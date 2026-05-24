@@ -63,6 +63,7 @@ DISCOUNT_STATE_FILE = "discount_state.json"                                 # re
 # ---- 9 PM heads-up: preview tomorrow's still-empty units (3h before the midnight tier) ----
 HEADS_UP_HOUR    = int(os.environ.get("HEADS_UP_HOUR", "21"))               # 21:00 = 9 PM Riyadh
 HEADS_UP_CHANNEL = os.environ.get("HEADS_UP_CHANNEL", "discount-heads-up")  # where the preview is posted
+HEADS_UP_TEST    = os.environ.get("HEADS_UP_TEST", "0") in ("1", "true", "True", "yes")  # post once on startup
 
 # ---- weekend rule (Thu/Fri): no midnight/noon tiers — a single softer discount at 5:30 PM ----
 WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split(",")
@@ -532,6 +533,13 @@ async def on_ready():
         discount_weekend_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
+    if HEADS_UP_TEST:
+        print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
+        try:
+            items, tomorrow, weekend = await asyncio.to_thread(compute_headsup)
+            await post_headsup(items, tomorrow, weekend)
+        except Exception as e:
+            print("test heads-up error:", e)
 
 if __name__ == "__main__":
     missing = [k for k in ("HOSTAWAY_ACCOUNT_ID", "HOSTAWAY_API_KEY", "DISCORD_TOKEN", "DISCORD_GUILD_ID")
