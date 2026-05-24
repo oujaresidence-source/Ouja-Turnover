@@ -50,11 +50,13 @@ CATEGORY_NAME        = os.environ.get("CATEGORY_NAME", "🧹 Turnovers")
 DEFAULT_CHECKOUT_HOUR = int(os.environ.get("DEFAULT_CHECKOUT_HOUR", "12"))
 
 # ---- last-minute tiered discount (all Riyadh time) ----
-# Tier 1 fires the moment a date becomes "today" (midnight); Tier 2 deepens it at noon.
+# Tier 1 fires at midnight, Tier 2 deepens it at noon, Tier 3 deepens again at 4 PM.
 DISCOUNT_TIER1_PERCENT = float(os.environ.get("DISCOUNT_TIER1_PERCENT", "15"))
 DISCOUNT_TIER1_HOUR    = int(os.environ.get("DISCOUNT_TIER1_HOUR", "0"))    # 00:00 = midnight
-DISCOUNT_TIER2_PERCENT = float(os.environ.get("DISCOUNT_TIER2_PERCENT", "30"))
+DISCOUNT_TIER2_PERCENT = float(os.environ.get("DISCOUNT_TIER2_PERCENT", "20"))
 DISCOUNT_TIER2_HOUR    = int(os.environ.get("DISCOUNT_TIER2_HOUR", "12"))   # 12:00 = noon
+DISCOUNT_TIER3_PERCENT = float(os.environ.get("DISCOUNT_TIER3_PERCENT", "30"))
+DISCOUNT_TIER3_HOUR    = int(os.environ.get("DISCOUNT_TIER3_HOUR", "18"))   # 18:00 = 6 PM
 DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false", "False", "no")
 DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
@@ -268,6 +270,7 @@ def compute_headsup():
     """List units still empty for TOMORROW night, with the discount they'll actually get."""
     f1 = (100.0 - DISCOUNT_TIER1_PERCENT) / 100.0
     f2 = (100.0 - DISCOUNT_TIER2_PERCENT) / 100.0
+    f3 = (100.0 - DISCOUNT_TIER3_PERCENT) / 100.0
     fw = (100.0 - WEEKEND_DISCOUNT_PERCENT) / 100.0
     tomorrow_date = datetime.now(TZ).date() + timedelta(days=1)
     tomorrow = tomorrow_date.isoformat()
@@ -290,7 +293,7 @@ def compute_headsup():
             price = float(price)
             items.append({"name": name, "price": int(price),
                           "t1": int(round(price * f1)), "t2": int(round(price * f2)),
-                          "w": int(round(price * fw))})
+                          "t3": int(round(price * f3)), "w": int(round(price * fw))})
         except Exception as e:
             print(f"headsup error for {name}: {e}")
     return items, tomorrow, weekend
@@ -353,6 +356,11 @@ def _clip(s, n=18):
     """Trim a unit name so the table columns stay aligned."""
     s = str(s).strip()
     return s if len(s) <= n else s[:n - 1] + "…"
+
+def _fmt_hour(h):
+    """24h int -> friendly label, e.g. 0->'12 AM', 12->'12 PM', 18->'6 PM'."""
+    suffix = "AM" if h < 12 else "PM"
+    return f"{h % 12 or 12} {suffix}"
 
 def responsible_for(internal_name, checkout_dt):
     """Returns (employee_name, discord_id, arabic_day). Any may be None if no match."""
@@ -477,6 +485,13 @@ async def discount_tier2_loop():
         return
     await _run_tier(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)")
 
+@tasks.loop(time=dt_time(hour=DISCOUNT_TIER3_HOUR, tzinfo=TZ))
+async def discount_tier3_loop():
+    if is_weekend_today():
+        print("[Tier 3] Thu/Fri — skipping evening discount (weekend rule)")
+        return
+    await _run_tier(DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)")
+
 @tasks.loop(time=dt_time(hour=WEEKEND_DISCOUNT_HOUR, minute=WEEKEND_DISCOUNT_MINUTE, tzinfo=TZ))
 async def discount_weekend_loop():
     if not is_weekend_today():
@@ -488,18 +503,20 @@ def _headsup_table(items, weekend):
     if weekend:
         wp = int(WEEKEND_DISCOUNT_PERCENT)
         c1, c2 = f"-{wp}%", "SAVE"
-        header = f"{'UNIT':<18}{'NOW':>7}{c1:>7}{c2:>7}"
-        rows = [f"{_clip(it['name']):<18}{it['price']:>7}{it['w']:>7}"
-                f"{it['price'] - it['w']:>7}" for it in items]
+        header = f"{'UNIT':<16}{'NOW':>6}{c1:>6}{c2:>6}"
+        rows = [f"{_clip(it['name'], 16):<16}{it['price']:>6}{it['w']:>6}"
+                f"{it['price'] - it['w']:>6}" for it in items]
         note = f"Single drop if still empty: **-{wp}% at 5:30 PM** (weekend rule)."
     else:
-        p1, p2 = int(DISCOUNT_TIER1_PERCENT), int(DISCOUNT_TIER2_PERCENT)
-        c1, c2 = f"-{p1}%", f"-{p2}%"
-        header = f"{'UNIT':<18}{'NOW':>7}{c1:>7}{c2:>7}"
-        rows = [f"{_clip(it['name']):<18}{it['price']:>7}{it['t1']:>7}{it['t2']:>7}"
-                for it in items]
-        note = (f"Prices auto-drop if still empty: **-{p1}% at 12 AM**, "
-                f"then **-{p2}% at 12 PM**.")
+        p1, p2, p3 = (int(DISCOUNT_TIER1_PERCENT), int(DISCOUNT_TIER2_PERCENT),
+                      int(DISCOUNT_TIER3_PERCENT))
+        c1, c2, c3 = f"-{p1}%", f"-{p2}%", f"-{p3}%"
+        header = f"{'UNIT':<16}{'NOW':>6}{c1:>6}{c2:>6}{c3:>6}"
+        rows = [f"{_clip(it['name'], 16):<16}{it['price']:>6}{it['t1']:>6}"
+                f"{it['t2']:>6}{it['t3']:>6}" for it in items]
+        note = (f"Prices auto-drop if still empty: **-{p1}% at {_fmt_hour(DISCOUNT_TIER1_HOUR)}** → "
+                f"**-{p2}% at {_fmt_hour(DISCOUNT_TIER2_HOUR)}** → "
+                f"**-{p3}% at {_fmt_hour(DISCOUNT_TIER3_HOUR)}**.")
     sep = "─" * len(header)
     return note, "\n".join([header, sep, *rows])
 
@@ -546,7 +563,8 @@ async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
     print(f"Weekday tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
-          f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00 "
+          f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00, "
+          f"{DISCOUNT_TIER3_PERCENT:.0f}% at {DISCOUNT_TIER3_HOUR:02d}:00 "
           f"{'(DRY-RUN)' if DISCOUNT_DRY_RUN else '(LIVE)'}")
     print(f"Weekend rule (Thu/Fri): {WEEKEND_DISCOUNT_PERCENT:.0f}% at "
           f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d} only")
@@ -557,6 +575,8 @@ async def on_ready():
         discount_tier1_loop.start()
     if not discount_tier2_loop.is_running():
         discount_tier2_loop.start()
+    if not discount_tier3_loop.is_running():
+        discount_tier3_loop.start()
     if not discount_weekend_loop.is_running():
         discount_weekend_loop.start()
     if not headsup_loop.is_running():
