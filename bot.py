@@ -349,6 +349,11 @@ def norm_unit(s):
     s = str(s).strip().lower().replace("ouja", "").replace("|", "")
     return re.sub(r"[\s\-_]+", " ", s).strip()
 
+def _clip(s, n=18):
+    """Trim a unit name so the table columns stay aligned."""
+    s = str(s).strip()
+    return s if len(s) <= n else s[:n - 1] + "…"
+
 def responsible_for(internal_name, checkout_dt):
     """Returns (employee_name, discord_id, arabic_day). Any may be None if no match."""
     day = ARABIC_DAYS[checkout_dt.weekday()]
@@ -361,6 +366,22 @@ async def get_category(guild):
         if cat.name == CATEGORY_NAME:
             return cat
     return await guild.create_category(CATEGORY_NAME)
+
+async def ensure_channel(guild, name, category=None):
+    """Find a text channel by name (create it if missing) and keep it under `category`."""
+    ch = discord.utils.get(guild.text_channels, name=name)
+    if ch is None:
+        try:
+            ch = await guild.create_text_channel(name, category=category)
+        except Exception as e:
+            print(f"channel create error ({name}):", e)
+            return None
+    elif category is not None and ch.category_id != category.id:
+        try:
+            await ch.edit(category=category)      # move existing channel under the category
+        except Exception as e:
+            print(f"channel move error ({name}):", e)
+    return ch
 
 async def sync_checkouts():
     guild = bot.get_guild(GUILD_ID)
@@ -419,12 +440,10 @@ async def post_discount_summary(changes, today, pct, label):
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
-    channel = discord.utils.get(guild.text_channels, name=DISCOUNT_CHANNEL)
+    category = await get_category(guild)
+    channel = await ensure_channel(guild, DISCOUNT_CHANNEL, category)
     if channel is None:
-        try:
-            channel = await guild.create_text_channel(DISCOUNT_CHANNEL)
-        except Exception:
-            return
+        return
     state = ("🧪 معاينة فقط — ما تغيّر أي سعر"
              if DISCOUNT_DRY_RUN else f"✅ تم تطبيق خصم {int(pct)}٪ من السعر الأصلي")
     lines = "\n".join(f"• {c['name']}: {c['orig']} → {c['new']} ر.س" for c in changes[:60])
@@ -464,43 +483,52 @@ async def discount_weekend_loop():
         return                       # only fires on Thu/Fri
     await _run_tier(WEEKEND_DISCOUNT_PERCENT, "Weekend (Thu/Fri 5:30 PM)")
 
+def _headsup_table(items, weekend):
+    """Build a clean monospace table + an explanatory note for the heads-up preview."""
+    if weekend:
+        wp = int(WEEKEND_DISCOUNT_PERCENT)
+        c1, c2 = f"-{wp}%", "SAVE"
+        header = f"{'UNIT':<18}{'NOW':>7}{c1:>7}{c2:>7}"
+        rows = [f"{_clip(it['name']):<18}{it['price']:>7}{it['w']:>7}"
+                f"{it['price'] - it['w']:>7}" for it in items]
+        note = f"Single drop if still empty: **-{wp}% at 5:30 PM** (weekend rule)."
+    else:
+        p1, p2 = int(DISCOUNT_TIER1_PERCENT), int(DISCOUNT_TIER2_PERCENT)
+        c1, c2 = f"-{p1}%", f"-{p2}%"
+        header = f"{'UNIT':<18}{'NOW':>7}{c1:>7}{c2:>7}"
+        rows = [f"{_clip(it['name']):<18}{it['price']:>7}{it['t1']:>7}{it['t2']:>7}"
+                for it in items]
+        note = (f"Prices auto-drop if still empty: **-{p1}% at 12 AM**, "
+                f"then **-{p2}% at 12 PM**.")
+    sep = "─" * len(header)
+    return note, "\n".join([header, sep, *rows])
+
 async def post_headsup(items, tomorrow, weekend):
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
-    channel = discord.utils.get(guild.text_channels, name=HEADS_UP_CHANNEL)
+    category = await get_category(guild)
+    channel = await ensure_channel(guild, HEADS_UP_CHANNEL, category)
     if channel is None:
-        try:
-            channel = await guild.create_text_channel(HEADS_UP_CHANNEL)
-        except Exception:
-            return
+        return
+    try:
+        date_str = datetime.strptime(tomorrow, "%Y-%m-%d").strftime("%a · %d %b %Y")
+    except ValueError:
+        date_str = tomorrow
     if not items:
         await channel.send(embed=discord.Embed(
-            title=f"📋 نظرة على بكرة · {tomorrow}",
-            description="ما فيه وحدات فاضية لبكرة — كله محجوز 🎉", color=GOLD))
+            title="📋 Tomorrow's Open Units",
+            description=f"**{date_str}**\n\nAll units are booked for tomorrow — nothing to discount. 🎉",
+            color=GOLD))
         return
-    shown = items[:40]
+    shown = items[:45]
     extra = len(items) - len(shown)
-    if weekend:
-        wp = int(WEEKEND_DISCOUNT_PERCENT)
-        lines = "\n".join(
-            f"• {it['name']}:  قبل **{it['price']}** ← بعد **{it['w']}** ر.س  "
-            f"(−{wp}٪، وفّر {it['price'] - it['w']})"
-            for it in shown)
-        footer = (f"{len(items)} وحدة فاضية · بكرة ويكند (خميس/جمعة): "
-                  f"خصم {wp}٪ وحده الساعة 5:30 م إذا ما انحجزت")
-    else:
-        p1, p2 = int(DISCOUNT_TIER1_PERCENT), int(DISCOUNT_TIER2_PERCENT)
-        lines = "\n".join(
-            f"• {it['name']}:  قبل **{it['price']}** → منتصف الليل **{it['t1']}** (−{p1}٪) "
-            f"→ الظهر **{it['t2']}** (−{p2}٪) ر.س"
-            for it in shown)
-        footer = f"{len(items)} وحدة فاضية · تنزل تدريجياً منتصف الليل ثم الظهر إذا ما انحجزت"
+    note, table = _headsup_table(shown, weekend)
+    desc = f"**{date_str}** · **{len(items)} units** still open\n{note}\n```\n{table}\n```"
     if extra > 0:
-        lines += f"\n…و{extra} وحدة أخرى"
-    embed = discord.Embed(title=f"📋 تنبيه مبكر · وحدات فاضية لبكرة ({tomorrow})",
-                          description=lines, color=GOLD)
-    embed.set_footer(text=footer)
+        desc += f"\n*+{extra} more not shown.*"
+    embed = discord.Embed(title="📋 Tomorrow's Open Units", description=desc, color=GOLD)
+    embed.set_footer(text="All prices in SAR · preview only — nothing changes until the scheduled time.")
     await channel.send(embed=embed)
 
 @tasks.loop(time=dt_time(hour=HEADS_UP_HOUR, tzinfo=TZ))
