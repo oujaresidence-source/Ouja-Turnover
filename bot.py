@@ -30,7 +30,7 @@ import re
 import json
 import time
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
 import requests
@@ -48,6 +48,17 @@ POLL_MINUTES         = int(os.environ.get("POLL_MINUTES", "15"))
 TZ                   = ZoneInfo(os.environ.get("TIMEZONE", "Asia/Riyadh"))
 CATEGORY_NAME        = os.environ.get("CATEGORY_NAME", "🧹 Turnovers")
 DEFAULT_CHECKOUT_HOUR = int(os.environ.get("DEFAULT_CHECKOUT_HOUR", "12"))
+
+# ---- last-minute tiered discount (all Riyadh time) ----
+# Tier 1 fires the moment a date becomes "today" (midnight); Tier 2 deepens it at noon.
+DISCOUNT_TIER1_PERCENT = float(os.environ.get("DISCOUNT_TIER1_PERCENT", "15"))
+DISCOUNT_TIER1_HOUR    = int(os.environ.get("DISCOUNT_TIER1_HOUR", "0"))    # 00:00 = midnight
+DISCOUNT_TIER2_PERCENT = float(os.environ.get("DISCOUNT_TIER2_PERCENT", "30"))
+DISCOUNT_TIER2_HOUR    = int(os.environ.get("DISCOUNT_TIER2_HOUR", "12"))   # 12:00 = noon
+DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false", "False", "no")
+DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
+DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
+DISCOUNT_STATE_FILE = "discount_state.json"                                 # remembers tonight's original price
 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
@@ -84,6 +95,24 @@ def api_get(path, params=None, _retry=0):
         time.sleep(10)
         if _retry < 3:
             return api_get(path, params, _retry + 1)
+    r.raise_for_status()
+    return r.json()
+
+def api_put(path, body, _retry=0):
+    token = get_token()
+    r = requests.put(
+        f"{BASE}{path}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                 "Cache-control": "no-cache"},
+        json=body, timeout=60,
+    )
+    if r.status_code == 403 and _retry == 0:
+        get_token(force=True)
+        return api_put(path, body, _retry + 1)
+    if r.status_code == 429:
+        time.sleep(10)
+        if _retry < 3:
+            return api_put(path, body, _retry + 1)
     r.raise_for_status()
     return r.json()
 
@@ -160,6 +189,66 @@ def fetch_upcoming_checkouts():
         pages += 1
     return out
 
+def _load_discount_state():
+    try:
+        return json.load(open(DISCOUNT_STATE_FILE, encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _save_discount_state(st):
+    try:
+        json.dump(st, open(DISCOUNT_STATE_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+def apply_discount_tier(pct):
+    """Set tonight's price to `pct`% off the ORIGINAL price, for every still-empty unit.
+    The original is captured once per day (state file + Hostaway note) so the two tiers
+    never compound. Returns (changes, today). Honors DRY-RUN."""
+    factor = (100.0 - pct) / 100.0
+    today = datetime.now(TZ).date().isoformat()
+    state = _load_discount_state()
+    state = {today: state.get(today, {})}      # keep only today's record
+    day_orig = state[today]
+    listings = get_listings_map()
+    changes = []
+    for lid, name in listings.items():
+        lid_s = str(lid)
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": today, "endDate": today})
+            days = cal.get("result", []) or []
+            if not days:
+                continue
+            d = days[0]
+            available = int(d.get("isAvailable", 0) or 0) == 1
+            booked = bool(d.get("reservationId"))
+            current = d.get("price")
+            if not available or booked or not current:
+                continue                                   # booked / blocked / no price
+            current = float(current)
+            # recover tonight's original: remembered state -> Hostaway note -> current
+            original = day_orig.get(lid_s)
+            if original is None:
+                m = re.search(r"ouja-orig:(\d+(?:\.\d+)?)", str(d.get("note") or ""))
+                original = float(m.group(1)) if m else current
+                day_orig[lid_s] = original
+            new_price = round(original * factor)
+            if DISCOUNT_FLOOR and new_price < DISCOUNT_FLOOR:
+                new_price = int(DISCOUNT_FLOOR)
+            if new_price >= current:
+                continue                                   # already at/below this level
+            if not DISCOUNT_DRY_RUN:
+                api_put(f"/listings/{lid}/calendar",
+                        {"startDate": today, "endDate": today, "price": new_price,
+                         "note": f"ouja-orig:{int(original)}"})
+            changes.append({"name": name, "orig": int(original),
+                            "old": int(current), "new": int(new_price)})
+        except Exception as e:
+            print(f"discount error for {name}: {e}")
+    _save_discount_state(state)
+    return changes, today
+
 # ---------------- handled-set persistence ----------------
 def load_handled():
     try:
@@ -195,9 +284,31 @@ class CleaningDoneView(discord.ui.View):
         except Exception as e:
             print("delete error:", e)
 
-def channel_name(internal_name, checkout_dt):
-    base = re.sub(r"[^a-z0-9]+", "-", internal_name.lower()).strip("-")[:80] or "unit"
-    return f"{base}-{checkout_dt.strftime('%b%d').lower()}"
+def channel_name(internal_name):
+    # Discord channel names must be lowercase, no spaces/symbols.
+    # "Ouja | B209" -> "ouja-b209". The full name is shown inside the channel.
+    return re.sub(r"[^a-z0-9]+", "-", internal_name.lower()).strip("-")[:90] or "unit"
+
+# ---- responsible-person lookup (from assignments.json built off the Excel) ----
+try:
+    ASSIGNMENTS = json.load(open("assignments.json", encoding="utf-8"))
+except Exception as e:
+    print("Could not load assignments.json:", e)
+    ASSIGNMENTS = {"by_day": {}, "discord_ids": {}}
+
+# Python weekday(): Mon=0 ... Sun=6
+ARABIC_DAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+
+def norm_unit(s):
+    s = str(s).strip().lower().replace("ouja", "").replace("|", "")
+    return re.sub(r"[\s\-_]+", " ", s).strip()
+
+def responsible_for(internal_name, checkout_dt):
+    """Returns (employee_name, discord_id, arabic_day). Any may be None if no match."""
+    day = ARABIC_DAYS[checkout_dt.weekday()]
+    emp = ASSIGNMENTS.get("by_day", {}).get(day, {}).get(norm_unit(internal_name))
+    did = ASSIGNMENTS.get("discord_ids", {}).get(emp) if emp else None
+    return emp, did, day
 
 async def get_category(guild):
     for cat in guild.categories:
@@ -225,17 +336,27 @@ async def sync_checkouts():
             continue
         try:
             ch = await guild.create_text_channel(
-                channel_name(it["listing"], it["checkout"]),
+                channel_name(it["listing"]),
                 category=category, topic=f"hostaway-res:{it['res_id']}")
-            embed = discord.Embed(title=f"🧹 Turnover — {it['listing']}", color=GOLD)
+            embed = discord.Embed(title="🧹 Turnover Ready", color=GOLD)
+            embed.add_field(name="Unit", value=it["listing"], inline=False)
             embed.add_field(name="Guest", value=it["guest"], inline=True)
             embed.add_field(name="Checkout",
                             value=it["checkout"].strftime("%a %d %b · %I:%M %p"), inline=True)
+
+            emp, did, day = responsible_for(it["listing"], it["checkout"])
+            if emp:
+                embed.add_field(name="مسؤول التنظيف",
+                                value=(f"<@{did}> ({emp})" if did else emp), inline=False)
             embed.set_footer(text="Tap the button below once cleaning is complete to close this channel.")
-            await ch.send(embed=embed, view=CleaningDoneView())
+
+            content = f"<@{did}> 🧹 وحدة جاهزة للتنظيف" if did else None
+            await ch.send(content=content, embed=embed, view=CleaningDoneView(),
+                          allowed_mentions=discord.AllowedMentions(users=True))
             handled.add(it["res_id"])
             save_handled(handled)
-            print(f"Opened channel for {it['listing']} (res {it['res_id']})")
+            note = f" -> {emp}" if emp else " (no responsible match — check unit name)"
+            print(f"Opened channel for {it['listing']} (res {it['res_id']}){note}")
         except Exception as e:
             print("create error:", e)
 
@@ -246,12 +367,58 @@ async def poll_loop():
     except Exception as e:
         print("poll error:", e)
 
+async def post_discount_summary(changes, today, pct, label):
+    if not changes:
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    channel = discord.utils.get(guild.text_channels, name=DISCOUNT_CHANNEL)
+    if channel is None:
+        try:
+            channel = await guild.create_text_channel(DISCOUNT_CHANNEL)
+        except Exception:
+            return
+    state = ("🧪 معاينة فقط — ما تغيّر أي سعر"
+             if DISCOUNT_DRY_RUN else f"✅ تم تطبيق خصم {int(pct)}٪ من السعر الأصلي")
+    lines = "\n".join(f"• {c['name']}: {c['orig']} → {c['new']} ر.س" for c in changes[:60])
+    embed = discord.Embed(title=f"💰 {label} · خصم {int(pct)}٪ · {today}",
+                          description=lines, color=GOLD)
+    embed.set_footer(text=f"{state} · {len(changes)} وحدة فاضية")
+    await channel.send(embed=embed)
+
+async def _run_tier(pct, label):
+    try:
+        changes, today = await asyncio.to_thread(apply_discount_tier, pct)
+        mode = "DRY-RUN" if DISCOUNT_DRY_RUN else "LIVE"
+        print(f"[{label} {today}] {mode} {pct:.0f}%: {len(changes)} empty units")
+        for c in changes:
+            print(f"   {c['name']}: orig {c['orig']} -> {c['new']}")
+        await post_discount_summary(changes, today, pct, label)
+    except Exception as e:
+        print(f"{label} error:", e)
+
+@tasks.loop(time=dt_time(hour=DISCOUNT_TIER1_HOUR, tzinfo=TZ))
+async def discount_tier1_loop():
+    await _run_tier(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)")
+
+@tasks.loop(time=dt_time(hour=DISCOUNT_TIER2_HOUR, tzinfo=TZ))
+async def discount_tier2_loop():
+    await _run_tier(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)")
+
 @bot.event
 async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
+    print(f"Discount tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
+          f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00 "
+          f"{'(DRY-RUN)' if DISCOUNT_DRY_RUN else '(LIVE)'}")
     if not poll_loop.is_running():
         poll_loop.start()
+    if not discount_tier1_loop.is_running():
+        discount_tier1_loop.start()
+    if not discount_tier2_loop.is_running():
+        discount_tier2_loop.start()
 
 if __name__ == "__main__":
     missing = [k for k in ("HOSTAWAY_ACCOUNT_ID", "HOSTAWAY_API_KEY", "DISCORD_TOKEN", "DISCORD_GUILD_ID")
