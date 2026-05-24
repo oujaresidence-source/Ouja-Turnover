@@ -60,6 +60,17 @@ DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
 DISCOUNT_STATE_FILE = "discount_state.json"                                 # remembers tonight's original price
 
+# ---- 9 PM heads-up: preview tomorrow's still-empty units (3h before the midnight tier) ----
+HEADS_UP_HOUR    = int(os.environ.get("HEADS_UP_HOUR", "21"))               # 21:00 = 9 PM Riyadh
+HEADS_UP_CHANNEL = os.environ.get("HEADS_UP_CHANNEL", "discount-heads-up")  # where the preview is posted
+
+# ---- weekend rule (Thu/Fri): no midnight/noon tiers — a single softer discount at 5:30 PM ----
+WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split(",")
+                   if x.strip().isdigit())                                  # 3=Thu, 4=Fri (Mon=0)
+WEEKEND_DISCOUNT_PERCENT = float(os.environ.get("WEEKEND_DISCOUNT_PERCENT", "20"))
+WEEKEND_DISCOUNT_HOUR    = int(os.environ.get("WEEKEND_DISCOUNT_HOUR", "17"))
+WEEKEND_DISCOUNT_MINUTE  = int(os.environ.get("WEEKEND_DISCOUNT_MINUTE", "30"))  # 17:30 = 5:30 PM
+
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
 HANDLED_FILE = "handled.json"
@@ -249,6 +260,40 @@ def apply_discount_tier(pct):
     _save_discount_state(state)
     return changes, today
 
+def is_weekend_today():
+    return datetime.now(TZ).weekday() in WEEKEND_DAYS
+
+def compute_headsup():
+    """List units still empty for TOMORROW night, with the discount they'll actually get."""
+    f1 = (100.0 - DISCOUNT_TIER1_PERCENT) / 100.0
+    f2 = (100.0 - DISCOUNT_TIER2_PERCENT) / 100.0
+    fw = (100.0 - WEEKEND_DISCOUNT_PERCENT) / 100.0
+    tomorrow_date = datetime.now(TZ).date() + timedelta(days=1)
+    tomorrow = tomorrow_date.isoformat()
+    weekend = tomorrow_date.weekday() in WEEKEND_DAYS
+    listings = get_listings_map()
+    items = []
+    for lid, name in listings.items():
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": tomorrow, "endDate": tomorrow})
+            days = cal.get("result", []) or []
+            if not days:
+                continue
+            d = days[0]
+            available = int(d.get("isAvailable", 0) or 0) == 1
+            booked = bool(d.get("reservationId"))
+            price = d.get("price")
+            if not available or booked or not price:
+                continue
+            price = float(price)
+            items.append({"name": name, "price": int(price),
+                          "t1": int(round(price * f1)), "t2": int(round(price * f2)),
+                          "w": int(round(price * fw))})
+        except Exception as e:
+            print(f"headsup error for {name}: {e}")
+    return items, tomorrow, weekend
+
 # ---------------- handled-set persistence ----------------
 def load_handled():
     try:
@@ -400,25 +445,93 @@ async def _run_tier(pct, label):
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER1_HOUR, tzinfo=TZ))
 async def discount_tier1_loop():
+    if is_weekend_today():
+        print("[Tier 1] Thu/Fri — skipping midnight discount (weekend rule)")
+        return
     await _run_tier(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)")
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER2_HOUR, tzinfo=TZ))
 async def discount_tier2_loop():
+    if is_weekend_today():
+        print("[Tier 2] Thu/Fri — skipping noon discount (weekend rule)")
+        return
     await _run_tier(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)")
+
+@tasks.loop(time=dt_time(hour=WEEKEND_DISCOUNT_HOUR, minute=WEEKEND_DISCOUNT_MINUTE, tzinfo=TZ))
+async def discount_weekend_loop():
+    if not is_weekend_today():
+        return                       # only fires on Thu/Fri
+    await _run_tier(WEEKEND_DISCOUNT_PERCENT, "Weekend (Thu/Fri 5:30 PM)")
+
+async def post_headsup(items, tomorrow, weekend):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    channel = discord.utils.get(guild.text_channels, name=HEADS_UP_CHANNEL)
+    if channel is None:
+        try:
+            channel = await guild.create_text_channel(HEADS_UP_CHANNEL)
+        except Exception:
+            return
+    if not items:
+        await channel.send(embed=discord.Embed(
+            title=f"📋 نظرة على بكرة · {tomorrow}",
+            description="ما فيه وحدات فاضية لبكرة — كله محجوز 🎉", color=GOLD))
+        return
+    shown = items[:40]
+    extra = len(items) - len(shown)
+    if weekend:
+        wp = int(WEEKEND_DISCOUNT_PERCENT)
+        lines = "\n".join(
+            f"• {it['name']}:  قبل **{it['price']}** ← بعد **{it['w']}** ر.س  "
+            f"(−{wp}٪، وفّر {it['price'] - it['w']})"
+            for it in shown)
+        footer = (f"{len(items)} وحدة فاضية · بكرة ويكند (خميس/جمعة): "
+                  f"خصم {wp}٪ وحده الساعة 5:30 م إذا ما انحجزت")
+    else:
+        p1, p2 = int(DISCOUNT_TIER1_PERCENT), int(DISCOUNT_TIER2_PERCENT)
+        lines = "\n".join(
+            f"• {it['name']}:  قبل **{it['price']}** → منتصف الليل **{it['t1']}** (−{p1}٪) "
+            f"→ الظهر **{it['t2']}** (−{p2}٪) ر.س"
+            for it in shown)
+        footer = f"{len(items)} وحدة فاضية · تنزل تدريجياً منتصف الليل ثم الظهر إذا ما انحجزت"
+    if extra > 0:
+        lines += f"\n…و{extra} وحدة أخرى"
+    embed = discord.Embed(title=f"📋 تنبيه مبكر · وحدات فاضية لبكرة ({tomorrow})",
+                          description=lines, color=GOLD)
+    embed.set_footer(text=footer)
+    await channel.send(embed=embed)
+
+@tasks.loop(time=dt_time(hour=HEADS_UP_HOUR, tzinfo=TZ))
+async def headsup_loop():
+    try:
+        items, tomorrow, weekend = await asyncio.to_thread(compute_headsup)
+        print(f"[heads-up {tomorrow}] {len(items)} units open for tomorrow "
+              f"({'weekend' if weekend else 'weekday'})")
+        await post_headsup(items, tomorrow, weekend)
+    except Exception as e:
+        print("headsup error:", e)
 
 @bot.event
 async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
-    print(f"Discount tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
+    print(f"Weekday tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
           f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00 "
           f"{'(DRY-RUN)' if DISCOUNT_DRY_RUN else '(LIVE)'}")
+    print(f"Weekend rule (Thu/Fri): {WEEKEND_DISCOUNT_PERCENT:.0f}% at "
+          f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d} only")
+    print(f"Heads-up preview at {HEADS_UP_HOUR:02d}:00 -> #{HEADS_UP_CHANNEL}")
     if not poll_loop.is_running():
         poll_loop.start()
     if not discount_tier1_loop.is_running():
         discount_tier1_loop.start()
     if not discount_tier2_loop.is_running():
         discount_tier2_loop.start()
+    if not discount_weekend_loop.is_running():
+        discount_weekend_loop.start()
+    if not headsup_loop.is_running():
+        headsup_loop.start()
 
 if __name__ == "__main__":
     missing = [k for k in ("HOSTAWAY_ACCOUNT_ID", "HOSTAWAY_API_KEY", "DISCORD_TOKEN", "DISCORD_GUILD_ID")
