@@ -61,6 +61,10 @@ DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false",
 DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
 DISCOUNT_STATE_FILE = "discount_state.json"                                 # remembers tonight's original price
+# Diagnostics: after each live write, re-read the day and log requested vs actual price.
+DISCOUNT_VERIFY  = os.environ.get("DISCOUNT_VERIFY", "0") in ("1", "true", "True", "yes")
+# Set to a percent (e.g. "15") to run one tier immediately on startup for testing.
+DISCOUNT_TEST    = os.environ.get("DISCOUNT_TEST", "0")
 
 # ---- 9 PM heads-up: preview tomorrow's still-empty units (3h before the midnight tier) ----
 HEADS_UP_HOUR    = int(os.environ.get("HEADS_UP_HOUR", "21"))               # 21:00 = 9 PM Riyadh
@@ -253,9 +257,22 @@ def apply_discount_tier(pct):
             if new_price >= current:
                 continue                                   # already at/below this level
             if not DISCOUNT_DRY_RUN:
-                api_put(f"/listings/{lid}/calendar",
-                        {"startDate": today, "endDate": today, "price": new_price,
+                resp = api_put(f"/listings/{lid}/calendar",
+                        {"startDate": today, "endDate": today,
+                         "isAvailable": 1, "price": new_price,
                          "note": f"ouja-orig:{int(original)}"})
+                if DISCOUNT_VERIFY:
+                    try:
+                        chk = api_get(f"/listings/{lid}/calendar",
+                                      params={"startDate": today, "endDate": today})
+                        cd = (chk.get("result") or [{}])[0]
+                        actual = cd.get("price")
+                        status = resp.get("status") if isinstance(resp, dict) else "?"
+                        stuck = "✅ stuck" if str(actual) == str(new_price) else "❌ reverted/ignored"
+                        print(f"   VERIFY {name}: requested {new_price}, Hostaway now shows "
+                              f"{actual} ({stuck}) · PUT status={status}")
+                    except Exception as e:
+                        print(f"   VERIFY {name}: read-back failed: {e}")
             changes.append({"name": name, "orig": int(original),
                             "old": int(current), "new": int(new_price)})
         except Exception as e:
@@ -518,7 +535,10 @@ def _headsup_table(items, weekend):
                 f"**-{p2}% at {_fmt_hour(DISCOUNT_TIER2_HOUR)}** → "
                 f"**-{p3}% at {_fmt_hour(DISCOUNT_TIER3_HOUR)}**.")
     sep = "─" * len(header)
-    return note, "\n".join([header, sep, *rows])
+    # Prefix each line with a zero-width LEFT-TO-RIGHT MARK so an Arabic unit
+    # name can't flip the line's direction and scramble the number columns.
+    lines = [header, sep, *rows]
+    return note, "\n".join("\u200e" + ln for ln in lines)
 
 async def post_headsup(items, tomorrow, weekend):
     guild = bot.get_guild(GUILD_ID)
@@ -588,6 +608,15 @@ async def on_ready():
             await post_headsup(items, tomorrow, weekend)
         except Exception as e:
             print("test heads-up error:", e)
+    if DISCOUNT_TEST not in ("0", "", "false", "False", "no"):
+        try:
+            pct = (DISCOUNT_TIER1_PERCENT if DISCOUNT_TEST in ("1", "true", "True", "yes")
+                   else float(DISCOUNT_TEST))
+        except ValueError:
+            pct = DISCOUNT_TIER1_PERCENT
+        print(f"DISCOUNT_TEST — running a {pct:.0f}% tier now "
+              f"({'DRY-RUN' if DISCOUNT_DRY_RUN else 'LIVE'})")
+        await _run_tier(pct, "Test (startup)")
 
 if __name__ == "__main__":
     missing = [k for k in ("HOSTAWAY_ACCOUNT_ID", "HOSTAWAY_API_KEY", "DISCORD_TOKEN", "DISCORD_GUILD_ID")
