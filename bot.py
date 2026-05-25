@@ -78,6 +78,15 @@ WEEKEND_DISCOUNT_PERCENT = float(os.environ.get("WEEKEND_DISCOUNT_PERCENT", "20"
 WEEKEND_DISCOUNT_HOUR    = int(os.environ.get("WEEKEND_DISCOUNT_HOUR", "17"))
 WEEKEND_DISCOUNT_MINUTE  = int(os.environ.get("WEEKEND_DISCOUNT_MINUTE", "30"))  # 17:30 = 5:30 PM
 
+# ---- cleaning reminders: nag the open turnover channels until ✅ Cleaning Done ----
+REMINDER_START_HOUR = int(os.environ.get("REMINDER_START_HOUR", "12"))  # start at 12 PM
+REMINDER_FAST_HOUR  = int(os.environ.get("REMINDER_FAST_HOUR", "15"))   # speed up at 3 PM
+REMINDER_END_HOUR   = int(os.environ.get("REMINDER_END_HOUR", "23"))    # stop at 11 PM
+REMINDER_SLOW_MIN   = int(os.environ.get("REMINDER_SLOW_MIN", "30"))    # 12 PM–3 PM: every 30 min
+REMINDER_FAST_MIN   = int(os.environ.get("REMINDER_FAST_MIN", "15"))    # after 3 PM: every 15 min
+OPERATION_ROLE_ID   = os.environ.get("OPERATION_ROLE_ID", "")           # role to ping if no cleaner
+OPERATION_ROLE_NAME = os.environ.get("OPERATION_ROLE_NAME", "operation")
+
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
 HANDLED_FILE = "handled.json"
@@ -379,6 +388,28 @@ def _fmt_hour(h):
     suffix = "AM" if h < 12 else "PM"
     return f"{h % 12 or 12} {suffix}"
 
+def parse_topic_res(topic):
+    """Reservation id stored in a turnover channel's topic."""
+    m = re.search(r"hostaway-res:(\d+)", topic or "")
+    return m.group(1) if m else None
+
+def parse_topic_did(topic):
+    """Responsible cleaner's Discord id stored in the topic (None if unassigned)."""
+    m = re.search(r"did:(\d+)", topic or "")
+    return m.group(1) if m else None
+
+def find_operation_role(guild):
+    """The role to ping when a unit has no assigned cleaner."""
+    if OPERATION_ROLE_ID.isdigit():
+        r = guild.get_role(int(OPERATION_ROLE_ID))
+        if r:
+            return r
+    name = OPERATION_ROLE_NAME.lower()
+    for r in guild.roles:
+        if r.name.lower() == name:
+            return r
+    return None
+
 def responsible_for(internal_name, checkout_dt):
     """Returns (employee_name, discord_id, arabic_day). Any may be None if no match."""
     day = ARABIC_DAYS[checkout_dt.weekday()]
@@ -418,8 +449,9 @@ async def sync_checkouts():
     # reservation ids that already have a live channel
     existing = set()
     for ch in category.text_channels:
-        if ch.topic and ch.topic.startswith("hostaway-res:"):
-            existing.add(ch.topic.split(":", 1)[1])
+        rid = parse_topic_res(ch.topic)
+        if rid:
+            existing.add(rid)
     handled.update(existing)
 
     items = await asyncio.to_thread(fetch_upcoming_checkouts)
@@ -427,16 +459,17 @@ async def sync_checkouts():
         if it["res_id"] in handled or it["res_id"] in existing:
             continue
         try:
+            emp, did, day = responsible_for(it["listing"], it["checkout"])
+            # topic carries the reservation id + responsible discord id (for reminders)
+            topic = f"hostaway-res:{it['res_id']} did:{did or ''}"
             ch = await guild.create_text_channel(
-                channel_name(it["listing"]),
-                category=category, topic=f"hostaway-res:{it['res_id']}")
+                channel_name(it["listing"]), category=category, topic=topic)
             embed = discord.Embed(title="🧹 Turnover Ready", color=GOLD)
             embed.add_field(name="Unit", value=it["listing"], inline=False)
             embed.add_field(name="Guest", value=it["guest"], inline=True)
             embed.add_field(name="Checkout",
                             value=it["checkout"].strftime("%a %d %b · %I:%M %p"), inline=True)
 
-            emp, did, day = responsible_for(it["listing"], it["checkout"])
             if emp:
                 embed.add_field(name="مسؤول التنظيف",
                                 value=(f"<@{did}> ({emp})" if did else emp), inline=False)
@@ -444,7 +477,7 @@ async def sync_checkouts():
 
             content = f"<@{did}> 🧹 وحدة جاهزة للتنظيف" if did else None
             await ch.send(content=content, embed=embed, view=CleaningDoneView(),
-                          allowed_mentions=discord.AllowedMentions(users=True))
+                          allowed_mentions=discord.AllowedMentions(users=True, roles=True))
             handled.add(it["res_id"])
             save_handled(handled)
             note = f" -> {emp}" if emp else " (no responsible match — check unit name)"
@@ -458,6 +491,52 @@ async def poll_loop():
         await sync_checkouts()
     except Exception as e:
         print("poll error:", e)
+
+# remembers when each open channel was last pinged (resets on restart, which is fine)
+_last_reminder = {}
+
+@tasks.loop(minutes=1)
+async def reminder_loop():
+    """Nag every open turnover channel until cleaning is marked done.
+    12 PM–3 PM: every 30 min. After 3 PM: every 15 min. Quiet outside those hours."""
+    now = datetime.now(TZ)
+    hour = now.hour
+    if hour < REMINDER_START_HOUR or hour >= REMINDER_END_HOUR:
+        return
+    interval = REMINDER_SLOW_MIN if hour < REMINDER_FAST_HOUR else REMINDER_FAST_MIN
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+    if category is None:
+        return
+    op_role = find_operation_role(guild)
+    live_ids = set()
+    for ch in list(category.text_channels):
+        if not parse_topic_res(ch.topic):
+            continue                      # only turnover channels
+        live_ids.add(ch.id)
+        last = _last_reminder.get(ch.id)
+        if last and (now - last) < timedelta(minutes=interval):
+            continue
+        did = parse_topic_did(ch.topic)
+        if did:
+            mention = f"<@{did}>"
+        elif op_role:
+            mention = op_role.mention
+        else:
+            mention = f"@{OPERATION_ROLE_NAME}"
+        try:
+            await ch.send(
+                f"{mention} ⏰ تذكير: هالوحدة لسه تحتاج تنظيف — اضغط ✅ Cleaning Done لما تخلص.",
+                allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+            _last_reminder[ch.id] = now
+        except Exception as e:
+            print(f"reminder error ({ch.name}):", e)
+    # drop timers for channels that no longer exist (cleaning done)
+    for cid in list(_last_reminder.keys()):
+        if cid not in live_ids:
+            _last_reminder.pop(cid, None)
 
 async def post_discount_summary(changes, today, pct, label):
     if not changes:
@@ -589,8 +668,13 @@ async def on_ready():
     print(f"Weekend rule (Thu/Fri): {WEEKEND_DISCOUNT_PERCENT:.0f}% at "
           f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d} only")
     print(f"Heads-up preview at {HEADS_UP_HOUR:02d}:00 -> #{HEADS_UP_CHANNEL}")
+    print(f"Cleaning reminders: every {REMINDER_SLOW_MIN} min "
+          f"{REMINDER_START_HOUR:02d}:00–{REMINDER_FAST_HOUR:02d}:00, then every "
+          f"{REMINDER_FAST_MIN} min until {REMINDER_END_HOUR:02d}:00")
     if not poll_loop.is_running():
         poll_loop.start()
+    if not reminder_loop.is_running():
+        reminder_loop.start()
     if not discount_tier1_loop.is_running():
         discount_tier1_loop.start()
     if not discount_tier2_loop.is_running():
