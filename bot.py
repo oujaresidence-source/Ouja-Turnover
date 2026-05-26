@@ -92,6 +92,9 @@ OPERATION_ROLE_NAME = os.environ.get("OPERATION_ROLE_NAME", "operation")
 # ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+# Smarter model for the few high-touch, personality-heavy messages (manager script +
+# empathetic repeat-escalation acks). Low volume, so the extra cost is tiny.
+CLAUDE_MODEL_PREMIUM = os.environ.get("CLAUDE_MODEL_PREMIUM", "claude-sonnet-4-6")
 ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "True", "yes")
 ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
 ASSISTANT_POLL_MIN = int(os.environ.get("ASSISTANT_POLL_MIN", "2"))   # check inbox every N min
@@ -920,7 +923,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         print("claude_draft error:", e)
         return None
 
-def claude_text(system, user, max_tokens=600):
+def claude_text(system, user, max_tokens=600, model=None):
     """Plain-text Claude call (no JSON). Returns the text or None."""
     if not ANTHROPIC_API_KEY:
         return None
@@ -929,7 +932,7 @@ def claude_text(system, user, max_tokens=600):
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": CLAUDE_MODEL, "max_tokens": max_tokens, "system": system,
+            json={"model": model or CLAUDE_MODEL, "max_tokens": max_tokens, "system": system,
                   "messages": [{"role": "user", "content": user}]},
             timeout=60,
         )
@@ -948,7 +951,7 @@ def claude_escalation_ack(guest, unit, history, guest_text):
            "لا تكتبها كأنها قالب آلي مكرر. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط.")
     user = (f"الوحدة: {unit}\nالضيف: {guest}\nالمحادثة:\n{history}\n\n"
             f"آخر رسالة من الضيف: {guest_text}")
-    return claude_text(sys, user, 500)
+    return claude_text(sys, user, 500, model=CLAUDE_MODEL_PREMIUM)
 
 def claude_manager_script(guest, unit, history, guest_text, reason, manager_name):
     """A ready-to-send reply in the owner's warm/charismatic voice for whoever claims."""
@@ -960,7 +963,7 @@ def claude_manager_script(guest, unit, history, guest_text, reason, manager_name
            "طبيعية مهب قالب جامد. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط بدون أي شرح.")
     user = (f"الوحدة: {unit}\nالضيف: {guest}\nسبب التصعيد: {reason}\nالمحادثة:\n{history}\n\n"
             f"آخر رسالة من الضيف: {guest_text}")
-    return claude_text(sys, user, 700)
+    return claude_text(sys, user, 700, model=CLAUDE_MODEL_PREMIUM)
 
 def fetch_new_guest_messages(seen, debug=False):
     """Scan recent conversations, fetch each one's messages, and return new inbound
@@ -1506,6 +1509,7 @@ async def on_ready():
           f"{REMINDER_START_HOUR:02d}:00–{REMINDER_FAST_HOUR:02d}:00, then every "
           f"{REMINDER_FAST_MIN} min until {REMINDER_END_HOUR:02d}:00")
     print(f"AI assistant: {'ON' if ASSISTANT_ENABLED else 'OFF'} · model={CLAUDE_MODEL} · "
+          f"premium={CLAUDE_MODEL_PREMIUM} · "
           f"auto-send simple={'ON' if ASSISTANT_AUTO else 'OFF'} · "
           f"escalation-ack={'ON' if ASSISTANT_ESC_ACK else 'OFF'} -> #{ASSISTANT_CHANNEL}")
     if not poll_loop.is_running():
