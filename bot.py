@@ -87,6 +87,16 @@ REMINDER_FAST_MIN   = int(os.environ.get("REMINDER_FAST_MIN", "15"))    # after 
 OPERATION_ROLE_ID   = os.environ.get("OPERATION_ROLE_ID", "")           # role to ping if no cleaner
 OPERATION_ROLE_NAME = os.environ.get("OPERATION_ROLE_NAME", "operation")
 
+# ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "True", "yes")
+ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
+ASSISTANT_POLL_MIN = int(os.environ.get("ASSISTANT_POLL_MIN", "2"))   # check inbox every N min
+ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many recent convos to scan
+# Safety: replies are NEVER sent automatically unless you explicitly turn this on later.
+ASSISTANT_AUTOSEND = os.environ.get("ASSISTANT_AUTOSEND", "0") in ("1", "true", "True", "yes")
+
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
 HANDLED_FILE = "handled.json"
@@ -125,7 +135,25 @@ def api_get(path, params=None, _retry=0):
     r.raise_for_status()
     return r.json()
 
-def api_put(path, body, _retry=0):
+def api_post(path, body, _retry=0):
+    token = get_token()
+    r = requests.post(
+        f"{BASE}{path}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                 "Cache-control": "no-cache"},
+        json=body, timeout=60,
+    )
+    if r.status_code == 403 and _retry == 0:
+        get_token(force=True)
+        return api_post(path, body, _retry + 1)
+    if r.status_code == 429:
+        time.sleep(10)
+        if _retry < 3:
+            return api_post(path, body, _retry + 1)
+    r.raise_for_status()
+    return r.json()
+
+
     token = get_token()
     r = requests.put(
         f"{BASE}{path}",
@@ -657,9 +685,221 @@ async def headsup_loop():
     except Exception as e:
         print("headsup error:", e)
 
+# ====================== AI guest-message assistant ======================
+# Claude drafts a reply, a human approves it in Discord, and only then is it sent.
+ASSISTANT_RULES = """You are "فيصل", the front-desk assistant for Ouja Residence, a premium short-term \
+rental company in Riyadh, Saudi Arabia. You draft replies to guest messages. A human teammate reviews \
+every draft before it is sent, so be helpful but stay strictly within your lane.
+
+TONE
+- Warm, semi-friendly, professional — Ritz-Carlton hospitality standard.
+- Reply in the SAME language the guest used. If Arabic, use natural Najdi Saudi dialect. Switch \
+language immediately if the guest switches.
+- Keep replies concise and human. Never reveal you are an AI unless asked.
+
+YOU MAY draft replies about
+- Unit amenities (wifi, parking, pool, kitchen, facilities)
+- Check-in / check-out TIMES and the self-entry PROCESS (never the actual code)
+- Directions, location, nearby restaurants and areas
+- House-rules clarifications
+- Greetings, thanks, general hospitality
+
+YOU MUST NOT do these — instead set action to "escalate"
+- Confirm, modify, cancel, or refund a booking
+- Offer any discount, comp, or price change
+- Share the door/entry CODE or any building security info
+- Share other guests', owners', or internal/financial information
+- Handle any complaint, dispute, damage claim, or an upset guest
+- Promise late checkout, early check-in, or extra services you cannot verify
+- Give legal, medical, or financial advice
+- Discuss anything outside hosting / off-topic
+- State any fact about the unit you were not given — never invent details
+- Anything you are unsure about — when in doubt, escalate; never guess
+
+OUTPUT — respond with ONLY a JSON object, nothing else:
+{"action": "reply" | "escalate",
+ "reply": "the drafted message to the guest in their language; empty string if escalating",
+ "intent": "short label, e.g. wifi, directions, checkin, pricing, complaint, booking-change",
+ "sentiment": "ok" | "upset",
+ "reason": "one short line for the human reviewer explaining your choice",
+ "confidence": 0.0-1.0}"""
+
+def _msg_is_inbound(m):
+    return int(m.get("isIncoming", m.get("incoming", 0)) or 0) == 1
+
+def _msg_time(m):
+    return str(m.get("date") or m.get("insertedOn") or m.get("latestMessageDate") or "")
+
+def claude_draft(guest_name, unit, history_text):
+    """Call Claude to draft a reply. Returns parsed dict or None on failure."""
+    if not ANTHROPIC_API_KEY:
+        print("assistant: ANTHROPIC_API_KEY not set")
+        return None
+    user = (f"Guest name: {guest_name}\nUnit: {unit}\n\n"
+            f"Conversation so far (oldest first, last line is the guest's new message):\n"
+            f"{history_text}\n\nDraft your reply as the JSON object.")
+    try:
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": CLAUDE_MODEL, "max_tokens": 700, "system": ASSISTANT_RULES,
+                  "messages": [{"role": "user", "content": user}]},
+            timeout=60,
+        )
+        r.raise_for_status()
+        blocks = r.json().get("content", []) or []
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        return json.loads(text)
+    except Exception as e:
+        print("claude_draft error:", e)
+        return None
+
+def fetch_new_guest_messages(seen):
+    """Scan recent conversations and return new inbound guest messages not yet in `seen`."""
+    listings = get_listings_map()
+    out = []
+    try:
+        data = api_get("/conversations", params={"limit": ASSISTANT_SCAN, "includeResources": 1})
+    except Exception as e:
+        print("assistant fetch error:", e)
+        return out
+    for c in data.get("result", []) or []:
+        cid = c.get("id")
+        msgs = c.get("conversationMessages") or []
+        if not msgs:
+            continue
+        msgs = sorted(msgs, key=_msg_time)
+        last = msgs[-1]
+        mid = str(last.get("id"))
+        if mid in seen or not _msg_is_inbound(last):
+            continue
+        lm = c.get("listingMapId")
+        unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
+        guest = c.get("recipientName") or c.get("guestName") or "Guest"
+        history = "\n".join(
+            f"{'Guest' if _msg_is_inbound(m) else 'Host'}: {(m.get('body') or '').strip()}"
+            for m in msgs[-8:] if (m.get("body") or "").strip())
+        out.append({
+            "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
+            "comm_type": last.get("communicationType") or "email",
+            "guest_text": (last.get("body") or "").strip(), "history": history,
+        })
+    return out
+
+def send_guest_message(conversation_id, body, comm_type="email"):
+    return api_post(f"/conversations/{conversation_id}/messages",
+                    {"body": body, "communicationType": comm_type})
+
+class EditModal(discord.ui.Modal, title="Edit reply before sending"):
+    def __init__(self, item, draft):
+        super().__init__()
+        self.item = item
+        self.box = discord.ui.TextInput(label="Reply to guest", style=discord.TextStyle.paragraph,
+                                        default=draft, max_length=1800)
+        self.add_item(self.box)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        text = str(self.box.value).strip()
+        try:
+            await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
+                                    self.item["comm_type"])
+            await interaction.response.send_message(
+                f"✅ Sent (edited) by {interaction.user.mention} to **{self.item['guest']}**.")
+        except Exception as e:
+            await interaction.response.send_message(f"⚠️ Send failed: {e}", ephemeral=True)
+
+class ApproveView(discord.ui.View):
+    def __init__(self, item, draft):
+        super().__init__(timeout=86400)   # buttons live for 24h
+        self.item = item
+        self.draft = draft
+
+    @discord.ui.button(label="✅ Send", style=discord.ButtonStyle.success)
+    async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await asyncio.to_thread(send_guest_message, self.item["conversation_id"], self.draft,
+                                    self.item["comm_type"])
+            for c in self.children:
+                c.disabled = True
+            await interaction.response.edit_message(view=self)
+            await interaction.followup.send(
+                f"✅ Sent by {interaction.user.mention} to **{self.item['guest']}**.")
+        except Exception as e:
+            await interaction.response.send_message(f"⚠️ Send failed: {e}", ephemeral=True)
+
+    @discord.ui.button(label="✏️ Edit & Send", style=discord.ButtonStyle.primary)
+    async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(EditModal(self.item, self.draft))
+
+    @discord.ui.button(label="🗑️ Reject", style=discord.ButtonStyle.danger)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for c in self.children:
+            c.disabled = True
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(f"🗑️ Discarded by {interaction.user.mention}.")
+
+_assistant_seen = set()
+
+async def post_assistant_card(channel, item, result):
+    g = item["guest"]
+    intent = result.get("intent", "—")
+    sentiment = result.get("sentiment", "ok")
+    conf = result.get("confidence", 0)
+    escalate = result.get("action") != "reply" or sentiment == "upset" or (conf or 0) < 0.55
+    color = 0xD64545 if escalate else GOLD
+    embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=color)
+    embed.add_field(name="Guest said", value=(item["guest_text"] or "—")[:1000], inline=False)
+    if escalate:
+        embed.add_field(name="🔴 Needs a human",
+                        value=result.get("reason", "Escalated — handle manually."), inline=False)
+        embed.set_footer(text=f"intent: {intent} · sentiment: {sentiment} · confidence: {conf}")
+        await channel.send(embed=embed)
+        return
+    embed.add_field(name="Suggested reply", value=(result.get("reply") or "—")[:1000], inline=False)
+    embed.set_footer(text=f"intent: {intent} · confidence: {conf} · review before sending")
+    await channel.send(embed=embed, view=ApproveView(item, result.get("reply", "")))
+
+@tasks.loop(minutes=ASSISTANT_POLL_MIN)
+async def assistant_loop():
+    if not ASSISTANT_ENABLED:
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    channel = await ensure_channel(guild, ASSISTANT_CHANNEL, await get_category(guild))
+    if channel is None:
+        return
+    try:
+        items = await asyncio.to_thread(fetch_new_guest_messages, _assistant_seen)
+    except Exception as e:
+        print("assistant_loop fetch error:", e)
+        return
+    for it in items:
+        _assistant_seen.add(it["message_id"])
+        if not it["guest_text"]:
+            continue
+        result = await asyncio.to_thread(claude_draft, it["guest"], it["unit"], it["history"])
+        if not result:
+            continue
+        try:
+            await post_assistant_card(channel, it, result)
+        except Exception as e:
+            print("assistant card error:", e)
+
 @bot.event
 async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
+    # On first start, mark everything currently in the inbox as already-seen so the
+    # assistant only reacts to messages that arrive from now on.
+    if ASSISTANT_ENABLED and not _assistant_seen:
+        try:
+            for it in await asyncio.to_thread(fetch_new_guest_messages, set()):
+                _assistant_seen.add(it["message_id"])
+            print(f"assistant: baselined {len(_assistant_seen)} existing conversations")
+        except Exception as e:
+            print("assistant baseline error:", e)
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
     print(f"Weekday tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
           f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00, "
@@ -671,6 +911,8 @@ async def on_ready():
     print(f"Cleaning reminders: every {REMINDER_SLOW_MIN} min "
           f"{REMINDER_START_HOUR:02d}:00–{REMINDER_FAST_HOUR:02d}:00, then every "
           f"{REMINDER_FAST_MIN} min until {REMINDER_END_HOUR:02d}:00")
+    print(f"AI assistant: {'ON' if ASSISTANT_ENABLED else 'OFF'} · model={CLAUDE_MODEL} · "
+          f"autosend={'ON' if ASSISTANT_AUTOSEND else 'OFF (draft→approve)'} -> #{ASSISTANT_CHANNEL}")
     if not poll_loop.is_running():
         poll_loop.start()
     if not reminder_loop.is_running():
@@ -685,6 +927,8 @@ async def on_ready():
         discount_weekend_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
+    if not assistant_loop.is_running():
+        assistant_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
