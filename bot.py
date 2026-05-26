@@ -2254,6 +2254,7 @@ textarea:focus{outline:none;border-color:var(--gold2);box-shadow:0 0 0 3px rgba(
     </div>
   </div>
   <div class="panel" id="pr"><div class="card"><h3 id="h_pricing">💰</h3><div class="muted" id="upl" style="margin-bottom:12px"></div><div id="prTable"><div class="loading">…</div></div></div></div>
+  <div class="panel" id="strat"><div class="card"><h3 id="h_strat">📊</h3><div class="muted" id="stratHdr" style="margin-bottom:14px"></div><div id="stratList"><div class="loading">…</div></div></div></div>
   <div class="panel" id="auto"><div class="card"><h3 id="h_auto">⚡</h3><div class="muted" id="autoHdr" style="margin-bottom:14px"></div><div id="autoFeed"><div class="loading">…</div></div></div></div>
   <div class="panel" id="log"><div class="card"><h3 id="h_log">📋</h3><div class="catf" id="catf"></div><div id="logFeed"><div class="loading">…</div></div></div></div>
 </div>
@@ -2276,6 +2277,10 @@ const T={
   stratTitle:"استراتيجية التسعير المباشرة",stratActive:"شغّالة الآن · يحسّن تلقائياً",stratDone:"انتهت",stratEvery:"تحديث كل",stratMin:"دقيقة",
   stratStop:"إيقاف الاستراتيجية",stratStart:"البداية",stratCur:"الحالي",stratStatus:"الحالة",stratBookedT:"انحجزت ✅",stratOpenT:"مفتوحة",
   stratChanges:"تعديلات",stratStarted:"بدأت",stratResult:"النتيجة",stratBookedN:"محجوزة",stratOpenN:"مفتوحة",stratGoal:"يرفع السعر وقت الطلب وينزّله تدريجياً للّيالي الفاضية لين تنحجز.",
+  stratTab:"الاستراتيجيات",stratRunning:"شغّالة",stratDone:"منتهية",stratAppliedT:"طُبّق بالبداية",stratMovesT:"تعديلات السعر",
+  stratNone:"ما فيه استراتيجيات بعد — طبّق فرصة تسعير من صفحة 💰 التسعير وبتبدأ وحدة هنا.",stratDetails:"تفاصيل",
+  stratHdr:"كل وحدة طبّقت عليها تسعير ذكي تتابعها هنا: كم ليلة انحجزت، كم مرة عدّل السعر، وهل شغّالة الحين.",
+  stratDryWarn:"⚠️ وضع التجربة شغّال (PRICE_APPLY_DRYRUN=1) — يحسب بس ما يكتب أسعار فعلية على Hostaway.",stratNights:"ليلة",
   today:"اليوم",arrivalsT:"الوصول اليوم",departuresT:"المغادرة اليوم",emptyTonight:"فاضية الليلة",tightT:"تنظيف نفس اليوم",
   allClear:"كل شي تمام — ما فيه شي يحتاج تدخّلك ✅",riskT:"إيراد على الطاولة",occTonight:"مشغولة الليلة",nightsT:"ليالي",
   noArr:"ما فيه وصول اليوم",noDep:"ما فيه مغادرة اليوم",noEmpty:"كل الوحدات محجوزة الليلة 🎉",
@@ -2300,6 +2305,10 @@ const T={
   stratTitle:"Live pricing strategy",stratActive:"Running · auto-optimizing",stratDone:"Finished",stratEvery:"updates every",stratMin:"min",
   stratStop:"Stop strategy",stratStart:"Start",stratCur:"Current",stratStatus:"Status",stratBookedT:"booked ✅",stratOpenT:"open",
   stratChanges:"changes",stratStarted:"Started",stratResult:"Result",stratBookedN:"booked",stratOpenN:"open",stratGoal:"Holds price high when demand is there, steps it down for empty nights as they near — until they book.",
+  stratTab:"Strategies",stratRunning:"Running",stratDone:"Done",stratAppliedT:"Applied at start",stratMovesT:"Price moves",
+  stratNone:"No strategies yet — apply a price opportunity from the 💰 Pricing page and one will start here.",stratDetails:"Details",
+  stratHdr:"Every unit you've put on smart pricing is tracked here: how many nights booked, how many times the price moved, and whether it's still running.",
+  stratDryWarn:"⚠️ Dry-run is ON (PRICE_APPLY_DRYRUN=1) — it computes but does NOT write real prices to Hostaway.",stratNights:"nights",
   today:"Today",arrivalsT:"Arrivals today",departuresT:"Departures today",emptyTonight:"Empty tonight",tightT:"Same-day turnovers",
   allClear:"All clear — nothing needs you right now ✅",riskT:"Revenue on the table",occTonight:"Occupied tonight",nightsT:"nights",
   noArr:"No arrivals today",noDep:"No departures today",noEmpty:"Every unit is booked tonight 🎉",
@@ -2328,10 +2337,10 @@ const AX={x:{grid:{color:GRID},ticks:{color:MUT}},y:{grid:{color:GRID},ticks:{co
 function applyLang(){
   document.documentElement.dir=t().dir;document.documentElement.lang=L;
   document.getElementById('langBtn').textContent=(L==="ar"?"EN":"ع");
-  const tb=[["today","🌅"],["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["auto","⚡"],["log","📋"]];
+  const tb=[["today","🌅"],["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["strat","📊"],["auto","⚡"],["log","📋"]];
   document.getElementById('tabs').innerHTML=tb.map(x=>`<div class="tab ${x[0]===cur?'on':''}" data-t="${x[0]}" onclick="tab('${x[0]}')">${x[1]} ${t()[x[0]]}<span class="badge" id="bdg_${x[0]}" style="display:none"></span></div>`).join('');
-  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log",h_auto:"auto",h_arr:"arrivalsT",h_dep:"departuresT",h_empty:"emptyTonight"};
-  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋",h_auto:"⚡",h_arr:"🟢",h_dep:"🔵",h_empty:"🏠"};
+  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log",h_auto:"auto",h_arr:"arrivalsT",h_dep:"departuresT",h_empty:"emptyTonight",h_strat:"stratTab"};
+  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋",h_auto:"⚡",h_arr:"🟢",h_dep:"🔵",h_empty:"🏠",h_strat:"📊"};
   for(const id in H){const e=document.getElementById(id);if(e)e.innerHTML=E[id]+" "+t()[H[id]];}
   const ah=document.getElementById('autoHdr');if(ah)ah.textContent=t().autoHdr;
   document.getElementById('catf').innerHTML=Object.entries(t().cats).map(([c,l])=>`<div class="tab ${c===curCat?'on':''}" data-c="${c}" onclick="logf('${c}')">${l}</div>`).join('');
@@ -2341,7 +2350,8 @@ function showPanel(x){document.querySelectorAll('.tab[data-t]').forEach(e=>e.cla
   document.querySelectorAll('.panel').forEach(e=>e.classList.toggle('on',e.id===x))}
 function tab(x){cur=x;showPanel(x);
   if(x==='rev'&&!loaded.rev)loadRevenue();
-  if(x==='pr'&&!loaded.pr)loadPricing();}
+  if(x==='pr'&&!loaded.pr)loadPricing();
+  if(x==='strat')loadStrategies();}
 function logf(c){curCat=c;document.querySelectorAll('.catf .tab').forEach(e=>e.classList.toggle('on',e.dataset.c===c));renderLog()}
 
 async function init(){try{document.getElementById('lerr').textContent='';await api('/api/overview');
@@ -2353,7 +2363,8 @@ async function init(){try{document.getElementById('lerr').textContent='';await a
 async function loadFast(){            // instant tabs: today + overview KPIs + inbox + log + auto
   D.today=await api('/api/today');D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');
   D.log=(await api('/api/log')).items;D.auto=(await api('/api/autolog')).items;
-  renderToday();renderKpis();renderInbox();renderLog();renderAuto();renderFresh();
+  D.strat=await api('/api/strategies');
+  renderToday();renderKpis();renderInbox();renderLog();renderAuto();renderStrategies();renderFresh();
   if(D.ov.ready){loadOverview();}else{setTimeout(retryOverview,5000);}   // bg compute still warming
 }
 async function retryOverview(){D.ov=await api('/api/overview');renderKpis();renderFresh();if(!D.ov.ready)setTimeout(retryOverview,5000);else loadOverview();}
@@ -2461,7 +2472,31 @@ async function applyDetail(){if(!detailLid)return;const b=document.getElementByI
   const r=await post('/api/apply',{lid:detailLid});
   if(r.ok){toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied);loaded.pr=false;loadPricing();openStrategy(detailLid)}
   else{toast(r.error||t().err);if(b){b.disabled=false;b.textContent='✅ '+t().confirmApply}}}
+async function loadStrategies(){try{D.strat=await api('/api/strategies');renderStrategies()}catch(e){}}
+function renderStrategies(){const w=document.getElementById('stratList');if(!w)return;
+  const d=D.strat||{};const items=d.items||[];
+  const hdr=document.getElementById('stratHdr');
+  if(hdr)hdr.innerHTML=t().stratHdr+(d.dry_run?` <span style="color:var(--red)">· ${t().stratDryWarn}</span>`:'');
+  if(!items.length){w.innerHTML=`<div class="empty">${t().stratNone}</div>`;return}
+  w.innerHTML=items.map(s=>{
+    const pill=s.active?`<span class="st applied">● ${t().stratRunning}</span>`:`<span class="st booked">${t().stratDone}</span>`;
+    const start=(s.started||'').replace('T',' ');
+    const cur=L==='ar'?'ر.س':'SAR';
+    return `<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="openStrategy(${s.lid})">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div><b style="font-size:16px">⚡ ${esc(s.name)}</b> &nbsp;${pill}</div>
+        <button class="btn ghost" onclick="event.stopPropagation();openStrategy(${s.lid})">${t().stratDetails} →</button>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+        <div class="kpi" style="flex:1;min-width:110px"><div class="v g">${s.booked}/${s.total}</div><div class="l">${t().stratBookedN} · ${t().stratNights}</div></div>
+        <div class="kpi" style="flex:1;min-width:110px"><div class="v b">${s.applied_start}</div><div class="l">${t().stratAppliedT}</div></div>
+        <div class="kpi" style="flex:1;min-width:110px"><div class="v">${s.changes_total}</div><div class="l">${t().stratMovesT}</div></div>
+      </div>
+      <div class="muted" style="margin-top:10px;font-size:12px">${t().basePrice}: ${fmt(s.base)} ${cur} · ${t().stratStarted}: ${start}${s.dry?` · <span style="color:var(--red)">DRY-RUN</span>`:''}</div>
+    </div>`}).join('')}
 async function openStrategy(lid){detailLid=lid;
+  const m=document.getElementById('modal'),s=document.getElementById('sheet');
+  s.innerHTML=`<div class="loading">…</div>`;m.classList.add('show');
   if(stratTimer)clearInterval(stratTimer);
   const pull=async()=>{try{renderStrategy(await api('/api/strategy?lid='+lid))}catch(e){}};
   await pull();stratTimer=setInterval(pull,60000);}   // mirror every minute (bot re-optimizes every 10)
@@ -2510,19 +2545,35 @@ def _live_counts():
     return {"pending_cards": len(_pending_replies),
             "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by"))}
 
+def fetch_inhouse(day):
+    """Reservations overlapping `day` (arrived on/before, departing on/after) — a precise,
+    bounded query (~one row per occupied/turning unit) so occupancy is always accurate."""
+    try:
+        data = api_get("/reservations", params={
+            "arrivalEndDate": day.isoformat(),          # arrivalDate <= today
+            "departureStartDate": day.isoformat(),      # departureDate >= today
+            "limit": 200})
+        return data.get("result", []) or []
+    except Exception as e:
+        print("in-house fetch error:", e)
+        return []
+
 def _compute_today():
     """The morning cockpit: arrivals, departures, who's empty tonight, same-day turnovers,
-    and the revenue on the table. Reads only already-cached data — no new Hostaway load."""
+    and the revenue on the table. Occupancy comes from a targeted in-house query (accurate)."""
     today = datetime.now(TZ).date()
-    reservations = get_reservations_cached()
     listings = get_listings_map()
+    rows = fetch_inhouse(today)
+    if not rows:                                            # fallback to history if the query fails
+        rows = [r for r in get_reservations_cached() if _res_realized(r)]
+    print(f"today: in-house query returned {len(rows)} reservations")
 
     def nm(r):
         return listings.get(r.get("listingMapId")) or r.get("listingName") or f"unit-{r.get('listingMapId')}"
 
     arrivals, departures = [], []
     occ_lids, dep_lids, arr_lids = set(), set(), set()
-    for r in reservations:
+    for r in rows:
         if not _res_realized(r):
             continue
         a, d = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
@@ -2763,8 +2814,8 @@ async def _api_apply(request):
         return _json({"error": "no pending changes (refresh pricing first)"}, 409)
     applied, skipped, results = await asyncio.to_thread(apply_price_changes, lid, changes)
     _last_price_changes.pop(lid, None)
-    if PRICING_STRATEGY_ENABLED:
-        activate_strategy(lid)                 # keep optimizing this unit toward the best numbers
+    if PRICING_STRATEGY_ENABLED and activate_strategy(lid, applied):
+        asyncio.create_task(_kick_strategy(lid))   # run one pass now so the page isn't blank
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
     log_event("pricing", f"طبّق {applied} سعر (من اللوحة) · {name}"
               + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
@@ -2793,7 +2844,7 @@ def _strategy_price(base, d, factors):
     f = 0.80 if lead <= 2 else 0.86 if lead <= 5 else 0.92 if lead <= 10 else 0.97 if lead <= 20 else 1.0
     return int(round(max(0.6 * base, target * f)))
 
-def activate_strategy(lid):
+def activate_strategy(lid, applied=0):
     """Start (or refresh) an active pricing strategy for a unit from its latest detail rows."""
     det = _last_price_detail.get(lid)
     if not det or not det.get("rows"):
@@ -2803,10 +2854,24 @@ def activate_strategy(lid):
         p = r["proposed"]
         dates[r["date"]] = {"start": p, "cur": p, "booked": False, "changes": 0,
                             "last": datetime.now(TZ).isoformat(timespec="minutes")}
+    prev = _pricing_strategies.get(lid, {})
     _pricing_strategies[lid] = {"name": det.get("name", str(lid)), "base": det.get("base", 0),
-                                "started": datetime.now(TZ).isoformat(timespec="minutes"),
-                                "updated": time.time(), "active": True, "dates": dates}
+                                "started": prev.get("started") or datetime.now(TZ).isoformat(timespec="minutes"),
+                                "updated": time.time(), "active": True, "dates": dates,
+                                "applied_start": applied, "changes_total": prev.get("changes_total", 0),
+                                "dry_at_start": PRICE_APPLY_DRYRUN}
     return True
+
+async def _kick_strategy(lid):
+    """Run a single optimization pass for one unit immediately (called right after Apply)."""
+    try:
+        strat = _pricing_strategies.get(lid)
+        if not strat:
+            return
+        factors = await asyncio.to_thread(lambda: compute_demand_factors(get_reservations_cached()))
+        await asyncio.to_thread(_run_strategy_unit, lid, strat, factors, datetime.now(TZ).date())
+    except Exception as e:
+        print(f"kick strategy {lid}:", e)
 
 @tasks.loop(minutes=PRICING_STRATEGY_MIN)
 async def pricing_strategy_loop():
@@ -2869,6 +2934,7 @@ def _run_strategy_unit(lid, strat, factors, today):
             rec["cur"] = want
             rec["changes"] = rec.get("changes", 0) + 1
             rec["last"] = datetime.now(TZ).isoformat(timespec="minutes")
+            strat["changes_total"] = strat.get("changes_total", 0) + 1
     strat["updated"] = time.time()
     if all(rec["booked"] or (_parse_date(d) and _parse_date(d) < today) for d, rec in dates.items()):
         strat["active"] = False
@@ -2885,6 +2951,28 @@ def _strategy_view(lid):
             "started": s.get("started"), "updated": s.get("updated", 0),
             "interval": PRICING_STRATEGY_MIN, "dry_run": PRICE_APPLY_DRYRUN,
             "total": len(rows), "booked": booked, "open": len(rows) - booked, "dates": rows}
+
+def _strategies_list():
+    """Summary of every strategy (active + finished) for the standing Strategies page."""
+    out = []
+    for lid, s in _pricing_strategies.items():
+        dates = s.get("dates", {})
+        booked = sum(1 for r in dates.values() if r.get("booked"))
+        out.append({"lid": lid, "name": s.get("name", str(lid)), "base": s.get("base", 0),
+                    "active": s.get("active", False), "started": s.get("started"),
+                    "updated": s.get("updated", 0), "total": len(dates), "booked": booked,
+                    "open": len(dates) - booked, "applied_start": s.get("applied_start", 0),
+                    "changes_total": s.get("changes_total", 0),
+                    "dry": s.get("dry_at_start", PRICE_APPLY_DRYRUN)})
+    # active first, then most-recently-updated
+    out.sort(key=lambda x: (not x["active"], -(x["updated"] or 0)))
+    return out
+
+async def _api_strategies(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"items": _strategies_list(), "enabled": PRICING_STRATEGY_ENABLED,
+                  "interval": PRICING_STRATEGY_MIN, "dry_run": PRICE_APPLY_DRYRUN})
 
 async def _api_strategy(request):
     if not _dash_auth(request):
@@ -2954,6 +3042,7 @@ async def start_web_server():
         app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/strategy", _api_strategy)
+        app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
@@ -3818,6 +3907,17 @@ async def on_ready():
         guild0 = bot.get_guild(GUILD_ID)
         if guild0 is not None:
             await load_knowledge(guild0)
+            try:                                   # make the auto-reply audit room exist up front
+                cat = await get_assistant_category(guild0)
+                ch = await ensure_channel(guild0, AUTO_REPLY_CHANNEL, cat)
+                if ch is not None and not [m async for m in ch.history(limit=1)]:
+                    note = ("📝 **سجل الردود التلقائية** — كل رد يرسله المساعد فيصل تلقائياً بيتسجّل هنا.\n"
+                            f"التشغيل التلقائي الحين: **{'مفعّل ✅' if ASSISTANT_AUTO else 'متوقف — فعّله بـ ASSISTANT_AUTO=1'}**"
+                            if not ASSISTANT_AUTO else
+                            "📝 **سجل الردود التلقائية** — كل رد يرسله المساعد فيصل تلقائياً بيتسجّل هنا.")
+                    await ch.send(note)
+            except Exception as e:
+                print("auto-reply room setup:", e)
         await asyncio.to_thread(load_catalog, True)
     if not assistant_loop.is_running():
         assistant_loop.start()
