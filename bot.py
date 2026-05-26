@@ -71,7 +71,7 @@ DISCOUNT_TIER3_HOUR    = int(os.environ.get("DISCOUNT_TIER3_HOUR", "18"))   # 18
 DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false", "False", "no")
 DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
-DISCOUNT_STATE_FILE = "discount_state.json"                                 # remembers tonight's original price
+DISCOUNT_STATE_FILE_NAME = "discount_state.json"                            # path resolved via _state_path() below (survives redeploys)
 # Diagnostics: after each live write, re-read the day and log requested vs actual price.
 DISCOUNT_VERIFY  = os.environ.get("DISCOUNT_VERIFY", "0") in ("1", "true", "True", "yes")
 # Set to a percent (e.g. "15") to run one tier immediately on startup for testing.
@@ -133,7 +133,7 @@ CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 CLAUDE_MODEL_PREMIUM = os.environ.get("CLAUDE_MODEL_PREMIUM", "claude-sonnet-4-6")
 ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "True", "yes")
 ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
-ASSISTANT_POLL_MIN = int(os.environ.get("ASSISTANT_POLL_MIN", "2"))   # check inbox every N min
+ASSISTANT_POLL_MIN = float(os.environ.get("ASSISTANT_POLL_MIN", "0.5"))   # check inbox every N min (float ok)
 ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many recent convos to scan
 # ---- Stage 2: Hostaway webhooks (instant replies). 100% optional/backward-compatible:
 # if not set up in Hostaway, the bot just keeps polling as before. ----
@@ -381,16 +381,12 @@ def fetch_upcoming_checkouts():
     return out
 
 def _load_discount_state():
-    try:
-        return json.load(open(DISCOUNT_STATE_FILE, encoding="utf-8"))
-    except Exception:
-        return {}
+    # _load_json returns the default on any error and reads from STATE_DIR (the volume),
+    # so tonight's "original price" snapshot survives redeploys.
+    return _load_json(DISCOUNT_STATE_FILE_NAME, {})
 
 def _save_discount_state(st):
-    try:
-        json.dump(st, open(DISCOUNT_STATE_FILE, "w", encoding="utf-8"), ensure_ascii=False)
-    except Exception:
-        pass
+    _save_json(DISCOUNT_STATE_FILE_NAME, st)
 
 def apply_discount_tier(pct):
     """Set tonight's price to `pct`% off the ORIGINAL price, for every still-empty unit.
@@ -2274,7 +2270,8 @@ const T={
   stApplied:"تم",stBooked:"محجوز",stDry:"تجريبي",stError:"خطأ",
   salExplain:"هذا المنحنى يوضّح في أي أيام من الشهر يحجز الضيوف أكثر. عادةً يرتفع الطلب مع نزول الرواتب. <b>استغلها:</b> ارفع الأسعار في الأيام القوية، وادفع عروض في الأيام الضعيفة عشان تملا الفراغ.",
   auto:"الردود التلقائية",autoEmpty:"ما فيه ردود تلقائية بعد",autoHdr:"الردود اللي رسلها المساعد تلقائياً (بدون مراجعة)",
-  stratTitle:"استراتيجية التسعير المباشرة",stratActive:"شغّالة الآن · يحسّن تلقائياً",stratDone:"انتهت",stratEvery:"تحديث كل",stratMin:"دقيقة",
+  strat:"الاستراتيجيات",
+  stratTitle:"استراتيجية التسعير المباشرة",stratActive:"شغّالة الآن · يحسّن تلقائياً",stratEvery:"تحديث كل",stratMin:"دقيقة",
   stratStop:"إيقاف الاستراتيجية",stratStart:"البداية",stratCur:"الحالي",stratStatus:"الحالة",stratBookedT:"انحجزت ✅",stratOpenT:"مفتوحة",
   stratChanges:"تعديلات",stratStarted:"بدأت",stratResult:"النتيجة",stratBookedN:"محجوزة",stratOpenN:"مفتوحة",stratGoal:"يرفع السعر وقت الطلب وينزّله تدريجياً للّيالي الفاضية لين تنحجز.",
   stratTab:"الاستراتيجيات",stratRunning:"شغّالة",stratDone:"منتهية",stratAppliedT:"طُبّق بالبداية",stratMovesT:"تعديلات السعر",
@@ -2302,7 +2299,8 @@ const T={
   stApplied:"done",stBooked:"booked",stDry:"dry-run",stError:"error",
   salExplain:"This curve shows which days of the month guests book most. Demand usually peaks around payday. <b>Use it:</b> raise prices on strong days, push offers on weak days to fill the gaps.",
   auto:"Auto-replies",autoEmpty:"No auto-replies yet",autoHdr:"Replies the assistant sent on its own (no review)",
-  stratTitle:"Live pricing strategy",stratActive:"Running · auto-optimizing",stratDone:"Finished",stratEvery:"updates every",stratMin:"min",
+  strat:"Strategies",
+  stratTitle:"Live pricing strategy",stratActive:"Running · auto-optimizing",stratEvery:"updates every",stratMin:"min",
   stratStop:"Stop strategy",stratStart:"Start",stratCur:"Current",stratStatus:"Status",stratBookedT:"booked ✅",stratOpenT:"open",
   stratChanges:"changes",stratStarted:"Started",stratResult:"Result",stratBookedN:"booked",stratOpenN:"open",stratGoal:"Holds price high when demand is there, steps it down for empty nights as they near — until they book.",
   stratTab:"Strategies",stratRunning:"Running",stratDone:"Done",stratAppliedT:"Applied at start",stratMovesT:"Price moves",
@@ -2927,7 +2925,8 @@ def _run_strategy_unit(lid, strat, factors, today):
             if not PRICE_APPLY_DRYRUN:
                 try:
                     api_put(f"/listings/{lid}/calendar",
-                            {"startDate": dstr, "endDate": dstr, "isAvailable": 1, "price": want})
+                            {"startDate": dstr, "endDate": dstr, "isAvailable": 1,
+                             "price": want, "note": f"ouja-orig:{want}"})
                 except Exception as e:
                     print(f"strategy put {lid} {dstr}:", e)
                     continue
@@ -3333,9 +3332,10 @@ def compute_revenue_report(reservations, listings_map):
     mean_rate = (sum(arr_by_dom.values()) / sum(occ_count[d] for d in range(1, 32) if occ_count.get(d))) \
         if arr_by_dom else 0
     dom_index = {dom: (rates[dom] / mean_rate if mean_rate else 1) for dom in rates}
-    # find the weakest contiguous run within days 1..28 (avoid month-end sparsity)
+    # find the weakest/strongest contiguous run within days 1..28 (avoid month-end sparsity:
+    # months with 30/31 days mean day 29-31 have ~half the samples and skew the index)
     weak_days = [dom for dom in range(1, 29) if dom_index.get(dom, 1) < 0.92]
-    strong_days = [dom for dom in range(1, 32) if dom_index.get(dom, 1) > 1.08]
+    strong_days = [dom for dom in range(1, 29) if dom_index.get(dom, 1) > 1.08]
 
     def _run(days):
         if not days:
@@ -3630,7 +3630,8 @@ def apply_price_changes(listing_id, changes):
         try:
             api_put(f"/listings/{listing_id}/calendar",
                     {"startDate": c["date"], "endDate": c["date"],
-                     "isAvailable": 1, "price": price})
+                     "isAvailable": 1, "price": price,
+                     "note": f"ouja-orig:{price}"})   # anchor for the discount tiers later
             applied += 1
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "applied"})
         except Exception as e:
