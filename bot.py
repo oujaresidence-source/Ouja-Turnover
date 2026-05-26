@@ -32,7 +32,7 @@ import json
 import time
 import random
 import asyncio
-from collections import defaultdict, deque
+from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -202,6 +202,47 @@ MANAGER_SCRIPT = os.environ.get("MANAGER_SCRIPT", "1") in ("1", "true", "True", 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
 
+# ---------------- bounded helpers ----------------
+class _BoundedSet:
+    """Insertion-ordered set with a hard cap. Oldest entries auto-evicted.
+    Used for `_assistant_seen` so we don't (a) grow forever in memory or
+    (b) lose recent message IDs when an unordered set is sliced on save."""
+    __slots__ = ("_d", "maxlen")
+
+    def __init__(self, items=(), maxlen=20000):
+        self._d = OrderedDict()
+        self.maxlen = maxlen
+        for x in items:
+            self.add(x)
+
+    def add(self, item):
+        if item in self._d:
+            self._d.move_to_end(item)
+        else:
+            self._d[item] = None
+            if len(self._d) > self.maxlen:
+                self._d.popitem(last=False)
+
+    def __contains__(self, item):
+        return item in self._d
+
+    def __len__(self):
+        return len(self._d)
+
+    def __iter__(self):
+        return iter(self._d)
+
+    def __bool__(self):
+        return bool(self._d)
+
+def _bounded_cache_put(cache, key, value, maxlen):
+    """Trim an OrderedDict cache to `maxlen` after inserting. Caller passes an OrderedDict."""
+    if key in cache:
+        cache.move_to_end(key)
+    cache[key] = value
+    while len(cache) > maxlen:
+        cache.popitem(last=False)
+
 # ---------------- Persistent state (Railway Volume) ----------------
 # Mount a Railway Volume at this path so state survives restarts AND redeploys.
 STATE_DIR = os.environ.get("STATE_DIR", "/data")
@@ -253,6 +294,10 @@ def get_token(force=False):
     _token["value"] = r.json()["access_token"]
     return _token["value"]
 
+# Status codes that mean "your bearer token is no longer accepted — refresh once and retry."
+# Hostaway has been observed to use 403; spec says 401 — accept both to be safe.
+_AUTH_RETRY_CODES = (401, 403)
+
 def api_get(path, params=None, _retry=0):
     token = get_token()
     r = requests.get(
@@ -260,7 +305,7 @@ def api_get(path, params=None, _retry=0):
         headers={"Authorization": f"Bearer {token}", "Cache-control": "no-cache"},
         params=params or {}, timeout=60,
     )
-    if r.status_code == 403 and _retry == 0:        # token expired -> refresh once
+    if r.status_code in _AUTH_RETRY_CODES and _retry == 0:   # token expired -> refresh once
         get_token(force=True)
         return api_get(path, params, _retry + 1)
     if r.status_code == 429:                          # rate limited -> brief backoff
@@ -278,7 +323,7 @@ def api_post(path, body, _retry=0):
                  "Cache-control": "no-cache"},
         json=body, timeout=60,
     )
-    if r.status_code == 403 and _retry == 0:
+    if r.status_code in _AUTH_RETRY_CODES and _retry == 0:
         get_token(force=True)
         return api_post(path, body, _retry + 1)
     if r.status_code == 429:
@@ -297,7 +342,7 @@ def api_put(path, body, _retry=0):
                  "Cache-control": "no-cache"},
         json=body, timeout=60,
     )
-    if r.status_code == 403 and _retry == 0:
+    if r.status_code in _AUTH_RETRY_CODES and _retry == 0:
         get_token(force=True)
         return api_put(path, body, _retry + 1)
     if r.status_code == 429:
@@ -1018,7 +1063,9 @@ _catalog_text = ""
 _catalog_ts = 0
 _catalog_units = []        # structured: [{id, name, beds, area, price, link}]
 # availability/price cache: (listing_id, checkin, checkout) -> (result|None, ts)
-_avail_cache = {}
+# Bounded so a busy day can't grow this forever (each unique date range is one entry).
+_avail_cache = OrderedDict()
+_AVAIL_CACHE_MAX = 2000
 INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
 INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "14"))   # max units to date-check per msg
 
@@ -1141,7 +1188,7 @@ def unit_availability_price(listing_id, checkin, checkout):
     except Exception as e:
         print(f"availability fetch error ({listing_id}):", e)
         result = None
-    _avail_cache[key] = (result, time.time())
+    _bounded_cache_put(_avail_cache, key, (result, time.time()), _AVAIL_CACHE_MAX)
     return result
 
 def enrich_catalog_for_dates(checkin, checkout, exclude_id=None):
@@ -1267,7 +1314,20 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         blocks = r.json().get("content", []) or []
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
         text = text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # The model sometimes wraps the JSON in a sentence ("Here's the reply: {...}").
+            # Pull out the first balanced {...} block and try again instead of dropping the
+            # draft entirely.
+            m = re.search(r"\{.*\}", text, re.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group(0))
+                except Exception:
+                    pass
+            print("claude_draft: could not parse JSON · raw=", text[:300])
+            return None
     except Exception as e:
         print("claude_draft error:", e)
         return None
@@ -1856,7 +1916,7 @@ class ApproveView(discord.ui.View):
         item, _ = self._resolve(interaction)
         await interaction.response.send_modal(TeachModal(interaction.message.id, item))
 
-_assistant_seen = set()
+_assistant_seen = _BoundedSet(maxlen=20000)
 
 _SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج"}
 
@@ -1898,7 +1958,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                 inline=False)
             except Exception as e:
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
-        embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {conf} · "
+        embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {round(conf*100)}% · "
                               f"يعاد التنبيه كل {ESCALATION_REPING_MIN} دقيقة لين يستلمه أحد")
         # post to the dedicated escalations channel and @mention the operation team
         guild = channel.guild
@@ -1959,8 +2019,8 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=GOLD)
     embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1024], inline=False)
     embed.add_field(name="✍️ الرد المقترح", value=(reply or "—")[:1024], inline=False)
-    embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · راجعه قبل الإرسال · التوقيع يُضاف "
-                          f"تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
+    embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · راجعه قبل الإرسال · "
+                          f"التوقيع يُضاف تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed}
 
@@ -3120,6 +3180,10 @@ async def escalation_reping_loop():
             await _resolve_escalation(mid, esc)
             continue
         if esc["attempts"] >= ESCALATION_MAX_PINGS:
+            # we've nagged the max number of times and nobody picked it up — stop
+            # silently sitting on the dashboard counter; mark it as exhausted so the
+            # KPI reflects reality and the card carries a clear visual state.
+            await _resolve_escalation(mid, esc, reason=f"انتهت محاولات التنبيه ({ESCALATION_MAX_PINGS}× بدون استلام)")
             continue
         if (now - esc["last_ping"]) < ESCALATION_REPING_MIN * 60:
             continue
@@ -3147,8 +3211,9 @@ async def knowledge_loop():
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
+    global _price_opps
     try:
-        _assistant_seen = set(_load_json("seen.json", []))
+        _assistant_seen = _BoundedSet(_load_json("seen.json", []), maxlen=20000)
         _pending_replies = {int(k): v for k, v in _load_json("pending.json", {}).items()}
         _escalations = {int(k): v for k, v in _load_json("escalations.json", {}).items()}
         _esc_ack_count = {int(k): v for k, v in _load_json("ack_count.json", {}).items()}
@@ -3159,14 +3224,16 @@ def load_state():
         _auto_replies.extend(_load_json("auto_replies.json", []))
         _pricing_strategies.clear()
         _pricing_strategies.update({int(k): v for k, v in _load_json("strategies.json", {}).items()})
+        _price_opps = {int(k): v for k, v in _load_json("price_opps.json", {}).items()}
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
-                  f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed")
+                  f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
+                  f"{len(_price_opps)} price cards")
     except Exception as e:
         print("state load error:", e)
 
 def persist_state():
-    _save_json("seen.json", list(_assistant_seen)[-20000:])
+    _save_json("seen.json", list(_assistant_seen))
     _save_json("pending.json", {str(k): v for k, v in _pending_replies.items()})
     _save_json("escalations.json", {str(k): v for k, v in _escalations.items()})
     _save_json("ack_count.json", {str(k): v for k, v in _esc_ack_count.items()})
@@ -3174,6 +3241,7 @@ def persist_state():
     _save_json("activity.json", list(_activity))
     _save_json("auto_replies.json", list(_auto_replies))
     _save_json("strategies.json", {str(k): v for k, v in _pricing_strategies.items()})
+    _save_json("price_opps.json", {str(k): v for k, v in _price_opps.items()})
 
 @tasks.loop(seconds=60)
 async def persist_loop():
