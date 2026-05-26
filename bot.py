@@ -153,7 +153,40 @@ MANAGER_SCRIPT = os.environ.get("MANAGER_SCRIPT", "1") in ("1", "true", "True", 
 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
-HANDLED_FILE = "handled.json"
+
+# ---------------- Persistent state (Railway Volume) ----------------
+# Mount a Railway Volume at this path so state survives restarts AND redeploys.
+STATE_DIR = os.environ.get("STATE_DIR", "/data")
+
+def _state_path(name):
+    return os.path.join(STATE_DIR, name)
+
+def _save_json(name, obj):
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = _state_path(name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False)
+        os.replace(tmp, _state_path(name))   # atomic write
+    except Exception as e:
+        print(f"state save error ({name}):", e)
+
+def _load_json(name, default):
+    try:
+        with open(_state_path(name), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def _state_persistent():
+    """True if STATE_DIR looks like a mounted volume (writable & exists)."""
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        return os.path.isdir(STATE_DIR)
+    except Exception:
+        return False
+
+HANDLED_FILE = _state_path("handled.json")
 
 # ---------------- Hostaway ----------------
 _token = {"value": None}
