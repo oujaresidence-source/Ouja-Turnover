@@ -30,6 +30,7 @@ import re
 import io
 import json
 import time
+import random
 import asyncio
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, time as dt_time
@@ -172,7 +173,8 @@ CATALOG_CALENDAR_PRICES = os.environ.get("CATALOG_CALENDAR_PRICES", "1") in ("1"
 # anything needing approval or a human still posts a card. Default OFF — everything waits
 # for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
 ASSISTANT_AUTO     = os.environ.get("ASSISTANT_AUTO", "0") in ("1", "true", "True", "yes")
-ASSISTANT_AUTO_CONF = float(os.environ.get("ASSISTANT_AUTO_CONF", "0.85"))  # min confidence to auto-send
+ASSISTANT_AUTO_CONF = float(os.environ.get("ASSISTANT_AUTO_CONF", "0.85"))  # Stage 1: auto-send at/above this confidence
+ESCALATE_BELOW     = float(os.environ.get("ESCALATE_BELOW", "0.55"))       # Stage 3: escalate below this confidence
 # Signature appended to every guest-facing message.
 ASSISTANT_SIGNATURE_AR = os.environ.get("ASSISTANT_SIGNATURE_AR", "الدعم الفني - مساعد 🤍")
 ASSISTANT_SIGNATURE_EN = os.environ.get("ASSISTANT_SIGNATURE_EN", "Technical Support - Musaid 🤍")
@@ -1401,13 +1403,60 @@ def fetch_conversation_item(conversation_id, seen):
         c["id"] = conversation_id
     return _conv_to_item(c, listings, seen)
 
+SIGNATURE_VARY = os.environ.get("SIGNATURE_VARY", "1") in ("1", "true", "True", "yes")
+
+# 50 varied Najdi/warm sign-offs so no two messages end the same way.
+SIGNATURES_AR = [
+    "تحياتي،\nمساعد - فريق عوجا 🤍", "كامل التوفيق،\nأخوك مساعد - فريق عوجا",
+    "في أمان الله،\nمساعد من عوجا 🤍", "تسلم،\nمساعد - عوجا",
+    "أي خدمة ثانية أنا حاضر،\nمساعد - فريق عوجا 🤍", "سعدنا بخدمتك،\nمساعد من عوجا",
+    "لا تتردد تطلبني،\nأخوك مساعد - عوجا 🤍", "نتشرف فيك دايم،\nفريق عوجا - مساعد",
+    "حياك الله،\nمساعد - فريق عوجا 🤍", "بالخدمة دايماً،\nمساعد من عوجا",
+    "تحياتي القلبية،\nمساعد - عوجا 🤍", "يومك سعيد،\nأخوك مساعد - فريق عوجا",
+    "تواصل معي أي وقت،\nمساعد - عوجا 🤍", "شاكر لك،\nمساعد من فريق عوجا",
+    "دمت بخير،\nمساعد - عوجا 🤍", "خدمتك شرف لنا،\nفريق عوجا",
+    "أبشر بكل اللي يسعدك،\nمساعد - عوجا 🤍", "تقبل تحياتي،\nمساعد من عوجا",
+    "نحن في خدمتك،\nفريق عوجا - مساعد 🤍", "الله يحييك،\nأخوك مساعد - عوجا",
+    "أي استفسار ثاني أنا موجود،\nمساعد - فريق عوجا 🤍", "سرّنا تواصلك،\nمساعد من عوجا",
+    "بالتوفيق،\nمساعد - عوجا 🤍", "تستاهل كل خير،\nفريق عوجا - مساعد",
+    "حاضرين لك،\nمساعد - فريق عوجا 🤍", "تحياتي وتقديري،\nمساعد من عوجا",
+    "نوّرتنا،\nمساعد - عوجا 🤍", "أمرك،\nأخوك مساعد - فريق عوجا",
+    "خليك على تواصل،\nمساعد - عوجا 🤍", "سعيد بخدمتك،\nمساعد من فريق عوجا",
+    "الله يسعدك،\nمساعد - عوجا 🤍", "تحت أمرك دايم،\nفريق عوجا - مساعد",
+    "ودّي وتحياتي،\nمساعد من عوجا 🤍", "عساك على القوة،\nأخوك مساعد - عوجا",
+    "أي شي تحتاجه أنا جاهز،\nمساعد - فريق عوجا 🤍", "شكراً لثقتك،\nمساعد من عوجا",
+    "بكل سرور،\nمساعد - عوجا 🤍", "اعتبرني أخوك،\nمساعد - فريق عوجا",
+    "دايم بالخدمة،\nمساعد من عوجا 🤍", "تحياتي الحارة،\nفريق عوجا - مساعد",
+    "الله يوفقك،\nمساعد - عوجا 🤍", "نتمنى لك إقامة سعيدة،\nمساعد من فريق عوجا",
+    "حياك في أي وقت،\nمساعد - عوجا 🤍", "تسلم وما تقصّر،\nأخوك مساعد - عوجا",
+    "خدمتك أولوية عندنا،\nفريق عوجا 🤍", "بانتظار خدمتك،\nمساعد - عوجا",
+    "مع خالص الود،\nمساعد من عوجا 🤍", "سعدنا فيك،\nمساعد - فريق عوجا",
+    "كلنا بالخدمة،\nمساعد - عوجا 🤍", "الله يتمّم لك على خير،\nأخوك مساعد - فريق عوجا",
+]
+SIGNATURES_EN = [
+    "Best regards,\nMusaid – Ouja Team 🤍", "At your service,\nMusaid – Ouja",
+    "Always happy to help,\nMusaid – Ouja Team 🤍", "Warm regards,\nMusaid from Ouja",
+    "Reach out anytime,\nMusaid – Ouja Team 🤍", "Take care,\nMusaid – Ouja",
+    "Glad to assist,\nMusaid – Ouja Team 🤍", "Anything else, I'm here,\nMusaid – Ouja",
+    "Wishing you a great stay,\nMusaid – Ouja Team 🤍", "Kind regards,\nMusaid from Ouja",
+    "We're here for you,\nOuja Team – Musaid 🤍", "Thanks for reaching out,\nMusaid – Ouja",
+    "All the best,\nMusaid – Ouja Team 🤍", "Happy to help anytime,\nMusaid – Ouja",
+    "With pleasure,\nMusaid – Ouja Team 🤍", "Don't hesitate to ask,\nMusaid from Ouja",
+    "Here whenever you need,\nMusaid – Ouja 🤍", "Cheers,\nMusaid – Ouja Team",
+    "Your comfort is our priority,\nOuja Team 🤍", "Talk soon,\nMusaid – Ouja",
+]
+
 def _has_arabic(s):
     return any("\u0600" <= ch <= "\u06ff" for ch in str(s))
 
+def _pick_signature(arabic):
+    if not SIGNATURE_VARY:
+        return ASSISTANT_SIGNATURE_AR if arabic else ASSISTANT_SIGNATURE_EN
+    return random.choice(SIGNATURES_AR if arabic else SIGNATURES_EN)
+
 def with_signature(text):
-    """Append the support signature, language-matched to the message."""
-    sig = ASSISTANT_SIGNATURE_AR if _has_arabic(text) else ASSISTANT_SIGNATURE_EN
-    return f"{str(text).rstrip()}\n\n{sig}"
+    """Append a (rotating) support signature, language-matched to the message."""
+    return f"{str(text).rstrip()}\n\n{_pick_signature(_has_arabic(text))}"
 
 def send_guest_message(conversation_id, body, comm_type="email"):
     return api_post(f"/conversations/{conversation_id}/messages",
@@ -1505,6 +1554,7 @@ class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسا
             except Exception:
                 pass
             _pending_replies.pop(self.message_id, None)
+            _replied_msgs.add(self.message_id)
             await interaction.followup.send(
                 f"✅ تم الإرسال (بعد التعديل) بواسطة {interaction.user.mention} "
                 f"للضيف **{self.item['guest']}**.")
@@ -1667,6 +1717,7 @@ class ConfirmActionView(discord.ui.View):
                                         item["comm_type"])
                 await self._disable_card(interaction)
                 _pending_replies.pop(self.message_id, None)
+                _replied_msgs.add(self.message_id)
                 await interaction.followup.send(
                     f"✅ تم الإرسال بواسطة {interaction.user.mention} للضيف **{item['guest']}**.")
             except Exception as e:
@@ -1674,6 +1725,7 @@ class ConfirmActionView(discord.ui.View):
         else:   # reject
             await self._disable_card(interaction)
             _pending_replies.pop(self.message_id, None)
+            _replied_msgs.add(self.message_id)
             await interaction.response.edit_message(content="🗑️ تم التجاهل.", view=None)
             await interaction.followup.send(f"🗑️ تم التجاهل بواسطة {interaction.user.mention}.")
 
@@ -1764,6 +1816,10 @@ class ApproveView(discord.ui.View):
 
     @discord.ui.button(label="✅ إرسال", style=discord.ButtonStyle.success, custom_id="ouja_send")
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.message.id in _replied_msgs:
+            await interaction.response.send_message(
+                "✅ تم التعامل مع هذا الرد مسبقاً (من اللوحة).", ephemeral=True)
+            return
         item, draft = self._resolve(interaction)
         if not item:
             await interaction.response.send_message(
@@ -1809,7 +1865,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     conf = float(result.get("confidence", 0) or 0)
     action = result.get("action", "escalate")
     reply = (result.get("reply") or "").strip()
-    escalate = action == "escalate" or sentiment == "upset" or conf < 0.55
+    escalate = action == "escalate" or sentiment == "upset" or conf < ESCALATE_BELOW
 
     # ---- needs a human: tell the guest it's escalated, then alert the team ----
     if escalate:
@@ -1860,18 +1916,18 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             print("escalation post error:", e)
         return
 
-    # ---- very simple & high-confidence: send automatically, then post an FYI card ----
-    can_auto = (ASSISTANT_AUTO and action == "auto" and sentiment == "ok"
-                and conf >= ASSISTANT_AUTO_CONF and reply)
+    # ---- STAGE 1: confident enough -> send automatically, then post an FYI card ----
+    can_auto = (ASSISTANT_AUTO and not escalate and bool(reply) and conf >= ASSISTANT_AUTO_CONF)
     if can_auto:
         try:
             await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
                                     item["comm_type"])
-            embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=0x3BA55D)
+            embed = discord.Embed(title=f"⚡ رد تلقائي · {g} · {item['unit']}", color=0x3BA55D)
             embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
-            embed.add_field(name="✅ تم الرد تلقائياً", value=reply[:1000], inline=False)
-            embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · رد تلقائي (للعلم)")
+            embed.add_field(name="✅ تم الرد تلقائياً (Stage 1)", value=reply[:1000], inline=False)
+            embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · رد تلقائي للعلم")
             await channel.send(embed=embed)
+            log_event("guest", f"رد تلقائي ({round(conf*100)}%) · {g} · {item['unit']}")
             return
         except Exception as e:
             print("auto-send failed, falling back to approval:", e)
@@ -2009,6 +2065,8 @@ def log_event(category, text):
 
 # ---------------- Dashboard: auth + cached analytics + API + page ----------------
 _dash_cache = {}
+_replied_msgs = set()        # guard so a reply isn't sent twice (Discord + dashboard)
+_last_price_changes = {}     # lid -> [changes] from the latest pricing compute (for dashboard Apply)
 
 DASHBOARD_HTML = """<!doctype html>
 <html lang="ar" dir="rtl">
@@ -2017,126 +2075,201 @@ DASHBOARD_HTML = """<!doctype html>
 <title>Ouja · Control Center</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-:root{--bg:#0c0c0e;--card:#15151a;--line:#26262e;--gold:#C8A24B;--txt:#ECECEC;--mut:#8b8b95;--green:#2ECC71;--red:#E74C3C;}
+:root{--bg:#0a0a0c;--bg2:#101015;--card:#16161d;--line:#26262f;--gold:#C8A24B;--gold2:#e6c478;
+--txt:#EDEDED;--mut:#8b8b97;--green:#2ECC71;--red:#E74C3C;--blue:#5B8DEF;}
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Segoe UI',Tahoma,sans-serif}
-body{background:var(--bg);color:var(--txt);min-height:100vh}
+body{background:radial-gradient(900px 500px at 80% -10%,rgba(200,162,75,.10),transparent),var(--bg);color:var(--txt);min-height:100vh}
 #login{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:14px}
-#login input{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:12px 16px;border-radius:10px;width:280px;font-size:15px;text-align:center}
-.btn{background:var(--gold);color:#000;border:none;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px}
-.wrap{max-width:1100px;margin:0 auto;padding:18px}
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.logo{font-size:20px;font-weight:800;color:var(--gold);letter-spacing:.5px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
-.kpi .v{font-size:24px;font-weight:800}
-.kpi .l{color:var(--mut);font-size:12px;margin-top:4px}
+#login input{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:13px 16px;border-radius:12px;width:300px;font-size:15px;text-align:center}
+.btn{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1300;border:none;padding:11px 22px;border-radius:11px;font-weight:800;cursor:pointer;font-size:14px}
+.btn:active{transform:translateY(1px)}
+.btn.sm{padding:7px 14px;font-size:13px;border-radius:9px}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--mut);font-weight:600}
+.btn.red{background:transparent;border:1px solid var(--red);color:var(--red)}
+.btn.green{background:transparent;border:1px solid var(--green);color:var(--green)}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 18px 60px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:10px;flex-wrap:wrap}
+.logo{font-size:21px;font-weight:900;background:linear-gradient(135deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:.4px}
+.tools{display:flex;gap:8px;align-items:center}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:linear-gradient(180deg,var(--bg2),var(--card));border:1px solid var(--line);border-radius:16px;padding:15px 16px;transition:.2s}
+.kpi:hover{border-color:var(--gold)}
+.kpi .v{font-size:25px;font-weight:900}
+.kpi .l{color:var(--mut);font-size:12px;margin-top:5px}
 .kpi .g{color:var(--gold)}
-.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.tab{background:var(--card);border:1px solid var(--line);color:var(--mut);padding:9px 16px;border-radius:10px;cursor:pointer;font-size:14px}
-.tab.on{background:var(--gold);color:#000;border-color:var(--gold);font-weight:700}
-.panel{display:none}.panel.on{display:block}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
-.card h3{font-size:14px;color:var(--gold);margin-bottom:12px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.tab{background:var(--card);border:1px solid var(--line);color:var(--mut);padding:9px 16px;border-radius:11px;cursor:pointer;font-size:14px;transition:.15s}
+.tab:hover{color:var(--txt)}
+.tab.on{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1300;border-color:var(--gold);font-weight:800}
+.badge{display:inline-block;min-width:18px;text-align:center;background:var(--red);color:#fff;border-radius:20px;font-size:11px;padding:0 6px;margin-inline-start:6px;font-weight:700}
+.panel{display:none}.panel.on{display:block;animation:f .25s}
+@keyframes f{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:17px;margin-bottom:14px}
+.card h3{font-size:14px;color:var(--gold);margin-bottom:13px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line)}
+th,td{text-align:start;padding:9px 6px;border-bottom:1px solid var(--line)}
 th{color:var(--mut);font-weight:600}
-.pill{padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.pill{padding:2px 9px;border-radius:20px;font-size:11px;font-weight:800;white-space:nowrap}
 .up{background:rgba(46,204,113,.15);color:var(--green)}.dn{background:rgba(231,76,60,.15);color:var(--red)}.hd{background:#2a2a32;color:var(--mut)}
 .logrow{display:flex;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
-.logrow .t{color:var(--mut);font-size:11px;min-width:120px}
+.logrow .t{color:var(--mut);font-size:11px;min-width:130px}
 .catf{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
 .catf .tab{padding:6px 12px;font-size:12px}
 .bar{height:7px;background:#2a2a32;border-radius:5px;overflow:hidden;margin-top:5px}
-.bar>div{height:100%;background:var(--gold)}
+.bar>div{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2))}
 .muted{color:var(--mut);font-size:12px}
 canvas{max-height:240px}
+.item{border:1px solid var(--line);border-radius:13px;padding:13px;margin-bottom:11px;background:var(--bg2)}
+.item .hd2{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap}
+.item .who{font-weight:800}.item .unit{color:var(--gold);font-size:12px}
+.gtext{background:#0e0e12;border:1px solid var(--line);border-radius:9px;padding:9px;font-size:13px;color:var(--mut);margin-bottom:9px}
+textarea{width:100%;background:#0e0e12;border:1px solid var(--line);border-radius:9px;color:var(--txt);padding:10px;font-size:13px;min-height:84px;font-family:inherit;resize:vertical}
+.acts{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+.acts input{background:#0e0e12;border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:7px 10px;font-size:13px;flex:1;min-width:120px}
+.empty{color:var(--mut);text-align:center;padding:24px;font-size:13px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--gold);color:var(--txt);padding:11px 18px;border-radius:11px;font-size:14px;z-index:99;opacity:0;transition:.3s}
+.toast.show{opacity:1}
 </style></head>
 <body>
 <div id="login">
   <div class="logo">عوجا · Control Center</div>
-  <input id="tok" type="password" placeholder="ادخل رمز الدخول">
-  <button class="btn" onclick="saveTok()">دخول</button>
+  <input id="tok" type="password" placeholder="رمز الدخول / Access token">
+  <button class="btn" onclick="saveTok()">دخول · Enter</button>
   <div class="muted" id="lerr"></div>
 </div>
 <div class="wrap" id="app" style="display:none">
-  <header><div class="logo">عوجا · Control Center</div>
-    <div style="display:flex;gap:8px"><button class="tab" onclick="refresh()">↻ تحديث</button>
-    <button class="tab" onclick="logout()">خروج</button></div></header>
+  <header>
+    <div class="logo" id="brand">عوجا · Control Center</div>
+    <div class="tools">
+      <button class="tab" onclick="toggleLang()" id="langBtn">EN</button>
+      <button class="tab" onclick="refresh()" id="refreshBtn">↻</button>
+      <button class="tab" onclick="logout()" id="logoutBtn">⎋</button>
+    </div>
+  </header>
   <div class="kpis" id="kpis"></div>
-  <div class="tabs">
-    <div class="tab on" data-t="ov" onclick="tab('ov')">نظرة عامة</div>
-    <div class="tab" data-t="rev" onclick="tab('rev')">الإيرادات والتحليل</div>
-    <div class="tab" data-t="pr" onclick="tab('pr')">التسعير</div>
-    <div class="tab" data-t="log" onclick="tab('log')">سجل النشاط</div>
+  <div class="tabs" id="tabs"></div>
+  <div class="panel on" id="ov">
+    <div class="card"><h3 id="h_monthly"></h3><canvas id="cMonthly"></canvas></div>
+    <div class="card"><h3 id="h_units"></h3><div id="unitTable"></div></div>
   </div>
-  <div class="panel on" id="ov"><div class="card"><h3>الإيراد الشهري (آخر ١٢ شهر)</h3><canvas id="cMonthly"></canvas></div>
-    <div class="card"><h3>أداء الوحدات (آخر ٩٠ يوم)</h3><div id="unitTable"></div></div></div>
-  <div class="panel" id="rev"><div class="card"><h3>أقوى الشهور (متوسط السعر)</h3><canvas id="cSeason"></canvas></div>
-    <div class="card"><h3>دورة الراتب (الطلب حسب يوم الشهر)</h3><canvas id="cSalary"></canvas><div class="muted" id="salNote"></div></div></div>
-  <div class="panel" id="pr"><div class="card"><h3>فرص التسعير</h3><div class="muted" id="upl"></div><div id="prTable"></div></div></div>
-  <div class="panel" id="log"><div class="card"><h3>سجل النشاط</h3>
-    <div class="catf"><div class="tab on" data-c="" onclick="logf('')">الكل</div>
-      <div class="tab" data-c="guest" onclick="logf('guest')">الضيوف</div>
-      <div class="tab" data-c="escalation" onclick="logf('escalation')">تصعيدات</div>
-      <div class="tab" data-c="pricing" onclick="logf('pricing')">التسعير</div>
-      <div class="tab" data-c="report" onclick="logf('report')">التقارير</div></div>
-    <div id="logFeed"></div></div></div>
+  <div class="panel" id="inbox">
+    <div class="card"><h3 id="h_replies"></h3><div id="replies"></div></div>
+    <div class="card"><h3 id="h_esc"></h3><div id="escs"></div></div>
+  </div>
+  <div class="panel" id="rev">
+    <div class="card"><h3 id="h_season"></h3><canvas id="cSeason"></canvas></div>
+    <div class="card"><h3 id="h_salary"></h3><canvas id="cSalary"></canvas><div class="muted" id="salNote"></div></div>
+  </div>
+  <div class="panel" id="pr"><div class="card"><h3 id="h_pricing"></h3><div class="muted" id="upl"></div><div id="prTable"></div></div></div>
+  <div class="panel" id="log"><div class="card"><h3 id="h_log"></h3><div class="catf" id="catf"></div><div id="logFeed"></div></div></div>
 </div>
+<div class="toast" id="toast"></div>
 <script>
-const TK="ouja_token";let charts={},curCat="";
+const TK="ouja_token";
+const T={ar:{dir:"rtl",brand:"عوجا · Control Center",ov:"نظرة عامة",inbox:"الوارد",rev:"الإيرادات",pr:"التسعير",log:"السجل",
+ monthly:"الإيراد الشهري (آخر ١٢ شهر)",units:"أداء الوحدات (٩٠ يوم)",season:"أقوى الشهور (متوسط السعر)",
+ salary:"دورة الراتب (الطلب حسب يوم الشهر)",pricing:"فرص التسعير",replies:"ردود بانتظار الموافقة",esc:"تصعيدات مفتوحة",
+ send:"إرسال",reject:"تجاهل",claim:"استلام",apply:"تطبيق",noRep:"ما فيه ردود معلّقة 🎉",noEsc:"ما فيه تصعيدات مفتوحة 🎉",
+ guestSays:"الضيف يقول",reason:"السبب",claimedBy:"مستلم بواسطة",namePh:"اسمك",uplift:"إيراد إضافي تقديري",
+ colUnit:"الوحدة",colOcc:"إشغال",colAdr:"سعر/ليلة",colPace:"سرعة ٣٠ي",colReco:"التوصية",colChg:"تغييرات",colUp:"إيراد إضافي",colConf:"الثقة",colApply:"",
+ cats:{"":"الكل",guest:"الضيوف",escalation:"تصعيدات",pricing:"التسعير",report:"التقارير"},
+ kpis:[["active_units","الوحدات الفعّالة",""],["occ_30","إشغال ٣٠ يوم","%"],["rev_30","إيراد ٣٠ يوم"," ر.س"],
+  ["rev_7","إيراد ٧ أيام"," ر.س"],["missed_7","إيراد ضائع ٧ أيام"," ر.س"],["pending_cards","ردود معلّقة",""],
+  ["open_escalations","تصعيدات مفتوحة",""],["checkins_today","وصول اليوم",""],["checkouts_today","مغادرة اليوم",""]],
+ sent:"تم الإرسال ✅",rejected:"تم التجاهل",claimed:"تم الاستلام ✅",applied:"تم التطبيق ✅",err:"صار خطأ",weak:"أضعف الأيام",strong:"أقوى الأيام"},
+ en:{dir:"ltr",brand:"Ouja · Control Center",ov:"Overview",inbox:"Inbox",rev:"Revenue",pr:"Pricing",log:"Log",
+ monthly:"Monthly revenue (last 12 mo)",units:"Unit performance (90d)",season:"Top months (avg rate)",
+ salary:"Salary cycle (demand by day-of-month)",pricing:"Pricing opportunities",replies:"Replies awaiting approval",esc:"Open escalations",
+ send:"Send",reject:"Dismiss",claim:"Claim",apply:"Apply",noRep:"No pending replies 🎉",noEsc:"No open escalations 🎉",
+ guestSays:"Guest says",reason:"Reason",claimedBy:"Claimed by",namePh:"Your name",uplift:"Est. extra revenue",
+ colUnit:"Unit",colOcc:"Occ",colAdr:"Rate/nt",colPace:"30d pace",colReco:"Action",colChg:"Changes",colUp:"Extra rev",colConf:"Confidence",colApply:"",
+ cats:{"":"All",guest:"Guests",escalation:"Escalations",pricing:"Pricing",report:"Reports"},
+ kpis:[["active_units","Active units",""],["occ_30","Occ 30d","%"],["rev_30","Rev 30d"," SAR"],
+  ["rev_7","Rev 7d"," SAR"],["missed_7","Missed 7d"," SAR"],["pending_cards","Pending replies",""],
+  ["open_escalations","Open escalations",""],["checkins_today","Check-ins today",""],["checkouts_today","Check-outs today",""]],
+ sent:"Sent ✅",rejected:"Dismissed",claimed:"Claimed ✅",applied:"Applied ✅",err:"Something went wrong",weak:"Weakest days",strong:"Strongest days"}};
+let L="ar",charts={},curCat="",lastData={};
+function t(){return T[L]}
 function tok(){return localStorage.getItem(TK)||""}
 function saveTok(){localStorage.setItem(TK,document.getElementById('tok').value.trim());init()}
 function logout(){localStorage.removeItem(TK);location.reload()}
+function toggleLang(){L=L==="ar"?"en":"ar";localStorage.setItem("ouja_lang",L);applyLang();renderAll()}
+function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
 async function api(p){const r=await fetch(p+(p.includes('?')?'&':'?')+'token='+encodeURIComponent(tok()));
   if(r.status===401)throw'unauthorized';return r.json()}
-function tab(t){document.querySelectorAll('.tab[data-t]').forEach(e=>e.classList.toggle('on',e.dataset.t===t));
-  document.querySelectorAll('.panel').forEach(e=>e.classList.toggle('on',e.id===t))}
-function logf(c){curCat=c;document.querySelectorAll('.catf .tab').forEach(e=>e.classList.toggle('on',e.dataset.c===c));loadLog()}
+async function post(p,body){const r=await fetch(p+'?token='+encodeURIComponent(tok()),
+  {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json().catch(()=>({}))}
 function fmt(n){return (n||0).toLocaleString('en-US')}
 function mkChart(id,cfg){if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),cfg)}
-const GOLD='#C8A24B',GRID='#26262e';
-async function init(){
-  try{document.getElementById('lerr').textContent='';
-    await loadOverview();document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
-    loadRevenue();loadPricing();loadLog();
-  }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح';}
+const GOLD='#C8A24B',GRID='#26262f';
+function applyLang(){document.documentElement.dir=t().dir;document.documentElement.lang=L;
+  document.getElementById('langBtn').textContent=L==="ar"?"EN":"ع";
+  document.getElementById('brand').textContent=t().brand;
+  const tabs=[["ov",t().ov],["inbox",t().inbox],["rev",t().rev],["pr",t().pr],["log",t().log]];
+  document.getElementById('tabs').innerHTML=tabs.map((x,i)=>`<div class="tab ${i===0?'on':''}" data-t="${x[0]}" onclick="tab('${x[0]}')">${x[1]}<span class="badge" id="bdg_${x[0]}" style="display:none"></span></div>`).join('');
+  document.getElementById('h_monthly').textContent=t().monthly;document.getElementById('h_units').textContent=t().units;
+  document.getElementById('h_replies').textContent=t().replies;document.getElementById('h_esc').textContent=t().esc;
+  document.getElementById('h_season').textContent=t().season;document.getElementById('h_salary').textContent=t().salary;
+  document.getElementById('h_pricing').textContent=t().pricing;document.getElementById('h_log').textContent=t().log;
+  document.getElementById('catf').innerHTML=Object.entries(t().cats).map(([c,lbl],i)=>`<div class="tab ${c===curCat?'on':''}" data-c="${c}" onclick="logf('${c}')">${lbl}</div>`).join('');
 }
-function refresh(){loadOverview();loadRevenue();loadPricing();loadLog()}
-async function loadOverview(){const d=await api('/api/overview');
-  const k=[['active_units','الوحدات الفعّالة',''],['occ_30','إشغال ٣٠ يوم','%'],['rev_30','إيراد ٣٠ يوم',' ر.س'],
-    ['rev_7','إيراد ٧ أيام',' ر.س'],['missed_7','إيراد ضائع ٧ أيام',' ر.س'],['pending_cards','ردود معلّقة',''],
-    ['open_escalations','تصعيدات مفتوحة',''],['checkins_today','وصول اليوم',''],['checkouts_today','مغادرة اليوم','']];
-  document.getElementById('kpis').innerHTML=k.map(([key,lbl,suf])=>
-    `<div class="kpi"><div class="v g">${fmt(d[key])}${suf}</div><div class="l">${lbl}</div></div>`).join('');
-}
-async function loadRevenue(){const d=await api('/api/revenue');
-  mkChart('cMonthly',{type:'line',data:{labels:d.monthly.map(m=>m.m),
-    datasets:[{data:d.monthly.map(m=>m.rev),borderColor:GOLD,backgroundColor:'rgba(200,162,75,.12)',fill:true,tension:.3}]},
-    options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b95'}},y:{grid:{color:GRID},ticks:{color:'#8b8b95'}}}}});
-  mkChart('cSeason',{type:'bar',data:{labels:d.seasonality.map(m=>m.name),
-    datasets:[{data:d.seasonality.map(m=>m.adr),backgroundColor:GOLD}]},
-    options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8b8b95'}},y:{grid:{color:GRID},ticks:{color:'#8b8b95'}}}}});
+function tab(x){document.querySelectorAll('.tab[data-t]').forEach(e=>e.classList.toggle('on',e.dataset.t===x));
+  document.querySelectorAll('.panel').forEach(e=>e.classList.toggle('on',e.id===x))}
+function logf(c){curCat=c;document.querySelectorAll('.catf .tab').forEach(e=>e.classList.toggle('on',e.dataset.c===c));renderLog()}
+async function init(){try{document.getElementById('lerr').textContent='';await api('/api/overview');
+  document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
+  L=localStorage.getItem("ouja_lang")||"ar";applyLang();await refresh();
+  }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح / Wrong token'}}
+async function refresh(){lastData.ov=await api('/api/overview');lastData.rev=await api('/api/revenue');
+  lastData.inbox=await api('/api/inbox');lastData.log=(await api('/api/log')).items;
+  try{lastData.pr=await api('/api/pricing')}catch(e){lastData.pr={units:[],total_uplift:0}}
+  renderAll()}
+function renderAll(){renderKpis();renderInbox();renderRevenue();renderPricing();renderLog();}
+function renderKpis(){const d=lastData.ov||{};document.getElementById('kpis').innerHTML=t().kpis.map(([k,lbl,suf])=>
+  `<div class="kpi"><div class="v g">${fmt(d[k])}${suf}</div><div class="l">${lbl}</div></div>`).join('')}
+function renderRevenue(){const d=lastData.rev;if(!d)return;
+  mkChart('cMonthly',{type:'line',data:{labels:d.monthly.map(m=>m.m),datasets:[{data:d.monthly.map(m=>m.rev),borderColor:GOLD,backgroundColor:'rgba(200,162,75,.13)',fill:true,tension:.3,pointRadius:0}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b97'}},y:{grid:{color:GRID},ticks:{color:'#8b8b97'}}}}});
+  mkChart('cSeason',{type:'bar',data:{labels:d.seasonality.map(m=>m.name),datasets:[{data:d.seasonality.map(m=>m.adr),backgroundColor:GOLD,borderRadius:5}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8b8b97'}},y:{grid:{color:GRID},ticks:{color:'#8b8b97'}}}}});
   const doms=Array.from({length:31},(_,i)=>i+1);
-  mkChart('cSalary',{type:'line',data:{labels:doms,
-    datasets:[{data:doms.map(x=>d.salary[x]||1),borderColor:GOLD,tension:.25,pointRadius:0}]},
-    options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b95'}},y:{grid:{color:GRID},ticks:{color:'#8b8b95'}}}}});
-  document.getElementById('salNote').textContent=(d.weak?('أضعف الأيام: '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?(' · أقوى الأيام: '+d.strong[0]+'–'+d.strong[1]):'');
+  mkChart('cSalary',{type:'line',data:{labels:doms,datasets:[{data:doms.map(x=>d.salary[x]||1),borderColor:GOLD,tension:.25,pointRadius:0,fill:true,backgroundColor:'rgba(200,162,75,.08)'}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b97'}},y:{grid:{color:GRID},ticks:{color:'#8b8b97'}}}}});
+  document.getElementById('salNote').textContent=(d.weak?(t().weak+': '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?(' · '+t().strong+': '+d.strong[0]+'–'+d.strong[1]):'');
   const rows=d.units.slice(0,60).map(u=>{const cls=u.reco.includes('raise')?'up':(u.reco==='lower'?'dn':'hd');
     return `<tr><td>${u.name}</td><td>${u.occ}%</td><td>${u.adr||'-'}</td><td>${u.pace}%</td><td><span class="pill ${cls}">${u.label}</span></td></tr>`}).join('');
-  document.getElementById('unitTable').innerHTML=`<table><tr><th>الوحدة</th><th>إشغال</th><th>سعر/ليلة</th><th>سرعة ٣٠ي</th><th>التوصية</th></tr>${rows}</table>`;
-}
-async function loadPricing(){const d=await api('/api/pricing');
-  document.getElementById('upl').innerHTML=`إيراد إضافي تقديري: <b style="color:var(--gold)">~${fmt(d.total_uplift)} ر.س</b>`;
+  document.getElementById('unitTable').innerHTML=`<table><tr><th>${t().colUnit}</th><th>${t().colOcc}</th><th>${t().colAdr}</th><th>${t().colPace}</th><th>${t().colReco}</th></tr>${rows}</table>`}
+function renderPricing(){const d=lastData.pr;if(!d)return;
+  document.getElementById('upl').innerHTML=`${t().uplift}: <b style="color:var(--gold)">~${fmt(d.total_uplift)} SAR</b>`;
   const rows=d.units.map(u=>`<tr><td>${u.name}</td><td>${u.raise?('🔼 '+u.raise):''} ${u.drop?('🔽 '+u.drop):''}</td>
-    <td>~${fmt(u.uplift)} ر.س</td><td><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td></tr>`).join('');
-  document.getElementById('prTable').innerHTML=`<table><tr><th>الوحدة</th><th>تغييرات</th><th>إيراد إضافي</th><th>الثقة</th></tr>${rows}</table>`;
-}
-async function loadLog(){const d=await api('/api/log'+(curCat?('?cat='+curCat):''));
+    <td>~${fmt(u.uplift)}</td><td style="min-width:90px"><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td>
+    <td><button class="btn sm" onclick="doApply(${u.lid},this)">${t().apply}</button></td></tr>`).join('');
+  document.getElementById('prTable').innerHTML=`<table><tr><th>${t().colUnit}</th><th>${t().colChg}</th><th>${t().colUp}</th><th>${t().colConf}</th><th></th></tr>${rows}</table>`}
+function renderInbox(){const d=lastData.inbox||{replies:[],escalations:[]};
+  setBadge('inbox',d.replies.length+d.escalations.filter(e=>!e.claimed_by).length);
+  document.getElementById('replies').innerHTML=d.replies.length?d.replies.map(r=>`
+    <div class="item" id="rep_${r.id}"><div class="hd2"><span class="who">${r.guest}</span><span class="unit">${r.unit}</span></div>
+    <div class="gtext">${t().guestSays}: ${esc(r.guest_text)||'—'}</div>
+    <textarea id="ta_${r.id}">${esc(r.draft)}</textarea>
+    <div class="acts"><button class="btn sm green" onclick="doSend(${r.id})">${t().send}</button>
+    <button class="btn sm red" onclick="doReject(${r.id})">${t().reject}</button></div></div>`).join(''):`<div class="empty">${t().noRep}</div>`;
+  document.getElementById('escs').innerHTML=d.escalations.length?d.escalations.map(e=>`
+    <div class="item" id="esc_${e.id}"><div class="hd2"><span class="who">${e.guest}</span><span class="unit">${e.unit}</span></div>
+    <div class="gtext">${t().guestSays}: ${esc(e.guest_text)||'—'}<br>${t().reason}: ${esc(e.reason)||'—'}</div>
+    ${e.claimed_by?`<div class="muted">${t().claimedBy}: <b>${esc(e.claimed_by)}</b></div>`:
+    `<div class="acts"><input id="nm_${e.id}" placeholder="${t().namePh}"><button class="btn sm" onclick="doClaim(${e.id})">${t().claim}</button></div>`}</div>`).join(''):`<div class="empty">${t().noEsc}</div>`}
+function renderLog(){const items=(lastData.log||[]).filter(e=>!curCat||e.cat===curCat).slice(0,200);
   const ic={guest:'💬',escalation:'🚨',pricing:'💰',report:'📊'};
-  document.getElementById('logFeed').innerHTML=d.items.map(e=>
-    `<div class="logrow"><span class="t">${e.ts.replace('T',' ')}</span><span>${ic[e.cat]||'•'}</span><span>${e.text}</span></div>`).join('')
-    ||'<div class="muted">لا يوجد نشاط بعد.</div>';
-}
+  document.getElementById('logFeed').innerHTML=items.length?items.map(e=>
+    `<div class="logrow"><span class="t">${e.ts.replace('T',' ')}</span><span>${ic[e.cat]||'•'}</span><span>${esc(e.text)}</span></div>`).join(''):`<div class="empty">—</div>`}
+function setBadge(tabId,n){const b=document.getElementById('bdg_'+tabId);if(!b)return;if(n>0){b.textContent=n;b.style.display='inline-block'}else b.style.display='none'}
+function esc(s){return (s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
+async function doSend(id){const text=document.getElementById('ta_'+id).value;const r=await post('/api/send',{id,text});
+  if(r.ok){toast(t().sent);document.getElementById('rep_'+id).remove();refreshInbox()}else toast(r.error||t().err)}
+async function doReject(id){const r=await post('/api/reject',{id});toast(t().rejected);document.getElementById('rep_'+id).remove();refreshInbox()}
+async function doClaim(id){const name=document.getElementById('nm_'+id).value||'';const r=await post('/api/claim',{id,name});
+  if(r.ok){toast(t().claimed);refreshInbox()}else toast(r.error||t().err)}
+async function doApply(lid,btn){btn.disabled=true;btn.textContent='…';const r=await post('/api/apply',{lid});
+  if(r.ok){toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied)}else toast(r.error||t().err);
+  setTimeout(()=>{btn.disabled=false;btn.textContent=t().apply},800)}
+async function refreshInbox(){lastData.inbox=await api('/api/inbox');lastData.ov=await api('/api/overview');renderKpis();renderInbox()}
 if(tok())init();
 </script></body></html>"""
 
@@ -2200,11 +2333,13 @@ def _compute_pricing():
         load_catalog(True)
     factors = compute_demand_factors(reservations)
     per_unit, _ = compute_price_opportunities(factors, _catalog_units)
+    _last_price_changes.clear()
     units = []
-    for p in sorted(per_unit.values(), key=lambda x: x["uplift"], reverse=True):
+    for lid, p in sorted(per_unit.items(), key=lambda kv: kv[1]["uplift"], reverse=True):
         if not p["raise"] and not p["drop"]:
             continue
-        units.append({"name": p["name"], "raise": len(p["raise"]), "drop": len(p["drop"]),
+        _last_price_changes[lid] = _unit_changes(p)
+        units.append({"lid": lid, "name": p["name"], "raise": len(p["raise"]), "drop": len(p["drop"]),
                       "uplift": round(p["uplift"]), "confidence": p.get("confidence", 50),
                       "base": p.get("base", 0)})
     return {"total_uplift": round(sum(p["uplift"] for p in per_unit.values())), "units": units[:40]}
@@ -2231,6 +2366,105 @@ async def _api_log(request):
     items = [e for e in reversed(_activity) if not cat or e["cat"] == cat][:200]
     return _json({"items": items})
 
+async def _api_inbox(request):
+    """Live mirror of what the team is acting on: pending replies + open escalations."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    replies = []
+    for mid, d in list(_pending_replies.items()):
+        it = d.get("item", {})
+        replies.append({"id": mid, "guest": it.get("guest", "Guest"), "unit": it.get("unit", ""),
+                        "guest_text": (it.get("guest_text") or "")[:600],
+                        "draft": (d.get("draft") or "")[:1200]})
+    escs = []
+    for eid, e in list(_escalations.items()):
+        escs.append({"id": eid, "guest": e.get("guest", ""), "unit": e.get("unit", ""),
+                     "reason": (e.get("reason") or "")[:400], "guest_text": (e.get("guest_text") or "")[:400],
+                     "claimed_by": e.get("claimed_by")})
+    return _json({"replies": replies, "escalations": escs})
+
+async def _read_body(request):
+    try:
+        return await request.json()
+    except Exception:
+        return {}
+
+async def _api_send(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        mid = int(b.get("id"))
+    except Exception:
+        return _json({"error": "bad id"}, 400)
+    if mid in _replied_msgs:
+        return _json({"error": "already handled"}, 409)
+    data = _pending_replies.pop(mid, None)
+    if not data:
+        return _json({"error": "not found / already handled"}, 409)
+    _replied_msgs.add(mid)
+    item = data["item"]
+    reply = (b.get("text") or data.get("draft") or "").strip()
+    try:
+        await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
+                                item.get("comm_type", "email"))
+        log_event("guest", f"رد (من اللوحة) · {item.get('guest','')} · {item.get('unit','')}")
+        return _json({"ok": True})
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+
+async def _api_reject(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        mid = int(b.get("id"))
+    except Exception:
+        return _json({"error": "bad id"}, 400)
+    _replied_msgs.add(mid)
+    data = _pending_replies.pop(mid, None)
+    if data:
+        log_event("guest", f"تجاهل رد (من اللوحة) · {data.get('item',{}).get('guest','')}")
+    return _json({"ok": True})
+
+async def _api_claim(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        eid = int(b.get("id"))
+    except Exception:
+        return _json({"error": "bad id"}, 400)
+    name = (b.get("name") or "الفريق").strip()
+    e = _escalations.get(eid)
+    if not e:
+        return _json({"error": "not found"}, 409)
+    if e.get("claimed_by"):
+        return _json({"error": f"already claimed by {e['claimed_by']}"}, 409)
+    e["claimed_by"] = name
+    if e.get("conversation_id"):
+        _claimed_convos.add(e["conversation_id"])
+    log_event("escalation", f"استلام تصعيد (من اللوحة) بواسطة {name} · {e.get('unit','')}")
+    return _json({"ok": True})
+
+async def _api_apply(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    changes = _last_price_changes.get(lid)
+    if not changes:
+        return _json({"error": "no pending changes (refresh pricing first)"}, 409)
+    applied, skipped = await asyncio.to_thread(apply_price_changes, lid, changes)
+    _last_price_changes.pop(lid, None)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    log_event("pricing", f"طبّق {applied} سعر (من اللوحة) · {name}"
+              + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
+    return _json({"ok": True, "applied": applied, "skipped": skipped, "dry_run": PRICE_APPLY_DRYRUN})
+
 async def _handle_dashboard(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
 
@@ -2249,6 +2483,11 @@ async def start_web_server():
         app.router.add_get("/api/revenue", _api_revenue)
         app.router.add_get("/api/pricing", _api_pricing)
         app.router.add_get("/api/log", _api_log)
+        app.router.add_get("/api/inbox", _api_inbox)
+        app.router.add_post("/api/send", _api_send)
+        app.router.add_post("/api/reject", _api_reject)
+        app.router.add_post("/api/claim", _api_claim)
+        app.router.add_post("/api/apply", _api_apply)
     _web_runner = web.AppRunner(app)
     await _web_runner.setup()
     site = web.TCPSite(_web_runner, "0.0.0.0", WEB_PORT)
