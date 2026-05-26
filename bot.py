@@ -1749,7 +1749,7 @@ class PriceConfirmView(discord.ui.View):
                 content="انتهت صلاحية هالبطاقة — اطلب تقرير جديد.", view=None)
             return
         await interaction.response.edit_message(content="⏳ جاري تطبيق الأسعار…", view=None)
-        applied, skipped = await asyncio.to_thread(
+        applied, skipped, _results = await asyncio.to_thread(
             apply_price_changes, opp["listing_id"], opp["changes"])
         _price_opps.pop(self.card_message_id, None)
         tail = (" — (تجربة DRY-RUN، ما تغيّر شي فعلي)" if PRICE_APPLY_DRYRUN else "")
@@ -2068,6 +2068,7 @@ def log_event(category, text):
 _dash_cache = {}
 _replied_msgs = set()        # guard so a reply isn't sent twice (Discord + dashboard)
 _last_price_changes = {}     # lid -> [changes] from the latest pricing compute (for dashboard Apply)
+_last_price_detail = {}      # lid -> {name, base, confidence, rows:[per-date decision + why]}
 
 DASHBOARD_HTML = """<!doctype html>
 <html lang="ar" dir="rtl">
@@ -2079,8 +2080,8 @@ DASHBOARD_HTML = """<!doctype html>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-:root{--bg:#08080a;--bg2:#0f0f14;--card:#15151c;--card2:#1b1b23;--line:#272730;--gold:#C8A24B;--gold2:#e8c87e;
---txt:#F0F0F0;--mut:#8a8a96;--green:#36c275;--red:#e6584c;--blue:#5b8def;}
+:root{--bg:#0d0e13;--bg2:#16171f;--card:#1a1c25;--card2:#21232e;--line:#2e3039;--gold:#C8A24B;--gold2:#e8c87e;
+--txt:#F2F2F4;--mut:#9a9aa6;--green:#36c275;--red:#e6584c;--blue:#5b8def;--purple:#a78bfa;--teal:#2dd4bf;}
 *{box-sizing:border-box;margin:0;padding:0;font-family:'IBM Plex Sans Arabic',-apple-system,'Segoe UI',Tahoma,sans-serif}
 body{background:radial-gradient(1100px 620px at 85% -12%,rgba(200,162,75,.10),transparent),var(--bg);color:var(--txt);min-height:100vh;font-size:14px;line-height:1.55}
 #login{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:15px;padding:20px}
@@ -2151,6 +2152,27 @@ textarea:focus{outline:none;border-color:var(--gold)}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--card2);border:1px solid var(--gold);color:var(--txt);padding:12px 20px;border-radius:12px;font-size:14px;z-index:99;opacity:0;transition:.3s;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .spin{animation:rot 1s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}
+.thread{display:flex;flex-direction:column;gap:7px;margin-bottom:11px;max-height:230px;overflow-y:auto;padding:2px}
+.msg{display:flex;gap:7px;align-items:flex-start;max-width:88%}
+.msg .m-ic{flex-shrink:0;font-size:13px;margin-top:6px}
+.msg .m-tx{padding:9px 12px;border-radius:13px;font-size:13px;line-height:1.5}
+.msg.gin{align-self:flex-start}.msg.gin .m-tx{background:#0d0d12;border:1px solid var(--line);color:#cfcfd8;border-start-start-radius:4px}
+.msg.hout{align-self:flex-end;flex-direction:row-reverse}.msg.hout .m-tx{background:rgba(200,162,75,.13);border:1px solid rgba(200,162,75,.32);color:#f0e4c8;border-start-end-radius:4px}
+.lbl{color:var(--gold);font-size:11px;font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between}
+.lbl .tm{color:var(--mut);font-weight:400}
+.explain{background:rgba(91,141,239,.08);border:1px solid rgba(91,141,239,.25);border-radius:11px;padding:11px 13px;font-size:12.5px;color:#c2cee8;line-height:1.65;margin-top:11px}
+.explain b{color:var(--blue)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(3px);z-index:120;display:none;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto}
+.modal.show{display:flex;animation:f .2s}
+.sheet{background:var(--card);border:1px solid var(--line);border-radius:18px;max-width:760px;width:100%;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.sheet .sh-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:10px}
+.sheet h2{font-size:18px;font-weight:700}
+.x{background:var(--card2);border:1px solid var(--line);color:var(--mut);width:34px;height:34px;border-radius:10px;cursor:pointer;font-size:16px;flex-shrink:0}
+.chip{display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:7px;padding:1px 7px;font-size:10.5px;color:var(--mut);margin:1px}
+.chip.hi{border-color:rgba(54,194,117,.4);color:var(--green)}.chip.lo{border-color:rgba(230,88,76,.4);color:var(--red)}
+.arrow{color:var(--gold);font-weight:700}
+.st{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
+.st.applied{background:rgba(54,194,117,.16);color:var(--green)}.st.booked{background:rgba(154,154,166,.16);color:var(--mut)}.st.dry{background:rgba(91,141,239,.16);color:var(--blue)}.st.error{background:rgba(230,88,76,.16);color:var(--red)}
 </style></head>
 <body>
 <div id="login">
@@ -2184,13 +2206,14 @@ textarea:focus{outline:none;border-color:var(--gold)}
   <div class="panel" id="rev">
     <div class="grid2">
       <div class="card"><h3 id="h_season">📅</h3><canvas id="cSeason"></canvas></div>
-      <div class="card"><h3 id="h_salary">💵</h3><canvas id="cSalary"></canvas><div class="muted" id="salNote"></div></div>
+      <div class="card"><h3 id="h_salary">💵</h3><canvas id="cSalary"></canvas><div class="muted" id="salNote" style="margin-top:8px"></div><div class="explain" id="salExplain"></div></div>
     </div>
   </div>
   <div class="panel" id="pr"><div class="card"><h3 id="h_pricing">💰</h3><div class="muted" id="upl" style="margin-bottom:12px"></div><div id="prTable"><div class="loading">…</div></div></div></div>
   <div class="panel" id="log"><div class="card"><h3 id="h_log">📋</h3><div class="catf" id="catf"></div><div id="logFeed"><div class="loading">…</div></div></div></div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal" id="modal" onclick="if(event.target===this)closeDetail()"><div class="sheet" id="sheet"></div></div>
 <script>
 const TK="ouja_token";
 const T={
@@ -2199,6 +2222,11 @@ const T={
   salary:"دورة الراتب · الطلب حسب يوم الشهر",pricing:"فرص التسعير",replies:"ردود بانتظار الموافقة",esc:"تصعيدات مفتوحة",
   send:"إرسال",reject:"تجاهل",claim:"استلام",apply:"تطبيق",noRep:"ما فيه ردود معلّقة 🎉",noEsc:"ما فيه تصعيدات 🎉",
   gsays:"الضيف يقول",reason:"السبب",by:"مستلم بواسطة",namePh:"اسمك",uplift:"إيراد إضافي تقديري",calc:"جاري التحليل في الخلفية… بيظهر خلال لحظات",
+  proposed:"الرد المقترح · عدّله إذا تبي",review:"مراجعة وتطبيق",confirmApply:"أكّد التطبيق",close:"إغلاق",applyResult:"النتيجة",
+  dDate:"التاريخ",dDay:"اليوم",dCur:"الحالي",dNew:"المقترح",dWhy:"ليه؟",dLead:"باقي",days:"يوم",basePrice:"السعر الأساسي",conf:"نسبة الثقة",
+  whyMonth:"موسم",whyPay:"راتب",whyWeek:"نهاية أسبوع",noChg:"ما فيه تغييرات لهالوحدة حالياً",
+  stApplied:"تم",stBooked:"محجوز",stDry:"تجريبي",stError:"خطأ",
+  salExplain:"هذا المنحنى يوضّح في أي أيام من الشهر يحجز الضيوف أكثر. عادةً يرتفع الطلب مع نزول الرواتب. <b>استغلها:</b> ارفع الأسعار في الأيام القوية، وادفع عروض في الأيام الضعيفة عشان تملا الفراغ.",
   cU:"الوحدة",cOcc:"إشغال",cAdr:"سعر/ليلة",cPace:"سرعة ٣٠ي",cReco:"التوصية",cChg:"تغييرات",cUp:"إيراد إضافي",cConf:"الثقة",
   cats:{"":"الكل",guest:"الضيوف",escalation:"تصعيدات",pricing:"التسعير",report:"التقارير"},
   kpis:[["active_units","🏠","الوحدات الفعّالة","","g"],["occ_30","📊","إشغال ٣٠ يوم","%","g"],["rev_30","💰","إيراد ٣٠ يوم"," ر.س","g"],
@@ -2211,6 +2239,11 @@ const T={
   salary:"Salary cycle · demand by day-of-month",pricing:"Pricing opportunities",replies:"Replies awaiting approval",esc:"Open escalations",
   send:"Send",reject:"Dismiss",claim:"Claim",apply:"Apply",noRep:"No pending replies 🎉",noEsc:"No escalations 🎉",
   gsays:"Guest says",reason:"Reason",by:"Claimed by",namePh:"Your name",uplift:"Est. extra revenue",calc:"Computing in the background… ready in a moment",
+  proposed:"Proposed reply · edit if needed",review:"Review & apply",confirmApply:"Confirm apply",close:"Close",applyResult:"Result",
+  dDate:"Date",dDay:"Day",dCur:"Current",dNew:"Proposed",dWhy:"Why?",dLead:"In",days:"d",basePrice:"Base price",conf:"Confidence",
+  whyMonth:"season",whyPay:"payday",whyWeek:"weekend",noChg:"No changes for this unit right now",
+  stApplied:"done",stBooked:"booked",stDry:"dry-run",stError:"error",
+  salExplain:"This curve shows which days of the month guests book most. Demand usually peaks around payday. <b>Use it:</b> raise prices on strong days, push offers on weak days to fill the gaps.",
   cU:"Unit",cOcc:"Occ",cAdr:"Rate/nt",cPace:"30d pace",cReco:"Action",cChg:"Changes",cUp:"Extra rev",cConf:"Confidence",
   cats:{"":"All",guest:"Guests",escalation:"Escalations",pricing:"Pricing",report:"Reports"},
   kpis:[["active_units","🏠","Active units","","g"],["occ_30","📊","Occupancy 30d","%","g"],["rev_30","💰","Revenue 30d"," SAR","g"],
@@ -2288,7 +2321,8 @@ function renderRevenueCharts(){const d=D.rev;if(!d||d.loading){return}
   if(d.seasonality)mkChart('cSeason',{type:'bar',data:{labels:d.seasonality.map(m=>m.name),datasets:[{data:d.seasonality.map(m=>m.adr),backgroundColor:GOLD,borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:MUT}},y:AX.y}}});
   if(d.salary){const doms=Array.from({length:31},(_,i)=>i+1);
    mkChart('cSalary',{type:'line',data:{labels:doms,datasets:[{data:doms.map(x=>d.salary[x]||1),borderColor:GOLD,tension:.3,pointRadius:0,fill:true,backgroundColor:'rgba(200,162,75,.08)',borderWidth:2}]},options:{plugins:{legend:{display:false}},scales:AX}});
-   document.getElementById('salNote').textContent=(d.weak?(t().weak+': '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?(' · '+t().strong+': '+d.strong[0]+'–'+d.strong[1]):'')}}
+   document.getElementById('salNote').textContent=(d.weak?('🔻 '+t().weak+': '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?('   🔺 '+t().strong+': '+d.strong[0]+'–'+d.strong[1]):'');
+   const se=document.getElementById('salExplain');if(se)se.innerHTML=t().salExplain}}
 function renderUnits(){const d=D.rev;const el=document.getElementById('unitTable');if(!el)return;
   if(!d||d.loading||!d.units){el.innerHTML=`<div class="loading">${t().calc}</div>`;return}
   const rows=d.units.slice(0,60).map(u=>{const cls=u.reco&&u.reco.includes('raise')?'up':(u.reco==='lower'?'dn':'hd');
@@ -2297,20 +2331,23 @@ function renderUnits(){const d=D.rev;const el=document.getElementById('unitTable
 function renderPricing(){const d=D.pr,el=document.getElementById('prTable');if(!el)return;
   if(!d||d.loading){el.innerHTML=`<div class="loading">${t().calc}</div>`;document.getElementById('upl').textContent='';return}
   document.getElementById('upl').innerHTML=`${t().uplift}: <b style="color:var(--gold);font-size:15px">~${fmt(d.total_uplift)} ${L==='ar'?'ر.س':'SAR'}</b>`;
-  const rows=(d.units||[]).map(u=>`<tr><td>${esc(u.name)}</td><td>${u.raise?('🔼 '+u.raise):''} ${u.drop?('🔽 '+u.drop):''}</td><td>~${fmt(u.uplift)}</td><td style="min-width:96px"><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td><td><button class="btn sm" onclick="doApply(${u.lid},this)">${t().apply}</button></td></tr>`).join('');
+  const rows=(d.units||[]).map(u=>`<tr><td>${esc(u.name)}</td><td>${u.raise?('🔼 '+u.raise):''} ${u.drop?('🔽 '+u.drop):''}</td><td>~${fmt(u.uplift)}</td><td style="min-width:96px"><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td><td><button class="btn sm" onclick="openDetail(${u.lid})">${t().review}</button></td></tr>`).join('');
   el.innerHTML=`<table><tr><th>${t().cU}</th><th>${t().cChg}</th><th>${t().cUp}</th><th>${t().cConf}</th><th></th></tr>${rows}</table>`}
+function threadHtml(s){if(!s)return '';return s.split(String.fromCharCode(10)).filter(x=>x.trim()).map(line=>{
+  const g=/^Guest:/i.test(line),txt=esc(line.replace(/^(Guest:|Host:) */i,''));
+  return `<div class="msg ${g?'gin':'hout'}"><span class="m-ic">${g?'👤':'🤍'}</span><div class="m-tx">${txt}</div></div>`}).join('')}
 function renderInbox(){const d=D.inbox||{replies:[],escalations:[]};
   setBadge('inbox',(d.replies?d.replies.length:0)+(d.escalations?d.escalations.filter(e=>!e.claimed_by).length:0));
-  const rep=document.getElementById('replies');
-  rep.innerHTML=(d.replies&&d.replies.length)?d.replies.map(r=>`
+  const one=(txt)=>`<div class="msg gin"><span class="m-ic">👤</span><div class="m-tx">${esc(txt)||'—'}</div></div>`;
+  document.getElementById('replies').innerHTML=(d.replies&&d.replies.length)?d.replies.map(r=>`
    <div class="item" id="rep_${r.id}"><div class="top"><span class="who">${esc(r.guest)}</span><span class="unit">${esc(r.unit)}</span></div>
-   <div class="bubble"><b>${t().gsays}</b>${esc(r.guest_text)||'—'}</div>
+   <div class="thread">${threadHtml(r.thread)||one(r.guest_text)}</div>
+   <div class="lbl"><span>✍️ ${t().proposed}</span><span class="tm">${esc((r.time||'').replace('T',' ').slice(0,16))}</span></div>
    <textarea id="ta_${r.id}">${esc(r.draft)}</textarea>
    <div class="acts"><button class="btn sm green" onclick="doSend(${r.id})">✅ ${t().send}</button><button class="btn sm red" onclick="doReject(${r.id})">🗑️ ${t().reject}</button></div></div>`).join(''):`<div class="empty">${t().noRep}</div>`;
-  const ec=document.getElementById('escs');
-  ec.innerHTML=(d.escalations&&d.escalations.length)?d.escalations.map(e=>`
+  document.getElementById('escs').innerHTML=(d.escalations&&d.escalations.length)?d.escalations.map(e=>`
    <div class="item" id="esc_${e.id}"><div class="top"><span class="who">${esc(e.guest)}</span><span class="unit">${esc(e.unit)}</span></div>
-   <div class="bubble"><b>${t().gsays}</b>${esc(e.guest_text)||'—'}</div>
+   <div class="thread">${one(e.guest_text)}</div>
    ${e.reason?`<div class="muted" style="margin-bottom:8px">⚠️ ${esc(e.reason)}</div>`:''}
    ${e.claimed_by?`<div class="muted">${t().by}: <b style="color:var(--green)">${esc(e.claimed_by)}</b></div>`:`<div class="acts"><input id="nm_${e.id}" placeholder="${t().namePh}"><button class="btn sm" onclick="doClaim(${e.id})">🙋 ${t().claim}</button></div>`}</div>`).join(''):`<div class="empty">${t().noEsc}</div>`}
 function renderLog(){const items=(D.log||[]).filter(e=>!curCat||e.cat===curCat).slice(0,200),ic={guest:'💬',escalation:'🚨',pricing:'💰',report:'📊'};
@@ -2325,6 +2362,34 @@ async function doClaim(id){const n=(document.getElementById('nm_'+id)||{}).value
 async function doApply(lid,btn){btn.disabled=true;const o=btn.textContent;btn.textContent='…';const r=await post('/api/apply',{lid});
   if(r.ok)toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied);else toast(r.error||t().err);
   setTimeout(()=>{btn.disabled=false;btn.textContent=o},900)}
+
+// ---- Pricing decision detail (what we're changing, why, and the result) ----
+let detailLid=null;
+function whyChips(r){const c=[];
+  if(r.mi&&Math.abs(r.mi-1)>=0.05)c.push(`<span class="chip ${r.mi>1?'hi':'lo'}">${t().whyMonth} ×${r.mi}</span>`);
+  if(r.di&&Math.abs(r.di-1)>=0.05)c.push(`<span class="chip ${r.di>1?'hi':'lo'}">${t().whyPay} ×${r.di}</span>`);
+  if(r.wi&&Math.abs(r.wi-1)>=0.05)c.push(`<span class="chip ${r.wi>1?'hi':'lo'}">${t().whyWeek} ×${r.wi}</span>`);
+  return c.join(' ')||'<span class="chip">—</span>'}
+async function openDetail(lid){detailLid=lid;const m=document.getElementById('modal'),s=document.getElementById('sheet');
+  s.innerHTML=`<div class="loading">…</div>`;m.classList.add('show');
+  try{renderDetail(await api('/api/pricing/detail?lid='+lid),null)}catch(e){renderDetail({rows:[]},null)}}
+function closeDetail(){document.getElementById('modal').classList.remove('show');detailLid=null}
+function renderDetail(d,results){const s=document.getElementById('sheet');
+  if(!d||!d.rows||!d.rows.length){s.innerHTML=`<div class="sh-top"><h2>—</h2><button class="x" onclick="closeDetail()">✕</button></div><div class="empty">${t().noChg}</div>`;return}
+  const rm={};if(results)results.forEach(r=>rm[r.date]=r.status);
+  const stTxt={applied:t().stApplied,booked:t().stBooked,dry:t().stDry,error:t().stError};
+  const rows=d.rows.map(r=>{const up=r.kind==='raise';const cur=r.current?fmt(r.current):'—';
+    const st=rm[r.date]?`<span class="st ${rm[r.date]}">${stTxt[rm[r.date]]||rm[r.date]}</span>`:'';
+    return `<tr><td>${r.date}</td><td>${L==='ar'?r.wd_ar:r.wd_en}</td><td>${cur}</td><td><span class="arrow">${up?'🔼':'🔽'} ${fmt(r.proposed)}</span></td><td>${whyChips(r)}</td><td>${r.lead}${t().days}</td><td>${st}</td></tr>`}).join('');
+  const footer=results?`<div class="muted" style="margin-top:13px">${t().applyResult}: <b style="color:var(--green)">✅ ${results.filter(x=>x.status==='applied'||x.status==='dry').length}</b> · ${t().stBooked}: ${results.filter(x=>x.status==='booked').length}</div><div class="acts" style="margin-top:10px"><button class="btn ghost" onclick="closeDetail()">${t().close}</button></div>`
+    :`<div class="acts" style="margin-top:15px"><button class="btn" id="applyBtn" onclick="applyDetail()">✅ ${t().confirmApply}</button><button class="btn ghost" onclick="closeDetail()">${t().close}</button></div>`;
+  s.innerHTML=`<div class="sh-top"><div><h2>${esc(d.name)}</h2><div class="muted" style="margin-top:3px">${t().basePrice}: ${fmt(d.base)} ${L==='ar'?'ر.س':'SAR'} · ${t().conf}: ${d.confidence}%</div><div class="bar" style="max-width:170px;margin-top:7px"><div style="width:${d.confidence}%"></div></div></div><button class="x" onclick="closeDetail()">✕</button></div>
+    <div style="overflow-x:auto;margin-top:12px"><table><tr><th>${t().dDate}</th><th>${t().dDay}</th><th>${t().dCur}</th><th>${t().dNew}</th><th>${t().dWhy}</th><th>${t().dLead}</th><th></th></tr>${rows}</table></div>${footer}`}
+async function applyDetail(){if(!detailLid)return;const b=document.getElementById('applyBtn');if(b){b.disabled=true;b.textContent='…'}
+  let d={rows:[]};try{d=await api('/api/pricing/detail?lid='+detailLid)}catch(e){}
+  const r=await post('/api/apply',{lid:detailLid});
+  if(r.ok){toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied);renderDetail(d,r.results||[]);loaded.pr=false;loadPricing()}
+  else{toast(r.error||t().err);if(b){b.disabled=false;b.textContent='✅ '+t().confirmApply}}}
 if(tok())init();
 </script></body></html>"""
 
@@ -2389,11 +2454,26 @@ def _compute_pricing():
     factors = compute_demand_factors(reservations)
     per_unit, _ = compute_price_opportunities(factors, _catalog_units)
     _last_price_changes.clear()
+    _last_price_detail.clear()
+    _WD_AR = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+    _WD_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     units = []
     for lid, p in sorted(per_unit.items(), key=lambda kv: kv[1]["uplift"], reverse=True):
         if not p["raise"] and not p["drop"]:
             continue
         _last_price_changes[lid] = _unit_changes(p)
+        drows = []
+        for r, kind in [(x, "raise") for x in p["raise"]] + [(x, "drop") for x in p["drop"]]:
+            d = _parse_date(r["date"])
+            mi = round(factors["month_index"].get(d.month, 1), 2) if d else 1
+            di = round(factors["dom_index"].get(d.day, 1), 2) if d else 1
+            wi = round(factors["dow_index"].get(d.weekday(), 1), 2) if d else 1
+            drows.append({"date": r["date"], "wd_ar": _WD_AR[r["wd"]], "wd_en": _WD_EN[r["wd"]],
+                          "current": r["current"], "proposed": (r["target"] if kind == "raise" else r["clear"]),
+                          "kind": kind, "lead": r["lead"], "mi": mi, "di": di, "wi": wi})
+        drows.sort(key=lambda x: x["date"])
+        _last_price_detail[lid] = {"name": p["name"], "base": p.get("base", 0),
+                                   "confidence": p.get("confidence", 50), "rows": drows}
         units.append({"lid": lid, "name": p["name"], "raise": len(p["raise"]), "drop": len(p["drop"]),
                       "uplift": round(p["uplift"]), "confidence": p.get("confidence", 50),
                       "base": p.get("base", 0)})
@@ -2436,6 +2516,8 @@ async def _api_inbox(request):
         it = d.get("item", {})
         replies.append({"id": mid, "guest": it.get("guest", "Guest"), "unit": it.get("unit", ""),
                         "guest_text": (it.get("guest_text") or "")[:600],
+                        "thread": (it.get("history") or "")[:2500],
+                        "time": it.get("last_time", ""),
                         "draft": (d.get("draft") or "")[:1200]})
     escs = []
     for eid, e in list(_escalations.items()):
@@ -2519,15 +2601,25 @@ async def _api_apply(request):
     changes = _last_price_changes.get(lid)
     if not changes:
         return _json({"error": "no pending changes (refresh pricing first)"}, 409)
-    applied, skipped = await asyncio.to_thread(apply_price_changes, lid, changes)
+    applied, skipped, results = await asyncio.to_thread(apply_price_changes, lid, changes)
     _last_price_changes.pop(lid, None)
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
     log_event("pricing", f"طبّق {applied} سعر (من اللوحة) · {name}"
               + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
-    return _json({"ok": True, "applied": applied, "skipped": skipped, "dry_run": PRICE_APPLY_DRYRUN})
+    return _json({"ok": True, "applied": applied, "skipped": skipped,
+                  "dry_run": PRICE_APPLY_DRYRUN, "results": results})
 
 async def _handle_dashboard(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+
+async def _api_pricing_detail(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    return _json(_last_price_detail.get(lid) or {"rows": []})
 
 @tasks.loop(minutes=DASH_REFRESH_MIN)
 async def dashboard_cache_loop():
@@ -2567,6 +2659,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing", _api_pricing)
         app.router.add_get("/api/log", _api_log)
         app.router.add_get("/api/inbox", _api_inbox)
+        app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -3061,9 +3154,10 @@ _price_opps = {}
 
 def apply_price_changes(listing_id, changes):
     """Write the approved nightly prices to the Hostaway calendar. Re-verifies the dates are
-    still available first (one range read), then PUTs each. Honors PRICE_APPLY_DRYRUN."""
+    still available first (one range read), then PUTs each. Honors PRICE_APPLY_DRYRUN.
+    Returns (applied, skipped, results) where results = [{date, kind, price, status}]."""
     if not changes:
-        return (0, 0)
+        return (0, 0, [])
     dates = sorted(d for d in (_parse_date(c["date"]) for c in changes) if d)
     available = set()
     try:
@@ -3077,24 +3171,29 @@ def apply_price_changes(listing_id, changes):
     except Exception as e:
         print("price re-verify error:", e)
         available = None                       # couldn't verify -> best effort, apply anyway
-    applied, skipped = 0, 0
+    applied, skipped, results = 0, 0, []
     for c in changes:
+        price = int(round(c["price"]))
         if available is not None and c["date"] not in available:
             skipped += 1                        # got booked / blocked since the report
+            results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "booked"})
             continue
         if PRICE_APPLY_DRYRUN:
-            print(f"[DRY-RUN] would set {listing_id} {c['date']} -> {int(round(c['price']))} ر.س")
+            print(f"[DRY-RUN] would set {listing_id} {c['date']} -> {price} ر.س")
             applied += 1
+            results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "dry"})
             continue
         try:
             api_put(f"/listings/{listing_id}/calendar",
                     {"startDate": c["date"], "endDate": c["date"],
-                     "isAvailable": 1, "price": int(round(c["price"]))})
+                     "isAvailable": 1, "price": price})
             applied += 1
+            results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "applied"})
         except Exception as e:
             print(f"apply price error ({listing_id} {c['date']}):", e)
             skipped += 1
-    return applied, skipped
+            results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "error"})
+    return applied, skipped, results
 
 def _unit_changes(pu):
     """Flatten a unit's raise/drop rows into apply-ready change dicts."""
