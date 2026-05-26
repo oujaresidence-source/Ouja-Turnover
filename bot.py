@@ -101,8 +101,9 @@ ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "Tr
 # messages get drafted right away (handy for a first test without sending a new message).
 ASSISTANT_TEST     = os.environ.get("ASSISTANT_TEST", "0") in ("1", "true", "True", "yes")
 # Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
-# anything needing approval or a human still posts a card. When OFF, everything waits for approval.
-ASSISTANT_AUTO     = os.environ.get("ASSISTANT_AUTO", "1") in ("1", "true", "True", "yes")
+# anything needing approval or a human still posts a card. Default OFF — everything waits
+# for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
+ASSISTANT_AUTO     = os.environ.get("ASSISTANT_AUTO", "0") in ("1", "true", "True", "yes")
 ASSISTANT_AUTO_CONF = float(os.environ.get("ASSISTANT_AUTO_CONF", "0.85"))  # min confidence to auto-send
 # Signature appended to every guest-facing message.
 ASSISTANT_SIGNATURE_AR = os.environ.get("ASSISTANT_SIGNATURE_AR", "الدعم الفني - مساعد 🤍")
@@ -113,6 +114,12 @@ ASSISTANT_ACK_AR   = os.environ.get("ASSISTANT_ACK_AR",
     "حياك الله 🤍 رفعنا موضوعك للقسم المختص، وبيتواصل معك الفريق في أقرب وقت.")
 ASSISTANT_ACK_EN   = os.environ.get("ASSISTANT_ACK_EN",
     "Thank you 🤍 We've escalated this to our specialized team and someone will contact you shortly.")
+# Escalations go to their own channel, ping the operation team, and re-ping until claimed.
+ESCALATION_CHANNEL    = os.environ.get("ESCALATION_CHANNEL", "escalations")
+ESCALATION_REPING_MIN = int(os.environ.get("ESCALATION_REPING_MIN", "10"))   # re-ping every N min
+ESCALATION_MAX_PINGS  = int(os.environ.get("ESCALATION_MAX_PINGS", "12"))    # stop after this many re-pings
+CLAIM_NAMES = [n.strip() for n in os.environ.get(
+    "CLAIM_NAMES", "اسيل,فيصل,ماثر,نوره,ناصر,محمد").split(",") if n.strip()]
 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
@@ -735,6 +742,23 @@ YOU MAY draft replies (auto or reply) about
 - House-rules clarifications
 - Greetings, thanks, general hospitality
 
+ARRIVAL GUIDE LINK (important)
+- When a guest asks about the location, the address, directions, where to park, the outer/building \
+door number, or any arrival detail, point them to the unit's arrival-guide link (it is provided to \
+you in the context as "Arrival-guide link for this unit"). Tell them all the details are there.
+- Always include the exact link given to you. NEVER invent a link.
+- If the link is "NOT AVAILABLE", do NOT make one up — set action to "escalate" instead.
+- If the guest says they can't open it or nothing happens, explain it opens an Airbnb warning page \
+("you're leaving Airbnb"): they should tap "متابعة" (or "Continue" if their app is in English), \
+then tap the guide/directions option. (This is "auto"/"reply" — just a helpful instruction.)
+
+PRE-BOOKING PRIVACY (critical)
+- The context gives you "Booking status". If it is NOT CONFIRMED (an inquiry or pre-booking), you \
+MUST NOT share the exact location, address, building/door number, or the arrival-guide link — even \
+if the guest asks directly. Politely tell them the full location and arrival details are sent right \
+after the booking is confirmed. You may still talk about the general area, amenities, and price.
+- Only share location and the arrival-guide link when Booking status is CONFIRMED.
+
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
 - Offer any discount, comp, or price change
@@ -764,12 +788,62 @@ def _msg_is_inbound(m):
 def _msg_time(m):
     return str(m.get("date") or m.get("insertedOn") or m.get("latestMessageDate") or "")
 
-def claude_draft(guest_name, unit, history_text):
+_guide_cache = {}
+
+def get_guide_url(listing_id):
+    """Pull the arrival-guide link stored in the listing's Custom Fields. Cached per listing."""
+    if listing_id in _guide_cache:
+        return _guide_cache[listing_id]
+    url = None
+    try:
+        data = api_get(f"/listings/{listing_id}", params={"includeResources": 1})
+        listing = data.get("result") or {}
+        # 1) look through the listing's custom-field values for a URL
+        for key in ("listingCustomFieldValues", "customFieldValues", "customFields"):
+            for cf in (listing.get(key) or []):
+                v = str(cf.get("value") or "").strip()
+                if v.startswith("http"):
+                    url = v
+                    break
+            if url:
+                break
+        # 2) fallback: scan the whole listing for the guide domain
+        if not url:
+            blob = json.dumps(listing, ensure_ascii=False)
+            m = (re.search(r"https?://[^\s\"']*oujaguide[^\s\"']*", blob)
+                 or re.search(r"https?://[^\s\"']*netlify[^\s\"']*", blob))
+            if m:
+                url = m.group(0)
+    except Exception as e:
+        print(f"guide url error for listing {listing_id}: {e}")
+    _guide_cache[listing_id] = url
+    return url
+
+# A booking only counts as "confirmed" (safe to share location/guide) for these statuses.
+CONFIRMED_STATUSES = {"new", "modified"}
+
+def get_reservation_status(reservation_id):
+    """Return the reservation status (lowercased), or '' if unknown. Not cached — it can change."""
+    if not reservation_id:
+        return ""
+    try:
+        data = api_get(f"/reservations/{reservation_id}")
+        return (data.get("result", {}) or {}).get("status", "").lower()
+    except Exception as e:
+        print(f"reservation status error ({reservation_id}):", e)
+        return ""
+
+def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False):
     """Call Claude to draft a reply. Returns parsed dict or None on failure."""
     if not ANTHROPIC_API_KEY:
         print("assistant: ANTHROPIC_API_KEY not set")
         return None
-    user = (f"Guest name: {guest_name}\nUnit: {unit}\n\n"
+    status_line = ("Booking status: CONFIRMED" if confirmed
+                   else "Booking status: NOT CONFIRMED (inquiry / pre-booking)")
+    guide_line = (f"Arrival-guide link for this unit: {guide_url}"
+                  if (guide_url and confirmed)
+                  else "Arrival-guide link for this unit: NOT AVAILABLE / do not share")
+    user = (f"Guest name: {guest_name}\nUnit: {unit}\n{status_line}\n{guide_line}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     try:
@@ -827,11 +901,15 @@ def fetch_new_guest_messages(seen, debug=False):
         lm = c.get("listingMapId")
         unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
         guest = c.get("recipientName") or c.get("guestName") or "Guest"
+        res = c.get("reservation") or {}
         history = "\n".join(
             f"{'Guest' if _msg_is_inbound(m) else 'Host'}: {(m.get('body') or '').strip()}"
             for m in msgs[-8:] if (m.get("body") or "").strip())
         out.append({
             "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
+            "listing_id": lm,
+            "reservation_id": c.get("reservationId") or res.get("id"),
+            "res_status": (res.get("status") or "").lower(),
             "comm_type": last.get("communicationType") or "email",
             "guest_text": (last.get("body") or "").strip(), "history": history,
         })
@@ -850,6 +928,56 @@ def with_signature(text):
 def send_guest_message(conversation_id, body, comm_type="email"):
     return api_post(f"/conversations/{conversation_id}/messages",
                     {"body": with_signature(body), "communicationType": comm_type})
+
+# pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
+_escalations = {}
+
+class NameSelect(discord.ui.Select):
+    """The name picker shown after tapping Claim."""
+    def __init__(self, channel_id, message_id):
+        super().__init__(placeholder="اختر اسمك للاستلام…", min_values=1, max_values=1,
+                         options=[discord.SelectOption(label=n) for n in CLAIM_NAMES])
+        self.target_channel_id = channel_id
+        self.target_message_id = message_id
+
+    async def callback(self, interaction: discord.Interaction):
+        name = self.values[0]
+        esc = _escalations.get(self.target_message_id)
+        if esc and esc.get("claimed_by"):
+            await interaction.response.edit_message(
+                content=f"⚠️ التصعيد مستلم مسبقاً بواسطة {esc['claimed_by']}.", view=None)
+            return
+        if esc:
+            esc["claimed_by"] = name
+        try:
+            ch = interaction.client.get_channel(self.target_channel_id)
+            msg = await ch.fetch_message(self.target_message_id)
+            embed = msg.embeds[0] if msg.embeds else discord.Embed()
+            embed.add_field(name="✅ تم الاستلام", value=f"بواسطة **{name}**", inline=False)
+            embed.color = 0x3BA55D
+            done = ClaimView()
+            for c in done.children:
+                c.disabled = True
+            await msg.edit(embed=embed, view=done)
+        except Exception as e:
+            print("claim edit error:", e)
+        await interaction.response.edit_message(content=f"✅ استلمت التصعيد باسم **{name}**.", view=None)
+
+class ClaimView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)   # persistent across restarts
+
+    @discord.ui.button(label="🙋 أخذ المهمة / Claim", style=discord.ButtonStyle.primary,
+                       custom_id="ouja_claim")
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        esc = _escalations.get(interaction.message.id)
+        if esc and esc.get("claimed_by"):
+            await interaction.response.send_message(
+                f"⚠️ مستلم مسبقاً بواسطة {esc['claimed_by']}.", ephemeral=True)
+            return
+        picker = discord.ui.View(timeout=300)
+        picker.add_item(NameSelect(interaction.channel.id, interaction.message.id))
+        await interaction.response.send_message("اختر اسمك للاستلام:", view=picker, ephemeral=True)
 
 class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسال"):
     def __init__(self, item, draft):
@@ -916,7 +1044,7 @@ async def post_assistant_card(channel, item, result):
 
     # ---- needs a human: tell the guest it's escalated, then alert the team ----
     if escalate:
-        embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=0xD64545)
+        embed = discord.Embed(title=f"🚨 تصعيد · {g} · {item['unit']}", color=0xD64545)
         embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
         embed.add_field(name="🔴 يحتاج تدخل بشري",
                         value=result.get("reason", "تم التصعيد — تعامل معه يدوياً."), inline=False)
@@ -930,8 +1058,22 @@ async def post_assistant_card(channel, item, result):
                                 inline=False)
             except Exception as e:
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
-        embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {conf}")
-        await channel.send(embed=embed)
+        embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {conf} · "
+                              f"يعاد التنبيه كل {ESCALATION_REPING_MIN} دقيقة لين يستلمه أحد")
+        # post to the dedicated escalations channel and @mention the operation team
+        guild = channel.guild
+        esc_channel = await ensure_channel(guild, ESCALATION_CHANNEL, await get_category(guild))
+        target = esc_channel or channel
+        op_role = find_operation_role(guild)
+        mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
+        try:
+            msg = await target.send(content=f"{mention} 🚨 تصعيد جديد يحتاج استلام",
+                                    embed=embed, view=ClaimView(),
+                                    allowed_mentions=discord.AllowedMentions(roles=True))
+            _escalations[msg.id] = {"channel_id": target.id, "guest": g, "unit": item["unit"],
+                                    "last_ping": datetime.now(TZ), "attempts": 0, "claimed_by": None}
+        except Exception as e:
+            print("escalation post error:", e)
         return
 
     # ---- very simple & high-confidence: send automatically, then post an FYI card ----
@@ -977,7 +1119,13 @@ async def assistant_loop():
         _assistant_seen.add(it["message_id"])
         if not it["guest_text"]:
             continue
-        result = await asyncio.to_thread(claude_draft, it["guest"], it["unit"], it["history"])
+        status = it.get("res_status") or await asyncio.to_thread(
+            get_reservation_status, it.get("reservation_id"))
+        confirmed = status in CONFIRMED_STATUSES
+        guide = (await asyncio.to_thread(get_guide_url, it.get("listing_id"))
+                 if (confirmed and it.get("listing_id")) else None)
+        result = await asyncio.to_thread(
+            claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed)
         if not result:
             continue
         try:
@@ -985,9 +1133,40 @@ async def assistant_loop():
         except Exception as e:
             print("assistant card error:", e)
 
+@tasks.loop(minutes=1)
+async def escalation_reping_loop():
+    """Re-ping the operation team about any escalation that hasn't been claimed yet."""
+    if not _escalations:
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    op_role = find_operation_role(guild)
+    mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
+    now = datetime.now(TZ)
+    for mid, esc in list(_escalations.items()):
+        if esc.get("claimed_by") or esc["attempts"] >= ESCALATION_MAX_PINGS:
+            continue
+        if (now - esc["last_ping"]).total_seconds() < ESCALATION_REPING_MIN * 60:
+            continue
+        ch = bot.get_channel(esc["channel_id"])
+        if ch is None:
+            continue
+        try:
+            ref = discord.MessageReference(message_id=mid, channel_id=esc["channel_id"],
+                                           fail_if_not_exists=False)
+            await ch.send(f"{mention} ⏰ لسه ما تم استلام التصعيد — **{esc['guest']} · {esc['unit']}**. "
+                          f"اضغط 🙋 أخذ المهمة.",
+                          reference=ref, allowed_mentions=discord.AllowedMentions(roles=True))
+            esc["last_ping"] = now
+            esc["attempts"] += 1
+        except Exception as e:
+            print("reping error:", e)
+
 @bot.event
 async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
+    bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     # On first start, mark everything currently in the inbox as already-seen so the
     # assistant only reacts to messages that arrive from now on.
     if ASSISTANT_ENABLED and not ASSISTANT_TEST and not _assistant_seen:
@@ -1027,6 +1206,8 @@ async def on_ready():
         headsup_loop.start()
     if not assistant_loop.is_running():
         assistant_loop.start()
+    if not escalation_reping_loop.is_running():
+        escalation_reping_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
