@@ -934,6 +934,11 @@ def _msg_is_inbound(m):
 def _msg_time(m):
     return str(m.get("date") or m.get("insertedOn") or m.get("latestMessageDate") or "")
 
+def _msg_sort_key(m):
+    """Sortable timestamp so the guest's *latest* message is reliably the newest.
+    (Within one conversation the tz skew is uniform, so relative order stays correct.)"""
+    return _parse_msg_dt(_msg_time(m)) or datetime.min.replace(tzinfo=TZ)
+
 def _parse_msg_dt(s):
     """Parse a Hostaway message timestamp as Riyadh local time. Returns aware dt or None.
     Parsing as TZ is safe for baselining: a tz mismatch can only make a message look OLDER
@@ -1316,7 +1321,7 @@ def _conv_to_item(c, listings, seen, debug=False):
         return None
     if not msgs:
         return None
-    msgs = sorted(msgs, key=_msg_time)
+    msgs = sorted(msgs, key=_msg_sort_key)
     # the guest's most recent (inbound) message
     guest_idx = next((i for i in range(len(msgs) - 1, -1, -1)
                       if _msg_is_inbound(msgs[i])), None)
@@ -2405,7 +2410,7 @@ def compute_demand_factors(reservations):
     dom_index = {d: ((arr[d] / occ_count[d]) / mean if mean and occ_count.get(d) else 1)
                  for d in range(1, 32)}
     return {"unit_adr": unit_adr, "overall_adr": overall, "month_index": month_index,
-            "dow_index": dow_index, "dom_index": dom_index}
+            "dow_index": dow_index, "dom_index": dom_index, "unit_nights": dict(u_n)}
 
 def compute_price_opportunities(factors, units, horizon=None):
     """For each active unit's UNBOOKED future nights, compute a demand-informed target price
@@ -2423,7 +2428,9 @@ def compute_price_opportunities(factors, units, horizon=None):
         base = factors["unit_adr"].get(lid) or u.get("price") or overall
         if not base:
             continue
-        pu = per_unit.setdefault(lid, {"name": name, "raise": [], "drop": [], "uplift": 0.0})
+        pu = per_unit.setdefault(lid, {"name": name, "raise": [], "drop": [], "uplift": 0.0,
+                                       "base": round(base), "n_hist": factors.get("unit_nights", {}).get(lid, 0),
+                                       "checked": 0, "gap_sum": 0.0})
         for day in fetch_calendar_days(lid, today, end):
             d = _parse_date(day.get("date"))
             if not d:
@@ -2431,6 +2438,7 @@ def compute_price_opportunities(factors, units, horizon=None):
             available = int(day.get("isAvailable", 0) or 0) == 1 and not day.get("reservationId")
             if not available:
                 continue                                   # booked/blocked -> can't reprice
+            pu["checked"] += 1
             cur = day.get("price")
             cur = float(cur) if isinstance(cur, (int, float)) and cur > 0 else None
             mi = factors["month_index"].get(d.month, 1)
@@ -2445,11 +2453,22 @@ def compute_price_opportunities(factors, units, horizon=None):
             if cur and cur < 0.90 * target:
                 row["reco"] = "raise"
                 pu["uplift"] += (target - cur)
+                pu["gap_sum"] += (target - cur) / cur
                 pu["raise"].append(row)
             elif cur and lead <= 10 and cur > 1.12 * clear:
                 row["reco"] = "drop"
                 pu["drop"].append(row)
             all_rows.append(row)
+    # ---- neutral confidence score per unit (data volume + signal strength + corroboration) ----
+    for pu in per_unit.values():
+        nr, nd = len(pu["raise"]), len(pu["drop"])
+        avg_gap = (pu["gap_sum"] / nr) if nr else 0.0          # average price gap (fraction)
+        data_conf = min(1.0, pu["n_hist"] / 60.0)             # 60+ nights of history saturates
+        signal_conf = max(min(1.0, avg_gap / 0.30), 0.6 if nd else 0.0)
+        count_conf = min(1.0, (nr + nd) / 12.0)
+        conf = 100 * (0.45 * data_conf + 0.35 * signal_conf + 0.20 * count_conf)
+        pu["confidence"] = int(max(40, min(90, round(conf))))
+        pu["avg_gap"] = avg_gap
     return per_unit, all_rows
 
 _AR_WD = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
@@ -2525,16 +2544,20 @@ def build_price_opp_summary(per_unit, all_rows):
                               str(r["clear"]), str(r["lead"]), r["reco"]]))
     return e, ("\n".join(out)).encode("utf-8-sig")
 
+def _conf_bar(pct):
+    filled = round(pct / 10)
+    return "█" * filled + "░" * (10 - filled)
+
 def build_unit_card(pu):
     """An embed for one unit's opportunities (shown with Apply/Skip buttons)."""
     nr, nd = len(pu["raise"]), len(pu["drop"])
-    head = f"{pu['name']}"
+    conf = pu.get("confidence", 50)
     desc = []
     if nr:
         desc.append(f"🔼 **رفع {nr} ليلة** (إيراد إضافي ~{round(pu['uplift'])} ر.س)")
     if nd:
         desc.append(f"🔽 **خفض {nd} ليلة** (ليالي قريبة فاضية، عشان تمتلئ)")
-    e = discord.Embed(title=head[:256], description="\n".join(desc), color=GOLD)
+    e = discord.Embed(title=str(pu["name"])[:256], description="\n".join(desc), color=GOLD)
     lines = []
     for r in sorted(pu["raise"], key=lambda x: (x["target"] - (x["current"] or 0)), reverse=True)[:8]:
         lines.append(f"🔼 {r['date']} ({_AR_WD[r['wd']]}): {r['current']} → ~{r['target']} ر.س")
@@ -2546,6 +2569,18 @@ def build_unit_card(pu):
         lines.append(f"… +{nd-5} ليالي خفض أخرى")
     if lines:
         e.add_field(name="التفاصيل", value="\n".join(lines)[:1024], inline=False)
+    # ---- neutral "why" / facts ----
+    facts = [f"• متوسط سعرك الفعلي تاريخياً: ~{pu.get('base', 0)} ر.س",
+             f"• فحصت {pu.get('checked', 0)} ليلة متاحة في الـ{PRICE_OPP_HORIZON} يوم الجاية"]
+    if nr:
+        facts.append(f"• {nr} ليلة سعرها الحالي أقل من المتوقّع (فرق متوسط +{round(pu.get('avg_gap',0)*100)}%)")
+    if nd:
+        facts.append(f"• {nd} ليلة قريبة لا زالت فاضية وسعرها أعلى من سعر التصريف")
+    facts.append("• الأساس: متوسط سعر وحدتك × الشهر × اليوم بالشهر × يوم الأسبوع — من بياناتك أنت")
+    e.add_field(name="📊 ليه؟ (حقائق)", value="\n".join(facts)[:1024], inline=False)
+    e.add_field(name="🎯 نسبة الثقة في التوصية",
+                value=f"`{_conf_bar(conf)}` **{conf}%**\nمحسوبة من حجم بياناتك + قوة فرق السعر — مو ضمان بيع.",
+                inline=False)
     e.set_footer(text="✅ طبّق = أغيّر هالأسعار في تقويمك · الأسعار قبل الضريبة ورسوم المنصة")
     return e
 
@@ -2695,25 +2730,20 @@ async def on_ready():
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
-    # On first start, mark older inbox messages as already-seen so the assistant doesn't
-    # replay old backlog — but KEEP messages from the last few minutes so a fresh guest
-    # message still gets a card even if the bot just restarted/redeployed.
-    # (After the first run, _assistant_seen is restored from the volume above, so this
-    #  whole block is skipped and NOTHING is ever re-baselined or lost.)
+    # On the FIRST start only (no saved state yet), mark the whole current inbox as
+    # already-seen so we never replay old backlog. After this, ONLY genuinely new message
+    # IDs get a card — and persistence keeps _assistant_seen across restarts, so redeploys
+    # don't re-baseline and don't miss messages that arrive during a restart.
+    # (No timestamp guessing here — that was reading Hostaway times in the wrong timezone
+    #  and making fresh messages look hours old, which replayed old chats and skipped new ones.)
     if ASSISTANT_ENABLED and not ASSISTANT_TEST and not _assistant_seen:
         try:
-            now = datetime.now(TZ)
-            grace = ASSISTANT_BASELINE_GRACE_MIN * 60
-            kept = 0
-            for it in await asyncio.to_thread(fetch_new_guest_messages, set(), False):
-                dt = _parse_msg_dt(it.get("last_time"))
-                recent = dt is not None and 0 <= (now - dt).total_seconds() <= grace
-                if recent and grace > 0:
-                    kept += 1            # leave unseen -> gets a card on the next poll
-                else:
-                    _assistant_seen.add(it["message_id"])
-            print(f"assistant: baselined {len(_assistant_seen)} old conversations, "
-                  f"{kept} recent kept for follow-up (grace={ASSISTANT_BASELINE_GRACE_MIN}m)")
+            base = await asyncio.to_thread(fetch_new_guest_messages, set(), False)
+            for it in base:
+                _assistant_seen.add(it["message_id"])
+            await asyncio.to_thread(persist_state)   # save immediately so it survives a restart
+            print(f"assistant: baselined {len(_assistant_seen)} existing conversations "
+                  f"— from now on only NEW messages get cards")
         except Exception as e:
             print("assistant baseline error:", e)
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
