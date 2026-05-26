@@ -446,6 +446,8 @@ def apply_discount_tier(pct):
     changes = []
     for lid, name in listings.items():
         lid_s = str(lid)
+        if is_unit_skipped(lid):
+            continue                                       # owner asked to hold price on this unit
         try:
             cal = api_get(f"/listings/{lid}/calendar",
                           params={"startDate": today, "endDate": today})
@@ -496,6 +498,157 @@ def apply_discount_tier(pct):
 
 def is_weekend_today():
     return datetime.now(TZ).weekday() in WEEKEND_DAYS
+
+def compute_tonight_empty():
+    """For each unit empty TONIGHT, return its current price + the discount schedule the
+    bot will apply if the unit stays empty (tier 1 at midnight, 2 at noon, 3 at 6 PM, or
+    a single weekend drop on Thu/Fri at 5:30 PM). Also includes the owner-set skip status.
+
+    Returned shape (one entry per empty unit):
+      {lid, name, price, t1, t2, t3, w, weekend, skipped_until, paused_global,
+       tier_times: [{label, hour, minute, pct, price}], next: {label, when_iso, price}}
+    """
+    today = datetime.now(TZ).date()
+    today_iso = today.isoformat()
+    weekend = today.weekday() in WEEKEND_DAYS
+    listings = get_listings_map()
+    now = datetime.now(TZ)
+    paused_global = is_discount_paused()
+
+    f1 = (100.0 - DISCOUNT_TIER1_PERCENT) / 100.0
+    f2 = (100.0 - DISCOUNT_TIER2_PERCENT) / 100.0
+    f3 = (100.0 - DISCOUNT_TIER3_PERCENT) / 100.0
+    fw = (100.0 - WEEKEND_DISCOUNT_PERCENT) / 100.0
+
+    items = []
+    for lid, name in listings.items():
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": today_iso, "endDate": today_iso})
+            days = cal.get("result", []) or []
+            if not days:
+                continue
+            d = days[0]
+            available = int(d.get("isAvailable", 0) or 0) == 1
+            booked = bool(d.get("reservationId"))
+            price = d.get("price")
+            if not available or booked or not price:
+                continue
+            price = float(price)
+            # recover the original (anchor) so the tier prices we show match what the
+            # discount loop would actually write.
+            m = re.search(r"ouja-orig:(\d+(?:\.\d+)?)", str(d.get("note") or ""))
+            original = float(m.group(1)) if m else price
+
+            tier_times = []
+            if weekend:
+                tier_times.append({"label": "Weekend",
+                                   "hour": WEEKEND_DISCOUNT_HOUR, "minute": WEEKEND_DISCOUNT_MINUTE,
+                                   "pct": int(WEEKEND_DISCOUNT_PERCENT),
+                                   "price": int(round(original * fw))})
+            else:
+                tier_times.append({"label": "T1", "hour": DISCOUNT_TIER1_HOUR, "minute": 0,
+                                   "pct": int(DISCOUNT_TIER1_PERCENT),
+                                   "price": int(round(original * f1))})
+                tier_times.append({"label": "T2", "hour": DISCOUNT_TIER2_HOUR, "minute": 0,
+                                   "pct": int(DISCOUNT_TIER2_PERCENT),
+                                   "price": int(round(original * f2))})
+                tier_times.append({"label": "T3", "hour": DISCOUNT_TIER3_HOUR, "minute": 0,
+                                   "pct": int(DISCOUNT_TIER3_PERCENT),
+                                   "price": int(round(original * f3))})
+
+            # which tier is "next" today (still upcoming)?
+            next_tier = None
+            for tt in tier_times:
+                fire = now.replace(hour=tt["hour"], minute=tt["minute"], second=0, microsecond=0)
+                if fire > now:
+                    next_tier = {"label": tt["label"], "when_iso": fire.isoformat(timespec="minutes"),
+                                 "pct": tt["pct"], "price": tt["price"]}
+                    break
+
+            items.append({
+                "lid": lid, "name": name,
+                "price": int(round(price)), "original": int(round(original)),
+                "t1": int(round(original * f1)), "t2": int(round(original * f2)),
+                "t3": int(round(original * f3)), "w": int(round(original * fw)),
+                "weekend": weekend, "tier_times": tier_times, "next": next_tier,
+                "skipped_until": unit_skip_until_iso(lid),
+                "paused_global": paused_global,
+            })
+        except Exception as e:
+            print(f"tonight-empty error for {name}: {e}")
+    items.sort(key=lambda x: x["name"])
+    return items
+
+def get_inbox_item_detail(item_id):
+    """Build a rich detail view for a pending reply or open escalation, including the
+    full conversation history (refetched from Hostaway) and the booking context."""
+    try:
+        item_id = int(item_id)
+    except Exception:
+        return None
+    src = None; kind = None
+    if item_id in _pending_replies:
+        src = _pending_replies[item_id]; kind = "reply"
+    elif item_id in _escalations:
+        src = _escalations[item_id]; kind = "escalation"
+    if not src:
+        return None
+
+    if kind == "reply":
+        item = src.get("item", {})
+        cid = item.get("conversation_id")
+        guest = item.get("guest"); unit = item.get("unit"); lid = item.get("listing_id")
+        res_id = item.get("reservation_id")
+        checkin = item.get("checkin"); checkout = item.get("checkout")
+        draft = src.get("draft", ""); confirmed = src.get("confirmed", False)
+        reason = ""; intent = src.get("intent", ""); conf = src.get("confidence")
+        sentiment = src.get("sentiment", "")
+    else:   # escalation
+        cid = src.get("conversation_id")
+        guest = src.get("guest"); unit = src.get("unit"); lid = None
+        res_id = None; checkin = None; checkout = None
+        draft = ""; confirmed = False
+        reason = src.get("reason", ""); intent = ""; conf = None; sentiment = ""
+
+    # refetch the live thread so the dashboard shows the latest
+    thread = []
+    if cid:
+        try:
+            data = api_get(f"/conversations/{cid}/messages")
+            msgs = sorted((data.get("result") or []), key=_msg_sort_key)
+            for m in msgs[-30:]:
+                thread.append({
+                    "from": "guest" if _msg_is_inbound(m) else "host",
+                    "text": (m.get("body") or "").strip(),
+                    "ts": _msg_time(m),
+                    "automated": (not _msg_is_inbound(m)) and _looks_automated(m.get("body") or ""),
+                })
+        except Exception as e:
+            print(f"detail fetch thread error ({cid}):", e)
+
+    # booking context
+    nights = None; total = None; status = ""
+    if res_id:
+        try:
+            data = api_get(f"/reservations/{res_id}")
+            r = data.get("result") or {}
+            nights = _res_nights(r) or None
+            total = r.get("totalPrice") or None
+            status = (r.get("status") or "").lower()
+            checkin = checkin or r.get("arrivalDate")
+            checkout = checkout or r.get("departureDate")
+        except Exception as e:
+            print(f"detail fetch reservation error ({res_id}):", e)
+
+    return {
+        "kind": kind, "id": item_id, "guest": guest or "", "unit": unit or "",
+        "listing_id": lid, "conversation_id": cid, "reservation_id": res_id,
+        "status": status, "confirmed": confirmed,
+        "checkin": checkin, "checkout": checkout, "nights": nights, "total_price": total,
+        "draft": draft, "reason": reason, "intent": intent, "confidence": conf,
+        "sentiment": sentiment, "thread": thread,
+    }
 
 def compute_headsup():
     """List units still empty for TOMORROW night, with the discount they'll actually get."""
@@ -773,6 +926,27 @@ async def post_discount_summary(changes, today, pct, label):
 # until which all tier loops skip. Persisted in state so a redeploy doesn't accidentally
 # resume discounts the owner wanted off.
 _discount_paused_until = 0
+
+# Per-unit discount skip: {listing_id (int) -> unix-timestamp until which discounts skip
+# for this specific unit only}. Lets the owner say "hold price on this apartment" without
+# pausing all discounts globally. Persisted.
+_unit_discount_skip = {}
+
+def is_unit_skipped(lid):
+    try:
+        ts = _unit_discount_skip.get(int(lid), 0)
+        return float(ts) > time.time()
+    except Exception:
+        return False
+
+def unit_skip_until_iso(lid):
+    try:
+        ts = _unit_discount_skip.get(int(lid), 0)
+        if float(ts) <= time.time():
+            return ""
+        return datetime.fromtimestamp(float(ts), TZ).isoformat(timespec="minutes")
+    except Exception:
+        return ""
 
 def is_discount_paused():
     return _discount_paused_until > time.time()
@@ -2041,7 +2215,8 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · راجعه قبل الإرسال · "
                           f"التوقيع يُضاف تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
-    _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed}
+    _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed,
+                                 "intent": intent, "confidence": round(conf*100), "sentiment": sentiment}
 
 async def process_assistant_item(it, channel):
     """Draft + post a card (or escalate) for ONE guest message. Shared by the poll
@@ -3163,16 +3338,43 @@ def _run_strategy_unit(lid, strat, factors, today):
         strat["active"] = False
 
 def _strategy_view(lid):
+    """Strategy detail with per-night before/after + the 'why' (month/dom/dow factors +
+    lead-time discount) so the dashboard can elaborate each price decision."""
     s = _pricing_strategies.get(lid)
     if not s:
         return {"active": False, "dates": []}
-    rows = sorted(({"date": d, "start": r["start"], "cur": r["cur"], "booked": r["booked"],
-                    "changes": r.get("changes", 0)} for d, r in s["dates"].items()),
-                  key=lambda x: x["date"])
+    # compute factors once so we can attach per-night reasoning to the rows
+    try:
+        factors = compute_demand_factors(get_reservations_cached())
+    except Exception:
+        factors = {"month_index": {}, "dom_index": {}, "dow_index": {}, "overall_adr": 0}
+    today = datetime.now(TZ).date()
+    _WD_AR = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+    _WD_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    rows = []
+    for d_str, r in s["dates"].items():
+        d = _parse_date(d_str)
+        if not d:
+            continue
+        lead = (d - today).days
+        mi = round(factors["month_index"].get(d.month, 1), 2) if d else 1
+        di = round(factors["dom_index"].get(d.day, 1), 2) if d else 1
+        wi = round(factors["dow_index"].get(d.weekday(), 1), 2) if d else 1
+        lead_factor = (0.80 if lead <= 2 else 0.86 if lead <= 5 else
+                       0.92 if lead <= 10 else 0.97 if lead <= 20 else 1.0)
+        rows.append({
+            "date": d_str, "wd_ar": _WD_AR[d.weekday()], "wd_en": _WD_EN[d.weekday()],
+            "lead": lead, "start": r["start"], "cur": r["cur"],
+            "booked": r["booked"], "changes": r.get("changes", 0),
+            "last": r.get("last", ""),
+            "mi": mi, "di": di, "wi": wi, "lead_factor": lead_factor,
+        })
+    rows.sort(key=lambda x: x["date"])
     booked = sum(1 for r in rows if r["booked"])
     return {"name": s.get("name"), "base": s.get("base"), "active": s.get("active", False),
             "started": s.get("started"), "updated": s.get("updated", 0),
             "interval": PRICING_STRATEGY_MIN, "dry_run": PRICE_APPLY_DRYRUN,
+            "applied_start": s.get("applied_start", 0), "changes_total": s.get("changes_total", 0),
             "total": len(rows), "booked": booked, "open": len(rows) - booked, "dates": rows}
 
 def _strategies_list():
@@ -3250,6 +3452,79 @@ async def _api_discount_resume(request):
     log_event("pricing", "استئناف الخصومات التلقائية")
     return _json({"ok": True, **discount_pause_status()})
 
+# ---- per-unit discount skip (hold price on a specific apartment) ----
+async def _api_unit_skip(request):
+    """POST {lid, hours: N (default 24)} — skip discounts on this unit for N hours."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+        hours = float(b.get("hours", 24))
+    except Exception:
+        return _json({"error": "bad params"}, 400)
+    hours = max(0.5, min(168.0, hours))
+    _unit_discount_skip[lid] = time.time() + hours * 3600
+    await asyncio.to_thread(persist_state)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    log_event("pricing", f"تجاهل خصم {hours:g}س · {name}")
+    return _json({"ok": True, "lid": lid, "until_iso": unit_skip_until_iso(lid)})
+
+async def _api_unit_unskip(request):
+    """POST {lid} — clear the skip on this unit."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    _unit_discount_skip.pop(lid, None)
+    await asyncio.to_thread(persist_state)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    log_event("pricing", f"إلغاء تجاهل الخصم · {name}")
+    return _json({"ok": True})
+
+async def _api_today_empty(request):
+    """Per-unit empty-tonight detail: current price, scheduled tier prices, skip status."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = await asyncio.to_thread(compute_tonight_empty)
+    return _json({"items": items, "weekend": datetime.now(TZ).weekday() in WEEKEND_DAYS,
+                  "paused": is_discount_paused(),
+                  "paused_until_iso": discount_pause_status().get("until_iso", "")})
+
+async def _api_inbox_detail(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        item_id = int(request.query.get("id"))
+    except Exception:
+        return _json({"error": "bad id"}, 400)
+    detail = await asyncio.to_thread(get_inbox_item_detail, item_id)
+    if not detail:
+        return _json({"error": "not found"}, 404)
+    return _json(detail)
+
+async def _api_teach(request):
+    """POST {topic, fact} — save a fact to the #knowledge Discord channel (mirrors the
+    Discord 'علّم' modal). Future drafts pick it up after the next knowledge refresh."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    topic = (b.get("topic") or "").strip()
+    fact = (b.get("fact") or "").strip()
+    if not fact:
+        return _json({"error": "fact required"}, 400)
+    line = f"**{topic}**: {fact}" if topic else fact
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return _json({"error": "discord guild not ready"}, 503)
+    ok = await save_fact(guild, line)
+    if ok:
+        log_event("guest", f"تعلّم معلومة جديدة (من اللوحة): {(topic or fact)[:80]}")
+    return _json({"ok": bool(ok)})
+
 @tasks.loop(minutes=DASH_REFRESH_MIN)
 async def dashboard_cache_loop():
     """Pre-compute heavy analytics in the background so the dashboard serves instantly."""
@@ -3300,6 +3575,11 @@ async def start_web_server():
         app.router.add_get("/api/discount/status", _api_discount_status)
         app.router.add_post("/api/discount/pause", _api_discount_pause)
         app.router.add_post("/api/discount/resume", _api_discount_resume)
+        app.router.add_post("/api/discount/skip-unit", _api_unit_skip)
+        app.router.add_post("/api/discount/unskip-unit", _api_unit_unskip)
+        app.router.add_get("/api/today/empty", _api_today_empty)
+        app.router.add_get("/api/inbox/detail", _api_inbox_detail)
+        app.router.add_post("/api/teach", _api_teach)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -3408,7 +3688,7 @@ async def knowledge_loop():
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
-    global _price_opps, _discount_paused_until
+    global _price_opps, _discount_paused_until, _unit_discount_skip
     try:
         _assistant_seen = _BoundedSet(_load_json("seen.json", []), maxlen=20000)
         _pending_replies = {int(k): v for k, v in _load_json("pending.json", {}).items()}
@@ -3423,6 +3703,8 @@ def load_state():
         _pricing_strategies.update({int(k): v for k, v in _load_json("strategies.json", {}).items()})
         _price_opps = {int(k): v for k, v in _load_json("price_opps.json", {}).items()}
         _discount_paused_until = float(_load_json("discount_pause.json", 0) or 0)
+        _unit_discount_skip = {int(k): float(v) for k, v in _load_json("unit_discount_skip.json", {}).items()
+                               if float(v) > time.time()}   # drop expired entries on boot
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -3441,6 +3723,7 @@ def persist_state():
     _save_json("strategies.json", {str(k): v for k, v in _pricing_strategies.items()})
     _save_json("price_opps.json", {str(k): v for k, v in _price_opps.items()})
     _save_json("discount_pause.json", _discount_paused_until)
+    _save_json("unit_discount_skip.json", {str(k): v for k, v in _unit_discount_skip.items()})
 
 @tasks.loop(seconds=60)
 async def persist_loop():
