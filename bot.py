@@ -2194,6 +2194,7 @@ textarea:focus{outline:none;border-color:var(--gold2);box-shadow:0 0 0 3px rgba(
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--txt);color:#fff;padding:12px 22px;border-radius:12px;font-size:14px;z-index:130;opacity:0;transition:.3s;box-shadow:0 12px 34px rgba(0,0,0,.25)}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .spin{animation:rot 1s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}
+.attn{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px}
 .explain{background:var(--goldsoft);border:1px solid #ecdcbf;border-radius:12px;padding:12px 14px;font-size:12.5px;color:#6b5a36;line-height:1.7;margin-top:12px}
 .explain b{color:var(--gold)}
 .modal{position:fixed;inset:0;background:rgba(44,39,34,.42);backdrop-filter:blur(3px);z-index:140;display:none;align-items:flex-start;justify-content:center;padding:34px 14px;overflow-y:auto}
@@ -2228,6 +2229,14 @@ textarea:focus{outline:none;border-color:var(--gold2);box-shadow:0 0 0 3px rgba(
   <div class="kpis" id="kpis"></div>
   <div class="tabs" id="tabs"></div>
 
+  <div class="panel" id="today">
+    <div class="attn" id="attn"></div>
+    <div class="card"><h3 id="h_empty">🏠</h3><div class="muted" id="emptyHd" style="margin-bottom:12px"></div><div id="emptyList"></div></div>
+    <div class="grid2">
+      <div class="card"><h3 id="h_arr">🟢</h3><div id="arrList"></div></div>
+      <div class="card"><h3 id="h_dep">🔵</h3><div id="depList"></div></div>
+    </div>
+  </div>
   <div class="panel" id="ov">
     <div class="card"><h3 id="h_monthly">📈</h3><canvas id="cMonthly"></canvas></div>
     <div class="card"><h3 id="h_units">🏠</h3><div id="unitTable"><div class="loading">…</div></div></div>
@@ -2267,6 +2276,9 @@ const T={
   stratTitle:"استراتيجية التسعير المباشرة",stratActive:"شغّالة الآن · يحسّن تلقائياً",stratDone:"انتهت",stratEvery:"تحديث كل",stratMin:"دقيقة",
   stratStop:"إيقاف الاستراتيجية",stratStart:"البداية",stratCur:"الحالي",stratStatus:"الحالة",stratBookedT:"انحجزت ✅",stratOpenT:"مفتوحة",
   stratChanges:"تعديلات",stratStarted:"بدأت",stratResult:"النتيجة",stratBookedN:"محجوزة",stratOpenN:"مفتوحة",stratGoal:"يرفع السعر وقت الطلب وينزّله تدريجياً للّيالي الفاضية لين تنحجز.",
+  today:"اليوم",arrivalsT:"الوصول اليوم",departuresT:"المغادرة اليوم",emptyTonight:"فاضية الليلة",tightT:"تنظيف نفس اليوم",
+  allClear:"كل شي تمام — ما فيه شي يحتاج تدخّلك ✅",riskT:"إيراد على الطاولة",occTonight:"مشغولة الليلة",nightsT:"ليالي",
+  noArr:"ما فيه وصول اليوم",noDep:"ما فيه مغادرة اليوم",noEmpty:"كل الوحدات محجوزة الليلة 🎉",
   cU:"الوحدة",cOcc:"إشغال",cAdr:"سعر/ليلة",cPace:"سرعة ٣٠ي",cReco:"التوصية",cChg:"تغييرات",cUp:"إيراد إضافي",cConf:"الثقة",
   cats:{"":"الكل",guest:"الضيوف",escalation:"تصعيدات",pricing:"التسعير",report:"التقارير"},
   kpis:[["active_units","🏠","الوحدات الفعّالة","","g"],["occ_30","📊","إشغال ٣٠ يوم","%","g"],["rev_30","💰","إيراد ٣٠ يوم"," ر.س","g"],
@@ -2288,6 +2300,9 @@ const T={
   stratTitle:"Live pricing strategy",stratActive:"Running · auto-optimizing",stratDone:"Finished",stratEvery:"updates every",stratMin:"min",
   stratStop:"Stop strategy",stratStart:"Start",stratCur:"Current",stratStatus:"Status",stratBookedT:"booked ✅",stratOpenT:"open",
   stratChanges:"changes",stratStarted:"Started",stratResult:"Result",stratBookedN:"booked",stratOpenN:"open",stratGoal:"Holds price high when demand is there, steps it down for empty nights as they near — until they book.",
+  today:"Today",arrivalsT:"Arrivals today",departuresT:"Departures today",emptyTonight:"Empty tonight",tightT:"Same-day turnovers",
+  allClear:"All clear — nothing needs you right now ✅",riskT:"Revenue on the table",occTonight:"Occupied tonight",nightsT:"nights",
+  noArr:"No arrivals today",noDep:"No departures today",noEmpty:"Every unit is booked tonight 🎉",
   cU:"Unit",cOcc:"Occ",cAdr:"Rate/nt",cPace:"30d pace",cReco:"Action",cChg:"Changes",cUp:"Extra rev",cConf:"Confidence",
   cats:{"":"All",guest:"Guests",escalation:"Escalations",pricing:"Pricing",report:"Reports"},
   kpis:[["active_units","🏠","Active units","","g"],["occ_30","📊","Occupancy 30d","%","g"],["rev_30","💰","Revenue 30d"," SAR","g"],
@@ -2295,7 +2310,7 @@ const T={
    ["open_escalations","🚨","Open escalations","","r"],["checkins_today","🟢","Check-ins today","","g"],["checkouts_today","🔵","Check-outs today","","b"]],
   sent:"Sent ✅",rej:"Dismissed",claimed:"Claimed ✅",applied:"Applied ✅",err:"Something went wrong",
   weak:"Weakest days",strong:"Strongest days",fresh:"Updated",live:"live",updating:"updating…"}};
-let L=localStorage.getItem("ouja_lang")||"ar",charts={},curCat="",cur="ov",loaded={},D={};
+let L=localStorage.getItem("ouja_lang")||"ar",charts={},curCat="",cur="today",loaded={},D={};
 function t(){return T[L]}
 function tok(){return localStorage.getItem(TK)||""}
 function saveTok(){localStorage.setItem(TK,document.getElementById('tok').value.trim());init()}
@@ -2313,10 +2328,10 @@ const AX={x:{grid:{color:GRID},ticks:{color:MUT}},y:{grid:{color:GRID},ticks:{co
 function applyLang(){
   document.documentElement.dir=t().dir;document.documentElement.lang=L;
   document.getElementById('langBtn').textContent=(L==="ar"?"EN":"ع");
-  const tb=[["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["auto","⚡"],["log","📋"]];
+  const tb=[["today","🌅"],["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["auto","⚡"],["log","📋"]];
   document.getElementById('tabs').innerHTML=tb.map(x=>`<div class="tab ${x[0]===cur?'on':''}" data-t="${x[0]}" onclick="tab('${x[0]}')">${x[1]} ${t()[x[0]]}<span class="badge" id="bdg_${x[0]}" style="display:none"></span></div>`).join('');
-  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log",h_auto:"auto"};
-  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋",h_auto:"⚡"};
+  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log",h_auto:"auto",h_arr:"arrivalsT",h_dep:"departuresT",h_empty:"emptyTonight"};
+  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋",h_auto:"⚡",h_arr:"🟢",h_dep:"🔵",h_empty:"🏠"};
   for(const id in H){const e=document.getElementById(id);if(e)e.innerHTML=E[id]+" "+t()[H[id]];}
   const ah=document.getElementById('autoHdr');if(ah)ah.textContent=t().autoHdr;
   document.getElementById('catf').innerHTML=Object.entries(t().cats).map(([c,l])=>`<div class="tab ${c===curCat?'on':''}" data-c="${c}" onclick="logf('${c}')">${l}</div>`).join('');
@@ -2335,14 +2350,14 @@ async function init(){try{document.getElementById('lerr').textContent='';await a
   setInterval(pollLive,15000);            // keep KPIs + inbox mirroring live
   }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح · Wrong token'}}
 
-async function loadFast(){            // instant tabs: overview KPIs + inbox + log + auto
-  D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');D.log=(await api('/api/log')).items;
-  D.auto=(await api('/api/autolog')).items;
-  renderKpis();renderInbox();renderLog();renderAuto();renderFresh();
+async function loadFast(){            // instant tabs: today + overview KPIs + inbox + log + auto
+  D.today=await api('/api/today');D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');
+  D.log=(await api('/api/log')).items;D.auto=(await api('/api/autolog')).items;
+  renderToday();renderKpis();renderInbox();renderLog();renderAuto();renderFresh();
   if(D.ov.ready){loadOverview();}else{setTimeout(retryOverview,5000);}   // bg compute still warming
 }
 async function retryOverview(){D.ov=await api('/api/overview');renderKpis();renderFresh();if(!D.ov.ready)setTimeout(retryOverview,5000);else loadOverview();}
-async function pollLive(){try{D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');D.auto=(await api('/api/autolog')).items;renderKpis();renderInbox();renderAuto();renderFresh();}catch(e){}}
+async function pollLive(){try{D.today=await api('/api/today');D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');D.auto=(await api('/api/autolog')).items;renderToday();renderKpis();renderInbox();renderAuto();renderFresh();}catch(e){}}
 async function refresh(){const b=document.getElementById('refreshBtn');b.classList.add('spin');
   loaded={};await loadFast();await loadOverview();if(cur==='rev')await loadRevenue();if(cur==='pr')await loadPricing();
   setTimeout(()=>b.classList.remove('spin'),500)}
@@ -2350,7 +2365,23 @@ async function refresh(){const b=document.getElementById('refreshBtn');b.classLi
 async function loadOverview(){if(!D.rev)D.rev=await api('/api/revenue');loaded.ov=true;renderRevenueCharts();renderUnits()}
 async function loadRevenue(){D.rev=await api('/api/revenue');loaded.rev=true;renderRevenueCharts();renderUnits()}
 async function loadPricing(){D.pr=await api('/api/pricing');loaded.pr=true;renderPricing()}
-function renderAll(){renderKpis();renderInbox();renderLog();renderAuto();renderFresh();renderRevenueCharts();renderUnits();renderPricing()}
+function renderAll(){renderToday();renderKpis();renderInbox();renderLog();renderAuto();renderFresh();renderRevenueCharts();renderUnits();renderPricing()}
+function renderToday(){const d=D.today||{};
+  const cards=[];
+  if(d.open_escalations)cards.push(['🚨',d.open_escalations,t().esc,'r',"tab('inbox')"]);
+  if(d.pending_cards)cards.push(['💬',d.pending_cards,t().replies,'b',"tab('inbox')"]);
+  if(d.empty_n)cards.push(['🏠',d.empty_n,t().emptyTonight,'g',""]);
+  if(d.tight&&d.tight.length)cards.push(['⚡',d.tight.length,t().tightT,'r',""]);
+  const attn=document.getElementById('attn');if(!attn)return;
+  attn.innerHTML=cards.length?cards.map(c=>`<div class="kpi" ${c[4]?`onclick="${c[4]}" style="cursor:pointer"`:''}><div class="ic">${c[0]}</div><div class="v ${c[3]}">${c[1]}</div><div class="l">${c[2]}</div></div>`).join('')
+    :`<div class="card" style="grid-column:1/-1;text-align:center;color:var(--green);font-weight:600">${t().allClear}</div>`;
+  document.getElementById('emptyHd').innerHTML=`${t().occTonight}: <b>${d.occupied||0}/${d.active||0}</b> &nbsp;·&nbsp; ${t().emptyTonight}: <b style="color:var(--gold)">${d.empty_n||0}</b> &nbsp;·&nbsp; ${t().riskT}: <b style="color:var(--red)">~${fmt(d.risk||0)} ${L==='ar'?'ر.س':'SAR'}</b>`;
+  const arr=d.arrivals||[];
+  document.getElementById('arrList').innerHTML=arr.length?arr.map(a=>`<div class="logrow"><span>🟢</span><span style="flex:1"><b>${esc(a.unit)}</b> · ${esc(a.guest)}</span><span class="muted">${a.nights} ${t().nightsT}</span></div>`).join(''):`<div class="empty">${t().noArr}</div>`;
+  const dep=d.departures||[];
+  document.getElementById('depList').innerHTML=dep.length?dep.map(x=>`<div class="logrow"><span>🔵</span><span style="flex:1"><b>${esc(x.unit)}</b> · ${esc(x.guest)}</span></div>`).join(''):`<div class="empty">${t().noDep}</div>`;
+  const em=d.empty||[];
+  document.getElementById('emptyList').innerHTML=em.length?em.map(e=>`<span class="unit" style="display:inline-block;margin:3px 3px 0">${esc(e.unit)}</span>`).join(''):`<div class="empty">${t().noEmpty}</div>`}
 
 function renderFresh(){const u=D.ov&&D.ov.updated?new Date(D.ov.updated*1000):null;
   const dot=document.getElementById('dot');dot.className='dot'+((D.ov&&D.ov.ready)?'':' warn');
@@ -2479,6 +2510,47 @@ def _live_counts():
     return {"pending_cards": len(_pending_replies),
             "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by"))}
 
+def _compute_today():
+    """The morning cockpit: arrivals, departures, who's empty tonight, same-day turnovers,
+    and the revenue on the table. Reads only already-cached data — no new Hostaway load."""
+    today = datetime.now(TZ).date()
+    reservations = get_reservations_cached()
+    listings = get_listings_map()
+
+    def nm(r):
+        return listings.get(r.get("listingMapId")) or r.get("listingName") or f"unit-{r.get('listingMapId')}"
+
+    arrivals, departures = [], []
+    occ_lids, dep_lids, arr_lids = set(), set(), set()
+    for r in reservations:
+        if not _res_realized(r):
+            continue
+        a, d = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
+        lid = r.get("listingMapId")
+        if a == today:
+            arrivals.append({"guest": r.get("guestName") or "Guest", "unit": nm(r),
+                             "nights": _res_nights(r), "checkout": d.isoformat() if d else ""})
+            arr_lids.add(lid)
+        if d == today:
+            departures.append({"guest": r.get("guestName") or "Guest", "unit": nm(r)})
+            dep_lids.add(lid)
+        if a and d and a <= today < d:
+            occ_lids.add(lid)
+    units = {u["id"]: u["name"] for u in _catalog_units if u.get("id")}
+    active = len(units) or len(occ_lids)
+    empty = [{"unit": units.get(lid, str(lid)), "lid": lid}
+             for lid in units if lid not in occ_lids]
+    tight = [units.get(lid, str(lid)) for lid in (dep_lids & arr_lids)]      # same-day turnover
+    prices = [u.get("price") for u in _catalog_units if u.get("price")]
+    avg = round(sum(prices) / len(prices)) if prices else 0
+    return {"date": today.isoformat(), "active": active, "occupied": len(occ_lids),
+            "arrivals": sorted(arrivals, key=lambda x: x["unit"]),
+            "departures": sorted(departures, key=lambda x: x["unit"]),
+            "empty": sorted(empty, key=lambda x: x["unit"])[:90], "empty_n": len(empty),
+            "tight": tight, "avg": avg, "risk": len(empty) * avg,
+            "pending_cards": len(_pending_replies),
+            "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by"))}
+
 def _compute_overview():
     today = datetime.now(TZ).date()
     reservations = get_reservations_cached()
@@ -2581,6 +2653,14 @@ async def _api_autolog(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     return _json({"items": list(_auto_replies)[:200]})
+
+async def _api_today(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    d = dict(_cache_get("today") or {})
+    d.update(_live_counts())                 # escalations + pending always real-time
+    d["ready"] = _cache_get("today") is not None
+    return _json(d if d.get("ready") else {"loading": True, **_live_counts()})
 
 async def _api_inbox(request):
     """Live mirror of what the team is acting on: pending replies + open escalations."""
@@ -2843,6 +2923,9 @@ async def dashboard_cache_loop():
         rv = await asyncio.to_thread(_compute_revenue)
         if rv.get("monthly") or rv.get("units"):
             _dash_cache["revenue"] = (rv, time.time())
+        td = await asyncio.to_thread(_compute_today)
+        if td.get("active"):
+            _dash_cache["today"] = (td, time.time())
         last = _dash_cache.get("pricing")
         if (not last) or (time.time() - last[1] > 1800):   # pricing is calendar-heavy: every ~30 min
             pr = await asyncio.to_thread(_compute_pricing)
@@ -2868,6 +2951,7 @@ async def start_web_server():
         app.router.add_get("/api/log", _api_log)
         app.router.add_get("/api/inbox", _api_inbox)
         app.router.add_get("/api/autolog", _api_autolog)
+        app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
