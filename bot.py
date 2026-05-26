@@ -27,9 +27,11 @@ Optional (sensible defaults):
 
 import os
 import re
+import io
 import json
 import time
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -78,6 +80,29 @@ DISCOUNT_TEST    = os.environ.get("DISCOUNT_TEST", "0")
 HEADS_UP_HOUR    = int(os.environ.get("HEADS_UP_HOUR", "21"))               # 21:00 = 9 PM Riyadh
 HEADS_UP_CHANNEL = os.environ.get("HEADS_UP_CHANNEL", "discount-heads-up")  # where the preview is posted
 HEADS_UP_TEST    = os.environ.get("HEADS_UP_TEST", "0") in ("1", "true", "True", "yes")  # post once on startup
+# ---- Weekly Revenue Report (recommend-only; optimizes for max total revenue) ----
+REVENUE_CHANNEL     = os.environ.get("REVENUE_CHANNEL", "revenue-report")
+REVENUE_REPORT_DOW  = int(os.environ.get("REVENUE_REPORT_DOW", "6"))    # 0=Mon … 6=Sun
+REVENUE_REPORT_HOUR = int(os.environ.get("REVENUE_REPORT_HOUR", "9"))   # Riyadh hour to post
+REVENUE_MAX_PAGES   = int(os.environ.get("REVENUE_MAX_PAGES", "60"))    # 100 reservations/page
+REVENUE_WINDOW_DAYS = int(os.environ.get("REVENUE_WINDOW_DAYS", "90"))  # trailing perf window
+REVENUE_TEST        = os.environ.get("REVENUE_TEST", "0") in ("1", "true", "True", "yes")  # post once on startup
+REVENUE_DEBUG       = os.environ.get("REVENUE_DEBUG", "0") in ("1", "true", "True", "yes")
+# ---- Per-date pricing opportunities (#price-opportunities) ----
+PRICE_OPP_CHANNEL   = os.environ.get("PRICE_OPP_CHANNEL", "price-opportunities")
+PRICE_OPP_HORIZON   = int(os.environ.get("PRICE_OPP_HORIZON", "45"))    # days ahead to price
+PRICE_OPP_DOW       = int(os.environ.get("PRICE_OPP_DOW", "6"))         # 0=Mon … 6=Sun
+PRICE_OPP_HOUR      = int(os.environ.get("PRICE_OPP_HOUR", "10"))
+PRICE_OPP_TEST      = os.environ.get("PRICE_OPP_TEST", "0") in ("1", "true", "True", "yes")
+# When you click ✅ apply, the bot writes the new price to your Hostaway calendar.
+# Set PRICE_APPLY_DRYRUN=1 to TEST safely (logs what it would do, changes nothing).
+PRICE_APPLY_DRYRUN  = os.environ.get("PRICE_APPLY_DRYRUN", "0") in ("1", "true", "True", "yes")
+PRICE_OPP_MAX_CARDS = int(os.environ.get("PRICE_OPP_MAX_CARDS", "15"))  # action cards to post
+# ---- Last-week performance review (#last-week-review) ----
+WEEKLY_REVIEW_CHANNEL = os.environ.get("WEEKLY_REVIEW_CHANNEL", "last-week-review")
+WEEKLY_REVIEW_DOW   = int(os.environ.get("WEEKLY_REVIEW_DOW", "6"))     # 0=Mon … 6=Sun
+WEEKLY_REVIEW_HOUR  = int(os.environ.get("WEEKLY_REVIEW_HOUR", "8"))
+WEEKLY_REVIEW_TEST  = os.environ.get("WEEKLY_REVIEW_TEST", "0") in ("1", "true", "True", "yes")
 
 # ---- weekend rule (Thu/Fri): no midnight/noon tiers — a single softer discount at 5:30 PM ----
 WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split(",")
@@ -1647,6 +1672,70 @@ class ConfirmActionView(discord.ui.View):
         await interaction.response.edit_message(
             content="تمام، ما سويت شي. الكرت زي ما هو 👍", view=None)
 
+class PriceConfirmView(discord.ui.View):
+    """Ephemeral 'are you sure?' before writing prices to the calendar."""
+    def __init__(self, card_message_id):
+        super().__init__(timeout=300)
+        self.card_message_id = card_message_id
+
+    @discord.ui.button(label="✅ نعم، طبّق", style=discord.ButtonStyle.success)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        opp = _price_opps.get(self.card_message_id)
+        if not opp:
+            await interaction.response.edit_message(
+                content="انتهت صلاحية هالبطاقة — اطلب تقرير جديد.", view=None)
+            return
+        await interaction.response.edit_message(content="⏳ جاري تطبيق الأسعار…", view=None)
+        applied, skipped = await asyncio.to_thread(
+            apply_price_changes, opp["listing_id"], opp["changes"])
+        _price_opps.pop(self.card_message_id, None)
+        tail = (" — (تجربة DRY-RUN، ما تغيّر شي فعلي)" if PRICE_APPLY_DRYRUN else "")
+        skip_txt = f" · تخطّيت {skipped} (محجوزة/تغيّرت)" if skipped else ""
+        result = f"✅ طبّقت {applied} ليلة على **{opp['name']}**{skip_txt}{tail}"
+        await interaction.followup.send(result, ephemeral=True)
+        try:
+            card = await interaction.channel.fetch_message(self.card_message_id)
+            emb = card.embeds[0] if card.embeds else discord.Embed()
+            emb.color = 0x2ECC71
+            emb.set_footer(text=f"{result} · بواسطة {interaction.user.display_name}")
+            await card.edit(embed=emb, view=None)
+        except Exception as e:
+            print("price card update error:", e)
+
+    @discord.ui.button(label="✖️ لا", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="تمام، ما غيّرت شي 👍", view=None)
+
+class PriceApplyView(discord.ui.View):
+    """Persistent Apply/Skip buttons under each unit's pricing card."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ طبّق", style=discord.ButtonStyle.success,
+                       custom_id="ouja_price_apply")
+    async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
+        opp = _price_opps.get(interaction.message.id)
+        if not opp:
+            await interaction.response.send_message(
+                "هالبطاقة قديمة (البوت اتحدّث) — اطلب تقرير جديد بـ PRICE_OPP_TEST=1.",
+                ephemeral=True)
+            return
+        n = len(opp["changes"])
+        warn = ("\n⚠️ وضع التجربة شغّال — ما راح يتغيّر شي فعلي." if PRICE_APPLY_DRYRUN
+                else "\n‼️ بيتغيّر السعر فعلياً في تقويمك (Airbnb/Hostaway).")
+        await interaction.response.send_message(
+            f"متأكد تبي تطبّق **{n}** تغيير سعر على **{opp['name']}**؟{warn}",
+            view=PriceConfirmView(interaction.message.id), ephemeral=True)
+
+    @discord.ui.button(label="❌ تجاهل", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_price_skip")
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        _price_opps.pop(interaction.message.id, None)
+        emb = interaction.message.embeds[0] if interaction.message.embeds else discord.Embed()
+        emb.color = 0x95A5A6
+        emb.set_footer(text=f"❌ تم التجاهل بواسطة {interaction.user.display_name}")
+        await interaction.response.edit_message(embed=emb, view=None)
+
 class ApproveView(discord.ui.View):
     def __init__(self, item=None, draft=None):
         super().__init__(timeout=None)   # persistent — survives bot restarts
@@ -1967,12 +2056,645 @@ def persist_state():
 async def persist_loop():
     await asyncio.to_thread(persist_state)
 
+# ==================== Weekly Revenue Report (recommend-only) ====================
+# Pulls full booking history from Hostaway and produces a weekly Discord report:
+#  (1) per-unit raise/hold/lower recommendation (optimizing TOTAL REVENUE),
+#  (2) which months pay best/worst, (3) the real intra-month "salary cycle" dip.
+# It NEVER changes prices — it only recommends. All numbers are computed in code.
+
+def fetch_all_reservations(max_pages=None):
+    """Paginate the full reservation history from Hostaway."""
+    max_pages = max_pages or REVENUE_MAX_PAGES
+    out, offset, limit = [], 0, 100
+    for _ in range(max_pages):
+        try:
+            data = api_get("/reservations", params={"limit": limit, "offset": offset})
+        except Exception as e:
+            print("reservations fetch error:", e)
+            break
+        rows = data.get("result", []) or []
+        if not rows:
+            break
+        out.extend(rows)
+        if len(rows) < limit:
+            break
+        offset += limit
+    if REVENUE_DEBUG and out:
+        print("reservation sample keys:", sorted(out[0].keys()))
+    print(f"revenue: fetched {len(out)} reservations")
+    return out
+
+def _res_nights(r):
+    n = r.get("nights")
+    if isinstance(n, int) and n > 0:
+        return n
+    ci, co = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
+    return (co - ci).days if (ci and co and co > ci) else 0
+
+def _res_revenue(r):
+    """Best-effort gross booking revenue (consistent across channels). Tune via REVENUE_DEBUG."""
+    for k in ("totalPrice", "baseRate", "ownerPayout", "hostPayout", "price"):
+        v = r.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            return float(v)
+    return 0.0
+
+def _res_realized(r):
+    return (r.get("status") or "").lower() in CONFIRMED_STATUSES
+
+def _explode_nights(reservations):
+    """Return (nights, arrivals): nights = list of (listing_id, date, nightly_price);
+    arrivals = list of (listing_id, checkin_date)."""
+    nights, arrivals = [], []
+    for r in reservations:
+        if not _res_realized(r):
+            continue
+        ci = _parse_date(r.get("arrivalDate"))
+        n = _res_nights(r)
+        if not ci or n <= 0:
+            continue
+        lid = r.get("listingMapId")
+        nightly = _res_revenue(r) / n if n else 0
+        arrivals.append((lid, ci))
+        for i in range(n):
+            nights.append((lid, ci + timedelta(days=i), nightly))
+    return nights, arrivals
+
+def _unit_reco(pace30, occ90, adr, adr_median):
+    """Revenue-max heuristic -> (key, label_ar, reason_ar, suggested_pct)."""
+    if pace30 is None:
+        return ("watch", "🟡 راقب", "بيانات غير كافية", 0)
+    p = round(pace30 * 100)
+    if pace30 >= 0.85:
+        return ("raise", "🔼 ارفع", f"يمتلئ بسرعة (محجوز {p}% من الـ٣٠ يوم الجاية) — فيه مجال ترفع", 12)
+    if pace30 >= 0.65:
+        return ("raise_small", "🔼 ارفع بسيط", f"طلب قوي (pace {p}%)", 6)
+    if pace30 >= 0.40:
+        if adr and adr_median and adr < 0.9 * adr_median and (occ90 or 0) >= 0.6:
+            return ("raise_small", "🔼 ارفع بسيط", "سعرك أقل من متوسط المحفظة وإشغالك جيد", 5)
+        return ("hold", "⏸️ ثابت", f"وضع متوازن (pace {p}%)", 0)
+    if adr and adr_median and adr > 1.1 * adr_median:
+        return ("lower", "🔽 خفّض", f"طلب ضعيف وسعرك أعلى من المتوسط (pace {p}%)", -12)
+    return ("lower", "🔽 خفّض", f"طلب ضعيف للـ٣٠ يوم الجاية (pace {p}%)", -8)
+
+_AR_MONTHS = ["", "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+
+def compute_revenue_report(reservations, listings_map):
+    """Crunch the history into per-unit recs + seasonality + salary-cycle. Pure/no I/O."""
+    today = datetime.now(TZ).date()
+    w_start = today - timedelta(days=REVENUE_WINDOW_DAYS)
+    n30 = today + timedelta(days=30)
+    y_start = today - timedelta(days=365)
+    nights, arrivals = _explode_nights(reservations)
+
+    # ---- per-unit: trailing-window occupancy/ADR + forward 30-day pace ----
+    sold90, rev90, booked30 = defaultdict(int), defaultdict(float), defaultdict(int)
+    for lid, d, nightly in nights:
+        if w_start <= d < today:
+            sold90[lid] += 1
+            rev90[lid] += nightly
+        if today <= d < n30:
+            booked30[lid] += 1
+    units = []
+    adrs = []
+    for lid in set(list(sold90) + list(booked30)):
+        s = sold90[lid]
+        adr = (rev90[lid] / s) if s else None
+        if adr:
+            adrs.append(adr)
+    adr_median = sorted(adrs)[len(adrs) // 2] if adrs else None
+    all_lids = set(list(sold90) + list(booked30))
+    for lid in all_lids:
+        s = sold90[lid]
+        occ90 = s / REVENUE_WINDOW_DAYS
+        adr = (rev90[lid] / s) if s else None
+        pace30 = booked30[lid] / 30
+        revpar = (rev90[lid] / REVENUE_WINDOW_DAYS) if REVENUE_WINDOW_DAYS else 0
+        key, label, reason, pct = _unit_reco(pace30, occ90, adr, adr_median)
+        units.append({
+            "lid": lid, "name": listings_map.get(lid) or f"unit-{lid}",
+            "occ90": occ90, "adr": adr, "revpar": revpar, "pace30": pace30,
+            "reco": key, "label": label, "reason": reason, "pct": pct,
+        })
+    units.sort(key=lambda u: (u["pace30"] or 0), reverse=True)
+
+    # ---- seasonality: avg nightly (ADR) + volume by month-of-year ----
+    m_rev, m_nights = defaultdict(float), defaultdict(int)
+    for lid, d, nightly in nights:
+        m_rev[d.month] += nightly
+        m_nights[d.month] += 1
+    total_n = sum(m_nights.values())
+    overall_adr = (sum(m_rev.values()) / total_n) if total_n else 0
+    months = []
+    for m in range(1, 13):
+        if m_nights[m]:
+            adr_m = m_rev[m] / m_nights[m]
+            months.append({"m": m, "name": _AR_MONTHS[m], "adr": adr_m,
+                           "nights": m_nights[m],
+                           "index": (adr_m / overall_adr) if overall_adr else 1})
+    months.sort(key=lambda x: x["index"], reverse=True)
+
+    # ---- salary cycle: arrivals per day-of-month (last 365d), normalized by occurrences ----
+    occ_count = defaultdict(int)        # how many calendar dates had each day-of-month
+    d = y_start
+    while d < today:
+        occ_count[d.day] += 1
+        d += timedelta(days=1)
+    arr_by_dom = defaultdict(int)
+    for lid, ci in arrivals:
+        if y_start <= ci < today:
+            arr_by_dom[ci.day] += 1
+    rates = {dom: (arr_by_dom[dom] / occ_count[dom]) for dom in range(1, 32) if occ_count.get(dom)}
+    mean_rate = (sum(arr_by_dom.values()) / sum(occ_count[d] for d in range(1, 32) if occ_count.get(d))) \
+        if arr_by_dom else 0
+    dom_index = {dom: (rates[dom] / mean_rate if mean_rate else 1) for dom in rates}
+    # find the weakest contiguous run within days 1..28 (avoid month-end sparsity)
+    weak_days = [dom for dom in range(1, 29) if dom_index.get(dom, 1) < 0.92]
+    strong_days = [dom for dom in range(1, 32) if dom_index.get(dom, 1) > 1.08]
+
+    def _run(days):
+        if not days:
+            return None
+        best = cur = [days[0]]
+        for x in days[1:]:
+            if x == cur[-1] + 1:
+                cur.append(x)
+            else:
+                if len(cur) > len(best):
+                    best = cur
+                cur = [x]
+        if len(cur) > len(best):
+            best = cur
+        return (best[0], best[-1])
+
+    salary = {
+        "dom_index": dom_index,
+        "weak_window": _run(weak_days),
+        "strong_window": _run(strong_days),
+        "have_data": bool(arr_by_dom),
+    }
+    return {"units": units, "months": months, "salary": salary,
+            "overall_adr": overall_adr, "total_nights": total_n,
+            "active": len(all_lids)}
+
+def _pct(x):
+    return f"{round((x - 1) * 100):+d}%"
+
+def build_revenue_embeds(rep):
+    """Turn the computed report into Discord embeds + a detail CSV (bytes)."""
+    units = rep["units"]
+    raises = [u for u in units if u["reco"] in ("raise", "raise_small")]
+    lowers = [u for u in units if u["reco"] == "lower"]
+    holds = [u for u in units if u["reco"] == "hold"]
+    port_occ = (sum(u["occ90"] for u in units) / len(units)) if units else 0
+    port_pace = (sum((u["pace30"] or 0) for u in units) / len(units)) if units else 0
+
+    e1 = discord.Embed(
+        title="📊 تقرير الإيرادات الأسبوعي · عوجا",
+        description=(f"الوحدات الفعّالة: **{rep['active']}** · إشغال آخر {REVENUE_WINDOW_DAYS} يوم: "
+                     f"**{round(port_occ*100)}%** · متوسط الحجز للـ٣٠ يوم الجاية: **{round(port_pace*100)}%** · "
+                     f"متوسط السعر/الليلة: **{round(rep['overall_adr'])} ر.س**\n"
+                     f"الهدف: **أعلى إيراد إجمالي** · *توصيات فقط — أنت تقرر التطبيق*"),
+        color=GOLD)
+    if raises:
+        txt = "\n".join(f"• **{u['name']}** {u['label']} ~{u['pct']:+d}% — {u['reason']}"
+                        for u in raises[:12])
+        e1.add_field(name=f"🔼 ارفع السعر ({len(raises)})", value=txt[:1024], inline=False)
+    if lowers:
+        txt = "\n".join(f"• **{u['name']}** {u['pct']:+d}% — {u['reason']}" for u in lowers[:12])
+        e1.add_field(name=f"🔽 خفّض السعر ({len(lowers)})", value=txt[:1024], inline=False)
+    e1.add_field(name="⏸️ ثابت", value=f"{len(holds)} وحدة وضعها متوازن", inline=False)
+    e1.set_footer(text="التفاصيل الكاملة لكل وحدة في الملف المرفق · الأسعار قبل الضريبة ورسوم المنصة")
+
+    e2 = discord.Embed(title="🗓️ أقوى وأضعف الشهور (حسب متوسط السعر)", color=GOLD)
+    if rep["months"]:
+        top = rep["months"][:3]
+        bot_ = rep["months"][-3:]
+        e2.add_field(name="الأقوى",
+                     value="\n".join(f"• {m['name']}: {round(m['adr'])} ر.س/ليلة ({_pct(m['index'])} عن المعدل)"
+                                     for m in top) or "—", inline=False)
+        e2.add_field(name="الأضعف",
+                     value="\n".join(f"• {m['name']}: {round(m['adr'])} ر.س/ليلة ({_pct(m['index'])} عن المعدل)"
+                                     for m in reversed(bot_)) or "—", inline=False)
+        e2.set_footer(text="ارفع الأسعار الأساسية في الشهور القوية، وخفّفها في الضعيفة")
+
+    s = rep["salary"]
+    e3 = discord.Embed(title="💸 دورة الراتب داخل الشهر", color=GOLD)
+    if s["have_data"]:
+        parts = []
+        ww, sw = s["weak_window"], s["strong_window"]
+        if ww:
+            a, b = ww
+            avgw = sum(s["dom_index"].get(d, 1) for d in range(a, b + 1)) / (b - a + 1)
+            parts.append(f"📉 الطلب يضعف في أيام **{a}–{b}** ({_pct(avgw)} عن المعدل) — اقتراح: خفّض "
+                         f"~{min(12, round((1-avgw)*100))}% على الليالي اللي تقع في هالأيام.")
+        if sw:
+            a, b = sw
+            avgs = sum(s["dom_index"].get(d, 1) for d in range(a, b + 1)) / (b - a + 1)
+            parts.append(f"📈 الطلب يرتفع حول أيام **{a}–{b}** ({_pct(avgs)} عن المعدل) — اقتراح: ثبّت أو "
+                         f"ارفع ~{min(12, round((avgs-1)*100))}% على هالأيام.")
+        parts.append("ملاحظتك كانت: ضعف ٢٠–٢٤ والراتب يوم ٢٥ — فوق تشوف اللي طلعته بياناتك فعلياً.")
+        e3.description = "\n\n".join(parts)
+    else:
+        e3.description = "ما فيه بيانات وصول كافية في آخر سنة لتحليل دورة الراتب بعد."
+
+    # ---- detail CSV (every unit) ----
+    rows = ["unit,occupancy_90d_%,ADR_SAR,RevPAR_SAR,pace_30d_%,recommendation,suggested_%"]
+    for u in sorted(rep["units"], key=lambda x: (x["reco"] != "raise", x["name"])):
+        rows.append(",".join([
+            '"' + str(u["name"]).replace('"', "'") + '"',
+            str(round(u["occ90"] * 100)),
+            str(round(u["adr"])) if u["adr"] else "",
+            str(round(u["revpar"])),
+            str(round((u["pace30"] or 0) * 100)),
+            u["reco"], str(u["pct"]),
+        ]))
+    csv_bytes = ("\n".join(rows)).encode("utf-8-sig")
+    return [e1, e2, e3], csv_bytes
+
+async def post_revenue_report():
+    if not ASSISTANT_ENABLED:
+        pass  # report doesn't require the assistant; keep running regardless
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    channel = await ensure_channel(guild, REVENUE_CHANNEL, await get_assistant_category(guild))
+    if channel is None:
+        return
+    reservations = await asyncio.to_thread(fetch_all_reservations)
+    if not reservations:
+        await channel.send("⚠️ ما قدرت أجيب بيانات الحجوزات من Hostaway لهذا التقرير.")
+        return
+    listings_map = await asyncio.to_thread(get_listings_map)
+    rep = await asyncio.to_thread(compute_revenue_report, reservations, listings_map)
+    embeds, csv_bytes = build_revenue_embeds(rep)
+    file = discord.File(io.BytesIO(csv_bytes), filename="ouja_revenue_detail.csv")
+    await channel.send(embeds=embeds, file=file)
+    print(f"revenue: posted weekly report ({rep['active']} units)")
+
+_revenue_last_date = None
+
+@tasks.loop(minutes=30)
+async def revenue_loop():
+    """Fire once on the configured weekday + hour (Riyadh)."""
+    global _revenue_last_date
+    now = datetime.now(TZ)
+    if now.weekday() != REVENUE_REPORT_DOW or now.hour != REVENUE_REPORT_HOUR:
+        return
+    if _revenue_last_date == now.date():
+        return
+    _revenue_last_date = now.date()
+    try:
+        await post_revenue_report()
+    except Exception as e:
+        print("revenue_loop error:", e)
+
+# ==================== Per-date pricing opportunities + last-week review ====================
+_res_cache = {"data": None, "ts": 0}
+
+def get_reservations_cached(ttl=1800):
+    """Cache the full reservation pull so multiple reports in a short window reuse it."""
+    if _res_cache["data"] is not None and (time.time() - _res_cache["ts"]) < ttl:
+        return _res_cache["data"]
+    data = fetch_all_reservations()
+    _res_cache["data"], _res_cache["ts"] = data, time.time()
+    return data
+
+def fetch_calendar_days(listing_id, start, end):
+    try:
+        data = api_get(f"/listings/{listing_id}/calendar",
+                       params={"startDate": start.isoformat(), "endDate": end.isoformat()})
+        return data.get("result", []) or []
+    except Exception as e:
+        print(f"calendar fetch error ({listing_id}):", e)
+        return []
+
+def compute_demand_factors(reservations):
+    """Build pricing multipliers from real history: per-unit achieved ADR + month / day-of-month
+    / day-of-week demand indices (all relative to the portfolio average)."""
+    today = datetime.now(TZ).date()
+    y_start = today - timedelta(days=365)
+    nights, arrivals = _explode_nights(reservations)
+    u_rev, u_n = defaultdict(float), defaultdict(int)
+    m_rev, m_n = defaultdict(float), defaultdict(int)
+    w_rev, w_n = defaultdict(float), defaultdict(int)
+    for lid, d, nightly in nights:
+        u_rev[lid] += nightly
+        u_n[lid] += 1
+        m_rev[d.month] += nightly
+        m_n[d.month] += 1
+        w_rev[d.weekday()] += nightly
+        w_n[d.weekday()] += 1
+    unit_adr = {lid: (u_rev[lid] / u_n[lid]) for lid in u_n if u_n[lid]}
+    tot_n = sum(u_n.values())
+    overall = (sum(u_rev.values()) / tot_n) if tot_n else 0
+    month_index = {m: ((m_rev[m] / m_n[m]) / overall if overall and m_n[m] else 1) for m in range(1, 13)}
+    dow_index = {w: ((w_rev[w] / w_n[w]) / overall if overall and w_n[w] else 1) for w in range(7)}
+    occ_count = defaultdict(int)
+    dd = y_start
+    while dd < today:
+        occ_count[dd.day] += 1
+        dd += timedelta(days=1)
+    arr = defaultdict(int)
+    for lid, ci in arrivals:
+        if y_start <= ci < today:
+            arr[ci.day] += 1
+    denom = sum(occ_count[d] for d in range(1, 32) if occ_count.get(d))
+    mean = (sum(arr.values()) / denom) if denom else 0
+    dom_index = {d: ((arr[d] / occ_count[d]) / mean if mean and occ_count.get(d) else 1)
+                 for d in range(1, 32)}
+    return {"unit_adr": unit_adr, "overall_adr": overall, "month_index": month_index,
+            "dow_index": dow_index, "dom_index": dom_index}
+
+def compute_price_opportunities(factors, units, horizon=None):
+    """For each active unit's UNBOOKED future nights, compute a demand-informed target price
+    and compare to the current calendar price. Returns (per_unit, all_rows)."""
+    horizon = horizon or PRICE_OPP_HORIZON
+    today = datetime.now(TZ).date()
+    end = today + timedelta(days=horizon)
+    overall = factors["overall_adr"]
+    per_unit = {}
+    all_rows = []
+    for u in units:
+        lid, name = u.get("id"), u.get("name")
+        if not lid:
+            continue
+        base = factors["unit_adr"].get(lid) or u.get("price") or overall
+        if not base:
+            continue
+        pu = per_unit.setdefault(lid, {"name": name, "raise": [], "drop": [], "uplift": 0.0})
+        for day in fetch_calendar_days(lid, today, end):
+            d = _parse_date(day.get("date"))
+            if not d:
+                continue
+            available = int(day.get("isAvailable", 0) or 0) == 1 and not day.get("reservationId")
+            if not available:
+                continue                                   # booked/blocked -> can't reprice
+            cur = day.get("price")
+            cur = float(cur) if isinstance(cur, (int, float)) and cur > 0 else None
+            mi = factors["month_index"].get(d.month, 1)
+            di = factors["dom_index"].get(d.day, 1)
+            wi = factors["dow_index"].get(d.weekday(), 1)
+            target = max(0.6 * base, min(1.8 * base, base * mi * di * wi))
+            lead = (d - today).days
+            clear = target * (0.88 if lead <= 7 else (0.95 if lead <= 14 else 1.0))
+            row = {"lid": lid, "name": name, "date": d.isoformat(), "wd": d.weekday(),
+                   "current": round(cur) if cur else None, "target": round(target),
+                   "clear": round(clear), "lead": lead, "reco": "ok"}
+            if cur and cur < 0.90 * target:
+                row["reco"] = "raise"
+                pu["uplift"] += (target - cur)
+                pu["raise"].append(row)
+            elif cur and lead <= 10 and cur > 1.12 * clear:
+                row["reco"] = "drop"
+                pu["drop"].append(row)
+            all_rows.append(row)
+    return per_unit, all_rows
+
+_AR_WD = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+
+# pending price-change cards: discord_message_id -> {listing_id, name, changes:[{date,price,kind}]}
+_price_opps = {}
+
+def apply_price_changes(listing_id, changes):
+    """Write the approved nightly prices to the Hostaway calendar. Re-verifies the dates are
+    still available first (one range read), then PUTs each. Honors PRICE_APPLY_DRYRUN."""
+    if not changes:
+        return (0, 0)
+    dates = sorted(d for d in (_parse_date(c["date"]) for c in changes) if d)
+    available = set()
+    try:
+        cal = api_get(f"/listings/{listing_id}/calendar",
+                      params={"startDate": dates[0].isoformat(), "endDate": dates[-1].isoformat()})
+        for day in (cal.get("result") or []):
+            if int(day.get("isAvailable", 0) or 0) == 1 and not day.get("reservationId"):
+                dd = _parse_date(day.get("date"))
+                if dd:
+                    available.add(dd.isoformat())
+    except Exception as e:
+        print("price re-verify error:", e)
+        available = None                       # couldn't verify -> best effort, apply anyway
+    applied, skipped = 0, 0
+    for c in changes:
+        if available is not None and c["date"] not in available:
+            skipped += 1                        # got booked / blocked since the report
+            continue
+        if PRICE_APPLY_DRYRUN:
+            print(f"[DRY-RUN] would set {listing_id} {c['date']} -> {int(round(c['price']))} ر.س")
+            applied += 1
+            continue
+        try:
+            api_put(f"/listings/{listing_id}/calendar",
+                    {"startDate": c["date"], "endDate": c["date"],
+                     "isAvailable": 1, "price": int(round(c["price"]))})
+            applied += 1
+        except Exception as e:
+            print(f"apply price error ({listing_id} {c['date']}):", e)
+            skipped += 1
+    return applied, skipped
+
+def _unit_changes(pu):
+    """Flatten a unit's raise/drop rows into apply-ready change dicts."""
+    out = []
+    for r in pu["raise"]:
+        out.append({"date": r["date"], "price": r["target"], "kind": "raise"})
+    for r in pu["drop"]:
+        out.append({"date": r["date"], "price": r["clear"], "kind": "drop"})
+    return out
+
+def build_price_opp_summary(per_unit, all_rows):
+    total_uplift = round(sum(p["uplift"] for p in per_unit.values()))
+    n_raise = sum(len(p["raise"]) for p in per_unit.values())
+    n_drop = sum(len(p["drop"]) for p in per_unit.values())
+    e = discord.Embed(
+        title="💰 فرص التسعير لكل ليلة · عوجا",
+        description=(f"فحصت الليالي المتاحة للـ{PRICE_OPP_HORIZON} يوم الجاية.\n"
+                     f"🔼 ليالي ناقصة تسعير: **{n_raise}** · 🔽 ليالي قريبة تحتاج تخفيض لتمتلئ: **{n_drop}**\n"
+                     f"💵 إيراد إضافي تقديري لو رفعت الناقصة: **~{total_uplift} ر.س**\n"
+                     f"تحت تلقى بطاقة لكل وحدة — اضغط **✅ طبّق** عشان أغيّر الأسعار فعلياً، أو **❌ تجاهل**."
+                     + ("\n⚠️ **وضع التجربة (DRY-RUN)** شغّال — ما راح يتغيّر شي فعلي."
+                        if PRICE_APPLY_DRYRUN else "")),
+        color=GOLD)
+    out = ["unit,date,weekday,current_SAR,target_SAR,clearing_SAR,lead_days,reco"]
+    for r in all_rows:
+        if r["reco"] == "ok":
+            continue
+        out.append(",".join(['"' + str(r["name"]).replace('"', "'") + '"', r["date"],
+                              str(r["wd"]), str(r["current"] or ""), str(r["target"]),
+                              str(r["clear"]), str(r["lead"]), r["reco"]]))
+    return e, ("\n".join(out)).encode("utf-8-sig")
+
+def build_unit_card(pu):
+    """An embed for one unit's opportunities (shown with Apply/Skip buttons)."""
+    nr, nd = len(pu["raise"]), len(pu["drop"])
+    head = f"{pu['name']}"
+    desc = []
+    if nr:
+        desc.append(f"🔼 **رفع {nr} ليلة** (إيراد إضافي ~{round(pu['uplift'])} ر.س)")
+    if nd:
+        desc.append(f"🔽 **خفض {nd} ليلة** (ليالي قريبة فاضية، عشان تمتلئ)")
+    e = discord.Embed(title=head[:256], description="\n".join(desc), color=GOLD)
+    lines = []
+    for r in sorted(pu["raise"], key=lambda x: (x["target"] - (x["current"] or 0)), reverse=True)[:8]:
+        lines.append(f"🔼 {r['date']} ({_AR_WD[r['wd']]}): {r['current']} → ~{r['target']} ر.س")
+    if nr > 8:
+        lines.append(f"… +{nr-8} ليالي رفع أخرى")
+    for r in sorted(pu["drop"], key=lambda x: x["lead"])[:5]:
+        lines.append(f"🔽 {r['date']} ({_AR_WD[r['wd']]}, بعد {r['lead']} يوم): {r['current']} → ~{r['clear']} ر.س")
+    if nd > 5:
+        lines.append(f"… +{nd-5} ليالي خفض أخرى")
+    if lines:
+        e.add_field(name="التفاصيل", value="\n".join(lines)[:1024], inline=False)
+    e.set_footer(text="✅ طبّق = أغيّر هالأسعار في تقويمك · الأسعار قبل الضريبة ورسوم المنصة")
+    return e
+
+async def post_price_opportunities():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    channel = await ensure_channel(guild, PRICE_OPP_CHANNEL, await get_assistant_category(guild))
+    if channel is None:
+        return
+    if not _catalog_units:
+        await asyncio.to_thread(load_catalog, True)
+    reservations = await asyncio.to_thread(get_reservations_cached)
+    if not reservations or not _catalog_units:
+        await channel.send("⚠️ ما قدرت أجهّز فرص التسعير — بيانات الحجوزات أو قائمة الوحدات ناقصة.")
+        return
+    factors = await asyncio.to_thread(compute_demand_factors, reservations)
+    per_unit, rows = await asyncio.to_thread(compute_price_opportunities, factors, _catalog_units)
+    summary, csv_bytes = build_price_opp_summary(per_unit, rows)
+    file = discord.File(io.BytesIO(csv_bytes), filename="ouja_price_opportunities.csv")
+    await channel.send(embed=summary, file=file)
+    # one action card per unit (top by uplift), each with Apply/Skip buttons
+    ranked = sorted([p for p in per_unit.values() if p["raise"] or p["drop"]],
+                    key=lambda p: p["uplift"], reverse=True)
+    posted = 0
+    for pu in ranked[:PRICE_OPP_MAX_CARDS]:
+        changes = _unit_changes(pu)
+        if not changes:
+            continue
+        msg = await channel.send(embed=build_unit_card(pu), view=PriceApplyView())
+        _price_opps[msg.id] = {"listing_id": pu["lid"], "name": pu["name"], "changes": changes}
+        posted += 1
+    print(f"price-opp: posted summary + {posted} action cards ({len(per_unit)} units checked)")
+
+def compute_last_week(reservations, listings_map, factors):
+    """Actual performance of the last 7 days vs the prior 7, per unit + portfolio."""
+    today = datetime.now(TZ).date()
+    w0, wp = today - timedelta(days=7), today - timedelta(days=14)
+    nights, _ = _explode_nights(reservations)
+    cur = defaultdict(lambda: {"n": 0, "rev": 0.0})
+    prev = defaultdict(lambda: {"n": 0, "rev": 0.0})
+    for lid, d, nightly in nights:
+        if w0 <= d < today:
+            cur[lid]["n"] += 1
+            cur[lid]["rev"] += nightly
+        elif wp <= d < w0:
+            prev[lid]["n"] += 1
+            prev[lid]["rev"] += nightly
+    lids = set(list(cur) + list(prev) + [u["id"] for u in _catalog_units if u.get("id")])
+    units = []
+    for lid in lids:
+        n, rev = cur[lid]["n"], cur[lid]["rev"]
+        adr = (rev / n) if n else (factors["unit_adr"].get(lid) or factors["overall_adr"])
+        empty = max(0, 7 - n)
+        missed = empty * (adr or 0)
+        units.append({"lid": lid, "name": listings_map.get(lid) or f"unit-{lid}",
+                      "n": n, "rev": rev, "occ": n / 7, "adr": adr, "empty": empty,
+                      "missed": missed, "prev_n": prev[lid]["n"], "prev_rev": prev[lid]["rev"]})
+    tot_rev = sum(u["rev"] for u in units)
+    tot_n = sum(u["n"] for u in units)
+    tot_prev = sum(u["prev_rev"] for u in units)
+    avail = len(units) * 7
+    return {"units": units, "tot_rev": tot_rev, "tot_nights": tot_n,
+            "occ": (tot_n / avail) if avail else 0, "tot_prev": tot_prev,
+            "tot_missed": sum(u["missed"] for u in units), "w0": w0, "today": today}
+
+def build_last_week_message(rep):
+    delta = rep["tot_rev"] - rep["tot_prev"]
+    arrow = "🟢▲" if delta >= 0 else "🔴▼"
+    pct = (round(delta / rep["tot_prev"] * 100) if rep["tot_prev"] else 0)
+    e = discord.Embed(
+        title="📅 مراجعة الأسبوع الماضي · عوجا",
+        description=(f"من {rep['w0']} إلى {rep['today']}\n"
+                     f"الإيراد: **{round(rep['tot_rev'])} ر.س**  {arrow} {pct:+d}% عن الأسبوع قبله\n"
+                     f"الإشغال: **{round(rep['occ']*100)}%** · ليالي مباعة: **{rep['tot_nights']}**\n"
+                     f"💸 إيراد ضائع تقديري من الليالي الفاضية: **~{round(rep['tot_missed'])} ر.س**"),
+        color=GOLD)
+    worst = sorted([u for u in rep["units"] if u["empty"] > 0],
+                   key=lambda u: u["missed"], reverse=True)[:8]
+    if worst:
+        e.add_field(
+            name="أكثر وحدات فيها ليالي فاضية (فرصة ضائعة)",
+            value="\n".join(f"• **{u['name']}**: {u['empty']} ليالي فاضية · "
+                            f"~{round(u['missed'])} ر.س ضائعة · إشغال {round(u['occ']*100)}%"
+                            for u in worst)[:1024],
+            inline=False)
+    best = sorted(rep["units"], key=lambda u: u["rev"], reverse=True)[:5]
+    if best and best[0]["rev"]:
+        e.add_field(name="الأعلى إيراداً هالأسبوع",
+                    value="\n".join(f"• **{u['name']}**: {round(u['rev'])} ر.س · "
+                                    f"إشغال {round(u['occ']*100)}%" for u in best if u["rev"])[:1024],
+                    inline=False)
+    e.set_footer(text="«الإيراد الضائع» = ليالي فاضية × متوسط سعر الوحدة · تقديري")
+    return e
+
+async def post_last_week_review():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    channel = await ensure_channel(guild, WEEKLY_REVIEW_CHANNEL, await get_assistant_category(guild))
+    if channel is None:
+        return
+    if not _catalog_units:
+        await asyncio.to_thread(load_catalog, True)
+    reservations = await asyncio.to_thread(get_reservations_cached)
+    if not reservations:
+        await channel.send("⚠️ ما قدرت أجيب بيانات الحجوزات لمراجعة الأسبوع.")
+        return
+    listings_map = await asyncio.to_thread(get_listings_map)
+    factors = await asyncio.to_thread(compute_demand_factors, reservations)
+    rep = await asyncio.to_thread(compute_last_week, reservations, listings_map, factors)
+    await channel.send(embed=build_last_week_message(rep))
+    print("last-week-review: posted")
+
+_price_opp_last = None
+_review_last = None
+
+@tasks.loop(minutes=30)
+async def price_opp_loop():
+    global _price_opp_last
+    now = datetime.now(TZ)
+    if now.weekday() != PRICE_OPP_DOW or now.hour != PRICE_OPP_HOUR or _price_opp_last == now.date():
+        return
+    _price_opp_last = now.date()
+    try:
+        await post_price_opportunities()
+    except Exception as e:
+        print("price_opp_loop error:", e)
+
+@tasks.loop(minutes=30)
+async def weekly_review_loop():
+    global _review_last
+    now = datetime.now(TZ)
+    if now.weekday() != WEEKLY_REVIEW_DOW or now.hour != WEEKLY_REVIEW_HOUR or _review_last == now.date():
+        return
+    _review_last = now.date()
+    try:
+        await post_last_week_review()
+    except Exception as e:
+        print("weekly_review_loop error:", e)
+
+
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
+    bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
     # On first start, mark older inbox messages as already-seen so the assistant doesn't
     # replay old backlog — but KEEP messages from the last few minutes so a fresh guest
     # message still gets a card even if the bot just restarted/redeployed.
@@ -2034,6 +2756,12 @@ async def on_ready():
         escalation_reping_loop.start()
     if not persist_loop.is_running():
         persist_loop.start()
+    if not revenue_loop.is_running():
+        revenue_loop.start()
+    if not price_opp_loop.is_running():
+        price_opp_loop.start()
+    if not weekly_review_loop.is_running():
+        weekly_review_loop.start()
     if WEBHOOKS_ENABLED and _HAS_AIOHTTP and _web_runner is None:
         try:
             await start_web_server()
@@ -2050,6 +2778,24 @@ async def on_ready():
             await post_headsup(items, tomorrow, weekend)
         except Exception as e:
             print("test heads-up error:", e)
+    if REVENUE_TEST:
+        print("REVENUE_TEST=1 — building the weekly revenue report now (test run)")
+        try:
+            await post_revenue_report()
+        except Exception as e:
+            print("test revenue report error:", e)
+    if PRICE_OPP_TEST:
+        print("PRICE_OPP_TEST=1 — building price opportunities now (test run)")
+        try:
+            await post_price_opportunities()
+        except Exception as e:
+            print("test price-opp error:", e)
+    if WEEKLY_REVIEW_TEST:
+        print("WEEKLY_REVIEW_TEST=1 — building last-week review now (test run)")
+        try:
+            await post_last_week_review()
+        except Exception as e:
+            print("test last-week-review error:", e)
     if DISCOUNT_TEST not in ("0", "", "false", "False", "no"):
         try:
             pct = (DISCOUNT_TIER1_PERCENT if DISCOUNT_TEST in ("1", "true", "True", "yes")
