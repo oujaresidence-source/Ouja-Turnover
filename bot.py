@@ -803,9 +803,13 @@ that are obvious or that you were explicitly given (e.g. a friendly "حياك ا
 "تم، بالتوفiق"). These get sent to the guest automatically, so only use "auto" when you are sure.
 - "reply" → a helpful reply you CAN draft, but a human should approve it first because it is more \
 substantive, or you are not fully certain (most amenity/directions/check-in answers fall here).
-- "escalate" → needs a human (see list below). Draft no reply.
+- "escalate" → matches the MUST-escalate list below. Draft no reply.
 
-WHEN IN DOUBT: prefer "reply" over "auto", and prefer "escalate" over "reply". Never gamble on "auto".
+WHEN IN DOUBT between "auto" and "reply", pick "reply" — a human approves it before it sends, so it is \
+always safe. Only choose "escalate" when the request matches the MUST-escalate list (complaint, dispute, \
+refund, booking change, upset guest, security info). A question you simply don't have the answer to \
+(like live availability) is NOT a reason to escalate — suggest what you can and point the guest to the \
+Airbnb link. Never gamble on "auto".
 
 YOU MAY draft replies (auto or reply) about
 - Unit amenities (wifi, parking, pool, kitchen, facilities)
@@ -831,17 +835,28 @@ if the guest asks directly. Politely tell them the full location and arrival det
 after the booking is confirmed. You may still talk about the general area, amenities, and price.
 - Only share location and the arrival-guide link when Booking status is CONFIRMED.
 
-SUGGESTING ANOTHER UNIT
-- If the guest asks for a different/another unit (or bigger/cheaper/another area): FIRST ask what \
-they want — preferred neighborhood/area, number of bedrooms, and any must-haves or budget — unless \
-they already said. Don't suggest before you know their criteria.
+SUGGESTING A UNIT / AVAILABILITY  (do NOT escalate these — suggest instead)
+- If the guest asks for another/different unit, a bigger/cheaper/smaller one, a unit in another area, \
+a unit with a certain feature (balcony, pool, terrace, X bedrooms, etc.), OR simply "do you have a \
+unit available today / for these dates?": this is a SUGGESTION task. Use action "reply" (a human \
+approves it). It is NOT an escalation.
+- FIRST, if you don't already know what they want, ask briefly: preferred area, number of bedrooms, \
+and any must-have or budget. If they already told you, skip the questions and suggest right away.
 - Then, from the "قائمة وحدات عوجا" in the context, suggest 1-3 matches. For each: name, bedrooms, \
-area, the "starting from" nightly price, and the Airbnb link if it's in the list. NEVER invent a link \
-or detail. If nothing matches exactly, suggest the closest and clearly state the differences.
+area, the "starting from" nightly price, and the Airbnb link if it is in the list. NEVER invent a link \
+or a detail. If nothing matches exactly, suggest the closest and state the differences honestly.
+- AVAILABILITY: you do NOT have live availability. Never promise a unit is free. Instead, suggest the \
+options and tell the guest to check live availability and book directly from the Airbnb link (the link \
+always shows what is open for their dates). Not knowing availability is NEVER a reason to escalate — \
+suggest + send them to the link.
+- A FEATURE you're not sure about (e.g. whether a unit allows smoking, or has a specific view): if it \
+is not in your provided info, suggest the closest units, be honest that you'd confirm that specific \
+detail with the team, and keep it action "reply" so a human checks. Do NOT invent the feature.
 - Whenever you mention a price, add a short note that prices are approximate and BEFORE tax and the \
 platform service fee.
-- You are NOT availability-aware: don't promise a unit is free for their dates — tell them to confirm \
-and book from the Airbnb link. This is a normal "reply" (needs approval), not an escalation.
+- MIXED message: if a guest asks several things and you can help with some (suggest units, directions, \
+amenities) but one part truly needs a human (e.g. extending checkout, a refund), DRAFT a "reply" that \
+handles what you can and says you'll check the rest with the team — do not escalate the whole message.
 
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
@@ -1022,10 +1037,22 @@ def load_catalog(force=False):
     except Exception as e:
         print("catalog load error:", e)
 
-# Hints that the guest is asking about a different/another unit (to inject the catalog).
-_ALT_HINTS = ["ثاني", "ثانيه", "ثانية", "بديل", "غيره", "غيرها", "اكبر", "أكبر", "ارخص", "أرخص",
-              "اصغر", "أصغر", "خيار", "خيارات", "وحده ثاني", "شقه ثاني", "another", "other",
-              "different", "bigger", "cheaper", "smaller", "option", "alternativ"]
+# Hints that the guest is asking about a different unit, availability, or a feature
+# (any of these injects the units catalog so the bot SUGGESTS instead of escalating).
+_ALT_HINTS = [
+    # another / different / bigger / cheaper
+    "ثاني", "ثانيه", "ثانية", "بديل", "غيره", "غيرها", "اكبر", "أكبر", "ارخص", "أرخص",
+    "اصغر", "أصغر", "خيار", "خيارات", "وحده ثاني", "شقه ثاني",
+    "another", "other", "different", "bigger", "cheaper", "smaller", "option", "alternativ",
+    # availability / is there a unit
+    "متاح", "متاحه", "متاحة", "متوفر", "متوفره", "متوفرة", "توفر", "التوفر", "فاضي", "فاضيه",
+    "فاضية", "شاغر", "شاغره", "فيه وحده", "فيه شقة", "فيه شقه", "عندكم وحده", "عندكم شقة",
+    "available", "availab", "vacant", "vacancy", "any unit", "do you have a unit",
+    # features that point to a different unit
+    "بلكون", "تراس", "مسبح", "تدخين", "حوش", "استوديو", "غرفتين", "ثلاث غرف", "ثلاث غرفه",
+    "balcony", "terrace", "pool", "smoking", "studio", "two bedroom", "2 bedroom",
+    "three bedroom", "3 bedroom",
+]
 
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False, dates=None):
     """Call Claude to draft a reply. Returns parsed dict or None on failure."""
@@ -1044,16 +1071,19 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                    if facts else "")
     want_catalog = _catalog_text and any(h in history_text.lower() for h in _ALT_HINTS)
     catalog_block = (
-        "قائمة وحدات عوجا للاقتراح عند طلب بديل:\n" + _catalog_text + "\n\n"
+        "قائمة وحدات عوجا للاقتراح عند طلب بديل أو سؤال عن التوفّر:\n" + _catalog_text + "\n\n"
         "تعليمات الاقتراح:\n"
-        "- أول ما يطلب شقة/وحدة ثانية أو بديل، اسأله بلطف عن اللي يبيه: أي حي/منطقة يفضّل، كم غرفة "
-        "يحتاج، وأي شي مهم له (ميزانية، قرب من مكان...). لا تقترح قبل ما تعرف مطلبه.\n"
-        "- بعد ما يوضّح، طابق من القائمة واقترح 1-3 خيارات. لكل خيار: الاسم، عدد الغرف، المنطقة، "
-        "السعر التقريبي لليلة (يبدأ من)، ورابط Airbnb لو موجود. لا تخترع رابط أو تفاصيل.\n"
-        "- لو ما فيه مطابق تماماً لطلبه، اقترح أقرب خيار ووضّح الفروقات بصراحة (مثلاً: أكبر بغرفة، "
-        "أو في حي قريب من اللي طلب).\n"
-        "- إذا ذكرت أي سعر، أضف في النهاية تنويه: الأسعار تقريبية وقبل الضريبة ورسوم المنصة.\n"
-        "- إنت مهب متأكد من التوفّر لتواريخه — وجّهه يتأكد ويحجز من رابط Airbnb.\n\n"
+        "- أول ما يطلب شقة/وحدة ثانية أو بديل أو يسأل (فيه وحده متاحه؟ / عندكم شي فاضي؟): اسأله بلطف "
+        "عن اللي يبيه (أي حي، كم غرفة، وش المهم له) إلا إذا قالها، وبعدها اقترح طول.\n"
+        "- طابق من القائمة واقترح 1-3 خيارات. لكل خيار: الاسم، عدد الغرف، المنطقة، السعر التقريبي لليلة "
+        "(يبدأ من)، ورابط Airbnb لو موجود. لا تخترع رابط أو تفاصيل.\n"
+        "- لو ما فيه مطابق تماماً، اقترح أقرب خيار ووضّح الفروقات بصراحة.\n"
+        "- التوفّر: إنت ما تعرف التوفّر المباشر. لا توعد إن وحدة فاضية — بدّل: اعرض الخيارات ووجّهه يتأكد "
+        "ويحجز من رابط Airbnb (الرابط يبيّن المتاح لتواريخه). **السؤال عن التوفّر مو سبب للتصعيد إطلاقاً** "
+        "— اقترح ووجّهه للرابط.\n"
+        "- ميزة مو متأكد منها (مثلاً: الوحدة مسموح فيها تدخين؟ فيها بلكون؟) وما هي عندك بالمعلومات: اقترح "
+        "أقرب الوحدات، وقل بصراحة إنك بتتأكد من هالتفصيلة مع الفريق، وخلها رد (يراجعه إنسان). لا تخترع.\n"
+        "- إذا ذكرت سعر، أضف تنويه: الأسعار تقريبية وقبل الضريبة ورسوم المنصة.\n\n"
         ) if want_catalog else ""
     user = (f"{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
             f"{status_line}\n{guide_line}{dates_line}\n\n"
