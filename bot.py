@@ -98,6 +98,10 @@ PRICE_OPP_TEST      = os.environ.get("PRICE_OPP_TEST", "0") in ("1", "true", "Tr
 # When you click ✅ apply, the bot writes the new price to your Hostaway calendar.
 # Set PRICE_APPLY_DRYRUN=1 to TEST safely (logs what it would do, changes nothing).
 PRICE_APPLY_DRYRUN  = os.environ.get("PRICE_APPLY_DRYRUN", "0") in ("1", "true", "True", "yes")
+# Dynamic pricing strategy: after you Apply, the bot keeps optimizing that unit's open nights
+# toward the best numbers (holds high when far out; steps down as a night stays empty & nears).
+PRICING_STRATEGY_ENABLED = os.environ.get("PRICING_STRATEGY_ENABLED", "1") in ("1", "true", "True", "yes")
+PRICING_STRATEGY_MIN     = int(os.environ.get("PRICING_STRATEGY_MIN", "10"))   # re-optimize interval (min)
 PRICE_OPP_MAX_CARDS = int(os.environ.get("PRICE_OPP_MAX_CARDS", "15"))  # action cards to post
 # ---- Last-week performance review (#last-week-review) ----
 WEEKLY_REVIEW_CHANNEL = os.environ.get("WEEKLY_REVIEW_CHANNEL", "last-week-review")
@@ -187,6 +191,7 @@ ASSISTANT_ACK_EN   = os.environ.get("ASSISTANT_ACK_EN",
     "Thank you 🤍 We've escalated this to our specialized team and someone will contact you shortly.")
 # Escalations go to their own channel, ping the operation team, and re-ping until claimed.
 ESCALATION_CHANNEL    = os.environ.get("ESCALATION_CHANNEL", "escalations")
+AUTO_REPLY_CHANNEL    = os.environ.get("AUTO_REPLY_CHANNEL", "auto-replies")  # audit log of Stage-1 auto-sends
 ESCALATION_REPING_MIN = int(os.environ.get("ESCALATION_REPING_MIN", "10"))   # re-ping every N min
 ESCALATION_MAX_PINGS  = int(os.environ.get("ESCALATION_MAX_PINGS", "12"))    # stop after this many re-pings
 CLAIM_NAMES = [n.strip() for n in os.environ.get(
@@ -1466,6 +1471,7 @@ def send_guest_message(conversation_id, body, comm_type="email"):
 # pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
 _escalations = {}
 _esc_ack_count = {}     # conversation_id -> how many escalation acks we've sent
+_esc_sent_acks = {}     # conversation_id -> [ack bodies we sent] (to tell our msgs from a co-host's)
 _claimed_convos = set() # conversation_ids a human has claimed (stop auto-acks)
 
 class NameSelect(discord.ui.Select):
@@ -1889,6 +1895,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                               item["history"], item["guest_text"]) or static
             try:
                 await asyncio.to_thread(send_guest_message, cid, ack, item["comm_type"])
+                _esc_sent_acks.setdefault(cid, []).append(ack)
                 embed.add_field(name="📤 تم إبلاغ الضيف",
                                 value=("رسالة طمأنة متعاطفة (متابعة)" if n > 1
                                        else "رسالة طمأنة إنه تم تصعيد طلبه للقسم المختص."),
@@ -1912,7 +1919,9 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                     "conversation_id": item["conversation_id"],
                                     "guest_text": item["guest_text"],
                                     "reason": result.get("reason", ""), "history": item["history"],
-                                    "last_ping": time.time(), "attempts": 0, "claimed_by": None}
+                                    "last_ping": time.time(), "attempts": 0, "claimed_by": None,
+                                    "last_msg_id": item.get("message_id") or 0,
+                                    "acks": list(_esc_sent_acks.get(item["conversation_id"], []))}
         except Exception as e:
             print("escalation post error:", e)
         return
@@ -1929,6 +1938,22 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · رد تلقائي للعلم")
             await channel.send(embed=embed)
             log_event("guest", f"رد تلقائي ({round(conf*100)}%) · {g} · {item['unit']}")
+            # --- auto-reply audit: keep a record + post to the dedicated audit channel ---
+            _auto_replies.appendleft({"ts": datetime.now(TZ).isoformat(timespec="seconds"),
+                                      "guest": g, "unit": item["unit"], "conf": round(conf * 100),
+                                      "guest_text": (item["guest_text"] or "")[:600], "reply": reply[:1000]})
+            try:
+                audit = await ensure_channel(channel.guild, AUTO_REPLY_CHANNEL,
+                                             await get_assistant_category(channel.guild))
+                if audit:
+                    a = discord.Embed(title=f"⚡ {g} · {item['unit']}", color=0x3BA55D,
+                                      timestamp=datetime.now(TZ))
+                    a.add_field(name="📩 الضيف", value=(item["guest_text"] or "—")[:1000], inline=False)
+                    a.add_field(name="🤍 رد المساعد (تلقائي)", value=reply[:1000], inline=False)
+                    a.set_footer(text=f"ثقة {round(conf*100)}% · أُرسل بدون مراجعة")
+                    await audit.send(embed=a)
+            except Exception as e:
+                print("auto-reply audit post error:", e)
             return
         except Exception as e:
             print("auto-send failed, falling back to approval:", e)
@@ -2054,6 +2079,8 @@ async def _handle_health(request):
 
 # ---------------- Activity log (feeds the dashboard) ----------------
 _activity = deque(maxlen=800)
+_auto_replies = deque(maxlen=500)     # audit of Stage-1 auto-sent messages (guest msg + AI reply)
+_pricing_strategies = {}              # lid -> active dynamic-pricing strategy state
 
 def log_event(category, text):
     """Record something the bot did, for the dashboard's activity feed."""
@@ -2218,6 +2245,7 @@ textarea:focus{outline:none;border-color:var(--gold2);box-shadow:0 0 0 3px rgba(
     </div>
   </div>
   <div class="panel" id="pr"><div class="card"><h3 id="h_pricing">💰</h3><div class="muted" id="upl" style="margin-bottom:12px"></div><div id="prTable"><div class="loading">…</div></div></div></div>
+  <div class="panel" id="auto"><div class="card"><h3 id="h_auto">⚡</h3><div class="muted" id="autoHdr" style="margin-bottom:14px"></div><div id="autoFeed"><div class="loading">…</div></div></div></div>
   <div class="panel" id="log"><div class="card"><h3 id="h_log">📋</h3><div class="catf" id="catf"></div><div id="logFeed"><div class="loading">…</div></div></div></div>
 </div>
 <div class="toast" id="toast"></div>
@@ -2235,6 +2263,10 @@ const T={
   whyMonth:"موسم",whyPay:"راتب",whyWeek:"نهاية أسبوع",noChg:"ما فيه تغييرات لهالوحدة حالياً",
   stApplied:"تم",stBooked:"محجوز",stDry:"تجريبي",stError:"خطأ",
   salExplain:"هذا المنحنى يوضّح في أي أيام من الشهر يحجز الضيوف أكثر. عادةً يرتفع الطلب مع نزول الرواتب. <b>استغلها:</b> ارفع الأسعار في الأيام القوية، وادفع عروض في الأيام الضعيفة عشان تملا الفراغ.",
+  auto:"الردود التلقائية",autoEmpty:"ما فيه ردود تلقائية بعد",autoHdr:"الردود اللي رسلها المساعد تلقائياً (بدون مراجعة)",
+  stratTitle:"استراتيجية التسعير المباشرة",stratActive:"شغّالة الآن · يحسّن تلقائياً",stratDone:"انتهت",stratEvery:"تحديث كل",stratMin:"دقيقة",
+  stratStop:"إيقاف الاستراتيجية",stratStart:"البداية",stratCur:"الحالي",stratStatus:"الحالة",stratBookedT:"انحجزت ✅",stratOpenT:"مفتوحة",
+  stratChanges:"تعديلات",stratStarted:"بدأت",stratResult:"النتيجة",stratBookedN:"محجوزة",stratOpenN:"مفتوحة",stratGoal:"يرفع السعر وقت الطلب وينزّله تدريجياً للّيالي الفاضية لين تنحجز.",
   cU:"الوحدة",cOcc:"إشغال",cAdr:"سعر/ليلة",cPace:"سرعة ٣٠ي",cReco:"التوصية",cChg:"تغييرات",cUp:"إيراد إضافي",cConf:"الثقة",
   cats:{"":"الكل",guest:"الضيوف",escalation:"تصعيدات",pricing:"التسعير",report:"التقارير"},
   kpis:[["active_units","🏠","الوحدات الفعّالة","","g"],["occ_30","📊","إشغال ٣٠ يوم","%","g"],["rev_30","💰","إيراد ٣٠ يوم"," ر.س","g"],
@@ -2252,6 +2284,10 @@ const T={
   whyMonth:"season",whyPay:"payday",whyWeek:"weekend",noChg:"No changes for this unit right now",
   stApplied:"done",stBooked:"booked",stDry:"dry-run",stError:"error",
   salExplain:"This curve shows which days of the month guests book most. Demand usually peaks around payday. <b>Use it:</b> raise prices on strong days, push offers on weak days to fill the gaps.",
+  auto:"Auto-replies",autoEmpty:"No auto-replies yet",autoHdr:"Replies the assistant sent on its own (no review)",
+  stratTitle:"Live pricing strategy",stratActive:"Running · auto-optimizing",stratDone:"Finished",stratEvery:"updates every",stratMin:"min",
+  stratStop:"Stop strategy",stratStart:"Start",stratCur:"Current",stratStatus:"Status",stratBookedT:"booked ✅",stratOpenT:"open",
+  stratChanges:"changes",stratStarted:"Started",stratResult:"Result",stratBookedN:"booked",stratOpenN:"open",stratGoal:"Holds price high when demand is there, steps it down for empty nights as they near — until they book.",
   cU:"Unit",cOcc:"Occ",cAdr:"Rate/nt",cPace:"30d pace",cReco:"Action",cChg:"Changes",cUp:"Extra rev",cConf:"Confidence",
   cats:{"":"All",guest:"Guests",escalation:"Escalations",pricing:"Pricing",report:"Reports"},
   kpis:[["active_units","🏠","Active units","","g"],["occ_30","📊","Occupancy 30d","%","g"],["rev_30","💰","Revenue 30d"," SAR","g"],
@@ -2277,11 +2313,12 @@ const AX={x:{grid:{color:GRID},ticks:{color:MUT}},y:{grid:{color:GRID},ticks:{co
 function applyLang(){
   document.documentElement.dir=t().dir;document.documentElement.lang=L;
   document.getElementById('langBtn').textContent=(L==="ar"?"EN":"ع");
-  const tb=[["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["log","📋"]];
+  const tb=[["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["auto","⚡"],["log","📋"]];
   document.getElementById('tabs').innerHTML=tb.map(x=>`<div class="tab ${x[0]===cur?'on':''}" data-t="${x[0]}" onclick="tab('${x[0]}')">${x[1]} ${t()[x[0]]}<span class="badge" id="bdg_${x[0]}" style="display:none"></span></div>`).join('');
-  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log"};
-  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋"};
+  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log",h_auto:"auto"};
+  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋",h_auto:"⚡"};
   for(const id in H){const e=document.getElementById(id);if(e)e.innerHTML=E[id]+" "+t()[H[id]];}
+  const ah=document.getElementById('autoHdr');if(ah)ah.textContent=t().autoHdr;
   document.getElementById('catf').innerHTML=Object.entries(t().cats).map(([c,l])=>`<div class="tab ${c===curCat?'on':''}" data-c="${c}" onclick="logf('${c}')">${l}</div>`).join('');
   showPanel(cur);
 }
@@ -2298,13 +2335,14 @@ async function init(){try{document.getElementById('lerr').textContent='';await a
   setInterval(pollLive,15000);            // keep KPIs + inbox mirroring live
   }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح · Wrong token'}}
 
-async function loadFast(){            // instant tabs: overview KPIs + inbox + log
+async function loadFast(){            // instant tabs: overview KPIs + inbox + log + auto
   D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');D.log=(await api('/api/log')).items;
-  renderKpis();renderInbox();renderLog();renderFresh();
+  D.auto=(await api('/api/autolog')).items;
+  renderKpis();renderInbox();renderLog();renderAuto();renderFresh();
   if(D.ov.ready){loadOverview();}else{setTimeout(retryOverview,5000);}   // bg compute still warming
 }
 async function retryOverview(){D.ov=await api('/api/overview');renderKpis();renderFresh();if(!D.ov.ready)setTimeout(retryOverview,5000);else loadOverview();}
-async function pollLive(){try{D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');renderKpis();renderInbox();renderFresh();}catch(e){}}
+async function pollLive(){try{D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');D.auto=(await api('/api/autolog')).items;renderKpis();renderInbox();renderAuto();renderFresh();}catch(e){}}
 async function refresh(){const b=document.getElementById('refreshBtn');b.classList.add('spin');
   loaded={};await loadFast();await loadOverview();if(cur==='rev')await loadRevenue();if(cur==='pr')await loadPricing();
   setTimeout(()=>b.classList.remove('spin'),500)}
@@ -2312,7 +2350,7 @@ async function refresh(){const b=document.getElementById('refreshBtn');b.classLi
 async function loadOverview(){if(!D.rev)D.rev=await api('/api/revenue');loaded.ov=true;renderRevenueCharts();renderUnits()}
 async function loadRevenue(){D.rev=await api('/api/revenue');loaded.rev=true;renderRevenueCharts();renderUnits()}
 async function loadPricing(){D.pr=await api('/api/pricing');loaded.pr=true;renderPricing()}
-function renderAll(){renderKpis();renderInbox();renderLog();renderFresh();renderRevenueCharts();renderUnits();renderPricing()}
+function renderAll(){renderKpis();renderInbox();renderLog();renderAuto();renderFresh();renderRevenueCharts();renderUnits();renderPricing()}
 
 function renderFresh(){const u=D.ov&&D.ov.updated?new Date(D.ov.updated*1000):null;
   const dot=document.getElementById('dot');dot.className='dot'+((D.ov&&D.ov.ready)?'':' warn');
@@ -2360,6 +2398,11 @@ function renderInbox(){const d=D.inbox||{replies:[],escalations:[]};
    ${e.claimed_by?`<div class="muted">${t().by}: <b style="color:var(--green)">${esc(e.claimed_by)}</b></div>`:`<div class="acts"><input id="nm_${e.id}" placeholder="${t().namePh}"><button class="btn sm" onclick="doClaim(${e.id})">🙋 ${t().claim}</button></div>`}</div>`).join(''):`<div class="empty">${t().noEsc}</div>`}
 function renderLog(){const items=(D.log||[]).filter(e=>!curCat||e.cat===curCat).slice(0,200),ic={guest:'💬',escalation:'🚨',pricing:'💰',report:'📊'};
   document.getElementById('logFeed').innerHTML=items.length?items.map(e=>`<div class="logrow"><span class="t">${esc(e.ts).replace('T',' ')}</span><span class="ic">${ic[e.cat]||'•'}</span><span>${esc(e.text)}</span></div>`).join(''):`<div class="empty">—</div>`}
+function renderAuto(){const items=D.auto||[];const el=document.getElementById('autoFeed');if(!el)return;
+  el.innerHTML=items.length?items.map(a=>`<div class="item"><div class="top"><span class="who">${esc(a.guest)}</span><span class="unit">${esc(a.unit)}</span></div>
+   <div class="thread"><div class="msg gin"><span class="m-ic">👤</span><div class="m-tx">${esc(a.guest_text)||'—'}</div></div>
+   <div class="msg hout"><span class="m-ic">🤍</span><div class="m-tx">${esc(a.reply)}</div></div></div>
+   <div class="lbl"><span>⚡ ${a.conf}%</span><span class="tm">${esc((a.ts||'').replace('T',' ').slice(0,16))}</span></div></div>`).join(''):`<div class="empty">${t().autoEmpty}</div>`}
 function setBadge(id,n){const b=document.getElementById('bdg_'+id);if(!b)return;if(n>0){b.textContent=n;b.style.display='inline-block'}else b.style.display='none'}
 
 async function doSend(id){const ta=document.getElementById('ta_'+id);const r=await post('/api/send',{id,text:ta.value});
@@ -2381,7 +2424,31 @@ function whyChips(r){const c=[];
 async function openDetail(lid){detailLid=lid;const m=document.getElementById('modal'),s=document.getElementById('sheet');
   s.innerHTML=`<div class="loading">…</div>`;m.classList.add('show');
   try{renderDetail(await api('/api/pricing/detail?lid='+lid),null)}catch(e){renderDetail({rows:[]},null)}}
-function closeDetail(){document.getElementById('modal').classList.remove('show');detailLid=null}
+function closeDetail(){document.getElementById('modal').classList.remove('show');detailLid=null;if(stratTimer){clearInterval(stratTimer);stratTimer=null}}
+let stratTimer=null;
+async function applyDetail(){if(!detailLid)return;const b=document.getElementById('applyBtn');if(b){b.disabled=true;b.textContent='…'}
+  const r=await post('/api/apply',{lid:detailLid});
+  if(r.ok){toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied);loaded.pr=false;loadPricing();openStrategy(detailLid)}
+  else{toast(r.error||t().err);if(b){b.disabled=false;b.textContent='✅ '+t().confirmApply}}}
+async function openStrategy(lid){detailLid=lid;
+  if(stratTimer)clearInterval(stratTimer);
+  const pull=async()=>{try{renderStrategy(await api('/api/strategy?lid='+lid))}catch(e){}};
+  await pull();stratTimer=setInterval(pull,60000);}   // mirror every minute (bot re-optimizes every 10)
+function renderStrategy(s){const sh=document.getElementById('sheet');if(!s||!s.dates){return}
+  const stTxt=r=>r.booked?`<span class="st applied">${t().stratBookedT}</span>`:`<span class="st booked">${t().stratOpenT}</span>`;
+  const rows=s.dates.map(r=>`<tr><td>${r.date}</td><td>${fmt(r.start)}</td><td><span class="arrow">${fmt(r.cur)}</span></td><td>${r.changes} ${t().stratChanges}</td><td>${stTxt(r)}</td></tr>`).join('');
+  const upd=s.updated?new Date(s.updated*1000).toLocaleTimeString(L==='ar'?'ar-SA':'en-US',{hour:'2-digit',minute:'2-digit'}):'—';
+  const status=s.active?`<span class="st applied">● ${t().stratActive}</span>`:`<span class="st booked">${t().stratDone}</span>`;
+  sh.innerHTML=`<div class="sh-top"><div><h2>⚡ ${esc(s.name)}</h2>
+     <div class="muted" style="margin-top:4px">${status} · ${t().stratEvery} ${s.interval} ${t().stratMin}${s.dry_run?' · DRY-RUN':''}</div>
+     <div class="explain" style="margin-top:10px">${t().stratGoal}</div></div><button class="x" onclick="closeDetail()">✕</button></div>
+   <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap">
+     <div class="kpi" style="flex:1;min-width:120px"><div class="v g">${s.booked}/${s.total}</div><div class="l">${t().stratResult} · ${t().stratBookedN}</div></div>
+     <div class="kpi" style="flex:1;min-width:120px"><div class="v">${s.open}</div><div class="l">${t().stratOpenN}</div></div>
+     <div class="kpi" style="flex:1;min-width:120px"><div class="v b" style="font-size:18px">${upd}</div><div class="l">${t().fresh}</div></div></div>
+   <div style="overflow-x:auto"><table><tr><th>${t().dDate}</th><th>${t().stratStart}</th><th>${t().stratCur}</th><th>${t().stratChanges}</th><th>${t().stratStatus}</th></tr>${rows}</table></div>
+   <div class="acts" style="margin-top:15px">${s.active?`<button class="btn red" onclick="stopStrategy(${detailLid})">⏹ ${t().stratStop}</button>`:''}<button class="btn ghost" onclick="closeDetail()">${t().close}</button></div>`}
+async function stopStrategy(lid){await post('/api/strategy/stop',{lid});toast('⏹');try{renderStrategy(await api('/api/strategy?lid='+lid))}catch(e){}}
 function renderDetail(d,results){const s=document.getElementById('sheet');
   if(!d||!d.rows||!d.rows.length){s.innerHTML=`<div class="sh-top"><h2>—</h2><button class="x" onclick="closeDetail()">✕</button></div><div class="empty">${t().noChg}</div>`;return}
   const rm={};if(results)results.forEach(r=>rm[r.date]=r.status);
@@ -2393,11 +2460,6 @@ function renderDetail(d,results){const s=document.getElementById('sheet');
     :`<div class="acts" style="margin-top:15px"><button class="btn" id="applyBtn" onclick="applyDetail()">✅ ${t().confirmApply}</button><button class="btn ghost" onclick="closeDetail()">${t().close}</button></div>`;
   s.innerHTML=`<div class="sh-top"><div><h2>${esc(d.name)}</h2><div class="muted" style="margin-top:3px">${t().basePrice}: ${fmt(d.base)} ${L==='ar'?'ر.س':'SAR'} · ${t().conf}: ${d.confidence}%</div><div class="bar" style="max-width:170px;margin-top:7px"><div style="width:${d.confidence}%"></div></div></div><button class="x" onclick="closeDetail()">✕</button></div>
     <div style="overflow-x:auto;margin-top:12px"><table><tr><th>${t().dDate}</th><th>${t().dDay}</th><th>${t().dCur}</th><th>${t().dNew}</th><th>${t().dWhy}</th><th>${t().dLead}</th><th></th></tr>${rows}</table></div>${footer}`}
-async function applyDetail(){if(!detailLid)return;const b=document.getElementById('applyBtn');if(b){b.disabled=true;b.textContent='…'}
-  let d={rows:[]};try{d=await api('/api/pricing/detail?lid='+detailLid)}catch(e){}
-  const r=await post('/api/apply',{lid:detailLid});
-  if(r.ok){toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied);renderDetail(d,r.results||[]);loaded.pr=false;loadPricing()}
-  else{toast(r.error||t().err);if(b){b.disabled=false;b.textContent='✅ '+t().confirmApply}}}
 if(tok())init();
 </script></body></html>"""
 
@@ -2515,6 +2577,11 @@ async def _api_log(request):
     items = [e for e in reversed(_activity) if not cat or e["cat"] == cat][:200]
     return _json({"items": items})
 
+async def _api_autolog(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"items": list(_auto_replies)[:200]})
+
 async def _api_inbox(request):
     """Live mirror of what the team is acting on: pending replies + open escalations."""
     if not _dash_auth(request):
@@ -2616,6 +2683,8 @@ async def _api_apply(request):
         return _json({"error": "no pending changes (refresh pricing first)"}, 409)
     applied, skipped, results = await asyncio.to_thread(apply_price_changes, lid, changes)
     _last_price_changes.pop(lid, None)
+    if PRICING_STRATEGY_ENABLED:
+        activate_strategy(lid)                 # keep optimizing this unit toward the best numbers
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
     log_event("pricing", f"طبّق {applied} سعر (من اللوحة) · {name}"
               + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
@@ -2633,6 +2702,132 @@ async def _api_pricing_detail(request):
     except Exception:
         return _json({"error": "bad lid"}, 400)
     return _json(_last_price_detail.get(lid) or {"rows": []})
+
+def _strategy_price(base, d, factors):
+    """Best-number price for one night: demand target, stepped down as the night nears while empty."""
+    mi = factors["month_index"].get(d.month, 1)
+    di = factors["dom_index"].get(d.day, 1)
+    wi = factors["dow_index"].get(d.weekday(), 1)
+    target = max(0.6 * base, min(1.8 * base, base * mi * di * wi))
+    lead = (d - datetime.now(TZ).date()).days
+    f = 0.80 if lead <= 2 else 0.86 if lead <= 5 else 0.92 if lead <= 10 else 0.97 if lead <= 20 else 1.0
+    return int(round(max(0.6 * base, target * f)))
+
+def activate_strategy(lid):
+    """Start (or refresh) an active pricing strategy for a unit from its latest detail rows."""
+    det = _last_price_detail.get(lid)
+    if not det or not det.get("rows"):
+        return False
+    dates = {}
+    for r in det["rows"]:
+        p = r["proposed"]
+        dates[r["date"]] = {"start": p, "cur": p, "booked": False, "changes": 0,
+                            "last": datetime.now(TZ).isoformat(timespec="minutes")}
+    _pricing_strategies[lid] = {"name": det.get("name", str(lid)), "base": det.get("base", 0),
+                                "started": datetime.now(TZ).isoformat(timespec="minutes"),
+                                "updated": time.time(), "active": True, "dates": dates}
+    return True
+
+@tasks.loop(minutes=PRICING_STRATEGY_MIN)
+async def pricing_strategy_loop():
+    """Keep re-optimizing every active unit's open nights toward the best numbers."""
+    if not (PRICING_STRATEGY_ENABLED and any(s.get("active") for s in _pricing_strategies.values())):
+        return
+    try:
+        factors = await asyncio.to_thread(lambda: compute_demand_factors(get_reservations_cached()))
+    except Exception as e:
+        print("strategy factors error:", e)
+        return
+    today = datetime.now(TZ).date()
+    for lid, strat in list(_pricing_strategies.items()):
+        if not strat.get("active"):
+            continue
+        try:
+            await asyncio.to_thread(_run_strategy_unit, lid, strat, factors, today)
+        except Exception as e:
+            print(f"strategy unit {lid} error:", e)
+
+def _run_strategy_unit(lid, strat, factors, today):
+    dates = strat["dates"]
+    future = [d for d in dates if (_parse_date(d) or today) >= today]
+    if not future:
+        strat["active"] = False
+        return
+    ds = sorted(_parse_date(d) for d in future)
+    booked_now = {}
+    try:
+        cal = api_get(f"/listings/{lid}/calendar",
+                      params={"startDate": ds[0].isoformat(), "endDate": ds[-1].isoformat()})
+        for day in (cal.get("result") or []):
+            booked_now[day.get("date")] = (int(day.get("isAvailable", 0) or 0) != 1
+                                           or bool(day.get("reservationId")))
+    except Exception as e:
+        print("strategy calendar error:", e)
+        return
+    base = strat.get("base") or factors["overall_adr"]
+    for dstr in future:
+        d = _parse_date(dstr)
+        if d < today:
+            continue
+        rec = dates[dstr]
+        if booked_now.get(dstr):                       # it sold — success, stop managing it
+            if not rec["booked"]:
+                rec["booked"] = True
+                rec["last"] = datetime.now(TZ).isoformat(timespec="minutes")
+                log_event("pricing", f"استراتيجية · انحجزت ليلة {dstr} · {strat['name']} ✅")
+            continue
+        want = _strategy_price(base, d, factors)
+        cur = rec.get("cur") or want
+        if cur and abs(want - cur) / cur >= 0.03:       # only meaningful moves
+            if not PRICE_APPLY_DRYRUN:
+                try:
+                    api_put(f"/listings/{lid}/calendar",
+                            {"startDate": dstr, "endDate": dstr, "isAvailable": 1, "price": want})
+                except Exception as e:
+                    print(f"strategy put {lid} {dstr}:", e)
+                    continue
+            rec["cur"] = want
+            rec["changes"] = rec.get("changes", 0) + 1
+            rec["last"] = datetime.now(TZ).isoformat(timespec="minutes")
+    strat["updated"] = time.time()
+    if all(rec["booked"] or (_parse_date(d) and _parse_date(d) < today) for d, rec in dates.items()):
+        strat["active"] = False
+
+def _strategy_view(lid):
+    s = _pricing_strategies.get(lid)
+    if not s:
+        return {"active": False, "dates": []}
+    rows = sorted(({"date": d, "start": r["start"], "cur": r["cur"], "booked": r["booked"],
+                    "changes": r.get("changes", 0)} for d, r in s["dates"].items()),
+                  key=lambda x: x["date"])
+    booked = sum(1 for r in rows if r["booked"])
+    return {"name": s.get("name"), "base": s.get("base"), "active": s.get("active", False),
+            "started": s.get("started"), "updated": s.get("updated", 0),
+            "interval": PRICING_STRATEGY_MIN, "dry_run": PRICE_APPLY_DRYRUN,
+            "total": len(rows), "booked": booked, "open": len(rows) - booked, "dates": rows}
+
+async def _api_strategy(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    return _json(_strategy_view(lid))
+
+async def _api_strategy_stop(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    s = _pricing_strategies.get(lid)
+    if s:
+        s["active"] = False
+        log_event("pricing", f"إيقاف استراتيجية · {s.get('name', lid)}")
+    return _json({"ok": True})
 
 @tasks.loop(minutes=DASH_REFRESH_MIN)
 async def dashboard_cache_loop():
@@ -2672,7 +2867,10 @@ async def start_web_server():
         app.router.add_get("/api/pricing", _api_pricing)
         app.router.add_get("/api/log", _api_log)
         app.router.add_get("/api/inbox", _api_inbox)
+        app.router.add_get("/api/autolog", _api_autolog)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
+        app.router.add_get("/api/strategy", _api_strategy)
+        app.router.add_post("/api/strategy/stop", _api_strategy_stop)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -2683,9 +2881,57 @@ async def start_web_server():
     await site.start()
     print(f"web server listening on :{WEB_PORT}  (webhook path: /hook/{WEBHOOK_SECRET})")
 
+def _cohost_responded(esc):
+    """True if a human teammate replied to the guest directly since the escalation —
+    an outbound message NEWER than the trigger that we didn't send ourselves."""
+    cid = esc.get("conversation_id")
+    if not cid:
+        return False
+    try:
+        msgs = sorted((api_get(f"/conversations/{cid}/messages").get("result") or []),
+                      key=lambda m: m.get("id", 0) or 0)
+    except Exception:
+        return False
+    base = esc.get("last_msg_id", 0) or 0
+    acks = esc.get("acks", [])
+    for m in msgs:
+        if (m.get("id", 0) or 0) <= base:
+            continue                                   # not newer than the escalation trigger
+        if _msg_is_inbound(m):
+            continue                                   # guest's own message
+        body = (m.get("body") or "").strip()
+        if not body or _looks_automated(body):
+            continue
+        if any(a and a[:40] in body for a in acks):
+            continue                                   # this is one of our own ack messages
+        return True                                    # a human/co-host reply we didn't send
+    return False
+
+async def _resolve_escalation(mid, esc, reason="رد عليه أحد المضيفين"):
+    """Stop nagging: mark resolved, free the conversation, and update the Discord card."""
+    cid = esc.get("conversation_id")
+    if cid:
+        _claimed_convos.add(cid)
+    _escalations.pop(mid, None)
+    log_event("escalation", f"أُغلق تلقائياً ({reason}) · {esc.get('guest','')} · {esc.get('unit','')}")
+    try:
+        ch = bot.get_channel(esc.get("channel_id"))
+        if ch:
+            msg = await ch.fetch_message(mid)
+            done = ClaimView()
+            for c in done.children:
+                c.disabled = True
+            emb = msg.embeds[0] if msg.embeds else discord.Embed()
+            emb.color = 0x3BA55D
+            emb.add_field(name="✅ تم الإغلاق تلقائياً", value=reason, inline=False)
+            await msg.edit(content=f"✅ تم التعامل معه — {reason}", embed=emb, view=done)
+    except Exception as e:
+        print("resolve-escalation edit error:", e)
+
 @tasks.loop(minutes=1)
 async def escalation_reping_loop():
-    """Re-ping the operation team about any escalation that hasn't been claimed yet."""
+    """Re-ping the operation team about any escalation that hasn't been claimed yet —
+    but first auto-resolve any escalation where a co-host already replied (and stop nagging)."""
     if not _escalations:
         return
     guild = bot.get_guild(GUILD_ID)
@@ -2695,7 +2941,13 @@ async def escalation_reping_loop():
     mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
     now = time.time()
     for mid, esc in list(_escalations.items()):
-        if esc.get("claimed_by") or esc["attempts"] >= ESCALATION_MAX_PINGS:
+        if esc.get("claimed_by"):
+            continue
+        # --- auto-close if a teammate already answered the guest directly ---
+        if await asyncio.to_thread(_cohost_responded, esc):
+            await _resolve_escalation(mid, esc)
+            continue
+        if esc["attempts"] >= ESCALATION_MAX_PINGS:
             continue
         if (now - esc["last_ping"]) < ESCALATION_REPING_MIN * 60:
             continue
@@ -2731,6 +2983,10 @@ def load_state():
         _claimed_convos = set(int(x) for x in _load_json("claimed.json", []))
         _activity.clear()
         _activity.extend(_load_json("activity.json", []))
+        _auto_replies.clear()
+        _auto_replies.extend(_load_json("auto_replies.json", []))
+        _pricing_strategies.clear()
+        _pricing_strategies.update({int(k): v for k, v in _load_json("strategies.json", {}).items()})
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed")
@@ -2744,6 +3000,8 @@ def persist_state():
     _save_json("ack_count.json", {str(k): v for k, v in _esc_ack_count.items()})
     _save_json("claimed.json", list(_claimed_convos))
     _save_json("activity.json", list(_activity))
+    _save_json("auto_replies.json", list(_auto_replies))
+    _save_json("strategies.json", {str(k): v for k, v in _pricing_strategies.items()})
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -3485,6 +3743,8 @@ async def on_ready():
         persist_loop.start()
     if DASHBOARD_ENABLED and DASHBOARD_TOKEN and not dashboard_cache_loop.is_running():
         dashboard_cache_loop.start()   # warms the cache immediately, then every few minutes
+    if PRICING_STRATEGY_ENABLED and not pricing_strategy_loop.is_running():
+        pricing_strategy_loop.start()
     if not revenue_loop.is_running():
         revenue_loop.start()
     if not price_opp_loop.is_running():
