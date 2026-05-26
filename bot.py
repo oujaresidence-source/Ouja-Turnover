@@ -990,52 +990,114 @@ class ClaimView(discord.ui.View):
         await interaction.response.send_message("اختر اسمك للاستلام:", view=picker, ephemeral=True)
 
 class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسال"):
-    def __init__(self, item, draft):
+    def __init__(self, item, draft, message_id=None):
         super().__init__()
         self.item = item
+        self.message_id = message_id
         self.box = discord.ui.TextInput(label="الرد للضيف", style=discord.TextStyle.paragraph,
                                         default=draft, max_length=1800)
         self.add_item(self.box)
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)   # ack now; sending can be slow
         text = str(self.box.value).strip()
         try:
             await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
                                     self.item["comm_type"])
-            await interaction.response.send_message(
+            try:
+                msg = await interaction.channel.fetch_message(self.message_id)
+                done = ApproveView()
+                for c in done.children:
+                    c.disabled = True
+                await msg.edit(view=done)
+            except Exception:
+                pass
+            _pending_replies.pop(self.message_id, None)
+            await interaction.followup.send(
                 f"✅ تم الإرسال (بعد التعديل) بواسطة {interaction.user.mention} "
                 f"للضيف **{self.item['guest']}**.")
         except Exception as e:
-            await interaction.response.send_message(f"⚠️ فشل الإرسال: {e}", ephemeral=True)
+            await interaction.followup.send(f"⚠️ فشل الإرسال: {e}", ephemeral=True)
+
+# pending approval cards: discord_message_id -> {"item": item, "draft": draft}
+_pending_replies = {}
+
+def _recover_from_embed(message):
+    """Rebuild (item, draft) from the card itself, so buttons work even after a full redeploy."""
+    try:
+        if not message.embeds:
+            return None, None
+        emb = message.embeds[0]
+        foot = (emb.footer.text or "") if emb.footer else ""
+        m = re.search(r"#(\d+)·(\S+)", foot)
+        if not m:
+            return None, None
+        title = emb.title or ""
+        guest = "الضيف"
+        if "💬" in title:
+            t = title.split("💬", 1)[1].strip()
+            guest = (t.split("·", 1)[0].strip() or guest)
+        draft = None
+        for f in emb.fields:
+            if "الرد المقترح" in (f.name or ""):
+                draft = (f.value or "").strip()
+        if not draft or draft == "—":
+            return None, None
+        return {"conversation_id": int(m.group(1)), "comm_type": m.group(2), "guest": guest}, draft
+    except Exception as e:
+        print("embed recover error:", e)
+        return None, None
 
 class ApproveView(discord.ui.View):
-    def __init__(self, item, draft):
-        super().__init__(timeout=86400)   # buttons live for 24h
+    def __init__(self, item=None, draft=None):
+        super().__init__(timeout=None)   # persistent — survives bot restarts
         self.item = item
         self.draft = draft
 
-    @discord.ui.button(label="✅ إرسال", style=discord.ButtonStyle.success)
+    def _resolve(self, interaction):
+        data = _pending_replies.get(interaction.message.id)
+        if data:
+            return data["item"], data["draft"]
+        if self.item:
+            return self.item, self.draft     # same-session fallback
+        return _recover_from_embed(interaction.message)   # rebuild after a redeploy
+
+    @discord.ui.button(label="✅ إرسال", style=discord.ButtonStyle.success, custom_id="ouja_send")
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
+        item, draft = self._resolve(interaction)
+        if not item:
+            await interaction.response.send_message(
+                "⚠️ هذا الكرت قديم (انعاد تشغيل البوت) — تجاهله وتعامل مع الرسالة يدوياً.",
+                ephemeral=True)
+            return
+        await interaction.response.defer()   # ack within 3s, then do the slow send
         try:
-            await asyncio.to_thread(send_guest_message, self.item["conversation_id"], self.draft,
-                                    self.item["comm_type"])
+            await asyncio.to_thread(send_guest_message, item["conversation_id"], draft,
+                                    item["comm_type"])
             for c in self.children:
                 c.disabled = True
-            await interaction.response.edit_message(view=self)
+            await interaction.message.edit(view=self)
+            _pending_replies.pop(interaction.message.id, None)
             await interaction.followup.send(
-                f"✅ تم الإرسال بواسطة {interaction.user.mention} للضيف **{self.item['guest']}**.")
+                f"✅ تم الإرسال بواسطة {interaction.user.mention} للضيف **{item['guest']}**.")
         except Exception as e:
-            await interaction.response.send_message(f"⚠️ فشل الإرسال: {e}", ephemeral=True)
+            await interaction.followup.send(f"⚠️ فشل الإرسال: {e}", ephemeral=True)
 
-    @discord.ui.button(label="✏️ تعديل وإرسال", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="✏️ تعديل وإرسال", style=discord.ButtonStyle.primary, custom_id="ouja_edit")
     async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EditModal(self.item, self.draft))
+        item, draft = self._resolve(interaction)
+        if not item:
+            await interaction.response.send_message(
+                "⚠️ هذا الكرت قديم (انعاد تشغيل البوت) — تجاهله وتعامل يدوياً.", ephemeral=True)
+            return
+        await interaction.response.send_modal(EditModal(item, draft, interaction.message.id))
 
-    @discord.ui.button(label="🗑️ رفض", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🗑️ رفض", style=discord.ButtonStyle.danger, custom_id="ouja_reject")
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         for c in self.children:
             c.disabled = True
         await interaction.response.edit_message(view=self)
+        _pending_replies.pop(interaction.message.id, None)
         await interaction.followup.send(f"🗑️ تم التجاهل بواسطة {interaction.user.mention}.")
 
 _assistant_seen = set()
@@ -1106,10 +1168,12 @@ async def post_assistant_card(channel, item, result):
 
     # ---- needs approval: draft + buttons ----
     embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=GOLD)
-    embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
-    embed.add_field(name="✍️ الرد المقترح", value=(reply or "—")[:1000], inline=False)
-    embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · راجعه قبل الإرسال · التوقيع يُضاف تلقائياً")
-    await channel.send(embed=embed, view=ApproveView(item, reply))
+    embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1024], inline=False)
+    embed.add_field(name="✍️ الرد المقترح", value=(reply or "—")[:1024], inline=False)
+    embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · راجعه قبل الإرسال · التوقيع يُضاف "
+                          f"تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
+    sent = await channel.send(embed=embed, view=ApproveView(item, reply))
+    _pending_replies[sent.id] = {"item": item, "draft": reply}
 
 @tasks.loop(minutes=ASSISTANT_POLL_MIN)
 async def assistant_loop():
@@ -1179,6 +1243,7 @@ async def escalation_reping_loop():
 async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
+    bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     # On first start, mark everything currently in the inbox as already-seen so the
     # assistant only reacts to messages that arrive from now on.
     if ASSISTANT_ENABLED and not ASSISTANT_TEST and not _assistant_seen:
