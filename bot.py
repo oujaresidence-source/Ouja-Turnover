@@ -105,6 +105,14 @@ ASSISTANT_TEST     = os.environ.get("ASSISTANT_TEST", "0") in ("1", "true", "Tru
 # On startup, messages newer than this many minutes are NOT baselined, so a fresh guest
 # message still gets a card even if the bot just restarted/redeployed. Set 0 to baseline all.
 ASSISTANT_BASELINE_GRACE_MIN = int(os.environ.get("ASSISTANT_BASELINE_GRACE_MIN", "15"))
+# Also draft a reply when the only thing sent AFTER the guest's question is an automated
+# welcome/booking message (so guest questions buried under auto-messages still get answered).
+# A real human/bot reply after the guest still counts as "answered" and is skipped.
+ASSISTANT_ANSWER_PAST_AUTO = os.environ.get("ASSISTANT_ANSWER_PAST_AUTO", "1") in ("1", "true", "True", "yes")
+# Outbound messages containing any of these (case-insensitive, '|'-separated) are treated as
+# automated, not a real answer. Add your Hostaway welcome/automation phrases here.
+AUTO_REPLY_MARKERS = [m.strip() for m in os.environ.get(
+    "AUTO_REPLY_MARKERS", "truly delighted|we are truly|delighted by your|we've prepared|we have prepared").split("|") if m.strip()]
 # Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
 # anything needing approval or a human still posts a card. Default OFF — everything waits
 # for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
@@ -813,6 +821,12 @@ def _parse_msg_dt(s):
             pass
     return None
 
+def _looks_automated(body):
+    """True if an outbound message looks like an automated welcome/booking message
+    (i.e. not a real answer to the guest)."""
+    b = (body or "").lower()
+    return any(mk.lower() in b for mk in AUTO_REPLY_MARKERS)
+
 _guide_cache = {}
 
 def get_guide_url(listing_id):
@@ -916,13 +930,26 @@ def fetch_new_guest_messages(seen, debug=False):
         if not msgs:
             continue
         msgs = sorted(msgs, key=_msg_time)
-        last = msgs[-1]
-        mid = str(last.get("id"))
+        # the guest's most recent (inbound) message
+        guest_idx = next((i for i in range(len(msgs) - 1, -1, -1)
+                          if _msg_is_inbound(msgs[i])), None)
+        if guest_idx is None:
+            continue                                    # guest never messaged
+        guest_msg = msgs[guest_idx]
+        mid = str(guest_msg.get("id"))
+        after = msgs[guest_idx + 1:]                     # anything sent after the guest spoke
+        # "answered" = a real reply exists after the guest (not just an automated welcome)
+        answered = bool(after) and not all(
+            _looks_automated(m.get("body") or "") for m in after)
         if debug:
-            print(f"  conv {cid}: {len(msgs)} msgs · last inbound={_msg_is_inbound(last)} · "
-                  f"id={mid} · body={(last.get('body') or '')[:50]!r}")
-        if mid in seen or not _msg_is_inbound(last):
-            continue                       # already handled, or host already replied
+            print(f"  conv {cid}: {len(msgs)} msgs · guest_last_id={mid} · after={len(after)} · "
+                  f"answered={answered} · body={(guest_msg.get('body') or '')[:50]!r}")
+        if mid in seen:
+            continue                                    # already drafted for this message
+        if answered:
+            continue                                    # a real human/bot reply already exists
+        if after and not ASSISTANT_ANSWER_PAST_AUTO:
+            continue                                    # only auto-replies after, feature off
         lm = c.get("listingMapId")
         unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
         guest = c.get("recipientName") or c.get("guestName") or "Guest"
@@ -935,9 +962,9 @@ def fetch_new_guest_messages(seen, debug=False):
             "listing_id": lm,
             "reservation_id": c.get("reservationId") or res.get("id"),
             "res_status": (res.get("status") or "").lower(),
-            "comm_type": last.get("communicationType") or "email",
-            "guest_text": (last.get("body") or "").strip(), "history": history,
-            "last_time": _msg_time(last),
+            "comm_type": guest_msg.get("communicationType") or "email",
+            "guest_text": (guest_msg.get("body") or "").strip(), "history": history,
+            "last_time": _msg_time(guest_msg),
         })
     if debug:
         print(f"assistant DEBUG: {len(out)} new inbound guest message(s) to draft")
