@@ -124,6 +124,10 @@ ASSISTANT_ALWAYS_DRAFT = os.environ.get("ASSISTANT_ALWAYS_DRAFT", "1") in ("1", 
 KNOWLEDGE_CHANNEL     = os.environ.get("KNOWLEDGE_CHANNEL", "knowledge")
 KNOWLEDGE_REFRESH_MIN = int(os.environ.get("KNOWLEDGE_REFRESH_MIN", "5"))
 KNOWLEDGE_MAX         = int(os.environ.get("KNOWLEDGE_MAX", "300"))   # facts (messages) to load
+# When on, logs each listing's active-status + whether an Airbnb link was found (for tuning).
+CATALOG_DEBUG = os.environ.get("CATALOG_DEBUG", "0") in ("1", "true", "True", "yes")
+# Pull a real "starting from" nightly price from each unit's calendar (reflects dynamic pricing).
+CATALOG_CALENDAR_PRICES = os.environ.get("CATALOG_CALENDAR_PRICES", "1") in ("1", "true", "True", "yes")
 # Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
 # anything needing approval or a human still posts a card. Default OFF — everything waits
 # for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
@@ -794,6 +798,18 @@ if the guest asks directly. Politely tell them the full location and arrival det
 after the booking is confirmed. You may still talk about the general area, amenities, and price.
 - Only share location and the arrival-guide link when Booking status is CONFIRMED.
 
+SUGGESTING ANOTHER UNIT
+- If the guest asks for a different/another unit (or bigger/cheaper/another area): FIRST ask what \
+they want — preferred neighborhood/area, number of bedrooms, and any must-haves or budget — unless \
+they already said. Don't suggest before you know their criteria.
+- Then, from the "قائمة وحدات عوجا" in the context, suggest 1-3 matches. For each: name, bedrooms, \
+area, the "starting from" nightly price, and the Airbnb link if it's in the list. NEVER invent a link \
+or detail. If nothing matches exactly, suggest the closest and clearly state the differences.
+- Whenever you mention a price, add a short note that prices are approximate and BEFORE tax and the \
+platform service fee.
+- You are NOT availability-aware: don't promise a unit is free for their dates — tell them to confirm \
+and book from the Airbnb link. This is a normal "reply" (needs approval), not an escalation.
+
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
 - Offer any discount, comp, or price change
@@ -889,7 +905,96 @@ def get_reservation_status(reservation_id):
 # Knowledge base loaded from the #knowledge Discord channel; injected into every draft.
 _knowledge_text = ""
 
-def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False):
+# Units catalog (name · bedrooms · area · base price · Airbnb link) pulled from Hostaway.
+_catalog_text = ""
+_catalog_ts = 0
+
+def _listing_active(L):
+    """False if the listing looks inactive/unlisted (the red 🚫 in Hostaway) — skip those."""
+    v = L.get("status")
+    if isinstance(v, str) and v.lower() in (
+            "inactive", "disabled", "unlisted", "delisted", "deleted", "draft", "paused", "off"):
+        return False
+    if v in (0, "0", False):
+        return False
+    for key in ("isActive", "listed", "active", "isListed"):
+        if key in L and L.get(key) in (0, "0", False, "false", "False"):
+            return False
+    return True
+
+def _airbnb_link(L):
+    """Best-effort Airbnb listing URL from the listing's channel data."""
+    blob = json.dumps(L, ensure_ascii=False)
+    m = (re.search(r"https?://[^\s\"']*airbnb\.[^\s\"']*/rooms/\d+", blob)
+         or re.search(r"https?://[^\s\"']*airbnb\.[^\s\"']*", blob))
+    if m:
+        return m.group(0)
+    m2 = re.search(r'"airbnb[A-Za-z]*[Ii]d"\s*:\s*"?(\d{5,})"?', blob)
+    if m2:
+        return f"https://www.airbnb.com/rooms/{m2.group(1)}"
+    return ""
+
+def _nightly_from(listing_id):
+    """A representative 'starting from' nightly price from the calendar (next ~30 days)."""
+    try:
+        today = datetime.now(TZ).date()
+        data = api_get(f"/listings/{listing_id}/calendar",
+                       params={"startDate": today.isoformat(),
+                               "endDate": (today + timedelta(days=30)).isoformat()})
+        prices = [d.get("price") for d in (data.get("result", []) or [])
+                  if d.get("isAvailable", 1) and isinstance(d.get("price"), (int, float))
+                  and d.get("price") > 0]
+        return min(prices) if prices else None
+    except Exception as e:
+        print(f"price fetch error ({listing_id}):", e)
+        return None
+
+def load_catalog(force=False):
+    """Build a units catalog from Hostaway listings (cached 1h). Used to suggest alternatives.
+    Skips inactive/unlisted listings (the red 🚫)."""
+    global _catalog_text, _catalog_ts
+    if not force and _catalog_text and (time.time() - _catalog_ts) < 3600:
+        return
+    try:
+        data = api_get("/listings", params={"limit": 100, "includeResources": 1})
+        rows, skipped = [], 0
+        for L in (data.get("result", []) or []):
+            name = (L.get("internalListingName") or L.get("name") or "").strip()
+            if not name:
+                continue
+            if not _listing_active(L):
+                skipped += 1
+                if CATALOG_DEBUG:
+                    print(f"  catalog SKIP (inactive): {name} · status={L.get('status')!r}")
+                continue
+            parts = [name]
+            beds = L.get("bedroomsNumber")
+            if beds:
+                parts.append(f"{beds} غرفة نوم")
+            area = (L.get("city") or L.get("address") or "").strip()
+            if area:
+                parts.append(area)
+            price = (_nightly_from(L.get("id")) if CATALOG_CALENDAR_PRICES else None) or L.get("price")
+            if price:
+                parts.append(f"تبدأ من ~{round(price)} ر.س/الليلة")
+            link = _airbnb_link(L)
+            if link:
+                parts.append(link)
+            rows.append(" · ".join(parts))
+            if CATALOG_DEBUG:
+                print(f"  catalog OK: {name} · status={L.get('status')!r} · link={'yes' if link else 'no'}")
+        _catalog_text = "\n".join(rows)[:6000]
+        _catalog_ts = time.time()
+        print(f"catalog: loaded {len(rows)} active units (skipped {skipped} inactive)")
+    except Exception as e:
+        print("catalog load error:", e)
+
+# Hints that the guest is asking about a different/another unit (to inject the catalog).
+_ALT_HINTS = ["ثاني", "ثانيه", "ثانية", "بديل", "غيره", "غيرها", "اكبر", "أكبر", "ارخص", "أرخص",
+              "اصغر", "أصغر", "خيار", "خيارات", "وحده ثاني", "شقه ثاني", "another", "other",
+              "different", "bigger", "cheaper", "smaller", "option", "alternativ"]
+
+def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False, dates=None):
     """Call Claude to draft a reply. Returns parsed dict or None on failure."""
     if not ANTHROPIC_API_KEY:
         print("assistant: ANTHROPIC_API_KEY not set")
@@ -899,18 +1004,35 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     guide_line = (f"Arrival-guide link for this unit: {guide_url}"
                   if (guide_url and confirmed)
                   else "Arrival-guide link for this unit: NOT AVAILABLE / do not share")
+    dates_line = (f"\nتواريخ الحجز: {dates[0]} إلى {dates[1]}"
+                  if dates and dates[0] else "")
     facts = _knowledge_text.strip()
     facts_block = (f"معلومات معتمدة عن عوجا (استخدمها كمصدر الحقيقة وصحّح أي تعارض):\n{facts}\n\n"
                    if facts else "")
-    user = (f"{facts_block}Guest name: {guest_name}\nUnit: {unit}\n{status_line}\n{guide_line}\n\n"
+    want_catalog = _catalog_text and any(h in history_text.lower() for h in _ALT_HINTS)
+    catalog_block = (
+        "قائمة وحدات عوجا للاقتراح عند طلب بديل:\n" + _catalog_text + "\n\n"
+        "تعليمات الاقتراح:\n"
+        "- أول ما يطلب شقة/وحدة ثانية أو بديل، اسأله بلطف عن اللي يبيه: أي حي/منطقة يفضّل، كم غرفة "
+        "يحتاج، وأي شي مهم له (ميزانية، قرب من مكان...). لا تقترح قبل ما تعرف مطلبه.\n"
+        "- بعد ما يوضّح، طابق من القائمة واقترح 1-3 خيارات. لكل خيار: الاسم، عدد الغرف، المنطقة، "
+        "السعر التقريبي لليلة (يبدأ من)، ورابط Airbnb لو موجود. لا تخترع رابط أو تفاصيل.\n"
+        "- لو ما فيه مطابق تماماً لطلبه، اقترح أقرب خيار ووضّح الفروقات بصراحة (مثلاً: أكبر بغرفة، "
+        "أو في حي قريب من اللي طلب).\n"
+        "- إذا ذكرت أي سعر، أضف في النهاية تنويه: الأسعار تقريبية وقبل الضريبة ورسوم المنصة.\n"
+        "- إنت مهب متأكد من التوفّر لتواريخه — وجّهه يتأكد ويحجز من رابط Airbnb.\n\n"
+        ) if want_catalog else ""
+    user = (f"{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
+            f"{status_line}\n{guide_line}{dates_line}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
+    model = CLAUDE_MODEL_PREMIUM if want_catalog else CLAUDE_MODEL
     try:
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": CLAUDE_MODEL, "max_tokens": 700, "system": ASSISTANT_RULES,
+            json={"model": model, "max_tokens": 700, "system": ASSISTANT_RULES,
                   "messages": [{"role": "user", "content": user}]},
             timeout=60,
         )
@@ -1028,6 +1150,7 @@ def fetch_new_guest_messages(seen, debug=False):
             "comm_type": guest_msg.get("communicationType") or "email",
             "guest_text": (guest_msg.get("body") or "").strip(), "history": history,
             "last_time": _msg_time(guest_msg),
+            "checkin": res.get("arrivalDate"), "checkout": res.get("departureDate"),
         })
     if debug:
         print(f"assistant DEBUG: {len(out)} new inbound guest message(s) to draft")
@@ -1081,25 +1204,20 @@ class NameSelect(discord.ui.Select):
             await msg.edit(embed=embed, view=done)
         except Exception as e:
             print("claim edit error:", e)
-        tail = " — جهّزت لك رد جاهز في الخاص 📩" if (esc and MANAGER_SCRIPT) else ""
+        tail = " — جهّزت لك رد جاهز تحت 👇" if (esc and MANAGER_SCRIPT) else ""
         await interaction.response.edit_message(
             content=f"✅ استلمت التصعيد باسم **{name}**.{tail}", view=None)
-        # DM the claimer a ready-to-send reply in the owner's warm style
+        # show the claimer a ready-to-send reply (private to them, right here in the channel)
         if esc and MANAGER_SCRIPT:
             script = await asyncio.to_thread(
                 claude_manager_script, esc.get("guest"), esc.get("unit"),
                 esc.get("history", ""), esc.get("guest_text", ""), esc.get("reason", ""), name)
             if script:
-                dm = (f"🎯 **{name}**، استلمت تصعيد **{esc.get('guest')} · {esc.get('unit')}**.\n"
-                      f"رد جاهز ترسله للضيف (انسخ والصق ثم أرسل):\n\n{script}")
+                dm = (f"🎯 رد جاهز للضيف **{esc.get('guest')} · {esc.get('unit')}** "
+                      f"(انسخ والصق ثم أرسل):\n\n{script}")
             else:
-                dm = (f"🎯 **{name}**، استلمت تصعيد **{esc.get('guest')} · {esc.get('unit')}**.\n"
-                      f"⚠️ تعذّر توليد الرد الجاهز — تواصل مع الضيف مباشرة.")
-            try:
-                await interaction.user.send(dm)
-            except Exception:
-                # DMs are closed -> show it privately right here instead
-                await interaction.followup.send(dm, ephemeral=True)
+                dm = ("⚠️ تعذّر توليد الرد الجاهز — تواصل مع الضيف مباشرة.")
+            await interaction.followup.send(dm, ephemeral=True)
 
 class ClaimView(discord.ui.View):
     def __init__(self):
@@ -1482,7 +1600,8 @@ async def assistant_loop():
         guide = (await asyncio.to_thread(get_guide_url, it.get("listing_id"))
                  if (confirmed and it.get("listing_id")) else None)
         result = await asyncio.to_thread(
-            claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed)
+            claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
+            (it.get("checkin"), it.get("checkout")))
         if not result:
             continue
         try:
@@ -1525,6 +1644,7 @@ async def knowledge_loop():
     guild = bot.get_guild(GUILD_ID)
     if guild is not None:
         await load_knowledge(guild)
+    await asyncio.to_thread(load_catalog)   # refreshes only if >1h old
 
 @bot.event
 async def on_ready():
@@ -1583,6 +1703,7 @@ async def on_ready():
         guild0 = bot.get_guild(GUILD_ID)
         if guild0 is not None:
             await load_knowledge(guild0)
+        await asyncio.to_thread(load_catalog, True)
     if not assistant_loop.is_running():
         assistant_loop.start()
     if not escalation_reping_loop.is_running():
