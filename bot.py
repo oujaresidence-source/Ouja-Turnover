@@ -31,7 +31,7 @@ import io
 import json
 import time
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -135,6 +135,10 @@ ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many
 WEBHOOKS_ENABLED = os.environ.get("WEBHOOKS_ENABLED", "1") in ("1", "true", "True", "yes")
 WEBHOOK_SECRET   = os.environ.get("WEBHOOK_SECRET", "ouja-hook")      # the secret path segment
 WEB_PORT         = int(os.environ.get("PORT", "8080"))               # Railway provides PORT
+# ---- Web dashboard (served by the same bot at /dashboard). Protected by a token. ----
+DASHBOARD_ENABLED = os.environ.get("DASHBOARD_ENABLED", "1") in ("1", "true", "True", "yes")
+DASHBOARD_TOKEN   = os.environ.get("DASHBOARD_TOKEN", "")            # REQUIRED to view (set your own)
+DASH_TTL          = int(os.environ.get("DASH_TTL", "600"))          # cache computed analytics (sec)
 # Safety: replies are NEVER sent automatically unless you explicitly turn this on later.
 ASSISTANT_AUTOSEND = os.environ.get("ASSISTANT_AUTOSEND", "0") in ("1", "true", "True", "yes")
 ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "True", "yes")
@@ -1433,6 +1437,7 @@ class NameSelect(discord.ui.Select):
             esc["claimed_by"] = name
             if esc.get("conversation_id"):
                 _claimed_convos.add(esc["conversation_id"])   # stop auto-acks
+            log_event("escalation", f"تم استلام تصعيد بواسطة {name} · {esc.get('unit','')}")
         try:
             ch = interaction.client.get_channel(self.target_channel_id)
             msg = await ch.fetch_message(self.target_message_id)
@@ -1697,6 +1702,8 @@ class PriceConfirmView(discord.ui.View):
         tail = (" — (تجربة DRY-RUN، ما تغيّر شي فعلي)" if PRICE_APPLY_DRYRUN else "")
         skip_txt = f" · تخطّيت {skipped} (محجوزة/تغيّرت)" if skipped else ""
         result = f"✅ طبّقت {applied} ليلة على **{opp['name']}**{skip_txt}{tail}"
+        log_event("pricing", f"طبّق {applied} سعر على {opp['name']} بواسطة {interaction.user.display_name}"
+                  + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
         await interaction.followup.send(result, ephemeral=True)
         try:
             card = await interaction.channel.fetch_message(self.card_message_id)
@@ -1897,6 +1904,11 @@ async def process_assistant_item(it, channel):
         return
     try:
         await post_assistant_card(channel, it, result, guide, confirmed)
+        act = result.get("action", "reply")
+        if act == "escalate" or result.get("sentiment") == "upset":
+            log_event("escalation", f"تصعيد · {it['guest']} · {it['unit']}")
+        else:
+            log_event("guest", f"بطاقة رد ({act}) · {it['guest']} · {it['unit']}")
     except Exception as e:
         print("assistant card error:", e)
 
@@ -1983,6 +1995,245 @@ async def _handle_hook(request):
 async def _handle_health(request):
     return web.Response(status=200, text="Ouja bot is up")
 
+# ---------------- Activity log (feeds the dashboard) ----------------
+_activity = deque(maxlen=800)
+
+def log_event(category, text):
+    """Record something the bot did, for the dashboard's activity feed."""
+    try:
+        _activity.append({"ts": datetime.now(TZ).isoformat(timespec="seconds"),
+                          "cat": category, "text": str(text)[:300]})
+    except Exception:
+        pass
+    print(f"[{category}] {text}")
+
+# ---------------- Dashboard: auth + cached analytics + API + page ----------------
+_dash_cache = {}
+
+DASHBOARD_HTML = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ouja · Control Center</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0c0c0e;--card:#15151a;--line:#26262e;--gold:#C8A24B;--txt:#ECECEC;--mut:#8b8b95;--green:#2ECC71;--red:#E74C3C;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Segoe UI',Tahoma,sans-serif}
+body{background:var(--bg);color:var(--txt);min-height:100vh}
+#login{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:14px}
+#login input{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:12px 16px;border-radius:10px;width:280px;font-size:15px;text-align:center}
+.btn{background:var(--gold);color:#000;border:none;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px}
+.wrap{max-width:1100px;margin:0 auto;padding:18px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.logo{font-size:20px;font-weight:800;color:var(--gold);letter-spacing:.5px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.kpi .v{font-size:24px;font-weight:800}
+.kpi .l{color:var(--mut);font-size:12px;margin-top:4px}
+.kpi .g{color:var(--gold)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.tab{background:var(--card);border:1px solid var(--line);color:var(--mut);padding:9px 16px;border-radius:10px;cursor:pointer;font-size:14px}
+.tab.on{background:var(--gold);color:#000;border-color:var(--gold);font-weight:700}
+.panel{display:none}.panel.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h3{font-size:14px;color:var(--gold);margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600}
+.pill{padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.up{background:rgba(46,204,113,.15);color:var(--green)}.dn{background:rgba(231,76,60,.15);color:var(--red)}.hd{background:#2a2a32;color:var(--mut)}
+.logrow{display:flex;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
+.logrow .t{color:var(--mut);font-size:11px;min-width:120px}
+.catf{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.catf .tab{padding:6px 12px;font-size:12px}
+.bar{height:7px;background:#2a2a32;border-radius:5px;overflow:hidden;margin-top:5px}
+.bar>div{height:100%;background:var(--gold)}
+.muted{color:var(--mut);font-size:12px}
+canvas{max-height:240px}
+</style></head>
+<body>
+<div id="login">
+  <div class="logo">عوجا · Control Center</div>
+  <input id="tok" type="password" placeholder="ادخل رمز الدخول">
+  <button class="btn" onclick="saveTok()">دخول</button>
+  <div class="muted" id="lerr"></div>
+</div>
+<div class="wrap" id="app" style="display:none">
+  <header><div class="logo">عوجا · Control Center</div>
+    <div style="display:flex;gap:8px"><button class="tab" onclick="refresh()">↻ تحديث</button>
+    <button class="tab" onclick="logout()">خروج</button></div></header>
+  <div class="kpis" id="kpis"></div>
+  <div class="tabs">
+    <div class="tab on" data-t="ov" onclick="tab('ov')">نظرة عامة</div>
+    <div class="tab" data-t="rev" onclick="tab('rev')">الإيرادات والتحليل</div>
+    <div class="tab" data-t="pr" onclick="tab('pr')">التسعير</div>
+    <div class="tab" data-t="log" onclick="tab('log')">سجل النشاط</div>
+  </div>
+  <div class="panel on" id="ov"><div class="card"><h3>الإيراد الشهري (آخر ١٢ شهر)</h3><canvas id="cMonthly"></canvas></div>
+    <div class="card"><h3>أداء الوحدات (آخر ٩٠ يوم)</h3><div id="unitTable"></div></div></div>
+  <div class="panel" id="rev"><div class="card"><h3>أقوى الشهور (متوسط السعر)</h3><canvas id="cSeason"></canvas></div>
+    <div class="card"><h3>دورة الراتب (الطلب حسب يوم الشهر)</h3><canvas id="cSalary"></canvas><div class="muted" id="salNote"></div></div></div>
+  <div class="panel" id="pr"><div class="card"><h3>فرص التسعير</h3><div class="muted" id="upl"></div><div id="prTable"></div></div></div>
+  <div class="panel" id="log"><div class="card"><h3>سجل النشاط</h3>
+    <div class="catf"><div class="tab on" data-c="" onclick="logf('')">الكل</div>
+      <div class="tab" data-c="guest" onclick="logf('guest')">الضيوف</div>
+      <div class="tab" data-c="escalation" onclick="logf('escalation')">تصعيدات</div>
+      <div class="tab" data-c="pricing" onclick="logf('pricing')">التسعير</div>
+      <div class="tab" data-c="report" onclick="logf('report')">التقارير</div></div>
+    <div id="logFeed"></div></div></div>
+</div>
+<script>
+const TK="ouja_token";let charts={},curCat="";
+function tok(){return localStorage.getItem(TK)||""}
+function saveTok(){localStorage.setItem(TK,document.getElementById('tok').value.trim());init()}
+function logout(){localStorage.removeItem(TK);location.reload()}
+async function api(p){const r=await fetch(p+(p.includes('?')?'&':'?')+'token='+encodeURIComponent(tok()));
+  if(r.status===401)throw'unauthorized';return r.json()}
+function tab(t){document.querySelectorAll('.tab[data-t]').forEach(e=>e.classList.toggle('on',e.dataset.t===t));
+  document.querySelectorAll('.panel').forEach(e=>e.classList.toggle('on',e.id===t))}
+function logf(c){curCat=c;document.querySelectorAll('.catf .tab').forEach(e=>e.classList.toggle('on',e.dataset.c===c));loadLog()}
+function fmt(n){return (n||0).toLocaleString('en-US')}
+function mkChart(id,cfg){if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),cfg)}
+const GOLD='#C8A24B',GRID='#26262e';
+async function init(){
+  try{document.getElementById('lerr').textContent='';
+    await loadOverview();document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
+    loadRevenue();loadPricing();loadLog();
+  }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح';}
+}
+function refresh(){loadOverview();loadRevenue();loadPricing();loadLog()}
+async function loadOverview(){const d=await api('/api/overview');
+  const k=[['active_units','الوحدات الفعّالة',''],['occ_30','إشغال ٣٠ يوم','%'],['rev_30','إيراد ٣٠ يوم',' ر.س'],
+    ['rev_7','إيراد ٧ أيام',' ر.س'],['missed_7','إيراد ضائع ٧ أيام',' ر.س'],['pending_cards','ردود معلّقة',''],
+    ['open_escalations','تصعيدات مفتوحة',''],['checkins_today','وصول اليوم',''],['checkouts_today','مغادرة اليوم','']];
+  document.getElementById('kpis').innerHTML=k.map(([key,lbl,suf])=>
+    `<div class="kpi"><div class="v g">${fmt(d[key])}${suf}</div><div class="l">${lbl}</div></div>`).join('');
+}
+async function loadRevenue(){const d=await api('/api/revenue');
+  mkChart('cMonthly',{type:'line',data:{labels:d.monthly.map(m=>m.m),
+    datasets:[{data:d.monthly.map(m=>m.rev),borderColor:GOLD,backgroundColor:'rgba(200,162,75,.12)',fill:true,tension:.3}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b95'}},y:{grid:{color:GRID},ticks:{color:'#8b8b95'}}}}});
+  mkChart('cSeason',{type:'bar',data:{labels:d.seasonality.map(m=>m.name),
+    datasets:[{data:d.seasonality.map(m=>m.adr),backgroundColor:GOLD}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8b8b95'}},y:{grid:{color:GRID},ticks:{color:'#8b8b95'}}}}});
+  const doms=Array.from({length:31},(_,i)=>i+1);
+  mkChart('cSalary',{type:'line',data:{labels:doms,
+    datasets:[{data:doms.map(x=>d.salary[x]||1),borderColor:GOLD,tension:.25,pointRadius:0}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b95'}},y:{grid:{color:GRID},ticks:{color:'#8b8b95'}}}}});
+  document.getElementById('salNote').textContent=(d.weak?('أضعف الأيام: '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?(' · أقوى الأيام: '+d.strong[0]+'–'+d.strong[1]):'');
+  const rows=d.units.slice(0,60).map(u=>{const cls=u.reco.includes('raise')?'up':(u.reco==='lower'?'dn':'hd');
+    return `<tr><td>${u.name}</td><td>${u.occ}%</td><td>${u.adr||'-'}</td><td>${u.pace}%</td><td><span class="pill ${cls}">${u.label}</span></td></tr>`}).join('');
+  document.getElementById('unitTable').innerHTML=`<table><tr><th>الوحدة</th><th>إشغال</th><th>سعر/ليلة</th><th>سرعة ٣٠ي</th><th>التوصية</th></tr>${rows}</table>`;
+}
+async function loadPricing(){const d=await api('/api/pricing');
+  document.getElementById('upl').innerHTML=`إيراد إضافي تقديري: <b style="color:var(--gold)">~${fmt(d.total_uplift)} ر.س</b>`;
+  const rows=d.units.map(u=>`<tr><td>${u.name}</td><td>${u.raise?('🔼 '+u.raise):''} ${u.drop?('🔽 '+u.drop):''}</td>
+    <td>~${fmt(u.uplift)} ر.س</td><td><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td></tr>`).join('');
+  document.getElementById('prTable').innerHTML=`<table><tr><th>الوحدة</th><th>تغييرات</th><th>إيراد إضافي</th><th>الثقة</th></tr>${rows}</table>`;
+}
+async function loadLog(){const d=await api('/api/log'+(curCat?('?cat='+curCat):''));
+  const ic={guest:'💬',escalation:'🚨',pricing:'💰',report:'📊'};
+  document.getElementById('logFeed').innerHTML=d.items.map(e=>
+    `<div class="logrow"><span class="t">${e.ts.replace('T',' ')}</span><span>${ic[e.cat]||'•'}</span><span>${e.text}</span></div>`).join('')
+    ||'<div class="muted">لا يوجد نشاط بعد.</div>';
+}
+if(tok())init();
+</script></body></html>"""
+
+def _dash_auth(request):
+    return bool(DASHBOARD_TOKEN) and (
+        request.query.get("token") or request.headers.get("X-Token", "")) == DASHBOARD_TOKEN
+
+def _json(data, status=200):
+    return web.json_response(data, status=status,
+                             dumps=lambda o: json.dumps(o, ensure_ascii=False))
+
+async def _cached(key, ttl, fn):
+    hit = _dash_cache.get(key)
+    if hit and (time.time() - hit[1]) < ttl:
+        return hit[0]
+    data = await asyncio.to_thread(fn)
+    _dash_cache[key] = (data, time.time())
+    return data
+
+def _compute_overview():
+    today = datetime.now(TZ).date()
+    reservations = get_reservations_cached()
+    listings = get_listings_map()
+    factors = compute_demand_factors(reservations)
+    lw = compute_last_week(reservations, listings, factors)
+    nights, _ = _explode_nights(reservations)
+    d30 = today - timedelta(days=30)
+    rev30 = sum(nl for _, d, nl in nights if d30 <= d < today)
+    n30 = sum(1 for _, d, _2 in nights if d30 <= d < today)
+    active = len(_catalog_units) or len(set(lid for lid, _, _2 in nights))
+    occ30 = (n30 / (active * 30)) if active else 0
+    ci = sum(1 for r in reservations if _res_realized(r) and _parse_date(r.get("arrivalDate")) == today)
+    co = sum(1 for r in reservations if _res_realized(r) and _parse_date(r.get("departureDate")) == today)
+    return {"active_units": active, "occ_30": round(occ30 * 100), "rev_30": round(rev30),
+            "rev_7": round(lw["tot_rev"]), "occ_7": round(lw["occ"] * 100),
+            "missed_7": round(lw["tot_missed"]), "pending_cards": len(_pending_replies),
+            "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by")),
+            "checkins_today": ci, "checkouts_today": co}
+
+def _compute_revenue():
+    reservations = get_reservations_cached()
+    listings = get_listings_map()
+    rep = compute_revenue_report(reservations, listings)
+    nights, _ = _explode_nights(reservations)
+    series = {}
+    for _, d, nl in nights:
+        series[f"{d.year}-{d.month:02d}"] = series.get(f"{d.year}-{d.month:02d}", 0) + nl
+    monthly = [{"m": k, "rev": round(series[k])} for k in sorted(series)[-12:]]
+    return {"monthly": monthly,
+            "seasonality": [{"name": m["name"], "adr": round(m["adr"]), "index": round(m["index"], 2)}
+                            for m in rep["months"]],
+            "salary": {str(k): round(v, 2) for k, v in rep["salary"]["dom_index"].items()},
+            "weak": rep["salary"]["weak_window"], "strong": rep["salary"]["strong_window"],
+            "units": [{"name": u["name"], "occ": round(u["occ90"] * 100),
+                       "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
+                       "reco": u["reco"], "label": u["label"]} for u in rep["units"]]}
+
+def _compute_pricing():
+    reservations = get_reservations_cached()
+    if not _catalog_units:
+        load_catalog(True)
+    factors = compute_demand_factors(reservations)
+    per_unit, _ = compute_price_opportunities(factors, _catalog_units)
+    units = []
+    for p in sorted(per_unit.values(), key=lambda x: x["uplift"], reverse=True):
+        if not p["raise"] and not p["drop"]:
+            continue
+        units.append({"name": p["name"], "raise": len(p["raise"]), "drop": len(p["drop"]),
+                      "uplift": round(p["uplift"]), "confidence": p.get("confidence", 50),
+                      "base": p.get("base", 0)})
+    return {"total_uplift": round(sum(p["uplift"] for p in per_unit.values())), "units": units[:40]}
+
+async def _api_overview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await _cached("overview", DASH_TTL, _compute_overview))
+
+async def _api_revenue(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await _cached("revenue", DASH_TTL, _compute_revenue))
+
+async def _api_pricing(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await _cached("pricing", max(DASH_TTL, 1800), _compute_pricing))
+
+async def _api_log(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    cat = request.query.get("cat", "")
+    items = [e for e in reversed(_activity) if not cat or e["cat"] == cat][:200]
+    return _json({"items": items})
+
+async def _handle_dashboard(request):
+    return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
@@ -1992,6 +2243,12 @@ async def start_web_server():
     app.router.add_get("/", _handle_health)                 # health check / browser test
     app.router.add_post("/hook/{secret}", _handle_hook)     # Hostaway posts here
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
+    if DASHBOARD_ENABLED:
+        app.router.add_get("/dashboard", _handle_dashboard)
+        app.router.add_get("/api/overview", _api_overview)
+        app.router.add_get("/api/revenue", _api_revenue)
+        app.router.add_get("/api/pricing", _api_pricing)
+        app.router.add_get("/api/log", _api_log)
     _web_runner = web.AppRunner(app)
     await _web_runner.setup()
     site = web.TCPSite(_web_runner, "0.0.0.0", WEB_PORT)
@@ -2044,6 +2301,8 @@ def load_state():
         _escalations = {int(k): v for k, v in _load_json("escalations.json", {}).items()}
         _esc_ack_count = {int(k): v for k, v in _load_json("ack_count.json", {}).items()}
         _claimed_convos = set(int(x) for x in _load_json("claimed.json", []))
+        _activity.clear()
+        _activity.extend(_load_json("activity.json", []))
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed")
@@ -2056,6 +2315,7 @@ def persist_state():
     _save_json("escalations.json", {str(k): v for k, v in _escalations.items()})
     _save_json("ack_count.json", {str(k): v for k, v in _esc_ack_count.items()})
     _save_json("claimed.json", list(_claimed_convos))
+    _save_json("activity.json", list(_activity))
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -2337,6 +2597,7 @@ async def post_revenue_report():
     file = discord.File(io.BytesIO(csv_bytes), filename="ouja_revenue_detail.csv")
     await channel.send(embeds=embeds, file=file)
     print(f"revenue: posted weekly report ({rep['active']} units)")
+    log_event("report", f"تقرير الإيرادات الأسبوعي · {rep['active']} وحدة")
 
 _revenue_last_date = None
 
@@ -2614,6 +2875,7 @@ async def post_price_opportunities():
         _price_opps[msg.id] = {"listing_id": pu["lid"], "name": pu["name"], "changes": changes}
         posted += 1
     print(f"price-opp: posted summary + {posted} action cards ({len(per_unit)} units checked)")
+    log_event("pricing", f"فرص التسعير · {posted} بطاقة وحدة")
 
 def compute_last_week(reservations, listings_map, factors):
     """Actual performance of the last 7 days vs the prior 7, per unit + portfolio."""
@@ -2694,6 +2956,7 @@ async def post_last_week_review():
     rep = await asyncio.to_thread(compute_last_week, reservations, listings_map, factors)
     await channel.send(embed=build_last_week_message(rep))
     print("last-week-review: posted")
+    log_event("report", "مراجعة الأسبوع الماضي")
 
 _price_opp_last = None
 _review_last = None
