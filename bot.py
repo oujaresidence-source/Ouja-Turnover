@@ -141,6 +141,8 @@ ESCALATION_REPING_MIN = int(os.environ.get("ESCALATION_REPING_MIN", "10"))   # r
 ESCALATION_MAX_PINGS  = int(os.environ.get("ESCALATION_MAX_PINGS", "12"))    # stop after this many re-pings
 CLAIM_NAMES = [n.strip() for n in os.environ.get(
     "CLAIM_NAMES", "اسيل,فيصل,ماثر,نوره,ناصر,محمد").split(",") if n.strip()]
+# When someone claims an escalation, DM them a ready-to-send reply in the owner's warm style.
+MANAGER_SCRIPT = os.environ.get("MANAGER_SCRIPT", "1") in ("1", "true", "True", "yes")
 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
@@ -918,6 +920,48 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         print("claude_draft error:", e)
         return None
 
+def claude_text(system, user, max_tokens=600):
+    """Plain-text Claude call (no JSON). Returns the text or None."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": CLAUDE_MODEL, "max_tokens": max_tokens, "system": system,
+                  "messages": [{"role": "user", "content": user}]},
+            timeout=60,
+        )
+        r.raise_for_status()
+        blocks = r.json().get("content", []) or []
+        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip() or None
+    except Exception as e:
+        print("claude_text error:", e)
+        return None
+
+def claude_escalation_ack(guest, unit, history, guest_text):
+    """An empathetic, problem-specific holding message for a repeat escalation."""
+    sys = ("أنت تكتب رسالة طمأنة قصيرة لضيف في عوجا تصعّد موضوعه مرة ثانية وهو لا يزال ينتظر أو منزعج. "
+           "اكتب بأسلوب سعودي نجدي دافئ وراقٍ: اعترف بمشكلته تحديداً، تفهّم شعوره، اعتذر بصدق، "
+           "وطمّنه إن الفريق المختص يشتغل على موضوعه الحين وبيتواصل معه قريب جداً. "
+           "لا تكتبها كأنها قالب آلي مكرر. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط.")
+    user = (f"الوحدة: {unit}\nالضيف: {guest}\nالمحادثة:\n{history}\n\n"
+            f"آخر رسالة من الضيف: {guest_text}")
+    return claude_text(sys, user, 500)
+
+def claude_manager_script(guest, unit, history, guest_text, reason, manager_name):
+    """A ready-to-send reply in the owner's warm/charismatic voice for whoever claims."""
+    sys = (f"أنت تكتب رسالة جاهزة بينسخها {manager_name} (مدير العقار في عوجا) ويرسلها للضيف مباشرة. "
+           "الأسلوب: سعودي نجدي دافئ، واثق، وكاريزما عالية مثل صاحب البيت اللي يهتم بضيفه شخصياً. "
+           f"الرسالة لازم: تحيي الضيف بحرارة، تعرّف إن {manager_name} مدير العقار وتولّى الموضوع بنفسه، "
+           "تذكر إن الشباب (الفريق) بلّغوه عن مشكلته، تلخّص مشكلته باختصار عشان يحس إنه مسموع، "
+           "تتفهّم وتعتذر بصدق، وتطمّنه بعبارات دافئة (مثل: أبشر بالي يسرّ خاطرك يا طويل العمر) إن الموضوع بينحل. "
+           "طبيعية مهب قالب جامد. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط بدون أي شرح.")
+    user = (f"الوحدة: {unit}\nالضيف: {guest}\nسبب التصعيد: {reason}\nالمحادثة:\n{history}\n\n"
+            f"آخر رسالة من الضيف: {guest_text}")
+    return claude_text(sys, user, 700)
+
 def fetch_new_guest_messages(seen, debug=False):
     """Scan recent conversations, fetch each one's messages, and return new inbound
     guest messages (the guest's latest message that hasn't been answered/seen)."""
@@ -1000,6 +1044,8 @@ def send_guest_message(conversation_id, body, comm_type="email"):
 
 # pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
 _escalations = {}
+_esc_ack_count = {}     # conversation_id -> how many escalation acks we've sent
+_claimed_convos = set() # conversation_ids a human has claimed (stop auto-acks)
 
 class NameSelect(discord.ui.Select):
     """The name picker shown after tapping Claim."""
@@ -1018,6 +1064,8 @@ class NameSelect(discord.ui.Select):
             return
         if esc:
             esc["claimed_by"] = name
+            if esc.get("conversation_id"):
+                _claimed_convos.add(esc["conversation_id"])   # stop auto-acks
         try:
             ch = interaction.client.get_channel(self.target_channel_id)
             msg = await ch.fetch_message(self.target_message_id)
@@ -1030,7 +1078,21 @@ class NameSelect(discord.ui.Select):
             await msg.edit(embed=embed, view=done)
         except Exception as e:
             print("claim edit error:", e)
-        await interaction.response.edit_message(content=f"✅ استلمت التصعيد باسم **{name}**.", view=None)
+        tail = " — جهّزت لك رد جاهز في الخاص 📩" if (esc and MANAGER_SCRIPT) else ""
+        await interaction.response.edit_message(
+            content=f"✅ استلمت التصعيد باسم **{name}**.{tail}", view=None)
+        # DM the claimer a ready-to-send reply in the owner's warm style
+        if esc and MANAGER_SCRIPT:
+            script = await asyncio.to_thread(
+                claude_manager_script, esc.get("guest"), esc.get("unit"),
+                esc.get("history", ""), esc.get("guest_text", ""), esc.get("reason", ""), name)
+            if script:
+                dm = (f"🎯 **{name}**، استلمت تصعيد **{esc.get('guest')} · {esc.get('unit')}**.\n"
+                      f"رد جاهز ترسله للضيف (انسخ والصق ثم أرسل):\n\n{script}")
+                try:
+                    await interaction.user.send(dm)
+                except Exception:
+                    await interaction.followup.send(dm, ephemeral=True)
 
 class ClaimView(discord.ui.View):
     def __init__(self):
@@ -1269,13 +1331,24 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
         embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
         embed.add_field(name="🔴 يحتاج تدخل بشري",
                         value=result.get("reason", "تم التصعيد — تعامل معه يدوياً."), inline=False)
-        if ASSISTANT_ESC_ACK:
-            ack = ASSISTANT_ACK_AR if _has_arabic(item["guest_text"]) else ASSISTANT_ACK_EN
+        cid = item["conversation_id"]
+        if cid in _claimed_convos:
+            embed.add_field(name="🙋 مستلمة",
+                            value="الموضوع مستلم من أحد الفريق — ما أرسلنا رد تلقائي.", inline=False)
+        elif ASSISTANT_ESC_ACK:
+            _esc_ack_count[cid] = _esc_ack_count.get(cid, 0) + 1
+            n = _esc_ack_count[cid]
+            static = ASSISTANT_ACK_AR if _has_arabic(item["guest_text"]) else ASSISTANT_ACK_EN
+            if n == 1:
+                ack = static                       # first time: quick holding message
+            else:                                  # repeat: empathetic, problem-specific
+                ack = await asyncio.to_thread(claude_escalation_ack, g, item["unit"],
+                                              item["history"], item["guest_text"]) or static
             try:
-                await asyncio.to_thread(send_guest_message, item["conversation_id"], ack,
-                                        item["comm_type"])
+                await asyncio.to_thread(send_guest_message, cid, ack, item["comm_type"])
                 embed.add_field(name="📤 تم إبلاغ الضيف",
-                                value="أرسلنا له رسالة طمأنة إنه تم تصعيد طلبه للقسم المختص.",
+                                value=("رسالة طمأنة متعاطفة (متابعة)" if n > 1
+                                       else "رسالة طمأنة إنه تم تصعيد طلبه للقسم المختص."),
                                 inline=False)
             except Exception as e:
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
@@ -1293,6 +1366,9 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                     embed=embed, view=ClaimView(),
                                     allowed_mentions=discord.AllowedMentions(roles=True))
             _escalations[msg.id] = {"channel_id": target.id, "guest": g, "unit": item["unit"],
+                                    "conversation_id": item["conversation_id"],
+                                    "guest_text": item["guest_text"],
+                                    "reason": result.get("reason", ""), "history": item["history"],
                                     "last_ping": datetime.now(TZ), "attempts": 0, "claimed_by": None}
         except Exception as e:
             print("escalation post error:", e)
