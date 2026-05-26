@@ -1576,7 +1576,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                     "conversation_id": item["conversation_id"],
                                     "guest_text": item["guest_text"],
                                     "reason": result.get("reason", ""), "history": item["history"],
-                                    "last_ping": datetime.now(TZ), "attempts": 0, "claimed_by": None}
+                                    "last_ping": time.time(), "attempts": 0, "claimed_by": None}
         except Exception as e:
             print("escalation post error:", e)
         return
@@ -1652,11 +1652,11 @@ async def escalation_reping_loop():
         return
     op_role = find_operation_role(guild)
     mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
-    now = datetime.now(TZ)
+    now = time.time()
     for mid, esc in list(_escalations.items()):
         if esc.get("claimed_by") or esc["attempts"] >= ESCALATION_MAX_PINGS:
             continue
-        if (now - esc["last_ping"]).total_seconds() < ESCALATION_REPING_MIN * 60:
+        if (now - esc["last_ping"]) < ESCALATION_REPING_MIN * 60:
             continue
         ch = bot.get_channel(esc["channel_id"])
         if ch is None:
@@ -1679,14 +1679,43 @@ async def knowledge_loop():
         await load_knowledge(guild)
     await asyncio.to_thread(load_catalog)   # refreshes only if >1h old
 
+def load_state():
+    """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
+    global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
+    try:
+        _assistant_seen = set(_load_json("seen.json", []))
+        _pending_replies = {int(k): v for k, v in _load_json("pending.json", {}).items()}
+        _escalations = {int(k): v for k, v in _load_json("escalations.json", {}).items()}
+        _esc_ack_count = {int(k): v for k, v in _load_json("ack_count.json", {}).items()}
+        _claimed_convos = set(int(x) for x in _load_json("claimed.json", []))
+        if _assistant_seen or _pending_replies or _escalations:
+            print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
+                  f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed")
+    except Exception as e:
+        print("state load error:", e)
+
+def persist_state():
+    _save_json("seen.json", list(_assistant_seen)[-20000:])
+    _save_json("pending.json", {str(k): v for k, v in _pending_replies.items()})
+    _save_json("escalations.json", {str(k): v for k, v in _escalations.items()})
+    _save_json("ack_count.json", {str(k): v for k, v in _esc_ack_count.items()})
+    _save_json("claimed.json", list(_claimed_convos))
+
+@tasks.loop(seconds=60)
+async def persist_loop():
+    await asyncio.to_thread(persist_state)
+
 @bot.event
 async def on_ready():
+    load_state()                       # restore seen/cards/escalations from the volume FIRST
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     # On first start, mark older inbox messages as already-seen so the assistant doesn't
     # replay old backlog — but KEEP messages from the last few minutes so a fresh guest
     # message still gets a card even if the bot just restarted/redeployed.
+    # (After the first run, _assistant_seen is restored from the volume above, so this
+    #  whole block is skipped and NOTHING is ever re-baselined or lost.)
     if ASSISTANT_ENABLED and not ASSISTANT_TEST and not _assistant_seen:
         try:
             now = datetime.now(TZ)
@@ -1741,6 +1770,8 @@ async def on_ready():
         assistant_loop.start()
     if not escalation_reping_loop.is_running():
         escalation_reping_loop.start()
+    if not persist_loop.is_running():
+        persist_loop.start()
     if ASSISTANT_ENABLED and not knowledge_loop.is_running():
         knowledge_loop.start()
     if HEADS_UP_TEST:
