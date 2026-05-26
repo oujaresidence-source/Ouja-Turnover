@@ -869,6 +869,17 @@ platform service fee.
 amenities) but one part truly needs a human (e.g. extending checkout, a refund), DRAFT a "reply" that \
 handles what you can and says you'll check the rest with the team — do not escalate the whole message.
 
+OPTIONAL EXTRAS / UPSELLS (offer gently — never push, never auto-promise)
+- You may mention Ouja's optional paid extras when it naturally fits and would genuinely help the guest, \
+phrased as a friendly offer, not a hard sell. Good moments: a guest arriving early or asking about \
+arrival time → early check-in; a guest asking about checkout or a late flight → late checkout; a guest \
+asking about airport pickup or transport → the Sawari Al Musafir chauffeur service; a long stay → an \
+extra mid-stay cleaning.
+- These are subject to availability and a fee, so you CANNOT confirm them yourself. Offer it, say the \
+team will confirm availability and the price, and set action to "reply" (a human approves). Never promise \
+a time or a price you weren't given, and never invent a fee. One soft offer is enough — don't repeat it.
+- If the guest says no or ignores it, drop it immediately and don't bring it up again.
+
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
 - Offer any discount, comp, or price change
@@ -967,6 +978,11 @@ _knowledge_text = ""
 # Units catalog (name · bedrooms · area · base price · Airbnb link) pulled from Hostaway.
 _catalog_text = ""
 _catalog_ts = 0
+_catalog_units = []        # structured: [{id, name, beds, area, price, link}]
+# availability/price cache: (listing_id, checkin, checkout) -> (result|None, ts)
+_avail_cache = {}
+INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
+INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "14"))   # max units to date-check per msg
 
 def _listing_active(L):
     """False if the listing looks inactive/unlisted (the red 🚫 in Hostaway) — skip those."""
@@ -1011,12 +1027,12 @@ def _nightly_from(listing_id):
 def load_catalog(force=False):
     """Build a units catalog from Hostaway listings (cached 1h). Used to suggest alternatives.
     Skips inactive/unlisted listings (the red 🚫)."""
-    global _catalog_text, _catalog_ts
+    global _catalog_text, _catalog_ts, _catalog_units
     if not force and _catalog_text and (time.time() - _catalog_ts) < 3600:
         return
     try:
         data = api_get("/listings", params={"limit": 100, "includeResources": 1})
-        rows, skipped = [], 0
+        rows, units, skipped = [], [], 0
         for L in (data.get("result", []) or []):
             name = (L.get("internalListingName") or L.get("name") or "").strip()
             if not name:
@@ -1026,27 +1042,100 @@ def load_catalog(force=False):
                 if CATALOG_DEBUG:
                     print(f"  catalog SKIP (inactive): {name} · status={L.get('status')!r}")
                 continue
-            parts = [name]
             beds = L.get("bedroomsNumber")
+            area = (L.get("city") or L.get("address") or "").strip()
+            price = (_nightly_from(L.get("id")) if CATALOG_CALENDAR_PRICES else None) or L.get("price")
+            link = _airbnb_link(L)
+            parts = [name]
             if beds:
                 parts.append(f"{beds} غرفة نوم")
-            area = (L.get("city") or L.get("address") or "").strip()
             if area:
                 parts.append(area)
-            price = (_nightly_from(L.get("id")) if CATALOG_CALENDAR_PRICES else None) or L.get("price")
             if price:
                 parts.append(f"تبدأ من ~{round(price)} ر.س/الليلة")
-            link = _airbnb_link(L)
             if link:
                 parts.append(link)
             rows.append(" · ".join(parts))
+            units.append({"id": L.get("id"), "name": name, "beds": beds, "area": area,
+                          "price": round(price) if price else None, "link": link})
             if CATALOG_DEBUG:
                 print(f"  catalog OK: {name} · status={L.get('status')!r} · link={'yes' if link else 'no'}")
         _catalog_text = "\n".join(rows)[:6000]
+        _catalog_units = units
         _catalog_ts = time.time()
         print(f"catalog: loaded {len(rows)} active units (skipped {skipped} inactive)")
     except Exception as e:
         print("catalog load error:", e)
+
+def _parse_date(s):
+    try:
+        return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def unit_availability_price(listing_id, checkin, checkout):
+    """Check the calendar for ONE unit over a specific stay. Returns
+    {available, nights, total, avg} (total/avg before tax & platform fee) or None
+    if unknown. Cached for INTEL_CACHE_MIN minutes."""
+    if not listing_id or not checkin or not checkout:
+        return None
+    ci, co = _parse_date(checkin), _parse_date(checkout)
+    if not ci or not co or co <= ci:
+        return None
+    key = (listing_id, ci.isoformat(), co.isoformat())
+    hit = _avail_cache.get(key)
+    if hit and (time.time() - hit[1]) < INTEL_CACHE_MIN * 60:
+        return hit[0]
+    last_night = co - timedelta(days=1)          # checkout night is not charged
+    nights = (co - ci).days
+    result = None
+    try:
+        data = api_get(f"/listings/{listing_id}/calendar",
+                       params={"startDate": ci.isoformat(), "endDate": last_night.isoformat()})
+        days = data.get("result", []) or []
+        if days:
+            available = all(int(d.get("isAvailable", 0) or 0) == 1 for d in days)
+            prices = [d.get("price") for d in days
+                      if isinstance(d.get("price"), (int, float)) and d.get("price") > 0]
+            total = round(sum(prices)) if len(prices) == len(days) and prices else None
+            avg = round(total / nights) if total else None
+            result = {"available": available, "nights": nights, "total": total, "avg": avg}
+    except Exception as e:
+        print(f"availability fetch error ({listing_id}):", e)
+        result = None
+    _avail_cache[key] = (result, time.time())
+    return result
+
+def enrich_catalog_for_dates(checkin, checkout, exclude_id=None):
+    """Build a catalog block that marks live availability + real total for the guest's
+    dates. Caps how many units we date-check (INTEL_MAX_CHECKS) to stay light. Units
+    beyond the cap (or with unknown calendars) just show the 'starting from' price."""
+    if not _catalog_units or not checkin or not checkout:
+        return _catalog_text
+    lines, checked = [], 0
+    for u in _catalog_units:
+        base = [u["name"]]
+        if u.get("beds"):
+            base.append(f"{u['beds']} غرفة نوم")
+        if u.get("area"):
+            base.append(u["area"])
+        info = None
+        if checked < INTEL_MAX_CHECKS and u.get("id") and u["id"] != exclude_id:
+            info = unit_availability_price(u["id"], checkin, checkout)
+            checked += 1
+        if info and info.get("total") is not None:
+            tag = "✅ متاحة لتواريخه" if info["available"] else "❌ غير متاحة لتواريخه"
+            base.append(f"{tag} · {info['nights']} ليالي ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة)")
+        elif info and info.get("available") is True:
+            base.append("✅ متاحة لتواريخه")
+        elif info and info.get("available") is False:
+            base.append("❌ غير متاحة لتواريخه")
+        elif u.get("price"):
+            base.append(f"تبدأ من ~{u['price']} ر.س/الليلة")
+        if u.get("link"):
+            base.append(u["link"])
+        lines.append(" · ".join(base))
+    return "\n".join(lines)[:6500]
 
 # Hints that the guest is asking about a different unit, availability, or a feature
 # (any of these injects the units catalog so the bot SUGGESTS instead of escalating).
@@ -1065,11 +1154,17 @@ _ALT_HINTS = [
     "three bedroom", "3 bedroom",
 ]
 
-def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False, dates=None):
+# Hints that the guest is asking about price / total cost (to compute their real total).
+_PRICE_HINTS = ["سعر", "السعر", "كم", "بكم", "كام", "تكلفة", "التكلفة", "المبلغ", "اجمالي", "الاجمالي",
+                "الإجمالي", "price", "cost", "how much", "total", "rate", "nightly"]
+
+def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False,
+                 dates=None, listing_id=None):
     """Call Claude to draft a reply. Returns parsed dict or None on failure."""
     if not ANTHROPIC_API_KEY:
         print("assistant: ANTHROPIC_API_KEY not set")
         return None
+    low = history_text.lower()
     status_line = ("Booking status: CONFIRMED" if confirmed
                    else "Booking status: NOT CONFIRMED (inquiry / pre-booking)")
     guide_line = (f"Arrival-guide link for this unit: {guide_url}"
@@ -1080,24 +1175,44 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     facts = _knowledge_text.strip()
     facts_block = (f"معلومات معتمدة عن عوجا (استخدمها كمصدر الحقيقة وصحّح أي تعارض):\n{facts}\n\n"
                    if facts else "")
-    want_catalog = _catalog_text and any(h in history_text.lower() for h in _ALT_HINTS)
+    want_catalog = bool(_catalog_text) and any(h in low for h in _ALT_HINTS)
+    # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
+    own_price_line = ""
+    if (dates and dates[0] and listing_id
+            and (want_catalog or any(h in low for h in _PRICE_HINTS))):
+        info = unit_availability_price(listing_id, dates[0], dates[1])
+        if info and info.get("total") is not None:
+            avail = "متاحة" if info["available"] else "غير متاحة حالياً"
+            own_price_line = (
+                f"\nالتسعير الفعلي لوحدة الضيف ({unit}) لتواريخه (قبل الضريبة ورسوم المنصة): "
+                f"{info['nights']} ليالي ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة) · الوحدة {avail}.")
+        elif info and info.get("available") is not None:
+            own_price_line = (f"\nوحدة الضيف ({unit}) "
+                              f"{'متاحة' if info['available'] else 'غير متاحة'} لتواريخه.")
+    # ---- alternatives: use a live-availability catalog when we know the dates ----
+    if want_catalog and dates and dates[0]:
+        catalog_data = enrich_catalog_for_dates(dates[0], dates[1], exclude_id=listing_id)
+        avail_note = ("- التواريخ معروفة، فالقائمة تبيّن التوفّر الفعلي ✅/❌ والإجمالي الحقيقي لتواريخه. "
+                      "اقترح فقط الوحدات المعلّمة ✅ متاحة، واذكر الإجمالي المبيّن. لا تقترح وحدة ❌.\n")
+    else:
+        catalog_data = _catalog_text
+        avail_note = ("- إنت ما تعرف التوفّر المباشر لتواريخه — اعرض الخيارات ووجّهه يتأكد ويحجز من رابط "
+                      "Airbnb. **السؤال عن التوفّر مو سبب للتصعيد إطلاقاً**.\n")
     catalog_block = (
-        "قائمة وحدات عوجا للاقتراح عند طلب بديل أو سؤال عن التوفّر:\n" + _catalog_text + "\n\n"
+        "قائمة وحدات عوجا للاقتراح عند طلب بديل أو سؤال عن التوفّر:\n" + catalog_data + "\n\n"
         "تعليمات الاقتراح:\n"
         "- أول ما يطلب شقة/وحدة ثانية أو بديل أو يسأل (فيه وحده متاحه؟ / عندكم شي فاضي؟): اسأله بلطف "
         "عن اللي يبيه (أي حي، كم غرفة، وش المهم له) إلا إذا قالها، وبعدها اقترح طول.\n"
-        "- طابق من القائمة واقترح 1-3 خيارات. لكل خيار: الاسم، عدد الغرف، المنطقة، السعر التقريبي لليلة "
-        "(يبدأ من)، ورابط Airbnb لو موجود. لا تخترع رابط أو تفاصيل.\n"
+        "- طابق من القائمة واقترح 1-3 خيارات. لكل خيار: الاسم، عدد الغرف، المنطقة، السعر، ورابط Airbnb "
+        "لو موجود. لا تخترع رابط أو تفاصيل.\n"
         "- لو ما فيه مطابق تماماً، اقترح أقرب خيار ووضّح الفروقات بصراحة.\n"
-        "- التوفّر: إنت ما تعرف التوفّر المباشر. لا توعد إن وحدة فاضية — بدّل: اعرض الخيارات ووجّهه يتأكد "
-        "ويحجز من رابط Airbnb (الرابط يبيّن المتاح لتواريخه). **السؤال عن التوفّر مو سبب للتصعيد إطلاقاً** "
-        "— اقترح ووجّهه للرابط.\n"
-        "- ميزة مو متأكد منها (مثلاً: الوحدة مسموح فيها تدخين؟ فيها بلكون؟) وما هي عندك بالمعلومات: اقترح "
-        "أقرب الوحدات، وقل بصراحة إنك بتتأكد من هالتفصيلة مع الفريق، وخلها رد (يراجعه إنسان). لا تخترع.\n"
+        + avail_note +
+        "- ميزة مو متأكد منها (تدخين؟ بلكون؟) وما هي عندك بالمعلومات: اقترح أقرب الوحدات، وقل بصراحة "
+        "إنك بتتأكد من هالتفصيلة مع الفريق، وخلها رد (يراجعه إنسان). لا تخترع.\n"
         "- إذا ذكرت سعر، أضف تنويه: الأسعار تقريبية وقبل الضريبة ورسوم المنصة.\n\n"
         ) if want_catalog else ""
     user = (f"{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}\n\n"
+            f"{status_line}\n{guide_line}{dates_line}{own_price_line}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     model = CLAUDE_MODEL_PREMIUM if want_catalog else CLAUDE_MODEL
@@ -1683,7 +1798,7 @@ async def process_assistant_item(it, channel):
              if (confirmed and it.get("listing_id")) else None)
     result = await asyncio.to_thread(
         claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
-        (it.get("checkin"), it.get("checkout")))
+        (it.get("checkin"), it.get("checkout")), it.get("listing_id"))
     if not result:
         return
     try:
