@@ -47,6 +47,8 @@ HOURS_AHEAD          = int(os.environ.get("HOURS_AHEAD", "12"))
 POLL_MINUTES         = int(os.environ.get("POLL_MINUTES", "15"))
 TZ                   = ZoneInfo(os.environ.get("TIMEZONE", "Asia/Riyadh"))
 CATEGORY_NAME        = os.environ.get("CATEGORY_NAME", "🧹 Turnovers")
+# Category for the guest-assistant + escalations channels (your existing ops category).
+ASSISTANT_CATEGORY   = os.environ.get("ASSISTANT_CATEGORY", "Operations")
 DEFAULT_CHECKOUT_HOUR = int(os.environ.get("DEFAULT_CHECKOUT_HOUR", "12"))
 
 # ---- last-minute tiered discount (all Riyadh time) ----
@@ -474,6 +476,14 @@ async def get_category(guild):
         if cat.name == CATEGORY_NAME:
             return cat
     return await guild.create_category(CATEGORY_NAME)
+
+async def get_assistant_category(guild):
+    """Category for guest-assistant + escalations. Reuses your existing Operations category."""
+    want = ASSISTANT_CATEGORY.lower()
+    for cat in guild.categories:
+        if cat.name.lower() == want:
+            return cat
+    return await guild.create_category(ASSISTANT_CATEGORY)
 
 async def ensure_channel(guild, name, category=None):
     """Find a text channel by name (create it if missing) and keep it under `category`."""
@@ -1062,7 +1072,8 @@ async def post_assistant_card(channel, item, result):
                               f"يعاد التنبيه كل {ESCALATION_REPING_MIN} دقيقة لين يستلمه أحد")
         # post to the dedicated escalations channel and @mention the operation team
         guild = channel.guild
-        esc_channel = await ensure_channel(guild, ESCALATION_CHANNEL, await get_category(guild))
+        esc_channel = await ensure_channel(guild, ESCALATION_CHANNEL,
+                                           await get_assistant_category(guild))
         target = esc_channel or channel
         op_role = find_operation_role(guild)
         mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
@@ -1107,7 +1118,8 @@ async def assistant_loop():
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
-    channel = await ensure_channel(guild, ASSISTANT_CHANNEL, await get_category(guild))
+    channel = await ensure_channel(guild, ASSISTANT_CHANNEL,
+                                   await get_assistant_category(guild))
     if channel is None:
         return
     try:
