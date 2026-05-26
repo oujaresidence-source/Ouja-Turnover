@@ -140,6 +140,7 @@ WEB_PORT         = int(os.environ.get("PORT", "8080"))               # Railway p
 DASHBOARD_ENABLED = os.environ.get("DASHBOARD_ENABLED", "1") in ("1", "true", "True", "yes")
 DASHBOARD_TOKEN   = os.environ.get("DASHBOARD_TOKEN", "")            # REQUIRED to view (set your own)
 DASH_TTL          = int(os.environ.get("DASH_TTL", "600"))          # cache computed analytics (sec)
+DASH_REFRESH_MIN  = int(os.environ.get("DASH_REFRESH_MIN", "7"))    # background pre-compute interval (min)
 # Safety: replies are NEVER sent automatically unless you explicitly turn this on later.
 ASSISTANT_AUTOSEND = os.environ.get("ASSISTANT_AUTOSEND", "0") in ("1", "true", "True", "yes")
 ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "True", "yes")
@@ -2073,203 +2074,257 @@ DASHBOARD_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ouja · Control Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-:root{--bg:#0a0a0c;--bg2:#101015;--card:#16161d;--line:#26262f;--gold:#C8A24B;--gold2:#e6c478;
---txt:#EDEDED;--mut:#8b8b97;--green:#2ECC71;--red:#E74C3C;--blue:#5B8DEF;}
-*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,'Segoe UI',Tahoma,sans-serif}
-body{background:radial-gradient(900px 500px at 80% -10%,rgba(200,162,75,.10),transparent),var(--bg);color:var(--txt);min-height:100vh}
-#login{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:14px}
-#login input{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:13px 16px;border-radius:12px;width:300px;font-size:15px;text-align:center}
-.btn{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1300;border:none;padding:11px 22px;border-radius:11px;font-weight:800;cursor:pointer;font-size:14px}
-.btn:active{transform:translateY(1px)}
-.btn.sm{padding:7px 14px;font-size:13px;border-radius:9px}
-.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--mut);font-weight:600}
-.btn.red{background:transparent;border:1px solid var(--red);color:var(--red)}
-.btn.green{background:transparent;border:1px solid var(--green);color:var(--green)}
-.wrap{max-width:1180px;margin:0 auto;padding:18px 18px 60px}
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:10px;flex-wrap:wrap}
-.logo{font-size:21px;font-weight:900;background:linear-gradient(135deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:.4px}
+:root{--bg:#08080a;--bg2:#0f0f14;--card:#15151c;--card2:#1b1b23;--line:#272730;--gold:#C8A24B;--gold2:#e8c87e;
+--txt:#F0F0F0;--mut:#8a8a96;--green:#36c275;--red:#e6584c;--blue:#5b8def;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'IBM Plex Sans Arabic',-apple-system,'Segoe UI',Tahoma,sans-serif}
+body{background:radial-gradient(1100px 620px at 85% -12%,rgba(200,162,75,.10),transparent),var(--bg);color:var(--txt);min-height:100vh;font-size:14px;line-height:1.55}
+#login{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:15px;padding:20px}
+#login .logo{font-size:24px}
+#login input{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:14px 18px;border-radius:13px;width:min(320px,90vw);font-size:15px;text-align:center}
+.btn{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1300;border:none;padding:11px 22px;border-radius:11px;font-weight:700;cursor:pointer;font-size:14px;transition:.15s}
+.btn:hover{filter:brightness(1.06)}.btn:active{transform:translateY(1px)}.btn:disabled{opacity:.55;cursor:default}
+.btn.sm{padding:8px 15px;font-size:13px;border-radius:10px}
+.btn.green{background:rgba(54,194,117,.14);color:var(--green);border:1px solid rgba(54,194,117,.4)}
+.btn.red{background:rgba(230,88,76,.12);color:var(--red);border:1px solid rgba(230,88,76,.4)}
+.icbtn{background:var(--card);border:1px solid var(--line);color:var(--mut);width:38px;height:38px;border-radius:11px;cursor:pointer;font-size:15px;transition:.15s}
+.icbtn:hover{color:var(--txt);border-color:var(--gold)}
+.wrap{max-width:1240px;margin:0 auto;padding:16px 18px 80px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px;flex-wrap:wrap}
+.logo{font-size:20px;font-weight:700;background:linear-gradient(135deg,var(--gold2),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{display:flex;align-items:center;gap:7px;color:var(--mut);font-size:12px;margin-top:3px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot.warn{background:var(--gold);box-shadow:0 0 8px var(--gold)}
 .tools{display:flex;gap:8px;align-items:center}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
-.kpi{background:linear-gradient(180deg,var(--bg2),var(--card));border:1px solid var(--line);border-radius:16px;padding:15px 16px;transition:.2s}
-.kpi:hover{border-color:var(--gold)}
-.kpi .v{font-size:25px;font-weight:900}
-.kpi .l{color:var(--mut);font-size:12px;margin-top:5px}
-.kpi .g{color:var(--gold)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:16px;padding:15px 16px;transition:.18s;position:relative;overflow:hidden}
+.kpi:hover{border-color:rgba(200,162,75,.5);transform:translateY(-2px)}
+.kpi .ic{font-size:16px;opacity:.85}
+.kpi .v{font-size:26px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
+.kpi .v.g{color:var(--gold)}.kpi .v.r{color:var(--red)}.kpi .v.b{color:var(--blue)}
+.kpi .l{color:var(--mut);font-size:12px;margin-top:3px}
+.shimmer{background:linear-gradient(90deg,var(--card) 25%,var(--card2) 50%,var(--card) 75%);background-size:200% 100%;animation:sh 1.3s infinite;color:transparent!important;border-radius:6px}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
-.tab{background:var(--card);border:1px solid var(--line);color:var(--mut);padding:9px 16px;border-radius:11px;cursor:pointer;font-size:14px;transition:.15s}
+.tab{background:var(--card);border:1px solid var(--line);color:var(--mut);padding:10px 17px;border-radius:12px;cursor:pointer;font-size:14px;font-weight:500;transition:.15s;display:flex;align-items:center;gap:7px}
 .tab:hover{color:var(--txt)}
-.tab.on{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1300;border-color:var(--gold);font-weight:800}
-.badge{display:inline-block;min-width:18px;text-align:center;background:var(--red);color:#fff;border-radius:20px;font-size:11px;padding:0 6px;margin-inline-start:6px;font-weight:700}
-.panel{display:none}.panel.on{display:block;animation:f .25s}
-@keyframes f{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:17px;margin-bottom:14px}
-.card h3{font-size:14px;color:var(--gold);margin-bottom:13px}
+.tab.on{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1300;border-color:var(--gold);font-weight:700}
+.badge{min-width:19px;text-align:center;background:var(--red);color:#fff;border-radius:20px;font-size:11px;padding:1px 6px;font-weight:700}
+.tab.on .badge{background:#1a1300;color:var(--gold2)}
+.panel{display:none}.panel.on{display:block;animation:f .22s ease}
+@keyframes f{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:18px;margin-bottom:14px}
+.card h3{font-size:14px;color:var(--gold);margin-bottom:14px;display:flex;align-items:center;gap:8px;font-weight:600}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:start;padding:9px 6px;border-bottom:1px solid var(--line)}
-th{color:var(--mut);font-weight:600}
-.pill{padding:2px 9px;border-radius:20px;font-size:11px;font-weight:800;white-space:nowrap}
-.up{background:rgba(46,204,113,.15);color:var(--green)}.dn{background:rgba(231,76,60,.15);color:var(--red)}.hd{background:#2a2a32;color:var(--mut)}
-.logrow{display:flex;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
-.logrow .t{color:var(--mut);font-size:11px;min-width:130px}
-.catf{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-.catf .tab{padding:6px 12px;font-size:12px}
-.bar{height:7px;background:#2a2a32;border-radius:5px;overflow:hidden;margin-top:5px}
+th,td{text-align:start;padding:10px 7px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600;font-size:12px}
+tr:last-child td{border-bottom:none}
+.pill{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
+.up{background:rgba(54,194,117,.15);color:var(--green)}.dn{background:rgba(230,88,76,.15);color:var(--red)}.hd{background:#2a2a33;color:var(--mut)}
+.logrow{display:flex;gap:11px;padding:11px 4px;border-bottom:1px solid var(--line);font-size:13px;align-items:flex-start}
+.logrow:last-child{border:none}
+.logrow .t{color:var(--mut);font-size:11px;min-width:135px;flex-shrink:0}
+.logrow .ic{flex-shrink:0}
+.catf{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+.catf .tab{padding:7px 13px;font-size:12px}
+.bar{height:7px;background:#2a2a33;border-radius:5px;overflow:hidden;margin-top:5px}
 .bar>div{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2))}
 .muted{color:var(--mut);font-size:12px}
-canvas{max-height:240px}
-.item{border:1px solid var(--line);border-radius:13px;padding:13px;margin-bottom:11px;background:var(--bg2)}
-.item .hd2{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap}
-.item .who{font-weight:800}.item .unit{color:var(--gold);font-size:12px}
-.gtext{background:#0e0e12;border:1px solid var(--line);border-radius:9px;padding:9px;font-size:13px;color:var(--mut);margin-bottom:9px}
-textarea{width:100%;background:#0e0e12;border:1px solid var(--line);border-radius:9px;color:var(--txt);padding:10px;font-size:13px;min-height:84px;font-family:inherit;resize:vertical}
-.acts{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
-.acts input{background:#0e0e12;border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:7px 10px;font-size:13px;flex:1;min-width:120px}
-.empty{color:var(--mut);text-align:center;padding:24px;font-size:13px}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--gold);color:var(--txt);padding:11px 18px;border-radius:11px;font-size:14px;z-index:99;opacity:0;transition:.3s}
-.toast.show{opacity:1}
+canvas{max-height:250px}
+.item{border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:12px;background:linear-gradient(180deg,var(--card2),var(--card))}
+.item .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap}
+.item .who{font-weight:700;font-size:15px}.item .unit{color:var(--gold);font-size:12px;background:rgba(200,162,75,.1);padding:3px 10px;border-radius:8px}
+.bubble{background:#0c0c11;border:1px solid var(--line);border-radius:11px;padding:11px 13px;font-size:13px;color:#c6c6cf;margin-bottom:11px}
+.bubble b{color:var(--mut);font-weight:600;font-size:11px;display:block;margin-bottom:3px}
+textarea{width:100%;background:#0c0c11;border:1px solid var(--line);border-radius:11px;color:var(--txt);padding:12px;font-size:13.5px;min-height:92px;resize:vertical;line-height:1.6}
+textarea:focus{outline:none;border-color:var(--gold)}
+.acts{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;align-items:center}
+.acts input{background:#0c0c11;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:9px 12px;font-size:13px;flex:1;min-width:130px}
+.empty{color:var(--mut);text-align:center;padding:30px;font-size:14px}
+.loading{color:var(--mut);text-align:center;padding:26px;font-size:13px}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--card2);border:1px solid var(--gold);color:var(--txt);padding:12px 20px;border-radius:12px;font-size:14px;z-index:99;opacity:0;transition:.3s;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.spin{animation:rot 1s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}
 </style></head>
 <body>
 <div id="login">
   <div class="logo">عوجا · Control Center</div>
-  <input id="tok" type="password" placeholder="رمز الدخول / Access token">
+  <input id="tok" type="password" placeholder="رمز الدخول · Access token" onkeydown="if(event.key==='Enter')saveTok()">
   <button class="btn" onclick="saveTok()">دخول · Enter</button>
   <div class="muted" id="lerr"></div>
 </div>
 <div class="wrap" id="app" style="display:none">
   <header>
-    <div class="logo" id="brand">عوجا · Control Center</div>
+    <div><div class="logo" id="brand">عوجا · Control Center</div><div class="sub"><span class="dot" id="dot"></span><span id="freshness"></span></div></div>
     <div class="tools">
-      <button class="tab" onclick="toggleLang()" id="langBtn">EN</button>
-      <button class="tab" onclick="refresh()" id="refreshBtn">↻</button>
-      <button class="tab" onclick="logout()" id="logoutBtn">⎋</button>
+      <button class="icbtn" onclick="toggleLang()" id="langBtn">EN</button>
+      <button class="icbtn" onclick="refresh()" id="refreshBtn">↻</button>
+      <button class="icbtn" onclick="logout()">⎋</button>
     </div>
   </header>
   <div class="kpis" id="kpis"></div>
   <div class="tabs" id="tabs"></div>
-  <div class="panel on" id="ov">
-    <div class="card"><h3 id="h_monthly"></h3><canvas id="cMonthly"></canvas></div>
-    <div class="card"><h3 id="h_units"></h3><div id="unitTable"></div></div>
+
+  <div class="panel" id="ov">
+    <div class="card"><h3 id="h_monthly">📈</h3><canvas id="cMonthly"></canvas></div>
+    <div class="card"><h3 id="h_units">🏠</h3><div id="unitTable"><div class="loading">…</div></div></div>
   </div>
   <div class="panel" id="inbox">
-    <div class="card"><h3 id="h_replies"></h3><div id="replies"></div></div>
-    <div class="card"><h3 id="h_esc"></h3><div id="escs"></div></div>
+    <div class="grid2">
+      <div class="card"><h3 id="h_replies">💬</h3><div id="replies"><div class="loading">…</div></div></div>
+      <div class="card"><h3 id="h_esc">🚨</h3><div id="escs"><div class="loading">…</div></div></div>
+    </div>
   </div>
   <div class="panel" id="rev">
-    <div class="card"><h3 id="h_season"></h3><canvas id="cSeason"></canvas></div>
-    <div class="card"><h3 id="h_salary"></h3><canvas id="cSalary"></canvas><div class="muted" id="salNote"></div></div>
+    <div class="grid2">
+      <div class="card"><h3 id="h_season">📅</h3><canvas id="cSeason"></canvas></div>
+      <div class="card"><h3 id="h_salary">💵</h3><canvas id="cSalary"></canvas><div class="muted" id="salNote"></div></div>
+    </div>
   </div>
-  <div class="panel" id="pr"><div class="card"><h3 id="h_pricing"></h3><div class="muted" id="upl"></div><div id="prTable"></div></div></div>
-  <div class="panel" id="log"><div class="card"><h3 id="h_log"></h3><div class="catf" id="catf"></div><div id="logFeed"></div></div></div>
+  <div class="panel" id="pr"><div class="card"><h3 id="h_pricing">💰</h3><div class="muted" id="upl" style="margin-bottom:12px"></div><div id="prTable"><div class="loading">…</div></div></div></div>
+  <div class="panel" id="log"><div class="card"><h3 id="h_log">📋</h3><div class="catf" id="catf"></div><div id="logFeed"><div class="loading">…</div></div></div></div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 const TK="ouja_token";
-const T={ar:{dir:"rtl",brand:"عوجا · Control Center",ov:"نظرة عامة",inbox:"الوارد",rev:"الإيرادات",pr:"التسعير",log:"السجل",
- monthly:"الإيراد الشهري (آخر ١٢ شهر)",units:"أداء الوحدات (٩٠ يوم)",season:"أقوى الشهور (متوسط السعر)",
- salary:"دورة الراتب (الطلب حسب يوم الشهر)",pricing:"فرص التسعير",replies:"ردود بانتظار الموافقة",esc:"تصعيدات مفتوحة",
- send:"إرسال",reject:"تجاهل",claim:"استلام",apply:"تطبيق",noRep:"ما فيه ردود معلّقة 🎉",noEsc:"ما فيه تصعيدات مفتوحة 🎉",
- guestSays:"الضيف يقول",reason:"السبب",claimedBy:"مستلم بواسطة",namePh:"اسمك",uplift:"إيراد إضافي تقديري",
- colUnit:"الوحدة",colOcc:"إشغال",colAdr:"سعر/ليلة",colPace:"سرعة ٣٠ي",colReco:"التوصية",colChg:"تغييرات",colUp:"إيراد إضافي",colConf:"الثقة",colApply:"",
- cats:{"":"الكل",guest:"الضيوف",escalation:"تصعيدات",pricing:"التسعير",report:"التقارير"},
- kpis:[["active_units","الوحدات الفعّالة",""],["occ_30","إشغال ٣٠ يوم","%"],["rev_30","إيراد ٣٠ يوم"," ر.س"],
-  ["rev_7","إيراد ٧ أيام"," ر.س"],["missed_7","إيراد ضائع ٧ أيام"," ر.س"],["pending_cards","ردود معلّقة",""],
-  ["open_escalations","تصعيدات مفتوحة",""],["checkins_today","وصول اليوم",""],["checkouts_today","مغادرة اليوم",""]],
- sent:"تم الإرسال ✅",rejected:"تم التجاهل",claimed:"تم الاستلام ✅",applied:"تم التطبيق ✅",err:"صار خطأ",weak:"أضعف الأيام",strong:"أقوى الأيام"},
- en:{dir:"ltr",brand:"Ouja · Control Center",ov:"Overview",inbox:"Inbox",rev:"Revenue",pr:"Pricing",log:"Log",
- monthly:"Monthly revenue (last 12 mo)",units:"Unit performance (90d)",season:"Top months (avg rate)",
- salary:"Salary cycle (demand by day-of-month)",pricing:"Pricing opportunities",replies:"Replies awaiting approval",esc:"Open escalations",
- send:"Send",reject:"Dismiss",claim:"Claim",apply:"Apply",noRep:"No pending replies 🎉",noEsc:"No open escalations 🎉",
- guestSays:"Guest says",reason:"Reason",claimedBy:"Claimed by",namePh:"Your name",uplift:"Est. extra revenue",
- colUnit:"Unit",colOcc:"Occ",colAdr:"Rate/nt",colPace:"30d pace",colReco:"Action",colChg:"Changes",colUp:"Extra rev",colConf:"Confidence",colApply:"",
- cats:{"":"All",guest:"Guests",escalation:"Escalations",pricing:"Pricing",report:"Reports"},
- kpis:[["active_units","Active units",""],["occ_30","Occ 30d","%"],["rev_30","Rev 30d"," SAR"],
-  ["rev_7","Rev 7d"," SAR"],["missed_7","Missed 7d"," SAR"],["pending_cards","Pending replies",""],
-  ["open_escalations","Open escalations",""],["checkins_today","Check-ins today",""],["checkouts_today","Check-outs today",""]],
- sent:"Sent ✅",rejected:"Dismissed",claimed:"Claimed ✅",applied:"Applied ✅",err:"Something went wrong",weak:"Weakest days",strong:"Strongest days"}};
-let L="ar",charts={},curCat="",lastData={};
+const T={
+ ar:{dir:"rtl",ov:"نظرة عامة",inbox:"الوارد",rev:"الإيرادات",pr:"التسعير",log:"السجل",
+  monthly:"الإيراد الشهري · آخر ١٢ شهر",units:"أداء الوحدات · آخر ٩٠ يوم",season:"أقوى الشهور · متوسط السعر",
+  salary:"دورة الراتب · الطلب حسب يوم الشهر",pricing:"فرص التسعير",replies:"ردود بانتظار الموافقة",esc:"تصعيدات مفتوحة",
+  send:"إرسال",reject:"تجاهل",claim:"استلام",apply:"تطبيق",noRep:"ما فيه ردود معلّقة 🎉",noEsc:"ما فيه تصعيدات 🎉",
+  gsays:"الضيف يقول",reason:"السبب",by:"مستلم بواسطة",namePh:"اسمك",uplift:"إيراد إضافي تقديري",calc:"جاري التحليل في الخلفية… بيظهر خلال لحظات",
+  cU:"الوحدة",cOcc:"إشغال",cAdr:"سعر/ليلة",cPace:"سرعة ٣٠ي",cReco:"التوصية",cChg:"تغييرات",cUp:"إيراد إضافي",cConf:"الثقة",
+  cats:{"":"الكل",guest:"الضيوف",escalation:"تصعيدات",pricing:"التسعير",report:"التقارير"},
+  kpis:[["active_units","🏠","الوحدات الفعّالة","","g"],["occ_30","📊","إشغال ٣٠ يوم","%","g"],["rev_30","💰","إيراد ٣٠ يوم"," ر.س","g"],
+   ["rev_7","🗓️","إيراد ٧ أيام"," ر.س","g"],["missed_7","📉","إيراد ضائع ٧ أيام"," ر.س","r"],["pending_cards","💬","ردود معلّقة","","b"],
+   ["open_escalations","🚨","تصعيدات مفتوحة","","r"],["checkins_today","🟢","وصول اليوم","","g"],["checkouts_today","🔵","مغادرة اليوم","","b"]],
+  sent:"تم الإرسال ✅",rej:"تم التجاهل",claimed:"تم الاستلام ✅",applied:"تم التطبيق ✅",err:"صار خطأ",
+  weak:"أضعف الأيام",strong:"أقوى الأيام",fresh:"آخر تحديث",live:"مباشر",updating:"يحدّث…"},
+ en:{dir:"ltr",ov:"Overview",inbox:"Inbox",rev:"Revenue",pr:"Pricing",log:"Log",
+  monthly:"Monthly revenue · last 12 mo",units:"Unit performance · last 90 days",season:"Top months · avg rate",
+  salary:"Salary cycle · demand by day-of-month",pricing:"Pricing opportunities",replies:"Replies awaiting approval",esc:"Open escalations",
+  send:"Send",reject:"Dismiss",claim:"Claim",apply:"Apply",noRep:"No pending replies 🎉",noEsc:"No escalations 🎉",
+  gsays:"Guest says",reason:"Reason",by:"Claimed by",namePh:"Your name",uplift:"Est. extra revenue",calc:"Computing in the background… ready in a moment",
+  cU:"Unit",cOcc:"Occ",cAdr:"Rate/nt",cPace:"30d pace",cReco:"Action",cChg:"Changes",cUp:"Extra rev",cConf:"Confidence",
+  cats:{"":"All",guest:"Guests",escalation:"Escalations",pricing:"Pricing",report:"Reports"},
+  kpis:[["active_units","🏠","Active units","","g"],["occ_30","📊","Occupancy 30d","%","g"],["rev_30","💰","Revenue 30d"," SAR","g"],
+   ["rev_7","🗓️","Revenue 7d"," SAR","g"],["missed_7","📉","Missed 7d"," SAR","r"],["pending_cards","💬","Pending replies","","b"],
+   ["open_escalations","🚨","Open escalations","","r"],["checkins_today","🟢","Check-ins today","","g"],["checkouts_today","🔵","Check-outs today","","b"]],
+  sent:"Sent ✅",rej:"Dismissed",claimed:"Claimed ✅",applied:"Applied ✅",err:"Something went wrong",
+  weak:"Weakest days",strong:"Strongest days",fresh:"Updated",live:"live",updating:"updating…"}};
+let L=localStorage.getItem("ouja_lang")||"ar",charts={},curCat="",cur="ov",loaded={},D={};
 function t(){return T[L]}
 function tok(){return localStorage.getItem(TK)||""}
 function saveTok(){localStorage.setItem(TK,document.getElementById('tok').value.trim());init()}
 function logout(){localStorage.removeItem(TK);location.reload()}
-function toggleLang(){L=L==="ar"?"en":"ar";localStorage.setItem("ouja_lang",L);applyLang();renderAll()}
-function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200)}
-async function api(p){const r=await fetch(p+(p.includes('?')?'&':'?')+'token='+encodeURIComponent(tok()));
-  if(r.status===401)throw'unauthorized';return r.json()}
-async function post(p,body){const r=await fetch(p+'?token='+encodeURIComponent(tok()),
-  {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json().catch(()=>({}))}
+function toggleLang(){L=(L==="ar"?"en":"ar");localStorage.setItem("ouja_lang",L);applyLang();renderAll()}
+function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2300)}
+function esc(s){return (s==null?'':String(s)).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
 function fmt(n){return (n||0).toLocaleString('en-US')}
-function mkChart(id,cfg){if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),cfg)}
-const GOLD='#C8A24B',GRID='#26262f';
-function applyLang(){document.documentElement.dir=t().dir;document.documentElement.lang=L;
-  document.getElementById('langBtn').textContent=L==="ar"?"EN":"ع";
-  document.getElementById('brand').textContent=t().brand;
-  const tabs=[["ov",t().ov],["inbox",t().inbox],["rev",t().rev],["pr",t().pr],["log",t().log]];
-  document.getElementById('tabs').innerHTML=tabs.map((x,i)=>`<div class="tab ${i===0?'on':''}" data-t="${x[0]}" onclick="tab('${x[0]}')">${x[1]}<span class="badge" id="bdg_${x[0]}" style="display:none"></span></div>`).join('');
-  document.getElementById('h_monthly').textContent=t().monthly;document.getElementById('h_units').textContent=t().units;
-  document.getElementById('h_replies').textContent=t().replies;document.getElementById('h_esc').textContent=t().esc;
-  document.getElementById('h_season').textContent=t().season;document.getElementById('h_salary').textContent=t().salary;
-  document.getElementById('h_pricing').textContent=t().pricing;document.getElementById('h_log').textContent=t().log;
-  document.getElementById('catf').innerHTML=Object.entries(t().cats).map(([c,lbl],i)=>`<div class="tab ${c===curCat?'on':''}" data-c="${c}" onclick="logf('${c}')">${lbl}</div>`).join('');
+async function api(p){const r=await fetch(p+(p.includes('?')?'&':'?')+'token='+encodeURIComponent(tok()));if(r.status===401)throw'unauthorized';return r.json()}
+async function post(p,b){const r=await fetch(p+'?token='+encodeURIComponent(tok()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json().catch(()=>({}))}
+function mkChart(id,cfg){if(charts[id])charts[id].destroy();const el=document.getElementById(id);if(el)charts[id]=new Chart(el,cfg)}
+const GOLD='#C8A24B',G2='#e8c87e',GRID='#272730',MUT='#8a8a96';
+const AX={x:{grid:{color:GRID},ticks:{color:MUT}},y:{grid:{color:GRID},ticks:{color:MUT}}};
+
+function applyLang(){
+  document.documentElement.dir=t().dir;document.documentElement.lang=L;
+  document.getElementById('langBtn').textContent=(L==="ar"?"EN":"ع");
+  const tb=[["ov","🏠"],["inbox","📥"],["rev","📈"],["pr","💰"],["log","📋"]];
+  document.getElementById('tabs').innerHTML=tb.map(x=>`<div class="tab ${x[0]===cur?'on':''}" data-t="${x[0]}" onclick="tab('${x[0]}')">${x[1]} ${t()[x[0]]}<span class="badge" id="bdg_${x[0]}" style="display:none"></span></div>`).join('');
+  const H={h_monthly:"monthly",h_units:"units",h_replies:"replies",h_esc:"esc",h_season:"season",h_salary:"salary",h_pricing:"pricing",h_log:"log"};
+  const E={h_monthly:"📈",h_units:"🏠",h_replies:"💬",h_esc:"🚨",h_season:"📅",h_salary:"💵",h_pricing:"💰",h_log:"📋"};
+  for(const id in H){const e=document.getElementById(id);if(e)e.innerHTML=E[id]+" "+t()[H[id]];}
+  document.getElementById('catf').innerHTML=Object.entries(t().cats).map(([c,l])=>`<div class="tab ${c===curCat?'on':''}" data-c="${c}" onclick="logf('${c}')">${l}</div>`).join('');
+  showPanel(cur);
 }
-function tab(x){document.querySelectorAll('.tab[data-t]').forEach(e=>e.classList.toggle('on',e.dataset.t===x));
+function showPanel(x){document.querySelectorAll('.tab[data-t]').forEach(e=>e.classList.toggle('on',e.dataset.t===x));
   document.querySelectorAll('.panel').forEach(e=>e.classList.toggle('on',e.id===x))}
+function tab(x){cur=x;showPanel(x);
+  if(x==='rev'&&!loaded.rev)loadRevenue();
+  if(x==='pr'&&!loaded.pr)loadPricing();}
 function logf(c){curCat=c;document.querySelectorAll('.catf .tab').forEach(e=>e.classList.toggle('on',e.dataset.c===c));renderLog()}
+
 async function init(){try{document.getElementById('lerr').textContent='';await api('/api/overview');
   document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
-  L=localStorage.getItem("ouja_lang")||"ar";applyLang();await refresh();
-  }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح / Wrong token'}}
-async function refresh(){lastData.ov=await api('/api/overview');lastData.rev=await api('/api/revenue');
-  lastData.inbox=await api('/api/inbox');lastData.log=(await api('/api/log')).items;
-  try{lastData.pr=await api('/api/pricing')}catch(e){lastData.pr={units:[],total_uplift:0}}
-  renderAll()}
-function renderAll(){renderKpis();renderInbox();renderRevenue();renderPricing();renderLog();}
-function renderKpis(){const d=lastData.ov||{};document.getElementById('kpis').innerHTML=t().kpis.map(([k,lbl,suf])=>
-  `<div class="kpi"><div class="v g">${fmt(d[k])}${suf}</div><div class="l">${lbl}</div></div>`).join('')}
-function renderRevenue(){const d=lastData.rev;if(!d)return;
-  mkChart('cMonthly',{type:'line',data:{labels:d.monthly.map(m=>m.m),datasets:[{data:d.monthly.map(m=>m.rev),borderColor:GOLD,backgroundColor:'rgba(200,162,75,.13)',fill:true,tension:.3,pointRadius:0}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b97'}},y:{grid:{color:GRID},ticks:{color:'#8b8b97'}}}}});
-  mkChart('cSeason',{type:'bar',data:{labels:d.seasonality.map(m=>m.name),datasets:[{data:d.seasonality.map(m=>m.adr),backgroundColor:GOLD,borderRadius:5}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8b8b97'}},y:{grid:{color:GRID},ticks:{color:'#8b8b97'}}}}});
-  const doms=Array.from({length:31},(_,i)=>i+1);
-  mkChart('cSalary',{type:'line',data:{labels:doms,datasets:[{data:doms.map(x=>d.salary[x]||1),borderColor:GOLD,tension:.25,pointRadius:0,fill:true,backgroundColor:'rgba(200,162,75,.08)'}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{color:GRID},ticks:{color:'#8b8b97'}},y:{grid:{color:GRID},ticks:{color:'#8b8b97'}}}}});
-  document.getElementById('salNote').textContent=(d.weak?(t().weak+': '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?(' · '+t().strong+': '+d.strong[0]+'–'+d.strong[1]):'');
-  const rows=d.units.slice(0,60).map(u=>{const cls=u.reco.includes('raise')?'up':(u.reco==='lower'?'dn':'hd');
-    return `<tr><td>${u.name}</td><td>${u.occ}%</td><td>${u.adr||'-'}</td><td>${u.pace}%</td><td><span class="pill ${cls}">${u.label}</span></td></tr>`}).join('');
-  document.getElementById('unitTable').innerHTML=`<table><tr><th>${t().colUnit}</th><th>${t().colOcc}</th><th>${t().colAdr}</th><th>${t().colPace}</th><th>${t().colReco}</th></tr>${rows}</table>`}
-function renderPricing(){const d=lastData.pr;if(!d)return;
-  document.getElementById('upl').innerHTML=`${t().uplift}: <b style="color:var(--gold)">~${fmt(d.total_uplift)} SAR</b>`;
-  const rows=d.units.map(u=>`<tr><td>${u.name}</td><td>${u.raise?('🔼 '+u.raise):''} ${u.drop?('🔽 '+u.drop):''}</td>
-    <td>~${fmt(u.uplift)}</td><td style="min-width:90px"><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td>
-    <td><button class="btn sm" onclick="doApply(${u.lid},this)">${t().apply}</button></td></tr>`).join('');
-  document.getElementById('prTable').innerHTML=`<table><tr><th>${t().colUnit}</th><th>${t().colChg}</th><th>${t().colUp}</th><th>${t().colConf}</th><th></th></tr>${rows}</table>`}
-function renderInbox(){const d=lastData.inbox||{replies:[],escalations:[]};
-  setBadge('inbox',d.replies.length+d.escalations.filter(e=>!e.claimed_by).length);
-  document.getElementById('replies').innerHTML=d.replies.length?d.replies.map(r=>`
-    <div class="item" id="rep_${r.id}"><div class="hd2"><span class="who">${r.guest}</span><span class="unit">${r.unit}</span></div>
-    <div class="gtext">${t().guestSays}: ${esc(r.guest_text)||'—'}</div>
-    <textarea id="ta_${r.id}">${esc(r.draft)}</textarea>
-    <div class="acts"><button class="btn sm green" onclick="doSend(${r.id})">${t().send}</button>
-    <button class="btn sm red" onclick="doReject(${r.id})">${t().reject}</button></div></div>`).join(''):`<div class="empty">${t().noRep}</div>`;
-  document.getElementById('escs').innerHTML=d.escalations.length?d.escalations.map(e=>`
-    <div class="item" id="esc_${e.id}"><div class="hd2"><span class="who">${e.guest}</span><span class="unit">${e.unit}</span></div>
-    <div class="gtext">${t().guestSays}: ${esc(e.guest_text)||'—'}<br>${t().reason}: ${esc(e.reason)||'—'}</div>
-    ${e.claimed_by?`<div class="muted">${t().claimedBy}: <b>${esc(e.claimed_by)}</b></div>`:
-    `<div class="acts"><input id="nm_${e.id}" placeholder="${t().namePh}"><button class="btn sm" onclick="doClaim(${e.id})">${t().claim}</button></div>`}</div>`).join(''):`<div class="empty">${t().noEsc}</div>`}
-function renderLog(){const items=(lastData.log||[]).filter(e=>!curCat||e.cat===curCat).slice(0,200);
-  const ic={guest:'💬',escalation:'🚨',pricing:'💰',report:'📊'};
-  document.getElementById('logFeed').innerHTML=items.length?items.map(e=>
-    `<div class="logrow"><span class="t">${e.ts.replace('T',' ')}</span><span>${ic[e.cat]||'•'}</span><span>${esc(e.text)}</span></div>`).join(''):`<div class="empty">—</div>`}
-function setBadge(tabId,n){const b=document.getElementById('bdg_'+tabId);if(!b)return;if(n>0){b.textContent=n;b.style.display='inline-block'}else b.style.display='none'}
-function esc(s){return (s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}
-async function doSend(id){const text=document.getElementById('ta_'+id).value;const r=await post('/api/send',{id,text});
-  if(r.ok){toast(t().sent);document.getElementById('rep_'+id).remove();refreshInbox()}else toast(r.error||t().err)}
-async function doReject(id){const r=await post('/api/reject',{id});toast(t().rejected);document.getElementById('rep_'+id).remove();refreshInbox()}
-async function doClaim(id){const name=document.getElementById('nm_'+id).value||'';const r=await post('/api/claim',{id,name});
-  if(r.ok){toast(t().claimed);refreshInbox()}else toast(r.error||t().err)}
-async function doApply(lid,btn){btn.disabled=true;btn.textContent='…';const r=await post('/api/apply',{lid});
-  if(r.ok){toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied)}else toast(r.error||t().err);
-  setTimeout(()=>{btn.disabled=false;btn.textContent=t().apply},800)}
-async function refreshInbox(){lastData.inbox=await api('/api/inbox');lastData.ov=await api('/api/overview');renderKpis();renderInbox()}
+  applyLang();await loadFast();
+  setInterval(pollLive,15000);            // keep KPIs + inbox mirroring live
+  }catch(e){document.getElementById('lerr').textContent='رمز غير صحيح · Wrong token'}}
+
+async function loadFast(){            // instant tabs: overview KPIs + inbox + log
+  D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');D.log=(await api('/api/log')).items;
+  renderKpis();renderInbox();renderLog();renderFresh();
+  if(D.ov.ready){loadOverview();}else{setTimeout(retryOverview,5000);}   // bg compute still warming
+}
+async function retryOverview(){D.ov=await api('/api/overview');renderKpis();renderFresh();if(!D.ov.ready)setTimeout(retryOverview,5000);else loadOverview();}
+async function pollLive(){try{D.ov=await api('/api/overview');D.inbox=await api('/api/inbox');renderKpis();renderInbox();renderFresh();}catch(e){}}
+async function refresh(){const b=document.getElementById('refreshBtn');b.classList.add('spin');
+  loaded={};await loadFast();await loadOverview();if(cur==='rev')await loadRevenue();if(cur==='pr')await loadPricing();
+  setTimeout(()=>b.classList.remove('spin'),500)}
+
+async function loadOverview(){if(!D.rev)D.rev=await api('/api/revenue');loaded.ov=true;renderRevenueCharts();renderUnits()}
+async function loadRevenue(){D.rev=await api('/api/revenue');loaded.rev=true;renderRevenueCharts();renderUnits()}
+async function loadPricing(){D.pr=await api('/api/pricing');loaded.pr=true;renderPricing()}
+function renderAll(){renderKpis();renderInbox();renderLog();renderFresh();renderRevenueCharts();renderUnits();renderPricing()}
+
+function renderFresh(){const u=D.ov&&D.ov.updated?new Date(D.ov.updated*1000):null;
+  const dot=document.getElementById('dot');dot.className='dot'+((D.ov&&D.ov.ready)?'':' warn');
+  document.getElementById('freshness').textContent=(D.ov&&D.ov.ready)?
+    (t().fresh+': '+(u?u.toLocaleTimeString(L==='ar'?'ar-SA':'en-US',{hour:'2-digit',minute:'2-digit'}):'—')+' · '+t().live):t().updating}
+function renderKpis(){const d=D.ov||{},ready=d.ready!==false;
+  document.getElementById('kpis').innerHTML=t().kpis.map(([k,ic,lbl,suf,col])=>{
+    const liveK=(k==='pending_cards'||k==='open_escalations');
+    const val=(ready||liveK)?`${fmt(d[k])}${suf}`:'';
+    const sh=(ready||liveK)?'':'shimmer';
+    return `<div class="kpi"><div class="ic">${ic}</div><div class="v ${col} ${sh}">${val||'00'}</div><div class="l">${lbl}</div></div>`}).join('')}
+function renderRevenueCharts(){const d=D.rev;if(!d||d.loading){return}
+  mkChart('cMonthly',{type:'line',data:{labels:d.monthly.map(m=>m.m),datasets:[{data:d.monthly.map(m=>m.rev),borderColor:GOLD,backgroundColor:'rgba(200,162,75,.13)',fill:true,tension:.35,pointRadius:0,borderWidth:2}]},options:{plugins:{legend:{display:false}},scales:AX}});
+  if(d.seasonality)mkChart('cSeason',{type:'bar',data:{labels:d.seasonality.map(m=>m.name),datasets:[{data:d.seasonality.map(m=>m.adr),backgroundColor:GOLD,borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:MUT}},y:AX.y}}});
+  if(d.salary){const doms=Array.from({length:31},(_,i)=>i+1);
+   mkChart('cSalary',{type:'line',data:{labels:doms,datasets:[{data:doms.map(x=>d.salary[x]||1),borderColor:GOLD,tension:.3,pointRadius:0,fill:true,backgroundColor:'rgba(200,162,75,.08)',borderWidth:2}]},options:{plugins:{legend:{display:false}},scales:AX}});
+   document.getElementById('salNote').textContent=(d.weak?(t().weak+': '+d.weak[0]+'–'+d.weak[1]):'')+(d.strong?(' · '+t().strong+': '+d.strong[0]+'–'+d.strong[1]):'')}}
+function renderUnits(){const d=D.rev;const el=document.getElementById('unitTable');if(!el)return;
+  if(!d||d.loading||!d.units){el.innerHTML=`<div class="loading">${t().calc}</div>`;return}
+  const rows=d.units.slice(0,60).map(u=>{const cls=u.reco&&u.reco.includes('raise')?'up':(u.reco==='lower'?'dn':'hd');
+    return `<tr><td>${esc(u.name)}</td><td>${u.occ}%</td><td>${u.adr||'-'}</td><td>${u.pace}%</td><td><span class="pill ${cls}">${esc(u.label)}</span></td></tr>`}).join('');
+  el.innerHTML=`<table><tr><th>${t().cU}</th><th>${t().cOcc}</th><th>${t().cAdr}</th><th>${t().cPace}</th><th>${t().cReco}</th></tr>${rows}</table>`}
+function renderPricing(){const d=D.pr,el=document.getElementById('prTable');if(!el)return;
+  if(!d||d.loading){el.innerHTML=`<div class="loading">${t().calc}</div>`;document.getElementById('upl').textContent='';return}
+  document.getElementById('upl').innerHTML=`${t().uplift}: <b style="color:var(--gold);font-size:15px">~${fmt(d.total_uplift)} ${L==='ar'?'ر.س':'SAR'}</b>`;
+  const rows=(d.units||[]).map(u=>`<tr><td>${esc(u.name)}</td><td>${u.raise?('🔼 '+u.raise):''} ${u.drop?('🔽 '+u.drop):''}</td><td>~${fmt(u.uplift)}</td><td style="min-width:96px"><div>${u.confidence}%</div><div class="bar"><div style="width:${u.confidence}%"></div></div></td><td><button class="btn sm" onclick="doApply(${u.lid},this)">${t().apply}</button></td></tr>`).join('');
+  el.innerHTML=`<table><tr><th>${t().cU}</th><th>${t().cChg}</th><th>${t().cUp}</th><th>${t().cConf}</th><th></th></tr>${rows}</table>`}
+function renderInbox(){const d=D.inbox||{replies:[],escalations:[]};
+  setBadge('inbox',(d.replies?d.replies.length:0)+(d.escalations?d.escalations.filter(e=>!e.claimed_by).length:0));
+  const rep=document.getElementById('replies');
+  rep.innerHTML=(d.replies&&d.replies.length)?d.replies.map(r=>`
+   <div class="item" id="rep_${r.id}"><div class="top"><span class="who">${esc(r.guest)}</span><span class="unit">${esc(r.unit)}</span></div>
+   <div class="bubble"><b>${t().gsays}</b>${esc(r.guest_text)||'—'}</div>
+   <textarea id="ta_${r.id}">${esc(r.draft)}</textarea>
+   <div class="acts"><button class="btn sm green" onclick="doSend(${r.id})">✅ ${t().send}</button><button class="btn sm red" onclick="doReject(${r.id})">🗑️ ${t().reject}</button></div></div>`).join(''):`<div class="empty">${t().noRep}</div>`;
+  const ec=document.getElementById('escs');
+  ec.innerHTML=(d.escalations&&d.escalations.length)?d.escalations.map(e=>`
+   <div class="item" id="esc_${e.id}"><div class="top"><span class="who">${esc(e.guest)}</span><span class="unit">${esc(e.unit)}</span></div>
+   <div class="bubble"><b>${t().gsays}</b>${esc(e.guest_text)||'—'}</div>
+   ${e.reason?`<div class="muted" style="margin-bottom:8px">⚠️ ${esc(e.reason)}</div>`:''}
+   ${e.claimed_by?`<div class="muted">${t().by}: <b style="color:var(--green)">${esc(e.claimed_by)}</b></div>`:`<div class="acts"><input id="nm_${e.id}" placeholder="${t().namePh}"><button class="btn sm" onclick="doClaim(${e.id})">🙋 ${t().claim}</button></div>`}</div>`).join(''):`<div class="empty">${t().noEsc}</div>`}
+function renderLog(){const items=(D.log||[]).filter(e=>!curCat||e.cat===curCat).slice(0,200),ic={guest:'💬',escalation:'🚨',pricing:'💰',report:'📊'};
+  document.getElementById('logFeed').innerHTML=items.length?items.map(e=>`<div class="logrow"><span class="t">${esc(e.ts).replace('T',' ')}</span><span class="ic">${ic[e.cat]||'•'}</span><span>${esc(e.text)}</span></div>`).join(''):`<div class="empty">—</div>`}
+function setBadge(id,n){const b=document.getElementById('bdg_'+id);if(!b)return;if(n>0){b.textContent=n;b.style.display='inline-block'}else b.style.display='none'}
+
+async function doSend(id){const ta=document.getElementById('ta_'+id);const r=await post('/api/send',{id,text:ta.value});
+  if(r.ok){toast(t().sent);const c=document.getElementById('rep_'+id);if(c)c.remove();pollLive()}else toast(r.error||t().err)}
+async function doReject(id){await post('/api/reject',{id});toast(t().rej);const c=document.getElementById('rep_'+id);if(c)c.remove();pollLive()}
+async function doClaim(id){const n=(document.getElementById('nm_'+id)||{}).value||'';const r=await post('/api/claim',{id,name:n});
+  if(r.ok){toast(t().claimed);pollLive()}else toast(r.error||t().err)}
+async function doApply(lid,btn){btn.disabled=true;const o=btn.textContent;btn.textContent='…';const r=await post('/api/apply',{lid});
+  if(r.ok)toast(t().applied+(r.dry_run?' (DRY-RUN)':'')+' · '+r.applied);else toast(r.error||t().err);
+  setTimeout(()=>{btn.disabled=false;btn.textContent=o},900)}
 if(tok())init();
 </script></body></html>"""
 
@@ -2281,13 +2336,13 @@ def _json(data, status=200):
     return web.json_response(data, status=status,
                              dumps=lambda o: json.dumps(o, ensure_ascii=False))
 
-async def _cached(key, ttl, fn):
+def _cache_get(key):
     hit = _dash_cache.get(key)
-    if hit and (time.time() - hit[1]) < ttl:
-        return hit[0]
-    data = await asyncio.to_thread(fn)
-    _dash_cache[key] = (data, time.time())
-    return data
+    return hit[0] if hit else None
+
+def _live_counts():
+    return {"pending_cards": len(_pending_replies),
+            "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by"))}
 
 def _compute_overview():
     today = datetime.now(TZ).date()
@@ -2347,17 +2402,23 @@ def _compute_pricing():
 async def _api_overview(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    return _json(await _cached("overview", DASH_TTL, _compute_overview))
+    data = dict(_cache_get("overview") or {})
+    data.update(_live_counts())                 # these two are always real-time & cheap
+    data["ready"] = _cache_get("overview") is not None
+    data["updated"] = _dash_cache.get("overview", (None, 0))[1]
+    return _json(data)
 
 async def _api_revenue(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    return _json(await _cached("revenue", DASH_TTL, _compute_revenue))
+    d = _cache_get("revenue")
+    return _json(d if d else {"loading": True})
 
 async def _api_pricing(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    return _json(await _cached("pricing", max(DASH_TTL, 1800), _compute_pricing))
+    d = _cache_get("pricing")
+    return _json(d if d else {"loading": True})
 
 async def _api_log(request):
     if not _dash_auth(request):
@@ -2467,6 +2528,28 @@ async def _api_apply(request):
 
 async def _handle_dashboard(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+
+@tasks.loop(minutes=DASH_REFRESH_MIN)
+async def dashboard_cache_loop():
+    """Pre-compute heavy analytics in the background so the dashboard serves instantly."""
+    if not (DASHBOARD_ENABLED and DASHBOARD_TOKEN):
+        return
+    try:
+        if not _catalog_units:
+            await asyncio.to_thread(load_catalog, True)
+        ov = await asyncio.to_thread(_compute_overview)
+        if ov.get("active_units") or ov.get("rev_30") or ov.get("rev_7"):  # don't cache empty
+            _dash_cache["overview"] = (ov, time.time())
+        rv = await asyncio.to_thread(_compute_revenue)
+        if rv.get("monthly") or rv.get("units"):
+            _dash_cache["revenue"] = (rv, time.time())
+        last = _dash_cache.get("pricing")
+        if (not last) or (time.time() - last[1] > 1800):   # pricing is calendar-heavy: every ~30 min
+            pr = await asyncio.to_thread(_compute_pricing)
+            _dash_cache["pricing"] = (pr, time.time())
+        print(f"dashboard cache warmed · units={ov.get('active_units')} rev30={ov.get('rev_30')}")
+    except Exception as e:
+        print("dashboard cache error:", e)
 
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
@@ -3288,6 +3371,8 @@ async def on_ready():
         escalation_reping_loop.start()
     if not persist_loop.is_running():
         persist_loop.start()
+    if DASHBOARD_ENABLED and DASHBOARD_TOKEN and not dashboard_cache_loop.is_running():
+        dashboard_cache_loop.start()   # warms the cache immediately, then every few minutes
     if not revenue_loop.is_running():
         revenue_loop.start()
     if not price_opp_loop.is_running():
