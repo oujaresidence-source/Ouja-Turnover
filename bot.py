@@ -37,6 +37,12 @@ import requests
 import discord
 from discord.ext import commands, tasks
 
+try:
+    from aiohttp import web        # for the Hostaway webhook server (Stage 2)
+    _HAS_AIOHTTP = True
+except Exception:
+    _HAS_AIOHTTP = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -99,6 +105,11 @@ ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "
 ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
 ASSISTANT_POLL_MIN = int(os.environ.get("ASSISTANT_POLL_MIN", "2"))   # check inbox every N min
 ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many recent convos to scan
+# ---- Stage 2: Hostaway webhooks (instant replies). 100% optional/backward-compatible:
+# if not set up in Hostaway, the bot just keeps polling as before. ----
+WEBHOOKS_ENABLED = os.environ.get("WEBHOOKS_ENABLED", "1") in ("1", "true", "True", "yes")
+WEBHOOK_SECRET   = os.environ.get("WEBHOOK_SECRET", "ouja-hook")      # the secret path segment
+WEB_PORT         = int(os.environ.get("PORT", "8080"))               # Railway provides PORT
 # Safety: replies are NEVER sent automatically unless you explicitly turn this on later.
 ASSISTANT_AUTOSEND = os.environ.get("ASSISTANT_AUTOSEND", "0") in ("1", "true", "True", "yes")
 ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "True", "yes")
@@ -1150,6 +1161,61 @@ def claude_manager_script(guest, unit, history, guest_text, reason, manager_name
             f"آخر رسالة من الضيف: {guest_text}")
     return claude_text(sys, user, 700, model=CLAUDE_MODEL_PREMIUM) or claude_text(sys, user, 700)
 
+def _conv_to_item(c, listings, seen, debug=False):
+    """Turn ONE conversation object into a new-guest-message item, or None.
+    Shared by the full scan and the single-conversation webhook path."""
+    cid = c.get("id")
+    if not cid:
+        return None
+    try:
+        md = api_get(f"/conversations/{cid}/messages")
+        msgs = md.get("result", []) or []
+    except Exception as e:
+        if debug:
+            print(f"  conv {cid}: messages fetch error: {e}")
+        return None
+    if not msgs:
+        return None
+    msgs = sorted(msgs, key=_msg_time)
+    # the guest's most recent (inbound) message
+    guest_idx = next((i for i in range(len(msgs) - 1, -1, -1)
+                      if _msg_is_inbound(msgs[i])), None)
+    if guest_idx is None:
+        return None                                     # guest never messaged
+    guest_msg = msgs[guest_idx]
+    mid = str(guest_msg.get("id"))
+    after = msgs[guest_idx + 1:]                         # anything sent after the guest spoke
+    # "answered" = a real reply exists after the guest (not just an automated welcome)
+    answered = bool(after) and not all(
+        _looks_automated(m.get("body") or "") for m in after)
+    if debug:
+        print(f"  conv {cid}: {len(msgs)} msgs · guest_last_id={mid} · after={len(after)} · "
+              f"answered={answered} · body={(guest_msg.get('body') or '')[:50]!r}")
+    if mid in seen:
+        return None                                     # already drafted for this message
+    if not ASSISTANT_ALWAYS_DRAFT:
+        if answered:
+            return None                                 # a real human/bot reply already exists
+        if after and not ASSISTANT_ANSWER_PAST_AUTO:
+            return None                                 # only auto-replies after, feature off
+    lm = c.get("listingMapId")
+    unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
+    guest = c.get("recipientName") or c.get("guestName") or "Guest"
+    res = c.get("reservation") or {}
+    history = "\n".join(
+        f"{'Guest' if _msg_is_inbound(m) else 'Host'}: {(m.get('body') or '').strip()}"
+        for m in msgs[-8:] if (m.get("body") or "").strip())
+    return {
+        "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
+        "listing_id": lm,
+        "reservation_id": c.get("reservationId") or res.get("id"),
+        "res_status": (res.get("status") or "").lower(),
+        "comm_type": guest_msg.get("communicationType") or "email",
+        "guest_text": (guest_msg.get("body") or "").strip(), "history": history,
+        "last_time": _msg_time(guest_msg),
+        "checkin": res.get("arrivalDate"), "checkout": res.get("departureDate"),
+    }
+
 def fetch_new_guest_messages(seen, debug=False):
     """Scan recent conversations, fetch each one's messages, and return new inbound
     guest messages (the guest's latest message that hasn't been answered/seen)."""
@@ -1164,60 +1230,27 @@ def fetch_new_guest_messages(seen, debug=False):
     if debug:
         print(f"assistant DEBUG: /conversations returned {len(convos)} conversations")
     for c in convos:
-        cid = c.get("id")
-        if not cid:
-            continue
-        try:
-            md = api_get(f"/conversations/{cid}/messages")
-            msgs = md.get("result", []) or []
-        except Exception as e:
-            if debug:
-                print(f"  conv {cid}: messages fetch error: {e}")
-            continue
-        if not msgs:
-            continue
-        msgs = sorted(msgs, key=_msg_time)
-        # the guest's most recent (inbound) message
-        guest_idx = next((i for i in range(len(msgs) - 1, -1, -1)
-                          if _msg_is_inbound(msgs[i])), None)
-        if guest_idx is None:
-            continue                                    # guest never messaged
-        guest_msg = msgs[guest_idx]
-        mid = str(guest_msg.get("id"))
-        after = msgs[guest_idx + 1:]                     # anything sent after the guest spoke
-        # "answered" = a real reply exists after the guest (not just an automated welcome)
-        answered = bool(after) and not all(
-            _looks_automated(m.get("body") or "") for m in after)
-        if debug:
-            print(f"  conv {cid}: {len(msgs)} msgs · guest_last_id={mid} · after={len(after)} · "
-                  f"answered={answered} · body={(guest_msg.get('body') or '')[:50]!r}")
-        if mid in seen:
-            continue                                    # already drafted for this message
-        if not ASSISTANT_ALWAYS_DRAFT:
-            if answered:
-                continue                                # a real human/bot reply already exists
-            if after and not ASSISTANT_ANSWER_PAST_AUTO:
-                continue                                # only auto-replies after, feature off
-        lm = c.get("listingMapId")
-        unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
-        guest = c.get("recipientName") or c.get("guestName") or "Guest"
-        res = c.get("reservation") or {}
-        history = "\n".join(
-            f"{'Guest' if _msg_is_inbound(m) else 'Host'}: {(m.get('body') or '').strip()}"
-            for m in msgs[-8:] if (m.get("body") or "").strip())
-        out.append({
-            "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
-            "listing_id": lm,
-            "reservation_id": c.get("reservationId") or res.get("id"),
-            "res_status": (res.get("status") or "").lower(),
-            "comm_type": guest_msg.get("communicationType") or "email",
-            "guest_text": (guest_msg.get("body") or "").strip(), "history": history,
-            "last_time": _msg_time(guest_msg),
-            "checkin": res.get("arrivalDate"), "checkout": res.get("departureDate"),
-        })
+        it = _conv_to_item(c, listings, seen, debug)
+        if it:
+            out.append(it)
     if debug:
         print(f"assistant DEBUG: {len(out)} new inbound guest message(s) to draft")
     return out
+
+def fetch_conversation_item(conversation_id, seen):
+    """Fetch ONE conversation (for the webhook path) and return its new-message item or None."""
+    listings = get_listings_map()
+    try:
+        data = api_get(f"/conversations/{conversation_id}", params={"includeResources": 1})
+    except Exception as e:
+        print(f"webhook: conversation {conversation_id} fetch error:", e)
+        return None
+    c = data.get("result") or {}
+    if not c:
+        return None
+    if not c.get("id"):
+        c["id"] = conversation_id
+    return _conv_to_item(c, listings, seen)
 
 def _has_arabic(s):
     return any("\u0600" <= ch <= "\u06ff" for ch in str(s))
@@ -1637,40 +1670,124 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed}
 
-@tasks.loop(minutes=ASSISTANT_POLL_MIN)
-async def assistant_loop():
-    if not ASSISTANT_ENABLED:
+async def process_assistant_item(it, channel):
+    """Draft + post a card (or escalate) for ONE guest message. Shared by the poll
+    loop and the webhook handler so both behave identically."""
+    _assistant_seen.add(it["message_id"])
+    if not it["guest_text"]:
         return
+    status = it.get("res_status") or await asyncio.to_thread(
+        get_reservation_status, it.get("reservation_id"))
+    confirmed = status in CONFIRMED_STATUSES
+    guide = (await asyncio.to_thread(get_guide_url, it.get("listing_id"))
+             if (confirmed and it.get("listing_id")) else None)
+    result = await asyncio.to_thread(
+        claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
+        (it.get("checkin"), it.get("checkout")))
+    if not result:
+        return
+    try:
+        await post_assistant_card(channel, it, result, guide, confirmed)
+    except Exception as e:
+        print("assistant card error:", e)
+
+async def _assistant_channel():
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
+        return None
+    return await ensure_channel(guild, ASSISTANT_CHANNEL, await get_assistant_category(guild))
+
+async def run_assistant_scan():
+    """One full inbox scan (used by the poll loop and as a webhook fallback)."""
+    if not ASSISTANT_ENABLED:
         return
-    channel = await ensure_channel(guild, ASSISTANT_CHANNEL,
-                                   await get_assistant_category(guild))
+    channel = await _assistant_channel()
     if channel is None:
         return
     try:
         items = await asyncio.to_thread(fetch_new_guest_messages, _assistant_seen, ASSISTANT_DEBUG)
     except Exception as e:
-        print("assistant_loop fetch error:", e)
+        print("assistant scan fetch error:", e)
         return
     for it in items:
-        _assistant_seen.add(it["message_id"])
-        if not it["guest_text"]:
-            continue
-        status = it.get("res_status") or await asyncio.to_thread(
-            get_reservation_status, it.get("reservation_id"))
-        confirmed = status in CONFIRMED_STATUSES
-        guide = (await asyncio.to_thread(get_guide_url, it.get("listing_id"))
-                 if (confirmed and it.get("listing_id")) else None)
-        result = await asyncio.to_thread(
-            claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
-            (it.get("checkin"), it.get("checkout")))
-        if not result:
-            continue
-        try:
-            await post_assistant_card(channel, it, result, guide, confirmed)
-        except Exception as e:
-            print("assistant card error:", e)
+        await process_assistant_item(it, channel)
+
+@tasks.loop(minutes=ASSISTANT_POLL_MIN)
+async def assistant_loop():
+    try:
+        await run_assistant_scan()
+    except Exception as e:
+        print("assistant_loop error:", e)
+
+# ---------------- Stage 2: Hostaway webhook server ----------------
+_web_runner = None
+
+def _extract_conversation_id(payload):
+    """Pull a conversationId out of Hostaway's webhook payload, trying common shapes.
+    Returns None if we can't find one (caller then falls back to a full scan)."""
+    if not isinstance(payload, dict):
+        return None
+    # top level
+    for k in ("conversationId", "conversation_id"):
+        if payload.get(k):
+            return payload[k]
+    body = payload.get("data") or payload.get("object") or payload.get("body") or {}
+    if isinstance(body, dict):
+        for k in ("conversationId", "conversation_id"):
+            if body.get(k):
+                return body[k]
+        # if the event object itself is a conversation, its id IS the conversation id
+        evt = str(payload.get("event") or payload.get("type") or payload.get("object") or "").lower()
+        if "conversation" in evt and body.get("id"):
+            return body["id"]
+    return None
+
+async def _process_conversation_now(conversation_id):
+    """Handle a single conversation immediately (triggered by a webhook)."""
+    await bot.wait_until_ready()
+    if not ASSISTANT_ENABLED:
+        return
+    channel = await _assistant_channel()
+    if channel is None:
+        return
+    it = await asyncio.to_thread(fetch_conversation_item, conversation_id, _assistant_seen)
+    if it:
+        print(f"webhook: processing conversation {conversation_id} ({it['guest']})")
+        await process_assistant_item(it, channel)
+
+async def _handle_hook(request):
+    secret = request.match_info.get("secret", "")
+    if secret != WEBHOOK_SECRET:
+        return web.Response(status=403, text="forbidden")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    cid = _extract_conversation_id(payload)
+    if cid:
+        asyncio.create_task(_process_conversation_now(cid))
+    else:
+        # couldn't parse a conversation id -> just scan recent inbox (still near-instant)
+        asyncio.create_task(run_assistant_scan())
+    return web.Response(status=200, text="ok")     # ack fast so Hostaway doesn't retry
+
+async def _handle_health(request):
+    return web.Response(status=200, text="Ouja bot is up")
+
+async def start_web_server():
+    """Run a tiny HTTP server so Hostaway can push new-message events to us."""
+    global _web_runner
+    if _web_runner is not None or not _HAS_AIOHTTP:
+        return
+    app = web.Application()
+    app.router.add_get("/", _handle_health)                 # health check / browser test
+    app.router.add_post("/hook/{secret}", _handle_hook)     # Hostaway posts here
+    app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
+    _web_runner = web.AppRunner(app)
+    await _web_runner.setup()
+    site = web.TCPSite(_web_runner, "0.0.0.0", WEB_PORT)
+    await site.start()
+    print(f"web server listening on :{WEB_PORT}  (webhook path: /hook/{WEBHOOK_SECRET})")
 
 @tasks.loop(minutes=1)
 async def escalation_reping_loop():
@@ -1802,6 +1919,13 @@ async def on_ready():
         escalation_reping_loop.start()
     if not persist_loop.is_running():
         persist_loop.start()
+    if WEBHOOKS_ENABLED and _HAS_AIOHTTP and _web_runner is None:
+        try:
+            await start_web_server()
+        except Exception as e:
+            print("web server start error:", e)
+    elif WEBHOOKS_ENABLED and not _HAS_AIOHTTP:
+        print("webhooks: aiohttp not installed — add 'aiohttp' to requirements.txt to enable")
     if ASSISTANT_ENABLED and not knowledge_loop.is_running():
         knowledge_loop.start()
     if HEADS_UP_TEST:
