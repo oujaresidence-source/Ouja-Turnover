@@ -102,6 +102,9 @@ ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "Tr
 # Skip the startup "mark everything seen" baseline so the latest unanswered guest
 # messages get drafted right away (handy for a first test without sending a new message).
 ASSISTANT_TEST     = os.environ.get("ASSISTANT_TEST", "0") in ("1", "true", "True", "yes")
+# On startup, messages newer than this many minutes are NOT baselined, so a fresh guest
+# message still gets a card even if the bot just restarted/redeployed. Set 0 to baseline all.
+ASSISTANT_BASELINE_GRACE_MIN = int(os.environ.get("ASSISTANT_BASELINE_GRACE_MIN", "15"))
 # Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
 # anything needing approval or a human still posts a card. Default OFF — everything waits
 # for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
@@ -798,6 +801,18 @@ def _msg_is_inbound(m):
 def _msg_time(m):
     return str(m.get("date") or m.get("insertedOn") or m.get("latestMessageDate") or "")
 
+def _parse_msg_dt(s):
+    """Parse a Hostaway message timestamp as Riyadh local time. Returns aware dt or None.
+    Parsing as TZ is safe for baselining: a tz mismatch can only make a message look OLDER
+    (so it gets baselined like before), never wrongly resurrect an old one."""
+    s = str(s).strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(s[:19], fmt).replace(tzinfo=TZ)
+        except Exception:
+            pass
+    return None
+
 _guide_cache = {}
 
 def get_guide_url(listing_id):
@@ -922,6 +937,7 @@ def fetch_new_guest_messages(seen, debug=False):
             "res_status": (res.get("status") or "").lower(),
             "comm_type": last.get("communicationType") or "email",
             "guest_text": (last.get("body") or "").strip(), "history": history,
+            "last_time": _msg_time(last),
         })
     if debug:
         print(f"assistant DEBUG: {len(out)} new inbound guest message(s) to draft")
@@ -1244,13 +1260,23 @@ async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
-    # On first start, mark everything currently in the inbox as already-seen so the
-    # assistant only reacts to messages that arrive from now on.
+    # On first start, mark older inbox messages as already-seen so the assistant doesn't
+    # replay old backlog — but KEEP messages from the last few minutes so a fresh guest
+    # message still gets a card even if the bot just restarted/redeployed.
     if ASSISTANT_ENABLED and not ASSISTANT_TEST and not _assistant_seen:
         try:
+            now = datetime.now(TZ)
+            grace = ASSISTANT_BASELINE_GRACE_MIN * 60
+            kept = 0
             for it in await asyncio.to_thread(fetch_new_guest_messages, set(), False):
-                _assistant_seen.add(it["message_id"])
-            print(f"assistant: baselined {len(_assistant_seen)} existing conversations")
+                dt = _parse_msg_dt(it.get("last_time"))
+                recent = dt is not None and 0 <= (now - dt).total_seconds() <= grace
+                if recent and grace > 0:
+                    kept += 1            # leave unseen -> gets a card on the next poll
+                else:
+                    _assistant_seen.add(it["message_id"])
+            print(f"assistant: baselined {len(_assistant_seen)} old conversations, "
+                  f"{kept} recent kept for follow-up (grace={ASSISTANT_BASELINE_GRACE_MIN}m)")
         except Exception as e:
             print("assistant baseline error:", e)
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
