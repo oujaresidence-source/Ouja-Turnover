@@ -113,6 +113,9 @@ ASSISTANT_ANSWER_PAST_AUTO = os.environ.get("ASSISTANT_ANSWER_PAST_AUTO", "1") i
 # automated, not a real answer. Add your Hostaway welcome/automation phrases here.
 AUTO_REPLY_MARKERS = [m.strip() for m in os.environ.get(
     "AUTO_REPLY_MARKERS", "truly delighted|we are truly|delighted by your|we've prepared|we have prepared").split("|") if m.strip()]
+# Always draft a card for the guest's latest message, even if the team/automation already
+# replied after it. Set 0 to only draft when the guest is unanswered.
+ASSISTANT_ALWAYS_DRAFT = os.environ.get("ASSISTANT_ALWAYS_DRAFT", "1") in ("1", "true", "True", "yes")
 # Knowledge base: a Discord channel the assistant reads as facts about Ouja. Anyone can add
 # facts by typing in it, and the 🧠 Teach button on a card saves corrections here.
 KNOWLEDGE_CHANNEL     = os.environ.get("KNOWLEDGE_CHANNEL", "knowledge")
@@ -196,6 +199,7 @@ def api_post(path, body, _retry=0):
     return r.json()
 
 
+def api_put(path, body, _retry=0):
     token = get_token()
     r = requests.put(
         f"{BASE}{path}",
@@ -957,10 +961,11 @@ def fetch_new_guest_messages(seen, debug=False):
                   f"answered={answered} · body={(guest_msg.get('body') or '')[:50]!r}")
         if mid in seen:
             continue                                    # already drafted for this message
-        if answered:
-            continue                                    # a real human/bot reply already exists
-        if after and not ASSISTANT_ANSWER_PAST_AUTO:
-            continue                                    # only auto-replies after, feature off
+        if not ASSISTANT_ALWAYS_DRAFT:
+            if answered:
+                continue                                # a real human/bot reply already exists
+            if after and not ASSISTANT_ANSWER_PAST_AUTO:
+                continue                                # only auto-replies after, feature off
         lm = c.get("listingMapId")
         unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
         guest = c.get("recipientName") or c.get("guestName") or "Guest"
