@@ -100,6 +100,19 @@ ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "Tr
 # Skip the startup "mark everything seen" baseline so the latest unanswered guest
 # messages get drafted right away (handy for a first test without sending a new message).
 ASSISTANT_TEST     = os.environ.get("ASSISTANT_TEST", "0") in ("1", "true", "True", "yes")
+# Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
+# anything needing approval or a human still posts a card. When OFF, everything waits for approval.
+ASSISTANT_AUTO     = os.environ.get("ASSISTANT_AUTO", "1") in ("1", "true", "True", "yes")
+ASSISTANT_AUTO_CONF = float(os.environ.get("ASSISTANT_AUTO_CONF", "0.85"))  # min confidence to auto-send
+# Signature appended to every guest-facing message.
+ASSISTANT_SIGNATURE_AR = os.environ.get("ASSISTANT_SIGNATURE_AR", "الدعم الفني - مساعد 🤍")
+ASSISTANT_SIGNATURE_EN = os.environ.get("ASSISTANT_SIGNATURE_EN", "Technical Support - Musaid 🤍")
+# When a chat escalates to a human, auto-send the guest a holding message.
+ASSISTANT_ESC_ACK  = os.environ.get("ASSISTANT_ESC_ACK", "1") in ("1", "true", "True", "yes")
+ASSISTANT_ACK_AR   = os.environ.get("ASSISTANT_ACK_AR",
+    "حياك الله 🤍 رفعنا موضوعك للقسم المختص، وبيتواصل معك الفريق في أقرب وقت.")
+ASSISTANT_ACK_EN   = os.environ.get("ASSISTANT_ACK_EN",
+    "Thank you 🤍 We've escalated this to our specialized team and someone will contact you shortly.")
 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
@@ -696,12 +709,26 @@ rental company in Riyadh, Saudi Arabia. You draft replies to guest messages. A h
 every draft before it is sent, so be helpful but stay strictly within your lane.
 
 TONE
-- Warm, semi-friendly, professional — Ritz-Carlton hospitality standard.
-- Reply in the SAME language the guest used. If Arabic, use natural Najdi Saudi dialect. Switch \
-language immediately if the guest switches.
-- Keep replies concise and human. Never reveal you are an AI unless asked.
+- Warm, friendly, professional — Ritz-Carlton hospitality standard.
+- Reply in the SAME language the guest used, switching immediately if they switch.
+- For Arabic: write CLEAN, modern, natural Saudi Arabic with only a LIGHT local touch — \
+warm phrases like "حياك الله"، "تم"، "أبشر"، "بالتوفيق" used naturally and sparingly. \
+Do NOT write heavy or folksy Najdi slang. Aim for how a polished, well-spoken Saudi host \
+talks — simple, elegant, respectful — not exaggerated dialect.
+- Keep replies short, human, and to the point. Never reveal you are an AI unless asked.
 
-YOU MAY draft replies about
+CHOOSE ONE OF THREE ACTIONS
+- "auto" → a VERY simple, safe, low-risk reply you are highly confident about, where a wrong \
+answer would do no harm: greetings, thanks, reassurance, simple confirmations, and basic facts \
+that are obvious or that you were explicitly given (e.g. a friendly "حياك الله", "شكراً لك", \
+"تم، بالتوفiق"). These get sent to the guest automatically, so only use "auto" when you are sure.
+- "reply" → a helpful reply you CAN draft, but a human should approve it first because it is more \
+substantive, or you are not fully certain (most amenity/directions/check-in answers fall here).
+- "escalate" → needs a human (see list below). Draft no reply.
+
+WHEN IN DOUBT: prefer "reply" over "auto", and prefer "escalate" over "reply". Never gamble on "auto".
+
+YOU MAY draft replies (auto or reply) about
 - Unit amenities (wifi, parking, pool, kitchen, facilities)
 - Check-in / check-out TIMES and the self-entry PROCESS (never the actual code)
 - Directions, location, nearby restaurants and areas
@@ -721,12 +748,15 @@ YOU MUST NOT do these — instead set action to "escalate"
 - Anything you are unsure about — when in doubt, escalate; never guess
 
 OUTPUT — respond with ONLY a JSON object, nothing else:
-{"action": "reply" | "escalate",
- "reply": "the drafted message to the guest in their language; empty string if escalating",
- "intent": "short label, e.g. wifi, directions, checkin, pricing, complaint, booking-change",
+{"action": "auto" | "reply" | "escalate",
+ "reply": "the drafted message to the guest IN THE GUEST'S OWN LANGUAGE; empty string if escalating",
+ "intent": "short label IN ARABIC, e.g. واي فاي، اتجاهات، تسجيل دخول، تسعير، شكوى، تعديل حجز",
  "sentiment": "ok" | "upset",
- "reason": "one short line for the human reviewer explaining your choice",
- "confidence": 0.0-1.0}"""
+ "reason": "one short line IN ARABIC for the human reviewer explaining your choice (the team reads Arabic)",
+ "confidence": 0.0-1.0}
+
+IMPORTANT: "reply" stays in the guest's language (Najdi Arabic if they wrote Arabic). But "intent" and \
+"reason" must ALWAYS be written in Arabic, because the Ouja team reading these cards speaks Arabic."""
 
 def _msg_is_inbound(m):
     return int(m.get("isIncoming", m.get("incoming", 0)) or 0) == 1
@@ -809,15 +839,23 @@ def fetch_new_guest_messages(seen, debug=False):
         print(f"assistant DEBUG: {len(out)} new inbound guest message(s) to draft")
     return out
 
+def _has_arabic(s):
+    return any("\u0600" <= ch <= "\u06ff" for ch in str(s))
+
+def with_signature(text):
+    """Append the support signature, language-matched to the message."""
+    sig = ASSISTANT_SIGNATURE_AR if _has_arabic(text) else ASSISTANT_SIGNATURE_EN
+    return f"{str(text).rstrip()}\n\n{sig}"
+
 def send_guest_message(conversation_id, body, comm_type="email"):
     return api_post(f"/conversations/{conversation_id}/messages",
-                    {"body": body, "communicationType": comm_type})
+                    {"body": with_signature(body), "communicationType": comm_type})
 
-class EditModal(discord.ui.Modal, title="Edit reply before sending"):
+class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسال"):
     def __init__(self, item, draft):
         super().__init__()
         self.item = item
-        self.box = discord.ui.TextInput(label="Reply to guest", style=discord.TextStyle.paragraph,
+        self.box = discord.ui.TextInput(label="الرد للضيف", style=discord.TextStyle.paragraph,
                                         default=draft, max_length=1800)
         self.add_item(self.box)
 
@@ -827,9 +865,10 @@ class EditModal(discord.ui.Modal, title="Edit reply before sending"):
             await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
                                     self.item["comm_type"])
             await interaction.response.send_message(
-                f"✅ Sent (edited) by {interaction.user.mention} to **{self.item['guest']}**.")
+                f"✅ تم الإرسال (بعد التعديل) بواسطة {interaction.user.mention} "
+                f"للضيف **{self.item['guest']}**.")
         except Exception as e:
-            await interaction.response.send_message(f"⚠️ Send failed: {e}", ephemeral=True)
+            await interaction.response.send_message(f"⚠️ فشل الإرسال: {e}", ephemeral=True)
 
 class ApproveView(discord.ui.View):
     def __init__(self, item, draft):
@@ -837,7 +876,7 @@ class ApproveView(discord.ui.View):
         self.item = item
         self.draft = draft
 
-    @discord.ui.button(label="✅ Send", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="✅ إرسال", style=discord.ButtonStyle.success)
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             await asyncio.to_thread(send_guest_message, self.item["conversation_id"], self.draft,
@@ -846,41 +885,78 @@ class ApproveView(discord.ui.View):
                 c.disabled = True
             await interaction.response.edit_message(view=self)
             await interaction.followup.send(
-                f"✅ Sent by {interaction.user.mention} to **{self.item['guest']}**.")
+                f"✅ تم الإرسال بواسطة {interaction.user.mention} للضيف **{self.item['guest']}**.")
         except Exception as e:
-            await interaction.response.send_message(f"⚠️ Send failed: {e}", ephemeral=True)
+            await interaction.response.send_message(f"⚠️ فشل الإرسال: {e}", ephemeral=True)
 
-    @discord.ui.button(label="✏️ Edit & Send", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="✏️ تعديل وإرسال", style=discord.ButtonStyle.primary)
     async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(EditModal(self.item, self.draft))
 
-    @discord.ui.button(label="🗑️ Reject", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🗑️ رفض", style=discord.ButtonStyle.danger)
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         for c in self.children:
             c.disabled = True
         await interaction.response.edit_message(view=self)
-        await interaction.followup.send(f"🗑️ Discarded by {interaction.user.mention}.")
+        await interaction.followup.send(f"🗑️ تم التجاهل بواسطة {interaction.user.mention}.")
 
 _assistant_seen = set()
+
+_SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج"}
 
 async def post_assistant_card(channel, item, result):
     g = item["guest"]
     intent = result.get("intent", "—")
     sentiment = result.get("sentiment", "ok")
-    conf = result.get("confidence", 0)
-    escalate = result.get("action") != "reply" or sentiment == "upset" or (conf or 0) < 0.55
-    color = 0xD64545 if escalate else GOLD
-    embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=color)
-    embed.add_field(name="Guest said", value=(item["guest_text"] or "—")[:1000], inline=False)
+    sent_ar = _SENTIMENT_AR.get(sentiment, sentiment)
+    conf = float(result.get("confidence", 0) or 0)
+    action = result.get("action", "escalate")
+    reply = (result.get("reply") or "").strip()
+    escalate = action == "escalate" or sentiment == "upset" or conf < 0.55
+
+    # ---- needs a human: tell the guest it's escalated, then alert the team ----
     if escalate:
-        embed.add_field(name="🔴 Needs a human",
-                        value=result.get("reason", "Escalated — handle manually."), inline=False)
-        embed.set_footer(text=f"intent: {intent} · sentiment: {sentiment} · confidence: {conf}")
+        embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=0xD64545)
+        embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
+        embed.add_field(name="🔴 يحتاج تدخل بشري",
+                        value=result.get("reason", "تم التصعيد — تعامل معه يدوياً."), inline=False)
+        if ASSISTANT_ESC_ACK:
+            ack = ASSISTANT_ACK_AR if _has_arabic(item["guest_text"]) else ASSISTANT_ACK_EN
+            try:
+                await asyncio.to_thread(send_guest_message, item["conversation_id"], ack,
+                                        item["comm_type"])
+                embed.add_field(name="📤 تم إبلاغ الضيف",
+                                value="أرسلنا له رسالة طمأنة إنه تم تصعيد طلبه للقسم المختص.",
+                                inline=False)
+            except Exception as e:
+                embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
+        embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {conf}")
         await channel.send(embed=embed)
         return
-    embed.add_field(name="Suggested reply", value=(result.get("reply") or "—")[:1000], inline=False)
-    embed.set_footer(text=f"intent: {intent} · confidence: {conf} · review before sending")
-    await channel.send(embed=embed, view=ApproveView(item, result.get("reply", "")))
+
+    # ---- very simple & high-confidence: send automatically, then post an FYI card ----
+    can_auto = (ASSISTANT_AUTO and action == "auto" and sentiment == "ok"
+                and conf >= ASSISTANT_AUTO_CONF and reply)
+    if can_auto:
+        try:
+            await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
+                                    item["comm_type"])
+            embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=0x3BA55D)
+            embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
+            embed.add_field(name="✅ تم الرد تلقائياً", value=reply[:1000], inline=False)
+            embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · رد تلقائي (للعلم)")
+            await channel.send(embed=embed)
+            return
+        except Exception as e:
+            print("auto-send failed, falling back to approval:", e)
+            # fall through to the approval card if the send failed
+
+    # ---- needs approval: draft + buttons ----
+    embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=GOLD)
+    embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
+    embed.add_field(name="✍️ الرد المقترح", value=(reply or "—")[:1000], inline=False)
+    embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · راجعه قبل الإرسال · التوقيع يُضاف تلقائياً")
+    await channel.send(embed=embed, view=ApproveView(item, reply))
 
 @tasks.loop(minutes=ASSISTANT_POLL_MIN)
 async def assistant_loop():
@@ -933,7 +1009,8 @@ async def on_ready():
           f"{REMINDER_START_HOUR:02d}:00–{REMINDER_FAST_HOUR:02d}:00, then every "
           f"{REMINDER_FAST_MIN} min until {REMINDER_END_HOUR:02d}:00")
     print(f"AI assistant: {'ON' if ASSISTANT_ENABLED else 'OFF'} · model={CLAUDE_MODEL} · "
-          f"autosend={'ON' if ASSISTANT_AUTOSEND else 'OFF (draft→approve)'} -> #{ASSISTANT_CHANNEL}")
+          f"auto-send simple={'ON' if ASSISTANT_AUTO else 'OFF'} · "
+          f"escalation-ack={'ON' if ASSISTANT_ESC_ACK else 'OFF'} -> #{ASSISTANT_CHANNEL}")
     if not poll_loop.is_running():
         poll_loop.start()
     if not reminder_loop.is_running():
