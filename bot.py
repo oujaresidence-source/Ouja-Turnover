@@ -96,6 +96,10 @@ ASSISTANT_POLL_MIN = int(os.environ.get("ASSISTANT_POLL_MIN", "2"))   # check in
 ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many recent convos to scan
 # Safety: replies are NEVER sent automatically unless you explicitly turn this on later.
 ASSISTANT_AUTOSEND = os.environ.get("ASSISTANT_AUTOSEND", "0") in ("1", "true", "True", "yes")
+ASSISTANT_DEBUG    = os.environ.get("ASSISTANT_DEBUG", "0") in ("1", "true", "True", "yes")
+# Skip the startup "mark everything seen" baseline so the latest unanswered guest
+# messages get drafted right away (handy for a first test without sending a new message).
+ASSISTANT_TEST     = os.environ.get("ASSISTANT_TEST", "0") in ("1", "true", "True", "yes")
 
 BASE = "https://api.hostaway.com/v1"
 GOLD = 0xC8A24B
@@ -756,8 +760,9 @@ def claude_draft(guest_name, unit, history_text):
         print("claude_draft error:", e)
         return None
 
-def fetch_new_guest_messages(seen):
-    """Scan recent conversations and return new inbound guest messages not yet in `seen`."""
+def fetch_new_guest_messages(seen, debug=False):
+    """Scan recent conversations, fetch each one's messages, and return new inbound
+    guest messages (the guest's latest message that hasn't been answered/seen)."""
     listings = get_listings_map()
     out = []
     try:
@@ -765,16 +770,30 @@ def fetch_new_guest_messages(seen):
     except Exception as e:
         print("assistant fetch error:", e)
         return out
-    for c in data.get("result", []) or []:
+    convos = data.get("result", []) or []
+    if debug:
+        print(f"assistant DEBUG: /conversations returned {len(convos)} conversations")
+    for c in convos:
         cid = c.get("id")
-        msgs = c.get("conversationMessages") or []
+        if not cid:
+            continue
+        try:
+            md = api_get(f"/conversations/{cid}/messages")
+            msgs = md.get("result", []) or []
+        except Exception as e:
+            if debug:
+                print(f"  conv {cid}: messages fetch error: {e}")
+            continue
         if not msgs:
             continue
         msgs = sorted(msgs, key=_msg_time)
         last = msgs[-1]
         mid = str(last.get("id"))
+        if debug:
+            print(f"  conv {cid}: {len(msgs)} msgs · last inbound={_msg_is_inbound(last)} · "
+                  f"id={mid} · body={(last.get('body') or '')[:50]!r}")
         if mid in seen or not _msg_is_inbound(last):
-            continue
+            continue                       # already handled, or host already replied
         lm = c.get("listingMapId")
         unit = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
         guest = c.get("recipientName") or c.get("guestName") or "Guest"
@@ -786,6 +805,8 @@ def fetch_new_guest_messages(seen):
             "comm_type": last.get("communicationType") or "email",
             "guest_text": (last.get("body") or "").strip(), "history": history,
         })
+    if debug:
+        print(f"assistant DEBUG: {len(out)} new inbound guest message(s) to draft")
     return out
 
 def send_guest_message(conversation_id, body, comm_type="email"):
@@ -872,7 +893,7 @@ async def assistant_loop():
     if channel is None:
         return
     try:
-        items = await asyncio.to_thread(fetch_new_guest_messages, _assistant_seen)
+        items = await asyncio.to_thread(fetch_new_guest_messages, _assistant_seen, ASSISTANT_DEBUG)
     except Exception as e:
         print("assistant_loop fetch error:", e)
         return
@@ -893,9 +914,9 @@ async def on_ready():
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     # On first start, mark everything currently in the inbox as already-seen so the
     # assistant only reacts to messages that arrive from now on.
-    if ASSISTANT_ENABLED and not _assistant_seen:
+    if ASSISTANT_ENABLED and not ASSISTANT_TEST and not _assistant_seen:
         try:
-            for it in await asyncio.to_thread(fetch_new_guest_messages, set()):
+            for it in await asyncio.to_thread(fetch_new_guest_messages, set(), False):
                 _assistant_seen.add(it["message_id"])
             print(f"assistant: baselined {len(_assistant_seen)} existing conversations")
         except Exception as e:
