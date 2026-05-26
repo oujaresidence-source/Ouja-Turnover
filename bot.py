@@ -113,6 +113,11 @@ ASSISTANT_ANSWER_PAST_AUTO = os.environ.get("ASSISTANT_ANSWER_PAST_AUTO", "1") i
 # automated, not a real answer. Add your Hostaway welcome/automation phrases here.
 AUTO_REPLY_MARKERS = [m.strip() for m in os.environ.get(
     "AUTO_REPLY_MARKERS", "truly delighted|we are truly|delighted by your|we've prepared|we have prepared").split("|") if m.strip()]
+# Knowledge base: a Discord channel the assistant reads as facts about Ouja. Anyone can add
+# facts by typing in it, and the 🧠 Teach button on a card saves corrections here.
+KNOWLEDGE_CHANNEL     = os.environ.get("KNOWLEDGE_CHANNEL", "knowledge")
+KNOWLEDGE_REFRESH_MIN = int(os.environ.get("KNOWLEDGE_REFRESH_MIN", "5"))
+KNOWLEDGE_MAX         = int(os.environ.get("KNOWLEDGE_MAX", "300"))   # facts (messages) to load
 # Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
 # anything needing approval or a human still posts a card. Default OFF — everything waits
 # for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
@@ -872,6 +877,9 @@ def get_reservation_status(reservation_id):
         print(f"reservation status error ({reservation_id}):", e)
         return ""
 
+# Knowledge base loaded from the #knowledge Discord channel; injected into every draft.
+_knowledge_text = ""
+
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False):
     """Call Claude to draft a reply. Returns parsed dict or None on failure."""
     if not ANTHROPIC_API_KEY:
@@ -882,7 +890,10 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     guide_line = (f"Arrival-guide link for this unit: {guide_url}"
                   if (guide_url and confirmed)
                   else "Arrival-guide link for this unit: NOT AVAILABLE / do not share")
-    user = (f"Guest name: {guest_name}\nUnit: {unit}\n{status_line}\n{guide_line}\n\n"
+    facts = _knowledge_text.strip()
+    facts_block = (f"معلومات معتمدة عن عوجا (استخدمها كمصدر الحقيقة وصحّح أي تعارض):\n{facts}\n\n"
+                   if facts else "")
+    user = (f"{facts_block}Guest name: {guest_name}\nUnit: {unit}\n{status_line}\n{guide_line}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     try:
@@ -1091,6 +1102,91 @@ def _recover_from_embed(message):
         print("embed recover error:", e)
         return None, None
 
+async def load_knowledge(guild):
+    """Read the #knowledge channel and build the facts text the assistant uses."""
+    global _knowledge_text
+    ch = discord.utils.get(guild.text_channels, name=KNOWLEDGE_CHANNEL)
+    if ch is None:
+        return
+    try:
+        facts = []
+        async for m in ch.history(limit=KNOWLEDGE_MAX, oldest_first=True):
+            body = (m.content or "").strip()
+            if body and not body.startswith(("/", "!")):   # skip commands
+                facts.append(f"- {body}")
+        _knowledge_text = "\n".join(facts)[:8000]
+        print(f"knowledge: loaded {len(facts)} fact(s) from #{KNOWLEDGE_CHANNEL}")
+    except Exception as e:
+        print("knowledge load error:", e)
+
+async def save_fact(guild, text):
+    """Append a fact to the #knowledge channel (creating it if needed) and refresh."""
+    ch = await ensure_channel(guild, KNOWLEDGE_CHANNEL, await get_assistant_category(guild))
+    if ch is None:
+        return False
+    try:
+        await ch.send(text[:1900])
+        await load_knowledge(guild)
+        return True
+    except Exception as e:
+        print("save fact error:", e)
+        return False
+
+class TeachModal(discord.ui.Modal, title="🧠 علّم المساعد معلومة"):
+    def __init__(self, message_id, item=None):
+        super().__init__()
+        self.message_id = message_id
+        self.item = item
+        self.topic = discord.ui.TextInput(label="الموضوع (اختياري)", required=False,
+                                          placeholder="مثال: واي فاي وحدة C08 / موقف السيارة",
+                                          max_length=120)
+        self.fact = discord.ui.TextInput(label="المعلومة الصحيحة", style=discord.TextStyle.paragraph,
+                                         placeholder="اكتب المعلومة الصح اللي تبي المساعد يعرفها ويستخدمها.",
+                                         max_length=900)
+        self.add_item(self.topic)
+        self.add_item(self.fact)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        topic = str(self.topic.value).strip()
+        fact = str(self.fact.value).strip()
+        line = f"**{topic}**: {fact}" if topic else fact
+        ok = await save_fact(interaction.guild, line)
+        if not ok:
+            await interaction.followup.send("⚠️ تعذّر حفظ المعلومة.", ephemeral=True)
+            return
+        # regenerate this card's draft using the new knowledge (if we still have context)
+        data = _pending_replies.get(self.message_id)
+        item = (data or {}).get("item") or self.item
+        regen = False
+        if item and item.get("history"):
+            try:
+                result = await asyncio.to_thread(
+                    claude_draft, item["guest"], item["unit"], item["history"],
+                    (data or {}).get("guide"), (data or {}).get("confirmed", False))
+                reply = (result or {}).get("reply", "").strip()
+                if reply:
+                    msg = await interaction.channel.fetch_message(self.message_id)
+                    emb = msg.embeds[0]
+                    fields = emb.fields
+                    emb.clear_fields()
+                    for f in fields:
+                        emb.add_field(name=f.name,
+                                      value=(reply[:1024] if "الرد المقترح" in f.name else f.value),
+                                      inline=f.inline)
+                    await msg.edit(embed=emb, view=ApproveView())
+                    if data:
+                        data["draft"] = reply
+                    else:
+                        _pending_replies[self.message_id] = {"item": item, "draft": reply,
+                                                             "guide": (data or {}).get("guide"),
+                                                             "confirmed": (data or {}).get("confirmed", False)}
+                    regen = True
+            except Exception as e:
+                print("teach regen error:", e)
+        note = "✅ حفظت المعلومة" + (" وأعدت صياغة الرد بها 👆" if regen else " — بتنطبق على الردود الجاية.")
+        await interaction.followup.send(note, ephemeral=True)
+
 class ApproveView(discord.ui.View):
     def __init__(self, item=None, draft=None):
         super().__init__(timeout=None)   # persistent — survives bot restarts
@@ -1143,11 +1239,16 @@ class ApproveView(discord.ui.View):
         _pending_replies.pop(interaction.message.id, None)
         await interaction.followup.send(f"🗑️ تم التجاهل بواسطة {interaction.user.mention}.")
 
+    @discord.ui.button(label="🧠 علّم", style=discord.ButtonStyle.secondary, custom_id="ouja_teach")
+    async def teach(self, interaction: discord.Interaction, button: discord.ui.Button):
+        item, _ = self._resolve(interaction)
+        await interaction.response.send_modal(TeachModal(interaction.message.id, item))
+
 _assistant_seen = set()
 
 _SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج"}
 
-async def post_assistant_card(channel, item, result):
+async def post_assistant_card(channel, item, result, guide=None, confirmed=False):
     g = item["guest"]
     intent = result.get("intent", "—")
     sentiment = result.get("sentiment", "ok")
@@ -1216,7 +1317,7 @@ async def post_assistant_card(channel, item, result):
     embed.set_footer(text=f"النوع: {intent} · الثقة: {conf} · راجعه قبل الإرسال · التوقيع يُضاف "
                           f"تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
-    _pending_replies[sent.id] = {"item": item, "draft": reply}
+    _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed}
 
 @tasks.loop(minutes=ASSISTANT_POLL_MIN)
 async def assistant_loop():
@@ -1248,7 +1349,7 @@ async def assistant_loop():
         if not result:
             continue
         try:
-            await post_assistant_card(channel, it, result)
+            await post_assistant_card(channel, it, result, guide, confirmed)
         except Exception as e:
             print("assistant card error:", e)
 
@@ -1281,6 +1382,12 @@ async def escalation_reping_loop():
             esc["attempts"] += 1
         except Exception as e:
             print("reping error:", e)
+
+@tasks.loop(minutes=KNOWLEDGE_REFRESH_MIN)
+async def knowledge_loop():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is not None:
+        await load_knowledge(guild)
 
 @bot.event
 async def on_ready():
@@ -1334,10 +1441,16 @@ async def on_ready():
         discount_weekend_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
+    if ASSISTANT_ENABLED:
+        guild0 = bot.get_guild(GUILD_ID)
+        if guild0 is not None:
+            await load_knowledge(guild0)
     if not assistant_loop.is_running():
         assistant_loop.start()
     if not escalation_reping_loop.is_running():
         escalation_reping_loop.start()
+    if ASSISTANT_ENABLED and not knowledge_loop.is_running():
+        knowledge_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
