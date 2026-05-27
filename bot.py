@@ -3343,7 +3343,11 @@ async function refresh(){
 function renderAll(){
   renderFresh(); renderKpis(); renderNeedsBanner();
   renderTodayHome(); renderRevCard(); renderRecent();
-  renderInbox(); renderDiscountBanner();
+  // Don't blow away an expanded item's content on the 15-second auto-refresh —
+  // re-rendering the whole list wipes the body div and the user just sees an
+  // empty pane. The badges + KPIs are still updated above.
+  if(!openInboxId) renderInbox();
+  renderDiscountBanner();
   buildSideNav(); buildBottomNav();
 }
 
@@ -3489,18 +3493,23 @@ function renderInbox(){
 }
 
 function renderInboxItem(k, d){
-  const isOpen = openInboxId === d.id;
-  const conf = d.confidence!==undefined ? d.confidence : null;
+  // IDs are returned as STRINGS from the backend (Discord snowflakes overflow
+  // JS number precision). Wrap them in HTML-encoded single quotes inside the
+  // onclick attribute (`&#39;` decodes to ') so JS receives a string literal.
+  const idAttr = String(d.id);
+  const idJs = "&#39;" + idAttr + "&#39;";
+  const isOpen = openInboxId === idAttr;
+  const conf = d.confidence!==undefined && d.confidence!==null ? d.confidence : null;
   const confClass = conf===null?'':(conf>=85?'high':(conf>=60?'mid':'low'));
   const confChip = conf!==null && k==='rep' ? '<span class="ibox-conf '+confClass+'">'+conf+'%</span>' : '';
-  return '<div class="ibox '+(k==='esc'?'escalation':'reply')+(isOpen?' open':'')+'" id="ib_'+d.id+'">'
-    + '<div class="ibox-row" onclick="toggleInbox('+d.id+')">'
+  return '<div class="ibox '+(k==='esc'?'escalation':'reply')+(isOpen?' open':'')+'" id="ib_'+idAttr+'">'
+    + '<div class="ibox-row" onclick="toggleInbox('+idJs+')">'
     + '<div class="ibox-icon '+(k==='esc'?'esc':'rep')+'">'+(k==='esc'?'🚨':'💬')+'</div>'
     + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(d.guest||'')+'</span><span class="ibox-unit">'+esc(d.unit||'')+'</span></div><div class="ibox-preview">'+esc((d.guest_text||'').slice(0,160))+'</div></div>'
     + '<div class="ibox-meta">'+confChip+'<span class="ibox-time">'+esc(shortTime(d.time||''))+'</span></div>'
     + '<span class="ibox-expand">⌃</span>'
     + '</div>'
-    + (isOpen ? '<div class="ibox-body" id="ibbody_'+d.id+'"><div class="empty sk">—</div></div>' : '')
+    + (isOpen ? '<div class="ibox-body" id="ibbody_'+idAttr+'"><div class="empty sk">—</div></div>' : '')
     + '</div>';
 }
 
@@ -3517,6 +3526,7 @@ function renderAutoItem(a){
 }
 
 async function toggleInbox(id){
+  id = String(id);          // always a string (Discord snowflake)
   if(openInboxId === id){
     openInboxId = null;
     const el = document.getElementById('ib_'+id);
@@ -3533,7 +3543,12 @@ async function toggleInbox(id){
   renderInbox();
   // fetch detail
   try{
-    const det = await api('/api/inbox/detail?id='+id);
+    const det = await api('/api/inbox/detail?id='+encodeURIComponent(id));
+    if(det && det.error){
+      const b = document.getElementById('ibbody_'+id);
+      if(b) b.innerHTML = '<div class="empty">⚠ '+esc(det.error)+'</div>';
+      return;
+    }
     renderInboxDetail(id, det);
   }catch(e){
     const b = document.getElementById('ibbody_'+id);
@@ -3588,24 +3603,25 @@ function renderInboxDetail(id, det){
       + '</div></div>';
   }
 
-  // action row + draft for replies
+  // action row + draft for replies — quote id so JS gets a string literal
+  const idJs = "&#39;" + id + "&#39;";
   let actions = '';
   if(isEsc){
-    actions = '<div class="action-row"><input id="cn_'+id+'" placeholder="'+t().claim_ph+'"><button class="btn primary sm" onclick="doClaim('+id+')">🙋 '+t().claim+'</button></div>';
+    actions = '<div class="action-row"><input id="cn_'+id+'" placeholder="'+t().claim_ph+'"><button class="btn primary sm" onclick="doClaim('+idJs+')">🙋 '+t().claim+'</button></div>';
   }else{
     actions = '<div class="draft-label">✍ '+t().drw_draft+'</div>'
       + '<textarea id="ta_'+id+'" placeholder="'+t().drw_draft+'">'+esc(det.draft||'')+'</textarea>'
       + '<div class="action-row">'
-        + '<button class="btn green sm" onclick="doSend('+id+')">✓ '+t().rep_send+'</button>'
-        + '<button class="btn ghost sm" onclick="focusEdit('+id+')">✎ '+t().rep_edit_focus+'</button>'
-        + '<button class="btn red sm" onclick="doReject('+id+')">✕ '+t().rep_reject+'</button>'
-        + '<button class="btn ghost sm" onclick="toggleTeach('+id+')">🧠 '+t().rep_teach+'</button>'
+        + '<button class="btn green sm" onclick="doSend('+idJs+')">✓ '+t().rep_send+'</button>'
+        + '<button class="btn ghost sm" onclick="focusEdit('+idJs+')">✎ '+t().rep_edit_focus+'</button>'
+        + '<button class="btn red sm" onclick="doReject('+idJs+')">✕ '+t().rep_reject+'</button>'
+        + '<button class="btn ghost sm" onclick="toggleTeach('+idJs+')">🧠 '+t().rep_teach+'</button>'
       + '</div>'
       + '<div class="teach-form" id="teach_'+id+'">'
         + '<div style="font-size:11px;color:var(--purple);font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">🧠 '+t().teach_label+'</div>'
         + '<input id="teachT_'+id+'" placeholder="'+t().teach_topic+'">'
         + '<textarea id="teachF_'+id+'" placeholder="'+t().teach_fact+'" style="min-height:60px"></textarea>'
-        + '<div class="row"><button class="btn ghost xs" onclick="toggleTeach('+id+')">✕</button><button class="btn primary xs" onclick="doTeach('+id+')">💾 '+t().teach_save+'</button></div>'
+        + '<div class="row"><button class="btn ghost xs" onclick="toggleTeach('+idJs+')">✕</button><button class="btn primary xs" onclick="doTeach('+idJs+')">💾 '+t().teach_save+'</button></div>'
       + '</div>';
   }
 
@@ -3615,8 +3631,8 @@ function renderInboxDetail(id, det){
     + '</div>'+actions;
 }
 
-function focusEdit(id){ const ta=document.getElementById('ta_'+id); if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length) } }
-function toggleTeach(id){ const el=document.getElementById('teach_'+id); if(el) el.classList.toggle('open') }
+function focusEdit(id){ id=String(id); const ta=document.getElementById('ta_'+id); if(ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length) } }
+function toggleTeach(id){ id=String(id); const el=document.getElementById('teach_'+id); if(el) el.classList.toggle('open') }
 
 /* ============================================================
    DISCOUNT BANNER + TODAY EMPTY GRID
@@ -3918,22 +3934,26 @@ function closeDrawer(){
    ACTIONS
    ============================================================ */
 async function doSend(id){
+  id = String(id);
   const ta = document.getElementById('ta_'+id);
   const text = ta?ta.value:'';
   const r = await post('/api/send',{id:id, text:text});
   if(r.ok){ toast(t().sent); openInboxId=null; loadAll() } else toast(r.error||t().err);
 }
 async function doReject(id){
+  id = String(id);
   await post('/api/reject',{id:id});
   toast(t().rejected); openInboxId=null; loadAll();
 }
 async function doClaim(id){
+  id = String(id);
   const inEl = document.getElementById('cn_'+id);
   const n = inEl ? inEl.value : '';
   const r = await post('/api/claim',{id:id, name:n});
   if(r.ok){ toast(t().claimed_t); openInboxId=null; loadAll() } else toast(r.error||t().err);
 }
 async function doTeach(id){
+  id = String(id);
   const topic = (document.getElementById('teachT_'+id)||{}).value || '';
   const fact = (document.getElementById('teachF_'+id)||{}).value || '';
   if(!fact.trim()){ toast(t().err); return }
@@ -4155,21 +4175,28 @@ async def _api_today(request):
     return _json(d if d.get("ready") else {"loading": True, **_live_counts()})
 
 async def _api_inbox(request):
-    """Live mirror of what the team is acting on: pending replies + open escalations."""
+    """Live mirror of what the team is acting on: pending replies + open escalations.
+
+    NOTE: Discord message IDs (snowflakes) are 18-19 digit ints. JavaScript's
+    Number type only preserves precision up to 2^53 (16 digits), so we ALWAYS
+    return IDs as strings — otherwise JS rounds off the last 2 digits and every
+    detail/send/reject/claim lookup hits a 404."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     replies = []
     for mid, d in list(_pending_replies.items()):
         it = d.get("item", {})
-        replies.append({"id": mid, "guest": it.get("guest", "Guest"), "unit": it.get("unit", ""),
+        replies.append({"id": str(mid), "guest": it.get("guest", "Guest"), "unit": it.get("unit", ""),
                         "guest_text": (it.get("guest_text") or "")[:600],
                         "thread": (it.get("history") or "")[:2500],
                         "time": it.get("last_time", ""),
+                        "confidence": d.get("confidence"),
                         "draft": (d.get("draft") or "")[:1200]})
     escs = []
     for eid, e in list(_escalations.items()):
-        escs.append({"id": eid, "guest": e.get("guest", ""), "unit": e.get("unit", ""),
+        escs.append({"id": str(eid), "guest": e.get("guest", ""), "unit": e.get("unit", ""),
                      "reason": (e.get("reason") or "")[:400], "guest_text": (e.get("guest_text") or "")[:400],
+                     "time": e.get("last_ping") and datetime.fromtimestamp(e["last_ping"], TZ).isoformat(timespec="minutes") or "",
                      "claimed_by": e.get("claimed_by")})
     return _json({"replies": replies, "escalations": escs})
 
