@@ -2090,6 +2090,114 @@ def _distill_general(entries, prior_summary):
     return claude_text(_DISTILL_SYSTEM, user, max_tokens=900, model=CLAUDE_MODEL_PREMIUM) \
         or claude_text(_DISTILL_SYSTEM, user, max_tokens=900)
 
+def bootstrap_learnings_from_history(limit_conversations=300, min_pairs_per_apt=3):
+    """One-shot: walk the most-recent N Hostaway conversations, extract (guest_question
+    → team_reply) pairs grouped by listing, then distill a per-apartment summary for
+    each apartment that has enough material. Designed to seed the assistant with the
+    team's historical voice and unit-specific knowledge — so it starts at ~20% instead
+    of from zero. Intended to run as a one-time background job, not in a loop.
+
+    Returns {conversations_scanned, pairs_extracted, apartments_distilled}."""
+    # ---- Step 1: pull recent conversations (paginated) ----
+    convos, offset, page = [], 0, 100
+    while len(convos) < limit_conversations:
+        try:
+            data = api_get("/conversations",
+                           params={"limit": page, "offset": offset, "includeResources": 1})
+        except Exception as e:
+            print(f"bootstrap: /conversations fetch error at offset {offset}: {e}")
+            break
+        batch = data.get("result", []) or []
+        if not batch:
+            break
+        convos.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    convos = convos[:limit_conversations]
+    print(f"bootstrap: pulled {len(convos)} conversation(s)")
+    log_event("guest", f"بدأ التعلّم التاريخي · {len(convos)} محادثة")
+
+    # ---- Step 2: build (question → team-reply) pairs grouped by apartment ----
+    listings = get_listings_map()
+    by_apt = defaultdict(list)
+    scanned, pairs = 0, 0
+    for c in convos:
+        cid = c.get("id")
+        lid = c.get("listingMapId")
+        if not cid or not lid:
+            continue
+        try:
+            data = api_get(f"/conversations/{cid}/messages")
+            msgs = sorted(data.get("result", []) or [], key=_msg_sort_key)
+        except Exception as e:
+            print(f"bootstrap: convo {cid} fetch error: {e}")
+            continue
+        scanned += 1
+        unit_name = listings.get(lid) or c.get("listingName") or f"unit-{lid}"
+        # Pair each inbound message with the NEXT non-automated outbound reply
+        for i, m in enumerate(msgs):
+            if not _msg_is_inbound(m):
+                continue
+            qtext = (m.get("body") or "").strip()
+            if not qtext or len(qtext) < 6:
+                continue
+            for j in range(i + 1, len(msgs)):
+                m2 = msgs[j]
+                if _msg_is_inbound(m2):
+                    break                                      # unanswered before next inbound
+                body2 = (m2.get("body") or "").strip()
+                if not body2 or _looks_automated(body2) or len(body2) < 10:
+                    continue
+                by_apt[int(lid)].append({
+                    "ts": _msg_time(m2),
+                    "conversation_id": cid,
+                    "listing_id": int(lid),
+                    "unit": unit_name,
+                    "guest_question": qtext[:900],
+                    "bot_draft": "",                            # no bot draft existed historically
+                    "final_reply": body2[:1400],
+                    "diff_ratio": 1.0,
+                    "was_edited": True,                         # team-authored by definition
+                    "via": "history",
+                    "approver": "(historical)",
+                })
+                pairs += 1
+                break
+    print(f"bootstrap: extracted {pairs} (question, reply) pair(s) across {len(by_apt)} apt(s)")
+
+    # ---- Step 3: distill per apartment + general ----
+    distilled = 0
+    for lid, entries in by_apt.items():
+        if len(entries) < min_pairs_per_apt:
+            continue
+        existing = _apartment_learnings.get(lid, {})
+        summary = _distill_apartment(lid, entries, existing.get("summary", ""))
+        if summary and summary.strip():
+            _apartment_learnings[lid] = {
+                "summary": summary.strip(),
+                "last_distilled": time.time(),
+                "examples_count": len(entries),
+                "unit": entries[-1].get("unit", ""),
+            }
+            distilled += 1
+            print(f"bootstrap: distilled {entries[-1].get('unit','')} ({len(entries)} pairs)")
+    # general summary across a sampled subset (cap to keep prompt size sane)
+    all_sample = []
+    for entries in by_apt.values():
+        all_sample.extend(entries[-15:])
+    if all_sample:
+        g = _distill_general(all_sample, _general_learnings.get("summary", ""))
+        if g and g.strip():
+            _general_learnings["summary"] = g.strip()
+            _general_learnings["last_distilled"] = time.time()
+            _general_learnings["examples_count"] = len(all_sample)
+            print(f"bootstrap: distilled general ({len(all_sample)} pairs)")
+    print(f"bootstrap: COMPLETE · {distilled} apartment(s) distilled")
+    log_event("guest", f"اكتمل التعلّم التاريخي · {distilled} شقة من {scanned} محادثة")
+    return {"conversations_scanned": scanned, "pairs_extracted": pairs,
+            "apartments_distilled": distilled}
+
 def distill_learnings():
     """Walk _learning_log, distill per-apartment + general summaries when there's
        enough new material. Designed to be cheap when nothing changed."""
@@ -3559,9 +3667,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_learn_sub"></div>
           </div>
           <div class="page-tools">
+            <button class="btn primary sm" onclick="bootstrapLearnings()" id="learnBootstrapBtn">📥 <span id="t_learn_bootstrap">تعلّم من التاريخ</span></button>
             <button class="btn ghost sm" onclick="distillLearningsNow()" id="learnDistillBtn">↻ <span id="t_learn_distill">تلخيص الآن</span></button>
           </div>
         </div>
+        <div id="bootstrapStatus" style="display:none"></div>
         <div class="card">
           <div class="card-head"><span class="card-title">🌐 <span id="t_learn_general">الملخص العام</span></span><div class="card-actions" id="genActions"></div></div>
           <div id="learnGeneralBody"><div class="empty sk">—</div></div>
@@ -3641,6 +3751,12 @@ const T = {
     learn_last:'آخر تلخيص', learn_examples:'تفاعل', learn_search:'ابحث عن وحدة…',
     learn_no_apt:'ما فيه شقق فيها ملخص حالياً', learn_confirm_forget:'تحذف الملخص نهائياً؟',
     learn_saved:'تم الحفظ ✅', learn_distilling:'يلخّص الآن… ممكن ياخذ ٣٠ ثانية',
+    learn_bootstrap:'تعلّم من التاريخ',
+    learn_bootstrap_confirm:'يقرأ آخر ٣٠٠ محادثة من Hostaway ويستخرج منها دروس لكل شقة. يستغرق ١٠-١٥ دقيقة في الخلفية وتكلفته بسيطة من Claude. متأكد؟',
+    learn_bootstrap_started:'بدأ التعلّم التاريخي · بيشتغل في الخلفية',
+    learn_bootstrap_running:'⏳ يقرأ المحادثات السابقة الحين… ممكن ياخذ ١٠-١٥ دقيقة. لا تغلق اللوحة.',
+    learn_bootstrap_done:'✅ اكتمل التعلّم التاريخي',
+    learn_bootstrap_scanned:'محادثة مفحوصة', learn_bootstrap_pairs:'سؤال-جواب مستخرج', learn_bootstrap_apts:'شقة تم تلخيصها',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
     today_h:'اليوم', today_date_sub:'',
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
@@ -3705,6 +3821,12 @@ const T = {
     learn_last:'Last distill', learn_examples:'interactions', learn_search:'Search unit…',
     learn_no_apt:'No apartments with summaries yet', learn_confirm_forget:'Delete this summary?',
     learn_saved:'Saved ✅', learn_distilling:'Distilling now… may take 30s',
+    learn_bootstrap:'Learn from history',
+    learn_bootstrap_confirm:'This reads your last 300 Hostaway conversations and distills lessons per apartment. Takes 10-15 minutes in the background; Claude cost is modest. Continue?',
+    learn_bootstrap_started:'Historical learning started · running in background',
+    learn_bootstrap_running:'⏳ Reading past conversations now… may take 10-15 min. You can keep the dashboard open.',
+    learn_bootstrap_done:'✅ Historical learning complete',
+    learn_bootstrap_scanned:'conversations scanned', learn_bootstrap_pairs:'Q&A pairs extracted', learn_bootstrap_apts:'apartments distilled',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
     today_h:'Today', today_date_sub:'',
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
@@ -4672,6 +4794,53 @@ async function distillLearningsNow(){
   if(btn){ btn.disabled = false; btn.innerHTML = '↻ '+t().learn_distill; }
 }
 
+let _bootstrapPoll = null;
+async function bootstrapLearnings(){
+  if(!confirm(t().learn_bootstrap_confirm)) return;
+  const btn = document.getElementById('learnBootstrapBtn');
+  if(btn){ btn.disabled = true; btn.innerHTML = '⏳'; }
+  const r = await post('/api/learning/bootstrap', {limit_conversations:300});
+  if(!r.ok){ toast(r.error || t().err); if(btn){ btn.disabled=false; btn.innerHTML='📥 '+t().learn_bootstrap; } return; }
+  toast(t().learn_bootstrap_started);
+  showBootstrapStatus({running:true});
+  // poll status every 8s
+  if(_bootstrapPoll) clearInterval(_bootstrapPoll);
+  _bootstrapPoll = setInterval(pollBootstrap, 8000);
+  pollBootstrap();
+}
+async function pollBootstrap(){
+  try{
+    const s = await api('/api/learning/bootstrap/status');
+    showBootstrapStatus(s);
+    if(!s.running){
+      clearInterval(_bootstrapPoll); _bootstrapPoll = null;
+      const btn = document.getElementById('learnBootstrapBtn');
+      if(btn){ btn.disabled = false; btn.innerHTML = '📥 '+t().learn_bootstrap; }
+      await loadLearnings();
+    }
+  }catch(_){}
+}
+function showBootstrapStatus(s){
+  const el = document.getElementById('bootstrapStatus');
+  if(!el) return;
+  if(!s || (!s.running && !s.result && !s.error)){ el.style.display='none'; return; }
+  el.style.display='block';
+  if(s.running){
+    el.innerHTML = '<div class="card" style="background:var(--gold-tint);border-color:var(--gold)"><span style="color:var(--gold);font-weight:600">'+t().learn_bootstrap_running+'</span></div>';
+  }else if(s.error){
+    el.innerHTML = '<div class="card" style="background:var(--red-soft);border-color:var(--red)"><span style="color:var(--red)">⚠ '+esc(s.error)+'</span></div>';
+  }else if(s.result){
+    const r = s.result;
+    el.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:var(--green)">'
+      + '<div style="color:var(--green);font-weight:700;margin-bottom:8px">'+t().learn_bootstrap_done+'</div>'
+      + '<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px">'
+      + '<span><b class="mono">'+r.conversations_scanned+'</b> '+t().learn_bootstrap_scanned+'</span>'
+      + '<span><b class="mono">'+r.pairs_extracted+'</b> '+t().learn_bootstrap_pairs+'</span>'
+      + '<span><b class="mono">'+r.apartments_distilled+'</b> '+t().learn_bootstrap_apts+'</span>'
+      + '</div></div>';
+  }
+}
+
 /* ============================================================
    DRAWER
    ============================================================ */
@@ -5442,6 +5611,46 @@ async def _api_learning_distill_now(request):
                   "apartments_with_summary": len(_apartment_learnings),
                   "general_examples": _general_learnings.get("examples_count", 0)})
 
+_bootstrap_state = {"running": False, "started": 0, "finished": 0, "result": None, "error": ""}
+
+async def _api_learning_bootstrap(request):
+    """POST {limit_conversations?: int (50..1000), force?: bool} — one-shot historical
+    seeding. Walks the most-recent N Hostaway conversations, extracts team replies,
+    distills per-apartment summaries. Runs in the background — poll
+    /api/learning/bootstrap/status for progress."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _bootstrap_state["running"]:
+        return _json({"error": "bootstrap already running",
+                      "started": _bootstrap_state["started"]}, 409)
+    b = await _read_body(request)
+    try:
+        limit = int(b.get("limit_conversations", 300))
+    except Exception:
+        limit = 300
+    limit = max(50, min(1000, limit))
+    async def _run():
+        _bootstrap_state.update({"running": True, "started": time.time(),
+                                 "finished": 0, "result": None, "error": ""})
+        try:
+            res = await asyncio.to_thread(bootstrap_learnings_from_history, limit)
+            _bootstrap_state["result"] = res
+            await asyncio.to_thread(persist_state)
+        except Exception as e:
+            _bootstrap_state["error"] = str(e)
+            print("bootstrap_learnings error:", e)
+        finally:
+            _bootstrap_state["running"] = False
+            _bootstrap_state["finished"] = time.time()
+    asyncio.create_task(_run())
+    return _json({"ok": True, "started": True, "limit_conversations": limit,
+                  "note": "Running in background; poll /api/learning/bootstrap/status"})
+
+async def _api_learning_bootstrap_status(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(_bootstrap_state)
+
 async def _api_learning_edit(request):
     """POST {scope:'apartment'|'general', lid?, summary} — directly overwrite
     a distilled summary. Useful when the owner wants to add a fact the bot
@@ -5541,6 +5750,8 @@ async def start_web_server():
         app.router.add_post("/api/learning/forget", _api_learning_forget)
         app.router.add_post("/api/learning/distill", _api_learning_distill_now)
         app.router.add_post("/api/learning/edit", _api_learning_edit)
+        app.router.add_post("/api/learning/bootstrap", _api_learning_bootstrap)
+        app.router.add_get("/api/learning/bootstrap/status", _api_learning_bootstrap_status)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
