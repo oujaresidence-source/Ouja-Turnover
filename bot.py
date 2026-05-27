@@ -1458,6 +1458,17 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     facts = _knowledge_text.strip()
     facts_block = (f"معلومات معتمدة عن عوجا (استخدمها كمصدر الحقيقة وصحّح أي تعارض):\n{facts}\n\n"
                    if facts else "")
+    # ---- learned summaries (distilled by Claude from past team-approved replies) ----
+    # General first (cross-portfolio patterns), then apartment-specific if we have a lid.
+    gen_learn = (_general_learnings.get("summary") or "").strip()
+    if gen_learn:
+        facts_block += ("دروس عامة استخلصها النظام من ردود الفريق السابقة (طبّقها بشكل افتراضي إلا "
+                        "إذا تعارضت مع معلومة محدّدة لهذه الوحدة):\n" + gen_learn + "\n\n")
+    if listing_id:
+        apt_learn = (_apartment_learnings.get(int(listing_id)) or {}).get("summary", "").strip()
+        if apt_learn:
+            facts_block += ("دروس خاصة بهذه الوحدة بالذات (تجمعت من تفاعلات سابقة عليها — اعتبرها "
+                            "مصدر حقيقة قوي عن هذه الشقة تحديداً):\n" + apt_learn + "\n\n")
     want_catalog = bool(_catalog_text) and any(h in low for h in _ALT_HINTS)
     # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
     own_price_line = ""
@@ -1571,6 +1582,145 @@ def claude_manager_script(guest, unit, history, guest_text, reason, manager_name
     user = (f"الوحدة: {unit}\nالضيف: {guest}\nسبب التصعيد: {reason}\nالمحادثة:\n{history}\n\n"
             f"آخر رسالة من الضيف: {guest_text}")
     return claude_text(sys, user, 700, model=CLAUDE_MODEL_PREMIUM) or claude_text(sys, user, 700)
+
+# ========================================================================
+# Self-learning helpers
+# ========================================================================
+def _text_diff_ratio(a, b):
+    """0.0 = identical, 1.0 = totally different. Cheap approximate via SequenceMatcher."""
+    if not a and not b:
+        return 0.0
+    if not a or not b:
+        return 1.0
+    try:
+        from difflib import SequenceMatcher
+        return 1.0 - SequenceMatcher(None, a, b).ratio()
+    except Exception:
+        return 0.0
+
+def record_learning(item, original_draft, final_reply, via, approver=None):
+    """Append one send/edit event to _learning_log.
+       `item` is the message item dict (guest, unit, listing_id, conversation_id, guest_text).
+       `via` is one of: discord_send | discord_edit | dashboard_send | auto | escalation_ack."""
+    try:
+        if not item:
+            return
+        diff = _text_diff_ratio((original_draft or "").strip(), (final_reply or "").strip())
+        entry = {
+            "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+            "conversation_id": item.get("conversation_id"),
+            "listing_id": item.get("listing_id"),
+            "unit": (item.get("unit") or "")[:80],
+            "guest": (item.get("guest") or "")[:60],
+            "guest_question": (item.get("guest_text") or "")[:900],
+            "bot_draft": (original_draft or "")[:1400],
+            "final_reply": (final_reply or "")[:1400],
+            "diff_ratio": round(diff, 2),
+            "was_edited": diff >= 0.20,                # human reshaped the bot >20%
+            "via": via,
+            "approver": approver or "",
+        }
+        _learning_log.append(entry)
+    except Exception as e:
+        print("record_learning error:", e)
+
+_DISTILL_SYSTEM = (
+    "أنت تحلّل آخر تفاعلات بوت إدارة عقارات «عوجا» في الرياض لاستخراج درس مكثّف يساعد البوت "
+    "يجاوب بشكل أصحّ في المستقبل. كل تفاعل يحتوي على: سؤال الضيف، مسوّدة البوت الأصلية، "
+    "والرد النهائي الذي أرسله الفريق (مع إشارة إن كان مُعدّل أو مُرسل كما هو).\n\n"
+    "ركّز على:\n"
+    "- حقائق متكرّرة عن الوحدة/الشقة بالتحديد (موقع، مدخل، رقم العمارة، باركن، WiFi، أي خصوصية)\n"
+    "- الأسئلة الشائعة وكيف يردّ عليها الفريق فعلياً\n"
+    "- الحالات التي عدّل فيها الفريق المسوّدة بشكل كبير = البوت كان يخطئ، استخرج الدرس\n"
+    "- الأمور المحلية (مطاعم، مسافة المطار، مولات قريبة) لو ذُكرت أكثر من مرة\n\n"
+    "تجاهل أسماء الضيوف وأي معلومات شخصية. اكتب الملخص بعربي واضح، مرتّب بـbullet points "
+    "تحت عناوين قصيرة. أقصى ٥٠٠ كلمة. لو فيه ملخص سابق، ابنِ عليه (احتفظ بما لا يزال صحيحاً، "
+    "أضف الجديد، احذف ما يناقضه التفاعل الأخير)."
+)
+
+def _format_entries_for_distill(entries):
+    """Compact textual rendering of recent send events for the distillation prompt."""
+    out = []
+    for i, e in enumerate(entries, 1):
+        tag = "✏️ مُعدّل" if e.get("was_edited") else "✅ كما هو"
+        out.append(
+            f"[{i}] {tag}\n"
+            f"سؤال الضيف: {e.get('guest_question','')[:500]}\n"
+            f"مسوّدة البوت: {(e.get('bot_draft') or '')[:500]}\n"
+            f"الرد النهائي: {(e.get('final_reply') or '')[:500]}"
+        )
+    return "\n\n".join(out)
+
+def _distill_apartment(lid, entries, prior_summary):
+    """Ask Claude to distill recent entries for one apartment. Returns summary string or None."""
+    if not entries:
+        return None
+    name = entries[-1].get("unit") or f"unit-{lid}"
+    sample = _format_entries_for_distill(entries[-LEARNING_SAMPLE_PER_APT:])
+    user = (
+        f"الوحدة: {name}\n\n"
+        f"الملخص السابق:\n{prior_summary or '(لا يوجد بعد)'}\n\n"
+        f"آخر التفاعلات لهذه الوحدة:\n{sample}\n\n"
+        f"اكتب الملخص المحدّث لهذه الوحدة فقط."
+    )
+    return claude_text(_DISTILL_SYSTEM, user, max_tokens=900, model=CLAUDE_MODEL_PREMIUM) \
+        or claude_text(_DISTILL_SYSTEM, user, max_tokens=900)
+
+def _distill_general(entries, prior_summary):
+    """Distill cross-apartment learnings (tone, common questions, escalation patterns)."""
+    if not entries:
+        return None
+    sample = _format_entries_for_distill(entries[-60:])
+    user = (
+        f"تفاعلات حديثة من عدة وحدات (للأنماط العامة عبر المحفظة):\n\n"
+        f"الملخص العام السابق:\n{prior_summary or '(لا يوجد بعد)'}\n\n"
+        f"آخر التفاعلات:\n{sample}\n\n"
+        f"اكتب الملخص العام المحدّث (أنماط لغوية، أسئلة شائعة، طريقة الفريق في الرد، "
+        f"تجاهل التفاصيل الخاصة بشقة واحدة فقط)."
+    )
+    return claude_text(_DISTILL_SYSTEM, user, max_tokens=900, model=CLAUDE_MODEL_PREMIUM) \
+        or claude_text(_DISTILL_SYSTEM, user, max_tokens=900)
+
+def distill_learnings():
+    """Walk _learning_log, distill per-apartment + general summaries when there's
+       enough new material. Designed to be cheap when nothing changed."""
+    if not _learning_log:
+        return
+    # group by apartment
+    by_apt = defaultdict(list)
+    for e in list(_learning_log):
+        lid = e.get("listing_id")
+        if lid:
+            by_apt[int(lid)].append(e)
+    # per-apartment
+    distilled = 0
+    for lid, entries in by_apt.items():
+        existing = _apartment_learnings.get(lid, {})
+        prior_count = existing.get("examples_count", 0)
+        if len(entries) - prior_count < LEARNING_MIN_NEW_EXAMPLES and existing.get("summary"):
+            continue                                    # not enough new material to re-spend tokens
+        summary = _distill_apartment(lid, entries, existing.get("summary", ""))
+        if summary and summary.strip():
+            _apartment_learnings[lid] = {
+                "summary": summary.strip(),
+                "last_distilled": time.time(),
+                "examples_count": len(entries),
+                "unit": entries[-1].get("unit", ""),
+            }
+            distilled += 1
+            log_event("guest", f"تعلّم محدّث · {entries[-1].get('unit','')} ({len(entries)} مثال)")
+    # general
+    all_entries = list(_learning_log)
+    prior_g = _general_learnings.get("examples_count", 0)
+    if len(all_entries) - prior_g >= LEARNING_MIN_NEW_EXAMPLES or not _general_learnings.get("summary"):
+        g_summary = _distill_general(all_entries, _general_learnings.get("summary", ""))
+        if g_summary and g_summary.strip():
+            _general_learnings["summary"] = g_summary.strip()
+            _general_learnings["last_distilled"] = time.time()
+            _general_learnings["examples_count"] = len(all_entries)
+            distilled += 1
+    if distilled:
+        print(f"learnings: distilled {distilled} summary block(s)")
 
 def _conv_to_item(c, listings, seen, debug=False):
     """Turn ONE conversation object into a new-guest-message item, or None.
@@ -1796,6 +1946,7 @@ class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسا
         super().__init__()
         self.item = item
         self.message_id = message_id
+        self._original_draft = draft or ""    # keep for learning capture below
         self.box = discord.ui.TextInput(label="الرد للضيف", style=discord.TextStyle.paragraph,
                                         default=draft, max_length=1800)
         self.add_item(self.box)
@@ -1806,6 +1957,9 @@ class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسا
         try:
             await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
                                     self.item["comm_type"])
+            # learning: capture the team's edited reply as a strong correction signal
+            record_learning(self.item, self._original_draft, text,
+                            via="discord_edit", approver=str(interaction.user))
             try:
                 msg = await interaction.channel.fetch_message(self.message_id)
                 done = ApproveView()
@@ -1976,6 +2130,9 @@ class ConfirmActionView(discord.ui.View):
             try:
                 await asyncio.to_thread(send_guest_message, item["conversation_id"], draft,
                                         item["comm_type"])
+                # learning: send-as-is means the team approved the draft verbatim
+                record_learning(item, draft, draft,
+                                via="discord_send", approver=str(interaction.user))
                 await self._disable_card(interaction)
                 _pending_replies.pop(self.message_id, None)
                 _replied_msgs.add(self.message_id)
@@ -2186,6 +2343,9 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
         try:
             await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
                                     item["comm_type"])
+            # learning: auto-sent at high confidence (still useful — confirms the
+            # bot's wording on simple replies, helps reinforce the pattern)
+            record_learning(item, reply, reply, via="auto", approver="(auto)")
             embed = discord.Embed(title=f"⚡ رد تلقائي · {g} · {item['unit']}", color=0x3BA55D)
             embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
             embed.add_field(name="✅ تم الرد تلقائياً (Stage 1)", value=reply[:1000], inline=False)
@@ -2336,6 +2496,19 @@ async def _handle_health(request):
 _activity = deque(maxlen=800)
 _auto_replies = deque(maxlen=500)     # audit of Stage-1 auto-sent messages (guest msg + AI reply)
 _pricing_strategies = {}              # lid -> active dynamic-pricing strategy state
+
+# ---- Self-learning: capture every send + periodically distill team intent ----
+# Every approved/edited reply is appended to _learning_log. A background task
+# (learning_distillation_loop) groups the recent entries by listing and asks
+# Claude to extract a concise summary of what the team has been telling guests.
+# The resulting per-apartment + general summaries are then injected into every
+# future draft so the bot becomes more apartment-specific and confident over time.
+_learning_log = deque(maxlen=3000)
+_apartment_learnings = {}   # lid (int) -> {"summary": str, "last_distilled": ts, "examples_count": int}
+_general_learnings = {"summary": "", "last_distilled": 0, "examples_count": 0}
+LEARNING_MIN_NEW_EXAMPLES = int(os.environ.get("LEARNING_MIN_NEW_EXAMPLES", "5"))   # don't re-distill until N new entries
+LEARNING_DISTILL_MIN = int(os.environ.get("LEARNING_DISTILL_MIN", "30"))           # background distill interval (min)
+LEARNING_SAMPLE_PER_APT = int(os.environ.get("LEARNING_SAMPLE_PER_APT", "40"))     # last N entries per apt to feed Claude
 
 def log_event(category, text):
     """Record something the bot did, for the dashboard's activity feed."""
@@ -4220,10 +4393,15 @@ async def _api_send(request):
         return _json({"error": "not found / already handled"}, 409)
     _replied_msgs.add(mid)
     item = data["item"]
-    reply = (b.get("text") or data.get("draft") or "").strip()
+    original_draft = data.get("draft") or ""
+    reply = (b.get("text") or original_draft).strip()
     try:
         await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
                                 item.get("comm_type", "email"))
+        # learning: dashboard send — if the user changed the text in the textarea
+        # vs the original draft, that's a correction signal (was_edited=True via diff)
+        record_learning(item, original_draft, reply,
+                        via="dashboard_send", approver="(dashboard)")
         log_event("guest", f"رد (من اللوحة) · {item.get('guest','')} · {item.get('unit','')}")
         return _json({"ok": True})
     except Exception as e:
@@ -4595,6 +4773,80 @@ async def _api_teach(request):
         log_event("guest", f"تعلّم معلومة جديدة (من اللوحة): {(topic or fact)[:80]}")
     return _json({"ok": bool(ok)})
 
+# ---- self-learning views ----
+async def _api_learning_summary(request):
+    """Return distilled summaries. Optional ?lid= for one apartment, else all."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    lid = request.query.get("lid")
+    if lid:
+        try:
+            lid_i = int(lid)
+        except Exception:
+            return _json({"error": "bad lid"}, 400)
+        apt = _apartment_learnings.get(lid_i) or {}
+        return _json({"apartment": apt, "general": _general_learnings})
+    # all apartments
+    return _json({
+        "general": _general_learnings,
+        "apartments": [{"lid": k, **v} for k, v in
+                       sorted(_apartment_learnings.items(),
+                              key=lambda kv: -(kv[1].get("last_distilled") or 0))],
+        "log_size": len(_learning_log),
+    })
+
+async def _api_learning_log(request):
+    """Last N learning log entries (most recent first)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        n = int(request.query.get("limit", "50"))
+    except Exception:
+        n = 50
+    n = max(1, min(500, n))
+    items = list(_learning_log)[-n:][::-1]
+    return _json({"items": items, "total": len(_learning_log)})
+
+async def _api_learning_forget(request):
+    """POST {lid?, scope?: 'apartment'|'general'|'all'} — drop a learned summary
+    so the bot stops citing it. Useful when a summary went wrong."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    scope = (b.get("scope") or "").strip()
+    if scope == "general":
+        _general_learnings["summary"] = ""
+        _general_learnings["examples_count"] = 0
+        log_event("guest", "نسيت الملخص العام للتعلّم")
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": True})
+    if scope == "apartment":
+        try:
+            lid = int(b.get("lid"))
+        except Exception:
+            return _json({"error": "bad lid"}, 400)
+        prev = _apartment_learnings.pop(lid, None)
+        log_event("guest", f"نسيت الملخص الخاص بـ {(prev or {}).get('unit','وحدة')}")
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": True})
+    if scope == "all":
+        _apartment_learnings.clear()
+        _general_learnings["summary"] = ""
+        _general_learnings["examples_count"] = 0
+        log_event("guest", "نسيت كل ملخصات التعلّم")
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": True})
+    return _json({"error": "scope must be apartment|general|all"}, 400)
+
+async def _api_learning_distill_now(request):
+    """Force a re-distillation right now (useful for testing or after a new wave of edits)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    await asyncio.to_thread(distill_learnings)
+    return _json({"ok": True,
+                  "apartments_with_summary": len(_apartment_learnings),
+                  "general_examples": _general_learnings.get("examples_count", 0)})
+
 @tasks.loop(minutes=DASH_REFRESH_MIN)
 async def dashboard_cache_loop():
     """Pre-compute heavy analytics in the background so the dashboard serves instantly."""
@@ -4650,6 +4902,10 @@ async def start_web_server():
         app.router.add_get("/api/today/empty", _api_today_empty)
         app.router.add_get("/api/inbox/detail", _api_inbox_detail)
         app.router.add_post("/api/teach", _api_teach)
+        app.router.add_get("/api/learning/summary", _api_learning_summary)
+        app.router.add_get("/api/learning/log", _api_learning_log)
+        app.router.add_post("/api/learning/forget", _api_learning_forget)
+        app.router.add_post("/api/learning/distill", _api_learning_distill_now)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -4763,6 +5019,15 @@ async def knowledge_loop():
         await load_knowledge(guild)
     await asyncio.to_thread(load_catalog)   # refreshes only if >1h old
 
+@tasks.loop(minutes=LEARNING_DISTILL_MIN)
+async def learning_distillation_loop():
+    """Re-summarise recent send/edit events per-apartment + general. Cheap if no
+    new entries since the last distill (LEARNING_MIN_NEW_EXAMPLES gate)."""
+    try:
+        await asyncio.to_thread(distill_learnings)
+    except Exception as e:
+        print("learning_distillation_loop error:", e)
+
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
@@ -4783,6 +5048,11 @@ def load_state():
         _discount_paused_until = float(_load_json("discount_pause.json", 0) or 0)
         _unit_discount_skip = {int(k): float(v) for k, v in _load_json("unit_discount_skip.json", {}).items()
                                if float(v) > time.time()}   # drop expired entries on boot
+        _learning_log.clear()
+        _learning_log.extend(_load_json("learning_log.json", []))
+        _apartment_learnings.clear()
+        _apartment_learnings.update({int(k): v for k, v in _load_json("apartment_learnings.json", {}).items()})
+        _general_learnings.update(_load_json("general_learnings.json", {"summary": "", "last_distilled": 0, "examples_count": 0}))
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -4802,6 +5072,9 @@ def persist_state():
     _save_json("price_opps.json", {str(k): v for k, v in _price_opps.items()})
     _save_json("discount_pause.json", _discount_paused_until)
     _save_json("unit_discount_skip.json", {str(k): v for k, v in _unit_discount_skip.items()})
+    _save_json("learning_log.json", list(_learning_log))
+    _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
+    _save_json("general_learnings.json", _general_learnings)
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -5573,6 +5846,8 @@ async def on_ready():
         print("webhooks: aiohttp not installed — add 'aiohttp' to requirements.txt to enable")
     if ASSISTANT_ENABLED and not knowledge_loop.is_running():
         knowledge_loop.start()
+    if ASSISTANT_ENABLED and not learning_distillation_loop.is_running():
+        learning_distillation_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
