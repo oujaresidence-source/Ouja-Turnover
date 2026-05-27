@@ -1283,10 +1283,28 @@ every draft before it is sent, so be helpful but stay strictly within your lane.
 TONE
 - Warm, friendly, professional — Ritz-Carlton hospitality standard.
 - Reply in the SAME language the guest used, switching immediately if they switch.
-- For Arabic: write CLEAN, modern, natural Saudi Arabic with only a LIGHT local touch — \
-warm phrases like "حياك الله"، "تم"، "أبشر"، "بالتوفيق" used naturally and sparingly. \
-Do NOT write heavy or folksy Najdi slang. Aim for how a polished, well-spoken Saudi host \
-talks — simple, elegant, respectful — not exaggerated dialect.
+- For Arabic: ALWAYS Saudi/Gulf — either Najdi (preferred) or clean "white" Saudi \
+that any Gulf reader hears as one of their own. NEVER Levantine, Egyptian, Iraqi, \
+or Maghrebi. Avoid heavy or folksy slang too — aim for how a polished, well-spoken \
+Saudi host talks: simple, elegant, respectful. Warm Saudi phrases like \
+"حياك الله / تم / أبشر / بالتوفيق / ما يخالف / يعطيك العافية" used naturally and sparingly.
+
+FORBIDDEN NON-SAUDI WORDS (replace with the Saudi equivalent, no exceptions):
+- "شو" ❌ → use "وش" أو "إيش" ✅
+- "بدك / بدّك / بدي / بدنا" ❌ → use "تبي / تبغى / أبي / نبي" ✅
+- "دلوقتي / حالاً (مصري)" ❌ → use "الحين" ✅
+- "عايز / عاوز" ❌ → use "أبي / أبغى" ✅
+- "إزيك / إزاي" ❌ → use "كيفك / كيف" ✅
+- "كده / كدا" ❌ → use "كذا / جذي" ✅
+- "فين / امتى" ❌ → use "وين / متى" ✅
+- "بتاع / بتاعك" ❌ → use "حق / حقك / مال" ✅
+- "ايه / ايوه" ❌ → use "إيش / إي" ✅
+- "معلش / مفيش / فيه (مصري بمعنى يوجد)" ❌ → use "ما يخالف / ما فيه / فيه" بالنطق السعودي ✅
+- "هلق / هلأ" ❌ → use "الحين" ✅
+- "كتير / منيح / تمام (لو فيه نطق شامي)" ❌ → use "كثير / زين / تمام" ✅
+- "يلا / يلّا" بمعنى تعال → استبدلها بـ "تفضل / تكفى" حسب السياق.
+Quick mental check before writing: "هل هذا الكلمة يقولها سعودي في الرياض بشكل طبيعي؟" If not — replace it.
+
 - Keep replies short, human, and to the point. Never reveal you are an AI unless asked.
 
 CHOOSE ONE OF THREE ACTIONS
@@ -1970,12 +1988,23 @@ def claude_text(system, user, max_tokens=600, model=None):
         print("claude_text error:", e)
         return None
 
+# Reusable dialect lock — appended to every Arabic-generating system prompt so
+# we get consistent Najdi/white-Saudi output across all paths (drafts, distill,
+# acks, manager scripts). Centralising it keeps the rules in one place.
+_DIALECT_LOCK = (
+    "\n\n⛔ قيد لهجة صارم: اكتب بعربي سعودي/نجدي فقط. ممنوع نهائياً أي كلمة شامية أو مصرية مثل: "
+    "شو، بدك، دلوقتي، عايز، إزيك، كده، فين، بتاع، ايه، معلش، هلق. "
+    "البدائل الصحيحة بالترتيب: وش/إيش، تبي/تبغى، الحين، أبي، كيفك، كذا، وين، حق/مال، إي، "
+    "ما يخالف، الحين. قبل ما ترسل، اسأل نفسك: 'هل سعودي في الرياض يقولها بهالشكل؟' لو لا، استبدلها."
+)
+
 def claude_escalation_ack(guest, unit, history, guest_text):
     """An empathetic, problem-specific holding message for a repeat escalation."""
     sys = ("أنت تكتب رسالة طمأنة قصيرة لضيف في عوجا تصعّد موضوعه مرة ثانية وهو لا يزال ينتظر أو منزعج. "
            "اكتب بأسلوب سعودي نجدي دافئ وراقٍ: اعترف بمشكلته تحديداً، تفهّم شعوره، اعتذر بصدق، "
            "وطمّنه إن الفريق المختص يشتغل على موضوعه الحين وبيتواصل معه قريب جداً. "
-           "لا تكتبها كأنها قالب آلي مكرر. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط.")
+           "لا تكتبها كأنها قالب آلي مكرر. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط."
+           + _DIALECT_LOCK)
     user = (f"الوحدة: {unit}\nالضيف: {guest}\nالمحادثة:\n{history}\n\n"
             f"آخر رسالة من الضيف: {guest_text}")
     return claude_text(sys, user, 500, model=CLAUDE_MODEL_PREMIUM) or claude_text(sys, user, 500)
@@ -1987,7 +2016,8 @@ def claude_manager_script(guest, unit, history, guest_text, reason, manager_name
            f"الرسالة لازم: تحيي الضيف بحرارة، تعرّف إن {manager_name} مدير العقار وتولّى الموضوع بنفسه، "
            "تذكر إن الشباب (الفريق) بلّغوه عن مشكلته، تلخّص مشكلته باختصار عشان يحس إنه مسموع، "
            "تتفهّم وتعتذر بصدق، وتطمّنه بعبارات دافئة (مثل: أبشر بالي يسرّ خاطرك يا طويل العمر) إن الموضوع بينحل. "
-           "طبيعية مهب قالب جامد. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط بدون أي شرح.")
+           "طبيعية مهب قالب جامد. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط بدون أي شرح."
+           + _DIALECT_LOCK)
     user = (f"الوحدة: {unit}\nالضيف: {guest}\nسبب التصعيد: {reason}\nالمحادثة:\n{history}\n\n"
             f"آخر رسالة من الضيف: {guest_text}")
     return claude_text(sys, user, 700, model=CLAUDE_MODEL_PREMIUM) or claude_text(sys, user, 700)
@@ -2042,9 +2072,13 @@ _DISTILL_SYSTEM = (
     "- الأسئلة الشائعة وكيف يردّ عليها الفريق فعلياً\n"
     "- الحالات التي عدّل فيها الفريق المسوّدة بشكل كبير = البوت كان يخطئ، استخرج الدرس\n"
     "- الأمور المحلية (مطاعم، مسافة المطار، مولات قريبة) لو ذُكرت أكثر من مرة\n\n"
-    "تجاهل أسماء الضيوف وأي معلومات شخصية. اكتب الملخص بعربي واضح، مرتّب بـbullet points "
-    "تحت عناوين قصيرة. أقصى ٥٠٠ كلمة. لو فيه ملخص سابق، ابنِ عليه (احتفظ بما لا يزال صحيحاً، "
-    "أضف الجديد، احذف ما يناقضه التفاعل الأخير)."
+    "تجاهل أسماء الضيوف وأي معلومات شخصية. اكتب الملخص بعربي **سعودي/نجدي فقط** — لا تستخدم "
+    "أبداً كلمات شامية أو مصرية مثل: شو، بدك، دلوقتي، عايز، إزيك، كده، فين، بتاع، ايه، معلش، "
+    "هلق. استبدلها بـ: وش/إيش، تبي/تبغى، الحين، أبي، كيفك، كذا، وين، حق/مال، إي، ما يخالف. "
+    "هذا الملخص بيُحقن في كل مسوّدة جاية، فلو تسرّبت لهجة غير سعودية هنا راح تنسخها كل ردود البوت. "
+    "اكتب مرتّب بـbullet points تحت عناوين قصيرة. أقصى ٥٠٠ كلمة. لو فيه ملخص سابق، ابنِ عليه "
+    "(احتفظ بما لا يزال صحيحاً، أضف الجديد، احذف ما يناقضه التفاعل الأخير)."
+    + _DIALECT_LOCK
 )
 
 def _format_entries_for_distill(entries):
