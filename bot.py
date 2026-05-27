@@ -499,6 +499,132 @@ def apply_discount_tier(pct):
 def is_weekend_today():
     return datetime.now(TZ).weekday() in WEEKEND_DAYS
 
+# ====================================================================
+# Rental-agreement reminder
+# --------------------------------------------------------------------
+# Hostaway only releases the door code AFTER the rental agreement is
+# signed. So if check-in is approaching and we still see no signature on
+# the reservation, we re-send the original signing link with a short note
+# explaining why their code hasn't arrived yet.
+# ====================================================================
+def _is_agreement_signed(r):
+    """Defensive: Hostaway exposes the signed flag under several names across
+    plans/versions. Treat ANY of these being truthy as 'signed'."""
+    for k in ("isAccepted", "isSignedRentalAgreement", "rentalAgreementAccepted",
+              "isAgreementSigned", "isContractSigned", "isRentalAgreementSigned",
+              "agreementAccepted", "agreementSigned"):
+        v = r.get(k)
+        if v in (1, True, "1", "true", "True", "yes"):
+            return True
+    if r.get("acceptedDate") or r.get("agreementSignedDate") or r.get("signedAt"):
+        return True
+    return False
+
+_AGREEMENT_URL_HINTS = ("signing.hostaway", "hostaway.com/signing", "/signing/",
+                        "/rental-agreement", "rental_agreement", "agreement-sign",
+                        "esign", "docusign", "signing-link", "signnow",
+                        "hostaway.com/contracts", "hostawayintegrations.com")
+
+def find_agreement_url(conversation_id):
+    """Scan past HOST (outbound) messages in the conversation for a signing-link URL.
+    Picks the most-recent matching URL so a re-sent link wins."""
+    if not conversation_id:
+        return None
+    try:
+        data = api_get(f"/conversations/{conversation_id}/messages")
+        msgs = sorted((data.get("result") or []), key=_msg_sort_key)
+    except Exception as e:
+        print(f"find_agreement_url fetch error ({conversation_id}):", e)
+        return None
+    candidate = None
+    for m in msgs:
+        if _msg_is_inbound(m):
+            continue                                       # we want OUR earlier messages
+        body = (m.get("body") or "")
+        if not body:
+            continue
+        low = body.lower()
+        for url in re.findall(r"https?://[^\s)>\]\"']+", body):
+            ul = url.lower()
+            if any(h in ul for h in _AGREEMENT_URL_HINTS):
+                candidate = url       # keep updating -> ends on most recent
+    return candidate
+
+def _reminder_message_ar(link):
+    return (
+        f"مرحباً 🤍\n"
+        f"لاحظنا أن العقد الإلكتروني لحجزك لم يتم التوقيع عليه بعد. هذا السبب اللي بسببه "
+        f"رمز الدخول للوحدة ما وصلك للحين — يُرسَل تلقائياً فور توقيع العقد.\n\n"
+        f"رابط التوقيع:\n{link}\n\n"
+        f"بعد التوقيع راح يوصلك رمز الدخول مباشرة. إذا واجهت أي مشكلة في فتح الرابط أو "
+        f"التوقيع، رد علينا هنا ونساعدك على طول."
+    )
+
+def _reminder_message_en(link):
+    return (
+        f"Hi 🤍\n"
+        f"Just a quick note — the rental agreement for your booking hasn't been signed yet, "
+        f"which is why your access code hasn't arrived. The code is released automatically "
+        f"as soon as the agreement is signed.\n\n"
+        f"Sign here:\n{link}\n\n"
+        f"Once signed, your access code will reach you straight away. If the link doesn't "
+        f"open or anything's unclear, reply here and we'll help right away."
+    )
+
+def _check_agreement_for_one(r, now):
+    """Single-reservation evaluation. Returns True if we sent a reminder."""
+    res_id = r.get("id")
+    if not res_id or res_id in _agreement_reminded:
+        return False
+    if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+        return False
+    arrival = _parse_date(r.get("arrivalDate"))
+    if not arrival or arrival != now.date():
+        return False                                       # only act on TODAY's arrivals
+    if _is_agreement_signed(r):
+        return False                                       # already signed, nothing to do
+    hour = parse_hour(r.get("checkInTime"), 15)
+    checkin_dt = datetime(arrival.year, arrival.month, arrival.day,
+                          min(hour, 23), 0, tzinfo=TZ)
+    hours_until = (checkin_dt - now).total_seconds() / 3600.0
+    if not (0 < hours_until <= AGREEMENT_REMINDER_LEAD_HOURS):
+        return False
+    cid = r.get("conversationId")
+    link = find_agreement_url(cid)
+    if not link:
+        print(f"  agreement-reminder: res {res_id} not signed, but no signing URL found in conversation")
+        return False
+    is_ar = _has_arabic((r.get("guestName") or "")) or True   # default Arabic for KSA guests
+    body = _reminder_message_ar(link) if is_ar else _reminder_message_en(link)
+    try:
+        send_guest_message(cid, body, "email")
+        _agreement_reminded.add(res_id)
+        log_event("guest", f"تذكير توقيع العقد · {r.get('guestName','ضيف')} · check-in بعد {hours_until:.1f}س")
+        print(f"  agreement-reminder: nudged res {res_id} (check-in in {hours_until:.1f}h)")
+        return True
+    except Exception as e:
+        print(f"agreement-reminder send error (res {res_id}):", e)
+        return False
+
+def check_agreement_reminders():
+    """Top-level: pull today's reservations and run _check_agreement_for_one on each."""
+    if not AGREEMENT_REMINDER_ENABLED:
+        return
+    today_iso = datetime.now(TZ).date().isoformat()
+    try:
+        data = api_get("/reservations", params={
+            "arrivalStartDate": today_iso, "arrivalEndDate": today_iso,
+            "limit": 200, "includeResources": 0,
+        })
+    except Exception as e:
+        print("agreement-reminder fetch error:", e)
+        return
+    rows = data.get("result", []) or []
+    now = datetime.now(TZ)
+    n = sum(1 for r in rows if _check_agreement_for_one(r, now))
+    if n:
+        print(f"agreement-reminder: sent {n} nudge(s)")
+
 def compute_tonight_empty():
     """For each unit empty TONIGHT, return its current price + the discount schedule the
     bot will apply if the unit stays empty (tier 1 at midnight, 2 at noon, 3 at 6 PM, or
@@ -2670,6 +2796,13 @@ _general_learnings = {"summary": "", "last_distilled": 0, "examples_count": 0}
 LEARNING_MIN_NEW_EXAMPLES = int(os.environ.get("LEARNING_MIN_NEW_EXAMPLES", "5"))   # don't re-distill until N new entries
 LEARNING_DISTILL_MIN = int(os.environ.get("LEARNING_DISTILL_MIN", "30"))           # background distill interval (min)
 LEARNING_SAMPLE_PER_APT = int(os.environ.get("LEARNING_SAMPLE_PER_APT", "40"))     # last N entries per apt to feed Claude
+
+# ---- Code-not-received reminder: nudge guests who haven't signed the agreement
+# before their check-in, since Hostaway only releases the door code AFTER they sign.
+AGREEMENT_REMINDER_ENABLED = os.environ.get("AGREEMENT_REMINDER_ENABLED", "1") in ("1","true","True","yes")
+AGREEMENT_REMINDER_LEAD_HOURS = float(os.environ.get("AGREEMENT_REMINDER_LEAD_HOURS", "1"))   # remind when check-in is N hours away
+AGREEMENT_REMINDER_POLL_MIN = int(os.environ.get("AGREEMENT_REMINDER_POLL_MIN", "10"))         # how often the loop runs
+_agreement_reminded = set()   # set of reservation_ids we've already nudged (persisted)
 
 def log_event(category, text):
     """Record something the bot did, for the dashboard's activity feed."""
@@ -5407,10 +5540,20 @@ async def learning_distillation_loop():
     except Exception as e:
         print("learning_distillation_loop error:", e)
 
+@tasks.loop(minutes=AGREEMENT_REMINDER_POLL_MIN)
+async def agreement_reminder_loop():
+    """Every N minutes, check today's arrivals: if check-in is within the lead-time
+    window and the agreement isn't signed yet, re-send the signing link with an
+    explanation that the door code is gated on the signature."""
+    try:
+        await asyncio.to_thread(check_agreement_reminders)
+    except Exception as e:
+        print("agreement_reminder_loop error:", e)
+
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
-    global _price_opps, _discount_paused_until, _unit_discount_skip
+    global _price_opps, _discount_paused_until, _unit_discount_skip, _agreement_reminded
     try:
         _assistant_seen = _BoundedSet(_load_json("seen.json", []), maxlen=20000)
         _pending_replies = {int(k): v for k, v in _load_json("pending.json", {}).items()}
@@ -5432,6 +5575,7 @@ def load_state():
         _apartment_learnings.clear()
         _apartment_learnings.update({int(k): v for k, v in _load_json("apartment_learnings.json", {}).items()})
         _general_learnings.update(_load_json("general_learnings.json", {"summary": "", "last_distilled": 0, "examples_count": 0}))
+        _agreement_reminded = set(int(x) for x in _load_json("agreement_reminded.json", []) if str(x).strip())
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -5454,6 +5598,7 @@ def persist_state():
     _save_json("learning_log.json", list(_learning_log))
     _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
     _save_json("general_learnings.json", _general_learnings)
+    _save_json("agreement_reminded.json", list(_agreement_reminded))
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -6227,6 +6372,8 @@ async def on_ready():
         knowledge_loop.start()
     if ASSISTANT_ENABLED and not learning_distillation_loop.is_running():
         learning_distillation_loop.start()
+    if AGREEMENT_REMINDER_ENABLED and not agreement_reminder_loop.is_running():
+        agreement_reminder_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
