@@ -520,6 +520,86 @@ def _is_agreement_signed(r):
         return True
     return False
 
+# Phrases that suggest the guest is asking for early check-in. Match in either lang.
+_EARLY_CHECKIN_HINTS = [
+    # Arabic
+    "تشيك ان مبكر", "تشيك-ان مبكر", "تشيك إن مبكر", "تسجيل دخول مبكر", "دخول مبكر",
+    "ادخل بدري", "ادخل من الصبح", "ندخل بدري", "ندخل الصبح", "ادخل ابكر", "أدخل أبكر",
+    "ادخل قبل الوقت", "ندخل قبل الوقت", "اقدر ادخل قبل", "تقدر تخليني ادخل",
+    "ابي ادخل اليوم", "ابي اوصل بدري", "اوصل بدري", "اوصل الصبح", "ابي ادخل الصبح",
+    "early checkin", "early check-in", "early check in",
+    "check in early", "check-in early", "checking in early",
+    "arrive early", "arrival early", "before check-in", "before check in",
+]
+
+def _is_early_checkin_request(text):
+    t = (text or "").lower()
+    return any(h in t for h in _EARLY_CHECKIN_HINTS)
+
+def _calendar_night_free(listing_id, night_date):
+    """True iff `night_date` (single date) is not occupied/blocked for `listing_id`."""
+    try:
+        d_iso = night_date.isoformat()
+        cal = api_get(f"/listings/{listing_id}/calendar",
+                      params={"startDate": d_iso, "endDate": d_iso})
+        days = cal.get("result") or []
+        if not days:
+            return False
+        day = days[0]
+        if day.get("reservationId"):
+            return False
+        return int(day.get("isAvailable", 0) or 0) == 1
+    except Exception as e:
+        print(f"_calendar_night_free error ({listing_id}, {night_date}):", e)
+        return False
+
+def early_checkin_context(reservation_id, listing_id):
+    """Heavy helper used only when a guest seems to be requesting early check-in.
+    Returns a dict the prompt can use to give Claude a concrete answer:
+      - prev_occupied: is the night BEFORE arrival booked for the guest's unit?
+      - alternatives: up to 5 active units where the same night IS free (potential
+        swaps the team could approve).
+    Returns None if we can't determine arrival or have no listing context."""
+    if not reservation_id or not listing_id:
+        return None
+    try:
+        rdata = api_get(f"/reservations/{reservation_id}")
+        r = rdata.get("result") or {}
+        arrival = _parse_date(r.get("arrivalDate"))
+        if not arrival:
+            return None
+    except Exception as e:
+        print(f"early_checkin_context arrival fetch error: {e}")
+        return None
+    prev_night = arrival - timedelta(days=1)
+    prev_occupied = not _calendar_night_free(listing_id, prev_night)
+    alternatives = []
+    if prev_occupied and _catalog_units:
+        # Pre-rank candidates so we don't burn 70 calendar reads if we don't need to:
+        # prefer the same bedroom count + area as the guest's current unit when known.
+        current = next((u for u in _catalog_units if u.get("id") == listing_id), {})
+        want = {"beds": current.get("beds"), "area": current.get("area"),
+                "tags": list(current.get("tags") or [])[:3]}
+        candidates = sorted(
+            [u for u in _catalog_units if u.get("id") and u["id"] != listing_id],
+            key=lambda u: -_unit_match_score(u, want),
+        )[:18]   # check at most ~18 so the loop stays fast
+        for u in candidates:
+            if _calendar_night_free(u["id"], prev_night) and _calendar_night_free(u["id"], arrival):
+                alternatives.append({
+                    "id": u["id"], "name": u["name"],
+                    "beds": u.get("beds"), "area": u.get("area") or u.get("neighbourhood"),
+                    "link": u.get("link"), "price": u.get("price"),
+                })
+                if len(alternatives) >= 5:
+                    break
+    return {
+        "prev_occupied": prev_occupied,
+        "prev_night": prev_night.isoformat(),
+        "arrival": arrival.isoformat(),
+        "alternatives": alternatives,
+    }
+
 _AGREEMENT_URL_HINTS = ("signing.hostaway", "hostaway.com/signing", "/signing/",
                         "/rental-agreement", "rental_agreement", "agreement-sign",
                         "esign", "docusign", "signing-link", "signnow",
@@ -1694,7 +1774,7 @@ _PRICE_HINTS = ["سعر", "السعر", "كم", "بكم", "كام", "تكلفة"
                 "الإجمالي", "price", "cost", "how much", "total", "rate", "nightly"]
 
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False,
-                 dates=None, listing_id=None):
+                 dates=None, listing_id=None, reservation_id=None):
     """Call Claude to draft a reply. Returns parsed dict or None on failure."""
     if not ANTHROPIC_API_KEY:
         print("assistant: ANTHROPIC_API_KEY not set")
@@ -1735,6 +1815,47 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         elif info and info.get("available") is not None:
             own_price_line = (f"\nوحدة الضيف ({unit}) "
                               f"{'متاحة' if info['available'] else 'غير متاحة'} لتواريخه.")
+    # ---- early check-in detection + pre-computation ----
+    # Done HERE (in claude_draft) rather than in the system prompt because the bot
+    # can't call functions on its own — we precompute prev-night occupancy +
+    # alternative units the team could swap to, then inject the result as facts
+    # the model quotes with certainty.
+    early_block = ""
+    if listing_id and _is_early_checkin_request(history_text):
+        ec = early_checkin_context(reservation_id, listing_id) or \
+             {"prev_occupied": None, "prev_night": "", "arrival": "", "alternatives": []}
+        if ec.get("prev_occupied") is True:
+            alts_txt = "\n".join([
+                f"  • {a['name']}"
+                + (f" · {a['beds']} غرفة" if a.get('beds') else "")
+                + (f" · {a['area']}" if a.get('area') else "")
+                + (f" · يبدأ من ~{a['price']} ر.س" if a.get('price') else "")
+                + (f" · {a['link']}" if a.get('link') else "")
+                for a in ec["alternatives"]
+            ]) or "  (ما لقيت بدائل واضحة قريبة من معايير وحدته)"
+            early_block = (
+                f"\n\nطلب تشيك-إن مبكر — السياق المحسوب مسبقاً:\n"
+                f"- الليلة السابقة لوصول الضيف ({ec.get('prev_night')}) محجوزة في وحدته الحالية، "
+                f"فالتشيك-إن المبكر **غير ممكن في وحدته الأصلية**.\n"
+                f"- وحدات بديلة كانت ليلتها السابقة + ليلة الوصول كلاهما فاضية (يمكن تحويله إليها بموافقة الفريق):\n{alts_txt}\n\n"
+                f"خطوات الرد المطلوبة:\n"
+                f"1) أخبر الضيف بصراحة إن وحدته الحالية الليلة قبل وصوله محجوزة، فالتشيك-إن المبكر فيها غير ممكن.\n"
+                f"2) اعرض عليه خيار التحويل لوحدة بديلة (لو فيه بدائل فوق): اسأله إذا يبيك تتأكد من توفّر "
+                f"وحدة ثانية مناسبة للدخول المبكر، ولو قال نعم اسأله المعايير المهمة له (كم غرفة، الميزانية، حي معيّن).\n"
+                f"3) action='reply' لأن الموافقة النهائية على التحويل تحتاج قسم المختص — قول له إن الفريق "
+                f"بيتأكد ويرد عليه.\n"
+                f"4) لا تَعِد بشيء قبل موافقة الفريق."
+            )
+        elif ec.get("prev_occupied") is False:
+            early_block = (
+                f"\n\nطلب تشيك-إن مبكر — السياق المحسوب مسبقاً:\n"
+                f"- الليلة السابقة لوصوله ({ec.get('prev_night')}) **فاضية** في وحدته، فالتشيك-إن المبكر ممكن "
+                f"من ناحية التوفّر.\n"
+                f"- لكن التأكيد النهائي يحتاج موافقة قسم المختص.\n\n"
+                f"خطوات الرد: action='reply'. قل للضيف إن طلبه ممكن من ناحية التوفّر، وإن الفريق بيراجع "
+                f"الموافقة النهائية ويتواصل معه بأقرب وقت. لا تؤكّد له ساعة دخول بعينها قبل موافقة الفريق."
+            )
+
     # ---- alternatives: use a live-availability catalog when we know the dates ----
     want = _criteria_from_text(history_text) if want_catalog else {}
     has_dates = bool(dates and dates[0] and dates[1])
@@ -1793,10 +1914,11 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         "Airbnb عند الحجز.'\n\n"
         ) if want_catalog else ""
     user = (f"{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}{own_price_line}\n\n"
+            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
-    model = CLAUDE_MODEL_PREMIUM if want_catalog else CLAUDE_MODEL
+    # The early-check-in path needs richer reasoning; use the premium model when present.
+    model = CLAUDE_MODEL_PREMIUM if (want_catalog or early_block) else CLAUDE_MODEL
     try:
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -2683,7 +2805,8 @@ async def process_assistant_item(it, channel):
              if (confirmed and it.get("listing_id")) else None)
     result = await asyncio.to_thread(
         claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
-        (it.get("checkin"), it.get("checkout")), it.get("listing_id"))
+        (it.get("checkin"), it.get("checkout")), it.get("listing_id"),
+        it.get("reservation_id"))
     if not result:
         return
     try:
