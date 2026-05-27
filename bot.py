@@ -3295,6 +3295,33 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="card"><div id="logBody"><div class="empty sk">—</div></div></div>
       </section>
 
+      <!-- ============ LEARNINGS ============ -->
+      <section class="view" id="view_learn">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_learn">📚 ما تعلّمه المساعد</div>
+            <div class="page-sub" id="t_learn_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="distillLearningsNow()" id="learnDistillBtn">↻ <span id="t_learn_distill">تلخيص الآن</span></button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">🌐 <span id="t_learn_general">الملخص العام</span></span><div class="card-actions" id="genActions"></div></div>
+          <div id="learnGeneralBody"><div class="empty sk">—</div></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><span class="card-title">🏠 <span id="t_learn_apt">ملخصات حسب الشقة</span></span></div>
+            <input id="learnSearch" placeholder="ابحث عن وحدة…" oninput="renderLearnings()" style="margin-bottom:10px">
+            <div id="learnAptList" style="max-height:520px;overflow-y:auto"><div class="empty sk">—</div></div>
+          </div>
+          <div class="card">
+            <div id="learnAptDetail"><div class="empty" id="t_learn_empty_sel">اختر شقة من القائمة</div></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ MORE (mobile only) ============ -->
       <section class="view" id="view_more">
         <div class="page-head"><div><div class="page-title">المزيد</div></div></div>
@@ -3348,7 +3375,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', log:'النشاط', more:'المزيد',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد',
+    learn_title:'📚 ما تعلّمه المساعد',
+    learn_sub:'الملخصات اللي استخلصها النظام من ردود فريقك — تقدر تعدّل أو تحذف',
+    learn_general:'الملخص العام (يطبّق على كل الشقق)', learn_apt:'ملخصات حسب الشقة',
+    learn_empty:'ما فيه ملخص بعد · يحتاج تفاعلات أكثر',
+    learn_empty_sel:'اختر شقة من اليمين لمشاهدة ملخصها',
+    learn_distill:'تلخيص الآن', learn_edit:'تعديل', learn_forget:'حذف', learn_save:'حفظ', learn_cancel:'إلغاء',
+    learn_last:'آخر تلخيص', learn_examples:'تفاعل', learn_search:'ابحث عن وحدة…',
+    learn_no_apt:'ما فيه شقق فيها ملخص حالياً', learn_confirm_forget:'تحذف الملخص نهائياً؟',
+    learn_saved:'تم الحفظ ✅', learn_distilling:'يلخّص الآن… ممكن ياخذ ٣٠ ثانية',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
     today_h:'اليوم', today_date_sub:'',
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
@@ -3403,7 +3439,16 @@ const T = {
     units_count:'وحدة'
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', log:'Activity', more:'More',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More',
+    learn_title:'📚 What the assistant has learned',
+    learn_sub:"Summaries the system distilled from your team's replies — you can edit or delete",
+    learn_general:'General summary (applies to every unit)', learn_apt:'Per-apartment summaries',
+    learn_empty:'No summary yet · needs more interactions',
+    learn_empty_sel:'Pick an apartment on the right to view its summary',
+    learn_distill:'Distill now', learn_edit:'Edit', learn_forget:'Delete', learn_save:'Save', learn_cancel:'Cancel',
+    learn_last:'Last distill', learn_examples:'interactions', learn_search:'Search unit…',
+    learn_no_apt:'No apartments with summaries yet', learn_confirm_forget:'Delete this summary?',
+    learn_saved:'Saved ✅', learn_distilling:'Distilling now… may take 30s',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
     today_h:'Today', today_date_sub:'',
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
@@ -3511,6 +3556,8 @@ function applyLang(){
     t_strat:'strat', t_strat_sub:'strat_sub',
     t_rev:'rev', t_rev_sub:'rev_sub', t_rev_month:'rev_month', t_rev_sal:'rev_sal', t_rev_units:'rev_units',
     t_log:'log', t_log_sub:'log_sub',
+    t_learn:'learn_title', t_learn_sub:'learn_sub', t_learn_distill:'learn_distill',
+    t_learn_general:'learn_general', t_learn_apt:'learn_apt',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -3534,6 +3581,7 @@ const NAV = [
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'rev',     ic:'∿', tk:'rev'},
+  {id:'learn',   ic:'📚', tk:'learn'},
   {id:'log',     ic:'≡', tk:'log'}
 ];
 const MNAV = [
@@ -3611,6 +3659,7 @@ function go(id){
   if(id==='rev' && (!D.rev || D.rev.loading)) loadRevenue();
   if(id==='log') renderLog();
   if(id==='inbox') { renderInbox(); populateUnitFilter() }
+  if(id==='learn') loadLearnings();
 }
 
 /* ============================================================
@@ -4236,6 +4285,135 @@ function renderLog(){
   body.innerHTML = items.map(function(e){
     return '<div class="log-row"><div class="log-lic">'+(ic[e.cat]||'·')+'</div><div class="log-lts">'+esc(shortTime(e.ts))+'</div><div class="log-ltxt">'+esc(e.text)+'</div></div>';
   }).join('');
+}
+
+/* ============================================================
+   LEARNINGS — view, edit, forget, distill-now
+   ============================================================ */
+let learnSelectedLid = null;
+let learnEditingGeneral = false;
+let learnEditingApt = false;
+
+async function loadLearnings(){
+  const list = document.getElementById('learnAptList');
+  if(list) list.innerHTML = '<div class="empty sk">—</div>';
+  try{ D.learn = await api('/api/learning/summary') }catch(_){ D.learn = {} }
+  // sync sub copy
+  const sub = document.getElementById('t_learn_sub'); if(sub) sub.textContent = t().learn_sub;
+  const eSel = document.getElementById('t_learn_empty_sel'); if(eSel) eSel.textContent = t().learn_empty_sel;
+  renderLearnings();
+}
+
+function _fmtDistillTime(ts){
+  if(!ts) return '—';
+  try{ return new Date(ts*1000).toLocaleString(L==='ar'?'ar-SA':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) }
+  catch(_){ return '—' }
+}
+
+function renderLearnings(){
+  const d = D.learn || {};
+  // ---- general ----
+  const gen = d.general || {};
+  const genBody = document.getElementById('learnGeneralBody');
+  const genActs = document.getElementById('genActions');
+  if(learnEditingGeneral){
+    genBody.innerHTML = '<textarea id="learnGenTa" style="min-height:200px;width:100%;line-height:1.7">'+esc(gen.summary||'')+'</textarea>';
+    genActs.innerHTML = '<button class="btn ghost sm" onclick="learnEditingGeneral=false;renderLearnings()">✕ '+t().learn_cancel+'</button>'
+      + '<button class="btn primary sm" onclick="saveGeneralSummary()">💾 '+t().learn_save+'</button>';
+  }else if(gen.summary){
+    genBody.innerHTML = '<div style="white-space:pre-wrap;line-height:1.75;font-size:13px">'+esc(gen.summary)+'</div>'
+      + '<div class="muted" style="margin-top:10px;font-size:11px">⏱ '+t().learn_last+': '+_fmtDistillTime(gen.last_distilled)+' · '+(gen.examples_count||0)+' '+t().learn_examples+'</div>';
+    genActs.innerHTML = '<button class="btn ghost sm" onclick="learnEditingGeneral=true;renderLearnings()">✎ '+t().learn_edit+'</button>'
+      + '<button class="btn red sm" onclick="forgetLearning(&#39;general&#39;,null)">🗑 '+t().learn_forget+'</button>';
+  }else{
+    genBody.innerHTML = '<div class="empty">'+t().learn_empty+'</div>';
+    genActs.innerHTML = '<button class="btn ghost sm" onclick="learnEditingGeneral=true;renderLearnings()">✎ '+t().learn_edit+'</button>';
+  }
+
+  // ---- apartments list ----
+  const apts = d.apartments || [];
+  const q = (document.getElementById('learnSearch')||{}).value || '';
+  const filtered = q ? apts.filter(function(a){return (a.unit||'').toLowerCase().indexOf(q.toLowerCase())>=0}) : apts;
+  const listEl = document.getElementById('learnAptList');
+  if(!filtered.length){
+    listEl.innerHTML = '<div class="empty">'+t().learn_no_apt+'</div>';
+  }else{
+    listEl.innerHTML = filtered.map(function(a){
+      const on = learnSelectedLid === a.lid ? ' style="background:var(--gold-tint);border-radius:6px"' : '';
+      return '<div class="list-row" onclick="selectLearnApt('+a.lid+')" style="cursor:pointer;padding:9px 10px"'+on+'>'
+        + '<span class="l-name">'+esc(a.unit||('unit-'+a.lid))+'</span>'
+        + '<span class="l-tag muted">'+(a.examples_count||0)+'</span>'
+        + '</div>';
+    }).join('');
+  }
+
+  // ---- selected apartment ----
+  renderLearnAptDetail();
+}
+
+function selectLearnApt(lid){
+  learnSelectedLid = lid;
+  learnEditingApt = false;
+  renderLearnings();
+}
+
+function renderLearnAptDetail(){
+  const el = document.getElementById('learnAptDetail');
+  if(!el) return;
+  const apts = (D.learn||{}).apartments || [];
+  const apt = apts.find(function(a){return a.lid === learnSelectedLid});
+  if(!apt){
+    el.innerHTML = '<div class="empty">'+t().learn_empty_sel+'</div>';
+    return;
+  }
+  if(learnEditingApt){
+    el.innerHTML = '<div class="card-head"><span class="card-title">'+esc(apt.unit||'')+'</span>'
+      + '<div class="card-actions">'
+        + '<button class="btn ghost sm" onclick="learnEditingApt=false;renderLearnings()">✕ '+t().learn_cancel+'</button>'
+        + '<button class="btn primary sm" onclick="saveAptSummary('+apt.lid+')">💾 '+t().learn_save+'</button>'
+      + '</div></div>'
+      + '<textarea id="learnAptTa" style="min-height:340px;width:100%;line-height:1.7">'+esc(apt.summary||'')+'</textarea>';
+  }else{
+    el.innerHTML = '<div class="card-head"><span class="card-title">'+esc(apt.unit||'')+'</span>'
+      + '<div class="card-actions">'
+        + '<button class="btn ghost sm" onclick="learnEditingApt=true;renderLearnings()">✎ '+t().learn_edit+'</button>'
+        + '<button class="btn red sm" onclick="forgetLearning(&#39;apartment&#39;,'+apt.lid+')">🗑 '+t().learn_forget+'</button>'
+      + '</div></div>'
+      + '<div style="white-space:pre-wrap;line-height:1.75;font-size:13px;max-height:540px;overflow-y:auto">'+esc(apt.summary||'')+'</div>'
+      + '<div class="muted" style="margin-top:10px;font-size:11px">⏱ '+t().learn_last+': '+_fmtDistillTime(apt.last_distilled)+' · '+(apt.examples_count||0)+' '+t().learn_examples+'</div>';
+  }
+}
+
+async function saveGeneralSummary(){
+  const ta = document.getElementById('learnGenTa');
+  if(!ta) return;
+  const r = await post('/api/learning/edit', {scope:'general', summary:ta.value});
+  if(r.ok){ toast(t().learn_saved); learnEditingGeneral=false; loadLearnings(); }
+  else toast(r.error || t().err);
+}
+async function saveAptSummary(lid){
+  const ta = document.getElementById('learnAptTa');
+  if(!ta) return;
+  const r = await post('/api/learning/edit', {scope:'apartment', lid:lid, summary:ta.value});
+  if(r.ok){ toast(t().learn_saved); learnEditingApt=false; loadLearnings(); }
+  else toast(r.error || t().err);
+}
+async function forgetLearning(scope, lid){
+  if(!confirm(t().learn_confirm_forget)) return;
+  const body = {scope:scope}; if(lid) body.lid = lid;
+  const r = await post('/api/learning/forget', body);
+  if(r.ok){
+    if(scope==='apartment' && lid===learnSelectedLid) learnSelectedLid = null;
+    loadLearnings();
+  } else toast(r.error || t().err);
+}
+async function distillLearningsNow(){
+  const btn = document.getElementById('learnDistillBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳'; }
+  toast(t().learn_distilling);
+  try{ await post('/api/learning/distill', {}); }catch(_){}
+  await loadLearnings();
+  if(btn){ btn.disabled = false; btn.innerHTML = '↻ '+t().learn_distill; }
 }
 
 /* ============================================================
@@ -5008,6 +5186,45 @@ async def _api_learning_distill_now(request):
                   "apartments_with_summary": len(_apartment_learnings),
                   "general_examples": _general_learnings.get("examples_count", 0)})
 
+async def _api_learning_edit(request):
+    """POST {scope:'apartment'|'general', lid?, summary} — directly overwrite
+    a distilled summary. Useful when the owner wants to add a fact the bot
+    hasn't learned yet, or fix something the distiller got wrong. The edited
+    summary sticks until the next distill — which only fires when there are
+    new examples — so an edit is effectively permanent unless real new traffic
+    overwrites it."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    scope = (b.get("scope") or "").strip()
+    summary = (b.get("summary") or "").strip()
+    if scope == "general":
+        _general_learnings["summary"] = summary
+        _general_learnings["last_distilled"] = time.time()
+        if not _general_learnings.get("examples_count"):
+            _general_learnings["examples_count"] = 1   # mark as set
+        log_event("guest", "تعديل يدوي للملخص العام")
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": True})
+    if scope == "apartment":
+        try:
+            lid = int(b.get("lid"))
+        except Exception:
+            return _json({"error": "bad lid"}, 400)
+        existing = _apartment_learnings.get(lid) or {}
+        unit_name = existing.get("unit") or next(
+            (u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+        _apartment_learnings[lid] = {
+            "summary": summary,
+            "last_distilled": time.time(),
+            "examples_count": existing.get("examples_count") or 1,
+            "unit": unit_name,
+        }
+        log_event("guest", f"تعديل يدوي لملخص {unit_name}")
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": True})
+    return _json({"error": "scope must be apartment|general"}, 400)
+
 @tasks.loop(minutes=DASH_REFRESH_MIN)
 async def dashboard_cache_loop():
     """Pre-compute heavy analytics in the background so the dashboard serves instantly."""
@@ -5067,6 +5284,7 @@ async def start_web_server():
         app.router.add_get("/api/learning/log", _api_learning_log)
         app.router.add_post("/api/learning/forget", _api_learning_forget)
         app.router.add_post("/api/learning/distill", _api_learning_distill_now)
+        app.router.add_post("/api/learning/edit", _api_learning_edit)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
