@@ -1307,9 +1307,59 @@ def _nightly_from(listing_id):
         print(f"price fetch error ({listing_id}):", e)
         return None
 
+def _extract_amenities(L):
+    """Pull a list of human-readable amenity names from a Hostaway listing object.
+    Hostaway uses different shapes across endpoints (listingAmenities / amenities /
+    amenityIds) — try the common ones, skip blanks."""
+    out = []
+    for key in ("listingAmenities", "amenities", "listing_amenities"):
+        for a in (L.get(key) or []):
+            if isinstance(a, dict):
+                n = a.get("amenityName") or a.get("name") or a.get("amenity")
+                if n: out.append(str(n).strip())
+            elif isinstance(a, str) and a.strip():
+                out.append(a.strip())
+    # dedupe, preserve order
+    seen, dedup = set(), []
+    for a in out:
+        k = a.lower()
+        if k not in seen:
+            seen.add(k); dedup.append(a)
+    return dedup
+
+# Common amenity keywords -> normalized tag we can match guest hints against
+_AMENITY_TAGS = {
+    "wifi": ["wifi", "wi-fi", "internet", "واي فاي", "واي-فاي", "انترنت", "إنترنت"],
+    "pool": ["pool", "swimming", "مسبح", "حمام سباحه", "حمام سباحة"],
+    "parking": ["parking", "garage", "موقف", "باركن", "موقف خاص", "موقف سيارات"],
+    "kitchen": ["kitchen", "kitchenette", "مطبخ"],
+    "balcony": ["balcony", "terrace", "patio", "بلكون", "بلكونة", "تراس"],
+    "smoking": ["smoking", "smoking allowed", "تدخين", "مسموح التدخين"],
+    "gym": ["gym", "fitness", "جيم", "نادي رياضي", "صالة رياضية"],
+    "elevator": ["elevator", "lift", "مصعد"],
+    "washer": ["washer", "washing machine", "غسالة", "غسالة ملابس"],
+    "ac": ["air conditioning", "ac", "تكييف", "مكيف"],
+    "family": ["family-friendly", "kid friendly", "child friendly", "عائلي", "مناسب للعوائل"],
+    "workspace": ["workspace", "desk", "مكتب", "غرفة مكتب"],
+}
+
+def _amenity_tags(amenity_names):
+    """Reduce raw amenity strings to a normalized tag set (wifi/pool/parking/...)."""
+    blob = " ; ".join(amenity_names).lower()
+    tags = set()
+    for tag, kws in _AMENITY_TAGS.items():
+        if any(kw in blob for kw in kws):
+            tags.add(tag)
+    return sorted(tags)
+
 def load_catalog(force=False):
     """Build a units catalog from Hostaway listings (cached 1h). Used to suggest alternatives.
-    Skips inactive/unlisted listings (the red 🚫)."""
+    Skips inactive/unlisted listings (the red 🚫).
+
+    For each active unit we pull: name, bedrooms, bathrooms, max guests, area,
+    starting price, Airbnb link, raw amenity list + normalized tag set
+    (wifi/pool/parking/...). The richer set powers smarter matching in
+    enrich_catalog_for_dates() and clearer suggestion blurbs in claude_draft()."""
     global _catalog_text, _catalog_ts, _catalog_units
     if not force and _catalog_text and (time.time() - _catalog_ts) < 3600:
         return
@@ -1326,24 +1376,35 @@ def load_catalog(force=False):
                     print(f"  catalog SKIP (inactive): {name} · status={L.get('status')!r}")
                 continue
             beds = L.get("bedroomsNumber")
+            baths = L.get("bathroomsNumber")
+            capacity = L.get("personCapacity") or L.get("guestsIncluded") or L.get("maxGuests")
             area = (L.get("city") or L.get("address") or "").strip()
+            neighbourhood = (L.get("neighbourhood") or L.get("neighborhood") or "").strip()
+            ptype = (L.get("propertyTypeName") or L.get("propertyType") or "").strip()
             price = (_nightly_from(L.get("id")) if CATALOG_CALENDAR_PRICES else None) or L.get("price")
             link = _airbnb_link(L)
+            amen_raw = _extract_amenities(L)
+            tags = _amenity_tags(amen_raw)
             parts = [name]
-            if beds:
-                parts.append(f"{beds} غرفة نوم")
-            if area:
-                parts.append(area)
-            if price:
-                parts.append(f"تبدأ من ~{round(price)} ر.س/الليلة")
-            if link:
-                parts.append(link)
+            if beds:    parts.append(f"{beds} غرفة نوم")
+            if baths:   parts.append(f"{baths} حمام")
+            if capacity:parts.append(f"يستوعب {capacity}")
+            if ptype:   parts.append(ptype)
+            if area or neighbourhood:
+                parts.append((neighbourhood + " · " + area).strip(" ·"))
+            if price:   parts.append(f"تبدأ من ~{round(price)} ر.س/الليلة")
+            if tags:    parts.append("مرافق: " + ", ".join(tags))
+            if link:    parts.append(link)
             rows.append(" · ".join(parts))
-            units.append({"id": L.get("id"), "name": name, "beds": beds, "area": area,
-                          "price": round(price) if price else None, "link": link})
+            units.append({"id": L.get("id"), "name": name, "beds": beds,
+                          "baths": baths, "capacity": capacity,
+                          "area": area, "neighbourhood": neighbourhood, "ptype": ptype,
+                          "price": round(price) if price else None,
+                          "link": link, "amenities": amen_raw[:30], "tags": tags})
             if CATALOG_DEBUG:
-                print(f"  catalog OK: {name} · status={L.get('status')!r} · link={'yes' if link else 'no'}")
-        _catalog_text = "\n".join(rows)[:6000]
+                print(f"  catalog OK: {name} · beds={beds} · cap={capacity} · "
+                      f"tags={','.join(tags)} · link={'y' if link else 'n'}")
+        _catalog_text = "\n".join(rows)[:8000]
         _catalog_units = units
         _catalog_ts = time.time()
         print(f"catalog: loaded {len(rows)} active units (skipped {skipped} inactive)")
@@ -1389,36 +1450,101 @@ def unit_availability_price(listing_id, checkin, checkout):
     _bounded_cache_put(_avail_cache, key, (result, time.time()), _AVAIL_CACHE_MAX)
     return result
 
-def enrich_catalog_for_dates(checkin, checkout, exclude_id=None):
-    """Build a catalog block that marks live availability + real total for the guest's
-    dates. Caps how many units we date-check (INTEL_MAX_CHECKS) to stay light. Units
-    beyond the cap (or with unknown calendars) just show the 'starting from' price."""
+def _unit_match_score(u, want):
+    """Score a unit against a desired-criteria dict so we date-check the most-likely
+    matches FIRST. `want` keys: beds, capacity, area, tags (set of normalized tags).
+    Score is purely a sort key; nothing is filtered out."""
+    s = 0
+    if want.get("beds") and u.get("beds"):
+        diff = abs(int(u["beds"]) - int(want["beds"]))
+        s += max(0, 10 - diff * 4)            # exact = +10, off by 1 = +6, etc.
+    if want.get("capacity") and u.get("capacity"):
+        if int(u["capacity"]) >= int(want["capacity"]):
+            s += 5
+    if want.get("area"):
+        a = (want["area"] or "").lower()
+        if a and a in ((u.get("area") or "") + " " + (u.get("neighbourhood") or "")).lower():
+            s += 6
+    wtags = set(want.get("tags") or [])
+    if wtags:
+        match = wtags & set(u.get("tags") or [])
+        s += 4 * len(match)
+    if u.get("price"):
+        s += 1     # prefer units we actually know the price of
+    if u.get("link"):
+        s += 1
+    return s
+
+def enrich_catalog_for_dates(checkin, checkout, exclude_id=None, want=None):
+    """Build a catalog block annotated with live availability + real total for the
+    guest's dates. If `want` is provided (criteria the guest mentioned), we sort
+    candidates by relevance first so the most-likely matches get the real-time
+    calendar lookup (and the irrelevant ones still show 'starting from')."""
     if not _catalog_units or not checkin or not checkout:
         return _catalog_text
+    want = want or {}
+    # Rank candidates so the limited INTEL_MAX_CHECKS budget goes to the best matches.
+    ranked = sorted(
+        [u for u in _catalog_units if u.get("id") and u["id"] != exclude_id],
+        key=lambda u: -_unit_match_score(u, want),
+    )
     lines, checked = [], 0
-    for u in _catalog_units:
+    for u in ranked:
         base = [u["name"]]
-        if u.get("beds"):
-            base.append(f"{u['beds']} غرفة نوم")
-        if u.get("area"):
-            base.append(u["area"])
+        if u.get("beds"):     base.append(f"{u['beds']} غرفة نوم")
+        if u.get("baths"):    base.append(f"{u['baths']} حمام")
+        if u.get("capacity"): base.append(f"يستوعب {u['capacity']}")
+        loc = " · ".join(filter(None, [u.get("neighbourhood"), u.get("area")])).strip(" ·")
+        if loc: base.append(loc)
         info = None
-        if checked < INTEL_MAX_CHECKS and u.get("id") and u["id"] != exclude_id:
+        if checked < INTEL_MAX_CHECKS:
             info = unit_availability_price(u["id"], checkin, checkout)
             checked += 1
         if info and info.get("total") is not None:
             tag = "✅ متاحة لتواريخه" if info["available"] else "❌ غير متاحة لتواريخه"
-            base.append(f"{tag} · {info['nights']} ليالي ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة)")
+            base.append(f"{tag} · {info['nights']} ليلة ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة)")
         elif info and info.get("available") is True:
             base.append("✅ متاحة لتواريخه")
         elif info and info.get("available") is False:
             base.append("❌ غير متاحة لتواريخه")
         elif u.get("price"):
             base.append(f"تبدأ من ~{u['price']} ر.س/الليلة")
-        if u.get("link"):
-            base.append(u["link"])
+        if u.get("tags"):  base.append("مرافق: " + ", ".join(u["tags"]))
+        if u.get("link"):  base.append(u["link"])
         lines.append(" · ".join(base))
-    return "\n".join(lines)[:6500]
+    return "\n".join(lines)[:8000]
+
+def _criteria_from_text(text):
+    """Heuristic: pull what the guest seems to want from a short inquiry.
+    Returns {beds, capacity, area, tags}. All optional. Used to rank suggestions."""
+    t = (text or "").lower()
+    want = {}
+    # bedrooms
+    bed_words = {1: ["غرفة وحدة", "وحدة وحدة", "غرفة واحدة", "studio", "استوديو", "1br", "1 br", "1-bedroom", "غرفه واحده"],
+                 2: ["غرفتين", "غرفتان", "2br", "2 br", "two bedroom", "two-bedroom"],
+                 3: ["ثلاث غرف", "ثلاث غرفة", "3br", "3 br", "three bedroom", "three-bedroom"],
+                 4: ["اربع غرف", "أربع غرف", "4br", "4 br", "four bedroom"]}
+    for n, words in bed_words.items():
+        if any(w in t for w in words):
+            want["beds"] = n; break
+    # capacity
+    m = re.search(r"(?:عدد|كم|نحن|احنا|نكون)?\s*(\d{1,2})\s*(?:شخص|اشخاص|أشخاص|ضيف|ضيوف|persons?|people|guests?)", t)
+    if m:
+        try: want["capacity"] = int(m.group(1))
+        except: pass
+    # area hints (Riyadh neighbourhoods)
+    for area in ["الملقا", "النرجس", "العارض", "النفل", "حطين", "الياسمين", "الربيع",
+                 "قرطبة", "العقيق", "القيروان", "التعاون", "عرقه", "الماجدية", "الملقى",
+                 "malqa", "narjis", "qurtuba", "yasmin", "rabie"]:
+        if area in t:
+            want["area"] = area; break
+    # amenity tags
+    tags = set()
+    for tag, kws in _AMENITY_TAGS.items():
+        if any(kw in t for kw in kws):
+            tags.add(tag)
+    if tags: want["tags"] = list(tags)
+    return want
 
 # Hints that the guest is asking about a different unit, availability, or a feature
 # (any of these injects the units catalog so the bot SUGGESTS instead of escalating).
@@ -1484,26 +1610,61 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             own_price_line = (f"\nوحدة الضيف ({unit}) "
                               f"{'متاحة' if info['available'] else 'غير متاحة'} لتواريخه.")
     # ---- alternatives: use a live-availability catalog when we know the dates ----
-    if want_catalog and dates and dates[0]:
-        catalog_data = enrich_catalog_for_dates(dates[0], dates[1], exclude_id=listing_id)
-        avail_note = ("- التواريخ معروفة، فالقائمة تبيّن التوفّر الفعلي ✅/❌ والإجمالي الحقيقي لتواريخه. "
-                      "اقترح فقط الوحدات المعلّمة ✅ متاحة، واذكر الإجمالي المبيّن. لا تقترح وحدة ❌.\n")
+    want = _criteria_from_text(history_text) if want_catalog else {}
+    has_dates = bool(dates and dates[0] and dates[1])
+    knows_what = bool(want.get("beds") or want.get("capacity") or want.get("area") or want.get("tags"))
+    must_ask = want_catalog and (not has_dates or not knows_what)
+
+    if want_catalog and has_dates:
+        catalog_data = enrich_catalog_for_dates(dates[0], dates[1], exclude_id=listing_id, want=want)
+        avail_note = ("- التواريخ معروفة. القائمة فوق مرتّبة حسب الأقرب لطلب الضيف، وتبيّن التوفّر الفعلي "
+                      "✅/❌ والإجمالي الحقيقي لتواريخه. **اقترح فقط الوحدات ✅ المتاحة** واذكر الإجمالي "
+                      "والمتوسط/الليلة كما هو. لا تقترح وحدة ❌.\n")
     else:
         catalog_data = _catalog_text
         avail_note = ("- إنت ما تعرف التوفّر المباشر لتواريخه — اعرض الخيارات ووجّهه يتأكد ويحجز من رابط "
                       "Airbnb. **السؤال عن التوفّر مو سبب للتصعيد إطلاقاً**.\n")
+
+    # Build a tiny "what we already know about this guest" line so the bot doesn't re-ask.
+    known_bits = []
+    if has_dates: known_bits.append(f"التواريخ: {dates[0]} → {dates[1]}")
+    if want.get("beds"): known_bits.append(f"عدد الغرف المطلوب: {want['beds']}")
+    if want.get("capacity"): known_bits.append(f"عدد الضيوف: {want['capacity']}")
+    if want.get("area"): known_bits.append(f"المنطقة المفضّلة: {want['area']}")
+    if want.get("tags"): known_bits.append("مرافق مطلوبة: " + ", ".join(want["tags"]))
+    known_line = ("معلومات الضيف المستخلصة من المحادثة:\n- " + "\n- ".join(known_bits) + "\n\n") if known_bits else ""
+
+    # When the inquiry is short and we don't yet know dates/beds/capacity/area,
+    # force the bot to ASK first instead of dumping a catalog.
+    ask_block = ""
+    if must_ask:
+        missing = []
+        if not has_dates: missing.append("التواريخ (الوصول والمغادرة)")
+        if not want.get("beds") and not want.get("capacity"): missing.append("عدد الضيوف أو عدد الغرف")
+        if not want.get("area"): missing.append("الحي/المنطقة المفضّلة (أو لا يهم)")
+        ask_block = (
+            "⚠️ المهمّة الأولى الآن: قبل ما تقترح أي وحدة، اسأل الضيف عن: "
+            + " · ".join(missing) + ". "
+            "اسأل بأسلوب لطيف ومختصر (سؤال أو سؤالين بحد أقصى)، ولا تقترح وحدات بعد لأن "
+            "أي اقتراح بدون هالمعلومات بيكون عشوائي. لو الضيف قال 'لا يهم' أو 'أي شي' لشي منهم، "
+            "اعتبره معروف وكمّل بالاقتراح. action لازم يكون 'reply' (يراجعه إنسان).\n\n"
+        )
+
     catalog_block = (
-        "قائمة وحدات عوجا للاقتراح عند طلب بديل أو سؤال عن التوفّر:\n" + catalog_data + "\n\n"
-        "تعليمات الاقتراح:\n"
-        "- أول ما يطلب شقة/وحدة ثانية أو بديل أو يسأل (فيه وحده متاحه؟ / عندكم شي فاضي؟): اسأله بلطف "
-        "عن اللي يبيه (أي حي، كم غرفة، وش المهم له) إلا إذا قالها، وبعدها اقترح طول.\n"
-        "- طابق من القائمة واقترح 1-3 خيارات. لكل خيار: الاسم، عدد الغرف، المنطقة، السعر، ورابط Airbnb "
-        "لو موجود. لا تخترع رابط أو تفاصيل.\n"
-        "- لو ما فيه مطابق تماماً، اقترح أقرب خيار ووضّح الفروقات بصراحة.\n"
+        known_line + ask_block +
+        "قائمة وحدات عوجا للاقتراح:\n" + catalog_data + "\n\n"
+        "تعليمات الاقتراح (لما تكون جاهز):\n"
+        "- اقترح **٢-٣ خيارات بالضبط**، أفضل ما يطابق طلب الضيف.\n"
+        "- لكل خيار اذكر بالترتيب: الاسم · عدد الغرف · عدد الحمامات · سعة الضيوف · المنطقة "
+        "(الحي + المدينة) · الإجمالي الحقيقي لتواريخه (لا تذكر فقط 'تبدأ من' لما يكون الإجمالي معروف) "
+        "· رابط Airbnb للحجز المباشر. لا تخترع رابط أو رقم.\n"
+        "- لو فيه مرافق مطلوبة (مسبح، باركن، تدخين، بلكون...) أكّد أيها متوفر في كل خيار من قائمة "
+        "'مرافق:' المعطاة لك. لو غير متأكد من ميزة، قل بصراحة 'بتأكد من الفريق' وخلها 'reply'.\n"
+        "- لو ما فيه مطابق ١٠٠٪، اقترح أقرب خيار ووضّح الفروقات بصراحة (مثلاً: 'الأقرب لطلبك "
+        "غرفتين بدل ثلاث').\n"
         + avail_note +
-        "- ميزة مو متأكد منها (تدخين؟ بلكون؟) وما هي عندك بالمعلومات: اقترح أقرب الوحدات، وقل بصراحة "
-        "إنك بتتأكد من هالتفصيلة مع الفريق، وخلها رد (يراجعه إنسان). لا تخترع.\n"
-        "- إذا ذكرت سعر، أضف تنويه: الأسعار تقريبية وقبل الضريبة ورسوم المنصة.\n\n"
+        "- دائماً ختام: 'الأسعار تقريبية، قبل الضريبة ورسوم المنصة. التوفّر النهائي يتأكد من رابط "
+        "Airbnb عند الحجز.'\n\n"
         ) if want_catalog else ""
     user = (f"{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
             f"{status_line}\n{guide_line}{dates_line}{own_price_line}\n\n"
