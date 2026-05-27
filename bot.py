@@ -2469,14 +2469,29 @@ a{color:inherit;text-decoration:none;cursor:pointer}
 #app{display:none}
 .shell{display:grid;min-height:100vh;width:100%}
 
+/* Grid-areas decouple visual placement from HTML source order.
+   In RTL, CSS-grid auto-reverses columns, so "side main" puts the sidebar
+   on the user's right and the main content on the user's left automatically. */
+header.mhead{grid-area:head}
+main.main{grid-area:main}
+aside.side{grid-area:side}
+
 /* Desktop ≥ 1024 */
 @media (min-width:1024px){
-  html[dir="rtl"] .shell{grid-template-columns:1fr var(--side)}
-  html[dir="ltr"] .shell{grid-template-columns:var(--side) 1fr}
+  .shell{
+    grid-template-columns:var(--side) 1fr;
+    grid-template-rows:100vh;
+    grid-template-areas:"side main";
+  }
 }
 /* Tablet/Mobile */
 @media (max-width:1023px){
-  .shell{grid-template-rows:auto 1fr auto;padding-bottom:64px}
+  .shell{
+    grid-template-columns:1fr;
+    grid-template-rows:auto 1fr;
+    grid-template-areas:"head" "main";
+    padding-bottom:64px;
+  }
 }
 
 /* ============== SIDEBAR (desktop) ============== */
@@ -2679,10 +2694,13 @@ html[data-theme="dark"] .reasoning-box{background:rgba(109,88,194,.10)}
 /* ============== DRAWER (right side, for details) ============== */
 .drawer-backdrop{position:fixed;inset:0;background:rgba(26,24,21,.30);z-index:90;opacity:0;pointer-events:none;transition:.22s;backdrop-filter:blur(2px)}
 .drawer-backdrop.show{opacity:1;pointer-events:auto}
-.drawer{position:fixed;top:0;bottom:0;width:min(var(--drawer),100vw);background:var(--surface);box-shadow:var(--sh-drawer);z-index:91;display:flex;flex-direction:column;transition:transform .25s ease}
-html[dir="rtl"] .drawer{left:0;transform:translateX(-105%)}
-html[dir="ltr"] .drawer{right:0;transform:translateX(105%)}
-.drawer.open{transform:translateX(0)}
+/* Drawer always slides in from the END side (opposite of the sidebar):
+   right edge in LTR, left edge in RTL. inset-inline-end + a single transform
+   rule per direction keeps specificity even so .open always wins. */
+.drawer{position:fixed;top:0;bottom:0;inset-inline-end:0;width:min(var(--drawer),100vw);background:var(--surface);box-shadow:var(--sh-drawer);z-index:91;display:flex;flex-direction:column;transition:transform .25s ease;transform:translateX(110%)}
+html[dir="rtl"] .drawer{transform:translateX(-110%)}
+html[dir="ltr"] .drawer.open,
+html[dir="rtl"] .drawer.open{transform:translateX(0)}
 .drawer-head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
 .drawer-title{font-size:15px;font-weight:700;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis}
 .drawer-sub{font-size:11.5px;color:var(--mut);margin-top:2px}
