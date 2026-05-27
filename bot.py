@@ -698,7 +698,13 @@ def save_handled(s):
 handled = load_handled()
 
 # ---------------- Discord ----------------
+# message_content is a privileged intent (must also be enabled in the Discord Dev
+# Portal -> Bot -> Privileged Gateway Intents). Required so the assistant can
+# read knowledge-channel facts and detect the !ouja prefix commands. The portal
+# toggle is already on (knowledge facts are loading); declaring it here silences
+# the "Privileged message content intent is missing" warning on every startup.
 intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!ouja ", intents=intents)
 
 class CleaningDoneView(discord.ui.View):
@@ -4628,6 +4634,14 @@ async def start_web_server():
     await site.start()
     print(f"web server listening on :{WEB_PORT}  (webhook path: /hook/{WEBHOOK_SECRET})")
 
+def _as_int(v):
+    """Hostaway sometimes returns message/reservation IDs as strings; coerce safely.
+    Falsy or unparseable values become 0 so '<=' comparisons stay valid."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
 def _cohost_responded(esc):
     """True if a human teammate replied to the guest directly since the escalation —
     an outbound message NEWER than the trigger that we didn't send ourselves."""
@@ -4636,13 +4650,13 @@ def _cohost_responded(esc):
         return False
     try:
         msgs = sorted((api_get(f"/conversations/{cid}/messages").get("result") or []),
-                      key=lambda m: m.get("id", 0) or 0)
+                      key=lambda m: _as_int(m.get("id")))
     except Exception:
         return False
-    base = esc.get("last_msg_id", 0) or 0
+    base = _as_int(esc.get("last_msg_id"))
     acks = esc.get("acks", [])
     for m in msgs:
-        if (m.get("id", 0) or 0) <= base:
+        if _as_int(m.get("id")) <= base:
             continue                                   # not newer than the escalation trigger
         if _msg_is_inbound(m):
             continue                                   # guest's own message
