@@ -698,13 +698,16 @@ def save_handled(s):
 handled = load_handled()
 
 # ---------------- Discord ----------------
-# message_content is a privileged intent (must also be enabled in the Discord Dev
-# Portal -> Bot -> Privileged Gateway Intents). Required so the assistant can
-# read knowledge-channel facts and detect the !ouja prefix commands. The portal
-# toggle is already on (knowledge facts are loading); declaring it here silences
-# the "Privileged message content intent is missing" warning on every startup.
+# IMPORTANT: declaring intents.message_content=True requires the "Message
+# Content Intent" toggle to ALSO be ON in Discord Developer Portal -> Bot ->
+# Privileged Gateway Intents. If it's off, the bot crashes on connect with
+# `PrivilegedIntentsRequired`. The portal toggle is currently OFF for this
+# bot, so we stay on defaults and the startup warning is harmless (knowledge
+# facts continue to load fine because the bot's own posts to #knowledge —
+# including those added via the 🧠 Teach button — don't require the intent).
+# To silence the warning AND get full message-read powers, flip the portal
+# toggle on then re-add `intents.message_content = True` here.
 intents = discord.Intents.default()
-intents.message_content = True
 bot = commands.Bot(command_prefix="!ouja ", intents=intents)
 
 class CleaningDoneView(discord.ui.View):
