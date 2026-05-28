@@ -3634,6 +3634,31 @@ async def process_assistant_item(it, channel):
     _assistant_seen.add(it["message_id"])
     if not it["guest_text"]:
         return
+    # ---- Off-hours auto-acknowledgement ----
+    # If we're outside the team's working window AND we haven't already acked
+    # this conversation during the current off-hours, send a one-time "we'll
+    # respond when we're back" message so the guest isn't left in silence.
+    # The real draft still gets created and queued — the team handles it
+    # the moment they're back online.
+    if OFFHOURS_AUTOREPLY_ENABLED and not is_within_working_hours():
+        cid = it.get("conversation_id")
+        if cid and cid not in _offhours_acked_convos:
+            try:
+                back_at = next_work_start()
+                back_label_ar = back_at.strftime("%H:%M") + (" بكرة" if back_at.date() != datetime.now(TZ).date() else "")
+                back_label_en = back_at.strftime("%H:%M") + (" tomorrow" if back_at.date() != datetime.now(TZ).date() else "")
+                is_ar = _has_arabic(it.get("guest_text", ""))
+                ack = (f"حياك الله 🤍 الفريق غير متاح حالياً، نرجع لك بكامل التفاصيل الساعة "
+                       f"{back_label_ar}. لو في شي مستعجل اكتبه هنا وراح يكون أول شي نرد عليه."
+                       if is_ar else
+                       f"Hi 🤍 our team is offline right now and we'll get back to you at "
+                       f"{back_label_en} sharp. If it's urgent, write it here and it'll be the "
+                       f"first message we pick up.")
+                await asyncio.to_thread(send_guest_message, cid, ack, it.get("comm_type", "email"))
+                _offhours_acked_convos.add(cid)
+                log_event("guest", f"رسالة 'خارج ساعات العمل' · {it.get('guest','')} · {it.get('unit','')}")
+            except Exception as e:
+                print("offhours ack send error:", e)
     status = it.get("res_status") or await asyncio.to_thread(
         get_reservation_status, it.get("reservation_id"))
     confirmed = status in CONFIRMED_STATUSES
@@ -3839,6 +3864,37 @@ DEEPCLEAN_DEFAULT_LAST = os.environ.get("DEEPCLEAN_DEFAULT_LAST", "2026-04-27")
 DEEPCLEAN_AVOID_WD     = set(int(x) for x in os.environ.get("DEEPCLEAN_AVOID_WD", "3,4").split(",") if x.strip().isdigit())  # 3=Thu, 4=Fri
 DEEPCLEAN_CONFIRM_HOUR = int(os.environ.get("DEEPCLEAN_CONFIRM_HOUR", "21"))  # 9pm Riyadh
 CLEANING_TOKEN         = os.environ.get("CLEANING_TOKEN", "")   # public link gate
+
+# ---------------- Working hours / off-hours behavior ----------------
+# Team is active 11:00–01:30 (next day). Outside this window we:
+#   1) Stop counting SLA against the team
+#   2) Send a one-time "we're back at HOURS" auto-reply to the guest
+WORK_START_HOUR  = int(os.environ.get("WORK_START_HOUR", "11"))
+WORK_END_HOUR    = int(os.environ.get("WORK_END_HOUR", "25"))    # 25 == 1am next day (i.e. 24+1)
+WORK_END_MIN     = int(os.environ.get("WORK_END_MIN", "30"))     # 30 → 1:30 am
+OFFHOURS_AUTOREPLY_ENABLED = os.environ.get("OFFHOURS_AUTOREPLY_ENABLED", "1") in ("1","true","True","yes")
+_offhours_acked_convos = set()    # conversation_ids we already auto-replied to in the current off-hours window
+
+def is_within_working_hours(dt=None):
+    dt = dt or datetime.now(TZ)
+    h, m = dt.hour, dt.minute
+    minutes = h * 60 + m
+    start = WORK_START_HOUR * 60
+    end = WORK_END_HOUR * 60 + WORK_END_MIN
+    # If end > 24*60, the window wraps past midnight (e.g. 11:00 → 25:30 = 01:30 next day).
+    if end <= 24 * 60:
+        return start <= minutes < end
+    # wrapped window: working if minutes >= start  OR  minutes < (end - 24*60)
+    return minutes >= start or minutes < (end - 24 * 60)
+
+def next_work_start(dt=None):
+    """Return the next datetime when working hours resume."""
+    dt = dt or datetime.now(TZ)
+    today_start = dt.replace(hour=WORK_START_HOUR, minute=0, second=0, microsecond=0)
+    if dt < today_start:
+        return today_start
+    # Otherwise tomorrow's start
+    return today_start + timedelta(days=1)
 # lid (int) -> {last_done, next_scheduled, next_status, history:[{date,ts,notes}], notes}
 _deep_clean_state = {}
 
@@ -4551,9 +4607,12 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_clean_sub"></div>
           </div>
           <div class="page-tools">
+            <label class="btn ghost sm" style="cursor:pointer">📥 رفع CSV<input type="file" accept=".csv" onchange="uploadCleaningCSV(event)" style="display:none"></label>
             <button class="btn ghost sm" onclick="loadCleaning()">↻</button>
           </div>
         </div>
+
+        <div id="cleanImportResult" style="display:none"></div>
 
         <div class="kpis" id="cleanStats"></div>
 
@@ -5433,6 +5492,36 @@ async function cleanSetLast(lid){
   if(!date) return;
   const r = await post('/api/cleaning/set-last', {lid:lid, date:date});
   if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
+}
+
+async function uploadCleaningCSV(ev){
+  const file = ev.target.files && ev.target.files[0];
+  if(!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  toast('⏳ يستورد…');
+  let r;
+  try{
+    const resp = await fetch('/api/cleaning/import-csv?token=' + encodeURIComponent(tok()), {
+      method:'POST', body: fd
+    });
+    r = await resp.json();
+  }catch(e){ toast('خطأ'); return; }
+  ev.target.value = '';
+  const box = document.getElementById('cleanImportResult');
+  if(r.ok){
+    box.style.display = 'block';
+    box.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:rgba(14,158,95,.2)">'
+      + '<div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ تم الاستيراد</div>'
+      + '<div>طُبّق على <b>'+r.matched.length+'</b> وحدة</div>'
+      + (r.unmatched.length ? '<div class="muted" style="margin-top:8px">⚠ غير مطابقة ('+r.unmatched.length+'): '+r.unmatched.map(function(x){return esc(x.name)}).join('، ')+'</div>' : '')
+      + (r.no_date.length ? '<div class="muted" style="margin-top:8px">⚠ بدون تاريخ صحيح ('+r.no_date.length+'): '+r.no_date.map(function(x){return esc(x.name)}).join('، ')+'</div>' : '')
+      + '</div>';
+    loadCleaning();
+  }else{
+    box.style.display = 'block';
+    box.innerHTML = '<div class="card" style="background:var(--red-soft);border-color:rgba(196,67,67,.2);color:var(--red)">⚠ '+esc(r.error||'فشل الاستيراد')+'</div>';
+  }
 }
 
 // ============== CALENDAR (forward pace + bulk apply) ==============
@@ -7627,6 +7716,83 @@ async def _api_cleaning_reschedule(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+async def _api_cleaning_import_csv(request):
+    """POST multipart-form with field 'file' = a CSV with two columns: name,date.
+    Header row optional. Date format: YYYY-MM-DD (or DD/MM/YYYY also accepted).
+    Names are matched against listings by normalized comparison
+    (strip 'Ouja|', lower-case, collapse whitespace)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+        if not field or field.name != "file":
+            return _json({"error": "expected 'file' multipart field"}, 400)
+        raw = (await field.read()).decode("utf-8-sig", errors="ignore")
+    except Exception as e:
+        return _json({"error": f"upload error: {e}"}, 400)
+
+    import csv as _csv, io as _io
+    listings = get_listings_map() or {}
+    norm_to_lid = {norm_unit(name): lid for lid, name in listings.items()}
+    rows = list(_csv.reader(_io.StringIO(raw)))
+    if not rows:
+        return _json({"error": "empty CSV"}, 400)
+    # Skip the header row if first row's "date" cell doesn't parse as a date
+    start = 0
+    if rows[0]:
+        test_date = (rows[0][-1] or "").strip()
+        if not _parse_any_date(test_date):
+            start = 1
+
+    matched, unmatched, no_date = [], [], []
+    for r in rows[start:]:
+        if not r or len(r) < 2:
+            continue
+        raw_name = (r[0] or "").strip()
+        raw_date = (r[-1] or "").strip()
+        if not raw_name:
+            continue
+        d = _parse_any_date(raw_date)
+        if not d:
+            no_date.append({"name": raw_name, "raw_date": raw_date})
+            continue
+        n = norm_unit(raw_name)
+        lid = norm_to_lid.get(n)
+        if not lid:
+            # fuzzy fallback: contains-match
+            for k, v in norm_to_lid.items():
+                if n and (n in k or k in n) and len(n) >= 3:
+                    lid = v
+                    break
+        if not lid:
+            unmatched.append({"name": raw_name})
+            continue
+        if lid not in _deep_clean_state:
+            _dc_init(lid)
+        _deep_clean_state[lid]["last_done"] = d.isoformat()
+        _deep_clean_state[lid]["next_scheduled"] = None
+        _deep_clean_state[lid]["next_status"] = "unscheduled"
+        matched.append({"lid": lid, "name": listings[lid], "date": d.isoformat()})
+    await asyncio.to_thread(persist_state)
+    # rerun scheduler so the new dates flow into next_scheduled
+    await asyncio.to_thread(schedule_deep_cleans)
+    log_event("pricing", f"تنظيف عميق · استورد {len(matched)} وحدة من CSV "
+                          f"(غير مطابقة: {len(unmatched)}, بدون تاريخ: {len(no_date)})")
+    return _json({"ok": True, "matched": matched, "unmatched": unmatched, "no_date": no_date})
+
+def _parse_any_date(s):
+    """Tolerant date parser: accepts YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, MM/DD/YYYY."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s[:10], fmt).date()
+        except Exception:
+            pass
+    return None
+
 async def _api_cleaning_set_last(request):
     """POST {lid, date} — set last_done (used to import the April 27 baseline file)."""
     if not _dash_auth(request):
@@ -8067,6 +8233,7 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/mark-done", _api_cleaning_mark_done)
         app.router.add_post("/api/cleaning/reschedule", _api_cleaning_reschedule)
         app.router.add_post("/api/cleaning/set-last", _api_cleaning_set_last)
+        app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
         app.router.add_get("/cleaning", _handle_cleaning_page)
         app.router.add_get("/api/cleaning/public", _api_cleaning_public)
@@ -8218,6 +8385,12 @@ async def deepclean_confirm_loop():
         await asyncio.to_thread(confirm_tomorrow_deepcleans)
     except Exception as e:
         print("deepclean_confirm_loop error:", e)
+
+@tasks.loop(time=dt_time(hour=WORK_START_HOUR, tzinfo=TZ))
+async def offhours_ack_reset_loop():
+    """At the start of every working day, clear the set of conversations that already
+    got an off-hours auto-ack so they can be re-acked next time we go offline."""
+    _offhours_acked_convos.clear()
 
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
@@ -9065,6 +9238,8 @@ async def on_ready():
         deepclean_schedule_loop.start()
     if DEEPCLEAN_ENABLED and not deepclean_confirm_loop.is_running():
         deepclean_confirm_loop.start()
+    if not offhours_ack_reset_loop.is_running():
+        offhours_ack_reset_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
