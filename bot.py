@@ -5580,8 +5580,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
               <div style="font-weight:600;margin-bottom:10px;font-size:13px">➕ أضف ديب كلين بتاريخ محدد</div>
               <div class="muted" style="font-size:11.5px;margin-bottom:10px">للشقق الجديدة بعد التشطيب. لو في شقة باليوم نفسه، تتأجل لليوم الي بعده تلقائياً</div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <select id="dcInsertLid" style="flex:1;min-width:200px;padding:7px 10px;height:36px;font-size:13px"></select>
-                <input id="dcInsertDate" type="date" style="width:170px;padding:7px 10px;height:36px;font-size:13px">
+                <select id="dcInsertLid" style="flex:1;min-width:200px;padding:7px 10px;height:38px;font-size:13px"></select>
+                <input type="hidden" id="dcInsertDate">
+                <button id="dcInsertDate_lbl" onclick="openDatePicker('dcInsertDate','اختر تاريخ الإضافة')" style="background:var(--surface);border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:0 14px;height:38px;font-size:13px;font-weight:600;cursor:pointer;min-width:170px;text-align:center">📅 اختر التاريخ</button>
                 <button class="btn primary sm" onclick="cleanInsertAt()">➕ أضف</button>
               </div>
             </div>
@@ -5590,9 +5591,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
               <div style="font-weight:600;margin-bottom:10px;font-size:13px">🔄 إعادة جدولة كل الشقق من تاريخ</div>
               <div class="muted" style="font-size:11.5px;margin-bottom:10px">تمسح كل المواعيد المجدولة وتعيد توزيعها يومياً بدءاً من التاريخ المختار (الأقدم تنظيفاً أولاً). الشقق الموقفة ما تتأثر</div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <input id="dcResetDate" type="date" style="width:170px;padding:7px 10px;height:36px;font-size:13px">
+                <input type="hidden" id="dcResetDate">
+                <button id="dcResetDate_lbl" onclick="openDatePicker('dcResetDate','اختر تاريخ البداية')" style="background:var(--surface);border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:0 14px;height:38px;font-size:13px;font-weight:600;cursor:pointer;min-width:170px;text-align:center">📅 اختر التاريخ</button>
+                <button class="btn ghost sm" onclick="cleanSetResetSunday()">⏩ الأحد القادم</button>
                 <button class="btn warn sm" onclick="cleanResetFrom()">🔄 إعادة جدولة الكل</button>
-                <button class="btn ghost sm" onclick="cleanSetResetSunday()">📅 الأحد القادم</button>
               </div>
             </div>
           </div>
@@ -5791,6 +5793,94 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 </div>
 
 <div id="toast"></div>
+
+<!-- Custom Arabic date picker modal -->
+<div id="datePickerOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(2px)" onclick="if(event.target===this)closeDatePicker()">
+  <div style="background:var(--surface);padding:18px;border-radius:16px;width:340px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)" id="datePickerBody"></div>
+</div>
+
+<script>
+const DP = { inputId:null, title:'اختر التاريخ', y:2026, m:5, d:31 };
+const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+const AR_WDS    = ['أحد','اثن','ثلا','أرب','خمي','جمع','سبت'];
+function openDatePicker(inputId, title){
+  DP.inputId = inputId; DP.title = title || 'اختر التاريخ';
+  let cur = (document.getElementById(inputId)||{}).value;
+  if(!cur){
+    try { cur = (D.clean && D.clean.today) || new Date().toISOString().slice(0,10); }
+    catch(_) { cur = new Date().toISOString().slice(0,10); }
+  }
+  const p = cur.split('-');
+  DP.y = parseInt(p[0])||new Date().getFullYear();
+  DP.m = parseInt(p[1])||(new Date().getMonth()+1);
+  DP.d = parseInt(p[2])||new Date().getDate();
+  renderDatePicker();
+  document.getElementById('datePickerOverlay').style.display = 'flex';
+}
+function closeDatePicker(){ document.getElementById('datePickerOverlay').style.display = 'none'; }
+function renderDatePicker(){
+  const wrap = document.getElementById('datePickerBody'); if(!wrap) return;
+  const cy = new Date().getFullYear();
+  const yrs = [];
+  for(let yy = cy - 1; yy <= cy + 5; yy++) yrs.push(yy);
+  // Clamp DP.d to days-in-month
+  const dim = new Date(DP.y, DP.m, 0).getDate();
+  if(DP.d > dim) DP.d = dim;
+  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+           + '<div style="font-size:15px;font-weight:700">'+esc(DP.title)+'</div>'
+           + '<button onclick="closeDatePicker()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">×</button>'
+           + '</div>';
+  // Year + month row
+  html += '<div style="display:flex;gap:8px;margin-bottom:14px">'
+        + '<select id="dpY" onchange="DP.y=parseInt(this.value);renderDatePicker()" style="flex:1;height:40px;padding:0 10px;font-size:14px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-weight:600">';
+  for(const yy of yrs) html += '<option value="'+yy+'"'+(yy===DP.y?' selected':'')+'>'+yy+'</option>';
+  html += '</select>'
+        + '<select id="dpM" onchange="DP.m=parseInt(this.value);renderDatePicker()" style="flex:1;height:40px;padding:0 10px;font-size:14px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-weight:600">';
+  for(let mm = 1; mm <= 12; mm++) html += '<option value="'+mm+'"'+(mm===DP.m?' selected':'')+'>'+AR_MONTHS[mm-1]+'</option>';
+  html += '</select></div>';
+  // Weekday header (Sun..Sat)
+  html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px">';
+  for(const wd of AR_WDS) html += '<div style="text-align:center;font-size:10.5px;color:var(--mut);font-weight:700;padding:4px 0">'+wd+'</div>';
+  html += '</div>';
+  // Day grid
+  html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
+  const firstWd = new Date(DP.y, DP.m - 1, 1).getDay(); // 0=Sun
+  for(let i = 0; i < firstWd; i++) html += '<div></div>';
+  for(let dd = 1; dd <= dim; dd++){
+    const sel = dd === DP.d;
+    const bg  = sel ? 'var(--gold)' : 'var(--surface-2)';
+    const fg  = sel ? '#fff' : 'var(--text)';
+    const bd  = sel ? 'var(--gold)' : 'var(--border)';
+    html += '<button type="button" onclick="DP.d='+dd+';renderDatePicker()" '
+         +  'style="background:'+bg+';color:'+fg+';border:1px solid '+bd+';border-radius:8px;height:36px;font-weight:600;font-size:13px;cursor:pointer;transition:.12s">'
+         +  dd + '</button>';
+  }
+  html += '</div>';
+  // Selected preview + actions
+  const iso = DP.y + '-' + String(DP.m).padStart(2,'0') + '-' + String(DP.d).padStart(2,'0');
+  html += '<div style="margin-top:14px;padding:10px;background:var(--surface-2);border-radius:10px;text-align:center;font-weight:600;font-size:13px;color:var(--gold)">📅 '+iso+'</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:12px">'
+        + '<button class="btn ghost sm" onclick="closeDatePicker()" style="flex:1">إلغاء</button>'
+        + '<button class="btn primary sm" onclick="confirmDatePicker()" style="flex:2">✓ اختر</button>'
+        + '</div>';
+  wrap.innerHTML = html;
+}
+function confirmDatePicker(){
+  const iso = DP.y + '-' + String(DP.m).padStart(2,'0') + '-' + String(DP.d).padStart(2,'0');
+  const inp = document.getElementById(DP.inputId);
+  if(inp){
+    inp.value = iso;
+    // If there's a visible-label twin (id + "_lbl"), update it too
+    const lbl = document.getElementById(DP.inputId + '_lbl');
+    if(lbl) lbl.textContent = '📅 ' + iso;
+  }
+  closeDatePicker();
+}
+function _setDateField(id, iso){
+  const inp = document.getElementById(id); if(inp) inp.value = iso;
+  const lbl = document.getElementById(id + '_lbl'); if(lbl) lbl.textContent = '📅 ' + iso;
+}
+</script>
 
 <script>
 /* ============================================================
@@ -6890,7 +6980,7 @@ function cleanSetResetSunday(){
   const add = dow === 0 ? 7 : (7 - dow);
   const nx = new Date(t0); nx.setDate(t0.getDate() + add);
   const iso = nx.toISOString().slice(0,10);
-  const el = document.getElementById('dcResetDate'); if(el) el.value = iso;
+  _setDateField('dcResetDate', iso);
   toast('📅 ' + iso);
 }
 function renderCleaningPaused(){
@@ -6934,7 +7024,7 @@ function _populateCleanInsertDropdown(){
   if(dInp && !dInp.value){
     const t0 = new Date((D.clean||{}).today || new Date().toISOString().slice(0,10));
     t0.setDate(t0.getDate() + 1);
-    dInp.value = t0.toISOString().slice(0,10);
+    _setDateField('dcInsertDate', t0.toISOString().slice(0,10));
   }
   // Default reset date = next Sunday (if empty)
   const rInp = document.getElementById('dcResetDate');
