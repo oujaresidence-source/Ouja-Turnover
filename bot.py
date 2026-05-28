@@ -1143,11 +1143,13 @@ def _dc_find_next_date(lid, after_date=None):
     return None
 
 def schedule_deep_cleans():
-    """Assign next_scheduled for every unit that doesn't have one."""
+    """Assign next_scheduled for every non-paused unit that doesn't have one."""
     if not DEEPCLEAN_ENABLED:
         return
     listings = get_listings_map() or {}
     for lid in listings:
+        if lid in _paused_units:
+            continue
         if lid not in _deep_clean_state:
             _dc_init(lid)
         s = _deep_clean_state[lid]
@@ -1160,6 +1162,115 @@ def schedule_deep_cleans():
             print(f"deepclean: scheduled {listings[lid]} ({lid}) for {nd}")
     return True
 
+# ---- New scheduling primitives (insert / reset / cascade) ----
+def _dc_next_valid_day(d):
+    """Skip Thu/Fri forward."""
+    while d.weekday() in DEEPCLEAN_AVOID_WD:
+        d += timedelta(days=1)
+    return d
+
+def _dc_insert_at(lid, target_iso, _depth=0):
+    """Place lid at target_iso. If someone else is already there, cascade-push them
+    to the next valid day. Skips Thu/Fri. Limited recursion depth as safety."""
+    if _depth > 200:
+        return False
+    target = _parse_date(target_iso) if isinstance(target_iso, str) else target_iso
+    if not target:
+        return False
+    target = _dc_next_valid_day(target)
+    target_iso = target.isoformat()
+    # Find current occupant (excluding self)
+    occupant = None
+    for l, s in _deep_clean_state.items():
+        if l == lid:
+            continue
+        if s.get("next_scheduled") == target_iso:
+            occupant = l
+            break
+    # Assign target to lid
+    if lid not in _deep_clean_state:
+        _dc_init(lid)
+    _deep_clean_state[lid]["next_scheduled"] = target_iso
+    _deep_clean_state[lid]["next_status"] = "scheduled"
+    # Cascade displaced occupant to next valid day
+    if occupant is not None:
+        _dc_insert_at(occupant, (target + timedelta(days=1)).isoformat(), _depth + 1)
+    return True
+
+def _dc_reset_from(start_iso):
+    """Wipe all next_scheduled for non-paused units and re-lay them starting from
+    start_iso, one valid-day per unit, ordered by oldest-last_done-first (most
+    overdue takes the earliest slots)."""
+    start = _parse_date(start_iso) if isinstance(start_iso, str) else start_iso
+    if not start:
+        return 0
+    # Build priority queue: (last_done, lid) ascending so oldest = first
+    pool = []
+    for lid, s in _deep_clean_state.items():
+        if lid in _paused_units:
+            continue
+        s["next_scheduled"] = None
+        s["next_status"] = "unscheduled"
+        last = _parse_date(s.get("last_done")) or (datetime.now(TZ).date() - timedelta(days=999))
+        pool.append((last, lid))
+    pool.sort()
+    cur = _dc_next_valid_day(start)
+    assigned = 0
+    for _, lid in pool:
+        cur = _dc_next_valid_day(cur)
+        _deep_clean_state[lid]["next_scheduled"] = cur.isoformat()
+        _deep_clean_state[lid]["next_status"] = "scheduled"
+        cur += timedelta(days=1)
+        assigned += 1
+    return assigned
+
+def _dc_handle_booking_conflict(blocked_lid, blocked_iso):
+    """When blocked_lid was scheduled for blocked_iso but the unit got booked:
+      1) Pull every later-scheduled unit BACKWARD by one valid-day to fill the gap
+         (so Monday's clean becomes Sunday's, Tuesday's becomes Monday's, etc.)
+      2) Find blocked_lid's checkout from Hostaway and reschedule it for the first
+         valid day AFTER checkout."""
+    blocked_d = _parse_date(blocked_iso)
+    if not blocked_d:
+        return
+    # Step 1: pull others up
+    others = sorted([
+        (_parse_date(s["next_scheduled"]), lid)
+        for lid, s in _deep_clean_state.items()
+        if lid != blocked_lid and s.get("next_scheduled") and lid not in _paused_units
+           and _parse_date(s["next_scheduled"]) and _parse_date(s["next_scheduled"]) > blocked_d
+    ])
+    cur = blocked_d
+    for orig_d, lid in others:
+        cur = _dc_next_valid_day(cur)
+        if cur < orig_d:
+            _deep_clean_state[lid]["next_scheduled"] = cur.isoformat()
+            cur += timedelta(days=1)
+        else:
+            # caught up — no more pulling
+            cur = orig_d + timedelta(days=1)
+    # Step 2: push blocked_lid to first valid day after its checkout
+    new_d = None
+    try:
+        cal = api_get(f"/listings/{blocked_lid}/calendar",
+                      params={"startDate": blocked_iso, "endDate": blocked_iso})
+        days = cal.get("result") or []
+        res_id = days[0].get("reservationId") if days else None
+        if res_id:
+            res = api_get(f"/reservations/{res_id}").get("result", {})
+            checkout = _parse_date(res.get("departureDate"))
+            if checkout:
+                new_d = checkout + timedelta(days=1)
+    except Exception as e:
+        print(f"booking conflict checkout lookup error ({blocked_lid}):", e)
+    if new_d is None:
+        new_d = blocked_d + timedelta(days=1)
+    taken = _dc_scheduled_dates()
+    while new_d.weekday() in DEEPCLEAN_AVOID_WD or new_d.isoformat() in taken:
+        new_d += timedelta(days=1)
+    _deep_clean_state[blocked_lid]["next_scheduled"] = new_d.isoformat()
+    _deep_clean_state[blocked_lid]["next_status"] = "scheduled"
+
 def confirm_tomorrow_deepcleans():
     """At 9pm: lock in tomorrow's planned deep cleans.
        - if the unit is still free → block the calendar (isAvailable=0) so the cleaner has the day
@@ -1171,19 +1282,21 @@ def confirm_tomorrow_deepcleans():
     listings = get_listings_map() or {}
     confirmed, pushed = 0, 0
     for lid, s in list(_deep_clean_state.items()):
+        if lid in _paused_units:
+            continue
         if s.get("next_scheduled") != iso:
             continue
         name = listings.get(lid, str(lid))
         if not _dc_calendar_day_free(lid, iso):
-            # guest beat us to it; reschedule
-            s["next_scheduled"] = None
-            s["next_status"] = "pushed"
-            nd = _dc_find_next_date(lid, after_date=tomorrow)
-            if nd:
-                s["next_scheduled"] = nd
-                s["next_status"] = "scheduled"
+            # Guest beat us to it. NEW cascade behavior: shift everyone scheduled
+            # AFTER `iso` BACKWARD by one valid-day so they fill the gap, then
+            # push this lid to the first valid day AFTER its checkout.
+            _dc_handle_booking_conflict(lid, iso)
             pushed += 1
-            log_event("pricing", f"تنظيف عميق · {name}: انحجزت ليوم {iso}، نُقل إلى {s.get('next_scheduled','—')}")
+            new_target = _deep_clean_state.get(lid, {}).get("next_scheduled", "—")
+            log_event("pricing",
+                      f"تنظيف عميق · {name}: انحجزت ليوم {iso}. الباقي تقدّم يوم لتعبئة الفراغ. "
+                      f"هالشقة نُقلت لتاريخ {new_target} (بعد تشيك-آوت الحجز).")
             continue
         # block the day in Hostaway
         try:
@@ -4707,6 +4820,10 @@ def next_work_start(dt=None):
     return today_start + timedelta(days=1)
 # lid (int) -> {last_done, next_scheduled, next_status, history:[{date,ts,notes}], notes}
 _deep_clean_state = {}
+# Listings the owner has manually parked (out of rotation). When paused, the unit
+# is skipped by every scheduling function and shown in a separate dashboard
+# section. Persisted across redeploys.
+_paused_units = set()
 
 def log_event(category, text):
     """Record something the bot did, for the dashboard's activity feed."""
@@ -5442,6 +5559,42 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="card">
           <div class="card-head"><span class="card-title">🔗 <span id="t_clean_link_title">الرابط لشركة التنظيف</span></span></div>
           <div id="cleanLinkBox"></div>
+        </div>
+
+        <!-- Tools: insert at date + reset from date -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">🛠️ أدوات الجدول</span><span class="card-sub">إضافة فردية أو إعادة ترتيب الكل</span></div>
+          <div style="display:grid;grid-template-columns:1fr;gap:14px;padding:4px 2px">
+            <!-- Insert at date -->
+            <div style="background:var(--surface-2);padding:14px;border-radius:12px;border:1px solid var(--border)">
+              <div style="font-weight:600;margin-bottom:10px;font-size:13px">➕ أضف ديب كلين بتاريخ محدد</div>
+              <div class="muted" style="font-size:11.5px;margin-bottom:10px">للشقق الجديدة بعد التشطيب. لو في شقة باليوم نفسه، تتأجل لليوم الي بعده تلقائياً</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <select id="dcInsertLid" style="flex:1;min-width:200px;padding:7px 10px;height:36px;font-size:13px"></select>
+                <input id="dcInsertDate" type="date" style="width:170px;padding:7px 10px;height:36px;font-size:13px">
+                <button class="btn primary sm" onclick="cleanInsertAt()">➕ أضف</button>
+              </div>
+            </div>
+            <!-- Reset from date -->
+            <div style="background:var(--surface-2);padding:14px;border-radius:12px;border:1px solid var(--border)">
+              <div style="font-weight:600;margin-bottom:10px;font-size:13px">🔄 إعادة جدولة كل الشقق من تاريخ</div>
+              <div class="muted" style="font-size:11.5px;margin-bottom:10px">تمسح كل المواعيد المجدولة وتعيد توزيعها يومياً بدءاً من التاريخ المختار (الأقدم تنظيفاً أولاً). الشقق الموقفة ما تتأثر</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <input id="dcResetDate" type="date" style="width:170px;padding:7px 10px;height:36px;font-size:13px">
+                <button class="btn warn sm" onclick="cleanResetFrom()">🔄 إعادة جدولة الكل</button>
+                <button class="btn ghost sm" onclick="cleanSetResetSunday()">📅 الأحد القادم</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Paused units (hidden from schedule until unpaused) -->
+        <div class="card" id="cleanPausedCard" style="display:none">
+          <div class="card-head">
+            <span class="card-title">⏸ الشقق الموقفة</span>
+            <span class="card-sub" id="cleanPausedCount">—</span>
+          </div>
+          <div id="cleanPausedBody"></div>
         </div>
 
         <div class="card">
@@ -6463,6 +6616,8 @@ async function loadCleaning(){
   renderCleaningWeek();
   renderCleaningVisual();
   renderCleaningLink();
+  renderCleaningPaused();
+  _populateCleanInsertDropdown();
   renderCleaningList();
 }
 
@@ -6660,7 +6815,10 @@ function renderCleaningList(){
       + '<td>'+last+' <button class="btn ghost xs" onclick="cleanSetLast('+it.lid+')" title="'+t().clean_set_last+'">✎</button></td>'
       + '<td>'+nxt+' <button class="btn ghost xs" onclick="cleanResched('+it.lid+')" title="'+t().clean_reschedule+'">📅</button></td>'
       + '<td>'+_cleanStatusPill(it.next_status)+'</td>'
-      + '<td><button class="btn green xs" onclick="cleanMarkDone('+it.lid+')">✓ '+t().clean_mark_done+'</button></td>'
+      + '<td>'
+      + '<button class="btn green xs" onclick="cleanMarkDone('+it.lid+')">✓ '+t().clean_mark_done+'</button> '
+      + '<button class="btn ghost xs" onclick="cleanPause('+it.lid+')" title="إيقاف من الجدول">⏸</button>'
+      + '</td>'
       + '</tr>';
   }
   html += '</tbody></table></div>';
@@ -6683,6 +6841,96 @@ async function cleanSetLast(lid){
   if(!date) return;
   const r = await post('/api/cleaning/set-last', {lid:lid, date:date});
   if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
+}
+
+async function cleanPause(lid){
+  if(!confirm('إيقاف هذي الشقة من جدول الديب كلين؟ تقدر ترجعها متى ما حبيت من قسم "الشقق الموقفة"')) return;
+  const r = await post('/api/cleaning/pause', {lid:lid});
+  if(r.ok){ toast('⏸ تم الإيقاف'); loadCleaning(); } else toast(r.error||t().err);
+}
+async function cleanUnpause(lid){
+  const r = await post('/api/cleaning/unpause', {lid:lid});
+  if(r.ok){ toast('▶ تم التشغيل'); loadCleaning(); } else toast(r.error||t().err);
+}
+async function cleanInsertAt(){
+  const lidSel = document.getElementById('dcInsertLid');
+  const dateInp = document.getElementById('dcInsertDate');
+  const lid = lidSel && lidSel.value;
+  const date = dateInp && dateInp.value;
+  if(!lid){ toast('اختر شقة'); return; }
+  if(!date){ toast('اختر تاريخ'); return; }
+  const r = await post('/api/cleaning/insert', {lid:parseInt(lid), date:date});
+  if(r.ok){
+    toast('➕ تمت الإضافة في ' + (r.scheduled_for || date));
+    loadCleaning();
+  } else toast(r.error||t().err);
+}
+async function cleanResetFrom(){
+  const dateInp = document.getElementById('dcResetDate');
+  const date = dateInp && dateInp.value;
+  if(!date){ toast('اختر تاريخ البداية'); return; }
+  if(!confirm('سيتم مسح كل المواعيد المجدولة وإعادة توزيعها يومياً من ' + date + '. متأكد؟')) return;
+  const r = await post('/api/cleaning/reschedule-from', {date:date});
+  if(r.ok){ toast('🔄 ' + (r.rescheduled||0) + ' شقة'); loadCleaning(); } else toast(r.error||t().err);
+}
+function cleanSetResetSunday(){
+  // Next Sunday from today
+  const t0 = new Date((D.clean||{}).today || new Date().toISOString().slice(0,10));
+  const dow = t0.getDay(); // 0=Sun
+  const add = dow === 0 ? 7 : (7 - dow);
+  const nx = new Date(t0); nx.setDate(t0.getDate() + add);
+  const iso = nx.toISOString().slice(0,10);
+  const el = document.getElementById('dcResetDate'); if(el) el.value = iso;
+  toast('📅 ' + iso);
+}
+function renderCleaningPaused(){
+  const card = document.getElementById('cleanPausedCard');
+  const body = document.getElementById('cleanPausedBody');
+  const cnt  = document.getElementById('cleanPausedCount');
+  if(!card || !body) return;
+  const paused = ((D.clean||{}).paused_items)||[];
+  if(!paused.length){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  if(cnt) cnt.textContent = paused.length + ' شقة';
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">';
+  for(const it of paused){
+    const last = it.last_done ? (it.last_done + ' · ' + (it.days_since_last||0) + ' يوم') : '—';
+    html += '<div style="background:var(--surface-2);padding:11px 13px;border-radius:10px;border:1px solid var(--border)">'
+      + '<div class="strong" style="font-size:13px;margin-bottom:4px">'+esc(it.name)+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-bottom:8px">آخر تنظيف: '+last+'</div>'
+      + '<button class="btn primary xs" onclick="cleanUnpause('+it.lid+')">▶ شغّلها</button>'
+      + '</div>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+function _populateCleanInsertDropdown(){
+  const sel = document.getElementById('dcInsertLid'); if(!sel) return;
+  // include both active and paused so user can also insert a paused one
+  const items = ((D.clean||{}).items)||[];
+  const paused = ((D.clean||{}).paused_items)||[];
+  const all = items.concat(paused);
+  all.sort(function(a,b){ return (a.name||'').localeCompare(b.name||'') });
+  const prev = sel.value;
+  let html = '<option value="">— اختر شقة —</option>';
+  for(const it of all){
+    const tag = it.paused ? ' ⏸' : '';
+    html += '<option value="'+it.lid+'">'+esc(it.name)+tag+'</option>';
+  }
+  sel.innerHTML = html;
+  if(prev) sel.value = prev;
+  // Default insert date = tomorrow
+  const dInp = document.getElementById('dcInsertDate');
+  if(dInp && !dInp.value){
+    const t0 = new Date((D.clean||{}).today || new Date().toISOString().slice(0,10));
+    t0.setDate(t0.getDate() + 1);
+    dInp.value = t0.toISOString().slice(0,10);
+  }
+  // Default reset date = next Sunday (if empty)
+  const rInp = document.getElementById('dcResetDate');
+  if(rInp && !rInp.value){
+    cleanSetResetSunday();
+  }
 }
 
 async function uploadCleaningCSV(ev){ return _uploadCleaning(ev, '/api/cleaning/import-csv') }
@@ -9033,6 +9281,7 @@ async def _api_cleaning_schedule(request):
     if not _catalog_units:
         await asyncio.to_thread(load_catalog, True)
     out = []
+    paused_out = []
     for lid, name in listings.items():
         if lid not in _deep_clean_state:
             _dc_init(lid)
@@ -9042,29 +9291,39 @@ async def _api_cleaning_schedule(request):
         nxt = _parse_date(s.get("next_scheduled"))
         days_since = (today - last).days if last else None
         days_until = (nxt - today).days if nxt else None
-        # overdue if days_since > MAX
-        overdue = bool(days_since and days_since > DEEPCLEAN_MAX_DAYS)
-        out.append({
+        is_paused = lid in _paused_units
+        # overdue if days_since > MAX (and not paused)
+        overdue = bool(days_since and days_since > DEEPCLEAN_MAX_DAYS and not is_paused)
+        row = {
             "lid": lid, "name": name,
             "beds": u.get("beds"), "area": u.get("area") or u.get("neighbourhood"),
             "last_done": s.get("last_done"),
-            "next_scheduled": s.get("next_scheduled"),
+            "next_scheduled": None if is_paused else s.get("next_scheduled"),
             "next_status": s.get("next_status"),
-            "days_since_last": days_since, "days_until_next": days_until,
+            "days_since_last": days_since, "days_until_next": None if is_paused else days_until,
             "overdue": overdue,
+            "paused": is_paused,
             "history": (s.get("history") or [])[-5:],
             "notes": s.get("notes", ""),
-        })
+        }
+        if is_paused:
+            paused_out.append(row)
+        else:
+            out.append(row)
     out.sort(key=lambda x: (-1 if x["overdue"] else 0, -(x["days_since_last"] or 0)))
+    paused_out.sort(key=lambda x: x["name"] or "")
     counts = {
-        "total": len(out),
+        "total": len(out) + len(paused_out),
+        "active": len(out),
+        "paused": len(paused_out),
         "overdue": sum(1 for x in out if x["overdue"]),
         "scheduled": sum(1 for x in out if x["next_scheduled"]),
         "blocked_tomorrow": sum(1 for x in out
                                 if x["next_scheduled"] == (today + timedelta(days=1)).isoformat()
                                 and x["next_status"] == "blocked"),
     }
-    return _json({"items": out, "today": today.isoformat(), "counts": counts,
+    return _json({"items": out, "paused_items": paused_out,
+                  "today": today.isoformat(), "counts": counts,
                   "cleaning_url": ("/cleaning?token=" + CLEANING_TOKEN) if CLEANING_TOKEN else "",
                   "have_token": bool(CLEANING_TOKEN)})
 
@@ -9364,6 +9623,81 @@ async def _api_cleaning_set_last(request):
     _deep_clean_state[lid]["next_status"] = "unscheduled"
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
+
+async def _api_cleaning_pause(request):
+    """POST {lid} — pause a unit (remove from deep-clean schedule + calendar)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    _paused_units.add(lid)
+    if lid in _deep_clean_state:
+        _deep_clean_state[lid]["next_scheduled"] = None
+        _deep_clean_state[lid]["next_status"] = "paused"
+    await asyncio.to_thread(persist_state)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    log_event("pricing", f"تنظيف عميق · {name}: تم الإيقاف ⏸")
+    return _json({"ok": True})
+
+async def _api_cleaning_unpause(request):
+    """POST {lid} — unpause a unit. Re-runs the scheduler so it gets a slot."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    _paused_units.discard(lid)
+    if lid in _deep_clean_state and _deep_clean_state[lid].get("next_status") == "paused":
+        _deep_clean_state[lid]["next_status"] = "unscheduled"
+    await asyncio.to_thread(persist_state)
+    # Re-run the scheduler so this unit takes the next free slot
+    await asyncio.to_thread(schedule_deep_cleans)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    log_event("pricing", f"تنظيف عميق · {name}: تم تشغيله ▶")
+    return _json({"ok": True})
+
+async def _api_cleaning_insert(request):
+    """POST {lid, date} — insert a deep-clean for lid at date (e.g. after finishing).
+    If date is occupied, the occupant is cascade-pushed forward."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    date = b.get("date")
+    if not _parse_date(date):
+        return _json({"error": "bad date"}, 400)
+    # Un-pause if it was paused
+    _paused_units.discard(lid)
+    if lid not in _deep_clean_state:
+        _dc_init(lid)
+    _dc_insert_at(lid, date)
+    await asyncio.to_thread(persist_state)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    final_date = _deep_clean_state.get(lid, {}).get("next_scheduled", date)
+    log_event("pricing", f"تنظيف عميق · {name}: إضافة في {final_date} ➕")
+    return _json({"ok": True, "scheduled_for": final_date})
+
+async def _api_cleaning_reschedule_from(request):
+    """POST {date} — wipe all non-paused next_scheduled and re-lay the queue
+    starting from `date`, oldest-last_done first."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    date = b.get("date")
+    if not _parse_date(date):
+        return _json({"error": "bad date"}, 400)
+    n = _dc_reset_from(date)
+    await asyncio.to_thread(persist_state)
+    log_event("pricing", f"تنظيف عميق · إعادة جدولة من {date} · {n} شقة 🔄")
+    return _json({"ok": True, "rescheduled": n})
 
 async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
@@ -9794,6 +10128,10 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/mark-done", _api_cleaning_mark_done)
         app.router.add_post("/api/cleaning/reschedule", _api_cleaning_reschedule)
         app.router.add_post("/api/cleaning/set-last", _api_cleaning_set_last)
+        app.router.add_post("/api/cleaning/pause", _api_cleaning_pause)
+        app.router.add_post("/api/cleaning/unpause", _api_cleaning_unpause)
+        app.router.add_post("/api/cleaning/insert", _api_cleaning_insert)
+        app.router.add_post("/api/cleaning/reschedule-from", _api_cleaning_reschedule_from)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -10084,6 +10422,8 @@ def load_state():
         _custom_events.extend(_load_json("custom_events.json", []))
         _deep_clean_state.clear()
         _deep_clean_state.update({int(k): v for k, v in _load_json("deep_clean.json", {}).items()})
+        _paused_units.clear()
+        _paused_units.update(int(x) for x in _load_json("paused_units.json", []) if str(x).strip())
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -10124,6 +10464,7 @@ def persist_state():
     _save_json("daily_metrics.json", _daily_metrics)
     _save_json("custom_events.json", _custom_events)
     _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
+    _save_json("paused_units.json", list(_paused_units))
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
