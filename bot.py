@@ -33,6 +33,8 @@ import time
 import random
 import asyncio
 import hashlib
+import hmac
+import threading
 import secrets as _secrets_mod
 from collections import defaultdict, deque, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -46,7 +48,7 @@ from discord.ext import commands, tasks
 try:
     from aiohttp import web        # for the Hostaway webhook server (Stage 2)
     _HAS_AIOHTTP = True
-except Exception:
+except ImportError:
     _HAS_AIOHTTP = False
 
 # ---------------- config ----------------
@@ -267,7 +269,10 @@ def _load_json(name, default):
     try:
         with open(_state_path(name), encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except FileNotFoundError:
+        return default                      # normal: file not created yet
+    except Exception as e:
+        print(f"state load error ({name}):", e)   # corruption / permission / bad JSON
         return default
 
 def _state_persistent():
@@ -275,27 +280,33 @@ def _state_persistent():
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
         return os.path.isdir(STATE_DIR)
-    except Exception:
+    except Exception as e:
+        print("state dir check error:", e)
         return False
 
 HANDLED_FILE = _state_path("handled.json")
 
 # ---------------- Hostaway ----------------
 _token = {"value": None}
+_token_lock = threading.Lock()
 
 def get_token(force=False):
     if _token["value"] and not force:
         return _token["value"]
-    r = requests.post(
-        f"{BASE}/accessTokens",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        data={"grant_type": "client_credentials", "client_id": HOSTAWAY_ACCOUNT_ID,
-              "client_secret": HOSTAWAY_API_KEY, "scope": "general"},
-        timeout=30,
-    )
-    r.raise_for_status()
-    _token["value"] = r.json()["access_token"]
-    return _token["value"]
+    with _token_lock:
+        # Re-check inside the lock: another thread may have refreshed already.
+        if _token["value"] and not force:
+            return _token["value"]
+        r = requests.post(
+            f"{BASE}/accessTokens",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={"grant_type": "client_credentials", "client_id": HOSTAWAY_ACCOUNT_ID,
+                  "client_secret": HOSTAWAY_API_KEY, "scope": "general"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        _token["value"] = r.json()["access_token"]
+        return _token["value"]
 
 # Status codes that mean "your bearer token is no longer accepted — refresh once and retry."
 # Hostaway has been observed to use 403; spec says 401 — accept both to be safe.
@@ -379,9 +390,9 @@ def parse_hour(v, default):
     s = str(v)
     if ":" in s:
         try: return int(s.split(":")[0])
-        except: return default
+        except (ValueError, TypeError): return default
     try: return int(float(s))
-    except: return default
+    except (ValueError, TypeError): return default
 
 SKIP_STATUSES = {"cancelled", "declined", "expired", "inquiry", "inquirydenied", "inquirytimedout"}
 
@@ -888,7 +899,6 @@ def find_agreement_url(conversation_id):
         body = (m.get("body") or "")
         if not body:
             continue
-        low = body.lower()
         for url in re.findall(r"https?://[^\s)>\]\"']+", body):
             ul = url.lower()
             if any(h in ul for h in _AGREEMENT_URL_HINTS):
@@ -1012,13 +1022,13 @@ def _check_agreement_for_one(r, now):
         # Tell the guest the apartment is being prepared (no code yet — we never send it)
         is_ar = _has_arabic(guest_name) or True
         msg = (
-            f"حياك الله 🤍\nالشقة الحين قاعدين يجهّزونها — تنظيف عميق قبل وصولك. "
-            f"الكود بيُرسَل لك مباشرة من الفريق المختص فور ما تكون جاهزة. "
-            f"شكراً لصبرك ودقايق وراح نعطيك تأكيد."
+            "حياك الله 🤍\nالشقة الحين قاعدين يجهّزونها — تنظيف عميق قبل وصولك. "
+            "الكود بيُرسَل لك مباشرة من الفريق المختص فور ما تكون جاهزة. "
+            "شكراً لصبرك ودقايق وراح نعطيك تأكيد."
             if is_ar else
-            f"Hi 🤍\nThe apartment is being prepped right now — a deep clean before you arrive. "
-            f"Our team will send the access code directly the moment it's ready. "
-            f"Thanks for your patience — confirmation coming shortly."
+            "Hi 🤍\nThe apartment is being prepped right now — a deep clean before you arrive. "
+            "Our team will send the access code directly the moment it's ready. "
+            "Thanks for your patience — confirmation coming shortly."
         )
         try:
             send_guest_message(cid, msg, "email")
@@ -1045,11 +1055,11 @@ def _check_agreement_for_one(r, now):
         # → operations team needs to send the code manually. The bot NEVER sends it.
         is_ar = _has_arabic(guest_name) or True
         guest_msg = (
-            f"حياك الله 🤍\nرفعت طلبك للفريق المختص الحين، وراح يوصلك كود الدخول "
-            f"خلال دقائق. آسفين على التأخير."
+            "حياك الله 🤍\nرفعت طلبك للفريق المختص الحين، وراح يوصلك كود الدخول "
+            "خلال دقائق. آسفين على التأخير."
             if is_ar else
-            f"Hi 🤍\nI've flagged this to our team right now and your access code will reach "
-            f"you within minutes. Sorry for the delay."
+            "Hi 🤍\nI've flagged this to our team right now and your access code will reach "
+            "you within minutes. Sorry for the delay."
         )
         try:
             send_guest_message(cid, guest_msg, "email")
@@ -1062,8 +1072,8 @@ def _check_agreement_for_one(r, now):
                 detail=(f"الضيف **{guest_name}** ({unit_name}) — موعد دخوله مرّ بـ{abs(hours_until):.1f}س.\n"
                         f"• الشقة جاهزة (قناة التنظيف مغلقة) ✓\n"
                         f"• " + ("العقد موقّع ✓\n" if signed else "العقد غير مطلوب لهذه الشقة ✓\n") +
-                        f"• ما أُرسل كود الدخول للضيف خلال آخر ٢٤ ساعة ❌\n\n"
-                        f"⚠ **أرسلوا الكود الآن** — البوت ممنوع من إرساله ذاتياً."),
+                        "• ما أُرسل كود الدخول للضيف خلال آخر ٢٤ ساعة ❌\n\n"
+                        "⚠ **أرسلوا الكود الآن** — البوت ممنوع من إرساله ذاتياً."),
                 severity="high",
             ))
             _code_escalated.add(res_id)
@@ -1455,8 +1465,8 @@ def mark_deep_clean_done(lid, date_iso=None, notes=""):
     try:
         api_put(f"/listings/{lid}/calendar",
                 {"startDate": done_date, "endDate": done_date, "isAvailable": 1})
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"calendar-free error (listing {lid}, {done_date}):", e)
     return True
 
 def compute_tonight_empty():
@@ -2698,7 +2708,7 @@ def _criteria_from_text(text):
     m = re.search(r"(?:عدد|كم|نحن|احنا|نكون)?\s*(\d{1,2})\s*(?:شخص|اشخاص|أشخاص|ضيف|ضيوف|persons?|people|guests?)", t)
     if m:
         try: want["capacity"] = int(m.group(1))
-        except: pass
+        except (ValueError, TypeError): pass
     # area hints (Riyadh neighbourhoods)
     for area in ["الملقا", "النرجس", "العارض", "النفل", "حطين", "الياسمين", "الربيع",
                  "قرطبة", "العقيق", "القيروان", "التعاون", "عرقه", "الماجدية", "الملقى",
@@ -3036,9 +3046,9 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                     f"- {when}.\n"
                     f"- " + ("هذه الوحدة **لا تتطلّب** عقد توقيع." if not needs_agr
                             else ("العقد موقّع ✅" if signed else "العقد غير موقّع ❌")) + "\n"
-                    f"- حالة الشقة: " + ("جاهزة (التنظيف انتهى)" if apt_ready
+                    "- حالة الشقة: " + ("جاهزة (التنظيف انتهى)" if apt_ready
                                           else "**لازالت تحت التنظيف** (قناة التنظيف مفتوحة)") + "\n"
-                    f"- " + ("الكود **أُرسل** للضيف خلال آخر ٢٤ ساعة ✅" if code_already_sent
+                    "- " + ("الكود **أُرسل** للضيف خلال آخر ٢٤ ساعة ✅" if code_already_sent
                             else "الكود **لم يُرسَل** بعد ❌") + "\n\n"
                     "🚫 قاعدة لا تُكسر: ممنوع تكتب أي كود أو رقم أرقام بسياق الدخول. "
                     "ممنوع تكرّر كود ذكره الضيف. الكود يرسله الفريق المختص فقط، لا أنت ولا "
@@ -4374,7 +4384,7 @@ async def _process_conversation_now(conversation_id):
 
 async def _handle_hook(request):
     secret = request.match_info.get("secret", "")
-    if secret != WEBHOOK_SECRET:
+    if not hmac.compare_digest(secret, WEBHOOK_SECRET):
         return web.Response(status=403, text="forbidden")
     try:
         payload = await request.json()
@@ -5345,7 +5355,7 @@ def _auth_session(request):
 def _user_can(request, tab, action="read"):
     """Permission check. Legacy DASHBOARD_TOKEN is treated as super-admin."""
     token = request.query.get("token", "") or request.headers.get("X-Token", "")
-    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+    if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
         return True
     u = _auth_session(request)
     if not u:
@@ -11328,7 +11338,7 @@ def _dash_auth(request):
     token = request.query.get("token") or request.headers.get("X-Token", "")
     if not token:
         return False
-    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+    if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
         return True
     # Session token check
     sess = _sessions.get(token)
@@ -13143,9 +13153,27 @@ async def _api_reviews_open_ticket(request):
     return _json({"ok": True, "ticket": _ticket_view(t), "existing": False})
 
 # ===================== USERS + AUTH API =====================
+# Basic in-memory brute-force throttle: per client IP, max attempts per window.
+_login_attempts = {}            # ip -> [timestamps of recent failed attempts]
+_LOGIN_MAX_FAILS = 5
+_LOGIN_WINDOW_S  = 60
+
+def _login_blocked(ip):
+    """True if this IP has too many recent failed logins. Prunes old entries."""
+    now = time.time()
+    fails = [t for t in _login_attempts.get(ip, []) if now - t < _LOGIN_WINDOW_S]
+    _login_attempts[ip] = fails
+    return len(fails) >= _LOGIN_MAX_FAILS
+
+def _login_record_fail(ip):
+    _login_attempts.setdefault(ip, []).append(time.time())
+
 async def _api_auth_login(request):
     """POST {username, password} → {ok:true, token, user}.
     Token is a session token good for 30 days."""
+    ip = request.remote or "?"
+    if _login_blocked(ip):
+        return _json({"error": "too many attempts, try again later"}, 429)
     b = await _read_body(request)
     name = (b.get("username") or "").strip()
     pw   = b.get("password") or ""
@@ -13153,9 +13181,12 @@ async def _api_auth_login(request):
         return _json({"error": "username and password required"}, 400)
     u = _find_user_by_name(name)
     if not u or not u.get("active"):
+        _login_record_fail(ip)
         return _json({"error": "invalid credentials"}, 401)
     if not _verify_password(pw, u.get("password_hash", "")):
+        _login_record_fail(ip)
         return _json({"error": "invalid credentials"}, 401)
+    _login_attempts.pop(ip, None)   # success clears the counter
     tok = _new_session_token()
     _sessions[tok] = {
         "user_id": u["id"],
@@ -13173,7 +13204,7 @@ async def _api_users_me(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     token = request.query.get("token") or request.headers.get("X-Token", "")
-    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+    if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
         # legacy super-admin — synthesise a fake admin user
         return _json({"ok": True, "user": {"id": "owner", "name": "Owner",
                                             "role": "admin",
@@ -14328,9 +14359,9 @@ def load_state():
             try:
                 u = _user_create("admin", DASHBOARD_TOKEN, role="admin",
                                   created_by="bootstrap")
-                print(f"BOOTSTRAP: created admin user '{u['name']}' "
-                      f"(password = DASHBOARD_TOKEN). You can now log in "
-                      f"with username 'admin' + the same token value.")
+                print(f"BOOTSTRAP: created admin user '{u['name']}'. "
+                      f"Log in with username 'admin' and your configured "
+                      f"dashboard credential.")
             except Exception as e:
                 print("bootstrap admin create error:", e)
         _quotes.clear()
@@ -15145,7 +15176,7 @@ async def on_message(message):
                     mention_author=False,
                 )
             log_event("guest",
-                      f"معرفة جديدة في #knowledge · " + (unit_name or "عام") + " · " + body[:60])
+                      "معرفة جديدة في #knowledge · " + (unit_name or "عام") + " · " + body[:60])
         except Exception as e:
             print("knowledge reply error:", e)
     finally:
