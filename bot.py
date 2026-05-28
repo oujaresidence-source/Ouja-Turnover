@@ -870,6 +870,134 @@ def check_agreement_reminders():
     if n:
         print(f"agreement-reminder: sent {n} nudge(s)")
 
+# ====================================================================
+# Deep-clean scheduler
+# ====================================================================
+def _dc_init(lid):
+    if lid in _deep_clean_state:
+        return
+    _deep_clean_state[lid] = {
+        "last_done": DEEPCLEAN_DEFAULT_LAST,
+        "next_scheduled": None,
+        "next_status": "unscheduled",   # unscheduled | scheduled | blocked | pushed | done
+        "history": [],
+        "notes": "",
+    }
+
+def _dc_calendar_day_free(lid, d_iso):
+    try:
+        cal = api_get(f"/listings/{lid}/calendar",
+                      params={"startDate": d_iso, "endDate": d_iso})
+        days = cal.get("result") or []
+        if not days:
+            return False
+        d = days[0]
+        return int(d.get("isAvailable", 0) or 0) == 1 and not d.get("reservationId")
+    except Exception as e:
+        print(f"deepclean cal check error ({lid}, {d_iso}):", e)
+        return False
+
+def _dc_scheduled_dates():
+    return {s.get("next_scheduled") for s in _deep_clean_state.values() if s.get("next_scheduled")}
+
+def _dc_find_next_date(lid, after_date=None):
+    """Pick the earliest valid date for this unit's next deep clean.
+    Constraints: weekday not in DEEPCLEAN_AVOID_WD, not already scheduled for another unit,
+    within the 45-60 day window (extended to 75 if needed). Does NOT do per-date
+    Hostaway lookups (too expensive) — caller verifies at confirm time."""
+    if lid not in _deep_clean_state:
+        _dc_init(lid)
+    s = _deep_clean_state[lid]
+    last = _parse_date(s.get("last_done")) or (datetime.now(TZ).date() - timedelta(days=30))
+    today = datetime.now(TZ).date()
+    earliest = max(last + timedelta(days=DEEPCLEAN_MIN_DAYS),
+                   (after_date or today) + timedelta(days=1))
+    horizon = max(last + timedelta(days=DEEPCLEAN_MAX_DAYS + 30),
+                  earliest + timedelta(days=30))
+    taken = _dc_scheduled_dates()
+    d = earliest
+    while d <= horizon:
+        if d.weekday() not in DEEPCLEAN_AVOID_WD and d.isoformat() not in taken:
+            return d.isoformat()
+        d += timedelta(days=1)
+    return None
+
+def schedule_deep_cleans():
+    """Assign next_scheduled for every unit that doesn't have one."""
+    if not DEEPCLEAN_ENABLED:
+        return
+    listings = get_listings_map() or {}
+    for lid in listings:
+        if lid not in _deep_clean_state:
+            _dc_init(lid)
+        s = _deep_clean_state[lid]
+        if s.get("next_scheduled"):
+            continue
+        nd = _dc_find_next_date(lid)
+        if nd:
+            s["next_scheduled"] = nd
+            s["next_status"] = "scheduled"
+            print(f"deepclean: scheduled {listings[lid]} ({lid}) for {nd}")
+    return True
+
+def confirm_tomorrow_deepcleans():
+    """At 9pm: lock in tomorrow's planned deep cleans.
+       - if the unit is still free → block the calendar (isAvailable=0) so the cleaner has the day
+       - if a guest booked it last-minute → push to the next available slot"""
+    if not DEEPCLEAN_ENABLED:
+        return
+    tomorrow = datetime.now(TZ).date() + timedelta(days=1)
+    iso = tomorrow.isoformat()
+    listings = get_listings_map() or {}
+    confirmed, pushed = 0, 0
+    for lid, s in list(_deep_clean_state.items()):
+        if s.get("next_scheduled") != iso:
+            continue
+        name = listings.get(lid, str(lid))
+        if not _dc_calendar_day_free(lid, iso):
+            # guest beat us to it; reschedule
+            s["next_scheduled"] = None
+            s["next_status"] = "pushed"
+            nd = _dc_find_next_date(lid, after_date=tomorrow)
+            if nd:
+                s["next_scheduled"] = nd
+                s["next_status"] = "scheduled"
+            pushed += 1
+            log_event("pricing", f"تنظيف عميق · {name}: انحجزت ليوم {iso}، نُقل إلى {s.get('next_scheduled','—')}")
+            continue
+        # block the day in Hostaway
+        try:
+            api_put(f"/listings/{lid}/calendar",
+                    {"startDate": iso, "endDate": iso,
+                     "isAvailable": 0, "note": "deep-clean"})
+            s["next_status"] = "blocked"
+            confirmed += 1
+            log_event("pricing", f"تنظيف عميق · {name}: مؤكد ومحجوز ليوم {iso}")
+        except Exception as e:
+            print(f"deepclean block error ({lid}, {iso}):", e)
+    if confirmed or pushed:
+        print(f"deepclean: confirmed={confirmed} pushed={pushed} for {iso}")
+
+def mark_deep_clean_done(lid, date_iso=None, notes=""):
+    if lid not in _deep_clean_state:
+        _dc_init(lid)
+    s = _deep_clean_state[lid]
+    done_date = date_iso or datetime.now(TZ).date().isoformat()
+    s["history"].append({"date": done_date,
+                         "ts": datetime.now(TZ).isoformat(timespec="minutes"),
+                         "notes": notes})
+    s["history"] = s["history"][-20:]
+    s["last_done"] = done_date
+    s["next_scheduled"] = None
+    s["next_status"] = "unscheduled"
+    # try to free the calendar date in case we'd blocked it
+    try:
+        api_put(f"/listings/{lid}/calendar",
+                {"startDate": done_date, "endDate": done_date, "isAvailable": 1})
+    except Exception:
+        pass
+    return True
+
 def compute_tonight_empty():
     """For each unit empty TONIGHT, return its current price + the discount schedule the
     bot will apply if the unit stays empty (tier 1 at midnight, 2 at noon, 3 at 6 PM, or
@@ -3699,6 +3827,21 @@ AGREEMENT_REMINDER_LEAD_HOURS = float(os.environ.get("AGREEMENT_REMINDER_LEAD_HO
 AGREEMENT_REMINDER_POLL_MIN = int(os.environ.get("AGREEMENT_REMINDER_POLL_MIN", "10"))         # how often the loop runs
 _agreement_reminded = set()   # set of reservation_ids we've already nudged (persisted)
 
+# ---------------- Deep-clean schedule ----------------
+# Every apartment is deep-cleaned every 45-60 days. We pre-schedule, and at 9pm
+# the night before we either CONFIRM (and block the day in Hostaway so it's
+# unbookable) or PUSH to the next available slot if a guest booked it last-minute.
+# Avoid Thu/Fri (peak weekend demand). Only ONE apartment per day.
+DEEPCLEAN_ENABLED      = os.environ.get("DEEPCLEAN_ENABLED", "1") in ("1","true","True","yes")
+DEEPCLEAN_MIN_DAYS     = int(os.environ.get("DEEPCLEAN_MIN_DAYS", "45"))
+DEEPCLEAN_MAX_DAYS     = int(os.environ.get("DEEPCLEAN_MAX_DAYS", "60"))
+DEEPCLEAN_DEFAULT_LAST = os.environ.get("DEEPCLEAN_DEFAULT_LAST", "2026-04-27")
+DEEPCLEAN_AVOID_WD     = set(int(x) for x in os.environ.get("DEEPCLEAN_AVOID_WD", "3,4").split(",") if x.strip().isdigit())  # 3=Thu, 4=Fri
+DEEPCLEAN_CONFIRM_HOUR = int(os.environ.get("DEEPCLEAN_CONFIRM_HOUR", "21"))  # 9pm Riyadh
+CLEANING_TOKEN         = os.environ.get("CLEANING_TOKEN", "")   # public link gate
+# lid (int) -> {last_done, next_scheduled, next_status, history:[{date,ts,notes}], notes}
+_deep_clean_state = {}
+
 def log_event(category, text):
     """Record something the bot did, for the dashboard's activity feed."""
     try:
@@ -4400,6 +4543,42 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="card"><div id="logBody"><div class="empty sk">—</div></div></div>
       </section>
 
+      <!-- ============ DEEP-CLEAN SCHEDULE ============ -->
+      <section class="view" id="view_clean">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_clean">🧹 جدول التنظيف العميق</div>
+            <div class="page-sub" id="t_clean_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadCleaning()">↻</button>
+          </div>
+        </div>
+
+        <div class="kpis" id="cleanStats"></div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">🔗 <span id="t_clean_link_title">الرابط لشركة التنظيف</span></span></div>
+          <div id="cleanLinkBox"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">📋 الجدول الكامل</span>
+            <div class="card-actions">
+              <select id="cleanFilter" onchange="renderCleaningList()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="all" id="cf_all">الكل</option>
+                <option value="overdue" id="cf_overdue">متأخّرة</option>
+                <option value="soon" id="cf_soon">قريباً (٧ أيام)</option>
+                <option value="unscheduled" id="cf_unsch">غير مجدولة</option>
+              </select>
+              <input id="cleanSearch" placeholder="ابحث…" oninput="renderCleaningList()" style="width:160px;padding:6px 10px;height:32px;font-size:12px">
+            </div>
+          </div>
+          <div id="cleanListBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ LEARNINGS ============ -->
       <section class="view" id="view_learn">
         <div class="page-head">
@@ -4525,7 +4704,22 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق',
+    clean_title:'🧹 جدول التنظيف العميق',
+    clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
+    clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
+    clean_link_title:'🔗 الرابط لشركة التنظيف',
+    clean_link_copy:'انسخ', clean_link_open:'افتح', clean_link_missing:'⚠ متغيّر CLEANING_TOKEN غير معرّف في Railway — أضفه أولاً لإنشاء الرابط',
+    clean_filter_all:'الكل', clean_filter_overdue:'متأخّرة', clean_filter_soon:'قريباً (٧ أيام)', clean_filter_unscheduled:'غير مجدولة',
+    clean_unit:'الوحدة', clean_last:'آخر تنظيف', clean_next:'القادم', clean_status:'الحالة', clean_actions:'إجراءات',
+    clean_mark_done:'علّم منجز', clean_reschedule:'إعادة جدولة', clean_set_last:'تعديل تاريخ آخر تنظيف',
+    clean_status_unscheduled:'غير مجدولة', clean_status_scheduled:'مجدولة', clean_status_blocked:'مؤكدة + مقفلة', clean_status_pushed:'تأجّلت',
+    clean_days_ago:'يوم مضى', clean_days_left:'يوم باقي',
+    clean_overdue_lbl:'متأخّرة',
+    clean_modal_set_last:'تاريخ آخر تنظيف عميق', clean_modal_resched:'تاريخ التنظيف الجديد',
+    clean_modal_save:'حفظ', clean_modal_cancel:'إلغاء',
+    clean_confirm_done:'تأكيد إنجاز التنظيف لهذي الوحدة اليوم؟',
+    copied:'نُسخ ✓',
     learn_title:'📚 ما تعلّمه المساعد',
     learn_sub:'الملخصات اللي استخلصها النظام من ردود فريقك — تقدر تعدّل أو تحذف',
     learn_general:'الملخص العام (يطبّق على كل الشقق)', learn_apt:'ملخصات حسب الشقة',
@@ -4625,7 +4819,22 @@ const T = {
     units_count:'وحدة'
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean',
+    clean_title:'🧹 Deep cleaning schedule',
+    clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
+    clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
+    clean_link_title:'🔗 Share link for the cleaning company',
+    clean_link_copy:'copy', clean_link_open:'open', clean_link_missing:'⚠ CLEANING_TOKEN env var not set in Railway — add it first to enable the link',
+    clean_filter_all:'All', clean_filter_overdue:'Overdue', clean_filter_soon:'Soon (7 days)', clean_filter_unscheduled:'Unscheduled',
+    clean_unit:'Unit', clean_last:'Last cleaned', clean_next:'Next', clean_status:'Status', clean_actions:'Actions',
+    clean_mark_done:'mark done', clean_reschedule:'reschedule', clean_set_last:'edit last-cleaned date',
+    clean_status_unscheduled:'unscheduled', clean_status_scheduled:'scheduled', clean_status_blocked:'confirmed + blocked', clean_status_pushed:'pushed',
+    clean_days_ago:'days ago', clean_days_left:'days left',
+    clean_overdue_lbl:'overdue',
+    clean_modal_set_last:'Last deep-clean date', clean_modal_resched:'New cleaning date',
+    clean_modal_save:'Save', clean_modal_cancel:'Cancel',
+    clean_confirm_done:'Mark this unit as deep-cleaned today?',
+    copied:'copied ✓',
     learn_title:'📚 What the assistant has learned',
     learn_sub:"Summaries the system distilled from your team's replies — you can edit or delete",
     learn_general:'General summary (applies to every unit)', learn_apt:'Per-apartment summaries',
@@ -4787,6 +4996,8 @@ function applyLang(){
     t_calendar:'calendar_title', t_calendar_sub:'calendar_sub',
     t_cal_events_legend:'cal_events_legend', t_bulk_title:'bulk_title',
     t_rev_pace:'rev_pace',
+    t_clean:'clean_title', t_clean_sub:'clean_sub', t_clean_link_title:'clean_link_title',
+    cf_all:'clean_filter_all', cf_overdue:'clean_filter_overdue', cf_soon:'clean_filter_soon', cf_unsch:'clean_filter_unscheduled',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -4810,6 +5021,7 @@ const NAV = [
   {id:'calendar',ic:'📅', tk:'calendar'},
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
+  {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
   {id:'rev',     ic:'∿', tk:'rev'},
   {id:'learn',   ic:'📚', tk:'learn'},
   {id:'log',     ic:'≡', tk:'log'}
@@ -4828,6 +5040,7 @@ function badgeCount(key){
   const ib = D.inbox || {};
   if(key==='inbox') return (ib.replies?ib.replies.length:0) + (ib.escalations?ib.escalations.filter(function(e){return !e.claimed_by}).length:0);
   if(key==='pricing') return ((D.pr && D.pr.units) || []).length;
+  if(key==='clean') return ((D.clean && D.clean.counts) || {}).overdue || 0;
   return 0;
 }
 function buildSideNav(){
@@ -4892,6 +5105,7 @@ function go(id){
   if(id==='inbox') { renderInbox(); populateUnitFilter() }
   if(id==='learn') loadLearnings();
   if(id==='calendar') loadForwardCalendar();
+  if(id==='clean') loadCleaning();
 }
 
 /* ============================================================
@@ -5107,6 +5321,118 @@ function renderUrgentStrip(){
     + rows
     + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
     + '</div>';
+}
+
+// ============== DEEP CLEAN SCHEDULE ==============
+async function loadCleaning(){
+  document.getElementById('cleanListBody').innerHTML = '<div class="empty sk">—</div>';
+  try{ D.clean = await api('/api/cleaning/schedule') }catch(_){ D.clean = {items:[], counts:{}} }
+  const sub = document.getElementById('t_clean_sub'); if(sub) sub.textContent = t().clean_sub;
+  renderCleaningStats();
+  renderCleaningLink();
+  renderCleaningList();
+}
+
+function renderCleaningStats(){
+  const el = document.getElementById('cleanStats'); if(!el) return;
+  const c = (D.clean||{}).counts || {};
+  const cards = [
+    {ic:'🏠', cls:'b', val:c.total||0, lbl:t().clean_stat_total},
+    {ic:'⚠', cls:'r', val:c.overdue||0, lbl:t().clean_stat_overdue},
+    {ic:'📅', cls:'g', val:c.scheduled||0, lbl:t().clean_stat_scheduled},
+    {ic:'🔒', cls:'p', val:c.blocked_tomorrow||0, lbl:t().clean_stat_tomorrow},
+  ];
+  el.innerHTML = cards.map(function(c){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
+      +'<div class="kpi-val">'+c.val+'</div><div class="kpi-lbl">'+c.lbl+'</div></div>';
+  }).join('');
+}
+
+function renderCleaningLink(){
+  const el = document.getElementById('cleanLinkBox'); if(!el) return;
+  const d = D.clean || {};
+  if(!d.have_token){
+    el.innerHTML = '<div class="muted" style="background:var(--yellow-soft);padding:11px 14px;border-radius:8px;color:var(--yellow);font-weight:500">'+t().clean_link_missing+'</div>';
+    return;
+  }
+  const fullUrl = location.origin + d.cleaning_url;
+  el.innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<input value="'+esc(fullUrl)+'" readonly id="cleanLinkInput" style="flex:1;min-width:240px;font-family:var(--font-mono);font-size:12px;background:var(--surface-2)">'
+    + '<button class="btn ghost sm" onclick="copyCleanLink()">📋 '+t().clean_link_copy+'</button>'
+    + '<a href="'+esc(d.cleaning_url)+'" target="_blank" class="btn primary sm">🔗 '+t().clean_link_open+'</a>'
+    + '</div>'
+    + '<div class="muted" style="margin-top:8px;font-size:11.5px">شارك هذا الرابط مع شركة التنظيف فقط · يحدّث تلقائياً كل يوم</div>';
+}
+
+function copyCleanLink(){
+  const inp = document.getElementById('cleanLinkInput'); if(!inp) return;
+  inp.select(); document.execCommand('copy');
+  toast(t().copied);
+}
+
+function _cleanStatusPill(s){
+  const map = {
+    unscheduled: ['muted', t().clean_status_unscheduled],
+    scheduled:   ['info', t().clean_status_scheduled],
+    blocked:     ['ok', t().clean_status_blocked],
+    pushed:      ['warn', t().clean_status_pushed],
+  };
+  const m = map[s] || ['muted', s||'—'];
+  return '<span class="pill '+m[0]+'">'+m[1]+'</span>';
+}
+
+function renderCleaningList(){
+  const body = document.getElementById('cleanListBody'); if(!body) return;
+  const items = ((D.clean||{}).items)||[];
+  const filt = (document.getElementById('cleanFilter')||{}).value || 'all';
+  const q = ((document.getElementById('cleanSearch')||{}).value || '').toLowerCase();
+  const today = (D.clean||{}).today || '';
+  let filtered = items;
+  if(filt === 'overdue') filtered = items.filter(function(x){return x.overdue});
+  else if(filt === 'soon') filtered = items.filter(function(x){return x.days_until_next != null && x.days_until_next <= 7});
+  else if(filt === 'unscheduled') filtered = items.filter(function(x){return !x.next_scheduled});
+  if(q) filtered = filtered.filter(function(x){return (x.name||'').toLowerCase().indexOf(q) >= 0});
+  if(!filtered.length){ body.innerHTML = '<div class="empty">—</div>'; return; }
+  let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
+    + '<th>'+t().clean_unit+'</th>'
+    + '<th>'+t().clean_last+'</th>'
+    + '<th>'+t().clean_next+'</th>'
+    + '<th>'+t().clean_status+'</th>'
+    + '<th>'+t().clean_actions+'</th>'
+    + '</tr></thead><tbody>';
+  for(const it of filtered){
+    const last = it.last_done ? (it.last_done + ' <span class="muted" style="font-size:11px">· '+it.days_since_last+' '+t().clean_days_ago+'</span>') : '—';
+    const nxt = it.next_scheduled ? (it.next_scheduled + ' <span class="muted" style="font-size:11px">· '+it.days_until_next+' '+t().clean_days_left+'</span>') : '—';
+    const overdueTag = it.overdue ? ' <span class="pill danger" style="margin-inline-start:6px">'+t().clean_overdue_lbl+'</span>' : '';
+    const bedTag = it.beds ? ' <span class="muted" style="font-size:11px">'+it.beds+' غرف</span>' : '';
+    html += '<tr><td class="strong">'+esc(it.name)+bedTag+overdueTag+'</td>'
+      + '<td>'+last+' <button class="btn ghost xs" onclick="cleanSetLast('+it.lid+')" title="'+t().clean_set_last+'">✎</button></td>'
+      + '<td>'+nxt+' <button class="btn ghost xs" onclick="cleanResched('+it.lid+')" title="'+t().clean_reschedule+'">📅</button></td>'
+      + '<td>'+_cleanStatusPill(it.next_status)+'</td>'
+      + '<td><button class="btn green xs" onclick="cleanMarkDone('+it.lid+')">✓ '+t().clean_mark_done+'</button></td>'
+      + '</tr>';
+  }
+  html += '</tbody></table></div>';
+  body.innerHTML = html;
+}
+
+async function cleanMarkDone(lid){
+  if(!confirm(t().clean_confirm_done)) return;
+  const r = await post('/api/cleaning/mark-done', {lid:lid});
+  if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
+}
+async function cleanResched(lid){
+  const date = prompt(t().clean_modal_resched + ' (YYYY-MM-DD)');
+  if(!date) return;
+  const r = await post('/api/cleaning/reschedule', {lid:lid, date:date});
+  if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
+}
+async function cleanSetLast(lid){
+  const date = prompt(t().clean_modal_set_last + ' (YYYY-MM-DD)');
+  if(!date) return;
+  const r = await post('/api/cleaning/set-last', {lid:lid, date:date});
+  if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
 }
 
 // ============== CALENDAR (forward pace + bulk apply) ==============
@@ -6338,6 +6664,164 @@ if(tok()) init();
 </body>
 </html>"""
 
+CLEANING_HTML = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>عوجا · جدول التنظيف العميق</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+:root{
+  --bg:#FAFAF7;--surface:#FFFFFF;--surface-2:#F5F2EC;--line:#E8E2D5;
+  --text:#1A1815;--text-2:#544D43;--mut:#A09989;
+  --gold:#A37728;--gold-2:#8B6320;--gold-soft:#F4EBD5;
+  --green:#0E9E5F;--green-soft:#DCF3E6;
+  --red:#C44343;--red-soft:#FAE3E3;
+  --blue:#2F6FD0;--blue-soft:#E0EBFA;
+  --r:14px;--sh:0 2px 8px rgba(26,24,21,.06);
+}
+html,body{font-family:'IBM Plex Sans Arabic','Inter',-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.6}
+body{padding:0 0 60px}
+header{background:linear-gradient(135deg,var(--gold),var(--gold-2));color:#fff;padding:36px 22px 30px;text-align:center;box-shadow:var(--sh)}
+header h1{font-size:24px;font-weight:700;letter-spacing:.3px;margin-bottom:6px}
+header h2{font-size:13px;font-weight:500;opacity:.85;letter-spacing:.4px}
+header .lang-en{margin-top:14px;padding:8px 18px;background:rgba(255,255,255,.18);border-radius:10px;display:inline-block;font-size:11.5px;font-weight:500;line-height:1.65;backdrop-filter:blur(4px)}
+.wrap{max-width:880px;margin:0 auto;padding:22px 18px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;text-align:center;box-shadow:var(--sh)}
+.stat .v{font-size:24px;font-weight:700;color:var(--gold);letter-spacing:-.5px}
+.stat .l{font-size:11.5px;color:var(--mut);margin-top:4px}
+.day-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:14px;overflow:hidden;box-shadow:var(--sh)}
+.day-head{padding:12px 16px;background:var(--gold-soft);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.day-head .date{font-weight:700;font-size:15px;color:var(--text)}
+.day-head .wd{color:var(--mut);font-size:12px;font-weight:500}
+.day-head .days-away{background:var(--surface);padding:3px 10px;border-radius:8px;font-size:11px;color:var(--text-2);font-weight:600}
+.day-head .today-pill{background:var(--green);color:#fff;padding:4px 12px;border-radius:8px;font-size:11.5px;font-weight:700}
+.day-body{padding:14px 16px}
+.unit-name{font-size:17px;font-weight:700;color:var(--text);margin-bottom:8px}
+.unit-meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.tag{display:inline-block;background:var(--surface-2);padding:4px 11px;border-radius:7px;font-size:11.5px;color:var(--text-2);font-weight:500;border:1px solid var(--line)}
+.tag.green{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.18)}
+.tag.blue{background:var(--blue-soft);color:var(--blue);border-color:rgba(47,111,208,.18)}
+.tag.gold{background:var(--gold-soft);color:var(--gold);border-color:rgba(163,119,40,.18);font-weight:700}
+.guide-btn{display:inline-flex;align-items:center;gap:8px;background:var(--gold);color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;font-size:13px;text-decoration:none;margin-top:6px;transition:.15s}
+.guide-btn:hover{background:var(--gold-2);transform:translateY(-1px)}
+.empty{text-align:center;color:var(--mut);padding:40px 18px;background:var(--surface);border:1px dashed var(--line);border-radius:var(--r)}
+.empty .ic{font-size:42px;display:block;margin-bottom:10px;opacity:.4}
+.section-title{font-size:13px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin:18px 0 10px;padding:0 4px}
+.section-title:first-child{margin-top:0}
+.err{background:var(--red-soft);color:var(--red);padding:14px;border-radius:var(--r);text-align:center;font-weight:600}
+.last-cleaned{font-size:11px;color:var(--mut);margin-top:8px;display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(14,158,95,.18);display:inline-block}
+.status-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:7px;font-size:11px;font-weight:600;background:var(--blue-soft);color:var(--blue)}
+.status-pill.blocked{background:var(--green-soft);color:var(--green)}
+@media (max-width:600px){
+  header h1{font-size:20px}
+  .stats{grid-template-columns:repeat(3,1fr);gap:7px}
+  .stat .v{font-size:20px}
+  .unit-name{font-size:15px}
+}
+</style></head>
+<body>
+<header>
+  <h1>👋 أهلاً بشركاء النجاح</h1>
+  <h2>جدول التنظيف العميق · عوجا</h2>
+  <div class="lang-en">Welcome our success partners<br>Deep cleaning schedule · Ouja Residence</div>
+</header>
+<div class="wrap" id="root">
+  <div class="empty"><span class="ic">⏳</span>جاري التحميل...<br><span style="font-size:11.5px">Loading...</span></div>
+</div>
+<script>
+function esc(s){return (s==null?'':String(s)).replace(/[<>&]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]})}
+function wdAr(d){return ['الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][d]}
+function fmtDate(s){try{const dt=new Date(s);return dt.toLocaleDateString('ar-SA',{day:'numeric',month:'long',year:'numeric'})}catch(_){return s}}
+
+(async function(){
+  const root = document.getElementById('root');
+  const token = new URLSearchParams(location.search).get('token') || '';
+  if(!token){ root.innerHTML = '<div class="err">⚠ رابط غير مكتمل · Missing access token</div>'; return; }
+  let data;
+  try{
+    const r = await fetch('/api/cleaning/public?token=' + encodeURIComponent(token));
+    if(r.status === 401){ root.innerHTML = '<div class="err">⚠ رابط غير صحيح · Invalid access</div>'; return; }
+    data = await r.json();
+  }catch(e){
+    root.innerHTML = '<div class="err">⚠ تعذّر التحميل · Could not load schedule</div>'; return;
+  }
+  const items = data.items || [];
+  const today = data.today;
+  // group by date
+  const byDate = {};
+  for(const it of items){
+    if(!byDate[it.date]) byDate[it.date] = [];
+    byDate[it.date].push(it);
+  }
+  const todayItems = items.filter(function(x){return x.date === today});
+  const upcoming = items.filter(function(x){return x.date > today});
+  const total = items.length;
+  const this7 = items.filter(function(x){
+    const d = new Date(x.date), tdy = new Date(today);
+    return (d - tdy) / 86400000 <= 7 && d >= tdy;
+  }).length;
+
+  let html = '<div class="stats">'
+    + '<div class="stat"><div class="v">'+todayItems.length+'</div><div class="l">اليوم · today</div></div>'
+    + '<div class="stat"><div class="v">'+this7+'</div><div class="l">٧ أيام · 7 days</div></div>'
+    + '<div class="stat"><div class="v">'+total+'</div><div class="l">المجموع · total</div></div>'
+    + '</div>';
+
+  function renderDay(d_iso, list){
+    const dt = new Date(d_iso);
+    const wd = wdAr(dt.getDay() === 0 ? 6 : dt.getDay() - 1);
+    const isToday = d_iso === today;
+    const daysAway = Math.round((new Date(d_iso) - new Date(today)) / 86400000);
+    let body = '';
+    for(const u of list){
+      const lastDone = u.last_done ? '<div class="last-cleaned"><span class="dot"></span>آخر تنظيف عميق: ' + fmtDate(u.last_done) + ' · last deep clean</div>' : '';
+      const guide = u.guide_url ? '<a class="guide-btn" href="' + esc(u.guide_url) + '" target="_blank">📖 دليل الوصول · arrival guide</a>' : '';
+      const stPill = u.status === 'blocked' ? '<span class="status-pill blocked">🔒 مؤكد · confirmed</span>' : '<span class="status-pill">📅 مجدول · scheduled</span>';
+      body += '<div class="day-body">'
+        + '<div class="unit-name">'+esc(u.name)+'</div>'
+        + '<div class="unit-meta">'
+          + stPill
+          + (u.beds ? '<span class="tag gold">'+u.beds+' غرف · bedrooms</span>' : '')
+          + (u.baths ? '<span class="tag">'+u.baths+' حمام · bath</span>' : '')
+          + (u.area ? '<span class="tag blue">📍 '+esc(u.area)+'</span>' : '')
+        + '</div>'
+        + lastDone
+        + guide
+        + '</div>';
+    }
+    const todayTag = isToday ? '<span class="today-pill">اليوم · today</span>'
+                             : '<span class="days-away">بعد '+daysAway+' يوم · in '+daysAway+'d</span>';
+    return '<div class="day-card">'
+      + '<div class="day-head"><div><div class="date">'+fmtDate(d_iso)+'</div><div class="wd">'+wd+'</div></div>'+todayTag+'</div>'
+      + body
+      + '</div>';
+  }
+
+  if(todayItems.length){
+    html += '<div class="section-title">🌟 تنظيف اليوم · today\\'s clean</div>' + renderDay(today, todayItems);
+  }
+  if(upcoming.length){
+    html += '<div class="section-title">📅 القادم · upcoming</div>';
+    const grouped = {};
+    for(const u of upcoming){ if(!grouped[u.date]) grouped[u.date] = []; grouped[u.date].push(u); }
+    for(const d of Object.keys(grouped).sort()){ html += renderDay(d, grouped[d]); }
+  }
+  if(!items.length){
+    html += '<div class="empty"><span class="ic">✓</span>ما فيه تنظيفات مجدولة حالياً<br><span style="font-size:11.5px">No scheduled cleanings yet</span></div>';
+  }
+  root.innerHTML = html;
+})();
+</script>
+</body>
+</html>"""
+
 def _dash_auth(request):
     return bool(DASHBOARD_TOKEN) and (
         request.query.get("token") or request.headers.get("X-Token", "")) == DASHBOARD_TOKEN
@@ -7066,6 +7550,136 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_cleaning_schedule(request):
+    """Dashboard view of every unit's deep-clean state."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    listings = get_listings_map() or {}
+    today = datetime.now(TZ).date()
+    if not _catalog_units:
+        await asyncio.to_thread(load_catalog, True)
+    out = []
+    for lid, name in listings.items():
+        if lid not in _deep_clean_state:
+            _dc_init(lid)
+        s = _deep_clean_state[lid]
+        u = next((c for c in _catalog_units if c.get("id") == lid), {})
+        last = _parse_date(s.get("last_done"))
+        nxt = _parse_date(s.get("next_scheduled"))
+        days_since = (today - last).days if last else None
+        days_until = (nxt - today).days if nxt else None
+        # overdue if days_since > MAX
+        overdue = bool(days_since and days_since > DEEPCLEAN_MAX_DAYS)
+        out.append({
+            "lid": lid, "name": name,
+            "beds": u.get("beds"), "area": u.get("area") or u.get("neighbourhood"),
+            "last_done": s.get("last_done"),
+            "next_scheduled": s.get("next_scheduled"),
+            "next_status": s.get("next_status"),
+            "days_since_last": days_since, "days_until_next": days_until,
+            "overdue": overdue,
+            "history": (s.get("history") or [])[-5:],
+            "notes": s.get("notes", ""),
+        })
+    out.sort(key=lambda x: (-1 if x["overdue"] else 0, -(x["days_since_last"] or 0)))
+    counts = {
+        "total": len(out),
+        "overdue": sum(1 for x in out if x["overdue"]),
+        "scheduled": sum(1 for x in out if x["next_scheduled"]),
+        "blocked_tomorrow": sum(1 for x in out
+                                if x["next_scheduled"] == (today + timedelta(days=1)).isoformat()
+                                and x["next_status"] == "blocked"),
+    }
+    return _json({"items": out, "today": today.isoformat(), "counts": counts,
+                  "cleaning_url": ("/cleaning?token=" + CLEANING_TOKEN) if CLEANING_TOKEN else "",
+                  "have_token": bool(CLEANING_TOKEN)})
+
+async def _api_cleaning_mark_done(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    ok = await asyncio.to_thread(mark_deep_clean_done, lid, b.get("date"), b.get("notes", ""))
+    await asyncio.to_thread(persist_state)
+    name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
+    log_event("pricing", f"تنظيف عميق · {name}: تم الإنجاز ✓")
+    return _json({"ok": ok})
+
+async def _api_cleaning_reschedule(request):
+    """POST {lid, date} — manual override of next scheduled date."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    date = b.get("date")
+    if not _parse_date(date):
+        return _json({"error": "bad date"}, 400)
+    if lid not in _deep_clean_state:
+        _dc_init(lid)
+    _deep_clean_state[lid]["next_scheduled"] = date
+    _deep_clean_state[lid]["next_status"] = "scheduled"
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_cleaning_set_last(request):
+    """POST {lid, date} — set last_done (used to import the April 27 baseline file)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    date = b.get("date")
+    if not _parse_date(date):
+        return _json({"error": "bad date"}, 400)
+    if lid not in _deep_clean_state:
+        _dc_init(lid)
+    _deep_clean_state[lid]["last_done"] = date
+    _deep_clean_state[lid]["next_scheduled"] = None
+    _deep_clean_state[lid]["next_status"] = "unscheduled"
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_cleaning_public(request):
+    """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
+    not the dashboard token — so the link can be shared with the cleaners safely."""
+    token = request.query.get("token", "")
+    if not CLEANING_TOKEN or token != CLEANING_TOKEN:
+        return _json({"error": "unauthorized"}, 401)
+    if not _catalog_units:
+        await asyncio.to_thread(load_catalog, True)
+    listings = get_listings_map() or {}
+    today = datetime.now(TZ).date()
+    out = []
+    for lid, s in _deep_clean_state.items():
+        if not s.get("next_scheduled"):
+            continue
+        sd = _parse_date(s["next_scheduled"])
+        if not sd or sd < today or (sd - today).days > 45:
+            continue
+        u = next((c for c in _catalog_units if c.get("id") == lid), {})
+        out.append({
+            "name": listings.get(lid, str(lid)),
+            "date": s["next_scheduled"],
+            "status": s.get("next_status", "scheduled"),
+            "beds": u.get("beds"), "baths": u.get("baths"),
+            "area": u.get("area") or u.get("neighbourhood"),
+            "last_done": s.get("last_done"),
+            "guide_url": await asyncio.to_thread(get_guide_url, lid),
+        })
+    out.sort(key=lambda x: x["date"])
+    return _json({"items": out, "today": today.isoformat()})
+
+async def _handle_cleaning_page(request):
+    return web.Response(text=CLEANING_HTML, content_type="text/html")
+
 async def _api_events_list(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -7449,6 +8063,13 @@ async def start_web_server():
         app.router.add_post("/api/events/save", _api_events_save)
         app.router.add_post("/api/events/delete", _api_events_delete)
         app.router.add_get("/api/units", _api_units_list)
+        app.router.add_get("/api/cleaning/schedule", _api_cleaning_schedule)
+        app.router.add_post("/api/cleaning/mark-done", _api_cleaning_mark_done)
+        app.router.add_post("/api/cleaning/reschedule", _api_cleaning_reschedule)
+        app.router.add_post("/api/cleaning/set-last", _api_cleaning_set_last)
+        # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
+        app.router.add_get("/cleaning", _handle_cleaning_page)
+        app.router.add_get("/api/cleaning/public", _api_cleaning_public)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -7582,6 +8203,22 @@ async def agreement_reminder_loop():
     except Exception as e:
         print("agreement_reminder_loop error:", e)
 
+@tasks.loop(hours=4)
+async def deepclean_schedule_loop():
+    """Top up the deep-clean schedule for any unit that doesn't have a next date."""
+    try:
+        await asyncio.to_thread(schedule_deep_cleans)
+    except Exception as e:
+        print("deepclean_schedule_loop error:", e)
+
+@tasks.loop(time=dt_time(hour=DEEPCLEAN_CONFIRM_HOUR, tzinfo=TZ))
+async def deepclean_confirm_loop():
+    """At 9pm Riyadh: confirm tomorrow's deep cleans (block calendar) or push them."""
+    try:
+        await asyncio.to_thread(confirm_tomorrow_deepcleans)
+    except Exception as e:
+        print("deepclean_confirm_loop error:", e)
+
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
@@ -7612,6 +8249,8 @@ def load_state():
         _daily_metrics.update(_load_json("daily_metrics.json", {}))
         _custom_events.clear()
         _custom_events.extend(_load_json("custom_events.json", []))
+        _deep_clean_state.clear()
+        _deep_clean_state.update({int(k): v for k, v in _load_json("deep_clean.json", {}).items()})
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -7643,6 +8282,7 @@ def persist_state():
                 _daily_metrics.pop(k, None)
     _save_json("daily_metrics.json", _daily_metrics)
     _save_json("custom_events.json", _custom_events)
+    _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -8421,6 +9061,10 @@ async def on_ready():
         learning_distillation_loop.start()
     if AGREEMENT_REMINDER_ENABLED and not agreement_reminder_loop.is_running():
         agreement_reminder_loop.start()
+    if DEEPCLEAN_ENABLED and not deepclean_schedule_loop.is_running():
+        deepclean_schedule_loop.start()
+    if DEEPCLEAN_ENABLED and not deepclean_confirm_loop.is_running():
+        deepclean_confirm_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
