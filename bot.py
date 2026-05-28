@@ -978,6 +978,127 @@ def confirm_tomorrow_deepcleans():
     if confirmed or pushed:
         print(f"deepclean: confirmed={confirmed} pushed={pushed} for {iso}")
 
+def _make_feedback_token(lid, res_id):
+    """Compact opaque token combining unit + reservation. Random suffix so the
+    URL can't be guessed."""
+    import secrets
+    return f"{int(lid)}-{int(res_id)}-{secrets.token_urlsafe(6)}"
+
+def send_cleaning_feedback_request(reservation_row):
+    """For one arrival, queue a rating-request message to the guest. Called by
+    the cleaning_feedback_loop. Safe to call repeatedly — _cleaning_feedback_sent
+    short-circuits duplicates."""
+    if not CLEAN_FEEDBACK_ENABLED:
+        return False
+    r = reservation_row
+    res_id = r.get("id")
+    if not res_id or res_id in _cleaning_feedback_sent:
+        return False
+    if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+        return False
+    cid = r.get("conversationId")
+    if not cid:
+        return False
+    lid = r.get("listingMapId")
+    if not lid:
+        return False
+    # Only ask if the unit had a recent deep clean (within last 30 days)
+    s = _deep_clean_state.get(int(lid)) or {}
+    last = _parse_date(s.get("last_done"))
+    if not last:
+        return False
+    if (datetime.now(TZ).date() - last).days > 30:
+        return False
+    token = _make_feedback_token(lid, res_id)
+    unit_name = (get_listings_map() or {}).get(lid) or f"unit-{lid}"
+    base_url = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    url = f"{base_url}/clean-feedback?id={token}" if base_url else f"/clean-feedback?id={token}"
+    is_ar = _has_arabic(r.get("guestName") or "") or True
+    body = (
+        f"حياك الله 🤍\nخدمة سريعة عشانك: كيف لقيت نظافة الشقة لما دخلت؟ تقييمك يفرق معنا "
+        f"وبيوصل لشركة التنظيف. ضغطة وحدة فقط:\n{url}\n\nشكراً 🤍"
+        if is_ar else
+        f"Hi 🤍\nQuick favor: how did you find the apartment's cleanliness on check-in? "
+        f"Your rating goes straight to our cleaning team. One tap:\n{url}\n\nThank you 🤍"
+    )
+    try:
+        send_guest_message(cid, body, "email")
+        _cleaning_feedback[token] = {
+            "lid": int(lid), "reservation_id": int(res_id),
+            "unit": unit_name, "guest": r.get("guestName", ""),
+            "ts_sent": datetime.now(TZ).isoformat(timespec="minutes"),
+            "score": None, "comment": "", "ts_done": None,
+            "last_clean_date": s.get("last_done"),
+        }
+        _cleaning_feedback_sent.add(res_id)
+        log_event("guest", f"تقييم نظافة · أُرسل للضيف {r.get('guestName','')} · {unit_name}")
+        return True
+    except Exception as e:
+        print("send_cleaning_feedback_request error:", e)
+        return False
+
+def check_cleaning_feedback_requests():
+    """Walk today's arrivals; for each one whose check-in passed >= N hours ago
+    and the unit was recently deep-cleaned, dispatch the feedback request once."""
+    if not CLEAN_FEEDBACK_ENABLED:
+        return
+    today_iso = datetime.now(TZ).date().isoformat()
+    yest_iso = (datetime.now(TZ).date() - timedelta(days=1)).isoformat()
+    try:
+        data = api_get("/reservations", params={
+            "arrivalStartDate": yest_iso, "arrivalEndDate": today_iso,
+            "limit": 200, "includeResources": 0,
+        })
+    except Exception as e:
+        print("cleaning feedback fetch error:", e); return
+    rows = data.get("result", []) or []
+    now = datetime.now(TZ)
+    sent = 0
+    for r in rows:
+        arr = _parse_date(r.get("arrivalDate"))
+        if not arr: continue
+        ci_hour = parse_hour(r.get("checkInTime"), 15)
+        ci_dt = datetime(arr.year, arr.month, arr.day, min(ci_hour, 23), 0, tzinfo=TZ)
+        hours_after_ci = (now - ci_dt).total_seconds() / 3600
+        if hours_after_ci < CLEAN_FEEDBACK_DELAY_HOURS or hours_after_ci > 36:
+            continue
+        if send_cleaning_feedback_request(r):
+            sent += 1
+    if sent:
+        print(f"cleaning-feedback: queued {sent} request(s)")
+
+def cleaning_quality_summary():
+    """Aggregate stats: avg score per unit, recent scores, distribution."""
+    by_unit = defaultdict(lambda: {"name":"", "lid":None, "scores":[], "comments":[]})
+    for tok, fb in _cleaning_feedback.items():
+        if fb.get("score") is None:
+            continue
+        u = by_unit[fb["lid"]]
+        u["name"] = fb["unit"]; u["lid"] = fb["lid"]
+        u["scores"].append({"ts": fb.get("ts_done"), "score": fb["score"], "guest": fb.get("guest","")})
+        if (fb.get("comment") or "").strip():
+            u["comments"].append({"ts": fb.get("ts_done"), "comment": fb["comment"], "score": fb["score"]})
+    units = []
+    for lid, u in by_unit.items():
+        scores = [x["score"] for x in u["scores"]]
+        avg = round(sum(scores) / len(scores), 2) if scores else None
+        units.append({"lid": lid, "name": u["name"],
+                      "avg": avg, "count": len(scores),
+                      "recent": u["scores"][-5:], "comments": u["comments"][-5:]})
+    units.sort(key=lambda x: (x["avg"] if x["avg"] is not None else 99))
+    sent = len(_cleaning_feedback)
+    done = sum(1 for fb in _cleaning_feedback.values() if fb.get("score") is not None)
+    overall_avg = None
+    if done:
+        all_scores = [fb["score"] for fb in _cleaning_feedback.values() if fb.get("score") is not None]
+        overall_avg = round(sum(all_scores)/len(all_scores), 2)
+    return {
+        "units": units,
+        "stats": {"sent": sent, "responded": done,
+                  "response_rate": round(done/sent*100) if sent else 0,
+                  "overall_avg": overall_avg},
+    }
+
 def mark_deep_clean_done(lid, date_iso=None, notes=""):
     if lid not in _deep_clean_state:
         _dc_init(lid)
@@ -3927,6 +4048,16 @@ GUEST_VIP_MIN_STAYS  = int(os.environ.get("GUEST_VIP_MIN_STAYS", "2"))
 GUEST_VIP_MIN_NIGHTS = int(os.environ.get("GUEST_VIP_MIN_NIGHTS", "5"))
 GUEST_SUMMARY_REFRESH_MIN = int(os.environ.get("GUEST_SUMMARY_REFRESH_MIN", "60"))   # how often to re-distill summaries
 
+# ---------------- Cleaning quality feedback ----------------
+# After each completed deep-clean, when the NEXT guest checks into that unit
+# we send them a one-tap rating link (1-5 stars). The page lives at
+# /clean-feedback?id=<token> and writes scores back to a per-unit ledger so
+# the owner sees which units are slipping + each cleaning company's avg score.
+CLEAN_FEEDBACK_ENABLED = os.environ.get("CLEAN_FEEDBACK_ENABLED", "1") in ("1","true","True","yes")
+CLEAN_FEEDBACK_DELAY_HOURS = int(os.environ.get("CLEAN_FEEDBACK_DELAY_HOURS", "3"))   # ask N hours after check-in
+_cleaning_feedback = {}     # token -> {lid, unit, guest, ts_sent, score, comment, ts_done}
+_cleaning_feedback_sent = set()   # reservation_ids we've already pinged so we don't double-ask
+
 def _normalize_phone(s):
     s = "".join(c for c in (s or "") if c.isdigit())
     if not s:
@@ -4784,6 +4915,28 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ QUALITY (cleaning feedback per unit) ============ -->
+      <section class="view" id="view_quality">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_quality">⭐ جودة التنظيف</div>
+            <div class="page-sub" id="t_quality_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadQuality()">↻</button>
+          </div>
+        </div>
+        <div class="kpis" id="qualStats"></div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">🏠 ترتيب الوحدات</span></div>
+          <div id="qualUnitsBody"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">💬 آخر التعليقات</span></div>
+          <div id="qualCommentsBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ GUESTS (profiles + VIP + summaries) ============ -->
       <section class="view" id="view_guests">
         <div class="page-head">
@@ -4963,6 +5116,12 @@ const T = {
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
+    quality:'جودة النظافة', quality_title:'⭐ جودة التنظيف',
+    quality_sub:'تقييمات الضيوف لنظافة الوحدات — متوسط كل وحدة + التعليقات',
+    quality_stat_sent:'طُلب', quality_stat_resp:'استُجيب', quality_stat_rate:'نسبة الاستجابة', quality_stat_avg:'المتوسط العام',
+    quality_unit:'الوحدة', quality_avg:'المتوسط', quality_count:'عدد التقييمات', quality_recent:'آخر تقييم',
+    quality_empty:'ما فيه تقييمات بعد · أول تقييم بيوصل بعد ما يدخل ضيف بعد التنظيف العميق',
+    quality_comments:'تعليقات',
     learn_title:'📚 ما تعلّمه المساعد',
     learn_sub:'الملخصات اللي استخلصها النظام من ردود فريقك — تقدر تعدّل أو تحذف',
     learn_general:'الملخص العام (يطبّق على كل الشقق)', learn_apt:'ملخصات حسب الشقة',
@@ -5088,6 +5247,12 @@ const T = {
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
+    quality:'Cleaning quality', quality_title:'⭐ Cleaning quality',
+    quality_sub:"Guest ratings on each unit's cleanliness — averages + comments",
+    quality_stat_sent:'Requested', quality_stat_resp:'Responded', quality_stat_rate:'Response rate', quality_stat_avg:'Overall avg',
+    quality_unit:'Unit', quality_avg:'Avg', quality_count:'Ratings', quality_recent:'Recent',
+    quality_empty:'No ratings yet · the first one comes after a guest checks in post-deep-clean',
+    quality_comments:'Comments',
     learn_title:'📚 What the assistant has learned',
     learn_sub:"Summaries the system distilled from your team's replies — you can edit or delete",
     learn_general:'General summary (applies to every unit)', learn_apt:'Per-apartment summaries',
@@ -5253,6 +5418,7 @@ function applyLang(){
     cf_all:'clean_filter_all', cf_overdue:'clean_filter_overdue', cf_soon:'clean_filter_soon', cf_unsch:'clean_filter_unscheduled',
     t_guests:'guests_title', t_guests_sub:'guests_sub',
     gf_all:'guests_filter_all', gf_vip:'guests_filter_vip', gf_repeat:'guests_filter_repeat',
+    t_quality:'quality_title', t_quality_sub:'quality_sub',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -5278,6 +5444,7 @@ const NAV = [
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
   {id:'guests',  ic:'👤', tk:'guests'},
+  {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
   {id:'learn',   ic:'📚', tk:'learn'},
   {id:'log',     ic:'≡', tk:'log'}
@@ -5363,6 +5530,7 @@ function go(id){
   if(id==='calendar') loadForwardCalendar();
   if(id==='clean') loadCleaning();
   if(id==='guests') loadGuests();
+  if(id==='quality') loadQuality();
 }
 
 /* ============================================================
@@ -5578,6 +5746,70 @@ function renderUrgentStrip(){
     + rows
     + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
     + '</div>';
+}
+
+// ============== CLEANING QUALITY ==============
+async function loadQuality(){
+  document.getElementById('qualUnitsBody').innerHTML = '<div class="empty sk">—</div>';
+  document.getElementById('qualCommentsBody').innerHTML = '<div class="empty sk">—</div>';
+  try{ D.quality = await api('/api/cleaning/quality') }catch(_){ D.quality = {units:[], stats:{}} }
+  const sub = document.getElementById('t_quality_sub'); if(sub) sub.textContent = t().quality_sub;
+  renderQualityStats();
+  renderQualityUnits();
+  renderQualityComments();
+}
+function _stars(n){ if(n == null) return '—'; const k = Math.round(n); return '★'.repeat(k) + '☆'.repeat(5-k) + ' ' + n }
+function renderQualityStats(){
+  const el = document.getElementById('qualStats'); if(!el) return;
+  const s = (D.quality||{}).stats || {};
+  const cards = [
+    {ic:'📤', cls:'b', val:s.sent||0, lbl:t().quality_stat_sent},
+    {ic:'✓', cls:'g', val:s.responded||0, lbl:t().quality_stat_resp},
+    {ic:'%', cls:'p', val:(s.response_rate||0)+'%', lbl:t().quality_stat_rate},
+    {ic:'⭐', cls:'gold', val:s.overall_avg!=null?s.overall_avg:'—', lbl:t().quality_stat_avg},
+  ];
+  el.innerHTML = cards.map(function(c){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
+      + '<div class="kpi-val">'+c.val+'</div><div class="kpi-lbl">'+c.lbl+'</div></div>';
+  }).join('');
+}
+function renderQualityUnits(){
+  const body = document.getElementById('qualUnitsBody'); if(!body) return;
+  const units = ((D.quality||{}).units) || [];
+  if(!units.length){ body.innerHTML = '<div class="empty">'+t().quality_empty+'</div>'; return; }
+  let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
+    + '<th>'+t().quality_unit+'</th><th class="num">'+t().quality_avg+'</th>'
+    + '<th class="num">'+t().quality_count+'</th><th>'+t().quality_recent+'</th></tr></thead><tbody>';
+  for(const u of units){
+    const avgCls = u.avg == null ? '' : (u.avg >= 4.5 ? 'ok' : u.avg >= 3.5 ? 'warn' : 'danger');
+    const avgPill = u.avg == null ? '<span class="muted">—</span>'
+                  : '<span class="pill '+avgCls+'">'+_stars(u.avg)+'</span>';
+    const recent = u.recent && u.recent.length
+      ? u.recent.slice(-3).map(function(r){return '★'.repeat(r.score)}).join(' · ') : '—';
+    html += '<tr><td class="strong">'+esc(u.name||'—')+'</td>'
+      + '<td class="num">'+avgPill+'</td>'
+      + '<td class="num">'+u.count+'</td>'
+      + '<td class="muted" style="font-size:11.5px">'+recent+'</td></tr>';
+  }
+  html += '</tbody></table></div>';
+  body.innerHTML = html;
+}
+function renderQualityComments(){
+  const body = document.getElementById('qualCommentsBody'); if(!body) return;
+  const units = ((D.quality||{}).units) || [];
+  const all = [];
+  for(const u of units){
+    for(const c of (u.comments || [])){
+      all.push({unit:u.name, ts:c.ts, comment:c.comment, score:c.score});
+    }
+  }
+  if(!all.length){ body.innerHTML = '<div class="empty">'+t().quality_empty+'</div>'; return; }
+  all.sort(function(a,b){return (b.ts||'').localeCompare(a.ts||'')});
+  body.innerHTML = all.slice(0,20).map(function(c){
+    return '<div class="log-row"><div class="log-lic">★'+c.score+'</div>'
+      + '<div class="log-lts">'+esc((c.ts||'').replace('T',' '))+'<br><b style="color:var(--text)">'+esc(c.unit||'')+'</b></div>'
+      + '<div class="log-ltxt">'+esc(c.comment||'')+'</div></div>';
+  }).join('');
 }
 
 // ============== GUEST PROFILES ==============
@@ -7205,6 +7437,93 @@ function fmtDate(s){try{const dt=new Date(s);return dt.toLocaleDateString('ar-SA
 </body>
 </html>"""
 
+CLEAN_FEEDBACK_HTML = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>تقييم نظافة الشقة · عوجا</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#FAFAF7;--surface:#FFFFFF;--gold:#A37728;--gold-2:#8B6320;--text:#1A1815;--mut:#A09989;--green:#0E9E5F;--line:#E8E2D5}
+html,body{font-family:'IBM Plex Sans Arabic','Inter',sans-serif;background:var(--bg);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;color:var(--text)}
+.card{max-width:440px;width:100%;background:var(--surface);border-radius:18px;box-shadow:0 12px 40px rgba(26,24,21,.08);padding:30px 24px;text-align:center}
+.brand{font-size:26px;font-weight:700;color:var(--gold);margin-bottom:4px}
+h1{font-size:18px;font-weight:600;margin:14px 0 6px;color:var(--text);line-height:1.5}
+.unit{font-size:14px;color:var(--mut);margin-bottom:24px}
+.stars{display:flex;justify-content:center;gap:8px;margin:18px 0}
+.star{font-size:44px;cursor:pointer;color:#E0DCD2;transition:.12s;-webkit-tap-highlight-color:transparent}
+.star:hover,.star.on{color:var(--gold);transform:scale(1.08)}
+textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-family:inherit;font-size:14px;min-height:80px;margin:14px 0;resize:vertical}
+button{background:linear-gradient(135deg,var(--gold),var(--gold-2));color:#fff;border:none;padding:13px 26px;border-radius:11px;font-size:15px;font-weight:600;cursor:pointer;width:100%;transition:.15s}
+button:hover{filter:brightness(1.06)}
+button:disabled{opacity:.5;cursor:default}
+.thanks{padding:36px 20px;text-align:center}
+.thanks .ic{font-size:56px;display:block;margin-bottom:10px}
+.thanks h2{font-size:20px;font-weight:700;color:var(--green);margin-bottom:6px}
+.thanks p{color:var(--mut);font-size:14px}
+.err{color:#C44343;padding:18px;text-align:center}
+</style></head>
+<body>
+<div class="card" id="root">
+  <div style="text-align:center;padding:30px">⏳ يحمّل…</div>
+</div>
+<script>
+let chosen = 0;
+function setStar(n){
+  chosen = n;
+  document.querySelectorAll('.star').forEach(function(el, i){
+    el.classList.toggle('on', i < n);
+  });
+  document.getElementById('sendBtn').disabled = (n < 1);
+}
+async function submit(){
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true; btn.textContent = '⏳';
+  const id = new URLSearchParams(location.search).get('id');
+  const comment = (document.getElementById('cmt')||{}).value || '';
+  const r = await fetch('/api/clean-feedback?id=' + encodeURIComponent(id), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id:id, score:chosen, comment:comment})
+  });
+  const j = await r.json().catch(function(){return {}});
+  const root = document.getElementById('root');
+  if(j.ok){
+    root.innerHTML = '<div class="thanks"><span class="ic">🤍</span><h2>شكراً لك</h2><p>تقييمك وصل لفريقنا · Your rating has been received</p></div>';
+  }else{
+    root.innerHTML = '<div class="err">⚠ تعذّر الإرسال · ' + (j.error || 'try again') + '</div>';
+  }
+}
+(async function(){
+  const id = new URLSearchParams(location.search).get('id');
+  if(!id){ document.getElementById('root').innerHTML = '<div class="err">⚠ رابط غير صحيح</div>'; return; }
+  let data;
+  try{
+    const r = await fetch('/api/clean-feedback?id=' + encodeURIComponent(id));
+    data = await r.json();
+  }catch(e){ document.getElementById('root').innerHTML = '<div class="err">⚠ خطأ</div>'; return; }
+  if(data.error){ document.getElementById('root').innerHTML = '<div class="err">⚠ ' + data.error + '</div>'; return; }
+  if(data.already_done){
+    document.getElementById('root').innerHTML = '<div class="thanks"><span class="ic">✓</span><h2>تم التقييم مسبقاً</h2><p>شكراً لك · Already received</p></div>';
+    return;
+  }
+  document.getElementById('root').innerHTML =
+    '<div class="brand">عوجا</div>'
+    + '<h1>كيف لقيت نظافة الشقة لما دخلت؟<br><span style="color:var(--mut);font-size:14px;font-weight:400">How clean was the apartment on check-in?</span></h1>'
+    + '<div class="unit">' + (data.unit || '') + '</div>'
+    + '<div class="stars">'
+      + [1,2,3,4,5].map(function(n){ return '<span class="star" onclick="setStar(' + n + ')">★</span>' }).join('')
+    + '</div>'
+    + '<textarea id="cmt" placeholder="ملاحظة (اختياري) · optional comment"></textarea>'
+    + '<button id="sendBtn" disabled onclick="submit()">إرسال · Send</button>';
+})();
+</script>
+</body>
+</html>"""
+
 def _dash_auth(request):
     return bool(DASHBOARD_TOKEN) and (
         request.query.get("token") or request.headers.get("X-Token", "")) == DASHBOARD_TOKEN
@@ -7933,6 +8252,46 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_clean_quality_summary(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(cleaning_quality_summary())
+
+async def _api_clean_feedback_get(request):
+    """Public — fetches the rating context for a token (so the page can show
+    which unit they're rating). No auth required; the token IS the auth."""
+    tok = request.query.get("id", "")
+    fb = _cleaning_feedback.get(tok)
+    if not fb:
+        return _json({"error": "not found"}, 404)
+    return _json({"unit": fb.get("unit"), "guest": fb.get("guest", ""),
+                  "already_done": fb.get("score") is not None})
+
+async def _api_clean_feedback_submit(request):
+    """Public — POST {id, score(1-5), comment?}. Idempotent: first submission wins."""
+    b = await _read_body(request)
+    tok = (b.get("id") or "").strip()
+    fb = _cleaning_feedback.get(tok)
+    if not fb:
+        return _json({"error": "not found"}, 404)
+    if fb.get("score") is not None:
+        return _json({"ok": True, "already": True})
+    try:
+        score = int(b.get("score"))
+    except Exception:
+        return _json({"error": "bad score"}, 400)
+    if score < 1 or score > 5:
+        return _json({"error": "score 1-5"}, 400)
+    fb["score"] = score
+    fb["comment"] = (b.get("comment") or "")[:600]
+    fb["ts_done"] = datetime.now(TZ).isoformat(timespec="minutes")
+    await asyncio.to_thread(persist_state)
+    log_event("guest", f"تقييم نظافة جديد · {fb.get('unit','')} · {score}⭐")
+    return _json({"ok": True})
+
+async def _handle_clean_feedback_page(request):
+    return web.Response(text=CLEAN_FEEDBACK_HTML, content_type="text/html")
+
 async def _api_guests_list(request):
     """Return guest profiles for the dashboard. Filters/sorts in the client."""
     if not _dash_auth(request):
@@ -8583,6 +8942,11 @@ async def start_web_server():
         app.router.add_post("/api/events/delete", _api_events_delete)
         app.router.add_get("/api/units", _api_units_list)
         app.router.add_get("/api/guests", _api_guests_list)
+        app.router.add_get("/api/cleaning/quality", _api_clean_quality_summary)
+        # Public no-auth feedback page + endpoints (token IS the auth)
+        app.router.add_get("/clean-feedback", _handle_clean_feedback_page)
+        app.router.add_get("/api/clean-feedback", _api_clean_feedback_get)
+        app.router.add_post("/api/clean-feedback", _api_clean_feedback_submit)
         app.router.add_get("/api/guests/detail", _api_guest_detail)
         app.router.add_post("/api/guests/notes", _api_guest_notes)
         app.router.add_post("/api/guests/toggle-vip", _api_guest_toggle_vip)
@@ -8749,6 +9113,15 @@ async def offhours_ack_reset_loop():
     got an off-hours auto-ack so they can be re-acked next time we go offline."""
     _offhours_acked_convos.clear()
 
+@tasks.loop(minutes=30)
+async def cleaning_feedback_loop():
+    """Twice an hour: check today's arrivals and dispatch a feedback request
+    to any guest whose check-in passed >= CLEAN_FEEDBACK_DELAY_HOURS ago."""
+    try:
+        await asyncio.to_thread(check_cleaning_feedback_requests)
+    except Exception as e:
+        print("cleaning_feedback_loop error:", e)
+
 @tasks.loop(minutes=GUEST_SUMMARY_REFRESH_MIN)
 async def guest_summary_loop():
     """Walk recent conversations and append a Claude-generated 2-3 line summary
@@ -8823,6 +9196,10 @@ def load_state():
         _deep_clean_state.update({int(k): v for k, v in _load_json("deep_clean.json", {}).items()})
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
+        _cleaning_feedback.clear()
+        _cleaning_feedback.update(_load_json("cleaning_feedback.json", {}))
+        _cleaning_feedback_sent.clear()
+        _cleaning_feedback_sent.update(int(x) for x in _load_json("cleaning_feedback_sent.json", []) if str(x).strip())
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -8856,6 +9233,8 @@ def persist_state():
     _save_json("custom_events.json", _custom_events)
     _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
     _save_json("guest_profiles.json", _guest_profiles)
+    _save_json("cleaning_feedback.json", _cleaning_feedback)
+    _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -9642,6 +10021,8 @@ async def on_ready():
         offhours_ack_reset_loop.start()
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
         guest_summary_loop.start()
+    if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
+        cleaning_feedback_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
