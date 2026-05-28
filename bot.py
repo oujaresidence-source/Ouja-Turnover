@@ -501,6 +501,154 @@ def is_weekend_today():
     return datetime.now(TZ).weekday() in WEEKEND_DAYS
 
 # ====================================================================
+# Saudi events / high-demand windows. These boost the bot's reasoning
+# about pricing and surface as alerts when the portfolio's forward pace
+# for those dates is unusually low. Dates are approximate and easy to
+# edit in one place.
+# ====================================================================
+SAUDI_EVENTS = [
+    # name, start_iso, end_iso, demand boost (multiplier hint), kind
+    {"name": "يوم التأسيس",  "start": "2026-02-22", "end": "2026-02-22", "boost": 1.40, "kind": "national"},
+    {"name": "يوم التأسيس",  "start": "2027-02-22", "end": "2027-02-22", "boost": 1.40, "kind": "national"},
+    {"name": "عيد الفطر",     "start": "2026-03-20", "end": "2026-03-25", "boost": 1.60, "kind": "eid"},
+    {"name": "عيد الأضحى",    "start": "2026-05-26", "end": "2026-06-01", "boost": 1.55, "kind": "eid"},
+    {"name": "عيد الفطر",     "start": "2027-03-09", "end": "2027-03-14", "boost": 1.60, "kind": "eid"},
+    {"name": "عيد الأضحى",    "start": "2027-05-16", "end": "2027-05-22", "boost": 1.55, "kind": "eid"},
+    {"name": "اليوم الوطني",  "start": "2026-09-22", "end": "2026-09-24", "boost": 1.50, "kind": "national"},
+    {"name": "اليوم الوطني",  "start": "2027-09-22", "end": "2027-09-24", "boost": 1.50, "kind": "national"},
+    {"name": "موسم الرياض",   "start": "2026-10-23", "end": "2027-03-15", "boost": 1.30, "kind": "season"},
+    {"name": "موسم الرياض",   "start": "2027-10-23", "end": "2028-03-15", "boost": 1.30, "kind": "season"},
+    # Ramadan = low demand period — encoded as a NEGATIVE boost so the
+    # pricing model can pull back rather than push.
+    {"name": "رمضان",         "start": "2026-02-17", "end": "2026-03-19", "boost": 0.75, "kind": "ramadan"},
+    {"name": "رمضان",         "start": "2027-02-06", "end": "2027-03-08", "boost": 0.75, "kind": "ramadan"},
+]
+
+def events_for_date(d):
+    """Active SAUDI_EVENTS entries for a `datetime.date`."""
+    if not d:
+        return []
+    iso = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
+    return [e for e in SAUDI_EVENTS if e["start"] <= iso <= e["end"]]
+
+def event_boost_for_date(d):
+    """Effective multiplier on this date — product of all active events.
+    Returns 1.0 if no events apply."""
+    boost = 1.0
+    for e in events_for_date(d):
+        boost *= e["boost"]
+    return boost
+
+# ====================================================================
+# Forward calendar — for each day in [today, today+N), what's the
+# portfolio occupancy, how many units are still empty, what's the avg
+# price of those empty units, and which Saudi events are active.
+# Powers the dashboard's calendar view + pricing alerts.
+# ====================================================================
+def compute_forward_calendar(days=60):
+    today = datetime.now(TZ).date()
+    end_date = today + timedelta(days=days - 1)
+    today_iso = today.isoformat()
+    end_iso = end_date.isoformat()
+    listing_ids = list((get_listings_map() or {}).keys())
+    per_listing = {}
+
+    def _fetch(lid):
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": today_iso, "endDate": end_iso})
+            return lid, (cal.get("result") or [])
+        except Exception as e:
+            print(f"forward cal error ({lid}):", e)
+            return lid, []
+
+    if listing_ids:
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futs = [ex.submit(_fetch, lid) for lid in listing_ids]
+                for f in as_completed(futs):
+                    lid, days_data = f.result()
+                    per_listing[lid] = {d.get("date"): d for d in days_data if d.get("date")}
+        except Exception as e:
+            print("forward cal pool error:", e)
+    total_units = len(listing_ids) or 1
+    out = []
+    for i in range(days):
+        d = today + timedelta(days=i)
+        d_iso = d.isoformat()
+        occupied = 0
+        avail_prices = []
+        for lid in per_listing:
+            row = per_listing[lid].get(d_iso)
+            if not row:
+                continue
+            available = int(row.get("isAvailable", 0) or 0) == 1
+            booked = bool(row.get("reservationId"))
+            if booked or not available:
+                occupied += 1
+            else:
+                price = row.get("price")
+                if isinstance(price, (int, float)) and price > 0:
+                    avail_prices.append(float(price))
+        events = events_for_date(d)
+        avg_avail = round(sum(avail_prices) / len(avail_prices)) if avail_prices else None
+        out.append({
+            "date": d_iso, "weekday": d.weekday(),
+            "is_weekend": d.weekday() in WEEKEND_DAYS,
+            "occupied": occupied, "available": total_units - occupied,
+            "total": total_units,
+            "pace_pct": round((occupied / total_units) * 100) if total_units else 0,
+            "avg_price": avg_avail,
+            "events": [{"name": e["name"], "kind": e["kind"], "boost": e["boost"]} for e in events],
+            "event_boost": round(event_boost_for_date(d), 2),
+        })
+    return out
+
+# Cache it for 20 minutes — calendar fetches across the whole portfolio aren't free.
+_forward_cache = {"data": None, "ts": 0}
+def get_forward_calendar(days=60, ttl=1200):
+    if _forward_cache["data"] is not None and (time.time() - _forward_cache["ts"]) < ttl \
+       and len(_forward_cache["data"]) >= days:
+        return _forward_cache["data"][:days]
+    data = compute_forward_calendar(days=max(days, 60))
+    _forward_cache["data"] = data
+    _forward_cache["ts"] = time.time()
+    return data[:days]
+
+def compute_pricing_alerts():
+    """Edge-day attention list. Sees the next 45 days, flags:
+       (1) HIGH severity: an active SAUDI event date that's still <50% booked
+       (2) MED severity: a non-event weekend that's <30% booked + 14+ days away
+       (3) MED severity: a national-event date where the bot's prices aren't elevated
+    The Today-page urgent strip surfaces these inline."""
+    cal = get_forward_calendar(days=45)
+    today = datetime.now(TZ).date()
+    alerts = []
+    for d in cal:
+        d_date = _parse_date(d["date"])
+        lead = (d_date - today).days if d_date else 0
+        if d["events"] and d["pace_pct"] < 50 and lead >= 2:
+            names = "، ".join(e["name"] for e in d["events"])
+            alerts.append({
+                "kind": "low_pace_event", "severity": "high",
+                "date": d["date"], "lead_days": lead,
+                "title": f"{names} · {d['date']}",
+                "detail": f"pace {d['pace_pct']}% فقط · {d['available']} وحدة فاضية · "
+                          f"{'متوسط السعر ' + str(d['avg_price']) + ' ر.س' if d['avg_price'] else 'لا يوجد سعر متوسط'}",
+                "action_view": "pricing",
+            })
+        elif d["is_weekend"] and d["pace_pct"] < 30 and 5 <= lead <= 21 and not d["events"]:
+            wd_ar = ["الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت","الأحد"][d["weekday"]]
+            alerts.append({
+                "kind": "low_pace_weekend", "severity": "med",
+                "date": d["date"], "lead_days": lead,
+                "title": f"نهاية أسبوع {wd_ar} · {d['date']}",
+                "detail": f"pace {d['pace_pct']}% · {d['available']} وحدة فاضية بعد {lead} يوم",
+                "action_view": "pricing",
+            })
+    return alerts
+
+# ====================================================================
 # Rental-agreement reminder
 # --------------------------------------------------------------------
 # Hostaway only releases the door code AFTER the rental agreement is
@@ -894,6 +1042,20 @@ def compute_urgent_now():
             })
     except Exception as e:
         print("urgent arrivals error:", e)
+    # ---- pricing alerts on edge days (Saudi events + low-pace weekends) ----
+    try:
+        for pa in compute_pricing_alerts():
+            items.append({
+                "kind": pa["kind"], "severity": pa["severity"],
+                "id": pa["date"],
+                "title": pa["title"], "subtitle": "",
+                "detail": pa["detail"],
+                "age_min": None,
+                "action_view": pa.get("action_view", "pricing"),
+                "checkin": pa["date"],
+            })
+    except Exception as e:
+        print("pricing alerts error:", e)
     # severity order, then age
     sev_order = {"high": 0, "med": 1, "low": 2}
     items.sort(key=lambda x: (sev_order.get(x["severity"], 9), -(x.get("age_min") or 0)))
@@ -3918,6 +4080,27 @@ table.data .num{font-family:var(--font-mono);text-align:end}
 .stat-mini .l{font-size:10.5px;color:var(--mut);margin-top:3px}
 
 /* ============== CHARTS ============== */
+/* Calendar heatmap (forward pace view) */
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+@media (max-width:600px){.calgrid{grid-template-columns:repeat(5,1fr)}}
+.calday{position:relative;padding:8px 6px 6px;border-radius:8px;cursor:pointer;min-height:62px;border:1.5px solid transparent;transition:.12s;background:var(--surface-2)}
+.calday:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:var(--sh-sm)}
+.calday.sel{border-color:var(--gold);background:var(--gold-tint)}
+.calday.cal-low{background:#fae3e3}            /* <40% */
+.calday.cal-mid{background:#faeed1}            /* 40-69% */
+.calday.cal-high{background:#dcf3e6}           /* 70-89% */
+.calday.cal-full{background:#a3e0bd}           /* 90%+ */
+html[data-theme="dark"] .calday.cal-low{background:#2e1414}
+html[data-theme="dark"] .calday.cal-mid{background:#2d2210}
+html[data-theme="dark"] .calday.cal-high{background:#0f2e1f}
+html[data-theme="dark"] .calday.cal-full{background:#1a4d33}
+.calday .cd-dnum{font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--text);line-height:1}
+.calday .cd-pct{position:absolute;top:6px;inset-inline-end:6px;font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--text-2)}
+.calday .cd-wd{font-size:9px;color:var(--mut);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
+.calday .cd-evt{position:absolute;bottom:4px;inset-inline-start:6px;inset-inline-end:6px;font-size:9px;color:var(--gold);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+.calday.evt{border-color:var(--gold)}
+.calday.weekend .cd-dnum{color:var(--blue)}
+
 .bar-chart{display:flex;gap:4px;align-items:flex-end;height:130px;padding:0 4px;margin-bottom:12px}
 .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;cursor:default;position:relative}
 .bar-col:hover .bar-tip{opacity:1;transform:translateY(-3px)}
@@ -4087,6 +4270,32 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="discountBanner"></div>
 
         <div id="emptyGridWrap"><div class="empty sk">—</div></div>
+      </section>
+
+      <!-- ============ CALENDAR (forward pace + events + bulk apply) ============ -->
+      <section class="view" id="view_calendar">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_calendar">📅 تقويم الإيراد · ٦٠ يوم قادمة</div>
+            <div class="page-sub" id="t_calendar_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadForwardCalendar()">↻</button>
+          </div>
+        </div>
+        <div class="card">
+          <div id="calendarGrid"><div class="empty sk">—</div></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><span class="card-title">🗓️ <span id="t_cal_events_legend">المناسبات</span></span></div>
+            <div id="calEventsBody"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">⚡ <span id="t_bulk_title">تطبيق جماعي على المدى المحدد</span></span></div>
+            <div id="bulkForm"></div>
+          </div>
+        </div>
       </section>
 
       <!-- ============ PRICING VIEW ============ -->
@@ -4305,6 +4514,18 @@ const T = {
     learn_stat_replies:'ردود اليوم', learn_stat_auto:'معدّل التلقائي', learn_stat_conf:'متوسط الثقة',
     learn_stat_esc:'تصعيدات اليوم', learn_stat_vs_avg:'مقارنة بمتوسط ٧ أيام',
     learn_event_edited:'مُعدّل', learn_event_sent:'كما هي', learn_event_auto:'تلقائي', learn_event_via:'عبر',
+    calendar:'التقويم', calendar_title:'📅 تقويم الإيراد · ٦٠ يوم قادمة',
+    calendar_sub:'لون كل يوم = نسبة الإشغال. ضع المؤشر للتفاصيل · اضغط لاختيار مدى للتطبيق الجماعي',
+    cal_event:'مناسبة', cal_avg:'متوسط السعر', cal_avail:'فاضي', cal_occ:'مشغول',
+    cal_no_events:'لا توجد مناسبات سعودية في هذا النطاق',
+    cal_events_legend:'المناسبات',
+    cal_pace:'الإشغال', cal_pct:'٪',
+    bulk_title:'⚡ تطبيق جماعي على المدى المحدد',
+    bulk_from:'من', bulk_to:'إلى', bulk_pct:'النسبة', bulk_action:'الإجراء',
+    bulk_raise:'رفع', bulk_lower:'خفض', bulk_apply:'طبّق على الكل',
+    bulk_select_range:'اختر مدى من الأيام بالضغط عليها',
+    bulk_confirm:'متأكد؟ سيتم تعديل أسعار الليالي المتاحة فقط في كل الوحدات (المحجوزة لن تتأثر).',
+    bulk_applied:'تم: {a} ليلة عُدّلت · {s} تُجوهلت',
     arrivals:'الوصول القادم', no_arrivals_window:'ما فيه وصول في الـ٣٦ ساعة الجاية',
     arr_signed:'موقّع', arr_unsigned:'غير موقّع', arr_in:'بعد', arr_hours:'ساعة', arr_minutes:'دقيقة',
     arr_now:'الحين', arr_past:'مضى',
@@ -4388,6 +4609,18 @@ const T = {
     learn_stat_replies:'Replies today', learn_stat_auto:'Auto-send rate', learn_stat_conf:'Avg confidence',
     learn_stat_esc:'Escalations today', learn_stat_vs_avg:'vs 7-day avg',
     learn_event_edited:'edited', learn_event_sent:'sent as-is', learn_event_auto:'auto', learn_event_via:'via',
+    calendar:'Calendar', calendar_title:'📅 Revenue calendar · next 60 days',
+    calendar_sub:'Day color = occupancy. Hover for detail · click to select a range for bulk apply',
+    cal_event:'event', cal_avg:'avg price', cal_avail:'open', cal_occ:'booked',
+    cal_no_events:'No Saudi events in this range',
+    cal_events_legend:'Events',
+    cal_pace:'Occupancy', cal_pct:'%',
+    bulk_title:'⚡ Bulk apply to the selected range',
+    bulk_from:'from', bulk_to:'to', bulk_pct:'percent', bulk_action:'action',
+    bulk_raise:'raise', bulk_lower:'lower', bulk_apply:'apply to all',
+    bulk_select_range:'Click days to select a range',
+    bulk_confirm:'Sure? This will adjust prices on AVAILABLE nights only across every active unit (booked nights are untouched).',
+    bulk_applied:'Done: {a} nights changed · {s} skipped',
     arrivals:'Upcoming arrivals', no_arrivals_window:'No arrivals in the next 36h',
     arr_signed:'signed', arr_unsigned:'unsigned', arr_in:'in', arr_hours:'h', arr_minutes:'min',
     arr_now:'now', arr_past:'past',
@@ -4507,6 +4740,8 @@ function applyLang(){
     t_learn_chart3:'learn_chart3', t_learn_chart4:'learn_chart4',
     t_learn_recent:'learn_recent',
     t_arrivals:'arrivals',
+    t_calendar:'calendar_title', t_calendar_sub:'calendar_sub',
+    t_cal_events_legend:'cal_events_legend', t_bulk_title:'bulk_title',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -4527,6 +4762,7 @@ const NAV = [
   {id:'home',    ic:'◇', tk:'home'},
   {id:'inbox',   ic:'✉', tk:'inbox', badge:'inbox'},
   {id:'today',   ic:'◎', tk:'today'},
+  {id:'calendar',ic:'📅', tk:'calendar'},
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -4609,6 +4845,7 @@ function go(id){
   if(id==='log') renderLog();
   if(id==='inbox') { renderInbox(); populateUnitFilter() }
   if(id==='learn') loadLearnings();
+  if(id==='calendar') loadForwardCalendar();
 }
 
 /* ============================================================
@@ -4730,6 +4967,150 @@ function renderUrgentStrip(){
     + rows
     + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
     + '</div>';
+}
+
+// ============== CALENDAR (forward pace + bulk apply) ==============
+let calSelect = {start:null, end:null};
+
+async function loadForwardCalendar(){
+  const el = document.getElementById('calendarGrid');
+  if(el) el.innerHTML = '<div class="empty sk">—</div>';
+  try{ D.cal = await api('/api/calendar/forward?days=60') }catch(_){ D.cal = {days:[], events:[]} }
+  const sub = document.getElementById('t_calendar_sub'); if(sub) sub.textContent = t().calendar_sub;
+  renderForwardCalendar();
+  renderCalEvents();
+  renderBulkForm();
+}
+
+function _calClass(p){
+  if(p >= 90) return 'cal-full';
+  if(p >= 70) return 'cal-high';
+  if(p >= 40) return 'cal-mid';
+  return 'cal-low';
+}
+
+function renderForwardCalendar(){
+  const el = document.getElementById('calendarGrid');
+  if(!el) return;
+  const days = (D.cal||{}).days || [];
+  if(!days.length){ el.innerHTML = '<div class="empty">'+t().rev_no+'</div>'; return; }
+  // Group by weekday header row (Sat-Sun-Mon-... for ar / Mon-...-Sun for en)
+  const wdLabelsAr = ['الإث','الثل','الأر','الخم','الجم','السب','الأح'];
+  const wdLabelsEn = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const wdLabels = (L==='ar') ? wdLabelsAr : wdLabelsEn;
+  // pad start so days align under their weekday header
+  const first = days[0];
+  const firstWd = first.weekday; // 0..6
+  const pad = firstWd;
+  let html = '<div class="calgrid" style="margin-bottom:6px">';
+  for(let i=0;i<7;i++){ html += '<div style="text-align:center;color:var(--mut);font-size:11px;font-weight:600;padding:4px 0">'+wdLabels[i]+'</div>'; }
+  html += '</div><div class="calgrid">';
+  for(let i=0;i<pad;i++){ html += '<div></div>'; }
+  for(const d of days){
+    const cls = _calClass(d.pace_pct);
+    const isEvt = (d.events||[]).length > 0;
+    const isWE = d.is_weekend;
+    const isSel = calSelect.start && calSelect.end && d.date >= calSelect.start && d.date <= calSelect.end;
+    const dnum = parseInt(d.date.slice(8,10), 10);
+    const evtName = isEvt ? esc((d.events[0]||{}).name||'') : '';
+    const tip = d.date + ' · ' + t().cal_pace + ' ' + d.pace_pct + '% · ' + d.available + ' ' + t().cal_avail
+              + (d.avg_price ? ' · ' + t().cal_avg + ' ' + d.avg_price + ' SAR' : '')
+              + (isEvt ? ' · ' + d.events.map(function(e){return e.name}).join(', ') : '');
+    html += '<div class="calday '+cls+(isEvt?' evt':'')+(isWE?' weekend':'')+(isSel?' sel':'')+'"'
+      + ' title="'+tip+'"'
+      + ' onclick="calClick(&#39;'+d.date+'&#39;)">'
+      + '<div class="cd-dnum">'+dnum+'</div>'
+      + '<div class="cd-pct">'+d.pace_pct+'%</div>'
+      + '<div class="cd-wd">'+wdLabels[d.weekday].toLowerCase()+'</div>'
+      + (evtName ? '<div class="cd-evt">'+evtName+'</div>' : '')
+      + '</div>';
+  }
+  html += '</div>';
+  // legend
+  html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;color:var(--mut)">'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:#fae3e3;border-radius:3px;vertical-align:middle"></span> &lt;40%</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:#faeed1;border-radius:3px;vertical-align:middle"></span> 40-69%</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:#dcf3e6;border-radius:3px;vertical-align:middle"></span> 70-89%</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:#a3e0bd;border-radius:3px;vertical-align:middle"></span> 90%+</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;border:1.5px solid var(--gold);border-radius:3px;vertical-align:middle"></span> '+t().cal_event+'</span>'
+    + '</div>';
+  el.innerHTML = html;
+}
+
+function calClick(date){
+  if(!calSelect.start || (calSelect.start && calSelect.end)){
+    // start a new selection
+    calSelect = {start:date, end:date};
+  }else{
+    // extend
+    if(date < calSelect.start){ calSelect.end = calSelect.start; calSelect.start = date; }
+    else                      { calSelect.end = date; }
+  }
+  renderForwardCalendar();
+  renderBulkForm();
+}
+
+function renderCalEvents(){
+  const el = document.getElementById('calEventsBody');
+  if(!el) return;
+  const days = (D.cal||{}).days || [];
+  const seen = {};
+  const lst = [];
+  for(const d of days){
+    for(const e of (d.events||[])){
+      const k = e.name + '|' + e.kind;
+      if(!seen[k]){ seen[k] = {name:e.name, kind:e.kind, boost:e.boost, dates:[]}; lst.push(seen[k]); }
+      seen[k].dates.push(d.date);
+    }
+  }
+  if(!lst.length){ el.innerHTML = '<div class="empty">'+t().cal_no_events+'</div>'; return; }
+  el.innerHTML = lst.map(function(e){
+    const first = e.dates[0]; const last = e.dates[e.dates.length-1];
+    const range = first === last ? first : (first + ' → ' + last);
+    return '<div class="log-row"><div class="log-lic">🎉</div>'
+      + '<div class="log-lts">'+range+'</div>'
+      + '<div class="log-ltxt"><b>'+esc(e.name)+'</b> · '+(e.boost>=1?'+':'')+Math.round((e.boost-1)*100)+'% طلب متوقع</div></div>';
+  }).join('');
+}
+
+function renderBulkForm(){
+  const el = document.getElementById('bulkForm');
+  if(!el) return;
+  const has = !!(calSelect.start && calSelect.end);
+  if(!has){
+    el.innerHTML = '<div class="empty">'+t().bulk_select_range+'</div>';
+    return;
+  }
+  el.innerHTML =
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    + '<span class="muted">'+t().bulk_from+'</span>'
+    + '<span class="mono" style="font-weight:600">'+calSelect.start+'</span>'
+    + '<span class="muted">'+t().bulk_to+'</span>'
+    + '<span class="mono" style="font-weight:600">'+calSelect.end+'</span>'
+    + '<button class="btn ghost xs" onclick="calSelect={start:null,end:null};renderForwardCalendar();renderBulkForm()">✕</button>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<select id="bulkAction" style="width:auto;padding:7px 12px"><option value="raise">'+t().bulk_raise+'</option><option value="lower">'+t().bulk_lower+'</option></select>'
+    + '<input id="bulkPct" type="number" min="1" max="80" value="10" style="width:90px;text-align:center"> %'
+    + '<button class="btn primary sm" onclick="doBulkApply()">⚡ '+t().bulk_apply+'</button>'
+    + '</div>'
+    + '<div class="muted" style="margin-top:10px;font-size:11.5px">'+t().bulk_confirm+'</div>';
+}
+
+async function doBulkApply(){
+  if(!calSelect.start || !calSelect.end) return;
+  if(!confirm(t().bulk_confirm)) return;
+  const action = document.getElementById('bulkAction').value;
+  const pct = parseFloat(document.getElementById('bulkPct').value || '0');
+  if(!pct || pct <= 0) return;
+  const r = await post('/api/pricing/bulk', {
+    start: calSelect.start, end: calSelect.end, percent: pct, action: action
+  });
+  if(r.ok){
+    toast(t().bulk_applied.replace('{a}', r.applied).replace('{s}', r.skipped) + (r.dry_run?' (DRY-RUN)':''));
+    calSelect = {start:null, end:null};
+    loadForwardCalendar();
+  } else toast(r.error || t().err);
 }
 
 function renderArrivalsTimeline(){
@@ -6039,11 +6420,13 @@ async def _api_pricing_detail(request):
     return _json(_last_price_detail.get(lid) or {"rows": []})
 
 def _strategy_price(base, d, factors):
-    """Best-number price for one night: demand target, stepped down as the night nears while empty."""
+    """Best-number price for one night: demand target × Saudi-event boost,
+    stepped down as the night nears while empty."""
     mi = factors["month_index"].get(d.month, 1)
     di = factors["dom_index"].get(d.day, 1)
     wi = factors["dow_index"].get(d.weekday(), 1)
-    target = max(0.6 * base, min(1.8 * base, base * mi * di * wi))
+    ev = event_boost_for_date(d)           # 1.4-1.6 on Eid / National Day, 0.75 during Ramadan
+    target = max(0.6 * base, min(2.2 * base, base * mi * di * wi * ev))
     lead = (d - datetime.now(TZ).date()).days
     f = 0.80 if lead <= 2 else 0.86 if lead <= 5 else 0.92 if lead <= 10 else 0.97 if lead <= 20 else 1.0
     return int(round(max(0.6 * base, target * f)))
@@ -6446,6 +6829,85 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_calendar_forward(request):
+    """Aggregate per-date forward calendar: occupancy + avg price + Saudi events."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        days = int(request.query.get("days", "60"))
+    except Exception:
+        days = 60
+    days = max(7, min(120, days))
+    data = await asyncio.to_thread(get_forward_calendar, days)
+    return _json({"days": data, "events": SAUDI_EVENTS})
+
+async def _api_pricing_bulk(request):
+    """POST {start, end, percent, action:'raise'|'lower', only_available?:bool=True}
+    Bulk adjust the calendar across ALL active units for [start, end].
+    Only updates currently-available unbooked nights by default. Honors
+    PRICE_APPLY_DRYRUN so you can preview before committing."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    start = _parse_date(b.get("start"))
+    end = _parse_date(b.get("end"))
+    try:
+        pct = float(b.get("percent", 0))
+        action = (b.get("action") or "raise").lower()
+    except Exception:
+        return _json({"error": "bad params"}, 400)
+    if not start or not end or end < start or pct <= 0 or pct > 80:
+        return _json({"error": "bad date range or percent"}, 400)
+    factor = (1 + pct / 100) if action == "raise" else (1 - pct / 100)
+    listings = list((get_listings_map() or {}).keys())
+    only_available = b.get("only_available", True)
+
+    def _adjust_one(lid):
+        applied, skipped = 0, 0
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": start.isoformat(), "endDate": end.isoformat()})
+            for day in (cal.get("result") or []):
+                d_iso = day.get("date")
+                if not d_iso:
+                    continue
+                available = int(day.get("isAvailable", 0) or 0) == 1 and not day.get("reservationId")
+                if only_available and not available:
+                    skipped += 1
+                    continue
+                cur = day.get("price")
+                if not isinstance(cur, (int, float)) or cur <= 0:
+                    skipped += 1
+                    continue
+                new_price = int(round(float(cur) * factor))
+                if new_price == int(cur):
+                    skipped += 1
+                    continue
+                if not PRICE_APPLY_DRYRUN:
+                    api_put(f"/listings/{lid}/calendar",
+                            {"startDate": d_iso, "endDate": d_iso,
+                             "isAvailable": 1, "price": new_price,
+                             "note": f"ouja-orig:{new_price}"})
+                applied += 1
+        except Exception as e:
+            print(f"bulk_apply error ({lid}):", e)
+        return applied, skipped
+
+    tot_applied, tot_skipped = 0, 0
+    if listings:
+        with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+            for f in as_completed([ex.submit(_adjust_one, lid) for lid in listings]):
+                a, s = f.result()
+                tot_applied += a; tot_skipped += s
+    log_event("pricing",
+              f"تطبيق جماعي {action} {pct}% · {start.isoformat()}→{end.isoformat()} · "
+              f"{tot_applied} ليلة" + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
+    # Invalidate the forward-calendar cache so the page reflects new prices immediately
+    _forward_cache["data"] = None
+    _forward_cache["ts"] = 0
+    return _json({"ok": True, "applied": tot_applied, "skipped": tot_skipped,
+                  "dry_run": PRICE_APPLY_DRYRUN, "factor": factor})
+
 async def _api_home_urgent(request):
     """Operational urgency feed for the home page — high-severity items first."""
     if not _dash_auth(request):
@@ -6645,6 +7107,8 @@ async def start_web_server():
         app.router.add_get("/api/learning/today", _api_learning_today)
         app.router.add_get("/api/home/urgent", _api_home_urgent)
         app.router.add_get("/api/home/arrivals", _api_home_arrivals)
+        app.router.add_get("/api/calendar/forward", _api_calendar_forward)
+        app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -7226,12 +7690,15 @@ def compute_price_opportunities(factors, units, horizon=None):
             mi = factors["month_index"].get(d.month, 1)
             di = factors["dom_index"].get(d.day, 1)
             wi = factors["dow_index"].get(d.weekday(), 1)
-            target = max(0.6 * base, min(1.8 * base, base * mi * di * wi))
+            ev = event_boost_for_date(d)
+            target = max(0.6 * base, min(2.2 * base, base * mi * di * wi * ev))
             lead = (d - today).days
             clear = target * (0.88 if lead <= 7 else (0.95 if lead <= 14 else 1.0))
+            ev_names = [e["name"] for e in events_for_date(d)]
             row = {"lid": lid, "name": name, "date": d.isoformat(), "wd": d.weekday(),
                    "current": round(cur) if cur else None, "target": round(target),
-                   "clear": round(clear), "lead": lead, "reco": "ok"}
+                   "clear": round(clear), "lead": lead, "reco": "ok",
+                   "event": ev_names[0] if ev_names else None, "event_boost": round(ev, 2)}
             if cur and cur < 0.90 * target:
                 row["reco"] = "raise"
                 pu["uplift"] += (target - cur)
