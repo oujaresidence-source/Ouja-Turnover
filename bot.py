@@ -5800,12 +5800,18 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 </div>
 
 <script>
-const DP = { inputId:null, title:'اختر التاريخ', y:2026, m:5, d:31 };
+const DP = { inputId:null, callback:null, seedDate:null, title:'اختر التاريخ', y:2026, m:5, d:31 };
 const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 const AR_WDS    = ['أحد','اثن','ثلا','أرب','خمي','جمع','سبت'];
-function openDatePicker(inputId, title){
-  DP.inputId = inputId; DP.title = title || 'اختر التاريخ';
-  let cur = (document.getElementById(inputId)||{}).value;
+/* openDatePicker(inputId, title, opts?)
+   opts: { callback:fn(iso), seedDate:'YYYY-MM-DD' } */
+function openDatePicker(inputId, title, opts){
+  opts = opts || {};
+  DP.inputId  = inputId || null;
+  DP.callback = (typeof opts.callback === 'function') ? opts.callback : null;
+  DP.seedDate = opts.seedDate || null;
+  DP.title    = title || 'اختر التاريخ';
+  let cur = DP.seedDate || (inputId ? ((document.getElementById(inputId)||{}).value) : null);
   if(!cur){
     try { cur = (D.clean && D.clean.today) || new Date().toISOString().slice(0,10); }
     catch(_) { cur = new Date().toISOString().slice(0,10); }
@@ -5867,18 +5873,125 @@ function renderDatePicker(){
 }
 function confirmDatePicker(){
   const iso = DP.y + '-' + String(DP.m).padStart(2,'0') + '-' + String(DP.d).padStart(2,'0');
-  const inp = document.getElementById(DP.inputId);
-  if(inp){
-    inp.value = iso;
-    // If there's a visible-label twin (id + "_lbl"), update it too
-    const lbl = document.getElementById(DP.inputId + '_lbl');
-    if(lbl) lbl.textContent = '📅 ' + iso;
+  if(DP.inputId){
+    const inp = document.getElementById(DP.inputId);
+    if(inp){
+      inp.value = iso;
+      const lbl = document.getElementById(DP.inputId + '_lbl');
+      if(lbl) lbl.textContent = '📅 ' + iso;
+    }
   }
+  const cb = DP.callback;
   closeDatePicker();
+  if(cb) cb(iso);
 }
 function _setDateField(id, iso){
   const inp = document.getElementById(id); if(inp) inp.value = iso;
   const lbl = document.getElementById(id + '_lbl'); if(lbl) lbl.textContent = '📅 ' + iso;
+}
+
+/* ---------- Cascade simulator + confirm modal ---------- */
+const DEEPCLEAN_AVOID_WD = [4, 5]; // JS getDay: 0=Sun .. 4=Thu, 5=Fri  (Saudi weekend)
+function _dcNextValid(iso){
+  const p = iso.split('-').map(Number);
+  let d = new Date(Date.UTC(p[0], p[1]-1, p[2]));
+  while(DEEPCLEAN_AVOID_WD.indexOf(d.getUTCDay()) >= 0){
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return d.toISOString().slice(0,10);
+}
+function _dcAddDays(iso, n){
+  const p = iso.split('-').map(Number);
+  const d = new Date(Date.UTC(p[0], p[1]-1, p[2]));
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0,10);
+}
+/* Returns [{lid, name, from, to}] describing the chain of displacements that
+   would happen if `movingLid` is placed on `targetIso`. Uses the current
+   D.clean.items as the schedule snapshot. */
+function _simulateCascade(targetIso, movingLid){
+  const items = ((D.clean||{}).items)||[];
+  // Snapshot: date -> item (excluding moving unit)
+  const byDate = {};
+  for(const it of items){
+    if(it.lid === movingLid) continue;
+    if(it.next_scheduled) byDate[it.next_scheduled] = it;
+  }
+  const moves = [];
+  let cur = _dcNextValid(targetIso);
+  while(byDate[cur]){
+    const occupant = byDate[cur];
+    delete byDate[cur];
+    const nextDay = _dcNextValid(_dcAddDays(cur, 1));
+    moves.push({ lid:occupant.lid, name:occupant.name, from:cur, to:nextDay });
+    cur = nextDay;
+  }
+  return moves;
+}
+
+/* Generic confirm modal: showConfirm({title, html, confirmLabel, onConfirm}) */
+function showConfirm(opts){
+  opts = opts || {};
+  // Build or reuse the overlay
+  let ov = document.getElementById('confirmOverlay');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'confirmOverlay';
+    ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+    ov.onclick = function(e){ if(e.target === ov) closeConfirm(); };
+    const inner = document.createElement('div');
+    inner.id = 'confirmBody';
+    inner.style.cssText = 'background:var(--surface);padding:20px;border-radius:16px;width:420px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)';
+    ov.appendChild(inner);
+    document.body.appendChild(ov);
+  }
+  const body = document.getElementById('confirmBody');
+  body.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px">'
+    +   '<div style="font-size:15px;font-weight:700;line-height:1.4">'+(opts.title||'تأكيد')+'</div>'
+    +   '<button onclick="closeConfirm()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">×</button>'
+    + '</div>'
+    + '<div style="font-size:13px;line-height:1.6;color:var(--text-2)">'+(opts.html||'')+'</div>'
+    + '<div style="display:flex;gap:8px;margin-top:16px">'
+    +   '<button class="btn ghost sm" onclick="closeConfirm()" style="flex:1">إلغاء</button>'
+    +   '<button class="btn primary sm" id="confirmYesBtn" style="flex:2">'+(opts.confirmLabel||'✓ تأكيد')+'</button>'
+    + '</div>';
+  document.getElementById('confirmYesBtn').onclick = function(){
+    const cb = opts.onConfirm;
+    closeConfirm();
+    if(typeof cb === 'function') cb();
+  };
+  ov.style.display = 'flex';
+}
+function closeConfirm(){
+  const ov = document.getElementById('confirmOverlay');
+  if(ov) ov.style.display = 'none';
+}
+
+/* Build human-readable cascade-confirm body for a reschedule/insert of `unitName`
+   onto `targetIso`. Returns an HTML string. */
+function _cascadeConfirmHTML(unitName, targetIso, moves){
+  let html = '<div style="background:var(--surface-2);padding:12px;border-radius:10px;margin-bottom:12px">'
+           + '<div style="font-size:11.5px;color:var(--mut);margin-bottom:4px">الإجراء</div>'
+           + '<div style="font-weight:600">جدولة <span style="color:var(--gold)">'+esc(unitName)+'</span> على '+esc(targetIso)+'</div>'
+           + '</div>';
+  if(!moves.length){
+    html += '<div style="color:var(--green);font-weight:600">✓ هذا اليوم فاضي — ما فيه شقة أخرى تتأثر</div>';
+    return html;
+  }
+  html += '<div style="font-weight:600;margin-bottom:8px">⚠️ هذي الشقق بتتأجل بسبب التبديل:</div>'
+       + '<div style="display:flex;flex-direction:column;gap:6px">';
+  for(const m of moves){
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface-2);border-radius:8px;font-size:12.5px">'
+         +    '<div style="flex:1"><div style="font-weight:600">'+esc(m.name)+'</div>'
+         +      '<div class="muted" style="font-size:11px">'+esc(m.from)+' ← الموقع الأصلي</div></div>'
+         +    '<div style="color:var(--gold);font-size:16px">→</div>'
+         +    '<div style="text-align:end"><div class="muted" style="font-size:11px">يتأجل إلى</div>'
+         +      '<div style="font-weight:600;color:var(--gold)">'+esc(m.to)+'</div></div>'
+         + '</div>';
+  }
+  html += '</div>';
+  return html;
 }
 </script>
 
@@ -6930,17 +7043,46 @@ async function cleanMarkDone(lid){
   const r = await post('/api/cleaning/mark-done', {lid:lid});
   if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
 }
+function _findItem(lid){
+  const a = ((D.clean||{}).items)||[];
+  const b = ((D.clean||{}).paused_items)||[];
+  return a.concat(b).find(function(x){ return x.lid === lid });
+}
 async function cleanResched(lid){
-  const date = prompt(t().clean_modal_resched + ' (YYYY-MM-DD)');
-  if(!date) return;
-  const r = await post('/api/cleaning/reschedule', {lid:lid, date:date});
-  if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
+  const it = _findItem(lid);
+  const name = it ? it.name : ('#'+lid);
+  const seed = (it && it.next_scheduled) ? it.next_scheduled : null;
+  openDatePicker(null, 'إعادة جدولة ' + name, {
+    seedDate: seed,
+    callback: function(iso){
+      const moves = _simulateCascade(iso, lid);
+      showConfirm({
+        title: '🔄 تأكيد إعادة الجدولة',
+        html: _cascadeConfirmHTML(name, iso, moves),
+        confirmLabel: '✓ نفّذ',
+        onConfirm: async function(){
+          // Use the cascading endpoint so the displacement is handled server-side
+          const r = await post('/api/cleaning/insert', {lid:lid, date:iso});
+          if(r.ok){
+            toast('✓ تمت الجدولة في ' + (r.scheduled_for||iso));
+            loadCleaning();
+          } else toast(r.error||t().err);
+        }
+      });
+    }
+  });
 }
 async function cleanSetLast(lid){
-  const date = prompt(t().clean_modal_set_last + ' (YYYY-MM-DD)');
-  if(!date) return;
-  const r = await post('/api/cleaning/set-last', {lid:lid, date:date});
-  if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
+  const it = _findItem(lid);
+  const name = it ? it.name : ('#'+lid);
+  const seed = (it && it.last_done) ? it.last_done : null;
+  openDatePicker(null, 'تحديث آخر تنظيف لـ ' + name, {
+    seedDate: seed,
+    callback: async function(iso){
+      const r = await post('/api/cleaning/set-last', {lid:lid, date:iso});
+      if(r.ok){ toast('✓ ' + iso); loadCleaning(); } else toast(r.error||t().err);
+    }
+  });
 }
 
 async function cleanPause(lid){
@@ -6958,12 +7100,23 @@ async function cleanInsertAt(){
   const lid = lidSel && lidSel.value;
   const date = dateInp && dateInp.value;
   if(!lid){ toast('اختر شقة'); return; }
-  if(!date){ toast('اختر تاريخ'); return; }
-  const r = await post('/api/cleaning/insert', {lid:parseInt(lid), date:date});
-  if(r.ok){
-    toast('➕ تمت الإضافة في ' + (r.scheduled_for || date));
-    loadCleaning();
-  } else toast(r.error||t().err);
+  if(!date){ toast('اضغط زر التاريخ واختر يوم'); return; }
+  const lidNum = parseInt(lid);
+  const it = _findItem(lidNum);
+  const name = it ? it.name : ('#'+lidNum);
+  const moves = _simulateCascade(date, lidNum);
+  showConfirm({
+    title: '➕ تأكيد الإضافة',
+    html: _cascadeConfirmHTML(name, date, moves),
+    confirmLabel: '✓ أضف',
+    onConfirm: async function(){
+      const r = await post('/api/cleaning/insert', {lid:lidNum, date:date});
+      if(r.ok){
+        toast('➕ تمت الإضافة في ' + (r.scheduled_for || date));
+        loadCleaning();
+      } else toast(r.error||t().err);
+    }
+  });
 }
 async function cleanResetFrom(){
   const dateInp = document.getElementById('dcResetDate');
