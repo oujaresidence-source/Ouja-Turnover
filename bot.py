@@ -787,6 +787,118 @@ def compute_tonight_empty():
     items.sort(key=lambda x: x["name"])
     return items
 
+def compute_arrivals_with_status(window_hours=36):
+    """For each upcoming arrival inside `window_hours`, attach the agreement
+    signing status, the conversation id, and how far away check-in is. Powers
+    the new home-page arrivals timeline."""
+    now = datetime.now(TZ)
+    cutoff = now + timedelta(hours=window_hours)
+    today_iso = now.date().isoformat()
+    tomorrow_iso = (now.date() + timedelta(days=1)).isoformat()
+    try:
+        data = api_get("/reservations", params={
+            "arrivalStartDate": today_iso, "arrivalEndDate": tomorrow_iso,
+            "limit": 200, "includeResources": 0,
+        })
+    except Exception as e:
+        print("compute_arrivals_with_status fetch error:", e)
+        return []
+    rows = data.get("result", []) or []
+    listings = get_listings_map()
+    out = []
+    for r in rows:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        arrival = _parse_date(r.get("arrivalDate"))
+        if not arrival:
+            continue
+        hour = parse_hour(r.get("checkInTime"), 15)
+        ci_dt = datetime(arrival.year, arrival.month, arrival.day, min(hour, 23), 0, tzinfo=TZ)
+        if not (now - timedelta(hours=4) <= ci_dt <= cutoff):
+            continue
+        lid = r.get("listingMapId")
+        unit_name = listings.get(lid) or r.get("listingName") or f"unit-{lid}"
+        hrs = (ci_dt - now).total_seconds() / 3600.0
+        out.append({
+            "reservation_id": r.get("id"),
+            "guest": r.get("guestName") or r.get("guestFirstName") or "Guest",
+            "unit": unit_name, "listing_id": lid,
+            "checkin_iso": ci_dt.isoformat(timespec="minutes"),
+            "checkin_label": ci_dt.strftime("%a %H:%M"),
+            "hours_until": round(hrs, 1),
+            "nights": _res_nights(r),
+            "signed": _is_agreement_signed(r),
+            "conversation_id": r.get("conversationId"),
+            "total_price": r.get("totalPrice"),
+        })
+    out.sort(key=lambda x: x["hours_until"])
+    return out
+
+def compute_urgent_now():
+    """Top operational items the owner needs to see at a glance:
+       - escalations open + age
+       - pending replies + age
+       - upcoming arrivals with unsigned agreements
+       - empty units tonight (with a price-status hint)
+    """
+    now = time.time()
+    items = []
+    # ---- escalations ----
+    for mid, e in _escalations.items():
+        if e.get("claimed_by"):
+            continue
+        age_min = int((now - (e.get("last_ping") or now)) / 60)
+        items.append({
+            "kind": "escalation", "severity": "high",
+            "id": str(mid), "title": e.get("guest", "ضيف"),
+            "subtitle": e.get("unit", ""),
+            "detail": (e.get("reason") or "")[:140],
+            "age_min": max(0, age_min),
+            "action_view": "inbox",
+        })
+    # ---- pending replies (>15 min counts as aging) ----
+    for mid, d in _pending_replies.items():
+        item = d.get("item", {})
+        last_time = item.get("last_time", "")
+        age_min = None
+        try:
+            if last_time:
+                dt = _parse_msg_dt(last_time)
+                if dt:
+                    age_min = int((datetime.now(TZ) - dt).total_seconds() / 60)
+        except Exception:
+            pass
+        items.append({
+            "kind": "pending_reply",
+            "severity": "med" if (age_min or 0) > 15 else "low",
+            "id": str(mid), "title": item.get("guest", "ضيف"),
+            "subtitle": item.get("unit", ""),
+            "detail": (item.get("guest_text") or "")[:140],
+            "age_min": age_min,
+            "action_view": "inbox",
+        })
+    # ---- arrivals with unsigned agreements (next 24h) ----
+    try:
+        arrivals = compute_arrivals_with_status(window_hours=24)
+        for a in arrivals:
+            if a["signed"] or a["hours_until"] < 0:
+                continue
+            sev = "high" if a["hours_until"] <= 2 else "med"
+            items.append({
+                "kind": "unsigned_agreement", "severity": sev,
+                "id": str(a["reservation_id"]),
+                "title": a["guest"], "subtitle": a["unit"],
+                "detail": f"وصول بعد {a['hours_until']} ساعة · العقد غير موقّع",
+                "age_min": None, "action_view": "home",
+                "checkin": a["checkin_label"],
+            })
+    except Exception as e:
+        print("urgent arrivals error:", e)
+    # severity order, then age
+    sev_order = {"high": 0, "med": 1, "low": 2}
+    items.sort(key=lambda x: (sev_order.get(x["severity"], 9), -(x.get("age_min") or 0)))
+    return items
+
 def get_inbox_item_detail(item_id):
     """Build a rich detail view for a pending reply or open escalation, including the
     full conversation history (refetched from Hostaway) and the booking context."""
@@ -1861,6 +1973,52 @@ def _is_asking_alternatives(text):
     t = (text or "").lower()
     return any(p in t for p in _ALT_PHRASES)
 
+# Late checkout requests. Mirror of early check-in. We check if the NEXT night
+# (after the guest's departure) is free — if yes, late checkout is easy and team
+# just needs to approve; if no, very tight (cleaner needs the room) and the
+# escalation context warns the team.
+_LATE_CHECKOUT_HINTS = [
+    # Arabic
+    "تشيك اوت متاخر", "تشيك آوت متأخر", "تشيك اوت متأخر", "خروج متاخر", "خروج متأخر",
+    "اطلع متاخر", "أطلع متأخر", "اطلع بعد", "أطلع بعد", "اطلع الساعة", "أطلع الساعة",
+    "اخر موعد للخروج", "آخر موعد للخروج", "اطول وقت", "أطول وقت",
+    "ابقى لين", "أبقى لين", "نبقى لين", "ابقى الى", "أبقى إلى",
+    "خروج متاخر شوي", "تأخير الخروج", "تاخير الخروج", "ممكن اتاخر بالخروج",
+    "checkout بعد", "check out بعد", "تشيك أوت بعد", "تشيك اوت بعد",
+    # English
+    "late checkout", "late check-out", "late check out",
+    "check out late", "checkout late", "leave later",
+    "stay until", "stay till", "checkout extension", "extend checkout",
+    "later checkout time",
+]
+def _is_late_checkout_request(text):
+    t = (text or "").lower()
+    return any(h in t for h in _LATE_CHECKOUT_HINTS)
+
+def late_checkout_context(reservation_id, listing_id):
+    """Mirror of early_checkin_context but for LATE checkout. Checks whether the
+    night AFTER departure is occupied — if yes, late checkout is tight; if no,
+    easy (team just needs to approve)."""
+    if not reservation_id or not listing_id:
+        return None
+    try:
+        rdata = api_get(f"/reservations/{reservation_id}")
+        r = rdata.get("result") or {}
+        departure = _parse_date(r.get("departureDate"))
+        if not departure:
+            return None
+    except Exception as e:
+        print(f"late_checkout_context departure fetch error: {e}")
+        return None
+    # The "next night" in calendar terms IS the departure date (hostaway represents
+    # the departure date as the last night NOT booked by this reservation).
+    next_night_occupied = not _calendar_night_free(listing_id, departure)
+    return {
+        "next_occupied": next_night_occupied,
+        "departure": departure.isoformat(),
+        "next_night": departure.isoformat(),
+    }
+
 # Door-code / access questions. When the guest asks where their code is, we must
 # answer with REAL context (hours until check-in + signing status), not a template.
 _CODE_Q_HINTS = [
@@ -2024,6 +2182,29 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         "- دائماً ختام: 'الأسعار تقريبية، قبل الضريبة ورسوم المنصة. التوفّر النهائي يتأكد من رابط "
         "Airbnb عند الحجز.'\n\n"
         ) if want_catalog else ""
+    # ---- Late-checkout: check whether the next night is occupied so the bot
+    # tells the team whether it's an easy yes or a tight ask.
+    late_block = ""
+    if listing_id and _is_late_checkout_request(history_text):
+        lc = late_checkout_context(reservation_id, listing_id) or {}
+        if lc.get("next_occupied") is True:
+            late_block = (
+                f"\n\nطلب تشيك-آوت متأخّر — السياق المحسوب:\n"
+                f"- الليلة بعد مغادرة الضيف ({lc.get('next_night')}) محجوزة في نفس الوحدة، فالتأخير "
+                f"مقيّد بساعات قليلة (المنظّف يحتاج وقت قبل دخول الضيف الجاي).\n\n"
+                f"كيف ترد: action='reply'. قل للضيف إن الطلب وارد بس مقيّد، الفريق بيحاول يعطيه "
+                f"أطول وقت ممكن (عادةً ساعة-ساعتين بعد الموعد الأصلي) وبيتأكد ويرد. لا تَعِد بساعة "
+                f"بعينها قبل موافقة الفريق."
+            )
+        elif lc.get("next_occupied") is False:
+            late_block = (
+                f"\n\nطلب تشيك-آوت متأخّر — السياق المحسوب:\n"
+                f"- الليلة بعد مغادرة الضيف ({lc.get('next_night')}) **فاضية** في وحدته، "
+                f"فالتأخير ممكن لساعات طويلة (الجدول مفتوح).\n\n"
+                f"كيف ترد: action='reply'. قل للضيف إن الطلب ممكن من ناحية الجدول، والفريق "
+                f"بيراجع ويؤكّد ساعة الخروج. لا تؤكّد ساعة بعينها قبل موافقة الفريق."
+            )
+
     # ---- Code/access question: inject real-time context (hours until check-in,
     # signing status) so the bot stops giving generic "code arrives 5 days before"
     # answers when check-in is today.
@@ -2106,7 +2287,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         if unit else ""
     )
     user = (f"{unit_guard}{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{code_block}\n\n"
+            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
@@ -3833,7 +4014,19 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="kpis" id="kpis"></div>
 
+        <!-- Operational command-center: urgent items at the top (collapsible by severity) -->
+        <div id="urgentStrip"></div>
+
         <div id="needsBanner"></div>
+
+        <!-- Today's arrivals timeline with per-guest signed/code status -->
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">🛬 <span id="t_arrivals">الوصول القادم</span></span>
+            <span class="card-sub" id="arrivalsCount"></span>
+          </div>
+          <div id="arrivalsTimeline"><div class="empty sk">—</div></div>
+        </div>
 
         <div class="grid2">
           <div class="card">
@@ -4112,6 +4305,12 @@ const T = {
     learn_stat_replies:'ردود اليوم', learn_stat_auto:'معدّل التلقائي', learn_stat_conf:'متوسط الثقة',
     learn_stat_esc:'تصعيدات اليوم', learn_stat_vs_avg:'مقارنة بمتوسط ٧ أيام',
     learn_event_edited:'مُعدّل', learn_event_sent:'كما هي', learn_event_auto:'تلقائي', learn_event_via:'عبر',
+    arrivals:'الوصول القادم', no_arrivals_window:'ما فيه وصول في الـ٣٦ ساعة الجاية',
+    arr_signed:'موقّع', arr_unsigned:'غير موقّع', arr_in:'بعد', arr_hours:'ساعة', arr_minutes:'دقيقة',
+    arr_now:'الحين', arr_past:'مضى',
+    urgent_title:'🚨 يبيك الحين', urgent_none:'كل شي تحت السيطرة ✓',
+    urgent_esc:'تصعيد مفتوح', urgent_pending:'رد بانتظار مراجعتك', urgent_unsigned:'عقد غير موقّع · تشيك-إن قريب',
+    urgent_age:'منذ', urgent_open:'افتح',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
     today_h:'اليوم', today_date_sub:'',
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
@@ -4189,6 +4388,12 @@ const T = {
     learn_stat_replies:'Replies today', learn_stat_auto:'Auto-send rate', learn_stat_conf:'Avg confidence',
     learn_stat_esc:'Escalations today', learn_stat_vs_avg:'vs 7-day avg',
     learn_event_edited:'edited', learn_event_sent:'sent as-is', learn_event_auto:'auto', learn_event_via:'via',
+    arrivals:'Upcoming arrivals', no_arrivals_window:'No arrivals in the next 36h',
+    arr_signed:'signed', arr_unsigned:'unsigned', arr_in:'in', arr_hours:'h', arr_minutes:'min',
+    arr_now:'now', arr_past:'past',
+    urgent_title:'🚨 Needs you', urgent_none:'All clear ✓',
+    urgent_esc:'open escalation', urgent_pending:'pending reply', urgent_unsigned:'unsigned · check-in soon',
+    urgent_age:'ago', urgent_open:'open',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
     today_h:'Today', today_date_sub:'',
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
@@ -4301,6 +4506,7 @@ function applyLang(){
     t_learn_chart1:'learn_chart1', t_learn_chart2:'learn_chart2',
     t_learn_chart3:'learn_chart3', t_learn_chart4:'learn_chart4',
     t_learn_recent:'learn_recent',
+    t_arrivals:'arrivals',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -4426,10 +4632,13 @@ async function loadAll(){
     const r = await Promise.all([
       api('/api/overview'), api('/api/today'), api('/api/inbox'),
       api('/api/discount/status'), api('/api/log'), api('/api/autolog'),
-      api('/api/revenue').catch(function(){return {loading:true}})
+      api('/api/revenue').catch(function(){return {loading:true}}),
+      api('/api/home/urgent').catch(function(){return {items:[]}}),
+      api('/api/home/arrivals?hours=36').catch(function(){return {items:[]}}),
     ]);
     D.ov=r[0]; D.today=r[1]; D.inbox=r[2]; D.disc=r[3];
     D.log=(r[4]||{}).items||[]; D.auto=(r[5]||{}).items||[]; D.rev=r[6];
+    D.urgent=r[7]; D.arrivals=r[8];
     populateUnitFilter();
     renderAll();
   }catch(e){ if(e==='unauthorized') logout() }
@@ -4467,6 +4676,7 @@ async function refresh(){
    ============================================================ */
 function renderAll(){
   renderFresh(); renderKpis(); renderNeedsBanner();
+  renderUrgentStrip(); renderArrivalsTimeline();
   renderTodayHome(); renderRevCard(); renderRecent();
   // Don't blow away an expanded item's content on the 15-second auto-refresh —
   // re-rendering the whole list wipes the body div and the user just sees an
@@ -4474,6 +4684,81 @@ function renderAll(){
   if(!openInboxId) renderInbox();
   renderDiscountBanner();
   buildSideNav(); buildBottomNav();
+}
+
+function renderUrgentStrip(){
+  const el = document.getElementById('urgentStrip');
+  if(!el) return;
+  const d = D.urgent || {items:[], counts:{}};
+  const items = d.items || [];
+  if(!items.length){
+    el.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:rgba(14,158,95,.18);text-align:center;padding:13px"><span style="color:var(--green);font-weight:600">✓ '+t().urgent_none+'</span></div>';
+    return;
+  }
+  // Show up to 6 most urgent inline; collapse the rest
+  const top = items.slice(0, 6);
+  const more = items.length - top.length;
+  const sevColor = function(s){ return s==='high' ? 'var(--red)' : (s==='med' ? 'var(--yellow)' : 'var(--blue)') };
+  const sevBg = function(s){ return s==='high' ? 'var(--red-soft)' : (s==='med' ? 'var(--yellow-soft)' : 'var(--blue-soft)') };
+  const kindLabel = function(k){
+    if(k==='escalation') return t().urgent_esc;
+    if(k==='pending_reply') return t().urgent_pending;
+    if(k==='unsigned_agreement') return t().urgent_unsigned;
+    return k;
+  };
+  const rows = top.map(function(it){
+    const age = (it.age_min != null) ? '<span class="muted" style="font-size:11px">· '+it.age_min+'m '+t().urgent_age+'</span>' : '';
+    const detail = it.detail ? '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(it.detail)+'</div>' : '';
+    return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer" onclick="go(\\''+(it.action_view||'inbox')+'\\')">'
+      + '<div style="width:6px;align-self:stretch;background:'+sevColor(it.severity)+';border-radius:3px;flex-shrink:0"></div>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">'
+          + '<span style="font-weight:600;font-size:13.5px">'+esc(it.title)+'</span>'
+          + '<span class="pill" style="background:'+sevBg(it.severity)+';color:'+sevColor(it.severity)+'">'+kindLabel(it.kind)+'</span>'
+        + '</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px">'
+          + '<span class="muted" style="font-size:12px">'+esc(it.subtitle||'')+' '+age+'</span>'
+        + '</div>'
+        + detail
+      + '</div>'
+    + '</div>';
+  }).join('');
+  el.innerHTML = '<div class="card" style="padding:0;overflow:hidden">'
+    + '<div class="card-head" style="padding:14px 16px;margin:0;border-bottom:1px solid var(--line)">'
+      + '<span class="card-title">'+t().urgent_title+' <span class="pill danger">'+items.length+'</span></span>'
+    + '</div>'
+    + rows
+    + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
+    + '</div>';
+}
+
+function renderArrivalsTimeline(){
+  const el = document.getElementById('arrivalsTimeline');
+  const cnt = document.getElementById('arrivalsCount');
+  if(!el) return;
+  const d = D.arrivals || {items:[]};
+  const items = d.items || [];
+  if(cnt) cnt.textContent = items.length ? ('· '+items.length) : '';
+  if(!items.length){
+    el.innerHTML = '<div class="empty">'+t().no_arrivals_window+'</div>';
+    return;
+  }
+  el.innerHTML = items.map(function(a){
+    const hrs = a.hours_until;
+    let when;
+    if(hrs < 0) when = '<span style="color:var(--mut)">'+t().arr_past+'</span>';
+    else if(hrs < 1) when = '<span style="color:var(--red);font-weight:600">'+Math.round(hrs*60)+' '+t().arr_minutes+'</span>';
+    else if(hrs < 24) when = '<span style="color:var(--yellow);font-weight:600">'+t().arr_in+' '+hrs.toFixed(1)+' '+t().arr_hours+'</span>';
+    else when = '<span class="muted">'+t().arr_in+' '+Math.round(hrs/24)+' '+t().pr_d_days+'</span>';
+    const signPill = a.signed
+      ? '<span class="pill ok">✓ '+t().arr_signed+'</span>'
+      : '<span class="pill danger">✗ '+t().arr_unsigned+'</span>';
+    return '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);align-items:center">'
+      + '<div style="font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--text-2);white-space:nowrap">'+esc(a.checkin_label)+'</div>'
+      + '<div style="min-width:0"><div style="font-weight:600;font-size:13.5px">'+esc(a.guest)+' <span class="muted" style="font-weight:500;font-size:12px">· '+esc(a.unit)+'</span></div><div style="display:flex;gap:6px;margin-top:3px;flex-wrap:wrap">'+signPill+'<span class="muted" style="font-size:11px">'+a.nights+' '+t().nights+'</span></div></div>'
+      + '<div style="font-size:12px;white-space:nowrap">'+when+'</div>'
+      + '</div>';
+  }).join('');
 }
 
 function renderFresh(){
@@ -6161,6 +6446,28 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_home_urgent(request):
+    """Operational urgency feed for the home page — high-severity items first."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = await asyncio.to_thread(compute_urgent_now)
+    return _json({"items": items, "counts": {
+        "high": sum(1 for i in items if i.get("severity") == "high"),
+        "med":  sum(1 for i in items if i.get("severity") == "med"),
+        "low":  sum(1 for i in items if i.get("severity") == "low"),
+    }})
+
+async def _api_home_arrivals(request):
+    """Next-N-hours arrivals with per-guest status (signed/code)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        h = int(request.query.get("hours", "36"))
+    except Exception:
+        h = 36
+    items = await asyncio.to_thread(compute_arrivals_with_status, max(6, min(72, h)))
+    return _json({"items": items, "window_hours": h})
+
 async def _api_metrics_daily(request):
     """Return up to N days of daily counters + derived rates so the dashboard can
     chart the assistant's improvement over time. ?days=30 by default."""
@@ -6336,6 +6643,8 @@ async def start_web_server():
         app.router.add_get("/api/learning/bootstrap/status", _api_learning_bootstrap_status)
         app.router.add_get("/api/metrics/daily", _api_metrics_daily)
         app.router.add_get("/api/learning/today", _api_learning_today)
+        app.router.add_get("/api/home/urgent", _api_home_urgent)
+        app.router.add_get("/api/home/arrivals", _api_home_arrivals)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
