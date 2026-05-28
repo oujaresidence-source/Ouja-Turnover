@@ -4062,6 +4062,206 @@ def metric_record_apartment(unit_name):
             apt.append(unit_name)
     except Exception:
         pass
+
+# ====================================================================
+# WILT — What I Learned Today  (daily journal-style summary)
+# ====================================================================
+def compose_wilt(date_iso=None):
+    """Build the data dict for today's WILT post. Inputs come from the in-memory
+    counters + learning log + knowledge cache + cleaning feedback ledger."""
+    today = date_iso or datetime.now(TZ).date().isoformat()
+    row = _daily_metrics.get(today, _new_day_row())
+
+    # 1) Reply funnel for today
+    drafts = row.get("drafts_made", 0)
+    total = row.get("replies_total", 0)
+    auto = row.get("replies_auto", 0)
+    manual = row.get("replies_manual", 0)
+    edited = row.get("replies_edited", 0)
+    dashboard = row.get("replies_dashboard", 0)
+    escs_created = row.get("escalations_created", 0)
+    escs_resolved = row.get("escalations_resolved", 0)
+    avg_conf = round((row["confidence_sum"] / row["confidence_count"]) * 100) \
+        if row.get("confidence_count") else 0
+    topics = row.get("topics", {})
+    top_topics = sorted(topics.items(), key=lambda kv: -kv[1])[:5]
+    apts_touched = row.get("apartments_touched", [])
+
+    # 2) New knowledge added today (from log events tagged 'معرفة')
+    knowledge_today = [e for e in _activity
+                       if e.get("ts", "").startswith(today) and "معرفة" in e.get("text", "")]
+    # 3) Concrete correction examples — top 5 most-edited drafts today
+    edits_today = sorted(
+        [e for e in _learning_log
+         if e.get("ts", "").startswith(today) and e.get("was_edited")],
+        key=lambda e: -(e.get("diff_ratio") or 0),
+    )[:5]
+    # 4) Apartments whose distilled summary refreshed today
+    today_dt = datetime.now(TZ).date()
+    apt_updated_today = [(lid, v) for lid, v in _apartment_learnings.items()
+                         if v.get("last_distilled") and
+                         datetime.fromtimestamp(v["last_distilled"], TZ).date() == today_dt]
+    # 5) Cleaning quality ratings received today
+    quality_today = [fb for fb in _cleaning_feedback.values()
+                     if fb.get("ts_done", "").startswith(today)]
+    # 6) Net new VIPs today is hard without timestamps; skip — surface running count
+    vip_count = sum(1 for p in _guest_profiles.values() if p.get("vip"))
+
+    return {
+        "date": today,
+        "funnel": {
+            "drafts": drafts, "total": total, "auto": auto, "manual": manual,
+            "edited": edited, "dashboard": dashboard,
+            "auto_rate": round(auto / total * 100) if total else 0,
+            "edit_rate": round(edited / max(1, manual + edited + dashboard) * 100)
+                if (manual + edited + dashboard) else 0,
+            "avg_confidence": avg_conf,
+        },
+        "escalations": {"created": escs_created, "resolved": escs_resolved},
+        "topics": top_topics,
+        "apartments_touched": apts_touched,
+        "knowledge_added": [{"ts": e["ts"][11:16], "text": e["text"][:160]} for e in knowledge_today],
+        "corrections": [
+            {"unit": e.get("unit",""), "guest_q": (e.get("guest_question","") or "")[:140],
+             "bot_draft": (e.get("bot_draft","") or "")[:160],
+             "final": (e.get("final_reply","") or "")[:160],
+             "diff": e.get("diff_ratio", 0)}
+            for e in edits_today
+        ],
+        "apartments_distilled_today": [{"lid": l, "unit": v.get("unit","")}
+                                       for l, v in apt_updated_today][:10],
+        "quality": {"count": len(quality_today),
+                    "avg": round(sum(fb["score"] for fb in quality_today) / len(quality_today), 1)
+                          if quality_today else None,
+                    "comments": [{"unit": fb.get("unit",""), "score": fb["score"],
+                                  "text": (fb.get("comment","") or "")[:120]}
+                                 for fb in quality_today if fb.get("comment")][:3]},
+        "vip_count": vip_count,
+    }
+
+def claude_wilt_prose(data):
+    """Ask Claude (Sonnet) for a warm 3-4 sentence Najdi summary of the day.
+    Returns string or None."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    sys = ("أنت تكتب ملخص يومي قصير دافئ لفريق إدارة عقارات «عوجا». الملخص يكون "
+           "بصيغة أنا (المساعد): 3-4 جمل، نجدي طبيعي، صادق، بدون مبالغة. ركّز على: "
+           "أهم شي تعلّمته، أبرز شي عدّله الفريق علي، وأي نمط لاحظته. لو اليوم هادي "
+           "ما حصل فيه شي مميّز، قول ذلك بوضوح. اكتب نص الفقرة فقط بدون عناوين."
+           + _DIALECT_LOCK)
+    user = (f"بيانات اليوم {data.get('date')}:\n"
+            f"- مسوّدات: {data['funnel']['drafts']}، أرسلت: {data['funnel']['total']} "
+            f"(تلقائي {data['funnel']['auto']}, مُعدّلة {data['funnel']['edited']}, "
+            f"يدوي {data['funnel']['manual']}, لوحة {data['funnel']['dashboard']}).\n"
+            f"- متوسط الثقة: {data['funnel']['avg_confidence']}%.\n"
+            f"- تصعيدات: {data['escalations']['created']} جديدة، "
+            f"{data['escalations']['resolved']} مُغلقة.\n"
+            f"- أكثر المواضيع: {', '.join(k for k,_ in data['topics']) or '—'}.\n"
+            f"- معرفة جديدة من الفريق: {len(data['knowledge_added'])}.\n"
+            f"- تصحيحات بارزة: {len(data['corrections'])}.\n"
+            f"- شقق محدّث ملخصها: {len(data['apartments_distilled_today'])}.\n"
+            f"- تقييمات نظافة اليوم: {data['quality']['count']} "
+            f"(متوسط {data['quality']['avg']})." if data['quality']['count'] else
+            f"- بيانات اليوم {data.get('date')}: قليل من النشاط.\n"
+            )
+    return claude_text(sys, user, max_tokens=350, model=CLAUDE_MODEL_PREMIUM) \
+        or claude_text(sys, user, max_tokens=350)
+
+def _wilt_embed(data, prose=""):
+    """Render the WILT data as a Discord embed."""
+    f = data["funnel"]
+    e = data["escalations"]
+    desc_lines = []
+    if prose:
+        desc_lines.append("*" + prose.strip() + "*\n")
+    desc_lines.append(
+        f"**🤖 الردود:** {f['total']} مُرسلة من أصل {f['drafts']} مسوّدة "
+        f"(تلقائي **{f['auto']}** · يدوي **{f['manual']}** · مُعدّلة **{f['edited']}** · "
+        f"لوحة **{f['dashboard']}**)"
+    )
+    desc_lines.append(
+        f"**📊 المؤشرات:** تلقائي {f['auto_rate']}% · تعديل {f['edit_rate']}% · "
+        f"ثقة {f['avg_confidence']}% · تصعيدات +{e['created']} / −{e['resolved']}"
+    )
+    if data["topics"]:
+        desc_lines.append("**🏷️ المواضيع:** " + " · ".join(f"{n} ({c})" for n, c in data["topics"]))
+    if data["apartments_touched"]:
+        desc_lines.append(f"**🏠 شقق نشطة اليوم:** {len(data['apartments_touched'])}")
+    embed = discord.Embed(
+        title=f"📓 WILT · ما تعلّمته اليوم · {data['date']}",
+        description="\n\n".join(desc_lines),
+        color=GOLD,
+    )
+    # New facts the team posted today
+    if data["knowledge_added"]:
+        embed.add_field(
+            name=f"🧠 معرفة جديدة من الفريق ({len(data['knowledge_added'])})",
+            value="\n".join(f"`{k['ts']}` {k['text']}" for k in data["knowledge_added"][:6])[:1024],
+            inline=False,
+        )
+    # Top corrections
+    if data["corrections"]:
+        lines = []
+        for c in data["corrections"][:3]:
+            unit = c["unit"] or "—"
+            lines.append(f"**{unit}** — تعديل {int(c['diff']*100)}%\n"
+                         f"  س: _{c['guest_q'][:100]}_\n"
+                         f"  أنا قلت: ~~{c['bot_draft'][:100]}~~\n"
+                         f"  الفريق صحّحها لـ: **{c['final'][:100]}**")
+        embed.add_field(
+            name=f"✍️ تصحيحات بارزة ({len(data['corrections'])})",
+            value="\n\n".join(lines)[:1024],
+            inline=False,
+        )
+    # Apartments whose distilled brain updated today
+    if data["apartments_distilled_today"]:
+        names = " · ".join(a["unit"] for a in data["apartments_distilled_today"] if a["unit"])
+        embed.add_field(
+            name=f"📚 شقق حدّثت ملخصها اليوم ({len(data['apartments_distilled_today'])})",
+            value=(names or "—")[:1024], inline=False,
+        )
+    # Cleaning quality
+    if data["quality"]["count"]:
+        q = data["quality"]
+        cmts = ""
+        if q["comments"]:
+            cmts = "\n" + "\n".join(f"  • **{c['unit']}** ({c['score']}★): {c['text']}"
+                                    for c in q["comments"])
+        embed.add_field(
+            name=f"⭐ تقييمات نظافة ({q['count']})",
+            value=f"المتوسط: **{q['avg']}** ⭐{cmts}"[:1024],
+            inline=False,
+        )
+    embed.set_footer(text=f"إجمالي ضيوف VIP حتى الآن: {data['vip_count']} · "
+                          f"ما تعلّمته يُرسَل يومياً الساعة {WILT_HOUR:02d}:00 · "
+                          f"غيّر القناة عبر متغيّر WILT_CHANNEL")
+    return embed
+
+async def post_wilt():
+    """Compose today's WILT, post it to #wilt, ping the team. Idempotent — won't
+    repost for the same date thanks to _wilt_last_date."""
+    global _wilt_last_date
+    if not WILT_ENABLED:
+        return
+    today = datetime.now(TZ).date()
+    if _wilt_last_date == today and not WILT_TEST:
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    category = await get_assistant_category(guild)
+    channel = await ensure_channel(guild, WILT_CHANNEL, category)
+    if channel is None:
+        return
+    data = await asyncio.to_thread(compose_wilt)
+    prose = await asyncio.to_thread(claude_wilt_prose, data)
+    try:
+        await channel.send(embed=_wilt_embed(data, prose or ""))
+        _wilt_last_date = today
+        log_event("report", f"WILT · ملخص يومي · {data['funnel']['total']} رد، "
+                            f"{len(data['corrections'])} تصحيح، {data['vip_count']} VIP")
+    except Exception as e:
+        print("post_wilt error:", e)
 LEARNING_MIN_NEW_EXAMPLES = int(os.environ.get("LEARNING_MIN_NEW_EXAMPLES", "5"))   # don't re-distill until N new entries
 LEARNING_DISTILL_MIN = int(os.environ.get("LEARNING_DISTILL_MIN", "30"))           # background distill interval (min)
 LEARNING_SAMPLE_PER_APT = int(os.environ.get("LEARNING_SAMPLE_PER_APT", "40"))     # last N entries per apt to feed Claude
@@ -4095,6 +4295,16 @@ WORK_END_HOUR    = int(os.environ.get("WORK_END_HOUR", "25"))    # 25 == 1am nex
 WORK_END_MIN     = int(os.environ.get("WORK_END_MIN", "30"))     # 30 → 1:30 am
 OFFHOURS_AUTOREPLY_ENABLED = os.environ.get("OFFHOURS_AUTOREPLY_ENABLED", "1") in ("1","true","True","yes")
 _offhours_acked_convos = set()    # conversation_ids we already auto-replied to in the current off-hours window
+
+# ---------------- WILT: What I Learned Today ----------------
+# Once a day at WILT_HOUR Riyadh, post a daily journal-style summary to
+# #wilt with: counters, what changed, who corrected what, which apartments
+# got new facts, plus a 3-4 sentence Najdi prose summary from Claude.
+WILT_ENABLED  = os.environ.get("WILT_ENABLED", "1") in ("1","true","True","yes")
+WILT_CHANNEL  = os.environ.get("WILT_CHANNEL", "wilt")
+WILT_HOUR     = int(os.environ.get("WILT_HOUR", "23"))      # 11pm Riyadh
+WILT_TEST     = os.environ.get("WILT_TEST", "0") in ("1","true","True","yes")
+_wilt_last_date = None
 
 # ---------------- Guest profiles ----------------
 # A "guest profile" is keyed by best-available stable identifier:
@@ -9484,6 +9694,14 @@ async def offhours_ack_reset_loop():
     got an off-hours auto-ack so they can be re-acked next time we go offline."""
     _offhours_acked_convos.clear()
 
+@tasks.loop(time=dt_time(hour=WILT_HOUR, tzinfo=TZ))
+async def wilt_loop():
+    """Post the daily WILT (What I Learned Today) at WILT_HOUR Riyadh."""
+    try:
+        await post_wilt()
+    except Exception as e:
+        print("wilt_loop error:", e)
+
 @tasks.loop(time=dt_time(hour=WORK_START_HOUR, minute=2, tzinfo=TZ))
 async def morning_escalation_reminder_loop():
     """First thing each working day, post a summary of every unclaimed escalation
@@ -10499,6 +10717,14 @@ async def on_ready():
         offhours_ack_reset_loop.start()
     if not morning_escalation_reminder_loop.is_running():
         morning_escalation_reminder_loop.start()
+    if WILT_ENABLED and not wilt_loop.is_running():
+        wilt_loop.start()
+    if WILT_TEST:
+        print("WILT_TEST=1 — posting WILT now (test run)")
+        try:
+            await post_wilt()
+        except Exception as e:
+            print("test WILT error:", e)
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
         guest_summary_loop.start()
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
