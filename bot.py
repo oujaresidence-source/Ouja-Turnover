@@ -7651,22 +7651,28 @@ function go(id){
    INIT + LOAD
    ============================================================ */
 async function init(){
+  // STEP 1 — verify token. Only here can we say "wrong token".
   try{
     document.getElementById('lerr').textContent='';
     await api('/api/overview');
-    document.getElementById('login').style.display='none';
-    document.getElementById('app').style.display='block';
-    applyTheme(); applyLang();
-    // Identify the current user (legacy super-admin token returns {role:'admin'})
-    try{ D.me = await api('/api/users/me'); }catch(_){ D.me = {user:{role:'admin'}}; }
-    buildSideNav();
-    await loadAll();
-    _applyHelpDismissals();
-    maybeShowWelcome();
-    setInterval(loadAll, 15000);
   }catch(e){
     document.getElementById('lerr').textContent = t().wrong;
+    return;
   }
+  // STEP 2 — token is valid. From here on, *never* fall back to "wrong token"
+  // even if a render helper crashes — we let the user into the dashboard.
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='block';
+  try{ applyTheme(); }catch(e){ console.error('applyTheme failed:', e); }
+  try{ applyLang(); }catch(e){ console.error('applyLang failed:', e); }
+  try{ D.me = await api('/api/users/me'); }catch(_){ D.me = {user:{role:'admin'}}; }
+  try{ buildSideNav(); }catch(e){ console.error('buildSideNav failed:', e); }
+  try{ await loadAll(); }catch(e){ console.error('loadAll failed:', e); }
+  try{ _applyHelpDismissals(); }catch(e){ console.error('help dismiss failed:', e); }
+  try{ maybeShowWelcome(); }catch(e){ console.error('welcome failed:', e); }
+  setInterval(function(){
+    try{ loadAll(); }catch(e){ console.error('loadAll tick:', e); }
+  }, 15000);
 }
 async function loadAll(){
   try{
