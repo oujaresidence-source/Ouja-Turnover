@@ -5886,8 +5886,29 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 <div id="login">
   <div class="brand-lg">عوجا</div>
   <div class="sub">Ouja Operations</div>
-  <input id="tok" type="password" placeholder="رمز الدخول · Access token" autocomplete="off" onkeydown="if(event.key==='Enter')saveTok()">
-  <button class="btn primary" onclick="saveTok()" style="padding:12px 26px;font-size:13.5px">دخول · Enter</button>
+
+  <!-- Mode toggle -->
+  <div style="display:flex;gap:0;margin:14px 0 10px;border-radius:8px;overflow:hidden;border:1px solid #d4cfc1">
+    <button id="loginTabToken" onclick="switchLoginMode('token')" style="flex:1;padding:10px;background:#f5efe2;color:#1a1a1a;border:none;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:600;border-inline-end:1px solid #d4cfc1">🔑 توكن · Token</button>
+    <button id="loginTabUser" onclick="switchLoginMode('user')" style="flex:1;padding:10px;background:#fff;color:#666;border:none;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:500">👤 اسم وكلمة مرور</button>
+  </div>
+
+  <!-- Token mode (legacy) -->
+  <div id="loginPaneToken">
+    <input id="tok" type="password" placeholder="رمز الدخول · Access token" autocomplete="off" onkeydown="if(event.key==='Enter')saveTok()">
+    <button class="btn primary" onclick="saveTok()" style="padding:12px 26px;font-size:13.5px;margin-top:8px;width:100%">دخول · Enter</button>
+  </div>
+
+  <!-- User mode (new) -->
+  <div id="loginPaneUser" style="display:none">
+    <input id="loginUsername" type="text" placeholder="اسم المستخدم · Username" autocomplete="username" style="margin-bottom:8px">
+    <input id="loginPassword" type="password" placeholder="كلمة المرور · Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUserLogin()">
+    <button class="btn primary" onclick="doUserLogin()" style="padding:12px 26px;font-size:13.5px;margin-top:8px;width:100%">دخول · Enter</button>
+    <div style="font-size:11px;color:#888;text-align:center;margin-top:10px;line-height:1.5">
+      أول مرة؟ المالك يقدر يدخل بـ:<br><b>اسم المستخدم:</b> admin · <b>كلمة المرور:</b> هي نفس قيمة <code>DASHBOARD_TOKEN</code>
+    </div>
+  </div>
+
   <div class="err" id="lerr"></div>
 </div>
 
@@ -7319,6 +7340,50 @@ function t(){return T[L]}
 function tok(){return localStorage.getItem(TK)||''}
 function saveTok(){localStorage.setItem(TK, document.getElementById('tok').value.trim()); init()}
 function logout(){localStorage.removeItem(TK); location.reload()}
+
+function switchLoginMode(mode){
+  const t = document.getElementById('loginTabToken');
+  const u = document.getElementById('loginTabUser');
+  const pt = document.getElementById('loginPaneToken');
+  const pu = document.getElementById('loginPaneUser');
+  if(mode === 'user'){
+    if(t) t.style.cssText = t.style.cssText.replace('background:#f5efe2;color:#1a1a1a','background:#fff;color:#666');
+    if(u) u.style.cssText = u.style.cssText.replace('background:#fff;color:#666','background:#f5efe2;color:#1a1a1a');
+    if(pt) pt.style.display = 'none';
+    if(pu) pu.style.display = 'block';
+  } else {
+    if(t) t.style.cssText = t.style.cssText.replace('background:#fff;color:#666','background:#f5efe2;color:#1a1a1a');
+    if(u) u.style.cssText = u.style.cssText.replace('background:#f5efe2;color:#1a1a1a','background:#fff;color:#666');
+    if(pt) pt.style.display = 'block';
+    if(pu) pu.style.display = 'none';
+  }
+}
+
+async function doUserLogin(){
+  document.getElementById('lerr').textContent = '';
+  const username = (document.getElementById('loginUsername')||{}).value.trim();
+  const password = (document.getElementById('loginPassword')||{}).value;
+  if(!username || !password){
+    document.getElementById('lerr').textContent = 'الاسم وكلمة المرور مطلوبين';
+    return;
+  }
+  try {
+    const r = await fetch('/api/auth/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username:username, password:password})
+    });
+    const j = await r.json().catch(function(){return {}});
+    if(j.ok && j.token){
+      localStorage.setItem(TK, j.token);
+      init();
+    } else {
+      document.getElementById('lerr').textContent = j.error || 'الاسم أو كلمة المرور غلط';
+    }
+  } catch(e){
+    document.getElementById('lerr').textContent = 'خطأ بالاتصال';
+  }
+}
 function esc(s){return (s==null?'':String(s)).replace(/[<>&"']/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]})}
 function fmt(n){return (Math.round(n||0)).toLocaleString('en-US')}
 function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show')},2200)}
@@ -14214,6 +14279,22 @@ def load_state():
         for k, v in (_load_json("users.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _users[str(k)] = v
+        # First-run bootstrap: if no admin user exists, auto-create one
+        # using the legacy DASHBOARD_TOKEN as the password. Username is
+        # "admin". This guarantees the owner can always log in even if
+        # they forgot the token field — they can use the username/password
+        # form on the login screen instead.
+        has_admin = any(u.get("role") == "admin" and u.get("active")
+                        for u in _users.values())
+        if not has_admin and DASHBOARD_TOKEN:
+            try:
+                u = _user_create("admin", DASHBOARD_TOKEN, role="admin",
+                                  created_by="bootstrap")
+                print(f"BOOTSTRAP: created admin user '{u['name']}' "
+                      f"(password = DASHBOARD_TOKEN). You can now log in "
+                      f"with username 'admin' + the same token value.")
+            except Exception as e:
+                print("bootstrap admin create error:", e)
         _quotes.clear()
         for k, v in (_load_json("quotes.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
