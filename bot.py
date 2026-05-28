@@ -6257,7 +6257,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_reviews">
         <div class="page-head">
           <div>
-            <div class="page-title">⭐ المراجعات</div>
+            <div class="page-title" id="rv_pt">⭐ المراجعات</div>
             <div class="page-sub" id="t_reviews_sub">—</div>
           </div>
           <div class="page-tools">
@@ -6328,11 +6328,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_tickets">
         <div class="page-head">
           <div>
-            <div class="page-title">🔧 الصيانة</div>
-            <div class="page-sub">سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً</div>
+            <div class="page-title" id="tk_pt">🔧 الصيانة</div>
+            <div class="page-sub" id="tk_ps">سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً</div>
           </div>
           <div class="page-tools">
-            <button class="btn primary sm" onclick="openTicketModal()">➕ تذكرة جديدة</button>
+            <button class="btn primary sm" id="tk_btn_new" onclick="openTicketModal()">➕ تذكرة جديدة</button>
             <button class="btn ghost sm" onclick="loadTickets()">↻</button>
           </div>
         </div>
@@ -6766,7 +6766,68 @@ const T = {
     nav_home:'الرئيسية', nav_inbox:'الوارد', nav_today:'اليوم', nav_pricing:'تسعير', nav_more:'المزيد',
     apply_all_q:'تطبيق كل التغييرات على هالوحدة؟',
     no_data:'ما فيه بيانات', untilDays:'يوم',
-    units_count:'وحدة'
+    units_count:'وحدة',
+    /* ===== Page-help banner copy (Batch 26) ===== */
+    ph:{
+      home:    {t:'👋 أهلاً وسهلاً', b:'هذي الصفحة الرئيسية — كل أرقام اليوم تجي هنا: <b>الإشغال</b>، <b>الإيراد</b>، <b>الشقق الفاضية الليلة</b>، <b>التذاكر العاجلة</b>. أي رقم بلون أحمر = يحتاج انتباه، اضغطه يوديك لتفاصيله. الشريط الجانبي يسار = كل الصفحات.'},
+      inbox:   {t:'✉️ ردود الضيوف والتصعيدات', b:'كل ما المساعد يحضّر رد لضيف بيظهر هنا. <b>أصفر</b> = يحتاج موافقتك (شك في الرد). <b>أحمر</b> = تصعيد، فيه مشكلة جدية. اضغط أي محادثة تشوف النص كامل.'},
+      today:   {t:'◎ الفاضي الليلة', b:'كل شقة لسا فاضية الليلة، مع <b>السعر الحالي</b> و<b>جدول الخصومات المجدولة</b> الساعة ٢٠، ٢٢، ومنتصف الليل. الهدف: ٩٥٪ إشغال (ما عدا رمضان).'},
+      calendar:{t:'📅 تقويم الـ٦٠ يوم', b:'كل خانة = يوم. اللون يبيّن قوة الإشغال: <b>أخضر</b> = ممتاز، <b>أصفر</b> = متوسط، <b>أحمر</b> = ضعيف. اضغط يوم تشوف اللي حاجز فيه وأي شقق فاضية.'},
+      pricing: {t:'$ فرص رفع/تخفيض السعر', b:'البوت يلقى فرص ترفع السعر فيها أو تخفّضه. اضغط أي فرصة، تشوف <b>السبب</b> والـ<b>قبل/بعد</b>. زر "طبّق" يكتب السعر في Hostaway مباشرة.'},
+      strat:   {t:'⚡ الاستراتيجيات المتابَعة', b:'كل فرصة سعر طبقتها = استراتيجية البوت يتابعها يومياً. تشوف هنا: حُجزت ولا لا، الإيراد المتحقق، ومتى انتهت. تقدر <b>توقف</b> أي وحدة.'},
+      rev:     {t:'∿ الأرقام الكبيرة', b:'إيراد آخر <b>١٢ شهر</b>، مقارنة بالشهر اللي قبله، أداء كل شقة، وتأثير <b>دورة الراتب</b>. تقدر تصدّر CSV — يفتح بـExcel عربي بدون مشاكل.'},
+      log:     {t:'≡ كل ما عمله البوت', b:'رسائل، تصعيدات، تغييرات أسعار، تنظيفات، تذاكر — كله مسجّل هنا بتوقيت Riyadh. استخدم الفلتر فوق تركز على نوع معين.'},
+      clean:   {t:'🧹 التنظيف العميق', b:'كل شقة تتنظف عميق كل <b>٤٥-٦٠ يوم</b>. تنظيف واحد كل يوم، يتأكد من Hostaway الساعة <b>٩ مساءً</b> الليلة قبل. لو الشقة محجوزة، يبدّلها مع شقة ثانية تلقائي.'},
+      quality: {t:'⭐ تقييم نظافة كل شقة', b:'متوسط تقييمات النظافة من الضيوف لكل شقة، مع آخر التعليقات. <b>الترتيب: الأسوأ فوق</b> عشان تشتغل عليها أول.'},
+      guests:  {t:'👤 الضيوف اللي زاروك', b:'كل ضيف نزل عندك من قبل — اسمه، رقمه، كم مرة زار، وأي شقق. تقدر تعلّمه <b>VIP</b> فيتنبه له المساعد كل مرة يرجع.'},
+      learn:   {t:'📚 ما تعلّمه المساعد', b:'كل ما الفريق يعدّل رد للمساعد، البوت يتعلّم منه. تشوف هنا وش تعلّم اليوم/أمس/الأسبوع الفايت، ونسبة ثقته، وما تعلّمه عن كل شقة.'},
+      tickets: {t:'🔧 الصيانة', b:'كل مشكلة بشقة (سباكة، تكييف، شكوى ضيف…) تنفتح كـ<b>تذكرة</b> هنا. ⚙️ البوت يفتح التذكرة تلقائياً لما يصير تصعيد. 👷 تقدر تضيف يدوي. كل تذكرة فيها: حالة، أولوية، مسؤول، مورّد، تكلفة، وسجل تعليقات.'},
+      reviews: {t:'⭐ المراجعات', b:'كل مراجعات Airbnb / Booking تجي هنا. ⭐ كل مراجعة سلبية يقدر المساعد يقول لك هل تنحذف (HIGH/MEDIUM/LOW). 📝 إذا تنحذف يجهّز <b>رسالة دفاع</b>. 🤝 وإذا ما تنحذف، يكتب <b>رد عام محترم</b> بأسلوب <b>AAA</b>.'}
+    },
+    /* ===== Tickets ===== */
+    tkts:{
+      title:'🔧 الصيانة', sub:'سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً',
+      new:'➕ تذكرة جديدة', list:'📋 القائمة',
+      f_status_all:'كل الحالات', f_prio_all:'كل الأولويات', f_cat_all:'كل التصنيفات',
+      st_open:'🆕 جديدة', st_in:'🔧 تحت العمل', st_fix:'✅ منجزة', st_can:'⛔ ملغية',
+      pr_low:'منخفضة', pr_med:'متوسطة', pr_high:'عالية', pr_urg:'عاجلة',
+      kpi_total:'إجمالي التذاكر', kpi_open:'جديدة', kpi_in:'تحت العمل', kpi_over:'متأخّرة',
+      empty:'ما فيه تذاكر بعد. اضغط <b>تذكرة جديدة</b> أو انتظر البوت يفتح وحدة تلقائياً.',
+      modal_new:'➕ تذكرة جديدة', modal_edit:'🔧 تعديل التذكرة',
+      f_title:'العنوان *', f_desc:'الوصف', f_status:'الحالة', f_prio:'الأولوية',
+      f_cat:'التصنيف', f_unit:'الشقة', f_assignee:'المسؤول', f_due:'تاريخ الاستحقاق',
+      f_vendor:'المورّد', f_phone:'هاتف المورّد', f_cost:'التكلفة (ر.س)',
+      f_note:'إضافة تعليق', log_title:'📜 سجل التذكرة',
+      btn_cancel:'إلغاء', btn_create:'➕ أنشئ', btn_save:'💾 احفظ', btn_del:'🗑 حذف',
+      src_esc:'🚨 من تصعيد ضيف', src_rev:'⭐ من مراجعة'
+    },
+    /* ===== Reviews ===== */
+    rvw:{
+      title:'⭐ المراجعات',
+      refresh:'↻ تحديث من Hostaway',
+      last_update:'آخر تحديث:', no_update:'اضغط "تحديث من Hostaway" لجلب المراجعات',
+      kpi_shown:'في المدى المحدد', kpi_pos:'إيجابية', kpi_urg:'حرجة (≤٢ نجوم)', kpi_an:'تم تحليلها',
+      f_sent_all:'كل المشاعر', f_sent_pos:'إيجابية (٤-٥ ⭐)', f_sent_neg:'سلبية (≤٣ ⭐)',
+      f_urg_all:'كل المستويات', f_urg_urg:'حرجة', f_urg_warn:'سلبية', f_urg_norm:'عادية',
+      f_fix_all:'الكل', f_fix_no:'غير محلولة', f_fix_yes:'محلولة',
+      search_ph:'ابحث بنص المراجعة أو اسم الضيف…',
+      auto_en:'ترجم للإنجليزي تلقائياً',
+      bulk:'🤖 حلّل الكل (٢٥)',
+      empty:'ما فيه مراجعات بعد. اضغط "↻ تحديث من Hostaway" أعلاه ليجيب لك المراجعات.',
+      group_title:'📋 المراجعات حسب الشقة',
+      win_all:'الكل', win_7d:'٧ أيام', win_14d:'١٤ يوم', win_30d:'شهر',
+      win_90d:'٣ شهور', win_180d:'٦ شهور', win_365d:'سنة',
+      pos_pill:'💚 إيجابية', fixed_pill:'✓ محلولة',
+      analyzing:'⏳ يترجم…', translate_btn:'🌐 ترجم للإنجليزي',
+      ai_label:'🤖 تحليل المساعد:',
+      dispute_title:'📝 رسالة دفاع لـ Airbnb (English)', dispute_angle:'زاوية الحجة:',
+      reply_pos:'💚 رد شكر شخصي', reply_neg:'🤝 رد عام بأسلوب AAA',
+      copy:'📋 نسخ', copied:'✓ منسوخ',
+      not_analyzed_pos:'ما فيه رد شكر بعد', not_analyzed_neg:'المساعد ما حلل هذي المراجعة بعد',
+      btn_pos:'🤖 جهّز رد شكر', btn_neg:'🤖 حلّل بـ AI',
+      unfix:'↩ ارجع كغير محلولة', fix:'✓ علّم محلولة',
+      open_ticket:'🔧 افتح تذكرة صيانة', reanalyze:'↻ أعد التحليل'
+    }
   },
   en:{dir:'ltr',
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews',
@@ -6897,7 +6958,68 @@ const T = {
     nav_home:'Home', nav_inbox:'Inbox', nav_today:'Today', nav_pricing:'Pricing', nav_more:'More',
     apply_all_q:'Apply all changes for this unit?',
     no_data:'No data', untilDays:'d',
-    units_count:'units'
+    units_count:'units',
+    /* ===== Page-help banner copy (Batch 26) — English ===== */
+    ph:{
+      home:    {t:'👋 Welcome', b:'This is the home page — today\'s key numbers all live here: <b>occupancy</b>, <b>revenue</b>, <b>vacant tonight</b>, <b>urgent tickets</b>. Any red number needs attention; click it to drill down. The left sidebar is every page.'},
+      inbox:   {t:'✉️ Guest replies & escalations', b:'Every draft the AI assistant prepares for a guest lands here. <b>Yellow</b> = the bot is unsure and wants your approval. <b>Red</b> = escalation, real problem. Click any thread to see the full conversation.'},
+      today:   {t:'◎ Vacant tonight', b:'Every unit still unbooked for tonight, with the <b>current price</b> plus the <b>scheduled discount tiers</b> at 8 PM, 10 PM and midnight. Target: 95% occupancy (Ramadan excluded).'},
+      calendar:{t:'📅 60-day calendar', b:'Every box = one day. Colour shows occupancy strength: <b>green</b> = excellent, <b>yellow</b> = medium, <b>red</b> = weak. Click a day to see who\'s booked and which units are still open.'},
+      pricing: {t:'$ Price-up & price-down opportunities', b:'The bot finds nights where you should raise or lower the price. Click an opportunity to see the <b>reasoning</b> and <b>before/after</b>. "Apply" writes the new price into Hostaway immediately.'},
+      strat:   {t:'⚡ Tracked strategies', b:'Every price change you applied = a strategy the bot watches daily. You see whether the night booked, the actual revenue captured, and when it ended. You can <b>stop</b> any unit at any time.'},
+      rev:     {t:'∿ The big numbers', b:'Revenue for the last <b>12 months</b>, comparison vs the previous month, per-unit performance, and the <b>salary-cycle</b> effect (demand spikes at month-end). CSV export opens cleanly in Arabic-Excel.'},
+      log:     {t:'≡ Everything the bot did', b:'Messages, escalations, price changes, cleanings, tickets — all logged here in Riyadh time. Use the top filter to focus on a specific kind of activity.'},
+      clean:   {t:'🧹 Deep cleaning', b:'Every unit gets a deep clean every <b>45-60 days</b>. One clean per day, confirmed against Hostaway at <b>9 PM the night before</b>. If the unit is booked, it auto-swaps with another unit.'},
+      quality: {t:'⭐ Cleanliness rating per unit', b:'Average guest cleanliness ratings per unit, with the latest comments. <b>Sorted worst-first</b> so you tackle the highest-impact unit first.'},
+      guests:  {t:'👤 Guests who\'ve stayed', b:'Every past guest — name, phone, visit count, and which units. Mark a guest <b>VIP</b> and the assistant will recognise them the next time they reach out.'},
+      learn:   {t:'📚 What the assistant learned', b:'Every time the team edits a reply, the bot learns from it. See what it learned <b>today vs yesterday vs last week</b>, its confidence trend, and what it learned about each specific apartment.'},
+      tickets: {t:'🔧 Maintenance', b:'Every problem in a unit (plumbing, AC, guest complaint…) opens a <b>ticket</b> here. ⚙️ The bot opens one automatically when an escalation fires. 👷 You can add one manually. Each ticket has status, priority, assignee, vendor, cost, and a full audit log.'},
+      reviews: {t:'⭐ Reviews', b:'Every Airbnb / Booking review lands here. ⭐ For negative ones the assistant tells you whether it\'s removable (HIGH/MEDIUM/LOW). 📝 If yes, it drafts a <b>dispute message</b>. 🤝 If no, it writes a polished <b>public reply</b> using the <b>AAA</b> framework.'}
+    },
+    /* ===== Tickets — English ===== */
+    tkts:{
+      title:'🔧 Maintenance', sub:'Ticket log — every escalation or problem auto-opens one here',
+      new:'➕ New ticket', list:'📋 List',
+      f_status_all:'All statuses', f_prio_all:'All priorities', f_cat_all:'All categories',
+      st_open:'🆕 Open', st_in:'🔧 In progress', st_fix:'✅ Fixed', st_can:'⛔ Cancelled',
+      pr_low:'Low', pr_med:'Medium', pr_high:'High', pr_urg:'Urgent',
+      kpi_total:'Total tickets', kpi_open:'Open', kpi_in:'In progress', kpi_over:'Overdue',
+      empty:'No tickets yet. Click <b>New ticket</b> or wait for the bot to open one automatically.',
+      modal_new:'➕ New ticket', modal_edit:'🔧 Edit ticket',
+      f_title:'Title *', f_desc:'Description', f_status:'Status', f_prio:'Priority',
+      f_cat:'Category', f_unit:'Apartment', f_assignee:'Assignee', f_due:'Due date',
+      f_vendor:'Vendor', f_phone:'Vendor phone', f_cost:'Cost (SAR)',
+      f_note:'Add a comment', log_title:'📜 Ticket log',
+      btn_cancel:'Cancel', btn_create:'➕ Create', btn_save:'💾 Save', btn_del:'🗑 Delete',
+      src_esc:'🚨 From guest escalation', src_rev:'⭐ From a review'
+    },
+    /* ===== Reviews — English ===== */
+    rvw:{
+      title:'⭐ Reviews',
+      refresh:'↻ Refresh from Hostaway',
+      last_update:'Last update:', no_update:'Click "Refresh from Hostaway" to pull reviews',
+      kpi_shown:'In selected range', kpi_pos:'Positive', kpi_urg:'Critical (≤2 ★)', kpi_an:'Analyzed',
+      f_sent_all:'All sentiments', f_sent_pos:'Positive (4-5 ⭐)', f_sent_neg:'Negative (≤3 ⭐)',
+      f_urg_all:'All levels', f_urg_urg:'Critical', f_urg_warn:'Negative', f_urg_norm:'Normal',
+      f_fix_all:'All', f_fix_no:'Unresolved', f_fix_yes:'Resolved',
+      search_ph:'Search review text or guest name…',
+      auto_en:'Auto-translate to English',
+      bulk:'🤖 Analyze all (25)',
+      empty:'No reviews yet. Click "↻ Refresh from Hostaway" above to pull them.',
+      group_title:'📋 Reviews grouped by apartment',
+      win_all:'All', win_7d:'7 days', win_14d:'14 days', win_30d:'1 month',
+      win_90d:'3 months', win_180d:'6 months', win_365d:'1 year',
+      pos_pill:'💚 Positive', fixed_pill:'✓ Resolved',
+      analyzing:'⏳ Translating…', translate_btn:'🌐 Translate to English',
+      ai_label:'🤖 AI analysis:',
+      dispute_title:'📝 Dispute message for Airbnb', dispute_angle:'Argument angle:',
+      reply_pos:'💚 Personal thank-you reply', reply_neg:'🤝 Public reply (AAA)',
+      copy:'📋 Copy', copied:'✓ Copied',
+      not_analyzed_pos:'No thank-you reply yet', not_analyzed_neg:'Not analyzed yet',
+      btn_pos:'🤖 Generate thank-you', btn_neg:'🤖 Analyze with AI',
+      unfix:'↩ Mark unresolved', fix:'✓ Mark resolved',
+      open_ticket:'🔧 Open maintenance ticket', reanalyze:'↻ Re-analyze'
+    }
   }
 };
 
@@ -6978,6 +7100,64 @@ function applyLang(){
   buildSideNav(); buildBottomNav(); buildMoreNav(); buildInboxTabs();
   const mhT = document.getElementById('mhead_title');
   if(mhT) mhT.textContent = t()[view] || t().home;
+  // Repaint every page-help banner from t().ph[key]
+  const ph = t().ph || {};
+  for(const el of document.querySelectorAll('.page-help')){
+    const k = el.getAttribute('data-help-key');
+    const o = ph[k]; if(!o) continue;
+    const tEl = el.querySelector('.ph-t');
+    const bEl = el.querySelector('.ph-b');
+    if(tEl) tEl.textContent = o.t;
+    if(bEl) bEl.innerHTML = o.b;  // allow inline <b> tags
+  }
+  // Repaint tickets + reviews static labels
+  _i18nPaintTickets();
+  _i18nPaintReviews();
+  // If we have data on screen, re-render so dynamic strings flip too
+  if(D.tickets) _renderTicketsBody(), _renderTicketStats();
+  if(D.reviews) _renderReviewsBody(), _renderReviewsStats(), _renderTimeFilterStrip();
+}
+
+function _i18nPaintTickets(){
+  const k = t().tkts || {};
+  function set(id, val){ const e = document.getElementById(id); if(e) e.textContent = val; }
+  // Page head + buttons
+  set('tk_pt', k.title); set('tk_ps', k.sub);
+  set('tk_btn_new', k.new); set('tk_card_list', k.list);
+  // Filter <option> labels
+  const stMap = {'':'f_status_all', open:'st_open', in_progress:'st_in',
+                 fixed:'st_fix', cancelled:'st_can'};
+  const prMap = {'':'f_prio_all', urgent:'pr_urg', high:'pr_high', med:'pr_med', low:'pr_low'};
+  const sel = document.getElementById('tkFilterStatus');
+  if(sel){ for(const o of sel.options){ if(stMap[o.value] && k[stMap[o.value]]) o.text = k[stMap[o.value]]; } }
+  const sel2 = document.getElementById('tkFilterPriority');
+  if(sel2){ for(const o of sel2.options){ if(prMap[o.value] && k[prMap[o.value]]) o.text = k[prMap[o.value]]; } }
+  const sel3 = document.getElementById('tkFilterCategory');
+  if(sel3 && sel3.options[0]){ sel3.options[0].text = k.f_cat_all || sel3.options[0].text; }
+  const srch = document.getElementById('tkSearch'); if(srch && (k.search_ph || L==='en')) srch.placeholder = L==='en' ? 'Search…' : 'ابحث…';
+}
+
+function _i18nPaintReviews(){
+  const k = t().rvw || {};
+  function set(id, val){ const e = document.getElementById(id); if(e) e.textContent = val; }
+  set('rv_pt', k.title);
+  set('rvRefreshBtn', k.refresh);
+  set('rvBulkBtn', k.bulk);
+  // Filter <option>s
+  const sm = {'':'f_sent_all', positive:'f_sent_pos', negative:'f_sent_neg'};
+  const um = {'':'f_urg_all', urgent:'f_urg_urg', warning:'f_urg_warn', normal:'f_urg_norm'};
+  const fm = {'':'f_fix_all', '0':'f_fix_no', '1':'f_fix_yes'};
+  for(const [id, m] of [['rvFilterSent', sm], ['rvFilterUrg', um], ['rvFilterFixed', fm]]){
+    const sel = document.getElementById(id); if(!sel) continue;
+    for(const o of sel.options){ if(m[o.value] && k[m[o.value]]) o.text = k[m[o.value]]; }
+  }
+  const srch = document.getElementById('rvSearch');
+  if(srch && k.search_ph) srch.placeholder = k.search_ph;
+  // Auto-EN toggle label
+  const lblParent = document.getElementById('rvShowEnglish');
+  if(lblParent && lblParent.nextElementSibling){
+    lblParent.nextElementSibling.textContent = k.auto_en || lblParent.nextElementSibling.textContent;
+  }
 }
 
 /* ============================================================
@@ -7620,10 +7800,11 @@ function _populateTicketCatFilter(){
 function _renderTicketsBody(){
   const body = document.getElementById('ticketsBody'); if(!body) return;
   const items = ((D.tickets||{}).items)||[];
+  const k = t().tkts || {};
   if(!items.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
       + '<div style="font-size:32px;margin-bottom:8px">📭</div>'
-      + '<div class="muted" style="font-size:13.5px">ما فيه تذاكر بعد. اضغط <b>تذكرة جديدة</b> أو انتظر البوت يفتح وحدة تلقائياً عند أي تصعيد.</div>'
+      + '<div class="muted" style="font-size:13.5px">'+(k.empty||'')+'</div>'
       + '</div>';
     return;
   }
@@ -7853,17 +8034,19 @@ async function loadReviews(){
 }
 function _renderReviewsSub(){
   const el = document.getElementById('t_reviews_sub'); if(!el) return;
+  const k = t().rvw || {};
   const last = (D.reviews||{}).last_fetch_iso;
-  el.textContent = last ? ('آخر تحديث: ' + last) : 'اضغط "تحديث من Hostaway" لجلب المراجعات';
+  el.textContent = last ? ((k.last_update||'آخر تحديث:') + ' ' + last) : (k.no_update||'اضغط "تحديث" لجلب المراجعات');
 }
 function _renderReviewsStats(){
   const el = document.getElementById('rvStats'); if(!el) return;
   const c = (D.reviews||{}).counts || {};
+  const k = t().rvw || {};
   const cards = [
-    {ic:'⭐', cls:'b', val:c.shown||0,    lbl:'في المدى المحدد'},
-    {ic:'💚', cls:'g', val:c.positive||0, lbl:'إيجابية'},
-    {ic:'🚨', cls:'r', val:c.urgent||0,   lbl:'حرجة (≤٢ نجوم)'},
-    {ic:'🤖', cls:'a', val:c.analyzed||0, lbl:'تم تحليلها'},
+    {ic:'⭐', cls:'b', val:c.shown||0,    lbl:k.kpi_shown||'في المدى المحدد'},
+    {ic:'💚', cls:'g', val:c.positive||0, lbl:k.kpi_pos||'إيجابية'},
+    {ic:'🚨', cls:'r', val:c.urgent||0,   lbl:k.kpi_urg||'حرجة (≤٢ نجوم)'},
+    {ic:'🤖', cls:'a', val:c.analyzed||0, lbl:k.kpi_an||'تم تحليلها'},
   ];
   el.innerHTML = cards.map(function(x){
     return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+x.cls+'">'+x.ic+'</div></div>'
@@ -7873,16 +8056,19 @@ function _renderReviewsStats(){
 function _renderTimeFilterStrip(){
   const el = document.getElementById('rvTimeFilterStrip'); if(!el) return;
   const windows = ((D.reviews||{}).counts && D.reviews.counts.windows) || {};
+  const k = t().rvw || {};
+  const labels = {0:'win_all', 7:'win_7d', 14:'win_14d', 30:'win_30d', 90:'win_90d', 180:'win_180d', 365:'win_365d'};
   let h = '';
   for(const w of RV_WINDOWS){
     const cnt = w.k ? (windows[w.k]||0) : (windows.all||0);
     const active = _rvCurrentDays === w.d;
+    const lbl = k[labels[w.d]] || w.lbl;
     h += '<button onclick="setRvWindow('+w.d+')" '
       +  'style="padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;'
       +  'background:'+(active?'var(--gold)':'var(--surface-2)')+';'
       +  'color:'+(active?'#fff':'var(--text)')+';'
       +  'border:1px solid '+(active?'var(--gold)':'var(--border)')+';transition:.12s">'
-      +  esc(w.lbl)+' <span style="opacity:.7;font-weight:500">('+cnt+')</span></button>';
+      +  esc(lbl)+' <span style="opacity:.7;font-weight:500">('+cnt+')</span></button>';
   }
   el.innerHTML = h;
 }
@@ -7893,10 +8079,11 @@ function _starBar(n){
 function _renderReviewsBody(){
   const body = document.getElementById('rvBody'); if(!body) return;
   const units = ((D.reviews||{}).units)||[];
+  const k = t().rvw || {};
   if(!units.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
       + '<div style="font-size:32px;margin-bottom:8px">📭</div>'
-      + '<div class="muted" style="font-size:13.5px">ما فيه مراجعات بعد. اضغط <b>"↻ تحديث من Hostaway"</b> أعلاه ليجيب لك المراجعات من Airbnb / Booking.</div>'
+      + '<div class="muted" style="font-size:13.5px">'+(k.empty||'')+'</div>'
       + '</div>';
     return;
   }
@@ -7925,7 +8112,9 @@ function _renderReviewsBody(){
   body.innerHTML = html;
 }
 function _renderReviewCard(r){
-  const showEn = (document.getElementById('rvShowEnglish')||{}).checked;
+  // Auto-translate fires when the toggle is on OR when the dashboard
+  // language is English (so English-only employees never see Arabic text).
+  const showEn = ((document.getElementById('rvShowEnglish')||{}).checked) || (L === 'en');
   const fixedPill = r.state.fixed
     ? '<span class="pill ok" style="margin-inline-start:6px">✓ محلولة</span>' : '';
   const urgClass = r.urgency === 'urgent' ? 'border-color:var(--red)' :
