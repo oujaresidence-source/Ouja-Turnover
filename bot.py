@@ -3194,6 +3194,25 @@ def claude_text(system, user, max_tokens=600, model=None):
         print("claude_text error:", e)
         return None
 
+def claude_json(system, user, max_tokens=900, model=None):
+    """Same as claude_text but parses the response as JSON. Strips ```json fences,
+    falls back to the first balanced {...} block. Returns dict or None."""
+    txt = claude_text(system, user, max_tokens=max_tokens, model=model)
+    if not txt:
+        return None
+    txt = txt.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(txt)
+    except Exception:
+        m = re.search(r"\{.*\}", txt, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+        print("claude_json: parse failed, raw=", txt[:300])
+        return None
+
 # Reusable dialect lock — appended to every Arabic-generating system prompt so
 # we get consistent Najdi/white-Saudi output across all paths (drafts, distill,
 # acks, manager scripts). Centralising it keeps the rules in one place.
@@ -4979,6 +4998,163 @@ def _ticket_from_escalation(esc_id, esc):
         created_by="bot",
     )
 
+def fetch_reviews_from_hostaway(limit=300, page_size=100):
+    """Pull recent reviews from Hostaway across all listings. Returns list of
+    normalised review dicts (newest first). Caps at `limit` to keep cost sane."""
+    out = []
+    offset = 0
+    while len(out) < limit:
+        batch_size = min(page_size, limit - len(out))
+        try:
+            j = api_get("/v1/reviews", params={"limit": batch_size, "offset": offset,
+                                               "sortOrder": "departureDate:desc"})
+        except Exception as e:
+            print("fetch_reviews_from_hostaway error:", e)
+            break
+        rows = (j or {}).get("result") or []
+        if not rows:
+            break
+        for r in rows:
+            rid = str(r.get("id") or "")
+            if not rid:
+                continue
+            rating_10 = r.get("rating") or r.get("overallRating") or 0
+            try:
+                rating_5 = int(round(float(rating_10) / 2)) if rating_10 else 0
+            except Exception:
+                rating_5 = 0
+            out.append({
+                "id": rid,
+                "listing_id": r.get("listingMapId") or r.get("listingId"),
+                "rating": rating_5,
+                "rating_raw": rating_10,
+                "guest_name": (r.get("guestName") or r.get("guest_name") or "").strip(),
+                "public_review": (r.get("publicReview") or r.get("public_review") or "").strip(),
+                "private_review": (r.get("privateReview") or "").strip(),
+                "channel": (r.get("channelName") or r.get("channel") or "").strip() or "Airbnb",
+                "date": (r.get("departureDate") or r.get("date") or "")[:10],
+                "is_public": bool(r.get("isPublic", True)),
+                "reservation_id": r.get("reservationId"),
+                "raw": r,
+            })
+        if len(rows) < batch_size:
+            break
+        offset += batch_size
+    return out
+
+def refresh_reviews():
+    """Fetch + merge into _reviews. Returns count."""
+    global _reviews_last_fetch
+    fresh = fetch_reviews_from_hostaway()
+    for r in fresh:
+        _reviews[r["id"]] = r
+    _reviews_last_fetch = int(time.time())
+    return len(fresh)
+
+# AI prompt for review analysis — applies AAA framework (Acknowledge, Apologize,
+# Act) + Ritz-Carlton "ladies and gentlemen" tone for public responses, and the
+# Airbnb review-removal policy rubric for the dispute analysis.
+_REVIEW_AI_SYSTEM = (
+    "You are an expert reputation manager for Ouja Residence — a Saudi luxury "
+    "short-term-rental brand in Riyadh. You handle Airbnb / Booking reviews. "
+    "For each review you receive, produce a single JSON object with EXACTLY "
+    "these keys (no extra prose, no fences):\n"
+    "{\n"
+    '  "removability": "high" | "medium" | "low",\n'
+    '  "removability_reason_ar": "one-paragraph Arabic explanation",\n'
+    '  "dispute_angle_ar": "Arabic note for the team — the policy angle to argue",\n'
+    '  "dispute_message_en": "polished English message to Airbnb support",\n'
+    '  "public_response_ar": "Arabic public reply",\n'
+    '  "public_response_en": "English public reply"\n'
+    "}\n\n"
+    "REMOVABILITY RUBRIC (Airbnb policies as of 2024):\n"
+    "• HIGH = clear policy violation: extortion/threats, content unrelated to "
+    "the stay, discriminatory language, complaint about something out of host "
+    "control (airport delays, weather), or guest cancelled and still reviewed.\n"
+    "• MEDIUM = grey area: very brief content-less reviews, third-party "
+    "complaints, factual errors that can be evidenced, biased single-issue "
+    "complaints.\n"
+    "• LOW = legitimate complaint about a real issue → cannot be removed, "
+    "respond publicly instead.\n\n"
+    "DISPUTE MESSAGE (English) — only meaningful for HIGH/MEDIUM:\n"
+    "• Address Airbnb support directly, polite and concise.\n"
+    "• Cite the specific policy clause being violated.\n"
+    "• Reference the review ID and listing if available.\n"
+    "• Close: 'Thank you, Ouja Residence team.'\n\n"
+    "PUBLIC RESPONSE — use the AAA framework + Ritz-Carlton tone:\n"
+    "  A1. ACKNOWLEDGE  — thank the guest by name, validate their experience.\n"
+    "  A2. APOLOGIZE    — sincere apology for the specific pain point only if "
+    "the complaint is legitimate; never grovel; never admit liability you don't have.\n"
+    "  A3. ACT          — state the concrete action taken or being taken.\n"
+    "• Tone: dignified, warm, ladies-and-gentlemen-serving-ladies-and-gentlemen. "
+    "Never defensive, never blame the guest.\n"
+    "• Length: 3–5 sentences total.\n"
+    "• Close Arabic with: 'مع أطيب التحيات، فريق عوجا للسكن'\n"
+    "• Close English with: 'Warm regards, OUJA RESIDENCE'\n\n"
+    "DIALECT (Arabic): white-Saudi/Najdi. No Egyptian, Levantine, Iraqi, or "
+    "Maghrebi words. Examples of words to AVOID: دلوقتي، إيه، بدك، كمان، شو، "
+    "هلق، بكير. Use: الحين، إيش، تبي، أيضاً، وش، الحين، بدري."
+)
+
+def claude_analyze_review(review):
+    """Return the AI cache dict for a review (5 fields). Cached by review id —
+    callers should check _review_ai_cache first."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    listings = get_listings_map() or {}
+    unit = listings.get(review.get("listing_id"), "")
+    txt = review.get("public_review") or "(empty review)"
+    private = review.get("private_review") or ""
+    user = (
+        f"Review to analyse:\n"
+        f"  ID:        {review.get('id')}\n"
+        f"  Apartment: {unit or review.get('listing_id') or 'unknown'}\n"
+        f"  Channel:   {review.get('channel') or 'Airbnb'}\n"
+        f"  Date:      {review.get('date') or 'unknown'}\n"
+        f"  Guest:     {review.get('guest_name') or 'unknown'}\n"
+        f"  Rating:    {review.get('rating') or 0}/5\n"
+        f"  Public review text:\n    \"{txt}\"\n"
+    )
+    if private:
+        user += f"  Private feedback to host:\n    \"{private}\"\n"
+    user += "\nReturn the JSON object now."
+    out = claude_json(_REVIEW_AI_SYSTEM, user, max_tokens=1200)
+    if not isinstance(out, dict):
+        return None
+    out["generated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    return out
+
+# ===================== REVIEWS (Hostaway + AI dispute/AAA) =====================
+# Per review:
+#   id          str (Hostaway review id)
+#   listing_id  int
+#   rating      int 1..5 (Hostaway returns 0-10 — we /2 round)
+#   guest_name  str
+#   public_review str (the guest's actual text)
+#   private_review str (private feedback, if any)
+#   date        ISO date of stay/review
+#   channel     "Airbnb" | "Booking" | ...
+#   is_public   bool
+# AI cache keyed by review id:
+#   removability: "high"|"medium"|"low"
+#   removability_reason_ar: str
+#   dispute_angle_ar: str
+#   dispute_message_en: str
+#   public_response_ar: str (Ritz-Carlton + AAA)
+#   public_response_en: str (Ritz-Carlton + AAA)
+#   generated_at: ISO timestamp
+# Review state (manual annotations):
+#   fixed: bool          (team has resolved the underlying issue)
+#   assignee: str | None
+#   notes: str
+#   ticket_id: str | None  (if a maintenance ticket was opened from this review)
+#   last_edit_by: str
+#   last_edit_at: ISO
+_reviews = {}            # rev_id -> raw review dict
+_review_ai_cache = {}    # rev_id -> AI analysis dict
+_review_states = {}      # rev_id -> manual state dict
+_reviews_last_fetch = 0  # epoch seconds
+
 # Owner's chosen "queue start" anchor. Set by /api/cleaning/reschedule-from and
 # also auto-applied after pause/unpause so the queue stays compacted forward.
 # If today drifts past the anchor, we use today+1 (next valid day) instead.
@@ -5897,6 +6073,56 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ REVIEWS (المراجعات) ============ -->
+      <section class="view" id="view_reviews">
+        <div class="page-head">
+          <div>
+            <div class="page-title">⭐ المراجعات</div>
+            <div class="page-sub" id="t_reviews_sub">—</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="refreshReviews()" id="rvRefreshBtn">↻ تحديث من Hostaway</button>
+          </div>
+        </div>
+
+        <!-- What is this page? -->
+        <div class="card" style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold)">
+          <div style="padding:6px 4px">
+            <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 ما هي هذي الصفحة؟</div>
+            <div class="muted" style="font-size:12.5px;line-height:1.7">
+              كل مراجعات Airbnb / Booking تجي هنا مرتبة حسب الشقة.
+              ⭐ كل مراجعة سلبية يقدر <b>المساعد الذكي</b> يحللها ويقول لك: هل تنحذف من Airbnb (HIGH / MEDIUM / LOW)؟
+              📝 إذا تنحذف يجهّز لك <b>رسالة دفاع</b> ترسلها لـ Airbnb.
+              🤝 وإذا ما تنحذف، يكتب لك <b>رد عام محترم</b> بأسلوب <b>AAA</b> (اعتراف، اعتذار، إجراء) وعلى نمط Ritz-Carlton.
+              🔧 تقدر تفتح <b>تذكرة صيانة</b> من المراجعة بضغطة وحدة.
+            </div>
+          </div>
+        </div>
+
+        <div class="kpis" id="rvStats"></div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">📋 المراجعات حسب الشقة</span>
+            <div class="card-actions" style="flex-wrap:wrap;gap:6px">
+              <select id="rvFilterUrg" onchange="loadReviews()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="">كل المستويات</option>
+                <option value="urgent">حرجة</option>
+                <option value="warning">سلبية</option>
+                <option value="normal">إيجابية</option>
+              </select>
+              <select id="rvFilterFixed" onchange="loadReviews()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="">الكل</option>
+                <option value="0">غير محلولة</option>
+                <option value="1">محلولة</option>
+              </select>
+              <input id="rvSearch" placeholder="ابحث بنص المراجعة أو اسم الضيف…" oninput="_rvSearchDeb()" style="width:240px;padding:6px 10px;height:32px;font-size:12px">
+            </div>
+          </div>
+          <div id="rvBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ TICKETS (الصيانة) ============ -->
       <section class="view" id="view_tickets">
         <div class="page-head">
@@ -6210,7 +6436,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -6341,7 +6567,7 @@ const T = {
     units_count:'وحدة'
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -6564,6 +6790,7 @@ const NAV = [
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
   {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
+  {id:'reviews', ic:'⭐', tk:'reviews', badge:'reviews'},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -6588,6 +6815,10 @@ function badgeCount(key){
   if(key==='tickets'){
     const c = (D.tickets && D.tickets.counts) || {};
     return (c.overdue||0) + (c.urgent||0);
+  }
+  if(key==='reviews'){
+    const c = (D.reviews && D.reviews.counts) || {};
+    return c.unfixed || 0;
   }
   return 0;
 }
@@ -6657,6 +6888,7 @@ function go(id){
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
   if(id==='tickets') loadTickets();
+  if(id==='reviews') loadReviews();
 }
 
 /* ============================================================
@@ -7292,6 +7524,204 @@ async function deleteTicket(tid){
   const r = await post('/api/tickets/delete', {id:tid});
   if(r.ok){ toast('🗑 حُذفت'); closeTicketModal(); loadTickets(); }
   else toast(r.error || 'خطأ');
+}
+
+/* ============== REVIEWS (المراجعات) ============== */
+const RV_URG_LABEL = {urgent:'حرجة', warning:'سلبية', normal:'إيجابية'};
+const RV_URG_PILL  = {urgent:'danger', warning:'warn', normal:'ok'};
+const RV_REMOVE_LABEL = {high:'HIGH · قابلة للحذف', medium:'MEDIUM · ممكن', low:'LOW · غير قابلة'};
+const RV_REMOVE_PILL  = {high:'ok', medium:'warn', low:'danger'};
+let _rvSearchT = null;
+function _rvSearchDeb(){ clearTimeout(_rvSearchT); _rvSearchT = setTimeout(loadReviews, 350); }
+
+async function loadReviews(){
+  const body = document.getElementById('rvBody');
+  if(body) body.innerHTML = '<div class="empty sk">—</div>';
+  const qs = new URLSearchParams();
+  const u  = (document.getElementById('rvFilterUrg')||{}).value;
+  const f  = (document.getElementById('rvFilterFixed')||{}).value;
+  const q  = (document.getElementById('rvSearch')||{}).value || '';
+  if(u) qs.set('urgency', u);
+  if(f) qs.set('fixed', f);
+  if(q) qs.set('q', q);
+  try{ D.reviews = await api('/api/reviews/list?' + qs.toString()); }
+  catch(_){ D.reviews = {units:[], counts:{}} }
+  _renderReviewsSub();
+  _renderReviewsStats();
+  _renderReviewsBody();
+  buildSideNav();
+}
+function _renderReviewsSub(){
+  const el = document.getElementById('t_reviews_sub'); if(!el) return;
+  const last = (D.reviews||{}).last_fetch_iso;
+  el.textContent = last ? ('آخر تحديث: ' + last) : 'اضغط "تحديث من Hostaway" لجلب المراجعات';
+}
+function _renderReviewsStats(){
+  const el = document.getElementById('rvStats'); if(!el) return;
+  const c = (D.reviews||{}).counts || {};
+  const cards = [
+    {ic:'⭐', cls:'b', val:c.total||0,    lbl:'كل المراجعات'},
+    {ic:'🚨', cls:'r', val:c.urgent||0,   lbl:'حرجة (≤٢ نجوم)'},
+    {ic:'⚠',  cls:'a', val:c.warning||0,  lbl:'سلبية (٣ نجوم)'},
+    {ic:'🔧', cls:'g', val:c.unfixed||0,  lbl:'بانتظار الحل'},
+  ];
+  el.innerHTML = cards.map(function(x){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+x.cls+'">'+x.ic+'</div></div>'
+      +'<div class="kpi-val">'+x.val+'</div><div class="kpi-lbl">'+x.lbl+'</div></div>';
+  }).join('');
+}
+function _starBar(n){
+  n = Math.max(0, Math.min(5, parseInt(n||0)));
+  return '★'.repeat(n) + '☆'.repeat(5-n);
+}
+function _renderReviewsBody(){
+  const body = document.getElementById('rvBody'); if(!body) return;
+  const units = ((D.reviews||{}).units)||[];
+  if(!units.length){
+    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
+      + '<div style="font-size:32px;margin-bottom:8px">📭</div>'
+      + '<div class="muted" style="font-size:13.5px">ما فيه مراجعات بعد. اضغط <b>"↻ تحديث من Hostaway"</b> أعلاه ليجيب لك المراجعات من Airbnb / Booking.</div>'
+      + '</div>';
+    return;
+  }
+  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  for(const u of units){
+    const urgPill = '<span class="pill '+(RV_URG_PILL[u.urgency]||'info')+'" style="margin-inline-start:6px">'+RV_URG_LABEL[u.urgency]+'</span>';
+    const unfixed = u.unfixed_negatives > 0
+      ? '<span class="pill danger" style="margin-inline-start:6px">'+u.unfixed_negatives+' بانتظار الحل</span>' : '';
+    const avgColor = u.avg >= 4.5 ? 'var(--green)' : (u.avg >= 4 ? 'var(--gold)' : 'var(--red)');
+    html += '<details class="rv-unit" style="background:var(--surface-2);border-radius:12px;border:1px solid var(--border);overflow:hidden">'
+         +    '<summary style="padding:12px 14px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px">'
+         +      '<div style="flex:1;min-width:0">'
+         +        '<div class="strong" style="font-size:13.5px">▸ '+esc(u.unit_name)+urgPill+unfixed+'</div>'
+         +        '<div style="font-size:11.5px;color:var(--mut);margin-top:3px">'
+         +          u.count+' مراجعة · متوسط <span style="color:'+avgColor+';font-weight:700">'+u.avg+'</span>/5'
+         +        '</div>'
+         +      '</div>'
+         +    '</summary>'
+         +    '<div style="padding:0 14px 12px 14px;display:flex;flex-direction:column;gap:8px">';
+    for(const r of u.reviews){
+      html += _renderReviewCard(r);
+    }
+    html += '</div></details>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+function _renderReviewCard(r){
+  const fixedPill = r.state.fixed
+    ? '<span class="pill ok" style="margin-inline-start:6px">✓ محلولة</span>' : '';
+  const urgClass = r.urgency === 'urgent' ? 'border-color:var(--red)' :
+                   (r.urgency === 'warning' ? 'border-color:var(--gold)' : '');
+  let html = '<div class="rv-card" id="rv_'+esc(r.id)+'" style="background:var(--surface);padding:12px 14px;border-radius:10px;border:1px solid var(--border);'+urgClass+'">'
+    + '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:8px">'
+    +   '<div style="flex:1;min-width:0">'
+    +     '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    +       '<span class="strong" style="font-size:13px">'+esc(r.guest_name||'—')+'</span>'
+    +       '<span style="color:var(--gold);font-size:13px;letter-spacing:1px">'+_starBar(r.rating)+'</span>'
+    +       '<span class="muted" style="font-size:11px">'+esc(r.date||'')+' · '+esc(r.channel||'')+'</span>'
+    +       fixedPill
+    +     '</div>'
+    +   '</div>'
+    + '</div>';
+  if(r.public_review){
+    html += '<div style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;margin-bottom:8px;white-space:pre-wrap">'+esc(r.public_review)+'</div>';
+  }
+  // AI analysis section
+  if(r.ai && r.ai.removability){
+    const rm = r.ai.removability;
+    html += '<div style="background:var(--gold-tint);padding:10px 12px;border-radius:8px;margin-bottom:8px">'
+         +    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+         +      '<span style="font-size:11.5px;font-weight:700">🤖 تحليل المساعد:</span>'
+         +      '<span class="pill '+(RV_REMOVE_PILL[rm]||'info')+'">'+RV_REMOVE_LABEL[rm]+'</span>'
+         +    '</div>';
+    if(r.ai.removability_reason_ar){
+      html += '<div style="font-size:11.5px;line-height:1.65;color:var(--text-2)">'+esc(r.ai.removability_reason_ar)+'</div>';
+    }
+    html += '</div>';
+    // Two collapsible boxes: dispute + public response
+    if(r.ai.dispute_angle_ar || r.ai.dispute_message_en){
+      html += '<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">📝 رسالة دفاع لـ Airbnb (English)</summary>'
+           +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px">'
+           +      (r.ai.dispute_angle_ar ? '<div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px"><b>زاوية الحجة:</b> '+esc(r.ai.dispute_angle_ar)+'</div>' : '')
+           +      (r.ai.dispute_message_en ? '<div dir="ltr" style="font-size:12.5px;line-height:1.6;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.dispute_message_en)+'</div>' : '')
+           +      '<button class="btn ghost xs" style="margin-top:8px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.dispute_message_en||'')+')">📋 نسخ</button>'
+           +    '</div></details>';
+    }
+    if(r.ai.public_response_ar || r.ai.public_response_en){
+      html += '<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">🤝 رد عام بأسلوب AAA</summary>'
+           +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px;display:flex;flex-direction:column;gap:10px">';
+      if(r.ai.public_response_ar){
+        html += '<div><div style="font-size:11px;color:var(--mut);margin-bottom:4px;font-weight:600">🇸🇦 عربي</div>'
+             +    '<div style="font-size:12.5px;line-height:1.7;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.public_response_ar)+'</div>'
+             +    '<button class="btn ghost xs" style="margin-top:6px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.public_response_ar)+')">📋 نسخ</button></div>';
+      }
+      if(r.ai.public_response_en){
+        html += '<div><div style="font-size:11px;color:var(--mut);margin-bottom:4px;font-weight:600">🇺🇸 English</div>'
+             +    '<div dir="ltr" style="font-size:12.5px;line-height:1.7;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.public_response_en)+'</div>'
+             +    '<button class="btn ghost xs" style="margin-top:6px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.public_response_en)+')">📋 نسخ</button></div>';
+      }
+      html += '</div></details>';
+    }
+  } else {
+    html += '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-bottom:8px;text-align:center">'
+         +    '<div class="muted" style="font-size:11.5px;margin-bottom:6px">المساعد ما حلل هذي المراجعة بعد</div>'
+         +    '<button class="btn primary xs" onclick="analyzeReview(&#39;'+esc(r.id)+'&#39;,this)">🤖 حلّل بـ AI</button>'
+         + '</div>';
+  }
+  // Action row
+  html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
+       +    (r.state.fixed
+            ? '<button class="btn ghost xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">↩ ارجع كغير محلولة</button>'
+            : '<button class="btn green xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">✓ علّم محلولة</button>')
+       +    (r.state.ticket_id
+            ? '<button class="btn ghost xs" onclick="go(&#39;tickets&#39;);setTimeout(function(){openTicketModal(&#39;'+esc(r.state.ticket_id)+'&#39;)},300)">🔧 تذكرة #'+esc(r.state.ticket_id.slice(-4))+'</button>'
+            : '<button class="btn warn xs" onclick="openTicketFromReview(&#39;'+esc(r.id)+'&#39;)">🔧 افتح تذكرة صيانة</button>')
+       +    (r.ai ? '<button class="btn ghost xs" onclick="analyzeReview(&#39;'+esc(r.id)+'&#39;,this,true)">↻ أعد التحليل</button>' : '')
+       + '</div>';
+  html += '</div>';
+  return html;
+}
+function _rvCopy(btn, txt){
+  try {
+    navigator.clipboard.writeText(txt || '').then(function(){ toast('📋 تم النسخ'); });
+    if(btn){ btn.textContent = '✓ منسوخ'; setTimeout(function(){ btn.textContent = '📋 نسخ' }, 1500); }
+  } catch(_){ toast('فشل النسخ'); }
+}
+async function refreshReviews(){
+  const b = document.getElementById('rvRefreshBtn');
+  if(b){ b.disabled = true; b.textContent = '⏳ جاري السحب…'; }
+  try {
+    const r = await post('/api/reviews/refresh', {});
+    if(r.ok){ toast('✓ تم سحب ' + (r.fetched||0) + ' مراجعة'); await loadReviews(); }
+    else toast(r.error || 'خطأ');
+  } finally {
+    if(b){ b.disabled = false; b.textContent = '↻ تحديث من Hostaway'; }
+  }
+}
+async function analyzeReview(rid, btn, force){
+  if(btn){ btn.disabled = true; const orig = btn.textContent; btn.textContent = '⏳ يحلل…';
+    btn.dataset.orig = orig; }
+  try {
+    const r = await post('/api/reviews/analyze', {id:rid, force:!!force});
+    if(r.ok){ toast(r.cached ? '✓ من الذاكرة' : '✓ تم التحليل'); await loadReviews(); }
+    else toast(r.error || 'خطأ');
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = btn.dataset.orig || '🤖 حلّل بـ AI'; }
+  }
+}
+async function toggleReviewFixed(rid){
+  const r = await post('/api/reviews/toggle-fixed', {id:rid});
+  if(r.ok){ toast(r.fixed ? '✓ محلولة' : '↩ غير محلولة'); loadReviews(); }
+  else toast(r.error || 'خطأ');
+}
+async function openTicketFromReview(rid){
+  if(!confirm('فتح تذكرة صيانة من هذي المراجعة؟')) return;
+  const r = await post('/api/reviews/open-ticket', {id:rid});
+  if(r.ok){
+    toast(r.existing ? '✓ التذكرة موجودة بالفعل' : '🔧 تم فتح تذكرة');
+    loadReviews();
+  } else toast(r.error || 'خطأ');
 }
 
 function _ar_wd(n){ return ['الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][n] }
@@ -10605,6 +11035,232 @@ async def _api_tickets_delete(request):
             return _json({"ok": True})
     return _json({"error": "not found"}, 404)
 
+# ===================== REVIEWS API =====================
+def _review_urgency(rating, has_text):
+    """Map a rating + content to an urgency band used by the UI cards."""
+    if rating and rating <= 2:
+        return "urgent"
+    if rating and rating <= 3:
+        return "warning"
+    if not has_text:
+        return "normal"
+    return "normal"
+
+def _review_view(rev_id, rev):
+    ai = _review_ai_cache.get(rev_id) or {}
+    state = _review_states.get(rev_id) or {}
+    listings = get_listings_map() or {}
+    unit_name = listings.get(rev.get("listing_id"), str(rev.get("listing_id") or ""))
+    return {
+        "id": rev_id,
+        "listing_id": rev.get("listing_id"),
+        "unit_name": unit_name,
+        "guest_name": rev.get("guest_name") or "",
+        "rating": rev.get("rating") or 0,
+        "rating_raw": rev.get("rating_raw") or 0,
+        "channel": rev.get("channel") or "",
+        "date": rev.get("date") or "",
+        "public_review": rev.get("public_review") or "",
+        "private_review": rev.get("private_review") or "",
+        "urgency": _review_urgency(rev.get("rating") or 0,
+                                   bool(rev.get("public_review"))),
+        "analyzed": bool(ai),
+        "ai": {
+            "removability":           ai.get("removability"),
+            "removability_reason_ar": ai.get("removability_reason_ar"),
+            "dispute_angle_ar":       ai.get("dispute_angle_ar"),
+            "dispute_message_en":     ai.get("dispute_message_en"),
+            "public_response_ar":     ai.get("public_response_ar"),
+            "public_response_en":     ai.get("public_response_en"),
+            "generated_at":           ai.get("generated_at"),
+        } if ai else None,
+        "state": {
+            "fixed":        bool(state.get("fixed")),
+            "assignee":     state.get("assignee"),
+            "notes":        state.get("notes") or "",
+            "ticket_id":    state.get("ticket_id"),
+            "last_edit_by": state.get("last_edit_by"),
+            "last_edit_at": state.get("last_edit_at"),
+        },
+    }
+
+async def _api_reviews_list(request):
+    """GET /api/reviews/list?lid=&urgency=&fixed=&q="""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid_f = int(request.query.get("lid")) if request.query.get("lid") else None
+    except Exception:
+        lid_f = None
+    urg = (request.query.get("urgency") or "").strip()
+    fixed = request.query.get("fixed", "")
+    q = (request.query.get("q") or "").lower().strip()
+
+    rows = []
+    for rid, rev in _reviews.items():
+        v = _review_view(rid, rev)
+        if lid_f is not None and v["listing_id"] != lid_f: continue
+        if urg and v["urgency"] != urg: continue
+        if fixed == "1" and not v["state"]["fixed"]: continue
+        if fixed == "0" and v["state"]["fixed"]: continue
+        if q:
+            blob = (v["public_review"] + " " + v["guest_name"] + " " + v["unit_name"]).lower()
+            if q not in blob: continue
+        rows.append(v)
+    # newest first, urgent first
+    rank = {"urgent": 3, "warning": 2, "normal": 1}
+    rows.sort(key=lambda x: (rank.get(x["urgency"], 0),
+                             x.get("date") or ""), reverse=True)
+
+    # Group by apartment for the UI
+    by_unit = {}
+    for v in rows:
+        lid = v["listing_id"]
+        key = str(lid) if lid is not None else "_"
+        by_unit.setdefault(key, {
+            "listing_id": lid, "unit_name": v["unit_name"],
+            "reviews": [], "count": 0, "avg": 0.0,
+            "urgency": "normal", "unfixed_negatives": 0,
+        })
+        by_unit[key]["reviews"].append(v)
+    for grp in by_unit.values():
+        ratings = [r["rating"] for r in grp["reviews"] if r["rating"]]
+        grp["count"] = len(grp["reviews"])
+        grp["avg"] = round(sum(ratings) / len(ratings), 2) if ratings else 0
+        urgs = [r["urgency"] for r in grp["reviews"]]
+        if "urgent" in urgs: grp["urgency"] = "urgent"
+        elif "warning" in urgs: grp["urgency"] = "warning"
+        grp["unfixed_negatives"] = sum(
+            1 for r in grp["reviews"]
+            if r["urgency"] in ("urgent", "warning") and not r["state"]["fixed"])
+    units = sorted(by_unit.values(),
+                   key=lambda g: (-{"urgent":2,"warning":1,"normal":0}[g["urgency"]],
+                                  -g["unfixed_negatives"],
+                                  g["avg"]))
+    counts = {
+        "total":    len(_reviews),
+        "shown":    len(rows),
+        "urgent":   sum(1 for v in rows if v["urgency"] == "urgent"),
+        "warning":  sum(1 for v in rows if v["urgency"] == "warning"),
+        "unfixed":  sum(1 for v in rows if v["urgency"] in ("urgent","warning") and not v["state"]["fixed"]),
+        "analyzed": sum(1 for v in rows if v["analyzed"]),
+    }
+    return _json({
+        "units": units,
+        "counts": counts,
+        "last_fetch_iso": (datetime.fromtimestamp(_reviews_last_fetch, TZ).isoformat(timespec="minutes")
+                           if _reviews_last_fetch else None),
+    })
+
+async def _api_reviews_refresh(request):
+    """POST → re-pull reviews from Hostaway."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        n = await asyncio.to_thread(refresh_reviews)
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"المراجعات · تم سحب {n} مراجعة من Hostaway")
+    return _json({"ok": True, "fetched": n})
+
+async def _api_reviews_analyze(request):
+    """POST {id} → run AI analysis on a single review (uses cache if present)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = str(b.get("id") or "").strip()
+    force = bool(b.get("force"))
+    if not rid or rid not in _reviews:
+        return _json({"error": "review not found"}, 404)
+    if not force and rid in _review_ai_cache:
+        return _json({"ok": True, "ai": _review_ai_cache[rid], "cached": True})
+    rev = _reviews[rid]
+    try:
+        out = await asyncio.to_thread(claude_analyze_review, rev)
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+    if not out:
+        return _json({"error": "AI did not return a valid analysis"}, 502)
+    _review_ai_cache[rid] = out
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "ai": out, "cached": False})
+
+async def _api_reviews_toggle_fixed(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = str(b.get("id") or "").strip()
+    if not rid or rid not in _reviews:
+        return _json({"error": "review not found"}, 404)
+    state = _review_states.setdefault(rid, {})
+    state["fixed"] = not state.get("fixed")
+    state["last_edit_by"] = (b.get("by") or "owner").strip() or "owner"
+    state["last_edit_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "fixed": state["fixed"]})
+
+async def _api_reviews_notes(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = str(b.get("id") or "").strip()
+    if not rid or rid not in _reviews:
+        return _json({"error": "review not found"}, 404)
+    state = _review_states.setdefault(rid, {})
+    state["notes"] = (b.get("notes") or "").strip()[:1000]
+    state["last_edit_by"] = (b.get("by") or "owner").strip() or "owner"
+    state["last_edit_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_reviews_open_ticket(request):
+    """POST {id} → open a maintenance ticket from a review (idempotent)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = str(b.get("id") or "").strip()
+    if not rid or rid not in _reviews:
+        return _json({"error": "review not found"}, 404)
+    rev = _reviews[rid]
+    state = _review_states.setdefault(rid, {})
+    # Idempotent: if a ticket already exists for this review, return it
+    if state.get("ticket_id"):
+        existing = next((t for t in _tickets if t.get("id") == state["ticket_id"]), None)
+        if existing:
+            return _json({"ok": True, "ticket": _ticket_view(existing), "existing": True})
+    listings = get_listings_map() or {}
+    unit_name = listings.get(rev.get("listing_id"), "") or "—"
+    ai = _review_ai_cache.get(rid) or {}
+    title = f"مراجعة سلبية · {unit_name} · {rev.get('guest_name','—')} ({rev.get('rating',0)}/5)"[:120]
+    body_lines = []
+    if rev.get("public_review"):
+        body_lines.append("نص المراجعة:")
+        body_lines.append(rev["public_review"][:500])
+    if rev.get("private_review"):
+        body_lines.append("\nرسالة خاصة:")
+        body_lines.append(rev["private_review"][:300])
+    if ai.get("removability_reason_ar"):
+        body_lines.append("\nتحليل AI لقابلية الحذف:")
+        body_lines.append(ai["removability_reason_ar"][:400])
+    description = "\n".join(body_lines)
+    t = _ticket_create(
+        title=title,
+        description=description,
+        lid=rev.get("listing_id"),
+        priority="high" if (rev.get("rating") or 0) <= 2 else "med",
+        category="صيانة",
+        source="review",
+        source_ref=rid,
+        guest=rev.get("guest_name"),
+        created_by=(b.get("by") or "owner"),
+    )
+    state["ticket_id"] = t["id"]
+    state["last_edit_by"] = (b.get("by") or "owner").strip() or "owner"
+    state["last_edit_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "ticket": _ticket_view(t), "existing": False})
+
 async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
     not the dashboard token — so the link can be shared with the cleaners safely."""
@@ -11043,6 +11699,13 @@ async def start_web_server():
         app.router.add_post("/api/tickets/create", _api_tickets_create)
         app.router.add_post("/api/tickets/update", _api_tickets_update)
         app.router.add_post("/api/tickets/delete", _api_tickets_delete)
+        # Reviews (Hostaway + AI dispute/AAA)
+        app.router.add_get("/api/reviews/list", _api_reviews_list)
+        app.router.add_post("/api/reviews/refresh", _api_reviews_refresh)
+        app.router.add_post("/api/reviews/analyze", _api_reviews_analyze)
+        app.router.add_post("/api/reviews/toggle-fixed", _api_reviews_toggle_fixed)
+        app.router.add_post("/api/reviews/notes", _api_reviews_notes)
+        app.router.add_post("/api/reviews/open-ticket", _api_reviews_open_ticket)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -11341,6 +12004,18 @@ def load_state():
         for t in (_load_json("tickets.json", []) or []):
             if isinstance(t, dict) and t.get("id"):
                 _tickets.append(t)
+        _reviews.clear()
+        for k, v in (_load_json("reviews.json", {}) or {}).items():
+            if isinstance(v, dict):
+                _reviews[str(k)] = v
+        _review_ai_cache.clear()
+        for k, v in (_load_json("review_ai.json", {}) or {}).items():
+            if isinstance(v, dict):
+                _review_ai_cache[str(k)] = v
+        _review_states.clear()
+        for k, v in (_load_json("review_states.json", {}) or {}).items():
+            if isinstance(v, dict):
+                _review_states[str(k)] = v
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -11385,6 +12060,9 @@ def persist_state():
     _save_json("dc_anchor.json", _dc_anchor_date)
     # Cap tickets to last 1000 on disk to keep the JSON small
     _save_json("tickets.json", _tickets[:1000])
+    _save_json("reviews.json", _reviews)
+    _save_json("review_ai.json", _review_ai_cache)
+    _save_json("review_states.json", _review_states)
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
