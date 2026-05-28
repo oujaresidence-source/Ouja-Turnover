@@ -4180,6 +4180,14 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                     "last_ping": time.time(), "attempts": 0, "claimed_by": None,
                                     "last_msg_id": item.get("message_id") or 0,
                                     "acks": list(_esc_sent_acks.get(item["conversation_id"], []))}
+            # Open a linked maintenance ticket so the issue lives in the
+            # dashboard's ticket log too — survives Discord scroll-back and
+            # gets owners the audit trail they asked for.
+            try:
+                tkt = _ticket_from_escalation(msg.id, _escalations[msg.id])
+                _escalations[msg.id]["ticket_id"] = tkt["id"]
+            except Exception as _e:
+                print("ticket-from-escalation error:", _e)
         except Exception as e:
             print("escalation post error:", e)
         return
@@ -4829,6 +4837,147 @@ _deep_clean_state = {}
 # is skipped by every scheduling function and shown in a separate dashboard
 # section. Persisted across redeploys.
 _paused_units = set()
+
+# ===================== MAINTENANCE TICKETS (صيانة) =====================
+# A lightweight task tracker. Every escalation that gets posted to the
+# operations channel ALSO opens a ticket here so the team has a permanent
+# audit trail with who-did-what, status, priority, vendor, cost. Tickets
+# also serve as the home for problems detected by AI review-analysis.
+#
+# Schema (per ticket):
+#   id           "tk_<ts><rand>"
+#   title        short Arabic title
+#   description  free-form body
+#   status       "open" | "in_progress" | "fixed" | "cancelled"
+#   priority     "low" | "med" | "high" | "urgent"
+#   category     "صيانة" | "كهرباء" | "سباكة" | "تنظيف" | "تكييف" | "أثاث" |
+#                "أجهزة" | "إنترنت" | "أقفال" | "أخرى"
+#   lid          related Hostaway listing id (int) or None
+#   unit_name    snapshot of the apartment name (so it survives renames)
+#   assignee     team-member name string or None
+#   due_date     ISO date string or None
+#   cost         number SAR or None
+#   vendor       free-form vendor name or None
+#   vendor_phone string or None
+#   source       "manual" | "escalation" | "review"
+#   source_ref   the originating escalation/review id (string) or None
+#   guest        guest name snapshot when source=escalation
+#   created_at   ISO timestamp
+#   created_by   "bot" or team-member name
+#   log          list of {ts, who, what} events for the audit trail
+_tickets = []  # newest-first
+_ticket_seq = 0
+
+_TICKET_CATS = ["صيانة", "كهرباء", "سباكة", "تنظيف", "تكييف", "أثاث",
+                "أجهزة", "إنترنت", "أقفال", "أخرى"]
+_TICKET_STATUSES  = ["open", "in_progress", "fixed", "cancelled"]
+_TICKET_PRIORITY  = ["low", "med", "high", "urgent"]
+
+def _new_ticket_id():
+    # Monotonic counter + millisecond timestamp → collision-free even in tight loops
+    global _ticket_seq
+    _ticket_seq += 1
+    return f"tk_{int(time.time() * 1000)}_{_ticket_seq:06d}"
+
+def _ticket_log(t, who, what):
+    """Append an audit-trail entry. Caps at 50."""
+    t.setdefault("log", []).append({
+        "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+        "who": (who or "bot")[:40],
+        "what": (what or "")[:300],
+    })
+    if len(t["log"]) > 50:
+        t["log"] = t["log"][-50:]
+
+def _ticket_create(title, *, description="", lid=None, priority="med",
+                   category="صيانة", source="manual", source_ref=None,
+                   guest=None, created_by="bot", assignee=None,
+                   due_date=None, vendor=None, vendor_phone=None, cost=None):
+    """Create + register a ticket. Returns the dict."""
+    lid_int = None
+    try:
+        if lid is not None:
+            lid_int = int(lid)
+    except Exception:
+        lid_int = None
+    unit_name = None
+    if lid_int is not None:
+        unit_name = next((u.get("name") for u in _catalog_units
+                          if u.get("id") == lid_int), None) \
+                    or (get_listings_map() or {}).get(lid_int) \
+                    or str(lid_int)
+    t = {
+        "id": _new_ticket_id(),
+        "title": (title or "بدون عنوان")[:120],
+        "description": (description or "")[:2000],
+        "status": "open",
+        "priority": priority if priority in _TICKET_PRIORITY else "med",
+        "category": category if category in _TICKET_CATS else "صيانة",
+        "lid": lid_int,
+        "unit_name": unit_name,
+        "assignee": assignee,
+        "due_date": due_date,
+        "cost": cost,
+        "vendor": vendor,
+        "vendor_phone": vendor_phone,
+        "source": source if source in ("manual", "escalation", "review") else "manual",
+        "source_ref": source_ref,
+        "guest": guest,
+        "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        "created_by": created_by or "bot",
+        "log": [],
+    }
+    _ticket_log(t, created_by or "bot",
+                f"فتح التذكرة (المصدر: {t['source']})")
+    _tickets.insert(0, t)
+    # Cap memory at 2000 tickets — older ones drop off
+    if len(_tickets) > 2000:
+        del _tickets[2000:]
+    log_event("ops", f"تذكرة جديدة [{t['category']}]: {t['title']}"
+                     + (f" · {unit_name}" if unit_name else ""))
+    return t
+
+def _ticket_from_escalation(esc_id, esc):
+    """Create (or return existing) ticket linked to an escalation. Idempotent
+    by source_ref so duplicate fires from retries don't open duplicate tickets."""
+    ref = str(esc_id)
+    for t in _tickets:
+        if t.get("source") == "escalation" and str(t.get("source_ref")) == ref:
+            return t
+    unit = esc.get("unit") or "—"
+    guest = esc.get("guest") or "—"
+    reason = (esc.get("reason") or "").strip()
+    last_msg = (esc.get("guest_text") or "").strip().replace("\n", " ")
+    title = f"تصعيد · {unit} · {guest}"[:120]
+    body_lines = []
+    if reason:
+        body_lines.append(f"السبب: {reason}")
+    if last_msg:
+        body_lines.append("آخر رسالة من الضيف:")
+        body_lines.append(last_msg[:500])
+    if esc.get("conversation_id"):
+        body_lines.append(f"\nمحادثة Hostaway: {esc['conversation_id']}")
+    description = "\n".join(body_lines)
+    lid = None
+    # try to resolve the listing-id from the unit name
+    try:
+        listings = get_listings_map() or {}
+        for k, v in listings.items():
+            if v and unit and v.strip() == unit.strip():
+                lid = int(k); break
+    except Exception:
+        pass
+    return _ticket_create(
+        title=title,
+        description=description,
+        lid=lid,
+        priority="high",
+        category="صيانة",
+        source="escalation",
+        source_ref=ref,
+        guest=guest,
+        created_by="bot",
+    )
 
 # Owner's chosen "queue start" anchor. Set by /api/cleaning/reschedule-from and
 # also auto-applied after pause/unpause so the queue stays compacted forward.
@@ -5748,6 +5897,65 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ TICKETS (الصيانة) ============ -->
+      <section class="view" id="view_tickets">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🔧 الصيانة</div>
+            <div class="page-sub">سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="openTicketModal()">➕ تذكرة جديدة</button>
+            <button class="btn ghost sm" onclick="loadTickets()">↻</button>
+          </div>
+        </div>
+
+        <!-- What is this page? -->
+        <div class="card" style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold)">
+          <div style="padding:6px 4px">
+            <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 ما هي هذي الصفحة؟</div>
+            <div class="muted" style="font-size:12.5px;line-height:1.7">
+              كل مشكلة بشقة (سباكة، تكييف، إلكترونيات، شكوى ضيف…) تنفتح كـ <b>تذكرة</b> هنا.
+              ⚙️ البوت يفتح التذكرة تلقائياً لما يصير تصعيد من ضيف.
+              👷 تقدر تضيف تذكرة يدوي بزر <b>"تذكرة جديدة"</b>.
+              ✅ كل تذكرة فيها: <b>الحالة</b> (جديدة / تحت العمل / منجزة)، <b>الأولوية</b>، <b>المسؤول</b>،
+              <b>المورّد</b>، <b>التكلفة</b>، و<b>سجل تعليقات</b> يحفظ مين سوّى وش.
+            </div>
+          </div>
+        </div>
+
+        <div class="kpis" id="ticketStats"></div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">📋 القائمة</span>
+            <div class="card-actions" style="flex-wrap:wrap;gap:6px">
+              <select id="tkFilterStatus" onchange="loadTickets()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="">كل الحالات</option>
+                <option value="open">جديدة</option>
+                <option value="in_progress">تحت العمل</option>
+                <option value="fixed">منجزة</option>
+                <option value="cancelled">ملغية</option>
+              </select>
+              <select id="tkFilterPriority" onchange="loadTickets()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="">كل الأولويات</option>
+                <option value="urgent">عاجلة</option>
+                <option value="high">عالية</option>
+                <option value="med">متوسطة</option>
+                <option value="low">منخفضة</option>
+              </select>
+              <select id="tkFilterCategory" onchange="loadTickets()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="">كل التصنيفات</option>
+              </select>
+              <input id="tkSearch" placeholder="ابحث…" oninput="_tkSearchDeb()" style="width:180px;padding:6px 10px;height:32px;font-size:12px">
+            </div>
+          </div>
+          <div id="ticketsBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
+      <!-- Ticket edit/create modal overlay (built lazy in JS) -->
+
       <!-- ============ MORE (mobile only) ============ -->
       <section class="view" id="view_more">
         <div class="page-head"><div><div class="page-title">المزيد</div></div></div>
@@ -6002,7 +6210,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -6133,7 +6341,7 @@ const T = {
     units_count:'وحدة'
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -6355,6 +6563,7 @@ const NAV = [
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
+  {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -6376,6 +6585,10 @@ function badgeCount(key){
   if(key==='inbox') return (ib.replies?ib.replies.length:0) + (ib.escalations?ib.escalations.filter(function(e){return !e.claimed_by}).length:0);
   if(key==='pricing') return ((D.pr && D.pr.units) || []).length;
   if(key==='clean') return ((D.clean && D.clean.counts) || {}).overdue || 0;
+  if(key==='tickets'){
+    const c = (D.tickets && D.tickets.counts) || {};
+    return (c.overdue||0) + (c.urgent||0);
+  }
   return 0;
 }
 function buildSideNav(){
@@ -6443,6 +6656,7 @@ function go(id){
   if(id==='clean') loadCleaning();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
+  if(id==='tickets') loadTickets();
 }
 
 /* ============================================================
@@ -6832,6 +7046,252 @@ async function loadCleaning(){
   renderCleaningPaused();
   _populateCleanInsertDropdown();
   renderCleaningList();
+}
+
+/* ============== TICKETS (الصيانة) ============== */
+const TK_STATUS_LABEL  = {open:'🆕 جديدة', in_progress:'🔧 تحت العمل', fixed:'✅ منجزة', cancelled:'⛔ ملغية'};
+const TK_PRIORITY_LABEL = {low:'منخفضة', med:'متوسطة', high:'عالية', urgent:'عاجلة'};
+const TK_PRIORITY_PILL  = {low:'muted', med:'info', high:'warn', urgent:'danger'};
+const TK_STATUS_PILL    = {open:'info', in_progress:'warn', fixed:'ok', cancelled:'muted'};
+let _tkSearchT = null;
+function _tkSearchDeb(){ clearTimeout(_tkSearchT); _tkSearchT = setTimeout(loadTickets, 350); }
+
+async function loadTickets(){
+  const body = document.getElementById('ticketsBody');
+  if(body) body.innerHTML = '<div class="empty sk">—</div>';
+  const qs = new URLSearchParams();
+  const s  = (document.getElementById('tkFilterStatus')||{}).value;
+  const p  = (document.getElementById('tkFilterPriority')||{}).value;
+  const c  = (document.getElementById('tkFilterCategory')||{}).value;
+  const q  = (document.getElementById('tkSearch')||{}).value || '';
+  if(s) qs.set('status', s);
+  if(p) qs.set('priority', p);
+  if(c) qs.set('category', c);
+  if(q) qs.set('q', q);
+  try{ D.tickets = await api('/api/tickets/list?' + qs.toString()); }
+  catch(_){ D.tickets = {items:[], counts:{}, categories:[]} }
+  _renderTicketStats();
+  _populateTicketCatFilter();
+  _renderTicketsBody();
+  // also refresh the sidebar badge
+  buildSideNav();
+}
+
+function _renderTicketStats(){
+  const el = document.getElementById('ticketStats'); if(!el) return;
+  const c = (D.tickets||{}).counts || {};
+  const cards = [
+    {ic:'📋', cls:'b', val:c.total||0,        lbl:'إجمالي التذاكر'},
+    {ic:'🆕', cls:'g', val:c.open||0,         lbl:'جديدة'},
+    {ic:'🔧', cls:'a', val:c.in_progress||0,  lbl:'تحت العمل'},
+    {ic:'⚠',  cls:'r', val:c.overdue||0,      lbl:'متأخّرة'},
+  ];
+  el.innerHTML = cards.map(function(x){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+x.cls+'">'+x.ic+'</div></div>'
+      +'<div class="kpi-val">'+x.val+'</div><div class="kpi-lbl">'+x.lbl+'</div></div>';
+  }).join('');
+}
+function _populateTicketCatFilter(){
+  const sel = document.getElementById('tkFilterCategory'); if(!sel) return;
+  const cats = ((D.tickets||{}).categories)||[];
+  const prev = sel.value;
+  let h = '<option value="">كل التصنيفات</option>';
+  for(const c of cats) h += '<option value="'+esc(c)+'">'+esc(c)+'</option>';
+  sel.innerHTML = h;
+  if(prev) sel.value = prev;
+}
+function _renderTicketsBody(){
+  const body = document.getElementById('ticketsBody'); if(!body) return;
+  const items = ((D.tickets||{}).items)||[];
+  if(!items.length){
+    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
+      + '<div style="font-size:32px;margin-bottom:8px">📭</div>'
+      + '<div class="muted" style="font-size:13.5px">ما فيه تذاكر بعد. اضغط <b>تذكرة جديدة</b> أو انتظر البوت يفتح وحدة تلقائياً عند أي تصعيد.</div>'
+      + '</div>';
+    return;
+  }
+  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for(const it of items){
+    const stat = TK_STATUS_LABEL[it.status] || it.status;
+    const prio = TK_PRIORITY_LABEL[it.priority] || it.priority;
+    const overdueTag = it.overdue ? '<span class="pill danger" style="margin-inline-start:6px">⏰ متأخرة</span>' : '';
+    const srcEmoji = it.source === 'escalation' ? '🚨 ' : (it.source === 'review' ? '⭐ ' : '');
+    const unitTag = it.unit_name ? '<span class="muted" style="font-size:11px">· '+esc(it.unit_name)+'</span>' : '';
+    const dueTag  = it.due_date ? '<span class="muted" style="font-size:11px">· ⏰ '+esc(it.due_date)+'</span>' : '';
+    const assTag  = it.assignee ? '<span class="muted" style="font-size:11px">· 👤 '+esc(it.assignee)+'</span>' : '';
+    html += '<div class="ticket-row" onclick="openTicketModal(&#39;'+esc(it.id)+'&#39;)" '
+         +    'style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;transition:.12s"'
+         +    ' onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+         +    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">'
+         +      '<div style="flex:1;min-width:0">'
+         +        '<div class="strong" style="font-size:13.5px">'+srcEmoji+esc(it.title)+overdueTag+'</div>'
+         +        '<div style="margin-top:4px;font-size:11.5px;color:var(--mut)">'
+         +          esc(it.category)+unitTag+assTag+dueTag
+         +        '</div>'
+         +      '</div>'
+         +      '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'
+         +        '<span class="pill '+(TK_STATUS_PILL[it.status]||'info')+'">'+stat+'</span>'
+         +        '<span class="pill '+(TK_PRIORITY_PILL[it.priority]||'info')+'">'+prio+'</span>'
+         +      '</div>'
+         +    '</div>'
+         + '</div>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+/* ---------- Ticket modal (create + edit) ---------- */
+function _ensureTicketModal(){
+  let ov = document.getElementById('ticketOverlay');
+  if(ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'ticketOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9997;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:14px';
+  ov.onclick = function(e){ if(e.target === ov) closeTicketModal(); };
+  const box = document.createElement('div');
+  box.id = 'ticketModalBody';
+  box.style.cssText = 'background:var(--surface);padding:18px;border-radius:16px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  return ov;
+}
+function closeTicketModal(){
+  const ov = document.getElementById('ticketOverlay'); if(ov) ov.style.display = 'none';
+}
+async function openTicketModal(tid){
+  _ensureTicketModal();
+  // Lazy-load units for the apartment dropdown
+  if(!D.units){
+    try{ D.units = await api('/api/units') }catch(_){ D.units = {units:[]} }
+  }
+  const existing = tid ? (((D.tickets||{}).items)||[]).find(function(x){ return x.id === tid }) : null;
+  _renderTicketModal(existing, !!tid);
+  document.getElementById('ticketOverlay').style.display = 'flex';
+}
+function _renderTicketModal(t, isEdit){
+  const box = document.getElementById('ticketModalBody'); if(!box) return;
+  const cats = ((D.tickets||{}).categories) || ['صيانة','كهرباء','سباكة','تنظيف','تكييف','أثاث','أجهزة','إنترنت','أقفال','أخرى'];
+  t = t || {};
+  function opt(arr, sel, fmt){
+    return arr.map(function(v){
+      const lbl = fmt ? fmt(v) : v;
+      return '<option value="'+esc(v)+'"'+(sel===v?' selected':'')+'>'+esc(lbl)+'</option>';
+    }).join('');
+  }
+  const title = isEdit ? '🔧 تعديل التذكرة' : '➕ تذكرة جديدة';
+  // Get listings for unit dropdown
+  const units = ((D.units && D.units.units) || []);
+  let unitOpts = '<option value="">— بدون شقة محددة —</option>';
+  for(const u of units){
+    unitOpts += '<option value="'+u.id+'"'+(t.lid===u.id?' selected':'')+'>'+esc(u.name)+'</option>';
+  }
+  let html =
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">'
+    +   '<div style="font-size:16px;font-weight:700">'+title+'</div>'
+    +   '<button onclick="closeTicketModal()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:22px;line-height:1;padding:0 4px">×</button>'
+    + '</div>';
+  if(isEdit && t.source && t.source !== 'manual'){
+    const srcLabel = t.source === 'escalation' ? '🚨 من تصعيد ضيف' : '⭐ من مراجعة';
+    html += '<div style="background:var(--gold-tint);padding:8px 12px;border-radius:8px;font-size:11.5px;margin-bottom:12px;color:var(--gold);font-weight:600">'+srcLabel+'</div>';
+  }
+  html +=
+      '<div style="display:flex;flex-direction:column;gap:12px">'
+    +   '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">العنوان *</label>'
+    +     '<input id="tkF_title" placeholder="مثال: عطل تكييف غرفة النوم" value="'+esc(t.title||'')+'" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +   '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">الوصف</label>'
+    +     '<textarea id="tkF_description" placeholder="اشرح المشكلة بالتفصيل…" rows="4" style="width:100%;padding:9px 12px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-family:inherit;resize:vertical">'+esc(t.description||'')+'</textarea></div>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">الحالة</label>'
+    +       '<select id="tkF_status" style="width:100%;padding:0 10px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)">'
+    +       opt(['open','in_progress','fixed','cancelled'], t.status||'open', function(v){return TK_STATUS_LABEL[v]})
+    +       '</select></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">الأولوية</label>'
+    +       '<select id="tkF_priority" style="width:100%;padding:0 10px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)">'
+    +       opt(['low','med','high','urgent'], t.priority||'med', function(v){return TK_PRIORITY_LABEL[v]})
+    +       '</select></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">التصنيف</label>'
+    +       '<select id="tkF_category" style="width:100%;padding:0 10px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)">'
+    +       opt(cats, t.category||'صيانة')
+    +       '</select></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">الشقة</label>'
+    +       '<select id="tkF_lid" style="width:100%;padding:0 10px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)">'+unitOpts+'</select></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">المسؤول</label>'
+    +       '<input id="tkF_assignee" placeholder="اسم العضو" value="'+esc(t.assignee||'')+'" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">تاريخ الاستحقاق</label>'
+    +       '<input type="hidden" id="tkF_due_date" value="'+esc(t.due_date||'')+'">'
+    +       '<button id="tkF_due_date_lbl" onclick="openDatePicker(&#39;tkF_due_date&#39;,&#39;اختر تاريخ الاستحقاق&#39;)" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;height:38px;width:100%;font-size:13px;color:var(--text);cursor:pointer">'+(t.due_date?'📅 '+esc(t.due_date):'📅 اختر التاريخ')+'</button></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">المورّد</label>'
+    +       '<input id="tkF_vendor" placeholder="اسم المؤسسة" value="'+esc(t.vendor||'')+'" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">هاتف المورّد</label>'
+    +       '<input id="tkF_vendor_phone" placeholder="05xxxxxxxx" value="'+esc(t.vendor_phone||'')+'" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">التكلفة (ر.س)</label>'
+    +       '<input id="tkF_cost" type="number" placeholder="0" value="'+esc(t.cost!=null?String(t.cost):'')+'" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +   '</div>';
+  if(isEdit){
+    html +=
+        '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">إضافة تعليق</label>'
+      +   '<textarea id="tkF_note" placeholder="مثال: تواصلت مع المورّد، يجي بكرا الساعة ٤…" rows="2" style="width:100%;padding:9px 12px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-family:inherit;resize:vertical"></textarea></div>';
+    if(t.log && t.log.length){
+      html += '<div><div style="font-size:11.5px;font-weight:600;color:var(--mut);margin-bottom:6px">📜 سجل التذكرة</div>';
+      html += '<div style="background:var(--surface-2);padding:10px;border-radius:8px;max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">';
+      for(const e of t.log.slice().reverse()){
+        html += '<div style="font-size:11.5px;padding:6px 8px;background:var(--surface);border-radius:6px">'
+             +    '<div class="muted" style="font-size:10.5px;margin-bottom:2px">'+esc(e.ts||'')+' · '+esc(e.who||'')+'</div>'
+             +    '<div>'+esc(e.what||'')+'</div>'
+             + '</div>';
+      }
+      html += '</div></div>';
+    }
+  }
+  html += '</div>';  // end form column
+  html +=
+      '<div style="display:flex;gap:8px;margin-top:16px">'
+    +   '<button class="btn ghost sm" onclick="closeTicketModal()" style="flex:1">إلغاء</button>';
+  if(isEdit){
+    html += '<button class="btn danger sm" onclick="deleteTicket(&#39;'+esc(t.id)+'&#39;)" style="flex:0 0 auto;padding:0 14px">🗑 حذف</button>';
+  }
+  html +=   '<button class="btn primary sm" onclick="saveTicket('+(isEdit?'&#39;'+esc(t.id)+'&#39;':'null')+')" style="flex:2">'+(isEdit?'💾 احفظ':'➕ أنشئ')+'</button>'
+    + '</div>';
+  box.innerHTML = html;
+}
+async function saveTicket(tid){
+  function val(id){ const e = document.getElementById(id); return e ? (e.value || '') : ''; }
+  const data = {
+    title:        val('tkF_title').trim(),
+    description:  val('tkF_description').trim(),
+    status:       val('tkF_status'),
+    priority:     val('tkF_priority'),
+    category:     val('tkF_category'),
+    lid:          val('tkF_lid') ? parseInt(val('tkF_lid')) : null,
+    assignee:     val('tkF_assignee').trim() || null,
+    due_date:     val('tkF_due_date') || null,
+    vendor:       val('tkF_vendor').trim() || null,
+    vendor_phone: val('tkF_vendor_phone').trim() || null,
+    cost:         val('tkF_cost') ? parseFloat(val('tkF_cost')) : null,
+  };
+  if(!data.title){ toast('اكتب عنوان للتذكرة'); return; }
+  const note = val('tkF_note').trim();
+  let url, payload;
+  if(tid){
+    url = '/api/tickets/update';
+    payload = Object.assign({id:tid, by:'owner'}, data);
+    if(note) payload.note = note;
+  } else {
+    url = '/api/tickets/create';
+    payload = Object.assign({created_by:'owner'}, data);
+  }
+  const r = await post(url, payload);
+  if(r.ok){
+    toast(tid ? '✓ حُفظ' : '➕ تم الإنشاء');
+    closeTicketModal();
+    loadTickets();
+  } else toast(r.error || 'خطأ');
+}
+async function deleteTicket(tid){
+  if(!confirm('متأكد تبي تحذف هذي التذكرة؟ ما يصير تراجع.')) return;
+  const r = await post('/api/tickets/delete', {id:tid});
+  if(r.ok){ toast('🗑 حُذفت'); closeTicketModal(); loadTickets(); }
+  else toast(r.error || 'خطأ');
 }
 
 function _ar_wd(n){ return ['الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][n] }
@@ -9972,6 +10432,179 @@ async def _api_cleaning_reschedule_from(request):
     log_event("pricing", f"تنظيف عميق · إعادة جدولة من {date} · {n} شقة 🔄")
     return _json({"ok": True, "rescheduled": n})
 
+# ===================== MAINTENANCE TICKETS API =====================
+def _ticket_view(t):
+    """Dashboard-friendly view of a ticket (no sensitive internals)."""
+    open_age = None
+    try:
+        if t.get("created_at") and t.get("status") in ("open", "in_progress"):
+            ca = datetime.fromisoformat(t["created_at"])
+            open_age = (datetime.now(TZ) - ca).days
+    except Exception:
+        open_age = None
+    overdue = False
+    try:
+        if t.get("due_date") and t.get("status") in ("open", "in_progress"):
+            d = datetime.strptime(t["due_date"], "%Y-%m-%d").date()
+            overdue = d < datetime.now(TZ).date()
+    except Exception:
+        overdue = False
+    return {
+        "id": t["id"], "title": t.get("title", ""),
+        "description": t.get("description", ""),
+        "status": t.get("status", "open"),
+        "priority": t.get("priority", "med"),
+        "category": t.get("category", "صيانة"),
+        "lid": t.get("lid"), "unit_name": t.get("unit_name"),
+        "assignee": t.get("assignee"),
+        "due_date": t.get("due_date"),
+        "cost": t.get("cost"),
+        "vendor": t.get("vendor"), "vendor_phone": t.get("vendor_phone"),
+        "source": t.get("source", "manual"),
+        "source_ref": t.get("source_ref"),
+        "guest": t.get("guest"),
+        "created_at": t.get("created_at"),
+        "created_by": t.get("created_by", "bot"),
+        "log": t.get("log", [])[-10:],
+        "open_age_days": open_age,
+        "overdue": overdue,
+    }
+
+async def _api_tickets_list(request):
+    """GET /api/tickets/list?status=&priority=&category=&q=&lid="""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q  = (request.query.get("q", "") or "").lower().strip()
+    st = (request.query.get("status", "") or "").strip()
+    pr = (request.query.get("priority", "") or "").strip()
+    cat = (request.query.get("category", "") or "").strip()
+    try:
+        lid_f = int(request.query.get("lid")) if request.query.get("lid") else None
+    except Exception:
+        lid_f = None
+    items = []
+    for t in _tickets:
+        if st and t.get("status") != st: continue
+        if pr and t.get("priority") != pr: continue
+        if cat and t.get("category") != cat: continue
+        if lid_f is not None and t.get("lid") != lid_f: continue
+        if q:
+            blob = " ".join(str(t.get(k, "")) for k in
+                            ("title", "description", "unit_name", "vendor",
+                             "assignee", "guest")).lower()
+            if q not in blob: continue
+        items.append(_ticket_view(t))
+    # newest-first is already the in-memory order, but recompute for safety
+    rank = {"urgent": 3, "high": 2, "med": 1, "low": 0}
+    items.sort(key=lambda x: (0 if x["overdue"] else 1,
+                              -(rank.get(x["priority"], 1)),
+                              x.get("created_at") or ""), reverse=False)
+    # Counts
+    counts = {
+        "total": len(_tickets),
+        "open": sum(1 for t in _tickets if t.get("status") == "open"),
+        "in_progress": sum(1 for t in _tickets if t.get("status") == "in_progress"),
+        "fixed": sum(1 for t in _tickets if t.get("status") == "fixed"),
+        "overdue": sum(1 for v in items if v["overdue"]),
+        "urgent": sum(1 for t in _tickets
+                      if t.get("priority") == "urgent" and t.get("status") in ("open", "in_progress")),
+    }
+    return _json({
+        "items": items, "counts": counts,
+        "categories": _TICKET_CATS,
+        "today": datetime.now(TZ).date().isoformat(),
+    })
+
+async def _api_tickets_create(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    title = (b.get("title") or "").strip()
+    if not title:
+        return _json({"error": "title required"}, 400)
+    t = _ticket_create(
+        title=title,
+        description=(b.get("description") or "").strip(),
+        lid=b.get("lid"),
+        priority=(b.get("priority") or "med"),
+        category=(b.get("category") or "صيانة"),
+        assignee=(b.get("assignee") or None),
+        due_date=(b.get("due_date") or None),
+        cost=b.get("cost"),
+        vendor=(b.get("vendor") or None),
+        vendor_phone=(b.get("vendor_phone") or None),
+        source="manual",
+        created_by=(b.get("created_by") or "owner"),
+    )
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "ticket": _ticket_view(t)})
+
+def _find_ticket(tid):
+    for t in _tickets:
+        if t.get("id") == tid:
+            return t
+    return None
+
+async def _api_tickets_update(request):
+    """POST {id, status?, priority?, category?, assignee?, due_date?, cost?,
+       vendor?, vendor_phone?, title?, description?, note?}"""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    tid = (b.get("id") or "").strip()
+    t = _find_ticket(tid)
+    if not t:
+        return _json({"error": "not found"}, 404)
+    who = (b.get("by") or "owner").strip() or "owner"
+    changed = []
+    field_map_ar = {
+        "status":   "الحالة",
+        "priority": "الأولوية",
+        "category": "التصنيف",
+        "assignee": "المسؤول",
+        "due_date": "تاريخ الاستحقاق",
+        "cost":     "التكلفة",
+        "vendor":   "المورّد",
+        "vendor_phone": "هاتف المورّد",
+        "title":    "العنوان",
+        "description": "الوصف",
+    }
+    for k in ("status", "priority", "category", "assignee", "due_date",
+              "cost", "vendor", "vendor_phone", "title", "description"):
+        if k not in b:
+            continue
+        v = b.get(k)
+        if k == "status" and v and v not in _TICKET_STATUSES:
+            continue
+        if k == "priority" and v and v not in _TICKET_PRIORITY:
+            continue
+        if k == "category" and v and v not in _TICKET_CATS:
+            continue
+        old = t.get(k)
+        if old == v:
+            continue
+        t[k] = v
+        changed.append(f"{field_map_ar.get(k, k)}: {old or '—'} → {v or '—'}")
+    note = (b.get("note") or "").strip()
+    if note:
+        _ticket_log(t, who, f"تعليق: {note[:200]}")
+    if changed:
+        _ticket_log(t, who, " · ".join(changed)[:280])
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "ticket": _ticket_view(t)})
+
+async def _api_tickets_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    tid = (b.get("id") or "").strip()
+    for i, t in enumerate(_tickets):
+        if t.get("id") == tid:
+            del _tickets[i]
+            await asyncio.to_thread(persist_state)
+            return _json({"ok": True})
+    return _json({"error": "not found"}, 404)
+
 async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
     not the dashboard token — so the link can be shared with the cleaners safely."""
@@ -10405,6 +11038,11 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/unpause", _api_cleaning_unpause)
         app.router.add_post("/api/cleaning/insert", _api_cleaning_insert)
         app.router.add_post("/api/cleaning/reschedule-from", _api_cleaning_reschedule_from)
+        # Maintenance tickets (صيانة)
+        app.router.add_get("/api/tickets/list", _api_tickets_list)
+        app.router.add_post("/api/tickets/create", _api_tickets_create)
+        app.router.add_post("/api/tickets/update", _api_tickets_update)
+        app.router.add_post("/api/tickets/delete", _api_tickets_delete)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -10699,6 +11337,10 @@ def load_state():
         _paused_units.clear()
         _paused_units.update(int(x) for x in _load_json("paused_units.json", []) if str(x).strip())
         _dc_anchor_date = _load_json("dc_anchor.json", None) or None
+        _tickets.clear()
+        for t in (_load_json("tickets.json", []) or []):
+            if isinstance(t, dict) and t.get("id"):
+                _tickets.append(t)
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -10741,6 +11383,8 @@ def persist_state():
     _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
     _save_json("paused_units.json", list(_paused_units))
     _save_json("dc_anchor.json", _dc_anchor_date)
+    # Cap tickets to last 1000 on disk to keep the JSON small
+    _save_json("tickets.json", _tickets[:1000])
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
