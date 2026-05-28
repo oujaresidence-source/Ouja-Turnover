@@ -2249,6 +2249,16 @@ def record_learning(item, original_draft, final_reply, via, approver=None):
             "approver": approver or "",
         }
         _learning_log.append(entry)
+        # ---- daily metrics ----
+        metric_bump("replies_total")
+        if via == "auto":           metric_bump("replies_auto")
+        elif via == "discord_send": metric_bump("replies_manual")
+        elif via == "discord_edit": metric_bump("replies_edited")
+        elif via == "dashboard_send":
+            metric_bump("replies_dashboard")
+            if entry["was_edited"]: metric_bump("replies_edited")
+            else:                   metric_bump("replies_manual")
+        metric_record_apartment(item.get("unit"))
     except Exception as e:
         print("record_learning error:", e)
 
@@ -2635,6 +2645,7 @@ class NameSelect(discord.ui.Select):
             return
         if esc:
             esc["claimed_by"] = name
+            metric_bump("escalations_resolved")
             if esc.get("conversation_id"):
                 _claimed_convos.add(esc["conversation_id"])   # stop auto-acks
             log_event("escalation", f"تم استلام تصعيد بواسطة {name} · {esc.get('unit','')}")
@@ -3025,8 +3036,15 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     reply = (result.get("reply") or "").strip()
     escalate = action == "escalate" or sentiment == "upset" or conf < ESCALATE_BELOW
 
+    # daily metrics: every draft counts, with confidence + topic + apartment
+    metric_bump("drafts_made")
+    metric_record_confidence(conf)
+    metric_record_topic(intent)
+    metric_record_apartment(item.get("unit"))
+
     # ---- needs a human: tell the guest it's escalated, then alert the team ----
     if escalate:
+        metric_bump("escalations_created")
         embed = discord.Embed(title=f"🚨 تصعيد · {g} · {item['unit']}", color=0xD64545)
         embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
         embed.add_field(name="🔴 يحتاج تدخل بشري",
@@ -3247,6 +3265,70 @@ _pricing_strategies = {}              # lid -> active dynamic-pricing strategy s
 _learning_log = deque(maxlen=3000)
 _apartment_learnings = {}   # lid (int) -> {"summary": str, "last_distilled": ts, "examples_count": int}
 _general_learnings = {"summary": "", "last_distilled": 0, "examples_count": 0}
+
+# Daily metrics — one row per calendar date, persisted, used by the Learning page's
+# trend charts and the "what improved over time" copy. Every reply send, escalation
+# creation, and escalation resolution bumps a counter here.
+_daily_metrics = {}     # "YYYY-MM-DD" -> {counters dict, see _new_day_row()}
+
+def _new_day_row():
+    return {
+        "replies_total": 0,         # any reply that went out (auto + manual + dashboard + edit)
+        "replies_auto": 0,           # high-conf auto-sent
+        "replies_manual": 0,         # human clicked Send-as-is from Discord
+        "replies_edited": 0,         # human edited then sent (correction signal)
+        "replies_dashboard": 0,      # sent from the web dashboard
+        "escalations_created": 0,
+        "escalations_resolved": 0,   # claimed OR auto-resolved
+        "drafts_made": 0,            # total drafts the assistant produced (escalated or not)
+        "confidence_sum": 0.0,       # for computing avg
+        "confidence_count": 0,
+        "topics": {},                # intent -> count
+        "apartments_touched": [],    # list of unit names that saw activity today
+    }
+
+def _today_key():
+    return datetime.now(TZ).date().isoformat()
+
+def _day_row(d_key=None):
+    k = d_key or _today_key()
+    return _daily_metrics.setdefault(k, _new_day_row())
+
+def metric_bump(key, by=1, day=None):
+    try:
+        row = _day_row(day)
+        row[key] = row.get(key, 0) + by
+    except Exception:
+        pass
+
+def metric_record_confidence(conf):
+    try:
+        row = _day_row()
+        row["confidence_sum"] = row.get("confidence_sum", 0.0) + float(conf or 0)
+        row["confidence_count"] = row.get("confidence_count", 0) + 1
+    except Exception:
+        pass
+
+def metric_record_topic(intent):
+    try:
+        if not intent:
+            return
+        row = _day_row()
+        topics = row.setdefault("topics", {})
+        topics[intent] = topics.get(intent, 0) + 1
+    except Exception:
+        pass
+
+def metric_record_apartment(unit_name):
+    try:
+        if not unit_name:
+            return
+        row = _day_row()
+        apt = row.setdefault("apartments_touched", [])
+        if unit_name not in apt:
+            apt.append(unit_name)
+    except Exception:
+        pass
 LEARNING_MIN_NEW_EXAMPLES = int(os.environ.get("LEARNING_MIN_NEW_EXAMPLES", "5"))   # don't re-distill until N new entries
 LEARNING_DISTILL_MIN = int(os.environ.get("LEARNING_DISTILL_MIN", "30"))           # background distill interval (min)
 LEARNING_SAMPLE_PER_APT = int(os.environ.get("LEARNING_SAMPLE_PER_APT", "40"))     # last N entries per apt to feed Claude
@@ -3895,6 +3977,49 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
         <div id="bootstrapStatus" style="display:none"></div>
+
+        <!-- Stat cards: today + delta vs 7-day average -->
+        <div class="kpis" id="learnStats"></div>
+
+        <!-- Trend charts: confidence, auto-send rate, escalation rate -->
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><span class="card-title">📈 <span id="t_learn_chart1">نسبة الثقة (٣٠ يوم)</span></span></div>
+            <div id="learnChartConf"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">⚡ <span id="t_learn_chart2">معدّل الردود التلقائية (٣٠ يوم)</span></span></div>
+            <div id="learnChartAuto"></div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="card-head"><span class="card-title">💬 <span id="t_learn_chart3">حجم الردود اليومي</span></span></div>
+            <div id="learnChartVol"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">🚨 <span id="t_learn_chart4">معدّل التصعيد (٣٠ يوم)</span></span></div>
+            <div id="learnChartEsc"></div>
+          </div>
+        </div>
+
+        <!-- What was learned in the selected window -->
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">🆕 <span id="t_learn_recent">آخر ما تعلّمه</span></span>
+            <div class="card-actions">
+              <select id="learnWindow" onchange="loadLearnToday()" style="font-size:12px;padding:6px 10px;height:32px">
+                <option value="1">اليوم</option>
+                <option value="2">آخر يومين</option>
+                <option value="7">آخر أسبوع</option>
+                <option value="30">آخر شهر</option>
+              </select>
+            </div>
+          </div>
+          <div id="learnRecentBody"><div class="empty sk">—</div></div>
+        </div>
+
+        <!-- Distilled summaries (existing) -->
         <div class="card">
           <div class="card-head"><span class="card-title">🌐 <span id="t_learn_general">الملخص العام</span></span><div class="card-actions" id="genActions"></div></div>
           <div id="learnGeneralBody"><div class="empty sk">—</div></div>
@@ -3980,6 +4105,13 @@ const T = {
     learn_bootstrap_running:'⏳ يقرأ المحادثات السابقة الحين… ممكن ياخذ ١٠-١٥ دقيقة. لا تغلق اللوحة.',
     learn_bootstrap_done:'✅ اكتمل التعلّم التاريخي',
     learn_bootstrap_scanned:'محادثة مفحوصة', learn_bootstrap_pairs:'سؤال-جواب مستخرج', learn_bootstrap_apts:'شقة تم تلخيصها',
+    learn_today:'اليوم', learn_yesterday:'أمس', learn_7d:'٧ أيام', learn_30d:'٣٠ يوم',
+    learn_chart1:'نسبة الثقة (٣٠ يوم)', learn_chart2:'معدّل الردود التلقائية (٣٠ يوم)',
+    learn_chart3:'حجم الردود اليومي', learn_chart4:'معدّل التصعيد (٣٠ يوم)',
+    learn_recent:'آخر ما تعلّمه', learn_recent_empty:'ما فيه نشاط في هذي الفترة',
+    learn_stat_replies:'ردود اليوم', learn_stat_auto:'معدّل التلقائي', learn_stat_conf:'متوسط الثقة',
+    learn_stat_esc:'تصعيدات اليوم', learn_stat_vs_avg:'مقارنة بمتوسط ٧ أيام',
+    learn_event_edited:'مُعدّل', learn_event_sent:'كما هي', learn_event_auto:'تلقائي', learn_event_via:'عبر',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
     today_h:'اليوم', today_date_sub:'',
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
@@ -4050,6 +4182,13 @@ const T = {
     learn_bootstrap_running:'⏳ Reading past conversations now… may take 10-15 min. You can keep the dashboard open.',
     learn_bootstrap_done:'✅ Historical learning complete',
     learn_bootstrap_scanned:'conversations scanned', learn_bootstrap_pairs:'Q&A pairs extracted', learn_bootstrap_apts:'apartments distilled',
+    learn_today:'Today', learn_yesterday:'Yesterday', learn_7d:'Last 7 days', learn_30d:'Last 30 days',
+    learn_chart1:'Avg confidence (30d)', learn_chart2:'Auto-send rate (30d)',
+    learn_chart3:'Daily reply volume', learn_chart4:'Escalation rate (30d)',
+    learn_recent:'Recently learned', learn_recent_empty:'No activity in this window',
+    learn_stat_replies:'Replies today', learn_stat_auto:'Auto-send rate', learn_stat_conf:'Avg confidence',
+    learn_stat_esc:'Escalations today', learn_stat_vs_avg:'vs 7-day avg',
+    learn_event_edited:'edited', learn_event_sent:'sent as-is', learn_event_auto:'auto', learn_event_via:'via',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
     today_h:'Today', today_date_sub:'',
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
@@ -4159,6 +4298,9 @@ function applyLang(){
     t_log:'log', t_log_sub:'log_sub',
     t_learn:'learn_title', t_learn_sub:'learn_sub', t_learn_distill:'learn_distill',
     t_learn_general:'learn_general', t_learn_apt:'learn_apt',
+    t_learn_chart1:'learn_chart1', t_learn_chart2:'learn_chart2',
+    t_learn_chart3:'learn_chart3', t_learn_chart4:'learn_chart4',
+    t_learn_recent:'learn_recent',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -4898,11 +5040,155 @@ let learnEditingApt = false;
 async function loadLearnings(){
   const list = document.getElementById('learnAptList');
   if(list) list.innerHTML = '<div class="empty sk">—</div>';
-  try{ D.learn = await api('/api/learning/summary') }catch(_){ D.learn = {} }
+  // Fetch summaries + metrics + recent events in parallel so the page paints once.
+  try{
+    const r = await Promise.all([
+      api('/api/learning/summary'),
+      api('/api/metrics/daily?days=30').catch(function(){return {days:[]}}),
+      api('/api/learning/today?days=1').catch(function(){return {apartments:[], total_events:0}}),
+    ]);
+    D.learn = r[0]; D.learnMetrics = r[1]; D.learnRecent = r[2];
+  }catch(_){ D.learn = {} }
   // sync sub copy
   const sub = document.getElementById('t_learn_sub'); if(sub) sub.textContent = t().learn_sub;
   const eSel = document.getElementById('t_learn_empty_sel'); if(eSel) eSel.textContent = t().learn_empty_sel;
+  renderLearnStats();
+  renderLearnCharts();
+  renderLearnRecent();
   renderLearnings();
+}
+
+async function loadLearnToday(){
+  const sel = document.getElementById('learnWindow');
+  const days = sel ? parseInt(sel.value || '1', 10) : 1;
+  try{ D.learnRecent = await api('/api/learning/today?days='+days) }catch(_){ D.learnRecent = {apartments:[], total_events:0} }
+  renderLearnRecent();
+}
+
+function _delta(a, b){
+  if(b === 0 || b === null || b === undefined) return null;
+  return Math.round(((a - b) / b) * 100);
+}
+
+function renderLearnStats(){
+  const m = D.learnMetrics || {days:[]};
+  const days = m.days || [];
+  if(!days.length){
+    document.getElementById('learnStats').innerHTML = '<div class="kpi" style="grid-column:1/-1"><div class="kpi-lbl">'+t().learn_recent_empty+'</div></div>';
+    return;
+  }
+  const today = days[days.length-1] || {};
+  const last7 = days.slice(-8, -1);   // 7 days before today
+  const avg = function(arr, k){ if(!arr.length) return 0; return arr.reduce(function(s,x){return s+(x[k]||0)},0)/arr.length };
+  const avg_replies = avg(last7, 'replies_total');
+  const avg_auto    = avg(last7, 'auto_rate');
+  const avg_conf    = avg(last7, 'avg_confidence');
+  const avg_esc     = avg(last7, 'escalations_created');
+
+  const cards = [
+    {ic:'💬', cls:'b', val:today.replies_total||0, lbl:t().learn_stat_replies,
+     delta:_delta(today.replies_total||0, avg_replies)},
+    {ic:'⚡', cls:'g', val:(today.auto_rate||0)+'%', lbl:t().learn_stat_auto,
+     delta:_delta(today.auto_rate||0, avg_auto)},
+    {ic:'🎯', cls:'p', val:(today.avg_confidence||0)+'%', lbl:t().learn_stat_conf,
+     delta:_delta(today.avg_confidence||0, avg_conf)},
+    {ic:'🚨', cls:(today.escalations_created>0?'r':''), val:today.escalations_created||0, lbl:t().learn_stat_esc,
+     delta:_delta(today.escalations_created||0, avg_esc), inverted:true},
+  ];
+  document.getElementById('learnStats').innerHTML = cards.map(function(c){
+    let deltaHtml = '';
+    if(c.delta !== null && c.delta !== 0){
+      const positive = c.inverted ? c.delta < 0 : c.delta > 0;
+      const cls = positive ? 'up' : 'dn';
+      const sign = c.delta > 0 ? '+' : '';
+      deltaHtml = '<span class="kpi-delta '+cls+'">'+sign+c.delta+'%</span>';
+    }
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div>'+deltaHtml+'</div>'
+      +'<div class="kpi-val">'+c.val+'</div><div class="kpi-lbl">'+c.lbl+' · <span style="opacity:.7">'+t().learn_stat_vs_avg+'</span></div></div>';
+  }).join('');
+}
+
+function _lineChartSvg(values, color, suffix){
+  if(!values || !values.length) return '<div class="empty">'+t().rev_no+'</div>';
+  const w = 600, h = 140, pad = 28;
+  const max = Math.max.apply(null, values.concat([1]));
+  const min = 0;
+  const range = max - min || 1;
+  const dx = (w - pad*2) / Math.max(values.length - 1, 1);
+  const pts = values.map(function(v, i){
+    const x = pad + i * dx;
+    const y = h - pad - ((v - min) / range) * (h - pad*2);
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  // area fill polygon
+  const fillPts = pts + ' ' + (pad + (values.length-1)*dx).toFixed(1) + ',' + (h-pad) + ' ' + pad + ',' + (h-pad);
+  const last = values[values.length-1];
+  const lastX = pad + (values.length-1) * dx;
+  const lastY = h - pad - ((last - min) / range) * (h - pad*2);
+  // y-axis ticks
+  const ticks = [0, Math.round(max/2), Math.round(max)];
+  const tickHtml = ticks.map(function(tv){
+    const y = h - pad - ((tv - min) / range) * (h - pad*2);
+    return '<line x1="'+pad+'" y1="'+y+'" x2="'+(w-pad)+'" y2="'+y+'" stroke="var(--line)" stroke-dasharray="2,3"/>'
+      + '<text x="'+(pad-4)+'" y="'+(y+3)+'" text-anchor="end" fill="var(--mut)" font-size="9" font-family="var(--font-mono)">'+tv+(suffix||'')+'</text>';
+  }).join('');
+  return '<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMidYMid meet" style="width:100%;height:160px;overflow:visible">'
+    + tickHtml
+    + '<polygon points="'+fillPts+'" fill="'+color+'" fill-opacity="0.12"/>'
+    + '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '<circle cx="'+lastX.toFixed(1)+'" cy="'+lastY.toFixed(1)+'" r="3.5" fill="'+color+'"/>'
+    + '<text x="'+lastX+'" y="'+(lastY-8)+'" text-anchor="middle" fill="'+color+'" font-size="11" font-weight="700" font-family="var(--font-mono)">'+last+(suffix||'')+'</text>'
+    + '</svg>';
+}
+
+function _barChartSvg(values, color){
+  if(!values || !values.length) return '<div class="empty">'+t().rev_no+'</div>';
+  const w = 600, h = 140, pad = 28;
+  const max = Math.max.apply(null, values.concat([1]));
+  const bw = (w - pad*2) / values.length;
+  const bars = values.map(function(v, i){
+    const bh = ((v) / max) * (h - pad*2);
+    const x = pad + i * bw + 1;
+    const y = h - pad - bh;
+    return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+(bw-2).toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+color+'" rx="2"/>';
+  }).join('');
+  return '<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMidYMid meet" style="width:100%;height:160px">'
+    + bars
+    + '<line x1="'+pad+'" y1="'+(h-pad)+'" x2="'+(w-pad)+'" y2="'+(h-pad)+'" stroke="var(--line)"/>'
+    + '<text x="'+(pad-4)+'" y="'+(pad+3)+'" text-anchor="end" fill="var(--mut)" font-size="9" font-family="var(--font-mono)">'+max+'</text>'
+    + '</svg>';
+}
+
+function renderLearnCharts(){
+  const m = D.learnMetrics || {days:[]};
+  const days = m.days || [];
+  const confs = days.map(function(d){return d.avg_confidence || 0});
+  const autos = days.map(function(d){return d.auto_rate || 0});
+  const vols  = days.map(function(d){return d.replies_total || 0});
+  const escs  = days.map(function(d){return d.escalation_rate || 0});
+  document.getElementById('learnChartConf').innerHTML = _lineChartSvg(confs, '#6D58C2', '%');
+  document.getElementById('learnChartAuto').innerHTML = _lineChartSvg(autos, '#0E9E5F', '%');
+  document.getElementById('learnChartVol').innerHTML  = _barChartSvg(vols, '#A37728');
+  document.getElementById('learnChartEsc').innerHTML  = _lineChartSvg(escs, '#C44343', '%');
+}
+
+function renderLearnRecent(){
+  const d = D.learnRecent || {apartments:[], total_events:0};
+  const body = document.getElementById('learnRecentBody');
+  if(!d.total_events){ body.innerHTML = '<div class="empty">'+t().learn_recent_empty+'</div>'; return; }
+  body.innerHTML = d.apartments.map(function(a){
+    const events = a.events.slice(0, 6).map(function(e){
+      const tag = e.via === 'auto' ? t().learn_event_auto
+                : (e.was_edited ? t().learn_event_edited : t().learn_event_sent);
+      const tagCls = e.via === 'auto' ? 'ok' : (e.was_edited ? 'warn' : 'info');
+      return '<div class="log-row" style="grid-template-columns:auto 1fr;align-items:flex-start">'
+        + '<span class="log-lts">'+esc(shortTime(e.ts))+' <span class="pill '+tagCls+'">'+tag+'</span></span>'
+        + '<span class="log-ltxt"><b>س:</b> '+esc(e.guest_question||'')+'<br><b>ر:</b> '+esc(e.final_reply||'')+'</span>'
+        + '</div>';
+    }).join('');
+    const more = a.events.length > 6 ? '<div class="muted" style="text-align:center;padding:5px">+ '+(a.events.length-6)+'</div>' : '';
+    return '<div class="card" style="margin-bottom:10px;background:var(--surface-2)"><div style="font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between"><span>'+esc(a.unit)+'</span><span class="pill muted">'+a.count+'</span></div>'+events+more+'</div>';
+  }).join('');
 }
 
 function _fmtDistillTime(ts){
@@ -5423,6 +5709,7 @@ async def _api_claim(request):
     if e.get("claimed_by"):
         return _json({"error": f"already claimed by {e['claimed_by']}"}, 409)
     e["claimed_by"] = name
+    metric_bump("escalations_resolved")
     if e.get("conversation_id"):
         _claimed_convos.add(e["conversation_id"])
     log_event("escalation", f"استلام تصعيد (من اللوحة) بواسطة {name} · {e.get('unit','')}")
@@ -5874,6 +6161,78 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_metrics_daily(request):
+    """Return up to N days of daily counters + derived rates so the dashboard can
+    chart the assistant's improvement over time. ?days=30 by default."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        days = int(request.query.get("days", "30"))
+    except Exception:
+        days = 30
+    days = max(1, min(120, days))
+    today = datetime.now(TZ).date()
+    out = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        k = d.isoformat()
+        row = _daily_metrics.get(k, _new_day_row())
+        total = row.get("replies_total", 0)
+        manual_or_edit = row.get("replies_manual", 0) + row.get("replies_edited", 0) + row.get("replies_dashboard", 0)
+        auto_rate = round((row.get("replies_auto", 0) / total) * 100) if total else 0
+        edit_rate = round((row.get("replies_edited", 0) / manual_or_edit) * 100) if manual_or_edit else 0
+        drafts = row.get("drafts_made", 0)
+        esc_rate = round((row.get("escalations_created", 0) / drafts) * 100) if drafts else 0
+        avg_conf = round((row["confidence_sum"] / row["confidence_count"]) * 100) if row.get("confidence_count") else 0
+        out.append({
+            "date": k,
+            "replies_total": total,
+            "replies_auto": row.get("replies_auto", 0),
+            "replies_manual": row.get("replies_manual", 0),
+            "replies_edited": row.get("replies_edited", 0),
+            "replies_dashboard": row.get("replies_dashboard", 0),
+            "drafts_made": drafts,
+            "escalations_created": row.get("escalations_created", 0),
+            "escalations_resolved": row.get("escalations_resolved", 0),
+            "auto_rate": auto_rate,         # % of replies that auto-sent
+            "edit_rate": edit_rate,         # % of human-touched replies that needed editing
+            "escalation_rate": esc_rate,    # % of drafts that escalated
+            "avg_confidence": avg_conf,     # avg confidence across drafts that day
+            "apartments_touched": len(row.get("apartments_touched", [])),
+            "topics": row.get("topics", {}),
+        })
+    return _json({"days": out})
+
+async def _api_learning_today(request):
+    """Return today's learning events grouped by apartment so the page can show
+    'what changed today' instead of just the static summary text."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        window_days = int(request.query.get("days", "1"))
+    except Exception:
+        window_days = 1
+    window_days = max(1, min(30, window_days))
+    cutoff = datetime.now(TZ) - timedelta(days=window_days)
+    cutoff_iso = cutoff.isoformat(timespec="seconds")
+    by_apt = defaultdict(list)
+    for e in reversed(_learning_log):
+        ts = e.get("ts", "")
+        if ts < cutoff_iso:
+            break
+        unit = e.get("unit") or "—"
+        by_apt[unit].append({
+            "ts": ts, "via": e.get("via", ""),
+            "guest_question": (e.get("guest_question") or "")[:240],
+            "final_reply": (e.get("final_reply") or "")[:240],
+            "was_edited": e.get("was_edited", False),
+            "diff_ratio": e.get("diff_ratio", 0),
+        })
+    items = sorted([{"unit": u, "count": len(es), "events": es} for u, es in by_apt.items()],
+                   key=lambda x: -x["count"])
+    return _json({"window_days": window_days, "apartments": items,
+                  "total_events": sum(x["count"] for x in items)})
+
 async def _api_learning_edit(request):
     """POST {scope:'apartment'|'general', lid?, summary} — directly overwrite
     a distilled summary. Useful when the owner wants to add a fact the bot
@@ -5975,6 +6334,8 @@ async def start_web_server():
         app.router.add_post("/api/learning/edit", _api_learning_edit)
         app.router.add_post("/api/learning/bootstrap", _api_learning_bootstrap)
         app.router.add_get("/api/learning/bootstrap/status", _api_learning_bootstrap_status)
+        app.router.add_get("/api/metrics/daily", _api_metrics_daily)
+        app.router.add_get("/api/learning/today", _api_learning_today)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -6025,6 +6386,7 @@ async def _resolve_escalation(mid, esc, reason="رد عليه أحد المضي�
     if cid:
         _claimed_convos.add(cid)
     _escalations.pop(mid, None)
+    metric_bump("escalations_resolved")
     log_event("escalation", f"أُغلق تلقائياً ({reason}) · {esc.get('guest','')} · {esc.get('unit','')}")
     try:
         ch = bot.get_channel(esc.get("channel_id"))
@@ -6133,6 +6495,8 @@ def load_state():
         _apartment_learnings.update({int(k): v for k, v in _load_json("apartment_learnings.json", {}).items()})
         _general_learnings.update(_load_json("general_learnings.json", {"summary": "", "last_distilled": 0, "examples_count": 0}))
         _agreement_reminded = set(int(x) for x in _load_json("agreement_reminded.json", []) if str(x).strip())
+        _daily_metrics.clear()
+        _daily_metrics.update(_load_json("daily_metrics.json", {}))
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -6156,6 +6520,13 @@ def persist_state():
     _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
     _save_json("general_learnings.json", _general_learnings)
     _save_json("agreement_reminded.json", list(_agreement_reminded))
+    # cap to last 120 days to keep the JSON small
+    if len(_daily_metrics) > 120:
+        keep = sorted(_daily_metrics.keys())[-120:]
+        for k in list(_daily_metrics.keys()):
+            if k not in keep:
+                _daily_metrics.pop(k, None)
+    _save_json("daily_metrics.json", _daily_metrics)
 
 @tasks.loop(seconds=60)
 async def persist_loop():
