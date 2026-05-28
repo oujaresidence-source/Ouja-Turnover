@@ -33,6 +33,7 @@ import time
 import random
 import asyncio
 from collections import defaultdict, deque, OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
@@ -1521,7 +1522,8 @@ _catalog_units = []        # structured: [{id, name, beds, area, price, link}]
 _avail_cache = OrderedDict()
 _AVAIL_CACHE_MAX = 2000
 INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
-INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "25"))   # max units to date-check per msg
+INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "80"))   # max units to date-check per msg (parallel — covers full portfolio)
+INTEL_PARALLEL = int(os.environ.get("INTEL_PARALLEL", "12"))         # concurrent calendar lookups
 
 # Model for guest-facing drafts. Always premium by default — Haiku produces too many
 # generic/templated replies that ignore the actual context (e.g. saying "code arrives
@@ -1738,18 +1740,35 @@ def _unit_match_score(u, want):
 
 def enrich_catalog_for_dates(checkin, checkout, exclude_id=None, want=None):
     """Build a catalog block annotated with live availability + real total for the
-    guest's dates. If `want` is provided (criteria the guest mentioned), we sort
-    candidates by relevance first so the most-likely matches get the real-time
-    calendar lookup (and the irrelevant ones still show 'starting from')."""
+    guest's dates. With parallel calendar fetches (INTEL_PARALLEL workers) we can
+    now check the FULL portfolio in ~3-5 s instead of ~30 s sequential, so the
+    default cap (INTEL_MAX_CHECKS) is large enough to cover everything. `want`
+    still orders the output by relevance for the guest."""
     if not _catalog_units or not checkin or not checkout:
         return _catalog_text
     want = want or {}
-    # Rank candidates so the limited INTEL_MAX_CHECKS budget goes to the best matches.
     ranked = sorted(
         [u for u in _catalog_units if u.get("id") and u["id"] != exclude_id],
         key=lambda u: -_unit_match_score(u, want),
     )
-    lines, checked = [], 0
+    targets = ranked[:INTEL_MAX_CHECKS]
+    # ---- parallel calendar lookups (the old loop was sequential = ~30s for 69 units) ----
+    info_map = {}
+    if targets:
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futures = {ex.submit(unit_availability_price, u["id"], checkin, checkout): u["id"]
+                           for u in targets}
+                for fut in as_completed(futures):
+                    lid = futures[fut]
+                    try:
+                        info_map[lid] = fut.result()
+                    except Exception as e:
+                        print(f"enrich parallel error ({lid}):", e)
+                        info_map[lid] = None
+        except Exception as e:
+            print("enrich pool error:", e)
+    lines = []
     for u in ranked:
         base = [u["name"]]
         if u.get("beds"):     base.append(f"{u['beds']} غرفة نوم")
@@ -1757,10 +1776,7 @@ def enrich_catalog_for_dates(checkin, checkout, exclude_id=None, want=None):
         if u.get("capacity"): base.append(f"يستوعب {u['capacity']}")
         loc = " · ".join(filter(None, [u.get("neighbourhood"), u.get("area")])).strip(" ·")
         if loc: base.append(loc)
-        info = None
-        if checked < INTEL_MAX_CHECKS:
-            info = unit_availability_price(u["id"], checkin, checkout)
-            checked += 1
+        info = info_map.get(u["id"])
         if info and info.get("total") is not None:
             tag = "✅ متاحة لتواريخه" if info["available"] else "❌ غير متاحة لتواريخه"
             base.append(f"{tag} · {info['nights']} ليلة ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة)")
