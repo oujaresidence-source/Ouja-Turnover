@@ -32,6 +32,8 @@ import json
 import time
 import random
 import asyncio
+import hashlib
+import secrets as _secrets_mod
 from collections import defaultdict, deque, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, time as dt_time
@@ -5171,6 +5173,128 @@ def claude_analyze_review(review):
     out["generated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
     return out
 
+# ===================== USERS + ROLE-BASED PERMISSIONS =====================
+# Multi-user system layered on top of the legacy DASHBOARD_TOKEN. The legacy
+# token still works as a super-admin backdoor (for the owner). Anyone else
+# logs in with username + password → gets a session token stored client-side.
+#
+# Each user has:
+#   id          "u_<ts><rand>"
+#   name        display name (also used as login username)
+#   password_hash  PBKDF2 SHA-256, 100k rounds, salted
+#   role        "admin" | "ops" | "viewer"  (preset, but perms override)
+#   perms       per-tab matrix {tab: {read, write, create}}
+#   active      bool — disabled users can't log in
+#   created_at  ISO
+#   created_by  who added them
+_users = {}                 # user_id -> user dict
+_sessions = {}              # session_token -> {user_id, expires_at}
+
+_USER_TABS = [
+    "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
+    "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
+    "users", "quote", "weekly", "design",
+]
+
+def _default_perms(role):
+    """Build the starting permission matrix for a role."""
+    if role == "admin":
+        return {tab: {"read": True, "write": True, "create": True} for tab in _USER_TABS}
+    if role == "ops":
+        # ops can see + modify most things, but only create tickets/quotes
+        return {
+            tab: {
+                "read":   tab != "users",
+                "write":  tab not in ("users", "rev", "log"),
+                "create": tab in ("tickets", "quote", "weekly", "design"),
+            } for tab in _USER_TABS
+        }
+    # viewer: read-only on everything except admin tabs
+    return {
+        tab: {"read": tab not in ("users",), "write": False, "create": False}
+        for tab in _USER_TABS
+    }
+
+def _hash_password(pw):
+    salt = _secrets_mod.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt.encode("utf-8"), 100_000)
+    return f"{salt}${h.hex()}"
+
+def _verify_password(pw, stored):
+    try:
+        salt, hexed = stored.split("$", 1)
+        new = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"),
+                                  salt.encode("utf-8"), 100_000)
+        # constant-time compare
+        return hashlib.sha256(new.hex().encode()).digest() == hashlib.sha256(hexed.encode()).digest()
+    except Exception:
+        return False
+
+def _new_user_id():
+    return f"u_{int(time.time()*1000)}_{random.randint(100,999)}"
+
+def _new_session_token():
+    return _secrets_mod.token_urlsafe(32)
+
+def _user_create(name, password, role="viewer", perms=None, created_by="system"):
+    """Create a new user. Returns the user dict (without the password hash)."""
+    uid = _new_user_id()
+    u = {
+        "id": uid,
+        "name": (name or "").strip(),
+        "password_hash": _hash_password(password or ""),
+        "role": role if role in ("admin", "ops", "viewer") else "viewer",
+        "perms": perms or _default_perms(role),
+        "active": True,
+        "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        "created_by": created_by or "system",
+    }
+    _users[uid] = u
+    return u
+
+def _user_view(u):
+    """Public view (no password hash)."""
+    if not u:
+        return None
+    return {k: v for k, v in u.items() if k != "password_hash"}
+
+def _find_user_by_name(name):
+    if not name:
+        return None
+    name = name.strip().lower()
+    for u in _users.values():
+        if (u.get("name") or "").strip().lower() == name:
+            return u
+    return None
+
+def _auth_session(request):
+    """Look up the session by token. Returns the user dict (full) or None."""
+    token = request.query.get("token", "") or request.headers.get("X-Token", "")
+    if not token:
+        return None
+    sess = _sessions.get(token)
+    if not sess:
+        return None
+    if sess.get("expires_at", 0) < time.time():
+        _sessions.pop(token, None)
+        return None
+    u = _users.get(sess.get("user_id"))
+    if not u or not u.get("active"):
+        return None
+    return u
+
+def _user_can(request, tab, action="read"):
+    """Permission check. Legacy DASHBOARD_TOKEN is treated as super-admin."""
+    token = request.query.get("token", "") or request.headers.get("X-Token", "")
+    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+        return True
+    u = _auth_session(request)
+    if not u:
+        return False
+    if u.get("role") == "admin":
+        return True
+    return bool(((u.get("perms") or {}).get(tab) or {}).get(action))
+
 # ===================== REVIEWS (Hostaway + AI dispute/AAA) =====================
 # Per review:
 #   id          str (Hostaway review id)
@@ -6253,6 +6377,33 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ USERS (المستخدمون) ============ -->
+      <section class="view" id="view_users">
+        <div class="page-head">
+          <div>
+            <div class="page-title">👥 المستخدمون</div>
+            <div class="page-sub">إنشاء وإدارة الموظفين وصلاحياتهم</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="openUserModal()">➕ مستخدم جديد</button>
+            <button class="btn ghost sm" onclick="loadUsers()">↻</button>
+          </div>
+        </div>
+
+        <div class="page-help" data-help-key="users">
+          <button class="ph-x" onclick="dismissHelp('users')" title="إخفاء">×</button>
+          <div class="ph-t">👥 المستخدمون والصلاحيات</div>
+          <div class="ph-b">
+            أنشئ حسابات للموظفين هنا. لكل موظف ٣ مستويات صلاحيات لكل صفحة:
+            <b>قراءة</b> (يشوف) · <b>تعديل</b> (يغيّر) · <b>إنشاء</b> (يضيف جديد).
+            القوالب الجاهزة: <b>admin</b> (كل شي) · <b>ops</b> (تشغيل يومي بدون إعدادات) ·
+            <b>viewer</b> (مشاهد فقط).
+          </div>
+        </div>
+
+        <div id="usersBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ REVIEWS (المراجعات) ============ -->
       <section class="view" id="view_reviews">
         <div class="page-head">
@@ -6638,7 +6789,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -6830,7 +6981,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -7173,6 +7324,7 @@ const NAV = [
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
   {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
   {id:'reviews', ic:'⭐', tk:'reviews', badge:'reviews'},
+  {id:'users',   ic:'👥', tk:'users', adminOnly:true},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -7206,10 +7358,14 @@ function badgeCount(key){
 }
 function buildSideNav(){
   const el = document.getElementById('sideNav'); if(!el) return;
-  el.innerHTML = NAV.map(function(n){
-    const c = badgeCount(n.badge);
-    return '<a class="item'+(view===n.id?' on':'')+'" onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
-  }).join('');
+  // Filter adminOnly tabs based on D.me — legacy token users default to admin.
+  const me = (D.me && D.me.user) || {role:'admin'};
+  const isAdmin = me.role === 'admin';
+  el.innerHTML = NAV.filter(function(n){ return !(n.adminOnly && !isAdmin) })
+    .map(function(n){
+      const c = badgeCount(n.badge);
+      return '<a class="item'+(view===n.id?' on':'')+'" onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
+    }).join('');
 }
 function buildBottomNav(){
   const el = document.getElementById('bottomNav'); if(!el) return;
@@ -7352,6 +7508,7 @@ function go(id){
   if(id==='quality') loadQuality();
   if(id==='tickets') loadTickets();
   if(id==='reviews') loadReviews();
+  if(id==='users') loadUsers();
 }
 
 /* ============================================================
@@ -7364,6 +7521,9 @@ async function init(){
     document.getElementById('login').style.display='none';
     document.getElementById('app').style.display='block';
     applyTheme(); applyLang();
+    // Identify the current user (legacy super-admin token returns {role:'admin'})
+    try{ D.me = await api('/api/users/me'); }catch(_){ D.me = {user:{role:'admin'}}; }
+    buildSideNav();
     await loadAll();
     _applyHelpDismissals();
     maybeShowWelcome();
@@ -7989,6 +8149,208 @@ async function deleteTicket(tid){
   if(!confirm('متأكد تبي تحذف هذي التذكرة؟ ما يصير تراجع.')) return;
   const r = await post('/api/tickets/delete', {id:tid});
   if(r.ok){ toast('🗑 حُذفت'); closeTicketModal(); loadTickets(); }
+  else toast(r.error || 'خطأ');
+}
+
+/* ============== USERS (المستخدمون) ============== */
+const ROLE_LABEL = {admin:'مدير', ops:'تشغيل', viewer:'مشاهد'};
+const ROLE_LABEL_EN = {admin:'Admin', ops:'Operator', viewer:'Viewer'};
+const ROLE_PILL = {admin:'gold', ops:'info', viewer:'muted'};
+const TAB_LABEL = {
+  home:'الرئيسية', inbox:'الوارد', today:'اليوم', calendar:'التقويم',
+  pricing:'التسعير', strat:'الاستراتيجيات', clean:'التنظيف',
+  tickets:'الصيانة', reviews:'المراجعات', guests:'الضيوف',
+  quality:'الجودة', rev:'الإيرادات', learn:'التعلّم', log:'النشاط',
+  users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي',
+  design:'طلبات التصميم'
+};
+const TAB_LABEL_EN = {
+  home:'Home', inbox:'Inbox', today:'Today', calendar:'Calendar',
+  pricing:'Pricing', strat:'Strategies', clean:'Deep clean',
+  tickets:'Maintenance', reviews:'Reviews', guests:'Guests',
+  quality:'Quality', rev:'Revenue', learn:'Learning', log:'Activity',
+  users:'Users', quote:'Quotations', weekly:'Weekly report',
+  design:'Design requests'
+};
+
+async function loadUsers(){
+  const body = document.getElementById('usersBody'); if(body) body.innerHTML = '<div class="empty sk">—</div>';
+  try{ D.users = await api('/api/users/list'); }
+  catch(e){
+    if(body) body.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--red)">'
+      + 'ما عندك صلاحية الوصول لهذي الصفحة</div>';
+    return;
+  }
+  _renderUsersBody();
+}
+function _roleLabel(r){ return (L==='en' ? ROLE_LABEL_EN : ROLE_LABEL)[r] || r }
+function _tabLabel(tab){ return (L==='en' ? TAB_LABEL_EN : TAB_LABEL)[tab] || tab }
+
+function _renderUsersBody(){
+  const body = document.getElementById('usersBody'); if(!body) return;
+  const users = ((D.users||{}).users)||[];
+  if(!users.length){
+    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
+      + '<div style="font-size:32px;margin-bottom:8px">👥</div>'
+      + '<div class="muted">ما فيه مستخدمين بعد. اضغط <b>"مستخدم جديد"</b> فوق لإضافة أول حساب.</div>'
+      + '</div>';
+    return;
+  }
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">';
+  for(const u of users){
+    const dt = (u.created_at||'').slice(0,10);
+    html += '<div onclick="openUserModal(&#39;'+esc(u.id)+'&#39;)" style="background:var(--surface-2);padding:14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;transition:.12s" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">'
+      +   '<div style="font-weight:700;font-size:14px">'+esc(u.name)+(u.active?'':' <span class="pill muted" style="font-size:10px">⛔ موقّف</span>')+'</div>'
+      +   '<span class="pill '+(ROLE_PILL[u.role]||'info')+'">'+esc(_roleLabel(u.role))+'</span>'
+      + '</div>'
+      + '<div class="muted" style="font-size:11px;margin-bottom:6px">أضيف: '+esc(dt)+'</div>';
+    // Quick permission summary
+    const perms = u.perms || {};
+    let readN = 0, writeN = 0, createN = 0;
+    for(const k in perms){
+      if(perms[k].read) readN++;
+      if(perms[k].write) writeN++;
+      if(perms[k].create) createN++;
+    }
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10.5px">'
+      + '<span class="pill info">👁 '+readN+'</span>'
+      + '<span class="pill warn">✎ '+writeN+'</span>'
+      + '<span class="pill ok">➕ '+createN+'</span>'
+      + '</div></div>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+function _ensureUserModal(){
+  let ov = document.getElementById('userOverlay');
+  if(ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'userOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9997;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:14px';
+  ov.onclick = function(e){ if(e.target === ov) closeUserModal(); };
+  const box = document.createElement('div');
+  box.id = 'userModalBody';
+  box.style.cssText = 'background:var(--surface);padding:18px;border-radius:16px;width:580px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  return ov;
+}
+function closeUserModal(){ const ov=document.getElementById('userOverlay'); if(ov) ov.style.display='none'; }
+function openUserModal(uid){
+  _ensureUserModal();
+  const u = uid ? (((D.users||{}).users)||[]).find(x=>x.id===uid) : null;
+  _renderUserModal(u, !!uid);
+  document.getElementById('userOverlay').style.display = 'flex';
+}
+function _renderUserModal(u, isEdit){
+  const box = document.getElementById('userModalBody'); if(!box) return;
+  const tabs = ((D.users||{}).tabs)||['home','inbox','tickets','reviews'];
+  u = u || {role:'viewer', perms:{}, active:true};
+  const title = isEdit ? '✎ تعديل ' + esc(u.name||'') : '➕ مستخدم جديد';
+  let html =
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">'
+    +   '<div style="font-size:16px;font-weight:700">'+title+'</div>'
+    +   '<button onclick="closeUserModal()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:22px;padding:0 4px">×</button>'
+    + '</div>'
+    + '<div style="display:flex;flex-direction:column;gap:12px">'
+    +   '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">الاسم *</label>'
+    +     '<input id="uF_name" placeholder="فيصل" value="'+esc(u.name||'')+'" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">الدور</label>'
+    +       '<select id="uF_role" onchange="_uApplyRolePreset()" style="width:100%;height:38px;padding:0 10px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font-size:13px">'
+    +         '<option value="admin"'+(u.role==='admin'?' selected':'')+'>مدير (كل شي)</option>'
+    +         '<option value="ops"'+(u.role==='ops'?' selected':'')+'>تشغيل</option>'
+    +         '<option value="viewer"'+(u.role!=='admin'&&u.role!=='ops'?' selected':'')+'>مشاهد فقط</option>'
+    +       '</select></div>'
+    +     '<div><label style="font-size:11.5px;font-weight:600;color:var(--mut);display:block;margin-bottom:4px">'+(isEdit?'كلمة مرور جديدة (اختياري)':'كلمة المرور *')+'</label>'
+    +       '<input id="uF_pass" type="text" placeholder="٦ أحرف أو أكثر" style="width:100%;padding:9px 12px;height:38px;font-size:13px;border-radius:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)"></div>'
+    +   '</div>'
+    +   '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px">'
+    +     '<input type="checkbox" id="uF_active"'+(u.active!==false?' checked':'')+'> الحساب فعّال (لو شيلت العلامة، ما يقدر يدخل)</label></div>'
+    +   '<div>'
+    +     '<div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--gold)">🛡 الصلاحيات لكل صفحة</div>'
+    +     '<div style="background:var(--surface-2);border-radius:8px;padding:10px;max-height:280px;overflow-y:auto">'
+    +       '<table style="width:100%;font-size:12px"><thead><tr style="text-align:start"><th style="text-align:start;padding:4px">الصفحة</th><th style="padding:4px 8px;text-align:center;width:60px">👁 شوف</th><th style="padding:4px 8px;text-align:center;width:60px">✎ عدّل</th><th style="padding:4px 8px;text-align:center;width:60px">➕ أنشئ</th></tr></thead><tbody>';
+  for(const tab of tabs){
+    const p = (u.perms && u.perms[tab]) || {};
+    html += '<tr><td style="padding:5px 4px">'+esc(_tabLabel(tab))+'</td>'
+         +   '<td style="text-align:center"><input type="checkbox" id="uF_p_'+tab+'_r"'+(p.read?' checked':'')+'></td>'
+         +   '<td style="text-align:center"><input type="checkbox" id="uF_p_'+tab+'_w"'+(p.write?' checked':'')+'></td>'
+         +   '<td style="text-align:center"><input type="checkbox" id="uF_p_'+tab+'_c"'+(p.create?' checked':'')+'></td></tr>';
+  }
+  html += '</tbody></table></div></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:16px">'
+    +   '<button class="btn ghost sm" onclick="closeUserModal()" style="flex:1">إلغاء</button>';
+  if(isEdit){
+    html += '<button class="btn danger sm" onclick="deleteUser(&#39;'+esc(u.id)+'&#39;)" style="flex:0 0 auto;padding:0 14px">🗑 حذف</button>';
+  }
+  html += '<button class="btn primary sm" onclick="saveUser('+(isEdit?'&#39;'+esc(u.id)+'&#39;':'null')+')" style="flex:2">'+(isEdit?'💾 احفظ':'➕ أنشئ')+'</button>'
+    + '</div>';
+  box.innerHTML = html;
+}
+function _uApplyRolePreset(){
+  const role = (document.getElementById('uF_role')||{}).value;
+  const presets = {
+    admin: {read:true, write:true, create:true},
+    ops:   {read:true, write:true, create:false},
+    viewer:{read:true, write:false, create:false},
+  };
+  const p = presets[role] || presets.viewer;
+  const tabs = ((D.users||{}).tabs)||[];
+  for(const tab of tabs){
+    const r = document.getElementById('uF_p_'+tab+'_r');
+    const w = document.getElementById('uF_p_'+tab+'_w');
+    const c = document.getElementById('uF_p_'+tab+'_c');
+    // viewer hides users tab from non-admins
+    if(tab === 'users' && role !== 'admin'){
+      if(r) r.checked = false;
+      if(w) w.checked = false;
+      if(c) c.checked = false;
+      continue;
+    }
+    if(r) r.checked = p.read;
+    if(w) w.checked = p.write;
+    if(c) c.checked = p.create;
+  }
+}
+async function saveUser(uid){
+  const tabs = ((D.users||{}).tabs)||[];
+  function v(id){ const e=document.getElementById(id); return e ? e.value : '' }
+  function ck(id){ const e=document.getElementById(id); return e ? e.checked : false }
+  const name = v('uF_name').trim();
+  const role = v('uF_role');
+  const pw   = v('uF_pass').trim();
+  const active = ck('uF_active');
+  const perms = {};
+  for(const tab of tabs){
+    perms[tab] = {
+      read: ck('uF_p_'+tab+'_r'),
+      write: ck('uF_p_'+tab+'_w'),
+      create: ck('uF_p_'+tab+'_c'),
+    };
+  }
+  if(!name){ toast('اكتب الاسم'); return; }
+  if(!uid && pw.length < 6){ toast('كلمة المرور لازم ٦ أحرف أو أكثر'); return; }
+  let url, payload;
+  if(uid){
+    url = '/api/users/update';
+    payload = {id:uid, name:name, role:role, perms:perms, active:active};
+    if(pw) payload.password = pw;
+  } else {
+    url = '/api/users/create';
+    payload = {name:name, role:role, perms:perms, password:pw};
+  }
+  const r = await post(url, payload);
+  if(r.ok){ toast(uid?'✓ حُفظ':'➕ تم الإنشاء'); closeUserModal(); loadUsers(); }
+  else toast(r.error || 'خطأ');
+}
+async function deleteUser(uid){
+  if(!confirm('متأكد تبي تحذف هذا المستخدم؟ ما يصير تراجع.')) return;
+  const r = await post('/api/users/delete', {id:uid});
+  if(r.ok){ toast('🗑 حُذف'); closeUserModal(); loadUsers(); }
   else toast(r.error || 'خطأ');
 }
 
@@ -10183,8 +10545,24 @@ async function submit(){
 </html>"""
 
 def _dash_auth(request):
-    return bool(DASHBOARD_TOKEN) and (
-        request.query.get("token") or request.headers.get("X-Token", "")) == DASHBOARD_TOKEN
+    """Returns True if the request carries either:
+      • the legacy super-admin DASHBOARD_TOKEN, OR
+      • a valid (non-expired, active-user) session token from the users system.
+    Both are checked against `?token=...` query param OR the X-Token header."""
+    token = request.query.get("token") or request.headers.get("X-Token", "")
+    if not token:
+        return False
+    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+        return True
+    # Session token check
+    sess = _sessions.get(token)
+    if not sess:
+        return False
+    if sess.get("expires_at", 0) < time.time():
+        _sessions.pop(token, None)
+        return False
+    u = _users.get(sess.get("user_id"))
+    return bool(u and u.get("active"))
 
 def _json(data, status=200):
     return web.json_response(data, status=status,
@@ -11988,6 +12366,131 @@ async def _api_reviews_open_ticket(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "ticket": _ticket_view(t), "existing": False})
 
+# ===================== USERS + AUTH API =====================
+async def _api_auth_login(request):
+    """POST {username, password} → {ok:true, token, user}.
+    Token is a session token good for 30 days."""
+    b = await _read_body(request)
+    name = (b.get("username") or "").strip()
+    pw   = b.get("password") or ""
+    if not name or not pw:
+        return _json({"error": "username and password required"}, 400)
+    u = _find_user_by_name(name)
+    if not u or not u.get("active"):
+        return _json({"error": "invalid credentials"}, 401)
+    if not _verify_password(pw, u.get("password_hash", "")):
+        return _json({"error": "invalid credentials"}, 401)
+    tok = _new_session_token()
+    _sessions[tok] = {
+        "user_id": u["id"],
+        "expires_at": time.time() + 30 * 86400,
+    }
+    return _json({"ok": True, "token": tok, "user": _user_view(u)})
+
+async def _api_auth_logout(request):
+    token = request.query.get("token") or request.headers.get("X-Token", "")
+    if token:
+        _sessions.pop(token, None)
+    return _json({"ok": True})
+
+async def _api_users_me(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    token = request.query.get("token") or request.headers.get("X-Token", "")
+    if DASHBOARD_TOKEN and token == DASHBOARD_TOKEN:
+        # legacy super-admin — synthesise a fake admin user
+        return _json({"ok": True, "user": {"id": "owner", "name": "Owner",
+                                            "role": "admin",
+                                            "perms": _default_perms("admin")}})
+    u = _auth_session(request)
+    return _json({"ok": True, "user": _user_view(u)})
+
+async def _api_users_list(request):
+    if not _user_can(request, "users", "read"):
+        return _json({"error": "forbidden"}, 403)
+    items = [_user_view(u) for u in _users.values()]
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return _json({"users": items,
+                  "tabs": _USER_TABS,
+                  "roles": ["admin", "ops", "viewer"]})
+
+async def _api_users_create(request):
+    if not _user_can(request, "users", "create"):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    name = (b.get("name") or "").strip()
+    pw   = b.get("password") or ""
+    role = (b.get("role") or "viewer").strip()
+    perms = b.get("perms")  # optional override
+    if not name:
+        return _json({"error": "name required"}, 400)
+    if len(pw) < 6:
+        return _json({"error": "password must be at least 6 characters"}, 400)
+    if _find_user_by_name(name):
+        return _json({"error": "user with that name already exists"}, 409)
+    u = _user_create(name, pw, role=role, perms=perms,
+                     created_by=(b.get("by") or "admin"))
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"مستخدم جديد · {u['name']} ({u['role']})")
+    return _json({"ok": True, "user": _user_view(u)})
+
+async def _api_users_update(request):
+    """POST {id, name?, role?, perms?, active?, password?} (admin only)"""
+    if not _user_can(request, "users", "write"):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    uid = (b.get("id") or "").strip()
+    u = _users.get(uid)
+    if not u:
+        return _json({"error": "user not found"}, 404)
+    changed = []
+    for k in ("name", "role"):
+        if k in b and b[k] is not None and b[k] != u.get(k):
+            if k == "role" and b[k] not in ("admin", "ops", "viewer"):
+                continue
+            u[k] = b[k]
+            changed.append(k)
+    if "active" in b:
+        u["active"] = bool(b["active"])
+        changed.append("active")
+    if isinstance(b.get("perms"), dict):
+        # Sanitise: only allow known tabs and known actions
+        new_perms = {}
+        for tab in _USER_TABS:
+            cur = (b["perms"].get(tab) or {})
+            new_perms[tab] = {
+                "read":   bool(cur.get("read")),
+                "write":  bool(cur.get("write")),
+                "create": bool(cur.get("create")),
+            }
+        u["perms"] = new_perms
+        changed.append("perms")
+    if b.get("password"):
+        if len(b["password"]) < 6:
+            return _json({"error": "password must be at least 6 characters"}, 400)
+        u["password_hash"] = _hash_password(b["password"])
+        changed.append("password")
+    await asyncio.to_thread(persist_state)
+    if changed:
+        log_event("ops", f"مستخدم · تحديث {u.get('name','?')} · {', '.join(changed)}")
+    return _json({"ok": True, "user": _user_view(u)})
+
+async def _api_users_delete(request):
+    if not _user_can(request, "users", "write"):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    uid = (b.get("id") or "").strip()
+    u = _users.pop(uid, None)
+    if not u:
+        return _json({"error": "user not found"}, 404)
+    # invalidate any active sessions for this user
+    for tok, sess in list(_sessions.items()):
+        if sess.get("user_id") == uid:
+            _sessions.pop(tok, None)
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"مستخدم · حذف {u.get('name','?')}")
+    return _json({"ok": True})
+
 async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
     not the dashboard token — so the link can be shared with the cleaners safely."""
@@ -12435,6 +12938,14 @@ async def start_web_server():
         app.router.add_post("/api/reviews/open-ticket", _api_reviews_open_ticket)
         app.router.add_post("/api/reviews/translate", _api_reviews_translate)
         app.router.add_post("/api/reviews/bulk-analyze", _api_reviews_bulk_analyze)
+        # Auth + users (admin only beyond me/login/logout)
+        app.router.add_post("/api/auth/login", _api_auth_login)
+        app.router.add_post("/api/auth/logout", _api_auth_logout)
+        app.router.add_get("/api/users/me", _api_users_me)
+        app.router.add_get("/api/users/list", _api_users_list)
+        app.router.add_post("/api/users/create", _api_users_create)
+        app.router.add_post("/api/users/update", _api_users_update)
+        app.router.add_post("/api/users/delete", _api_users_delete)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -12749,6 +13260,10 @@ def load_state():
         for k, v in (_load_json("review_translations.json", {}) or {}).items():
             if isinstance(v, dict):
                 _review_translations[str(k)] = v
+        _users.clear()
+        for k, v in (_load_json("users.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _users[str(k)] = v
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -12797,6 +13312,8 @@ def persist_state():
     _save_json("review_ai.json", _review_ai_cache)
     _save_json("review_states.json", _review_states)
     _save_json("review_translations.json", _review_translations)
+    _save_json("users.json", _users)
+    # Sessions are intentionally NOT persisted — restarts force re-login
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
