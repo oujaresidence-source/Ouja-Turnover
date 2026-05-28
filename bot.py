@@ -5173,6 +5173,65 @@ def claude_analyze_review(review):
     out["generated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
     return out
 
+# ===================== WEEKLY REPORTS (التقرير الأسبوعي) =====================
+# Per-employee, per-week risk/challenge log for every apartment they cover.
+# Modelled on the standalone HTML the owner sent: status / risk / challenge /
+# plan / resolved / notes per apartment.
+_weekly_reports = {}   # report_id -> dict
+
+def _new_report_id():
+    return f"wr_{int(time.time()*1000)}_{random.randint(100,999)}"
+
+# ===================== DESIGN REQUESTS (Petunia) =====================
+# Full design/furniture brief sent to the contractor (Petunia in the owner's
+# case). Captures client + unit + entry method + style + budget + per-room
+# requirements.
+_design_requests = {}   # design_id -> dict
+
+def _new_design_id():
+    return f"dr_{int(time.time()*1000)}_{random.randint(100,999)}"
+
+def _new_design_ref():
+    """OJA-YYYY-XXXX auto-incrementing within the year."""
+    now = datetime.now(TZ)
+    prefix = f"OJA-{now.year}-"
+    used = set()
+    for d in _design_requests.values():
+        r = d.get("ref", "")
+        if r.startswith(prefix):
+            try:
+                used.add(int(r.rsplit("-", 1)[-1]))
+            except Exception:
+                pass
+    nxt = max(used) + 1 if used else 1
+    return f"{prefix}{nxt:04d}"
+
+# ===================== QUOTATIONS (عرض سعر) =====================
+# Print-ready quotes for clients. Each one has line items + service-fee % +
+# VAT toggle + signature. Modelled on the standalone HTML the owner sent.
+_quotes = {}   # quote_id -> dict
+_QUOTE_SEQ = 0
+
+def _new_quote_id():
+    global _QUOTE_SEQ
+    _QUOTE_SEQ += 1
+    return f"q_{int(time.time()*1000)}_{_QUOTE_SEQ:04d}"
+
+def _new_quote_number():
+    """OJ-YYYYMM-XXX (auto-incrementing seq within the month)."""
+    now = datetime.now(TZ)
+    prefix = f"OJ-{now.year}{now.month:02d}-"
+    used = set()
+    for q in _quotes.values():
+        n = q.get("number", "")
+        if n.startswith(prefix):
+            try:
+                used.add(int(n.rsplit("-", 1)[-1]))
+            except Exception:
+                pass
+    nxt = max(used) + 1 if used else 1
+    return f"{prefix}{nxt:03d}"
+
 # ===================== USERS + ROLE-BASED PERMISSIONS =====================
 # Multi-user system layered on top of the legacy DASHBOARD_TOKEN. The legacy
 # token still works as a super-admin backdoor (for the owner). Anyone else
@@ -6377,6 +6436,77 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ QUOTATIONS (عرض سعر) ============ -->
+      <section class="view" id="view_quote">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📄 عروض الأسعار</div>
+            <div class="page-sub">منشئ عروض أسعار جاهزة للطباعة</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="openQuoteEditor()">➕ عرض سعر جديد</button>
+            <button class="btn ghost sm" onclick="loadQuotes()">↻</button>
+          </div>
+        </div>
+        <div class="page-help" data-help-key="quote">
+          <button class="ph-x" onclick="dismissHelp('quote')" title="إخفاء">×</button>
+          <div class="ph-t">📄 عرض السعر</div>
+          <div class="ph-b">
+            اضغط <b>"عرض سعر جديد"</b> تفتح نموذج تعبئة (بيانات العميل، البنود، الضريبة، رسوم خدمة، توقيع).
+            تقدر تحفظ كمسودة وترجع تعدلها، وتطبع PDF نظيف بضغطة وحدة. كل عرض يحفظ ويسجل في النشاط.
+          </div>
+        </div>
+        <div id="quotesBody"><div class="empty sk">—</div></div>
+      </section>
+
+      <!-- ============ WEEKLY REPORT (التقرير الأسبوعي) ============ -->
+      <section class="view" id="view_weekly">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📊 التقرير الأسبوعي</div>
+            <div class="page-sub">تقرير الموظف عن المخاطر والتحديات لكل شقة</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="openWeeklyEditor()">➕ تقرير جديد</button>
+            <button class="btn ghost sm" onclick="loadWeekly()">↻</button>
+          </div>
+        </div>
+        <div class="page-help" data-help-key="weekly">
+          <button class="ph-x" onclick="dismissHelp('weekly')" title="إخفاء">×</button>
+          <div class="ph-t">📊 التقرير الأسبوعي</div>
+          <div class="ph-b">
+            كل موظف يعبّي تقريره الأسبوعي عن الشقق المسؤول عنها — <b>الخطر</b>،
+            <b>التحدي</b>، <b>خطة الاستجابة</b>، و<b>المعالجة</b>. التقرير يطبع جاهز
+            ويحفظ في السجل عشان تقارنه بالأسابيع الجاية.
+          </div>
+        </div>
+        <div id="weeklyBody"><div class="empty sk">—</div></div>
+      </section>
+
+      <!-- ============ DESIGN REQUESTS (Petunia) ============ -->
+      <section class="view" id="view_design">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🛋️ طلبات التصميم والتأثيث</div>
+            <div class="page-sub">نموذج طلب تصميم/تأثيث مقدم لشركة التنفيذ</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="openDesignEditor()">➕ طلب جديد</button>
+            <button class="btn ghost sm" onclick="loadDesigns()">↻</button>
+          </div>
+        </div>
+        <div class="page-help" data-help-key="design">
+          <button class="ph-x" onclick="dismissHelp('design')" title="إخفاء">×</button>
+          <div class="ph-t">🛋️ طلبات التصميم</div>
+          <div class="ph-b">
+            نموذج طلب كامل لشركات التصميم: بيانات العميل، بيانات الوحدة، طريقة الدخول،
+            الميزانية، النمط، تفاصيل كل غرفة، ومدير المشروع. يطبع PDF احترافي
+            ويحفظ في السجل.
+          </div>
+        </div>
+        <div id="designsBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ USERS (المستخدمون) ============ -->
       <section class="view" id="view_users">
         <div class="page-head">
@@ -6789,7 +6919,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -6981,7 +7111,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -7325,6 +7455,9 @@ const NAV = [
   {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
   {id:'reviews', ic:'⭐', tk:'reviews', badge:'reviews'},
   {id:'users',   ic:'👥', tk:'users', adminOnly:true},
+  {id:'quote',   ic:'📄', tk:'quote'},
+  {id:'weekly',  ic:'📊', tk:'weekly'},
+  {id:'design',  ic:'🛋️', tk:'design'},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -7509,6 +7642,9 @@ function go(id){
   if(id==='tickets') loadTickets();
   if(id==='reviews') loadReviews();
   if(id==='users') loadUsers();
+  if(id==='quote') loadQuotes();
+  if(id==='weekly') loadWeekly();
+  if(id==='design') loadDesigns();
 }
 
 /* ============================================================
@@ -8150,6 +8286,537 @@ async function deleteTicket(tid){
   const r = await post('/api/tickets/delete', {id:tid});
   if(r.ok){ toast('🗑 حُذفت'); closeTicketModal(); loadTickets(); }
   else toast(r.error || 'خطأ');
+}
+
+/* ============== QUOTATIONS (عروض الأسعار) ============== */
+const QUOTE_LS = 'ouja:lastQuote';
+let _qDraft = null;
+
+async function loadQuotes(){
+  const body = document.getElementById('quotesBody'); if(body) body.innerHTML = '<div class="empty sk">—</div>';
+  try { D.quotes = await api('/api/quotes/list'); } catch(_){ D.quotes = {quotes:[]} }
+  _renderQuotesBody();
+}
+function _renderQuotesBody(){
+  const body = document.getElementById('quotesBody'); if(!body) return;
+  const items = ((D.quotes||{}).quotes)||[];
+  if(!items.length){
+    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
+      + '<div style="font-size:32px;margin-bottom:8px">📄</div>'
+      + '<div class="muted">ما فيه عروض أسعار. اضغط "<b>عرض سعر جديد</b>" أعلاه.</div>'
+      + '</div>';
+    return;
+  }
+  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for(const q of items){
+    h += '<div onclick="openQuoteEditor(&#39;'+esc(q.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+      + '<div><div class="strong" style="font-size:13.5px">'+esc(q.number||'')+' · '+esc(q.client_name||'—')+'</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(q.date||'')+' · '+esc(q.client_phone||'')+'</div></div>'
+      + '<div style="text-align:end"><div style="font-weight:700;color:var(--gold);font-size:14px">'+fmt(q.grand_total||0)+' ر.س</div>'
+      + '<div class="muted" style="font-size:10.5px">'+esc((q.created_at||'').slice(0,10))+'</div></div>'
+      + '</div>';
+  }
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+function _ensureQuoteOv(){
+  let ov = document.getElementById('quoteOverlay');
+  if(ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'quoteOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9996;padding:18px;overflow-y:auto';
+  ov.innerHTML = '<div id="quoteEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
+  document.body.appendChild(ov);
+  return ov;
+}
+function closeQuote(){ const ov=document.getElementById('quoteOverlay'); if(ov) ov.style.display='none'; }
+
+async function openQuoteEditor(qid){
+  _ensureQuoteOv();
+  let q;
+  if(qid){
+    try{ const r = await api('/api/quotes/get?id='+encodeURIComponent(qid)); q = r.quote }catch(_){ q = null }
+  }
+  if(!q){
+    const today = new Date().toISOString().slice(0,10);
+    q = {id:null, number:'', date:today, client_name:'', client_phone:'', client_company:'',
+         client_email:'', items:[{description:'',qty:1,price:0},{description:'',qty:1,price:0}],
+         service_rate:5, vat_rate:15, vat_on:true, notes:'', signature_name:''};
+  }
+  _qDraft = q;
+  _renderQuoteEditor();
+  document.getElementById('quoteOverlay').style.display = 'block';
+}
+
+function _renderQuoteEditor(){
+  const q = _qDraft || {};
+  const items = q.items || [];
+  let rows = '';
+  for(let i=0; i<items.length; i++){
+    const it = items[i]; const total = (parseFloat(it.qty||0))*(parseFloat(it.price||0));
+    rows += '<tr><td style="text-align:center;color:var(--mut);font-size:11px">'+(i+1)+'</td>'
+      + '<td><input value="'+esc(it.description||'')+'" oninput="_qSet('+i+',\\'description\\',this.value)" placeholder="وصف البند" style="width:100%;padding:6px;background:transparent;border:none;color:var(--text);font-size:12.5px"></td>'
+      + '<td style="width:70px"><input type="number" value="'+(it.qty||0)+'" oninput="_qSet('+i+',\\'qty\\',this.value);_qRecalc()" style="width:100%;padding:6px;text-align:center;background:transparent;border:none;color:var(--text);font-size:12.5px"></td>'
+      + '<td style="width:100px"><input type="number" step="0.01" value="'+(it.price||0)+'" oninput="_qSet('+i+',\\'price\\',this.value);_qRecalc()" style="width:100%;padding:6px;text-align:center;background:transparent;border:none;color:var(--text);font-size:12.5px"></td>'
+      + '<td style="width:90px;text-align:center;color:var(--gold);font-weight:600;font-size:12.5px">'+fmt(total)+'</td>'
+      + '<td style="width:30px"><button onclick="_qDel('+i+')" style="background:transparent;border:none;color:var(--mut);cursor:pointer">×</button></td></tr>';
+  }
+  const html =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    + '<div style="font-size:18px;font-weight:700">📄 '+(q.id?'تعديل':'إنشاء')+' عرض سعر</div>'
+    + '<button onclick="closeQuote()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px;padding:0 6px">×</button>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">رقم العرض</label>'
+    +     '<input id="qF_number" value="'+esc(q.number||'')+'" placeholder="OJ-202605-001" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">التاريخ</label>'
+    +     '<input id="qF_date" type="date" value="'+esc(q.date||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">العميل *</label>'
+    +     '<input id="qF_client_name" value="'+esc(q.client_name||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">الجوال</label>'
+    +     '<input id="qF_client_phone" value="'+esc(q.client_phone||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;direction:ltr;text-align:end"></div>'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">الشركة</label>'
+    +     '<input id="qF_client_company" value="'+esc(q.client_company||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
+    +   '<div style="grid-column:span 3"><label class="muted" style="font-size:11px;font-weight:600">الإيميل</label>'
+    +     '<input id="qF_client_email" value="'+esc(q.client_email||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;direction:ltr;text-align:end"></div>'
+    + '</div>'
+    + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:14px">'
+    +   '<div style="font-weight:700;font-size:13px;margin-bottom:8px;color:var(--gold)">📋 البنود</div>'
+    +   '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    +   '<thead><tr style="border-bottom:1px solid var(--border);color:var(--mut);font-size:11px">'
+    +     '<th style="padding:6px">#</th><th style="text-align:start;padding:6px">الوصف</th>'
+    +     '<th style="padding:6px">العدد</th><th style="padding:6px">السعر</th>'
+    +     '<th style="padding:6px">الإجمالي</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +   '<button onclick="_qAddRow()" style="margin-top:10px;padding:8px 14px;background:transparent;border:1.5px dashed var(--gold);color:var(--gold);border-radius:6px;cursor:pointer;font-size:12px;width:100%">+ إضافة بند</button>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px">'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">ملاحظات</label>'
+    +     '<textarea id="qF_notes" rows="4" placeholder="شروط، ضمانات، فترة التسليم…" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:inherit;resize:vertical">'+esc(q.notes||'')+'</textarea></div>'
+    +   '<div style="background:var(--surface-2);padding:12px;border-radius:8px">'
+    +     '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span class="muted">المجموع</span><span id="qV_sub">0.00</span></div>'
+    +     '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;align-items:center"><span class="muted">رسوم خدمة <input id="qF_service_rate" type="number" value="'+(q.service_rate||5)+'" oninput="_qRecalc()" style="width:48px;padding:2px 4px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;text-align:center"> ٪</span><span id="qV_srv">0.00</span></div>'
+    +     '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;align-items:center"><span class="muted"><label style="cursor:pointer"><input id="qF_vat_on" type="checkbox" '+(q.vat_on!==false?'checked':'')+' onchange="_qRecalc()"> ضريبة <input id="qF_vat_rate" type="number" value="'+(q.vat_rate||15)+'" oninput="_qRecalc()" style="width:42px;padding:2px 4px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;text-align:center"> ٪</label></span><span id="qV_vat">0.00</span></div>'
+    +     '<div style="display:flex;justify-content:space-between;padding:10px 0 0;border-top:1px solid var(--border);margin-top:6px;font-weight:700;color:var(--gold)"><span>الإجمالي</span><span id="qV_grand">0.00 ر.س</span></div>'
+    +   '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +   '<button onclick="closeQuote()" class="btn ghost sm" style="flex:1">إلغاء</button>'
+    +   (q.id ? '<button onclick="deleteQuote(&#39;'+esc(q.id)+'&#39;)" class="btn danger sm" style="padding:0 14px">🗑 حذف</button>' : '')
+    +   '<button onclick="printQuote()" class="btn ghost sm" style="flex:1">🖨 طباعة</button>'
+    +   '<button onclick="saveQuote()" class="btn primary sm" style="flex:2">💾 احفظ</button>'
+    + '</div>';
+  document.getElementById('quoteEditorBody').innerHTML = html;
+  _qRecalc();
+}
+function _qSet(i, k, v){ if(_qDraft && _qDraft.items[i]) _qDraft.items[i][k] = v; }
+function _qAddRow(){ if(!_qDraft) return; _qDraft.items.push({description:'',qty:1,price:0}); _renderQuoteEditor(); }
+function _qDel(i){ if(!_qDraft) return; _qDraft.items.splice(i,1); _renderQuoteEditor(); }
+function _qRecalc(){
+  if(!_qDraft) return;
+  let sub = 0;
+  for(const it of _qDraft.items){ sub += (parseFloat(it.qty||0))*(parseFloat(it.price||0)); }
+  const sr = parseFloat((document.getElementById('qF_service_rate')||{}).value || 5);
+  const vr = parseFloat((document.getElementById('qF_vat_rate')||{}).value || 15);
+  const vo = (document.getElementById('qF_vat_on')||{}).checked;
+  const srv = sub * sr/100;
+  const vat = vo ? (sub+srv) * vr/100 : 0;
+  const gd = sub+srv+vat;
+  const s1=document.getElementById('qV_sub'); if(s1) s1.textContent = fmt(sub);
+  const s2=document.getElementById('qV_srv'); if(s2) s2.textContent = fmt(srv);
+  const s3=document.getElementById('qV_vat'); if(s3) s3.textContent = fmt(vat);
+  const s4=document.getElementById('qV_grand'); if(s4) s4.textContent = fmt(gd)+' ر.س';
+}
+async function saveQuote(){
+  if(!_qDraft) return;
+  function v(id){ const e=document.getElementById(id); return e ? e.value : '' }
+  function ck(id){ const e=document.getElementById(id); return e ? e.checked : false }
+  const payload = {
+    id: _qDraft.id || '',
+    number: v('qF_number'), date: v('qF_date'),
+    client_name: v('qF_client_name'), client_phone: v('qF_client_phone'),
+    client_company: v('qF_client_company'), client_email: v('qF_client_email'),
+    items: _qDraft.items, notes: v('qF_notes'),
+    service_rate: parseFloat(v('qF_service_rate') || 5),
+    vat_rate: parseFloat(v('qF_vat_rate') || 15),
+    vat_on: ck('qF_vat_on'),
+  };
+  if(!payload.client_name){ toast('اكتب اسم العميل'); return; }
+  const r = await post('/api/quotes/save', payload);
+  if(r.ok){ toast('💾 حُفظ'); _qDraft = r.quote; closeQuote(); loadQuotes(); }
+  else toast(r.error || 'خطأ');
+}
+async function deleteQuote(qid){
+  if(!confirm('حذف عرض السعر؟')) return;
+  const r = await post('/api/quotes/delete', {id:qid});
+  if(r.ok){ toast('🗑 حُذف'); closeQuote(); loadQuotes(); }
+}
+function printQuote(){
+  if(!_qDraft) return;
+  const q = _qDraft;
+  _qRecalc();
+  const sub = parseFloat((document.getElementById('qV_sub')||{}).textContent || 0);
+  const srv = parseFloat((document.getElementById('qV_srv')||{}).textContent || 0);
+  const vat = parseFloat((document.getElementById('qV_vat')||{}).textContent || 0);
+  const grand = sub+srv+vat;
+  let rows = '';
+  q.items.forEach((it,i)=>{
+    const total = (parseFloat(it.qty||0))*(parseFloat(it.price||0));
+    rows += '<tr><td style="text-align:center;color:#888">'+(i+1)+'</td><td>'+(it.description||'')+'</td><td style="text-align:center">'+(it.qty||0)+'</td><td style="text-align:center">'+fmt(it.price||0)+'</td><td style="text-align:center;font-weight:600">'+fmt(total)+'</td></tr>';
+  });
+  const w = window.open('', '_blank');
+  w.document.write('<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>'+esc(q.number||'Quote')+'</title>'
+    +'<style>body{font-family:Tahoma,Arial,sans-serif;background:#fff;color:#222;padding:30px;max-width:860px;margin:auto;line-height:1.6}'
+    +'.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c9a96e;padding-bottom:16px;margin-bottom:24px}'
+    +'.h .l{font-size:28px;font-weight:800}.h .l .sub{font-size:11px;color:#888;font-weight:400;letter-spacing:2px;margin-top:4px}'
+    +'.h .r{text-align:start}.h .r .t{font-size:20px;font-weight:300;letter-spacing:4px}.h .r .meta{margin-top:10px;font-size:12px}'
+    +'.box{background:#faf8f3;padding:12px 16px;border-radius:6px;margin-bottom:20px}'
+    +'.box b{color:#c9a96e;font-size:11px;text-transform:uppercase;letter-spacing:1.5px}'
+    +'table{width:100%;border-collapse:collapse;margin-bottom:20px}th{background:#222;color:#fff;padding:10px;font-weight:600;font-size:11px;letter-spacing:1px}'
+    +'td{padding:10px;border-bottom:1px solid #eee;font-size:13px}.tt{margin-top:30px;text-align:end;font-size:14px}'
+    +'.tt .row{display:flex;justify-content:flex-end;gap:30px;padding:6px 0}.tt .grand{background:#222;color:#fff;padding:14px 20px;border-radius:6px;display:inline-block;font-size:16px;font-weight:700;margin-top:10px}'
+    +'.sig{margin-top:60px;border-top:1px solid #999;padding-top:6px;width:240px;font-size:11px;color:#666}'
+    +'@media print{body{padding:0}@page{margin:1cm}}</style></head><body>'
+    +'<div class="h"><div class="l">عوجا ريزيدنس<div class="sub">OUJA RESIDENCE</div></div>'
+    +'<div class="r"><div class="t">QUOTATION</div><div style="font-size:12px;color:#888;margin-top:2px">عرض سعر</div>'
+    +'<div class="meta">رقم: <b>'+esc(q.number||'')+'</b><br>التاريخ: '+esc(q.date||'')+'</div></div></div>'
+    +'<div class="box"><b>بيانات العميل</b><div style="margin-top:6px">'+esc(q.client_name||'—')
+    +(q.client_phone?'<br>'+esc(q.client_phone):'')+(q.client_company?'<br>'+esc(q.client_company):'')
+    +(q.client_email?'<br>'+esc(q.client_email):'')+'</div></div>'
+    +'<table><thead><tr><th style="width:36px">#</th><th>الوصف</th><th style="width:60px">العدد</th><th style="width:80px">السعر</th><th style="width:90px">الإجمالي</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +(q.notes?'<div class="box"><b>ملاحظات</b><div style="margin-top:6px;white-space:pre-wrap">'+esc(q.notes)+'</div></div>':'')
+    +'<div class="tt"><div class="row"><span>المجموع:</span><span>'+fmt(sub)+' ر.س</span></div>'
+    +'<div class="row"><span>رسوم خدمة:</span><span>'+fmt(srv)+' ر.س</span></div>'
+    +'<div class="row"><span>ضريبة:</span><span>'+fmt(vat)+' ر.س</span></div>'
+    +'<div class="grand">الإجمالي: '+fmt(grand)+' ر.س</div></div>'
+    +'<div class="sig">التوقيع المعتمد</div>'
+    +'<script>setTimeout(function(){window.print()},400)<\/script></body></html>');
+  w.document.close();
+}
+
+/* ============== WEEKLY REPORT (التقرير الأسبوعي) ============== */
+const WR_RISKS = ["لا يوجد خطر","رائحة الحمام","مشكلة نظافة","تقييمات منخفضة","مشكلة سخان","مشكلة مكيف","مشكلة كهرباء","تسريب مياه","حشرات","رائحة دخان","مشكلة مفارش","مشكلة أبواب","مغلقة للصيانة","عدم توفير مستلزمات","صوت مزعج"];
+const WR_CHALLENGES = ["لا يوجد تحدي","رفع التقييمات","تحسين النظافة","تغيير المفارش","رائحة الشقة","صيانة دورات المياه","توفير مستلزمات","مشكلة واي فاي","ديب كلين للشقة","غسيل كنب"];
+const WR_STATUS = ["ممتاز","فوق المتوسط","متوسط","سيئ"];
+const WR_PLAN = ["سريعة","ممتازة","متوسطة","لا يوجد","تم الحل","تم التواصل مع الصيانة","تم تغيير شركة التنظيف","تم إرسال فني","جاري المتابعة"];
+const WR_RESOLVED = ["نعم","لا","في التقدم"];
+let _wrDraft = null;
+
+async function loadWeekly(){
+  const body = document.getElementById('weeklyBody'); if(body) body.innerHTML = '<div class="empty sk">—</div>';
+  try { D.weekly = await api('/api/weekly/list'); } catch(_){ D.weekly = {reports:[]} }
+  _renderWeeklyBody();
+}
+function _renderWeeklyBody(){
+  const body = document.getElementById('weeklyBody'); if(!body) return;
+  const items = ((D.weekly||{}).reports)||[];
+  if(!items.length){
+    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">📊</div><div class="muted">ما فيه تقارير أسبوعية بعد. اضغط "<b>تقرير جديد</b>" أعلاه.</div></div>';
+    return;
+  }
+  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for(const r of items){
+    h += '<div onclick="openWeeklyEditor(&#39;'+esc(r.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+      + '<div><div class="strong" style="font-size:13.5px">📅 '+esc(r.date||'')+' · '+esc(r.employee||'—')+'</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+(r.apt_count||0)+' شقة</div></div>'
+      + '<div class="muted" style="font-size:10.5px">'+esc((r.created_at||'').slice(0,16))+'</div></div>';
+  }
+  h += '</div>';
+  body.innerHTML = h;
+}
+function _ensureWeeklyOv(){
+  let ov = document.getElementById('weeklyOverlay'); if(ov) return ov;
+  ov = document.createElement('div'); ov.id='weeklyOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9995;padding:18px;overflow-y:auto';
+  ov.innerHTML = '<div id="weeklyEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
+  document.body.appendChild(ov);
+  return ov;
+}
+function closeWeekly(){ const ov=document.getElementById('weeklyOverlay'); if(ov) ov.style.display='none'; }
+async function openWeeklyEditor(rid){
+  _ensureWeeklyOv();
+  let r;
+  if(rid){ try{ const x=await api('/api/weekly/get?id='+encodeURIComponent(rid)); r=x.report }catch(_){ r=null } }
+  if(!r){
+    const today = new Date().toISOString().slice(0,10);
+    r = {id:null, employee:'', date:today, apartments:[]};
+  }
+  _wrDraft = r;
+  _renderWeeklyEditor();
+  document.getElementById('weeklyOverlay').style.display = 'block';
+}
+function _renderWeeklyEditor(){
+  const r = _wrDraft || {};
+  const apts = r.apartments || [];
+  let aptHtml = '';
+  for(let i=0; i<apts.length; i++){
+    aptHtml += _wrRenderApt(i, apts[i]);
+  }
+  const html =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    + '<div style="font-size:18px;font-weight:700">📊 '+(r.id?'تعديل':'إنشاء')+' تقرير أسبوعي</div>'
+    + '<button onclick="closeWeekly()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px;padding:0 6px">×</button>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">الموظف *</label>'
+    +     '<input id="wrF_employee" value="'+esc(r.employee||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
+    +   '<div><label class="muted" style="font-size:11px;font-weight:600">التاريخ</label>'
+    +     '<input id="wrF_date" type="date" value="'+esc(r.date||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
+    + '</div>'
+    + '<div style="margin-bottom:14px;display:flex;gap:8px"><input id="wrF_newApt" placeholder="اسم الشقة (مثل: MS5 202)" style="flex:1;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'
+    + '<button onclick="_wrAddApt()" class="btn primary sm">+ شقة</button></div>'
+    + '<div id="wrApts">'+aptHtml+'</div>'
+    + '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'
+    +   '<button onclick="closeWeekly()" class="btn ghost sm" style="flex:1">إلغاء</button>'
+    +   (r.id ? '<button onclick="deleteWeekly(&#39;'+esc(r.id)+'&#39;)" class="btn danger sm" style="padding:0 14px">🗑 حذف</button>' : '')
+    +   '<button onclick="printWeekly()" class="btn ghost sm" style="flex:1">🖨 طباعة</button>'
+    +   '<button onclick="saveWeekly()" class="btn primary sm" style="flex:2">💾 احفظ</button>'
+    + '</div>';
+  document.getElementById('weeklyEditorBody').innerHTML = html;
+}
+function _wrRenderApt(i, apt){
+  function chips(name, opts, sel){
+    return opts.map(o=>'<button onclick="_wrToggle('+i+',\\''+name+'\\','+JSON.stringify(o).replace(/"/g,'&quot;')+')" style="padding:4px 10px;border-radius:99px;border:1px solid '+(sel&&sel.indexOf(o)>=0?'var(--gold)':'var(--border)')+';background:'+(sel&&sel.indexOf(o)>=0?'var(--gold-tint)':'transparent')+';color:var(--text);font-size:11px;cursor:pointer">'+o+'</button>').join(' ');
+  }
+  function sel(name, opts, cur){
+    let h='<select onchange="_wrSet('+i+',\\''+name+'\\',this.value)" style="padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">';
+    h+='<option value="">—</option>';
+    opts.forEach(o=>h+='<option value="'+esc(o)+'"'+(cur===o?' selected':'')+'>'+o+'</option>');
+    h+='</select>'; return h;
+  }
+  return '<div style="background:var(--surface-2);padding:12px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    + '<div class="strong" style="font-size:13.5px">🏠 '+esc(apt.name||'')+'</div>'
+    + '<button onclick="_wrDelApt('+i+')" style="background:transparent;border:none;color:var(--red);cursor:pointer">×</button></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'
+    + '<div><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">الحالة</div>'+sel('status', WR_STATUS, apt.status)+'</div>'
+    + '<div><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">تمت المعالجة</div>'+sel('resolved', WR_RESOLVED, apt.resolved)+'</div></div>'
+    + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">الخطر</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('risks', WR_RISKS, apt.risks)+'</div></div>'
+    + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">التحدي</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('challenges', WR_CHALLENGES, apt.challenges)+'</div></div>'
+    + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">خطة الاستجابة</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('plan', WR_PLAN, apt.plan)+'</div></div>'
+    + '</div>';
+}
+function _wrAddApt(){
+  if(!_wrDraft) return;
+  const inp = document.getElementById('wrF_newApt'); const nm = (inp.value||'').trim();
+  if(!nm) return;
+  _wrDraft.apartments = _wrDraft.apartments || [];
+  _wrDraft.apartments.push({name:nm, status:'', risks:[], challenges:[], plan:[], resolved:'', comments:[]});
+  inp.value = ''; _renderWeeklyEditor();
+}
+function _wrDelApt(i){ if(_wrDraft){ _wrDraft.apartments.splice(i,1); _renderWeeklyEditor(); } }
+function _wrToggle(i, key, val){
+  if(!_wrDraft) return;
+  const a = _wrDraft.apartments[i]; if(!a) return;
+  a[key] = a[key] || [];
+  const idx = a[key].indexOf(val);
+  if(idx>=0) a[key].splice(idx,1); else a[key].push(val);
+  _renderWeeklyEditor();
+}
+function _wrSet(i, key, val){ if(_wrDraft && _wrDraft.apartments[i]) _wrDraft.apartments[i][key] = val; }
+async function saveWeekly(){
+  if(!_wrDraft) return;
+  function v(id){const e=document.getElementById(id); return e?e.value:'' }
+  const payload = {id:_wrDraft.id||'', employee:v('wrF_employee'), date:v('wrF_date'), apartments:_wrDraft.apartments||[]};
+  if(!payload.employee){ toast('اكتب اسم الموظف'); return; }
+  const r = await post('/api/weekly/save', payload);
+  if(r.ok){ toast('💾 حُفظ'); _wrDraft = r.report; closeWeekly(); loadWeekly(); }
+  else toast(r.error || 'خطأ');
+}
+async function deleteWeekly(rid){
+  if(!confirm('حذف التقرير؟')) return;
+  const r = await post('/api/weekly/delete', {id:rid});
+  if(r.ok){ toast('🗑 حُذف'); closeWeekly(); loadWeekly(); }
+}
+function printWeekly(){
+  if(!_wrDraft) return;
+  const r = _wrDraft;
+  let aptsHtml = '';
+  (r.apartments||[]).forEach(a=>{
+    aptsHtml += '<div style="background:#fafbfc;border:1px solid #e8ecf0;border-radius:8px;padding:12px;margin-bottom:8px">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><div style="font-weight:700">🏠 '+esc(a.name||'')+'</div>'
+      + (a.status?'<div style="background:#eff6ff;color:#1d4ed8;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600">'+esc(a.status)+'</div>':'')+'</div>';
+    if((a.risks||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>الخطر:</b> '+(a.risks||[]).map(x=>'<span style="background:#fff3cd;padding:1px 6px;border-radius:99px;font-size:10px">'+x+'</span>').join(' ')+'</div>';
+    if((a.challenges||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>التحدي:</b> '+(a.challenges||[]).map(x=>'<span style="background:#dbeafe;padding:1px 6px;border-radius:99px;font-size:10px">'+x+'</span>').join(' ')+'</div>';
+    if((a.plan||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>الخطة:</b> '+(a.plan||[]).join(' — ')+'</div>';
+    if(a.resolved) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>المعالجة:</b> '+esc(a.resolved)+'</div>';
+    aptsHtml += '</div>';
+  });
+  const w = window.open('','_blank');
+  w.document.write('<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تقرير '+esc(r.employee||'')+'</title>'
+    +'<style>body{font-family:Tahoma,sans-serif;background:#fff;color:#1a202c;padding:30px;max-width:900px;margin:auto;line-height:1.6}'
+    +'h1{font-size:22px;border-bottom:2px solid #1a56db;padding-bottom:10px;margin-bottom:18px;color:#1a56db}'
+    +'@media print{body{padding:0}@page{margin:1cm}}</style></head><body>'
+    +'<h1>📊 التقرير الأسبوعي — '+esc(r.employee||'')+'</h1>'
+    +'<div style="color:#64748b;margin-bottom:20px;font-size:13px">📅 '+esc(r.date||'')+' · '+(r.apartments||[]).length+' شقة</div>'
+    +aptsHtml
+    +'<script>setTimeout(function(){window.print()},400)<\/script></body></html>');
+  w.document.close();
+}
+
+/* ============== DESIGN REQUESTS (Petunia) ============== */
+const DR_UNIT_TYPES = ["شقة","فيلا","دوبلكس","تاون هاوس","بنتهاوس","استوديو","مكتب","معرض","أخرى"];
+const DR_PURPOSES = ["سكن شخصي","استثمار (تأجير)","تأجير مفروش","Airbnb","مكتبي","أخرى"];
+const DR_STYLES = ["مودرن","كلاسيك","نيوكلاسيك","مينيمال","بوهيمي","صناعي","حسب اقتراح المصمم"];
+const DR_PRIORITIES = ["عادي","متوسط","عاجل"];
+const DR_ROOM_TYPES = ["صالة رئيسية","صالة طعام","غرفة نوم رئيسية","غرفة نوم","غرفة أطفال","مطبخ","مجلس","مكتب","حمام","غرفة غسيل","بلكونة","مدخل","أخرى"];
+const DR_LEVELS = ["ستاندرد","ديلوكس","بريميوم"];
+let _drDraft = null;
+
+async function loadDesigns(){
+  const body = document.getElementById('designsBody'); if(body) body.innerHTML = '<div class="empty sk">—</div>';
+  try { D.designs = await api('/api/design/list'); } catch(_){ D.designs = {requests:[]} }
+  _renderDesignsBody();
+}
+function _renderDesignsBody(){
+  const body = document.getElementById('designsBody'); if(!body) return;
+  const items = ((D.designs||{}).requests)||[];
+  if(!items.length){
+    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🛋️</div><div class="muted">ما فيه طلبات. اضغط "<b>طلب جديد</b>" أعلاه.</div></div>';
+    return;
+  }
+  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for(const d of items){
+    const prioColor = d.priority==='عاجل' ? 'var(--red)' : (d.priority==='متوسط' ? 'var(--gold)' : 'var(--green)');
+    h += '<div onclick="openDesignEditor(&#39;'+esc(d.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+      + '<div><div class="strong" style="font-size:13.5px">'+esc(d.ref||'')+' · '+esc(d.client_name||'—')+'</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(d.project_name||'')+'</div></div>'
+      + (d.priority?'<span style="background:'+prioColor+';color:#fff;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:700">'+esc(d.priority)+'</span>':'')
+      + '</div>';
+  }
+  h += '</div>'; body.innerHTML = h;
+}
+function _ensureDesignOv(){
+  let ov = document.getElementById('designOverlay'); if(ov) return ov;
+  ov = document.createElement('div'); ov.id='designOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9994;padding:18px;overflow-y:auto';
+  ov.innerHTML = '<div id="designEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
+  document.body.appendChild(ov); return ov;
+}
+function closeDesign(){ const ov=document.getElementById('designOverlay'); if(ov) ov.style.display='none'; }
+async function openDesignEditor(did){
+  _ensureDesignOv();
+  let d;
+  if(did){ try{ const x=await api('/api/design/get?id='+encodeURIComponent(did)); d=x.request }catch(_){ d=null } }
+  if(!d){
+    d = {id:null, ref:'(جديد)', client_name:'', client_phone:'', client_email:'',
+         project_name:'', district:'', unit_type:'شقة', unit_code:'', area:'',
+         entry_method:'مفتاح', entry_detail:'', purpose:'', style:'مودرن',
+         budget:'', priority:'متوسط', deadline:'', pm_name:'', pm_phone:'',
+         has_plans:'', notes:'',
+         rooms:[{type:'صالة رئيسية',level:'ستاندرد',notes:''},
+                {type:'غرفة نوم رئيسية',level:'ستاندرد',notes:''},
+                {type:'مطبخ',level:'ستاندرد',notes:''}]};
+  }
+  _drDraft = d;
+  _renderDesignEditor();
+  document.getElementById('designOverlay').style.display = 'block';
+}
+function _renderDesignEditor(){
+  const d = _drDraft || {};
+  function inp(id, val, ph){ return '<input id="drF_'+id+'" value="'+esc(val||'')+'" placeholder="'+(ph||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">' }
+  function sel(id, val, opts){
+    let h='<select id="drF_'+id+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">';
+    h+='<option value="">—</option>';
+    opts.forEach(o=>h+='<option value="'+esc(o)+'"'+(val===o?' selected':'')+'>'+o+'</option>');
+    h+='</select>'; return h;
+  }
+  function lbl(name, ctrl){ return '<div><label class="muted" style="font-size:11px;font-weight:600">'+name+'</label>'+ctrl+'</div>'; }
+  let roomsHtml = '';
+  (d.rooms||[]).forEach((r,i)=>{
+    roomsHtml += '<div style="background:var(--surface-2);padding:10px;border-radius:8px;margin-bottom:8px;display:grid;grid-template-columns:1fr 1fr 2fr 30px;gap:8px;align-items:center">'
+      +'<select onchange="_drSet('+i+',\\'type\\',this.value)" style="padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+      + DR_ROOM_TYPES.map(t=>'<option value="'+esc(t)+'"'+(r.type===t?' selected':'')+'>'+t+'</option>').join('')+'</select>'
+      +'<select onchange="_drSet('+i+',\\'level\\',this.value)" style="padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+      + DR_LEVELS.map(t=>'<option value="'+esc(t)+'"'+(r.level===t?' selected':'')+'>'+t+'</option>').join('')+'</select>'
+      +'<input value="'+esc(r.notes||'')+'" oninput="_drSet('+i+',\\'notes\\',this.value)" placeholder="ملاحظات" style="padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+      +'<button onclick="_drDelRoom('+i+')" style="background:transparent;border:none;color:var(--red);cursor:pointer">×</button></div>';
+  });
+  const html =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    + '<div style="font-size:18px;font-weight:700">🛋️ '+(d.id?'تعديل':'إنشاء')+' طلب تصميم · <span style="color:var(--gold);font-size:12px">'+esc(d.ref||'')+'</span></div>'
+    + '<button onclick="closeDesign()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px;padding:0 6px">×</button>'
+    + '</div>'
+    + '<div style="font-weight:700;color:var(--gold);font-size:12px;margin-bottom:6px">👤 العميل</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+    +   lbl('الاسم *', inp('client_name', d.client_name)) + lbl('الجوال', inp('client_phone', d.client_phone))
+    +   lbl('الإيميل', inp('client_email', d.client_email))
+    + '</div>'
+    + '<div style="font-weight:700;color:var(--gold);font-size:12px;margin-bottom:6px">🏢 الوحدة</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
+    +   lbl('المشروع', inp('project_name', d.project_name)) + lbl('الحي', inp('district', d.district))
+    +   lbl('نوع الوحدة', sel('unit_type', d.unit_type, DR_UNIT_TYPES))
+    +   lbl('كود الوحدة', inp('unit_code', d.unit_code)) + lbl('المساحة (م²)', inp('area', d.area))
+    +   lbl('الحالة', sel('unit_status', d.unit_status, ["فارغة","تشطيب جزئي","مشطبة","مؤثثة - تحتاج تجديد","تحت الإنشاء"]))
+    + '</div>'
+    + '<div style="font-weight:700;color:var(--gold);font-size:12px;margin-bottom:6px">🎯 المتطلبات</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
+    +   lbl('الغرض', sel('purpose', d.purpose, DR_PURPOSES)) + lbl('النمط', sel('style', d.style, DR_STYLES))
+    +   lbl('الميزانية (ر.س)', inp('budget', d.budget))
+    +   lbl('الأولوية', sel('priority', d.priority, DR_PRIORITIES))
+    +   lbl('الموعد', '<input id="drF_deadline" type="date" value="'+esc(d.deadline||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">')
+    +   lbl('طريقة الدخول', sel('entry_method', d.entry_method, ["مفتاح","قفل إلكتروني"]))
+    + '</div>'
+    + '<div style="font-weight:700;color:var(--gold);font-size:12px;margin-bottom:6px">🛋️ الغرف</div>'
+    + '<div id="drRooms">'+roomsHtml+'</div>'
+    + '<button onclick="_drAddRoom()" style="margin-bottom:14px;padding:8px 14px;background:transparent;border:1.5px dashed var(--gold);color:var(--gold);border-radius:6px;cursor:pointer;font-size:12px;width:100%">+ إضافة غرفة</button>'
+    + '<div style="font-weight:700;color:var(--gold);font-size:12px;margin-bottom:6px">📎 مدير المشروع وملاحظات</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +   lbl('اسم مدير المشروع', inp('pm_name', d.pm_name)) + lbl('هاتف مدير المشروع', inp('pm_phone', d.pm_phone))
+    + '</div>'
+    + '<div style="margin-bottom:14px">'+lbl('ملاحظات', '<textarea id="drF_notes" rows="3" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;font-family:inherit;resize:vertical">'+esc(d.notes||'')+'</textarea>')+'</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +   '<button onclick="closeDesign()" class="btn ghost sm" style="flex:1">إلغاء</button>'
+    +   (d.id ? '<button onclick="deleteDesign(&#39;'+esc(d.id)+'&#39;)" class="btn danger sm" style="padding:0 14px">🗑 حذف</button>' : '')
+    +   '<button onclick="printDesign()" class="btn ghost sm" style="flex:1">🖨 طباعة</button>'
+    +   '<button onclick="saveDesign()" class="btn primary sm" style="flex:2">💾 احفظ</button>'
+    + '</div>';
+  document.getElementById('designEditorBody').innerHTML = html;
+}
+function _drSet(i,k,v){ if(_drDraft&&_drDraft.rooms[i]) _drDraft.rooms[i][k]=v; }
+function _drAddRoom(){ if(!_drDraft) return; _drDraft.rooms = _drDraft.rooms||[]; _drDraft.rooms.push({type:'',level:'ستاندرد',notes:''}); _renderDesignEditor(); }
+function _drDelRoom(i){ if(_drDraft){ _drDraft.rooms.splice(i,1); _renderDesignEditor(); } }
+async function saveDesign(){
+  if(!_drDraft) return;
+  function v(id){const e=document.getElementById('drF_'+id); return e?e.value.trim():''}
+  const payload = Object.assign({id:_drDraft.id||'', rooms:_drDraft.rooms||[]},
+    ['client_name','client_phone','client_email','project_name','district','unit_type','unit_code','area','unit_status','purpose','style','budget','priority','deadline','entry_method','pm_name','pm_phone','notes']
+      .reduce((a,k)=>{a[k]=v(k); return a},{}));
+  if(!payload.client_name){ toast('اكتب اسم العميل'); return; }
+  const r = await post('/api/design/save', payload);
+  if(r.ok){ toast('💾 حُفظ'); _drDraft = r.request; closeDesign(); loadDesigns(); }
+  else toast(r.error || 'خطأ');
+}
+async function deleteDesign(did){
+  if(!confirm('حذف الطلب؟')) return;
+  const r = await post('/api/design/delete', {id:did});
+  if(r.ok){ toast('🗑 حُذف'); closeDesign(); loadDesigns(); }
+}
+function printDesign(){
+  if(!_drDraft) return;
+  const d = _drDraft;
+  let rooms = '';
+  (d.rooms||[]).forEach((r,i)=>{ rooms += '<div style="background:#f9f8f6;border:1px solid #e5e1db;border-radius:6px;padding:8px 12px;margin-bottom:6px"><b>'+(i+1)+'. '+esc(r.type||'')+'</b> · '+esc(r.level||'')+(r.notes?'<br><span style="color:#666;font-size:12px">📝 '+esc(r.notes)+'</span>':'')+'</div>'; });
+  function row(l, v){ return v?'<tr><td style="background:#faf9f7;padding:7px 10px;width:35%;font-weight:600">'+l+'</td><td style="padding:7px 10px">'+esc(v)+'</td></tr>':''; }
+  const w = window.open('','_blank');
+  w.document.write('<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>'+esc(d.ref||'')+'</title>'
+    +'<style>body{font-family:Tahoma,sans-serif;background:#fff;color:#2c2c2c;padding:0;margin:0;line-height:1.6}'
+    +'.h{background:#1a1a2e;color:#fff;padding:30px 40px;display:flex;justify-content:space-between}'
+    +'.h h1{font-size:24px;margin:0}.h .ref{background:rgba(255,255,255,.15);padding:5px 18px;border-radius:6px;font-size:13px}'
+    +'.body{padding:24px 40px;max-width:900px;margin:auto}'
+    +'.sect{margin-bottom:20px}.sect h3{font-size:14px;color:#1a1a2e;background:#e8d5b0;padding:6px 12px;border-radius:6px;border-right:3px solid #c9a96e;margin-bottom:10px}'
+    +'table{width:100%;border-collapse:collapse;margin-bottom:8px}td{border-bottom:1px solid #f0ece6;font-size:13px}'
+    +'@media print{body{margin:0}@page{margin:0;size:A4}}</style></head><body>'
+    +'<div class="h"><div><h1>عوجا ريزيدنس</h1><div style="font-size:12px;opacity:.75;margin-top:4px">طلب تصميم وتأثيث</div></div>'
+    +'<div style="text-align:start"><div class="ref">'+esc(d.ref||'')+'</div><div style="font-size:11px;margin-top:6px;opacity:.7">'+esc((d.created_at||'').slice(0,10))+'</div></div></div>'
+    +'<div class="body">'
+    +'<div class="sect"><h3>بيانات العميل</h3><table>'+row('الاسم', d.client_name)+row('الجوال', d.client_phone)+row('الإيميل', d.client_email)+'</table></div>'
+    +'<div class="sect"><h3>الوحدة</h3><table>'+row('المشروع', d.project_name)+row('الحي', d.district)+row('النوع', d.unit_type)+row('الكود', d.unit_code)+row('المساحة', d.area?d.area+' م²':'')+row('الحالة', d.unit_status)+row('طريقة الدخول', d.entry_method)+'</table></div>'
+    +'<div class="sect"><h3>المتطلبات</h3><table>'+row('الغرض', d.purpose)+row('النمط', d.style)+row('الميزانية', d.budget?d.budget+' ر.س':'')+row('الأولوية', d.priority)+row('الموعد', d.deadline)+'</table></div>'
+    +'<div class="sect"><h3>الغرف ('+(d.rooms||[]).length+')</h3>'+rooms+'</div>'
+    +(d.pm_name||d.notes?'<div class="sect"><h3>إضافي</h3><table>'+row('مدير المشروع', d.pm_name)+row('هاتف المدير', d.pm_phone)+row('ملاحظات', d.notes)+'</table></div>':'')
+    +'</div><script>setTimeout(function(){window.print()},400)<\/script></body></html>');
+  w.document.close();
 }
 
 /* ============== USERS (المستخدمون) ============== */
@@ -12491,6 +13158,268 @@ async def _api_users_delete(request):
     log_event("ops", f"مستخدم · حذف {u.get('name','?')}")
     return _json({"ok": True})
 
+# ===================== QUOTATIONS API =====================
+def _quote_totals(items, service_rate, vat_rate, vat_on):
+    """Compute totals from a quote's items + rates. All amounts in SAR."""
+    subtotal = 0.0
+    for it in (items or []):
+        try:
+            qty = float(it.get("qty") or 0)
+            price = float(it.get("price") or 0)
+            subtotal += qty * price
+        except Exception:
+            pass
+    service_amt = subtotal * (float(service_rate or 0) / 100.0)
+    base_for_vat = subtotal + service_amt
+    vat_amt = base_for_vat * (float(vat_rate or 0) / 100.0) if vat_on else 0.0
+    return {
+        "subtotal":    round(subtotal, 2),
+        "service_amt": round(service_amt, 2),
+        "vat_amt":     round(vat_amt, 2),
+        "grand_total": round(subtotal + service_amt + vat_amt, 2),
+    }
+
+async def _api_quotes_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = list(_quotes.values())
+    items.sort(key=lambda q: q.get("created_at") or "", reverse=True)
+    # trim large fields from the list view
+    out = []
+    for q in items:
+        out.append({
+            "id": q.get("id"), "number": q.get("number"),
+            "date": q.get("date"), "client_name": q.get("client_name"),
+            "client_phone": q.get("client_phone"),
+            "status": q.get("status", "draft"),
+            "grand_total": q.get("totals", {}).get("grand_total", 0),
+            "created_at": q.get("created_at"),
+            "created_by": q.get("created_by"),
+        })
+    return _json({"quotes": out, "count": len(out)})
+
+async def _api_quotes_get(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    qid = request.query.get("id", "")
+    q = _quotes.get(qid)
+    if not q:
+        return _json({"error": "not found"}, 404)
+    return _json({"quote": q})
+
+async def _api_quotes_save(request):
+    """POST {id?, number?, date?, client_*, items, service_rate, vat_rate,
+       vat_on, notes, signature_name}"""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    qid = (b.get("id") or "").strip()
+    is_new = not qid or qid not in _quotes
+    if is_new:
+        qid = qid or _new_quote_id()
+        q = {
+            "id": qid,
+            "number": b.get("number") or _new_quote_number(),
+            "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+            "created_by": (b.get("by") or "owner"),
+        }
+        _quotes[qid] = q
+    else:
+        q = _quotes[qid]
+    # Update fields
+    for k in ("number", "date", "client_name", "client_phone", "client_company",
+              "client_email", "notes", "signature_name", "status"):
+        if k in b:
+            q[k] = (b[k] or "").strip() if isinstance(b[k], str) else b[k]
+    if isinstance(b.get("items"), list):
+        cleaned = []
+        for it in b["items"]:
+            if not isinstance(it, dict): continue
+            cleaned.append({
+                "description": (it.get("description") or "").strip()[:300],
+                "note": (it.get("note") or "").strip()[:200],
+                "qty": float(it.get("qty") or 0),
+                "price": float(it.get("price") or 0),
+            })
+        q["items"] = cleaned
+    if "service_rate" in b:
+        try: q["service_rate"] = float(b["service_rate"])
+        except Exception: pass
+    if "vat_rate" in b:
+        try: q["vat_rate"] = float(b["vat_rate"])
+        except Exception: pass
+    if "vat_on" in b:
+        q["vat_on"] = bool(b["vat_on"])
+    # Recompute totals
+    q["totals"] = _quote_totals(q.get("items"), q.get("service_rate", 5),
+                                 q.get("vat_rate", 15), q.get("vat_on", True))
+    q["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    if is_new:
+        log_event("ops", f"عرض سعر جديد · {q['number']} · {q.get('client_name','—')}"
+                         + f" · {q['totals']['grand_total']} ر.س")
+    return _json({"ok": True, "quote": q, "is_new": is_new})
+
+async def _api_quotes_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    qid = (b.get("id") or "").strip()
+    q = _quotes.pop(qid, None)
+    if not q:
+        return _json({"error": "not found"}, 404)
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"عرض سعر · حذف {q.get('number','?')}")
+    return _json({"ok": True})
+
+# ===================== WEEKLY REPORTS API =====================
+async def _api_weekly_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = list(_weekly_reports.values())
+    items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    out = []
+    for r in items[:200]:
+        out.append({
+            "id": r.get("id"), "employee": r.get("employee"),
+            "date": r.get("date"),
+            "apt_count": len(r.get("apartments") or []),
+            "created_at": r.get("created_at"),
+        })
+    return _json({"reports": out, "count": len(items)})
+
+async def _api_weekly_get(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    rid = request.query.get("id", "")
+    r = _weekly_reports.get(rid)
+    if not r:
+        return _json({"error": "not found"}, 404)
+    return _json({"report": r})
+
+async def _api_weekly_save(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = (b.get("id") or "").strip()
+    is_new = not rid or rid not in _weekly_reports
+    if is_new:
+        rid = rid or _new_report_id()
+        r = {"id": rid, "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+        _weekly_reports[rid] = r
+    else:
+        r = _weekly_reports[rid]
+    for k in ("employee", "date"):
+        if k in b: r[k] = (b[k] or "").strip()
+    if isinstance(b.get("apartments"), list):
+        cleaned = []
+        for apt in b["apartments"]:
+            if not isinstance(apt, dict): continue
+            cleaned.append({
+                "name":      (apt.get("name") or "").strip()[:80],
+                "status":    (apt.get("status") or "").strip()[:40],
+                "risks":     [str(x)[:120] for x in (apt.get("risks") or [])][:20],
+                "challenges":[str(x)[:120] for x in (apt.get("challenges") or [])][:20],
+                "plan":      [str(x)[:200] for x in (apt.get("plan") or [])][:20],
+                "resolved":  (apt.get("resolved") or "").strip()[:40],
+                "comments":  [str(x)[:200] for x in (apt.get("comments") or [])][:20],
+            })
+        r["apartments"] = cleaned
+    r["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    if is_new:
+        log_event("ops", f"تقرير أسبوعي · {r.get('employee','?')} · "
+                         f"{len(r.get('apartments') or [])} شقة")
+    return _json({"ok": True, "report": r, "is_new": is_new})
+
+async def _api_weekly_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = (b.get("id") or "").strip()
+    r = _weekly_reports.pop(rid, None)
+    if not r:
+        return _json({"error": "not found"}, 404)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+# ===================== DESIGN REQUESTS API =====================
+async def _api_design_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = list(_design_requests.values())
+    items.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+    out = []
+    for d in items[:200]:
+        out.append({
+            "id": d.get("id"), "ref": d.get("ref"),
+            "client_name": d.get("client_name"),
+            "project_name": d.get("project_name"),
+            "priority": d.get("priority"),
+            "created_at": d.get("created_at"),
+        })
+    return _json({"requests": out, "count": len(items)})
+
+async def _api_design_get(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    did = request.query.get("id", "")
+    d = _design_requests.get(did)
+    if not d:
+        return _json({"error": "not found"}, 404)
+    return _json({"request": d})
+
+async def _api_design_save(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    did = (b.get("id") or "").strip()
+    is_new = not did or did not in _design_requests
+    if is_new:
+        did = did or _new_design_id()
+        d = {"id": did, "ref": _new_design_ref(),
+             "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+        _design_requests[did] = d
+    else:
+        d = _design_requests[did]
+    str_fields = ("services", "client_name", "client_phone", "client_email",
+                  "contact_method", "project_name", "district", "unit_type",
+                  "unit_code", "area", "floors", "building_no", "entry_no",
+                  "location", "unit_status", "entry_method", "entry_detail",
+                  "purpose", "style", "budget", "priority", "deadline",
+                  "pm_name", "pm_phone", "has_plans", "notes")
+    for k in str_fields:
+        if k in b:
+            v = b[k]
+            d[k] = v if isinstance(v, (list, dict)) else (str(v or "")).strip()[:600]
+    if isinstance(b.get("rooms"), list):
+        rooms = []
+        for r in b["rooms"]:
+            if not isinstance(r, dict): continue
+            rooms.append({
+                "type":  (r.get("type") or "").strip()[:60],
+                "level": (r.get("level") or "ستاندرد").strip()[:30],
+                "notes": (r.get("notes") or "").strip()[:300],
+            })
+        d["rooms"] = rooms
+    d["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    if is_new:
+        log_event("ops", f"طلب تصميم · {d.get('ref','?')} · "
+                         f"{d.get('client_name','—')}")
+    return _json({"ok": True, "request": d, "is_new": is_new})
+
+async def _api_design_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    did = (b.get("id") or "").strip()
+    d = _design_requests.pop(did, None)
+    if not d:
+        return _json({"error": "not found"}, 404)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
 async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
     not the dashboard token — so the link can be shared with the cleaners safely."""
@@ -12946,6 +13875,21 @@ async def start_web_server():
         app.router.add_post("/api/users/create", _api_users_create)
         app.router.add_post("/api/users/update", _api_users_update)
         app.router.add_post("/api/users/delete", _api_users_delete)
+        # Quotations
+        app.router.add_get("/api/quotes/list", _api_quotes_list)
+        app.router.add_get("/api/quotes/get", _api_quotes_get)
+        app.router.add_post("/api/quotes/save", _api_quotes_save)
+        app.router.add_post("/api/quotes/delete", _api_quotes_delete)
+        # Weekly reports
+        app.router.add_get("/api/weekly/list", _api_weekly_list)
+        app.router.add_get("/api/weekly/get", _api_weekly_get)
+        app.router.add_post("/api/weekly/save", _api_weekly_save)
+        app.router.add_post("/api/weekly/delete", _api_weekly_delete)
+        # Design requests
+        app.router.add_get("/api/design/list", _api_design_list)
+        app.router.add_get("/api/design/get", _api_design_get)
+        app.router.add_post("/api/design/save", _api_design_save)
+        app.router.add_post("/api/design/delete", _api_design_delete)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -13264,6 +14208,18 @@ def load_state():
         for k, v in (_load_json("users.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _users[str(k)] = v
+        _quotes.clear()
+        for k, v in (_load_json("quotes.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _quotes[str(k)] = v
+        _weekly_reports.clear()
+        for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _weekly_reports[str(k)] = v
+        _design_requests.clear()
+        for k, v in (_load_json("design_requests.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _design_requests[str(k)] = v
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -13313,6 +14269,9 @@ def persist_state():
     _save_json("review_states.json", _review_states)
     _save_json("review_translations.json", _review_translations)
     _save_json("users.json", _users)
+    _save_json("quotes.json", _quotes)
+    _save_json("weekly_reports.json", _weekly_reports)
+    _save_json("design_requests.json", _design_requests)
     # Sessions are intentionally NOT persisted — restarts force re-login
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
