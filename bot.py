@@ -524,12 +524,28 @@ SAUDI_EVENTS = [
     {"name": "رمضان",         "start": "2027-02-06", "end": "2027-03-08", "boost": 0.75, "kind": "ramadan"},
 ]
 
+# Owner-added custom events (e.g., Ouja-specific high-demand windows like a
+# local conference or a wedding season). Merged with SAUDI_EVENTS at lookup
+# time and persisted across redeploys. Each entry has an `id` so we can edit
+# or delete it from the dashboard.
+_custom_events = []   # list of {id, name, start, end, boost, kind}
+
+def _all_events():
+    """Combined view of bundled SAUDI_EVENTS + owner-added _custom_events,
+    each tagged with `source` so the UI can show what's editable."""
+    out = []
+    for e in SAUDI_EVENTS:
+        out.append({**e, "source": "default", "id": None})
+    for e in _custom_events:
+        out.append({**e, "source": "custom"})
+    return out
+
 def events_for_date(d):
-    """Active SAUDI_EVENTS entries for a `datetime.date`."""
+    """Active events (default + custom) on a given date."""
     if not d:
         return []
     iso = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
-    return [e for e in SAUDI_EVENTS if e["start"] <= iso <= e["end"]]
+    return [e for e in _all_events() if e["start"] <= iso <= e["end"]]
 
 def event_boost_for_date(d):
     """Effective multiplier on this date — product of all active events.
@@ -5050,30 +5066,86 @@ function calClick(date){
   renderBulkForm();
 }
 
-function renderCalEvents(){
+async function renderCalEvents(){
   const el = document.getElementById('calEventsBody');
   if(!el) return;
-  const days = (D.cal||{}).days || [];
-  const seen = {};
-  const lst = [];
-  for(const d of days){
-    for(const e of (d.events||[])){
-      const k = e.name + '|' + e.kind;
-      if(!seen[k]){ seen[k] = {name:e.name, kind:e.kind, boost:e.boost, dates:[]}; lst.push(seen[k]); }
-      seen[k].dates.push(d.date);
-    }
+  // Pull the full editable events list (default + custom)
+  try{ D.events = await api('/api/events') }catch(_){ D.events = {events:[]} }
+  const all = (D.events||{}).events || [];
+  if(!all.length){ el.innerHTML = '<div class="empty">'+t().cal_no_events+'</div>'; return; }
+  // Group by source
+  const today = new Date().toISOString().slice(0,10);
+  const sorted = all.slice().sort(function(a,b){ return (a.start||'').localeCompare(b.start||'') });
+  let html = '';
+  for(const e of sorted){
+    const active = e.start <= today && today <= e.end;
+    const past = e.end < today;
+    const boostPct = Math.round((e.boost-1)*100);
+    const boostLbl = (boostPct >= 0 ? '+' : '') + boostPct + '%';
+    const boostCls = boostPct > 0 ? 'ok' : (boostPct < 0 ? 'danger' : 'muted');
+    const rangeLbl = e.start === e.end ? e.start : (e.start + ' → ' + e.end);
+    const editable = e.source === 'custom';
+    const dimStyle = past ? 'opacity:.45' : '';
+    html += '<div class="log-row" style="grid-template-columns:auto 1fr auto;'+dimStyle+'">'
+      + '<div class="log-lic">'+(active?'🟢':(past?'⚪':'🎉'))+'</div>'
+      + '<div><div style="font-weight:600;font-size:13px">'+esc(e.name)+' <span class="pill '+boostCls+'">'+boostLbl+'</span>'+(editable?'':' <span class="muted" style="font-size:10px">· افتراضي</span>')+'</div>'
+      + '<div class="muted" style="font-size:11.5px">'+rangeLbl+' · '+esc(e.kind||'')+'</div></div>'
+      + '<div style="display:flex;gap:5px">'
+        + (editable ? ('<button class="btn ghost xs" onclick="editEvent(&#39;'+e.id+'&#39;)">✎</button>'
+                    + '<button class="btn red xs" onclick="deleteEvent(&#39;'+e.id+'&#39;)">🗑</button>') : '')
+      + '</div></div>';
   }
-  if(!lst.length){ el.innerHTML = '<div class="empty">'+t().cal_no_events+'</div>'; return; }
-  el.innerHTML = lst.map(function(e){
-    const first = e.dates[0]; const last = e.dates[e.dates.length-1];
-    const range = first === last ? first : (first + ' → ' + last);
-    return '<div class="log-row"><div class="log-lic">🎉</div>'
-      + '<div class="log-lts">'+range+'</div>'
-      + '<div class="log-ltxt"><b>'+esc(e.name)+'</b> · '+(e.boost>=1?'+':'')+Math.round((e.boost-1)*100)+'% طلب متوقع</div></div>';
-  }).join('');
+  // Add-new form
+  html += '<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:12px">'
+    + '<div style="font-weight:600;font-size:12px;color:var(--mut);margin-bottom:8px">+ أضف مناسبة جديدة</div>'
+    + '<div id="evtFormHost"></div>'
+    + '<button class="btn ghost sm" onclick="renderEventForm()">+ مناسبة جديدة</button>'
+    + '</div>';
+  el.innerHTML = html;
 }
 
-function renderBulkForm(){
+function renderEventForm(existing){
+  const host = document.getElementById('evtFormHost');
+  if(!host) return;
+  const e = existing || {id:'', name:'', start:'', end:'', boost:1.2, kind:'custom'};
+  host.innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">'
+    + '<input id="evN" placeholder="اسم المناسبة" value="'+esc(e.name)+'" style="grid-column:1/-1">'
+    + '<input id="evS" type="date" value="'+e.start+'">'
+    + '<input id="evE" type="date" value="'+e.end+'">'
+    + '<input id="evB" type="number" step="0.05" min="0.3" max="3.0" value="'+e.boost+'" placeholder="boost (1.4 = +40%)">'
+    + '<input id="evK" placeholder="kind (eid/national/custom...)" value="'+esc(e.kind||'custom')+'">'
+    + '</div>'
+    + '<div style="display:flex;gap:5px;justify-content:flex-end">'
+      + '<button class="btn ghost xs" onclick="document.getElementById(&#39;evtFormHost&#39;).innerHTML=&#39;&#39;">✕</button>'
+      + '<button class="btn primary xs" onclick="saveEvent(&#39;'+e.id+'&#39;)">💾 حفظ</button>'
+    + '</div>';
+}
+
+async function saveEvent(eid){
+  const body = {
+    id: eid || null,
+    name: (document.getElementById('evN')||{}).value || '',
+    start: (document.getElementById('evS')||{}).value || '',
+    end: (document.getElementById('evE')||{}).value || '',
+    boost: parseFloat((document.getElementById('evB')||{}).value || '1.0'),
+    kind: (document.getElementById('evK')||{}).value || 'custom',
+  };
+  const r = await post('/api/events/save', body);
+  if(r.ok){ toast('✅'); document.getElementById('evtFormHost').innerHTML=''; loadForwardCalendar(); }
+  else toast(r.error || t().err);
+}
+function editEvent(eid){
+  const e = ((D.events||{}).events||[]).find(function(x){return x.id === eid});
+  if(e) renderEventForm(e);
+}
+async function deleteEvent(eid){
+  if(!confirm('احذف المناسبة؟')) return;
+  const r = await post('/api/events/delete', {id:eid});
+  if(r.ok){ toast('🗑'); loadForwardCalendar(); }
+}
+
+async function renderBulkForm(){
   const el = document.getElementById('bulkForm');
   if(!el) return;
   const has = !!(calSelect.start && calSelect.end);
@@ -5081,6 +5153,12 @@ function renderBulkForm(){
     el.innerHTML = '<div class="empty">'+t().bulk_select_range+'</div>';
     return;
   }
+  // Fetch units list once for the filter dropdowns
+  if(!D.units){
+    try{ D.units = await api('/api/units') }catch(_){ D.units = {units:[], beds:[], areas:[]} }
+  }
+  const beds = (D.units||{}).beds || [];
+  const areas = (D.units||{}).areas || [];
   el.innerHTML =
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
     + '<span class="muted">'+t().bulk_from+'</span>'
@@ -5089,12 +5167,40 @@ function renderBulkForm(){
     + '<span class="mono" style="font-weight:600">'+calSelect.end+'</span>'
     + '<button class="btn ghost xs" onclick="calSelect={start:null,end:null};renderForwardCalendar();renderBulkForm()">✕</button>'
     + '</div>'
-    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
     + '<select id="bulkAction" style="width:auto;padding:7px 12px"><option value="raise">'+t().bulk_raise+'</option><option value="lower">'+t().bulk_lower+'</option></select>'
     + '<input id="bulkPct" type="number" min="1" max="80" value="10" style="width:90px;text-align:center"> %'
-    + '<button class="btn primary sm" onclick="doBulkApply()">⚡ '+t().bulk_apply+'</button>'
     + '</div>'
+    + '<div class="muted" style="margin-bottom:6px;font-size:11.5px;font-weight:600">فلتر النطاق (اختياري):</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    + '<select id="bulkBeds" style="width:auto;padding:7px 12px"><option value="">كل عدد الغرف</option>'
+      + beds.map(function(b){return '<option value="'+b+'">'+b+' غرفة</option>'}).join('')
+    + '</select>'
+    + '<select id="bulkArea" style="width:auto;padding:7px 12px;max-width:180px"><option value="">كل المناطق</option>'
+      + areas.map(function(a){return '<option value="'+esc(a)+'">'+esc(a)+'</option>'}).join('')
+    + '</select>'
+    + '<button class="btn ghost xs" onclick="toggleBulkUnits()">'+(bulkPickerOpen?'إخفاء قائمة الوحدات':'اختر وحدات محددة…')+'</button>'
+    + '</div>'
+    + '<div id="bulkUnitPicker" style="'+(bulkPickerOpen?'':'display:none')+'max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:12px;background:var(--surface-2)">'
+      + ((D.units||{}).units||[]).map(function(u){
+          const checked = bulkSelectedUnits.indexOf(u.id) >= 0 ? 'checked' : '';
+          return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12.5px;cursor:pointer">'
+            + '<input type="checkbox" value="'+u.id+'" '+checked+' onchange="toggleBulkUnit('+u.id+')">'
+            + '<span>'+esc(u.name||('unit-'+u.id))+'</span>'
+            + '<span class="muted" style="margin-inline-start:auto">'+(u.beds||'?')+' غرف · '+esc(u.area||'')+'</span>'
+            + '</label>';
+        }).join('')
+    + '</div>'
+    + '<button class="btn primary sm" onclick="doBulkApply()" style="width:100%">⚡ '+t().bulk_apply+'</button>'
     + '<div class="muted" style="margin-top:10px;font-size:11.5px">'+t().bulk_confirm+'</div>';
+}
+
+let bulkPickerOpen = false;
+let bulkSelectedUnits = [];
+function toggleBulkUnits(){ bulkPickerOpen = !bulkPickerOpen; renderBulkForm() }
+function toggleBulkUnit(lid){
+  const i = bulkSelectedUnits.indexOf(lid);
+  if(i >= 0) bulkSelectedUnits.splice(i, 1); else bulkSelectedUnits.push(lid);
 }
 
 async function doBulkApply(){
@@ -5102,13 +5208,20 @@ async function doBulkApply(){
   if(!confirm(t().bulk_confirm)) return;
   const action = document.getElementById('bulkAction').value;
   const pct = parseFloat(document.getElementById('bulkPct').value || '0');
+  const beds = document.getElementById('bulkBeds').value;
+  const area = document.getElementById('bulkArea').value;
   if(!pct || pct <= 0) return;
-  const r = await post('/api/pricing/bulk', {
+  const body = {
     start: calSelect.start, end: calSelect.end, percent: pct, action: action
-  });
+  };
+  if(bulkSelectedUnits.length) body.lids = bulkSelectedUnits.slice();
+  if(beds) body.beds = parseInt(beds, 10);
+  if(area) body.area = area;
+  const r = await post('/api/pricing/bulk', body);
   if(r.ok){
     toast(t().bulk_applied.replace('{a}', r.applied).replace('{s}', r.skipped) + (r.dry_run?' (DRY-RUN)':''));
     calSelect = {start:null, end:null};
+    bulkSelectedUnits = [];
     loadForwardCalendar();
   } else toast(r.error || t().err);
 }
@@ -6829,6 +6942,80 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_events_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"events": _all_events()})
+
+async def _api_events_save(request):
+    """POST {id?, name, start, end, boost, kind?} — add a new custom event or
+    update an existing one (matched by id). Default events are read-only."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    name = (b.get("name") or "").strip()
+    start = (b.get("start") or "").strip()
+    end = (b.get("end") or "").strip()
+    try:
+        boost = float(b.get("boost", 1.0))
+    except Exception:
+        boost = 1.0
+    kind = (b.get("kind") or "custom").strip()[:30]
+    if not name or not _parse_date(start) or not _parse_date(end):
+        return _json({"error": "name + valid start + end required"}, 400)
+    if end < start:
+        return _json({"error": "end must be >= start"}, 400)
+    boost = max(0.3, min(3.0, boost))     # clamp to sane range
+    eid = b.get("id")
+    if eid:                                # update existing
+        for e in _custom_events:
+            if e.get("id") == eid:
+                e.update({"name": name, "start": start, "end": end,
+                          "boost": boost, "kind": kind})
+                break
+        else:
+            return _json({"error": "id not found"}, 404)
+    else:                                  # create
+        new_id = f"c{int(time.time()*1000)}"
+        _custom_events.append({"id": new_id, "name": name, "start": start,
+                               "end": end, "boost": boost, "kind": kind})
+    # invalidate forward cache so the calendar reflects the new event
+    _forward_cache["data"] = None; _forward_cache["ts"] = 0
+    await asyncio.to_thread(persist_state)
+    log_event("pricing", f"حدث مخصص: {name} ({start} → {end}) × {boost}")
+    return _json({"ok": True})
+
+async def _api_events_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    eid = b.get("id")
+    if not eid:
+        return _json({"error": "id required"}, 400)
+    before = len(_custom_events)
+    _custom_events[:] = [e for e in _custom_events if e.get("id") != eid]
+    if len(_custom_events) == before:
+        return _json({"error": "id not found"}, 404)
+    _forward_cache["data"] = None; _forward_cache["ts"] = 0
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_units_list(request):
+    """Return active units with the fields the bulk-apply filter needs."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if not _catalog_units:
+        await asyncio.to_thread(load_catalog, True)
+    out = [{"id": u.get("id"), "name": u.get("name"), "beds": u.get("beds"),
+            "area": u.get("area"), "neighbourhood": u.get("neighbourhood"),
+            "capacity": u.get("capacity")}
+           for u in _catalog_units if u.get("id")]
+    # also surface available area + bedroom values for picker dropdowns
+    beds = sorted({u["beds"] for u in out if u.get("beds")})
+    areas = sorted({(u.get("neighbourhood") or u.get("area") or "").strip()
+                    for u in out if (u.get("neighbourhood") or u.get("area"))})
+    return _json({"units": out, "beds": beds, "areas": [a for a in areas if a]})
+
 async def _api_calendar_forward(request):
     """Aggregate per-date forward calendar: occupancy + avg price + Saudi events."""
     if not _dash_auth(request):
@@ -6842,10 +7029,12 @@ async def _api_calendar_forward(request):
     return _json({"days": data, "events": SAUDI_EVENTS})
 
 async def _api_pricing_bulk(request):
-    """POST {start, end, percent, action:'raise'|'lower', only_available?:bool=True}
-    Bulk adjust the calendar across ALL active units for [start, end].
-    Only updates currently-available unbooked nights by default. Honors
-    PRICE_APPLY_DRYRUN so you can preview before committing."""
+    """POST {start, end, percent, action:'raise'|'lower', only_available?:bool=True,
+            lids?:[int], beds?:int, area?:str} — bulk adjust prices in a date range
+    with optional filtering by specific unit ids, bedroom count, and/or area
+    substring. Only adjusts currently-available unbooked nights. Honors
+    PRICE_APPLY_DRYRUN. Writes the ouja-orig: note so discount tiers respect
+    the new anchor."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
@@ -6859,8 +7048,30 @@ async def _api_pricing_bulk(request):
     if not start or not end or end < start or pct <= 0 or pct > 80:
         return _json({"error": "bad date range or percent"}, 400)
     factor = (1 + pct / 100) if action == "raise" else (1 - pct / 100)
-    listings = list((get_listings_map() or {}).keys())
     only_available = b.get("only_available", True)
+    # ---- apply filter to the listing set ----
+    f_lids = b.get("lids") or []
+    f_beds = b.get("beds")
+    f_area = (b.get("area") or "").strip().lower()
+    if not _catalog_units:
+        await asyncio.to_thread(load_catalog, True)
+    candidates = _catalog_units or []
+    if f_lids:
+        wanted = set(int(x) for x in f_lids)
+        candidates = [u for u in candidates if u.get("id") in wanted]
+    if f_beds:
+        try:
+            bv = int(f_beds)
+            candidates = [u for u in candidates if u.get("beds") == bv]
+        except Exception:
+            pass
+    if f_area:
+        candidates = [u for u in candidates
+                      if (u.get("area") or "").lower().find(f_area) >= 0
+                      or (u.get("neighbourhood") or "").lower().find(f_area) >= 0]
+    listings = [u["id"] for u in candidates if u.get("id")]
+    if not listings:
+        return _json({"error": "filter matched zero units"}, 400)
 
     def _adjust_one(lid):
         applied, skipped = 0, 0
@@ -6899,9 +7110,10 @@ async def _api_pricing_bulk(request):
             for f in as_completed([ex.submit(_adjust_one, lid) for lid in listings]):
                 a, s = f.result()
                 tot_applied += a; tot_skipped += s
+    scope_label = (f"{len(listings)} وحدة" if f_lids or f_beds or f_area else "كل الوحدات")
     log_event("pricing",
               f"تطبيق جماعي {action} {pct}% · {start.isoformat()}→{end.isoformat()} · "
-              f"{tot_applied} ليلة" + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
+              f"{scope_label} · {tot_applied} ليلة" + (" (DRY-RUN)" if PRICE_APPLY_DRYRUN else ""))
     # Invalidate the forward-calendar cache so the page reflects new prices immediately
     _forward_cache["data"] = None
     _forward_cache["ts"] = 0
@@ -7109,6 +7321,10 @@ async def start_web_server():
         app.router.add_get("/api/home/arrivals", _api_home_arrivals)
         app.router.add_get("/api/calendar/forward", _api_calendar_forward)
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
+        app.router.add_get("/api/events", _api_events_list)
+        app.router.add_post("/api/events/save", _api_events_save)
+        app.router.add_post("/api/events/delete", _api_events_delete)
+        app.router.add_get("/api/units", _api_units_list)
         app.router.add_post("/api/send", _api_send)
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
@@ -7270,6 +7486,8 @@ def load_state():
         _agreement_reminded = set(int(x) for x in _load_json("agreement_reminded.json", []) if str(x).strip())
         _daily_metrics.clear()
         _daily_metrics.update(_load_json("daily_metrics.json", {}))
+        _custom_events.clear()
+        _custom_events.extend(_load_json("custom_events.json", []))
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -7300,6 +7518,7 @@ def persist_state():
             if k not in keep:
                 _daily_metrics.pop(k, None)
     _save_json("daily_metrics.json", _daily_metrics)
+    _save_json("custom_events.json", _custom_events)
 
 @tasks.loop(seconds=60)
 async def persist_loop():
