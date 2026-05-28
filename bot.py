@@ -5377,6 +5377,16 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px;gap:14px;flex-wrap:wrap}
 .page-title{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.2px;line-height:1.15}
 .page-sub{color:var(--mut);font-size:12px;margin-top:2px}
+/* Reusable "what is this page?" help banner — soft gold-tinted card with
+   a clear title and 2-4 short bullets. Employees with zero ramp-up see it
+   before any data, so they always know what they're looking at. */
+.page-help{background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold);border-radius:12px;padding:12px 14px;margin-bottom:14px;position:relative}
+.page-help .ph-t{font-weight:700;font-size:13.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.page-help .ph-b{color:var(--text-2);font-size:12.5px;line-height:1.75}
+.page-help .ph-b b{color:var(--gold)}
+.page-help .ph-x{position:absolute;inset-inline-end:8px;top:6px;background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;border-radius:6px}
+.page-help .ph-x:hover{background:var(--surface);color:var(--text)}
+.page-help.hidden{display:none}
 .page-tools{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 
 /* ============== KPI STRIP ============== */
@@ -5680,6 +5690,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div class="page-help" id="ph_home" data-help-key="home">
+          <button class="ph-x" onclick="dismissHelp('home')" title="إخفاء">×</button>
+          <div class="ph-t">👋 أهلاً وسهلاً</div>
+          <div class="ph-b">
+            هذي الصفحة الرئيسية — كل أرقام اليوم تجي هنا: <b>الإشغال</b>، <b>الإيراد</b>،
+            <b>الشقق الفاضية الليلة</b>، <b>التذاكر العاجلة</b>. أي رقم بلون أحمر = يحتاج انتباه، اضغطه يوديك لتفاصيله.
+            الشريط الجانبي يسار = كل الصفحات.
+          </div>
+        </div>
+
         <div class="kpis" id="kpis"></div>
 
         <!-- Operational command-center: urgent items at the top (collapsible by severity) -->
@@ -5725,6 +5745,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div class="page-help" id="ph_inbox" data-help-key="inbox">
+          <button class="ph-x" onclick="dismissHelp('inbox')" title="إخفاء">×</button>
+          <div class="ph-t">✉️ ردود الضيوف والتصعيدات</div>
+          <div class="ph-b">
+            كل ما المساعد يحضّر رد لضيف بيظهر هنا. <b>أصفر</b> = يحتاج موافقتك (شك في الرد).
+            <b>أحمر</b> = تصعيد، فيه مشكلة جدية. اضغط أي محادثة تشوف النص كامل. الفلاتر فوق
+            تساعدك تركز على شقة معينة أو حالة معينة.
+          </div>
+        </div>
+
         <div class="filterbar">
           <div class="tabsfilter" id="ibFilterTabs"></div>
           <select id="ibFilterUnit" onchange="renderInbox()"><option value="">كل الوحدات</option></select>
@@ -5752,6 +5782,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div class="page-help" id="ph_today" data-help-key="today">
+          <button class="ph-x" onclick="dismissHelp('today')" title="إخفاء">×</button>
+          <div class="ph-t">◎ الفاضي الليلة</div>
+          <div class="ph-b">
+            كل شقة لسا فاضية الليلة، مع <b>السعر الحالي</b> و<b>جدول الخصومات المجدولة</b>
+            الساعة ٢٠، ٢٢، ومنتصف الليل. لو شفت سعر ما يعجبك، اضغط ⏸ على الشقة توقف الخصومات
+            عنها. الهدف: ٩٥٪ إشغال (ما عدا رمضان).
+          </div>
+        </div>
+
         <div id="discountBanner"></div>
 
         <div id="emptyGridWrap"><div class="empty sk">—</div></div>
@@ -5768,6 +5808,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <button class="btn ghost sm" onclick="loadForwardCalendar()">↻</button>
           </div>
         </div>
+
+        <div class="page-help" id="ph_calendar" data-help-key="calendar">
+          <button class="ph-x" onclick="dismissHelp('calendar')" title="إخفاء">×</button>
+          <div class="ph-t">📅 تقويم الـ٦٠ يوم</div>
+          <div class="ph-b">
+            كل خانة = يوم. اللون يبيّن قوة الإشغال: <b>أخضر</b> = ممتاز، <b>أصفر</b> = متوسط،
+            <b>أحمر</b> = ضعيف. الأرقام تحت كل تاريخ: محجوزة / فاضية / الإيراد المتوقع.
+            اضغط يوم تشوف اللي حاجز فيه وأي شقق فاضية.
+          </div>
+        </div>
+
         <div class="card">
           <div id="calendarGrid"><div class="empty sk">—</div></div>
         </div>
@@ -5791,6 +5842,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_pr_sub">توصيات أسعار للـ٤٥ يوم الجاية — اضغط لرؤية تفاصيل كل تاريخ</div>
           </div>
         </div>
+
+        <div class="page-help" id="ph_pricing" data-help-key="pricing">
+          <button class="ph-x" onclick="dismissHelp('pricing')" title="إخفاء">×</button>
+          <div class="ph-t">$ فرص رفع/تخفيض السعر</div>
+          <div class="ph-b">
+            البوت يفحص كل ليلة قادمة ويلقى فرص يرفع فيها السعر (عيد، فعالية، فيكند) أو يخفّض
+            (فاضي ومتأخر). اضغط فرصة تشوف <b>السبب</b> والـ<b>قبل/بعد</b>. زر "طبّق" يكتب
+            السعر في Hostaway فوراً — بدون موافقة إضافية.
+          </div>
+        </div>
+
         <div class="card">
           <div id="prTotalBody"></div>
         </div>
@@ -5808,6 +5870,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_strat_sub">الوحدات المتابَعة تلقائياً — اضغط لرؤية قبل/بعد كل ليلة</div>
           </div>
         </div>
+
+        <div class="page-help" id="ph_strat" data-help-key="strat">
+          <button class="ph-x" onclick="dismissHelp('strat')" title="إخفاء">×</button>
+          <div class="ph-t">⚡ الاستراتيجيات المتابَعة</div>
+          <div class="ph-b">
+            كل فرصة سعر طبقتها = استراتيجية البوت يتابعها يومياً. تشوف هنا: حُجزت الليلة ولا لا،
+            كم إيراد تحقّق فعلاً، ومتى انتهت. تقدر <b>توقف</b> أي استراتيجية وقت ما تبي.
+          </div>
+        </div>
+
         <div class="card">
           <div id="stratListBody"><div class="empty sk">—</div></div>
         </div>
@@ -5819,6 +5891,15 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div>
             <div class="page-title" id="t_rev">الإيرادات والأداء</div>
             <div class="page-sub" id="t_rev_sub">آخر ١٢ شهر + دورة الراتب + أداء الوحدات</div>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_rev" data-help-key="rev">
+          <button class="ph-x" onclick="dismissHelp('rev')" title="إخفاء">×</button>
+          <div class="ph-t">∿ الأرقام الكبيرة</div>
+          <div class="ph-b">
+            إيراد آخر <b>١٢ شهر</b>، مقارنة بالشهر اللي قبله، أداء كل شقة، وتأثير
+            <b>دورة الراتب</b> (آخر الشهر يرتفع الطلب). تقدر تصدّر CSV — يفتح بـExcel عربي بدون مشاكل.
           </div>
         </div>
 
@@ -5858,6 +5939,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <select id="logFilter" onchange="renderLog()" style="width:auto;font-size:12px;padding:6px 10px;height:32px"><option value="">الكل</option><option value="guest">الضيوف</option><option value="escalation">تصعيدات</option><option value="pricing">تسعير</option><option value="report">تقارير</option></select>
           </div>
         </div>
+
+        <div class="page-help" id="ph_log" data-help-key="log">
+          <button class="ph-x" onclick="dismissHelp('log')" title="إخفاء">×</button>
+          <div class="ph-t">≡ كل ما عمله البوت</div>
+          <div class="ph-b">
+            رسائل، تصعيدات، تغييرات أسعار، تنظيفات، تذاكر — كله مسجل هنا بتوقيت Riyadh.
+            استخدم الفلتر فوق تركز على نوع معين. مفيد للمراجعة في نهاية اليوم.
+          </div>
+        </div>
+
         <div class="card"><div id="logBody"><div class="empty sk">—</div></div></div>
       </section>
 
@@ -5872,6 +5963,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <label class="btn primary sm" style="cursor:pointer">📥 رفع Excel<input type="file" accept=".xlsx" onchange="uploadCleaningXLSX(event)" style="display:none"></label>
             <label class="btn ghost sm" style="cursor:pointer">📄 CSV<input type="file" accept=".csv" onchange="uploadCleaningCSV(event)" style="display:none"></label>
             <button class="btn ghost sm" onclick="loadCleaning()">↻</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_clean" data-help-key="clean">
+          <button class="ph-x" onclick="dismissHelp('clean')" title="إخفاء">×</button>
+          <div class="ph-t">🧹 التنظيف العميق</div>
+          <div class="ph-b">
+            كل شقة تتنظف عميق كل <b>٤٥-٦٠ يوم</b>. الجدول يوزع <b>تنظيف واحد كل يوم</b> ويتأكد
+            من Hostaway الساعة <b>٩ مساءً</b> الليلة قبل. لو الشقة محجوزة، يبدّلها مع شقة ثانية تلقائي.
+            زر <b>⏸</b> يشيل شقة من الجدول مؤقتاً، و<b>"🔄 إعادة جدولة الكل"</b> يبدأ الكل من تاريخ تختاره.
           </div>
         </div>
 
@@ -5962,6 +6063,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <button class="btn ghost sm" onclick="loadQuality()">↻</button>
           </div>
         </div>
+
+        <div class="page-help" id="ph_quality" data-help-key="quality">
+          <button class="ph-x" onclick="dismissHelp('quality')" title="إخفاء">×</button>
+          <div class="ph-t">⭐ تقييم نظافة كل شقة</div>
+          <div class="ph-b">
+            متوسط تقييمات النظافة من الضيوف لكل شقة، مع آخر التعليقات. <b>الترتيب: الأسوأ فوق</b>
+            عشان تشتغل عليها أول. اضغط شقة تشوف التعليقات بالتفصيل.
+          </div>
+        </div>
+
         <div class="kpis" id="qualStats"></div>
         <div class="card">
           <div class="card-head"><span class="card-title">🏠 ترتيب الوحدات</span></div>
@@ -5982,6 +6093,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="loadGuests()">↻</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_guests" data-help-key="guests">
+          <button class="ph-x" onclick="dismissHelp('guests')" title="إخفاء">×</button>
+          <div class="ph-t">👤 الضيوف اللي زاروك</div>
+          <div class="ph-b">
+            كل ضيف نزل عندك من قبل — اسمه، رقمه، كم مرة زار، وأي شقق. اضغط ضيف تشوف
+            <b>ملف كامل</b> + <b>ملاحظات الفريق</b> + <b>ملخص آخر محادثات</b>. تقدر تعلّمه
+            <b>VIP</b> بضغطة، فيتنبه له المساعد كل مرة يرجع.
           </div>
         </div>
         <div class="kpis" id="guestStats"></div>
@@ -6013,6 +6134,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <button class="btn ghost sm" onclick="distillLearningsNow()" id="learnDistillBtn">↻ <span id="t_learn_distill">تلخيص الآن</span></button>
           </div>
         </div>
+
+        <div class="page-help" id="ph_learn" data-help-key="learn">
+          <button class="ph-x" onclick="dismissHelp('learn')" title="إخفاء">×</button>
+          <div class="ph-t">📚 ما تعلمه المساعد</div>
+          <div class="ph-b">
+            كل ما الفريق يعدّل رد للمساعد، البوت يتعلّم منه. هذي الصفحة تبيّن لك <b>وش تعلّم اليوم
+            مقارنة بأمس والأسبوع الفايت</b>، <b>كم نسبة ثقته</b>، و<b>وش تعلّم عن كل شقة بعينها</b>.
+            زر <b>"تعلّم من التاريخ"</b> يعطيه دفعة وحدة من كل المحادثات القديمة.
+          </div>
+        </div>
+
         <div id="bootstrapStatus" style="display:none"></div>
 
         <!-- Stat cards: today + delta vs 7-day average -->
@@ -6200,6 +6332,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <div class="side-foot">
         <div class="side-status"><span class="dot" id="sideDot"></span><span id="sideStatus">…</span></div>
         <div class="side-tools">
+          <button class="icbtn" onclick="restoreAllHelp();showWelcome()" title="استعرض الشرح" style="background:var(--gold-tint);color:var(--gold);font-weight:700">💡</button>
           <button class="icbtn" onclick="toggleTheme()" title="theme">◐</button>
           <button class="icbtn" onclick="toggleLang()" id="sLangBtn">EN</button>
           <button class="icbtn" onclick="logout()" title="logout">⎋</button>
@@ -6870,6 +7003,87 @@ function clearInboxFilters(){
   buildInboxTabs(); renderInbox();
 }
 
+/* ---------- Per-page help banners ---------- */
+const HELP_LS_KEY = 'ouja:helpDismissed';
+function _helpDismissed(){
+  try { return JSON.parse(localStorage.getItem(HELP_LS_KEY) || '{}') || {}; }
+  catch(_) { return {}; }
+}
+function _helpSetDismissed(map){
+  try { localStorage.setItem(HELP_LS_KEY, JSON.stringify(map||{})); } catch(_){}
+}
+function dismissHelp(key){
+  const m = _helpDismissed(); m[key] = 1; _helpSetDismissed(m);
+  const els = document.querySelectorAll('[data-help-key="'+key+'"]');
+  for(const el of els) el.classList.add('hidden');
+}
+function restoreAllHelp(){
+  _helpSetDismissed({});
+  for(const el of document.querySelectorAll('.page-help')) el.classList.remove('hidden');
+  toast('💡 تم استرجاع كل التلميحات');
+}
+function _applyHelpDismissals(){
+  const m = _helpDismissed();
+  for(const el of document.querySelectorAll('.page-help')){
+    const k = el.getAttribute('data-help-key');
+    if(k && m[k]) el.classList.add('hidden');
+  }
+}
+
+/* ---------- First-login welcome modal ---------- */
+const WELCOME_LS_KEY = 'ouja:welcomeSeen';
+function maybeShowWelcome(){
+  try { if(localStorage.getItem(WELCOME_LS_KEY)) return; } catch(_){}
+  setTimeout(showWelcome, 800);
+}
+function showWelcome(){
+  let ov = document.getElementById('welcomeOverlay');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'welcomeOverlay';
+    ov.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:14px';
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML =
+      '<div style="background:var(--surface);padding:24px;border-radius:18px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 30px 80px rgba(0,0,0,.6);border:1px solid var(--border)">'
+    +   '<div style="text-align:center;margin-bottom:18px">'
+    +     '<div style="font-size:48px;margin-bottom:8px">👋</div>'
+    +     '<div style="font-size:22px;font-weight:800;color:var(--gold);margin-bottom:4px">أهلاً بك في عوجا</div>'
+    +     '<div class="muted" style="font-size:13px">دقيقة وحدة وأشرح لك كل شي</div>'
+    +   '</div>'
+    +   '<div style="display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:1.7">'
+    +     _welcomeStep('1', '📋', 'الشريط الجانبي يسار',
+                      'كل صفحة فيها أيقونة. اضغطها تنقلك. الرقم الأحمر = شي يحتاج انتباه.')
+    +     _welcomeStep('2', '✉️', 'الوارد',
+                      'كل ردود المساعد على ضيوف Airbnb. الأصفر يحتاج موافقتك. الأحمر تصعيد.')
+    +     _welcomeStep('3', '🔧', 'الصيانة',
+                      'أي مشكلة تنفتح كتذكرة. تتابعها من جديدة → تحت العمل → منجزة.')
+    +     _welcomeStep('4', '⭐', 'المراجعات',
+                      'كل مراجعة Airbnb، والمساعد يقول لك تنحذف ولا لا ويكتب لك الرد.')
+    +     _welcomeStep('5', '🧹', 'التنظيف العميق',
+                      'جدول يومي بدون تدخل. الساعة ٩م الليلة قبل يتأكد ويعدّل لو في حجز.')
+    +     _welcomeStep('6', '💡', 'لما تحتاج تذكير',
+                      'كل صفحة فيها شرح ذهبي فوق. لو خفيته، اضغط زر "💡 المساعدة" أسفل الشريط الجانبي.')
+    +   '</div>'
+    +   '<div style="display:flex;gap:8px;margin-top:20px">'
+    +     '<button class="btn primary sm" onclick="dismissWelcome()" style="flex:1;height:42px;font-size:14px;font-weight:700">✓ فهمت، يلا نبدأ</button>'
+    +   '</div>'
+    + '</div>';
+}
+function _welcomeStep(n, ic, title, body){
+  return '<div style="display:flex;gap:12px;align-items:flex-start;background:var(--surface-2);padding:11px 13px;border-radius:10px">'
+       +   '<div style="background:var(--gold);color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 28px">'+n+'</div>'
+       +   '<div style="flex:1;min-width:0">'
+       +     '<div style="font-weight:700;margin-bottom:2px">'+ic+' '+esc(title)+'</div>'
+       +     '<div class="muted" style="font-size:12px">'+esc(body)+'</div>'
+       +   '</div>'
+       + '</div>';
+}
+function dismissWelcome(){
+  try { localStorage.setItem(WELCOME_LS_KEY, '1'); } catch(_){}
+  const ov = document.getElementById('welcomeOverlay'); if(ov) ov.remove();
+}
+
 function go(id){
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
@@ -6902,6 +7116,8 @@ async function init(){
     document.getElementById('app').style.display='block';
     applyTheme(); applyLang();
     await loadAll();
+    _applyHelpDismissals();
+    maybeShowWelcome();
     setInterval(loadAll, 15000);
   }catch(e){
     document.getElementById('lerr').textContent = t().wrong;
