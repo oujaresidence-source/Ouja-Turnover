@@ -7742,7 +7742,7 @@ function go(id){
   const mhT = document.getElementById('mhead_title'); if(mhT) mhT.textContent = t()[id] || t().home;
   window.scrollTo({top:0});
   if(id==='today' && !D.tonight) loadTodayEmpty();
-  if(id==='pricing' && !D.pr) loadPricing();
+  if(id==='pricing' && (!D.pr || D.pr.loading)) loadPricing();
   if(id==='strat' && !D.strat) loadStrategies();
   if(id==='rev' && (!D.rev || D.rev.loading)) loadRevenue();
   if(id==='log') renderLog();
@@ -10471,7 +10471,15 @@ function renderEmptyUnitCard(u){
 function renderPricing(){
   const d = D.pr; const tot = document.getElementById('prTotalBody');
   const body = document.getElementById('prListBody');
-  if(!d || d.loading){ body.innerHTML='<div class="empty">…</div>'; tot.innerHTML=''; return }
+  if(!d || d.loading){
+    body.innerHTML='<div class="empty">…</div>'; tot.innerHTML='';
+    // keep retrying while the backend warms the (calendar-heavy) pricing cache
+    clearTimeout(window._prPoll);
+    if(document.getElementById('view_pricing') && document.getElementById('view_pricing').classList.contains('on')){
+      window._prPoll = setTimeout(loadPricing, 6000);
+    }
+    return }
+  if(d.error){ body.innerHTML='<div class="empty">⚠ '+esc(d.error)+'</div>'; tot.innerHTML=''; return }
   const units = d.units||[];
   document.getElementById('prListCount').textContent = units.length?'· '+units.length:'';
   tot.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">'
@@ -10625,8 +10633,9 @@ function renderStrategyDetail(lid, s){
    ============================================================ */
 function renderRevenueFull(){
   const rev = D.rev||{};
-  const monthly = (rev.monthly||[]).slice(-12);
   const mBody = document.getElementById('revMonthlyBody');
+  if(rev.error){ if(mBody) mBody.innerHTML='<div class="empty">⚠ '+esc(rev.error)+'</div>'; return }
+  const monthly = (rev.monthly||[]).slice(-12);
   if(monthly.length){
     const max = Math.max.apply(null, monthly.map(function(m){return m.rev}));
     const bars = monthly.map(function(m){
@@ -11358,6 +11367,27 @@ def _cache_get(key):
     hit = _dash_cache.get(key)
     return hit[0] if hit else None
 
+_cache_inflight = set()
+
+def _kick_compute(key, compute_fn):
+    """Lazy warm: if `key` isn't cached and no compute is already running, start one
+    in the background. This guarantees a page request triggers the computation even if
+    the periodic cache loop is slow or hasn't run yet. Errors are cached (briefly) so
+    the page shows the real problem instead of spinning forever."""
+    if _cache_get(key) is not None or key in _cache_inflight:
+        return
+    _cache_inflight.add(key)
+    async def _runner():
+        try:
+            val = await asyncio.to_thread(compute_fn)
+            _dash_cache[key] = (val, time.time())
+        except Exception as e:
+            print(f"lazy {key} compute error:", e)
+            _dash_cache[key] = ({"error": str(e)[:300]}, time.time())
+        finally:
+            _cache_inflight.discard(key)
+    asyncio.create_task(_runner())
+
 def _live_counts():
     return {"pending_cards": len(_pending_replies),
             "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by"))}
@@ -11502,13 +11532,19 @@ async def _api_revenue(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     d = _cache_get("revenue")
-    return _json(d if d else {"loading": True})
+    if d is None:
+        _kick_compute("revenue", _compute_revenue)
+        return _json({"loading": True})
+    return _json(d)
 
 async def _api_pricing(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     d = _cache_get("pricing")
-    return _json(d if d else {"loading": True})
+    if d is None:
+        _kick_compute("pricing", _compute_pricing)
+        return _json({"loading": True})
+    return _json(d)
 
 async def _api_log(request):
     if not _dash_auth(request):
