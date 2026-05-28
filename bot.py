@@ -685,6 +685,104 @@ def _is_agreement_signed(r):
         return True
     return False
 
+# ---- Per-listing "requires-rental-agreement" detection ----
+# Some Ouja units require a signed agreement before the access code is released;
+# others don't (no agreement at all). Read it from the Hostaway listing config
+# and cache per-listing for 6h.
+_listing_agreement_cache = {}    # lid -> {"required": bool, "ts": cached_at}
+
+def _unit_requires_agreement(lid):
+    """True if this listing needs a signed rental agreement. False if Hostaway
+    config clearly indicates 'no agreement'. Defaults to True (the safer side)
+    if we can't determine — better to remind a guest unnecessarily than to
+    silently miss one."""
+    if not lid:
+        return True
+    cached = _listing_agreement_cache.get(int(lid))
+    if cached and (time.time() - cached["ts"]) < 6 * 3600:
+        return cached["required"]
+    required = True
+    try:
+        data = api_get(f"/listings/{lid}", params={"includeResources": 1})
+        L = data.get("result") or {}
+        # Explicit "off" markers — any of these = no agreement
+        for k in ("requireRentalAgreement", "hasRentalAgreement",
+                  "useRentalAgreement", "rentalAgreementRequired"):
+            v = L.get(k)
+            if v in (False, 0, "0", "false", "False", "no"):
+                required = False
+                break
+            if v in (True, 1, "1", "true", "True", "yes"):
+                required = True
+                break
+        else:
+            # No explicit toggle — look for a populated agreement template/id
+            has_template = any(L.get(k) for k in
+                               ("rentalAgreementId", "rentalAgreementTemplate",
+                                "rentalAgreement", "agreementId", "contractId"))
+            # Also scan listing JSON for "rental agreement" mentions as a hint
+            blob = json.dumps(L, ensure_ascii=False).lower()
+            mentions = "rental_agreement" in blob or "rentalagreement" in blob \
+                       or "ايجار" in blob or "اتفاقية" in blob or "العقد" in blob
+            required = bool(has_template or mentions)
+    except Exception as e:
+        print(f"_unit_requires_agreement error ({lid}):", e)
+    _listing_agreement_cache[int(lid)] = {"required": required, "ts": time.time()}
+    return required
+
+def _is_unit_ready_for_checkin(lid):
+    """Live check: is there still an open turnover-cleaning Discord channel for
+    this unit? If yes → cleaning is in progress and the unit is NOT ready. If no
+    such channel exists, treat the unit as ready."""
+    if not lid:
+        return True
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return True
+    category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+    if category is None:
+        return True
+    listings = get_listings_map() or {}
+    name = listings.get(int(lid)) or listings.get(lid) or ""
+    if not name:
+        return True
+    expected = channel_name(name)
+    for ch in category.text_channels:
+        if ch.name == expected:
+            return False     # cleaning channel still open
+    return True
+
+# Heuristic: did we (the host side) send a door code to the guest in the last N hours?
+_CODE_KEYWORDS_AR = ("كود", "رمز", "كلمة المرور", "كلمة مرور", "الباسوورد", "باسوورد", "رمز الدخول")
+_CODE_KEYWORDS_EN = ("code", "access code", "door code", "passcode", "password")
+def _was_code_sent_recently(conversation_id, since_hours=24):
+    """Scan host-side messages in the conversation for code-like content (4-6 digit
+    number near a code keyword) sent within the last N hours. Returns True if found."""
+    if not conversation_id:
+        return False
+    try:
+        data = api_get(f"/conversations/{conversation_id}/messages")
+        msgs = data.get("result") or []
+    except Exception as e:
+        print(f"_was_code_sent_recently fetch error ({conversation_id}):", e)
+        return False
+    cutoff = datetime.now(TZ) - timedelta(hours=since_hours)
+    for m in msgs:
+        if _msg_is_inbound(m):
+            continue
+        body = (m.get("body") or "")
+        if not body:
+            continue
+        ts = _parse_msg_dt(_msg_time(m))
+        if ts and ts < cutoff:
+            continue
+        if not re.search(r"\b\d{4,6}\b", body):
+            continue
+        low = body.lower()
+        if any(kw in low for kw in _CODE_KEYWORDS_EN) or any(kw in body for kw in _CODE_KEYWORDS_AR):
+            return True
+    return False
+
 # Phrases that suggest the guest is asking for early check-in. Match in either lang.
 _EARLY_CHECKIN_HINTS = [
     # Arabic
@@ -816,40 +914,162 @@ def _reminder_message_en(link):
         f"open or anything's unclear, reply here and we'll help right away."
     )
 
+# Track which reservations we've already system-escalated about so we don't spam
+_code_escalated = set()       # reservation_ids where we already escalated "code wasn't sent"
+_not_ready_escalated = set()  # reservation_ids where we already escalated "apartment not ready"
+
+async def _post_system_escalation(title, detail, severity="high"):
+    """Post a system-generated escalation card to #escalations (no guest message needed).
+    Pings operations role for high severity."""
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        category = await get_assistant_category(guild)
+        esc_ch = await ensure_channel(guild, ESCALATION_CHANNEL, category)
+        if esc_ch is None:
+            return
+        op_role = find_operation_role(guild)
+        mention = op_role.mention if (op_role and severity == "high") else ""
+        color = 0xD64545 if severity == "high" else 0xE0A22F
+        embed = discord.Embed(title=f"⚠ {title}", description=detail, color=color)
+        embed.set_footer(text="تصعيد آلي من النظام · يحتاج تدخّل بشري")
+        await esc_ch.send(content=mention or None, embed=embed,
+                          allowed_mentions=discord.AllowedMentions(roles=True))
+        log_event("escalation", f"تصعيد نظام · {title}")
+    except Exception as e:
+        print("system escalation error:", e)
+
 def _check_agreement_for_one(r, now):
-    """Single-reservation evaluation. Returns True if we sent a reminder."""
+    """Per-reservation evaluation with the new smart logic:
+      1) If THIS LISTING doesn't require an agreement → skip step 2, jump to 3.
+      2) If agreement required + NOT signed + check-in close → resend signing link.
+      3) Either way: if check-in time has PASSED + no door-code message has been
+         sent to the guest in last 24h:
+            - apartment NOT ready (cleaning still ongoing) → tell the guest the
+              unit is being prepared, AND raise a system escalation telling ops
+              to follow up once cleaning completes.
+            - apartment IS ready + still no code → raise a HIGH escalation to
+              operations: "code wasn't sent, please send it now."
+    Returns True if we took ANY action (so the loop logs it)."""
     res_id = r.get("id")
-    if not res_id or res_id in _agreement_reminded:
+    if not res_id:
         return False
     if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
         return False
     arrival = _parse_date(r.get("arrivalDate"))
     if not arrival or arrival != now.date():
-        return False                                       # only act on TODAY's arrivals
-    if _is_agreement_signed(r):
-        return False                                       # already signed, nothing to do
+        return False
     hour = parse_hour(r.get("checkInTime"), 15)
     checkin_dt = datetime(arrival.year, arrival.month, arrival.day,
                           min(hour, 23), 0, tzinfo=TZ)
     hours_until = (checkin_dt - now).total_seconds() / 3600.0
-    if not (0 < hours_until <= AGREEMENT_REMINDER_LEAD_HOURS):
-        return False
+    lid = r.get("listingMapId")
+    listings = get_listings_map() or {}
+    unit_name = listings.get(lid, f"unit-{lid}")
+    guest_name = r.get("guestName") or "ضيف"
     cid = r.get("conversationId")
-    link = find_agreement_url(cid)
-    if not link:
-        print(f"  agreement-reminder: res {res_id} not signed, but no signing URL found in conversation")
-        return False
-    is_ar = _has_arabic((r.get("guestName") or "")) or True   # default Arabic for KSA guests
-    body = _reminder_message_ar(link) if is_ar else _reminder_message_en(link)
-    try:
-        send_guest_message(cid, body, "email")
-        _agreement_reminded.add(res_id)
-        log_event("guest", f"تذكير توقيع العقد · {r.get('guestName','ضيف')} · check-in بعد {hours_until:.1f}س")
-        print(f"  agreement-reminder: nudged res {res_id} (check-in in {hours_until:.1f}h)")
-        return True
-    except Exception as e:
-        print(f"agreement-reminder send error (res {res_id}):", e)
-        return False
+    action_taken = False
+
+    # ---- Step 1+2: Agreement-not-signed reminder (only when listing requires it) ----
+    needs_agreement = _unit_requires_agreement(lid)
+    signed = _is_agreement_signed(r)
+    if needs_agreement and not signed:
+        if res_id not in _agreement_reminded \
+           and 0 < hours_until <= AGREEMENT_REMINDER_LEAD_HOURS:
+            link = find_agreement_url(cid)
+            if link:
+                is_ar = _has_arabic(guest_name) or True
+                body = _reminder_message_ar(link) if is_ar else _reminder_message_en(link)
+                try:
+                    send_guest_message(cid, body, "email")
+                    _agreement_reminded.add(res_id)
+                    log_event("guest", f"تذكير توقيع العقد · {guest_name} · {unit_name} · "
+                                       f"check-in بعد {hours_until:.1f}س")
+                    action_taken = True
+                except Exception as e:
+                    print(f"agreement-reminder send error (res {res_id}):", e)
+            else:
+                print(f"  agreement-reminder: res {res_id} ({unit_name}) needs agreement but "
+                      f"no signing URL found in conversation")
+
+    # ---- Step 3: Check-in time has PASSED and no code arrived ----
+    # Skip if the agreement IS required but NOT signed — the signing reminder above
+    # is the right action; code shouldn't be released until signing.
+    if needs_agreement and not signed:
+        return action_taken
+    # Only act once check-in has actually passed (the team should've sent the code by now).
+    if hours_until > 0:
+        return action_taken
+    # Are they already in? Heuristic: code was sent in the last 24h.
+    if _was_code_sent_recently(cid, since_hours=24):
+        return action_taken
+    # Is the apartment even ready?
+    ready = _is_unit_ready_for_checkin(lid)
+    if not ready and res_id not in _not_ready_escalated:
+        # Tell the guest the apartment is being prepared (no code yet — we never send it)
+        is_ar = _has_arabic(guest_name) or True
+        msg = (
+            f"حياك الله 🤍\nالشقة الحين قاعدين يجهّزونها — تنظيف عميق قبل وصولك. "
+            f"الكود بيُرسَل لك مباشرة من الفريق المختص فور ما تكون جاهزة. "
+            f"شكراً لصبرك ودقايق وراح نعطيك تأكيد."
+            if is_ar else
+            f"Hi 🤍\nThe apartment is being prepped right now — a deep clean before you arrive. "
+            f"Our team will send the access code directly the moment it's ready. "
+            f"Thanks for your patience — confirmation coming shortly."
+        )
+        try:
+            send_guest_message(cid, msg, "email")
+            _not_ready_escalated.add(res_id)
+            action_taken = True
+        except Exception as e:
+            print(f"not-ready guest msg error: {e}")
+        # Also raise a med-severity escalation so ops can track the cleaning bottleneck
+        try:
+            import asyncio as _aio
+            _aio.create_task(_post_system_escalation(
+                title=f"🧹 شقة لم تجهز بعد · {unit_name}",
+                detail=(f"الضيف **{guest_name}** موعد دخوله مرّ بـ{abs(hours_until):.1f}س "
+                        f"والكود ما أُرسل لأن قناة التنظيف لـ **{unit_name}** "
+                        f"لازالت مفتوحة. تابعوا التنظيف ثم أرسلوا الكود."),
+                severity="med",
+            ))
+        except Exception as e:
+            print(f"not-ready escalation post error: {e}")
+        log_event("escalation", f"شقة لم تجهز · {unit_name} · {guest_name}")
+        return action_taken
+    if ready and res_id not in _code_escalated:
+        # Apartment is ready, agreement is fine (or not required), but no code went out.
+        # → operations team needs to send the code manually. The bot NEVER sends it.
+        is_ar = _has_arabic(guest_name) or True
+        guest_msg = (
+            f"حياك الله 🤍\nرفعت طلبك للفريق المختص الحين، وراح يوصلك كود الدخول "
+            f"خلال دقائق. آسفين على التأخير."
+            if is_ar else
+            f"Hi 🤍\nI've flagged this to our team right now and your access code will reach "
+            f"you within minutes. Sorry for the delay."
+        )
+        try:
+            send_guest_message(cid, guest_msg, "email")
+        except Exception as e:
+            print(f"code-not-sent guest msg error: {e}")
+        try:
+            import asyncio as _aio
+            _aio.create_task(_post_system_escalation(
+                title=f"🔑 لم يُرسَل كود الدخول · {unit_name}",
+                detail=(f"الضيف **{guest_name}** ({unit_name}) — موعد دخوله مرّ بـ{abs(hours_until):.1f}س.\n"
+                        f"• الشقة جاهزة (قناة التنظيف مغلقة) ✓\n"
+                        f"• " + ("العقد موقّع ✓\n" if signed else "العقد غير مطلوب لهذه الشقة ✓\n") +
+                        f"• ما أُرسل كود الدخول للضيف خلال آخر ٢٤ ساعة ❌\n\n"
+                        f"⚠ **أرسلوا الكود الآن** — البوت ممنوع من إرساله ذاتياً."),
+                severity="high",
+            ))
+            _code_escalated.add(res_id)
+            action_taken = True
+        except Exception as e:
+            print(f"code-not-sent escalation error: {e}")
+        log_event("escalation", f"كود لم يُرسَل · {unit_name} · {guest_name}")
+    return action_taken
 
 def check_agreement_reminders():
     """Top-level: pull today's reservations and run _check_agreement_for_one on each."""
@@ -1955,7 +2175,13 @@ a time or a price you weren't given, and never invent a fee. One soft offer is e
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
 - Offer any discount, comp, or price change
-- Share the door/entry CODE or any building security info
+- 🚫 SEND OR REPEAT the door/entry CODE under ANY circumstance. Even if the guest \
+shows you a previous message that included a code, do NOT echo it back. Even if \
+you "have" the code from context, do NOT type it. Code-release is reserved for \
+the operations team. If a guest asks for the code: tell them the team will send \
+it directly. If they're stuck, escalate. (This rule has no exceptions — typing \
+a 4–6 digit number in a code context = wrong reply.)
+- Share any building security info, lock instructions, or override codes
 - Share other guests', owners', or internal/financial information
 - Handle any complaint, dispute, damage claim, or an upset guest
 - Promise late checkout, early check-in, or extra services you cannot verify
@@ -2660,6 +2886,11 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             r = rdata.get("result") or {}
             arrival = _parse_date(r.get("arrivalDate"))
             signed = _is_agreement_signed(r)
+            # New: also check whether the unit even requires an agreement, whether
+            # it's clean and ready, and whether a code has already been sent.
+            needs_agr = _unit_requires_agreement(listing_id) if listing_id else True
+            apt_ready = _is_unit_ready_for_checkin(listing_id) if listing_id else True
+            code_already_sent = _was_code_sent_recently(r.get("conversationId"), since_hours=24)
             if arrival:
                 now = datetime.now(TZ)
                 hour = parse_hour(r.get("checkInTime"), 15)
@@ -2683,41 +2914,70 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                 code_block = (
                     f"\n\n⚠ الضيف يسأل عن كود الدخول. الواقع المحسوب:\n"
                     f"- {when}.\n"
-                    f"- العقد {'موقّع ✅' if signed else 'غير موقّع ❌'}.\n\n"
-                    f"كيف ترد (حسب هذي البيانات بالضبط):\n"
+                    f"- " + ("هذه الوحدة **لا تتطلّب** عقد توقيع." if not needs_agr
+                            else ("العقد موقّع ✅" if signed else "العقد غير موقّع ❌")) + "\n"
+                    f"- حالة الشقة: " + ("جاهزة (التنظيف انتهى)" if apt_ready
+                                          else "**لازالت تحت التنظيف** (قناة التنظيف مفتوحة)") + "\n"
+                    f"- " + ("الكود **أُرسل** للضيف خلال آخر ٢٤ ساعة ✅" if code_already_sent
+                            else "الكود **لم يُرسَل** بعد ❌") + "\n\n"
+                    "🚫 قاعدة لا تُكسر: ممنوع تكتب أي كود أو رقم أرقام بسياق الدخول. "
+                    "ممنوع تكرّر كود ذكره الضيف. الكود يرسله الفريق المختص فقط، لا أنت ولا "
+                    "أي رد آلي.\n\n"
+                    "كيف ترد (حسب الحالة بالضبط):\n"
                 )
-                if not signed and hrs < 48:
+                if needs_agr and not signed:
+                    if hrs < 48:
+                        code_block += (
+                            "- العقد لازم يُوقَّع قبل ما يُفرَج الكود. اشرح ذلك بلطف، وقل "
+                            "إن الكود يُرسَل تلقائياً فور التوقيع. لو الرابط في رسالة سابقة "
+                            "وجّهه يفتحه، أو قل إن الفريق راح يعيد إرساله. action='reply'."
+                        )
+                    else:
+                        code_block += (
+                            "- العقد لازم يوقّع قبل الدخول لكن التشيك-إن بعيد. ذكّره بلطف "
+                            "إن خطوة التوقيع لازمة، والكود بيوصله بعدها."
+                        )
+                elif not apt_ready and hrs < 6:
                     code_block += (
-                        "- العقد غير موقّع، فالكود مايوصل إلا بعد التوقيع. اشرح له ذلك بلطف، "
-                        "وقول إن الكود يُرسَل تلقائياً فور توقيعه. لو الرابط في رسالة سابقة "
-                        "اطلب منه يفتحها، أو قل إن الفريق راح يعيد إرساله. action='reply'."
+                        "- الشقة لازالت تحت التنظيف، ولهذا ما وصله الكود بعد. اعتذر بلطف وقل "
+                        "إن الفريق المختص بيرسل الكود فور ما تجهز الوحدة. action='reply'. "
+                        "ممنوع تذكر وقت محدد لجاهزية الشقة."
                     )
-                elif not signed:
+                elif not code_already_sent and hrs <= 0 and apt_ready:
+                    # Apartment ready, agreement fine, but no code went out. Ops team
+                    # needs to act. The bot already auto-escalates from the reminder
+                    # loop — here just tell the guest the team is on it.
                     code_block += (
-                        "- العقد لسه غير موقّع لكن التشيك-إن بعيد. ذكّره بلطف إنه يحتاج "
-                        "يوقّع قبل الدخول، والكود بيوصله بعد التوقيع."
+                        "- الشقة جاهزة والعقد سليم، لكن الكود ما وصل للضيف بعد. "
+                        "اعتذر بصدق وقول إنك رفعت طلبه للفريق المختص الحين، والكود "
+                        "بيوصله خلال دقائق. action='reply'. **لا تكتب أي كود تحت أي ظرف.**"
+                    )
+                elif hrs < -2:
+                    code_block += (
+                        "- موعد التشيك-إن مضى. لو الكود اللي بحوزتك في المحادثة لازال غير ذي "
+                        "صلاحية، اطلب من الضيف يفحص بريده/Spam ورسائل Airbnb/Hostaway. لو ما "
+                        "لقاه قول إن الفريق يتحقّق فوراً. action='reply'."
                     )
                 elif hrs < 0:
                     code_block += (
-                        "- العقد موقّع والوقت مضى. الكود كان لازم وصله. اطلب منه يفحص "
-                        "البريد بما فيها Spam، ورسائل Airbnb/Hostaway. لو ما لقاه action='reply' "
-                        "وقل إن الفريق يتحقّق فوراً."
+                        "- موعد التشيك-إن حلّ. اطلب من الضيف يفحص رسائله، وإذا ما وصله "
+                        "action='reply' عشان الفريق يتأكد."
                     )
                 elif hrs < 6:
                     code_block += (
-                        "- العقد موقّع والتشيك-إن قريب جداً. اطلب منه يفحص البريد + Spam، "
-                        "وإذا ما وصله بعد، action='reply' عشان الفريق يتأكد."
+                        "- التشيك-إن قريب جداً. اطلب منه يفحص الرسائل + Spam، وإذا ما وصله "
+                        "بعد action='reply'."
                     )
                 elif hrs < 48:
                     code_block += (
-                        "- العقد موقّع، الكود يوصل عادةً قبل التشيك-إن ببضع ساعات. طمّنه "
-                        "إنه بيوصله في وقته قبل دخوله. **لا تقول له رقم ثابت مثل '٥ أيام'**."
+                        "- التشيك-إن قريب. طمّنه إن الكود بيوصله قبل دخوله ببضع ساعات. "
+                        "**لا تقول رقم ثابت مثل '٥ أيام'**."
                     )
                 else:
                     code_block += (
-                        "- التشيك-إن بعيد لسه، فالكود ما يُرسل الآن. طمّنه إنه بيوصله قبل "
-                        "دخوله ببضع ساعات بإذن الله. **لا تخترع رقم ثابت — لا تقول '٥ أيام قبل' "
-                        "ولا '٤٨ ساعة قبل' — قول 'قبل دخولك ببضع ساعات' فقط**."
+                        "- التشيك-إن بعيد، فالكود ما يُرسل الآن. طمّنه إنه بيوصله قبل دخوله "
+                        "ببضع ساعات بإذن الله. **لا تخترع رقم ثابت — قول 'قبل دخولك ببضع "
+                        "ساعات' فقط**."
                     )
         except Exception as e:
             print(f"code_question_context error: {e}")
@@ -9691,8 +9951,13 @@ async def deepclean_confirm_loop():
 @tasks.loop(time=dt_time(hour=WORK_START_HOUR, tzinfo=TZ))
 async def offhours_ack_reset_loop():
     """At the start of every working day, clear the set of conversations that already
-    got an off-hours auto-ack so they can be re-acked next time we go offline."""
+    got an off-hours auto-ack so they can be re-acked next time we go offline.
+    Also reset the per-day system-escalation dedupe sets so a recurring issue can
+    re-escalate (still per-reservation, just not stuck forever)."""
     _offhours_acked_convos.clear()
+    # We DO keep _code_escalated / _not_ready_escalated for full reservation
+    # lifetime — once we've escalated a given reservation we don't want to
+    # spam ops. The state persists across redeploys.
 
 @tasks.loop(time=dt_time(hour=WILT_HOUR, tzinfo=TZ))
 async def wilt_loop():
@@ -9811,6 +10076,8 @@ def load_state():
         _apartment_learnings.update({int(k): v for k, v in _load_json("apartment_learnings.json", {}).items()})
         _general_learnings.update(_load_json("general_learnings.json", {"summary": "", "last_distilled": 0, "examples_count": 0}))
         _agreement_reminded = set(int(x) for x in _load_json("agreement_reminded.json", []) if str(x).strip())
+        _code_escalated.update(int(x) for x in _load_json("code_escalated.json", []) if str(x).strip())
+        _not_ready_escalated.update(int(x) for x in _load_json("not_ready_escalated.json", []) if str(x).strip())
         _daily_metrics.clear()
         _daily_metrics.update(_load_json("daily_metrics.json", {}))
         _custom_events.clear()
@@ -9846,6 +10113,8 @@ def persist_state():
     _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
     _save_json("general_learnings.json", _general_learnings)
     _save_json("agreement_reminded.json", list(_agreement_reminded))
+    _save_json("code_escalated.json", list(_code_escalated))
+    _save_json("not_ready_escalated.json", list(_not_ready_escalated))
     # cap to last 120 days to keep the JSON small
     if len(_daily_metrics) > 120:
         keep = sorted(_daily_metrics.keys())[-120:]
