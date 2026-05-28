@@ -4998,9 +4998,11 @@ def _ticket_from_escalation(esc_id, esc):
         created_by="bot",
     )
 
-def fetch_reviews_from_hostaway(limit=300, page_size=100):
+def fetch_reviews_from_hostaway(limit=20000, page_size=100):
     """Pull recent reviews from Hostaway across all listings. Returns list of
-    normalised review dicts (newest first). Caps at `limit` to keep cost sane."""
+    normalised review dicts (newest first). Default cap is 20k — effectively
+    "all of them" for any account we'd reasonably serve. The owner's account
+    has ~14.6k reviews on disk so this comfortably covers every published one."""
     out = []
     offset = 0
     while len(out) < limit:
@@ -5023,16 +5025,20 @@ def fetch_reviews_from_hostaway(limit=300, page_size=100):
                 rating_5 = int(round(float(rating_10) / 2)) if rating_10 else 0
             except Exception:
                 rating_5 = 0
+            # Try multiple date fields — Hostaway varies between endpoints
+            date_str = (r.get("submittedAt") or r.get("departureDate")
+                        or r.get("insertedOn") or r.get("date") or "")
             out.append({
                 "id": rid,
                 "listing_id": r.get("listingMapId") or r.get("listingId"),
                 "rating": rating_5,
                 "rating_raw": rating_10,
-                "guest_name": (r.get("guestName") or r.get("guest_name") or "").strip(),
+                "guest_name": (r.get("guestName") or r.get("guest_name")
+                               or r.get("reviewerName") or "").strip(),
                 "public_review": (r.get("publicReview") or r.get("public_review") or "").strip(),
                 "private_review": (r.get("privateReview") or "").strip(),
                 "channel": (r.get("channelName") or r.get("channel") or "").strip() or "Airbnb",
-                "date": (r.get("departureDate") or r.get("date") or "")[:10],
+                "date": str(date_str)[:10] if date_str else "",
                 "is_public": bool(r.get("isPublic", True)),
                 "reservation_id": r.get("reservationId"),
                 "raw": r,
@@ -5054,19 +5060,39 @@ def refresh_reviews():
 # AI prompt for review analysis — applies AAA framework (Acknowledge, Apologize,
 # Act) + Ritz-Carlton "ladies and gentlemen" tone for public responses, and the
 # Airbnb review-removal policy rubric for the dispute analysis.
+# Includes a "positive review" branch: short, warm, witty (ذرب) Najdi thank-yous.
 _REVIEW_AI_SYSTEM = (
-    "You are an expert reputation manager for Ouja Residence — a Saudi luxury "
-    "short-term-rental brand in Riyadh. You handle Airbnb / Booking reviews. "
-    "For each review you receive, produce a single JSON object with EXACTLY "
-    "these keys (no extra prose, no fences):\n"
+    "You are the warm, sharp-witted (ذرب) public-face of Ouja Residence — a "
+    "Saudi luxury short-term-rental brand in Riyadh. You handle every review "
+    "(positive and negative) from Airbnb / Booking. For each review you "
+    "receive, output a SINGLE JSON object with EXACTLY these keys (no extra "
+    "prose, no markdown fences):\n"
     "{\n"
-    '  "removability": "high" | "medium" | "low",\n'
-    '  "removability_reason_ar": "one-paragraph Arabic explanation",\n'
-    '  "dispute_angle_ar": "Arabic note for the team — the policy angle to argue",\n'
-    '  "dispute_message_en": "polished English message to Airbnb support",\n'
+    '  "removability": "high" | "medium" | "low" | "none",\n'
+    '  "removability_reason_ar": "one-paragraph Arabic explanation (or empty if positive)",\n'
+    '  "dispute_angle_ar": "Arabic note for the team — empty if positive",\n'
+    '  "dispute_message_en": "polished English message to Airbnb support — empty if positive",\n'
     '  "public_response_ar": "Arabic public reply",\n'
-    '  "public_response_en": "English public reply"\n'
+    '  "public_response_en": "English public reply",\n'
+    '  "is_positive": true | false\n'
     "}\n\n"
+    "FIRST decide: is this review positive (4-5 stars / ≥ 8 of 10) or negative?\n\n"
+    "================ POSITIVE PATH (4-5 stars) ================\n"
+    "• removability = \"none\". Leave removability_reason_ar, dispute_angle_ar, "
+    "dispute_message_en as empty strings.\n"
+    "• is_positive = true.\n"
+    "• Write a SHORT (1-3 sentences), warm, witty, personal Najdi/Saudi thank-you. "
+    "Make it ذرب: sharp, friendly, has personality — NOT robotic, NOT corporate. "
+    "Address the guest by FIRST NAME if available. Reference something specific "
+    "from their review when possible (e.g. they mentioned the TV → mention the TV). "
+    "Use natural Saudi expressions like: \"يا غالينا\"، \"نورتونا\"، \"تكفون "
+    "رجعوا\"، \"ما يطيب الكلام منكم\"، \"الشرف لنا\". Avoid bland phrases like "
+    "'thank you for your feedback'. Close Arabic with: 'فريق عوجا للسكن 🌿' "
+    "(NO formal sign-off). Close English with: 'Warm regards, OUJA Residence 🌿'.\n\n"
+    "================ NEGATIVE PATH (1-3 stars or complaint) ================\n"
+    "• Set removability per the rubric below.\n"
+    "• is_positive = false.\n"
+    "• Fill ALL fields including dispute message + public response.\n\n"
     "REMOVABILITY RUBRIC (Airbnb policies as of 2024):\n"
     "• HIGH = clear policy violation: extortion/threats, content unrelated to "
     "the stay, discriminatory language, complaint about something out of host "
@@ -5076,12 +5102,12 @@ _REVIEW_AI_SYSTEM = (
     "complaints.\n"
     "• LOW = legitimate complaint about a real issue → cannot be removed, "
     "respond publicly instead.\n\n"
-    "DISPUTE MESSAGE (English) — only meaningful for HIGH/MEDIUM:\n"
+    "DISPUTE MESSAGE (English) — HIGH/MEDIUM only:\n"
     "• Address Airbnb support directly, polite and concise.\n"
     "• Cite the specific policy clause being violated.\n"
     "• Reference the review ID and listing if available.\n"
     "• Close: 'Thank you, Ouja Residence team.'\n\n"
-    "PUBLIC RESPONSE — use the AAA framework + Ritz-Carlton tone:\n"
+    "NEGATIVE PUBLIC RESPONSE — AAA framework + Ritz-Carlton tone:\n"
     "  A1. ACKNOWLEDGE  — thank the guest by name, validate their experience.\n"
     "  A2. APOLOGIZE    — sincere apology for the specific pain point only if "
     "the complaint is legitimate; never grovel; never admit liability you don't have.\n"
@@ -5091,10 +5117,31 @@ _REVIEW_AI_SYSTEM = (
     "• Length: 3–5 sentences total.\n"
     "• Close Arabic with: 'مع أطيب التحيات، فريق عوجا للسكن'\n"
     "• Close English with: 'Warm regards, OUJA RESIDENCE'\n\n"
-    "DIALECT (Arabic): white-Saudi/Najdi. No Egyptian, Levantine, Iraqi, or "
-    "Maghrebi words. Examples of words to AVOID: دلوقتي، إيه، بدك، كمان، شو، "
-    "هلق، بكير. Use: الحين، إيش، تبي، أيضاً، وش، الحين، بدري."
+    "DIALECT (Arabic, BOTH paths): white-Saudi/Najdi. No Egyptian, Levantine, "
+    "Iraqi, or Maghrebi words. Examples of words to AVOID: دلوقتي، إيه، بدك، "
+    "كمان، شو، هلق، بكير. Use: الحين، إيش، تبي، أيضاً، وش، بدري."
 )
+
+# Lightweight translator for guest review text — used when an EN-only employee
+# is reading an Arabic review. Cached per review so we don't re-pay.
+_REVIEW_TRANSLATE_SYSTEM = (
+    "You translate Airbnb / Booking review text. Preserve tone (positive, "
+    "negative, sarcastic). Return ONLY the translated text — no preamble, "
+    "no quotes, no explanation. If the input is already in English, return "
+    "it unchanged. If the input is empty, return an empty string."
+)
+
+def claude_translate_review_text(text, target="en"):
+    """Translate review text to target lang. Returns the translated string."""
+    if not text or not text.strip() or not ANTHROPIC_API_KEY:
+        return text or ""
+    sys_prompt = _REVIEW_TRANSLATE_SYSTEM
+    if target == "en":
+        user = "Translate to natural English:\n\n" + text
+    else:
+        user = "Translate to natural Saudi Arabic:\n\n" + text
+    out = claude_text(sys_prompt, user, max_tokens=600)
+    return (out or text).strip()
 
 def claude_analyze_review(review):
     """Return the AI cache dict for a review (5 fields). Cached by review id —
@@ -5153,6 +5200,7 @@ def claude_analyze_review(review):
 _reviews = {}            # rev_id -> raw review dict
 _review_ai_cache = {}    # rev_id -> AI analysis dict
 _review_states = {}      # rev_id -> manual state dict
+_review_translations = {}  # rev_id -> {"en": "...", "ar": "..."} cached translations
 _reviews_last_fetch = 0  # epoch seconds
 
 # Owner's chosen "queue start" anchor. Set by /api/cleaning/reschedule-from and
@@ -6233,22 +6281,43 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="kpis" id="rvStats"></div>
 
+        <!-- Time-window filter strip (the key user-asked feature) -->
+        <div class="card" style="padding:12px 14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+            <div style="display:flex;flex-wrap:wrap;gap:6px" id="rvTimeFilterStrip">
+              <!-- chips rendered by JS -->
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+              <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-2);cursor:pointer">
+                <input type="checkbox" id="rvShowEnglish" onchange="loadReviews()" style="cursor:pointer">
+                <span>ترجم للإنجليزي تلقائياً</span>
+              </label>
+              <button class="btn primary sm" onclick="bulkAnalyzeReviews()" id="rvBulkBtn" title="حلل كل المراجعات الظاهرة دفعة وحدة">🤖 حلّل الكل (٢٥)</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <span class="card-title">📋 المراجعات حسب الشقة</span>
             <div class="card-actions" style="flex-wrap:wrap;gap:6px">
+              <select id="rvFilterSent" onchange="loadReviews()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="">كل المشاعر</option>
+                <option value="positive">إيجابية (٤-٥ ⭐)</option>
+                <option value="negative">سلبية (≤٣ ⭐)</option>
+              </select>
               <select id="rvFilterUrg" onchange="loadReviews()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
                 <option value="">كل المستويات</option>
                 <option value="urgent">حرجة</option>
                 <option value="warning">سلبية</option>
-                <option value="normal">إيجابية</option>
+                <option value="normal">عادية</option>
               </select>
               <select id="rvFilterFixed" onchange="loadReviews()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
                 <option value="">الكل</option>
                 <option value="0">غير محلولة</option>
                 <option value="1">محلولة</option>
               </select>
-              <input id="rvSearch" placeholder="ابحث بنص المراجعة أو اسم الضيف…" oninput="_rvSearchDeb()" style="width:240px;padding:6px 10px;height:32px;font-size:12px">
+              <input id="rvSearch" placeholder="ابحث بنص المراجعة أو اسم الضيف…" oninput="_rvSearchDeb()" style="width:220px;padding:6px 10px;height:32px;font-size:12px">
             </div>
           </div>
           <div id="rvBody"><div class="empty sk">—</div></div>
@@ -7743,12 +7812,23 @@ async function deleteTicket(tid){
 }
 
 /* ============== REVIEWS (المراجعات) ============== */
-const RV_URG_LABEL = {urgent:'حرجة', warning:'سلبية', normal:'إيجابية'};
+const RV_URG_LABEL = {urgent:'حرجة', warning:'سلبية', normal:'عادية'};
 const RV_URG_PILL  = {urgent:'danger', warning:'warn', normal:'ok'};
-const RV_REMOVE_LABEL = {high:'HIGH · قابلة للحذف', medium:'MEDIUM · ممكن', low:'LOW · غير قابلة'};
-const RV_REMOVE_PILL  = {high:'ok', medium:'warn', low:'danger'};
+const RV_REMOVE_LABEL = {high:'HIGH · قابلة للحذف', medium:'MEDIUM · ممكن', low:'LOW · غير قابلة', none:'—'};
+const RV_REMOVE_PILL  = {high:'ok', medium:'warn', low:'danger', none:'muted'};
+const RV_WINDOWS = [
+  {k:'',     d:0,   lbl:'الكل'},
+  {k:'7d',   d:7,   lbl:'٧ أيام'},
+  {k:'14d',  d:14,  lbl:'١٤ يوم'},
+  {k:'30d',  d:30,  lbl:'شهر'},
+  {k:'90d',  d:90,  lbl:'٣ شهور'},
+  {k:'180d', d:180, lbl:'٦ شهور'},
+  {k:'365d', d:365, lbl:'سنة'},
+];
+let _rvCurrentDays = 0;     // 0 = all
 let _rvSearchT = null;
 function _rvSearchDeb(){ clearTimeout(_rvSearchT); _rvSearchT = setTimeout(loadReviews, 350); }
+function setRvWindow(d){ _rvCurrentDays = d; loadReviews(); }
 
 async function loadReviews(){
   const body = document.getElementById('rvBody');
@@ -7756,14 +7836,18 @@ async function loadReviews(){
   const qs = new URLSearchParams();
   const u  = (document.getElementById('rvFilterUrg')||{}).value;
   const f  = (document.getElementById('rvFilterFixed')||{}).value;
+  const s  = (document.getElementById('rvFilterSent')||{}).value;
   const q  = (document.getElementById('rvSearch')||{}).value || '';
   if(u) qs.set('urgency', u);
   if(f) qs.set('fixed', f);
+  if(s) qs.set('sentiment', s);
   if(q) qs.set('q', q);
+  if(_rvCurrentDays) qs.set('days', String(_rvCurrentDays));
   try{ D.reviews = await api('/api/reviews/list?' + qs.toString()); }
   catch(_){ D.reviews = {units:[], counts:{}} }
   _renderReviewsSub();
   _renderReviewsStats();
+  _renderTimeFilterStrip();
   _renderReviewsBody();
   buildSideNav();
 }
@@ -7776,15 +7860,31 @@ function _renderReviewsStats(){
   const el = document.getElementById('rvStats'); if(!el) return;
   const c = (D.reviews||{}).counts || {};
   const cards = [
-    {ic:'⭐', cls:'b', val:c.total||0,    lbl:'كل المراجعات'},
+    {ic:'⭐', cls:'b', val:c.shown||0,    lbl:'في المدى المحدد'},
+    {ic:'💚', cls:'g', val:c.positive||0, lbl:'إيجابية'},
     {ic:'🚨', cls:'r', val:c.urgent||0,   lbl:'حرجة (≤٢ نجوم)'},
-    {ic:'⚠',  cls:'a', val:c.warning||0,  lbl:'سلبية (٣ نجوم)'},
-    {ic:'🔧', cls:'g', val:c.unfixed||0,  lbl:'بانتظار الحل'},
+    {ic:'🤖', cls:'a', val:c.analyzed||0, lbl:'تم تحليلها'},
   ];
   el.innerHTML = cards.map(function(x){
     return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+x.cls+'">'+x.ic+'</div></div>'
       +'<div class="kpi-val">'+x.val+'</div><div class="kpi-lbl">'+x.lbl+'</div></div>';
   }).join('');
+}
+function _renderTimeFilterStrip(){
+  const el = document.getElementById('rvTimeFilterStrip'); if(!el) return;
+  const windows = ((D.reviews||{}).counts && D.reviews.counts.windows) || {};
+  let h = '';
+  for(const w of RV_WINDOWS){
+    const cnt = w.k ? (windows[w.k]||0) : (windows.all||0);
+    const active = _rvCurrentDays === w.d;
+    h += '<button onclick="setRvWindow('+w.d+')" '
+      +  'style="padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;'
+      +  'background:'+(active?'var(--gold)':'var(--surface-2)')+';'
+      +  'color:'+(active?'#fff':'var(--text)')+';'
+      +  'border:1px solid '+(active?'var(--gold)':'var(--border)')+';transition:.12s">'
+      +  esc(w.lbl)+' <span style="opacity:.7;font-weight:500">('+cnt+')</span></button>';
+  }
+  el.innerHTML = h;
 }
 function _starBar(n){
   n = Math.max(0, Math.min(5, parseInt(n||0)));
@@ -7825,10 +7925,12 @@ function _renderReviewsBody(){
   body.innerHTML = html;
 }
 function _renderReviewCard(r){
+  const showEn = (document.getElementById('rvShowEnglish')||{}).checked;
   const fixedPill = r.state.fixed
     ? '<span class="pill ok" style="margin-inline-start:6px">✓ محلولة</span>' : '';
   const urgClass = r.urgency === 'urgent' ? 'border-color:var(--red)' :
                    (r.urgency === 'warning' ? 'border-color:var(--gold)' : '');
+  const isPos = r.is_positive;
   let html = '<div class="rv-card" id="rv_'+esc(r.id)+'" style="background:var(--surface);padding:12px 14px;border-radius:10px;border:1px solid var(--border);'+urgClass+'">'
     + '<div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:8px">'
     +   '<div style="flex:1;min-width:0">'
@@ -7836,36 +7938,54 @@ function _renderReviewCard(r){
     +       '<span class="strong" style="font-size:13px">'+esc(r.guest_name||'—')+'</span>'
     +       '<span style="color:var(--gold);font-size:13px;letter-spacing:1px">'+_starBar(r.rating)+'</span>'
     +       '<span class="muted" style="font-size:11px">'+esc(r.date||'')+' · '+esc(r.channel||'')+'</span>'
+    +       (isPos ? '<span class="pill ok" style="font-size:10px">💚 إيجابية</span>' : '')
     +       fixedPill
     +     '</div>'
     +   '</div>'
     + '</div>';
   if(r.public_review){
-    html += '<div style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;margin-bottom:8px;white-space:pre-wrap">'+esc(r.public_review)+'</div>';
+    html += '<div style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;margin-bottom:6px;white-space:pre-wrap">'+esc(r.public_review)+'</div>';
+    // Translated version (lazy — fetched on demand or auto if checkbox on)
+    if(r.public_review_en){
+      html += '<div dir="ltr" style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12px;line-height:1.6;margin-bottom:8px;white-space:pre-wrap;border-inline-start:3px solid var(--gold)">'
+           +    '<div style="font-size:10px;color:var(--mut);margin-bottom:3px;font-weight:600;direction:rtl;text-align:start">🌐 English</div>'
+           +    esc(r.public_review_en) + '</div>';
+    } else if(showEn){
+      // Auto-trigger a translate request, then re-render
+      _rvAutoTranslate(r.id);
+      html += '<div style="font-size:11px;color:var(--mut);margin-bottom:8px;text-align:center">⏳ يترجم…</div>';
+    } else {
+      html += '<button class="btn ghost xs" style="margin-bottom:8px" onclick="translateReview(&#39;'+esc(r.id)+'&#39;,this)">🌐 ترجم للإنجليزي</button>';
+    }
   }
   // AI analysis section
-  if(r.ai && r.ai.removability){
-    const rm = r.ai.removability;
-    html += '<div style="background:var(--gold-tint);padding:10px 12px;border-radius:8px;margin-bottom:8px">'
-         +    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
-         +      '<span style="font-size:11.5px;font-weight:700">🤖 تحليل المساعد:</span>'
-         +      '<span class="pill '+(RV_REMOVE_PILL[rm]||'info')+'">'+RV_REMOVE_LABEL[rm]+'</span>'
-         +    '</div>';
-    if(r.ai.removability_reason_ar){
-      html += '<div style="font-size:11.5px;line-height:1.65;color:var(--text-2)">'+esc(r.ai.removability_reason_ar)+'</div>';
+  if(r.ai){
+    const rm = r.ai.removability || 'none';
+    // Removability box only relevant for negative reviews
+    if(!isPos && rm !== 'none'){
+      html += '<div style="background:var(--gold-tint);padding:10px 12px;border-radius:8px;margin-bottom:8px">'
+           +    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+           +      '<span style="font-size:11.5px;font-weight:700">🤖 تحليل المساعد:</span>'
+           +      '<span class="pill '+(RV_REMOVE_PILL[rm]||'info')+'">'+RV_REMOVE_LABEL[rm]+'</span>'
+           +    '</div>';
+      if(r.ai.removability_reason_ar){
+        html += '<div style="font-size:11.5px;line-height:1.65;color:var(--text-2)">'+esc(r.ai.removability_reason_ar)+'</div>';
+      }
+      html += '</div>';
+      // Dispute message — only for HIGH/MEDIUM negatives
+      if(r.ai.dispute_angle_ar || r.ai.dispute_message_en){
+        html += '<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">📝 رسالة دفاع لـ Airbnb (English)</summary>'
+             +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px">'
+             +      (r.ai.dispute_angle_ar ? '<div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px"><b>زاوية الحجة:</b> '+esc(r.ai.dispute_angle_ar)+'</div>' : '')
+             +      (r.ai.dispute_message_en ? '<div dir="ltr" style="font-size:12.5px;line-height:1.6;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.dispute_message_en)+'</div>' : '')
+             +      '<button class="btn ghost xs" style="margin-top:8px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.dispute_message_en||'')+')">📋 نسخ</button>'
+             +    '</div></details>';
+      }
     }
-    html += '</div>';
-    // Two collapsible boxes: dispute + public response
-    if(r.ai.dispute_angle_ar || r.ai.dispute_message_en){
-      html += '<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">📝 رسالة دفاع لـ Airbnb (English)</summary>'
-           +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px">'
-           +      (r.ai.dispute_angle_ar ? '<div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px"><b>زاوية الحجة:</b> '+esc(r.ai.dispute_angle_ar)+'</div>' : '')
-           +      (r.ai.dispute_message_en ? '<div dir="ltr" style="font-size:12.5px;line-height:1.6;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.dispute_message_en)+'</div>' : '')
-           +      '<button class="btn ghost xs" style="margin-top:8px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.dispute_message_en||'')+')">📋 نسخ</button>'
-           +    '</div></details>';
-    }
+    // Public response (open by default for positives — that's the main thing users need)
     if(r.ai.public_response_ar || r.ai.public_response_en){
-      html += '<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">🤝 رد عام بأسلوب AAA</summary>'
+      const replyTitle = isPos ? '💚 رد شكر شخصي' : '🤝 رد عام بأسلوب AAA';
+      html += '<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">'+replyTitle+'</summary>'
            +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px;display:flex;flex-direction:column;gap:10px">';
       if(r.ai.public_response_ar){
         html += '<div><div style="font-size:11px;color:var(--mut);margin-bottom:4px;font-weight:600">🇸🇦 عربي</div>'
@@ -7880,9 +8000,11 @@ function _renderReviewCard(r){
       html += '</div></details>';
     }
   } else {
+    const pos = (r.rating||0) >= 4;
+    const label = pos ? '🤖 جهّز رد شكر' : '🤖 حلّل بـ AI';
     html += '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-bottom:8px;text-align:center">'
-         +    '<div class="muted" style="font-size:11.5px;margin-bottom:6px">المساعد ما حلل هذي المراجعة بعد</div>'
-         +    '<button class="btn primary xs" onclick="analyzeReview(&#39;'+esc(r.id)+'&#39;,this)">🤖 حلّل بـ AI</button>'
+         +    '<div class="muted" style="font-size:11.5px;margin-bottom:6px">'+(pos?'ما فيه رد شكر بعد':'المساعد ما حلل هذي المراجعة بعد')+'</div>'
+         +    '<button class="btn primary xs" onclick="analyzeReview(&#39;'+esc(r.id)+'&#39;,this)">'+label+'</button>'
          + '</div>';
   }
   // Action row
@@ -7890,9 +8012,9 @@ function _renderReviewCard(r){
        +    (r.state.fixed
             ? '<button class="btn ghost xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">↩ ارجع كغير محلولة</button>'
             : '<button class="btn green xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">✓ علّم محلولة</button>')
-       +    (r.state.ticket_id
+       +    (!isPos ? (r.state.ticket_id
             ? '<button class="btn ghost xs" onclick="go(&#39;tickets&#39;);setTimeout(function(){openTicketModal(&#39;'+esc(r.state.ticket_id)+'&#39;)},300)">🔧 تذكرة #'+esc(r.state.ticket_id.slice(-4))+'</button>'
-            : '<button class="btn warn xs" onclick="openTicketFromReview(&#39;'+esc(r.id)+'&#39;)">🔧 افتح تذكرة صيانة</button>')
+            : '<button class="btn warn xs" onclick="openTicketFromReview(&#39;'+esc(r.id)+'&#39;)">🔧 افتح تذكرة صيانة</button>') : '')
        +    (r.ai ? '<button class="btn ghost xs" onclick="analyzeReview(&#39;'+esc(r.id)+'&#39;,this,true)">↻ أعد التحليل</button>' : '')
        + '</div>';
   html += '</div>';
@@ -7938,6 +8060,73 @@ async function openTicketFromReview(rid){
     toast(r.existing ? '✓ التذكرة موجودة بالفعل' : '🔧 تم فتح تذكرة');
     loadReviews();
   } else toast(r.error || 'خطأ');
+}
+
+async function translateReview(rid, btn){
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ يترجم…'; }
+  try {
+    const r = await post('/api/reviews/translate', {id:rid, target:'en'});
+    if(r.ok){
+      toast(r.cached ? '✓ من الذاكرة' : '🌐 تمت الترجمة');
+      // Refresh just to repaint with the translation
+      loadReviews();
+    } else toast(r.error || 'خطأ');
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = '🌐 ترجم للإنجليزي'; }
+  }
+}
+
+// Auto-translate debounce queue — when "show English" is on, translate visible
+// reviews one at a time so we don't fan out 50 simultaneous Claude calls.
+const _rvAutoQueue = new Set();
+let _rvAutoBusy = false;
+async function _rvAutoTranslate(rid){
+  if(!rid || _rvAutoQueue.has(rid)) return;
+  _rvAutoQueue.add(rid);
+  if(_rvAutoBusy) return;
+  _rvAutoBusy = true;
+  try {
+    while(_rvAutoQueue.size){
+      const next = _rvAutoQueue.values().next().value;
+      _rvAutoQueue.delete(next);
+      try {
+        const r = await post('/api/reviews/translate', {id:next, target:'en'});
+        if(r.ok){
+          // mutate the in-memory copy so we don't need a full reload
+          for(const u of (D.reviews||{}).units||[]){
+            for(const rv of u.reviews||[]){
+              if(rv.id === next){ rv.public_review_en = r.text; }
+            }
+          }
+        }
+      } catch(_){}
+    }
+    _renderReviewsBody();
+  } finally {
+    _rvAutoBusy = false;
+  }
+}
+
+async function bulkAnalyzeReviews(){
+  const btn = document.getElementById('rvBulkBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ يحلل…'; }
+  try {
+    const u  = (document.getElementById('rvFilterUrg')||{}).value;
+    const s  = (document.getElementById('rvFilterSent')||{}).value;
+    const payload = {limit: 25};
+    if(s) payload.sentiment = s;
+    if(_rvCurrentDays) payload.days = _rvCurrentDays;
+    const r = await post('/api/reviews/bulk-analyze', payload);
+    if(r.ok){
+      toast(r.message || ('✓ بدأ تحليل ' + (r.queued||0) + ' مراجعة'));
+      // Reload after a short delay so the user can see results trickle in
+      setTimeout(loadReviews, 3500);
+      setTimeout(loadReviews, 9000);
+      setTimeout(loadReviews, 18000);
+    } else toast(r.error || 'خطأ');
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = '🤖 حلّل الكل (٢٥)'; }
+  }
 }
 
 function _ar_wd(n){ return ['الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][n] }
@@ -11265,6 +11454,7 @@ def _review_urgency(rating, has_text):
 def _review_view(rev_id, rev):
     ai = _review_ai_cache.get(rev_id) or {}
     state = _review_states.get(rev_id) or {}
+    tr = _review_translations.get(rev_id) or {}
     listings = get_listings_map() or {}
     unit_name = listings.get(rev.get("listing_id"), str(rev.get("listing_id") or ""))
     return {
@@ -11277,10 +11467,13 @@ def _review_view(rev_id, rev):
         "channel": rev.get("channel") or "",
         "date": rev.get("date") or "",
         "public_review": rev.get("public_review") or "",
+        "public_review_en": tr.get("en") or "",
         "private_review": rev.get("private_review") or "",
         "urgency": _review_urgency(rev.get("rating") or 0,
                                    bool(rev.get("public_review"))),
         "analyzed": bool(ai),
+        "is_positive": bool(ai.get("is_positive")) if ai else (
+            True if (rev.get("rating") or 0) >= 4 else False),
         "ai": {
             "removability":           ai.get("removability"),
             "removability_reason_ar": ai.get("removability_reason_ar"),
@@ -11288,6 +11481,7 @@ def _review_view(rev_id, rev):
             "dispute_message_en":     ai.get("dispute_message_en"),
             "public_response_ar":     ai.get("public_response_ar"),
             "public_response_en":     ai.get("public_response_en"),
+            "is_positive":            ai.get("is_positive"),
             "generated_at":           ai.get("generated_at"),
         } if ai else None,
         "state": {
@@ -11300,8 +11494,22 @@ def _review_view(rev_id, rev):
         },
     }
 
+def _review_in_window(rev, days):
+    """True if the review's date is within the last `days` days. days=0 → all."""
+    if not days:
+        return True
+    d = (rev or {}).get("date") or ""
+    if not d:
+        return False
+    try:
+        rd = datetime.strptime(d[:10], "%Y-%m-%d").date()
+    except Exception:
+        return False
+    today = datetime.now(TZ).date()
+    return (today - rd).days <= days
+
 async def _api_reviews_list(request):
-    """GET /api/reviews/list?lid=&urgency=&fixed=&q="""
+    """GET /api/reviews/list?lid=&urgency=&fixed=&q=&days=&sentiment="""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     try:
@@ -11311,16 +11519,26 @@ async def _api_reviews_list(request):
     urg = (request.query.get("urgency") or "").strip()
     fixed = request.query.get("fixed", "")
     q = (request.query.get("q") or "").lower().strip()
+    try:
+        days = int(request.query.get("days") or 0)
+    except Exception:
+        days = 0
+    sentiment = (request.query.get("sentiment") or "").strip()  # "" | "positive" | "negative"
 
     rows = []
     for rid, rev in _reviews.items():
+        if not _review_in_window(rev, days):
+            continue
         v = _review_view(rid, rev)
         if lid_f is not None and v["listing_id"] != lid_f: continue
         if urg and v["urgency"] != urg: continue
         if fixed == "1" and not v["state"]["fixed"]: continue
         if fixed == "0" and v["state"]["fixed"]: continue
+        if sentiment == "positive" and not v["is_positive"]: continue
+        if sentiment == "negative" and v["is_positive"]: continue
         if q:
-            blob = (v["public_review"] + " " + v["guest_name"] + " " + v["unit_name"]).lower()
+            blob = (v["public_review"] + " " + v["public_review_en"] + " "
+                    + v["guest_name"] + " " + v["unit_name"]).lower()
             if q not in blob: continue
         rows.append(v)
     # newest first, urgent first
@@ -11353,17 +11571,28 @@ async def _api_reviews_list(request):
                    key=lambda g: (-{"urgent":2,"warning":1,"normal":0}[g["urgency"]],
                                   -g["unfixed_negatives"],
                                   g["avg"]))
+    # Per-window counters so the UI's time-filter buttons can show counts
+    def _count_window(d):
+        return sum(1 for r in _reviews.values() if _review_in_window(r, d))
+    windows = {"all": _count_window(0), "7d": _count_window(7),
+               "14d": _count_window(14), "30d": _count_window(30),
+               "90d": _count_window(90), "180d": _count_window(180),
+               "365d": _count_window(365)}
     counts = {
         "total":    len(_reviews),
         "shown":    len(rows),
         "urgent":   sum(1 for v in rows if v["urgency"] == "urgent"),
         "warning":  sum(1 for v in rows if v["urgency"] == "warning"),
+        "positive": sum(1 for v in rows if v["is_positive"]),
         "unfixed":  sum(1 for v in rows if v["urgency"] in ("urgent","warning") and not v["state"]["fixed"]),
         "analyzed": sum(1 for v in rows if v["analyzed"]),
+        "translated": sum(1 for v in rows if v["public_review_en"]),
+        "windows":  windows,
     }
     return _json({
         "units": units,
         "counts": counts,
+        "filter": {"days": days, "sentiment": sentiment, "urgency": urg, "fixed": fixed, "q": q},
         "last_fetch_iso": (datetime.fromtimestamp(_reviews_last_fetch, TZ).isoformat(timespec="minutes")
                            if _reviews_last_fetch else None),
     })
@@ -11429,6 +11658,99 @@ async def _api_reviews_notes(request):
     state["last_edit_at"] = datetime.now(TZ).isoformat(timespec="seconds")
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
+
+async def _api_reviews_translate(request):
+    """POST {id, target:'en'|'ar'} → translate the review text and cache."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = str(b.get("id") or "").strip()
+    target = (b.get("target") or "en").strip()
+    force = bool(b.get("force"))
+    if not rid or rid not in _reviews:
+        return _json({"error": "review not found"}, 404)
+    if target not in ("en", "ar"):
+        return _json({"error": "bad target"}, 400)
+    rev = _reviews[rid]
+    cached = (_review_translations.get(rid) or {}).get(target)
+    if cached and not force:
+        return _json({"ok": True, "text": cached, "cached": True})
+    src = rev.get("public_review") or ""
+    if not src.strip():
+        return _json({"ok": True, "text": "", "cached": False})
+    try:
+        out = await asyncio.to_thread(claude_translate_review_text, src, target)
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+    if rid not in _review_translations:
+        _review_translations[rid] = {}
+    _review_translations[rid][target] = (out or "").strip()
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "text": _review_translations[rid][target], "cached": False})
+
+async def _api_reviews_bulk_analyze(request):
+    """POST {lid?, sentiment?, days?, limit?} — analyze up to `limit` unprocessed
+    reviews matching the filters. Caps cost: default limit 25.
+    Background-safe — returns immediately with the count queued, the work runs
+    in a thread so the dashboard doesn't lock up."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid_f = int(b.get("lid")) if b.get("lid") else None
+    except Exception:
+        lid_f = None
+    sentiment = (b.get("sentiment") or "").strip()
+    try:
+        days = int(b.get("days") or 0)
+    except Exception:
+        days = 0
+    try:
+        limit = int(b.get("limit") or 25)
+    except Exception:
+        limit = 25
+    limit = max(1, min(limit, 100))
+
+    # Build the work list
+    targets = []
+    for rid, rev in _reviews.items():
+        if rid in _review_ai_cache:
+            continue
+        if not (rev.get("public_review") or "").strip():
+            continue
+        if lid_f is not None and rev.get("listing_id") != lid_f: continue
+        if not _review_in_window(rev, days): continue
+        rating = rev.get("rating") or 0
+        is_pos = rating >= 4
+        if sentiment == "positive" and not is_pos: continue
+        if sentiment == "negative" and is_pos: continue
+        targets.append((rid, rev))
+        if len(targets) >= limit:
+            break
+
+    if not targets:
+        return _json({"ok": True, "queued": 0, "message": "ما فيه مراجعات تحتاج تحليل"})
+
+    # Run in a worker so the request doesn't hang for minutes
+    def _worker():
+        done = 0
+        for rid, rev in targets:
+            try:
+                out = claude_analyze_review(rev)
+                if out:
+                    _review_ai_cache[rid] = out
+                    done += 1
+            except Exception as e:
+                print(f"bulk_analyze {rid} error:", e)
+        try:
+            persist_state()
+        except Exception:
+            pass
+        log_event("ops", f"المراجعات · تحليل جماعي · {done}/{len(targets)} ✓")
+
+    asyncio.get_event_loop().run_in_executor(None, _worker)
+    return _json({"ok": True, "queued": len(targets),
+                  "message": f"بدأ تحليل {len(targets)} مراجعة في الخلفية"})
 
 async def _api_reviews_open_ticket(request):
     """POST {id} → open a maintenance ticket from a review (idempotent)."""
@@ -11922,6 +12244,8 @@ async def start_web_server():
         app.router.add_post("/api/reviews/toggle-fixed", _api_reviews_toggle_fixed)
         app.router.add_post("/api/reviews/notes", _api_reviews_notes)
         app.router.add_post("/api/reviews/open-ticket", _api_reviews_open_ticket)
+        app.router.add_post("/api/reviews/translate", _api_reviews_translate)
+        app.router.add_post("/api/reviews/bulk-analyze", _api_reviews_bulk_analyze)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -12232,6 +12556,10 @@ def load_state():
         for k, v in (_load_json("review_states.json", {}) or {}).items():
             if isinstance(v, dict):
                 _review_states[str(k)] = v
+        _review_translations.clear()
+        for k, v in (_load_json("review_translations.json", {}) or {}).items():
+            if isinstance(v, dict):
+                _review_translations[str(k)] = v
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -12279,6 +12607,7 @@ def persist_state():
     _save_json("reviews.json", _reviews)
     _save_json("review_ai.json", _review_ai_cache)
     _save_json("review_states.json", _review_states)
+    _save_json("review_translations.json", _review_translations)
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
