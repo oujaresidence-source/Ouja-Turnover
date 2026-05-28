@@ -2051,6 +2051,11 @@ def get_reservation_status(reservation_id):
 
 # Knowledge base loaded from the #knowledge Discord channel; injected into every draft.
 _knowledge_text = ""
+# Per-apartment raw facts pulled from #knowledge. Messages mentioning an
+# apartment name go HERE (scoped); messages without a name go into
+# _knowledge_text (general). Re-derived from the channel on every
+# load_knowledge() call, so the channel is the source of truth.
+_knowledge_apartment_facts = {}    # lid (int) -> [fact strings]
 
 # Units catalog (name · bedrooms · area · base price · Airbnb link) pulled from Hostaway.
 _catalog_text = ""
@@ -2488,6 +2493,17 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     facts = _knowledge_text.strip()
     facts_block = (f"معلومات معتمدة عن عوجا (استخدمها كمصدر الحقيقة وصحّح أي تعارض):\n{facts}\n\n"
                    if facts else "")
+    # Apartment-scoped facts the team posted in #knowledge mentioning this unit
+    # by name. These take PRECEDENCE over general facts and over learned summaries
+    # when they conflict — they're explicit, team-authored, and unit-specific.
+    if listing_id:
+        apt_kn = _knowledge_apartment_facts.get(int(listing_id), [])
+        if apt_kn:
+            facts_block += (
+                "حقائق محدّدة عن هذه الوحدة (كتبها الفريق في قناة المعرفة — "
+                "اعتبرها أعلى مصدر ثقة عن هذه الشقة بالذات):\n"
+                + "\n".join("- " + f for f in apt_kn[-20:]) + "\n\n"
+            )
     # ---- learned summaries (distilled by Claude from past team-approved replies) ----
     # General first (cross-portfolio patterns), then apartment-specific if we have a lid.
     gen_learn = (_general_learnings.get("summary") or "").strip()
@@ -3392,20 +3408,59 @@ def _recover_from_embed(message):
         print("embed recover error:", e)
         return None, None
 
+def _detect_apartment_in_text(text):
+    """Return (lid, unit_name) if `text` mentions one of our catalog apartments by
+    name, else (None, None). Uses normalized substring match — picks the LONGEST
+    matching name so "12B HTN" wins over "12B" and "A12 - النرجس" wins over "A12".
+    Only triggers on names ≥ 2 normalized chars to avoid spurious matches."""
+    if not text or not _catalog_units:
+        return None, None
+    norm_text = " " + norm_unit(text) + " "
+    best = (None, None, 0)   # lid, name, score (length)
+    for u in _catalog_units:
+        unit_name = u.get("name", "")
+        if not unit_name:
+            continue
+        unit_norm = norm_unit(unit_name)
+        if len(unit_norm) < 2:
+            continue
+        # Require a word-ish boundary: pad with spaces, then check
+        if (" " + unit_norm + " ") in norm_text or norm_text.endswith(" " + unit_norm) \
+           or norm_text.startswith(unit_norm + " ") or unit_norm in norm_text:
+            if len(unit_norm) > best[2]:
+                best = (int(u["id"]), unit_name, len(unit_norm))
+    return (best[0], best[1]) if best[0] else (None, None)
+
 async def load_knowledge(guild):
-    """Read the #knowledge channel and build the facts text the assistant uses."""
-    global _knowledge_text
+    """Read the #knowledge channel and rebuild BOTH:
+      - _knowledge_text (general facts, injected into every draft)
+      - _knowledge_apartment_facts[lid] (scoped facts, injected only when
+        drafting for that apartment)
+    A message is treated as apartment-scoped if it mentions a catalog
+    apartment by name, otherwise it's general."""
+    global _knowledge_text, _knowledge_apartment_facts
     ch = discord.utils.get(guild.text_channels, name=KNOWLEDGE_CHANNEL)
     if ch is None:
         return
     try:
-        facts = []
+        general_facts = []
+        apt_facts = {}
+        total = 0
         async for m in ch.history(limit=KNOWLEDGE_MAX, oldest_first=True):
             body = (m.content or "").strip()
-            if body and not body.startswith(("/", "!")):   # skip commands
-                facts.append(f"- {body}")
-        _knowledge_text = "\n".join(facts)[:8000]
-        print(f"knowledge: loaded {len(facts)} fact(s) from #{KNOWLEDGE_CHANNEL}")
+            if not body or body.startswith(("/", "!")):
+                continue
+            total += 1
+            lid, _name = _detect_apartment_in_text(body)
+            if lid:
+                apt_facts.setdefault(lid, []).append(body)
+            else:
+                general_facts.append(f"- {body}")
+        _knowledge_text = "\n".join(general_facts)[:8000]
+        _knowledge_apartment_facts = {k: v[-30:] for k, v in apt_facts.items()}
+        scoped = sum(len(v) for v in apt_facts.values())
+        print(f"knowledge: loaded {total} fact(s) from #{KNOWLEDGE_CHANNEL} "
+              f"({len(general_facts)} general, {scoped} apt-scoped across {len(apt_facts)} units)")
     except Exception as e:
         print("knowledge load error:", e)
 
@@ -10265,6 +10320,79 @@ async def weekly_review_loop():
     except Exception as e:
         print("weekly_review_loop error:", e)
 
+
+@bot.event
+async def on_message(message):
+    """Knowledge-channel feedback loop. Any team message in #knowledge gets:
+       1) 👀 reaction immediately (acknowledgement of receipt)
+       2) appended to the in-memory facts (apartment-scoped if a unit name is
+          mentioned, otherwise general)
+       3) ✅ reaction once persisted
+       4) a one-line reply confirming the scope so the team knows exactly
+          where it landed."""
+    try:
+        # Ignore the bot itself and any other bots
+        if message.author.bot:
+            return
+        # Only act on the configured knowledge channel
+        if not message.channel or getattr(message.channel, "name", "") != KNOWLEDGE_CHANNEL:
+            return
+        body = (message.content or "").strip()
+        if not body or body.startswith(("/", "!")):
+            return
+        # 👀 — we see you
+        try:
+            await message.add_reaction("👀")
+        except Exception:
+            pass
+        # Decide scope
+        lid, unit_name = _detect_apartment_in_text(body)
+        # Apply in-memory immediately so the very next draft can use it.
+        # A full reload (load_knowledge) happens periodically + after this
+        # handler to keep things in sync with Discord.
+        if lid:
+            _knowledge_apartment_facts.setdefault(int(lid), []).append(body)
+            _knowledge_apartment_facts[int(lid)] = _knowledge_apartment_facts[int(lid)][-30:]
+        else:
+            globals()["_knowledge_text"] = (
+                (_knowledge_text + "\n- " + body) if _knowledge_text else ("- " + body)
+            )[-8000:]
+        # Trigger a fresh load so the canonical source matches (and we
+        # de-dupe in case the same fact was already there)
+        try:
+            await load_knowledge(message.guild)
+        except Exception as e:
+            print("knowledge reload error:", e)
+        # ✅ — saved
+        try:
+            await message.add_reaction("✅")
+        except Exception:
+            pass
+        # Reply confirming scope
+        try:
+            if lid and unit_name:
+                await message.reply(
+                    f"✅ تم! حفظت هذي المعلومة لـ **{unit_name}** فقط — راح أستخدمها "
+                    f"كمصدر حقيقة في كل رد يخص هذي الوحدة من الحين فصاعداً.",
+                    mention_author=False,
+                )
+            else:
+                await message.reply(
+                    "✅ تم! حفظت هذي المعلومة في **الذاكرة العامة** — راح تنطبق على كل الوحدات. "
+                    "لو تبيها تخص شقة معيّنة، اكتب اسم الشقة داخل الرسالة (مثلاً: "
+                    "*'F2: الواي فاي اسمه Ouja-F2'* أو *'في A12 - النرجس فيه باركن إضافي تحت'*).",
+                    mention_author=False,
+                )
+            log_event("guest",
+                      f"معرفة جديدة في #knowledge · " + (unit_name or "عام") + " · " + body[:60])
+        except Exception as e:
+            print("knowledge reply error:", e)
+    finally:
+        # CRITICAL: keep prefix commands (!ouja ...) working
+        try:
+            await bot.process_commands(message)
+        except Exception:
+            pass
 
 @bot.event
 async def on_ready():
