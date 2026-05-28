@@ -5887,36 +5887,25 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
   <div class="brand-lg">عوجا</div>
   <div class="sub">Ouja Operations</div>
 
-  <!-- Mode toggle (uses .on class for selected state) -->
-  <style>
-    #loginTabs{display:flex;gap:0;margin:18px 0 14px;border-radius:10px;overflow:hidden;border:1px solid #d4cfc1;width:100%}
-    #loginTabs button{flex:1;padding:12px 8px;background:#fff;color:#888;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:.15s}
-    #loginTabs button:first-child{border-inline-end:1px solid #d4cfc1}
-    #loginTabs button.on{background:#c9a96e;color:#fff}
-    #loginTabs button:hover:not(.on){background:#f5efe2;color:#1a1a1a}
-  </style>
-  <div id="loginTabs">
-    <button id="loginTabToken" class="on" type="button" onclick="switchLoginMode('token')">🔑 توكن · Token</button>
-    <button id="loginTabUser" type="button" onclick="switchLoginMode('user')">👤 اسم وكلمة مرور</button>
-  </div>
-
-  <!-- Token mode (legacy) -->
-  <div id="loginPaneToken">
-    <input id="tok" type="password" placeholder="رمز الدخول · Access token" autocomplete="off" onkeydown="if(event.key==='Enter')saveTok()">
-    <button class="btn primary" onclick="saveTok()" style="padding:12px 26px;font-size:13.5px;margin-top:8px;width:100%">دخول · Enter</button>
-  </div>
-
-  <!-- User mode (new) -->
-  <div id="loginPaneUser" style="display:none">
-    <input id="loginUsername" type="text" placeholder="اسم المستخدم · Username (e.g. admin)" autocomplete="username" style="margin-bottom:8px">
+  <!-- Method A: username + password (default + recommended) -->
+  <div style="margin-top:18px;background:#fff;padding:14px;border-radius:12px;border:2px solid #c9a96e">
+    <div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:10px;text-align:center">👤 الدخول بحساب · Username login</div>
+    <input id="loginUsername" type="text" placeholder="اسم المستخدم (admin)" autocomplete="username" style="margin-bottom:8px">
     <input id="loginPassword" type="password" placeholder="كلمة المرور · Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUserLogin()">
-    <button class="btn primary" onclick="doUserLogin()" style="padding:12px 26px;font-size:13.5px;margin-top:8px;width:100%">دخول · Enter</button>
-    <div style="font-size:11.5px;color:#888;text-align:center;margin-top:14px;line-height:1.6;background:#faf8f3;padding:10px;border-radius:8px;border:1px solid #f0ece6">
-      💡 <b>أول مرة؟</b> ادخل بـ:<br>
-      <b>اسم المستخدم:</b> <code style="background:#f5efe2;padding:1px 6px;border-radius:4px">admin</code><br>
-      <b>كلمة المرور:</b> نفس قيمة <code style="background:#f5efe2;padding:1px 6px;border-radius:4px">DASHBOARD_TOKEN</code> من Railway
+    <button onclick="doUserLogin()" style="padding:12px 26px;font-size:14px;margin-top:10px;width:100%;background:#c9a96e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:700">دخول · Sign in</button>
+    <div style="font-size:11.5px;color:#666;text-align:center;margin-top:10px;line-height:1.6;background:#faf8f3;padding:9px;border-radius:6px">
+      💡 أول مرة؟ <b>admin</b> + قيمة <code style="background:#f5efe2;padding:1px 5px;border-radius:3px">DASHBOARD_TOKEN</code>
     </div>
   </div>
+
+  <!-- Method B: legacy token fallback -->
+  <details style="margin-top:14px">
+    <summary style="font-size:12px;color:#888;cursor:pointer;text-align:center;padding:6px">🔑 أو ادخل بالتوكن مباشرة · Or use token</summary>
+    <div style="margin-top:8px;padding:12px;background:#faf8f3;border-radius:8px">
+      <input id="tok" type="password" placeholder="رمز الدخول · Access token" autocomplete="off" onkeydown="if(event.key==='Enter')saveTok()" style="margin-bottom:8px">
+      <button onclick="saveTok()" style="padding:10px 20px;font-size:13px;width:100%;background:#fff;color:#1a1a1a;border:1px solid #d4cfc1;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600">دخول بالتوكن</button>
+    </div>
+  </details>
 
   <div class="err" id="lerr"></div>
 </div>
@@ -7272,20 +7261,20 @@ const T = {
     units_count:'units',
     /* ===== Page-help banner copy (Batch 26) — English ===== */
     ph:{
-      home:    {t:'👋 Welcome', b:'This is the home page — today\'s key numbers all live here: <b>occupancy</b>, <b>revenue</b>, <b>vacant tonight</b>, <b>urgent tickets</b>. Any red number needs attention; click it to drill down. The left sidebar is every page.'},
+      home:    {t:'👋 Welcome', b:'This is the home page — today’s key numbers all live here: <b>occupancy</b>, <b>revenue</b>, <b>vacant tonight</b>, <b>urgent tickets</b>. Any red number needs attention; click it to drill down. The left sidebar is every page.'},
       inbox:   {t:'✉️ Guest replies & escalations', b:'Every draft the AI assistant prepares for a guest lands here. <b>Yellow</b> = the bot is unsure and wants your approval. <b>Red</b> = escalation, real problem. Click any thread to see the full conversation.'},
       today:   {t:'◎ Vacant tonight', b:'Every unit still unbooked for tonight, with the <b>current price</b> plus the <b>scheduled discount tiers</b> at 8 PM, 10 PM and midnight. Target: 95% occupancy (Ramadan excluded).'},
-      calendar:{t:'📅 60-day calendar', b:'Every box = one day. Colour shows occupancy strength: <b>green</b> = excellent, <b>yellow</b> = medium, <b>red</b> = weak. Click a day to see who\'s booked and which units are still open.'},
-      pricing: {t:'$ Price-up & price-down opportunities', b:'The bot finds nights where you should raise or lower the price. Click an opportunity to see the <b>reasoning</b> and <b>before/after</b>. "Apply" writes the new price into Hostaway immediately.'},
+      calendar:{t:'📅 60-day calendar', b:'Every box = one day. Colour shows occupancy strength: <b>green</b> = excellent, <b>yellow</b> = medium, <b>red</b> = weak. Click a day to see who is booked and which units are still open.'},
+      pricing: {t:'$ Price-up & price-down opportunities', b:'The bot finds nights where you should raise or lower the price. Click an opportunity to see the <b>reasoning</b> and <b>before/after</b>. Apply writes the new price into Hostaway immediately.'},
       strat:   {t:'⚡ Tracked strategies', b:'Every price change you applied = a strategy the bot watches daily. You see whether the night booked, the actual revenue captured, and when it ended. You can <b>stop</b> any unit at any time.'},
       rev:     {t:'∿ The big numbers', b:'Revenue for the last <b>12 months</b>, comparison vs the previous month, per-unit performance, and the <b>salary-cycle</b> effect (demand spikes at month-end). CSV export opens cleanly in Arabic-Excel.'},
       log:     {t:'≡ Everything the bot did', b:'Messages, escalations, price changes, cleanings, tickets — all logged here in Riyadh time. Use the top filter to focus on a specific kind of activity.'},
       clean:   {t:'🧹 Deep cleaning', b:'Every unit gets a deep clean every <b>45-60 days</b>. One clean per day, confirmed against Hostaway at <b>9 PM the night before</b>. If the unit is booked, it auto-swaps with another unit.'},
       quality: {t:'⭐ Cleanliness rating per unit', b:'Average guest cleanliness ratings per unit, with the latest comments. <b>Sorted worst-first</b> so you tackle the highest-impact unit first.'},
-      guests:  {t:'👤 Guests who\'ve stayed', b:'Every past guest — name, phone, visit count, and which units. Mark a guest <b>VIP</b> and the assistant will recognise them the next time they reach out.'},
+      guests:  {t:'👤 Guests who have stayed', b:'Every past guest — name, phone, visit count, and which units. Mark a guest <b>VIP</b> and the assistant will recognise them the next time they reach out.'},
       learn:   {t:'📚 What the assistant learned', b:'Every time the team edits a reply, the bot learns from it. See what it learned <b>today vs yesterday vs last week</b>, its confidence trend, and what it learned about each specific apartment.'},
       tickets: {t:'🔧 Maintenance', b:'Every problem in a unit (plumbing, AC, guest complaint…) opens a <b>ticket</b> here. ⚙️ The bot opens one automatically when an escalation fires. 👷 You can add one manually. Each ticket has status, priority, assignee, vendor, cost, and a full audit log.'},
-      reviews: {t:'⭐ Reviews', b:'Every Airbnb / Booking review lands here. ⭐ For negative ones the assistant tells you whether it\'s removable (HIGH/MEDIUM/LOW). 📝 If yes, it drafts a <b>dispute message</b>. 🤝 If no, it writes a polished <b>public reply</b> using the <b>AAA</b> framework.'}
+      reviews: {t:'⭐ Reviews', b:'Every Airbnb / Booking review lands here. ⭐ For negative ones the assistant tells you whether it is removable (HIGH/MEDIUM/LOW). 📝 If yes, it drafts a <b>dispute message</b>. 🤝 If no, it writes a polished <b>public reply</b> using the <b>AAA</b> framework.'}
     },
     /* ===== Tickets — English ===== */
     tkts:{
@@ -7346,9 +7335,38 @@ let drawerOpen = false;
    UTILS
    ============================================================ */
 function t(){return T[L]}
-function tok(){return localStorage.getItem(TK)||''}
-function saveTok(){localStorage.setItem(TK, document.getElementById('tok').value.trim()); init()}
-function logout(){localStorage.removeItem(TK); location.reload()}
+function tok(){
+  try { return localStorage.getItem(TK) || ''; } catch(_){ return ''; }
+}
+function saveTok(){
+  const inp = document.getElementById('tok');
+  const v = inp ? (inp.value || '').trim() : '';
+  if(!v){
+    const e = document.getElementById('lerr');
+    if(e) e.textContent = 'الرمز فارغ · Token is empty';
+    return;
+  }
+  try { localStorage.setItem(TK, v); } catch(_){}
+  location.reload();
+}
+function logout(){
+  try { localStorage.removeItem(TK); } catch(_){}
+  location.reload();
+}
+
+// Make every uncaught JS error visible in the login error slot — no more
+// silent failures where the user clicks and nothing happens.
+window.addEventListener('error', function(ev){
+  try {
+    const e = document.getElementById('lerr');
+    if(e && ev && ev.message){
+      e.textContent = '⚠ ' + ev.message;
+      e.style.fontSize = '11px';
+      e.style.direction = 'ltr';
+      e.style.textAlign = 'start';
+    }
+  } catch(_){}
+});
 
 function switchLoginMode(mode){
   const t  = document.getElementById('loginTabToken');
@@ -7371,11 +7389,14 @@ function switchLoginMode(mode){
 }
 
 async function doUserLogin(){
-  document.getElementById('lerr').textContent = '';
-  const username = (document.getElementById('loginUsername')||{}).value.trim();
-  const password = (document.getElementById('loginPassword')||{}).value;
+  const errEl = document.getElementById('lerr');
+  if(errEl) errEl.textContent = '';
+  const uEl = document.getElementById('loginUsername');
+  const pEl = document.getElementById('loginPassword');
+  const username = uEl ? (uEl.value || '').trim() : '';
+  const password = pEl ? (pEl.value || '') : '';
   if(!username || !password){
-    document.getElementById('lerr').textContent = 'الاسم وكلمة المرور مطلوبين';
+    if(errEl) errEl.textContent = 'الاسم وكلمة المرور مطلوبين · Both fields required';
     return;
   }
   try {
@@ -7384,15 +7405,21 @@ async function doUserLogin(){
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({username:username, password:password})
     });
-    const j = await r.json().catch(function(){return {}});
-    if(j.ok && j.token){
-      localStorage.setItem(TK, j.token);
-      init();
-    } else {
-      document.getElementById('lerr').textContent = j.error || 'الاسم أو كلمة المرور غلط';
+    let j = {};
+    try { j = await r.json(); } catch(_){ j = {}; }
+    if(r.ok && j.ok && j.token){
+      try { localStorage.setItem(TK, j.token); } catch(_){}
+      // Reload to a totally clean state, then init runs with the new token
+      location.reload();
+      return;
+    }
+    if(errEl){
+      errEl.textContent = (j && j.error) ? j.error
+        : (r.status === 401 ? 'الاسم أو كلمة المرور غلط · Wrong username or password'
+                            : 'خطأ في الخادم · Server error (' + r.status + ')');
     }
   } catch(e){
-    document.getElementById('lerr').textContent = 'خطأ بالاتصال';
+    if(errEl) errEl.textContent = 'خطأ بالاتصال · Network error';
   }
 }
 function esc(s){return (s==null?'':String(s)).replace(/[<>&"']/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]})}
