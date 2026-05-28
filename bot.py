@@ -4073,6 +4073,7 @@ html[dir="rtl"] .drawer.open{transform:translateX(0)}
 .drawer-sub{font-size:11.5px;color:var(--mut);margin-top:2px}
 .drawer-body{flex:1;overflow-y:auto;padding:16px 18px}
 .drawer-foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:var(--surface-2)}
+@media (max-width:1023px){.drawer{width:100vw}.drawer-body{padding:14px 14px calc(80px + env(safe-area-inset-bottom))}.drawer-head{padding:12px 14px}.drawer-foot{padding:10px 14px}}
 
 /* ============== PRICING DETAIL TABLE ============== */
 table.data{width:100%;border-collapse:collapse;font-size:12px}
@@ -4098,8 +4099,13 @@ table.data .num{font-family:var(--font-mono);text-align:end}
 /* ============== CHARTS ============== */
 /* Calendar heatmap (forward pace view) */
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-@media (max-width:600px){.calgrid{grid-template-columns:repeat(5,1fr)}}
+@media (max-width:600px){.calgrid{gap:2px}}
 .calday{position:relative;padding:8px 6px 6px;border-radius:8px;cursor:pointer;min-height:62px;border:1.5px solid transparent;transition:.12s;background:var(--surface-2)}
+@media (max-width:600px){.calday{padding:5px 3px 3px;min-height:50px;border-radius:6px}}
+@media (max-width:600px){.calday .cd-dnum{font-size:11px}}
+@media (max-width:600px){.calday .cd-pct{font-size:8.5px;top:3px;inset-inline-end:3px}}
+@media (max-width:600px){.calday .cd-wd{display:none}}
+@media (max-width:600px){.calday .cd-evt{font-size:7.5px;bottom:2px;inset-inline-start:2px;inset-inline-end:2px}}
 .calday:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:var(--sh-sm)}
 .calday.sel{border-color:var(--gold);background:var(--gold-tint)}
 .calday.cal-low{background:#fae3e3}            /* <40% */
@@ -4135,7 +4141,9 @@ html[data-theme="dark"] .calday.cal-full{background:#1a4d33}
 /* ============== BOTTOM NAV (mobile) ============== */
 nav.bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);padding:5px 6px calc(6px + env(safe-area-inset-bottom));z-index:60}
 html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-filter:blur(12px)}
-@media (max-width:1023px){nav.bnav{display:grid;grid-template-columns:repeat(5,1fr);gap:3px}}
+@media (max-width:1023px){nav.bnav{display:grid;grid-template-columns:repeat(6,1fr);gap:2px}}
+@media (max-width:1023px){.bn{padding:6px 2px;font-size:9px}}
+@media (max-width:1023px){.bn .ic{font-size:15px}}
 .bn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:7px 4px;border-radius:7px;color:var(--text-3);font-size:9.5px;font-weight:500;transition:.12s;position:relative}
 .bn .ic{font-size:16px;line-height:1}
 .bn.on{color:var(--gold)}
@@ -4352,6 +4360,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_rev_sub">آخر ١٢ شهر + دورة الراتب + أداء الوحدات</div>
           </div>
         </div>
+
+        <!-- Hero KPI strip: this-month vs prior month -->
+        <div class="kpis" id="revKpis"></div>
+
+        <!-- Forward pace: next 30 days at a glance -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">🚀 <span id="t_rev_pace">سرعة الحجز للـ٣٠ يوم القادمة</span></span><span class="card-sub" id="revPaceSub"></span></div>
+          <div id="revPaceBody"><div class="empty sk">—</div></div>
+        </div>
+
         <div class="grid2">
           <div class="card">
             <div class="card-head"><span class="card-title">📅 <span id="t_rev_month">الإيراد الشهري</span></span></div>
@@ -4542,6 +4560,11 @@ const T = {
     bulk_select_range:'اختر مدى من الأيام بالضغط عليها',
     bulk_confirm:'متأكد؟ سيتم تعديل أسعار الليالي المتاحة فقط في كل الوحدات (المحجوزة لن تتأثر).',
     bulk_applied:'تم: {a} ليلة عُدّلت · {s} تُجوهلت',
+    rev_pace:'سرعة الحجز للـ٣٠ يوم القادمة', rev_pace_sub:'كم وحدة محجوزة من إجمالي ليالي الـ٣٠ يوم',
+    rev_kpi_mtd:'إيراد الشهر للحين', rev_kpi_occ:'إشغال ٣٠ يوم', rev_kpi_adr:'متوسط السعر',
+    rev_kpi_pace:'نسبة الحجز للقادم', rev_kpi_vs_prev:'مقارنة بالفترة السابقة',
+    rev_pace_total:'إجمالي ليالي ممكنة', rev_pace_booked:'محجوزة', rev_pace_open:'فاضية',
+    rev_pace_proj:'إيراد متوقّع', rev_pace_events:'أيام مهمة قادمة',
     arrivals:'الوصول القادم', no_arrivals_window:'ما فيه وصول في الـ٣٦ ساعة الجاية',
     arr_signed:'موقّع', arr_unsigned:'غير موقّع', arr_in:'بعد', arr_hours:'ساعة', arr_minutes:'دقيقة',
     arr_now:'الحين', arr_past:'مضى',
@@ -4637,6 +4660,11 @@ const T = {
     bulk_select_range:'Click days to select a range',
     bulk_confirm:'Sure? This will adjust prices on AVAILABLE nights only across every active unit (booked nights are untouched).',
     bulk_applied:'Done: {a} nights changed · {s} skipped',
+    rev_pace:'30-day booking pace', rev_pace_sub:'How many of the next 30 nights are already booked',
+    rev_kpi_mtd:'Revenue MTD', rev_kpi_occ:'Occupancy 30d', rev_kpi_adr:'Avg rate',
+    rev_kpi_pace:'30d forward pace', rev_kpi_vs_prev:'vs prior period',
+    rev_pace_total:'Total potential nights', rev_pace_booked:'booked', rev_pace_open:'open',
+    rev_pace_proj:'Projected revenue', rev_pace_events:'Big upcoming dates',
     arrivals:'Upcoming arrivals', no_arrivals_window:'No arrivals in the next 36h',
     arr_signed:'signed', arr_unsigned:'unsigned', arr_in:'in', arr_hours:'h', arr_minutes:'min',
     arr_now:'now', arr_past:'past',
@@ -4758,6 +4786,7 @@ function applyLang(){
     t_arrivals:'arrivals',
     t_calendar:'calendar_title', t_calendar_sub:'calendar_sub',
     t_cal_events_legend:'cal_events_legend', t_bulk_title:'bulk_title',
+    t_rev_pace:'rev_pace',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -4789,6 +4818,7 @@ const MNAV = [
   {id:'home', ic:'◇', tk:'nav_home'},
   {id:'inbox', ic:'✉', tk:'nav_inbox', badge:'inbox'},
   {id:'today', ic:'◎', tk:'nav_today'},
+  {id:'calendar', ic:'📅', tk:'calendar'},
   {id:'pricing', ic:'$', tk:'nav_pricing', badge:'pricing'},
   {id:'more', ic:'⋯', tk:'nav_more'}
 ];
@@ -4907,8 +4937,102 @@ async function loadStrategies(){
   renderStrategies();
 }
 async function loadRevenue(){
-  try{ D.rev = await api('/api/revenue') }catch(_){ D.rev={loading:true} }
+  // Pull revenue + forward calendar in parallel so the new KPI cards and the
+  // forward-pace summary paint together.
+  try{
+    const r = await Promise.all([
+      api('/api/revenue'),
+      api('/api/calendar/forward?days=30').catch(function(){return {days:[]}}),
+    ]);
+    D.rev = r[0];
+    D.revCal30 = r[1];
+  }catch(_){ D.rev = {loading:true}; D.revCal30 = {days:[]} }
   renderRevenueFull();
+  renderRevKpis();
+  renderRevPace();
+}
+
+function renderRevKpis(){
+  const el = document.getElementById('revKpis'); if(!el) return;
+  const rev = D.rev || {};
+  const months = (rev.monthly || []).slice();
+  // MTD vs prior month
+  const this_m = months[months.length-1] || {rev:0};
+  const prev_m = months.length > 1 ? months[months.length-2] : {rev:0};
+  const delta_mtd = prev_m.rev ? Math.round((this_m.rev - prev_m.rev) / prev_m.rev * 100) : null;
+  // 30-day forward pace
+  const cal = (D.revCal30||{}).days || [];
+  let booked = 0, total = 0, projRev = 0;
+  cal.forEach(function(d){
+    booked += d.occupied || 0;
+    total += d.total || 0;
+    if(d.avg_price && d.available != null && d.occupied != null){
+      // already-booked nights * their price won't be in d.avg_price (it's only of available);
+      // so project = booked nights * portfolio rough ADR (use overall_adr if visible)
+    }
+  });
+  const pace_pct = total ? Math.round((booked / total) * 100) : 0;
+  // occupancy + ADR from revenue endpoint
+  const occ_units = (rev.units || []);
+  const avg_occ = occ_units.length ? Math.round(occ_units.reduce(function(s,u){return s + (u.occ||0)},0) / occ_units.length) : 0;
+  const avg_adr = occ_units.length ? Math.round(occ_units.reduce(function(s,u){return s + (u.adr||0)},0) / occ_units.length) : 0;
+
+  const cards = [
+    {ic:'$', cls:'g', val:fmt(this_m.rev||0)+' SAR', lbl:t().rev_kpi_mtd, delta:delta_mtd},
+    {ic:'◌', cls:'b', val:avg_occ+'%', lbl:t().rev_kpi_occ},
+    {ic:'∿', cls:'p', val:fmt(avg_adr)+' SAR', lbl:t().rev_kpi_adr},
+    {ic:'🚀', cls:(pace_pct>=60?'g':(pace_pct>=40?'y':'r')), val:pace_pct+'%', lbl:t().rev_kpi_pace},
+  ];
+  el.innerHTML = cards.map(function(c){
+    let dh = '';
+    if(c.delta != null && c.delta !== 0){
+      const cls = c.delta > 0 ? 'up' : 'dn';
+      dh = '<span class="kpi-delta '+cls+'">'+(c.delta>0?'+':'')+c.delta+'%</span>';
+    }
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div>'+dh+'</div>'
+      + '<div class="kpi-val">'+c.val+'</div><div class="kpi-lbl">'+c.lbl+(c.delta!=null?(' · <span style="opacity:.7">'+t().rev_kpi_vs_prev+'</span>'):'')+'</div></div>';
+  }).join('');
+}
+
+function renderRevPace(){
+  const el = document.getElementById('revPaceBody'); if(!el) return;
+  const sub = document.getElementById('revPaceSub'); if(sub) sub.textContent = t().rev_pace_sub;
+  const cal = (D.revCal30||{}).days || [];
+  if(!cal.length){ el.innerHTML = '<div class="empty">'+t().rev_no+'</div>'; return; }
+  let booked = 0, open = 0, total = 0;
+  let projRev = 0;
+  // Estimate projected revenue: avg_price across days × open nights doesn't account for booked
+  // night value; we approximate using overall ADR from units (better than nothing).
+  const units = (D.rev||{}).units || [];
+  const avg_adr = units.length ? units.reduce(function(s,u){return s+(u.adr||0)},0)/units.length : 0;
+  const futureEvents = [];
+  cal.forEach(function(d){
+    total += d.total || 0;
+    booked += d.occupied || 0;
+    open += d.available || 0;
+    if((d.events||[]).length){
+      futureEvents.push({date:d.date, name:(d.events[0]||{}).name, pace:d.pace_pct});
+    }
+  });
+  projRev = Math.round(booked * avg_adr);
+  const pace = total ? Math.round((booked/total)*100) : 0;
+  // Visual bar: booked vs open
+  const barW = Math.max(2, pace);
+  el.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div><div class="kpi-val" style="color:var(--gold)">'+booked+'<span style="font-size:14px;color:var(--mut);font-weight:500">/'+total+'</span></div><div class="muted">'+t().rev_pace_total+'</div></div>'
+    + '<div><div class="kpi-val green">'+pace+'%</div><div class="muted">'+t().rev_pace_booked+'</div></div>'
+    + '<div><div class="kpi-val">'+open+'</div><div class="muted">'+t().rev_pace_open+'</div></div>'
+    + (avg_adr ? ('<div><div class="kpi-val" style="color:var(--blue)">~'+fmt(projRev)+' SAR</div><div class="muted">'+t().rev_pace_proj+'</div></div>') : '')
+    + '</div>'
+    + '<div style="background:var(--surface-2);border-radius:8px;height:14px;overflow:hidden;border:1px solid var(--line)"><div style="width:'+barW+'%;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2))"></div></div>';
+  if(futureEvents.length){
+    el.innerHTML += '<div style="margin-top:14px"><div class="muted" style="margin-bottom:6px;font-weight:600;font-size:12px">'+t().rev_pace_events+'</div>'
+      + futureEvents.slice(0,5).map(function(e){
+        const cls = e.pace < 50 ? 'danger' : (e.pace < 75 ? 'warn' : 'ok');
+        return '<div class="log-row"><div class="log-lts">'+e.date+'</div><div><b>'+esc(e.name)+'</b> <span class="pill '+cls+'">'+e.pace+'% booked</span></div></div>';
+      }).join('') + '</div>';
+  }
 }
 async function loadTodayEmpty(){
   const wrap = document.getElementById('emptyGridWrap');
