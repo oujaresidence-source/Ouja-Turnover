@@ -5396,6 +5396,28 @@ _review_states = {}      # rev_id -> manual state dict
 _review_translations = {}  # rev_id -> {"en": "...", "ar": "..."} cached translations
 _reviews_last_fetch = 0  # epoch seconds
 
+# Historical review analytics, baked from the Airbnb/Hostaway export
+# (reviews_insights.json, shipped in the repo). Holds per-apartment category
+# averages + common-issue tags that the live /v1/reviews feed doesn't expose.
+_reviews_insights = {}
+
+def load_reviews_insights():
+    """Load the shipped historical-insights file (sits next to bot.py, NOT in
+    STATE_DIR). Safe to call repeatedly; missing file just means no history."""
+    global _reviews_insights
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reviews_insights.json")
+        with open(path, encoding="utf-8") as f:
+            _reviews_insights = json.load(f) or {}
+    except FileNotFoundError:
+        _reviews_insights = {}
+    except Exception as e:
+        print("load_reviews_insights error:", e)
+        _reviews_insights = {}
+    return _reviews_insights
+
+load_reviews_insights()
+
 # Owner's chosen "queue start" anchor. Set by /api/cleaning/reschedule-from and
 # also auto-applied after pause/unpause so the queue stays compacted forward.
 # If today drifts past the anchor, we use today+1 (next valid day) instead.
@@ -6571,6 +6593,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_reviews_sub">—</div>
           </div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="toggleReviewInsights()" id="rvInsBtn">📊 تحليل الشقق</button>
             <button class="btn primary sm" onclick="refreshReviews()" id="rvRefreshBtn">↻ تحديث من Hostaway</button>
           </div>
         </div>
@@ -6590,6 +6613,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div class="kpis" id="rvStats"></div>
+
+        <!-- Per-apartment insights (toggled by 📊 تحليل الشقق) -->
+        <div class="card" id="rvInsightsCard" style="display:none">
+          <div class="card-head">
+            <span class="card-title">📊 تحليل الشقق — درجات التقييم والمشاكل الشائعة</span>
+            <div class="card-actions">
+              <input id="rvInsSearch" placeholder="ابحث باسم الشقة…" oninput="_rvInsFilter()" style="width:200px;padding:6px 10px;height:32px;font-size:12px">
+            </div>
+          </div>
+          <div id="rvInsightsBody"><div class="empty sk">—</div></div>
+        </div>
 
         <!-- Time-window filter strip (the key user-asked feature) -->
         <div class="card" style="padding:12px 14px">
@@ -8659,6 +8693,9 @@ const WR_CHALLENGES = ["لا يوجد تحدي","رفع التقييمات","ت�
 const WR_STATUS = ["ممتاز","فوق المتوسط","متوسط","سيئ"];
 const WR_PLAN = ["سريعة","ممتازة","متوسطة","لا يوجد","تم الحل","تم التواصل مع الصيانة","تم تغيير شركة التنظيف","تم إرسال فني","جاري المتابعة"];
 const WR_RESOLVED = ["نعم","لا","في التقدم"];
+// Standard weekly inspection checklist — every apartment gets these MCQ items.
+const WR_CHECK_ITEMS = ["النظافة العامة","رائحة الشقة","المكيفات","السخان والماء الحار","الواي فاي","قفل الباب / الكود","المواقف","المفارش والمناشف","المستلزمات (شامبو، صابون…)","الأجهزة الكهربائية","دورات المياه","الإضاءة"];
+const WR_CHECK_STATES = [["ok","✓ سليم"],["issue","⚠ يحتاج"],["na","— غير منطبق"]];
 let _wrDraft = null;
 
 async function loadWeekly(){
@@ -8699,18 +8736,32 @@ async function openWeeklyEditor(rid){
   if(!r){
     const today = new Date().toISOString().slice(0,10);
     r = {id:null, employee:'', date:today, apartments:[]};
+    // New report → pre-list every apartment with its common issues.
+    try {
+      const tpl = await api('/api/weekly/template');
+      r.apartments = (tpl.apartments||[]).map(function(a){
+        return {name:a.name, listing_id:a.listing_id, common_issues:a.common_issues||[],
+                checks:{}, status:'', risks:[], challenges:[], plan:[], resolved:'', comments:[]};
+      });
+    } catch(_){}
   }
   _wrDraft = r;
+  _wrExpanded = {}; _wrFilter = '';
   _renderWeeklyEditor();
   document.getElementById('weeklyOverlay').style.display = 'block';
 }
 function _renderWeeklyEditor(){
   const r = _wrDraft || {};
   const apts = r.apartments || [];
+  const fq = (_wrFilter||'').toLowerCase().trim();
   let aptHtml = '';
+  let shown = 0;
   for(let i=0; i<apts.length; i++){
+    if(fq && String(apts[i].name||'').toLowerCase().indexOf(fq)<0) continue;
     aptHtml += _wrRenderApt(i, apts[i]);
+    shown++;
   }
+  if(!aptHtml) aptHtml = '<div class="empty muted" style="padding:14px;text-align:center;font-size:12px">ما فيه شقة بهذا الاسم</div>';
   const html =
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     + '<div style="font-size:18px;font-weight:700">📊 '+(r.id?'تعديل':'إنشاء')+' تقرير أسبوعي</div>'
@@ -8722,8 +8773,12 @@ function _renderWeeklyEditor(){
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">التاريخ</label>'
     +     '<input id="wrF_date" type="date" value="'+esc(r.date||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
     + '</div>'
-    + '<div style="margin-bottom:14px;display:flex;gap:8px"><input id="wrF_newApt" placeholder="اسم الشقة (مثل: MS5 202)" style="flex:1;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'
-    + '<button onclick="_wrAddApt()" class="btn primary sm">+ شقة</button></div>'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">'
+    +   '<div class="muted" style="font-size:11.5px;font-weight:600">🏠 '+apts.length+' شقة'+(fq?(' · ظاهر '+shown):'')+'</div>'
+    +   '<input id="wrF_search" value="'+esc(_wrFilter||'')+'" oninput="_wrSetFilter(this.value)" placeholder="ابحث عن شقة…" style="width:200px;padding:7px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+    + '</div>'
+    + '<div style="margin-bottom:14px;display:flex;gap:8px"><input id="wrF_newApt" placeholder="إضافة شقة يدوياً (مثل: MS5 202)" style="flex:1;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'
+    + '<button onclick="_wrAddApt()" class="btn ghost sm">+ شقة</button></div>'
     + '<div id="wrApts">'+aptHtml+'</div>'
     + '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'
     +   '<button onclick="closeWeekly()" class="btn ghost sm" style="flex:1">إلغاء</button>'
@@ -8733,7 +8788,36 @@ function _renderWeeklyEditor(){
     + '</div>';
   document.getElementById('weeklyEditorBody').innerHTML = html;
 }
+let _wrExpanded = {};
+let _wrFilter = '';
+function _wrSetFilter(v){ _wrFilter = v; _renderWeeklyEditor(); const e=document.getElementById('wrF_search'); if(e){ e.focus(); const n=e.value.length; try{e.setSelectionRange(n,n);}catch(_){} } }
+function _wrToggleApt(i){ _wrExpanded[i] = !_wrExpanded[i]; _renderWeeklyEditor(); }
+function _wrSetCheck(i, item, val){
+  if(!_wrDraft) return;
+  const a = _wrDraft.apartments[i]; if(!a) return;
+  a.checks = a.checks || {};
+  a.checks[item] = (a.checks[item]===val) ? '' : val;
+  _renderWeeklyEditor();
+}
 function _wrRenderApt(i, apt){
+  const open = !!_wrExpanded[i];
+  const checks = apt.checks || {};
+  // header summary: how many checks ticked + any "issue" flag
+  let nOk=0, nIssue=0;
+  WR_CHECK_ITEMS.forEach(function(it){ const v=checks[it]; if(v==='ok')nOk++; else if(v==='issue')nIssue++; });
+  const ci = apt.common_issues || [];
+  const ciBadge = ci.length ? '<span style="background:var(--bad,#c62828);color:#fff;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">⚠ '+ci.length+' متكررة</span>' : '';
+  const head = '<div onclick="_wrToggleApt('+i+')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:8px">'
+    + '<div class="strong" style="font-size:13.5px">'+(open?'▾':'▸')+' 🏠 '+esc(apt.name||'')+ciBadge+'</div>'
+    + '<div style="display:flex;align-items:center;gap:6px">'
+    + (nIssue?'<span style="background:#fff3cd;color:#92400e;border-radius:99px;padding:1px 8px;font-size:10px">⚠ '+nIssue+'</span>':'')
+    + (nOk?'<span style="background:#d1fae5;color:#065f46;border-radius:99px;padding:1px 8px;font-size:10px">✓ '+nOk+'</span>':'')
+    + (apt.status?'<span style="background:var(--gold-tint);border-radius:99px;padding:1px 8px;font-size:10px">'+esc(apt.status)+'</span>':'')
+    + '<button onclick="event.stopPropagation();_wrDelApt('+i+')" style="background:transparent;border:none;color:var(--red);cursor:pointer;font-size:16px">×</button>'
+    + '</div></div>';
+  if(!open){
+    return '<div style="background:var(--surface-2);padding:10px 12px;border-radius:10px;margin-bottom:8px;border:1px solid var(--border)">'+head+'</div>';
+  }
   function chips(name, opts, sel){
     return opts.map(o=>'<button onclick="_wrToggle('+i+',\\''+name+'\\','+JSON.stringify(o).replace(/"/g,'&quot;')+')" style="padding:4px 10px;border-radius:99px;border:1px solid '+(sel&&sel.indexOf(o)>=0?'var(--gold)':'var(--border)')+';background:'+(sel&&sel.indexOf(o)>=0?'var(--gold-tint)':'transparent')+';color:var(--text);font-size:11px;cursor:pointer">'+o+'</button>').join(' ');
   }
@@ -8743,24 +8827,49 @@ function _wrRenderApt(i, apt){
     opts.forEach(o=>h+='<option value="'+esc(o)+'"'+(cur===o?' selected':'')+'>'+o+'</option>');
     h+='</select>'; return h;
   }
+  // common issues reminder strip
+  let ciHtml = '';
+  if(ci.length){
+    ciHtml = '<div style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold);border-radius:8px;padding:8px 10px;margin-bottom:10px">'
+      + '<div class="muted" style="font-size:10.5px;font-weight:700;margin-bottom:4px">📌 المشاكل المتكررة لهذي الشقة (من المراجعات) — ركّز عليها:</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:4px">'
+      + ci.map(x=>'<span style="background:var(--surface);border:1px solid var(--bad,#c62828);color:var(--bad,#c62828);border-radius:99px;padding:1px 9px;font-size:11px">'+esc(x)+'</span>').join('')
+      + '</div></div>';
+  }
+  // MCQ checklist
+  let chk = '<div style="margin-bottom:10px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:6px">✅ قائمة الفحص الأسبوعي</div>'
+    + '<div style="display:flex;flex-direction:column;gap:5px">';
+  WR_CHECK_ITEMS.forEach(function(it){
+    const cur = checks[it] || '';
+    chk += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);border-radius:7px;padding:5px 9px">'
+      + '<span style="font-size:12px">'+esc(it)+'</span><div style="display:flex;gap:4px;flex-shrink:0">';
+    WR_CHECK_STATES.forEach(function(st){
+      const active = cur===st[0];
+      const col = st[0]==='ok'?'#065f46':st[0]==='issue'?'#92400e':'var(--text-2)';
+      const bg  = active ? (st[0]==='ok'?'#d1fae5':st[0]==='issue'?'#fff3cd':'var(--surface-2)') : 'transparent';
+      chk += '<button onclick="_wrSetCheck('+i+','+JSON.stringify(it).replace(/"/g,'&quot;')+','+JSON.stringify(st[0]).replace(/"/g,'&quot;')+')" style="padding:3px 9px;border-radius:99px;border:1px solid '+(active?col:'var(--border)')+';background:'+bg+';color:'+(active?col:'var(--text-2)')+';font-size:10.5px;cursor:pointer;font-weight:'+(active?'700':'400')+'">'+st[1]+'</button>';
+    });
+    chk += '</div></div>';
+  });
+  chk += '</div></div>';
   return '<div style="background:var(--surface-2);padding:12px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-    + '<div class="strong" style="font-size:13.5px">🏠 '+esc(apt.name||'')+'</div>'
-    + '<button onclick="_wrDelApt('+i+')" style="background:transparent;border:none;color:var(--red);cursor:pointer">×</button></div>'
+    + head + '<div style="margin-top:10px">'
+    + ciHtml + chk
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'
     + '<div><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">الحالة</div>'+sel('status', WR_STATUS, apt.status)+'</div>'
     + '<div><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">تمت المعالجة</div>'+sel('resolved', WR_RESOLVED, apt.resolved)+'</div></div>'
     + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">الخطر</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('risks', WR_RISKS, apt.risks)+'</div></div>'
     + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">التحدي</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('challenges', WR_CHALLENGES, apt.challenges)+'</div></div>'
     + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">خطة الاستجابة</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('plan', WR_PLAN, apt.plan)+'</div></div>'
-    + '</div>';
+    + '</div></div>';
 }
 function _wrAddApt(){
   if(!_wrDraft) return;
   const inp = document.getElementById('wrF_newApt'); const nm = (inp.value||'').trim();
   if(!nm) return;
   _wrDraft.apartments = _wrDraft.apartments || [];
-  _wrDraft.apartments.push({name:nm, status:'', risks:[], challenges:[], plan:[], resolved:'', comments:[]});
+  _wrDraft.apartments.push({name:nm, listing_id:null, common_issues:[], checks:{}, status:'', risks:[], challenges:[], plan:[], resolved:'', comments:[]});
+  _wrExpanded[_wrDraft.apartments.length-1] = true;
   inp.value = ''; _renderWeeklyEditor();
 }
 function _wrDelApt(i){ if(_wrDraft){ _wrDraft.apartments.splice(i,1); _renderWeeklyEditor(); } }
@@ -8791,16 +8900,28 @@ function printWeekly(){
   if(!_wrDraft) return;
   const r = _wrDraft;
   let aptsHtml = '';
-  (r.apartments||[]).forEach(a=>{
-    aptsHtml += '<div style="background:#fafbfc;border:1px solid #e8ecf0;border-radius:8px;padding:12px;margin-bottom:8px">'
+  function _hasData(a){
+    const c = a.checks||{};
+    const anyCheck = Object.keys(c).some(k=>c[k]);
+    return anyCheck || a.status || (a.risks||[]).length || (a.challenges||[]).length || (a.plan||[]).length || a.resolved;
+  }
+  (r.apartments||[]).filter(_hasData).forEach(a=>{
+    aptsHtml += '<div style="background:#fafbfc;border:1px solid #e8ecf0;border-radius:8px;padding:12px;margin-bottom:8px;break-inside:avoid">'
       + '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><div style="font-weight:700">🏠 '+esc(a.name||'')+'</div>'
       + (a.status?'<div style="background:#eff6ff;color:#1d4ed8;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600">'+esc(a.status)+'</div>':'')+'</div>';
-    if((a.risks||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>الخطر:</b> '+(a.risks||[]).map(x=>'<span style="background:#fff3cd;padding:1px 6px;border-radius:99px;font-size:10px">'+x+'</span>').join(' ')+'</div>';
-    if((a.challenges||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>التحدي:</b> '+(a.challenges||[]).map(x=>'<span style="background:#dbeafe;padding:1px 6px;border-radius:99px;font-size:10px">'+x+'</span>').join(' ')+'</div>';
-    if((a.plan||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>الخطة:</b> '+(a.plan||[]).join(' — ')+'</div>';
+    const c = a.checks||{};
+    const okItems = Object.keys(c).filter(k=>c[k]==='ok');
+    const issueItems = Object.keys(c).filter(k=>c[k]==='issue');
+    if(issueItems.length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>⚠ يحتاج متابعة:</b> '+issueItems.map(x=>'<span style="background:#fff3cd;color:#92400e;padding:1px 7px;border-radius:99px;font-size:10.5px;margin:0 2px">'+esc(x)+'</span>').join('')+'</div>';
+    if(okItems.length) aptsHtml += '<div style="font-size:11.5px;margin:4px 0;color:#065f46"><b>✓ سليم:</b> '+okItems.map(esc).join(' · ')+'</div>';
+    if((a.common_issues||[]).length) aptsHtml += '<div style="font-size:11px;margin:4px 0;color:#b91c1c"><b>📌 مشاكل متكررة (مراجعات):</b> '+(a.common_issues||[]).map(esc).join(' · ')+'</div>';
+    if((a.risks||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>الخطر:</b> '+(a.risks||[]).map(x=>'<span style="background:#fff3cd;padding:1px 6px;border-radius:99px;font-size:10px">'+esc(x)+'</span>').join(' ')+'</div>';
+    if((a.challenges||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>التحدي:</b> '+(a.challenges||[]).map(x=>'<span style="background:#dbeafe;padding:1px 6px;border-radius:99px;font-size:10px">'+esc(x)+'</span>').join(' ')+'</div>';
+    if((a.plan||[]).length) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>الخطة:</b> '+(a.plan||[]).map(esc).join(' — ')+'</div>';
     if(a.resolved) aptsHtml += '<div style="font-size:12px;margin:4px 0"><b>المعالجة:</b> '+esc(a.resolved)+'</div>';
     aptsHtml += '</div>';
   });
+  if(!aptsHtml) aptsHtml = '<div style="color:#94a3b8;padding:20px;text-align:center">لا توجد شقق معبأة بعد.</div>';
   const w = window.open('','_blank');
   w.document.write('<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تقرير '+esc(r.employee||'')+'</title>'
     +'<style>body{font-family:Tahoma,sans-serif;background:#fff;color:#1a202c;padding:30px;max-width:900px;margin:auto;line-height:1.6}'
@@ -9413,6 +9534,93 @@ async function refreshReviews(){
   } finally {
     if(b){ b.disabled = false; b.textContent = '↻ تحديث من Hostaway'; }
   }
+}
+
+// ===== Per-apartment review insights =====
+let _rvInsData = null;
+function toggleReviewInsights(){
+  const card = document.getElementById('rvInsightsCard');
+  if(!card) return;
+  const showing = card.style.display !== 'none';
+  if(showing){ card.style.display='none'; return; }
+  card.style.display='';
+  if(!_rvInsData) loadReviewInsights();
+}
+async function loadReviewInsights(){
+  const body = document.getElementById('rvInsightsBody');
+  if(body) body.innerHTML = '<div class="empty sk">⏳ جاري التحليل…</div>';
+  try {
+    const r = await api('/api/reviews/insights');
+    _rvInsData = r;
+    renderReviewInsights(r);
+  } catch(e){
+    if(body) body.innerHTML = '<div class="empty">تعذّر تحميل التحليل</div>';
+  }
+}
+function _catBar(label, val){
+  const v = (typeof val==='number' && val>0) ? val : 0;
+  const pct = Math.max(0, Math.min(100, (v/10)*100));
+  const col = v>=9.3 ? 'var(--good,#2e7d32)' : v>=8.5 ? 'var(--gold,#b8860b)' : 'var(--bad,#c62828)';
+  return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">'
+    + '<span style="width:78px;color:var(--text-2)">'+label+'</span>'
+    + '<div style="flex:1;height:6px;background:var(--surface-2);border-radius:4px;overflow:hidden">'
+    + '<div style="height:100%;width:'+pct+'%;background:'+col+'"></div></div>'
+    + '<span style="width:32px;text-align:left;font-weight:700">'+(v?v.toFixed(2):'—')+'</span></div>';
+}
+const _CAT_LBL = {accuracy:'الدقة', checkin:'الدخول', cleanliness:'النظافة', communication:'التواصل', location:'الموقع', value:'القيمة', respect_house_rules:'الالتزام'};
+function renderReviewInsights(d){
+  const body = document.getElementById('rvInsightsBody');
+  if(!body) return;
+  if(!d || (!d.apartments && !d.overall)){ body.innerHTML='<div class="empty">لا توجد بيانات</div>'; return; }
+  let h = '';
+  // Global scorecard
+  const ov = d.overall || {};
+  h += '<div class="card" style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold);margin-bottom:12px">'
+     + '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;padding:6px 4px">'
+     + '<div><div style="font-size:30px;font-weight:800;color:var(--gold)">'+(ov.avg?ov.avg.toFixed(2):'—')+'</div>'
+     + '<div class="muted" style="font-size:11px">متوسط عام · '+(ov.count||0)+' مراجعة تاريخية'+(d.live_total?(' · '+d.live_total+' حية'):'')+'</div></div>';
+  if(d.issues && d.issues.length){
+    h += '<div style="flex:1;min-width:240px"><div class="muted" style="font-size:11px;margin-bottom:5px">أكثر المشاكل تكراراً</div>'
+       + '<div style="display:flex;flex-wrap:wrap;gap:5px">';
+    d.issues.slice(0,12).forEach(function(it){
+      h += '<span style="background:var(--surface);border:1px solid var(--bad,#c62828);color:var(--bad,#c62828);border-radius:12px;padding:2px 9px;font-size:11px">'+it.tag+' <b>'+it.n+'</b></span>';
+    });
+    h += '</div></div>';
+  }
+  h += '</div></div>';
+  // Per-apartment cards
+  const apts = (d.apartments||[]).slice().sort(function(a,b){ return (b.hist_count||0)-(a.hist_count||0); });
+  h += '<div id="rvInsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">';
+  apts.forEach(function(a){
+    const nm = a.name || a.hist_name || ('#'+a.listing_id);
+    const avg = a.hist_avg || a.live_avg || 0;
+    const acol = avg>=9.3?'var(--good,#2e7d32)':avg>=8.5?'var(--gold,#b8860b)':'var(--bad,#c62828)';
+    h += '<div class="card rvInsApt" data-name="'+String(nm).toLowerCase()+'" style="padding:12px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px">'
+      + '<div style="font-weight:700;font-size:13px;line-height:1.35">'+nm+'</div>'
+      + '<div style="text-align:left;flex-shrink:0"><span style="font-size:20px;font-weight:800;color:'+acol+'">'+(avg?avg.toFixed(2):'—')+'</span>'
+      + '<div class="muted" style="font-size:10px">'+(a.hist_count||0)+' مراجعة'+(a.live_count?(' · '+a.live_count+' حية'):'')+(a.recent90?(' · '+a.recent90+' بآخر ٩٠ يوم'):'')+'</div></div></div>';
+    const cats = a.cats || {};
+    ['cleanliness','communication','checkin','accuracy','location','value','respect_house_rules'].forEach(function(k){
+      if(cats[k]!=null && cats[k]>0) h += _catBar(_CAT_LBL[k]||k, cats[k]);
+    });
+    if(a.issues && a.issues.length){
+      h += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">';
+      a.issues.slice(0,8).forEach(function(it){
+        h += '<span style="background:var(--surface-2);border-radius:10px;padding:1px 8px;font-size:10.5px;color:var(--text-2)">'+it.tag+' '+it.n+'</span>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div>';
+  body.innerHTML = h;
+}
+function _rvInsFilter(){
+  const q = (document.getElementById('rvInsSearch').value||'').toLowerCase().trim();
+  document.querySelectorAll('#rvInsGrid .rvInsApt').forEach(function(el){
+    el.style.display = (!q || (el.dataset.name||'').indexOf(q)>=0) ? '' : 'none';
+  });
 }
 async function analyzeReview(rid, btn, force){
   if(btn){ btn.disabled = true; const orig = btn.textContent; btn.textContent = '⏳ يحلل…';
@@ -13026,6 +13234,68 @@ async def _api_reviews_list(request):
                            if _reviews_last_fetch else None),
     })
 
+async def _api_reviews_insights(request):
+    """GET → per-apartment review scorecards + common issues.
+    Historical category breakdown (cleanliness, value, …) comes from the shipped
+    export (reviews_insights.json); live counts/averages are overlaid from the
+    reviews currently pulled from Hostaway so the numbers stay current."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    seed = _reviews_insights or {}
+    seed_apts = seed.get("apartments", {}) or {}
+    listings = get_listings_map()
+    live = {}
+    for rev in _reviews.values():
+        lid = rev.get("listing_id")
+        if lid is None:
+            continue
+        key = str(lid)
+        g = live.setdefault(key, {"count": 0, "sum": 0.0, "n": 0, "recent90": 0})
+        g["count"] += 1
+        try:
+            rr = float(rev.get("rating_raw") or 0)
+        except Exception:
+            rr = 0
+        if rr > 0:
+            g["sum"] += rr
+            g["n"] += 1
+        if _review_in_window(rev, 90):
+            g["recent90"] += 1
+    cards = []
+    seen = set()
+    for name, s in seed_apts.items():
+        lid = s.get("listing_id")
+        key = str(lid) if lid is not None else None
+        lv = live.get(key, {}) if key else {}
+        if key:
+            seen.add(key)
+        cur_name = listings.get(int(lid)) if (lid and str(lid).isdigit()) else None
+        cards.append({
+            "name": cur_name or name, "hist_name": name, "listing_id": lid,
+            "hist_count": s.get("count", 0), "hist_avg": s.get("avg"),
+            "cats": s.get("cats", {}), "low": s.get("low", 0), "issues": s.get("issues", []),
+            "live_count": lv.get("count", 0),
+            "live_avg": round(lv["sum"] / lv["n"], 2) if lv.get("n") else None,
+            "recent90": lv.get("recent90", 0),
+        })
+    for key, lv in live.items():
+        if key in seen:
+            continue
+        lid = int(key) if key.isdigit() else key
+        cards.append({
+            "name": listings.get(lid) or ("unit-" + key), "hist_name": None, "listing_id": lid,
+            "hist_count": 0, "hist_avg": None, "cats": {}, "low": 0, "issues": [],
+            "live_count": lv.get("count", 0),
+            "live_avg": round(lv["sum"] / lv["n"], 2) if lv.get("n") else None,
+            "recent90": lv.get("recent90", 0),
+        })
+    cards.sort(key=lambda c: (c["hist_count"] + c["live_count"]), reverse=True)
+    return _json({
+        "overall": seed.get("overall", {}), "issues": seed.get("issues", []),
+        "issues_all": seed.get("issues_all", []), "generated": seed.get("generated"),
+        "apartments": cards, "live_total": len(_reviews),
+    })
+
 async def _api_reviews_refresh(request):
     """POST → re-pull reviews from Hostaway."""
     if not _dash_auth(request):
@@ -13513,6 +13783,34 @@ async def _api_weekly_get(request):
         return _json({"error": "not found"}, 404)
     return _json({"report": r})
 
+async def _api_weekly_template(request):
+    """GET → all apartments pre-listed, each with its most-common review issues.
+    Used to pre-populate a brand-new weekly report so the employee just ticks
+    the MCQ checklist per apartment instead of typing names one by one."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    seed = _reviews_insights or {}
+    seed_apts = seed.get("apartments", {}) or {}
+    try:
+        listings = await asyncio.to_thread(get_listings_map)
+    except Exception:
+        listings = {}
+    apts, seen = [], set()
+    for nm, s in sorted(seed_apts.items(), key=lambda kv: kv[0]):
+        lid = s.get("listing_id")
+        cur = listings.get(int(lid)) if (lid and str(lid).isdigit()) else None
+        apts.append({
+            "name": cur or nm, "listing_id": lid,
+            "common_issues": [it.get("tag") for it in (s.get("issues") or []) if it.get("tag")][:6],
+        })
+        if lid is not None:
+            seen.add(str(lid))
+    for lid, name in sorted(listings.items(), key=lambda kv: str(kv[1])):
+        if str(lid) in seen:
+            continue
+        apts.append({"name": name, "listing_id": lid, "common_issues": []})
+    return _json({"apartments": apts, "count": len(apts)})
+
 async def _api_weekly_save(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -13531,14 +13829,21 @@ async def _api_weekly_save(request):
         cleaned = []
         for apt in b["apartments"]:
             if not isinstance(apt, dict): continue
+            checks = {}
+            if isinstance(apt.get("checks"), dict):
+                for k, v in list(apt["checks"].items())[:40]:
+                    checks[str(k)[:60]] = str(v)[:10]
             cleaned.append({
                 "name":      (apt.get("name") or "").strip()[:80],
+                "listing_id": apt.get("listing_id"),
                 "status":    (apt.get("status") or "").strip()[:40],
                 "risks":     [str(x)[:120] for x in (apt.get("risks") or [])][:20],
                 "challenges":[str(x)[:120] for x in (apt.get("challenges") or [])][:20],
                 "plan":      [str(x)[:200] for x in (apt.get("plan") or [])][:20],
                 "resolved":  (apt.get("resolved") or "").strip()[:40],
                 "comments":  [str(x)[:200] for x in (apt.get("comments") or [])][:20],
+                "common_issues": [str(x)[:60] for x in (apt.get("common_issues") or [])][:10],
+                "checks":    checks,
             })
         r["apartments"] = cleaned
     r["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
@@ -14076,6 +14381,7 @@ async def start_web_server():
         app.router.add_post("/api/tickets/delete", _api_tickets_delete)
         # Reviews (Hostaway + AI dispute/AAA)
         app.router.add_get("/api/reviews/list", _api_reviews_list)
+        app.router.add_get("/api/reviews/insights", _api_reviews_insights)
         app.router.add_post("/api/reviews/refresh", _api_reviews_refresh)
         app.router.add_post("/api/reviews/analyze", _api_reviews_analyze)
         app.router.add_post("/api/reviews/toggle-fixed", _api_reviews_toggle_fixed)
@@ -14098,6 +14404,7 @@ async def start_web_server():
         app.router.add_post("/api/quotes/delete", _api_quotes_delete)
         # Weekly reports
         app.router.add_get("/api/weekly/list", _api_weekly_list)
+        app.router.add_get("/api/weekly/template", _api_weekly_template)
         app.router.add_get("/api/weekly/get", _api_weekly_get)
         app.router.add_post("/api/weekly/save", _api_weekly_save)
         app.router.add_post("/api/weekly/delete", _api_weekly_delete)
