@@ -1197,13 +1197,18 @@ def _dc_insert_at(lid, target_iso, _depth=0):
         _dc_insert_at(occupant, (target + timedelta(days=1)).isoformat(), _depth + 1)
     return True
 
-def _dc_reset_from(start_iso):
+def _dc_reset_from(start_iso, set_anchor=True):
     """Wipe all next_scheduled for non-paused units and re-lay them starting from
     start_iso, one valid-day per unit, ordered by oldest-last_done-first (most
-    overdue takes the earliest slots)."""
+    overdue takes the earliest slots). When set_anchor is True (the default for
+    explicit user action), the start_iso is remembered as `_dc_anchor_date` so
+    later pause/unpause auto-compactions stay tethered to the same start."""
+    global _dc_anchor_date
     start = _parse_date(start_iso) if isinstance(start_iso, str) else start_iso
     if not start:
         return 0
+    if set_anchor:
+        _dc_anchor_date = start.isoformat()
     # Build priority queue: (last_done, lid) ascending so oldest = first
     pool = []
     for lid, s in _deep_clean_state.items():
@@ -4824,6 +4829,11 @@ _deep_clean_state = {}
 # is skipped by every scheduling function and shown in a separate dashboard
 # section. Persisted across redeploys.
 _paused_units = set()
+
+# Owner's chosen "queue start" anchor. Set by /api/cleaning/reschedule-from and
+# also auto-applied after pause/unpause so the queue stays compacted forward.
+# If today drifts past the anchor, we use today+1 (next valid day) instead.
+_dc_anchor_date = None
 
 def log_event(category, text):
     """Record something the bot did, for the dashboard's activity feed."""
@@ -9624,8 +9634,21 @@ async def _api_cleaning_set_last(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+def _dc_effective_anchor():
+    """Resolve the start date for an auto-compaction.
+       - If owner set an anchor via reschedule-from, use max(anchor, tomorrow-valid).
+       - Otherwise default to tomorrow's next valid day."""
+    tomorrow = datetime.now(TZ).date() + timedelta(days=1)
+    tomorrow_v = _dc_next_valid_day(tomorrow)
+    anchor = _parse_date(_dc_anchor_date) if _dc_anchor_date else None
+    if anchor and anchor > tomorrow_v:
+        return _dc_next_valid_day(anchor).isoformat()
+    return tomorrow_v.isoformat()
+
 async def _api_cleaning_pause(request):
-    """POST {lid} — pause a unit (remove from deep-clean schedule + calendar)."""
+    """POST {lid} — pause a unit. After the pause we auto-compact the queue
+    forward so we don't waste days: the remaining units are re-laid starting from
+    the owner's anchor date (or tomorrow if no anchor)."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
@@ -9637,13 +9660,19 @@ async def _api_cleaning_pause(request):
     if lid in _deep_clean_state:
         _deep_clean_state[lid]["next_scheduled"] = None
         _deep_clean_state[lid]["next_status"] = "paused"
+    # Auto-compact: pull the remaining queue forward so the gap left behind
+    # gets filled instead of every other unit drifting later.
+    start_iso = _dc_effective_anchor()
+    _dc_reset_from(start_iso, set_anchor=False)
     await asyncio.to_thread(persist_state)
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
-    log_event("pricing", f"تنظيف عميق · {name}: تم الإيقاف ⏸")
-    return _json({"ok": True})
+    log_event("pricing", f"تنظيف عميق · {name}: تم الإيقاف ⏸ · تم ضغط الطابور من {start_iso}")
+    return _json({"ok": True, "rebased_from": start_iso})
 
 async def _api_cleaning_unpause(request):
-    """POST {lid} — unpause a unit. Re-runs the scheduler so it gets a slot."""
+    """POST {lid} — unpause a unit. Re-compacts the whole queue from the anchor
+    so the just-unpaused unit gets slotted in by last_done priority (oldest first)
+    instead of pinned to the very end."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
@@ -9654,12 +9683,13 @@ async def _api_cleaning_unpause(request):
     _paused_units.discard(lid)
     if lid in _deep_clean_state and _deep_clean_state[lid].get("next_status") == "paused":
         _deep_clean_state[lid]["next_status"] = "unscheduled"
+    # Re-compact from the anchor so this unit takes its priority slot.
+    start_iso = _dc_effective_anchor()
+    _dc_reset_from(start_iso, set_anchor=False)
     await asyncio.to_thread(persist_state)
-    # Re-run the scheduler so this unit takes the next free slot
-    await asyncio.to_thread(schedule_deep_cleans)
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
-    log_event("pricing", f"تنظيف عميق · {name}: تم تشغيله ▶")
-    return _json({"ok": True})
+    log_event("pricing", f"تنظيف عميق · {name}: تم تشغيله ▶ · تم إعادة الترتيب من {start_iso}")
+    return _json({"ok": True, "rebased_from": start_iso})
 
 async def _api_cleaning_insert(request):
     """POST {lid, date} — insert a deep-clean for lid at date (e.g. after finishing).
@@ -10392,6 +10422,7 @@ def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
     global _price_opps, _discount_paused_until, _unit_discount_skip, _agreement_reminded
+    global _dc_anchor_date
     try:
         _assistant_seen = _BoundedSet(_load_json("seen.json", []), maxlen=20000)
         _pending_replies = {int(k): v for k, v in _load_json("pending.json", {}).items()}
@@ -10424,6 +10455,7 @@ def load_state():
         _deep_clean_state.update({int(k): v for k, v in _load_json("deep_clean.json", {}).items()})
         _paused_units.clear()
         _paused_units.update(int(x) for x in _load_json("paused_units.json", []) if str(x).strip())
+        _dc_anchor_date = _load_json("dc_anchor.json", None) or None
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -10465,6 +10497,7 @@ def persist_state():
     _save_json("custom_events.json", _custom_events)
     _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
     _save_json("paused_units.json", list(_paused_units))
+    _save_json("dc_anchor.json", _dc_anchor_date)
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
