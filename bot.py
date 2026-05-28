@@ -3692,12 +3692,32 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
         elif ASSISTANT_ESC_ACK:
             _esc_ack_count[cid] = _esc_ack_count.get(cid, 0) + 1
             n = _esc_ack_count[cid]
-            static = ASSISTANT_ACK_AR if _has_arabic(item["guest_text"]) else ASSISTANT_ACK_EN
-            if n == 1:
-                ack = static                       # first time: quick holding message
+            is_ar = _has_arabic(item["guest_text"])
+            # Off-hours ack: tell the guest exactly what happens next AND when.
+            # In-hours ack: the regular static or the empathetic re-ack on repeats.
+            offhours_now = bool(item.get("_offhours"))
+            if offhours_now and n == 1:
+                back = next_work_start()
+                same_day = back.date() == datetime.now(TZ).date()
+                back_ar = back.strftime("%H:%M") + (" بكرة" if not same_day else "")
+                back_en = back.strftime("%H:%M") + (" tomorrow" if not same_day else "")
+                ack = (
+                    f"حياك الله 🤍 وصلت رسالتك. الفريق خارج ساعات العمل حالياً (نرجع الساعة "
+                    f"{back_ar})، لكن لأهمية موضوعك رفعت تنبيهاً للمشرف الحين، وأول ما يبدأ "
+                    f"اليوم بيتواصل معك مباشرة. إذا فيه تفاصيل إضافية تساعدنا، اكتبها هنا وراح "
+                    f"تكون أمامه أول ما يفتح الجهاز."
+                    if is_ar else
+                    f"Hi 🤍 your message is in. Our team is off-hours right now (back at "
+                    f"{back_en}), but I've flagged this to the supervisor immediately and "
+                    f"they'll reach out the moment they start their day. Any extra detail you "
+                    f"add here will be the first thing they see when they're back."
+                )
+            elif n == 1:
+                ack = ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN
             else:                                  # repeat: empathetic, problem-specific
                 ack = await asyncio.to_thread(claude_escalation_ack, g, item["unit"],
-                                              item["history"], item["guest_text"]) or static
+                                              item["history"], item["guest_text"]) \
+                       or (ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN)
             try:
                 await asyncio.to_thread(send_guest_message, cid, ack, item["comm_type"])
                 _esc_sent_acks.setdefault(cid, []).append(ack)
@@ -3732,7 +3752,12 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
         return
 
     # ---- STAGE 1: confident enough -> send automatically, then post an FYI card ----
-    can_auto = (ASSISTANT_AUTO and not escalate and bool(reply) and conf >= ASSISTANT_AUTO_CONF)
+    # During off-hours we treat auto-send as enabled by default — the team
+    # isn't around to approve, and the owner explicitly asked the bot to
+    # "answer as much as possible" outside hours.
+    offhours = bool(item.get("_offhours"))
+    can_auto = (not escalate and bool(reply) and conf >= ASSISTANT_AUTO_CONF and
+                (ASSISTANT_AUTO or offhours))
     if can_auto:
         try:
             await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
@@ -3792,31 +3817,14 @@ async def process_assistant_item(it, channel):
             it["guest_prior_stays"] = len(prof.get("reservations", []))
     except Exception as e:
         print("guest profile update error:", e)
-    # ---- Off-hours auto-acknowledgement ----
-    # If we're outside the team's working window AND we haven't already acked
-    # this conversation during the current off-hours, send a one-time "we'll
-    # respond when we're back" message so the guest isn't left in silence.
-    # The real draft still gets created and queued — the team handles it
-    # the moment they're back online.
-    if OFFHOURS_AUTOREPLY_ENABLED and not is_within_working_hours():
-        cid = it.get("conversation_id")
-        if cid and cid not in _offhours_acked_convos:
-            try:
-                back_at = next_work_start()
-                back_label_ar = back_at.strftime("%H:%M") + (" بكرة" if back_at.date() != datetime.now(TZ).date() else "")
-                back_label_en = back_at.strftime("%H:%M") + (" tomorrow" if back_at.date() != datetime.now(TZ).date() else "")
-                is_ar = _has_arabic(it.get("guest_text", ""))
-                ack = (f"حياك الله 🤍 الفريق غير متاح حالياً، نرجع لك بكامل التفاصيل الساعة "
-                       f"{back_label_ar}. لو في شي مستعجل اكتبه هنا وراح يكون أول شي نرد عليه."
-                       if is_ar else
-                       f"Hi 🤍 our team is offline right now and we'll get back to you at "
-                       f"{back_label_en} sharp. If it's urgent, write it here and it'll be the "
-                       f"first message we pick up.")
-                await asyncio.to_thread(send_guest_message, cid, ack, it.get("comm_type", "email"))
-                _offhours_acked_convos.add(cid)
-                log_event("guest", f"رسالة 'خارج ساعات العمل' · {it.get('guest','')} · {it.get('unit','')}")
-            except Exception as e:
-                print("offhours ack send error:", e)
+    # ---- Off-hours flag (used below in the draft path) ----
+    # New behavior per owner: outside working hours, answer ANY question the
+    # bot is confident about (treat off-hours like ASSISTANT_AUTO=ON with the
+    # same confidence threshold). Only escalations and very-low-confidence
+    # cases trigger the holding message — and that holding message now
+    # promises an escalation + supervisor reminder at the start of the day,
+    # instead of just "we'll get back to you".
+    it["_offhours"] = (OFFHOURS_AUTOREPLY_ENABLED and not is_within_working_hours())
     status = it.get("res_status") or await asyncio.to_thread(
         get_reservation_status, it.get("reservation_id"))
     confirmed = status in CONFIRMED_STATUSES
@@ -4884,7 +4892,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_clean_sub"></div>
           </div>
           <div class="page-tools">
-            <label class="btn ghost sm" style="cursor:pointer">📥 رفع CSV<input type="file" accept=".csv" onchange="uploadCleaningCSV(event)" style="display:none"></label>
+            <label class="btn primary sm" style="cursor:pointer">📥 رفع Excel<input type="file" accept=".xlsx" onchange="uploadCleaningXLSX(event)" style="display:none"></label>
+            <label class="btn ghost sm" style="cursor:pointer">📄 CSV<input type="file" accept=".csv" onchange="uploadCleaningCSV(event)" style="display:none"></label>
             <button class="btn ghost sm" onclick="loadCleaning()">↻</button>
           </div>
         </div>
@@ -4892,6 +4901,18 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="cleanImportResult" style="display:none"></div>
 
         <div class="kpis" id="cleanStats"></div>
+
+        <!-- THIS WEEK strip — the supervisor's daily lookup -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">📆 هذا الأسبوع — ٧ أيام قادمة</span></div>
+          <div id="cleanWeek"><div class="empty sk">—</div></div>
+        </div>
+
+        <!-- 60-day visual schedule — the actual SCHEDULE the user asked for -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">🗓️ الجدول البصري · ٦٠ يوم قادمة</span><span class="card-sub">اضغط أي يوم للتفاصيل</span></div>
+          <div id="cleanVisualGrid"><div class="empty sk">—</div></div>
+        </div>
 
         <div class="card">
           <div class="card-head"><span class="card-title">🔗 <span id="t_clean_link_title">الرابط لشركة التنظيف</span></span></div>
@@ -5914,8 +5935,127 @@ async function loadCleaning(){
   try{ D.clean = await api('/api/cleaning/schedule') }catch(_){ D.clean = {items:[], counts:{}} }
   const sub = document.getElementById('t_clean_sub'); if(sub) sub.textContent = t().clean_sub;
   renderCleaningStats();
+  renderCleaningWeek();
+  renderCleaningVisual();
   renderCleaningLink();
   renderCleaningList();
+}
+
+function _ar_wd(n){ return ['الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][n] }
+function _en_wd(n){ return ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][n] }
+function _wd(n){ return L==='ar' ? _ar_wd(n) : _en_wd(n) }
+
+function renderCleaningWeek(){
+  const el = document.getElementById('cleanWeek'); if(!el) return;
+  const items = ((D.clean||{}).items)||[];
+  const today = new Date((D.clean||{}).today || new Date().toISOString().slice(0,10));
+  // Build a date -> items[] map
+  const byDate = {};
+  for(const it of items){
+    if(!it.next_scheduled) continue;
+    if(!byDate[it.next_scheduled]) byDate[it.next_scheduled] = [];
+    byDate[it.next_scheduled].push(it);
+  }
+  let html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">';
+  for(let i = 0; i < 7; i++){
+    const d = new Date(today); d.setDate(today.getDate() + i);
+    const iso = d.toISOString().slice(0,10);
+    const wdIdx = (d.getDay() + 6) % 7;   // Monday=0
+    const isToday = i === 0;
+    const isWeekend = wdIdx === 3 || wdIdx === 4;   // Thu/Fri
+    const todays = byDate[iso] || [];
+    const bg = todays.length ? 'var(--gold-soft)' : (isWeekend ? 'var(--surface-2)' : 'var(--surface)');
+    const border = isToday ? '2px solid var(--gold)' : '1px solid var(--line)';
+    let body = '<div class="muted" style="font-size:11px;text-align:center;padding:14px 4px">'
+             + (isWeekend ? '🚫 نهاية أسبوع' : '—') + '</div>';
+    if(todays.length){
+      body = todays.map(function(it){
+        const stCls = it.next_status === 'blocked' ? 'ok' : 'info';
+        return '<div style="background:var(--surface);border-radius:6px;padding:5px 8px;margin-bottom:4px;font-size:11.5px;font-weight:600">'
+          + esc(it.name) + ' <span class="pill ' + stCls + '" style="font-size:9.5px">' + (it.next_status === 'blocked' ? '🔒' : '📅') + '</span></div>';
+      }).join('');
+    }
+    html += '<div style="background:' + bg + ';border:' + border + ';border-radius:10px;padding:10px 8px 8px">'
+      + '<div style="font-size:10.5px;color:var(--mut);font-weight:600">' + _wd(wdIdx) + (isToday ? ' · اليوم' : '') + '</div>'
+      + '<div style="font-family:var(--font-mono);font-weight:700;font-size:16px;margin-bottom:6px">' + d.getDate() + '/' + (d.getMonth()+1) + '</div>'
+      + body
+      + '</div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderCleaningVisual(){
+  const el = document.getElementById('cleanVisualGrid'); if(!el) return;
+  const items = ((D.clean||{}).items)||[];
+  const today = new Date((D.clean||{}).today || new Date().toISOString().slice(0,10));
+  const byDate = {};
+  for(const it of items){
+    if(!it.next_scheduled) continue;
+    if(!byDate[it.next_scheduled]) byDate[it.next_scheduled] = [];
+    byDate[it.next_scheduled].push(it);
+  }
+  // 60-day grid, 7 cols
+  const wdLabels = ['الإث','الثل','الأر','الخم','الجم','السب','الأح'];
+  const wdLabelsEn = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const wds = L==='ar' ? wdLabels : wdLabelsEn;
+  let html = '<div class="calgrid" style="margin-bottom:6px">';
+  for(let i = 0; i < 7; i++) html += '<div style="text-align:center;color:var(--mut);font-size:10.5px;font-weight:600;padding:3px 0">' + wds[i] + '</div>';
+  html += '</div><div class="calgrid">';
+  // pad to align under correct weekday (Mon=0)
+  const firstWd = (today.getDay() + 6) % 7;
+  for(let i = 0; i < firstWd; i++) html += '<div></div>';
+  for(let i = 0; i < 60; i++){
+    const d = new Date(today); d.setDate(today.getDate() + i);
+    const iso = d.toISOString().slice(0,10);
+    const wdIdx = (d.getDay() + 6) % 7;
+    const isWE = wdIdx === 3 || wdIdx === 4;
+    const todays = byDate[iso] || [];
+    const has = todays.length > 0;
+    const cls = has
+      ? (todays[0].next_status === 'blocked' ? 'cal-high' : 'cal-mid')
+      : (isWE ? '' : '');
+    const isToday = i === 0;
+    const evtLabel = has ? (todays.length === 1 ? todays[0].name.slice(0, 11) : (todays.length + ' وحدات')) : '';
+    html += '<div class="calday ' + cls + (isWE ? ' weekend' : '') + (has ? ' evt' : '') + '"'
+      + (isToday ? ' style="outline:2px solid var(--gold);outline-offset:-2px"' : '')
+      + ' onclick="cleanDayDrill(&#39;' + iso + '&#39;)">'
+      + '<div class="cd-dnum">' + d.getDate() + '</div>'
+      + '<div class="cd-wd">' + wds[wdIdx].toLowerCase() + '</div>'
+      + (has ? '<div class="cd-evt">' + esc(evtLabel) + '</div>' : '')
+      + '</div>';
+  }
+  html += '</div>';
+  // Legend
+  html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:11px;color:var(--mut)">'
+    + '<span><span style="display:inline-block;width:12px;height:12px;background:#dcf3e6;border-radius:3px;vertical-align:middle;border:1.5px solid var(--gold)"></span> مؤكدة + مقفلة</span>'
+    + '<span><span style="display:inline-block;width:12px;height:12px;background:#faeed1;border-radius:3px;vertical-align:middle;border:1.5px solid var(--gold)"></span> مجدولة</span>'
+    + '<span><span style="display:inline-block;width:12px;height:12px;background:var(--surface-2);border-radius:3px;vertical-align:middle"></span> فاضي</span>'
+    + '<span><span style="display:inline-block;width:12px;height:12px;background:var(--surface-2);border-radius:3px;vertical-align:middle;border:1.5px solid var(--gold)"></span> اليوم</span>'
+    + '</div>';
+  el.innerHTML = html;
+}
+
+function cleanDayDrill(iso){
+  const items = ((D.clean||{}).items||[]).filter(function(x){return x.next_scheduled === iso});
+  if(!items.length){
+    toast('ما فيه تنظيفات في ' + iso);
+    return;
+  }
+  openDrawer('🧹 ' + iso, items.length + ' وحدة');
+  setDrawerBody(
+    items.map(function(it){
+      const status = it.next_status === 'blocked' ? '✓ مؤكد + الكالندر مقفل' : '📅 مجدول (يتأكد ٩م الليلة قبل)';
+      return '<div class="list-item">'
+        + '<div class="top"><span class="name">'+esc(it.name)+'</span><span class="meta">'+(it.beds || '?')+' غرف</span></div>'
+        + '<div class="muted">'+esc(it.area || '')+'</div>'
+        + '<div style="margin-top:6px"><span class="pill '+(it.next_status==='blocked'?'ok':'info')+'">'+status+'</span></div>'
+        + '<div class="actions"><button class="btn green xs" onclick="cleanMarkDone('+it.lid+');closeDrawer()">✓ علّم منجز</button>'
+        + '<button class="btn ghost xs" onclick="cleanResched('+it.lid+');closeDrawer()">📅 إعادة جدولة</button></div>'
+        + '</div>';
+    }).join('')
+  );
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">إغلاق</button>');
 }
 
 function renderCleaningStats(){
@@ -6020,28 +6160,36 @@ async function cleanSetLast(lid){
   if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
 }
 
-async function uploadCleaningCSV(ev){
+async function uploadCleaningCSV(ev){ return _uploadCleaning(ev, '/api/cleaning/import-csv') }
+async function uploadCleaningXLSX(ev){ return _uploadCleaning(ev, '/api/cleaning/import-xlsx') }
+
+async function _uploadCleaning(ev, endpoint){
   const file = ev.target.files && ev.target.files[0];
   if(!file) return;
-  const fd = new FormData();
-  fd.append('file', file);
+  const fd = new FormData(); fd.append('file', file);
   toast('⏳ يستورد…');
   let r;
   try{
-    const resp = await fetch('/api/cleaning/import-csv?token=' + encodeURIComponent(tok()), {
-      method:'POST', body: fd
-    });
+    const resp = await fetch(endpoint + '?token=' + encodeURIComponent(tok()), {method:'POST', body: fd});
     r = await resp.json();
   }catch(e){ toast('خطأ'); return; }
   ev.target.value = '';
   const box = document.getElementById('cleanImportResult');
   if(r.ok){
+    const dated = (r.matched||[]).length;
+    const unknown = (r.unknown||[]).length;
+    const noDate = (r.no_date||[]).length;
+    const bad = (r.unmatched||[]).length;
     box.style.display = 'block';
     box.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:rgba(14,158,95,.2)">'
-      + '<div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ تم الاستيراد</div>'
-      + '<div>طُبّق على <b>'+r.matched.length+'</b> وحدة</div>'
-      + (r.unmatched.length ? '<div class="muted" style="margin-top:8px">⚠ غير مطابقة ('+r.unmatched.length+'): '+r.unmatched.map(function(x){return esc(x.name)}).join('، ')+'</div>' : '')
-      + (r.no_date.length ? '<div class="muted" style="margin-top:8px">⚠ بدون تاريخ صحيح ('+r.no_date.length+'): '+r.no_date.map(function(x){return esc(x.name)}).join('، ')+'</div>' : '')
+      + '<div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ تم الاستيراد بنجاح</div>'
+      + '<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px">'
+        + '<span><b class="mono">'+dated+'</b> وحدة بتاريخ محدّد</span>'
+        + (unknown ? '<span><b class="mono">'+unknown+'</b> وحدة تاريخها غير معروف (تُعتبر متأخّرة لجدولة فورية)</span>' : '')
+        + (noDate ? '<span><b class="mono">'+noDate+'</b> بدون تاريخ</span>' : '')
+        + (bad ? '<span style="color:var(--red)"><b class="mono">'+bad+'</b> ما طابقت أي وحدة</span>' : '')
+      + '</div>'
+      + ((r.unmatched||[]).length ? '<div class="muted" style="margin-top:10px;font-size:11.5px">⚠ غير مطابقة: '+r.unmatched.map(function(x){return esc(x.name)}).join('، ')+'</div>' : '')
       + '</div>';
     loadCleaning();
   }else{
@@ -8505,6 +8653,173 @@ def _parse_any_date(s):
             pass
     return None
 
+# ---- Smart Arabic free-form date parser (for the cleaning-baseline import) ----
+_AR_NUM_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_AR_MONTHS = {
+    "يناير": 1, "كانون الثاني": 1,
+    "فبراير": 2, "شباط": 2,
+    "مارس": 3, "آذار": 3, "اذار": 3,
+    "أبريل": 4, "ابريل": 4, "نيسان": 4,
+    "مايو": 5, "أيار": 5, "ايار": 5,
+    "يونيو": 6, "حزيران": 6,
+    "يوليو": 7, "تموز": 7,
+    "أغسطس": 8, "اغسطس": 8, "آب": 8,
+    "سبتمبر": 9, "أيلول": 9, "ايلول": 9,
+    "أكتوبر": 10, "اكتوبر": 10, "تشرين الأول": 10,
+    "نوفمبر": 11, "تشرين الثاني": 11,
+    "ديسمبر": 12, "كانون الأول": 12,
+}
+# Phrases that mean "we don't know" / "never done". Caller treats these as the
+# unit being maximally overdue (forces immediate scheduling).
+_AR_UNKNOWN_PHRASES = ("مدري", "ماسوينا", "ما سوينا", "ما تم", "?", "n/a", "—")
+
+def parse_ar_freeform_date(s, today=None):
+    """Returns (date | None, was_unknown:bool). Handles ISO, DD/MM/YYYY,
+    "قبل X يوم/اسبوع/شهر[ ونص]", Arabic month names with Arabic or western
+    numerals, and uncertainty phrases like "مدري"/"ماسوينا" → returns (None, True)."""
+    if s is None:
+        return None, False
+    today = today or datetime.now(TZ).date()
+    if isinstance(s, datetime):
+        return s.date(), False
+    if isinstance(s, date) and not isinstance(s, datetime):
+        return s, False
+    raw = str(s).strip()
+    if not raw:
+        return None, False
+    s = raw.translate(_AR_NUM_MAP).lower().strip()
+    if any(s == u or s.startswith(u) for u in _AR_UNKNOWN_PHRASES if u):
+        return None, True
+    d = _parse_any_date(s)
+    if d:
+        return d, False
+    # relative day phrases
+    m = re.search(r"قبل\s*(\d+)\s*(?:يوم|ايام|أيام)", s)
+    if m: return today - timedelta(days=int(m.group(1))), False
+    if "قبل اسبوعين" in s or "قبل أسبوعين" in s: return today - timedelta(days=14), False
+    if "قبل اسبوع" in s or "قبل أسبوع" in s: return today - timedelta(days=7), False
+    m = re.search(r"قبل\s*(\d+)\s*(?:اسابيع|أسابيع)", s)
+    if m: return today - timedelta(weeks=int(m.group(1))), False
+    if "قبل شهرين ونص" in s or "قبل شهرين ونصف" in s: return today - timedelta(days=75), False
+    if "قبل شهر ونص" in s or "قبل شهر ونصف" in s: return today - timedelta(days=45), False
+    if "قبل شهرين" in s: return today - timedelta(days=60), False
+    if "قبل شهر" in s: return today - timedelta(days=30), False
+    m = re.search(r"قبل\s*(\d+)\s*(?:اشهر|أشهر|شهور)", s)
+    if m: return today - timedelta(days=30 * int(m.group(1))), False
+    # Arabic month name with day number
+    for name, num in _AR_MONTHS.items():
+        if name in s:
+            digs = re.findall(r"\d+", s)
+            if digs:
+                day_n = int(digs[0])
+                if 1 <= day_n <= 31:
+                    try:
+                        d = date(today.year, num, day_n)
+                        if (d - today).days > 180:
+                            d = date(today.year - 1, num, day_n)
+                        return d, False
+                    except ValueError:
+                        pass
+    return None, False
+
+# Add a 'date' alias at module level since we use it in the helper above
+from datetime import date  # noqa: E402
+
+async def _api_cleaning_import_xlsx(request):
+    """POST multipart 'file' = .xlsx with one row per apartment.
+    Auto-detects which columns hold the apartment name and the last-clean date
+    (any cell in a row that parses as an Arabic-or-ISO date counts as the date,
+    any cell that matches a catalog name as the name). 'مدري' / 'ماسوينا' / blank
+    are treated as 'overdue from day one' so the scheduler picks them first."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        import openpyxl as _xl, io as _io
+    except Exception:
+        return _json({"error": "openpyxl not installed"}, 500)
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+        if not field or field.name != "file":
+            return _json({"error": "expected 'file' multipart field"}, 400)
+        blob = await field.read()
+    except Exception as e:
+        return _json({"error": f"upload error: {e}"}, 400)
+    try:
+        wb = _xl.load_workbook(_io.BytesIO(blob), data_only=True)
+    except Exception as e:
+        return _json({"error": f"not a valid xlsx: {e}"}, 400)
+
+    listings = get_listings_map() or {}
+    norm_to_lid = {norm_unit(n): lid for lid, n in listings.items()}
+    today = datetime.now(TZ).date()
+    # treat "unknown" as 90 days ago so the scheduler picks them immediately
+    UNKNOWN_FALLBACK = today - timedelta(days=90)
+
+    matched, unmatched, unknown_dates = [], [], []
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        for row in ws.iter_rows(values_only=True):
+            # Find name-cell + date-cell heuristically
+            name_cell, date_cell, parsed_date, was_unknown = None, None, None, False
+            for cell in row:
+                if isinstance(cell, str) and len(cell.strip()) >= 2:
+                    norm = norm_unit(cell)
+                    if norm in norm_to_lid:
+                        name_cell = cell; continue
+                d, unk = parse_ar_freeform_date(cell, today=today)
+                if d:
+                    date_cell = cell; parsed_date = d
+                if unk:
+                    was_unknown = True; date_cell = cell
+            # Fallback: if no exact match, try fuzzy contains on string cells
+            if not name_cell:
+                for cell in row:
+                    if isinstance(cell, str) and len(cell.strip()) >= 2:
+                        norm = norm_unit(cell)
+                        for k in norm_to_lid:
+                            if norm and (norm in k or k in norm) and abs(len(norm) - len(k)) <= 6:
+                                name_cell = cell
+                                break
+                        if name_cell:
+                            break
+            if not name_cell:
+                continue
+            lid = norm_to_lid.get(norm_unit(name_cell))
+            if not lid:
+                for k, v in norm_to_lid.items():
+                    n = norm_unit(name_cell)
+                    if n and (n in k or k in n) and abs(len(n) - len(k)) <= 6:
+                        lid = v; break
+            if not lid:
+                unmatched.append({"name": name_cell, "raw_date": str(date_cell or "")})
+                continue
+            if lid not in _deep_clean_state:
+                _dc_init(lid)
+            if parsed_date:
+                _deep_clean_state[lid]["last_done"] = parsed_date.isoformat()
+                _deep_clean_state[lid]["next_scheduled"] = None
+                _deep_clean_state[lid]["next_status"] = "unscheduled"
+                matched.append({"lid": lid, "name": listings[lid],
+                                "raw_date": str(date_cell), "parsed": parsed_date.isoformat()})
+            elif was_unknown:
+                _deep_clean_state[lid]["last_done"] = UNKNOWN_FALLBACK.isoformat()
+                _deep_clean_state[lid]["next_scheduled"] = None
+                _deep_clean_state[lid]["next_status"] = "unscheduled"
+                _deep_clean_state[lid]["notes"] = (
+                    "تاريخ آخر تنظيف غير معروف (مدري/ماسوينا) — تمت معاملته كأنه قبل ٩٠ يوم لضمان جدولة فورية."
+                )
+                unknown_dates.append({"lid": lid, "name": listings[lid],
+                                      "raw_date": str(date_cell)})
+    # Re-run the scheduler so the freshly-imported dates yield real next dates
+    await asyncio.to_thread(persist_state)
+    await asyncio.to_thread(schedule_deep_cleans)
+    log_event("pricing",
+              f"تنظيف عميق · استيراد XLSX: {len(matched)} تاريخ + "
+              f"{len(unknown_dates)} غير معروف · {len(unmatched)} غير مطابق")
+    return _json({"ok": True, "matched": matched, "unknown": unknown_dates,
+                  "unmatched": unmatched})
+
 async def _api_cleaning_set_last(request):
     """POST {lid, date} — set last_done (used to import the April 27 baseline file)."""
     if not _dash_auth(request):
@@ -8955,6 +9270,7 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/reschedule", _api_cleaning_reschedule)
         app.router.add_post("/api/cleaning/set-last", _api_cleaning_set_last)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
+        app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
         app.router.add_get("/cleaning", _handle_cleaning_page)
         app.router.add_get("/api/cleaning/public", _api_cleaning_public)
@@ -9112,6 +9428,40 @@ async def offhours_ack_reset_loop():
     """At the start of every working day, clear the set of conversations that already
     got an off-hours auto-ack so they can be re-acked next time we go offline."""
     _offhours_acked_convos.clear()
+
+@tasks.loop(time=dt_time(hour=WORK_START_HOUR, minute=2, tzinfo=TZ))
+async def morning_escalation_reminder_loop():
+    """First thing each working day, post a summary of every unclaimed escalation
+    into #escalations so the team starts the day looking at the right stack."""
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        open_escs = [(mid, e) for mid, e in _escalations.items() if not e.get("claimed_by")]
+        if not open_escs:
+            return
+        category = await get_assistant_category(guild)
+        ch = await ensure_channel(guild, ESCALATION_CHANNEL, category)
+        if ch is None:
+            return
+        op_role = find_operation_role(guild)
+        mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
+        lines = []
+        for mid, e in open_escs[:25]:
+            age_min = int((time.time() - (e.get("last_ping") or time.time())) / 60)
+            lines.append(f"• **{e.get('guest','ضيف')}** · {e.get('unit','')} · من {age_min} دقيقة")
+        embed = discord.Embed(
+            title="☀ صباح الخير — تصعيدات بانتظار الاستلام",
+            description=f"{len(open_escs)} تصعيد مفتوح. تحت قائمة بأول {min(25,len(open_escs))}:\n\n"
+                        + "\n".join(lines),
+            color=GOLD,
+        )
+        embed.set_footer(text="افتح أي تصعيد فوق ↑ واضغط 🙋 أخذ المهمة")
+        await ch.send(content=f"{mention} ☀", embed=embed,
+                      allowed_mentions=discord.AllowedMentions(roles=True))
+        log_event("escalation", f"تذكير الصباح · {len(open_escs)} تصعيد مفتوح")
+    except Exception as e:
+        print("morning_escalation_reminder_loop error:", e)
 
 @tasks.loop(minutes=30)
 async def cleaning_feedback_loop():
@@ -10019,6 +10369,8 @@ async def on_ready():
         deepclean_confirm_loop.start()
     if not offhours_ack_reset_loop.is_running():
         offhours_ack_reset_loop.start()
+    if not morning_escalation_reminder_loop.is_running():
+        morning_escalation_reminder_loop.start()
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
         guest_summary_loop.start()
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
