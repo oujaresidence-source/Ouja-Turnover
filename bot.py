@@ -5887,10 +5887,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
   <div class="brand-lg">عوجا</div>
   <div class="sub">Ouja Operations</div>
 
-  <!-- Mode toggle -->
-  <div style="display:flex;gap:0;margin:14px 0 10px;border-radius:8px;overflow:hidden;border:1px solid #d4cfc1">
-    <button id="loginTabToken" onclick="switchLoginMode('token')" style="flex:1;padding:10px;background:#f5efe2;color:#1a1a1a;border:none;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:600;border-inline-end:1px solid #d4cfc1">🔑 توكن · Token</button>
-    <button id="loginTabUser" onclick="switchLoginMode('user')" style="flex:1;padding:10px;background:#fff;color:#666;border:none;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:500">👤 اسم وكلمة مرور</button>
+  <!-- Mode toggle (uses .on class for selected state) -->
+  <style>
+    #loginTabs{display:flex;gap:0;margin:18px 0 14px;border-radius:10px;overflow:hidden;border:1px solid #d4cfc1;width:100%}
+    #loginTabs button{flex:1;padding:12px 8px;background:#fff;color:#888;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;transition:.15s}
+    #loginTabs button:first-child{border-inline-end:1px solid #d4cfc1}
+    #loginTabs button.on{background:#c9a96e;color:#fff}
+    #loginTabs button:hover:not(.on){background:#f5efe2;color:#1a1a1a}
+  </style>
+  <div id="loginTabs">
+    <button id="loginTabToken" class="on" type="button" onclick="switchLoginMode('token')">🔑 توكن · Token</button>
+    <button id="loginTabUser" type="button" onclick="switchLoginMode('user')">👤 اسم وكلمة مرور</button>
   </div>
 
   <!-- Token mode (legacy) -->
@@ -5901,11 +5908,13 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
   <!-- User mode (new) -->
   <div id="loginPaneUser" style="display:none">
-    <input id="loginUsername" type="text" placeholder="اسم المستخدم · Username" autocomplete="username" style="margin-bottom:8px">
+    <input id="loginUsername" type="text" placeholder="اسم المستخدم · Username (e.g. admin)" autocomplete="username" style="margin-bottom:8px">
     <input id="loginPassword" type="password" placeholder="كلمة المرور · Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUserLogin()">
     <button class="btn primary" onclick="doUserLogin()" style="padding:12px 26px;font-size:13.5px;margin-top:8px;width:100%">دخول · Enter</button>
-    <div style="font-size:11px;color:#888;text-align:center;margin-top:10px;line-height:1.5">
-      أول مرة؟ المالك يقدر يدخل بـ:<br><b>اسم المستخدم:</b> admin · <b>كلمة المرور:</b> هي نفس قيمة <code>DASHBOARD_TOKEN</code>
+    <div style="font-size:11.5px;color:#888;text-align:center;margin-top:14px;line-height:1.6;background:#faf8f3;padding:10px;border-radius:8px;border:1px solid #f0ece6">
+      💡 <b>أول مرة؟</b> ادخل بـ:<br>
+      <b>اسم المستخدم:</b> <code style="background:#f5efe2;padding:1px 6px;border-radius:4px">admin</code><br>
+      <b>كلمة المرور:</b> نفس قيمة <code style="background:#f5efe2;padding:1px 6px;border-radius:4px">DASHBOARD_TOKEN</code> من Railway
     </div>
   </div>
 
@@ -7342,21 +7351,23 @@ function saveTok(){localStorage.setItem(TK, document.getElementById('tok').value
 function logout(){localStorage.removeItem(TK); location.reload()}
 
 function switchLoginMode(mode){
-  const t = document.getElementById('loginTabToken');
-  const u = document.getElementById('loginTabUser');
+  const t  = document.getElementById('loginTabToken');
+  const u  = document.getElementById('loginTabUser');
   const pt = document.getElementById('loginPaneToken');
   const pu = document.getElementById('loginPaneUser');
-  if(mode === 'user'){
-    if(t) t.style.cssText = t.style.cssText.replace('background:#f5efe2;color:#1a1a1a','background:#fff;color:#666');
-    if(u) u.style.cssText = u.style.cssText.replace('background:#fff;color:#666','background:#f5efe2;color:#1a1a1a');
-    if(pt) pt.style.display = 'none';
-    if(pu) pu.style.display = 'block';
-  } else {
-    if(t) t.style.cssText = t.style.cssText.replace('background:#fff;color:#666','background:#f5efe2;color:#1a1a1a');
-    if(u) u.style.cssText = u.style.cssText.replace('background:#f5efe2;color:#1a1a1a','background:#fff;color:#666');
-    if(pt) pt.style.display = 'block';
-    if(pu) pu.style.display = 'none';
-  }
+  const useUser = (mode === 'user');
+  if(t) t.classList.toggle('on', !useUser);
+  if(u) u.classList.toggle('on',  useUser);
+  if(pt) pt.style.display = useUser ? 'none'  : 'block';
+  if(pu) pu.style.display = useUser ? 'block' : 'none';
+  // Auto-focus the relevant first input so the keyboard goes there
+  setTimeout(function(){
+    const focusEl = useUser ? document.getElementById('loginUsername')
+                            : document.getElementById('tok');
+    if(focusEl) focusEl.focus();
+  }, 50);
+  // Clear any prior error
+  const e = document.getElementById('lerr'); if(e) e.textContent = '';
 }
 
 async function doUserLogin(){
