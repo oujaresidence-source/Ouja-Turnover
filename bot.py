@@ -8573,42 +8573,82 @@ async function deleteQuote(qid){
 function printQuote(){
   if(!_qDraft) return;
   const q = _qDraft;
-  _qRecalc();
-  const sub = parseFloat((document.getElementById('qV_sub')||{}).textContent || 0);
-  const srv = parseFloat((document.getElementById('qV_srv')||{}).textContent || 0);
-  const vat = parseFloat((document.getElementById('qV_vat')||{}).textContent || 0);
+  // compute totals directly from the draft (DOM text is comma-formatted and would mis-parse)
+  let sub = 0;
+  q.items.forEach(function(it){ sub += (parseFloat(it.qty||0))*(parseFloat(it.price||0)); });
+  const srEl=document.getElementById('qF_service_rate'), vrEl=document.getElementById('qF_vat_rate'), voEl=document.getElementById('qF_vat_on');
+  const sr = parseFloat(srEl ? srEl.value : (q.service_rate!=null?q.service_rate:5)) || 0;
+  const vr = parseFloat(vrEl ? vrEl.value : (q.vat_rate!=null?q.vat_rate:15)) || 0;
+  const vo = voEl ? voEl.checked : (q.vat_on!==false);
+  const srv = sub * sr/100;
+  const vat = vo ? (sub+srv) * vr/100 : 0;
   const grand = sub+srv+vat;
   let rows = '';
-  q.items.forEach((it,i)=>{
+  q.items.forEach(function(it,i){
+    if(!(it.description||it.price||it.qty)) return;
     const total = (parseFloat(it.qty||0))*(parseFloat(it.price||0));
-    rows += '<tr><td style="text-align:center;color:#888">'+(i+1)+'</td><td>'+(it.description||'')+'</td><td style="text-align:center">'+(it.qty||0)+'</td><td style="text-align:center">'+fmt(it.price||0)+'</td><td style="text-align:center;font-weight:600">'+fmt(total)+'</td></tr>';
+    rows += '<tr><td>'+(i+1)+'</td><td class="desc">'+esc(it.description||'')+'</td><td>'+(it.qty||0)+'</td><td>'+fmt(it.price||0)+'</td><td class="amt">'+fmt(total)+'</td></tr>';
   });
   const w = window.open('', '_blank');
   w.document.write('<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>'+esc(q.number||'Quote')+'</title>'
-    +'<style>body{font-family:Tahoma,Arial,sans-serif;background:#fff;color:#222;padding:30px;max-width:860px;margin:auto;line-height:1.6}'
-    +'.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c9a96e;padding-bottom:16px;margin-bottom:24px}'
-    +'.h .l{font-size:28px;font-weight:800}.h .l .sub{font-size:11px;color:#888;font-weight:400;letter-spacing:2px;margin-top:4px}'
-    +'.h .r{text-align:start}.h .r .t{font-size:20px;font-weight:300;letter-spacing:4px}.h .r .meta{margin-top:10px;font-size:12px}'
-    +'.box{background:#faf8f3;padding:12px 16px;border-radius:6px;margin-bottom:20px}'
-    +'.box b{color:#c9a96e;font-size:11px;text-transform:uppercase;letter-spacing:1.5px}'
-    +'table{width:100%;border-collapse:collapse;margin-bottom:20px}th{background:#222;color:#fff;padding:10px;font-weight:600;font-size:11px;letter-spacing:1px}'
-    +'td{padding:10px;border-bottom:1px solid #eee;font-size:13px}.tt{margin-top:30px;text-align:end;font-size:14px}'
-    +'.tt .row{display:flex;justify-content:flex-end;gap:30px;padding:6px 0}.tt .grand{background:#222;color:#fff;padding:14px 20px;border-radius:6px;display:inline-block;font-size:16px;font-weight:700;margin-top:10px}'
-    +'.sig{margin-top:60px;border-top:1px solid #999;padding-top:6px;width:240px;font-size:11px;color:#666}'
-    +'@media print{body{padding:0}@page{margin:1cm}}</style></head><body>'
-    +'<div class="h"><div class="l">عوجا ريزيدنس<div class="sub">OUJA RESIDENCE</div></div>'
-    +'<div class="r"><div class="t">QUOTATION</div><div style="font-size:12px;color:#888;margin-top:2px">عرض سعر</div>'
-    +'<div class="meta">رقم: <b>'+esc(q.number||'')+'</b><br>التاريخ: '+esc(q.date||'')+'</div></div></div>'
-    +'<div class="box"><b>بيانات العميل</b><div style="margin-top:6px">'+esc(q.client_name||'—')
-    +(q.client_phone?'<br>'+esc(q.client_phone):'')+(q.client_company?'<br>'+esc(q.client_company):'')
-    +(q.client_email?'<br>'+esc(q.client_email):'')+'</div></div>'
-    +'<table><thead><tr><th style="width:36px">#</th><th>الوصف</th><th style="width:60px">العدد</th><th style="width:80px">السعر</th><th style="width:90px">الإجمالي</th></tr></thead><tbody>'+rows+'</tbody></table>'
-    +(q.notes?'<div class="box"><b>ملاحظات</b><div style="margin-top:6px;white-space:pre-wrap">'+esc(q.notes)+'</div></div>':'')
-    +'<div class="tt"><div class="row"><span>المجموع:</span><span>'+fmt(sub)+' ر.س</span></div>'
-    +'<div class="row"><span>رسوم خدمة:</span><span>'+fmt(srv)+' ر.س</span></div>'
-    +'<div class="row"><span>ضريبة:</span><span>'+fmt(vat)+' ر.س</span></div>'
-    +'<div class="grand">الإجمالي: '+fmt(grand)+' ر.س</div></div>'
-    +'<div class="sig">التوقيع المعتمد</div>'
+    +'<style>'
+    +'*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'body{font-family:"Tahoma","Times New Roman",serif;background:#fff;color:#2b2b2b;max-width:900px;margin:auto;padding:48px 54px;line-height:1.75}'
+    +'.lux-top{text-align:center;padding-bottom:20px}'
+    +'.brand-ar{font-size:34px;font-weight:800;letter-spacing:1px;color:#1c1c1c}'
+    +'.brand-en{font-size:12px;letter-spacing:8px;color:#b08d4f;margin-top:7px;font-weight:600}'
+    +'.brand-tag{font-size:10px;letter-spacing:4px;color:#9a9a9a;margin-top:7px;text-transform:uppercase}'
+    +'.rule-gold{height:2px;background:linear-gradient(90deg,transparent,#c9a96e 18%,#c9a96e 82%,transparent);margin:6px 0 0}'
+    +'.doc-row{display:flex;justify-content:space-between;align-items:flex-end;margin:30px 0 24px}'
+    +'.doc-title{font-size:25px;font-weight:300;letter-spacing:9px;color:#1c1c1c}'
+    +'.doc-title small{display:block;font-size:12px;letter-spacing:3px;color:#b08d4f;margin-top:5px;font-weight:600}'
+    +'.doc-meta{font-size:12.5px;color:#555;text-align:start;line-height:2}'
+    +'.doc-meta b{color:#1c1c1c}'
+    +'.party{display:flex;gap:18px;margin-bottom:26px}'
+    +'.party .card{flex:1;background:#faf7f0;border:1px solid #ece2cf;border-radius:4px;padding:15px 17px}'
+    +'.lbl{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#b08d4f;font-weight:700}'
+    +'.party .nm{font-size:14.5px;font-weight:700;color:#1c1c1c;margin-top:7px}'
+    +'.party .dt{font-size:12px;color:#555;margin-top:3px}'
+    +'table{width:100%;border-collapse:collapse;margin:6px 0}'
+    +'thead th{background:#1c1c1c;color:#e9d9b8;padding:12px;font-size:10.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;text-align:center}'
+    +'thead th.desc{text-align:start}'
+    +'tbody td{padding:11px 12px;border-bottom:1px solid #efe9da;font-size:13px;text-align:center;color:#333}'
+    +'tbody td.desc{text-align:start;color:#1c1c1c}'
+    +'tbody td.amt{font-weight:700;color:#b08d4f}'
+    +'tbody tr:nth-child(even){background:#fcfaf4}'
+    +'.totals{display:flex;justify-content:flex-end;margin-top:20px}'
+    +'.totals .tbl{width:330px}'
+    +'.totals .row{display:flex;justify-content:space-between;padding:8px 4px;font-size:13px;color:#555;border-bottom:1px solid #f0ece0}'
+    +'.totals .grand{display:flex;justify-content:space-between;background:#1c1c1c;color:#fff;padding:14px 18px;margin-top:12px;border-radius:3px;font-size:15px;font-weight:700;letter-spacing:.5px}'
+    +'.totals .grand span:last-child{color:#e9d9b8}'
+    +'.notes{margin-top:28px;background:#faf7f0;border-inline-start:3px solid #c9a96e;padding:13px 17px;border-radius:3px;font-size:12.5px;white-space:pre-wrap;color:#444}'
+    +'.foot{margin-top:50px;display:flex;justify-content:space-between;align-items:flex-end}'
+    +'.sig{width:250px;text-align:center}'
+    +'.sig .line{border-top:1px solid #8a8a8a;padding-top:8px;font-size:11px;color:#666;letter-spacing:1px}'
+    +'.thanks{font-size:13px;color:#b08d4f;font-style:italic}'
+    +'.lux-footer{margin-top:36px;border-top:1px solid #d8c9a8;padding-top:13px;text-align:center;font-size:10px;letter-spacing:3px;color:#9a9a9a;text-transform:uppercase}'
+    +'@media print{body{padding:24px 30px}@page{margin:1.2cm}}'
+    +'</style></head><body>'
+    +'<div class="lux-top"><div class="brand-ar">عوجا ريزيدنس</div><div class="brand-en">OUJA&nbsp;&nbsp;RESIDENCE</div><div class="brand-tag">Premium Stays · Riyadh</div></div>'
+    +'<div class="rule-gold"></div>'
+    +'<div class="doc-row"><div class="doc-title">QUOTATION<small>عرض سعر</small></div>'
+    +'<div class="doc-meta">رقم العرض&nbsp;:&nbsp;<b>'+esc(q.number||'—')+'</b><br>التاريخ&nbsp;:&nbsp;<b>'+esc(q.date||'—')+'</b></div></div>'
+    +'<div class="party"><div class="card"><div class="lbl">مقدّم إلى · Prepared For</div><div class="nm">'+esc(q.client_name||'—')+'</div>'
+    +(q.client_company?'<div class="dt">'+esc(q.client_company)+'</div>':'')
+    +(q.client_phone?'<div class="dt" style="direction:ltr;text-align:end">'+esc(q.client_phone)+'</div>':'')
+    +(q.client_email?'<div class="dt" style="direction:ltr;text-align:end">'+esc(q.client_email)+'</div>':'')
+    +'</div>'
+    +'<div class="card"><div class="lbl">من · From</div><div class="nm">عوجا ريزيدنس</div><div class="dt">إدارة وتشغيل الوحدات الفندقية</div><div class="dt">الرياض · المملكة العربية السعودية</div></div></div>'
+    +'<table><thead><tr><th style="width:38px">#</th><th class="desc">الوصف · Description</th><th style="width:64px">العدد</th><th style="width:96px">السعر</th><th style="width:104px">الإجمالي</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div class="totals"><div class="tbl">'
+    +'<div class="row"><span>المجموع الفرعي</span><span>'+fmt(sub)+' ر.س</span></div>'
+    +'<div class="row"><span>رسوم الخدمة ('+sr+'٪)</span><span>'+fmt(srv)+' ر.س</span></div>'
+    +(vo?'<div class="row"><span>ضريبة القيمة المضافة ('+vr+'٪)</span><span>'+fmt(vat)+' ر.س</span></div>':'')
+    +'<div class="grand"><span>الإجمالي · Total</span><span>'+fmt(grand)+' ر.س</span></div>'
+    +'</div></div>'
+    +(q.notes?'<div class="notes"><div class="lbl" style="margin-bottom:6px">ملاحظات · Notes</div>'+esc(q.notes)+'</div>':'')
+    +'<div class="foot"><div class="sig"><div class="line">التوقيع المعتمد · Authorized Signature</div></div><div class="thanks">شكراً لثقتكم بنا</div></div>'
+    +'<div class="lux-footer">Ouja Residence · عوجا ريزيدنس · Riyadh · KSA</div>'
     +'<script>setTimeout(function(){window.print()},400)<\/script></body></html>');
   w.document.close();
 }
