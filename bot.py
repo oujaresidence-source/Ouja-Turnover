@@ -2349,8 +2349,10 @@ _PRICE_HINTS = ["سعر", "السعر", "كم", "بكم", "كام", "تكلفة"
                 "الإجمالي", "price", "cost", "how much", "total", "rate", "nightly"]
 
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False,
-                 dates=None, listing_id=None, reservation_id=None):
-    """Call Claude to draft a reply. Returns parsed dict or None on failure."""
+                 dates=None, listing_id=None, reservation_id=None, profile_key=None):
+    """Call Claude to draft a reply. Returns parsed dict or None on failure.
+    If profile_key is provided AND the profile has prior stays / summaries,
+    the bot greets them as a returning guest and references past context."""
     if not ANTHROPIC_API_KEY:
         print("assistant: ANTHROPIC_API_KEY not set")
         return None
@@ -2583,6 +2585,32 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         except Exception as e:
             print(f"code_question_context error: {e}")
 
+    # ---- Returning-guest / VIP context ----
+    # If the bot has talked to this person before AND we have prior context,
+    # surface it so the reply feels personal ("welcome back", references a
+    # past stay, etc.). Does nothing for first-time guests.
+    profile_block = ""
+    if profile_key and profile_key in _guest_profiles:
+        p = _guest_profiles[profile_key]
+        stays = len(p.get("reservations", []))
+        if stays >= 2 or p.get("vip"):
+            past = p.get("reservations", [])[-3:]
+            past_summary = "; ".join(
+                (r.get("unit","") + " " + (r.get("checkin","") or "")) for r in past if r.get("unit")
+            ) or "—"
+            summaries = (p.get("summaries", []) or [])[-3:]
+            sum_text = "\n".join("- " + (s.get("text","") or "")[:280] for s in summaries if s.get("text"))
+            vip_line = "⭐ ضيف مميّز (VIP) — سبق له " + str(stays) + " إقامة معنا." if p.get("vip") else "ضيف عائد — سبق له " + str(stays) + " إقامة."
+            profile_block = (
+                f"\n\nملف الضيف (لا تذكر أنه ملف — استخدمه طبيعياً):\n"
+                f"- {vip_line}\n"
+                f"- إقاماته السابقة: {past_summary}\n"
+                + (f"- ملخصات محادثات سابقة:\n{sum_text}\n" if sum_text else "")
+                + "- ابدأ ردك بترحيب يعكس عودته (مثل 'حياك الله مرة ثانية' / 'نوّرتنا تاني'). "
+                + "لا تطلب منه معلومات يفترض أنها معروفة لنا من الإقامات السابقة. "
+                + "لو ذكر تفضيلاً سابقاً في الملخصات، استخدمه."
+            )
+
     # ---- Hard unit-context guard: the bot has been asking 'which apartment?' even
     # when the inquiry is clearly about the booked unit. Reinforce that the Unit
     # field below IS the unit they're inquiring about, unless they explicitly
@@ -2592,7 +2620,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         f"لا تسأله أبداً 'أي شقة تقصد' أو 'أي وحدة'. الاقتراحات البديلة تظهر فقط لما يطلبها صراحةً.\n\n"
         if unit else ""
     )
-    user = (f"{unit_guard}{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
+    user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
             f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
@@ -3634,6 +3662,15 @@ async def process_assistant_item(it, channel):
     _assistant_seen.add(it["message_id"])
     if not it["guest_text"]:
         return
+    # Update guest profile with this conversation's reservation (silent, fast).
+    try:
+        prof = record_guest_stay(it)
+        if prof:
+            it["guest_profile_key"] = prof["key"]
+            it["guest_vip"] = prof.get("vip", False)
+            it["guest_prior_stays"] = len(prof.get("reservations", []))
+    except Exception as e:
+        print("guest profile update error:", e)
     # ---- Off-hours auto-acknowledgement ----
     # If we're outside the team's working window AND we haven't already acked
     # this conversation during the current off-hours, send a one-time "we'll
@@ -3667,7 +3704,7 @@ async def process_assistant_item(it, channel):
     result = await asyncio.to_thread(
         claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
         (it.get("checkin"), it.get("checkout")), it.get("listing_id"),
-        it.get("reservation_id"))
+        it.get("reservation_id"), it.get("guest_profile_key"))
     if not result:
         return
     try:
@@ -3874,6 +3911,115 @@ WORK_END_HOUR    = int(os.environ.get("WORK_END_HOUR", "25"))    # 25 == 1am nex
 WORK_END_MIN     = int(os.environ.get("WORK_END_MIN", "30"))     # 30 → 1:30 am
 OFFHOURS_AUTOREPLY_ENABLED = os.environ.get("OFFHOURS_AUTOREPLY_ENABLED", "1") in ("1","true","True","yes")
 _offhours_acked_convos = set()    # conversation_ids we already auto-replied to in the current off-hours window
+
+# ---------------- Guest profiles ----------------
+# A "guest profile" is keyed by best-available stable identifier:
+#   1) phone number (normalized) if provided
+#   2) lowercase guest email
+#   3) lowercase guest name (last resort — risk of merging different people
+#      with the same name)
+# Each profile aggregates reservations seen, conversation summaries, preferences
+# the bot has learned, and a VIP flag toggled when a guest has booked >= 2 times
+# or has stayed >= 5 nights total.
+_guest_profiles = {}    # key -> {key, names:[], phone, email, reservations:[{id,unit,checkin,checkout,nights,total,ts}],
+                        #         summaries:[{ts,conversation_id,text}], notes, vip, first_seen, last_seen, total_nights, total_revenue}
+GUEST_VIP_MIN_STAYS  = int(os.environ.get("GUEST_VIP_MIN_STAYS", "2"))
+GUEST_VIP_MIN_NIGHTS = int(os.environ.get("GUEST_VIP_MIN_NIGHTS", "5"))
+GUEST_SUMMARY_REFRESH_MIN = int(os.environ.get("GUEST_SUMMARY_REFRESH_MIN", "60"))   # how often to re-distill summaries
+
+def _normalize_phone(s):
+    s = "".join(c for c in (s or "") if c.isdigit())
+    if not s:
+        return ""
+    # KSA: 9665XXXXXXXX or 05XXXXXXXX → unify to +9665XXXXXXXX
+    if s.startswith("00"):
+        s = s[2:]
+    if s.startswith("0") and len(s) == 10:
+        s = "966" + s[1:]
+    return "+" + s
+
+def _profile_key(name, phone="", email=""):
+    p = _normalize_phone(phone)
+    if p and len(p) > 7:
+        return "ph:" + p
+    e = (email or "").strip().lower()
+    if e and "@" in e:
+        return "em:" + e
+    n = (name or "").strip().lower()
+    return "nm:" + n if n else ""
+
+def _ensure_profile(key, name="", phone="", email=""):
+    if not key:
+        return None
+    if key not in _guest_profiles:
+        _guest_profiles[key] = {
+            "key": key, "names": [], "phone": _normalize_phone(phone),
+            "email": (email or "").strip().lower(),
+            "reservations": [], "summaries": [], "notes": "",
+            "vip": False, "first_seen": datetime.now(TZ).isoformat(timespec="minutes"),
+            "last_seen": datetime.now(TZ).isoformat(timespec="minutes"),
+            "total_nights": 0, "total_revenue": 0.0,
+        }
+    p = _guest_profiles[key]
+    nm = (name or "").strip()
+    if nm and nm not in p["names"]:
+        p["names"].append(nm)
+        p["names"] = p["names"][-5:]      # keep last 5 spellings
+    if phone and not p["phone"]:
+        p["phone"] = _normalize_phone(phone)
+    if email and not p["email"]:
+        p["email"] = (email or "").strip().lower()
+    p["last_seen"] = datetime.now(TZ).isoformat(timespec="minutes")
+    return p
+
+def _recompute_vip(profile):
+    stays = len(profile.get("reservations", []))
+    nights = profile.get("total_nights", 0) or sum(r.get("nights", 0) for r in profile.get("reservations", []))
+    profile["total_nights"] = nights
+    profile["vip"] = (stays >= GUEST_VIP_MIN_STAYS) or (nights >= GUEST_VIP_MIN_NIGHTS)
+
+def record_guest_stay(item):
+    """Called whenever we encounter a confirmed reservation in conversation handling.
+    Builds/updates the profile and writes the reservation into it (dedup by id)."""
+    name = item.get("guest") or ""
+    phone = item.get("guest_phone") or ""
+    email = item.get("guest_email") or ""
+    key = _profile_key(name, phone, email)
+    if not key:
+        return None
+    p = _ensure_profile(key, name=name, phone=phone, email=email)
+    res_id = item.get("reservation_id")
+    if not res_id:
+        return p
+    # Dedup
+    if not any(r.get("id") == res_id for r in p["reservations"]):
+        p["reservations"].append({
+            "id": res_id,
+            "unit": item.get("unit", ""),
+            "listing_id": item.get("listing_id"),
+            "checkin": item.get("checkin"),
+            "checkout": item.get("checkout"),
+            "nights": _res_nights({"arrivalDate": item.get("checkin"),
+                                    "departureDate": item.get("checkout")}),
+            "ts": datetime.now(TZ).isoformat(timespec="minutes"),
+        })
+        p["reservations"] = p["reservations"][-30:]
+    _recompute_vip(p)
+    return p
+
+# Periodic Claude-powered conversation summarisation per profile.
+def _summarise_conversation_for_profile(p, conv_id, recent_text):
+    """Ask Claude for a 2-3 line summary of a single conversation (no PII).
+    Skipped silently if no key or text is empty."""
+    if not ANTHROPIC_API_KEY or not (recent_text or "").strip():
+        return None
+    sys = ("لخّص بسطرين أو ثلاثة محادثة ضيف عوجا بحيث يقدر الفريق يتذكر سياقها في الزيارة الجاية: "
+           "وش طلب الضيف، وش حصل، إذا فيه تفضيل واضح يستحق التذكّر (مثلاً يحب الطابق العالي، يكره الضوضاء، "
+           "عائلة فيها أطفال، طلب تشيك-إن مبكّر سابقاً، إلخ). تجاهل أرقام الهاتف والبريد. عربي سعودي مختصر."
+           + _DIALECT_LOCK)
+    user = f"المحادثة:\n{recent_text[:6000]}\n\nاكتب الملخص المختصر."
+    return claude_text(sys, user, max_tokens=300, model=CLAUDE_MODEL_PREMIUM) \
+        or claude_text(sys, user, max_tokens=300)
 
 def is_within_working_hours(dt=None):
     dt = dt or datetime.now(TZ)
@@ -4638,6 +4784,34 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ GUESTS (profiles + VIP + summaries) ============ -->
+      <section class="view" id="view_guests">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_guests">👤 سجل الضيوف</div>
+            <div class="page-sub" id="t_guests_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadGuests()">↻</button>
+          </div>
+        </div>
+        <div class="kpis" id="guestStats"></div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">📋 القائمة</span>
+            <div class="card-actions">
+              <select id="guestFilter" onchange="renderGuestList()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
+                <option value="all" id="gf_all">الكل</option>
+                <option value="vip" id="gf_vip">VIP فقط</option>
+                <option value="repeat" id="gf_repeat">العائدون</option>
+              </select>
+              <input id="guestSearch" placeholder="ابحث بالاسم/الهاتف…" oninput="renderGuestList()" style="width:200px;padding:6px 10px;height:32px;font-size:12px">
+            </div>
+          </div>
+          <div id="guestListBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ LEARNINGS ============ -->
       <section class="view" id="view_learn">
         <div class="page-head">
@@ -4779,6 +4953,16 @@ const T = {
     clean_modal_save:'حفظ', clean_modal_cancel:'إلغاء',
     clean_confirm_done:'تأكيد إنجاز التنظيف لهذي الوحدة اليوم؟',
     copied:'نُسخ ✓',
+    guests:'الضيوف', guests_title:'👤 سجل الضيوف',
+    guests_sub:'كل من تفاعل معنا — أبرز المتكررين والـVIP',
+    guests_stat_total:'الإجمالي', guests_stat_vip:'ضيوف VIP', guests_stat_repeat:'عائدون (٢+)',
+    guests_filter_all:'الكل', guests_filter_vip:'VIP فقط', guests_filter_repeat:'العائدون',
+    guests_search:'ابحث بالاسم/الهاتف…',
+    guest_name:'الاسم', guest_stays:'إقامات', guest_nights:'ليالي', guest_last:'آخر تفاعل',
+    guest_no_data:'ما فيه ضيوف بعد', guest_vip_on:'⭐ VIP',
+    guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
+    guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
+    guest_drw_toggle_vip:'تبديل VIP',
     learn_title:'📚 ما تعلّمه المساعد',
     learn_sub:'الملخصات اللي استخلصها النظام من ردود فريقك — تقدر تعدّل أو تحذف',
     learn_general:'الملخص العام (يطبّق على كل الشقق)', learn_apt:'ملخصات حسب الشقة',
@@ -4894,6 +5078,16 @@ const T = {
     clean_modal_save:'Save', clean_modal_cancel:'Cancel',
     clean_confirm_done:'Mark this unit as deep-cleaned today?',
     copied:'copied ✓',
+    guests:'Guests', guests_title:'👤 Guest profiles',
+    guests_sub:'Everyone who has interacted with us — repeats + VIPs surfaced',
+    guests_stat_total:'Total', guests_stat_vip:'VIPs', guests_stat_repeat:'Returning (2+)',
+    guests_filter_all:'All', guests_filter_vip:'VIPs only', guests_filter_repeat:'Returning',
+    guests_search:'Search name/phone…',
+    guest_name:'Name', guest_stays:'stays', guest_nights:'nights', guest_last:'last seen',
+    guest_no_data:'No guests recorded yet', guest_vip_on:'⭐ VIP',
+    guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
+    guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
+    guest_drw_toggle_vip:'Toggle VIP',
     learn_title:'📚 What the assistant has learned',
     learn_sub:"Summaries the system distilled from your team's replies — you can edit or delete",
     learn_general:'General summary (applies to every unit)', learn_apt:'Per-apartment summaries',
@@ -5057,6 +5251,8 @@ function applyLang(){
     t_rev_pace:'rev_pace',
     t_clean:'clean_title', t_clean_sub:'clean_sub', t_clean_link_title:'clean_link_title',
     cf_all:'clean_filter_all', cf_overdue:'clean_filter_overdue', cf_soon:'clean_filter_soon', cf_unsch:'clean_filter_unscheduled',
+    t_guests:'guests_title', t_guests_sub:'guests_sub',
+    gf_all:'guests_filter_all', gf_vip:'guests_filter_vip', gf_repeat:'guests_filter_repeat',
     t_clear_filt:'f_clear'
   };
   for(const id in map){
@@ -5081,6 +5277,7 @@ const NAV = [
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
+  {id:'guests',  ic:'👤', tk:'guests'},
   {id:'rev',     ic:'∿', tk:'rev'},
   {id:'learn',   ic:'📚', tk:'learn'},
   {id:'log',     ic:'≡', tk:'log'}
@@ -5165,6 +5362,7 @@ function go(id){
   if(id==='learn') loadLearnings();
   if(id==='calendar') loadForwardCalendar();
   if(id==='clean') loadCleaning();
+  if(id==='guests') loadGuests();
 }
 
 /* ============================================================
@@ -5380,6 +5578,102 @@ function renderUrgentStrip(){
     + rows
     + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
     + '</div>';
+}
+
+// ============== GUEST PROFILES ==============
+async function loadGuests(){
+  document.getElementById('guestListBody').innerHTML = '<div class="empty sk">—</div>';
+  try{ D.guests = await api('/api/guests') }catch(_){ D.guests = {items:[], counts:{}} }
+  const sub = document.getElementById('t_guests_sub'); if(sub) sub.textContent = t().guests_sub;
+  renderGuestStats();
+  renderGuestList();
+}
+function renderGuestStats(){
+  const el = document.getElementById('guestStats'); if(!el) return;
+  const c = (D.guests||{}).counts || {};
+  const cards = [
+    {ic:'👤', cls:'b', val:c.total||0, lbl:t().guests_stat_total},
+    {ic:'⭐', cls:'gold', val:c.vip||0, lbl:t().guests_stat_vip},
+    {ic:'🔁', cls:'g', val:c.repeat||0, lbl:t().guests_stat_repeat},
+  ];
+  el.innerHTML = cards.map(function(c){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
+      + '<div class="kpi-val">'+c.val+'</div><div class="kpi-lbl">'+c.lbl+'</div></div>';
+  }).join('');
+}
+function renderGuestList(){
+  const body = document.getElementById('guestListBody'); if(!body) return;
+  const items = ((D.guests||{}).items) || [];
+  const filt = (document.getElementById('guestFilter')||{}).value || 'all';
+  const q = ((document.getElementById('guestSearch')||{}).value || '').toLowerCase();
+  let f = items;
+  if(filt === 'vip') f = items.filter(function(x){return x.vip});
+  else if(filt === 'repeat') f = items.filter(function(x){return x.stays >= 2});
+  if(q) f = f.filter(function(x){
+    return (x.name||'').toLowerCase().indexOf(q) >= 0 || (x.phone||'').toLowerCase().indexOf(q) >= 0;
+  });
+  if(!f.length){ body.innerHTML = '<div class="empty">'+t().guest_no_data+'</div>'; return; }
+  let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
+    + '<th>'+t().guest_name+'</th><th class="num">'+t().guest_stays+'</th>'
+    + '<th class="num">'+t().guest_nights+'</th><th>'+t().guest_last+'</th><th></th></tr></thead><tbody>';
+  for(const g of f){
+    const vipTag = g.vip ? ' <span class="pill gold">'+t().guest_vip_on+'</span>' : '';
+    html += '<tr style="cursor:pointer" onclick="openGuestDrawer(&#39;'+esc(g.key)+'&#39;)">'
+      + '<td class="strong">'+esc(g.name||'—')+vipTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
+      + '<td class="num">'+g.stays+'</td><td class="num">'+g.nights+'</td>'
+      + '<td class="muted" style="font-size:11.5px">'+esc((g.last_seen||'').replace('T',' ').slice(0,16))+'</td>'
+      + '<td style="text-align:end"><span class="muted">←</span></td></tr>';
+  }
+  html += '</tbody></table></div>';
+  body.innerHTML = html;
+}
+
+async function openGuestDrawer(key){
+  openDrawer('—','');
+  setDrawerBody('<div class="empty sk">—</div>');
+  let p;
+  try{ p = await api('/api/guests/detail?key='+encodeURIComponent(key)) }catch(_){ p = null }
+  if(!p || p.error){ setDrawerBody('<div class="empty">⚠</div>'); return; }
+  setDrawerTitle((p.names||['—'])[p.names.length-1]+(p.vip?' ⭐':''), (p.phone||'')+' · '+(p.email||''));
+  const stays = (p.reservations||[]).slice().reverse();
+  const sums = (p.summaries||[]).slice().reverse();
+  let body = '<div class="strat-overview">'
+    + '<div class="stat-mini"><div class="v g">'+(stays.length)+'</div><div class="l">'+t().guest_stays+'</div></div>'
+    + '<div class="stat-mini"><div class="v">'+(p.total_nights||0)+'</div><div class="l">'+t().guest_nights+'</div></div>'
+    + '<div class="stat-mini"><div class="v gold">'+(sums.length)+'</div><div class="l">'+t().guest_drw_summaries+'</div></div>'
+    + '</div>';
+  if(stays.length){
+    body += '<div class="context-h">'+t().guest_drw_stays+'</div><div class="list">'
+      + stays.map(function(r){
+        return '<div class="list-row"><span class="l-name">'+esc(r.unit||'')+'</span>'
+          + '<span class="l-val">'+(r.checkin||'')+' → '+(r.checkout||'')+'</span>'
+          + '<span class="l-tag">'+r.nights+'n</span></div>';
+      }).join('') + '</div>';
+  }
+  if(sums.length){
+    body += '<div class="context-h">'+t().guest_drw_summaries+'</div>'
+      + sums.map(function(s){
+        return '<div class="needs-item-text" style="margin-bottom:6px">'
+          + '<div class="muted" style="font-size:10.5px;margin-bottom:4px">'+esc(s.ts||'')+'</div>'
+          + esc(s.text||'') + '</div>';
+      }).join('');
+  }
+  body += '<div class="context-h">'+t().guest_drw_notes+'</div>'
+    + '<textarea id="guestNotes" style="min-height:80px">'+esc(p.notes||'')+'</textarea>';
+  setDrawerBody(body);
+  setDrawerFoot(
+      '<button class="btn ghost sm" onclick="toggleGuestVip(&#39;'+esc(key)+'&#39;)">⭐ '+t().guest_drw_toggle_vip+'</button>'
+    + '<button class="btn primary sm" onclick="saveGuestNotes(&#39;'+esc(key)+'&#39;)">💾 '+t().guest_drw_save+'</button>'
+  );
+}
+async function saveGuestNotes(key){
+  const ta = document.getElementById('guestNotes');
+  const r = await post('/api/guests/notes', {key:key, notes:(ta?ta.value:'')});
+  if(r.ok){ toast('✓'); closeDrawer(); loadGuests(); } else toast(r.error||t().err);
+}
+async function toggleGuestVip(key){
+  const r = await post('/api/guests/toggle-vip', {key:key});
+  if(r.ok){ toast(r.vip?'⭐':'✓'); openGuestDrawer(key); loadGuests(); }
 }
 
 // ============== DEEP CLEAN SCHEDULE ==============
@@ -7639,6 +7933,65 @@ async def _api_learning_bootstrap_status(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(_bootstrap_state)
 
+async def _api_guests_list(request):
+    """Return guest profiles for the dashboard. Filters/sorts in the client."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    out = []
+    for k, p in _guest_profiles.items():
+        out.append({
+            "key": k,
+            "name": (p.get("names") or ["—"])[-1],
+            "names": p.get("names", []),
+            "phone": p.get("phone", ""),
+            "email": p.get("email", ""),
+            "vip": p.get("vip", False),
+            "stays": len(p.get("reservations", [])),
+            "nights": p.get("total_nights", 0),
+            "first_seen": p.get("first_seen"),
+            "last_seen": p.get("last_seen"),
+            "summaries_count": len(p.get("summaries", [])),
+        })
+    out.sort(key=lambda x: (not x["vip"], -(x["stays"] or 0)))
+    return _json({"items": out, "counts": {
+        "total": len(out),
+        "vip": sum(1 for x in out if x["vip"]),
+        "repeat": sum(1 for x in out if x["stays"] >= 2),
+    }})
+
+async def _api_guest_detail(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    key = request.query.get("key", "")
+    p = _guest_profiles.get(key)
+    if not p:
+        return _json({"error": "not found"}, 404)
+    return _json(p)
+
+async def _api_guest_notes(request):
+    """POST {key, notes} — set free-form notes on a guest profile."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    key = b.get("key", "")
+    p = _guest_profiles.get(key)
+    if not p:
+        return _json({"error": "not found"}, 404)
+    p["notes"] = (b.get("notes") or "")[:1000]
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_guest_toggle_vip(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _guest_profiles.get(b.get("key", ""))
+    if not p:
+        return _json({"error": "not found"}, 404)
+    p["vip"] = not p.get("vip", False)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "vip": p["vip"]})
+
 async def _api_cleaning_schedule(request):
     """Dashboard view of every unit's deep-clean state."""
     if not _dash_auth(request):
@@ -8229,6 +8582,10 @@ async def start_web_server():
         app.router.add_post("/api/events/save", _api_events_save)
         app.router.add_post("/api/events/delete", _api_events_delete)
         app.router.add_get("/api/units", _api_units_list)
+        app.router.add_get("/api/guests", _api_guests_list)
+        app.router.add_get("/api/guests/detail", _api_guest_detail)
+        app.router.add_post("/api/guests/notes", _api_guest_notes)
+        app.router.add_post("/api/guests/toggle-vip", _api_guest_toggle_vip)
         app.router.add_get("/api/cleaning/schedule", _api_cleaning_schedule)
         app.router.add_post("/api/cleaning/mark-done", _api_cleaning_mark_done)
         app.router.add_post("/api/cleaning/reschedule", _api_cleaning_reschedule)
@@ -8392,6 +8749,46 @@ async def offhours_ack_reset_loop():
     got an off-hours auto-ack so they can be re-acked next time we go offline."""
     _offhours_acked_convos.clear()
 
+@tasks.loop(minutes=GUEST_SUMMARY_REFRESH_MIN)
+async def guest_summary_loop():
+    """Walk recent conversations and append a Claude-generated 2-3 line summary
+    to the matching guest profile, capped to last 5 summaries per profile."""
+    if not ANTHROPIC_API_KEY or not _guest_profiles:
+        return
+    try:
+        # Look at the last 50 send events to find recent conversation activity
+        recent = list(_learning_log)[-50:]
+        by_conv = {}
+        for e in recent:
+            cid = e.get("conversation_id")
+            if cid:
+                by_conv.setdefault(cid, []).append(e)
+        for cid, events in by_conv.items():
+            text_blob = "\n".join(
+                "Guest: " + (e.get("guest_question","") or "") + "\nHost: " + (e.get("final_reply","") or "")
+                for e in events[-6:]
+            )
+            # find the matching profile by guest name from the most recent event
+            last = events[-1]
+            name = last.get("guest", "")
+            key = _profile_key(name)
+            if not key or key not in _guest_profiles:
+                continue
+            p = _guest_profiles[key]
+            # skip if we already summarised this conversation recently
+            if any(s.get("conversation_id") == cid for s in p.get("summaries", [])):
+                continue
+            summary = await asyncio.to_thread(_summarise_conversation_for_profile, p, cid, text_blob)
+            if summary:
+                p.setdefault("summaries", []).append({
+                    "ts": datetime.now(TZ).isoformat(timespec="minutes"),
+                    "conversation_id": cid,
+                    "text": summary.strip()[:600],
+                })
+                p["summaries"] = p["summaries"][-5:]
+    except Exception as e:
+        print("guest_summary_loop error:", e)
+
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
@@ -8424,6 +8821,8 @@ def load_state():
         _custom_events.extend(_load_json("custom_events.json", []))
         _deep_clean_state.clear()
         _deep_clean_state.update({int(k): v for k, v in _load_json("deep_clean.json", {}).items()})
+        _guest_profiles.clear()
+        _guest_profiles.update(_load_json("guest_profiles.json", {}))
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -8456,6 +8855,7 @@ def persist_state():
     _save_json("daily_metrics.json", _daily_metrics)
     _save_json("custom_events.json", _custom_events)
     _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
+    _save_json("guest_profiles.json", _guest_profiles)
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -9240,6 +9640,8 @@ async def on_ready():
         deepclean_confirm_loop.start()
     if not offhours_ack_reset_loop.is_running():
         offhours_ack_reset_loop.start()
+    if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
+        guest_summary_loop.start()
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
