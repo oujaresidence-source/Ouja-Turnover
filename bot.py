@@ -1521,7 +1521,12 @@ _catalog_units = []        # structured: [{id, name, beds, area, price, link}]
 _avail_cache = OrderedDict()
 _AVAIL_CACHE_MAX = 2000
 INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
-INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "14"))   # max units to date-check per msg
+INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "25"))   # max units to date-check per msg
+
+# Model for guest-facing drafts. Always premium by default — Haiku produces too many
+# generic/templated replies that ignore the actual context (e.g. saying "code arrives
+# 5 days before check-in" when check-in is today). Cost increase is modest at this volume.
+GUEST_DRAFT_MODEL = os.environ.get("GUEST_DRAFT_MODEL", CLAUDE_MODEL_PREMIUM)
 
 def _listing_active(L):
     """False if the listing looks inactive/unlisted (the red 🚫 in Hostaway) — skip those."""
@@ -1802,22 +1807,62 @@ def _criteria_from_text(text):
     if tags: want["tags"] = list(tags)
     return want
 
-# Hints that the guest is asking about a different unit, availability, or a feature
-# (any of these injects the units catalog so the bot SUGGESTS instead of escalating).
-_ALT_HINTS = [
-    # another / different / bigger / cheaper
-    "ثاني", "ثانيه", "ثانية", "بديل", "غيره", "غيرها", "اكبر", "أكبر", "ارخص", "أرخص",
-    "اصغر", "أصغر", "خيار", "خيارات", "وحده ثاني", "شقه ثاني",
-    "another", "other", "different", "bigger", "cheaper", "smaller", "option", "alternativ",
-    # availability / is there a unit
-    "متاح", "متاحه", "متاحة", "متوفر", "متوفره", "متوفرة", "توفر", "التوفر", "فاضي", "فاضيه",
-    "فاضية", "شاغر", "شاغره", "فيه وحده", "فيه شقة", "فيه شقه", "عندكم وحده", "عندكم شقة",
-    "available", "availab", "vacant", "vacancy", "any unit", "do you have a unit",
-    # features that point to a different unit
-    "بلكون", "تراس", "مسبح", "تدخين", "حوش", "استوديو", "غرفتين", "ثلاث غرف", "ثلاث غرفه",
-    "balcony", "terrace", "pool", "smoking", "studio", "two bedroom", "2 bedroom",
-    "three bedroom", "3 bedroom",
+# PHRASES (not single words) that strongly indicate the guest is asking for a
+# DIFFERENT unit — not asking about their current one. The previous bare-word list
+# triggered on "متاح" inside "الواي فاي متاح؟" which caused the bot to launch into
+# "tell me your dates and bedrooms" — completely wrong for an amenity question.
+# These phrases require a unit-noun + intent so they only fire on real alt-asking.
+_ALT_PHRASES = [
+    # Arabic — explicit "another / alternative / different unit"
+    "شقة ثاني", "شقه ثاني", "شقة ثانية", "شقه ثانيه",
+    "وحدة ثاني", "وحده ثاني", "وحدة ثانية", "وحده ثانيه",
+    "شقة بديل", "وحدة بديل", "شقه بديل", "وحده بديل",
+    "بديل", "بدائل", "غيرها", "غيره",
+    "خيار ثاني", "خيارات ثاني", "خيار آخر", "خيارات اخرى", "خيارات أخرى",
+    # bigger/smaller/cheaper relative requests
+    "اكبر من", "أكبر من", "ارخص من", "أرخص من", "اصغر من", "أصغر من",
+    "ارخص شقة", "أرخص شقة", "اكبر شقة", "أكبر شقة",
+    "في شقة اكبر", "فيه شقة اكبر", "وحدة اكبر",
+    # explicit "do you have a unit" — must include a unit-noun
+    "عندكم شقة", "عندكم شقه", "عندكم وحدة", "عندكم وحده",
+    "عندكم استوديو", "فيه شقة", "فيه شقه", "فيه وحدة", "فيه وحده",
+    "فيه استوديو", "تتوفر شقة", "تتوفر وحدة", "متوفر شقة", "متوفر وحدة",
+    "متوفره شقه", "متوفره وحده",
+    # multi-bedroom shopping (clearly looking around)
+    "غرفتين", "ثلاث غرف", "ثلاث غرفه", "اربع غرف", "أربع غرف",
+    "studio apartment", "two bedroom", "three bedroom", "2 bedroom", "3 bedroom",
+    # English alternatives
+    "another apartment", "another unit", "different apartment", "different unit",
+    "alternative", "any other", "any apartment", "any unit",
+    "bigger apartment", "smaller apartment", "cheaper apartment",
+    "do you have a unit", "do you have an apartment", "do you have any",
+    "do you have other", "do you have another",
 ]
+
+def _is_asking_alternatives(text):
+    """Strict catalog trigger. Returns True only on clear 'I want a different unit'
+    phrasing — won't false-fire on amenity questions ('is the wifi available?')."""
+    t = (text or "").lower()
+    return any(p in t for p in _ALT_PHRASES)
+
+# Door-code / access questions. When the guest asks where their code is, we must
+# answer with REAL context (hours until check-in + signing status), not a template.
+_CODE_Q_HINTS = [
+    "الكود", "كود الدخول", "كود البوابة", "كود الباب", "رمز الدخول", "رمز البوابة",
+    "كلمة المرور", "الباسوورد", "باسوورد", "باسورد",
+    "ما وصلني الكود", "ما جاني الكود", "وين الكود", "وين رمز", "ما وصل الكود",
+    "ما جاء الكود", "لم يصلني", "لم يصل الكود",
+    "access code", "door code", "key code", "passcode", "passcode for",
+    "where is the code", "where's the code", "code didn't arrive",
+    "didn't receive the code", "haven't received the code", "no code",
+    "didn't get the code", "haven't got the code",
+]
+def _is_code_question(text):
+    t = (text or "").lower()
+    return any(h in t for h in _CODE_Q_HINTS)
+
+# Kept for back-compat; nothing reads it directly anymore (replaced by _is_asking_alternatives).
+_ALT_HINTS = _ALT_PHRASES
 
 # Hints that the guest is asking about price / total cost (to compute their real total).
 _PRICE_HINTS = ["سعر", "السعر", "كم", "بكم", "كام", "تكلفة", "التكلفة", "المبلغ", "اجمالي", "الاجمالي",
@@ -1851,7 +1896,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         if apt_learn:
             facts_block += ("دروس خاصة بهذه الوحدة بالذات (تجمعت من تفاعلات سابقة عليها — اعتبرها "
                             "مصدر حقيقة قوي عن هذه الشقة تحديداً):\n" + apt_learn + "\n\n")
-    want_catalog = bool(_catalog_text) and any(h in low for h in _ALT_HINTS)
+    want_catalog = bool(_catalog_text) and _is_asking_alternatives(history_text)
     # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
     own_price_line = ""
     if (dates and dates[0] and listing_id
@@ -1963,12 +2008,95 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         "- دائماً ختام: 'الأسعار تقريبية، قبل الضريبة ورسوم المنصة. التوفّر النهائي يتأكد من رابط "
         "Airbnb عند الحجز.'\n\n"
         ) if want_catalog else ""
-    user = (f"{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}\n\n"
+    # ---- Code/access question: inject real-time context (hours until check-in,
+    # signing status) so the bot stops giving generic "code arrives 5 days before"
+    # answers when check-in is today.
+    code_block = ""
+    if reservation_id and _is_code_question(history_text):
+        try:
+            rdata = api_get(f"/reservations/{reservation_id}")
+            r = rdata.get("result") or {}
+            arrival = _parse_date(r.get("arrivalDate"))
+            signed = _is_agreement_signed(r)
+            if arrival:
+                now = datetime.now(TZ)
+                hour = parse_hour(r.get("checkInTime"), 15)
+                checkin_dt = datetime(arrival.year, arrival.month, arrival.day,
+                                      min(hour, 23), 0, tzinfo=TZ)
+                hrs = (checkin_dt - now).total_seconds() / 3600.0
+                if hrs < -2:
+                    when = "موعد التشيك-إن **مضى فعلاً** — الضيف كان لازم يكون داخل الوحدة"
+                elif hrs < 0:
+                    when = "موعد التشيك-إن **حلّ الحين**"
+                elif hrs < 6:
+                    when = f"التشيك-إن **اليوم بعد {hrs:.1f} ساعة فقط** — قريب جداً"
+                elif hrs < 24:
+                    when = f"التشيك-إن **اليوم** (بعد {int(hrs)} ساعة)"
+                elif hrs < 48:
+                    when = "التشيك-إن **بكرة**"
+                elif hrs < 168:
+                    when = f"التشيك-إن بعد **{int(hrs/24)} يوم**"
+                else:
+                    when = f"التشيك-إن بعد **{int(hrs/24)} يوم** — لسه فيه وقت طويل"
+                code_block = (
+                    f"\n\n⚠ الضيف يسأل عن كود الدخول. الواقع المحسوب:\n"
+                    f"- {when}.\n"
+                    f"- العقد {'موقّع ✅' if signed else 'غير موقّع ❌'}.\n\n"
+                    f"كيف ترد (حسب هذي البيانات بالضبط):\n"
+                )
+                if not signed and hrs < 48:
+                    code_block += (
+                        "- العقد غير موقّع، فالكود مايوصل إلا بعد التوقيع. اشرح له ذلك بلطف، "
+                        "وقول إن الكود يُرسَل تلقائياً فور توقيعه. لو الرابط في رسالة سابقة "
+                        "اطلب منه يفتحها، أو قل إن الفريق راح يعيد إرساله. action='reply'."
+                    )
+                elif not signed:
+                    code_block += (
+                        "- العقد لسه غير موقّع لكن التشيك-إن بعيد. ذكّره بلطف إنه يحتاج "
+                        "يوقّع قبل الدخول، والكود بيوصله بعد التوقيع."
+                    )
+                elif hrs < 0:
+                    code_block += (
+                        "- العقد موقّع والوقت مضى. الكود كان لازم وصله. اطلب منه يفحص "
+                        "البريد بما فيها Spam، ورسائل Airbnb/Hostaway. لو ما لقاه action='reply' "
+                        "وقل إن الفريق يتحقّق فوراً."
+                    )
+                elif hrs < 6:
+                    code_block += (
+                        "- العقد موقّع والتشيك-إن قريب جداً. اطلب منه يفحص البريد + Spam، "
+                        "وإذا ما وصله بعد، action='reply' عشان الفريق يتأكد."
+                    )
+                elif hrs < 48:
+                    code_block += (
+                        "- العقد موقّع، الكود يوصل عادةً قبل التشيك-إن ببضع ساعات. طمّنه "
+                        "إنه بيوصله في وقته قبل دخوله. **لا تقول له رقم ثابت مثل '٥ أيام'**."
+                    )
+                else:
+                    code_block += (
+                        "- التشيك-إن بعيد لسه، فالكود ما يُرسل الآن. طمّنه إنه بيوصله قبل "
+                        "دخوله ببضع ساعات بإذن الله. **لا تخترع رقم ثابت — لا تقول '٥ أيام قبل' "
+                        "ولا '٤٨ ساعة قبل' — قول 'قبل دخولك ببضع ساعات' فقط**."
+                    )
+        except Exception as e:
+            print(f"code_question_context error: {e}")
+
+    # ---- Hard unit-context guard: the bot has been asking 'which apartment?' even
+    # when the inquiry is clearly about the booked unit. Reinforce that the Unit
+    # field below IS the unit they're inquiring about, unless they explicitly
+    # asked for an alternative.
+    unit_guard = (
+        f"⚠ السياق الثابت: الضيف يسأل عن وحدته **{unit}** (هذي هي الشقة المرتبطة بحجزه/استفساره). "
+        f"لا تسأله أبداً 'أي شقة تقصد' أو 'أي وحدة'. الاقتراحات البديلة تظهر فقط لما يطلبها صراحةً.\n\n"
+        if unit else ""
+    )
+    user = (f"{unit_guard}{facts_block}{catalog_block}Guest name: {guest_name}\nUnit: {unit}\n"
+            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
-    # The early-check-in path needs richer reasoning; use the premium model when present.
-    model = CLAUDE_MODEL_PREMIUM if (want_catalog or early_block) else CLAUDE_MODEL
+    # Always use the premium model for guest drafts — Haiku produces too many
+    # context-blind replies (the "code arrives 5 days before" template being the
+    # canonical example). Can be overridden via GUEST_DRAFT_MODEL env var.
+    model = GUEST_DRAFT_MODEL
     try:
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
