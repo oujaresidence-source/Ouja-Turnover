@@ -24,29 +24,38 @@ var INGEST_SECRET = 'PUT-YOUR-EXPENSE_INGEST_SECRET-HERE';
 // معرّف النموذج (من رابط تعديل النموذج). يلزم لتحديث القوائم تلقائياً.
 var FORM_ID = 'PUT-YOUR-GOOGLE-FORM-ID-HERE';
 
-// Map each logical field to the EXACT question title in your Google Form.
-// اربط كل حقل بعنوان السؤال في النموذج بالضبط (انسخه حرفياً).
+// Map each logical field to the EXACT question/column title in YOUR Google Form.
+// مطابق لأعمدة شيت عوجا الفعلي (تاريخ 2026). انسخ العنوان حرفياً لو غيّرت سؤال.
 var Q = {
-  submitter:        'مين اللي يرسل؟',                 // Who is submitting?
-  apartment:        'الشقة',                          // Apartment
-  maintenance_type: 'نوع الصيانة',                    // Maintenance type
-  category:         'فئة المصروف',                    // Expense category
-  amount:           'المبلغ المدفوع (ر.س)',            // Amount paid (SAR)
-  expense_date:     'تاريخ المصروف',                  // Date of the expense
-  receipt:          'صورة الفاتورة',                  // Receipt photo (file upload)
-  no_receipt_reason:'إذا ما فيه فاتورة، وش السبب؟',   // No-receipt reason (short text)
-  vendor:           'المحل / المورّد (اختياري)',       // Vendor / shop (optional)
-  payment_method:   'طريقة الدفع (اختياري)',          // Payment method (optional)
-  note:             'ملاحظة (اختياري)'                // Note (optional)
+  submitter:        'اسم المشرف | Supervisor Name',     // Who is submitting?
+  apartment:        'اسم الشقه؟',                        // Apartment
+  maintenance_type: 'نوع الصيانه | Maintenance Type',    // Maintenance type
+  amount:           'التكلفه بالريال | Cost in SAR',      // Amount paid (SAR)
+  expense_date:     'تاريخ الصيانه | Maintenance Date',   // Date of the expense
+  receipt:          'رفع الفاتوره | Upload Invoice',      // Receipt photo (file upload)
+  no_receipt_reason:'اذا مافي فاتوره، اكتب السبب',        // No-receipt reason
+  vendor:           'اسم الموّرد | Vendor Name',          // Vendor / shop
+  // these two free-text columns are merged into the note below:
+  description:      'وصف العمل | Description of Work',    // Description of work
+  notes:            'ملاحظات إضافيه | Additional Notes',  // Additional notes
+  vat:              'هل المبلغ شامل ضريبة القيمة المضافة 15%؟ | VAT included?'
 };
+
+// This form has no "category" question — it is a maintenance form, so every
+// expense defaults to this category (maps to Hostaway "Maintenance & Repairs").
+// نموذج صيانة → الفئة الافتراضية. لو ضفت سؤال فئة لاحقاً، حطّ عنوانه في Q.category وفعّل المزامنة.
+var DEFAULT_CATEGORY = 'صيانة وإصلاحات';
 
 // Name of the status column we write back into the responses sheet.
 var STATUS_HEADER = 'الحالة (تلقائي)';   // "Status (auto)"
 
 // Which dropdowns to keep in sync from the system. أي قوائم نحدّثها تلقائياً.
+// Only APARTMENT is synced (authoritative from Hostaway, requirement A.2). The
+// others are left ON so we don't overwrite your curated supervisor/type lists.
+// لو تبي مزامنة الأنواع/المشرفين، عبّئها أول في إعدادات الداشبورد ثم خلّ القيمة true.
 var SYNC = {
-  apartment: true, maintenance_type: true, category: true,
-  submitter: true, payment_method: true
+  apartment: true, maintenance_type: false,
+  submitter: false, category: false, payment_method: false
 };
 
 /* ============================== INGEST / الإرسال للنظام ============================== */
@@ -69,19 +78,29 @@ function onFormSubmit(e) {
     var receiptLink = String(cell('receipt') || '').trim();
     var noReceipt   = String(cell('no_receipt_reason') || '').trim();
 
+    // Merge the two free-text columns + the VAT answer into one note.
+    var desc = String(cell('description') || '').trim();
+    var more = String(cell('notes') || '').trim();
+    var vat  = String(cell('vat') || '').trim();
+    var noteBits = [];
+    if (desc) noteBits.push(desc);
+    if (more) noteBits.push(more);
+    if (vat)  noteBits.push('الضريبة/VAT: ' + vat);
+    var note = noteBits.join(' · ');
+
     var payload = {
       submission_id:     'gf-' + sheet.getSheetId() + '-' + row,   // idempotent per row
       submitter:         String(cell('submitter') || '').trim(),
       apartment:         String(cell('apartment') || '').trim(),
       maintenance_type:  String(cell('maintenance_type') || '').trim(),
-      category:          String(cell('category') || '').trim(),
+      category:          DEFAULT_CATEGORY,        // no category question on this form
       amount:            String(cell('amount') || '').trim(),
       expense_date:      _fmtDate(cell('expense_date')),
       receipt_link:      receiptLink,
       no_receipt_reason: receiptLink ? '' : noReceipt,
       vendor:            String(cell('vendor') || '').trim(),
-      payment_method:    String(cell('payment_method') || '').trim(),
-      note:              String(cell('note') || '').trim(),
+      payment_method:    '',                      // no payment-method question on this form
+      note:              note,
       submitted_at:      _fmtDateTime(vals[0])   // Timestamp column
     };
 
