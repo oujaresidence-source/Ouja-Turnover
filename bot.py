@@ -116,6 +116,16 @@ WEEKLY_REVIEW_DOW   = int(os.environ.get("WEEKLY_REVIEW_DOW", "6"))     # 0=Mon 
 WEEKLY_REVIEW_HOUR  = int(os.environ.get("WEEKLY_REVIEW_HOUR", "8"))
 WEEKLY_REVIEW_TEST  = os.environ.get("WEEKLY_REVIEW_TEST", "0") in ("1", "true", "True", "yes")
 
+# ---- field-expense automation (Google Form → validation → Hostaway) ----
+# DRY-RUN by default: clean expenses are marked "Ready" but NOT written to
+# Hostaway until the owner sets EXPENSE_POST_DRYRUN=0. Mirrors PRICE_APPLY_DRYRUN.
+EXPENSE_POST_DRYRUN   = os.environ.get("EXPENSE_POST_DRYRUN", "1") in ("1", "true", "True", "yes")
+# Shared secret the Google Apps Script must send (header X-Ingest-Secret) so only
+# our own form can push submissions. If blank, ingestion is open (not recommended).
+EXPENSE_INGEST_SECRET = os.environ.get("EXPENSE_INGEST_SECRET", "")
+# Hostaway expenses endpoint (relative to BASE which already ends in /v1).
+EXPENSE_HOSTAWAY_PATH = os.environ.get("EXPENSE_HOSTAWAY_PATH", "/expenses")
+
 # ---- weekend rule (Thu/Fri): no midnight/noon tiers — a single softer discount at 5:30 PM ----
 WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split(",")
                    if x.strip().isdigit())                                  # 3=Thu, 4=Fri (Mon=0)
@@ -5534,6 +5544,308 @@ def _pmo_log(project, who, text):
     })
     project["log"] = project["log"][:500]
 
+# ===================== FIELD EXPENSES (المصاريف) =====================
+# Field employees log on-the-ground payments via a Google Form → Google Sheet →
+# our ingest endpoint. We validate each one; clean ("Ready") expenses post to
+# Hostaway automatically; anything incomplete / ambiguous / duplicate is HELD in
+# a review queue for a manager. We store only the Drive receipt LINK, never the
+# image bytes. See the product spec for the exact behaviours.
+_expenses = {}            # expense_id -> dict
+_expense_settings = {}    # persisted config (merged over defaults)
+_expense_seq = 0
+
+EXPENSE_STATUSES = ["captured", "ready", "held", "posted", "failed", "discarded"]
+
+# Default settings (all editable from the dashboard Settings panel).
+EXPENSE_DEFAULT_SETTINGS = {
+    "auto_post": True,            # post clean expenses automatically
+    "dup_window_days": 3,         # ± days for duplicate detection
+    "high_amount_threshold": 0,   # 0 = off; else hold amounts above this
+    "max_age_days": 90,           # hold expenses older than this
+    "receipt_required": True,
+    # form maintenance type -> stays as-is (display); category drives Hostaway.
+    "maintenance_types": [
+        "سباكة", "كهرباء", "تكييف", "سخان", "أجهزة", "أثاث", "مستلزمات تنظيف",
+        "مفارش", "أقفال/مفاتيح", "إنترنت", "مكافحة حشرات", "مصعد", "ديكور",
+        "مطبخ", "تجهيزات حمام", "سلامة", "أخرى",
+    ],
+    # form category -> Hostaway expense category name.
+    "category_map": {
+        "صيانة وإصلاحات": "Maintenance & Repairs",
+        "مستلزمات ومواد": "Supplies & Consumables",
+        "أثاث وتجهيز": "Furniture & Fit-out",
+        "تنظيف": "Cleaning",
+        "خدمات (كهرباء/ماء)": "Utilities",
+        "اشتراكات/عضويات": "Subscriptions",
+        "مواصلات": "Transportation",
+        "أخرى": "Other",
+    },
+    "employees": ["موظف 1", "موظف 2"],
+    "payment_methods": ["كاش", "بطاقة الشركة", "تحويل"],
+}
+
+# Hold-reason codes → bilingual labels (shown on the review-queue cards).
+EXPENSE_HOLD_LABELS = {
+    "incomplete":       ("ناقص — بيانات مفقودة", "Incomplete — missing data"),
+    "apartment_confirm":("الشقة تحتاج تأكيد",   "Apartment needs confirmation"),
+    "apartment_none":   ("الشقة غير موجودة",     "Apartment not found"),
+    "high_amount":      ("مبلغ مرتفع — يحتاج مراجعة", "High amount — please review"),
+    "bad_date":         ("راجع تاريخ المصروف",   "Check the expense date"),
+    "no_receipt":       ("بدون فاتورة — يحتاج موافقة", "No receipt — manager approval needed"),
+    "duplicate":        ("تكرار محتمل",          "Possible duplicate"),
+}
+
+def _new_expense_id():
+    global _expense_seq
+    _expense_seq += 1
+    return f"ex_{int(time.time()*1000)}_{_expense_seq:06d}"
+
+def _new_expense_ref():
+    """OJ-EXP-XXXX, auto-incrementing."""
+    used = set()
+    for e in _expenses.values():
+        r = e.get("ref", "")
+        if r.startswith("OJ-EXP-"):
+            try:
+                used.add(int(r.rsplit("-", 1)[-1]))
+            except Exception:
+                pass
+    return f"OJ-EXP-{(max(used)+1 if used else 1):04d}"
+
+def _exp_settings():
+    """Defaults deep-merged with any persisted overrides."""
+    s = json.loads(json.dumps(EXPENSE_DEFAULT_SETTINGS))
+    for k, v in (_expense_settings or {}).items():
+        s[k] = v
+    return s
+
+def _exp_norm(s):
+    """Normalize an apartment name for matching (collapse spaces, lowercase)."""
+    return re.sub(r"\s+", " ", str(s or "").strip()).lower()
+
+def _exp_match_apartment(name):
+    """Return (listing_id, candidates). Exactly one normalized match → resolved.
+    More than one → candidates list for manager confirmation. None → empty."""
+    listings = get_listings_map() or {}
+    target = _exp_norm(name)
+    if not target:
+        return None, []
+    exact = [{"listing_id": lid, "name": nm} for lid, nm in listings.items()
+             if _exp_norm(nm) == target]
+    if len(exact) == 1:
+        return exact[0]["listing_id"], []
+    if len(exact) > 1:
+        return None, exact
+    # fuzzy: target contained in a listing name or vice-versa
+    fuzzy = [{"listing_id": lid, "name": nm} for lid, nm in listings.items()
+             if target in _exp_norm(nm) or _exp_norm(nm) in target]
+    if len(fuzzy) == 1:
+        return None, fuzzy          # one fuzzy hit → still confirm
+    return None, fuzzy              # 0 or many → candidates (maybe empty)
+
+def _exp_find_duplicate(exp):
+    """Find an existing expense with same listing + amount + category whose
+    expense_date is within the duplicate window. Returns the twin or None."""
+    s = _exp_settings()
+    win = int(s.get("dup_window_days") or 3)
+    try:
+        d0 = datetime.strptime(exp.get("expense_date", ""), "%Y-%m-%d").date()
+    except Exception:
+        return None
+    lid = exp.get("listing_id")
+    amt = exp.get("amount")
+    cat = exp.get("category")
+    if lid is None or amt is None:
+        return None
+    for other in _expenses.values():
+        if other.get("id") == exp.get("id"):
+            continue
+        if other.get("status") in ("discarded", "failed"):
+            continue
+        if other.get("listing_id") != lid or other.get("amount") != amt \
+           or other.get("category") != cat:
+            continue
+        try:
+            d1 = datetime.strptime(other.get("expense_date", ""), "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if abs((d1 - d0).days) <= win:
+            return other
+    return None
+
+def _exp_validate(exp):
+    """Run the six checks (§C.3) in order, collect every problem, and set
+    status to 'ready' or 'held' with reasons. Mutates exp in place."""
+    s = _exp_settings()
+    reasons = []          # list of (code, detail)
+    # Check 1 — completeness
+    missing = []
+    if not (exp.get("submitter") or "").strip():       missing.append("submitter")
+    if not (exp.get("apartment") or "").strip():       missing.append("apartment")
+    if not (exp.get("maintenance_type") or "").strip(): missing.append("maintenance_type")
+    if not (exp.get("category") or "").strip():        missing.append("category")
+    amt = exp.get("amount")
+    if not isinstance(amt, (int, float)) or amt is None: missing.append("amount")
+    if not (exp.get("expense_date") or "").strip():    missing.append("expense_date")
+    has_receipt = bool((exp.get("receipt_link") or "").strip())
+    has_reason  = bool((exp.get("no_receipt_reason") or "").strip())
+    if not has_receipt and not has_reason:             missing.append("receipt")
+    if missing:
+        reasons.append(("incomplete", ",".join(missing)))
+    # Check 2 — apartment match
+    lid, cands = _exp_match_apartment(exp.get("apartment"))
+    if lid is not None:
+        exp["listing_id"] = lid
+        exp["candidates"] = []
+    else:
+        exp["listing_id"] = None
+        exp["candidates"] = cands
+        if cands:
+            reasons.append(("apartment_confirm", ""))
+        elif (exp.get("apartment") or "").strip():
+            reasons.append(("apartment_none", ""))
+    # Check 3 — amount sanity
+    if isinstance(amt, (int, float)) and amt is not None:
+        if amt <= 0:
+            if ("incomplete", ) not in [(r[0],) for r in reasons]:
+                reasons.append(("incomplete", "amount"))
+        else:
+            thr = float(s.get("high_amount_threshold") or 0)
+            if thr > 0 and amt > thr:
+                reasons.append(("high_amount", str(int(amt))))
+    # Check 4 — date sanity
+    ds = (exp.get("expense_date") or "").strip()
+    if ds:
+        try:
+            d = datetime.strptime(ds, "%Y-%m-%d").date()
+            today = datetime.now(TZ).date()
+            max_age = int(s.get("max_age_days") or 90)
+            if d > today or (today - d).days > max_age:
+                reasons.append(("bad_date", ds))
+        except Exception:
+            reasons.append(("bad_date", ds))
+    # Check 5 — receipt
+    if s.get("receipt_required") and not has_receipt and has_reason:
+        reasons.append(("no_receipt", ""))
+    # Check 6 — possible duplicate (only meaningful once apartment+amount known)
+    if exp.get("listing_id") is not None and isinstance(amt, (int, float)) and amt and amt > 0 \
+       and not exp.get("dup_ignored"):
+        twin = _exp_find_duplicate(exp)
+        if twin:
+            reasons.append(("duplicate", f"{twin.get('ref')}|{twin.get('expense_date')}"))
+            exp["dup_of"] = twin.get("id")
+    else:
+        exp["dup_of"] = None
+    exp["hold_reasons"] = [{"code": c, "detail": d} for c, d in reasons]
+    if reasons:
+        exp["status"] = "held"
+        exp["primary_reason"] = reasons[0][0]
+    else:
+        exp["status"] = "ready"
+        exp["primary_reason"] = None
+    exp["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    return exp
+
+def _exp_post_to_hostaway(exp):
+    """Write a Ready expense to Hostaway. Sets posted/failed. Respects DRYRUN.
+    On any error → status 'failed' with the exact message (queued for retry)."""
+    if exp.get("listing_id") is None:
+        exp["status"] = "failed"; exp["error"] = "no matched listing"
+        return False
+    s = _exp_settings()
+    cat = (s.get("category_map") or {}).get(exp.get("category") or "", exp.get("category") or "Other")
+    name = (exp.get("maintenance_type") or "Expense")
+    if (exp.get("note") or "").strip():
+        name = f"{name} — {exp['note'].strip()}"
+    desc_bits = []
+    if exp.get("vendor"):          desc_bits.append(f"Vendor: {exp['vendor']}")
+    if exp.get("payment_method"):  desc_bits.append(f"Paid: {exp['payment_method']}")
+    if exp.get("submitter"):       desc_bits.append(f"By: {exp['submitter']}")
+    if exp.get("receipt_link"):    desc_bits.append(f"Receipt: {exp['receipt_link']}")
+    if exp.get("no_receipt_reason"): desc_bits.append(f"No receipt: {exp['no_receipt_reason']}")
+    payload = {
+        "listingMapId": int(exp["listing_id"]),
+        "amount": -abs(float(exp["amount"])),      # expenses are negative in Hostaway
+        "expenseDate": exp.get("expense_date"),
+        "date": exp.get("expense_date"),
+        "categoryName": cat,
+        "concept": name[:120],
+        "name": name[:120],
+        "description": " · ".join(desc_bits)[:900],
+        "currency": "SAR",
+    }
+    if EXPENSE_POST_DRYRUN:
+        exp["status"] = "posted"
+        exp["hostaway_ref"] = "DRYRUN"
+        exp["posted_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        exp["posted_auto"] = True
+        exp["error"] = None
+        return True
+    try:
+        res = api_post(EXPENSE_HOSTAWAY_PATH, payload)
+        ref = None
+        if isinstance(res, dict):
+            ref = (res.get("result") or {}).get("id") if isinstance(res.get("result"), dict) else res.get("id")
+        exp["status"] = "posted"
+        exp["hostaway_ref"] = str(ref) if ref is not None else "ok"
+        exp["posted_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        exp["posted_auto"] = True
+        exp["error"] = None
+        return True
+    except Exception as e:
+        exp["status"] = "failed"
+        exp["error"] = str(e)[:400]
+        return False
+
+def _exp_process(exp, *, allow_post=True):
+    """Validate, then auto-post if Ready and auto-post is enabled."""
+    _exp_validate(exp)
+    s = _exp_settings()
+    if allow_post and exp.get("status") == "ready" and s.get("auto_post"):
+        _exp_post_to_hostaway(exp)
+    return exp
+
+def _exp_ingest(sub):
+    """Create one expense from a raw form submission dict. Idempotent by
+    submission_id. Returns (expense, created_bool)."""
+    sub_id = str(sub.get("submission_id") or "").strip()
+    if sub_id:
+        for e in _expenses.values():
+            if e.get("submission_id") == sub_id:
+                return e, False
+    amt = sub.get("amount")
+    try:
+        amt = round(float(str(amt).replace(",", "").strip()), 2) if amt not in (None, "") else None
+    except Exception:
+        amt = None
+    eid = _new_expense_id()
+    exp = {
+        "id": eid,
+        "ref": _new_expense_ref(),
+        "submission_id": sub_id or eid,
+        "submitter": (sub.get("submitter") or "").strip()[:80],
+        "apartment": (sub.get("apartment") or "").strip()[:120],
+        "listing_id": None,
+        "maintenance_type": (sub.get("maintenance_type") or "").strip()[:60],
+        "category": (sub.get("category") or "").strip()[:60],
+        "amount": amt,
+        "expense_date": (sub.get("expense_date") or "").strip()[:10],
+        "receipt_link": (sub.get("receipt_link") or "").strip()[:600],
+        "no_receipt_reason": (sub.get("no_receipt_reason") or "").strip()[:200],
+        "vendor": (sub.get("vendor") or "").strip()[:120],
+        "payment_method": (sub.get("payment_method") or "").strip()[:40],
+        "note": (sub.get("note") or "").strip()[:300],
+        "submitted_at": (sub.get("submitted_at") or datetime.now(TZ).isoformat(timespec="seconds")),
+        "status": "captured",
+        "hold_reasons": [], "primary_reason": None, "candidates": [],
+        "dup_of": None, "hostaway_ref": None, "posted_at": None,
+        "posted_auto": False, "error": None,
+        "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+    }
+    _expenses[eid] = exp
+    _exp_process(exp)
+    return exp, True
+
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
@@ -5580,7 +5892,7 @@ _sessions = {}              # session_token -> {user_id, expires_at}
 _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
-    "users", "quote", "weekly", "design", "pmo",
+    "users", "quote", "weekly", "design", "pmo", "expenses",
 ]
 
 def _default_perms(role):
@@ -6903,6 +7215,30 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="pmoBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ FIELD EXPENSES (المصاريف) ============ -->
+      <section class="view" id="view_expenses">
+        <div class="page-head">
+          <div>
+            <div class="page-title">💸 المصاريف</div>
+            <div class="page-sub">مصاريف الميدان من النموذج → التحقق → Hostaway</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
+            <button class="btn ghost sm" onclick="loadExpenses()">↻</button>
+          </div>
+        </div>
+        <div class="page-help" data-help-key="expenses">
+          <button class="ph-x" onclick="dismissHelp('expenses')" title="إخفاء">×</button>
+          <div class="ph-t">💸 أتمتة مصاريف الميدان</div>
+          <div class="ph-b">
+            الموظفين يسجّلون مصاريفهم عبر <b>نموذج Google</b>. المصاريف الواضحة
+            تُرحّل تلقائياً إلى Hostaway على الشقة الصحيحة، وأي مصروف ناقص أو
+            غامض أو مكرر يوقف في <b>قائمة المراجعة</b> عشان تتأكد منه بضغطة.
+          </div>
+        </div>
+        <div id="expBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ USERS (المستخدمون) ============ -->
       <section class="view" id="view_users">
         <div class="page-head">
@@ -7327,7 +7663,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -7519,7 +7855,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -7951,6 +8287,7 @@ const NAV = [
   {id:'weekly',  ic:'📊', tk:'weekly'},
   {id:'design',  ic:'🛋️', tk:'design'},
   {id:'pmo',     ic:'🏗️', tk:'pmo'},
+  {id:'expenses',ic:'💸', tk:'expenses', badge:'expenses'},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -7980,6 +8317,7 @@ function badgeCount(key){
     const c = (D.reviews && D.reviews.counts) || {};
     return c.unfixed || 0;
   }
+  if(key==='expenses') return ((D.expSummary||{}).queue) || 0;
   return 0;
 }
 function buildSideNav(){
@@ -8139,6 +8477,7 @@ function go(id){
   if(id==='weekly') loadWeekly();
   if(id==='design') loadDesigns();
   if(id==='pmo') loadPmo();
+  if(id==='expenses') loadExpenses();
 }
 
 /* ============================================================
@@ -9443,6 +9782,369 @@ function printWeekly(){
   w.document.close();
 }
 
+/* ============== FIELD EXPENSES (المصاريف) ============== */
+const EXP_HOLD = {
+  incomplete:['ناقص — بيانات مفقودة','Incomplete — missing data'],
+  apartment_confirm:['الشقة تحتاج تأكيد','Apartment needs confirmation'],
+  apartment_none:['الشقة غير موجودة','Apartment not found'],
+  high_amount:['مبلغ مرتفع — يحتاج مراجعة','High amount — review'],
+  bad_date:['راجع تاريخ المصروف','Check the expense date'],
+  no_receipt:['بدون فاتورة — يحتاج موافقة','No receipt — approval needed'],
+  duplicate:['تكرار محتمل','Possible duplicate']
+};
+const EXP_STATUS = {
+  captured:['قيد المعالجة','Processing'], ready:['جاهز','Ready'], held:['موقوف','Held'],
+  posted:['مُرحّل','Posted'], failed:['فشل','Failed'], discarded:['متجاهَل','Discarded']
+};
+let _expPeriod = 'week';   // week | month | custom
+let _expFrom = '', _expTo = '';
+let _expSub = 'queue';     // queue | all | apt | emp
+let _expDraft = null;
+let _expSettingsDraft = null, _expSettingsDryrun = false;
+let _expFilters = {status:'', apartment:'', employee:'', category:'', q:''};
+let _expFT = null;
+
+function expMoney(n){ var s = fmt(Math.abs(n||0)); return L==='ar' ? (s+' ر.س') : ('SAR '+s); }
+function expReasonLabel(code){ var x = EXP_HOLD[code]; return x ? (L==='ar'?x[0]:x[1]) : code; }
+function _expTh(c){ return '<th style="text-align:start;padding:7px 6px;font-size:10.5px;color:var(--mut);font-weight:600">'+c+'</th>'; }
+function _isoLocal(d){ var m=d.getMonth()+1, day=d.getDate(); return d.getFullYear()+'-'+(m<10?'0'+m:m)+'-'+(day<10?'0'+day:day); }
+function _expJoin(arr){ return (arr||[]).join(String.fromCharCode(10)); }
+function _expLines(id){ var el=document.getElementById(id); if(!el) return [];
+  return el.value.split(String.fromCharCode(10)).map(function(s){return s.replace(String.fromCharCode(13),'').trim();}).filter(function(s){return s;}); }
+function _expMapText(m){ var out=[]; for(var k in (m||{})){ if(m.hasOwnProperty(k)) out.push(k+' = '+m[k]); } return out.join(String.fromCharCode(10)); }
+
+function _expStatusChip(st){
+  var col = {posted:'var(--green)',ready:'var(--green)',held:'var(--gold)',failed:'var(--red)',discarded:'var(--mut)',captured:'var(--mut)'};
+  var lab = EXP_STATUS[st] ? (L==='ar'?EXP_STATUS[st][0]:EXP_STATUS[st][1]) : st;
+  return '<span style="background:'+(col[st]||'var(--mut)')+';color:#fff;padding:2px 9px;border-radius:99px;font-size:10px;font-weight:700">'+esc(lab)+'</span>';
+}
+function _expPeriodRange(){
+  var now=new Date(), from='', to='';
+  if(_expPeriod==='week'){ var f=new Date(now); f.setDate(f.getDate()-6); from=_isoLocal(f); to=_isoLocal(now); }
+  else if(_expPeriod==='month'){ from=_isoLocal(new Date(now.getFullYear(),now.getMonth(),1)); to=_isoLocal(now); }
+  else { from=_expFrom; to=_expTo; }
+  return {from:from, to:to};
+}
+function _expFind(id){ var arr=(D.expQueue||[]).concat(D.expList||[]); for(var i=0;i<arr.length;i++){ if(arr[i].id===id) return arr[i]; } return null; }
+
+async function loadExpenses(){
+  var body=document.getElementById('expBody');
+  if(body && !D.expOpts) body.innerHTML='<div class="empty sk">—</div>';
+  if(!D.expOpts){ try{ D.expOpts=await api('/api/expenses/options'); }catch(_){ D.expOpts={apartments:[],employees:[],categories:[],maintenance_types:[],payment_methods:[]}; } }
+  var r=_expPeriodRange();
+  var qs='?from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
+  try{ D.expSummary=await api('/api/expenses/summary'+qs); }catch(_){ D.expSummary={}; }
+  try{ var q=await api('/api/expenses/queue'); D.expQueue=q.expenses||[]; }catch(_){ D.expQueue=[]; }
+  if(_expSub==='all') await expReloadList(); else _renderExpenses();
+  buildSideNav(); buildBottomNav();
+}
+async function expReloadList(){
+  var r=_expPeriodRange(), f=_expFilters;
+  var qs='?from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
+  if(f.status) qs+='&status='+encodeURIComponent(f.status);
+  if(f.apartment) qs+='&apartment='+encodeURIComponent(f.apartment);
+  if(f.employee) qs+='&employee='+encodeURIComponent(f.employee);
+  if(f.category) qs+='&category='+encodeURIComponent(f.category);
+  if(f.q) qs+='&q='+encodeURIComponent(f.q);
+  try{ var x=await api('/api/expenses/list'+qs); D.expList=x.expenses||[]; }catch(_){ D.expList=[]; }
+  _renderExpenses();
+}
+async function expRefresh(){ D.expList=null; await loadExpenses(); }
+
+function expSetPeriod(p){
+  _expPeriod=p;
+  if(p==='custom' && !_expFrom){ var n=new Date(); var f=new Date(n); f.setDate(f.getDate()-30); _expFrom=_isoLocal(f); _expTo=_isoLocal(n); }
+  loadExpenses();
+}
+function _expCustom(){ var f=document.getElementById('expFrom'), t=document.getElementById('expTo'); if(f)_expFrom=f.value; if(t)_expTo=t.value; loadExpenses(); }
+function expSetSub(s){ _expSub=s; if(s==='all'){ D.expList=null; expReloadList(); return; } _renderExpenses(); }
+function _expF(k,v){ _expFilters[k]=v; clearTimeout(_expFT); _expFT=setTimeout(function(){ expReloadList(); }, k==='q'?350:0); }
+
+function _renderExpenses(){
+  var body=document.getElementById('expBody'); if(!body) return;
+  var h=_expCountersHtml()+_expPeriodHtml()+_expSubHtml();
+  if(_expSub==='queue') h+=_expQueueHtml();
+  else if(_expSub==='all') h+=_expAllHtml();
+  else if(_expSub==='apt') h+=_expByAptHtml();
+  else if(_expSub==='emp') h+=_expByEmpHtml();
+  body.innerHTML=h;
+}
+function _expCountersHtml(){
+  var s=D.expSummary||{};
+  var dry = s.dryrun ? '<div style="background:rgba(212,175,55,.12);border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:10px;font-size:12px;margin-bottom:10px">'+(L==='ar'?'⚠️ وضع تجريبي — لا يكتب على Hostaway فعلياً (EXPENSE_POST_DRYRUN=1)':'⚠️ Dry-run — nothing is written to Hostaway (EXPENSE_POST_DRYRUN=1)')+'</div>' : '';
+  function card(lab,val,col){ return '<div style="flex:1;min-width:118px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px 14px"><div class="muted" style="font-size:11px">'+lab+'</div><div style="font-size:18px;font-weight:800;margin-top:3px;color:'+(col||'var(--text)')+'">'+val+'</div></div>'; }
+  return dry+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + card(L==='ar'?'إجمالي المُرحّل':'Total posted', expMoney(s.posted_sar||0),'var(--green)')
+    + card(L==='ar'?'مُرحّل (عدد)':'Posted (#)', fmt(s.posted_n||0))
+    + card(L==='ar'?'موقوف':'Held', fmt(s.held||0), (s.held?'var(--gold)':'var(--text)'))
+    + card(L==='ar'?'فشل':'Failed', fmt(s.failed||0), (s.failed?'var(--red)':'var(--text)'))
+    + card(L==='ar'?'هذا الأسبوع':'This week', expMoney(s.week_sar||0))
+    + '</div>';
+}
+function _expPeriodHtml(){
+  function b(id,lab){ return '<button class="btn ghost sm" onclick="expSetPeriod(&#39;'+id+'&#39;)" style="'+(_expPeriod===id?'background:var(--gold);color:#1a1a1a;border-color:var(--gold)':'')+'">'+lab+'</button>'; }
+  var custom='';
+  if(_expPeriod==='custom'){
+    custom='<input type="date" id="expFrom" value="'+esc(_expFrom)+'" onchange="_expCustom()" style="padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px"><span class="muted">→</span><input type="date" id="expTo" value="'+esc(_expTo)+'" onchange="_expCustom()" style="padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">';
+  }
+  var r=_expPeriodRange();
+  var csv='/api/expenses/export.csv?token='+encodeURIComponent(tok())+'&from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
+  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    + b('week',L==='ar'?'أسبوع':'Week') + b('month',L==='ar'?'شهر':'Month') + b('custom',L==='ar'?'مخصص':'Custom')
+    + custom + '<span style="flex:1"></span>'
+    + '<a class="btn ghost sm" href="'+csv+'" target="_blank">⬇ CSV</a></div>';
+}
+function _expSubHtml(){
+  var qn=((D.expQueue||[]).length);
+  function b(id,lab){ return '<button class="btn ghost sm" onclick="expSetSub(&#39;'+id+'&#39;)" style="'+(_expSub===id?'background:var(--surface);border-color:var(--gold);color:var(--gold)':'')+'">'+lab+'</button>'; }
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:10px">'
+    + b('queue',(L==='ar'?'المراجعة':'Review')+(qn?(' ('+qn+')'):''))
+    + b('all',L==='ar'?'الكل':'All')
+    + b('apt',L==='ar'?'حسب الشقة':'By apartment')
+    + b('emp',L==='ar'?'حسب الموظف':'By employee') + '</div>';
+}
+function _expQueueHtml(){
+  var items=D.expQueue||[];
+  if(!items.length) return '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:30px">✅</div><div class="muted" style="margin-top:6px">'+(L==='ar'?'ما فيه مصاريف بانتظار المراجعة':'No expenses awaiting review')+'</div></div>';
+  return '<div style="display:flex;flex-direction:column;gap:10px">'+items.map(_expCard).join('')+'</div>';
+}
+function _expCard(e){
+  var reason = e.primary_reason || (e.status==='failed'?'failed':'');
+  var chips;
+  if(e.status==='failed') chips='<span style="background:rgba(229,72,77,.16);color:var(--red);padding:2px 8px;border-radius:99px;font-size:10px">'+(L==='ar'?'فشل الترحيل':'Post failed')+'</span>';
+  else chips=(e.hold_reasons||[]).map(function(r){ return '<span style="background:rgba(212,175,55,.14);color:var(--gold);padding:2px 8px;border-radius:99px;font-size:10px;margin-inline-end:5px">'+esc(expReasonLabel(r.code))+(r.detail?(' · '+esc(r.detail)):'')+'</span>'; }).join('');
+  var head='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+    + '<div><div class="strong" style="font-size:13.5px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(e.apartment||(L==='ar'?'(بدون شقة)':'(no apartment)'))+' · '+esc(e.expense_date||'')+'</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(e.submitter||'—')+' · '+esc(e.maintenance_type||'')+' · '+esc(e.category||'')+'</div></div>'
+    + _expStatusChip(e.status)+'</div>';
+  return '<div style="background:var(--surface-2);border:1px solid var(--border);border-inline-start:3px solid '+(e.status==='failed'?'var(--red)':'var(--gold)')+';border-radius:12px;padding:13px 14px">'
+    + head + '<div style="margin-top:8px">'+chips+'</div>' + _expCardExtras(e,reason) + _expCardActions(e,reason) + '</div>';
+}
+function _expCardExtras(e,reason){
+  var h='';
+  if(reason==='apartment_confirm'||reason==='apartment_none'){
+    var opts='<option value="">—</option>';
+    var cands=e.candidates||[];
+    if(cands.length){ opts+=cands.map(function(c){return '<option value="'+c.listing_id+'">'+esc(c.name)+'</option>';}).join(''); opts+='<option value="" disabled>──────</option>'; }
+    var aps=((D.expOpts||{}).apartments)||[];
+    opts+=aps.map(function(a){return '<option value="'+a.listing_id+'">'+esc(a.name)+'</option>';}).join('');
+    h+='<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<span class="muted" style="font-size:11px">'+(L==='ar'?'اختر الشقة:':'Pick apartment:')+'</span>'
+      +'<select id="expApt_'+esc(e.id)+'" style="flex:1;min-width:180px;padding:7px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'+opts+'</select>'
+      +'<button class="btn sm" onclick="expResolveApt(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تأكيد':'Confirm')+'</button></div>';
+  }
+  if(reason==='no_receipt' && e.no_receipt_reason)
+    h+='<div class="muted" style="margin-top:8px;font-size:11.5px">'+(L==='ar'?'سبب عدم وجود فاتورة: ':'No-receipt reason: ')+esc(e.no_receipt_reason)+'</div>';
+  if(e.status==='failed' && e.error)
+    h+='<div style="margin-top:8px;font-size:11.5px;color:var(--red);background:rgba(229,72,77,.08);border-radius:8px;padding:8px">'+esc(e.error)+'</div>';
+  if(reason==='duplicate' && e.dup_twin){
+    var t=e.dup_twin;
+    h+='<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+      +'<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px"><div class="muted" style="font-size:10px;margin-bottom:3px">'+(L==='ar'?'هذا المصروف':'This expense')+'</div><div style="font-size:12px;font-weight:700">'+expMoney(e.amount)+'</div><div class="muted" style="font-size:11px">'+esc(e.expense_date||'')+'</div><div class="muted" style="font-size:11px">'+esc(e.category||'')+'</div></div>'
+      +'<div style="background:var(--surface);border:1px solid var(--gold);border-radius:8px;padding:9px"><div class="muted" style="font-size:10px;margin-bottom:3px">'+(L==='ar'?'المصروف المشابه':'Existing twin')+' · '+esc(t.ref||'')+'</div><div style="font-size:12px;font-weight:700">'+expMoney(t.amount)+'</div><div class="muted" style="font-size:11px">'+esc(t.expense_date||'')+'</div><div class="muted" style="font-size:11px">'+esc(t.category||'')+'</div></div></div>';
+  }
+  if(e.receipt_link)
+    h+='<div style="margin-top:8px"><a href="'+esc(e.receipt_link)+'" target="_blank" style="font-size:11.5px;color:var(--gold)">📎 '+(L==='ar'?'الفاتورة':'Receipt')+'</a></div>';
+  return h;
+}
+function _expCardActions(e,reason){
+  var btns=[];
+  if(reason==='duplicate'){
+    btns.push('<button class="btn sm" onclick="expNotDup(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'مو مكرر — رحّله':'Not a duplicate — post')+'</button>');
+    btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل كمكرر':'Discard as duplicate')+'</button>');
+  } else if(reason==='high_amount'||reason==='no_receipt'||reason==='bad_date'){
+    btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'مراجعة ✓ ورحّل':'Approve & post')+'</button>');
+  } else if(e.status==='failed'){
+    btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>');
+  }
+  btns.push('<button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تعديل':'Edit')+'</button>');
+  if(reason!=='duplicate') btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل':'Discard')+'</button>');
+  return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btns.join('')+'</div>';
+}
+function _expSelPairs(key,val,pairs){
+  return '<select onchange="_expF(&#39;'+key+'&#39;,this.value)" style="padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+    + pairs.map(function(p){return '<option value="'+esc(p[0])+'"'+(val===p[0]?' selected':'')+'>'+esc(p[1])+'</option>';}).join('') + '</select>';
+}
+function _expAllHtml(){
+  var items=D.expList;
+  if(items==null){ expReloadList(); return '<div class="empty sk">—</div>'; }
+  var f=_expFilters, o=D.expOpts||{};
+  var statusPairs=[['',L==='ar'?'كل الحالات':'All statuses'],['posted','Posted'],['held','Held'],['failed','Failed'],['ready','Ready'],['discarded','Discarded']];
+  var aptPairs=[['',L==='ar'?'كل الشقق':'All apartments']].concat(((o.apartments)||[]).map(function(a){return [a.name,a.name];}));
+  var empPairs=[['',L==='ar'?'كل الموظفين':'All employees']].concat(((o.employees)||[]).map(function(x){return [x,x];}));
+  var catPairs=[['',L==='ar'?'كل الفئات':'All categories']].concat(((o.categories)||[]).map(function(x){return [x,x];}));
+  var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<input value="'+esc(f.q)+'" placeholder="'+(L==='ar'?'بحث…':'Search…')+'" oninput="_expF(&#39;q&#39;,this.value)" style="flex:1;min-width:140px;padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+    +_expSelPairs('status',f.status,statusPairs)+_expSelPairs('apartment',f.apartment,aptPairs)
+    +_expSelPairs('employee',f.employee,empPairs)+_expSelPairs('category',f.category,catPairs)+'</div>';
+  if(!items.length) return bar+'<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'ما فيه نتائج':'No results')+'</div>';
+  var thead='<tr>'+[L==='ar'?'المرجع':'Ref',L==='ar'?'التاريخ':'Date',L==='ar'?'الشقة':'Apartment',L==='ar'?'الموظف':'Employee',L==='ar'?'الفئة':'Category',L==='ar'?'المبلغ':'Amount',L==='ar'?'الحالة':'Status',L==='ar'?'مرفقات':'Links',''].map(_expTh).join('')+'</tr>';
+  var rows=items.map(function(e){
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.ref||'')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11.5px;white-space:nowrap">'+esc(e.expense_date||'')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.apartment||'—')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.submitter||'—')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.category||'—')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11.5px;font-weight:700;white-space:nowrap">'+expMoney(e.amount)+'</td>'
+      +'<td style="padding:7px 6px">'+_expStatusChip(e.status)+'</td>'
+      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+(e.receipt_link?('<a href="'+esc(e.receipt_link)+'" target="_blank" style="color:var(--gold)">📎</a>'):'')+(e.hostaway_ref&&e.hostaway_ref!=='DRYRUN'?(' <span class="muted">#'+esc(e.hostaway_ref)+'</span>'):'')+'</td>'
+      +'<td style="padding:7px 6px;white-space:nowrap"><button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">✎</button> <button class="btn ghost sm" onclick="expDelete(&#39;'+esc(e.id)+'&#39;)">🗑</button></td></tr>';
+  }).join('');
+  return bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+thead+rows+'</table></div>';
+}
+function _expByAptHtml(){
+  var arr=((D.expSummary||{}).by_apartment)||[];
+  if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
+  var head='<tr>'+[L==='ar'?'الشقة':'Apartment',L==='ar'?'عدد':'Count',L==='ar'?'إجمالي مُرحّل':'Total posted'].map(_expTh).join('')+'</tr>';
+  var rows=arr.map(function(a){ return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700">'+expMoney(a.total)+'</td></tr>'; }).join('');
+  return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
+}
+function _expByEmpHtml(){
+  var arr=((D.expSummary||{}).by_employee)||[];
+  if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
+  var head='<tr>'+[L==='ar'?'الموظف':'Employee',L==='ar'?'مُرحّل':'Posted',L==='ar'?'موقوف':'Held',L==='ar'?'إجمالي':'Total'].map(_expTh).join('')+'</tr>';
+  var rows=arr.map(function(x){ return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px">'+esc(x.employee)+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(x.posted)+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(x.held)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700">'+expMoney(x.total)+'</td></tr>'; }).join('');
+  return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
+}
+
+/* ---- expense actions ---- */
+async function expPost(id){
+  var r=await post('/api/expenses/post',{id:id});
+  if(r && r.ok) toast(L==='ar'?'تم الترحيل ✓':'Posted ✓');
+  else toast(L==='ar'?'لسه موقوف — راجع البيانات':'Still held — check data');
+  await expRefresh();
+}
+async function expDiscard(id){
+  var e=_expFind(id);
+  var msg=(L==='ar'?'تجاهل المصروف؟ ':'Discard expense? ')+(e?(e.ref+' · '+expMoney(e.amount)+' · '+(e.apartment||'')+' · '+(e.expense_date||'')):'');
+  if(!confirm(msg)) return;
+  await post('/api/expenses/discard',{id:id});
+  toast(L==='ar'?'تم التجاهل':'Discarded'); await expRefresh();
+}
+async function expNotDup(id){ await post('/api/expenses/not-duplicate',{id:id}); toast(L==='ar'?'تم — مو مكرر':'Marked not duplicate'); await expRefresh(); }
+async function expResolveApt(id){
+  var sel=document.getElementById('expApt_'+id);
+  if(!sel || !sel.value){ toast(L==='ar'?'اختر الشقة':'Pick an apartment'); return; }
+  await post('/api/expenses/resolve-apartment',{id:id, listing_id:parseInt(sel.value,10)});
+  toast(L==='ar'?'تم تحديد الشقة':'Apartment set'); await expRefresh();
+}
+async function expDelete(id){
+  var e=_expFind(id);
+  var msg=(L==='ar'?'حذف المصروف نهائياً؟ ':'Delete expense permanently? ')+(e?(e.ref+' · '+expMoney(e.amount)+' · '+(e.apartment||'')+' · '+(e.expense_date||'')):'');
+  if(!confirm(msg)) return;
+  var removeHa=false;
+  if(e && e.status==='posted' && e.hostaway_ref && e.hostaway_ref!=='DRYRUN')
+    removeHa=confirm(L==='ar'?'حذفه أيضاً من Hostaway؟':'Also remove it from Hostaway?');
+  await post('/api/expenses/delete',{id:id, remove_hostaway:removeHa});
+  toast(L==='ar'?'تم الحذف':'Deleted'); await expRefresh();
+}
+
+/* ---- edit overlay ---- */
+function _ensureExpOv(){
+  var ov=document.getElementById('expOverlay'); if(ov) return ov;
+  ov=document.createElement('div'); ov.id='expOverlay';
+  ov.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9994;padding:18px;overflow-y:auto';
+  ov.innerHTML='<div id="expEditBody" style="background:var(--surface);max-width:680px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
+  document.body.appendChild(ov); return ov;
+}
+function closeExp(){ var ov=document.getElementById('expOverlay'); if(ov) ov.style.display='none'; }
+function _expSetField(k,v){ if(_expDraft) _expDraft[k]=v; }
+async function expEdit(id){
+  _ensureExpOv();
+  var d=null; try{ var x=await api('/api/expenses/get?id='+encodeURIComponent(id)); d=x.expense; }catch(_){}
+  if(!d){ toast(L==='ar'?'تعذّر الفتح':'Could not open'); return; }
+  _expDraft=d; _renderExpEditor();
+  document.getElementById('expOverlay').style.display='block';
+}
+function _renderExpEditor(){
+  var d=_expDraft||{}, o=D.expOpts||{};
+  function inp(k,ph,type){ return '<input '+(type?('type="'+type+'" '):'')+'value="'+esc(d[k]==null?'':d[k])+'" oninput="_expSetField(&#39;'+k+'&#39;,this.value)" placeholder="'+(ph||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'; }
+  function sel(k,arr){ var h='<select onchange="_expSetField(&#39;'+k+'&#39;,this.value)" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"><option value="">—</option>'; (arr||[]).forEach(function(op){ h+='<option value="'+esc(op)+'"'+(d[k]===op?' selected':'')+'>'+esc(op)+'</option>'; }); h+='</select>'; return h; }
+  function lbl(n,c){ return '<div><label class="muted" style="font-size:11px;font-weight:600">'+n+'</label>'+c+'</div>'; }
+  var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    +'<div style="font-size:17px;font-weight:700">💸 '+(L==='ar'?'تعديل مصروف':'Edit expense')+' · <span style="color:var(--gold);font-size:12px">'+esc(d.ref||'')+'</span></div>'
+    +'<button onclick="closeExp()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px">×</button></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    + lbl(L==='ar'?'الموظف':'Employee', sel('submitter',o.employees))
+    + lbl(L==='ar'?'الشقة':'Apartment', inp('apartment'))
+    + lbl(L==='ar'?'نوع الصيانة':'Maintenance type', sel('maintenance_type',o.maintenance_types))
+    + lbl(L==='ar'?'الفئة':'Category', sel('category',o.categories))
+    + lbl(L==='ar'?'المبلغ (ر.س)':'Amount (SAR)', inp('amount','','number'))
+    + lbl(L==='ar'?'تاريخ المصروف':'Expense date', inp('expense_date','','date'))
+    + lbl(L==='ar'?'المورّد':'Vendor', inp('vendor'))
+    + lbl(L==='ar'?'طريقة الدفع':'Payment method', sel('payment_method',o.payment_methods))
+    + lbl(L==='ar'?'رابط الفاتورة (Drive)':'Receipt link (Drive)', inp('receipt_link'))
+    + lbl(L==='ar'?'سبب عدم الفاتورة':'No-receipt reason', inp('no_receipt_reason'))
+    +'</div>' + lbl(L==='ar'?'ملاحظة':'Note', inp('note'))
+    +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
+    +'<button class="btn ghost" onclick="closeExp()">'+(L==='ar'?'إلغاء':'Cancel')+'</button>'
+    +'<button class="btn" onclick="expSaveEdit()">'+(L==='ar'?'حفظ ومراجعة':'Save & re-check')+'</button></div>';
+  document.getElementById('expEditBody').innerHTML=html;
+}
+async function expSaveEdit(){
+  var d=_expDraft; if(!d) return;
+  await post('/api/expenses/update',{id:d.id, submitter:d.submitter, apartment:d.apartment,
+    maintenance_type:d.maintenance_type, category:d.category, amount:d.amount, expense_date:d.expense_date,
+    receipt_link:d.receipt_link, no_receipt_reason:d.no_receipt_reason, vendor:d.vendor,
+    payment_method:d.payment_method, note:d.note});
+  closeExp(); toast(L==='ar'?'تم الحفظ':'Saved'); await expRefresh();
+}
+
+/* ---- settings overlay ---- */
+async function expShowSettings(){
+  _ensureExpOv();
+  var x={}; try{ x=await api('/api/expenses/settings'); }catch(_){}
+  _expSettingsDraft=JSON.parse(JSON.stringify(x.settings||{}));
+  _expSettingsDryrun=!!x.dryrun;
+  _renderExpSettings();
+  document.getElementById('expOverlay').style.display='block';
+}
+function _renderExpSettings(){
+  var s=_expSettingsDraft||{};
+  function row(lab,ctrl){ return '<div style="margin-bottom:12px">'+(lab?('<label class="muted" style="font-size:11.5px;font-weight:600;display:block;margin-bottom:4px">'+lab+'</label>'):'')+ctrl+'</div>'; }
+  function num(id,val){ return '<input id="'+id+'" type="number" value="'+esc(val==null?'':String(val))+'" style="width:120px;padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'; }
+  function ta(id,val,rows){ return '<textarea id="'+id+'" rows="'+(rows||4)+'" style="width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'+esc(val||'')+'</textarea>'; }
+  function chk(id,on,lab){ return '<label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'> <span style="font-size:12.5px">'+lab+'</span></label>'; }
+  var dry=_expSettingsDryrun ? '<div style="background:rgba(212,175,55,.12);border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:10px;font-size:11.5px;margin-bottom:12px">'+(L==='ar'?'وضع تجريبي مفعّل (EXPENSE_POST_DRYRUN=1) — للكتابة الفعلية على Hostaway غيّره إلى 0 في متغيرات البيئة.':'Dry-run ON (EXPENSE_POST_DRYRUN=1) — set the env var to 0 to write to Hostaway.')+'</div>' : '';
+  var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    +'<div style="font-size:17px;font-weight:700">⚙️ '+(L==='ar'?'إعدادات المصاريف':'Expense settings')+'</div>'
+    +'<button onclick="closeExp()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px">×</button></div>'
+    + dry
+    + row('', chk('expsAuto',s.auto_post,L==='ar'?'الترحيل التلقائي للمصاريف الجاهزة':'Auto-post clean expenses'))
+    + row('', chk('expsReceipt',s.receipt_required,L==='ar'?'الفاتورة مطلوبة (وقف عند عدم وجودها)':'Receipt required (hold if missing)'))
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap">'
+    + row(L==='ar'?'نافذة التكرار (± أيام)':'Duplicate window (± days)', num('expsDup',s.dup_window_days))
+    + row(L==='ar'?'حد المبلغ المرتفع (0=معطّل)':'High-amount threshold (0=off)', num('expsHigh',s.high_amount_threshold))
+    + row(L==='ar'?'أقصى عمر للمصروف (أيام)':'Max expense age (days)', num('expsAge',s.max_age_days))
+    + '</div>'
+    + row(L==='ar'?'أنواع الصيانة (سطر لكل نوع)':'Maintenance types (one per line)', ta('expsMT',_expJoin(s.maintenance_types)))
+    + row(L==='ar'?'الموظفون (سطر لكل اسم)':'Employees (one per line)', ta('expsEmp',_expJoin(s.employees)))
+    + row(L==='ar'?'طرق الدفع (سطر لكل طريقة)':'Payment methods (one per line)', ta('expsPM',_expJoin(s.payment_methods)))
+    + row(L==='ar'?'ربط الفئات (فئة النموذج = فئة Hostaway)':'Category map (form = Hostaway)', ta('expsCat',_expMapText(s.category_map),7))
+    + '<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
+    + '<button class="btn ghost" onclick="closeExp()">'+(L==='ar'?'إلغاء':'Cancel')+'</button>'
+    + '<button class="btn" onclick="expSaveSettings()">'+(L==='ar'?'حفظ':'Save')+'</button></div>';
+  document.getElementById('expEditBody').innerHTML=html;
+}
+async function expSaveSettings(){
+  var s=_expSettingsDraft||{};
+  s.auto_post=document.getElementById('expsAuto').checked;
+  s.receipt_required=document.getElementById('expsReceipt').checked;
+  s.dup_window_days=parseInt(document.getElementById('expsDup').value||'3',10);
+  s.high_amount_threshold=parseInt(document.getElementById('expsHigh').value||'0',10);
+  s.max_age_days=parseInt(document.getElementById('expsAge').value||'90',10);
+  s.maintenance_types=_expLines('expsMT');
+  s.employees=_expLines('expsEmp');
+  s.payment_methods=_expLines('expsPM');
+  var cm={}; _expLines('expsCat').forEach(function(l){ var i=l.indexOf('='); if(i>0){ var k=l.slice(0,i).trim(); var v=l.slice(i+1).trim(); if(k) cm[k]=v; } });
+  s.category_map=cm;
+  await post('/api/expenses/settings',{settings:s});
+  D.expOpts=null;
+  closeExp(); toast(L==='ar'?'تم حفظ الإعدادات':'Settings saved'); await loadExpenses();
+}
+
 /* ============== DESIGN REQUESTS (Petunia) ============== */
 const DR_UNIT_TYPES = ["شقة","فيلا","دوبلكس","تاون هاوس","بنتهاوس","استوديو","مكتب","معرض","أخرى"];
 const DR_PURPOSES = ["سكن شخصي","استثمار (تأجير)","تأجير مفروش","Airbnb","مكتبي","أخرى"];
@@ -10241,7 +10943,7 @@ const TAB_LABEL = {
   tickets:'الصيانة', reviews:'المراجعات', guests:'الضيوف',
   quality:'الجودة', rev:'الإيرادات', learn:'التعلّم', log:'النشاط',
   users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي',
-  design:'طلبات التصميم', pmo:'تجهيز الشقق'
+  design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف'
 };
 const TAB_LABEL_EN = {
   home:'Home', inbox:'Inbox', today:'Today', calendar:'Calendar',
@@ -10249,7 +10951,7 @@ const TAB_LABEL_EN = {
   tickets:'Maintenance', reviews:'Reviews', guests:'Guests',
   quality:'Quality', rev:'Revenue', learn:'Learning', log:'Activity',
   users:'Users', quote:'Quotations', weekly:'Weekly report',
-  design:'Design requests', pmo:'Fit-out projects'
+  design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses'
 };
 
 async function loadUsers(){
@@ -15279,6 +15981,326 @@ async def _api_weekly_delete(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+# ===================== FIELD EXPENSES API =====================
+def _exp_view(e):
+    """Expense dict + the suspected-twin summary (for side-by-side duplicate UI)."""
+    v = dict(e)
+    if e.get("dup_of") and e["dup_of"] in _expenses:
+        t = _expenses[e["dup_of"]]
+        v["dup_twin"] = {
+            "id": t.get("id"), "ref": t.get("ref"), "amount": t.get("amount"),
+            "expense_date": t.get("expense_date"), "apartment": t.get("apartment"),
+            "category": t.get("category"), "status": t.get("status"),
+        }
+    return v
+
+async def _api_expenses_ingest(request):
+    """Public webhook for the Google Apps Script. Authenticated by a shared
+    secret (header X-Ingest-Secret or ?secret=). Idempotent by submission_id.
+    Accepts one submission or a {submissions:[...]} batch."""
+    secret = request.headers.get("X-Ingest-Secret") or request.query.get("secret") or ""
+    ok_secret = (not EXPENSE_INGEST_SECRET) or hmac.compare_digest(secret, EXPENSE_INGEST_SECRET)
+    if not ok_secret and not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    subs = b.get("submissions") if isinstance(b.get("submissions"), list) else [b]
+    out = []
+    created_any = False
+    for sub in subs:
+        if not isinstance(sub, dict):
+            continue
+        exp, created = await asyncio.to_thread(_exp_ingest, sub)
+        created_any = created_any or created
+        out.append({"id": exp.get("id"), "ref": exp.get("ref"),
+                    "status": exp.get("status"), "created": created,
+                    "primary_reason": exp.get("primary_reason")})
+        if created and exp.get("status") in ("held", "failed"):
+            lbl = EXPENSE_HOLD_LABELS.get(exp.get("primary_reason") or "", ("مصروف", ""))[0]
+            log_event("ops", f"مصروف يحتاج مراجعة [{exp.get('ref')}] · {lbl} · "
+                             f"{exp.get('apartment') or '—'} · {exp.get('amount') or 0} ر.س")
+        elif created and exp.get("status") == "posted":
+            log_event("ops", f"مصروف مُرحّل تلقائياً [{exp.get('ref')}] · "
+                             f"{exp.get('apartment') or '—'} · {exp.get('amount') or 0} ر.س")
+    if created_any:
+        await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "results": out})
+
+def _exp_in_period(e, dfrom, dto):
+    d = (e.get("expense_date") or "")[:10]
+    if dfrom and d < dfrom: return False
+    if dto and d > dto:     return False
+    return True
+
+async def _api_expenses_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q = request.query
+    status = q.get("status", "")
+    dfrom, dto = q.get("from", ""), q.get("to", "")
+    apt = q.get("apartment", "")
+    emp = q.get("employee", "")
+    cat = q.get("category", "")
+    mt  = q.get("maintenance_type", "")
+    search = (q.get("q", "") or "").lower().strip()
+    items = []
+    for e in _expenses.values():
+        if status and e.get("status") != status: continue
+        if not _exp_in_period(e, dfrom, dto): continue
+        if apt and e.get("apartment") != apt: continue
+        if emp and e.get("submitter") != emp: continue
+        if cat and e.get("category") != cat: continue
+        if mt and e.get("maintenance_type") != mt: continue
+        if search and search not in (
+            (e.get("apartment", "") + e.get("submitter", "") + e.get("note", "") +
+             e.get("vendor", "") + e.get("ref", "") + e.get("maintenance_type", "")).lower()):
+            continue
+        items.append(_exp_view(e))
+    items.sort(key=lambda e: (e.get("submitted_at") or e.get("created_at") or ""), reverse=True)
+    return _json({"expenses": items[:500], "count": len(items)})
+
+async def _api_expenses_queue(request):
+    """Held + Failed only (the review queue), newest first."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = [_exp_view(e) for e in _expenses.values()
+             if e.get("status") in ("held", "failed")]
+    items.sort(key=lambda e: (e.get("submitted_at") or e.get("created_at") or ""), reverse=True)
+    return _json({"expenses": items, "count": len(items)})
+
+async def _api_expenses_summary(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q = request.query
+    dfrom, dto = q.get("from", ""), q.get("to", "")
+    posted_sar = held = posted_n = failed = 0
+    week_sar = 0.0
+    wk_from = (datetime.now(TZ).date() - timedelta(days=7)).isoformat()
+    by_apt, by_emp = {}, {}
+    for e in _expenses.values():
+        st = e.get("status")
+        if st in ("held",): held += 1
+        if st in ("failed",): failed += 1
+        if not _exp_in_period(e, dfrom, dto): continue
+        amt = abs(float(e.get("amount") or 0))
+        if st == "posted":
+            posted_sar += amt; posted_n += 1
+            if (e.get("expense_date") or "") >= wk_from:
+                week_sar += amt
+        a = e.get("apartment") or "—"; m = e.get("submitter") or "—"
+        ba = by_apt.setdefault(a, {"apartment": a, "total": 0.0, "count": 0})
+        be = by_emp.setdefault(m, {"employee": m, "total": 0.0, "count": 0,
+                                   "posted": 0, "held": 0, "discarded": 0})
+        if st == "posted":
+            ba["total"] += amt; ba["count"] += 1
+            be["total"] += amt; be["posted"] += 1
+        be["count"] += 1
+        if st == "held": be["held"] += 1
+        if st == "discarded": be["discarded"] += 1
+    return _json({
+        "posted_sar": round(posted_sar, 2), "held": held, "posted_n": posted_n,
+        "failed": failed, "week_sar": round(week_sar, 2),
+        "queue": held + failed,
+        "by_apartment": sorted(by_apt.values(), key=lambda x: -x["total"]),
+        "by_employee": sorted(by_emp.values(), key=lambda x: -x["total"]),
+        "dryrun": EXPENSE_POST_DRYRUN,
+    })
+
+async def _api_expenses_get(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    e = _expenses.get(request.query.get("id", ""))
+    if not e:
+        return _json({"error": "not found"}, 404)
+    return _json({"expense": _exp_view(e)})
+
+_EXP_EDITABLE = ("submitter", "apartment", "maintenance_type", "category", "amount",
+                 "expense_date", "receipt_link", "no_receipt_reason", "vendor",
+                 "payment_method", "note")
+
+async def _api_expenses_update(request):
+    """Edit fields then re-validate (no auto-post)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    for k in _EXP_EDITABLE:
+        if k in b:
+            if k == "amount":
+                try:
+                    e[k] = round(float(str(b[k]).replace(",", "").strip()), 2) if b[k] not in (None, "") else None
+                except Exception:
+                    e[k] = None
+            else:
+                e[k] = (b[k] or "").strip() if isinstance(b[k], str) else b[k]
+    await asyncio.to_thread(_exp_process, e, allow_post=False)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "expense": _exp_view(e)})
+
+async def _api_expenses_post(request):
+    """Manual 'Post now' / 'Retry'. Re-validates first; only posts if Ready."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    await asyncio.to_thread(_exp_validate, e)
+    if e.get("status") != "ready":
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": False, "error": "still_held", "expense": _exp_view(e)})
+    ok = await asyncio.to_thread(_exp_post_to_hostaway, e)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": ok, "expense": _exp_view(e)})
+
+async def _api_expenses_resolve_apartment(request):
+    """Manager picked the right listing for an ambiguous/not-found expense."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    lid = b.get("listing_id")
+    try:
+        lid = int(lid)
+    except Exception:
+        return _json({"error": "bad listing_id"}, 400)
+    name = (get_listings_map() or {}).get(lid)
+    if name:
+        e["apartment"] = name
+    e["listing_id"] = lid
+    e["candidates"] = []
+    e["apartment_locked"] = lid       # remember the manual choice
+    await asyncio.to_thread(_exp_process, e, allow_post=True)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "expense": _exp_view(e)})
+
+async def _api_expenses_not_duplicate(request):
+    """'Not a duplicate — post it' button."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    e["dup_ignored"] = True
+    e["dup_of"] = None
+    await asyncio.to_thread(_exp_process, e, allow_post=True)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "expense": _exp_view(e)})
+
+async def _api_expenses_discard(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    e["status"] = "discarded"
+    e["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"تجاهل مصروف [{e.get('ref')}] · {e.get('apartment') or '—'}")
+    return _json({"ok": True})
+
+async def _api_expenses_delete(request):
+    """Delete from our system. If it was posted, the manager is asked whether to
+    remove it from Hostaway too (remove_hostaway flag). We never silently touch
+    Hostaway."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    removed_remote = False
+    if b.get("remove_hostaway") and e.get("hostaway_ref") and e.get("hostaway_ref") != "DRYRUN":
+        if not EXPENSE_POST_DRYRUN:
+            try:
+                api_delete = globals().get("api_delete")
+                if api_delete:
+                    api_delete(f"{EXPENSE_HOSTAWAY_PATH}/{e['hostaway_ref']}")
+                    removed_remote = True
+            except Exception as ex:
+                return _json({"error": f"hostaway delete failed: {ex}"}, 502)
+    _expenses.pop(e["id"], None)
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"حذف مصروف [{e.get('ref')}]" + (" + من Hostaway" if removed_remote else ""))
+    return _json({"ok": True, "removed_hostaway": removed_remote})
+
+async def _api_expenses_options(request):
+    """Drives the dashboard dropdowns AND the Google-Form sync: current live
+    apartment names + the configurable lists."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        listings = await asyncio.to_thread(get_listings_map)
+    except Exception:
+        listings = {}
+    s = _exp_settings()
+    return _json({
+        "apartments": sorted([{"listing_id": lid, "name": nm} for lid, nm in listings.items()],
+                             key=lambda x: str(x["name"])),
+        "employees": s.get("employees", []),
+        "categories": list((s.get("category_map") or {}).keys()),
+        "maintenance_types": s.get("maintenance_types", []),
+        "payment_methods": s.get("payment_methods", []),
+    })
+
+async def _api_expenses_settings_get(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"settings": _exp_settings(), "dryrun": EXPENSE_POST_DRYRUN})
+
+async def _api_expenses_settings_save(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    s = b.get("settings")
+    if not isinstance(s, dict):
+        return _json({"error": "bad settings"}, 400)
+    for k in ("auto_post", "receipt_required"):
+        if k in s: _expense_settings[k] = bool(s[k])
+    for k in ("dup_window_days", "high_amount_threshold", "max_age_days"):
+        if k in s:
+            try: _expense_settings[k] = max(0, int(s[k]))
+            except Exception: pass
+    for k in ("maintenance_types", "employees", "payment_methods"):
+        if isinstance(s.get(k), list):
+            _expense_settings[k] = [str(x)[:60] for x in s[k]][:60]
+    if isinstance(s.get("category_map"), dict):
+        _expense_settings["category_map"] = {str(k)[:60]: str(v)[:60]
+                                             for k, v in s["category_map"].items()}
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "settings": _exp_settings()})
+
+async def _api_expenses_export(request):
+    """CSV export of the current filter (or all)."""
+    if not _dash_auth(request):
+        return web.Response(status=401, text="unauthorized")
+    q = request.query
+    dfrom, dto = q.get("from", ""), q.get("to", "")
+    cols = ["ref", "status", "expense_date", "apartment", "submitter", "maintenance_type",
+            "category", "amount", "vendor", "payment_method", "hostaway_ref",
+            "receipt_link", "note", "primary_reason"]
+    rows = ["," .join(cols)]
+    items = sorted(_expenses.values(),
+                   key=lambda e: (e.get("expense_date") or ""), reverse=True)
+    for e in items:
+        if not _exp_in_period(e, dfrom, dto):
+            continue
+        cells = []
+        for c in cols:
+            val = str(e.get(c, "") if e.get(c) is not None else "")
+            if any(ch in val for ch in [",", '"', "\n"]):
+                val = '"' + val.replace('"', '""') + '"'
+            cells.append(val)
+        rows.append(",".join(cells))
+    body = ("﻿" + "\n".join(rows)).encode("utf-8")
+    return web.Response(body=body, content_type="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=ouja-expenses.csv"})
+
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
     if not _dash_auth(request):
@@ -16553,6 +17575,22 @@ async def start_web_server():
         app.router.add_get("/api/weekly/get", _api_weekly_get)
         app.router.add_post("/api/weekly/save", _api_weekly_save)
         app.router.add_post("/api/weekly/delete", _api_weekly_delete)
+        # Field expenses (المصاريف)
+        app.router.add_post("/api/expenses/ingest", _api_expenses_ingest)
+        app.router.add_get("/api/expenses/list", _api_expenses_list)
+        app.router.add_get("/api/expenses/queue", _api_expenses_queue)
+        app.router.add_get("/api/expenses/summary", _api_expenses_summary)
+        app.router.add_get("/api/expenses/get", _api_expenses_get)
+        app.router.add_post("/api/expenses/update", _api_expenses_update)
+        app.router.add_post("/api/expenses/post", _api_expenses_post)
+        app.router.add_post("/api/expenses/resolve-apartment", _api_expenses_resolve_apartment)
+        app.router.add_post("/api/expenses/not-duplicate", _api_expenses_not_duplicate)
+        app.router.add_post("/api/expenses/discard", _api_expenses_discard)
+        app.router.add_post("/api/expenses/delete", _api_expenses_delete)
+        app.router.add_get("/api/expenses/options", _api_expenses_options)
+        app.router.add_get("/api/expenses/settings", _api_expenses_settings_get)
+        app.router.add_post("/api/expenses/settings", _api_expenses_settings_save)
+        app.router.add_get("/api/expenses/export.csv", _api_expenses_export)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
@@ -16986,6 +18024,12 @@ def load_state():
         for k, v in (_load_json("pmo_templates.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _pmo_templates[str(k)] = v
+        _expenses.clear()
+        for k, v in (_load_json("expenses.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _expenses[str(k)] = v
+        _expense_settings.clear()
+        _expense_settings.update(_load_json("expense_settings.json", {}) or {})
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -17040,6 +18084,8 @@ def persist_state():
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
     _save_json("pmo_templates.json", _pmo_templates)
+    _save_json("expenses.json", _expenses)
+    _save_json("expense_settings.json", _expense_settings)
     # Sessions are intentionally NOT persisted — restarts force re-login
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
