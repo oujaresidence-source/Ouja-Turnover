@@ -17450,6 +17450,229 @@ async def _api_learning_edit(request):
         return _json({"ok": True})
     return _json({"error": "scope must be apartment|general"}, 400)
 
+# ============== MUSAED SHOWCASE (أفضل محادثات مساعد) ==============
+# Pulls recent Hostaway conversations, finds the messages MUSAED actually authored
+# (he signs every guest-facing message), then surfaces the best real example of three
+# kinds: (1) he suggested other apartments, (2) a long thread with no escalation,
+# (3) a thread he correctly escalated. Rendered as a standalone, screenshot-friendly
+# page so the owner can show real proof in an ad. Read-only; touches no bot logic.
+_showcase_cache = {"ts": 0, "data": None}
+
+# Markers that prove an OUTBOUND message came from Musaed (he always signs).
+_MSC_SIG = ["مساعد", "Musaid", "الدعم الفني", "Technical Support"]
+_MSC_ESC_PHRASE = "رفعنا موضوعك للقسم المختص"
+# Verbs/phrases that signal "I'm recommending another unit / option".
+_MSC_SUGGEST = ["أرشح", "ارشح", "نرشح", "نرشّح", "أرشّح", "ترشيح", "نقترح", "أقترح",
+                "اقترح", "ننقلك", "بديل", "خيار ثاني", "خيار آخر", "وحدة ثانية",
+                "شقة ثانية", "شقة أخرى", "وحدة أخرى", "أنسب لك", "متوفر لدينا",
+                "عندنا وحدة", "عندنا شقة", "نوفر لك"]
+_MSC_THANKS = ["شكرا", "شكراً", "تسلم", "يعطيك العافية", "مشكور", "الله يعطيك",
+               "ممتاز", "كفو", "🙏", "🤍", "thank", "thanks", "appreciate"]
+
+def _msc_is_musaed(body):
+    b = body or ""
+    return any(s in b for s in _MSC_SIG)
+
+def _analyze_musaed_showcase(limit_conversations=120):
+    """Walk recent conversations, classify each, and return the best example per bucket."""
+    listings = get_listings_map()
+    esc_cids = {str(e.get("conversation_id")) for e in _escalations.values()
+                if e.get("conversation_id")}
+    # --- pull recent conversations (paginated) ---
+    convos, offset, page = [], 0, 100
+    while len(convos) < limit_conversations:
+        try:
+            data = api_get("/conversations",
+                           params={"limit": page, "offset": offset, "includeResources": 1})
+        except Exception as e:
+            print(f"showcase: /conversations error at {offset}: {e}")
+            break
+        batch = data.get("result", []) or []
+        if not batch:
+            break
+        convos.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    convos = convos[:limit_conversations]
+
+    # other-unit name tokens (distinctive part after the "|")
+    name_tokens = {}
+    for lid, nm in listings.items():
+        tail = (nm or "").split("|")[-1].strip()
+        toks = [t for t in tail.replace("-", " ").split() if len(t) >= 4]
+        name_tokens[lid] = toks
+
+    records = []
+    for c in convos:
+        cid = c.get("id")
+        lid = c.get("listingMapId")
+        if not cid:
+            continue
+        try:
+            md = api_get(f"/conversations/{cid}/messages")
+            msgs = sorted(md.get("result", []) or [], key=_msg_sort_key)
+        except Exception:
+            continue
+        if len(msgs) < 3:
+            continue
+        thread, musaed_answers, escalated, suggests = [], 0, False, 0
+        for m in msgs:
+            body = (m.get("body") or "").strip()
+            if not body:
+                continue
+            inb = _msg_is_inbound(m)
+            is_m = (not inb) and _msc_is_musaed(body)
+            if (not inb) and (not _looks_automated(body)) and is_m:
+                musaed_answers += 1
+            if (not inb) and (_MSC_ESC_PHRASE in body):
+                escalated = True
+            if (not inb):
+                if any(k in body for k in _MSC_SUGGEST):
+                    suggests += 2
+                for olid, toks in name_tokens.items():
+                    if olid == lid:
+                        continue
+                    if any(t in body for t in toks):
+                        suggests += 1
+                        break
+            thread.append({"inb": inb, "musaed": is_m, "body": body[:1200],
+                           "auto": _looks_automated(body),
+                           "t": _msg_time(m)[:16].replace("T", " ")})
+        if str(cid) in esc_cids:
+            escalated = True
+        if musaed_answers == 0:                       # only showcase genuine Musaed work
+            continue
+        tail = " ".join(x["body"] for x in thread[-3:])
+        gratitude = any(k in tail.lower() for k in _MSC_THANKS)
+        records.append({
+            "cid": cid, "guest": c.get("recipientName") or c.get("guestName") or "ضيف",
+            "unit": listings.get(lid) or c.get("listingName") or "—",
+            "n": len(thread), "musaed_answers": musaed_answers,
+            "escalated": escalated, "suggests": suggests, "gratitude": gratitude,
+            "thread": thread,
+        })
+
+    def best(cands, keyfn):
+        cands = list(cands)
+        return max(cands, key=keyfn) if cands else None
+
+    pick_suggest = best((r for r in records if r["suggests"] > 0),
+                        lambda r: (r["suggests"], r["musaed_answers"], r["gratitude"], r["n"]))
+    pick_long = best((r for r in records if not r["escalated"] and r["musaed_answers"] >= 2),
+                     lambda r: (r["n"], r["musaed_answers"], r["gratitude"]))
+    pick_esc = best((r for r in records if r["escalated"] and r["musaed_answers"] >= 1),
+                    lambda r: (r["musaed_answers"], r["n"]))
+    # avoid showing the same conversation twice
+    used = set()
+    out = []
+    for tag, title, sub, rec in [
+        ("suggest", "🏘️ يرشّح شقق ثانية", "بدل ما يصعّد — يقترح وحدة مناسبة للضيف", pick_suggest),
+        ("long", "💬 محادثة طويلة بدون تصعيد", "جاوب على كل شي بنفسه من البداية للنهاية", pick_long),
+        ("escalate", "🚨 محادثة بتصعيد", "تعامل بأدب ثم رفعها للفريق بالوقت الصح", pick_esc),
+    ]:
+        if rec and rec["cid"] not in used:
+            used.add(rec["cid"])
+            out.append({"tag": tag, "title": title, "sub": sub, "rec": rec})
+    return {"scanned": len(convos), "candidates": len(records), "buckets": out}
+
+def _msc_esc(s):
+    return _html.escape(str(s or ""))
+
+def _render_showcase_html(data):
+    css = """
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#ECE5D8;font-family:-apple-system,'Segoe UI',Tahoma,Arial,sans-serif;
+ color:#2b2622;direction:rtl;padding:24px 14px 60px}
+.wrap{max-width:760px;margin:0 auto}
+.hdr{text-align:center;margin:8px 0 28px}
+.hdr .brand{font-size:13px;letter-spacing:3px;color:#BF5B43;font-weight:700}
+.hdr h1{font-size:30px;font-weight:800;margin:6px 0 4px}
+.hdr p{color:#7a6f64;font-size:14px}
+.meta{text-align:center;color:#9a8e80;font-size:12px;margin-top:6px}
+.conv{background:#fff;border-radius:22px;padding:20px 18px;margin:0 0 26px;
+ box-shadow:0 8px 30px rgba(120,90,60,.10)}
+.conv .top{display:flex;align-items:center;gap:10px;border-bottom:1px solid #f0e9dd;
+ padding-bottom:12px;margin-bottom:14px}
+.conv .badge{font-size:13px;font-weight:800;color:#BF5B43}
+.conv .who{font-size:13px;color:#6b6157;margin-right:auto}
+.conv .sub{font-size:12px;color:#9a8e80;margin-bottom:14px}
+.msg{display:flex;margin:8px 0}
+.msg .b{max-width:78%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.55;
+ white-space:pre-wrap;word-break:break-word}
+.guest{justify-content:flex-start}
+.guest .b{background:#f3ece0;color:#3b342c;border-bottom-right-radius:5px}
+.host{justify-content:flex-end}
+.host .b{background:#BF5B43;color:#fff;border-bottom-left-radius:5px}
+.auto .b{background:#efe7d7;color:#8a7d6c;font-style:italic}
+.tm{font-size:10px;color:#b3a899;margin:2px 6px;align-self:flex-end}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;
+ background:#fff;color:#BF5B43;border:1px solid #e7c3b8;margin-bottom:3px}
+.analysis{background:#faf5ec;border-radius:14px;padding:12px 14px;margin-top:14px;
+ font-size:13px;color:#5d5346;line-height:1.7}
+.analysis b{color:#BF5B43}
+.empty{text-align:center;color:#9a8e80;padding:40px;background:#fff;border-radius:18px}
+"""
+    parts = ['<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">',
+             '<meta name="viewport" content="width=device-width,initial-scale=1">',
+             '<title>أفضل محادثات مساعد · عوجا</title><style>', css, '</style></head><body><div class="wrap">',
+             '<div class="hdr"><div class="brand">OUJA RESIDENCE</div>',
+             '<h1>أفضل محادثات مساعد 🤍</h1>',
+             '<p>محادثات حقيقية تعامل معها مساعد — موقّعة باسمه، مسحوبة مباشرة من Hostaway</p>',
+             '<div class="meta">فُحصت %d محادثة · %d محادثة مؤهّلة</div></div>'
+             % (data.get("scanned", 0), data.get("candidates", 0))]
+    if not data.get("buckets"):
+        parts.append('<div class="empty">ما لقيت محادثات مؤهّلة في آخر دفعة. جرّب زيادة العدد عبر ?n=200</div>')
+    for bk in data.get("buckets", []):
+        r = bk["rec"]
+        parts.append('<div class="conv"><div class="top"><span class="badge">%s</span>'
+                     '<span class="who">%s · %s</span></div>'
+                     % (_msc_esc(bk["title"]), _msc_esc(r["guest"]), _msc_esc(r["unit"])))
+        parts.append('<div class="sub">%s</div>' % _msc_esc(bk["sub"]))
+        for m in r["thread"]:
+            side = "guest" if m["inb"] else "host"
+            cls = side + (" auto" if (m.get("auto") and not m["inb"]) else "")
+            tag = ""
+            if (not m["inb"]) and m.get("musaed"):
+                tag = '<div><span class="tag">مساعد</span></div>'
+            elif (not m["inb"]) and m.get("auto"):
+                tag = '<div><span class="tag">رسالة تلقائية</span></div>'
+            parts.append('<div class="msg %s"><div>%s<div class="b">%s</div></div>'
+                         '<div class="tm">%s</div></div>'
+                         % (cls, tag, _msc_esc(m["body"]), _msc_esc(m.get("t", ""))))
+        # honest analysis line
+        notes = []
+        notes.append("ردّ مساعد بنفسه على <b>%d</b> رسالة." % r["musaed_answers"])
+        if bk["tag"] == "suggest":
+            notes.append("اقترح على الضيف <b>خيار/وحدة ثانية</b> بدل ما يصعّد الطلب — بالضبط مثل ما هو مدرّب.")
+        if bk["tag"] == "long":
+            notes.append("محادثة من <b>%d رسالة</b> خلّصها <b>بدون أي تصعيد</b>." % r["n"])
+        if bk["tag"] == "escalate":
+            notes.append("لما صار الموضوع يحتاج بشر، <b>رفعه للفريق</b> بأدب بدل ما يجاوب غلط.")
+        if r["gratitude"]:
+            notes.append("الضيف ختم بكلمة <b>شكر/امتنان</b> 🤍.")
+        parts.append('<div class="analysis">%s</div></div>' % " ".join(notes))
+    parts.append('</div></body></html>')
+    return "".join(parts)
+
+async def _handle_musaed_showcase(request):
+    token = request.query.get("token", "")
+    if not (DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN)):
+        return web.Response(status=403, text="forbidden")
+    try:
+        n = int(request.query.get("n", "120"))
+    except ValueError:
+        n = 120
+    n = max(20, min(n, 400))
+    refresh = request.query.get("refresh") in ("1", "true", "yes")
+    cached = _showcase_cache.get("data")
+    if (not refresh) and cached and (time.time() - _showcase_cache["ts"] < 1800):
+        data = cached
+    else:
+        data = await asyncio.to_thread(_analyze_musaed_showcase, n)
+        _showcase_cache["data"], _showcase_cache["ts"] = data, time.time()
+    return web.Response(text=_render_showcase_html(data), content_type="text/html")
+
 @tasks.loop(minutes=DASH_REFRESH_MIN)
 async def dashboard_cache_loop():
     """Pre-compute heavy analytics in the background so the dashboard serves instantly."""
@@ -17486,6 +17709,7 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
+        app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/api/overview", _api_overview)
         app.router.add_get("/api/revenue", _api_revenue)
         app.router.add_get("/api/pricing", _api_pricing)
