@@ -5125,6 +5125,7 @@ _REVIEW_AI_SYSTEM = (
     "{\n"
     '  "removability": "high" | "medium" | "low" | "none",\n'
     '  "removability_reason_ar": "one-paragraph Arabic explanation (or empty if positive)",\n'
+    '  "policy_reference": "the EXACT Airbnb Reviews Policy ground that applies + the help article, e.g. \\"Airbnb Reviews Policy — Biased reviews / content outside the host\'s control (airbnb.com/help/article/2673)\\". Empty if not removable or positive.",\n'
     '  "dispute_angle_ar": "Arabic note for the team — empty if positive",\n'
     '  "dispute_message_en": "polished English message to Airbnb support — empty if positive",\n'
     '  "public_response_ar": "Arabic public reply",\n'
@@ -5148,25 +5149,50 @@ _REVIEW_AI_SYSTEM = (
     "• Set removability per the rubric below.\n"
     "• is_positive = false.\n"
     "• Fill ALL fields including dispute message + public response.\n\n"
-    "REMOVABILITY RUBRIC (Airbnb policies as of 2024):\n"
-    "• HIGH = clear policy violation: extortion/threats, content unrelated to "
-    "the stay, discriminatory language, complaint about something out of host "
-    "control (airport delays, weather), or guest cancelled and still reviewed.\n"
-    "• MEDIUM = grey area: very brief content-less reviews, third-party "
-    "complaints, factual errors that can be evidenced, biased single-issue "
+    "AIRBNB REVIEWS POLICY — the canonical reference (cite this, do NOT invent "
+    "URLs). Airbnb's Review Policy lives at airbnb.com/help/article/2673. A review "
+    "may be removed when it:\n"
+    "  (a) is BIASED — written to extort/retaliate (guest threatened a bad review "
+    "for a refund/discount), or is a retaliatory/incentivised review;\n"
+    "  (b) contains IRRELEVANT content — not about the actual stay or the guest's "
+    "genuine experience (politics, the neighbourhood, an unrelated rant);\n"
+    "  (c) is about something OUTSIDE THE HOST'S CONTROL — circumstances the host "
+    "cannot reasonably influence (airport delays, weather, a city-wide power cut, "
+    "or shared/communal facilities the host does not operate);\n"
+    "  (d) violates Airbnb's CONTENT POLICY — discriminatory, threatening, profane, "
+    "or contains private/personal information;\n"
+    "  (e) is from a guest who CANCELLED before the stay, or a fraudulent booking.\n\n"
+    "REMOVABILITY RUBRIC (map the review to the grounds above):\n"
+    "• HIGH = clearly matches (a),(c),(d), or (e): extortion/threats, content "
+    "unrelated to the stay, discrimination/profanity, out-of-host-control factors, "
+    "or guest cancelled and still reviewed.\n"
+    "• MEDIUM = grey area under (a),(b), or (c): very brief content-less reviews, "
+    "third-party complaints, evidenceable factual errors, single-issue biased "
     "complaints.\n"
-    "• LOW = legitimate complaint about a real issue → cannot be removed, "
-    "respond publicly instead.\n\n"
+    "• LOW = legitimate complaint about a real issue inside the host's control "
+    "(cleanliness, AC, water heater, wifi, the code/entry, amenities) → CANNOT be "
+    "removed; respond publicly instead.\n\n"
+    "PARKING — IMPORTANT: Ouja does NOT control parking. Parking is shared/communal "
+    "and managed by the compound or building, not by us. So:\n"
+    "  • For removability: a complaint ONLY about parking availability is "
+    "OUTSIDE THE HOST'S CONTROL → lean MEDIUM/HIGH and cite ground (c).\n"
+    "  • In the public response: NEVER claim we fixed/added/resolved parking. "
+    "Instead acknowledge warmly and gently clarify that parking is managed by the "
+    "compound/building and offer that our guest team can advise on the best nearby "
+    "options. Do NOT promise a parking fix.\n\n"
     "DISPUTE MESSAGE (English) — HIGH/MEDIUM only:\n"
     "• Address Airbnb support directly, polite and concise.\n"
-    "• Cite the specific policy clause being violated.\n"
+    "• Quote the specific policy ground (a)-(e) being violated and reference "
+    "airbnb.com/help/article/2673.\n"
     "• Reference the review ID and listing if available.\n"
     "• Close: 'Thank you, Ouja Residence team.'\n\n"
     "NEGATIVE PUBLIC RESPONSE — AAA framework + Ritz-Carlton tone:\n"
     "  A1. ACKNOWLEDGE  — thank the guest by name, validate their experience.\n"
     "  A2. APOLOGIZE    — sincere apology for the specific pain point only if "
     "the complaint is legitimate; never grovel; never admit liability you don't have.\n"
-    "  A3. ACT          — state the concrete action taken or being taken.\n"
+    "  A3. ACT          — state that the issue HAS BEEN RESOLVED / addressed "
+    "(reassuring, past tense) so future guests are covered — EXCEPT for parking or "
+    "any out-of-host-control factor, where you do NOT claim a fix (see PARKING).\n"
     "• Tone: dignified, warm, ladies-and-gentlemen-serving-ladies-and-gentlemen. "
     "Never defensive, never blame the guest.\n"
     "• Length: 3–5 sentences total.\n"
@@ -6679,7 +6705,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
                 <input type="checkbox" id="rvShowEnglish" onchange="loadReviews()" style="cursor:pointer">
                 <span>ترجم للإنجليزي تلقائياً</span>
               </label>
-              <button class="btn primary sm" onclick="bulkAnalyzeReviews()" id="rvBulkBtn" title="حلل كل المراجعات الظاهرة دفعة وحدة">🤖 حلّل الكل (٢٥)</button>
+              <button class="btn primary sm" onclick="bulkAnalyzeReviews()" id="rvBulkBtn" title="حلل دفعة من المراجعات — السلبية أولاً (الحذف/الرد)">🤖 حلّل الكل (السلبية أولاً)</button>
             </div>
           </div>
         </div>
@@ -9502,31 +9528,44 @@ function _renderReviewCard(r){
   // AI analysis section
   if(r.ai){
     const rm = r.ai.removability || 'none';
-    // Removability box only relevant for negative reviews
-    if(!isPos && rm !== 'none'){
-      html += '<div style="background:var(--gold-tint);padding:10px 12px;border-radius:8px;margin-bottom:8px">'
-           +    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
-           +      '<span style="font-size:11.5px;font-weight:700">🤖 تحليل المساعد:</span>'
+    const removable = !isPos && (rm === 'high' || rm === 'medium');
+    const notRemovable = !isPos && (rm === 'low' || rm === 'none');
+    // ---- REMOVABLE: tell the owner WHY + WHAT to send Airbnb + the policy ----
+    if(removable){
+      html += '<div style="background:#ecfdf5;border:1px solid #10b981;padding:10px 12px;border-radius:8px;margin-bottom:8px">'
+           +    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
+           +      '<span style="font-size:11.5px;font-weight:700;color:#065f46">✅ يمكن طلب حذفها من Airbnb</span>'
            +      '<span class="pill '+(RV_REMOVE_PILL[rm]||'info')+'">'+RV_REMOVE_LABEL[rm]+'</span>'
            +    '</div>';
       if(r.ai.removability_reason_ar){
-        html += '<div style="font-size:11.5px;line-height:1.65;color:var(--text-2)">'+esc(r.ai.removability_reason_ar)+'</div>';
+        html += '<div style="font-size:11.5px;line-height:1.65;color:var(--text-2)"><b>ليش تنحذف:</b> '+esc(r.ai.removability_reason_ar)+'</div>';
+      }
+      if(r.ai.policy_reference){
+        html += '<div dir="ltr" style="font-size:11px;line-height:1.6;color:#065f46;margin-top:6px;background:var(--surface);padding:6px 9px;border-radius:6px;text-align:start"><b>📖 Airbnb Policy:</b> '+esc(r.ai.policy_reference)+'</div>';
       }
       html += '</div>';
-      // Dispute message — only for HIGH/MEDIUM negatives
+      // What to send Airbnb — open so it's obvious
       if(r.ai.dispute_angle_ar || r.ai.dispute_message_en){
-        html += '<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">📝 رسالة دفاع لـ Airbnb (English)</summary>'
+        html += '<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">📝 وش ترسل لـ Airbnb (انسخه وأرسله)</summary>'
              +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px">'
              +      (r.ai.dispute_angle_ar ? '<div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px"><b>زاوية الحجة:</b> '+esc(r.ai.dispute_angle_ar)+'</div>' : '')
              +      (r.ai.dispute_message_en ? '<div dir="ltr" style="font-size:12.5px;line-height:1.6;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.dispute_message_en)+'</div>' : '')
-             +      '<button class="btn ghost xs" style="margin-top:8px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.dispute_message_en||'')+')">📋 نسخ</button>'
+             +      '<button class="btn primary xs" style="margin-top:8px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.dispute_message_en||'')+')">📋 انسخ رسالة Airbnb</button>'
              +    '</div></details>';
       }
     }
-    // Public response (open by default for positives — that's the main thing users need)
+    // ---- NOT REMOVABLE: the reply scenario — reply publicly (AAA) ----
+    if(notRemovable){
+      html += '<div style="background:#fef2f2;border:1px solid #ef4444;padding:8px 12px;border-radius:8px;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+           +    '<span style="font-size:11.5px;font-weight:700;color:#991b1b">❌ ما تنحذف حسب سياسة Airbnb — الأفضل ترد عليها بأسلوب AAA</span>'
+           + '</div>';
+    }
+    // Public response — open for positives and for non-removable negatives (the reply)
     if(r.ai.public_response_ar || r.ai.public_response_en){
-      const replyTitle = isPos ? '💚 رد شكر شخصي' : '🤝 رد عام بأسلوب AAA';
-      html += '<details open style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">'+replyTitle+'</summary>'
+      const respOpen = isPos || notRemovable;
+      const replyTitle = isPos ? '💚 رد شكر شخصي'
+                       : (notRemovable ? '✍️ الرد المقترح (AAA) — المشكلة تم حلها' : '🤝 رد عام بأسلوب AAA (احتياطي)');
+      html += '<details '+(respOpen?'open':'')+' style="margin-bottom:6px"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gold);padding:6px 0">'+replyTitle+'</summary>'
            +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px;display:flex;flex-direction:column;gap:10px">';
       if(r.ai.public_response_ar){
         html += '<div><div style="font-size:11px;color:var(--mut);margin-bottom:4px;font-weight:600">🇸🇦 عربي</div>'
@@ -9549,7 +9588,13 @@ function _renderReviewCard(r){
          + '</div>';
   }
   // Action row
+  const _rmv = (r.ai && r.ai.removability) || 'none';
+  const _notRemovable = !isPos && (_rmv === 'low' || _rmv === 'none');
+  const _replyTxt = r.ai ? (r.ai.public_response_ar || r.ai.public_response_en || '') : '';
   html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
+       +    ((r.ai && _replyTxt && (_notRemovable || isPos))
+            ? '<button class="btn primary xs" onclick="_rvCopy(this, '+JSON.stringify(_replyTxt)+')">✍️ انسخ الرد وأرسله</button>'
+            : '')
        +    (r.state.fixed
             ? '<button class="btn ghost xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">↩ ارجع كغير محلولة</button>'
             : '<button class="btn green xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">✓ علّم محلولة</button>')
@@ -9739,21 +9784,21 @@ async function bulkAnalyzeReviews(){
   const btn = document.getElementById('rvBulkBtn');
   if(btn){ btn.disabled = true; btn.textContent = '⏳ يحلل…'; }
   try {
-    const u  = (document.getElementById('rvFilterUrg')||{}).value;
     const s  = (document.getElementById('rvFilterSent')||{}).value;
-    const payload = {limit: 25};
+    const payload = {limit: 50};   // negatives are analysed first server-side
     if(s) payload.sentiment = s;
     if(_rvCurrentDays) payload.days = _rvCurrentDays;
     const r = await post('/api/reviews/bulk-analyze', payload);
     if(r.ok){
       toast(r.message || ('✓ بدأ تحليل ' + (r.queued||0) + ' مراجعة'));
-      // Reload after a short delay so the user can see results trickle in
-      setTimeout(loadReviews, 3500);
-      setTimeout(loadReviews, 9000);
-      setTimeout(loadReviews, 18000);
+      // Reload as results trickle in (analysis runs in the background)
+      setTimeout(loadReviews, 4000);
+      setTimeout(loadReviews, 12000);
+      setTimeout(loadReviews, 25000);
+      setTimeout(loadReviews, 45000);
     } else toast(r.error || 'خطأ');
   } finally {
-    if(btn){ btn.disabled = false; btn.textContent = '🤖 حلّل الكل (٢٥)'; }
+    if(btn){ btn.disabled = false; btn.textContent = '🤖 حلّل الكل (السلبية أولاً)'; }
   }
 }
 
@@ -13157,6 +13202,7 @@ def _review_view(rev_id, rev):
         "ai": {
             "removability":           ai.get("removability"),
             "removability_reason_ar": ai.get("removability_reason_ar"),
+            "policy_reference":       ai.get("policy_reference"),
             "dispute_angle_ar":       ai.get("dispute_angle_ar"),
             "dispute_message_en":     ai.get("dispute_message_en"),
             "public_response_ar":     ai.get("public_response_ar"),
@@ -13451,10 +13497,11 @@ async def _api_reviews_bulk_analyze(request):
         limit = int(b.get("limit") or 25)
     except Exception:
         limit = 25
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 200))
 
-    # Build the work list
-    targets = []
+    # Build the work list (collect all candidates, then prioritise negatives —
+    # those are the ones that need the removability + reply analysis).
+    candidates = []
     for rid, rev in _reviews.items():
         if rid in _review_ai_cache:
             continue
@@ -13466,9 +13513,10 @@ async def _api_reviews_bulk_analyze(request):
         is_pos = rating >= 4
         if sentiment == "positive" and not is_pos: continue
         if sentiment == "negative" and is_pos: continue
-        targets.append((rid, rev))
-        if len(targets) >= limit:
-            break
+        candidates.append((rid, rev, rating, is_pos))
+    # negatives first, then lowest rating first, then newest first
+    candidates.sort(key=lambda c: (c[3], c[2], ), )
+    targets = [(rid, rev) for rid, rev, _r, _p in candidates[:limit]]
 
     if not targets:
         return _json({"ok": True, "queued": 0, "message": "ما فيه مراجعات تحتاج تحليل"})
