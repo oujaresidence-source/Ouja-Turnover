@@ -5997,6 +5997,94 @@ def _exp_poll_sheet():
         log_event("ops", f"مصاريف الميدان · استورد {created} مصروف جديد من الشيت")
     return created
 
+def _exp_fetch_hostaway():
+    """Fetch existing expenses already in Hostaway (paginated). Returns
+    (list, ok, error). 'ok' is False if the endpoint doesn't respond as expected."""
+    items, offset, page = [], 0, 100
+    try:
+        while True:
+            data = api_get(EXPENSE_HOSTAWAY_PATH, params={"limit": page, "offset": offset})
+            batch = (data or {}).get("result")
+            if batch is None and isinstance(data, list):
+                batch = data
+            batch = batch or []
+            items.extend(batch)
+            if len(batch) < page:
+                break
+            offset += page
+            if offset > 5000:
+                break
+        return items, True, None
+    except Exception as e:
+        return items, False, str(e)[:300]
+
+def _exp_ha_key(lid, amount, date_str):
+    try:
+        return (int(lid), round(abs(float(amount)), 2), str(date_str or "")[:10])
+    except Exception:
+        return None
+
+def _exp_reconcile(apply=False):
+    """Pull every sheet row, compare against expenses already in Hostaway, and
+    report (and optionally post) the clean ones that are missing from Hostaway.
+    Held/incomplete/unmatched expenses are never auto-posted — they stay in the
+    review queue. Respects EXPENSE_POST_DRYRUN. Returns a summary dict."""
+    pulled = _exp_poll_sheet()
+    ha_items, ha_ok, ha_err = _exp_fetch_hostaway()
+    ha_keys = set()
+    for x in ha_items:
+        lid = x.get("listingMapId") or x.get("listingId") or x.get("listing_id")
+        k = _exp_ha_key(lid, x.get("amount"), x.get("expenseDate") or x.get("date"))
+        if k:
+            ha_keys.add(k)
+
+    total = len(_expenses)
+    counts = {"held": 0, "already_ours": 0, "already_in_hostaway": 0,
+              "missing": 0, "posted_now": 0, "post_failed": 0, "unmatched": 0}
+    missing_preview = []
+    for e in _expenses.values():
+        st = e.get("status")
+        if st == "discarded":
+            continue
+        # already truly posted by us (real Hostaway ref, not a DRYRUN placeholder)
+        if e.get("hostaway_ref") and e["hostaway_ref"] not in ("DRYRUN", "existing", "ok", None):
+            counts["already_ours"] += 1
+            continue
+        # only clean/ready expenses are eligible to post; held ones wait for review
+        ready = (st == "ready") or (st == "posted" and e.get("hostaway_ref") in ("DRYRUN", "ok", "existing", None))
+        if not ready:
+            counts["held"] += 1
+            continue
+        lid = e.get("listing_id")
+        if lid is None:
+            counts["unmatched"] += 1
+            continue
+        k = _exp_ha_key(lid, e.get("amount"), e.get("expense_date"))
+        if ha_ok and k and k in ha_keys:
+            # Hostaway already has an equivalent expense → mark as reconciled, don't repost
+            e["status"] = "posted"
+            if not e.get("hostaway_ref") or e["hostaway_ref"] == "DRYRUN":
+                e["hostaway_ref"] = "existing"
+            counts["already_in_hostaway"] += 1
+            continue
+        # missing from Hostaway
+        counts["missing"] += 1
+        missing_preview.append({"ref": e.get("ref"), "apartment": e.get("apartment"),
+                                "amount": e.get("amount"), "date": e.get("expense_date"),
+                                "type": e.get("maintenance_type")})
+        if apply:
+            ok = _exp_post_to_hostaway(e)
+            counts["posted_now" if ok else "post_failed"] += 1
+    persist_state()
+    summary = {"pulled_from_sheet": pulled, "total_expenses": total,
+               "hostaway_fetch_ok": ha_ok, "hostaway_error": ha_err,
+               "hostaway_existing": len(ha_keys), "dryrun": EXPENSE_POST_DRYRUN,
+               "applied": bool(apply), **counts,
+               "missing_sample": missing_preview[:50]}
+    log_event("ops", f"مطابقة المصاريف · سحب {pulled} · ناقص {counts['missing']} · "
+                     f"{'رُحّل ' + str(counts['posted_now']) if apply else 'معاينة'}")
+    return summary
+
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
@@ -7374,6 +7462,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub">مصاريف الميدان من النموذج → التحقق → Hostaway</div>
           </div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="expReconcile()">🔄 مطابقة Hostaway</button>
             <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
             <button class="btn ghost sm" onclick="loadExpenses()">↻</button>
           </div>
@@ -10001,6 +10090,35 @@ async function expReloadList(){
   _renderExpenses();
 }
 async function expRefresh(){ D.expList=null; await loadExpenses(); }
+async function expReconcile(){
+  var NL=String.fromCharCode(10);
+  if(!confirm(L==='ar'?'نسحب كل الشيت ونقارنه مع Hostaway؟':'Pull the whole sheet and compare with Hostaway?')) return;
+  toast(L==='ar'?'⏳ نسحب ونقارن…':'⏳ Pulling & comparing…');
+  var s; try{ s=await post('/api/expenses/reconcile',{apply:false}); }catch(e){ toast('⚠ '+e); return; }
+  var msg=(L==='ar'
+    ? ('سحبنا '+s.pulled_from_sheet+' صف من الشيت · إجمالي المصاريف '+s.total_expenses+NL
+      +'موجودة بـHostaway: '+s.already_in_hostaway+' · ناقصة: '+s.missing+NL
+      +'بانتظار المراجعة: '+s.held+' · غير مطابقة شقة: '+s.unmatched)
+    : ('Pulled '+s.pulled_from_sheet+' rows · total '+s.total_expenses+NL
+      +'In Hostaway: '+s.already_in_hostaway+' · Missing: '+s.missing+NL
+      +'Held: '+s.held+' · Unmatched: '+s.unmatched));
+  if(!s.hostaway_fetch_ok){
+    msg += NL+NL+(L==='ar'?'⚠ تعذّر قراءة مصاريف Hostaway: ':'⚠ Could not read Hostaway expenses: ')+(s.hostaway_error||'');
+  }
+  if(s.missing>0){
+    var ask=msg+NL+NL+(L==='ar'
+      ? ('ترحيل الـ'+s.missing+' الناقصة لـHostaway الآن؟'+(s.dryrun?' (وضع التجربة DRYRUN مفعّل — ما راح يكتب فعلياً)':''))
+      : ('Post the '+s.missing+' missing to Hostaway now?'+(s.dryrun?' (DRYRUN on — nothing actually written)':'')));
+    if(confirm(ask)){
+      toast(L==='ar'?'⏳ نرحّل الناقص…':'⏳ Posting missing…');
+      var r=await post('/api/expenses/reconcile',{apply:true});
+      toast((L==='ar'?'تم · رُحّل ':'Done · posted ')+r.posted_now+(r.post_failed?(' · '+(L==='ar'?'فشل ':'failed ')+r.post_failed):''));
+    }
+  } else {
+    alert(msg);
+  }
+  await expRefresh();
+}
 
 function expSetPeriod(p){
   _expPeriod=p;
@@ -16455,6 +16573,16 @@ async def _api_expenses_export(request):
     return web.Response(body=body, content_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=ouja-expenses.csv"})
 
+async def _api_expenses_reconcile(request):
+    """Pull all sheet rows, compare to Hostaway, report (and optionally post) the
+    clean ones missing from Hostaway. POST {apply:true} to actually post."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    apply = bool(b.get("apply")) or request.query.get("apply") in ("1", "true", "yes")
+    summary = await asyncio.to_thread(_exp_reconcile, apply)
+    return _json(summary)
+
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
     if not _dash_auth(request):
@@ -17981,6 +18109,7 @@ async def start_web_server():
         app.router.add_get("/api/expenses/settings", _api_expenses_settings_get)
         app.router.add_post("/api/expenses/settings", _api_expenses_settings_save)
         app.router.add_get("/api/expenses/export.csv", _api_expenses_export)
+        app.router.add_post("/api/expenses/reconcile", _api_expenses_reconcile)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
