@@ -16230,9 +16230,12 @@ async def _api_expenses_delete(request):
     return _json({"ok": True, "removed_hostaway": removed_remote})
 
 async def _api_expenses_options(request):
-    """Drives the dashboard dropdowns AND the Google-Form sync: current live
-    apartment names + the configurable lists."""
-    if not _dash_auth(request):
+    """Drives the dashboard dropdowns AND the public expense form: current live
+    apartment names + the configurable lists. Auth = dashboard token OR the
+    field-form ingest secret (so staff can load the form without the dashboard token)."""
+    secret = request.headers.get("X-Ingest-Secret") or request.query.get("key") or request.query.get("secret") or ""
+    ok_secret = bool(EXPENSE_INGEST_SECRET) and hmac.compare_digest(secret, EXPENSE_INGEST_SECRET)
+    if not ok_secret and not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     try:
         listings = await asyncio.to_thread(get_listings_map)
