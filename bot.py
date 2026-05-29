@@ -6120,6 +6120,45 @@ def _exp_sheet_probe():
         diag["error"] = "no data rows found"
     return diag
 
+def _exp_hostaway_probe():
+    """Diagnostic: try the configured expenses path AND a few likely alternates,
+    reporting status/shape/count so we can confirm the right Hostaway endpoint."""
+    candidates = [EXPENSE_HOSTAWAY_PATH, "/expenses", "/expenses/list",
+                  "/listingExpenses", "/financeExpenses", "/financialReporting/expenses"]
+    seen, tried = set(), []
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        entry = {"path": path, "ok": None, "raw_type": None, "keys": [],
+                 "count": None, "sample": None, "error": None}
+        try:
+            data = api_get(path, params={"limit": 5})
+            entry["ok"] = True
+            entry["raw_type"] = type(data).__name__
+            if isinstance(data, dict):
+                entry["keys"] = list(data.keys())[:20]
+                res = data.get("result")
+                if isinstance(res, list):
+                    entry["count"] = len(res)
+                    if res:
+                        entry["sample"] = str(res[0])[:600]
+                else:
+                    entry["count"] = "result=" + type(res).__name__
+                    entry["sample"] = str(data)[:600]
+            elif isinstance(data, list):
+                entry["count"] = len(data)
+                if data:
+                    entry["sample"] = str(data[0])[:600]
+        except Exception as e:
+            entry["ok"] = False
+            entry["error"] = str(e)[:250]
+        tried.append(entry)
+        # stop early if we clearly found expenses
+        if entry["ok"] and isinstance(entry["count"], int) and entry["count"] > 0:
+            break
+    return {"configured_path": EXPENSE_HOSTAWAY_PATH, "tried": tried}
+
 def _exp_fetch_hostaway(max_pages=10):
     """Fetch existing expenses already in Hostaway (paginated, capped). Returns
     (list, ok, error). 'ok' is False if the endpoint doesn't respond as expected."""
@@ -6556,6 +6595,24 @@ html[dir="rtl"] select{background-position:14px 14px,9px 14px}
 a{color:inherit;text-decoration:none;cursor:pointer}
 .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-0.02em}
 
+/* ============== A11Y: keyboard focus + reduced motion ============== */
+/* Outline (not box-shadow) so the ring never clips inside overflow:hidden cards.
+   :focus-visible keeps mouse clicks ring-free while giving keyboard users a clear
+   target. Inputs keep their own --gold focus ring defined above. */
+a:focus-visible,button:focus-visible,.icbtn:focus-visible,.side-nav .item:focus-visible,.tabsfilter button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:var(--r-xs)}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+  .btn:active:not(:disabled),.icbtn:active{transform:none!important}
+}
+/* iOS zoom-jumps the page when focusing an input under 16px. Force 16px at
+   touch widths so tapping a field never triggers the zoom (beats inline sizes). */
+@media (max-width:1023px){
+  input,textarea,select{font-size:16px!important}
+}
+/* Emil: pressable elements scale down a hair so the UI feels alive under the finger. */
+.btn:active:not(:disabled){transform:scale(.97)}
+.icbtn:active{transform:scale(.94)}
+
 /* ============== LOGIN ============== */
 #login{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;background:var(--bg);z-index:1000}
 #login .brand-lg{font-size:34px;font-weight:700;color:var(--gold)}
@@ -6956,9 +7013,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
     <header class="mhead">
       <div class="mhead-brand"><div class="logo">ع</div><div class="name" id="mhead_title">الرئيسية</div></div>
       <div class="mhead-tools">
-        <button class="icbtn" onclick="toggleTheme()" id="themeBtn">◐</button>
-        <button class="icbtn" onclick="toggleLang()" id="langBtn">EN</button>
-        <button class="icbtn" onclick="refresh()" id="refreshBtnM">↻</button>
+        <button class="icbtn" onclick="toggleTheme()" id="themeBtn" aria-label="Toggle theme / تبديل المظهر" title="Theme">◐</button>
+        <button class="icbtn" onclick="toggleLang()" id="langBtn" aria-label="Switch language / تغيير اللغة" title="Language">EN</button>
+        <button class="icbtn" onclick="refresh()" id="refreshBtnM" aria-label="Refresh data / تحديث" title="Refresh">↻</button>
       </div>
     </header>
 
@@ -7598,6 +7655,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="expSheetTest()">🔍 فحص الشيت</button>
+            <button class="btn ghost sm" onclick="expHostawayTest()">🔍 فحص Hostaway</button>
             <button class="btn ghost sm" onclick="expReconcile()">🔄 مطابقة Hostaway</button>
             <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
             <button class="btn ghost sm" onclick="loadExpenses()">↻</button>
@@ -7802,10 +7860,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <div class="side-foot">
         <div class="side-status"><span class="dot" id="sideDot"></span><span id="sideStatus">…</span></div>
         <div class="side-tools">
-          <button class="icbtn" onclick="restoreAllHelp();showWelcome()" title="استعرض الشرح" style="background:var(--gold-tint);color:var(--gold);font-weight:700">💡</button>
-          <button class="icbtn" onclick="toggleTheme()" title="theme">◐</button>
-          <button class="icbtn" onclick="toggleLang()" id="sLangBtn">EN</button>
-          <button class="icbtn" onclick="logout()" title="logout">⎋</button>
+          <button class="icbtn" onclick="restoreAllHelp();showWelcome()" aria-label="Show help / استعرض الشرح" title="استعرض الشرح" style="background:var(--gold-tint);color:var(--gold);font-weight:700">💡</button>
+          <button class="icbtn" onclick="toggleTheme()" aria-label="Toggle theme / تبديل المظهر" title="theme">◐</button>
+          <button class="icbtn" onclick="toggleLang()" id="sLangBtn" aria-label="Switch language / تغيير اللغة">EN</button>
+          <button class="icbtn" onclick="logout()" aria-label="Log out / تسجيل الخروج" title="logout">⎋</button>
         </div>
       </div>
     </aside>
@@ -7822,7 +7880,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="drawer-title" id="drwTitle">—</div>
         <div class="drawer-sub" id="drwSub"></div>
       </div>
-      <button class="icbtn" onclick="closeDrawer()">✕</button>
+      <button class="icbtn" onclick="closeDrawer()" aria-label="Close / إغلاق" title="Close">✕</button>
     </div>
     <div class="drawer-body" id="drwBody"></div>
     <div class="drawer-foot" id="drwFoot" style="display:none"></div>
@@ -8704,14 +8762,14 @@ function buildSideNav(){
   el.innerHTML = NAV.filter(function(n){ return !(n.adminOnly && !isAdmin) })
     .map(function(n){
       const c = badgeCount(n.badge);
-      return '<a class="item'+(view===n.id?' on':'')+'" onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
+      return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
     }).join('');
 }
 function buildBottomNav(){
   const el = document.getElementById('bottomNav'); if(!el) return;
   el.innerHTML = MNAV.map(function(n){
     const c = badgeCount(n.badge);
-    return '<button class="bn'+(view===n.id?' on':'')+'" onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</button>';
+    return '<button class="bn'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</button>';
   }).join('');
 }
 function buildMoreNav(){
@@ -9543,6 +9601,12 @@ function _ensureQuoteOv(){
   ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9996;padding:18px;overflow-y:auto';
   ov.innerHTML = '<div id="quoteEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
   document.body.appendChild(ov);
+  // Click the dark backdrop (not the card) to dismiss — matches the drawer's behaviour.
+  ov.addEventListener('click', function(e){ if(e.target===ov) closeQuote(); });
+  // Esc closes the editor (added once, since _ensureQuoteOv only builds the overlay once).
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Escape' && ov.style.display!=='none') closeQuote();
+  });
   return ov;
 }
 function closeQuote(){ const ov=document.getElementById('quoteOverlay'); if(ov) ov.style.display='none'; }
@@ -9562,6 +9626,18 @@ async function openQuoteEditor(qid){
   _qDraft = q;
   _renderQuoteEditor();
   document.getElementById('quoteOverlay').style.display = 'block';
+  // Emil: modal scales in from center (modals keep center origin) with a fade.
+  var _reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var _b = document.getElementById('quoteEditorBody');
+  if(_b && !_reduce){
+    _b.style.transition='none'; _b.style.transform='scale(.97)'; _b.style.opacity='0';
+    requestAnimationFrame(function(){
+      _b.style.transition='transform .22s cubic-bezier(0.23,1,0.32,1),opacity .2s ease';
+      _b.style.transform='scale(1)'; _b.style.opacity='1';
+    });
+  }
+  // New quote → drop the cursor straight into the client field.
+  if(!qid){ setTimeout(function(){ var f=document.getElementById('qF_client_name'); if(f) f.focus(); }, 60); }
 }
 
 function _renderQuoteEditor(){
@@ -9584,7 +9660,7 @@ function _renderQuoteEditor(){
     + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">رقم العرض</label>'
-    +     '<input id="qF_number" value="'+esc(q.number||'')+'" placeholder="OJ-202605-001" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
+    +     '<input id="qF_number" value="'+esc(q.number||'')+'" placeholder="يُنشأ تلقائيًا" title="اتركه فاضي ويتولّد رقم تلقائي عند الحفظ" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">التاريخ</label>'
     +     '<input id="qF_date" type="date" value="'+esc(q.date||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">العميل *</label>'
@@ -9619,7 +9695,7 @@ function _renderQuoteEditor(){
     +   '<button onclick="closeQuote()" class="btn ghost sm" style="flex:1">إلغاء</button>'
     +   (q.id ? '<button onclick="deleteQuote(&#39;'+esc(q.id)+'&#39;)" class="btn danger sm" style="padding:0 14px">🗑 حذف</button>' : '')
     +   '<button onclick="printQuote()" class="btn ghost sm" style="flex:1">🖨 طباعة</button>'
-    +   '<button onclick="saveQuote()" class="btn primary sm" style="flex:2">💾 احفظ</button>'
+    +   '<button id="qSaveBtn" onclick="saveQuote()" class="btn primary sm" style="flex:2">💾 احفظ</button>'
     + '</div>';
   document.getElementById('quoteEditorBody').innerHTML = html;
   _qRecalc();
@@ -9656,10 +9732,14 @@ async function saveQuote(){
     vat_rate: parseFloat(v('qF_vat_rate') || 15),
     vat_on: ck('qF_vat_on'),
   };
-  if(!payload.client_name){ toast('اكتب اسم العميل'); return; }
-  const r = await post('/api/quotes/save', payload);
-  if(r.ok){ toast('💾 حُفظ'); _qDraft = r.quote; closeQuote(); loadQuotes(); }
-  else toast(r.error || 'خطأ');
+  if(!payload.client_name){ toast('اكتب اسم العميل'); var f=document.getElementById('qF_client_name'); if(f) f.focus(); return; }
+  var btn=document.getElementById('qSaveBtn'); var old=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='… جاري الحفظ'; }
+  try{
+    const r = await post('/api/quotes/save', payload);
+    if(r.ok){ toast('💾 حُفظ'); _qDraft = r.quote; closeQuote(); loadQuotes(); }
+    else { toast(r.error || 'خطأ'); if(btn){ btn.disabled=false; btn.innerHTML=old; } }
+  }catch(e){ toast('خطأ بالحفظ'); if(btn){ btn.disabled=false; btn.innerHTML=old; } }
 }
 async function deleteQuote(qid){
   if(!confirm('حذف عرض السعر؟')) return;
@@ -10241,6 +10321,18 @@ async function expSheetTest(){
   }
   if(d.sample){ m+=(L==='ar'?'مثال أول صف → شقة: ':'first row → apt: ')+(d.sample.apartment||'—')+' · '+(d.sample.amount||'—')+' · '+(d.sample.date||'—')+NL; }
   if(d.error){ m+=NL+(L==='ar'?'⚠ المشكلة: ':'⚠ problem: ')+d.error; }
+  alert(m);
+}
+async function expHostawayTest(){
+  var NL=String.fromCharCode(10);
+  toast(L==='ar'?'⏳ نفحص Hostaway…':'⏳ Testing Hostaway…');
+  var d; try{ d=await api('/api/expenses/hostaway-debug'); }catch(e){ alert('⚠ '+e); return; }
+  var m=(L==='ar'?'🔍 فحص نقطة مصاريف Hostaway':'🔍 Hostaway expenses endpoint test')+NL+NL;
+  (d.tried||[]).forEach(function(t){
+    m+= t.path+'  →  '+(t.ok? ((L==='ar'?'نجح':'ok')+', '+(L==='ar'?'عدد=':'count=')+t.count) : ((L==='ar'?'فشل: ':'fail: ')+(t.error||'')))+NL;
+    if(t.keys&&t.keys.length){ m+='   keys: '+t.keys.join(', ')+NL; }
+    if(t.sample){ m+='   sample: '+String(t.sample).slice(0,180)+NL; }
+  });
   alert(m);
 }
 async function expReconcile(){
@@ -16759,6 +16851,13 @@ async def _api_expenses_sheet_debug(request):
     diag = await asyncio.to_thread(_exp_sheet_probe)
     return _json(diag)
 
+async def _api_expenses_hostaway_debug(request):
+    """Probe Hostaway expense endpoints so we can confirm the right path/shape."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    diag = await asyncio.to_thread(_exp_hostaway_probe)
+    return _json(diag)
+
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
     if not _dash_auth(request):
@@ -16961,6 +17060,11 @@ def _pmo_owner_html(p):
     cur = p.get("milestone_index", 0)
     next_step = p.get("next_step", "")
 
+    # Rich WhatsApp/social preview when the client opens the link (they get it via WhatsApp).
+    og_desc = f"نسبة الإنجاز {overall_txt}"
+    if ho_ar:
+        og_desc += f" · التسليم {ho_ar}"
+
     def lbl(ar, en):
         return f"<span data-ar=\"{e(ar)}\" data-en=\"{e(en)}\">{e(ar)}</span>"
 
@@ -16998,13 +17102,13 @@ def _pmo_owner_html(p):
         rooms_html.append(
             f"<div class='room'><div class='room-head'><div class='room-name'>{e(rm)}</div>"
             f"<div class='room-meta'>{e(str(done_n))}/{e(str(len(rt)))} · {rp_txt}</div></div>"
-            f"<div class='room-bar'><div style='width:{0 if rp is None else rp}%'></div></div>"
+            f"<div class='room-bar'><div class='barfill' style='--w:{0 if rp is None else rp}%'></div></div>"
             + "".join(rows) + "</div>")
     rooms_block = "".join(rooms_html) or f"<div class='empty'>{lbl('ما فيه مهام بعد','No tasks yet')}</div>"
 
     next_block = ""
     if next_step:
-        next_block = (f"<div class='card next'><div class='card-t'>{lbl('الخطوة الجاية','Next step')}</div>"
+        next_block = (f"<div class='card next rise d2'><div class='card-t'>{lbl('الخطوة الجاية','Next step')}</div>"
                       f"<div class='next-txt'>{e(next_step)}</div></div>")
 
     dl_html = ""
@@ -17014,62 +17118,109 @@ def _pmo_owner_html(p):
     ho_html = (f"<span data-ar=\"{e(ho_ar)}\" data-en=\"{e(ho_en)}\">{e(ho_ar)}</span>" if ho_ar else "")
 
     return f"""<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{e(unit_name)} — Ouja</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>{e(unit_name)} — Ouja عوجا</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#0a0e16">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{e(unit_name)} · Ouja عوجا">
+<meta property="og:description" content="{e(og_desc)}">
+<meta name="twitter:card" content="summary">
 <style>
-*{{box-sizing:border-box}}
-body{{margin:0;font-family:system-ui,'Segoe UI',Tahoma,sans-serif;background:#0b0f17;color:#e5e7eb;line-height:1.6}}
-.wrap{{max-width:680px;margin:0 auto;padding:18px 16px 60px}}
-.topbar{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}}
-.brand{{font-weight:800;letter-spacing:.5px;color:#c9a24b}}
-.langbtn{{background:#1a2230;color:#e5e7eb;border:1px solid #2b3650;border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}}
-.hero{{background:linear-gradient(135deg,#121a2b,#0d1320);border:1px solid #1f2a3f;border-radius:18px;padding:20px;margin-bottom:16px}}
-.unit{{font-size:22px;font-weight:800;margin:0 0 4px}}
-.sub{{color:#9ca3af;font-size:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}}
-.days{{background:#16331f;color:#4ade80;border-radius:999px;padding:2px 10px;font-size:12px}}
-.days.over{{background:#3a1414;color:#f87171}}
-.pct{{font-size:40px;font-weight:800;margin:14px 0 6px;color:#fff}}
-.bar{{height:12px;border-radius:999px;background:#1f2a3f;overflow:hidden}}
-.bar>div{{height:100%;background:linear-gradient(90deg,#c9a24b,#e8c977);border-radius:999px;transition:width .4s}}
-.card{{background:#0f1623;border:1px solid #1f2a3f;border-radius:16px;padding:16px;margin-bottom:14px}}
-.card-t{{font-weight:700;margin-bottom:10px;color:#cbd5e1}}
-.next-txt{{color:#e5e7eb}}
-.timeline{{display:flex;flex-direction:column;gap:0;position:relative}}
-.ms{{display:flex;align-items:flex-start;gap:10px;padding:6px 0;position:relative}}
-.ms-dot{{width:24px;height:24px;border-radius:50%;flex:0 0 24px;display:flex;align-items:center;justify-content:center;font-size:12px;background:#1f2a3f;color:#6b7280;border:2px solid #2b3650}}
-.ms.done .ms-dot{{background:#16331f;color:#4ade80;border-color:#16a34a}}
-.ms.cur .ms-dot{{background:#1e293b;color:#c9a24b;border-color:#c9a24b}}
-.ms-lbl{{font-size:14px;color:#cbd5e1;padding-top:2px}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+:root{{
+  --gold:#c9a24b;--gold-2:#e8c977;
+  --bg:#0a0e16;--surface:#0f1623;--surface-2:#0b121e;
+  --line:#1f2a3f;--line-2:#18222f;
+  --text:#e9edf4;--text-2:#aeb6c4;--text-3:#6b7585;
+  --green:#4ade80;--red:#f87171;
+  --ease:cubic-bezier(0.23,1,0.32,1);
+}}
+html{{-webkit-text-size-adjust:100%}}
+body{{font-family:'IBM Plex Sans Arabic',system-ui,'Segoe UI',Tahoma,sans-serif;
+  background:radial-gradient(1100px 560px at 50% -8%,rgba(201,162,75,.10),transparent 62%),var(--bg);
+  background-attachment:fixed;color:var(--text);line-height:1.6;min-height:100vh;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}}
+.wrap{{max-width:680px;margin:0 auto;padding:22px 16px 64px}}
+
+/* Entrance: progressive-enhancement via @starting-style — unsupported browsers
+   simply show the final state, so content is never hidden behind JS. */
+.rise{{transition:opacity .6s var(--ease),transform .6s var(--ease)}}
+@starting-style{{.rise{{opacity:0;transform:translateY(16px)}}}}
+.d1{{transition-delay:.04s}}.d2{{transition-delay:.11s}}.d3{{transition-delay:.18s}}.d4{{transition-delay:.25s}}
+
+.topbar{{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}}
+.brand{{font-weight:800;letter-spacing:.4px;font-size:15px;background:linear-gradient(135deg,var(--gold),var(--gold-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}}
+.langbtn{{background:rgba(255,255,255,.04);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:7px 16px;font-size:13px;cursor:pointer;font-family:inherit;transition:transform .16s var(--ease),background .2s,border-color .2s}}
+.langbtn:hover{{border-color:var(--gold);background:rgba(201,162,75,.08)}}
+.langbtn:active{{transform:scale(.96)}}
+
+.hero{{position:relative;overflow:hidden;background:linear-gradient(135deg,#141d30,#0c1220);border:1px solid var(--line);border-radius:22px;padding:24px;margin-bottom:16px}}
+.hero::before{{content:'';position:absolute;inset:0;background:radial-gradient(420px 220px at 100% 0,rgba(201,162,75,.13),transparent 70%);pointer-events:none}}
+.unit{{font-size:24px;font-weight:800;letter-spacing:-.3px;margin-bottom:6px}}
+.sub{{color:var(--text-2);font-size:13.5px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+.days{{background:rgba(74,222,128,.12);color:var(--green);border:1px solid rgba(74,222,128,.25);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600}}
+.days.over{{background:rgba(248,113,113,.12);color:var(--red);border-color:rgba(248,113,113,.25)}}
+.pct{{font-size:46px;font-weight:800;letter-spacing:-1px;color:#fff;margin:18px 0 8px;font-variant-numeric:tabular-nums}}
+.bar{{height:12px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden}}
+.barfill{{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),var(--gold-2));width:var(--w);transition:width 1.1s var(--ease) .15s}}
+@starting-style{{.barfill{{width:0}}}}
+.lbl-sm{{font-size:12px;color:var(--text-2);margin-top:10px}}
+
+.card{{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:14px}}
+.card.next{{background:linear-gradient(135deg,rgba(201,162,75,.10),var(--surface));border-color:rgba(201,162,75,.30)}}
+.card-t{{font-weight:700;font-size:14px;color:var(--text);margin-bottom:14px;display:flex;align-items:center;gap:9px}}
+.card-t::before{{content:'';width:4px;height:15px;border-radius:2px;background:linear-gradient(var(--gold),var(--gold-2))}}
+.next-txt{{color:var(--text);font-size:14.5px;line-height:1.7}}
+
+.timeline{{display:flex;flex-direction:column;padding-inline-start:2px}}
+.ms{{position:relative;display:flex;align-items:flex-start;gap:12px;padding:7px 0}}
+.ms::before{{content:'';position:absolute;inset-inline-start:11px;top:25px;bottom:-7px;width:2px;background:var(--line)}}
+.ms:last-child::before{{display:none}}
+.ms.done::before{{background:rgba(74,222,128,.40)}}
+.ms-dot{{width:24px;height:24px;flex:0 0 24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--surface-2);color:var(--text-3);border:2px solid var(--line);z-index:1}}
+.ms.done .ms-dot{{background:rgba(74,222,128,.14);color:var(--green);border-color:rgba(74,222,128,.5)}}
+.ms.cur .ms-dot{{background:rgba(201,162,75,.16);color:var(--gold);border-color:var(--gold);box-shadow:0 0 0 4px rgba(201,162,75,.12)}}
+.ms-lbl{{font-size:14px;color:var(--text-2);padding-top:3px}}
 .ms.cur .ms-lbl{{color:#fff;font-weight:700}}
-.ms.up .ms-lbl{{color:#6b7280}}
-.ms-date{{font-size:11px;color:#6b7280;margin-inline-start:auto;padding-top:4px}}
-.room{{margin-bottom:14px}}
-.room-head{{display:flex;justify-content:space-between;align-items:baseline}}
-.room-name{{font-weight:700;color:#fff}}
-.room-meta{{font-size:12px;color:#9ca3af}}
-.room-bar{{height:6px;border-radius:999px;background:#1f2a3f;overflow:hidden;margin:6px 0 8px}}
-.room-bar>div{{height:100%;background:#c9a24b;border-radius:999px}}
-.task{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:#0b121e;border:1px solid #18222f;border-radius:10px;margin-bottom:6px}}
-.task-name{{font-size:14px}}
-.qty{{color:#9ca3af;font-size:12px}}
-.chip{{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid;white-space:nowrap}}
-.empty{{color:#6b7280;text-align:center;padding:20px}}
-.upd{{text-align:center;color:#6b7280;font-size:12px;margin-top:18px}}
+.ms.up .ms-lbl{{color:var(--text-3)}}
+.ms-date{{font-size:11px;color:var(--text-3);margin-inline-start:auto;padding-top:5px;font-variant-numeric:tabular-nums}}
+
+.room{{margin-bottom:16px}}
+.room:last-child{{margin-bottom:0}}
+.room-head{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}}
+.room-name{{font-weight:700;color:#fff;font-size:14px}}
+.room-meta{{font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}}
+.room-bar{{height:6px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;margin-bottom:9px}}
+.room-bar>.barfill{{transition:width 1s var(--ease) .25s}}
+.task{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:12px;margin-bottom:7px}}
+.task:last-child{{margin-bottom:0}}
+.task-name{{font-size:13.5px}}
+.qty{{color:var(--text-3);font-size:12px}}
+.chip{{font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid;white-space:nowrap}}
+.empty{{color:var(--text-3);text-align:center;padding:22px}}
+.upd{{text-align:center;color:var(--text-3);font-size:12px;margin-top:22px}}
+
+@media (prefers-reduced-motion:reduce){{
+  *{{transition:none!important;animation:none!important}}
+}}
 </style></head><body>
 <div class="wrap">
-  <div class="topbar"><div class="brand">OUJA · عوجا</div>
+  <div class="topbar rise"><div class="brand">OUJA · عوجا</div>
     <button class="langbtn" id="lng" onclick="tog()">English</button></div>
-  <div class="hero">
+  <div class="hero rise d1">
     <div class="unit">{e(unit_name)}</div>
     <div class="sub">{("<span>"+lbl('التسليم','Handover')+": "+ho_html+"</span>") if ho_html else ""}{dl_html}</div>
-    <div class="pct">{overall_txt}</div>
-    <div class="bar"><div style="width:{bar_w}%"></div></div>
-    <div style="font-size:12px;color:#9ca3af;margin-top:8px">{lbl('نسبة الإنجاز','Overall progress')}</div>
+    <div class="pct" data-pct="{bar_w if overall is not None else ''}">{overall_txt}</div>
+    <div class="bar" role="progressbar" aria-label="نسبة الإنجاز" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{bar_w}"><div class="barfill" style="--w:{bar_w}%"></div></div>
+    <div class="lbl-sm">{lbl('نسبة الإنجاز','Overall progress')}</div>
   </div>
   {next_block}
-  <div class="card"><div class="card-t">{lbl('مراحل المشروع','Project timeline')}</div>{ms_block}</div>
-  <div class="card"><div class="card-t">{lbl('المهام حسب الغرفة','Tasks by room')}</div>{rooms_block}</div>
-  <div class="upd">{lbl('آخر تحديث','Last updated')}: <span data-ar="{e(upd_ar)}" data-en="{e(upd_en)}">{e(upd_ar)}</span></div>
+  <div class="card rise d2"><div class="card-t">{lbl('مراحل المشروع','Project timeline')}</div>{ms_block}</div>
+  <div class="card rise d3"><div class="card-t">{lbl('المهام حسب الغرفة','Tasks by room')}</div>{rooms_block}</div>
+  <div class="upd rise d4">{lbl('آخر تحديث','Last updated')}: <span data-ar="{e(upd_ar)}" data-en="{e(upd_en)}">{e(upd_ar)}</span></div>
 </div>
 <script>
 var L='ar';
@@ -17084,6 +17235,25 @@ function tog(){{
     if (v!==null && v!=='') els[i].textContent = v;
   }}
 }}
+/* Count-up on the headline % — pure enhancement; if JS is off the number is
+   already rendered as text. Skipped under reduced-motion. */
+(function(){{
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var el = document.querySelector('.pct');
+  if(!el) return;
+  var target = parseInt(el.getAttribute('data-pct'), 10);
+  if(isNaN(target)) return;
+  if(reduce){{ el.textContent = target + '%'; return; }}
+  var start = null, dur = 900;
+  function step(ts){{
+    if(start===null) start = ts;
+    var p = Math.min((ts-start)/dur, 1);
+    var eased = 1 - Math.pow(1-p, 3);
+    el.textContent = Math.round(eased*target) + '%';
+    if(p<1) requestAnimationFrame(step);
+  }}
+  requestAnimationFrame(step);
+}})();
 </script>
 </body></html>"""
 
@@ -18040,52 +18210,63 @@ def _msc_esc(s):
 def _render_showcase_html(data):
     css = """
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#ECE5D8;font-family:-apple-system,'Segoe UI',Tahoma,Arial,sans-serif;
- color:#2b2622;direction:rtl;padding:24px 14px 60px}
+:root{--accent:#BF5B43;--accent-2:#d8775f;--ease:cubic-bezier(0.23,1,0.32,1)}
+html{-webkit-text-size-adjust:100%}
+body{background:radial-gradient(1000px 480px at 50% -6%,rgba(191,91,67,.10),transparent 60%),#ECE5D8;
+ font-family:'IBM Plex Sans Arabic',-apple-system,'Segoe UI',Tahoma,Arial,sans-serif;
+ color:#2b2622;direction:rtl;padding:26px 14px 64px;line-height:1.6;min-height:100vh;-webkit-font-smoothing:antialiased}
 .wrap{max-width:760px;margin:0 auto}
-.hdr{text-align:center;margin:8px 0 28px}
-.hdr .brand{font-size:13px;letter-spacing:3px;color:#BF5B43;font-weight:700}
-.hdr h1{font-size:30px;font-weight:800;margin:6px 0 4px}
-.hdr p{color:#7a6f64;font-size:14px}
-.meta{text-align:center;color:#9a8e80;font-size:12px;margin-top:6px}
-.conv{background:#fff;border-radius:22px;padding:20px 18px;margin:0 0 26px;
- box-shadow:0 8px 30px rgba(120,90,60,.10)}
+.rise{transition:opacity .6s var(--ease),transform .6s var(--ease)}
+@starting-style{.rise{opacity:0;transform:translateY(16px)}}
+.hdr{text-align:center;margin:10px 0 30px}
+.hdr .brand{font-size:12px;letter-spacing:3px;color:var(--accent);font-weight:700}
+.hdr h1{font-size:32px;font-weight:800;margin:8px 0 6px;letter-spacing:-.5px}
+.hdr p{color:#7a6f64;font-size:14.5px;max-width:520px;margin:0 auto}
+.meta{display:inline-block;margin-top:14px;color:#8a7d6c;font-size:12px;background:rgba(255,255,255,.6);
+ border:1px solid #e7ddcc;border-radius:999px;padding:5px 14px;font-variant-numeric:tabular-nums}
+.conv{background:#fff;border-radius:24px;padding:22px 20px;margin:0 0 24px;
+ box-shadow:0 10px 36px rgba(120,90,60,.10),0 2px 6px rgba(120,90,60,.05);border:1px solid rgba(255,255,255,.8)}
 .conv .top{display:flex;align-items:center;gap:10px;border-bottom:1px solid #f0e9dd;
- padding-bottom:12px;margin-bottom:14px}
-.conv .badge{font-size:13px;font-weight:800;color:#BF5B43}
-.conv .who{font-size:13px;color:#6b6157;margin-right:auto}
-.conv .sub{font-size:12px;color:#9a8e80;margin-bottom:14px}
-.msg{display:flex;margin:8px 0}
-.msg .b{max-width:78%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.55;
+ padding-bottom:13px;margin-bottom:6px}
+.conv .badge{font-size:14px;font-weight:800;color:var(--accent)}
+.conv .who{font-size:12.5px;color:#6b6157;margin-right:auto}
+.conv .sub{font-size:12.5px;color:#9a8e80;margin:8px 0 16px}
+.msg{display:flex;margin:9px 0}
+.msg .b{max-width:78%;padding:11px 15px;border-radius:18px;font-size:15px;line-height:1.6;
  white-space:pre-wrap;word-break:break-word}
 .guest{justify-content:flex-start}
-.guest .b{background:#f3ece0;color:#3b342c;border-bottom-right-radius:5px}
+.guest .b{background:#f3ece0;color:#3b342c;border-bottom-right-radius:6px}
 .host{justify-content:flex-end}
-.host .b{background:#BF5B43;color:#fff;border-bottom-left-radius:5px}
-.auto .b{background:#efe7d7;color:#8a7d6c;font-style:italic}
-.tm{font-size:10px;color:#b3a899;margin:2px 6px;align-self:flex-end}
-.tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;
- background:#fff;color:#BF5B43;border:1px solid #e7c3b8;margin-bottom:3px}
-.analysis{background:#faf5ec;border-radius:14px;padding:12px 14px;margin-top:14px;
- font-size:13px;color:#5d5346;line-height:1.7}
-.analysis b{color:#BF5B43}
-.empty{text-align:center;color:#9a8e80;padding:40px;background:#fff;border-radius:18px}
+.host .b{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;border-bottom-left-radius:6px;box-shadow:0 4px 14px rgba(191,91,67,.25)}
+.auto .b{background:#efe7d7;color:#8a7d6c;font-style:italic;box-shadow:none}
+.tm{font-size:10px;color:#b3a899;margin:2px 6px;align-self:flex-end;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:9px;
+ background:#fff;color:var(--accent);border:1px solid #e7c3b8;margin-bottom:4px}
+.analysis{background:linear-gradient(135deg,#faf5ec,#f6efe2);border-radius:16px;padding:13px 15px;margin-top:16px;
+ font-size:13px;color:#5d5346;line-height:1.75;border:1px solid #f0e6d4}
+.analysis b{color:var(--accent)}
+.empty{text-align:center;color:#9a8e80;padding:44px;background:#fff;border-radius:20px;box-shadow:0 10px 36px rgba(120,90,60,.08)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 """
     parts = ['<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">',
              '<meta name="viewport" content="width=device-width,initial-scale=1">',
-             '<title>أفضل محادثات مساعد · عوجا</title><style>', css, '</style></head><body><div class="wrap">',
-             '<div class="hdr"><div class="brand">OUJA RESIDENCE</div>',
+             '<title>أفضل محادثات مساعد · عوجا</title>',
+             '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
+             '<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700;800&display=swap" rel="stylesheet">',
+             '<meta name="theme-color" content="#ECE5D8">',
+             '<style>', css, '</style></head><body><div class="wrap">',
+             '<div class="hdr rise"><div class="brand">OUJA RESIDENCE</div>',
              '<h1>أفضل محادثات مساعد 🤍</h1>',
              '<p>محادثات حقيقية تعامل معها مساعد — موقّعة باسمه، مسحوبة مباشرة من Hostaway</p>',
              '<div class="meta">فُحصت %d محادثة · %d محادثة مؤهّلة</div></div>'
              % (data.get("scanned", 0), data.get("candidates", 0))]
     if not data.get("buckets"):
         parts.append('<div class="empty">ما لقيت محادثات مؤهّلة في آخر دفعة. جرّب زيادة العدد عبر ?n=200</div>')
-    for bk in data.get("buckets", []):
+    for idx, bk in enumerate(data.get("buckets", [])):
         r = bk["rec"]
-        parts.append('<div class="conv"><div class="top"><span class="badge">%s</span>'
+        parts.append('<div class="conv rise" style="transition-delay:%.2fs"><div class="top"><span class="badge">%s</span>'
                      '<span class="who">%s · %s</span></div>'
-                     % (_msc_esc(bk["title"]), _msc_esc(r["guest"]), _msc_esc(r["unit"])))
+                     % (idx * 0.07, _msc_esc(bk["title"]), _msc_esc(r["guest"]), _msc_esc(r["unit"])))
         parts.append('<div class="sub">%s</div>' % _msc_esc(bk["sub"]))
         for m in r["thread"]:
             side = "guest" if m["inb"] else "host"
@@ -18287,6 +18468,7 @@ async def start_web_server():
         app.router.add_get("/api/expenses/export.csv", _api_expenses_export)
         app.router.add_post("/api/expenses/reconcile", _api_expenses_reconcile)
         app.router.add_get("/api/expenses/sheet-debug", _api_expenses_sheet_debug)
+        app.router.add_get("/api/expenses/hostaway-debug", _api_expenses_hostaway_debug)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
