@@ -6027,12 +6027,56 @@ def _exp_poll_sheet():
         log_event("ops", f"مصاريف الميدان · استورد {created} مصروف جديد من الشيت")
     return created
 
-def _exp_fetch_hostaway():
-    """Fetch existing expenses already in Hostaway (paginated). Returns
+def _exp_sheet_probe():
+    """Sheet-only diagnostic: fetch + parse the CSV and report what we see.
+    Does NOT ingest and does NOT touch Hostaway, so it returns fast and can't hang."""
+    diag = {"configured": bool(EXPENSE_SHEET_CSV_URL), "resolved_url": "",
+            "http_status": None, "content_type": "", "bytes": 0, "rows_parsed": 0,
+            "data_rows": 0, "headers": [], "mapped": {}, "sample": None,
+            "looks_like_html": False, "error": None}
+    url = _exp_sheet_csv_url()
+    diag["resolved_url"] = url
+    if not url:
+        diag["error"] = "EXPENSE_SHEET_CSV_URL not set on Railway"
+        return diag
+    try:
+        r = requests.get(url, timeout=20, allow_redirects=True)
+        diag["http_status"] = r.status_code
+        diag["content_type"] = r.headers.get("Content-Type", "")
+        diag["bytes"] = len(r.content or b"")
+        r.raise_for_status()
+        text = r.content.decode("utf-8-sig", errors="replace")
+    except Exception as e:
+        diag["error"] = "fetch error: " + str(e)[:200]
+        return diag
+    head = text.lstrip()[:200].lower()
+    diag["looks_like_html"] = head.startswith("<!doctype") or head.startswith("<html") or "<head" in head
+    if diag["looks_like_html"]:
+        diag["error"] = "got an HTML page, not CSV — the sheet is probably not shared 'Anyone with the link'"
+    import csv as _csv, io as _io
+    rows = list(_csv.reader(_io.StringIO(text)))
+    diag["rows_parsed"] = len(rows)
+    if rows:
+        diag["headers"] = [str(h).strip() for h in rows[0]][:30]
+        idx = _exp_sheet_colmap(rows[0])
+        diag["mapped"] = {k: (v is not None) for k, v in idx.items()}
+        data = [rr for rr in rows[1:] if any(str(c).strip() for c in rr)]
+        diag["data_rows"] = len(data)
+        if data:
+            sub = _exp_sheet_row_to_sub(idx, data[0])
+            if sub:
+                diag["sample"] = {"apartment": sub.get("apartment"), "amount": sub.get("amount"),
+                                  "date": sub.get("expense_date"), "submitter": sub.get("submitter")}
+    if not diag["error"] and diag["data_rows"] == 0:
+        diag["error"] = "no data rows found"
+    return diag
+
+def _exp_fetch_hostaway(max_pages=10):
+    """Fetch existing expenses already in Hostaway (paginated, capped). Returns
     (list, ok, error). 'ok' is False if the endpoint doesn't respond as expected."""
     items, offset, page = [], 0, 100
     try:
-        while True:
+        for _ in range(max_pages):
             data = api_get(EXPENSE_HOSTAWAY_PATH, params={"limit": page, "offset": offset})
             batch = (data or {}).get("result")
             if batch is None and isinstance(data, list):
@@ -6042,8 +6086,6 @@ def _exp_fetch_hostaway():
             if len(batch) < page:
                 break
             offset += page
-            if offset > 5000:
-                break
         return items, True, None
     except Exception as e:
         return items, False, str(e)[:300]
@@ -7493,6 +7535,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub">مصاريف الميدان من النموذج → التحقق → Hostaway</div>
           </div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="expSheetTest()">🔍 فحص الشيت</button>
             <button class="btn ghost sm" onclick="expReconcile()">🔄 مطابقة Hostaway</button>
             <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
             <button class="btn ghost sm" onclick="loadExpenses()">↻</button>
@@ -10121,6 +10164,23 @@ async function expReloadList(){
   _renderExpenses();
 }
 async function expRefresh(){ D.expList=null; await loadExpenses(); }
+async function expSheetTest(){
+  var NL=String.fromCharCode(10);
+  toast(L==='ar'?'⏳ نفحص الشيت…':'⏳ Testing sheet…');
+  var d; try{ d=await api('/api/expenses/sheet-debug'); }catch(e){ alert('⚠ '+e); return; }
+  var m=(L==='ar'?'🔍 فحص الشيت':'🔍 Sheet test')+NL+NL
+   +(L==='ar'?'الرابط مضبوط؟ ':'URL set? ')+(d.configured?'✓':'✗')+NL
+   +'HTTP '+(d.http_status==null?'—':d.http_status)+'  ·  '+(d.content_type||'')+NL
+   +(L==='ar'?'صفوف مقروءة: ':'rows: ')+(d.rows_parsed||0)+'  ·  '+(L==='ar'?'صفوف بيانات: ':'data rows: ')+(d.data_rows||0)+NL;
+  if(d.headers&&d.headers.length){ m+=(L==='ar'?'الأعمدة: ':'columns: ')+d.headers.join(' | ')+NL; }
+  if(d.mapped){
+    var bad=Object.keys(d.mapped).filter(function(k){return !d.mapped[k];});
+    m+=(L==='ar'?'أعمدة غير مطابقة: ':'unmapped fields: ')+(bad.length?bad.join(', '):(L==='ar'?'لا شيء ✓':'none ✓'))+NL;
+  }
+  if(d.sample){ m+=(L==='ar'?'مثال أول صف → شقة: ':'first row → apt: ')+(d.sample.apartment||'—')+' · '+(d.sample.amount||'—')+' · '+(d.sample.date||'—')+NL; }
+  if(d.error){ m+=NL+(L==='ar'?'⚠ المشكلة: ':'⚠ problem: ')+d.error; }
+  alert(m);
+}
 async function expReconcile(){
   var NL=String.fromCharCode(10);
   if(!confirm(L==='ar'?'نسحب كل الشيت ونقارنه مع Hostaway؟':'Pull the whole sheet and compare with Hostaway?')) return;
@@ -16628,6 +16688,13 @@ async def _api_expenses_reconcile(request):
         return _json({"error": str(e)[:400], "pulled_from_sheet": 0, "total_expenses": 0,
                       "hostaway_fetch_ok": False, "sheet_debug": dict(_exp_sheet_diag)})
 
+async def _api_expenses_sheet_debug(request):
+    """Fast sheet-only probe (no Hostaway, no ingest). Confirms the sheet is readable."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    diag = await asyncio.to_thread(_exp_sheet_probe)
+    return _json(diag)
+
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
     if not _dash_auth(request):
@@ -18155,6 +18222,7 @@ async def start_web_server():
         app.router.add_post("/api/expenses/settings", _api_expenses_settings_save)
         app.router.add_get("/api/expenses/export.csv", _api_expenses_export)
         app.router.add_post("/api/expenses/reconcile", _api_expenses_reconcile)
+        app.router.add_get("/api/expenses/sheet-debug", _api_expenses_sheet_debug)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
