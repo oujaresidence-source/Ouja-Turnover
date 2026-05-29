@@ -5961,28 +5961,55 @@ def _exp_sheet_row_to_sub(idx, row):
         "submitted_at":      ts or datetime.now(TZ).isoformat(timespec="seconds"),
     }
 
+_exp_sheet_diag = {}     # last sheet-poll diagnostics (for troubleshooting)
+
 def _exp_poll_sheet():
     """Fetch the shared Google Sheet as CSV and ingest any new rows. Idempotent
-    (rows dedupe by a stable submission_id). Returns count of newly-created expenses."""
+    (rows dedupe by a stable submission_id). Returns count of newly-created expenses.
+    Records why it got nothing into _exp_sheet_diag for the reconcile/debug view."""
+    global _exp_sheet_diag
+    diag = {"configured": bool(EXPENSE_SHEET_CSV_URL), "resolved_url": "",
+            "http_status": None, "content_type": "", "bytes": 0,
+            "rows_parsed": 0, "data_rows": 0, "headers": [], "mapped": {},
+            "looks_like_html": False, "error": None, "created": 0}
     url = _exp_sheet_csv_url()
+    diag["resolved_url"] = url
     if not url:
+        diag["error"] = "EXPENSE_SHEET_CSV_URL not set on Railway"
+        _exp_sheet_diag = diag
         return 0
     try:
         r = requests.get(url, timeout=30, allow_redirects=True)
+        diag["http_status"] = r.status_code
+        diag["content_type"] = r.headers.get("Content-Type", "")
+        diag["bytes"] = len(r.content or b"")
         r.raise_for_status()
         text = r.content.decode("utf-8-sig", errors="replace")
     except Exception as e:
+        diag["error"] = "fetch error: " + str(e)[:200]
+        _exp_sheet_diag = diag
         print("expense sheet poll: fetch error:", e)
         return 0
+    head = text.lstrip()[:200].lower()
+    diag["looks_like_html"] = head.startswith("<!doctype") or head.startswith("<html") or "<head" in head
     import csv as _csv, io as _io
     rows = list(_csv.reader(_io.StringIO(text)))
+    diag["rows_parsed"] = len(rows)
+    if diag["looks_like_html"]:
+        diag["error"] = "got an HTML page, not CSV — the sheet is probably not shared 'Anyone with the link'"
     if len(rows) < 2:
+        if not diag["error"]:
+            diag["error"] = "no data rows (only %d row[s])" % len(rows)
+        _exp_sheet_diag = diag
         return 0
+    diag["headers"] = [str(h).strip() for h in rows[0]][:30]
     idx = _exp_sheet_colmap(rows[0])
-    created = 0
+    diag["mapped"] = {k: (v is not None) for k, v in idx.items()}
+    created = 0; data_rows = 0
     for raw in rows[1:]:
         if not any(str(c).strip() for c in raw):
             continue
+        data_rows += 1
         sub = _exp_sheet_row_to_sub(idx, raw)
         if not sub:
             continue
@@ -5992,6 +6019,9 @@ def _exp_poll_sheet():
                 created += 1
         except Exception as e:
             print("expense sheet poll: ingest error:", e)
+    diag["data_rows"] = data_rows
+    diag["created"] = created
+    _exp_sheet_diag = diag
     if created:
         persist_state()
         log_event("ops", f"مصاريف الميدان · استورد {created} مصروف جديد من الشيت")
@@ -6080,7 +6110,8 @@ def _exp_reconcile(apply=False):
                "hostaway_fetch_ok": ha_ok, "hostaway_error": ha_err,
                "hostaway_existing": len(ha_keys), "dryrun": EXPENSE_POST_DRYRUN,
                "applied": bool(apply), **counts,
-               "missing_sample": missing_preview[:50]}
+               "missing_sample": missing_preview[:50],
+               "sheet_debug": dict(_exp_sheet_diag)}
     log_event("ops", f"مطابقة المصاريف · سحب {pulled} · ناقص {counts['missing']} · "
                      f"{'رُحّل ' + str(counts['posted_now']) if apply else 'معاينة'}")
     return summary
@@ -10104,6 +10135,14 @@ async function expReconcile(){
       +'Held: '+s.held+' · Unmatched: '+s.unmatched));
   if(!s.hostaway_fetch_ok){
     msg += NL+NL+(L==='ar'?'⚠ تعذّر قراءة مصاريف Hostaway: ':'⚠ Could not read Hostaway expenses: ')+(s.hostaway_error||'');
+  }
+  if(s.pulled_from_sheet===0 && s.total_expenses===0){
+    var d=s.sheet_debug||{};
+    msg += NL+NL+(L==='ar'?'🔍 تشخيص الشيت:':'🔍 Sheet diagnostic:')+NL
+        +(L==='ar'?'الرابط مضبوط؟ ':'URL set? ')+(d.configured?'✓':'✗')+NL
+        +'HTTP '+(d.http_status==null?'—':d.http_status)+' · '+(d.content_type||'')+NL
+        +(L==='ar'?'صفوف: ':'rows: ')+(d.rows_parsed||0)+NL
+        +(d.error?((L==='ar'?'السبب: ':'reason: ')+d.error):'');
   }
   if(s.missing>0){
     var ask=msg+NL+NL+(L==='ar'
