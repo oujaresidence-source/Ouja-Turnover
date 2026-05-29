@@ -136,6 +136,11 @@ CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 # Smarter model for the few high-touch, personality-heavy messages (manager script +
 # empathetic repeat-escalation acks). Low volume, so the extra cost is tiny.
 CLAUDE_MODEL_PREMIUM = os.environ.get("CLAUDE_MODEL_PREMIUM", "claude-sonnet-4-6")
+# ---- Review analysis (bulk "analyze everything now" + ongoing auto-analysis) ----
+REVIEW_ANALYZE_WORKERS    = int(os.environ.get("REVIEW_ANALYZE_WORKERS", "6"))    # parallel Claude calls during bulk
+REVIEW_AUTOANALYZE_ENABLED = os.environ.get("REVIEW_AUTOANALYZE_ENABLED", "1") in ("1", "true", "True", "yes")
+REVIEW_AUTOANALYZE_MIN    = int(os.environ.get("REVIEW_AUTOANALYZE_MIN", "15"))   # background loop interval (minutes)
+REVIEW_AUTOANALYZE_BATCH  = int(os.environ.get("REVIEW_AUTOANALYZE_BATCH", "8"))  # how many to analyze per cycle
 ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "True", "yes")
 ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
 ASSISTANT_POLL_MIN = float(os.environ.get("ASSISTANT_POLL_MIN", "0.5"))   # check inbox every N min (float ok)
@@ -3187,24 +3192,41 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         return None
 
 def claude_text(system, user, max_tokens=600, model=None):
-    """Plain-text Claude call (no JSON). Returns the text or None."""
+    """Plain-text Claude call (no JSON). Returns the text or None.
+    Retries on rate-limit / transient overload (429/500/503/529) with capped
+    exponential backoff so bulk review analysis survives bursts."""
     if not ANTHROPIC_API_KEY:
         return None
-    try:
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": model or CLAUDE_MODEL, "max_tokens": max_tokens, "system": system,
-                  "messages": [{"role": "user", "content": user}]},
-            timeout=60,
-        )
-        r.raise_for_status()
-        blocks = r.json().get("content", []) or []
-        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip() or None
-    except Exception as e:
-        print("claude_text error:", e)
-        return None
+    last_err = None
+    for attempt in range(4):
+        try:
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": model or CLAUDE_MODEL, "max_tokens": max_tokens, "system": system,
+                      "messages": [{"role": "user", "content": user}]},
+                timeout=60,
+            )
+            if r.status_code in (429, 500, 503, 529):
+                wait = min(2 ** attempt, 8)
+                try:
+                    ra = r.headers.get("retry-after")
+                    if ra:
+                        wait = min(max(float(ra), wait), 20)
+                except Exception:
+                    pass
+                last_err = f"HTTP {r.status_code}"
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            blocks = r.json().get("content", []) or []
+            return "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip() or None
+        except Exception as e:
+            last_err = e
+            time.sleep(min(2 ** attempt, 8))
+    print("claude_text error:", last_err)
+    return None
 
 def claude_json(system, user, max_tokens=900, model=None):
     """Same as claude_text but parses the response as JSON. Strips ```json fences,
@@ -5464,6 +5486,9 @@ _review_ai_cache = {}    # rev_id -> AI analysis dict
 _review_states = {}      # rev_id -> manual state dict
 _review_translations = {}  # rev_id -> {"en": "...", "ar": "..."} cached translations
 _reviews_last_fetch = 0  # epoch seconds
+# Live progress for the "analyze everything now" bulk job (one at a time).
+_review_bulk_job = {"running": False, "total": 0, "done": 0, "errors": 0,
+                    "started": 0, "finished": 0}
 
 # Historical review analytics, baked from the Airbnb/Hostaway export
 # (reviews_insights.json, shipped in the repo). Holds per-apartment category
@@ -9780,26 +9805,49 @@ async function _rvAutoTranslate(rid){
   }
 }
 
+let _rvPollTimer = null;
 async function bulkAnalyzeReviews(){
   const btn = document.getElementById('rvBulkBtn');
-  if(btn){ btn.disabled = true; btn.textContent = '⏳ يحلل…'; }
+  const dflt = (L==='ar') ? '🤖 حلّل الكل (السلبية أولاً)' : '🤖 Analyze all (negatives first)';
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ …'; }
   try {
     const s  = (document.getElementById('rvFilterSent')||{}).value;
-    const payload = {limit: 50};   // negatives are analysed first server-side
+    const payload = {};   // analyze EVERYTHING (negatives first server-side)
     if(s) payload.sentiment = s;
     if(_rvCurrentDays) payload.days = _rvCurrentDays;
-    const r = await post('/api/reviews/bulk-analyze', payload);
-    if(r.ok){
-      toast(r.message || ('✓ بدأ تحليل ' + (r.queued||0) + ' مراجعة'));
-      // Reload as results trickle in (analysis runs in the background)
-      setTimeout(loadReviews, 4000);
-      setTimeout(loadReviews, 12000);
-      setTimeout(loadReviews, 25000);
-      setTimeout(loadReviews, 45000);
-    } else toast(r.error || 'خطأ');
-  } finally {
-    if(btn){ btn.disabled = false; btn.textContent = '🤖 حلّل الكل (السلبية أولاً)'; }
+    const r = await post('/api/reviews/analyze-all', payload);
+    if(!r.ok){ toast(r.message || r.error || 'خطأ'); if(btn){ btn.disabled=false; btn.textContent=dflt; } return; }
+    if(r.total === 0){ toast(r.message || '✓ كل المراجعات محلّلة'); if(btn){ btn.disabled=false; btn.textContent=dflt; } return; }
+    toast(r.message || ('✓ بدأ تحليل ' + (r.total||0) + ' مراجعة'));
+    _rvPollAnalyzeStatus(btn, dflt);
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = dflt; }
   }
+}
+function _rvPollAnalyzeStatus(btn, dflt){
+  if(_rvPollTimer){ clearInterval(_rvPollTimer); }
+  let ticks = 0;
+  const poll = async () => {
+    ticks++;
+    let j = null;
+    try { j = await api('/api/reviews/analyze-status'); } catch(_){}
+    if(!j){ return; }
+    const done = (j.done||0) + (j.errors||0);
+    const total = j.total||0;
+    if(btn){
+      if(j.running){ btn.textContent = '⏳ ' + done + '/' + total; btn.disabled = true; }
+    }
+    // refresh the visible list every ~3rd tick so cards fill in live
+    if(ticks % 3 === 0){ loadReviews(); }
+    if(!j.running){
+      clearInterval(_rvPollTimer); _rvPollTimer = null;
+      if(btn){ btn.disabled = false; btn.textContent = dflt; }
+      loadReviews();
+      toast((L==='ar') ? ('✓ تم تحليل ' + (j.done||0) + ' مراجعة') : ('✓ Analyzed ' + (j.done||0) + ' reviews'));
+    }
+  };
+  poll();
+  _rvPollTimer = setInterval(poll, 5000);
 }
 
 function _ar_wd(n){ return ['الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][n] }
@@ -13542,6 +13590,115 @@ async def _api_reviews_bulk_analyze(request):
     return _json({"ok": True, "queued": len(targets),
                   "message": f"بدأ تحليل {len(targets)} مراجعة في الخلفية"})
 
+def _review_analyze_targets(lid_f=None, sentiment="", days=0):
+    """Build the full unanalyzed-review work list, negatives first (lowest
+    rating first). Shared by the bulk 'analyze everything' job and the
+    background auto-analyze loop."""
+    cands = []
+    for rid, rev in _reviews.items():
+        if rid in _review_ai_cache:
+            continue
+        if not (rev.get("public_review") or "").strip():
+            continue
+        if lid_f is not None and rev.get("listing_id") != lid_f:
+            continue
+        if not _review_in_window(rev, days):
+            continue
+        rating = rev.get("rating") or 0
+        is_pos = rating >= 4
+        if sentiment == "positive" and not is_pos:
+            continue
+        if sentiment == "negative" and is_pos:
+            continue
+        cands.append((rid, rev, rating, is_pos))
+    cands.sort(key=lambda c: (c[3], c[2]))  # negatives first, lowest rating first
+    return [(rid, rev) for rid, rev, _r, _p in cands]
+
+def _run_review_bulk_job(targets):
+    """Analyze every review in `targets` concurrently with a worker pool, while
+    updating _review_bulk_job for live dashboard progress. Runs in a daemon
+    thread (started by the analyze-all endpoint)."""
+    global _review_bulk_job
+    _review_bulk_job = {"running": True, "total": len(targets), "done": 0,
+                        "errors": 0, "started": int(time.time()), "finished": 0}
+
+    def _one(item):
+        rid, rev = item
+        try:
+            out = claude_analyze_review(rev)
+            if out:
+                _review_ai_cache[rid] = out
+                return (rid, True)
+        except Exception as e:
+            print(f"analyze-all {rid} error:", e)
+        return (rid, False)
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, REVIEW_ANALYZE_WORKERS)) as ex:
+            futs = [ex.submit(_one, it) for it in targets]
+            for fut in as_completed(futs):
+                try:
+                    _rid, ok = fut.result()
+                except Exception:
+                    ok = False
+                if ok:
+                    _review_bulk_job["done"] += 1
+                else:
+                    _review_bulk_job["errors"] += 1
+                processed = _review_bulk_job["done"] + _review_bulk_job["errors"]
+                if processed % 25 == 0:
+                    try:
+                        persist_state()
+                    except Exception:
+                        pass
+    finally:
+        _review_bulk_job["running"] = False
+        _review_bulk_job["finished"] = int(time.time())
+        try:
+            persist_state()
+        except Exception:
+            pass
+        log_event("ops", f"المراجعات · تحليل الكل · {_review_bulk_job['done']}/{_review_bulk_job['total']} ✓")
+
+async def _api_reviews_analyze_all(request):
+    """POST {lid?, sentiment?, days?} — analyze EVERY unanalyzed review now,
+    in parallel, with live progress. Guards against double-runs."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if not ANTHROPIC_API_KEY:
+        return _json({"error": "no_api_key", "message": "مفتاح Claude غير مهيأ"}, 400)
+    if _review_bulk_job.get("running"):
+        return _json({"ok": True, "already_running": True,
+                      "total": _review_bulk_job.get("total", 0),
+                      "done": _review_bulk_job.get("done", 0),
+                      "message": "التحليل شغّال حالياً"})
+    b = await _read_body(request)
+    try:
+        lid_f = int(b.get("lid")) if b.get("lid") else None
+    except Exception:
+        lid_f = None
+    sentiment = (b.get("sentiment") or "").strip()
+    try:
+        days = int(b.get("days") or 0)
+    except Exception:
+        days = 0
+    targets = _review_analyze_targets(lid_f, sentiment, days)
+    if not targets:
+        return _json({"ok": True, "total": 0, "message": "كل المراجعات محلّلة ✓"})
+    t = threading.Thread(target=_run_review_bulk_job, args=(targets,), daemon=True)
+    t.start()
+    return _json({"ok": True, "total": len(targets),
+                  "message": f"بدأ تحليل {len(targets)} مراجعة"})
+
+async def _api_reviews_analyze_status(request):
+    """GET — live progress of the analyze-everything job + total analyzed."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    job = dict(_review_bulk_job)
+    job["analyzed_total"] = len(_review_ai_cache)
+    job["reviews_total"] = len(_reviews)
+    return _json(job)
+
 async def _api_reviews_open_ticket(request):
     """POST {id} → open a maintenance ticket from a review (idempotent)."""
     if not _dash_auth(request):
@@ -14480,6 +14637,8 @@ async def start_web_server():
         app.router.add_post("/api/reviews/open-ticket", _api_reviews_open_ticket)
         app.router.add_post("/api/reviews/translate", _api_reviews_translate)
         app.router.add_post("/api/reviews/bulk-analyze", _api_reviews_bulk_analyze)
+        app.router.add_post("/api/reviews/analyze-all", _api_reviews_analyze_all)
+        app.router.add_get("/api/reviews/analyze-status", _api_reviews_analyze_status)
         # Auth + users (admin only beyond me/login/logout)
         app.router.add_post("/api/auth/login", _api_auth_login)
         app.router.add_post("/api/auth/logout", _api_auth_logout)
@@ -14668,6 +14827,44 @@ async def reviews_refresh_loop():
         print(f"reviews: daily refresh pulled {n} from Hostaway — total {len(_reviews)}")
     except Exception as e:
         print("reviews_refresh_loop error:", e)
+
+@tasks.loop(minutes=REVIEW_AUTOANALYZE_MIN)
+async def reviews_autoanalyze_loop():
+    """Quietly analyze a small batch of any not-yet-analyzed reviews each cycle
+    (negatives first), so new reviews get their removability + AAA reply ready
+    automatically. Skips while a manual 'analyze everything' job is running."""
+    if not REVIEW_AUTOANALYZE_ENABLED or not ANTHROPIC_API_KEY:
+        return
+    if _review_bulk_job.get("running"):
+        return
+    try:
+        targets = await asyncio.to_thread(_review_analyze_targets)
+        if not targets:
+            return
+        batch = targets[:max(1, REVIEW_AUTOANALYZE_BATCH)]
+
+        def _work():
+            n = 0
+            for rid, rev in batch:
+                try:
+                    out = claude_analyze_review(rev)
+                    if out:
+                        _review_ai_cache[rid] = out
+                        n += 1
+                except Exception as e:
+                    print(f"autoanalyze {rid} error:", e)
+            if n:
+                try:
+                    persist_state()
+                except Exception:
+                    pass
+            return n
+
+        n = await asyncio.to_thread(_work)
+        if n:
+            print(f"reviews: auto-analyzed {n} (remaining ~{len(targets) - n})")
+    except Exception as e:
+        print("reviews_autoanalyze_loop error:", e)
 
 @tasks.loop(time=dt_time(hour=WORK_START_HOUR, tzinfo=TZ))
 async def offhours_ack_reset_loop():
@@ -15763,6 +15960,8 @@ async def on_ready():
         weekly_review_loop.start()
     if not reviews_refresh_loop.is_running():
         reviews_refresh_loop.start()   # initial pull on boot, then daily
+    if REVIEW_AUTOANALYZE_ENABLED and not reviews_autoanalyze_loop.is_running():
+        reviews_autoanalyze_loop.start()   # auto-analyze new reviews in the background
     if WEBHOOKS_ENABLED and _HAS_AIOHTTP and _web_runner is None:
         try:
             await start_web_server()
