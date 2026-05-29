@@ -5061,13 +5061,56 @@ def fetch_reviews_from_hostaway(limit=20000, page_size=100):
     return out
 
 def refresh_reviews():
-    """Fetch + merge into _reviews. Returns count."""
+    """Fetch + merge into _reviews. Returns number fetched from Hostaway."""
     global _reviews_last_fetch
     fresh = fetch_reviews_from_hostaway()
+    # When Hostaway returns the live version of a review we already hold from the
+    # CSV seed (same reservation), drop the seed copy first so it isn't shown twice.
+    seed_by_resid = {}
+    for k, v in list(_reviews.items()):
+        if str(v.get("source")) == "csv" and v.get("reservation_id"):
+            seed_by_resid.setdefault(str(v["reservation_id"]), []).append(k)
     for r in fresh:
+        resid = str(r.get("reservation_id") or "")
+        if resid and resid in seed_by_resid:
+            for sk in seed_by_resid.pop(resid):
+                _reviews.pop(sk, None)
         _reviews[r["id"]] = r
     _reviews_last_fetch = int(time.time())
     return len(fresh)
+
+def merge_reviews_seed():
+    """Load the shipped reviews_seed.json (full Airbnb history exported from
+    Hostaway) into _reviews for any reservation not already present — live and
+    persisted reviews always win. This makes the Reviews page show the whole
+    history immediately, even on a fresh deploy before the first live pull."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reviews_seed.json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except FileNotFoundError:
+        return 0
+    except Exception as e:
+        print("merge_reviews_seed error:", e)
+        return 0
+    seed = data.get("reviews") or {}
+    have = set()
+    for v in _reviews.values():
+        if v.get("reservation_id"):
+            have.add(str(v["reservation_id"]))
+    added = 0
+    for k, v in seed.items():
+        if not isinstance(v, dict):
+            continue
+        resid = str(v.get("reservation_id") or "")
+        if resid and resid in have:
+            continue
+        if k not in _reviews:
+            _reviews[k] = v
+            added += 1
+            if resid:
+                have.add(resid)
+    return added
 
 # AI prompt for review analysis — applies AAA framework (Acknowledge, Apologize,
 # Act) + Ritz-Carlton "ladies and gentlemen" tone for public responses, and the
@@ -14567,6 +14610,17 @@ async def deepclean_confirm_loop():
     except Exception as e:
         print("deepclean_confirm_loop error:", e)
 
+@tasks.loop(hours=24)
+async def reviews_refresh_loop():
+    """Pull new Airbnb/Booking reviews from Hostaway once a day and merge them in,
+    so the Reviews page keeps growing automatically without anyone clicking."""
+    try:
+        n = await asyncio.to_thread(refresh_reviews)
+        await asyncio.to_thread(persist_state)
+        print(f"reviews: daily refresh pulled {n} from Hostaway — total {len(_reviews)}")
+    except Exception as e:
+        print("reviews_refresh_loop error:", e)
+
 @tasks.loop(time=dt_time(hour=WORK_START_HOUR, tzinfo=TZ))
 async def offhours_ack_reset_loop():
     """At the start of every working day, clear the set of conversations that already
@@ -14715,6 +14769,12 @@ def load_state():
         for k, v in (_load_json("reviews.json", {}) or {}).items():
             if isinstance(v, dict):
                 _reviews[str(k)] = v
+        try:
+            _seeded = merge_reviews_seed()
+            if _seeded:
+                print(f"reviews: merged {_seeded} seed reviews (Airbnb history) — total {len(_reviews)}")
+        except Exception as e:
+            print("merge_reviews_seed error:", e)
         _review_ai_cache.clear()
         for k, v in (_load_json("review_ai.json", {}) or {}).items():
             if isinstance(v, dict):
@@ -15653,6 +15713,8 @@ async def on_ready():
         price_opp_loop.start()
     if not weekly_review_loop.is_running():
         weekly_review_loop.start()
+    if not reviews_refresh_loop.is_running():
+        reviews_refresh_loop.start()   # initial pull on boot, then daily
     if WEBHOOKS_ENABLED and _HAS_AIOHTTP and _web_runner is None:
         try:
             await start_web_server()
