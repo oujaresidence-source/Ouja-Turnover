@@ -5660,10 +5660,24 @@ def _exp_norm(s):
     return re.sub(r"\s+", " ", str(s or "").strip()).lower()
 
 def _exp_match_apartment(name):
-    """Return (listing_id, candidates). Exactly one normalized match → resolved.
-    More than one → candidates list for manager confirmation. None → empty."""
+    """Return (listing_id, candidates). Resolution order:
+    1) an explicit Hostaway listing id in brackets/parens, e.g. "[441508] 13 JOOD"
+    2) exactly one exact name match (after stripping the bracketed id)
+    3) exactly one fuzzy (substring) name match
+    Otherwise → candidates list for manager confirmation (or empty = not found)."""
     listings = get_listings_map() or {}
-    target = _exp_norm(name)
+    raw = str(name or "")
+    # 1) explicit listing id in [..] or (..)
+    for num in re.findall(r"[\[\(]\s*(\d{3,})\s*[\]\)]", raw):
+        try:
+            lid = int(num)
+        except ValueError:
+            continue
+        if lid in listings:
+            return lid, []
+    # strip the bracketed id for text matching
+    cleaned = re.sub(r"[\[\(]\s*\d{3,}\s*[\]\)]", " ", raw)
+    target = _exp_norm(cleaned)
     if not target:
         return None, []
     exact = [{"listing_id": lid, "name": nm} for lid, nm in listings.items()
@@ -5676,7 +5690,7 @@ def _exp_match_apartment(name):
     fuzzy = [{"listing_id": lid, "name": nm} for lid, nm in listings.items()
              if target in _exp_norm(nm) or _exp_norm(nm) in target]
     if len(fuzzy) == 1:
-        return None, fuzzy          # one fuzzy hit → still confirm
+        return fuzzy[0]["listing_id"], []   # single confident match → resolve
     return None, fuzzy              # 0 or many → candidates (maybe empty)
 
 def _exp_find_duplicate(exp):
@@ -6137,6 +6151,18 @@ def _exp_reconcile(apply=False):
     Held/incomplete/unmatched expenses are never auto-posted — they stay in the
     review queue. Respects EXPENSE_POST_DRYRUN. Returns a summary dict."""
     pulled = _exp_poll_sheet()
+    # Re-run validation on every not-yet-posted expense so the latest apartment
+    # matching (e.g. the bracketed listing-id rule) re-resolves old held items.
+    revalidated = 0
+    for e in list(_expenses.values()):
+        if e.get("status") == "discarded":
+            continue
+        if e.get("hostaway_ref") and e["hostaway_ref"] not in ("DRYRUN", "existing", "ok", None):
+            continue
+        before = e.get("status")
+        _exp_validate(e)
+        if e.get("status") != before:
+            revalidated += 1
     ha_items, ha_ok, ha_err = _exp_fetch_hostaway()
     ha_keys = set()
     for x in ha_items:
@@ -6184,6 +6210,7 @@ def _exp_reconcile(apply=False):
             counts["posted_now" if ok else "post_failed"] += 1
     persist_state()
     summary = {"pulled_from_sheet": pulled, "total_expenses": total,
+               "revalidated": revalidated,
                "hostaway_fetch_ok": ha_ok, "hostaway_error": ha_err,
                "hostaway_existing": len(ha_keys), "dryrun": EXPENSE_POST_DRYRUN,
                "applied": bool(apply), **counts,
@@ -10224,8 +10251,10 @@ async function expReconcile(){
   var msg=(s.error?((L==='ar'?'⚠ خطأ بالخادم: ':'⚠ Server error: ')+s.error+NL+NL):'')+(L==='ar'
     ? ('سحبنا '+s.pulled_from_sheet+' صف من الشيت · إجمالي المصاريف '+s.total_expenses+NL
       +'موجودة بـHostaway: '+s.already_in_hostaway+' · ناقصة: '+s.missing+NL
+      +'أُعيد مطابقتها: '+(s.revalidated||0)+NL
       +'بانتظار المراجعة: '+s.held+' · غير مطابقة شقة: '+s.unmatched)
     : ('Pulled '+s.pulled_from_sheet+' rows · total '+s.total_expenses+NL
+      +'re-matched: '+(s.revalidated||0)+NL
       +'In Hostaway: '+s.already_in_hostaway+' · Missing: '+s.missing+NL
       +'Held: '+s.held+' · Unmatched: '+s.unmatched));
   if(!s.hostaway_fetch_ok){
