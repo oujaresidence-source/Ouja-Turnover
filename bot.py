@@ -125,6 +125,42 @@ EXPENSE_POST_DRYRUN   = os.environ.get("EXPENSE_POST_DRYRUN", "1") in ("1", "tru
 EXPENSE_INGEST_SECRET = os.environ.get("EXPENSE_INGEST_SECRET", "")
 # Hostaway expenses endpoint (relative to BASE which already ends in /v1).
 EXPENSE_HOSTAWAY_PATH = os.environ.get("EXPENSE_HOSTAWAY_PATH", "/expenses")
+# Pull-based intake (no Google Apps Script): poll a published / link-shared Google
+# Sheet as CSV and ingest new rows directly. Set EXPENSE_SHEET_CSV_URL to the sheet's
+# CSV export URL (or a normal sheet link — we derive the export URL from the ID).
+EXPENSE_SHEET_CSV_URL  = os.environ.get("EXPENSE_SHEET_CSV_URL", "").strip()
+EXPENSE_SHEET_POLL_MIN = int(os.environ.get("EXPENSE_SHEET_POLL_MIN", "3") or "3")
+# Logical field -> exact column header in Ouja's live expense form/sheet.
+EXPENSE_SHEET_COLS = {
+    "timestamp":        "Timestamp",
+    "submitter":        "اسم المشرف | Supervisor Name",
+    "expense_date":     "تاريخ الصيانه | Maintenance Date",
+    "apartment":        "اسم الشقه؟",
+    "maintenance_type": "نوع الصيانه | Maintenance Type",
+    "description":      "وصف العمل | Description of Work",
+    "notes":            "ملاحظات إضافيه | Additional Notes",
+    "amount":           "التكلفه بالريال | Cost in SAR",
+    "vat":              "هل المبلغ شامل ضريبة القيمة المضافة 15%؟ | VAT included?",
+    "vendor":           "اسم الموّرد | Vendor Name",
+    "receipt_link":     "رفع الفاتوره | Upload Invoice",
+    "no_receipt_reason":"اذا مافي فاتوره، اكتب السبب",
+}
+# Fuzzy fallback keywords if a header is renamed slightly (lowercased contains-any).
+EXPENSE_SHEET_FUZZY = {
+    "timestamp":        ["timestamp", "طابع"],
+    "submitter":        ["مشرف", "supervisor"],
+    "expense_date":     ["تاريخ", "date"],
+    "apartment":        ["شقه", "شقة", "apartment"],
+    "maintenance_type": ["نوع", "type"],
+    "description":      ["وصف", "description"],
+    "notes":            ["ملاحظ", "notes"],
+    "amount":           ["تكلف", "مبلغ", "cost", "amount"],
+    "vat":              ["ضريبة", "vat"],
+    "vendor":           ["مورد", "مورّد", "vendor"],
+    "receipt_link":     ["رفع", "invoice", "receipt"],
+    "no_receipt_reason":["سبب", "reason"],
+}
+EXPENSE_DEFAULT_CATEGORY = os.environ.get("EXPENSE_DEFAULT_CATEGORY", "صيانة وإصلاحات")
 
 # ---- weekend rule (Thu/Fri): no midnight/noon tiers — a single softer discount at 5:30 PM ----
 WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split(",")
@@ -5845,6 +5881,121 @@ def _exp_ingest(sub):
     _expenses[eid] = exp
     _exp_process(exp)
     return exp, True
+
+def _exp_sheet_csv_url():
+    """Accept either a ready CSV/publish URL or a normal sheet link; derive a CSV
+    export URL from the spreadsheet id (+ gid if present) for the latter."""
+    u = EXPENSE_SHEET_CSV_URL
+    if not u:
+        return ""
+    if "output=csv" in u or "tqx=out:csv" in u or u.endswith(".csv"):
+        return u
+    m = re.search(r"/spreadsheets/d/(?:e/)?([A-Za-z0-9_-]+)", u)
+    if not m:
+        return u
+    sid = m.group(1)
+    g = re.search(r"[#&?]gid=(\d+)", u)
+    gid = g.group(1) if g else "0"
+    return f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid}"
+
+def _exp_parse_sheet_date(s):
+    """Best-effort → YYYY-MM-DD. Handles ISO and D/M/Y or M/D/Y; manager can fix later."""
+    s = str(s or "").strip()
+    if not s:
+        return ""
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = re.match(r"(\d{1,2})[/.](\d{1,2})[/.](\d{4})", s)
+    if m:
+        a, b, y = int(m.group(1)), int(m.group(2)), m.group(3)
+        if a > 12 and b <= 12:      d, mo = a, b      # clearly D/M/Y
+        elif b > 12 and a <= 12:    d, mo = b, a      # clearly M/D/Y
+        else:                       d, mo = a, b      # ambiguous → assume D/M/Y
+        return f"{y}-{mo:02d}-{d:02d}"
+    return s[:10]
+
+def _exp_sheet_colmap(headers):
+    """Map each logical field to a column index using exact header, then fuzzy."""
+    norm = [str(h or "").strip() for h in headers]
+    low = [h.lower() for h in norm]
+    idx = {}
+    for field, want in EXPENSE_SHEET_COLS.items():
+        c = next((i for i, h in enumerate(norm) if h == want), None)
+        if c is None:
+            for kw in EXPENSE_SHEET_FUZZY.get(field, []):
+                c = next((i for i, h in enumerate(low) if kw.lower() in h), None)
+                if c is not None:
+                    break
+        idx[field] = c
+    return idx
+
+def _exp_sheet_row_to_sub(idx, row):
+    """Turn one CSV row into an ingest submission dict (or None if empty/no amount)."""
+    def g(field):
+        c = idx.get(field)
+        return (row[c].strip() if (c is not None and c < len(row) and row[c] is not None) else "")
+    ts = g("timestamp")
+    submitter = g("submitter"); apartment = g("apartment"); amount = g("amount")
+    if not (apartment or amount or submitter):
+        return None
+    receipt = g("receipt_link"); norec = g("no_receipt_reason")
+    bits = []
+    if g("description"): bits.append(g("description"))
+    if g("notes"):       bits.append(g("notes"))
+    if g("vat"):         bits.append("الضريبة/VAT: " + g("vat"))
+    key = "|".join([ts, submitter, amount, apartment, g("expense_date")])
+    return {
+        "submission_id":     "gs-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:16],
+        "submitter":         submitter,
+        "apartment":         apartment,
+        "maintenance_type":  g("maintenance_type"),
+        "category":          EXPENSE_DEFAULT_CATEGORY,
+        "amount":            amount,
+        "expense_date":      _exp_parse_sheet_date(g("expense_date")),
+        "receipt_link":      receipt,
+        "no_receipt_reason": "" if receipt else norec,
+        "vendor":            g("vendor"),
+        "payment_method":    "",
+        "note":              " · ".join(bits),
+        "submitted_at":      ts or datetime.now(TZ).isoformat(timespec="seconds"),
+    }
+
+def _exp_poll_sheet():
+    """Fetch the shared Google Sheet as CSV and ingest any new rows. Idempotent
+    (rows dedupe by a stable submission_id). Returns count of newly-created expenses."""
+    url = _exp_sheet_csv_url()
+    if not url:
+        return 0
+    try:
+        r = requests.get(url, timeout=30, allow_redirects=True)
+        r.raise_for_status()
+        text = r.content.decode("utf-8-sig", errors="replace")
+    except Exception as e:
+        print("expense sheet poll: fetch error:", e)
+        return 0
+    import csv as _csv, io as _io
+    rows = list(_csv.reader(_io.StringIO(text)))
+    if len(rows) < 2:
+        return 0
+    idx = _exp_sheet_colmap(rows[0])
+    created = 0
+    for raw in rows[1:]:
+        if not any(str(c).strip() for c in raw):
+            continue
+        sub = _exp_sheet_row_to_sub(idx, raw)
+        if not sub:
+            continue
+        try:
+            _exp, was_new = _exp_ingest(sub)
+            if was_new:
+                created += 1
+        except Exception as e:
+            print("expense sheet poll: ingest error:", e)
+    if created:
+        persist_state()
+        log_event("ops", f"مصاريف الميدان · استورد {created} مصروف جديد من الشيت")
+    return created
 
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
@@ -17701,6 +17852,18 @@ async def dashboard_cache_loop():
     except Exception as e:
         print("dashboard cache error:", e)
 
+@tasks.loop(minutes=EXPENSE_SHEET_POLL_MIN)
+async def expense_sheet_loop():
+    """Poll the shared expense Google Sheet and ingest new rows (pull-based intake)."""
+    if not EXPENSE_SHEET_CSV_URL:
+        return
+    try:
+        n = await asyncio.to_thread(_exp_poll_sheet)
+        if n:
+            print(f"expense sheet: ingested {n} new row(s)")
+    except Exception as e:
+        print("expense sheet loop error:", e)
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
@@ -19147,6 +19310,8 @@ async def on_ready():
         persist_loop.start()
     if DASHBOARD_ENABLED and DASHBOARD_TOKEN and not dashboard_cache_loop.is_running():
         dashboard_cache_loop.start()   # warms the cache immediately, then every few minutes
+    if EXPENSE_SHEET_CSV_URL and not expense_sheet_loop.is_running():
+        expense_sheet_loop.start()     # pull-based field-expense intake from the shared sheet
     if PRICING_STRATEGY_ENABLED and not pricing_strategy_loop.is_running():
         pricing_strategy_loop.start()
     if not revenue_loop.is_running():

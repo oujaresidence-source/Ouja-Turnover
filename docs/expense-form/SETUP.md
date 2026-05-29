@@ -10,6 +10,34 @@ Wire **Google Form ⇄ Ouja system ⇄ Hostaway**. Follow in order. No coding ne
 
 ---
 
+## ⭐ الطريقة الموصى بها (بدون أي كود) — Pull-based, no Apps Script
+
+النظام **يسحب** الشيت بنفسه كل بضع دقائق ويستورد الصفوف الجديدة. ما تحتاج Apps Script ولا مشغّلات
+ولا تسجيل دخول Google للبرمجة. **خطوتين فقط:**
+
+1. **شارك الشيت للقراءة:** افتح الشيت → **Share / مشاركة** → غيّر إلى **"Anyone with the link →
+   Viewer / أي شخص لديه الرابط → مُشاهد"** → انسخ الرابط.
+2. **أضف متغيّر واحد على Railway:** Variables → أضف:
+   - الاسم: `EXPENSE_SHEET_CSV_URL`
+   - القيمة: رابط الشيت اللي نسخته (النظام يحوّله تلقائياً لصيغة CSV).
+   - (اختياري) `EXPENSE_SHEET_POLL_MIN` = كل كم دقيقة يسحب (الافتراضي 3).
+
+خلاص — بعد إعادة تشغيل Railway، أي صف جديد بالشيت يدخل تلقائياً خلال دقائق، يمرّ على نفس الفحوصات،
+وغير المطابق بالشقة يُحجَز للمراجعة (كما طلبت). الشقق تُطابَق مع Hostaway تلقائياً.
+
+> ملاحظات: هذي الطريقة لا تكتب الحالة رجوع في الشيت ولا تزامن قوائم النموذج (راجع الداشبورد كمرجع
+> أساسي). لو تبي هذي الميزتين، استخدم طريقة Apps Script بالأسفل بدلاً منها.
+>
+> Two steps only: share the sheet "Anyone with link → Viewer", then add `EXPENSE_SHEET_CSV_URL`
+> on Railway. The bot pulls new rows automatically. (No sheet status write-back / no dropdown
+> auto-sync — use the Apps Script method below if you want those.)
+
+---
+
+## الطريقة البديلة (Apps Script) — gives status write-back + dropdown sync
+
+---
+
 ## الخطوة 0 — متغيّر السر على Railway / Step 0 — Secret on Railway
 
 1. افتح Railway → الخدمة (worker) → تبويب **Variables**.
