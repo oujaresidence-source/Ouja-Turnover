@@ -5882,21 +5882,62 @@ def _exp_ingest(sub):
     _exp_process(exp)
     return exp, True
 
-def _exp_sheet_csv_url():
-    """Accept either a ready CSV/publish URL or a normal sheet link; derive a CSV
-    export URL from the spreadsheet id (+ gid if present) for the latter."""
+def _exp_sheet_csv_candidates():
+    """From the configured link, build a list of CSV URLs to try in order.
+    Handles the common gid mismatch (a sheet's first tab is rarely gid=0) by also
+    trying without gid and via the gviz endpoint."""
     u = EXPENSE_SHEET_CSV_URL
     if not u:
-        return ""
+        return []
     if "output=csv" in u or "tqx=out:csv" in u or u.endswith(".csv"):
-        return u
+        return [u]
     m = re.search(r"/spreadsheets/d/(?:e/)?([A-Za-z0-9_-]+)", u)
     if not m:
-        return u
+        return [u]
     sid = m.group(1)
+    base = f"https://docs.google.com/spreadsheets/d/{sid}"
     g = re.search(r"[#&?]gid=(\d+)", u)
-    gid = g.group(1) if g else "0"
-    return f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid}"
+    gid = g.group(1) if g else None
+    cands = []
+    if gid:
+        cands.append(f"{base}/export?format=csv&gid={gid}")
+        cands.append(f"{base}/gviz/tq?tqx=out:csv&gid={gid}")
+    cands.append(f"{base}/export?format=csv")            # default = first sheet
+    cands.append(f"{base}/gviz/tq?tqx=out:csv")
+    return cands
+
+def _exp_sheet_csv_url():
+    cands = _exp_sheet_csv_candidates()
+    return cands[0] if cands else ""
+
+def _exp_fetch_sheet(timeout=20):
+    """Try each candidate URL until one returns real CSV (not an HTML page).
+    Returns dict {text, url, status, content_type, bytes, error}."""
+    out = {"text": None, "url": "", "status": None, "content_type": "",
+           "bytes": 0, "error": None}
+    cands = _exp_sheet_csv_candidates()
+    if not cands:
+        out["error"] = "EXPENSE_SHEET_CSV_URL not set on Railway"
+        return out
+    last = None
+    for url in cands:
+        try:
+            r = requests.get(url, timeout=timeout, allow_redirects=True)
+            ct = r.headers.get("Content-Type", "")
+            body = r.content or b""
+            txt = body.decode("utf-8-sig", errors="replace")
+            head = txt.lstrip()[:200].lower()
+            is_html = head.startswith("<!doctype") or head.startswith("<html") or "<head" in head
+            last = {"text": txt, "url": url, "status": r.status_code,
+                    "content_type": ct, "bytes": len(body),
+                    "error": None if (r.ok and not is_html) else
+                             ("HTTP %d / %s" % (r.status_code, "html" if is_html else "error"))}
+            if r.ok and not is_html and ("," in txt or "\n" in txt):
+                return last
+        except Exception as e:
+            last = {"text": None, "url": url, "status": None, "content_type": "",
+                    "bytes": 0, "error": "fetch error: " + str(e)[:160]}
+    return last or out
 
 def _exp_parse_sheet_date(s):
     """Best-effort → YYYY-MM-DD. Handles ISO and D/M/Y or M/D/Y; manager can fix later."""
@@ -5910,9 +5951,9 @@ def _exp_parse_sheet_date(s):
     if m:
         a, b, y = int(m.group(1)), int(m.group(2)), m.group(3)
         if a > 12 and b <= 12:      d, mo = a, b      # clearly D/M/Y
-        elif b > 12 and a <= 12:    d, mo = b, a      # clearly M/D/Y
-        else:                       d, mo = a, b      # ambiguous → assume D/M/Y
-        return f"{y}-{mo:02d}-{d:02d}"
+        elif b > 12 and a <= 12:    mo, d = a, b      # clearly M/D/Y
+        else:                       mo, d = a, b      # ambiguous → M/D/Y (Google Sheets default)
+        return f"{y}-{mo:02d}-{int(d):02d}"
     return s[:10]
 
 def _exp_sheet_colmap(headers):
@@ -5972,23 +6013,20 @@ def _exp_poll_sheet():
             "http_status": None, "content_type": "", "bytes": 0,
             "rows_parsed": 0, "data_rows": 0, "headers": [], "mapped": {},
             "looks_like_html": False, "error": None, "created": 0}
-    url = _exp_sheet_csv_url()
-    diag["resolved_url"] = url
-    if not url:
+    if not EXPENSE_SHEET_CSV_URL:
         diag["error"] = "EXPENSE_SHEET_CSV_URL not set on Railway"
         _exp_sheet_diag = diag
         return 0
-    try:
-        r = requests.get(url, timeout=30, allow_redirects=True)
-        diag["http_status"] = r.status_code
-        diag["content_type"] = r.headers.get("Content-Type", "")
-        diag["bytes"] = len(r.content or b"")
-        r.raise_for_status()
-        text = r.content.decode("utf-8-sig", errors="replace")
-    except Exception as e:
-        diag["error"] = "fetch error: " + str(e)[:200]
+    fetched = _exp_fetch_sheet(timeout=30)
+    diag["resolved_url"] = fetched.get("url", "")
+    diag["http_status"] = fetched.get("status")
+    diag["content_type"] = fetched.get("content_type", "")
+    diag["bytes"] = fetched.get("bytes", 0)
+    text = fetched.get("text")
+    if not text:
+        diag["error"] = fetched.get("error") or "no data returned"
         _exp_sheet_diag = diag
-        print("expense sheet poll: fetch error:", e)
+        print("expense sheet poll: fetch error:", diag["error"])
         return 0
     head = text.lstrip()[:200].lower()
     diag["looks_like_html"] = head.startswith("<!doctype") or head.startswith("<html") or "<head" in head
@@ -6034,20 +6072,17 @@ def _exp_sheet_probe():
             "http_status": None, "content_type": "", "bytes": 0, "rows_parsed": 0,
             "data_rows": 0, "headers": [], "mapped": {}, "sample": None,
             "looks_like_html": False, "error": None}
-    url = _exp_sheet_csv_url()
-    diag["resolved_url"] = url
-    if not url:
+    if not EXPENSE_SHEET_CSV_URL:
         diag["error"] = "EXPENSE_SHEET_CSV_URL not set on Railway"
         return diag
-    try:
-        r = requests.get(url, timeout=20, allow_redirects=True)
-        diag["http_status"] = r.status_code
-        diag["content_type"] = r.headers.get("Content-Type", "")
-        diag["bytes"] = len(r.content or b"")
-        r.raise_for_status()
-        text = r.content.decode("utf-8-sig", errors="replace")
-    except Exception as e:
-        diag["error"] = "fetch error: " + str(e)[:200]
+    fetched = _exp_fetch_sheet(timeout=20)
+    diag["resolved_url"] = fetched.get("url", "")
+    diag["http_status"] = fetched.get("status")
+    diag["content_type"] = fetched.get("content_type", "")
+    diag["bytes"] = fetched.get("bytes", 0)
+    text = fetched.get("text")
+    if not text:
+        diag["error"] = fetched.get("error") or "no data returned"
         return diag
     head = text.lstrip()[:200].lower()
     diag["looks_like_html"] = head.startswith("<!doctype") or head.startswith("<html") or "<head" in head
