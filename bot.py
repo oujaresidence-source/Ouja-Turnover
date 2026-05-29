@@ -10126,7 +10126,7 @@ async function expReconcile(){
   if(!confirm(L==='ar'?'نسحب كل الشيت ونقارنه مع Hostaway؟':'Pull the whole sheet and compare with Hostaway?')) return;
   toast(L==='ar'?'⏳ نسحب ونقارن…':'⏳ Pulling & comparing…');
   var s; try{ s=await post('/api/expenses/reconcile',{apply:false}); }catch(e){ toast('⚠ '+e); return; }
-  var msg=(L==='ar'
+  var msg=(s.error?((L==='ar'?'⚠ خطأ بالخادم: ':'⚠ Server error: ')+s.error+NL+NL):'')+(L==='ar'
     ? ('سحبنا '+s.pulled_from_sheet+' صف من الشيت · إجمالي المصاريف '+s.total_expenses+NL
       +'موجودة بـHostaway: '+s.already_in_hostaway+' · ناقصة: '+s.missing+NL
       +'بانتظار المراجعة: '+s.held+' · غير مطابقة شقة: '+s.unmatched)
@@ -16619,8 +16619,14 @@ async def _api_expenses_reconcile(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
     apply = bool(b.get("apply")) or request.query.get("apply") in ("1", "true", "yes")
-    summary = await asyncio.to_thread(_exp_reconcile, apply)
-    return _json(summary)
+    try:
+        summary = await asyncio.to_thread(_exp_reconcile, apply)
+        return _json(summary)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json({"error": str(e)[:400], "pulled_from_sheet": 0, "total_expenses": 0,
+                      "hostaway_fetch_ok": False, "sheet_debug": dict(_exp_sheet_diag)})
 
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
