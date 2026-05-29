@@ -30,6 +30,8 @@ import re
 import io
 import json
 import time
+import html as _html
+import base64
 import random
 import asyncio
 import hashlib
@@ -3247,6 +3249,104 @@ def claude_json(system, user, max_tokens=900, model=None):
         print("claude_json: parse failed, raw=", txt[:300])
         return None
 
+_PMO_EQUATION_SYSTEM = (
+    "You read an interior fit-out / furnishing 'equation' (المعادلة) — a quotation or "
+    "bill-of-materials document for a Saudi apartment, usually Arabic tables. Your job is to "
+    "extract EVERY line item that needs to be bought, fixed, or installed.\n\n"
+    "The tables may be messy: columns in any order, merged cells, Arabic + numbers mixed, "
+    "RTL layout, prices with ر.س/SAR, quantities written as عدد/كمية. Be robust — if a value "
+    "is missing, leave it blank rather than guessing. Never invent items that aren't there. "
+    "If the document is unreadable, return an empty items list.\n\n"
+    "For each item output:\n"
+    "  name  — the item, short and clear (Arabic if the doc is Arabic). e.g. 'كنب 3 مقاعد'.\n"
+    "  room  — best-guess room/category in Arabic (e.g. 'غرفة المعيشة','غرفة النوم الرئيسية',"
+    "'المطبخ','دورة المياه','المدخل','عام'). Use 'عام' if you truly can't tell.\n"
+    "  qty   — integer quantity, default 1 if not stated.\n"
+    "  cost  — unit or line cost as a number in SAR if present, else null (do NOT guess).\n\n"
+    "Return STRICT JSON only, no prose, no markdown fences:\n"
+    '{\"items\":[{\"name\":\"...\",\"room\":\"...\",\"qty\":1,\"cost\":1250}, ...],'
+    '\"partial\":false}\n'
+    "Set partial=true if the document was hard to read and some items may be missing."
+)
+
+def claude_extract_equation(pdf_bytes, model=None):
+    """Send the fit-out 'equation' PDF to Claude (native PDF document block) and
+    extract line items. Returns {'items':[{name,room,qty,cost}], 'partial':bool}
+    or None on hard failure. Uses the premium model for table accuracy."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
+    except Exception as e:
+        print("equation b64 error:", e)
+        return None
+    content = [
+        {"type": "document",
+         "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
+        {"type": "text", "text": "استخرج كل البنود من هذه المعادلة وأرجعها JSON فقط حسب التعليمات."},
+    ]
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": model or CLAUDE_MODEL_PREMIUM, "max_tokens": 8000,
+                      "system": _PMO_EQUATION_SYSTEM,
+                      "messages": [{"role": "user", "content": content}]},
+                timeout=180,
+            )
+            if r.status_code in (429, 500, 503, 529):
+                last_err = f"HTTP {r.status_code}"
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            r.raise_for_status()
+            blocks = r.json().get("content", []) or []
+            txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+            txt = txt.replace("```json", "").replace("```", "").strip()
+            data = None
+            try:
+                data = json.loads(txt)
+            except Exception:
+                m = re.search(r"\{.*\}", txt, re.DOTALL)
+                if m:
+                    try:
+                        data = json.loads(m.group(0))
+                    except Exception:
+                        data = None
+            if data is None:
+                print("equation parse failed, raw=", txt[:300])
+                return None
+            raw_items = data.get("items") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            partial = bool(data.get("partial")) if isinstance(data, dict) else False
+            out = []
+            for it in (raw_items or []):
+                if not isinstance(it, dict):
+                    continue
+                name = (str(it.get("name") or "")).strip()[:160]
+                if not name:
+                    continue
+                room = (str(it.get("room") or "عام")).strip()[:60] or "عام"
+                try:
+                    qty = int(float(it.get("qty") or 1))
+                except Exception:
+                    qty = 1
+                if qty < 1:
+                    qty = 1
+                cost = it.get("cost")
+                try:
+                    cost = float(cost) if cost not in (None, "", "null") else None
+                except Exception:
+                    cost = None
+                out.append({"name": name, "room": room, "qty": qty, "cost": cost})
+            return {"items": out, "partial": partial}
+        except Exception as e:
+            last_err = e
+            time.sleep(min(2 ** attempt, 8))
+    print("claude_extract_equation error:", last_err)
+    return None
+
 # Reusable dialect lock — appended to every Arabic-generating system prompt so
 # we get consistent Najdi/white-Saudi output across all paths (drafts, distill,
 # acks, manager scripts). Centralising it keeps the rules in one place.
@@ -5307,6 +5407,133 @@ def _new_design_ref():
     nxt = max(used) + 1 if used else 1
     return f"{prefix}{nxt:04d}"
 
+# ===================== PMO — APARTMENT FIT-OUT PROJECTS =====================
+# Full project-management flow for a unit going through fit-out/turnover:
+# intake → upload the "equation" PDF → review-extracted tasks → task board
+# (5 weighted statuses, grouped-by-room) → milestone timeline → view-only owner
+# link. Costs are internal-only and never exposed on the owner link.
+_pmo_projects = {}    # project_id -> project dict
+_pmo_templates = {}   # template_id -> {id, name, room, tasks:[{name, qty}]}
+
+# Status -> weight for the auto progress formula (§3.6). "blocked" is special:
+# excluded entirely from the calculation (not 0).
+PMO_STATUS_WEIGHTS = {
+    "not_started":   0,
+    "in_progress":   40,
+    "final_touches": 75,
+    "done":          100,
+}
+PMO_STATUSES = ["not_started", "in_progress", "final_touches", "done", "blocked"]
+
+# Fixed default milestone stages (§3.8), (arabic, english).
+PMO_MILESTONES = [
+    ("تم التواصل",            "Contacted"),
+    ("اجتماع تصميم داخلي",    "Internal design meeting"),
+    ("تم رفع العرض",          "Quotation sent"),
+    ("تحت المعاينة",          "Under inspection"),
+    ("تم الدفع",              "Paid"),
+    ("التثبيت تام",           "Installation complete"),
+    ("تصميم المرفق السكني",   "Compound/common-area styling"),
+    ("تسليم العقار",          "Property handover"),
+    ("تشغيل العقار",          "Property go-live"),
+]
+
+def _new_pmo_id():
+    return f"pmo_{int(time.time()*1000)}_{random.randint(100,999)}"
+
+def _new_pmo_task_id():
+    return f"t_{int(time.time()*1000)}_{random.randint(1000,9999)}"
+
+def _new_pmo_template_id():
+    return f"tpl_{int(time.time()*1000)}_{random.randint(100,999)}"
+
+def _new_pmo_ref():
+    """OJ-PMO-XXXX auto-incrementing across all projects."""
+    prefix = "OJ-PMO-"
+    used = set()
+    for p in _pmo_projects.values():
+        r = p.get("ref", "")
+        if r.startswith(prefix):
+            try:
+                used.add(int(r.rsplit("-", 1)[-1]))
+            except Exception:
+                pass
+    nxt = max(used) + 1 if used else 1
+    return f"{prefix}{nxt:04d}"
+
+def _pmo_owner_token():
+    """Long, unguessable token for the view-only owner link."""
+    return _secrets_mod.token_urlsafe(24)
+
+def _ouja_prefix(name):
+    """Force the 'Ouja |' prefix on a unit name (§0.2). Idempotent."""
+    name = (name or "").strip()
+    if not name:
+        return name
+    low = name.lower()
+    if low.startswith("ouja |") or name.startswith("عوجا |") or low.startswith("ouja|") or name.startswith("عوجا|"):
+        return name
+    return f"Ouja | {name}"
+
+def _pmo_default_milestones():
+    return [{"ar": ar, "en": en, "reached_at": None} for ar, en in PMO_MILESTONES]
+
+def _pmo_progress(tasks):
+    """Overall/per-room progress per §3.6. Returns an int percent, or None when
+    every counted task is Blocked (caller shows '—'). Zero tasks → 0."""
+    tasks = tasks or []
+    if not tasks:
+        return 0
+    counted = [t for t in tasks if (t.get("status") or "not_started") != "blocked"]
+    if not counted:
+        return None   # all blocked → '—'
+    total = sum(PMO_STATUS_WEIGHTS.get(t.get("status") or "not_started", 0) for t in counted)
+    return int(round(total / len(counted)))
+
+def _pmo_rooms_of(project):
+    """Ordered list of room names for a project. Falls back to rooms inferred
+    from the tasks if the explicit rooms list is empty."""
+    rooms = list(project.get("rooms") or [])
+    for t in project.get("tasks") or []:
+        rm = (t.get("room") or "").strip()
+        if rm and rm not in rooms:
+            rooms.append(rm)
+    return rooms
+
+def _pmo_status_label(project):
+    """Coarse project status used by the list filter: completed / blocked /
+    in_progress. 'Blocked' = has a blocked task and nothing moved this week."""
+    tasks = project.get("tasks") or []
+    if tasks and all((t.get("status") == "done" or t.get("status") == "blocked") for t in tasks) \
+            and any(t.get("status") == "done" for t in tasks):
+        # all non-blocked tasks done
+        if all(t.get("status") == "done" for t in tasks):
+            return "completed"
+    prog = _pmo_progress(tasks)
+    if prog == 100:
+        return "completed"
+    has_blocked = any(t.get("status") == "blocked" for t in tasks)
+    # "moved this week" = any task updated in the last 7 days
+    moved = False
+    cutoff = (datetime.now(TZ) - timedelta(days=7)).isoformat()
+    for t in tasks:
+        if (t.get("updated_at") or "") >= cutoff:
+            moved = True
+            break
+    if has_blocked and not moved:
+        return "blocked"
+    return "in_progress"
+
+def _pmo_log(project, who, text):
+    """Append a newest-first activity-log line (team-only)."""
+    project.setdefault("log", [])
+    project["log"].insert(0, {
+        "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+        "who": who or "—",
+        "text": text,
+    })
+    project["log"] = project["log"][:500]
+
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
@@ -5353,7 +5580,7 @@ _sessions = {}              # session_token -> {user_id, expires_at}
 _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
-    "users", "quote", "weekly", "design",
+    "users", "quote", "weekly", "design", "pmo",
 ]
 
 def _default_perms(role):
@@ -6652,6 +6879,30 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="designsBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ PMO — FIT-OUT PROJECTS (تجهيز الشقق) ============ -->
+      <section class="view" id="view_pmo">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🏗️ تجهيز الشقق</div>
+            <div class="page-sub">إدارة مشاريع التجهيز من المعادلة إلى التسليم</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" onclick="pmoNewProject()">➕ مشروع جديد</button>
+            <button class="btn ghost sm" onclick="loadPmo()">↻</button>
+          </div>
+        </div>
+        <div class="page-help" data-help-key="pmo">
+          <button class="ph-x" onclick="dismissHelp('pmo')" title="إخفاء">×</button>
+          <div class="ph-t">🏗️ تجهيز الشقق (PMO)</div>
+          <div class="ph-b">
+            تابع كل شقة من <b>المعادلة</b> لين <b>التسليم</b>: ارفع ملف المعادلة (PDF)
+            يتحوّل تلقائياً لمهام، حدّث حالة كل مهمة، تابع نسبة الإنجاز والمراحل،
+            وأرسل للمالك <b>رابط متابعة</b> يشوف فيه التقدّم بدون أسعار.
+          </div>
+        </div>
+        <div id="pmoBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ USERS (المستخدمون) ============ -->
       <section class="view" id="view_users">
         <div class="page-head">
@@ -7076,7 +7327,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -7268,7 +7519,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -7699,6 +7950,7 @@ const NAV = [
   {id:'quote',   ic:'📄', tk:'quote'},
   {id:'weekly',  ic:'📊', tk:'weekly'},
   {id:'design',  ic:'🛋️', tk:'design'},
+  {id:'pmo',     ic:'🏗️', tk:'pmo'},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -7886,6 +8138,7 @@ function go(id){
   if(id==='quote') loadQuotes();
   if(id==='weekly') loadWeekly();
   if(id==='design') loadDesigns();
+  if(id==='pmo') loadPmo();
 }
 
 /* ============================================================
@@ -9193,6 +9446,629 @@ function printDesign(){
   w.document.close();
 }
 
+/* ============================================================
+   PMO — FIT-OUT PROJECTS (تجهيز الشقق)
+   ============================================================ */
+var _pmoP = null;        // current open project (full view)
+var _pmoView = 'rooms';  // 'rooms' | 'kanban'
+var _pmoEq = null;       // parsed equation items pending review
+var _pmoFilter = 'all';
+var _pmoSort = 'updated';
+var _pmoSearch = '';
+
+var PMO_ST = {
+  not_started:   {ar:'لم يبدأ',        en:'Not started',   c:'#6b7280'},
+  in_progress:   {ar:'جاري التنفيذ',   en:'In progress',   c:'#2563eb'},
+  final_touches: {ar:'اللمسات الأخيرة',en:'Final touches',  c:'#d97706'},
+  done:          {ar:'مكتمل',          en:'Done',          c:'#16a34a'},
+  blocked:       {ar:'متوقف / بانتظار',en:'Blocked',       c:'#dc2626'}
+};
+var PMO_ST_ORDER = ['not_started','in_progress','final_touches','done','blocked'];
+function _pmoStLbl(s){ var o=PMO_ST[s]||PMO_ST.not_started; return L==='ar'?o.ar:o.en; }
+function _pmoStC(s){ return (PMO_ST[s]||PMO_ST.not_started).c; }
+
+function pmoMoney(n){
+  if(n==null||n==='') return '—';
+  var s = fmt(n);
+  return L==='ar' ? (s+' ر.س') : ('SAR '+s);
+}
+function pmoDate(iso){
+  if(!iso) return '';
+  try{ return new Date(iso).toLocaleDateString(L==='ar'?'ar-SA':'en-US',{day:'numeric',month:'short',year:'numeric'}); }
+  catch(_){ return iso; }
+}
+function pmoDaysLeft(iso){
+  if(!iso) return null;
+  var d = new Date(iso+'T00:00:00'); if(isNaN(d)) return null;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var diff = Math.round((d - today)/86400000);
+  if(diff<0) return {over:true, txt:(L==='ar'?('متأخر '+Math.abs(diff)+' يوم'):(Math.abs(diff)+' days overdue'))};
+  if(diff===0) return {over:false, txt:(L==='ar'?'اليوم':'today')};
+  return {over:false, txt:(L==='ar'?('باقي '+diff+' يوم'):(diff+' days left'))};
+}
+function pmoOwnerUrl(tok){ return window.location.origin + '/pmo/o/' + tok; }
+function _waDigits(s){ return (s||'').replace(/[^0-9]/g,''); }
+
+/* ---------- list ---------- */
+async function loadPmo(){
+  _pmoP = null;
+  var body = document.getElementById('pmoBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
+  try{ D.pmo = await api('/api/pmo/list'); }catch(_){ D.pmo = {projects:[],summary:{}}; }
+  _renderPmoList();
+}
+function _renderPmoList(){
+  var body = document.getElementById('pmoBody'); if(!body) return;
+  var d = D.pmo || {projects:[],summary:{}};
+  var sm = d.summary || {};
+  var ar = (L==='ar');
+  var h = '';
+  // counters
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div class="card" style="flex:1;min-width:90px;text-align:center;padding:12px"><div style="font-size:22px;font-weight:800">'+(sm.total||0)+'</div><div class="muted" style="font-size:11px">'+(ar?'المشاريع':'Projects')+'</div></div>';
+  h += '<div class="card" style="flex:1;min-width:90px;text-align:center;padding:12px"><div style="font-size:22px;font-weight:800;color:var(--gold)">'+(sm.in_progress||0)+'</div><div class="muted" style="font-size:11px">'+(ar?'قيد العمل':'In progress')+'</div></div>';
+  h += '<div class="card" style="flex:1;min-width:90px;text-align:center;padding:12px"><div style="font-size:22px;font-weight:800;color:var(--green)">'+(sm.completed||0)+'</div><div class="muted" style="font-size:11px">'+(ar?'مكتملة':'Completed')+'</div></div>';
+  h += '</div>';
+  // search + filter + sort
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<input id="pmoSearch" oninput="_pmoSearch=this.value;_pmoRenderCards()" value="'+esc(_pmoSearch)+'" placeholder="'+(ar?'ابحث باسم العميل أو الوحدة':'Search by client or unit')+'" style="flex:1;min-width:160px;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">';
+  h += '<select id="pmoFilter" onchange="_pmoFilter=this.value;_pmoRenderCards()" style="padding:9px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">'
+     + '<option value="all">'+(ar?'الكل':'All')+'</option>'
+     + '<option value="in_progress">'+(ar?'قيد العمل':'In progress')+'</option>'
+     + '<option value="completed">'+(ar?'مكتملة':'Completed')+'</option>'
+     + '<option value="blocked">'+(ar?'متوقفة':'Blocked')+'</option></select>';
+  h += '<select id="pmoSort" onchange="_pmoSort=this.value;_pmoRenderCards()" style="padding:9px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">'
+     + '<option value="updated">'+(ar?'آخر تحديث':'Recently updated')+'</option>'
+     + '<option value="created">'+(ar?'الأحدث إنشاءً':'Newest')+'</option>'
+     + '<option value="handover">'+(ar?'أقرب تسليم':'Nearest handover')+'</option>'
+     + '<option value="prog_low">'+(ar?'أقل إنجاز':'Lowest progress')+'</option>'
+     + '<option value="prog_high">'+(ar?'أعلى إنجاز':'Highest progress')+'</option></select>';
+  h += '</div>';
+  h += '<div id="pmoCards"></div>';
+  body.innerHTML = h;
+  var f=document.getElementById('pmoFilter'); if(f) f.value=_pmoFilter;
+  var s=document.getElementById('pmoSort'); if(s) s.value=_pmoSort;
+  _pmoRenderCards();
+}
+function _pmoRenderCards(){
+  var wrap = document.getElementById('pmoCards'); if(!wrap) return;
+  var ar = (L==='ar');
+  var items = ((D.pmo||{}).projects||[]).slice();
+  var q = (_pmoSearch||'').trim().toLowerCase();
+  if(q) items = items.filter(function(p){ return ((p.unit_name||'')+' '+(p.client_name||'')).toLowerCase().indexOf(q)>=0; });
+  if(_pmoFilter!=='all') items = items.filter(function(p){ return p.status_label===_pmoFilter; });
+  items.sort(function(a,b){
+    if(_pmoSort==='created') return (b.created_at||'').localeCompare(a.created_at||'');
+    if(_pmoSort==='handover') return (a.handover_date||'9999').localeCompare(b.handover_date||'9999');
+    if(_pmoSort==='prog_low') return (a.progress==null?999:a.progress)-(b.progress==null?999:b.progress);
+    if(_pmoSort==='prog_high') return (b.progress==null?-1:b.progress)-(a.progress==null?-1:a.progress);
+    return (b.updated_at||'').localeCompare(a.updated_at||'');
+  });
+  if(!items.length){
+    wrap.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🏗️</div><div class="muted">'+(ar?'ما فيه مشاريع. اضغط "مشروع جديد" عشان تبدأ.':'No projects yet. Create your first project to start.')+'</div></div>';
+    return;
+  }
+  var h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for(var i=0;i<items.length;i++){
+    var p = items[i];
+    var prog = (p.progress==null)?'—':(p.progress+'%');
+    var bw = (p.progress==null)?0:p.progress;
+    var ms = p.milestone ? (ar?(p.milestone.ar||''):(p.milestone.en||'')) : '';
+    var dl = pmoDaysLeft(p.handover_date);
+    h += '<div class="card" style="padding:14px;cursor:pointer" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+'</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(p.client_name||'')+(p.district?(' · '+esc(p.district)):'')+'</div></div>'
+      + '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-weight:800;font-size:16px">'+prog+'</div></div></div>'
+      + '<div style="height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:9px 0 7px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span class="muted" style="font-size:11px">'+(ms?('🚩 '+esc(ms)):'')+'</span>'
+      + (dl?('<span style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</span>'):'')
+      + '</div>'
+      + '<div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">'
+      + '<button class="btn ghost xs" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'+(ar?'افتح':'Open')+'</button>'
+      + '<button class="btn ghost xs" onclick="pmoCopyOwnerById(&#39;'+esc(p.id)+'&#39;)">'+(ar?'انسخ رابط المالك':'Copy owner link')+'</button>'
+      + '</div></div>';
+  }
+  h += '</div>';
+  wrap.innerHTML = h;
+}
+async function pmoCopyOwnerById(id){
+  try{ var x = await api('/api/pmo/get?id='+encodeURIComponent(id)); var p=x.project;
+    if(!p.owner_token){ var r=await post('/api/pmo/owner-link',{pid:id,action:'generate'}); p.owner_token=r.owner_token; }
+    _rvCopyText(pmoOwnerUrl(p.owner_token)); toast(L==='ar'?'✓ نُسخ رابط المالك':'✓ Owner link copied');
+  }catch(_){ toast('خطأ'); }
+}
+function _rvCopyText(txt){
+  try{ navigator.clipboard.writeText(txt); }
+  catch(_){ var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch(e){} document.body.removeChild(ta); }
+}
+
+/* ---------- overlay ---------- */
+function _pmoOv(){
+  var ov = document.getElementById('pmoOverlay'); if(ov) return ov;
+  ov = document.createElement('div'); ov.id='pmoOverlay';
+  ov.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9994;padding:18px;overflow-y:auto';
+  ov.innerHTML='<div id="pmoOvBody" style="background:var(--surface);max-width:720px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
+  document.body.appendChild(ov); return ov;
+}
+function pmoCloseOv(){ var ov=document.getElementById('pmoOverlay'); if(ov) ov.style.display='none'; }
+
+/* ---------- intake ---------- */
+function pmoNewProject(){
+  var ov=_pmoOv(); var ar=(L==='ar');
+  function fld(id,lbl,req,ph,type){ return '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+lbl+(req?' <span style="color:var(--red)">*</span>':'')+'</label><input id="'+id+'" type="'+(type||'text')+'" placeholder="'+(ph||'')+'" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)"><div class="pmo-err" data-for="'+id+'" style="color:var(--red);font-size:11px;margin-top:3px"></div></div>'; }
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:18px;font-weight:800">🏗️ '+(ar?'مشروع جديد':'New Project')+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  h += '<div style="font-weight:700;color:var(--gold);margin:8px 0 6px">'+(ar?'العميل':'Client')+'</div>';
+  h += fld('pmi_cname', ar?'اسم العميل':'Client name', true, '');
+  h += fld('pmi_cwa', ar?'واتساب العميل':'Client WhatsApp', true, '+966 5X XXX XXXX', 'tel');
+  h += fld('pmi_cemail', ar?'الإيميل':'Email', false, '', 'email');
+  h += '<div style="font-weight:700;color:var(--gold);margin:14px 0 6px">'+(ar?'الوحدة':'Unit')+'</div>';
+  h += fld('pmi_uname', ar?'اسم الوحدة (يبدأ بـ Ouja |)':'Unit name (Ouja | …)', true, 'Ouja | ');
+  h += fld('pmi_dist', ar?'الحي / المجمع':'District / Compound', true, '');
+  h += '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+(ar?'النوع':'Unit type')+'</label><select id="pmi_utype" style="width:100%;padding:9px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)"><option value="">—</option><option>Studio</option><option>1BR</option><option>2BR</option><option>3BR</option><option>Villa</option><option>Other</option></select></div>';
+  h += '<div style="display:flex;gap:8px">'+'<div style="flex:1">'+fld('pmi_floor', ar?'الدور':'Floor', false,'')+'</div><div style="flex:1">'+fld('pmi_bldg', ar?'رقم المبنى':'Building', false,'')+'</div><div style="flex:1">'+fld('pmi_area', ar?'المساحة م²':'Area m²', false,'','number')+'</div></div>';
+  h += '<div style="font-weight:700;color:var(--gold);margin:14px 0 6px">'+(ar?'المشروع':'Project')+'</div>';
+  h += fld('pmi_style', ar?'النمط المطلوب':'Desired style', false, '');
+  h += '<div style="display:flex;gap:8px"><div style="flex:1">'+fld('pmi_budget', ar?'الميزانية (ر.س)':'Budget (SAR)', false,'','number')+'</div><div style="flex:1">'+fld('pmi_handover', ar?'تاريخ التسليم':'Target handover', false,'','date')+'</div></div>';
+  h += fld('pmi_sup', ar?'المشرف / المصمم':'Supervisor / designer', true, '');
+  h += '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+(ar?'ملاحظات':'Notes')+'</label><textarea id="pmi_notes" maxlength="600" rows="3" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)"></textarea></div>';
+  h += '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" style="flex:1" onclick="pmoSaveIntake()">'+(ar?'إنشاء المشروع':'Create Project')+'</button><button class="btn ghost" onclick="pmoCloseOv()">'+(ar?'إلغاء':'Cancel')+'</button></div>';
+  document.getElementById('pmoOvBody').innerHTML = h;
+  ov.style.display='block';
+}
+function _pmoVal(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
+function _pmoShowErr(id,msg){ var e=document.querySelector('.pmo-err[data-for="'+id+'"]'); if(e) e.textContent=msg||''; var inp=document.getElementById(id); if(inp) inp.style.borderColor=msg?'var(--red)':'var(--border)'; }
+async function pmoSaveIntake(){
+  var ar=(L==='ar');
+  ['pmi_cname','pmi_cwa','pmi_uname','pmi_dist','pmi_sup'].forEach(function(id){_pmoShowErr(id,'');});
+  var body = {
+    client:{name:_pmoVal('pmi_cname'), whatsapp:_pmoVal('pmi_cwa'), email:_pmoVal('pmi_cemail')},
+    unit:{name:_pmoVal('pmi_uname'), district:_pmoVal('pmi_dist'), type:_pmoVal('pmi_utype'), floor:_pmoVal('pmi_floor'), building:_pmoVal('pmi_bldg'), area:_pmoVal('pmi_area')},
+    style:_pmoVal('pmi_style'), budget:_pmoVal('pmi_budget'), handover_date:_pmoVal('pmi_handover'),
+    supervisor:_pmoVal('pmi_sup'), notes:(document.getElementById('pmi_notes')||{}).value||''
+  };
+  var miss=false;
+  if(!body.client.name){_pmoShowErr('pmi_cname',ar?'مطلوب':'Required');miss=true;}
+  if(!body.client.whatsapp){_pmoShowErr('pmi_cwa',ar?'مطلوب':'Required');miss=true;}
+  else if(_waDigits(body.client.whatsapp).length<8){_pmoShowErr('pmi_cwa',ar?'رقم غير صحيح':'Invalid number');miss=true;}
+  if(!body.unit.name){_pmoShowErr('pmi_uname',ar?'مطلوب':'Required');miss=true;}
+  if(!body.unit.district){_pmoShowErr('pmi_dist',ar?'مطلوب':'Required');miss=true;}
+  if(!body.supervisor){_pmoShowErr('pmi_sup',ar?'مطلوب':'Required');miss=true;}
+  if(miss) return;
+  var r = await post('/api/pmo/create', body);
+  if(r.error==='validation'){ for(var k in (r.fields||{})){ var map={'client.name':'pmi_cname','client.whatsapp':'pmi_cwa','unit.name':'pmi_uname','unit.district':'pmi_dist','supervisor':'pmi_sup'}; if(map[k]) _pmoShowErr(map[k], r.fields[k]); } return; }
+  if(!r.ok){ toast(r.message||r.error||'خطأ'); return; }
+  toast(L==='ar'?('✓ أُنشئ — '+(r.project.ref||'')):('✓ Created — '+(r.project.ref||'')));
+  pmoCloseOv();
+  _pmoP = r.project;
+  _renderPmoProject();
+  setTimeout(function(){ pmoUploadPrompt(); }, 300);
+}
+
+/* ---------- project board ---------- */
+async function pmoOpen(id){
+  var body=document.getElementById('pmoBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
+  try{ var x = await api('/api/pmo/get?id='+encodeURIComponent(id)); _pmoP=x.project; }catch(_){ toast('خطأ'); loadPmo(); return; }
+  _renderPmoProject();
+}
+function _renderPmoProject(){
+  var body=document.getElementById('pmoBody'); if(!body||!_pmoP) return;
+  var p=_pmoP, ar=(L==='ar');
+  var prog = (p.progress==null)?'—':(p.progress+'%');
+  var bw = (p.progress==null)?0:p.progress;
+  var ms = p.milestones||[]; var ci=p.milestone_index||0;
+  var dl = pmoDaysLeft(p.handover_date);
+  var h='';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><button class="btn ghost sm" onclick="loadPmo()">'+(ar?'← رجوع':'← Back')+'</button><span class="muted" style="font-size:11px">'+esc(p.ref||'')+'</span></div>';
+  // header card
+  h += '<div class="card" style="padding:16px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><div style="font-size:18px;font-weight:800">'+esc((p.unit||{}).name||'')+'</div><div class="muted" style="font-size:12px;margin-top:2px">'+esc((p.client||{}).name||'')+(((p.unit||{}).district)?(' · '+esc(p.unit.district)):'')+'</div></div>';
+  h += '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-size:30px;font-weight:800">'+prog+'</div>'+(dl?('<div style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</div>'):'')+'</div></div>';
+  h += '<div style="height:10px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:10px 0 4px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>';
+  h += '<div class="muted" style="font-size:11px">'+(ar?'المرحلة الحالية':'Current stage')+': '+esc(ms[ci]?(ar?ms[ci].ar:ms[ci].en):'—')+'</div>';
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">';
+  h += '<button class="btn primary xs" onclick="pmoAddTask(&#39;&#39;)">'+(ar?'+ مهمة':'+ Task')+'</button>';
+  h += '<button class="btn ghost xs" onclick="pmoUploadPrompt()">'+(ar?'⬆ رفع المعادلة':'⬆ Upload equation')+'</button>';
+  h += '<button class="btn ghost xs" onclick="pmoSendUpdate()">'+(ar?'📲 أرسل تحديث للمالك':'📲 Send update to owner')+'</button>';
+  h += '<button class="btn ghost xs" onclick="pmoOwnerPanel()">'+(ar?'🔗 رابط المالك':'🔗 Owner link')+'</button>';
+  h += '<button class="btn ghost xs" onclick="pmoDeleteProject()">'+(ar?'🗑 حذف':'🗑 Delete')+'</button>';
+  h += '</div></div>';
+  // timeline
+  h += _pmoTimelineHtml(p);
+  // budget panel
+  h += _pmoBudgetHtml(p);
+  // board toolbar
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px"><div style="font-weight:800">'+(ar?'المهام':'Tasks')+'</div>'
+     + '<div style="display:flex;gap:4px"><button class="btn '+(_pmoView==='rooms'?'primary':'ghost')+' xs" onclick="_pmoView=&#39;rooms&#39;;_renderPmoProject()">'+(ar?'غرف':'Rooms')+'</button>'
+     + '<button class="btn '+(_pmoView==='kanban'?'primary':'ghost')+' xs" onclick="_pmoView=&#39;kanban&#39;;_renderPmoProject()">'+(ar?'لوحة':'Kanban')+'</button></div></div>';
+  h += '<div id="pmoBoard"></div>';
+  // activity log
+  h += _pmoLogHtml(p);
+  body.innerHTML = h;
+  if(_pmoView==='kanban') _pmoRenderKanban(); else _pmoRenderRooms();
+}
+function _pmoTimelineHtml(p){
+  var ar=(L==='ar'); var ms=p.milestones||[]; var ci=p.milestone_index||0;
+  var h='<div class="card" style="padding:14px;margin-bottom:12px"><div style="font-weight:700;margin-bottom:10px">'+(ar?'مراحل المشروع':'Timeline')+'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:2px">';
+  for(var i=0;i<ms.length;i++){
+    var st = i<ci?'done':(i===ci?'cur':'up');
+    var dot = st==='done'?'✓':(st==='cur'?'●':'○');
+    var col = st==='done'?'var(--green)':(st==='cur'?'var(--gold)':'var(--muted)');
+    var rd = ms[i].reached_at?(' · '+pmoDate((ms[i].reached_at||'').slice(0,10))):'';
+    h+='<div onclick="pmoSetMilestone('+i+')" style="display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;border-radius:8px" onmouseover="this.style.background=&#39;var(--surface-2)&#39;" onmouseout="this.style.background=&#39;transparent&#39;">'
+      + '<span style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:'+col+';border:2px solid '+col+'">'+dot+'</span>'
+      + '<span style="flex:1;font-size:13px;color:'+(st==='cur'?'var(--text)':(st==='up'?'var(--muted)':'var(--text)'))+';font-weight:'+(st==='cur'?'700':'400')+'">'+esc(ar?ms[i].ar:ms[i].en)+'</span>'
+      + '<span class="muted" style="font-size:11px">'+rd+'</span></div>';
+  }
+  h+='</div><div class="muted" style="font-size:11px;margin-top:6px">'+(ar?'اضغط على المرحلة لتحديثها':'Tap a stage to set it')+'</div></div>';
+  return h;
+}
+function _pmoBudgetHtml(p){
+  var ar=(L==='ar'); var b=p.budget, sp=p.spent;
+  var diff = (b!=null && sp!=null) ? (b-sp) : null;
+  var h='<div class="card" style="padding:14px;margin-bottom:12px"><div style="font-weight:700;margin-bottom:8px">'+(ar?'الميزانية مقابل المصروف':'Budget vs spent')+'</div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'الميزانية':'Budget')+'</div><div style="font-weight:700">'+(b!=null?pmoMoney(b):'—')+'</div></div>';
+  h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'التكلفة المقدّرة':'Estimated cost')+'</div><div style="font-weight:700">'+(sp!=null?pmoMoney(sp):'—')+'</div></div>';
+  h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'الفرق':'Difference')+'</div><div style="font-weight:700;color:'+(diff==null?'var(--text)':(diff>=0?'var(--green)':'var(--red)'))+'">'+(diff!=null?pmoMoney(diff):'—')+'</div></div>';
+  h+='</div><div class="muted" style="font-size:10.5px;margin-top:6px">'+(ar?'داخلي فقط — لا يظهر للمالك':'Internal only — hidden from owner')+'</div></div>';
+  return h;
+}
+function _pmoLogHtml(p){
+  var ar=(L==='ar'); var log=p.log||[];
+  var h='<div class="card" style="padding:14px;margin-top:14px"><div style="font-weight:700;margin-bottom:8px">'+(ar?'سجل النشاط':'Activity log')+'</div>';
+  if(!log.length){ h+='<div class="muted" style="font-size:12px">'+(ar?'لا يوجد نشاط بعد':'No activity yet')+'</div>'; }
+  else{ h+='<div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto">';
+    for(var i=0;i<Math.min(log.length,60);i++){ var e=log[i];
+      h+='<div style="font-size:12px;border-bottom:1px solid var(--border);padding-bottom:5px"><span>'+esc(e.text||'')+'</span> <span class="muted" style="font-size:10.5px">— '+esc(e.who||'')+' · '+pmoDate((e.ts||'').slice(0,10))+'</span></div>';
+    }
+    h+='</div>';
+  }
+  h+='</div>';
+  return h;
+}
+function _pmoRoomsList(p){
+  var rooms = (p.rooms||[]).slice();
+  (p.tasks||[]).forEach(function(t){ var r=t.room||'عام'; if(rooms.indexOf(r)<0) rooms.push(r); });
+  return rooms;
+}
+function _pmoRenderRooms(){
+  var el=document.getElementById('pmoBoard'); if(!el||!_pmoP) return;
+  var p=_pmoP, ar=(L==='ar');
+  var rooms=_pmoRoomsList(p);
+  if(!rooms.length){ el.innerHTML='<div class="empty" style="padding:24px;text-align:center"><div class="muted">'+(ar?'ما فيه مهام. أضف مهمة أو ارفع المعادلة.':'No tasks. Add one or upload the equation.')+'</div></div>'; return; }
+  var h='<div id="pmoRooms">';
+  for(var ri=0;ri<rooms.length;ri++){
+    var rm=rooms[ri];
+    var rt=(p.tasks||[]).filter(function(t){return (t.room||'عام')===rm;});
+    var rp=_pmoProgRoom(rt); var rpTxt=(rp==null)?'—':(rp+'%'); var bw=(rp==null)?0:rp;
+    var done=rt.filter(function(t){return t.status==='done';}).length;
+    h+='<div class="pmo-room card" data-room="'+esc(rm)+'" style="padding:12px;margin-bottom:10px">'
+      + '<div class="pmo-room-head" draggable="true" style="display:flex;justify-content:space-between;align-items:center;cursor:grab">'
+      + '<div style="font-weight:700">⠿ '+esc(rm)+'</div>'
+      + '<div class="muted" style="font-size:11px">'+done+' '+(ar?'من':'of')+' '+rt.length+' · '+rpTxt+'</div></div>'
+      + '<div style="height:5px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:7px 0"><div style="height:100%;width:'+bw+'%;background:var(--gold)"></div></div>'
+      + '<div class="pmo-tasks" data-room="'+esc(rm)+'">';
+    if(!rt.length){ h+='<div class="muted" style="font-size:12px;padding:6px">'+(ar?'أضف مهمة لهالغرفة':'Add a task to this room')+'</div>'; }
+    for(var ti=0;ti<rt.length;ti++){ h+=_pmoTaskRow(rt[ti]); }
+    h+='</div>';
+    h+='<div style="margin-top:6px;display:flex;gap:6px"><button class="btn ghost xs" onclick="pmoAddTask(&#39;'+esc(rm).replace(/&#39;/g,"\\&#39;")+'&#39;)">'+(ar?'+ مهمة':'+ Task')+'</button>'
+      + '<button class="btn ghost xs" onclick="pmoSaveTemplate(&#39;'+esc(rm).replace(/&#39;/g,"\\&#39;")+'&#39;)">'+(ar?'💾 احفظ كقالب':'💾 Save as template')+'</button></div>';
+    h+='</div>';
+  }
+  h+='</div>';
+  el.innerHTML=h;
+  _pmoBindDrag();
+}
+function _pmoTaskRow(t){
+  var ar=(L==='ar');
+  var qty=(t.qty&&t.qty!==1)?(' <span class="muted" style="font-size:11px">×'+t.qty+'</span>'):'';
+  var meta=[];
+  if(t.assignee) meta.push('👤 '+esc(t.assignee));
+  if(t.due) meta.push('📅 '+esc(t.due));
+  var metaH = meta.length?('<div class="muted" style="font-size:10.5px;margin-top:2px">'+meta.join(' · ')+'</div>'):'';
+  var c=_pmoStC(t.status);
+  return '<div class="pmo-row" draggable="true" data-tid="'+esc(t.id)+'" style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;margin-bottom:5px">'
+    + '<span style="cursor:grab;color:var(--muted)">⠿</span>'
+    + '<span onclick="pmoStatusMenu(event,&#39;'+esc(t.id)+'&#39;)" style="cursor:pointer;font-size:10.5px;padding:2px 8px;border-radius:99px;white-space:nowrap;background:'+c+'1a;color:'+c+';border:1px solid '+c+'55">'+esc(_pmoStLbl(t.status))+'</span>'
+    + '<div style="flex:1"><div style="font-size:13px">'+esc(t.name)+qty+'</div>'+metaH+'</div>'
+    + '<span onclick="pmoTaskMenu(event,&#39;'+esc(t.id)+'&#39;)" style="cursor:pointer;color:var(--muted);padding:0 4px">⋯</span>'
+    + '</div>';
+}
+function _pmoProgRoom(rt){
+  var counted=rt.filter(function(t){return t.status!=='blocked';});
+  if(!rt.length) return 0;
+  if(!counted.length) return null;
+  var w={not_started:0,in_progress:40,final_touches:75,done:100};
+  var tot=0; counted.forEach(function(t){tot+=(w[t.status]||0);});
+  return Math.round(tot/counted.length);
+}
+function _pmoRenderKanban(){
+  var el=document.getElementById('pmoBoard'); if(!el||!_pmoP) return;
+  var p=_pmoP, ar=(L==='ar');
+  var h='<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px">';
+  for(var i=0;i<PMO_ST_ORDER.length;i++){
+    var st=PMO_ST_ORDER[i]; var c=_pmoStC(st);
+    var col=(p.tasks||[]).filter(function(t){return (t.status||'not_started')===st;});
+    h+='<div class="pmo-kcol" data-status="'+st+'" style="min-width:180px;flex:0 0 180px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:8px">'
+      + '<div style="font-weight:700;font-size:12px;color:'+c+';margin-bottom:8px">'+esc(_pmoStLbl(st))+' ('+col.length+')</div>';
+    for(var j=0;j<col.length;j++){ var t=col[j];
+      h+='<div class="pmo-kcard" draggable="true" data-tid="'+esc(t.id)+'" style="background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px;margin-bottom:6px;cursor:grab">'
+        + '<div style="font-size:12.5px">'+esc(t.name)+'</div>'
+        + '<div class="muted" style="font-size:10.5px;margin-top:3px">'+esc(t.room||'')+(t.assignee?(' · 👤 '+esc(t.assignee)):'')+'</div></div>';
+    }
+    h+='</div>';
+  }
+  h+='</div>';
+  el.innerHTML=h;
+  _pmoBindKanbanDrag();
+}
+
+/* ---------- drag reorder (rooms view) ---------- */
+function _pmoAfter(cont,y,sel){
+  var els=[].slice.call(cont.querySelectorAll(sel)); var closest=null, off=-Infinity;
+  els.forEach(function(c){ var b=c.getBoundingClientRect(); var d=y-b.top-b.height/2; if(d<0&&d>off){off=d;closest=c;} });
+  return closest;
+}
+function _pmoBindDrag(){
+  // task rows within a room
+  document.querySelectorAll('#pmoRooms .pmo-tasks').forEach(function(cont){
+    cont.addEventListener('dragover', function(e){
+      var dragging=document.querySelector('.pmo-row.dragging'); if(!dragging) return;
+      e.preventDefault();
+      var after=_pmoAfter(cont,e.clientY,'.pmo-row:not(.dragging)');
+      if(after==null) cont.appendChild(dragging); else cont.insertBefore(dragging,after);
+    });
+  });
+  document.querySelectorAll('#pmoRooms .pmo-row').forEach(function(row){
+    row.addEventListener('dragstart', function(){ row.classList.add('dragging'); });
+    row.addEventListener('dragend', function(){ row.classList.remove('dragging'); _pmoPersistOrder(); });
+  });
+  // room sections
+  var roomsCont=document.getElementById('pmoRooms');
+  document.querySelectorAll('#pmoRooms .pmo-room-head').forEach(function(head){
+    var room=head.parentNode;
+    head.addEventListener('dragstart', function(){ room.classList.add('dragging'); });
+    head.addEventListener('dragend', function(){ room.classList.remove('dragging'); _pmoPersistOrder(); });
+  });
+  if(roomsCont){ roomsCont.addEventListener('dragover', function(e){
+    var dragging=document.querySelector('.pmo-room.dragging'); if(!dragging) return;
+    e.preventDefault();
+    var after=_pmoAfter(roomsCont,e.clientY,'.pmo-room:not(.dragging)');
+    if(after==null) roomsCont.appendChild(dragging); else roomsCont.insertBefore(dragging,after);
+  }); }
+}
+async function _pmoPersistOrder(){
+  if(!_pmoP) return;
+  var tids=[].slice.call(document.querySelectorAll('#pmoRooms .pmo-row')).map(function(r){return r.getAttribute('data-tid');});
+  var rooms=[].slice.call(document.querySelectorAll('#pmoRooms .pmo-room')).map(function(r){return r.getAttribute('data-room');});
+  await post('/api/pmo/reorder',{pid:_pmoP.id, task_order:tids, rooms:rooms});
+}
+function _pmoBindKanbanDrag(){
+  document.querySelectorAll('.pmo-kcard').forEach(function(card){
+    card.addEventListener('dragstart', function(e){ e.dataTransfer.setData('text/plain', card.getAttribute('data-tid')); card.classList.add('dragging'); });
+    card.addEventListener('dragend', function(){ card.classList.remove('dragging'); });
+  });
+  document.querySelectorAll('.pmo-kcol').forEach(function(col){
+    col.addEventListener('dragover', function(e){ e.preventDefault(); });
+    col.addEventListener('drop', async function(e){
+      e.preventDefault(); var tid=e.dataTransfer.getData('text/plain'); if(!tid) return;
+      var st=col.getAttribute('data-status');
+      var r=await post('/api/pmo/task/status',{pid:_pmoP.id, tid:tid, status:st});
+      if(r.ok){ _pmoP=r.project; _renderPmoProject(); }
+    });
+  });
+}
+
+/* ---------- task status / edit ---------- */
+function pmoStatusMenu(ev, tid){
+  ev.stopPropagation();
+  var ar=(L==='ar');
+  var ov=_pmoOv();
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="font-size:16px;font-weight:800">'+(ar?'الحالة':'Status')+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  for(var i=0;i<PMO_ST_ORDER.length;i++){ var st=PMO_ST_ORDER[i]; var c=_pmoStC(st);
+    h+='<button onclick="pmoSetStatus(&#39;'+esc(tid)+'&#39;,&#39;'+st+'&#39;)" style="display:block;width:100%;text-align:'+(ar?'right':'left')+';padding:11px;margin-bottom:6px;border-radius:9px;border:1px solid '+c+'55;background:'+c+'1a;color:'+c+';font-weight:700;cursor:pointer">'+esc(_pmoStLbl(st))+'</button>';
+  }
+  document.getElementById('pmoOvBody').innerHTML=h; ov.style.display='block';
+}
+async function pmoSetStatus(tid, st){
+  var r=await post('/api/pmo/task/status',{pid:_pmoP.id, tid:tid, status:st});
+  if(r.ok){ _pmoP=r.project; pmoCloseOv(); _renderPmoProject(); }
+  else toast(r.message||r.error||'خطأ');
+}
+function pmoTaskMenu(ev, tid){
+  ev.stopPropagation();
+  var ar=(L==='ar'); var t=(_pmoP.tasks||[]).filter(function(x){return x.id===tid;})[0]; if(!t) return;
+  var ov=_pmoOv();
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="font-size:16px;font-weight:800">'+esc(t.name)+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  h+='<button class="btn ghost" style="display:block;width:100%;margin-bottom:8px" onclick="pmoEditTask(&#39;'+esc(tid)+'&#39;)">✏️ '+(ar?'تعديل':'Edit')+'</button>';
+  h+='<button class="btn ghost" style="display:block;width:100%;margin-bottom:8px" onclick="pmoDuplicateTask(&#39;'+esc(tid)+'&#39;)">⧉ '+(ar?'تكرار':'Duplicate')+'</button>';
+  h+='<button class="btn" style="display:block;width:100%;color:var(--red)" onclick="pmoDeleteTask(&#39;'+esc(tid)+'&#39;)">🗑 '+(ar?'حذف':'Delete')+'</button>';
+  document.getElementById('pmoOvBody').innerHTML=h; ov.style.display='block';
+}
+function pmoAddTask(room){ pmoEditTask('', room); }
+function pmoEditTask(tid, room){
+  var ar=(L==='ar'); var t=tid?((_pmoP.tasks||[]).filter(function(x){return x.id===tid;})[0]||{}):{room:room||''};
+  var ov=_pmoOv();
+  function inp(id,lbl,val,type,ph){ return '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+lbl+'</label><input id="'+id+'" type="'+(type||'text')+'" value="'+esc(val==null?'':val)+'" placeholder="'+(ph||'')+'" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)"></div>'; }
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="font-size:16px;font-weight:800">'+(tid?(ar?'تعديل مهمة':'Edit task'):(ar?'مهمة جديدة':'New task'))+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  h+=inp('pmt_name', ar?'الاسم':'Name', t.name||'');
+  h+=inp('pmt_room', ar?'الغرفة / التصنيف':'Room / category', t.room||'');
+  h+='<div style="display:flex;gap:8px"><div style="flex:1">'+inp('pmt_qty', ar?'الكمية':'Quantity', t.qty||1, 'number')+'</div><div style="flex:1">'+inp('pmt_cost', ar?'التكلفة (ر.س)':'Cost (SAR)', t.cost==null?'':t.cost, 'number')+'</div></div>';
+  h+='<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+(ar?'الحالة':'Status')+'</label><select id="pmt_status" style="width:100%;padding:9px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">';
+  for(var i=0;i<PMO_ST_ORDER.length;i++){ var st=PMO_ST_ORDER[i]; h+='<option value="'+st+'"'+(((t.status||'not_started')===st)?' selected':'')+'>'+esc(_pmoStLbl(st))+'</option>'; }
+  h+='</select></div>';
+  h+='<div style="display:flex;gap:8px"><div style="flex:1">'+inp('pmt_assignee', ar?'المسؤول':'Assignee', t.assignee||'')+'</div><div style="flex:1">'+inp('pmt_due', ar?'تاريخ الاستحقاق':'Due date', t.due||'', 'date')+'</div></div>';
+  h+='<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+(ar?'ملاحظة':'Note')+'</label><textarea id="pmt_note" maxlength="300" rows="2" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">'+esc(t.note||'')+'</textarea></div>';
+  h+='<div style="display:flex;gap:8px;margin-top:6px"><button class="btn primary" style="flex:1" onclick="pmoSaveTask(&#39;'+esc(tid||'')+'&#39;)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost" onclick="pmoCloseOv()">'+(ar?'إلغاء':'Cancel')+'</button></div>';
+  document.getElementById('pmoOvBody').innerHTML=h; ov.style.display='block';
+}
+async function pmoSaveTask(tid){
+  var name=_pmoVal('pmt_name'); if(!name){ toast(L==='ar'?'اسم المهمة مطلوب':'Name required'); return; }
+  var task={ id:tid||'', name:name, room:_pmoVal('pmt_room')||'عام', qty:_pmoVal('pmt_qty')||1, cost:_pmoVal('pmt_cost'), status:(document.getElementById('pmt_status')||{}).value||'not_started', assignee:_pmoVal('pmt_assignee'), due:_pmoVal('pmt_due'), note:(document.getElementById('pmt_note')||{}).value||'' };
+  var r=await post('/api/pmo/task/save',{pid:_pmoP.id, task:task});
+  if(r.ok){ _pmoP=r.project; pmoCloseOv(); _renderPmoProject(); }
+  else toast(r.message||r.error||'خطأ');
+}
+async function pmoDuplicateTask(tid){
+  var t=(_pmoP.tasks||[]).filter(function(x){return x.id===tid;})[0]; if(!t) return;
+  var r=await post('/api/pmo/task/save',{pid:_pmoP.id, task:{name:t.name,room:t.room,qty:t.qty,cost:t.cost,status:'not_started',assignee:t.assignee,due:t.due,note:t.note}});
+  if(r.ok){ _pmoP=r.project; pmoCloseOv(); _renderPmoProject(); }
+}
+async function pmoDeleteTask(tid){
+  var t=(_pmoP.tasks||[]).filter(function(x){return x.id===tid;})[0];
+  if(!confirm((L==='ar'?'حذف المهمة: ':'Delete task: ')+(t?t.name:''))) return;
+  var r=await post('/api/pmo/task/delete',{pid:_pmoP.id, tid:tid});
+  if(r.ok){ _pmoP=r.project; pmoCloseOv(); _renderPmoProject(); }
+}
+
+/* ---------- milestone ---------- */
+async function pmoSetMilestone(idx){
+  var r=await post('/api/pmo/milestone',{pid:_pmoP.id, index:idx});
+  if(r.ok){ _pmoP=r.project; _renderPmoProject(); }
+}
+
+/* ---------- equation upload + review ---------- */
+function pmoUploadPrompt(){
+  if(!_pmoP) return;
+  var inp=document.createElement('input'); inp.type='file'; inp.accept='application/pdf,.pdf';
+  inp.onchange=function(){ if(inp.files&&inp.files[0]) pmoUploadEquation(inp.files[0]); };
+  inp.click();
+}
+async function pmoUploadEquation(file){
+  var ar=(L==='ar');
+  if(file.size>15*1024*1024){ toast(ar?'الملف كبير جداً (الحد 15MB)':'File too large (max 15MB)'); return; }
+  var ov=_pmoOv();
+  document.getElementById('pmoOvBody').innerHTML='<div style="text-align:center;padding:30px"><div style="font-size:30px">📄</div><div style="margin-top:10px;font-weight:700">'+(ar?'نقرأ المعادلة…':'Reading the equation…')+'</div><div class="muted" style="font-size:12px;margin-top:6px">'+(ar?'نطلّع البنود ونحوّلها مهام':'Finding items and turning them into tasks')+'</div></div>';
+  ov.style.display='block';
+  var fd=new FormData(); fd.append('file', file);
+  var r;
+  try{ var resp=await fetch('/api/pmo/parse-equation?token='+encodeURIComponent(tok()),{method:'POST',body:fd}); r=await resp.json(); }
+  catch(e){ r={error:'network'}; }
+  if(!r || !r.ok){
+    var msg=(r&&r.message)||(ar?'ما قدرنا نقرأ الملف':'Could not read the file');
+    document.getElementById('pmoOvBody').innerHTML='<div style="text-align:center;padding:24px"><div style="font-size:28px">⚠️</div><div style="margin:10px 0;font-weight:700">'+esc(msg)+'</div>'
+      + '<div style="display:flex;gap:8px;justify-content:center;margin-top:10px"><button class="btn ghost" onclick="pmoUploadPrompt()">'+(ar?'جرّب PDF ثاني':'Upload a different PDF')+'</button>'
+      + '<button class="btn primary" onclick="pmoCloseOv()">'+(ar?'ابدأ بقائمة فارغة':'Start empty')+'</button></div></div>';
+    return;
+  }
+  _pmoEq = r.items||[];
+  _pmoRenderReview(r.partial);
+}
+function _pmoRenderReview(partial){
+  var ar=(L==='ar'); var ov=_pmoOv();
+  var rooms={}; _pmoEq.forEach(function(it){ rooms[it.room||'عام']=true; });
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:16px;font-weight:800">'+(ar?'راجع البنود قبل الإنشاء':'Review before creating')+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  h+='<div class="muted" style="font-size:12px;margin-bottom:8px">'+(ar?('وجدنا '+_pmoEq.length+' بند في '+Object.keys(rooms).length+' غرفة'):('Found '+_pmoEq.length+' items across '+Object.keys(rooms).length+' rooms'))+'</div>';
+  if(partial){ h+='<div style="background:#3a2a14;border:1px solid #7a5a1a;color:#e8c977;padding:9px 12px;border-radius:9px;font-size:12px;margin-bottom:10px">⚠️ '+(ar?'بعض البنود ممكن تكون ناقصة أو غير واضحة — راجعها بعناية.':'Some items may be missing or unclear — please review carefully.')+'</div>'; }
+  h+='<div id="pmoReviewRows" style="max-height:50vh;overflow-y:auto">';
+  for(var i=0;i<_pmoEq.length;i++){ h+=_pmoReviewRow(i,_pmoEq[i]); }
+  h+='</div>';
+  h+='<button class="btn ghost sm" style="margin-top:8px" onclick="pmoAddReviewRow()">+ '+(ar?'إضافة بند':'Add row')+'</button>';
+  h+='<div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" style="flex:1" onclick="pmoCommitTasks()">'+(ar?'تأكيد وإنشاء المهام':'Confirm & create tasks')+'</button><button class="btn ghost" onclick="pmoCloseOv()">'+(ar?'تجاهل':'Discard')+'</button></div>';
+  document.getElementById('pmoOvBody').innerHTML=h; ov.style.display='block';
+}
+function _pmoReviewRow(i, it){
+  return '<div class="pmo-rv" data-i="'+i+'" style="display:flex;gap:5px;margin-bottom:5px;align-items:center">'
+    + '<input value="'+esc(it.name||'')+'" oninput="_pmoEq['+i+'].name=this.value" placeholder="'+(L==='ar'?'البند':'Item')+'" style="flex:2;padding:7px;border-radius:7px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:12px">'
+    + '<input value="'+esc(it.room||'')+'" oninput="_pmoEq['+i+'].room=this.value" placeholder="'+(L==='ar'?'غرفة':'Room')+'" style="flex:1;padding:7px;border-radius:7px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:12px">'
+    + '<input type="number" value="'+esc(it.qty==null?1:it.qty)+'" oninput="_pmoEq['+i+'].qty=this.value" style="width:48px;padding:7px;border-radius:7px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:12px">'
+    + '<input type="number" value="'+esc(it.cost==null?'':it.cost)+'" oninput="_pmoEq['+i+'].cost=this.value" placeholder="'+(L==='ar'?'تكلفة':'Cost')+'" style="width:64px;padding:7px;border-radius:7px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:12px">'
+    + '<span onclick="pmoDelReviewRow('+i+')" style="cursor:pointer;color:var(--red);padding:0 4px">✕</span></div>';
+}
+function pmoAddReviewRow(){ _pmoEq.push({name:'',room:'عام',qty:1,cost:null}); _pmoRenderReview(false); }
+function pmoDelReviewRow(i){ _pmoEq.splice(i,1); _pmoRenderReview(false); }
+async function pmoCommitTasks(){
+  var ar=(L==='ar');
+  var items=_pmoEq.filter(function(it){return (it.name||'').trim();});
+  if(!items.length){ toast(ar?'ما فيه بنود':'No items'); return; }
+  var mode='add';
+  if((_pmoP.tasks||[]).length){
+    mode = confirm(ar?'في مهام موجودة. اضغط "موافق" لإضافة الجديدة فوقها، أو "إلغاء" لاستبدال الكل.':'Tasks exist. OK = add on top, Cancel = replace all.') ? 'add':'replace';
+  }
+  var r=await post('/api/pmo/commit-tasks',{id:_pmoP.id, items:items, mode:mode});
+  if(r.ok){ _pmoP=r.project; pmoCloseOv(); _renderPmoProject(); toast(ar?('✓ أُنشئت '+r.added+' مهمة'):('✓ Created '+r.added+' tasks')); }
+  else toast(r.message||r.error||'خطأ');
+}
+
+/* ---------- templates ---------- */
+async function pmoSaveTemplate(room){
+  var ar=(L==='ar');
+  var name=prompt(ar?'اسم القالب:':'Template name:', (ar?'قالب ':'Template ')+room);
+  if(!name) return;
+  var r=await post('/api/pmo/template/save',{name:name, pid:_pmoP.id, room:room});
+  if(r.ok) toast(ar?('✓ حُفظ القالب ('+r.task_count+' بند)'):('✓ Template saved ('+r.task_count+' items)'));
+}
+
+/* ---------- owner link ---------- */
+async function pmoOwnerPanel(){
+  var ar=(L==='ar'); var ov=_pmoOv();
+  if(!_pmoP.owner_token){ var g=await post('/api/pmo/owner-link',{pid:_pmoP.id,action:'generate'}); _pmoP.owner_token=g.owner_token; _pmoP.owner_active=true; }
+  var url=pmoOwnerUrl(_pmoP.owner_token);
+  var active=_pmoP.owner_active!==false;
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="font-size:16px;font-weight:800">🔗 '+(ar?'رابط المالك':'Owner link')+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  h+='<div class="muted" style="font-size:12px;margin-bottom:6px">'+(ar?'رابط للعرض فقط — بدون أسعار، بدون تسجيل دخول.':'View-only — no costs, no login.')+(active?'':(' <span style="color:var(--red)">'+(ar?'(ملغى حالياً)':'(currently revoked)')+'</span>'))+'</div>';
+  h+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:9px;word-break:break-all;font-size:12px;margin-bottom:10px">'+esc(url)+'</div>';
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn primary xs" onclick="_rvCopyText(&#39;'+esc(url)+'&#39;);toast(&#39;✓&#39;)">'+(ar?'نسخ':'Copy')+'</button>';
+  h+='<button class="btn ghost xs" onclick="pmoShareOwner()">'+(ar?'مشاركة واتساب':'Share via WhatsApp')+'</button>';
+  h+='<button class="btn ghost xs" onclick="pmoOwnerAction(&#39;regenerate&#39;)">'+(ar?'إعادة توليد':'Regenerate')+'</button>';
+  h+='<button class="btn xs" style="color:var(--red)" onclick="pmoOwnerAction(&#39;revoke&#39;)">'+(ar?'إلغاء':'Revoke')+'</button></div>';
+  document.getElementById('pmoOvBody').innerHTML=h; ov.style.display='block';
+}
+async function pmoOwnerAction(action){
+  var ar=(L==='ar');
+  if(action==='regenerate' && !confirm(ar?'إعادة التوليد تلغي الرابط القديم فوراً. متأكد؟':'Regenerate invalidates the old link immediately. Continue?')) return;
+  if(action==='revoke' && !confirm(ar?'إلغاء الرابط؟ المالك ما راح يقدر يفتحه.':'Revoke the link? The owner won\\'t be able to open it.')) return;
+  var r=await post('/api/pmo/owner-link',{pid:_pmoP.id, action:action});
+  if(r.ok){ _pmoP.owner_token=r.owner_token; _pmoP.owner_active=r.owner_active; pmoOwnerPanel(); }
+}
+function pmoShareOwner(){
+  var url=pmoOwnerUrl(_pmoP.owner_token);
+  var wa=_waDigits((_pmoP.client||{}).whatsapp);
+  var txt=encodeURIComponent((L==='ar'?'رابط متابعة مشروع وحدتك: ':'Follow your project here: ')+url);
+  window.open('https://wa.me/'+wa+'?text='+txt,'_blank');
+}
+function pmoSendUpdate(){
+  var ar=(L==='ar'); var p=_pmoP;
+  var url=p.owner_token?pmoOwnerUrl(p.owner_token):'';
+  var prog=(p.progress==null)?'—':p.progress;
+  var ms=p.milestones||[]; var ci=p.milestone_index||0;
+  var stage=ms[ci]?(ar?ms[ci].ar:ms[ci].en):'';
+  var nextStep = p.next_step || (ms[ci+1]?(ar?ms[ci+1].ar:ms[ci+1].en):'');
+  var ov=_pmoOv();
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="font-size:16px;font-weight:800">📲 '+(ar?'تحديث للمالك':'Update to owner')+'</div><button class="btn ghost sm" onclick="pmoCloseOv()">✕</button></div>';
+  h+='<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">'+(ar?'الخطوة الجاية':'Next step')+'</label>';
+  h+='<input id="pmoNextStep" value="'+esc(nextStep)+'" style="width:100%;padding:9px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);margin-bottom:10px">';
+  h+='<div class="muted" style="font-size:11.5px;margin-bottom:6px">'+(ar?'الرسالة تنفتح في واتساب — ما تنرسل تلقائياً. بدون أسعار.':'Opens in WhatsApp — never auto-sends. No costs.')+'</div>';
+  h+='<div style="display:flex;gap:8px"><button class="btn primary" style="flex:1" onclick="pmoDoSendUpdate(true)">'+(ar?'افتح واتساب':'Open WhatsApp')+'</button><button class="btn ghost" onclick="pmoDoSendUpdate(false)">'+(ar?'انسخ النص':'Copy text')+'</button></div>';
+  document.getElementById('pmoOvBody').innerHTML=h; ov.style.display='block';
+  ov.dataset.url=url; ov.dataset.prog=prog; ov.dataset.stage=stage;
+}
+async function pmoDoSendUpdate(openWa){
+  var ar=(L==='ar'); var p=_pmoP;
+  var nextStep=_pmoVal('pmoNextStep');
+  if(nextStep!==(p.next_step||'')){ var u=await post('/api/pmo/update',{id:p.id, next_step:nextStep}); if(u.ok) _pmoP=u.project; }
+  var url=p.owner_token?pmoOwnerUrl(p.owner_token):'';
+  var prog=(p.progress==null)?'—':p.progress;
+  var ms=p.milestones||[]; var ci=p.milestone_index||0; var stage=ms[ci]?(ar?ms[ci].ar:ms[ci].en):'';
+  var name=(p.unit||{}).name||'';
+  var msg;
+  if(ar){ msg='🏠 تحديث مشروع '+name+'\\n'+'نسبة الإنجاز الحالية: '+prog+'٪\\n'+'المرحلة الحالية: '+stage+'\\n'+'الخطوة الجاية: '+nextStep+'\\n\\n'+'تابع التفاصيل لحظة بلحظة من هنا:\\n'+url+'\\n\\n— فريق عوجا'; }
+  else { msg='🏠 Update — '+name+'\\n'+'Current progress: '+prog+'%\\n'+'Current stage: '+stage+'\\n'+'Next step: '+nextStep+'\\n\\n'+'Follow the live details here:\\n'+url+'\\n\\n— Team Ouja'; }
+  if(openWa){ var wa=_waDigits((p.client||{}).whatsapp); window.open('https://wa.me/'+wa+'?text='+encodeURIComponent(msg),'_blank'); }
+  else { _rvCopyText(msg); toast(ar?'✓ نُسخ':'✓ Copied'); }
+  pmoCloseOv();
+}
+
+/* ---------- delete project ---------- */
+async function pmoDeleteProject(){
+  var ar=(L==='ar'); if(!_pmoP) return;
+  if(!confirm((ar?'حذف المشروع نهائياً: ':'Delete project permanently: ')+((_pmoP.unit||{}).name||''))) return;
+  var r=await post('/api/pmo/delete',{id:_pmoP.id});
+  if(r.ok){ toast(ar?'🗑 حُذف':'🗑 Deleted'); loadPmo(); }
+}
+
 /* ============== USERS (المستخدمون) ============== */
 const ROLE_LABEL = {admin:'مدير', ops:'تشغيل', viewer:'مشاهد'};
 const ROLE_LABEL_EN = {admin:'Admin', ops:'Operator', viewer:'Viewer'};
@@ -9203,7 +10079,7 @@ const TAB_LABEL = {
   tickets:'الصيانة', reviews:'المراجعات', guests:'الضيوف',
   quality:'الجودة', rev:'الإيرادات', learn:'التعلّم', log:'النشاط',
   users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي',
-  design:'طلبات التصميم'
+  design:'طلبات التصميم', pmo:'تجهيز الشقق'
 };
 const TAB_LABEL_EN = {
   home:'Home', inbox:'Inbox', today:'Today', calendar:'Calendar',
@@ -9211,7 +10087,7 @@ const TAB_LABEL_EN = {
   tickets:'Maintenance', reviews:'Reviews', guests:'Guests',
   quality:'Quality', rev:'Revenue', learn:'Learning', log:'Activity',
   users:'Users', quote:'Quotations', weekly:'Weekly report',
-  design:'Design requests'
+  design:'Design requests', pmo:'Fit-out projects'
 };
 
 async function loadUsers(){
@@ -14189,6 +15065,734 @@ async def _api_design_delete(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+# ===================== PMO — FIT-OUT PROJECTS API =====================
+def _req_actor(request):
+    """Display name of the logged-in team member (for the activity log)."""
+    token = request.query.get("token") or request.headers.get("X-Token", "")
+    if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
+        return "admin"
+    sess = _sessions.get(token or "")
+    if sess:
+        u = _users.get(sess.get("user_id"))
+        if u:
+            return u.get("name") or "—"
+    return "—"
+
+def _pmo_task_view(t):
+    return {
+        "id": t.get("id"), "name": t.get("name", ""), "room": t.get("room") or "عام",
+        "qty": t.get("qty", 1), "cost": t.get("cost"),
+        "status": t.get("status") or "not_started",
+        "assignee": t.get("assignee", ""), "due": t.get("due", ""),
+        "note": t.get("note", ""), "order": t.get("order", 0),
+    }
+
+def _pmo_view(p):
+    """Full team-facing project view with computed progress, room progress,
+    coarse status and budget rollup."""
+    tasks = p.get("tasks") or []
+    rooms = _pmo_rooms_of(p)
+    room_prog = {}
+    for rm in rooms:
+        rt = [t for t in tasks if (t.get("room") or "عام") == rm]
+        room_prog[rm] = _pmo_progress(rt)
+    has_costs = any(isinstance(t.get("cost"), (int, float)) for t in tasks)
+    spent = sum((t.get("cost") or 0) * (t.get("qty") or 1)
+                for t in tasks if isinstance(t.get("cost"), (int, float)))
+    return {
+        "id": p["id"], "ref": p.get("ref"),
+        "client": p.get("client", {}), "unit": p.get("unit", {}),
+        "style": p.get("style", ""), "budget": p.get("budget"),
+        "handover_date": p.get("handover_date", ""), "supervisor": p.get("supervisor", ""),
+        "notes": p.get("notes", ""),
+        "rooms": rooms,
+        "tasks": [_pmo_task_view(t) for t in sorted(tasks, key=lambda x: x.get("order", 0))],
+        "milestones": p.get("milestones") or _pmo_default_milestones(),
+        "milestone_index": p.get("milestone_index", 0),
+        "next_step": p.get("next_step", ""),
+        "owner_token": p.get("owner_token", ""), "owner_active": p.get("owner_active", True),
+        "log": (p.get("log") or [])[:200],
+        "progress": _pmo_progress(tasks),
+        "room_progress": room_prog,
+        "status_label": _pmo_status_label(p),
+        "spent": (spent if has_costs else None),
+        "task_count": len(tasks),
+        "done_count": sum(1 for t in tasks if t.get("status") == "done"),
+        "created_at": p.get("created_at"), "updated_at": p.get("updated_at"),
+    }
+
+_AR_MONTHS = ["", "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو",
+              "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+_EN_MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
+              "Aug", "Sep", "Oct", "Nov", "Dec"]
+_PMO_STATUS_LABELS = {
+    "not_started":   ("لم يبدأ", "Not started", "#6b7280"),
+    "in_progress":   ("جاري التنفيذ", "In progress", "#2563eb"),
+    "final_touches": ("اللمسات الأخيرة", "Final touches", "#d97706"),
+    "done":          ("مكتمل", "Done", "#16a34a"),
+    "blocked":       ("متوقف / بانتظار قطعة", "Blocked / waiting", "#dc2626"),
+}
+
+def _fmt_date_bi(iso):
+    """('7 أغسطس 2026', '7 Aug 2026') from a YYYY-MM-DD string; ('','') if blank."""
+    if not iso:
+        return ("", "")
+    try:
+        d = datetime.strptime(iso[:10], "%Y-%m-%d")
+        return (f"{d.day} {_AR_MONTHS[d.month]} {d.year}",
+                f"{d.day} {_EN_MONTHS[d.month]} {d.year}")
+    except Exception:
+        return (iso, iso)
+
+def _days_left_bi(iso):
+    """Bilingual 'days left'/'overdue' label + overdue flag, from handover date."""
+    if not iso:
+        return ("", "", False)
+    try:
+        d = datetime.strptime(iso[:10], "%Y-%m-%d").date()
+    except Exception:
+        return ("", "", False)
+    delta = (d - datetime.now(TZ).date()).days
+    if delta < 0:
+        return (f"متأخر {abs(delta)} يوم", f"{abs(delta)} days overdue", True)
+    if delta == 0:
+        return ("اليوم", "today", False)
+    return (f"باقي {delta} يوم", f"{delta} days left", False)
+
+def _pmo_owner_inactive_html():
+    return (
+        "<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Ouja</title><style>body{margin:0;font-family:system-ui,'Segoe UI',Tahoma,sans-serif;"
+        "background:#0b0f17;color:#e5e7eb;display:flex;min-height:100vh;align-items:center;"
+        "justify-content:center;text-align:center;padding:24px}div{max-width:420px}"
+        "h1{font-size:20px;margin:0 0 8px}p{color:#9ca3af;line-height:1.7}</style></head><body>"
+        "<div><h1>الرابط لم يعد فعّالاً</h1>"
+        "<p>هذا الرابط ما عاد شغّال. تواصل مع فريق عوجا للحصول على رابط جديد.<br>"
+        "<span style='opacity:.7'>This link is no longer active. Please contact Team Ouja.</span></p>"
+        "</div></body></html>"
+    )
+
+def _pmo_owner_html(p):
+    """Server-rendered, view-only owner page. Bilingual (AR default, JS toggle),
+    mobile-first. No costs, assignees, budget, notes, or activity log."""
+    e = _html.escape
+    tasks = sorted(p.get("tasks") or [], key=lambda x: x.get("order", 0))
+    rooms = _pmo_rooms_of(p)
+    unit_name = (p.get("unit") or {}).get("name", "") or "—"
+    overall = _pmo_progress(tasks)
+    overall_txt = "—" if overall is None else f"{overall}%"
+    bar_w = 0 if overall is None else overall
+    ho_ar, ho_en = _fmt_date_bi(p.get("handover_date"))
+    dl_ar, dl_en, overdue = _days_left_bi(p.get("handover_date"))
+    upd_ar, upd_en = _fmt_date_bi((p.get("updated_at") or "")[:10])
+    ms = p.get("milestones") or _pmo_default_milestones()
+    cur = p.get("milestone_index", 0)
+    next_step = p.get("next_step", "")
+
+    def lbl(ar, en):
+        return f"<span data-ar=\"{e(ar)}\" data-en=\"{e(en)}\">{e(ar)}</span>"
+
+    # milestone timeline
+    ms_html = []
+    for i, m in enumerate(ms):
+        state = "done" if i < cur else ("cur" if i == cur else "up")
+        rd_ar, rd_en = _fmt_date_bi((m.get("reached_at") or "")[:10]) if m.get("reached_at") else ("", "")
+        dot = "✓" if state == "done" else ("●" if state == "cur" else "")
+        date_span = (f"<div class='ms-date'><span data-ar=\"{e(rd_ar)}\" data-en=\"{e(rd_en)}\">{e(rd_ar)}</span></div>"
+                     if rd_ar else "")
+        ms_html.append(
+            f"<div class='ms {state}'><div class='ms-dot'>{dot}</div>"
+            f"<div class='ms-lbl'><span data-ar=\"{e(m.get('ar',''))}\" data-en=\"{e(m.get('en',''))}\">{e(m.get('ar',''))}</span></div>"
+            f"{date_span}</div>")
+    ms_block = "<div class='timeline'>" + "".join(ms_html) + "</div>"
+
+    # rooms + tasks
+    rooms_html = []
+    for rm in rooms:
+        rt = [t for t in tasks if (t.get("room") or "عام") == rm]
+        rp = _pmo_progress(rt)
+        rp_txt = "—" if rp is None else f"{rp}%"
+        done_n = sum(1 for t in rt if t.get("status") == "done")
+        rows = []
+        for t in rt:
+            ar_lbl, en_lbl, color = _PMO_STATUS_LABELS.get(t.get("status") or "not_started",
+                                                           _PMO_STATUS_LABELS["not_started"])
+            qty = t.get("qty", 1)
+            qty_html = f"<span class='qty'>×{e(str(qty))}</span>" if qty and qty != 1 else ""
+            rows.append(
+                f"<div class='task'><div class='task-name'>{e(t.get('name',''))} {qty_html}</div>"
+                f"<span class='chip' style='background:{color}1a;color:{color};border-color:{color}55'>"
+                f"<span data-ar=\"{e(ar_lbl)}\" data-en=\"{e(en_lbl)}\">{e(ar_lbl)}</span></span></div>")
+        rooms_html.append(
+            f"<div class='room'><div class='room-head'><div class='room-name'>{e(rm)}</div>"
+            f"<div class='room-meta'>{e(str(done_n))}/{e(str(len(rt)))} · {rp_txt}</div></div>"
+            f"<div class='room-bar'><div style='width:{0 if rp is None else rp}%'></div></div>"
+            + "".join(rows) + "</div>")
+    rooms_block = "".join(rooms_html) or f"<div class='empty'>{lbl('ما فيه مهام بعد','No tasks yet')}</div>"
+
+    next_block = ""
+    if next_step:
+        next_block = (f"<div class='card next'><div class='card-t'>{lbl('الخطوة الجاية','Next step')}</div>"
+                      f"<div class='next-txt'>{e(next_step)}</div></div>")
+
+    dl_html = ""
+    if dl_ar:
+        dl_html = (f"<span class='days {'over' if overdue else ''}' "
+                   f"data-ar=\"{e(dl_ar)}\" data-en=\"{e(dl_en)}\">{e(dl_ar)}</span>")
+    ho_html = (f"<span data-ar=\"{e(ho_ar)}\" data-en=\"{e(ho_en)}\">{e(ho_ar)}</span>" if ho_ar else "")
+
+    return f"""<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{e(unit_name)} — Ouja</title>
+<style>
+*{{box-sizing:border-box}}
+body{{margin:0;font-family:system-ui,'Segoe UI',Tahoma,sans-serif;background:#0b0f17;color:#e5e7eb;line-height:1.6}}
+.wrap{{max-width:680px;margin:0 auto;padding:18px 16px 60px}}
+.topbar{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}}
+.brand{{font-weight:800;letter-spacing:.5px;color:#c9a24b}}
+.langbtn{{background:#1a2230;color:#e5e7eb;border:1px solid #2b3650;border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}}
+.hero{{background:linear-gradient(135deg,#121a2b,#0d1320);border:1px solid #1f2a3f;border-radius:18px;padding:20px;margin-bottom:16px}}
+.unit{{font-size:22px;font-weight:800;margin:0 0 4px}}
+.sub{{color:#9ca3af;font-size:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}}
+.days{{background:#16331f;color:#4ade80;border-radius:999px;padding:2px 10px;font-size:12px}}
+.days.over{{background:#3a1414;color:#f87171}}
+.pct{{font-size:40px;font-weight:800;margin:14px 0 6px;color:#fff}}
+.bar{{height:12px;border-radius:999px;background:#1f2a3f;overflow:hidden}}
+.bar>div{{height:100%;background:linear-gradient(90deg,#c9a24b,#e8c977);border-radius:999px;transition:width .4s}}
+.card{{background:#0f1623;border:1px solid #1f2a3f;border-radius:16px;padding:16px;margin-bottom:14px}}
+.card-t{{font-weight:700;margin-bottom:10px;color:#cbd5e1}}
+.next-txt{{color:#e5e7eb}}
+.timeline{{display:flex;flex-direction:column;gap:0;position:relative}}
+.ms{{display:flex;align-items:flex-start;gap:10px;padding:6px 0;position:relative}}
+.ms-dot{{width:24px;height:24px;border-radius:50%;flex:0 0 24px;display:flex;align-items:center;justify-content:center;font-size:12px;background:#1f2a3f;color:#6b7280;border:2px solid #2b3650}}
+.ms.done .ms-dot{{background:#16331f;color:#4ade80;border-color:#16a34a}}
+.ms.cur .ms-dot{{background:#1e293b;color:#c9a24b;border-color:#c9a24b}}
+.ms-lbl{{font-size:14px;color:#cbd5e1;padding-top:2px}}
+.ms.cur .ms-lbl{{color:#fff;font-weight:700}}
+.ms.up .ms-lbl{{color:#6b7280}}
+.ms-date{{font-size:11px;color:#6b7280;margin-inline-start:auto;padding-top:4px}}
+.room{{margin-bottom:14px}}
+.room-head{{display:flex;justify-content:space-between;align-items:baseline}}
+.room-name{{font-weight:700;color:#fff}}
+.room-meta{{font-size:12px;color:#9ca3af}}
+.room-bar{{height:6px;border-radius:999px;background:#1f2a3f;overflow:hidden;margin:6px 0 8px}}
+.room-bar>div{{height:100%;background:#c9a24b;border-radius:999px}}
+.task{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:#0b121e;border:1px solid #18222f;border-radius:10px;margin-bottom:6px}}
+.task-name{{font-size:14px}}
+.qty{{color:#9ca3af;font-size:12px}}
+.chip{{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid;white-space:nowrap}}
+.empty{{color:#6b7280;text-align:center;padding:20px}}
+.upd{{text-align:center;color:#6b7280;font-size:12px;margin-top:18px}}
+</style></head><body>
+<div class="wrap">
+  <div class="topbar"><div class="brand">OUJA · عوجا</div>
+    <button class="langbtn" id="lng" onclick="tog()">English</button></div>
+  <div class="hero">
+    <div class="unit">{e(unit_name)}</div>
+    <div class="sub">{("<span>"+lbl('التسليم','Handover')+": "+ho_html+"</span>") if ho_html else ""}{dl_html}</div>
+    <div class="pct">{overall_txt}</div>
+    <div class="bar"><div style="width:{bar_w}%"></div></div>
+    <div style="font-size:12px;color:#9ca3af;margin-top:8px">{lbl('نسبة الإنجاز','Overall progress')}</div>
+  </div>
+  {next_block}
+  <div class="card"><div class="card-t">{lbl('مراحل المشروع','Project timeline')}</div>{ms_block}</div>
+  <div class="card"><div class="card-t">{lbl('المهام حسب الغرفة','Tasks by room')}</div>{rooms_block}</div>
+  <div class="upd">{lbl('آخر تحديث','Last updated')}: <span data-ar="{e(upd_ar)}" data-en="{e(upd_en)}">{e(upd_ar)}</span></div>
+</div>
+<script>
+var L='ar';
+function tog(){{
+  L = (L==='ar')?'en':'ar';
+  document.documentElement.lang = L;
+  document.documentElement.dir = (L==='ar')?'rtl':'ltr';
+  document.getElementById('lng').textContent = (L==='ar')?'English':'العربية';
+  var els = document.querySelectorAll('[data-ar]');
+  for (var i=0;i<els.length;i++){{
+    var v = els[i].getAttribute('data-'+L);
+    if (v!==null && v!=='') els[i].textContent = v;
+  }}
+}}
+</script>
+</body></html>"""
+
+async def _api_pmo_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    items = list(_pmo_projects.values())
+    out = []
+    for p in items:
+        tasks = p.get("tasks") or []
+        out.append({
+            "id": p["id"], "ref": p.get("ref"),
+            "unit_name": (p.get("unit") or {}).get("name", ""),
+            "client_name": (p.get("client") or {}).get("name", ""),
+            "district": (p.get("unit") or {}).get("district", ""),
+            "progress": _pmo_progress(tasks),
+            "milestone": (p.get("milestones") or _pmo_default_milestones())[p.get("milestone_index", 0)]
+                         if (p.get("milestones") or _pmo_default_milestones()) else None,
+            "handover_date": p.get("handover_date", ""),
+            "status_label": _pmo_status_label(p),
+            "task_count": len(tasks),
+            "created_at": p.get("created_at"), "updated_at": p.get("updated_at"),
+        })
+    out.sort(key=lambda x: x.get("updated_at") or x.get("created_at") or "", reverse=True)
+    total = len(out)
+    in_prog = sum(1 for x in out if x["status_label"] == "in_progress")
+    done = sum(1 for x in out if x["status_label"] == "completed")
+    return _json({"projects": out, "count": total,
+                  "summary": {"total": total, "in_progress": in_prog, "completed": done}})
+
+async def _api_pmo_get(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    pid = request.query.get("id", "")
+    p = _pmo_projects.get(pid)
+    if not p:
+        return _json({"error": "not found"}, 404)
+    return _json({"project": _pmo_view(p)})
+
+async def _api_pmo_create(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    client = b.get("client") or {}
+    unit = b.get("unit") or {}
+    errors = {}
+    if not (client.get("name") or "").strip():
+        errors["client.name"] = "مطلوب"
+    if not (client.get("whatsapp") or "").strip():
+        errors["client.whatsapp"] = "مطلوب"
+    if not (unit.get("name") or "").strip():
+        errors["unit.name"] = "مطلوب"
+    if not (unit.get("district") or "").strip():
+        errors["unit.district"] = "مطلوب"
+    if not (b.get("supervisor") or "").strip():
+        errors["supervisor"] = "مطلوب"
+    uname = _ouja_prefix(unit.get("name"))
+    if len(uname) > 50:
+        errors["unit.name"] = "الاسم أطول من 50 حرف (مع البادئة Ouja |)"
+    if errors:
+        return _json({"error": "validation", "fields": errors}, 400)
+    pid = _new_pmo_id()
+    budget = unit.get("budget", b.get("budget"))
+    try:
+        budget = float(budget) if budget not in (None, "", "null") else None
+    except Exception:
+        budget = None
+    p = {
+        "id": pid, "ref": _new_pmo_ref(),
+        "client": {
+            "name": (client.get("name") or "").strip()[:80],
+            "whatsapp": (client.get("whatsapp") or "").strip()[:40],
+            "email": (client.get("email") or "").strip()[:120],
+        },
+        "unit": {
+            "name": uname[:50],
+            "district": (unit.get("district") or "").strip()[:80],
+            "type": (unit.get("type") or "").strip()[:20],
+            "floor": (unit.get("floor") or "").strip()[:20],
+            "building": (unit.get("building") or "").strip()[:40],
+            "area": unit.get("area"),
+        },
+        "style": (b.get("style") or "").strip()[:60],
+        "budget": budget,
+        "handover_date": (b.get("handover_date") or "").strip()[:10],
+        "supervisor": (b.get("supervisor") or "").strip()[:80],
+        "notes": (b.get("notes") or "").strip()[:600],
+        "rooms": [], "tasks": [],
+        "milestones": _pmo_default_milestones(),
+        "milestone_index": 0,
+        "next_step": "",
+        "owner_token": _pmo_owner_token(), "owner_active": True,
+        "log": [],
+        "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        "updated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        "created_by": _req_actor(request),
+    }
+    _pmo_log(p, _req_actor(request), "أنشئ المشروع.")
+    _pmo_projects[pid] = p
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"PMO · مشروع جديد · {p['unit']['name']} ({p['ref']})")
+    return _json({"ok": True, "project": _pmo_view(p)})
+
+async def _api_pmo_update(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("id") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    if isinstance(b.get("client"), dict):
+        for k in ("name", "whatsapp", "email"):
+            if k in b["client"]:
+                p.setdefault("client", {})[k] = (b["client"][k] or "").strip()[:120]
+    if isinstance(b.get("unit"), dict):
+        for k in ("district", "type", "floor", "building", "area"):
+            if k in b["unit"]:
+                p.setdefault("unit", {})[k] = (str(b["unit"][k]).strip()[:80]
+                                               if b["unit"][k] is not None else "")
+        if "name" in b["unit"]:
+            nm = _ouja_prefix(b["unit"]["name"])[:50]
+            p.setdefault("unit", {})["name"] = nm
+    for k in ("style", "supervisor", "next_step", "handover_date", "notes"):
+        if k in b:
+            p[k] = (b[k] or "").strip()[:600]
+    if "budget" in b:
+        try:
+            p["budget"] = float(b["budget"]) if b["budget"] not in (None, "", "null") else None
+        except Exception:
+            pass
+    if isinstance(b.get("rooms"), list):
+        p["rooms"] = [str(x).strip()[:60] for x in b["rooms"] if str(x).strip()][:60]
+    p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "project": _pmo_view(p)})
+
+async def _api_pmo_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.pop((b.get("id") or "").strip(), None)
+    if not p:
+        return _json({"error": "not found"}, 404)
+    await asyncio.to_thread(persist_state)
+    log_event("ops", f"PMO · حذف مشروع · {(p.get('unit') or {}).get('name','?')}")
+    return _json({"ok": True})
+
+async def _api_pmo_parse_equation(request):
+    """POST multipart 'file' = the fit-out equation PDF (≤15MB). Returns the
+    extracted items for REVIEW — does NOT create tasks. Commit happens via
+    /api/pmo/commit-tasks after the user reviews/edits."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if not ANTHROPIC_API_KEY:
+        return _json({"error": "no_api_key", "message": "مفتاح Claude غير مهيأ"}, 400)
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+        if not field or field.name != "file":
+            return _json({"error": "expected 'file' multipart field"}, 400)
+        fname = (field.filename or "").lower()
+        ctype = (field.headers.get("Content-Type", "") or "").lower()
+        if not (fname.endswith(".pdf") or "pdf" in ctype):
+            return _json({"error": "not_pdf", "message": "ملفات PDF فقط مقبولة"}, 400)
+        size, chunks = 0, []
+        while True:
+            chunk = await field.read_chunk(262144)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > 15 * 1024 * 1024:
+                return _json({"error": "too_large", "message": "الملف كبير جداً. الحد 15 ميجابايت"}, 400)
+            chunks.append(chunk)
+        blob = b"".join(chunks)
+    except Exception as e:
+        return _json({"error": f"upload error: {e}"}, 400)
+    if not blob:
+        return _json({"error": "empty", "message": "ملف فارغ"}, 400)
+    result = await asyncio.to_thread(claude_extract_equation, blob)
+    if result is None:
+        return _json({"error": "unreadable",
+                      "message": "ما قدرنا نقرأ الملف. جرّب PDF ثاني أو ابدأ بقائمة فارغة"}, 422)
+    items = result.get("items") or []
+    rooms = []
+    for it in items:
+        if it.get("room") and it["room"] not in rooms:
+            rooms.append(it["room"])
+    return _json({"ok": True, "items": items, "partial": result.get("partial", False),
+                  "rooms": rooms, "item_count": len(items), "room_count": len(rooms)})
+
+async def _api_pmo_commit_tasks(request):
+    """POST {id, items:[{name,room,qty,cost}], mode:'replace'|'add'} — turn the
+    reviewed equation items into tasks. Default mode 'add' so nothing is lost."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("id") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    mode = (b.get("mode") or "add").strip()
+    items = b.get("items") if isinstance(b.get("items"), list) else []
+    if mode == "replace":
+        p["tasks"] = []
+    base_order = max([t.get("order", 0) for t in p.get("tasks", [])] or [0])
+    added = 0
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        name = (str(it.get("name") or "")).strip()[:160]
+        if not name:
+            continue
+        room = (str(it.get("room") or "عام")).strip()[:60] or "عام"
+        try:
+            qty = max(1, int(float(it.get("qty") or 1)))
+        except Exception:
+            qty = 1
+        cost = it.get("cost")
+        try:
+            cost = float(cost) if cost not in (None, "", "null") else None
+        except Exception:
+            cost = None
+        p.setdefault("tasks", []).append({
+            "id": _new_pmo_task_id(), "name": name, "room": room, "qty": qty,
+            "cost": cost, "status": "not_started", "assignee": "", "due": "",
+            "note": "", "order": base_order + i + 1,
+            "updated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        })
+        added += 1
+    # keep the project's ordered rooms list in sync
+    rooms = _pmo_rooms_of(p)
+    p["rooms"] = rooms
+    p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _pmo_log(p, _req_actor(request),
+             f"المعادلة رُفعت — {added} مهمة أُنشئت." if mode != "replace"
+             else f"المعادلة رُفعت (استبدال) — {added} مهمة.")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "added": added, "project": _pmo_view(p)})
+
+def _pmo_find_task(p, tid):
+    for t in p.get("tasks") or []:
+        if t.get("id") == tid:
+            return t
+    return None
+
+async def _api_pmo_task_save(request):
+    """POST {pid, task:{id?,name,room,qty,cost,status,assignee,due,note}} — add or edit."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    td = b.get("task") or {}
+    name = (str(td.get("name") or "")).strip()[:160]
+    if not name:
+        return _json({"error": "validation", "message": "اسم المهمة مطلوب"}, 400)
+    room = (str(td.get("room") or "عام")).strip()[:60] or "عام"
+    try:
+        qty = max(1, int(float(td.get("qty") or 1)))
+    except Exception:
+        qty = 1
+    cost = td.get("cost")
+    try:
+        cost = float(cost) if cost not in (None, "", "null") else None
+    except Exception:
+        cost = None
+    status = td.get("status") if td.get("status") in PMO_STATUSES else "not_started"
+    tid = (td.get("id") or "").strip()
+    existing = _pmo_find_task(p, tid) if tid else None
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    if existing:
+        existing.update({"name": name, "room": room, "qty": qty, "cost": cost,
+                         "status": status, "assignee": (td.get("assignee") or "").strip()[:80],
+                         "due": (td.get("due") or "").strip()[:10],
+                         "note": (td.get("note") or "").strip()[:300], "updated_at": now})
+        _pmo_log(p, _req_actor(request), f"عدّل المهمة «{name}».")
+    else:
+        order = max([t.get("order", 0) for t in p.get("tasks", [])] or [0]) + 1
+        p.setdefault("tasks", []).append({
+            "id": _new_pmo_task_id(), "name": name, "room": room, "qty": qty, "cost": cost,
+            "status": status, "assignee": (td.get("assignee") or "").strip()[:80],
+            "due": (td.get("due") or "").strip()[:10],
+            "note": (td.get("note") or "").strip()[:300], "order": order, "updated_at": now})
+        _pmo_log(p, _req_actor(request), f"أضاف المهمة «{name}».")
+    p["rooms"] = _pmo_rooms_of(p)
+    p["updated_at"] = now
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "project": _pmo_view(p)})
+
+async def _api_pmo_task_status(request):
+    """POST {pid, tid, status} — quick status-chip change."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    t = _pmo_find_task(p, (b.get("tid") or "").strip())
+    if not t:
+        return _json({"error": "task not found"}, 404)
+    new_status = b.get("status")
+    if new_status not in PMO_STATUSES:
+        return _json({"error": "bad status"}, 400)
+    old = t.get("status")
+    t["status"] = new_status
+    t["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    p["updated_at"] = t["updated_at"]
+    if old != new_status:
+        labels = {"not_started": "لم يبدأ", "in_progress": "جاري التنفيذ",
+                  "final_touches": "اللمسات الأخيرة", "done": "مكتمل", "blocked": "متوقف"}
+        _pmo_log(p, _req_actor(request),
+                 f"غيّر «{t.get('name','')}» إلى {labels.get(new_status, new_status)}.")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "project": _pmo_view(p)})
+
+async def _api_pmo_task_delete(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    tid = (b.get("tid") or "").strip()
+    t = _pmo_find_task(p, tid)
+    if not t:
+        return _json({"error": "task not found"}, 404)
+    p["tasks"] = [x for x in p.get("tasks", []) if x.get("id") != tid]
+    _pmo_log(p, _req_actor(request), f"حذف المهمة «{t.get('name','')}».")
+    p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "project": _pmo_view(p)})
+
+async def _api_pmo_reorder(request):
+    """POST {pid, task_order:[tid,...], rooms:[name,...]} — persist drag order."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    order = b.get("task_order") or []
+    if isinstance(order, list) and order:
+        rank = {tid: i for i, tid in enumerate(order)}
+        for t in p.get("tasks", []):
+            if t.get("id") in rank:
+                t["order"] = rank[t["id"]]
+    if isinstance(b.get("rooms"), list) and b["rooms"]:
+        p["rooms"] = [str(x).strip()[:60] for x in b["rooms"] if str(x).strip()][:60]
+    p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_pmo_milestone(request):
+    """POST {pid, index} — set the current milestone stage (manual)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    try:
+        idx = int(b.get("index"))
+    except Exception:
+        return _json({"error": "bad index"}, 400)
+    ms = p.get("milestones") or _pmo_default_milestones()
+    if idx < 0 or idx >= len(ms):
+        return _json({"error": "out of range"}, 400)
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    # mark every stage up to idx as reached (keep earliest date if already set)
+    for i, m in enumerate(ms):
+        if i <= idx and not m.get("reached_at"):
+            m["reached_at"] = now
+        if i > idx:
+            m["reached_at"] = None
+    p["milestones"] = ms
+    p["milestone_index"] = idx
+    p["updated_at"] = now
+    _pmo_log(p, _req_actor(request), f"المرحلة → {ms[idx].get('ar', '')}.")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "project": _pmo_view(p)})
+
+async def _api_pmo_owner_link(request):
+    """POST {pid, action:'generate'|'regenerate'|'revoke'}."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    action = (b.get("action") or "generate").strip()
+    if action == "revoke":
+        p["owner_active"] = False
+        _pmo_log(p, _req_actor(request), "أُلغي رابط المالك.")
+    elif action in ("generate", "regenerate"):
+        if action == "regenerate" or not p.get("owner_token"):
+            p["owner_token"] = _pmo_owner_token()
+        p["owner_active"] = True
+        _pmo_log(p, _req_actor(request),
+                 "أُنشئ رابط المالك." if action == "generate" else "أُعيد توليد رابط المالك.")
+    p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "owner_token": p.get("owner_token", ""),
+                  "owner_active": p.get("owner_active", True)})
+
+async def _api_pmo_template_list(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    out = [{"id": t["id"], "name": t.get("name", ""), "room": t.get("room", ""),
+            "task_count": len(t.get("tasks") or [])} for t in _pmo_templates.values()]
+    out.sort(key=lambda x: x["name"])
+    return _json({"templates": out})
+
+async def _api_pmo_template_save(request):
+    """POST {name, pid, room} — save the tasks of one room as a reusable template."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    name = (b.get("name") or "").strip()[:60]
+    if not name:
+        return _json({"error": "validation", "message": "اسم القالب مطلوب"}, 400)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    room = (b.get("room") or "").strip()
+    tasks = []
+    if p and room:
+        for t in p.get("tasks") or []:
+            if (t.get("room") or "عام") == room:
+                tasks.append({"name": t.get("name", ""), "qty": t.get("qty", 1)})
+    tid = _new_pmo_template_id()
+    _pmo_templates[tid] = {"id": tid, "name": name, "room": room, "tasks": tasks,
+                           "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "template_id": tid, "task_count": len(tasks)})
+
+async def _api_pmo_template_apply(request):
+    """POST {pid, template_id, room?} — create tasks from a template into a room."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    p = _pmo_projects.get((b.get("pid") or "").strip())
+    if not p:
+        return _json({"error": "not found"}, 404)
+    tpl = _pmo_templates.get((b.get("template_id") or "").strip())
+    if not tpl:
+        return _json({"error": "template not found"}, 404)
+    room = (b.get("room") or tpl.get("room") or "عام").strip()[:60] or "عام"
+    base_order = max([t.get("order", 0) for t in p.get("tasks", [])] or [0])
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    added = 0
+    for i, t in enumerate(tpl.get("tasks") or []):
+        nm = (t.get("name") or "").strip()[:160]
+        if not nm:
+            continue
+        try:
+            qty = max(1, int(float(t.get("qty") or 1)))
+        except Exception:
+            qty = 1
+        p.setdefault("tasks", []).append({
+            "id": _new_pmo_task_id(), "name": nm, "room": room, "qty": qty, "cost": None,
+            "status": "not_started", "assignee": "", "due": "", "note": "",
+            "order": base_order + i + 1, "updated_at": now})
+        added += 1
+    p["rooms"] = _pmo_rooms_of(p)
+    p["updated_at"] = now
+    _pmo_log(p, _req_actor(request), f"طبّق قالب «{tpl.get('name','')}» على {room} — {added} مهمة.")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "added": added, "project": _pmo_view(p)})
+
+async def _api_pmo_owner_page(request):
+    """Public, view-only owner page at /pmo/o/{token}. No login. Hides costs,
+    assignees, budget, notes and the activity log."""
+    token = request.match_info.get("token", "")
+    p = None
+    for proj in _pmo_projects.values():
+        if proj.get("owner_token") and proj.get("owner_token") == token:
+            p = proj
+            break
+    if not p or not p.get("owner_active", True):
+        return web.Response(text=_pmo_owner_inactive_html(), content_type="text/html", status=404)
+    return web.Response(text=_pmo_owner_html(p), content_type="text/html")
+
 async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
     not the dashboard token — so the link can be shared with the cleaners safely."""
@@ -14663,6 +16267,25 @@ async def start_web_server():
         app.router.add_get("/api/design/get", _api_design_get)
         app.router.add_post("/api/design/save", _api_design_save)
         app.router.add_post("/api/design/delete", _api_design_delete)
+        # PMO — fit-out projects
+        app.router.add_get("/api/pmo/list", _api_pmo_list)
+        app.router.add_get("/api/pmo/get", _api_pmo_get)
+        app.router.add_post("/api/pmo/create", _api_pmo_create)
+        app.router.add_post("/api/pmo/update", _api_pmo_update)
+        app.router.add_post("/api/pmo/delete", _api_pmo_delete)
+        app.router.add_post("/api/pmo/parse-equation", _api_pmo_parse_equation)
+        app.router.add_post("/api/pmo/commit-tasks", _api_pmo_commit_tasks)
+        app.router.add_post("/api/pmo/task/save", _api_pmo_task_save)
+        app.router.add_post("/api/pmo/task/status", _api_pmo_task_status)
+        app.router.add_post("/api/pmo/task/delete", _api_pmo_task_delete)
+        app.router.add_post("/api/pmo/reorder", _api_pmo_reorder)
+        app.router.add_post("/api/pmo/milestone", _api_pmo_milestone)
+        app.router.add_post("/api/pmo/owner-link", _api_pmo_owner_link)
+        app.router.add_get("/api/pmo/template/list", _api_pmo_template_list)
+        app.router.add_post("/api/pmo/template/save", _api_pmo_template_save)
+        app.router.add_post("/api/pmo/template/apply", _api_pmo_template_apply)
+        # Public, view-only owner page (no login; token in the path)
+        app.router.add_get("/pmo/o/{token}", _api_pmo_owner_page)
         app.router.add_post("/api/cleaning/import-csv", _api_cleaning_import_csv)
         app.router.add_post("/api/cleaning/import-xlsx", _api_cleaning_import_xlsx)
         # Public cleaning-company page (gated by CLEANING_TOKEN, not the dashboard token)
@@ -15064,6 +16687,14 @@ def load_state():
         for k, v in (_load_json("design_requests.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _design_requests[str(k)] = v
+        _pmo_projects.clear()
+        for k, v in (_load_json("pmo_projects.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _pmo_projects[str(k)] = v
+        _pmo_templates.clear()
+        for k, v in (_load_json("pmo_templates.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("id"):
+                _pmo_templates[str(k)] = v
         _guest_profiles.clear()
         _guest_profiles.update(_load_json("guest_profiles.json", {}))
         _cleaning_feedback.clear()
@@ -15116,6 +16747,8 @@ def persist_state():
     _save_json("quotes.json", _quotes)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
+    _save_json("pmo_projects.json", _pmo_projects)
+    _save_json("pmo_templates.json", _pmo_templates)
     # Sessions are intentionally NOT persisted — restarts force re-login
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
