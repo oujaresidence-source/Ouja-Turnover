@@ -9552,7 +9552,15 @@ function _renderTicketsBody(){
       + '</div>';
     return;
   }
-  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  // Item 73: Najdi one-liner state.
+  const _ar = (L==='ar');
+  const _open = items.filter(function(x){return x.status==='open'||x.status==='in_progress'}).length;
+  const _hot = items.filter(function(x){return x.impact_hot}).length;
+  const _od = items.filter(function(x){return x.overdue}).length;
+  const _tmsg = _ar ? (_open+' تذكرة مفتوحة'+(_hot?('، '+_hot+' على شقق فيها ضيوف'):'')+(_od?(' و'+_od+' متأخرة'):'')+'.')
+                    : (_open+' open tickets'+(_hot?(', '+_hot+' on occupied units'):'')+(_od?(', '+_od+' overdue'):'')+'.');
+  const _tline = '<div class="mbrief" style="margin-bottom:12px"><div class="mbrief-line">🔧 '+esc(_tmsg)+'</div></div>';
+  let html = _tline + '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const it of items){
     const ar = (L==='ar');
     const stat = TK_STATUS_LABEL[it.status] || it.status;
@@ -10980,7 +10988,12 @@ function _renderDesignsBody(){
   const cols = [['intake', ar?'جديد':'Intake'], ['in_progress', ar?'قيد التنفيذ':'In progress'], ['blocked', ar?'متوقف':'Blocked'], ['done', ar?'منجز':'Done']];
   const byStatus = {intake:[], in_progress:[], blocked:[], done:[]};
   items.forEach(function(d){ byStatus[_designStatusKey(d.status)].push(d); });
-  let h = '<div class="kanban">';
+  // Item 73: one-liner state.
+  const _bl = byStatus.blocked.length, _wt = items.filter(function(d){return d.waiting_on==='faisal'}).length;
+  const _dl = ar ? ('عندك '+items.length+' طلب تصميم'+(_bl?('، '+_bl+' متوقف'):'')+(_wt?(' و'+_wt+' ينتظر قرارك'):'')+'.')
+                 : (items.length+' design requests'+(_bl?(', '+_bl+' blocked'):'')+(_wt?(', '+_wt+' awaiting you'):'')+'.');
+  const _dline = '<div class="mbrief" style="margin-bottom:12px"><div class="mbrief-line">🛋️ '+esc(_dl)+'</div></div>';
+  let h = _dline + '<div class="kanban">';
   cols.forEach(function(c){
     const list = byStatus[c[0]];
     h += '<div class="kan-col"><div class="kan-h">'+c[1]+' <span class="kan-n">'+list.length+'</span></div>';
@@ -11238,7 +11251,13 @@ function _pmoRenderCards(){
     wrap.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🏗️</div><div class="muted">'+(ar?'ما فيه مشاريع. اضغط "مشروع جديد" عشان تبدأ.':'No projects yet. Create your first project to start.')+'</div></div>';
     return;
   }
-  var h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  // Item 73: Najdi one-liner state of the view.
+  var _late=items.filter(function(p){var d=pmoDaysLeft(p.handover_date);return d&&d.over&&(p.progress==null||p.progress<100)}).length;
+  var _so=items.filter(function(p){return p.signoff}).length;
+  var _pl = ar ? ('عندك '+items.length+' مشروع تجهيز'+(_late?('، منها '+_late+' متأخر'):'')+(_so?(' و'+_so+' يحتاج اعتمادك'):'')+'.')
+               : (items.length+' fit-out projects'+(_late?(', '+_late+' late'):'')+(_so?(', '+_so+' need sign-off'):'')+'.');
+  var _line='<div class="mbrief" style="margin-bottom:12px"><div class="mbrief-line">🏗️ '+esc(_pl)+'</div></div>';
+  var h = _line + '<div style="display:flex;flex-direction:column;gap:8px">';
   for(var i=0;i<items.length;i++){
     var p = items[i];
     var prog = (p.progress==null)?'—':(p.progress+'%');
