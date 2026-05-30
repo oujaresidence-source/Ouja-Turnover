@@ -6850,6 +6850,18 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .tc-arr{box-shadow:inset 3px 0 0 var(--green)}
 .tc-dep{box-shadow:inset -3px 0 0 var(--blue)}
 .tc:hover{outline:2px solid var(--gold);outline-offset:-2px}
+/* ===== Design requests KANBAN (items 50-52) ===== */
+.kanban{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media (max-width:900px){.kanban{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.kanban{grid-template-columns:1fr}}
+.kan-col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px;min-height:60px}
+.kan-h{font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.kan-n{background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:0 7px;font-size:10.5px;color:var(--mut)}
+.kan-empty{color:var(--mut);font-size:11px;text-align:center;padding:10px}
+.kan-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;margin-bottom:7px;cursor:pointer;transition:border-color .12s}
+.kan-card:hover{border-color:var(--gold)}
+.kan-card.blocked{border-inline-start:3px solid var(--red)}
+.kan-acts{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -9303,21 +9315,30 @@ function renderGuestList(){
   const items = ((D.guests||{}).items) || [];
   const filt = (document.getElementById('guestFilter')||{}).value || 'all';
   const q = ((document.getElementById('guestSearch')||{}).value || '').toLowerCase();
-  let f = items;
-  if(filt === 'vip') f = items.filter(function(x){return x.vip});
-  else if(filt === 'repeat') f = items.filter(function(x){return x.stays >= 2});
+  const ar = (L==='ar');
+  let f = items.slice();
+  if(filt === 'vip') f = f.filter(function(x){return x.vip});
+  else if(filt === 'repeat') f = f.filter(function(x){return x.stays >= 2});
   if(q) f = f.filter(function(x){
     return (x.name||'').toLowerCase().indexOf(q) >= 0 || (x.phone||'').toLowerCase().indexOf(q) >= 0;
   });
+  // Item 62: surface VIP + repeat — VIP first, then most stays.
+  f.sort(function(a,b){ if(!!b.vip !== !!a.vip) return (b.vip?1:0)-(a.vip?1:0); return (b.stays||0)-(a.stays||0); });
   if(!f.length){ body.innerHTML = '<div class="empty">'+t().guest_no_data+'</div>'; return; }
+  // Estimated lifetime value = nights x average ADR across units (labelled ≈, an estimate;
+  // exact per-guest revenue would need joining each guest's reservation totals).
+  const us=((D.rev||{}).units)||[]; let adr=0, n=0; us.forEach(function(u){ if(u.adr){adr+=u.adr;n++} }); adr = n? adr/n : 0;
   let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().guest_name+'</th><th class="num">'+t().guest_stays+'</th>'
-    + '<th class="num">'+t().guest_nights+'</th><th>'+t().guest_last+'</th><th></th></tr></thead><tbody>';
+    + '<th class="num">'+t().guest_nights+'</th><th class="num">'+(ar?'≈ القيمة':'≈ LTV')+'</th><th>'+t().guest_last+'</th><th></th></tr></thead><tbody>';
   for(const g of f){
     const vipTag = g.vip ? ' <span class="pill gold">'+t().guest_vip_on+'</span>' : '';
+    const repTag = (!g.vip && g.stays>=2) ? ' <span class="pill info">'+(ar?'متكرر':'repeat')+'</span>' : '';
+    const ltv = (adr>0 && g.nights) ? ('~'+fmt(Math.round(g.nights*adr))) : '—';
     html += '<tr style="cursor:pointer" onclick="openGuestDrawer(&#39;'+esc(g.key)+'&#39;)">'
-      + '<td class="strong">'+esc(g.name||'—')+vipTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
+      + '<td class="strong">'+esc(g.name||'—')+vipTag+repTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
       + '<td class="num">'+g.stays+'</td><td class="num">'+g.nights+'</td>'
+      + '<td class="num">'+ltv+'</td>'
       + '<td class="muted" style="font-size:11.5px">'+esc((g.last_seen||'').replace('T',' ').slice(0,16))+'</td>'
       + '<td style="text-align:end"><span class="muted">←</span></td></tr>';
   }
@@ -10826,22 +10847,47 @@ async function loadDesigns(){
   try { D.designs = await api('/api/design/list'); } catch(_){ D.designs = {requests:[]} }
   _renderDesignsBody();
 }
+function _designStatusKey(st){
+  st = st||'intake';
+  return (st==='done'||st==='blocked'||st==='in_progress') ? st : 'intake';
+}
+async function setDesignStatus(id, st){
+  try{ await post('/api/design/save',{id:id, status:st}); toast('✓'); loadDesigns(); }catch(e){ toast('خطأ'); }
+}
+async function toggleDesignWait(id, cur){
+  try{ await post('/api/design/save',{id:id, waiting_on: (cur==='faisal'?'':'faisal')}); toast('✓'); loadDesigns(); }catch(e){ toast('خطأ'); }
+}
 function _renderDesignsBody(){
   const body = document.getElementById('designsBody'); if(!body) return;
   const items = ((D.designs||{}).requests)||[];
+  const ar = (L==='ar');
   if(!items.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🛋️</div><div class="muted">ما فيه طلبات. اضغط "<b>طلب جديد</b>" أعلاه.</div></div>';
     return;
   }
-  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
-  for(const d of items){
-    const prioColor = d.priority==='عاجل' ? 'var(--red)' : (d.priority==='متوسط' ? 'var(--gold)' : 'var(--green)');
-    h += '<div onclick="openDesignEditor(&#39;'+esc(d.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
-      + '<div><div class="strong" style="font-size:13.5px">'+esc(d.ref||'')+' · '+esc(d.client_name||'—')+'</div>'
-      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(d.project_name||'')+'</div></div>'
-      + (d.priority?'<span style="background:'+prioColor+';color:#fff;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:700">'+esc(d.priority)+'</span>':'')
-      + '</div>';
-  }
+  // Item 50: kanban columns by status.
+  const cols = [['intake', ar?'جديد':'Intake'], ['in_progress', ar?'قيد التنفيذ':'In progress'], ['blocked', ar?'متوقف':'Blocked'], ['done', ar?'منجز':'Done']];
+  const byStatus = {intake:[], in_progress:[], blocked:[], done:[]};
+  items.forEach(function(d){ byStatus[_designStatusKey(d.status)].push(d); });
+  let h = '<div class="kanban">';
+  cols.forEach(function(c){
+    const list = byStatus[c[0]];
+    h += '<div class="kan-col"><div class="kan-h">'+c[1]+' <span class="kan-n">'+list.length+'</span></div>';
+    if(!list.length){ h += '<div class="kan-empty">—</div>'; }
+    list.forEach(function(d){
+      const wait = (d.waiting_on==='faisal');          // item 52
+      const blocked = (c[0]==='blocked');              // item 51
+      const moves = cols.filter(function(x){return x[0]!==c[0]})
+        .map(function(x){ return '<button class="qset-b" onclick="setDesignStatus(&#39;'+esc(d.id)+'&#39;,&#39;'+x[0]+'&#39;)">'+x[1]+'</button>'; }).join('');
+      h += '<div class="kan-card'+(blocked?' blocked':'')+'" onclick="openDesignEditor(&#39;'+esc(d.id)+'&#39;)">'
+        + '<div class="strong" style="font-size:12.5px">'+esc(d.client_name||'—')+(wait?(' <span class="pill warn">👤 '+(ar?'ينتظر فيصل':'awaiting Faisal')+'</span>'):'')+'</div>'
+        + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(d.ref||'')+(d.project_name?(' · '+esc(d.project_name)):'')+'</div>'
+        + '<div class="kan-acts" onclick="event.stopPropagation()">'+moves
+        +   '<button class="qset-b'+(wait?' danger':'')+'" title="'+(ar?'ينتظر قرار فيصل':'awaiting Faisal')+'" onclick="toggleDesignWait(&#39;'+esc(d.id)+'&#39;,&#39;'+esc(d.waiting_on||'')+'&#39;)">👤</button>'
+        + '</div></div>';
+    });
+    h += '</div>';
+  });
   h += '</div>'; body.innerHTML = h;
 }
 function _ensureDesignOv(){
@@ -17360,6 +17406,8 @@ async def _api_design_list(request):
             "client_name": d.get("client_name"),
             "project_name": d.get("project_name"),
             "priority": d.get("priority"),
+            "status": d.get("status", "intake"),
+            "waiting_on": d.get("waiting_on", ""),
             "created_at": d.get("created_at"),
         })
     return _json({"requests": out, "count": len(items)})
@@ -17391,7 +17439,8 @@ async def _api_design_save(request):
                   "unit_code", "area", "floors", "building_no", "entry_no",
                   "location", "unit_status", "entry_method", "entry_detail",
                   "purpose", "style", "budget", "priority", "deadline",
-                  "pm_name", "pm_phone", "has_plans", "notes")
+                  "pm_name", "pm_phone", "has_plans", "notes",
+                  "status", "waiting_on")   # items 50-52: kanban status + waiting-on-owner
     for k in str_fields:
         if k in b:
             v = b[k]
