@@ -6301,6 +6301,7 @@ def _exp_reconcile(apply=False):
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
 _quotes = {}   # quote_id -> dict
 _QUOTE_SEQ = 0
+_unit_owners = {}   # apartment name -> owner name (item 60: per-owner P&L)
 
 def _new_quote_id():
     global _QUOTE_SEQ
@@ -10716,6 +10717,9 @@ function _expAllHtml(){
   }).join('');
   return bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+thead+rows+'</table></div>';
 }
+async function setUnitOwner(apt, owner){
+  try{ await post('/api/expenses/set-owner',{apartment:apt, owner:owner}); toast('✓'); if(typeof expRefresh==='function') expRefresh(); }catch(e){ toast('خطأ'); }
+}
 function _expByAptHtml(){
   var arr=((D.expSummary||{}).by_apartment)||[];
   if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
@@ -10726,20 +10730,36 @@ function _expByAptHtml(){
   // Item 59: per-unit P&L — join 90-day revenue from the revenue view by unit name.
   var revMap={}; (((D.rev||{}).units)||[]).forEach(function(u){ revMap[u.name]=u.rev90||0; });
   var hasRev = Object.keys(revMap).length>0;
-  var cols=[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
+  var owners=((D.expSummary||{}).owners)||{};   // item 60
+  var cols=[ar?'الشقة':'Apartment',ar?'المالك':'Owner',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
   if(hasRev) cols=cols.concat([ar?'إيراد ٩٠ي':'Rev 90d',ar?'صافي':'Net']);
   var head='<tr>'+cols.map(_expTh).join('')+'</tr>';
   var rows=arr.map(function(a){
     var hot = (totals.length>=4 && median>0 && (a.total||0) >= median*1.5);
     var badge = hot ? ' <span class="pill danger">⚠ '+(ar?'أعلى من المعتاد':'above peers')+'</span>' : '';
-    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
+    var ownInput = '<input value="'+esc(owners[a.apartment]||'')+'" onchange="setUnitOwner(&#39;'+esc(a.apartment)+'&#39;,this.value)" placeholder="'+(ar?'المالك':'owner')+'" style="width:88px;font-size:11px;padding:3px 6px;background:var(--surface);border:1px solid var(--line);border-radius:5px;color:var(--text)">';
+    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px">'+ownInput+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
     if(hasRev){
       var rev = revMap[a.apartment]||0; var net = rev-(a.total||0);
       tr += '<td style="padding:8px 6px;font-size:12px">'+(rev?fmt(rev):'—')+'</td>'
           + '<td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+(rev?fmt(net):'—')+'</td>';
     }
     return tr+'</tr>'; }).join('');
-  return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
+  var tbl = '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
+  // Item 60: per-owner P&L rollup (revenue − expenses grouped by the owner assigned above).
+  var byOwner={};
+  arr.forEach(function(a){ var o=owners[a.apartment]; if(!o) return; var g=byOwner[o]=byOwner[o]||{units:0,exp:0,rev:0}; g.units++; g.exp+=(a.total||0); g.rev+=(revMap[a.apartment]||0); });
+  var oKeys=Object.keys(byOwner);
+  var ownerTbl;
+  if(oKeys.length){
+    ownerTbl = '<div style="margin-top:16px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'الربح/الخسارة حسب المالك':'P&L by owner')+'</div>'
+      + '<table style="width:100%;border-collapse:collapse"><tr>'+[ar?'المالك':'Owner',ar?'وحدات':'Units',ar?'إيراد':'Revenue',ar?'مصاريف':'Expenses',ar?'صافي':'Net'].map(_expTh).join('')+'</tr>'
+      + oKeys.map(function(o){ var g=byOwner[o]; var net=g.rev-g.exp; return '<tr style="border-bottom:1px solid var(--line)"><td class="strong" style="padding:8px 6px;font-size:12px">'+esc(o)+'</td><td style="padding:8px 6px;font-size:12px">'+g.units+'</td><td style="padding:8px 6px;font-size:12px">'+(g.rev?fmt(g.rev):'—')+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(g.exp)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+fmt(net)+'</td></tr>'; }).join('')
+      + '</table></div>';
+  }else{
+    ownerTbl = '<div class="muted" style="margin-top:12px;font-size:11px;padding:9px 11px;background:var(--surface-2);border-radius:6px">ℹ️ '+(ar?'عيّن مالكًا لكل وحدة في عمود «المالك» فوق، ويطلع لك الربح والخسارة لكل مالك تلقائيًا.':'Assign an owner in the Owner column above and per-owner P&L appears here automatically.')+'</div>';
+  }
+  return tbl + ownerTbl;
 }
 function _expByEmpHtml(){
   var arr=((D.expSummary||{}).by_employee)||[];
@@ -17361,8 +17381,25 @@ async def _api_expenses_summary(request):
         "queue": held + failed,
         "by_apartment": sorted(by_apt.values(), key=lambda x: -x["total"]),
         "by_employee": sorted(by_emp.values(), key=lambda x: -x["total"]),
+        "owners": dict(_unit_owners),   # item 60: apartment -> owner map
         "dryrun": EXPENSE_POST_DRYRUN,
     })
+
+async def _api_expenses_set_owner(request):
+    """POST {apartment, owner} — assign a unit to an owner for per-owner P&L (item 60)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    apt = (b.get("apartment") or "").strip()
+    if not apt:
+        return _json({"error": "no apartment"}, 400)
+    owner = (b.get("owner") or "").strip()[:80]
+    if owner:
+        _unit_owners[apt] = owner
+    else:
+        _unit_owners.pop(apt, None)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
 
 async def _api_expenses_get(request):
     if not _dash_auth(request):
@@ -19205,6 +19242,7 @@ async def start_web_server():
         app.router.add_get("/api/expenses/list", _api_expenses_list)
         app.router.add_get("/api/expenses/queue", _api_expenses_queue)
         app.router.add_get("/api/expenses/summary", _api_expenses_summary)
+        app.router.add_post("/api/expenses/set-owner", _api_expenses_set_owner)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
@@ -19636,6 +19674,7 @@ def load_state():
         for k, v in (_load_json("quotes.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _quotes[str(k)] = v
+        _unit_owners.update(_load_json("unit_owners.json", {}) or {})   # item 60
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -19708,6 +19747,7 @@ def persist_state():
     _save_json("review_translations.json", _review_translations)
     _save_json("users.json", _users)
     _save_json("quotes.json", _quotes)
+    _save_json("unit_owners.json", _unit_owners)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
