@@ -6716,6 +6716,23 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .page-help.hidden{display:none}
 .page-tools{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 
+/* ===== MORNING BRIEF (home) — one-glance headline + one-click alerts ===== */
+.mbrief{background:linear-gradient(135deg,var(--gold-tint),var(--surface));border:1px solid var(--gold);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:16px}
+.mbrief-line{font-size:14.5px;line-height:1.7;color:var(--text)}
+.mbrief-line b{color:var(--gold-2);font-weight:700}
+.mb-top{margin-top:9px;font-size:12.5px;color:var(--text-2)}
+.mb-top b{color:var(--text)}
+.mb-alerts{margin-top:11px;display:flex;flex-direction:column;gap:7px}
+.mb-alert{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:var(--r);font-size:12.5px;color:var(--text);cursor:pointer;border:1px solid;transition:transform .12s,border-color .15s}
+.mb-alert .mb-ic{flex-shrink:0;font-size:14px;line-height:1}
+.mb-alert b{color:var(--text);font-weight:700}
+.mb-alert .mb-go{margin-inline-start:auto;color:var(--text-3);font-weight:700}
+.mb-alert:active{transform:scale(.99)}
+.mb-alert.red{background:var(--red-soft);border-color:rgba(196,67,67,.22)}
+.mb-alert.red:hover{border-color:var(--red)}
+.mb-alert.amber{background:var(--yellow-soft);border-color:rgba(201,150,23,.22)}
+.mb-alert.amber:hover{border-color:var(--yellow)}
+
 /* ============== KPI STRIP ============== */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:18px}
 @media (max-width:767px){ .kpis{grid-template-columns:repeat(2,1fr);gap:8px} }
@@ -7045,6 +7062,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             الشريط الجانبي يسار = كل الصفحات.
           </div>
         </div>
+
+        <!-- Najdi morning brief: know the day in one glance (items 1-4) -->
+        <div id="morningBrief"></div>
 
         <div class="kpis" id="kpis"></div>
 
@@ -9083,7 +9103,7 @@ async function refresh(){
    RENDER: top-level
    ============================================================ */
 function renderAll(){
-  renderFresh(); renderKpis(); renderNeedsBanner();
+  renderFresh(); renderKpis(); renderMorningBrief(); renderNeedsBanner();
   renderUrgentStrip(); renderArrivalsTimeline();
   renderTodayHome(); renderRevCard(); renderRecent();
   // Don't blow away an expanded item's content on the 15-second auto-refresh —
@@ -12834,6 +12854,42 @@ function renderNeedsBanner(){
     +'</div>';
 }
 
+function renderMorningBrief(){
+  const el = document.getElementById('morningBrief'); if(!el) return;
+  const td = D.today||{};
+  const arr=(td.arrivals||[]).length, dep=(td.departures||[]).length, em=(td.empty||[]).length;
+  const risk=td.risk||0, tight=td.tight||[], at=td.arr_tickets||[];
+  const ar = (L==='ar');
+  // Item 1: one-glance Najdi headline.
+  const head = ar
+    ? ('صباح الخير 👋 اليوم <b>'+arr+'</b> وصول، <b>'+dep+'</b> مغادرة، <b>'+em+'</b> فاضية، وإيراد على الطاولة ~<b>'+fmt(risk)+' ر.س</b>.')
+    : ('Good morning 👋 Today: <b>'+arr+'</b> arrivals, <b>'+dep+'</b> departures, <b>'+em+'</b> empty, ~<b>'+fmt(risk)+' SAR</b> on the table.');
+  // Item 1 tail / item 2 echo: top-3 things that need you, from the money+urgency queue.
+  const urg = ((D.urgent||{}).items)||[];
+  let top3 = '';
+  if(urg.length){
+    top3 = '<div class="mb-top"><b>'+(ar?'أهم اللي يحتاجك:':'Top priorities:')+'</b> '
+      + urg.slice(0,3).map(function(it,i){ return (i+1)+'. '+esc(it.title||'')+(it.subtitle?(' · '+esc(it.subtitle)):''); }).join('  ·  ')
+      + '</div>';
+  }
+  // Items 3 & 4: red/amber one-click alerts.
+  let alerts = '';
+  at.forEach(function(a){
+    alerts += '<div class="mb-alert red" onclick="go(\\'tickets\\')"><span class="mb-ic">🛠️</span><span>'
+      + (ar ? ('وصول اليوم على <b>'+esc(a.unit)+'</b> وفيها تذكرة صيانة مفتوحة: '+esc(a.title))
+            : ('Arrival today into <b>'+esc(a.unit)+'</b> with an OPEN maintenance ticket: '+esc(a.title)))
+      + '</span><span class="mb-go">←</span></div>';
+  });
+  (tight||[]).forEach(function(u){
+    alerts += '<div class="mb-alert amber" onclick="go(\\'today\\')"><span class="mb-ic">⚡</span><span>'
+      + (ar ? ('تسليم واستلام نفس اليوم على <b>'+esc(u)+'</b> — رتّب تنظيف سريع')
+            : ('Same-day turnover on <b>'+esc(u)+'</b> — schedule a fast clean'))
+      + '</span><span class="mb-go">←</span></div>';
+  });
+  el.innerHTML = '<div class="mbrief"><div class="mbrief-line">'+head+'</div>'+top3
+    + (alerts ? '<div class="mb-alerts">'+alerts+'</div>' : '') + '</div>';
+}
+
 function renderTodayHome(){
   const td = D.today||{};
   const dEl = document.getElementById('t_today_date');
@@ -14087,9 +14143,22 @@ def _compute_today():
     empty = [{"unit": units.get(lid, str(lid)), "lid": lid}
              for lid in units if lid not in occ_lids]
     tight = [units.get(lid, str(lid)) for lid in (dep_lids & arr_lids)]      # same-day turnover
+    # Item 3: a guest arrives TODAY into a unit that still has an OPEN maintenance ticket.
+    _open_by_lid = {}
+    for _tk in _tickets:
+        if _tk.get("status") in ("open", "in_progress") and _tk.get("lid") is not None:
+            _open_by_lid.setdefault(_tk["lid"], []).append(_tk)
+    arr_tickets = []
+    for _lid in arr_lids:
+        _tks = _open_by_lid.get(_lid)
+        if _tks:
+            arr_tickets.append({"unit": units.get(_lid, str(_lid)), "lid": _lid,
+                                "title": _tks[0].get("title", ""), "ticket_id": _tks[0].get("id"),
+                                "n": len(_tks)})
     prices = [u.get("price") for u in _catalog_units if u.get("price")]
     avg = round(sum(prices) / len(prices)) if prices else 0
     return {"date": today.isoformat(), "active": active, "occupied": len(occ_lids),
+            "arr_tickets": arr_tickets,
             "arrivals": sorted(arrivals, key=lambda x: x["unit"]),
             "departures": sorted(departures, key=lambda x: x["unit"]),
             "empty": sorted(empty, key=lambda x: x["unit"])[:90], "empty_n": len(empty),
