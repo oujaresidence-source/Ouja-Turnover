@@ -6802,6 +6802,28 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .ibox-conf.high{background:var(--green-soft);color:var(--green)}
 .ibox-conf.mid{background:var(--yellow-soft);color:var(--yellow)}
 .ibox-conf.low{background:var(--red-soft);color:var(--red)}
+/* Inbox item enrichments (items 6-8): AI summary, wait-time, suggested action */
+.ibox-sum{font-size:11.5px;color:var(--text-3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ibox-wait{font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;font-family:var(--font-mono);background:var(--surface-2);color:var(--text-3)}
+.ibox-wait.hot{background:var(--red-soft);color:var(--red)}
+.ibox-act{font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;letter-spacing:.2px;white-space:nowrap}
+.ibox-act.send{background:var(--green-soft);color:var(--green)}
+.ibox-act.mid{background:var(--yellow-soft);color:var(--yellow)}
+.ibox-act.rev{background:var(--blue-soft);color:var(--blue)}
+.ibox-act.esc{background:var(--red-soft);color:var(--red)}
+/* Bulk-approve bar (item 9) */
+.bulkbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--green-soft);border:1px solid rgba(14,158,95,.22);border-radius:var(--r);padding:10px 13px;margin-bottom:10px;font-size:12.5px;color:var(--text)}
+.bulkbar b{color:var(--green)}
+/* Loud DRY-RUN banner (item 24) */
+.dry-banner{background:var(--red-soft);border:1px solid var(--red);color:var(--red);border-radius:var(--r);padding:11px 14px;margin-bottom:12px;font-size:12.5px;font-weight:700;text-align:center}
+/* Quote win-rate header + inline status setters (items 44-46) */
+.qstat{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.qstat>div{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;text-align:center}
+.qstat-v{font-size:18px;font-weight:700;color:var(--gold);font-family:var(--font-mono)}
+.qstat-l{font-size:10.5px;color:var(--mut);margin-top:2px}
+.qset{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
+.qset-b{font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);cursor:pointer}
+.qset-b:hover{border-color:var(--gold);color:var(--gold)}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -9399,21 +9421,29 @@ function _renderTicketsBody(){
   }
   let html = '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const it of items){
+    const ar = (L==='ar');
     const stat = TK_STATUS_LABEL[it.status] || it.status;
     const prio = TK_PRIORITY_LABEL[it.priority] || it.priority;
-    const overdueTag = it.overdue ? '<span class="pill danger" style="margin-inline-start:6px">⏰ متأخرة</span>' : '';
+    const overdueTag = it.overdue ? '<span class="pill danger" style="margin-inline-start:6px">⏰ '+(ar?'متأخرة':'overdue')+'</span>' : '';
+    // Item 31: occupied/arriving-soon impact; Item 34: recurring; Item 32: SLA (non-overdue).
+    const impactTag = it.impact_hot ? '<span class="pill danger" style="margin-inline-start:6px">🔴 '+(ar?'ضيف بالشقة':'occupied')+'</span>' : '';
+    const recurTag = it.recurring ? '<span class="pill warn" style="margin-inline-start:6px">🔁 '+(ar?'متكررة':'recurring')+'</span>' : '';
+    const slaTag = (!it.overdue && it.sla==='due_soon') ? '<span class="pill warn" style="margin-inline-start:6px">⏰ '+(ar?'قريبة':'due soon')+'</span>'
+                 : (it.sla==='aging') ? '<span class="pill muted" style="margin-inline-start:6px">⏳ '+(ar?'قديمة':'aging')+'</span>' : '';
     const srcEmoji = it.source === 'escalation' ? '🚨 ' : (it.source === 'review' ? '⭐ ' : '');
     const unitTag = it.unit_name ? '<span class="muted" style="font-size:11px">· '+esc(it.unit_name)+'</span>' : '';
     const dueTag  = it.due_date ? '<span class="muted" style="font-size:11px">· ⏰ '+esc(it.due_date)+'</span>' : '';
     const assTag  = it.assignee ? '<span class="muted" style="font-size:11px">· 👤 '+esc(it.assignee)+'</span>' : '';
+    // Item 33: the affected unit's next booking.
+    const nextTag = it.next_arrival ? '<span class="muted" style="font-size:11px">· 🛬 '+(ar?'وصول ':'arr ')+esc(it.next_arrival)+'</span>' : '';
     html += '<div class="ticket-row" onclick="openTicketModal(&#39;'+esc(it.id)+'&#39;)" '
-         +    'style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;transition:.12s"'
-         +    ' onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+         +    'style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--line);cursor:pointer;transition:.12s"'
+         +    ' onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--line)&#39;">'
          +    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">'
          +      '<div style="flex:1;min-width:0">'
-         +        '<div class="strong" style="font-size:13.5px">'+srcEmoji+esc(it.title)+overdueTag+'</div>'
+         +        '<div class="strong" style="font-size:13.5px">'+srcEmoji+esc(it.title)+overdueTag+impactTag+recurTag+slaTag+'</div>'
          +        '<div style="margin-top:4px;font-size:11.5px;color:var(--mut)">'
-         +          esc(it.category)+unitTag+assTag+dueTag
+         +          esc(it.category)+unitTag+assTag+dueTag+nextTag
          +        '</div>'
          +      '</div>'
          +      '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'
@@ -9590,9 +9620,22 @@ async function loadQuotes(){
   try { D.quotes = await api('/api/quotes/list'); } catch(_){ D.quotes = {quotes:[]} }
   _renderQuotesBody();
 }
+// Item 44: status metadata for a quote.
+function _quoteStatusInfo(st, ar){
+  st = st||'draft';
+  if(st==='accepted') return {cls:'ok', label: ar?'مقبول':'Accepted'};
+  if(st==='lost') return {cls:'danger', label: ar?'خسران':'Lost'};
+  if(st==='sent') return {cls:'info', label: ar?'مُرسل':'Sent'};
+  return {cls:'muted', label: ar?'مسودة':'Draft'};
+}
+async function setQuoteStatus(id, st){
+  try{ const r=await post('/api/quotes/save',{id:id, status:st}); if(r&&r.ok){ toast('✓'); loadQuotes(); } else toast('خطأ'); }
+  catch(e){ toast('خطأ'); }
+}
 function _renderQuotesBody(){
   const body = document.getElementById('quotesBody'); if(!body) return;
-  const items = ((D.quotes||{}).quotes)||[];
+  const data = D.quotes||{}; const items = data.quotes||[];
+  const ar = (L==='ar');
   if(!items.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
       + '<div style="font-size:32px;margin-bottom:8px">📄</div>'
@@ -9600,12 +9643,29 @@ function _renderQuotesBody(){
       + '</div>';
     return;
   }
-  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  // Item 46: win-rate header.
+  const st = data.stats||{};
+  const wr = (st.win_rate!=null) ? (st.win_rate+'%') : '—';
+  let h = '<div class="qstat">'
+    + '<div><div class="qstat-v">'+wr+'</div><div class="qstat-l">'+(ar?'نسبة القبول':'Win rate')+'</div></div>'
+    + '<div><div class="qstat-v">'+(st.won||0)+'</div><div class="qstat-l">'+(ar?'مقبول':'Accepted')+'</div></div>'
+    + '<div><div class="qstat-v">'+(st.lost||0)+'</div><div class="qstat-l">'+(ar?'خسران':'Lost')+'</div></div>'
+    + '<div><div class="qstat-v">'+items.length+'</div><div class="qstat-l">'+(ar?'الكل':'Total')+'</div></div></div>';
+  h += '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const q of items){
-    h += '<div onclick="openQuoteEditor(&#39;'+esc(q.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
-      + '<div><div class="strong" style="font-size:13.5px">'+esc(q.number||'')+' · '+esc(q.client_name||'—')+'</div>'
-      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(q.date||'')+' · '+esc(q.client_phone||'')+'</div></div>'
-      + '<div style="text-align:end"><div style="font-weight:700;color:var(--gold);font-size:14px">'+fmt(q.grand_total||0)+' ر.س</div>'
+    const si = _quoteStatusInfo(q.status, ar);
+    // Item 45: follow-up badge when a sent quote has had no decision for >=3 days.
+    let fu = '';
+    if(q.status==='sent' && (_waitMin(q.created_at)/1440)>=3){ fu = '<span class="pill warn" style="margin-inline-start:6px">⏰ '+(ar?'تابع العميل':'Follow up')+'</span>'; }
+    // Item 44: one-click status setters (stopPropagation so they don't open the editor).
+    const setBtns = '<div class="qset" onclick="event.stopPropagation()">'
+      + ['sent','accepted','lost'].map(function(s){ var i=_quoteStatusInfo(s,ar); return '<button class="qset-b '+i.cls+'" onclick="setQuoteStatus(&#39;'+esc(q.id)+'&#39;,&#39;'+s+'&#39;)">'+i.label+'</button>'; }).join('')
+      + '</div>';
+    h += '<div onclick="openQuoteEditor(&#39;'+esc(q.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--line);cursor:pointer;display:flex;justify-content:space-between;align-items:flex-start;gap:10px" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--line)&#39;">'
+      + '<div style="min-width:0"><div class="strong" style="font-size:13.5px">'+esc(q.number||'')+' · '+esc(q.client_name||'—')+' <span class="pill '+si.cls+'">'+si.label+'</span>'+fu+'</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(q.date||'')+' · '+esc(q.client_phone||'')+'</div>'
+      + setBtns + '</div>'
+      + '<div style="text-align:end;flex-shrink:0"><div style="font-weight:700;color:var(--gold);font-size:14px">'+fmt(q.grand_total||0)+' ر.س</div>'
       + '<div class="muted" style="font-size:10.5px">'+esc((q.created_at||'').slice(0,10))+'</div></div>'
       + '</div>';
   }
@@ -9869,14 +9929,39 @@ async function loadWeekly(){
   try { D.weekly = await api('/api/weekly/list'); } catch(_){ D.weekly = {reports:[]} }
   _renderWeeklyBody();
 }
+// Item 48: auto Najdi narrative from cached analytics (no AI call needed).
+function weeklyNarrative(){
+  const ov = D.ov||{}, units = ((D.rev||{}).units)||[];
+  const ar = (L==='ar');
+  const rev7 = ov.rev_7||0, rev30 = ov.rev_30||0, occ7 = ov.occ_7, missed = ov.missed_7||0;
+  // We don't store an exact prior week, so compare to the trailing ~3-week average (labelled honestly).
+  const prevAvg = rev30>rev7 ? (rev30-rev7)/3 : 0;
+  const wow = prevAvg>0 ? Math.round((rev7-prevAvg)/prevAvg*100) : null;
+  let strong=null, weak=null;
+  units.forEach(function(u){ if(u.occ==null) return; if(!strong||u.occ>strong.occ) strong=u; if(!weak||u.occ<weak.occ) weak=u; });
+  const acts=[];
+  const uplift = (D.pr&&D.pr.total_uplift)||0;
+  if(uplift>0) acts.push(ar?('فيه ~'+fmt(uplift)+' ر.س على الطاولة بالتسعير — راجع صفحة التسعير'):('~'+fmt(uplift)+' SAR on the table in pricing — review Pricing'));
+  if(weak && weak.occ!=null && weak.occ<60) acts.push(ar?('أضعف وحدة «'+esc(weak.name)+'» إشغالها '+weak.occ+'٪ — سوّ لها عرض أو نزّل سعرها'):('Weakest unit "'+esc(weak.name)+'" at '+weak.occ+'% — discount or promo it'));
+  if(missed>0) acts.push(ar?('ضاع ~'+fmt(missed)+' ر.س الأسبوع من ليالٍ فاضية — قلّلها'):('~'+fmt(missed)+' SAR missed this week from empty nights — cut them'));
+  if(!acts.length) acts.push(ar?'كل شي ماشي تمام — ثبّت على نفس الإيقاع':'All steady — keep the rhythm');
+  const wowTxt = wow==null ? '' : (ar?('، الإيراد '+(wow>=0?'+':'')+wow+'٪ مقابل متوسط آخر ٣ أسابيع'):(', revenue '+(wow>=0?'+':'')+wow+'% vs the trailing 3-week average'));
+  const line = ar
+    ? ('هذا الأسبوع: إيراد ~<b>'+fmt(rev7)+' ر.س</b>'+wowTxt+'، الإشغال <b>'+(occ7!=null?occ7+'٪':'—')+'</b>'+(strong?('، أقوى وحدة <b>'+esc(strong.name)+'</b> ('+strong.occ+'٪)'):'')+(weak?('، وأضعف وحدة <b>'+esc(weak.name)+'</b> ('+weak.occ+'٪)'):'')+'.')
+    : ('This week: revenue ~<b>'+fmt(rev7)+' SAR</b>'+wowTxt+', occupancy <b>'+(occ7!=null?occ7+'%':'—')+'</b>'+(strong?(', strongest <b>'+esc(strong.name)+'</b> ('+strong.occ+'%)'):'')+(weak?(', weakest <b>'+esc(weak.name)+'</b> ('+weak.occ+'%)'):'')+'.');
+  return '<div class="mbrief" style="margin-bottom:14px"><div class="mbrief-line">📊 '+line+'</div>'
+    + '<div class="mb-top"><b>'+(ar?'٣ أشياء تتصرف فيها:':'3 things to act on:')+'</b></div>'
+    + '<div class="mb-alerts">'+acts.slice(0,3).map(function(a,i){ return '<div class="mb-alert amber"><span class="mb-ic">'+(i+1)+'</span><span>'+a+'</span></div>'; }).join('')+'</div></div>';
+}
 function _renderWeeklyBody(){
   const body = document.getElementById('weeklyBody'); if(!body) return;
   const items = ((D.weekly||{}).reports)||[];
+  const narrative = weeklyNarrative();   // item 48 (kept above the numeric report list — item 49)
   if(!items.length){
-    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">📊</div><div class="muted">ما فيه تقارير أسبوعية بعد. اضغط "<b>تقرير جديد</b>" أعلاه.</div></div>';
+    body.innerHTML = narrative + '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">📊</div><div class="muted">ما فيه تقارير أسبوعية بعد. اضغط "<b>تقرير جديد</b>" أعلاه.</div></div>';
     return;
   }
-  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  let h = narrative + '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const r of items){
     const sm = r.summary||{};
     let badges = '';
@@ -11902,7 +11987,11 @@ function _renderReviewCard(r){
   const _replyTxt = r.ai ? (r.ai.public_response_ar || r.ai.public_response_en || '') : '';
   html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
        +    ((r.ai && _replyTxt && (_notRemovable || isPos))
-            ? '<button class="btn primary xs" onclick="_rvCopy(this, '+JSON.stringify(_replyTxt)+')">✍️ انسخ الرد وأرسله</button>'
+            ? '<button class="btn primary xs" onclick="_rvCopy(this, '+JSON.stringify(_replyTxt)+')">✍️ انسخ الرد</button>'
+              // Item 40: Hostaway's PUBLIC API does NOT support posting a review response
+              // (confirmed: our fetch only GETs /v1/reviews; no reply endpoint exists). So we
+              // do NOT fake a publish — we deep-link to the Hostaway reviews dashboard to paste.
+              + '<button class="btn ghost xs" title="Hostaway API ما يدعم نشر الرد مباشرة — يفتح لوحة Hostaway تنسخ الرد وتلصقه وتنشره" onclick="window.open(&#39;https://dashboard.hostaway.com/reviews&#39;,&#39;_blank&#39;)">🌐 رد على Hostaway ←</button>'
             : '')
        +    (r.state.fixed
             ? '<button class="btn ghost xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">↩ ارجع كغير محلولة</button>'
@@ -12956,21 +13045,66 @@ function filteredInboxItems(){
       return ((d.guest||'')+(d.unit||'')+(d.guest_text||'')+(d.reply||'')+(d.draft||'')).toLowerCase().indexOf(q) >= 0;
     });
   }
+  // Item 5: upset/escalations first, then longest guest wait-time first.
+  items.sort(function(a,b){
+    const ae=(a.k==='esc')?0:1, be=(b.k==='esc')?0:1;
+    if(ae!==be) return ae-be;
+    return _waitMin(b.d.time||b.d.ts) - _waitMin(a.d.time||a.d.ts);
+  });
   return items;
 }
 
+function _highConfReplies(){
+  // Item 9: pending replies the bot is >=85% sure of and that have a drafted answer.
+  return (((D.inbox||{}).replies)||[]).filter(function(r){ return (r.confidence!=null && r.confidence>=85 && (r.draft||'').trim()); });
+}
 function renderInbox(){
   buildInboxTabs();
   const items = filteredInboxItems();
   const el = document.getElementById('inboxList');
-  if(!items.length){ el.innerHTML='<div class="empty">'+t().ib_no+'</div>'; return }
-  el.innerHTML = items.map(function(x){
+  const ar = (L==='ar');
+  // Item 9: one-click bulk approve for all high-confidence replies.
+  const high = _highConfReplies();
+  let bar = '';
+  if(high.length){
+    bar = '<div class="bulkbar"><span>'+(ar?('⚡ فيه <b>'+high.length+'</b> رد فوق ٨٥٪ جاهز للإرسال'):('⚡ <b>'+high.length+'</b> replies above 85% ready to send'))+'</span>'
+      + '<button class="btn primary sm" onclick="bulkApprove()">'+(ar?'وافق على الكل':'Approve all')+'</button></div>';
+  }
+  if(!items.length){ el.innerHTML = bar + '<div class="empty">'+t().ib_no+'</div>'; return }
+  el.innerHTML = bar + items.map(function(x){
     if(x.k==='auto') return renderAutoItem(x.d);
     return renderInboxItem(x.k, x.d);
   }).join('');
   // re-attach textarea values if user was editing
 }
+async function bulkApprove(){
+  const high = _highConfReplies();
+  if(!high.length) return;
+  const ar = (L==='ar');
+  if(!confirm(ar?('توافق وترسل '+high.length+' رد جاهز؟'):('Approve & send '+high.length+' ready replies?'))) return;
+  let ok=0, fail=0;
+  for(const r of high){
+    try{ const res = await post('/api/send',{id:String(r.id), text:r.draft}); if(res && res.ok) ok++; else fail++; }
+    catch(e){ fail++; }
+  }
+  toast((ar?'تم إرسال ':'Sent ')+ok+(fail?(' · '+(ar?'فشل ':'failed ')+fail):''));
+  loadAll();
+}
 
+// Item 8: minutes a guest has been waiting since their last message.
+function _waitMin(ts){ if(!ts) return 0; var d=new Date(ts); if(isNaN(d.getTime())) return 0; return Math.max(0, Math.floor((Date.now()-d.getTime())/60000)); }
+function _waitLabel(m, ar){
+  if(m<60) return ar?('منذ '+m+'د'):(m+'m');
+  if(m<1440){ var h=Math.floor(m/60); return ar?('منذ '+h+'س'):(h+'h'); }
+  var dd=Math.floor(m/1440); return ar?('منذ '+dd+'ي'):(dd+'d');
+}
+// Item 7: suggested action derived from confidence + kind (thresholds mirror the bot's).
+function _suggestAction(k, conf, ar){
+  if(k==='esc') return {cls:'esc', label: ar?'صعّد':'Escalate'};
+  if(conf!=null && conf>=85) return {cls:'send', label: ar?'وافق وأرسل':'Approve'};
+  if(conf!=null && conf<55) return {cls:'rev', label: ar?'راجع بنفسك':'Review'};
+  return {cls:'mid', label: ar?'راجع وأرسل':'Review & send'};
+}
 function renderInboxItem(k, d){
   // IDs are returned as STRINGS from the backend (Discord snowflakes overflow
   // JS number precision). Wrap them in HTML-encoded single quotes inside the
@@ -12978,14 +13112,25 @@ function renderInboxItem(k, d){
   const idAttr = String(d.id);
   const idJs = "&#39;" + idAttr + "&#39;";
   const isOpen = openInboxId === idAttr;
+  const ar = (L==='ar');
   const conf = d.confidence!==undefined && d.confidence!==null ? d.confidence : null;
   const confClass = conf===null?'':(conf>=85?'high':(conf>=60?'mid':'low'));
   const confChip = conf!==null && k==='rep' ? '<span class="ibox-conf '+confClass+'">'+conf+'%</span>' : '';
+  // Item 8: guest wait-time chip (hot if >= 2h).
+  const wm = _waitMin(d.time); const waitChip = wm>0 ? '<span class="ibox-wait'+(wm>=120?' hot':'')+'">'+_waitLabel(wm,ar)+'</span>' : '';
+  // Item 7: suggested-action pill.
+  const act = _suggestAction(k, conf, ar);
+  const actPill = '<span class="ibox-act '+act.cls+'">'+act.label+'</span>';
+  // Item 6: one-line AI summary (the classified intent), shown without opening.
+  const intent = (d.intent||'').trim();
+  const summary = intent ? ('<div class="ibox-sum">🤖 '+esc(intent.slice(0,150))+'</div>') : '';
   return '<div class="ibox '+(k==='esc'?'escalation':'reply')+(isOpen?' open':'')+'" id="ib_'+idAttr+'">'
     + '<div class="ibox-row" onclick="toggleInbox('+idJs+')">'
     + '<div class="ibox-icon '+(k==='esc'?'esc':'rep')+'">'+(k==='esc'?'🚨':'💬')+'</div>'
-    + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(d.guest||'')+'</span><span class="ibox-unit">'+esc(d.unit||'')+'</span></div><div class="ibox-preview">'+esc((d.guest_text||'').slice(0,160))+'</div></div>'
-    + '<div class="ibox-meta">'+confChip+'<span class="ibox-time">'+esc(shortTime(d.time||''))+'</span></div>'
+    + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(d.guest||'')+'</span><span class="ibox-unit">'+esc(d.unit||'')+'</span>'+actPill+'</div>'
+      + '<div class="ibox-preview">'+esc((d.guest_text||'').slice(0,160))+'</div>'
+      + summary + '</div>'
+    + '<div class="ibox-meta">'+confChip+waitChip+'<span class="ibox-time">'+esc(shortTime(d.time||''))+'</span></div>'
     + '<span class="ibox-expand">⌃</span>'
     + '</div>'
     + (isOpen ? '<div class="ibox-body" id="ibbody_'+idAttr+'"><div class="empty sk">—</div></div>' : '')
@@ -13172,6 +13317,14 @@ function renderEmptyUnitCard(u){
 /* ============================================================
    PRICING
    ============================================================ */
+// Item 17: one-line plain-Najdi "why" for each pricing opportunity, from raise/drop counts.
+function pricingWhy(u, ar){
+  const rz=u.raise||0, dp=u.drop||0;
+  if(rz&&dp) return ar?('فيه '+rz+' ليلة مسعّرة أقل من الطلب ترفعها، و'+dp+' ليلة بطيئة الأفضل تنزّلها'):(rz+' nights underpriced to raise, '+dp+' slow nights to drop');
+  if(rz) return ar?(rz+' ليلة مسعّرة أقل من طلب السوق — ارفعها تكسب أكثر'):(rz+' nights priced below market demand — raise to capture more');
+  if(dp) return ar?(dp+' ليلة بطيئة — نزّل سعرها تنحجز قبل لا تفوت'):(dp+' slow nights — drop the price so they book');
+  return ar?'تسعير متوازن':'Balanced pricing';
+}
 function renderPricing(){
   const d = D.pr; const tot = document.getElementById('prTotalBody');
   const body = document.getElementById('prListBody');
@@ -13196,7 +13349,7 @@ function renderPricing(){
     return '<div class="ibox" style="border-inline-start:3px solid var(--gold);cursor:pointer" onclick="openPriceDetail('+u.lid+')">'
       + '<div class="ibox-row" style="cursor:pointer">'
       + '<div class="ibox-icon rep">💰</div>'
-      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(u.name)+'</span></div><div class="ibox-preview">'+changes+' '+t().pr_change+' · '+t().pr_uplift+' ~'+fmt(u.uplift)+' SAR · '+t().pr_conf+' '+(u.confidence||0)+'%</div></div>'
+      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(u.name)+'</span></div><div class="ibox-preview">'+changes+' '+t().pr_change+' · '+t().pr_uplift+' ~'+fmt(u.uplift)+' SAR · '+t().pr_conf+' '+(u.confidence||0)+'%</div><div class="ibox-sum">💡 '+esc(pricingWhy(u, L==='ar'))+'</div></div>'
       + '<div class="ibox-meta"><span class="ibox-conf high">~'+fmt(u.uplift)+'</span></div>'
       + '<span class="ibox-expand">←</span>'
       + '</div></div>';
@@ -13267,14 +13420,25 @@ async function doApplyFromDrawer(lid, btn){
 function renderStrategies(){
   const d = D.strat || {items:[]}; const items = d.items||[];
   const body = document.getElementById('stratListBody');
-  if(!items.length){ body.innerHTML='<div class="empty"><span class="ic">⚡</span>'+t().st_empty+'</div>'; return }
-  body.innerHTML = '<div class="inbox-list">' + items.map(function(s){
+  const ar = (L==='ar');
+  // Item 24: loud red banner when price writes are OFF (PRICE_APPLY_DRYRUN=1).
+  const banner = d.dry_run
+    ? '<div class="dry-banner">⚠ '+(ar?'وضع التجربة (DRY-RUN) — الأسعار تُحسب بس ما تُكتب فعلياً في Hostaway':'DRY-RUN — prices are computed but NOT written to Hostaway')+'</div>'
+    : '';
+  if(!items.length){ body.innerHTML = banner + '<div class="empty"><span class="ic">⚡</span>'+t().st_empty+'</div>'; return }
+  body.innerHTML = banner + '<div class="inbox-list">' + items.map(function(s){
     const pct = s.total?Math.round(s.booked/s.total*100):0;
-    const pill = s.active ? '<span class="pill ok">● '+t().st_running+'</span>' : '<span class="pill muted">'+t().st_done+'</span>';
-    return '<div class="ibox" style="border-inline-start:3px solid '+(s.active?'var(--green)':'var(--mut)')+';cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
+    // Item 22: working / not-moving / done flag.
+    const fl = s.flag==='working' ? '<span class="pill ok">'+(ar?'● شغّالة':'● Working')+'</span>'
+             : s.flag==='stalled' ? '<span class="pill danger">'+(ar?'⚠ ما تحرّكت':'⚠ Not moving')+'</span>'
+             : '<span class="pill muted">'+(ar?'منتهية':'Done')+'</span>';
+    // Item 21: revenue captured since start (estimate).
+    const rev = s.rev_captured ? (' · ~'+fmt(s.rev_captured)+' SAR '+(ar?'محصّلة':'captured')) : '';
+    const edge = s.flag==='stalled' ? 'var(--red)' : (s.active?'var(--green)':'var(--mut)');
+    return '<div class="ibox" style="border-inline-start:3px solid '+edge+';cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
       + '<div class="ibox-row">'
       + '<div class="ibox-icon" style="background:'+(s.active?'var(--green-soft)':'var(--surface-2)')+';color:'+(s.active?'var(--green)':'var(--mut)')+'">⚡</div>'
-      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(s.name)+'</span>'+pill+'</div><div class="ibox-preview">'+s.booked+'/'+s.total+' '+t().st_booked+' · '+s.changes_total+' '+t().st_changes+(s.base?' · base ~'+fmt(s.base)+' SAR':'')+'</div></div>'
+      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(s.name)+'</span>'+fl+'</div><div class="ibox-preview">'+s.booked+'/'+s.total+' '+t().st_booked+rev+' · '+s.changes_total+' '+t().st_changes+'</div></div>'
       + '<div class="ibox-meta"><span class="ibox-conf '+(pct>=50?'high':'mid')+'">'+pct+'%</span></div>'
       + '<span class="ibox-expand">←</span>'
       + '</div></div>';
@@ -14300,6 +14464,7 @@ async def _api_inbox(request):
                         "thread": (it.get("history") or "")[:2500],
                         "time": it.get("last_time", ""),
                         "confidence": d.get("confidence"),
+                        "intent": (d.get("intent") or ""), "sentiment": (d.get("sentiment") or ""),
                         "draft": (d.get("draft") or "")[:1200]})
     escs = []
     for eid, e in list(_escalations.items()):
@@ -14571,14 +14736,22 @@ def _strategies_list():
     for lid, s in _pricing_strategies.items():
         dates = s.get("dates", {})
         booked = sum(1 for r in dates.values() if r.get("booked"))
+        # Item 21: revenue captured since the strategy started = sum of the prices on
+        # the nights that actually booked while it ran (an estimate, labelled as such).
+        rev_captured = round(sum((r.get("cur") or 0) for r in dates.values() if r.get("booked")))
+        active = s.get("active", False)
+        # Item 22: working (booking nights) vs stalled (active but nothing moved) vs done.
+        flag = "done" if not active else ("working" if booked > 0 else "stalled")
         out.append({"lid": lid, "name": s.get("name", str(lid)), "base": s.get("base", 0),
-                    "active": s.get("active", False), "started": s.get("started"),
+                    "active": active, "started": s.get("started"),
                     "updated": s.get("updated", 0), "total": len(dates), "booked": booked,
+                    "rev_captured": rev_captured, "flag": flag,
                     "open": len(dates) - booked, "applied_start": s.get("applied_start", 0),
                     "changes_total": s.get("changes_total", 0),
                     "dry": s.get("dry_at_start", PRICE_APPLY_DRYRUN)})
-    # active first, then most-recently-updated
-    out.sort(key=lambda x: (not x["active"], -(x["updated"] or 0)))
+    # Item 23: active first; within active, STALLED (no bookings) pinned above working
+    # so a strategy producing zero movement surfaces at the top to be fixed.
+    out.sort(key=lambda x: (not x["active"], x["booked"] > 0, -(x["updated"] or 0)))
     return out
 
 async def _api_strategies(request):
@@ -15390,7 +15563,30 @@ def _ticket_view(t):
             overdue = d < datetime.now(TZ).date()
     except Exception:
         overdue = False
+    # Item 32: SLA status from due date / age.
+    sla = "none"
+    if t.get("status") in ("open", "in_progress"):
+        if overdue:
+            sla = "overdue"
+        elif t.get("due_date"):
+            try:
+                dd = (datetime.strptime(t["due_date"], "%Y-%m-%d").date() - datetime.now(TZ).date()).days
+                sla = "due_soon" if dd <= 2 else "ok"
+            except Exception:
+                sla = "ok"
+        elif open_age is not None and open_age >= 7:
+            sla = "aging"
+        else:
+            sla = "ok"
+    # Item 34: recurring = same problem category seen before in the same unit.
+    recurring = False
+    _lid, _cat = t.get("lid"), t.get("category")
+    if _lid is not None and _cat:
+        recurring = sum(1 for o in _tickets
+                        if o.get("lid") == _lid and o.get("category") == _cat
+                        and o.get("id") != t.get("id")) > 0
     return {
+        "sla": sla, "recurring": recurring,
         "id": t["id"], "title": t.get("title", ""),
         "description": t.get("description", ""),
         "status": t.get("status", "open"),
@@ -15423,6 +15619,26 @@ async def _api_tickets_list(request):
         lid_f = int(request.query.get("lid")) if request.query.get("lid") else None
     except Exception:
         lid_f = None
+    # Items 31/33: which units are occupied now or arriving soon — one cheap query
+    # reused for all tickets, so impact can drive the sort and show the next booking.
+    today = datetime.now(TZ).date()
+    hot_lids, next_arr = set(), {}
+    try:
+        for r in fetch_inhouse(today):
+            a, d = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
+            if a and d and a <= today < d:
+                hot_lids.add(r.get("listingMapId"))
+        for r in get_reservations_cached():
+            if not _res_realized(r):
+                continue
+            a = _parse_date(r.get("arrivalDate")); lid = r.get("listingMapId")
+            if a and a >= today:
+                if (lid not in next_arr) or (a.isoformat() < next_arr[lid]):
+                    next_arr[lid] = a.isoformat()
+                if 0 <= (a - today).days <= 2:
+                    hot_lids.add(lid)
+    except Exception:
+        pass
     items = []
     for t in _tickets:
         if st and t.get("status") != st: continue
@@ -15434,10 +15650,15 @@ async def _api_tickets_list(request):
                             ("title", "description", "unit_name", "vendor",
                              "assignee", "guest")).lower()
             if q not in blob: continue
-        items.append(_ticket_view(t))
-    # newest-first is already the in-memory order, but recompute for safety
+        v = _ticket_view(t)
+        v["impact_hot"] = v.get("lid") in hot_lids
+        v["next_arrival"] = next_arr.get(v.get("lid"))
+        items.append(v)
+    # Item 31: tickets on occupied / about-to-be-occupied units first, then overdue,
+    # then priority, then oldest.
     rank = {"urgent": 3, "high": 2, "med": 1, "low": 0}
-    items.sort(key=lambda x: (0 if x["overdue"] else 1,
+    items.sort(key=lambda x: (0 if x.get("impact_hot") else 1,
+                              0 if x["overdue"] else 1,
                               -(rank.get(x["priority"], 1)),
                               x.get("created_at") or ""), reverse=False)
     # Counts
@@ -16263,7 +16484,15 @@ async def _api_quotes_list(request):
             "created_at": q.get("created_at"),
             "created_by": q.get("created_by"),
         })
-    return _json({"quotes": out, "count": len(out)})
+    # Item 46: overall win-rate = accepted / (accepted + lost).
+    won = sum(1 for q in items if q.get("status") == "accepted")
+    lost = sum(1 for q in items if q.get("status") == "lost")
+    sent = sum(1 for q in items if q.get("status") in ("sent", "accepted", "lost"))
+    decided = won + lost
+    win_rate = round(won * 100 / decided) if decided else None
+    return _json({"quotes": out, "count": len(out),
+                  "stats": {"won": won, "lost": lost, "sent": sent,
+                            "decided": decided, "win_rate": win_rate}})
 
 async def _api_quotes_get(request):
     if not _dash_auth(request):
