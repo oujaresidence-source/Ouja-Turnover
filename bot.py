@@ -9421,21 +9421,29 @@ function _renderTicketsBody(){
   }
   let html = '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const it of items){
+    const ar = (L==='ar');
     const stat = TK_STATUS_LABEL[it.status] || it.status;
     const prio = TK_PRIORITY_LABEL[it.priority] || it.priority;
-    const overdueTag = it.overdue ? '<span class="pill danger" style="margin-inline-start:6px">⏰ متأخرة</span>' : '';
+    const overdueTag = it.overdue ? '<span class="pill danger" style="margin-inline-start:6px">⏰ '+(ar?'متأخرة':'overdue')+'</span>' : '';
+    // Item 31: occupied/arriving-soon impact; Item 34: recurring; Item 32: SLA (non-overdue).
+    const impactTag = it.impact_hot ? '<span class="pill danger" style="margin-inline-start:6px">🔴 '+(ar?'ضيف بالشقة':'occupied')+'</span>' : '';
+    const recurTag = it.recurring ? '<span class="pill warn" style="margin-inline-start:6px">🔁 '+(ar?'متكررة':'recurring')+'</span>' : '';
+    const slaTag = (!it.overdue && it.sla==='due_soon') ? '<span class="pill warn" style="margin-inline-start:6px">⏰ '+(ar?'قريبة':'due soon')+'</span>'
+                 : (it.sla==='aging') ? '<span class="pill muted" style="margin-inline-start:6px">⏳ '+(ar?'قديمة':'aging')+'</span>' : '';
     const srcEmoji = it.source === 'escalation' ? '🚨 ' : (it.source === 'review' ? '⭐ ' : '');
     const unitTag = it.unit_name ? '<span class="muted" style="font-size:11px">· '+esc(it.unit_name)+'</span>' : '';
     const dueTag  = it.due_date ? '<span class="muted" style="font-size:11px">· ⏰ '+esc(it.due_date)+'</span>' : '';
     const assTag  = it.assignee ? '<span class="muted" style="font-size:11px">· 👤 '+esc(it.assignee)+'</span>' : '';
+    // Item 33: the affected unit's next booking.
+    const nextTag = it.next_arrival ? '<span class="muted" style="font-size:11px">· 🛬 '+(ar?'وصول ':'arr ')+esc(it.next_arrival)+'</span>' : '';
     html += '<div class="ticket-row" onclick="openTicketModal(&#39;'+esc(it.id)+'&#39;)" '
-         +    'style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;transition:.12s"'
-         +    ' onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+         +    'style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--line);cursor:pointer;transition:.12s"'
+         +    ' onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--line)&#39;">'
          +    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">'
          +      '<div style="flex:1;min-width:0">'
-         +        '<div class="strong" style="font-size:13.5px">'+srcEmoji+esc(it.title)+overdueTag+'</div>'
+         +        '<div class="strong" style="font-size:13.5px">'+srcEmoji+esc(it.title)+overdueTag+impactTag+recurTag+slaTag+'</div>'
          +        '<div style="margin-top:4px;font-size:11.5px;color:var(--mut)">'
-         +          esc(it.category)+unitTag+assTag+dueTag
+         +          esc(it.category)+unitTag+assTag+dueTag+nextTag
          +        '</div>'
          +      '</div>'
          +      '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'
@@ -15530,7 +15538,30 @@ def _ticket_view(t):
             overdue = d < datetime.now(TZ).date()
     except Exception:
         overdue = False
+    # Item 32: SLA status from due date / age.
+    sla = "none"
+    if t.get("status") in ("open", "in_progress"):
+        if overdue:
+            sla = "overdue"
+        elif t.get("due_date"):
+            try:
+                dd = (datetime.strptime(t["due_date"], "%Y-%m-%d").date() - datetime.now(TZ).date()).days
+                sla = "due_soon" if dd <= 2 else "ok"
+            except Exception:
+                sla = "ok"
+        elif open_age is not None and open_age >= 7:
+            sla = "aging"
+        else:
+            sla = "ok"
+    # Item 34: recurring = same problem category seen before in the same unit.
+    recurring = False
+    _lid, _cat = t.get("lid"), t.get("category")
+    if _lid is not None and _cat:
+        recurring = sum(1 for o in _tickets
+                        if o.get("lid") == _lid and o.get("category") == _cat
+                        and o.get("id") != t.get("id")) > 0
     return {
+        "sla": sla, "recurring": recurring,
         "id": t["id"], "title": t.get("title", ""),
         "description": t.get("description", ""),
         "status": t.get("status", "open"),
@@ -15563,6 +15594,26 @@ async def _api_tickets_list(request):
         lid_f = int(request.query.get("lid")) if request.query.get("lid") else None
     except Exception:
         lid_f = None
+    # Items 31/33: which units are occupied now or arriving soon — one cheap query
+    # reused for all tickets, so impact can drive the sort and show the next booking.
+    today = datetime.now(TZ).date()
+    hot_lids, next_arr = set(), {}
+    try:
+        for r in fetch_inhouse(today):
+            a, d = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
+            if a and d and a <= today < d:
+                hot_lids.add(r.get("listingMapId"))
+        for r in get_reservations_cached():
+            if not _res_realized(r):
+                continue
+            a = _parse_date(r.get("arrivalDate")); lid = r.get("listingMapId")
+            if a and a >= today:
+                if (lid not in next_arr) or (a.isoformat() < next_arr[lid]):
+                    next_arr[lid] = a.isoformat()
+                if 0 <= (a - today).days <= 2:
+                    hot_lids.add(lid)
+    except Exception:
+        pass
     items = []
     for t in _tickets:
         if st and t.get("status") != st: continue
@@ -15574,10 +15625,15 @@ async def _api_tickets_list(request):
                             ("title", "description", "unit_name", "vendor",
                              "assignee", "guest")).lower()
             if q not in blob: continue
-        items.append(_ticket_view(t))
-    # newest-first is already the in-memory order, but recompute for safety
+        v = _ticket_view(t)
+        v["impact_hot"] = v.get("lid") in hot_lids
+        v["next_arrival"] = next_arr.get(v.get("lid"))
+        items.append(v)
+    # Item 31: tickets on occupied / about-to-be-occupied units first, then overdue,
+    # then priority, then oldest.
     rank = {"urgent": 3, "high": 2, "med": 1, "low": 0}
-    items.sort(key=lambda x: (0 if x["overdue"] else 1,
+    items.sort(key=lambda x: (0 if x.get("impact_hot") else 1,
+                              0 if x["overdue"] else 1,
                               -(rank.get(x["priority"], 1)),
                               x.get("created_at") or ""), reverse=False)
     # Counts
