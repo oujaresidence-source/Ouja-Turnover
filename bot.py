@@ -11722,6 +11722,10 @@ function _renderUsersBody(){
       + '</div>';
     return;
   }
+  const ar=(L==='ar');
+  // Items 41/43: real per-user attribution that exists = escalations currently claimed.
+  const escBy={}; (((D.inbox||{}).escalations)||[]).forEach(function(e){ if(e.claimed_by){ escBy[e.claimed_by]=(escBy[e.claimed_by]||0)+1; } });
+  users.sort(function(a,b){ return (escBy[b.name]||0)-(escBy[a.name]||0); });   // item 43: by activity
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">';
   for(const u of users){
     const dt = (u.created_at||'').slice(0,10);
@@ -11739,13 +11743,18 @@ function _renderUsersBody(){
       if(perms[k].write) writeN++;
       if(perms[k].create) createN++;
     }
+    const eh = escBy[u.name]||0;   // item 41 (the part that is actually attributed)
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10.5px">'
       + '<span class="pill info">👁 '+readN+'</span>'
       + '<span class="pill warn">✎ '+writeN+'</span>'
       + '<span class="pill ok">➕ '+createN+'</span>'
-      + '</div></div>';
+      + '</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:7px">'+(ar?'يتعامل مع':'handling')+' <b>'+eh+'</b> '+(ar?'تصعيد الآن':'escalations now')+'</div>'
+      + '</div>';
   }
   html += '</div>';
+  // Honest flag: the rest of items 41/42 need data we don't log yet (build UI, don't fake).
+  html += '<div class="muted" style="font-size:11px;margin-top:10px;padding:9px 11px;background:var(--surface-2);border-radius:8px;line-height:1.6">ℹ️ '+(ar?'عدد التصعيدات يجي من «استلم» في ديسكورد. تتبّع عدد الردود وزمن الاستجابة وجودة التنظيف لكل عضو يحتاج تسجيل المُرسِل/المنظّف والوقت على كل إجراء — مو مفعّل بعد.':'Escalation counts come from Discord claims. Per-user reply counts, response times, and cleaning-quality need per-action sender/cleaner + timestamp logging — not enabled yet.')+'</div>';
   body.innerHTML = html;
 }
 
