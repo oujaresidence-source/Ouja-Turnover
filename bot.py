@@ -6816,6 +6816,14 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .bulkbar b{color:var(--green)}
 /* Loud DRY-RUN banner (item 24) */
 .dry-banner{background:var(--red-soft);border:1px solid var(--red);color:var(--red);border-radius:var(--r);padding:11px 14px;margin-bottom:12px;font-size:12.5px;font-weight:700;text-align:center}
+/* Quote win-rate header + inline status setters (items 44-46) */
+.qstat{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.qstat>div{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;text-align:center}
+.qstat-v{font-size:18px;font-weight:700;color:var(--gold);font-family:var(--font-mono)}
+.qstat-l{font-size:10.5px;color:var(--mut);margin-top:2px}
+.qset{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
+.qset-b{font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);cursor:pointer}
+.qset-b:hover{border-color:var(--gold);color:var(--gold)}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -9604,9 +9612,22 @@ async function loadQuotes(){
   try { D.quotes = await api('/api/quotes/list'); } catch(_){ D.quotes = {quotes:[]} }
   _renderQuotesBody();
 }
+// Item 44: status metadata for a quote.
+function _quoteStatusInfo(st, ar){
+  st = st||'draft';
+  if(st==='accepted') return {cls:'ok', label: ar?'مقبول':'Accepted'};
+  if(st==='lost') return {cls:'danger', label: ar?'خسران':'Lost'};
+  if(st==='sent') return {cls:'info', label: ar?'مُرسل':'Sent'};
+  return {cls:'muted', label: ar?'مسودة':'Draft'};
+}
+async function setQuoteStatus(id, st){
+  try{ const r=await post('/api/quotes/save',{id:id, status:st}); if(r&&r.ok){ toast('✓'); loadQuotes(); } else toast('خطأ'); }
+  catch(e){ toast('خطأ'); }
+}
 function _renderQuotesBody(){
   const body = document.getElementById('quotesBody'); if(!body) return;
-  const items = ((D.quotes||{}).quotes)||[];
+  const data = D.quotes||{}; const items = data.quotes||[];
+  const ar = (L==='ar');
   if(!items.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
       + '<div style="font-size:32px;margin-bottom:8px">📄</div>'
@@ -9614,12 +9635,29 @@ function _renderQuotesBody(){
       + '</div>';
     return;
   }
-  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  // Item 46: win-rate header.
+  const st = data.stats||{};
+  const wr = (st.win_rate!=null) ? (st.win_rate+'%') : '—';
+  let h = '<div class="qstat">'
+    + '<div><div class="qstat-v">'+wr+'</div><div class="qstat-l">'+(ar?'نسبة القبول':'Win rate')+'</div></div>'
+    + '<div><div class="qstat-v">'+(st.won||0)+'</div><div class="qstat-l">'+(ar?'مقبول':'Accepted')+'</div></div>'
+    + '<div><div class="qstat-v">'+(st.lost||0)+'</div><div class="qstat-l">'+(ar?'خسران':'Lost')+'</div></div>'
+    + '<div><div class="qstat-v">'+items.length+'</div><div class="qstat-l">'+(ar?'الكل':'Total')+'</div></div></div>';
+  h += '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const q of items){
-    h += '<div onclick="openQuoteEditor(&#39;'+esc(q.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
-      + '<div><div class="strong" style="font-size:13.5px">'+esc(q.number||'')+' · '+esc(q.client_name||'—')+'</div>'
-      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(q.date||'')+' · '+esc(q.client_phone||'')+'</div></div>'
-      + '<div style="text-align:end"><div style="font-weight:700;color:var(--gold);font-size:14px">'+fmt(q.grand_total||0)+' ر.س</div>'
+    const si = _quoteStatusInfo(q.status, ar);
+    // Item 45: follow-up badge when a sent quote has had no decision for >=3 days.
+    let fu = '';
+    if(q.status==='sent' && (_waitMin(q.created_at)/1440)>=3){ fu = '<span class="pill warn" style="margin-inline-start:6px">⏰ '+(ar?'تابع العميل':'Follow up')+'</span>'; }
+    // Item 44: one-click status setters (stopPropagation so they don't open the editor).
+    const setBtns = '<div class="qset" onclick="event.stopPropagation()">'
+      + ['sent','accepted','lost'].map(function(s){ var i=_quoteStatusInfo(s,ar); return '<button class="qset-b '+i.cls+'" onclick="setQuoteStatus(&#39;'+esc(q.id)+'&#39;,&#39;'+s+'&#39;)">'+i.label+'</button>'; }).join('')
+      + '</div>';
+    h += '<div onclick="openQuoteEditor(&#39;'+esc(q.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--line);cursor:pointer;display:flex;justify-content:space-between;align-items:flex-start;gap:10px" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--line)&#39;">'
+      + '<div style="min-width:0"><div class="strong" style="font-size:13.5px">'+esc(q.number||'')+' · '+esc(q.client_name||'—')+' <span class="pill '+si.cls+'">'+si.label+'</span>'+fu+'</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(q.date||'')+' · '+esc(q.client_phone||'')+'</div>'
+      + setBtns + '</div>'
+      + '<div style="text-align:end;flex-shrink:0"><div style="font-weight:700;color:var(--gold);font-size:14px">'+fmt(q.grand_total||0)+' ر.س</div>'
       + '<div class="muted" style="font-size:10.5px">'+esc((q.created_at||'').slice(0,10))+'</div></div>'
       + '</div>';
   }
@@ -16361,7 +16399,15 @@ async def _api_quotes_list(request):
             "created_at": q.get("created_at"),
             "created_by": q.get("created_by"),
         })
-    return _json({"quotes": out, "count": len(out)})
+    # Item 46: overall win-rate = accepted / (accepted + lost).
+    won = sum(1 for q in items if q.get("status") == "accepted")
+    lost = sum(1 for q in items if q.get("status") == "lost")
+    sent = sum(1 for q in items if q.get("status") in ("sent", "accepted", "lost"))
+    decided = won + lost
+    win_rate = round(won * 100 / decided) if decided else None
+    return _json({"quotes": out, "count": len(out),
+                  "stats": {"won": won, "lost": lost, "sent": sent,
+                            "decided": decided, "win_rate": win_rate}})
 
 async def _api_quotes_get(request):
     if not _dash_auth(request):
