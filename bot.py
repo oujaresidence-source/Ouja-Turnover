@@ -6850,6 +6850,18 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .tc-arr{box-shadow:inset 3px 0 0 var(--green)}
 .tc-dep{box-shadow:inset -3px 0 0 var(--blue)}
 .tc:hover{outline:2px solid var(--gold);outline-offset:-2px}
+/* ===== Design requests KANBAN (items 50-52) ===== */
+.kanban{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media (max-width:900px){.kanban{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.kanban{grid-template-columns:1fr}}
+.kan-col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px;min-height:60px}
+.kan-h{font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.kan-n{background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:0 7px;font-size:10.5px;color:var(--mut)}
+.kan-empty{color:var(--mut);font-size:11px;text-align:center;padding:10px}
+.kan-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;margin-bottom:7px;cursor:pointer;transition:border-color .12s}
+.kan-card:hover{border-color:var(--gold)}
+.kan-card.blocked{border-inline-start:3px solid var(--red)}
+.kan-acts{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -10826,22 +10838,47 @@ async function loadDesigns(){
   try { D.designs = await api('/api/design/list'); } catch(_){ D.designs = {requests:[]} }
   _renderDesignsBody();
 }
+function _designStatusKey(st){
+  st = st||'intake';
+  return (st==='done'||st==='blocked'||st==='in_progress') ? st : 'intake';
+}
+async function setDesignStatus(id, st){
+  try{ await post('/api/design/save',{id:id, status:st}); toast('✓'); loadDesigns(); }catch(e){ toast('خطأ'); }
+}
+async function toggleDesignWait(id, cur){
+  try{ await post('/api/design/save',{id:id, waiting_on: (cur==='faisal'?'':'faisal')}); toast('✓'); loadDesigns(); }catch(e){ toast('خطأ'); }
+}
 function _renderDesignsBody(){
   const body = document.getElementById('designsBody'); if(!body) return;
   const items = ((D.designs||{}).requests)||[];
+  const ar = (L==='ar');
   if(!items.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🛋️</div><div class="muted">ما فيه طلبات. اضغط "<b>طلب جديد</b>" أعلاه.</div></div>';
     return;
   }
-  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
-  for(const d of items){
-    const prioColor = d.priority==='عاجل' ? 'var(--red)' : (d.priority==='متوسط' ? 'var(--gold)' : 'var(--green)');
-    h += '<div onclick="openDesignEditor(&#39;'+esc(d.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
-      + '<div><div class="strong" style="font-size:13.5px">'+esc(d.ref||'')+' · '+esc(d.client_name||'—')+'</div>'
-      + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(d.project_name||'')+'</div></div>'
-      + (d.priority?'<span style="background:'+prioColor+';color:#fff;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:700">'+esc(d.priority)+'</span>':'')
-      + '</div>';
-  }
+  // Item 50: kanban columns by status.
+  const cols = [['intake', ar?'جديد':'Intake'], ['in_progress', ar?'قيد التنفيذ':'In progress'], ['blocked', ar?'متوقف':'Blocked'], ['done', ar?'منجز':'Done']];
+  const byStatus = {intake:[], in_progress:[], blocked:[], done:[]};
+  items.forEach(function(d){ byStatus[_designStatusKey(d.status)].push(d); });
+  let h = '<div class="kanban">';
+  cols.forEach(function(c){
+    const list = byStatus[c[0]];
+    h += '<div class="kan-col"><div class="kan-h">'+c[1]+' <span class="kan-n">'+list.length+'</span></div>';
+    if(!list.length){ h += '<div class="kan-empty">—</div>'; }
+    list.forEach(function(d){
+      const wait = (d.waiting_on==='faisal');          // item 52
+      const blocked = (c[0]==='blocked');              // item 51
+      const moves = cols.filter(function(x){return x[0]!==c[0]})
+        .map(function(x){ return '<button class="qset-b" onclick="setDesignStatus(&#39;'+esc(d.id)+'&#39;,&#39;'+x[0]+'&#39;)">'+x[1]+'</button>'; }).join('');
+      h += '<div class="kan-card'+(blocked?' blocked':'')+'" onclick="openDesignEditor(&#39;'+esc(d.id)+'&#39;)">'
+        + '<div class="strong" style="font-size:12.5px">'+esc(d.client_name||'—')+(wait?(' <span class="pill warn">👤 '+(ar?'ينتظر فيصل':'awaiting Faisal')+'</span>'):'')+'</div>'
+        + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(d.ref||'')+(d.project_name?(' · '+esc(d.project_name)):'')+'</div>'
+        + '<div class="kan-acts" onclick="event.stopPropagation()">'+moves
+        +   '<button class="qset-b'+(wait?' danger':'')+'" title="'+(ar?'ينتظر قرار فيصل':'awaiting Faisal')+'" onclick="toggleDesignWait(&#39;'+esc(d.id)+'&#39;,&#39;'+esc(d.waiting_on||'')+'&#39;)">👤</button>'
+        + '</div></div>';
+    });
+    h += '</div>';
+  });
   h += '</div>'; body.innerHTML = h;
 }
 function _ensureDesignOv(){
@@ -17360,6 +17397,8 @@ async def _api_design_list(request):
             "client_name": d.get("client_name"),
             "project_name": d.get("project_name"),
             "priority": d.get("priority"),
+            "status": d.get("status", "intake"),
+            "waiting_on": d.get("waiting_on", ""),
             "created_at": d.get("created_at"),
         })
     return _json({"requests": out, "count": len(items)})
@@ -17391,7 +17430,8 @@ async def _api_design_save(request):
                   "unit_code", "area", "floors", "building_no", "entry_no",
                   "location", "unit_status", "entry_method", "entry_detail",
                   "purpose", "style", "budget", "priority", "deadline",
-                  "pm_name", "pm_phone", "has_plans", "notes")
+                  "pm_name", "pm_phone", "has_plans", "notes",
+                  "status", "waiting_on")   # items 50-52: kanban status + waiting-on-owner
     for k in str_fields:
         if k in b:
             v = b[k]
