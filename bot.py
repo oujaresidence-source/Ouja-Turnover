@@ -6331,6 +6331,7 @@ def _exp_reconcile(apply=False):
 _quotes = {}   # quote_id -> dict
 _QUOTE_SEQ = 0
 _unit_owners = {}   # apartment name -> owner name (item 60: per-owner P&L)
+_finance_defaults = {}   # report key (owner name or 'lid:N') -> saved report fields (Stage 3 item 16)
 
 def _new_quote_id():
     global _QUOTE_SEQ
@@ -6929,6 +6930,36 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .kan-card:hover{border-color:var(--gold)}
 .kan-card.blocked{border-inline-start:3px solid var(--red)}
 .kan-acts{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
+/* ===== FINANCE / monthly report builder (Stage 3) ===== */
+.fin-grid{display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start}
+@media (max-width:900px){.fin-grid{grid-template-columns:1fr}}
+.fin-form{display:flex;flex-direction:column;gap:9px;position:sticky;top:12px}
+.fin-form label{font-size:11px;color:var(--text-2);font-weight:600;display:block;margin-bottom:3px}
+.fin-form input,.fin-form select,.fin-form textarea{width:100%;font-size:12.5px}
+.fin-row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fin-sec{font-size:11px;font-weight:700;color:var(--gold-2);text-transform:uppercase;letter-spacing:.5px;margin:6px 0 2px;border-top:1px solid var(--line);padding-top:9px}
+.fin-check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);margin-top:4px}
+.fin-check input{width:auto}
+.fin-preview-wrap{min-width:0}
+.fin-preview-bar{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--mut);margin-bottom:8px;padding:0 2px}
+.fin-preview{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-sm)}
+.stmt{padding:32px 34px;font-size:13px;color:var(--text);line-height:1.7}
+.stmt-cover{border-bottom:2px solid var(--gold);padding-bottom:18px;margin-bottom:20px}
+.stmt-brand{font-size:13px;font-weight:800;letter-spacing:1px;color:var(--gold-2)}
+.stmt-h1{font-size:22px;font-weight:800;margin:10px 0 4px;letter-spacing:-.3px}
+.stmt-meta{color:var(--mut);font-size:12px}
+.stmt-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--gold-2);margin:22px 0 8px}
+.stmt table{width:100%;border-collapse:collapse;font-size:12px}
+.stmt th{text-align:start;font-size:10.5px;color:var(--mut);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+.stmt td{padding:7px 8px;border-bottom:1px solid var(--line)}
+.stmt .num{text-align:end;font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+.stmt-sum{background:var(--surface-2);border-radius:var(--r);padding:14px 16px;margin:6px 0}
+.stmt-sum-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
+.stmt-sum-row.total{border-top:2px solid var(--gold);margin-top:6px;padding-top:10px;font-weight:800;font-size:15px;color:var(--gold-2)}
+.stmt-note{font-size:12.5px;color:var(--text-2);line-height:1.75;margin:14px 0}
+.stmt-sign{margin-top:26px;font-size:12.5px}
+.stmt-foot{margin-top:22px;border-top:1px solid var(--line);padding-top:10px;font-size:11px;color:var(--mut);text-align:center}
+.recon-ok{color:var(--green);font-weight:700}.recon-bad{color:var(--red);font-weight:700}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -7703,6 +7734,57 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ FINANCE / ACCOUNTING (المالية) ============ -->
+      <section class="view" id="view_finance">
+        <div class="page-head">
+          <div><div class="page-title" id="t_finance">🧾 المالية</div><div class="page-sub" id="t_finance_sub">تقرير شهري للمُلّاك</div></div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="financeSaveDefaults()" id="finSaveBtn">💾 <span id="t_fin_save">حفظ كافتراضي</span></button>
+            <button class="btn primary sm" onclick="financeGeneratePdf()" id="finPdfBtn">⬇ PDF</button>
+          </div>
+        </div>
+        <div class="page-help" data-help-key="finance">
+          <button class="ph-x" onclick="dismissHelp('finance')" title="إخفاء">×</button>
+          <div class="ph-t">🧾 التقرير الشهري</div>
+          <div class="ph-b">اختر الشقة والفترة وعبّي الحقول الاختيارية — المعاينة تتحدّث فوريًا. كل الأرقام من البيانات الفعلية (Hostaway + المصاريف المطابقة). أي دفعة Airbnb ناقصة يبيّنها التدقيق ولا تُخمّن أبدًا.</div>
+        </div>
+        <div class="fin-grid">
+          <div class="card fin-form">
+            <div class="fin-row"><label>الشقة / Apartment</label><select id="finUnit" onchange="financeLoadReport()"><option value="">—</option></select></div>
+            <div class="fin-row2">
+              <div><label>من / From</label><input type="date" id="finStart" onchange="financeLoadReport()"></div>
+              <div><label>إلى / To</label><input type="date" id="finEnd" onchange="financeLoadReport()"></div>
+            </div>
+            <div class="fin-row2">
+              <div><label>نسبة الإدارة % / Mgmt %</label><input type="number" step="0.5" id="finMgmt" value="20" onchange="financeLoadReport()"></div>
+              <div><label>العملة / Currency</label><input id="finCurrency" value="SAR" oninput="financeRender()"></div>
+            </div>
+            <div class="fin-sec">حقول اختيارية (الفاضي يُخفى تلقائيًا)</div>
+            <div class="fin-row"><label>اسم المستلم / Recipient</label><input id="finRecipient" oninput="financeRender()"></div>
+            <div class="fin-row"><label>تحية / Greeting</label><input id="finGreeting" oninput="financeRender()" placeholder="حيّاك الله،"></div>
+            <div class="fin-row2">
+              <div><label>تاريخ الإصدار / Issue date</label><input type="date" id="finIssue" oninput="financeRender()"></div>
+              <div><label>رقم المرجع / Ref #</label><input id="finRef" oninput="financeRender()"></div>
+            </div>
+            <div class="fin-row"><label>وصف العقار/المالك / Property label</label><input id="finPropLabel" oninput="financeRender()"></div>
+            <div class="fin-row"><label>مقدمة / Cover note</label><textarea id="finCover" rows="2" oninput="financeRender()"></textarea></div>
+            <div class="fin-row"><label>خاتمة / Closing note</label><textarea id="finClosing" rows="2" oninput="financeRender()"></textarea></div>
+            <div class="fin-row2">
+              <div><label>التوقيع — الاسم / Signature name</label><input id="finSigName" oninput="financeRender()"></div>
+              <div><label>المسمّى / Title</label><input id="finSigTitle" oninput="financeRender()"></div>
+            </div>
+            <div class="fin-row"><label>تواصل (فوتر) / Contact footer</label><input id="finContact" oninput="financeRender()"></div>
+            <div class="fin-row"><label>ملاحظة الدفع (بدون IBAN) / Payment note</label><input id="finPayNote" oninput="financeRender()" placeholder="ملاحظة نصية فقط — لا أرقام بنكية"></div>
+            <div class="fin-row"><label>ملاحظات / Notes</label><textarea id="finNotes" rows="2" oninput="financeRender()"></textarea></div>
+            <label class="fin-check"><input type="checkbox" id="finLogo" checked onchange="financeRender()"> إظهار الشعار / Show logo</label>
+          </div>
+          <div class="fin-preview-wrap">
+            <div class="fin-preview-bar"><span id="t_fin_preview">معاينة مباشرة · Live preview</span><span id="finRecon"></span></div>
+            <div id="financePreview" class="fin-preview"><div class="empty" style="padding:40px;text-align:center">اختر شقة وفترة لعرض التقرير</div></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ QUOTATIONS (عرض سعر) ============ -->
       <section class="view" id="view_quote">
         <div class="page-head">
@@ -8249,7 +8331,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -8441,7 +8523,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -8874,6 +8956,7 @@ const NAV = [
   {id:'design',  ic:'🛋️', tk:'design'},
   {id:'pmo',     ic:'🏗️', tk:'pmo'},
   {id:'expenses',ic:'💸', tk:'expenses', badge:'expenses'},
+  {id:'finance', ic:'🧾', tk:'finance'},
   {id:'guests',  ic:'👤', tk:'guests'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
@@ -9064,6 +9147,7 @@ function go(id){
   if(id==='design') loadDesigns();
   if(id==='pmo') loadPmo();
   if(id==='expenses') loadExpenses();
+  if(id==='finance') loadFinance();
 }
 
 /* ============================================================
@@ -13906,6 +13990,121 @@ let learnSelectedLid = null;
 let learnEditingGeneral = false;
 let learnEditingApt = false;
 
+/* ===== FINANCE / monthly report builder (Stage 3) ===== */
+async function loadFinance(){
+  const sel=document.getElementById('finUnit');
+  if(sel && sel.options.length<=1){
+    let d; try{ d=await api('/api/finance/units'); }catch(_){ d={units:[]}; }
+    D.finUnits=(d.units||[]);
+    sel.innerHTML='<option value="">— اختر الشقة / pick apartment —</option>'+D.finUnits.map(function(u){return '<option value="'+u.lid+'">'+esc(u.name||('unit-'+u.lid))+'</option>';}).join('');
+  }
+  const s=document.getElementById('finStart'), e=document.getElementById('finEnd');
+  if(s && !s.value){ var n=new Date(); s.value=new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10); e.value=new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().slice(0,10); }
+  const iss=document.getElementById('finIssue'); if(iss && !iss.value) iss.value=new Date().toISOString().slice(0,10);
+}
+function financeFields(){
+  function v(id){ var x=document.getElementById(id); return x?(''+x.value).trim():''; }
+  return {recipient:v('finRecipient'),greeting:v('finGreeting'),issue:v('finIssue'),ref:v('finRef'),
+    prop_label:v('finPropLabel'),cover:v('finCover'),closing:v('finClosing'),sig_name:v('finSigName'),
+    sig_title:v('finSigTitle'),contact:v('finContact'),pay_note:v('finPayNote'),notes:v('finNotes'),
+    currency:v('finCurrency')||'SAR',mgmt_pct:v('finMgmt'),
+    logo:document.getElementById('finLogo')?document.getElementById('finLogo').checked:true};
+}
+function financeApplyDefaults(d){
+  if(!d) return;
+  const map={finRecipient:'recipient',finGreeting:'greeting',finRef:'ref',finPropLabel:'prop_label',finCover:'cover',finClosing:'closing',finSigName:'sig_name',finSigTitle:'sig_title',finContact:'contact',finPayNote:'pay_note',finNotes:'notes',finCurrency:'currency'};
+  for(const id in map){ const el=document.getElementById(id); if(el && d[map[id]]!=null && !el.value) el.value=d[map[id]]; }
+  if(d.mgmt_pct!=null){ var mg=document.getElementById('finMgmt'); if(mg && !mg.value) mg.value=d.mgmt_pct; }
+  if(d.logo===false){ var l=document.getElementById('finLogo'); if(l) l.checked=false; }
+}
+async function financeLoadReport(){
+  const lid=(document.getElementById('finUnit')||{}).value||'';
+  const start=(document.getElementById('finStart')||{}).value||'', end=(document.getElementById('finEnd')||{}).value||'';
+  if(!lid || !start || !end){ financeRender(); return; }
+  const u=(D.finUnits||[]).find(function(x){return String(x.lid)===String(lid);});
+  if(u){ const key=u.owner?('owner:'+u.owner):('lid:'+lid); try{ const dd=await api('/api/finance/defaults?key='+encodeURIComponent(key)); financeApplyDefaults(dd.defaults||{}); }catch(_){ } }
+  const m=(document.getElementById('finMgmt')||{}).value||'0';
+  document.getElementById('financePreview').innerHTML='<div class="empty sk" style="padding:40px">…</div>';
+  let r; try{ r=await api('/api/finance/report?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end+'&mgmt='+encodeURIComponent(m)); }catch(e){ r={error:'fetch'}; }
+  D.finReport=r; financeRender();
+}
+function financeStatementHTML(){
+  const r=D.finReport; const f=financeFields(); const ar=(L==='ar');
+  if(!r || r.error || !r.period) return null;
+  const cur=f.currency||'SAR'; const money=function(x){ return fmt(x)+' '+cur; };
+  const opt=function(val,html){ return (val&&(''+val).trim())?html:''; };
+  let h='<div class="stmt">';
+  h+='<div class="stmt-cover">';
+  if(f.logo) h+='<div class="stmt-brand">OUJA · عوجا</div>';
+  h+='<div class="stmt-h1">'+(ar?'تقرير مالي شهري':'Monthly Statement')+'</div>';
+  const pl=r.period?(r.period.start+' → '+r.period.end):'';
+  h+='<div class="stmt-meta">'+esc(r.apartment||'')+(pl?(' · '+pl):'')+opt(f.ref,' · '+(ar?'مرجع ':'Ref ')+esc(f.ref))+opt(f.issue,' · '+esc(f.issue))+'</div>';
+  h+=opt(f.prop_label,'<div class="stmt-meta">'+esc(f.prop_label)+'</div>')+'</div>';
+  h+=opt(f.greeting||f.recipient,'<div class="stmt-note">'+esc(f.greeting||'')+(f.recipient?(' '+esc(f.recipient)):'')+'</div>');
+  h+=opt(f.cover,'<div class="stmt-note">'+esc(f.cover)+'</div>');
+  h+='<div class="stmt-sec-t">'+(ar?'الملخّص':'Summary')+'</div><div class="stmt-sum">';
+  const sr=function(l,val,cls){ return '<div class="stmt-sum-row'+(cls?(' '+cls):'')+'"><span>'+l+'</span><span class="num">'+val+'</span></div>'; };
+  h+=sr(ar?'إيراد Airbnb (دفعات)':'Airbnb income (payouts)',money(r.income_airbnb));
+  h+=sr(ar?'إيراد مباشر (−٣٪)':'Direct income (−3%)',money(r.income_direct));
+  if(r.extras) h+=sr(ar?'إضافات':'Extras',money(r.extras));
+  h+=sr(ar?'إجمالي الدخل':'Total income',money(r.total_income));
+  h+=sr(ar?('رسوم عوجا ('+r.management_pct+'%)'):('Ouja fee ('+r.management_pct+'%)'),'−'+money(r.ouja_fee));
+  h+=sr(ar?'المصاريف':'Expenses','−'+money(r.expenses));
+  h+=sr(ar?'صافي المالك':'Owner net',money(r.owner_net),'total')+'</div>';
+  h+='<div class="stmt-sec-t">'+(ar?'الحجوزات':'Reservations')+'</div>';
+  if((r.resv_lines||[]).length){
+    h+='<table><thead><tr><th>'+(ar?'القناة':'Channel')+'</th><th>'+(ar?'الدخول':'Check-in')+'</th><th>'+(ar?'ليالٍ':'Nights')+'</th><th class="num">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>';
+    h+=(r.resv_lines||[]).map(function(l){ return '<tr><td>'+esc(l.channel)+'</td><td>'+esc(l.checkin||'')+'</td><td>'+(l.nights||'')+'</td><td class="num">'+(l.income==null?('<span class="recon-bad">'+(ar?'دفعة ناقصة':'payout missing')+'</span>'):money(l.income))+'</td></tr>'; }).join('')+'</tbody></table>';
+  } else { h+='<div class="stmt-note">'+(ar?'لا حجوزات في هذي الفترة':'No reservations this period')+'</div>'; }
+  h+='<div class="stmt-sec-t">'+(ar?'المصاريف':'Expenses')+'</div>';
+  if((r.exp_lines||[]).length){
+    h+='<table><thead><tr><th>'+(ar?'التاريخ':'Date')+'</th><th class="num">'+(ar?'المبلغ':'Amount')+'</th></tr></thead><tbody>';
+    h+=(r.exp_lines||[]).map(function(e){ return '<tr><td>'+esc(e.date||'')+'</td><td class="num">'+money(e.amount||0)+'</td></tr>'; }).join('')+'</tbody></table>';
+  } else { h+='<div class="stmt-note">'+(ar?'لا مصاريف في هذي الفترة':'No expenses this period')+'</div>'; }
+  h+=opt(f.closing,'<div class="stmt-note">'+esc(f.closing)+'</div>');
+  h+=opt(f.pay_note,'<div class="stmt-note"><b>'+(ar?'ملاحظة الدفع: ':'Payment note: ')+'</b>'+esc(f.pay_note)+'</div>');
+  h+=opt(f.notes,'<div class="stmt-note">'+esc(f.notes)+'</div>');
+  if(f.sig_name||f.sig_title) h+='<div class="stmt-sign">'+esc(f.sig_name||'')+(f.sig_title?('<br><span class="muted">'+esc(f.sig_title)+'</span>'):'')+'</div>';
+  h+=opt(f.contact,'<div class="stmt-foot">'+esc(f.contact)+'</div>');
+  return h+'</div>';
+}
+function financeRender(){
+  const prev=document.getElementById('financePreview'); if(!prev) return;
+  const r=D.finReport; const reconEl=document.getElementById('finRecon'); const ar=(L==='ar');
+  const html=financeStatementHTML();
+  if(!html){ prev.innerHTML='<div class="empty" style="padding:40px;text-align:center">'+((r&&r.error)?'⚠ خطأ بجلب البيانات':'اختر شقة وفترة')+'</div>'; if(reconEl) reconEl.textContent=''; return; }
+  const rec=(r.reconciliation)||{}; const cur=financeFields().currency||'SAR';
+  if(reconEl) reconEl.innerHTML = rec.balanced ? '<span class="recon-ok">✔ '+(ar?'متوازن':'balanced')+'</span>'
+    : '<span class="recon-bad">✖ '+(ar?'غير متوازن':'mismatch')+(rec.missing_payout_ids&&rec.missing_payout_ids.length?(' · '+rec.missing_payout_ids.length+(ar?' بدون دفعة':' missing payout')):'')+(rec.gap?(' · '+fmt(rec.gap)+' '+cur):'')+'</span>';
+  prev.innerHTML=html;
+}
+async function financeSaveDefaults(){
+  const lid=(document.getElementById('finUnit')||{}).value||''; if(!lid){ toast(L==='ar'?'اختر شقة':'Pick an apartment'); return; }
+  const u=(D.finUnits||[]).find(function(x){return String(x.lid)===String(lid);});
+  const key=(u&&u.owner)?('owner:'+u.owner):('lid:'+lid);
+  try{ await post('/api/finance/defaults',{key:key, defaults:financeFields()}); toast('💾 '+(L==='ar'?'حُفظ كافتراضي':'Saved as default')); }catch(e){ toast('خطأ'); }
+}
+function financeGeneratePdf(){
+  const prev=document.getElementById('financePreview');
+  if(!prev || !D.finReport || D.finReport.error || !D.finReport.period){ toast(L==='ar'?'اعرض التقرير أول':'Show the report first'); return; }
+  const w=window.open('','_blank'); if(!w){ toast(L==='ar'?'اسمح بالنوافذ المنبثقة':'Allow pop-ups'); return; }
+  const css='*{box-sizing:border-box}body{font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:#1A1815;margin:0}'
+    +'.stmt{padding:44px 46px;max-width:760px;margin:0 auto}.stmt-cover{border-bottom:2px solid #A37728;padding-bottom:18px;margin-bottom:22px}'
+    +'.stmt-brand{font-weight:800;letter-spacing:1px;color:#8B6320;font-size:13px}.stmt-h1{font-size:25px;font-weight:800;margin:12px 0 4px;letter-spacing:-.3px}'
+    +'.stmt-meta{color:#8C8475;font-size:12px}.stmt-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#8B6320;margin:24px 0 8px}'
+    +'table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:start;color:#8C8475;font-size:10.5px;font-weight:600;padding:6px 8px;border-bottom:1px solid #E8E2D5}'
+    +'td{padding:7px 8px;border-bottom:1px solid #EDE8DC}.num{text-align:end;font-variant-numeric:tabular-nums}'
+    +'.stmt-sum{background:#F7F4EE;border-radius:12px;padding:16px 18px;margin:6px 0}.stmt-sum-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}'
+    +'.stmt-sum-row.total{border-top:2px solid #A37728;margin-top:6px;padding-top:10px;font-weight:800;font-size:15px;color:#8B6320}'
+    +'.stmt-note{font-size:12.5px;color:#544D43;line-height:1.75;margin:14px 0}.stmt-sign{margin-top:28px;font-size:12.5px}'
+    +'.stmt-foot{margin-top:24px;border-top:1px solid #E8E2D5;padding-top:10px;font-size:11px;color:#8C8475;text-align:center}.recon-bad{color:#C44343}.muted{color:#8C8475}';
+  const dir=(L==='ar')?'rtl':'ltr';
+  w.document.write('<!doctype html><html dir="'+dir+'" lang="'+(L==='ar'?'ar':'en')+'"><head><meta charset="utf-8"><title>Ouja Statement</title>'
+    +'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700;800&display=swap" rel="stylesheet">'
+    +'<style>'+css+'</style></head><body>'+financeStatementHTML()+'</body></html>');
+  w.document.close();
+  setTimeout(function(){ try{ w.focus(); w.print(); }catch(_){ } }, 700);
+}
 async function loadLearnings(){
   const list = document.getElementById('learnAptList');
   if(list) list.innerHTML = '<div class="empty sk">—</div>';
@@ -17605,6 +17804,69 @@ async def _api_expenses_set_owner(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+# ===================== FINANCE / ACCOUNTING API (Stage 3) =====================
+def _finance_key(lid, owner):
+    return ("owner:" + owner) if owner else ("lid:" + str(lid))
+
+async def _api_finance_units(request):
+    """Apartments for the report picker (lid, name, owner, saved mgmt%)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    out = []
+    for u in (_catalog_units or []):
+        if not u.get("id"):
+            continue
+        owner = _unit_owners.get(u.get("name"), "")
+        dft = _finance_defaults.get(_finance_key(u["id"], owner), {})
+        out.append({"lid": u["id"], "name": u.get("name"), "owner": owner,
+                    "mgmt_pct": dft.get("mgmt_pct")})
+    out.sort(key=lambda x: x["name"] or "")
+    return _json({"units": out})
+
+async def _api_finance_report(request):
+    """Stage 3: the owner report for an apartment + date range. Real data only — never estimates."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q = request.query
+    try:
+        lid = int(q.get("lid")) if q.get("lid") else None
+    except Exception:
+        lid = None
+    start = _parse_date(q.get("start", "")); end = _parse_date(q.get("end", ""))
+    if not start or not end or end < start:
+        return _json({"error": "bad date range"}, 400)
+    try:
+        mgmt = float(q.get("mgmt", "0") or 0)
+    except Exception:
+        mgmt = 0.0
+    settings = {}
+    if q.get("rounding"):
+        try:
+            settings["rounding"] = int(q.get("rounding"))
+        except Exception:
+            pass
+    if q.get("basis") in ("checkin", "checkout"):
+        settings["period_basis"] = q.get("basis")
+    rep = await asyncio.to_thread(build_owner_report, lid, start, end, mgmt, settings)
+    return _json(rep)
+
+async def _api_finance_defaults(request):
+    """GET ?key= -> saved report defaults; POST {key, defaults} -> save (item 16).
+    Never stores bank/IBAN (item 17)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        return _json({"defaults": _finance_defaults.get(request.query.get("key", ""), {})})
+    b = await _read_body(request)
+    key = (b.get("key") or "").strip()
+    d = b.get("defaults") or {}
+    if not key or not isinstance(d, dict):
+        return _json({"error": "bad request"}, 400)
+    _finance_defaults[key] = {k: v for k, v in d.items()
+                              if k not in ("iban", "bank", "bank_account", "account_number")}
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
 async def _api_expenses_get(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -19447,6 +19709,10 @@ async def start_web_server():
         app.router.add_get("/api/expenses/queue", _api_expenses_queue)
         app.router.add_get("/api/expenses/summary", _api_expenses_summary)
         app.router.add_post("/api/expenses/set-owner", _api_expenses_set_owner)
+        app.router.add_get("/api/finance/units", _api_finance_units)
+        app.router.add_get("/api/finance/report", _api_finance_report)
+        app.router.add_get("/api/finance/defaults", _api_finance_defaults)
+        app.router.add_post("/api/finance/defaults", _api_finance_defaults)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
@@ -19879,6 +20145,7 @@ def load_state():
             if isinstance(v, dict) and v.get("id"):
                 _quotes[str(k)] = v
         _unit_owners.update(_load_json("unit_owners.json", {}) or {})   # item 60
+        _finance_defaults.update(_load_json("finance_defaults.json", {}) or {})   # Stage 3 item 16
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -19952,6 +20219,7 @@ def persist_state():
     _save_json("users.json", _users)
     _save_json("quotes.json", _quotes)
     _save_json("unit_owners.json", _unit_owners)
+    _save_json("finance_defaults.json", _finance_defaults)   # Stage 3 item 16
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
