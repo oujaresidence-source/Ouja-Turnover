@@ -2359,9 +2359,8 @@ substantive, or you are not fully certain (most amenity/directions/check-in answ
 
 WHEN IN DOUBT between "auto" and "reply", pick "reply" — a human approves it before it sends, so it is \
 always safe. Only choose "escalate" when the request matches the MUST-escalate list (complaint, dispute, \
-refund, booking change, upset guest, security info). A question you simply don't have the answer to \
-(like live availability) is NOT a reason to escalate — suggest what you can and point the guest to the \
-Airbnb link. Never gamble on "auto".
+refund, booking change, upset guest, security info). A question you simply don't have a fact for is NOT a reason to escalate — answer what you can (and live \
+availability you DO have whenever the unit + dates are known; see the AVAILABILITY rule below). Never gamble on "auto".
 
 YOU MAY draft replies (auto or reply) about
 - Unit amenities (wifi, parking, pool, kitchen, facilities)
@@ -2397,10 +2396,15 @@ and any must-have or budget. If they already told you, skip the questions and su
 - Then, from the "قائمة وحدات عوجا" in the context, suggest 1-3 matches. For each: name, bedrooms, \
 area, the "starting from" nightly price, and the Airbnb link if it is in the list. NEVER invent a link \
 or a detail. If nothing matches exactly, suggest the closest and state the differences honestly.
-- AVAILABILITY: you do NOT have live availability. Never promise a unit is free. Instead, suggest the \
-options and tell the guest to check live availability and book directly from the Airbnb link (the link \
-always shows what is open for their dates). Not knowing availability is NEVER a reason to escalate — \
-suggest + send them to the link.
+- AVAILABILITY (you DO have it — real-time): for a guest's stay, or any specific unit + dates, the system \
+checks the LIVE Hostaway calendar and puts the TRUE status in your context (متاحة / محجوزة / متاحة جزئياً). \
+Answer truthfully from that fact: if available, confirm it's free for those dates; if booked, say so plainly \
+and proactively suggest alternative dates or another AVAILABLE unit from the list; if partially available, \
+say which nights are taken. If the guest asks about availability but didn't say WHICH unit, ask which unit; \
+if they didn't give DATES, ask the dates — then the system checks and you answer. GUARDRAIL: state \
+availability ONLY from the real fact in your context — never guess, and never promise a unit is free without \
+it. If the context says availability could not be confirmed, tell the guest you're confirming with the team \
+and use action "reply" (a human checks) — never invent an answer and never dead-end them on a link.
 - A FEATURE you're not sure about (e.g. whether a unit allows smoking, or has a specific view): if it \
 is not in your provided info, suggest the closest units, be honest that you'd confirm that specific \
 detail with the team, and keep it action "reply" so a human checks. Do NOT invent the feature.
@@ -2732,6 +2736,81 @@ def unit_availability_price(listing_id, checkin, checkout):
     _bounded_cache_put(_avail_cache, key, (result, time.time()), _AVAIL_CACHE_MAX)
     return result
 
+def get_availability(listing_id, start_date, end_date):
+    """Truthful availability for ONE unit over a stay [start_date, end_date)
+    (the checkout night is never charged/occupied).
+
+    Strategy: a TARGETED, bounded live Hostaway calendar query for exactly the
+    stay window; fall back to the cached per-unit grid ONLY if the live call
+    fails. Returns a dict the assistant can quote with certainty:
+      {status: 'available'|'booked'|'partial', nights, free_nights[], booked_nights[],
+       total, avg, source: 'live'|'grid'}
+    or None when the answer is genuinely unknown — in which case the caller must
+    NOT guess; it should confirm with the team / escalate.
+    """
+    if not listing_id or not start_date or not end_date:
+        return None
+    ci, co = _parse_date(start_date), _parse_date(end_date)
+    if not ci or not co or co <= ci:
+        return None
+    nights = (co - ci).days
+    last_night = co - timedelta(days=1)
+    ckey = ("getav", int(listing_id), ci.isoformat(), co.isoformat())
+    hit = _avail_cache.get(ckey)
+    if hit and (time.time() - hit[1]) < INTEL_CACHE_MIN * 60:
+        return hit[0]
+
+    rows_by_date, source = None, None
+    # 1) targeted live query — just this window, cheap
+    try:
+        data = api_get(f"/listings/{listing_id}/calendar",
+                       params={"startDate": ci.isoformat(), "endDate": last_night.isoformat()})
+        rows = data.get("result") or []
+        if rows:
+            rows_by_date = {r.get("date"): r for r in rows if r.get("date")}
+            source = "live"
+    except Exception as e:
+        print(f"get_availability live error ({listing_id}):", e)
+    # 2) fallback ONLY on live failure — cached per-unit grid
+    if rows_by_date is None:
+        try:
+            grid = _cache_get("calendar_grid")
+            if grid and grid.get("start"):
+                base = _parse_date(grid["start"])
+                u = next((x for x in grid.get("units", []) if x.get("lid") == int(listing_id)), None)
+                if base and u:
+                    rows_by_date = {}
+                    for i, c in enumerate(u.get("cells", [])):
+                        d = (base + timedelta(days=i)).isoformat()
+                        is_empty = (c.get("status") == "empty")
+                        rows_by_date[d] = {"isAvailable": 1 if is_empty else 0,
+                                           "price": c.get("price"),
+                                           "reservationId": (None if is_empty else "x")}
+                    source = "grid"
+        except Exception as e:
+            print(f"get_availability grid error ({listing_id}):", e)
+    if not rows_by_date:
+        return None
+
+    free, booked, prices = [], [], []
+    for i in range(nights):
+        d = (ci + timedelta(days=i)).isoformat()
+        r = rows_by_date.get(d)
+        if r is None:
+            return None   # a night outside the known window → unknown, don't guess
+        avail = (int(r.get("isAvailable", 0) or 0) == 1) and not r.get("reservationId")
+        (free if avail else booked).append(d)
+        p = r.get("price")
+        if avail and isinstance(p, (int, float)) and p > 0:
+            prices.append(float(p))
+    status = "available" if not booked else ("booked" if len(booked) == nights else "partial")
+    total = round(sum(prices)) if (prices and len(prices) == nights) else None
+    avg = round(total / nights) if total else None
+    out = {"status": status, "nights": nights, "free_nights": free, "booked_nights": booked,
+           "total": total, "avg": avg, "source": source}
+    _bounded_cache_put(_avail_cache, ckey, (out, time.time()), _AVAIL_CACHE_MAX)
+    return out
+
 def _unit_match_score(u, want):
     """Score a unit against a desired-criteria dict so we date-check the most-likely
     matches FIRST. `want` keys: beds, capacity, area, tags (set of normalized tags).
@@ -2993,17 +3072,29 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     want_catalog = bool(_catalog_text) and _is_asking_alternatives(history_text)
     # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
     own_price_line = ""
-    if (dates and dates[0] and listing_id
-            and (want_catalog or any(h in low for h in _PRICE_HINTS))):
-        info = unit_availability_price(listing_id, dates[0], dates[1])
-        if info and info.get("total") is not None:
-            avail = "متاحة" if info["available"] else "غير متاحة حالياً"
-            own_price_line = (
-                f"\nالتسعير الفعلي لوحدة الضيف ({unit}) لتواريخه (قبل الضريبة ورسوم المنصة): "
-                f"{info['nights']} ليالي ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة) · الوحدة {avail}.")
-        elif info and info.get("available") is not None:
-            own_price_line = (f"\nوحدة الضيف ({unit}) "
-                              f"{'متاحة' if info['available'] else 'غير متاحة'} لتواريخه.")
+    _avail_intent = any(w in low for w in
+                        ("متاح", "متوف", "فاضي", "فاضية", "محجوز", "available", "availab", "vacan",
+                         "free for", "ممكن احجز", "اقدر احجز", "تقدر احجز", "احجز"))
+    if (dates and dates[0] and dates[1] and listing_id
+            and (want_catalog or _avail_intent or any(h in low for h in _PRICE_HINTS))):
+        av = get_availability(listing_id, dates[0], dates[1])
+        if av:
+            if av["status"] == "available":
+                stat = "متاحة بالكامل لتواريخه ✅"
+            elif av["status"] == "booked":
+                stat = "محجوزة بالكامل لتواريخه ❌ — اقترح عليه تواريخ ثانية أو وحدة بديلة متاحة من القائمة"
+            else:
+                stat = ("متاحة جزئياً — الليالي المحجوزة: " + "، ".join(av["booked_nights"])
+                        + "؛ اعرض عليه تعديل التواريخ أو وحدة بديلة متاحة")
+            price_txt = (f" · السعر الحقيقي ≈ {av['total']} ر.س ({av['avg']}/ليلة، قبل الضريبة ورسوم المنصة)"
+                         if av.get("total") else "")
+            own_price_line = (f"\nالتوافر الحقيقي لوحدة الضيف ({unit}) لتواريخه "
+                              f"(مصدره تقويم Hostaway المباشر — هذي حقيقة، استخدمها): {stat}{price_txt}.")
+        else:
+            # GUARDRAIL: real check genuinely failed → do NOT let the model guess.
+            own_price_line = (f"\n⚠ تعذّر تأكيد توافر وحدة الضيف ({unit}) لتواريخه آلياً. "
+                              f"لا تخمّن التوافر إطلاقاً — قل للضيف إنك تتأكد من التوفّر مع الفريق "
+                              f"وردّ بـ action=\"reply\" عشان بشر يأكد.")
     # ---- early check-in detection + pre-computation ----
     # Done HERE (in claude_draft) rather than in the system prompt because the bot
     # can't call functions on its own — we precompute prev-night occupancy +
