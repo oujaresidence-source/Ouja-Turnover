@@ -1483,12 +1483,23 @@ def cleaning_quality_summary():
             u["comments"].append({"ts": fb.get("ts_done"), "comment": fb["comment"], "score": fb["score"]})
     units = []
     for lid, u in by_unit.items():
-        scores = [x["score"] for x in u["scores"]]
+        sc = sorted(u["scores"], key=lambda x: x.get("ts") or "")
+        scores = [x["score"] for x in sc]
         avg = round(sum(scores) / len(scores), 2) if scores else None
+        # Item 30: trend = recent third of scores vs the earlier ones.
+        trend, tdelta = "flat", 0
+        if len(scores) >= 4:
+            k = max(2, len(scores) // 3)
+            recent, earlier = scores[-k:], scores[:-k]
+            if earlier:
+                tdelta = round(sum(recent) / len(recent) - sum(earlier) / len(earlier), 2)
+                trend = "up" if tdelta >= 0.3 else ("down" if tdelta <= -0.3 else "flat")
         units.append({"lid": lid, "name": u["name"],
-                      "avg": avg, "count": len(scores),
+                      "avg": avg, "count": len(scores), "trend": trend, "tdelta": tdelta,
                       "recent": u["scores"][-5:], "comments": u["comments"][-5:]})
-    units.sort(key=lambda x: (x["avg"] if x["avg"] is not None else 99))
+    # Item 30: declining units pinned to the top, then lowest average.
+    units.sort(key=lambda x: (0 if x.get("trend") == "down" else 1,
+                              x["avg"] if x["avg"] is not None else 99))
     sent = len(_cleaning_feedback)
     done = sum(1 for fb in _cleaning_feedback.values() if fb.get("score") is not None)
     overall_avg = None
@@ -9263,7 +9274,9 @@ function renderQualityUnits(){
                   : '<span class="pill '+avgCls+'">'+_stars(u.avg)+'</span>';
     const recent = u.recent && u.recent.length
       ? u.recent.slice(-3).map(function(r){return '★'.repeat(r.score)}).join(' · ') : '—';
-    html += '<tr><td class="strong">'+esc(u.name||'—')+'</td>'
+    const trendTag = u.trend==='down' ? ' <span class="pill danger">↓ '+(L==='ar'?'يتراجع':'declining')+'</span>'
+                   : u.trend==='up' ? ' <span class="pill ok">↑ '+(L==='ar'?'يتحسّن':'improving')+'</span>' : '';
+    html += '<tr><td class="strong">'+esc(u.name||'—')+trendTag+'</td>'
       + '<td class="num">'+avgPill+'</td>'
       + '<td class="num">'+u.count+'</td>'
       + '<td class="muted" style="font-size:11.5px">'+recent+'</td></tr>';
@@ -10682,11 +10695,22 @@ function _expByAptHtml(){
   // Item 58: flag apartments costing notably more than peers (>= 1.5x the median).
   var totals=arr.map(function(a){return a.total||0}).filter(function(x){return x>0}).sort(function(x,y){return x-y});
   var median = totals.length ? totals[Math.floor(totals.length/2)] : 0;
-  var head='<tr>'+[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'إجمالي مُرحّل':'Total posted'].map(_expTh).join('')+'</tr>';
+  // Item 59: per-unit P&L — join 90-day revenue from the revenue view by unit name.
+  var revMap={}; (((D.rev||{}).units)||[]).forEach(function(u){ revMap[u.name]=u.rev90||0; });
+  var hasRev = Object.keys(revMap).length>0;
+  var cols=[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
+  if(hasRev) cols=cols.concat([ar?'إيراد ٩٠ي':'Rev 90d',ar?'صافي':'Net']);
+  var head='<tr>'+cols.map(_expTh).join('')+'</tr>';
   var rows=arr.map(function(a){
     var hot = (totals.length>=4 && median>0 && (a.total||0) >= median*1.5);
     var badge = hot ? ' <span class="pill danger">⚠ '+(ar?'أعلى من المعتاد':'above peers')+'</span>' : '';
-    return '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td></tr>'; }).join('');
+    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
+    if(hasRev){
+      var rev = revMap[a.apartment]||0; var net = rev-(a.total||0);
+      tr += '<td style="padding:8px 6px;font-size:12px">'+(rev?fmt(rev):'—')+'</td>'
+          + '<td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+(rev?fmt(net):'—')+'</td>';
+    }
+    return tr+'</tr>'; }).join('');
   return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
 }
 function _expByEmpHtml(){
@@ -11106,6 +11130,9 @@ function _renderPmoList(){
   var s=document.getElementById('pmoSort'); if(s) s.value=_pmoSort;
   _pmoRenderCards();
 }
+async function pmoToggleSignoff(id, cur){
+  try{ await post('/api/pmo/update',{id:id, signoff: !cur}); toast('✓'); loadPmo(); }catch(e){ toast('خطأ'); }
+}
 function _pmoRenderCards(){
   var wrap = document.getElementById('pmoCards'); if(!wrap) return;
   var ar = (L==='ar');
@@ -11134,7 +11161,7 @@ function _pmoRenderCards(){
     var late = !!(dl && dl.over && (p.progress==null || p.progress<100));   // item 54
     h += '<div class="card" style="padding:14px;cursor:pointer'+(late?';border-inline-start:3px solid var(--red)':'')+'" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+'</div>'
+      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+(p.signoff?(' <span class="pill warn">⏳ '+(ar?'اعتماد فيصل':'Faisal sign-off')+'</span>'):'')+'</div>'
       + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(p.client_name||'')+(p.district?(' · '+esc(p.district)):'')+'</div></div>'
       + '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-weight:800;font-size:16px">'+prog+'</div></div></div>'
       + '<div style="height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:9px 0 7px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>'
@@ -11142,9 +11169,13 @@ function _pmoRenderCards(){
       + '<span class="muted" style="font-size:11px">'+(ms?('🚩 '+esc(ms)):'')+'</span>'
       + (dl?('<span style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</span>'):'')
       + '</div>'
-      + '<div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">'
+      // Item 55: budget vs actual (spent = sum of task costs).
+      + (p.budget?('<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-top:7px;color:var(--text-2)"><span>'+(ar?'الميزانية':'Budget')+': <b class="mono">'+fmt(p.spent||0)+'</b> / '+fmt(p.budget)+' SAR</span>'+(((p.spent||0)>p.budget)?('<span class="pill danger">'+(ar?'تجاوز':'over')+'</span>'):'')+'</div>'):'')
+      + '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" onclick="event.stopPropagation()">'
       + '<button class="btn ghost xs" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'+(ar?'افتح':'Open')+'</button>'
       + '<button class="btn ghost xs" onclick="pmoCopyOwnerById(&#39;'+esc(p.id)+'&#39;)">'+(ar?'انسخ رابط المالك':'Copy owner link')+'</button>'
+      // Item 56: one-click sign-off toggle.
+      + '<button class="btn '+(p.signoff?'red':'ghost')+' xs" onclick="pmoToggleSignoff(&#39;'+esc(p.id)+'&#39;,'+(p.signoff?'true':'false')+')">'+(p.signoff?(ar?'✓ اعتُمد':'✓ signed off'):(ar?'⏳ يحتاج اعتمادك':'⏳ needs sign-off'))+'</button>'
       + '</div></div>';
   }
   h += '</div>';
@@ -12480,12 +12511,19 @@ function renderCleaningList(){
   const filt = (document.getElementById('cleanFilter')||{}).value || 'all';
   const q = ((document.getElementById('cleanSearch')||{}).value || '').toLowerCase();
   const today = (D.clean||{}).today || '';
+  const ar=(L==='ar');
+  // Items 26/27: cross-ref today's arrivals/turnovers (D.today) with cleaning state.
+  const _td = D.today||{}; const _cbn={}; items.forEach(function(c){ _cbn[c.name]=c; });
+  let _alerts='';
+  (_td.tight||[]).forEach(function(u){ _alerts += '<div class="mb-alert amber"><span class="mb-ic">⚡</span><span>'+(ar?('تسليم واستلام نفس اليوم على <b>'+esc(u)+'</b> — لازم تنظيف سريع'):('Same-day turnover on <b>'+esc(u)+'</b> — needs a fast clean'))+'</span></div>'; });
+  (_td.arrivals||[]).forEach(function(a){ const c=_cbn[a.unit]; if(c&&c.overdue){ _alerts += '<div class="mb-alert red"><span class="mb-ic">🧹</span><span>'+(ar?('ضيف يوصل اليوم على <b>'+esc(a.unit)+'</b> والتنظيف متأخر — نظّفها قبل الوصول'):('Guest arrives today into <b>'+esc(a.unit)+'</b> and cleaning is overdue'))+'</span></div>'; } });
+  const _banner = _alerts ? '<div class="mb-alerts" style="margin-bottom:12px">'+_alerts+'</div>' : '';
   let filtered = items;
   if(filt === 'overdue') filtered = items.filter(function(x){return x.overdue});
   else if(filt === 'soon') filtered = items.filter(function(x){return x.days_until_next != null && x.days_until_next <= 7});
   else if(filt === 'unscheduled') filtered = items.filter(function(x){return !x.next_scheduled});
   if(q) filtered = filtered.filter(function(x){return (x.name||'').toLowerCase().indexOf(q) >= 0});
-  if(!filtered.length){ body.innerHTML = '<div class="empty">—</div>'; return; }
+  if(!filtered.length){ body.innerHTML = _banner + '<div class="empty">—</div>'; return; }
   let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().clean_unit+'</th>'
     + '<th>'+t().clean_last+'</th>'
@@ -12509,7 +12547,7 @@ function renderCleaningList(){
       + '</tr>';
   }
   html += '</tbody></table></div>';
-  body.innerHTML = html;
+  body.innerHTML = _banner + html;
 }
 
 async function cleanMarkDone(lid){
@@ -13647,12 +13685,26 @@ function renderRevenueFull(){
   if(rev.error){ if(mBody) mBody.innerHTML='<div class="empty">⚠ '+esc(rev.error)+'</div>'; return }
   const monthly = (rev.monthly||[]).slice(-12);
   if(monthly.length){
+    const ar = (L==='ar');
     const max = Math.max.apply(null, monthly.map(function(m){return m.rev}));
     const bars = monthly.map(function(m){
       const h = Math.max(5, (m.rev/max)*150);
       return '<div class="bar-col"><div class="bar-tip">'+fmt(m.rev)+' SAR</div><div class="bar" style="height:'+h+'px"></div><div class="bar-label">'+m.m.slice(5)+'</div></div>';
     }).join('');
-    mBody.innerHTML = '<div class="bar-chart" style="height:170px">'+bars+'</div>';
+    // Item 68: pace vs last month / same month last year.
+    const pc = rev.pace||{};
+    const pBadge = function(v, lbl){ if(v==null) return ''; return '<span class="kpi-delta '+(v>=0?'up':'dn')+'" style="margin-inline-start:6px">'+lbl+' '+(v>=0?'+':'')+v+'%</span>'; };
+    const paceLine = '<div style="margin-bottom:10px;font-size:12.5px;color:var(--text-2)">'+(ar?'وتيرة هذا الشهر':'This month')+': <b class="mono">'+fmt(pc.cur||0)+' SAR</b>'+pBadge(pc.mom, ar?'مقابل الشهر السابق':'MoM')+pBadge(pc.yoy, ar?'مقابل السنة السابقة':'YoY')+'</div>';
+    // Item 66: per-compound breakdown.
+    const comps = rev.compounds||[];
+    let compHtml = '';
+    if(comps.length>1){
+      compHtml = '<div style="margin-top:12px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'حسب المجمّع':'By compound')+'</div>'
+        + '<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+(ar?'المجمّع':'Compound')+'</th><th class="num">'+(ar?'وحدات':'Units')+'</th><th class="num">'+(ar?'الإشغال':'Occ')+'</th><th class="num">ADR</th></tr></thead><tbody>'
+        + comps.map(function(c){ return '<tr><td class="strong">'+esc(c.compound)+'</td><td class="num">'+c.units+'</td><td class="num">'+c.occ+'%</td><td class="num">'+fmt(c.adr)+'</td></tr>'; }).join('')
+        + '</tbody></table></div></div>';
+    }
+    mBody.innerHTML = paceLine + '<div class="bar-chart" style="height:170px">'+bars+'</div>' + compHtml;
   }else{ mBody.innerHTML='<div class="empty">'+t().rev_no+'</div>' }
 
   const sal = rev.salary || {};
@@ -14501,14 +14553,54 @@ def _compute_revenue():
     for _, d, nl in nights:
         series[f"{d.year}-{d.month:02d}"] = series.get(f"{d.year}-{d.month:02d}", 0) + nl
     monthly = [{"m": k, "rev": round(series[k])} for k in sorted(series)[-12:]]
+    # per-unit 90-day revenue, for the per-unit P&L join in Expenses (item 59)
+    today = datetime.now(TZ).date()
+    d90 = today - timedelta(days=90)
+    rev_by_name = {}
+    for lid, d, nl in nights:
+        if d >= d90:
+            nm = listings.get(lid) or ""
+            if nm:
+                rev_by_name[nm] = rev_by_name.get(nm, 0) + nl
+    # compound (neighbourhood) per unit, from the catalog (item 66)
+    nb_map = {u.get("name"): (u.get("neighbourhood") or u.get("area") or "")
+              for u in _catalog_units if u.get("name")}
+    units = [{"name": u["name"], "compound": nb_map.get(u["name"], ""),
+              "occ": round(u["occ90"] * 100), "rev90": round(rev_by_name.get(u["name"], 0)),
+              "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
+              "reco": u["reco"], "label": u["label"]} for u in rep["units"]]
+    # Item 66: per-compound aggregation (avg occupancy + ADR + unit count).
+    comp = {}
+    for u in units:
+        c = u["compound"] or "—"
+        g = comp.setdefault(c, {"compound": c, "units": 0, "occ_sum": 0, "adr_sum": 0, "adr_n": 0})
+        g["units"] += 1
+        g["occ_sum"] += u["occ"]
+        if u["adr"]:
+            g["adr_sum"] += u["adr"]; g["adr_n"] += 1
+    compounds = [{"compound": g["compound"], "units": g["units"],
+                  "occ": round(g["occ_sum"] / g["units"]) if g["units"] else 0,
+                  "adr": round(g["adr_sum"] / g["adr_n"]) if g["adr_n"] else 0}
+                 for g in comp.values()]
+    compounds.sort(key=lambda x: -x["occ"])
+    # Item 68: pace vs last month + same month last year (from the monthly nights-revenue series).
+    today = datetime.now(TZ).date()
+    _mk = lambda y, m: f"{y}-{m:02d}"
+    cur = series.get(_mk(today.year, today.month), 0)
+    pm_y, pm_m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    prev_m = series.get(_mk(pm_y, pm_m), 0)
+    prev_y = series.get(_mk(today.year - 1, today.month), 0)
+    pace = {"cur": round(cur),
+            "mom": round((cur - prev_m) / prev_m * 100) if prev_m else None,
+            "yoy": round((cur - prev_y) / prev_y * 100) if prev_y else None}
     return {"monthly": monthly,
+            "overall_adr": round(rep.get("overall_adr", 0) or 0),
+            "compounds": compounds, "pace": pace,
             "seasonality": [{"name": m["name"], "adr": round(m["adr"]), "index": round(m["index"], 2)}
                             for m in rep["months"]],
             "salary": {str(k): round(v, 2) for k, v in rep["salary"]["dom_index"].items()},
             "weak": rep["salary"]["weak_window"], "strong": rep["salary"]["strong_window"],
-            "units": [{"name": u["name"], "occ": round(u["occ90"] * 100),
-                       "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
-                       "reco": u["reco"], "label": u["label"]} for u in rep["units"]]}
+            "units": units}
 
 def _compute_calendar_grid(days=45):
     """Per-unit × per-day tape-chart grid for the next `days` days (items 10-14).
@@ -17524,6 +17616,7 @@ def _pmo_view(p):
         "room_progress": room_prog,
         "status_label": _pmo_status_label(p),
         "spent": (spent if has_costs else None),
+        "signoff": p.get("signoff", False),
         "task_count": len(tasks),
         "done_count": sum(1 for t in tasks if t.get("status") == "done"),
         "created_at": p.get("created_at"), "updated_at": p.get("updated_at"),
@@ -17802,8 +17895,12 @@ async def _api_pmo_list(request):
     out = []
     for p in items:
         tasks = p.get("tasks") or []
+        _spent = sum((t.get("cost") or 0) * (t.get("qty") or 1)
+                     for t in tasks if isinstance(t.get("cost"), (int, float)))
         out.append({
             "id": p["id"], "ref": p.get("ref"),
+            "budget": p.get("budget"), "spent": round(_spent) if _spent else None,  # item 55
+            "signoff": p.get("signoff", False),                                     # item 56
             "unit_name": (p.get("unit") or {}).get("name", ""),
             "client_name": (p.get("client") or {}).get("name", ""),
             "district": (p.get("unit") or {}).get("district", ""),
@@ -17922,6 +18019,8 @@ async def _api_pmo_update(request):
             p["budget"] = float(b["budget"]) if b["budget"] not in (None, "", "null") else None
         except Exception:
             pass
+    if "signoff" in b:
+        p["signoff"] = bool(b["signoff"])   # item 56: needs Faisal's sign-off
     if isinstance(b.get("rooms"), list):
         p["rooms"] = [str(x).strip()[:60] for x in b["rooms"] if str(x).strip()][:60]
     p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
