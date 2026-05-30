@@ -14056,7 +14056,7 @@ function financeStatementHTML(){
   h+='<div class="stmt-sec-t">'+(ar?'الحجوزات':'Reservations')+'</div>';
   if((r.resv_lines||[]).length){
     h+='<table><thead><tr><th>'+(ar?'القناة':'Channel')+'</th><th>'+(ar?'الدخول':'Check-in')+'</th><th>'+(ar?'ليالٍ':'Nights')+'</th><th class="num">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>';
-    h+=(r.resv_lines||[]).map(function(l){ return '<tr><td>'+esc(l.channel)+'</td><td>'+esc(l.checkin||'')+'</td><td>'+(l.nights||'')+'</td><td class="num">'+(l.income==null?('<span class="recon-bad">'+(ar?'دفعة ناقصة':'payout missing')+'</span>'):money(l.income))+'</td></tr>'; }).join('')+'</tbody></table>';
+    h+=(r.resv_lines||[]).map(function(l){ var flag=(l.channel==='other')?(ar?'قناة تحتاج قاعدة':'channel needs rule'):(ar?'دفعة ناقصة':'payout missing'); return '<tr><td>'+esc(l.channel)+'</td><td>'+esc(l.checkin||'')+'</td><td>'+(l.nights||'')+'</td><td class="num">'+(l.income==null?('<span class="recon-bad">'+flag+'</span>'):money(l.income))+'</td></tr>'; }).join('')+'</tbody></table>';
   } else { h+='<div class="stmt-note">'+(ar?'لا حجوزات في هذي الفترة':'No reservations this period')+'</div>'; }
   h+='<div class="stmt-sec-t">'+(ar?'المصاريف':'Expenses')+'</div>';
   if((r.exp_lines||[]).length){
@@ -14077,7 +14077,7 @@ function financeRender(){
   if(!html){ prev.innerHTML='<div class="empty" style="padding:40px;text-align:center">'+((r&&r.error)?'⚠ خطأ بجلب البيانات':'اختر شقة وفترة')+'</div>'; if(reconEl) reconEl.textContent=''; return; }
   const rec=(r.reconciliation)||{}; const cur=financeFields().currency||'SAR';
   if(reconEl) reconEl.innerHTML = rec.balanced ? '<span class="recon-ok">✔ '+(ar?'متوازن':'balanced')+'</span>'
-    : '<span class="recon-bad">✖ '+(ar?'غير متوازن':'mismatch')+(rec.missing_payout_ids&&rec.missing_payout_ids.length?(' · '+rec.missing_payout_ids.length+(ar?' بدون دفعة':' missing payout')):'')+(rec.gap?(' · '+fmt(rec.gap)+' '+cur):'')+'</span>';
+    : '<span class="recon-bad">✖ '+(ar?'غير متوازن':'mismatch')+(rec.missing_payout_ids&&rec.missing_payout_ids.length?(' · '+rec.missing_payout_ids.length+(ar?' بدون دفعة':' missing payout')):'')+(rec.needs_channel_rule_ids&&rec.needs_channel_rule_ids.length?(' · '+rec.needs_channel_rule_ids.length+(ar?' قناة بلا قاعدة':' channel(s) need rule')):'')+(rec.gap?(' · '+fmt(rec.gap)+' '+cur):'')+'</span>';
   prev.innerHTML=html;
 }
 async function financeSaveDefaults(){
@@ -14927,7 +14927,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         return round(float(x), rnd) if rnd and rnd > 0 else float(round(float(x)))
 
     inc_airbnb = 0.0; inc_direct = 0.0; extras_total = 0.0
-    resv_lines = []; missing_payout = []
+    resv_lines = []; missing_payout = []; needs_rule = []
     for r in reservations:
         status = (r.get("status") or "").lower()
         if status in _REPORT_CANCELLED:                       # EXCLUDE cancelled
@@ -14946,9 +14946,11 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
             else:
                 income = float(payout) - refund               # actual amount received
                 inc_airbnb += income
-        else:                                                 # direct
+        elif channel == "direct":
             income = (float(r.get("direct_revenue") or 0) - refund) * (1.0 - direct_fee)  # 3% on DIRECT only
             inc_direct += income
+        else:                                                 # 'other' (Booking.com, Vrbo…) — no confirmed rule
+            needs_rule.append(r.get("id")); income = None     # flagged, NEVER guessed
         resv_lines.append({
             "id": r.get("id"), "channel": channel, "apartment": r.get("apartment"),
             "checkin": r.get("checkin"), "checkout": r.get("checkout"), "nights": r.get("nights"),
@@ -14966,7 +14968,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
     # ---- reconciliation (item 14): totals must equal the sum of the rows, to the riyal ----
     rows_income = sum((l["income"] or 0) for l in resv_lines) + extras_total
     gap = R(rows_income) - R(total_income)
-    balanced = (abs(gap) < 0.005) and not missing_payout
+    balanced = (abs(gap) < 0.005) and not missing_payout and not needs_rule
     return {
         "currency": "SAR", "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": basis},
         "income_airbnb": R(inc_airbnb), "income_direct": R(inc_direct), "extras": R(extras_total),
@@ -14974,7 +14976,8 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
         "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines)},
         "resv_lines": resv_lines, "exp_lines": exp_lines,
-        "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout},
+        "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout,
+                           "needs_channel_rule_ids": needs_rule},
         "settings": s,
     }
 
@@ -14989,7 +14992,11 @@ _AIRBNB_PAYOUT_FIELDS = ("airbnbExpectedPayoutAmount", "expectedPayoutAmount",
 
 def _finance_channel(r):
     ch = (r.get("channelName") or r.get("channel") or "").strip().lower()
-    return "airbnb" if "airbnb" in ch else "direct"   # [CONFIRM] non-Airbnb channels treated as 'direct'
+    if "airbnb" in ch:
+        return "airbnb"
+    if (not ch) or any(w in ch for w in ("direct", "manual", "website", "owner", "walk")):
+        return "direct"
+    return "other"   # Booking.com / Vrbo / etc. — NOT 'direct'; flagged for an explicit rule
 
 def _airbnb_payout(r):
     for k in _AIRBNB_PAYOUT_FIELDS:
