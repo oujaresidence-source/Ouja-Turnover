@@ -6802,6 +6802,18 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .ibox-conf.high{background:var(--green-soft);color:var(--green)}
 .ibox-conf.mid{background:var(--yellow-soft);color:var(--yellow)}
 .ibox-conf.low{background:var(--red-soft);color:var(--red)}
+/* Inbox item enrichments (items 6-8): AI summary, wait-time, suggested action */
+.ibox-sum{font-size:11.5px;color:var(--text-3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ibox-wait{font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;font-family:var(--font-mono);background:var(--surface-2);color:var(--text-3)}
+.ibox-wait.hot{background:var(--red-soft);color:var(--red)}
+.ibox-act{font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;letter-spacing:.2px;white-space:nowrap}
+.ibox-act.send{background:var(--green-soft);color:var(--green)}
+.ibox-act.mid{background:var(--yellow-soft);color:var(--yellow)}
+.ibox-act.rev{background:var(--blue-soft);color:var(--blue)}
+.ibox-act.esc{background:var(--red-soft);color:var(--red)}
+/* Bulk-approve bar (item 9) */
+.bulkbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--green-soft);border:1px solid rgba(14,158,95,.22);border-radius:var(--r);padding:10px 13px;margin-bottom:10px;font-size:12.5px;color:var(--text)}
+.bulkbar b{color:var(--green)}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -12956,21 +12968,66 @@ function filteredInboxItems(){
       return ((d.guest||'')+(d.unit||'')+(d.guest_text||'')+(d.reply||'')+(d.draft||'')).toLowerCase().indexOf(q) >= 0;
     });
   }
+  // Item 5: upset/escalations first, then longest guest wait-time first.
+  items.sort(function(a,b){
+    const ae=(a.k==='esc')?0:1, be=(b.k==='esc')?0:1;
+    if(ae!==be) return ae-be;
+    return _waitMin(b.d.time||b.d.ts) - _waitMin(a.d.time||a.d.ts);
+  });
   return items;
 }
 
+function _highConfReplies(){
+  // Item 9: pending replies the bot is >=85% sure of and that have a drafted answer.
+  return (((D.inbox||{}).replies)||[]).filter(function(r){ return (r.confidence!=null && r.confidence>=85 && (r.draft||'').trim()); });
+}
 function renderInbox(){
   buildInboxTabs();
   const items = filteredInboxItems();
   const el = document.getElementById('inboxList');
-  if(!items.length){ el.innerHTML='<div class="empty">'+t().ib_no+'</div>'; return }
-  el.innerHTML = items.map(function(x){
+  const ar = (L==='ar');
+  // Item 9: one-click bulk approve for all high-confidence replies.
+  const high = _highConfReplies();
+  let bar = '';
+  if(high.length){
+    bar = '<div class="bulkbar"><span>'+(ar?('⚡ فيه <b>'+high.length+'</b> رد فوق ٨٥٪ جاهز للإرسال'):('⚡ <b>'+high.length+'</b> replies above 85% ready to send'))+'</span>'
+      + '<button class="btn primary sm" onclick="bulkApprove()">'+(ar?'وافق على الكل':'Approve all')+'</button></div>';
+  }
+  if(!items.length){ el.innerHTML = bar + '<div class="empty">'+t().ib_no+'</div>'; return }
+  el.innerHTML = bar + items.map(function(x){
     if(x.k==='auto') return renderAutoItem(x.d);
     return renderInboxItem(x.k, x.d);
   }).join('');
   // re-attach textarea values if user was editing
 }
+async function bulkApprove(){
+  const high = _highConfReplies();
+  if(!high.length) return;
+  const ar = (L==='ar');
+  if(!confirm(ar?('توافق وترسل '+high.length+' رد جاهز؟'):('Approve & send '+high.length+' ready replies?'))) return;
+  let ok=0, fail=0;
+  for(const r of high){
+    try{ const res = await post('/api/send',{id:String(r.id), text:r.draft}); if(res && res.ok) ok++; else fail++; }
+    catch(e){ fail++; }
+  }
+  toast((ar?'تم إرسال ':'Sent ')+ok+(fail?(' · '+(ar?'فشل ':'failed ')+fail):''));
+  loadAll();
+}
 
+// Item 8: minutes a guest has been waiting since their last message.
+function _waitMin(ts){ if(!ts) return 0; var d=new Date(ts); if(isNaN(d.getTime())) return 0; return Math.max(0, Math.floor((Date.now()-d.getTime())/60000)); }
+function _waitLabel(m, ar){
+  if(m<60) return ar?('منذ '+m+'د'):(m+'m');
+  if(m<1440){ var h=Math.floor(m/60); return ar?('منذ '+h+'س'):(h+'h'); }
+  var dd=Math.floor(m/1440); return ar?('منذ '+dd+'ي'):(dd+'d');
+}
+// Item 7: suggested action derived from confidence + kind (thresholds mirror the bot's).
+function _suggestAction(k, conf, ar){
+  if(k==='esc') return {cls:'esc', label: ar?'صعّد':'Escalate'};
+  if(conf!=null && conf>=85) return {cls:'send', label: ar?'وافق وأرسل':'Approve'};
+  if(conf!=null && conf<55) return {cls:'rev', label: ar?'راجع بنفسك':'Review'};
+  return {cls:'mid', label: ar?'راجع وأرسل':'Review & send'};
+}
 function renderInboxItem(k, d){
   // IDs are returned as STRINGS from the backend (Discord snowflakes overflow
   // JS number precision). Wrap them in HTML-encoded single quotes inside the
@@ -12978,14 +13035,25 @@ function renderInboxItem(k, d){
   const idAttr = String(d.id);
   const idJs = "&#39;" + idAttr + "&#39;";
   const isOpen = openInboxId === idAttr;
+  const ar = (L==='ar');
   const conf = d.confidence!==undefined && d.confidence!==null ? d.confidence : null;
   const confClass = conf===null?'':(conf>=85?'high':(conf>=60?'mid':'low'));
   const confChip = conf!==null && k==='rep' ? '<span class="ibox-conf '+confClass+'">'+conf+'%</span>' : '';
+  // Item 8: guest wait-time chip (hot if >= 2h).
+  const wm = _waitMin(d.time); const waitChip = wm>0 ? '<span class="ibox-wait'+(wm>=120?' hot':'')+'">'+_waitLabel(wm,ar)+'</span>' : '';
+  // Item 7: suggested-action pill.
+  const act = _suggestAction(k, conf, ar);
+  const actPill = '<span class="ibox-act '+act.cls+'">'+act.label+'</span>';
+  // Item 6: one-line AI summary (the classified intent), shown without opening.
+  const intent = (d.intent||'').trim();
+  const summary = intent ? ('<div class="ibox-sum">🤖 '+esc(intent.slice(0,150))+'</div>') : '';
   return '<div class="ibox '+(k==='esc'?'escalation':'reply')+(isOpen?' open':'')+'" id="ib_'+idAttr+'">'
     + '<div class="ibox-row" onclick="toggleInbox('+idJs+')">'
     + '<div class="ibox-icon '+(k==='esc'?'esc':'rep')+'">'+(k==='esc'?'🚨':'💬')+'</div>'
-    + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(d.guest||'')+'</span><span class="ibox-unit">'+esc(d.unit||'')+'</span></div><div class="ibox-preview">'+esc((d.guest_text||'').slice(0,160))+'</div></div>'
-    + '<div class="ibox-meta">'+confChip+'<span class="ibox-time">'+esc(shortTime(d.time||''))+'</span></div>'
+    + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(d.guest||'')+'</span><span class="ibox-unit">'+esc(d.unit||'')+'</span>'+actPill+'</div>'
+      + '<div class="ibox-preview">'+esc((d.guest_text||'').slice(0,160))+'</div>'
+      + summary + '</div>'
+    + '<div class="ibox-meta">'+confChip+waitChip+'<span class="ibox-time">'+esc(shortTime(d.time||''))+'</span></div>'
     + '<span class="ibox-expand">⌃</span>'
     + '</div>'
     + (isOpen ? '<div class="ibox-body" id="ibbody_'+idAttr+'"><div class="empty sk">—</div></div>' : '')
@@ -14300,6 +14368,7 @@ async def _api_inbox(request):
                         "thread": (it.get("history") or "")[:2500],
                         "time": it.get("last_time", ""),
                         "confidence": d.get("confidence"),
+                        "intent": (d.get("intent") or ""), "sentiment": (d.get("sentiment") or ""),
                         "draft": (d.get("draft") or "")[:1200]})
     escs = []
     for eid, e in list(_escalations.items()):
