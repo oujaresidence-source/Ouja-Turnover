@@ -1506,21 +1506,50 @@ def cleaning_quality_summary():
     if done:
         all_scores = [fb["score"] for fb in _cleaning_feedback.values() if fb.get("score") is not None]
         overall_avg = round(sum(all_scores)/len(all_scores), 2)
+    # Items 28/42: per-cleaner scores — attribute each feedback to the cleaner recorded
+    # on the unit's clean record on/closest-before the feedback's clean date.
+    by_cleaner = {}
+    for tok, fb in _cleaning_feedback.items():
+        if fb.get("score") is None:
+            continue
+        st = _deep_clean_state.get(fb.get("lid"))
+        if not st:
+            continue
+        fd = (fb.get("ts_done") or "")[:10]
+        best = None
+        for h in st.get("history", []):
+            if h.get("cleaner") and (not fd or h.get("date", "") <= fd):
+                if best is None or h.get("date", "") > best.get("date", ""):
+                    best = h
+        if best is None:
+            cands = [h for h in st.get("history", []) if h.get("cleaner")]
+            best = cands[-1] if cands else None
+        cleaner = best.get("cleaner") if best else None
+        if not cleaner:
+            continue
+        by_cleaner.setdefault(cleaner, []).append(fb["score"])
+    cleaners = [{"cleaner": n, "avg": round(sum(s) / len(s), 2), "count": len(s)}
+                for n, s in by_cleaner.items()]
+    cleaners.sort(key=lambda x: x["avg"])   # weakest first
     return {
         "units": units,
+        "cleaners": cleaners,
         "stats": {"sent": sent, "responded": done,
                   "response_rate": round(done/sent*100) if sent else 0,
                   "overall_avg": overall_avg},
     }
 
-def mark_deep_clean_done(lid, date_iso=None, notes=""):
+def mark_deep_clean_done(lid, date_iso=None, notes="", cleaner=""):
     if lid not in _deep_clean_state:
         _dc_init(lid)
     s = _deep_clean_state[lid]
     done_date = date_iso or datetime.now(TZ).date().isoformat()
+    cleaner = (cleaner or "").strip()[:60]
     s["history"].append({"date": done_date,
                          "ts": datetime.now(TZ).isoformat(timespec="minutes"),
-                         "notes": notes})
+                         "notes": notes, "cleaner": cleaner})   # item 28/42: who cleaned
+    if cleaner:
+        s["last_cleaner"] = cleaner
     s["history"] = s["history"][-20:]
     s["last_done"] = done_date
     s["next_scheduled"] = None
@@ -1735,6 +1764,32 @@ def compute_urgent_now():
             })
     except Exception as e:
         print("pricing alerts error:", e)
+    # ---- global cross-view items (item 71): must-decide things from every view ----
+    try:
+        for d in _design_requests.values():
+            if d.get("status") == "blocked":
+                items.append({"kind": "design_blocked", "severity": "med", "id": d.get("id"),
+                              "title": d.get("project_name") or d.get("client_name") or "تصميم",
+                              "subtitle": d.get("client_name", ""), "detail": "طلب تصميم متوقّف",
+                              "age_min": None, "action_view": "design"})
+            elif d.get("waiting_on") == "faisal":
+                items.append({"kind": "design_wait", "severity": "med", "id": d.get("id"),
+                              "title": d.get("project_name") or d.get("client_name") or "تصميم",
+                              "subtitle": d.get("client_name", ""), "detail": "طلب تصميم ينتظر قرارك",
+                              "age_min": None, "action_view": "design"})
+        for p in _pmo_projects.values():
+            if p.get("signoff"):
+                items.append({"kind": "pmo_signoff", "severity": "med", "id": p.get("id"),
+                              "title": (p.get("unit") or {}).get("name", "مشروع تجهيز"),
+                              "subtitle": (p.get("client") or {}).get("name", ""),
+                              "detail": "مشروع تجهيز يحتاج اعتمادك", "age_min": None, "action_view": "pmo"})
+        for lid, s in _pricing_strategies.items():
+            if s.get("active") and not any(r.get("booked") for r in (s.get("dates") or {}).values()):
+                items.append({"kind": "strat_stalled", "severity": "low", "id": str(lid),
+                              "title": s.get("name", str(lid)), "subtitle": "",
+                              "detail": "استراتيجية تسعير ما تحرّكت — راجعها", "age_min": None, "action_view": "strat"})
+    except Exception as e:
+        print("urgent global error:", e)
     # severity order, then age
     sev_order = {"high": 0, "med": 1, "low": 2}
     items.sort(key=lambda x: (sev_order.get(x["severity"], 9), -(x.get("age_min") or 0)))
@@ -6275,6 +6330,7 @@ def _exp_reconcile(apply=False):
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
 _quotes = {}   # quote_id -> dict
 _QUOTE_SEQ = 0
+_unit_owners = {}   # apartment name -> owner name (item 60: per-owner P&L)
 
 def _new_quote_id():
     global _QUOTE_SEQ
@@ -9264,8 +9320,18 @@ function renderQualityStats(){
 function renderQualityUnits(){
   const body = document.getElementById('qualUnitsBody'); if(!body) return;
   const units = ((D.quality||{}).units) || [];
-  if(!units.length){ body.innerHTML = '<div class="empty">'+t().quality_empty+'</div>'; return; }
-  let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
+  const ar = (L==='ar');
+  // Items 28/42: per-cleaner scores (weakest first).
+  const cleaners = ((D.quality||{}).cleaners)||[];
+  let cleanersHtml = '';
+  if(cleaners.length){
+    cleanersHtml = '<div style="margin-bottom:14px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'تقييم المنظّفين':'Cleaner scores')+'</div>'
+      + '<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+(ar?'المنظّف':'Cleaner')+'</th><th class="num">'+(ar?'المعدل':'Avg')+'</th><th class="num">'+(ar?'عدد':'Count')+'</th></tr></thead><tbody>'
+      + cleaners.map(function(c){ var cls=c.avg>=4.5?'ok':c.avg>=3.5?'warn':'danger'; return '<tr><td class="strong">'+esc(c.cleaner)+'</td><td class="num"><span class="pill '+cls+'">'+_stars(c.avg)+'</span></td><td class="num">'+c.count+'</td></tr>'; }).join('')
+      + '</tbody></table></div></div>';
+  }
+  if(!units.length){ body.innerHTML = cleanersHtml + '<div class="empty">'+t().quality_empty+'</div>'; return; }
+  let html = cleanersHtml + '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().quality_unit+'</th><th class="num">'+t().quality_avg+'</th>'
     + '<th class="num">'+t().quality_count+'</th><th>'+t().quality_recent+'</th></tr></thead><tbody>';
   for(const u of units){
@@ -10690,6 +10756,9 @@ function _expAllHtml(){
   }).join('');
   return bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+thead+rows+'</table></div>';
 }
+async function setUnitOwner(apt, owner){
+  try{ await post('/api/expenses/set-owner',{apartment:apt, owner:owner}); toast('✓'); if(typeof expRefresh==='function') expRefresh(); }catch(e){ toast('خطأ'); }
+}
 function _expByAptHtml(){
   var arr=((D.expSummary||{}).by_apartment)||[];
   if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
@@ -10700,20 +10769,36 @@ function _expByAptHtml(){
   // Item 59: per-unit P&L — join 90-day revenue from the revenue view by unit name.
   var revMap={}; (((D.rev||{}).units)||[]).forEach(function(u){ revMap[u.name]=u.rev90||0; });
   var hasRev = Object.keys(revMap).length>0;
-  var cols=[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
+  var owners=((D.expSummary||{}).owners)||{};   // item 60
+  var cols=[ar?'الشقة':'Apartment',ar?'المالك':'Owner',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
   if(hasRev) cols=cols.concat([ar?'إيراد ٩٠ي':'Rev 90d',ar?'صافي':'Net']);
   var head='<tr>'+cols.map(_expTh).join('')+'</tr>';
   var rows=arr.map(function(a){
     var hot = (totals.length>=4 && median>0 && (a.total||0) >= median*1.5);
     var badge = hot ? ' <span class="pill danger">⚠ '+(ar?'أعلى من المعتاد':'above peers')+'</span>' : '';
-    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
+    var ownInput = '<input value="'+esc(owners[a.apartment]||'')+'" onchange="setUnitOwner(&#39;'+esc(a.apartment)+'&#39;,this.value)" placeholder="'+(ar?'المالك':'owner')+'" style="width:88px;font-size:11px;padding:3px 6px;background:var(--surface);border:1px solid var(--line);border-radius:5px;color:var(--text)">';
+    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px">'+ownInput+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
     if(hasRev){
       var rev = revMap[a.apartment]||0; var net = rev-(a.total||0);
       tr += '<td style="padding:8px 6px;font-size:12px">'+(rev?fmt(rev):'—')+'</td>'
           + '<td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+(rev?fmt(net):'—')+'</td>';
     }
     return tr+'</tr>'; }).join('');
-  return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
+  var tbl = '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
+  // Item 60: per-owner P&L rollup (revenue − expenses grouped by the owner assigned above).
+  var byOwner={};
+  arr.forEach(function(a){ var o=owners[a.apartment]; if(!o) return; var g=byOwner[o]=byOwner[o]||{units:0,exp:0,rev:0}; g.units++; g.exp+=(a.total||0); g.rev+=(revMap[a.apartment]||0); });
+  var oKeys=Object.keys(byOwner);
+  var ownerTbl;
+  if(oKeys.length){
+    ownerTbl = '<div style="margin-top:16px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'الربح/الخسارة حسب المالك':'P&L by owner')+'</div>'
+      + '<table style="width:100%;border-collapse:collapse"><tr>'+[ar?'المالك':'Owner',ar?'وحدات':'Units',ar?'إيراد':'Revenue',ar?'مصاريف':'Expenses',ar?'صافي':'Net'].map(_expTh).join('')+'</tr>'
+      + oKeys.map(function(o){ var g=byOwner[o]; var net=g.rev-g.exp; return '<tr style="border-bottom:1px solid var(--line)"><td class="strong" style="padding:8px 6px;font-size:12px">'+esc(o)+'</td><td style="padding:8px 6px;font-size:12px">'+g.units+'</td><td style="padding:8px 6px;font-size:12px">'+(g.rev?fmt(g.rev):'—')+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(g.exp)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+fmt(net)+'</td></tr>'; }).join('')
+      + '</table></div>';
+  }else{
+    ownerTbl = '<div class="muted" style="margin-top:12px;font-size:11px;padding:9px 11px;background:var(--surface-2);border-radius:6px">ℹ️ '+(ar?'عيّن مالكًا لكل وحدة في عمود «المالك» فوق، ويطلع لك الربح والخسارة لكل مالك تلقائيًا.':'Assign an owner in the Owner column above and per-owner P&L appears here automatically.')+'</div>';
+  }
+  return tbl + ownerTbl;
 }
 function _expByEmpHtml(){
   var arr=((D.expSummary||{}).by_employee)||[];
@@ -12595,7 +12680,8 @@ function renderCleaningList(){
 
 async function cleanMarkDone(lid){
   if(!confirm(t().clean_confirm_done)) return;
-  const r = await post('/api/cleaning/mark-done', {lid:lid});
+  const cleaner = (prompt(L==='ar'?'اسم المنظّف (اختياري — يُحسب له التقييم):':'Cleaner name (optional — scores them):','')||'').trim();
+  const r = await post('/api/cleaning/mark-done', {lid:lid, cleaner:cleaner});
   if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
 }
 function _findItem(lid){
@@ -13973,7 +14059,10 @@ function renderLearnings(){
       + '<button class="btn primary sm" onclick="saveGeneralSummary()">💾 '+t().learn_save+'</button>';
   }else if(gen.summary){
     genBody.innerHTML = '<div style="white-space:pre-wrap;line-height:1.75;font-size:13px">'+esc(gen.summary)+'</div>'
-      + '<div class="muted" style="margin-top:10px;font-size:11px">⏱ '+t().learn_last+': '+_fmtDistillTime(gen.last_distilled)+' · '+(gen.examples_count||0)+' '+t().learn_examples+'</div>';
+      + '<div class="muted" style="margin-top:10px;font-size:11px">⏱ '+t().learn_last+': '+_fmtDistillTime(gen.last_distilled)+' · '+(gen.examples_count||0)+' '+t().learn_examples+'</div>'
+      // Item 70: make the impact explicit (no black box) — this learning now shapes every reply,
+      // and the conversations that produced it are shown in the "recent" panel below.
+      + '<div class="pill ok" style="margin-top:8px;display:inline-block;font-size:11px">✓ '+(L==='ar'?'مطبّق تلقائيًا على كل رد للضيوف · المحادثات اللي علّمته تحت':'Applied to every guest reply · source conversations shown below')+'</div>';
     genActs.innerHTML = '<button class="btn ghost sm" onclick="learnEditingGeneral=true;renderLearnings()">✎ '+t().learn_edit+'</button>'
       + '<button class="btn red sm" onclick="forgetLearning(&#39;general&#39;,null)">🗑 '+t().learn_forget+'</button>';
   }else{
@@ -15570,7 +15659,7 @@ async def _api_cleaning_mark_done(request):
         lid = int(b.get("lid"))
     except Exception:
         return _json({"error": "bad lid"}, 400)
-    ok = await asyncio.to_thread(mark_deep_clean_done, lid, b.get("date"), b.get("notes", ""))
+    ok = await asyncio.to_thread(mark_deep_clean_done, lid, b.get("date"), b.get("notes", ""), b.get("cleaner", ""))
     await asyncio.to_thread(persist_state)
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
     log_event("pricing", f"تنظيف عميق · {name}: تم الإنجاز ✓")
@@ -17332,8 +17421,25 @@ async def _api_expenses_summary(request):
         "queue": held + failed,
         "by_apartment": sorted(by_apt.values(), key=lambda x: -x["total"]),
         "by_employee": sorted(by_emp.values(), key=lambda x: -x["total"]),
+        "owners": dict(_unit_owners),   # item 60: apartment -> owner map
         "dryrun": EXPENSE_POST_DRYRUN,
     })
+
+async def _api_expenses_set_owner(request):
+    """POST {apartment, owner} — assign a unit to an owner for per-owner P&L (item 60)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    apt = (b.get("apartment") or "").strip()
+    if not apt:
+        return _json({"error": "no apartment"}, 400)
+    owner = (b.get("owner") or "").strip()[:80]
+    if owner:
+        _unit_owners[apt] = owner
+    else:
+        _unit_owners.pop(apt, None)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
 
 async def _api_expenses_get(request):
     if not _dash_auth(request):
@@ -19176,6 +19282,7 @@ async def start_web_server():
         app.router.add_get("/api/expenses/list", _api_expenses_list)
         app.router.add_get("/api/expenses/queue", _api_expenses_queue)
         app.router.add_get("/api/expenses/summary", _api_expenses_summary)
+        app.router.add_post("/api/expenses/set-owner", _api_expenses_set_owner)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
@@ -19607,6 +19714,7 @@ def load_state():
         for k, v in (_load_json("quotes.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _quotes[str(k)] = v
+        _unit_owners.update(_load_json("unit_owners.json", {}) or {})   # item 60
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -19679,6 +19787,7 @@ def persist_state():
     _save_json("review_translations.json", _review_translations)
     _save_json("users.json", _users)
     _save_json("quotes.json", _quotes)
+    _save_json("unit_owners.json", _unit_owners)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
