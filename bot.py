@@ -2385,6 +2385,11 @@ MUST NOT share the exact location, address, building/door number, or the arrival
 if the guest asks directly. Politely tell them the full location and arrival details are sent right \
 after the booking is confirmed. You may still talk about the general area, amenities, and price.
 - Only share location and the arrival-guide link when Booking status is CONFIRMED.
+- WORKING MEMORY: the whole conversation above is your memory. NEVER re-ask something the guest already \
+told you earlier in this same thread (their dates, party size, which unit, budget, preferences). Carry \
+those forward and build on them — answering each message in isolation is a failure.
+- OTHER GUESTS' PRIVACY: never reveal any other guest's name, dates, contact, or booking. Only ever \
+discuss THIS guest's own data. If asked who is in another unit or who booked something, politely decline.
 
 SUGGESTING A UNIT / AVAILABILITY  (do NOT escalate these — suggest instead)
 - If the guest asks for another/different unit, a bigger/cheaper/smaller one, a unit in another area, \
@@ -3338,10 +3343,15 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             summaries = (p.get("summaries", []) or [])[-3:]
             sum_text = "\n".join("- " + (s.get("text","") or "")[:280] for s in summaries if s.get("text"))
             vip_line = "⭐ ضيف مميّز (VIP) — سبق له " + str(stays) + " إقامة معنا." if p.get("vip") else "ضيف عائد — سبق له " + str(stays) + " إقامة."
+            _sent = _guest_sentiment(p)   # item 5b: prior sentiment
+            _sent_line = {"positive": "- انطباعه السابق عنّا إيجابي — حافظ على نفس المستوى.\n",
+                          "negative": "- كان عنده انطباع سلبي سابقاً — كن ألطف وأكثر اهتماماً وتأكّد ما يتكرر السبب.\n",
+                          "mixed": "- انطباعه السابق مختلط — اهتم بتفاصيله أكثر.\n"}.get(_sent, "")
             profile_block = (
                 f"\n\nملف الضيف (لا تذكر أنه ملف — استخدمه طبيعياً):\n"
                 f"- {vip_line}\n"
                 f"- إقاماته السابقة: {past_summary}\n"
+                + _sent_line
                 + (f"- ملخصات محادثات سابقة:\n{sum_text}\n" if sum_text else "")
                 + "- ابدأ ردك بترحيب يعكس عودته (مثل 'حياك الله مرة ثانية' / 'نوّرتنا تاني'). "
                 + "لا تطلب منه معلومات يفترض أنها معروفة لنا من الإقامات السابقة. "
@@ -3357,8 +3367,42 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         f"لا تسأله أبداً 'أي شقة تقصد' أو 'أي وحدة'. الاقتراحات البديلة تظهر فقط لما يطلبها صراحةً.\n\n"
         if unit else ""
     )
-    user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
+    # ---- Stage 2: time/season context (Riyadh) ----
+    _today_r = datetime.now(TZ).date()
+    _active_ev = list(dict.fromkeys(
+        e["name"] for e in SAUDI_EVENTS
+        if _parse_date(e.get("start", "")) and _parse_date(e.get("end", ""))
+        and _parse_date(e["start"]) <= _today_r <= _parse_date(e["end"])))
+    _se_bits = (["نهاية أسبوع"] if _today_r.weekday() in WEEKEND_DAYS else []) + _active_ev
+    season_block = ("\n\nسياق الوقت (الرياض): اليوم " + _today_r.isoformat()
+                    + ("، " + "، ".join(_se_bits) if _se_bits else "")
+                    + ". راعِ المناسبة في نبرتك وتوقيتك (تهنئة بالعيد، ازدحام موسم الرياض، هدوء رمضان…).")
+    # ---- Stage 2: this specific unit's facts from the catalog ----
+    listing_facts_block = ""
+    if listing_id:
+        _cu = next((u for u in _catalog_units if u.get("id") == int(listing_id)), None)
+        if _cu:
+            _lb = []
+            if _cu.get("beds"):
+                _lb.append(f"{_cu['beds']} غرف نوم")
+            _loc = _cu.get("area") or _cu.get("neighbourhood")
+            if _loc:
+                _lb.append(str(_loc))
+            if _cu.get("ptype"):
+                _lb.append(str(_cu["ptype"]))
+            _ams = _cu.get("amenities") or []
+            if _ams:
+                _lb.append("مزايا: " + "، ".join(str(a) for a in _ams[:12]))
+            if _lb:
+                listing_facts_block = "\nمواصفات هذه الوحدة (من كتالوج عوجا): " + " · ".join(_lb) + "."
+    # ---- Stage 2: reservation nights (dates + status are shown above) ----
+    nights_line = ""
+    if dates and dates[0] and dates[1]:
+        _ci2, _co2 = _parse_date(dates[0]), _parse_date(dates[1])
+        if _ci2 and _co2 and _co2 > _ci2:
+            nights_line = f"\nعدد ليالي الإقامة: {(_co2 - _ci2).days}."
+    user = (f"{unit_guard}{facts_block}{listing_facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
+            f"{status_line}\n{guide_line}{dates_line}{nights_line}{own_price_line}{season_block}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
