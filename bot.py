@@ -10695,11 +10695,22 @@ function _expByAptHtml(){
   // Item 58: flag apartments costing notably more than peers (>= 1.5x the median).
   var totals=arr.map(function(a){return a.total||0}).filter(function(x){return x>0}).sort(function(x,y){return x-y});
   var median = totals.length ? totals[Math.floor(totals.length/2)] : 0;
-  var head='<tr>'+[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'إجمالي مُرحّل':'Total posted'].map(_expTh).join('')+'</tr>';
+  // Item 59: per-unit P&L — join 90-day revenue from the revenue view by unit name.
+  var revMap={}; (((D.rev||{}).units)||[]).forEach(function(u){ revMap[u.name]=u.rev90||0; });
+  var hasRev = Object.keys(revMap).length>0;
+  var cols=[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
+  if(hasRev) cols=cols.concat([ar?'إيراد ٩٠ي':'Rev 90d',ar?'صافي':'Net']);
+  var head='<tr>'+cols.map(_expTh).join('')+'</tr>';
   var rows=arr.map(function(a){
     var hot = (totals.length>=4 && median>0 && (a.total||0) >= median*1.5);
     var badge = hot ? ' <span class="pill danger">⚠ '+(ar?'أعلى من المعتاد':'above peers')+'</span>' : '';
-    return '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td></tr>'; }).join('');
+    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
+    if(hasRev){
+      var rev = revMap[a.apartment]||0; var net = rev-(a.total||0);
+      tr += '<td style="padding:8px 6px;font-size:12px">'+(rev?fmt(rev):'—')+'</td>'
+          + '<td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+(rev?fmt(net):'—')+'</td>';
+    }
+    return tr+'</tr>'; }).join('');
   return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
 }
 function _expByEmpHtml(){
@@ -14535,11 +14546,20 @@ def _compute_revenue():
     for _, d, nl in nights:
         series[f"{d.year}-{d.month:02d}"] = series.get(f"{d.year}-{d.month:02d}", 0) + nl
     monthly = [{"m": k, "rev": round(series[k])} for k in sorted(series)[-12:]]
+    # per-unit 90-day revenue, for the per-unit P&L join in Expenses (item 59)
+    today = datetime.now(TZ).date()
+    d90 = today - timedelta(days=90)
+    rev_by_name = {}
+    for lid, d, nl in nights:
+        if d >= d90:
+            nm = listings.get(lid) or ""
+            if nm:
+                rev_by_name[nm] = rev_by_name.get(nm, 0) + nl
     # compound (neighbourhood) per unit, from the catalog (item 66)
     nb_map = {u.get("name"): (u.get("neighbourhood") or u.get("area") or "")
               for u in _catalog_units if u.get("name")}
     units = [{"name": u["name"], "compound": nb_map.get(u["name"], ""),
-              "occ": round(u["occ90"] * 100),
+              "occ": round(u["occ90"] * 100), "rev90": round(rev_by_name.get(u["name"], 0)),
               "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
               "reco": u["reco"], "label": u["label"]} for u in rep["units"]]
     # Item 66: per-compound aggregation (avg occupancy + ADR + unit count).
