@@ -14695,6 +14695,87 @@ def _compute_overview():
             "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by")),
             "checkins_today": ci, "checkouts_today": co}
 
+# ===================== FINANCE: monthly owner/investor report math =====================
+# Stage 3 (items 13-14). PURE, source-agnostic functions so the math is exactly testable
+# and never touches a number it didn't receive. NORMALIZED input rows:
+#   reservation: {id, source:'hostaway'|'sheet', channel:'airbnb'|'direct', lid, apartment,
+#                 checkin('YYYY-MM-DD'), checkout, nights, status, airbnb_payout:float|None,
+#                 direct_revenue:float|None, refund:float, extras:float}
+#   expense:     {id, apartment, lid, amount:float, date, matched:bool}
+# GUARANTEE: an Airbnb reservation with airbnb_payout=None is reported as MISSING (never
+# estimated) and the reconciliation refuses to balance while any are missing.
+_REPORT_CANCELLED = {"cancelled", "canceled", "declined", "expired", "denied"}
+FINANCE_DEFAULTS = {
+    "direct_fee_pct": 3.0,        # the 3% applies to DIRECT reservations ONLY
+    "period_basis": "checkin",    # CONFIRMED by Faisal
+    "rounding": 2,                # [CONFIRM] default 2 decimals
+    "vat_pct": 0.0,               # [CONFIRM] default none — all figures net
+}
+
+def _finance_in_period(row, start, end, basis):
+    d = _parse_date(row.get("checkin" if basis == "checkin" else "checkout"))
+    return d is not None and start <= d <= end
+
+def compute_owner_report(reservations, expenses, start, end, management_pct, settings=None):
+    """EXACT money math for one apartment/owner over [start, end] (item 13) + the
+    reconciliation check (item 14). Pure — verifiable on synthetic data. Never estimates."""
+    s = dict(FINANCE_DEFAULTS); s.update(settings or {})
+    basis = s["period_basis"]; rnd = int(s["rounding"]); direct_fee = float(s["direct_fee_pct"]) / 100.0
+    def R(x):
+        return round(float(x), rnd) if rnd and rnd > 0 else float(round(float(x)))
+
+    inc_airbnb = 0.0; inc_direct = 0.0; extras_total = 0.0
+    resv_lines = []; missing_payout = []
+    for r in reservations:
+        status = (r.get("status") or "").lower()
+        if status in _REPORT_CANCELLED:                       # EXCLUDE cancelled
+            continue
+        if status not in CONFIRMED_STATUSES:                  # only confirmed/realized
+            continue
+        if not _finance_in_period(r, start, end, basis):
+            continue
+        refund = float(r.get("refund") or 0)
+        ext = float(r.get("extras") or 0); extras_total += ext
+        channel = (r.get("channel") or "").lower()
+        if channel == "airbnb":
+            payout = r.get("airbnb_payout")
+            if payout is None:                                # NEVER guess a payout
+                missing_payout.append(r.get("id")); income = None
+            else:
+                income = float(payout) - refund               # actual amount received
+                inc_airbnb += income
+        else:                                                 # direct
+            income = (float(r.get("direct_revenue") or 0) - refund) * (1.0 - direct_fee)  # 3% on DIRECT only
+            inc_direct += income
+        resv_lines.append({
+            "id": r.get("id"), "channel": channel, "apartment": r.get("apartment"),
+            "checkin": r.get("checkin"), "checkout": r.get("checkout"), "nights": r.get("nights"),
+            "refund": R(refund), "extras": R(ext), "income": (None if income is None else R(income)),
+            "gross": (r.get("airbnb_payout") if channel == "airbnb" else r.get("direct_revenue")),
+        })
+
+    total_income = inc_airbnb + inc_direct + extras_total
+    ouja_fee = (float(management_pct) / 100.0) * total_income  # mgmt% BEFORE expenses
+    exp_lines = [e for e in expenses if e.get("matched")
+                 and _finance_in_period({"checkin": e.get("date"), "checkout": e.get("date")}, start, end, "checkin")]
+    expenses_total = sum(float(e.get("amount") or 0) for e in exp_lines)
+    owner_net = total_income - ouja_fee - expenses_total
+
+    # ---- reconciliation (item 14): totals must equal the sum of the rows, to the riyal ----
+    rows_income = sum((l["income"] or 0) for l in resv_lines) + extras_total
+    gap = R(rows_income) - R(total_income)
+    balanced = (abs(gap) < 0.005) and not missing_payout
+    return {
+        "currency": "SAR", "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": basis},
+        "income_airbnb": R(inc_airbnb), "income_direct": R(inc_direct), "extras": R(extras_total),
+        "total_income": R(total_income), "management_pct": float(management_pct),
+        "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
+        "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines)},
+        "resv_lines": resv_lines, "exp_lines": exp_lines,
+        "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout},
+        "settings": s,
+    }
+
 def _compute_revenue():
     reservations = get_reservations_cached()
     listings = get_listings_map()
