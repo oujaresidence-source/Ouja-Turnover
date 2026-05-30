@@ -1506,21 +1506,50 @@ def cleaning_quality_summary():
     if done:
         all_scores = [fb["score"] for fb in _cleaning_feedback.values() if fb.get("score") is not None]
         overall_avg = round(sum(all_scores)/len(all_scores), 2)
+    # Items 28/42: per-cleaner scores — attribute each feedback to the cleaner recorded
+    # on the unit's clean record on/closest-before the feedback's clean date.
+    by_cleaner = {}
+    for tok, fb in _cleaning_feedback.items():
+        if fb.get("score") is None:
+            continue
+        st = _deep_clean_state.get(fb.get("lid"))
+        if not st:
+            continue
+        fd = (fb.get("ts_done") or "")[:10]
+        best = None
+        for h in st.get("history", []):
+            if h.get("cleaner") and (not fd or h.get("date", "") <= fd):
+                if best is None or h.get("date", "") > best.get("date", ""):
+                    best = h
+        if best is None:
+            cands = [h for h in st.get("history", []) if h.get("cleaner")]
+            best = cands[-1] if cands else None
+        cleaner = best.get("cleaner") if best else None
+        if not cleaner:
+            continue
+        by_cleaner.setdefault(cleaner, []).append(fb["score"])
+    cleaners = [{"cleaner": n, "avg": round(sum(s) / len(s), 2), "count": len(s)}
+                for n, s in by_cleaner.items()]
+    cleaners.sort(key=lambda x: x["avg"])   # weakest first
     return {
         "units": units,
+        "cleaners": cleaners,
         "stats": {"sent": sent, "responded": done,
                   "response_rate": round(done/sent*100) if sent else 0,
                   "overall_avg": overall_avg},
     }
 
-def mark_deep_clean_done(lid, date_iso=None, notes=""):
+def mark_deep_clean_done(lid, date_iso=None, notes="", cleaner=""):
     if lid not in _deep_clean_state:
         _dc_init(lid)
     s = _deep_clean_state[lid]
     done_date = date_iso or datetime.now(TZ).date().isoformat()
+    cleaner = (cleaner or "").strip()[:60]
     s["history"].append({"date": done_date,
                          "ts": datetime.now(TZ).isoformat(timespec="minutes"),
-                         "notes": notes})
+                         "notes": notes, "cleaner": cleaner})   # item 28/42: who cleaned
+    if cleaner:
+        s["last_cleaner"] = cleaner
     s["history"] = s["history"][-20:]
     s["last_done"] = done_date
     s["next_scheduled"] = None
@@ -9291,8 +9320,18 @@ function renderQualityStats(){
 function renderQualityUnits(){
   const body = document.getElementById('qualUnitsBody'); if(!body) return;
   const units = ((D.quality||{}).units) || [];
-  if(!units.length){ body.innerHTML = '<div class="empty">'+t().quality_empty+'</div>'; return; }
-  let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
+  const ar = (L==='ar');
+  // Items 28/42: per-cleaner scores (weakest first).
+  const cleaners = ((D.quality||{}).cleaners)||[];
+  let cleanersHtml = '';
+  if(cleaners.length){
+    cleanersHtml = '<div style="margin-bottom:14px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'تقييم المنظّفين':'Cleaner scores')+'</div>'
+      + '<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+(ar?'المنظّف':'Cleaner')+'</th><th class="num">'+(ar?'المعدل':'Avg')+'</th><th class="num">'+(ar?'عدد':'Count')+'</th></tr></thead><tbody>'
+      + cleaners.map(function(c){ var cls=c.avg>=4.5?'ok':c.avg>=3.5?'warn':'danger'; return '<tr><td class="strong">'+esc(c.cleaner)+'</td><td class="num"><span class="pill '+cls+'">'+_stars(c.avg)+'</span></td><td class="num">'+c.count+'</td></tr>'; }).join('')
+      + '</tbody></table></div></div>';
+  }
+  if(!units.length){ body.innerHTML = cleanersHtml + '<div class="empty">'+t().quality_empty+'</div>'; return; }
+  let html = cleanersHtml + '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().quality_unit+'</th><th class="num">'+t().quality_avg+'</th>'
     + '<th class="num">'+t().quality_count+'</th><th>'+t().quality_recent+'</th></tr></thead><tbody>';
   for(const u of units){
@@ -12641,7 +12680,8 @@ function renderCleaningList(){
 
 async function cleanMarkDone(lid){
   if(!confirm(t().clean_confirm_done)) return;
-  const r = await post('/api/cleaning/mark-done', {lid:lid});
+  const cleaner = (prompt(L==='ar'?'اسم المنظّف (اختياري — يُحسب له التقييم):':'Cleaner name (optional — scores them):','')||'').trim();
+  const r = await post('/api/cleaning/mark-done', {lid:lid, cleaner:cleaner});
   if(r.ok){ toast('✓'); loadCleaning(); } else toast(r.error||t().err);
 }
 function _findItem(lid){
@@ -15619,7 +15659,7 @@ async def _api_cleaning_mark_done(request):
         lid = int(b.get("lid"))
     except Exception:
         return _json({"error": "bad lid"}, 400)
-    ok = await asyncio.to_thread(mark_deep_clean_done, lid, b.get("date"), b.get("notes", ""))
+    ok = await asyncio.to_thread(mark_deep_clean_done, lid, b.get("date"), b.get("notes", ""), b.get("cleaner", ""))
     await asyncio.to_thread(persist_state)
     name = next((u["name"] for u in _catalog_units if u.get("id") == lid), str(lid))
     log_event("pricing", f"تنظيف عميق · {name}: تم الإنجاز ✓")
