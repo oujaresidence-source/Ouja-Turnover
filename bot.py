@@ -3074,6 +3074,11 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         if apt_learn:
             facts_block += ("دروس خاصة بهذه الوحدة بالذات (تجمعت من تفاعلات سابقة عليها — اعتبرها "
                             "مصدر حقيقة قوي عن هذه الشقة تحديداً):\n" + apt_learn + "\n\n")
+    # ---- Stage 3 (item 10): human-APPROVED learnings (a person clicked Approve) ----
+    _appr = _approved_learnings_text(int(listing_id) if listing_id else None)
+    if _appr:
+        facts_block += ("دروس معتمدة من الفريق (وافق عليها بشر صراحةً — طبّقها كحقائق موثوقة):\n"
+                        + _appr + "\n\n")
     want_catalog = bool(_catalog_text) and _is_asking_alternatives(history_text)
     # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
     own_price_line = ""
@@ -3679,6 +3684,13 @@ def record_learning(item, original_draft, final_reply, via, approver=None):
             "approver": approver or "",
         }
         _learning_log.append(entry)
+        # Stage 3 (items 8a/8b): a human reshaping the draft (correction) or answering from
+        # scratch a conversation the bot couldn't draft (co-host) → a learning CANDIDATE,
+        # captured for human-gated review. Never auto-promoted.
+        if entry["was_edited"] and via in ("dashboard_send", "discord_edit"):
+            _k = "cohost" if len((entry["bot_draft"] or "").strip()) < 5 else "correction"
+            add_learning_candidate(_k, entry["guest_question"], entry["bot_draft"],
+                                   entry["final_reply"], entry["unit"], entry["listing_id"])
         # ---- daily metrics ----
         metric_bump("replies_total")
         if via == "auto":           metric_bump("replies_auto")
@@ -4505,6 +4517,15 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     reply = (result.get("reply") or "").strip()
     escalate = action == "escalate" or sentiment == "upset" or conf < ESCALATE_BELOW
 
+    # Stage 3 (item 8c): when Musaed can't handle it / is unsure, log a knowledge-gap
+    # candidate (clustered by question so "asked N times" surfaces — item 11).
+    if escalate:
+        try:
+            add_learning_candidate("gap", item.get("guest_text", ""), reply, "",
+                                   item.get("unit", ""), item.get("listing_id"))
+        except Exception:
+            pass
+
     # daily metrics: every draft counts, with confidence + topic + apartment
     metric_bump("drafts_made")
     metric_record_confidence(conf)
@@ -4784,6 +4805,108 @@ _pricing_strategies = {}              # lid -> active dynamic-pricing strategy s
 _learning_log = deque(maxlen=3000)
 _apartment_learnings = {}   # lid (int) -> {"summary": str, "last_distilled": ts, "examples_count": int}
 _general_learnings = {"summary": "", "last_distilled": 0, "examples_count": 0}
+
+# ===================== STAGE 3: human-gated learning =====================
+# Candidates are SIGNALS captured automatically; they NEVER become canonical until a
+# human approves them in the LEARN view (items 9 & 12). Approved ones are injected into
+# Musaed's context (item 10). Everything is reversible.
+_learning_candidates = []   # [{id, kind, question, draft, final, unit, lid, count, status, ts}]
+_LC_SEQ = 0
+_approved_learnings = []     # [{question, answer, unit, lid, ts}] — injected into claude_draft
+
+def _norm_q(s):
+    """Normalise a question for clustering (item 11): lowercase, strip punctuation."""
+    s = (s or "").strip().lower()
+    # keep alphanumerics, spaces, and Arabic LETTERS (ء U+0621 … ۿ U+06FF) — this
+    # deliberately drops Arabic punctuation (؟ ، ؛, which sit below U+0621) so that
+    # question-mark / spacing variants of the same question cluster together.
+    keep = [ch for ch in s if ch.isalnum() or ch == " " or "ء" <= ch <= "ۿ"]
+    return " ".join("".join(keep).split())[:200]
+
+def add_learning_candidate(kind, question, draft="", final="", unit="", lid=None):
+    """Item 8: capture a learning signal as a PENDING candidate (never auto-canonical).
+    kind: 'correction' (human reshaped the draft) | 'gap' (low-confidence/unanswered) |
+    'cohost' (co-host answered). Gaps cluster by similar question (item 11)."""
+    global _LC_SEQ
+    try:
+        q = (question or "").strip()
+        if not q:
+            return
+        if kind == "gap":
+            nq = _norm_q(q)
+            for c in _learning_candidates:
+                if c.get("status") == "pending" and c.get("kind") == "gap" and _norm_q(c.get("question")) == nq:
+                    c["count"] = c.get("count", 1) + 1
+                    c["ts"] = datetime.now(TZ).isoformat(timespec="seconds")
+                    return
+        _LC_SEQ += 1
+        _learning_candidates.append({
+            "id": f"lc_{int(time.time())}_{_LC_SEQ}", "kind": kind,
+            "question": q[:900], "draft": (draft or "")[:1400], "final": (final or "")[:1400],
+            "unit": (unit or "")[:80], "lid": lid, "count": 1, "status": "pending",
+            "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+        })
+        if len(_learning_candidates) > 500:
+            del _learning_candidates[:len(_learning_candidates) - 500]
+    except Exception as e:
+        print("add_learning_candidate error:", e)
+
+def _approved_learnings_text(lid=None):
+    """Approved learnings to inject into Musaed's context (item 10): general + this unit."""
+    out = []
+    for a in _approved_learnings[-80:]:
+        al = a.get("lid")
+        if al in (None, "") or (lid is not None and al == lid):
+            ans = (a.get("answer") or "").strip()
+            if ans:
+                out.append(f"- لو سُئل عن «{(a.get('question') or '')[:80]}» → {ans[:300]}")
+    return "\n".join(out)
+
+async def _api_learning_candidates(request):
+    """Item 9/11: list pending learning candidates, most-repeated gaps first."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    pend = [c for c in _learning_candidates if c.get("status") == "pending"]
+    pend.sort(key=lambda c: (c.get("count", 1), c.get("ts", "")), reverse=True)
+    return _json({"candidates": pend[:100], "count": len(pend),
+                  "approved": list(reversed(_approved_learnings[-50:]))})
+
+async def _api_learning_candidate_action(request):
+    """Item 9/12: human-gated approve / edit / discard. Approve/Edit promotes the pair to
+    an approved learning (injected into Musaed). NOTHING auto-promotes."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    c = next((x for x in _learning_candidates if x.get("id") == b.get("id", "")), None)
+    if not c:
+        return _json({"error": "not found"}, 404)
+    action = b.get("action", "")
+    if action == "discard":
+        c["status"] = "discarded"
+    elif action in ("approve", "edit"):
+        answer = (b.get("answer") or c.get("final") or c.get("draft") or "").strip()
+        if not answer:
+            return _json({"error": "no answer to approve"}, 400)
+        _approved_learnings.append({
+            "question": c.get("question", ""), "answer": answer[:1000],
+            "unit": c.get("unit", ""), "lid": c.get("lid"),
+            "ts": datetime.now(TZ).isoformat(timespec="seconds")})
+        c["status"] = "approved"
+    else:
+        return _json({"error": "bad action"}, 400)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_learning_candidate_forget(request):
+    """Item 12: reverse an approved learning (every learning is reversible)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ts = b.get("ts", "")
+    n0 = len(_approved_learnings)
+    _approved_learnings[:] = [a for a in _approved_learnings if a.get("ts") != ts]
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "removed": n0 - len(_approved_learnings)})
 
 # Daily metrics — one row per calendar date, persisted, used by the Learning page's
 # trend charts and the "what improved over time" copy. Every reply send, escalation
@@ -7779,6 +7902,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div id="bootstrapStatus" style="display:none"></div>
+
+        <!-- Stage 3: human-gated learning candidates (approve / edit / discard) -->
+        <div id="learnCandidates"></div>
 
         <!-- Stat cards: today + delta vs 7-day average -->
         <div class="kpis" id="learnStats"></div>
@@ -14050,9 +14176,11 @@ async function loadLearnings(){
       api('/api/learning/summary'),
       api('/api/metrics/daily?days=30').catch(function(){return {days:[]}}),
       api('/api/learning/today?days=1').catch(function(){return {apartments:[], total_events:0}}),
+      api('/api/learning/candidates').catch(function(){return {candidates:[], approved:[]}}),
     ]);
-    D.learn = r[0]; D.learnMetrics = r[1]; D.learnRecent = r[2];
+    D.learn = r[0]; D.learnMetrics = r[1]; D.learnRecent = r[2]; D.learnCand = r[3];
   }catch(_){ D.learn = {} }
+  renderLearnCandidates();
   // sync sub copy
   const sub = document.getElementById('t_learn_sub'); if(sub) sub.textContent = t().learn_sub;
   const eSel = document.getElementById('t_learn_empty_sel'); if(eSel) eSel.textContent = t().learn_empty_sel;
@@ -14201,6 +14329,45 @@ function _fmtDistillTime(ts){
   catch(_){ return '—' }
 }
 
+// Stage 3 (items 9/11/12): human-gated learning candidates in the LEARN view.
+function renderLearnCandidates(){
+  const el = document.getElementById('learnCandidates'); if(!el) return;
+  const d = D.learnCand || {}; const cand = d.candidates||[]; const appr = d.approved||[];
+  const ar = (L==='ar');
+  const kindLbl = function(k){ return k==='gap' ? (ar?'ما قدر يجاوبه':'unanswered') : k==='cohost' ? (ar?'جاوبه زميل':'co-host') : (ar?'تعديل بشري':'human edit'); };
+  let h = '';
+  if(cand.length){
+    h += '<div class="card" style="border-color:var(--gold)"><div class="card-head"><span class="card-title">🎓 '+(ar?'مرشّحات للتعلّم — تحتاج موافقتك':'Learning candidates — need your approval')+' <span class="pill gold">'+cand.length+'</span></span></div>';
+    h += cand.map(function(c){
+      const cnt = (c.count>1) ? (' <span class="pill danger">'+(ar?('انسأل ':'asked ')+c.count+(ar?' مرات':'×'))+'</span>') : '';
+      const ans = c.final || c.draft || '';
+      return '<div class="kan-card" style="cursor:default;margin-bottom:8px">'
+        + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><span class="pill info">'+kindLbl(c.kind)+'</span>'+cnt+(c.unit?(' <span class="muted" style="font-size:11px">'+esc(c.unit)+'</span>'):'')+'</div>'
+        + '<div class="strong" style="font-size:12.5px;margin-top:6px">'+(ar?'السؤال: ':'Q: ')+esc((c.question||'').slice(0,220))+'</div>'
+        + '<textarea id="lc_'+esc(c.id)+'" placeholder="'+(ar?'الجواب الصحيح اللي يتعلّمه':'the correct answer to teach')+'" style="width:100%;margin-top:6px;font-size:12px;min-height:54px">'+esc(ans)+'</textarea>'
+        + '<div class="kan-acts">'
+        +   '<button class="qset-b ok" onclick="lcAction(&#39;'+esc(c.id)+'&#39;,&#39;approve&#39;)">✓ '+(ar?'اعتمد':'Approve')+'</button>'
+        +   '<button class="qset-b danger" onclick="lcAction(&#39;'+esc(c.id)+'&#39;,&#39;discard&#39;)">🗑 '+(ar?'تجاهل':'Discard')+'</button>'
+        + '</div></div>';
+    }).join('');
+    h += '<div class="muted" style="font-size:11px;padding:4px 2px">ℹ️ '+(ar?'ما يصير درساً معتمداً إلا بضغطك «اعتمد» — ما فيه تعلّم تلقائي.':'Nothing becomes a learning until you click Approve — no auto-learning.')+'</div></div>';
+  }
+  if(appr.length){
+    h += '<div class="card"><div class="card-head"><span class="card-title">✅ '+(ar?'دروس معتمدة':'Approved learnings')+' <span class="pill ok">'+appr.length+'</span></span></div>';
+    h += appr.map(function(a){ return '<div class="kan-card" style="cursor:default;margin-bottom:7px"><div class="strong" style="font-size:12px">'+esc((a.question||'').slice(0,120))+'</div><div class="muted" style="font-size:11.5px;margin-top:3px">→ '+esc((a.answer||'').slice(0,220))+'</div><div class="kan-acts"><button class="qset-b danger" onclick="lcForget(&#39;'+esc(a.ts)+'&#39;)">↩ '+(ar?'تراجع':'Forget')+'</button></div></div>'; }).join('');
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+async function lcAction(id, action){
+  const ta = document.getElementById('lc_'+id);
+  const answer = ta ? ta.value : '';
+  if(action==='approve' && !(answer||'').trim()){ toast(L==='ar'?'اكتب الجواب أول':'Write the answer first'); return; }
+  try{ await post('/api/learning/candidate',{id:id, action:action, answer:answer}); toast('✓'); loadLearnings(); }catch(e){ toast('خطأ'); }
+}
+async function lcForget(ts){
+  try{ await post('/api/learning/candidate/forget',{ts:ts}); toast('✓'); loadLearnings(); }catch(e){ toast('خطأ'); }
+}
 function renderLearnings(){
   const d = D.learn || {};
   // ---- general ----
@@ -19365,6 +19532,9 @@ async def start_web_server():
         app.router.add_post("/api/learning/forget", _api_learning_forget)
         app.router.add_post("/api/learning/distill", _api_learning_distill_now)
         app.router.add_post("/api/learning/edit", _api_learning_edit)
+        app.router.add_get("/api/learning/candidates", _api_learning_candidates)
+        app.router.add_post("/api/learning/candidate", _api_learning_candidate_action)
+        app.router.add_post("/api/learning/candidate/forget", _api_learning_candidate_forget)
         app.router.add_post("/api/learning/bootstrap", _api_learning_bootstrap)
         app.router.add_get("/api/learning/bootstrap/status", _api_learning_bootstrap_status)
         app.router.add_get("/api/metrics/daily", _api_metrics_daily)
@@ -19803,6 +19973,8 @@ def load_state():
                                if float(v) > time.time()}   # drop expired entries on boot
         _learning_log.clear()
         _learning_log.extend(_load_json("learning_log.json", []))
+        _learning_candidates.extend(_load_json("learning_candidates.json", []) or [])   # Stage 3
+        _approved_learnings.extend(_load_json("approved_learnings.json", []) or [])      # Stage 3
         _apartment_learnings.clear()
         _apartment_learnings.update({int(k): v for k, v in _load_json("apartment_learnings.json", {}).items()})
         _general_learnings.update(_load_json("general_learnings.json", {"summary": "", "last_distilled": 0, "examples_count": 0}))
@@ -19917,6 +20089,8 @@ def persist_state():
     _save_json("discount_pause.json", _discount_paused_until)
     _save_json("unit_discount_skip.json", {str(k): v for k, v in _unit_discount_skip.items()})
     _save_json("learning_log.json", list(_learning_log))
+    _save_json("learning_candidates.json", _learning_candidates)   # Stage 3
+    _save_json("approved_learnings.json", _approved_learnings)     # Stage 3
     _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
     _save_json("general_learnings.json", _general_learnings)
     _save_json("agreement_reminded.json", list(_agreement_reminded))
