@@ -6824,6 +6824,32 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .qset{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
 .qset-b{font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);cursor:pointer}
 .qset-b:hover{border-color:var(--gold);color:var(--gold)}
+/* ===== Calendar TAPE-CHART (items 10-15) ===== */
+.tape-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-2);margin-bottom:10px}
+.tape-legend span{display:inline-flex;align-items:center;gap:5px}
+.tape-legend i{width:13px;height:13px;border-radius:3px;display:inline-block}
+.tape-legend .lg-arr{background:var(--gold-soft);box-shadow:inset 3px 0 0 var(--green)}
+.tape-legend .lg-dep{background:var(--surface);border:1px solid var(--line);box-shadow:inset -3px 0 0 var(--blue)}
+.tape-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:var(--r)}
+.tape{border-collapse:collapse;font-size:8.5px}
+.tape th,.tape td{border:1px solid var(--line);text-align:center;padding:0;height:30px}
+.tc-uh,.tc-un{position:sticky;inset-inline-start:0;background:var(--surface);z-index:2;text-align:start;padding:4px 8px;font-size:11px;font-weight:600;white-space:nowrap;min-width:118px;max-width:140px;overflow:hidden;text-overflow:ellipsis}
+.tc-dh{min-width:34px;padding:3px 1px;font-size:9px;color:var(--text-3);font-family:var(--font-mono);line-height:1.15;font-weight:600}
+.tc-dh.we{background:var(--surface-2)}
+.tc-dh.ev{color:var(--gold);background:var(--gold-tint)}
+.tc-risk-h{font-size:9.5px;color:var(--mut);font-weight:600}
+.tc-risk{font-size:8px;color:var(--text-3);font-family:var(--font-mono);background:var(--surface);height:18px}
+.tc-risk.on{color:var(--red);font-weight:700}
+.tc{min-width:34px;cursor:pointer;font-family:var(--font-mono)}
+.tc .tc-p{font-size:8px;color:inherit;opacity:.85}
+.tc-booked{background:var(--gold-soft);color:var(--gold-2)}
+.tc-empty{background:var(--surface);color:var(--text-3)}
+.tc-blocked{background:var(--surface-3);color:var(--mut)}
+.tc-none{background:var(--surface)}
+.tc-orphan{background:var(--yellow-soft);color:var(--yellow);font-weight:700}
+.tc-arr{box-shadow:inset 3px 0 0 var(--green)}
+.tc-dep{box-shadow:inset -3px 0 0 var(--blue)}
+.tc:hover{outline:2px solid var(--gold);outline-offset:-2px}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -7207,6 +7233,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <!-- Tape-chart: rows = units, columns = next 45 days (items 10-15) -->
+        <div class="card" style="padding:12px">
+          <div class="card-head"><span class="card-title">🎞️ <span id="t_tape">شريط الإشغال · ٤٥ يوم</span></span><span class="card-sub" id="tapeRisk"></span></div>
+          <div id="tapeChart"><div class="empty sk">—</div></div>
+        </div>
         <div class="card">
           <div id="calendarGrid"><div class="empty sk">—</div></div>
         </div>
@@ -12624,6 +12655,63 @@ async function loadForwardCalendar(){
   renderForwardCalendar();
   renderCalEvents();
   renderBulkForm();
+  loadTapeChart();
+}
+
+// Items 10-15: the tape-chart (rows = units, columns = next 45 days).
+async function loadTapeChart(){
+  const el = document.getElementById('tapeChart');
+  let d; try{ d = await api('/api/calendar/grid'); }catch(_){ d = {error:'fetch'} }
+  D.grid = d;
+  if(d && d.loading){
+    if(el) el.innerHTML = '<div class="empty">⏳ '+(L==='ar'?'يجهّز شريط الإشغال…':'Building the occupancy tape…')+'</div>';
+    clearTimeout(window._tapePoll);
+    const cv = document.getElementById('view_calendar');
+    if(cv && cv.classList.contains('on')){ window._tapePoll = setTimeout(loadTapeChart, 5000); }
+    return;
+  }
+  renderTapeChart();
+}
+function tapeLegend(ar){
+  return '<span><i style="background:var(--gold-soft)"></i>'+(ar?'محجوز':'Booked')+'</span>'
+    + '<span><i style="background:var(--surface);border:1px solid var(--line)"></i>'+(ar?'فاضي':'Empty')+'</span>'
+    + '<span><i style="background:var(--yellow-soft)"></i>'+(ar?'فجوة ليلة-ليلتين':'Orphan gap')+'</span>'
+    + '<span><i class="lg-arr"></i>'+(ar?'وصول':'Arrival')+'</span>'
+    + '<span><i class="lg-dep"></i>'+(ar?'مغادرة':'Departure')+'</span>';
+}
+function renderTapeChart(){
+  const el = document.getElementById('tapeChart'); if(!el) return;
+  const g = D.grid||{}; const days = g.days||[]; const units = g.units||[];
+  const ar = (L==='ar');
+  if(!units.length){ el.innerHTML = '<div class="empty">'+(g.error?'⚠ ':'')+(ar?'ما فيه بيانات تقويم بعد':'No calendar data yet')+'</div>'; return; }
+  const wdAr=['إث','ثل','أر','خم','جم','سب','أح'], wdEn=['M','T','W','T','F','S','U'];
+  const totalRisk = days.reduce(function(s,dd){return s+(dd.at_risk||0)},0);
+  const riskEl=document.getElementById('tapeRisk'); if(riskEl) riskEl.textContent = (ar?'إيراد بالخطر ~':'At risk ~')+fmt(totalRisk)+' SAR';
+  let head = '<th class="tc-uh">'+(ar?'الوحدة':'Unit')+'</th>';
+  days.forEach(function(dd){
+    const dn = parseInt((dd.date||'').slice(8,10),10);
+    const evt = dd.events&&dd.events.length;
+    head += '<th class="tc-dh'+(dd.weekend?' we':'')+(evt?' ev':'')+'" title="'+esc(dd.date+(evt?(' · '+dd.events.join(', ')):''))+'">'+(ar?wdAr[dd.weekday]:wdEn[dd.weekday])+'<br>'+dn+'</th>';
+  });
+  // Item 14: per-day revenue-at-risk row.
+  let riskRow = '<th class="tc-uh tc-risk-h">'+(ar?'بالخطر':'Risk')+'</th>';
+  days.forEach(function(dd){ riskRow += '<td class="tc-risk'+(dd.at_risk>0?' on':'')+'" title="'+(ar?'إيراد ليالٍ فاضية ':'empty-night revenue ')+fmt(dd.at_risk)+' SAR">'+(dd.at_risk>0?Math.round(dd.at_risk/1000)+'k':'·')+'</td>'; });
+  let rows='';
+  units.forEach(function(u){
+    let tds='';
+    u.cells.forEach(function(c,idx){
+      let cls='tc-'+(c.status||'none');
+      if(c.orphan) cls+=' tc-orphan';
+      if(c.arr) cls+=' tc-arr';
+      if(c.dep) cls+=' tc-dep';
+      const label = c.price ? '<span class="tc-p">'+c.price+'</span>' : '';
+      tds += '<td class="tc '+cls+'" onclick="openPriceDetail('+u.lid+')" title="'+esc(u.name+' · '+(days[idx]||{}).date+' · '+(c.status||'')+(c.orphan?' (gap)':'')+(c.price?(' · '+c.price+' SAR'):''))+'">'+label+'</td>';
+    });
+    rows += '<tr><th class="tc-un" title="'+esc(u.name)+'">'+esc(u.name)+'</th>'+tds+'</tr>';
+  });
+  el.innerHTML = '<div class="tape-legend">'+tapeLegend(ar)+'</div>'
+    + '<div class="tape-wrap"><table class="tape"><thead><tr>'+head+'</tr><tr>'+riskRow+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    + '<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'اضغط أي خانة تفتح تسعير الوحدة (عدّل السعر).':'Tap any cell to open the unit\\'s pricing (adjust price).')+'</div>';
 }
 
 function _calClass(p){
@@ -14368,6 +14456,91 @@ def _compute_revenue():
                        "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
                        "reco": u["reco"], "label": u["label"]} for u in rep["units"]]}
 
+def _compute_calendar_grid(days=45):
+    """Per-unit × per-day tape-chart grid for the next `days` days (items 10-14).
+    Each cell: status (booked/empty/blocked) + nightly price + arrival/departure/orphan
+    flags. Plus a per-day 'revenue at risk' total = sum of empty-night prices.
+    Calendar-heavy → fetched in parallel and served from the dashboard cache."""
+    today = datetime.now(TZ).date()
+    end_date = today + timedelta(days=days - 1)
+    listings = get_listings_map() or {}
+    listing_ids = list(listings.keys())
+    per_listing = {}
+
+    def _fetch(lid):
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": today.isoformat(), "endDate": end_date.isoformat()})
+            return lid, (cal.get("result") or [])
+        except Exception as e:
+            print(f"grid cal error ({lid}):", e)
+            return lid, []
+
+    if listing_ids:
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futs = [ex.submit(_fetch, lid) for lid in listing_ids]
+                for f in as_completed(futs):
+                    lid, days_data = f.result()
+                    per_listing[lid] = {d.get("date"): d for d in days_data if d.get("date")}
+        except Exception as e:
+            print("grid pool error:", e)
+
+    date_list = [today + timedelta(days=i) for i in range(days)]
+    date_isos = [d.isoformat() for d in date_list]
+    at_risk = [0.0] * days
+    units_out = []
+    for lid in listing_ids:
+        rows = per_listing.get(lid)
+        if not rows:
+            continue
+        cells = []
+        for d_iso in date_isos:
+            row = rows.get(d_iso)
+            if not row:
+                cells.append({"status": "none", "price": None})
+                continue
+            booked = bool(row.get("reservationId"))
+            available = int(row.get("isAvailable", 0) or 0) == 1
+            price = row.get("price")
+            price = round(float(price)) if isinstance(price, (int, float)) and price > 0 else None
+            cells.append({"status": "booked" if booked else ("empty" if available else "blocked"),
+                          "price": price})
+        # Item 11: arrival/departure boundaries (from booked-run edges); Item 14: at-risk.
+        for i in range(days):
+            c = cells[i]
+            prev_b = (i > 0 and cells[i - 1]["status"] == "booked")
+            if c["status"] == "booked" and not prev_b:
+                c["arr"] = 1
+            if c["status"] == "empty":
+                if prev_b:
+                    c["dep"] = 1
+                if c["price"]:
+                    at_risk[i] += c["price"]
+        # Item 13: orphan gaps — 1-2 empty nights wedged between two bookings.
+        i = 0
+        while i < days:
+            if cells[i]["status"] == "empty":
+                j = i
+                while j < days and cells[j]["status"] == "empty":
+                    j += 1
+                if (j - i) <= 2 and i > 0 and cells[i - 1]["status"] == "booked" \
+                   and j < days and cells[j]["status"] == "booked":
+                    for k in range(i, j):
+                        cells[k]["orphan"] = 1
+                i = j
+            else:
+                i += 1
+        units_out.append({"lid": lid, "name": listings.get(lid) or str(lid), "cells": cells})
+    units_out.sort(key=lambda u: u["name"])
+    days_out = [{"date": date_isos[i], "weekday": d.weekday(),
+                 "weekend": d.weekday() in WEEKEND_DAYS,
+                 "at_risk": round(at_risk[i]),
+                 "events": [e["name"] for e in events_for_date(d)]}
+                for i, d in enumerate(date_list)]
+    return {"start": today.isoformat(), "days_count": days,
+            "days": days_out, "units": units_out}
+
 def _compute_pricing():
     reservations = get_reservations_cached()
     if not _catalog_units:
@@ -14424,6 +14597,16 @@ async def _api_pricing(request):
     d = _cache_get("pricing")
     if d is None:
         _kick_compute("pricing", _compute_pricing)
+        return _json({"loading": True})
+    return _json(d)
+
+async def _api_calendar_grid(request):
+    """Per-unit × per-day tape-chart grid (items 10-15), served from cache."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    d = _cache_get("calendar_grid")
+    if d is None:
+        _kick_compute("calendar_grid", _compute_calendar_grid)
         return _json({"loading": True})
     return _json(d)
 
@@ -18631,6 +18814,10 @@ async def dashboard_cache_loop():
         if (not last) or (time.time() - last[1] > 1800):   # pricing is calendar-heavy: every ~30 min
             pr = await asyncio.to_thread(_compute_pricing)
             _dash_cache["pricing"] = (pr, time.time())
+        cg = _dash_cache.get("calendar_grid")
+        if (not cg) or (time.time() - cg[1] > 1800):       # grid is calendar-heavy too: every ~30 min
+            grid = await asyncio.to_thread(_compute_calendar_grid)
+            _dash_cache["calendar_grid"] = (grid, time.time())
         print(f"dashboard cache warmed · units={ov.get('active_units')} rev30={ov.get('rev_30')}")
     except Exception as e:
         print("dashboard cache error:", e)
@@ -18690,6 +18877,7 @@ async def start_web_server():
         app.router.add_get("/api/home/urgent", _api_home_urgent)
         app.router.add_get("/api/home/arrivals", _api_home_arrivals)
         app.router.add_get("/api/calendar/forward", _api_calendar_forward)
+        app.router.add_get("/api/calendar/grid", _api_calendar_grid)
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
         app.router.add_post("/api/events/save", _api_events_save)
