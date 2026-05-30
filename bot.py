@@ -1735,6 +1735,32 @@ def compute_urgent_now():
             })
     except Exception as e:
         print("pricing alerts error:", e)
+    # ---- global cross-view items (item 71): must-decide things from every view ----
+    try:
+        for d in _design_requests.values():
+            if d.get("status") == "blocked":
+                items.append({"kind": "design_blocked", "severity": "med", "id": d.get("id"),
+                              "title": d.get("project_name") or d.get("client_name") or "تصميم",
+                              "subtitle": d.get("client_name", ""), "detail": "طلب تصميم متوقّف",
+                              "age_min": None, "action_view": "design"})
+            elif d.get("waiting_on") == "faisal":
+                items.append({"kind": "design_wait", "severity": "med", "id": d.get("id"),
+                              "title": d.get("project_name") or d.get("client_name") or "تصميم",
+                              "subtitle": d.get("client_name", ""), "detail": "طلب تصميم ينتظر قرارك",
+                              "age_min": None, "action_view": "design"})
+        for p in _pmo_projects.values():
+            if p.get("signoff"):
+                items.append({"kind": "pmo_signoff", "severity": "med", "id": p.get("id"),
+                              "title": (p.get("unit") or {}).get("name", "مشروع تجهيز"),
+                              "subtitle": (p.get("client") or {}).get("name", ""),
+                              "detail": "مشروع تجهيز يحتاج اعتمادك", "age_min": None, "action_view": "pmo"})
+        for lid, s in _pricing_strategies.items():
+            if s.get("active") and not any(r.get("booked") for r in (s.get("dates") or {}).values()):
+                items.append({"kind": "strat_stalled", "severity": "low", "id": str(lid),
+                              "title": s.get("name", str(lid)), "subtitle": "",
+                              "detail": "استراتيجية تسعير ما تحرّكت — راجعها", "age_min": None, "action_view": "strat"})
+    except Exception as e:
+        print("urgent global error:", e)
     # severity order, then age
     sev_order = {"high": 0, "med": 1, "low": 2}
     items.sort(key=lambda x: (sev_order.get(x["severity"], 9), -(x.get("age_min") or 0)))
@@ -13973,7 +13999,10 @@ function renderLearnings(){
       + '<button class="btn primary sm" onclick="saveGeneralSummary()">💾 '+t().learn_save+'</button>';
   }else if(gen.summary){
     genBody.innerHTML = '<div style="white-space:pre-wrap;line-height:1.75;font-size:13px">'+esc(gen.summary)+'</div>'
-      + '<div class="muted" style="margin-top:10px;font-size:11px">⏱ '+t().learn_last+': '+_fmtDistillTime(gen.last_distilled)+' · '+(gen.examples_count||0)+' '+t().learn_examples+'</div>';
+      + '<div class="muted" style="margin-top:10px;font-size:11px">⏱ '+t().learn_last+': '+_fmtDistillTime(gen.last_distilled)+' · '+(gen.examples_count||0)+' '+t().learn_examples+'</div>'
+      // Item 70: make the impact explicit (no black box) — this learning now shapes every reply,
+      // and the conversations that produced it are shown in the "recent" panel below.
+      + '<div class="pill ok" style="margin-top:8px;display:inline-block;font-size:11px">✓ '+(L==='ar'?'مطبّق تلقائيًا على كل رد للضيوف · المحادثات اللي علّمته تحت':'Applied to every guest reply · source conversations shown below')+'</div>';
     genActs.innerHTML = '<button class="btn ghost sm" onclick="learnEditingGeneral=true;renderLearnings()">✎ '+t().learn_edit+'</button>'
       + '<button class="btn red sm" onclick="forgetLearning(&#39;general&#39;,null)">🗑 '+t().learn_forget+'</button>';
   }else{
