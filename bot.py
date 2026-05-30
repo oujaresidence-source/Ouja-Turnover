@@ -6959,6 +6959,7 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 .stmt-note{font-size:12.5px;color:var(--text-2);line-height:1.75;margin:14px 0}
 .stmt-sign{margin-top:26px;font-size:12.5px}
 .stmt-foot{margin-top:22px;border-top:1px solid var(--line);padding-top:10px;font-size:11px;color:var(--mut);text-align:center}
+.stmt-to{font-size:14px;margin:16px 0 2px;color:var(--text)}.stmt-to b{color:var(--gold-2);font-weight:700}
 .recon-ok{color:var(--green);font-weight:700}.recon-bad{color:var(--red);font-weight:700}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
@@ -14040,7 +14041,8 @@ function financeStatementHTML(){
   const pl=r.period?(r.period.start+' → '+r.period.end):'';
   h+='<div class="stmt-meta">'+esc(r.apartment||'')+(pl?(' · '+pl):'')+opt(f.ref,' · '+(ar?'مرجع ':'Ref ')+esc(f.ref))+opt(f.issue,' · '+esc(f.issue))+'</div>';
   h+=opt(f.prop_label,'<div class="stmt-meta">'+esc(f.prop_label)+'</div>')+'</div>';
-  h+=opt(f.greeting||f.recipient,'<div class="stmt-note">'+esc(f.greeting||'')+(f.recipient?(' '+esc(f.recipient)):'')+'</div>');
+  h+=opt(f.recipient,'<div class="stmt-to">'+(ar?'إلى':'To')+': <b>'+esc(f.recipient)+'</b></div>');
+  h+=opt(f.greeting,'<div class="stmt-note" style="margin-top:6px">'+esc(f.greeting)+'</div>');
   h+=opt(f.cover,'<div class="stmt-note">'+esc(f.cover)+'</div>');
   h+='<div class="stmt-sec-t">'+(ar?'الملخّص':'Summary')+'</div><div class="stmt-sum">';
   const sr=function(l,val,cls){ return '<div class="stmt-sum-row'+(cls?(' '+cls):'')+'"><span>'+l+'</span><span class="num">'+val+'</span></div>'; };
@@ -14097,7 +14099,8 @@ function financeGeneratePdf(){
     +'.stmt-sum{background:#F7F4EE;border-radius:12px;padding:16px 18px;margin:6px 0}.stmt-sum-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}'
     +'.stmt-sum-row.total{border-top:2px solid #A37728;margin-top:6px;padding-top:10px;font-weight:800;font-size:15px;color:#8B6320}'
     +'.stmt-note{font-size:12.5px;color:#544D43;line-height:1.75;margin:14px 0}.stmt-sign{margin-top:28px;font-size:12.5px}'
-    +'.stmt-foot{margin-top:24px;border-top:1px solid #E8E2D5;padding-top:10px;font-size:11px;color:#8C8475;text-align:center}.recon-bad{color:#C44343}.muted{color:#8C8475}';
+    +'.stmt-foot{margin-top:24px;border-top:1px solid #E8E2D5;padding-top:10px;font-size:11px;color:#8C8475;text-align:center}'
+    +'.stmt-to{font-size:14px;margin:16px 0 2px}.stmt-to b{color:#8B6320}.recon-bad{color:#C44343}.muted{color:#8C8475}';
   const dir=(L==='ar')?'rtl':'ltr';
   w.document.write('<!doctype html><html dir="'+dir+'" lang="'+(L==='ar'?'ar':'en')+'"><head><meta charset="utf-8"><title>Ouja Statement</title>'
     +'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700;800&display=swap" rel="stylesheet">'
