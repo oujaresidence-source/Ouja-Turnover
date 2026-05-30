@@ -9347,9 +9347,11 @@ function renderGuestList(){
   for(const g of f){
     const vipTag = g.vip ? ' <span class="pill gold">'+t().guest_vip_on+'</span>' : '';
     const repTag = (!g.vip && g.stays>=2) ? ' <span class="pill info">'+(ar?'متكرر':'repeat')+'</span>' : '';
+    const arrTag = g.arriving ? ' <span class="pill ok">🛬 '+(ar?'وصول ':'arr ')+esc(g.arriving)+'</span>' : '';   // item 63
+    const sentEmoji = g.sentiment==='positive'?'😊 ':g.sentiment==='negative'?'😟 ':g.sentiment==='mixed'?'🙂 ':'';   // item 64
     const ltv = (adr>0 && g.nights) ? ('~'+fmt(Math.round(g.nights*adr))) : '—';
     html += '<tr style="cursor:pointer" onclick="openGuestDrawer(&#39;'+esc(g.key)+'&#39;)">'
-      + '<td class="strong">'+esc(g.name||'—')+vipTag+repTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
+      + '<td class="strong">'+sentEmoji+esc(g.name||'—')+vipTag+repTag+arrTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
       + '<td class="num">'+g.stays+'</td><td class="num">'+g.nights+'</td>'
       + '<td class="num">'+ltv+'</td>'
       + '<td class="muted" style="font-size:11.5px">'+esc((g.last_seen||'').replace('T',' ').slice(0,16))+'</td>'
@@ -11973,6 +11975,38 @@ function _starBar(n){
   n = Math.max(0, Math.min(5, parseInt(n||0)));
   return '★'.repeat(n) + '☆'.repeat(5-n);
 }
+// Item 35: detect recurring themes across recent negative reviews (rating <= 3).
+function _reviewThemes(units){
+  const ar=(L==='ar');
+  const THEMES=[
+    {k:['wifi','واي','نت','انترنت','إنترنت'], ar:'الواي فاي', en:'WiFi'},
+    {k:['نظاف','وسخ','clean','dirty','غبار'], ar:'النظافة', en:'Cleanliness'},
+    {k:['تكييف','حار','بارد','تبريد','air condition'], ar:'التكييف', en:'A/C'},
+    {k:['رائحة','ريحة','smell','odor'], ar:'الروائح', en:'Smell'},
+    {k:['صوت','ضوضاء','إزعاج','noise','loud'], ar:'الضوضاء', en:'Noise'},
+    {k:['سخان','الماء حار','water','shower','دش'], ar:'الماء/السخان', en:'Water/Heater'},
+    {k:['دخول','مفتاح','check-in','checkin','entry','access'], ar:'الدخول', en:'Check-in'},
+    {k:['موقف','parking','باركن'], ar:'المواقف', en:'Parking'}
+  ];
+  const counts={};
+  units.forEach(function(u){
+    (u.reviews||[]).forEach(function(r){
+      if((r.rating||5) > 3) return;
+      const txt=((r.public_review||'')+' '+(r.private_review||'')).toLowerCase();
+      THEMES.forEach(function(th){
+        if(th.k.some(function(w){return txt.indexOf(w)>=0})){
+          const lbl = ar?th.ar:th.en;
+          (counts[lbl]=counts[lbl]||{}); counts[lbl][u.unit_name]=1;
+        }
+      });
+    });
+  });
+  const arr=Object.keys(counts).map(function(l){return {label:l, n:Object.keys(counts[l]).length}});
+  arr.sort(function(a,b){return b.n-a.n});
+  if(!arr.length) return '';
+  const chips = arr.slice(0,6).map(function(x){ return '<span class="pill danger" style="font-size:11.5px">'+esc(x.label)+' · '+x.n+' '+(ar?'وحدة':'unit')+'</span>'; }).join(' ');
+  return '<div class="mbrief" style="margin-bottom:12px;background:linear-gradient(135deg,var(--red-soft),var(--surface));border-color:var(--red)"><div class="mbrief-line" style="margin-bottom:8px">⚠ '+(ar?'وش يضرّ تقييمنا الحين:':'What is hurting our rating now:')+'</div><div style="display:flex;gap:6px;flex-wrap:wrap">'+chips+'</div></div>';
+}
 function _renderReviewsBody(){
   const body = document.getElementById('rvBody'); if(!body) return;
   const units = ((D.reviews||{}).units)||[];
@@ -11984,7 +12018,7 @@ function _renderReviewsBody(){
       + '</div>';
     return;
   }
-  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  let html = _reviewThemes(units) + '<div style="display:flex;flex-direction:column;gap:10px">';
   for(const u of units){
     const urgPill = '<span class="pill '+(RV_URG_PILL[u.urgency]||'info')+'" style="margin-inline-start:6px">'+RV_URG_LABEL[u.urgency]+'</span>';
     const unfixed = u.unfixed_negatives > 0
@@ -15378,21 +15412,57 @@ async def _api_clean_feedback_submit(request):
 async def _handle_clean_feedback_page(request):
     return web.Response(text=CLEAN_FEEDBACK_HTML, content_type="text/html")
 
+_GUEST_POS = ("شكر", "ممتاز", "رائع", "نظيف", "جميل", "سعيد", "أنصح", "حلو", "مرتاح",
+              "thank", "great", "excellent", "clean", "love", "perfect", "amazing", "comfortable")
+_GUEST_NEG = ("مشكلة", "سيء", "زعلان", "وسخ", "متأخر", "ما عجب", "رديء", "شكوى", "تعب", "غلط",
+              "dirty", "bad", "problem", "late", "broken", "rude", "complain", "issue", "noise")
+def _guest_sentiment(p):
+    """Item 64: a light sentiment read from the guest's distilled summaries + notes."""
+    t = (" ".join((s.get("text", "") or "") for s in (p.get("summaries") or []))
+         + " " + (p.get("notes", "") or "")).lower()
+    pos = sum(t.count(w) for w in _GUEST_POS)
+    neg = sum(t.count(w) for w in _GUEST_NEG)
+    if pos == 0 and neg == 0:
+        return "neutral"
+    if neg > pos:
+        return "negative"
+    if pos > neg:
+        return "positive"
+    return "mixed"
+
 async def _api_guests_list(request):
     """Return guest profiles for the dashboard. Filters/sorts in the client."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
+    # Item 63: upcoming arrivals (next 21 days) keyed by guest name → flag VIP/repeat arrivals.
+    upcoming = {}
+    try:
+        _t = datetime.now(TZ).date()
+        _e = _t + timedelta(days=21)
+        _data = api_get("/reservations", params={"arrivalStartDate": _t.isoformat(),
+                                                 "arrivalEndDate": _e.isoformat(), "limit": 200})
+        for r in (_data.get("result") or []):
+            nm = (r.get("guestName") or "").strip().lower()
+            a = _parse_date(r.get("arrivalDate"))
+            if nm and a and (nm not in upcoming or a.isoformat() < upcoming[nm]):
+                upcoming[nm] = a.isoformat()
+    except Exception as e:
+        print("guests upcoming error:", e)
     out = []
     for k, p in _guest_profiles.items():
+        names = p.get("names", [])
+        arriving = next((upcoming[n.strip().lower()] for n in names if n.strip().lower() in upcoming), None)
         out.append({
             "key": k,
-            "name": (p.get("names") or ["—"])[-1],
-            "names": p.get("names", []),
+            "name": (names or ["—"])[-1],
+            "names": names,
             "phone": p.get("phone", ""),
             "email": p.get("email", ""),
             "vip": p.get("vip", False),
             "stays": len(p.get("reservations", [])),
             "nights": p.get("total_nights", 0),
+            "sentiment": _guest_sentiment(p),   # item 64
+            "arriving": arriving,               # item 63
             "first_seen": p.get("first_seen"),
             "last_seen": p.get("last_seen"),
             "summaries_count": len(p.get("summaries", [])),
