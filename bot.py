@@ -14776,6 +14776,70 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "settings": s,
     }
 
+# ---- Hostaway → normalized finance rows (Stage 1: ALL reservations come from Hostaway) ----
+# The ACTUAL Airbnb host payout (net of Airbnb's service fee). Hostaway's standard field is
+# airbnbExpectedPayoutAmount; we try a few known aliases. We NEVER fall back to totalPrice
+# (that's the gross guest total, not the owner payout) — a missing payout stays None and is
+# surfaced by the reconciliation, never estimated. [CONFIRM the exact field from one live
+# reservation — REVENUE_DEBUG already logs 'reservation sample keys' on Railway.]
+_AIRBNB_PAYOUT_FIELDS = ("airbnbExpectedPayoutAmount", "expectedPayoutAmount",
+                         "ownerPayout", "hostPayout")
+
+def _finance_channel(r):
+    ch = (r.get("channelName") or r.get("channel") or "").strip().lower()
+    return "airbnb" if "airbnb" in ch else "direct"   # [CONFIRM] non-Airbnb channels treated as 'direct'
+
+def _airbnb_payout(r):
+    for k in _AIRBNB_PAYOUT_FIELDS:
+        v = r.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            return float(v)
+        if isinstance(v, str):
+            try:
+                fv = float(v)
+                if fv > 0:
+                    return fv
+            except Exception:
+                pass
+    return None
+
+def normalize_reservation(r, listings=None):
+    """One raw Hostaway reservation → a normalized finance row for compute_owner_report."""
+    listings = listings or {}
+    lid = r.get("listingMapId")
+    ch = _finance_channel(r)
+    refund = r.get("refundAmount")
+    tp = r.get("totalPrice")
+    return {
+        "id": r.get("id") or r.get("reservationId"),
+        "source": "hostaway", "channel": ch, "lid": lid,
+        "apartment": listings.get(lid) or r.get("listingName") or (f"unit-{lid}" if lid else ""),
+        "checkin": r.get("arrivalDate"), "checkout": r.get("departureDate"),
+        "nights": _res_nights(r), "status": (r.get("status") or "").lower(),
+        "airbnb_payout": (_airbnb_payout(r) if ch == "airbnb" else None),
+        "direct_revenue": (float(tp) if (ch == "direct" and isinstance(tp, (int, float))) else None),
+        "refund": (float(refund) if isinstance(refund, (int, float)) and refund > 0 else 0.0),
+        "extras": 0.0,
+    }
+
+def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None):
+    """Stage 3 wiring: pull this unit's Hostaway reservations + matched expenses and run the
+    verified math. lid=None → portfolio-wide. Never invents a number."""
+    listings = get_listings_map() or {}
+    resv = [normalize_reservation(r, listings) for r in get_reservations_cached()
+            if lid is None or r.get("listingMapId") == lid]
+    if expenses is None:
+        expenses = []
+        for e in _expenses.values():
+            if e.get("status") == "posted" and (lid is None or e.get("listing_id") == lid):
+                expenses.append({"id": e.get("id"), "apartment": e.get("apartment"),
+                                 "lid": e.get("listing_id"), "amount": e.get("amount"),
+                                 "date": e.get("expense_date"), "matched": True})
+    rep = compute_owner_report(resv, expenses, start, end, management_pct, settings)
+    rep["apartment"] = (listings.get(lid) if lid is not None else None)
+    rep["lid"] = lid
+    return rep
+
 def _compute_revenue():
     reservations = get_reservations_cached()
     listings = get_listings_map()
