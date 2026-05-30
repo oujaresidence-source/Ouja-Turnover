@@ -17867,6 +17867,39 @@ async def _api_finance_defaults(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+async def _api_finance_payout_probe(request):
+    """Diagnostic: read a few LIVE Airbnb reservations from Hostaway (this runs on Railway,
+    where the credentials are) and report which field holds the real Airbnb payout — so the
+    payout field is confirmed from REAL data, never guessed. Open this URL after deploy."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    def _probe():
+        try:
+            data = api_get("/reservations", params={"limit": 40, "offset": 0})
+        except Exception as e:
+            return {"error": str(e)[:300]}
+        rows = data.get("result", []) or []
+        money_kw = ("payout", "price", "total", "amount", "owner", "host", "expected",
+                    "net", "paid", "earning", "revenue", "channelexpected")
+        samples = []
+        for r in rows:
+            if "airbnb" not in (r.get("channelName") or r.get("channel") or "").lower():
+                continue
+            money = {k: v for k, v in r.items()
+                     if isinstance(v, (int, float)) and any(m in k.lower() for m in money_kw)}
+            samples.append({"id": r.get("id"), "channel": r.get("channelName"),
+                            "status": r.get("status"), "arrival": r.get("arrivalDate"),
+                            "money_fields": money})
+            if len(samples) >= 5:
+                break
+        payout_like = sorted({k for r in rows for k in r.keys()
+                              if any(m in k.lower() for m in ("payout", "expected", "ownerpay", "hostpay"))})
+        return {"fetched": len(rows), "airbnb_samples": samples,
+                "payout_like_fields_seen": payout_like,
+                "field_currently_used_first": _AIRBNB_PAYOUT_FIELDS[0],
+                "all_keys_of_first_row": (sorted(rows[0].keys()) if rows else [])}
+    return _json(await asyncio.to_thread(_probe))
+
 async def _api_expenses_get(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -19713,6 +19746,7 @@ async def start_web_server():
         app.router.add_get("/api/finance/report", _api_finance_report)
         app.router.add_get("/api/finance/defaults", _api_finance_defaults)
         app.router.add_post("/api/finance/defaults", _api_finance_defaults)
+        app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
