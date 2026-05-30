@@ -9315,21 +9315,30 @@ function renderGuestList(){
   const items = ((D.guests||{}).items) || [];
   const filt = (document.getElementById('guestFilter')||{}).value || 'all';
   const q = ((document.getElementById('guestSearch')||{}).value || '').toLowerCase();
-  let f = items;
-  if(filt === 'vip') f = items.filter(function(x){return x.vip});
-  else if(filt === 'repeat') f = items.filter(function(x){return x.stays >= 2});
+  const ar = (L==='ar');
+  let f = items.slice();
+  if(filt === 'vip') f = f.filter(function(x){return x.vip});
+  else if(filt === 'repeat') f = f.filter(function(x){return x.stays >= 2});
   if(q) f = f.filter(function(x){
     return (x.name||'').toLowerCase().indexOf(q) >= 0 || (x.phone||'').toLowerCase().indexOf(q) >= 0;
   });
+  // Item 62: surface VIP + repeat — VIP first, then most stays.
+  f.sort(function(a,b){ if(!!b.vip !== !!a.vip) return (b.vip?1:0)-(a.vip?1:0); return (b.stays||0)-(a.stays||0); });
   if(!f.length){ body.innerHTML = '<div class="empty">'+t().guest_no_data+'</div>'; return; }
+  // Estimated lifetime value = nights x average ADR across units (labelled ≈, an estimate;
+  // exact per-guest revenue would need joining each guest's reservation totals).
+  const us=((D.rev||{}).units)||[]; let adr=0, n=0; us.forEach(function(u){ if(u.adr){adr+=u.adr;n++} }); adr = n? adr/n : 0;
   let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().guest_name+'</th><th class="num">'+t().guest_stays+'</th>'
-    + '<th class="num">'+t().guest_nights+'</th><th>'+t().guest_last+'</th><th></th></tr></thead><tbody>';
+    + '<th class="num">'+t().guest_nights+'</th><th class="num">'+(ar?'≈ القيمة':'≈ LTV')+'</th><th>'+t().guest_last+'</th><th></th></tr></thead><tbody>';
   for(const g of f){
     const vipTag = g.vip ? ' <span class="pill gold">'+t().guest_vip_on+'</span>' : '';
+    const repTag = (!g.vip && g.stays>=2) ? ' <span class="pill info">'+(ar?'متكرر':'repeat')+'</span>' : '';
+    const ltv = (adr>0 && g.nights) ? ('~'+fmt(Math.round(g.nights*adr))) : '—';
     html += '<tr style="cursor:pointer" onclick="openGuestDrawer(&#39;'+esc(g.key)+'&#39;)">'
-      + '<td class="strong">'+esc(g.name||'—')+vipTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
+      + '<td class="strong">'+esc(g.name||'—')+vipTag+repTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
       + '<td class="num">'+g.stays+'</td><td class="num">'+g.nights+'</td>'
+      + '<td class="num">'+ltv+'</td>'
       + '<td class="muted" style="font-size:11.5px">'+esc((g.last_seen||'').replace('T',' ').slice(0,16))+'</td>'
       + '<td style="text-align:end"><span class="muted">←</span></td></tr>';
   }
