@@ -11975,6 +11975,38 @@ function _starBar(n){
   n = Math.max(0, Math.min(5, parseInt(n||0)));
   return '★'.repeat(n) + '☆'.repeat(5-n);
 }
+// Item 35: detect recurring themes across recent negative reviews (rating <= 3).
+function _reviewThemes(units){
+  const ar=(L==='ar');
+  const THEMES=[
+    {k:['wifi','واي','نت','انترنت','إنترنت'], ar:'الواي فاي', en:'WiFi'},
+    {k:['نظاف','وسخ','clean','dirty','غبار'], ar:'النظافة', en:'Cleanliness'},
+    {k:['تكييف','حار','بارد','تبريد','air condition'], ar:'التكييف', en:'A/C'},
+    {k:['رائحة','ريحة','smell','odor'], ar:'الروائح', en:'Smell'},
+    {k:['صوت','ضوضاء','إزعاج','noise','loud'], ar:'الضوضاء', en:'Noise'},
+    {k:['سخان','الماء حار','water','shower','دش'], ar:'الماء/السخان', en:'Water/Heater'},
+    {k:['دخول','مفتاح','check-in','checkin','entry','access'], ar:'الدخول', en:'Check-in'},
+    {k:['موقف','parking','باركن'], ar:'المواقف', en:'Parking'}
+  ];
+  const counts={};
+  units.forEach(function(u){
+    (u.reviews||[]).forEach(function(r){
+      if((r.rating||5) > 3) return;
+      const txt=((r.public_review||'')+' '+(r.private_review||'')).toLowerCase();
+      THEMES.forEach(function(th){
+        if(th.k.some(function(w){return txt.indexOf(w)>=0})){
+          const lbl = ar?th.ar:th.en;
+          (counts[lbl]=counts[lbl]||{}); counts[lbl][u.unit_name]=1;
+        }
+      });
+    });
+  });
+  const arr=Object.keys(counts).map(function(l){return {label:l, n:Object.keys(counts[l]).length}});
+  arr.sort(function(a,b){return b.n-a.n});
+  if(!arr.length) return '';
+  const chips = arr.slice(0,6).map(function(x){ return '<span class="pill danger" style="font-size:11.5px">'+esc(x.label)+' · '+x.n+' '+(ar?'وحدة':'unit')+'</span>'; }).join(' ');
+  return '<div class="mbrief" style="margin-bottom:12px;background:linear-gradient(135deg,var(--red-soft),var(--surface));border-color:var(--red)"><div class="mbrief-line" style="margin-bottom:8px">⚠ '+(ar?'وش يضرّ تقييمنا الحين:':'What is hurting our rating now:')+'</div><div style="display:flex;gap:6px;flex-wrap:wrap">'+chips+'</div></div>';
+}
 function _renderReviewsBody(){
   const body = document.getElementById('rvBody'); if(!body) return;
   const units = ((D.reviews||{}).units)||[];
@@ -11986,7 +12018,7 @@ function _renderReviewsBody(){
       + '</div>';
     return;
   }
-  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  let html = _reviewThemes(units) + '<div style="display:flex;flex-direction:column;gap:10px">';
   for(const u of units){
     const urgPill = '<span class="pill '+(RV_URG_PILL[u.urgency]||'info')+'" style="margin-inline-start:6px">'+RV_URG_LABEL[u.urgency]+'</span>';
     const unfixed = u.unfixed_negatives > 0
