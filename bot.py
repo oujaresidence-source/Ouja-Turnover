@@ -13240,6 +13240,14 @@ function renderEmptyUnitCard(u){
 /* ============================================================
    PRICING
    ============================================================ */
+// Item 17: one-line plain-Najdi "why" for each pricing opportunity, from raise/drop counts.
+function pricingWhy(u, ar){
+  const rz=u.raise||0, dp=u.drop||0;
+  if(rz&&dp) return ar?('فيه '+rz+' ليلة مسعّرة أقل من الطلب ترفعها، و'+dp+' ليلة بطيئة الأفضل تنزّلها'):(rz+' nights underpriced to raise, '+dp+' slow nights to drop');
+  if(rz) return ar?(rz+' ليلة مسعّرة أقل من طلب السوق — ارفعها تكسب أكثر'):(rz+' nights priced below market demand — raise to capture more');
+  if(dp) return ar?(dp+' ليلة بطيئة — نزّل سعرها تنحجز قبل لا تفوت'):(dp+' slow nights — drop the price so they book');
+  return ar?'تسعير متوازن':'Balanced pricing';
+}
 function renderPricing(){
   const d = D.pr; const tot = document.getElementById('prTotalBody');
   const body = document.getElementById('prListBody');
@@ -13264,7 +13272,7 @@ function renderPricing(){
     return '<div class="ibox" style="border-inline-start:3px solid var(--gold);cursor:pointer" onclick="openPriceDetail('+u.lid+')">'
       + '<div class="ibox-row" style="cursor:pointer">'
       + '<div class="ibox-icon rep">💰</div>'
-      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(u.name)+'</span></div><div class="ibox-preview">'+changes+' '+t().pr_change+' · '+t().pr_uplift+' ~'+fmt(u.uplift)+' SAR · '+t().pr_conf+' '+(u.confidence||0)+'%</div></div>'
+      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(u.name)+'</span></div><div class="ibox-preview">'+changes+' '+t().pr_change+' · '+t().pr_uplift+' ~'+fmt(u.uplift)+' SAR · '+t().pr_conf+' '+(u.confidence||0)+'%</div><div class="ibox-sum">💡 '+esc(pricingWhy(u, L==='ar'))+'</div></div>'
       + '<div class="ibox-meta"><span class="ibox-conf high">~'+fmt(u.uplift)+'</span></div>'
       + '<span class="ibox-expand">←</span>'
       + '</div></div>';
