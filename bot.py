@@ -13647,12 +13647,26 @@ function renderRevenueFull(){
   if(rev.error){ if(mBody) mBody.innerHTML='<div class="empty">⚠ '+esc(rev.error)+'</div>'; return }
   const monthly = (rev.monthly||[]).slice(-12);
   if(monthly.length){
+    const ar = (L==='ar');
     const max = Math.max.apply(null, monthly.map(function(m){return m.rev}));
     const bars = monthly.map(function(m){
       const h = Math.max(5, (m.rev/max)*150);
       return '<div class="bar-col"><div class="bar-tip">'+fmt(m.rev)+' SAR</div><div class="bar" style="height:'+h+'px"></div><div class="bar-label">'+m.m.slice(5)+'</div></div>';
     }).join('');
-    mBody.innerHTML = '<div class="bar-chart" style="height:170px">'+bars+'</div>';
+    // Item 68: pace vs last month / same month last year.
+    const pc = rev.pace||{};
+    const pBadge = function(v, lbl){ if(v==null) return ''; return '<span class="kpi-delta '+(v>=0?'up':'dn')+'" style="margin-inline-start:6px">'+lbl+' '+(v>=0?'+':'')+v+'%</span>'; };
+    const paceLine = '<div style="margin-bottom:10px;font-size:12.5px;color:var(--text-2)">'+(ar?'وتيرة هذا الشهر':'This month')+': <b class="mono">'+fmt(pc.cur||0)+' SAR</b>'+pBadge(pc.mom, ar?'مقابل الشهر السابق':'MoM')+pBadge(pc.yoy, ar?'مقابل السنة السابقة':'YoY')+'</div>';
+    // Item 66: per-compound breakdown.
+    const comps = rev.compounds||[];
+    let compHtml = '';
+    if(comps.length>1){
+      compHtml = '<div style="margin-top:12px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'حسب المجمّع':'By compound')+'</div>'
+        + '<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+(ar?'المجمّع':'Compound')+'</th><th class="num">'+(ar?'وحدات':'Units')+'</th><th class="num">'+(ar?'الإشغال':'Occ')+'</th><th class="num">ADR</th></tr></thead><tbody>'
+        + comps.map(function(c){ return '<tr><td class="strong">'+esc(c.compound)+'</td><td class="num">'+c.units+'</td><td class="num">'+c.occ+'%</td><td class="num">'+fmt(c.adr)+'</td></tr>'; }).join('')
+        + '</tbody></table></div></div>';
+    }
+    mBody.innerHTML = paceLine + '<div class="bar-chart" style="height:170px">'+bars+'</div>' + compHtml;
   }else{ mBody.innerHTML='<div class="empty">'+t().rev_no+'</div>' }
 
   const sal = rev.salary || {};
@@ -14501,14 +14515,45 @@ def _compute_revenue():
     for _, d, nl in nights:
         series[f"{d.year}-{d.month:02d}"] = series.get(f"{d.year}-{d.month:02d}", 0) + nl
     monthly = [{"m": k, "rev": round(series[k])} for k in sorted(series)[-12:]]
+    # compound (neighbourhood) per unit, from the catalog (item 66)
+    nb_map = {u.get("name"): (u.get("neighbourhood") or u.get("area") or "")
+              for u in _catalog_units if u.get("name")}
+    units = [{"name": u["name"], "compound": nb_map.get(u["name"], ""),
+              "occ": round(u["occ90"] * 100),
+              "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
+              "reco": u["reco"], "label": u["label"]} for u in rep["units"]]
+    # Item 66: per-compound aggregation (avg occupancy + ADR + unit count).
+    comp = {}
+    for u in units:
+        c = u["compound"] or "—"
+        g = comp.setdefault(c, {"compound": c, "units": 0, "occ_sum": 0, "adr_sum": 0, "adr_n": 0})
+        g["units"] += 1
+        g["occ_sum"] += u["occ"]
+        if u["adr"]:
+            g["adr_sum"] += u["adr"]; g["adr_n"] += 1
+    compounds = [{"compound": g["compound"], "units": g["units"],
+                  "occ": round(g["occ_sum"] / g["units"]) if g["units"] else 0,
+                  "adr": round(g["adr_sum"] / g["adr_n"]) if g["adr_n"] else 0}
+                 for g in comp.values()]
+    compounds.sort(key=lambda x: -x["occ"])
+    # Item 68: pace vs last month + same month last year (from the monthly nights-revenue series).
+    today = datetime.now(TZ).date()
+    _mk = lambda y, m: f"{y}-{m:02d}"
+    cur = series.get(_mk(today.year, today.month), 0)
+    pm_y, pm_m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    prev_m = series.get(_mk(pm_y, pm_m), 0)
+    prev_y = series.get(_mk(today.year - 1, today.month), 0)
+    pace = {"cur": round(cur),
+            "mom": round((cur - prev_m) / prev_m * 100) if prev_m else None,
+            "yoy": round((cur - prev_y) / prev_y * 100) if prev_y else None}
     return {"monthly": monthly,
+            "overall_adr": round(rep.get("overall_adr", 0) or 0),
+            "compounds": compounds, "pace": pace,
             "seasonality": [{"name": m["name"], "adr": round(m["adr"]), "index": round(m["index"], 2)}
                             for m in rep["months"]],
             "salary": {str(k): round(v, 2) for k, v in rep["salary"]["dom_index"].items()},
             "weak": rep["salary"]["weak_window"], "strong": rep["salary"]["strong_window"],
-            "units": [{"name": u["name"], "occ": round(u["occ90"] * 100),
-                       "adr": round(u["adr"]) if u["adr"] else 0, "pace": round((u["pace30"] or 0) * 100),
-                       "reco": u["reco"], "label": u["label"]} for u in rep["units"]]}
+            "units": units}
 
 def _compute_calendar_grid(days=45):
     """Per-unit × per-day tape-chart grid for the next `days` days (items 10-14).
