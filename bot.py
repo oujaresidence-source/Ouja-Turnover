@@ -12511,12 +12511,19 @@ function renderCleaningList(){
   const filt = (document.getElementById('cleanFilter')||{}).value || 'all';
   const q = ((document.getElementById('cleanSearch')||{}).value || '').toLowerCase();
   const today = (D.clean||{}).today || '';
+  const ar=(L==='ar');
+  // Items 26/27: cross-ref today's arrivals/turnovers (D.today) with cleaning state.
+  const _td = D.today||{}; const _cbn={}; items.forEach(function(c){ _cbn[c.name]=c; });
+  let _alerts='';
+  (_td.tight||[]).forEach(function(u){ _alerts += '<div class="mb-alert amber"><span class="mb-ic">⚡</span><span>'+(ar?('تسليم واستلام نفس اليوم على <b>'+esc(u)+'</b> — لازم تنظيف سريع'):('Same-day turnover on <b>'+esc(u)+'</b> — needs a fast clean'))+'</span></div>'; });
+  (_td.arrivals||[]).forEach(function(a){ const c=_cbn[a.unit]; if(c&&c.overdue){ _alerts += '<div class="mb-alert red"><span class="mb-ic">🧹</span><span>'+(ar?('ضيف يوصل اليوم على <b>'+esc(a.unit)+'</b> والتنظيف متأخر — نظّفها قبل الوصول'):('Guest arrives today into <b>'+esc(a.unit)+'</b> and cleaning is overdue'))+'</span></div>'; } });
+  const _banner = _alerts ? '<div class="mb-alerts" style="margin-bottom:12px">'+_alerts+'</div>' : '';
   let filtered = items;
   if(filt === 'overdue') filtered = items.filter(function(x){return x.overdue});
   else if(filt === 'soon') filtered = items.filter(function(x){return x.days_until_next != null && x.days_until_next <= 7});
   else if(filt === 'unscheduled') filtered = items.filter(function(x){return !x.next_scheduled});
   if(q) filtered = filtered.filter(function(x){return (x.name||'').toLowerCase().indexOf(q) >= 0});
-  if(!filtered.length){ body.innerHTML = '<div class="empty">—</div>'; return; }
+  if(!filtered.length){ body.innerHTML = _banner + '<div class="empty">—</div>'; return; }
   let html = '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().clean_unit+'</th>'
     + '<th>'+t().clean_last+'</th>'
@@ -12540,7 +12547,7 @@ function renderCleaningList(){
       + '</tr>';
   }
   html += '</tbody></table></div>';
-  body.innerHTML = html;
+  body.innerHTML = _banner + html;
 }
 
 async function cleanMarkDone(lid){
