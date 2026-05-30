@@ -6814,6 +6814,8 @@ main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
 /* Bulk-approve bar (item 9) */
 .bulkbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--green-soft);border:1px solid rgba(14,158,95,.22);border-radius:var(--r);padding:10px 13px;margin-bottom:10px;font-size:12.5px;color:var(--text)}
 .bulkbar b{color:var(--green)}
+/* Loud DRY-RUN banner (item 24) */
+.dry-banner{background:var(--red-soft);border:1px solid var(--red);color:var(--red);border-radius:var(--r);padding:11px 14px;margin-bottom:12px;font-size:12.5px;font-weight:700;text-align:center}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -13343,14 +13345,25 @@ async function doApplyFromDrawer(lid, btn){
 function renderStrategies(){
   const d = D.strat || {items:[]}; const items = d.items||[];
   const body = document.getElementById('stratListBody');
-  if(!items.length){ body.innerHTML='<div class="empty"><span class="ic">⚡</span>'+t().st_empty+'</div>'; return }
-  body.innerHTML = '<div class="inbox-list">' + items.map(function(s){
+  const ar = (L==='ar');
+  // Item 24: loud red banner when price writes are OFF (PRICE_APPLY_DRYRUN=1).
+  const banner = d.dry_run
+    ? '<div class="dry-banner">⚠ '+(ar?'وضع التجربة (DRY-RUN) — الأسعار تُحسب بس ما تُكتب فعلياً في Hostaway':'DRY-RUN — prices are computed but NOT written to Hostaway')+'</div>'
+    : '';
+  if(!items.length){ body.innerHTML = banner + '<div class="empty"><span class="ic">⚡</span>'+t().st_empty+'</div>'; return }
+  body.innerHTML = banner + '<div class="inbox-list">' + items.map(function(s){
     const pct = s.total?Math.round(s.booked/s.total*100):0;
-    const pill = s.active ? '<span class="pill ok">● '+t().st_running+'</span>' : '<span class="pill muted">'+t().st_done+'</span>';
-    return '<div class="ibox" style="border-inline-start:3px solid '+(s.active?'var(--green)':'var(--mut)')+';cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
+    // Item 22: working / not-moving / done flag.
+    const fl = s.flag==='working' ? '<span class="pill ok">'+(ar?'● شغّالة':'● Working')+'</span>'
+             : s.flag==='stalled' ? '<span class="pill danger">'+(ar?'⚠ ما تحرّكت':'⚠ Not moving')+'</span>'
+             : '<span class="pill muted">'+(ar?'منتهية':'Done')+'</span>';
+    // Item 21: revenue captured since start (estimate).
+    const rev = s.rev_captured ? (' · ~'+fmt(s.rev_captured)+' SAR '+(ar?'محصّلة':'captured')) : '';
+    const edge = s.flag==='stalled' ? 'var(--red)' : (s.active?'var(--green)':'var(--mut)');
+    return '<div class="ibox" style="border-inline-start:3px solid '+edge+';cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
       + '<div class="ibox-row">'
       + '<div class="ibox-icon" style="background:'+(s.active?'var(--green-soft)':'var(--surface-2)')+';color:'+(s.active?'var(--green)':'var(--mut)')+'">⚡</div>'
-      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(s.name)+'</span>'+pill+'</div><div class="ibox-preview">'+s.booked+'/'+s.total+' '+t().st_booked+' · '+s.changes_total+' '+t().st_changes+(s.base?' · base ~'+fmt(s.base)+' SAR':'')+'</div></div>'
+      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(s.name)+'</span>'+fl+'</div><div class="ibox-preview">'+s.booked+'/'+s.total+' '+t().st_booked+rev+' · '+s.changes_total+' '+t().st_changes+'</div></div>'
       + '<div class="ibox-meta"><span class="ibox-conf '+(pct>=50?'high':'mid')+'">'+pct+'%</span></div>'
       + '<span class="ibox-expand">←</span>'
       + '</div></div>';
@@ -14648,14 +14661,22 @@ def _strategies_list():
     for lid, s in _pricing_strategies.items():
         dates = s.get("dates", {})
         booked = sum(1 for r in dates.values() if r.get("booked"))
+        # Item 21: revenue captured since the strategy started = sum of the prices on
+        # the nights that actually booked while it ran (an estimate, labelled as such).
+        rev_captured = round(sum((r.get("cur") or 0) for r in dates.values() if r.get("booked")))
+        active = s.get("active", False)
+        # Item 22: working (booking nights) vs stalled (active but nothing moved) vs done.
+        flag = "done" if not active else ("working" if booked > 0 else "stalled")
         out.append({"lid": lid, "name": s.get("name", str(lid)), "base": s.get("base", 0),
-                    "active": s.get("active", False), "started": s.get("started"),
+                    "active": active, "started": s.get("started"),
                     "updated": s.get("updated", 0), "total": len(dates), "booked": booked,
+                    "rev_captured": rev_captured, "flag": flag,
                     "open": len(dates) - booked, "applied_start": s.get("applied_start", 0),
                     "changes_total": s.get("changes_total", 0),
                     "dry": s.get("dry_at_start", PRICE_APPLY_DRYRUN)})
-    # active first, then most-recently-updated
-    out.sort(key=lambda x: (not x["active"], -(x["updated"] or 0)))
+    # Item 23: active first; within active, STALLED (no bookings) pinned above working
+    # so a strategy producing zero movement surfaces at the top to be fixed.
+    out.sort(key=lambda x: (not x["active"], x["booked"] > 0, -(x["updated"] or 0)))
     return out
 
 async def _api_strategies(request):
