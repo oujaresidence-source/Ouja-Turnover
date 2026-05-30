@@ -11119,6 +11119,9 @@ function _renderPmoList(){
   var s=document.getElementById('pmoSort'); if(s) s.value=_pmoSort;
   _pmoRenderCards();
 }
+async function pmoToggleSignoff(id, cur){
+  try{ await post('/api/pmo/update',{id:id, signoff: !cur}); toast('✓'); loadPmo(); }catch(e){ toast('خطأ'); }
+}
 function _pmoRenderCards(){
   var wrap = document.getElementById('pmoCards'); if(!wrap) return;
   var ar = (L==='ar');
@@ -11147,7 +11150,7 @@ function _pmoRenderCards(){
     var late = !!(dl && dl.over && (p.progress==null || p.progress<100));   // item 54
     h += '<div class="card" style="padding:14px;cursor:pointer'+(late?';border-inline-start:3px solid var(--red)':'')+'" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+'</div>'
+      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+(p.signoff?(' <span class="pill warn">⏳ '+(ar?'اعتماد فيصل':'Faisal sign-off')+'</span>'):'')+'</div>'
       + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(p.client_name||'')+(p.district?(' · '+esc(p.district)):'')+'</div></div>'
       + '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-weight:800;font-size:16px">'+prog+'</div></div></div>'
       + '<div style="height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:9px 0 7px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>'
@@ -11155,9 +11158,13 @@ function _pmoRenderCards(){
       + '<span class="muted" style="font-size:11px">'+(ms?('🚩 '+esc(ms)):'')+'</span>'
       + (dl?('<span style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</span>'):'')
       + '</div>'
-      + '<div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">'
+      // Item 55: budget vs actual (spent = sum of task costs).
+      + (p.budget?('<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-top:7px;color:var(--text-2)"><span>'+(ar?'الميزانية':'Budget')+': <b class="mono">'+fmt(p.spent||0)+'</b> / '+fmt(p.budget)+' SAR</span>'+(((p.spent||0)>p.budget)?('<span class="pill danger">'+(ar?'تجاوز':'over')+'</span>'):'')+'</div>'):'')
+      + '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" onclick="event.stopPropagation()">'
       + '<button class="btn ghost xs" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'+(ar?'افتح':'Open')+'</button>'
       + '<button class="btn ghost xs" onclick="pmoCopyOwnerById(&#39;'+esc(p.id)+'&#39;)">'+(ar?'انسخ رابط المالك':'Copy owner link')+'</button>'
+      // Item 56: one-click sign-off toggle.
+      + '<button class="btn '+(p.signoff?'red':'ghost')+' xs" onclick="pmoToggleSignoff(&#39;'+esc(p.id)+'&#39;,'+(p.signoff?'true':'false')+')">'+(p.signoff?(ar?'✓ اعتُمد':'✓ signed off'):(ar?'⏳ يحتاج اعتمادك':'⏳ needs sign-off'))+'</button>'
       + '</div></div>';
   }
   h += '</div>';
@@ -17582,6 +17589,7 @@ def _pmo_view(p):
         "room_progress": room_prog,
         "status_label": _pmo_status_label(p),
         "spent": (spent if has_costs else None),
+        "signoff": p.get("signoff", False),
         "task_count": len(tasks),
         "done_count": sum(1 for t in tasks if t.get("status") == "done"),
         "created_at": p.get("created_at"), "updated_at": p.get("updated_at"),
@@ -17860,8 +17868,12 @@ async def _api_pmo_list(request):
     out = []
     for p in items:
         tasks = p.get("tasks") or []
+        _spent = sum((t.get("cost") or 0) * (t.get("qty") or 1)
+                     for t in tasks if isinstance(t.get("cost"), (int, float)))
         out.append({
             "id": p["id"], "ref": p.get("ref"),
+            "budget": p.get("budget"), "spent": round(_spent) if _spent else None,  # item 55
+            "signoff": p.get("signoff", False),                                     # item 56
             "unit_name": (p.get("unit") or {}).get("name", ""),
             "client_name": (p.get("client") or {}).get("name", ""),
             "district": (p.get("unit") or {}).get("district", ""),
@@ -17980,6 +17992,8 @@ async def _api_pmo_update(request):
             p["budget"] = float(b["budget"]) if b["budget"] not in (None, "", "null") else None
         except Exception:
             pass
+    if "signoff" in b:
+        p["signoff"] = bool(b["signoff"])   # item 56: needs Faisal's sign-off
     if isinstance(b.get("rooms"), list):
         p["rooms"] = [str(x).strip()[:60] for x in b["rooms"] if str(x).strip()][:60]
     p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
