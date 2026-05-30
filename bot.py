@@ -10657,8 +10657,15 @@ function _expAllHtml(){
 function _expByAptHtml(){
   var arr=((D.expSummary||{}).by_apartment)||[];
   if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
-  var head='<tr>'+[L==='ar'?'الشقة':'Apartment',L==='ar'?'عدد':'Count',L==='ar'?'إجمالي مُرحّل':'Total posted'].map(_expTh).join('')+'</tr>';
-  var rows=arr.map(function(a){ return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700">'+expMoney(a.total)+'</td></tr>'; }).join('');
+  var ar=(L==='ar');
+  // Item 58: flag apartments costing notably more than peers (>= 1.5x the median).
+  var totals=arr.map(function(a){return a.total||0}).filter(function(x){return x>0}).sort(function(x,y){return x-y});
+  var median = totals.length ? totals[Math.floor(totals.length/2)] : 0;
+  var head='<tr>'+[ar?'الشقة':'Apartment',ar?'عدد':'Count',ar?'إجمالي مُرحّل':'Total posted'].map(_expTh).join('')+'</tr>';
+  var rows=arr.map(function(a){
+    var hot = (totals.length>=4 && median>0 && (a.total||0) >= median*1.5);
+    var badge = hot ? ' <span class="pill danger">⚠ '+(ar?'أعلى من المعتاد':'above peers')+'</span>' : '';
+    return '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td></tr>'; }).join('');
   return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
 }
 function _expByEmpHtml(){
@@ -11078,9 +11085,10 @@ function _pmoRenderCards(){
     var bw = (p.progress==null)?0:p.progress;
     var ms = p.milestone ? (ar?(p.milestone.ar||''):(p.milestone.en||'')) : '';
     var dl = pmoDaysLeft(p.handover_date);
-    h += '<div class="card" style="padding:14px;cursor:pointer" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
+    var late = !!(dl && dl.over && (p.progress==null || p.progress<100));   // item 54
+    h += '<div class="card" style="padding:14px;cursor:pointer'+(late?';border-inline-start:3px solid var(--red)':'')+'" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+'</div>'
+      + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+'</div>'
       + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(p.client_name||'')+(p.district?(' · '+esc(p.district)):'')+'</div></div>'
       + '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-weight:800;font-size:16px">'+prog+'</div></div></div>'
       + '<div style="height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:9px 0 7px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>'
