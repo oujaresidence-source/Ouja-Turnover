@@ -9929,14 +9929,39 @@ async function loadWeekly(){
   try { D.weekly = await api('/api/weekly/list'); } catch(_){ D.weekly = {reports:[]} }
   _renderWeeklyBody();
 }
+// Item 48: auto Najdi narrative from cached analytics (no AI call needed).
+function weeklyNarrative(){
+  const ov = D.ov||{}, units = ((D.rev||{}).units)||[];
+  const ar = (L==='ar');
+  const rev7 = ov.rev_7||0, rev30 = ov.rev_30||0, occ7 = ov.occ_7, missed = ov.missed_7||0;
+  // We don't store an exact prior week, so compare to the trailing ~3-week average (labelled honestly).
+  const prevAvg = rev30>rev7 ? (rev30-rev7)/3 : 0;
+  const wow = prevAvg>0 ? Math.round((rev7-prevAvg)/prevAvg*100) : null;
+  let strong=null, weak=null;
+  units.forEach(function(u){ if(u.occ==null) return; if(!strong||u.occ>strong.occ) strong=u; if(!weak||u.occ<weak.occ) weak=u; });
+  const acts=[];
+  const uplift = (D.pr&&D.pr.total_uplift)||0;
+  if(uplift>0) acts.push(ar?('فيه ~'+fmt(uplift)+' ر.س على الطاولة بالتسعير — راجع صفحة التسعير'):('~'+fmt(uplift)+' SAR on the table in pricing — review Pricing'));
+  if(weak && weak.occ!=null && weak.occ<60) acts.push(ar?('أضعف وحدة «'+esc(weak.name)+'» إشغالها '+weak.occ+'٪ — سوّ لها عرض أو نزّل سعرها'):('Weakest unit "'+esc(weak.name)+'" at '+weak.occ+'% — discount or promo it'));
+  if(missed>0) acts.push(ar?('ضاع ~'+fmt(missed)+' ر.س الأسبوع من ليالٍ فاضية — قلّلها'):('~'+fmt(missed)+' SAR missed this week from empty nights — cut them'));
+  if(!acts.length) acts.push(ar?'كل شي ماشي تمام — ثبّت على نفس الإيقاع':'All steady — keep the rhythm');
+  const wowTxt = wow==null ? '' : (ar?('، الإيراد '+(wow>=0?'+':'')+wow+'٪ مقابل متوسط آخر ٣ أسابيع'):(', revenue '+(wow>=0?'+':'')+wow+'% vs the trailing 3-week average'));
+  const line = ar
+    ? ('هذا الأسبوع: إيراد ~<b>'+fmt(rev7)+' ر.س</b>'+wowTxt+'، الإشغال <b>'+(occ7!=null?occ7+'٪':'—')+'</b>'+(strong?('، أقوى وحدة <b>'+esc(strong.name)+'</b> ('+strong.occ+'٪)'):'')+(weak?('، وأضعف وحدة <b>'+esc(weak.name)+'</b> ('+weak.occ+'٪)'):'')+'.')
+    : ('This week: revenue ~<b>'+fmt(rev7)+' SAR</b>'+wowTxt+', occupancy <b>'+(occ7!=null?occ7+'%':'—')+'</b>'+(strong?(', strongest <b>'+esc(strong.name)+'</b> ('+strong.occ+'%)'):'')+(weak?(', weakest <b>'+esc(weak.name)+'</b> ('+weak.occ+'%)'):'')+'.');
+  return '<div class="mbrief" style="margin-bottom:14px"><div class="mbrief-line">📊 '+line+'</div>'
+    + '<div class="mb-top"><b>'+(ar?'٣ أشياء تتصرف فيها:':'3 things to act on:')+'</b></div>'
+    + '<div class="mb-alerts">'+acts.slice(0,3).map(function(a,i){ return '<div class="mb-alert amber"><span class="mb-ic">'+(i+1)+'</span><span>'+a+'</span></div>'; }).join('')+'</div></div>';
+}
 function _renderWeeklyBody(){
   const body = document.getElementById('weeklyBody'); if(!body) return;
   const items = ((D.weekly||{}).reports)||[];
+  const narrative = weeklyNarrative();   // item 48 (kept above the numeric report list — item 49)
   if(!items.length){
-    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">📊</div><div class="muted">ما فيه تقارير أسبوعية بعد. اضغط "<b>تقرير جديد</b>" أعلاه.</div></div>';
+    body.innerHTML = narrative + '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">📊</div><div class="muted">ما فيه تقارير أسبوعية بعد. اضغط "<b>تقرير جديد</b>" أعلاه.</div></div>';
     return;
   }
-  let h = '<div style="display:flex;flex-direction:column;gap:8px">';
+  let h = narrative + '<div style="display:flex;flex-direction:column;gap:8px">';
   for(const r of items){
     const sm = r.summary||{};
     let badges = '';
