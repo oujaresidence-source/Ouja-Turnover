@@ -2359,9 +2359,8 @@ substantive, or you are not fully certain (most amenity/directions/check-in answ
 
 WHEN IN DOUBT between "auto" and "reply", pick "reply" — a human approves it before it sends, so it is \
 always safe. Only choose "escalate" when the request matches the MUST-escalate list (complaint, dispute, \
-refund, booking change, upset guest, security info). A question you simply don't have the answer to \
-(like live availability) is NOT a reason to escalate — suggest what you can and point the guest to the \
-Airbnb link. Never gamble on "auto".
+refund, booking change, upset guest, security info). A question you simply don't have a fact for is NOT a reason to escalate — answer what you can (and live \
+availability you DO have whenever the unit + dates are known; see the AVAILABILITY rule below). Never gamble on "auto".
 
 YOU MAY draft replies (auto or reply) about
 - Unit amenities (wifi, parking, pool, kitchen, facilities)
@@ -2386,6 +2385,11 @@ MUST NOT share the exact location, address, building/door number, or the arrival
 if the guest asks directly. Politely tell them the full location and arrival details are sent right \
 after the booking is confirmed. You may still talk about the general area, amenities, and price.
 - Only share location and the arrival-guide link when Booking status is CONFIRMED.
+- WORKING MEMORY: the whole conversation above is your memory. NEVER re-ask something the guest already \
+told you earlier in this same thread (their dates, party size, which unit, budget, preferences). Carry \
+those forward and build on them — answering each message in isolation is a failure.
+- OTHER GUESTS' PRIVACY: never reveal any other guest's name, dates, contact, or booking. Only ever \
+discuss THIS guest's own data. If asked who is in another unit or who booked something, politely decline.
 
 SUGGESTING A UNIT / AVAILABILITY  (do NOT escalate these — suggest instead)
 - If the guest asks for another/different unit, a bigger/cheaper/smaller one, a unit in another area, \
@@ -2397,10 +2401,15 @@ and any must-have or budget. If they already told you, skip the questions and su
 - Then, from the "قائمة وحدات عوجا" in the context, suggest 1-3 matches. For each: name, bedrooms, \
 area, the "starting from" nightly price, and the Airbnb link if it is in the list. NEVER invent a link \
 or a detail. If nothing matches exactly, suggest the closest and state the differences honestly.
-- AVAILABILITY: you do NOT have live availability. Never promise a unit is free. Instead, suggest the \
-options and tell the guest to check live availability and book directly from the Airbnb link (the link \
-always shows what is open for their dates). Not knowing availability is NEVER a reason to escalate — \
-suggest + send them to the link.
+- AVAILABILITY (you DO have it — real-time): for a guest's stay, or any specific unit + dates, the system \
+checks the LIVE Hostaway calendar and puts the TRUE status in your context (متاحة / محجوزة / متاحة جزئياً). \
+Answer truthfully from that fact: if available, confirm it's free for those dates; if booked, say so plainly \
+and proactively suggest alternative dates or another AVAILABLE unit from the list; if partially available, \
+say which nights are taken. If the guest asks about availability but didn't say WHICH unit, ask which unit; \
+if they didn't give DATES, ask the dates — then the system checks and you answer. GUARDRAIL: state \
+availability ONLY from the real fact in your context — never guess, and never promise a unit is free without \
+it. If the context says availability could not be confirmed, tell the guest you're confirming with the team \
+and use action "reply" (a human checks) — never invent an answer and never dead-end them on a link.
 - A FEATURE you're not sure about (e.g. whether a unit allows smoking, or has a specific view): if it \
 is not in your provided info, suggest the closest units, be honest that you'd confirm that specific \
 detail with the team, and keep it action "reply" so a human checks. Do NOT invent the feature.
@@ -2732,6 +2741,81 @@ def unit_availability_price(listing_id, checkin, checkout):
     _bounded_cache_put(_avail_cache, key, (result, time.time()), _AVAIL_CACHE_MAX)
     return result
 
+def get_availability(listing_id, start_date, end_date):
+    """Truthful availability for ONE unit over a stay [start_date, end_date)
+    (the checkout night is never charged/occupied).
+
+    Strategy: a TARGETED, bounded live Hostaway calendar query for exactly the
+    stay window; fall back to the cached per-unit grid ONLY if the live call
+    fails. Returns a dict the assistant can quote with certainty:
+      {status: 'available'|'booked'|'partial', nights, free_nights[], booked_nights[],
+       total, avg, source: 'live'|'grid'}
+    or None when the answer is genuinely unknown — in which case the caller must
+    NOT guess; it should confirm with the team / escalate.
+    """
+    if not listing_id or not start_date or not end_date:
+        return None
+    ci, co = _parse_date(start_date), _parse_date(end_date)
+    if not ci or not co or co <= ci:
+        return None
+    nights = (co - ci).days
+    last_night = co - timedelta(days=1)
+    ckey = ("getav", int(listing_id), ci.isoformat(), co.isoformat())
+    hit = _avail_cache.get(ckey)
+    if hit and (time.time() - hit[1]) < INTEL_CACHE_MIN * 60:
+        return hit[0]
+
+    rows_by_date, source = None, None
+    # 1) targeted live query — just this window, cheap
+    try:
+        data = api_get(f"/listings/{listing_id}/calendar",
+                       params={"startDate": ci.isoformat(), "endDate": last_night.isoformat()})
+        rows = data.get("result") or []
+        if rows:
+            rows_by_date = {r.get("date"): r for r in rows if r.get("date")}
+            source = "live"
+    except Exception as e:
+        print(f"get_availability live error ({listing_id}):", e)
+    # 2) fallback ONLY on live failure — cached per-unit grid
+    if rows_by_date is None:
+        try:
+            grid = _cache_get("calendar_grid")
+            if grid and grid.get("start"):
+                base = _parse_date(grid["start"])
+                u = next((x for x in grid.get("units", []) if x.get("lid") == int(listing_id)), None)
+                if base and u:
+                    rows_by_date = {}
+                    for i, c in enumerate(u.get("cells", [])):
+                        d = (base + timedelta(days=i)).isoformat()
+                        is_empty = (c.get("status") == "empty")
+                        rows_by_date[d] = {"isAvailable": 1 if is_empty else 0,
+                                           "price": c.get("price"),
+                                           "reservationId": (None if is_empty else "x")}
+                    source = "grid"
+        except Exception as e:
+            print(f"get_availability grid error ({listing_id}):", e)
+    if not rows_by_date:
+        return None
+
+    free, booked, prices = [], [], []
+    for i in range(nights):
+        d = (ci + timedelta(days=i)).isoformat()
+        r = rows_by_date.get(d)
+        if r is None:
+            return None   # a night outside the known window → unknown, don't guess
+        avail = (int(r.get("isAvailable", 0) or 0) == 1) and not r.get("reservationId")
+        (free if avail else booked).append(d)
+        p = r.get("price")
+        if avail and isinstance(p, (int, float)) and p > 0:
+            prices.append(float(p))
+    status = "available" if not booked else ("booked" if len(booked) == nights else "partial")
+    total = round(sum(prices)) if (prices and len(prices) == nights) else None
+    avg = round(total / nights) if total else None
+    out = {"status": status, "nights": nights, "free_nights": free, "booked_nights": booked,
+           "total": total, "avg": avg, "source": source}
+    _bounded_cache_put(_avail_cache, ckey, (out, time.time()), _AVAIL_CACHE_MAX)
+    return out
+
 def _unit_match_score(u, want):
     """Score a unit against a desired-criteria dict so we date-check the most-likely
     matches FIRST. `want` keys: beds, capacity, area, tags (set of normalized tags).
@@ -2990,20 +3074,37 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         if apt_learn:
             facts_block += ("دروس خاصة بهذه الوحدة بالذات (تجمعت من تفاعلات سابقة عليها — اعتبرها "
                             "مصدر حقيقة قوي عن هذه الشقة تحديداً):\n" + apt_learn + "\n\n")
+    # ---- Stage 3 (item 10): human-APPROVED learnings (a person clicked Approve) ----
+    _appr = _approved_learnings_text(int(listing_id) if listing_id else None)
+    if _appr:
+        facts_block += ("دروس معتمدة من الفريق (وافق عليها بشر صراحةً — طبّقها كحقائق موثوقة):\n"
+                        + _appr + "\n\n")
     want_catalog = bool(_catalog_text) and _is_asking_alternatives(history_text)
     # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
     own_price_line = ""
-    if (dates and dates[0] and listing_id
-            and (want_catalog or any(h in low for h in _PRICE_HINTS))):
-        info = unit_availability_price(listing_id, dates[0], dates[1])
-        if info and info.get("total") is not None:
-            avail = "متاحة" if info["available"] else "غير متاحة حالياً"
-            own_price_line = (
-                f"\nالتسعير الفعلي لوحدة الضيف ({unit}) لتواريخه (قبل الضريبة ورسوم المنصة): "
-                f"{info['nights']} ليالي ≈ {info['total']} ر.س (متوسط {info['avg']}/ليلة) · الوحدة {avail}.")
-        elif info and info.get("available") is not None:
-            own_price_line = (f"\nوحدة الضيف ({unit}) "
-                              f"{'متاحة' if info['available'] else 'غير متاحة'} لتواريخه.")
+    _avail_intent = any(w in low for w in
+                        ("متاح", "متوف", "فاضي", "فاضية", "محجوز", "available", "availab", "vacan",
+                         "free for", "ممكن احجز", "اقدر احجز", "تقدر احجز", "احجز"))
+    if (dates and dates[0] and dates[1] and listing_id
+            and (want_catalog or _avail_intent or any(h in low for h in _PRICE_HINTS))):
+        av = get_availability(listing_id, dates[0], dates[1])
+        if av:
+            if av["status"] == "available":
+                stat = "متاحة بالكامل لتواريخه ✅"
+            elif av["status"] == "booked":
+                stat = "محجوزة بالكامل لتواريخه ❌ — اقترح عليه تواريخ ثانية أو وحدة بديلة متاحة من القائمة"
+            else:
+                stat = ("متاحة جزئياً — الليالي المحجوزة: " + "، ".join(av["booked_nights"])
+                        + "؛ اعرض عليه تعديل التواريخ أو وحدة بديلة متاحة")
+            price_txt = (f" · السعر الحقيقي ≈ {av['total']} ر.س ({av['avg']}/ليلة، قبل الضريبة ورسوم المنصة)"
+                         if av.get("total") else "")
+            own_price_line = (f"\nالتوافر الحقيقي لوحدة الضيف ({unit}) لتواريخه "
+                              f"(مصدره تقويم Hostaway المباشر — هذي حقيقة، استخدمها): {stat}{price_txt}.")
+        else:
+            # GUARDRAIL: real check genuinely failed → do NOT let the model guess.
+            own_price_line = (f"\n⚠ تعذّر تأكيد توافر وحدة الضيف ({unit}) لتواريخه آلياً. "
+                              f"لا تخمّن التوافر إطلاقاً — قل للضيف إنك تتأكد من التوفّر مع الفريق "
+                              f"وردّ بـ action=\"reply\" عشان بشر يأكد.")
     # ---- early check-in detection + pre-computation ----
     # Done HERE (in claude_draft) rather than in the system prompt because the bot
     # can't call functions on its own — we precompute prev-night occupancy +
@@ -3247,10 +3348,15 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             summaries = (p.get("summaries", []) or [])[-3:]
             sum_text = "\n".join("- " + (s.get("text","") or "")[:280] for s in summaries if s.get("text"))
             vip_line = "⭐ ضيف مميّز (VIP) — سبق له " + str(stays) + " إقامة معنا." if p.get("vip") else "ضيف عائد — سبق له " + str(stays) + " إقامة."
+            _sent = _guest_sentiment(p)   # item 5b: prior sentiment
+            _sent_line = {"positive": "- انطباعه السابق عنّا إيجابي — حافظ على نفس المستوى.\n",
+                          "negative": "- كان عنده انطباع سلبي سابقاً — كن ألطف وأكثر اهتماماً وتأكّد ما يتكرر السبب.\n",
+                          "mixed": "- انطباعه السابق مختلط — اهتم بتفاصيله أكثر.\n"}.get(_sent, "")
             profile_block = (
                 f"\n\nملف الضيف (لا تذكر أنه ملف — استخدمه طبيعياً):\n"
                 f"- {vip_line}\n"
                 f"- إقاماته السابقة: {past_summary}\n"
+                + _sent_line
                 + (f"- ملخصات محادثات سابقة:\n{sum_text}\n" if sum_text else "")
                 + "- ابدأ ردك بترحيب يعكس عودته (مثل 'حياك الله مرة ثانية' / 'نوّرتنا تاني'). "
                 + "لا تطلب منه معلومات يفترض أنها معروفة لنا من الإقامات السابقة. "
@@ -3266,8 +3372,42 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         f"لا تسأله أبداً 'أي شقة تقصد' أو 'أي وحدة'. الاقتراحات البديلة تظهر فقط لما يطلبها صراحةً.\n\n"
         if unit else ""
     )
-    user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
+    # ---- Stage 2: time/season context (Riyadh) ----
+    _today_r = datetime.now(TZ).date()
+    _active_ev = list(dict.fromkeys(
+        e["name"] for e in SAUDI_EVENTS
+        if _parse_date(e.get("start", "")) and _parse_date(e.get("end", ""))
+        and _parse_date(e["start"]) <= _today_r <= _parse_date(e["end"])))
+    _se_bits = (["نهاية أسبوع"] if _today_r.weekday() in WEEKEND_DAYS else []) + _active_ev
+    season_block = ("\n\nسياق الوقت (الرياض): اليوم " + _today_r.isoformat()
+                    + ("، " + "، ".join(_se_bits) if _se_bits else "")
+                    + ". راعِ المناسبة في نبرتك وتوقيتك (تهنئة بالعيد، ازدحام موسم الرياض، هدوء رمضان…).")
+    # ---- Stage 2: this specific unit's facts from the catalog ----
+    listing_facts_block = ""
+    if listing_id:
+        _cu = next((u for u in _catalog_units if u.get("id") == int(listing_id)), None)
+        if _cu:
+            _lb = []
+            if _cu.get("beds"):
+                _lb.append(f"{_cu['beds']} غرف نوم")
+            _loc = _cu.get("area") or _cu.get("neighbourhood")
+            if _loc:
+                _lb.append(str(_loc))
+            if _cu.get("ptype"):
+                _lb.append(str(_cu["ptype"]))
+            _ams = _cu.get("amenities") or []
+            if _ams:
+                _lb.append("مزايا: " + "، ".join(str(a) for a in _ams[:12]))
+            if _lb:
+                listing_facts_block = "\nمواصفات هذه الوحدة (من كتالوج عوجا): " + " · ".join(_lb) + "."
+    # ---- Stage 2: reservation nights (dates + status are shown above) ----
+    nights_line = ""
+    if dates and dates[0] and dates[1]:
+        _ci2, _co2 = _parse_date(dates[0]), _parse_date(dates[1])
+        if _ci2 and _co2 and _co2 > _ci2:
+            nights_line = f"\nعدد ليالي الإقامة: {(_co2 - _ci2).days}."
+    user = (f"{unit_guard}{facts_block}{listing_facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
+            f"{status_line}\n{guide_line}{dates_line}{nights_line}{own_price_line}{season_block}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
@@ -3544,6 +3684,13 @@ def record_learning(item, original_draft, final_reply, via, approver=None):
             "approver": approver or "",
         }
         _learning_log.append(entry)
+        # Stage 3 (items 8a/8b): a human reshaping the draft (correction) or answering from
+        # scratch a conversation the bot couldn't draft (co-host) → a learning CANDIDATE,
+        # captured for human-gated review. Never auto-promoted.
+        if entry["was_edited"] and via in ("dashboard_send", "discord_edit"):
+            _k = "cohost" if len((entry["bot_draft"] or "").strip()) < 5 else "correction"
+            add_learning_candidate(_k, entry["guest_question"], entry["bot_draft"],
+                                   entry["final_reply"], entry["unit"], entry["listing_id"])
         # ---- daily metrics ----
         metric_bump("replies_total")
         if via == "auto":           metric_bump("replies_auto")
@@ -4370,6 +4517,15 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     reply = (result.get("reply") or "").strip()
     escalate = action == "escalate" or sentiment == "upset" or conf < ESCALATE_BELOW
 
+    # Stage 3 (item 8c): when Musaed can't handle it / is unsure, log a knowledge-gap
+    # candidate (clustered by question so "asked N times" surfaces — item 11).
+    if escalate:
+        try:
+            add_learning_candidate("gap", item.get("guest_text", ""), reply, "",
+                                   item.get("unit", ""), item.get("listing_id"))
+        except Exception:
+            pass
+
     # daily metrics: every draft counts, with confidence + topic + apartment
     metric_bump("drafts_made")
     metric_record_confidence(conf)
@@ -4649,6 +4805,108 @@ _pricing_strategies = {}              # lid -> active dynamic-pricing strategy s
 _learning_log = deque(maxlen=3000)
 _apartment_learnings = {}   # lid (int) -> {"summary": str, "last_distilled": ts, "examples_count": int}
 _general_learnings = {"summary": "", "last_distilled": 0, "examples_count": 0}
+
+# ===================== STAGE 3: human-gated learning =====================
+# Candidates are SIGNALS captured automatically; they NEVER become canonical until a
+# human approves them in the LEARN view (items 9 & 12). Approved ones are injected into
+# Musaed's context (item 10). Everything is reversible.
+_learning_candidates = []   # [{id, kind, question, draft, final, unit, lid, count, status, ts}]
+_LC_SEQ = 0
+_approved_learnings = []     # [{question, answer, unit, lid, ts}] — injected into claude_draft
+
+def _norm_q(s):
+    """Normalise a question for clustering (item 11): lowercase, strip punctuation."""
+    s = (s or "").strip().lower()
+    # keep alphanumerics, spaces, and Arabic LETTERS (ء U+0621 … ۿ U+06FF) — this
+    # deliberately drops Arabic punctuation (؟ ، ؛, which sit below U+0621) so that
+    # question-mark / spacing variants of the same question cluster together.
+    keep = [ch for ch in s if ch.isalnum() or ch == " " or "ء" <= ch <= "ۿ"]
+    return " ".join("".join(keep).split())[:200]
+
+def add_learning_candidate(kind, question, draft="", final="", unit="", lid=None):
+    """Item 8: capture a learning signal as a PENDING candidate (never auto-canonical).
+    kind: 'correction' (human reshaped the draft) | 'gap' (low-confidence/unanswered) |
+    'cohost' (co-host answered). Gaps cluster by similar question (item 11)."""
+    global _LC_SEQ
+    try:
+        q = (question or "").strip()
+        if not q:
+            return
+        if kind == "gap":
+            nq = _norm_q(q)
+            for c in _learning_candidates:
+                if c.get("status") == "pending" and c.get("kind") == "gap" and _norm_q(c.get("question")) == nq:
+                    c["count"] = c.get("count", 1) + 1
+                    c["ts"] = datetime.now(TZ).isoformat(timespec="seconds")
+                    return
+        _LC_SEQ += 1
+        _learning_candidates.append({
+            "id": f"lc_{int(time.time())}_{_LC_SEQ}", "kind": kind,
+            "question": q[:900], "draft": (draft or "")[:1400], "final": (final or "")[:1400],
+            "unit": (unit or "")[:80], "lid": lid, "count": 1, "status": "pending",
+            "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+        })
+        if len(_learning_candidates) > 500:
+            del _learning_candidates[:len(_learning_candidates) - 500]
+    except Exception as e:
+        print("add_learning_candidate error:", e)
+
+def _approved_learnings_text(lid=None):
+    """Approved learnings to inject into Musaed's context (item 10): general + this unit."""
+    out = []
+    for a in _approved_learnings[-80:]:
+        al = a.get("lid")
+        if al in (None, "") or (lid is not None and al == lid):
+            ans = (a.get("answer") or "").strip()
+            if ans:
+                out.append(f"- لو سُئل عن «{(a.get('question') or '')[:80]}» → {ans[:300]}")
+    return "\n".join(out)
+
+async def _api_learning_candidates(request):
+    """Item 9/11: list pending learning candidates, most-repeated gaps first."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    pend = [c for c in _learning_candidates if c.get("status") == "pending"]
+    pend.sort(key=lambda c: (c.get("count", 1), c.get("ts", "")), reverse=True)
+    return _json({"candidates": pend[:100], "count": len(pend),
+                  "approved": list(reversed(_approved_learnings[-50:]))})
+
+async def _api_learning_candidate_action(request):
+    """Item 9/12: human-gated approve / edit / discard. Approve/Edit promotes the pair to
+    an approved learning (injected into Musaed). NOTHING auto-promotes."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    c = next((x for x in _learning_candidates if x.get("id") == b.get("id", "")), None)
+    if not c:
+        return _json({"error": "not found"}, 404)
+    action = b.get("action", "")
+    if action == "discard":
+        c["status"] = "discarded"
+    elif action in ("approve", "edit"):
+        answer = (b.get("answer") or c.get("final") or c.get("draft") or "").strip()
+        if not answer:
+            return _json({"error": "no answer to approve"}, 400)
+        _approved_learnings.append({
+            "question": c.get("question", ""), "answer": answer[:1000],
+            "unit": c.get("unit", ""), "lid": c.get("lid"),
+            "ts": datetime.now(TZ).isoformat(timespec="seconds")})
+        c["status"] = "approved"
+    else:
+        return _json({"error": "bad action"}, 400)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
+async def _api_learning_candidate_forget(request):
+    """Item 12: reverse an approved learning (every learning is reversible)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ts = b.get("ts", "")
+    n0 = len(_approved_learnings)
+    _approved_learnings[:] = [a for a in _approved_learnings if a.get("ts") != ts]
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "removed": n0 - len(_approved_learnings)})
 
 # Daily metrics — one row per calendar date, persisted, used by the Learning page's
 # trend charts and the "what improved over time" copy. Every reply send, escalation
@@ -7644,6 +7902,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div id="bootstrapStatus" style="display:none"></div>
+
+        <!-- Stage 3: human-gated learning candidates (approve / edit / discard) -->
+        <div id="learnCandidates"></div>
 
         <!-- Stat cards: today + delta vs 7-day average -->
         <div class="kpis" id="learnStats"></div>
@@ -13915,9 +14176,11 @@ async function loadLearnings(){
       api('/api/learning/summary'),
       api('/api/metrics/daily?days=30').catch(function(){return {days:[]}}),
       api('/api/learning/today?days=1').catch(function(){return {apartments:[], total_events:0}}),
+      api('/api/learning/candidates').catch(function(){return {candidates:[], approved:[]}}),
     ]);
-    D.learn = r[0]; D.learnMetrics = r[1]; D.learnRecent = r[2];
+    D.learn = r[0]; D.learnMetrics = r[1]; D.learnRecent = r[2]; D.learnCand = r[3];
   }catch(_){ D.learn = {} }
+  renderLearnCandidates();
   // sync sub copy
   const sub = document.getElementById('t_learn_sub'); if(sub) sub.textContent = t().learn_sub;
   const eSel = document.getElementById('t_learn_empty_sel'); if(eSel) eSel.textContent = t().learn_empty_sel;
@@ -14066,6 +14329,45 @@ function _fmtDistillTime(ts){
   catch(_){ return '—' }
 }
 
+// Stage 3 (items 9/11/12): human-gated learning candidates in the LEARN view.
+function renderLearnCandidates(){
+  const el = document.getElementById('learnCandidates'); if(!el) return;
+  const d = D.learnCand || {}; const cand = d.candidates||[]; const appr = d.approved||[];
+  const ar = (L==='ar');
+  const kindLbl = function(k){ return k==='gap' ? (ar?'ما قدر يجاوبه':'unanswered') : k==='cohost' ? (ar?'جاوبه زميل':'co-host') : (ar?'تعديل بشري':'human edit'); };
+  let h = '';
+  if(cand.length){
+    h += '<div class="card" style="border-color:var(--gold)"><div class="card-head"><span class="card-title">🎓 '+(ar?'مرشّحات للتعلّم — تحتاج موافقتك':'Learning candidates — need your approval')+' <span class="pill gold">'+cand.length+'</span></span></div>';
+    h += cand.map(function(c){
+      const cnt = (c.count>1) ? (' <span class="pill danger">'+(ar?('انسأل ':'asked ')+c.count+(ar?' مرات':'×'))+'</span>') : '';
+      const ans = c.final || c.draft || '';
+      return '<div class="kan-card" style="cursor:default;margin-bottom:8px">'
+        + '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><span class="pill info">'+kindLbl(c.kind)+'</span>'+cnt+(c.unit?(' <span class="muted" style="font-size:11px">'+esc(c.unit)+'</span>'):'')+'</div>'
+        + '<div class="strong" style="font-size:12.5px;margin-top:6px">'+(ar?'السؤال: ':'Q: ')+esc((c.question||'').slice(0,220))+'</div>'
+        + '<textarea id="lc_'+esc(c.id)+'" placeholder="'+(ar?'الجواب الصحيح اللي يتعلّمه':'the correct answer to teach')+'" style="width:100%;margin-top:6px;font-size:12px;min-height:54px">'+esc(ans)+'</textarea>'
+        + '<div class="kan-acts">'
+        +   '<button class="qset-b ok" onclick="lcAction(&#39;'+esc(c.id)+'&#39;,&#39;approve&#39;)">✓ '+(ar?'اعتمد':'Approve')+'</button>'
+        +   '<button class="qset-b danger" onclick="lcAction(&#39;'+esc(c.id)+'&#39;,&#39;discard&#39;)">🗑 '+(ar?'تجاهل':'Discard')+'</button>'
+        + '</div></div>';
+    }).join('');
+    h += '<div class="muted" style="font-size:11px;padding:4px 2px">ℹ️ '+(ar?'ما يصير درساً معتمداً إلا بضغطك «اعتمد» — ما فيه تعلّم تلقائي.':'Nothing becomes a learning until you click Approve — no auto-learning.')+'</div></div>';
+  }
+  if(appr.length){
+    h += '<div class="card"><div class="card-head"><span class="card-title">✅ '+(ar?'دروس معتمدة':'Approved learnings')+' <span class="pill ok">'+appr.length+'</span></span></div>';
+    h += appr.map(function(a){ return '<div class="kan-card" style="cursor:default;margin-bottom:7px"><div class="strong" style="font-size:12px">'+esc((a.question||'').slice(0,120))+'</div><div class="muted" style="font-size:11.5px;margin-top:3px">→ '+esc((a.answer||'').slice(0,220))+'</div><div class="kan-acts"><button class="qset-b danger" onclick="lcForget(&#39;'+esc(a.ts)+'&#39;)">↩ '+(ar?'تراجع':'Forget')+'</button></div></div>'; }).join('');
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+async function lcAction(id, action){
+  const ta = document.getElementById('lc_'+id);
+  const answer = ta ? ta.value : '';
+  if(action==='approve' && !(answer||'').trim()){ toast(L==='ar'?'اكتب الجواب أول':'Write the answer first'); return; }
+  try{ await post('/api/learning/candidate',{id:id, action:action, answer:answer}); toast('✓'); loadLearnings(); }catch(e){ toast('خطأ'); }
+}
+async function lcForget(ts){
+  try{ await post('/api/learning/candidate/forget',{ts:ts}); toast('✓'); loadLearnings(); }catch(e){ toast('خطأ'); }
+}
 function renderLearnings(){
   const d = D.learn || {};
   // ---- general ----
@@ -19230,6 +19532,9 @@ async def start_web_server():
         app.router.add_post("/api/learning/forget", _api_learning_forget)
         app.router.add_post("/api/learning/distill", _api_learning_distill_now)
         app.router.add_post("/api/learning/edit", _api_learning_edit)
+        app.router.add_get("/api/learning/candidates", _api_learning_candidates)
+        app.router.add_post("/api/learning/candidate", _api_learning_candidate_action)
+        app.router.add_post("/api/learning/candidate/forget", _api_learning_candidate_forget)
         app.router.add_post("/api/learning/bootstrap", _api_learning_bootstrap)
         app.router.add_get("/api/learning/bootstrap/status", _api_learning_bootstrap_status)
         app.router.add_get("/api/metrics/daily", _api_metrics_daily)
@@ -19668,6 +19973,8 @@ def load_state():
                                if float(v) > time.time()}   # drop expired entries on boot
         _learning_log.clear()
         _learning_log.extend(_load_json("learning_log.json", []))
+        _learning_candidates.extend(_load_json("learning_candidates.json", []) or [])   # Stage 3
+        _approved_learnings.extend(_load_json("approved_learnings.json", []) or [])      # Stage 3
         _apartment_learnings.clear()
         _apartment_learnings.update({int(k): v for k, v in _load_json("apartment_learnings.json", {}).items()})
         _general_learnings.update(_load_json("general_learnings.json", {"summary": "", "last_distilled": 0, "examples_count": 0}))
@@ -19782,6 +20089,8 @@ def persist_state():
     _save_json("discount_pause.json", _discount_paused_until)
     _save_json("unit_discount_skip.json", {str(k): v for k, v in _unit_discount_skip.items()})
     _save_json("learning_log.json", list(_learning_log))
+    _save_json("learning_candidates.json", _learning_candidates)   # Stage 3
+    _save_json("approved_learnings.json", _approved_learnings)     # Stage 3
     _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
     _save_json("general_learnings.json", _general_learnings)
     _save_json("agreement_reminded.json", list(_agreement_reminded))
