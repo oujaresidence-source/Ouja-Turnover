@@ -96,6 +96,25 @@ Then verify the embedded dashboard string is intact (extract `DASHBOARD_HTML` an
 And run a quick **synthetic-data logic test** for any new computation (e.g. feed fake
 reservations into the new function and assert the numbers) before trusting it on live data.
 
+## Design skills installed — USE THEM EVERY SESSION
+Three design skills live in `.claude/skills/` and MUST be applied to any UI work:
+- **impeccable** (`.claude/skills/impeccable/`) — design-quality language + references
+  (typeset, colorize, layout, animate, interaction-design, adapt, clarify) and a `critique`/
+  `audit`/`polish` process. Anti-patterns to avoid: pure #000/#888 (tint neutrals instead),
+  gradient text, glassmorphism-as-decoration, cards-nested-in-cards, gray text on color,
+  bounce easing, generic Inter-for-everything. (Its `detect.mjs` needs Node, absent locally —
+  apply the rules by hand.)
+- **emil-design-eng** (`.claude/skills/emil-design-eng/`) — micro-interaction craft: custom
+  ease-out `cubic-bezier(0.23,1,0.32,1)`, scale(.97) on press, never scale(0), transform/opacity
+  only, <300ms UI motion, don't animate frequently-seen/auto-refreshed elements, respect
+  prefers-reduced-motion.
+- **superpowers** (methodology only — NOT installed as a plugin; can't self-install the
+  marketplace plugin from inside a session): plan → build → verify, evidence over claims,
+  simplicity, no skipping.
+The locked design system already lives in `DASHBOARD_HTML`'s `:root` (tinted warm neutrals +
+gold accent scale, IBM Plex Sans Arabic / Inter / JetBrains Mono). Reuse those tokens; don't
+invent per-view colors.
+
 ## Working style for this repo
 - **Audit before changing.** When asked for something big, first read the relevant code and
   state the plan; don't rewrite broadly.
