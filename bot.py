@@ -11954,7 +11954,11 @@ function _renderReviewCard(r){
   const _replyTxt = r.ai ? (r.ai.public_response_ar || r.ai.public_response_en || '') : '';
   html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
        +    ((r.ai && _replyTxt && (_notRemovable || isPos))
-            ? '<button class="btn primary xs" onclick="_rvCopy(this, '+JSON.stringify(_replyTxt)+')">✍️ انسخ الرد وأرسله</button>'
+            ? '<button class="btn primary xs" onclick="_rvCopy(this, '+JSON.stringify(_replyTxt)+')">✍️ انسخ الرد</button>'
+              // Item 40: Hostaway's PUBLIC API does NOT support posting a review response
+              // (confirmed: our fetch only GETs /v1/reviews; no reply endpoint exists). So we
+              // do NOT fake a publish — we deep-link to the Hostaway reviews dashboard to paste.
+              + '<button class="btn ghost xs" title="Hostaway API ما يدعم نشر الرد مباشرة — يفتح لوحة Hostaway تنسخ الرد وتلصقه وتنشره" onclick="window.open(&#39;https://dashboard.hostaway.com/reviews&#39;,&#39;_blank&#39;)">🌐 رد على Hostaway ←</button>'
             : '')
        +    (r.state.fixed
             ? '<button class="btn ghost xs" onclick="toggleReviewFixed(&#39;'+esc(r.id)+'&#39;)">↩ ارجع كغير محلولة</button>'
