@@ -1483,12 +1483,23 @@ def cleaning_quality_summary():
             u["comments"].append({"ts": fb.get("ts_done"), "comment": fb["comment"], "score": fb["score"]})
     units = []
     for lid, u in by_unit.items():
-        scores = [x["score"] for x in u["scores"]]
+        sc = sorted(u["scores"], key=lambda x: x.get("ts") or "")
+        scores = [x["score"] for x in sc]
         avg = round(sum(scores) / len(scores), 2) if scores else None
+        # Item 30: trend = recent third of scores vs the earlier ones.
+        trend, tdelta = "flat", 0
+        if len(scores) >= 4:
+            k = max(2, len(scores) // 3)
+            recent, earlier = scores[-k:], scores[:-k]
+            if earlier:
+                tdelta = round(sum(recent) / len(recent) - sum(earlier) / len(earlier), 2)
+                trend = "up" if tdelta >= 0.3 else ("down" if tdelta <= -0.3 else "flat")
         units.append({"lid": lid, "name": u["name"],
-                      "avg": avg, "count": len(scores),
+                      "avg": avg, "count": len(scores), "trend": trend, "tdelta": tdelta,
                       "recent": u["scores"][-5:], "comments": u["comments"][-5:]})
-    units.sort(key=lambda x: (x["avg"] if x["avg"] is not None else 99))
+    # Item 30: declining units pinned to the top, then lowest average.
+    units.sort(key=lambda x: (0 if x.get("trend") == "down" else 1,
+                              x["avg"] if x["avg"] is not None else 99))
     sent = len(_cleaning_feedback)
     done = sum(1 for fb in _cleaning_feedback.values() if fb.get("score") is not None)
     overall_avg = None
@@ -9263,7 +9274,9 @@ function renderQualityUnits(){
                   : '<span class="pill '+avgCls+'">'+_stars(u.avg)+'</span>';
     const recent = u.recent && u.recent.length
       ? u.recent.slice(-3).map(function(r){return '★'.repeat(r.score)}).join(' · ') : '—';
-    html += '<tr><td class="strong">'+esc(u.name||'—')+'</td>'
+    const trendTag = u.trend==='down' ? ' <span class="pill danger">↓ '+(L==='ar'?'يتراجع':'declining')+'</span>'
+                   : u.trend==='up' ? ' <span class="pill ok">↑ '+(L==='ar'?'يتحسّن':'improving')+'</span>' : '';
+    html += '<tr><td class="strong">'+esc(u.name||'—')+trendTag+'</td>'
       + '<td class="num">'+avgPill+'</td>'
       + '<td class="num">'+u.count+'</td>'
       + '<td class="muted" style="font-size:11.5px">'+recent+'</td></tr>';
