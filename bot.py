@@ -14742,7 +14742,7 @@ async function doSend(id){
 async function doReject(id){
   id = String(id);
   await post('/api/reject',{id:id});
-  toast(t().rejected); openInboxId=null; loadAll();
+  toast(t().rejected); openInboxId=null; refreshView('inbox');
 }
 async function doClaim(id){
   id = String(id);
