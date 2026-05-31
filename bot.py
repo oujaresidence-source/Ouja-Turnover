@@ -5827,7 +5827,7 @@ def _exp_validate(exp):
                 reasons.append(("incomplete", "amount"))
         else:
             thr = float(s.get("high_amount_threshold") or 0)
-            if thr > 0 and amt > thr:
+            if thr > 0 and amt > thr and not exp.get("amount_approved"):
                 reasons.append(("high_amount", str(int(amt))))
     # Check 4 — date sanity
     ds = (exp.get("expense_date") or "").strip()
@@ -5836,12 +5836,13 @@ def _exp_validate(exp):
             d = datetime.strptime(ds, "%Y-%m-%d").date()
             today = datetime.now(TZ).date()
             max_age = int(s.get("max_age_days") or 90)
-            if d > today or (today - d).days > max_age:
+            if (d > today or (today - d).days > max_age) and not exp.get("date_approved"):
                 reasons.append(("bad_date", ds))
         except Exception:
-            reasons.append(("bad_date", ds))
+            if not exp.get("date_approved"):
+                reasons.append(("bad_date", ds))
     # Check 5 — receipt
-    if s.get("receipt_required") and not has_receipt and has_reason:
+    if s.get("receipt_required") and not has_receipt and has_reason and not exp.get("no_receipt_approved"):
         reasons.append(("no_receipt", ""))
     # Check 6 — possible duplicate (only meaningful once apartment+amount known)
     if exp.get("listing_id") is not None and isinstance(amt, (int, float)) and amt and amt > 0 \
@@ -10809,7 +10810,10 @@ function _expCardActions(e,reason){
     btns.push('<button class="btn sm" onclick="expNotDup(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'مو مكرر — رحّله':'Not a duplicate — post')+'</button>');
     btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل كمكرر':'Discard as duplicate')+'</button>');
   } else if(reason==='high_amount'||reason==='no_receipt'||reason==='bad_date'){
-    btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'مراجعة ✓ ورحّل':'Approve & post')+'</button>');
+    var glab = reason==='no_receipt'?(L==='ar'?'اعتمد بدون فاتورة ورحّل':'Approve no-receipt & post')
+             : reason==='high_amount'?(L==='ar'?'اعتمد المبلغ ورحّل':'Approve amount & post')
+             : (L==='ar'?'اعتمد التاريخ ورحّل':'Approve date & post');
+    btns.push('<button class="btn primary sm" onclick="expApproveAndPost(&#39;'+esc(e.id)+'&#39;,&#39;'+reason+'&#39;)">'+glab+'</button>');
   } else if(e.status==='failed'){
     btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>');
   }
@@ -10904,9 +10908,23 @@ function _expByEmpHtml(){
 /* ---- expense actions ---- */
 async function expPost(id){
   var r=await post('/api/expenses/post',{id:id});
-  if(r && r.ok) toast(L==='ar'?'تم الترحيل ✓':'Posted ✓');
-  else toast(L==='ar'?'لسه موقوف — راجع البيانات':'Still held — check data');
+  if(r && r.ok){ toast(L==='ar'?'تم الترحيل في Hostaway ✓':'Posted to Hostaway ✓'); }
+  else if(r && r.blocked_by && r.blocked_by.length){
+    // name the EXACT gate(s) that block posting — never the vague "راجع البيانات"
+    var names=r.blocked_by.map(function(b){ return (L==='ar'?b.ar:b.en)+(b.detail?(' · '+b.detail):''); }).join('، ');
+    toast((L==='ar'?'ما تقدر ترحّل: ':'Can\\'t post: ')+names);
+  } else if(r && r.error){
+    toast((L==='ar'?'Hostaway رفض: ':'Hostaway rejected: ')+r.error);   // the REAL API error
+  } else {
+    toast(L==='ar'?'فشل — حدّث الصفحة':'Failed — refresh');
+  }
   await expRefresh();
+}
+async function expApproveAndPost(id, gate){
+  // The fix for the doom loop: actually APPROVE the soft gate, then post.
+  var a=await post('/api/expenses/approve',{gate:gate, id:id});
+  if(!(a && a.ok)){ toast((L==='ar'?'تعذّرت الموافقة: ':'Approve failed: ')+((a&&a.error)||'')); return; }
+  await expPost(id);
 }
 async function expDiscard(id){
   var e=_expFind(id);
@@ -17954,10 +17972,39 @@ async def _api_expenses_post(request):
     await asyncio.to_thread(_exp_validate, e)
     if e.get("status") != "ready":
         await asyncio.to_thread(persist_state)
-        return _json({"ok": False, "error": "still_held", "expense": _exp_view(e)})
+        blocked = [{"code": r["code"],
+                    "ar": EXPENSE_HOLD_LABELS.get(r["code"], (r["code"], r["code"]))[0],
+                    "en": EXPENSE_HOLD_LABELS.get(r["code"], (r["code"], r["code"]))[1],
+                    "detail": r.get("detail")} for r in (e.get("hold_reasons") or [])]
+        return _json({"ok": False, "error": "still_held", "blocked_by": blocked,
+                      "expense": _exp_view(e)})
     ok = await asyncio.to_thread(_exp_post_to_hostaway, e)
     await asyncio.to_thread(persist_state)
-    return _json({"ok": ok, "expense": _exp_view(e)})
+    out = {"ok": ok, "expense": _exp_view(e)}
+    if not ok:                                              # surface the REAL Hostaway error
+        out["error"] = e.get("error") or "Hostaway rejected the post"
+        out["status"] = e.get("status")                    # 'failed'
+    return _json(out)
+
+async def _api_expenses_approve(request):
+    """Manager approves a SOFT gate (no_receipt / high_amount / bad_date) so the expense
+    can post — sets the approval flag + re-validates. This is the mechanism that was
+    missing (the old 'Approve & post' just re-validated and re-blocked)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    flag = {"no_receipt": "no_receipt_approved", "high_amount": "amount_approved",
+            "bad_date": "date_approved"}.get(b.get("gate", ""))
+    if not flag:
+        return _json({"error": "bad gate"}, 400)
+    e[flag] = True
+    e["approved_by"] = (b.get("by") or "")[:60]
+    await asyncio.to_thread(_exp_validate, e)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "expense": _exp_view(e)})
 
 async def _api_expenses_resolve_apartment(request):
     """Manager picked the right listing for an ambiguous/not-found expense."""
@@ -19760,6 +19807,7 @@ async def start_web_server():
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
+        app.router.add_post("/api/expenses/approve", _api_expenses_approve)
         app.router.add_post("/api/expenses/resolve-apartment", _api_expenses_resolve_apartment)
         app.router.add_post("/api/expenses/not-duplicate", _api_expenses_not_duplicate)
         app.router.add_post("/api/expenses/discard", _api_expenses_discard)
