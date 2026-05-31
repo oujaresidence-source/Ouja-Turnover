@@ -16044,6 +16044,35 @@ html.lang-en .chart-t{font-family:var(--f-en)}
 .mark-row .v{color:var(--ink);font-weight:600}
 .mark-row.ouja .l,.mark-row.ouja .v{color:var(--gold-bright)}
 
+/* ---------- proof ---------- */
+#proof[hidden]{display:none}
+.proof-wrap{margin-top:clamp(24px,4vh,38px)}
+.proof-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,2vw,20px)}
+@media (max-width:620px){.proof-kpis{grid-template-columns:1fr}}
+.proof-kpi{text-align:center;padding:clamp(22px,3vw,32px);border:1px solid var(--line);border-radius:var(--r-lg);background:linear-gradient(180deg,var(--surface),var(--bg-2))}
+.pk-v{font-family:var(--f-body);font-weight:600;font-size:clamp(2rem,4.6vw,2.9rem);color:var(--gold-bright);font-variant-numeric:tabular-nums;line-height:1}
+.pk-l{font-size:13px;color:var(--ink-3);margin-top:11px}
+.proof-areas{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:12px;margin-top:16px}
+.area{border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 16px;background:var(--surface-2)}
+.area-n{font-size:14px;color:var(--ink);font-weight:600;margin-bottom:9px}
+.area-s{display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-3);padding:3px 0}
+.area-s b{color:var(--gold-bright);font-variant-numeric:tabular-nums;font-weight:600}
+.proof-note{font-size:11.5px;color:var(--ink-3);text-align:center;margin-top:18px;line-height:1.6}
+
+/* ---------- takeaway / CTA ---------- */
+#takeaway{padding-block:clamp(36px,7vh,84px)}
+.takeaway-wrap{text-align:center;max-width:680px;margin-inline:auto;padding:clamp(30px,5vw,52px);border:1px solid var(--line-gold);border-radius:var(--r-xl);background:radial-gradient(120% 150% at 50% 0%, rgba(212,168,84,.1), transparent 58%), linear-gradient(180deg,var(--surface),var(--bg-2))}
+.takeaway-wrap h2{font-family:var(--f-ar);font-weight:500;font-size:clamp(1.6rem,3.8vw,2.4rem);color:var(--ink);margin:0 0 14px;letter-spacing:-.01em}
+html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
+.takeaway-wrap p{color:var(--ink-2);font-size:15px;line-height:1.75;margin:0 auto 28px;max-width:46ch}
+.cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn-gold{font-family:var(--f-body);font-size:15px;font-weight:700;color:#191205;background:linear-gradient(180deg,#ECCF8C,var(--gold));border:none;border-radius:999px;padding:15px 34px;cursor:pointer;box-shadow:0 14px 36px -14px rgba(212,168,84,.6);transition:transform .14s var(--ease),box-shadow .2s var(--ease)}
+.btn-gold:hover{box-shadow:0 18px 46px -14px rgba(212,168,84,.78)}
+.btn-gold:active{transform:scale(.97)}
+.btn-ghost2{font-family:var(--f-body);font-size:15px;color:var(--ink-2);background:transparent;border:1px solid var(--line);border-radius:999px;padding:15px 30px;cursor:pointer;transition:color .2s var(--ease),border-color .2s var(--ease)}
+.btn-ghost2:hover{color:var(--gold-bright);border-color:var(--line-gold)}
+@media (prefers-reduced-motion:reduce){.btn-gold:active{transform:none}}
+
 /* ---------- reveal on scroll (enhances an already-visible default) ---------- */
 .reveal{opacity:0;transform:translateY(20px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
 .reveal.in{opacity:1;transform:none}
@@ -16222,7 +16251,7 @@ html.lang-en .chart-t{font-family:var(--f-en)}
 
       <div class="panel viz-payback" data-reveal>
         <div class="pb-label" data-ar="استرداد تكلفة التجهيز" data-en="Setup cost payback">استرداد تكلفة التجهيز</div>
-        <div class="pb-main" id="pbMain">—</div>
+        <div class="pb-main" id="pbMain"></div>
         <div class="pb-sub" id="pbSub"></div>
       </div>
     </div>
@@ -16249,6 +16278,33 @@ html.lang-en .chart-t{font-family:var(--f-en)}
             <div class="mark-row"><span class="l" data-ar="التقليدي" data-en="Traditional">التقليدي</span><span class="v"><b id="mk10trad">0</b></span></div>
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="proof" hidden>
+    <div class="section-head wrap" data-reveal>
+      <div class="section-eyebrow" data-ar="من محفظتنا الحقيقية" data-en="From our real portfolio">من محفظتنا الحقيقية</div>
+      <h2 class="section-title" data-ar="ليست أرقامًا نظرية" data-en="Not theoretical numbers">ليست أرقامًا نظرية</h2>
+    </div>
+    <div class="wrap proof-wrap" data-reveal>
+      <div class="proof-kpis">
+        <div class="proof-kpi"><div class="pk-v" id="proofOcc">·</div><div class="pk-l" data-ar="متوسط الإشغال (آخر ٣٠ يوم)" data-en="Avg occupancy (last 30 days)">متوسط الإشغال (آخر ٣٠ يوم)</div></div>
+        <div class="proof-kpi"><div class="pk-v" id="proofAdr">·</div><div class="pk-l" data-ar="متوسط السعر / ليلة" data-en="Avg nightly rate">متوسط السعر / ليلة</div></div>
+        <div class="proof-kpi"><div class="pk-v" id="proofUnits">·</div><div class="pk-l" data-ar="وحدة مُدارة" data-en="Managed units">وحدة مُدارة</div></div>
+      </div>
+      <div class="proof-areas" id="proofAreas"></div>
+      <div class="proof-note" data-ar="متوسطات فعلية من وحدات عوجا المُدارة، مجمّعة حسب المنطقة وتُحدّث دوريًا. تُعرض هنا للاسترشاد ولا تضمن نتائج وحدة بعينها." data-en="Actual averages from Ouja-managed units, aggregated by area and updated periodically. Shown for reference; they do not guarantee any single unit's result.">متوسطات فعلية من وحدات عوجا المُدارة، مجمّعة حسب المنطقة وتُحدّث دوريًا. تُعرض هنا للاسترشاد ولا تضمن نتائج وحدة بعينها.</div>
+    </div>
+  </section>
+
+  <section id="takeaway">
+    <div class="wrap takeaway-wrap" data-reveal>
+      <h2 data-ar="جاهز تشوف أرقامك مطبوعة؟" data-en="Ready to see your numbers in print?">جاهز تشوف أرقامك مطبوعة؟</h2>
+      <p data-ar="نولّد لك تقريرًا شخصيًا من نفس المُدخلات التي ضبطتها، بصيغة أنيقة جاهزة للطباعة أو الحفظ PDF." data-en="We generate a personalized one-pager from the exact inputs you set, in a refined format ready to print or save as PDF.">نولّد لك تقريرًا شخصيًا من نفس المُدخلات التي ضبطتها، بصيغة أنيقة جاهزة للطباعة أو الحفظ PDF.</p>
+      <div class="cta-row">
+        <button type="button" class="btn-gold" onclick="generateReport()" data-ar="⤓ تحميل التقرير" data-en="⤓ Download report">⤓ تحميل التقرير</button>
+        <a class="btn-ghost2" href="#calc" data-ar="عدّل الأرقام" data-en="Adjust the numbers">عدّل الأرقام</a>
       </div>
     </div>
   </section>
@@ -16292,7 +16348,7 @@ function setLang(l){
   var t = document.getElementById('langToggle');
   if(t) t.textContent = (l==='ar' ? 'EN' : 'ع');
   try{ localStorage.setItem('ouja_invest_lang', l); }catch(e){}
-  if(_calcReady) recompute('instant');   /* re-render JS-generated copy in the new language */
+  if(_calcReady){ recompute('instant'); renderProof(); }   /* re-render JS-generated copy in the new language */
 }
 
 /* ---------- ROI ENGINE (math is LOCKED, see line-by-line below) ---------- */
@@ -16475,6 +16531,107 @@ function setupReveals(){
   for(var j=0;j<targets.length;j++) io.observe(targets[j]);
 }
 
+/* ---------- real-proof panel (renders injected window.OUJA_PROOF; omits if none) ---------- */
+function renderProof(){
+  var p=window.OUJA_PROOF, sec=document.getElementById('proof'); if(!sec) return;
+  var hasOcc=!!(p&&p.portfolio_occ!=null), hasAdr=!!(p&&p.portfolio_adr), hasUnits=!!(p&&p.units), hasAreas=!!(p&&p.areas&&p.areas.length);
+  if(!p || (!hasOcc && !hasAreas)){ sec.hidden=true; return; }
+  sec.hidden=false;
+  var ar=(document.documentElement.lang!=='en');
+  function tile(id,show){ var t=document.getElementById(id); if(!t) return; var k=t.closest('.proof-kpi'); if(k) k.style.display=show?'':'none'; }
+  setT('proofOcc', hasOcc?(p.portfolio_occ+'%'):'·'); tile('proofOcc',hasOcc);
+  setT('proofAdr', hasAdr?(fmt(p.portfolio_adr)+' '+(ar?'ر.س':'SAR')):'·'); tile('proofAdr',hasAdr);
+  setT('proofUnits', hasUnits?(''+p.units):'·'); tile('proofUnits',hasUnits);
+  var aw=document.getElementById('proofAreas');
+  if(aw){
+    var h='';
+    if(hasAreas){ p.areas.forEach(function(a){
+      h+='<div class="area"><div class="area-n">'+a.name+'</div>'
+        +'<div class="area-s"><span>'+(ar?'الإشغال':'Occupancy')+'</span><b>'+a.occ+'%</b></div>'
+        +'<div class="area-s"><span>'+(ar?'السعر/ليلة':'Nightly')+'</span><b>'+fmt(a.adr)+'</b></div></div>';
+    }); }
+    aw.innerHTML=h;
+  }
+}
+
+/* ---------- personalized one-pager (client-side print -> PDF, dark editorial) ---------- */
+function generateReport(){
+  var c=compute(S), p=window.OUJA_PROOF;
+  var d=new Date(), dateStr=d.getDate()+' / '+(d.getMonth()+1)+' / '+d.getFullYear();
+  function row(arL,enL,val,cls){ return '<div class="r '+(cls||'')+'"><span class="l">'+arL+(enL?(' <i>'+enL+'</i>'):'')+'</span><span class="n">'+val+'</span></div>'; }
+  var setupRows='';
+  SETUP.forEach(function(dd){ var it=S.setup[dd.key]; var dep=(it.life>0?it.cost/it.life:0);
+    setupRows+=row(dd.ar,dd.en, fmt(it.cost)+' ÷ '+it.life+' = '+fmt(dep)); });
+  var feeRow = S.feeOn ? row('رسوم إدارة عوجا','Ouja management fee','− '+fmt(c.mgmt)+' ('+fmt1(S.feePct)+'%)','minus') : '';
+  var payback = (c.paybackMonths!=null && isFinite(c.paybackMonths)) ? (Math.round(c.paybackMonths)+' شهر · months') : ('لا استرداد · none');
+  var proofBlock='';
+  if(p && (p.portfolio_occ!=null || (p.areas&&p.areas.length))){
+    var areaRows=''; if(p.areas){ p.areas.forEach(function(a){ areaRows+=row(a.name,'', a.occ+'% · '+fmt(a.adr)+' ر.س'); }); }
+    proofBlock='<div class="sec-t">متوسطات محفظتنا الحقيقية · Our real portfolio averages</div>'
+      +(p.portfolio_occ!=null? row('متوسط الإشغال (٣٠ يوم)','Avg occupancy (30d)', p.portfolio_occ+'%'):'')
+      +(p.portfolio_adr? row('متوسط السعر/ليلة','Avg nightly rate', fmt(p.portfolio_adr)+' ر.س'):'')
+      +(p.units? row('وحدات مُدارة','Managed units', ''+p.units):'')
+      +areaRows;
+  }
+  var doc='<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Ouja · Investor Returns</title>'
+    +'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    +'<link href="https://fonts.googleapis.com/css2?family=Reem+Kufi:wght@500;600;700&family=Marcellus&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">'
+    +'<style>'
+    +'@page{size:A4;margin:13mm}'
+    +'*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'html,body{margin:0}body{background:#100E0B;color:#F4EFE5;font-family:"IBM Plex Sans Arabic",sans-serif;font-size:11.5px;line-height:1.55;padding:4mm}'
+    +'.cover{border-bottom:2px solid #B8893F;padding-bottom:15px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end}'
+    +'.wm-ar{font-family:"Reem Kufi";color:#ECCF8C;font-size:30px;line-height:1}'
+    +'.wm-en{font-family:"Marcellus";letter-spacing:.3em;color:#A89E8D;font-size:10.5px;text-transform:uppercase;margin-top:6px}'
+    +'.doc-title{font-family:"Marcellus";color:#F4EFE5;font-size:16px;text-align:end}'
+    +'.doc-meta{color:#A89E8D;font-size:10.5px;text-align:end;margin-top:4px}'
+    +'.sec-t{color:#D4A854;font-size:10px;letter-spacing:.2em;text-transform:uppercase;margin:17px 0 6px;border-bottom:1px solid rgba(212,168,84,.3);padding-bottom:5px}'
+    +'.r{display:flex;justify-content:space-between;gap:14px;padding:5px 0;border-bottom:1px solid rgba(233,221,199,.08)}'
+    +'.r .l{color:#CBC2B2}.r .l i{color:#8a8170;font-style:normal;font-size:9.5px;margin-inline-start:5px}'
+    +'.r .n{font-variant-numeric:tabular-nums;color:#F4EFE5;white-space:nowrap}'
+    +'.r.plus .n{color:#ECCF8C}.r.minus .l,.r.minus .n{color:#A89E8D}'
+    +'.r.total{border-top:2px solid #B8893F;border-bottom:none;margin-top:5px;padding-top:9px}'
+    +'.r.total .l{color:#fff;font-weight:600}.r.total .n{color:#ECCF8C;font-weight:700;font-size:15px}'
+    +'.grid2{display:flex;gap:18px}.grid2>div{flex:1}'
+    +'.disc{margin-top:20px;padding:11px 13px;border:1px solid rgba(212,168,84,.25);border-radius:8px;background:rgba(212,168,84,.05);color:#CBC2B2;font-size:10px;line-height:1.6}'
+    +'.foot{margin-top:13px;text-align:center;color:#8a8170;font-size:9.5px}'
+    +'</style></head><body>'
+    +'<div class="cover"><div><div class="wm-ar">عوجا</div><div class="wm-en">Ouja Residence</div></div>'
+    +'<div><div class="doc-title">تقرير عوائد المستثمر · Investor Returns</div><div class="doc-meta">'+dateStr+' · قيمة الشقة '+fmt(S.V)+' ر.س</div></div></div>'
+    +'<div class="sec-t">الافتراضات · Assumptions</div>'
+    +row('قيمة الشقة','Apartment value', fmt(S.V)+' ر.س')
+    +row('عائد الإيجار التقليدي','Traditional yield', fmt1(S.yieldPct)+'%')
+    +row('زيادة دخل عوجا','Ouja uplift', fmt1(S.upliftPct)+'%')
+    +row('رسوم الإدارة','Management fee', S.feeOn?(fmt1(S.feePct)+'%'):'بدون · none')
+    +'<div class="sec-t">التجهيز والإهلاك · Setup & depreciation (cost ÷ life = annual)</div>'
+    +setupRows
+    +row('إجمالي التجهيز','Total setup', fmt(c.setupTotal)+' ر.س','total')
+    +'<div class="sec-t">الحساب السنوي · Annual calculation</div>'
+    +row('الإيجار التقليدي','Traditional lease', fmt(c.traditional))
+    +row('دخل الإيجار اليومي مع عوجا','Ouja daily-rental income', fmt(c.gross),'plus')
+    +row('إهلاك التجهيزات','Setup depreciation','− '+fmt(c.dep),'minus')
+    +feeRow
+    +row('دخلك الصافي السنوي','Your net annual income', fmt(c.net)+' ر.س','total')
+    +row('الفرق مقابل التقليدي','Difference vs traditional', (c.extra>=0?'+':'−')+fmt(Math.abs(c.extra))+' ر.س')
+    +row('استرداد التجهيز','Setup payback', payback)
+    +'<div class="sec-t">التوقّع التراكمي · Cumulative projection</div>'
+    +'<div class="grid2"><div>'
+    +row('عوجا · ٥ سنوات','Ouja · 5y', fmt(c.cum5_ouja)+' ر.س')
+    +row('عوجا · ١٠ سنوات','Ouja · 10y', fmt(c.cum10_ouja)+' ر.س')
+    +'</div><div>'
+    +row('التقليدي · ٥ سنوات','Traditional · 5y', fmt(c.cum5_trad)+' ر.س')
+    +row('التقليدي · ١٠ سنوات','Traditional · 10y', fmt(c.cum10_trad)+' ر.س')
+    +'</div></div>'
+    +proofBlock
+    +'<div class="disc"><b>تنبيه · Disclaimer:</b> الأرقام تقديرات وأهداف مبنية على متوسطات المحفظة والمعايير الدولية، وليست عوائد مضمونة. · Figures are estimates and targets based on portfolio averages and international standards, not guaranteed returns.</div>'
+    +'<div class="foot">عوجا ريزيدنس · Ouja Residence · '+dateStr+'</div>'
+    +'</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ alert(document.documentElement.lang==='en'?'Please allow pop-ups to download the report.':'فضلاً اسمح بالنوافذ المنبثقة لتحميل التقرير.'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+  setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} }, 650);
+}
+
 /* ---------- master recompute ---------- */
 function recompute(mode){
   var c = compute(S);
@@ -16570,6 +16727,7 @@ function initCalc(){
   /* count up from zero on first load */
   ['outNet','heroFigure'].forEach(function(id){ var e=document.getElementById(id); if(e){ e.setAttribute('data-val','0'); e.textContent='0'; } });
   recompute('full');
+  renderProof();
   setupReveals();
 }
 initCalc();
@@ -16580,10 +16738,38 @@ initCalc();
 # ===INVEST_HTML_END===
 
 def _invest_proof():
-    """Real, anonymized area-level averages (occupancy / ADR) for the investor
-    proof panel. Returns None when nothing trustworthy is available — we omit
-    rather than fabricate. Fully implemented in Stage 4."""
-    return None
+    """Real, anonymized area-level averages for the investor proof panel.
+    Reads only the already-warmed dashboard cache (instant; no heavy work in the
+    request path). Returns None when nothing trustworthy is available; we omit
+    rather than fabricate. Aggregated by area/neighbourhood, never per-unit/guest."""
+    cache = globals().get("_dash_cache") or {}
+    ov = (cache.get("overview") or (None,))[0]
+    rv = (cache.get("revenue") or (None,))[0]
+    proof = {}
+    if isinstance(ov, dict):
+        if ov.get("occ_30") is not None:
+            proof["portfolio_occ"] = int(round(ov["occ_30"]))
+        if ov.get("active_units"):
+            proof["units"] = int(ov["active_units"])
+    areas, adrs = [], []
+    if isinstance(rv, dict) and isinstance(rv.get("compounds"), list):
+        for g in rv["compounds"]:
+            name = (g.get("compound") or "").strip()
+            occ, adr = g.get("occ"), g.get("adr")
+            if (not name) or name == "—":
+                continue                      # skip the unlabeled bucket
+            if adr:
+                adrs.append(adr)
+            if occ is not None and adr:
+                areas.append({"name": name, "occ": int(round(occ)),
+                              "adr": int(round(adr)), "units": int(g.get("units") or 0)})
+    if areas:
+        proof["areas"] = areas[:5]            # strongest few areas (already sorted by occ)
+    if adrs:
+        proof["portfolio_adr"] = int(round(sum(adrs) / len(adrs)))
+    if proof.get("portfolio_occ") is None and not proof.get("areas"):
+        return None                           # nothing trustworthy -> omit the panel
+    return proof
 
 def _render_invest_html():
     """Inject the real-proof payload into the standalone investor page using a
