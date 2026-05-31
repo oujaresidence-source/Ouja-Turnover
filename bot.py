@@ -9267,8 +9267,12 @@ function refreshView(id){
   }
 }
 function go(id){
+  if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
+  // Stage 5 — reflect the view in the URL hash + tab title: bookmarkable, refresh-stable.
+  try{ if(location.hash.slice(1)!==id) location.hash = id; }catch(_){ }
+  try{ document.title = (t()[id]||'Ouja') + ' · Ouja'; }catch(_){ }
   buildSideNav(); buildBottomNav();
   const mhT = document.getElementById('mhead_title'); if(mhT) mhT.textContent = t()[id] || t().home;
   window.scrollTo({top:0});
@@ -9317,6 +9321,16 @@ async function init(){
   try{ await loadAll(); }catch(e){ console.error('loadAll failed:', e); }
   try{ _applyHelpDismissals(); }catch(e){ console.error('help dismiss failed:', e); }
   try{ maybeShowWelcome(); }catch(e){ console.error('welcome failed:', e); }
+  // Stage 5 — open the view named in the URL hash (deep-link + its category expands via
+  // buildSideNav's active-category rule); keep view ↔ URL in sync for refresh/back/bookmark.
+  try{
+    var _h=location.hash.slice(1);
+    go((_h && document.getElementById('view_'+_h)) ? _h : 'home');
+    window.addEventListener('hashchange', function(){
+      var h=location.hash.slice(1);
+      if(h && h!==view && document.getElementById('view_'+h)) go(h);
+    });
+  }catch(e){ console.error('hash routing failed:', e); }
   setInterval(function(){
     try{ loadAll(); }catch(e){ console.error('loadAll tick:', e); }
   }, 15000);
