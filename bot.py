@@ -16077,6 +16077,23 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
 .reveal{opacity:0;transform:translateY(20px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
 .reveal.in{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+/* gentle stagger when grouped panels reveal together (Emil) */
+.viz-grid [data-reveal]:nth-child(2){transition-delay:.09s}
+
+/* ---------- polish: touch targets + reduced-motion safety net ---------- */
+@media (max-width:600px){
+  .step{width:40px;height:40px;font-size:19px}
+  .life-n{min-width:46px}
+  .lnk{padding:9px 13px}
+}
+@media (pointer:coarse){
+  .slider::-webkit-slider-thumb{width:30px;height:30px}
+  .slider::-moz-range-thumb{width:30px;height:30px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+  html{scroll-behavior:auto!important}
+}
 
 /* ---------- disclaimer (always visible) ---------- */
 .disclaimer{
