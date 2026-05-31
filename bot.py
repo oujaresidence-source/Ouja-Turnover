@@ -9237,6 +9237,35 @@ function dismissWelcome(){
   const ov = document.getElementById('welcomeOverlay'); if(ov) ov.remove();
 }
 
+// Stage 4 — ONE shared refresher. After any action, call refreshView(view) so the
+// affected view re-fetches its data and re-renders: summary counts, group counts, the
+// item's new state and the sidebar badges all update together, with no manual refresh.
+function refreshView(id){
+  id = id || view;
+  switch(id){
+    case 'expenses': return expRefresh();
+    case 'inbox':    return loadAll();
+    case 'home':     return loadAll();
+    case 'pricing':  return loadPricing();
+    case 'strat':    return loadStrategies();
+    case 'rev':      return loadRevenue();
+    case 'calendar': return loadForwardCalendar();
+    case 'tickets':  return loadTickets();
+    case 'reviews':  return loadReviews();
+    case 'design':   return loadDesigns();
+    case 'pmo':      return loadPmo();
+    case 'quote':    return loadQuotes();
+    case 'weekly':   return loadWeekly();
+    case 'clean':    return loadCleaning();
+    case 'quality':  return loadQuality();
+    case 'guests':   return loadGuests();
+    case 'users':    return loadUsers();
+    case 'learn':    return loadLearnings();
+    case 'today':    return loadTodayEmpty();
+    case 'finance':  return loadFinance();
+    default:         return loadAll();
+  }
+}
 function go(id){
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
@@ -10882,10 +10911,11 @@ function _expQueueHtml(){
   if(!items.length) return '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:30px">✅</div><div class="muted" style="margin-top:6px">'+(L==='ar'?'ما فيه مصاريف بانتظار المراجعة':'No expenses awaiting review')+'</div></div>';
   var ar=(L==='ar');
   // ---- bucket every queue item by what it actually needs ----
-  var ready=[], failed=[], byR={};
+  var ready=[], failed=[], posted=[], byR={};
   items.forEach(function(e){
     if(e.status==='ready') ready.push(e);
     else if(e.status==='failed') failed.push(e);
+    else if(e.status==='posted') posted.push(e);
     else { var k=e.primary_reason||'incomplete'; (byR[k]=byR[k]||[]).push(e); }
   });
   function pick(){ var a=[]; for(var i=0;i<arguments.length;i++){ a=a.concat(byR[arguments[i]]||[]); } return a; }
@@ -10904,6 +10934,7 @@ function _expQueueHtml(){
     + stat('amber','approve',gApprove.length,ar?'يحتاج موافقة':'Needs approval')
     + stat('red','failed',failed.length,ar?'فشل':'Failed')
     + stat('green','ready',ready.length,ar?'جاهز للترحيل':'Ready to post')
+    + stat('green','posted',posted.length,ar?'مُرحّل':'Posted')
     + '</div>';
   if(f) h+='<div style="margin:-4px 0 10px"><button class="btn ghost xs" onclick="expQFilter(&#39;'+f+'&#39;)">'+(ar?'✕ إلغاء التصفية':'✕ Clear filter')+'</button></div>';
   function grp(key,title,pill,list){
@@ -10922,6 +10953,7 @@ function _expQueueHtml(){
   h+=grp('dup',ar?'تكرار محتمل':'Possible duplicate','warn',gDup);
   h+=grp('inc',ar?'بيانات ناقصة':'Incomplete','warn',gInc);
   h+=grp('failed',ar?'فشل الترحيل':'Failed to post','danger',failed);
+  h+=grp('posted',ar?'مُرحّل ✓ (آخر العمليات)':'Posted ✓ (recent)','ok',posted);
   return h;
 }
 var _expQFilter='';
@@ -11098,13 +11130,25 @@ function _expByEmpHtml(){
 }
 
 /* ---- expense actions ---- */
+// Emil: gentle green flash on a card in its NEW position, and bring it into view so
+// the user literally sees it move to the مُرحّل group. Reduced-motion safe.
+function _expFlash(id){
+  var c=document.getElementById('expc_'+id);
+  if(!c) return;
+  var rm=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(rm){ return; }
+  c.classList.add('just-posted');
+  try{ c.scrollIntoView({block:'nearest',behavior:'smooth'}); }catch(_){ }
+}
 async function expPost(id){
   var r=await post('/api/expenses/post',{id:id});
   if(r && r.ok){
-    toast(L==='ar'?'تم الترحيل في Hostaway ✓':'Posted to Hostaway ✓');
-    // Emil: gentle green flash on the card before it leaves the review queue
-    var c=document.getElementById('expc_'+id), rm=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if(c && !rm){ c.classList.add('just-posted'); await new Promise(function(res){ setTimeout(res,520); }); }
+    var dry = (r.expense && r.expense.hostaway_ref==='DRYRUN') || ((D.expSummary||{}).dryrun);
+    toast(dry ? (L==='ar'?'تجربة ✓ — انتقل إلى «مُرحّل» (ما انكتب على Hostaway فعلياً)':'Test ✓ — moved to Posted (nothing written to Hostaway)')
+              : (L==='ar'?'تم الترحيل ✓ — انتقل إلى «مُرحّل»':'Posted ✓ — moved to Posted'));
+    await expRefresh();          // re-fetch summary+queue, re-render → card now sits in مُرحّل, counts update
+    _expFlash(id);               // flash it in its new spot
+    return;
   }
   else if(r && r.blocked_by && r.blocked_by.length){
     // name the EXACT gate(s) that block posting — never the vague "راجع البيانات"
@@ -13478,7 +13522,7 @@ async function doBulkApply(){
     toast(t().bulk_applied.replace('{a}', r.applied).replace('{s}', r.skipped) + (r.dry_run?' (DRY-RUN)':''));
     calSelect = {start:null, end:null};
     bulkSelectedUnits = [];
-    loadForwardCalendar();
+    refreshView('calendar');
   } else toast(r.error || t().err);
 }
 
@@ -13716,7 +13760,7 @@ async function bulkApprove(){
     catch(e){ fail++; }
   }
   toast((ar?'تم إرسال ':'Sent ')+ok+(fail?(' · '+(ar?'فشل ':'failed ')+fail):''));
-  loadAll();
+  refreshView('inbox');
 }
 
 // Item 8: minutes a guest has been waiting since their last message.
@@ -14676,7 +14720,7 @@ async function doSend(id){
   const ta = document.getElementById('ta_'+id);
   const text = ta?ta.value:'';
   const r = await post('/api/send',{id:id, text:text});
-  if(r.ok){ toast(t().sent); openInboxId=null; loadAll() } else toast(r.error||t().err);
+  if(r.ok){ toast(t().sent); openInboxId=null; refreshView('inbox') } else toast(r.error||t().err);
 }
 async function doReject(id){
   id = String(id);
@@ -14688,7 +14732,7 @@ async function doClaim(id){
   const inEl = document.getElementById('cn_'+id);
   const n = inEl ? inEl.value : '';
   const r = await post('/api/claim',{id:id, name:n});
-  if(r.ok){ toast(t().claimed_t); openInboxId=null; loadAll() } else toast(r.error||t().err);
+  if(r.ok){ toast(t().claimed_t); openInboxId=null; refreshView('inbox') } else toast(r.error||t().err);
 }
 async function doTeach(id){
   id = String(id);
@@ -14700,7 +14744,7 @@ async function doTeach(id){
 }
 async function doStopStrategy(lid){
   await post('/api/strategy/stop',{lid:lid});
-  toast('■'); loadStrategies(); closeDrawer();
+  toast(L==='ar'?'تم إيقاف الاستراتيجية':'Strategy stopped'); refreshView('strat'); closeDrawer();
 }
 async function doPause(hours){
   const r = await post('/api/discount/pause',{hours:hours});
@@ -17970,12 +18014,18 @@ async def _api_expenses_list(request):
     return _json({"expenses": items[:500], "count": len(items)})
 
 async def _api_expenses_queue(request):
-    """The review queue: Held + Failed + any Ready-but-not-yet-posted, newest first."""
+    """The review queue: Held + Failed + Ready-but-not-yet-posted, newest first, PLUS the
+    most-recently-posted few so a successful post visibly MOVES the card into the مُرحّل
+    group (instead of vanishing). The posted tail is capped so it never grows unbounded."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     items = [_exp_view(e) for e in _expenses.values()
              if e.get("status") in ("held", "failed", "ready")]
     items.sort(key=lambda e: (e.get("submitted_at") or e.get("created_at") or ""), reverse=True)
+    # recently-posted tail (newest first, capped) — the "it worked, here it is" confirmation
+    posted = [e for e in _expenses.values() if e.get("status") == "posted" and e.get("posted_at")]
+    posted.sort(key=lambda e: e.get("posted_at") or "", reverse=True)
+    items += [_exp_view(e) for e in posted[:8]]
     return _json({"expenses": items, "count": len(items)})
 
 async def _api_expenses_summary(request):
