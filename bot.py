@@ -15895,6 +15895,99 @@ html.lang-en .section-title{font-family:var(--f-en);font-weight:400}
   background:linear-gradient(180deg,var(--surface),var(--bg-2));text-align:center;color:var(--ink-3);
 }
 
+/* ---------- calculator ---------- */
+.calc{padding-block:6px clamp(40px,8vh,90px)}
+.calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(18px,3vw,34px);align-items:start;margin-top:clamp(26px,4vh,40px)}
+@media (max-width:1080px){.calc-grid{grid-template-columns:1fr;max-width:680px;margin-inline:auto}}
+.panel{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--line);border-radius:var(--r-lg);padding:clamp(20px,3vw,32px);box-shadow:var(--sh)}
+.panel.statement{position:sticky;top:88px}
+@media (max-width:1080px){.panel.statement{position:static}}
+.panel-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:18px}
+.panel-t{font-family:var(--f-ar);font-size:19px;font-weight:600;color:var(--ink)}
+html.lang-en .panel-t{font-family:var(--f-en)}
+.panel-cap{font-size:12px;color:var(--ink-3)}
+
+.field{padding:15px 0;border-top:1px solid var(--line-2)}
+.field:first-of-type{border-top:none;padding-top:0}
+.field-l{font-size:14.5px;color:var(--ink-2);font-weight:500}
+.field-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.field-val{font-family:var(--f-body);color:var(--gold-bright);font-weight:500;font-variant-numeric:tabular-nums;font-size:15px}
+.field-val b{font-size:21px;font-weight:600}
+.field-foot{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
+.field-foot b{color:var(--ink-2);font-variant-numeric:tabular-nums}
+
+.money{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:0 13px;transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}
+.money:focus-within{border-color:var(--line-gold);box-shadow:0 0 0 3px var(--gold-glow)}
+.num-input{background:transparent;border:none;color:var(--ink);font-family:var(--f-body);font-weight:600;font-size:16px;padding:12px 0;width:100%;outline:none;font-variant-numeric:tabular-nums;min-width:0}
+.money .cur{color:var(--ink-3);font-size:12.5px;flex:none}
+.money.sm{padding:0 10px}
+.money.sm .num-input{font-size:14px;padding:9px 0}
+
+.slider{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:999px;background:var(--surface-3);outline:none;margin:15px 0 3px;cursor:pointer}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#F2DCA2,var(--gold) 72%);box-shadow:0 2px 10px rgba(0,0,0,.55),0 0 0 4px rgba(212,168,84,.15);cursor:grab;transition:transform .14s var(--ease),box-shadow .2s var(--ease)}
+.slider::-webkit-slider-thumb:active{transform:scale(.9);cursor:grabbing}
+.slider::-moz-range-thumb{width:24px;height:24px;border:none;border-radius:50%;background:radial-gradient(circle at 35% 30%,#F2DCA2,var(--gold) 72%);box-shadow:0 2px 10px rgba(0,0,0,.55),0 0 0 4px rgba(212,168,84,.15);cursor:grab}
+.slider:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(212,168,84,.45)}
+.slider:disabled{opacity:.4;cursor:not-allowed}
+@media (prefers-reduced-motion:reduce){.slider::-webkit-slider-thumb{transition:none}}
+
+.toggle{width:48px;height:28px;border-radius:999px;background:var(--surface-3);border:1px solid var(--line);position:relative;cursor:pointer;padding:0;flex:none;transition:background .22s var(--ease),border-color .22s var(--ease)}
+.toggle .knob{position:absolute;top:2px;inset-inline-start:2px;width:22px;height:22px;border-radius:50%;background:var(--ink-3);transition:transform .24s var(--ease),background .22s var(--ease)}
+.toggle.on{background:rgba(212,168,84,.22);border-color:var(--line-gold)}
+.toggle.on .knob{background:var(--gold);transform:translateX(20px)}
+html[dir="rtl"] .toggle.on .knob{transform:translateX(-20px)}
+@media (prefers-reduced-motion:reduce){.toggle .knob{transition:background .22s var(--ease)}}
+
+.sub-h{display:flex;justify-content:space-between;align-items:baseline;margin:22px 0 2px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:var(--gold);letter-spacing:.02em}
+.sub-h-r{color:var(--ink-3);letter-spacing:0;font-size:11px}
+.dep-caption{font-size:11px;color:var(--ink-3);line-height:1.6;margin-top:13px;padding:11px 13px;background:rgba(212,168,84,.06);border-radius:var(--r-xs);border:1px solid var(--line-2)}
+
+.setup-row{display:grid;grid-template-columns:minmax(60px,0.85fr) minmax(116px,1.25fr) auto minmax(72px,0.9fr);gap:8px 10px;align-items:center;padding:11px 0;border-top:1px solid var(--line-2)}
+.setup-row:first-child{border-top:none}
+.s-l{font-size:14px;color:var(--ink-2)}
+.life{display:inline-flex;align-items:center;gap:7px;justify-self:center}
+.step{width:27px;height:27px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);font-size:16px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s var(--ease),border-color .2s var(--ease),color .2s var(--ease)}
+.step:hover{color:var(--gold-bright);border-color:var(--line-gold)}
+.step:active{transform:scale(.88)}
+.life-n{min-width:52px;text-align:center;font-size:12.5px;color:var(--ink-3)}
+.life-n b{color:var(--ink);font-size:15px;font-variant-numeric:tabular-nums}
+.s-dep{text-align:end;font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.s-dep b{color:var(--gold-bright);font-size:13.5px;font-variant-numeric:tabular-nums}
+@media (max-width:600px){
+  .setup-row{grid-template-columns:1fr auto;row-gap:8px;padding:14px 0}
+  .setup-row .money{grid-column:1 / -1;order:3}
+  .s-l{order:1}
+  .life{order:2;justify-self:end}
+  .s-dep{order:4;grid-column:1 / -1;text-align:start}
+}
+
+.headline{text-align:center;padding-bottom:22px;border-bottom:1px solid var(--line)}
+.headline-l{font-size:14px;color:var(--ink-3);letter-spacing:.03em;margin-bottom:10px}
+.headline-fig{display:flex;align-items:baseline;justify-content:center;gap:.18em;font-family:var(--f-body);font-weight:600;font-size:clamp(2.7rem,7.2vw,4.3rem);line-height:1;color:var(--gold-bright);letter-spacing:-.025em;text-shadow:0 0 50px rgba(212,168,84,.2)}
+.headline-fig .num{font-variant-numeric:tabular-nums}
+.headline-fig .cur2{font-family:var(--f-ar);font-size:.27em;font-weight:500;color:var(--gold)}
+html.lang-en .headline-fig .cur2{font-family:var(--f-body)}
+.headline-extra{margin-top:14px;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;min-height:1.2em}
+.headline-extra.pos{color:var(--gold-bright)}
+.headline-extra.neg{color:var(--neg)}
+
+.ledger{margin-top:20px}
+.led-note{font-size:11px;color:var(--ink-3);text-align:end;margin-bottom:8px}
+.led-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:11px 2px;border-top:1px solid var(--line-2);font-size:14px}
+.led-row:first-of-type{border-top:none}
+.led-row[hidden]{display:none}
+.led-l{color:var(--ink-2);line-height:1.4}
+.led-v{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600;white-space:nowrap}
+.led-row.plus .led-v{color:var(--gold-bright)}
+.led-row.minus .led-l,.led-row.minus .led-v{color:var(--ink-3)}
+.led-row.total{border-top:2px solid var(--line-gold);margin-top:6px;padding-top:15px}
+.led-row.total .led-l{color:var(--ink);font-weight:600;font-size:15px}
+.led-row.total .led-v{color:var(--gold-bright);font-weight:700;font-size:21px}
+.led-sep{height:1px;background:var(--line);margin:9px 0}
+#ledExtra{color:var(--ink)}
+.led-v #ledExtra.pos{color:var(--gold-bright)}
+.led-v #ledExtra.neg{color:var(--neg)}
+
 /* ---------- disclaimer (always visible) ---------- */
 .disclaimer{
   position:sticky;bottom:0;z-index:80;
@@ -15943,8 +16036,8 @@ html.lang-en .section-title{font-family:var(--f-en);font-weight:400}
     <div class="compare">
       <div class="compare-line"><span data-ar="مقابل " data-en="versus ">مقابل </span><b id="heroTrad">56,560</b> <span data-ar="ر.س مع الإيجار التقليدي" data-en="SAR with a traditional lease">ر.س مع الإيجار التقليدي</span></div>
       <div class="bar" role="img" aria-label="Ouja income compared to a traditional lease">
-        <div class="trad" style="width:65%"></div>
-        <div class="extra" style="width:35%"></div>
+        <div class="trad" id="heroBarTrad" style="width:62%"></div>
+        <div class="extra" id="heroBarExtra" style="width:9%"></div>
       </div>
       <div class="bar-key">
         <span><i class="dot trad"></i><span data-ar="الإيجار التقليدي" data-en="Traditional lease">الإيجار التقليدي</span></span>
@@ -15963,8 +16056,80 @@ html.lang-en .section-title{font-family:var(--f-en);font-weight:400}
       <div class="section-eyebrow" data-ar="الحاسبة التفاعلية" data-en="Interactive calculator">الحاسبة التفاعلية</div>
       <h2 class="section-title" data-ar="احسب عائدك، سطرًا بسطر" data-en="Calculate your return, line by line">احسب عائدك، سطرًا بسطر</h2>
     </div>
-    <div class="stub wrap">
-      <span data-ar="الحاسبة التفاعلية الكاملة تُبنى في المرحلة التالية." data-en="The full interactive calculator is built in the next stage.">الحاسبة التفاعلية الكاملة تُبنى في المرحلة التالية.</span>
+    <div class="calc wrap">
+      <div class="calc-grid">
+
+        <div class="panel inputs">
+          <div class="panel-h">
+            <span class="panel-t" data-ar="مُدخلاتك" data-en="Your inputs">مُدخلاتك</span>
+            <span class="panel-cap" data-ar="كل رقمٍ قابل للتعديل" data-en="Every number is editable">كل رقمٍ قابل للتعديل</span>
+          </div>
+
+          <div class="field">
+            <span class="field-l" data-ar="قيمة الشقة" data-en="Apartment value">قيمة الشقة</span>
+            <span class="money" style="margin-top:9px">
+              <input id="inV" class="num-input" type="text" inputmode="numeric" autocomplete="off" value="1,010,000" aria-label="Apartment value">
+              <span class="cur" data-ar="ر.س" data-en="SAR">ر.س</span>
+            </span>
+          </div>
+
+          <div class="field">
+            <div class="field-top">
+              <span class="field-l" data-ar="عائد الإيجار التقليدي" data-en="Traditional rental yield">عائد الإيجار التقليدي</span>
+              <span class="field-val"><b id="outYield">5.6</b>%</span>
+            </div>
+            <input id="inYield" class="slider" type="range" min="2" max="10" step="0.1" value="5.6" aria-label="Traditional rental yield percent">
+            <div class="field-foot"><span data-ar="الدخل التقليدي السنوي" data-en="Traditional annual income">الدخل التقليدي السنوي</span> · <b id="outTradInline">56,560</b> <span data-ar="ر.س" data-en="SAR">ر.س</span></div>
+          </div>
+
+          <div class="sub-h">
+            <span data-ar="تكاليف التجهيز" data-en="Setup costs">تكاليف التجهيز</span>
+            <span class="sub-h-r" data-ar="العمر · الإهلاك السنوي" data-en="Life · annual depreciation">العمر · الإهلاك السنوي</span>
+          </div>
+          <div class="setup" id="setupRows"></div>
+          <div class="dep-caption" data-ar="معدلات الإهلاك وفق المعايير الدولية (IRS / UK capital allowances) · طريقة القسط الثابت." data-en="Depreciation rates follow international standards (IRS / UK capital allowances), straight-line method.">معدلات الإهلاك وفق المعايير الدولية (IRS / UK capital allowances) · طريقة القسط الثابت.</div>
+
+          <div class="field">
+            <div class="field-top">
+              <span class="field-l" data-ar="زيادة دخل عوجا" data-en="Ouja income uplift">زيادة دخل عوجا</span>
+              <span class="field-val"><b id="outUplift">70</b>%</span>
+            </div>
+            <input id="inUplift" class="slider" type="range" min="30" max="150" step="1" value="70" aria-label="Ouja income uplift percent">
+            <div class="field-foot" data-ar="الحد الأدنى ٣٠٪ · متوسط فارق الإيجار اليومي عن التقليدي" data-en="Minimum 30% · the typical daily-vs-traditional gap">الحد الأدنى ٣٠٪ · متوسط فارق الإيجار اليومي عن التقليدي</div>
+          </div>
+
+          <div class="field">
+            <div class="field-top">
+              <span class="field-l" data-ar="رسوم إدارة عوجا" data-en="Ouja management fee">رسوم إدارة عوجا</span>
+              <button id="inFeeToggle" type="button" class="toggle" role="switch" aria-checked="false" aria-label="Toggle management fee" onclick="toggleFee()"><span class="knob"></span></button>
+            </div>
+            <div class="fee-body" id="feeBody" hidden>
+              <input id="inFeePct" class="slider" type="range" min="0" max="35" step="0.5" value="20" aria-label="Management fee percent">
+              <div class="field-foot"><b id="outFeePct">20</b>% <span data-ar="من دخل عوجا الإجمالي" data-en="of Ouja gross income">من دخل عوجا الإجمالي</span> · <b id="outFeeAmt">0</b> <span data-ar="ر.س" data-en="SAR">ر.س</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel statement">
+          <div class="headline">
+            <div class="headline-l" data-ar="دخلك السنوي مع عوجا" data-en="Your annual income with Ouja">دخلك السنوي مع عوجا</div>
+            <div class="headline-fig"><span class="num" id="outNet" data-val="0">0</span><span class="cur2" data-ar="ر.س" data-en="SAR">ر.س</span></div>
+            <div class="headline-extra pos" id="outExtraLine"></div>
+          </div>
+          <div class="ledger">
+            <div class="led-note" data-ar="كل المبالغ سنوية بالريال السعودي" data-en="All amounts are annual, in SAR">كل المبالغ سنوية بالريال السعودي</div>
+            <div class="led-row"><span class="led-l" data-ar="الإيجار التقليدي (القيمة × العائد)" data-en="Traditional lease (value × yield)">الإيجار التقليدي (القيمة × العائد)</span><span class="led-v"><b id="ledTrad">0</b></span></div>
+            <div class="led-row plus"><span class="led-l" data-ar="دخل الإيجار اليومي مع عوجا" data-en="Ouja daily-rental income">دخل الإيجار اليومي مع عوجا</span><span class="led-v"><b id="ledGross">0</b></span></div>
+            <div class="led-row minus"><span class="led-l" data-ar="إهلاك التجهيزات السنوي" data-en="Annual setup depreciation">إهلاك التجهيزات السنوي</span><span class="led-v">−&nbsp;<b id="ledDep">0</b></span></div>
+            <div class="led-row minus" id="ledMgmtRow" hidden><span class="led-l" data-ar="رسوم إدارة عوجا" data-en="Ouja management fee">رسوم إدارة عوجا</span><span class="led-v">−&nbsp;<b id="ledMgmt">0</b></span></div>
+            <div class="led-row total"><span class="led-l" data-ar="دخلك الصافي السنوي" data-en="Your net annual income">دخلك الصافي السنوي</span><span class="led-v"><b id="ledNet">0</b></span></div>
+            <div class="led-sep"></div>
+            <div class="led-row"><span class="led-l" data-ar="الفرق مقابل التقليدي" data-en="Difference vs traditional">الفرق مقابل التقليدي</span><span class="led-v"><b id="ledExtra">0</b></span></div>
+            <div class="led-row"><span class="led-l" data-ar="إجمالي تكلفة التجهيز" data-en="Total setup cost">إجمالي تكلفة التجهيز</span><span class="led-v"><b id="ledSetup">0</b></span></div>
+          </div>
+        </div>
+
+      </div>
     </div>
   </section>
 </main>
@@ -15976,12 +16141,15 @@ html.lang-en .section-title{font-family:var(--f-en);font-weight:400}
 
 <script>window.OUJA_PROOF = /*__OUJA_PROOF__*/null;</script>
 <script>
+var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+var _calcReady = false;
+
+/* entry curtain, continues the "cast" from the ops dashboard */
 (function(){
-  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   var c = document.getElementById('curtain');
   function hideCurtain(){
     if(!c) return;
-    if(reduce){ c.style.display='none'; return; }
+    if(REDUCE){ c.style.display='none'; return; }
     var a = c.animate([{opacity:1},{opacity:0}], {duration:640, easing:'cubic-bezier(0.23,1,0.32,1)', fill:'forwards'});
     a.onfinish = function(){ c.style.display='none'; };
   }
@@ -15989,6 +16157,7 @@ html.lang-en .section-title{font-family:var(--f-en);font-weight:400}
   window.addEventListener('load', hideCurtain);
 })();
 
+/* ---------- language ---------- */
 function setLang(l){
   var html = document.documentElement;
   html.setAttribute('lang', l);
@@ -16003,11 +16172,201 @@ function setLang(l){
   var t = document.getElementById('langToggle');
   if(t) t.textContent = (l==='ar' ? 'EN' : 'ع');
   try{ localStorage.setItem('ouja_invest_lang', l); }catch(e){}
+  if(_calcReady) recompute('instant');   /* re-render JS-generated copy in the new language */
 }
-(function(){
-  var saved=null; try{ saved=localStorage.getItem('ouja_invest_lang'); }catch(e){}
-  if(saved==='en') setLang('en');
-})();
+
+/* ---------- ROI ENGINE (math is LOCKED, see line-by-line below) ---------- */
+var SETUP = [
+  {key:'furniture',   ar:'الأثاث',                en:'Furniture',                cost:50000, life:7},
+  {key:'kitchen',     ar:'المطبخ',                en:'Kitchen',                  cost:80000, life:10},
+  {key:'appliances',  ar:'الأجهزة',               en:'Appliances',               cost:30000, life:5},
+  {key:'electronics', ar:'الإلكترونيات',          en:'Electronics',              cost:15000, life:4},
+  {key:'decor',       ar:'المفروشات والديكور',    en:'Soft furnishings & décor', cost:10000, life:3}
+];
+var S = { V:1010000, yieldPct:5.6, upliftPct:70, feeOn:false, feePct:20, setup:{} };
+SETUP.forEach(function(d){ S.setup[d.key] = {cost:d.cost, life:d.life}; });
+
+function compute(s){
+  var traditional = s.V * (s.yieldPct/100);                 // V × traditional_yield
+  var gross       = traditional * (1 + s.upliftPct/100);    // × (1 + uplift)
+  var depBreak = {}, dep = 0;
+  SETUP.forEach(function(d){
+    var it = s.setup[d.key];
+    var a = (it.life > 0) ? (it.cost / it.life) : 0;        // straight-line: cost / useful_life
+    depBreak[d.key] = a; dep += a;
+  });
+  var mgmt = s.feeOn ? (s.feePct/100) * gross : 0;          // fee% × ouja_gross_annual (only if ON)
+  var net  = gross - dep - mgmt;                            // = ouja_net_annual
+  var extra = net - traditional;                            // extra_vs_traditional
+  var setupTotal = 0; SETUP.forEach(function(d){ setupTotal += s.setup[d.key].cost; });
+  var paybackRaw   = (extra !== 0) ? (setupTotal / (extra/12)) : null;
+  var paybackMonths = (extra > 0) ? paybackRaw : null;      // null when no payback (extra ≤ 0)
+  return {traditional:traditional, gross:gross, dep:dep, depBreak:depBreak, mgmt:mgmt,
+          net:net, extra:extra, setupTotal:setupTotal,
+          paybackMonths:paybackMonths, paybackRaw:paybackRaw,
+          cum5_trad:traditional*5, cum10_trad:traditional*10,
+          cum5_ouja:net*5, cum10_ouja:net*10};
+}
+
+/* ---------- formatting ---------- */
+function parseNum(s){ s = (''+s).replace(/[^0-9.]/g,''); var n = parseFloat(s); return isNaN(n)?0:n; }
+function fmt(n){ return Math.round(n).toLocaleString('en-US'); }
+function fmt1(n){ return (Math.round(n*10)/10).toLocaleString('en-US'); }
+function fmtSigned(n){ var r = Math.round(n); return (r<0?'−':'+') + Math.abs(r).toLocaleString('en-US'); }
+function setT(id,txt){ var e = document.getElementById(id); if(e) e.textContent = txt; }
+
+/* ---------- count-up (only on load / preset; instant during drag) ---------- */
+function animateValue(el, to, dur){
+  if(!el) return;
+  var from = parseFloat(el.getAttribute('data-val')); if(isNaN(from)) from = 0;
+  el.setAttribute('data-val', to);
+  if(el._raf){ cancelAnimationFrame(el._raf); el._raf = null; }
+  if(REDUCE || !dur){ el.textContent = fmt(to); return; }
+  var start = null;
+  function step(ts){
+    if(start===null) start = ts;
+    var p = Math.min(1, (ts-start)/dur);
+    var e = 1 - Math.pow(1-p, 3);              // ease-out cubic
+    el.textContent = fmt(from + (to-from)*e);
+    if(p < 1){ el._raf = requestAnimationFrame(step); } else { el.textContent = fmt(to); el._raf = null; }
+  }
+  el._raf = requestAnimationFrame(step);
+}
+
+/* ---------- render the 5 setup rows ---------- */
+function renderSetup(){
+  var wrap = document.getElementById('setupRows'); if(!wrap) return;
+  var h = '';
+  SETUP.forEach(function(d){
+    h += '<div class="setup-row">'
+      +    '<span class="s-l" data-ar="'+d.ar+'" data-en="'+d.en+'">'+d.ar+'</span>'
+      +    '<span class="money sm"><input class="num-input inCost" data-key="'+d.key+'" type="text" inputmode="numeric" autocomplete="off" value="'+fmt(d.cost)+'" aria-label="'+d.en+' cost"><span class="cur" data-ar="ر.س" data-en="SAR">ر.س</span></span>'
+      +    '<span class="life"><button type="button" class="step" data-key="'+d.key+'" data-d="-1" aria-label="decrease useful life">−</button>'
+      +      '<span class="life-n"><b class="lifeV" data-key="'+d.key+'">'+d.life+'</b> <span class="life-u" data-ar="سنة" data-en="yr">سنة</span></span>'
+      +      '<button type="button" class="step" data-key="'+d.key+'" data-d="1" aria-label="increase useful life">+</button></span>'
+      +    '<span class="s-dep"><b class="depV" data-key="'+d.key+'">0</b> <span class="dep-u" data-ar="ر.س/سنة" data-en="SAR/yr">ر.س/سنة</span></span>'
+      +  '</div>';
+  });
+  wrap.innerHTML = h;
+}
+
+function updateExtraLine(c){
+  var el = document.getElementById('outExtraLine'); if(!el) return;
+  var ar = (document.documentElement.lang !== 'en');
+  if(c.extra >= 0){
+    el.className = 'headline-extra pos';
+    el.textContent = '+' + fmt(c.extra) + (ar ? ' ر.س فوق الإيجار التقليدي' : ' SAR over a traditional lease');
+  } else {
+    el.className = 'headline-extra neg';
+    el.textContent = '−' + fmt(Math.abs(c.extra)) + (ar ? ' ر.س تحت التقليدي عند هذه الإعدادات' : ' SAR below traditional at these settings');
+  }
+}
+
+function updateHeroBar(c){
+  var bt = document.getElementById('heroBarTrad'), be = document.getElementById('heroBarExtra');
+  if(!bt || !be) return;
+  var scale = Math.max(c.net, c.traditional, 1);
+  bt.style.width = (c.traditional/scale*100) + '%';
+  be.style.width = ((c.net > c.traditional) ? ((c.net-c.traditional)/scale*100) : 0) + '%';
+}
+
+/* ---------- master recompute ---------- */
+function recompute(mode){
+  var c = compute(S);
+  window._lastCompute = c;
+  /* input echoes */
+  setT('outYield', fmt1(S.yieldPct));
+  setT('outUplift', Math.round(S.upliftPct));
+  setT('outFeePct', fmt1(S.feePct));
+  setT('outTradInline', fmt(c.traditional));
+  setT('outFeeAmt', fmt(c.mgmt));
+  /* setup outputs */
+  var dv = document.querySelectorAll('.depV');
+  for(var i=0;i<dv.length;i++){ var k = dv[i].getAttribute('data-key'); dv[i].textContent = fmt(c.depBreak[k]||0); }
+  var lv = document.querySelectorAll('.lifeV');
+  for(var j=0;j<lv.length;j++){ var kk = lv[j].getAttribute('data-key'); lv[j].textContent = S.setup[kk].life; }
+  /* ledger */
+  setT('ledTrad', fmt(c.traditional));
+  setT('ledGross', fmt(c.gross));
+  setT('ledDep', fmt(c.dep));
+  setT('ledMgmt', fmt(c.mgmt));
+  setT('ledNet', fmt(c.net));
+  setT('ledSetup', fmt(c.setupTotal));
+  var exEl = document.getElementById('ledExtra');
+  if(exEl){ exEl.textContent = fmtSigned(c.extra); exEl.className = (c.extra>=0 ? 'pos' : 'neg'); }
+  var mgmtRow = document.getElementById('ledMgmtRow'); if(mgmtRow) mgmtRow.hidden = !S.feeOn;
+  /* headline + hero */
+  var dur = (mode==='full') ? 820 : (mode==='settle' ? 380 : 0);
+  animateValue(document.getElementById('outNet'), c.net, dur);
+  animateValue(document.getElementById('heroFigure'), c.net, dur);
+  setT('heroTrad', fmt(c.traditional));
+  updateExtraLine(c);
+  updateHeroBar(c);
+  if(window.updateVisuals) window.updateVisuals(c);   /* charts hook (Stage 3) */
+}
+
+/* ---------- management fee toggle ---------- */
+function toggleFee(){
+  S.feeOn = !S.feeOn;
+  var t = document.getElementById('inFeeToggle');
+  if(t){ t.setAttribute('aria-checked', S.feeOn ? 'true' : 'false'); t.classList.toggle('on', S.feeOn); }
+  var body = document.getElementById('feeBody'); if(body) body.hidden = !S.feeOn;
+  var fp = document.getElementById('inFeePct'); if(fp) fp.disabled = !S.feeOn;
+  recompute('settle');
+}
+
+/* ---------- presets (buttons wired in Stage 3) ---------- */
+var PRESETS = { conservative:{yieldPct:5.6, upliftPct:30}, expected:{yieldPct:5.6, upliftPct:70}, strong:{yieldPct:5.6, upliftPct:110} };
+function applyPreset(name){
+  var p = PRESETS[name]; if(!p) return;
+  S.yieldPct = p.yieldPct; S.upliftPct = p.upliftPct;
+  var y = document.getElementById('inYield'); if(y) y.value = S.yieldPct;
+  var u = document.getElementById('inUplift'); if(u) u.value = S.upliftPct;
+  var btns = document.querySelectorAll('.preset'); for(var i=0;i<btns.length;i++){ btns[i].classList.toggle('on', btns[i].getAttribute('data-preset')===name); }
+  recompute('full');
+}
+
+/* ---------- init ---------- */
+function initCalc(){
+  renderSetup();
+  var vEl = document.getElementById('inV');
+  if(vEl){
+    vEl.addEventListener('input', function(){ S.V = parseNum(this.value); recompute('instant'); });
+    vEl.addEventListener('change', function(){ this.value = fmt(S.V); recompute('settle'); });
+    vEl.addEventListener('blur', function(){ this.value = fmt(S.V); });
+  }
+  var yEl = document.getElementById('inYield');
+  if(yEl){ yEl.addEventListener('input', function(){ S.yieldPct = parseFloat(this.value); recompute('instant'); });
+           yEl.addEventListener('change', function(){ recompute('settle'); }); }
+  var uEl = document.getElementById('inUplift');
+  if(uEl){ uEl.addEventListener('input', function(){ S.upliftPct = parseFloat(this.value); recompute('instant'); });
+           uEl.addEventListener('change', function(){ recompute('settle'); }); }
+  var fpEl = document.getElementById('inFeePct');
+  if(fpEl){ fpEl.addEventListener('input', function(){ S.feePct = parseFloat(this.value); recompute('instant'); });
+            fpEl.addEventListener('change', function(){ recompute('settle'); }); }
+  var sr = document.getElementById('setupRows');
+  if(sr){
+    sr.addEventListener('input', function(e){
+      var t = e.target; if(t && t.classList && t.classList.contains('inCost')){ S.setup[t.getAttribute('data-key')].cost = parseNum(t.value); recompute('instant'); }
+    });
+    sr.addEventListener('change', function(e){
+      var t = e.target; if(t && t.classList && t.classList.contains('inCost')){ t.value = fmt(S.setup[t.getAttribute('data-key')].cost); recompute('settle'); }
+    });
+    sr.addEventListener('click', function(e){
+      var t = e.target.closest ? e.target.closest('.step') : null; if(!t) return;
+      var k = t.getAttribute('data-key'); var d = parseInt(t.getAttribute('data-d'),10);
+      S.setup[k].life = Math.max(1, Math.min(40, S.setup[k].life + d));
+      recompute('settle');
+    });
+  }
+  _calcReady = true;
+  var saved = null; try{ saved = localStorage.getItem('ouja_invest_lang'); }catch(e){}
+  setLang(saved==='en' ? 'en' : 'ar');     /* applies labels + a silent recompute */
+  /* count up from zero on first load */
+  ['outNet','heroFigure'].forEach(function(id){ var e=document.getElementById(id); if(e){ e.setAttribute('data-val','0'); e.textContent='0'; } });
+  recompute('full');
+}
+initCalc();
 </script>
 </body>
 </html>
