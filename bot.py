@@ -15988,6 +15988,67 @@ html.lang-en .headline-fig .cur2{font-family:var(--f-body)}
 .led-v #ledExtra.pos{color:var(--gold-bright)}
 .led-v #ledExtra.neg{color:var(--neg)}
 
+/* ---------- presets ---------- */
+.presets{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:4px auto clamp(8px,2vh,16px)}
+.preset{font-family:var(--f-ar);font-size:15px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:10px 28px;cursor:pointer;transition:transform .14s var(--ease),color .2s var(--ease),border-color .2s var(--ease),background .2s var(--ease)}
+html.lang-en .preset{font-family:var(--f-body)}
+.preset:hover{color:var(--gold-bright);border-color:var(--line-gold)}
+.preset:active{transform:scale(.97)}
+.preset.on{background:linear-gradient(180deg,rgba(212,168,84,.22),rgba(212,168,84,.07));border-color:var(--gold);color:var(--gold-bright);box-shadow:0 8px 26px -14px rgba(212,168,84,.55)}
+@media (prefers-reduced-motion:reduce){.preset:active{transform:none}}
+
+/* ---------- visuals ---------- */
+.viz-grid{display:grid;grid-template-columns:1.45fr 1fr;gap:clamp(18px,3vw,28px);align-items:stretch;margin-top:clamp(24px,4vh,38px)}
+@media (max-width:1080px){.viz-grid{grid-template-columns:1fr;max-width:680px;margin-inline:auto}}
+.viz-compare{display:flex;flex-direction:column;justify-content:center;gap:22px}
+.cmp-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:12px}
+.cmp-head .lab{font-size:14.5px;color:var(--ink-2)}
+.cmp-yield{font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.cmp-yield.gold{color:var(--gold-bright);font-weight:600}
+.cmp-bar{height:18px;border-radius:999px;background:var(--surface-2);overflow:hidden;border:1px solid var(--line)}
+.cmp-fill{height:100%;border-radius:999px;width:0;transition:width .6s var(--ease)}
+.cmp-fill.trad{background:linear-gradient(90deg,#48423a,#5d5648)}
+.cmp-fill.ouja{background:linear-gradient(90deg,var(--gold-deep),var(--gold));box-shadow:0 0 20px rgba(212,168,84,.45)}
+.cmp-val{margin-top:9px;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.cmp-val b{color:var(--ink);font-weight:700}
+.cmp-val.gold,.cmp-val.gold b{color:var(--gold-bright)}
+.cmp-val.gold b{font-size:19px}
+.cmp-gap{margin-top:4px;text-align:center;font-size:13.5px;color:var(--gold-bright);font-weight:600;font-variant-numeric:tabular-nums;padding:13px;border:1px dashed var(--line-gold);border-radius:var(--r-sm);background:rgba(212,168,84,.05);line-height:1.5}
+.cmp-gap.neg{color:var(--neg);border-color:rgba(201,118,78,.42);background:rgba(201,118,78,.06)}
+@media (prefers-reduced-motion:reduce){.cmp-fill{transition:none}}
+
+.viz-payback{display:flex;flex-direction:column;justify-content:center;text-align:center;gap:12px}
+.pb-label{font-size:12.5px;color:var(--ink-3);letter-spacing:.04em}
+.pb-main{font-family:var(--f-body);font-weight:600;color:var(--gold-bright);font-variant-numeric:tabular-nums;line-height:1;font-size:clamp(2.6rem,6.5vw,3.6rem)}
+.pb-main .u{font-size:.32em;font-weight:500;color:var(--gold);margin-inline-start:.22em;font-family:var(--f-ar)}
+html.lang-en .pb-main .u{font-family:var(--f-body)}
+.pb-main.none{font-size:clamp(1.05rem,2.6vw,1.35rem);color:var(--neg);font-weight:600;line-height:1.4}
+.pb-sub{font-size:13.5px;color:var(--ink-2);line-height:1.7;max-width:36ch;margin-inline:auto}
+
+.viz-chart{margin-top:clamp(18px,3vw,28px)}
+.chart-head{display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin-bottom:10px;flex-wrap:wrap}
+.chart-t{font-family:var(--f-ar);font-size:17px;color:var(--ink);font-weight:600}
+html.lang-en .chart-t{font-family:var(--f-en)}
+.chart-key{display:flex;gap:18px;font-size:12px;color:var(--ink-3)}
+.chart-key span{display:inline-flex;align-items:center;gap:7px}
+.chart-key i{width:15px;height:3px;border-radius:2px;display:inline-block}
+.chart-key i.trad{background:#6b6352}
+.chart-key i.ouja{background:var(--gold)}
+.chart-wrap{width:100%}
+#projChart{width:100%;height:auto;display:block}
+.chart-marks{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+.mark{border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 16px;background:var(--surface-2)}
+.mark-t{font-size:12px;color:var(--ink-3);margin-bottom:10px}
+.mark-row{display:flex;justify-content:space-between;font-size:13.5px;padding:5px 0;font-variant-numeric:tabular-nums}
+.mark-row .l{color:var(--ink-2)}
+.mark-row .v{color:var(--ink);font-weight:600}
+.mark-row.ouja .l,.mark-row.ouja .v{color:var(--gold-bright)}
+
+/* ---------- reveal on scroll (enhances an already-visible default) ---------- */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
 /* ---------- disclaimer (always visible) ---------- */
 .disclaimer{
   position:sticky;bottom:0;z-index:80;
@@ -16056,10 +16117,15 @@ html.lang-en .headline-fig .cur2{font-family:var(--f-body)}
       <div class="section-eyebrow" data-ar="الحاسبة التفاعلية" data-en="Interactive calculator">الحاسبة التفاعلية</div>
       <h2 class="section-title" data-ar="احسب عائدك، سطرًا بسطر" data-en="Calculate your return, line by line">احسب عائدك، سطرًا بسطر</h2>
     </div>
+    <div class="presets wrap" role="group" aria-label="Scenario presets">
+      <button type="button" class="preset" data-preset="conservative" onclick="applyPreset('conservative')" data-ar="محافظ" data-en="Conservative">محافظ</button>
+      <button type="button" class="preset on" data-preset="expected" onclick="applyPreset('expected')" data-ar="متوقع" data-en="Expected">متوقع</button>
+      <button type="button" class="preset" data-preset="strong" onclick="applyPreset('strong')" data-ar="قوي" data-en="Strong">قوي</button>
+    </div>
     <div class="calc wrap">
       <div class="calc-grid">
 
-        <div class="panel inputs">
+        <div class="panel inputs" data-reveal>
           <div class="panel-h">
             <span class="panel-t" data-ar="مُدخلاتك" data-en="Your inputs">مُدخلاتك</span>
             <span class="panel-cap" data-ar="كل رقمٍ قابل للتعديل" data-en="Every number is editable">كل رقمٍ قابل للتعديل</span>
@@ -16110,7 +16176,7 @@ html.lang-en .headline-fig .cur2{font-family:var(--f-body)}
           </div>
         </div>
 
-        <div class="panel statement">
+        <div class="panel statement" data-reveal>
           <div class="headline">
             <div class="headline-l" data-ar="دخلك السنوي مع عوجا" data-en="Your annual income with Ouja">دخلك السنوي مع عوجا</div>
             <div class="headline-fig"><span class="num" id="outNet" data-val="0">0</span><span class="cur2" data-ar="ر.س" data-en="SAR">ر.س</span></div>
@@ -16129,6 +16195,60 @@ html.lang-en .headline-fig .cur2{font-family:var(--f-body)}
           </div>
         </div>
 
+      </div>
+    </div>
+  </section>
+
+  <section id="visuals">
+    <div class="section-head wrap" data-reveal>
+      <div class="section-eyebrow" data-ar="المقارنة والتوقّع" data-en="Comparison & projection">المقارنة والتوقّع</div>
+      <h2 class="section-title" data-ar="عوجا مقابل الإيجار التقليدي" data-en="Ouja vs the traditional lease">عوجا مقابل الإيجار التقليدي</h2>
+    </div>
+
+    <div class="wrap viz-grid">
+      <div class="panel viz-compare" data-reveal>
+        <div class="cmp-row">
+          <div class="cmp-head"><span class="lab" data-ar="الإيجار التقليدي" data-en="Traditional lease">الإيجار التقليدي</span><span class="cmp-yield"><b id="cmpTradYield">5.6</b>% <span data-ar="عائد" data-en="yield">عائد</span></span></div>
+          <div class="cmp-bar"><div class="cmp-fill trad" id="cmpBarTrad"></div></div>
+          <div class="cmp-val"><b id="cmpTradVal">0</b> <span data-ar="ر.س / سنة" data-en="SAR / yr">ر.س / سنة</span></div>
+        </div>
+        <div class="cmp-row">
+          <div class="cmp-head"><span class="lab" data-ar="عوجا · الإيجار اليومي" data-en="Ouja · daily rental">عوجا · الإيجار اليومي</span><span class="cmp-yield gold"><b id="cmpOujaYield">0</b>% <span data-ar="عائد صافٍ" data-en="net yield">عائد صافٍ</span></span></div>
+          <div class="cmp-bar"><div class="cmp-fill ouja" id="cmpBarOuja"></div></div>
+          <div class="cmp-val gold"><b id="cmpOujaVal">0</b> <span data-ar="ر.س / سنة" data-en="SAR / yr">ر.س / سنة</span></div>
+        </div>
+        <div class="cmp-gap" id="cmpGap"></div>
+      </div>
+
+      <div class="panel viz-payback" data-reveal>
+        <div class="pb-label" data-ar="استرداد تكلفة التجهيز" data-en="Setup cost payback">استرداد تكلفة التجهيز</div>
+        <div class="pb-main" id="pbMain">—</div>
+        <div class="pb-sub" id="pbSub"></div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="panel viz-chart" data-reveal>
+        <div class="chart-head">
+          <span class="chart-t" data-ar="الدخل التراكمي الصافي" data-en="Cumulative net income">الدخل التراكمي الصافي</span>
+          <div class="chart-key">
+            <span><i class="ouja"></i><span data-ar="عوجا" data-en="Ouja">عوجا</span></span>
+            <span><i class="trad"></i><span data-ar="التقليدي" data-en="Traditional">التقليدي</span></span>
+          </div>
+        </div>
+        <div class="chart-wrap"><svg id="projChart" viewBox="0 0 760 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cumulative net income over ten years, Ouja versus traditional"></svg></div>
+        <div class="chart-marks">
+          <div class="mark">
+            <div class="mark-t" data-ar="بعد ٥ سنوات" data-en="After 5 years">بعد ٥ سنوات</div>
+            <div class="mark-row ouja"><span class="l" data-ar="عوجا" data-en="Ouja">عوجا</span><span class="v"><b id="mk5ouja">0</b></span></div>
+            <div class="mark-row"><span class="l" data-ar="التقليدي" data-en="Traditional">التقليدي</span><span class="v"><b id="mk5trad">0</b></span></div>
+          </div>
+          <div class="mark">
+            <div class="mark-t" data-ar="بعد ١٠ سنوات" data-en="After 10 years">بعد ١٠ سنوات</div>
+            <div class="mark-row ouja"><span class="l" data-ar="عوجا" data-en="Ouja">عوجا</span><span class="v"><b id="mk10ouja">0</b></span></div>
+            <div class="mark-row"><span class="l" data-ar="التقليدي" data-en="Traditional">التقليدي</span><span class="v"><b id="mk10trad">0</b></span></div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -16270,6 +16390,91 @@ function updateHeroBar(c){
   be.style.width = ((c.net > c.traditional) ? ((c.net-c.traditional)/scale*100) : 0) + '%';
 }
 
+/* ---------- presets highlight ---------- */
+function clearPresets(){ var b=document.querySelectorAll('.preset'); for(var i=0;i<b.length;i++) b[i].classList.remove('on'); }
+
+/* ---------- payback line ---------- */
+function updatePayback(c){
+  var main=document.getElementById('pbMain'), sub=document.getElementById('pbSub'); if(!main||!sub) return;
+  var ar=(document.documentElement.lang!=='en');
+  if(c.paybackMonths!=null && isFinite(c.paybackMonths)){
+    var m=Math.round(c.paybackMonths), yy=Math.floor(m/12), rm=m%12;
+    main.className='pb-main';
+    main.innerHTML='<span class="n">'+m+'</span><span class="u">'+(ar?'شهر':'mo')+'</span>';
+    var approx = yy>0 ? (ar?(' ≈ '+yy+' سنة'+(rm?(' و'+rm+' شهر'):'')):(' ≈ '+yy+'y'+(rm?(' '+rm+'m'):''))) : '';
+    sub.textContent = ar ? ('أثاثك وتجهيزاتك يسترجعون تكلفتهم خلال '+m+' شهر'+approx+'.')
+                         : ('Your furniture and fit-out pay for themselves in '+m+' months'+approx+'.');
+  } else {
+    main.className='pb-main none';
+    main.textContent = ar ? 'لا استرداد عند هذه الإعدادات' : 'No payback at these settings';
+    sub.textContent = ar ? 'الزيادة الحالية لا تغطّي تكلفة التجهيز؛ ارفع نسبة الزيادة أو راجع التكاليف.'
+                         : 'The current uplift does not cover the setup cost. Raise the uplift or review the costs.';
+  }
+}
+
+/* ---------- projection chart (hand-built SVG, no library) ---------- */
+function buildChart(c){
+  var svg=document.getElementById('projChart'); if(!svg) return;
+  var W=760,H=340,pl=20,pr=20,pt=26,pb=42,yrs=10;
+  var maxV=Math.max(c.net*yrs, c.traditional*yrs, 1)*1.1;
+  function X(y){ return pl+(W-pl-pr)*(y/yrs); }
+  function Y(v){ return (H-pb)-(H-pt-pb)*(Math.max(0,v)/maxV); }
+  var tP=[],oP=[];
+  for(var y=0;y<=yrs;y++){ tP.push(X(y)+','+Y(c.traditional*y)); oP.push(X(y)+','+Y(c.net*y)); }
+  var base=Y(0);
+  var oArea='M'+X(0)+','+base+' L'+oP.join(' L')+' L'+X(yrs)+','+base+' Z';
+  var tArea='M'+X(0)+','+base+' L'+tP.join(' L')+' L'+X(yrs)+','+base+' Z';
+  function vline(y){ return '<line x1="'+X(y)+'" y1="'+pt+'" x2="'+X(y)+'" y2="'+(H-pb)+'" stroke="rgba(233,221,199,.09)" stroke-dasharray="3 6"/>'; }
+  function ylab(y,t){ return '<text x="'+X(y)+'" y="'+(H-pb+24)+'" fill="#A89E8D" font-size="13" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace">'+t+'</text>'; }
+  function dot(x,v,gold){ return '<circle cx="'+x+'" cy="'+Y(v)+'" r="4.5" fill="'+(gold?'#ECCF8C':'#8a8170')+'" stroke="#0E0D0C" stroke-width="2"/>'; }
+  var h='';
+  h+='<line x1="'+pl+'" y1="'+base+'" x2="'+(W-pr)+'" y2="'+base+'" stroke="rgba(233,221,199,.14)"/>';
+  h+=vline(5)+vline(10);
+  h+='<path d="'+oArea+'" fill="rgba(212,168,84,.13)"/>';
+  h+='<path d="'+tArea+'" fill="rgba(120,112,94,.16)"/>';
+  h+='<polyline points="'+tP.join(' ')+'" fill="none" stroke="#6b6352" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+  h+='<polyline points="'+oP.join(' ')+'" fill="none" stroke="#D4A854" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>';
+  h+=dot(X(5),c.traditional*5,false)+dot(X(10),c.traditional*10,false);
+  h+=dot(X(5),c.net*5,true)+dot(X(10),c.net*10,true);
+  h+=ylab(0,'0')+ylab(5,'5')+ylab(10,'10');
+  svg.innerHTML=h;
+}
+var _chartRaf=null;
+function scheduleChart(){ if(_chartRaf) return; _chartRaf=requestAnimationFrame(function(){ _chartRaf=null; if(window._lastCompute) buildChart(window._lastCompute); }); }
+
+/* ---------- visuals (called from recompute) ---------- */
+function updateVisuals(c){
+  var scale=Math.max(c.net,c.traditional,1);
+  var bt=document.getElementById('cmpBarTrad'), bo=document.getElementById('cmpBarOuja');
+  if(bt) bt.style.width=(c.traditional/scale*100)+'%';
+  if(bo) bo.style.width=(Math.max(0,c.net)/scale*100)+'%';
+  setT('cmpTradVal', fmt(c.traditional)); setT('cmpOujaVal', fmt(c.net));
+  setT('cmpTradYield', fmt1(S.yieldPct));
+  setT('cmpOujaYield', fmt1(S.V>0 ? (c.net/S.V*100) : 0));
+  var gap=document.getElementById('cmpGap');
+  if(gap){
+    var ar=(document.documentElement.lang!=='en');
+    var effGap=S.V>0 ? ((c.net-c.traditional)/S.V*100) : 0;
+    if(c.extra>=0){ gap.className='cmp-gap'; gap.textContent=(ar?'فارق عوجا: +':'Ouja advantage: +')+fmt(c.extra)+(ar?' ر.س · +':' SAR · +')+fmt1(effGap)+(ar?'٪ سنويًا':'% a year'); }
+    else { gap.className='cmp-gap neg'; gap.textContent=(ar?'عند هذه الإعدادات عوجا أقل بـ ':'At these settings Ouja is lower by ')+fmt(Math.abs(c.extra))+(ar?' ر.س سنويًا':' SAR a year'); }
+  }
+  updatePayback(c);
+  scheduleChart();
+  setT('mk5trad', fmt(c.cum5_trad)); setT('mk5ouja', fmt(c.cum5_ouja));
+  setT('mk10trad', fmt(c.cum10_trad)); setT('mk10ouja', fmt(c.cum10_ouja));
+}
+
+/* ---------- reveal on scroll ---------- */
+function setupReveals(){
+  if(REDUCE || !('IntersectionObserver' in window)) return;   /* content stays visible by default */
+  var targets=document.querySelectorAll('[data-reveal]');
+  for(var i=0;i<targets.length;i++) targets[i].classList.add('reveal');
+  var io=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, {threshold:0.12, rootMargin:'0px 0px -6% 0px'});
+  for(var j=0;j<targets.length;j++) io.observe(targets[j]);
+}
+
 /* ---------- master recompute ---------- */
 function recompute(mode){
   var c = compute(S);
@@ -16336,10 +16541,10 @@ function initCalc(){
     vEl.addEventListener('blur', function(){ this.value = fmt(S.V); });
   }
   var yEl = document.getElementById('inYield');
-  if(yEl){ yEl.addEventListener('input', function(){ S.yieldPct = parseFloat(this.value); recompute('instant'); });
+  if(yEl){ yEl.addEventListener('input', function(){ S.yieldPct = parseFloat(this.value); clearPresets(); recompute('instant'); });
            yEl.addEventListener('change', function(){ recompute('settle'); }); }
   var uEl = document.getElementById('inUplift');
-  if(uEl){ uEl.addEventListener('input', function(){ S.upliftPct = parseFloat(this.value); recompute('instant'); });
+  if(uEl){ uEl.addEventListener('input', function(){ S.upliftPct = parseFloat(this.value); clearPresets(); recompute('instant'); });
            uEl.addEventListener('change', function(){ recompute('settle'); }); }
   var fpEl = document.getElementById('inFeePct');
   if(fpEl){ fpEl.addEventListener('input', function(){ S.feePct = parseFloat(this.value); recompute('instant'); });
@@ -16365,6 +16570,7 @@ function initCalc(){
   /* count up from zero on first load */
   ['outNet','heroFigure'].forEach(function(id){ var e=document.getElementById(id); if(e){ e.setAttribute('data-val','0'); e.textContent='0'; } });
   recompute('full');
+  setupReveals();
 }
 initCalc();
 </script>
