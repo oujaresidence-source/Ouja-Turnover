@@ -7286,12 +7286,31 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub"><span class="dot" id="dot"></span> <span id="freshness"></span></div>
           </div>
           <div class="page-tools">
+            <button class="btn primary xs" id="investDeckBtn" onclick="castToInvest()" title="افتح عرض عوائد المستثمرين · Open the investor returns deck">✦ عرض المستثمرين<span style="opacity:.72;font-weight:500"> · Investor Deck</span></button>
             <button class="btn ghost xs" onclick="toggleTheme()" id="dThemeBtn">◐ <span id="t_theme">المظهر</span></button>
             <button class="btn ghost xs" onclick="toggleLang()" id="dLangBtn">EN</button>
             <button class="btn ghost xs" onclick="refresh()" id="refreshBtn">↻ <span id="t_refresh">تحديث</span></button>
           </div>
         </div>
 
+        <script>
+        /* Cast into the standalone investor deck: a gold bloom sweeps the ops UI,
+           then we navigate to /invest, which fades in from the same dark curtain. */
+        function castToInvest(){
+          try{
+            var url='/invest';
+            var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+            if(reduce){ window.location.href=url; return; }
+            var ov=document.createElement('div');
+            ov.setAttribute('aria-hidden','true');
+            ov.style.cssText='position:fixed;inset:0;z-index:9000;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 46%, rgba(212,168,84,.30), rgba(14,13,12,.97) 60%, #0E0D0C 100%)';
+            document.body.appendChild(ov);
+            var a=ov.animate([{opacity:0},{opacity:1}],{duration:460,easing:'cubic-bezier(0.23,1,0.32,1)',fill:'forwards'});
+            a.onfinish=function(){ window.location.href=url; };
+            setTimeout(function(){ window.location.href=url; }, 720);
+          }catch(e){ window.location.href='/invest'; }
+        }
+        </script>
         <div class="page-help" id="ph_home" data-help-key="home">
           <button class="ph-x" onclick="dismissHelp('home')" title="إخفاء">×</button>
           <div class="ph-t">👋 أهلاً وسهلاً</div>
@@ -15687,6 +15706,334 @@ async def _api_apply(request):
 async def _handle_dashboard(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
 
+# =====================================================================
+# INVESTOR DECK — standalone full-screen ROI presentation at /invest.
+# Its own dark, cinematic page (NOT the cream ops theme). Served openly
+# so the link is shareable; only anonymized portfolio AVERAGES are ever
+# injected — never per-unit or guest data, never fabricated numbers.
+# The big HTML lives in the INVEST_HTML raw string below (between the
+# BEGIN/END markers). Real-proof stats are injected at render time via a
+# literal placeholder replace (NOT an f-string), so every brace stays
+# literal exactly like DASHBOARD_HTML.
+# =====================================================================
+# ===INVEST_HTML_BEGIN===
+INVEST_HTML = r'''<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>عوجا · عوائد المستثمرين · Ouja Investor Returns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Reem+Kufi:wght@400;500;600;700&family=Marcellus&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0E0D0C;            /* warm near-black, the brand's own dark */
+  --bg-2:#131110;
+  --surface:#1A1714;
+  --surface-2:#221E19;
+  --surface-3:#2A2520;
+  --line:rgba(233,221,199,.10);          /* warm neutral hairline */
+  --line-2:rgba(233,221,199,.06);
+  --line-gold:rgba(212,168,84,.26);      /* gold hairline */
+  --ink:#F4EFE5;          /* warm off-white, ~17:1 on --bg */
+  --ink-2:#CBC2B2;        /* secondary, ~11:1 */
+  --ink-3:#A89E8D;        /* captions, ~7:1 */
+  --gold:#D4A854;
+  --gold-bright:#ECCF8C;  /* text-on-dark emphasis, ~11:1 */
+  --gold-deep:#B8893F;
+  --gold-glow:rgba(212,168,84,.16);
+  --pos:#CDA85B;          /* positive delta stays in the gold family */
+  --neg:#C9764E;          /* terracotta for "no advantage" states */
+  --r-xs:8px; --r-sm:12px; --r:16px; --r-lg:24px; --r-xl:32px;
+  --sh-sm:0 1px 2px rgba(0,0,0,.4);
+  --sh:0 18px 50px -24px rgba(0,0,0,.7);
+  --sh-gold:0 24px 70px -30px rgba(212,168,84,.34);
+  --f-ar:'Reem Kufi','IBM Plex Sans Arabic',system-ui,sans-serif;     /* Arabic display */
+  --f-en:'Marcellus',Georgia,'Times New Roman',serif;                 /* Latin display */
+  --f-body:'IBM Plex Sans Arabic','Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --ease:cubic-bezier(0.23,1,0.32,1);    /* Emil's signature ease-out */
+  --maxw:1180px;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} }
+body{
+  font-family:var(--f-body);
+  background:var(--bg);
+  color:var(--ink);
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  font-variant-numeric:tabular-nums;
+  overflow-x:hidden;
+  min-height:100vh;
+  /* layered atmosphere: warm vignette + a single gold bloom up top */
+  background-image:
+    radial-gradient(120% 80% at 50% -8%, rgba(212,168,84,.10), transparent 46%),
+    radial-gradient(100% 100% at 50% 120%, rgba(212,168,84,.05), transparent 55%);
+  background-attachment:fixed;
+}
+/* faint engraved hairline texture, very low contrast, premium not glassy */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
+  background-image:linear-gradient(var(--line-2) 1px,transparent 1px);
+  background-size:100% 56px;
+  -webkit-mask-image:linear-gradient(transparent,#000 18%,#000 82%,transparent);
+          mask-image:linear-gradient(transparent,#000 18%,#000 82%,transparent);
+}
+
+::selection{background:rgba(212,168,84,.28);color:#fff}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:var(--r-xs)}
+
+/* ---------- entry curtain (continues the dashboard "cast") ---------- */
+#curtain{
+  position:fixed;inset:0;z-index:120;pointer-events:none;
+  background:radial-gradient(circle at 50% 44%, rgba(212,168,84,.26), rgba(14,13,12,.97) 58%, #0E0D0C 100%);
+}
+
+/* ---------- nav ---------- */
+.nav{
+  position:sticky;top:0;z-index:90;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:18px clamp(18px,5vw,52px);
+  background:linear-gradient(var(--bg),rgba(14,13,12,.72) 70%,transparent);
+  -webkit-backdrop-filter:saturate(140%) blur(8px);
+          backdrop-filter:saturate(140%) blur(8px);
+}
+.wm{display:flex;align-items:baseline;gap:12px;line-height:1}
+.wm .ar{font-family:var(--f-ar);font-weight:600;font-size:23px;color:var(--gold-bright);letter-spacing:.5px}
+.wm .en{font-family:var(--f-en);font-size:12px;letter-spacing:.42em;color:var(--ink-3);text-transform:uppercase}
+.nav-tools{display:flex;align-items:center;gap:10px}
+.lnk{
+  font-size:12.5px;color:var(--ink-2);padding:8px 14px;border-radius:999px;
+  border:1px solid var(--line);transition:color .2s var(--ease),border-color .2s var(--ease),background .2s var(--ease);
+  white-space:nowrap;
+}
+.lnk:hover{color:var(--gold-bright);border-color:var(--line-gold);background:rgba(212,168,84,.06)}
+#langToggle{font-family:var(--f-en);min-width:46px;text-align:center;cursor:pointer;background:transparent;color:var(--ink-2)}
+html.lang-en #langToggle{font-family:var(--f-ar)}
+
+/* ---------- layout ---------- */
+main{position:relative;z-index:1}
+.wrap{max-width:var(--maxw);margin-inline:auto;padding-inline:clamp(18px,5vw,52px)}
+section{position:relative}
+
+/* ---------- hero ---------- */
+.hero{padding-block:clamp(48px,10vh,120px) clamp(60px,12vh,140px);text-align:center}
+.kicker{
+  display:inline-flex;align-items:center;gap:12px;
+  font-family:var(--f-en);font-size:12px;letter-spacing:.36em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:clamp(20px,4vh,38px);
+}
+.kicker::before,.kicker::after{content:"";width:clamp(22px,5vw,52px);height:1px;background:linear-gradient(90deg,transparent,var(--line-gold))}
+.kicker::after{background:linear-gradient(90deg,var(--line-gold),transparent)}
+html.lang-en .kicker{font-family:var(--f-en)}
+
+.hero-h{
+  font-family:var(--f-ar);
+  font-weight:500;
+  font-size:clamp(2.1rem,6.2vw,4.6rem);
+  line-height:1.12;letter-spacing:-.01em;
+  color:var(--ink);
+  margin:0 auto;max-width:18ch;
+  text-wrap:balance;
+}
+html.lang-en .hero-h{font-family:var(--f-en);font-weight:400;letter-spacing:0}
+.hero-h .gold{color:var(--gold-bright)}
+.hero-sub{
+  margin:clamp(20px,3.4vh,30px) auto 0;max-width:56ch;
+  font-size:clamp(1rem,1.7vw,1.18rem);color:var(--ink-2);line-height:1.78;font-weight:300;
+  text-wrap:pretty;
+}
+
+/* payoff figure */
+.payoff{margin-top:clamp(38px,7vh,72px)}
+.payoff-label{font-size:13.5px;letter-spacing:.04em;color:var(--ink-3);margin-bottom:10px}
+.figure{
+  font-family:var(--f-body);font-weight:600;
+  font-size:clamp(3.4rem,12vw,7.4rem);line-height:.96;letter-spacing:-.03em;
+  color:var(--gold-bright);
+  display:inline-flex;align-items:baseline;gap:.16em;
+  text-shadow:0 0 60px rgba(212,168,84,.18);
+}
+.figure .cur{font-family:var(--f-ar);font-size:.26em;font-weight:500;color:var(--gold);letter-spacing:0}
+.figure .num{font-variant-numeric:tabular-nums}
+
+/* delta bar: traditional vs ouja, the gap glows gold */
+.compare{margin:clamp(30px,5vh,52px) auto 0;max-width:560px}
+.compare-line{font-size:14.5px;color:var(--ink-2);margin-bottom:14px}
+.compare-line b{color:var(--ink);font-weight:600}
+.bar{height:14px;border-radius:999px;background:var(--surface-2);overflow:hidden;display:flex;border:1px solid var(--line)}
+.bar .trad{background:linear-gradient(90deg,#4a443a,#5a5346);height:100%}
+.bar .extra{background:linear-gradient(90deg,var(--gold-deep),var(--gold));height:100%;box-shadow:0 0 22px rgba(212,168,84,.5)}
+.bar-key{display:flex;justify-content:center;gap:26px;margin-top:14px;font-size:12.5px;color:var(--ink-3)}
+.bar-key span{display:inline-flex;align-items:center;gap:8px}
+.dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.dot.trad{background:#5a5346}
+.dot.extra{background:var(--gold)}
+
+/* scroll cue */
+.cue{margin-top:clamp(40px,7vh,76px);display:inline-flex;flex-direction:column;align-items:center;gap:10px;color:var(--ink-3);font-size:12.5px;letter-spacing:.05em}
+.cue .chev{width:26px;height:26px;border-inline:1px solid transparent}
+.cue svg{display:block;animation:cue 2.6s var(--ease) infinite}
+@keyframes cue{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(7px);opacity:1}}
+@media (prefers-reduced-motion:reduce){.cue svg{animation:none}}
+
+/* ---------- section placeholder (calculator arrives in Stage 2) ---------- */
+.section-head{text-align:center;padding-block:clamp(40px,8vh,80px) 0}
+.section-eyebrow{font-family:var(--f-en);font-size:11.5px;letter-spacing:.34em;text-transform:uppercase;color:var(--gold);margin-bottom:14px}
+.section-title{font-family:var(--f-ar);font-weight:500;font-size:clamp(1.7rem,3.6vw,2.6rem);color:var(--ink);margin:0;letter-spacing:-.01em}
+html.lang-en .section-title{font-family:var(--f-en);font-weight:400}
+.stub{
+  max-width:var(--maxw);margin:36px auto clamp(80px,12vh,140px);
+  padding:clamp(28px,5vw,56px);border:1px solid var(--line);border-radius:var(--r-lg);
+  background:linear-gradient(180deg,var(--surface),var(--bg-2));text-align:center;color:var(--ink-3);
+}
+
+/* ---------- disclaimer (always visible) ---------- */
+.disclaimer{
+  position:sticky;bottom:0;z-index:80;
+  font-size:11.5px;line-height:1.6;color:var(--ink-3);text-align:center;
+  padding:11px clamp(16px,5vw,52px);
+  background:linear-gradient(transparent,rgba(14,13,12,.86) 36%,var(--bg));
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  border-top:1px solid var(--line-2);
+}
+.disclaimer b{color:var(--ink-2);font-weight:600}
+
+@media (max-width:560px){
+  .wm .en{display:none}
+  .bar-key{gap:18px}
+}
+</style>
+</head>
+<body>
+
+<div id="curtain" aria-hidden="true"></div>
+
+<nav class="nav">
+  <a class="wm" href="/dashboard" aria-label="Ouja Residence">
+    <span class="ar">عوجا</span>
+    <span class="en">Ouja&nbsp;Residence</span>
+  </a>
+  <div class="nav-tools">
+    <a class="lnk" href="/dashboard" data-ar="‹ العودة للوحة" data-en="‹ Back to dashboard">‹ العودة للوحة</a>
+    <button class="lnk" id="langToggle" onclick="setLang(document.documentElement.lang==='ar'?'en':'ar')" aria-label="Switch language">EN</button>
+  </div>
+</nav>
+
+<main>
+  <section class="hero wrap">
+    <div class="kicker" data-ar="عرض المستثمرين" data-en="Investment Returns">عرض المستثمرين</div>
+    <h1 class="hero-h">
+      <span data-ar="ملكيةٌ واحدة، " data-en="One property, ">ملكيةٌ واحدة، </span><span class="gold" data-ar="دخلٌ يتجاوز الإيجار التقليدي." data-en="income beyond the traditional lease.">دخلٌ يتجاوز الإيجار التقليدي.</span>
+    </h1>
+    <p class="hero-sub" data-ar="إدارة عوجا للإيجار اليومي تُحوِّل شقتك إلى دخلٍ أعلى. كل رقمٍ هنا شفّاف وقابلٌ للتعديل، فحرِّك المُدخلات وشاهد عائدك يتغيّر لحظيًا." data-en="Ouja's daily-rental management turns your apartment into higher income. Every number here is transparent and adjustable, so move the inputs and watch your return update live.">إدارة عوجا للإيجار اليومي تُحوِّل شقتك إلى دخلٍ أعلى. كل رقمٍ هنا شفّاف وقابلٌ للتعديل، فحرِّك المُدخلات وشاهد عائدك يتغيّر لحظيًا.</p>
+
+    <div class="payoff">
+      <div class="payoff-label" data-ar="دخلك السنوي المتوقع مع عوجا" data-en="Your projected annual income with Ouja">دخلك السنوي المتوقع مع عوجا</div>
+      <div class="figure"><span class="num" id="heroFigure">87,400</span><span class="cur" data-ar="ر.س" data-en="SAR">ر.س</span></div>
+    </div>
+
+    <div class="compare">
+      <div class="compare-line"><span data-ar="مقابل " data-en="versus ">مقابل </span><b id="heroTrad">56,560</b> <span data-ar="ر.س مع الإيجار التقليدي" data-en="SAR with a traditional lease">ر.س مع الإيجار التقليدي</span></div>
+      <div class="bar" role="img" aria-label="Ouja income compared to a traditional lease">
+        <div class="trad" style="width:65%"></div>
+        <div class="extra" style="width:35%"></div>
+      </div>
+      <div class="bar-key">
+        <span><i class="dot trad"></i><span data-ar="الإيجار التقليدي" data-en="Traditional lease">الإيجار التقليدي</span></span>
+        <span><i class="dot extra"></i><span data-ar="الزيادة مع عوجا" data-en="The Ouja uplift">الزيادة مع عوجا</span></span>
+      </div>
+    </div>
+
+    <a class="cue" href="#calc" aria-label="Go to the calculator">
+      <span data-ar="اضبط الأرقام بنفسك" data-en="Adjust the numbers yourself">اضبط الأرقام بنفسك</span>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </a>
+  </section>
+
+  <section id="calc">
+    <div class="section-head wrap">
+      <div class="section-eyebrow" data-ar="الحاسبة التفاعلية" data-en="Interactive calculator">الحاسبة التفاعلية</div>
+      <h2 class="section-title" data-ar="احسب عائدك، سطرًا بسطر" data-en="Calculate your return, line by line">احسب عائدك، سطرًا بسطر</h2>
+    </div>
+    <div class="stub wrap">
+      <span data-ar="الحاسبة التفاعلية الكاملة تُبنى في المرحلة التالية." data-en="The full interactive calculator is built in the next stage.">الحاسبة التفاعلية الكاملة تُبنى في المرحلة التالية.</span>
+    </div>
+  </section>
+</main>
+
+<footer class="disclaimer">
+  <b data-ar="تنبيه:" data-en="Disclaimer:">تنبيه:</b>
+  <span data-ar=" الأرقام تقديرات وأهداف مبنية على متوسطات المحفظة والمعايير الدولية، وليست عوائد مضمونة." data-en=" Figures are estimates and targets based on portfolio averages and international standards, not guaranteed returns."> الأرقام تقديرات وأهداف مبنية على متوسطات المحفظة والمعايير الدولية، وليست عوائد مضمونة.</span>
+</footer>
+
+<script>window.OUJA_PROOF = /*__OUJA_PROOF__*/null;</script>
+<script>
+(function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var c = document.getElementById('curtain');
+  function hideCurtain(){
+    if(!c) return;
+    if(reduce){ c.style.display='none'; return; }
+    var a = c.animate([{opacity:1},{opacity:0}], {duration:640, easing:'cubic-bezier(0.23,1,0.32,1)', fill:'forwards'});
+    a.onfinish = function(){ c.style.display='none'; };
+  }
+  requestAnimationFrame(function(){ requestAnimationFrame(hideCurtain); });
+  window.addEventListener('load', hideCurtain);
+})();
+
+function setLang(l){
+  var html = document.documentElement;
+  html.setAttribute('lang', l);
+  html.setAttribute('dir', l==='ar' ? 'rtl' : 'ltr');
+  html.classList.toggle('lang-en', l==='en');
+  var nodes = document.querySelectorAll('[data-ar]');
+  for(var i=0;i<nodes.length;i++){
+    var n = nodes[i];
+    var v = n.getAttribute('data-'+l);
+    if(v != null) n.textContent = v;
+  }
+  var t = document.getElementById('langToggle');
+  if(t) t.textContent = (l==='ar' ? 'EN' : 'ع');
+  try{ localStorage.setItem('ouja_invest_lang', l); }catch(e){}
+}
+(function(){
+  var saved=null; try{ saved=localStorage.getItem('ouja_invest_lang'); }catch(e){}
+  if(saved==='en') setLang('en');
+})();
+</script>
+</body>
+</html>
+'''
+# ===INVEST_HTML_END===
+
+def _invest_proof():
+    """Real, anonymized area-level averages (occupancy / ADR) for the investor
+    proof panel. Returns None when nothing trustworthy is available — we omit
+    rather than fabricate. Fully implemented in Stage 4."""
+    return None
+
+def _render_invest_html():
+    """Inject the real-proof payload into the standalone investor page using a
+    literal placeholder replace (keeps INVEST_HTML a plain string, no f-string)."""
+    proof = None
+    try:
+        proof = _invest_proof()
+    except Exception as e:
+        print("invest proof error:", e)
+    payload = json.dumps(proof, ensure_ascii=False) if proof else "null"
+    return INVEST_HTML.replace("/*__OUJA_PROOF__*/null", payload)
+
+async def _handle_invest(request):
+    return web.Response(text=_render_invest_html(), content_type="text/html")
+
 async def _api_pricing_detail(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -19971,6 +20318,7 @@ async def start_web_server():
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
+        app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
         app.router.add_get("/api/overview", _api_overview)
         app.router.add_get("/api/revenue", _api_revenue)
         app.router.add_get("/api/pricing", _api_pricing)
