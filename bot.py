@@ -10854,10 +10854,15 @@ function _expCard(e){
     var _det=''; (e.hold_reasons||[]).forEach(function(r){ if(r.code===e.primary_reason && r.detail) _det=r.detail; });
     chips='<span class="exp-reason">'+esc(expReasonLabel(e.primary_reason))+(_det?(' · '+esc(_det)):'')+'</span>';
   }
+  // join only non-empty facts — no dangling "·  · " separators (impeccable: reduce noise)
+  function _j(parts){ return parts.filter(function(x){ return x && (''+x).trim(); }).map(esc).join(' · '); }
+  var _l2=_j([e.apartment||(L==='ar'?'(بدون شقة)':'(no apartment)'), e.expense_date]);
+  var _l3=_j([e.submitter, e.maintenance_type, e.category]);
   var head='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-    + '<div><div class="strong" style="font-size:13.5px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
-    + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(e.apartment||(L==='ar'?'(بدون شقة)':'(no apartment)'))+' · '+esc(e.expense_date||'')+'</div>'
-    + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(e.submitter||'—')+' · '+esc(e.maintenance_type||'')+' · '+esc(e.category||'')+'</div></div>'
+    + '<div style="min-width:0"><div class="strong" style="font-size:13.5px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
+    + (_l2?'<div class="muted" style="font-size:11.5px;margin-top:2px">'+_l2+'</div>':'')
+    + (_l3?'<div class="muted" style="font-size:11px;margin-top:2px">'+_l3+'</div>':'')
+    + '</div>'
     + _expStatusChip(e.status)+'</div>';
   var _edge=e.status==='failed'?'var(--red)':(e.status==='held'?'var(--yellow)':(e.status==='discarded'?'var(--mut)':'var(--green)'));
   return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-inline-start:3px solid '+_edge+'">'
@@ -10904,6 +10909,12 @@ function _expCardActions(e,reason){
     btns.push('<button class="btn primary sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'ترحيل لـHostaway':'Post to Hostaway')+'</button>');
   } else if(e.status==='failed'){
     btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>');
+  } else if(reason==='apartment_confirm'||reason==='apartment_none'||reason==='incomplete'){
+    // No direct post path here — show WHY posting is blocked: a greyed ترحيل + tooltip
+    // naming the open gate(s). The gate-clearing control sits in _expCardExtras above.
+    var gates=(e.hold_reasons||[]).map(function(r){return expReasonLabel(r.code);}).join('، ')||expReasonLabel(reason);
+    var tip=(L==='ar'?'ما تقدر ترحّل — ':'Can\\'t post — ')+gates;
+    btns.push('<button class="btn sm" disabled title="'+esc(tip)+'">'+(L==='ar'?'ترحيل (مقفل)':'Post (locked)')+'</button>');
   }
   btns.push('<button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تعديل':'Edit')+'</button>');
   if(reason!=='duplicate') btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل':'Discard')+'</button>');
