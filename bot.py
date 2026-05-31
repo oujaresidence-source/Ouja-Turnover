@@ -6878,6 +6878,14 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 
 /* ============== INBOX LIST ============== */
 .inbox-list{display:flex;flex-direction:column;gap:6px}
+/* Inbox uses the full width on desktop: collapsed conversations tile responsively;
+   the open one spans every column so the thread reads at a comfortable width.
+   Scoped to #inboxList so the shared .inbox-list class (used elsewhere) is untouched. */
+@media (min-width:1100px){
+  #inboxList{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:8px;align-items:start}
+  #inboxList>.bulkbar,#inboxList>.empty{grid-column:1/-1;margin-bottom:0}
+  #inboxList>.ibox.open{grid-column:1/-1}
+}
 .ibox{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);transition:.12s;overflow:hidden}
 .ibox:hover{border-color:var(--line-strong);box-shadow:var(--sh-xs)}
 .ibox.escalation{border-inline-start:3px solid var(--red)}
@@ -7095,6 +7103,16 @@ html[dir="rtl"] .drawer.open{transform:translateX(0)}
 .drawer-body{flex:1;overflow-y:auto;padding:16px 18px}
 .drawer-foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:var(--surface-2)}
 @media (max-width:1023px){.drawer{width:100vw}.drawer-body{padding:14px 14px calc(80px + env(safe-area-inset-bottom))}.drawer-head{padding:12px 14px}.drawer-foot{padding:10px 14px}}
+/* ===== Master-detail (Stage 2): on wide screens the drawer docks as a right-hand
+   detail pane and main reflows beside it — list stays clickable, full width is used.
+   Below 1360px (and on mobile) it stays the proven slide-over overlay, so no regression
+   on laptops where a 520px pane would crush the list. */
+@media (min-width:1360px){
+  body.detailpane main.main{padding-inline-end:calc(min(var(--drawer),100vw) + var(--s-4));transition:padding-inline-end .25s ease}
+  body.detailpane .drawer{box-shadow:none;border-inline-start:1px solid var(--line)}
+  body.detailpane .drawer-backdrop.show{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;pointer-events:none}
+}
+@media (prefers-reduced-motion:reduce){ body.detailpane main.main{transition:none} }
 
 /* ============== PRICING DETAIL TABLE ============== */
 table.data{width:100%;border-collapse:collapse;font-size:12px}
@@ -14580,6 +14598,9 @@ function openDrawer(title, sub){
   document.getElementById('drwSub').textContent = sub||'';
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerBg').classList.add('show');
+  // On wide screens the drawer docks as a right-hand detail pane (master-detail);
+  // body.detailpane reflows main beside it. Mid/mobile keep the overlay.
+  document.body.classList.add('detailpane');
   drawerOpen = true;
 }
 function setDrawerTitle(title, sub){
@@ -14594,6 +14615,7 @@ function setDrawerFoot(html){
 function closeDrawer(){
   document.getElementById('drawer').classList.remove('open');
   document.getElementById('drawerBg').classList.remove('show');
+  document.body.classList.remove('detailpane');
   drawerOpen = false;
 }
 
