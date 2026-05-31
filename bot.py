@@ -6737,6 +6737,20 @@ aside.side{display:none;background:var(--surface);border-inline-end:1px solid va
 .side-brand .name{font-size:16px;font-weight:700;color:var(--text);line-height:1}
 .side-brand .sub{font-size:9.5px;color:var(--mut);margin-top:2px;letter-spacing:1px;text-transform:uppercase}
 .side-nav{display:flex;flex-direction:column;gap:1px;flex:1}
+/* ===== Sectioned nav (Stage 3) ===== */
+.nav-group{display:flex;flex-direction:column}
+.nav-group + .nav-group{margin-top:7px}
+.nav-group-h{display:flex;align-items:center;gap:7px;width:100%;background:none;border:0;cursor:pointer;
+  padding:7px 11px 4px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--mut);user-select:none;text-align:start}
+.nav-group-h:hover{color:var(--text-2)}
+.nav-cat-label{flex:1;text-align:start;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nav-group-h .badge{background:var(--red);color:#fff;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:16px;text-align:center;line-height:1.3}
+.nav-caret{font-size:10px;opacity:.6;transition:transform .18s ease}
+.nav-group.collapsed .nav-caret{transform:rotate(-90deg)}
+.nav-group-items{display:flex;flex-direction:column;gap:1px}
+.nav-group.collapsed .nav-group-items{display:none}
+@media (prefers-reduced-motion:reduce){ .nav-caret{transition:none} }
 .side-nav .item{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r-sm);color:var(--text-2);font-size:13px;font-weight:500;cursor:pointer;transition:.12s;position:relative;user-select:none}
 .side-nav .item:hover{background:var(--surface-2);color:var(--text)}
 .side-nav .item.on{background:var(--gold-tint);color:var(--gold);font-weight:600}
@@ -8398,6 +8412,7 @@ const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
+    cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -8590,6 +8605,7 @@ const T = {
   },
   en:{dir:'ltr',
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
+    cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -9055,16 +9071,49 @@ function badgeCount(key){
   if(key==='expenses') return ((D.expSummary||{}).queue) || 0;
   return 0;
 }
+// Stage 3 — the sidebar is sectioned into 6 categories. Every NAV id below appears in
+// exactly one group; order is deliberate (what a manager reaches for, top to bottom).
+const NAV_CATS = [
+  {tk:'cat_overview', ids:['home','today']},
+  {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','quality','pmo','design']},
+  {tk:'cat_pricing',  ids:['pricing','strat','rev','quote']},
+  {tk:'cat_finance',  ids:['expenses','finance','weekly']},
+  {tk:'cat_guests',   ids:['guests','reviews']},
+  {tk:'cat_system',   ids:['users','learn','log']}
+];
+function _navCollapsed(){ try{ return JSON.parse(localStorage.getItem('ouja:navCollapsed')||'{}')||{}; }catch(_){ return {}; } }
+function toggleNavCat(tk){
+  const c=_navCollapsed(); c[tk]=!c[tk];
+  try{ localStorage.setItem('ouja:navCollapsed', JSON.stringify(c)); }catch(_){}
+  buildSideNav();
+}
 function buildSideNav(){
   const el = document.getElementById('sideNav'); if(!el) return;
   // Filter adminOnly tabs based on D.me — legacy token users default to admin.
   const me = (D.me && D.me.user) || {role:'admin'};
   const isAdmin = me.role === 'admin';
-  el.innerHTML = NAV.filter(function(n){ return !(n.adminOnly && !isAdmin) })
-    .map(function(n){
-      const c = badgeCount(n.badge);
-      return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
-    }).join('');
+  const byId = {}; NAV.forEach(function(n){ byId[n.id]=n; });
+  const collapsed = _navCollapsed();
+  function itemHtml(n){
+    const c = badgeCount(n.badge);
+    return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
+  }
+  el.innerHTML = NAV_CATS.map(function(cat){
+    const items = cat.ids.map(function(id){ return byId[id]; }).filter(function(n){ return n && !(n.adminOnly && !isAdmin); });
+    if(!items.length) return '';
+    const activeHere = items.some(function(n){ return n.id===view; });
+    // active category is always expanded; otherwise honor the saved collapse state
+    const isCollapsed = !!collapsed[cat.tk] && !activeHere;
+    let groupBadge = 0; items.forEach(function(n){ groupBadge += badgeCount(n.badge); });
+    return '<div class="nav-group'+(isCollapsed?' collapsed':'')+'">'
+      + '<button class="nav-group-h" onclick="toggleNavCat(\\''+cat.tk+'\\')" aria-expanded="'+(isCollapsed?'false':'true')+'">'
+        + '<span class="nav-cat-label">'+t()[cat.tk]+'</span>'
+        + ((isCollapsed && groupBadge>0)?'<span class="badge">'+groupBadge+'</span>':'')
+        + '<span class="nav-caret" aria-hidden="true">⌄</span>'
+      + '</button>'
+      + '<div class="nav-group-items">'+items.map(itemHtml).join('')+'</div>'
+    + '</div>';
+  }).join('');
 }
 function buildBottomNav(){
   const el = document.getElementById('bottomNav'); if(!el) return;
