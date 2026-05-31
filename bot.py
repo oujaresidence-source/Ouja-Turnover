@@ -6609,6 +6609,16 @@ DASHBOARD_HTML = """<!doctype html>
   --side:232px;
   --drawer:520px;
   --topbar:56px;
+
+  /* ===== Layout system (Stage 1) — spacing scale, page frame, breakpoints =====
+     Breakpoints used across the app: mobile <768 · tablet 768–1024 · desktop 1024–1440 · wide >1440 */
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:28px; --s-7:40px;
+  --grid-gap:16px;
+  --page-pad:26px;          /* generous gutter (≥24) for the content region */
+  --page-max:1600px;        /* ultra-wide readability cap — content never spans a 2000px screen */
+  --header-h:58px;
+  /* semantic z-index scale (no magic 999s): base < sticky < drawer-backdrop < drawer < modal < toast < tooltip */
+  --z-sticky:30; --z-drawer-bd:60; --z-drawer:61; --z-modal:80; --z-toast:90; --z-tip:100;
 }
 
 html[data-theme="dark"]{
@@ -6768,10 +6778,26 @@ header.mhead{display:none;background:var(--surface);border-bottom:1px solid var(
 .btn:disabled{opacity:.5;cursor:default;filter:none}
 
 /* ============== MAIN ============== */
-main.main{padding:20px 24px 48px;overflow-x:hidden;min-width:0;max-width:100%}
+main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-width:100%}
 @media (max-width:1023px){ main.main{padding:14px 14px 24px} }
+/* Stage 1 shell: on ultra-wide screens the content region caps for readability and
+   centers (never a 700px column on desktop, never a 2000px sprawl on a huge monitor). */
+@media (min-width:1601px){ .view.on{max-width:calc(var(--page-max) + 2*var(--page-pad));margin-inline:auto;width:100%} }
 
+/* Sticky page header (desktop). Negative margins bleed it to the content-region edges,
+   then it re-pads itself, so it sits flush above a full-width body with no side gaps. */
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px;gap:14px;flex-wrap:wrap}
+@media (min-width:1024px){
+  .page-head{
+    position:sticky; top:0; z-index:var(--z-sticky);
+    margin:-20px calc(-1 * var(--page-pad)) 18px;
+    padding:13px var(--page-pad);
+    background:color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter:blur(8px) saturate(1.15); -webkit-backdrop-filter:blur(8px) saturate(1.15);
+    border-bottom:1px solid var(--line);
+  }
+}
+@media (prefers-reduced-transparency:reduce){ .page-head{background:var(--bg); backdrop-filter:none; -webkit-backdrop-filter:none} }
 .page-title{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.2px;line-height:1.15}
 .page-sub{color:var(--mut);font-size:12px;margin-top:2px}
 /* Reusable "what is this page?" help banner — soft gold-tinted card with
