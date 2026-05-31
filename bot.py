@@ -6902,8 +6902,9 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 }
 .ibox{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);transition:.12s;overflow:hidden}
 .ibox:hover{border-color:var(--line-strong);box-shadow:var(--sh-xs)}
-.ibox.escalation{border-inline-start:3px solid var(--red)}
-.ibox.reply{border-inline-start:3px solid var(--gold)}
+/* type cue = tint of the whole border + the leading icon (🚨/💬), not a side-stripe accent */
+.ibox.escalation{border-color:color-mix(in srgb,var(--red) 38%,var(--line))}
+.ibox.reply{border-color:color-mix(in srgb,var(--gold) 34%,var(--line))}
 .ibox-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;padding:10px 13px;align-items:center;cursor:pointer}
 @media (max-width:767px){.ibox-row{grid-template-columns:auto 1fr auto;gap:8px;padding:9px 10px}}
 .ibox-icon{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
@@ -6978,7 +6979,7 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .kan-empty{color:var(--mut);font-size:11px;text-align:center;padding:10px}
 .kan-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;margin-bottom:7px;cursor:pointer;transition:border-color .12s}
 .kan-card:hover{border-color:var(--gold)}
-.kan-card.blocked{border-inline-start:3px solid var(--red)}
+.kan-card.blocked{border-color:color-mix(in srgb,var(--red) 40%,var(--line))}
 .kan-acts{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
 /* ===== FINANCE / monthly report builder (Stage 3) ===== */
 .fin-grid{display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start}
@@ -7204,8 +7205,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
 /* ============== VIEWS ============== */
 .view{display:none}
-.view.on{display:block;animation:fade .18s ease}
-@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.view.on{display:block;animation:fade .22s cubic-bezier(0.23,1,0.32,1)}
+@keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 
 /* ============== TOAST ============== */
 #toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:9px;font-size:12.5px;font-weight:500;opacity:0;transition:.22s;pointer-events:none;z-index:200;box-shadow:var(--sh-lg)}
@@ -10693,7 +10694,7 @@ function printWeekly(){
     aptsHtml += chipRow('إجراء المشرف', a.supervisor, a.supervisor_other, '#2a2440');
     if(a.resolved) aptsHtml += '<div style="font-size:12px;margin:5px 0"><b style="color:#c8a24a">حالة الحل:</b> '+esc(a.resolved)+'</div>';
     (a.issues||[]).forEach(function(it){
-      aptsHtml += '<div style="border-inline-start:3px solid '+(SEVCOL[it.severity]||'#888')+';background:#15151b;padding:6px 10px;margin:5px 0;border-radius:0 7px 7px 0">'
+      aptsHtml += '<div style="border:1px solid '+(SEVCOL[it.severity]||'#888')+';background:#15151b;padding:6px 10px;margin:5px 0;border-radius:7px">'
         + '<div style="font-size:12px;color:#fff">'+(it.resolved?'✓ ':'')+esc(it.text||'')+'</div>'
         + '<div style="font-size:10.5px;color:#9aa0aa;margin-top:2px">خطورة: <b style="color:'+(SEVCOL[it.severity]||'#888')+'">'+(SEVTXT[it.severity]||'')+'</b>'
         + (it.assignee?'  ·  المسؤول: '+esc(it.assignee):'')
@@ -11003,8 +11004,10 @@ function _expCard(e){
     + (_l3?'<div class="muted" style="font-size:11px;margin-top:2px">'+_l3+'</div>':'')
     + '</div>'
     + _expStatusChip(e.status)+'</div>';
+  // State cue is a subtle tint of the WHOLE border (impeccable bans side-stripe accents);
+  // the status pill carries the explicit label.
   var _edge=e.status==='failed'?'var(--red)':(e.status==='held'?'var(--yellow)':(e.status==='discarded'?'var(--mut)':'var(--green)'));
-  return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-inline-start:3px solid '+_edge+'">'
+  return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-color:color-mix(in srgb, '+_edge+' 32%, var(--line))">'
     + head + (chips?('<div style="margin-top:8px">'+chips+'</div>'):'') + _expCardExtras(e,reason) + _expCardActions(e,reason) + '</div>';
 }
 function _expCardExtras(e,reason){
@@ -11623,7 +11626,7 @@ function _pmoRenderCards(){
     var ms = p.milestone ? (ar?(p.milestone.ar||''):(p.milestone.en||'')) : '';
     var dl = pmoDaysLeft(p.handover_date);
     var late = !!(dl && dl.over && (p.progress==null || p.progress<100));   // item 54
-    h += '<div class="card" style="padding:14px;cursor:pointer'+(late?';border-inline-start:3px solid var(--red)':'')+'" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
+    h += '<div class="card" style="padding:14px;cursor:pointer'+(late?';border-color:color-mix(in srgb,var(--red) 40%,var(--line))':'')+'" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
       + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+(p.signoff?(' <span class="pill warn">⏳ '+(ar?'اعتماد فيصل':'Faisal sign-off')+'</span>'):'')+'</div>'
       + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(p.client_name||'')+(p.district?(' · '+esc(p.district)):'')+'</div></div>'
@@ -12529,7 +12532,7 @@ function _renderReviewCard(r){
     html += '<div style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;margin-bottom:6px;white-space:pre-wrap">'+esc(r.public_review)+'</div>';
     // Translated version (lazy — fetched on demand or auto if checkbox on)
     if(r.public_review_en){
-      html += '<div dir="ltr" style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12px;line-height:1.6;margin-bottom:8px;white-space:pre-wrap;border-inline-start:3px solid var(--gold)">'
+      html += '<div dir="ltr" style="background:var(--surface-2);padding:9px 12px;border-radius:8px;font-size:12px;line-height:1.6;margin-bottom:8px;white-space:pre-wrap;border:1px solid color-mix(in srgb,var(--gold) 30%,var(--line))">'
            +    '<div style="font-size:10px;color:var(--mut);margin-bottom:3px;font-weight:600;direction:rtl;text-align:start">🌐 English</div>'
            +    esc(r.public_review_en) + '</div>';
     } else if(showEn){
@@ -13824,7 +13827,7 @@ function renderInboxItem(k, d){
 }
 
 function renderAutoItem(a){
-  return '<div class="ibox" style="border-inline-start:3px solid var(--green)">'
+  return '<div class="ibox" style="border-color:color-mix(in srgb,var(--green) 36%,var(--line))">'
     + '<div class="ibox-row">'
     + '<div class="ibox-icon" style="background:var(--green-soft);color:var(--green)">⚡</div>'
     + '<div class="ibox-main">'
@@ -14032,7 +14035,7 @@ function renderPricing(){
   if(!units.length){ body.innerHTML='<div class="empty">'+t().pr_empty+'</div>'; return }
   body.innerHTML = '<div class="inbox-list">' + units.map(function(u){
     const changes = (u.raise||0) + (u.drop||0);
-    return '<div class="ibox" style="border-inline-start:3px solid var(--gold);cursor:pointer" onclick="openPriceDetail('+u.lid+')">'
+    return '<div class="ibox" style="border-color:color-mix(in srgb,var(--gold) 34%,var(--line));cursor:pointer" onclick="openPriceDetail('+u.lid+')">'
       + '<div class="ibox-row" style="cursor:pointer">'
       + '<div class="ibox-icon rep">💰</div>'
       + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(u.name)+'</span></div><div class="ibox-preview">'+changes+' '+t().pr_change+' · '+t().pr_uplift+' ~'+fmt(u.uplift)+' SAR · '+t().pr_conf+' '+(u.confidence||0)+'%</div><div class="ibox-sum">💡 '+esc(pricingWhy(u, L==='ar'))+'</div></div>'
@@ -14121,7 +14124,7 @@ function renderStrategies(){
     // Item 21: revenue captured since start (estimate).
     const rev = s.rev_captured ? (' · ~'+fmt(s.rev_captured)+' SAR '+(ar?'محصّلة':'captured')) : '';
     const edge = s.flag==='stalled' ? 'var(--red)' : (s.active?'var(--green)':'var(--mut)');
-    return '<div class="ibox" style="border-inline-start:3px solid '+edge+';cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
+    return '<div class="ibox" style="border-color:color-mix(in srgb,'+edge+' 36%,var(--line));cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
       + '<div class="ibox-row">'
       + '<div class="ibox-icon" style="background:'+(s.active?'var(--green-soft)':'var(--surface-2)')+';color:'+(s.active?'var(--green)':'var(--mut)')+'">⚡</div>'
       + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(s.name)+'</span>'+fl+'</div><div class="ibox-preview">'+s.booked+'/'+s.total+' '+t().st_booked+rev+' · '+s.changes_total+' '+t().st_changes+'</div></div>'
