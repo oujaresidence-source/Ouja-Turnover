@@ -2368,9 +2368,9 @@ substantive, or you are not fully certain (most amenity/directions/check-in answ
 
 WHEN IN DOUBT between "auto" and "reply", pick "reply" — a human approves it before it sends, so it is \
 always safe. Only choose "escalate" when the request matches the MUST-escalate list (complaint, dispute, \
-refund, booking change, upset guest, security info). A question you simply don't have the answer to \
-(like live availability) is NOT a reason to escalate — suggest what you can and point the guest to the \
-Airbnb link. Never gamble on "auto".
+refund, booking change, upset guest, security info). A question you can answer from the info and the \
+live availability you're given is NOT a reason to escalate — just answer it (never punt to "check the \
+link" instead of answering). Never gamble on "auto".
 
 YOU MAY draft replies (auto or reply) about
 - Unit amenities (wifi, parking, pool, kitchen, facilities)
@@ -2406,10 +2406,14 @@ and any must-have or budget. If they already told you, skip the questions and su
 - Then, from the "قائمة وحدات عوجا" in the context, suggest 1-3 matches. For each: name, bedrooms, \
 area, the "starting from" nightly price, and the Airbnb link if it is in the list. NEVER invent a link \
 or a detail. If nothing matches exactly, suggest the closest and state the differences honestly.
-- AVAILABILITY: you do NOT have live availability. Never promise a unit is free. Instead, suggest the \
-options and tell the guest to check live availability and book directly from the Airbnb link (the link \
-always shows what is open for their dates). Not knowing availability is NEVER a reason to escalate — \
-suggest + send them to the link.
+- AVAILABILITY: when the guest names a unit (or it's their own unit) AND dates, the context above gives \
+you the REAL live Hostaway availability + price for that unit and for alternatives — USE IT and answer \
+directly: available / booked / partially booked, with the real nightly price. If it's booked, say so \
+plainly and suggest the closest AVAILABLE alternatives from the list. Do NOT tell the guest to "just \
+check the link" and do NOT claim you can't see availability — you can. The Airbnb link is only an extra \
+way to book, never a substitute for answering. Ask for the dates first if they're missing. ONLY if the \
+live check is genuinely unavailable/failed for their exact dates: say you'll confirm with the team and \
+set action="escalate" — never dead-end the guest with just a link.
 - A FEATURE you're not sure about (e.g. whether a unit allows smoking, or has a specific view): if it \
 is not in your provided info, suggest the closest units, be honest that you'd confirm that specific \
 detail with the team, and keep it action "reply" so a human checks. Do NOT invent the feature.
@@ -3072,8 +3076,8 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                       "والمتوسط/الليلة كما هو. لا تقترح وحدة ❌.\n")
     else:
         catalog_data = _catalog_text
-        avail_note = ("- إنت ما تعرف التوفّر المباشر لتواريخه — اعرض الخيارات ووجّهه يتأكد ويحجز من رابط "
-                      "Airbnb. **السؤال عن التوفّر مو سبب للتصعيد إطلاقاً**.\n")
+        avail_note = ("- ما عندك تواريخ محددة بعد، فاسأل الضيف عن تواريخه أول عشان تشوف التوفّر الفعلي "
+                      "وتجاوبه. لا توجّهه 'يتأكد من الرابط' بدل ما تجاوب. **السؤال عن التوفّر مو سبب للتصعيد**.\n")
 
     # Build a tiny "what we already know about this guest" line so the bot doesn't re-ask.
     known_bits = []
@@ -3113,8 +3117,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         "- لو ما فيه مطابق ١٠٠٪، اقترح أقرب خيار ووضّح الفروقات بصراحة (مثلاً: 'الأقرب لطلبك "
         "غرفتين بدل ثلاث').\n"
         + avail_note +
-        "- دائماً ختام: 'الأسعار تقريبية، قبل الضريبة ورسوم المنصة. التوفّر النهائي يتأكد من رابط "
-        "Airbnb عند الحجز.'\n\n"
+        "- دائماً ختام: 'الأسعار تقريبية، قبل الضريبة ورسوم المنصة. وتقدر تحجز مباشرة من Airbnb.'\n\n"
         ) if want_catalog else ""
     # ---- Late-checkout: check whether the next night is occupied so the bot
     # tells the team whether it's an easy yes or a tight ask.
