@@ -15907,6 +15907,185 @@ def _pe_get_recs(force=False, ttl=1800):
     _pe_rec_cache.update({"data": _pe_compute_recommendations(), "ts": time.time()})
     return _pe_rec_cache["data"]
 
+# ---- Stage 6 (learning loop): log recommendations/applies; outcomes backfilled daily ----
+_pe_reco_log = []   # [{ts, lid, date, price, applied, dry, confirmed, booked, booked_at}]
+def _pe_log_reco(lid, date_iso, price, applied=False, dry=False, confirmed=None):
+    try:
+        _pe_reco_log.append({"ts": datetime.now(TZ).isoformat(timespec="seconds"), "lid": lid,
+                             "date": date_iso, "price": int(price), "applied": bool(applied),
+                             "dry": bool(dry), "confirmed": confirmed, "booked": None, "booked_at": None})
+        if len(_pe_reco_log) > 5000:
+            del _pe_reco_log[:len(_pe_reco_log) - 5000]
+    except Exception as e:
+        print("pe log error:", e)
+
+# ---- Stage 4: the "ليش هالسعر؟" explainability payload (every value real, or the row is omitted) ----
+_PE_DTYPE_AR = {"weekday": "يوم عادي (وسط الأسبوع)", "weekend": "نهاية الأسبوع (خميس–سبت)"}
+
+def _pe_demand_pill(signal):
+    return {"ahead": "الطلب مرتفع", "behind": "الطلب منخفض"}.get(signal, "الطلب عادي")
+
+def _pe_night_detail(lid, date_iso):
+    """Full panel payload for one (unit, night): the reco + a factor breakdown where every
+    sentence carries a REAL computed number, and any factor without data is omitted."""
+    c = _pe_get()
+    if c.get("error") or not c.get("data") or not c.get("models"):
+        return {"error": c.get("error") or "no data yet"}
+    data, models, pace = c["data"], c["models"], c["pace"]
+    g = data["groups_lid"].get(lid)
+    d = _parse_date(date_iso)
+    if not d:
+        return {"error": "bad date"}
+    today = datetime.now(TZ).date()
+    dtype, ev = _pe_date_type(d)
+    band, source = _pe_resolve_band(models, lid, g, dtype, ev)
+    if not band:
+        return {"error": "no realized data for this unit/day-type"}
+    units_by_lid = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
+    uname = (units_by_lid.get(lid) or {}).get("name") or str(lid)
+    # prefer the cached rec (has live current price + group pace); else compute without occ
+    rec = None
+    for r in (_pe_get_recs().get("recs") or []):
+        if r.get("lid") == lid and r.get("date") == date_iso:
+            rec = r
+            break
+    if rec is None:
+        cur = None
+        try:
+            cal = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+            for day in (cal.get("result") or []):
+                if day.get("date") == date_iso:
+                    cur = day.get("price")
+        except Exception as e:
+            print("pe night current-price error:", e)
+        rec = _pe_reco_for_night(d, today, dtype, ev, cur, band, source,
+                                 models["events"].get(ev) if ev else None,
+                                 pace.get(f"{g}||{dtype}"), None, _pe_floor_overrides.get(lid, 0))
+        if rec:
+            rec.update({"lid": lid, "unit": uname, "group": g})
+    if not rec:
+        return {"error": "could not compute"}
+    pe = pace.get(f"{g}||{dtype}") or {}
+    pooled = source in ("group", "event-est", "unit-thin")
+    factors = []
+    # 1) day-type
+    dt_label = ev or _PE_DTYPE_AR.get(dtype, dtype)
+    factors.append({"icon": "📅", "key": "نوع اليوم",
+                    "text": f"{dt_label} — متوسط سعرك المحقّق لهالنوع {band['median']:,} ر.س",
+                    "effect": dt_label})
+    # 2) your realized prices
+    src_tail = "" if source == "unit" else " (من وحدات مشابهة)"
+    factors.append({"icon": "💰", "key": "أسعار حجوزاتك الفعلية",
+                    "text": f"آخر {band['count']} حجز لنفس النوع — المتوسط {band['avg']:,}، الأعلى {band['max']:,} ر.س{src_tail}",
+                    "effect": f"{band['count']} حجز"})
+    # 3) booking pace (only if we have live occupancy)
+    if rec.get("occ_now") is not None and rec.get("typical_occ") is not None:
+        pace_word = {"ahead": "أسرع", "behind": "أبطأ"}.get(rec["signal"], "مثل")
+        factors.append({"icon": "⏱️", "key": "سرعة الحجز",
+                        "text": f"محجوزة {round(rec['occ_now']*100)}٪ وباقي {rec['days_out']} يوم — {pace_word} من المعتاد ({round(rec['typical_occ']*100)}٪)",
+                        "effect": _pe_demand_pill(rec["signal"])})
+    # 4) your booking habit (median lead)
+    if pe.get("lead_median") is not None:
+        factors.append({"icon": "📈", "key": "عادة الحجز عندك",
+                        "text": f"عادةً هالنوع ينحجز قبل ~{pe['lead_median']} يوم من الوصول",
+                        "effect": f"~{pe['lead_median']} يوم"})
+    # 5) event (only if a real event applies)
+    if ev:
+        eff = models["events"].get(ev) or {}
+        up = eff.get("learned_uplift")
+        if up:
+            pct = round((up - 1) * 100)
+            factors.append({"icon": "🎉", "key": "مناسبة",
+                            "text": f"{ev}: حجوزاتك بهالمناسبة بمتوسط {'+' if pct>=0 else ''}{pct}٪ عن العادي"
+                                    + ("" if eff.get("confidence") == "high" else " — بيانات قليلة لهالمناسبة"),
+                            "effect": ev})
+        elif eff.get("assumed_boost"):
+            factors.append({"icon": "🎉", "key": "مناسبة",
+                            "text": f"{ev}: تقدير من تقويم المناسبات (+{round((eff['assumed_boost']-1)*100)}٪) — ما عندنا حجوزات كافية بعد",
+                            "effect": ev})
+    # 6) hard floor
+    factors.append({"icon": "🛡️", "key": "الحد الأدنى للوحدة",
+                    "text": f"ما ننزل تحت {rec['floor']:,} ر.س لهالوحدة", "effect": f"{rec['floor']:,} ر.س"})
+    # 7) confidence
+    if rec["confidence"] == "high":
+        factors.append({"icon": "✅", "key": "مستوى الثقة", "text": "ثقة عالية — بيانات كافية لهالوحدة بالذات", "effect": "عالية"})
+    else:
+        factors.append({"icon": "⚠️", "key": "مستوى الثقة",
+                        "text": "ثقة منخفضة — بيانات قليلة لهالوحدة، فنستأنس بوحدات مشابهة", "effect": "منخفضة"})
+    # summary line
+    sig_phrase = {"ahead": "والحجز أسرع من المعتاد", "behind": "والحجز أبطأ من المعتاد"}.get(rec["signal"], "")
+    summary = f"{dt_label}، وحجوزاتك الفعلية متوسطها {band['median']:,} ر.س {sig_phrase}. نقترح {rec['recommended']:,} ر.س ضمن [{rec['floor']:,}–{rec['ceiling']:,}]."
+    return {"lid": lid, "unit": uname, "date": date_iso, "days_out": rec["days_out"],
+            "dtype": dtype, "event": ev, "demand_pill": _pe_demand_pill(rec["signal"]),
+            "signal": rec["signal"], "current": rec.get("current"), "recommended": rec["recommended"],
+            "delta": rec.get("delta"), "delta_pct": rec.get("delta_pct"),
+            "floor": rec["floor"], "ceiling": rec["ceiling"], "median": rec["median"],
+            "confidence": rec["confidence"], "pooled": pooled, "factors": factors,
+            "summary": summary, "footer_n": data.get("n_used", 0),
+            "dry_run": PRICE_APPLY_DRYRUN}
+
+def _pe_apply_night(lid, date_iso, price):
+    """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN). Returns the
+    REAL result — read back to confirm — never a faked success. Logs the action for learning."""
+    try:
+        price = int(round(float(price)))
+    except Exception:
+        return {"ok": False, "error": "bad price"}
+    if price <= 0:
+        return {"ok": False, "error": "bad price"}
+    floor = _pe_floor_overrides.get(lid, 0)
+    if floor and price < int(floor):
+        return {"ok": False, "error": f"below hard floor {floor}"}
+    if PRICE_APPLY_DRYRUN:
+        _pe_log_reco(lid, date_iso, price, applied=True, dry=True)
+        return {"ok": True, "dry_run": True, "lid": lid, "date": date_iso, "price": price,
+                "note": "DRY-RUN — ما تغيّر شي فعلي"}
+    try:
+        resp = api_put(f"/listings/{lid}/calendar",
+                       {"startDate": date_iso, "endDate": date_iso, "isAvailable": 1, "price": price})
+        actual = None
+        chk = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+        for day in (chk.get("result") or []):
+            if day.get("date") == date_iso:
+                actual = day.get("price")
+        confirmed = (actual is not None and abs(float(actual) - price) < 1)
+        _pe_log_reco(lid, date_iso, price, applied=True, dry=False, confirmed=confirmed)
+        return {"ok": True, "dry_run": False, "lid": lid, "date": date_iso, "price": price,
+                "confirmed": confirmed, "actual": actual, "status": (resp or {}).get("status")}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "lid": lid, "date": date_iso, "price": price}
+
+async def _api_pe_recs(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_pe_get_recs))
+
+async def _api_pe_night(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    date_iso = (request.query.get("date") or "")[:10]
+    if not _parse_date(date_iso):
+        return _json({"error": "bad date"}, 400)
+    return _json(await asyncio.to_thread(_pe_night_detail, lid, date_iso))
+
+async def _api_pe_apply(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    date_iso = (b.get("date") or "")[:10]
+    if not _parse_date(date_iso):
+        return _json({"error": "bad date"}, 400)
+    res = await asyncio.to_thread(_pe_apply_night, lid, date_iso, b.get("price"))
+    return _json(res)
+
 def _compute_pricing():
     reservations = get_reservations_cached()
     if not _catalog_units:
@@ -21511,6 +21690,9 @@ async def start_web_server():
         app.router.add_get("/api/autolog", _api_autolog)
         app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
+        app.router.add_get("/api/pricing2/recs", _api_pe_recs)       # engine v2: recommendations
+        app.router.add_get("/api/pricing2/night", _api_pe_night)     # engine v2: one-night "ليش هالسعر؟" detail
+        app.router.add_post("/api/pricing2/apply", _api_pe_apply)    # engine v2: one-night apply (DRYRUN-gated)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
