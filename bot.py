@@ -3210,13 +3210,15 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                         "ممنوع تذكر وقت محدد لجاهزية الشقة."
                     )
                 elif not code_already_sent and hrs <= 0 and apt_ready:
-                    # Apartment ready, agreement fine, but no code went out. Ops team
-                    # needs to act. The bot already auto-escalates from the reminder
-                    # loop — here just tell the guest the team is on it.
+                    # Check-in day, agreement SIGNED, apartment ready, code not sent, and the
+                    # guest is asking for it -> ESCALATE so the TEAM provides the code. Musaed
+                    # never hands out a code itself (Stage 3).
                     code_block += (
-                        "- الشقة جاهزة والعقد سليم، لكن الكود ما وصل للضيف بعد. "
-                        "اعتذر بصدق وقول إنك رفعت طلبه للفريق المختص الحين، والكود "
-                        "بيوصله خلال دقائق. action='reply'. **لا تكتب أي كود تحت أي ظرف.**"
+                        "- الشقة جاهزة والعقد موقّع، ويومه تشيك-إن اليوم، والضيف يطلب كود الدخول "
+                        "بس ما وصله بعد. **action='escalate'** — ارفع تذكرة واضحة للفريق فيها "
+                        "(اسم الضيف، الوحدة، رقم الحجز، والسبب: 'طلب كود الدخول · تشيك-إن اليوم · "
+                        "العقد موقّع'). وللضيف: اعتذر بصدق وقول إن الفريق المختص بيرسل له الكود حالاً. "
+                        "**لا تكتب أي كود تحت أي ظرف.**"
                     )
                 elif hrs < -2:
                     code_block += (
