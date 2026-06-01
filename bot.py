@@ -179,6 +179,15 @@ REMINDER_FAST_MIN   = int(os.environ.get("REMINDER_FAST_MIN", "15"))    # after 
 OPERATION_ROLE_ID   = os.environ.get("OPERATION_ROLE_ID", "")           # role to ping if no cleaner
 OPERATION_ROLE_NAME = os.environ.get("OPERATION_ROLE_NAME", "operation")
 
+# ---- In-house Cleaning Team (OujaCT) turnover flow ----
+# OujaCT-assigned apartments get their own English turnover channels in the
+# Turnovers category ("[internal]-oujact" / "[internal]-oujact-checkin") and a
+# daily English schedule. Assignment + price floor + group live in the Listings
+# store (listings_store.json). Unassigned apartments keep the normal flow.
+OUJACT_SCHEDULE_CHANNEL = os.environ.get("OUJACT_SCHEDULE_CHANNEL", "oujact-schedule")
+OUJACT_SCHEDULE_HOUR    = int(os.environ.get("OUJACT_SCHEDULE_HOUR", "0"))   # 0 = 12 AM Riyadh
+LISTINGS_AUTOSYNC       = os.environ.get("LISTINGS_AUTOSYNC", "1") in ("1", "true", "True", "yes")
+
 # ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
@@ -440,6 +449,267 @@ def get_listings_map():
     _listings["map"], _listings["ts"] = m, time.time()
     return m
 
+# ====================================================================
+#  LISTINGS MASTER STORE — the single source of truth every feature reads.
+#  Synced from Hostaway (NEW ✨ / CHANGED / DEACTIVATED detection, never deletes)
+#  and carries dashboard-only fields Hostaway does NOT have: group/compound,
+#  hard price floor, and the OujaCT (in-house cleaning team) assignment.
+# ====================================================================
+LISTINGS_STORE_FILE = "listings_store.json"
+_ls_store = None                  # lazy-loaded; see _ls_get()
+_ls_lock  = threading.Lock()
+# Hostaway-owned fields refreshed on every sync (local fields below are preserved).
+_LS_HA_FIELDS = ("internal_name", "public_name", "address", "city", "ha_status",
+                 "active", "bedrooms", "directions_url", "directions_field")
+
+def _ls_today_iso():
+    return datetime.now(TZ).date().isoformat()
+
+def _ls_get():
+    """Load the listings store from the volume once, then keep it in memory."""
+    global _ls_store
+    if _ls_store is None:
+        with _ls_lock:
+            if _ls_store is None:
+                data = _load_json(LISTINGS_STORE_FILE, None)
+                if not isinstance(data, dict) or "listings" not in data:
+                    data = {"listings": {}, "last_sync": None, "last_summary": {}}
+                _ls_store = data
+    return _ls_store
+
+def _ls_save():
+    if _ls_store is not None:
+        _save_json(LISTINGS_STORE_FILE, _ls_store)
+
+def _ls_needs_setup(rec):
+    """Active listing isn't ready for pricing/cleaning until it has a group AND a floor."""
+    if not rec.get("active", True):
+        return False
+    no_group = not str(rec.get("group") or "").strip()
+    no_floor = rec.get("floor") in (None, "")
+    return bool(no_group or no_floor)
+
+def oujact_listing_ids():
+    """Set of listing ids (int) currently assigned to the in-house cleaning team."""
+    out = set()
+    for k, rec in _ls_get()["listings"].items():
+        if rec.get("oujact"):
+            try:
+                out.add(int(k))
+            except (TypeError, ValueError):
+                pass
+    return out
+
+def _extract_directions(L):
+    """Find the unit's arrival-guide / 'how to reach the apartment' (directions) link in
+    the listing's Custom Fields. Returns (url, custom_field_name) — either may be None.
+    Mirrors get_guide_url's URL heuristic but ALSO captures which custom field it came
+    from, so the dashboard can show the exact Hostaway field name."""
+    best_url, best_name = None, None
+    for key in ("listingCustomFieldValues", "customFieldValues", "customFields"):
+        for cf in (L.get(key) or []):
+            if not isinstance(cf, dict):
+                continue
+            val = str(cf.get("value") or "").strip()
+            if not val.startswith("http"):
+                continue
+            name = ""
+            meta = cf.get("customField")
+            if isinstance(meta, dict):
+                name = meta.get("name") or meta.get("title") or ""
+            name = name or cf.get("name") or cf.get("customFieldName") or ""
+            if re.search(r"oujaguide|netlify", val, re.I):   # the known guide domains win
+                return val, (name or None)
+            if best_url is None:                              # else keep the first http value
+                best_url, best_name = val, (name or None)
+    return best_url, best_name
+
+def _ha_fetch_all_listings():
+    """Every listing (active AND inactive), paginated, with custom-field resources."""
+    out, limit, offset = [], 100, 0
+    while True:
+        data = api_get("/listings", params={"limit": limit, "offset": offset,
+                                            "includeResources": 1})
+        batch = data.get("result", []) or []
+        out.extend(batch)
+        if len(batch) < limit:
+            break
+        offset += limit
+    return out
+
+def _ls_snapshot(L):
+    """Reduce a raw Hostaway listing to the Hostaway-owned fields the store tracks."""
+    url, field = _extract_directions(L)
+    return {
+        "id": L.get("id"),
+        "internal_name": (L.get("internalListingName") or L.get("name") or "").strip(),
+        "public_name": (L.get("name") or "").strip(),
+        "address": (L.get("address") or L.get("city") or "").strip(),
+        "city": (L.get("city") or "").strip(),
+        "bedrooms": L.get("bedroomsNumber"),
+        "ha_status": L.get("status"),
+        "active": _listing_active(L),
+        "directions_url": url,
+        "directions_field": field,
+    }
+
+def sync_listings_store(raw=None):
+    """Refresh the master Listings store from Hostaway. Labels NEW / CHANGED / DEACTIVATED,
+    preserves every dashboard-only field (group/floor/oujact), never deletes a row.
+    Returns a summary dict (counts + per-listing change lists) for the toast + Listings page."""
+    store = _ls_get()
+    listings = store["listings"]
+    if raw is None:
+        raw = _ha_fetch_all_listings()
+    today = _ls_today_iso()
+    now_iso = datetime.now(TZ).isoformat(timespec="seconds")   # stamps last_sync + per-row change flags
+    seen = set()
+    new_l, changed_l, reactivated_l = [], [], []
+    for L in raw:
+        lid = L.get("id")
+        if lid is None:
+            continue
+        key = str(lid)
+        seen.add(key)
+        snap = _ls_snapshot(L)
+        rec = listings.get(key)
+        if rec is None:
+            rec = dict(snap)
+            rec.update({"group": "", "floor": None, "oujact": False,
+                        "first_seen": today, "last_seen": today, "deactivated_at": None,
+                        "change_flag": "new", "change_sync": now_iso})
+            listings[key] = rec
+            new_l.append({"id": lid, "name": rec["internal_name"]})
+            continue
+        # diff the human-meaningful Hostaway fields BEFORE overwriting
+        diffs = [f for f in ("internal_name", "address", "ha_status", "active")
+                 if rec.get(f) != snap.get(f)]
+        was_inactive = not rec.get("active", True)
+        for f in _LS_HA_FIELDS:
+            rec[f] = snap.get(f)
+        rec["last_seen"] = today
+        if was_inactive and snap.get("active"):
+            rec["deactivated_at"] = None
+            rec["change_flag"], rec["change_sync"] = "reactivated", now_iso
+            reactivated_l.append({"id": lid, "name": rec["internal_name"]})
+        if diffs:
+            rec["change_flag"], rec["change_sync"] = "changed", now_iso
+            changed_l.append({"id": lid, "name": rec["internal_name"], "fields": diffs})
+    # known listings Hostaway no longer returns -> DEACTIVATED (mark INACTIVE, keep the row)
+    inactive_l = []
+    for key, rec in listings.items():
+        if key not in seen and rec.get("active", True):
+            rec["active"] = False
+            rec["deactivated_at"] = today
+            rec["change_flag"], rec["change_sync"] = "deactivated", now_iso
+            inactive_l.append({"id": rec.get("id"), "name": rec.get("internal_name")})
+    summary = {
+        "new": len(new_l), "changed": len(changed_l), "inactive": len(inactive_l),
+        "reactivated": len(reactivated_l),
+        "inactive_total": sum(1 for r in listings.values() if not r.get("active", True)),
+        "total": len(listings),
+        "active": sum(1 for r in listings.values() if r.get("active", True)),
+        "needs_setup": sum(1 for r in listings.values() if _ls_needs_setup(r)),
+        "new_list": new_l, "changed_list": changed_l, "inactive_list": inactive_l,
+    }
+    store["last_sync"] = now_iso
+    store["last_summary"] = {k: summary[k] for k in
+        ("new", "changed", "inactive", "reactivated", "inactive_total",
+         "total", "active", "needs_setup")}
+    _ls_save()
+    return summary
+
+# ---- OujaCT turnover data: today's + tomorrow's turnovers for assigned units ----
+_OUJACT_FAR = datetime.max.replace(tzinfo=TZ)   # sort sentinel for "no check-in"
+
+def _ha_reservations_window(param_start, param_end, start_iso, end_iso):
+    """Paginated reservation pull for a date window (e.g. departures or arrivals)."""
+    out, limit, offset, pages = [], 100, 0, 0
+    while pages < 10:
+        data = api_get("/reservations", params={
+            param_start: start_iso, param_end: end_iso,
+            "limit": limit, "offset": offset, "includeResources": 0})
+        batch = data.get("result", []) or []
+        if not batch:
+            break
+        out.extend(batch)
+        if len(batch) < limit:
+            break
+        offset += limit
+        pages += 1
+    return out
+
+def _oujact_sort_key(it):
+    """Stage 5 priority: check-ins TODAY first, then earliest check-in time,
+    then earliest checkout, then unit name."""
+    return (0 if it["checkin_today"] else 1,
+            it["checkin_dt"] or _OUJACT_FAR,
+            it["checkout"],
+            (it["listing"] or "").lower())
+
+def fetch_oujact_turnovers():
+    """Today's + tomorrow's turnovers (departures) for OujaCT-assigned units, each tagged
+    with same-day check-in detection + the next guest's check-in time, priority-ordered."""
+    assigned = oujact_listing_ids()
+    if not assigned:
+        return []
+    listings = get_listings_map()
+    store = _ls_get()["listings"]
+    today = datetime.now(TZ).date()
+    tomorrow = today + timedelta(days=1)
+    deps = _ha_reservations_window("departureStartDate", "departureEndDate",
+                                   today.isoformat(), tomorrow.isoformat())
+    arrs = _ha_reservations_window("arrivalStartDate", "arrivalEndDate",
+                                   today.isoformat(), tomorrow.isoformat())
+    # (listing_id, arrivalDate) -> earliest check-in datetime, for same-day-checkin detection
+    arr_by = {}
+    for r in arrs:
+        if (r.get("status") or "").lower() in SKIP_STATUSES:
+            continue
+        lid = r.get("listingMapId")
+        a = r.get("arrivalDate")
+        if not a:
+            continue
+        hour = parse_hour(r.get("checkInTime"), 15)
+        try:
+            cin = datetime.strptime(a[:10], "%Y-%m-%d").replace(hour=min(hour, 23), tzinfo=TZ)
+        except ValueError:
+            continue
+        kk = (lid, a[:10])
+        if kk not in arr_by or cin < arr_by[kk]:
+            arr_by[kk] = cin
+    out = []
+    for r in deps:
+        if (r.get("status") or "").lower() in SKIP_STATUSES:
+            continue
+        lid = r.get("listingMapId")
+        if lid not in assigned:
+            continue
+        dep = r.get("departureDate")
+        if not dep:
+            continue
+        d_iso = dep[:10]
+        hour = parse_hour(r.get("checkOutTime"), DEFAULT_CHECKOUT_HOUR)
+        try:
+            checkout = datetime.strptime(d_iso, "%Y-%m-%d").replace(hour=min(hour, 23), tzinfo=TZ)
+        except ValueError:
+            continue
+        cin = arr_by.get((lid, d_iso))
+        rec = store.get(str(lid)) or {}
+        out.append({
+            "res_id": str(r.get("id")),
+            "lid": lid,
+            "listing": listings.get(lid) or rec.get("internal_name") or r.get("listingName") or f"unit-{lid}",
+            "guest": r.get("guestName") or r.get("guestFirstName") or "Guest",
+            "checkout": checkout,
+            "checkout_date": d_iso,
+            "checkin_today": cin is not None,
+            "checkin_dt": cin,
+            "directions_url": rec.get("directions_url"),
+        })
+    out.sort(key=_oujact_sort_key)
+    return out
+
 def parse_hour(v, default):
     if v is None:
         return default
@@ -485,6 +755,7 @@ def fetch_upcoming_checkouts():
                 lm = res.get("listingMapId")
                 out.append({
                     "res_id": str(res.get("id")),
+                    "lid": lm,
                     "listing": listings.get(lm) or res.get("listingName") or f"unit-{lm}",
                     "guest": res.get("guestName") or res.get("guestFirstName") or "Guest",
                     "checkout": checkout,
@@ -2052,8 +2323,11 @@ async def sync_checkouts():
     handled.update(existing)
 
     items = await asyncio.to_thread(fetch_upcoming_checkouts)
+    oujact_ids = oujact_listing_ids()   # these go through the dedicated OujaCT flow instead
     for it in items:
         if it["res_id"] in handled or it["res_id"] in existing:
+            continue
+        if it.get("lid") in oujact_ids:   # OujaCT-assigned -> handled by sync_oujact_turnovers
             continue
         try:
             emp, did, day = responsible_for(it["listing"], it["checkout"])
@@ -2082,12 +2356,118 @@ async def sync_checkouts():
         except Exception as e:
             print("create error:", e)
 
+# ---- OujaCT (in-house cleaning team) turnover channels + daily schedule ----
+def _oujact_channel(internal_name, checkin_today):
+    """Discord-safe OujaCT channel name. e.g. '12b-oujact' / '12b-oujact-checkin'."""
+    base = channel_name(internal_name)[:70]
+    suffix = "-oujact-checkin" if checkin_today else "-oujact"
+    return (base + suffix)[:100]
+
+def _oujact_card_embed(it):
+    """English turnover card for the in-house team. Reuses the ✅ Cleaning Done button."""
+    e = discord.Embed(title="🧹 Turnover — Ready to Clean", color=GOLD)
+    e.add_field(name="Unit", value=it["listing"], inline=False)
+    e.add_field(name="Checkout",
+                value=it["checkout"].strftime("%a %d %b · %I:%M %p"), inline=True)
+    if it["checkin_today"]:
+        cin = it.get("checkin_dt")
+        when = (" · " + cin.strftime("%I:%M %p")) if cin else ""
+        e.add_field(name="Status", value=f"🔴 CHECK-IN TODAY{when}", inline=True)
+    link = it.get("directions_url")
+    e.add_field(name="Directions", value=(link if link else "No link"), inline=False)
+    e.set_footer(text="Tap ✅ Cleaning Done when finished to close this channel.")
+    return e
+
+async def sync_oujact_turnovers():
+    """Create/rename the OujaCT turnover channels for TODAY's + TOMORROW's turnovers per the
+    current assignments. Idempotent (dedup by reservation id in the channel topic). Returns a
+    list describing what changed, for the Apply/Refresh toast."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None or not oujact_listing_ids():
+        return []
+    category = await get_category(guild)
+    items = await asyncio.to_thread(fetch_oujact_turnovers)
+    # index existing OujaCT channels by reservation id (only ones we created carry 'oujact:1')
+    existing = {}
+    for ch in category.text_channels:
+        if "oujact:1" in (ch.topic or ""):
+            rid = parse_topic_res(ch.topic)
+            if rid:
+                existing[rid] = ch
+    changed = []
+    for it in items:
+        want = _oujact_channel(it["listing"], it["checkin_today"])
+        topic = f"hostaway-res:{it['res_id']} oujact:1 checkin:{1 if it['checkin_today'] else 0}"
+        ch = existing.get(it["res_id"])
+        try:
+            if ch is None:
+                ch = await guild.create_text_channel(want, category=category, topic=topic)
+                await ch.send(embed=_oujact_card_embed(it), view=CleaningDoneView())
+                changed.append({"unit": it["listing"], "channel": want,
+                                "action": "created", "checkin": it["checkin_today"]})
+                print(f"OujaCT: opened {want} (res {it['res_id']})")
+            elif ch.name != want:
+                # check-in status changed -> rename + flag it in-channel (once)
+                await ch.edit(name=want, topic=topic)
+                if it["checkin_today"]:
+                    await ch.send("🔴 **CHECK-IN TODAY** — same-day arrival, prioritize this turnover.")
+                changed.append({"unit": it["listing"], "channel": want,
+                                "action": "renamed", "checkin": it["checkin_today"]})
+                print(f"OujaCT: renamed -> {want} (res {it['res_id']})")
+        except Exception as e:
+            print("OujaCT channel error:", e)
+    return changed
+
+async def post_oujact_schedule():
+    """Daily English schedule of OujaCT turnovers (today + tomorrow), priority-ordered:
+    check-ins first, then earliest check-in time. Each line: internal name · flag · directions."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None or not oujact_listing_ids():
+        return
+    items = await asyncio.to_thread(fetch_oujact_turnovers)
+    category = await get_category(guild)
+    ch = await ensure_channel(guild, OUJACT_SCHEDULE_CHANNEL, category)
+    if ch is None:
+        return
+    today_iso = datetime.now(TZ).date().isoformat()
+    lines = []
+    for it in items:
+        flag = "  🔴 CHECK-IN TODAY" if it["checkin_today"] else ""
+        when = "today" if it["checkout_date"] == today_iso else "tomorrow"
+        link = it.get("directions_url") or "No link"
+        lines.append(f"**{it['listing']}** · checkout {when}{flag}\n  Directions: {link}")
+    desc = "\n\n".join(lines) if lines else "No OujaCT turnovers for today or tomorrow."
+    embed = discord.Embed(title="🧹 OujaCT — Today & Tomorrow's Turnovers",
+                          description=desc[:4000], color=GOLD)
+    embed.set_footer(text="Order: check-ins first, then earliest check-in time.")
+    await ch.send(embed=embed)
+    print(f"OujaCT: posted daily schedule ({len(items)} turnovers)")
+
 @tasks.loop(minutes=POLL_MINUTES)
 async def poll_loop():
     try:
         await sync_checkouts()
     except Exception as e:
         print("poll error:", e)
+    try:
+        await sync_oujact_turnovers()      # keep OujaCT channels current between daily runs
+    except Exception as e:
+        print("oujact poll error:", e)
+
+@tasks.loop(time=dt_time(hour=OUJACT_SCHEDULE_HOUR, minute=5, tzinfo=TZ))
+async def oujact_daily_loop():
+    """Each day at OUJACT_SCHEDULE_HOUR (default 12 AM Riyadh): auto-sync listings, then
+    build today's + tomorrow's OujaCT channels and post the English schedule."""
+    if LISTINGS_AUTOSYNC:
+        try:
+            await asyncio.to_thread(sync_listings_store)
+        except Exception as e:
+            print("oujact daily listings-sync error:", e)
+    try:
+        await sync_oujact_turnovers()
+        await post_oujact_schedule()
+    except Exception as e:
+        print("oujact daily schedule error:", e)
 
 # remembers when each open channel was last pinged (resets on restart, which is fine)
 _last_reminder = {}
@@ -6399,7 +6779,7 @@ _sessions = {}              # session_token -> {user_id, expires_at}
 _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
-    "users", "quote", "weekly", "design", "pmo", "expenses",
+    "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
 ]
 
 def _default_perms(role):
@@ -7697,6 +8077,21 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="kpis" id="cleanStats"></div>
 
+        <!-- OujaCT — in-house cleaning team assignment + Apply/Refresh -->
+        <div class="card" id="oujactCard">
+          <div class="card-head">
+            <span class="card-title" id="t_ct_title">🧼 فريق التنظيف الداخلي (OujaCT)</span>
+            <span class="card-sub"><b id="oujactCount">0</b> <span id="t_ct_assigned">معيّنة</span></span>
+          </div>
+          <div class="muted" id="t_ct_sub" style="font-size:11.5px;margin:2px 2px 12px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+            <button class="btn primary sm" id="oujactApplyBtn" onclick="oujactApply()"><span id="t_ct_apply">⚡ تطبيق / تحديث القنوات</span></button>
+            <span class="muted" id="t_ct_apply_hint" style="font-size:11px"></span>
+          </div>
+          <input id="oujactSearch" placeholder="ابحث…" oninput="renderOujact()" style="width:200px;padding:6px 10px;height:32px;font-size:12px;margin-bottom:8px">
+          <div id="oujactBody"><div class="empty sk">—</div></div>
+        </div>
+
         <!-- THIS WEEK strip — the supervisor's daily lookup -->
         <div class="card">
           <div class="card-head"><span class="card-title">📆 هذا الأسبوع — ٧ أيام قادمة</span></div>
@@ -7766,6 +8161,31 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             </div>
           </div>
           <div id="cleanListBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
+      <!-- ============ LISTINGS (Hostaway master store) ============ -->
+      <section class="view" id="view_listings">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_listings">🏘️ سجل الشقق</div>
+            <div class="page-sub" id="t_listings_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn primary sm" id="lsPullBtn" onclick="listingsSync()"><span id="t_listings_pull">📥 سحب من Hostaway</span></button>
+            <button class="btn ghost sm" onclick="loadListings()">↻</button>
+          </div>
+        </div>
+        <div id="lsSyncBar" class="muted" style="font-size:12px;margin:0 2px 12px"></div>
+        <div class="kpis" id="lsStats"></div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_listings_card">📋 كل الوحدات</span>
+            <div class="card-actions">
+              <input id="lsSearch" placeholder="ابحث عن شقة…" oninput="renderListings()" style="width:200px;padding:6px 10px;height:32px;font-size:12px">
+            </div>
+          </div>
+          <div id="lsListBody"><div class="empty sk">—</div></div>
         </div>
       </section>
 
@@ -8521,6 +8941,19 @@ const T = {
   ar:{dir:'rtl',
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
+    listings:'الشقق',
+    listings_title:'🏘️ سجل الشقق (المصدر الأساسي)',
+    listings_sub:'كل الوحدات من Hostaway. هنا تحدّد المجموعة، الحد الأدنى للسعر، وفريق التنظيف الداخلي. الشقة الجديدة تظهر "تحتاج إعداد" لين تحدّد لها مجموعة وحد سعر.',
+    listings_pull:'📥 سحب من Hostaway', listings_last_sync:'آخر مزامنة', listings_never:'لم تتم بعد',
+    listings_dir_field:'حقل الوصول في Hostaway',
+    ls_new:'جديدة', ls_changed:'تغيّرت', ls_inactive:'غير نشطة', ls_needs:'تحتاج إعداد', ls_active:'نشطة', ls_total:'الإجمالي',
+    ls_h_unit:'الاسم الداخلي', ls_h_public:'الاسم العام', ls_h_addr:'العنوان', ls_h_beds:'غرف', ls_h_dir:'الوصول', ls_h_group:'المجموعة', ls_h_floor:'حد السعر', ls_h_oujact:'OujaCT',
+    ls_badge_new:'✨ جديدة', ls_badge_changed:'⟳ تغيّرت', ls_badge_inactive:'⏸ غير نشطة', ls_badge_needs:'⚠ تحتاج إعداد',
+    ls_dir_link:'رابط', ls_no_link:'لا يوجد', ls_search:'ابحث عن شقة…', ls_saved:'حُفظ ✓', ls_empty:'ما فيه شقق بعد — اضغط "سحب من Hostaway".', ls_group_ph:'مثال: الملقا', ls_floor_ph:'ر.س',
+    ct_title:'🧼 فريق التنظيف الداخلي (OujaCT)',
+    ct_sub:'اختر الشقق اللي يغطيها الفريق الداخلي. لها قنوات تسليم خاصة بالإنجليزية في Discord (اليوم + بكرة)، وجدول يومي مرتّب: تسجيل الدخول اليوم أولاً.',
+    ct_assigned:'معيّنة', ct_apply:'⚡ تطبيق / تحديث القنوات', ct_apply_hint:'ينشئ/يعيد تسمية قنوات تسليم اليوم وبكرة فوراً (بدون انتظار ١٢ ص).',
+    ct_none:'ما فيه شقق معيّنة بعد — فعّل الخانة جنب أي شقة تحت.', ct_search:'ابحث…', ct_applied:'تم —', ct_changed:'قناة محدّثة', ct_no_change:'القنوات محدّثة — ما فيه جديد.', ct_need_pull:'اسحب الشقق من Hostaway أول (من صفحة الشقق).',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -8714,6 +9147,19 @@ const T = {
   en:{dir:'ltr',
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
+    listings:'Listings',
+    listings_title:'🏘️ Listings (master store)',
+    listings_sub:'Every unit from Hostaway. Set the group, hard price floor, and in-house cleaning team for each unit here. A new unit shows "needs setup" until it has a group and a floor.',
+    listings_pull:'📥 Pull from Hostaway', listings_last_sync:'Last synced', listings_never:'never',
+    listings_dir_field:'Hostaway directions field',
+    ls_new:'new', ls_changed:'changed', ls_inactive:'inactive', ls_needs:'needs setup', ls_active:'active', ls_total:'total',
+    ls_h_unit:'Internal name', ls_h_public:'Public name', ls_h_addr:'Address', ls_h_beds:'Beds', ls_h_dir:'Directions', ls_h_group:'Group', ls_h_floor:'Price floor', ls_h_oujact:'OujaCT',
+    ls_badge_new:'✨ new', ls_badge_changed:'⟳ changed', ls_badge_inactive:'⏸ inactive', ls_badge_needs:'⚠ needs setup',
+    ls_dir_link:'link', ls_no_link:'none', ls_search:'Search units…', ls_saved:'Saved ✓', ls_empty:'No units yet — click "Pull from Hostaway".', ls_group_ph:'e.g. Malqa', ls_floor_ph:'SAR',
+    ct_title:'🧼 In-house cleaning team (OujaCT)',
+    ct_sub:'Pick the apartments the in-house team covers. They get dedicated English turnover channels in Discord (today + tomorrow) and a daily ordered schedule — same-day check-ins first.',
+    ct_assigned:'assigned', ct_apply:'⚡ Apply / Refresh channels', ct_apply_hint:'Creates/renames today + tomorrow channels right now (no waiting for 12 AM).',
+    ct_none:'No apartments assigned yet — tick the box next to any unit below.', ct_search:'Search…', ct_applied:'Done —', ct_changed:'channels updated', ct_no_change:'Channels up to date — nothing changed.', ct_need_pull:'Pull listings from Hostaway first (Listings page).',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -9138,6 +9584,7 @@ const NAV = [
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
+  {id:'listings',ic:'🏘️', tk:'listings', badge:'listings'},
   {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
   {id:'reviews', ic:'⭐', tk:'reviews', badge:'reviews'},
   {id:'users',   ic:'👥', tk:'users', adminOnly:true},
@@ -9177,13 +9624,14 @@ function badgeCount(key){
     return c.unfixed || 0;
   }
   if(key==='expenses') return ((D.expSummary||{}).queue) || 0;
+  if(key==='listings') return ((D.listings && D.listings.summary) || {}).needs_setup || 0;
   return 0;
 }
 // Stage 3 — the sidebar is sectioned into 6 categories. Every NAV id below appears in
 // exactly one group; order is deliberate (what a manager reaches for, top to bottom).
 const NAV_CATS = [
   {tk:'cat_overview', ids:['home','today']},
-  {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','quality','pmo','design']},
+  {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','listings','quality','pmo','design']},
   {tk:'cat_pricing',  ids:['pricing','strat','rev','quote']},
   {tk:'cat_finance',  ids:['expenses','finance','weekly']},
   {tk:'cat_guests',   ids:['guests','reviews']},
@@ -9404,6 +9852,7 @@ function go(id){
   if(id==='pmo') loadPmo();
   if(id==='expenses') loadExpenses();
   if(id==='finance') loadFinance();
+  if(id==='listings') loadListings();
 }
 
 /* ============================================================
@@ -9457,6 +9906,11 @@ async function loadAll(){
     D.urgent=r[7]; D.arrivals=r[8];
     populateUnitFilter();
     renderAll();
+    // keep the Listings "needs setup" badge live, but never while the user is editing
+    // those rows (listings/clean views own D.listings and render from it).
+    if(view!=='listings' && view!=='clean'){
+      api('/api/listings').then(function(x){ if(x&&x.listings){ D.listings=x; try{ buildSideNav(); }catch(_){} } }).catch(function(){});
+    }
   }catch(e){ if(e==='unauthorized') logout() }
 }
 var _pePanel = null;
@@ -9955,6 +10409,7 @@ async function toggleGuestVip(key){
 async function loadCleaning(){
   document.getElementById('cleanListBody').innerHTML = '<div class="empty sk">—</div>';
   try{ D.clean = await api('/api/cleaning/schedule') }catch(_){ D.clean = {items:[], counts:{}} }
+  try{ D.listings = await api('/api/listings') }catch(_){ if(!D.listings) D.listings = {listings:[], summary:{}} }
   const sub = document.getElementById('t_clean_sub'); if(sub) sub.textContent = t().clean_sub;
   renderCleaningStats();
   renderCleaningWeek();
@@ -9963,6 +10418,158 @@ async function loadCleaning(){
   renderCleaningPaused();
   _populateCleanInsertDropdown();
   renderCleaningList();
+  renderOujact();
+}
+
+/* ============== LISTINGS (Hostaway master store) + OujaCT team ============== */
+function _lsRows(){ return (D.listings && D.listings.listings) || []; }
+
+async function loadListings(){
+  var body=document.getElementById('lsListBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
+  try{ D.listings = await api('/api/listings'); }catch(e){ if(!D.listings) D.listings={listings:[], summary:{}}; }
+  var set=function(id,key){ var el=document.getElementById(id); if(el) el.textContent=t()[key]; };
+  set('t_listings','listings_title'); set('t_listings_sub','listings_sub'); set('t_listings_pull','listings_pull');
+  var cc=document.getElementById('t_listings_card'); if(cc) cc.textContent='📋 '+t().ls_total;
+  var sr=document.getElementById('lsSearch'); if(sr) sr.placeholder=t().ls_search;
+  renderListingsSyncBar(); renderListingsStats(); renderListings();
+  try{ buildSideNav(); }catch(_){}
+}
+
+function renderListingsSyncBar(){
+  var el=document.getElementById('lsSyncBar'); if(!el) return;
+  var d=D.listings||{};
+  var when = d.last_sync ? esc(String(d.last_sync).replace('T',' ')) : t().listings_never;
+  var fld = d.directions_field ? (' &nbsp;·&nbsp; '+t().listings_dir_field+': <b>'+esc(d.directions_field)+'</b>') : '';
+  el.innerHTML = t().listings_last_sync+': <b>'+when+'</b>'+fld;
+}
+
+function renderListingsStats(){
+  var el=document.getElementById('lsStats'); if(!el) return;
+  var s=(D.listings&&D.listings.summary)||{};
+  var cards=[
+    {ic:'🏠', cls:'b', val:s.total||0, lbl:t().ls_total},
+    {ic:'✓', cls:'g', val:s.active||0, lbl:t().ls_active},
+    {ic:'✨', cls:'p', val:s.new||0, lbl:t().ls_new},
+    {ic:'⟳', cls:'b', val:s.changed||0, lbl:t().ls_changed},
+    {ic:'⏸', cls:'r', val:s.inactive_total||0, lbl:t().ls_inactive},
+    {ic:'⚠', cls:'r', val:s.needs_setup||0, lbl:t().ls_needs}
+  ];
+  el.innerHTML = cards.map(function(c){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
+      +'<div class="kpi-val">'+c.val+'</div><div class="kpi-lbl">'+esc(c.lbl)+'</div></div>';
+  }).join('');
+}
+
+function _lsBadge(label, style){
+  return '<span style="display:inline-block;padding:2px 7px;border-radius:6px;font-size:10px;font-weight:600;white-space:nowrap;'+style+'">'+label+'</span>';
+}
+function _lsRowBadges(u){
+  var out=[];
+  if(!u.active){ out.push(_lsBadge(t().ls_badge_inactive, 'background:var(--surface-2);color:var(--mut)')); }
+  else {
+    if(u.change==='new')         out.push(_lsBadge(t().ls_badge_new, 'background:rgba(200,162,75,.18);color:var(--gold)'));
+    else if(u.change==='changed')out.push(_lsBadge(t().ls_badge_changed, 'background:rgba(95,117,150,.15);color:#5f7596'));
+    if(u.needs_setup)            out.push(_lsBadge(t().ls_badge_needs, 'background:rgba(204,140,40,.16);color:#bd7a1c'));
+  }
+  return out.join(' ');
+}
+
+function renderListings(){
+  var body=document.getElementById('lsListBody'); if(!body) return;
+  var rows=_lsRows();
+  if(!rows.length){ body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+t().ls_empty+'</div>'; return; }
+  var q=((document.getElementById('lsSearch')||{}).value||'').trim().toLowerCase();
+  var shown=rows.filter(function(u){ if(!q) return true; return ((u.internal_name||'')+' '+(u.public_name||'')+' '+(u.address||'')+' '+(u.group||'')).toLowerCase().indexOf(q)>=0; });
+  var th=function(k){ return '<th style="text-align:start;padding:8px 10px;color:var(--mut);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap">'+esc(t()[k])+'</th>'; };
+  var head='<thead><tr>'+th('ls_h_unit')+th('ls_h_public')+th('ls_h_addr')+th('ls_h_beds')+th('ls_h_dir')+th('ls_h_group')+th('ls_h_floor')+th('ls_h_oujact')+'</tr></thead>';
+  var td='padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle';
+  var rowsHtml=shown.map(function(u){
+    var dim = u.active ? '' : 'opacity:.55;';
+    var dir = u.directions_url
+      ? '<a href="'+esc(u.directions_url)+'" target="_blank" rel="noopener" style="color:var(--gold)">'+t().ls_dir_link+'</a>'
+      : '<span class="muted">'+t().ls_no_link+'</span>';
+    var inp='background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;padding:5px 7px';
+    var grp='<input type="text" value="'+esc(u.group||'')+'" placeholder="'+esc(t().ls_group_ph)+'" onchange="listingsSetField('+u.id+',&#39;group&#39;,this.value)" style="width:110px;'+inp+'">';
+    var flr='<input type="number" value="'+(u.floor==null?'':esc(String(u.floor)))+'" placeholder="'+esc(t().ls_floor_ph)+'" onchange="listingsSetField('+u.id+',&#39;floor&#39;,this.value)" style="width:78px;'+inp+'">';
+    var ct ='<input type="checkbox" '+(u.oujact?'checked':'')+' onchange="listingsSetField('+u.id+',&#39;oujact&#39;,this.checked)" style="accent-color:var(--gold);width:16px;height:16px;cursor:pointer">';
+    return '<tr style="'+dim+'">'
+      +'<td style="'+td+'"><div style="font-weight:600">'+esc(u.internal_name||('#'+u.id))+'</div>'
+        +(_lsRowBadges(u)?'<div style="margin-top:4px">'+_lsRowBadges(u)+'</div>':'')+'</td>'
+      +'<td style="'+td+';color:var(--text-2)">'+esc(u.public_name||'')+'</td>'
+      +'<td style="'+td+';color:var(--text-2);max-width:200px">'+esc(u.address||'')+'</td>'
+      +'<td style="'+td+';text-align:center">'+(u.bedrooms==null?'—':esc(String(u.bedrooms)))+'</td>'
+      +'<td style="'+td+'">'+dir+'</td>'
+      +'<td style="'+td+'">'+grp+'</td>'
+      +'<td style="'+td+'">'+flr+'</td>'
+      +'<td style="'+td+';text-align:center">'+ct+'</td>'
+      +'</tr>';
+  }).join('');
+  body.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+'<tbody>'+rowsHtml+'</tbody></table></div>';
+}
+
+async function listingsSync(){
+  var btn=document.getElementById('lsPullBtn'); if(btn) btn.disabled=true;
+  toast('⏳ Hostaway…');
+  var r=await post('/api/listings/sync', {});
+  if(btn) btn.disabled=false;
+  if(r && r.ok){
+    var s=r.summary||{};
+    toast('✓ '+(s.new||0)+' '+t().ls_new+' · '+(s.changed||0)+' '+t().ls_changed+' · '+(s.inactive||0)+' '+t().ls_inactive);
+    await loadListings();
+  } else { toast((r&&r.error)||'⚠'); }
+}
+
+async function listingsSetField(id, field, value){
+  var payload={id:id}; payload[field]=value;
+  var r=await post('/api/listings/update', payload);
+  if(r && r.ok){
+    var rows=_lsRows();
+    for(var i=0;i<rows.length;i++){ if(rows[i].id===id){ if(r.row) rows[i]=r.row; break; } }
+    if(D.listings){
+      D.listings.summary = D.listings.summary||{};
+      D.listings.summary.needs_setup = rows.filter(function(x){return x.needs_setup;}).length;
+      D.listings.assigned_count = rows.filter(function(x){return x.oujact;}).length;
+    }
+    if(field==='oujact'){ renderOujact(); if(view==='listings') renderListings(); }
+    try{ buildSideNav(); }catch(_){}
+    toast(t().ls_saved);
+  } else { toast((r&&r.error)||'⚠'); }
+}
+
+/* ---- OujaCT assignment card (lives in the Cleaning page) ---- */
+function renderOujact(){
+  var body=document.getElementById('oujactBody'); if(!body) return;
+  var setT=function(id,key){ var e=document.getElementById(id); if(e) e.textContent=t()[key]; };
+  setT('t_ct_title','ct_title'); setT('t_ct_assigned','ct_assigned'); setT('t_ct_apply','ct_apply');
+  setT('t_ct_sub','ct_sub'); setT('t_ct_apply_hint','ct_apply_hint');
+  var sb=document.getElementById('oujactSearch'); if(sb) sb.placeholder=t().ct_search;
+  var rows=_lsRows().filter(function(u){ return u.active; });
+  var cnt=rows.filter(function(u){ return u.oujact; }).length;
+  var ce=document.getElementById('oujactCount'); if(ce) ce.textContent=cnt;
+  if(!rows.length){ body.innerHTML='<div class="empty" style="padding:18px;text-align:center">'+t().ct_need_pull+'</div>'; return; }
+  var q=((document.getElementById('oujactSearch')||{}).value||'').trim().toLowerCase();
+  var shown=rows.filter(function(u){ if(!q) return true; return ((u.internal_name||'')+' '+(u.public_name||'')+' '+(u.address||'')).toLowerCase().indexOf(q)>=0; });
+  shown.sort(function(a,b){ return (b.oujact?1:0)-(a.oujact?1:0) || (a.internal_name||'').localeCompare(b.internal_name||''); });
+  body.innerHTML='<div style="max-height:340px;overflow-y:auto">'+shown.map(function(u){
+    var dir = u.directions_url ? '<span title="directions" style="margin-inline-start:auto">🔗</span>' : '';
+    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid var(--border);cursor:pointer">'
+      +'<input type="checkbox" '+(u.oujact?'checked':'')+' onchange="listingsSetField('+u.id+',&#39;oujact&#39;,this.checked)" style="accent-color:var(--gold);width:16px;height:16px;cursor:pointer">'
+      +'<span style="font-weight:600">'+esc(u.internal_name||('#'+u.id))+'</span>'
+      +'<span class="muted" style="font-size:11px">'+esc(u.public_name||'')+'</span>'
+      +dir+'</label>';
+  }).join('')+'</div>';
+}
+
+async function oujactApply(){
+  if(!_lsRows().filter(function(u){return u.oujact;}).length){ toast(t().ct_none); return; }
+  var btn=document.getElementById('oujactApplyBtn'); if(btn) btn.disabled=true;
+  toast('⏳ Discord…');
+  var r=await post('/api/oujact/apply', {});
+  if(btn) btn.disabled=false;
+  if(r && r.ok){
+    var n=(r.changed||[]).length;
+    toast(n ? (t().ct_applied+' '+n+' '+t().ct_changed) : t().ct_no_change);
+  } else { toast((r&&r.error)||'⚠'); }
 }
 
 /* ============== TICKETS (الصيانة) ============== */
@@ -21514,6 +22121,112 @@ async def _api_units_list(request):
                     for u in out if (u.get("neighbourhood") or u.get("area"))})
     return _json({"units": out, "beds": beds, "areas": [a for a in areas if a]})
 
+# ---- Listings master store + OujaCT assignment (Stages 1-2) ----
+def _ls_row_view(rec):
+    """Shape one stored listing for the dashboard (adds computed needs_setup + a fresh
+    change flag — 'new'/'changed'/'reactivated' only for the most recent sync)."""
+    last_sync = _ls_get().get("last_sync")
+    fresh = bool(last_sync) and rec.get("change_sync") == last_sync
+    return {
+        "id": rec.get("id"),
+        "internal_name": rec.get("internal_name") or "",
+        "public_name": rec.get("public_name") or "",
+        "address": rec.get("address") or "",
+        "bedrooms": rec.get("bedrooms"),
+        "ha_status": rec.get("ha_status"),
+        "active": bool(rec.get("active", True)),
+        "directions_url": rec.get("directions_url"),
+        "directions_field": rec.get("directions_field"),
+        "group": rec.get("group") or "",
+        "floor": rec.get("floor"),
+        "oujact": bool(rec.get("oujact")),
+        "first_seen": rec.get("first_seen"),
+        "deactivated_at": rec.get("deactivated_at"),
+        "needs_setup": _ls_needs_setup(rec),
+        "change": rec.get("change_flag") if fresh else None,
+    }
+
+async def _api_listings_list(request):
+    """The master Listings store: every unit + its fields + status, last sync + summary."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    store = _ls_get()
+    rows = [_ls_row_view(r) for r in store["listings"].values()]
+    # active first, needs-setup next, then alphabetical by internal name
+    rows.sort(key=lambda r: (0 if r["active"] else 1,
+                             0 if r["needs_setup"] else 1,
+                             r["internal_name"].lower()))
+    # summary: keep the last sync's EVENT counts (new/changed/inactive/reactivated) but
+    # recompute current-STATE counts live, so the "needs setup" badge stays accurate
+    # even after the owner edits a group/floor without re-syncing.
+    summary = dict(store.get("last_summary", {}))
+    summary.update({
+        "total": len(rows),
+        "active": sum(1 for r in rows if r["active"]),
+        "inactive_total": sum(1 for r in rows if not r["active"]),
+        "needs_setup": sum(1 for r in rows if r["needs_setup"]),
+    })
+    return _json({"listings": rows,
+                  "last_sync": store.get("last_sync"),
+                  "summary": summary,
+                  "assigned_count": sum(1 for r in rows if r["oujact"]),
+                  "directions_field": next((r["directions_field"] for r in rows
+                                            if r["directions_field"]), None)})
+
+async def _api_listings_sync(request):
+    """Manual 'Pull from Hostaway' — refresh the store and return the change summary."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        summary = await asyncio.to_thread(sync_listings_store)
+    except Exception as e:
+        print("listings sync error:", e)
+        return _json({"error": str(e)}, 500)
+    log_event("pricing",
+              f"مزامنة الشقق · {summary['new']} جديدة · {summary['changed']} تغيّرت · "
+              f"{summary['inactive']} ألغيت · {summary['needs_setup']} تحتاج إعداد")
+    return _json({"ok": True, "summary": summary, "last_sync": _ls_get().get("last_sync")})
+
+async def _api_listings_update(request):
+    """Set a listing's dashboard-only fields: group/compound, hard price floor, OujaCT flag."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rec = _ls_get()["listings"].get(str(b.get("id") or ""))
+    if not rec:
+        return _json({"error": "unknown listing"}, 404)
+    if "group" in b:
+        rec["group"] = str(b.get("group") or "").strip()
+    if "floor" in b:
+        fv = b.get("floor")
+        if fv in (None, "", "null"):
+            rec["floor"] = None
+        else:
+            try:
+                rec["floor"] = round(float(fv))
+            except (TypeError, ValueError):
+                return _json({"error": "bad floor"}, 400)
+    if "oujact" in b:
+        rec["oujact"] = bool(b.get("oujact"))
+    _ls_save()
+    return _json({"ok": True, "row": _ls_row_view(rec)})
+
+async def _api_oujact_apply(request):
+    """Apply / Refresh — create/rename today's + tomorrow's OujaCT channels right now."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    assigned = len(oujact_listing_ids())
+    if assigned == 0:
+        return _json({"ok": True, "changed": [], "assigned": 0,
+                      "note": "no apartments assigned to OujaCT yet"})
+    try:
+        changed = await sync_oujact_turnovers()
+    except Exception as e:
+        print("oujact apply error:", e)
+        return _json({"error": str(e)}, 500)
+    log_event("pricing", f"OujaCT · تطبيق/تحديث · {len(changed)} قناة · {assigned} شقة معيّنة")
+    return _json({"ok": True, "changed": changed, "assigned": assigned})
+
 async def _api_calendar_forward(request):
     """Aggregate per-date forward calendar: occupancy + avg price + Saudi events."""
     if not _dash_auth(request):
@@ -22081,6 +22794,10 @@ async def start_web_server():
         app.router.add_post("/api/events/save", _api_events_save)
         app.router.add_post("/api/events/delete", _api_events_delete)
         app.router.add_get("/api/units", _api_units_list)
+        app.router.add_get("/api/listings", _api_listings_list)
+        app.router.add_post("/api/listings/sync", _api_listings_sync)
+        app.router.add_post("/api/listings/update", _api_listings_update)
+        app.router.add_post("/api/oujact/apply", _api_oujact_apply)
         app.router.add_get("/api/guests", _api_guests_list)
         app.router.add_get("/api/cleaning/quality", _api_clean_quality_summary)
         # Public no-auth feedback page + endpoints (token IS the auth)
@@ -23456,6 +24173,8 @@ async def on_ready():
           f"escalation-ack={'ON' if ASSISTANT_ESC_ACK else 'OFF'} -> #{ASSISTANT_CHANNEL}")
     if not poll_loop.is_running():
         poll_loop.start()
+    if not oujact_daily_loop.is_running():
+        oujact_daily_loop.start()      # 12 AM: listings auto-sync + OujaCT channels + schedule
     if not reminder_loop.is_running():
         reminder_loop.start()
     if not discount_tier1_loop.is_running():
