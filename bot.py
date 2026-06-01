@@ -15636,8 +15636,86 @@ def _pe_reconstruct_pace(nights, group_units, horizon=PE_HORIZON):
                              "booking_curve": booking_curve, "typical_occ": typical_occ}
     return out
 
-# Daily-refreshed cache for the learned dataset + pace reconstruction.
-_pe_cache = {"data": None, "pace": None, "ts": 0, "error": None}
+PE_MIN_UNIT = int(os.environ.get("PE_MIN_UNIT", "8"))     # min bookings to trust a unit's OWN band (else pool to group)
+PE_EVENT_MIN = int(os.environ.get("PE_EVENT_MIN", "10"))  # min event-nights for a high-confidence learned effect
+
+def _pe_band(adrs):
+    """Realized ADR band from a list of booked ADRs (nearest-rank percentiles)."""
+    if not adrs:
+        return None
+    import statistics
+    s = sorted(adrs)
+    n = len(s)
+    def pct(p):
+        return round(s[min(n - 1, max(0, int(round((p / 100.0) * (n - 1)))))])
+    return {"count": n, "min": round(s[0]), "max": round(s[-1]),
+            "median": round(statistics.median(s)), "avg": round(sum(s) / n),
+            "p10": pct(10), "p90": pct(90)}
+
+def _pe_learn_models(data):
+    """PURE. From the night-level dataset learn the transparent, explainable models:
+      (3) booking-curve buckets per group x date-type (% of bookings per lead bucket),
+      (4) realized ADR bands per unit and per group x date-type (and x lead bucket),
+      (5) calendar effects per event: ADR uplift + pace shift LEARNED vs a same-group
+          non-event baseline (thin data -> low confidence + an honest note).
+    Nothing is assumed; the SAUDI_EVENTS boost is carried only as a labelled reference."""
+    import statistics
+    from collections import defaultdict
+    nights = data["nights"]
+    adr_unit_dt, adr_grp_dt = defaultdict(list), defaultdict(list)
+    adr_unit_dt_bkt, adr_grp_dt_bkt = defaultdict(list), defaultdict(list)
+    leads_grp_dt = defaultdict(list)
+    ev_adr, ev_leads, ev_groups = defaultdict(list), defaultdict(list), defaultdict(set)
+    base_adr_grp, base_leads_grp = defaultdict(list), defaultdict(list)
+    all_adr = []
+    for n in nights:
+        a, dt, lid, g, bkt, ev = n["adr"], n["dtype"], n["lid"], n["group"], n["bucket"], n.get("event")
+        all_adr.append(a)
+        if lid is not None:
+            adr_unit_dt[(lid, dt)].append(a)
+            adr_unit_dt_bkt[(lid, dt, bkt)].append(a)
+        if g:
+            adr_grp_dt[(g, dt)].append(a)
+            adr_grp_dt_bkt[(g, dt, bkt)].append(a)
+            leads_grp_dt[(g, dt)].append(n["lead"])
+            if ev:
+                ev_adr[ev].append(a); ev_leads[ev].append(n["lead"]); ev_groups[ev].add(g)
+            else:
+                base_adr_grp[g].append(a); base_leads_grp[g].append(n["lead"])
+    unit_bands = {f"{lid}||{dt}": _pe_band(v) for (lid, dt), v in adr_unit_dt.items()}
+    group_bands = {f"{g}||{dt}": _pe_band(v) for (g, dt), v in adr_grp_dt.items()}
+    unit_bands_bucket = {f"{lid}||{dt}||{bkt}": _pe_band(v) for (lid, dt, bkt), v in adr_unit_dt_bkt.items()}
+    group_bands_bucket = {f"{g}||{dt}||{bkt}": _pe_band(v) for (g, dt, bkt), v in adr_grp_dt_bkt.items()}
+    curve_buckets = {}
+    for (g, dt), lds in leads_grp_dt.items():
+        tot = len(lds)
+        cnt = {lbl: 0 for _, _, lbl in PE_LEAD_BUCKETS}
+        for L in lds:
+            cnt[_pe_lead_bucket(L)] += 1
+        curve_buckets[f"{g}||{dt}"] = {lbl: round(cnt[lbl] / tot, 4) for lbl in cnt} if tot else {}
+    assumed = {e["name"]: e.get("boost") for e in _all_events()}
+    events = {}
+    for ev, adrs in ev_adr.items():
+        grps = ev_groups.get(ev, set())
+        base = [a for g in grps for a in base_adr_grp.get(g, [])]
+        base_ld = [L for g in grps for L in base_leads_grp.get(g, [])]
+        n_ev = len(adrs)
+        uplift = (round(statistics.median(adrs) / statistics.median(base), 3)
+                  if base and statistics.median(base) > 0 else None)
+        pace_shift = (round(statistics.median(ev_leads[ev]) - statistics.median(base_ld), 1)
+                      if base_ld else None)
+        conf = "high" if (n_ev >= PE_EVENT_MIN and base) else "low"
+        events[ev] = {"n": n_ev, "learned_uplift": uplift, "pace_shift_days": pace_shift,
+                      "assumed_boost": assumed.get(ev), "confidence": conf,
+                      "note": None if conf == "high" else "بيانات قليلة لهالمناسبة"}
+    return {"unit_bands": unit_bands, "group_bands": group_bands,
+            "unit_bands_bucket": unit_bands_bucket, "group_bands_bucket": group_bands_bucket,
+            "curve_buckets": curve_buckets, "events": events,
+            "overall_adr": round(statistics.median(all_adr)) if all_adr else None,
+            "min_unit": PE_MIN_UNIT}
+
+# Daily-refreshed cache for the learned dataset + pace reconstruction + models.
+_pe_cache = {"data": None, "pace": None, "models": None, "ts": 0, "error": None}
 
 def _pe_get(force=False, ttl=86400):
     """Build (or return cached) the Stage-1 dataset + pace. Cached ~24h (daily)."""
@@ -15649,7 +15727,8 @@ def _pe_get(force=False, ttl=86400):
         today = datetime.now(TZ).date()
         data = _pe_build_dataset(get_reservations_cached(), _catalog_units, today)
         pace = _pe_reconstruct_pace(data["nights"], data["group_units"])
-        _pe_cache.update({"data": data, "pace": pace, "ts": time.time(), "error": None})
+        models = _pe_learn_models(data)
+        _pe_cache.update({"data": data, "pace": pace, "models": models, "ts": time.time(), "error": None})
     except Exception as e:
         _pe_cache["error"] = str(e)
         print("pricing-engine v2 build error:", e)
