@@ -120,6 +120,7 @@ WEEKLY_REVIEW_TEST  = os.environ.get("WEEKLY_REVIEW_TEST", "0") in ("1", "true",
 # DRY-RUN by default: clean expenses are marked "Ready" but NOT written to
 # Hostaway until the owner sets EXPENSE_POST_DRYRUN=0. Mirrors PRICE_APPLY_DRYRUN.
 EXPENSE_POST_DRYRUN   = os.environ.get("EXPENSE_POST_DRYRUN", "1") in ("1", "true", "True", "yes")
+_exp_sheet_last_sync = None   # ISO time of the last successful Google-Sheet poll (for the connection strip)
 # Shared secret the Google Apps Script must send (header X-Ingest-Secret) so only
 # our own form can push submissions. If blank, ingestion is open (not recommended).
 EXPENSE_INGEST_SECRET = os.environ.get("EXPENSE_INGEST_SECRET", "")
@@ -10976,6 +10977,33 @@ function _expStatusChip(st){
   var lab=EXP_STATUS[st]?(L==='ar'?EXP_STATUS[st][0]:EXP_STATUS[st][1]):st;
   return '<span style="background:'+c[0]+';color:'+c[1]+';padding:3px 11px;border-radius:99px;font-size:10.5px;font-weight:700;white-space:nowrap">'+esc(lab)+'</span>';
 }
+function _expTime(iso){ return esc(String(iso||'').replace('T',' ').slice(0,16)); }
+function _expSyncBadge(e){
+  // B1/B4: explicit, always-visible Hostaway sync status per expense.
+  var dry=(D.expSummary||{}).dryrun;
+  var base='display:inline-block;padding:4px 11px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap';
+  function b(style,txt){ return '<span style="'+base+';'+style+'">'+txt+'</span>'; }
+  if(e.status==='posted'){
+    var when=e.posted_at?(' · '+_expTime(e.posted_at)):'';
+    if(e.hostaway_ref==='DRYRUN' || dry)
+      return b('background:rgba(212,175,55,.14);color:var(--gold)', (L==='ar'?'🧪 تجريبي — ما تم الإرسال فعلياً لـ Hostaway':'🧪 Test — not actually sent to Hostaway')+when);
+    var refTxt=(e.hostaway_ref && e.hostaway_ref!=='ok' && e.hostaway_ref!=='DRYRUN')?(' · #'+esc(e.hostaway_ref)):'';
+    return b('background:var(--green-soft);color:var(--green)', (L==='ar'?'✓ مُرحّل لـ Hostaway':'✓ Posted to Hostaway')+when+refTxt);
+  }
+  if(e.status==='failed') return b('background:var(--red-soft);color:var(--red)', (L==='ar'?'✖ فشل الترحيل':'✖ Post failed'));
+  if(e.status==='discarded') return b('background:var(--surface-3);color:var(--mut)', (L==='ar'?'متجاهل':'Ignored'));
+  return b('background:var(--surface-3);color:var(--mut)', (L==='ar'?'غير مُرحّل لـ Hostaway':'Not posted to Hostaway'));
+}
+function _expConnStrip(){
+  // B3: plainly show the pipes are live.
+  var s=D.expSummary||{};
+  function pill(ok,lab){ var c=ok?'var(--green)':'var(--mut)', bg=ok?'var(--green-soft)':'var(--surface-3)';
+    return '<span style="display:inline-flex;align-items:center;gap:5px;background:'+bg+';color:'+c+';padding:5px 12px;border-radius:99px;font-size:11.5px;font-weight:600">'+(ok?'✓ ':'• ')+lab+'</span>'; }
+  var sheetOk=!!s.sheet_configured && !!s.sheet_last_sync;
+  var sheetLab='Google Sheet: '+(s.sheet_configured?(sheetOk?((L==='ar'?'متصل':'connected')+(s.sheet_last_sync?(' (' +(L==='ar'?'آخر مزامنة ':'last sync ')+_expTime(s.sheet_last_sync)+')'):'')):(L==='ar'?'مضبوط — بانتظار أول مزامنة':'configured — awaiting first sync')):(L==='ar'?'غير مضبوط':'not configured'));
+  var haLab='Hostaway: '+(s.hostaway_ok?(L==='ar'?'متصل':'connected'):(L==='ar'?'غير متصل':'not connected'));
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+pill(s.sheet_configured,sheetLab)+pill(s.hostaway_ok,haLab)+'</div>';
+}
 function _expPeriodRange(){
   var now=new Date(), from='', to='';
   if(_expPeriod==='week'){ var f=new Date(now); f.setDate(f.getDate()-6); from=_isoLocal(f); to=_isoLocal(now); }
@@ -11099,7 +11127,7 @@ function _expCountersHtml(){
   var s=D.expSummary||{};
   var dry = s.dryrun ? '<div style="background:rgba(212,175,55,.12);border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:10px;font-size:12px;margin-bottom:10px">'+(L==='ar'?'⚠️ وضع تجريبي — لا يكتب على Hostaway فعلياً (EXPENSE_POST_DRYRUN=1)':'⚠️ Dry-run — nothing is written to Hostaway (EXPENSE_POST_DRYRUN=1)')+'</div>' : '';
   function card(lab,val,col){ return '<div style="flex:1;min-width:118px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px 14px"><div class="muted" style="font-size:11px">'+lab+'</div><div style="font-size:18px;font-weight:800;margin-top:3px;color:'+(col||'var(--text)')+'">'+val+'</div></div>'; }
-  return dry+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+  return _expConnStrip()+dry+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + card(L==='ar'?'إجمالي المُرحّل':'Total posted', expMoney(s.posted_sar||0),'var(--green)')
     + card(L==='ar'?'مُرحّل (عدد)':'Posted (#)', fmt(s.posted_n||0))
     + card(L==='ar'?'موقوف':'Held', fmt(s.held||0), (s.held?'var(--gold)':'var(--text)'))
@@ -11216,7 +11244,8 @@ function _expCard(e){
   // the status pill carries the explicit label.
   var _edge=e.status==='failed'?'var(--red)':(e.status==='held'?'var(--yellow)':(e.status==='discarded'?'var(--mut)':'var(--green)'));
   return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-color:color-mix(in srgb, '+_edge+' 32%, var(--line))">'
-    + head + (chips?('<div style="margin-top:8px">'+chips+'</div>'):'') + _expCardExtras(e,reason) + _expCardActions(e,reason) + '</div>';
+    + head + '<div style="margin-top:6px">'+_expSyncBadge(e)+'</div>'
+    + (chips?('<div style="margin-top:8px">'+chips+'</div>'):'') + _expCardExtras(e,reason) + _expCardActions(e,reason) + '</div>';
 }
 function _expCardExtras(e,reason){
   var h='';
@@ -20093,6 +20122,9 @@ async def _api_expenses_summary(request):
         "by_employee": sorted(by_emp.values(), key=lambda x: -x["total"]),
         "owners": dict(_unit_owners),   # item 60: apartment -> owner map
         "dryrun": EXPENSE_POST_DRYRUN,
+        "sheet_configured": bool(EXPENSE_SHEET_CSV_URL),
+        "sheet_last_sync": _exp_sheet_last_sync,
+        "hostaway_ok": bool(_token.get("value")),     # a cached token = Hostaway auth is live
     })
 
 async def _api_expenses_set_owner(request):
@@ -21965,6 +21997,8 @@ async def expense_sheet_loop():
         return
     try:
         n = await asyncio.to_thread(_exp_poll_sheet)
+        global _exp_sheet_last_sync
+        _exp_sheet_last_sync = datetime.now(TZ).isoformat(timespec="minutes")   # a successful poll = sheet is reachable
         if n:
             print(f"expense sheet: ingested {n} new row(s)")
     except Exception as e:
