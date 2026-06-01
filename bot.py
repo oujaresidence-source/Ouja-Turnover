@@ -252,7 +252,9 @@ ASSISTANT_ACK_EN   = os.environ.get("ASSISTANT_ACK_EN",
 ESCALATION_CHANNEL    = os.environ.get("ESCALATION_CHANNEL", "escalations")
 AUTO_REPLY_CHANNEL    = os.environ.get("AUTO_REPLY_CHANNEL", "auto-replies")  # audit log of Stage-1 auto-sends
 ESCALATION_REPING_MIN = int(os.environ.get("ESCALATION_REPING_MIN", "10"))   # re-ping every N min
-ESCALATION_MAX_PINGS  = int(os.environ.get("ESCALATION_MAX_PINGS", "12"))    # stop after this many re-pings
+ESCALATION_MAX_PINGS  = int(os.environ.get("ESCALATION_MAX_PINGS", "12"))    # (legacy) re-ping count cap
+ESCALATION_REPING_SEC = int(os.environ.get("ESCALATION_REPING_SEC", "20"))   # Stage 4: re-ping cadence in SECONDS until claimed
+ESCALATION_REPING_MAX_MIN = int(os.environ.get("ESCALATION_REPING_MAX_MIN", "120"))  # safety: stop re-pinging after this many minutes unclaimed
 CLAIM_NAMES = [n.strip() for n in os.environ.get(
     "CLAIM_NAMES", "اسيل,فيصل,ماثر,نوره,ناصر,محمد").split(",") if n.strip()]
 # When someone claims an escalation, DM them a ready-to-send reply in the owner's warm style.
@@ -4445,7 +4447,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             except Exception as e:
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
         embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {round(conf*100)}% · "
-                              f"يعاد التنبيه كل {ESCALATION_REPING_MIN} دقيقة لين يستلمه أحد")
+                              f"يعاد التنبيه كل {ESCALATION_REPING_SEC} ثانية لين يستلمه أحد")
         # post to the dedicated escalations channel and @mention the operation team
         guild = channel.guild
         esc_channel = await ensure_channel(guild, ESCALATION_CHANNEL,
@@ -22249,7 +22251,7 @@ async def _resolve_escalation(mid, esc, reason="رد عليه أحد المضي�
     except Exception as e:
         print("resolve-escalation edit error:", e)
 
-@tasks.loop(minutes=1)
+@tasks.loop(seconds=ESCALATION_REPING_SEC)
 async def escalation_reping_loop():
     """Re-ping the operation team about any escalation that hasn't been claimed yet —
     but first auto-resolve any escalation where a co-host already replied (and stop nagging)."""
@@ -22268,13 +22270,12 @@ async def escalation_reping_loop():
         if await asyncio.to_thread(_cohost_responded, esc):
             await _resolve_escalation(mid, esc)
             continue
-        if esc["attempts"] >= ESCALATION_MAX_PINGS:
-            # we've nagged the max number of times and nobody picked it up — stop
-            # silently sitting on the dashboard counter; mark it as exhausted so the
-            # KPI reflects reality and the card carries a clear visual state.
-            await _resolve_escalation(mid, esc, reason=f"انتهت محاولات التنبيه ({ESCALATION_MAX_PINGS}× بدون استلام)")
+        if esc["attempts"] * ESCALATION_REPING_SEC >= ESCALATION_REPING_MAX_MIN * 60:
+            # safety cap: nobody claimed within the max window — stop nagging and mark it
+            # exhausted so the dashboard KPI reflects reality (re-ping never runs forever).
+            await _resolve_escalation(mid, esc, reason=f"انتهت محاولات التنبيه (بدون استلام خلال {ESCALATION_REPING_MAX_MIN} دقيقة)")
             continue
-        if (now - esc["last_ping"]) < ESCALATION_REPING_MIN * 60:
+        if (now - esc["last_ping"]) < ESCALATION_REPING_SEC:
             continue
         ch = bot.get_channel(esc["channel_id"])
         if ch is None:
