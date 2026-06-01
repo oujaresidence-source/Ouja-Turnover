@@ -15491,6 +15491,170 @@ def _compute_calendar_grid(days=45):
     return {"start": today.isoformat(), "days_count": days,
             "days": days_out, "units": units_out}
 
+# =====================================================================
+# PRICING ENGINE v2 ("فرص التسعير") — LEARNED FROM OUR OWN HOSTAWAY HISTORY.
+# Stage 1 (data foundation): pure builders + a daily-cached accessor.
+#   booking date = reservationDate (verified 100% populated, correct for
+#   imported history); confirmed = status in {new, modified}; lead =
+#   arrivalDate - reservationDate (drop < 0). ADR = totalPrice / nights.
+# Every value is computed from real reservations or omitted — never faked.
+# =====================================================================
+PE_HORIZON = int(os.environ.get("PRICE_OPP_HORIZON", "45"))      # days-out we learn/price
+PE_WEEKEND_DOW = {3, 4, 5}                                       # Thu,Fri,Sat (Mon=0); validated vs learned ADR-by-weekday
+PE_LEAD_BUCKETS = [(0, 0, "same-day"), (1, 2, "1-2d"), (3, 5, "3-5d"),
+                   (6, 10, "6-10d"), (11, 20, "11-20d"), (21, 99999, "21+d")]
+# When several calendar events overlap a date, the more specific one wins the tag.
+_PE_EVENT_PRIORITY = {"eid": 0, "national": 1, "ramadan": 2, "season": 3}
+
+def _pe_lead_bucket(lead):
+    for lo, hi, lbl in PE_LEAD_BUCKETS:
+        if lo <= lead <= hi:
+            return lbl
+    return "21+d"
+
+def _pe_group_key(u):
+    """Pool key = compound (neighbourhood) + size (bedrooms) + tier (property type)."""
+    nb = (u.get("neighbourhood") or u.get("area") or "").strip() or "—"
+    beds = u.get("beds")
+    beds = int(beds) if isinstance(beds, (int, float)) else (str(beds) if beds else "?")
+    pt = (u.get("ptype") or "").strip() or "—"
+    return f"{nb} · {beds}BR · {pt}"
+
+def _pe_groups(units=None):
+    """Return (lid->group_key, group_key->[lids], lid->unit-dict) from the catalog."""
+    units = units if units is not None else (_catalog_units or [])
+    l2g, g2l, l2u = {}, {}, {}
+    for u in units:
+        lid = u.get("id")
+        if lid is None:
+            continue
+        gk = _pe_group_key(u)
+        l2g[lid] = gk
+        l2u[lid] = u
+        g2l.setdefault(gk, []).append(lid)
+    return l2g, g2l, l2u
+
+def _pe_date_type(d):
+    """(type, event_name|None). A calendar event overrides weekend/weekday.
+    Uses the real SAUDI_EVENTS calendar; school-break is intentionally NOT tagged
+    (no trustworthy date source) rather than guessed."""
+    evs = events_for_date(d) or []
+    if evs:
+        evs = sorted(evs, key=lambda e: _PE_EVENT_PRIORITY.get(e.get("kind"), 9))
+        e = evs[0]
+        return (e.get("kind") or "event", e.get("name"))
+    if d.weekday() in PE_WEEKEND_DOW:
+        return ("weekend", None)
+    return ("weekday", None)
+
+def _pe_res_nights(r):
+    n = r.get("nights")
+    if isinstance(n, (int, float)) and n > 0:
+        return int(n)
+    ci, co = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
+    return (co - ci).days if (ci and co and co > ci) else 0
+
+def _pe_build_dataset(reservations, units, today):
+    """PURE. Night-level dataset of confirmed bookings, keyed off reservationDate.
+    Returns nights[] (one record per booked unit-night) + counts + a learned
+    ADR-by-weekday readout + group maps + the observed date range. No I/O."""
+    import statistics
+    l2g, g2l, l2u = _pe_groups(units)
+    today_iso = today.isoformat()
+    nights = []
+    n_conf = n_neg = n_used = 0
+    wd_adr = {i: [] for i in range(7)}
+    for r in reservations:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        n_conf += 1
+        ci = _parse_date(r.get("arrivalDate"))
+        rd = _parse_date(r.get("reservationDate"))
+        nn = _pe_res_nights(r)
+        tp = r.get("totalPrice")
+        if not ci or not rd or nn <= 0 or not isinstance(tp, (int, float)) or tp <= 0:
+            continue
+        lead = (ci - rd).days
+        if lead < 0:                       # drop the ~0.2% with negative lead
+            n_neg += 1
+            continue
+        n_used += 1
+        adr = tp / nn
+        lid = r.get("listingMapId")
+        grp = l2g.get(lid)                 # None if unit not in the active catalog
+        chan = r.get("channelName") or "?"
+        for i in range(nn):
+            nd = ci + timedelta(days=i)
+            dt, ev = _pe_date_type(nd)
+            nights.append({"lid": lid, "group": grp, "date": nd.isoformat(), "dtype": dt,
+                           "event": ev, "adr": round(adr, 2), "lead": lead,
+                           "bucket": _pe_lead_bucket(lead), "channel": chan,
+                           "arrival": ci.isoformat()})
+            wd_adr[nd.weekday()].append(adr)
+    wd_median = {i: (round(statistics.median(v)) if v else None) for i, v in wd_adr.items()}
+    all_dates = [n["date"] for n in nights]
+    return {"nights": nights, "n_confirmed": n_conf, "n_negative_lead": n_neg, "n_used": n_used,
+            "wd_median_adr": wd_median, "groups_lid": l2g, "group_units": g2l,
+            "n_groups": len(g2l), "n_units": len(l2u),
+            "date_min": min(all_dates) if all_dates else None,
+            "date_max": max(all_dates) if all_dates else None,
+            "past_max": max((d for d in all_dates if d <= today_iso), default=None)}
+
+def _pe_reconstruct_pace(nights, group_units, horizon=PE_HORIZON):
+    """PURE. Per (group, date-type) reconstruct, from booked nights' lead times:
+      booking_curve[t] = share of eventual bookings already on the books t days out
+                       = P(lead >= t)         (capacity-free; quantifies the curve)
+      typical_occ[t]   = booked-unit-nights(lead>=t) / (units_in_group * distinct_nights)
+                       (the pace baseline). final_occ = typical_occ[0].
+    The distinct-nights denominator is an approximation that tightens as data grows."""
+    import statistics, bisect
+    from collections import defaultdict
+    leads = defaultdict(list)              # (group,dtype) -> [lead per booked unit-night]
+    ndset = defaultdict(set)               # (group,dtype) -> {distinct night-date}
+    for n in nights:
+        g = n.get("group")
+        if not g:
+            continue
+        key = (g, n["dtype"])
+        leads[key].append(n["lead"])
+        ndset[key].add(n["date"])
+    out = {}
+    for key, lds in leads.items():
+        g, dt = key
+        total = len(lds)
+        K = max(1, len(group_units.get(g, [])))
+        N = max(1, len(ndset[key]))
+        srt = sorted(lds)
+        booking_curve, typical_occ = {}, {}
+        for t in range(0, horizon + 1):
+            ge = total - bisect.bisect_left(srt, t)       # count of leads >= t
+            booking_curve[t] = round(ge / total, 4) if total else 0.0
+            typical_occ[t] = round(ge / (K * N), 4)
+        out[f"{g}||{dt}"] = {"group": g, "dtype": dt, "n_bookings": total, "n_nights": N,
+                             "units": K, "final_occ": round(total / (K * N), 4),
+                             "lead_median": int(statistics.median(lds)) if lds else None,
+                             "booking_curve": booking_curve, "typical_occ": typical_occ}
+    return out
+
+# Daily-refreshed cache for the learned dataset + pace reconstruction.
+_pe_cache = {"data": None, "pace": None, "ts": 0, "error": None}
+
+def _pe_get(force=False, ttl=86400):
+    """Build (or return cached) the Stage-1 dataset + pace. Cached ~24h (daily)."""
+    if (not force) and _pe_cache["data"] and (time.time() - _pe_cache["ts"] < ttl):
+        return _pe_cache
+    try:
+        if not _catalog_units:
+            load_catalog(True)
+        today = datetime.now(TZ).date()
+        data = _pe_build_dataset(get_reservations_cached(), _catalog_units, today)
+        pace = _pe_reconstruct_pace(data["nights"], data["group_units"])
+        _pe_cache.update({"data": data, "pace": pace, "ts": time.time(), "error": None})
+    except Exception as e:
+        _pe_cache["error"] = str(e)
+        print("pricing-engine v2 build error:", e)
+    return _pe_cache
+
 def _compute_pricing():
     reservations = get_reservations_cached()
     if not _catalog_units:
