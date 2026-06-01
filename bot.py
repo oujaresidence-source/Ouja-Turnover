@@ -838,6 +838,9 @@ def apply_discount_tier(pct):
                         print(f"   VERIFY {name}: read-back failed: {e}")
             changes.append({"name": name, "orig": int(original),
                             "old": int(current), "new": int(new_price)})
+            log_price_change(lid, today, int(current), int(new_price), "last-minute",
+                             f"خصم اللحظة الأخيرة {int(pct)}% من السعر الأصلي {int(original)}",
+                             dry=DISCOUNT_DRY_RUN)
         except Exception as e:
             print(f"discount error for {name}: {e}")
     _save_discount_state(state)
@@ -16863,6 +16866,77 @@ try:
 except Exception:
     pass
 
+# ====================================================================
+#  CENTRAL PRICE-CHANGE AUDIT LOG (the trust mechanism)
+#  EVERY price write — engine, strategy rule, same-day step-down, manual edit,
+#  per-month apply, the daily job — routes through log_price_change(), which
+#  appends to a per-(listing, date) APPEND-ONLY timeline: timestamp, old→new,
+#  source, reason. Entries are never edited or deleted.
+# ====================================================================
+PRICE_LOG_FILE = "price_change_log.json"
+_price_log = {}                    # "<lid>|<YYYY-MM-DD>" -> [ {ts, old, new, source, reason, dry, confirmed} ]
+_PRICE_LOG_MAX_PER_KEY = 80        # keep the most recent N entries per date (append-only within that window)
+_price_log_lock = threading.Lock()
+
+try:
+    _pl_loaded = _load_json(PRICE_LOG_FILE, {})
+    if isinstance(_pl_loaded, dict):
+        _price_log.update(_pl_loaded)
+except Exception:
+    pass
+
+# Human labels for each price-change source (shown in the per-date timeline).
+PRICE_SOURCE_LABEL = {
+    "manual":      {"ar": "تعديل يدوي", "en": "manual edit", "icon": "✋"},
+    "engine":      {"ar": "محرّك التسعير", "en": "pricing engine", "icon": "🧠"},
+    "strategy":    {"ar": "استراتيجية ديناميكية", "en": "dynamic strategy", "icon": "⚡"},
+    "last-minute": {"ar": "خصم اللحظة الأخيرة", "en": "last-minute step-down", "icon": "⏱️"},
+    "monthly":     {"ar": "تطبيق شهري", "en": "monthly apply", "icon": "📅"},
+    "bulk":        {"ar": "تطبيق جماعي", "en": "bulk apply", "icon": "📦"},
+    "daily-job":   {"ar": "المهمة اليومية", "en": "daily job", "icon": "🔁"},
+}
+
+def _price_log_save():
+    try:
+        _save_json(PRICE_LOG_FILE, _price_log)
+    except Exception as e:
+        print("price log save:", e)
+
+def _coerce_price(v):
+    if v in (None, "", "null"):
+        return None
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError):
+        return None
+
+def log_price_change(lid, date_iso, old_price, new_price, source, reason="", dry=False, confirmed=None):
+    """Append ONE entry to the per-(listing, date) append-only audit trail. Called by EVERY
+    price-writing path so each date carries a complete, trustworthy timeline. Never edits or
+    deletes. Returns the entry (or None if the inputs were unusable)."""
+    try:
+        key = f"{int(lid)}|{str(date_iso)[:10]}"
+    except (TypeError, ValueError):
+        return None
+    entry = {"ts": datetime.now(TZ).isoformat(timespec="seconds"),
+             "old": _coerce_price(old_price), "new": _coerce_price(new_price),
+             "source": source, "reason": reason or "",
+             "dry": bool(dry), "confirmed": confirmed}
+    with _price_log_lock:
+        lst = _price_log.setdefault(key, [])
+        lst.append(entry)
+        if len(lst) > _PRICE_LOG_MAX_PER_KEY:
+            del lst[:len(lst) - _PRICE_LOG_MAX_PER_KEY]
+        _price_log_save()
+    return entry
+
+def price_change_log(lid, date_iso):
+    """The full timeline for one (listing, date), oldest first (a shallow copy)."""
+    try:
+        return list(_price_log.get(f"{int(lid)}|{str(date_iso)[:10]}", []))
+    except (TypeError, ValueError):
+        return []
+
 def _pe_backfill_outcomes(data):
     """For logged actions whose night has since booked (now appears among confirmed
     reservations), record booked_at = the real reservationDate and booked_price = realized
@@ -17008,9 +17082,10 @@ def _pe_night_detail(lid, date_iso):
             "summary": summary, "footer_n": data.get("n_used", 0),
             "dry_run": PRICE_APPLY_DRYRUN}
 
-def _pe_apply_night(lid, date_iso, price):
+def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None):
     """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN). Returns the
-    REAL result — read back to confirm — never a faked success. Logs the action for learning."""
+    REAL result — read back to confirm — never a faked success. Logs to BOTH the learning log
+    and the central price-change audit log (old→new · source · reason)."""
     try:
         price = int(round(float(price)))
     except Exception:
@@ -17022,9 +17097,18 @@ def _pe_apply_night(lid, date_iso, price):
         return {"ok": False, "error": f"below hard floor {floor}"}
     if PRICE_APPLY_DRYRUN:
         _pe_log_reco(lid, date_iso, price, applied=True, dry=True)
+        log_price_change(lid, date_iso, old, price, source, reason or "تطبيق سعر", dry=True)
         return {"ok": True, "dry_run": True, "lid": lid, "date": date_iso, "price": price,
                 "note": "DRY-RUN — ما تغيّر شي فعلي"}
     try:
+        if old is None:        # capture the live price BEFORE writing, for an accurate old→new
+            try:
+                pre = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+                for day in (pre.get("result") or []):
+                    if day.get("date") == date_iso:
+                        old = day.get("price")
+            except Exception:
+                old = None
         resp = api_put(f"/listings/{lid}/calendar",
                        {"startDate": date_iso, "endDate": date_iso, "isAvailable": 1, "price": price})
         actual = None
@@ -17034,6 +17118,7 @@ def _pe_apply_night(lid, date_iso, price):
                 actual = day.get("price")
         confirmed = (actual is not None and abs(float(actual) - price) < 1)
         _pe_log_reco(lid, date_iso, price, applied=True, dry=False, confirmed=confirmed)
+        log_price_change(lid, date_iso, old, price, source, reason or "تطبيق سعر", dry=False, confirmed=confirmed)
         return {"ok": True, "dry_run": False, "lid": lid, "date": date_iso, "price": price,
                 "confirmed": confirmed, "actual": actual, "status": (resp or {}).get("status")}
     except Exception as e:
@@ -17067,8 +17152,33 @@ async def _api_pe_apply(request):
     date_iso = (b.get("date") or "")[:10]
     if not _parse_date(date_iso):
         return _json({"error": "bad date"}, 400)
-    res = await asyncio.to_thread(_pe_apply_night, lid, date_iso, b.get("price"))
+    res = await asyncio.to_thread(_pe_apply_night, lid, date_iso, b.get("price"),
+                                  b.get("source", "manual"), b.get("reason", ""), b.get("old"))
     return _json(res)
+
+def _price_log_view(lid, date_iso):
+    """The per-date timeline shaped for the UI: each entry gets its source label + icon."""
+    out = []
+    for e in price_change_log(lid, date_iso):
+        meta = PRICE_SOURCE_LABEL.get(e.get("source"), {"ar": e.get("source", ""), "en": e.get("source", ""), "icon": "•"})
+        out.append({"ts": e.get("ts"), "old": e.get("old"), "new": e.get("new"),
+                    "source": e.get("source"), "source_ar": meta["ar"], "source_en": meta["en"],
+                    "icon": meta["icon"], "reason": e.get("reason", ""),
+                    "dry": e.get("dry"), "confirmed": e.get("confirmed")})
+    return out
+
+async def _api_pricing_changelog(request):
+    """The append-only price-change timeline for one (listing, date)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    date_iso = (request.query.get("date") or "")[:10]
+    if not _parse_date(date_iso):
+        return _json({"error": "bad date"}, 400)
+    return _json({"lid": lid, "date": date_iso, "log": _price_log_view(lid, date_iso)})
 
 # ---- Stage 7: backtest — prove the learned models aren't random ----
 def _pe_backtest(holdout_days=90):
@@ -18542,6 +18652,8 @@ def _run_strategy_unit(lid, strat, factors, today):
                 except Exception as e:
                     print(f"strategy put {lid} {dstr}:", e)
                     continue
+            log_price_change(lid, dstr, int(cur), int(want), "strategy",
+                             "إعادة تحسين ديناميكية (تقترب الليلة وفاضية)", dry=PRICE_APPLY_DRYRUN)
             rec["cur"] = want
             rec["changes"] = rec.get("changes", 0) + 1
             rec["last"] = datetime.now(TZ).isoformat(timespec="minutes")
@@ -22840,6 +22952,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing2/recs", _api_pe_recs)       # engine v2: recommendations
         app.router.add_get("/api/pricing2/night", _api_pe_night)     # engine v2: one-night "ليش هالسعر؟" detail
         app.router.add_post("/api/pricing2/apply", _api_pe_apply)    # engine v2: one-night apply (DRYRUN-gated)
+        app.router.add_get("/api/pricing/changelog", _api_pricing_changelog)   # per-date append-only audit log
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
@@ -23897,12 +24010,15 @@ def apply_price_changes(listing_id, changes):
         return (0, 0, [])
     dates = sorted(d for d in (_parse_date(c["date"]) for c in changes) if d)
     available = set()
+    cur_by_date = {}                           # date -> live price BEFORE the write (for the audit log)
     try:
         cal = api_get(f"/listings/{listing_id}/calendar",
                       params={"startDate": dates[0].isoformat(), "endDate": dates[-1].isoformat()})
         for day in (cal.get("result") or []):
+            dd = _parse_date(day.get("date"))
+            if dd:
+                cur_by_date[dd.isoformat()] = day.get("price")
             if int(day.get("isAvailable", 0) or 0) == 1 and not day.get("reservationId"):
-                dd = _parse_date(day.get("date"))
                 if dd:
                     available.add(dd.isoformat())
     except Exception as e:
@@ -23915,9 +24031,12 @@ def apply_price_changes(listing_id, changes):
             skipped += 1                        # got booked / blocked since the report
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "booked"})
             continue
+        _src = c.get("source", "bulk")
+        _rsn = c.get("reason") or (f"تطبيق جماعي ({c.get('kind')})" if c.get("kind") else "تطبيق جماعي")
         if PRICE_APPLY_DRYRUN:
             print(f"[DRY-RUN] would set {listing_id} {c['date']} -> {price} ر.س")
             applied += 1
+            log_price_change(listing_id, c["date"], cur_by_date.get(c["date"]), price, _src, _rsn, dry=True)
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "dry"})
             continue
         try:
@@ -23926,6 +24045,7 @@ def apply_price_changes(listing_id, changes):
                      "isAvailable": 1, "price": price,
                      "note": f"ouja-orig:{price}"})   # anchor for the discount tiers later
             applied += 1
+            log_price_change(listing_id, c["date"], cur_by_date.get(c["date"]), price, _src, _rsn, dry=False)
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "applied"})
         except Exception as e:
             print(f"apply price error ({listing_id} {c['date']}):", e)
