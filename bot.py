@@ -7464,11 +7464,46 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       </section>
 
       <!-- ============ PRICING VIEW ============ -->
+      <style>
+        .pe-sum{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline}
+        .pe-sum-k{font-size:13px;color:var(--text-2)} .pe-sum-k b{font-size:18px;color:var(--text)}
+        .pe-sum-k.up b{color:#2e9e6b} .pe-sum-k.down b{color:#c2683f}
+        .pe-sum-note{font-size:12px;color:var(--text-2);margin-top:8px;opacity:.85}
+        .pe-row{display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center;padding:12px 8px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .15s}
+        .pe-row:hover{background:var(--gold-tint)} .pe-row:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+        .pe-unit{font-weight:600;color:var(--text);font-size:14px}
+        .pe-meta{font-size:12px;color:var(--text-2);margin-top:3px}
+        .pe-prices{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:end}
+        .pe-cur{color:var(--text-2);text-decoration:line-through;font-size:13px} .pe-arr{margin:0 6px;color:var(--text-2)}
+        .pe-rec{font-weight:700;font-size:16px;color:var(--text)} .pe-rec.up{color:#2e9e6b} .pe-rec.down{color:#c2683f}
+        .pe-cur2{font-size:11px;color:var(--text-2);margin-inline-start:3px}
+        .pe-range{font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+        .pe-pill{font-size:11.5px;padding:3px 11px;border-radius:999px;white-space:nowrap;display:inline-block}
+        .pe-ahead{background:rgba(46,158,107,.14);color:#2e9e6b} .pe-behind{background:rgba(194,104,63,.14);color:#c2683f} .pe-normal{background:var(--gold-tint);color:var(--text-2)}
+        .pe-panel{padding:2px}
+        .pe-hero{text-align:center;margin:6px 0 14px}
+        .pe-hero-cur{color:var(--text-2);text-decoration:line-through;font-size:15px}
+        .pe-hero-rec{font-size:40px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1.15}
+        .pe-hero-unit{font-size:16px;font-weight:600}
+        .pe-delta{font-size:14px;font-weight:700;margin-top:4px} .pe-delta.up{color:#2e9e6b} .pe-delta.down{color:#c2683f}
+        .pe-slider-wrap{background:var(--gold-tint);border-radius:12px;padding:14px 14px 10px;margin:10px 0 16px}
+        #peSlider{width:100%;accent-color:var(--gold);cursor:pointer}
+        .pe-slider-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--text-2)} .pe-slider-row b{font-size:16px;color:var(--text);font-variant-numeric:tabular-nums}
+        .pe-cap{font-size:11.5px;color:var(--text-2);text-align:center;margin-top:8px}
+        .pe-facts-t{font-weight:700;color:var(--gold);font-size:14px;margin:4px 0 6px}
+        .pe-fact{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)}
+        .pe-fic{font-size:16px;flex:none;width:22px;text-align:center}
+        .pe-ftext{flex:1} .pe-fk{font-size:12px;color:var(--text-2);font-weight:600} .pe-fv{font-size:13.5px;color:var(--text);line-height:1.6;margin-top:2px}
+        .pe-feff{font-size:11px;color:var(--gold);background:var(--gold-tint);padding:2px 9px;border-radius:999px;white-space:nowrap;align-self:center}
+        .pe-summary{background:var(--gold-tint);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;color:var(--text);margin:14px 0 8px}
+        .pe-foot{font-size:11.5px;color:var(--text-2);text-align:center;margin-top:6px}
+        @media(max-width:640px){.pe-row{grid-template-columns:1fr auto;row-gap:6px}.pe-range{display:none}}
+      </style>
       <section class="view" id="view_pricing">
         <div class="page-head">
           <div>
             <div class="page-title" id="t_pricing">فرص التسعير</div>
-            <div class="page-sub" id="t_pr_sub">توصيات أسعار للـ٤٥ يوم الجاية — اضغط لرؤية تفاصيل كل تاريخ</div>
+            <div class="page-sub" id="t_pr_sub">توصيات مبنية على حجوزاتك الفعلية — اضغط أي ليلة تشوف «ليش هالسعر؟» وتطبّقها بضغطة</div>
           </div>
         </div>
 
@@ -7476,9 +7511,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <button class="ph-x" onclick="dismissHelp('pricing')" title="إخفاء">×</button>
           <div class="ph-t">$ فرص رفع/تخفيض السعر</div>
           <div class="ph-b">
-            البوت يفحص كل ليلة قادمة ويلقى فرص يرفع فيها السعر (عيد، فعالية، فيكند) أو يخفّض
-            (فاضي ومتأخر). اضغط فرصة تشوف <b>السبب</b> والـ<b>قبل/بعد</b>. زر "طبّق" يكتب
-            السعر في Hostaway فوراً — بدون موافقة إضافية.
+            المحرّك يتعلّم من <b>حجوزاتك الفعلية</b> (نفس نوع اليوم، سرعة الحجز، أسعارك المحقّقة)
+            ويقترح سعر لكل ليلة فاضية ضمن حد أدنى/أعلى. اضغط أي ليلة تفتح <b>«ليش هالسعر؟»</b>
+            بكل العوامل بالأرقام الحقيقية، عدّل السعر بالشريط إذا تبي، وبضغطة
+            <b>«تطبيق على Hostaway»</b> يتغيّر السعر — ما يصير شي بدون ضغطتك.
           </div>
         </div>
 
@@ -9371,10 +9407,101 @@ async function loadAll(){
     renderAll();
   }catch(e){ if(e==='unauthorized') logout() }
 }
+var _pePanel = null;
 async function loadPricing(){
-  document.getElementById('prListBody').innerHTML = '<div class="empty sk">—</div>';
-  try{ D.pr = await api('/api/pricing') }catch(_){ D.pr={loading:true} }
-  renderPricing();
+  var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML = '<div class="empty sk">—</div>';
+  try{ D.pr2 = await api('/api/pricing2/recs') }catch(_){ D.pr2={recs:[],error:'تعذّر جلب التوصيات'} }
+  renderPricing2();
+}
+function renderPricing2(){
+  var d = D.pr2||{}; var recs=(d.recs||[]).slice();
+  var tot=document.getElementById('prTotalBody'), body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
+  if(d.error){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+esc(d.error)+'</div>'; if(tot) tot.innerHTML=''; return; }
+  if(!recs.length){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">ما فيه فرص واضحة حالياً — الأسعار قريبة من المتوقّع.</div>'; if(tot) tot.innerHTML=''; return; }
+  var up=0, dn=0, sumOpp=0;
+  recs.forEach(function(r){ var dl=r.delta||0; if(dl>0){up++; sumOpp+=dl;} else if(dl<0){dn++;} });
+  if(tot) tot.innerHTML='<div class="pe-sum"><div class="pe-sum-k"><b>'+recs.length+'</b> فرصة</div>'
+    +'<div class="pe-sum-k up"><b>'+up+'</b> رفع</div><div class="pe-sum-k down"><b>'+dn+'</b> خفض</div>'
+    +'<div class="pe-sum-k"><b>+'+fmt(sumOpp)+'</b> ر.س/ليلة فرصة رفع</div></div>'
+    +'<div class="pe-sum-note">مبني على ~'+fmt(d.footer_n||0)+' حجز فعلي من حسابك · مرتّبة بأكبر فرصة'+(d.dry_run?' · وضع تجربة (DRY-RUN)':'')+'</div>';
+  if(cnt) cnt.textContent=recs.length+' فرصة';
+  var h='';
+  recs.forEach(function(r){
+    var dir=(r.delta||0)>0?'up':((r.delta||0)<0?'down':'flat');
+    var pill=r.signal==='ahead'?'مرتفع':(r.signal==='behind'?'منخفض':'عادي');
+    var arrow=(r.current!=null?('<span class="pe-cur">'+fmt(r.current)+'</span><span class="pe-arr">→</span>'):'');
+    var ev=r.event?esc(r.event):(r.dtype==='weekend'?'نهاية أسبوع':'يوم عادي');
+    h+='<div class="pe-row" data-lid="'+r.lid+'" data-date="'+r.date+'" onclick="openPePanel(this)" tabindex="0" role="button">'
+      +'<div class="pe-rmain"><div class="pe-unit">'+esc(r.unit||'')+'</div>'
+      +'<div class="pe-meta">'+r.date+' · '+ev+' · باقي '+r.days_out+' يوم</div></div>'
+      +'<div class="pe-prices">'+arrow+'<span class="pe-rec '+dir+'">'+fmt(r.recommended)+'</span><span class="pe-cur2">ر.س</span></div>'
+      +'<div class="pe-range">'+fmt(r.floor)+'–'+fmt(r.ceiling)+'</div>'
+      +'<div class="pe-pill pe-'+r.signal+'">'+pill+(r.confidence==='low'?' ؟':'')+'</div></div>';
+  });
+  if(body) body.innerHTML=h;
+}
+async function openPePanel(el){
+  var lid=el.getAttribute('data-lid'), date=el.getAttribute('data-date');
+  openDrawer('…','');
+  setDrawerBody('<div class="empty sk" style="padding:36px;text-align:center">…</div>');
+  setDrawerFoot('');
+  var det;
+  try{ det = await api('/api/pricing2/night?lid='+encodeURIComponent(lid)+'&date='+encodeURIComponent(date)); }
+  catch(_){ det={error:'تعذّر الجلب'}; }
+  if(det.error){ setDrawerBody('<div class="empty" style="padding:30px;text-align:center">'+esc(det.error)+'</div>'); return; }
+  _pePanel={lid:det.lid, date:det.date, current:det.current};
+  setDrawerTitle(det.unit||'—', det.date+' · باقي '+det.days_out+' يوم');
+  setDrawerBody(pePanelHtml(det));
+  var pfx=det.dry_run?'⚠ تجربة — ':'';
+  setDrawerFoot('<button class="btn ghost" onclick="peFocusSlider()">✎ تعديل</button>'
+    +'<button class="btn primary" id="peApplyBtn" onclick="peApply()">'+pfx+'تطبيق على Hostaway</button>');
+}
+function pePanelHtml(det){
+  var cur=det.current, rec=det.recommended;
+  var deltaTxt='';
+  if(cur!=null){ var dl=det.delta||0; deltaTxt='<div class="pe-delta '+(dl>0?'up':(dl<0?'down':''))+'">'+(dl>0?'+':'')+fmt(dl)+' ر.س ('+(dl>0?'+':'')+det.delta_pct+'٪)</div>'; }
+  var pill='<div style="text-align:center"><span class="pe-pill pe-'+det.signal+'">'+esc(det.demand_pill||'')+'</span>'+(det.confidence==='low'?' <span class="pe-pill pe-normal">ثقة منخفضة</span>':'')+'</div>';
+  var hero='<div class="pe-hero">'+(cur!=null?'<div class="pe-hero-cur">'+fmt(cur)+' ر.س</div>':'')
+    +'<div class="pe-hero-rec" id="peRecShow">'+fmt(rec)+' <span class="pe-hero-unit">ر.س</span></div>'+deltaTxt+'</div>';
+  var slider='<div class="pe-slider-wrap"><input type="range" id="peSlider" min="'+det.floor+'" max="'+det.ceiling+'" value="'+rec+'" step="5" oninput="peSlider()" aria-label="السعر">'
+    +'<div class="pe-slider-row"><span>'+fmt(det.floor)+'</span><b id="peSliderVal">'+fmt(rec)+' ر.س</b><span>'+fmt(det.ceiling)+'</span></div>'
+    +'<div class="pe-cap">مبني على حجوزاتك الفعلية لنفس نوع اليوم</div></div>';
+  var facts='<div class="pe-facts"><div class="pe-facts-t">ليش هالسعر؟</div>';
+  (det.factors||[]).forEach(function(f){
+    facts+='<div class="pe-fact"><span class="pe-fic">'+esc(f.icon||'•')+'</span><div class="pe-ftext"><div class="pe-fk">'+esc(f.key||'')+'</div><div class="pe-fv">'+esc(f.text||'')+'</div></div>'+(f.effect?'<span class="pe-feff">'+esc(f.effect)+'</span>':'')+'</div>';
+  });
+  facts+='</div>';
+  var summ=det.summary?('<div class="pe-summary"><b>الخلاصة:</b> '+esc(det.summary)+'</div>'):'';
+  var foot='<div class="pe-foot">مبني على ~'+fmt(det.footer_n||0)+' حجز فعلي من حسابك — يتحدّث يومياً</div>';
+  return '<div class="pe-panel">'+pill+hero+slider+facts+summ+foot+'</div>';
+}
+function peSlider(){
+  var s=document.getElementById('peSlider'); if(!s) return;
+  var v=parseInt(s.value,10);
+  var vEl=document.getElementById('peSliderVal'); if(vEl) vEl.textContent=fmt(v)+' ر.س';
+  var rEl=document.getElementById('peRecShow'); if(rEl) rEl.innerHTML=fmt(v)+' <span class="pe-hero-unit">ر.س</span>';
+  var cur=_pePanel&&_pePanel.current;
+  var dEl=document.querySelector('.pe-delta');
+  if(dEl && cur){ var dl=v-cur; dEl.className='pe-delta '+(dl>0?'up':(dl<0?'down':'')); dEl.textContent=(dl>0?'+':'')+fmt(dl)+' ر.س ('+(dl>0?'+':'')+Math.round(dl/cur*100)+'٪)'; }
+}
+function peFocusSlider(){ var s=document.getElementById('peSlider'); if(s) s.focus(); }
+async function peApply(){
+  if(!_pePanel) return;
+  var s=document.getElementById('peSlider'); var price=s?parseInt(s.value,10):null;
+  var btn=document.getElementById('peApplyBtn'); if(btn){ btn.disabled=true; btn.textContent='…'; }
+  var r;
+  try{ r=await post('/api/pricing2/apply',{lid:_pePanel.lid, date:_pePanel.date, price:price}); }
+  catch(_){ r={ok:false,error:'تعذّر الاتصال'}; }
+  if(btn) btn.disabled=false;
+  if(r && r.ok){
+    if(r.dry_run) toast('✓ تجربة (DRY-RUN) — ما تغيّر شي · '+fmt(r.price)+' ر.س');
+    else if(r.confirmed) toast('✅ تم التطبيق على Hostaway · '+fmt(r.price)+' ر.س');
+    else toast('⚠ أُرسل بس ما تأكد التغيير — راجع Hostaway');
+    closeDrawer(); loadPricing();
+  } else {
+    toast('✖ ما تم: '+esc((r&&r.error)||'خطأ'));
+    if(btn) btn.textContent='تطبيق على Hostaway';
+  }
 }
 async function loadStrategies(){
   document.getElementById('stratListBody').innerHTML = '<div class="empty sk">—</div>';
