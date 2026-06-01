@@ -261,10 +261,15 @@ ASSISTANT_ACK_EN   = os.environ.get("ASSISTANT_ACK_EN",
 # Escalations go to their own channel, ping the operation team, and re-ping until claimed.
 ESCALATION_CHANNEL    = os.environ.get("ESCALATION_CHANNEL", "escalations")
 AUTO_REPLY_CHANNEL    = os.environ.get("AUTO_REPLY_CHANNEL", "auto-replies")  # audit log of Stage-1 auto-sends
-ESCALATION_REPING_MIN = int(os.environ.get("ESCALATION_REPING_MIN", "10"))   # re-ping every N min
-ESCALATION_MAX_PINGS  = int(os.environ.get("ESCALATION_MAX_PINGS", "12"))    # (legacy) re-ping count cap
-ESCALATION_REPING_SEC = int(os.environ.get("ESCALATION_REPING_SEC", "20"))   # Stage 4: re-ping cadence in SECONDS until claimed
-ESCALATION_REPING_MAX_MIN = int(os.environ.get("ESCALATION_REPING_MAX_MIN", "120"))  # safety: stop re-pinging after this many minutes unclaimed
+# Re-ping (nag) cadence for UNCLAIMED escalations. The first 🚨 alert is always instant;
+# these settings only control the follow-up reminders so the channel never floods.
+ESCALATION_REPING_MIN = int(os.environ.get("ESCALATION_REPING_MIN", "10"))   # MINUTES before the first reminder
+ESCALATION_REPING_CAP_MIN = int(os.environ.get("ESCALATION_REPING_CAP_MIN", "30"))  # max minutes between reminders (backoff ceiling)
+ESCALATION_REPING_BACKOFF = os.environ.get("ESCALATION_REPING_BACKOFF", "1") in ("1", "true", "True", "yes")  # widen the gap each reminder (10→20→30…)
+ESCALATION_REPING_MAX_PINGS = int(os.environ.get("ESCALATION_REPING_MAX_PINGS",
+                                  os.environ.get("ESCALATION_MAX_PINGS", "5")))  # stop nagging after this many reminders (escalation stays OPEN, re-surfaced by the morning summary)
+ESCALATION_QUIET_OFFHOURS = os.environ.get("ESCALATION_QUIET_OFFHOURS", "1") in ("1", "true", "True", "yes")  # no nagging outside working hours (no 2 AM spam)
+ESCALATION_CHECK_SEC  = int(os.environ.get("ESCALATION_CHECK_SEC", "60"))     # how often the loop CHECKS (not how often it nags)
 CLAIM_NAMES = [n.strip() for n in os.environ.get(
     "CLAIM_NAMES", "اسيل,فيصل,ماثر,نوره,ناصر,محمد").split(",") if n.strip()]
 # When someone claims an escalation, DM them a ready-to-send reply in the owner's warm style.
@@ -4901,7 +4906,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             except Exception as e:
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
         embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {round(conf*100)}% · "
-                              f"يعاد التنبيه كل {ESCALATION_REPING_SEC} ثانية لين يستلمه أحد")
+                              f"يُذكَّر الفريق كل ~{ESCALATION_REPING_MIN} دقيقة (بحد أقصى {ESCALATION_REPING_MAX_PINGS} تذكيرات، ويهدأ خارج أوقات العمل)")
         # post to the dedicated escalations channel and @mention the operation team
         guild = channel.guild
         esc_channel = await ensure_channel(guild, ESCALATION_CHANNEL,
@@ -23042,10 +23047,18 @@ async def _resolve_escalation(mid, esc, reason="رد عليه أحد المضي�
     except Exception as e:
         print("resolve-escalation edit error:", e)
 
-@tasks.loop(seconds=ESCALATION_REPING_SEC)
+def _reping_interval_min(attempts):
+    """Minutes to wait before the next reminder. Backs off (10 → 20 → 30 …) up to the cap
+    so an unclaimed escalation is nudged a few times, not flooded."""
+    if not ESCALATION_REPING_BACKOFF:
+        return ESCALATION_REPING_MIN
+    return min(ESCALATION_REPING_MIN * (attempts + 1), ESCALATION_REPING_CAP_MIN)
+
+@tasks.loop(seconds=ESCALATION_CHECK_SEC)
 async def escalation_reping_loop():
-    """Re-ping the operation team about any escalation that hasn't been claimed yet —
-    but first auto-resolve any escalation where a co-host already replied (and stop nagging)."""
+    """Gently remind the operation team about UNCLAIMED escalations — spaced out, capped,
+    and quiet at night. First auto-resolves any escalation a co-host already answered.
+    (Replaces the old every-20-seconds nag that flooded #escalations.)"""
     if not _escalations:
         return
     guild = bot.get_guild(GUILD_ID)
@@ -23054,19 +23067,21 @@ async def escalation_reping_loop():
     op_role = find_operation_role(guild)
     mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
     now = time.time()
+    quiet = ESCALATION_QUIET_OFFHOURS and not is_within_working_hours()
     for mid, esc in list(_escalations.items()):
         if esc.get("claimed_by"):
             continue
-        # --- auto-close if a teammate already answered the guest directly ---
+        # --- auto-close if a teammate already answered the guest directly (stop nagging) ---
         if await asyncio.to_thread(_cohost_responded, esc):
             await _resolve_escalation(mid, esc)
             continue
-        if esc["attempts"] * ESCALATION_REPING_SEC >= ESCALATION_REPING_MAX_MIN * 60:
-            # safety cap: nobody claimed within the max window — stop nagging and mark it
-            # exhausted so the dashboard KPI reflects reality (re-ping never runs forever).
-            await _resolve_escalation(mid, esc, reason=f"انتهت محاولات التنبيه (بدون استلام خلال {ESCALATION_REPING_MAX_MIN} دقيقة)")
+        # stop nagging after the cap — the escalation stays OPEN (dashboard KPI + the
+        # morning summary at WORK_START_HOUR re-surface it); we just go silent.
+        if esc["attempts"] >= ESCALATION_REPING_MAX_PINGS:
             continue
-        if (now - esc["last_ping"]) < ESCALATION_REPING_SEC:
+        if quiet:
+            continue   # no late-night spam — the morning summary re-pings the whole stack
+        if (now - esc["last_ping"]) < _reping_interval_min(esc["attempts"]) * 60:
             continue
         ch = bot.get_channel(esc["channel_id"])
         if ch is None:
@@ -23075,7 +23090,7 @@ async def escalation_reping_loop():
             ref = discord.MessageReference(message_id=mid, channel_id=esc["channel_id"],
                                            fail_if_not_exists=False)
             await ch.send(f"{mention} ⏰ لسه ما تم استلام التصعيد — **{esc['guest']} · {esc['unit']}**. "
-                          f"اضغط 🙋 أخذ المهمة.",
+                          f"اضغط 🙋 أخذ المهمة. (تذكير {esc['attempts'] + 1}/{ESCALATION_REPING_MAX_PINGS})",
                           reference=ref, allowed_mentions=discord.AllowedMentions(roles=True))
             esc["last_ping"] = now
             esc["attempts"] += 1
