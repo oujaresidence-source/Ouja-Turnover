@@ -7498,6 +7498,33 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         .pe-summary{background:var(--gold-tint);border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;color:var(--text);margin:14px 0 8px}
         .pe-foot{font-size:11.5px;color:var(--text-2);text-align:center;margin-top:6px}
         @media(max-width:640px){.pe-row{grid-template-columns:1fr auto;row-gap:6px}.pe-range{display:none}}
+        .pe-cur-lbl{font-size:10px;color:var(--text-2);display:block}
+        .pe-apt{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden;background:var(--surface)}
+        .pe-apt-head{width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;background:none;border:none;cursor:pointer;font:inherit;text-align:start}
+        .pe-apt-head:hover{background:var(--gold-tint)}
+        .pe-apt-caret{transition:transform .25s cubic-bezier(0.23,1,0.32,1);color:var(--text-2);font-size:13px}
+        .pe-apt-head.on .pe-apt-caret{transform:rotate(180deg)}
+        .pe-apt-name{font-weight:600;color:var(--text);flex:1}
+        .pe-apt-stats{display:flex;gap:9px;align-items:center}
+        .pe-apt-opp{font-size:12px;color:var(--text-2)}
+        .pe-apt-up{font-size:13px;font-weight:700;color:#2e9e6b;background:rgba(46,158,107,.12);padding:3px 10px;border-radius:999px}
+        .pe-apt-body{max-height:0;overflow:hidden;opacity:.3;transition:max-height .3s cubic-bezier(0.23,1,0.32,1),opacity .3s ease}
+        .pe-apt-body.open{max-height:1000px;opacity:1}
+        .pe-cal-legend{font-size:11.5px;color:var(--text-2);padding:12px 14px 4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+        .pe-lg{width:11px;height:11px;border-radius:3px;display:inline-block;margin-inline-start:8px}
+        .pe-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;padding:10px 14px 16px}
+        .pe-wd{font-size:10.5px;color:var(--text-2);text-align:center;padding-bottom:2px}
+        .pe-cell{min-height:46px;border-radius:8px;border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:var(--surface-2)}
+        .pe-cell.pe-pad{border:none;background:none}
+        .pe-cell.pe-none{opacity:.45}
+        .pe-cell.pe-has{cursor:pointer;transition:transform .12s cubic-bezier(0.23,1,0.32,1)}
+        .pe-cell.pe-has:hover{transform:scale(1.06)} .pe-cell.pe-has:active{transform:scale(.96)}
+        .pe-cell.pe-raise{background:rgba(46,158,107,.15);border-color:rgba(46,158,107,.4)}
+        .pe-cell.pe-drop{background:rgba(194,104,63,.15);border-color:rgba(194,104,63,.4)}
+        .pe-lg.pe-raise{background:#2e9e6b} .pe-lg.pe-drop{background:#c2683f} .pe-lg.pe-holdc{background:#cdbfa6}
+        .pe-cd{font-size:11px;color:var(--text-2)} .pe-cp{font-size:12px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+        .pe-cell.pe-raise .pe-cp{color:#2e9e6b} .pe-cell.pe-drop .pe-cp{color:#c2683f}
+        @media(prefers-reduced-motion:reduce){.pe-apt-body,.pe-apt-caret,.pe-cell.pe-has{transition:none}}
       </style>
       <section class="view" id="view_pricing">
         <div class="page-head">
@@ -9413,32 +9440,67 @@ async function loadPricing(){
   try{ D.pr2 = await api('/api/pricing2/recs') }catch(_){ D.pr2={recs:[],error:'تعذّر جلب التوصيات'} }
   renderPricing2();
 }
+function _peIso(dt){ var m=dt.getMonth()+1, dd=dt.getDate(); return dt.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd; }
 function renderPricing2(){
-  var d = D.pr2||{}; var recs=(d.recs||[]).slice();
+  var d=D.pr2||{}; var recs=(d.recs||[]);
   var tot=document.getElementById('prTotalBody'), body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
   if(d.error){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+esc(d.error)+'</div>'; if(tot) tot.innerHTML=''; return; }
   if(!recs.length){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">ما فيه فرص واضحة حالياً — الأسعار قريبة من المتوقّع.</div>'; if(tot) tot.innerHTML=''; return; }
-  var up=0, dn=0, sumOpp=0;
-  recs.forEach(function(r){ var dl=r.delta||0; if(dl>0){up++; sumOpp+=dl;} else if(dl<0){dn++;} });
-  if(tot) tot.innerHTML='<div class="pe-sum"><div class="pe-sum-k"><b>'+recs.length+'</b> فرصة</div>'
-    +'<div class="pe-sum-k up"><b>'+up+'</b> رفع</div><div class="pe-sum-k down"><b>'+dn+'</b> خفض</div>'
-    +'<div class="pe-sum-k"><b>+'+fmt(sumOpp)+'</b> ر.س/ليلة فرصة رفع</div></div>'
-    +'<div class="pe-sum-note">مبني على ~'+fmt(d.footer_n||0)+' حجز فعلي من حسابك · مرتّبة بأكبر فرصة'+(d.dry_run?' · وضع تجربة (DRY-RUN)':'')+'</div>';
-  if(cnt) cnt.textContent=recs.length+' فرصة';
-  var h='';
+  var byU={};
   recs.forEach(function(r){
-    var dir=(r.delta||0)>0?'up':((r.delta||0)<0?'down':'flat');
-    var pill=r.signal==='ahead'?'مرتفع':(r.signal==='behind'?'منخفض':'عادي');
-    var arrow=(r.current!=null?('<span class="pe-cur">'+fmt(r.current)+'</span><span class="pe-arr">→</span>'):'');
-    var ev=r.event?esc(r.event):(r.dtype==='weekend'?'نهاية أسبوع':'يوم عادي');
-    h+='<div class="pe-row" data-lid="'+r.lid+'" data-date="'+r.date+'" onclick="openPePanel(this)" tabindex="0" role="button">'
-      +'<div class="pe-rmain"><div class="pe-unit">'+esc(r.unit||'')+'</div>'
-      +'<div class="pe-meta">'+r.date+' · '+ev+' · باقي '+r.days_out+' يوم</div></div>'
-      +'<div class="pe-prices">'+arrow+'<span class="pe-rec '+dir+'">'+fmt(r.recommended)+'</span><span class="pe-cur2">ر.س</span></div>'
-      +'<div class="pe-range">'+fmt(r.floor)+'–'+fmt(r.ceiling)+'</div>'
-      +'<div class="pe-pill pe-'+r.signal+'">'+pill+(r.confidence==='low'?' ؟':'')+'</div></div>';
+    var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}}; }
+    u.byDate[r.date]=r;
+    if(r.delta && r.delta>0) u.uplift+=r.delta;
+    if(r.delta && r.delta!==0) u.nopp++;
+  });
+  window._peByUnit=byU;
+  var units=Object.keys(byU).map(function(k){return byU[k];}).sort(function(a,b){return b.uplift-a.uplift;});
+  var totalUplift=units.reduce(function(s,u){return s+u.uplift;},0);
+  var totalOpps=units.reduce(function(s,u){return s+u.nopp;},0);
+  if(tot) tot.innerHTML='<div class="pe-sum"><div class="pe-sum-k"><b>'+units.length+'</b> شقة</div>'
+    +'<div class="pe-sum-k"><b>'+totalOpps+'</b> فرصة</div>'
+    +'<div class="pe-sum-k up"><b>+'+fmt(totalUplift)+'</b> ر.س فرصة رفع/ليلة</div></div>'
+    +'<div class="pe-sum-note">مرتّبة بأكبر فرصة · مبني على ~'+fmt(d.footer_n||0)+' حجز فعلي · السعر الحالي من تقويم Hostaway مباشرة'+(d.dry_run?' · وضع تجربة (DRY-RUN)':'')+'</div>';
+  if(cnt) cnt.textContent=units.length+' شقة';
+  var h='';
+  units.forEach(function(u){
+    h+='<div class="pe-apt">'
+      +'<button class="pe-apt-head" type="button" aria-expanded="false" onclick="pePeToggle(this,'+u.lid+')">'
+        +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
+        +'<span class="pe-apt-name">'+esc(u.unit||('وحدة '+u.lid))+'</span>'
+        +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+' فرصة</span>'):'')
+          +(u.uplift>0?('<span class="pe-apt-up">+'+fmt(u.uplift)+' ر.س</span>'):'')+'</span>'
+      +'</button>'
+      +'<div class="pe-apt-body" id="peapt_'+u.lid+'"></div>'
+    +'</div>';
   });
   if(body) body.innerHTML=h;
+}
+function pePeToggle(btn, lid){
+  var open=btn.getAttribute('aria-expanded')==='true';
+  btn.setAttribute('aria-expanded', open?'false':'true'); btn.classList.toggle('on', !open);
+  var bodyEl=document.getElementById('peapt_'+lid); if(!bodyEl) return;
+  if(open){ bodyEl.classList.remove('open'); return; }
+  if(!bodyEl.getAttribute('data-r')){ bodyEl.innerHTML=peMiniCal((window._peByUnit||{})[lid]); bodyEl.setAttribute('data-r','1'); }
+  bodyEl.classList.add('open');
+}
+function peMiniCal(u){
+  if(!u) return '';
+  var WD=['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
+  var hdr=''; for(var w=0; w<7; w++){ hdr+='<div class="pe-wd">'+WD[w]+'</div>'; }
+  var today=new Date(); today.setHours(0,0,0,0);
+  var cells=''; var pad=today.getDay();
+  for(var p=0;p<pad;p++){ cells+='<div class="pe-cell pe-pad"></div>'; }
+  for(var i=0;i<28;i++){
+    var dt=new Date(today.getTime()+i*86400000); var iso=_peIso(dt);
+    var r=(u.byDate||{})[iso];
+    var cls=r?((r.delta||0)>0?'pe-raise':((r.delta||0)<0?'pe-drop':'pe-holdc')):'pe-none';
+    var click=r?(' data-lid="'+u.lid+'" data-date="'+iso+'" onclick="openPePanel(this)" role="button" tabindex="0" title="اضغط لتفاصيل ليش هالسعر"'):'';
+    cells+='<div class="pe-cell '+cls+(r?' pe-has':'')+'"'+click+'><span class="pe-cd">'+dt.getDate()+'</span>'
+      +(r?('<span class="pe-cp">'+fmt(r.recommended)+'</span>'):'')+'</div>';
+  }
+  return '<div class="pe-cal-legend"><span class="pe-lg pe-raise"></span>ارفع<span class="pe-lg pe-drop"></span>خفّض<span class="pe-lg pe-holdc"></span>ثابت · اضغط أي يوم للتفاصيل</div>'
+    +'<div class="pe-cal">'+hdr+cells+'</div>';
 }
 async function openPePanel(el){
   var lid=el.getAttribute('data-lid'), date=el.getAttribute('data-date');
@@ -9461,7 +9523,7 @@ function pePanelHtml(det){
   var deltaTxt='';
   if(cur!=null){ var dl=det.delta||0; deltaTxt='<div class="pe-delta '+(dl>0?'up':(dl<0?'down':''))+'">'+(dl>0?'+':'')+fmt(dl)+' ر.س ('+(dl>0?'+':'')+det.delta_pct+'٪)</div>'; }
   var pill='<div style="text-align:center"><span class="pe-pill pe-'+det.signal+'">'+esc(det.demand_pill||'')+'</span>'+(det.confidence==='low'?' <span class="pe-pill pe-normal">ثقة منخفضة</span>':'')+'</div>';
-  var hero='<div class="pe-hero">'+(cur!=null?'<div class="pe-hero-cur">'+fmt(cur)+' ر.س</div>':'')
+  var hero='<div class="pe-hero">'+(cur!=null?'<div class="pe-hero-cur"><span class="pe-cur-lbl">الحالي في Hostaway</span> '+fmt(cur)+' ر.س</div>':'')
     +'<div class="pe-hero-rec" id="peRecShow">'+fmt(rec)+' <span class="pe-hero-unit">ر.س</span></div>'+deltaTxt+'</div>';
   var slider='<div class="pe-slider-wrap"><input type="range" id="peSlider" min="'+det.floor+'" max="'+det.ceiling+'" value="'+rec+'" step="5" oninput="peSlider()" aria-label="السعر">'
     +'<div class="pe-slider-row"><span>'+fmt(det.floor)+'</span><b id="peSliderVal">'+fmt(rec)+' ر.س</b><span>'+fmt(det.ceiling)+'</span></div>'
@@ -16028,8 +16090,8 @@ def _pe_compute_recommendations(horizon=None):
 
 _pe_rec_cache = {"data": None, "ts": 0}
 
-def _pe_get_recs(force=False, ttl=1800):
-    """Cached recommendation list (~30 min; calendars are live-ish, models are daily)."""
+def _pe_get_recs(force=False, ttl=900):
+    """Cached recommendation list (~15 min; the panel re-reads each night's price live on open)."""
     if (not force) and _pe_rec_cache["data"] and (time.time() - _pe_rec_cache["ts"] < ttl):
         return _pe_rec_cache["data"]
     _pe_rec_cache.update({"data": _pe_compute_recommendations(), "ts": time.time()})
@@ -16125,25 +16187,31 @@ def _pe_night_detail(lid, date_iso):
     units_by_lid = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
     uname = (units_by_lid.get(lid) or {}).get("name") or str(lid)
     # prefer the cached rec (has live current price + group pace); else compute without occ
+    # A1: ALWAYS read the LIVE per-night Hostaway calendar price so the panel's current is
+    # never stale (the list is cached; the detail you act on must be real-time).
+    live_cur = None
+    try:
+        cal = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+        for day in (cal.get("result") or []):
+            if day.get("date") == date_iso:
+                live_cur = day.get("price")
+    except Exception as e:
+        print("pe night live-price error:", e)
     rec = None
     for r in (_pe_get_recs().get("recs") or []):
         if r.get("lid") == lid and r.get("date") == date_iso:
-            rec = r
+            rec = dict(r)
             break
     if rec is None:
-        cur = None
-        try:
-            cal = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
-            for day in (cal.get("result") or []):
-                if day.get("date") == date_iso:
-                    cur = day.get("price")
-        except Exception as e:
-            print("pe night current-price error:", e)
-        rec = _pe_reco_for_night(d, today, dtype, ev, cur, band, source,
+        rec = _pe_reco_for_night(d, today, dtype, ev, live_cur, band, source,
                                  models["events"].get(ev) if ev else None,
                                  pace.get(f"{g}||{dtype}"), None, _pe_floor_overrides.get(lid, 0))
         if rec:
             rec.update({"lid": lid, "unit": uname, "group": g})
+    elif live_cur is not None and live_cur > 0:        # refresh the cached rec's current to live
+        rec["current"] = int(round(live_cur))
+        rec["delta"] = rec["recommended"] - rec["current"]
+        rec["delta_pct"] = round(100.0 * rec["delta"] / rec["current"], 1)
     if not rec:
         return {"error": "could not compute"}
     pe = pace.get(f"{g}||{dtype}") or {}
