@@ -740,8 +740,16 @@ def compute_pricing_alerts():
 # explaining why their code hasn't arrived yet.
 # ====================================================================
 def _is_agreement_signed(r):
-    """Defensive: Hostaway exposes the signed flag under several names across
-    plans/versions. Treat ANY of these being truthy as 'signed'."""
+    """'Satisfied' = signed OR no agreement needed, so Musaed never nags those.
+    SOURCE OF TRUTH on this account is the `reservationAgreement` STRING
+    (verified live: values 'signed' / 'not_signed' / 'not_required'); the old
+    boolean/date flags are kept only as a fallback for other Hostaway plans."""
+    ra = str(r.get("reservationAgreement") or "").strip().lower()
+    if ra in ("signed", "not_required", "not_applicable", "none", "waived", "approved"):
+        return True
+    if ra == "not_signed":
+        return False
+    # fallback: plans that expose a boolean/date flag instead of the string field
     for k in ("isAccepted", "isSignedRentalAgreement", "rentalAgreementAccepted",
               "isAgreementSigned", "isContractSigned", "isRentalAgreementSigned",
               "agreementAccepted", "agreementSigned"):
@@ -2421,6 +2429,11 @@ extra mid-stay cleaning.
 team will confirm availability and the price, and set action to "reply" (a human approves). Never promise \
 a time or a price you weren't given, and never invent a fee. One soft offer is enough — don't repeat it.
 - If the guest says no or ignores it, drop it immediately and don't bring it up again.
+- ANTI-NAG (important): never repeat a request the guest already satisfied, and never \
+repeat the same ask you already made earlier in this same thread. The context tells you \
+the rental-agreement status: if it is already SIGNED (or not required for this unit), do \
+NOT ask them to sign — acknowledge it's done and move on. Only ask to sign when the status \
+is genuinely UNSIGNED.
 
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
