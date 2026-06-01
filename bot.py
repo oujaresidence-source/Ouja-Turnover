@@ -203,6 +203,7 @@ ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "
 ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
 ASSISTANT_POLL_MIN = float(os.environ.get("ASSISTANT_POLL_MIN", "0.5"))   # check inbox every N min (float ok)
 ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many recent convos to scan
+ASSISTANT_HISTORY_MSGS = int(os.environ.get("ASSISTANT_HISTORY_MSGS", "14"))  # messages of thread context Musaed reads
 # ---- Stage 2: Hostaway webhooks (instant replies). 100% optional/backward-compatible:
 # if not set up in Hostaway, the bot just keeps polling as before. ----
 WEBHOOKS_ENABLED = os.environ.get("WEBHOOKS_ENABLED", "1") in ("1", "true", "True", "yes")
@@ -1095,9 +1096,11 @@ def _is_unit_ready_for_checkin(lid):
     if not name:
         return True
     expected = channel_name(name)
+    exp70 = expected[:70]                      # OujaCT channels = channel_name(name)[:70] + suffix
+    oujact_names = (exp70 + "-oujact", exp70 + "-oujact-checkin")
     for ch in category.text_channels:
-        if ch.name == expected:
-            return False     # cleaning channel still open
+        if ch.name == expected or ch.name in oujact_names:
+            return False     # a cleaning channel (normal or OujaCT) is still open
     return True
 
 # Heuristic: did we (the host side) send a door code to the guest in the last N hours?
@@ -2914,6 +2917,21 @@ def get_guide_url(listing_id):
     _guide_cache[listing_id] = url
     return url
 
+def directions_link(listing_id):
+    """The apartment's arrival-guide / location link to share with a guest. Prefers the
+    synced Listings store (the single source of truth the cleaning team also sees), then
+    falls back to the live custom-field heuristic. None if we genuinely have no link —
+    callers must never invent one."""
+    if not listing_id:
+        return None
+    try:
+        rec = _ls_get()["listings"].get(str(int(listing_id)))
+    except (TypeError, ValueError):
+        rec = None
+    if rec and rec.get("directions_url"):
+        return rec["directions_url"]
+    return get_guide_url(listing_id)
+
 # A booking only counts as "confirmed" (safe to share location/guide) for these statuses.
 CONFIRMED_STATUSES = {"new", "modified"}
 
@@ -3353,6 +3371,31 @@ _ALT_HINTS = _ALT_PHRASES
 _PRICE_HINTS = ["سعر", "السعر", "كم", "بكم", "كام", "تكلفة", "التكلفة", "المبلغ", "اجمالي", "الاجمالي",
                 "الإجمالي", "price", "cost", "how much", "total", "rate", "nightly"]
 
+def _guest_stay_state(checkin, checkout):
+    """Where the guest is in their stay RIGHT NOW, at day granularity (Riyadh). This is the
+    single fact Musaed must respect before answering anything about access/code/readiness, so
+    it never tells an already-checked-in guest the apartment 'isn't ready yet'.
+    Returns (state, arabic_descriptor). state in:
+      before_checkin · checkin_today · in_house · checkout_today · departed · unknown."""
+    a = _parse_date(checkin)
+    d = _parse_date(checkout)
+    today = datetime.now(TZ).date()
+    if not a:
+        return ("unknown", "")
+    if today < a:
+        return ("before_checkin",
+                f"الضيف **لسه ما وصل** — باقي {(a - today).days} يوم على التشيك-إن (الوصول {a.isoformat()}).")
+    if today == a:
+        return ("checkin_today", f"**اليوم يوم وصول الضيف** (تشيك-إن اليوم {a.isoformat()}).")
+    if d and today == d:
+        return ("checkout_today",
+                f"**اليوم يوم مغادرة الضيف** (تشيك-آوت اليوم {d.isoformat()}) — غالباً لسه داخل الوحدة.")
+    if d and today > d:
+        return ("departed", f"الضيف **غادر فعلاً** (كان تشيك-آوت {d.isoformat()}).")
+    return ("in_house",
+            f"الضيف **نازل حالياً** في الوحدة منذ {(today - a).days} ليلة (وصل {a.isoformat()}"
+            + (f"، يغادر {d.isoformat()})." if d else ")."))
+
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False,
                  dates=None, listing_id=None, reservation_id=None, profile_key=None):
     """Call Claude to draft a reply. Returns parsed dict or None on failure.
@@ -3364,6 +3407,12 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     low = history_text.lower()
     status_line = ("Booking status: CONFIRMED" if confirmed
                    else "Booking status: NOT CONFIRMED (inquiry / pre-booking)")
+    # The guest's live stay-state — injected as a hard fact so Musaed reads WHERE the guest
+    # is (already in-house? arriving? departed?) before answering about access/readiness.
+    stay_state, stay_desc = _guest_stay_state(dates[0] if dates else None,
+                                              dates[1] if dates else None)
+    stay_line = (f"\n🧭 حالة الضيف الآن (افهمها قبل أي رد عن الدخول/الكود/جاهزية الشقة): {stay_desc}"
+                 if stay_desc else "")
     guide_line = (f"Arrival-guide link for this unit: {guide_url}"
                   if (guide_url and confirmed)
                   else "Arrival-guide link for this unit: NOT AVAILABLE / do not share")
@@ -3538,12 +3587,33 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             r = rdata.get("result") or {}
             arrival = _parse_date(r.get("arrivalDate"))
             signed = _is_agreement_signed(r)
-            # New: also check whether the unit even requires an agreement, whether
-            # it's clean and ready, and whether a code has already been sent.
             needs_agr = _unit_requires_agreement(listing_id) if listing_id else True
-            apt_ready = _is_unit_ready_for_checkin(listing_id) if listing_id else True
-            code_already_sent = _was_code_sent_recently(r.get("conversationId"), since_hours=24)
-            if arrival:
+            # Stay-state decides everything here: an in-house / departed guest NEVER gets a
+            # "still being cleaned / not ready yet" answer about the code (that was the bug —
+            # a guest who checked in yesterday was told the apartment wasn't finished).
+            if stay_state in ("in_house", "checkout_today"):
+                code_block = (
+                    "\n\n⚠ الضيف يسأل عن كود الدخول/الباب — **وهو نازل في الوحدة فعلاً** "
+                    "(دخلها من قبل، مو يوم وصوله اليوم).\n"
+                    "🚫 ممنوع منعاً باتاً تقول إن الشقة 'تحت التنظيف' أو 'مو جاهزة' أو إن الكود "
+                    "تأخّر لأنها مو جاهزة — هو داخلها الحين.\n"
+                    "🚫 ممنوع تكتب أي كود أو أرقام، ولا تكرّر كود ذكره الضيف.\n"
+                    "كيف ترد: غالباً نسي الكود أو يحتاجه مرة ثانية. وجّهه يلقاه في رسائل "
+                    "Airbnb/Hostaway السابقة أو إيميله (نفس الرسالة اللي وصلته وقت دخوله). لو واضح "
+                    "إنه دوّر وما لقاه أو يحتاج مساعدة فورية: **action='escalate'** عشان الفريق يعيد "
+                    "إرسال الكود. غير كذا action='reply'."
+                )
+            elif stay_state == "departed":
+                code_block = (
+                    "\n\n⚠ الضيف يسأل عن كود الدخول بس **مغادرته صارت فعلاً والإقامة انتهت**.\n"
+                    "🚫 لا تقل إن الشقة تحت التنظيف. ممنوع تكتب أي كود.\n"
+                    "كيف ترد: وضّح بلطف إن الإقامة انتهت. لو فيه سبب جدّي يحتاج دخول "
+                    "**action='escalate'** للفريق، غير كذا action='reply'."
+                )
+            elif arrival:
+                # Arriving guest (today or upcoming): real-time, arrival-relative logic.
+                apt_ready = _is_unit_ready_for_checkin(listing_id) if listing_id else True
+                code_already_sent = _was_code_sent_recently(r.get("conversationId"), since_hours=24)
                 now = datetime.now(TZ)
                 hour = parse_hour(r.get("checkInTime"), 15)
                 checkin_dt = datetime(arrival.year, arrival.month, arrival.day,
@@ -3672,7 +3742,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         if unit else ""
     )
     user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
+            f"{status_line}{stay_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
@@ -4215,7 +4285,7 @@ def _conv_to_item(c, listings, seen, debug=False):
     res = c.get("reservation") or {}
     history = "\n".join(
         f"{'Guest' if _msg_is_inbound(m) else 'Host'}: {(m.get('body') or '').strip()}"
-        for m in msgs[-8:] if (m.get("body") or "").strip())
+        for m in msgs[-ASSISTANT_HISTORY_MSGS:] if (m.get("body") or "").strip())
     return {
         "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
         "listing_id": lm,
@@ -4939,7 +5009,7 @@ async def process_assistant_item(it, channel):
     status = it.get("res_status") or await asyncio.to_thread(
         get_reservation_status, it.get("reservation_id"))
     confirmed = status in CONFIRMED_STATUSES
-    guide = (await asyncio.to_thread(get_guide_url, it.get("listing_id"))
+    guide = (await asyncio.to_thread(directions_link, it.get("listing_id"))
              if (confirmed and it.get("listing_id")) else None)
     result = await asyncio.to_thread(
         claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
