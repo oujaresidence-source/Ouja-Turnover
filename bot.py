@@ -15855,6 +15855,7 @@ def _pe_get(force=False, ttl=86400):
         data = _pe_build_dataset(get_reservations_cached(), _catalog_units, today)
         pace = _pe_reconstruct_pace(data["nights"], data["group_units"])
         models = _pe_learn_models(data)
+        _pe_backfill_outcomes(data)        # learning loop: record real booked outcomes daily
         _pe_cache.update({"data": data, "pace": pace, "models": models, "ts": time.time(), "error": None})
     except Exception as e:
         _pe_cache["error"] = str(e)
@@ -16034,17 +16035,70 @@ def _pe_get_recs(force=False, ttl=1800):
     _pe_rec_cache.update({"data": _pe_compute_recommendations(), "ts": time.time()})
     return _pe_rec_cache["data"]
 
-# ---- Stage 6 (learning loop): log recommendations/applies; outcomes backfilled daily ----
-_pe_reco_log = []   # [{ts, lid, date, price, applied, dry, confirmed, booked, booked_at}]
+# ---- Stage 6 (learning loop): persist applies; backfill real outcomes daily; summarize ----
+# (Future: gentle A/B price-testing for true elasticity — FLAGGED, not built. Observational
+#  data gives strong heuristics, not guaranteed elasticity; this loop sharpens them over time.)
+PE_PRICE_TESTING_ENABLED = False   # intentionally off — do not auto-experiment on live prices
+_pe_reco_log = []   # [{ts, lid, date, price, applied, dry, confirmed, booked, booked_at, booked_price}]
+
+def _pe_log_save():
+    try:
+        _save_json("pe_reco_log", _pe_reco_log[-5000:])
+    except Exception as e:
+        print("pe log save:", e)
+
 def _pe_log_reco(lid, date_iso, price, applied=False, dry=False, confirmed=None):
     try:
         _pe_reco_log.append({"ts": datetime.now(TZ).isoformat(timespec="seconds"), "lid": lid,
                              "date": date_iso, "price": int(price), "applied": bool(applied),
-                             "dry": bool(dry), "confirmed": confirmed, "booked": None, "booked_at": None})
+                             "dry": bool(dry), "confirmed": confirmed,
+                             "booked": None, "booked_at": None, "booked_price": None})
         if len(_pe_reco_log) > 5000:
             del _pe_reco_log[:len(_pe_reco_log) - 5000]
+        _pe_log_save()
     except Exception as e:
         print("pe log error:", e)
+
+try:
+    _pe_loaded = _load_json("pe_reco_log", [])
+    if isinstance(_pe_loaded, list):
+        _pe_reco_log.extend(_pe_loaded)
+except Exception:
+    pass
+
+def _pe_backfill_outcomes(data):
+    """For logged actions whose night has since booked (now appears among confirmed
+    reservations), record booked_at = the real reservationDate and booked_price = realized
+    ADR. Real outcomes only — never inferred. Runs on the daily rebuild."""
+    try:
+        idx = {}
+        for n in data.get("nights", []):
+            key = (n["lid"], n["date"])
+            if key not in idx:
+                ci = _parse_date(n["arrival"])
+                idx[key] = {"booked_at": (ci - timedelta(days=n["lead"])).isoformat() if ci else None,
+                            "price": round(n["adr"])}
+        changed = False
+        for e in _pe_reco_log:
+            if e.get("booked") is None:
+                info = idx.get((e.get("lid"), e.get("date")))
+                if info:
+                    e["booked"], e["booked_at"], e["booked_price"] = True, info["booked_at"], info["price"]
+                    changed = True
+        if changed:
+            _pe_log_save()
+    except Exception as ex:
+        print("pe backfill:", ex)
+
+def _pe_learning_summary():
+    """Feedback signal from real outcomes: how applied recommendations actually fared."""
+    applied = [e for e in _pe_reco_log if e.get("applied") and not e.get("dry")]
+    booked = [e for e in applied if e.get("booked")]
+    out = {"logged_total": len(_pe_reco_log), "applied_real": len(applied), "applied_then_booked": len(booked)}
+    diffs = [e["booked_price"] - e["price"] for e in booked if e.get("booked_price") and e.get("price")]
+    if diffs:
+        out["avg_booked_minus_applied"] = round(sum(diffs) / len(diffs))
+    return out
 
 # ---- Stage 4: the "ليش هالسعر؟" explainability payload (every value real, or the row is omitted) ----
 _PE_DTYPE_AR = {"weekday": "يوم عادي (وسط الأسبوع)", "weekend": "نهاية الأسبوع (خميس–سبت)"}
@@ -16212,6 +16266,58 @@ async def _api_pe_apply(request):
         return _json({"error": "bad date"}, 400)
     res = await asyncio.to_thread(_pe_apply_night, lid, date_iso, b.get("price"))
     return _json(res)
+
+# ---- Stage 7: backtest — prove the learned models aren't random ----
+def _pe_backtest(holdout_days=90):
+    """Train on bookings for arrivals BEFORE a cutoff; test on the held-out recent arrivals.
+    Sanity metric: does the engine's anchor (date-type ADR band learned from TRAIN only) track
+    realized ADR on the held-out nights better than chance? Reports correlation, a top-vs-bottom
+    tercile actual-ADR check, and per-date-type predicted-vs-actual medians."""
+    import statistics
+    res = get_reservations_cached()
+    if not _catalog_units:
+        load_catalog(True)
+    today = datetime.now(TZ).date()
+    cutoff = today - timedelta(days=holdout_days)
+    def arr(r):
+        return _parse_date(r.get("arrivalDate"))
+    train_res = [r for r in res if arr(r) and arr(r) < cutoff]
+    test_res = [r for r in res if arr(r) and cutoff <= arr(r) <= today]
+    train = _pe_build_dataset(train_res, _catalog_units, cutoff)
+    models = _pe_learn_models(train)
+    test = _pe_build_dataset(test_res, _catalog_units, today)
+    pairs, by_dt = [], {}
+    for n in test["nights"]:
+        band, _src = _pe_resolve_band(models, n["lid"], n["group"], n["dtype"], n.get("event"))
+        if not band:
+            continue
+        pairs.append((band["median"], n["adr"]))
+        g = by_dt.setdefault(n["dtype"], {"pred": [], "act": []})
+        g["pred"].append(band["median"]); g["act"].append(n["adr"])
+    if len(pairs) < 30:
+        return {"error": "insufficient held-out data", "n_test_pairs": len(pairs),
+                "train_nights": len(train["nights"]), "test_nights": len(test["nights"])}
+    npr = len(pairs)
+    pred = [p for p, _ in pairs]
+    act = [a for _, a in pairs]
+    mp, ma = sum(pred) / npr, sum(act) / npr
+    cov = sum((p - mp) * (a - ma) for p, a in pairs)
+    vp = sum((p - mp) ** 2 for p in pred)
+    va = sum((a - ma) ** 2 for a in act)
+    r = cov / ((vp * va) ** 0.5) if vp > 0 and va > 0 else None
+    srt = sorted(pairs, key=lambda x: x[0])
+    k = max(1, npr // 3)
+    bot_a = statistics.mean(a for _, a in srt[:k])
+    top_a = statistics.mean(a for _, a in srt[-k:])
+    dt_table = {dt: {"pred_median": round(statistics.median(v["pred"])),
+                     "act_median": round(statistics.median(v["act"])), "n": len(v["act"])}
+                for dt, v in by_dt.items()}
+    return {"cutoff": cutoff.isoformat(), "train_nights": len(train["nights"]),
+            "test_nights": len(test["nights"]), "n_test_pairs": npr,
+            "pearson_r": round(r, 3) if r is not None else None,
+            "top_tercile_actual_adr": round(top_a), "bottom_tercile_actual_adr": round(bot_a),
+            "ranks_better_than_chance": bool(r and r > 0.15 and top_a > bot_a),
+            "by_date_type": dt_table}
 
 def _compute_pricing():
     reservations = get_reservations_cached()
