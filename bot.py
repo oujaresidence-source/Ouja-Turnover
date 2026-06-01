@@ -15734,6 +15734,179 @@ def _pe_get(force=False, ttl=86400):
         print("pricing-engine v2 build error:", e)
     return _pe_cache
 
+# ---- Stage 3: pace + recommendation engine (per upcoming open night, per unit) ----
+_pe_floor_overrides = {}     # optional {lid: absolute SAR floor} the owner can set; default none
+
+def _pe_resolve_band(models, lid, g, dtype, ev):
+    """Pick the realized ADR band to anchor on. Prefer the unit's OWN band when rich,
+    else the group's; for an event date-type with thin direct data, estimate from the
+    group's base band x the learned (or assumed) event uplift. Returns (band, source)."""
+    ub = models["unit_bands"].get(f"{lid}||{dtype}")
+    if ub and ub.get("count", 0) >= PE_MIN_UNIT:
+        return ub, "unit"
+    gb = models["group_bands"].get(f"{g}||{dtype}") if g else None
+    if gb and gb.get("count", 0) >= PE_MIN_UNIT:
+        return gb, "group"
+    if ev and g:
+        base = models["group_bands"].get(f"{g}||weekend") or models["group_bands"].get(f"{g}||weekday")
+        eff = models["events"].get(ev) or {}
+        up = eff.get("learned_uplift") or eff.get("assumed_boost")
+        if base and up:
+            est = dict(base)
+            for k in ("min", "max", "median", "avg", "p10", "p90"):
+                if isinstance(est.get(k), (int, float)):
+                    est[k] = int(round(est[k] * up))
+            return est, "event-est"
+    if ub:
+        return ub, "unit-thin"
+    if gb:
+        return gb, "group"
+    return None, None
+
+def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
+                       ev_effect, pace_entry, occ_now_frac, manual_floor=0):
+    """PURE. One night's recommendation. Far-out (>10d) holds the anchor and never
+    pre-discounts (raises early only for events that historically book early); near-in
+    (0-10d) moves with the pace signal toward floor (behind) or ceiling (ahead). Never
+    below the hard floor. Returns a dict, or None if there is no band (omit, don't fake)."""
+    if not band or not band.get("median"):
+        return None
+    median = band["median"]
+    days_out = (d - today).days
+    floor = max(int(round(0.70 * median)), int(manual_floor or 0))
+    ceiling = max(int(round(min(band.get("p90") or median * 1.5, 2.0 * median))), floor)
+    # pace signal: current on-the-books vs historical typical at this same days-out
+    typ = pace_entry["typical_occ"].get(days_out) if (pace_entry and pace_entry.get("typical_occ")) else None
+    if typ is not None and occ_now_frac is not None:
+        if occ_now_frac > typ * 1.15 + 1e-9:
+            signal = "ahead"
+        elif occ_now_frac < typ * 0.85 - 1e-9:
+            signal = "behind"
+        else:
+            signal = "normal"
+    else:
+        signal = "normal"
+    early_event = bool(ev) and bool(ev_effect) and (ev_effect.get("pace_shift_days") or 0) > 5
+    if days_out > 10:
+        if early_event:
+            rec = median + 0.60 * (ceiling - median)        # events that book early -> raise early
+        elif signal == "ahead":
+            rec = median + 0.40 * (ceiling - median)
+        else:
+            rec = median                                    # hold a confident anchor; do NOT pre-discount
+    else:
+        if signal == "behind":
+            frac = max(0.0, min(1.0, 1.0 - days_out / 10.0))   # closer to check-in -> deeper toward floor
+            rec = median - frac * (median - floor)
+        elif signal == "ahead":
+            rec = median + 0.50 * (ceiling - median)
+        else:
+            rec = median
+    rec = int(round(max(floor, min(ceiling, rec))))
+    out = {"date": d.isoformat(), "days_out": days_out, "dtype": dtype, "event": ev,
+           "recommended": rec, "floor": floor, "ceiling": ceiling, "median": median,
+           "signal": signal, "band_source": band_source, "band_count": band.get("count"),
+           "occ_now": (round(occ_now_frac, 3) if occ_now_frac is not None else None),
+           "typical_occ": (round(typ, 3) if typ is not None else None),
+           "confidence": "high" if band_source == "unit" else "low"}
+    if isinstance(current_price, (int, float)) and current_price > 0:
+        out["current"] = int(round(current_price))
+        out["delta"] = out["recommended"] - out["current"]
+        out["delta_pct"] = round(100.0 * out["delta"] / out["current"], 1)
+        out["opportunity"] = abs(out["delta"])
+    else:
+        out["current"] = None
+        out["delta"] = None
+        out["opportunity"] = 0
+    return out
+
+def _pe_fetch_calendars(lids, today, horizon):
+    """Fetch each unit's forward calendar [today, today+horizon] in parallel (GET only)."""
+    start, end = today.isoformat(), (today + timedelta(days=horizon)).isoformat()
+    out = {}
+    def fetch(lid):
+        try:
+            cal = api_get(f"/listings/{lid}/calendar", params={"startDate": start, "endDate": end})
+            days = {}
+            for day in (cal.get("result") or []):
+                ds = day.get("date")
+                if not ds:
+                    continue
+                avail = int(day.get("isAvailable", 0) or 0) == 1
+                days[ds] = {"avail": avail, "booked": (not avail) or bool(day.get("reservationId")),
+                            "price": day.get("price")}
+            return lid, days
+        except Exception as e:
+            print(f"pe calendar {lid}:", e)
+            return lid, {}
+    if not lids:
+        return out
+    try:
+        with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+            for f in as_completed([ex.submit(fetch, l) for l in lids]):
+                lid, days = f.result()
+                out[lid] = days
+    except Exception as e:
+        print("pe calendars pool error:", e)
+    return out
+
+def _pe_compute_recommendations(horizon=None):
+    """Build per-(unit, open night) recommendations from the learned models + live calendars."""
+    from collections import defaultdict
+    c = _pe_get()
+    if c.get("error") or not c.get("data") or not c.get("models"):
+        return {"recs": [], "error": c.get("error") or "no data yet", "built": time.time(), "n": 0}
+    data, models, pace = c["data"], c["models"], c["pace"]
+    l2g = data["groups_lid"]
+    today = datetime.now(TZ).date()
+    horizon = horizon or PE_HORIZON
+    per_unit = _pe_fetch_calendars(list(l2g.keys()), today, horizon)
+    occ_book, occ_tot = defaultdict(int), defaultdict(int)
+    for lid, days in per_unit.items():
+        g = l2g.get(lid)
+        if not g:
+            continue
+        for ds, row in days.items():
+            occ_tot[(g, ds)] += 1
+            if row["booked"]:
+                occ_book[(g, ds)] += 1
+    units_by_lid = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
+    recs = []
+    for lid, days in per_unit.items():
+        g = l2g.get(lid)
+        uname = (units_by_lid.get(lid) or {}).get("name") or str(lid)
+        for ds, row in days.items():
+            d = _parse_date(ds)
+            if not d or d < today or row["booked"]:
+                continue                                   # only future OPEN nights are repriceable
+            dtype, ev = _pe_date_type(d)
+            band, source = _pe_resolve_band(models, lid, g, dtype, ev)
+            if not band:
+                continue                                   # no real data -> omit (never fabricate)
+            tot = occ_tot.get((g, ds), 0)
+            occf = (occ_book.get((g, ds), 0) / tot) if tot else None
+            r = _pe_reco_for_night(d, today, dtype, ev, row.get("price"), band, source,
+                                   models["events"].get(ev) if ev else None,
+                                   pace.get(f"{g}||{dtype}"), occf,
+                                   _pe_floor_overrides.get(lid, 0))
+            if not r:
+                continue
+            r.update({"lid": lid, "unit": uname, "group": g})
+            recs.append(r)
+    recs.sort(key=lambda r: -(r.get("opportunity") or 0))
+    return {"recs": recs, "n": len(recs), "built": time.time(), "horizon": horizon,
+            "n_units": len(per_unit), "footer_n": data.get("n_used", 0),
+            "wd_median_adr": data.get("wd_median_adr")}
+
+_pe_rec_cache = {"data": None, "ts": 0}
+
+def _pe_get_recs(force=False, ttl=1800):
+    """Cached recommendation list (~30 min; calendars are live-ish, models are daily)."""
+    if (not force) and _pe_rec_cache["data"] and (time.time() - _pe_rec_cache["ts"] < ttl):
+        return _pe_rec_cache["data"]
+    _pe_rec_cache.update({"data": _pe_compute_recommendations(), "ts": time.time()})
+    return _pe_rec_cache["data"]
+
 def _compute_pricing():
     reservations = get_reservations_cached()
     if not _catalog_units:
