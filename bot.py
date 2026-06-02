@@ -18880,6 +18880,19 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
             <div class="field-foot" data-ar="الحد الأدنى ٣٠٪ · متوسط فارق الإيجار اليومي عن التقليدي" data-en="Minimum 30% · the typical daily-vs-traditional gap">الحد الأدنى ٣٠٪ · متوسط فارق الإيجار اليومي عن التقليدي</div>
           </div>
 
+          <div class="field" id="segField">
+            <div class="field-top">
+              <span class="field-l" data-ar="تسعير مبني على بياناتنا الفعلية (اختياري)" data-en="Data-driven ADR (optional)">تسعير مبني على بياناتنا الفعلية (اختياري)</span>
+              <span class="field-val" id="segPill" style="font-size:12px;font-weight:600"></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              <select id="segBeds" onchange="applySegment()" style="flex:1;min-width:84px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);color:inherit;border-radius:8px;padding:8px 9px;font-size:12px"><option value="" data-ar="— غرف" data-en="— beds">— غرف</option></select>
+              <select id="segType" onchange="applySegment()" style="flex:1;min-width:108px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);color:inherit;border-radius:8px;padding:8px 9px;font-size:12px"><option value="" data-ar="— نوع الوحدة" data-en="— unit type">— نوع الوحدة</option></select>
+              <select id="segArea" onchange="applySegment()" style="flex:1;min-width:118px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);color:inherit;border-radius:8px;padding:8px 9px;font-size:12px"><option value="" data-ar="— المنطقة" data-en="— area">— المنطقة</option></select>
+            </div>
+            <div class="field-foot" id="segNote" data-ar="اختر الغرف/النوع/المنطقة لرؤية متوسط سعرنا الفعلي." data-en="Pick beds/type/area to see our real median ADR.">اختر الغرف/النوع/المنطقة لرؤية متوسط سعرنا الفعلي.</div>
+          </div>
+
           <div class="field">
             <div class="field-top">
               <span class="field-l" data-ar="رسوم إدارة عوجا" data-en="Ouja management fee">رسوم إدارة عوجا</span>
@@ -18901,8 +18914,9 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
           <div class="ledger">
             <div class="led-note" data-ar="كل المبالغ سنوية بالريال السعودي" data-en="All amounts are annual, in SAR">كل المبالغ سنوية بالريال السعودي</div>
             <div class="led-row"><span class="led-l" data-ar="الإيجار التقليدي (القيمة × العائد)" data-en="Traditional lease (value × yield)">الإيجار التقليدي (القيمة × العائد)</span><span class="led-v"><b id="ledTrad">0</b></span></div>
-            <div class="led-row plus"><span class="led-l" data-ar="دخل الإيجار اليومي مع عوجا" data-en="Ouja daily-rental income">دخل الإيجار اليومي مع عوجا</span><span class="led-v"><b id="ledGross">0</b></span></div>
-            <div class="led-row minus"><span class="led-l" data-ar="إهلاك التجهيزات السنوي" data-en="Annual setup depreciation">إهلاك التجهيزات السنوي</span><span class="led-v">−&nbsp;<b id="ledDep">0</b></span></div>
+            <div class="led-row plus"><span class="led-l" data-ar="+ إهلاك التجهيزات (يُضاف للأساس قبل الزيادة)" data-en="+ setup depreciation (added to base before uplift)">+ إهلاك التجهيزات (يُضاف للأساس قبل الزيادة)</span><span class="led-v">+&nbsp;<b id="ledDep">0</b></span></div>
+            <div class="led-row" style="border-top:1px dashed var(--line, rgba(255,255,255,.12))"><span class="led-l" data-ar="= الأساس المعدّل" data-en="= adjusted base">= الأساس المعدّل</span><span class="led-v"><b id="ledAdjBase">0</b></span></div>
+            <div class="led-row plus"><span class="led-l" data-ar="دخل عوجا المتوقّع (الأساس × نسبة الزيادة)" data-en="Ouja projected (adjusted base × uplift)">دخل عوجا المتوقّع (الأساس × نسبة الزيادة)</span><span class="led-v"><b id="ledGross">0</b></span></div>
             <div class="led-row minus" id="ledMgmtRow" hidden><span class="led-l" data-ar="رسوم إدارة عوجا" data-en="Ouja management fee">رسوم إدارة عوجا</span><span class="led-v">−&nbsp;<b id="ledMgmt">0</b></span></div>
             <div class="led-row total"><span class="led-l" data-ar="دخلك الصافي السنوي" data-en="Your net annual income">دخلك الصافي السنوي</span><span class="led-v"><b id="ledNet">0</b></span></div>
             <div class="led-sep"></div>
@@ -19002,7 +19016,8 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
   <span data-ar=" الأرقام تقديرات وأهداف مبنية على متوسطات المحفظة والمعايير الدولية، وليست عوائد مضمونة." data-en=" Figures are estimates and targets based on portfolio averages and international standards, not guaranteed returns."> الأرقام تقديرات وأهداف مبنية على متوسطات المحفظة والمعايير الدولية، وليست عوائد مضمونة.</span>
 </footer>
 
-<script>window.OUJA_PROOF = /*__OUJA_PROOF__*/null;</script>
+<script>window.OUJA_PROOF = /*__OUJA_PROOF__*/null;
+window.OUJA_SEGMENTS = /*__OUJA_SEGMENTS__*/null;</script>
 <script>
 var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 var _calcReady = false;
@@ -19046,25 +19061,35 @@ var SETUP = [
   {key:'electronics', ar:'الإلكترونيات',          en:'Electronics',              cost:15000, life:4},
   {key:'decor',       ar:'المفروشات والديكور',    en:'Soft furnishings & décor', cost:10000, life:3}
 ];
-var S = { V:1010000, yieldPct:5.6, upliftPct:70, feeOn:false, feePct:20, setup:{} };
+var S = { V:1010000, yieldPct:5.6, upliftPct:70, feeOn:false, feePct:20, setup:{}, adr:null, occ:null, adrConf:null };
 SETUP.forEach(function(d){ S.setup[d.key] = {cost:d.cost, life:d.life}; });
 
 function compute(s){
+  // Mission 3 — ADD-TO-BASE depreciation (Faisal's method): annual dep (cost/life) is ADDED to
+  // the traditional base BEFORE the Ouja uplift %. Data-driven ADR is primary when confident.
   var traditional = s.V * (s.yieldPct/100);                 // V × traditional_yield
-  var gross       = traditional * (1 + s.upliftPct/100);    // × (1 + uplift)
   var depBreak = {}, dep = 0;
   SETUP.forEach(function(d){
     var it = s.setup[d.key];
     var a = (it.life > 0) ? (it.cost / it.life) : 0;        // straight-line: cost / useful_life
     depBreak[d.key] = a; dep += a;
   });
-  var mgmt = s.feeOn ? (s.feePct/100) * gross : 0;          // fee% × ouja_gross_annual (only if ON)
-  var net  = gross - dep - mgmt;                            // = ouja_net_annual
+  var adjustedBase = traditional + dep;                     // dep ADDED to base
+  var oujaUplift   = adjustedBase * (1 + s.upliftPct/100);  // uplift-based projection (fallback)
+  // data-driven: predicted ADR × occupancy × 365, primary when the segment is confident
+  var dataGross = null, basis = 'uplift';
+  if(s.adr && s.occ && (s.adrConf === 'high' || s.adrConf === 'med')){
+    dataGross = s.adr * (s.occ/100) * 365; basis = 'data';
+  }
+  var gross = (dataGross != null) ? dataGross : oujaUplift;  // Ouja projected gross
+  var mgmt = s.feeOn ? (s.feePct/100) * gross : 0;          // fee% × ouja_gross (only if ON)
+  var net  = gross - mgmt;                                  // dep already in the base, not subtracted again
   var extra = net - traditional;                            // extra_vs_traditional
   var setupTotal = 0; SETUP.forEach(function(d){ setupTotal += s.setup[d.key].cost; });
   var paybackRaw   = (extra !== 0) ? (setupTotal / (extra/12)) : null;
   var paybackMonths = (extra > 0) ? paybackRaw : null;      // null when no payback (extra ≤ 0)
-  return {traditional:traditional, gross:gross, dep:dep, depBreak:depBreak, mgmt:mgmt,
+  return {traditional:traditional, dep:dep, depBreak:depBreak, adjustedBase:adjustedBase,
+          oujaUplift:oujaUplift, dataGross:dataGross, basis:basis, gross:gross, mgmt:mgmt,
           net:net, extra:extra, setupTotal:setupTotal,
           paybackMonths:paybackMonths, paybackRaw:paybackRaw,
           cum5_trad:traditional*5, cum10_trad:traditional*10,
@@ -19293,10 +19318,11 @@ function generateReport(){
     +'<div class="sec-t">التجهيز والإهلاك · Setup & depreciation (cost ÷ life = annual)</div>'
     +setupRows
     +row('إجمالي التجهيز','Total setup', fmt(c.setupTotal)+' ر.س','total')
-    +'<div class="sec-t">الحساب السنوي · Annual calculation</div>'
-    +row('الإيجار التقليدي','Traditional lease', fmt(c.traditional))
-    +row('دخل الإيجار اليومي مع عوجا','Ouja daily-rental income', fmt(c.gross),'plus')
-    +row('إهلاك التجهيزات','Setup depreciation','− '+fmt(c.dep),'minus')
+    +'<div class="sec-t">الحساب السنوي · Annual calculation (add-to-base)</div>'
+    +row('الإيجار التقليدي (القيمة × العائد)','Traditional (value × yield)', fmt(c.traditional))
+    +row('+ إهلاك التجهيزات (يُضاف للأساس)','+ setup depreciation (added to base)','+ '+fmt(c.dep),'plus')
+    +row('= الأساس المعدّل','= adjusted base', fmt(c.adjustedBase))
+    +row('دخل عوجا المتوقّع (الأساس × نسبة الزيادة)','Ouja projected (adjusted base × uplift)', fmt(c.gross)+(c.basis==='data'?' · بيانات فعلية':''),'plus')
     +feeRow
     +row('دخلك الصافي السنوي','Your net annual income', fmt(c.net)+' ر.س','total')
     +row('الفرق مقابل التقليدي','Difference vs traditional', (c.extra>=0?'+':'−')+fmt(Math.abs(c.extra))+' ر.س')
@@ -19336,8 +19362,9 @@ function recompute(mode){
   for(var j=0;j<lv.length;j++){ var kk = lv[j].getAttribute('data-key'); lv[j].textContent = S.setup[kk].life; }
   /* ledger */
   setT('ledTrad', fmt(c.traditional));
-  setT('ledGross', fmt(c.gross));
   setT('ledDep', fmt(c.dep));
+  setT('ledAdjBase', fmt(c.adjustedBase));
+  setT('ledGross', fmt(c.gross));
   setT('ledMgmt', fmt(c.mgmt));
   setT('ledNet', fmt(c.net));
   setT('ledSetup', fmt(c.setupTotal));
@@ -19376,6 +19403,39 @@ function applyPreset(name){
 }
 
 /* ---------- init ---------- */
+/* ---------- Mission 3: data-driven ADR by (beds, type, area) from our real bookings ---------- */
+function _segConfLabel(c){
+  var ar=(document.documentElement.lang!=='en');
+  return c==='high'?(ar?'ثقة عالية':'high confidence'):(c==='med'?(ar?'ثقة متوسطة':'medium'):(ar?'بيانات قليلة':'thin data'));
+}
+function populateSegments(){
+  var sg=window.OUJA_SEGMENTS, f=document.getElementById('segField');
+  if(!sg){ if(f) f.style.display='none'; return; }
+  function fill(id,opts){ var el=document.getElementById(id); if(!el) return; (opts||[]).forEach(function(o){ var op=document.createElement('option'); op.value=o; op.textContent=o; el.appendChild(op); }); }
+  fill('segBeds', sg.beds_opts); fill('segType', sg.type_opts); fill('segArea', sg.area_opts);
+}
+function applySegment(){
+  var sg=window.OUJA_SEGMENTS; if(!sg) return;
+  var ar=(document.documentElement.lang!=='en');
+  var b=(document.getElementById('segBeds')||{}).value||'', t=(document.getElementById('segType')||{}).value||'', a=(document.getElementById('segArea')||{}).value||'';
+  var hit=null;
+  if(b&&t&&a) hit=sg.full[b+'|'+t.toLowerCase()+'|'+a.toLowerCase()];
+  if(!hit && b&&a) hit=sg.beds_area[b+'||'+a.toLowerCase()];
+  if(!hit && b) hit=sg.beds[b+'||'];
+  var pill=document.getElementById('segPill'), note=document.getElementById('segNote');
+  if(hit && hit.adr){
+    S.adr=hit.adr; S.adrConf=hit.confidence; S.occ=(sg.occ||85);
+    if(pill) pill.textContent=fmt(hit.adr)+' '+(ar?'ر.س':'SAR')+' · '+_segConfLabel(hit.confidence)+' (n='+hit.n+')';
+    if(note) note.textContent=(hit.confidence==='low')
+      ? (ar?'بيانات قليلة لهالشريحة — نرجع للنسبة اليدوية (افتراض، غير مضمون).':'Thin segment — falling back to the manual uplift (assumption, not guaranteed).')
+      : (ar?('نستخدم متوسط سعرنا الفعلي لهالشريحة: '+fmt(hit.adr)+' × الإشغال '+(sg.occ||85)+'٪ × ٣٦٥.'):('Using our real median ADR: '+fmt(hit.adr)+' × '+(sg.occ||85)+'% occ × 365.'));
+  } else {
+    S.adr=null; S.adrConf=null;
+    if(pill) pill.textContent='';
+    if(note) note.textContent=(ar?'اختر الغرف/النوع/المنطقة لرؤية متوسط سعرنا الفعلي.':'Pick beds/type/area to see our real median ADR.');
+  }
+  recompute('settle');
+}
 function initCalc(){
   renderSetup();
   var vEl = document.getElementById('inV');
@@ -19415,6 +19475,7 @@ function initCalc(){
   ['outNet','heroFigure'].forEach(function(id){ var e=document.getElementById(id); if(e){ e.setAttribute('data-val','0'); e.textContent='0'; } });
   recompute('full');
   renderProof();
+  populateSegments();
   setupReveals();
 }
 initCalc();
@@ -19458,8 +19519,107 @@ def _invest_proof():
         return None                           # nothing trustworthy -> omit the panel
     return proof
 
+def _invest_addbase(v, yield_pct, uplift_pct, setup_items):
+    """Mission 3 — add-to-base depreciation (Faisal's method): annual depreciation (cost ÷ life)
+    is ADDED to the traditional base BEFORE the Ouja uplift %. Returns the line-by-line ledger.
+    Worked example: 1,000,000 @ 5.6% = 56,000; +50,000/5=10,000; +20,000/10=2,000; = 68,000;
+    × 1.30 = 88,400."""
+    traditional = round(float(v) * (float(yield_pct) / 100.0))
+    lines = [{"key": "traditional", "ar": "الإيجار التقليدي (القيمة × العائد)",
+              "en": "Traditional (value × yield)", "amount": traditional, "op": "base"}]
+    dep_total = 0
+    for it in (setup_items or []):
+        cost = float(it.get("cost") or 0)
+        life = float(it.get("life") or 0)
+        a = round(cost / life) if life > 0 else 0
+        dep_total += a
+        lines.append({"key": it.get("key"), "ar": "+ إهلاك " + (it.get("ar") or it.get("label_ar") or ""),
+                      "en": "+ " + (it.get("en") or it.get("label_en") or "") + " dep",
+                      "amount": a, "op": "add"})
+    adjusted_base = traditional + dep_total
+    lines.append({"key": "adjusted_base", "ar": "= الأساس المعدّل", "en": "= adjusted base",
+                  "amount": adjusted_base, "op": "subtotal"})
+    ouja = round(adjusted_base * (1 + float(uplift_pct) / 100.0))
+    lines.append({"key": "ouja", "ar": "دخل عوجا المتوقّع (× نسبة الزيادة)",
+                  "en": "Ouja projected (× uplift)", "amount": ouja, "op": "total"})
+    return {"traditional": traditional, "dep_total": dep_total, "adjusted_base": adjusted_base,
+            "uplift_pct": float(uplift_pct), "ouja_projected": ouja, "lines": lines}
+
+def _invest_confidence(n):
+    return "high" if n >= 20 else "med" if n >= 8 else "low"
+
+def _invest_segment_adr(beds=None, ptype=None, area=None):
+    """Median realized ADR for our CONFIRMED reservations bucketed by (beds, type, area).
+    Returns {adr, n, confidence, ...}. Never invents — a thin segment returns low confidence
+    + an honest note and the caller must fall back to the manual uplift%."""
+    import statistics as _st
+    units = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
+    adrs = []
+    try:
+        for r in get_reservations_cached():
+            if not _res_realized(r):
+                continue
+            u = units.get(r.get("listingMapId"))
+            if not u:
+                continue
+            if beds not in (None, "") and str(u.get("beds")) != str(beds):
+                continue
+            if ptype not in (None, "") and (u.get("ptype") or "").lower() != str(ptype).lower():
+                continue
+            if area not in (None, ""):
+                ua = (u.get("neighbourhood") or u.get("area") or "").lower()
+                if str(area).lower() not in ua:
+                    continue
+            n = _res_nights(r)
+            rev = _res_revenue(r)
+            if n and rev:
+                adrs.append(rev / n)
+    except Exception as e:
+        print("invest segment adr:", e)
+    conf = _invest_confidence(len(adrs))
+    return {"adr": (round(_st.median(adrs)) if adrs else None), "n": len(adrs),
+            "confidence": conf, "beds": beds, "type": ptype, "area": area,
+            "note": ("" if conf != "low" else "بيانات قليلة لهالشريحة — رقم استرشادي، نرجع لنسبة الزيادة اليدوية")}
+
+def _invest_segments():
+    """Precomputed ADR buckets (full beds|type|area, beds|area, beds) for client-side lookup on
+    the public invest page — plus the dropdown option lists. Real data only; thin → low conf."""
+    import statistics as _st
+    units = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
+    rows = []
+    try:
+        for r in get_reservations_cached():
+            if not _res_realized(r):
+                continue
+            u = units.get(r.get("listingMapId"))
+            if not u:
+                continue
+            n = _res_nights(r)
+            rev = _res_revenue(r)
+            if not (n and rev):
+                continue
+            rows.append((str(u.get("beds") or ""), (u.get("ptype") or "").strip(),
+                         (u.get("neighbourhood") or u.get("area") or "").strip(), rev / n))
+    except Exception as e:
+        print("invest segments:", e)
+    def bucket(keyf):
+        m = {}
+        for beds, typ, area, adr in rows:
+            m.setdefault(keyf(beds, typ, area), []).append(adr)
+        return {k: {"adr": round(_st.median(v)), "n": len(v), "confidence": _invest_confidence(len(v))}
+                for k, v in m.items() if v}
+    return {
+        "full": bucket(lambda b, t, a: b + "|" + t.lower() + "|" + a.lower()),
+        "beds_area": bucket(lambda b, t, a: b + "||" + a.lower()),
+        "beds": bucket(lambda b, t, a: b + "||"),
+        "beds_opts": sorted({r[0] for r in rows if r[0]}, key=lambda x: (len(x), x)),
+        "type_opts": sorted({r[1] for r in rows if r[1]}),
+        "area_opts": sorted({r[2] for r in rows if r[2]}),
+        "occ": ((_invest_proof() or {}).get("portfolio_occ")),
+    }
+
 def _render_invest_html():
-    """Inject the real-proof payload into the standalone investor page using a
+    """Inject the real-proof + segment-ADR payloads into the standalone investor page using a
     literal placeholder replace (keeps INVEST_HTML a plain string, no f-string)."""
     proof = None
     try:
@@ -19467,7 +19627,14 @@ def _render_invest_html():
     except Exception as e:
         print("invest proof error:", e)
     payload = json.dumps(proof, ensure_ascii=False) if proof else "null"
-    return INVEST_HTML.replace("/*__OUJA_PROOF__*/null", payload)
+    seg = None
+    try:
+        seg = _invest_segments()
+    except Exception as e:
+        print("invest segments error:", e)
+    seg_payload = json.dumps(seg, ensure_ascii=False) if seg else "null"
+    return (INVEST_HTML.replace("/*__OUJA_PROOF__*/null", payload)
+                       .replace("/*__OUJA_SEGMENTS__*/null", seg_payload))
 
 async def _handle_invest(request):
     return web.Response(text=_render_invest_html(), content_type="text/html")
