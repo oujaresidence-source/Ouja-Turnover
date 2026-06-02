@@ -10219,14 +10219,27 @@ function renderPricingHeader(){
     ? kpi(hit.rate+'%', (L==='ar'?('توصيات طُبّقت ثم انحجزت ('+hit.booked+'/'+hit.applied+')'):('applied recs that booked ('+hit.booked+'/'+hit.applied+')')))
     : '<div class="pr-kpi"><div class="pr-kpi-v" style="font-size:13px;font-weight:600;line-height:1.3">'+(L==='ar'?'لا بيانات بعد':'no data yet')+'</div><div class="pr-kpi-l">'+(L==='ar'?'نسبة الليالي المخفّضة المحجوزة — تظهر بعد تطبيق فعلي (مو تجربة)':'discounted-night hit rate — appears after real (non-dry) applies')+'</div></div>';
   var mbtns=_prMonths().map(function(mk){ return '<button class="btn ghost sm" onclick="applyMonth(&#39;'+mk+'&#39;)">📅 '+(L==='ar'?'طبّق ':'Apply ')+mk+'</button>'; }).join(' ');
+  var imports='<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="pricingImportHostaway()">⬇ '+(L==='ar'?'استيراد قوائم من Hostaway':'Import from Hostaway')+'</button>'
+    +'<button class="btn ghost sm" onclick="pricingImportAirbnb()">⬇ '+(L==='ar'?'استيراد من Airbnb':'Import from Airbnb')+'</button></div>';
   el.innerHTML='<div class="pr-an">'
-    + kpi('+'+fmt(a.uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', (L==='ar'?('فرصة رفع/ليلة · '+(a.opp||0)+' فرصة'):('uplift opportunity · '+(a.opp||0)+' opps')))
+    + kpi((a.activated_count||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(a.units||0)+'</span>', (L==='ar'?'شقق مفعّلة (قلت لها نعم)':'apartments activated'))
+    + kpi('+'+fmt(a.uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', (L==='ar'?('فرصة رفع · '+(a.opp||0)+' فرصة (مفعّلة)'):('uplift · '+(a.opp||0)+' opps (activated)')))
     + kpi(a.changed_this_month||0, (L==='ar'?'تغييرات سعر هذا الشهر':'price changes this month'))
     + graph + hitKpi + '</div>'
-    + '<div style="margin-top:10px"><div class="pr-kpi-l" style="margin-bottom:5px">'+(L==='ar'?'استراتيجيات فعّالة (عدد الشقق):':'active strategies (apartments):')+'</div>'+chips+'</div>'
-    + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)"><div class="pr-kpi-l" style="margin-bottom:6px">'+(L==='ar'?'تطبيق شهر كامل (يعاين أول):':'apply a whole month (previews first):')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+mbtns+'</div></div>';
+    + '<div style="margin-top:10px"><div class="pr-kpi-l" style="margin-bottom:5px">'+(L==='ar'?'استراتيجيات فعّالة (عدد الشقق المفعّلة):':'active strategies (activated apartments):')+'</div>'+chips+'</div>'
+    + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;gap:18px;flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:220px"><div class="pr-kpi-l" style="margin-bottom:6px">'+(L==='ar'?'تطبيق شهر كامل (للمفعّلة فقط · يعاين أول):':'apply a whole month (activated only · previews first):')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+mbtns+'</div></div>'
+      + '<div style="min-width:220px"><div class="pr-kpi-l" style="margin-bottom:6px">'+(L==='ar'?'استيراد قوائم جديدة:':'import new listings:')+'</div>'+imports+'</div>'
+    + '</div>';
 }
 function _peIso(dt){ var m=dt.getMonth()+1, dd=dt.getDate(); return dt.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd; }
+var _prSearch='', _prCompound='', _prStrat='';
+function _prMatch(u){
+  if(_prSearch){ var q=_prSearch.toLowerCase(); if(((u.unit||'')+' '+(u.compound||'')).toLowerCase().indexOf(q)<0) return false; }
+  if(_prCompound && (u.compound||'')!==_prCompound) return false;
+  if(_prStrat){ var tg=((D.prA||{}).unit_toggles||{})[String(u.lid)]||{}; if(!tg[_prStrat]) return false; }
+  return true;
+}
 function renderPricing2(){
   var d=D.pr2||{}; var recs=(d.recs||[]);
   var body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
@@ -10234,32 +10247,78 @@ function renderPricing2(){
   if(!recs.length){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">ما فيه فرص واضحة حالياً — الأسعار قريبة من المتوقّع.</div>'; return; }
   var byU={};
   recs.forEach(function(r){
-    var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}}; }
-    u.byDate[r.date]=r;
+    var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}, activated:!!r.activated, compound:r.compound||''}; }
+    u.byDate[r.date]=r; u.activated=!!r.activated; if(r.compound) u.compound=r.compound;
     var f=r.final, c=r.current;
     if(f!=null && c!=null && f!==c){ u.nopp++; if(f>c) u.uplift+=(f-c); }
   });
   window._peByUnit=byU;
-  var units=Object.keys(byU).map(function(k){return byU[k];}).sort(function(a,b){return b.uplift-a.uplift;});
-  if(cnt) cnt.textContent=units.length+(L==='ar'?' شقة':' units');
+  var all=Object.keys(byU).map(function(k){return byU[k];});
+  var compounds={}; all.forEach(function(u){ if(u.compound) compounds[u.compound]=(compounds[u.compound]||0)+1; });
+  var shown=all.filter(_prMatch).sort(function(a,b){return b.uplift-a.uplift;});
+  var act=shown.filter(function(u){return u.activated;}), nact=shown.filter(function(u){return !u.activated;});
+  if(cnt) cnt.textContent=act.length+'/'+all.length+(L==='ar'?' مفعّلة':' activated');
   var ut=(D.prA||{}).unit_toggles||{};
-  // COLLAPSED rows by default — name · chips of active strategies · #opps · SAR uplift
-  var h=units.map(function(u){
+  // search + filter bar
+  var compOpts='<option value="">'+(L==='ar'?'كل المجمّعات':'All compounds')+'</option>'+Object.keys(compounds).sort().map(function(c){return '<option value="'+esc(c)+'"'+(_prCompound===c?' selected':'')+'>'+esc(c)+' ('+compounds[c]+')</option>';}).join('');
+  var stratOpts='<option value="">'+(L==='ar'?'كل الاستراتيجيات':'All strategies')+'</option>'+Object.keys(_PE_STRAT_META).map(function(k){return '<option value="'+k+'"'+(_prStrat===k?' selected':'')+'>'+_PE_STRAT_META[k].ic+' '+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'</option>';}).join('');
+  var inp='padding:7px 10px;height:34px;font-size:12.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--text)';
+  var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
+    +'<input id="prSearch" placeholder="'+(L==='ar'?'ابحث عن شقة…':'Search units…')+'" value="'+esc(_prSearch)+'" oninput="_prSearch=this.value;renderPricing2();var s=document.getElementById(&#39;prSearch&#39;);if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);}" style="flex:1;min-width:150px;'+inp+'">'
+    +'<select onchange="_prCompound=this.value;renderPricing2()" style="'+inp+'">'+compOpts+'</select>'
+    +'<select onchange="_prStrat=this.value;renderPricing2()" style="'+inp+'">'+stratOpts+'</select>'
+    +((_prSearch||_prCompound||_prStrat)?'<button class="btn ghost sm" onclick="_prSearch=&#39;&#39;;_prCompound=&#39;&#39;;_prStrat=&#39;&#39;;renderPricing2()">✕</button>':'')
+    +'</div>';
+  var grpH='font-size:12.5px;font-weight:700;color:var(--text-2);margin:0 0 10px;display:flex;align-items:center;gap:8px';
+  var cntPill='display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 6px;border-radius:99px;font-size:11px;font-weight:700';
+  function rowAct(u){
     var tg=ut[String(u.lid)]||{};
-    var chips=Object.keys(_PE_STRAT_META).filter(function(k){return tg[k];}).map(function(k){
-      return '<span class="pe-chip" title="'+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'">'+_PE_STRAT_META[k].ic+'</span>'; }).join('');
+    var chips=Object.keys(_PE_STRAT_META).filter(function(k){return tg[k];}).map(function(k){return '<span class="pe-chip" title="'+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'">'+_PE_STRAT_META[k].ic+'</span>';}).join('');
     return '<div class="pe-apt">'
       +'<button class="pe-apt-head" type="button" aria-expanded="false" onclick="pePeToggle(this,'+u.lid+')">'
         +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
         +'<span class="pe-apt-name">'+esc(u.unit||('وحدة '+u.lid))+'</span>'
         +'<span class="pe-apt-chips">'+chips+'</span>'
-        +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+(L==='ar'?' فرصة':' opp')+'</span>'):'')
-          +(u.uplift>0?('<span class="pe-apt-up">+'+fmt(u.uplift)+' ر.س</span>'):'')+'</span>'
-      +'</button>'
-      +'<div class="pe-apt-body" id="peapt_'+u.lid+'"></div>'
-    +'</div>';
-  }).join('');
+        +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+(L==='ar'?' فرصة':' opp')+'</span>'):'')+(u.uplift>0?('<span class="pe-apt-up">+'+fmt(u.uplift)+' ر.س</span>'):'')+'</span>'
+      +'</button><div class="pe-apt-body" id="peapt_'+u.lid+'"></div></div>';
+  }
+  function rowNact(u){
+    return '<div class="pe-apt"><div style="display:flex;align-items:center;gap:12px;padding:12px 16px">'
+      +'<span class="pe-apt-name" style="flex:1;min-width:0">'+esc(u.unit||('وحدة '+u.lid))+(u.compound?(' <span class="muted" style="font-size:11px">· '+esc(u.compound)+'</span>'):'')+'</span>'
+      +'<button class="btn primary sm" onclick="pricingActivate('+u.lid+',true)">✓ '+(L==='ar'?'فعّل التسعير':'Activate')+'</button></div></div>';
+  }
+  var nactComp={}; nact.forEach(function(u){ if(u.compound) nactComp[u.compound]=(nactComp[u.compound]||0)+1; });
+  var bulk=Object.keys(nactComp).sort().map(function(c){return '<button class="btn ghost xs" onclick="pricingActivateCompound(&#39;'+esc(c)+'&#39;)">✓ '+esc(c)+' ('+nactComp[c]+')</button>';}).join(' ');
+  var h=bar
+    +'<div style="'+grpH+'">✅ '+(L==='ar'?'مفعّلة (قلت لها نعم)':'Activated')+'<span style="'+cntPill+';background:var(--green-soft);color:var(--green)">'+act.length+'</span></div>'
+    +(act.length? act.map(rowAct).join('') : '<div class="muted" style="padding:12px 4px;font-size:12px">'+(L==='ar'?'ما فعّلت أي شقة بعد — فعّل من تحت ⬇':'No units activated yet — activate below.')+'</div>')
+    +'<div style="'+grpH+';margin-top:20px">⚪ '+(L==='ar'?'غير مفعّلة':'Not activated')+'<span style="'+cntPill+';background:var(--surface-2);color:var(--mut)">'+nact.length+'</span></div>'
+    +(bulk?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center"><span class="muted" style="font-size:11px">'+(L==='ar'?'فعّل مجمّع كامل:':'Activate a compound:')+'</span>'+bulk+'</div>'):'')
+    +(nact.length? nact.map(rowNact).join('') : '<div class="muted" style="padding:12px 4px;font-size:12px">'+(L==='ar'?'كل الشقق مفعّلة ✓':'All units activated ✓')+'</div>');
   if(body) body.innerHTML=h;
+}
+async function pricingActivate(lid,on){
+  var r; try{ r=await post('/api/pricing/activate',{lid:lid,on:on}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(on?(L==='ar'?'فُعّلت ✅':'Activated ✅'):(L==='ar'?'أُوقفت ⏸':'Deactivated ⏸')); await loadPricing(); }
+  else toast((r&&r.error)||'⚠');
+}
+async function pricingActivateCompound(comp){
+  if(!confirm((L==='ar'?'فعّل التسعير لكل شقق ':'Activate pricing for all units in ')+comp+'؟')) return;
+  var r; try{ r=await post('/api/pricing/activate',{compound:comp,on:true}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast((L==='ar'?'فُعّل ':'Activated ')+r.count+(L==='ar'?' شقة':' units')); await loadPricing(); }
+  else toast((r&&r.error)||'⚠');
+}
+async function pricingImportHostaway(){
+  toast(L==='ar'?'⏳ سحب من Hostaway…':'⏳ Importing from Hostaway…');
+  var r; try{ r=await post('/api/listings/sync',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ var s=r.summary||{}; toast('✓ '+(s.new||0)+(L==='ar'?' جديدة · ':' new · ')+(s.total||0)+(L==='ar'?' إجمالي':' total')); await loadPricing(); }
+  else toast((r&&r.error)||'⚠');
+}
+async function pricingImportAirbnb(){
+  toast(L==='ar'?'⏳ استيراد من Airbnb…':'⏳ Importing from Airbnb…');
+  var r; try{ r=await post('/api/pricing/import-airbnb',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ var s=r.summary||{}; toast(s.new?('✓ '+s.new+(L==='ar'?' جديدة':' new')):(r.note||(L==='ar'?'لا قوائم جديدة':'nothing new'))); await loadPricing(); }
+  else toast((r&&r.error)||'⚠');
 }
 function pePeToggle(btn, lid){
   var open=btn.getAttribute('aria-expanded')==='true';
@@ -10371,13 +10430,16 @@ function pePanelHtml(det){
   });
   facts+='</div>';
   var summ=det.summary?('<div class="pe-summary"><b>الخلاصة:</b> '+esc(det.summary)+'</div>'):'';
-  // Stage 3: before -> now (current Hostaway price -> the final price after strategy layers)
+  // Mission 2: before = FROZEN baseline (the Hostaway price the first time we saw this night,
+  // never overwritten by a preview/apply) → now = the final price after strategy layers.
   var beforeNow='';
-  if(cur!=null && det.final!=null){
-    var diff=det.final-cur;
-    beforeNow='<div class="pe-summary"><b>السعر قبل ← الآن:</b> '+fmt(cur)+' ← <b>'+fmt(det.final)+'</b> ر.س'
+  var before=(det.baseline!=null?det.baseline:cur);
+  if(before!=null && det.final!=null){
+    var diff=det.final-before;
+    beforeNow='<div class="pe-summary"><b>'+(L==='ar'?'السعر قبل ← الآن:':'Before → now:')+'</b> '+fmt(before)+' ← <b>'+fmt(det.final)+'</b> ر.س'
       +' <span style="color:'+(diff>0?'var(--up,#2e9e5b)':(diff<0?'var(--down,#cc4b4b)':'var(--mut)'))+'">('+(diff>0?'+':'')+fmt(diff)+')</span>'
-      +(det.final_source&&det.final_source!=='engine'?' · '+(det.final_source==='strategy'?'مصدره استراتيجية ديناميكية':esc(det.final_source)):'')+'</div>';
+      +(det.baseline!=null&&det.baseline!==cur?(' <span class="muted" style="font-size:10.5px">· '+(L==='ar'?'الأساس مجمّد':'baseline frozen')+'</span>'):'')
+      +(det.final_source&&det.final_source!=='engine'?' · '+(det.final_source==='strategy'?(L==='ar'?'مصدره استراتيجية ديناميكية':'via dynamic strategy'):esc(det.final_source)):'')+'</div>';
   }
   // Stage 4: which strategies are active on this date (+ per-unit on/off, Stage 7)
   var strat='';
@@ -17369,8 +17431,37 @@ def _strategy_toggles_save():
     except Exception as e:
         print("strategy toggle save:", e)
 
+# ---- Mission 2: explicit per-unit ACTIVATION (opt-in, OFF by default) ----
+# Strategies and price writes touch a unit ONLY after the owner activates it. New/imported
+# units land NOT activated. Persisted like the toggles.
+PRICING_ACTIVATED_FILE = "pricing_activated.json"
+_pricing_activated = {}     # str(lid) -> True
+try:
+    _pa_loaded = _load_json(PRICING_ACTIVATED_FILE, None)
+    if isinstance(_pa_loaded, dict):
+        _pricing_activated = {str(k): bool(v) for k, v in _pa_loaded.items() if v}
+except Exception:
+    pass
+
+def pricing_activated(lid):
+    return bool(_pricing_activated.get(str(lid)))
+
+def set_pricing_activated(lid, on):
+    if on:
+        _pricing_activated[str(lid)] = True
+    else:
+        _pricing_activated.pop(str(lid), None)
+    try:
+        _save_json(PRICING_ACTIVATED_FILE, _pricing_activated)
+    except Exception as e:
+        print("pricing activation save:", e)
+    return True
+
 def strategy_enabled(name, lid=None):
-    """True unless the strategy is disabled globally OR for this specific unit (ON by default)."""
+    """True unless the strategy is disabled globally OR for this specific unit (ON by default).
+    A unit that the owner has NOT activated has every strategy OFF — nothing about it changes."""
+    if lid is not None and not pricing_activated(lid):
+        return False                         # opt-in: not activated → no strategy applies
     if _strategy_toggles["global"].get(name) is False:
         return False
     if lid is not None:
@@ -17378,6 +17469,72 @@ def strategy_enabled(name, lid=None):
         if isinstance(u, dict) and u.get(name) is False:
             return False
     return True
+
+# ---- Mission 2: frozen before/after baseline. The live Hostaway price the FIRST time the
+# engine sees an open (lid, night) is frozen as `baseline`. Previews/applies/strategies NEVER
+# overwrite it; it refreshes ONLY when the live price differs from what Ouja last wrote
+# (a booking, or the owner editing directly in Hostaway). Fixes "before == now". ----
+PRICING_BASELINE_FILE = "pricing_baseline.json"
+_pricing_baseline = {}     # "lid|date" -> {"baseline": int, "ouja_wrote": int|None, "ts": iso}
+try:
+    _bl_loaded = _load_json(PRICING_BASELINE_FILE, None)
+    if isinstance(_bl_loaded, dict):
+        _pricing_baseline = _bl_loaded
+except Exception:
+    pass
+
+def _bl_key(lid, date_iso):
+    return f"{lid}|{date_iso}"
+
+def _pe_baseline_save():
+    try:
+        _save_json(PRICING_BASELINE_FILE, _pricing_baseline)
+    except Exception as e:
+        print("baseline save:", e)
+
+def pricing_baseline(lid, date_iso):
+    rec = _pricing_baseline.get(_bl_key(lid, date_iso))
+    return rec.get("baseline") if rec else None
+
+def _pe_baseline_observe(lid, date_iso, live_price):
+    """Freeze the live price the first time we see (lid,date); refresh ONLY when the live price
+    differs from what Ouja last wrote (a non-Ouja change). Returns the frozen baseline."""
+    if live_price is None:
+        return pricing_baseline(lid, date_iso)
+    try:
+        live = int(round(float(live_price)))
+    except (TypeError, ValueError):
+        return pricing_baseline(lid, date_iso)
+    k = _bl_key(lid, date_iso)
+    rec = _pricing_baseline.get(k)
+    if rec is None:
+        _pricing_baseline[k] = {"baseline": live, "ouja_wrote": None,
+                                "ts": datetime.now(TZ).isoformat(timespec="minutes")}
+        _pe_baseline_save()
+        return live
+    ow = rec.get("ouja_wrote")
+    if ow is not None and live != ow:        # live moved and it wasn't us → external change
+        rec["baseline"] = live
+        rec["ouja_wrote"] = None
+        rec["ts"] = datetime.now(TZ).isoformat(timespec="minutes")
+        _pe_baseline_save()
+    return rec["baseline"]
+
+def _pe_baseline_record_write(lid, date_iso, price):
+    """Remember what Ouja wrote (so our own apply never gets mistaken for an external change,
+    and baseline is never overwritten by a preview/apply)."""
+    try:
+        p = int(round(float(price)))
+    except (TypeError, ValueError):
+        return
+    k = _bl_key(lid, date_iso)
+    rec = _pricing_baseline.get(k)
+    if rec is None:
+        _pricing_baseline[k] = {"baseline": p, "ouja_wrote": p,
+                                "ts": datetime.now(TZ).isoformat(timespec="minutes")}
+    else:
+        rec["ouja_wrote"] = p
+    _pe_baseline_save()
 
 def set_strategy_toggle(name, enabled, lid=None):
     """Enable/disable a strategy globally (lid=None) or for one unit. Returns False on bad name."""
@@ -17457,6 +17614,10 @@ def _pe_decorate(data):
         r["final_source"] = info["source"]
         r["layers"] = info["layers"]
         r["badges"] = [L["key"] for L in info["layers"] if L["enabled"]]
+        # freeze the before/after baseline the first time we see this open night
+        r["baseline"] = _pe_baseline_observe(r.get("lid"), r.get("date"), r.get("current"))
+        r["activated"] = pricing_activated(r.get("lid"))
+        r["compound"] = (_ls_get()["listings"].get(str(r.get("lid"))) or {}).get("group") or ""
     return data
 
 def _pe_backfill_outcomes(data):
@@ -17596,6 +17757,7 @@ def _pe_night_detail(lid, date_iso):
     sig_phrase = {"ahead": "والحجز أسرع من المعتاد", "behind": "والحجز أبطأ من المعتاد"}.get(rec["signal"], "")
     summary = f"{dt_label}، وحجوزاتك الفعلية متوسطها {band['median']:,} ر.س {sig_phrase}. نقترح {rec['recommended']:,} ر.س ضمن [{rec['floor']:,}–{rec['ceiling']:,}]."
     info = _active_layers_for(lid, date_iso, rec["recommended"], rec.get("current"))
+    baseline = _pe_baseline_observe(lid, date_iso, rec.get("current"))   # frozen "before"
     return {"lid": lid, "unit": uname, "date": date_iso, "days_out": rec["days_out"],
             "dtype": dtype, "event": ev, "demand_pill": _pe_demand_pill(rec["signal"]),
             "signal": rec["signal"], "current": rec.get("current"), "recommended": rec["recommended"],
@@ -17603,8 +17765,9 @@ def _pe_night_detail(lid, date_iso):
             "floor": rec["floor"], "ceiling": rec["ceiling"], "median": rec["median"],
             "confidence": rec["confidence"], "pooled": pooled, "factors": factors,
             "summary": summary, "footer_n": data.get("n_used", 0),
-            "dry_run": PRICE_APPLY_DRYRUN,
+            "dry_run": PRICE_APPLY_DRYRUN, "activated": pricing_activated(lid),
             # Stage 3-4: transparent final-price model + active strategies + the change log
+            "baseline": baseline,                     # before = frozen Hostaway price (never overwritten)
             "final": info["final"], "final_color": info["color"], "final_source": info["source"],
             "layers": info["layers"], "changelog": _price_log_view(lid, date_iso)}
 
@@ -17645,6 +17808,8 @@ def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None):
         confirmed = (actual is not None and abs(float(actual) - price) < 1)
         _pe_log_reco(lid, date_iso, price, applied=True, dry=False, confirmed=confirmed)
         log_price_change(lid, date_iso, old, price, source, reason or "تطبيق سعر", dry=False, confirmed=confirmed)
+        if confirmed:
+            _pe_baseline_record_write(lid, date_iso, price)   # our write — don't refreeze baseline on it
         return {"ok": True, "dry_run": False, "lid": lid, "date": date_iso, "price": price,
                 "confirmed": confirmed, "actual": actual, "status": (resp or {}).get("status")}
     except Exception as e:
@@ -17751,6 +17916,8 @@ def _month_apply_plan(month_str):
     recs = _pe_get_recs().get("recs") or []
     plan = []
     for r in recs:
+        if not pricing_activated(r.get("lid")):
+            continue                                   # opt-in: never plan writes for non-activated units
         d = r.get("date") or ""
         if not d.startswith(month_str):
             continue
@@ -17809,10 +17976,13 @@ def _pricing_analytics():
     central change log, revenue, the learning log). Also returns per-unit toggle states."""
     recs = _pe_get_recs().get("recs") or []
     units = sorted({r["lid"] for r in recs if r.get("lid") is not None})
+    activated_count = sum(1 for lid in units if pricing_activated(lid))
     strat_counts = {k: sum(1 for lid in units if strategy_enabled(k, lid)) for k in STRATEGY_KEYS}
     unit_toggles = {str(lid): {k: strategy_enabled(k, lid) for k in STRATEGY_KEYS} for lid in units}
     uplift = opp = 0
     for r in recs:
+        if not pricing_activated(r.get("lid")):
+            continue                                   # uplift/opps reflect ACTIVATED units only
         f, c = r.get("final"), r.get("current")
         if f is not None and c is not None and int(f) != int(c):
             opp += 1
@@ -17839,7 +18009,8 @@ def _pricing_analytics():
     bk = ls.get("applied_then_booked", 0)
     hit = {"have": ar > 0, "applied": ar, "booked": bk,
            "rate": (round(100.0 * bk / ar) if ar else None)}
-    return {"units": len(units), "strat_counts": strat_counts, "unit_toggles": unit_toggles,
+    return {"units": len(units), "activated_count": activated_count,
+            "strat_counts": strat_counts, "unit_toggles": unit_toggles,
             "opp": opp, "uplift": int(uplift), "changed_this_month": changed,
             "discount_changes_this_month": disc, "month": cur_month,
             "spark": spark, "mom": mom, "hit_rate": hit, "dry_run": PRICE_APPLY_DRYRUN}
@@ -17850,7 +18021,10 @@ async def _api_pricing_analytics(request):
     return _json(await asyncio.to_thread(_pricing_analytics))
 
 def _unit_apply_plan(lid):
-    """Every date for ONE unit whose final price differs from current — the 'Apply this apartment' set."""
+    """Every date for ONE unit whose final price differs from current — the 'Apply this apartment' set.
+    Empty unless the unit is activated (opt-in: nothing is planned for a non-activated unit)."""
+    if not pricing_activated(lid):
+        return []
     recs = _pe_get_recs().get("recs") or []
     plan = []
     for r in recs:
@@ -17887,6 +18061,53 @@ async def _api_pricing_apply_unit(request):
                          + (" · تجربة" if PRICE_APPLY_DRYRUN else ""))
     return _json({"lid": lid, "results": results, "applied": applied, "failed": failed,
                   "count": len(plan), "dry_run": PRICE_APPLY_DRYRUN})
+
+# ---- Mission 2: opt-in activation (one unit OR a whole compound) ----
+async def _api_pricing_activate(request):
+    """POST {lid,on} for one unit, OR {compound,on} to activate a whole compound at once."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    on = bool(b.get("on"))
+    comp = (b.get("compound") or "").strip()
+    if comp:
+        store = _ls_get()["listings"]
+        n = 0
+        for k, rec in store.items():
+            if (rec.get("group") or "").strip() == comp:
+                try:
+                    set_pricing_activated(int(k), on); n += 1
+                except (TypeError, ValueError):
+                    pass
+        log_event("pricing", f"تسعير · {'تفعيل' if on else 'إيقاف'} مجمّع «{comp}» ({n} شقة)")
+        return _json({"ok": True, "compound": comp, "on": on, "count": n})
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    set_pricing_activated(lid, on)
+    nm = (get_listings_map() or {}).get(lid) or str(lid)
+    log_event("pricing", f"تسعير · {'تفعيل ✅' if on else 'إيقاف ⏸'} · {nm}")
+    return _json({"ok": True, "lid": lid, "on": on})
+
+async def _api_pricing_import_airbnb(request):
+    """Import Airbnb-channel listings (via Hostaway). Runs the same listings sync, then reports
+    how many of our units are Airbnb-linked. New units land NOT activated (needs setup)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        summary = await asyncio.to_thread(sync_listings_store)
+        raw = await asyncio.to_thread(_ha_fetch_all_listings)
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+    airbnb = 0
+    for L in raw:
+        if _airbnb_link(L):
+            airbnb += 1
+    log_event("pricing", f"استيراد Airbnb · {summary.get('new',0)} جديدة · {airbnb} مرتبطة بإيربنب")
+    return _json({"ok": True, "summary": summary, "airbnb_linked": airbnb,
+                  "total": len(raw),
+                  "note": ("كل قوائم Airbnb مرتبطة ومستوردة مسبقاً" if summary.get("new", 0) == 0 else "")})
 
 # ---- Stage 7: backtest — prove the learned models aren't random ----
 def _pe_backtest(holdout_days=90):
@@ -23804,6 +24025,8 @@ async def start_web_server():
         app.router.add_post("/api/pricing/apply-month", _api_pricing_apply_month)
         app.router.add_get("/api/pricing/analytics", _api_pricing_analytics)
         app.router.add_post("/api/pricing/apply-unit", _api_pricing_apply_unit)
+        app.router.add_post("/api/pricing/activate", _api_pricing_activate)
+        app.router.add_post("/api/pricing/import-airbnb", _api_pricing_import_airbnb)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
