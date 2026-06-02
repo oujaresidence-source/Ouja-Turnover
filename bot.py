@@ -7882,31 +7882,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       </section>
 
       <!-- ============ TODAY VIEW (per-empty-unit) ============ -->
-      <section class="view" id="view_today">
-        <div class="page-head">
-          <div>
-            <div class="page-title" id="t_today">اليوم · الوحدات الفاضية</div>
-            <div class="page-sub" id="t_today_sub">السعر الحالي + جدول الخصومات لكل شقة</div>
-          </div>
-          <div class="page-tools">
-            <button class="btn ghost sm" onclick="loadTodayEmpty()">↻</button>
-          </div>
-        </div>
-
-        <div class="page-help" id="ph_today" data-help-key="today">
-          <button class="ph-x" onclick="dismissHelp('today')" title="إخفاء">×</button>
-          <div class="ph-t">◎ الفاضي الليلة</div>
-          <div class="ph-b">
-            كل شقة لسا فاضية الليلة، مع <b>السعر الحالي</b> و<b>جدول الخصومات المجدولة</b>
-            الساعة ٢٠، ٢٢، ومنتصف الليل. لو شفت سعر ما يعجبك، اضغط ⏸ على الشقة توقف الخصومات
-            عنها. الهدف: ٩٥٪ إشغال (ما عدا رمضان).
-          </div>
-        </div>
-
-        <div id="discountBanner"></div>
-
-        <div id="emptyGridWrap"><div class="empty sk">—</div></div>
-      </section>
+      <!-- "Today" page removed — folded into the unified Pricing page (discountBanner +
+           emptyGridWrap moved there; the same-day step-down now shows as a calendar badge). -->
 
       <!-- ============ CALENDAR (forward pace + events + bulk apply) ============ -->
       <section class="view" id="view_calendar">
@@ -8016,27 +7993,43 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_pricing">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_pricing">فرص التسعير</div>
-            <div class="page-sub" id="t_pr_sub">توصيات مبنية على حجوزاتك الفعلية — اضغط أي ليلة تشوف «ليش هالسعر؟» وتطبّقها بضغطة</div>
+            <div class="page-title" id="t_pricing">التسعير</div>
+            <div class="page-sub" id="t_pr_sub">السعر النهائي لكل ليلة = توصية المحرّك + طبقات الاستراتيجية. اضغط أي يوم تشوف «ليش هالسعر؟» والسجل الكامل.</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadPricing()">↻</button>
           </div>
         </div>
 
         <div class="page-help" id="ph_pricing" data-help-key="pricing">
           <button class="ph-x" onclick="dismissHelp('pricing')" title="إخفاء">×</button>
-          <div class="ph-t">$ فرص رفع/تخفيض السعر</div>
+          <div class="ph-t">$ صفحة التسعير الموحّدة</div>
           <div class="ph-b">
-            المحرّك يتعلّم من <b>حجوزاتك الفعلية</b> (نفس نوع اليوم، سرعة الحجز، أسعارك المحقّقة)
-            ويقترح سعر لكل ليلة فاضية ضمن حد أدنى/أعلى. اضغط أي ليلة تفتح <b>«ليش هالسعر؟»</b>
-            بكل العوامل بالأرقام الحقيقية، عدّل السعر بالشريط إذا تبي، وبضغطة
-            <b>«تطبيق على Hostaway»</b> يتغيّر السعر — ما يصير شي بدون ضغطتك.
+            كل شقة لها تقويم يبيّن <b>السعر النهائي</b> لكل ليلة (أخضر=رفع، أحمر=خفض، رمادي=ثابت) مع
+            <b>شارة الاستراتيجية</b> الفعّالة (اللحظة الأخيرة، نهاية الأسبوع، مناسبة، استراتيجية ديناميكية).
+            اضغط أي يوم تفتح: <b>ليش هالسعر</b> + الاستراتيجيات الفعّالة + <b>السعر قبل ← الآن</b> +
+            <b>السجل الكامل</b> لكل تغيير. زر <b>«طبّق الشهر»</b> يعاين كل الأسعار ثم يطبّقها على Hostaway.
           </div>
+        </div>
+
+        <!-- folded-in: tonight's vacancies + the last-minute step-down (was the "Today" page) -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">◎ <span id="t_pr_tonight">الليلة — الفاضي + خصم اللحظة الأخيرة</span></span></div>
+          <div id="discountBanner"></div>
+          <div id="emptyGridWrap"><div class="empty sk">—</div></div>
+        </div>
+
+        <!-- Stage 7: strategy on/off toggles (all ON by default) -->
+        <div class="card">
+          <div class="card-head"><span class="card-title">⚙ <span id="t_pr_toggles">الاستراتيجيات</span></span><span class="card-sub" id="t_pr_toggles_sub">تشغيل/إيقاف — مفعّلة كلها افتراضياً</span></div>
+          <div id="stratToggles"><div class="empty sk">—</div></div>
         </div>
 
         <div class="card">
           <div id="prTotalBody"></div>
         </div>
         <div class="card">
-          <div class="card-head"><span class="card-title">📋 <span id="t_pr_list">قائمة الوحدات</span></span><span class="card-sub" id="prListCount"></span></div>
+          <div class="card-head"><span class="card-title">📋 <span id="t_pr_list">الوحدات — التقويم + طبّق الشهر</span></span><span class="card-sub" id="prListCount"></span></div>
           <div id="prListBody"><div class="empty sk">—</div></div>
         </div>
       </section>
@@ -9021,7 +9014,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'فرص التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     listings:'الشقق',
     listings_title:'🏘️ سجل الشقق (المصدر الأساسي)',
@@ -9117,7 +9110,7 @@ const T = {
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
     inbox_sub:'كل الردود والتصعيدات في مكان واحد',
     today_sub:'السعر الحالي + جدول الخصومات لكل شقة',
-    pr_sub:'توصيات أسعار للـ٤٥ يوم الجاية — اضغط لرؤية تفاصيل كل تاريخ',
+    pr_sub:'السعر النهائي لكل ليلة = توصية المحرّك + طبقات الاستراتيجية. اضغط أي يوم تشوف «ليش هالسعر؟» والسجل الكامل.',
     strat_sub:'الوحدات المتابَعة تلقائياً — اضغط لرؤية قبل/بعد كل ليلة',
     rev_sub:'آخر ١٢ شهر + دورة الراتب + أداء الوحدات',
     log_sub:'كل ما يعمله البوت',
@@ -9323,7 +9316,7 @@ const T = {
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
     inbox_sub:'Replies and escalations in one place',
     today_sub:'Current price + discount schedule for each empty unit',
-    pr_sub:'45-day recommendations — click any unit for per-date detail',
+    pr_sub:'Each night\\u2019s FINAL price = engine recommendation + active strategy layers. Click any day for the why + the full change log.',
     strat_sub:'Units being auto-priced — click for before/after per night',
     rev_sub:'12 months + salary cycle + unit performance',
     log_sub:'Everything the bot does',
@@ -9661,7 +9654,6 @@ function _i18nPaintReviews(){
 const NAV = [
   {id:'home',    ic:'◇', tk:'home'},
   {id:'inbox',   ic:'✉', tk:'inbox', badge:'inbox'},
-  {id:'today',   ic:'◎', tk:'today'},
   {id:'calendar',ic:'📅', tk:'calendar'},
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
@@ -9685,7 +9677,6 @@ const NAV = [
 const MNAV = [
   {id:'home', ic:'◇', tk:'nav_home'},
   {id:'inbox', ic:'✉', tk:'nav_inbox', badge:'inbox'},
-  {id:'today', ic:'◎', tk:'nav_today'},
   {id:'calendar', ic:'📅', tk:'calendar'},
   {id:'pricing', ic:'$', tk:'nav_pricing', badge:'pricing'},
   {id:'more', ic:'⋯', tk:'nav_more'}
@@ -9712,7 +9703,7 @@ function badgeCount(key){
 // Stage 3 — the sidebar is sectioned into 6 categories. Every NAV id below appears in
 // exactly one group; order is deliberate (what a manager reaches for, top to bottom).
 const NAV_CATS = [
-  {tk:'cat_overview', ids:['home','today']},
+  {tk:'cat_overview', ids:['home']},
   {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','listings','quality','pmo','design']},
   {tk:'cat_pricing',  ids:['pricing','strat','rev','quote']},
   {tk:'cat_finance',  ids:['expenses','finance','weekly']},
@@ -10000,6 +9991,31 @@ async function loadPricing(){
   var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML = '<div class="empty sk">—</div>';
   try{ D.pr2 = await api('/api/pricing2/recs') }catch(_){ D.pr2={recs:[],error:'تعذّر جلب التوصيات'} }
   renderPricing2();
+  loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down
+  loadStrategyToggles();    // Stage 7: strategy on/off strip
+}
+async function loadStrategyToggles(){
+  try{ D.stratTog = await api('/api/pricing/strategy-toggles'); }catch(_){ D.stratTog={strategies:[]}; }
+  renderStrategyToggles();
+}
+function renderStrategyToggles(){
+  var el=document.getElementById('stratToggles'); if(!el) return;
+  var list=((D.stratTog||{}).strategies)||[];
+  if(!list.length){ el.innerHTML='<div class="empty">—</div>'; return; }
+  el.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:8px">'+list.map(function(s){
+    var on=s.global_enabled;
+    return '<button class="strat-tog'+(on?' on':'')+'" onclick="toggleStrategy(&#39;'+s.key+'&#39;,'+(!on)+')" '
+      +'style="display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:999px;border:1.5px solid '
+      +(on?'var(--gold)':'var(--border)')+';background:'+(on?'var(--gold-tint)':'var(--surface-2)')+';color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600">'
+      +'<span>'+esc(s.icon)+'</span><span>'+esc(L==='ar'?s.label_ar:s.label_en)+'</span>'
+      +'<span style="font-size:10.5px;color:'+(on?'var(--gold)':'var(--mut)')+'">'+(on?(L==='ar'?'مفعّلة':'on'):(L==='ar'?'موقّفة':'off'))+'</span></button>';
+  }).join('')+'</div>'
+    +'<div class="muted" style="font-size:11px;margin-top:8px">'+(L==='ar'?'الإيقاف يشيل تأثير الاستراتيجية فوراً. التحكّم لكل وحدة من تفاصيل أي يوم.':'Disabling removes the effect immediately. Per-unit control lives in any date detail.')+'</div>';
+}
+async function toggleStrategy(key, enabled){
+  var r=await post('/api/pricing/strategy-toggle',{name:key, enabled:enabled});
+  if(r&&r.ok){ toast(enabled?(L==='ar'?'تشغيل ✅':'on ✅'):(L==='ar'?'إيقاف ⏸':'off ⏸')); loadPricing(); }
+  else toast((r&&r.error)||'⚠');
 }
 function _peIso(dt){ var m=dt.getMonth()+1, dd=dt.getDate(); return dt.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd; }
 function renderPricing2(){
@@ -10018,10 +10034,16 @@ function renderPricing2(){
   var units=Object.keys(byU).map(function(k){return byU[k];}).sort(function(a,b){return b.uplift-a.uplift;});
   var totalUplift=units.reduce(function(s,u){return s+u.uplift;},0);
   var totalOpps=units.reduce(function(s,u){return s+u.nopp;},0);
+  // Stage 6: per-month "Apply" buttons for the months the recommendations span
+  var _mons={}; var _t0=new Date(); _t0.setHours(0,0,0,0);
+  for(var _i=0;_i<46;_i++){ var _dd=new Date(_t0.getTime()+_i*86400000); _mons[_dd.getFullYear()+'-'+('0'+(_dd.getMonth()+1)).slice(-2)]=1; }
+  var _monBtns=Object.keys(_mons).sort().map(function(mk){
+    return '<button class="btn ghost sm" onclick="applyMonth(&#39;'+mk+'&#39;)">📅 '+(L==='ar'?'طبّق ':'Apply ')+mk+'</button>'; }).join(' ');
   if(tot) tot.innerHTML='<div class="pe-sum"><div class="pe-sum-k"><b>'+units.length+'</b> شقة</div>'
     +'<div class="pe-sum-k"><b>'+totalOpps+'</b> فرصة</div>'
     +'<div class="pe-sum-k up"><b>+'+fmt(totalUplift)+'</b> ر.س فرصة رفع/ليلة</div></div>'
-    +'<div class="pe-sum-note">مرتّبة بأكبر فرصة · مبني على ~'+fmt(d.footer_n||0)+' حجز فعلي · السعر الحالي من تقويم Hostaway مباشرة'+(d.dry_run?' · وضع تجربة (DRY-RUN)':'')+'</div>';
+    +'<div class="pe-sum-note">مرتّبة بأكبر فرصة · مبني على ~'+fmt(d.footer_n||0)+' حجز فعلي · السعر الحالي من تقويم Hostaway مباشرة'+(d.dry_run?' · وضع تجربة (DRY-RUN)':'')+'</div>'
+    +'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"><div class="muted" style="font-size:11.5px;margin-bottom:7px">'+(L==='ar'?'تطبيق كل أسعار شهر دفعة وحدة (يعاين أول ثم يطبّق ويسجّل):':'Apply a whole month at once (previews first, then applies + logs):')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+_monBtns+'</div></div>';
   if(cnt) cnt.textContent=units.length+' شقة';
   var h='';
   units.forEach(function(u){
@@ -10045,6 +10067,12 @@ function pePeToggle(btn, lid){
   if(!bodyEl.getAttribute('data-r')){ bodyEl.innerHTML=peMiniCal((window._peByUnit||{})[lid]); bodyEl.setAttribute('data-r','1'); }
   bodyEl.classList.add('open');
 }
+var _PE_BADGE_IC={'last-minute':'⏱️','strategy':'⚡','weekend':'📆','event':'🎉'};
+function _peBadgeIcons(r){
+  if(!r||!r.badges||!r.badges.length) return '';
+  var s=''; r.badges.forEach(function(b){ if(_PE_BADGE_IC[b]) s+=_PE_BADGE_IC[b]; });
+  return s?('<span class="pe-cbadge" style="display:block;font-size:8.5px;line-height:1.15;margin-top:1px">'+s+'</span>'):'';
+}
 function peMiniCal(u){
   if(!u) return '';
   var WD=['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
@@ -10055,12 +10083,18 @@ function peMiniCal(u){
   for(var i=0;i<28;i++){
     var dt=new Date(today.getTime()+i*86400000); var iso=_peIso(dt);
     var r=(u.byDate||{})[iso];
-    var cls=r?((r.delta||0)>0?'pe-raise':((r.delta||0)<0?'pe-drop':'pe-holdc')):'pe-none';
-    var click=r?(' data-lid="'+u.lid+'" data-date="'+iso+'" onclick="openPePanel(this)" role="button" tabindex="0" title="اضغط لتفاصيل ليش هالسعر"'):'';
+    // FINAL price + color = engine base recommendation + active strategy layers (falls back to raw reco)
+    var color=r?(r.final_color||((r.delta||0)>0?'raise':((r.delta||0)<0?'drop':'hold'))):null;
+    var cls=r?('pe-'+(color==='raise'?'raise':(color==='drop'?'drop':'holdc'))):'pe-none';
+    var price=r?(r.final!=null?r.final:r.recommended):null;
+    var click=r?(' data-lid="'+u.lid+'" data-date="'+iso+'" onclick="openPePanel(this)" role="button" tabindex="0" title="اضغط: ليش هالسعر + الاستراتيجيات + السجل"'):'';
     cells+='<div class="pe-cell '+cls+(r?' pe-has':'')+'"'+click+'><span class="pe-cd">'+dt.getDate()+'</span>'
-      +(r?('<span class="pe-cp">'+fmt(r.recommended)+'</span>'):'')+'</div>';
+      +(r?('<span class="pe-cp">'+fmt(price)+'</span>'+_peBadgeIcons(r)):'')+'</div>';
   }
-  return '<div class="pe-cal-legend"><span class="pe-lg pe-raise"></span>ارفع<span class="pe-lg pe-drop"></span>خفّض<span class="pe-lg pe-holdc"></span>ثابت · اضغط أي يوم للتفاصيل</div>'
+  return '<div class="pe-cal-legend"><span class="pe-lg pe-raise"></span>'+(L==='ar'?'رفع':'raise')
+    +'<span class="pe-lg pe-drop"></span>'+(L==='ar'?'خفض':'drop')
+    +'<span class="pe-lg pe-holdc"></span>'+(L==='ar'?'ثابت':'hold')
+    +' · ⏱️⚡📆🎉 '+(L==='ar'?'استراتيجية فعّالة':'active strategy')+'</div>'
     +'<div class="pe-cal">'+hdr+cells+'</div>';
 }
 async function openPePanel(el){
@@ -10095,8 +10129,56 @@ function pePanelHtml(det){
   });
   facts+='</div>';
   var summ=det.summary?('<div class="pe-summary"><b>الخلاصة:</b> '+esc(det.summary)+'</div>'):'';
+  // Stage 3: before -> now (current Hostaway price -> the final price after strategy layers)
+  var beforeNow='';
+  if(cur!=null && det.final!=null){
+    var diff=det.final-cur;
+    beforeNow='<div class="pe-summary"><b>السعر قبل ← الآن:</b> '+fmt(cur)+' ← <b>'+fmt(det.final)+'</b> ر.س'
+      +' <span style="color:'+(diff>0?'var(--up,#2e9e5b)':(diff<0?'var(--down,#cc4b4b)':'var(--mut)'))+'">('+(diff>0?'+':'')+fmt(diff)+')</span>'
+      +(det.final_source&&det.final_source!=='engine'?' · '+(det.final_source==='strategy'?'مصدره استراتيجية ديناميكية':esc(det.final_source)):'')+'</div>';
+  }
+  // Stage 4: which strategies are active on this date (+ per-unit on/off, Stage 7)
+  var strat='';
+  if(det.layers && det.layers.length){
+    strat='<div class="pe-facts"><div class="pe-facts-t">الاستراتيجيات الفعّالة على هاليوم</div>';
+    det.layers.forEach(function(Ly){
+      var on=Ly.enabled;
+      strat+='<div class="pe-fact"><span class="pe-fic">'+esc(Ly.icon||'•')+'</span>'
+        +'<div class="pe-ftext"><div class="pe-fk">'+esc(Ly.label_ar||Ly.key)
+          +(Ly.real?'':' <span style="color:var(--mut);font-size:10px">(ضمن السعر الأساسي)</span>')
+          +(on?'':' <span style="color:var(--mut);font-size:10px">— موقّفة</span>')+'</div>'
+        +'<div class="pe-fv">'+esc(Ly.note_ar||'')+'</div></div>'
+        +'<button class="btn '+(on?'ghost':'primary')+' xs" onclick="togglePeStrategy(&#39;'+Ly.key+'&#39;,'+det.lid+','+(!on)+')">'+(on?'إيقاف لهالوحدة':'تشغيل')+'</button>'
+        +'</div>';
+    });
+    strat+='</div>';
+  }
+  // Stage 5: the full append-only change log for this date
+  var clog='<div class="pe-facts"><div class="pe-facts-t">📜 سجل تغييرات السعر (لهذا اليوم)</div>';
+  var entries=det.changelog||[];
+  if(!entries.length){ clog+='<div class="pe-fv" style="padding:4px 2px;color:var(--mut)">ما فيه تغييرات مسجّلة بعد لهالليلة.</div>'; }
+  else { entries.slice().reverse().forEach(function(e){
+      var arrow=(e.old!=null?fmt(e.old):'—')+' ← '+(e.new!=null?fmt(e.new):'—');
+      clog+='<div class="pe-fact"><span class="pe-fic">'+esc(e.icon||'•')+'</span>'
+        +'<div class="pe-ftext"><div class="pe-fk">'+esc(e.source_ar||e.source||'')+(e.dry?' · تجربة':'')+(e.confirmed===false?' · لم يتأكد':'')+'</div>'
+        +'<div class="pe-fv">'+arrow+' ر.س'+(e.reason?(' · '+esc(e.reason)):'')
+        +'<div style="color:var(--mut);font-size:10px;margin-top:1px;direction:ltr;text-align:start">'+esc((e.ts||'').replace('T',' '))+'</div></div></div></div>';
+    });
+  }
+  clog+='</div>';
   var foot='<div class="pe-foot">مبني على ~'+fmt(det.footer_n||0)+' حجز فعلي من حسابك — يتحدّث يومياً</div>';
-  return '<div class="pe-panel">'+pill+hero+slider+facts+summ+foot+'</div>';
+  return '<div class="pe-panel">'+pill+hero+slider+beforeNow+strat+facts+summ+clog+foot+'</div>';
+}
+function openPeNight(lid, date){
+  openPePanel({getAttribute:function(k){ return k==='data-lid'?String(lid):String(date); }});
+}
+async function togglePeStrategy(key, lid, enabled){
+  var r=await post('/api/pricing/strategy-toggle',{name:key, lid:lid, enabled:enabled});
+  if(r&&r.ok){
+    toast(enabled?'تشغيل ✅':'إيقاف ⏸');
+    if(_pePanel) openPeNight(_pePanel.lid, _pePanel.date);   // refresh the drawer
+    loadPricing();
+  } else toast((r&&r.error)||'⚠');
 }
 function peSlider(){
   var s=document.getElementById('peSlider'); if(!s) return;
@@ -10113,7 +10195,9 @@ async function peApply(){
   var s=document.getElementById('peSlider'); var price=s?parseInt(s.value,10):null;
   var btn=document.getElementById('peApplyBtn'); if(btn){ btn.disabled=true; btn.textContent='…'; }
   var r;
-  try{ r=await post('/api/pricing2/apply',{lid:_pePanel.lid, date:_pePanel.date, price:price}); }
+  try{ r=await post('/api/pricing2/apply',{lid:_pePanel.lid, date:_pePanel.date, price:price,
+                                           source:'manual', old:_pePanel.current,
+                                           reason:'تعديل يدوي من اللوحة'}); }
   catch(_){ r={ok:false,error:'تعذّر الاتصال'}; }
   if(btn) btn.disabled=false;
   if(r && r.ok){
@@ -10125,6 +10209,26 @@ async function peApply(){
     toast('✖ ما تم: '+esc((r&&r.error)||'خطأ'));
     if(btn) btn.textContent='تطبيق على Hostaway';
   }
+}
+// Stage 6: per-month apply — preview every price for the month, confirm, push, show real result.
+async function applyMonth(month){
+  var pv; try{ pv=await api('/api/pricing/month-preview?month='+encodeURIComponent(month)); }
+  catch(_){ pv=null; }
+  if(!pv || pv.error){ toast((pv&&pv.error)||'⚠'); return; }
+  if(!pv.count){ toast(L==='ar'?('ما فيه أسعار للتطبيق في '+month):('Nothing to apply for '+month)); return; }
+  var lines=(pv.plan||[]).slice(0,40).map(function(p){
+    return (p.unit||('#'+p.lid))+' · '+p.date+': '+fmt(p.current)+' → '+fmt(p.final); }).join('\n');
+  if(pv.count>40) lines+='\n… +'+(pv.count-40);
+  var dryTxt=pv.dry_run?(L==='ar'?' (تجربة — ما يتغير شي فعلي)':' (DRY-RUN)'):'';
+  var head=(L==='ar'?('تطبيق '+pv.count+' سعر لشهر '+month+dryTxt+'؟\n('+pv.raises+' رفع · '+pv.drops+' خفض)\n\n')
+                    :('Apply '+pv.count+' prices for '+month+dryTxt+'?\n('+pv.raises+' up · '+pv.drops+' down)\n\n'));
+  if(!confirm(head+lines)) return;
+  toast('⏳ '+month+'…');
+  var r; try{ r=await post('/api/pricing/apply-month',{month:month}); }catch(_){ r=null; }
+  if(!r || r.error){ toast((r&&r.error)||'⚠'); return; }
+  var pfx=r.dry_run?(L==='ar'?'تجربة — ':'DRY-RUN — '):'';
+  toast(pfx+(L==='ar'?('طُبّق '+r.applied):('applied '+r.applied))+(r.failed?(' · '+(L==='ar'?'فشل ':'failed ')+r.failed):''));
+  loadPricing();
 }
 async function loadStrategies(){
   document.getElementById('stratListBody').innerHTML = '<div class="empty sk">—</div>';
@@ -15715,11 +15819,11 @@ async function doStopStrategy(lid){
 }
 async function doPause(hours){
   const r = await post('/api/discount/pause',{hours:hours});
-  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='today') renderTodayEmpty() }
+  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='pricing') renderTodayEmpty() }
 }
 async function doResume(){
   const r = await post('/api/discount/resume',{});
-  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='today') renderTodayEmpty() }
+  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='pricing') renderTodayEmpty() }
 }
 async function doSkipUnit(lid){
   const r = await post('/api/discount/skip-unit',{lid:lid, hours:24});
