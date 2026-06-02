@@ -6353,11 +6353,13 @@ def _exp_validate(exp):
     return exp
 
 def _exp_post_to_hostaway(exp):
-    """Write a Ready expense to Hostaway. Sets posted/failed. Respects DRYRUN.
-    On any error → status 'failed' with the exact message (queued for retry)."""
-    # Idempotency: a real Hostaway ref already exists → never post twice.
+    """SEND a Ready expense to Hostaway. On real success the status becomes 'in_transit'
+    (sent, awaiting verification) — NEVER 'posted'. Only _exp_verify_in_hostaway promotes
+    it to 'posted' (verified present + amount matches). Respects DRYRUN. Idempotent."""
+    # Idempotency: a real Hostaway ref already exists → never post twice (just keep verifying).
     if exp.get("hostaway_ref") and exp["hostaway_ref"] not in ("DRYRUN", "ok", "existing", None):
-        exp["status"] = "posted"
+        if exp.get("status") not in ("posted",):
+            exp["status"] = "in_transit"
         return True
     if exp.get("listing_id") is None:
         exp["status"] = "failed"; exp["error"] = "no matched listing"
@@ -6391,26 +6393,26 @@ def _exp_post_to_hostaway(exp):
         "currency": "SAR",
     }
     if EXPENSE_POST_DRYRUN:
-        exp["status"] = "posted"
+        exp["status"] = "in_transit"               # NOT posted — a dry-run writes nothing
         exp["hostaway_ref"] = "DRYRUN"
         exp["hostaway_verified"] = False           # a dry-run can never be verified as real
-        exp["posted_at"] = datetime.now(TZ).isoformat(timespec="seconds")
-        exp["posted_auto"] = True
+        exp["dry"] = True
+        exp["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         exp["error"] = None
-        _exp_log_event(exp, "posted", detail="DRY-RUN (not written to Hostaway)")
+        _exp_log_event(exp, "dry_send", detail="DRY-RUN — not written to Hostaway")
         return True
     try:
         res = api_post(EXPENSE_HOSTAWAY_PATH, payload)
         ha_id = None
         if isinstance(res, dict):
             ha_id = (res.get("result") or {}).get("id") if isinstance(res.get("result"), dict) else res.get("id")
-        exp["status"] = "posted"
+        exp["status"] = "in_transit"               # sent — promoted to 'posted' only by verify
         exp["hostaway_ref"] = str(ha_id) if ha_id is not None else "ok"
-        exp["hostaway_verified"] = False           # not verified until we re-query Hostaway
-        exp["posted_at"] = datetime.now(TZ).isoformat(timespec="seconds")
-        exp["posted_auto"] = True
+        exp["hostaway_verified"] = False
+        exp["dry"] = False
+        exp["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         exp["error"] = None
-        _exp_log_event(exp, "posted", detail=("#" + exp["hostaway_ref"]))
+        _exp_log_event(exp, "sent", detail=("#" + exp["hostaway_ref"]))
         return True
     except Exception as e:
         exp["status"] = "failed"
@@ -6737,9 +6739,16 @@ def _exp_hostaway_probe():
             break
     return {"configured_path": EXPENSE_HOSTAWAY_PATH, "tried": tried}
 
-def _exp_fetch_hostaway(max_pages=10):
-    """Fetch existing expenses already in Hostaway (paginated, capped). Returns
-    (list, ok, error). 'ok' is False if the endpoint doesn't respond as expected."""
+_exp_ha_cache = {"items": None, "ok": False, "err": None, "ts": 0.0}
+EXPENSE_HA_CACHE_TTL = int(os.environ.get("EXPENSE_HA_CACHE_TTL", "45"))  # sec; speeds up bulk verify
+
+def _exp_fetch_hostaway(max_pages=10, force=False):
+    """Fetch existing Hostaway expenses (paginated, capped), CACHED for a few seconds so a
+    bulk verify/reconcile over many expenses makes ONE Hostaway pull, not N. Returns
+    (list, ok, error). Pass force=True to bypass the cache (manual 'تحديث المزامنة')."""
+    c = _exp_ha_cache
+    if (not force) and c["items"] is not None and (time.time() - c["ts"] < EXPENSE_HA_CACHE_TTL):
+        return c["items"], c["ok"], c["err"]
     items, offset, page = [], 0, 100
     try:
         for _ in range(max_pages):
@@ -6752,8 +6761,10 @@ def _exp_fetch_hostaway(max_pages=10):
             if len(batch) < page:
                 break
             offset += page
+        c.update({"items": items, "ok": True, "err": None, "ts": time.time()})
         return items, True, None
     except Exception as e:
+        c.update({"items": items, "ok": False, "err": str(e)[:300], "ts": time.time()})
         return items, False, str(e)[:300]
 
 def _exp_ha_key(lid, amount, date_str):
@@ -6854,9 +6865,11 @@ def _exp_last_actor(exp):
     return exp.get("approved_by") or exp.get("submitter") or ""
 
 def _exp_verify_in_hostaway(exp):
-    """Re-query Hostaway and CONFIRM this expense is actually there — by our reference
-    (OJ-EXP-…) first, else by (listing, amount, date). Sets hostaway_verified. Never fakes:
-    DRY-RUN can't be verified, and an unreachable Hostaway leaves it unverified."""
+    """Re-query Hostaway and CONFIRM this expense is really there WITH a matching amount —
+    by our reference (OJ-EXP-…) first, else by (listing, amount, date). This is the ONLY
+    place that promotes an expense to 'posted'. Never fakes: DRY-RUN and an unreachable
+    Hostaway both leave it unverified (still 'in_transit'). A ref found but with a different
+    amount is flagged 'amount_mismatch' (conflict), NOT posted."""
     if EXPENSE_POST_DRYRUN:
         exp["hostaway_verified"] = False
         exp["verify_note"] = "dryrun"
@@ -6866,34 +6879,61 @@ def _exp_verify_in_hostaway(exp):
     if not ok:
         exp["verify_note"] = "hostaway_unreachable"
         return None
+    want_amt = round(abs(float(exp.get("amount") or 0)), 2)
     key = _exp_ha_key(exp.get("listing_id"), exp.get("amount"), exp.get("expense_date"))
     found_by = None
+    ref_seen = False
     for x in items:
+        try:
+            x_amt = round(abs(float(x.get("amount"))), 2)
+        except (TypeError, ValueError):
+            x_amt = None
         if ref and ref in json.dumps(x, ensure_ascii=False):
-            found_by = "ref"; break
+            ref_seen = True
+            if x_amt is not None and abs(x_amt - want_amt) < 1:    # amount must match
+                found_by = "ref"; break
         lid = x.get("listingMapId") or x.get("listingId") or x.get("listing_id")
         if key and _exp_ha_key(lid, x.get("amount"), x.get("expenseDate") or x.get("date")) == key:
             found_by = "key"; break
-    exp["hostaway_verified"] = bool(found_by)
-    exp["verify_note"] = ("found:" + found_by) if found_by else "not_found"
     if found_by:
+        exp["hostaway_verified"] = True
+        exp["verify_note"] = "found:" + found_by
         exp["verified_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        exp["status"] = "posted"                 # the single truth gate: posted == verified
+        if exp.get("discrepancy") == "amount_mismatch":
+            exp["discrepancy"] = None
+        if not exp.get("posted_at"):
+            exp["posted_at"] = exp["verified_at"]
         if not any(e.get("event") == "verified" for e in exp.get("events", [])):
             _exp_log_event(exp, "verified", detail=("matched by " + found_by))
-    return bool(found_by)
+        return True
+    exp["hostaway_verified"] = False
+    # Backfill / truth-keeping: an optimistic 'posted' that Hostaway can't confirm is NOT
+    # posted — demote it to in_transit (or to ready when there is no real ref to repost).
+    if exp.get("status") == "posted":
+        has_real_ref = exp.get("hostaway_ref") and exp["hostaway_ref"] not in ("DRYRUN", "ok", "existing", None)
+        exp["status"] = "in_transit" if has_real_ref else "ready"
+        _exp_log_event(exp, "verify_failed", detail="not found in Hostaway — re-queued")
+    if ref_seen:                                  # our ref is in Hostaway but the amount differs
+        exp["verify_note"] = "amount_conflict"
+        exp["discrepancy"] = "amount_mismatch"
+    else:
+        exp["verify_note"] = "not_found"
+    return False
 
 def _exp_pipeline(e):
     """The 3-step pipeline state for one expense (Sheet → Dashboard → Hostaway) + overall
     colour (max 4: green / amber / red / gray). Hostaway is 'done' ONLY when verified."""
     st = e.get("status")
     sheet = "done"                                            # it's in our system (sheet or manual)
-    dash = ("done" if st in ("ready", "posted") else
+    dash = ("done" if st in ("ready", "posted", "in_transit") else
             "skip" if st == "discarded" else "active")        # active = needs review / in progress
     if st == "failed":
         ha = "failed"
-    elif st == "posted":
-        ha = ("dry" if (EXPENSE_POST_DRYRUN or e.get("hostaway_ref") == "DRYRUN")
-              else "done" if e.get("hostaway_verified") else "active")   # active = جاري النقل / التحقق
+    elif st == "posted" and e.get("hostaway_verified"):
+        ha = "done"                                           # verified present in Hostaway ✓
+    elif st == "in_transit" or st == "posted":
+        ha = "dry" if (e.get("dry") or e.get("hostaway_ref") == "DRYRUN") else "active"  # جاري التحقق
     else:
         ha = "pending"
     color = ("red" if (st == "failed" or e.get("discrepancy")) else
@@ -11968,7 +12008,7 @@ const EXP_HOLD = {
 };
 const EXP_STATUS = {
   captured:['قيد المعالجة','Processing'], ready:['جاهز للترحيل','Ready to post'], held:['يحتاج إجراء','Needs action'],
-  posted:['مُرحّل','Posted'], failed:['فشل','Failed'], discarded:['متجاهَل','Ignored']
+  in_transit:['جاري التحقق','In transit'], posted:['مُرحّل ✓','Posted ✓'], failed:['فشل','Failed'], discarded:['متجاهَل','Ignored']
 };
 let _expPeriod = 'week';   // week | month | custom
 let _expFrom = '', _expTo = '';
@@ -11991,6 +12031,7 @@ function _expStatusChip(st){
   // Status color = STATE only, max 4 colours (tinted + accessible, no white-on-saturated):
   // posted/ready = green · held(needs action) = amber · failed = red · ignored = gray.
   var map={posted:['var(--green-soft)','var(--green)'],ready:['var(--green-soft)','var(--green)'],
+           in_transit:['var(--gold-tint)','var(--gold)'],
            held:['var(--yellow-soft)','var(--yellow)'],failed:['var(--red-soft)','var(--red)'],
            discarded:['var(--surface-3)','var(--mut)'],captured:['var(--surface-3)','var(--mut)']};
   var c=map[st]||map.captured;
@@ -12149,7 +12190,7 @@ function _expSyncStatusHtml(){
   }).join('');
   return head+'<div style="display:flex;flex-direction:column;gap:10px">'+body+'</div>';
 }
-var _EXP_EVENT_LABELS={logged:['سُجّل','logged'],pulled:['سُحب','pulled'],apartment_matched:['طوبقت الشقة','apartment matched'],apartment_confirmed:['أكّد الشقة','apartment confirmed'],approved:['اعتمد','approved'],post_requested:['طلب الترحيل','post requested'],posted:['رُحّل','posted'],verified:['تأكّد في Hostaway','verified in Hostaway'],post_failed:['فشل الترحيل','post failed'],discarded:['تجاهل','discarded']};
+var _EXP_EVENT_LABELS={logged:['سُجّل','logged'],pulled:['سُحب','pulled'],apartment_matched:['طوبقت الشقة','apartment matched'],apartment_confirmed:['أكّد الشقة','apartment confirmed'],approved:['اعتمد','approved'],post_requested:['طلب الترحيل','post requested'],sent:['أُرسل لـHostaway','sent to Hostaway'],dry_send:['إرسال تجريبي','dry-run send'],posted:['رُحّل','posted'],verified:['تأكّد في Hostaway ✓','verified in Hostaway ✓'],verify_failed:['لم يتأكّد — أُعيد للطابور','not confirmed — re-queued'],post_failed:['فشل الترحيل','post failed'],discarded:['تجاهل','discarded']};
 async function expOpenTimeline(id){
   openDrawer('…',''); setDrawerBody('<div class="empty sk" style="padding:36px;text-align:center">…</div>'); setDrawerFoot('');
   var e=null;
@@ -12189,8 +12230,9 @@ function _expCountersHtml(){
   var dry = s.dryrun ? '<div style="background:rgba(212,175,55,.12);border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:10px;font-size:12px;margin-bottom:10px">'+(L==='ar'?'⚠️ وضع تجريبي — لا يكتب على Hostaway فعلياً (EXPENSE_POST_DRYRUN=1)':'⚠️ Dry-run — nothing is written to Hostaway (EXPENSE_POST_DRYRUN=1)')+'</div>' : '';
   function card(lab,val,col){ return '<div style="flex:1;min-width:118px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px 14px"><div class="muted" style="font-size:11px">'+lab+'</div><div style="font-size:18px;font-weight:800;margin-top:3px;color:'+(col||'var(--text)')+'">'+val+'</div></div>'; }
   return _expConnStrip()+dry+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-    + card(L==='ar'?'إجمالي المُرحّل':'Total posted', expMoney(s.posted_sar||0),'var(--green)')
+    + card(L==='ar'?'مُرحّل ✓ (مؤكّد بـHostaway)':'Posted ✓ (verified)', expMoney(s.posted_sar||0),'var(--green)')
     + card(L==='ar'?'مُرحّل (عدد)':'Posted (#)', fmt(s.posted_n||0))
+    + card(L==='ar'?'جاري التحقق':'In transit', fmt(s.in_transit_n||0), (s.in_transit_n?'var(--gold)':'var(--text)'))
     + card(L==='ar'?'موقوف':'Held', fmt(s.held||0), (s.held?'var(--gold)':'var(--text)'))
     + card(L==='ar'?'فشل':'Failed', fmt(s.failed||0), (s.failed?'var(--red)':'var(--text)'))
     + card(L==='ar'?'هذا الأسبوع':'This week', expMoney(s.week_sar||0))
@@ -12224,11 +12266,12 @@ function _expQueueHtml(){
   if(!items.length) return '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:30px">✅</div><div class="muted" style="margin-top:6px">'+(L==='ar'?'ما فيه مصاريف بانتظار المراجعة':'No expenses awaiting review')+'</div></div>';
   var ar=(L==='ar');
   // ---- bucket every queue item by what it actually needs ----
-  var ready=[], failed=[], posted=[], byR={};
+  var ready=[], failed=[], posted=[], transit=[], byR={};
   items.forEach(function(e){
     if(e.status==='ready') ready.push(e);
     else if(e.status==='failed') failed.push(e);
-    else if(e.status==='posted') posted.push(e);
+    else if(e.status==='in_transit' || (e.status==='posted' && !e.hostaway_verified)) transit.push(e);
+    else if(e.status==='posted') posted.push(e);  // verified only
     else { var k=e.primary_reason||'incomplete'; (byR[k]=byR[k]||[]).push(e); }
   });
   function pick(){ var a=[]; for(var i=0;i<arguments.length;i++){ a=a.concat(byR[arguments[i]]||[]); } return a; }
@@ -12247,7 +12290,8 @@ function _expQueueHtml(){
     + stat('amber','approve',gApprove.length,ar?'يحتاج موافقة':'Needs approval')
     + stat('red','failed',failed.length,ar?'فشل':'Failed')
     + stat('green','ready',ready.length,ar?'جاهز للترحيل':'Ready to post')
-    + stat('green','posted',posted.length,ar?'مُرحّل':'Posted')
+    + stat('gold','transit',transit.length,ar?'جاري التحقق':'In transit')
+    + stat('green','posted',posted.length,ar?'مُرحّل ✓ (مؤكّد)':'Posted ✓ (verified)')
     + '</div>';
   if(f) h+='<div style="margin:-4px 0 10px"><button class="btn ghost xs" onclick="expQFilter(&#39;'+f+'&#39;)">'+(ar?'✕ إلغاء التصفية':'✕ Clear filter')+'</button></div>';
   function grp(key,title,pill,list){
@@ -12266,7 +12310,8 @@ function _expQueueHtml(){
   h+=grp('dup',ar?'تكرار محتمل':'Possible duplicate','warn',gDup);
   h+=grp('inc',ar?'بيانات ناقصة':'Incomplete','warn',gInc);
   h+=grp('failed',ar?'فشل الترحيل':'Failed to post','danger',failed);
-  h+=grp('posted',ar?'مُرحّل ✓ (آخر العمليات)':'Posted ✓ (recent)','ok',posted);
+  h+=grp('transit',ar?'جاري التحقق من Hostaway':'In transit — verifying','warn',transit);
+  h+=grp('posted',ar?'مُرحّل ✓ (مؤكّد في Hostaway)':'Posted ✓ (verified in Hostaway)','ok',posted);
   return h;
 }
 var _expQFilter='';
@@ -21562,7 +21607,7 @@ async def _api_expenses_queue(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     items = [_exp_view(e) for e in _expenses.values()
-             if e.get("status") in ("held", "failed", "ready")]
+             if e.get("status") in ("held", "failed", "ready", "in_transit")]
     items.sort(key=lambda e: (e.get("submitted_at") or e.get("created_at") or ""), reverse=True)
     # recently-posted tail (newest first, capped) — the "it worked, here it is" confirmation
     posted = [e for e in _expenses.values() if e.get("status") == "posted" and e.get("posted_at")]
@@ -21578,14 +21623,22 @@ async def _api_expenses_summary(request):
     posted_sar = held = posted_n = failed = 0
     week_sar = 0.0
     wk_from = (datetime.now(TZ).date() - timedelta(days=7)).isoformat()
+    in_transit_n = 0
+    in_transit_sar = 0.0
     by_apt, by_emp = {}, {}
     for e in _expenses.values():
         st = e.get("status")
+        # POSTED == verified present in Hostaway. Everything sent-but-unconfirmed (incl.
+        # dry-run) is 'in_transit', never counted as posted. One source of truth.
+        verified = (st == "posted" and bool(e.get("hostaway_verified")))
+        in_transit = (st == "in_transit") or (st == "posted" and not e.get("hostaway_verified"))
         if st in ("held",): held += 1
         if st in ("failed",): failed += 1
+        if in_transit: in_transit_n += 1
         if not _exp_in_period(e, dfrom, dto): continue
         amt = abs(float(e.get("amount") or 0))
-        if st == "posted":
+        if in_transit: in_transit_sar += amt
+        if verified:
             posted_sar += amt; posted_n += 1
             if (e.get("expense_date") or "") >= wk_from:
                 week_sar += amt
@@ -21593,7 +21646,7 @@ async def _api_expenses_summary(request):
         ba = by_apt.setdefault(a, {"apartment": a, "total": 0.0, "count": 0})
         be = by_emp.setdefault(m, {"employee": m, "total": 0.0, "count": 0,
                                    "posted": 0, "held": 0, "discarded": 0})
-        if st == "posted":
+        if verified:
             ba["total"] += amt; ba["count"] += 1
             be["total"] += amt; be["posted"] += 1
         be["count"] += 1
@@ -21601,8 +21654,9 @@ async def _api_expenses_summary(request):
         if st == "discarded": be["discarded"] += 1
     return _json({
         "posted_sar": round(posted_sar, 2), "held": held, "posted_n": posted_n,
+        "in_transit_n": in_transit_n, "in_transit_sar": round(in_transit_sar, 2),
         "failed": failed, "week_sar": round(week_sar, 2),
-        "queue": held + failed,
+        "queue": held + failed + in_transit_n,
         "by_apartment": sorted(by_apt.values(), key=lambda x: -x["total"]),
         "by_employee": sorted(by_emp.values(), key=lambda x: -x["total"]),
         "owners": dict(_unit_owners),   # item 60: apartment -> owner map
@@ -22022,12 +22076,14 @@ async def _api_expenses_sync_refresh(request):
     pulled = await asyncio.to_thread(_exp_poll_sheet)
 
     def _refresh():
+        _exp_fetch_hostaway(force=True)                 # ONE fresh pull; per-item verify hits the cache
         rev = 0
         for e in list(_expenses.values()):
             if e.get("status") == "discarded":
                 continue
-            if e.get("status") == "posted":
-                _exp_verify_in_hostaway(e)              # re-check it's really in Hostaway
+            # re-verify everything already sent (posted OR in_transit), incl. legacy optimistic
+            if e.get("status") in ("posted", "in_transit"):
+                _exp_verify_in_hostaway(e)              # promotes to posted / re-queues if not found
             else:
                 before = e.get("status")
                 _exp_validate(e)
@@ -22055,7 +22111,7 @@ async def _api_expenses_verify(request):
 
 _EXP_STATE_LABELS = {
     "verified": ("مؤكّد في Hostaway", "Verified in Hostaway"),
-    "posted_unverified": ("مُرحّل — بانتظار التأكيد", "Posted — awaiting verify"),
+    "in_transit": ("جاري التحقق", "In transit"),
     "failed": ("فشل الترحيل", "Failed"),
     "discrepancy": ("تعارض", "Discrepancy"),
     "ready": ("جاهز للترحيل", "Ready to post"),
@@ -22067,8 +22123,10 @@ def _exp_sync_state(e):
         return "failed"
     if e.get("discrepancy"):
         return "discrepancy"
-    if e.get("status") == "posted":
-        return "verified" if e.get("hostaway_verified") else "posted_unverified"
+    if e.get("status") == "posted" and e.get("hostaway_verified"):
+        return "verified"
+    if e.get("status") in ("in_transit", "posted"):     # sent but not verified-present
+        return "in_transit"
     if e.get("status") == "ready":
         return "ready"
     return "held"
