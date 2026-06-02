@@ -18051,10 +18051,11 @@ def _pricing_analytics():
             if f > c:
                 uplift += (f - c)
     cur_month = datetime.now(TZ).strftime("%Y-%m")
+    # §9: count CONFIRMED Hostaway writes only — never background recomputes/dry entries
     changed = disc = 0
     for entries in _price_log.values():
         for e in entries:
-            if (e.get("ts") or "")[:7] == cur_month:
+            if (e.get("ts") or "")[:7] == cur_month and e.get("confirmed") is True and not e.get("dry"):
                 changed += 1
                 if e.get("old") is not None and e.get("new") is not None and e["new"] < e["old"]:
                     disc += 1
@@ -19886,6 +19887,139 @@ def _strategies_list():
     out.sort(key=lambda x: (not x["active"], x["booked"] > 0, -(x["updated"] or 0)))
     return out
 
+# ============ §3/§4 metric engine — captured / due-hit / 5-state nights (never fabricate) ============
+def _strat_night_state(repriced, base, final, booked, passed):
+    """The 5 night-states (§4). repriced = ≥1 confirmed non-dry change on this night."""
+    if not repriced:
+        if final is not None and base is not None and int(final) != int(base):
+            return "suggested"            # preview (final≠baseline), not applied
+        return "baseline"                 # untouched
+    if booked:
+        return "booked"                   # applied + the night booked (win)
+    if passed:
+        return "empty"                    # applied + date passed + never booked (miss)
+    return "applied"                      # applied + still future/open (live)
+
+def _strat_booked_index(lid):
+    """{date: {booked_price, booked_at}} for nights of `lid` that REALLY booked (from the
+    learning log, populated by _pe_backfill_outcomes against confirmed reservations)."""
+    idx = {}
+    for e in _pe_reco_log:
+        if e.get("lid") == lid and e.get("booked") and e.get("date"):
+            idx[e["date"]] = {"booked_price": e.get("booked_price"), "booked_at": e.get("booked_at")}
+    return idx
+
+def _strat_night_confirmed(lid, date_iso):
+    """Confirmed, non-dry price-change entries for one (lid, date)."""
+    return [x for x in price_change_log(lid, date_iso)
+            if x.get("confirmed") is True and not x.get("dry")]
+
+def _strat_unit_metrics(lid, recs_by_date, today_iso):
+    """Per-activated-unit §3 metrics. Considers the UNION of rec dates (future) + every date
+    with a confirmed change (catches past repriced nights). captured/due-hit count only
+    DUE nights (passed or booked); future-open repriced nights are EXCLUDED."""
+    import statistics as _st
+    booked_idx = _strat_booked_index(lid)
+    dates = set(d for d in recs_by_date.keys() if d)
+    for key in _price_log:
+        p = key.split("|")
+        if len(p) == 2 and p[0] == str(lid):
+            dates.add(p[1])
+    nights = []
+    captured = 0
+    n_repriced = n_booked = n_empty = due = 0
+    base_booked, after_booked = [], []
+    for date in sorted(dates):
+        r = recs_by_date.get(date) or {}
+        base = r.get("baseline")
+        if base is None:
+            base = pricing_baseline(lid, date)
+        final = r.get("final")
+        cur = r.get("current")
+        repriced = len(_strat_night_confirmed(lid, date)) > 0
+        bk = booked_idx.get(date)
+        passed = date < today_iso
+        state = _strat_night_state(repriced, base, final, bool(bk), passed)
+        if repriced:
+            n_repriced += 1
+        is_due = repriced and (passed or bool(bk))
+        if is_due:
+            due += 1
+        cap = None
+        if state == "booked" and base is not None and bk and bk.get("booked_price") is not None:
+            cap = round(bk["booked_price"] - base)
+            captured += cap; n_booked += 1
+            base_booked.append(base); after_booked.append(bk["booked_price"])
+        elif state == "empty":
+            n_empty += 1
+        nights.append({"date": date, "state": state, "baseline": base, "final": final,
+                       "current": cur, "color": r.get("final_color"), "source": r.get("final_source"),
+                       "badges": r.get("badges") or [],
+                       "booked_price": (bk.get("booked_price") if bk else None),
+                       "booked_at": (bk.get("booked_at") if bk else None),
+                       "captured": cap, "due": is_due,
+                       "moved": (final is not None and base is not None and int(final) != int(base))})
+    return {"nights": nights, "captured": int(captured), "n_repriced": n_repriced,
+            "n_booked": n_booked, "n_empty": n_empty, "due_nights": due,
+            "due_hit": {"booked": n_booked, "due": due,
+                        "rate": (round(100.0 * n_booked / due) if due else None)},
+            "adr_before": (round(_st.median(base_booked)) if base_booked else None),
+            "adr_after": (round(_st.median(after_booked)) if after_booked else None),
+            "revpar_before": (round(sum(base_booked) / due) if due else None),
+            "revpar_after": (round(sum(after_booked) / due) if due else None),
+            "base_sum_booked": int(sum(base_booked))}
+
+def _strat_verdict(m):
+    """Najdi + EN one-line verdict per unit (§3)."""
+    n, mm, x, k = m["n_repriced"], m["n_booked"], m["captured"], m["n_empty"]
+    ar = f"رفعنا {n} ليلة، انحجزت {mm}، كسبنا +{x:,} ر.س فوق الأساسي، و{k} فاتت فاضية."
+    en = f"Repriced {n} nights · {mm} booked · +{x:,} SAR over baseline · {k} went empty."
+    return ar, en
+
+def _confirmed_changes_month(lids=None):
+    """Count CONFIRMED, non-dry Hostaway writes this month (optionally restricted to `lids`)."""
+    cur = datetime.now(TZ).strftime("%Y-%m")
+    n = 0
+    for key, entries in _price_log.items():
+        if lids is not None:
+            p = key.split("|")
+            try:
+                if int(p[0]) not in lids:
+                    continue
+            except (ValueError, IndexError):
+                continue
+        for e in entries:
+            if e.get("confirmed") is True and not e.get("dry") and (e.get("ts") or "")[:7] == cur:
+                n += 1
+    return n
+
+def _strat_attention(unit_metrics, today):
+    """Exception-based attention queue (§6). unit_metrics: [{lid,name,...,_recs}]."""
+    out = []
+    horizon48 = today + timedelta(days=2)
+    for u in unit_metrics:
+        nm = u["name"]
+        # 1. last-minute risk: applied future nights < 48h out, still open
+        risk = [n for n in u["nights"] if n["state"] == "applied"
+                and n["date"] and _parse_date(n["date"]) and today <= _parse_date(n["date"]) < horizon48]
+        if risk:
+            out.append({"kind": "lastminute", "lid": u["lid"],
+                        "ar": f"{nm}: {len(risk)} ليالي باقي أقل من ٤٨ ساعة وفاضية — خصم اللحظة الأخيرة شغّال.",
+                        "en": f"{nm}: {len(risk)} nights <48h out still open — last-minute step-down active."})
+        # 2. un-applied opportunity: suggested nights (final≠baseline, not pushed)
+        opp = [n for n in u["nights"] if n["state"] == "suggested" and n["final"] is not None and n["baseline"] is not None]
+        gain = sum(max(0, n["final"] - n["baseline"]) for n in opp)
+        if opp and gain >= 50:
+            out.append({"kind": "unapplied", "lid": u["lid"],
+                        "ar": f"{nm}: فرصة +{gain:,} ر.س على {len(opp)} ليلة ما طُبّقت.",
+                        "en": f"{nm}: +{gain:,} SAR opportunity on {len(opp)} un-applied nights."})
+        # 4. activated but silent: 0 confirmed changes
+        if u.get("last_change") is None and u.get("activated_days", 0) >= 2:
+            out.append({"kind": "silent", "lid": u["lid"],
+                        "ar": f"{nm}: مفعّلة من {u['activated_days']} أيام · ٠ تغييرات — تحتاج إعداد أو بيانات.",
+                        "en": f"{nm}: activated {u['activated_days']}d · 0 changes — needs setup or data."})
+    return out
+
 def _strategies_deep():
     """The deep Strategies command center — everything happening to the ACTIVATED units, built
     from the central price-change audit log + live recs + real booking outcomes. Per unit:
@@ -19910,6 +20044,7 @@ def _strategies_deep():
             log_by_lid.setdefault(lid, []).append(dict(e, date=dte))
     src_counts, units = {}, []
     total_changes = real_changes = dry_changes = open_uplift = 0
+    captured_total = base_sum_total = booked_total = due_total = 0
     for lid, urecs in by_lid.items():
         if not pricing_activated(lid):
             continue
@@ -19919,34 +20054,39 @@ def _strategies_deep():
             src_counts[e.get("source")] = src_counts.get(e.get("source"), 0) + 1
         u_real = sum(1 for e in changes if not e.get("dry"))
         total_changes += len(changes); real_changes += u_real; dry_changes += (len(changes) - u_real)
-        nights, u_uplift, moved = [], 0, 0
-        for r in sorted(urecs, key=lambda r: r.get("date") or ""):
+        # future-open uplift (for the scoreboard); §3 metrics come from _strat_unit_metrics
+        u_uplift = 0
+        for r in urecs:
             if (r.get("date") or "") < today:
                 continue
             base, fin = r.get("baseline"), r.get("final")
-            mv = (base is not None and fin is not None and int(fin) != int(base))
-            if mv:
-                moved += 1
-                if fin > base:
-                    u_uplift += (fin - base)
-            nights.append({"date": r.get("date"), "baseline": base, "final": fin,
-                           "current": r.get("current"), "color": r.get("final_color"),
-                           "source": r.get("final_source"), "badges": r.get("badges") or [], "moved": mv})
+            if base is not None and fin is not None and fin > base:
+                u_uplift += (fin - base)
         open_uplift += u_uplift
+        m = _strat_unit_metrics(lid, {r.get("date"): r for r in urecs if r.get("date")}, today)
+        var, ven = _strat_verdict(m)
+        captured_total += m["captured"]; base_sum_total += m["base_sum_booked"]
+        booked_total += m["n_booked"]; due_total += m["due_nights"]
         units.append({
             "lid": lid, "name": listings.get(lid) or (urecs[0].get("unit") if urecs else str(lid)),
             "compound": (urecs[0].get("compound") if urecs else ""),
             "changes": len(changes), "real_changes": u_real, "dry_changes": len(changes) - u_real,
-            "open_uplift": int(u_uplift), "moved_nights": moved,
+            "open_uplift": int(u_uplift), "moved_nights": sum(1 for n in m["nights"] if n["moved"]),
             "active_strategies": [k for k in STRATEGY_KEYS if strategy_enabled(k, lid)],
             "last_change": (ulog[-1]["ts"] if ulog else None),
-            "nights": nights[:60],
+            "activated_days": 2,    # placeholder; activation timestamp not tracked yet
+            "captured": m["captured"], "due_hit": m["due_hit"],
+            "n_repriced": m["n_repriced"], "n_booked": m["n_booked"], "n_empty": m["n_empty"],
+            "adr_before": m["adr_before"], "adr_after": m["adr_after"],
+            "revpar_before": m["revpar_before"], "revpar_after": m["revpar_after"],
+            "verdict_ar": var, "verdict_en": ven,
+            "nights": m["nights"][:90],
             "log": [dict(e, source_ar=PRICE_SOURCE_LABEL.get(e.get("source"), {}).get("ar", e.get("source")),
                          source_en=PRICE_SOURCE_LABEL.get(e.get("source"), {}).get("en", e.get("source")),
                          source_icon=PRICE_SOURCE_LABEL.get(e.get("source"), {}).get("icon", "•"))
                     for e in sorted(ulog, key=lambda e: e.get("ts") or "", reverse=True)[:50]],
         })
-    units.sort(key=lambda u: -u["open_uplift"])
+    units.sort(key=lambda u: -u["captured"] if u["captured"] else -u["open_uplift"])
     ls = _pe_learning_summary()
     ar_n, bk = ls.get("applied_real", 0), ls.get("applied_then_booked", 0)
     src_break = [{"source": s, "count": c,
@@ -19962,9 +20102,22 @@ def _strategies_deep():
             mom = round(100.0 * (spark[-1]["rev"] - spark[-2]["rev"]) / spark[-2]["rev"])
     except Exception as e:
         print("strategies deep revenue:", e)
+    activated_lids = set(u["lid"] for u in units)
+    today_d = datetime.now(TZ).date()
+    attention = _strat_attention(units, today_d)
+    # HERO — captured SAR over BOOKED repriced nights only (future-open excluded → no 2/348 lie)
+    captured_pct = (round(100.0 * captured_total / base_sum_total) if base_sum_total else None)
+    hero = {"captured": int(captured_total),
+            "captured_pct": captured_pct,
+            "have_outcome": booked_total > 0,
+            "booked": booked_total, "due": due_total,
+            "due_hit": {"booked": booked_total, "due": due_total,
+                        "rate": (round(100.0 * booked_total / due_total) if due_total else None)}}
     return {"activated": len(units), "total_units": len(by_lid),
             "total_changes": total_changes, "real_changes": real_changes, "dry_changes": dry_changes,
+            "confirmed_changes_month": _confirmed_changes_month(activated_lids),
             "open_uplift": int(open_uplift), "source_breakdown": src_break,
+            "hero": hero, "attention": attention,
             "hit_rate": {"have": ar_n > 0, "applied": ar_n, "booked": bk,
                          "rate": (round(100.0 * bk / ar_n) if ar_n else None)},
             "spark": spark, "mom": mom, "month": today[:7], "dry_run": PRICE_APPLY_DRYRUN, "units": units}
@@ -19973,6 +20126,86 @@ async def _api_strategies_deep(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(await asyncio.to_thread(_strategies_deep))
+
+_STORY_SRC_AR = {"engine": "المحرّك", "strategy": "الاستراتيجية الديناميكية",
+                 "last-minute": "خصم اللحظة الأخيرة", "manual": "تعديل يدوي",
+                 "monthly": "تطبيق شهري", "bulk": "تطبيق جماعي", "daily-job": "المهمة اليومية"}
+_STORY_SRC_EN = {"engine": "the engine", "strategy": "the dynamic strategy",
+                 "last-minute": "the last-minute step-down", "manual": "a manual edit",
+                 "monthly": "the monthly apply", "bulk": "the bulk apply", "daily-job": "the daily job"}
+
+def _apartment_story(lid, nights):
+    """One human sentence per confirmed change (§5), newest first, bucketed."""
+    by_date = {n["date"]: n for n in nights}
+    out = []
+    for date, n in by_date.items():
+        for e in _strat_night_confirmed(lid, date):
+            old, new = e.get("old"), e.get("new")
+            sa = _STORY_SRC_AR.get(e.get("source"), e.get("source") or "")
+            se = _STORY_SRC_EN.get(e.get("source"), e.get("source") or "")
+            hhmm = (e.get("ts") or "")[11:16]
+            bp = n.get("booked_price"); cap = n.get("captured")
+            if n["state"] == "booked":
+                ra = f"انحجزت بـ{bp:,} يوم {n.get('booked_at') or ''} ← +{cap or 0:,}" if bp else "انحجزت"
+                re_ = f"booked at {bp:,} on {n.get('booked_at') or ''} → +{cap or 0:,}" if bp else "booked"
+            elif n["state"] == "empty":
+                ra, re_ = "فاتت فاضية", "went empty"
+            else:
+                ra, re_ = "لسا مفتوحة", "still open"
+            raised = (old is not None and new is not None and new > old)
+            booked = (n["state"] == "booked")
+            bucket = ("ربح" if (raised and booked) else "أنقذنا ليلة" if (not raised and booked)
+                      else "رفعنا زيادة" if (raised and n["state"] == "empty") else "الطلب ضعيف")
+            out.append({"date": date, "ts": e.get("ts"), "bucket": bucket, "state": n["state"],
+                        "text_ar": f"{date}: {old} ← {new} · {sa} · أُرسل {hhmm} وتأكّد في Hostaway · {ra}",
+                        "text_en": f"{date}: {old} → {new} · {se} · sent {hhmm}, confirmed in Hostaway · {re_}"})
+    out.sort(key=lambda x: x.get("ts") or "", reverse=True)
+    return out[:80]
+
+def _apartment_page(lid):
+    """Full §7 payload for the dedicated apartment page (reuses the engine + §3 metrics)."""
+    recs = [r for r in (_pe_get_recs().get("recs") or []) if r.get("lid") == lid]
+    by_date = {r.get("date"): r for r in recs if r.get("date")}
+    listings = get_listings_map() or {}
+    name = listings.get(lid) or (recs[0].get("unit") if recs else str(lid))
+    today = datetime.now(TZ).date().isoformat()
+    m = _strat_unit_metrics(lid, by_date, today)
+    var, ven = _strat_verdict(m)
+    floor = ceiling = median = None
+    pace = None
+    if recs:
+        floor, ceiling, median = recs[0].get("floor"), recs[0].get("ceiling"), recs[0].get("median")
+    if by_date:
+        try:
+            nd = _pe_night_detail(lid, sorted(by_date)[0])
+            if nd and not nd.get("error"):
+                floor = nd.get("floor", floor); ceiling = nd.get("ceiling", ceiling); median = nd.get("median", median)
+                pace = {"signal": nd.get("signal"), "demand_pill": nd.get("demand_pill"),
+                        "occ_now": nd.get("occ_now"), "typical_occ": nd.get("typical_occ"),
+                        "days_out": nd.get("days_out")}
+        except Exception as e:
+            print("apartment night detail:", e)
+    return {"lid": lid, "name": name, "compound": (recs[0].get("compound") if recs else ""),
+            "activated": pricing_activated(lid),
+            "verdict_ar": var, "verdict_en": ven,
+            "captured": m["captured"], "due_hit": m["due_hit"],
+            "adr_before": m["adr_before"], "adr_after": m["adr_after"],
+            "revpar_before": m["revpar_before"], "revpar_after": m["revpar_after"],
+            "n_repriced": m["n_repriced"], "n_booked": m["n_booked"], "n_empty": m["n_empty"],
+            "floor": floor, "ceiling": ceiling, "median": median, "pace": pace,
+            "nights": m["nights"], "story": _apartment_story(lid, m["nights"]),
+            "active_strategies": [k for k in STRATEGY_KEYS if strategy_enabled(k, lid)],
+            "toggles": {k: strategy_enabled(k, lid) for k in STRATEGY_KEYS},
+            "dry_run": PRICE_APPLY_DRYRUN}
+
+async def _api_apartment(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.match_info.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    return _json(await asyncio.to_thread(_apartment_page, lid))
 
 async def _api_strategies(request):
     if not _dash_auth(request):
@@ -24347,6 +24580,7 @@ async def start_web_server():
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_get("/api/strategies/deep", _api_strategies_deep)
+        app.router.add_get("/api/apartment/{lid}", _api_apartment)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
         app.router.add_get("/api/discount/status", _api_discount_status)
         app.router.add_post("/api/discount/pause", _api_discount_pause)
