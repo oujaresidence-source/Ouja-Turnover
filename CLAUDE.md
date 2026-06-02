@@ -93,6 +93,19 @@ python3 -m pyflakes bot.py                                  # ignore "imported b
 Then verify the embedded dashboard string is intact (extract `DASHBOARD_HTML` and check):
 - `count("{") == count("}")`, `count("(") == count(")")`, `count("`") is even`.
 - Every `tb` tab `id` has a label key in both `T.ar` and `T.en`.
+- **PARSE THE EMBEDDED JS — brace-balance is NOT enough.** A single bad token kills the whole
+  script so the dashboard **won't even log in** (this has bitten twice). `pip install esprima`
+  (pure-Python, works offline), then parse every `<script>` block of the *served* HTML:
+  ```
+  import bot, esprima, re
+  for js in re.findall(r"<script>(.*?)</script>", bot.DASHBOARD_HTML, re.S):
+      esprima.parseScript(js)        # raises on the offending Line/Col
+  ```
+  **The #1 cause:** `DASHBOARD_HTML` is a normal (non-raw) triple-quoted string, so any
+  `\n`/`\t`/`\u…`/`\s` you type in the JS is consumed by **Python** first. A `\n` inside a
+  JS string literal (e.g. `.join('\n')`, a `confirm()` body, even a `//` comment) becomes a
+  REAL newline → unterminated string → dead login. Use `String.fromCharCode(10)` for newlines;
+  never put a backslash-escape inside the embedded JS.
 And run a quick **synthetic-data logic test** for any new computation (e.g. feed fake
 reservations into the new function and assert the numbers) before trusting it on live data.
 

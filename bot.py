@@ -10212,16 +10212,17 @@ async function peApply(){
 }
 // Stage 6: per-month apply — preview every price for the month, confirm, push, show real result.
 async function applyMonth(month){
+  var NL=String.fromCharCode(10);   // newline via charCode — a backslash-n literal gets mangled by Python (CLAUDE.md trap 1)
   var pv; try{ pv=await api('/api/pricing/month-preview?month='+encodeURIComponent(month)); }
   catch(_){ pv=null; }
   if(!pv || pv.error){ toast((pv&&pv.error)||'⚠'); return; }
   if(!pv.count){ toast(L==='ar'?('ما فيه أسعار للتطبيق في '+month):('Nothing to apply for '+month)); return; }
   var lines=(pv.plan||[]).slice(0,40).map(function(p){
-    return (p.unit||('#'+p.lid))+' · '+p.date+': '+fmt(p.current)+' → '+fmt(p.final); }).join('\n');
-  if(pv.count>40) lines+='\n… +'+(pv.count-40);
+    return (p.unit||('#'+p.lid))+' · '+p.date+': '+fmt(p.current)+' → '+fmt(p.final); }).join(NL);
+  if(pv.count>40) lines+=NL+'… +'+(pv.count-40);
   var dryTxt=pv.dry_run?(L==='ar'?' (تجربة — ما يتغير شي فعلي)':' (DRY-RUN)'):'';
-  var head=(L==='ar'?('تطبيق '+pv.count+' سعر لشهر '+month+dryTxt+'؟\n('+pv.raises+' رفع · '+pv.drops+' خفض)\n\n')
-                    :('Apply '+pv.count+' prices for '+month+dryTxt+'?\n('+pv.raises+' up · '+pv.drops+' down)\n\n'));
+  var head=(L==='ar'?('تطبيق '+pv.count+' سعر لشهر '+month+dryTxt+'؟'+NL+'('+pv.raises+' رفع · '+pv.drops+' خفض)'+NL+NL)
+                    :('Apply '+pv.count+' prices for '+month+dryTxt+'?'+NL+'('+pv.raises+' up · '+pv.drops+' down)'+NL+NL));
   if(!confirm(head+lines)) return;
   toast('⏳ '+month+'…');
   var r; try{ r=await post('/api/pricing/apply-month',{month:month}); }catch(_){ r=null; }
