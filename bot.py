@@ -8242,20 +8242,16 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="page-head">
           <div>
             <div class="page-title" id="t_strat">الاستراتيجيات</div>
-            <div class="page-sub" id="t_strat_sub">الوحدات المتابَعة تلقائياً — اضغط لرؤية قبل/بعد كل ليلة</div>
+            <div class="page-sub" id="t_strat_sub">مركز التحكّم العميق للشقق المفعّلة — كل تغيير سعر، مصدره، نتيجته.</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="strImportHostaway()">⬇ <span id="t_str_import">استيراد من Hostaway</span></button>
+            <button class="btn ghost sm" onclick="loadStrategies()">↻</button>
           </div>
         </div>
-
-        <div class="page-help" id="ph_strat" data-help-key="strat">
-          <button class="ph-x" onclick="dismissHelp('strat')" title="إخفاء">×</button>
-          <div class="ph-t">⚡ الاستراتيجيات المتابَعة</div>
-          <div class="ph-b">
-            كل فرصة سعر طبقتها = استراتيجية البوت يتابعها يومياً. تشوف هنا: حُجزت الليلة ولا لا،
-            كم إيراد تحقّق فعلاً، ومتى انتهت. تقدر <b>توقف</b> أي استراتيجية وقت ما تبي.
-          </div>
-        </div>
-
+        <div class="card"><div id="stratHeader"><div class="empty sk">—</div></div></div>
         <div class="card">
+          <div class="card-head"><span class="card-title">🏘️ <span id="t_str_units">الشقق المفعّلة</span></span><span class="card-sub" id="stratUnitsCount"></span></div>
           <div id="stratListBody"><div class="empty sk">—</div></div>
         </div>
       </section>
@@ -10536,9 +10532,48 @@ async function applyMonth(month){
   loadPricing();
 }
 async function loadStrategies(){
-  document.getElementById('stratListBody').innerHTML = '<div class="empty sk">—</div>';
-  try{ D.strat = await api('/api/strategies') }catch(_){ D.strat={items:[]} }
+  var lb=document.getElementById('stratListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
+  try{ D.stratD = await api('/api/strategies/deep'); }catch(_){ D.stratD={units:[],source_breakdown:[]}; }
+  var ti=document.getElementById('t_str_import'); if(ti) ti.textContent=(L==='ar'?'استيراد من Hostaway':'Import from Hostaway');
+  var tu=document.getElementById('t_str_units'); if(tu) tu.textContent=(L==='ar'?'الشقق المفعّلة':'Activated apartments');
+  renderStrategiesHeader();
   renderStrategies();
+}
+async function strImportHostaway(){
+  toast(L==='ar'?'⏳ سحب من Hostaway…':'⏳ Importing…');
+  var r; try{ r=await post('/api/listings/sync',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ var s=r.summary||{}; toast('✓ '+(s.new||0)+(L==='ar'?' قائمة جديدة (راجع صفحة التسعير لتفعيلها)':' new (activate them in Pricing)')); }
+  else toast((r&&r.error)||'⚠');
+}
+function renderStrategiesHeader(){
+  var el=document.getElementById('stratHeader'); if(!el) return;
+  var d=D.stratD||{}; var ar=(L==='ar');
+  if(d.dry_run){ el.innerHTML='<div class="dry-banner" style="margin-bottom:12px">⚠ '+(ar?'وضع التجربة (DRY-RUN) — التغييرات تُحسب وتُسجّل بس ما تُكتب فعلياً في Hostaway':'DRY-RUN — changes are computed + logged but NOT written to Hostaway')+'</div>'; } else { el.innerHTML=''; }
+  function kpi(v,l){ return '<div class="pr-kpi"><div class="pr-kpi-v">'+v+'</div><div class="pr-kpi-l">'+esc(l)+'</div></div>'; }
+  var hit=d.hit_rate||{};
+  var sp=d.spark||[]; var mx=Math.max.apply(null,sp.map(function(x){return x.rev||0;}).concat([1]));
+  var bars=sp.map(function(x,i){ return '<i class="'+(i===sp.length-1?'last':'')+'" style="height:'+Math.max(Math.round((x.rev||0)/mx*100),4)+'%" title="'+esc(x.m)+': '+fmt(x.rev)+'"></i>'; }).join('');
+  var momTxt=(d.mom==null?'—':((d.mom>0?'▲ +':(d.mom<0?'▼ ':''))+d.mom+'%')), momCol=(d.mom>0?'#2e9e6b':(d.mom<0?'#c2683f':'var(--mut)'));
+  var hk=hit.have? kpi(hit.rate+'%', ar?('توصيات طُبّقت ثم انحجزت ('+hit.booked+'/'+hit.applied+')'):('applied → booked ('+hit.booked+'/'+hit.applied+')'))
+    : '<div class="pr-kpi"><div class="pr-kpi-v" style="font-size:13px;font-weight:600;line-height:1.3">'+(ar?'لا بيانات بعد':'no data yet')+'</div><div class="pr-kpi-l">'+(ar?'نسبة الحجز بعد التطبيق — بعد تطبيق فعلي':'booked-after-apply — after real applies')+'</div></div>';
+  el.innerHTML+='<div class="pr-an">'
+    + kpi((d.activated||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(d.total_units||0)+'</span>', ar?'شقق مفعّلة':'activated apartments')
+    + kpi('+'+fmt(d.open_uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', ar?'فرصة رفع مفتوحة':'open uplift')
+    + kpi((d.real_changes||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(d.total_changes||0)+'</span>', ar?'تغييرات فعلية / إجمالي':'real / total changes')
+    + '<div class="pr-kpi"><div class="pr-kpi-l">'+(ar?'الإيراد الشهري · ':'Monthly revenue · ')+'<b style="color:'+momCol+'">'+momTxt+'</b></div><div class="pe-spark">'+bars+'</div></div>'
+    + hk + '</div>';
+  // per-source breakdown — WHICH price change is actually happening
+  var sb=d.source_breakdown||[];
+  if(sb.length){
+    var tot=sb.reduce(function(a,b){return a+b.count;},0)||1;
+    el.innerHTML+='<div style="margin-top:14px"><div class="pr-kpi-l" style="margin-bottom:6px">'+(ar?'مصدر تغييرات السعر (وين الشغل صار):':'where the price changes came from:')+'</div>'
+      +'<div style="display:flex;flex-direction:column;gap:6px">'+sb.map(function(s){
+        var pc=Math.round(s.count/tot*100);
+        return '<div style="display:flex;align-items:center;gap:10px;font-size:12px"><span style="min-width:150px">'+s.icon+' '+esc(ar?s.label_ar:s.label_en)+'</span>'
+          +'<span style="flex:1;height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:'+pc+'%;background:var(--gold);border-radius:99px"></span></span>'
+          +'<b style="min-width:64px;text-align:end">'+s.count+' ('+pc+'%)</b></div>';
+      }).join('')+'</div></div>';
+  }
 }
 async function loadRevenue(){
   // Pull revenue + forward calendar in parallel so the new KPI cards and the
@@ -15514,31 +15549,58 @@ async function doApplyFromDrawer(lid, btn){
    STRATEGIES
    ============================================================ */
 function renderStrategies(){
-  const d = D.strat || {items:[]}; const items = d.items||[];
-  const body = document.getElementById('stratListBody');
-  const ar = (L==='ar');
-  // Item 24: loud red banner when price writes are OFF (PRICE_APPLY_DRYRUN=1).
-  const banner = d.dry_run
-    ? '<div class="dry-banner">⚠ '+(ar?'وضع التجربة (DRY-RUN) — الأسعار تُحسب بس ما تُكتب فعلياً في Hostaway':'DRY-RUN — prices are computed but NOT written to Hostaway')+'</div>'
-    : '';
-  if(!items.length){ body.innerHTML = banner + '<div class="empty"><span class="ic">⚡</span>'+t().st_empty+'</div>'; return }
-  body.innerHTML = banner + '<div class="inbox-list">' + items.map(function(s){
-    const pct = s.total?Math.round(s.booked/s.total*100):0;
-    // Item 22: working / not-moving / done flag.
-    const fl = s.flag==='working' ? '<span class="pill ok">'+(ar?'● شغّالة':'● Working')+'</span>'
-             : s.flag==='stalled' ? '<span class="pill danger">'+(ar?'⚠ ما تحرّكت':'⚠ Not moving')+'</span>'
-             : '<span class="pill muted">'+(ar?'منتهية':'Done')+'</span>';
-    // Item 21: revenue captured since start (estimate).
-    const rev = s.rev_captured ? (' · ~'+fmt(s.rev_captured)+' SAR '+(ar?'محصّلة':'captured')) : '';
-    const edge = s.flag==='stalled' ? 'var(--red)' : (s.active?'var(--green)':'var(--mut)');
-    return '<div class="ibox" style="border-color:color-mix(in srgb,'+edge+' 36%,var(--line));cursor:pointer" onclick="openStrategyDetail('+s.lid+')">'
-      + '<div class="ibox-row">'
-      + '<div class="ibox-icon" style="background:'+(s.active?'var(--green-soft)':'var(--surface-2)')+';color:'+(s.active?'var(--green)':'var(--mut)')+'">⚡</div>'
-      + '<div class="ibox-main"><div class="ibox-top"><span class="ibox-who">'+esc(s.name)+'</span>'+fl+'</div><div class="ibox-preview">'+s.booked+'/'+s.total+' '+t().st_booked+rev+' · '+s.changes_total+' '+t().st_changes+'</div></div>'
-      + '<div class="ibox-meta"><span class="ibox-conf '+(pct>=50?'high':'mid')+'">'+pct+'%</span></div>'
-      + '<span class="ibox-expand">←</span>'
-      + '</div></div>';
-  }).join('') + '</div>';
+  var d=D.stratD||{units:[]}; var units=d.units||[]; var ar=(L==='ar');
+  var body=document.getElementById('stratListBody'), cnt=document.getElementById('stratUnitsCount');
+  if(cnt) cnt.textContent=units.length+(ar?' شقة مفعّلة':' activated');
+  if(!units.length){ body.innerHTML='<div class="empty" style="padding:30px;text-align:center"><span class="ic">⚡</span>'+(ar?'ما فعّلت أي شقة بعد — روح صفحة «التسعير» وفعّل الشقق اللي تبي تتابعها هنا.':'No activated apartments yet — go to Pricing and activate the units you want tracked here.')+'</div>'; return; }
+  window._strByLid={}; units.forEach(function(u){ window._strByLid[u.lid]=u; });
+  body.innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+units.map(function(u){
+    var chips=(u.active_strategies||[]).map(function(k){ return '<span class="pe-chip" title="'+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'">'+_PE_STRAT_META[k].ic+'</span>'; }).join('');
+    return '<div class="pe-apt"><button class="pe-apt-head" type="button" aria-expanded="false" onclick="strExpand(this,'+u.lid+')">'
+      +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
+      +'<span class="pe-apt-name">'+esc(u.name||('وحدة '+u.lid))+(u.compound?(' <span class="muted" style="font-size:11px">· '+esc(u.compound)+'</span>'):'')+'</span>'
+      +'<span class="pe-apt-chips">'+chips+'</span>'
+      +'<span class="pe-apt-stats">'+(u.open_uplift>0?('<span class="pe-apt-up">+'+fmt(u.open_uplift)+' ر.س</span>'):'')
+        +'<span class="pe-apt-opp">'+u.real_changes+'/'+u.changes+' '+(ar?'تغيير':'chg')+'</span></span>'
+      +'</button><div class="pe-apt-body" id="strb_'+u.lid+'"></div></div>';
+  }).join('')+'</div>';
+}
+function strExpand(btn,lid){
+  var open=btn.getAttribute('aria-expanded')==='true';
+  if(!open){ document.querySelectorAll('#stratListBody .pe-apt-head').forEach(function(b){b.setAttribute('aria-expanded','false');b.classList.remove('on');});
+             document.querySelectorAll('#stratListBody .pe-apt-body.open').forEach(function(be){be.classList.remove('open');}); }
+  btn.setAttribute('aria-expanded',open?'false':'true'); btn.classList.toggle('on',!open);
+  var el=document.getElementById('strb_'+lid); if(!el) return;
+  if(open){ el.classList.remove('open'); return; }
+  el.innerHTML=_strDetail((window._strByLid||{})[lid]); el.classList.add('open');
+}
+function _strDetail(u){
+  if(!u) return ''; var ar=(L==='ar');
+  var moved=(u.nights||[]).filter(function(n){return n.moved && n.baseline!=null && n.final!=null;});
+  var nightsH = moved.length
+    ? '<div class="pr-kpi-l" style="margin:8px 14px 4px">'+(ar?'قبل ← بعد لكل ليلة تحرّكت (الأساس مجمّد):':'before → after per moved night (baseline frozen):')+'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 8px">'+moved.map(function(n){
+        var col=n.color==='raise'?'#2e9e6b':(n.color==='drop'?'#c2683f':'var(--mut)');
+        return '<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:11px"><div class="muted">'+esc(n.date)+'</div><div><span class="muted">'+fmt(n.baseline)+'</span> ← <b style="color:'+col+'">'+fmt(n.final)+'</b></div></div>';
+      }).join('')+'</div>'
+    : '<div class="muted" style="padding:8px 14px;font-size:12px">'+(ar?'ما تحرّكت أي ليلة قادمة بعد عن الأساس.':'No upcoming night has moved off baseline yet.')+'</div>';
+  var log=(u.log||[]);
+  var logH = log.length
+    ? '<div class="pr-kpi-l" style="margin:10px 14px 4px">'+(ar?'السجل الكامل — كل تغيير سعر ومصدره (الأحدث أولاً):':'full change log — every price change + its source (newest first):')+'</div>'
+      +'<div style="max-height:300px;overflow-y:auto;padding:0 14px 12px">'+log.map(function(e){
+        var mv=(e.old!=null&&e.new!=null&&e.old!==e.new);
+        var col=(e.new>e.old)?'#2e9e6b':(e.new<e.old?'#c2683f':'var(--mut)');
+        var tag=e.dry?(' <span style="color:var(--gold)">· '+(ar?'تجربة':'dry')+'</span>')
+               :(e.confirmed===true?(' <span style="color:#2e9e6b">· '+(ar?'مؤكّد بـHostaway':'confirmed')+'</span>')
+               :(e.confirmed===false?(' <span style="color:var(--red)">· '+(ar?'غير مؤكّد':'unconfirmed')+'</span>'):''));
+        return '<div style="display:flex;gap:9px;padding:7px 0;border-bottom:1px solid var(--line)">'
+          +'<span style="font-size:14px">'+(e.source_icon||'•')+'</span>'
+          +'<div style="min-width:0;flex:1"><div style="font-size:12px;font-weight:600">'+esc(ar?e.source_ar:e.source_en)
+            +(mv?(' · <span class="muted">'+fmt(e.old)+'</span> → <b style="color:'+col+'">'+fmt(e.new)+'</b> ر.س'):'')+tag+'</div>'
+          +'<div class="muted" style="font-size:11px">'+esc(e.date||'')+' · '+_expTime(e.ts)+(e.reason?(' · '+esc(e.reason)):'')+'</div></div></div>';
+      }).join('')+'</div>'
+    : '<div class="muted" style="padding:8px 14px;font-size:12px">'+(ar?'ما فيه تغييرات مسجّلة بعد لهالشقة.':'No price changes logged for this unit yet.')+'</div>';
+  return nightsH+logH+'<div style="padding:6px 14px 12px"><button class="btn ghost xs" onclick="go(&#39;pricing&#39;)">↗ '+(ar?'افتح في التسعير للتعديل':'Open in Pricing to edit')+'</button></div>';
 }
 
 async function openStrategyDetail(lid){
@@ -19823,6 +19885,94 @@ def _strategies_list():
     # so a strategy producing zero movement surfaces at the top to be fixed.
     out.sort(key=lambda x: (not x["active"], x["booked"] > 0, -(x["updated"] or 0)))
     return out
+
+def _strategies_deep():
+    """The deep Strategies command center — everything happening to the ACTIVATED units, built
+    from the central price-change audit log + live recs + real booking outcomes. Per unit:
+    every change (old→new · source · confirmed/dry · when), per-night before→after, the active
+    strategies, open uplift, and the full timeline. Portfolio totals + per-source breakdown."""
+    recs = _pe_get_recs().get("recs") or []
+    by_lid = {}
+    for r in recs:
+        by_lid.setdefault(r.get("lid"), []).append(r)
+    listings = get_listings_map() or {}
+    today = datetime.now(TZ).date().isoformat()
+    # index the append-only change log by listing
+    log_by_lid = {}
+    for key, entries in _price_log.items():
+        parts = key.split("|")
+        try:
+            lid = int(parts[0])
+        except (ValueError, IndexError):
+            continue
+        dte = parts[1] if len(parts) > 1 else ""
+        for e in entries:
+            log_by_lid.setdefault(lid, []).append(dict(e, date=dte))
+    src_counts, units = {}, []
+    total_changes = real_changes = dry_changes = open_uplift = 0
+    for lid, urecs in by_lid.items():
+        if not pricing_activated(lid):
+            continue
+        ulog = sorted(log_by_lid.get(lid, []), key=lambda e: e.get("ts") or "")
+        changes = [e for e in ulog if e.get("old") is not None and e.get("new") is not None and e["old"] != e["new"]]
+        for e in changes:
+            src_counts[e.get("source")] = src_counts.get(e.get("source"), 0) + 1
+        u_real = sum(1 for e in changes if not e.get("dry"))
+        total_changes += len(changes); real_changes += u_real; dry_changes += (len(changes) - u_real)
+        nights, u_uplift, moved = [], 0, 0
+        for r in sorted(urecs, key=lambda r: r.get("date") or ""):
+            if (r.get("date") or "") < today:
+                continue
+            base, fin = r.get("baseline"), r.get("final")
+            mv = (base is not None and fin is not None and int(fin) != int(base))
+            if mv:
+                moved += 1
+                if fin > base:
+                    u_uplift += (fin - base)
+            nights.append({"date": r.get("date"), "baseline": base, "final": fin,
+                           "current": r.get("current"), "color": r.get("final_color"),
+                           "source": r.get("final_source"), "badges": r.get("badges") or [], "moved": mv})
+        open_uplift += u_uplift
+        units.append({
+            "lid": lid, "name": listings.get(lid) or (urecs[0].get("unit") if urecs else str(lid)),
+            "compound": (urecs[0].get("compound") if urecs else ""),
+            "changes": len(changes), "real_changes": u_real, "dry_changes": len(changes) - u_real,
+            "open_uplift": int(u_uplift), "moved_nights": moved,
+            "active_strategies": [k for k in STRATEGY_KEYS if strategy_enabled(k, lid)],
+            "last_change": (ulog[-1]["ts"] if ulog else None),
+            "nights": nights[:60],
+            "log": [dict(e, source_ar=PRICE_SOURCE_LABEL.get(e.get("source"), {}).get("ar", e.get("source")),
+                         source_en=PRICE_SOURCE_LABEL.get(e.get("source"), {}).get("en", e.get("source")),
+                         source_icon=PRICE_SOURCE_LABEL.get(e.get("source"), {}).get("icon", "•"))
+                    for e in sorted(ulog, key=lambda e: e.get("ts") or "", reverse=True)[:50]],
+        })
+    units.sort(key=lambda u: -u["open_uplift"])
+    ls = _pe_learning_summary()
+    ar_n, bk = ls.get("applied_real", 0), ls.get("applied_then_booked", 0)
+    src_break = [{"source": s, "count": c,
+                  "label_ar": PRICE_SOURCE_LABEL.get(s, {}).get("ar", s),
+                  "label_en": PRICE_SOURCE_LABEL.get(s, {}).get("en", s),
+                  "icon": PRICE_SOURCE_LABEL.get(s, {}).get("icon", "•")}
+                 for s, c in sorted(src_counts.items(), key=lambda kv: -kv[1])]
+    spark, mom = [], None
+    try:
+        rv = _compute_revenue()
+        spark = [{"m": x.get("m"), "rev": x.get("rev", 0)} for x in (rv.get("monthly") or [])][-6:]
+        if len(spark) >= 2 and spark[-2]["rev"]:
+            mom = round(100.0 * (spark[-1]["rev"] - spark[-2]["rev"]) / spark[-2]["rev"])
+    except Exception as e:
+        print("strategies deep revenue:", e)
+    return {"activated": len(units), "total_units": len(by_lid),
+            "total_changes": total_changes, "real_changes": real_changes, "dry_changes": dry_changes,
+            "open_uplift": int(open_uplift), "source_breakdown": src_break,
+            "hit_rate": {"have": ar_n > 0, "applied": ar_n, "booked": bk,
+                         "rate": (round(100.0 * bk / ar_n) if ar_n else None)},
+            "spark": spark, "mom": mom, "month": today[:7], "dry_run": PRICE_APPLY_DRYRUN, "units": units}
+
+async def _api_strategies_deep(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_strategies_deep))
 
 async def _api_strategies(request):
     if not _dash_auth(request):
@@ -24196,6 +24346,7 @@ async def start_web_server():
         app.router.add_post("/api/pricing/import-airbnb", _api_pricing_import_airbnb)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
+        app.router.add_get("/api/strategies/deep", _api_strategies_deep)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
         app.router.add_get("/api/discount/status", _api_discount_status)
         app.router.add_post("/api/discount/pause", _api_discount_pause)
