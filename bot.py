@@ -786,6 +786,8 @@ def apply_discount_tier(pct):
     never compound. Returns (changes, today). Honors DRY-RUN."""
     factor = (100.0 - pct) / 100.0
     today = datetime.now(TZ).date().isoformat()
+    if not strategy_enabled("last-minute"):
+        return [], today                        # last-minute step-down disabled globally
     state = _load_discount_state()
     state = {today: state.get(today, {})}      # keep only today's record
     day_orig = state[today]
@@ -795,6 +797,8 @@ def apply_discount_tier(pct):
         lid_s = str(lid)
         if is_unit_skipped(lid):
             continue                                       # owner asked to hold price on this unit
+        if not strategy_enabled("last-minute", lid):
+            continue                                       # last-minute step-down disabled for this unit
         try:
             cal = api_get(f"/listings/{lid}/calendar",
                           params={"startDate": today, "endDate": today})
@@ -16829,11 +16833,12 @@ def _pe_compute_recommendations(horizon=None):
 _pe_rec_cache = {"data": None, "ts": 0}
 
 def _pe_get_recs(force=False, ttl=900):
-    """Cached recommendation list (~15 min; the panel re-reads each night's price live on open)."""
+    """Cached recommendation list (~15 min). Decorated live on every read with the final price +
+    active strategy layers/badges so toggles + active strategies reflect immediately."""
     if (not force) and _pe_rec_cache["data"] and (time.time() - _pe_rec_cache["ts"] < ttl):
-        return _pe_rec_cache["data"]
+        return _pe_decorate(_pe_rec_cache["data"])
     _pe_rec_cache.update({"data": _pe_compute_recommendations(), "ts": time.time()})
-    return _pe_rec_cache["data"]
+    return _pe_decorate(_pe_rec_cache["data"])
 
 # ---- Stage 6 (learning loop): persist applies; backfill real outcomes daily; summarize ----
 # (Future: gentle A/B price-testing for true elasticity — FLAGGED, not built. Observational
@@ -16936,6 +16941,128 @@ def price_change_log(lid, date_iso):
         return list(_price_log.get(f"{int(lid)}|{str(date_iso)[:10]}", []))
     except (TypeError, ValueError):
         return []
+
+# ====================================================================
+#  STRATEGY TOGGLES + FINAL-PRICE LAYER MODEL  (Stage 3 + Stage 7)
+#  All strategies are ON by default. They can be disabled globally and/or per
+#  unit. The "final price" model is transparent:
+#     engine base recommendation  →  active strategy layers  →  final price.
+#  weekend/event are informational layers (already inside the learned base);
+#  last-minute step-down and the dynamic strategy are REAL layers that move the
+#  number, and disabling either removes its effect.
+# ====================================================================
+STRATEGY_TOGGLE_FILE = "strategy_toggles.json"
+STRATEGY_KEYS = ["last-minute", "strategy", "weekend", "event"]
+STRATEGY_KEY_LABEL = {
+    "last-minute": {"ar": "خصم اللحظة الأخيرة", "en": "Last-minute step-down", "icon": "⏱️", "real": True},
+    "strategy":    {"ar": "الاستراتيجية الديناميكية", "en": "Dynamic strategy", "icon": "⚡", "real": True},
+    "weekend":     {"ar": "تسعير نهاية الأسبوع", "en": "Weekend pricing", "icon": "📆", "real": False},
+    "event":       {"ar": "تسعير المناسبات", "en": "Event pricing", "icon": "🎉", "real": False},
+}
+_strategy_toggles = {"global": {}, "by_unit": {}}    # absence = ENABLED (ON by default)
+try:
+    _st_loaded = _load_json(STRATEGY_TOGGLE_FILE, None)
+    if isinstance(_st_loaded, dict):
+        _strategy_toggles["global"] = _st_loaded.get("global", {}) or {}
+        _strategy_toggles["by_unit"] = _st_loaded.get("by_unit", {}) or {}
+except Exception:
+    pass
+
+def _strategy_toggles_save():
+    try:
+        _save_json(STRATEGY_TOGGLE_FILE, _strategy_toggles)
+    except Exception as e:
+        print("strategy toggle save:", e)
+
+def strategy_enabled(name, lid=None):
+    """True unless the strategy is disabled globally OR for this specific unit (ON by default)."""
+    if _strategy_toggles["global"].get(name) is False:
+        return False
+    if lid is not None:
+        u = _strategy_toggles["by_unit"].get(str(lid))
+        if isinstance(u, dict) and u.get(name) is False:
+            return False
+    return True
+
+def set_strategy_toggle(name, enabled, lid=None):
+    """Enable/disable a strategy globally (lid=None) or for one unit. Returns False on bad name."""
+    if name not in STRATEGY_KEYS:
+        return False
+    if lid is None:
+        if enabled:
+            _strategy_toggles["global"].pop(name, None)
+        else:
+            _strategy_toggles["global"][name] = False
+    else:
+        u = _strategy_toggles["by_unit"].setdefault(str(lid), {})
+        if enabled:
+            u.pop(name, None)
+        else:
+            u[name] = False
+        if not u:
+            _strategy_toggles["by_unit"].pop(str(lid), None)
+    _strategy_toggles_save()
+    return True
+
+def _event_names_for(d):
+    out = []
+    for e in (events_for_date(d) if d else []):
+        nm = e.get("name") or e.get("label") or e.get("id")
+        if nm:
+            out.append(nm)
+    return out
+
+def _active_layers_for(lid, date_iso, base_price, current_price):
+    """Active strategy layers on (lid, date) + the resulting FINAL price (honors toggles).
+    base = engine recommendation; final = the dynamic-strategy target when a strategy manages
+    the date (else base). weekend/event are informational (already inside the learned base).
+    Returns {final, base, source, color, layers:[{key,label_ar,label_en,icon,enabled,real,note_ar,effect}]}."""
+    d = _parse_date(date_iso)
+    today = datetime.now(TZ).date()
+    base_price = base_price or current_price
+    final = base_price
+    source = "engine"
+    layers = []
+    def _add(key, note_ar="", effect=None):
+        meta = STRATEGY_KEY_LABEL[key]
+        layers.append({"key": key, "label_ar": meta["ar"], "label_en": meta["en"],
+                       "icon": meta["icon"], "real": meta["real"],
+                       "enabled": strategy_enabled(key, lid), "note_ar": note_ar, "effect": effect})
+    if d and d.weekday() in WEEKEND_DAYS:
+        _add("weekend", "السعر المتعلّم يشمل تأثير نهاية الأسبوع أصلاً")
+    evs = _event_names_for(d)
+    if evs:
+        _add("event", "·".join(evs), effect="·".join(evs))
+    strat = _pricing_strategies.get(lid)
+    if strat and strat.get("active") and date_iso in (strat.get("dates") or {}):
+        _add("strategy", "البوت يتابع هالليلة ويعيد تحسينها تلقائياً")
+        if strategy_enabled("strategy", lid):
+            tgt = (strat["dates"].get(date_iso) or {}).get("cur")
+            if tgt:
+                final = int(round(tgt))
+                source = "strategy"
+    if d == today:
+        _add("last-minute", "ينزل السعر تدريجياً اليوم لو ظلّت فاضية (حتى ~-٣٠٪)")
+    color = "hold"
+    if current_price and final:
+        if final > current_price + 0.5:
+            color = "raise"
+        elif final < current_price - 0.5:
+            color = "drop"
+    return {"final": (int(round(final)) if final else None), "base": base_price,
+            "source": source, "color": color, "layers": layers}
+
+def _pe_decorate(data):
+    """Attach the final price + active strategy layers/badges to every cached rec (live —
+    reflects current toggles + active strategies on each read)."""
+    for r in (data.get("recs") or []):
+        info = _active_layers_for(r.get("lid"), r.get("date"), r.get("recommended"), r.get("current"))
+        r["final"] = info["final"]
+        r["final_color"] = info["color"]
+        r["final_source"] = info["source"]
+        r["layers"] = info["layers"]
+        r["badges"] = [L["key"] for L in info["layers"] if L["enabled"]]
+    return data
 
 def _pe_backfill_outcomes(data):
     """For logged actions whose night has since booked (now appears among confirmed
@@ -17073,6 +17200,7 @@ def _pe_night_detail(lid, date_iso):
     # summary line
     sig_phrase = {"ahead": "والحجز أسرع من المعتاد", "behind": "والحجز أبطأ من المعتاد"}.get(rec["signal"], "")
     summary = f"{dt_label}، وحجوزاتك الفعلية متوسطها {band['median']:,} ر.س {sig_phrase}. نقترح {rec['recommended']:,} ر.س ضمن [{rec['floor']:,}–{rec['ceiling']:,}]."
+    info = _active_layers_for(lid, date_iso, rec["recommended"], rec.get("current"))
     return {"lid": lid, "unit": uname, "date": date_iso, "days_out": rec["days_out"],
             "dtype": dtype, "event": ev, "demand_pill": _pe_demand_pill(rec["signal"]),
             "signal": rec["signal"], "current": rec.get("current"), "recommended": rec["recommended"],
@@ -17080,7 +17208,10 @@ def _pe_night_detail(lid, date_iso):
             "floor": rec["floor"], "ceiling": rec["ceiling"], "median": rec["median"],
             "confidence": rec["confidence"], "pooled": pooled, "factors": factors,
             "summary": summary, "footer_n": data.get("n_used", 0),
-            "dry_run": PRICE_APPLY_DRYRUN}
+            "dry_run": PRICE_APPLY_DRYRUN,
+            # Stage 3-4: transparent final-price model + active strategies + the change log
+            "final": info["final"], "final_color": info["color"], "final_source": info["source"],
+            "layers": info["layers"], "changelog": _price_log_view(lid, date_iso)}
 
 def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None):
     """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN). Returns the
@@ -17179,6 +17310,103 @@ async def _api_pricing_changelog(request):
     if not _parse_date(date_iso):
         return _json({"error": "bad date"}, 400)
     return _json({"lid": lid, "date": date_iso, "log": _price_log_view(lid, date_iso)})
+
+# ---- Stage 7: strategy on/off toggles (global + per unit) ----
+async def _api_strategy_toggles(request):
+    """Current on/off state of every strategy (global, and for one unit if ?lid= given)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid")) if request.query.get("lid") else None
+    except Exception:
+        lid = None
+    out = []
+    for k in STRATEGY_KEYS:
+        meta = STRATEGY_KEY_LABEL[k]
+        out.append({"key": k, "label_ar": meta["ar"], "label_en": meta["en"],
+                    "icon": meta["icon"], "real": meta["real"],
+                    "global_enabled": strategy_enabled(k, None),
+                    "unit_enabled": (strategy_enabled(k, lid) if lid is not None else None)})
+    return _json({"strategies": out, "lid": lid})
+
+async def _api_strategy_toggle_set(request):
+    """POST {name, enabled, lid?} — enable/disable a strategy globally (no lid) or per unit."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    name = b.get("name")
+    if name not in STRATEGY_KEYS:
+        return _json({"error": "bad strategy"}, 400)
+    lid = None
+    if b.get("lid") not in (None, "", 0):
+        try:
+            lid = int(b.get("lid"))
+        except Exception:
+            return _json({"error": "bad lid"}, 400)
+    enabled = bool(b.get("enabled"))
+    set_strategy_toggle(name, enabled, lid)
+    scope = "كل الوحدات" if lid is None else f"وحدة {lid}"
+    log_event("pricing", f"استراتيجية «{STRATEGY_KEY_LABEL[name]['ar']}» {'تشغيل ✅' if enabled else 'إيقاف ⏸'} · {scope}")
+    return _json({"ok": True, "name": name, "lid": lid, "enabled": enabled})
+
+# ---- Stage 6: per-month apply (preview -> confirm -> apply -> real result) ----
+def _month_apply_plan(month_str):
+    """Every (unit, date) in `month_str` (YYYY-MM) whose FINAL price differs from the current
+    Hostaway price — the exact set the 'Apply [month]' button would write. Preview = plan."""
+    recs = _pe_get_recs().get("recs") or []
+    plan = []
+    for r in recs:
+        d = r.get("date") or ""
+        if not d.startswith(month_str):
+            continue
+        final = r.get("final")
+        cur = r.get("current")
+        if final is None:
+            continue
+        if cur is not None and int(final) == int(cur):
+            continue                                   # already at the final price — skip
+        plan.append({"lid": r["lid"], "unit": r.get("unit"), "date": d,
+                     "current": cur, "final": int(final), "color": r.get("final_color"),
+                     "source": r.get("final_source", "engine")})
+    plan.sort(key=lambda x: ((x["unit"] or ""), x["date"]))
+    return plan
+
+async def _api_pricing_month_preview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    month = (request.query.get("month") or "")[:7]
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        return _json({"error": "bad month"}, 400)
+    plan = await asyncio.to_thread(_month_apply_plan, month)
+    raises = sum(1 for p in plan if p["current"] is not None and p["final"] > p["current"])
+    drops = sum(1 for p in plan if p["current"] is not None and p["final"] < p["current"])
+    return _json({"month": month, "plan": plan, "count": len(plan),
+                  "raises": raises, "drops": drops, "dry_run": PRICE_APPLY_DRYRUN})
+
+async def _api_pricing_apply_month(request):
+    """Apply every planned price for the month — each through _pe_apply_night (logged via the
+    central audit log, DRYRUN-honoring), returning the REAL per-date result. Never faked."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    month = (b.get("month") or "")[:7]
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        return _json({"error": "bad month"}, 400)
+    plan = await asyncio.to_thread(_month_apply_plan, month)
+    results = []
+    for p in plan:
+        res = await asyncio.to_thread(_pe_apply_night, p["lid"], p["date"], p["final"],
+                                      "monthly", f"تطبيق شهري {month}", p["current"])
+        results.append({"lid": p["lid"], "unit": p["unit"], "date": p["date"],
+                        "final": p["final"], "current": p["current"], "ok": res.get("ok"),
+                        "dry": res.get("dry_run"), "confirmed": res.get("confirmed"),
+                        "error": res.get("error")})
+    applied = sum(1 for r in results if r["ok"])
+    failed = sum(1 for r in results if not r["ok"])
+    log_event("pricing", f"تطبيق شهري {month} · {applied} نجح · {failed} فشل"
+                         + (" · تجربة" if PRICE_APPLY_DRYRUN else ""))
+    return _json({"month": month, "results": results, "applied": applied,
+                  "failed": failed, "dry_run": PRICE_APPLY_DRYRUN})
 
 # ---- Stage 7: backtest — prove the learned models aren't random ----
 def _pe_backtest(holdout_days=90):
@@ -18613,6 +18841,8 @@ async def pricing_strategy_loop():
             print(f"strategy unit {lid} error:", e)
 
 def _run_strategy_unit(lid, strat, factors, today):
+    if not strategy_enabled("strategy", lid):
+        return                                  # dynamic strategy disabled (globally or for this unit)
     dates = strat["dates"]
     future = [d for d in dates if (_parse_date(d) or today) >= today]
     if not future:
@@ -22953,6 +23183,10 @@ async def start_web_server():
         app.router.add_get("/api/pricing2/night", _api_pe_night)     # engine v2: one-night "ليش هالسعر؟" detail
         app.router.add_post("/api/pricing2/apply", _api_pe_apply)    # engine v2: one-night apply (DRYRUN-gated)
         app.router.add_get("/api/pricing/changelog", _api_pricing_changelog)   # per-date append-only audit log
+        app.router.add_get("/api/pricing/strategy-toggles", _api_strategy_toggles)
+        app.router.add_post("/api/pricing/strategy-toggle", _api_strategy_toggle_set)
+        app.router.add_get("/api/pricing/month-preview", _api_pricing_month_preview)
+        app.router.add_post("/api/pricing/apply-month", _api_pricing_apply_month)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
