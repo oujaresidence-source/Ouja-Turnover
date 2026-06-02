@@ -126,6 +126,8 @@ _exp_sheet_last_sync = None   # ISO time of the last successful Google-Sheet pol
 EXPENSE_INGEST_SECRET = os.environ.get("EXPENSE_INGEST_SECRET", "")
 # Hostaway expenses endpoint (relative to BASE which already ends in /v1).
 EXPENSE_HOSTAWAY_PATH = os.environ.get("EXPENSE_HOSTAWAY_PATH", "/expenses")
+# Discord channel where a stuck/failed Hostaway post is announced (with a retry hint).
+EXPENSE_ALERT_CHANNEL = os.environ.get("EXPENSE_ALERT_CHANNEL", "expenses-alerts")
 # Pull-based intake (no Google Apps Script): poll a published / link-shared Google
 # Sheet as CSV and ingest new rows directly. Set EXPENSE_SHEET_CSV_URL to the sheet's
 # CSV export URL (or a normal sheet link — we derive the export URL from the ID).
@@ -6353,15 +6355,24 @@ def _exp_validate(exp):
 def _exp_post_to_hostaway(exp):
     """Write a Ready expense to Hostaway. Sets posted/failed. Respects DRYRUN.
     On any error → status 'failed' with the exact message (queued for retry)."""
+    # Idempotency: a real Hostaway ref already exists → never post twice.
+    if exp.get("hostaway_ref") and exp["hostaway_ref"] not in ("DRYRUN", "ok", "existing", None):
+        exp["status"] = "posted"
+        return True
     if exp.get("listing_id") is None:
         exp["status"] = "failed"; exp["error"] = "no matched listing"
+        _exp_log_event(exp, "post_failed", detail="no matched listing")
         return False
     s = _exp_settings()
     cat = (s.get("category_map") or {}).get(exp.get("category") or "", exp.get("category") or "Other")
+    ref = exp.get("ref") or ""
     name = (exp.get("maintenance_type") or "Expense")
     if (exp.get("note") or "").strip():
         name = f"{name} — {exp['note'].strip()}"
+    if ref:                                  # Stage 1: carry the reference INTO Hostaway
+        name = f"[{ref}] {name}"
     desc_bits = []
+    if ref:                        desc_bits.append(f"Ref: {ref}")
     if exp.get("vendor"):          desc_bits.append(f"Vendor: {exp['vendor']}")
     if exp.get("payment_method"):  desc_bits.append(f"Paid: {exp['payment_method']}")
     if exp.get("submitter"):       desc_bits.append(f"By: {exp['submitter']}")
@@ -6375,30 +6386,36 @@ def _exp_post_to_hostaway(exp):
         "categoryName": cat,
         "concept": name[:120],
         "name": name[:120],
+        "reference": ref,                          # Stage 1: our OJ-EXP-… id, for read-back verify
         "description": " · ".join(desc_bits)[:900],
         "currency": "SAR",
     }
     if EXPENSE_POST_DRYRUN:
         exp["status"] = "posted"
         exp["hostaway_ref"] = "DRYRUN"
+        exp["hostaway_verified"] = False           # a dry-run can never be verified as real
         exp["posted_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         exp["posted_auto"] = True
         exp["error"] = None
+        _exp_log_event(exp, "posted", detail="DRY-RUN (not written to Hostaway)")
         return True
     try:
         res = api_post(EXPENSE_HOSTAWAY_PATH, payload)
-        ref = None
+        ha_id = None
         if isinstance(res, dict):
-            ref = (res.get("result") or {}).get("id") if isinstance(res.get("result"), dict) else res.get("id")
+            ha_id = (res.get("result") or {}).get("id") if isinstance(res.get("result"), dict) else res.get("id")
         exp["status"] = "posted"
-        exp["hostaway_ref"] = str(ref) if ref is not None else "ok"
+        exp["hostaway_ref"] = str(ha_id) if ha_id is not None else "ok"
+        exp["hostaway_verified"] = False           # not verified until we re-query Hostaway
         exp["posted_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         exp["posted_auto"] = True
         exp["error"] = None
+        _exp_log_event(exp, "posted", detail=("#" + exp["hostaway_ref"]))
         return True
     except Exception as e:
         exp["status"] = "failed"
         exp["error"] = str(e)[:400]
+        _exp_log_event(exp, "post_failed", detail=str(e)[:160])
         return False
 
 def _exp_process(exp, *, allow_post=True):
@@ -6444,10 +6461,17 @@ def _exp_ingest(sub):
         "hold_reasons": [], "primary_reason": None, "candidates": [],
         "dup_of": None, "hostaway_ref": None, "posted_at": None,
         "posted_auto": False, "error": None,
+        "hostaway_verified": False, "verified_at": None, "verify_note": None,
+        "discrepancy": None, "events": [],
         "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
     }
     _expenses[eid] = exp
+    # append-only timeline: worker logged it (at submit time) → we pulled it now
+    _exp_log_event(exp, "logged", by=exp["submitter"], detail=exp.get("submitted_at", ""))
+    _exp_log_event(exp, "pulled", detail=("sheet" if sub.get("submission_id") else "manual"))
     _exp_process(exp)
+    if exp.get("listing_id") is not None:
+        _exp_log_event(exp, "apartment_matched", detail="auto")
     return exp, True
 
 def _exp_sheet_csv_candidates():
@@ -6812,6 +6836,127 @@ def _exp_reconcile(apply=False):
     log_event("ops", f"مطابقة المصاريف · سحب {pulled} · ناقص {counts['missing']} · "
                      f"{'رُحّل ' + str(counts['posted_now']) if apply else 'معاينة'}")
     return summary
+
+# ============ Expense traceability: timeline · verify · pipeline · reconciliation ============
+def _exp_log_event(exp, event, by="", detail=""):
+    """Append one append-only timeline entry to an expense (who + when + what)."""
+    exp.setdefault("events", []).append({
+        "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+        "event": event, "by": (by or "")[:60], "detail": (detail or "")[:200]})
+    if len(exp["events"]) > 100:
+        del exp["events"][:len(exp["events"]) - 100]
+
+def _exp_last_actor(exp):
+    """The last human who touched this expense (for the sync-status 'who' column)."""
+    for ev in reversed(exp.get("events", [])):
+        if ev.get("by"):
+            return ev["by"]
+    return exp.get("approved_by") or exp.get("submitter") or ""
+
+def _exp_verify_in_hostaway(exp):
+    """Re-query Hostaway and CONFIRM this expense is actually there — by our reference
+    (OJ-EXP-…) first, else by (listing, amount, date). Sets hostaway_verified. Never fakes:
+    DRY-RUN can't be verified, and an unreachable Hostaway leaves it unverified."""
+    if EXPENSE_POST_DRYRUN:
+        exp["hostaway_verified"] = False
+        exp["verify_note"] = "dryrun"
+        return None
+    ref = (exp.get("ref") or "")
+    items, ok, err = _exp_fetch_hostaway()
+    if not ok:
+        exp["verify_note"] = "hostaway_unreachable"
+        return None
+    key = _exp_ha_key(exp.get("listing_id"), exp.get("amount"), exp.get("expense_date"))
+    found_by = None
+    for x in items:
+        if ref and ref in json.dumps(x, ensure_ascii=False):
+            found_by = "ref"; break
+        lid = x.get("listingMapId") or x.get("listingId") or x.get("listing_id")
+        if key and _exp_ha_key(lid, x.get("amount"), x.get("expenseDate") or x.get("date")) == key:
+            found_by = "key"; break
+    exp["hostaway_verified"] = bool(found_by)
+    exp["verify_note"] = ("found:" + found_by) if found_by else "not_found"
+    if found_by:
+        exp["verified_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        if not any(e.get("event") == "verified" for e in exp.get("events", [])):
+            _exp_log_event(exp, "verified", detail=("matched by " + found_by))
+    return bool(found_by)
+
+def _exp_pipeline(e):
+    """The 3-step pipeline state for one expense (Sheet → Dashboard → Hostaway) + overall
+    colour (max 4: green / amber / red / gray). Hostaway is 'done' ONLY when verified."""
+    st = e.get("status")
+    sheet = "done"                                            # it's in our system (sheet or manual)
+    dash = ("done" if st in ("ready", "posted") else
+            "skip" if st == "discarded" else "active")        # active = needs review / in progress
+    if st == "failed":
+        ha = "failed"
+    elif st == "posted":
+        ha = ("dry" if (EXPENSE_POST_DRYRUN or e.get("hostaway_ref") == "DRYRUN")
+              else "done" if e.get("hostaway_verified") else "active")   # active = جاري النقل / التحقق
+    else:
+        ha = "pending"
+    color = ("red" if (st == "failed" or e.get("discrepancy")) else
+             "green" if ha == "done" else
+             "amber" if (ha in ("active", "dry") or dash == "active") else "gray")
+    return {"sheet": sheet, "dashboard": dash, "hostaway": ha,
+            "color": color, "discrepancy": e.get("discrepancy"),
+            "verified": bool(e.get("hostaway_verified"))}
+
+def _exp_discrepancies():
+    """Reconciliation engine — flag mismatches across Sheet/Dashboard/Hostaway:
+    in-sheet-not-Hostaway, in-Hostaway-not-sheet (orphans), amount mismatch, and duplicates.
+    Tags each of OUR expenses with e['discrepancy']; returns a summary (+ orphan sample)."""
+    ha_items, ha_ok, ha_err = _exp_fetch_hostaway()
+    ha_keys = set()
+    ha_by_listing_date = {}
+    for x in ha_items:
+        lid = x.get("listingMapId") or x.get("listingId") or x.get("listing_id")
+        dt = str(x.get("expenseDate") or x.get("date") or "")[:10]
+        k = _exp_ha_key(lid, x.get("amount"), dt)
+        if k:
+            ha_keys.add(k)
+            try:
+                ha_by_listing_date.setdefault((int(lid), dt), []).append(round(abs(float(x.get("amount"))), 2))
+            except Exception:
+                pass
+    live = [e for e in _expenses.values() if e.get("status") != "discarded"]
+    for e in live:
+        e["discrepancy"] = None
+    sheet_not_ha, amount_mismatch, dups = [], [], []
+    seen = {}
+    for e in live:
+        lid, amt, dt = e.get("listing_id"), e.get("amount"), str(e.get("expense_date") or "")[:10]
+        if lid is None or not isinstance(amt, (int, float)):
+            continue
+        k = _exp_ha_key(lid, amt, dt)
+        if k in seen:                                         # duplicate among OUR records
+            e["discrepancy"] = "duplicate"; dups.append(e.get("ref"))
+        else:
+            seen[k] = e.get("ref")
+        if e.get("status") in ("ready", "posted") and ha_ok:
+            if k not in ha_keys:
+                ha_amts = ha_by_listing_date.get((int(lid), dt), []) if dt else []
+                if ha_amts and round(abs(float(amt)), 2) not in ha_amts:
+                    e["discrepancy"] = e.get("discrepancy") or "amount_mismatch"; amount_mismatch.append(e.get("ref"))
+                elif e.get("status") == "ready" or not e.get("hostaway_verified"):
+                    e["discrepancy"] = e.get("discrepancy") or "sheet_not_hostaway"; sheet_not_ha.append(e.get("ref"))
+    our_keys = {_exp_ha_key(e.get("listing_id"), e.get("amount"), e.get("expense_date")) for e in live}
+    orphans = []
+    if ha_ok:
+        for x in ha_items:
+            lid = x.get("listingMapId") or x.get("listingId") or x.get("listing_id")
+            dt = str(x.get("expenseDate") or x.get("date") or "")[:10]
+            k = _exp_ha_key(lid, x.get("amount"), dt)
+            if k and k not in our_keys:
+                orphans.append({"listing": k[0], "amount": k[1], "date": k[2]})
+    persist_state()
+    return {"hostaway_ok": ha_ok, "hostaway_error": ha_err,
+            "sheet_not_hostaway": len(sheet_not_ha), "hostaway_not_sheet": len(orphans),
+            "amount_mismatch": len(amount_mismatch), "duplicates": len(dups),
+            "orphans_sample": orphans[:50],
+            "refs": {"sheet_not_hostaway": sheet_not_ha[:50],
+                     "amount_mismatch": amount_mismatch[:50], "duplicates": dups[:50]}}
 
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
@@ -7517,7 +7662,10 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 /* Emil: gentle flash when a card transitions held → posted */
 @keyframes expPosted{0%{background:var(--green-soft)}100%{background:var(--surface-2)}}
 .exp-card.just-posted{animation:expPosted .9s ease}
-@media (prefers-reduced-motion:reduce){.exp-card.just-posted{animation:none}}
+/* indeterminate "جاري النقل" transfer bar (Hostaway step in progress) */
+@keyframes expXfer{0%{margin-inline-start:-40%}100%{margin-inline-start:100%}}
+.exp-xfer{height:100%;width:40%;background:var(--gold);border-radius:99px;animation:expXfer 1.1s cubic-bezier(0.45,0,0.55,1) infinite}
+@media (prefers-reduced-motion:reduce){.exp-card.just-posted{animation:none}.exp-xfer{animation:none;width:100%;opacity:.5}}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -8586,9 +8734,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub">مصاريف الميدان من النموذج → التحقق → Hostaway</div>
           </div>
           <div class="page-tools">
-            <button class="btn ghost sm" onclick="expSheetTest()">🔍 فحص الشيت</button>
-            <button class="btn ghost sm" onclick="expHostawayTest()">🔍 فحص Hostaway</button>
-            <button class="btn ghost sm" onclick="expReconcile()">🔄 مطابقة Hostaway</button>
+            <button class="btn primary sm" onclick="expSyncRefresh()">🔄 <span id="t_exp_sync">تحديث المزامنة</span></button>
+            <button class="btn ghost sm" onclick="expSetSub('sync')">📊 <span id="t_exp_status">حالة المزامنة</span></button>
             <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
             <button class="btn ghost sm" onclick="loadExpenses()">↻</button>
           </div>
@@ -9044,6 +9191,7 @@ const T = {
     ct_sub:'اختر الشقق اللي يغطيها الفريق الداخلي. لها قنوات تسليم خاصة بالإنجليزية في Discord (اليوم + بكرة)، وجدول يومي مرتّب: تسجيل الدخول اليوم أولاً.',
     ct_assigned:'معيّنة', ct_apply:'⚡ تطبيق / تحديث القنوات', ct_apply_hint:'ينشئ/يعيد تسمية قنوات تسليم اليوم وبكرة فوراً (بدون انتظار ١٢ ص).',
     ct_none:'ما فيه شقق معيّنة بعد — فعّل الخانة جنب أي شقة تحت.', ct_search:'ابحث…', ct_applied:'تم —', ct_changed:'قناة محدّثة', ct_no_change:'القنوات محدّثة — ما فيه جديد.', ct_need_pull:'اسحب الشقق من Hostaway أول (من صفحة الشقق).',
+    exp_sync:'تحديث المزامنة', exp_status:'حالة المزامنة',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -9250,6 +9398,7 @@ const T = {
     ct_sub:'Pick the apartments the in-house team covers. They get dedicated English turnover channels in Discord (today + tomorrow) and a daily ordered schedule — same-day check-ins first.',
     ct_assigned:'assigned', ct_apply:'⚡ Apply / Refresh channels', ct_apply_hint:'Creates/renames today + tomorrow channels right now (no waiting for 12 AM).',
     ct_none:'No apartments assigned yet — tick the box next to any unit below.', ct_search:'Search…', ct_applied:'Done —', ct_changed:'channels updated', ct_no_change:'Channels up to date — nothing changed.', ct_need_pull:'Pull listings from Hostaway first (Listings page).',
+    exp_sync:'Refresh sync', exp_status:'Sync status',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -9592,7 +9741,7 @@ function applyLang(){
     t_guests:'guests_title', t_guests_sub:'guests_sub',
     gf_all:'guests_filter_all', gf_vip:'guests_filter_vip', gf_repeat:'guests_filter_repeat',
     t_quality:'quality_title', t_quality_sub:'quality_sub',
-    t_clear_filt:'f_clear'
+    t_clear_filt:'f_clear', t_exp_sync:'exp_sync', t_exp_status:'exp_status'
   };
   for(const id in map){
     const el = document.getElementById(id);
@@ -11849,21 +11998,44 @@ function _expStatusChip(st){
   return '<span style="background:'+c[0]+';color:'+c[1]+';padding:3px 11px;border-radius:99px;font-size:10.5px;font-weight:700;white-space:nowrap">'+esc(lab)+'</span>';
 }
 function _expTime(iso){ return esc(String(iso||'').replace('T',' ').slice(0,16)); }
+// client-side pipeline (mirrors _exp_pipeline) — used if the server value is missing
+function _expPipeline(e){
+  if(e.pipeline) return e.pipeline;
+  var dry=(D.expSummary||{}).dryrun, st=e.status;
+  var dash=(st==='ready'||st==='posted')?'done':(st==='discarded'?'skip':'active');
+  var ha = st==='failed'?'failed' : st==='posted'?((dry||e.hostaway_ref==='DRYRUN')?'dry':(e.hostaway_verified?'done':'active')) : 'pending';
+  var color=(st==='failed'||e.discrepancy)?'red':(ha==='done'?'green':((ha==='active'||ha==='dry'||dash==='active')?'amber':'gray'));
+  return {sheet:'done',dashboard:dash,hostaway:ha,color:color};
+}
+function _expDiscLabel(c){
+  var m={sheet_not_hostaway:(L==='ar'?'في الشيت وغير موجود بـHostaway':'in Sheet, not in Hostaway'),
+         amount_mismatch:(L==='ar'?'المبلغ يختلف عن Hostaway':'amount differs from Hostaway'),
+         duplicate:(L==='ar'?'تكرار محتمل':'possible duplicate')};
+  return m[c]||c;
+}
+// the 3-step traceability pipeline shown on every card: Sheet → Dashboard → Hostaway
 function _expSyncBadge(e){
-  // B1/B4: explicit, always-visible Hostaway sync status per expense.
-  var dry=(D.expSummary||{}).dryrun;
-  var base='display:inline-block;padding:4px 11px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap';
-  function b(style,txt){ return '<span style="'+base+';'+style+'">'+txt+'</span>'; }
-  if(e.status==='posted'){
-    var when=e.posted_at?(' · '+_expTime(e.posted_at)):'';
-    if(e.hostaway_ref==='DRYRUN' || dry)
-      return b('background:rgba(212,175,55,.14);color:var(--gold)', (L==='ar'?'🧪 تجريبي — ما تم الإرسال فعلياً لـ Hostaway':'🧪 Test — not actually sent to Hostaway')+when);
-    var refTxt=(e.hostaway_ref && e.hostaway_ref!=='ok' && e.hostaway_ref!=='DRYRUN')?(' · #'+esc(e.hostaway_ref)):'';
-    return b('background:var(--green-soft);color:var(--green)', (L==='ar'?'✓ مُرحّل لـ Hostaway':'✓ Posted to Hostaway')+when+refTxt);
+  var p=_expPipeline(e);
+  var COL={done:'var(--green)',active:'var(--gold)',dry:'var(--gold)',failed:'var(--red)',pending:'var(--mut)',skip:'var(--mut)'};
+  var IC={done:'✓',active:'…',dry:'🧪',failed:'✗',pending:'·',skip:'—'};
+  function step(label,state,sub){
+    var c=COL[state]||'var(--mut)';
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:60px">'
+      +'<div style="width:23px;height:23px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;background:'+c+'">'+IC[state]+'</div>'
+      +'<div style="font-size:9.5px;color:var(--text-2);text-align:center;line-height:1.2">'+label+(sub?('<br><span style="color:'+c+'">'+sub+'</span>'):'')+'</div></div>';
   }
-  if(e.status==='failed') return b('background:var(--red-soft);color:var(--red)', (L==='ar'?'✖ فشل الترحيل':'✖ Post failed'));
-  if(e.status==='discarded') return b('background:var(--surface-3);color:var(--mut)', (L==='ar'?'متجاهل':'Ignored'));
-  return b('background:var(--surface-3);color:var(--mut)', (L==='ar'?'غير مُرحّل لـ Hostaway':'Not posted to Hostaway'));
+  function conn(active){ return '<div style="flex:1;height:2px;background:'+(active?'var(--green)':'var(--line)')+';margin-top:11px;min-width:12px"></div>'; }
+  var haSub = p.hostaway==='done'?(L==='ar'?'مؤكّد':'verified'):(p.hostaway==='active'?(L==='ar'?'جاري النقل':'transferring'):(p.hostaway==='dry'?(L==='ar'?'تجريبي':'dry-run'):(p.hostaway==='failed'?(L==='ar'?'فشل':'failed'):'')));
+  var refTxt=(e.hostaway_ref && e.hostaway_ref!=='ok' && e.hostaway_ref!=='DRYRUN')?(' #'+esc(e.hostaway_ref)):'';
+  var rows='<div style="display:flex;align-items:flex-start;gap:0">'
+    + step(esc(e.ref||(L==='ar'?'الشيت':'Sheet')), p.sheet) + conn(p.dashboard!=='active'&&p.dashboard!=='pending')
+    + step((L==='ar'?'اللوحة':'Dashboard'), p.dashboard) + conn(p.hostaway==='done')
+    + step('Hostaway'+refTxt, p.hostaway, haSub) + '</div>';
+  var bar = p.hostaway==='active'
+    ? '<div class="exp-xferbar" style="height:4px;border-radius:99px;overflow:hidden;background:var(--surface-3);margin-top:7px"><div class="exp-xfer"></div></div>' : '';
+  var fail = (p.hostaway==='failed' && e.error)?'<div style="margin-top:6px;font-size:11px;color:var(--red)">✗ '+esc(e.error)+'</div>':'';
+  var disc = e.discrepancy?'<div style="margin-top:6px;font-size:11px;color:var(--red)">⚠ '+esc(_expDiscLabel(e.discrepancy))+'</div>':'';
+  return rows+bar+fail+disc;
 }
 function _expConnStrip(){
   // B3: plainly show the pipes are live.
@@ -11907,74 +12079,6 @@ async function expReloadList(){
   _renderExpenses();
 }
 async function expRefresh(){ D.expList=null; await loadExpenses(); }
-async function expSheetTest(){
-  var NL=String.fromCharCode(10);
-  toast(L==='ar'?'⏳ نفحص الشيت…':'⏳ Testing sheet…');
-  var d; try{ d=await api('/api/expenses/sheet-debug'); }catch(e){ alert('⚠ '+e); return; }
-  var m=(L==='ar'?'🔍 فحص الشيت':'🔍 Sheet test')+NL+NL
-   +(L==='ar'?'الرابط مضبوط؟ ':'URL set? ')+(d.configured?'✓':'✗')+NL
-   +'HTTP '+(d.http_status==null?'—':d.http_status)+'  ·  '+(d.content_type||'')+NL
-   +(L==='ar'?'صفوف مقروءة: ':'rows: ')+(d.rows_parsed||0)+'  ·  '+(L==='ar'?'صفوف بيانات: ':'data rows: ')+(d.data_rows||0)+NL;
-  if(d.headers&&d.headers.length){ m+=(L==='ar'?'الأعمدة: ':'columns: ')+d.headers.join(' | ')+NL; }
-  if(d.mapped){
-    var bad=Object.keys(d.mapped).filter(function(k){return !d.mapped[k];});
-    m+=(L==='ar'?'أعمدة غير مطابقة: ':'unmapped fields: ')+(bad.length?bad.join(', '):(L==='ar'?'لا شيء ✓':'none ✓'))+NL;
-  }
-  if(d.sample){ m+=(L==='ar'?'مثال أول صف → شقة: ':'first row → apt: ')+(d.sample.apartment||'—')+' · '+(d.sample.amount||'—')+' · '+(d.sample.date||'—')+NL; }
-  if(d.error){ m+=NL+(L==='ar'?'⚠ المشكلة: ':'⚠ problem: ')+d.error; }
-  alert(m);
-}
-async function expHostawayTest(){
-  var NL=String.fromCharCode(10);
-  toast(L==='ar'?'⏳ نفحص Hostaway…':'⏳ Testing Hostaway…');
-  var d; try{ d=await api('/api/expenses/hostaway-debug'); }catch(e){ alert('⚠ '+e); return; }
-  var m=(L==='ar'?'🔍 فحص نقطة مصاريف Hostaway':'🔍 Hostaway expenses endpoint test')+NL+NL;
-  (d.tried||[]).forEach(function(t){
-    m+= t.path+'  →  '+(t.ok? ((L==='ar'?'نجح':'ok')+', '+(L==='ar'?'عدد=':'count=')+t.count) : ((L==='ar'?'فشل: ':'fail: ')+(t.error||'')))+NL;
-    if(t.keys&&t.keys.length){ m+='   keys: '+t.keys.join(', ')+NL; }
-    if(t.sample){ m+='   sample: '+String(t.sample).slice(0,180)+NL; }
-  });
-  alert(m);
-}
-async function expReconcile(){
-  var NL=String.fromCharCode(10);
-  if(!confirm(L==='ar'?'نسحب كل الشيت ونقارنه مع Hostaway؟':'Pull the whole sheet and compare with Hostaway?')) return;
-  toast(L==='ar'?'⏳ نسحب ونقارن…':'⏳ Pulling & comparing…');
-  var s; try{ s=await post('/api/expenses/reconcile',{apply:false}); }catch(e){ toast('⚠ '+e); return; }
-  var msg=(s.error?((L==='ar'?'⚠ خطأ بالخادم: ':'⚠ Server error: ')+s.error+NL+NL):'')+(L==='ar'
-    ? ('سحبنا '+s.pulled_from_sheet+' صف من الشيت · إجمالي المصاريف '+s.total_expenses+NL
-      +'موجودة بـHostaway: '+s.already_in_hostaway+' · ناقصة: '+s.missing+NL
-      +'أُعيد مطابقتها: '+(s.revalidated||0)+NL
-      +'بانتظار المراجعة: '+s.held+' · غير مطابقة شقة: '+s.unmatched)
-    : ('Pulled '+s.pulled_from_sheet+' rows · total '+s.total_expenses+NL
-      +'re-matched: '+(s.revalidated||0)+NL
-      +'In Hostaway: '+s.already_in_hostaway+' · Missing: '+s.missing+NL
-      +'Held: '+s.held+' · Unmatched: '+s.unmatched));
-  if(!s.hostaway_fetch_ok){
-    msg += NL+NL+(L==='ar'?'⚠ تعذّر قراءة مصاريف Hostaway: ':'⚠ Could not read Hostaway expenses: ')+(s.hostaway_error||'');
-  }
-  if(s.pulled_from_sheet===0 && s.total_expenses===0){
-    var d=s.sheet_debug||{};
-    msg += NL+NL+(L==='ar'?'🔍 تشخيص الشيت:':'🔍 Sheet diagnostic:')+NL
-        +(L==='ar'?'الرابط مضبوط؟ ':'URL set? ')+(d.configured?'✓':'✗')+NL
-        +'HTTP '+(d.http_status==null?'—':d.http_status)+' · '+(d.content_type||'')+NL
-        +(L==='ar'?'صفوف: ':'rows: ')+(d.rows_parsed||0)+NL
-        +(d.error?((L==='ar'?'السبب: ':'reason: ')+d.error):'');
-  }
-  if(s.missing>0){
-    var ask=msg+NL+NL+(L==='ar'
-      ? ('ترحيل الـ'+s.missing+' الناقصة لـHostaway الآن؟'+(s.dryrun?' (وضع التجربة DRYRUN مفعّل — ما راح يكتب فعلياً)':''))
-      : ('Post the '+s.missing+' missing to Hostaway now?'+(s.dryrun?' (DRYRUN on — nothing actually written)':'')));
-    if(confirm(ask)){
-      toast(L==='ar'?'⏳ نرحّل الناقص…':'⏳ Posting missing…');
-      var r=await post('/api/expenses/reconcile',{apply:true});
-      toast((L==='ar'?'تم · رُحّل ':'Done · posted ')+r.posted_now+(r.post_failed?(' · '+(L==='ar'?'فشل ':'failed ')+r.post_failed):''));
-    }
-  } else {
-    alert(msg);
-  }
-  await expRefresh();
-}
 
 function expSetPeriod(p){
   _expPeriod=p;
@@ -11982,7 +12086,7 @@ function expSetPeriod(p){
   loadExpenses();
 }
 function _expCustom(){ var f=document.getElementById('expFrom'), t=document.getElementById('expTo'); if(f)_expFrom=f.value; if(t)_expTo=t.value; loadExpenses(); }
-function expSetSub(s){ _expSub=s; if(s==='all'){ D.expList=null; expReloadList(); return; } _renderExpenses(); }
+function expSetSub(s){ _expSub=s; if(s==='all'){ D.expList=null; expReloadList(); return; } if(s==='sync'){ expLoadSyncStatus(); return; } _renderExpenses(); }
 function _expF(k,v){ _expFilters[k]=v; clearTimeout(_expFT); _expFT=setTimeout(function(){ expReloadList(); }, k==='q'?350:0); }
 
 function _renderExpenses(){
@@ -11992,7 +12096,93 @@ function _renderExpenses(){
   else if(_expSub==='all') h+=_expAllHtml();
   else if(_expSub==='apt') h+=_expByAptHtml();
   else if(_expSub==='emp') h+=_expByEmpHtml();
+  else if(_expSub==='sync') h+=_expSyncStatusHtml();
   body.innerHTML=h;
+}
+// ---- THE one sync button: pull sheet + revalidate + re-verify Hostaway + reconcile ----
+async function expSyncRefresh(){
+  var NL=String.fromCharCode(10);
+  toast(L==='ar'?'⏳ نحدّث المزامنة…':'⏳ Refreshing sync…');
+  var r; try{ r=await post('/api/expenses/sync-refresh',{}); }catch(e){ toast('⚠ '+e); return; }
+  if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
+  var d=r.discrepancies||{};
+  var msg=(L==='ar'?'تم تحديث المزامنة':'Sync refreshed')+NL
+    +(L==='ar'?'سُحب من الشيت: ':'pulled: ')+(r.pulled_from_sheet||0)+' · '+(L==='ar'?'أُعيد فحصها: ':'revalidated: ')+(r.revalidated||0)+NL
+    +(L==='ar'?'تعارضات: ':'discrepancies: ')+(L==='ar'?'بالشيت بدون Hostaway ':'sheet→noHA ')+(d.sheet_not_hostaway||0)
+    +' · '+(L==='ar'?'بـHostaway بدون شيت ':'HA→noSheet ')+(d.hostaway_not_sheet||0)
+    +' · '+(L==='ar'?'مبالغ مختلفة ':'amount ')+(d.amount_mismatch||0)
+    +' · '+(L==='ar'?'تكرار ':'dups ')+(d.duplicates||0);
+  if(!d.hostaway_ok) msg+=NL+(L==='ar'?'⚠ تعذّر قراءة Hostaway: ':'⚠ Hostaway unreachable: ')+(d.hostaway_error||'');
+  toast(L==='ar'?'تم ✓':'Done ✓');
+  alert(msg);
+  await expRefresh();
+}
+async function expLoadSyncStatus(state){
+  _expSyncFilter=state||'';
+  var qs=_expSyncFilter?('?state='+encodeURIComponent(_expSyncFilter)):'';
+  try{ D.expSync=await api('/api/expenses/sync-status'+qs); }catch(_){ D.expSync={rows:[],totals:{}}; }
+  _renderExpenses();
+}
+var _expSyncFilter='';
+function _expSyncStatusHtml(){
+  var d=D.expSync||{rows:[],totals:{}}; var labs=d.labels||{};
+  var order=['failed','discrepancy','posted_unverified','ready','held','verified'];
+  var colMap={verified:'var(--green)',posted_unverified:'var(--gold)',ready:'var(--gold)',held:'var(--mut)',failed:'var(--red)',discrepancy:'var(--red)'};
+  // totals chips = filters (count + SAR) — totals always reflect ALL, even when filtered
+  var chips=order.filter(function(k){return d.totals&&d.totals[k];}).map(function(k){
+    var t=d.totals[k]; var on=_expSyncFilter===k;
+    var lab=(labs[k]?(L==='ar'?labs[k].ar:labs[k].en):k);
+    return '<button class="exp-stat'+(on?' on':'')+'" onclick="expLoadSyncStatus('+(on?"''":"'"+k+"'")+')" style="border-color:'+(on?colMap[k]:'var(--line)')+'">'
+      +'<div class="v" style="color:'+colMap[k]+'">'+t.count+'</div><div class="l">'+esc(lab)+' · '+expMoney(t.sar)+'</div></button>';
+  }).join('');
+  var head='<div class="exp-sumbar" style="margin-bottom:12px">'+chips+'</div>'
+    +(_expSyncFilter?'<div style="margin:-4px 0 10px"><button class="btn ghost xs" onclick="expLoadSyncStatus()">'+(L==='ar'?'✕ كل الحالات':'✕ All')+'</button></div>':'');
+  var rows=(d.rows||[]);
+  if(!rows.length) return head+'<div class="empty" style="padding:30px;text-align:center">'+(L==='ar'?'لا مصاريف في هذي الحالة':'No expenses in this state')+'</div>';
+  var body=rows.map(function(e){
+    return '<div class="exp-card" style="cursor:pointer" onclick="expOpenTimeline(&#39;'+esc(e.id)+'&#39;)">'
+      +'<div style="display:flex;justify-content:space-between;gap:10px"><div class="strong" style="font-size:13px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
+      +'<div class="muted" style="font-size:11px">'+esc(e.by||e.submitter||'')+'</div></div>'
+      +'<div class="muted" style="font-size:11.5px;margin:2px 0 8px">'+esc(e.apartment||'—')+' · '+esc(e.date||'')+'</div>'
+      +_expSyncBadge(e)
+      +'<div style="margin-top:8px;font-size:11px;color:var(--gold)">🕑 '+(L==='ar'?'اضغط للسجل الكامل':'tap for full timeline')+'</div></div>';
+  }).join('');
+  return head+'<div style="display:flex;flex-direction:column;gap:10px">'+body+'</div>';
+}
+var _EXP_EVENT_LABELS={logged:['سُجّل','logged'],pulled:['سُحب','pulled'],apartment_matched:['طوبقت الشقة','apartment matched'],apartment_confirmed:['أكّد الشقة','apartment confirmed'],approved:['اعتمد','approved'],post_requested:['طلب الترحيل','post requested'],posted:['رُحّل','posted'],verified:['تأكّد في Hostaway','verified in Hostaway'],post_failed:['فشل الترحيل','post failed'],discarded:['تجاهل','discarded']};
+async function expOpenTimeline(id){
+  openDrawer('…',''); setDrawerBody('<div class="empty sk" style="padding:36px;text-align:center">…</div>'); setDrawerFoot('');
+  var e=null;
+  (((D.expSync||{}).rows)||[]).forEach(function(x){ if(x.id===id) e=x; });
+  if(!e){ (D.expQueue||[]).concat(D.expList||[]).forEach(function(x){ if(x.id===id) e=x; }); }
+  if(!e){ setDrawerBody('<div class="empty">—</div>'); return; }
+  setDrawerTitle((e.ref||'')+' · '+expMoney(e.amount), (e.apartment||'—')+' · '+(e.date||e.expense_date||''));
+  var pipe='<div style="margin:4px 0 14px">'+_expSyncBadge(e)+'</div>';
+  var evs=(e.events||[]);
+  var tl=evs.length? evs.map(function(ev){
+    var lab=_EXP_EVENT_LABELS[ev.event]?(L==='ar'?_EXP_EVENT_LABELS[ev.event][0]:_EXP_EVENT_LABELS[ev.event][1]):ev.event;
+    return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">'
+      +'<div style="width:8px;height:8px;border-radius:50%;background:var(--gold);margin-top:5px;flex:none"></div>'
+      +'<div style="min-width:0"><div style="font-weight:600;font-size:12.5px">'+esc(lab)+(ev.by?(' · <span class="muted">'+esc(ev.by)+'</span>'):'')+'</div>'
+      +'<div class="muted" style="font-size:11px">'+_expTime(ev.ts)+(ev.detail?(' · '+esc(ev.detail)):'')+'</div></div></div>';
+  }).join('') : '<div class="muted" style="font-size:12px">'+(L==='ar'?'لا سجل بعد':'no timeline yet')+'</div>';
+  setDrawerBody(pipe+'<div style="font-weight:700;font-size:12px;margin-bottom:6px">'+(L==='ar'?'السجل الكامل (من سجّل → رُحّل → تأكّد)':'Full timeline (logged → posted → verified)')+'</div>'+tl);
+  var foot='';
+  if(e.status==='failed') foot+='<button class="btn primary sm" onclick="expRetry(&#39;'+esc(e.id)+'&#39;)">🔁 '+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>';
+  if(e.status==='posted') foot+='<button class="btn ghost sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">🔎 '+(L==='ar'?'تحقّق من Hostaway':'Verify in Hostaway')+'</button>';
+  setDrawerFoot(foot);
+}
+async function expRetry(id){
+  toast(L==='ar'?'⏳ إعادة المحاولة…':'⏳ Retrying…');
+  var r; try{ r=await post('/api/expenses/post',{id:id}); }catch(e){ toast('⚠ '+e); return; }
+  toast(r&&r.ok?(L==='ar'?(r.verified?'تم وتأكّد ✓':'رُحّل — بانتظار التأكيد'):(L==='ar'?'ok':'ok')):((L==='ar'?'فشل: ':'failed: ')+((r&&r.error)||'')));
+  closeDrawer(); await expRefresh(); if(_expSub==='sync') expLoadSyncStatus(_expSyncFilter);
+}
+async function expVerify(id){
+  toast(L==='ar'?'⏳ نتحقّق من Hostaway…':'⏳ Verifying…');
+  var r; try{ r=await post('/api/expenses/verify',{id:id}); }catch(e){ toast('⚠ '+e); return; }
+  toast(r&&r.verified?(L==='ar'?'مؤكّد في Hostaway ✓':'Verified ✓'):(L==='ar'?'لم يُعثر عليه بعد':'not found yet'));
+  closeDrawer(); await expRefresh(); if(_expSub==='sync') expLoadSyncStatus(_expSyncFilter);
 }
 function _expCountersHtml(){
   var s=D.expSummary||{};
@@ -12025,6 +12215,7 @@ function _expSubHtml(){
   return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:10px">'
     + b('queue',(L==='ar'?'المراجعة':'Review')+(qn?(' ('+qn+')'):''))
     + b('all',L==='ar'?'الكل':'All')
+    + b('sync',L==='ar'?'📊 حالة المزامنة':'📊 Sync status')
     + b('apt',L==='ar'?'حسب الشقة':'By apartment')
     + b('emp',L==='ar'?'حسب الموظف':'By employee') + '</div>';
 }
@@ -12116,6 +12307,7 @@ function _expCard(e){
   var _edge=e.status==='failed'?'var(--red)':(e.status==='held'?'var(--yellow)':(e.status==='discarded'?'var(--mut)':'var(--green)'));
   return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-color:color-mix(in srgb, '+_edge+' 32%, var(--line))">'
     + head + '<div style="margin-top:6px">'+_expSyncBadge(e)+'</div>'
+    + '<div style="margin-top:7px"><button class="btn ghost xs" onclick="expOpenTimeline(&#39;'+esc(e.id)+'&#39;)">🕑 '+(L==='ar'?'السجل الكامل':'Timeline')+'</button></div>'
     + (chips?('<div style="margin-top:8px">'+chips+'</div>'):'') + _expCardExtras(e,reason) + _expCardActions(e,reason) + '</div>';
 }
 function _expCardExtras(e,reason){
@@ -21286,8 +21478,10 @@ async def _api_weekly_delete(request):
 
 # ===================== FIELD EXPENSES API =====================
 def _exp_view(e):
-    """Expense dict + the suspected-twin summary (for side-by-side duplicate UI)."""
+    """Expense dict + the 3-step pipeline + the suspected-twin summary (for side-by-side UI)."""
     v = dict(e)
+    v["pipeline"] = _exp_pipeline(e)
+    v["sync_state"] = _exp_sync_state(e)
     if e.get("dup_of") and e["dup_of"] in _expenses:
         t = _expenses[e["dup_of"]]
         v["dup_twin"] = {
@@ -21580,12 +21774,18 @@ async def _api_expenses_post(request):
                     "detail": r.get("detail")} for r in (e.get("hold_reasons") or [])]
         return _json({"ok": False, "error": "still_held", "blocked_by": blocked,
                       "expense": _exp_view(e)})
+    by = (b.get("by") or "")[:60]
     ok = await asyncio.to_thread(_exp_post_to_hostaway, e)
+    if ok and by:
+        _exp_log_event(e, "post_requested", by=by)
+    if ok:                                                  # Hostaway ✓ ONLY after a real re-check
+        await asyncio.to_thread(_exp_verify_in_hostaway, e)
     await asyncio.to_thread(persist_state)
-    out = {"ok": ok, "expense": _exp_view(e)}
-    if not ok:                                              # surface the REAL Hostaway error
+    out = {"ok": ok, "verified": bool(e.get("hostaway_verified")), "expense": _exp_view(e)}
+    if not ok:                                              # surface the REAL Hostaway error + alert
         out["error"] = e.get("error") or "Hostaway rejected the post"
         out["status"] = e.get("status")                    # 'failed'
+        await _exp_alert_failure(e)                         # Stage 6: ping the team, never silently stuck
     return _json(out)
 
 async def _api_expenses_approve(request):
@@ -21604,6 +21804,7 @@ async def _api_expenses_approve(request):
         return _json({"error": "bad gate"}, 400)
     e[flag] = True
     e["approved_by"] = (b.get("by") or "")[:60]
+    _exp_log_event(e, "approved", by=e["approved_by"], detail=b.get("gate", ""))
     await asyncio.to_thread(_exp_validate, e)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
@@ -21627,6 +21828,7 @@ async def _api_expenses_resolve_apartment(request):
     e["listing_id"] = lid
     e["candidates"] = []
     e["apartment_locked"] = lid       # remember the manual choice
+    _exp_log_event(e, "apartment_confirmed", by=(b.get("by") or "")[:60], detail=(name or str(lid)))
     await asyncio.to_thread(_exp_process, e, allow_post=True)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
@@ -21787,6 +21989,118 @@ async def _api_expenses_hostaway_debug(request):
         return _json({"error": "unauthorized"}, 401)
     diag = await asyncio.to_thread(_exp_hostaway_probe)
     return _json(diag)
+
+# ---- Stage 6: alert the team about a stuck/failed post (with a retry hint) ----
+async def _exp_alert_failure(exp):
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        ch = await ensure_channel(guild, EXPENSE_ALERT_CHANNEL, await get_assistant_category(guild))
+        if ch is None:
+            return
+        op_role = find_operation_role(guild)
+        mention = op_role.mention if op_role else ""
+        emb = discord.Embed(title="⚠️ فشل ترحيل مصروف لـ Hostaway", color=0xE5484D)
+        emb.add_field(name="المرجع", value=str(exp.get("ref") or "—"), inline=True)
+        emb.add_field(name="الشقة", value=str(exp.get("apartment") or "—"), inline=True)
+        emb.add_field(name="المبلغ", value=f"{exp.get('amount') or '—'} ر.س", inline=True)
+        emb.add_field(name="السبب", value=str(exp.get("error") or "—")[:400], inline=False)
+        emb.set_footer(text="افتح لوحة المصاريف → «إعادة المحاولة» على البطاقة")
+        await ch.send(content=mention or None, embed=emb,
+                      allowed_mentions=discord.AllowedMentions(roles=True))
+        log_event("ops", f"تنبيه فشل ترحيل مصروف [{exp.get('ref')}] · {exp.get('error','')[:80]}")
+    except Exception as ex:
+        print("exp alert error:", ex)
+
+async def _api_expenses_sync_refresh(request):
+    """THE one button ('تحديث المزامنة'): pull the sheet, re-validate everything not yet
+    posted, RE-VERIFY every posted expense against live Hostaway, and run the reconciliation
+    engine. Refreshes statuses only — it never auto-posts (posting stays a manual action)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    pulled = await asyncio.to_thread(_exp_poll_sheet)
+
+    def _refresh():
+        rev = 0
+        for e in list(_expenses.values()):
+            if e.get("status") == "discarded":
+                continue
+            if e.get("status") == "posted":
+                _exp_verify_in_hostaway(e)              # re-check it's really in Hostaway
+            else:
+                before = e.get("status")
+                _exp_validate(e)
+                if e.get("status") != before:
+                    rev += 1
+        return rev
+    revalidated = await asyncio.to_thread(_refresh)
+    disc = await asyncio.to_thread(_exp_discrepancies)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "pulled_from_sheet": pulled, "revalidated": revalidated,
+                  "discrepancies": disc, "dryrun": EXPENSE_POST_DRYRUN})
+
+async def _api_expenses_verify(request):
+    """Re-check ONE expense against live Hostaway (the ✓ only turns green here)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get((b.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not found"}, 404)
+    res = await asyncio.to_thread(_exp_verify_in_hostaway, e)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "verified": bool(e.get("hostaway_verified")),
+                  "note": e.get("verify_note"), "expense": _exp_view(e)})
+
+_EXP_STATE_LABELS = {
+    "verified": ("مؤكّد في Hostaway", "Verified in Hostaway"),
+    "posted_unverified": ("مُرحّل — بانتظار التأكيد", "Posted — awaiting verify"),
+    "failed": ("فشل الترحيل", "Failed"),
+    "discrepancy": ("تعارض", "Discrepancy"),
+    "ready": ("جاهز للترحيل", "Ready to post"),
+    "held": ("بانتظار المراجعة", "Needs review"),
+}
+
+def _exp_sync_state(e):
+    if e.get("status") == "failed":
+        return "failed"
+    if e.get("discrepancy"):
+        return "discrepancy"
+    if e.get("status") == "posted":
+        return "verified" if e.get("hostaway_verified") else "posted_unverified"
+    if e.get("status") == "ready":
+        return "ready"
+    return "held"
+
+async def _api_expenses_sync_status(request):
+    """The 'حالة المزامنة' page: every expense + its pipeline stage + who touched it +
+    totals per state (count + SAR). Optional ?state= filter."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    want = (request.query.get("state") or "").strip()
+    rows, totals = [], {}
+    for e in _expenses.values():
+        if e.get("status") == "discarded":
+            continue
+        state = _exp_sync_state(e)
+        t = totals.setdefault(state, {"count": 0, "sar": 0.0})
+        t["count"] += 1
+        t["sar"] += abs(float(e.get("amount") or 0))
+        if want and state != want:
+            continue
+        rows.append({"id": e.get("id"), "ref": e.get("ref"), "apartment": e.get("apartment"),
+                     "amount": e.get("amount"), "date": e.get("expense_date"),
+                     "status": e.get("status"), "state": state,
+                     "pipeline": _exp_pipeline(e), "by": _exp_last_actor(e),
+                     "submitter": e.get("submitter"), "discrepancy": e.get("discrepancy"),
+                     "hostaway_ref": e.get("hostaway_ref"), "events": e.get("events", [])[-12:]})
+    rows.sort(key=lambda r: (r.get("date") or ""), reverse=True)
+    for v in totals.values():
+        v["sar"] = round(v["sar"])
+    return _json({"rows": rows, "totals": totals, "count": len(rows),
+                  "labels": {k: {"ar": v[0], "en": v[1]} for k, v in _EXP_STATE_LABELS.items()},
+                  "dryrun": EXPENSE_POST_DRYRUN})
 
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
@@ -23544,6 +23858,9 @@ async def start_web_server():
         app.router.add_post("/api/expenses/reconcile", _api_expenses_reconcile)
         app.router.add_get("/api/expenses/sheet-debug", _api_expenses_sheet_debug)
         app.router.add_get("/api/expenses/hostaway-debug", _api_expenses_hostaway_debug)
+        app.router.add_post("/api/expenses/sync-refresh", _api_expenses_sync_refresh)
+        app.router.add_get("/api/expenses/sync-status", _api_expenses_sync_status)
+        app.router.add_post("/api/expenses/verify", _api_expenses_verify)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
