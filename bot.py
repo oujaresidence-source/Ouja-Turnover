@@ -8256,6 +8256,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ APARTMENT PAGE (full-width, opened by Details) ============ -->
+      <section class="view" id="view_apartment">
+        <div id="aptBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ REVENUE VIEW ============ -->
       <section class="view" id="view_rev">
         <div class="page-head">
@@ -10155,9 +10160,11 @@ async function init(){
   // buildSideNav's active-category rule); keep view ↔ URL in sync for refresh/back/bookmark.
   try{
     var _h=location.hash.slice(1);
-    go((_h && document.getElementById('view_'+_h)) ? _h : 'home');
+    if(_h.indexOf('apartment/')===0){ openApartment(parseInt(_h.split('/')[1],10)); }
+    else go((_h && document.getElementById('view_'+_h)) ? _h : 'home');
     window.addEventListener('hashchange', function(){
       var h=location.hash.slice(1);
+      if(h.indexOf('apartment/')===0){ var al=parseInt(h.split('/')[1],10); if(al!==_aptLid) openApartment(al); return; }
       if(h && h!==view && document.getElementById('view_'+h)) go(h);
     });
   }catch(e){ console.error('hash routing failed:', e); }
@@ -10219,9 +10226,9 @@ function renderPricingHeader(){
     +'<button class="btn ghost sm" onclick="pricingImportAirbnb()">⬇ '+(L==='ar'?'استيراد من Airbnb':'Import from Airbnb')+'</button></div>';
   el.innerHTML='<div class="pr-an">'
     + kpi((a.activated_count||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(a.units||0)+'</span>', (L==='ar'?'شقق مفعّلة (قلت لها نعم)':'apartments activated'))
-    + kpi('+'+fmt(a.uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', (L==='ar'?('فرصة رفع · '+(a.opp||0)+' فرصة (مفعّلة)'):('uplift · '+(a.opp||0)+' opps (activated)')))
-    + kpi(a.changed_this_month||0, (L==='ar'?'تغييرات سعر هذا الشهر':'price changes this month'))
-    + graph + hitKpi + '</div>'
+    + kpi((a.changed_this_month||0), (L==='ar'?'تغييرات مؤكّدة هذا الشهر':'confirmed changes (month)'))
+    + kpi('+'+fmt(a.uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', (L==='ar'?('فرصة رفع مفتوحة · '+(a.opp||0)+' فرصة'):('open uplift · '+(a.opp||0)+' opps')))
+    + graph + '</div>'
     + '<div style="margin-top:10px"><div class="pr-kpi-l" style="margin-bottom:5px">'+(L==='ar'?'استراتيجيات فعّالة (عدد الشقق المفعّلة):':'active strategies (activated apartments):')+'</div>'+chips+'</div>'
     + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;gap:18px;flex-wrap:wrap">'
       + '<div style="flex:1;min-width:220px"><div class="pr-kpi-l" style="margin-bottom:6px">'+(L==='ar'?'تطبيق شهر كامل (للمفعّلة فقط · يعاين أول):':'apply a whole month (activated only · previews first):')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+mbtns+'</div></div>'
@@ -10276,7 +10283,9 @@ function renderPricing2(){
         +'<span class="pe-apt-name">'+esc(u.unit||('وحدة '+u.lid))+'</span>'
         +'<span class="pe-apt-chips">'+chips+'</span>'
         +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+(L==='ar'?' فرصة':' opp')+'</span>'):'')+(u.uplift>0?('<span class="pe-apt-up">+'+fmt(u.uplift)+' ر.س</span>'):'')+'</span>'
-      +'</button><div class="pe-apt-body" id="peapt_'+u.lid+'"></div></div>';
+      +'</button>'
+      +'<div style="padding:0 16px 8px"><button class="btn ghost xs" onclick="openApartment('+u.lid+',&#39;pricing&#39;)">📄 '+(L==='ar'?'تفاصيل الشقة ←':'Apartment details ←')+'</button></div>'
+      +'<div class="pe-apt-body" id="peapt_'+u.lid+'"></div></div>';
   }
   function rowNact(u){
     return '<div class="pe-apt"><div style="display:flex;align-items:center;gap:12px;padding:12px 16px">'
@@ -10547,26 +10556,43 @@ async function strImportHostaway(){
 }
 function renderStrategiesHeader(){
   var el=document.getElementById('stratHeader'); if(!el) return;
-  var d=D.stratD||{}; var ar=(L==='ar');
-  if(d.dry_run){ el.innerHTML='<div class="dry-banner" style="margin-bottom:12px">⚠ '+(ar?'وضع التجربة (DRY-RUN) — التغييرات تُحسب وتُسجّل بس ما تُكتب فعلياً في Hostaway':'DRY-RUN — changes are computed + logged but NOT written to Hostaway')+'</div>'; } else { el.innerHTML=''; }
+  var d=D.stratD||{}; var ar=(L==='ar'); var h=d.hero||{}; var dh=h.due_hit||{};
+  var html = d.dry_run ? '<div class="dry-banner" style="margin-bottom:12px">⚠ '+(ar?'وضع التجربة (DRY-RUN) — التغييرات تُحسب وتُسجّل بس ما تُكتب فعلياً في Hostaway':'DRY-RUN — changes are computed + logged but NOT written to Hostaway')+'</div>' : '';
+  // HERO scoreboard: captured (the win) · due-hit gauge (is it working?) · confirmed changes · revenue trend
   function kpi(v,l){ return '<div class="pr-kpi"><div class="pr-kpi-v">'+v+'</div><div class="pr-kpi-l">'+esc(l)+'</div></div>'; }
-  var hit=d.hit_rate||{};
+  var capV = h.have_outcome
+    ? '+'+fmt(h.captured||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>'+(h.captured_pct!=null?(' <span style="font-size:12px;color:var(--green)">+'+h.captured_pct+'%</span>'):'')
+    : '<span style="font-size:14px;font-weight:600;color:var(--mut)">'+(ar?'ما فيه نتيجة بعد':'No outcome yet')+'</span>';
+  var capKpi='<div class="pr-kpi" style="border-color:rgba(14,158,95,.4)"><div class="pr-kpi-v" style="color:var(--green)">'+capV+'</div><div class="pr-kpi-l">'+(ar?'صافي اللي كسبناه فوق الأساسي (ليالي انحجزت)':'captured over baseline (booked nights)')+'</div></div>';
+  // due-hit gauge (bullet bar): booked / due
+  var rate=dh.rate; var gauge='<div class="pr-kpi"><div class="pr-kpi-l" style="margin-bottom:4px">'+(ar?'هل تشتغل؟ — ليالي مستحقّة انحجزت':'Is it working? — due nights booked')+'</div>'
+    +'<div style="display:flex;align-items:center;gap:8px"><span style="flex:1;height:9px;background:var(--surface-2);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:'+(rate==null?0:rate)+'%;background:'+(rate!=null&&rate>=50?'var(--green)':'var(--gold)')+';border-radius:99px"></span></span>'
+    +'<b style="font-size:14px">'+(dh.due?((dh.booked||0)+'/'+dh.due):'—')+'</b></div></div>';
   var sp=d.spark||[]; var mx=Math.max.apply(null,sp.map(function(x){return x.rev||0;}).concat([1]));
   var bars=sp.map(function(x,i){ return '<i class="'+(i===sp.length-1?'last':'')+'" style="height:'+Math.max(Math.round((x.rev||0)/mx*100),4)+'%" title="'+esc(x.m)+': '+fmt(x.rev)+'"></i>'; }).join('');
-  var momTxt=(d.mom==null?'—':((d.mom>0?'▲ +':(d.mom<0?'▼ ':''))+d.mom+'%')), momCol=(d.mom>0?'#2e9e6b':(d.mom<0?'#c2683f':'var(--mut)'));
-  var hk=hit.have? kpi(hit.rate+'%', ar?('توصيات طُبّقت ثم انحجزت ('+hit.booked+'/'+hit.applied+')'):('applied → booked ('+hit.booked+'/'+hit.applied+')'))
-    : '<div class="pr-kpi"><div class="pr-kpi-v" style="font-size:13px;font-weight:600;line-height:1.3">'+(ar?'لا بيانات بعد':'no data yet')+'</div><div class="pr-kpi-l">'+(ar?'نسبة الحجز بعد التطبيق — بعد تطبيق فعلي':'booked-after-apply — after real applies')+'</div></div>';
-  el.innerHTML+='<div class="pr-an">'
+  var momTxt=(d.mom==null?'—':((d.mom>0?'▲ +':(d.mom<0?'▼ ':''))+d.mom+'%')), momCol=(d.mom>0?'var(--green)':(d.mom<0?'var(--down)':'var(--mut)'));
+  html+='<div class="pr-an">'
+    + capKpi + gauge
     + kpi((d.activated||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(d.total_units||0)+'</span>', ar?'شقق مفعّلة':'activated apartments')
-    + kpi('+'+fmt(d.open_uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', ar?'فرصة رفع مفتوحة':'open uplift')
-    + kpi((d.real_changes||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(d.total_changes||0)+'</span>', ar?'تغييرات فعلية / إجمالي':'real / total changes')
+    + kpi((d.confirmed_changes_month||0), ar?'تغييرات مؤكّدة هذا الشهر':'confirmed changes (month)')
     + '<div class="pr-kpi"><div class="pr-kpi-l">'+(ar?'الإيراد الشهري · ':'Monthly revenue · ')+'<b style="color:'+momCol+'">'+momTxt+'</b></div><div class="pe-spark">'+bars+'</div></div>'
-    + hk + '</div>';
-  // per-source breakdown — WHICH price change is actually happening
+    + '</div>';
+  // ATTENTION QUEUE (§6) — exception-based, never a blank panel
+  var att=d.attention||[];
+  html+='<div style="margin-top:16px"><div class="pr-kpi-l" style="margin-bottom:7px;font-weight:700;color:var(--text)">'+(ar?'🔔 يحتاج انتباهك':'🔔 Needs your attention')+'</div>';
+  html+= att.length
+    ? '<div style="display:flex;flex-direction:column;gap:7px">'+att.map(function(a){
+        return '<div style="display:flex;align-items:center;gap:9px;background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:8px;padding:9px 11px;font-size:12.5px">'
+          +'<span style="flex:1">'+esc(ar?a.ar:a.en)+'</span>'
+          +(a.lid?'<button class="btn ghost xs" onclick="openApartment('+a.lid+')">'+(ar?'تفاصيل':'Details')+'</button>':'')+'</div>';
+      }).join('')+'</div>'
+    : '<div style="background:rgba(14,158,95,.08);border:1px solid rgba(14,158,95,.25);border-radius:8px;padding:11px;font-size:12.5px;color:#0B7A4A">'+(ar?'كل شي تمام — ما فيه شي يحتاج انتباهك الحين.':'All good — nothing needs your attention right now.')+'</div>';
+  html+='</div>';
+  // per-source breakdown — WHICH price change actually happened
   var sb=d.source_breakdown||[];
   if(sb.length){
     var tot=sb.reduce(function(a,b){return a+b.count;},0)||1;
-    el.innerHTML+='<div style="margin-top:14px"><div class="pr-kpi-l" style="margin-bottom:6px">'+(ar?'مصدر تغييرات السعر (وين الشغل صار):':'where the price changes came from:')+'</div>'
+    html+='<div style="margin-top:16px"><div class="pr-kpi-l" style="margin-bottom:6px">'+(ar?'مصدر تغييرات السعر (وين صار الشغل):':'where the price changes came from:')+'</div>'
       +'<div style="display:flex;flex-direction:column;gap:6px">'+sb.map(function(s){
         var pc=Math.round(s.count/tot*100);
         return '<div style="display:flex;align-items:center;gap:10px;font-size:12px"><span style="min-width:150px">'+s.icon+' '+esc(ar?s.label_ar:s.label_en)+'</span>'
@@ -10574,6 +10600,7 @@ function renderStrategiesHeader(){
           +'<b style="min-width:64px;text-align:end">'+s.count+' ('+pc+'%)</b></div>';
       }).join('')+'</div></div>';
   }
+  el.innerHTML=html;
 }
 async function loadRevenue(){
   // Pull revenue + forward calendar in parallel so the new KPI cards and the
@@ -15556,13 +15583,21 @@ function renderStrategies(){
   window._strByLid={}; units.forEach(function(u){ window._strByLid[u.lid]=u; });
   body.innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+units.map(function(u){
     var chips=(u.active_strategies||[]).map(function(k){ return '<span class="pe-chip" title="'+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'">'+_PE_STRAT_META[k].ic+'</span>'; }).join('');
-    return '<div class="pe-apt"><button class="pe-apt-head" type="button" aria-expanded="false" onclick="strExpand(this,'+u.lid+')">'
-      +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
-      +'<span class="pe-apt-name">'+esc(u.name||('وحدة '+u.lid))+(u.compound?(' <span class="muted" style="font-size:11px">· '+esc(u.compound)+'</span>'):'')+'</span>'
-      +'<span class="pe-apt-chips">'+chips+'</span>'
-      +'<span class="pe-apt-stats">'+(u.open_uplift>0?('<span class="pe-apt-up">+'+fmt(u.open_uplift)+' ر.س</span>'):'')
-        +'<span class="pe-apt-opp">'+u.real_changes+'/'+u.changes+' '+(ar?'تغيير':'chg')+'</span></span>'
-      +'</button><div class="pe-apt-body" id="strb_'+u.lid+'"></div></div>';
+    var dh=u.due_hit||{};
+    var capTag = u.captured>0 ? '<span class="pe-apt-up" title="'+(ar?'كسبناه فوق الأساسي':'captured over baseline')+'">+'+fmt(u.captured)+' ر.س</span>' : '';
+    var dueTag = dh.due ? '<span class="pe-apt-opp">'+(dh.booked||0)+'/'+dh.due+' '+(ar?'انحجزت':'booked')+'</span>' : '';
+    return '<div class="pe-apt">'
+      +'<button class="pe-apt-head" type="button" aria-expanded="false" onclick="strExpand(this,'+u.lid+')">'
+        +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
+        +'<span class="pe-apt-name">'+esc(u.name||('وحدة '+u.lid))+(u.compound?(' <span class="muted" style="font-size:11px">· '+esc(u.compound)+'</span>'):'')+'</span>'
+        +'<span class="pe-apt-chips">'+chips+'</span>'
+        +'<span class="pe-apt-stats">'+capTag+dueTag+'</span>'
+      +'</button>'
+      +'<div style="padding:2px 16px 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<span class="muted" style="font-size:12px;flex:1;min-width:0">'+esc(ar?u.verdict_ar:u.verdict_en)+'</span>'
+        +'<button class="btn ghost xs" onclick="openApartment('+u.lid+')">'+(ar?'تفاصيل ←':'Details ←')+'</button>'
+      +'</div>'
+      +'<div class="pe-apt-body" id="strb_'+u.lid+'"></div></div>';
   }).join('')+'</div>';
 }
 function strExpand(btn,lid){
@@ -15601,6 +15636,115 @@ function _strDetail(u){
       }).join('')+'</div>'
     : '<div class="muted" style="padding:8px 14px;font-size:12px">'+(ar?'ما فيه تغييرات مسجّلة بعد لهالشقة.':'No price changes logged for this unit yet.')+'</div>';
   return nightsH+logH+'<div style="padding:6px 14px 12px"><button class="btn ghost xs" onclick="go(&#39;pricing&#39;)">↗ '+(ar?'افتح في التسعير للتعديل':'Open in Pricing to edit')+'</button></div>';
+}
+
+/* ============================================================
+   APARTMENT PAGE (#apartment/<lid>) — dedicated full-width detail
+   ============================================================ */
+var _aptLid=null, _aptFrom='strat';
+// 5-state night cell (§4): exact theme fills; inline-SVG icons, never emoji.
+var _APT_SVG_CLOCK='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="vertical-align:middle"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+var _APT_SVG_CHECK='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="vertical-align:middle"><path d="M5 13l4 4L19 7"/></svg>';
+function _aptCellStyle(state){
+  if(state==='baseline')  return {bg:'var(--surface-2)', tx:'var(--mut)', bd:'1px solid var(--line)', ic:''};
+  if(state==='suggested') return {bg:'var(--gold-soft)', tx:'var(--gold-2)', bd:'1px solid var(--line)', ic:''};
+  if(state==='applied')   return {bg:'var(--surface)', tx:'var(--green)', bd:'1.5px solid var(--green)', ic:_APT_SVG_CLOCK};
+  if(state==='booked')    return {bg:'rgba(14,158,95,.12)', tx:'#0B7A4A', bd:'1px solid rgba(14,158,95,.4)', ic:_APT_SVG_CHECK};
+  if(state==='empty')     return {bg:'rgba(204,75,75,.10)', tx:'#B3433F', bd:'1px solid rgba(204,75,75,.3)', ic:''};
+  return {bg:'var(--surface-2)', tx:'var(--mut)', bd:'1px solid var(--line)', ic:''};
+}
+function _aptLegend(){ var ar=(L==='ar');
+  var items=[['baseline',ar?'أساسي':'baseline'],['suggested',ar?'مقترح':'suggested'],['applied',ar?'مطبّق مباشر':'applied · live'],['booked',ar?'انحجزت':'booked'],['empty',ar?'فاتت فاضية':'passed empty']];
+  return '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text-2);margin:8px 0">'+items.map(function(it){
+    var s=_aptCellStyle(it[0]); return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:'+s.bg+';border:'+s.bd+';display:inline-block"></span>'+esc(it[1])+'</span>'; }).join('')+'</div>';
+}
+function _aptCal(nights){
+  var WD=(L==='ar')?['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var byd={}; (nights||[]).forEach(function(n){ byd[n.date]=n; });
+  var today=new Date(); today.setHours(0,0,0,0);
+  var hdr=''; for(var w=0;w<7;w++){ hdr+='<div class="pe-wd">'+WD[w]+'</div>'; }
+  var cells=''; var pad=today.getDay();
+  for(var p=0;p<pad;p++){ cells+='<div class="pe-cell pe-pad"></div>'; }
+  for(var i=0;i<42;i++){
+    var dt=new Date(today.getTime()+i*86400000); var iso=_peIso(dt); var n=byd[iso];
+    var st=n?n.state:'baseline'; var s=_aptCellStyle(st);
+    var price=n?(n.final!=null?n.final:(n.baseline!=null?n.baseline:'')):'';
+    var capn=(n&&n.captured)?('<span style="display:block;font-size:8.5px;font-weight:700">+'+fmt(n.captured)+'</span>'):'';
+    var click=n?(' onclick="aptOpenNight(&#39;'+iso+'&#39;)" role="button" tabindex="0" style="cursor:pointer;background:'+s.bg+';border:'+s.bd+';color:'+s.tx+'"'):(' style="background:'+s.bg+';border:'+s.bd+';color:'+s.tx+'"');
+    cells+='<div class="pe-cell pe-has"'+click+'><span class="pe-cd">'+dt.getDate()+(s.ic?(' '+s.ic):'')+'</span>'+(price!==''?('<span class="pe-cp">'+fmt(price)+'</span>'):'')+capn+'</div>';
+  }
+  return _aptLegend()+'<div class="pe-cal">'+hdr+cells+'</div>';
+}
+function _aptBucketColor(b){ return (b==='ربح')?'#0B7A4A':(b==='أنقذنا ليلة')?'var(--green)':(b==='رفعنا زيادة')?'var(--gold-2)':'#B3433F'; }
+async function openApartment(lid, from){
+  _aptLid=lid; _aptFrom=from||view||'strat';
+  try{ location.hash='apartment/'+lid; }catch(_){}
+  view='apartment';
+  document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id==='view_apartment'); });
+  window.scrollTo({top:0});
+  var b=document.getElementById('aptBody'); if(b) b.innerHTML='<div class="empty sk" style="padding:40px;text-align:center">…</div>';
+  var d; try{ d=await api('/api/apartment/'+encodeURIComponent(lid)); }catch(_){ d=null; }
+  if(!d || d.error){ if(b) b.innerHTML='<div class="empty" style="padding:40px;text-align:center">⚠ '+(d&&d.error||'error')+'</div>'; return; }
+  D.apt=d; renderApartment(d);
+}
+function renderApartment(d){
+  var b=document.getElementById('aptBody'); if(!b) return; var ar=(L==='ar');
+  function metric(v,l,col){ return '<div class="pr-kpi"><div class="pr-kpi-v"'+(col?(' style="color:'+col+'"'):'')+'>'+v+'</div><div class="pr-kpi-l">'+esc(l)+'</div></div>'; }
+  var dh=d.due_hit||{};
+  var crumb='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><button class="btn ghost sm" onclick="aptBack()">← '+(ar?'رجوع':'Back')+'</button>'
+    +'<span class="muted" style="font-size:12px">'+(_aptFrom==='pricing'?(ar?'التسعير':'Pricing'):(ar?'الاستراتيجيات':'Strategies'))+' ‹ <b style="color:var(--text)">'+esc(d.name)+'</b></span></div>';
+  var head='<div class="page-title" style="font-size:24px">'+esc(d.name)+(d.compound?(' <span class="muted" style="font-size:14px">· '+esc(d.compound)+'</span>'):'')+'</div>'
+    +'<div class="page-sub" style="margin-bottom:12px">'+esc(ar?d.verdict_ar:d.verdict_en)+'</div>';
+  var capV=d.captured>0?('+'+fmt(d.captured)+' ر.س'):(ar?'—':'—');
+  var strip='<div class="card"><div class="pr-an">'
+    + metric(capV, ar?'كسبناه فوق الأساسي':'captured over baseline','var(--green)')
+    + metric(dh.due?((dh.booked||0)+'/'+dh.due):'—', ar?'ليالي مستحقّة انحجزت':'due nights booked')
+    + metric((d.adr_before!=null?fmt(d.adr_before)+' → '+fmt(d.adr_after):'—'), ar?'متوسط السعر قبل ← بعد':'ADR before → after')
+    + metric((d.revpar_before!=null?fmt(d.revpar_before)+' → '+fmt(d.revpar_after):'—'), 'RevPAR '+(ar?'قبل ← بعد':'before → after'))
+    + '</div></div>';
+  // floor & ceiling + why
+  var floors='<div class="card"><div class="card-head"><span class="card-title">🛡️ '+(ar?'الحد الأدنى والأعلى':'Floor & ceiling')+'</span></div>'
+    +'<div style="font-size:12.5px;color:var(--text-2);padding:4px 2px">'+(ar?'ما ننزل تحت ':'Never below ')+'<b style="color:var(--text)">'+fmt(d.floor||0)+'</b>'+(d.median?(ar?(' · ٧٠٪ من وسيط '+fmt(d.median)):(' · 70% of median '+fmt(d.median))):'')+' · '+(ar?'السقف ':'ceiling ')+'<b style="color:var(--text)">'+fmt(d.ceiling||0)+'</b>'+'</div></div>';
+  // pace
+  var pace=d.pace||{}; var paceH='';
+  if(pace.occ_now!=null && pace.typical_occ!=null){
+    paceH='<div class="card"><div class="card-head"><span class="card-title">⏱️ '+(ar?'سرعة الحجز مقابل المعتاد':'Pace vs typical')+'</span></div>'
+      +'<div style="font-size:13px;padding:6px 2px">'+(ar?'محجوزة ':'booked ')+'<b>'+Math.round(pace.occ_now*100)+'%</b>'+(pace.days_out!=null?(' '+(ar?'وباقي ':'· ')+pace.days_out+' '+(ar?'يوم':'days out')):'')+' · '+(ar?'المعتاد ':'typical ')+'<b>'+Math.round(pace.typical_occ*100)+'%</b> '+esc(pace.demand_pill||'')+'</div></div>';
+  }
+  // calendar
+  var calC='<div class="card"><div class="card-head"><span class="card-title">📅 '+(ar?'تقويم ٦ أسابيع':'6-week calendar')+'</span></div>'+_aptCal(d.nights)+'</div>';
+  // story log (§5)
+  var story=(d.story||[]);
+  var storyC='<div class="card"><div class="card-head"><span class="card-title">📜 '+(ar?'قصّة كل تغيير':'Story of every change')+'</span></div>'
+    +(story.length?('<div style="display:flex;flex-direction:column;gap:8px">'+story.map(function(s){
+      return '<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 4px;border-bottom:1px solid var(--line)"><span style="background:'+_aptBucketColor(s.bucket)+';color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:99px;white-space:nowrap;margin-top:1px">'+esc(s.bucket)+'</span><span style="font-size:12.5px;line-height:1.5">'+esc(ar?s.text_ar:s.text_en)+'</span></div>';
+    }).join('')+'</div>'):('<div class="muted" style="font-size:12px;padding:6px 2px">'+(ar?'ما فيه تغييرات مؤكّدة بعد.':'No confirmed changes yet.')+'</div>'))+'</div>';
+  // controls
+  var tg=d.toggles||{};
+  var togBtns=Object.keys(_PE_STRAT_META).map(function(k){ var on=tg[k]; var m=_PE_STRAT_META[k];
+    return '<button class="pe-utog'+(on?' on':'')+'" onclick="togglePeUnit(&#39;'+k+'&#39;,'+d.lid+','+(!on)+');setTimeout(function(){openApartment('+d.lid+')},400)">'+m.ic+' '+(ar?m.ar:m.en)+'</button>'; }).join('');
+  var ctrl='<div class="card"><div class="card-head"><span class="card-title">⚙ '+(ar?'التحكّم':'Controls')+'</span></div>'
+    +'<div class="pe-utogs" style="padding:6px 2px">'+togBtns+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;padding:6px 2px">'
+    +'<button class="btn primary sm" onclick="aptApply('+d.lid+')">✅ '+(ar?'طبّق هذي الشقة':'Apply this apartment')+'</button>'
+    +'<button class="btn ghost sm" onclick="aptDeactivate('+d.lid+')">⏸ '+(ar?'إيقاف التفعيل':'Deactivate')+'</button></div>'
+    +'<div class="pr-kpi-l" style="padding:2px">'+(d.dry_run?(ar?'وضع تجربة — ما يُكتب على Hostaway':'Dry-run — nothing written to Hostaway'):(ar?'يكتب على Hostaway فعلياً':'writes to Hostaway'))+'</div></div>';
+  b.innerHTML=crumb+head+strip+(paceH)+floors+calC+storyC+ctrl;
+}
+function aptBack(){ go(_aptFrom||'strat'); }
+function aptOpenNight(iso){ if(_aptLid!=null) openPePanel({getAttribute:function(k){return k==='data-lid'?String(_aptLid):iso;}}); }
+async function aptApply(lid){
+  var u=null; (((D.stratD||{}).units)||[]).forEach(function(x){if(x.lid===lid)u=x;});
+  if(!confirm(L==='ar'?'طبّق أسعار هذي الشقة على Hostaway؟':'Apply this apartment’s prices to Hostaway?')) return;
+  toast('⏳…'); var r; try{ r=await post('/api/pricing/apply-unit',{lid:lid}); }catch(_){ r=null; }
+  if(r&&!r.error){ var pfx=r.dry_run?(L==='ar'?'تجربة — ':'DRY-RUN — '):''; toast(pfx+(L==='ar'?'طُبّق ':'applied ')+(r.applied||0)); openApartment(lid); }
+  else toast((r&&r.error)||'⚠');
+}
+async function aptDeactivate(lid){
+  if(!confirm(L==='ar'?'إيقاف تفعيل هذي الشقة؟ بترجع لقائمة «غير مفعّلة».':'Deactivate this apartment?')) return;
+  var r; try{ r=await post('/api/pricing/activate',{lid:lid,on:false}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(L==='ar'?'أُوقفت ⏸':'Deactivated ⏸'); go('strat'); loadStrategies(); }
+  else toast((r&&r.error)||'⚠');
 }
 
 async function openStrategyDetail(lid){
