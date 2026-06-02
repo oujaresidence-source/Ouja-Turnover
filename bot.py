@@ -7989,6 +7989,24 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         .pe-cd{font-size:11px;color:var(--text-2)} .pe-cp{font-size:12px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
         .pe-cell.pe-raise .pe-cp{color:#2e9e6b} .pe-cell.pe-drop .pe-cp{color:#c2683f}
         @media(prefers-reduced-motion:reduce){.pe-apt-body,.pe-apt-caret,.pe-cell.pe-has{transition:none}}
+        /* ---- Pricing redesign: analytics header + chips + per-apartment toggles ---- */
+        .pr-an{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+        .pr-kpi{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+        .pr-kpi-v{font-size:20px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.1}
+        .pr-kpi-l{font-size:11px;color:var(--text-2);margin-top:3px}
+        .pr-kpi .pe-chip{margin:3px 3px 0 0}
+        .pe-chip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--gold-tint);color:var(--gold);border:1px solid rgba(200,162,75,.3);white-space:nowrap}
+        .pe-chip.off{background:var(--surface-2);color:var(--mut);border-color:var(--line)}
+        .pe-apt-chips{display:inline-flex;gap:4px;flex-wrap:wrap;margin-inline-start:6px}
+        .pe-utogs{display:flex;flex-wrap:wrap;gap:8px;padding:4px 14px 14px;align-items:center}
+        .pe-utog{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--surface-2);color:var(--text);cursor:pointer;font-size:12px;font-weight:600;transition:border-color .12s ease,background .12s ease,transform .1s cubic-bezier(0.23,1,0.32,1)}
+        .pe-utog:active{transform:scale(.97)}
+        .pe-utog.on{border-color:var(--gold);background:var(--gold-tint)}
+        .pe-utog .pe-utog-st{font-size:10px;color:var(--mut)} .pe-utog.on .pe-utog-st{color:var(--gold)}
+        .pe-spark{display:flex;align-items:flex-end;gap:3px;height:34px;margin-top:6px}
+        .pe-spark i{flex:1;background:var(--gold);border-radius:2px 2px 0 0;min-height:2px;opacity:.55}
+        .pe-spark i.last{opacity:1}
+        @media(prefers-reduced-motion:reduce){.pe-utog{transition:none}}
       </style>
       <section class="view" id="view_pricing">
         <div class="page-head">
@@ -8012,26 +8030,23 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
-        <!-- folded-in: tonight's vacancies + the last-minute step-down (was the "Today" page) -->
+        <!-- analytics header -->
         <div class="card">
-          <div class="card-head"><span class="card-title">◎ <span id="t_pr_tonight">الليلة — الفاضي + خصم اللحظة الأخيرة</span></span></div>
-          <div id="discountBanner"></div>
-          <div id="emptyGridWrap"><div class="empty sk">—</div></div>
+          <div id="prAnalytics"><div class="empty sk">—</div></div>
         </div>
 
-        <!-- Stage 7: strategy on/off toggles (all ON by default) -->
+        <!-- collapsible per-apartment list (accordion: one open at a time) -->
         <div class="card">
-          <div class="card-head"><span class="card-title">⚙ <span id="t_pr_toggles">الاستراتيجيات</span></span><span class="card-sub" id="t_pr_toggles_sub">تشغيل/إيقاف — مفعّلة كلها افتراضياً</span></div>
-          <div id="stratToggles"><div class="empty sk">—</div></div>
-        </div>
-
-        <div class="card">
-          <div id="prTotalBody"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="card-title">📋 <span id="t_pr_list">الوحدات — التقويم + طبّق الشهر</span></span><span class="card-sub" id="prListCount"></span></div>
+          <div class="card-head"><span class="card-title">🏘️ <span id="t_pr_list">الوحدات</span></span><span class="card-sub" id="prListCount"></span></div>
           <div id="prListBody"><div class="empty sk">—</div></div>
         </div>
+
+        <!-- folded-in "Today": tonight's vacancies + last-minute step-down (secondary, collapsed) -->
+        <details class="card" id="prTonight">
+          <summary style="cursor:pointer;font-weight:600;font-size:13px;padding:2px 0;list-style:none">◎ <span id="t_pr_tonight">الليلة — الفاضي + خصم اللحظة الأخيرة</span></summary>
+          <div style="margin-top:10px"><div id="discountBanner"></div>
+          <div id="emptyGridWrap"><div class="empty sk">—</div></div></div>
+        </details>
       </section>
 
       <!-- ============ STRATEGIES VIEW ============ -->
@@ -9987,84 +10002,86 @@ async function loadAll(){
   }catch(e){ if(e==='unauthorized') logout() }
 }
 var _pePanel = null;
+var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'📆',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'🎉',ar:'مناسبة',en:'Event'}};
 async function loadPricing(){
-  var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML = '<div class="empty sk">—</div>';
-  try{ D.pr2 = await api('/api/pricing2/recs') }catch(_){ D.pr2={recs:[],error:'تعذّر جلب التوصيات'} }
+  var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics')]); D.pr2=rr[0]; D.prA=rr[1]; }
+  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; }
+  renderPricingHeader();
   renderPricing2();
-  loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down
-  loadStrategyToggles();    // Stage 7: strategy on/off strip
+  loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down (collapsed)
 }
-async function loadStrategyToggles(){
-  try{ D.stratTog = await api('/api/pricing/strategy-toggles'); }catch(_){ D.stratTog={strategies:[]}; }
-  renderStrategyToggles();
+function _prMonths(){
+  var m={}, t0=new Date(); t0.setHours(0,0,0,0);
+  for(var i=0;i<46;i++){ var d=new Date(t0.getTime()+i*86400000); m[d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)]=1; }
+  return Object.keys(m).sort();
 }
-function renderStrategyToggles(){
-  var el=document.getElementById('stratToggles'); if(!el) return;
-  var list=((D.stratTog||{}).strategies)||[];
-  if(!list.length){ el.innerHTML='<div class="empty">—</div>'; return; }
-  el.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:8px">'+list.map(function(s){
-    var on=s.global_enabled;
-    return '<button class="strat-tog'+(on?' on':'')+'" onclick="toggleStrategy(&#39;'+s.key+'&#39;,'+(!on)+')" '
-      +'style="display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:999px;border:1.5px solid '
-      +(on?'var(--gold)':'var(--border)')+';background:'+(on?'var(--gold-tint)':'var(--surface-2)')+';color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600">'
-      +'<span>'+esc(s.icon)+'</span><span>'+esc(L==='ar'?s.label_ar:s.label_en)+'</span>'
-      +'<span style="font-size:10.5px;color:'+(on?'var(--gold)':'var(--mut)')+'">'+(on?(L==='ar'?'مفعّلة':'on'):(L==='ar'?'موقّفة':'off'))+'</span></button>';
-  }).join('')+'</div>'
-    +'<div class="muted" style="font-size:11px;margin-top:8px">'+(L==='ar'?'الإيقاف يشيل تأثير الاستراتيجية فوراً. التحكّم لكل وحدة من تفاصيل أي يوم.':'Disabling removes the effect immediately. Per-unit control lives in any date detail.')+'</div>';
-}
-async function toggleStrategy(key, enabled){
-  var r=await post('/api/pricing/strategy-toggle',{name:key, enabled:enabled});
-  if(r&&r.ok){ toast(enabled?(L==='ar'?'تشغيل ✅':'on ✅'):(L==='ar'?'إيقاف ⏸':'off ⏸')); loadPricing(); }
-  else toast((r&&r.error)||'⚠');
+function renderPricingHeader(){
+  var el=document.getElementById('prAnalytics'); if(!el) return;
+  var a=D.prA||{}; var sc=a.strat_counts||{}; var hit=a.hit_rate||{};
+  function kpi(v,l){ return '<div class="pr-kpi"><div class="pr-kpi-v">'+v+'</div><div class="pr-kpi-l">'+esc(l)+'</div></div>'; }
+  var chips=Object.keys(_PE_STRAT_META).map(function(k){ var m=_PE_STRAT_META[k]; return '<span class="pe-chip">'+m.ic+' '+(L==='ar'?m.ar:m.en)+' · '+(sc[k]||0)+'</span>'; }).join('');
+  var sp=a.spark||[]; var max=Math.max.apply(null,sp.map(function(x){return x.rev||0;}).concat([1]));
+  var bars=sp.map(function(x,i){ var h=Math.round((x.rev||0)/max*100); return '<i class="'+(i===sp.length-1?'last':'')+'" style="height:'+Math.max(h,4)+'%" title="'+esc(x.m)+': '+fmt(x.rev)+'"></i>'; }).join('');
+  var momTxt=(a.mom==null?'—':((a.mom>0?'▲ +':(a.mom<0?'▼ ':''))+a.mom+'%'));
+  var momCol=(a.mom>0?'#2e9e6b':(a.mom<0?'#c2683f':'var(--mut)'));
+  var graph='<div class="pr-kpi"><div class="pr-kpi-l">'+(L==='ar'?'الإيراد الشهري (آخر ٦)':'Monthly revenue (last 6)')+' · <b style="color:'+momCol+'">'+momTxt+'</b></div><div class="pe-spark">'+bars+'</div></div>';
+  var hitKpi=hit.have
+    ? kpi(hit.rate+'%', (L==='ar'?('توصيات طُبّقت ثم انحجزت ('+hit.booked+'/'+hit.applied+')'):('applied recs that booked ('+hit.booked+'/'+hit.applied+')')))
+    : '<div class="pr-kpi"><div class="pr-kpi-v" style="font-size:13px;font-weight:600;line-height:1.3">'+(L==='ar'?'لا بيانات بعد':'no data yet')+'</div><div class="pr-kpi-l">'+(L==='ar'?'نسبة الليالي المخفّضة المحجوزة — تظهر بعد تطبيق فعلي (مو تجربة)':'discounted-night hit rate — appears after real (non-dry) applies')+'</div></div>';
+  var mbtns=_prMonths().map(function(mk){ return '<button class="btn ghost sm" onclick="applyMonth(&#39;'+mk+'&#39;)">📅 '+(L==='ar'?'طبّق ':'Apply ')+mk+'</button>'; }).join(' ');
+  el.innerHTML='<div class="pr-an">'
+    + kpi('+'+fmt(a.uplift||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>', (L==='ar'?('فرصة رفع/ليلة · '+(a.opp||0)+' فرصة'):('uplift opportunity · '+(a.opp||0)+' opps')))
+    + kpi(a.changed_this_month||0, (L==='ar'?'تغييرات سعر هذا الشهر':'price changes this month'))
+    + graph + hitKpi + '</div>'
+    + '<div style="margin-top:10px"><div class="pr-kpi-l" style="margin-bottom:5px">'+(L==='ar'?'استراتيجيات فعّالة (عدد الشقق):':'active strategies (apartments):')+'</div>'+chips+'</div>'
+    + '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)"><div class="pr-kpi-l" style="margin-bottom:6px">'+(L==='ar'?'تطبيق شهر كامل (يعاين أول):':'apply a whole month (previews first):')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+mbtns+'</div></div>';
 }
 function _peIso(dt){ var m=dt.getMonth()+1, dd=dt.getDate(); return dt.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd; }
 function renderPricing2(){
   var d=D.pr2||{}; var recs=(d.recs||[]);
-  var tot=document.getElementById('prTotalBody'), body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
-  if(d.error){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+esc(d.error)+'</div>'; if(tot) tot.innerHTML=''; return; }
-  if(!recs.length){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">ما فيه فرص واضحة حالياً — الأسعار قريبة من المتوقّع.</div>'; if(tot) tot.innerHTML=''; return; }
+  var body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
+  if(d.error){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+esc(d.error)+'</div>'; return; }
+  if(!recs.length){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">ما فيه فرص واضحة حالياً — الأسعار قريبة من المتوقّع.</div>'; return; }
   var byU={};
   recs.forEach(function(r){
     var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}}; }
     u.byDate[r.date]=r;
-    if(r.delta && r.delta>0) u.uplift+=r.delta;
-    if(r.delta && r.delta!==0) u.nopp++;
+    var f=r.final, c=r.current;
+    if(f!=null && c!=null && f!==c){ u.nopp++; if(f>c) u.uplift+=(f-c); }
   });
   window._peByUnit=byU;
   var units=Object.keys(byU).map(function(k){return byU[k];}).sort(function(a,b){return b.uplift-a.uplift;});
-  var totalUplift=units.reduce(function(s,u){return s+u.uplift;},0);
-  var totalOpps=units.reduce(function(s,u){return s+u.nopp;},0);
-  // Stage 6: per-month "Apply" buttons for the months the recommendations span
-  var _mons={}; var _t0=new Date(); _t0.setHours(0,0,0,0);
-  for(var _i=0;_i<46;_i++){ var _dd=new Date(_t0.getTime()+_i*86400000); _mons[_dd.getFullYear()+'-'+('0'+(_dd.getMonth()+1)).slice(-2)]=1; }
-  var _monBtns=Object.keys(_mons).sort().map(function(mk){
-    return '<button class="btn ghost sm" onclick="applyMonth(&#39;'+mk+'&#39;)">📅 '+(L==='ar'?'طبّق ':'Apply ')+mk+'</button>'; }).join(' ');
-  if(tot) tot.innerHTML='<div class="pe-sum"><div class="pe-sum-k"><b>'+units.length+'</b> شقة</div>'
-    +'<div class="pe-sum-k"><b>'+totalOpps+'</b> فرصة</div>'
-    +'<div class="pe-sum-k up"><b>+'+fmt(totalUplift)+'</b> ر.س فرصة رفع/ليلة</div></div>'
-    +'<div class="pe-sum-note">مرتّبة بأكبر فرصة · مبني على ~'+fmt(d.footer_n||0)+' حجز فعلي · السعر الحالي من تقويم Hostaway مباشرة'+(d.dry_run?' · وضع تجربة (DRY-RUN)':'')+'</div>'
-    +'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"><div class="muted" style="font-size:11.5px;margin-bottom:7px">'+(L==='ar'?'تطبيق كل أسعار شهر دفعة وحدة (يعاين أول ثم يطبّق ويسجّل):':'Apply a whole month at once (previews first, then applies + logs):')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+_monBtns+'</div></div>';
-  if(cnt) cnt.textContent=units.length+' شقة';
-  var h='';
-  units.forEach(function(u){
-    h+='<div class="pe-apt">'
+  if(cnt) cnt.textContent=units.length+(L==='ar'?' شقة':' units');
+  var ut=(D.prA||{}).unit_toggles||{};
+  // COLLAPSED rows by default — name · chips of active strategies · #opps · SAR uplift
+  var h=units.map(function(u){
+    var tg=ut[String(u.lid)]||{};
+    var chips=Object.keys(_PE_STRAT_META).filter(function(k){return tg[k];}).map(function(k){
+      return '<span class="pe-chip" title="'+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'">'+_PE_STRAT_META[k].ic+'</span>'; }).join('');
+    return '<div class="pe-apt">'
       +'<button class="pe-apt-head" type="button" aria-expanded="false" onclick="pePeToggle(this,'+u.lid+')">'
         +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
         +'<span class="pe-apt-name">'+esc(u.unit||('وحدة '+u.lid))+'</span>'
-        +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+' فرصة</span>'):'')
+        +'<span class="pe-apt-chips">'+chips+'</span>'
+        +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+(L==='ar'?' فرصة':' opp')+'</span>'):'')
           +(u.uplift>0?('<span class="pe-apt-up">+'+fmt(u.uplift)+' ر.س</span>'):'')+'</span>'
       +'</button>'
       +'<div class="pe-apt-body" id="peapt_'+u.lid+'"></div>'
     +'</div>';
-  });
+  }).join('');
   if(body) body.innerHTML=h;
 }
 function pePeToggle(btn, lid){
   var open=btn.getAttribute('aria-expanded')==='true';
+  if(!open){   // accordion: collapse any other open apartment first (one open at a time)
+    document.querySelectorAll('#prListBody .pe-apt-head').forEach(function(b){ b.setAttribute('aria-expanded','false'); b.classList.remove('on'); });
+    document.querySelectorAll('#prListBody .pe-apt-body.open').forEach(function(be){ be.classList.remove('open'); });
+  }
   btn.setAttribute('aria-expanded', open?'false':'true'); btn.classList.toggle('on', !open);
   var bodyEl=document.getElementById('peapt_'+lid); if(!bodyEl) return;
   if(open){ bodyEl.classList.remove('open'); return; }
-  if(!bodyEl.getAttribute('data-r')){ bodyEl.innerHTML=peMiniCal((window._peByUnit||{})[lid]); bodyEl.setAttribute('data-r','1'); }
+  bodyEl.innerHTML=peMiniCal((window._peByUnit||{})[lid]);   // re-render so preview + toggles are current
   bodyEl.classList.add('open');
 }
 var _PE_BADGE_IC={'last-minute':'⏱️','strategy':'⚡','weekend':'📆','event':'🎉'};
@@ -10095,7 +10112,43 @@ function peMiniCal(u){
     +'<span class="pe-lg pe-drop"></span>'+(L==='ar'?'خفض':'drop')
     +'<span class="pe-lg pe-holdc"></span>'+(L==='ar'?'ثابت':'hold')
     +' · ⏱️⚡📆🎉 '+(L==='ar'?'استراتيجية فعّالة':'active strategy')+'</div>'
-    +'<div class="pe-cal">'+hdr+cells+'</div>';
+    +'<div class="pe-cal">'+hdr+cells+'</div>'
+    +_peUnitControls(u.lid);
+}
+// the 4 per-apartment strategy toggles + Apply, shown BELOW that apartment's calendar
+function _peUnitControls(lid){
+  var tg=((D.prA||{}).unit_toggles||{})[String(lid)]||{};
+  var btns=Object.keys(_PE_STRAT_META).map(function(k){
+    var on=tg[k]; var m=_PE_STRAT_META[k];
+    return '<button class="pe-utog'+(on?' on':'')+'" onclick="togglePeUnit(&#39;'+k+'&#39;,'+lid+','+(!on)+')">'
+      +m.ic+' '+(L==='ar'?m.ar:m.en)+' <span class="pe-utog-st">'+(on?(L==='ar'?'مفعّل':'on'):(L==='ar'?'موقّف':'off'))+'</span></button>';
+  }).join('');
+  return '<div class="pe-utogs">'+btns
+    +'<button class="btn primary sm" style="margin-inline-start:auto" onclick="applyUnit('+lid+')">✅ '+(L==='ar'?'طبّق هذي الشقة':'Apply this apartment')+'</button></div>'
+    +'<div class="pr-kpi-l" style="padding:0 14px 12px">'+(L==='ar'
+        ?'التبديل يغيّر معاينة هذي الشقة فقط · ما يُرسل شي لـHostaway حتى تضغط «طبّق هذي الشقة».'
+        :'Toggles change this apartment’s preview only · nothing is pushed to Hostaway until you press “Apply this apartment”.')+'</div>';
+}
+async function togglePeUnit(key, lid, enabled){
+  var r=await post('/api/pricing/strategy-toggle',{name:key, lid:lid, enabled:enabled});
+  if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
+  toast(enabled?(L==='ar'?'تشغيل ✅':'on ✅'):(L==='ar'?'إيقاف ⏸':'off ⏸'));
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics')]); D.pr2=rr[0]; D.prA=rr[1]; }catch(_){}
+  renderPricingHeader(); renderPricing2();
+  var btn=document.querySelector('#prListBody .pe-apt-head[onclick="pePeToggle(this,'+lid+')"]');
+  if(btn) pePeToggle(btn, lid);   // re-open this apartment so the new preview shows
+}
+async function applyUnit(lid){
+  var u=(window._peByUnit||{})[lid]||{}; var n=0;
+  Object.keys(u.byDate||{}).forEach(function(dt){ var r=u.byDate[dt]; if(r.final!=null&&r.current!=null&&r.final!==r.current) n++; });
+  if(!n){ toast(L==='ar'?'ما فيه أسعار مختلفة للتطبيق':'Nothing to apply'); return; }
+  if(!confirm((L==='ar'?('طبّق '+n+' سعر لهذي الشقة فقط؟'):('Apply '+n+' prices for THIS apartment only?')))) return;
+  toast('⏳…');
+  var r; try{ r=await post('/api/pricing/apply-unit',{lid:lid}); }catch(_){ r=null; }
+  if(!r||r.error){ toast((r&&r.error)||'⚠'); return; }
+  var pfx=r.dry_run?(L==='ar'?'تجربة — ':'DRY-RUN — '):'';
+  toast(pfx+(L==='ar'?'طُبّق ':'applied ')+r.applied+(r.failed?(' · '+(L==='ar'?'فشل ':'failed ')+r.failed):''));
+  loadPricing();
 }
 async function openPePanel(el){
   var lid=el.getAttribute('data-lid'), date=el.getAttribute('data-date');
@@ -17513,6 +17566,91 @@ async def _api_pricing_apply_month(request):
     return _json({"month": month, "results": results, "applied": applied,
                   "failed": failed, "dry_run": PRICE_APPLY_DRYRUN})
 
+# ---- Pricing analytics header + per-apartment apply (redesign; reuses the engine) ----
+def _pricing_analytics():
+    """Header numbers for the Pricing page — all from existing data (recs, toggles, the
+    central change log, revenue, the learning log). Also returns per-unit toggle states."""
+    recs = _pe_get_recs().get("recs") or []
+    units = sorted({r["lid"] for r in recs if r.get("lid") is not None})
+    strat_counts = {k: sum(1 for lid in units if strategy_enabled(k, lid)) for k in STRATEGY_KEYS}
+    unit_toggles = {str(lid): {k: strategy_enabled(k, lid) for k in STRATEGY_KEYS} for lid in units}
+    uplift = opp = 0
+    for r in recs:
+        f, c = r.get("final"), r.get("current")
+        if f is not None and c is not None and int(f) != int(c):
+            opp += 1
+            if f > c:
+                uplift += (f - c)
+    cur_month = datetime.now(TZ).strftime("%Y-%m")
+    changed = disc = 0
+    for entries in _price_log.values():
+        for e in entries:
+            if (e.get("ts") or "")[:7] == cur_month:
+                changed += 1
+                if e.get("old") is not None and e.get("new") is not None and e["new"] < e["old"]:
+                    disc += 1
+    spark, mom = [], None
+    try:
+        rv = _compute_revenue()
+        spark = [{"m": x.get("m"), "rev": x.get("rev", 0)} for x in (rv.get("monthly") or [])][-6:]
+        if len(spark) >= 2 and spark[-2]["rev"]:
+            mom = round(100.0 * (spark[-1]["rev"] - spark[-2]["rev"]) / spark[-2]["rev"])
+    except Exception as e:
+        print("pricing analytics revenue:", e)
+    ls = _pe_learning_summary()
+    ar = ls.get("applied_real", 0)
+    bk = ls.get("applied_then_booked", 0)
+    hit = {"have": ar > 0, "applied": ar, "booked": bk,
+           "rate": (round(100.0 * bk / ar) if ar else None)}
+    return {"units": len(units), "strat_counts": strat_counts, "unit_toggles": unit_toggles,
+            "opp": opp, "uplift": int(uplift), "changed_this_month": changed,
+            "discount_changes_this_month": disc, "month": cur_month,
+            "spark": spark, "mom": mom, "hit_rate": hit, "dry_run": PRICE_APPLY_DRYRUN}
+
+async def _api_pricing_analytics(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_pricing_analytics))
+
+def _unit_apply_plan(lid):
+    """Every date for ONE unit whose final price differs from current — the 'Apply this apartment' set."""
+    recs = _pe_get_recs().get("recs") or []
+    plan = []
+    for r in recs:
+        if r.get("lid") != lid:
+            continue
+        f, c = r.get("final"), r.get("current")
+        if f is None or (c is not None and int(f) == int(c)):
+            continue
+        plan.append({"date": r["date"], "current": c, "final": int(f), "unit": r.get("unit")})
+    plan.sort(key=lambda x: x["date"])
+    return plan
+
+async def _api_pricing_apply_unit(request):
+    """Apply only THIS apartment's prices (preview-then-apply; never touches other units)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except Exception:
+        return _json({"error": "bad lid"}, 400)
+    plan = await asyncio.to_thread(_unit_apply_plan, lid)
+    results = []
+    for p in plan:
+        res = await asyncio.to_thread(_pe_apply_night, lid, p["date"], p["final"],
+                                      "manual", "تطبيق الشقة", p["current"])
+        results.append({"date": p["date"], "final": p["final"], "current": p["current"],
+                        "ok": res.get("ok"), "dry": res.get("dry_run"),
+                        "confirmed": res.get("confirmed"), "error": res.get("error")})
+    applied = sum(1 for r in results if r["ok"])
+    failed = sum(1 for r in results if not r["ok"])
+    nm = (plan[0]["unit"] if plan else str(lid))
+    log_event("pricing", f"تطبيق الشقة {nm} · {applied} نجح · {failed} فشل"
+                         + (" · تجربة" if PRICE_APPLY_DRYRUN else ""))
+    return _json({"lid": lid, "results": results, "applied": applied, "failed": failed,
+                  "count": len(plan), "dry_run": PRICE_APPLY_DRYRUN})
+
 # ---- Stage 7: backtest — prove the learned models aren't random ----
 def _pe_backtest(holdout_days=90):
     """Train on bookings for arrivals BEFORE a cutoff; test on the held-out recent arrivals.
@@ -23292,6 +23430,8 @@ async def start_web_server():
         app.router.add_post("/api/pricing/strategy-toggle", _api_strategy_toggle_set)
         app.router.add_get("/api/pricing/month-preview", _api_pricing_month_preview)
         app.router.add_post("/api/pricing/apply-month", _api_pricing_apply_month)
+        app.router.add_get("/api/pricing/analytics", _api_pricing_analytics)
+        app.router.add_post("/api/pricing/apply-unit", _api_pricing_apply_unit)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
