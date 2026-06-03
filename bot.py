@@ -20637,6 +20637,8 @@ def _pe_reconstruct_pace(nights, group_units, horizon=PE_HORIZON):
 
 PE_MIN_UNIT = int(os.environ.get("PE_MIN_UNIT", "8"))     # min bookings to trust a unit's OWN band (else pool to group)
 PE_EVENT_MIN = int(os.environ.get("PE_EVENT_MIN", "10"))  # min event-nights for a high-confidence learned effect
+PE_POOL_STRETCH = float(os.environ.get("PE_POOL_STRETCH", "0.15"))   # pooled rec may exceed THIS unit's own max by ≤15%
+PE_LEAN_STRENGTH = float(os.environ.get("PE_LEAN_STRENGTH", "0.30")) # how hard the price↔occupancy dial pulls (0..1)
 
 def _pe_band(adrs):
     """Realized ADR band from a list of booked ADRs (nearest-rank percentiles)."""
@@ -20764,17 +20766,28 @@ def _pe_resolve_band(models, lid, g, dtype, ev):
     return None, None
 
 def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
-                       ev_effect, pace_entry, occ_now_frac, manual_floor=0):
+                       ev_effect, pace_entry, occ_now_frac, manual_floor=0,
+                       own_max=None, lean="balanced"):
     """PURE. One night's recommendation. Far-out (>10d) holds the anchor and never
     pre-discounts (raises early only for events that historically book early); near-in
     (0-10d) moves with the pace signal toward floor (behind) or ceiling (ahead). Never
-    below the hard floor. Returns a dict, or None if there is no band (omit, don't fake)."""
+    below the hard floor. Returns a dict, or None if there is no band (omit, don't fake).
+    `own_max` caps a POOLED recommendation to this unit's own realized max ×(1+stretch) so
+    we never suggest a price far above what THIS apartment ever proved (events exempt).
+    `lean` tilts the result toward occupancy ('fill') or price ('top')."""
     if not band or not band.get("median"):
         return None
     median = band["median"]
     days_out = (d - today).days
     floor = max(int(round(0.70 * median)), int(manual_floor or 0))
     ceiling = max(int(round(min(band.get("p90") or median * 1.5, 2.0 * median))), floor)
+    # Pooled cap: when borrowing from similar units, don't fly far above this unit's own history.
+    pooled_capped = False
+    if band_source != "unit" and own_max and not ev:
+        cap = max(floor, int(round(own_max * (1.0 + PE_POOL_STRETCH))))
+        if cap < ceiling:
+            ceiling = cap
+            pooled_capped = True
     # pace signal: current on-the-books vs historical typical at this same days-out
     typ = pace_entry["typical_occ"].get(days_out) if (pace_entry and pace_entry.get("typical_occ")) else None
     if typ is not None and occ_now_frac is not None:
@@ -20802,9 +20815,15 @@ def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
             rec = median + 0.50 * (ceiling - median)
         else:
             rec = median
+    # price↔occupancy dial: fill → pull toward floor; top → push toward ceiling
+    if lean == "fill":
+        rec = rec - PE_LEAN_STRENGTH * (rec - floor)
+    elif lean == "top":
+        rec = rec + PE_LEAN_STRENGTH * (ceiling - rec)
     rec = int(round(max(floor, min(ceiling, rec))))
     out = {"date": d.isoformat(), "days_out": days_out, "dtype": dtype, "event": ev,
            "recommended": rec, "floor": floor, "ceiling": ceiling, "median": median,
+           "lean": lean, "pooled_capped": pooled_capped,
            "signal": signal, "band_source": band_source, "band_count": band.get("count"),
            "occ_now": (round(occ_now_frac, 3) if occ_now_frac is not None else None),
            "typical_occ": (round(typ, 3) if typ is not None else None),
@@ -20898,10 +20917,12 @@ def _pe_compute_recommendations(horizon=None):
                 continue
             tot = occ_tot.get((g, ds), 0)
             occf = (occ_book.get((g, ds), 0) / tot) if tot else None
+            own_b = models["unit_bands"].get(f"{lid}||{dtype}")
             r = _pe_reco_for_night(d, today, dtype, ev, row.get("price"), band, source,
                                    models["events"].get(ev) if ev else None,
                                    pace.get(f"{g}||{dtype}"), occf,
-                                   _pe_floor_overrides.get(lid, 0))
+                                   _pe_floor_overrides.get(lid, 0),
+                                   own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid))
             if not r:
                 continue
             r.update({"lid": lid, "unit": uname, "group": g})
@@ -21079,6 +21100,32 @@ def set_pricing_activated(lid, on):
         _save_json(PRICING_ACTIVATED_FILE, _pricing_activated)
     except Exception as e:
         print("pricing activation save:", e)
+    return True
+
+# ---- Per-apartment price↔occupancy dial: fill (favor occupancy) / balanced / top (favor price) ----
+PRICING_LEAN_FILE = "pricing_lean.json"
+_pricing_lean = {}     # str(lid) -> "fill" | "top"  (absent == "balanced")
+try:
+    _pl_loaded = _load_json(PRICING_LEAN_FILE, None)
+    if isinstance(_pl_loaded, dict):
+        _pricing_lean = {str(k): v for k, v in _pl_loaded.items() if v in ("fill", "top")}
+except Exception:
+    pass
+
+def pe_lean(lid):
+    return _pricing_lean.get(str(lid), "balanced")
+
+def set_pe_lean(lid, val):
+    if val in ("fill", "top"):
+        _pricing_lean[str(lid)] = val
+    elif val == "balanced":
+        _pricing_lean.pop(str(lid), None)
+    else:
+        return False
+    try:
+        _save_json(PRICING_LEAN_FILE, _pricing_lean)
+    except Exception as e:
+        print("pricing lean save:", e)
     return True
 
 def strategy_enabled(name, lid=None):
@@ -21353,9 +21400,11 @@ def _pe_night_detail(lid, date_iso):
             rec = dict(r)
             break
     if rec is None:
+        own_b = models["unit_bands"].get(f"{lid}||{dtype}")
         rec = _pe_reco_for_night(d, today, dtype, ev, live_cur, band, source,
                                  models["events"].get(ev) if ev else None,
-                                 pace.get(f"{g}||{dtype}"), None, _pe_floor_overrides.get(lid, 0))
+                                 pace.get(f"{g}||{dtype}"), None, _pe_floor_overrides.get(lid, 0),
+                                 own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid))
         if rec:
             rec.update({"lid": lid, "unit": uname, "group": g})
     elif live_cur is not None and live_cur > 0:        # refresh the cached rec's current to live
@@ -21748,6 +21797,23 @@ async def _api_pricing_activate(request):
     nm = (get_listings_map() or {}).get(lid) or str(lid)
     log_event("pricing", f"تسعير · {'تفعيل ✅' if on else 'إيقاف ⏸'} · {nm}")
     return _json({"ok": True, "lid": lid, "on": on})
+
+async def _api_pricing_lean(request):
+    """Set a unit's price↔occupancy dial: 'fill' (favor occupancy) / 'balanced' / 'top' (favor price)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    val = (b.get("lean") or "balanced").strip()
+    if not set_pe_lean(lid, val):
+        return _json({"error": "bad lean"}, 400)
+    _pe_rec_cache["ts"] = 0          # force the next recs read to recompute with the new dial
+    nm = (get_listings_map() or {}).get(lid) or str(lid)
+    log_event("pricing", f"تسعير · الميل {val} · {nm}")
+    return _json({"ok": True, "lid": lid, "lean": val})
 
 async def _api_pricing_import_airbnb(request):
     """Import Airbnb-channel listings (via Hostaway). Runs the same listings sync, then reports
@@ -28988,6 +29054,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing/analytics", _api_pricing_analytics)
         app.router.add_post("/api/pricing/apply-unit", _api_pricing_apply_unit)
         app.router.add_post("/api/pricing/activate", _api_pricing_activate)
+        app.router.add_post("/api/pricing/lean", _api_pricing_lean)
         app.router.add_post("/api/pricing/import-airbnb", _api_pricing_import_airbnb)
         app.router.add_get("/api/strategy", _api_strategy)
         app.router.add_get("/api/strategies", _api_strategies)
