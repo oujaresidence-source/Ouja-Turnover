@@ -6327,6 +6327,7 @@ def _pmo_log(project, who, text):
 # a review queue for a manager. We store only the Drive receipt LINK, never the
 # image bytes. See the product spec for the exact behaviours.
 _expenses = {}            # expense_id -> dict
+_exp4_batches = {}        # batch_id -> import-file batch (the downloadable files log; append-only)
 _expense_settings = {}    # persisted config (merged over defaults)
 _expense_seq = 0
 _expense_export_queue = deque()
@@ -8937,26 +8938,81 @@ def _exp4_prepare_check(ids):
     return {"ok": ok, "error": err, "hostaway_count": len(items or []),
             "ready": ready, "already": already, "blocked": blocked}
 
+def _exp4_new_batch_id():
+    n = 0
+    for k in _exp4_batches:
+        try:
+            n = max(n, int(str(k).split("-")[-1]))
+        except (ValueError, IndexError):
+            pass
+    return "OJ-IMP-%04d" % (n + 1)
+
 def _exp4_build_file(ids, by=""):
-    """Build the import .xlsx for the FINAL included ids and mark each as 'in import file,
-    awaiting verification'. Returns (xlsx_bytes, marked_ids, skipped). Skips ineligible rows."""
-    rows, marked, skipped = [], [], []
+    """Build the import CSV for the FINAL included ids, mark each 'in import file, awaiting
+    verification', and RECORD a downloadable batch in the files log. Returns
+    (csv_bytes, marked_ids, skipped, batch_id). Skips ineligible rows."""
+    rows, marked, skipped, meta = [], [], [], []
     for i in ids:
         e = _expenses.get(str(i))
         elig, why = _exp4_file_eligible(e) if e else (False, "not_found")
         if not elig:
             skipped.append({"id": str(i), "reason": why}); continue
         rows.append(_exp4_import_row(e))
+        meta.append({"expense_id": e.get("id"), "ref": e.get("ref"), "apartment": e.get("apartment"),
+                     "amount": round(abs(float(e.get("amount") or 0)), 2), "kind": e.get("kind") or "expense",
+                     "date": e.get("expense_date"), "listing_id": e.get("listing_id"), "category": e.get("category")})
         e["hostaway_ref"] = "FILE"                          # placeholder (not a real id; excluded by _exp_has_real_hostaway_ref)
         e["dry"] = False
         e["import_batch_at"] = _exp_now().isoformat(timespec="seconds")
         _exp_set_status(e, "sent_unverified", reason="import_file", detail="in Hostaway import file")
         _exp4_set_job(e, "exported_not_verified", error="awaiting_import")
-        _exp4_log(e, "import_file_prepared", actor=by, new="exported_not_verified",
-                  detail="included in Hostaway import file", recommended="upload in Hostaway, then verify")
         marked.append(e.get("id"))
+    csv_bytes = _exp4_csv_bytes(rows)
+    batch_id = ""
+    if marked:
+        import base64
+        batch_id = _exp4_new_batch_id()
+        _exp4_batches[batch_id] = {
+            "batch_id": batch_id, "created_at": _exp_now().isoformat(timespec="seconds"),
+            "by": (by or "")[:60], "filename": "ouja-hostaway-import-" + batch_id + ".csv",
+            "count": len(meta), "total_sar": round(sum(r["amount"] for r in meta), 2),
+            "rows": meta, "csv_b64": base64.b64encode(csv_bytes).decode("ascii"),
+        }
+        for e_id in marked:
+            e = _expenses.get(e_id)
+            if e:
+                e["import_batch_id"] = batch_id
+                _exp4_log(e, "import_file_prepared", actor=by, new="exported_not_verified",
+                          detail="in import batch " + batch_id, recommended="upload in Hostaway, then verify")
     persist_state()
-    return _exp4_csv_bytes(rows), marked, skipped
+    return csv_bytes, marked, skipped, batch_id
+
+def _exp4_batch_status(b):
+    """Live tracking for a batch: how many of its expenses are now verified in Hostaway."""
+    v = 0
+    for r in b.get("rows", []):
+        e = _expenses.get(r.get("expense_id"))
+        if e and _exp4_export_status(e) == "verified":
+            v += 1
+    total = len(b.get("rows", []))
+    return {"verified": v, "pending": total - v, "total": total}
+
+def _exp4_batches_list(q=""):
+    """The files log (newest first), searchable by batch id / OJ-EXP ref / apartment / amount."""
+    ql = (q or "").strip().lower()
+    out = []
+    for b in _exp4_batches.values():
+        if ql:
+            hay = (b.get("batch_id", "") + " " + " ".join(
+                str(r.get("ref", "")) + " " + str(r.get("apartment", "")) + " " + str(r.get("amount", ""))
+                for r in b.get("rows", []))).lower()
+            if ql not in hay:
+                continue
+        out.append({"batch_id": b["batch_id"], "created_at": b.get("created_at"), "by": b.get("by", ""),
+                    "filename": b.get("filename"), "count": b.get("count"), "total_sar": b.get("total_sar"),
+                    "status": _exp4_batch_status(b), "rows": b.get("rows", [])})
+    out.sort(key=lambda x: (x.get("created_at") or ""), reverse=True)
+    return out
 
 async def _exp4_verify_now(exp):
     """Re-fetch Hostaway and verify this one expense (no API create). Used after a file import
@@ -15653,6 +15709,7 @@ function _renderExp4(){
   var d=D.exp4||{}, tabs=d.tabs||{}, T=t(), ar=(L==='ar');
   var head='<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
       +'<button class="btn primary sm" onclick="x4OpenPrepare()">📤 '+(ar?'تجهيز ملف الاستيراد':'Prepare import file')+'</button>'
+      +'<button class="btn ghost sm" onclick="x4OpenFiles()">📁 '+(ar?'سجل الملفات':'Files log')+'</button>'
       +'<button class="btn ghost sm" onclick="x4Import()">'+T.x4_import+'</button>'
       +'<button class="btn ghost sm" onclick="loadExpenses()">'+T.x4_refresh+'</button>'
       +'<button class="btn ghost sm" onclick="x4Advanced()">'+T.x4_advanced+'</button></div>';
@@ -15671,6 +15728,7 @@ function _renderExp4(){
     +(_x4Tab==='pending'?('<button class="btn primary sm" onclick="x4ApproveAllPending()">'+(ar?'✓ اعتماد كل الصالح':'✓ Approve all valid')+'</button>'):'')
     +'</div>';
   if(_x4Tab==='prepare'){ body.innerHTML=head+cards+x4PrepareHtml(); return; }
+  if(_x4Tab==='files'){ body.innerHTML=head+cards+x4FilesHtml(); return; }
   var rows=d.rows||[];
   var list=rows.length ? '<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(x4Row).join('')+'</div>'
     : emptyState(T.x4_no_rows, ar?'بدّل التبويب أو حدّث الإدخال من الشيت.':'Switch tab or refresh intake from the Sheet.','—');
@@ -15913,6 +15971,39 @@ function x4PrepResultHtml(c){
     +'<button class="btn primary" '+(readyN?'':'disabled')+' onclick="x4PrepDownload()">'+(ar?'أنا جاهز — نزّل الملف':'I am ready — download file')+' ('+readyN+')</button>'
     +'<button class="btn ghost sm" onclick="x4PrepBack()">'+(ar?'رجوع للتحديد':'Back to selection')+'</button></div>';
   return conn+sReady+sAlready+sBlocked+dl;
+}
+
+/* ---- Import files log: every generated file, re-downloadable, searchable, tracked ---- */
+var _x4Files=null; var _x4FilesQ='';
+async function x4OpenFiles(){
+  _x4Tab='files';
+  var body=document.getElementById('expBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
+  try{ _x4Files=await api('/api/expenses/v4/batches'+(_x4FilesQ?('?q='+encodeURIComponent(_x4FilesQ)):'')); }catch(e){ _x4Files={batches:[]}; }
+  _renderExp4();
+}
+function x4FilesSearch(v){ _x4FilesQ=v; clearTimeout(window._x4ft); window._x4ft=setTimeout(x4OpenFiles,300); }
+function x4FileToggle(id){ var el=document.getElementById('x4f_'+id); if(el) el.style.display=(el.style.display==='none'?'block':'none'); }
+function x4FilesHtml(){
+  var ar=(L==='ar'), d=_x4Files||{batches:[]}, bs=d.batches||[];
+  var search='<input value="'+esc(_x4FilesQ)+'" oninput="x4FilesSearch(this.value)" placeholder="'+(ar?'بحث: رقم الملف / مرجع OJ-EXP / شقة / مبلغ':'Search: file id / OJ-EXP ref / apartment / amount')+'" style="width:100%;max-width:380px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px;margin:8px 0 12px">';
+  if(!bs.length) return search+emptyState(ar?'ما فيه ملفات بعد':'No files yet', ar?'جهّز ملف استيراد أول من «تجهيز ملف الاستيراد».':'Make one from "Prepare import file".','📁');
+  var list=bs.map(function(b){
+    var st=b.status||{}, when=String(b.created_at||'').replace('T',' ').slice(0,16);
+    var pct=st.total?Math.round((st.verified/st.total)*100):0;
+    var bar='<div style="height:6px;background:var(--surface-2);border-radius:6px;overflow:hidden;margin-top:6px"><div style="height:100%;width:'+pct+'%;background:var(--green)"></div></div>';
+    var dlUrl='/api/expenses/v4/batch-file?id='+encodeURIComponent(b.batch_id)+'&token='+encodeURIComponent(tok());
+    var rowsInner=(b.rows||[]).map(function(r){ return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:11.5px"><span>'+esc(r.ref||'')+' · '+esc(r.apartment||'')+'</span><span class="muted">'+expMoney(r.amount||0)+(r.kind==='extra'?(' · '+(ar?'إضافة':'extra')):'')+'</span></div>'; }).join('');
+    return '<div class="exp-card" style="margin-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">'
+        +'<div><b style="font-size:13.5px">📄 '+esc(b.batch_id)+'</b><div class="muted" style="font-size:11px;margin-top:2px">'+esc(when)+' · '+esc(b.by||'')+'</div></div>'
+        +'<div style="text-align:end"><b>'+fmt(b.count||0)+' '+(ar?'صف':'rows')+'</b><div class="muted" style="font-size:11px">'+expMoney(b.total_sar||0)+'</div></div></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;font-size:11.5px"><span class="muted">'+(ar?'تم التحقق':'verified')+': <b style="color:var(--green)">'+fmt(st.verified||0)+'</b> / '+fmt(st.total||0)+'</span><span class="muted">'+pct+'%</span></div>'+bar
+      +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'
+        +'<a class="btn primary xs" href="'+dlUrl+'" target="_blank">⬇ '+(ar?'تنزيل الملف':'Download')+'</a>'
+        +'<button class="btn ghost xs" onclick="x4FileToggle(&#39;'+esc(b.batch_id)+'&#39;)">'+(ar?'عرض الصفوف':'Show rows')+'</button></div>'
+      +'<div id="x4f_'+esc(b.batch_id)+'" style="display:none;margin-top:8px">'+rowsInner+'</div></div>';
+  }).join('');
+  return search+'<div>'+list+'</div>';
 }
 
 /* ============== DESIGN REQUESTS (Petunia) ============== */
@@ -26806,10 +26897,11 @@ async def _api_exp4_build_file(request):
     if not ids:
         return _json({"error": "no_ids"}, 400)
     import base64
-    xlsx, marked, skipped = await asyncio.to_thread(_exp4_build_file, ids, by)
-    return _json({"ok": True, "filename": "ouja-hostaway-import.csv", "mime": "text/csv;charset=utf-8",
-                  "b64": base64.b64encode(xlsx).decode("ascii"),
-                  "marked": marked, "skipped": skipped})
+    csv_bytes, marked, skipped, batch_id = await asyncio.to_thread(_exp4_build_file, ids, by)
+    fname = "ouja-hostaway-import-" + batch_id + ".csv" if batch_id else "ouja-hostaway-import.csv"
+    return _json({"ok": True, "filename": fname, "mime": "text/csv;charset=utf-8",
+                  "b64": base64.b64encode(csv_bytes).decode("ascii"),
+                  "marked": marked, "skipped": skipped, "batch_id": batch_id})
 
 async def _api_exp4_mark_already(request):
     """An expense the duplicate-check found ALREADY in Hostaway: verify it now (so it gets a
@@ -26823,6 +26915,28 @@ async def _api_exp4_mark_already(request):
     ok, why = await _exp4_verify_now(e)
     await asyncio.to_thread(persist_state)
     return _json({"ok": ok, "reason": why, "view": _exp4_view(e)})
+
+async def _api_exp4_batches(request):
+    """The downloadable import-files log (searchable by batch id / ref / apartment / amount)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    rows = await asyncio.to_thread(_exp4_batches_list, request.query.get("q") or "")
+    return _json({"ok": True, "batches": rows, "total": len(rows)})
+
+async def _api_exp4_batch_file(request):
+    """Re-download a previously generated import file (byte-identical to what was made)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = _exp4_batches.get((request.query.get("id") or "").strip())
+    if not b:
+        return _json({"error": "not_found"}, 404)
+    import base64
+    try:
+        data = base64.b64decode(b.get("csv_b64") or "")
+    except Exception:
+        data = b"".join([])
+    return web.Response(body=data, content_type="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=" + (b.get("filename") or "ouja-hostaway-import.csv")})
 
 async def _api_exp4_reset(request):
     """Admin restart: re-check Hostaway; real ones → Verified, the rest → Pending (cleaned)."""
@@ -28985,6 +29099,8 @@ async def start_web_server():
         app.router.add_post("/api/expenses/v4/mark-already", _api_exp4_mark_already)
         app.router.add_post("/api/expenses/v4/reset-unverified", _api_exp4_reset)
         app.router.add_post("/api/expenses/v4/approve-all-pending", _api_exp4_approve_all)
+        app.router.add_get("/api/expenses/v4/batches", _api_exp4_batches)
+        app.router.add_get("/api/expenses/v4/batch-file", _api_exp4_batch_file)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
@@ -29433,6 +29549,10 @@ def load_state():
         for k, v in (_load_json("expenses.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _expenses[str(k)] = v
+        _exp4_batches.clear()
+        for k, v in (_load_json("import_batches.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("batch_id"):
+                _exp4_batches[str(k)] = v
         try:
             _m = _exp4_migrate_all()      # V4: backfill approval_status (idempotent, never deletes/fakes)
             if _m:
@@ -29498,6 +29618,7 @@ def persist_state():
     _save_json("pmo_projects.json", _pmo_projects)
     _save_json("pmo_templates.json", _pmo_templates)
     _save_json("expenses.json", _expenses)
+    _save_json("import_batches.json", _exp4_batches)
     _save_json("expense_settings.json", _expense_settings)
     # Sessions are intentionally NOT persisted — restarts force re-login
     _save_json("guest_profiles.json", _guest_profiles)
