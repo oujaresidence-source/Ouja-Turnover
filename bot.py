@@ -6802,7 +6802,8 @@ def _exp_process(exp, *, allow_post=True):
     _exp_validate(exp)
     s = _exp_settings()
     if allow_post and exp.get("status") == "ready" and s.get("auto_post"):
-        _exp_post_to_hostaway(exp)
+        _exp_queue_for_export(exp, reason="auto_post", retry=False)
+        _exp_ensure_export_worker()
     return exp
 
 def _exp_ingest(sub):
@@ -12998,15 +12999,29 @@ const EXP_HOLD = {
   duplicate:['تكرار محتمل','Possible duplicate']
 };
 const EXP_STATUS = {
-  captured:['قيد المعالجة','Processing'], ready:['جاهز للترحيل','Ready to post'], held:['يحتاج إجراء','Needs action'],
-  in_transit:['جاري التحقق','In transit'], posted:['مُرحّل ✓','Posted ✓'], failed:['فشل','Failed'], discarded:['متجاهَل','Ignored']
+  draft:['مسودة','Draft'],
+  captured:['مسودة','Draft'],
+  needs_review:['يحتاج مراجعة','Needs review'],
+  held:['يحتاج مراجعة','Needs review'],
+  ready:['جاهز للتصدير','Ready'],
+  queued:['في الطابور','Queued'],
+  sending:['جاري الإرسال','Sending'],
+  sent_unverified:['أُرسل ولم يتأكد','Sent, unverified'],
+  in_transit:['أُرسل ولم يتأكد','Sent, unverified'],
+  verified:['مؤكد في Hostaway','Verified'],
+  posted:['مؤكد في Hostaway','Verified'],
+  failed:['فشل','Failed'],
+  stale_pending:['معلق/قديم','Stale pending'],
+  duplicate:['تكرار محتمل','Possible duplicate'],
+  archived:['مؤرشف','Archived'],
+  discarded:['مؤرشف','Archived']
 };
 let _expPeriod = 'week';   // week | month | custom
 let _expFrom = '', _expTo = '';
 let _expSub = 'queue';     // queue | all | apt | emp
 let _expDraft = null;
 let _expSettingsDraft = null, _expSettingsDryrun = false;
-let _expFilters = {status:'', apartment:'', employee:'', category:'', q:''};
+let _expFilters = {status:'', apartment:'', employee:'', category:'', receipt:'', source:'', q:''};
 let _expFT = null;
 
 function expMoney(n){ var s = fmt(Math.abs(n||0)); return L==='ar' ? (s+' ر.س') : ('SAR '+s); }
@@ -13021,10 +13036,14 @@ function _expMapText(m){ var out=[]; for(var k in (m||{})){ if(m.hasOwnProperty(
 function _expStatusChip(st){
   // Status color = STATE only, max 4 colours (tinted + accessible, no white-on-saturated):
   // posted/ready = green · held(needs action) = amber · failed = red · ignored = gray.
-  var map={posted:['var(--green-soft)','var(--green)'],ready:['var(--green-soft)','var(--green)'],
-           in_transit:['var(--gold-tint)','var(--gold)'],
-           held:['var(--yellow-soft)','var(--yellow)'],failed:['var(--red-soft)','var(--red)'],
-           discarded:['var(--surface-3)','var(--mut)'],captured:['var(--surface-3)','var(--mut)']};
+  var map={verified:['var(--green-soft)','var(--green)'],posted:['var(--green-soft)','var(--green)'],
+           ready:['var(--green-soft)','var(--green)'],
+           queued:['var(--gold-tint)','var(--gold)'],sending:['var(--gold-tint)','var(--gold)'],
+           sent_unverified:['var(--gold-tint)','var(--gold)'],in_transit:['var(--gold-tint)','var(--gold)'],
+           needs_review:['var(--yellow-soft)','var(--yellow)'],held:['var(--yellow-soft)','var(--yellow)'],
+           duplicate:['var(--yellow-soft)','var(--yellow)'],stale_pending:['var(--yellow-soft)','var(--yellow)'],
+           failed:['var(--red-soft)','var(--red)'],
+           archived:['var(--surface-3)','var(--mut)'],discarded:['var(--surface-3)','var(--mut)'],draft:['var(--surface-3)','var(--mut)'],captured:['var(--surface-3)','var(--mut)']};
   var c=map[st]||map.captured;
   var lab=EXP_STATUS[st]?(L==='ar'?EXP_STATUS[st][0]:EXP_STATUS[st][1]):st;
   return '<span style="background:'+c[0]+';color:'+c[1]+';padding:3px 11px;border-radius:99px;font-size:10.5px;font-weight:700;white-space:nowrap">'+esc(lab)+'</span>';
@@ -13034,8 +13053,8 @@ function _expTime(iso){ return esc(String(iso||'').replace('T',' ').slice(0,16))
 function _expPipeline(e){
   if(e.pipeline) return e.pipeline;
   var dry=(D.expSummary||{}).dryrun, st=e.status;
-  var dash=(st==='ready'||st==='posted')?'done':(st==='discarded'?'skip':'active');
-  var ha = st==='failed'?'failed' : st==='posted'?((dry||e.hostaway_ref==='DRYRUN')?'dry':(e.hostaway_verified?'done':'active')) : 'pending';
+  var dash=(st==='ready'||st==='verified'||st==='queued'||st==='sending'||st==='sent_unverified')?'done':(st==='archived'||st==='discarded'?'skip':'active');
+  var ha = st==='failed'?'failed' : st==='verified'?'done' : (st==='queued'||st==='sending'||st==='sent_unverified'||st==='stale_pending')?((dry||e.hostaway_ref==='DRYRUN')?'dry':'active') : 'pending';
   var color=(st==='failed'||e.discrepancy)?'red':(ha==='done'?'green':((ha==='active'||ha==='dry'||dash==='active')?'amber':'gray'));
   return {sheet:'done',dashboard:dash,hostaway:ha,color:color};
 }
@@ -13150,6 +13169,68 @@ async function expSyncRefresh(){
   alert(msg);
   await expRefresh();
 }
+async function expExportStatus(status){
+  var lab=EXP_STATUS[status]?(L==='ar'?EXP_STATUS[status][0]:EXP_STATUS[status][1]):status;
+  if(!confirm((L==='ar'?'تصدير كل عناصر حالة ':'Export all items with status ')+lab+'؟')) return;
+  var r; try{ r=await post('/api/expenses/export-selected',{status:status}); }catch(e){ toast('⚠ '+e); return; }
+  toast((L==='ar'?'أُضيف للطابور: ':'Queued: ')+((r.queued||[]).length||0));
+  await expRefresh();
+}
+async function expRetryStatus(status){
+  var r; try{ r=await post('/api/expenses/retry',{status:status}); }catch(e){ toast('⚠ '+e); return; }
+  toast((L==='ar'?'أُضيف للطابور: ':'Queued: ')+((r.queued||[]).length||0));
+  await expRefresh();
+}
+async function expVerifyStatus(){
+  var r; try{ r=await post('/api/expenses/verify-selected',{}); }catch(e){ toast('⚠ '+e); return; }
+  var ok=(r.results||[]).filter(function(x){return x.verified;}).length;
+  toast((L==='ar'?'تأكد: ':'Verified: ')+ok+' / '+((r.results||[]).length));
+  await expRefresh();
+}
+async function expArchiveVerified(){
+  if(!confirm(L==='ar'?'أرشفة كل المصاريف المؤكدة؟':'Archive all verified expenses?')) return;
+  var r; try{ r=await post('/api/expenses/archive-verified',{}); }catch(e){ toast('⚠ '+e); return; }
+  toast((L==='ar'?'أُرشف: ':'Archived: ')+((r.archived||[]).length));
+  await expRefresh();
+}
+async function expShowExportLog(){
+  openDrawer(L==='ar'?'سجل تصدير المصاريف':'Expense export log','Hostaway');
+  setDrawerBody('<div class="empty sk" style="padding:30px">—</div>'); setDrawerFoot('');
+  var r; try{ r=await api('/api/expenses/export-log'); }catch(e){ setDrawerBody('<div class="empty">'+esc(e)+'</div>'); return; }
+  var rows=r.rows||[];
+  if(!rows.length){ setDrawerBody('<div class="empty">'+(L==='ar'?'لا يوجد سجل تصدير بعد':'No export attempts yet')+'</div>'); return; }
+  setDrawerBody('<div style="display:flex;flex-direction:column;gap:8px">'+rows.slice(0,160).map(function(x){
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:9px;background:var(--surface-2)">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px"><b>'+esc(x.ref||'')+'</b>'+_expStatusChip(x.status)+'</div>'
+      +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc((x.ts||'').replace('T',' ').slice(0,16))+' · '+esc(x.event||'')+(x.ok===false?' · '+(L==='ar'?'فشل':'failed'):'')+'</div>'
+      +(x.detail?'<div style="font-size:11.5px;margin-top:4px">'+esc(x.detail)+'</div>':'')
+      +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc(x.apartment||'')+' · '+expMoney(x.amount||0)+'</div></div>';
+  }).join('')+'</div>');
+}
+async function expRepairPreview(){
+  openDrawer(L==='ar'?'إصلاح آمن للمصاريف':'Safe expense repair', L==='ar'?'معاينة فقط':'Preview only');
+  setDrawerBody('<div class="empty sk" style="padding:30px">—</div>'); setDrawerFoot('');
+  var r; try{ r=await api('/api/expenses/repair-preview'); }catch(e){ setDrawerBody('<div class="empty">'+esc(e)+'</div>'); return; }
+  var rows=r.rows||[], counts=r.counts||{};
+  var h='<div class="muted" style="font-size:12px;margin-bottom:10px">'+(L==='ar'?'هذا لا يعيد التصدير. يتحقق أولاً من Hostaway ويقترح الآمن فقط.':'This does not re-export. It verifies Hostaway first and suggests safe work only.')+'</div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+Object.keys(counts).map(function(k){return '<span class="pill">'+esc((EXP_STATUS[k]?(L==='ar'?EXP_STATUS[k][0]:EXP_STATUS[k][1]):k))+' · '+counts[k]+'</span>';}).join('')+'</div>';
+  if(!rows.length) h+='<div class="empty">'+(L==='ar'?'لا يوجد شيء عالق':'Nothing stuck')+'</div>';
+  else h+='<div style="display:flex;flex-direction:column;gap:8px">'+rows.slice(0,120).map(function(x){
+    return '<label style="display:flex;gap:8px;align-items:flex-start;border:1px solid var(--border);border-radius:8px;padding:9px;background:var(--surface-2)">'
+      +'<input class="expRepairId" type="checkbox" value="'+esc(x.id)+'" checked>'
+      +'<div style="flex:1"><div><b>'+esc(x.ref||'')+'</b> · '+_expStatusChip(x.status)+' <span class="exp-reason">'+esc(x.reason||'')+'</span></div>'
+      +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc(x.apartment||'')+' · '+esc(x.date||'')+' · '+expMoney(x.amount||0)+' · '+esc(x.safe_action||'')+'</div></div></label>';
+  }).join('')+'</div>';
+  setDrawerBody(h);
+  setDrawerFoot('<button class="btn primary sm" onclick="expRepairApply()">'+(L==='ar'?'طبّق الإصلاح المحدد':'Apply selected repair')+'</button>');
+}
+async function expRepairApply(){
+  var ids=Array.from(document.querySelectorAll('.expRepairId:checked')).map(function(x){return x.value;});
+  if(!ids.length){ toast(L==='ar'?'حدد عناصر أولاً':'Select rows first'); return; }
+  var r; try{ r=await post('/api/expenses/repair-apply',{ids:ids}); }catch(e){ toast('⚠ '+e); return; }
+  toast((L==='ar'?'تحقق ':'Verified ')+((r.verified||[]).filter(function(x){return x.verified;}).length)+' · '+(L==='ar'?'طابور ':'queued ')+((r.queued||[]).length));
+  closeDrawer(); await expRefresh();
+}
 async function expLoadSyncStatus(state){
   _expSyncFilter=state||'';
   var qs=_expSyncFilter?('?state='+encodeURIComponent(_expSyncFilter)):'';
@@ -13159,8 +13240,8 @@ async function expLoadSyncStatus(state){
 var _expSyncFilter='';
 function _expSyncStatusHtml(){
   var d=D.expSync||{rows:[],totals:{}}; var labs=d.labels||{};
-  var order=['failed','discrepancy','posted_unverified','ready','held','verified'];
-  var colMap={verified:'var(--green)',posted_unverified:'var(--gold)',ready:'var(--gold)',held:'var(--mut)',failed:'var(--red)',discrepancy:'var(--red)'};
+  var order=['failed','discrepancy','in_transit','ready','held','verified'];
+  var colMap={verified:'var(--green)',in_transit:'var(--gold)',ready:'var(--gold)',held:'var(--mut)',failed:'var(--red)',discrepancy:'var(--red)'};
   // totals chips = filters (count + SAR) — totals always reflect ALL, even when filtered
   var chips=order.filter(function(k){return d.totals&&d.totals[k];}).map(function(k){
     var t=d.totals[k]; var on=_expSyncFilter===k;
@@ -13201,8 +13282,8 @@ async function expOpenTimeline(id){
   }).join('') : '<div class="muted" style="font-size:12px">'+(L==='ar'?'لا سجل بعد':'no timeline yet')+'</div>';
   setDrawerBody(pipe+'<div style="font-weight:700;font-size:12px;margin-bottom:6px">'+(L==='ar'?'السجل الكامل (من سجّل → رُحّل → تأكّد)':'Full timeline (logged → posted → verified)')+'</div>'+tl);
   var foot='';
-  if(e.status==='failed') foot+='<button class="btn primary sm" onclick="expRetry(&#39;'+esc(e.id)+'&#39;)">🔁 '+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>';
-  if(e.status==='posted') foot+='<button class="btn ghost sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">🔎 '+(L==='ar'?'تحقّق من Hostaway':'Verify in Hostaway')+'</button>';
+  if(e.status==='failed'||e.status==='stale_pending') foot+='<button class="btn primary sm" onclick="expRetry(&#39;'+esc(e.id)+'&#39;)">🔁 '+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>';
+  if(e.status==='verified'||e.status==='sent_unverified'||e.status==='queued'||e.status==='sending') foot+='<button class="btn ghost sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">🔎 '+(L==='ar'?'تحقّق من Hostaway':'Verify in Hostaway')+'</button>';
   setDrawerFoot(foot);
 }
 async function expRetry(id){
@@ -13220,14 +13301,15 @@ async function expVerify(id){
 function _expCountersHtml(){
   var s=D.expSummary||{};
   var dry = s.dryrun ? '<div style="background:rgba(212,175,55,.12);border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:10px;font-size:12px;margin-bottom:10px">'+(L==='ar'?'⚠️ وضع تجريبي — لا يكتب على Hostaway فعلياً (EXPENSE_POST_DRYRUN=1)':'⚠️ Dry-run — nothing is written to Hostaway (EXPENSE_POST_DRYRUN=1)')+'</div>' : '';
-  function card(lab,val,col){ return '<div style="flex:1;min-width:118px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px 14px"><div class="muted" style="font-size:11px">'+lab+'</div><div style="font-size:18px;font-weight:800;margin-top:3px;color:'+(col||'var(--text)')+'">'+val+'</div></div>'; }
+  function card(lab,val,col,sub){ return '<div style="flex:1;min-width:126px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px"><div class="muted" style="font-size:11px">'+lab+'</div><div style="font-size:18px;font-weight:800;margin-top:3px;color:'+(col||'var(--text)')+'">'+val+'</div>'+(sub?'<div class="muted" style="font-size:10.5px;margin-top:2px">'+sub+'</div>':'')+'</div>'; }
+  var qp=(s.export_queue||{}), stale=(qp.stale_minutes||{});
   return _expConnStrip()+dry+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-    + card(L==='ar'?'مُرحّل ✓ (مؤكّد بـHostaway)':'Posted ✓ (verified)', expMoney(s.posted_sar||0),'var(--green)')
-    + card(L==='ar'?'مُرحّل (عدد)':'Posted (#)', fmt(s.posted_n||0))
-    + card(L==='ar'?'جاري التحقق':'In transit', fmt(s.in_transit_n||0), (s.in_transit_n?'var(--gold)':'var(--text)'))
-    + card(L==='ar'?'موقوف':'Held', fmt(s.held||0), (s.held?'var(--gold)':'var(--text)'))
-    + card(L==='ar'?'فشل':'Failed', fmt(s.failed||0), (s.failed?'var(--red)':'var(--text)'))
-    + card(L==='ar'?'هذا الأسبوع':'This week', expMoney(s.week_sar||0))
+    + card(L==='ar'?'المصاريف / الفترة':'Expenses / period', expMoney(s.total_sar||0), 'var(--text)', L==='ar'?'هذا الأسبوع: '+expMoney(s.week_sar||0):'week: '+expMoney(s.week_sar||0))
+    + card(L==='ar'?'جاهز':'Ready', fmt(s.ready||0), (s.ready?'var(--green)':'var(--text)'))
+    + card(L==='ar'?'يحتاج مراجعة':'Needs review', fmt((s.needs_review||0)+(s.duplicates||0)), ((s.needs_review||s.duplicates)?'var(--gold)':'var(--text)'))
+    + card(L==='ar'?'طابور/إرسال':'Queued / sending', fmt((s.queued||0)+(s.sending||0)), ((s.queued||s.sending)?'var(--gold)':'var(--text)'), 'workers '+fmt(qp.workers||0))
+    + card(L==='ar'?'مؤكد':'Verified', fmt(s.verified||0), 'var(--green)', expMoney(s.posted_sar||0))
+    + card(L==='ar'?'فشل/معلق':'Failed / stale', fmt((s.failed||0)+(s.stale_pending||0)), ((s.failed||s.stale_pending)?'var(--red)':'var(--text)'), 'stale '+fmt(stale.sent_unverified||30)+'m')
     + '</div>';
 }
 function _expPeriodHtml(){
@@ -13238,10 +13320,19 @@ function _expPeriodHtml(){
   }
   var r=_expPeriodRange();
   var csv='/api/expenses/export.csv?token='+encodeURIComponent(tok())+'&from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
-  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+  var actions='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    + '<button class="btn ghost sm" onclick="expSyncRefresh()">↻ '+(L==='ar'?'تحديث الشيت وHostaway':'Refresh Sheet + Hostaway')+'</button>'
+    + '<button class="btn ghost sm" onclick="expVerifyStatus()">✓ '+(L==='ar'?'تحقق المحدد':'Verify pending')+'</button>'
+    + '<button class="btn primary sm" onclick="expExportStatus(&#39;ready&#39;)">⬆ '+(L==='ar'?'صدّر الجاهز':'Export ready')+'</button>'
+    + '<button class="btn ghost sm" onclick="expRetryStatus(&#39;failed&#39;)">↺ '+(L==='ar'?'أعد الفاشل':'Retry failed')+'</button>'
+    + '<button class="btn ghost sm" onclick="expRetryStatus(&#39;stale_pending&#39;)">⏱ '+(L==='ar'?'أعد المعلق':'Retry stale')+'</button>'
+    + '<button class="btn ghost sm" onclick="expArchiveVerified()">✓ '+(L==='ar'?'أرشف المؤكد':'Archive verified')+'</button>'
+    + '<button class="btn ghost sm" onclick="expShowExportLog()">☰ '+(L==='ar'?'السجل':'Log')+'</button>'
+    + '<a class="btn ghost sm" href="'+csv+'" target="_blank">⬇ CSV</a></div>';
+  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
     + b('week',L==='ar'?'أسبوع':'Week') + b('month',L==='ar'?'شهر':'Month') + b('custom',L==='ar'?'مخصص':'Custom')
     + custom + '<span style="flex:1"></span>'
-    + '<a class="btn ghost sm" href="'+csv+'" target="_blank">⬇ CSV</a></div>';
+    + '<button class="btn ghost sm" onclick="expRepairPreview()">🛠 '+(L==='ar'?'إصلاح آمن':'Safe repair')+'</button></div>'+actions;
 }
 function _expSubHtml(){
   var qn=((D.expQueue||[]).length);
@@ -13257,20 +13348,17 @@ function _expQueueHtml(){
   var items=D.expQueue||[];
   if(!items.length) return '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:30px">✅</div><div class="muted" style="margin-top:6px">'+(L==='ar'?'ما فيه مصاريف بانتظار المراجعة':'No expenses awaiting review')+'</div></div>';
   var ar=(L==='ar');
-  // ---- bucket every queue item by what it actually needs ----
-  var ready=[], failed=[], posted=[], transit=[], byR={};
+  var groups={needs_review:[],ready:[],queued:[],sent_unverified:[],verified:[],failed:[],duplicates:[],archived:[]};
   items.forEach(function(e){
-    if(e.status==='ready') ready.push(e);
-    else if(e.status==='failed') failed.push(e);
-    else if(e.status==='in_transit' || (e.status==='posted' && !e.hostaway_verified)) transit.push(e);
-    else if(e.status==='posted') posted.push(e);  // verified only
-    else { var k=e.primary_reason||'incomplete'; (byR[k]=byR[k]||[]).push(e); }
+    if(e.status==='ready') groups.ready.push(e);
+    else if(e.status==='queued'||e.status==='sending') groups.queued.push(e);
+    else if(e.status==='sent_unverified') groups.sent_unverified.push(e);
+    else if(e.status==='verified') groups.verified.push(e);
+    else if(e.status==='failed'||e.status==='stale_pending') groups.failed.push(e);
+    else if(e.status==='duplicate') groups.duplicates.push(e);
+    else if(e.status==='archived') groups.archived.push(e);
+    else groups.needs_review.push(e);
   });
-  function pick(){ var a=[]; for(var i=0;i<arguments.length;i++){ a=a.concat(byR[arguments[i]]||[]); } return a; }
-  var gApt=pick('apartment_confirm','apartment_none');
-  var gApprove=pick('high_amount','bad_date','no_receipt');
-  var gDup=pick('duplicate');
-  var gInc=pick('incomplete');
   var f=_expQFilter;
   // ---- summary bar: each count is a clickable filter (item 8) ----
   function stat(cls,key,v,lab){
@@ -13278,12 +13366,13 @@ function _expQueueHtml(){
       +'<div class="v">'+v+'</div><div class="l">'+lab+'</div></div>';
   }
   var h='<div class="exp-sumbar">'
-    + stat('amber','apt',gApt.length,ar?'يحتاج تأكيد شقة':'Needs apartment')
-    + stat('amber','approve',gApprove.length,ar?'يحتاج موافقة':'Needs approval')
-    + stat('red','failed',failed.length,ar?'فشل':'Failed')
-    + stat('green','ready',ready.length,ar?'جاهز للترحيل':'Ready to post')
-    + stat('gold','transit',transit.length,ar?'جاري التحقق':'In transit')
-    + stat('green','posted',posted.length,ar?'مُرحّل ✓ (مؤكّد)':'Posted ✓ (verified)')
+    + stat('amber','needs_review',groups.needs_review.length,ar?'يحتاج مراجعة':'Needs review')
+    + stat('green','ready',groups.ready.length,ar?'جاهز':'Ready')
+    + stat('gold','queued',groups.queued.length,ar?'طابور/إرسال':'Queued/Sending')
+    + stat('gold','sent_unverified',groups.sent_unverified.length,ar?'أرسل ولم يتأكد':'Sent unverified')
+    + stat('green','verified',groups.verified.length,ar?'مؤكد':'Verified')
+    + stat('red','failed',groups.failed.length,ar?'فشل/معلق':'Failed/Stale')
+    + stat('amber','duplicates',groups.duplicates.length,ar?'تكرار':'Duplicates')
     + '</div>';
   if(f) h+='<div style="margin:-4px 0 10px"><button class="btn ghost xs" onclick="expQFilter(&#39;'+f+'&#39;)">'+(ar?'✕ إلغاء التصفية':'✕ Clear filter')+'</button></div>';
   function grp(key,title,pill,list){
@@ -13292,18 +13381,18 @@ function _expQueueHtml(){
       +'<div style="display:flex;flex-direction:column;gap:10px">'+list.map(_expCard).join('')+'</div>';
   }
   // ---- ready group first, with the bulk "post all ready" button (item 11) ----
-  if((!f||f==='ready') && ready.length){
-    h+='<div class="exp-group-h">'+(ar?'جاهز للترحيل':'Ready to post')+' <span class="pill ok">'+ready.length+'</span>'
-      +'<button class="btn primary xs" style="margin-inline-start:auto" onclick="expPostAllReady()">'+(ar?('ترحيل الكل ('+ready.length+')'):('Post all ('+ready.length+')'))+'</button></div>'
-      +'<div style="display:flex;flex-direction:column;gap:10px">'+ready.map(_expCard).join('')+'</div>';
+  if((!f||f==='ready') && groups.ready.length){
+    h+='<div class="exp-group-h">'+(ar?'جاهز للتصدير':'Ready to export')+' <span class="pill ok">'+groups.ready.length+'</span>'
+      +'<button class="btn primary xs" style="margin-inline-start:auto" onclick="expPostAllReady()">'+(ar?('صدّر الكل ('+groups.ready.length+')'):('Export all ('+groups.ready.length+')'))+'</button></div>'
+      +'<div style="display:flex;flex-direction:column;gap:10px">'+groups.ready.map(_expCard).join('')+'</div>';
   }
-  h+=grp('apt',ar?'يحتاج تأكيد الشقة':'Needs apartment','warn',gApt);
-  h+=grp('approve',ar?'يحتاج موافقة':'Needs approval','warn',gApprove);
-  h+=grp('dup',ar?'تكرار محتمل':'Possible duplicate','warn',gDup);
-  h+=grp('inc',ar?'بيانات ناقصة':'Incomplete','warn',gInc);
-  h+=grp('failed',ar?'فشل الترحيل':'Failed to post','danger',failed);
-  h+=grp('transit',ar?'جاري التحقق من Hostaway':'In transit — verifying','warn',transit);
-  h+=grp('posted',ar?'مُرحّل ✓ (مؤكّد في Hostaway)':'Posted ✓ (verified in Hostaway)','ok',posted);
+  h+=grp('needs_review',ar?'يحتاج مراجعة':'Needs review','warn',groups.needs_review);
+  h+=grp('queued',ar?'في الطابور / جاري الإرسال':'Queued / Sending','warn',groups.queued);
+  h+=grp('sent_unverified',ar?'أُرسل ولم يتأكد من Hostaway':'Sent, not verified in Hostaway','warn',groups.sent_unverified);
+  h+=grp('failed',ar?'فشل أو عالق':'Failed or stale','danger',groups.failed);
+  h+=grp('duplicates',ar?'تكرار محتمل':'Possible duplicates','warn',groups.duplicates);
+  h+=grp('verified',ar?'مؤكد في Hostaway':'Verified in Hostaway','ok',groups.verified);
+  h+=grp('archived',ar?'مؤرشف':'Archived','',groups.archived);
   return h;
 }
 var _expQFilter='';
@@ -13311,18 +13400,14 @@ function expQFilter(k){ _expQFilter=(_expQFilter===k)?'':k; _renderExpenses(); }
 async function expPostAllReady(){
   var ready=(D.expQueue||[]).filter(function(e){return e.status==='ready';});
   if(!ready.length){ toast(L==='ar'?'ما فيه جاهز':'Nothing ready'); return; }
-  if(!confirm(L==='ar'?('ترحيل '+ready.length+' مصروف لـHostaway؟'):('Post '+ready.length+' to Hostaway?'))) return;
-  toast(L==='ar'?'⏳ نرحّل الجاهز…':'⏳ Posting ready…');
-  var ok=0, fail=0;
-  for(var i=0;i<ready.length;i++){
-    var r=await post('/api/expenses/post',{id:ready[i].id});
-    if(r && r.ok) ok++; else fail++;
-  }
-  toast((L==='ar'?'تم · رُحّل ':'Done · posted ')+ok+(fail?(' · '+(L==='ar'?'فشل ':'failed ')+fail):''));
+  if(!confirm(L==='ar'?('تصدير '+ready.length+' مصروف لـHostaway؟'):('Export '+ready.length+' expenses to Hostaway?'))) return;
+  toast(L==='ar'?'⏳ نضيفها للطابور…':'⏳ Queueing…');
+  var r=await post('/api/expenses/export-selected',{ids:ready.map(function(e){return e.id;})});
+  toast((L==='ar'?'أُضيف للطابور ':'Queued ')+((r.queued||[]).length));
   await expRefresh();
 }
 function _expCard(e){
-  var reason = e.primary_reason || (e.status==='failed'?'failed':'');
+  var reason = e.status_reason || e.primary_reason || (e.status==='failed'?'failed':'');
   // ONE neutral reason chip — the status pill carries the colour, the reason is just text.
   var chips='';
   if(e.status!=='failed' && e.primary_reason){
@@ -13332,16 +13417,20 @@ function _expCard(e){
   // join only non-empty facts — no dangling "·  · " separators (impeccable: reduce noise)
   function _j(parts){ return parts.filter(function(x){ return x && (''+x).trim(); }).map(esc).join(' · '); }
   var _l2=_j([e.apartment||(L==='ar'?'(بدون شقة)':'(no apartment)'), e.expense_date]);
-  var _l3=_j([e.submitter, e.maintenance_type, e.category]);
+  var _src=e.submission_id&&String(e.submission_id).indexOf('gs-')===0?'Google Sheet':'Dashboard';
+  var _ha=e.hostaway_expense_id||e.hostaway_ref||'';
+  var _l3=_j([e.submitter, e.maintenance_type, e.category, _src]);
+  var _ops=_j([(e.last_attempt_at?((L==='ar'?'آخر محاولة ':'last attempt ')+_expTime(e.last_attempt_at)):''), (e.retry_count?((L==='ar'?'محاولات ':'tries ')+e.retry_count):''), (_ha?('Hostaway '+_ha):'')]);
   var head='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
     + '<div style="min-width:0"><div class="strong" style="font-size:13.5px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
     + (_l2?'<div class="muted" style="font-size:11.5px;margin-top:2px">'+_l2+'</div>':'')
     + (_l3?'<div class="muted" style="font-size:11px;margin-top:2px">'+_l3+'</div>':'')
+    + (_ops?'<div class="muted" style="font-size:10.5px;margin-top:2px">'+_ops+'</div>':'')
     + '</div>'
     + _expStatusChip(e.status)+'</div>';
   // State cue is a subtle tint of the WHOLE border (impeccable bans side-stripe accents);
   // the status pill carries the explicit label.
-  var _edge=e.status==='failed'?'var(--red)':(e.status==='held'?'var(--yellow)':(e.status==='discarded'?'var(--mut)':'var(--green)'));
+  var _edge=(e.status==='failed'||e.status==='stale_pending')?'var(--red)':((e.status==='needs_review'||e.status==='duplicate')?'var(--yellow)':((e.status==='archived')?'var(--mut)':(e.status==='queued'||e.status==='sending'||e.status==='sent_unverified'?'var(--gold)':'var(--green)')));
   return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-color:color-mix(in srgb, '+_edge+' 32%, var(--line))">'
     + head + '<div style="margin-top:6px">'+_expSyncBadge(e)+'</div>'
     + '<div style="margin-top:7px"><button class="btn ghost xs" onclick="expOpenTimeline(&#39;'+esc(e.id)+'&#39;)">🕑 '+(L==='ar'?'السجل الكامل':'Timeline')+'</button></div>'
@@ -13376,7 +13465,7 @@ function _expCardExtras(e,reason){
 }
 function _expCardActions(e,reason){
   var btns=[];
-  if(reason==='duplicate'){
+  if(e.status==='duplicate' || reason==='duplicate'){
     btns.push('<button class="btn sm" onclick="expNotDup(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'مو مكرر — رحّله':'Not a duplicate — post')+'</button>');
     btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل كمكرر':'Discard as duplicate')+'</button>');
   } else if(reason==='high_amount'||reason==='no_receipt'||reason==='bad_date'){
@@ -13385,9 +13474,13 @@ function _expCardActions(e,reason){
              : (L==='ar'?'اعتمد التاريخ ورحّل':'Approve date & post');
     btns.push('<button class="btn primary sm" onclick="expApproveAndPost(&#39;'+esc(e.id)+'&#39;,&#39;'+reason+'&#39;)">'+glab+'</button>');
   } else if(e.status==='ready'){
-    btns.push('<button class="btn primary sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'ترحيل لـHostaway':'Post to Hostaway')+'</button>');
-  } else if(e.status==='failed'){
+    btns.push('<button class="btn primary sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'صدّر لـHostaway':'Export to Hostaway')+'</button>');
+  } else if(e.status==='failed'||e.status==='stale_pending'){
     btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>');
+  } else if(e.status==='sent_unverified'||e.status==='queued'||e.status==='sending'){
+    btns.push('<button class="btn sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تحقق الآن':'Verify now')+'</button>');
+  } else if(e.status==='verified'){
+    btns.push('<button class="btn ghost sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'أعد التحقق':'Re-verify')+'</button>');
   } else if(reason==='apartment_confirm'||reason==='apartment_none'||reason==='incomplete'){
     // No direct post path here — show WHY posting is blocked: a greyed ترحيل + tooltip
     // naming the open gate(s). The gate-clearing control sits in _expCardExtras above.
@@ -13396,7 +13489,7 @@ function _expCardActions(e,reason){
     btns.push('<button class="btn sm" disabled title="'+esc(tip)+'">'+(L==='ar'?'ترحيل (مقفل)':'Post (locked)')+'</button>');
   }
   btns.push('<button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تعديل':'Edit')+'</button>');
-  if(reason!=='duplicate') btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل':'Discard')+'</button>');
+  if(reason!=='duplicate' && e.status!=='archived') btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل':'Discard')+'</button>');
   return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btns.join('')+'</div>';
 }
 function _expSelPairs(key,val,pairs){
@@ -13407,26 +13500,37 @@ function _expAllHtml(){
   var items=D.expList;
   if(items==null){ expReloadList(); return '<div class="empty sk">—</div>'; }
   var f=_expFilters, o=D.expOpts||{};
-  var statusPairs=[['',L==='ar'?'كل الحالات':'All statuses'],['posted','Posted'],['held','Held'],['failed','Failed'],['ready','Ready'],['discarded','Discarded']];
+  var statusPairs=[['',L==='ar'?'كل الحالات':'All statuses'],['needs_review',L==='ar'?'يحتاج مراجعة':'Needs review'],['ready',L==='ar'?'جاهز':'Ready'],['queued',L==='ar'?'في الطابور':'Queued'],['sending',L==='ar'?'جاري الإرسال':'Sending'],['sent_unverified',L==='ar'?'أرسل ولم يتأكد':'Sent unverified'],['verified',L==='ar'?'مؤكد':'Verified'],['failed',L==='ar'?'فشل':'Failed'],['stale_pending',L==='ar'?'معلق':'Stale'],['duplicate',L==='ar'?'تكرار':'Duplicate'],['archived',L==='ar'?'مؤرشف':'Archived']];
   var aptPairs=[['',L==='ar'?'كل الشقق':'All apartments']].concat(((o.apartments)||[]).map(function(a){return [a.name,a.name];}));
   var empPairs=[['',L==='ar'?'كل الموظفين':'All employees']].concat(((o.employees)||[]).map(function(x){return [x,x];}));
   var catPairs=[['',L==='ar'?'كل الفئات':'All categories']].concat(((o.categories)||[]).map(function(x){return [x,x];}));
+  var receiptPairs=[['',L==='ar'?'كل الفواتير':'All receipts'],['yes',L==='ar'?'مع فاتورة':'Has receipt'],['no',L==='ar'?'بدون فاتورة':'No receipt']];
+  var sourcePairs=[['',L==='ar'?'كل المصادر':'All sources'],['sheet','Google Sheet'],['manual',L==='ar'?'يدوي':'Manual']];
   var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
     +'<input value="'+esc(f.q)+'" placeholder="'+(L==='ar'?'بحث…':'Search…')+'" oninput="_expF(&#39;q&#39;,this.value)" style="flex:1;min-width:140px;padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
     +_expSelPairs('status',f.status,statusPairs)+_expSelPairs('apartment',f.apartment,aptPairs)
-    +_expSelPairs('employee',f.employee,empPairs)+_expSelPairs('category',f.category,catPairs)+'</div>';
+    +_expSelPairs('employee',f.employee,empPairs)+_expSelPairs('category',f.category,catPairs)
+    +_expSelPairs('receipt',f.receipt,receiptPairs)+_expSelPairs('source',f.source,sourcePairs)+'</div>';
+  if(f.receipt) items=items.filter(function(e){ return f.receipt==='yes'?!!e.receipt_link:!e.receipt_link; });
+  if(f.source) items=items.filter(function(e){ var src=e.submission_id&&String(e.submission_id).indexOf('gs-')===0?'sheet':'manual'; return src===f.source; });
   if(!items.length) return bar+'<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'ما فيه نتائج':'No results')+'</div>';
-  var thead='<tr>'+[L==='ar'?'المرجع':'Ref',L==='ar'?'التاريخ':'Date',L==='ar'?'الشقة':'Apartment',L==='ar'?'الموظف':'Employee',L==='ar'?'الفئة':'Category',L==='ar'?'المبلغ':'Amount',L==='ar'?'الحالة':'Status',L==='ar'?'مرفقات':'Links',''].map(_expTh).join('')+'</tr>';
+  var thead='<tr>'+[L==='ar'?'المرجع':'Ref',L==='ar'?'التاريخ':'Date',L==='ar'?'الشقة':'Apartment',L==='ar'?'الفئة':'Category',L==='ar'?'الوصف/المورد':'Description/vendor',L==='ar'?'المبلغ':'Amount',L==='ar'?'المصدر/فاتورة':'Source/receipt',L==='ar'?'حالة Hostaway':'Hostaway status',L==='ar'?'السبب':'Reason',L==='ar'?'آخر محاولة':'Attempt',L==='ar'?'محاولات':'Retries',L==='ar'?'Hostaway ID':'Hostaway ID',''].map(_expTh).join('')+'</tr>';
   var rows=items.map(function(e){
+    var src=e.submission_id&&String(e.submission_id).indexOf('gs-')===0?'Sheet':'Manual';
+    var desc=[e.vendor,e.maintenance_type,e.note].filter(function(x){return x;}).join(' · ');
     return '<tr style="border-bottom:1px solid var(--border)">'
       +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.ref||'')+'</td>'
       +'<td style="padding:7px 6px;font-size:11.5px;white-space:nowrap">'+esc(e.expense_date||'')+'</td>'
       +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.apartment||'—')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.submitter||'—')+'</td>'
       +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.category||'—')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11.5px;min-width:160px">'+esc(desc||e.submitter||'—')+'</td>'
       +'<td style="padding:7px 6px;font-size:11.5px;font-weight:700;white-space:nowrap">'+expMoney(e.amount)+'</td>'
+      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+src+' '+(e.receipt_link?('<a href="'+esc(e.receipt_link)+'" target="_blank" style="color:var(--gold)">📎</a>'):'—')+'</td>'
       +'<td style="padding:7px 6px">'+_expStatusChip(e.status)+'</td>'
-      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+(e.receipt_link?('<a href="'+esc(e.receipt_link)+'" target="_blank" style="color:var(--gold)">📎</a>'):'')+(e.hostaway_ref&&e.hostaway_ref!=='DRYRUN'?(' <span class="muted">#'+esc(e.hostaway_ref)+'</span>'):'')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11px;max-width:140px">'+esc(e.status_reason||e.primary_reason||'')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+_expTime(e.last_attempt_at||e.sent_at||'')+'</td>'
+      +'<td style="padding:7px 6px;font-size:11px;text-align:center">'+fmt(e.retry_count||0)+'</td>'
+      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+esc(e.hostaway_expense_id||e.hostaway_ref||'')+'</td>'
       +'<td style="padding:7px 6px;white-space:nowrap"><button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">✎</button> <button class="btn ghost sm" onclick="expDelete(&#39;'+esc(e.id)+'&#39;)">🗑</button></td></tr>';
   }).join('');
   return bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+thead+rows+'</table></div>';
@@ -13498,8 +13602,8 @@ async function expPost(id){
   var r=await post('/api/expenses/post',{id:id});
   if(r && r.ok){
     var dry = (r.expense && r.expense.hostaway_ref==='DRYRUN') || ((D.expSummary||{}).dryrun);
-    toast(dry ? (L==='ar'?'تجربة ✓ — انتقل إلى «مُرحّل» (ما انكتب على Hostaway فعلياً)':'Test ✓ — moved to Posted (nothing written to Hostaway)')
-              : (L==='ar'?'تم الترحيل ✓ — انتقل إلى «مُرحّل»':'Posted ✓ — moved to Posted'));
+    toast(dry ? (L==='ar'?'تجربة — أُضيف للطابور (لن يكتب على Hostaway)':'Dry-run — queued (nothing written to Hostaway)')
+              : (L==='ar'?'أُضيف للطابور — سنؤكد من Hostaway':'Queued — will verify in Hostaway'));
     await expRefresh();          // re-fetch summary+queue, re-render → card now sits in مُرحّل, counts update
     _expFlash(id);               // flash it in its new spot
     return;
@@ -13540,7 +13644,7 @@ async function expDelete(id){
   var msg=(L==='ar'?'حذف المصروف نهائياً؟ ':'Delete expense permanently? ')+(e?(e.ref+' · '+expMoney(e.amount)+' · '+(e.apartment||'')+' · '+(e.expense_date||'')):'');
   if(!confirm(msg)) return;
   var removeHa=false;
-  if(e && e.status==='posted' && e.hostaway_ref && e.hostaway_ref!=='DRYRUN')
+  if(e && e.status==='verified' && e.hostaway_ref && e.hostaway_ref!=='DRYRUN')
     removeHa=confirm(L==='ar'?'حذفه أيضاً من Hostaway؟':'Also remove it from Hostaway?');
   await post('/api/expenses/delete',{id:id, remove_hostaway:removeHa});
   toast(L==='ar'?'تم الحذف':'Deleted'); await expRefresh();
@@ -23546,8 +23650,9 @@ async def _api_expenses_ingest(request):
             lbl = EXPENSE_HOLD_LABELS.get(exp.get("primary_reason") or "", ("مصروف", ""))[0]
             log_event("ops", f"مصروف يحتاج مراجعة [{exp.get('ref')}] · {lbl} · "
                              f"{exp.get('apartment') or '—'} · {exp.get('amount') or 0} ر.س")
-        elif created and exp.get("status") == "posted":
-            log_event("ops", f"مصروف مُرحّل تلقائياً [{exp.get('ref')}] · "
+        elif created and _exp_canonical_status(exp) in ("queued", "sending", "sent_unverified", "verified"):
+            _exp_ensure_export_worker()
+            log_event("ops", f"مصروف في طابور التصدير [{exp.get('ref')}] · "
                              f"{exp.get('apartment') or '—'} · {exp.get('amount') or 0} ر.س")
     if created_any:
         await asyncio.to_thread(persist_state)
@@ -24136,9 +24241,10 @@ async def _api_expenses_export(request):
         return web.Response(status=401, text="unauthorized")
     q = request.query
     dfrom, dto = q.get("from", ""), q.get("to", "")
-    cols = ["ref", "status", "expense_date", "apartment", "submitter", "maintenance_type",
-            "category", "amount", "vendor", "payment_method", "hostaway_ref",
-            "receipt_link", "note", "primary_reason"]
+    cols = ["ref", "status", "raw_status", "status_reason", "expense_date", "apartment",
+            "submitter", "maintenance_type", "category", "amount", "vendor", "payment_method",
+            "source", "receipt_link", "hostaway_ref", "hostaway_expense_id", "last_attempt_at",
+            "retry_count", "error_class", "note", "primary_reason"]
     rows = ["," .join(cols)]
     items = sorted(_expenses.values(),
                    key=lambda e: (e.get("expense_date") or ""), reverse=True)
@@ -24147,7 +24253,18 @@ async def _api_expenses_export(request):
             continue
         cells = []
         for c in cols:
-            val = str(e.get(c, "") if e.get(c) is not None else "")
+            if c == "status":
+                val = _exp_canonical_status(e)
+            elif c == "raw_status":
+                val = e.get("status", "")
+            elif c == "status_reason":
+                val = _exp_status_reason(e)
+            elif c == "source":
+                val = "sheet" if str(e.get("submission_id") or "").startswith("gs-") else "manual"
+            elif c == "retry_count":
+                val = str(int(e.get("retry_count") or 0))
+            else:
+                val = str(e.get(c, "") if e.get(c) is not None else "")
             if any(ch in val for ch in [",", '"', "\n"]):
                 val = '"' + val.replace('"', '""') + '"'
             cells.append(val)
@@ -26055,6 +26172,7 @@ async def expense_sheet_loop():
         _exp_sheet_last_sync = datetime.now(TZ).isoformat(timespec="minutes")   # a successful poll = sheet is reachable
         if n:
             print(f"expense sheet: ingested {n} new row(s)")
+            _exp_ensure_export_worker()
     except Exception as e:
         print("expense sheet loop error:", e)
 
