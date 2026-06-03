@@ -8960,6 +8960,71 @@ async def _exp4_verify_now(exp):
         _exp4_log(exp, "verify_recheck_miss", detail=exp.get("verify_note") or "not_found")
     return ok, ("verified" if ok else (exp.get("verify_note") or "not_found"))
 
+_EXP4_RESET_CLEAR = ("hostaway_ref", "hostaway_expense_id", "hostaway_match_snapshot",
+                     "verified_at", "verify_note", "dry", "discrepancy", "primary_reason",
+                     "sending_at", "queued_at", "import_batch_at", "error", "error_class", "export_job")
+
+def _exp4_reset_unverified(by=""):
+    """Admin 'restart' (one Hostaway pull, then local matching): for every NON-verified
+    expense, re-check Hostaway — the ones actually there become Verified; everything else is
+    cleaned back to Pending Approval (clears fake exported/FILE/duplicate traces) so the owner
+    can re-approve and build a fresh import file. Never deletes; keeps the audit trail."""
+    items, ok, err = _exp_fetch_hostaway(force=True)
+    reverified = reset = kept = 0
+    for e in _expenses.values():
+        if e.get("archived") or e.get("is_split_parent"):
+            continue
+        if _exp4_export_status(e) == "verified":
+            kept += 1
+            continue
+        m = _exp_match_hostaway_item(e, items) if ok else {"present": False, "confidence": 0}
+        if ok and m.get("present") and m.get("confidence", 0) >= 0.95:
+            e["hostaway_verified"] = True
+            e["hostaway_expense_id"] = m.get("id") or e.get("hostaway_expense_id")
+            if m.get("id"):
+                e["hostaway_ref"] = str(m.get("id"))
+            e["hostaway_match_snapshot"] = _exp4_safe_summary(m.get("item") or {},
+                ("id", "listingMapId", "amount", "expenseDate", "date", "categoryName", "concept", "reference"))
+            e["verified_at"] = _exp_now().isoformat(timespec="seconds")
+            e["verify_note"] = "match:" + (m.get("method") or "")
+            e["approval_status"] = "approved"
+            _exp_set_status(e, "verified", reason="reset_match", detail=m.get("method") or "")
+            _exp4_set_job(e, "verified")
+            _exp4_log(e, "reset_verified", actor=by, new="verified", detail="found in Hostaway on reset")
+            reverified += 1
+        else:
+            for k in _EXP4_RESET_CLEAR:
+                e.pop(k, None)
+            e["hostaway_verified"] = False
+            e["retry_count"] = 0
+            e["approval_status"] = "needs_edit" if _exp4_missing_required(e) else "pending_approval"
+            _exp_set_status(e, "captured", reason="reset_unverified", by=by, detail="not in Hostaway — back to pending")
+            _exp4_log(e, "reset_unverified", actor=by, new=e["approval_status"], detail="not found in Hostaway; reset to pending")
+            reset += 1
+    # also drain any leftover in-process queue so nothing re-fires
+    try:
+        _exp4_queue.clear()
+    except Exception:
+        pass
+    persist_state()
+    return {"ok": ok, "error": err, "hostaway_count": len(items or []),
+            "reverified": reverified, "reset_to_pending": reset, "kept_verified": kept}
+
+def _exp4_approve_all_pending(by=""):
+    """Approve every Pending expense that passes validation (bulk). Invalid ones stay
+    Needs-Edit. Returns counts."""
+    approved = skipped = 0
+    for e in _expenses.values():
+        if _exp4_tab(e) != "pending":
+            continue
+        if _exp4_missing_required(e):
+            e["approval_status"] = "needs_edit"; skipped += 1; continue
+        ok, _why = _exp4_approve(e, by=by)
+        if ok:
+            approved += 1
+    persist_state()
+    return {"ok": True, "approved": approved, "skipped": skipped}
+
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
@@ -15590,7 +15655,10 @@ function _renderExp4(){
         +'<div class="muted" style="font-size:11.5px;margin-top:2px">'+T[p[1]]+'</div>'
         +'<div class="muted" style="font-size:10.5px">'+expMoney(c.sar||0)+'</div></button>';
     }).join('')+'</div>';
-  var search='<input value="'+esc(_x4Q)+'" oninput="x4Search(this.value)" placeholder="'+(ar?'بحث: مرجع / شقة / موظف':'Search: ref / apartment / employee')+'" style="width:100%;max-width:340px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px;margin-bottom:12px">';
+  var search='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    +'<input value="'+esc(_x4Q)+'" oninput="x4Search(this.value)" placeholder="'+(ar?'بحث: مرجع / شقة / موظف':'Search: ref / apartment / employee')+'" style="flex:1;min-width:200px;max-width:340px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px">'
+    +(_x4Tab==='pending'?('<button class="btn primary sm" onclick="x4ApproveAllPending()">'+(ar?'✓ اعتماد كل الصالح':'✓ Approve all valid')+'</button>'):'')
+    +'</div>';
   if(_x4Tab==='prepare'){ body.innerHTML=head+cards+x4PrepareHtml(); return; }
   var rows=d.rows||[];
   var list=rows.length ? '<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(x4Row).join('')+'</div>'
@@ -15723,9 +15791,27 @@ async function x4Advanced(){
   var d; try{ d=await api('/api/expenses/v4/reconcile'); }catch(e){ setDrawerBody('⚠ '+esc(String(e))); return; }
   var T=t(), c=d.counts||{};
   var labels={ledger_only:(L==='ar'?'في الدفتر فقط':'Ledger only'),verified_in_all:T.x4_verified,exported_not_verified:T.x4_exported_nv,duplicate_suspected:(L==='ar'?'تكرار محتمل':'Duplicate suspected'),hostaway_only:(L==='ar'?'في Hostaway فقط':'Hostaway only')};
-  var body='<div class="muted" style="font-size:11.5px;margin-bottom:10px">Hostaway: '+(d.ok?(L==='ar'?'متصل':'connected'):('⚠ '+esc(d.error||'')))+' · '+fmt(d.hostaway_count||0)+'</div>';
+  var reset='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px">'
+    +'<div style="font-weight:700;margin-bottom:4px">🔄 '+(L==='ar'?'إعادة ضبط غير المؤكد':'Reset un-verified')+'</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+(L==='ar'?'نفحص Hostaway: الموجود فعليًا يصير «متحقق»، والباقي يرجع «بانتظار الاعتماد» نظيف عشان تعتمده وتسوي ملف جديد.':'Re-checks Hostaway: ones really there become Verified, the rest go back to a clean Pending Approval so you can re-approve and build a fresh file.')+'</div>'
+    +'<button class="btn primary sm" onclick="x4Reset()">🔄 '+(L==='ar'?'إعادة الضبط الآن':'Reset now')+'</button></div>';
+  var body=reset+'<div class="muted" style="font-size:11.5px;margin-bottom:10px">Hostaway: '+(d.ok?(L==='ar'?'متصل':'connected'):('⚠ '+esc(d.error||'')))+' · '+fmt(d.hostaway_count||0)+'</div>';
   body+=Object.keys(labels).map(function(k){ return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span>'+esc(labels[k])+'</span><b>'+fmt(c[k]||0)+'</b></div>'; }).join('');
   setDrawerBody(body);
+}
+async function x4Reset(){
+  if(!confirm(L==='ar'?'إعادة الضبط: نفحص Hostaway، نثبّت الموجود فعليًا كـ«متحقق»، ونرجّع كل الباقي إلى «بانتظار الاعتماد». ما نحذف أي شيء. متأكد؟':'Reset: re-check Hostaway, keep the ones really there as Verified, send everything else back to Pending Approval. Nothing is deleted. Continue?')) return;
+  toast(L==='ar'?'⏳ نعيد الضبط ونفحص Hostaway…':'⏳ Resetting + checking Hostaway…');
+  var r; try{ r=await post('/api/expenses/v4/reset-unverified',{}); }catch(e){ toast('⚠ '+e); return; }
+  toast((L==='ar'?'تم · متحقق ':'Done · verified ')+(r.reverified||0)+(L==='ar'?' · رجّع للاعتماد ':' · reset ')+(r.reset_to_pending||0));
+  closeDrawer(); _x4Tab='pending'; loadExpenses();
+}
+async function x4ApproveAllPending(){
+  if(!confirm(L==='ar'?'اعتماد كل المصاريف الصالحة في «بانتظار الاعتماد»؟ (الناقصة تبقى «تحتاج تدخل»)':'Approve all valid expenses in Pending? (incomplete ones stay in Needs Action)')) return;
+  toast(L==='ar'?'⏳ نعتمد…':'⏳ Approving…');
+  var r; try{ r=await post('/api/expenses/v4/approve-all-pending',{}); }catch(e){ toast('⚠ '+e); return; }
+  toast((L==='ar'?'اعتُمد ':'Approved ')+(r.approved||0)+(r.skipped?((L==='ar'?' · ناقص ':' · skipped ')+r.skipped):''));
+  loadExpenses();
 }
 
 /* ---- Prepare import file: select approved → live Hostaway dup-check → I'm ready → download .xlsx ---- */
@@ -26727,6 +26813,20 @@ async def _api_exp4_mark_already(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": ok, "reason": why, "view": _exp4_view(e)})
 
+async def _api_exp4_reset(request):
+    """Admin restart: re-check Hostaway; real ones → Verified, the rest → Pending (cleaned)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    by = _exp4_actor(request, await _read_body(request))
+    return _json(await asyncio.to_thread(_exp4_reset_unverified, by))
+
+async def _api_exp4_approve_all(request):
+    """Bulk-approve every valid Pending expense."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    by = _exp4_actor(request, await _read_body(request))
+    return _json(await asyncio.to_thread(_exp4_approve_all_pending, by))
+
 async def _api_expenses_sync_status(request):
     """The 'حالة المزامنة' page: every expense + its pipeline stage + who touched it +
     totals per state (count + SAR). Optional ?state= filter."""
@@ -28872,6 +28972,8 @@ async def start_web_server():
         app.router.add_post("/api/expenses/v4/prepare-check", _api_exp4_prepare_check)
         app.router.add_post("/api/expenses/v4/build-file", _api_exp4_build_file)
         app.router.add_post("/api/expenses/v4/mark-already", _api_exp4_mark_already)
+        app.router.add_post("/api/expenses/v4/reset-unverified", _api_exp4_reset)
+        app.router.add_post("/api/expenses/v4/approve-all-pending", _api_exp4_approve_all)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
