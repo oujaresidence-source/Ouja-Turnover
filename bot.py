@@ -8867,7 +8867,7 @@ def _exp4_import_row(exp):
     if (exp.get("kind") or "expense") == "expense":
         amt = -amt                                      # expense negative; extra stays positive
     return {"name": name, "description": " · ".join(desc_bits)[:900], "category": cat,
-            "date": _exp4_import_date(exp.get("expense_date")), "reservationId": exp.get("reservation_id") or "",
+            "date": (exp.get("expense_date") or "")[:10], "reservationId": exp.get("reservation_id") or "",
             "listingId": (int(exp["listing_id"]) if exp.get("listing_id") is not None else ""),
             "unitId": "", "owner": exp.get("owner_email") or "", "amount": amt}
 
@@ -8884,6 +8884,17 @@ def _exp4_xlsx_bytes(rows):
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+def _exp4_csv_bytes(rows):
+    """Build a Hostaway import CSV (exact template columns), UTF-8 with a BOM so Excel and
+    Arabic text render correctly. Proper quoting via the csv module."""
+    import csv as _csv, io as _io
+    sio = _io.StringIO()
+    w = _csv.writer(sio)
+    w.writerow(EXP4_IMPORT_COLS)
+    for r in rows:
+        w.writerow([r.get(c, "") for c in EXP4_IMPORT_COLS])
+    return ("﻿" + sio.getvalue()).encode("utf-8")
 
 def _exp4_file_eligible(exp):
     """A row may go into the import file only if approved, non-split, valid, AND mapped to a
@@ -8945,7 +8956,7 @@ def _exp4_build_file(ids, by=""):
                   detail="included in Hostaway import file", recommended="upload in Hostaway, then verify")
         marked.append(e.get("id"))
     persist_state()
-    return _exp4_xlsx_bytes(rows), marked, skipped
+    return _exp4_csv_bytes(rows), marked, skipped
 
 async def _exp4_verify_now(exp):
     """Re-fetch Hostaway and verify this one expense (no API create). Used after a file import
@@ -15854,9 +15865,9 @@ async function x4PrepDownload(){
   if(!r.ok||!r.b64){ toast('⚠'); return; }
   var bin=atob(r.b64), len=bin.length, arr=new Uint8Array(len), i;
   for(i=0;i<len;i++){ arr[i]=bin.charCodeAt(i); }
-  var blob=new Blob([arr],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  var blob=new Blob([arr],{type:(r.mime||'text/csv;charset=utf-8')});
   var url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download=r.filename||'ouja-hostaway-import.xlsx';
+  a.href=url; a.download=r.filename||'ouja-hostaway-import.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   toast(L==='ar'?'تم تجهيز الملف — ارفعه في Hostaway ثم تحقق':'File ready — upload it in Hostaway, then verify');
   _x4Prepare=null; _x4Tab='exported'; loadExpenses();
@@ -26796,7 +26807,7 @@ async def _api_exp4_build_file(request):
         return _json({"error": "no_ids"}, 400)
     import base64
     xlsx, marked, skipped = await asyncio.to_thread(_exp4_build_file, ids, by)
-    return _json({"ok": True, "filename": "ouja-hostaway-import.xlsx",
+    return _json({"ok": True, "filename": "ouja-hostaway-import.csv", "mime": "text/csv;charset=utf-8",
                   "b64": base64.b64encode(xlsx).decode("ascii"),
                   "marked": marked, "skipped": skipped})
 
