@@ -20882,7 +20882,20 @@ def _pe_compute_recommendations(horizon=None):
             dtype, ev = _pe_date_type(d)
             band, source = _pe_resolve_band(models, lid, g, dtype, ev)
             if not band:
-                continue                                   # no real data -> omit (never fabricate)
+                # No learned band for this (unit, day-type) yet. The night is AVAILABLE on
+                # Hostaway, so surface it as an editable "hold at current price" cell instead
+                # of hiding it — NEVER fabricate a suggested change (recommended == current).
+                cur = row.get("price")
+                if not isinstance(cur, (int, float)) or cur <= 0:
+                    continue                               # truly nothing to show → omit
+                cur = int(round(cur))
+                recs.append({"date": ds, "days_out": (d - today).days, "dtype": dtype, "event": ev,
+                             "recommended": cur, "current": cur, "delta": 0, "delta_pct": 0.0,
+                             "opportunity": 0, "floor": _pe_floor_overrides.get(lid, 0) or 0,
+                             "ceiling": cur, "median": cur, "signal": "normal", "band_source": "none",
+                             "band_count": 0, "occ_now": None, "typical_occ": None, "confidence": "none",
+                             "no_model": True, "lid": lid, "unit": uname, "group": g})
+                continue
             tot = occ_tot.get((g, ds), 0)
             occf = (occ_book.get((g, ds), 0) / tot) if tot else None
             r = _pe_reco_for_night(d, today, dtype, ev, row.get("price"), band, source,
@@ -21219,6 +21232,15 @@ def _pe_decorate(data):
     """Attach the final price + active strategy layers/badges to every cached rec (live —
     reflects current toggles + active strategies on each read)."""
     for r in (data.get("recs") or []):
+        if r.get("no_model"):
+            # available night with no learned data → pure "hold at current price", no layers
+            cur = r.get("current")
+            r["final"] = cur; r["final_color"] = "hold"; r["final_source"] = "current"
+            r["layers"] = []; r["badges"] = []
+            r["baseline"] = _pe_baseline_observe(r.get("lid"), r.get("date"), cur)
+            r["activated"] = pricing_activated(r.get("lid"))
+            r["compound"] = (_ls_get()["listings"].get(str(r.get("lid"))) or {}).get("group") or ""
+            continue
         info = _active_layers_for(r.get("lid"), r.get("date"), r.get("recommended"), r.get("current"))
         r["final"] = info["final"]
         r["final_color"] = info["color"]
@@ -21285,10 +21307,35 @@ def _pe_night_detail(lid, date_iso):
     today = datetime.now(TZ).date()
     dtype, ev = _pe_date_type(d)
     band, source = _pe_resolve_band(models, lid, g, dtype, ev)
-    if not band:
-        return {"error": "no realized data for this unit/day-type"}
     units_by_lid = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
     uname = (units_by_lid.get(lid) or {}).get("name") or str(lid)
+    if not band:
+        # Available night with no learned data → editable "hold at current price" panel
+        # (no fabricated suggestion; the owner can set it manually). Mirrors the calendar cell.
+        live_cur = None
+        try:
+            cal = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+            for day in (cal.get("result") or []):
+                if day.get("date") == date_iso:
+                    live_cur = day.get("price")
+        except Exception as e:
+            print("pe night live-price error:", e)
+        cur = int(round(live_cur)) if isinstance(live_cur, (int, float)) and live_cur > 0 else None
+        dt_label = ev or _PE_DTYPE_AR.get(dtype, dtype)
+        return {"lid": lid, "unit": uname, "date": date_iso, "days_out": (d - today).days,
+                "dtype": dtype, "event": ev, "demand_pill": _pe_demand_pill("normal"), "signal": "normal",
+                "current": cur, "recommended": cur, "delta": 0, "delta_pct": 0.0,
+                "floor": _pe_floor_overrides.get(lid, 0) or 0, "ceiling": cur, "median": cur,
+                "confidence": "none", "pooled": False, "no_model": True,
+                "factors": [{"icon": "🛈", "key": "نوع اليوم", "text": dt_label, "effect": dt_label},
+                            {"icon": "✍️", "key": "بدون بيانات كافية",
+                             "text": "ما عندنا حجوزات سابقة كافية لهالنوع من الليالي بهالوحدة، فما نقترح سعر. الليلة متاحة وتقدر تحط السعر يدويًا.",
+                             "effect": "يدوي"}],
+                "summary": ("ليلة متاحة بدون بيانات كافية. السعر الحالي " + ((str(cur) + " ر.س") if cur else "غير معروف") + " — عدّله يدويًا لو تبي."),
+                "footer_n": data.get("n_used", 0), "dry_run": PRICE_APPLY_DRYRUN,
+                "activated": pricing_activated(lid), "baseline": _pe_baseline_observe(lid, date_iso, cur),
+                "final": cur, "final_color": "hold", "final_source": "current", "layers": [],
+                "changelog": _price_log_view(lid, date_iso)}
     # prefer the cached rec (has live current price + group pace); else compute without occ
     # A1: ALWAYS read the LIVE per-night Hostaway calendar price so the panel's current is
     # never stale (the list is cached; the detail you act on must be real-time).
