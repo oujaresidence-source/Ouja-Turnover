@@ -164,6 +164,11 @@ EXPENSE_SHEET_FUZZY = {
     "no_receipt_reason":["سبب", "reason"],
 }
 EXPENSE_DEFAULT_CATEGORY = os.environ.get("EXPENSE_DEFAULT_CATEGORY", "صيانة وإصلاحات")
+EXPENSE_EXPORT_WORKERS = max(1, int(os.environ.get("EXPENSE_EXPORT_WORKERS", "2") or "2"))
+EXPENSE_EXPORT_MAX_RETRIES = max(0, int(os.environ.get("EXPENSE_EXPORT_MAX_RETRIES", "3") or "3"))
+EXPENSE_QUEUE_STALE_MIN = max(1, int(os.environ.get("EXPENSE_QUEUE_STALE_MIN", "30") or "30"))
+EXPENSE_SENDING_STALE_MIN = max(1, int(os.environ.get("EXPENSE_SENDING_STALE_MIN", "15") or "15"))
+EXPENSE_SENT_UNVERIFIED_STALE_MIN = max(1, int(os.environ.get("EXPENSE_SENT_UNVERIFIED_STALE_MIN", "30") or "30"))
 
 # ---- weekend rule (Thu/Fri): no midnight/noon tiers — a single softer discount at 5:30 PM ----
 WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split(",")
@@ -6326,6 +6331,43 @@ _expense_settings = {}    # persisted config (merged over defaults)
 _expense_seq = 0
 
 EXPENSE_STATUSES = ["captured", "ready", "held", "posted", "failed", "discarded"]
+EXPENSE_CANONICAL_STATUSES = [
+    "draft", "needs_review", "ready", "queued", "sending", "sent_unverified",
+    "verified", "failed", "stale_pending", "duplicate", "archived",
+]
+
+EXPENSE_STATUS_COMPAT = {
+    "captured": "draft",
+    "held": "needs_review",
+    "in_transit": "sent_unverified",
+    "posted": "verified",
+    "discarded": "archived",
+}
+
+EXPENSE_STATUS_LABELS = {
+    "draft": ("مسودة", "Draft"),
+    "needs_review": ("يحتاج مراجعة", "Needs review"),
+    "ready": ("جاهز للتصدير", "Ready"),
+    "queued": ("في الطابور", "Queued"),
+    "sending": ("جاري الإرسال", "Sending"),
+    "sent_unverified": ("أُرسل ولم يتأكد", "Sent, unverified"),
+    "verified": ("مؤكد في Hostaway", "Verified in Hostaway"),
+    "failed": ("فشل", "Failed"),
+    "stale_pending": ("معلق/قديم", "Stale pending"),
+    "duplicate": ("تكرار محتمل", "Possible duplicate"),
+    "archived": ("مؤرشف", "Archived"),
+}
+
+EXPENSE_ERROR_LABELS = {
+    "auth": ("مشكلة صلاحيات Hostaway", "Hostaway auth issue"),
+    "network": ("تعذر الاتصال", "Network issue"),
+    "validation": ("بيانات غير مقبولة", "Validation issue"),
+    "duplicate": ("تكرار", "Duplicate"),
+    "hostaway": ("رفض Hostaway", "Hostaway rejected it"),
+    "verification": ("لم يتأكد بعد", "Verification pending"),
+    "dryrun": ("وضع تجريبي", "Dry-run"),
+    "unknown": ("خطأ غير معروف", "Unknown error"),
+}
 
 # Default settings (all editable from the dashboard Settings panel).
 EXPENSE_DEFAULT_SETTINGS = {
@@ -6389,6 +6431,121 @@ def _exp_settings():
     for k, v in (_expense_settings or {}).items():
         s[k] = v
     return s
+
+def _exp_now():
+    return datetime.now(TZ)
+
+def _exp_parse_ts(value):
+    if not value:
+        return None
+    try:
+        s = str(value).strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=TZ)
+    except Exception:
+        return None
+
+def _exp_minutes_since(value, now=None):
+    dt = _exp_parse_ts(value)
+    if not dt:
+        return None
+    now = now or _exp_now()
+    return max(0.0, (now - dt.astimezone(TZ)).total_seconds() / 60.0)
+
+def _exp_error_class(msg):
+    s = str(msg or "").lower()
+    if not s:
+        return ""
+    if any(x in s for x in ("401", "403", "unauthorized", "forbidden", "token", "auth")):
+        return "auth"
+    if any(x in s for x in ("timeout", "timed out", "connection", "network", "dns", "ssl")):
+        return "network"
+    if any(x in s for x in ("400", "422", "invalid", "missing", "validation")):
+        return "validation"
+    if "duplicate" in s or "already" in s:
+        return "duplicate"
+    if "verify" in s or "not_found" in s or "unverified" in s:
+        return "verification"
+    return "hostaway"
+
+def _exp_canonical_status(exp, now=None):
+    """Single dashboard truth model. Stored legacy values remain readable."""
+    st = exp.get("status") or "captured"
+    if exp.get("hostaway_verified"):
+        return "verified"
+    if exp.get("discrepancy") == "duplicate" or exp.get("primary_reason") == "duplicate":
+        if st not in ("verified", "posted", "archived", "discarded"):
+            return "duplicate"
+    canon = st if st in EXPENSE_CANONICAL_STATUSES else EXPENSE_STATUS_COMPAT.get(st, st)
+    if canon == "verified" and not exp.get("hostaway_verified"):
+        canon = "sent_unverified"
+    if canon == "needs_review" and exp.get("primary_reason") == "duplicate":
+        canon = "duplicate"
+    if canon in ("queued", "sending", "sent_unverified"):
+        stale = _exp_stale_reason(exp, now=now, canon=canon)
+        if stale:
+            return "stale_pending"
+    return canon if canon in EXPENSE_CANONICAL_STATUSES else "draft"
+
+def _exp_stale_reason(exp, now=None, canon=None):
+    canon = canon or _exp_canonical_status(exp, now=now)
+    if canon == "queued":
+        mins = _exp_minutes_since(exp.get("queued_at") or exp.get("status_entered_at") or exp.get("updated_at"), now)
+        if mins is not None and mins >= EXPENSE_QUEUE_STALE_MIN:
+            return f"queued>{EXPENSE_QUEUE_STALE_MIN}m"
+    if canon == "sending":
+        mins = _exp_minutes_since(exp.get("sending_at") or exp.get("status_entered_at") or exp.get("updated_at"), now)
+        if mins is not None and mins >= EXPENSE_SENDING_STALE_MIN:
+            return f"sending>{EXPENSE_SENDING_STALE_MIN}m"
+    if canon == "sent_unverified":
+        mins = _exp_minutes_since(exp.get("sent_at") or exp.get("posted_at") or exp.get("updated_at"), now)
+        if mins is not None and mins >= EXPENSE_SENT_UNVERIFIED_STALE_MIN:
+            return f"sent_unverified>{EXPENSE_SENT_UNVERIFIED_STALE_MIN}m"
+    return ""
+
+def _exp_status_reason(exp, canon=None):
+    canon = canon or _exp_canonical_status(exp)
+    if canon == "stale_pending":
+        return exp.get("stale_reason") or _exp_stale_reason(exp) or "pending too long"
+    if canon in ("needs_review", "duplicate"):
+        return exp.get("primary_reason") or "review"
+    if canon == "failed":
+        return exp.get("error_class") or _exp_error_class(exp.get("error")) or "unknown"
+    if canon == "sent_unverified" and exp.get("verify_note"):
+        return exp.get("verify_note")
+    if canon == "queued":
+        return exp.get("queue_reason") or "waiting for worker"
+    return exp.get("status_reason") or ""
+
+def _exp_set_status(exp, status, *, reason="", by="", detail=""):
+    old = exp.get("status")
+    exp["status"] = status
+    exp["status_reason"] = reason or ""
+    exp["status_entered_at"] = _exp_now().isoformat(timespec="seconds")
+    exp["updated_at"] = exp["status_entered_at"]
+    if old != status:
+        _exp_log_event(exp, "status:" + status, by=by, detail=detail or reason or old or "")
+
+def _exp_apply_stale_state(exp, now=None):
+    canon = _exp_canonical_status(exp, now=now)
+    if canon != "stale_pending":
+        return False
+    reason = _exp_stale_reason(exp, now=now) or exp.get("stale_reason") or "pending too long"
+    if exp.get("status") != "stale_pending":
+        exp["previous_status"] = exp.get("status")
+        exp["stale_reason"] = reason
+        _exp_set_status(exp, "stale_pending", reason=reason, detail=reason)
+        return True
+    exp["stale_reason"] = reason
+    return False
+
+def _exp_can_export(exp):
+    return _exp_canonical_status(exp) in ("ready", "failed", "stale_pending")
+
+def _exp_can_verify(exp):
+    return _exp_canonical_status(exp) in ("sent_unverified", "stale_pending", "sending", "queued")
 
 def _exp_norm(s):
     """Normalize an apartment name for matching (collapse spaces, lowercase)."""
@@ -23159,6 +23316,28 @@ async def _api_weekly_delete(request):
 def _exp_view(e):
     """Expense dict + the 3-step pipeline + the suspected-twin summary (for side-by-side UI)."""
     v = dict(e)
+    raw_status = e.get("status") or "captured"
+    canon = _exp_canonical_status(e)
+    v["raw_status"] = raw_status
+    v["status"] = canon
+    v["status_label"] = {
+        "ar": EXPENSE_STATUS_LABELS.get(canon, (canon, canon))[0],
+        "en": EXPENSE_STATUS_LABELS.get(canon, (canon, canon))[1],
+    }
+    v["status_reason"] = _exp_status_reason(e, canon)
+    v["retry_count"] = int(e.get("retry_count") or 0)
+    v["attempt_count"] = len(e.get("export_attempts") or [])
+    v["last_attempt_at"] = e.get("last_attempt_at") or e.get("sending_at") or e.get("sent_at")
+    v["hostaway_expense_id"] = e.get("hostaway_expense_id") or e.get("hostaway_ref")
+    v["can_export"] = _exp_can_export(e)
+    v["can_verify"] = _exp_can_verify(e)
+    if canon == "failed":
+        ec = e.get("error_class") or _exp_error_class(e.get("error")) or "unknown"
+        v["error_class"] = ec
+        v["error_label"] = {
+            "ar": EXPENSE_ERROR_LABELS.get(ec, EXPENSE_ERROR_LABELS["unknown"])[0],
+            "en": EXPENSE_ERROR_LABELS.get(ec, EXPENSE_ERROR_LABELS["unknown"])[1],
+        }
     v["pipeline"] = _exp_pipeline(e)
     v["sync_state"] = _exp_sync_state(e)
     if e.get("dup_of") and e["dup_of"] in _expenses:
