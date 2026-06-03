@@ -10674,22 +10674,19 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_expenses">
         <div class="page-head">
           <div>
-            <div class="page-title">💸 المصاريف V2</div>
-            <div class="page-sub">تحليل المصادر الثلاثة: Google Sheet → الداشبورد → Hostaway</div>
+            <div class="page-title">💸 مركز اعتماد المصاريف</div>
+            <div class="page-sub">الشيت للإدخال · الداشبورد للاعتماد · Hostaway للترحيل</div>
           </div>
           <div class="page-tools">
-            <button class="btn primary sm" onclick="expV2Reconcile(true)">↻ <span id="t_exp_sync">مطابقة الآن</span></button>
-            <button class="btn ghost sm" onclick="expV2RepairPlan()">🧭 <span id="t_exp_status">مطابقة وإصلاح</span></button>
             <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
           </div>
         </div>
         <div class="page-help" data-help-key="expenses">
           <button class="ph-x" onclick="dismissHelp('expenses')" title="إخفاء">×</button>
-          <div class="ph-t">💸 المصاريف V2</div>
+          <div class="ph-t">💸 مركز اعتماد المصاريف</div>
           <div class="ph-b">
-            هنا تشوف المصروف هل هو موجود في الشيت، الداشبورد، وHostaway —
-            وعشان كذا نعرف وين المشكلة بالضبط. علامة الصح الخضراء ما تظهر إلا بعد
-            تحديث Hostaway والتأكد منه.
+            مسار واحد واضح: الموظف يضيف المصروف في Google Sheet (إدخال فقط) ← تعتمده أو ترفضه من هنا
+            ← يتصدّر إلى Hostaway ← يتحقق تلقائياً. علامة الصح الخضراء ما تظهر إلا بعد التأكد من Hostaway فعلياً.
           </div>
         </div>
         <div id="expensesOpsSummary"></div>
@@ -15444,12 +15441,10 @@ function x4StateLabel(r){ var T=t(); if(r.export_status==='exported_not_verified
 function _renderExp4(){
   var body=document.getElementById('expBody'); if(!body) return;
   var d=D.exp4||{}, tabs=d.tabs||{}, T=t(), ar=(L==='ar');
-  var head='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
-    +'<div><div style="font-size:18px;font-weight:800">'+T.x4_title+'</div><div class="muted" style="font-size:12px;margin-top:2px">'+T.x4_sub+'</div></div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+  var head='<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
       +'<button class="btn ghost sm" onclick="x4Import()">'+T.x4_import+'</button>'
       +'<button class="btn ghost sm" onclick="loadExpenses()">'+T.x4_refresh+'</button>'
-      +'<button class="btn ghost sm" onclick="x4Advanced()">'+T.x4_advanced+'</button></div></div>';
+      +'<button class="btn ghost sm" onclick="x4Advanced()">'+T.x4_advanced+'</button></div>';
   if(d.dryrun_on){ head+=riskPanel('warn', ar?'وضع التجربة مفعّل':'DRY-RUN is ON', ar?'EXPENSE_POST_DRYRUN=1 — التصدير محاكاة فقط ولا يتحقق من Hostaway. اضبطه على 0 في Railway للترحيل الفعلي.':'EXPENSE_POST_DRYRUN=1 — exports are simulated and can never verify. Set it to 0 in Railway for real writes.','',''); }
   if(d.error){ head+=riskPanel('danger', ar?'تعذّر التحميل':'Could not load', esc(String(d.error)),'',''); }
   var order=[['pending','x4_pending'],['approved','x4_approved'],['exported','x4_exported'],['verified','x4_verified'],['needs_action','x4_needs_action']];
