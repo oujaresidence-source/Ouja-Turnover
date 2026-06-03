@@ -189,6 +189,14 @@ OPERATION_ROLE_NAME = os.environ.get("OPERATION_ROLE_NAME", "operation")
 OUJACT_SCHEDULE_CHANNEL = os.environ.get("OUJACT_SCHEDULE_CHANNEL", "oujact-schedule")
 OUJACT_SCHEDULE_HOUR    = int(os.environ.get("OUJACT_SCHEDULE_HOUR", "0"))   # 0 = 12 AM Riyadh
 LISTINGS_AUTOSYNC       = os.environ.get("LISTINGS_AUTOSYNC", "1") in ("1", "true", "True", "yes")
+# ---- Oujact Dispatch Center ----
+# Token-gated mobile route page for the cleaning team (separate from the dashboard token).
+# Falls back to the existing CLEANING_TOKEN so a route link works out-of-the-box.
+OUJACT_ROUTE_TOKEN   = os.environ.get("OUJACT_ROUTE_TOKEN", "") or os.environ.get("CLEANING_TOKEN", "")
+GOOGLE_MAPS_API_KEY  = os.environ.get("GOOGLE_MAPS_API_KEY", "")   # optional — ETA falls back if absent
+OUJACT_CLEAN_MIN     = int(os.environ.get("OUJACT_CLEAN_MIN", "20"))   # default cleaning estimate (min)
+OUJACT_CLEAN_MAX     = int(os.environ.get("OUJACT_CLEAN_MAX", "40"))
+OUJACT_PARK_BUFFER   = int(os.environ.get("OUJACT_PARK_BUFFER", "5"))  # parking/waiting buffer (min)
 
 # ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -2459,6 +2467,178 @@ async def post_oujact_schedule():
     embed.set_footer(text="Order: check-ins first, then earliest check-in time.")
     await ch.send(embed=embed)
     print(f"OujaCT: posted daily schedule ({len(items)} turnovers)")
+
+# ============================================================================
+#  OUJACT DISPATCH CENTER — priority plan, checkout state, route token, ETA
+#  (reuses fetch_oujact_turnovers + the listings store + the public-page token
+#   pattern. Never fakes Airbnb detection or ETA; priority always beats distance.)
+# ============================================================================
+def _extract_latlng(url):
+    """Safely pull (lat, lng) from a Google Maps URL. Returns None if not confidently found."""
+    if not url:
+        return None
+    for pat in (r"@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)",                # …/@24.77,46.63,17z
+                r"!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)",            # !3dLAT!4dLNG
+                r"[?&](?:q|ll|destination|center)=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)"):
+        m = re.search(pat, url)
+        if m:
+            try:
+                lat, lng = float(m.group(1)), float(m.group(2))
+                if -90 <= lat <= 90 and -180 <= lng <= 180:
+                    return (lat, lng)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+# --- small append-safe state stores (existing _load_json/_save_json persistence) ---
+_oujact_checkout = _load_json("oujact_checkout.json", {}) or {}    # "lid|date" -> {state, by, ts}
+_oujact_status   = _load_json("oujact_status.json", []) or []      # append-only status actions
+_oujact_route_audit = _load_json("oujact_route_audit.json", []) or []
+_oujact_dispatch_log = _load_json("oujact_dispatch_log.json", {}) or {}  # "lid|date" -> {flags}
+
+OUJACT_CHECKOUT_STATES = ("unknown", "guest_confirmed", "checkout_button", "airbnb_confirmed",
+                          "late_checkout", "inside", "checkout_passed")
+def _oc_key(lid, date_iso):
+    return f"{lid}|{str(date_iso)[:10]}"
+def _oujact_checkout_state(lid, date_iso):
+    return (_oujact_checkout.get(_oc_key(lid, date_iso)) or {}).get("state", "unknown")
+def _oujact_set_checkout_state(lid, date_iso, state, by=""):
+    if state not in OUJACT_CHECKOUT_STATES:
+        return False
+    _oujact_checkout[_oc_key(lid, date_iso)] = {
+        "state": state, "by": (by or "")[:60],
+        "ts": datetime.now(TZ).isoformat(timespec="seconds")}
+    _save_json("oujact_checkout.json", _oujact_checkout)
+    return True
+def _oujact_latest_status(lid, date_iso):
+    k = _oc_key(lid, date_iso)
+    last = None
+    for e in _oujact_status:
+        if e.get("key") == k:
+            last = e
+    return last
+def _oujact_log_status(lid, date_iso, action, note="", by=""):
+    e = {"key": _oc_key(lid, date_iso), "lid": lid, "date": str(date_iso)[:10],
+         "action": action, "note": (note or "")[:300], "by": (by or "")[:60],
+         "prev": (_oujact_latest_status(lid, date_iso) or {}).get("action"),
+         "ts": datetime.now(TZ).isoformat(timespec="seconds")}
+    _oujact_status.append(e)
+    if len(_oujact_status) > 5000:
+        del _oujact_status[:len(_oujact_status) - 5000]
+    _save_json("oujact_status.json", _oujact_status)
+    return e
+
+# Feature 5 — priority tiers (lower = first). Operational urgency ALWAYS beats distance;
+# ETA only reorders within the same tier.
+_OUJACT_REASON = {
+    "guest_confirmed": ("الضيف أكد الخروج", "Guest confirmed checkout"),
+    "checkin_today":   ("فيه دخول اليوم", "Check-in today"),
+    "checkout_passed": ("وقت الخروج عدى", "Checkout passed"),
+    "missing_report":  ("التقرير ناقص", "Missing report"),
+    "urgent":          ("بلاغ عاجل", "Urgent issue"),
+    "late_checkout":   ("خروج متأخر معتمد", "Late checkout approved"),
+    "inside":          ("الضيف باقي داخل", "Guest still inside"),
+    "flexible":        ("مرن", "Flexible"),
+}
+def _oujact_priority(it, cstate, done, now):
+    """Returns (tier, reason_code). Lower tier = dispatched first."""
+    passed = it["checkout"] <= now
+    if cstate == "inside":
+        return (95, "inside")                       # blocker — last
+    if cstate == "late_checkout":
+        return (80, "late_checkout")
+    if cstate in ("guest_confirmed", "checkout_button", "airbnb_confirmed"):
+        return (0 if it["checkin_today"] else 1, "guest_confirmed")
+    if it["checkin_today"]:
+        return (1, "checkin_today")                 # same-day check-in — near the top regardless of distance
+    if passed and not done:
+        return (2, "missing_report")
+    if passed:
+        return (3, "checkout_passed")
+    return (6, "flexible")
+
+def _oujact_dispatch_plan(today_only=True):
+    """Today's prioritized Oujact dispatch plan (priority tier first; within-tier by check-in
+    time then checkout). Includes config, checkout state, status, reason chips, missing-map flag."""
+    items = fetch_oujact_turnovers()
+    today = datetime.now(TZ).date().isoformat()
+    if today_only:
+        items = [it for it in items if it["checkout_date"] == today]
+    now = datetime.now(TZ)
+    store = _ls_get()["listings"]
+    plan = []
+    for it in items:
+        lid, d = it["lid"], it["checkout_date"]
+        cfg = store.get(str(lid)) or {}
+        cstate = _oujact_checkout_state(lid, d)
+        if cstate == "unknown" and it["checkout"] <= now:
+            cstate = "checkout_passed"              # official time passed (not a guest signal)
+        last = _oujact_latest_status(lid, d)
+        done = (last or {}).get("action") in ("done",)
+        tier, rc = _oujact_priority(it, _oujact_checkout_state(lid, d), done, now)
+        maps = (cfg.get("maps_link") or "").strip()
+        plan.append({
+            "lid": lid, "name": it["listing"], "date": d,
+            "district": cfg.get("group") or cfg.get("address") or "",
+            "checkout_time": it["checkout"].strftime("%H:%M"),
+            "checkout_passed": it["checkout"] <= now,
+            "checkin_today": it["checkin_today"],
+            "checkin_time": (it["checkin_dt"].strftime("%H:%M") if it.get("checkin_dt") else None),
+            "checkout_state": cstate, "status": (last or {}).get("action"),
+            "tier": tier, "reason_code": rc,
+            "reason_ar": _OUJACT_REASON.get(rc, ("", ""))[0],
+            "reason_en": _OUJACT_REASON.get(rc, ("", ""))[1],
+            "maps_link": maps, "directions_url": cfg.get("directions_url"),
+            "lat": cfg.get("lat"), "lng": cfg.get("lng"), "missing_maps": not maps,
+            "clean_min": cfg.get("clean_min") or OUJACT_CLEAN_MIN,
+            "clean_max": cfg.get("clean_max") or OUJACT_CLEAN_MAX,
+            "park_buffer": cfg.get("park_buffer") if cfg.get("park_buffer") is not None else OUJACT_PARK_BUFFER,
+            "access_notes": cfg.get("access_notes") or "", "parking_notes": cfg.get("parking_notes") or "",
+            "discord_channel": cfg.get("discord_channel") or "",
+        })
+    plan.sort(key=lambda p: (p["tier"], p.get("checkin_time") or "99:99", p["checkout_time"]))
+    for i, p in enumerate(plan):
+        p["rank"] = i + 1
+    return plan
+
+def _oujact_route_eta(start, plan):
+    """Leg-by-leg ETA (minutes) in plan order, traffic-aware, ONLY when a Google key + the
+    start coords + each destination's coords are available. Never fabricates — returns
+    {available, reason, legs:[min|None], total_drive_min} and the page falls back gracefully."""
+    if not GOOGLE_MAPS_API_KEY:
+        return {"available": False, "reason": "no_api_key", "legs": [], "total_drive_min": None}
+    s = _extract_latlng(start) if isinstance(start, str) else start
+    if not s:
+        return {"available": False, "reason": "no_start_coords", "legs": [], "total_drive_min": None}
+    legs, total, ok_any = [], 0, False
+    origin = s
+    try:
+        for p in plan:
+            if p.get("lat") is None or p.get("lng") is None:
+                legs.append(None); continue
+            body = {"origins": [{"waypoint": {"location": {"latLng": {"latitude": origin[0], "longitude": origin[1]}}}}],
+                    "destinations": [{"waypoint": {"location": {"latLng": {"latitude": p["lat"], "longitude": p["lng"]}}}}],
+                    "travelMode": "DRIVE", "routingPreference": "TRAFFIC_AWARE"}
+            r = requests.post("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix",
+                              headers={"X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                                       "X-Goog-FieldMask": "originIndex,destinationIndex,duration,condition",
+                                       "Content-Type": "application/json"}, json=body, timeout=20)
+            r.raise_for_status()
+            rows = r.json() if isinstance(r.json(), list) else [r.json()]
+            dur = None
+            for row in rows:
+                ds = str(row.get("duration") or "").rstrip("s")
+                if ds.isdigit():
+                    dur = round(int(ds) / 60)
+            legs.append(dur)
+            if dur is not None:
+                total += dur; ok_any = True
+            origin = (p["lat"], p["lng"])
+        return {"available": ok_any, "reason": ("ok" if ok_any else "no_legs"),
+                "legs": legs, "total_drive_min": (total if ok_any else None)}
+    except Exception as e:
+        print("oujact ETA error:", e)
+        return {"available": False, "reason": "api_error", "legs": [], "total_drive_min": None}
 
 @tasks.loop(minutes=POLL_MINUTES)
 async def poll_loop():
@@ -16754,6 +16934,162 @@ if(tok()) init();
 </body>
 </html>"""
 
+OUJACT_ROUTE_HTML = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>خطة تنظيف Oujact</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#FAFAF7;--surface:#FFFFFF;--surface-2:#F5F2EC;--surface-3:#EDE8DC;--line:#E8E2D5;--line-strong:#D4CDB9;--text:#1A1815;--text-2:#544D43;--mut:#A09989;--gold:#A37728;--gold-2:#8B6320;--gold-soft:#F4EBD5;--green:#0E9E5F;--down:#cc4b4b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;padding:0 0 40px}
+.wrap{max-width:560px;margin:0 auto;padding:14px}
+.top{position:sticky;top:0;background:var(--bg);padding:12px 0 8px;z-index:5;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 0 2px} .sub{font-size:12px;color:var(--text-2)}
+.langbtn{position:absolute;inset-inline-end:0;top:12px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;color:var(--text-2);cursor:pointer}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
+.card.urgent{border-color:rgba(204,75,75,.45)} .card.soon{border-color:rgba(163,119,40,.4)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;cursor:pointer;transition:transform .1s cubic-bezier(0.23,1,0.32,1),background .12s}
+.btn:active{transform:scale(.97)} .btn.gold{background:var(--gold);color:#fff;border-color:var(--gold)} .btn.ghost{background:var(--surface-2)}
+.btn.full{width:100%;margin-top:8px}
+.startopt{display:flex;flex-direction:column;gap:8px}
+input,.fld{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--text);font:inherit;font-size:13px}
+.warn{background:var(--gold-soft);border:1px solid rgba(163,119,40,.35);color:var(--gold-2);border-radius:10px;padding:11px;font-size:13px;margin-top:10px}
+.rank{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff;flex:none}
+.chip{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--line)}
+.chip.r{background:rgba(204,75,75,.12);color:#B3433F;border-color:rgba(204,75,75,.3)}
+.chip.g{background:var(--gold-soft);color:var(--gold-2);border-color:rgba(163,119,40,.3)}
+.chip.ok{background:rgba(14,158,95,.12);color:#0B7A4A;border-color:rgba(14,158,95,.3)}
+.meta{font-size:12px;color:var(--text-2);margin-top:6px;line-height:1.7}
+.acts{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+.acts .btn{flex:1;min-width:30%;font-size:12px;padding:9px 8px}
+.sumrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.sumtile{flex:1;min-width:90px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.sumtile .v{font-size:18px;font-weight:800} .sumtile .l{font-size:10.5px;color:var(--mut)}
+.muted{color:var(--mut)} a{color:var(--gold-2)}
+@media(prefers-reduced-motion:reduce){.btn{transition:none}}
+</style></head>
+<body><div class="wrap">
+<div class="top"><button class="langbtn" onclick="toggleLang()" id="langBtn">EN</button>
+<h1 id="t_title">خطة تنظيف Oujact لليوم</h1><div class="sub" id="t_date"></div></div>
+<div id="startCard" class="card"></div>
+<div id="summary"></div>
+<div id="plan"></div>
+</div>
+<script>
+var L='ar'; var TOK=new URLSearchParams(location.search).get('token')||'';
+var START=null; var DATA=null;
+var T={
+ ar:{title:'خطة تنظيف Oujact لليوم',start_h:'ابدأ هنا',choose:'اختر نقطة البداية',
+   geo:'استخدم موقعي الحالي',link:'الصق رابط Google Maps كنقطة بداية',addr:'اكتب نقطة البداية يدويًا',
+   addr_ph:'مثال: مقر عوجا التخصصي، حي الملقا، آخر شقة...', link_ph:'الصق رابط Google Maps هنا',
+   no_start:'اختر نقطة البداية عشان نحسب لك المسار.', geo_denied:'تعذّر الوصول لموقعك — استخدم لصق الرابط أو الكتابة اليدوية.',
+   use:'استخدم', change:'غيّر نقطة البداية', calc:'احسب المسار',
+   prio:'الأولوية', reason:'سبب الأولوية', maps:'افتح في Google Maps', chan:'قناة الشقة',
+   clean:'الوقت المتوقع للتنظيف', park:'انتظار/مواقف', access:'ملاحظة الوصول',
+   nomap:'لا يوجد رابط خرائط', eta_na:'ETA غير متاح حاليًا', within:'أقرب مسار داخل نفس الأولوية',
+   prio_note:'الأولوية التشغيلية مقدّمة على قرب المسافة',
+   arrived:'وصلت', started:'بدأ التنظيف', done:'تم', issue:'فيه مشكلة', inside:'الضيف باقي داخل',
+   total_apts:'شقق', urgent:'عاجلة', first:'أول شقة', route_t:'وقت المسار', clean_w:'وقت التنظيف', miss:'بدون خريطة',
+   checkin:'دخول اليوم', checkout:'الخروج', min:'دقيقة', done_t:'تم تسجيل الحالة', empty:'ما فيه شقق مجدولة اليوم لفريق Oujact.',
+   bad:'رابط غير صالح أو منتهي.', leg:'قيادة'},
+ en:{title:'Oujact Cleaning Route Plan',start_h:'Start here',choose:'Choose a starting point',
+   geo:'Use my current location',link:'Paste Google Maps link as starting point',addr:'Type starting address manually',
+   addr_ph:'Example: Ouja HQ, Al Malqa, last apartment...', link_ph:'Paste a Google Maps link here',
+   no_start:'Choose a starting point so we can calculate the route.', geo_denied:'Could not get your location — paste a link or type it.',
+   use:'Use', change:'Change starting point', calc:'Calculate route',
+   prio:'Priority', reason:'Why first', maps:'Open in Google Maps', chan:'Apartment channel',
+   clean:'Est. cleaning time', park:'Parking / wait', access:'Access note',
+   nomap:'No map link', eta_na:'ETA unavailable', within:'Nearest within same priority',
+   prio_note:'Operational priority comes before distance',
+   arrived:'Arrived', started:'Started cleaning', done:'Done', issue:'Issue', inside:'Guest still inside',
+   total_apts:'units', urgent:'urgent', first:'first', route_t:'route time', clean_w:'cleaning', miss:'no map',
+   checkin:'check-in today', checkout:'checkout', min:'min', done_t:'Status saved', empty:'No Oujact apartments scheduled today.',
+   bad:'Invalid or expired link.', leg:'drive'}};
+function t(){return T[L];}
+function esc(s){return (s==null?'':String(s)).replace(/[<>&\"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','\"':'&quot;'})[c];});}
+function toggleLang(){L=(L==='ar'?'en':'ar');document.documentElement.lang=L;document.documentElement.dir=(L==='ar'?'rtl':'ltr');document.getElementById('langBtn').textContent=(L==='ar'?'EN':'ع');render();}
+function renderStart(){
+ var k=t(); var c=document.getElementById('startCard');
+ if(START){ c.innerHTML='<div style=\"display:flex;align-items:center;gap:10px\"><div style=\"flex:1\"><div class=\"muted\" style=\"font-size:11px\">'+esc(k.start_h)+'</div><b>'+esc(START.label)+'</b></div><button class=\"btn ghost\" onclick=\"START=null;render()\">'+esc(k.change)+'</button></div>'; return; }
+ c.innerHTML='<b>'+esc(k.choose)+'</b><div class=\"startopt\" style=\"margin-top:10px\">'
+  +'<button class=\"btn gold\" onclick=\"useGeo()\">📍 '+esc(k.geo)+'</button>'
+  +'<input id=\"slink\" class=\"fld\" placeholder=\"'+esc(k.link_ph)+'\"><button class=\"btn\" onclick=\"useLink()\">🔗 '+esc(k.link)+'</button>'
+  +'<input id=\"saddr\" class=\"fld\" placeholder=\"'+esc(k.addr_ph)+'\"><button class=\"btn\" onclick=\"useAddr()\">⌨ '+esc(k.addr)+'</button>'
+  +'</div>';
+}
+function useGeo(){ if(!navigator.geolocation){ alert(t().geo_denied); return; }
+ navigator.geolocation.getCurrentPosition(function(p){ START={mode:'geo',value:p.coords.latitude.toFixed(5)+','+p.coords.longitude.toFixed(5),label:(L==='ar'?'موقعي الحالي':'My current location')}; load(); },
+  function(){ alert(t().geo_denied); }); }
+function useLink(){ var v=(document.getElementById('slink')||{}).value||''; if(!v.trim())return; START={mode:'link',value:v.trim(),label:(L==='ar'?'رابط خرائط':'Maps link')}; load(); }
+function useAddr(){ var v=(document.getElementById('saddr')||{}).value||''; if(!v.trim())return; START={mode:'addr',value:v.trim(),label:v.trim()}; load(); }
+function tierChip(p){ var k=t(); var cls=p.tier<=1?'r':(p.tier<=3?'g':''); return '<span class=\"chip '+cls+'\">'+esc(L==='ar'?p.reason_ar:p.reason_en)+'</span>'; }
+function rankColor(p){ return p.tier<=1?'#B3433F':(p.tier<=3?'var(--gold)':'var(--mut)'); }
+function mapsHref(p){ var dest=(p.lat!=null&&p.lng!=null)?(p.lat+','+p.lng):(p.maps_link||''); if(!dest) return ''; var o=START?('&origin='+encodeURIComponent(START.value)):''; return 'https://www.google.com/maps/dir/?api=1'+o+'&destination='+encodeURIComponent(dest); }
+function render(){
+ document.getElementById('t_title').textContent=t().title;
+ renderStart();
+ var sum=document.getElementById('summary'), pl=document.getElementById('plan');
+ if(!START){ sum.innerHTML=''; pl.innerHTML='<div class=\"warn\">'+esc(t().no_start)+'</div>'; return; }
+ if(!DATA){ pl.innerHTML='<div class=\"card muted\">…</div>'; return; }
+ var d=DATA, k=t(), tot=d.totals||{};
+ document.getElementById('t_date').textContent=d.date||'';
+ var eta=tot.eta_available; var route=(tot.drive_min_total!=null)?(tot.drive_min_total+' '+k.min):k.eta_na;
+ sum.innerHTML='<div class=\"sumrow\">'
+  +'<div class=\"sumtile\"><div class=\"v\">'+(tot.apartments||0)+'</div><div class=\"l\">'+k.total_apts+'</div></div>'
+  +'<div class=\"sumtile\"><div class=\"v\" style=\"color:#B3433F\">'+(tot.urgent||0)+'</div><div class=\"l\">'+k.urgent+'</div></div>'
+  +'<div class=\"sumtile\"><div class=\"v\" style=\"font-size:13px\">'+esc(tot.first||'—')+'</div><div class=\"l\">'+k.first+'</div></div>'
+  +'<div class=\"sumtile\"><div class=\"v\" style=\"font-size:13px\">'+esc(route)+'</div><div class=\"l\">'+k.route_t+'</div></div>'
+  +'<div class=\"sumtile\"><div class=\"v\" style=\"font-size:13px\">'+(tot.clean_min_total||0)+'–'+(tot.clean_max_total||0)+' '+k.min+'</div><div class=\"l\">'+k.clean_w+'</div></div>'
+  +(tot.missing_maps?('<div class=\"sumtile\"><div class=\"v\" style=\"color:var(--gold-2)\">'+tot.missing_maps+'</div><div class=\"l\">'+k.miss+'</div></div>'):'')+'</div>'
+  +'<div class=\"muted\" style=\"font-size:11px;margin-top:8px\">'+esc(k.prio_note)+(eta?'':(' · '+esc(k.eta_na)))+'</div>';
+ var plan=d.plan||[];
+ if(!plan.length){ pl.innerHTML='<div class=\"card muted\">'+esc(k.empty)+'</div>'; return; }
+ pl.innerHTML=plan.map(function(p){
+   var href=mapsHref(p);
+   var co=p.checkout_passed?('<span class=\"chip r\">'+k.checkout+' '+esc(p.checkout_time)+' ✓</span>'):('<span class=\"chip\">'+k.checkout+' '+esc(p.checkout_time)+'</span>');
+   var ci=p.checkin_today?('<span class=\"chip g\">'+k.checkin+(p.checkin_time?(' '+esc(p.checkin_time)):'')+'</span>'):'';
+   var etaL=(p.eta_min!=null)?('<span class=\"chip\">'+k.leg+' '+p.eta_min+' '+k.min+'</span>'):'';
+   var statusChip=p.status?('<span class=\"chip ok\">'+esc(p.status)+'</span>'):'';
+   var meta='<div class=\"meta\">'+(p.district?('📍 '+esc(p.district)+'<br>'):'')
+     +'🧹 '+k.clean+': '+p.clean_min+'–'+p.clean_max+' '+k.min+' · 🅿 '+k.park+': '+p.park_buffer+' '+k.min
+     +(p.access_notes?('<br>🔑 '+k.access+': '+esc(p.access_notes)):'')
+     +(p.parking_notes?('<br>🅿 '+esc(p.parking_notes)):'')+'</div>';
+   var maps= href?('<a class=\"btn gold\" href=\"'+href+'\" target=\"_blank\" rel=\"noopener\">🗺️ '+k.maps+'</a>')
+     :('<span class=\"chip g\">'+k.nomap+'</span>');
+   var chan=p.discord_channel?('<span class=\"chip\">📡 '+esc(p.discord_channel)+'</span>'):'';
+   var acts='<div class=\"acts\">'
+     +'<button class=\"btn\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;arrived&#39;)\">'+k.arrived+'</button>'
+     +'<button class=\"btn\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;started&#39;)\">'+k.started+'</button>'
+     +'<button class=\"btn gold\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;done&#39;)\">'+k.done+'</button>'
+     +'<button class=\"btn ghost\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;issue&#39;)\">'+k.issue+'</button>'
+     +'<button class=\"btn ghost\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;guest_inside&#39;)\">'+k.inside+'</button></div>';
+   return '<div class=\"card'+(p.tier<=1?' urgent':(p.tier<=3?' soon':''))+'\">'
+     +'<div style=\"display:flex;align-items:center;gap:10px\"><div class=\"rank\" style=\"background:'+rankColor(p)+'\">'+p.rank+'</div>'
+     +'<div style=\"flex:1;min-width:0\"><b>'+esc(p.name)+'</b><div style=\"margin-top:5px;display:flex;gap:5px;flex-wrap:wrap\">'+tierChip(p)+co+ci+etaL+statusChip+'</div></div></div>'
+     +meta+'<div style=\"display:flex;gap:7px;flex-wrap:wrap;margin-top:10px\">'+maps+chan+'</div>'+acts+'</div>';
+ }).join('');
+}
+function load(){ renderStart();
+ if(!START){ render(); return; }
+ document.getElementById('plan').innerHTML='<div class=\"card muted\">…</div>';
+ fetch('/api/oujact/route?token='+encodeURIComponent(TOK)+'&start='+encodeURIComponent(START.value))
+  .then(function(r){ if(r.status===401) throw 'bad'; return r.json(); })
+  .then(function(d){ DATA=d; render(); })
+  .catch(function(){ document.getElementById('plan').innerHTML='<div class=\"warn\">'+esc(t().bad)+'</div>'; });
+}
+function act(lid,date,action){
+ fetch('/api/oujact/status?token='+encodeURIComponent(TOK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lid:lid,date:date,action:action})})
+  .then(function(r){return r.json();}).then(function(){ load(); })
+  .catch(function(){});
+}
+document.documentElement.lang='ar';
+render();
+</script></body></html>"""
+
 CLEANING_HTML = """<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
@@ -24443,6 +24779,16 @@ def _ls_row_view(rec):
         "deactivated_at": rec.get("deactivated_at"),
         "needs_setup": _ls_needs_setup(rec),
         "change": rec.get("change_flag") if fresh else None,
+        # Oujact dispatch config (append-safe; absent on old records → sensible defaults)
+        "maps_link": rec.get("maps_link") or "",
+        "lat": rec.get("lat"), "lng": rec.get("lng"),
+        "access_notes": rec.get("access_notes") or "",
+        "parking_notes": rec.get("parking_notes") or "",
+        "clean_min": rec.get("clean_min") or OUJACT_CLEAN_MIN,
+        "clean_max": rec.get("clean_max") or OUJACT_CLEAN_MAX,
+        "park_buffer": rec.get("park_buffer") if rec.get("park_buffer") is not None else OUJACT_PARK_BUFFER,
+        "discord_channel": rec.get("discord_channel") or "",
+        "missing_maps": bool(rec.get("oujact")) and not (rec.get("maps_link") or "").strip(),
     }
 
 async def _api_listings_list(request):
@@ -24507,6 +24853,21 @@ async def _api_listings_update(request):
                 return _json({"error": "bad floor"}, 400)
     if "oujact" in b:
         rec["oujact"] = bool(b.get("oujact"))
+    # Oujact dispatch config (all append-safe)
+    if "maps_link" in b:
+        ml = str(b.get("maps_link") or "").strip()[:600]
+        rec["maps_link"] = ml
+        ll = _extract_latlng(ml)
+        rec["lat"], rec["lng"] = (ll if ll else (None, None))
+    for f in ("access_notes", "parking_notes", "discord_channel"):
+        if f in b:
+            rec[f] = str(b.get(f) or "").strip()[:300]
+    for f in ("clean_min", "clean_max", "park_buffer"):
+        if f in b:
+            try:
+                rec[f] = max(0, int(b.get(f)))
+            except (TypeError, ValueError):
+                pass
     _ls_save()
     return _json({"ok": True, "row": _ls_row_view(rec)})
 
@@ -24525,6 +24886,121 @@ async def _api_oujact_apply(request):
         return _json({"error": str(e)}, 500)
     log_event("pricing", f"OujaCT · تطبيق/تحديث · {len(changed)} قناة · {assigned} شقة معيّنة")
     return _json({"ok": True, "changed": changed, "assigned": assigned})
+
+# ---- Oujact Dispatch APIs ----
+def _oujact_plan_totals(plan, eta):
+    """Day totals: cleaning window (Σ min..max), parking buffers, drive time (if ETA), and the
+    full completion window. Apartments with no map link are excluded from drive time only."""
+    cmin = sum(p["clean_min"] for p in plan)
+    cmax = sum(p["clean_max"] for p in plan)
+    buf = sum(p["park_buffer"] for p in plan)
+    drive = (eta or {}).get("total_drive_min")
+    return {"apartments": len(plan),
+            "urgent": sum(1 for p in plan if p["tier"] <= 2),
+            "first": (plan[0]["name"] if plan else None),
+            "clean_min_total": cmin, "clean_max_total": cmax, "park_buffer_total": buf,
+            "drive_min_total": drive,
+            "missing_maps": sum(1 for p in plan if p["missing_maps"]),
+            "eta_available": bool((eta or {}).get("available")),
+            "total_min_low": (cmin + buf + (drive or 0)),
+            "total_min_high": (cmax + buf + (drive or 0))}
+
+async def _api_oujact_route(request):
+    """PUBLIC, token-gated route data for the cleaning team (Oujact only · today · cleaning
+    actions only — never the full dashboard). Optional ?start= computes ETA when possible."""
+    token = request.query.get("token", "")
+    if not OUJACT_ROUTE_TOKEN or token != OUJACT_ROUTE_TOKEN:
+        return _json({"error": "unauthorized"}, 401)
+    plan = await asyncio.to_thread(_oujact_dispatch_plan)
+    start = (request.query.get("start") or "").strip()
+    eta = {"available": False, "reason": "no_start", "legs": [], "total_drive_min": None}
+    if start:
+        eta = await asyncio.to_thread(_oujact_route_eta, start, plan)
+        legs = eta.get("legs") or []
+        for i, p in enumerate(plan):
+            p["eta_min"] = legs[i] if i < len(legs) else None
+    return _json({"ok": True, "date": datetime.now(TZ).date().isoformat(),
+                  "plan": plan, "eta": eta, "totals": _oujact_plan_totals(plan, eta),
+                  "have_start": bool(start), "maps_key": bool(GOOGLE_MAPS_API_KEY)})
+
+async def _api_oujact_route_link(request):
+    """Dashboard: generate + audit the shareable Oujact route link (token-scoped to today)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if not OUJACT_ROUTE_TOKEN:
+        return _json({"error": "no_token",
+                      "note": "ضع OUJACT_ROUTE_TOKEN أو CLEANING_TOKEN في متغيرات Railway أول"}, 400)
+    plan = await asyncio.to_thread(_oujact_dispatch_plan)
+    url = "/oujact-route?token=" + OUJACT_ROUTE_TOKEN
+    audit = {"ts": datetime.now(TZ).isoformat(timespec="seconds"),
+             "by": _req_actor(request), "date": datetime.now(TZ).date().isoformat(),
+             "count": len(plan), "apartments": [p["name"] for p in plan]}
+    _oujact_route_audit.append(audit)
+    if len(_oujact_route_audit) > 1000:
+        del _oujact_route_audit[:len(_oujact_route_audit) - 1000]
+    _save_json("oujact_route_audit.json", _oujact_route_audit)
+    log_event("ops", f"Oujact · أُنشئ رابط المسار · {len(plan)} شقة")
+    return _json({"ok": True, "url": url, "count": len(plan),
+                  "audit": _oujact_route_audit[-10:][::-1]})
+
+async def _api_oujact_dispatch(request):
+    """Dashboard summary of today's Oujact dispatch plan."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    plan = await asyncio.to_thread(_oujact_dispatch_plan)
+    return _json({"ok": True, "plan": plan, "totals": _oujact_plan_totals(plan, None),
+                  "have_token": bool(OUJACT_ROUTE_TOKEN),
+                  "recent_links": _oujact_route_audit[-5:][::-1]})
+
+async def _api_oujact_checkout_state(request):
+    """Dashboard manual override of a guest's checkout state (NO fake Airbnb detection)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    date = (b.get("date") or datetime.now(TZ).date().isoformat())[:10]
+    state = b.get("state")
+    if not _oujact_set_checkout_state(lid, date, state, _req_actor(request)):
+        return _json({"error": "bad state"}, 400)
+    return _json({"ok": True, "lid": lid, "date": date, "state": state})
+
+async def _api_oujact_status(request):
+    """Status action from the route page (token) OR the dashboard. Logs to the audit trail;
+    'Guest Still Inside' / 'Issue' fire a safe urgent Discord update. Never marks a report
+    verified unless the existing report system confirms it."""
+    tok = request.query.get("token", "")
+    route_ok = bool(OUJACT_ROUTE_TOKEN) and tok == OUJACT_ROUTE_TOKEN
+    if not (route_ok or _dash_auth(request)):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    date = (b.get("date") or datetime.now(TZ).date().isoformat())[:10]
+    action = (b.get("action") or "").strip()
+    if action not in ("arrived", "started", "done", "issue", "guest_inside"):
+        return _json({"error": "bad action"}, 400)
+    actor = (b.get("by") or "").strip()[:60] or ("route-link" if route_ok else _req_actor(request))
+    e = await asyncio.to_thread(_oujact_log_status, lid, date, action, b.get("note", ""), actor)
+    if action == "guest_inside":
+        await asyncio.to_thread(_oujact_set_checkout_state, lid, date, "inside", actor)
+    # safe urgent Discord update for blockers/issues
+    if action in ("guest_inside", "issue"):
+        nm = (get_listings_map() or {}).get(lid, str(lid))
+        title = "🛰️ Oujact — الضيف باقي داخل" if action == "guest_inside" else "🛰️ Oujact — بلاغ من الفريق"
+        try:
+            await _post_system_escalation(title, f"{nm} · {date}" + (f" · {b.get('note')}" if b.get("note") else ""),
+                                          severity="high")
+        except Exception as ex:
+            print("oujact status alert:", ex)
+    return _json({"ok": True, "logged": e})
+
+async def _handle_oujact_route(request):
+    return web.Response(text=OUJACT_ROUTE_HTML, content_type="text/html")
 
 async def _api_calendar_forward(request):
     """Aggregate per-date forward calendar: occupancy + avg price + Saudi events."""
@@ -25108,6 +25584,12 @@ async def start_web_server():
         app.router.add_post("/api/listings/sync", _api_listings_sync)
         app.router.add_post("/api/listings/update", _api_listings_update)
         app.router.add_post("/api/oujact/apply", _api_oujact_apply)
+        app.router.add_get("/oujact-route", _handle_oujact_route)          # public mobile route page
+        app.router.add_get("/api/oujact/route", _api_oujact_route)         # token-gated route data
+        app.router.add_get("/api/oujact/dispatch", _api_oujact_dispatch)
+        app.router.add_get("/api/oujact/route-link", _api_oujact_route_link)
+        app.router.add_post("/api/oujact/checkout-state", _api_oujact_checkout_state)
+        app.router.add_post("/api/oujact/status", _api_oujact_status)
         app.router.add_get("/api/guests", _api_guests_list)
         app.router.add_get("/api/cleaning/quality", _api_clean_quality_summary)
         # Public no-auth feedback page + endpoints (token IS the auth)
