@@ -6336,7 +6336,7 @@ _expense_export_worker_task = None
 EXPENSE_STATUSES = ["captured", "ready", "held", "posted", "failed", "discarded"]
 EXPENSE_CANONICAL_STATUSES = [
     "draft", "needs_review", "ready", "queued", "sending", "sent_unverified",
-    "verified", "failed", "stale_pending", "duplicate", "archived",
+    "verified", "failed", "stale_pending", "duplicate", "archived", "split_parent",
 ]
 
 EXPENSE_STATUS_COMPAT = {
@@ -6359,6 +6359,7 @@ EXPENSE_STATUS_LABELS = {
     "stale_pending": ("معلق/قديم", "Stale pending"),
     "duplicate": ("تكرار محتمل", "Possible duplicate"),
     "archived": ("مؤرشف", "Archived"),
+    "split_parent": ("مصروف مقسم", "Split Parent"),
 }
 
 EXPENSE_ERROR_LABELS = {
@@ -7151,6 +7152,512 @@ def _exp_ha_key(lid, amount, date_str):
     except Exception:
         return None
 
+EXPENSE_V2_STATUS_LABELS = {
+    "needs_review": ("تحتاج مراجعة", "Needs Review"),
+    "ready": ("جاهز للترحيل", "Ready to Export"),
+    "in_progress": ("قيد التنفيذ", "In Progress"),
+    "sent_not_verified": ("تم الإرسال ولم يتم التحقق", "Sent, Not Verified"),
+    "verified": ("متحقق في Hostaway", "Verified in Hostaway"),
+    "failed": ("فشل", "Failed"),
+    "duplicate": ("مكرر / موجود مسبقًا", "Duplicate / Already Exists"),
+    "archived": ("مؤرشف", "Archived"),
+    "split_parent": ("مصروف مقسم", "Split Parent"),
+}
+
+EXPENSE_V2_REASON_LABELS = {
+    "missing_apartment": ("ما ترحّل لأن الشقة ناقصة.", "Not exported because the apartment is missing."),
+    "missing_hostaway_property": ("ما ترحّل لأن الشقة غير مربوطة برقم Hostaway.", "Not exported because the apartment is not mapped to a Hostaway property id."),
+    "missing_amount": ("مشكلة قراءة من الشيت: المبلغ ناقص أو غير صحيح.", "Sheet parse issue: amount is empty or invalid."),
+    "missing_date": ("مشكلة قراءة من الشيت: التاريخ ناقص أو غير صحيح.", "Sheet parse issue: date is empty or invalid."),
+    "missing_category": ("Hostaway رفض البيانات: التصنيف ناقص.", "Hostaway rejected the payload: missing category."),
+    "duplicate_suspected": ("احتمال تكرار: نفس المبلغ/التاريخ/الشقة موجود.", "Duplicate suspected: same amount/date/property already exists."),
+    "hostaway_verified": ("لقيناه في Hostaway بعد التحديث.", "Found in Hostaway after re-fetch."),
+    "hostaway_id_not_found": ("تم الإرسال لكن ما تحققنا: عندنا رقم Hostaway محلي وما لقيناه بعد التحديث.", "Sent but not verified: a local Hostaway id exists, but re-fetch did not find it."),
+    "hostaway_missing": ("غير موجود في Hostaway وجاهز للترحيل.", "Missing from Hostaway and ready to export."),
+    "hostaway_error": ("تعذر الاتصال بـ Hostaway.", "Could not reach Hostaway."),
+    "queue_stuck": ("الطابور علق: ما فيه عامل خلص العملية خلال المهلة.", "Queue stuck: no worker completed this job within the threshold."),
+    "export_failed": ("فشل الترحيل. راجع رسالة Hostaway.", "Export failed. Check the Hostaway error."),
+    "sent_pending_verify": ("تم الإرسال ونحتاج تحقق من Hostaway.", "Sent and needs Hostaway verification."),
+    "split_not_balanced": ("التقسيم غير متوازن.", "Split is not balanced."),
+    "split_parent": ("هذا أصل مصروف مقسم ولا يترحّل بنفسه.", "This is a split parent and is not exported itself."),
+    "archived": ("مؤرشف.", "Archived."),
+}
+
+def _exp_has_real_hostaway_ref(exp):
+    ref = exp.get("hostaway_ref") or exp.get("hostaway_expense_id")
+    return bool(ref) and str(ref) not in ("DRYRUN", "ok", "existing", "None", "none")
+
+def _exp_hostaway_item_id(item):
+    if not isinstance(item, dict):
+        return None
+    for k in ("id", "expenseId", "expense_id"):
+        v = item.get(k)
+        if v not in (None, ""):
+            return str(v)
+    return None
+
+def _exp_hostaway_item_amount(item):
+    try:
+        return round(abs(float((item or {}).get("amount"))), 2)
+    except Exception:
+        return None
+
+def _exp_hostaway_item_date(item):
+    return str((item or {}).get("expenseDate") or (item or {}).get("date") or "")[:10]
+
+def _exp_hostaway_item_lid(item):
+    return (item or {}).get("listingMapId") or (item or {}).get("listingId") or (item or {}).get("listing_id")
+
+def _exp_fetch_hostaway_one(hostaway_ref):
+    """Best-effort direct lookup by Hostaway expense id. Returns (item, ok, error).
+    This is intentionally optional because some Hostaway deployments only support
+    list endpoints for expenses; callers fall back to the bulk fetch."""
+    hid = str(hostaway_ref or "").strip()
+    if not hid or hid in ("DRYRUN", "ok", "existing", "None", "none"):
+        return None, False, "no_real_hostaway_ref"
+    try:
+        data = api_get(f"{EXPENSE_HOSTAWAY_PATH}/{hid}")
+        if isinstance(data, dict):
+            res = data.get("result")
+            if isinstance(res, dict):
+                return res, True, None
+            if isinstance(res, list) and res:
+                return res[0], True, None
+            return data, True, None
+        if isinstance(data, list) and data:
+            return data[0], True, None
+        return None, True, "empty_response"
+    except Exception as e:
+        return None, False, str(e)[:300]
+
+def _exp_match_hostaway_item(exp, hostaway_items=None, direct_item=None):
+    """Conservative Hostaway matcher for V2 reconciliation.
+    High-confidence verification needs a direct id/ref match plus amount, or a
+    stored Hostaway id found in the list. Key-only matches are duplicate evidence."""
+    items = hostaway_items or []
+    ref = str(exp.get("ref") or "")
+    ha_ref = str(exp.get("hostaway_ref") or exp.get("hostaway_expense_id") or "")
+    want_amt = None
+    try:
+        want_amt = round(abs(float(exp.get("amount") or 0)), 2)
+    except Exception:
+        pass
+    key = _exp_ha_key(exp.get("listing_id"), exp.get("amount"), exp.get("expense_date"))
+
+    def amount_ok(item):
+        got = _exp_hostaway_item_amount(item)
+        return got is not None and want_amt is not None and abs(got - want_amt) < 1
+
+    def pack(item, method, confidence, reason=""):
+        return {
+            "present": True,
+            "item": item,
+            "id": _exp_hostaway_item_id(item),
+            "method": method,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    if isinstance(direct_item, dict) and amount_ok(direct_item):
+        return pack(direct_item, "hostaway_id", 0.97)
+    if isinstance(direct_item, dict):
+        return pack(direct_item, "hostaway_id", 0.55, "amount_mismatch")
+
+    for item in items:
+        try:
+            raw = json.dumps(item, ensure_ascii=False)
+        except Exception:
+            raw = str(item)
+        if ref and ref in raw:
+            if amount_ok(item):
+                return pack(item, "reference", 0.98)
+            return pack(item, "reference", 0.55, "amount_mismatch")
+
+    for item in items:
+        item_id = _exp_hostaway_item_id(item)
+        if ha_ref and item_id and item_id == ha_ref and amount_ok(item):
+            return pack(item, "hostaway_id", 0.96)
+
+    for item in items:
+        lid = _exp_hostaway_item_lid(item)
+        item_key = _exp_ha_key(lid, item.get("amount"), _exp_hostaway_item_date(item))
+        if key and item_key == key:
+            return pack(item, "property_amount_date", 0.82)
+
+    return {"present": False, "item": None, "id": None, "method": "", "confidence": 0.0, "reason": "not_found"}
+
+def _exp_v2_validation_errors(exp):
+    errors = []
+    if not (exp.get("apartment") or "").strip():
+        errors.append("missing_apartment")
+    if exp.get("listing_id") is None:
+        errors.append("missing_hostaway_property")
+    try:
+        amt = float(exp.get("amount"))
+        if amt <= 0:
+            errors.append("missing_amount")
+    except Exception:
+        errors.append("missing_amount")
+    if not (exp.get("expense_date") or "").strip():
+        errors.append("missing_date")
+    if not (exp.get("category") or "").strip():
+        errors.append("missing_category")
+    if exp.get("primary_reason") == "duplicate" or exp.get("discrepancy") == "duplicate":
+        errors.append("duplicate_suspected")
+    if exp.get("split_error"):
+        errors.append(exp.get("split_error"))
+    return list(dict.fromkeys(errors))
+
+def _exp_v2_source_state(exp, match):
+    sub_id = str(exp.get("submission_id") or "")
+    return {
+        "sheet_state": {
+            "present_in_sheet": sub_id.startswith("gs-"),
+            "sheet_row_id": sub_id if sub_id.startswith("gs-") else "",
+            "sheet_last_seen_at": exp.get("submitted_at") or exp.get("created_at") or "",
+            "parsed_ok": not bool(_exp_v2_validation_errors(exp)),
+            "parse_errors": _exp_v2_validation_errors(exp),
+            "sheet_raw_data": {
+                "apartment": exp.get("apartment"),
+                "amount": exp.get("amount"),
+                "date": exp.get("expense_date"),
+                "submitter": exp.get("submitter"),
+            } if sub_id.startswith("gs-") else {},
+        },
+        "dashboard_state": {
+            "present_in_dashboard": True,
+            "local_reference": exp.get("ref") or "",
+            "local_status": _exp_canonical_status(exp),
+            "local_last_updated": exp.get("updated_at") or exp.get("created_at") or "",
+            "local_attempt_count": int(exp.get("retry_count") or 0),
+            "local_error": exp.get("error") or exp.get("status_reason") or "",
+            "local_parent_id": exp.get("split_parent_id") or "",
+            "local_child_ids": exp.get("split_child_ids") or [],
+        },
+        "hostaway_state": {
+            "present_in_hostaway": bool(match.get("present") and match.get("confidence", 0) >= 0.82),
+            "hostaway_expense_id": match.get("id") or "",
+            "hostaway_last_checked_at": _exp_now().isoformat(timespec="seconds"),
+            "hostaway_match_method": match.get("method") or "",
+            "match_method": match.get("method") or "",
+            "hostaway_match_confidence": match.get("confidence") or 0.0,
+            "match_confidence": match.get("confidence") or 0.0,
+            "hostaway_payload_or_response_summary": _exp_safe_hostaway_summary(match.get("item")),
+            "hostaway_error": match.get("reason") if match.get("reason") not in ("not_found", "") else "",
+        },
+    }
+
+def _exp_safe_hostaway_summary(item):
+    if not isinstance(item, dict):
+        return {}
+    keep = ("id", "expenseId", "listingMapId", "listingId", "amount", "expenseDate",
+            "date", "categoryName", "concept", "name", "reference", "description")
+    return {k: item.get(k) for k in keep if k in item}
+
+def _exp_v2_status_for_exp(exp, match):
+    canon = _exp_canonical_status(exp)
+    real_ref = _exp_has_real_hostaway_ref(exp)
+    validation_errors = _exp_v2_validation_errors(exp)
+    matched = bool(match.get("present") and match.get("confidence", 0) >= 0.82)
+    high_conf = bool(match.get("present") and match.get("confidence", 0) >= 0.95)
+
+    if exp.get("split_role") == "parent" or exp.get("status") == "split_parent":
+        return "split_parent", "split_parent", "none", False, "archive_parent"
+    if canon == "archived":
+        return "archived", "archived", "none", False, "none"
+    if matched and (high_conf or real_ref):
+        return "verified", "hostaway_verified", "archive_if_done", False, "mark_verified"
+    if matched:
+        return "duplicate", "duplicate_suspected", "skip_duplicate", False, "skip_duplicate"
+    if real_ref:
+        return "sent_not_verified", "hostaway_id_not_found", "verify_hostaway_id", False, "manual_verify"
+    if canon in ("queued", "sending"):
+        return "in_progress", canon, "wait_or_open_log", False, "wait"
+    if canon == "stale_pending":
+        if exp.get("previous_status") in ("queued", "sending"):
+            return "failed", "queue_stuck", "retry_temporary_failure", False, "retry_temporary"
+        return "sent_not_verified", "sent_pending_verify", "verify_sent", False, "verify_sent"
+    if canon == "failed":
+        return "failed", exp.get("error_class") or "export_failed", "retry_temporary_failure", False, "retry_temporary"
+    if validation_errors:
+        return "needs_review", validation_errors[0], "fix_required_fields", False, "move_to_review"
+    if canon == "duplicate":
+        return "duplicate", "duplicate_suspected", "skip_duplicate", False, "skip_duplicate"
+    return "ready", "hostaway_missing", "export_ready", True, "export_safe_missing"
+
+def _exp_v2_row_for_exp(exp, hostaway_items):
+    match = _exp_match_hostaway_item(exp, hostaway_items)
+    v2_status, reason, recommended, can_export, repair_action = _exp_v2_status_for_exp(exp, match)
+    states = _exp_v2_source_state(exp, match)
+    label = EXPENSE_V2_STATUS_LABELS.get(v2_status, (v2_status, v2_status))
+    reason_label = EXPENSE_V2_REASON_LABELS.get(reason, (reason, reason))
+    return {
+        "id": exp.get("id"),
+        "ref": exp.get("ref") or "",
+        "source_kind": "dashboard",
+        "date": exp.get("expense_date") or "",
+        "apartment": exp.get("apartment") or "",
+        "listing_id": exp.get("listing_id"),
+        "category": exp.get("category") or "",
+        "description": exp.get("note") or exp.get("maintenance_type") or exp.get("vendor") or "",
+        "vendor": exp.get("vendor") or "",
+        "amount": round(abs(float(exp.get("amount") or 0)), 2),
+        "source": "sheet" if states["sheet_state"]["present_in_sheet"] else "manual",
+        "raw_status": exp.get("status") or "",
+        "local_status": _exp_canonical_status(exp),
+        "v2_status": v2_status,
+        "v2_status_label": {"ar": label[0], "en": label[1]},
+        "reason": reason,
+        "reason_label": {"ar": reason_label[0], "en": reason_label[1]},
+        "recommended_action": recommended,
+        "repair_action": repair_action,
+        "can_export": bool(can_export),
+        "can_verify": v2_status in ("sent_not_verified", "in_progress"),
+        "attempts": int(exp.get("retry_count") or 0),
+        "last_attempt_at": exp.get("last_attempt_at") or exp.get("sending_at") or exp.get("sent_at") or "",
+        "events": (exp.get("events") or [])[-20:],
+        "export_attempts": (exp.get("export_attempts") or [])[-20:],
+        **states,
+    }
+
+def _exp_v2_orphan_row(item):
+    hid = _exp_hostaway_item_id(item) or ""
+    amount = _exp_hostaway_item_amount(item) or 0
+    date = _exp_hostaway_item_date(item)
+    desc = item.get("concept") or item.get("name") or item.get("description") or ""
+    return {
+        "id": "ha_" + hid,
+        "ref": "",
+        "source_kind": "hostaway_only",
+        "date": date,
+        "apartment": str(_exp_hostaway_item_lid(item) or ""),
+        "listing_id": _exp_hostaway_item_lid(item),
+        "category": item.get("categoryName") or "",
+        "description": desc,
+        "vendor": "",
+        "amount": amount,
+        "source": "hostaway",
+        "raw_status": "hostaway_only",
+        "local_status": "",
+        "v2_status": "duplicate",
+        "v2_status_label": {"ar": EXPENSE_V2_STATUS_LABELS["duplicate"][0], "en": EXPENSE_V2_STATUS_LABELS["duplicate"][1]},
+        "reason": "duplicate_suspected",
+        "reason_label": {"ar": EXPENSE_V2_REASON_LABELS["duplicate_suspected"][0], "en": EXPENSE_V2_REASON_LABELS["duplicate_suspected"][1]},
+        "recommended_action": "review_hostaway_only",
+        "repair_action": "skip_duplicate",
+        "can_export": False,
+        "can_verify": False,
+        "attempts": 0,
+        "last_attempt_at": "",
+        "events": [],
+        "export_attempts": [],
+        "sheet_state": {"present_in_sheet": False, "sheet_row_id": "", "sheet_last_seen_at": "", "parsed_ok": False, "parse_errors": ["missing_sheet"], "sheet_raw_data": {}},
+        "dashboard_state": {"present_in_dashboard": False, "local_reference": "", "local_status": "", "local_last_updated": "", "local_attempt_count": 0, "local_error": "", "local_parent_id": "", "local_child_ids": []},
+        "hostaway_state": {
+            "present_in_hostaway": True,
+            "hostaway_expense_id": hid,
+            "hostaway_last_checked_at": _exp_now().isoformat(timespec="seconds"),
+            "hostaway_match_method": "orphan",
+            "match_method": "orphan",
+            "hostaway_match_confidence": 1.0,
+            "match_confidence": 1.0,
+            "hostaway_payload_or_response_summary": _exp_safe_hostaway_summary(item),
+            "hostaway_error": "",
+        },
+    }
+
+def _exp_v2_reconcile_items(hostaway_items=None, include_hostaway_orphans=True):
+    if hostaway_items is None:
+        hostaway_items, ha_ok, ha_err = _exp_fetch_hostaway()
+    else:
+        ha_ok, ha_err = True, None
+    rows = []
+    matched_ids = set()
+    for exp in _expenses.values():
+        if exp.get("status") == "discarded":
+            pass
+        row = _exp_v2_row_for_exp(exp, hostaway_items or [])
+        rows.append(row)
+        hid = row["hostaway_state"].get("hostaway_expense_id")
+        if hid:
+            matched_ids.add(str(hid))
+    if include_hostaway_orphans:
+        for item in hostaway_items or []:
+            hid = _exp_hostaway_item_id(item)
+            if hid and str(hid) in matched_ids:
+                continue
+            rows.append(_exp_v2_orphan_row(item))
+    totals = {}
+    sar = {}
+    for r in rows:
+        st = r["v2_status"]
+        totals[st] = totals.get(st, 0) + 1
+        sar[st] = round(sar.get(st, 0.0) + abs(float(r.get("amount") or 0)), 2)
+    diagnostics = defaultdict(lambda: {"count": 0, "examples": []})
+    for r in rows:
+        reason = r.get("reason") or "unknown"
+        g = diagnostics[reason]
+        g["count"] += 1
+        if len(g["examples"]) < 5:
+            g["examples"].append({"id": r.get("id"), "ref": r.get("ref"), "amount": r.get("amount"), "apartment": r.get("apartment")})
+    return {
+        "ok": True,
+        "hostaway_ok": ha_ok,
+        "hostaway_error": ha_err,
+        "generated_at": _exp_now().isoformat(timespec="seconds"),
+        "rows": rows,
+        "totals": totals,
+        "sar_totals": sar,
+        "health": {
+            "sheet": dict(_exp_sheet_diag or {}),
+            "dashboard": {
+                "local_records": len(_expenses),
+                "ready": totals.get("ready", 0),
+                "failed": totals.get("failed", 0),
+                "split_parents": totals.get("split_parent", 0),
+            },
+            "hostaway": {
+                "connected": bool(ha_ok),
+                "last_fetch": _exp_now().isoformat(timespec="seconds"),
+                "verified_matches": totals.get("verified", 0),
+                "api_error": ha_err,
+                "fetched": len(hostaway_items or []),
+            },
+        },
+        "diagnostics": dict(diagnostics),
+    }
+
+def _exp_v2_repair_plan(hostaway_items=None):
+    snap = _exp_v2_reconcile_items(hostaway_items=hostaway_items, include_hostaway_orphans=True)
+    actions = {
+        "mark_matched_verified": [],
+        "move_unsafe_to_review": [],
+        "export_safe_missing": [],
+        "retry_temporary": [],
+        "manual_verify": [],
+        "skip_duplicate": [],
+    }
+    for r in snap["rows"]:
+        action = r.get("repair_action")
+        if action == "mark_verified":
+            actions["mark_matched_verified"].append(r)
+        elif action == "move_to_review":
+            actions["move_unsafe_to_review"].append(r)
+        elif action == "export_safe_missing":
+            actions["export_safe_missing"].append(r)
+        elif action == "retry_temporary":
+            actions["retry_temporary"].append(r)
+        elif action == "manual_verify":
+            actions["manual_verify"].append(r)
+        elif action == "skip_duplicate":
+            actions["skip_duplicate"].append(r)
+    return {
+        "ok": True,
+        "dry_run": True,
+        "counts": {k: len(v) for k, v in actions.items()},
+        "actions": actions,
+        "summary": {
+            "already_verified": len(actions["mark_matched_verified"]),
+            "missing_from_hostaway": len(actions["export_safe_missing"]),
+            "duplicates": len(actions["skip_duplicate"]),
+            "unsafe_to_export": len(actions["move_unsafe_to_review"]),
+            "temporary_failures": len(actions["retry_temporary"]),
+            "manual_review": len(actions["manual_verify"]),
+        },
+        "snapshot": snap,
+    }
+
+def _exp_v2_child_ref(parent_ref, idx):
+    return f"{parent_ref}-{chr(ord('A') + idx)}"
+
+def _exp_v2_split_preview(parent_id, mode, rows):
+    parent = _expenses.get(str(parent_id))
+    if not parent:
+        return {"ok": False, "error": "not_found"}
+    mode = (mode or "").strip()
+    if mode not in ("percentage", "amount"):
+        return {"ok": False, "error": "bad_split_mode"}
+    try:
+        total = round(abs(float(parent.get("amount") or 0)), 2)
+    except Exception:
+        return {"ok": False, "error": "missing_amount"}
+    if total <= 0:
+        return {"ok": False, "error": "missing_amount"}
+    if not isinstance(rows, list) or len(rows) < 2:
+        return {"ok": False, "error": "need_two_or_more_children"}
+    children = []
+    running = 0.0
+    for i, row in enumerate(rows):
+        try:
+            value = float(row.get("value"))
+        except Exception:
+            return {"ok": False, "error": "invalid_split_value"}
+        if value < 0:
+            return {"ok": False, "error": "invalid_split_value"}
+        if mode == "percentage":
+            amount = round(total * value / 100.0, 2)
+            pct = round(value, 4)
+        else:
+            amount = round(value, 2)
+            pct = round((amount / total) * 100.0, 4) if total else 0
+        if i == len(rows) - 1:
+            amount = round(total - running, 2) if mode == "percentage" else amount
+        running = round(running + amount, 2)
+        children.append({
+            "ref": _exp_v2_child_ref(parent.get("ref") or "OJ-EXP", i),
+            "amount": amount,
+            "percentage": pct,
+            "apartment": (row.get("apartment") or "").strip(),
+            "listing_id": row.get("listing_id"),
+        })
+    if mode == "percentage":
+        pct_total = round(sum(float(r.get("value") or 0) for r in rows), 4)
+        if abs(pct_total - 100.0) > 0.01:
+            return {"ok": False, "error": "split_not_balanced", "remaining_amount": round(total - running, 2)}
+    if abs(running - total) > 0.01:
+        return {"ok": False, "error": "split_not_balanced", "remaining_amount": round(total - running, 2)}
+    return {"ok": True, "parent": {"id": parent.get("id"), "ref": parent.get("ref"), "amount": total},
+            "mode": mode, "children": children, "remaining_amount": 0.0}
+
+def _exp_v2_split_confirm(parent_id, mode, rows, by=""):
+    preview = _exp_v2_split_preview(parent_id, mode, rows)
+    if not preview.get("ok"):
+        return preview
+    parent = _expenses.get(str(parent_id))
+    child_ids = []
+    for child in preview["children"]:
+        eid = _new_expense_id()
+        exp = dict(parent)
+        exp.update({
+            "id": eid,
+            "ref": child["ref"],
+            "amount": child["amount"],
+            "apartment": child["apartment"] or parent.get("apartment"),
+            "listing_id": child["listing_id"],
+            "status": "ready",
+            "hostaway_ref": None,
+            "hostaway_expense_id": None,
+            "hostaway_verified": False,
+            "split_role": "child",
+            "split_parent_id": parent.get("id"),
+            "split_percentage": child["percentage"],
+            "events": [],
+            "export_attempts": [],
+            "note": ((parent.get("note") or parent.get("maintenance_type") or "") + f" · split from {parent.get('ref')}").strip(" ·"),
+            "created_at": _exp_now().isoformat(timespec="seconds"),
+            "updated_at": _exp_now().isoformat(timespec="seconds"),
+        })
+        _expenses[eid] = exp
+        _exp_log_event(exp, "split_child_created", by=by, detail=parent.get("ref") or "")
+        _exp_validate(exp)
+        child_ids.append(eid)
+    parent["split_role"] = "parent"
+    parent["split_child_ids"] = child_ids
+    _exp_set_status(parent, "split_parent", reason="split_confirmed", by=by, detail=str(len(child_ids)))
+    _exp_log_event(parent, "split_parent_created", by=by, detail="children " + ",".join(child_ids))
+    return {"ok": True, "parent_id": parent.get("id"), "child_ids": child_ids,
+            "children": [_exp_view(_expenses[cid]) for cid in child_ids]}
+
 def _exp_reconcile(apply=False):
     """Pull every sheet row, compare against expenses already in Hostaway, and
     report (and optionally post) the clean ones that are missing from Hostaway.
@@ -7254,6 +7761,33 @@ def _exp_verify_in_hostaway(exp):
         exp["error_class"] = "dryrun"
         return None
     ref = (exp.get("ref") or "")
+    if _exp_has_real_hostaway_ref(exp):
+        direct, direct_ok, _direct_err = _exp_fetch_hostaway_one(exp.get("hostaway_ref") or exp.get("hostaway_expense_id"))
+        if direct_ok and isinstance(direct, dict):
+            direct_match = _exp_match_hostaway_item(exp, [], direct_item=direct)
+            if direct_match.get("present") and direct_match.get("confidence", 0) >= 0.95:
+                exp["hostaway_verified"] = True
+                exp["verify_note"] = "found:hostaway_id"
+                exp["verification_method"] = "hostaway_id"
+                exp["verified_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+                hid = _exp_hostaway_item_id(direct)
+                if hid:
+                    exp["hostaway_expense_id"] = hid
+                    exp["hostaway_ref"] = hid
+                _exp_set_status(exp, "verified", reason="hostaway_match", detail="matched by hostaway_id")
+                exp["error"] = None
+                exp["error_class"] = ""
+                if not exp.get("posted_at"):
+                    exp["posted_at"] = exp["verified_at"]
+                if not any(e.get("event") == "verified" for e in exp.get("events", [])):
+                    _exp_log_event(exp, "verified", detail="matched by hostaway_id")
+                return True
+            if direct_match.get("reason") == "amount_mismatch":
+                exp["hostaway_verified"] = False
+                exp["verify_note"] = "amount_conflict"
+                exp["discrepancy"] = "amount_mismatch"
+                exp["error_class"] = "verification"
+                return False
     items, ok, err = _exp_fetch_hostaway()
     if not ok:
         exp["verify_note"] = "hostaway_unreachable"
@@ -24081,6 +24615,11 @@ async def _api_expenses_repair_apply(request):
             verified.append({"id": eid, "verified": bool(ok), "note": e.get("verify_note")})
             if ok:
                 continue
+            if _exp_has_real_hostaway_ref(e):
+                _exp_set_status(e, "sent_unverified", reason="hostaway_id_not_found",
+                                detail="real Hostaway ref exists; verify manually before export")
+                skipped.append({"id": str(eid), "reason": "manual_verify_required"})
+                continue
         ok, why = _exp_queue_for_export(e, by=by, reason="repair_apply", retry=True)
         (queued if ok else skipped).append({"id": str(eid), "reason": why})
     if queued:
@@ -24421,6 +24960,172 @@ async def _api_expenses_sync_status(request):
     return _json({"rows": rows, "totals": totals, "count": len(rows),
                   "labels": {k: {"ar": v[0], "en": v[1]} for k, v in _EXP_STATE_LABELS.items()},
                   "dryrun": EXPENSE_POST_DRYRUN})
+
+async def _api_expenses_v2_overview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    force = request.query.get("force") in ("1", "true", "yes")
+    if force:
+        await asyncio.to_thread(_exp_poll_sheet)
+        await asyncio.to_thread(_exp_fetch_hostaway, force=True)
+    hostaway_items, ha_ok, ha_err = await asyncio.to_thread(_exp_fetch_hostaway)
+    snap = await asyncio.to_thread(_exp_v2_reconcile_items, hostaway_items, True)
+    snap["hostaway_ok"] = ha_ok
+    snap["hostaway_error"] = ha_err
+    return _json(snap)
+
+async def _api_expenses_v2_reconcile(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request) if request.method == "POST" else {}
+    pull_sheet = bool(b.get("pull_sheet")) or request.query.get("pull_sheet") in ("1", "true", "yes")
+    if pull_sheet:
+        await asyncio.to_thread(_exp_poll_sheet)
+    hostaway_items, ha_ok, ha_err = await asyncio.to_thread(_exp_fetch_hostaway, force=True)
+    snap = await asyncio.to_thread(_exp_v2_reconcile_items, hostaway_items, True)
+    snap["hostaway_ok"] = ha_ok
+    snap["hostaway_error"] = ha_err
+    await asyncio.to_thread(persist_state)
+    return _json(snap)
+
+async def _api_expenses_v2_repair_plan(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    hostaway_items, ha_ok, ha_err = await asyncio.to_thread(_exp_fetch_hostaway, force=True)
+    plan = await asyncio.to_thread(_exp_v2_repair_plan, hostaway_items)
+    plan["hostaway_ok"] = ha_ok
+    plan["hostaway_error"] = ha_err
+    return _json(plan)
+
+async def _api_expenses_v2_repair_apply(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    action = (b.get("action") or "").strip()
+    ids = set(str(x) for x in (b.get("ids") if isinstance(b.get("ids"), list) else []))
+    by = (b.get("by") or "")[:60]
+    allowed = {
+        "mark_matched_verified", "move_unsafe_to_review", "export_safe_missing",
+        "retry_temporary", "skip_duplicate", "manual_verify",
+    }
+    if action not in allowed:
+        return _json({"error": "bad_action"}, 400)
+    hostaway_items, _ha_ok, _ha_err = await asyncio.to_thread(_exp_fetch_hostaway, force=True)
+    plan = await asyncio.to_thread(_exp_v2_repair_plan, hostaway_items)
+    candidates = plan["actions"].get(action, [])
+    if ids:
+        candidates = [r for r in candidates if str(r.get("id")) in ids]
+    out = {"ok": True, "action": action, "changed": [], "queued": [], "skipped": [], "verified": []}
+
+    for row in candidates:
+        eid = str(row.get("id") or "")
+        if row.get("source_kind") == "hostaway_only":
+            out["skipped"].append({"id": eid, "reason": "hostaway_only"})
+            continue
+        exp = _expenses.get(eid)
+        if not exp:
+            out["skipped"].append({"id": eid, "reason": "not_found"})
+            continue
+        if action == "mark_matched_verified":
+            ok = await asyncio.to_thread(_exp_verify_in_hostaway, exp)
+            if ok:
+                out["verified"].append({"id": eid, "ref": exp.get("ref")})
+            else:
+                out["skipped"].append({"id": eid, "reason": exp.get("verify_note") or "not_verified"})
+        elif action == "manual_verify":
+            ok = await asyncio.to_thread(_exp_verify_in_hostaway, exp)
+            if ok:
+                out["verified"].append({"id": eid, "ref": exp.get("ref")})
+            else:
+                _exp_set_status(exp, "sent_unverified", reason="hostaway_id_not_found",
+                                detail=exp.get("verify_note") or "not_found")
+                out["skipped"].append({"id": eid, "reason": "sent_not_verified"})
+        elif action == "move_unsafe_to_review":
+            _exp_set_status(exp, "needs_review", reason=row.get("reason") or "review", by=by,
+                            detail=row.get("reason") or "review")
+            out["changed"].append({"id": eid, "status": "needs_review"})
+        elif action == "skip_duplicate":
+            if _exp_canonical_status(exp) != "verified":
+                _exp_set_status(exp, "duplicate", reason="duplicate_suspected", by=by,
+                                detail=row.get("reason") or "duplicate")
+                out["changed"].append({"id": eid, "status": "duplicate"})
+            else:
+                out["skipped"].append({"id": eid, "reason": "already_verified"})
+        elif action == "retry_temporary":
+            if _exp_has_real_hostaway_ref(exp):
+                out["skipped"].append({"id": eid, "reason": "manual_verify_required"})
+                continue
+            ok, why = _exp_queue_for_export(exp, by=by, reason="v2_retry_temporary", retry=True)
+            (out["queued"] if ok else out["skipped"]).append({"id": eid, "reason": why})
+        elif action == "export_safe_missing":
+            if _exp_has_real_hostaway_ref(exp):
+                out["skipped"].append({"id": eid, "reason": "manual_verify_required"})
+                continue
+            await asyncio.to_thread(_exp_validate, exp)
+            if exp.get("status") != "ready":
+                out["skipped"].append({"id": eid, "reason": exp.get("primary_reason") or "validation"})
+                continue
+            ok, why = _exp_queue_for_export(exp, by=by, reason="v2_export_safe_missing", retry=False)
+            (out["queued"] if ok else out["skipped"]).append({"id": eid, "reason": why})
+    if out["queued"]:
+        _exp_ensure_export_worker()
+    await asyncio.to_thread(persist_state)
+    out["queue"] = _exp_queue_snapshot()
+    return _json(out)
+
+async def _api_expenses_v2_split_preview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    preview = await asyncio.to_thread(_exp_v2_split_preview, b.get("id") or b.get("parent_id"),
+                                      b.get("mode"), b.get("rows") or [])
+    return _json(preview, 200 if preview.get("ok") else 400)
+
+async def _api_expenses_v2_split_confirm(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    result = await asyncio.to_thread(_exp_v2_split_confirm, b.get("id") or b.get("parent_id"),
+                                     b.get("mode"), b.get("rows") or [], (b.get("by") or "")[:60])
+    if result.get("ok"):
+        await asyncio.to_thread(persist_state)
+    return _json(result, 200 if result.get("ok") else 400)
+
+async def _api_expenses_v2_diagnostics_csv(request):
+    if not _dash_auth(request):
+        return web.Response(status=401, text="unauthorized")
+    hostaway_items, _ha_ok, _ha_err = await asyncio.to_thread(_exp_fetch_hostaway, force=True)
+    snap = await asyncio.to_thread(_exp_v2_reconcile_items, hostaway_items, True)
+    import csv as _csv, io as _io
+    buf = _io.StringIO()
+    cols = ["ref", "source_kind", "v2_status", "reason", "recommended_action",
+            "date", "apartment", "listing_id", "category", "amount",
+            "sheet", "dashboard", "hostaway", "hostaway_id", "match_method", "match_confidence"]
+    w = _csv.DictWriter(buf, fieldnames=cols)
+    w.writeheader()
+    for r in snap["rows"]:
+        ha = r.get("hostaway_state") or {}
+        w.writerow({
+            "ref": r.get("ref"),
+            "source_kind": r.get("source_kind"),
+            "v2_status": r.get("v2_status"),
+            "reason": r.get("reason"),
+            "recommended_action": r.get("recommended_action"),
+            "date": r.get("date"),
+            "apartment": r.get("apartment"),
+            "listing_id": r.get("listing_id"),
+            "category": r.get("category"),
+            "amount": r.get("amount"),
+            "sheet": bool((r.get("sheet_state") or {}).get("present_in_sheet")),
+            "dashboard": bool((r.get("dashboard_state") or {}).get("present_in_dashboard")),
+            "hostaway": bool(ha.get("present_in_hostaway")),
+            "hostaway_id": ha.get("hostaway_expense_id"),
+            "match_method": ha.get("match_method"),
+            "match_confidence": ha.get("match_confidence"),
+        })
+    body = ("\ufeff" + buf.getvalue()).encode("utf-8")
+    return web.Response(body=body, content_type="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=ouja-expenses-v2-diagnostics.csv"})
 
 # ===================== DESIGN REQUESTS API =====================
 async def _api_design_list(request):
@@ -26339,6 +27044,13 @@ async def start_web_server():
         app.router.add_post("/api/expenses/sync-refresh", _api_expenses_sync_refresh)
         app.router.add_get("/api/expenses/sync-status", _api_expenses_sync_status)
         app.router.add_post("/api/expenses/verify", _api_expenses_verify)
+        app.router.add_get("/api/expenses/v2/overview", _api_expenses_v2_overview)
+        app.router.add_post("/api/expenses/v2/reconcile", _api_expenses_v2_reconcile)
+        app.router.add_get("/api/expenses/v2/repair-plan", _api_expenses_v2_repair_plan)
+        app.router.add_post("/api/expenses/v2/repair-apply", _api_expenses_v2_repair_apply)
+        app.router.add_post("/api/expenses/v2/split-preview", _api_expenses_v2_split_preview)
+        app.router.add_post("/api/expenses/v2/split-confirm", _api_expenses_v2_split_confirm)
+        app.router.add_get("/api/expenses/v2/diagnostics.csv", _api_expenses_v2_diagnostics_csv)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
