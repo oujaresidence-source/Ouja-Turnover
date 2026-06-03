@@ -6739,33 +6739,7 @@ def _exp_post_to_hostaway(exp):
         _exp_set_status(exp, "failed", reason="validation", detail=exp["error"])
         _exp_log_event(exp, "post_failed", detail="no matched listing")
         return False
-    s = _exp_settings()
-    cat = (s.get("category_map") or {}).get(exp.get("category") or "", exp.get("category") or "Other")
-    ref = exp.get("ref") or ""
-    name = (exp.get("maintenance_type") or "Expense")
-    if (exp.get("note") or "").strip():
-        name = f"{name} — {exp['note'].strip()}"
-    if ref:                                  # Stage 1: carry the reference INTO Hostaway
-        name = f"[{ref}] {name}"
-    desc_bits = []
-    if ref:                        desc_bits.append(f"Ref: {ref}")
-    if exp.get("vendor"):          desc_bits.append(f"Vendor: {exp['vendor']}")
-    if exp.get("payment_method"):  desc_bits.append(f"Paid: {exp['payment_method']}")
-    if exp.get("submitter"):       desc_bits.append(f"By: {exp['submitter']}")
-    if exp.get("receipt_link"):    desc_bits.append(f"Receipt: {exp['receipt_link']}")
-    if exp.get("no_receipt_reason"): desc_bits.append(f"No receipt: {exp['no_receipt_reason']}")
-    payload = {
-        "listingMapId": int(exp["listing_id"]),
-        "amount": -abs(float(exp["amount"])),      # expenses are negative in Hostaway
-        "expenseDate": exp.get("expense_date"),
-        "date": exp.get("expense_date"),
-        "categoryName": cat,
-        "concept": name[:120],
-        "name": name[:120],
-        "reference": ref,                          # Stage 1: our OJ-EXP-… id, for read-back verify
-        "description": " · ".join(desc_bits)[:900],
-        "currency": "SAR",
-    }
+    payload, _pmissing = _exp_build_payload(exp)     # same builder the diagnostic previews (no drift)
     if EXPENSE_POST_DRYRUN:
         _exp_set_status(exp, "sent_unverified", reason="dryrun", detail="DRY-RUN — not written to Hostaway")
         exp["hostaway_ref"] = "DRYRUN"
@@ -7845,6 +7819,164 @@ def _exp_verify_in_hostaway(exp):
     else:
         exp["verify_note"] = "not_found"
     return False
+
+# ============================================================================
+#  EXPENSES — DIAGNOSIS-FIRST RUNNER (read-only; proves WHY an expense is stuck)
+#  Reuses the existing status/verify/mapping/dup helpers. Sends NOTHING to Hostaway.
+# ============================================================================
+def _exp_build_payload(exp):
+    """Build the EXACT Hostaway expense payload WITHOUT sending — mirrors the live poster
+    (_exp_post_to_hostaway). Returns (payload, missing_required_fields). Read-only."""
+    s = _exp_settings()
+    cat = (s.get("category_map") or {}).get(exp.get("category") or "", exp.get("category") or "Other")
+    ref = exp.get("ref") or ""
+    name = (exp.get("maintenance_type") or "Expense")
+    if (exp.get("note") or "").strip():
+        name = f"{name} — {exp['note'].strip()}"
+    if ref:
+        name = f"[{ref}] {name}"
+    desc_bits = []
+    if ref:                          desc_bits.append(f"Ref: {ref}")
+    if exp.get("vendor"):            desc_bits.append(f"Vendor: {exp['vendor']}")
+    if exp.get("payment_method"):    desc_bits.append(f"Paid: {exp['payment_method']}")
+    if exp.get("submitter"):         desc_bits.append(f"By: {exp['submitter']}")
+    if exp.get("receipt_link"):      desc_bits.append(f"Receipt: {exp['receipt_link']}")
+    if exp.get("no_receipt_reason"): desc_bits.append(f"No receipt: {exp['no_receipt_reason']}")
+    missing = []
+    if exp.get("listing_id") is None:                 missing.append("listing_id (Hostaway property)")
+    if exp.get("amount") in (None, ""):               missing.append("amount")
+    if not (exp.get("expense_date") or "").strip():   missing.append("expense_date")
+    if not (exp.get("category") or "").strip():       missing.append("category")
+    try:
+        amt = -abs(float(exp["amount"])) if exp.get("amount") not in (None, "") else None
+    except (TypeError, ValueError):
+        amt = None; missing.append("amount (not a number)")
+    payload = {
+        "listingMapId": (int(exp["listing_id"]) if exp.get("listing_id") is not None else None),
+        "amount": amt, "expenseDate": exp.get("expense_date"), "date": exp.get("expense_date"),
+        "categoryName": cat, "concept": name[:120], "name": name[:120],
+        "reference": ref, "description": " · ".join(desc_bits)[:900], "currency": "SAR"}
+    return payload, missing
+
+def _exp_diagnose(exp):
+    """Full per-expense diagnosis answering: did we actually call Hostaway, what did it return,
+    is mapping/payload/dup/verification the problem? Read-only — sends nothing."""
+    canon = _exp_canonical_status(exp)
+    payload, missing = _exp_build_payload(exp)
+    ref = exp.get("ref") or ""
+    hr = exp.get("hostaway_ref")
+    dry = (hr == "DRYRUN") or bool(exp.get("dry"))
+    real_ref = bool(hr) and hr not in ("DRYRUN", "ok", "existing", None)
+    # was a REAL Hostaway API call attempted? (a 'sent' event, or a real ref) vs dry/never
+    evs = exp.get("events", [])
+    sent_evs = [e for e in evs if e.get("event") in ("sent", "post_failed")]
+    dry_evs = [e for e in evs if e.get("event") == "dry_send"]
+    called = bool(sent_evs) or real_ref
+    last_attempt = exp.get("sent_at") or (sent_evs[-1]["ts"] if sent_evs else (dry_evs[-1]["ts"] if dry_evs else None))
+    lid_match, cands = _exp_match_apartment(exp.get("apartment"))
+    twin = _exp_find_duplicate(exp)
+    # ---- root-cause classification (priority order) ----
+    if canon == "verified":
+        code, ar, en = "verified", "متحقق في Hostaway ✓", "Verified in Hostaway."
+    elif exp.get("listing_id") is None:
+        code, ar, en = "no_mapping", "الشقة غير مربوطة برقم Hostaway — ما نقدر نرحّله.", "Apartment is not mapped to a Hostaway property id — cannot export."
+    elif missing:
+        code, ar, en = "missing_fields", "البيانات ناقصة: " + ", ".join(missing), "Payload missing required fields: " + ", ".join(missing)
+    elif dry:
+        code, ar, en = "dryrun", "وضع التجربة (EXPENSE_POST_DRYRUN=1) — ما انكتب فعليًا في Hostaway.", "DRY-RUN (EXPENSE_POST_DRYRUN=1) — never actually written to Hostaway."
+    elif canon == "failed":
+        ecl = exp.get("error_class") or _exp_error_class(exp.get("error"))
+        code, en = "failed_" + (ecl or "unknown"), "Hostaway/export failed (" + (ecl or "unknown") + "): " + (exp.get("error") or "")[:160]
+        ar = "فشل الترحيل (" + (ecl or "غير معروف") + "): " + (exp.get("error") or "")[:160]
+    elif exp.get("discrepancy") == "amount_mismatch":
+        code, ar, en = "amount_conflict", "المرجع موجود في Hostaway لكن المبلغ مختلف.", "Reference exists in Hostaway but the amount differs."
+    elif canon == "duplicate" or twin:
+        code, ar, en = "duplicate", "احتمال تكرار — موجود مسبقًا.", "Duplicate suspected — a matching record exists."
+    elif canon == "stale_pending":
+        code, ar, en = "stale", "علق في الطابور/الإرسال أطول من الحد.", "Stuck in queue/sending past the threshold."
+    elif canon == "sent_unverified":
+        code = "sent_unverified"
+        ar = "تم الإرسال لكن ما تحققنا: ما لقينا " + ref + " بعد تحديث Hostaway." if not called and not real_ref else "تم الإرسال لـHostaway لكن إعادة الجلب ما لقت " + ref + "."
+        en = "Sent but not verified: re-fetch did not find " + ref + " in Hostaway."
+    elif canon in ("inbox", "draft", "captured"):
+        code, ar, en = "awaiting_review", "ينتظر المراجعة في الوارد — ما طُلب ترحيله بعد.", "Waiting in the inbox — not requested for export yet."
+    elif canon == "ready":
+        code, ar, en = "approved_not_exported", "معتمد وجاهز — لكن ما طُلب ترحيله بعد.", "Approved/ready — but export has not been requested yet."
+    else:
+        code, ar, en = "needs_review", _exp_status_reason(exp) or "يحتاج مراجعة", "Needs review."
+    rec_ar, rec_en = _EXP_DIAG_REC.get(code, ("راجع البطاقة", "Review the card"))
+    return {
+        "ref": ref, "id": exp.get("id"), "apartment": exp.get("apartment"),
+        "amount": exp.get("amount"), "date": exp.get("expense_date"), "category": exp.get("category"),
+        "canonical_status": canon, "legacy_status": exp.get("status"),
+        "source": {"submission_id": exp.get("submission_id"), "submitter": exp.get("submitter"),
+                   "vendor": exp.get("vendor"), "receipt_link": exp.get("receipt_link"),
+                   "note": exp.get("note"), "submitted_at": exp.get("submitted_at")},
+        "validation_missing": missing,
+        "apartment_mapping": {"stored_listing_id": exp.get("listing_id"),
+                              "rematch_listing_id": lid_match,
+                              "candidates": [c.get("name") for c in (cands or [])][:5],
+                              "hostaway_property_id": exp.get("listing_id")},
+        "payload_preview": payload,
+        "reference_in_payload": bool(ref) and ("[" + ref + "]") in (payload.get("name") or "") and payload.get("reference") == ref,
+        "hostaway_called": called, "dry_run_only": dry,
+        "hostaway_ref": hr, "hostaway_expense_id": exp.get("hostaway_expense_id"),
+        "real_hostaway_ref": real_ref, "last_attempt_at": last_attempt,
+        "last_error": exp.get("error"), "error_class": exp.get("error_class") or _exp_error_class(exp.get("error")),
+        "verify_note": exp.get("verify_note"), "verification_method": exp.get("verification_method"),
+        "hostaway_verified": bool(exp.get("hostaway_verified")), "verified_at": exp.get("verified_at"),
+        "verify_query": {"by": "reference→hostaway_id→(listing,amount,date)",
+                         "reference": ref, "listing_id": exp.get("listing_id"),
+                         "amount": exp.get("amount"), "date": exp.get("expense_date")},
+        "duplicate_match": ({"ref": twin.get("ref"), "id": twin.get("id"),
+                             "amount": twin.get("amount"), "date": twin.get("expense_date")} if twin else None),
+        "queue_state": exp.get("queue_reason") or exp.get("status_reason") or "",
+        "diagnosis_code": code, "diagnosis_ar": ar, "diagnosis_en": en,
+        "recommended_ar": rec_ar, "recommended_en": rec_en,
+        "events": (exp.get("events") or [])[-15:],
+    }
+
+_EXP_DIAG_REC = {
+    "verified":              ("لا إجراء — متحقق.", "No action — verified."),
+    "no_mapping":            ("اربط الشقة برقم Hostaway من «ربط بشقة مختلفة».", "Map the apartment to a Hostaway property id."),
+    "missing_fields":        ("عدّل المصروف وكمّل الحقول الناقصة ثم اعتمده.", "Edit the expense, fill the missing fields, then approve."),
+    "dryrun":                ("اضبط EXPENSE_POST_DRYRUN=0 في Railway ثم رحّل المعتمد.", "Set EXPENSE_POST_DRYRUN=0 in Railway, then export approved."),
+    "amount_conflict":       ("راجع المبلغ في Hostaway أو عدّل المصروف ثم أعد التحقق.", "Reconcile the amount in Hostaway or edit it, then re-verify."),
+    "duplicate":             ("لو مو مكرر اضغط «مو مكرر» ثم رحّله، وإلا اتركه.", "If not a duplicate mark it so, else leave it."),
+    "stale":                 ("أعد المحاولة (مؤقت فقط) من «مطابقة وإصلاح».", "Retry (temporary only) via Reconcile & Repair."),
+    "sent_unverified":       ("حدّث Hostaway وتحقّق؛ لو ما ظهر تأكد من فلتر الشهر/الشقة.", "Refresh Hostaway + verify; if still missing, check the month/property filter."),
+    "awaiting_review":       ("اعتمده من الوارد عشان يجهز للترحيل.", "Approve it in the Inbox to make it export-ready."),
+    "approved_not_exported": ("اضغط «ترحيل المعتمد».", "Click Export Approved."),
+    "failed_auth":           ("مفتاح/توكن Hostaway — تأكد من HOSTAWAY_API_KEY.", "Hostaway auth — check HOSTAWAY_API_KEY."),
+    "failed_validation":     ("عدّل البيانات الناقصة ثم أعد الترحيل.", "Fix the invalid/missing fields, then re-export."),
+    "failed_network":        ("مؤقت — أعد المحاولة بعد قليل.", "Temporary — retry shortly."),
+}
+
+def _exp_diagnose_sample(limit=8):
+    """Pick the most-stuck expenses (failed / stale / sent-unverified / dry-run / duplicate /
+    no-mapping) and diagnose each. Read-only."""
+    stuck = []
+    for e in _expenses.values():
+        canon = _exp_canonical_status(e)
+        if (canon in ("failed", "stale_pending", "sent_unverified", "duplicate", "needs_review")
+                or e.get("hostaway_ref") == "DRYRUN" or e.get("listing_id") is None):
+            stuck.append(e)
+    stuck.sort(key=lambda e: (e.get("updated_at") or e.get("created_at") or ""), reverse=True)
+    return [_exp_diagnose(e) for e in stuck[:max(5, limit)]]
+
+def _exp_diag_overview():
+    """Counts by canonical status + by diagnosis code, so the panel can say WHERE the problem is."""
+    by_status, by_code = {}, {}
+    dry = 0
+    for e in _expenses.values():
+        c = _exp_canonical_status(e)
+        by_status[c] = by_status.get(c, 0) + 1
+        if e.get("hostaway_ref") == "DRYRUN":
+            dry += 1
+    for d in _exp_diagnose_sample(limit=200):
+        by_code[d["diagnosis_code"]] = by_code.get(d["diagnosis_code"], 0) + 1
+    return {"by_status": by_status, "by_diagnosis": by_code, "dryrun_count": dry,
+            "total": len(_expenses), "dryrun_on": EXPENSE_POST_DRYRUN}
 
 def _exp_pipeline(e):
     """The 3-step pipeline state for one expense (Sheet → Dashboard → Hostaway) + overall
@@ -14246,6 +14378,7 @@ function expV2SetSummary(snap){
 async function loadExpenses(){
   var body=document.getElementById('expBody');
   if(body) body.innerHTML='<div class="empty sk">—</div>';
+  D.expDiagDeep=null;                       // re-fetch root-cause diagnosis lazily on next open
   if(!D.expOpts){ try{ D.expOpts=await api('/api/expenses/options'); }catch(_){ D.expOpts={apartments:[]}; } }
   try{ D.expV2=await api('/api/expenses/v2/overview'); }catch(e){ D.expV2={rows:[],totals:{},health:{},diagnostics:{},error:String(e)}; }
   expV2SetSummary(D.expV2);
@@ -14257,7 +14390,9 @@ async function expRefresh(){ await loadExpenses(); }
 async function expV2Reconcile(pullSheet){
   toast(expV2L('⏳ نطابق المصادر…','⏳ Reconciling sources…'));
   var r; try{ r=await post('/api/expenses/v2/reconcile',{pull_sheet:!!pullSheet}); }catch(e){ toast('⚠ '+e); return; }
-  D.expV2=r; expV2SetSummary(r); _renderExpensesV2(); renderExpensesOpsSummary(); buildSideNav();
+  D.expV2=r; D.expDiagDeep=null; expV2SetSummary(r);
+  if(_expV2View==='diagnostics'){ expV2LoadDeepDiag(); } else { _renderExpensesV2(); }
+  renderExpensesOpsSummary(); buildSideNav();
   toast(expV2L('تمت المطابقة','Reconciled'));
 }
 async function expV2Action(action){
@@ -14272,7 +14407,40 @@ async function expV2Action(action){
   toast(expV2L('تم: ','Done: ')+(r.changed||[]).length+' / '+(r.queued||[]).length+' / '+(r.verified||[]).length);
   await loadExpenses();
 }
-function expV2SetView(v){ _expV2View=v; _renderExpensesV2(); }
+function expV2SetView(v){ _expV2View=v; if(v==='diagnostics'&&!D.expDiagDeep){ expV2LoadDeepDiag(); return; } _renderExpensesV2(); }
+// Deep per-expense root-cause diagnosis (diagnosis-first). Read-only; never writes/sends.
+async function expV2LoadDeepDiag(){
+  try{ D.expDiagDeep=await api('/api/expenses/diagnose'); }catch(_){ D.expDiagDeep={overview:{},sample:[],dryrun_on:false}; }
+  _renderExpensesV2();
+}
+function expV2DeepDiagHtml(){
+  var d=D.expDiagDeep; if(!d) return '<div class="empty sk" style="margin-bottom:10px">—</div>';
+  var ov=d.overview||{}, sample=d.sample||[];
+  var dryBanner = d.dryrun_on ? riskPanel('warn', expV2L('السبب الجذري الأرجح: وضع التجربة مفعّل','Most likely root cause: DRY-RUN is ON'),
+    expV2L('EXPENSE_POST_DRYRUN=1 — ما انكتب أي مصروف فعليًا في Hostaway. اضبطه على 0 في Railway ثم رحّل المعتمد.','EXPENSE_POST_DRYRUN=1 — nothing was actually written to Hostaway. Set it to 0 in Railway, then export approved.'), '', '') : '';
+  var bd=ov.by_diagnosis||{}; var bk=Object.keys(bd).sort(function(a,b){return bd[b]-bd[a];});
+  var bdHtml=bk.length?('<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px">'+bk.map(function(k){return '<span class="exp-reason" style="font-size:11.5px">'+esc(k)+': <b>'+bd[k]+'</b></span>';}).join('')+'</div>'):'';
+  var head='<div style="display:flex;gap:8px;align-items:center;margin:4px 0 8px"><b style="font-size:13.5px">🩺 '+expV2L('تشخيص لكل مصروف','Per-expense root cause')+'</b>'
+    +'<span class="muted" style="font-size:11.5px">'+expV2L('إجمالي ','total ')+(ov.total||0)+(d.dryrun_on?(' · DRY-RUN '+(ov.dryrun_count||0)):'')+'</span></div>';
+  var cards=sample.length?sample.map(function(x){
+    function kv(l,v){ return '<div style="font-size:11.5px"><span class="muted">'+esc(l)+':</span> '+esc(v)+'</div>'; }
+    var called = x.dry_run_only?expV2L('لا — وضع تجربة فقط','No — dry-run only'):(x.hostaway_called?expV2L('نعم','Yes'):expV2L('لا — تحديث محلي فقط','No — local only'));
+    return '<div class="card" style="border-radius:8px;margin-bottom:9px"><div style="display:flex;justify-content:space-between;gap:8px"><b>'+esc(x.ref||x.id||'')+' · '+esc(x.apartment||'—')+'</b>'+expV2Pill(esc(x.canonical_status),expV2Tone(x.canonical_status))+'</div>'
+      +'<div style="margin-top:6px;font-size:12.5px"><b>'+expV2L('التشخيص','Diagnosis')+':</b> '+esc(L==='ar'?x.diagnosis_ar:x.diagnosis_en)+'</div>'
+      +'<div style="margin-top:4px;font-size:12px;color:var(--gold)"><b>'+expV2L('الإجراء المقترح','Recommended')+':</b> '+esc(L==='ar'?x.recommended_ar:x.recommended_en)+'</div>'
+      +'<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:3px 14px">'
+        +kv(expV2L('اتصلنا بـHostaway؟','Hostaway called?'), called)
+        +kv(expV2L('مرجع Hostaway','Hostaway ref'), x.hostaway_ref||'—')
+        +kv(expV2L('تأكد','Verified'), x.hostaway_verified?expV2L('نعم ✓','Yes ✓'):expV2L('لا','No'))
+        +kv(expV2L('ربط الشقة','Property map'), (x.apartment_mapping||{}).hostaway_property_id||expV2L('غير مربوط','unmapped'))
+        +kv(expV2L('الرقم في الحمولة','Ref in payload'), x.reference_in_payload?'✓':'✗')
+        +kv(expV2L('تكرار','Duplicate'), x.duplicate_match?(x.duplicate_match.ref||'—'):'—')
+        +(x.last_error?kv(expV2L('آخر خطأ','Last error'), x.last_error):'')
+      +'</div></div>';
+  }).join(''):('<div class="muted" style="padding:14px 0">'+expV2L('ما فيه مصاريف عالقة 🎉','No stuck expenses 🎉')+'</div>');
+  return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'+dryBanner+head+bdHtml+cards
+    +'<a class="btn ghost xs" href="/api/expenses/diagnose?format=csv&token='+encodeURIComponent(tok())+'" target="_blank">⬇ '+expV2L('تحميل تقرير التشخيص CSV','Download root-cause CSV')+'</a></div>';
+}
 function expV2Rows(){
   var rows=((D.expV2||{}).rows)||[];
   if(_expV2View==='overview') return rows.filter(function(r){return r.v2_status!=='archived';}).slice(0,140);
@@ -14352,13 +14520,15 @@ function expV2RowCard(r){
     +'<div style="margin-top:10px;display:flex;gap:7px;flex-wrap:wrap">'+actions+'</div></div>';
 }
 function expV2DiagnosticsHtml(){
+  var deep=expV2DeepDiagHtml();
   var d=(D.expV2||{}).diagnostics||{}, keys=Object.keys(d).sort(function(a,b){return (d[b].count||0)-(d[a].count||0);});
-  if(!keys.length) return emptyState(expV2L('لا توجد مشاكل واضحة','No grouped issues'),expV2L('شغل مطابقة الآن لتحديث التشخيص.','Run Reconcile Now to refresh diagnostics.'),'✓');
-  return '<div style="display:grid;gap:10px">'+keys.map(function(k){
+  if(!keys.length) return deep+emptyState(expV2L('لا توجد مجموعات مشاكل','No grouped issues'),expV2L('شغل مطابقة الآن لتحديث التجميع.','Run Reconcile Now to refresh grouping.'),'✓');
+  var grouped='<div style="font-size:12px;font-weight:700;color:var(--text-2);margin:4px 0 8px">'+expV2L('تجميع حسب السبب','Grouped by reason')+'</div><div style="display:grid;gap:10px">'+keys.map(function(k){
     var g=d[k]||{};
     var examples=(g.examples||[]).map(function(x){return '<span class="exp-reason">'+esc((x.ref||x.id||'')+' · '+(x.apartment||'')+' · '+expMoney(x.amount||0))+'</span>';}).join(' ');
     return '<div class="card" style="border-radius:8px"><div style="display:flex;justify-content:space-between;gap:10px"><b>'+esc(k)+'</b>'+expV2Pill(fmt(g.count||0),expV2Tone(k))+'</div><div class="muted" style="font-size:11.5px;margin-top:6px">'+examples+'</div></div>';
   }).join('')+'</div>';
+  return deep+grouped;
 }
 function _renderExpensesV2(){
   var body=document.getElementById('expBody'); if(!body) return;
@@ -25198,6 +25368,37 @@ def _exp_sync_state(e):
         return "ready"
     return "held"
 
+async def _api_expenses_diagnose(request):
+    """Diagnosis-first runner (read-only; sends nothing). ?id=<expense> → one full diagnosis;
+    no id → an overview + the most-stuck sample. ?format=csv → a diagnostics CSV download."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    eid = (request.query.get("id") or "").strip()
+    if eid:
+        e = _expenses.get(eid)
+        if not e:
+            return _json({"error": "not found"}, 404)
+        return _json({"ok": True, "diagnosis": await asyncio.to_thread(_exp_diagnose, e)})
+    overview = await asyncio.to_thread(_exp_diag_overview)
+    sample = await asyncio.to_thread(_exp_diagnose_sample, 12)
+    if request.query.get("format") == "csv":
+        cols = ["ref", "apartment", "amount", "date", "canonical_status", "diagnosis_code",
+                "hostaway_called", "dry_run_only", "real_hostaway_ref", "hostaway_verified",
+                "error_class", "diagnosis_en", "recommended_en"]
+        lines = [",".join(cols)]
+        for d in sample:
+            row = []
+            for c in cols:
+                v = str(d.get(c, "") if d.get(c) is not None else "")
+                if any(ch in v for ch in [",", '"', "\n"]):
+                    v = '"' + v.replace('"', '""') + '"'
+                row.append(v)
+            lines.append(",".join(row))
+        body = ("﻿" + "\n".join(lines)).encode("utf-8")
+        return web.Response(body=body, content_type="text/csv",
+                            headers={"Content-Disposition": "attachment; filename=ouja-expense-diagnostics.csv"})
+    return _json({"ok": True, "overview": overview, "sample": sample, "dryrun_on": EXPENSE_POST_DRYRUN})
+
 async def _api_expenses_sync_status(request):
     """The 'حالة المزامنة' page: every expense + its pipeline stage + who touched it +
     totals per state (count + SAR). Optional ?state= filter."""
@@ -27310,6 +27511,7 @@ async def start_web_server():
         app.router.add_get("/api/expenses/hostaway-debug", _api_expenses_hostaway_debug)
         app.router.add_post("/api/expenses/sync-refresh", _api_expenses_sync_refresh)
         app.router.add_get("/api/expenses/sync-status", _api_expenses_sync_status)
+        app.router.add_get("/api/expenses/diagnose", _api_expenses_diagnose)
         app.router.add_post("/api/expenses/verify", _api_expenses_verify)
         app.router.add_get("/api/expenses/v2/overview", _api_expenses_v2_overview)
         app.router.add_post("/api/expenses/v2/reconcile", _api_expenses_v2_reconcile)
