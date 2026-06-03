@@ -12713,8 +12713,8 @@ function renderPricing2(){
   if(!recs.length){ if(body) body.innerHTML=emptyState(labelText('ما فيه فرص واضحة حالياً','No clear pricing opportunities'), labelText('الأسعار قريبة من المتوقع. راجع التقويم إذا تبغى نطاق محدد.','Prices are close to expected. Use the calendar for a specific range.'),'$'); return; }
   var byU={};
   recs.forEach(function(r){
-    var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}, activated:!!r.activated, compound:r.compound||''}; }
-    u.byDate[r.date]=r; u.activated=!!r.activated; if(r.compound) u.compound=r.compound;
+    var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}, activated:!!r.activated, compound:r.compound||'', lean:r.lean||'balanced'}; }
+    u.byDate[r.date]=r; u.activated=!!r.activated; if(r.compound) u.compound=r.compound; if(r.lean) u.lean=r.lean;
     var f=r.final, c=r.current;
     if(f!=null && c!=null && f!==c){ u.nopp++; if(f>c) u.uplift+=(f-c); }
   });
@@ -12839,11 +12839,26 @@ function _peUnitControls(lid){
     return '<button class="pe-utog'+(on?' on':'')+'" onclick="togglePeUnit(&#39;'+k+'&#39;,'+lid+','+(!on)+')">'
       +m.ic+' '+(L==='ar'?m.ar:m.en)+' <span class="pe-utog-st">'+(on?(L==='ar'?'مفعّل':'on'):(L==='ar'?'موقّف':'off'))+'</span></button>';
   }).join('');
+  var lean=((window._peByUnit||{})[lid]||{}).lean||'balanced';
+  function db(val,ar,en,ic){ var on=lean===val; return '<button class="pe-utog'+(on?' on':'')+'" onclick="setPeLean('+lid+',&#39;'+val+'&#39;)">'+ic+' '+(L==='ar'?ar:en)+'</button>'; }
+  var dial='<div class="pe-utogs" style="border-top:1px dashed var(--border);padding-top:8px">'
+    +'<span class="pr-kpi-l" style="align-self:center;margin-inline-end:4px">'+(L==='ar'?'الميل:':'Lean:')+'</span>'
+    +db('fill','يملأ (إشغال)','Fill (occupancy)','🛏️')+db('balanced','متوازن','Balanced','⚖️')+db('top','أعلى سعر','Top dollar','💎')+'</div>';
   return '<div class="pe-utogs">'+btns
     +'<button class="btn primary sm" style="margin-inline-start:auto" onclick="applyUnit('+lid+')">✅ '+(L==='ar'?'طبّق هذي الشقة':'Apply this apartment')+'</button></div>'
+    +dial
     +'<div class="pr-kpi-l" style="padding:0 14px 12px">'+(L==='ar'
-        ?'التبديل يغيّر معاينة هذي الشقة فقط · ما يُرسل شي لـHostaway حتى تضغط «طبّق هذي الشقة».'
-        :'Toggles change this apartment’s preview only · nothing is pushed to Hostaway until you press “Apply this apartment”.')+'</div>';
+        ?'التبديل يغيّر معاينة هذي الشقة فقط · ما يُرسل شي لـHostaway حتى تضغط «طبّق هذي الشقة». · «الميل» يوجّه المحرّك نحو الإشغال أو أعلى سعر.'
+        :'Toggles change this apartment’s preview only · nothing is pushed to Hostaway until you press “Apply this apartment”. · “Lean” tilts the engine toward occupancy or top price.')+'</div>';
+}
+async function setPeLean(lid, val){
+  var r; try{ r=await post('/api/pricing/lean',{lid:lid, lean:val}); }catch(_){ r=null; }
+  if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
+  toast(L==='ar'?('الميل: '+(val==='fill'?'إشغال':(val==='top'?'أعلى سعر':'متوازن'))):('Lean: '+val));
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics')]); D.pr2=rr[0]; D.prA=rr[1]; }catch(_){}
+  renderPricingHeader(); renderPricing2();
+  var btn=document.querySelector('#prListBody .pe-apt-head[onclick="pePeToggle(this,'+lid+')"]');
+  if(btn) pePeToggle(btn, lid);   // re-open this apartment so the new preview shows
 }
 async function togglePeUnit(key, lid, enabled){
   var r=await post('/api/pricing/strategy-toggle',{name:key, lid:lid, enabled:enabled});
@@ -12939,8 +12954,21 @@ function pePanelHtml(det){
   }
   clog+='</div>';
   var foot='<div class="pe-foot">مبني على ~'+fmt(det.footer_n||0)+' حجز فعلي من حسابك — يتحدّث يومياً</div>';
-  return '<div class="pe-panel">'+pill+hero+slider+beforeNow+strat+facts+summ+clog+foot+'</div>';
+  var opts='';
+  if(det.options && det.options.length){
+    opts='<div class="pe-facts"><div class="pe-facts-t">'+(L==='ar'?'اختر سعر — اضغط واحد ثم «تطبيق»':'Pick a price — tap one, then Apply')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 2px">';
+    det.options.forEach(function(o){
+      opts+='<button class="btn ghost sm" onclick="perPick('+o.price+')" style="flex:1;min-width:130px;text-align:start">'
+        +'<div style="font-weight:700;font-size:12px">'+esc(L==='ar'?o.label_ar:o.label_en)+'</div>'
+        +'<div style="font-size:14px;font-weight:800">'+fmt(o.price)+' ر.س</div>'
+        +'<div class="muted" style="font-size:10px">'+esc(L==='ar'?o.why_ar:o.why_en)+'</div></button>';
+    });
+    opts+='</div></div>';
+  }
+  var capNote=det.pooled_capped?('<div class="pe-cap" style="color:var(--gold)">'+(L==='ar'?'⚖︎ محدود قرب أعلى سعر حققته هالشقة (البيانات من وحدات مشابهة)':'⚖︎ capped near this apartment max (data from similar units)')+'</div>'):'';
+  return '<div class="pe-panel">'+pill+hero+slider+capNote+opts+beforeNow+strat+facts+summ+clog+foot+'</div>';
 }
+function perPick(p){ var s=document.getElementById('peSlider'); if(!s) return; var lo=parseInt(s.min,10), hi=parseInt(s.max,10); if(p<lo) s.min=p; if(p>hi) s.max=p; s.value=p; peSlider(); }
 function openPeNight(lid, date){
   openPePanel({getAttribute:function(k){ return k==='data-lid'?String(lid):String(date); }});
 }
@@ -20913,7 +20941,7 @@ def _pe_compute_recommendations(horizon=None):
                              "opportunity": 0, "floor": _pe_floor_overrides.get(lid, 0) or 0,
                              "ceiling": cur, "median": cur, "signal": "normal", "band_source": "none",
                              "band_count": 0, "occ_now": None, "typical_occ": None, "confidence": "none",
-                             "no_model": True, "lid": lid, "unit": uname, "group": g})
+                             "no_model": True, "lean": pe_lean(lid), "lid": lid, "unit": uname, "group": g})
                 continue
             tot = occ_tot.get((g, ds), 0)
             occf = (occ_book.get((g, ds), 0) / tot) if tot else None
@@ -21340,6 +21368,23 @@ _PE_DTYPE_AR = {"weekday": "يوم عادي (وسط الأسبوع)", "weekend":
 def _pe_demand_pill(signal):
     return {"ahead": "الطلب مرتفع", "behind": "الطلب منخفض"}.get(signal, "الطلب عادي")
 
+def _pe_options(safe, balanced, push):
+    """Build the 2-3 tap-to-apply price choices (bilingual). Deduped by price."""
+    raw = [("safe", "آمن — سعرك المعتاد", "Safe — your usual", "غالبًا يحجز بسرعة", "usually books fast", safe),
+           ("balanced", "متوازن — اقتراح المحرّك", "Balanced — engine pick", "أفضل توازن بين السعر والإشغال", "best price/occupancy balance", balanced),
+           ("push", "طموح — أعلى سعر", "Push — aim high", "لو الطلب قوي تكسب أكثر", "more upside if demand is strong", push)]
+    out, seen = [], set()
+    for k, la, le, wa, we, p in raw:
+        try:
+            pi = int(round(float(p)))
+        except (TypeError, ValueError):
+            continue
+        if pi <= 0 or pi in seen:
+            continue
+        seen.add(pi)
+        out.append({"key": k, "label_ar": la, "label_en": le, "why_ar": wa, "why_en": we, "price": pi})
+    return out
+
 def _pe_night_detail(lid, date_iso):
     """Full panel payload for one (unit, night): the reco + a factor breakdown where every
     sentence carries a REAL computed number, and any factor without data is omitted."""
@@ -21382,6 +21427,9 @@ def _pe_night_detail(lid, date_iso):
                 "footer_n": data.get("n_used", 0), "dry_run": PRICE_APPLY_DRYRUN,
                 "activated": pricing_activated(lid), "baseline": _pe_baseline_observe(lid, date_iso, cur),
                 "final": cur, "final_color": "hold", "final_source": "current", "layers": [],
+                "lean": pe_lean(lid),
+                "options": ([{"key": "hold", "label_ar": "ثابت — السعر الحالي", "label_en": "Hold — current price",
+                              "why_ar": "ما عندنا بيانات نقترح بها", "why_en": "no data to suggest a change", "price": cur}] if cur else []),
                 "changelog": _price_log_view(lid, date_iso)}
     # prefer the cached rec (has live current price + group pace); else compute without occ
     # A1: ALWAYS read the LIVE per-night Hostaway calendar price so the panel's current is
@@ -21465,12 +21513,17 @@ def _pe_night_detail(lid, date_iso):
     summary = f"{dt_label}، وحجوزاتك الفعلية متوسطها {band['median']:,} ر.س {sig_phrase}. نقترح {rec['recommended']:,} ر.س ضمن [{rec['floor']:,}–{rec['ceiling']:,}]."
     info = _active_layers_for(lid, date_iso, rec["recommended"], rec.get("current"))
     baseline = _pe_baseline_observe(lid, date_iso, rec.get("current"))   # frozen "before"
+    own_b = models["unit_bands"].get(f"{lid}||{dtype}")
+    options = _pe_options(own_b.get("median") if own_b else rec["floor"],
+                          info["final"] if info.get("final") else rec["recommended"], rec["ceiling"])
     return {"lid": lid, "unit": uname, "date": date_iso, "days_out": rec["days_out"],
             "dtype": dtype, "event": ev, "demand_pill": _pe_demand_pill(rec["signal"]),
             "signal": rec["signal"], "current": rec.get("current"), "recommended": rec["recommended"],
             "delta": rec.get("delta"), "delta_pct": rec.get("delta_pct"),
             "floor": rec["floor"], "ceiling": rec["ceiling"], "median": rec["median"],
             "confidence": rec["confidence"], "pooled": pooled, "factors": factors,
+            "options": options, "lean": rec.get("lean") or pe_lean(lid),
+            "pooled_capped": rec.get("pooled_capped", False),
             "summary": summary, "footer_n": data.get("n_used", 0),
             "dry_run": PRICE_APPLY_DRYRUN, "activated": pricing_activated(lid),
             # Stage 3-4: transparent final-price model + active strategies + the change log
