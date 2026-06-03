@@ -28,6 +28,60 @@ class DashboardUiContractTest(unittest.TestCase):
         self.assertIn("approveBulkSummary", html)
         self.assertIn("confirmDanger", html)
 
+    def test_full_operations_ui_pass_contract_is_present(self):
+        html = dashboard_html()
+
+        for css_class in [
+            ".ops-strip",
+            ".ops-card",
+            ".risk-panel",
+            ".action-bar",
+            ".data-empty",
+            ".status-rail",
+        ]:
+            self.assertIn(css_class, html)
+
+        for helper in [
+            "function emptyState",
+            "function opsStrip",
+            "function riskPanel",
+            "function setBusy",
+            "function confirmAction",
+            "function bulkPriceSummary",
+            "function pricingApplySummary",
+        ]:
+            self.assertIn(helper, html)
+
+        for page_hook in [
+            "homeCommandDeck",
+            "inboxOpsSummary",
+            "calendarOpsSummary",
+            "pricingOpsSummary",
+            "strategiesOpsSummary",
+            "cleaningOpsSummary",
+            "listingsOpsSummary",
+            "qualityOpsSummary",
+            "guestsOpsSummary",
+            "ticketsOpsSummary",
+            "designOpsSummary",
+            "pmoOpsSummary",
+            "revenueOpsSummary",
+            "expensesOpsSummary",
+            "financeOpsSummary",
+        ]:
+            self.assertIn(page_hook, html)
+
+        self.assertIn("renderAllPageOps", html)
+
+
+class ProductBriefContractTest(unittest.TestCase):
+    def test_product_brief_exists_for_design_work(self):
+        product = ROOT / "PRODUCT.md"
+        self.assertTrue(product.exists())
+        text = product.read_text(encoding="utf-8")
+        self.assertIn("## Register\n\nproduct", text)
+        self.assertIn("Ouja Residence operators", text)
+
 
 if __name__ == "__main__":
     unittest.main()

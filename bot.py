@@ -7510,6 +7510,53 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .page-help.hidden{display:none}
 .page-tools{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 
+/* ===== OPERATIONS PASS — shared page summaries, risk rails, and empty states ===== */
+.ops-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px;margin:0 0 14px}
+.ops-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px 12px;min-height:76px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:var(--sh-xs)}
+.ops-card:hover{border-color:var(--line-strong);box-shadow:var(--sh-sm)}
+.ops-card .oc-l{font-size:11.5px;color:var(--mut);font-weight:600;line-height:1.35}
+.ops-card .oc-v{font-size:21px;color:var(--text);font-weight:800;font-family:var(--font-mono);line-height:1.1;margin-top:4px}
+.ops-card .oc-s{font-size:11px;color:var(--text-2);line-height:1.4;margin-top:5px}
+.ops-card.ok{background:var(--green-soft);border-color:rgba(14,158,95,.22)}
+.ops-card.ok .oc-v{color:var(--green)}
+.ops-card.warn{background:var(--yellow-soft);border-color:rgba(201,150,23,.24)}
+.ops-card.warn .oc-v{color:var(--yellow)}
+.ops-card.danger{background:var(--red-soft);border-color:rgba(196,67,67,.24)}
+.ops-card.danger .oc-v{color:var(--red)}
+.ops-card.info{background:var(--blue-soft);border-color:rgba(62,120,210,.20)}
+.ops-card.info .oc-v{color:var(--blue)}
+.risk-panel{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px 14px;margin:0 0 14px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;box-shadow:var(--sh-xs)}
+.risk-panel .rp-ic{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--gold-soft);color:var(--gold)}
+.risk-panel .rp-t{font-weight:800;color:var(--text);font-size:13.5px}
+.risk-panel .rp-b{color:var(--text-2);font-size:12px;line-height:1.55;margin-top:2px}
+.risk-panel.warn{background:var(--yellow-soft);border-color:rgba(201,150,23,.28)}
+.risk-panel.danger{background:var(--red-soft);border-color:rgba(196,67,67,.28)}
+.risk-panel.ok{background:var(--green-soft);border-color:rgba(14,158,95,.24)}
+.risk-panel.info{background:var(--blue-soft);border-color:rgba(62,120,210,.20)}
+.risk-panel.warn .rp-ic{background:rgba(201,150,23,.16);color:var(--yellow)}
+.risk-panel.danger .rp-ic{background:rgba(196,67,67,.14);color:var(--red)}
+.risk-panel.ok .rp-ic{background:rgba(14,158,95,.14);color:var(--green)}
+.risk-panel.info .rp-ic{background:rgba(62,120,210,.13);color:var(--blue)}
+.action-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin:0 0 14px}
+.action-bar .ab-copy{font-size:12.5px;color:var(--text-2);line-height:1.55}
+.action-bar .ab-copy b{color:var(--text)}
+.action-bar .ab-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.status-rail{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 14px}
+.status-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text-2);font-size:11px;font-weight:700;padding:4px 9px}
+.status-chip.ok{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.2)}
+.status-chip.warn{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(201,150,23,.22)}
+.status-chip.danger{background:var(--red-soft);color:var(--red);border-color:rgba(196,67,67,.22)}
+.status-chip.info{background:var(--blue-soft);color:var(--blue);border-color:rgba(62,120,210,.18)}
+.data-empty{background:var(--surface-2);border:1px dashed var(--line-strong);border-radius:var(--r);padding:22px 14px;text-align:center;color:var(--mut);line-height:1.7}
+.data-empty .de-ic{font-size:22px;margin-bottom:5px}
+.data-empty .de-t{font-weight:800;color:var(--text-2);font-size:13px}
+.data-empty .de-a{font-size:11.5px;color:var(--mut);margin-top:3px}
+@media (max-width:640px){
+  .ops-strip{grid-template-columns:1fr 1fr;gap:8px}
+  .risk-panel{grid-template-columns:1fr}
+  .risk-panel .rp-go{justify-self:start}
+}
+
 /* ===== MORNING BRIEF (home) — one-glance headline + one-click alerts ===== */
 .mbrief{background:linear-gradient(135deg,var(--gold-tint),var(--surface));border:1px solid var(--gold);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:16px}
 .mbrief-line{font-size:14.5px;line-height:1.7;color:var(--text)}
@@ -8013,6 +8060,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <!-- Najdi morning brief: know the day in one glance (items 1-4) -->
         <div id="morningBrief"></div>
+        <div id="homeCommandDeck"></div>
 
         <div class="kpis" id="kpis"></div>
 
@@ -8081,6 +8129,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <button class="clear" onclick="clearInboxFilters()" id="t_clear_filt">مسح</button>
         </div>
 
+        <div id="inboxOpsSummary"></div>
         <div id="inboxList" class="inbox-list"><div class="empty sk">—</div></div>
       </section>
 
@@ -8110,6 +8159,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div id="calendarOpsSummary"></div>
         <!-- Tape-chart: rows = units, columns = next 45 days (items 10-15) -->
         <div class="card" style="padding:12px">
           <div class="card-head"><span class="card-title">🎞️ <span id="t_tape">شريط الإشغال · ٤٥ يوم</span></span><span class="card-sub" id="tapeRisk"></span></div>
@@ -8233,6 +8283,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div id="pricingOpsSummary"></div>
         <!-- analytics header -->
         <div class="card">
           <div id="prAnalytics"><div class="empty sk">—</div></div>
@@ -8264,6 +8315,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <button class="btn ghost sm" onclick="loadStrategies()">↻</button>
           </div>
         </div>
+        <div id="strategiesOpsSummary"></div>
         <div class="card"><div id="stratHeader"><div class="empty sk">—</div></div></div>
         <div class="card">
           <div class="card-head"><span class="card-title">🏘️ <span id="t_str_units">الشقق المفعّلة</span></span><span class="card-sub" id="stratUnitsCount"></span></div>
@@ -8294,6 +8346,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div id="revenueOpsSummary"></div>
         <!-- Hero KPI strip: this-month vs prior month -->
         <div class="kpis" id="revKpis"></div>
 
@@ -8369,6 +8422,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div id="cleanImportResult" style="display:none"></div>
 
+        <div id="cleaningOpsSummary"></div>
         <div class="kpis" id="cleanStats"></div>
 
         <!-- OujaCT — in-house cleaning team assignment + Apply/Refresh -->
@@ -8470,6 +8524,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <button class="btn ghost sm" onclick="loadListings()">↻</button>
           </div>
         </div>
+        <div id="listingsOpsSummary"></div>
         <div id="lsSyncBar" class="muted" style="font-size:12px;margin:0 2px 12px"></div>
         <div class="kpis" id="lsStats"></div>
         <div class="card">
@@ -8504,6 +8559,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div id="qualityOpsSummary"></div>
         <div class="kpis" id="qualStats"></div>
         <div class="card">
           <div class="card-head"><span class="card-title">🏠 ترتيب الوحدات</span></div>
@@ -8536,6 +8592,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <b>VIP</b> بضغطة، فيتنبه له المساعد كل مرة يرجع.
           </div>
         </div>
+        <div id="guestsOpsSummary"></div>
         <div class="kpis" id="guestStats"></div>
         <div class="card">
           <div class="card-head">
@@ -8650,6 +8707,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div class="ph-t">🧾 التقرير الشهري</div>
           <div class="ph-b">اختر الشقة والفترة وعبّي الحقول الاختيارية — المعاينة تتحدّث فوريًا. كل الأرقام من البيانات الفعلية (Hostaway + المصاريف المطابقة). أي دفعة Airbnb ناقصة يبيّنها التدقيق ولا تُخمّن أبدًا.</div>
         </div>
+        <div id="financeOpsSummary"></div>
         <div class="fin-grid">
           <div class="card fin-form">
             <div class="fin-row"><label>الشقة / Apartment</label><select id="finUnit" onchange="financeLoadReport()"><option value="">—</option></select></div>
@@ -8755,6 +8813,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             ويحفظ في السجل.
           </div>
         </div>
+        <div id="designOpsSummary"></div>
         <div id="designsBody"><div class="empty sk">—</div></div>
       </section>
 
@@ -8779,6 +8838,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             وأرسل للمالك <b>رابط متابعة</b> يشوف فيه التقدّم بدون أسعار.
           </div>
         </div>
+        <div id="pmoOpsSummary"></div>
         <div id="pmoBody"><div class="empty sk">—</div></div>
       </section>
 
@@ -8805,6 +8865,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             غامض أو مكرر يوقف في <b>قائمة المراجعة</b> عشان تتأكد منه بضغطة.
           </div>
         </div>
+        <div id="expensesOpsSummary"></div>
         <div id="expBody"><div class="empty sk">—</div></div>
       </section>
 
@@ -8945,6 +9006,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div id="ticketsOpsSummary"></div>
         <div class="kpis" id="ticketStats"></div>
 
         <div class="card">
@@ -9751,6 +9813,226 @@ function fmt(n){return (Math.round(n||0)).toLocaleString('en-US')}
 function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show')},2200)}
 function shortTime(s){return (s||'').replace('T',' ').slice(5,16)}
 function dayTime(s){if(!s) return '';try{const d=new Date(s);return d.toLocaleString(L==='ar'?'ar-SA':'en-US',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}catch(_){return shortTime(s)}}
+function putHtml(id, html){const el=document.getElementById(id); if(el) el.innerHTML=html||''}
+function safeArr(x){return Array.isArray(x)?x:[]}
+function safeNum(x){x=Number(x); return isFinite(x)?x:0}
+function pct(x){return Math.round(safeNum(x))+'%'}
+function labelText(ar,en){return L==='ar'?ar:en}
+function toneBy(n,warn,danger){n=safeNum(n); return n>=safeNum(danger)?'danger':(n>=safeNum(warn)?'warn':'ok')}
+function emptyState(title, action, icon){
+  return '<div class="empty data-empty"><div class="de-ic">'+esc(icon||'—')+'</div><div class="de-t">'+esc(title||labelText('ما فيه بيانات','No data yet'))+'</div><div class="de-a">'+esc(action||labelText('تظهر هنا أول ما توصل البيانات.','It will appear here as soon as data arrives.'))+'</div></div>';
+}
+function opsStrip(cards){
+  cards=safeArr(cards).filter(Boolean);
+  if(!cards.length) return '';
+  return '<div class="ops-strip">'+cards.map(function(c){
+    var tone=c.tone?(' '+c.tone):'';
+    var click=c.onclick?(' role="button" tabindex="0" onclick="'+esc(c.onclick)+'"'):'';
+    return '<div class="ops-card'+tone+'"'+click+'><div><div class="oc-l">'+esc(c.label||'')+'</div><div class="oc-v">'+esc(c.value==null?'—':c.value)+'</div></div><div class="oc-s">'+esc(c.sub||'')+'</div></div>';
+  }).join('')+'</div>';
+}
+function statusRail(items){
+  items=safeArr(items).filter(Boolean);
+  if(!items.length) return '';
+  return '<div class="status-rail">'+items.map(function(i){
+    return '<span class="status-chip '+esc(i.tone||'')+'">'+esc(i.icon||'')+' '+esc(i.label||'')+'</span>';
+  }).join('')+'</div>';
+}
+function riskPanel(level,title,body,actionLabel,onclick){
+  level=level||'info';
+  var icon=level==='danger'?'!':(level==='warn'?'؟':(level==='ok'?'✓':'i'));
+  var btn=(actionLabel&&onclick)?'<button class="btn ghost sm rp-go" onclick="'+esc(onclick)+'">'+esc(actionLabel)+'</button>':'';
+  return '<div class="risk-panel '+esc(level)+'"><div class="rp-ic">'+icon+'</div><div><div class="rp-t">'+esc(title||'')+'</div><div class="rp-b">'+esc(body||'')+'</div></div>'+btn+'</div>';
+}
+function actionBar(copy, actions){
+  var acts=safeArr(actions).map(function(a){
+    return '<button class="btn '+esc(a.kind||'ghost')+' sm" onclick="'+esc(a.onclick||'')+'">'+esc(a.label||'')+'</button>';
+  }).join('');
+  return '<div class="action-bar"><div class="ab-copy">'+copy+'</div><div class="ab-actions">'+acts+'</div></div>';
+}
+function setBusy(elOrId, busy){
+  var el=typeof elOrId==='string'?document.getElementById(elOrId):elOrId;
+  if(!el) return;
+  if(busy){ el.setAttribute('aria-busy','true'); el.disabled=true; }
+  else { el.removeAttribute('aria-busy'); el.disabled=false; }
+}
+function confirmAction(message){ return window.confirm(message); }
+function bulkPriceSummary(body){
+  var nl=String.fromCharCode(10), b=body||{};
+  var unit=b.lids&&b.lids.length?fmt(b.lids.length)+' '+labelText('شقة محددة','selected units'):labelText('كل الشقق المطابقة','all matching units');
+  var value=(b.action==='lower'?labelText('خفض ','lower '):labelText('رفع ','raise '))+(b.percent||0)+'%';
+  return labelText('تأكيد تطبيق الأسعار الجماعي','Confirm bulk price apply')+nl
+    +labelText('النطاق: ','Scope: ')+unit+nl
+    +labelText('من: ','From: ')+(b.start||'—')+' '+labelText('إلى: ','to: ')+(b.end||'—')+nl
+    +labelText('القيمة: ','Value: ')+value+nl
+    +labelText('سيتم إرسال الأسعار إلى Hostaway إذا لم تكن التجربة مفعّلة.','Prices will be sent to Hostaway unless dry-run is enabled.');
+}
+function pricingApplySummary(count, scope, dryRun){
+  var nl=String.fromCharCode(10);
+  return labelText('تأكيد تطبيق التسعير','Confirm pricing apply')+nl
+    +labelText('النطاق: ','Scope: ')+(scope||'—')+nl
+    +labelText('عدد الليالي المتغيرة: ','Changed nights: ')+fmt(count||0)+nl
+    +(dryRun?labelText('تجربة فقط، لن يتم الإرسال إلى Hostaway.','Dry-run only. Nothing will be pushed to Hostaway.'):labelText('سيتم تحديث Hostaway مباشرة.','Hostaway will be updated directly.'));
+}
+function renderHomeCommandDeck(){
+  var urg=safeArr((D.urgent||{}).items), arr=safeArr((D.arrivals||{}).items), replies=safeArr((D.inbox||{}).replies), escs=safeArr((D.inbox||{}).escalations);
+  var red=urg.filter(function(x){return (x.severity||x.level)==='danger'||(x.kind||'').indexOf('ticket')>=0;}).length + escs.length;
+  var signed=arr.filter(function(x){return x.code_sent||x.signed||x.access_sent;}).length;
+  var html=opsStrip([
+    {label:labelText('يحتاج قرار الآن','Needs a decision'),value:red,sub:labelText('تصعيدات وتذاكر حمراء','escalations and red tickets'),tone:toneBy(red,1,4),onclick:"go('inbox')"},
+    {label:labelText('وصول خلال ٣٦ ساعة','Arrivals in 36h'),value:arr.length,sub:labelText('الموقّع/المرسل: ','ready/sent: ')+signed,tone:arr.length?'info':'ok'},
+    {label:labelText('ردود تنتظر موافقة','Replies waiting'),value:replies.length,sub:labelText('راجع قبل الإرسال الجماعي','review before bulk send'),tone:toneBy(replies.length,6,18),onclick:"go('inbox')"},
+    {label:labelText('فاضي الليلة','Empty tonight'),value:safeNum((D.today||{}).empty_n),sub:labelText('يتغذى منها التسعير والتنظيف','feeds pricing and cleaning'),tone:toneBy(safeNum((D.today||{}).empty_n),10,30),onclick:"go('pricing')"}
+  ]);
+  if(red) html+=riskPanel('danger',labelText('ابدأ بالتصعيدات قبل الأرقام','Start with escalations before metrics'),labelText('فيه عناصر ضيف أو صيانة تحتاج تدخل بشري. لا تضيع وسط بطاقات الأداء.','Guest or maintenance items need a human decision. Do not let them get buried in performance cards.'),labelText('افتح الصندوق','Open inbox'),"go('inbox')");
+  putHtml('homeCommandDeck', html);
+}
+function renderInboxOpsSummary(){
+  var replies=safeArr((D.inbox||{}).replies), escs=safeArr((D.inbox||{}).escalations), all=replies.concat(escs);
+  var auto=replies.filter(function(r){return safeNum(r.confidence)>=85;}).length;
+  var claimed=all.filter(function(r){return r.claimed_by||r.status==='claimed';}).length;
+  var html=opsStrip([
+    {label:labelText('تصعيدات مفتوحة','Open escalations'),value:escs.length,sub:labelText('تعامل معها واحد واحد','handle one by one'),tone:toneBy(escs.length,1,4)},
+    {label:labelText('جاهز للإرسال','Ready to send'),value:auto,sub:labelText('ثقة ٨٥٪ وفوق','confidence 85%+'),tone:auto?'ok':'info'},
+    {label:labelText('مستلمة من الفريق','Claimed by team'),value:claimed,sub:labelText('يمنع التداخل بين الموظفين','prevents duplicated work'),tone:'info'}
+  ]);
+  html+=actionBar('<b>'+esc(labelText('قاعدة الصندوق','Inbox rule'))+'</b> '+esc(labelText('الأحمر لا يُرسل تلقائياً، والأصفر يحتاج مراجعة، والأخضر قابل للإرسال الجماعي.','Red never auto-sends, yellow needs review, green can be bulk-approved.')),[
+    {label:labelText('راجع وأرسل الكل','Review and send all'),kind:'primary',onclick:'bulkApprove()'},
+    {label:labelText('التصعيدات','Escalations'),onclick:"setInboxFilter('esc')"}
+  ]);
+  if(escs.length) html+=riskPanel('danger',labelText('فيه تصعيدات ضيف تحتاج مالك قرار','Guest escalations need an owner decision'),labelText('افتح المحادثة واقرأ النص الكامل قبل الرد، خصوصاً مشاكل الدخول والحجز والنظافة.','Open the full conversation before replying, especially access, reservation, and cleaning issues.'),labelText('عرض التصعيدات','Show escalations'),"setInboxFilter('esc')");
+  putHtml('inboxOpsSummary', html);
+}
+function renderCalendarOpsSummary(){
+  var days=safeArr((D.cal||{}).days), events=safeArr((D.cal||{}).events);
+  var weak=days.filter(function(d){return safeNum(d.pace_pct)<40;}).length;
+  var strong=days.filter(function(d){return safeNum(d.pace_pct)>=70;}).length;
+  putHtml('calendarOpsSummary', opsStrip([
+    {label:labelText('أيام ضعيفة','Weak days'),value:weak,sub:labelText('أقل من ٤٠٪ إشغال','below 40% occupancy'),tone:toneBy(weak,3,10)},
+    {label:labelText('أيام قوية','Strong days'),value:strong,sub:labelText('٧٠٪ وفوق','70% and up'),tone:strong?'ok':'info'},
+    {label:labelText('مناسبات قادمة','Upcoming events'),value:events.length,sub:labelText('تؤثر على التسعير الجماعي','affects bulk pricing'),tone:events.length?'warn':'info'}
+  ])+statusRail([
+    {label:labelText('اضغط اليوم للتفاصيل','Click a day for details'),icon:'↗',tone:'info'},
+    {label:labelText('الأحمر يحتاج تسعير','Red needs pricing'),icon:'!',tone:'danger'}
+  ]));
+}
+function renderPricingOpsSummary(){
+  var a=D.prA||{}, recs=safeArr((D.pr2||{}).recs);
+  var changed=recs.filter(function(r){return r.final!=null&&r.current!=null&&r.final!==r.current;}).length;
+  var activated=safeNum(a.activated_count);
+  var html=opsStrip([
+    {label:labelText('شقق مفعّلة','Activated units'),value:activated+'/'+safeNum(a.units),sub:labelText('لا نطبّق على غير المفعّل','only activated units apply'),tone:activated?'ok':'warn'},
+    {label:labelText('ليالي تغيّر سعرها','Nights with price changes'),value:changed,sub:labelText('قبل الإرسال إلى Hostaway','before Hostaway push'),tone:toneBy(changed,20,80)},
+    {label:labelText('فرصة رفع مفتوحة','Open uplift'),value:'+'+fmt(a.uplift||0),sub:labelText('ر.س تقديرية','estimated SAR'),tone:safeNum(a.uplift)?'ok':'info'}
+  ]);
+  if(changed) html+=riskPanel('warn',labelText('راجع العينات قبل تطبيق الشهر','Review samples before applying a month'),labelText('التطبيق الشهري كبير الأثر. افتح شقة، راجع قبل/بعد، ثم طبّق بنطاق واضح.','Month apply is high-impact. Open a unit, review before/after, then apply a clear scope.'),labelText('أول شقة مفعّلة','First active unit'),"document.querySelector('#prListBody .pe-apt-head')&&document.querySelector('#prListBody .pe-apt-head').click()");
+  putHtml('pricingOpsSummary', html);
+}
+function renderStrategiesOpsSummary(){
+  var a=D.stratD||{}, attention=safeArr(a.attention||a.needs_attention), units=safeArr(a.units||a.apartments);
+  putHtml('strategiesOpsSummary', opsStrip([
+    {label:labelText('يحتاج انتباه','Needs attention'),value:attention.length,sub:labelText('نتائج أو خصومات غير طبيعية','unusual outcomes or discounts'),tone:toneBy(attention.length,1,5)},
+    {label:labelText('وحدات تحت المتابعة','Tracked units'),value:units.length||safeNum(a.units_count),sub:labelText('تشغيل تلقائي كل ليلة','nightly automation'),tone:'info'},
+    {label:labelText('تغييرات مؤكدة','Confirmed changes'),value:safeNum(a.confirmed||a.changed_this_month),sub:labelText('هذا الشهر','this month'),tone:'ok'}
+  ]));
+}
+function renderCleaningOpsSummary(){
+  var c=D.clean||{}, st=c.stats||c.summary||{}, overdue=safeNum(st.overdue||c.overdue), scheduled=safeNum(st.scheduled||c.scheduled), tomorrow=safeNum(st.blocked_tomorrow||c.blocked_tomorrow);
+  var html=opsStrip([
+    {label:labelText('متأخرة','Overdue'),value:overdue,sub:labelText('لازم إعادة جدولة','needs reschedule'),tone:toneBy(overdue,1,3)},
+    {label:labelText('مجدولة','Scheduled'),value:scheduled||safeNum(st.total_scheduled),sub:labelText('خلال ٦٠ يوم','within 60 days'),tone:'info'},
+    {label:labelText('محجوزة بكرة','Booked tomorrow'),value:tomorrow,sub:labelText('تحتاج تبديل تلقائي','needs auto-swap'),tone:toneBy(tomorrow,1,4)}
+  ]);
+  if(overdue) html+=riskPanel('danger',labelText('نظافة عميقة متأخرة','Deep clean overdue'),labelText('ابدأ بالمتأخر، ثم راجع الشقق المحجوزة بكرة قبل إرسال جدول الفريق.','Start with overdue units, then review tomorrow-booked units before sending the crew schedule.'),labelText('فلتر المتأخر','Filter overdue'),"var f=document.getElementById('cleanFilter');if(f){f.value='overdue';renderCleaningList();}");
+  putHtml('cleaningOpsSummary', html);
+}
+function renderListingsOpsSummary(){
+  var s=(D.listings||{}).summary||D.listings||{};
+  var needs=safeNum(s.needs_setup||s.needs_setup_count), active=safeNum(s.active||s.active_count), total=safeNum(s.total||safeArr((D.listings||{}).listings).length);
+  putHtml('listingsOpsSummary', opsStrip([
+    {label:labelText('تحتاج إعداد','Needs setup'),value:needs,sub:labelText('اسم داخلي، مجموعة، سعر','internal name, group, price'),tone:toneBy(needs,1,10)},
+    {label:labelText('نشطة','Active'),value:active,sub:labelText('جاهزة للعمليات','ready for operations'),tone:'ok'},
+    {label:labelText('الإجمالي','Total'),value:total,sub:labelText('من Hostaway','from Hostaway'),tone:'info'}
+  ]));
+}
+function renderQualityOpsSummary(){
+  var s=(D.quality||{}).stats||D.quality||{};
+  var sent=safeNum(s.sent||s.requests), responded=safeNum(s.responded), avg=s.average||s.overall_avg||'—';
+  putHtml('qualityOpsSummary', opsStrip([
+    {label:labelText('طلبات تقييم','Review requests'),value:sent,sub:labelText('بعد التنظيف العميق','after deep clean'),tone:'info'},
+    {label:labelText('استجابات','Responses'),value:responded,sub:labelText('تغذي ترتيب الوحدات','feeds unit ranking'),tone:responded?'ok':'warn'},
+    {label:labelText('المتوسط العام','Overall average'),value:avg,sub:labelText('الأسوأ يظهر أولاً','worst appears first'),tone:avg==='—'?'warn':'ok'}
+  ]));
+}
+function renderGuestsOpsSummary(){
+  var g=D.guests||{}, list=safeArr(g.guests||g.items), vip=list.filter(function(x){return x.vip;}).length, repeat=list.filter(function(x){return safeNum(x.stays||x.reservations_count)>1;}).length;
+  putHtml('guestsOpsSummary', opsStrip([
+    {label:labelText('كل الضيوف','All guests'),value:list.length||safeNum(g.total),sub:labelText('ملفات محفوظة','saved profiles'),tone:'info'},
+    {label:'VIP',value:vip,sub:labelText('تنبيه قبل الرد','alert before reply'),tone:vip?'warn':'info'},
+    {label:labelText('عائدون','Repeat guests'),value:repeat,sub:labelText('فرصة خدمة شخصية','personal service opportunity'),tone:repeat?'ok':'info'}
+  ]));
+}
+function renderTicketsOpsSummary(){
+  var s=(D.tickets||{}).stats||(D.tickets||{}).counts||D.tickets||{}, items=safeArr((D.tickets||{}).items||D.tickets);
+  var open=safeNum(s.open||s.new||items.filter(function(x){return x.status==='open';}).length), progress=safeNum(s.in_progress||items.filter(function(x){return x.status==='in_progress';}).length), overdue=safeNum(s.overdue);
+  var html=opsStrip([
+    {label:labelText('مفتوحة','Open'),value:open,sub:labelText('تحتاج مالك مهمة','needs owner'),tone:toneBy(open,10,40)},
+    {label:labelText('تحت العمل','In progress'),value:progress,sub:labelText('تابع آخر تحديث','track last update'),tone:'info'},
+    {label:labelText('متأخرة','Overdue'),value:overdue,sub:labelText('تؤثر على الضيف','guest impact'),tone:toneBy(overdue,1,5)}
+  ]);
+  if(open) html+=riskPanel(overdue?'danger':'warn',labelText('الصيانة لا تُدار بالعدد فقط','Maintenance is not just a count'),labelText('رتّب المفتوح حسب أثره على الوصول القادم والضيف الموجود، ثم عيّن مسؤولاً واضحاً.','Sort open tickets by next-arrival and in-house guest impact, then assign a clear owner.'),labelText('فلتر المفتوح','Filter open'),"var f=document.getElementById('tkFilterStatus');if(f){f.value='open';loadTickets();}");
+  putHtml('ticketsOpsSummary', html);
+}
+function renderDesignOpsSummary(){
+  var rows=safeArr((D.designs||{}).requests||D.designs), waiting=rows.filter(function(x){return (x.status||'').indexOf('wait')>=0||(x.status||'')==='draft';}).length;
+  putHtml('designOpsSummary', opsStrip([
+    {label:labelText('طلبات محفوظة','Saved requests'),value:rows.length,sub:labelText('PDF وسجل لكل طلب','PDF and log for each request'),tone:rows.length?'info':'warn'},
+    {label:labelText('تحتاج متابعة','Need follow-up'),value:waiting,sub:labelText('مسودة أو بانتظار اعتماد','draft or waiting approval'),tone:toneBy(waiting,1,4)}
+  ])+(rows.length?'':emptyState(labelText('ما فيه طلبات تصميم','No design requests'),labelText('ابدأ من زر طلب جديد في الأعلى.','Start from New request above.'),'🛋️')));
+}
+function renderPmoOpsSummary(){
+  var p=D.pmo||{}, rows=safeArr(p.projects||p.items), s=p.summary||{};
+  var pending=rows.filter(function(x){return x.needs_approval||x.waiting_owner||x.status==='pending';}).length;
+  putHtml('pmoOpsSummary', opsStrip([
+    {label:labelText('المشاريع','Projects'),value:safeNum(s.total||rows.length),sub:labelText('من المعادلة للتسليم','from scope to handover'),tone:'info'},
+    {label:labelText('قيد العمل','In progress'),value:safeNum(s.in_progress||s.active),sub:labelText('تابع النسبة والمرحلة','track progress and stage'),tone:'warn'},
+    {label:labelText('اعتماد مطلوب','Approval needed'),value:pending,sub:labelText('لا يتوقف بالمحادثات','do not bury in chats'),tone:toneBy(pending,1,3)}
+  ]));
+}
+function renderRevenueOpsSummary(){
+  var r=D.rev||{}, months=safeArr(r.monthly), units=safeArr(r.units), pace=safeArr((D.revCal30||{}).days);
+  var latest=months.length?months[months.length-1]:{};
+  putHtml('revenueOpsSummary', opsStrip([
+    {label:labelText('إيراد آخر شهر','Latest month revenue'),value:fmt(latest.revenue||latest.rev||r.this_month_revenue),sub:labelText('مقارنة بالشهر السابق في الرسم','compare in chart below'),tone:'ok'},
+    {label:labelText('وحدات لها أداء','Units with performance'),value:units.length,sub:labelText('افتح الأسوأ قبل الأفضل','open weakest before best'),tone:'info'},
+    {label:labelText('أيام سرعة الحجز','Pace days'),value:pace.length,sub:labelText('٣٠ يوم قادمة','next 30 days'),tone:'info'}
+  ]));
+}
+function renderExpensesOpsSummary(){
+  var q=safeArr(D.expQueue), list=safeArr(D.expList), s=D.expSummary||{};
+  var review=q.length || safeNum(s.queue||s.review||s.pending_review);
+  putHtml('expensesOpsSummary', opsStrip([
+    {label:labelText('قائمة مراجعة','Review queue'),value:review||safeNum(s.review),sub:labelText('غامض أو مكرر أو ناقص','ambiguous, duplicate, or missing'),tone:toneBy(review||safeNum(s.review),1,6)},
+    {label:labelText('جاهز للترحيل','Ready to sync'),value:safeNum(s.ready||s.auto_ready),sub:labelText('Hostaway','Hostaway'),tone:'ok'},
+    {label:labelText('كل المصاريف بالفترة','All expenses in period'),value:safeNum(s.count||s.total_count||list.length),sub:labelText('حسب الفلتر الحالي','current filter scope'),tone:'info'}
+  ]));
+}
+function renderFinanceOpsSummary(){
+  var unit=(document.getElementById('finUnit')||{}).value, start=(document.getElementById('finStart')||{}).value, end=(document.getElementById('finEnd')||{}).value;
+  putHtml('financeOpsSummary', actionBar('<b>'+esc(labelText('تقرير المالك','Owner report'))+'</b> '+esc(labelText('اختيار الشقة والفترة شرط قبل PDF. لا يظهر أي حقل فارغ في المعاينة.','Select unit and dates before PDF. Empty optional fields stay hidden.')),[
+    {label:labelText('تحديث المعاينة','Refresh preview'),kind:'ghost',onclick:'financeRender()'},
+    {label:'PDF',kind:'primary',onclick:'financeGeneratePdf()'}
+  ])+statusRail([
+    {label:unit?labelText('شقة مختارة','Unit selected'):labelText('اختر شقة','Choose unit'),icon:unit?'✓':'!',tone:unit?'ok':'warn'},
+    {label:(start&&end)?labelText('فترة جاهزة','Period ready'):labelText('حدد الفترة','Set period'),icon:(start&&end)?'✓':'!',tone:(start&&end)?'ok':'warn'}
+  ]));
+}
+function renderAllPageOps(){
+  renderHomeCommandDeck(); renderInboxOpsSummary(); renderCalendarOpsSummary(); renderPricingOpsSummary();
+  renderStrategiesOpsSummary(); renderCleaningOpsSummary(); renderListingsOpsSummary(); renderQualityOpsSummary();
+  renderGuestsOpsSummary(); renderTicketsOpsSummary(); renderDesignOpsSummary(); renderPmoOpsSummary();
+  renderRevenueOpsSummary(); renderExpensesOpsSummary(); renderFinanceOpsSummary();
+}
 
 async function api(path){
   const r = await fetch(path + (path.indexOf('?')>=0?'&':'?') + 'token=' + encodeURIComponent(tok()));
@@ -10015,6 +10297,7 @@ function buildInboxTabs(){
   }).join('');
 }
 function setIbFilter(t_){inboxFilter.type=t_; buildInboxTabs(); renderInbox()}
+function setInboxFilter(t_){setIbFilter(t_)}
 function clearInboxFilters(){
   inboxFilter = {type:'all', unit:'', status:'', search:''};
   document.getElementById('ibFilterUnit').value=''; document.getElementById('ibFilterStatus').value=''; document.getElementById('ibFilterSearch').value='';
@@ -10232,6 +10515,7 @@ async function loadPricing(){
   catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; }
   renderPricingHeader();
   renderPricing2();
+  renderPricingOpsSummary();
   loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down (collapsed)
 }
 function _prMonths(){
@@ -10277,8 +10561,8 @@ function _prMatch(u){
 function renderPricing2(){
   var d=D.pr2||{}; var recs=(d.recs||[]);
   var body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
-  if(d.error){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+esc(d.error)+'</div>'; return; }
-  if(!recs.length){ if(body) body.innerHTML='<div class="empty" style="padding:30px;text-align:center">ما فيه فرص واضحة حالياً — الأسعار قريبة من المتوقّع.</div>'; return; }
+  if(d.error){ if(body) body.innerHTML=emptyState(esc(d.error), labelText('حاول التحديث أو راجع الاتصال بـ Hostaway.','Refresh or check the Hostaway connection.'),'⚠'); return; }
+  if(!recs.length){ if(body) body.innerHTML=emptyState(labelText('ما فيه فرص واضحة حالياً','No clear pricing opportunities'), labelText('الأسعار قريبة من المتوقع. راجع التقويم إذا تبغى نطاق محدد.','Prices are close to expected. Use the calendar for a specific range.'),'$'); return; }
   var byU={};
   recs.forEach(function(r){
     var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}, activated:!!r.activated, compound:r.compound||''}; }
@@ -10426,7 +10710,7 @@ async function applyUnit(lid){
   var u=(window._peByUnit||{})[lid]||{}; var n=0;
   Object.keys(u.byDate||{}).forEach(function(dt){ var r=u.byDate[dt]; if(r.final!=null&&r.current!=null&&r.final!==r.current) n++; });
   if(!n){ toast(L==='ar'?'ما فيه أسعار مختلفة للتطبيق':'Nothing to apply'); return; }
-  if(!confirm((L==='ar'?('طبّق '+n+' سعر لهذي الشقة فقط؟'):('Apply '+n+' prices for THIS apartment only?')))) return;
+  if(!confirmAction(pricingApplySummary(n, u.unit||('#'+lid), false))) return;
   toast('⏳…');
   var r; try{ r=await post('/api/pricing/apply-unit',{lid:lid}); }catch(_){ r=null; }
   if(!r||r.error){ toast((r&&r.error)||'⚠'); return; }
@@ -10563,7 +10847,7 @@ async function applyMonth(month){
   var dryTxt=pv.dry_run?(L==='ar'?' (تجربة — ما يتغير شي فعلي)':' (DRY-RUN)'):'';
   var head=(L==='ar'?('تطبيق '+pv.count+' سعر لشهر '+month+dryTxt+'؟'+NL+'('+pv.raises+' رفع · '+pv.drops+' خفض)'+NL+NL)
                     :('Apply '+pv.count+' prices for '+month+dryTxt+'?'+NL+'('+pv.raises+' up · '+pv.drops+' down)'+NL+NL));
-  if(!confirm(head+lines)) return;
+  if(!confirmAction(head+lines)) return;
   toast('⏳ '+month+'…');
   var r; try{ r=await post('/api/pricing/apply-month',{month:month}); }catch(_){ r=null; }
   if(!r || r.error){ toast((r&&r.error)||'⚠'); return; }
@@ -10578,6 +10862,7 @@ async function loadStrategies(){
   var tu=document.getElementById('t_str_units'); if(tu) tu.textContent=(L==='ar'?'الشقق المفعّلة':'Activated apartments');
   renderStrategiesHeader();
   renderStrategies();
+  renderStrategiesOpsSummary();
 }
 async function strImportHostaway(){
   toast(L==='ar'?'⏳ سحب من Hostaway…':'⏳ Importing…');
@@ -10647,6 +10932,7 @@ async function loadRevenue(){
   renderRevenueFull();
   renderRevKpis();
   renderRevPace();
+  renderRevenueOpsSummary();
 }
 
 function renderRevKpis(){
@@ -10695,7 +10981,7 @@ function renderRevPace(){
   const el = document.getElementById('revPaceBody'); if(!el) return;
   const sub = document.getElementById('revPaceSub'); if(sub) sub.textContent = t().rev_pace_sub;
   const cal = (D.revCal30||{}).days || [];
-  if(!cal.length){ el.innerHTML = '<div class="empty">'+t().rev_no+'</div>'; return; }
+  if(!cal.length){ el.innerHTML = emptyState(t().rev_no, labelText('يظهر شريط السرعة بعد وصول تقويم ٣٠ يوم من Hostaway.','The pace strip appears after the 30-day Hostaway calendar loads.'),'🚀'); return; }
   let booked = 0, open = 0, total = 0;
   let projRev = 0;
   // Estimate projected revenue: avg_price across days × open nights doesn't account for booked
@@ -10757,6 +11043,7 @@ function renderAll(){
   // empty pane. The badges + KPIs are still updated above.
   if(!openInboxId) renderInbox();
   renderDiscountBanner();
+  renderAllPageOps();
   buildSideNav(); buildBottomNav();
 }
 
@@ -10815,6 +11102,7 @@ async function loadQuality(){
   renderQualityStats();
   renderQualityUnits();
   renderQualityComments();
+  renderQualityOpsSummary();
 }
 function _stars(n){ if(n == null) return '—'; const k = Math.round(n); return '★'.repeat(k) + '☆'.repeat(5-k) + ' ' + n }
 function renderQualityStats(){
@@ -10844,7 +11132,7 @@ function renderQualityUnits(){
       + cleaners.map(function(c){ var cls=c.avg>=4.5?'ok':c.avg>=3.5?'warn':'danger'; return '<tr><td class="strong">'+esc(c.cleaner)+'</td><td class="num"><span class="pill '+cls+'">'+_stars(c.avg)+'</span></td><td class="num">'+c.count+'</td></tr>'; }).join('')
       + '</tbody></table></div></div>';
   }
-  if(!units.length){ body.innerHTML = cleanersHtml + '<div class="empty">'+t().quality_empty+'</div>'; return; }
+  if(!units.length){ body.innerHTML = cleanersHtml + emptyState(t().quality_empty, labelText('أول تقييم يظهر بعد إرسال طلب جودة ودخول رد من الضيف.','The first score appears after a quality request gets a guest response.'),'⭐'); return; }
   let html = cleanersHtml + '<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+t().quality_unit+'</th><th class="num">'+t().quality_avg+'</th>'
     + '<th class="num">'+t().quality_count+'</th><th>'+t().quality_recent+'</th></tr></thead><tbody>';
@@ -10873,7 +11161,7 @@ function renderQualityComments(){
       all.push({unit:u.name, ts:c.ts, comment:c.comment, score:c.score});
     }
   }
-  if(!all.length){ body.innerHTML = '<div class="empty">'+t().quality_empty+'</div>'; return; }
+  if(!all.length){ body.innerHTML = emptyState(t().quality_empty, labelText('آخر التعليقات ستظهر هنا بعد أول رد جودة.','Recent comments will appear here after the first quality response.'),'💬'); return; }
   all.sort(function(a,b){return (b.ts||'').localeCompare(a.ts||'')});
   body.innerHTML = all.slice(0,20).map(function(c){
     return '<div class="log-row"><div class="log-lic">★'+c.score+'</div>'
@@ -10889,6 +11177,7 @@ async function loadGuests(){
   const sub = document.getElementById('t_guests_sub'); if(sub) sub.textContent = t().guests_sub;
   renderGuestStats();
   renderGuestList();
+  renderGuestsOpsSummary();
 }
 function renderGuestStats(){
   const el = document.getElementById('guestStats'); if(!el) return;
@@ -10918,7 +11207,7 @@ function renderGuestList(){
   // Item 62: surface VIP + repeat — VIP first, then most stays.
   f.sort(function(a,b){ if(!!b.vip !== !!a.vip) return (b.vip?1:0)-(a.vip?1:0); return (b.stays||0)-(a.stays||0); });
   if(!f.length){
-    body.innerHTML = '<div class="empty" data-empty-title="'+esc(ar?'ما لقينا ضيوف بهذا الفلتر':'No guests match this filter')+'" data-empty-action="'+esc(ar?'امسح البحث أو اختر كل الضيوف. بيانات الضيوف تظهر بعد وصول محادثات أو حجوزات من Hostaway.':'Clear search or switch to all guests. Guest data appears after Hostaway conversations or reservations are available.')+'">'+t().guest_no_data+'</div>';
+    body.innerHTML = emptyState(ar?'ما لقينا ضيوف بهذا الفلتر':'No guests match this filter', ar?'امسح البحث أو اختر كل الضيوف. بيانات الضيوف تظهر بعد وصول محادثات أو حجوزات من Hostaway.':'Clear search or switch to all guests. Guest data appears after Hostaway conversations or reservations are available.','👤');
     return;
   }
   // Estimated lifetime value = nights x average ADR across units (labelled ≈, an estimate;
@@ -11006,6 +11295,7 @@ async function loadCleaning(){
   _populateCleanInsertDropdown();
   renderCleaningList();
   renderOujact();
+  renderCleaningOpsSummary();
 }
 
 /* ============== LISTINGS (Hostaway master store) + OujaCT team ============== */
@@ -11019,6 +11309,7 @@ async function loadListings(){
   var cc=document.getElementById('t_listings_card'); if(cc) cc.textContent='📋 '+t().ls_total;
   var sr=document.getElementById('lsSearch'); if(sr) sr.placeholder=t().ls_search;
   renderListingsSyncBar(); renderListingsStats(); renderListings();
+  renderListingsOpsSummary();
   try{ buildSideNav(); }catch(_){}
 }
 
@@ -11064,7 +11355,7 @@ function _lsRowBadges(u){
 function renderListings(){
   var body=document.getElementById('lsListBody'); if(!body) return;
   var rows=_lsRows();
-  if(!rows.length){ body.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+t().ls_empty+'</div>'; return; }
+  if(!rows.length){ body.innerHTML=emptyState(t().ls_empty, labelText('اسحب الوحدات من Hostaway ثم أكمل الاسم الداخلي والمجموعة والسعر.','Pull units from Hostaway, then complete internal name, group, and base price.'),'🏘️'); return; }
   var q=((document.getElementById('lsSearch')||{}).value||'').trim().toLowerCase();
   var shown=rows.filter(function(u){ if(!q) return true; return ((u.internal_name||'')+' '+(u.public_name||'')+' '+(u.address||'')+' '+(u.group||'')).toLowerCase().indexOf(q)>=0; });
   var th=function(k){ return '<th style="text-align:start;padding:8px 10px;color:var(--mut);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap">'+esc(t()[k])+'</th>'; };
@@ -11133,7 +11424,7 @@ function renderOujact(){
   var rows=_lsRows().filter(function(u){ return u.active; });
   var cnt=rows.filter(function(u){ return u.oujact; }).length;
   var ce=document.getElementById('oujactCount'); if(ce) ce.textContent=cnt;
-  if(!rows.length){ body.innerHTML='<div class="empty" style="padding:18px;text-align:center">'+t().ct_need_pull+'</div>'; return; }
+  if(!rows.length){ body.innerHTML=emptyState(t().ct_need_pull, labelText('فريق التنظيف الداخلي يعتمد على سجل الشقق أولاً.','The internal cleaning team depends on the listing register first.'),'🧼'); return; }
   var q=((document.getElementById('oujactSearch')||{}).value||'').trim().toLowerCase();
   var shown=rows.filter(function(u){ if(!q) return true; return ((u.internal_name||'')+' '+(u.public_name||'')+' '+(u.address||'')).toLowerCase().indexOf(q)>=0; });
   shown.sort(function(a,b){ return (b.oujact?1:0)-(a.oujact?1:0) || (a.internal_name||'').localeCompare(b.internal_name||''); });
@@ -11184,6 +11475,7 @@ async function loadTickets(){
   _renderTicketStats();
   _populateTicketCatFilter();
   _renderTicketsBody();
+  renderTicketsOpsSummary();
   // also refresh the sidebar badge
   buildSideNav();
 }
@@ -11218,7 +11510,7 @@ function _renderTicketsBody(){
   if(!items.length){
     body.innerHTML = '<div class="empty" style="padding:30px;text-align:center">'
       + '<div style="font-size:32px;margin-bottom:8px">📭</div>'
-      + '<div class="muted" style="font-size:13.5px">'+(k.empty||'')+'</div>'
+      + '<div class="muted" style="font-size:13.5px">'+(k.empty||'')+'</div><div class="de-a">'+(L==='ar'?'التذاكر الجديدة من التصعيدات تظهر هنا تلقائياً، أو أضف تذكرة من الزر بالأعلى.':'Tickets from escalations appear here automatically, or add one from the button above.')+'</div>'
       + '</div>';
     return;
   }
@@ -12264,6 +12556,7 @@ async function loadExpenses(){
   try{ D.expSummary=await api('/api/expenses/summary'+qs); }catch(_){ D.expSummary={}; }
   try{ var q=await api('/api/expenses/queue'); D.expQueue=q.expenses||[]; }catch(_){ D.expQueue=[]; }
   if(_expSub==='all') await expReloadList(); else _renderExpenses();
+  renderExpensesOpsSummary();
   buildSideNav(); buildBottomNav();
 }
 async function expReloadList(){
@@ -12829,6 +13122,7 @@ async function loadDesigns(){
   const body = document.getElementById('designsBody'); if(body) body.innerHTML = '<div class="empty sk">—</div>';
   try { D.designs = await api('/api/design/list'); } catch(_){ D.designs = {requests:[]} }
   _renderDesignsBody();
+  renderDesignOpsSummary();
 }
 function _designStatusKey(st){
   st = st||'intake';
@@ -12845,7 +13139,7 @@ function _renderDesignsBody(){
   const items = ((D.designs||{}).requests)||[];
   const ar = (L==='ar');
   if(!items.length){
-    body.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🛋️</div><div class="muted">ما فيه طلبات. اضغط "<b>طلب جديد</b>" أعلاه.</div></div>';
+    body.innerHTML = emptyState(labelText('ما فيه طلبات تصميم','No design requests'), labelText('اضغط طلب جديد بالأعلى وأنشئ طلب PDF محفوظ بالسجل.','Use New request above to create a saved PDF request.'),'🛋️');
     return;
   }
   // Item 50: kanban columns by status.
@@ -13060,6 +13354,7 @@ async function loadPmo(){
   var body = document.getElementById('pmoBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
   try{ D.pmo = await api('/api/pmo/list'); }catch(_){ D.pmo = {projects:[],summary:{}}; }
   _renderPmoList();
+  renderPmoOpsSummary();
 }
 function _renderPmoList(){
   var body = document.getElementById('pmoBody'); if(!body) return;
@@ -13112,7 +13407,7 @@ function _pmoRenderCards(){
     return (b.updated_at||'').localeCompare(a.updated_at||'');
   });
   if(!items.length){
-    wrap.innerHTML = '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:32px;margin-bottom:8px">🏗️</div><div class="muted">'+(ar?'ما فيه مشاريع. اضغط "مشروع جديد" عشان تبدأ.':'No projects yet. Create your first project to start.')+'</div></div>';
+    wrap.innerHTML = emptyState(ar?'ما فيه مشاريع تجهيز':'No fit-out projects', ar?'اضغط مشروع جديد عشان تبدأ من المعادلة للتسليم.':'Create a project to move from scope to handover.','🏗️');
     return;
   }
   // Item 73: Najdi one-liner state of the view.
@@ -14759,6 +15054,7 @@ async function loadForwardCalendar(){
   renderForwardCalendar();
   renderCalEvents();
   renderBulkForm();
+  renderCalendarOpsSummary();
   loadTapeChart();
 }
 
@@ -15011,7 +15307,7 @@ async function renderBulkForm(){
             + '</label>';
         }).join('')
     + '</div>'
-    + '<button class="btn primary sm" onclick="doBulkApply()" style="width:100%">⚡ '+t().bulk_apply+'</button>'
+    + '<button class="btn primary sm" id="bulkPriceApplyBtn" onclick="doBulkApply()" style="width:100%">⚡ '+t().bulk_apply+'</button>'
     + '<div class="muted" style="margin-top:10px;font-size:11.5px">'+t().bulk_confirm+'</div>';
 }
 
@@ -15025,7 +15321,6 @@ function toggleBulkUnit(lid){
 
 async function doBulkApply(){
   if(!calSelect.start || !calSelect.end) return;
-  if(!confirm(t().bulk_confirm)) return;
   const action = document.getElementById('bulkAction').value;
   const pct = parseFloat(document.getElementById('bulkPct').value || '0');
   const beds = document.getElementById('bulkBeds').value;
@@ -15037,7 +15332,10 @@ async function doBulkApply(){
   if(bulkSelectedUnits.length) body.lids = bulkSelectedUnits.slice();
   if(beds) body.beds = parseInt(beds, 10);
   if(area) body.area = area;
+  if(!confirmAction(bulkPriceSummary(body))) return;
+  setBusy('bulkPriceApplyBtn', true);
   const r = await post('/api/pricing/bulk', body);
+  setBusy('bulkPriceApplyBtn', false);
   if(r.ok){
     toast(t().bulk_applied.replace('{a}', r.applied).replace('{s}', r.skipped) + (r.dry_run?' (DRY-RUN)':''));
     calSelect = {start:null, end:null};
@@ -15943,6 +16241,7 @@ async function loadFinance(){
   const s=document.getElementById('finStart'), e=document.getElementById('finEnd');
   if(s && !s.value){ var n=new Date(); s.value=new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10); e.value=new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().slice(0,10); }
   const iss=document.getElementById('finIssue'); if(iss && !iss.value) iss.value=new Date().toISOString().slice(0,10);
+  renderFinanceOpsSummary();
 }
 function financeFields(){
   function v(id){ var x=document.getElementById(id); return x?(''+x.value).trim():''; }
@@ -15962,13 +16261,13 @@ function financeApplyDefaults(d){
 async function financeLoadReport(){
   const lid=(document.getElementById('finUnit')||{}).value||'';
   const start=(document.getElementById('finStart')||{}).value||'', end=(document.getElementById('finEnd')||{}).value||'';
-  if(!lid || !start || !end){ financeRender(); return; }
+  if(!lid || !start || !end){ financeRender(); renderFinanceOpsSummary(); return; }
   const u=(D.finUnits||[]).find(function(x){return String(x.lid)===String(lid);});
   if(u){ const key=u.owner?('owner:'+u.owner):('lid:'+lid); try{ const dd=await api('/api/finance/defaults?key='+encodeURIComponent(key)); financeApplyDefaults(dd.defaults||{}); }catch(_){ } }
   const m=(document.getElementById('finMgmt')||{}).value||'0';
   document.getElementById('financePreview').innerHTML='<div class="empty sk" style="padding:40px">…</div>';
   let r; try{ r=await api('/api/finance/report?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end+'&mgmt='+encodeURIComponent(m)); }catch(e){ r={error:'fetch'}; }
-  D.finReport=r; financeRender();
+  D.finReport=r; financeRender(); renderFinanceOpsSummary();
 }
 function financeStatementHTML(){
   const r=D.finReport; const f=financeFields(); const ar=(L==='ar');
@@ -16013,6 +16312,7 @@ function financeStatementHTML(){
 }
 function financeRender(){
   const prev=document.getElementById('financePreview'); if(!prev) return;
+  renderFinanceOpsSummary();
   const r=D.finReport; const reconEl=document.getElementById('finRecon'); const ar=(L==='ar');
   const html=financeStatementHTML();
   if(!html){ prev.innerHTML='<div class="empty" style="padding:40px;text-align:center">'+((r&&r.error)?'⚠ خطأ بجلب البيانات':'اختر شقة وفترة')+'</div>'; if(reconEl) reconEl.textContent=''; return; }
