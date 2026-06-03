@@ -6827,6 +6827,11 @@ def _exp_ingest(sub):
     _exp_process(exp)
     if exp.get("listing_id") is not None:
         _exp_log_event(exp, "apartment_matched", detail="auto")
+    # V4 intake-only: land in the approval lane, NEVER auto-export. (The approval gate in
+    # _exp_queue_for_export already blocks any auto-post path until a human approves.)
+    exp["approval_status"] = "needs_edit" if _exp4_missing_required(exp) else "pending_approval"
+    exp.setdefault("audit", [])
+    _exp4_log(exp, "imported", detail=exp["approval_status"])
     return exp, True
 
 def _exp_sheet_csv_candidates():
@@ -8081,6 +8086,8 @@ def _exp_queue_for_export(exp, *, by="", reason="manual", retry=False):
     queued/sending rows safely instead of silently losing them."""
     if not exp:
         return False, "not_found"
+    if _exp4_approval_status(exp) != "approved":     # V4 approval gate: export ONLY approved expenses
+        return False, "needs_approval"
     if _exp_canonical_status(exp) in ("needs_review", "duplicate", "archived", "verified"):
         return False, _exp_canonical_status(exp)
     if not _exp_export_eligible(exp, retry=retry):
@@ -8186,6 +8193,254 @@ def _exp_ensure_export_worker():
     if _expense_export_worker_task is None or _expense_export_worker_task.done():
         _expense_export_worker_task = loop.create_task(_exp_export_worker())
     return True
+
+# ============================================================================
+#  EXPENSES V4 — Expense Approval Center (the canonical workflow)
+#  Google Sheet = intake only · Dashboard = approval only · Hostaway = export only.
+#  Rebuilt clean on the existing durable ledger (_expenses / expenses.json).
+#  Reuses ONLY low-level primitives (api_post/api_get, sheet fetch, persistence,
+#  i18n, theme). The old _exp_* / V2 logic stays in the file but is unlinked from
+#  the UI + poll loop. NEVER fakes a Hostaway confirmation; never auto-exports.
+# ============================================================================
+EXP4_APPROVAL = ("pending_approval", "approved", "rejected", "needs_edit")
+EXP4_EXPORT = ("not_exported", "export_requested", "exporting",
+               "exported_not_verified", "verified", "failed", "duplicate_found")
+
+def _exp4_missing_required(exp):
+    """Minimum fields an expense needs before it can be approved/exported."""
+    miss = []
+    amt = exp.get("amount")
+    try:
+        bad_amt = amt in (None, "") or float(amt) == 0
+    except (TypeError, ValueError):
+        bad_amt = True
+    if bad_amt:
+        miss.append("amount")
+    if not str(exp.get("expense_date") or "").strip():
+        miss.append("expense_date")
+    if not str(exp.get("apartment") or "").strip() and exp.get("listing_id") is None:
+        miss.append("apartment")
+    if not str(exp.get("category") or "").strip():
+        miss.append("category")
+    return miss
+
+def _exp4_export_status(exp):
+    """Single source of truth for the export lane, derived from the canonical status +
+    verification flag. NEVER returns 'verified' unless Hostaway actually confirmed it."""
+    if exp.get("hostaway_verified"):
+        return "verified"
+    canon = _exp_canonical_status(exp)
+    if canon == "verified":            # canonical says verified but the flag is missing → stay honest
+        return "exported_not_verified"
+    if canon == "duplicate":
+        return "duplicate_found"
+    if canon == "failed":
+        return "failed"
+    if canon == "queued":
+        return "exporting" if exp.get("id") in _expense_export_running else "export_requested"
+    if canon == "sending":
+        return "exporting"
+    if canon in ("sent_unverified", "stale_pending"):
+        return "exported_not_verified" if (exp.get("hostaway_ref") or _exp_has_real_hostaway_ref(exp)) else "failed"
+    return "not_exported"
+
+def _exp4_approval_status(exp):
+    """Stored approval lane (set by migration / intake / approve / reject / edit)."""
+    a = exp.get("approval_status")
+    if a in EXP4_APPROVAL:
+        return a
+    canon = _exp_canonical_status(exp)                 # fallback derive (pre-migration safety)
+    if canon in ("verified", "sent_unverified", "queued", "sending", "stale_pending", "failed"):
+        return "approved"
+    if canon == "archived":
+        return "rejected"
+    return "pending_approval"
+
+def _exp4_tab(exp):
+    """Which of the 5 lifecycle tabs this expense belongs to (or 'archived')."""
+    if exp.get("archived"):
+        return "archived"
+    es = _exp4_export_status(exp)
+    aps = _exp4_approval_status(exp)
+    if es == "verified":
+        return "verified"
+    if es in ("export_requested", "exporting", "exported_not_verified"):
+        return "exported"
+    if es in ("failed", "duplicate_found") or aps in ("needs_edit", "rejected") or exp.get("is_split_parent"):
+        return "needs_action"
+    if aps == "approved":
+        return "approved"
+    return "pending"
+
+_EXP4_REC = {     # (ar, en) recommended next action by situation key
+    "fix_fields":   ("كمّل الحقول الناقصة ثم اعتمد", "Fill the missing fields, then approve"),
+    "approve":      ("راجع المصروف واعتمده", "Review and approve"),
+    "export":       ("اضغط «تصدير إلى Hostaway»", "Click Export to Hostaway"),
+    "wait_export":  ("قيد التصدير — انتظر قليلاً", "Exporting — please wait"),
+    "recheck":      ("تحقق ثم أعد التصدير", "Check then re-export"),
+    "view_match":   ("اعرض مطابقة Hostaway", "View the Hostaway match"),
+    "verified":     ("لا إجراء — متحقق في Hostaway", "No action — verified in Hostaway"),
+    "dedupe":       ("راجع التكرار في Hostaway", "Review the duplicate in Hostaway"),
+    "rejected":     ("مرفوض — عدّله لإعادة فتحه", "Rejected — edit to reopen it"),
+    "split_parent": ("مصروف مقسّم — أدر الأبناء", "Split parent — manage its children"),
+}
+
+def _exp4_recommended(exp):
+    es = _exp4_export_status(exp); aps = _exp4_approval_status(exp)
+    if exp.get("is_split_parent"): key = "split_parent"
+    elif es == "verified": key = "verified"
+    elif es == "duplicate_found": key = "dedupe"
+    elif es == "failed": key = "recheck"
+    elif es == "exported_not_verified": key = "view_match"
+    elif es in ("export_requested", "exporting"): key = "wait_export"
+    elif aps == "rejected": key = "rejected"
+    elif aps == "needs_edit": key = "fix_fields"
+    elif aps == "approved": key = "export"
+    else: key = "approve"
+    return key, _EXP4_REC.get(key, ("", ""))
+
+def _exp4_view(exp):
+    """Full V4 record for the API/UI. Derives the lanes; stores nothing."""
+    miss = _exp4_missing_required(exp)
+    rec_key, (rec_ar, rec_en) = _exp4_recommended(exp)
+    sub_id = str(exp.get("submission_id") or "")
+    return {
+        "expense_id": exp.get("id"),
+        "ouja_reference": exp.get("ref") or "",
+        "source": "split" if exp.get("split_parent_id") else ("google_sheet" if sub_id.startswith("gs-") else "manual"),
+        "source_row_id": sub_id,
+        "submitted_at": exp.get("submitted_at") or exp.get("created_at") or "",
+        "imported_at": exp.get("created_at") or "",
+        "submitter": exp.get("submitter") or "",
+        "apartment": exp.get("apartment") or "",
+        "listing_id": exp.get("listing_id"),
+        "amount_sar": round(abs(float(exp.get("amount") or 0)), 2),
+        "expense_date": exp.get("expense_date") or "",
+        "category": exp.get("category") or "",
+        "concept": exp.get("maintenance_type") or exp.get("category") or "",
+        "description": exp.get("note") or "",
+        "vendor": exp.get("vendor") or "",
+        "receipt_url": exp.get("receipt_link") or "",
+        "approval_status": _exp4_approval_status(exp),
+        "export_status": _exp4_export_status(exp),
+        "tab": _exp4_tab(exp),
+        "hostaway_expense_id": exp.get("hostaway_expense_id") or (exp.get("hostaway_ref") if _exp_has_real_hostaway_ref(exp) else ""),
+        "hostaway_verified": bool(exp.get("hostaway_verified")),
+        "hostaway_last_checked_at": exp.get("verified_at") or exp.get("hostaway_last_checked_at") or "",
+        "last_export_attempt_at": exp.get("sending_at") or exp.get("last_attempt_at") or "",
+        "retry_count": int(exp.get("retry_count") or 0),
+        "last_error_code": exp.get("error_class") or "",
+        "last_error_message": exp.get("error") or "",
+        "missing_fields": miss,
+        "recommended_key": rec_key, "recommended_ar": rec_ar, "recommended_en": rec_en,
+        "rejection_reason": exp.get("rejection_reason") or "",
+        "approved_by": exp.get("approved_by") or "", "approved_at": exp.get("approved_at") or "",
+        "is_split_parent": bool(exp.get("is_split_parent")),
+        "split_parent_id": exp.get("split_parent_id") or "",
+        "split_child_ids": exp.get("split_child_ids") or [],
+        "archived": bool(exp.get("archived")),
+        "created_at": exp.get("created_at") or "", "updated_at": exp.get("updated_at") or "",
+    }
+
+def _exp4_log(exp, action, *, actor="", prev="", new="", detail="",
+              payload_summary=None, response_summary=None, error_code="", error_message="", recommended=""):
+    """Append-only V4 audit entry (no secrets). Mirrors into the legacy timeline too."""
+    row = {
+        "ts": _exp_now().isoformat(timespec="seconds"),
+        "ref": exp.get("ref") or exp.get("id"),
+        "actor": (actor or "")[:60], "action": action,
+        "prev_status": prev, "new_status": new, "detail": (detail or "")[:240],
+        "error_code": (error_code or "")[:60], "error_message": (error_message or "")[:240],
+        "recommended_action": (recommended or "")[:120],
+    }
+    if payload_summary is not None: row["payload_summary"] = payload_summary
+    if response_summary is not None: row["response_summary"] = response_summary
+    exp.setdefault("audit", []).append(row)
+    if len(exp["audit"]) > 200:
+        del exp["audit"][:len(exp["audit"]) - 200]
+    try:
+        _exp_log_event(exp, "v4:" + action, by=actor, detail=detail or new or "")
+    except Exception:
+        pass
+    return row
+
+def _exp4_migrate_all():
+    """One-time, idempotent backfill: give every existing expense an approval_status.
+    Owner rule: anything NOT yet sent to Hostaway → pending_approval (NO auto-approve);
+    already-exported/verified keep their state. Never overwrites an existing approval_status,
+    never deletes, never fakes verification."""
+    migrated = 0
+    for e in _expenses.values():
+        if e.get("approval_status") in EXP4_APPROVAL:
+            continue
+        canon = _exp_canonical_status(e)
+        if canon in ("verified", "sent_unverified", "queued", "sending", "stale_pending", "failed"):
+            e["approval_status"] = "approved"             # already exported/in-flight → implicitly approved
+        elif canon == "archived":
+            e["approval_status"] = "rejected"; e["archived"] = True
+        elif canon == "split_parent":
+            e["approval_status"] = "approved"; e["is_split_parent"] = True
+        else:                                             # ready/draft/captured/needs_review/duplicate → not yet sent
+            e["approval_status"] = "needs_edit" if _exp4_missing_required(e) else "pending_approval"
+        _exp4_log(e, "migrated_v4", prev=canon, new=e["approval_status"], detail="mapped into V4 lifecycle")
+        migrated += 1
+    if migrated:
+        persist_state()
+    return migrated
+
+def _exp4_approve(exp, by=""):
+    """Pending/Needs-Edit → Approved (only when required fields are present)."""
+    miss = _exp4_missing_required(exp)
+    if miss:
+        exp["approval_status"] = "needs_edit"
+        _exp4_log(exp, "approve_blocked", actor=by, new="needs_edit", detail="missing: " + ",".join(miss))
+        return False, "needs_edit:" + ",".join(miss)
+    prev = _exp4_approval_status(exp)
+    exp["approval_status"] = "approved"
+    exp["approved_by"] = (by or "")[:60]
+    exp["approved_at"] = _exp_now().isoformat(timespec="seconds")
+    exp["updated_at"] = exp["approved_at"]
+    _exp4_log(exp, "approved", actor=by, prev=prev, new="approved")
+    return True, "approved"
+
+def _exp4_reject(exp, by="", reason=""):
+    prev = _exp4_approval_status(exp)
+    exp["approval_status"] = "rejected"
+    exp["rejected_by"] = (by or "")[:60]
+    exp["rejected_at"] = _exp_now().isoformat(timespec="seconds")
+    exp["rejection_reason"] = (reason or "")[:240]
+    exp["updated_at"] = exp["rejected_at"]
+    _exp4_log(exp, "rejected", actor=by, prev=prev, new="rejected", detail=reason)
+    return True, "rejected"
+
+_EXP4_EDITABLE = ("apartment", "category", "maintenance_type", "amount", "expense_date",
+                  "vendor", "note", "receipt_link", "payment_method")
+
+def _exp4_edit(exp, fields, by=""):
+    """Edit editable fields, re-match the apartment, and re-evaluate the approval lane."""
+    changed = []
+    for k in _EXP4_EDITABLE:
+        if k not in fields:
+            continue
+        v = fields[k]
+        if k == "amount":
+            try:
+                v = round(float(str(v).replace(",", "").strip()), 2)
+            except (TypeError, ValueError):
+                continue
+        else:
+            v = str(v).strip()[:600]
+        if exp.get(k) != v:
+            exp[k] = v; changed.append(k)
+    if "apartment" in changed:
+        lid, _c = _exp_match_apartment(exp.get("apartment"))
+        if lid is not None:
+            exp["listing_id"] = lid
+    if _exp4_approval_status(exp) in ("needs_edit", "rejected"):
+        exp["approval_status"] = "needs_edit" if _exp4_missing_required(exp) else "pending_approval"
+    exp["updated_at"] = _exp_now().isoformat(timespec="seconds")
+    _exp4_log(exp, "edited", actor=by, detail=",".join(changed) or "no change")
+    return True, changed
 
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
@@ -27992,6 +28247,12 @@ def load_state():
         for k, v in (_load_json("expenses.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _expenses[str(k)] = v
+        try:
+            _m = _exp4_migrate_all()      # V4: backfill approval_status (idempotent, never deletes/fakes)
+            if _m:
+                print(f"expenses V4: migrated {_m} record(s) into the approval lifecycle")
+        except Exception as _e:
+            print("expenses V4 migrate error:", _e)
         _expense_settings.clear()
         _expense_settings.update(_load_json("expense_settings.json", {}) or {})
         _guest_profiles.clear()
