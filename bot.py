@@ -7164,7 +7164,7 @@ EXPENSE_V2_REASON_LABELS = {
 
 def _exp_has_real_hostaway_ref(exp):
     ref = exp.get("hostaway_ref") or exp.get("hostaway_expense_id")
-    return bool(ref) and str(ref) not in ("DRYRUN", "ok", "existing", "None", "none")
+    return bool(ref) and str(ref) not in ("DRYRUN", "ok", "existing", "None", "none", "FILE")
 
 def _exp_hostaway_item_id(item):
     if not isinstance(item, dict):
@@ -8321,6 +8321,8 @@ def _exp4_view(exp):
         "description": exp.get("note") or "",
         "vendor": exp.get("vendor") or "",
         "receipt_url": exp.get("receipt_link") or "",
+        "kind": exp.get("kind") or "expense",                 # expense (negative) | extra (positive)
+        "owner_email": exp.get("owner_email") or "",
         "approval_status": _exp4_approval_status(exp),
         "export_status": _exp4_export_status(exp),
         "tab": _exp4_tab(exp),
@@ -8414,11 +8416,14 @@ def _exp4_reject(exp, by="", reason=""):
     return True, "rejected"
 
 _EXP4_EDITABLE = ("apartment", "category", "maintenance_type", "amount", "expense_date",
-                  "vendor", "note", "receipt_link", "payment_method")
+                  "vendor", "note", "receipt_link", "payment_method", "owner_email")
 
 def _exp4_edit(exp, fields, by=""):
     """Edit editable fields, re-match the apartment, and re-evaluate the approval lane."""
     changed = []
+    if "kind" in fields and str(fields["kind"]) in ("expense", "extra"):
+        if exp.get("kind") != fields["kind"]:
+            exp["kind"] = fields["kind"]; changed.append("kind")
     for k in _EXP4_EDITABLE:
         if k not in fields:
             continue
@@ -8825,6 +8830,135 @@ def _exp4_reconcile():
             buckets["hostaway_only"].append(_exp4_safe_summary(it, ("id", "amount", "expenseDate", "date", "concept", "categoryName")))
     return {"ok": ok, "error": err, "hostaway_count": len(items or []),
             "counts": {k: len(v) for k, v in buckets.items()}, "buckets": buckets}
+
+# ---- V4 bulk EXPORT via Hostaway's import file (.xlsx) — no API create, dup-safe ----
+# Hostaway has NO bulk/import API (verified against their docs); the .xlsx is uploaded by
+# hand in Hostaway's web import. So we BUILD the exact-format file, after a live duplicate
+# check, and verification still re-fetches Hostaway. Expense=negative, Extra=positive.
+EXP4_IMPORT_COLS = ["name", "description", "category", "date", "reservationId",
+                    "listingId", "unitId", "owner", "amount"]
+
+def _exp4_import_date(s):
+    try:
+        y, m, d = str(s)[:10].split("-")
+        return datetime(int(y), int(m), int(d))      # template cells are datetimes; matches Hostaway
+    except Exception:
+        return str(s or "")
+
+def _exp4_import_row(exp):
+    """One Hostaway import-template row from a ledger expense. Embeds the OJ-EXP ref in the
+    name so we can verify it back. Expense → negative amount, Extra → positive."""
+    s = _exp_settings()
+    cat = (s.get("category_map") or {}).get(exp.get("category") or "", exp.get("category") or "")
+    ref = exp.get("ref") or ""
+    apt = (exp.get("apartment") or "").replace("Ouja |", "").strip()
+    base = (exp.get("maintenance_type") or exp.get("category") or "Expense")
+    name = " | ".join([p for p in (ref, base, apt) if p])[:200]
+    desc_bits = [b for b in (
+        ("Vendor: " + exp["vendor"]) if exp.get("vendor") else "",
+        ("By: " + exp["submitter"]) if exp.get("submitter") else "",
+        ("Note: " + exp["note"]) if exp.get("note") else "",
+        ("Receipt: " + exp["receipt_link"]) if exp.get("receipt_link") else "",
+    ) if b]
+    try:
+        amt = round(abs(float(exp.get("amount"))), 2)
+    except (TypeError, ValueError):
+        amt = 0.0
+    if (exp.get("kind") or "expense") == "expense":
+        amt = -amt                                      # expense negative; extra stays positive
+    return {"name": name, "description": " · ".join(desc_bits)[:900], "category": cat,
+            "date": _exp4_import_date(exp.get("expense_date")), "reservationId": exp.get("reservation_id") or "",
+            "listingId": (int(exp["listing_id"]) if exp.get("listing_id") is not None else ""),
+            "unitId": "", "owner": exp.get("owner_email") or "", "amount": amt}
+
+def _exp4_xlsx_bytes(rows):
+    """Build a Hostaway import .xlsx (exact template columns) from row dicts. openpyxl is a
+    declared dependency (requirements.txt)."""
+    import openpyxl, io
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Expenes and extras import templ"          # match Hostaway's template sheet name
+    ws.append(EXP4_IMPORT_COLS)
+    for r in rows:
+        ws.append([r.get(c, "") for c in EXP4_IMPORT_COLS])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def _exp4_file_eligible(exp):
+    """A row may go into the import file only if approved, non-split, valid, AND mapped to a
+    Hostaway listing id (the import needs the numeric listingId, not just a text apartment)."""
+    if not exp or exp.get("is_split_parent"):
+        return False, "split_parent"
+    if _exp4_approval_status(exp) != "approved":
+        return False, "not_approved"
+    miss = _exp4_missing_required(exp)
+    if miss:
+        return False, "missing:" + ",".join(miss)
+    if exp.get("listing_id") is None:
+        return False, "no_hostaway_listing"
+    return True, "ok"
+
+def _exp4_prepare_check(ids):
+    """LIVE pre-download duplicate check: for a batch of approved expenses, ask Hostaway
+    'is each already there?' and classify ready / already_in_hostaway / blocked. Read-only —
+    builds NOTHING and changes NOTHING yet."""
+    items, ok, err = _exp_fetch_hostaway(force=True)
+    ready, already, blocked = [], [], []
+    for i in ids:
+        e = _expenses.get(str(i))
+        if not e:
+            continue
+        base = {"id": e.get("id"), "ref": e.get("ref"), "apartment": e.get("apartment"),
+                "amount": round(abs(float(e.get("amount") or 0)), 2), "date": e.get("expense_date"),
+                "kind": e.get("kind") or "expense"}
+        elig, why = _exp4_file_eligible(e)
+        if not elig:
+            base["reason"] = why; blocked.append(base); continue
+        m = _exp_match_hostaway_item(e, items) if ok else {"present": False, "confidence": 0}
+        if m.get("present") and m.get("confidence", 0) >= 0.82:
+            base["confidence"] = round(m.get("confidence", 0), 2)
+            base["match_method"] = m.get("method", "")
+            base["hostaway_id"] = m.get("id") or ""
+            already.append(base)
+        else:
+            ready.append(base)
+    return {"ok": ok, "error": err, "hostaway_count": len(items or []),
+            "ready": ready, "already": already, "blocked": blocked}
+
+def _exp4_build_file(ids, by=""):
+    """Build the import .xlsx for the FINAL included ids and mark each as 'in import file,
+    awaiting verification'. Returns (xlsx_bytes, marked_ids, skipped). Skips ineligible rows."""
+    rows, marked, skipped = [], [], []
+    for i in ids:
+        e = _expenses.get(str(i))
+        elig, why = _exp4_file_eligible(e) if e else (False, "not_found")
+        if not elig:
+            skipped.append({"id": str(i), "reason": why}); continue
+        rows.append(_exp4_import_row(e))
+        e["hostaway_ref"] = "FILE"                          # placeholder (not a real id; excluded by _exp_has_real_hostaway_ref)
+        e["dry"] = False
+        e["import_batch_at"] = _exp_now().isoformat(timespec="seconds")
+        _exp_set_status(e, "sent_unverified", reason="import_file", detail="in Hostaway import file")
+        _exp4_set_job(e, "exported_not_verified", error="awaiting_import")
+        _exp4_log(e, "import_file_prepared", actor=by, new="exported_not_verified",
+                  detail="included in Hostaway import file", recommended="upload in Hostaway, then verify")
+        marked.append(e.get("id"))
+    persist_state()
+    return _exp4_xlsx_bytes(rows), marked, skipped
+
+async def _exp4_verify_now(exp):
+    """Re-fetch Hostaway and verify this one expense (no API create). Used after a file import
+    and for the 'Verify now' action. Green check only on a real match."""
+    if not exp or exp.get("is_split_parent"):
+        return False, "split_parent"
+    ok = await _exp4_verify(exp)
+    if ok:
+        _exp4_set_job(exp, "verified")
+        _exp4_log(exp, "verified_recheck", new="verified", detail=exp.get("verify_note") or "")
+    else:
+        _exp4_log(exp, "verify_recheck_miss", detail=exp.get("verify_note") or "not_found")
+    return ok, ("verified" if ok else (exp.get("verify_note") or "not_found"))
 
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
@@ -11141,7 +11275,7 @@ const T = {
     x4_pending:'بانتظار الاعتماد', x4_approved:'معتمد', x4_exported:'تم التصدير إلى Hostaway',
     x4_verified:'متحقق', x4_needs_action:'تحتاج تدخل',
     x4_approve:'اعتماد', x4_reject:'رفض', x4_edit:'تعديل', x4_export:'تصدير إلى Hostaway',
-    x4_view_match:'عرض مطابقة Hostaway', x4_recheck:'تحقق ثم أعد التصدير', x4_split:'تقسيم',
+    x4_view_match:'عرض مطابقة Hostaway', x4_recheck:'تحقق الآن', x4_split:'تقسيم',
     x4_in_sheet:'موجود في الشيت', x4_in_ledger:'موجود في الدفتر الداخلي', x4_in_hostaway:'موجود في Hostaway',
     x4_not_hostaway:'غير موجود في Hostaway', x4_exported_nv:'تم التصدير ولم يتم التحقق',
     x4_issue:'سبب المشكلة', x4_recommended:'الإجراء المقترح',
@@ -11377,7 +11511,7 @@ const T = {
     x4_pending:'Pending Approval', x4_approved:'Approved', x4_exported:'Exported to Hostaway',
     x4_verified:'Verified', x4_needs_action:'Needs Action',
     x4_approve:'Approve', x4_reject:'Reject', x4_edit:'Edit', x4_export:'Export to Hostaway',
-    x4_view_match:'View Hostaway Match', x4_recheck:'Check then re-export', x4_split:'Split',
+    x4_view_match:'View Hostaway Match', x4_recheck:'Verify now', x4_split:'Split',
     x4_in_sheet:'Present in Sheet', x4_in_ledger:'Present in Internal Ledger', x4_in_hostaway:'Present in Hostaway',
     x4_not_hostaway:'Missing from Hostaway', x4_exported_nv:'Exported, Not Verified',
     x4_issue:'Issue Reason', x4_recommended:'Recommended Action',
@@ -15442,6 +15576,7 @@ function _renderExp4(){
   var body=document.getElementById('expBody'); if(!body) return;
   var d=D.exp4||{}, tabs=d.tabs||{}, T=t(), ar=(L==='ar');
   var head='<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+      +'<button class="btn primary sm" onclick="x4OpenPrepare()">📤 '+(ar?'تجهيز ملف الاستيراد':'Prepare import file')+'</button>'
       +'<button class="btn ghost sm" onclick="x4Import()">'+T.x4_import+'</button>'
       +'<button class="btn ghost sm" onclick="loadExpenses()">'+T.x4_refresh+'</button>'
       +'<button class="btn ghost sm" onclick="x4Advanced()">'+T.x4_advanced+'</button></div>';
@@ -15456,6 +15591,7 @@ function _renderExp4(){
         +'<div class="muted" style="font-size:10.5px">'+expMoney(c.sar||0)+'</div></button>';
     }).join('')+'</div>';
   var search='<input value="'+esc(_x4Q)+'" oninput="x4Search(this.value)" placeholder="'+(ar?'بحث: مرجع / شقة / موظف':'Search: ref / apartment / employee')+'" style="width:100%;max-width:340px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px;margin-bottom:12px">';
+  if(_x4Tab==='prepare'){ body.innerHTML=head+cards+x4PrepareHtml(); return; }
   var rows=d.rows||[];
   var list=rows.length ? '<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(x4Row).join('')+'</div>'
     : emptyState(T.x4_no_rows, ar?'بدّل التبويب أو حدّث الإدخال من الشيت.':'Switch tab or refresh intake from the Sheet.','—');
@@ -15466,8 +15602,8 @@ function x4Btns(r){
   function b(fn,lab,kind){ return '<button class="btn '+(kind||'ghost')+' xs" onclick="'+fn+'(&#39;'+esc(id)+'&#39;)">'+lab+'</button>'; }
   if(r.is_split_parent) return '<span class="muted" style="font-size:11px">'+T.x4_split+'</span>';
   if(r.tab==='pending') out=[b('x4Approve',T.x4_approve,'primary'),b('x4Reject',T.x4_reject),b('x4Edit',T.x4_edit),b('x4Split',T.x4_split)];
-  else if(r.tab==='approved') out=[b('x4Export',T.x4_export,'primary'),b('x4Edit',T.x4_edit),b('x4Reject',T.x4_reject),b('x4Split',T.x4_split)];
-  else if(r.tab==='exported'){ out=[b('x4Match',T.x4_view_match)]; if(es==='exported_not_verified') out.push(b('x4Recheck',T.x4_recheck)); }
+  else if(r.tab==='approved') out=[b('x4Edit',T.x4_edit),b('x4Reject',T.x4_reject),b('x4Split',T.x4_split)];   // export via Prepare-File flow (file-only)
+  else if(r.tab==='exported'){ out=[b('x4Recheck',T.x4_recheck,'primary'),b('x4Match',T.x4_view_match)]; }
   else if(r.tab==='verified') out=[b('x4Match',T.x4_view_match),b('x4Archive',T.x4_archive)];
   else { if(es==='failed') out=[b('x4Recheck',T.x4_recheck,'primary'),b('x4Edit',T.x4_edit)];
          else if(es==='duplicate_found') out=[b('x4Match',T.x4_view_match),b('x4Edit',T.x4_edit),b('x4Reject',T.x4_reject)];
@@ -15590,6 +15726,96 @@ async function x4Advanced(){
   var body='<div class="muted" style="font-size:11.5px;margin-bottom:10px">Hostaway: '+(d.ok?(L==='ar'?'متصل':'connected'):('⚠ '+esc(d.error||'')))+' · '+fmt(d.hostaway_count||0)+'</div>';
   body+=Object.keys(labels).map(function(k){ return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span>'+esc(labels[k])+'</span><b>'+fmt(c[k]||0)+'</b></div>'; }).join('');
   setDrawerBody(body);
+}
+
+/* ---- Prepare import file: select approved → live Hostaway dup-check → I'm ready → download .xlsx ---- */
+var _x4Prepare=null;
+async function x4OpenPrepare(){
+  _x4Tab='prepare';
+  var body=document.getElementById('expBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
+  var d; try{ d=await api('/api/expenses/v4/overview?tab=approved&limit=400'); }catch(e){ d={rows:[]}; }
+  _x4Prepare={approved:(d.rows||[]), sel:{}, check:null};
+  (d.rows||[]).forEach(function(r){ _x4Prepare.sel[r.expense_id]=true; });
+  _renderExp4();
+}
+function x4PrepSel(id,on){ if(_x4Prepare){ _x4Prepare.sel[id]=on; } }
+function x4PrepAll(on){ if(!_x4Prepare) return; _x4Prepare.approved.forEach(function(r){ _x4Prepare.sel[r.expense_id]=on; }); _x4Prepare.check=null; _renderExp4(); }
+function x4PrepBack(){ if(_x4Prepare){ _x4Prepare.check=null; _renderExp4(); } }
+async function x4PrepCheck(){
+  if(!_x4Prepare) return;
+  var ids=_x4Prepare.approved.map(function(r){return r.expense_id;}).filter(function(id){return _x4Prepare.sel[id];});
+  if(!ids.length){ toast(L==='ar'?'اختر مصاريف أول':'Select expenses first'); return; }
+  toast(L==='ar'?'⏳ نتحقق من Hostaway…':'⏳ Checking Hostaway…');
+  var c; try{ c=await post('/api/expenses/v4/prepare-check',{ids:ids}); }catch(e){ toast('⚠ '+e); return; }
+  _x4Prepare.check=c; _renderExp4();
+}
+function x4PrepInclude(id){
+  if(!_x4Prepare||!_x4Prepare.check) return;
+  var c=_x4Prepare.check, i;
+  for(i=0;i<c.already.length;i++){ if(c.already[i].id===id){ c.ready.push(c.already[i]); c.already.splice(i,1); break; } }
+  _renderExp4();
+}
+async function x4PrepMarkAlready(id){
+  var r; try{ r=await post('/api/expenses/v4/mark-already',{id:id}); }catch(e){ toast('⚠ '+e); return; }
+  toast(r.ok?(L==='ar'?'تم وضعه كمتحقق':'Marked verified'):('⚠ '+(r.reason||'')));
+  if(_x4Prepare&&_x4Prepare.check){ _x4Prepare.check.already=_x4Prepare.check.already.filter(function(x){return x.id!==id;}); _renderExp4(); }
+}
+async function x4PrepDownload(){
+  if(!_x4Prepare||!_x4Prepare.check) return;
+  var ids=(_x4Prepare.check.ready||[]).map(function(r){return r.id;});
+  if(!ids.length){ toast(L==='ar'?'ما فيه صفوف جاهزة':'No ready rows'); return; }
+  var r; try{ r=await post('/api/expenses/v4/build-file',{ids:ids}); }catch(e){ toast('⚠ '+e); return; }
+  if(!r.ok||!r.b64){ toast('⚠'); return; }
+  var bin=atob(r.b64), len=bin.length, arr=new Uint8Array(len), i;
+  for(i=0;i<len;i++){ arr[i]=bin.charCodeAt(i); }
+  var blob=new Blob([arr],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  var url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=r.filename||'ouja-hostaway-import.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  toast(L==='ar'?'تم تجهيز الملف — ارفعه في Hostaway ثم تحقق':'File ready — upload it in Hostaway, then verify');
+  _x4Prepare=null; _x4Tab='exported'; loadExpenses();
+}
+function x4PrepareHtml(){
+  var T=t(), ar=(L==='ar'), p=_x4Prepare||{approved:[],sel:{}};
+  var selCount=Object.keys(p.sel).filter(function(k){return p.sel[k];}).length;
+  var head='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0">'
+    +'<b style="font-size:14px">📤 '+(ar?'تجهيز ملف الاستيراد':'Prepare import file')+'</b>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +'<button class="btn ghost sm" onclick="x4PrepAll(true)">'+(ar?'تحديد الكل':'Select all')+'</button>'
+      +'<button class="btn ghost sm" onclick="x4PrepAll(false)">'+(ar?'مسح':'Clear')+'</button>'
+      +'<button class="btn primary sm" onclick="x4PrepCheck()">'+(ar?'تحقق من Hostaway':'Check Hostaway')+' ('+selCount+')</button></div></div>';
+  if(p.check) return head+x4PrepResultHtml(p.check);
+  if(!p.approved.length) return head+emptyState(ar?'ما فيه مصاريف معتمدة':'No approved expenses', ar?'اعتمد مصاريف أول من تبويب «معتمد».':'Approve expenses first.','—');
+  var list=p.approved.map(function(r){
+    var on=!!p.sel[r.expense_id], unmapped=(r.listing_id==null);
+    return '<label class="exp-card" style="display:flex;gap:10px;align-items:center;cursor:pointer">'
+      +'<input type="checkbox" '+(on?'checked':'')+' onchange="x4PrepSel(&#39;'+esc(r.expense_id)+'&#39;,this.checked)">'
+      +'<div style="flex:1;min-width:0"><b>'+esc(r.ouja_reference||r.expense_id)+' · '+expMoney(r.amount_sar||0)+'</b>'
+      +'<div class="muted" style="font-size:11.5px">'+esc(r.apartment||'—')+' · '+esc(r.expense_date||'')+' · '+esc(r.category||'')+'</div></div>'
+      +(unmapped?('<span class="exp-reason" style="color:var(--down)">'+(ar?'غير مربوط بـHostaway':'no Hostaway listing')+'</span>'):'')+'</label>';
+  }).join('');
+  return head+'<div style="display:flex;flex-direction:column;gap:8px">'+list+'</div>';
+}
+function x4PrepResultHtml(c){
+  var ar=(L==='ar');
+  function sec(title,col,rows,extra){ if(!rows||!rows.length) return '';
+    return '<div style="margin-bottom:14px"><div style="font-weight:700;color:'+col+';margin-bottom:6px">'+title+' ('+rows.length+')</div>'
+      +rows.map(function(r){ return '<div class="exp-card" style="display:flex;justify-content:space-between;gap:8px;align-items:center">'
+        +'<div style="min-width:0"><b>'+esc(r.ref||r.id)+' · '+expMoney(r.amount||0)+'</b>'
+        +'<div class="muted" style="font-size:11px">'+esc(r.apartment||'')+' · '+esc(r.date||'')+(r.reason?(' · '+esc(r.reason)):'')+(r.confidence?(' · '+Math.round(r.confidence*100)+'%'):'')+'</div></div>'
+        +(extra?extra(r):'')+'</div>'; }).join('')+'</div>';
+  }
+  var readyN=(c.ready||[]).length;
+  var conn='<div class="muted" style="font-size:11.5px;margin:6px 0">Hostaway: '+(c.ok?(ar?'متصل':'connected'):('⚠ '+esc(c.error||'')))+' · '+fmt(c.hostaway_count||0)+'</div>';
+  var sReady=sec('✅ '+(ar?'جاهزة (مو موجودة في Hostaway)':'Ready (not in Hostaway)'),'var(--green)',c.ready,null);
+  var sAlready=sec('⚠️ '+(ar?'موجودة مسبقًا في Hostaway':'Already in Hostaway'),'var(--gold)',c.already,function(r){
+    return '<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn ghost xs" onclick="x4PrepMarkAlready(&#39;'+esc(r.id)+'&#39;)">'+(ar?'موجود — علّمه متحقق':'Mark verified')+'</button>'
+      +'<button class="btn ghost xs" onclick="x4PrepInclude(&#39;'+esc(r.id)+'&#39;)">'+(ar?'ضمّنه':'Include')+'</button></div>'; });
+  var sBlocked=sec('⛔ '+(ar?'مرفوضة (تحتاج إصلاح/ربط)':'Blocked (need fixing/mapping)'),'var(--down)',c.blocked,null);
+  var dl='<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">'
+    +'<button class="btn primary" '+(readyN?'':'disabled')+' onclick="x4PrepDownload()">'+(ar?'أنا جاهز — نزّل الملف':'I am ready — download file')+' ('+readyN+')</button>'
+    +'<button class="btn ghost sm" onclick="x4PrepBack()">'+(ar?'رجوع للتحديد':'Back to selection')+'</button></div>';
+  return conn+sReady+sAlready+sBlocked+dl;
 }
 
 /* ============== DESIGN REQUESTS (Petunia) ============== */
@@ -26387,17 +26613,21 @@ async def _api_exp4_export(request):
     return _json(out)
 
 async def _api_exp4_recheck(request):
-    """Check-then-re-export (duplicate-safe): verifies in Hostaway first, only re-exports
-    if genuinely absent. Never blind-duplicates."""
+    """Verify now: re-fetch Hostaway and confirm this expense (no API create — export is
+    file-only). Promotes to Verified only on a real match."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    b = await _read_body(request); by = _exp4_actor(request, b)
-    e = _expenses.get(str(b.get("id") or ""))
-    if not e:
-        return _json({"error": "not_found"}, 404)
-    ok, why = _exp4_check_then_reexport(e, by=by)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else ([b.get("id")] if b.get("id") else [])
+    out = {"ok": True, "verified": [], "not_found": []}
+    for i in ids:
+        e = _expenses.get(str(i))
+        if not e:
+            continue
+        ok, why = await _exp4_verify_now(e)
+        (out["verified"] if ok else out["not_found"]).append({"id": str(i), "reason": why})
     await asyncio.to_thread(persist_state)
-    return _json({"ok": ok, "reason": why, "view": _exp4_view(e)})
+    return _json(out)
 
 async def _api_exp4_match(request):
     """View Hostaway Match — a LIVE Hostaway lookup for one expense (explicit action)."""
@@ -26458,6 +26688,44 @@ async def _api_exp4_archive(request):
     _exp4_log(e, "archived", actor=by, new="archived")
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
+
+async def _api_exp4_prepare_check(request):
+    """Pre-download LIVE duplicate check: which of these approved expenses are already in
+    Hostaway. Read-only — builds nothing. {ids:[...]} -> {ready, already, blocked}."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    return _json(await asyncio.to_thread(_exp4_prepare_check, ids))
+
+async def _api_exp4_build_file(request):
+    """Build the Hostaway import .xlsx for the FINAL included ids and mark them
+    'in import file, awaiting verification'. Returns the file as base64 for an instant
+    browser download (no server-side storage)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    if not ids:
+        return _json({"error": "no_ids"}, 400)
+    import base64
+    xlsx, marked, skipped = await asyncio.to_thread(_exp4_build_file, ids, by)
+    return _json({"ok": True, "filename": "ouja-hostaway-import.xlsx",
+                  "b64": base64.b64encode(xlsx).decode("ascii"),
+                  "marked": marked, "skipped": skipped})
+
+async def _api_exp4_mark_already(request):
+    """An expense the duplicate-check found ALREADY in Hostaway: verify it now (so it gets a
+    real green check) and keep it OUT of the import file."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    e = _expenses.get(str(b.get("id") or ""))
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    ok, why = await _exp4_verify_now(e)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": ok, "reason": why, "view": _exp4_view(e)})
 
 async def _api_expenses_sync_status(request):
     """The 'حالة المزامنة' page: every expense + its pipeline stage + who touched it +
@@ -28601,6 +28869,9 @@ async def start_web_server():
         app.router.add_post("/api/expenses/v4/split-preview", _api_exp4_split_preview)
         app.router.add_post("/api/expenses/v4/split-apply", _api_exp4_split_apply)
         app.router.add_post("/api/expenses/v4/archive", _api_exp4_archive)
+        app.router.add_post("/api/expenses/v4/prepare-check", _api_exp4_prepare_check)
+        app.router.add_post("/api/expenses/v4/build-file", _api_exp4_build_file)
+        app.router.add_post("/api/expenses/v4/mark-already", _api_exp4_mark_already)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
