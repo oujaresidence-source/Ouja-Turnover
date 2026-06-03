@@ -11140,6 +11140,23 @@ const T = {
     exp_sync:'تحديث المزامنة', exp_status:'حالة المزامنة',
     exp_v2:'المصاريف V2', exp_reconcile_repair:'مطابقة وإصلاح',
     exp_three_source:'تحليل المصادر الثلاثة',
+    x4_title:'مركز اعتماد المصاريف', x4_sub:'الشيت للإدخال · الداشبورد للاعتماد · Hostaway للترحيل',
+    x4_pending:'بانتظار الاعتماد', x4_approved:'معتمد', x4_exported:'تم التصدير إلى Hostaway',
+    x4_verified:'متحقق', x4_needs_action:'تحتاج تدخل',
+    x4_approve:'اعتماد', x4_reject:'رفض', x4_edit:'تعديل', x4_export:'تصدير إلى Hostaway',
+    x4_view_match:'عرض مطابقة Hostaway', x4_recheck:'تحقق ثم أعد التصدير', x4_split:'تقسيم',
+    x4_in_sheet:'موجود في الشيت', x4_in_ledger:'موجود في الدفتر الداخلي', x4_in_hostaway:'موجود في Hostaway',
+    x4_not_hostaway:'غير موجود في Hostaway', x4_exported_nv:'تم التصدير ولم يتم التحقق',
+    x4_issue:'سبب المشكلة', x4_recommended:'الإجراء المقترح',
+    x4_split_pct:'تقسيم بالنسبة', x4_split_sar:'تقسيم بالمبلغ', x4_remaining:'المبلغ المتبقي',
+    x4_confirm_split:'اعتماد التقسيم', x4_only_verified:'لا تظهر علامة الصح إلا بعد التحقق من Hostaway',
+    x4_audit:'سجل التدقيق', x4_import:'تحديث الإدخال من الشيت', x4_refresh:'تحديث', x4_advanced:'متقدّم (تشخيص)',
+    x4_count:'عدد', x4_amount:'المبلغ', x4_employee:'الموظف', x4_apartment:'الشقة', x4_date:'التاريخ',
+    x4_category:'الفئة', x4_concept:'الوصف', x4_receipt:'الإيصال', x4_state:'الحالة', x4_reason:'السبب',
+    x4_payload:'حمولة Hostaway', x4_response:'رد Hostaway', x4_match:'مطابقة Hostaway', x4_raw:'بيانات الشيت',
+    x4_ledger_rec:'السجل الداخلي', x4_timeline:'المسار', x4_no_rows:'ما فيه مصاريف هنا',
+    x4_reject_q:'سبب الرفض؟', x4_archive:'أرشفة', x4_save:'حفظ', x4_cancel:'إلغاء', x4_add_apt:'أضف شقة',
+    x4_checked_at:'آخر فحص', x4_confidence:'الثقة', x4_ha_id:'رقم Hostaway',
     exp_present_sheet:'موجود في الشيت', exp_present_dashboard:'موجود في الداشبورد', exp_present_hostaway:'موجود في Hostaway',
     exp_missing_hostaway:'غير موجود في Hostaway', exp_ready_export:'جاهز للترحيل', exp_needs_review:'تحتاج مراجعة',
     exp_in_progress:'قيد التنفيذ', exp_sent_not_verified:'تم الإرسال ولم يتم التحقق', exp_verified_hostaway:'متحقق في Hostaway',
@@ -11359,6 +11376,23 @@ const T = {
     exp_sync:'Refresh sync', exp_status:'Sync status',
     exp_v2:'Expenses V2', exp_reconcile_repair:'Reconcile & Repair',
     exp_three_source:'Three-source analysis',
+    x4_title:'Expense Approval Center', x4_sub:'Sheet to intake · Dashboard to approve · Hostaway to export',
+    x4_pending:'Pending Approval', x4_approved:'Approved', x4_exported:'Exported to Hostaway',
+    x4_verified:'Verified', x4_needs_action:'Needs Action',
+    x4_approve:'Approve', x4_reject:'Reject', x4_edit:'Edit', x4_export:'Export to Hostaway',
+    x4_view_match:'View Hostaway Match', x4_recheck:'Check then re-export', x4_split:'Split',
+    x4_in_sheet:'Present in Sheet', x4_in_ledger:'Present in Internal Ledger', x4_in_hostaway:'Present in Hostaway',
+    x4_not_hostaway:'Missing from Hostaway', x4_exported_nv:'Exported, Not Verified',
+    x4_issue:'Issue Reason', x4_recommended:'Recommended Action',
+    x4_split_pct:'Split by Percentage', x4_split_sar:'Split by SAR Amount', x4_remaining:'Remaining Amount',
+    x4_confirm_split:'Confirm Split', x4_only_verified:'Do not show checkmark until verified in Hostaway',
+    x4_audit:'Audit Log', x4_import:'Refresh intake from Sheet', x4_refresh:'Refresh', x4_advanced:'Advanced (diagnostics)',
+    x4_count:'count', x4_amount:'Amount', x4_employee:'Employee', x4_apartment:'Apartment', x4_date:'Date',
+    x4_category:'Category', x4_concept:'Concept', x4_receipt:'Receipt', x4_state:'State', x4_reason:'Reason',
+    x4_payload:'Hostaway payload', x4_response:'Hostaway response', x4_match:'Hostaway match', x4_raw:'Sheet row',
+    x4_ledger_rec:'Internal ledger', x4_timeline:'Timeline', x4_no_rows:'No expenses here',
+    x4_reject_q:'Reason for rejection?', x4_archive:'Archive', x4_save:'Save', x4_cancel:'Cancel', x4_add_apt:'Add apartment',
+    x4_checked_at:'Last checked', x4_confidence:'Confidence', x4_ha_id:'Hostaway id',
     exp_present_sheet:'Present in Sheet', exp_present_dashboard:'Present in Dashboard', exp_present_hostaway:'Present in Hostaway',
     exp_missing_hostaway:'Missing from Hostaway', exp_ready_export:'Ready to Export', exp_needs_review:'Needs Review',
     exp_in_progress:'In Progress', exp_sent_not_verified:'Sent, Not Verified', exp_verified_hostaway:'Verified in Hostaway',
@@ -15386,6 +15420,181 @@ async function expSaveSettings(){
   await post('/api/expenses/settings',{settings:s});
   D.expOpts=null;
   closeExp(); toast(L==='ar'?'تم حفظ الإعدادات':'Settings saved'); await loadExpenses();
+}
+
+/* ============================================================
+   EXPENSES V4 — Expense Approval Center (supersedes V1/V2 UI;
+   the old renderers stay in code but are no longer reached).
+   Sheet=intake · Dashboard=approval · Hostaway=export. No raw
+   backslash escapes in any string (String.fromCharCode for newlines).
+   ============================================================ */
+var _x4Tab='pending'; var _x4Q=''; var _x4Split=null;
+function x4Color(tab){ return tab==='verified'?'var(--green)':(tab==='needs_action'?'var(--down)':'var(--gold)'); }
+async function loadExpenses(){
+  var body=document.getElementById('expBody'); if(!body) return;
+  body.innerHTML='<div class="empty sk">—</div>';
+  if(!D.expOpts){ try{ D.expOpts=await api('/api/expenses/options'); }catch(_e){ D.expOpts={apartments:[]}; } }
+  try{ D.exp4=await api('/api/expenses/v4/overview?tab='+encodeURIComponent(_x4Tab)+(_x4Q?('&q='+encodeURIComponent(_x4Q)):'')); }
+  catch(e){ D.exp4={tabs:{},rows:[],error:String(e)}; }
+  _renderExp4(); buildSideNav(); buildBottomNav();
+}
+function x4SetTab(tb){ _x4Tab=tb; loadExpenses(); }
+function x4Search(v){ _x4Q=v; clearTimeout(window._x4qt); window._x4qt=setTimeout(loadExpenses,300); }
+function x4StateLabel(r){ var T=t(); if(r.export_status==='exported_not_verified') return T.x4_exported_nv; return T['x4_'+r.tab]||r.tab; }
+function _renderExp4(){
+  var body=document.getElementById('expBody'); if(!body) return;
+  var d=D.exp4||{}, tabs=d.tabs||{}, T=t(), ar=(L==='ar');
+  var head='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<div><div style="font-size:18px;font-weight:800">'+T.x4_title+'</div><div class="muted" style="font-size:12px;margin-top:2px">'+T.x4_sub+'</div></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +'<button class="btn ghost sm" onclick="x4Import()">'+T.x4_import+'</button>'
+      +'<button class="btn ghost sm" onclick="loadExpenses()">'+T.x4_refresh+'</button>'
+      +'<button class="btn ghost sm" onclick="x4Advanced()">'+T.x4_advanced+'</button></div></div>';
+  if(d.dryrun_on){ head+=riskPanel('warn', ar?'وضع التجربة مفعّل':'DRY-RUN is ON', ar?'EXPENSE_POST_DRYRUN=1 — التصدير محاكاة فقط ولا يتحقق من Hostaway. اضبطه على 0 في Railway للترحيل الفعلي.':'EXPENSE_POST_DRYRUN=1 — exports are simulated and can never verify. Set it to 0 in Railway for real writes.','',''); }
+  if(d.error){ head+=riskPanel('danger', ar?'تعذّر التحميل':'Could not load', esc(String(d.error)),'',''); }
+  var order=[['pending','x4_pending'],['approved','x4_approved'],['exported','x4_exported'],['verified','x4_verified'],['needs_action','x4_needs_action']];
+  var cards='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;margin:12px 0">'
+    +order.map(function(p){ var c=tabs[p[0]]||{}, on=_x4Tab===p[0], col=x4Color(p[0]);
+      return '<button onclick="x4SetTab(&#39;'+p[0]+'&#39;)" style="text-align:start;background:'+(on?'var(--surface)':'var(--surface-2)')+';border:1px solid '+(on?col:'var(--border)')+';border-radius:10px;padding:12px 14px;cursor:pointer">'
+        +'<div style="font-size:20px;font-weight:800;color:'+col+'">'+fmt(c.count||0)+'</div>'
+        +'<div class="muted" style="font-size:11.5px;margin-top:2px">'+T[p[1]]+'</div>'
+        +'<div class="muted" style="font-size:10.5px">'+expMoney(c.sar||0)+'</div></button>';
+    }).join('')+'</div>';
+  var search='<input value="'+esc(_x4Q)+'" oninput="x4Search(this.value)" placeholder="'+(ar?'بحث: مرجع / شقة / موظف':'Search: ref / apartment / employee')+'" style="width:100%;max-width:340px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px;margin-bottom:12px">';
+  var rows=d.rows||[];
+  var list=rows.length ? '<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(x4Row).join('')+'</div>'
+    : emptyState(T.x4_no_rows, ar?'بدّل التبويب أو حدّث الإدخال من الشيت.':'Switch tab or refresh intake from the Sheet.','—');
+  body.innerHTML=head+cards+search+list;
+}
+function x4Btns(r){
+  var T=t(), id=r.expense_id, es=r.export_status, aps=r.approval_status, out=[];
+  function b(fn,lab,kind){ return '<button class="btn '+(kind||'ghost')+' xs" onclick="'+fn+'(&#39;'+esc(id)+'&#39;)">'+lab+'</button>'; }
+  if(r.is_split_parent) return '<span class="muted" style="font-size:11px">'+T.x4_split+'</span>';
+  if(r.tab==='pending') out=[b('x4Approve',T.x4_approve,'primary'),b('x4Reject',T.x4_reject),b('x4Edit',T.x4_edit),b('x4Split',T.x4_split)];
+  else if(r.tab==='approved') out=[b('x4Export',T.x4_export,'primary'),b('x4Edit',T.x4_edit),b('x4Reject',T.x4_reject),b('x4Split',T.x4_split)];
+  else if(r.tab==='exported'){ out=[b('x4Match',T.x4_view_match)]; if(es==='exported_not_verified') out.push(b('x4Recheck',T.x4_recheck)); }
+  else if(r.tab==='verified') out=[b('x4Match',T.x4_view_match),b('x4Archive',T.x4_archive)];
+  else { if(es==='failed') out=[b('x4Recheck',T.x4_recheck,'primary'),b('x4Edit',T.x4_edit)];
+         else if(es==='duplicate_found') out=[b('x4Match',T.x4_view_match),b('x4Edit',T.x4_edit),b('x4Reject',T.x4_reject)];
+         else if(aps==='rejected') out=[b('x4Edit',T.x4_edit)];
+         else out=[b('x4Edit',T.x4_edit),b('x4Reject',T.x4_reject)]; }
+  return out.join(' ');
+}
+function x4Row(r){
+  var T=t(), col=x4Color(r.tab);
+  var facts=[r.expense_id,r.source,r.expense_date,r.category,r.concept].filter(Boolean).map(esc).join(' · ');
+  var recommended=(L==='ar'?r.recommended_ar:r.recommended_en)||'';
+  var reasonChip = r.export_status==='exported_not_verified' ? T.x4_exported_nv
+    : ((r.missing_fields&&r.missing_fields.length) ? (T.x4_issue+': '+r.missing_fields.join(', ')) : (r.last_error_message||''));
+  return '<div class="exp-card" style="border-inline-start:3px solid '+col+';cursor:pointer" onclick="if(event.target.tagName!==&#39;BUTTON&#39;)x4Detail(&#39;'+esc(r.expense_id)+'&#39;)">'
+    +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="min-width:0">'
+      +'<div style="font-weight:800;font-size:14px">'+esc(r.ouja_reference||r.expense_id)+' · '+expMoney(r.amount_sar||0)+'</div>'
+      +'<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(r.apartment||'—')+' · '+esc(r.submitter||'—')+'</div>'
+      +'<div class="muted" style="font-size:11px;margin-top:2px">'+facts+'</div></div>'
+      +'<span style="font-size:11px;font-weight:700;color:'+col+'">'+esc(x4StateLabel(r))+'</span></div>'
+    +(reasonChip?('<div style="margin-top:7px"><span class="exp-reason">'+esc(reasonChip)+'</span></div>'):'')
+    +(recommended?('<div style="margin-top:5px;font-size:11.5px;color:var(--gold)">'+T.x4_recommended+': '+esc(recommended)+'</div>'):'')
+    +'<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">'+x4Btns(r)+'</div></div>';
+}
+async function x4Approve(id){ var r=await post('/api/expenses/v4/approve',{id:id}); if(r.blocked&&r.blocked.length) toast('⚠ '+(r.blocked[0].reason||'')); else toast('✓'); closeDrawer(); await loadExpenses(); }
+async function x4Reject(id){ var why=prompt(t().x4_reject_q); if(why===null) return; await post('/api/expenses/v4/reject',{id:id,reason:why||''}); closeDrawer(); await loadExpenses(); }
+async function x4Export(id){ var r=await post('/api/expenses/v4/export',{id:id}); if(r.skipped&&r.skipped.length) toast('⚠ '+(r.skipped[0].reason||'')); else toast(L==='ar'?'تم الإرسال للتصدير':'Queued for export'); closeDrawer(); await loadExpenses(); }
+async function x4Recheck(id){ toast(L==='ar'?'⏳ نتحقق من Hostaway…':'⏳ Checking Hostaway…'); var r=await post('/api/expenses/v4/recheck',{id:id}); toast(r.ok?(L==='ar'?'تم':'Done'):('⚠ '+(r.reason||''))); closeDrawer(); await loadExpenses(); }
+async function x4Archive(id){ await post('/api/expenses/v4/archive',{id:id}); closeDrawer(); await loadExpenses(); }
+async function x4Import(){ toast(L==='ar'?'⏳ نقرأ الشيت…':'⏳ Reading Sheet…'); var r=await post('/api/expenses/v4/import',{}); toast((L==='ar'?'استورد ':'imported ')+(r.created||0)); await loadExpenses(); }
+async function x4Detail(id){
+  var d; try{ d=await api('/api/expenses/v4/detail?id='+encodeURIComponent(id)); }catch(e){ toast('⚠ '+e); return; }
+  if(!d.view) return; var v=d.view, T=t();
+  openDrawer(v.ouja_reference||v.expense_id, expMoney(v.amount_sar||0)+' · '+(v.apartment||''));
+  function pre(o){ return '<pre style="white-space:pre-wrap;direction:ltr;text-align:left;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;max-height:200px;overflow:auto">'+esc(JSON.stringify(o||{},null,2))+'</pre>'; }
+  function sec(ti,inner){ return '<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:5px">'+esc(ti)+'</div>'+inner+'</div>'; }
+  var lifecycle='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><span class="exp-reason">'+esc(x4StateLabel(v))+'</span><span class="exp-reason">'+esc(v.approval_status)+'</span><span class="exp-reason">'+esc(v.export_status)+'</span></div>';
+  var rec='<div style="font-size:12px;margin-bottom:10px">'+T.x4_recommended+': <b>'+esc(L==='ar'?v.recommended_ar:v.recommended_en)+'</b></div>';
+  var note='<div class="muted" style="font-size:10.5px;margin-bottom:12px">'+T.x4_only_verified+'</div>';
+  var matchBox = v.hostaway_verified ? sec(T.x4_match, pre(d.match_snapshot)) : '';
+  setDrawerBody(lifecycle+rec+note
+    + sec(T.x4_raw, pre(d.raw))
+    + sec(T.x4_ledger_rec, pre({approval_status:v.approval_status,export_status:v.export_status,listing_id:v.listing_id,retry_count:v.retry_count,hostaway_expense_id:v.hostaway_expense_id,last_error:v.last_error_message}))
+    + sec(T.x4_payload, pre(d.payload_preview)) + matchBox
+    + sec(T.x4_audit, pre(d.audit)) );
+  setDrawerFoot(x4Btns(v));
+}
+async function x4Edit(id){
+  var d; try{ d=await api('/api/expenses/v4/detail?id='+encodeURIComponent(id)); }catch(e){ toast('⚠ '+e); return; }
+  var v=d.view, T=t();
+  openDrawer(T.x4_edit, v.ouja_reference||id);
+  function f(k,lab,val,type){ return '<div style="margin-bottom:8px"><label class="muted" style="font-size:11px;display:block;margin-bottom:3px">'+esc(lab)+'</label><input id="x4e_'+k+'" value="'+esc(val==null?'':val)+'" '+(type?('type='+type):'')+' style="width:100%;padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"></div>'; }
+  setDrawerBody(f('apartment',T.x4_apartment,v.apartment)+f('amount',T.x4_amount,v.amount_sar,'number')+f('expense_date',T.x4_date,v.expense_date,'date')+f('category',T.x4_category,v.category)+f('maintenance_type',T.x4_concept,v.concept)+f('vendor','Vendor',v.vendor)+f('receipt_link',T.x4_receipt,v.receipt_url)+f('note','Note',v.description));
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+T.x4_cancel+'</button><button class="btn primary sm" onclick="x4SaveEdit(&#39;'+esc(id)+'&#39;)">'+T.x4_save+'</button>');
+}
+async function x4SaveEdit(id){
+  var keys=['apartment','amount','expense_date','category','maintenance_type','vendor','receipt_link','note'], fields={};
+  keys.forEach(function(k){ var el=document.getElementById('x4e_'+k); if(el) fields[k]=el.value; });
+  await post('/api/expenses/v4/edit',{id:id,fields:fields});
+  closeDrawer(); toast(L==='ar'?'تم الحفظ':'Saved'); await loadExpenses();
+}
+async function x4Match(id){
+  toast(L==='ar'?'⏳ نفحص Hostaway…':'⏳ Checking Hostaway…');
+  var d; try{ d=await api('/api/expenses/v4/match?id='+encodeURIComponent(id)); }catch(e){ toast('⚠ '+e); return; }
+  var m=d.match||{}, T=t(), col=m.present?'var(--green)':'var(--down)';
+  openDrawer(T.x4_match,'');
+  function pre(o){ return '<pre style="white-space:pre-wrap;direction:ltr;text-align:left;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;max-height:240px;overflow:auto">'+esc(JSON.stringify(o||{},null,2))+'</pre>'; }
+  var present=m.present?(L==='ar'?'موجود':'Present'):(L==='ar'?'غير موجود':'Not found');
+  var when=String(d.checked_at||'').replace('T',' ');
+  setDrawerBody('<div style="font-size:13px;margin-bottom:8px"><b style="color:'+col+'">'+present+'</b> · '+T.x4_confidence+': '+Math.round((m.confidence||0)*100)+'%</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-bottom:10px">'+T.x4_ha_id+': '+esc(m.hostaway_expense_id||'—')+' · '+T.x4_checked_at+': '+esc(when)+'</div>'
+    +'<div class="muted" style="font-size:10.5px;margin-bottom:6px">'+T.x4_only_verified+'</div>'+pre(m.item));
+}
+function x4Split(id){
+  var rows=(D.exp4&&D.exp4.rows)||[], r=null;
+  for(var i=0;i<rows.length;i++){ if(rows[i].expense_id===id){ r=rows[i]; break; } }
+  _x4Split={id:id,mode:'percent',rows:[{apartment:'',value:''},{apartment:'',value:''}],preview:{}};
+  openDrawer(t().x4_split, r?expMoney(r.amount_sar):'');
+  x4RenderSplit(); x4SplitPreview();
+}
+function x4SplitMode(m){ if(_x4Split){ _x4Split.mode=m; x4RenderSplit(); x4SplitPreview(); } }
+function x4SplitAdd(){ if(_x4Split&&_x4Split.rows.length<5){ _x4Split.rows.push({apartment:'',value:''}); x4RenderSplit(); x4SplitPreview(); } }
+function x4SplitDel(i){ if(_x4Split&&_x4Split.rows.length>2){ _x4Split.rows.splice(i,1); x4RenderSplit(); x4SplitPreview(); } }
+function x4SplitSet(i,k,v){ if(_x4Split){ _x4Split.rows[i][k]=v; clearTimeout(window._x4st); window._x4st=setTimeout(x4SplitPreview,350); } }
+function x4RenderSplit(){
+  if(!_x4Split) return; var T=t(), s=_x4Split;
+  var apts=(D.expOpts&&D.expOpts.apartments)||[];
+  var datalist='<datalist id="x4apts">'+apts.map(function(a){ return '<option value="'+esc(a.name||a)+'">'; }).join('')+'</datalist>';
+  var modeBtns='<div style="display:flex;gap:8px;margin-bottom:10px">'
+    +'<button class="btn '+(s.mode==='percent'?'primary':'ghost')+' sm" onclick="x4SplitMode(&#39;percent&#39;)">'+T.x4_split_pct+'</button>'
+    +'<button class="btn '+(s.mode==='sar'?'primary':'ghost')+' sm" onclick="x4SplitMode(&#39;sar&#39;)">'+T.x4_split_sar+'</button></div>';
+  var rowsHtml=s.rows.map(function(r,i){ return '<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">'
+      +'<input value="'+esc(r.apartment)+'" oninput="x4SplitSet('+i+',&#39;apartment&#39;,this.value)" placeholder="Ouja | ..." list="x4apts" style="flex:2;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+      +'<input value="'+esc(r.value)+'" oninput="x4SplitSet('+i+',&#39;value&#39;,this.value)" type="number" step="0.01" placeholder="'+(s.mode==='percent'?'%':'SAR')+'" style="width:90px;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+      +(s.rows.length>2?('<button class="btn ghost xs" onclick="x4SplitDel('+i+')">×</button>'):'')+'</div>'; }).join('');
+  setDrawerBody(datalist+modeBtns+rowsHtml
+    +'<button class="btn ghost sm" onclick="x4SplitAdd()">+ '+T.x4_add_apt+'</button>'
+    +'<div style="font-size:12px;margin:10px 0">'+T.x4_remaining+': <b id="x4rem">—</b></div>'
+    +'<div id="x4errs" style="color:var(--down);font-size:11.5px"></div>');
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+T.x4_cancel+'</button><button class="btn primary sm" id="x4confirm" disabled onclick="x4SplitConfirm()">'+T.x4_confirm_split+'</button>');
+}
+async function x4SplitPreview(){
+  if(!_x4Split) return; var p;
+  try{ p=await post('/api/expenses/v4/split-preview',{id:_x4Split.id,mode:_x4Split.mode,rows:_x4Split.rows}); }catch(e){ p={ok:false,errors:[String(e)]}; }
+  _x4Split.preview=p;
+  var rem=document.getElementById('x4rem'); if(rem){ rem.textContent=expMoney(p.remaining||0); rem.style.color=(p.remaining===0?'var(--green)':'var(--down)'); }
+  var er=document.getElementById('x4errs'); if(er){ er.innerHTML=(p.errors&&p.errors.length)?p.errors.map(esc).join(' · '):''; }
+  var cf=document.getElementById('x4confirm'); if(cf){ cf.disabled=!p.ok; }
+}
+async function x4SplitConfirm(){
+  if(!_x4Split) return;
+  var r=await post('/api/expenses/v4/split-apply',{id:_x4Split.id,mode:_x4Split.mode,rows:_x4Split.rows});
+  if(r.ok){ toast(L==='ar'?'تم التقسيم':'Split created'); _x4Split=null; closeDrawer(); await loadExpenses(); }
+  else toast('⚠ '+(r.reason||''));
+}
+async function x4Advanced(){
+  openDrawer(t().x4_advanced,''); setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('');
+  var d; try{ d=await api('/api/expenses/v4/reconcile'); }catch(e){ setDrawerBody('⚠ '+esc(String(e))); return; }
+  var T=t(), c=d.counts||{};
+  var labels={ledger_only:(L==='ar'?'في الدفتر فقط':'Ledger only'),verified_in_all:T.x4_verified,exported_not_verified:T.x4_exported_nv,duplicate_suspected:(L==='ar'?'تكرار محتمل':'Duplicate suspected'),hostaway_only:(L==='ar'?'في Hostaway فقط':'Hostaway only')};
+  var body='<div class="muted" style="font-size:11.5px;margin-bottom:10px">Hostaway: '+(d.ok?(L==='ar'?'متصل':'connected'):('⚠ '+esc(d.error||'')))+' · '+fmt(d.hostaway_count||0)+'</div>';
+  body+=Object.keys(labels).map(function(k){ return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span>'+esc(labels[k])+'</span><b>'+fmt(c[k]||0)+'</b></div>'; }).join('');
+  setDrawerBody(body);
 }
 
 /* ============== DESIGN REQUESTS (Petunia) ============== */
@@ -26062,6 +26271,199 @@ async def _api_expenses_diagnose(request):
                             headers={"Content-Disposition": "attachment; filename=ouja-expense-diagnostics.csv"})
     return _json({"ok": True, "overview": overview, "sample": sample, "dryrun_on": EXPENSE_POST_DRYRUN})
 
+# ============================================================================
+#  EXPENSES V4 — API for the Expense Approval Center
+#  Overview is LEDGER-ONLY (no Hostaway on page load). Hostaway is touched only on
+#  explicit actions: Export, View Hostaway Match, Reconcile, Check-then-re-export.
+# ============================================================================
+def _exp4_actor(request, body=None):
+    token = request.query.get("token") or request.headers.get("X-Token", "")
+    if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
+        return "owner"
+    sess = _sessions.get(token) or {}
+    u = _users.get(sess.get("user_id")) or {}
+    return str(u.get("name") or u.get("username") or (body or {}).get("by") or "dashboard")[:60]
+
+def _exp4_overview_data(tab="pending", q="", limit=120, offset=0):
+    tabs = {k: {"count": 0, "sar": 0.0} for k in ("pending", "approved", "exported", "verified", "needs_action")}
+    ql = (q or "").strip().lower()
+    rows = []
+    for e in _expenses.values():
+        v = _exp4_view(e)
+        t = v["tab"]
+        if t == "archived":
+            continue
+        if t in tabs:
+            tabs[t]["count"] += 1
+            tabs[t]["sar"] = round(tabs[t]["sar"] + v["amount_sar"], 2)
+        if t == tab:
+            if ql and ql not in (" ".join([str(v.get(k) or "") for k in
+                                           ("ouja_reference", "apartment", "submitter", "category", "concept")])).lower():
+                continue
+            rows.append(v)
+    rows.sort(key=lambda r: (r.get("created_at") or ""), reverse=True)
+    return {"ok": True, "tab": tab, "tabs": tabs, "total": len(rows),
+            "rows": rows[offset:offset + limit], "dryrun_on": EXPENSE_POST_DRYRUN}
+
+async def _api_exp4_overview(request):
+    """Ledger-only Approval Center data (fast; no Hostaway calls). ?tab=&q=&limit=&offset="""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    tab = (request.query.get("tab") or "pending").strip()
+    if tab not in ("pending", "approved", "exported", "verified", "needs_action"):
+        tab = "pending"
+    try:
+        limit = max(1, min(400, int(request.query.get("limit") or 120)))
+        offset = max(0, int(request.query.get("offset") or 0))
+    except (TypeError, ValueError):
+        limit, offset = 120, 0
+    data = await asyncio.to_thread(_exp4_overview_data, tab, request.query.get("q") or "", limit, offset)
+    return _json(data)
+
+async def _api_exp4_detail(request):
+    """Everything the detail drawer needs for one expense (ledger-only; no Hostaway call)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    e = _expenses.get((request.query.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    return _json({"ok": True, "view": _exp4_view(e),
+                  "payload_preview": _exp4_build_payload(e),
+                  "match_snapshot": e.get("hostaway_match_snapshot") or {},
+                  "raw": {"submission_id": e.get("submission_id"), "submitter": e.get("submitter"),
+                          "apartment": e.get("apartment"), "amount": e.get("amount"),
+                          "expense_date": e.get("expense_date"), "category": e.get("category"),
+                          "note": e.get("note"), "receipt_link": e.get("receipt_link")},
+                  "audit": (e.get("audit") or [])[-60:],
+                  "timeline": (e.get("events") or [])[-40:]})
+
+async def _api_exp4_approve(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else ([b.get("id")] if b.get("id") else [])
+    out = {"ok": True, "approved": [], "blocked": []}
+    for i in ids:
+        e = _expenses.get(str(i))
+        if not e:
+            continue
+        ok, why = _exp4_approve(e, by=by)
+        (out["approved"] if ok else out["blocked"]).append({"id": str(i), "reason": why})
+    await asyncio.to_thread(persist_state)
+    return _json(out)
+
+async def _api_exp4_reject(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    e = _expenses.get(str(b.get("id") or ""))
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    _exp4_reject(e, by=by, reason=(b.get("reason") or ""))
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "view": _exp4_view(e)})
+
+async def _api_exp4_edit(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    e = _expenses.get(str(b.get("id") or ""))
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    fields = b.get("fields") if isinstance(b.get("fields"), dict) else {}
+    _ok, changed = _exp4_edit(e, fields, by=by)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "changed": changed, "view": _exp4_view(e)})
+
+async def _api_exp4_export(request):
+    """Request export for one or many APPROVED expenses (worker checks Hostaway first)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else ([b.get("id")] if b.get("id") else [])
+    out = {"ok": True, "queued": [], "skipped": []}
+    for i in ids:
+        e = _expenses.get(str(i))
+        if not e:
+            continue
+        ok, why = _exp4_request_export(e, by=by)
+        (out["queued"] if ok else out["skipped"]).append({"id": str(i), "reason": why})
+    await asyncio.to_thread(persist_state)
+    return _json(out)
+
+async def _api_exp4_recheck(request):
+    """Check-then-re-export (duplicate-safe): verifies in Hostaway first, only re-exports
+    if genuinely absent. Never blind-duplicates."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    e = _expenses.get(str(b.get("id") or ""))
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    ok, why = _exp4_check_then_reexport(e, by=by)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": ok, "reason": why, "view": _exp4_view(e)})
+
+async def _api_exp4_match(request):
+    """View Hostaway Match — a LIVE Hostaway lookup for one expense (explicit action)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    e = _expenses.get((request.query.get("id") or "").strip())
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    match = await asyncio.to_thread(_exp4_find_in_hostaway, e)
+    e["hostaway_last_checked_at"] = _exp_now().isoformat(timespec="seconds")
+    return _json({"ok": True, "match": {
+        "present": bool(match.get("present")), "confidence": round(match.get("confidence", 0), 2),
+        "method": match.get("method", ""), "hostaway_expense_id": match.get("id") or "",
+        "reason": match.get("reason", ""),
+        "item": _exp4_safe_summary(match.get("item") or {},
+                ("id", "listingMapId", "amount", "expenseDate", "date", "categoryName", "concept", "reference")),
+    }, "checked_at": e["hostaway_last_checked_at"], "view": _exp4_view(e)})
+
+async def _api_exp4_import(request):
+    """Intake refresh — pull the Google Sheet (intake only; never auto-exports)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    created = await asyncio.to_thread(_exp_poll_sheet)
+    return _json({"ok": True, "created": created, "diag": _exp_sheet_diag})
+
+async def _api_exp4_reconcile(request):
+    """Advanced (diagnostics) three-source reconciliation — explicit LIVE Hostaway pull."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    data = await asyncio.to_thread(_exp4_reconcile)
+    return _json(data)
+
+async def _api_exp4_split_preview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    return _json(_exp4_split_preview(str(b.get("id") or ""), (b.get("mode") or "percent"),
+                                     b.get("rows") if isinstance(b.get("rows"), list) else []))
+
+async def _api_exp4_split_apply(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    ok, why, child_ids = _exp4_split_apply(str(b.get("id") or ""), (b.get("mode") or "percent"),
+                                           b.get("rows") if isinstance(b.get("rows"), list) else [], by=by)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": ok, "reason": why, "child_ids": child_ids})
+
+async def _api_exp4_archive(request):
+    """Hide a finished (verified/rejected) row from the main tabs. Data is preserved."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    e = _expenses.get(str(b.get("id") or ""))
+    if not e:
+        return _json({"error": "not_found"}, 404)
+    e["archived"] = True
+    _exp4_log(e, "archived", actor=by, new="archived")
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
 async def _api_expenses_sync_status(request):
     """The 'حالة المزامنة' page: every expense + its pipeline stage + who touched it +
     totals per state (count + SAR). Optional ?state= filter."""
@@ -28190,6 +28592,20 @@ async def start_web_server():
         app.router.add_post("/api/expenses/v2/split-preview", _api_expenses_v2_split_preview)
         app.router.add_post("/api/expenses/v2/split-confirm", _api_expenses_v2_split_confirm)
         app.router.add_get("/api/expenses/v2/diagnostics.csv", _api_expenses_v2_diagnostics_csv)
+        # ---- Expenses V4 — Approval Center ----
+        app.router.add_get("/api/expenses/v4/overview", _api_exp4_overview)
+        app.router.add_get("/api/expenses/v4/detail", _api_exp4_detail)
+        app.router.add_post("/api/expenses/v4/approve", _api_exp4_approve)
+        app.router.add_post("/api/expenses/v4/reject", _api_exp4_reject)
+        app.router.add_post("/api/expenses/v4/edit", _api_exp4_edit)
+        app.router.add_post("/api/expenses/v4/export", _api_exp4_export)
+        app.router.add_post("/api/expenses/v4/recheck", _api_exp4_recheck)
+        app.router.add_get("/api/expenses/v4/match", _api_exp4_match)
+        app.router.add_post("/api/expenses/v4/import", _api_exp4_import)
+        app.router.add_get("/api/expenses/v4/reconcile", _api_exp4_reconcile)
+        app.router.add_post("/api/expenses/v4/split-preview", _api_exp4_split_preview)
+        app.router.add_post("/api/expenses/v4/split-apply", _api_exp4_split_apply)
+        app.router.add_post("/api/expenses/v4/archive", _api_exp4_archive)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
