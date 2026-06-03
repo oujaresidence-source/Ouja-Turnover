@@ -7521,7 +7521,9 @@ def _exp_v2_repair_plan(hostaway_items=None):
             actions["export_safe_missing"].append(r)
         elif action == "retry_temporary":
             actions["retry_temporary"].append(r)
-        elif action == "manual_verify":
+        elif action in ("manual_verify", "verify_sent"):
+            # BUGFIX: 'verify_sent' (stale sent expenses) had NO bucket, so the
+            # "Verify Sent" button silently skipped them. Both just re-check Hostaway.
             actions["manual_verify"].append(r)
         elif action == "skip_duplicate":
             actions["skip_duplicate"].append(r)
