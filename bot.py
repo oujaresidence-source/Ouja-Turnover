@@ -9489,6 +9489,7 @@ const T = {
     ct_sub:'اختر الشقق اللي يغطيها الفريق الداخلي. لها قنوات تسليم خاصة بالإنجليزية في Discord (اليوم + بكرة)، وجدول يومي مرتّب: تسجيل الدخول اليوم أولاً.',
     ct_assigned:'معيّنة', ct_apply:'⚡ تطبيق / تحديث القنوات', ct_apply_hint:'ينشئ/يعيد تسمية قنوات تسليم اليوم وبكرة فوراً (بدون انتظار ١٢ ص).',
     ct_none:'ما فيه شقق معيّنة بعد — فعّل الخانة جنب أي شقة تحت.', ct_search:'ابحث…', ct_applied:'تم —', ct_changed:'قناة محدّثة', ct_no_change:'القنوات محدّثة — ما فيه جديد.', ct_need_pull:'اسحب الشقق من Hostaway أول (من صفحة الشقق).',
+    ct_route_copy:'نسخ رابط خطة Oujact', ct_route_copied:'نُسخ رابط المسار ✓', ct_missing_map:'رابط الخرائط ناقص', ct_maps_ph:'الصق رابط Google Maps للشقة', ct_dispatch:'خطة اليوم', ct_no_token:'ضع OUJACT_ROUTE_TOKEN (أو CLEANING_TOKEN) في Railway أول', ct_urgent:'عاجلة', ct_open_route:'افتح صفحة المسار',
     exp_sync:'تحديث المزامنة', exp_status:'حالة المزامنة',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
@@ -9696,6 +9697,7 @@ const T = {
     ct_sub:'Pick the apartments the in-house team covers. They get dedicated English turnover channels in Discord (today + tomorrow) and a daily ordered schedule — same-day check-ins first.',
     ct_assigned:'assigned', ct_apply:'⚡ Apply / Refresh channels', ct_apply_hint:'Creates/renames today + tomorrow channels right now (no waiting for 12 AM).',
     ct_none:'No apartments assigned yet — tick the box next to any unit below.', ct_search:'Search…', ct_applied:'Done —', ct_changed:'channels updated', ct_no_change:'Channels up to date — nothing changed.', ct_need_pull:'Pull listings from Hostaway first (Listings page).',
+    ct_route_copy:'Copy Oujact Route Link', ct_route_copied:'Route link copied ✓', ct_missing_map:'Missing Google Maps link', ct_maps_ph:'Paste the apartment Google Maps link', ct_dispatch:"Today's dispatch", ct_no_token:'Set OUJACT_ROUTE_TOKEN (or CLEANING_TOKEN) in Railway first', ct_urgent:'urgent', ct_open_route:'Open route page',
     exp_sync:'Refresh sync', exp_status:'Sync status',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
@@ -11608,14 +11610,43 @@ function renderOujact(){
   var q=((document.getElementById('oujactSearch')||{}).value||'').trim().toLowerCase();
   var shown=rows.filter(function(u){ if(!q) return true; return ((u.internal_name||'')+' '+(u.public_name||'')+' '+(u.address||'')).toLowerCase().indexOf(q)>=0; });
   shown.sort(function(a,b){ return (b.oujact?1:0)-(a.oujact?1:0) || (a.internal_name||'').localeCompare(b.internal_name||''); });
-  body.innerHTML='<div style="max-height:340px;overflow-y:auto">'+shown.map(function(u){
+  var ar=(L==='ar');
+  // toolbar: copy route link + dispatch summary (the dispatch centre entry point)
+  var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+    +'<button class="btn primary sm" onclick="copyOujactRouteLink()">🧭 '+esc(t().ct_route_copy)+'</button>'
+    +'<span id="oujactDispatch" class="muted" style="font-size:11.5px"></span></div>';
+  body.innerHTML=bar+'<div style="max-height:340px;overflow-y:auto">'+shown.map(function(u){
     var dir = u.directions_url ? '<span title="directions" style="margin-inline-start:auto">🔗</span>' : '';
-    return '<label style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid var(--border);cursor:pointer">'
+    var row='<label style="display:flex;align-items:center;gap:10px;padding:8px 6px 6px;cursor:pointer">'
       +'<input type="checkbox" '+(u.oujact?'checked':'')+' onchange="listingsSetField('+u.id+',&#39;oujact&#39;,this.checked)" style="accent-color:var(--gold);width:16px;height:16px;cursor:pointer">'
       +'<span style="font-weight:600">'+esc(u.internal_name||('#'+u.id))+'</span>'
       +'<span class="muted" style="font-size:11px">'+esc(u.public_name||'')+'</span>'
-      +dir+'</label>';
+      +(u.oujact&&u.missing_maps?'<span class="chip" style="margin-inline-start:auto;background:var(--gold-tint);color:var(--gold);font-size:10px;padding:2px 7px;border-radius:99px">⚠ '+esc(t().ct_missing_map)+'</span>':dir)
+      +'</label>';
+    // assigned apartments get an inline Google Maps link field
+    if(u.oujact){
+      row+='<div style="padding:0 6px 9px 32px;border-bottom:1px solid var(--border)"><input type="text" value="'+esc(u.maps_link||'')+'" placeholder="'+esc(t().ct_maps_ph)+'" onchange="listingsSetField('+u.id+',&#39;maps_link&#39;,this.value)" style="width:100%;padding:6px 9px;font-size:11.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;color:var(--text)"></div>';
+    } else { row='<div style="border-bottom:1px solid var(--border)">'+row+'</div>'; }
+    return row;
   }).join('')+'</div>';
+  renderOujactDispatch();
+}
+async function renderOujactDispatch(){
+  var el=document.getElementById('oujactDispatch'); if(!el) return;
+  var d; try{ d=await api('/api/oujact/dispatch'); }catch(_){ return; }
+  if(!d||!d.ok) return;
+  var to=d.totals||{}; var ar=(L==='ar');
+  el.innerHTML=esc(t().ct_dispatch)+': <b>'+(to.apartments||0)+'</b> '+(ar?'شقة':'units')
+    +' · <b style="color:var(--down,#cc4b4b)">'+(to.urgent||0)+'</b> '+esc(t().ct_urgent)
+    +(to.missing_maps?(' · <b style="color:var(--gold)">'+to.missing_maps+'</b> '+esc(t().ct_missing_map)):'')
+    +(to.first?(' · '+(ar?'أول':'first')+': '+esc(to.first)):'');
+}
+async function copyOujactRouteLink(){
+  var r; try{ r=await api('/api/oujact/route-link'); }catch(_){ r=null; }
+  if(!r||!r.ok){ toast((r&&r.note)||(r&&r.error)||t().ct_no_token); return; }
+  var url=location.origin+r.url;
+  try{ await navigator.clipboard.writeText(url); toast(t().ct_route_copied); }
+  catch(_){ window.prompt(t().ct_route_copy, url); }
 }
 
 async function oujactApply(){
