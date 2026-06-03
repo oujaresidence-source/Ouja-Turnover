@@ -7965,7 +7965,9 @@ def _exp_diagnose_sample(limit=8):
     return [_exp_diagnose(e) for e in stuck[:max(5, limit)]]
 
 def _exp_diag_overview():
-    """Counts by canonical status + by diagnosis code, so the panel can say WHERE the problem is."""
+    """Counts by canonical status + by diagnosis code, so the panel can say WHERE the problem is.
+    Also reports the Hostaway-endpoint TRUTH (can we actually read expenses back? which path? error?)
+    — this is the real question once DRY-RUN is off."""
     by_status, by_code = {}, {}
     dry = 0
     for e in _expenses.values():
@@ -7975,8 +7977,16 @@ def _exp_diag_overview():
             dry += 1
     for d in _exp_diagnose_sample(limit=200):
         by_code[d["diagnosis_code"]] = by_code.get(d["diagnosis_code"], 0) + 1
+    # Hostaway read-back truth (cached ~45s; ONE pull). Confirms the endpoint actually responds.
+    try:
+        ha_items, ha_ok, ha_err = _exp_fetch_hostaway(force=False)
+    except Exception as e:
+        ha_items, ha_ok, ha_err = [], False, str(e)[:200]
     return {"by_status": by_status, "by_diagnosis": by_code, "dryrun_count": dry,
-            "total": len(_expenses), "dryrun_on": EXPENSE_POST_DRYRUN}
+            "total": len(_expenses), "dryrun_on": EXPENSE_POST_DRYRUN,
+            "dryrun_raw": os.environ.get("EXPENSE_POST_DRYRUN", "1"),
+            "hostaway_endpoint": {"path": EXPENSE_HOSTAWAY_PATH, "readable": bool(ha_ok),
+                                  "count": len(ha_items), "error": ha_err}}
 
 def _exp_pipeline(e):
     """The 3-step pipeline state for one expense (Sheet → Dashboard → Hostaway) + overall
@@ -14418,6 +14428,18 @@ function expV2DeepDiagHtml(){
   var ov=d.overview||{}, sample=d.sample||[];
   var dryBanner = d.dryrun_on ? riskPanel('warn', expV2L('السبب الجذري الأرجح: وضع التجربة مفعّل','Most likely root cause: DRY-RUN is ON'),
     expV2L('EXPENSE_POST_DRYRUN=1 — ما انكتب أي مصروف فعليًا في Hostaway. اضبطه على 0 في Railway ثم رحّل المعتمد.','EXPENSE_POST_DRYRUN=1 — nothing was actually written to Hostaway. Set it to 0 in Railway, then export approved.'), '', '') : '';
+  // Hostaway endpoint truth — the real question once DRY-RUN is off.
+  var hep=ov.hostaway_endpoint||{}; var haBanner='';
+  if(ov.hostaway_endpoint){
+    if(hep.readable){
+      haBanner=riskPanel('ok', expV2L('Hostaway متصل — القراءة تعمل','Hostaway reachable — read works'),
+        expV2L('المسار '+(hep.path||'/expenses')+' يرجّع '+(hep.count||0)+' مصروف. لو مصروفك مو ظاهر، السبب في بطاقته تحت (إرسال/تحقق/ربط)، مو في الاتصال.','Path '+(hep.path||'/expenses')+' returns '+(hep.count||0)+' expenses. If yours is missing, the reason is in its card below (send/verify/mapping), not the connection.'),'','');
+    } else {
+      haBanner=riskPanel('danger', expV2L('Hostaway لا يستجيب لمسار المصاريف','Hostaway expense endpoint is not responding'),
+        expV2L('المسار '+(hep.path||'/expenses')+' رجّع خطأ: '+(hep.error||'—')+'. يمكن المسار غير صحيح — جرّب اختبار المسارات.','Path '+(hep.path||'/expenses')+' returned an error: '+(hep.error||'—')+'. The path may be wrong — run the endpoint test.'),
+        expV2L('اختبر مسارات Hostaway','Test Hostaway endpoints'), "window.open('/api/expenses/hostaway-debug?token='+encodeURIComponent(tok()),'_blank')");
+    }
+  }
   var bd=ov.by_diagnosis||{}; var bk=Object.keys(bd).sort(function(a,b){return bd[b]-bd[a];});
   var bdHtml=bk.length?('<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px">'+bk.map(function(k){return '<span class="exp-reason" style="font-size:11.5px">'+esc(k)+': <b>'+bd[k]+'</b></span>';}).join('')+'</div>'):'';
   var head='<div style="display:flex;gap:8px;align-items:center;margin:4px 0 8px"><b style="font-size:13.5px">🩺 '+expV2L('تشخيص لكل مصروف','Per-expense root cause')+'</b>'
@@ -14438,7 +14460,7 @@ function expV2DeepDiagHtml(){
         +(x.last_error?kv(expV2L('آخر خطأ','Last error'), x.last_error):'')
       +'</div></div>';
   }).join(''):('<div class="muted" style="padding:14px 0">'+expV2L('ما فيه مصاريف عالقة 🎉','No stuck expenses 🎉')+'</div>');
-  return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'+dryBanner+head+bdHtml+cards
+  return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'+dryBanner+haBanner+head+bdHtml+cards
     +'<a class="btn ghost xs" href="/api/expenses/diagnose?format=csv&token='+encodeURIComponent(tok())+'" target="_blank">⬇ '+expV2L('تحميل تقرير التشخيص CSV','Download root-cause CSV')+'</a></div>';
 }
 function expV2Rows(){
