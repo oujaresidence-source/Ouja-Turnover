@@ -6329,6 +6329,9 @@ def _pmo_log(project, who, text):
 _expenses = {}            # expense_id -> dict
 _expense_settings = {}    # persisted config (merged over defaults)
 _expense_seq = 0
+_expense_export_queue = deque()
+_expense_export_running = set()
+_expense_export_worker_task = None
 
 EXPENSE_STATUSES = ["captured", "ready", "held", "posted", "failed", "discarded"]
 EXPENSE_CANONICAL_STATUSES = [
@@ -6547,6 +6550,37 @@ def _exp_can_export(exp):
 def _exp_can_verify(exp):
     return _exp_canonical_status(exp) in ("sent_unverified", "stale_pending", "sending", "queued")
 
+def _exp_export_attempt(exp, event, *, detail="", ok=None):
+    row = {
+        "ts": _exp_now().isoformat(timespec="seconds"),
+        "event": event,
+        "detail": (detail or "")[:240],
+    }
+    if ok is not None:
+        row["ok"] = bool(ok)
+    exp.setdefault("export_attempts", []).append(row)
+    if len(exp["export_attempts"]) > 80:
+        del exp["export_attempts"][:len(exp["export_attempts"]) - 80]
+    exp["last_attempt_at"] = row["ts"]
+    _exp_log_event(exp, event, detail=row["detail"])
+
+def _exp_retry_backoff_seconds(exp):
+    n = int(exp.get("retry_count") or 0)
+    return min(90, 3 * (2 ** max(0, n - 1)))
+
+def _exp_queue_snapshot():
+    return {
+        "queued": list(_expense_export_queue),
+        "running": sorted(_expense_export_running),
+        "workers": EXPENSE_EXPORT_WORKERS,
+        "max_retries": EXPENSE_EXPORT_MAX_RETRIES,
+        "stale_minutes": {
+            "queued": EXPENSE_QUEUE_STALE_MIN,
+            "sending": EXPENSE_SENDING_STALE_MIN,
+            "sent_unverified": EXPENSE_SENT_UNVERIFIED_STALE_MIN,
+        },
+    }
+
 def _exp_norm(s):
     """Normalize an apartment name for matching (collapse spaces, lowercase)."""
     return re.sub(r"\s+", " ", str(s or "").strip()).lower()
@@ -6695,11 +6729,13 @@ def _exp_post_to_hostaway(exp):
     it to 'posted' (verified present + amount matches). Respects DRYRUN. Idempotent."""
     # Idempotency: a real Hostaway ref already exists → never post twice (just keep verifying).
     if exp.get("hostaway_ref") and exp["hostaway_ref"] not in ("DRYRUN", "ok", "existing", None):
-        if exp.get("status") not in ("posted",):
-            exp["status"] = "in_transit"
+        if _exp_canonical_status(exp) != "verified":
+            _exp_set_status(exp, "sent_unverified", reason="real_ref_exists")
         return True
     if exp.get("listing_id") is None:
-        exp["status"] = "failed"; exp["error"] = "no matched listing"
+        exp["error"] = "no matched listing"
+        exp["error_class"] = "validation"
+        _exp_set_status(exp, "failed", reason="validation", detail=exp["error"])
         _exp_log_event(exp, "post_failed", detail="no matched listing")
         return False
     s = _exp_settings()
@@ -6730,12 +6766,13 @@ def _exp_post_to_hostaway(exp):
         "currency": "SAR",
     }
     if EXPENSE_POST_DRYRUN:
-        exp["status"] = "in_transit"               # NOT posted — a dry-run writes nothing
+        _exp_set_status(exp, "sent_unverified", reason="dryrun", detail="DRY-RUN — not written to Hostaway")
         exp["hostaway_ref"] = "DRYRUN"
         exp["hostaway_verified"] = False           # a dry-run can never be verified as real
         exp["dry"] = True
         exp["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         exp["error"] = None
+        exp["error_class"] = ""
         _exp_log_event(exp, "dry_send", detail="DRY-RUN — not written to Hostaway")
         return True
     try:
@@ -6743,17 +6780,20 @@ def _exp_post_to_hostaway(exp):
         ha_id = None
         if isinstance(res, dict):
             ha_id = (res.get("result") or {}).get("id") if isinstance(res.get("result"), dict) else res.get("id")
-        exp["status"] = "in_transit"               # sent — promoted to 'posted' only by verify
+        _exp_set_status(exp, "sent_unverified", reason="awaiting_verification")
         exp["hostaway_ref"] = str(ha_id) if ha_id is not None else "ok"
+        exp["hostaway_expense_id"] = exp["hostaway_ref"]
         exp["hostaway_verified"] = False
         exp["dry"] = False
         exp["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         exp["error"] = None
+        exp["error_class"] = ""
         _exp_log_event(exp, "sent", detail=("#" + exp["hostaway_ref"]))
         return True
     except Exception as e:
-        exp["status"] = "failed"
         exp["error"] = str(e)[:400]
+        exp["error_class"] = _exp_error_class(exp["error"])
+        _exp_set_status(exp, "failed", reason=exp["error_class"], detail=exp["error"])
         _exp_log_event(exp, "post_failed", detail=str(e)[:160])
         return False
 
@@ -7210,6 +7250,7 @@ def _exp_verify_in_hostaway(exp):
     if EXPENSE_POST_DRYRUN:
         exp["hostaway_verified"] = False
         exp["verify_note"] = "dryrun"
+        exp["error_class"] = "dryrun"
         return None
     ref = (exp.get("ref") or "")
     items, ok, err = _exp_fetch_hostaway()
@@ -7219,6 +7260,7 @@ def _exp_verify_in_hostaway(exp):
     want_amt = round(abs(float(exp.get("amount") or 0)), 2)
     key = _exp_ha_key(exp.get("listing_id"), exp.get("amount"), exp.get("expense_date"))
     found_by = None
+    found_item = None
     ref_seen = False
     for x in items:
         try:
@@ -7228,17 +7270,26 @@ def _exp_verify_in_hostaway(exp):
         if ref and ref in json.dumps(x, ensure_ascii=False):
             ref_seen = True
             if x_amt is not None and abs(x_amt - want_amt) < 1:    # amount must match
-                found_by = "ref"; break
+                found_by = "ref"; found_item = x; break
         lid = x.get("listingMapId") or x.get("listingId") or x.get("listing_id")
         if key and _exp_ha_key(lid, x.get("amount"), x.get("expenseDate") or x.get("date")) == key:
-            found_by = "key"; break
+            found_by = "key"; found_item = x; break
     if found_by:
         exp["hostaway_verified"] = True
         exp["verify_note"] = "found:" + found_by
+        exp["verification_method"] = found_by
         exp["verified_at"] = datetime.now(TZ).isoformat(timespec="seconds")
-        exp["status"] = "posted"                 # the single truth gate: posted == verified
+        if isinstance(found_item, dict):
+            hid = found_item.get("id") or found_item.get("expenseId") or found_item.get("expense_id")
+            if hid is not None:
+                exp["hostaway_expense_id"] = str(hid)
+                if not exp.get("hostaway_ref") or exp.get("hostaway_ref") in ("ok", "existing"):
+                    exp["hostaway_ref"] = str(hid)
+        _exp_set_status(exp, "verified", reason="hostaway_match", detail=("matched by " + found_by))
         if exp.get("discrepancy") == "amount_mismatch":
             exp["discrepancy"] = None
+        exp["error"] = None
+        exp["error_class"] = ""
         if not exp.get("posted_at"):
             exp["posted_at"] = exp["verified_at"]
         if not any(e.get("event") == "verified" for e in exp.get("events", [])):
@@ -7247,13 +7298,15 @@ def _exp_verify_in_hostaway(exp):
     exp["hostaway_verified"] = False
     # Backfill / truth-keeping: an optimistic 'posted' that Hostaway can't confirm is NOT
     # posted — demote it to in_transit (or to ready when there is no real ref to repost).
-    if exp.get("status") == "posted":
+    if _exp_canonical_status(exp) == "verified" or exp.get("status") == "posted":
         has_real_ref = exp.get("hostaway_ref") and exp["hostaway_ref"] not in ("DRYRUN", "ok", "existing", None)
-        exp["status"] = "in_transit" if has_real_ref else "ready"
+        _exp_set_status(exp, "sent_unverified" if has_real_ref else "ready",
+                        reason="verify_failed", detail="not found in Hostaway")
         _exp_log_event(exp, "verify_failed", detail="not found in Hostaway — re-queued")
     if ref_seen:                                  # our ref is in Hostaway but the amount differs
         exp["verify_note"] = "amount_conflict"
         exp["discrepancy"] = "amount_mismatch"
+        exp["error_class"] = "verification"
     else:
         exp["verify_note"] = "not_found"
     return False
@@ -7261,15 +7314,15 @@ def _exp_verify_in_hostaway(exp):
 def _exp_pipeline(e):
     """The 3-step pipeline state for one expense (Sheet → Dashboard → Hostaway) + overall
     colour (max 4: green / amber / red / gray). Hostaway is 'done' ONLY when verified."""
-    st = e.get("status")
+    st = _exp_canonical_status(e)
     sheet = "done"                                            # it's in our system (sheet or manual)
-    dash = ("done" if st in ("ready", "posted", "in_transit") else
-            "skip" if st == "discarded" else "active")        # active = needs review / in progress
+    dash = ("done" if st in ("ready", "queued", "sending", "sent_unverified", "verified") else
+            "skip" if st == "archived" else "active")         # active = needs review / in progress
     if st == "failed":
         ha = "failed"
-    elif st == "posted" and e.get("hostaway_verified"):
+    elif st == "verified" and e.get("hostaway_verified"):
         ha = "done"                                           # verified present in Hostaway ✓
-    elif st == "in_transit" or st == "posted":
+    elif st in ("queued", "sending", "sent_unverified", "stale_pending"):
         ha = "dry" if (e.get("dry") or e.get("hostaway_ref") == "DRYRUN") else "active"  # جاري التحقق
     else:
         ha = "pending"
@@ -7334,6 +7387,126 @@ def _exp_discrepancies():
             "orphans_sample": orphans[:50],
             "refs": {"sheet_not_hostaway": sheet_not_ha[:50],
                      "amount_mismatch": amount_mismatch[:50], "duplicates": dups[:50]}}
+
+def _exp_export_eligible(exp, *, retry=False):
+    canon = _exp_canonical_status(exp)
+    if canon in ("ready", "failed", "stale_pending"):
+        return True
+    if retry and canon in ("sent_unverified", "queued", "sending"):
+        return True
+    return False
+
+def _exp_queue_for_export(exp, *, by="", reason="manual", retry=False):
+    """Put one expense in the durable-ish in-process export queue.
+    The queue state is persisted on the expense, so a restart can repair stale
+    queued/sending rows safely instead of silently losing them."""
+    if not exp:
+        return False, "not_found"
+    if _exp_canonical_status(exp) in ("needs_review", "duplicate", "archived", "verified"):
+        return False, _exp_canonical_status(exp)
+    if not _exp_export_eligible(exp, retry=retry):
+        return False, _exp_canonical_status(exp)
+    if exp.get("id") not in _expense_export_queue and exp.get("id") not in _expense_export_running:
+        _expense_export_queue.append(exp.get("id"))
+    exp["queued_at"] = _exp_now().isoformat(timespec="seconds")
+    exp["queue_reason"] = reason
+    exp["queued_by"] = by[:60]
+    _exp_set_status(exp, "queued", reason=reason, by=by, detail=reason)
+    _exp_export_attempt(exp, "export_queued", detail=reason)
+    return True, "queued"
+
+def _exp_repair_preview_rows():
+    now = _exp_now()
+    rows = []
+    for e in _expenses.values():
+        _exp_apply_stale_state(e, now=now)
+        canon = _exp_canonical_status(e, now=now)
+        if canon in ("stale_pending", "failed", "sent_unverified", "queued", "sending"):
+            rows.append({
+                "id": e.get("id"), "ref": e.get("ref"), "status": canon,
+                "raw_status": e.get("status"), "reason": _exp_status_reason(e, canon),
+                "hostaway_ref": e.get("hostaway_ref"),
+                "amount": e.get("amount"), "apartment": e.get("apartment"),
+                "date": e.get("expense_date"), "retry_count": int(e.get("retry_count") or 0),
+                "safe_action": "verify_first" if e.get("hostaway_ref") else ("retry_export" if canon == "failed" else "review"),
+            })
+    rows.sort(key=lambda r: (r.get("status") or "", r.get("ref") or ""))
+    return rows
+
+async def _exp_export_one(exp_id):
+    exp = _expenses.get(exp_id)
+    if not exp:
+        return False
+    _expense_export_running.add(exp_id)
+    try:
+        _exp_apply_stale_state(exp)
+        canon = _exp_canonical_status(exp)
+        if canon in ("archived", "verified", "needs_review", "duplicate"):
+            _exp_export_attempt(exp, "export_skipped", detail=canon, ok=False)
+            return False
+
+        # If anything was already sent, verify first and never blindly duplicate it.
+        if exp.get("hostaway_ref") and canon in ("sent_unverified", "stale_pending", "queued", "sending"):
+            _exp_export_attempt(exp, "verify_before_retry", detail=str(exp.get("hostaway_ref")))
+            ok = await asyncio.to_thread(_exp_verify_in_hostaway, exp)
+            if ok:
+                _exp_export_attempt(exp, "export_verified", detail=exp.get("verify_note", ""), ok=True)
+                return True
+            if exp.get("hostaway_ref") not in ("DRYRUN", "ok", "existing", None):
+                _exp_set_status(exp, "stale_pending", reason="sent_not_verified", detail=exp.get("verify_note") or "not_found")
+                _exp_export_attempt(exp, "retry_blocked_sent_unverified", detail="real Hostaway ref exists; manual review required", ok=False)
+                return False
+
+        await asyncio.to_thread(_exp_validate, exp)
+        if exp.get("status") != "ready":
+            _exp_set_status(exp, "needs_review", reason=exp.get("primary_reason") or "validation")
+            _exp_export_attempt(exp, "export_blocked", detail=exp.get("primary_reason") or "validation", ok=False)
+            return False
+
+        exp["retry_count"] = int(exp.get("retry_count") or 0) + 1
+        exp["sending_at"] = _exp_now().isoformat(timespec="seconds")
+        _exp_set_status(exp, "sending", reason="worker", detail=f"attempt {exp['retry_count']}")
+        _exp_export_attempt(exp, "export_sending", detail=f"attempt {exp['retry_count']}")
+        ok = await asyncio.to_thread(_exp_post_to_hostaway, exp)
+        if not ok:
+            _exp_export_attempt(exp, "export_failed", detail=exp.get("error") or "", ok=False)
+            return False
+        _exp_export_attempt(exp, "export_sent", detail=exp.get("hostaway_ref") or "", ok=True)
+        verified = await asyncio.to_thread(_exp_verify_in_hostaway, exp)
+        _exp_export_attempt(exp, "export_verified" if verified else "export_unverified",
+                            detail=exp.get("verify_note") or "", ok=bool(verified))
+        return bool(verified)
+    finally:
+        _expense_export_running.discard(exp_id)
+        await asyncio.to_thread(persist_state)
+
+async def _exp_export_worker():
+    global _expense_export_worker_task
+    try:
+        while _expense_export_queue:
+            batch = []
+            while _expense_export_queue and len(batch) < EXPENSE_EXPORT_WORKERS:
+                eid = _expense_export_queue.popleft()
+                if eid in _expense_export_running:
+                    continue
+                batch.append(eid)
+            if not batch:
+                await asyncio.sleep(0.1)
+                continue
+            await asyncio.gather(*[_exp_export_one(eid) for eid in batch])
+            await asyncio.sleep(0.1)
+    finally:
+        _expense_export_worker_task = None
+
+def _exp_ensure_export_worker():
+    global _expense_export_worker_task
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    if _expense_export_worker_task is None or _expense_export_worker_task.done():
+        _expense_export_worker_task = loop.create_task(_exp_export_worker())
+    return True
 
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
@@ -23399,7 +23572,9 @@ async def _api_expenses_list(request):
     search = (q.get("q", "") or "").lower().strip()
     items = []
     for e in _expenses.values():
-        if status and e.get("status") != status: continue
+        _exp_apply_stale_state(e)
+        canon = _exp_canonical_status(e)
+        if status and canon != status: continue
         if not _exp_in_period(e, dfrom, dto): continue
         if apt and e.get("apartment") != apt: continue
         if emp and e.get("submitter") != emp: continue
@@ -23419,11 +23594,15 @@ async def _api_expenses_queue(request):
     group (instead of vanishing). The posted tail is capped so it never grows unbounded."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
+    for e in _expenses.values():
+        _exp_apply_stale_state(e)
+    queue_states = {"needs_review", "duplicate", "failed", "ready", "queued", "sending",
+                    "sent_unverified", "stale_pending"}
     items = [_exp_view(e) for e in _expenses.values()
-             if e.get("status") in ("held", "failed", "ready", "in_transit")]
+             if _exp_canonical_status(e) in queue_states]
     items.sort(key=lambda e: (e.get("submitted_at") or e.get("created_at") or ""), reverse=True)
     # recently-posted tail (newest first, capped) — the "it worked, here it is" confirmation
-    posted = [e for e in _expenses.values() if e.get("status") == "posted" and e.get("posted_at")]
+    posted = [e for e in _expenses.values() if _exp_canonical_status(e) == "verified" and e.get("posted_at")]
     posted.sort(key=lambda e: e.get("posted_at") or "", reverse=True)
     items += [_exp_view(e) for e in posted[:8]]
     return _json({"expenses": items, "count": len(items)})
@@ -23438,18 +23617,26 @@ async def _api_expenses_summary(request):
     wk_from = (datetime.now(TZ).date() - timedelta(days=7)).isoformat()
     in_transit_n = 0
     in_transit_sar = 0.0
+    ready_n = queued_n = sending_n = stale_n = archived_n = duplicate_n = 0
+    total_sar = 0.0
     by_apt, by_emp = {}, {}
     for e in _expenses.values():
-        st = e.get("status")
-        # POSTED == verified present in Hostaway. Everything sent-but-unconfirmed (incl.
-        # dry-run) is 'in_transit', never counted as posted. One source of truth.
-        verified = (st == "posted" and bool(e.get("hostaway_verified")))
-        in_transit = (st == "in_transit") or (st == "posted" and not e.get("hostaway_verified"))
-        if st in ("held",): held += 1
+        _exp_apply_stale_state(e)
+        st = _exp_canonical_status(e)
+        verified = (st == "verified")
+        in_transit = st in ("queued", "sending", "sent_unverified")
+        if st in ("needs_review",): held += 1
+        if st in ("duplicate",): duplicate_n += 1
         if st in ("failed",): failed += 1
+        if st in ("ready",): ready_n += 1
+        if st in ("queued",): queued_n += 1
+        if st in ("sending",): sending_n += 1
+        if st in ("stale_pending",): stale_n += 1
+        if st in ("archived",): archived_n += 1
         if in_transit: in_transit_n += 1
         if not _exp_in_period(e, dfrom, dto): continue
         amt = abs(float(e.get("amount") or 0))
+        total_sar += amt
         if in_transit: in_transit_sar += amt
         if verified:
             posted_sar += amt; posted_n += 1
@@ -23463,13 +23650,20 @@ async def _api_expenses_summary(request):
             ba["total"] += amt; ba["count"] += 1
             be["total"] += amt; be["posted"] += 1
         be["count"] += 1
-        if st == "held": be["held"] += 1
-        if st == "discarded": be["discarded"] += 1
+        if st in ("needs_review", "duplicate"): be["held"] += 1
+        if st == "archived": be["discarded"] += 1
     return _json({
         "posted_sar": round(posted_sar, 2), "held": held, "posted_n": posted_n,
         "in_transit_n": in_transit_n, "in_transit_sar": round(in_transit_sar, 2),
+        "ready": ready_n, "queued": queued_n, "sending": sending_n,
+        "sent_unverified": in_transit_n, "stale_pending": stale_n,
+        "duplicates": duplicate_n, "archived": archived_n,
         "failed": failed, "week_sar": round(week_sar, 2),
-        "queue": held + failed + in_transit_n,
+        "total_sar": round(total_sar, 2),
+        "needs_review": held,
+        "verified": posted_n,
+        "queue": held + duplicate_n + failed + in_transit_n + ready_n + stale_n,
+        "export_queue": _exp_queue_snapshot(),
         "by_apartment": sorted(by_apt.values(), key=lambda x: -x["total"]),
         "by_employee": sorted(by_emp.values(), key=lambda x: -x["total"]),
         "owners": dict(_unit_owners),   # item 60: apartment -> owner map
@@ -23625,7 +23819,8 @@ async def _api_expenses_update(request):
     return _json({"ok": True, "expense": _exp_view(e)})
 
 async def _api_expenses_post(request):
-    """Manual 'Post now' / 'Retry'. Re-validates first; only posts if Ready."""
+    """Manual 'Export now' / 'Retry'. Re-validates first, then enqueues.
+    The Hostaway write + verification runs in the background worker."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
@@ -23633,7 +23828,7 @@ async def _api_expenses_post(request):
     if not e:
         return _json({"error": "not found"}, 404)
     await asyncio.to_thread(_exp_validate, e)
-    if e.get("status") != "ready":
+    if e.get("status") != "ready" and _exp_canonical_status(e) not in ("failed", "stale_pending"):
         await asyncio.to_thread(persist_state)
         blocked = [{"code": r["code"],
                     "ar": EXPENSE_HOLD_LABELS.get(r["code"], (r["code"], r["code"]))[0],
@@ -23642,18 +23837,152 @@ async def _api_expenses_post(request):
         return _json({"ok": False, "error": "still_held", "blocked_by": blocked,
                       "expense": _exp_view(e)})
     by = (b.get("by") or "")[:60]
-    ok = await asyncio.to_thread(_exp_post_to_hostaway, e)
-    if ok and by:
+    ok, why = _exp_queue_for_export(e, by=by, reason="manual", retry=True)
+    if ok:
         _exp_log_event(e, "post_requested", by=by)
-    if ok:                                                  # Hostaway ✓ ONLY after a real re-check
-        await asyncio.to_thread(_exp_verify_in_hostaway, e)
+        _exp_ensure_export_worker()
     await asyncio.to_thread(persist_state)
-    out = {"ok": ok, "verified": bool(e.get("hostaway_verified")), "expense": _exp_view(e)}
-    if not ok:                                              # surface the REAL Hostaway error + alert
-        out["error"] = e.get("error") or "Hostaway rejected the post"
-        out["status"] = e.get("status")                    # 'failed'
-        await _exp_alert_failure(e)                         # Stage 6: ping the team, never silently stuck
+    out = {"ok": ok, "queued": ok, "reason": why, "verified": bool(e.get("hostaway_verified")),
+           "queue": _exp_queue_snapshot(), "expense": _exp_view(e)}
+    if not ok:
+        out["error"] = why
     return _json(out)
+
+async def _api_expenses_export_selected(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    status = (b.get("status") or "").strip()
+    by = (b.get("by") or "")[:60]
+    if not ids and status:
+        ids = [e.get("id") for e in _expenses.values() if _exp_canonical_status(e) == status]
+    queued, skipped = [], []
+    for eid in ids:
+        e = _expenses.get(str(eid))
+        if e and _exp_canonical_status(e) == "ready":
+            await asyncio.to_thread(_exp_validate, e)
+        ok, why = _exp_queue_for_export(e, by=by, reason="bulk_export", retry=False)
+        (queued if ok else skipped).append({"id": str(eid), "reason": why})
+    if queued:
+        _exp_ensure_export_worker()
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "queued": queued, "skipped": skipped, "queue": _exp_queue_snapshot()})
+
+async def _api_expenses_retry(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    status = (b.get("status") or "").strip()
+    by = (b.get("by") or "")[:60]
+    if not ids:
+        wanted = {status} if status else {"failed", "stale_pending"}
+        ids = [e.get("id") for e in _expenses.values() if _exp_canonical_status(e) in wanted]
+    queued, skipped = [], []
+    for eid in ids:
+        e = _expenses.get(str(eid))
+        ok, why = _exp_queue_for_export(e, by=by, reason="retry", retry=True)
+        (queued if ok else skipped).append({"id": str(eid), "reason": why})
+    if queued:
+        _exp_ensure_export_worker()
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "queued": queued, "skipped": skipped, "queue": _exp_queue_snapshot()})
+
+async def _api_expenses_verify_selected(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    if not ids:
+        ids = [e.get("id") for e in _expenses.values() if _exp_can_verify(e)]
+    _exp_fetch_hostaway(force=True)
+    out = []
+    for eid in ids:
+        e = _expenses.get(str(eid))
+        if not e:
+            out.append({"id": str(eid), "ok": False, "error": "not_found"})
+            continue
+        ok = await asyncio.to_thread(_exp_verify_in_hostaway, e)
+        _exp_export_attempt(e, "manual_verify", detail=e.get("verify_note") or "", ok=bool(ok))
+        if not ok:
+            _exp_apply_stale_state(e)
+        out.append({"id": e.get("id"), "ref": e.get("ref"), "verified": bool(e.get("hostaway_verified")),
+                    "note": e.get("verify_note"), "status": _exp_canonical_status(e)})
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "results": out})
+
+async def _api_expenses_archive_verified(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    if not ids:
+        ids = [e.get("id") for e in _expenses.values() if _exp_canonical_status(e) == "verified"]
+    archived = []
+    for eid in ids:
+        e = _expenses.get(str(eid))
+        if e and _exp_canonical_status(e) == "verified":
+            _exp_set_status(e, "archived", reason="verified_archived")
+            archived.append(e.get("id"))
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "archived": archived})
+
+async def _api_expenses_export_log(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    rows = []
+    for e in _expenses.values():
+        for a in e.get("export_attempts") or []:
+            r = dict(a)
+            r.update({"id": e.get("id"), "ref": e.get("ref"), "apartment": e.get("apartment"),
+                      "amount": e.get("amount"), "status": _exp_canonical_status(e)})
+            rows.append(r)
+    rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    return _json({"ok": True, "queue": _exp_queue_snapshot(), "rows": rows[:500]})
+
+async def _api_expenses_repair_preview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    rows = await asyncio.to_thread(_exp_repair_preview_rows)
+    await asyncio.to_thread(persist_state)
+    counts = defaultdict(int)
+    for r in rows:
+        counts[r["status"]] += 1
+    return _json({"ok": True, "dry_run": True, "counts": dict(counts), "rows": rows})
+
+async def _api_expenses_repair_apply(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
+    by = (b.get("by") or "")[:60]
+    if not ids:
+        ids = [r["id"] for r in _exp_repair_preview_rows()
+               if r.get("safe_action") in ("verify_first", "retry_export")]
+    # Safe repair first verifies sent/stale rows. It queues retries only for failed rows
+    # or records without any Hostaway ref.
+    verified = []
+    queued = []
+    skipped = []
+    _exp_fetch_hostaway(force=True)
+    for eid in ids:
+        e = _expenses.get(str(eid))
+        if not e:
+            skipped.append({"id": str(eid), "reason": "not_found"})
+            continue
+        if e.get("hostaway_ref"):
+            ok = await asyncio.to_thread(_exp_verify_in_hostaway, e)
+            verified.append({"id": eid, "verified": bool(ok), "note": e.get("verify_note")})
+            if ok:
+                continue
+        ok, why = _exp_queue_for_export(e, by=by, reason="repair_apply", retry=True)
+        (queued if ok else skipped).append({"id": str(eid), "reason": why})
+    if queued:
+        _exp_ensure_export_worker()
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "verified": verified, "queued": queued, "skipped": skipped,
+                  "queue": _exp_queue_snapshot()})
 
 async def _api_expenses_approve(request):
     """Manager approves a SOFT gate (no_receipt / high_amount / bad_date) so the expense
@@ -23892,11 +24221,12 @@ async def _api_expenses_sync_refresh(request):
         _exp_fetch_hostaway(force=True)                 # ONE fresh pull; per-item verify hits the cache
         rev = 0
         for e in list(_expenses.values()):
-            if e.get("status") == "discarded":
+            if _exp_canonical_status(e) == "archived":
                 continue
             # re-verify everything already sent (posted OR in_transit), incl. legacy optimistic
-            if e.get("status") in ("posted", "in_transit"):
+            if _exp_canonical_status(e) in ("verified", "sent_unverified", "queued", "sending", "stale_pending"):
                 _exp_verify_in_hostaway(e)              # promotes to posted / re-queues if not found
+                _exp_apply_stale_state(e)
             else:
                 before = e.get("status")
                 _exp_validate(e)
@@ -23932,15 +24262,16 @@ _EXP_STATE_LABELS = {
 }
 
 def _exp_sync_state(e):
-    if e.get("status") == "failed":
+    st = _exp_canonical_status(e)
+    if st == "failed":
         return "failed"
     if e.get("discrepancy"):
         return "discrepancy"
-    if e.get("status") == "posted" and e.get("hostaway_verified"):
+    if st == "verified":
         return "verified"
-    if e.get("status") in ("in_transit", "posted"):     # sent but not verified-present
+    if st in ("queued", "sending", "sent_unverified", "stale_pending"):
         return "in_transit"
-    if e.get("status") == "ready":
+    if st == "ready":
         return "ready"
     return "held"
 
@@ -23952,7 +24283,8 @@ async def _api_expenses_sync_status(request):
     want = (request.query.get("state") or "").strip()
     rows, totals = [], {}
     for e in _expenses.values():
-        if e.get("status") == "discarded":
+        _exp_apply_stale_state(e)
+        if _exp_canonical_status(e) == "archived":
             continue
         state = _exp_sync_state(e)
         t = totals.setdefault(state, {"count": 0, "sar": 0.0})
@@ -23962,7 +24294,7 @@ async def _api_expenses_sync_status(request):
             continue
         rows.append({"id": e.get("id"), "ref": e.get("ref"), "apartment": e.get("apartment"),
                      "amount": e.get("amount"), "date": e.get("expense_date"),
-                     "status": e.get("status"), "state": state,
+                     "status": _exp_canonical_status(e), "raw_status": e.get("status"), "state": state,
                      "pipeline": _exp_pipeline(e), "by": _exp_last_actor(e),
                      "submitter": e.get("submitter"), "discrepancy": e.get("discrepancy"),
                      "hostaway_ref": e.get("hostaway_ref"), "events": e.get("events", [])[-12:]})
@@ -25876,6 +26208,13 @@ async def start_web_server():
         app.router.add_get("/api/expenses/settings", _api_expenses_settings_get)
         app.router.add_post("/api/expenses/settings", _api_expenses_settings_save)
         app.router.add_get("/api/expenses/export.csv", _api_expenses_export)
+        app.router.add_get("/api/expenses/export-log", _api_expenses_export_log)
+        app.router.add_post("/api/expenses/export-selected", _api_expenses_export_selected)
+        app.router.add_post("/api/expenses/retry", _api_expenses_retry)
+        app.router.add_post("/api/expenses/verify-selected", _api_expenses_verify_selected)
+        app.router.add_post("/api/expenses/archive-verified", _api_expenses_archive_verified)
+        app.router.add_get("/api/expenses/repair-preview", _api_expenses_repair_preview)
+        app.router.add_post("/api/expenses/repair-apply", _api_expenses_repair_apply)
         app.router.add_post("/api/expenses/reconcile", _api_expenses_reconcile)
         app.router.add_get("/api/expenses/sheet-debug", _api_expenses_sheet_debug)
         app.router.add_get("/api/expenses/hostaway-debug", _api_expenses_hostaway_debug)
