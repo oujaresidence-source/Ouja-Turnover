@@ -8442,6 +8442,256 @@ def _exp4_edit(exp, fields, by=""):
     _exp4_log(exp, "edited", actor=by, detail=",".join(changed) or "no change")
     return True, changed
 
+# ---- V4 export worker / state machine (rebuilt; reuses only low-level Hostaway I/O) ----
+_exp4_queue = deque()
+_exp4_running = set()
+_exp4_worker_task = None
+EXP4_MAX_ATTEMPTS = max(1, int(os.environ.get("EXP4_MAX_ATTEMPTS", "4") or "4"))
+EXP4_JOB_STATES = ("export_requested", "validating", "checking_hostaway",
+                   "creating_hostaway_expense", "verifying_hostaway", "verified",
+                   "exported_not_verified", "failed", "duplicate_found")
+
+def _exp4_job(exp):
+    return exp.setdefault("export_job", {"state": "", "attempts": 0, "started_at": "",
+                                         "updated_at": "", "last_error": ""})
+
+def _exp4_set_job(exp, state, *, error=""):
+    j = _exp4_job(exp)
+    if state == "export_requested":
+        j["started_at"] = _exp_now().isoformat(timespec="seconds")
+    j["state"] = state
+    j["updated_at"] = _exp_now().isoformat(timespec="seconds")
+    if error:
+        j["last_error"] = error[:240]
+    return j
+
+def _exp4_build_payload(exp):
+    """Exact Hostaway expense payload. Amount is NEGATIVE (Hostaway treats expenses as
+    negative; extras are positive). The stable Ouja reference is embedded in the concept so
+    we can match it back later — without clobbering the human description."""
+    s = _exp_settings()
+    cat = (s.get("category_map") or {}).get(exp.get("category") or "", exp.get("category") or "Other")
+    ref = exp.get("ref") or ""
+    apt = (exp.get("apartment") or "").replace("Ouja |", "").strip()
+    base = (exp.get("maintenance_type") or exp.get("category") or "Expense")
+    concept = " | ".join([p for p in (ref, base, apt) if p])[:200]
+    try:
+        amt = -abs(round(float(exp.get("amount")), 2))
+    except (TypeError, ValueError):
+        amt = None
+    desc_bits = [b for b in (
+        ("Ref: " + ref) if ref else "",
+        ("Vendor: " + exp["vendor"]) if exp.get("vendor") else "",
+        ("By: " + exp["submitter"]) if exp.get("submitter") else "",
+        ("Note: " + exp["note"]) if exp.get("note") else "",
+        ("Receipt: " + exp["receipt_link"]) if exp.get("receipt_link") else "",
+    ) if b]
+    return {
+        "listingMapId": (int(exp["listing_id"]) if exp.get("listing_id") is not None else None),
+        "amount": amt, "expenseDate": exp.get("expense_date"), "date": exp.get("expense_date"),
+        "categoryName": cat, "concept": concept, "name": concept,
+        "reference": ref, "description": " · ".join(desc_bits)[:900], "currency": "SAR",
+    }
+
+def _exp4_safe_summary(d, keep):
+    if not isinstance(d, dict):
+        return {}
+    return {k: d.get(k) for k in keep if k in d}
+
+def _exp4_find_in_hostaway(exp, items=None):
+    """'Does this exact expense already exist in Hostaway?' Reuses the conservative matcher.
+    Read-only; returns a match dict (present / confidence / id / method)."""
+    if items is None:
+        items, ok, _err = _exp_fetch_hostaway(force=True)
+        if not ok:
+            return {"present": False, "confidence": 0.0, "reason": "hostaway_unreachable", "id": None, "item": None}
+    return _exp_match_hostaway_item(exp, items)
+
+async def _exp4_verify(exp):
+    """Re-fetch Hostaway and confirm the EXACT expense exists. Only a high-confidence match
+    flips it to verified. DRY-RUN / unreachable never verify (honest)."""
+    exp["hostaway_last_checked_at"] = _exp_now().isoformat(timespec="seconds")
+    if EXPENSE_POST_DRYRUN:
+        exp["verify_note"] = "dryrun"
+        return False
+    match = await asyncio.to_thread(_exp4_find_in_hostaway, exp)
+    if match.get("present") and match.get("confidence", 0) >= 0.95:
+        exp["hostaway_verified"] = True
+        exp["hostaway_expense_id"] = match.get("id") or exp.get("hostaway_expense_id")
+        if match.get("id"):
+            exp["hostaway_ref"] = str(match.get("id"))
+        exp["hostaway_match_snapshot"] = _exp4_safe_summary(match.get("item") or {},
+            ("id", "listingMapId", "amount", "expenseDate", "date", "categoryName", "concept", "reference"))
+        exp["verified_at"] = exp["hostaway_last_checked_at"]
+        exp["verify_note"] = "match:" + (match.get("method") or "")
+        _exp_set_status(exp, "verified", reason="hostaway_match", detail=match.get("method") or "")
+        return True
+    exp["verify_note"] = match.get("reason") or "not_found"
+    return False
+
+async def _exp4_export_one(eid):
+    """The export state machine for ONE expense: validating → checking_hostaway →
+    creating_hostaway_expense → verifying_hostaway → verified/exported_not_verified/failed/
+    duplicate_found. Idempotent (lock + check-Hostaway-first), audited at every step."""
+    exp = _expenses.get(eid)
+    if not exp or eid in _exp4_running:
+        return
+    _exp4_running.add(eid)
+    try:
+        if _exp4_approval_status(exp) != "approved" or exp.get("is_split_parent"):
+            _exp4_set_job(exp, "failed", error="not_approved_or_split")
+            _exp4_log(exp, "export_rejected", new="failed", detail="not approved / split parent")
+            return
+        # 1) validating
+        _exp4_set_job(exp, "validating")
+        miss = _exp4_missing_required(exp)
+        if miss:
+            exp["approval_status"] = "needs_edit"
+            _exp_set_status(exp, "needs_review", reason="validation", detail=",".join(miss))
+            _exp4_set_job(exp, "failed", error="missing:" + ",".join(miss))
+            _exp4_log(exp, "validate_failed", new="failed", error_code="validation",
+                      error_message=",".join(miss), recommended="fill missing fields")
+            return
+        # 2) checking_hostaway FIRST — never blind-duplicate
+        _exp4_set_job(exp, "checking_hostaway")
+        match = await asyncio.to_thread(_exp4_find_in_hostaway, exp)
+        if match.get("present") and match.get("confidence", 0) >= 0.95:
+            await _exp4_verify(exp)
+            _exp4_set_job(exp, "verified")
+            _exp4_log(exp, "already_in_hostaway", new="verified", detail=match.get("method") or "",
+                      response_summary=_exp4_safe_summary(match.get("item") or {}, ("id", "amount", "concept")))
+            return
+        if match.get("present") and match.get("confidence", 0) >= 0.82:
+            exp["primary_reason"] = "duplicate"
+            _exp_set_status(exp, "duplicate", reason="duplicate_suspected")
+            _exp4_set_job(exp, "duplicate_found")
+            _exp4_log(exp, "duplicate_found", new="duplicate_found", detail=match.get("method") or "",
+                      recommended="review the duplicate in Hostaway")
+            return
+        # 3) creating_hostaway_expense
+        exp["retry_count"] = int(exp.get("retry_count") or 0) + 1
+        exp["sending_at"] = _exp_now().isoformat(timespec="seconds")
+        _exp_set_status(exp, "sending", reason="v4_worker", detail="attempt %d" % exp["retry_count"])
+        _exp4_set_job(exp, "creating_hostaway_expense")
+        payload = _exp4_build_payload(exp)
+        _exp4_log(exp, "create_attempt", new="creating_hostaway_expense",
+                  payload_summary=_exp4_safe_summary(payload, ("listingMapId", "amount", "expenseDate", "categoryName", "concept", "reference", "currency")))
+        if EXPENSE_POST_DRYRUN:
+            exp["hostaway_ref"] = "DRYRUN"; exp["dry"] = True; exp["hostaway_verified"] = False
+            _exp_set_status(exp, "sent_unverified", reason="dryrun", detail="DRY-RUN — not written")
+            _exp4_set_job(exp, "exported_not_verified", error="dryrun")
+            _exp4_log(exp, "dry_run", new="exported_not_verified",
+                      detail="DRY-RUN (EXPENSE_POST_DRYRUN=1) — nothing written to Hostaway")
+            return
+        try:
+            res = await asyncio.to_thread(api_post, EXPENSE_HOSTAWAY_PATH, payload)
+        except Exception as e:
+            msg = str(e)[:240]; cls = _exp_error_class(msg)
+            exp["error"] = msg; exp["error_class"] = cls
+            if cls == "network" and exp["retry_count"] < EXP4_MAX_ATTEMPTS:
+                _exp_set_status(exp, "queued", reason="retry_backoff")
+                _exp4_set_job(exp, "export_requested", error=msg)
+                _exp4_log(exp, "create_error_retry", new="export_requested", error_code=cls, error_message=msg)
+                _exp4_queue.append(eid)
+            else:
+                _exp_set_status(exp, "failed", reason=cls, detail=msg)
+                _exp4_set_job(exp, "failed", error=msg)
+                _exp4_log(exp, "create_failed", new="failed", error_code=cls, error_message=msg,
+                          recommended="check then re-export")
+            return
+        ha_id = None
+        if isinstance(res, dict):
+            ha_id = (res.get("result") or {}).get("id") if isinstance(res.get("result"), dict) else res.get("id")
+        exp["hostaway_ref"] = str(ha_id) if ha_id is not None else "ok"
+        exp["hostaway_expense_id"] = exp["hostaway_ref"]
+        exp["dry"] = False; exp["error"] = None; exp["error_class"] = ""
+        _exp_set_status(exp, "sent_unverified", reason="created")
+        _exp4_log(exp, "created", new="verifying_hostaway",
+                  response_summary={"id": ha_id} if ha_id is not None else {"result": "ok"})
+        # 4) verifying_hostaway
+        _exp4_set_job(exp, "verifying_hostaway")
+        if await _exp4_verify(exp):
+            _exp4_set_job(exp, "verified")
+            _exp4_log(exp, "verified", new="verified", detail=exp.get("verify_note") or "")
+        else:
+            _exp_set_status(exp, "sent_unverified", reason="exported_not_verified", detail=exp.get("verify_note") or "")
+            _exp4_set_job(exp, "exported_not_verified", error=exp.get("verify_note") or "not_found")
+            _exp4_log(exp, "exported_not_verified", new="exported_not_verified",
+                      detail="searched ref→listing+amount+date; not confirmed yet",
+                      recommended="view match / check again")
+    finally:
+        _exp4_running.discard(eid)
+        await asyncio.to_thread(persist_state)
+
+async def _exp4_worker():
+    global _exp4_worker_task
+    try:
+        while _exp4_queue:
+            batch = []
+            while _exp4_queue and len(batch) < EXPENSE_EXPORT_WORKERS:
+                e = _exp4_queue.popleft()
+                if e not in _exp4_running:
+                    batch.append(e)
+            if not batch:
+                await asyncio.sleep(0.1); continue
+            await asyncio.gather(*[_exp4_export_one(e) for e in batch])
+            await asyncio.sleep(0.1)
+    finally:
+        _exp4_worker_task = None
+
+def _exp4_ensure_worker():
+    global _exp4_worker_task
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    if _exp4_worker_task is None or _exp4_worker_task.done():
+        _exp4_worker_task = loop.create_task(_exp4_worker())
+    return True
+
+def _exp4_request_export(exp, by=""):
+    """Gated export request. Only an APPROVED, non-split expense is enqueued. The worker
+    checks Hostaway first (duplicate-safe), creates, then verifies."""
+    if not exp:
+        return False, "not_found"
+    if exp.get("is_split_parent"):
+        return False, "split_parent_not_exportable"
+    if _exp4_approval_status(exp) != "approved":
+        return False, "needs_approval"
+    if exp.get("hostaway_verified"):
+        return False, "already_verified"
+    eid = exp.get("id")
+    if eid not in _exp4_queue and eid not in _exp4_running:
+        _exp4_queue.append(eid)
+    exp["queued_at"] = _exp_now().isoformat(timespec="seconds")
+    _exp_set_status(exp, "queued", reason="v4_export", by=by)
+    _exp4_set_job(exp, "export_requested")
+    _exp4_log(exp, "export_requested", actor=by, new="export_requested")
+    _exp4_ensure_worker()
+    return True, "export_requested"
+
+def _exp4_check_then_reexport(exp, by=""):
+    """Duplicate-safe retry. Identical to requesting an export: the worker's step-2 check
+    confirms Hostaway FIRST and verifies/dedupes instead of creating a second copy."""
+    return _exp4_request_export(exp, by=by)
+
+def _exp4_recover_stuck():
+    """On restart, expenses left mid-export (no worker alive) are recovered, never left
+    'exporting' forever: approved+unverified rows are re-queued (the worker re-checks
+    Hostaway first, so this can't duplicate)."""
+    n = 0
+    for e in _expenses.values():
+        j = e.get("export_job") or {}
+        if j.get("state") in ("export_requested", "validating", "checking_hostaway",
+                               "creating_hostaway_expense", "verifying_hostaway"):
+            if (_exp4_approval_status(e) == "approved" and not e.get("hostaway_verified")
+                    and not e.get("is_split_parent")):
+                _exp4_set_job(e, "export_requested", error="recovered_after_restart")
+                if e.get("id") not in _exp4_queue and e.get("id") not in _exp4_running:
+                    _exp4_queue.append(e.get("id"))
+                n += 1
+    return n
+
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
@@ -27615,7 +27865,15 @@ async def dashboard_cache_loop():
 
 @tasks.loop(minutes=EXPENSE_SHEET_POLL_MIN)
 async def expense_sheet_loop():
-    """Poll the shared expense Google Sheet and ingest new rows (pull-based intake)."""
+    """Poll the shared expense Google Sheet and ingest new rows (intake only — never
+    auto-exports). Also recovers any V4 export job left stuck by a restart."""
+    try:
+        recovered = await asyncio.to_thread(_exp4_recover_stuck)   # runs even if no sheet configured
+        if recovered:
+            print(f"expenses V4: recovered {recovered} stuck export job(s)")
+            _exp4_ensure_worker()
+    except Exception as e:
+        print("expenses V4 recover error:", e)
     if not EXPENSE_SHEET_CSV_URL:
         return
     try:
@@ -27623,8 +27881,7 @@ async def expense_sheet_loop():
         global _exp_sheet_last_sync
         _exp_sheet_last_sync = datetime.now(TZ).isoformat(timespec="minutes")   # a successful poll = sheet is reachable
         if n:
-            print(f"expense sheet: ingested {n} new row(s)")
-            _exp_ensure_export_worker()
+            print(f"expense sheet: ingested {n} new intake row(s) → Pending Approval")
     except Exception as e:
         print("expense sheet loop error:", e)
 
