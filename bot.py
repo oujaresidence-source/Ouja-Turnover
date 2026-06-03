@@ -8692,6 +8692,140 @@ def _exp4_recover_stuck():
                 n += 1
     return n
 
+# ---- V4 split expenses (one paid receipt → 2-5 apartments) ----
+def _exp4_child_ref(parent_ref, idx):
+    return "%s-%s" % (parent_ref or "OJ-EXP", chr(ord("A") + idx))
+
+def _exp4_split_compute(parent_amount, mode, rows):
+    """Return (child_amounts, errors). rows = [{apartment, value}]; mode = percent|sar.
+    Rounds to 2dp and pushes any rounding remainder onto the LAST child so children sum
+    EXACTLY to the parent total."""
+    errors = []
+    try:
+        total = round(abs(float(parent_amount)), 2)
+    except (TypeError, ValueError):
+        return [], ["parent amount is invalid"]
+    clean = [r for r in rows if str(r.get("apartment") or "").strip()]
+    if len(clean) < 2:
+        errors.append("need at least 2 apartments")
+    vals = []
+    for r in clean:
+        try:
+            vals.append(float(str(r.get("value")).replace(",", "").strip()))
+        except (TypeError, ValueError):
+            vals.append(None)
+    if any(v is None for v in vals):
+        return [], errors + ["every row needs a number"]
+    if any(v <= 0 for v in vals):
+        errors.append("no zero or negative amounts")
+    if mode == "percent":
+        if abs(sum(vals) - 100.0) > 0.1:
+            errors.append("percentages must total 100%% (got %.1f%%)" % sum(vals))
+        amounts = [round(total * v / 100.0, 2) for v in vals]
+    else:
+        if abs(sum(vals) - total) > 0.01:
+            errors.append("amounts must total %.2f (got %.2f)" % (total, sum(vals)))
+        amounts = [round(v, 2) for v in vals]
+    if amounts and not errors:
+        amounts[-1] = round(amounts[-1] + round(total - sum(amounts), 2), 2)
+        if any(a <= 0 for a in amounts):
+            errors.append("a child amount rounded to zero — adjust the split")
+    return amounts, errors
+
+def _exp4_split_preview(parent_id, mode, rows):
+    parent = _expenses.get(str(parent_id))
+    if not parent:
+        return {"ok": False, "errors": ["parent_not_found"]}
+    amounts, errors = _exp4_split_compute(parent.get("amount"), mode, rows)
+    clean = [r for r in rows if str(r.get("apartment") or "").strip()]
+    children = ([{"apartment": clean[i].get("apartment"), "amount": amounts[i],
+                  "ref": _exp4_child_ref(parent.get("ref"), i)} for i in range(len(amounts))]
+                if amounts else [])
+    total = round(abs(float(parent.get("amount") or 0)), 2)
+    allocated = round(sum(amounts), 2) if amounts else 0.0
+    return {"ok": not errors, "errors": errors, "parent_amount": total,
+            "allocated": allocated, "remaining": round(total - allocated, 2), "children": children}
+
+def _exp4_split_apply(parent_id, mode, rows, by=""):
+    """Create the child expenses and mark the parent a (non-exportable) Split Parent.
+    No Hostaway calls — split is local until each child is approved + exported separately."""
+    parent = _expenses.get(str(parent_id))
+    if not parent:
+        return False, "parent_not_found", []
+    if parent.get("is_split_parent"):
+        return False, "already_split", []
+    if parent.get("hostaway_verified") or _exp_has_real_hostaway_ref(parent):
+        return False, "already_in_hostaway", []          # never split something already booked
+    prev = _exp4_split_preview(parent_id, mode, rows)
+    if not prev.get("ok"):
+        return False, ";".join(prev.get("errors") or ["invalid"]), []
+    child_ids = []
+    n = len(prev["children"])
+    for i, ch in enumerate(prev["children"]):
+        cid = _new_expense_id()
+        lid, _c = _exp_match_apartment(ch["apartment"])
+        child = {
+            "id": cid, "ref": ch["ref"], "submission_id": cid,
+            "submitter": parent.get("submitter") or "", "apartment": ch["apartment"], "listing_id": lid,
+            "maintenance_type": parent.get("maintenance_type") or "", "category": parent.get("category") or "",
+            "amount": ch["amount"], "expense_date": parent.get("expense_date") or "",
+            "receipt_link": parent.get("receipt_link") or "", "vendor": parent.get("vendor") or "",
+            "payment_method": parent.get("payment_method") or "",
+            "note": (parent.get("note") or "") + (" — split %d/%d of %s" % (i + 1, n, parent.get("ref") or "")),
+            "submitted_at": parent.get("submitted_at") or _exp_now().isoformat(timespec="seconds"),
+            "status": "captured", "hold_reasons": [], "primary_reason": None, "candidates": [],
+            "hostaway_ref": None, "hostaway_verified": False, "verify_note": None,
+            "discrepancy": None, "events": [], "audit": [],
+            "created_at": _exp_now().isoformat(timespec="seconds"), "split_parent_id": parent.get("id"),
+        }
+        child["approval_status"] = "needs_edit" if _exp4_missing_required(child) else "pending_approval"
+        _expenses[cid] = child
+        _exp4_log(child, "split_child_created", actor=by, new=child["approval_status"],
+                  detail="from %s · %s SAR" % (parent.get("ref"), ch["amount"]))
+        child_ids.append(cid)
+    parent["is_split_parent"] = True
+    parent["split_child_ids"] = child_ids
+    parent["approval_status"] = "approved"               # parent is settled via its children; un-exportable
+    _exp_set_status(parent, "split_parent", reason="split_confirmed", by=by, detail=str(len(child_ids)))
+    _exp4_log(parent, "split_parent_created", actor=by, new="split_parent",
+              detail="%d children: %s" % (len(child_ids), ",".join(child_ids)))
+    persist_state()
+    return True, "split", child_ids
+
+# ---- V4 three-source reconciliation (Advanced drawer — diagnostics, not the main flow) ----
+def _exp4_reconcile():
+    """Compare the Internal Ledger vs Hostaway (+ a sheet-origin flag), reference-first with
+    a conservative fallback. NEVER marks verified on a weak match. Read-only."""
+    items, ok, err = _exp_fetch_hostaway(force=True)
+    buckets = {"ledger_only": [], "verified_in_all": [], "exported_not_verified": [],
+               "duplicate_suspected": [], "hostaway_only": []}
+    matched_ha = set()
+    for e in _expenses.values():
+        if e.get("archived"):
+            continue
+        v = _exp4_view(e)
+        m = _exp_match_hostaway_item(e, items) if ok else {"present": False, "confidence": 0.0}
+        if m.get("id"):
+            matched_ha.add(str(m.get("id")))
+        row = {"ref": v["ouja_reference"], "apartment": v["apartment"], "amount": v["amount_sar"],
+               "date": v["expense_date"], "approval_status": v["approval_status"],
+               "export_status": v["export_status"], "in_sheet": v["source"] == "google_sheet",
+               "confidence": round(m.get("confidence", 0), 2), "match_method": m.get("method", "")}
+        if v["export_status"] == "verified":
+            buckets["verified_in_all"].append(row)
+        elif m.get("present") and m.get("confidence", 0) >= 0.82 and not v["hostaway_verified"]:
+            buckets["duplicate_suspected"].append(row)
+        elif v["export_status"] == "exported_not_verified":
+            buckets["exported_not_verified"].append(row)
+        else:
+            buckets["ledger_only"].append(row)
+    for it in (items or []):
+        hid = str(_exp_hostaway_item_id(it) or "")
+        if hid and hid not in matched_ha:
+            buckets["hostaway_only"].append(_exp4_safe_summary(it, ("id", "amount", "expenseDate", "date", "concept", "categoryName")))
+    return {"ok": ok, "error": err, "hostaway_count": len(items or []),
+            "counts": {k: len(v) for k, v in buckets.items()}, "buckets": buckets}
+
 # ===================== QUOTATIONS (عرض سعر) =====================
 # Print-ready quotes for clients. Each one has line items + service-fee % +
 # VAT toggle + signature. Modelled on the standalone HTML the owner sent.
