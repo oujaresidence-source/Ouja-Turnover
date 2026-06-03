@@ -7346,6 +7346,9 @@ select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,va
 html[dir="rtl"] select{background-position:14px 14px,9px 14px}
 a{color:inherit;text-decoration:none;cursor:pointer}
 .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-0.02em}
+bdi,.bidi,.mono,.kpi-val,.money,.unit-code,.ibox-who,.ibox-unit,.pill,table.data td,table.data th{unicode-bidi:isolate}
+.text-safe,.ibox-preview,.ibox-sum,.log-ltxt,.card-sub,.page-sub,.empty{overflow-wrap:anywhere;word-break:normal}
+html[dir="rtl"] .latin,html[dir="rtl"] .mono,html[dir="rtl"] .unit-code,html[dir="rtl"] .money{direction:ltr;display:inline-block}
 
 /* ============== A11Y: keyboard focus + reduced motion ============== */
 /* Outline (not box-shadow) so the ring never clips inside overflow:hidden cards.
@@ -7413,11 +7416,16 @@ aside.side{display:none;background:var(--surface);border-inline-end:1px solid va
 .nav-group{display:flex;flex-direction:column}
 .nav-group + .nav-group{margin-top:7px}
 .nav-group-h{display:flex;align-items:center;gap:7px;width:100%;background:none;border:0;cursor:pointer;
-  padding:7px 11px 4px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:7px 11px 4px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
   color:var(--mut);user-select:none;text-align:start}
+html[lang="ar"] .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5px}
 .nav-group-h:hover{color:var(--text-2)}
 .nav-cat-label{flex:1;text-align:start;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.nav-group-h .badge{background:var(--red);color:#fff;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:16px;text-align:center;line-height:1.3}
+.badge{display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;unicode-bidi:isolate}
+.nav-group-h .badge{background:var(--surface-2);color:var(--text-2);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:16px;text-align:center;line-height:1.3}
+.nav-group-h .badge.danger,.side-nav .item .badge.danger,.bn .badge.danger{background:var(--red);color:#fff}
+.nav-group-h .badge.warn,.side-nav .item .badge.warn,.bn .badge.warn{background:var(--yellow-soft);color:var(--yellow);border:1px solid rgba(201,150,23,.24)}
+.nav-group-h .badge.info,.side-nav .item .badge.info,.bn .badge.info{background:var(--blue-soft);color:var(--blue);border:1px solid rgba(47,111,208,.20)}
 .nav-caret{font-size:10px;opacity:.6;transition:transform .18s ease}
 .nav-group.collapsed .nav-caret{transform:rotate(-90deg)}
 .nav-group-items{display:flex;flex-direction:column;gap:1px}
@@ -7428,8 +7436,8 @@ aside.side{display:none;background:var(--surface);border-inline-end:1px solid va
 .side-nav .item.on{background:var(--gold-tint);color:var(--gold);font-weight:600}
 .side-nav .item.on::before{content:'';position:absolute;inset-inline-start:0;top:8px;bottom:8px;width:3px;background:var(--gold);border-radius:2px}
 .side-nav .item .ic{font-size:14px;width:18px;text-align:center;line-height:1}
-.side-nav .item .badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:17px;text-align:center;line-height:1.3}
-.side-nav .item.on .badge{background:var(--gold)}
+.side-nav .item .badge{margin-inline-start:auto;background:var(--surface-2);color:var(--text-2);font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:17px;text-align:center;line-height:1.3}
+.side-nav .item.on .badge:not(.danger):not(.warn):not(.info){background:var(--gold);color:#fff}
 .side-foot{display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line);margin-top:6px}
 .side-status{font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:6px;padding:0 8px;margin-bottom:6px}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(14,158,95,.18);flex-shrink:0}
@@ -7446,11 +7454,11 @@ header.mhead{display:none;background:var(--surface);border-bottom:1px solid var(
 .mhead-tools{display:flex;gap:5px}
 
 /* ============== ICON BUTTONS ============== */
-.icbtn{width:32px;height:32px;border-radius:7px;background:var(--surface);border:1px solid var(--line);color:var(--text-2);font-size:13px;display:inline-flex;align-items:center;justify-content:center;transition:.12s}
+.icbtn{width:36px;min-width:36px;height:36px;border-radius:7px;background:var(--surface);border:1px solid var(--line);color:var(--text-2);font-size:13px;display:inline-flex;align-items:center;justify-content:center;transition:.12s}
 .icbtn:hover{color:var(--gold);border-color:var(--gold);background:var(--gold-tint)}
 
 /* ============== BUTTONS ============== */
-.btn{padding:7px 13px;border-radius:7px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;transition:.12s;border:1px solid transparent;line-height:1.2;white-space:nowrap}
+.btn{min-height:36px;padding:7px 13px;border-radius:7px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:5px;transition:.12s;border:1px solid transparent;line-height:1.2;white-space:nowrap}
 .btn.primary{background:linear-gradient(135deg,var(--gold),var(--gold-2));color:#fff;box-shadow:var(--sh-xs)}
 .btn.primary:hover{filter:brightness(1.05);box-shadow:var(--sh-sm)}
 .btn.green{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.22)}
@@ -7462,6 +7470,10 @@ header.mhead{display:none;background:var(--surface);border-bottom:1px solid var(
 .btn.xs{padding:4px 9px;font-size:11.5px;border-radius:6px}
 .btn.sm{padding:6px 11px;font-size:12px;border-radius:6px}
 .btn:disabled{opacity:.5;cursor:default;filter:none}
+.btn[aria-busy="true"]{position:relative;color:transparent!important;pointer-events:none}
+.btn[aria-busy="true"]::after{content:'';width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.88);border-top-color:transparent;position:absolute;inset:auto;animation:spin .75s linear infinite}
+.btn.ghost[aria-busy="true"]::after{border-color:var(--gold);border-top-color:transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* ============== MAIN ============== */
 main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-width:100%}
@@ -7586,7 +7598,7 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .ibox-top{display:flex;align-items:center;gap:7px;margin-bottom:2px}
 .ibox-who{font-weight:600;font-size:13px;color:var(--text)}
 .ibox-unit{font-size:11px;color:var(--mut);background:var(--surface-2);padding:1px 7px;border-radius:5px}
-.ibox-preview{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.ibox-preview{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;direction:inherit}
 .ibox-meta{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
 .ibox-time{font-size:10.5px;color:var(--mut);font-family:var(--font-mono);white-space:nowrap}
 .ibox-conf{font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;font-family:var(--font-mono)}
@@ -7876,7 +7888,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .bn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:7px 4px;border-radius:7px;color:var(--text-3);font-size:9.5px;font-weight:500;transition:.12s;position:relative}
 .bn .ic{font-size:16px;line-height:1}
 .bn.on{color:var(--gold)}
-.bn .badge{position:absolute;top:3px;inset-inline-end:14px;background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:7px;min-width:13px;text-align:center;line-height:1.3}
+.bn .badge{position:absolute;top:3px;inset-inline-end:14px;background:var(--surface-2);color:var(--text-2);font-size:9px;font-weight:700;padding:1px 5px;border-radius:7px;min-width:13px;text-align:center;line-height:1.3}
 
 /* ============== VIEWS ============== */
 .view{display:none}
@@ -7889,7 +7901,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
 /* ============== EMPTY STATES ============== */
-.empty{color:var(--mut);text-align:center;padding:32px 14px;font-size:12.5px}
+.empty{color:var(--mut);text-align:center;padding:28px 16px;font-size:12.5px;border:1px dashed transparent;border-radius:var(--r);min-height:88px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px}
+.empty[data-empty-title]{background:var(--surface-2);border-color:var(--line)}
+.empty[data-empty-title]::before{content:attr(data-empty-title);display:block;color:var(--text-2);font-weight:700;font-size:13.5px}
+.empty[data-empty-action]::after{content:attr(data-empty-action);display:block;color:var(--mut);font-size:11.5px;max-width:58ch;line-height:1.65}
 .empty .ic{font-size:28px;display:block;margin-bottom:6px;opacity:.4}
 .muted{color:var(--mut);font-size:11.5px}
 .sk{background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 50%,var(--surface-2) 75%);background-size:200% 100%;animation:sk 1.4s infinite;color:transparent!important;border-radius:5px;min-height:14px;display:inline-block;width:60%}
@@ -9905,6 +9920,22 @@ function badgeCount(key){
   if(key==='listings') return ((D.listings && D.listings.summary) || {}).needs_setup || 0;
   return 0;
 }
+function badgeInfo(key){
+  const count = badgeCount(key);
+  if(!count) return {count:0, cls:'', label:''};
+  let cls = 'warn';
+  if(key==='inbox'){
+    const ib = D.inbox || {};
+    const esc = (ib.escalations||[]).filter(function(e){return !e.claimed_by}).length;
+    cls = esc ? 'danger' : 'warn';
+  }else if(key==='tickets' || key==='clean'){
+    cls = 'danger';
+  }else if(key==='pricing'){
+    cls = 'info';
+  }
+  const label = (L==='ar' ? 'عدد التنبيهات: ' : 'Alert count: ') + count;
+  return {count:count, cls:cls, label:label};
+}
 // Stage 3 — the sidebar is sectioned into 6 categories. Every NAV id below appears in
 // exactly one group; order is deliberate (what a manager reaches for, top to bottom).
 const NAV_CATS = [
@@ -9929,8 +9960,8 @@ function buildSideNav(){
   const byId = {}; NAV.forEach(function(n){ byId[n.id]=n; });
   const collapsed = _navCollapsed();
   function itemHtml(n){
-    const c = badgeCount(n.badge);
-    return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</a>';
+    const b = badgeInfo(n.badge);
+    return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'" title="'+esc(b.label)+'">'+b.count+'</span>':'')+'</a>';
   }
   el.innerHTML = NAV_CATS.map(function(cat){
     const items = cat.ids.map(function(id){ return byId[id]; }).filter(function(n){ return n && !(n.adminOnly && !isAdmin); });
@@ -9938,11 +9969,11 @@ function buildSideNav(){
     const activeHere = items.some(function(n){ return n.id===view; });
     // active category is always expanded; otherwise honor the saved collapse state
     const isCollapsed = !!collapsed[cat.tk] && !activeHere;
-    let groupBadge = 0; items.forEach(function(n){ groupBadge += badgeCount(n.badge); });
+    let groupBadge = 0, groupDanger = false; items.forEach(function(n){ const b=badgeInfo(n.badge); groupBadge += b.count; if(b.cls==='danger') groupDanger = true; });
     return '<div class="nav-group'+(isCollapsed?' collapsed':'')+'">'
       + '<button class="nav-group-h" onclick="toggleNavCat(\\''+cat.tk+'\\')" aria-expanded="'+(isCollapsed?'false':'true')+'">'
         + '<span class="nav-cat-label">'+t()[cat.tk]+'</span>'
-        + ((isCollapsed && groupBadge>0)?'<span class="badge">'+groupBadge+'</span>':'')
+        + ((isCollapsed && groupBadge>0)?'<span class="badge '+(groupDanger?'danger':'warn')+'">'+groupBadge+'</span>':'')
         + '<span class="nav-caret" aria-hidden="true">⌄</span>'
       + '</button>'
       + '<div class="nav-group-items">'+items.map(itemHtml).join('')+'</div>'
@@ -9952,8 +9983,8 @@ function buildSideNav(){
 function buildBottomNav(){
   const el = document.getElementById('bottomNav'); if(!el) return;
   el.innerHTML = MNAV.map(function(n){
-    const c = badgeCount(n.badge);
-    return '<button class="bn'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(c>0?'<span class="badge">'+c+'</span>':'')+'</button>';
+    const b = badgeInfo(n.badge);
+    return '<button class="bn'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'">'+b.count+'</span>':'')+'</button>';
   }).join('');
 }
 function buildMoreNav(){
@@ -10886,7 +10917,10 @@ function renderGuestList(){
   });
   // Item 62: surface VIP + repeat — VIP first, then most stays.
   f.sort(function(a,b){ if(!!b.vip !== !!a.vip) return (b.vip?1:0)-(a.vip?1:0); return (b.stays||0)-(a.stays||0); });
-  if(!f.length){ body.innerHTML = '<div class="empty">'+t().guest_no_data+'</div>'; return; }
+  if(!f.length){
+    body.innerHTML = '<div class="empty" data-empty-title="'+esc(ar?'ما لقينا ضيوف بهذا الفلتر':'No guests match this filter')+'" data-empty-action="'+esc(ar?'امسح البحث أو اختر كل الضيوف. بيانات الضيوف تظهر بعد وصول محادثات أو حجوزات من Hostaway.':'Clear search or switch to all guests. Guest data appears after Hostaway conversations or reservations are available.')+'">'+t().guest_no_data+'</div>';
+    return;
+  }
   // Estimated lifetime value = nights x average ADR across units (labelled ≈, an estimate;
   // exact per-guest revenue would need joining each guest's reservation totals).
   const us=((D.rev||{}).units)||[]; let adr=0, n=0; us.forEach(function(u){ if(u.adr){adr+=u.adr;n++} }); adr = n? adr/n : 0;
@@ -15226,25 +15260,43 @@ function renderInbox(){
   let bar = '';
   if(high.length){
     bar = '<div class="bulkbar"><span>'+(ar?('⚡ فيه <b>'+high.length+'</b> رد فوق ٨٥٪ جاهز للإرسال'):('⚡ <b>'+high.length+'</b> replies above 85% ready to send'))+'</span>'
-      + '<button class="btn primary sm" onclick="bulkApprove()">'+(ar?'وافق على الكل':'Approve all')+'</button></div>';
+      + '<button class="btn primary sm" id="bulkApproveBtn" onclick="bulkApprove()">'+(ar?'راجع وأرسل الكل':'Review & send all')+'</button></div>';
   }
-  if(!items.length){ el.innerHTML = bar + '<div class="empty">'+t().ib_no+'</div>'; return }
+  if(!items.length){
+    el.innerHTML = bar + '<div class="empty" data-empty-title="'+esc(ar?'ما فيه عناصر هنا':'Nothing in this queue')+'" data-empty-action="'+esc(ar?'غيّر الفلتر أو امسح البحث. التصعيدات والردود الجديدة تظهر هنا تلقائياً.':'Change the filter or clear search. New escalations and replies land here automatically.')+'">'+t().ib_no+'</div>';
+    return;
+  }
   el.innerHTML = bar + items.map(function(x){
     if(x.k==='auto') return renderAutoItem(x.d);
     return renderInboxItem(x.k, x.d);
   }).join('');
   // re-attach textarea values if user was editing
 }
+function approveBulkSummary(items){
+  const ar = (L==='ar');
+  const names = items.slice(0,5).map(function(r){ return (r.unit||'—')+' · '+(r.guest||'—')+' · '+(r.confidence||0)+'%'; });
+  const more = items.length>5 ? (ar?('و+'+(items.length-5)+' ردود ثانية'):('and '+(items.length-5)+' more')) : '';
+  const lines = ar
+    ? ['إرسال جماعي للضيوف', 'العدد: '+items.length, 'كل الردود فوق ٨٥٪، لكن راجع أنها ما تحتوي وعد أو سعر أو كود دخول حساس.', names.join(String.fromCharCode(10)), more, 'تبي ترسل الآن؟']
+    : ['Bulk guest send', 'Count: '+items.length, 'All replies are above 85%, but confirm there is no sensitive promise, price, or entry code.', names.join(String.fromCharCode(10)), more, 'Send now?'];
+  return lines.filter(Boolean).join(String.fromCharCode(10));
+}
+function confirmDanger(message){
+  return confirm(message);
+}
 async function bulkApprove(){
   const high = _highConfReplies();
   if(!high.length) return;
-  const ar = (L==='ar');
-  if(!confirm(ar?('توافق وترسل '+high.length+' رد جاهز؟'):('Approve & send '+high.length+' ready replies?'))) return;
+  if(!confirmDanger(approveBulkSummary(high))) return;
+  const btn = document.getElementById('bulkApproveBtn');
+  if(btn){ btn.setAttribute('aria-busy','true'); btn.disabled = true; }
   let ok=0, fail=0;
   for(const r of high){
     try{ const res = await post('/api/send',{id:String(r.id), text:r.draft}); if(res && res.ok) ok++; else fail++; }
     catch(e){ fail++; }
   }
+  if(btn){ btn.removeAttribute('aria-busy'); btn.disabled = false; }
+  const ar = (L==='ar');
   toast((ar?'تم إرسال ':'Sent ')+ok+(fail?(' · '+(ar?'فشل ':'failed ')+fail):''));
   refreshView('inbox');
 }
@@ -20073,16 +20125,16 @@ def _strat_unit_metrics(lid, recs_by_date, today_iso):
     captured = 0
     n_repriced = n_booked = n_empty = due = 0
     base_booked, after_booked = [], []
-    for date in sorted(dates):
-        r = recs_by_date.get(date) or {}
+    for date_iso in sorted(dates):
+        r = recs_by_date.get(date_iso) or {}
         base = r.get("baseline")
         if base is None:
-            base = pricing_baseline(lid, date)
+            base = pricing_baseline(lid, date_iso)
         final = r.get("final")
         cur = r.get("current")
-        repriced = len(_strat_night_confirmed(lid, date)) > 0
-        bk = booked_idx.get(date)
-        passed = date < today_iso
+        repriced = len(_strat_night_confirmed(lid, date_iso)) > 0
+        bk = booked_idx.get(date_iso)
+        passed = date_iso < today_iso
         state = _strat_night_state(repriced, base, final, bool(bk), passed)
         if repriced:
             n_repriced += 1
@@ -20096,7 +20148,7 @@ def _strat_unit_metrics(lid, recs_by_date, today_iso):
             base_booked.append(base); after_booked.append(bk["booked_price"])
         elif state == "empty":
             n_empty += 1
-        nights.append({"date": date, "state": state, "baseline": base, "final": final,
+        nights.append({"date": date_iso, "state": state, "baseline": base, "final": final,
                        "current": cur, "color": r.get("final_color"), "source": r.get("final_source"),
                        "badges": r.get("badges") or [],
                        "booked_price": (bk.get("booked_price") if bk else None),
@@ -20282,8 +20334,8 @@ def _apartment_story(lid, nights):
     """One human sentence per confirmed change (§5), newest first, bucketed."""
     by_date = {n["date"]: n for n in nights}
     out = []
-    for date, n in by_date.items():
-        for e in _strat_night_confirmed(lid, date):
+    for date_iso, n in by_date.items():
+        for e in _strat_night_confirmed(lid, date_iso):
             old, new = e.get("old"), e.get("new")
             sa = _STORY_SRC_AR.get(e.get("source"), e.get("source") or "")
             se = _STORY_SRC_EN.get(e.get("source"), e.get("source") or "")
@@ -20300,9 +20352,9 @@ def _apartment_story(lid, nights):
             booked = (n["state"] == "booked")
             bucket = ("ربح" if (raised and booked) else "أنقذنا ليلة" if (not raised and booked)
                       else "رفعنا زيادة" if (raised and n["state"] == "empty") else "الطلب ضعيف")
-            out.append({"date": date, "ts": e.get("ts"), "bucket": bucket, "state": n["state"],
-                        "text_ar": f"{date}: {old} ← {new} · {sa} · أُرسل {hhmm} وتأكّد في Hostaway · {ra}",
-                        "text_en": f"{date}: {old} → {new} · {se} · sent {hhmm}, confirmed in Hostaway · {re_}"})
+            out.append({"date": date_iso, "ts": e.get("ts"), "bucket": bucket, "state": n["state"],
+                        "text_ar": f"{date_iso}: {old} ← {new} · {sa} · أُرسل {hhmm} وتأكّد في Hostaway · {ra}",
+                        "text_en": f"{date_iso}: {old} → {new} · {se} · sent {hhmm}, confirmed in Hostaway · {re_}"})
     out.sort(key=lambda x: x.get("ts") or "", reverse=True)
     return out[:80]
 
@@ -23019,7 +23071,7 @@ async def _api_expenses_verify(request):
     e = _expenses.get((b.get("id") or "").strip())
     if not e:
         return _json({"error": "not found"}, 404)
-    res = await asyncio.to_thread(_exp_verify_in_hostaway, e)
+    await asyncio.to_thread(_exp_verify_in_hostaway, e)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "verified": bool(e.get("hostaway_verified")),
                   "note": e.get("verify_note"), "expense": _exp_view(e)})
