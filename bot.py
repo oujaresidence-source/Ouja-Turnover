@@ -9891,23 +9891,22 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_expenses">
         <div class="page-head">
           <div>
-            <div class="page-title">💸 المصاريف</div>
-            <div class="page-sub">مصاريف الميدان من النموذج → التحقق → Hostaway</div>
+            <div class="page-title">💸 المصاريف V2</div>
+            <div class="page-sub">تحليل المصادر الثلاثة: Google Sheet → الداشبورد → Hostaway</div>
           </div>
           <div class="page-tools">
-            <button class="btn primary sm" onclick="expSyncRefresh()">🔄 <span id="t_exp_sync">تحديث المزامنة</span></button>
-            <button class="btn ghost sm" onclick="expSetSub('sync')">📊 <span id="t_exp_status">حالة المزامنة</span></button>
+            <button class="btn primary sm" onclick="expV2Reconcile(true)">↻ <span id="t_exp_sync">مطابقة الآن</span></button>
+            <button class="btn ghost sm" onclick="expV2RepairPlan()">🧭 <span id="t_exp_status">مطابقة وإصلاح</span></button>
             <button class="btn ghost sm" onclick="expShowSettings()">⚙️ الإعدادات</button>
-            <button class="btn ghost sm" onclick="loadExpenses()">↻</button>
           </div>
         </div>
         <div class="page-help" data-help-key="expenses">
           <button class="ph-x" onclick="dismissHelp('expenses')" title="إخفاء">×</button>
-          <div class="ph-t">💸 أتمتة مصاريف الميدان</div>
+          <div class="ph-t">💸 المصاريف V2</div>
           <div class="ph-b">
-            الموظفين يسجّلون مصاريفهم عبر <b>نموذج Google</b>. المصاريف الواضحة
-            تُرحّل تلقائياً إلى Hostaway على الشقة الصحيحة، وأي مصروف ناقص أو
-            غامض أو مكرر يوقف في <b>قائمة المراجعة</b> عشان تتأكد منه بضغطة.
+            هنا تشوف المصروف هل هو موجود في الشيت، الداشبورد، وHostaway —
+            وعشان كذا نعرف وين المشكلة بالضبط. علامة الصح الخضراء ما تظهر إلا بعد
+            تحديث Hostaway والتأكد منه.
           </div>
         </div>
         <div id="expensesOpsSummary"></div>
@@ -10356,6 +10355,17 @@ const T = {
     ct_none:'ما فيه شقق معيّنة بعد — فعّل الخانة جنب أي شقة تحت.', ct_search:'ابحث…', ct_applied:'تم —', ct_changed:'قناة محدّثة', ct_no_change:'القنوات محدّثة — ما فيه جديد.', ct_need_pull:'اسحب الشقق من Hostaway أول (من صفحة الشقق).',
     ct_route_copy:'نسخ رابط خطة Oujact', ct_route_copied:'نُسخ رابط المسار ✓', ct_missing_map:'رابط الخرائط ناقص', ct_maps_ph:'الصق رابط Google Maps للشقة', ct_dispatch:'خطة اليوم', ct_no_token:'ضع OUJACT_ROUTE_TOKEN (أو CLEANING_TOKEN) في Railway أول', ct_urgent:'عاجلة', ct_open_route:'افتح صفحة المسار',
     exp_sync:'تحديث المزامنة', exp_status:'حالة المزامنة',
+    exp_v2:'المصاريف V2', exp_reconcile_repair:'مطابقة وإصلاح',
+    exp_three_source:'تحليل المصادر الثلاثة',
+    exp_present_sheet:'موجود في الشيت', exp_present_dashboard:'موجود في الداشبورد', exp_present_hostaway:'موجود في Hostaway',
+    exp_missing_hostaway:'غير موجود في Hostaway', exp_ready_export:'جاهز للترحيل', exp_needs_review:'تحتاج مراجعة',
+    exp_in_progress:'قيد التنفيذ', exp_sent_not_verified:'تم الإرسال ولم يتم التحقق', exp_verified_hostaway:'متحقق في Hostaway',
+    exp_failed:'فشل', exp_duplicate_exists:'مكرر / موجود مسبقًا', exp_archived:'مؤرشف',
+    exp_issue_reason:'سبب المشكلة', exp_recommended_action:'الإجراء المقترح',
+    exp_split:'تقسيم المصروف', exp_split_pct:'تقسيم بالنسبة', exp_split_amount:'تقسيم بالمبلغ',
+    exp_remaining:'المبلغ المتبقي', exp_split_preview:'معاينة التقسيم', exp_split_confirm:'اعتماد التقسيم',
+    exp_no_fake_verified:'لا تعرض علامة الصح إلا بعد التحقق من Hostaway',
+    exp_why_not:'ليش ما ترحّل؟', exp_download_diag:'تنزيل تقرير التشخيص CSV',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
@@ -10564,6 +10574,17 @@ const T = {
     ct_none:'No apartments assigned yet — tick the box next to any unit below.', ct_search:'Search…', ct_applied:'Done —', ct_changed:'channels updated', ct_no_change:'Channels up to date — nothing changed.', ct_need_pull:'Pull listings from Hostaway first (Listings page).',
     ct_route_copy:'Copy Oujact Route Link', ct_route_copied:'Route link copied ✓', ct_missing_map:'Missing Google Maps link', ct_maps_ph:'Paste the apartment Google Maps link', ct_dispatch:"Today's dispatch", ct_no_token:'Set OUJACT_ROUTE_TOKEN (or CLEANING_TOKEN) in Railway first', ct_urgent:'urgent', ct_open_route:'Open route page',
     exp_sync:'Refresh sync', exp_status:'Sync status',
+    exp_v2:'Expenses V2', exp_reconcile_repair:'Reconcile & Repair',
+    exp_three_source:'Three-source analysis',
+    exp_present_sheet:'Present in Sheet', exp_present_dashboard:'Present in Dashboard', exp_present_hostaway:'Present in Hostaway',
+    exp_missing_hostaway:'Missing from Hostaway', exp_ready_export:'Ready to Export', exp_needs_review:'Needs Review',
+    exp_in_progress:'In Progress', exp_sent_not_verified:'Sent, Not Verified', exp_verified_hostaway:'Verified in Hostaway',
+    exp_failed:'Failed', exp_duplicate_exists:'Duplicate / Already Exists', exp_archived:'Archived',
+    exp_issue_reason:'Issue reason', exp_recommended_action:'Recommended action',
+    exp_split:'Split expense', exp_split_pct:'Split by percentage', exp_split_amount:'Split by SAR amount',
+    exp_remaining:'Remaining amount', exp_split_preview:'Split preview', exp_split_confirm:'Confirm split',
+    exp_no_fake_verified:'Do not show checkmark until verified in Hostaway',
+    exp_why_not:'Why not exported?', exp_download_diag:'Download diagnostics CSV',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
@@ -14182,6 +14203,252 @@ async function expDelete(id){
     removeHa=confirm(L==='ar'?'حذفه أيضاً من Hostaway؟':'Also remove it from Hostaway?');
   await post('/api/expenses/delete',{id:id, remove_hostaway:removeHa});
   toast(L==='ar'?'تم الحذف':'Deleted'); await expRefresh();
+}
+
+/* ---- Expenses V2: clear three-source reconciliation ---- */
+let _expV2View='overview';
+let _expV2SplitDraft=null;
+function expV2L(ar,en){ return L==='ar'?ar:en; }
+function expV2StatusLabel(st){
+  var m={needs_review:[t().exp_needs_review,t().exp_needs_review],ready:[t().exp_ready_export,t().exp_ready_export],
+    in_progress:[t().exp_in_progress,t().exp_in_progress],sent_not_verified:[t().exp_sent_not_verified,t().exp_sent_not_verified],
+    verified:[t().exp_verified_hostaway,t().exp_verified_hostaway],failed:[t().exp_failed,t().exp_failed],
+    duplicate:[t().exp_duplicate_exists,t().exp_duplicate_exists],archived:[t().exp_archived,t().exp_archived],
+    split_parent:[L==='ar'?'مصروف مقسم':'Split Parent',L==='ar'?'مصروف مقسم':'Split Parent']};
+  return (m[st]&&m[st][0])||st||'—';
+}
+function expV2Tone(st){
+  if(st==='verified') return 'ok';
+  if(st==='failed'||st==='sent_not_verified') return 'danger';
+  if(st==='needs_review'||st==='duplicate'||st==='in_progress') return 'warn';
+  if(st==='ready') return 'ok';
+  return 'info';
+}
+function expV2Color(st){
+  var tone=expV2Tone(st);
+  return tone==='ok'?'var(--green)':(tone==='danger'?'var(--red)':(tone==='warn'?'var(--gold)':'var(--mut)'));
+}
+function expV2Pill(label,tone){
+  var col=tone==='ok'?'var(--green)':(tone==='danger'?'var(--red)':(tone==='warn'?'var(--gold)':'var(--mut)'));
+  var bg=tone==='ok'?'var(--green-soft)':(tone==='danger'?'var(--red-soft)':(tone==='warn'?'var(--gold-tint)':'var(--surface-3)'));
+  return '<span style="display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:4px 9px;background:'+bg+';color:'+col+';font-size:10.5px;font-weight:700">'+esc(label)+'</span>';
+}
+function expV2SourceChip(label,present,verified){
+  var tone=verified?'ok':(present?'warn':'info');
+  var mark=verified?'✓':(present?'•':'—');
+  return expV2Pill(mark+' '+label,tone);
+}
+function expV2SetSummary(snap){
+  var totals=(snap&&snap.totals)||{};
+  D.expSummary={queue:(totals.needs_review||0)+(totals.failed||0)+(totals.sent_not_verified||0),
+    ready:totals.ready||0,total_count:(snap.rows||[]).length,review:(totals.needs_review||0),count:(snap.rows||[]).length};
+}
+async function loadExpenses(){
+  var body=document.getElementById('expBody');
+  if(body) body.innerHTML='<div class="empty sk">—</div>';
+  if(!D.expOpts){ try{ D.expOpts=await api('/api/expenses/options'); }catch(_){ D.expOpts={apartments:[]}; } }
+  try{ D.expV2=await api('/api/expenses/v2/overview'); }catch(e){ D.expV2={rows:[],totals:{},health:{},diagnostics:{},error:String(e)}; }
+  expV2SetSummary(D.expV2);
+  _renderExpensesV2();
+  renderExpensesOpsSummary();
+  buildSideNav(); buildBottomNav();
+}
+async function expRefresh(){ await loadExpenses(); }
+async function expV2Reconcile(pullSheet){
+  toast(expV2L('⏳ نطابق المصادر…','⏳ Reconciling sources…'));
+  var r; try{ r=await post('/api/expenses/v2/reconcile',{pull_sheet:!!pullSheet}); }catch(e){ toast('⚠ '+e); return; }
+  D.expV2=r; expV2SetSummary(r); _renderExpensesV2(); renderExpensesOpsSummary(); buildSideNav();
+  toast(expV2L('تمت المطابقة','Reconciled'));
+}
+async function expV2Action(action){
+  var msg={export_safe_missing:[expV2L('تصدير المصاريف الجاهزة فقط؟','Export ready expenses only?')],
+    retry_temporary:[expV2L('إعادة المحاولة للفشل المؤقت فقط؟','Retry temporary failures only?')],
+    manual_verify:[expV2L('التحقق من المرسل وغير المؤكد فقط؟','Verify sent, not verified expenses only?')],
+    move_unsafe_to_review:[expV2L('نقل غير الآمن إلى تحتاج مراجعة؟','Move unsafe rows to Needs Review?')],
+    skip_duplicate:[expV2L('وضع المكررات كموجودة مسبقاً؟','Mark duplicates as already existing?')],
+    mark_matched_verified:[expV2L('اعتماد المطابق بعد إعادة التحقق؟','Mark matched rows verified after re-check?')]};
+  if(!confirm((msg[action]&&msg[action][0])||action)) return;
+  var r; try{ r=await post('/api/expenses/v2/repair-apply',{action:action}); }catch(e){ toast('⚠ '+e); return; }
+  toast(expV2L('تم: ','Done: ')+(r.changed||[]).length+' / '+(r.queued||[]).length+' / '+(r.verified||[]).length);
+  await loadExpenses();
+}
+function expV2SetView(v){ _expV2View=v; _renderExpensesV2(); }
+function expV2Rows(){
+  var rows=((D.expV2||{}).rows)||[];
+  if(_expV2View==='overview') return rows.filter(function(r){return r.v2_status!=='archived';}).slice(0,140);
+  if(_expV2View==='missing') return rows.filter(function(r){return r.v2_status==='ready'||r.v2_status==='sent_not_verified';});
+  if(_expV2View==='sheet_only') return rows.filter(function(r){return ((r.sheet_state||{}).present_in_sheet)&&!((r.hostaway_state||{}).present_in_hostaway);});
+  if(_expV2View==='dashboard_only') return rows.filter(function(r){return ((r.dashboard_state||{}).present_in_dashboard)&&!((r.sheet_state||{}).present_in_sheet)&&!((r.hostaway_state||{}).present_in_hostaway);});
+  if(_expV2View==='hostaway_only') return rows.filter(function(r){return r.source_kind==='hostaway_only';});
+  if(_expV2View==='verified_all') return rows.filter(function(r){return r.v2_status==='verified'&&((r.sheet_state||{}).present_in_sheet)&&((r.dashboard_state||{}).present_in_dashboard);});
+  if(_expV2View==='split') return rows.filter(function(r){return r.v2_status==='split_parent'||((r.dashboard_state||{}).local_parent_id);});
+  if(_expV2View==='diagnostics') return rows;
+  return rows.filter(function(r){return r.v2_status===_expV2View;});
+}
+function expV2HealthCards(){
+  var h=(D.expV2||{}).health||{}, sheet=h.sheet||{}, dash=h.dashboard||{}, ha=h.hostaway||{};
+  function card(title, value, sub, tone){
+    return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:92px">'
+      +'<div class="muted" style="font-size:11px;font-weight:700">'+esc(title)+'</div>'
+      +'<div style="font-size:22px;font-weight:800;margin-top:5px;color:'+expV2Color(tone||'info')+'">'+esc(value)+'</div>'
+      +'<div class="muted" style="font-size:11px;margin-top:4px">'+esc(sub||'')+'</div></div>';
+  }
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0">'
+    +card('Google Sheet', sheet.configured?expV2L('متصل','Connected'):expV2L('غير مضبوط','Not configured'),
+      expV2L('آخر مزامنة: ','last sync: ')+(sheet.resolved_url?expV2L('رابط موجود','URL set'):'—')+' · '+expV2L('صفوف: ','rows: ')+fmt(sheet.data_rows||0), sheet.error?'failed':'verified')
+    +card(expV2L('الداشبورد','Dashboard'), fmt(dash.local_records||0), expV2L('جاهز ','ready ')+fmt(dash.ready||0)+' · '+expV2L('فشل ','failed ')+fmt(dash.failed||0)+' · '+expV2L('تقسيم ','split ')+fmt(dash.split_parents||0), 'in_progress')
+    +card('Hostaway', ha.connected?expV2L('متصل','Connected'):expV2L('غير متصل','Not connected'),
+      expV2L('مؤكد ','verified ')+fmt(ha.verified_matches||0)+' · '+expV2L('مجلب ','fetched ')+fmt(ha.fetched||0)+(ha.api_error?(' · '+ha.api_error):''), ha.connected?'verified':'failed')
+    +'</div>';
+}
+function expV2WorkflowCards(){
+  var totals=(D.expV2||{}).totals||{}, sar=(D.expV2||{}).sar_totals||{};
+  var order=[['needs_review',t().exp_needs_review],['ready',t().exp_ready_export],['in_progress',t().exp_in_progress],['sent_not_verified',t().exp_sent_not_verified],['verified',t().exp_verified_hostaway],['failed',t().exp_failed],['duplicate',t().exp_duplicate_exists],['split',t().exp_split]];
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0 16px">'
+    +order.map(function(p){ var key=p[0], on=_expV2View===key; var val= key==='split'?(totals.split_parent||0):(totals[key]||0); var money=key==='split'?(sar.split_parent||0):(sar[key]||0);
+      return '<button class="exp-stat '+expV2Tone(key)+' '+(on?'on':'')+'" onclick="expV2SetView(&#39;'+key+'&#39;)" style="text-align:start;border-color:'+(on?'var(--gold)':'var(--border)')+'">'
+        +'<div class="v">'+fmt(val)+'</div><div class="l">'+esc(p[1])+' · '+expMoney(money)+'</div></button>';
+    }).join('')+'</div>';
+}
+function expV2Actions(){
+  var csv='/api/expenses/v2/diagnostics.csv?token='+encodeURIComponent(tok());
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px">'
+    +'<button class="btn ghost sm" onclick="expV2Reconcile(true)">'+expV2L('تحديث الشيت','Refresh Sheet')+'</button>'
+    +'<button class="btn ghost sm" onclick="expV2Reconcile(false)">'+expV2L('تحديث Hostaway','Refresh Hostaway')+'</button>'
+    +'<button class="btn primary sm" onclick="expV2Reconcile(true)">'+expV2L('طابق الآن','Reconcile Now')+'</button>'
+    +'<button class="btn primary sm" onclick="expV2Action(&#39;export_safe_missing&#39;)">'+expV2L('صدّر الجاهز','Export Ready')+'</button>'
+    +'<button class="btn ghost sm" onclick="expV2Action(&#39;retry_temporary&#39;)">'+expV2L('أعد الفاشل','Retry Failed')+'</button>'
+    +'<button class="btn ghost sm" onclick="expV2Action(&#39;manual_verify&#39;)">'+expV2L('تحقق من المرسل','Verify Sent')+'</button>'
+    +'<button class="btn ghost sm" onclick="expV2RepairPlan()">🧭 '+t().exp_reconcile_repair+'</button>'
+    +'<button class="btn ghost sm" onclick="expV2SetView(&#39;diagnostics&#39;)">'+expV2L('التشخيص','Open Diagnostics')+'</button>'
+    +'<a class="btn ghost sm" href="'+csv+'" target="_blank">'+t().exp_download_diag+'</a></div>';
+}
+function expV2FilterTabs(){
+  var tabs=[['overview',expV2L('نظرة عامة','Overview')],['missing',t().exp_missing_hostaway],['sheet_only',expV2L('الشيت فقط','Sheet only')],
+    ['dashboard_only',expV2L('الداشبورد فقط','Dashboard only')],['hostaway_only',expV2L('Hostaway فقط','Hostaway only')],
+    ['verified_all',expV2L('مؤكد في الثلاثة','Verified in all')],['duplicate',t().exp_duplicate_exists],['split',t().exp_split],['diagnostics',expV2L('التشخيص','Diagnostics')]];
+  return '<div style="display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px">'
+    +tabs.map(function(tb){return '<button class="btn ghost sm" onclick="expV2SetView(&#39;'+tb[0]+'&#39;)" style="'+(_expV2View===tb[0]?'background:var(--surface);border-color:var(--gold);color:var(--gold)':'')+'">'+esc(tb[1])+'</button>';}).join('')+'</div>';
+}
+function expV2RowCard(r){
+  var ss=r.sheet_state||{}, ds=r.dashboard_state||{}, hs=r.hostaway_state||{};
+  var status=expV2Pill(expV2StatusLabel(r.v2_status), expV2Tone(r.v2_status));
+  var reason=expV2Pill((r.reason_label&&r.reason_label[L])||r.reason||'', expV2Tone(r.v2_status));
+  var src='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+    +expV2SourceChip(t().exp_present_sheet, !!ss.present_in_sheet, false)
+    +expV2SourceChip(t().exp_present_dashboard, !!ds.present_in_dashboard, false)
+    +expV2SourceChip(t().exp_present_hostaway, !!hs.present_in_hostaway, r.v2_status==='verified')+'</div>';
+  var actions='<button class="btn ghost xs" onclick="expV2Open(&#39;'+esc(r.id)+'&#39;)">'+expV2L('عرض','View')+'</button>';
+  if(ds.present_in_dashboard) actions+=' <button class="btn ghost xs" onclick="expEdit(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تعديل/إصلاح','Edit/Fix')+'</button>';
+  if(r.can_export) actions+=' <button class="btn primary xs" onclick="expV2ExportOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('ترحيل','Export')+'</button>';
+  if(r.can_verify) actions+=' <button class="btn ghost xs" onclick="expV2VerifyOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تحقق','Verify')+'</button>';
+  if(ds.present_in_dashboard && r.v2_status!=='split_parent') actions+=' <button class="btn ghost xs" onclick="expV2Split(&#39;'+esc(r.id)+'&#39;)">'+t().exp_split+'</button>';
+  var facts=[r.date,r.apartment,r.category,(r.source||''),r.last_attempt_at?(expV2L('آخر محاولة ','last attempt ')+_expTime(r.last_attempt_at)):'',r.attempts?(expV2L('محاولات ','attempts ')+r.attempts):''].filter(Boolean).map(esc).join(' · ');
+  return '<div class="exp-card" style="border-color:color-mix(in srgb, '+expV2Color(r.v2_status)+' 34%, var(--line));cursor:pointer" onclick="if(event.target.tagName!==&#39;BUTTON&#39;&&event.target.tagName!==&#39;A&#39;)expV2Open(&#39;'+esc(r.id)+'&#39;)">'
+    +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="min-width:0">'
+    +'<div class="strong" style="font-size:14px">'+esc(r.ref||r.id||'—')+' · '+expMoney(r.amount||0)+'</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:3px">'+facts+'</div></div><div>'+status+'</div></div>'
+    +src+'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px"><span class="muted" style="font-size:11px">'+t().exp_why_not+'</span>'+reason+'<span class="muted" style="font-size:11px">'+esc(r.recommended_action||'')+'</span></div>'
+    +'<div style="margin-top:10px;display:flex;gap:7px;flex-wrap:wrap">'+actions+'</div></div>';
+}
+function expV2DiagnosticsHtml(){
+  var d=(D.expV2||{}).diagnostics||{}, keys=Object.keys(d).sort(function(a,b){return (d[b].count||0)-(d[a].count||0);});
+  if(!keys.length) return emptyState(expV2L('لا توجد مشاكل واضحة','No grouped issues'),expV2L('شغل مطابقة الآن لتحديث التشخيص.','Run Reconcile Now to refresh diagnostics.'),'✓');
+  return '<div style="display:grid;gap:10px">'+keys.map(function(k){
+    var g=d[k]||{};
+    var examples=(g.examples||[]).map(function(x){return '<span class="exp-reason">'+esc((x.ref||x.id||'')+' · '+(x.apartment||'')+' · '+expMoney(x.amount||0))+'</span>';}).join(' ');
+    return '<div class="card" style="border-radius:8px"><div style="display:flex;justify-content:space-between;gap:10px"><b>'+esc(k)+'</b>'+expV2Pill(fmt(g.count||0),expV2Tone(k))+'</div><div class="muted" style="font-size:11.5px;margin-top:6px">'+examples+'</div></div>';
+  }).join('')+'</div>';
+}
+function _renderExpensesV2(){
+  var body=document.getElementById('expBody'); if(!body) return;
+  var snap=D.expV2||{}, rows=expV2Rows();
+  var banner=riskPanel('info',t().exp_three_source,expV2L('هنا تشوف المصروف هل هو موجود في الشيت، الداشبورد، وHostaway — وعشان كذا نعرف وين المشكلة بالضبط.','This view reconciles Sheet, Dashboard, and Hostaway so you can see exactly where the issue is.'),'', '');
+  var html=banner+expV2HealthCards()+expV2WorkflowCards()+expV2Actions()+expV2FilterTabs();
+  if(_expV2View==='diagnostics') html+=expV2DiagnosticsHtml();
+  else if(!rows.length) html+=emptyState(expV2L('ما فيه مصاريف في هذا الفلتر','No expenses in this filter'),expV2L('غيّر الفلتر أو شغّل مطابقة الآن.','Change the filter or run Reconcile Now.'),'—');
+  else html+='<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(expV2RowCard).join('')+'</div>';
+  body.innerHTML=html;
+}
+function expV2Find(id){ var rows=((D.expV2||{}).rows)||[]; for(var i=0;i<rows.length;i++){ if(String(rows[i].id)===String(id)) return rows[i]; } return null; }
+function expV2Pre(obj){ return '<pre style="white-space:pre-wrap;direction:ltr;text-align:left;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;max-height:220px;overflow:auto">'+esc(JSON.stringify(obj||{},null,2))+'</pre>'; }
+function expV2Open(id){
+  var r=expV2Find(id); if(!r) return;
+  openDrawer(r.ref||r.id||'—', expMoney(r.amount||0)+' · '+(r.apartment||''));
+  var hs=r.hostaway_state||{}, ds=r.dashboard_state||{}, ss=r.sheet_state||{};
+  var h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+expV2Pill(expV2StatusLabel(r.v2_status), expV2Tone(r.v2_status))+expV2Pill((r.reason_label&&r.reason_label[L])||r.reason, expV2Tone(r.v2_status))+'</div>'
+    +'<div class="muted" style="font-size:12px;margin-bottom:12px">'+t().exp_recommended_action+': <b>'+esc(r.recommended_action||'')+'</b></div>'
+    +'<div style="display:grid;grid-template-columns:1fr;gap:10px">'
+    +'<div><b>'+t().exp_present_sheet+'</b>'+expV2Pre(ss)+'</div>'
+    +'<div><b>'+t().exp_present_dashboard+'</b>'+expV2Pre(ds)+'</div>'
+    +'<div><b>'+t().exp_present_hostaway+'</b>'+expV2Pre(hs)+'</div>'
+    +'<div><b>'+expV2L('السجل','Timeline')+'</b>'+expV2Pre({events:r.events,export_attempts:r.export_attempts})+'</div></div>';
+  setDrawerBody(h);
+  var foot='';
+  if(ds.present_in_dashboard) foot+='<button class="btn ghost sm" onclick="expEdit(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تعديل/إصلاح','Edit/Fix')+'</button>';
+  if(r.can_export) foot+='<button class="btn primary sm" onclick="expV2ExportOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('ترحيل','Export')+'</button>';
+  if(r.can_verify) foot+='<button class="btn ghost sm" onclick="expV2VerifyOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تحقق','Verify')+'</button>';
+  if(ds.present_in_dashboard && r.v2_status!=='split_parent') foot+='<button class="btn ghost sm" onclick="expV2Split(&#39;'+esc(r.id)+'&#39;)">'+t().exp_split+'</button>';
+  setDrawerFoot(foot);
+}
+async function expV2ExportOne(id){ await post('/api/expenses/v2/repair-apply',{action:'export_safe_missing',ids:[id]}); closeDrawer(); await loadExpenses(); }
+async function expV2VerifyOne(id){ await post('/api/expenses/v2/repair-apply',{action:'manual_verify',ids:[id]}); closeDrawer(); await loadExpenses(); }
+async function expV2RepairPlan(){
+  openDrawer(t().exp_reconcile_repair, expV2L('معاينة فقط','Preview only')); setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('');
+  var p; try{ p=await api('/api/expenses/v2/repair-plan'); }catch(e){ setDrawerBody('<div class="empty">'+esc(e)+'</div>'); return; }
+  D.expV2Plan=p; var s=p.summary||{};
+  function row(action,label,count,body){
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:11px;margin-bottom:8px;background:var(--surface-2)"><div style="display:flex;justify-content:space-between;gap:8px"><b>'+esc(label)+'</b>'+expV2Pill(fmt(count||0),count?'warn':'info')+'</div><div class="muted" style="font-size:11.5px;margin-top:4px">'+esc(body)+'</div>'+(count?'<button class="btn primary sm" style="margin-top:8px" onclick="expV2Action(&#39;'+action+'&#39;)">'+esc(label)+'</button>':'')+'</div>';
+  }
+  var h='<div class="muted" style="font-size:12px;margin-bottom:12px">'+expV2L('كل إجراء يقول بالضبط وش بيسوي. ما فيه زر واحد يطابِق ويصدّر كل شيء.','Each action says exactly what it will do. There is no one vague button that queues everything.')+'</div>'
+    +row('mark_matched_verified',expV2L('علّم المطابق كمتحقق','Mark matched as Verified'),s.already_verified,expV2L('يعيد التحقق ثم يعتمد الموجود فعلاً في Hostaway.','Re-checks then marks only rows actually found in Hostaway.'))
+    +row('move_unsafe_to_review',expV2L('انقل غير الآمن للمراجعة','Move unsafe to Needs Review'),s.unsafe_to_export,expV2L('ناقص شقة أو مبلغ أو تاريخ أو تصنيف أو تقسيم غير متوازن.','Missing apartment, amount, date, category, or unbalanced split.'))
+    +row('export_safe_missing',expV2L('صدّر الناقص الآمن فقط','Export only safe missing'),s.missing_from_hostaway,expV2L('يصّدر فقط المصاريف الجاهزة التي لا تملك رقم Hostaway حقيقي.','Exports only ready rows that do not already have a real Hostaway id.'))
+    +row('retry_temporary',expV2L('أعد الفشل المؤقت فقط','Retry temporary failures'),s.temporary_failures,expV2L('لا يعيد تصدير المكررات أو الصفوف التي لها رقم Hostaway.','Does not re-export duplicates or rows with a Hostaway id.'))
+    +row('manual_verify',expV2L('راجع المرسل وغير المؤكد','Review sent, not verified'),s.manual_review,expV2L('صفوف عندها رقم Hostaway محلي لكن لم نجدها في التحديث.','Rows have a local Hostaway id but were not found in the refresh.'))
+    +row('skip_duplicate',expV2L('تجاهل المكررات','Skip duplicates'),s.duplicates,expV2L('يضعها كموجودة مسبقاً ولا يصدّرها تلقائياً.','Marks as already existing and never exports automatically.'));
+  setDrawerBody(h);
+}
+function expV2Split(id){
+  var r=expV2Find(id); if(!r) return;
+  _expV2SplitDraft={id:id,mode:'percentage',rows:[{listing_id:'',apartment:'',value:50},{listing_id:'',apartment:'',value:50}],preview:null};
+  openDrawer(t().exp_split, (r.ref||'')+' · '+expMoney(r.amount||0)); expV2RenderSplit();
+}
+function expV2SplitOptions(sel){
+  var opts='<option value="">—</option>';
+  (((D.expOpts||{}).apartments)||[]).forEach(function(a){ opts+='<option value="'+esc(a.listing_id)+'"'+(String(sel)===String(a.listing_id)?' selected':'')+'>'+esc(a.name)+'</option>'; });
+  return opts;
+}
+function expV2SplitSet(i,k,v){
+  var d=_expV2SplitDraft; if(!d) return;
+  d.rows[i][k]=v;
+  if(k==='listing_id'){ var a=(((D.expOpts||{}).apartments)||[]).filter(function(x){return String(x.listing_id)===String(v);})[0]; d.rows[i].apartment=a?a.name:''; }
+}
+function expV2SplitAdd(){ if(_expV2SplitDraft){ _expV2SplitDraft.rows.push({listing_id:'',apartment:'',value:0}); expV2RenderSplit(); } }
+function expV2SplitDel(i){ if(_expV2SplitDraft&&_expV2SplitDraft.rows.length>2){ _expV2SplitDraft.rows.splice(i,1); expV2RenderSplit(); } }
+function expV2RenderSplit(){
+  var d=_expV2SplitDraft; if(!d) return;
+  var modeBtns='<div style="display:flex;gap:8px;margin-bottom:10px"><button class="btn ghost sm" onclick="_expV2SplitDraft.mode=&#39;percentage&#39;;expV2RenderSplit()" style="'+(d.mode==='percentage'?'background:var(--gold);color:#1a1a1a':'')+'">'+t().exp_split_pct+'</button><button class="btn ghost sm" onclick="_expV2SplitDraft.mode=&#39;amount&#39;;expV2RenderSplit()" style="'+(d.mode==='amount'?'background:var(--gold);color:#1a1a1a':'')+'">'+t().exp_split_amount+'</button></div>';
+  var rows=d.rows.map(function(r,i){
+    return '<div style="display:grid;grid-template-columns:1.5fr .8fr auto;gap:8px;margin-bottom:8px;align-items:center">'
+      +'<select onchange="expV2SplitSet('+i+',&#39;listing_id&#39;,this.value)">'+expV2SplitOptions(r.listing_id)+'</select>'
+      +'<input type="number" step="0.01" value="'+esc(r.value)+'" oninput="expV2SplitSet('+i+',&#39;value&#39;,this.value)" placeholder="'+(d.mode==='percentage'?'%':'SAR')+'">'
+      +'<button class="btn ghost sm" onclick="expV2SplitDel('+i+')">×</button></div>';
+  }).join('');
+  var prev=d.preview?expV2Pre(d.preview):'<div class="muted" style="font-size:12px">'+t().exp_split_preview+'</div>';
+  setDrawerBody(modeBtns+rows+'<button class="btn ghost sm" onclick="expV2SplitAdd()">+ '+expV2L('أضف شقة','Add apartment')+'</button><div style="margin-top:12px">'+prev+'</div>');
+  setDrawerFoot('<button class="btn ghost sm" onclick="expV2SplitPreview()">'+t().exp_split_preview+'</button><button class="btn primary sm" onclick="expV2SplitConfirm()">'+t().exp_split_confirm+'</button>');
+}
+async function expV2SplitPreview(){
+  var d=_expV2SplitDraft; if(!d) return;
+  var r=await post('/api/expenses/v2/split-preview',{id:d.id,mode:d.mode,rows:d.rows});
+  d.preview=r; expV2RenderSplit();
+}
+async function expV2SplitConfirm(){
+  var d=_expV2SplitDraft; if(!d) return;
+  var r=await post('/api/expenses/v2/split-confirm',{id:d.id,mode:d.mode,rows:d.rows});
+  if(!r.ok){ d.preview=r; expV2RenderSplit(); return; }
+  toast(expV2L('تم التقسيم','Split created')); closeDrawer(); await loadExpenses();
 }
 
 /* ---- edit overlay ---- */

@@ -73,6 +73,29 @@ class DashboardUiContractTest(unittest.TestCase):
 
         self.assertIn("renderAllPageOps", html)
 
+    def test_expenses_v2_dashboard_contract_is_present(self):
+        html = dashboard_html()
+
+        for text in [
+            "المصاريف V2",
+            "تحليل المصادر الثلاثة",
+            "مطابقة وإصلاح",
+            "لا تعرض علامة الصح إلا بعد التحقق من Hostaway",
+            "Download diagnostics CSV",
+        ]:
+            self.assertIn(text, html)
+
+        for helper in [
+            "function expV2Reconcile",
+            "function expV2RepairPlan",
+            "function expV2Split",
+            "function expV2DiagnosticsHtml",
+            "/api/expenses/v2/overview",
+            "/api/expenses/v2/repair-apply",
+            "/api/expenses/v2/split-confirm",
+        ]:
+            self.assertIn(helper, html)
+
 
 class ProductBriefContractTest(unittest.TestCase):
     def test_product_brief_exists_for_design_work(self):
