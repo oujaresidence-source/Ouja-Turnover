@@ -19419,7 +19419,9 @@ async function finAdjSave(){
                          .map(function(x){ return {label:(x.label||'').trim(), amount:parseFloat(x.amount)||0, kind:(x.kind==='income'?'income':'expense')}; });
   try{ await post('/api/finance/adjust',{lid:s.lid, start:s.start, end:s.end, adjust:{expense_overrides:s.overrides, extra_lines:extra, comment:comment}}); }
   catch(e){ toast('⚠ '+e); return; }
-  toast(L==='ar'?'حُفظ ✓':'Saved ✓'); closeDrawer(); financeLoadReport();
+  toast(L==='ar'?'حُفظ ✓':'Saved ✓'); closeDrawer();
+  if(s.bulkIdx!=null){ await bulkRefetchItem(s.bulkIdx); bulkPreviewRender(); }
+  else { financeLoadReport(); }
 }
 /* ===== Bulk owner-statement PDFs (per-apartment or per-owner) ===== */
 var _bulkPdf=null;
@@ -19457,7 +19459,7 @@ function bulkPdfRender(){
     list=units.length?units.map(function(u){ return '<label style="'+rowSt+'"><input type="checkbox" '+(s.sel[u.lid]?'checked':'')+' onchange="bulkSelApt('+u.lid+',this.checked)"> <span style="flex:1">'+esc(u.name||'')+'</span><span class="muted" style="font-size:11px">'+esc(u.owner||'')+'</span></label>'; }).join(''):('<div class="muted">'+(ar?'لا شقق':'No apartments')+'</div>');
   }
   setDrawerBody(modeBtns+dates+selAll+'<div style="display:flex;flex-direction:column;gap:5px">'+list+'</div>');
-  setDrawerFoot('<button class="btn primary" onclick="bulkGenerate()">⬇ '+(ar?'تجهيز PDF':'Generate PDF')+'</button>');
+  setDrawerFoot('<button class="btn primary" onclick="bulkGenerate()">'+(ar?'معاينة وتعديل ←':'Preview & edit →')+'</button>');
 }
 async function bulkGenerate(){
   var s=_bulkPdf, from=(document.getElementById('bpFrom')||{}).value, to=(document.getElementById('bpTo')||{}).value;
@@ -19468,7 +19470,54 @@ async function bulkGenerate(){
   toast(L==='ar'?'⏳ نجهّز التقارير…':'⏳ Generating…');
   var r; try{ r=await post('/api/finance/bulk',body); }catch(e){ toast('⚠ '+e); return; }
   if(!r||!r.items||!r.items.length){ toast(L==='ar'?'ما فيه بيانات':'No data'); return; }
-  closeDrawer(); stmtDownload(r.items);
+  _bulkItems=r.items; _bulkMode=s.mode; bulkPreviewRender();
+}
+var _bulkItems=null, _bulkMode='apartment';
+function bulkPreviewRender(){
+  var ar=(L==='ar'), items=_bulkItems||[];
+  var inp='padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
+  var cards=items.map(function(it,i){
+    var r=it.report||{}, editable=(r.lid!=null);
+    var h='<div class="card" style="border-radius:10px;padding:12px;margin-bottom:8px">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px"><b style="font-size:13px">'+esc(it.label||'')+'</b><span class="muted" style="font-size:11px">'+esc(it.owner||r.owner||'')+'</span></div>'
+      +'<div style="font-size:12px;margin-top:4px;color:var(--text-2)">'+(ar?'الدخل ':'income ')+fmt(r.total_income||0)+' · '+(ar?'مصاريف ':'exp ')+fmt(r.expenses||0)+' · '+(ar?'الصافي ':'net ')+'<b>'+fmt(r.owner_net||0)+'</b> ر.س'+(r.adjusted?(' · '+(ar?'معدّل':'edited')):'')+'</div>';
+    if(editable){
+      h+='<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'
+        +'<input id="bo_'+i+'" value="'+esc(r.owner||'')+'" placeholder="'+(ar?'المالك':'owner')+'" style="'+inp+';flex:1;min-width:120px">'
+        +'<input id="bm_'+i+'" type="number" step="0.5" value="'+(r.management_pct==null?'':r.management_pct)+'" title="'+(ar?'نسبة الإدارة %':'mgmt %')+'" style="'+inp+';width:66px">'
+        +'<button class="btn ghost xs" onclick="bulkSaveOwner('+i+')">'+(ar?'حفظ':'save')+'</button>'
+        +'<button class="btn ghost xs" onclick="bulkEditItem('+i+')">✏️ '+(ar?'المصاريف':'expenses')+'</button></div>'
+        +'<textarea id="bc_'+i+'" rows="2" placeholder="'+(ar?'ملاحظة على البيان':'statement comment')+'" style="'+inp+';width:100%;margin-top:6px">'+esc(r.comment||'')+'</textarea>';
+    }
+    return h+'</div>';
+  }).join('');
+  setDrawerBody('<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+(ar?'عدّل ثم نزّل — كل شقة ملف PDF مستقل باسم الشقة والمالك':'Edit, then download — one named PDF per apartment')+'</div>'+cards);
+  setDrawerFoot('<button class="btn ghost sm" onclick="bulkPdfRender()">'+(ar?'رجوع':'Back')+'</button><button class="btn primary" onclick="bulkDownloadAll()">⬇ '+(ar?'تنزيل':'Download')+' ('+items.length+')</button>');
+}
+async function bulkRefetchItem(i){
+  var it=(_bulkItems||[])[i]; if(!it||!it.report||it.report.lid==null) return;
+  try{ var rep=await api('/api/finance/report?lid='+it.report.lid+'&start='+encodeURIComponent(it.report.period.start)+'&end='+encodeURIComponent(it.report.period.end)); _bulkItems[i].report=rep; if(rep&&rep.owner) _bulkItems[i].owner=rep.owner; }catch(_){}
+}
+async function bulkSaveOwner(i){
+  var it=(_bulkItems||[])[i]; if(!it) return; var r=it.report||{};
+  var owner=(document.getElementById('bo_'+i)||{}).value||'', mgmt=(document.getElementById('bm_'+i)||{}).value||'', comment=(document.getElementById('bc_'+i)||{}).value||'';
+  var cl=r.cleaning||{};
+  try{ await post('/api/finance/owners',{apartment:r.apartment, owner:owner, mgmt_pct:mgmt, cleaning:{type:(cl.type==='owner'?'owner':'ours'), amount:(cl.amount||0)}}); }catch(_){}
+  var sv=r.saved_adjust||{};
+  try{ await post('/api/finance/adjust',{lid:r.lid, start:r.period.start, end:r.period.end, adjust:{expense_overrides:sv.expense_overrides||{}, extra_lines:sv.extra_lines||[], comment:comment}}); }catch(_){}
+  await bulkRefetchItem(i); toast(L==='ar'?'حُفظ ✓':'Saved ✓'); bulkPreviewRender();
+}
+function bulkEditItem(i){
+  var it=(_bulkItems||[])[i]; if(!it||!it.report) return; var r=it.report, sv=r.saved_adjust||{};
+  _finAdj={lid:r.lid, start:r.period.start, end:r.period.end,
+           overrides:JSON.parse(JSON.stringify(sv.expense_overrides||{})),
+           extra:(sv.extra_lines||[]).slice(), comment:sv.comment||'', raw:(r.exp_lines_raw||[]), bulkIdx:i};
+  openDrawer(L==='ar'?'✏️ تعديل المصاريف':'✏️ Edit expenses', esc(it.label||''));
+  finAdjRender();
+}
+async function bulkDownloadAll(){
+  if(!_bulkItems||!_bulkItems.length) return;
+  await stmtDownload(_bulkItems);
 }
 /* ===== Elevated PDF statement + client-side per-file PDF/ZIP engine ===== */
 function _loadScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('load '+src)); }; document.head.appendChild(s); }); }
