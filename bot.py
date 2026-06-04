@@ -32,6 +32,7 @@ import json
 import time
 import html as _html
 import base64
+import mimetypes
 import random
 import asyncio
 import hashlib
@@ -202,6 +203,9 @@ GOOGLE_MAPS_API_KEY  = os.environ.get("GOOGLE_MAPS_API_KEY", "")   # optional �
 OUJACT_CLEAN_MIN     = int(os.environ.get("OUJACT_CLEAN_MIN", "20"))   # default cleaning estimate (min)
 OUJACT_CLEAN_MAX     = int(os.environ.get("OUJACT_CLEAN_MAX", "40"))
 OUJACT_PARK_BUFFER   = int(os.environ.get("OUJACT_PARK_BUFFER", "5"))  # parking/waiting buffer (min)
+CLEANING_REVIEW_CHANNEL = os.environ.get("CLEANING_REVIEW_CHANNEL", "oujact-review")
+CLEANING_PHOTO_MAX_MB = int(os.environ.get("CLEANING_PHOTO_MAX_MB", "12"))
+CLEANING_DRIVE_ROOT_FOLDER_ID = os.environ.get("CLEANING_DRIVE_ROOT_FOLDER_ID", "")
 
 # ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -2500,6 +2504,26 @@ _oujact_checkout = _load_json("oujact_checkout.json", {}) or {}    # "lid|date" 
 _oujact_status   = _load_json("oujact_status.json", []) or []      # append-only status actions
 _oujact_route_audit = _load_json("oujact_route_audit.json", []) or []
 _oujact_dispatch_log = _load_json("oujact_dispatch_log.json", {}) or {}  # "lid|date" -> {flags}
+_cleaning_photo_templates = _load_json("cleaning_photo_templates.json", {}) or {}
+_cleaning_reports = _load_json("cleaning_reports.json", {}) or {}
+_cleaning_report_photos = _load_json("cleaning_report_photos.json", {}) or {}
+_cleaning_report_audit = _load_json("cleaning_report_audit.json", []) or []
+
+CLEANING_REPORT_STATUSES = (
+    "draft", "uploading", "submitted_for_review", "pending_manager_review",
+    "manager_approved", "manager_rejected", "needs_reshoot", "issue_found")
+
+DEFAULT_CLEANING_PHOTO_SLOTS = [
+    ("living_room", "غرفة المعيشة", "Living room"),
+    ("dining_table", "طاولة الطعام", "Dining table"),
+    ("tv_remote", "ريموت التلفزيون", "TV remote"),
+    ("bedroom", "غرفة النوم", "Bedroom"),
+    ("bathroom", "الحمام", "Bathroom"),
+    ("kitchen", "المطبخ", "Kitchen"),
+    ("entrance", "المدخل", "Entrance"),
+    ("supplies", "المستلزمات", "Supplies"),
+    ("damage_check", "فحص الأضرار", "Damage check"),
+]
 
 OUJACT_CHECKOUT_STATES = ("unknown", "guest_confirmed", "checkout_button", "airbnb_confirmed",
                           "late_checkout", "inside", "checkout_passed")
@@ -2532,6 +2556,187 @@ def _oujact_log_status(lid, date_iso, action, note="", by=""):
         del _oujact_status[:len(_oujact_status) - 5000]
     _save_json("oujact_status.json", _oujact_status)
     return e
+
+def _cleanproof_now():
+    return datetime.now(TZ).isoformat(timespec="seconds")
+
+def _cleanproof_template_id(scope, value=""):
+    value = str(value or "default").strip() or "default"
+    return f"cpt-{scope}-{value}".replace("|", "-").replace(" ", "-")
+
+def _cleanproof_default_template():
+    now = _cleanproof_now()
+    return {
+        "template_id": "cpt-default",
+        "scope": "default",
+        "apartment_id": "",
+        "apartment_type": "",
+        "template_name": "Default cleaning photo checklist",
+        "active": True,
+        "created_at": now,
+        "updated_at": now,
+        "updated_by": "system",
+        "slots": [
+            {
+                "slot_id": sid, "label_ar": ar, "label_en": en,
+                "instructions_ar": "صوّر بوضوح بعد التنظيف.",
+                "instructions_en": "Take a clear photo after cleaning.",
+                "required": True, "allow_multiple": False,
+                "display_order": i + 1, "active": True,
+            }
+            for i, (sid, ar, en) in enumerate(DEFAULT_CLEANING_PHOTO_SLOTS)
+        ],
+    }
+
+def _cleanproof_ensure_default_template():
+    t = _cleaning_photo_templates.get("cpt-default")
+    if not isinstance(t, dict):
+        t = _cleanproof_default_template()
+        _cleaning_photo_templates["cpt-default"] = t
+        _save_json("cleaning_photo_templates.json", _cleaning_photo_templates)
+    return t
+
+def _cleanproof_template_for(lid=None):
+    _cleanproof_ensure_default_template()
+    if lid is not None:
+        tid = _cleanproof_template_id("apartment", lid)
+        t = _cleaning_photo_templates.get(tid)
+        if isinstance(t, dict) and t.get("active"):
+            return t
+    return _cleaning_photo_templates["cpt-default"]
+
+def _cleanproof_snapshot_template(tpl):
+    snap = json.loads(json.dumps(tpl, ensure_ascii=False))
+    snap["snapshot_at"] = _cleanproof_now()
+    return snap
+
+def _cleanproof_code(name, lid):
+    s = (name or "").split("|")[-1].strip() or str(lid)
+    s = re.sub(r"[^A-Za-z0-9\u0600-\u06FF_-]+", "-", s).strip("-")
+    return s[:30] or str(lid)
+
+def _cleanproof_listing_name(lid):
+    """Resolve a listing name without a live Hostaway call; photo proof must work offline."""
+    try:
+        rec = (_ls_get().get("listings") or {}).get(str(int(lid))) or {}
+        nm = rec.get("internal_name") or rec.get("public_name") or ""
+        if nm:
+            return nm
+    except Exception:
+        pass
+    try:
+        return (_listings.get("map") or {}).get(int(lid)) or str(lid)
+    except Exception:
+        return str(lid)
+
+def _cleanproof_report_id(lid, date_iso):
+    code = _cleanproof_code(_cleanproof_listing_name(lid), lid)
+    raw = f"{date_iso}-{lid}-{code}".encode("utf-8")
+    return f"CLR-{str(date_iso).replace('-', '')}-{code}-{hashlib.sha1(raw).hexdigest()[:6]}"
+
+def _cleanproof_audit(report_id, action, actor="", prev="", new="", detail="", extra=None):
+    rep = _cleaning_reports.get(report_id) or {}
+    row = {
+        "timestamp": _cleanproof_now(),
+        "report_id": report_id,
+        "apartment": rep.get("apartment_name") or "",
+        "action": action,
+        "actor": (actor or "")[:80],
+        "previous_status": prev or "",
+        "new_status": new or "",
+        "detail": (detail or "")[:500],
+    }
+    if isinstance(extra, dict):
+        row.update({k: v for k, v in extra.items() if k not in ("token", "secret", "api_key")})
+    _cleaning_report_audit.append(row)
+    if len(_cleaning_report_audit) > 5000:
+        del _cleaning_report_audit[:len(_cleaning_report_audit) - 5000]
+    _save_json("cleaning_report_audit.json", _cleaning_report_audit)
+    return row
+
+def _cleanproof_report_photos(report_id):
+    return [p for p in _cleaning_report_photos.values()
+            if isinstance(p, dict) and p.get("report_id") == report_id and p.get("status") != "removed"]
+
+def _cleanproof_recount(report):
+    slots = [s for s in (report.get("checklist_snapshot") or {}).get("slots", []) if s.get("active")]
+    required = [s for s in slots if s.get("required")]
+    uploaded_slots = {p.get("slot_id") for p in _cleanproof_report_photos(report.get("report_id")) if p.get("status") == "uploaded"}
+    report["required_slots_count"] = len(required)
+    report["uploaded_required_slots_count"] = sum(1 for s in required if s.get("slot_id") in uploaded_slots)
+    report["all_required_complete"] = report["uploaded_required_slots_count"] >= report["required_slots_count"]
+    return report
+
+def _cleanproof_get_or_create_report(lid, date_iso, actor="", route_id=""):
+    lid = int(lid)
+    date_iso = str(date_iso or datetime.now(TZ).date().isoformat())[:10]
+    rid = _cleanproof_report_id(lid, date_iso)
+    report = _cleaning_reports.get(rid)
+    if isinstance(report, dict):
+        return _cleanproof_recount(report)
+    name = _cleanproof_listing_name(lid)
+    tpl = _cleanproof_template_for(lid)
+    now = _cleanproof_now()
+    report = {
+        "report_id": rid, "date": date_iso, "route_id": route_id,
+        "dispatch_item_id": _oc_key(lid, date_iso), "apartment_id": lid,
+        "apartment_name": name, "apartment_code": _cleanproof_code(name, lid),
+        "listing_id": lid, "cleaner_id": "", "cleaner_name": actor or "",
+        "checklist_template_id": tpl.get("template_id"),
+        "checklist_snapshot": _cleanproof_snapshot_template(tpl),
+        "status": "draft", "required_slots_count": 0,
+        "uploaded_required_slots_count": 0, "all_required_complete": False,
+        "drive_folder_id": "", "drive_folder_url": "",
+        "storage_provider": "local_fallback",
+        "storage_warning": "Google Drive is not configured. Files are saved under STATE_DIR local storage.",
+        "discord_review_channel_id": "", "discord_review_message_id": "",
+        "manager_decision": "", "manager_notes": "",
+        "approved_by": "", "approved_at": "", "rejected_by": "", "rejected_at": "",
+        "reshoot_requested_by": "", "reshoot_requested_at": "",
+        "issue_found": False, "issue_notes": "",
+        "created_at": now, "updated_at": now,
+    }
+    _cleanproof_recount(report)
+    _cleaning_reports[rid] = report
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(rid, "report_created", actor, "", "draft")
+    return report
+
+def _cleanproof_safe_filename(slot_id, code, report_id, original_name):
+    ext = os.path.splitext(original_name or "")[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic"):
+        ext = ".jpg"
+    stamp = datetime.now(TZ).strftime("%Y%m%d_%H%M%S")
+    base = f"{slot_id}_{code}_{stamp}_{report_id}".replace("/", "-")
+    return re.sub(r"[^A-Za-z0-9_.\-\u0600-\u06FF]+", "-", base)[:160] + ext
+
+def _cleanproof_save_local(report, slot_id, filename, data, mime_type):
+    root = os.path.join(STATE_DIR, "cleaning_photos", report["date"], report["report_id"])
+    os.makedirs(root, exist_ok=True)
+    path = os.path.join(root, filename)
+    with open(path, "wb") as f:
+        f.write(data)
+    return {"provider": "local_fallback", "path": path, "url": ""}
+
+def _cleanproof_photo_view(photo):
+    return {
+        "photo_id": photo.get("photo_id"), "report_id": photo.get("report_id"),
+        "slot_id": photo.get("slot_id"), "file_name": photo.get("file_name"),
+        "mime_type": photo.get("mime_type"), "file_size": photo.get("file_size"),
+        "uploaded_at": photo.get("uploaded_at"), "uploaded_by": photo.get("uploaded_by"),
+        "drive_file_id": photo.get("drive_file_id"), "drive_file_url": photo.get("drive_file_url"),
+        "thumbnail_url": photo.get("thumbnail_url"), "storage_url": photo.get("storage_url"),
+        "status": photo.get("status"), "error_message": photo.get("error_message"),
+    }
+
+def _cleanproof_report_view(report, include_photos=True):
+    r = _cleanproof_recount(report)
+    out = {k: v for k, v in r.items() if k != "checklist_snapshot"}
+    out["checklist"] = r.get("checklist_snapshot") or {}
+    if include_photos:
+        out["photos"] = [_cleanproof_photo_view(p) for p in _cleanproof_report_photos(r.get("report_id"))]
+    out["audit"] = [a for a in _cleaning_report_audit if a.get("report_id") == r.get("report_id")][-80:]
+    return out
 
 # Feature 5 — priority tiers (lower = first). Operational urgency ALWAYS beats distance;
 # ETA only reorders within the same tier.
@@ -4976,6 +5181,137 @@ class PriceApplyView(discord.ui.View):
         emb.color = 0x95A5A6
         emb.set_footer(text=f"❌ تم التجاهل بواسطة {interaction.user.display_name}")
         await interaction.response.edit_message(embed=emb, view=None)
+
+def _cleanproof_find_by_discord_message(message_id):
+    sid = str(message_id or "")
+    for r in _cleaning_reports.values():
+        if str(r.get("discord_review_message_id") or "") == sid:
+            return r
+    return None
+
+def _cleanproof_decide(report, decision, actor, notes=""):
+    if not report:
+        return None
+    prev = report.get("status", "")
+    now = _cleanproof_now()
+    if decision == "approve":
+        report.update({"status": "manager_approved", "manager_decision": "approved",
+                       "manager_notes": notes[:500], "approved_by": actor[:80],
+                       "approved_at": now, "updated_at": now})
+        new = "manager_approved"
+    elif decision == "reject":
+        report.update({"status": "manager_rejected", "manager_decision": "rejected",
+                       "manager_notes": notes[:500], "rejected_by": actor[:80],
+                       "rejected_at": now, "updated_at": now})
+        new = "manager_rejected"
+    elif decision == "reshoot":
+        report.update({"status": "needs_reshoot", "manager_decision": "needs_reshoot",
+                       "manager_notes": notes[:500], "reshoot_requested_by": actor[:80],
+                       "reshoot_requested_at": now, "updated_at": now})
+        new = "needs_reshoot"
+    else:
+        return None
+    _cleaning_reports[report["report_id"]] = report
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(report["report_id"], f"manager_{decision}", actor, prev, new, notes)
+    log_event("ops", f"Oujact photo report · {decision} · {report.get('apartment_name')}")
+    return report
+
+def _cleanproof_discord_embed(report):
+    photos = _cleanproof_report_photos(report.get("report_id"))
+    status = report.get("status", "draft")
+    color = 0x0E9E5F if status == "manager_approved" else (0xC44343 if status == "manager_rejected" else GOLD)
+    title = f"🧼 Cleaning report · {report.get('apartment_code') or report.get('apartment_name')}"
+    desc = [
+        f"**Apartment:** {report.get('apartment_name')}",
+        f"**Date:** {report.get('date')}",
+        f"**Checklist:** {report.get('uploaded_required_slots_count', 0)}/{report.get('required_slots_count', 0)} required photos",
+        f"**Status:** `{status}`",
+    ]
+    if report.get("issue_found"):
+        desc.append(f"**Issue:** {report.get('issue_notes') or 'flagged by cleaner'}")
+    if report.get("drive_folder_url"):
+        desc.append(f"[Open Drive folder]({report.get('drive_folder_url')})")
+    elif report.get("storage_provider") == "local_fallback":
+        desc.append("Storage: local fallback under STATE_DIR. Drive is not configured.")
+    if report.get("manager_notes"):
+        desc.append(f"**Manager notes:** {report.get('manager_notes')}")
+    e = discord.Embed(title=title[:256], description="\n".join(desc)[:4000], color=color)
+    if photos:
+        sample = ", ".join((p.get("slot_id") or "") for p in photos[:6])
+        e.add_field(name="Uploaded slots", value=sample or "—", inline=False)
+    e.set_footer(text=f"report_id:{report.get('report_id')}")
+    return e
+
+class CleaningReportDecisionModal(discord.ui.Modal):
+    def __init__(self, decision, message_id):
+        title = "Reject cleaning report" if decision == "reject" else "Request reshoot"
+        super().__init__(title=title)
+        self.decision = decision
+        self.message_id = message_id
+        self.notes = discord.ui.TextInput(label="Reason / notes", style=discord.TextStyle.paragraph,
+                                          required=True, max_length=500)
+        self.add_item(self.notes)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        report = _cleanproof_find_by_discord_message(self.message_id)
+        if not report:
+            await interaction.response.send_message("Report not found.", ephemeral=True)
+            return
+        report = _cleanproof_decide(report, self.decision, str(interaction.user), str(self.notes.value or ""))
+        await interaction.response.send_message("Saved.", ephemeral=True)
+        try:
+            ch = interaction.channel
+            if ch:
+                msg = await ch.fetch_message(int(self.message_id))
+                await msg.edit(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
+        except Exception as e:
+            print("cleanproof modal edit error:", e)
+
+class CleaningProofReviewView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success,
+                       custom_id="ouja_cleanproof_approve")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        report = _cleanproof_find_by_discord_message(interaction.message.id)
+        if not report:
+            await interaction.response.send_message("Report not found.", ephemeral=True)
+            return
+        report = _cleanproof_decide(report, "approve", str(interaction.user), "")
+        await interaction.response.edit_message(embed=_cleanproof_discord_embed(report),
+                                                view=CleaningProofReviewView())
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger,
+                       custom_id="ouja_cleanproof_reject")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CleaningReportDecisionModal("reject", interaction.message.id))
+
+    @discord.ui.button(label="Needs reshoot", style=discord.ButtonStyle.primary,
+                       custom_id="ouja_cleanproof_reshoot")
+    async def reshoot(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CleaningReportDecisionModal("reshoot", interaction.message.id))
+
+async def _cleanproof_send_discord_review(report_id):
+    report = _cleaning_reports.get(report_id)
+    if not report or not GUILD_ID:
+        return False, "missing_report_or_guild"
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return False, "guild_not_ready"
+    ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
+    if ch is None:
+        return False, "channel_not_ready"
+    msg = await ch.send(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
+    report["discord_review_channel_id"] = str(ch.id)
+    report["discord_review_message_id"] = str(msg.id)
+    report["updated_at"] = _cleanproof_now()
+    _cleaning_reports[report_id] = report
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(report_id, "discord_review_sent", "bot", report.get("status"), report.get("status"),
+                      extra={"discord_channel_id": str(ch.id), "discord_message_id": str(msg.id)})
+    return True, ""
 
 class ApproveView(discord.ui.View):
     def __init__(self, item=None, draft=None):
@@ -10534,6 +10870,29 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div id="oujactBody"><div class="empty sk">—</div></div>
         </div>
 
+        <div class="card" id="cleanProofCard">
+          <div class="card-head">
+            <span class="card-title" id="t_cp_title">📷 تقارير صور التنظيف</span>
+            <span class="card-sub" id="cleanProofStorage">—</span>
+          </div>
+          <div class="muted" id="t_cp_sub" style="font-size:11.5px;margin:2px 2px 12px"></div>
+          <div class="kpis" id="cleanProofStats"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0">
+            <button class="btn ghost sm" onclick="loadCleaningReports()">↻ <span id="t_cp_refresh">تحديث التقارير</span></button>
+            <button class="btn ghost sm" onclick="openCleanTemplateEditor()">⚙ <span id="t_cp_templates">تعديل قائمة الصور</span></button>
+            <select id="cleanProofStatus" onchange="renderCleaningReports()" style="height:34px;padding:6px 10px;font-size:12px">
+              <option value="">All</option>
+              <option value="pending_manager_review">Pending</option>
+              <option value="manager_approved">Approved</option>
+              <option value="manager_rejected">Rejected</option>
+              <option value="needs_reshoot">Needs reshoot</option>
+              <option value="issue_found">Issues</option>
+            </select>
+            <input id="cleanProofSearch" oninput="renderCleaningReports()" placeholder="ابحث..." style="width:220px;padding:6px 10px;height:34px;font-size:12px">
+          </div>
+          <div id="cleanProofBody"><div class="empty sk">—</div></div>
+        </div>
+
         <!-- THIS WEEK strip — the supervisor's daily lookup -->
         <div class="card">
           <div class="card-head"><span class="card-title">📆 هذا الأسبوع — ٧ أيام قادمة</span></div>
@@ -11440,6 +11799,20 @@ const T = {
     exp_why_not:'ليش ما ترحّل؟', exp_download_diag:'تنزيل تقرير التشخيص CSV',
     clean_title:'🧹 جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
+    cp_title:'📷 تقارير صور التنظيف', cp_sub:'المنظّف يرفع الصور من رابط المسار. المدير يعتمد أو يرفض من الداشبورد أو Discord، والأرشيف يبقى محفوظ.',
+    cp_refresh:'تحديث التقارير', cp_templates:'تعديل قائمة الصور', cp_pending:'قيد مراجعة المدير',
+    cp_approved:'تم اعتماد التنظيف', cp_rejected:'تم رفض التقرير', cp_reshoot:'إعادة تصوير مطلوبة',
+    cp_draft:'مسودة', cp_uploading:'جاري الرفع', cp_submitted:'مرسل للمراجعة', cp_issue:'فيه مشكلة',
+    cp_required:'صور مطلوبة', cp_optional:'صور اختيارية', cp_missing:'الصورة ناقصة', cp_uploaded:'تم الرفع',
+    cp_drive:'رابط مجلد Drive', cp_open_photos:'افتح الصور', cp_approve:'اعتماد', cp_reject:'رفض',
+    cp_needs_reshoot:'إعادة تصوير', cp_reason:'سبب الرفض', cp_notes:'ملاحظات المدير',
+    cp_archive:'أرشيف تقارير التنظيف', cp_search:'ابحث عن تقرير أو شقة...', cp_completion:'اكتمال الصور',
+    cp_storage_local:'تخزين محلي مؤقت: فعّل Google Drive للأرشفة الدائمة', cp_storage_drive:'Google Drive مفعّل',
+    cp_no_reports:'ما فيه تقارير صور تنظيف بعد', cp_view:'عرض التفاصيل', cp_template_title:'خانات صور التنظيف',
+    cp_add_slot:'إضافة خانة', cp_delete_slot:'حذف الخانة', cp_required_lbl:'إلزامية', cp_optional_lbl:'اختيارية',
+    cp_allow_multi:'يسمح بأكثر من صورة', cp_label_ar:'اسم الخانة بالعربي', cp_label_en:'اسم الخانة بالإنجليزي',
+    cp_instr_ar:'تعليمات التصوير بالعربي', cp_instr_en:'تعليمات التصوير بالإنجليزي', cp_save_template:'حفظ القائمة',
+    cp_damage_check:'فحص الأضرار', cp_supplies:'المستلزمات', cp_tv_remote:'ريموت التلفزيون',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
     clean_link_title:'🔗 الرابط لشركة التنظيف',
     clean_link_copy:'انسخ', clean_link_open:'افتح', clean_link_missing:'⚠ متغيّر CLEANING_TOKEN غير معرّف في Railway — أضفه أولاً لإنشاء الرابط',
@@ -11676,6 +12049,20 @@ const T = {
     exp_why_not:'Why not exported?', exp_download_diag:'Download diagnostics CSV',
     clean_title:'🧹 Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
+    cp_title:'📷 Cleaning photo reports', cp_sub:'Cleaners upload photos from the route link. Managers approve or reject from Dashboard or Discord, with the archive kept in storage.',
+    cp_refresh:'Refresh reports', cp_templates:'Edit photo checklist', cp_pending:'Pending manager review',
+    cp_approved:'Cleaning approved', cp_rejected:'Report rejected', cp_reshoot:'Reshoot required',
+    cp_draft:'Draft', cp_uploading:'Uploading', cp_submitted:'Submitted for review', cp_issue:'Issue found',
+    cp_required:'Required photos', cp_optional:'Optional photos', cp_missing:'Missing photo', cp_uploaded:'Uploaded',
+    cp_drive:'Drive folder link', cp_open_photos:'Open photos', cp_approve:'Approve', cp_reject:'Reject',
+    cp_needs_reshoot:'Needs reshoot', cp_reason:'Rejection reason', cp_notes:'Manager notes',
+    cp_archive:'Cleaning report archive', cp_search:'Search report or apartment...', cp_completion:'Photo completion',
+    cp_storage_local:'Temporary local storage: configure Google Drive for permanent archive', cp_storage_drive:'Google Drive enabled',
+    cp_no_reports:'No cleaning photo reports yet', cp_view:'View details', cp_template_title:'Photo slots',
+    cp_add_slot:'Add slot', cp_delete_slot:'Delete slot', cp_required_lbl:'Required', cp_optional_lbl:'Optional',
+    cp_allow_multi:'Allow multiple photos', cp_label_ar:'Arabic slot label', cp_label_en:'English slot label',
+    cp_instr_ar:'Arabic photo instructions', cp_instr_en:'English photo instructions', cp_save_template:'Save checklist',
+    cp_damage_check:'Damage check', cp_supplies:'Supplies', cp_tv_remote:'TV remote',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
     clean_link_title:'🔗 Share link for the cleaning company',
     clean_link_copy:'copy', clean_link_open:'open', clean_link_missing:'⚠ CLEANING_TOKEN env var not set in Railway — add it first to enable the link',
@@ -13471,6 +13858,7 @@ async function loadCleaning(){
   document.getElementById('cleanListBody').innerHTML = '<div class="empty sk">—</div>';
   try{ D.clean = await api('/api/cleaning/schedule') }catch(_){ D.clean = {items:[], counts:{}} }
   try{ D.listings = await api('/api/listings') }catch(_){ if(!D.listings) D.listings = {listings:[], summary:{}} }
+  await loadCleaningReports(false);
   const sub = document.getElementById('t_clean_sub'); if(sub) sub.textContent = t().clean_sub;
   renderCleaningStats();
   renderCleaningWeek();
@@ -13481,6 +13869,162 @@ async function loadCleaning(){
   renderCleaningList();
   renderOujact();
   renderCleaningOpsSummary();
+}
+
+function _cpStatusLabel(s){
+  var m={
+    draft:t().cp_draft, uploading:t().cp_uploading, submitted_for_review:t().cp_submitted,
+    pending_manager_review:t().cp_pending, manager_approved:t().cp_approved,
+    manager_rejected:t().cp_rejected, needs_reshoot:t().cp_reshoot, issue_found:t().cp_issue
+  };
+  return m[s] || s || '—';
+}
+function _cpStatusPill(s){
+  var cls = s==='manager_approved' ? 'ok' : (s==='manager_rejected' || s==='needs_reshoot' || s==='issue_found' ? 'danger' : (s==='pending_manager_review' || s==='submitted_for_review' ? 'warn' : 'muted'));
+  return '<span class="pill '+cls+'">'+esc(_cpStatusLabel(s))+'</span>';
+}
+async function loadCleaningReports(showToast){
+  var title=document.getElementById('t_cp_title'); if(title) title.textContent=t().cp_title;
+  var sub=document.getElementById('t_cp_sub'); if(sub) sub.textContent=t().cp_sub;
+  var rf=document.getElementById('t_cp_refresh'); if(rf) rf.textContent=t().cp_refresh;
+  var tp=document.getElementById('t_cp_templates'); if(tp) tp.textContent=t().cp_templates;
+  var search=document.getElementById('cleanProofSearch'); if(search) search.placeholder=t().cp_search;
+  try{ D.cleanReports = await api('/api/cleaning/reports'); }
+  catch(_){ D.cleanReports = {reports:[], counts:{}, storage:{}}; }
+  renderCleaningReports();
+  if(showToast) toast('✓');
+}
+function renderCleaningReports(){
+  var root=document.getElementById('cleanProofBody'); if(!root) return;
+  var d=D.cleanReports || {reports:[], counts:{}, storage:{}};
+  var st=d.storage || {};
+  var storage=document.getElementById('cleanProofStorage');
+  if(storage) storage.textContent = st.drive_configured ? t().cp_storage_drive : t().cp_storage_local;
+  var c=d.counts || {};
+  var stats=[
+    {v:c.pending_manager_review||0,l:t().cp_pending,cls:'gold',ic:'⏳'},
+    {v:c.manager_approved||0,l:t().cp_approved,cls:'g',ic:'✓'},
+    {v:c.manager_rejected||0,l:t().cp_rejected,cls:'r',ic:'×'},
+    {v:c.needs_reshoot||0,l:t().cp_reshoot,cls:'p',ic:'↻'}
+  ];
+  var statsEl=document.getElementById('cleanProofStats');
+  if(statsEl) statsEl.innerHTML=stats.map(function(x){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+x.cls+'">'+x.ic+'</div></div><div class="kpi-val">'+x.v+'</div><div class="kpi-lbl">'+esc(x.l)+'</div></div>';
+  }).join('');
+  var rows=(d.reports||[]).slice();
+  var f=(document.getElementById('cleanProofStatus')||{}).value || '';
+  var q=((document.getElementById('cleanProofSearch')||{}).value || '').trim().toLowerCase();
+  if(f) rows=rows.filter(function(r){return r.status===f});
+  if(q) rows=rows.filter(function(r){return ((r.report_id||'')+' '+(r.apartment_name||'')+' '+(r.date||'')+' '+(r.cleaner_id||'')).toLowerCase().indexOf(q)>=0});
+  if(!rows.length){ root.innerHTML=emptyState(t().cp_no_reports, t().cp_sub, '📷'); return; }
+  root.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px">'+rows.map(function(r){
+    var photos=(r.photos||[]).filter(function(p){return p.status==='uploaded'}).slice(0,4);
+    var pct=(r.required_slots_count?Math.round((r.uploaded_required_slots_count||0)*100/r.required_slots_count):0);
+    var imgs=photos.map(function(p){return '<img src="/api/cleaning/photo?token='+encodeURIComponent(tok())+'&photo_id='+encodeURIComponent(p.photo_id)+'" style="width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">'}).join('');
+    var actions='';
+    if(r.status==='pending_manager_review' || r.status==='submitted_for_review' || r.status==='issue_found'){
+      actions+='<button class="btn green xs" onclick="cleanProofDecision(&#39;'+esc(r.report_id)+'&#39;,&#39;approve&#39;)">'+esc(t().cp_approve)+'</button>';
+      actions+='<button class="btn warn xs" onclick="cleanProofDecision(&#39;'+esc(r.report_id)+'&#39;,&#39;reshoot&#39;)">'+esc(t().cp_needs_reshoot)+'</button>';
+      actions+='<button class="btn ghost xs" onclick="cleanProofDecision(&#39;'+esc(r.report_id)+'&#39;,&#39;reject&#39;)">'+esc(t().cp_reject)+'</button>';
+    }
+    return '<div class="list-item" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px">'
+      +'<div class="top"><span class="name">'+esc(r.apartment_name||r.apartment_code||r.report_id)+'</span><span class="meta">'+esc(r.date||'')+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:8px 0">'+_cpStatusPill(r.status)+'<span class="muted">'+esc(r.report_id||'')+'</span></div>'
+      +'<div class="muted" style="font-size:11.5px;margin-bottom:7px">'+esc(t().cp_completion)+': <b>'+pct+'%</b> · '+(r.uploaded_required_slots_count||0)+'/'+(r.required_slots_count||0)+'</div>'
+      +'<div style="height:6px;background:var(--surface-2);border-radius:99px;overflow:hidden;margin-bottom:9px"><div style="width:'+pct+'%;height:100%;background:var(--gold)"></div></div>'
+      +'<div style="display:flex;gap:6px;min-height:54px;margin-bottom:9px">'+(imgs||'<span class="muted">'+esc(t().cp_missing)+'</span>')+'</div>'
+      +(r.drive_folder_url?'<a class="btn ghost xs" target="_blank" href="'+esc(r.drive_folder_url)+'">'+esc(t().cp_drive)+'</a>':'')
+      +'<div class="actions" style="margin-top:9px"><button class="btn ghost xs" onclick="openCleanProofReport(&#39;'+esc(r.report_id)+'&#39;)">'+esc(t().cp_view)+'</button>'+actions+'</div>'
+      +'</div>';
+  }).join('')+'</div>';
+}
+function _cpFindReport(rid){
+  return ((D.cleanReports||{}).reports||[]).find(function(r){return r.report_id===rid});
+}
+function openCleanProofReport(rid){
+  var r=_cpFindReport(rid); if(!r) return;
+  openDrawer(r.apartment_name || rid, r.report_id+' · '+_cpStatusLabel(r.status));
+  var photos=(r.photos||[]).filter(function(p){return p.status==='uploaded'});
+  var photoHtml=photos.length ? photos.map(function(p){
+    return '<div style="display:flex;gap:9px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:7px">'
+      +'<img src="/api/cleaning/photo?token='+encodeURIComponent(tok())+'&photo_id='+encodeURIComponent(p.photo_id)+'" style="width:72px;height:72px;object-fit:cover;border-radius:7px">'
+      +'<div><div class="strong">'+esc(p.slot_id||'')+'</div><div class="muted">'+esc(p.file_name||'')+'</div></div></div>';
+  }).join('') : '<div class="empty">'+esc(t().cp_missing)+'</div>';
+  var audit=(r.audit||[]).slice().reverse().map(function(a){
+    return '<div class="list-row"><span class="l-name">'+esc(a.action||'')+'</span><span class="l-val">'+esc((a.ts||'').replace('T',' ').slice(0,16))+'</span><span class="l-tag">'+esc(a.actor||'')+'</span></div>';
+  }).join('');
+  var body='<div class="strat-overview">'
+    +'<div class="stat-mini"><div class="v">'+(r.uploaded_required_slots_count||0)+'/'+(r.required_slots_count||0)+'</div><div class="l">'+esc(t().cp_required)+'</div></div>'
+    +'<div class="stat-mini"><div class="v gold">'+_cpStatusPill(r.status)+'</div><div class="l">'+esc(t().clean_status)+'</div></div>'
+    +'</div>'
+    +'<div class="context-h">'+esc(t().cp_open_photos)+'</div>'+photoHtml
+    +'<div class="context-h">'+esc(t().cp_notes)+'</div><div class="needs-item-text">'+esc(r.manager_notes||r.issue_notes||'—')+'</div>'
+    +'<div class="context-h">'+esc(t().x4_audit||'Audit')+'</div><div class="list">'+(audit||'<div class="empty">—</div>')+'</div>';
+  setDrawerBody(body);
+  var foot='';
+  if(r.drive_folder_url) foot+='<a class="btn ghost sm" target="_blank" href="'+esc(r.drive_folder_url)+'">'+esc(t().cp_drive)+'</a>';
+  if(r.status==='pending_manager_review' || r.status==='submitted_for_review' || r.status==='issue_found'){
+    foot+='<button class="btn green sm" onclick="cleanProofDecision(&#39;'+esc(rid)+'&#39;,&#39;approve&#39;)">'+esc(t().cp_approve)+'</button>';
+    foot+='<button class="btn warn sm" onclick="cleanProofDecision(&#39;'+esc(rid)+'&#39;,&#39;reshoot&#39;)">'+esc(t().cp_needs_reshoot)+'</button>';
+    foot+='<button class="btn ghost sm" onclick="cleanProofDecision(&#39;'+esc(rid)+'&#39;,&#39;reject&#39;)">'+esc(t().cp_reject)+'</button>';
+  }
+  setDrawerFoot(foot+'<button class="btn ghost sm" onclick="closeDrawer()">×</button>');
+}
+async function cleanProofDecision(rid, decision){
+  var notes='';
+  if(decision==='reject' || decision==='reshoot'){
+    notes=(prompt(decision==='reject'?t().cp_reason:t().cp_notes,'')||'').trim();
+    if(!notes) return;
+  }
+  var r=await post('/api/cleaning/report-decision',{report_id:rid,decision:decision,notes:notes});
+  if(r&&r.ok){ toast('✓'); await loadCleaningReports(false); openCleanProofReport(rid); }
+  else toast((r&&r.error)||t().err);
+}
+async function openCleanTemplateEditor(){
+  var data; try{ data=await api('/api/cleaning/templates'); }catch(_){ data=null; }
+  if(!data||!data.ok){ toast('⚠'); return; }
+  var tpl=(data.templates||[]).find(function(x){return x.template_id==='cpt-default'}) || (data.templates||[])[0];
+  if(!tpl){ toast('⚠'); return; }
+  openDrawer(t().cp_template_title, tpl.template_name||'');
+  var slots=(tpl.slots||[]).slice().sort(function(a,b){return (a.display_order||0)-(b.display_order||0)});
+  var html='<div id="cpTplSlots">'+slots.map(_cpSlotEditorHtml).join('')+'</div>'
+    +'<button class="btn ghost sm" onclick="cpAddSlot()">＋ '+esc(t().cp_add_slot)+'</button>';
+  setDrawerBody(html);
+  setDrawerFoot('<button class="btn primary sm" onclick="saveCleanTemplate()">💾 '+esc(t().cp_save_template)+'</button><button class="btn ghost sm" onclick="closeDrawer()">×</button>');
+}
+function _cpSlotEditorHtml(s){
+  var sid=esc(s.slot_id||'slot');
+  return '<div class="cp-slot" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:9px;background:var(--surface-2)" data-slot="'+sid+'">'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input class="cp-slot-id" value="'+sid+'" style="width:130px"><label><input class="cp-required" type="checkbox" '+(s.required?'checked':'')+'> '+esc(t().cp_required_lbl)+'</label><label><input class="cp-multi" type="checkbox" '+(s.allow_multiple?'checked':'')+'> '+esc(t().cp_allow_multi)+'</label><button class="btn ghost xs" onclick="this.closest(&#39;.cp-slot&#39;).remove()">×</button></div>'
+    +'<input class="cp-label-ar" placeholder="'+esc(t().cp_label_ar)+'" value="'+esc(s.label_ar||'')+'" style="width:100%;margin-bottom:6px">'
+    +'<input class="cp-label-en" placeholder="'+esc(t().cp_label_en)+'" value="'+esc(s.label_en||'')+'" style="width:100%;margin-bottom:6px">'
+    +'<textarea class="cp-instr-ar" placeholder="'+esc(t().cp_instr_ar)+'" style="min-height:54px;margin-bottom:6px">'+esc(s.instructions_ar||'')+'</textarea>'
+    +'<textarea class="cp-instr-en" placeholder="'+esc(t().cp_instr_en)+'" style="min-height:54px">'+esc(s.instructions_en||'')+'</textarea>'
+    +'</div>';
+}
+function cpAddSlot(){
+  var box=document.getElementById('cpTplSlots'); if(!box) return;
+  var n=box.querySelectorAll('.cp-slot').length+1;
+  box.insertAdjacentHTML('beforeend', _cpSlotEditorHtml({slot_id:'slot_'+n,label_ar:'',label_en:'',required:true,allow_multiple:false}));
+}
+async function saveCleanTemplate(){
+  var box=document.getElementById('cpTplSlots'); if(!box) return;
+  var slots=[];
+  box.querySelectorAll('.cp-slot').forEach(function(el,i){
+    slots.push({
+      slot_id:(el.querySelector('.cp-slot-id')||{}).value || ('slot_'+(i+1)),
+      label_ar:(el.querySelector('.cp-label-ar')||{}).value || '',
+      label_en:(el.querySelector('.cp-label-en')||{}).value || '',
+      instructions_ar:(el.querySelector('.cp-instr-ar')||{}).value || '',
+      instructions_en:(el.querySelector('.cp-instr-en')||{}).value || '',
+      required:!!((el.querySelector('.cp-required')||{}).checked),
+      allow_multiple:!!((el.querySelector('.cp-multi')||{}).checked),
+      active:true, display_order:i+1
+    });
+  });
+  var r=await post('/api/cleaning/template-save',{scope:'default',template_name:'Default cleaning photo checklist',active:true,slots:slots});
+  if(r&&r.ok){ toast('✓'); closeDrawer(); }
+  else toast((r&&r.error)||t().err);
 }
 
 /* ============== LISTINGS (Hostaway master store) + OujaCT team ============== */
@@ -20141,6 +20685,13 @@ input,.fld{width:100%;padding:11px;border:1px solid var(--line);border-radius:10
 .sumtile{flex:1;min-width:90px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
 .sumtile .v{font-size:18px;font-weight:800} .sumtile .l{font-size:10.5px;color:var(--mut)}
 .muted{color:var(--mut)} a{color:var(--gold-2)}
+.overlay{position:fixed;inset:0;background:rgba(26,24,21,.38);z-index:20;display:none;align-items:flex-end}
+.sheet{background:var(--bg);border-radius:18px 18px 0 0;max-height:88vh;overflow:auto;width:100%;padding:14px;box-shadow:0 -10px 32px rgba(26,24,21,.18)}
+.slot{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px}
+.slot.missing{border-color:rgba(204,75,75,.38);background:rgba(204,75,75,.06)}
+.slot.done{border-color:rgba(14,158,95,.35);background:rgba(14,158,95,.06)}
+.photo-prev{width:86px;height:64px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);margin-top:8px}
+.bar{height:8px;background:var(--surface-3);border-radius:999px;overflow:hidden;margin-top:9px}.bar i{display:block;height:100%;background:var(--green);width:0%}
 @media(prefers-reduced-motion:reduce){.btn{transition:none}}
 </style></head>
 <body><div class="wrap">
@@ -20150,6 +20701,7 @@ input,.fld{width:100%;padding:11px;border:1px solid var(--line);border-radius:10
 <div id="summary"></div>
 <div id="plan"></div>
 </div>
+<div class="overlay" id="photoOverlay"><div class="sheet" id="photoSheet"></div></div>
 <script>
 var L='ar'; var TOK=new URLSearchParams(location.search).get('token')||'';
 var START=null; var DATA=null;
@@ -20164,6 +20716,10 @@ var T={
    nomap:'لا يوجد رابط خرائط', eta_na:'ETA غير متاح حاليًا', within:'أقرب مسار داخل نفس الأولوية',
    prio_note:'الأولوية التشغيلية مقدّمة على قرب المسافة',
    arrived:'وصلت', started:'بدأ التنظيف', done:'تم', issue:'فيه مشكلة', inside:'الضيف باقي داخل',
+   photos:'ارفع صور التنظيف', report:'تقرير تنظيف', req:'صور مطلوبة', opt:'صور اختيارية', missing:'الصورة ناقصة',
+   uploaded:'تم الرفع', replace:'استبدال الصورة', submit:'إرسال للمراجعة', pending:'قيد مراجعة المدير',
+   approved:'تم اعتماد التنظيف', rejected:'تم رفض التقرير', reshoot:'إعادة تصوير مطلوبة', note:'ملاحظة',
+   damage:'فحص الأضرار', close:'إغلاق', choose_file:'اختر/صوّر', progress:'الصور المرفوعة',
    total_apts:'شقق', urgent:'عاجلة', first:'أول شقة', route_t:'وقت المسار', clean_w:'وقت التنظيف', miss:'بدون خريطة',
    checkin:'دخول اليوم', checkout:'الخروج', min:'دقيقة', done_t:'تم تسجيل الحالة', empty:'ما فيه شقق مجدولة اليوم لفريق Oujact.',
    bad:'رابط غير صالح أو منتهي.', leg:'قيادة'},
@@ -20177,6 +20733,10 @@ var T={
    nomap:'No map link', eta_na:'ETA unavailable', within:'Nearest within same priority',
    prio_note:'Operational priority comes before distance',
    arrived:'Arrived', started:'Started cleaning', done:'Done', issue:'Issue', inside:'Guest still inside',
+   photos:'Upload cleaning photos', report:'Cleaning report', req:'Required photos', opt:'Optional photos', missing:'Missing photo',
+   uploaded:'Uploaded', replace:'Replace photo', submit:'Submit for review', pending:'Pending manager review',
+   approved:'Cleaning approved', rejected:'Report rejected', reshoot:'Reshoot required', note:'Note',
+   damage:'Damage check', close:'Close', choose_file:'Choose/camera', progress:'Uploaded photos',
    total_apts:'units', urgent:'urgent', first:'first', route_t:'route time', clean_w:'cleaning', miss:'no map',
    checkin:'check-in today', checkout:'checkout', min:'min', done_t:'Status saved', empty:'No Oujact apartments scheduled today.',
    bad:'Invalid or expired link.', leg:'drive'}};
@@ -20236,6 +20796,7 @@ function render(){
      +'<button class=\"btn\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;arrived&#39;)\">'+k.arrived+'</button>'
      +'<button class=\"btn\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;started&#39;)\">'+k.started+'</button>'
      +'<button class=\"btn gold\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;done&#39;)\">'+k.done+'</button>'
+     +'<button class=\"btn\" onclick=\"openPhotos('+p.lid+',&#39;'+p.date+'&#39;)\">📷 '+k.photos+'</button>'
      +'<button class=\"btn ghost\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;issue&#39;)\">'+k.issue+'</button>'
      +'<button class=\"btn ghost\" onclick=\"act('+p.lid+',&#39;'+p.date+'&#39;,&#39;guest_inside&#39;)\">'+k.inside+'</button></div>';
    return '<div class=\"card'+(p.tier<=1?' urgent':(p.tier<=3?' soon':''))+'\">'
@@ -20256,6 +20817,45 @@ function act(lid,date,action){
  fetch('/api/oujact/status?token='+encodeURIComponent(TOK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lid:lid,date:date,action:action})})
   .then(function(r){return r.json();}).then(function(){ load(); })
   .catch(function(){});
+}
+var PHOTO={lid:null,date:null,report:null,busy:false};
+function closePhotos(){ document.getElementById('photoOverlay').style.display='none'; PHOTO={lid:null,date:null,report:null,busy:false}; }
+function photoStatusText(st){ var k=t(); var m={draft:k.report,uploading:k.report,submitted_for_review:k.pending,pending_manager_review:k.pending,manager_approved:k.approved,manager_rejected:k.rejected,needs_reshoot:k.reshoot,issue_found:k.issue}; return m[st]||st||k.report; }
+function openPhotos(lid,date){
+ PHOTO.lid=lid; PHOTO.date=date; document.getElementById('photoOverlay').style.display='flex';
+ document.getElementById('photoSheet').innerHTML='<div class=\"card muted\">…</div>';
+ fetch('/api/oujact/photo-template?token='+encodeURIComponent(TOK)+'&lid='+lid+'&date='+encodeURIComponent(date))
+  .then(function(r){return r.json();}).then(function(d){ if(!d.ok) throw d.error||'error'; PHOTO.report=d.report; renderPhotoSheet(); })
+  .catch(function(e){ document.getElementById('photoSheet').innerHTML='<div class=\"warn\">⚠ '+esc(e)+'</div><button class=\"btn full\" onclick=\"closePhotos()\">'+esc(t().close)+'</button>'; });
+}
+function renderPhotoSheet(){
+ var r=PHOTO.report||{}, k=t(), slots=((r.checklist||{}).slots)||[], photos=r.photos||[];
+ var by={}; photos.forEach(function(p){ if(p.status==='uploaded') by[p.slot_id]=p; });
+ var pct=(r.required_slots_count?Math.round((r.uploaded_required_slots_count||0)*100/r.required_slots_count):0);
+ var html='<div style=\"display:flex;align-items:center;gap:10px;margin-bottom:8px\"><div style=\"flex:1\"><b>'+esc(k.report)+'</b><div class=\"muted\" style=\"font-size:12px\">'+esc(r.apartment_name||'')+' · '+esc(photoStatusText(r.status))+'</div></div><button class=\"btn ghost\" onclick=\"closePhotos()\">×</button></div>'
+  +'<div class=\"card\"><div style=\"display:flex;justify-content:space-between;gap:8px\"><b>'+esc(k.progress)+'</b><span class=\"chip '+(r.all_required_complete?'ok':'r')+'\">'+(r.uploaded_required_slots_count||0)+'/'+(r.required_slots_count||0)+'</span></div><div class=\"bar\"><i style=\"width:'+pct+'%\"></i></div></div>';
+ slots.filter(function(s){return s.active!==false}).sort(function(a,b){return (a.display_order||0)-(b.display_order||0)}).forEach(function(s){
+   var p=by[s.slot_id], req=!!s.required, cls=p?'done':(req?'missing':'');
+   var img=p?('<img class=\"photo-prev\" src=\"/api/cleaning/photo?token='+encodeURIComponent(TOK)+'&photo_id='+encodeURIComponent(p.photo_id)+'\">'):'';
+   html+='<div class=\"slot '+cls+'\"><div style=\"display:flex;gap:10px;align-items:flex-start\"><div style=\"flex:1\"><b>'+esc(L==='ar'?s.label_ar:s.label_en)+'</b> <span class=\"chip '+(req?'r':'')+'\">'+esc(req?k.req:k.opt)+'</span><div class=\"muted\" style=\"font-size:12px;margin-top:4px\">'+esc(L==='ar'?s.instructions_ar:s.instructions_en)+'</div>'+img+'</div><label class=\"btn gold\" style=\"cursor:pointer\">'+esc(p?k.replace:k.choose_file)+'<input type=\"file\" accept=\"image/*\" capture=\"environment\" onchange=\"uploadPhotoSlot(event,&#39;'+esc(s.slot_id)+'&#39;)\" style=\"display:none\"></label></div></div>';
+ });
+ html+='<textarea id=\"photoNotes\" class=\"fld\" style=\"margin-top:10px;min-height:74px\" placeholder=\"'+esc(k.note)+'\"></textarea>'
+  +'<label class=\"chip\" style=\"margin-top:10px\"><input id=\"photoIssue\" type=\"checkbox\"> '+esc(k.issue)+' / '+esc(k.damage)+'</label>'
+  +'<button class=\"btn gold full\" onclick=\"submitPhotoReport()\">'+esc(k.submit)+'</button>';
+ document.getElementById('photoSheet').innerHTML=html;
+}
+function uploadPhotoSlot(ev,slot){
+ var f=ev.target.files&&ev.target.files[0]; if(!f||PHOTO.busy)return; PHOTO.busy=true;
+ var fd=new FormData(); fd.append('lid',PHOTO.lid); fd.append('date',PHOTO.date); fd.append('slot_id',slot); fd.append('file',f);
+ fetch('/api/oujact/photo-upload?token='+encodeURIComponent(TOK),{method:'POST',body:fd})
+  .then(function(r){return r.json();}).then(function(d){ if(!d.ok) throw d.message||d.error||'upload failed'; PHOTO.report=d.report; PHOTO.busy=false; renderPhotoSheet(); })
+  .catch(function(e){ PHOTO.busy=false; alert('⚠ '+e); });
+}
+function submitPhotoReport(){
+ var notes=(document.getElementById('photoNotes')||{}).value||'', issue=!!((document.getElementById('photoIssue')||{}).checked);
+ fetch('/api/oujact/report-submit?token='+encodeURIComponent(TOK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lid:PHOTO.lid,date:PHOTO.date,issue_found:issue,issue_notes:notes})})
+  .then(function(r){return r.json();}).then(function(d){ if(!d.ok) throw (d.missing&&d.missing.length?d.missing.join('، '):(d.message||d.error||'error')); PHOTO.report=d.report; renderPhotoSheet(); alert(t().pending); })
+  .catch(function(e){ alert('⚠ '+e); });
 }
 document.documentElement.lang='ar';
 render();
@@ -29566,6 +30166,240 @@ async def _api_oujact_status(request):
             print("oujact status alert:", ex)
     return _json({"ok": True, "logged": e})
 
+def _oujact_route_auth(request):
+    tok = request.query.get("token", "")
+    return bool(OUJACT_ROUTE_TOKEN) and tok == OUJACT_ROUTE_TOKEN
+
+async def _api_oujact_photo_template(request):
+    if not _oujact_route_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    date = (request.query.get("date") or datetime.now(TZ).date().isoformat())[:10]
+    report = await asyncio.to_thread(_cleanproof_get_or_create_report, lid, date, "route-link", "oujact-route")
+    return _json({"ok": True, "report": _cleanproof_report_view(report),
+                  "drive_configured": bool(CLEANING_DRIVE_ROOT_FOLDER_ID)})
+
+async def _api_oujact_photo_upload(request):
+    if not _oujact_route_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        reader = await request.multipart()
+        fields, file_bytes, original_name, mime_type = {}, b"", "", ""
+        async for part in reader:
+            if part.name == "file":
+                original_name = part.filename or "photo.jpg"
+                mime_type = part.headers.get("Content-Type") or mimetypes.guess_type(original_name)[0] or "image/jpeg"
+                chunks, total = [], 0
+                while True:
+                    chunk = await part.read_chunk()
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > CLEANING_PHOTO_MAX_MB * 1024 * 1024:
+                        return _json({"error": "too_large", "message": f"max {CLEANING_PHOTO_MAX_MB}MB"}, 400)
+                    chunks.append(chunk)
+                file_bytes = b"".join(chunks)
+            else:
+                fields[part.name] = (await part.text()).strip()
+    except Exception as e:
+        return _json({"error": f"upload error: {e}"}, 400)
+    if not file_bytes:
+        return _json({"error": "empty_file"}, 400)
+    try:
+        lid = int(fields.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    date = (fields.get("date") or datetime.now(TZ).date().isoformat())[:10]
+    slot_id = (fields.get("slot_id") or "").strip()
+    report = await asyncio.to_thread(_cleanproof_get_or_create_report, lid, date, fields.get("by") or "route-link", "oujact-route")
+    slots = {s.get("slot_id"): s for s in (report.get("checklist_snapshot") or {}).get("slots", [])}
+    if slot_id not in slots:
+        return _json({"error": "bad slot"}, 400)
+    filename = _cleanproof_safe_filename(slot_id, report.get("apartment_code"), report.get("report_id"), original_name)
+    try:
+        stored = await asyncio.to_thread(_cleanproof_save_local, report, slot_id, filename, file_bytes, mime_type)
+    except Exception as e:
+        _cleanproof_audit(report["report_id"], "drive_upload_failed", fields.get("by") or "route-link",
+                          report.get("status"), report.get("status"), str(e)[:300])
+        return _json({"error": "storage_failed", "message": str(e)[:300]}, 500)
+    # Replace a single-photo slot by marking older slot photos removed.
+    if not slots[slot_id].get("allow_multiple"):
+        for p in _cleanproof_report_photos(report["report_id"]):
+            if p.get("slot_id") == slot_id and p.get("status") == "uploaded":
+                p["status"] = "removed"
+                p["removed_at"] = _cleanproof_now()
+                _cleaning_report_photos[p["photo_id"]] = p
+    pid = "clp-" + hashlib.sha1(f"{report['report_id']}|{slot_id}|{filename}|{time.time()}".encode()).hexdigest()[:16]
+    photo = {
+        "photo_id": pid, "report_id": report["report_id"], "slot_id": slot_id,
+        "apartment_id": lid, "file_name": filename, "mime_type": mime_type,
+        "file_size": len(file_bytes), "uploaded_at": _cleanproof_now(),
+        "uploaded_by": fields.get("by") or "route-link",
+        "drive_file_id": "", "drive_file_url": "", "thumbnail_url": "",
+        "storage_url": stored.get("url") or "", "local_path": stored.get("path") or "",
+        "status": "uploaded", "error_message": "",
+    }
+    _cleaning_report_photos[pid] = photo
+    report["status"] = "uploading" if report.get("status") == "draft" else report.get("status")
+    report["updated_at"] = _cleanproof_now()
+    _cleanproof_recount(report)
+    _cleaning_reports[report["report_id"]] = report
+    _save_json("cleaning_report_photos.json", _cleaning_report_photos)
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(report["report_id"], "slot_photo_uploaded", photo["uploaded_by"],
+                      "", report.get("status"), slot_id,
+                      {"photo_id": pid, "file_size": len(file_bytes), "storage_provider": report.get("storage_provider")})
+    return _json({"ok": True, "report": _cleanproof_report_view(report), "photo": _cleanproof_photo_view(photo)})
+
+async def _api_oujact_report_submit(request):
+    if not _oujact_route_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    date = (b.get("date") or datetime.now(TZ).date().isoformat())[:10]
+    actor = (b.get("by") or "route-link")[:80]
+    report = await asyncio.to_thread(_cleanproof_get_or_create_report, lid, date, actor, "oujact-route")
+    _cleanproof_recount(report)
+    if b.get("issue_found"):
+        report["issue_found"] = True
+        report["issue_notes"] = (b.get("issue_notes") or "")[:500]
+    if not report.get("all_required_complete"):
+        missing = []
+        uploaded = {p.get("slot_id") for p in _cleanproof_report_photos(report["report_id"]) if p.get("status") == "uploaded"}
+        for s in (report.get("checklist_snapshot") or {}).get("slots", []):
+            if s.get("active") and s.get("required") and s.get("slot_id") not in uploaded:
+                missing.append(s.get("label_ar") or s.get("slot_id"))
+        _cleaning_reports[report["report_id"]] = report
+        _save_json("cleaning_reports.json", _cleaning_reports)
+        return _json({"error": "missing_required_photos", "missing": missing,
+                      "report": _cleanproof_report_view(report)}, 400)
+    prev = report.get("status", "")
+    report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
+    report["updated_at"] = _cleanproof_now()
+    _cleaning_reports[report["report_id"]] = report
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(report["report_id"], "report_submitted", actor, prev, report["status"])
+    ok, err = await _cleanproof_send_discord_review(report["report_id"])
+    if not ok:
+        _cleanproof_audit(report["report_id"], "discord_review_failed", "bot",
+                          "pending_manager_review", "pending_manager_review", err)
+    return _json({"ok": True, "discord_sent": ok, "discord_error": err,
+                  "report": _cleanproof_report_view(report)})
+
+async def _api_cleaning_reports(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    status = (request.query.get("status") or "").strip()
+    q = (request.query.get("q") or "").strip().lower()
+    rows = list(_cleaning_reports.values())
+    for r in rows:
+        _cleanproof_recount(r)
+    if status:
+        rows = [r for r in rows if r.get("status") == status]
+    if q:
+        rows = [r for r in rows if q in (r.get("apartment_name", "").lower() + " " + r.get("report_id", "").lower() + " " + r.get("date", ""))]
+    rows.sort(key=lambda r: (r.get("date", ""), r.get("updated_at", "")), reverse=True)
+    counts = defaultdict(int)
+    for r in _cleaning_reports.values():
+        counts[r.get("status", "draft")] += 1
+    return _json({"ok": True, "reports": [_cleanproof_report_view(r, include_photos=True) for r in rows[:300]],
+                  "counts": dict(counts),
+                  "storage": {"provider": "google_drive" if CLEANING_DRIVE_ROOT_FOLDER_ID else "local_fallback",
+                              "drive_configured": bool(CLEANING_DRIVE_ROOT_FOLDER_ID),
+                              "warning": "" if CLEANING_DRIVE_ROOT_FOLDER_ID else "Google Drive is not configured. Local Railway disk must be backed by a mounted STATE_DIR volume."}})
+
+async def _api_cleaning_report_decision(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    rid = (b.get("report_id") or "").strip()
+    decision = (b.get("decision") or "").strip()
+    report = _cleaning_reports.get(rid)
+    if not report:
+        return _json({"error": "not found"}, 404)
+    if decision not in ("approve", "reject", "reshoot"):
+        return _json({"error": "bad decision"}, 400)
+    report = _cleanproof_decide(report, decision, _req_actor(request), b.get("notes") or "")
+    # Keep Discord card in sync when possible.
+    try:
+        if report.get("discord_review_channel_id") and report.get("discord_review_message_id"):
+            ch = bot.get_channel(int(report["discord_review_channel_id"]))
+            if ch:
+                msg = await ch.fetch_message(int(report["discord_review_message_id"]))
+                await msg.edit(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
+    except Exception as e:
+        print("cleanproof discord sync error:", e)
+    return _json({"ok": True, "report": _cleanproof_report_view(report)})
+
+async def _api_cleaning_templates(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    _cleanproof_ensure_default_template()
+    return _json({"ok": True, "templates": list(_cleaning_photo_templates.values())})
+
+async def _api_cleaning_template_save(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    scope = (b.get("scope") or "default").strip()
+    if scope not in ("default", "apartment_type", "apartment"):
+        return _json({"error": "bad scope"}, 400)
+    value = b.get("apartment_id") if scope == "apartment" else (b.get("apartment_type") if scope == "apartment_type" else "default")
+    tid = "cpt-default" if scope == "default" else _cleanproof_template_id(scope, value)
+    slots = b.get("slots") or []
+    clean_slots = []
+    for i, s in enumerate(slots):
+        sid = re.sub(r"[^A-Za-z0-9_-]+", "_", (s.get("slot_id") or f"slot_{i+1}").strip())[:40]
+        if not sid:
+            continue
+        clean_slots.append({
+            "slot_id": sid, "label_ar": (s.get("label_ar") or sid)[:80],
+            "label_en": (s.get("label_en") or sid)[:80],
+            "instructions_ar": (s.get("instructions_ar") or "")[:240],
+            "instructions_en": (s.get("instructions_en") or "")[:240],
+            "required": bool(s.get("required", True)),
+            "allow_multiple": bool(s.get("allow_multiple", False)),
+            "display_order": int(s.get("display_order") or (i + 1)),
+            "active": bool(s.get("active", True)),
+        })
+    if not clean_slots:
+        return _json({"error": "at least one slot required"}, 400)
+    now = _cleanproof_now()
+    old = _cleaning_photo_templates.get(tid) or {}
+    tpl = {
+        "template_id": tid, "scope": scope,
+        "apartment_id": str(value or "") if scope == "apartment" else "",
+        "apartment_type": str(value or "") if scope == "apartment_type" else "",
+        "template_name": (b.get("template_name") or old.get("template_name") or "Cleaning photo checklist")[:120],
+        "active": bool(b.get("active", True)),
+        "slots": sorted(clean_slots, key=lambda x: x["display_order"]),
+        "created_at": old.get("created_at") or now,
+        "updated_at": now, "updated_by": _req_actor(request),
+    }
+    _cleaning_photo_templates[tid] = tpl
+    _save_json("cleaning_photo_templates.json", _cleaning_photo_templates)
+    _cleanproof_audit("", "template_edited", _req_actor(request), "", "", tid)
+    return _json({"ok": True, "template": tpl})
+
+async def _api_cleaning_photo_file(request):
+    route_ok = _oujact_route_auth(request)
+    if not (route_ok or _dash_auth(request)):
+        return _json({"error": "unauthorized"}, 401)
+    pid = (request.query.get("photo_id") or "").strip()
+    photo = _cleaning_report_photos.get(pid)
+    if not photo or photo.get("status") == "removed":
+        return _json({"error": "not found"}, 404)
+    path = photo.get("local_path") or ""
+    if not path or not os.path.exists(path):
+        return _json({"error": "file missing"}, 404)
+    return web.FileResponse(path, headers={"Content-Type": photo.get("mime_type") or "application/octet-stream"})
+
 async def _handle_oujact_route(request):
     return web.Response(text=OUJACT_ROUTE_HTML, content_type="text/html")
 
@@ -30162,6 +30996,9 @@ async def start_web_server():
         app.router.add_post("/api/oujact/apply", _api_oujact_apply)
         app.router.add_get("/oujact-route", _handle_oujact_route)          # public mobile route page
         app.router.add_get("/api/oujact/route", _api_oujact_route)         # token-gated route data
+        app.router.add_get("/api/oujact/photo-template", _api_oujact_photo_template)
+        app.router.add_post("/api/oujact/photo-upload", _api_oujact_photo_upload)
+        app.router.add_post("/api/oujact/report-submit", _api_oujact_report_submit)
         app.router.add_get("/api/oujact/dispatch", _api_oujact_dispatch)
         app.router.add_get("/api/oujact/route-link", _api_oujact_route_link)
         app.router.add_post("/api/oujact/checkout-state", _api_oujact_checkout_state)
@@ -30183,6 +31020,11 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/unpause", _api_cleaning_unpause)
         app.router.add_post("/api/cleaning/insert", _api_cleaning_insert)
         app.router.add_post("/api/cleaning/reschedule-from", _api_cleaning_reschedule_from)
+        app.router.add_get("/api/cleaning/reports", _api_cleaning_reports)
+        app.router.add_post("/api/cleaning/report-decision", _api_cleaning_report_decision)
+        app.router.add_get("/api/cleaning/templates", _api_cleaning_templates)
+        app.router.add_post("/api/cleaning/template-save", _api_cleaning_template_save)
+        app.router.add_get("/api/cleaning/photo", _api_cleaning_photo_file)
         # Maintenance tickets (صيانة)
         app.router.add_get("/api/tickets/list", _api_tickets_list)
         app.router.add_post("/api/tickets/create", _api_tickets_create)
@@ -30768,6 +31610,19 @@ def load_state():
         _cleaning_feedback.update(_load_json("cleaning_feedback.json", {}))
         _cleaning_feedback_sent.clear()
         _cleaning_feedback_sent.update(int(x) for x in _load_json("cleaning_feedback_sent.json", []) if str(x).strip())
+        _cleaning_photo_templates.clear()
+        _cleaning_photo_templates.update(_load_json("cleaning_photo_templates.json", {}) or {})
+        _cleanproof_ensure_default_template()
+        _cleaning_reports.clear()
+        for k, v in (_load_json("cleaning_reports.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("report_id"):
+                _cleaning_reports[str(k)] = v
+        _cleaning_report_photos.clear()
+        for k, v in (_load_json("cleaning_report_photos.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("photo_id"):
+                _cleaning_report_photos[str(k)] = v
+        _cleaning_report_audit.clear()
+        _cleaning_report_audit.extend(_load_json("cleaning_report_audit.json", []) or [])
         if _assistant_seen or _pending_replies or _escalations:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
@@ -30828,6 +31683,10 @@ def persist_state():
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
+    _save_json("cleaning_photo_templates.json", _cleaning_photo_templates)
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _save_json("cleaning_report_photos.json", _cleaning_report_photos)
+    _save_json("cleaning_report_audit.json", _cleaning_report_audit[-5000:])
 
 @tasks.loop(seconds=60)
 async def persist_loop():
@@ -31596,6 +32455,7 @@ async def on_ready():
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
+    bot.add_view(CleaningProofReviewView())  # re-bind cleaning photo approval buttons
     # On the FIRST start only (no saved state yet), mark the whole current inbox as
     # already-seen so we never replay old backlog. After this, ONLY genuinely new message
     # IDs get a card — and persistence keeps _assistant_seen across restarts, so redeploys
