@@ -10818,6 +10818,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
               <div><label>نسبة الإدارة % / Mgmt %</label><input type="number" step="0.5" id="finMgmt" value="20" onchange="financeLoadReport()"></div>
               <div><label>العملة / Currency</label><input id="finCurrency" value="SAR" oninput="financeRender()"></div>
             </div>
+            <div class="fin-row2">
+              <div><label>النظافة / Cleaning</label><select id="finCleanType" onchange="financeToggleCleanAmt();financeLoadReport()"><option value="ours">على عوجا / On us</option><option value="owner">المالك يدفع / Owner pays</option></select></div>
+              <div><label>قيمة النظافة (شهري) / Cleaning (monthly)</label><input type="number" step="50" id="finCleanAmt" value="0" onchange="financeLoadReport()"></div>
+            </div>
             <div class="fin-sec">حقول اختيارية (الفاضي يُخفى تلقائيًا)</div>
             <div class="fin-row"><label>اسم المستلم / Recipient</label><input id="finRecipient" oninput="financeRender()"></div>
             <div class="fin-row"><label>تحية / Greeting</label><input id="finGreeting" oninput="financeRender()" placeholder="حيّاك الله،"></div>
@@ -19218,15 +19222,32 @@ function financeApplyDefaults(d){
   if(d.mgmt_pct!=null){ var mg=document.getElementById('finMgmt'); if(mg && !mg.value) mg.value=d.mgmt_pct; }
   if(d.logo===false){ var l=document.getElementById('finLogo'); if(l) l.checked=false; }
 }
+function financeToggleCleanAmt(){
+  var t=(document.getElementById('finCleanType')||{}).value, a=document.getElementById('finCleanAmt');
+  if(a) a.disabled=(t!=='owner');
+}
+var _finPickedLid=null;
 async function financeLoadReport(){
   const lid=(document.getElementById('finUnit')||{}).value||'';
   const start=(document.getElementById('finStart')||{}).value||'', end=(document.getElementById('finEnd')||{}).value||'';
   if(!lid || !start || !end){ financeRender(); renderFinanceOpsSummary(); return; }
   const u=(D.finUnits||[]).find(function(x){return String(x.lid)===String(lid);});
-  if(u){ const key=u.owner?('owner:'+u.owner):('lid:'+lid); try{ const dd=await api('/api/finance/defaults?key='+encodeURIComponent(key)); financeApplyDefaults(dd.defaults||{}); }catch(_){ } }
+  // when a NEW apartment is picked, auto-fill mgmt% + cleaning from الملاك والرسوم (the registry)
+  if(u && String(lid)!==String(_finPickedLid)){
+    _finPickedLid=String(lid);
+    const key=u.owner?('owner:'+u.owner):('lid:'+lid); try{ const dd=await api('/api/finance/defaults?key='+encodeURIComponent(key)); financeApplyDefaults(dd.defaults||{}); }catch(_){ }
+    // الملاك والرسوم (registry) is the source of truth → set AFTER defaults so it wins
+    if(u.mgmt_pct!=null){ var mEl=document.getElementById('finMgmt'); if(mEl) mEl.value=u.mgmt_pct; }
+    var cl=u.cleaning||{type:'ours',amount:0};
+    var ctEl=document.getElementById('finCleanType'); if(ctEl) ctEl.value=(cl.type==='owner'?'owner':'ours');
+    var caEl=document.getElementById('finCleanAmt'); if(caEl) caEl.value=(cl.amount||0);
+    financeToggleCleanAmt();
+  }
   const m=(document.getElementById('finMgmt')||{}).value||'0';
+  const ct=(document.getElementById('finCleanType')||{}).value||'ours';
+  const ca=(document.getElementById('finCleanAmt')||{}).value||'0';
   document.getElementById('financePreview').innerHTML='<div class="empty sk" style="padding:40px">…</div>';
-  let r; try{ r=await api('/api/finance/report?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end+'&mgmt='+encodeURIComponent(m)); }catch(e){ r={error:'fetch'}; }
+  let r; try{ r=await api('/api/finance/report?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end+'&mgmt='+encodeURIComponent(m)+'&clean_type='+ct+'&clean_amount='+encodeURIComponent(ca)); }catch(e){ r={error:'fetch'}; }
   D.finReport=r; financeRender(); renderFinanceOpsSummary();
 }
 function financeStatementHTML(){
@@ -27186,7 +27207,14 @@ async def _api_finance_report(request):
             pass
     if q.get("basis") in ("checkin", "checkout"):
         settings["period_basis"] = q.get("basis")
-    rep = await asyncio.to_thread(build_owner_report, lid, start, end, mgmt, settings)
+    cleaning = None
+    if q.get("clean_type") in ("ours", "owner"):
+        try:
+            ca = round(float(q.get("clean_amount") or 0), 2)
+        except (TypeError, ValueError):
+            ca = 0.0
+        cleaning = {"type": q.get("clean_type"), "amount": ca}
+    rep = await asyncio.to_thread(build_owner_report, lid, start, end, mgmt, settings, None, cleaning)
     return _json(rep)
 
 def _finance_aggregate(reps, owner, start, end):
