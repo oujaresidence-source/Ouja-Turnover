@@ -10792,6 +10792,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="page-head">
           <div><div class="page-title" id="t_finance">🧾 المالية</div><div class="page-sub" id="t_finance_sub">تقرير شهري للمُلّاك</div></div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="openOwnersTable()" id="finOwnersBtn">👥 <span id="t_fin_owners">المُلّاك والرسوم</span></button>
             <button class="btn ghost sm" onclick="financeSaveDefaults()" id="finSaveBtn">💾 <span id="t_fin_save">حفظ كافتراضي</span></button>
             <button class="btn primary sm" onclick="financeGeneratePdf()" id="finPdfBtn">⬇ PDF</button>
           </div>
@@ -19217,6 +19218,10 @@ function financeStatementHTML(){
   h+=sr(ar?'إجمالي الدخل':'Total income',money(r.total_income));
   h+=sr(ar?('رسوم عوجا ('+r.management_pct+'%)'):('Ouja fee ('+r.management_pct+'%)'),'−'+money(r.ouja_fee));
   h+=sr(ar?'المصاريف':'Expenses','−'+money(r.expenses));
+  if(r.cleaning){
+    if(r.cleaning.type==='owner') h+=sr(ar?('النظافة ('+r.cleaning.cleans+' × '+fmt(r.cleaning.amount)+')'):('Cleaning ('+r.cleaning.cleans+' × '+fmt(r.cleaning.amount)+')'),'−'+money(r.cleaning.total));
+    else h+=sr(ar?'النظافة (علينا)':'Cleaning (on us)', money(0));
+  }
   h+=sr(ar?'صافي المالك':'Owner net',money(r.owner_net),'total')+'</div>';
   h+='<div class="stmt-sec-t">'+(ar?'الحجوزات':'Reservations')+'</div>';
   if((r.resv_lines||[]).length){
@@ -19273,6 +19278,62 @@ function financeGeneratePdf(){
     +'<style>'+css+'</style></head><body>'+financeStatementHTML()+'</body></html>');
   w.document.close();
   setTimeout(function(){ try{ w.focus(); w.print(); }catch(_){ } }, 700);
+}
+/* ===== Owners & cleaning-fee registry (editable table) ===== */
+async function openOwnersTable(){
+  openDrawer(L==='ar'?'👥 المُلّاك والرسوم':'👥 Owners & fees',''); setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('');
+  await ownersReload('');
+}
+async function ownersReload(q){
+  var d; try{ d=await api('/api/finance/owners'+(q?('?q='+encodeURIComponent(q)):'')); }catch(e){ d={rows:[]}; }
+  D.owners=d; ownersRender();
+}
+function ownersSearch(v){ clearTimeout(window._ownq); window._ownq=setTimeout(function(){ ownersReload(v); }, 300); }
+function ownersRender(){
+  var ar=(L==='ar'), d=D.owners||{rows:[]};
+  var head='<div style="display:flex;gap:8px;margin-bottom:10px"><input oninput="ownersSearch(this.value)" placeholder="'+(ar?'بحث: شقة أو مالك':'Search: apartment or owner')+'" style="flex:1;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12.5px">'
+    +'<button class="btn ghost sm" onclick="ownersAdd()">+ '+(ar?'أضف':'Add')+'</button></div>'
+    +'<div class="muted" style="font-size:11px;margin-bottom:8px">'+(ar?'النظافة: «علينا» يعني عوجا تتحمّلها · «المالك» يعني تُخصم من المالك لكل تنظيف.':'Cleaning: “on us” = Ouja absorbs it · “owner” = deducted per clean from the owner.')+'</div>';
+  var rows=(d.rows||[]).map(ownersRowHtml).join('');
+  setDrawerBody(head+'<div style="display:flex;flex-direction:column;gap:8px">'+rows+'</div>');
+}
+function ownersRowHtml(r,i){
+  var ar=(L==='ar'), cl=r.cleaning||{type:'ours',amount:0};
+  var inp='width:100%;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
+  return '<div class="card" style="border-radius:8px;padding:10px">'
+    +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font-size:13px">'+esc(r.apartment)+'</b>'
+      +'<button class="btn ghost xs" onclick="ownersDel('+i+')">🗑</button></div>'
+    +'<div style="display:grid;grid-template-columns:1.4fr .8fr;gap:6px;margin-top:7px">'
+      +'<div><div class="muted" style="font-size:10px">'+(ar?'المالك':'Owner')+'</div><input id="own_o_'+i+'" value="'+esc(r.owner||'')+'" style="'+inp+'"></div>'
+      +'<div><div class="muted" style="font-size:10px">'+(ar?'الإدارة %':'Mgmt %')+'</div><input id="own_m_'+i+'" type="number" step="0.5" value="'+(r.mgmt_pct==null?'':r.mgmt_pct)+'" style="'+inp+'"></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:6px;align-items:flex-end;margin-top:7px">'
+      +'<div style="flex:1"><div class="muted" style="font-size:10px">'+(ar?'النظافة':'Cleaning')+'</div>'
+        +'<select id="own_ct_'+i+'" onchange="ownersToggleClean('+i+')" style="'+inp+'"><option value="ours"'+(cl.type!=='owner'?' selected':'')+'>'+(ar?'علينا':'On us')+'</option><option value="owner"'+(cl.type==='owner'?' selected':'')+'>'+(ar?'المالك يدفع':'Owner pays')+'</option></select></div>'
+      +'<div style="flex:1"><div class="muted" style="font-size:10px">'+(ar?'لكل تنظيف (ر.س)':'Per clean (SAR)')+'</div><input id="own_ca_'+i+'" type="number" '+(cl.type==='owner'?'':'disabled')+' value="'+(cl.amount||0)+'" style="'+inp+'"></div>'
+      +'<button class="btn primary xs" onclick="ownersSave('+i+')">'+(ar?'حفظ':'Save')+'</button>'
+    +'</div></div>';
+}
+function ownersToggleClean(i){ var s=document.getElementById('own_ct_'+i), a=document.getElementById('own_ca_'+i); if(s&&a) a.disabled=(s.value!=='owner'); }
+async function ownersSave(i){
+  var r=((D.owners||{}).rows||[])[i]; if(!r) return;
+  var owner=(document.getElementById('own_o_'+i)||{}).value||'';
+  var mgmt=(document.getElementById('own_m_'+i)||{}).value||'';
+  var ct=(document.getElementById('own_ct_'+i)||{}).value||'ours';
+  var ca=(document.getElementById('own_ca_'+i)||{}).value||0;
+  var resp; try{ resp=await post('/api/finance/owners',{apartment:r.apartment, owner:owner, mgmt_pct:mgmt, cleaning:{type:ct, amount:ca}}); }catch(e){ toast('⚠'); return; }
+  if(resp&&resp.ok){ toast(L==='ar'?'حُفظ ✓':'Saved ✓'); if(resp.row){ D.owners.rows[i]=resp.row; } } else toast('⚠ '+((resp&&resp.error)||''));
+}
+async function ownersDel(i){
+  var r=((D.owners||{}).rows||[])[i]; if(!r) return;
+  if(!confirm(L==='ar'?('حذف '+r.apartment+'؟'):('Delete '+r.apartment+'?'))) return;
+  try{ await post('/api/finance/owners',{apartment:r.apartment, delete:true}); }catch(e){ toast('⚠'); return; }
+  toast(L==='ar'?'حُذف':'Deleted'); await ownersReload('');
+}
+async function ownersAdd(){
+  var apt=prompt(L==='ar'?'كود الشقة (مثل FD1):':'Apartment code (e.g. FD1):'); if(!apt) return;
+  try{ await post('/api/finance/owners',{apartment:apt, owner:'', mgmt_pct:'', cleaning:{type:'ours',amount:0}}); }catch(e){ toast('⚠'); return; }
+  await ownersReload('');
 }
 async function loadLearnings(){
   const list = document.getElementById('learnAptList');
@@ -20240,13 +20301,65 @@ FINANCE_DEFAULTS = {
     "vat_pct": 0.0,               # [CONFIRM] default none — all figures net
 }
 
+# ---- Owner registry: apartment → owner + management % + cleaning-fee policy ----
+# Seeded once (if empty) from the owner's file: cleaning 'ours' = Ouja absorbs it (owner
+# not charged); 'owner' = the owner pays this much PER CLEAN (turnover). Editable in the
+# dashboard, persisted to owner_registry.json. (owner, mgmt%, cleaning) per apartment code.
+_OWNER_SEED = [
+    ('FD1', 'فوزية', 25.0, 'ours', 0), ('D104', 'فوزية', 25.0, 'ours', 0), ('C204', 'فوزية', 25.0, 'ours', 0),
+    ('3902', 'فهد القحطاني', 20.0, 'ours', 0), ('c8', 'ساره الجبر', 18.0, 'owner', 1115.0),
+    ('A-11', 'هلا الصيخان', 20.0, 'owner', 1050.0), ('b09', 'عبدالله العفيصان', 15.0, 'owner', 1100.0),
+    ('B20', 'عدنان المولد', 18.0, 'owner', 1265.0), ('A15', 'وفا القحطاني', 22.0, 'ours', 0),
+    ('C118', 'عبدالعزيز الشاهين', 15.0, 'owner', 900.0), ('F1', 'سمو الاميرة نوره', 25.0, 'ours', 0),
+    ('F2', 'سمو الاميرة نوره', 25.0, 'ours', 0), ('101A', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0),
+    ('101B', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0), ('201A', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0),
+    ('201B', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0), ('102A', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0),
+    ('202A', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0), ('202B', 'ابو فهد عبدالحمن الخطيب', 18.0, 'ours', 0),
+    ('14B', 'عبدالمحسن الجعيد', 18.0, 'owner', 950.0), ('HUE 9', 'امجد الحديثي', 25.0, 'ours', 0),
+    ('HUE 103', 'فواز الدلبحي', 22.0, 'ours', 0), ('c08', 'عبدالرحمن القصير', 20.0, 'ours', 0),
+    ('MLQ11', 'تركي الضبعان', 22.0, 'ours', 0), ('A5', 'عثمان الملحم', 20.0, 'ours', 0),
+    ('MLQ1', 'عبدالمحسن العنزي', 20.0, 'ours', 0), ('a2', 'عبدالعزيز السويلم', 20.0, 'owner', 1000.0),
+    ('الياسمين 8', 'د غانم', 20.0, 'owner', 1300.0), ('L-07', 'احمد الصغير', 15.0, 'owner', 1115.0),
+    ('C2', 'نواف الوهيبي', 20.0, 'owner', 1250.0), ('A12', 'عثمان الهلال', 18.0, 'owner', 1000.0),
+    ('HUE 202', 'عبدالرحمن الشايع', 18.0, 'owner', 1150.0), ('E15', 'عبدالهادي العنزي', 22.0, 'owner', 1150.0),
+    ('D7', 'بتول يوسف', 20.0, 'owner', 1050.0), ('2A', 'سلطان الفيصل', 18.0, 'owner', 1050.0),
+    ('E104', 'بندر العنزي', 15.0, 'owner', 1050.0), ('6', 'عبدالله اليحيئ', 20.0, 'owner', 1100.0),
+    ('B-13', 'عبدالملك المغامس', 18.0, 'owner', 1000.0),
+]
+_owner_registry = {}     # apt_key(lower) -> {apartment, owner, mgmt_pct, cleaning:{type,amount}}
+
+def _owner_key(apt):
+    return re.sub(r"\s+", " ", str(apt or "").strip()).lower()
+
+def _owner_seed_if_empty():
+    if _owner_registry:
+        return 0
+    for apt, owner, mgmt, ctype, camt in _OWNER_SEED:
+        _owner_registry[_owner_key(apt)] = {
+            "apartment": apt, "owner": owner, "mgmt_pct": mgmt,
+            "cleaning": {"type": ctype, "amount": float(camt or 0)}}
+    return len(_owner_registry)
+
+def _owner_info(apt):
+    """Look up an apartment's owner/mgmt/cleaning by code — exact, then substring either way
+    (the registry uses short codes like 'FD1'; Hostaway names are 'Ouja | … FD1 …')."""
+    k = _owner_key(apt)
+    if k in _owner_registry:
+        return _owner_registry[k]
+    for rk, rec in _owner_registry.items():
+        if rk and (rk in k or k in rk):
+            return rec
+    return None
+
 def _finance_in_period(row, start, end, basis):
     d = _parse_date(row.get("checkin" if basis == "checkin" else "checkout"))
     return d is not None and start <= d <= end
 
-def compute_owner_report(reservations, expenses, start, end, management_pct, settings=None):
+def compute_owner_report(reservations, expenses, start, end, management_pct, settings=None, cleaning=None):
     """EXACT money math for one apartment/owner over [start, end] (item 13) + the
-    reconciliation check (item 14). Pure — verifiable on synthetic data. Never estimates."""
+    reconciliation check (item 14). Pure — verifiable on synthetic data. Never estimates.
+    `cleaning` = {'type':'ours'|'owner','amount':per-clean SAR}: when the OWNER pays, deduct
+    amount × (number of stays/turnovers in the period); 'ours' = Ouja absorbs it (no deduction)."""
     s = dict(FINANCE_DEFAULTS); s.update(settings or {})
     basis = s["period_basis"]; rnd = int(s["rounding"]); direct_fee = float(s["direct_fee_pct"]) / 100.0
     def R(x):
@@ -20289,7 +20402,11 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
     exp_lines = [e for e in expenses if e.get("matched")
                  and _finance_in_period({"checkin": e.get("date"), "checkout": e.get("date")}, start, end, "checkin")]
     expenses_total = sum(float(e.get("amount") or 0) for e in exp_lines)
-    owner_net = total_income - ouja_fee - expenses_total
+    # cleaning fee: owner-pays → amount × number of stays (turnovers) in the period; 'ours' → 0
+    cl = cleaning or {"type": "ours", "amount": 0}
+    cleans = len(resv_lines)
+    cleaning_total = (float(cl.get("amount") or 0) * cleans) if (cl.get("type") == "owner") else 0.0
+    owner_net = total_income - ouja_fee - expenses_total - cleaning_total
 
     # ---- reconciliation (item 14): totals must equal the sum of the rows, to the riyal ----
     rows_income = sum((l["income"] or 0) for l in resv_lines) + extras_total
@@ -20300,6 +20417,8 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "income_airbnb": R(inc_airbnb), "income_direct": R(inc_direct), "extras": R(extras_total),
         "total_income": R(total_income), "management_pct": float(management_pct),
         "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
+        "cleaning": {"type": cl.get("type", "ours"), "amount": R(float(cl.get("amount") or 0)),
+                     "cleans": cleans, "total": R(cleaning_total)},
         "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines)},
         "resv_lines": resv_lines, "exp_lines": exp_lines,
         "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout,
@@ -20357,10 +20476,17 @@ def normalize_reservation(r, listings=None):
         "extras": 0.0,
     }
 
-def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None):
+def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None, cleaning=None):
     """Stage 3 wiring: pull this unit's Hostaway reservations + matched expenses and run the
-    verified math. lid=None → portfolio-wide. Never invents a number."""
+    verified math. lid=None → portfolio-wide. Never invents a number. Pulls the owner /
+    management % / cleaning policy from the owner registry (explicit args override it)."""
     listings = get_listings_map() or {}
+    aptname = (listings.get(lid) if lid is not None else None)
+    info = _owner_info(aptname) if aptname else None
+    if (not management_pct) and info and info.get("mgmt_pct") is not None:
+        management_pct = info["mgmt_pct"]
+    if cleaning is None:
+        cleaning = info["cleaning"] if info else {"type": "ours", "amount": 0}
     resv = [normalize_reservation(r, listings) for r in get_reservations_cached()
             if lid is None or r.get("listingMapId") == lid]
     if expenses is None:
@@ -20370,9 +20496,10 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
                 expenses.append({"id": e.get("id"), "apartment": e.get("apartment"),
                                  "lid": e.get("listing_id"), "amount": e.get("amount"),
                                  "date": e.get("expense_date"), "matched": True})
-    rep = compute_owner_report(resv, expenses, start, end, management_pct, settings)
-    rep["apartment"] = (listings.get(lid) if lid is not None else None)
+    rep = compute_owner_report(resv, expenses, start, end, management_pct, settings, cleaning=cleaning)
+    rep["apartment"] = aptname
     rep["lid"] = lid
+    rep["owner"] = (info.get("owner") if info else "") or _unit_owners.get(aptname, "")
     return rep
 
 def _compute_revenue():
@@ -26224,12 +26351,55 @@ async def _api_finance_units(request):
     for u in (_catalog_units or []):
         if not u.get("id"):
             continue
-        owner = _unit_owners.get(u.get("name"), "")
+        info = _owner_info(u.get("name"))
+        owner = (info.get("owner") if info else None) or _unit_owners.get(u.get("name"), "")
         dft = _finance_defaults.get(_finance_key(u["id"], owner), {})
-        out.append({"lid": u["id"], "name": u.get("name"), "owner": owner,
-                    "mgmt_pct": dft.get("mgmt_pct")})
+        mgmt = dft.get("mgmt_pct")
+        if mgmt is None and info:
+            mgmt = info.get("mgmt_pct")
+        out.append({"lid": u["id"], "name": u.get("name"), "owner": owner, "mgmt_pct": mgmt,
+                    "cleaning": (info.get("cleaning") if info else None)})
     out.sort(key=lambda x: x["name"] or "")
     return _json({"units": out})
+
+async def _api_finance_owners(request):
+    """GET → the owner+cleaning-fee registry (editable table; ?q= search).
+    POST {apartment, owner, mgmt_pct, cleaning:{type,amount}} → upsert; {apartment, delete:true} → remove."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        ql = (request.query.get("q") or "").strip().lower()
+        rows = []
+        for rec in _owner_registry.values():
+            if ql and ql not in (str(rec.get("apartment", "")) + " " + str(rec.get("owner", ""))).lower():
+                continue
+            rows.append(rec)
+        rows.sort(key=lambda r: (r.get("owner") or "", r.get("apartment") or ""))
+        owners = sorted({r.get("owner") for r in _owner_registry.values() if r.get("owner")})
+        return _json({"ok": True, "rows": rows, "owners": owners, "total": len(rows)})
+    b = await _read_body(request)
+    apt = (b.get("apartment") or "").strip()
+    if not apt:
+        return _json({"error": "apartment required"}, 400)
+    k = _owner_key(apt)
+    if b.get("delete"):
+        _owner_registry.pop(k, None)
+        await asyncio.to_thread(persist_state)
+        return _json({"ok": True, "deleted": apt})
+    cl = b.get("cleaning") or {}
+    ctype = "owner" if cl.get("type") == "owner" else "ours"
+    try:
+        camt = round(float(cl.get("amount") or 0), 2)
+    except (TypeError, ValueError):
+        camt = 0.0
+    try:
+        mgmt = round(float(b.get("mgmt_pct")), 2) if b.get("mgmt_pct") not in (None, "") else None
+    except (TypeError, ValueError):
+        mgmt = None
+    _owner_registry[k] = {"apartment": apt, "owner": (b.get("owner") or "").strip(),
+                          "mgmt_pct": mgmt, "cleaning": {"type": ctype, "amount": camt if ctype == "owner" else 0}}
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "row": _owner_registry[k]})
 
 async def _api_finance_report(request):
     """Stage 3: the owner report for an apartment + date range. Real data only — never estimates."""
@@ -29213,6 +29383,8 @@ async def start_web_server():
         app.router.add_get("/api/finance/report", _api_finance_report)
         app.router.add_get("/api/finance/defaults", _api_finance_defaults)
         app.router.add_post("/api/finance/defaults", _api_finance_defaults)
+        app.router.add_get("/api/finance/owners", _api_finance_owners)
+        app.router.add_post("/api/finance/owners", _api_finance_owners)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
@@ -29696,6 +29868,13 @@ def load_state():
                 _quotes[str(k)] = v
         _unit_owners.update(_load_json("unit_owners.json", {}) or {})   # item 60
         _finance_defaults.update(_load_json("finance_defaults.json", {}) or {})   # Stage 3 item 16
+        _owner_registry.clear()
+        for k, v in (_load_json("owner_registry.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("apartment"):
+                _owner_registry[str(k)] = v
+        _n = _owner_seed_if_empty()          # first run → seed from the owner's file (38 apartments)
+        if _n:
+            print(f"owner registry: seeded {_n} apartments")
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -29780,6 +29959,7 @@ def persist_state():
     _save_json("quotes.json", _quotes)
     _save_json("unit_owners.json", _unit_owners)
     _save_json("finance_defaults.json", _finance_defaults)   # Stage 3 item 16
+    _save_json("owner_registry.json", _owner_registry)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
