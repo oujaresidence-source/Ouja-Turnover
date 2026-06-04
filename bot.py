@@ -19622,24 +19622,23 @@ function stmtNode(it){
   return d;
 }
 async function stmtDownload(items){
+  // Server-rendered PDFs (proper Arabic). Builds the request from the items and downloads
+  // a single PDF or a ZIP of named PDFs. Names the file client-side (avoids non-ASCII headers).
   if(!items||!items.length){ toast(L==='ar'?'ما فيه بيانات':'No data'); return; }
-  try{ await loadPdfLibs(); }catch(e){ toast(L==='ar'?'تعذّر تحميل مكتبة PDF — نفتح للطباعة':'PDF lib failed — opening print'); bulkPrint(items); return; }
-  if(!window.html2pdf){ bulkPrint(items); return; }
-  var opt={margin:[6,0,6,0], image:{type:'jpeg',quality:0.97}, html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy']}};
-  if(items.length===1){
-    var el=stmtNode(items[0]); document.body.appendChild(el);
-    try{ await html2pdf().set(opt).from(el.firstChild).save(stmtFilename(items[0])); } finally{ el.remove(); }
-    toast(L==='ar'?'تم تنزيل الملف ✓':'Downloaded ✓'); return;
-  }
-  var zip=new JSZip();
-  for(var i=0;i<items.length;i++){
-    toast((L==='ar'?'تجهيز ':'building ')+(i+1)+'/'+items.length);
-    var node=stmtNode(items[i]); document.body.appendChild(node);
-    try{ var blob=await html2pdf().set(opt).from(node.firstChild).outputPdf('blob'); zip.file(stmtFilename(items[i]), blob); } finally{ node.remove(); }
-  }
-  var content=await zip.generateAsync({type:'blob'});
-  var url=URL.createObjectURL(content), a=document.createElement('a'); a.href=url; a.download='ouja-statements.zip'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  toast(L==='ar'?('تم · '+items.length+' ملف PDF في ZIP'):('Done · '+items.length+' PDFs in a ZIP'));
+  var first=items[0], p=(first.report&&first.report.period)||{};
+  var mode=(first.kind==='owner')?'owner':'apartment';
+  var body={mode:mode, start:p.start, end:p.end};
+  if(mode==='owner'){ body.owners=items.map(function(it){ return it.owner||it.label; }); }
+  else { body.lids=items.map(function(it){ return it.report&&it.report.lid; }).filter(function(x){ return x!=null; }); }
+  var nm=(items.length===1)?stmtFilename(first):'ouja-statements.zip';
+  toast(L==='ar'?'⏳ نجهّز PDF…':'⏳ Generating PDF…');
+  var resp;
+  try{ resp=await fetch('/api/finance/pdf?token='+encodeURIComponent(tok()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+  catch(e){ toast('⚠ '+e); return; }
+  if(!resp.ok){ var em=''; try{ em=(await resp.json()).error||''; }catch(_e){} toast('⚠ '+(em||resp.status)); return; }
+  var blob=await resp.blob();
+  var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=nm; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  toast(L==='ar'?('تم ✓ ('+items.length+(items.length===1?' ملف':' ملفات في ZIP')+')'):('Done ✓ ('+items.length+(items.length===1?' file':' files in ZIP')+')'));
 }
 function bulkStatementHTML(r,label,kind){
   if(!r) return '';
@@ -21017,6 +21016,208 @@ def _finance_import_hostaway_expenses():
     persist_state()
     return {"ok": True, "imported": new_n, "matched": matched_n, "total": len(items),
             "last_import": dict(_finance_last_import)}
+
+# ===================== Server-side PDF owner statements (proper Arabic shaping) =====================
+_PDF_FONT_PATH = None
+
+def _pdf_font():
+    """Fetch + cache an Arabic-capable TTF once (runtime download → STATE_DIR/fonts). Returns
+    a path or None. Avoids bundling a binary in the repo; Railway has internet."""
+    global _PDF_FONT_PATH
+    if _PDF_FONT_PATH and os.path.exists(_PDF_FONT_PATH):
+        return _PDF_FONT_PATH
+    try:
+        d = os.path.join(STATE_DIR, "fonts"); os.makedirs(d, exist_ok=True)
+    except Exception:
+        d = "/tmp"
+    path = os.path.join(d, "ouja-ar.ttf")
+    if os.path.exists(path) and os.path.getsize(path) > 20000:
+        _PDF_FONT_PATH = path; return path
+    urls = [
+        "https://github.com/google/fonts/raw/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf",
+        "https://cdn.jsdelivr.net/gh/google/fonts/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf",
+        "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf",
+        "https://cdn.jsdelivr.net/gh/google/fonts/ofl/amiri/Amiri-Regular.ttf",
+    ]
+    for u in urls:
+        try:
+            r = requests.get(u, timeout=30)
+            if r.ok and len(r.content) > 20000:
+                with open(path, "wb") as f:
+                    f.write(r.content)
+                _PDF_FONT_PATH = path; return path
+        except Exception as e:
+            print("pdf font fetch failed:", u, e)
+    return None
+
+def _ar(text):
+    """Reshape + bidi an Arabic (or mixed) string so a PDF renderer draws it correctly."""
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        return get_display(arabic_reshaper.reshape(str(text if text is not None else "")))
+    except Exception:
+        return str(text if text is not None else "")
+
+def _pdf_statement_bytes(rep, label):
+    """Render ONE owner statement to PDF bytes (fpdf2). Cream/gold, RTL, real Arabic shaping.
+    Detailed: owner+fees block, summary, income breakdown, reservations + expenses tables."""
+    from fpdf import FPDF
+    fp = _pdf_font()
+    cur = "ر.س"
+    GOLD = (163, 119, 40); INK = (26, 24, 21); MUT = (140, 132, 117); CREAM = (250, 247, 240); LINE = (232, 226, 213)
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(True, margin=16)
+    pdf.add_page()
+    if fp:
+        pdf.add_font("ar", "", fp, uni=True)
+        FONT = "ar"
+    else:
+        FONT = "Helvetica"
+    def shape(t):
+        return _ar(t) if fp else str(t if t is not None else "")
+    W = 210.0; M = 15.0; usable = W - 2 * M
+    def _n(x):
+        try:
+            return "{:,}".format(int(round(float(x or 0))))
+        except (TypeError, ValueError):
+            return "0"
+    def money(x):
+        return _n(x) + " " + cur
+    # ---- header band ----
+    pdf.set_fill_color(*CREAM); pdf.rect(0, 0, W, 46, "F")
+    pdf.set_fill_color(*GOLD); pdf.rect(0, 46, W, 1.4, "F")
+    pdf.set_xy(M, 9); pdf.set_font(FONT, size=10); pdf.set_text_color(*GOLD)
+    pdf.cell(usable, 5, shape("OUJA RESIDENCE · عوجا"), align="R")
+    pdf.set_xy(M, 15); pdf.set_font(FONT, size=20); pdf.set_text_color(*INK)
+    pdf.cell(usable, 9, shape("كشف حساب المالك"), align="R")
+    pdf.set_xy(M, 27); pdf.set_font(FONT, size=10); pdf.set_text_color(*MUT)
+    period = (rep.get("period") or {})
+    meta = "المالك: %s   ·   العقار: %s   ·   الإدارة: %s%%   ·   الفترة: %s ← %s" % (
+        rep.get("owner") or "—", label or rep.get("apartment") or "—",
+        (rep.get("management_pct") if rep.get("management_pct") is not None else "—"),
+        period.get("end", ""), period.get("start", ""))
+    pdf.cell(usable, 5, shape(meta), align="R")
+    cl = rep.get("cleaning") or {}
+    clean_txt = ("النظافة: يدفعها المالك · %s/تنظيف × %s" % (_n(cl.get("amount") or 0), cl.get("cleans") if cl.get("cleans") is not None else "—")) if cl.get("type") == "owner" else "النظافة: على عوجا (مشمولة)"
+    pdf.set_xy(M, 33); pdf.cell(usable, 5, shape(clean_txt), align="R")
+    pdf.set_y(54)
+    # ---- row helper (label right, value left) ----
+    def kv(lbl, val, big=False, neg=False):
+        y = pdf.get_y(); pdf.set_font(FONT, size=(13 if big else 11))
+        pdf.set_text_color(*(GOLD if big else MUT)); pdf.set_xy(M + usable * 0.45, y)
+        pdf.cell(usable * 0.55, 7, shape(lbl), align="R")
+        pdf.set_text_color(*((181, 59, 59) if neg else (INK if not big else GOLD))); pdf.set_xy(M, y)
+        pdf.cell(usable * 0.45, 7, ("− " if neg else "") + (val if isinstance(val, str) else shape(val)), align="L")
+        pdf.set_y(y + 7)
+    def section(title):
+        pdf.ln(3); pdf.set_font(FONT, size=10); pdf.set_text_color(*GOLD)
+        pdf.set_x(M); pdf.cell(usable, 6, shape(title), align="R"); pdf.ln(7)
+        pdf.set_draw_color(*LINE); pdf.line(M, pdf.get_y() - 2, W - M, pdf.get_y() - 2)
+    # ---- summary box ----
+    box_y = pdf.get_y(); pdf.set_fill_color(*CREAM); pdf.rect(M, box_y, usable, 52, "F")
+    pdf.set_xy(M + 5, box_y + 4)
+    def kvbox(lbl, val, big=False, neg=False):
+        y = pdf.get_y(); pdf.set_font(FONT, size=(14 if big else 11))
+        pdf.set_text_color(*(GOLD if big else MUT)); pdf.set_xy(M + usable * 0.45, y)
+        pdf.cell(usable * 0.50, 7, shape(lbl), align="R")
+        pdf.set_text_color(*((181, 59, 59) if neg else (GOLD if big else INK))); pdf.set_xy(M + 5, y)
+        pdf.cell(usable * 0.45, 7, ("− " if neg else "") + (val if isinstance(val, str) else shape(val)), align="L")
+        pdf.set_y(y + 7)
+    kvbox("إجمالي الدخل", money(rep.get("total_income")))
+    kvbox("رسوم عوجا (%s%%)" % (rep.get("management_pct") or 0), money(rep.get("ouja_fee")), neg=True)
+    kvbox("المصاريف", money(rep.get("expenses")), neg=True)
+    if cl.get("total"):
+        kvbox("النظافة", money(cl.get("total")), neg=True)
+    pdf.set_draw_color(*GOLD); pdf.line(M + 5, pdf.get_y() + 1, W - M - 5, pdf.get_y() + 1); pdf.ln(2)
+    kvbox("صافي المالك", money(rep.get("owner_net")), big=True)
+    pdf.set_y(box_y + 56)
+    # ---- income breakdown ----
+    section("تفصيل الدخل")
+    kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
+    kv("دخل مباشر (−٣٪)", money(rep.get("income_direct")))
+    if rep.get("extras"):
+        kv("إضافات", money(rep.get("extras")))
+    # ---- reservations table ----
+    rl = rep.get("resv_lines") or []
+    if rl:
+        section("الحجوزات (%d)" % len(rl)); pdf.set_font(FONT, size=10); pdf.set_text_color(*INK)
+        for l in rl[:40]:
+            y = pdf.get_y()
+            pdf.set_xy(M, y); pdf.cell(usable * 0.30, 6, (money(l.get("income")) if l.get("income") is not None else "—"), align="L")
+            pdf.set_xy(M + usable * 0.30, y); pdf.set_text_color(*MUT); pdf.cell(usable * 0.20, 6, str(l.get("nights") or ""), align="C")
+            pdf.cell(usable * 0.25, 6, str(l.get("checkin") or ""), align="C")
+            pdf.set_text_color(*INK); pdf.cell(usable * 0.25, 6, shape(l.get("channel") or ""), align="R"); pdf.ln(6)
+    # ---- expenses table ----
+    el = rep.get("exp_lines") or []
+    section("المصاريف (%d)" % len(el)); pdf.set_font(FONT, size=10)
+    if el:
+        for e in el[:60]:
+            y = pdf.get_y(); pdf.set_text_color(*INK)
+            pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, money(e.get("amount")), align="L")
+            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(str(e.get("date") or e.get("note") or "")), align="R"); pdf.ln(6)
+    else:
+        pdf.set_text_color(*MUT); pdf.set_x(M); pdf.cell(usable, 6, shape("لا مصاريف في هذي الفترة"), align="R"); pdf.ln(6)
+    # ---- per-apartment breakdown (owner aggregate) ----
+    aps = rep.get("apartments") or []
+    if aps:
+        section("حسب الشقة"); pdf.set_font(FONT, size=10)
+        for a in aps:
+            y = pdf.get_y(); pdf.set_text_color(*INK)
+            pdf.set_xy(M, y); pdf.cell(usable * 0.30, 6, money(a.get("owner_net")), align="L")
+            pdf.set_xy(M + usable * 0.30, y); pdf.set_text_color(*MUT); pdf.cell(usable * 0.30, 6, money(a.get("total_income")), align="L")
+            pdf.set_text_color(*INK); pdf.cell(usable * 0.40, 6, shape(str(a.get("apartment") or "")), align="R"); pdf.ln(6)
+    # ---- comment + footer ----
+    if rep.get("comment"):
+        pdf.ln(2); pdf.set_font(FONT, size=10); pdf.set_text_color(*INK); pdf.set_x(M)
+        pdf.multi_cell(usable, 6, shape("ملاحظة: " + rep.get("comment")), align="R")
+    pdf.set_y(-18); pdf.set_font(FONT, size=8); pdf.set_text_color(*MUT)
+    pdf.cell(usable, 5, shape("كل الأرقام من بيانات فعلية (Hostaway + المصاريف المتحقّقة) · عوجا ريزيدنس"), align="C")
+    out = pdf.output()
+    return bytes(out)
+
+def _finance_collect_items(mode, lids, owners, start, end):
+    """Build [{label, owner, kind, report}] for the requested apartments/owners (shared by the
+    bulk JSON preview and the PDF endpoint)."""
+    listings = get_listings_map() or {}
+    items = []
+    if mode == "owner":
+        for own in [o for o in (owners or []) if o]:
+            sub = _owner_lids(own, listings)
+            reps = [build_owner_report(lid, start, end, 0, {}) for lid in sub]
+            items.append({"label": own, "owner": own, "kind": "owner",
+                          "report": _finance_aggregate(reps, own, start, end)})
+    else:
+        for lid in (lids or []):
+            try:
+                lid = int(lid)
+            except (TypeError, ValueError):
+                continue
+            rep = build_owner_report(lid, start, end, 0, {})
+            items.append({"label": listings.get(lid) or str(lid), "owner": rep.get("owner", ""),
+                          "kind": "apartment", "report": rep})
+    return items
+
+def _finance_pdf_filename(it):
+    raw = ("%s - %s" % (it.get("label") or "statement", it.get("owner") or "")).strip(" -")
+    bad = set('/\\:*?"<>|')
+    return ("".join("-" if c in bad else c for c in raw).strip() or "statement") + ".pdf"
+
+def _finance_pdf_payload(items):
+    """Return (bytes, filename, content_type): one PDF if a single item, else a ZIP of named PDFs."""
+    if len(items) == 1:
+        return _pdf_statement_bytes(items[0]["report"], items[0].get("label")), _finance_pdf_filename(items[0]), "application/pdf"
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        used = {}
+        for it in items:
+            fn = _finance_pdf_filename(it)
+            used[fn] = used.get(fn, 0) + 1
+            if used[fn] > 1:
+                fn = fn[:-4] + ("-%d.pdf" % used[fn])
+            z.writestr(fn, _pdf_statement_bytes(it["report"], it.get("label")))
+    return buf.getvalue(), "ouja-statements.zip", "application/zip"
 
 def _compute_revenue():
     reservations = get_reservations_cached()
@@ -26878,6 +27079,28 @@ async def _api_finance_units(request):
     out.sort(key=lambda x: x["name"] or "")
     return _json({"units": out, "last_import": dict(_finance_last_import)})
 
+async def _api_finance_pdf(request):
+    """Server-rendered owner-statement PDF(s) with proper Arabic. POST {mode, lids|owners,
+    start, end} → a single PDF (1 item) or a ZIP of named PDFs (many). Binary download."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    start = _parse_date(b.get("start", "")); end = _parse_date(b.get("end", ""))
+    if not start or not end or end < start:
+        return _json({"error": "bad date range"}, 400)
+    mode = "owner" if b.get("mode") == "owner" else "apartment"
+    items = await asyncio.to_thread(_finance_collect_items, mode, b.get("lids") or [], b.get("owners") or [], start, end)
+    if not items:
+        return _json({"error": "no items"}, 400)
+    try:
+        data, fn, ct = await asyncio.to_thread(_finance_pdf_payload, items)
+    except Exception as e:
+        print("finance pdf error:", e)
+        return _json({"error": "pdf_failed: " + str(e)[:160]}, 500)
+    ascii_fn = "ouja-statements.zip" if ct == "application/zip" else "ouja-statement.pdf"
+    return web.Response(body=data, content_type=ct,
+                        headers={"Content-Disposition": "attachment; filename=" + ascii_fn})
+
 async def _api_finance_import_expenses(request):
     """Import the expenses list from Hostaway into the ledger (so statements reflect everything
     in Hostaway). Read-from-Hostaway only; never writes back; never duplicates."""
@@ -27015,28 +27238,7 @@ async def _api_finance_bulk(request):
     if not start or not end or end < start:
         return _json({"error": "bad date range"}, 400)
     mode = "owner" if b.get("mode") == "owner" else "apartment"
-    listings = get_listings_map() or {}
-
-    def rep_for_lid(lid):
-        return build_owner_report(lid, start, end, 0, {})       # registry fills mgmt% + cleaning
-
-    items = []
-    if mode == "owner":
-        owners = [o for o in (b.get("owners") or []) if o]
-        for own in owners:
-            sub = _owner_lids(own, listings)        # explicit overrides + normalized auto-match
-            reps = [await asyncio.to_thread(rep_for_lid, lid) for lid in sub]
-            items.append({"label": own, "owner": own, "kind": "owner",
-                          "report": _finance_aggregate(reps, own, start, end)})
-    else:
-        for lid in (b.get("lids") or []):
-            try:
-                lid = int(lid)
-            except (TypeError, ValueError):
-                continue
-            rep = await asyncio.to_thread(rep_for_lid, lid)
-            items.append({"label": listings.get(lid) or str(lid), "owner": rep.get("owner", ""),
-                          "kind": "apartment", "report": rep})
+    items = await asyncio.to_thread(_finance_collect_items, mode, b.get("lids") or [], b.get("owners") or [], start, end)
     return _json({"ok": True, "items": items, "count": len(items),
                   "period": {"start": start.isoformat(), "end": end.isoformat()}})
 
@@ -29999,6 +30201,7 @@ async def start_web_server():
         app.router.add_post("/api/finance/owners", _api_finance_owners)
         app.router.add_post("/api/finance/bulk", _api_finance_bulk)
         app.router.add_post("/api/finance/import-expenses", _api_finance_import_expenses)
+        app.router.add_post("/api/finance/pdf", _api_finance_pdf)
         app.router.add_get("/api/finance/adjust", _api_finance_adjust)
         app.router.add_post("/api/finance/adjust", _api_finance_adjust)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
