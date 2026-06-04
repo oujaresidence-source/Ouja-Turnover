@@ -15939,6 +15939,13 @@ function x4PrepInclude(id){
   for(i=0;i<c.already.length;i++){ if(c.already[i].id===id){ c.ready.push(c.already[i]); c.already.splice(i,1); break; } }
   _renderExp4();
 }
+async function x4PrepAmt(id){
+  var el=document.getElementById('prx_'+id); if(!el) return;
+  var v=el.value;
+  var r; try{ r=await post('/api/expenses/v4/edit',{id:id, fields:{amount:v}}); }catch(e){ toast('⚠ '+e); return; }
+  if(_x4Prepare&&_x4Prepare.check){ (_x4Prepare.check.ready||[]).forEach(function(x){ if(x.id===id){ var n=parseFloat(v); if(!isNaN(n)) x.amount=Math.abs(n); } }); }
+  toast(L==='ar'?'تم تعديل المبلغ ✓ (يدخل في الملف)':'Amount updated ✓ (goes into the file)');
+}
 async function x4PrepMarkAlready(id){
   var r; try{ r=await post('/api/expenses/v4/mark-already',{id:id}); }catch(e){ toast('⚠ '+e); return; }
   toast(r.ok?(L==='ar'?'تم وضعه كمتحقق':'Marked verified'):('⚠ '+(r.reason||'')));
@@ -15991,7 +15998,11 @@ function x4PrepResultHtml(c){
   }
   var readyN=(c.ready||[]).length;
   var conn='<div class="muted" style="font-size:11.5px;margin:6px 0">Hostaway: '+(c.ok?(ar?'متصل':'connected'):('⚠ '+esc(c.error||'')))+' · '+fmt(c.hostaway_count||0)+'</div>';
-  var sReady=sec('✅ '+(ar?'جاهزة (مو موجودة في Hostaway)':'Ready (not in Hostaway)'),'var(--green)',c.ready,null);
+  var sReady=sec('✅ '+(ar?'جاهزة (مو موجودة في Hostaway) — تقدر تعدّل المبلغ قبل التنزيل':'Ready (not in Hostaway) — edit the amount before download'),'var(--green)',c.ready,function(r){
+    return '<div style="display:flex;gap:4px;align-items:center;flex-shrink:0">'
+      +'<input type="number" step="0.01" value="'+(r.amount||0)+'" id="prx_'+esc(r.id)+'" style="width:84px;padding:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
+      +'<button class="btn ghost xs" onclick="x4PrepAmt(&#39;'+esc(r.id)+'&#39;)" title="'+(ar?'حفظ المبلغ':'save amount')+'">💾</button>'
+      +'<button class="btn ghost xs" onclick="x4Edit(&#39;'+esc(r.id)+'&#39;)" title="'+(ar?'تعديل كامل':'full edit')+'">✏️</button></div>'; });
   var sAlready=sec('⚠️ '+(ar?'موجودة مسبقًا في Hostaway':'Already in Hostaway'),'var(--gold)',c.already,function(r){
     return '<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn ghost xs" onclick="x4PrepMarkAlready(&#39;'+esc(r.id)+'&#39;)">'+(ar?'موجود — علّمه متحقق':'Mark verified')+'</button>'
       +'<button class="btn ghost xs" onclick="x4PrepInclude(&#39;'+esc(r.id)+'&#39;)">'+(ar?'ضمّنه':'Include')+'</button></div>'; });
