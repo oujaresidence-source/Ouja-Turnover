@@ -10793,6 +10793,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div><div class="page-title" id="t_finance">🧾 المالية</div><div class="page-sub" id="t_finance_sub">تقرير شهري للمُلّاك</div></div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="openOwnersTable()" id="finOwnersBtn">👥 <span id="t_fin_owners">المُلّاك والرسوم</span></button>
+            <button class="btn ghost sm" onclick="openBulkPdf()" id="finBulkBtn">🧾 <span id="t_fin_bulk">PDF بالجملة</span></button>
             <button class="btn ghost sm" onclick="financeSaveDefaults()" id="finSaveBtn">💾 <span id="t_fin_save">حفظ كافتراضي</span></button>
             <button class="btn primary sm" onclick="financeGeneratePdf()" id="finPdfBtn">⬇ PDF</button>
           </div>
@@ -19346,6 +19347,94 @@ async function ownersAdd(){
   try{ await post('/api/finance/owners',{apartment:apt, owner:'', mgmt_pct:'', cleaning:{type:'ours',amount:0}}); }catch(e){ toast('⚠'); return; }
   await ownersReload('');
 }
+/* ===== Bulk owner-statement PDFs (per-apartment or per-owner) ===== */
+var _bulkPdf=null;
+async function openBulkPdf(){
+  openDrawer(L==='ar'?'🧾 PDF بالجملة':'🧾 Bulk PDFs',''); setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('');
+  if(!D.finUnits){ try{ var u=await api('/api/finance/units'); D.finUnits=u.units||[]; }catch(_){ D.finUnits=[]; } }
+  if(!D.owners){ try{ D.owners=await api('/api/finance/owners'); }catch(_){ D.owners={owners:[]}; } }
+  _bulkPdf={mode:'apartment', sel:{}, owners:{}};
+  bulkPdfRender();
+}
+function bulkMode(m){ if(_bulkPdf){ _bulkPdf.mode=m; bulkPdfRender(); } }
+function bulkSelApt(lid,on){ if(_bulkPdf) _bulkPdf.sel[lid]=on; }
+function bulkSelOwner(i,on){ if(!_bulkPdf) return; var o=((D.owners||{}).owners||[])[i]; if(o!=null) _bulkPdf.owners[o]=on; }
+function bulkSelAll(){
+  if(!_bulkPdf) return;
+  if(_bulkPdf.mode==='owner'){ ((D.owners||{}).owners||[]).forEach(function(o){ _bulkPdf.owners[o]=true; }); }
+  else { (D.finUnits||[]).forEach(function(u){ _bulkPdf.sel[u.lid]=true; }); }
+  bulkPdfRender();
+}
+function bulkPdfRender(){
+  var ar=(L==='ar'), s=_bulkPdf;
+  var inp='padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
+  var modeBtns='<div style="display:flex;gap:8px;margin-bottom:10px">'
+    +'<button class="btn '+(s.mode==='apartment'?'primary':'ghost')+' sm" onclick="bulkMode(&#39;apartment&#39;)">'+(ar?'ملف لكل شقة':'Per apartment')+'</button>'
+    +'<button class="btn '+(s.mode==='owner'?'primary':'ghost')+' sm" onclick="bulkMode(&#39;owner&#39;)">'+(ar?'ملف لكل مالك':'Per owner')+'</button></div>';
+  var dates='<div style="display:flex;gap:8px;margin-bottom:8px"><input type="date" id="bpFrom" value="'+esc(((document.getElementById('finStart')||{}).value)||'')+'" style="'+inp+';flex:1"><input type="date" id="bpTo" value="'+esc(((document.getElementById('finEnd')||{}).value)||'')+'" style="'+inp+';flex:1"></div>';
+  var selAll='<button class="btn ghost sm" onclick="bulkSelAll()" style="margin-bottom:8px">'+(ar?'تحديد الكل':'Select all')+'</button>';
+  var rowSt='display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--border);border-radius:6px';
+  var list='';
+  if(s.mode==='owner'){
+    var owners=((D.owners||{}).owners)||[];
+    list=owners.length?owners.map(function(o,i){ return '<label style="'+rowSt+'"><input type="checkbox" '+(s.owners[o]?'checked':'')+' onchange="bulkSelOwner('+i+',this.checked)"> '+esc(o)+'</label>'; }).join(''):('<div class="muted">'+(ar?'لا ملّاك':'No owners')+'</div>');
+  } else {
+    var units=(D.finUnits||[]);
+    list=units.length?units.map(function(u){ return '<label style="'+rowSt+'"><input type="checkbox" '+(s.sel[u.lid]?'checked':'')+' onchange="bulkSelApt('+u.lid+',this.checked)"> <span style="flex:1">'+esc(u.name||'')+'</span><span class="muted" style="font-size:11px">'+esc(u.owner||'')+'</span></label>'; }).join(''):('<div class="muted">'+(ar?'لا شقق':'No apartments')+'</div>');
+  }
+  setDrawerBody(modeBtns+dates+selAll+'<div style="display:flex;flex-direction:column;gap:5px">'+list+'</div>');
+  setDrawerFoot('<button class="btn primary" onclick="bulkGenerate()">⬇ '+(ar?'تجهيز PDF':'Generate PDF')+'</button>');
+}
+async function bulkGenerate(){
+  var s=_bulkPdf, from=(document.getElementById('bpFrom')||{}).value, to=(document.getElementById('bpTo')||{}).value;
+  if(!from||!to){ toast(L==='ar'?'اختر الفترة':'Pick the date range'); return; }
+  var body={mode:s.mode, start:from, end:to};
+  if(s.mode==='owner'){ body.owners=Object.keys(s.owners).filter(function(k){return s.owners[k];}); if(!body.owners.length){ toast(L==='ar'?'اختر مالك':'Pick owners'); return; } }
+  else { body.lids=Object.keys(s.sel).filter(function(k){return s.sel[k];}); if(!body.lids.length){ toast(L==='ar'?'اختر شقق':'Pick apartments'); return; } }
+  toast(L==='ar'?'⏳ نجهّز التقارير…':'⏳ Generating…');
+  var r; try{ r=await post('/api/finance/bulk',body); }catch(e){ toast('⚠ '+e); return; }
+  if(!r||!r.items||!r.items.length){ toast(L==='ar'?'ما فيه بيانات':'No data'); return; }
+  bulkPrint(r.items);
+}
+function bulkStatementHTML(r,label,kind){
+  if(!r) return '';
+  var ar=(L==='ar'), cur=r.currency||'SAR', money=function(x){return fmt(x)+' '+cur;};
+  var pl=r.period?(r.period.start+' → '+r.period.end):'';
+  var sr=function(l,v,c){ return '<div class="stmt-sum-row'+(c?' '+c:'')+'"><span>'+l+'</span><span class="num">'+v+'</span></div>'; };
+  var h='<div class="stmt"><div class="stmt-cover"><div class="stmt-brand">OUJA · عوجا</div>'
+    +'<div class="stmt-h1">'+(ar?'تقرير مالي':'Statement')+'</div>'
+    +'<div class="stmt-meta">'+esc(label||'')+((r.owner&&kind!=='owner')?(' · '+esc(r.owner)):'')+(pl?(' · '+pl):'')+'</div></div>';
+  h+='<div class="stmt-sec-t">'+(ar?'الملخّص':'Summary')+'</div><div class="stmt-sum">';
+  h+=sr(ar?'إجمالي الدخل':'Total income',money(r.total_income));
+  h+=sr(ar?'رسوم عوجا':'Ouja fee','−'+money(r.ouja_fee));
+  h+=sr(ar?'المصاريف':'Expenses','−'+money(r.expenses));
+  if(r.cleaning&&r.cleaning.total) h+=sr(ar?'النظافة':'Cleaning','−'+money(r.cleaning.total));
+  h+=sr(ar?'صافي المالك':'Owner net',money(r.owner_net),'total')+'</div>';
+  if(r.apartments&&r.apartments.length){
+    h+='<div class="stmt-sec-t">'+(ar?'الشقق':'Apartments')+'</div><table><thead><tr><th>'+(ar?'الشقة':'Apartment')+'</th><th class="num">'+(ar?'الدخل':'Income')+'</th><th class="num">'+(ar?'الصافي':'Net')+'</th></tr></thead><tbody>';
+    h+=r.apartments.map(function(a){ return '<tr><td>'+esc(a.apartment||'')+'</td><td class="num">'+money(a.total_income)+'</td><td class="num">'+money(a.owner_net)+'</td></tr>'; }).join('')+'</tbody></table>';
+  }
+  return h+'</div>';
+}
+function bulkPrint(items){
+  var w=window.open('','_blank'); if(!w){ toast(L==='ar'?'اسمح بالنوافذ المنبثقة':'Allow pop-ups'); return; }
+  var css='*{box-sizing:border-box}body{font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:#1A1815;margin:0}'
+    +'.stmt{padding:44px 46px;max-width:760px;margin:0 auto;page-break-after:always}.stmt-cover{border-bottom:2px solid #A37728;padding-bottom:18px;margin-bottom:22px}'
+    +'.stmt-brand{font-weight:800;letter-spacing:1px;color:#8B6320;font-size:13px}.stmt-h1{font-size:25px;font-weight:800;margin:12px 0 4px}'
+    +'.stmt-meta{color:#8C8475;font-size:12px}.stmt-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#8B6320;margin:24px 0 8px}'
+    +'table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:start;color:#8C8475;font-size:10.5px;font-weight:600;padding:6px 8px;border-bottom:1px solid #E8E2D5}'
+    +'td{padding:7px 8px;border-bottom:1px solid #EDE8DC}.num{text-align:end;font-variant-numeric:tabular-nums}'
+    +'.stmt-sum{background:#F7F4EE;border-radius:12px;padding:16px 18px;margin:6px 0}.stmt-sum-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}'
+    +'.stmt-sum-row.total{border-top:2px solid #A37728;margin-top:6px;padding-top:10px;font-weight:800;font-size:15px;color:#8B6320}';
+  var dir=(L==='ar')?'rtl':'ltr';
+  var bodyHtml=items.map(function(it){ return bulkStatementHTML(it.report, it.label, it.kind); }).join('');
+  w.document.write('<!doctype html><html dir="'+dir+'" lang="'+(L==='ar'?'ar':'en')+'"><head><meta charset="utf-8"><title>Ouja Statements</title>'
+    +'<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700;800&display=swap" rel="stylesheet">'
+    +'<style>'+css+'</style></head><body>'+bodyHtml+'</body></html>');
+  w.document.close();
+  toast(L==='ar'?('جاهز · '+items.length+' تقرير'):('Ready · '+items.length+' statement(s)'));
+  setTimeout(function(){ try{ w.focus(); w.print(); }catch(_){} }, 800);
+}
 async function loadLearnings(){
   const list = document.getElementById('learnAptList');
   if(list) list.innerHTML = '<div class="empty sk">—</div>';
@@ -26439,6 +26528,61 @@ async def _api_finance_report(request):
     rep = await asyncio.to_thread(build_owner_report, lid, start, end, mgmt, settings)
     return _json(rep)
 
+def _finance_aggregate(reps, owner, start, end):
+    """Combine several apartment reports into ONE owner statement (sum the money, keep a
+    per-apartment breakdown). Used for the per-owner bulk PDF."""
+    R = lambda x: round(float(x or 0), 2)
+    tot = lambda k: R(sum(float(r.get(k) or 0) for r in reps))
+    parts = [{"apartment": r.get("apartment"), "total_income": r.get("total_income"),
+              "ouja_fee": r.get("ouja_fee"), "expenses": r.get("expenses"),
+              "cleaning": (r.get("cleaning") or {}).get("total", 0), "owner_net": r.get("owner_net")}
+             for r in reps]
+    cleaning_total = R(sum((r.get("cleaning") or {}).get("total", 0) for r in reps))
+    balanced = all((r.get("reconciliation") or {}).get("balanced") for r in reps) if reps else True
+    return {"currency": "SAR", "owner": owner,
+            "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
+            "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
+            "extras": tot("extras"), "total_income": tot("total_income"), "ouja_fee": tot("ouja_fee"),
+            "expenses": tot("expenses"), "cleaning": {"type": "mixed", "total": cleaning_total, "cleans": None, "amount": None},
+            "owner_net": tot("owner_net"), "apartments": parts,
+            "reconciliation": {"balanced": balanced}, "n_apartments": len(reps)}
+
+async def _api_finance_bulk(request):
+    """Build owner statements for MANY targets at once (for the bulk PDF). POST:
+    {mode:'apartment'|'owner', lids:[...] | owners:[...], start, end}. Per-owner aggregates
+    all of that owner's apartments into one statement. Real data only."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    start = _parse_date(b.get("start", "")); end = _parse_date(b.get("end", ""))
+    if not start or not end or end < start:
+        return _json({"error": "bad date range"}, 400)
+    mode = "owner" if b.get("mode") == "owner" else "apartment"
+    listings = get_listings_map() or {}
+
+    def rep_for_lid(lid):
+        return build_owner_report(lid, start, end, 0, {})       # registry fills mgmt% + cleaning
+
+    items = []
+    if mode == "owner":
+        owners = [o for o in (b.get("owners") or []) if o]
+        for own in owners:
+            sub = [lid for lid, nm in listings.items() if (_owner_info(nm) or {}).get("owner") == own]
+            reps = [await asyncio.to_thread(rep_for_lid, lid) for lid in sub]
+            items.append({"label": own, "owner": own, "kind": "owner",
+                          "report": _finance_aggregate(reps, own, start, end)})
+    else:
+        for lid in (b.get("lids") or []):
+            try:
+                lid = int(lid)
+            except (TypeError, ValueError):
+                continue
+            rep = await asyncio.to_thread(rep_for_lid, lid)
+            items.append({"label": listings.get(lid) or str(lid), "owner": rep.get("owner", ""),
+                          "kind": "apartment", "report": rep})
+    return _json({"ok": True, "items": items, "count": len(items),
+                  "period": {"start": start.isoformat(), "end": end.isoformat()}})
+
 async def _api_finance_defaults(request):
     """GET ?key= -> saved report defaults; POST {key, defaults} -> save (item 16).
     Never stores bank/IBAN (item 17)."""
@@ -29396,6 +29540,7 @@ async def start_web_server():
         app.router.add_post("/api/finance/defaults", _api_finance_defaults)
         app.router.add_get("/api/finance/owners", _api_finance_owners)
         app.router.add_post("/api/finance/owners", _api_finance_owners)
+        app.router.add_post("/api/finance/bulk", _api_finance_bulk)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
