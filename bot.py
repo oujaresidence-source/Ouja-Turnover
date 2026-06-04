@@ -19319,9 +19319,16 @@ function ownersRender(){
 function ownersRowHtml(r,i){
   var ar=(L==='ar'), cl=r.cleaning||{type:'ours',amount:0};
   var inp='width:100%;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
+  var lst=((D.owners||{}).listings)||[];
+  var cur=(r.lid!=null?r.lid:(r.matched_lid!=null?r.matched_lid:''));
+  var opts='<option value="">'+(ar?'— تلقائي —':'— auto —')+'</option>'+lst.map(function(o){ return '<option value="'+o.lid+'"'+(String(o.lid)===String(cur)?' selected':'')+'>'+esc(o.name||('#'+o.lid))+'</option>'; }).join('');
+  var matchTxt = r.matched_listing ? ('✓ '+esc(r.matched_listing)) : ('<span style="color:var(--down)">'+(ar?'⚠ لا يطابق شقة في Hostaway — اختر يدويًا':'⚠ no Hostaway match — pick manually')+'</span>');
   return '<div class="card" style="border-radius:8px;padding:10px">'
     +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font-size:13px">'+esc(r.apartment)+'</b>'
       +'<button class="btn ghost xs" onclick="ownersDel('+i+')">🗑</button></div>'
+    +'<div style="font-size:10.5px;margin-top:3px">'+matchTxt+'</div>'
+    +'<div style="margin-top:7px"><div class="muted" style="font-size:10px">'+(ar?'الشقة في Hostaway':'Hostaway listing')+'</div>'
+      +'<select id="own_l_'+i+'" style="'+inp+'">'+opts+'</select></div>'
     +'<div style="display:grid;grid-template-columns:1.4fr .8fr;gap:6px;margin-top:7px">'
       +'<div><div class="muted" style="font-size:10px">'+(ar?'المالك':'Owner')+'</div><input id="own_o_'+i+'" value="'+esc(r.owner||'')+'" style="'+inp+'"></div>'
       +'<div><div class="muted" style="font-size:10px">'+(ar?'الإدارة %':'Mgmt %')+'</div><input id="own_m_'+i+'" type="number" step="0.5" value="'+(r.mgmt_pct==null?'':r.mgmt_pct)+'" style="'+inp+'"></div>'
@@ -19340,8 +19347,9 @@ async function ownersSave(i){
   var mgmt=(document.getElementById('own_m_'+i)||{}).value||'';
   var ct=(document.getElementById('own_ct_'+i)||{}).value||'ours';
   var ca=(document.getElementById('own_ca_'+i)||{}).value||0;
-  var resp; try{ resp=await post('/api/finance/owners',{apartment:r.apartment, owner:owner, mgmt_pct:mgmt, cleaning:{type:ct, amount:ca}}); }catch(e){ toast('⚠'); return; }
-  if(resp&&resp.ok){ toast(L==='ar'?'حُفظ ✓':'Saved ✓'); if(resp.row){ D.owners.rows[i]=resp.row; } } else toast('⚠ '+((resp&&resp.error)||''));
+  var lidEl=document.getElementById('own_l_'+i); var lid=lidEl?lidEl.value:'';
+  var resp; try{ resp=await post('/api/finance/owners',{apartment:r.apartment, owner:owner, mgmt_pct:mgmt, lid:lid, cleaning:{type:ct, amount:ca}}); }catch(e){ toast('⚠'); return; }
+  if(resp&&resp.ok){ toast(L==='ar'?'حُفظ ✓':'Saved ✓'); await ownersReload(''); } else toast('⚠ '+((resp&&resp.error)||''));
 }
 async function ownersDel(i){
   var r=((D.owners||{}).rows||[])[i]; if(!r) return;
@@ -20677,16 +20685,56 @@ def _owner_seed_if_empty():
             "cleaning": {"type": ctype, "amount": float(camt or 0)}}
     return len(_owner_registry)
 
+def _owner_norm(s):
+    """Normalize for matching: lowercase, keep only alphanumerics + Arabic letters (drop
+    spaces, '|', '-', etc.). So code 'A-11' → 'a11' matches a listing 'Ouja | A 11'."""
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
 def _owner_info(apt):
-    """Look up an apartment's owner/mgmt/cleaning by code — exact, then substring either way
-    (the registry uses short codes like 'FD1'; Hostaway names are 'Ouja | … FD1 …')."""
+    """Look up an apartment's owner/mgmt/cleaning by code. Exact key first, then a NORMALIZED
+    substring match (ignores spaces/dashes/case) preferring the LONGEST code so 'MLQ1' doesn't
+    steal the 'MLQ11' listing. The registry uses short codes; Hostaway names embed them."""
     k = _owner_key(apt)
     if k in _owner_registry:
         return _owner_registry[k]
-    for rk, rec in _owner_registry.items():
-        if rk and (rk in k or k in rk):
-            return rec
-    return None
+    nk = _owner_norm(apt)
+    if not nk:
+        return None
+    best, best_len = None, 0
+    for rec in _owner_registry.values():
+        rn = _owner_norm(rec.get("apartment"))
+        if rn and (rn in nk or nk in rn) and len(rn) > best_len:
+            best, best_len = rec, len(rn)
+    return best
+
+def _owner_resolve_lid(rec, listings):
+    """The Hostaway listing id for a registry apartment: an explicit override if set, else the
+    best NORMALIZED-substring match against the listing names (longest listing-name code)."""
+    if rec.get("lid") is not None:
+        try:
+            return int(rec["lid"])
+        except (TypeError, ValueError):
+            pass
+    rn = _owner_norm(rec.get("apartment"))
+    if not rn:
+        return None
+    best, best_len = None, 0
+    for lid, nm in (listings or {}).items():
+        nn = _owner_norm(nm)
+        if rn and rn in nn and len(rn) > best_len:
+            best, best_len = lid, len(rn)
+    return best
+
+def _owner_lids(owner, listings):
+    """All Hostaway listing ids belonging to one owner (explicit overrides + auto-match)."""
+    out = []
+    for rec in _owner_registry.values():
+        if (rec.get("owner") or "") != owner:
+            continue
+        lid = _owner_resolve_lid(rec, listings)
+        if lid is not None and lid not in out:
+            out.append(lid)
+    return out
 
 def _finance_in_period(row, start, end, basis):
     d = _parse_date(row.get("checkin" if basis == "checkin" else "checkout"))
@@ -26844,14 +26892,20 @@ async def _api_finance_owners(request):
         return _json({"error": "unauthorized"}, 401)
     if request.method == "GET":
         ql = (request.query.get("q") or "").strip().lower()
+        listings = get_listings_map() or {}
         rows = []
         for rec in _owner_registry.values():
             if ql and ql not in (str(rec.get("apartment", "")) + " " + str(rec.get("owner", ""))).lower():
                 continue
-            rows.append(rec)
+            lid = _owner_resolve_lid(rec, listings)
+            r2 = dict(rec)
+            r2["matched_lid"] = lid
+            r2["matched_listing"] = listings.get(lid) if lid is not None else ""
+            rows.append(r2)
         rows.sort(key=lambda r: (r.get("owner") or "", r.get("apartment") or ""))
         owners = sorted({r.get("owner") for r in _owner_registry.values() if r.get("owner")})
-        return _json({"ok": True, "rows": rows, "owners": owners, "total": len(rows)})
+        return _json({"ok": True, "rows": rows, "owners": owners, "total": len(rows),
+                      "listings": [{"lid": k, "name": v} for k, v in sorted(listings.items(), key=lambda x: x[1] or "")]})
     b = await _read_body(request)
     apt = (b.get("apartment") or "").strip()
     if not apt:
@@ -26871,8 +26925,15 @@ async def _api_finance_owners(request):
         mgmt = round(float(b.get("mgmt_pct")), 2) if b.get("mgmt_pct") not in (None, "") else None
     except (TypeError, ValueError):
         mgmt = None
+    lid = None
+    if b.get("lid") not in (None, ""):
+        try:
+            lid = int(b.get("lid"))
+        except (TypeError, ValueError):
+            lid = None
     _owner_registry[k] = {"apartment": apt, "owner": (b.get("owner") or "").strip(),
-                          "mgmt_pct": mgmt, "cleaning": {"type": ctype, "amount": camt if ctype == "owner" else 0}}
+                          "mgmt_pct": mgmt, "lid": lid,
+                          "cleaning": {"type": ctype, "amount": camt if ctype == "owner" else 0}}
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "row": _owner_registry[k]})
 
@@ -26963,7 +27024,7 @@ async def _api_finance_bulk(request):
     if mode == "owner":
         owners = [o for o in (b.get("owners") or []) if o]
         for own in owners:
-            sub = [lid for lid, nm in listings.items() if (_owner_info(nm) or {}).get("owner") == own]
+            sub = _owner_lids(own, listings)        # explicit overrides + normalized auto-match
             reps = [await asyncio.to_thread(rep_for_lid, lid) for lid in sub]
             items.append({"label": own, "owner": own, "kind": "owner",
                           "report": _finance_aggregate(reps, own, start, end)})
