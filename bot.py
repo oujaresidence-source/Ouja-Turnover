@@ -10792,6 +10792,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="page-head">
           <div><div class="page-title" id="t_finance">🧾 المالية</div><div class="page-sub" id="t_finance_sub">تقرير شهري للمُلّاك</div></div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="finImportExpenses()" id="finImpBtn">⬇ <span id="t_fin_imp">استيراد مصاريف Hostaway</span></button>
             <button class="btn ghost sm" onclick="openOwnersTable()" id="finOwnersBtn">👥 <span id="t_fin_owners">المُلّاك والرسوم</span></button>
             <button class="btn ghost sm" onclick="openBulkPdf()" id="finBulkBtn">🧾 <span id="t_fin_bulk">PDF بالجملة</span></button>
             <button class="btn ghost sm" onclick="openEditStatement()" id="finEditBtn">✏️ <span id="t_fin_edit">تعديل البيان</span></button>
@@ -10805,6 +10806,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div class="ph-b">اختر الشقة والفترة وعبّي الحقول الاختيارية — المعاينة تتحدّث فوريًا. كل الأرقام من البيانات الفعلية (Hostaway + المصاريف المطابقة). أي دفعة Airbnb ناقصة يبيّنها التدقيق ولا تُخمّن أبدًا.</div>
         </div>
         <div id="financeOpsSummary"></div>
+        <div id="finLastImport" class="muted" style="font-size:11.5px;margin:0 0 10px"></div>
         <div class="fin-grid">
           <div class="card fin-form">
             <div class="fin-row"><label>الشقة / Apartment</label><select id="finUnit" onchange="financeLoadReport()"><option value="">—</option></select></div>
@@ -19174,13 +19176,32 @@ async function loadFinance(){
   const sel=document.getElementById('finUnit');
   if(sel && sel.options.length<=1){
     let d; try{ d=await api('/api/finance/units'); }catch(_){ d={units:[]}; }
-    D.finUnits=(d.units||[]);
+    D.finUnits=(d.units||[]); D.finLastImport=d.last_import||{};
     sel.innerHTML='<option value="">— اختر الشقة / pick apartment —</option>'+D.finUnits.map(function(u){return '<option value="'+u.lid+'">'+esc(u.name||('unit-'+u.lid))+'</option>';}).join('');
   }
   const s=document.getElementById('finStart'), e=document.getElementById('finEnd');
   if(s && !s.value){ var n=new Date(); s.value=new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10); e.value=new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().slice(0,10); }
   const iss=document.getElementById('finIssue'); if(iss && !iss.value) iss.value=new Date().toISOString().slice(0,10);
-  renderFinanceOpsSummary();
+  renderFinanceOpsSummary(); finRenderLastImport();
+}
+function finRenderLastImport(){
+  var el=document.getElementById('finLastImport'); if(!el) return;
+  var li=D.finLastImport||{}, ar=(L==='ar');
+  if(!li.at){ el.innerHTML=ar?'لم تُستورد مصاريف من Hostaway بعد.':'No Hostaway expense import yet.'; return; }
+  var when=String(li.at).replace('T',' ').slice(0,16);
+  el.innerHTML=(ar?'آخر استيراد من Hostaway: ':'Last Hostaway import: ')+'<b>'+esc(when)+'</b>'
+    +' · '+(ar?'جديد ':'new ')+fmt(li.imported||0)+' · '+(ar?'مطابق ':'matched ')+fmt(li.matched||0)+' · '+(ar?'إجمالي ':'total ')+fmt(li.total||0);
+}
+async function finImportExpenses(){
+  var btn=document.getElementById('finImpBtn'); if(btn){ btn.disabled=true; }
+  toast(L==='ar'?'⏳ نستورد المصاريف من Hostaway…':'⏳ Importing expenses from Hostaway…');
+  var r; try{ r=await post('/api/finance/import-expenses',{}); }catch(e){ toast('⚠ '+e); if(btn) btn.disabled=false; return; }
+  if(btn) btn.disabled=false;
+  if(!r||!r.ok){ toast('⚠ '+((r&&r.error)||'')); return; }
+  D.finLastImport=r.last_import||{at:new Date().toISOString(),imported:r.imported,matched:r.matched,total:r.total};
+  finRenderLastImport();
+  toast((L==='ar'?'تم · جديد ':'Done · new ')+(r.imported||0)+(L==='ar'?' · مطابق ':' · matched ')+(r.matched||0));
+  if(typeof financeLoadReport==='function' && (document.getElementById('finUnit')||{}).value) financeLoadReport();
 }
 function financeFields(){
   function v(id){ var x=document.getElementById(id); return x?(''+x.value).trim():''; }
@@ -20711,7 +20732,10 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
     if expenses is None:
         expenses = []
         for e in _expenses.values():
-            if e.get("status") == "posted" and (lid is None or e.get("listing_id") == lid):
+            # count expenses that are REAL in Hostaway (verified) — covers V4 'verified',
+            # legacy 'posted', and Hostaway-imported expenses. (Was status=='posted' only,
+            # which missed every V4-verified expense.)
+            if _exp_canonical_status(e) == "verified" and (lid is None or e.get("listing_id") == lid):
                 expenses.append({"id": e.get("id"), "apartment": e.get("apartment"),
                                  "lid": e.get("listing_id"), "amount": e.get("amount"),
                                  "date": e.get("expense_date"), "matched": True})
@@ -20726,6 +20750,79 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
         rep = _finance_apply_adjust(rep, adjust)
         rep["saved_adjust"] = adjust
     return rep
+
+_finance_last_import = {}     # {at, imported, matched, total} — persisted, shown on the Finance page
+
+def _finance_import_hostaway_expenses():
+    """Pull the expenses list from Hostaway and bring any we don't have into the ledger so the
+    owner statements reflect EVERYTHING in Hostaway (incl. expenses entered directly there).
+    Matches by Hostaway id, then by listing+amount+date; otherwise creates a verified ledger
+    record (source 'hostaway'). Records the last-import time. Read-from-Hostaway only; never
+    writes back to Hostaway. Never duplicates."""
+    items, ok, err = _exp_fetch_hostaway(force=True)
+    if not ok:
+        return {"ok": False, "error": err or "hostaway unreachable", "imported": 0, "matched": 0,
+                "total": 0, "last_import": _finance_last_import}
+    have_ids = set()
+    for e in _expenses.values():
+        hid = str(e.get("hostaway_expense_id") or e.get("hostaway_ref") or "")
+        if hid and _exp_has_real_hostaway_ref(e):
+            have_ids.add(hid)
+    new_n = matched_n = 0
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    for it in items:
+        hid = str(_exp_hostaway_item_id(it) or "")
+        if not hid:
+            continue
+        if hid in have_ids:
+            matched_n += 1
+            continue
+        lid = _exp_hostaway_item_lid(it)
+        amt = _exp_hostaway_item_amount(it)        # abs SAR
+        dt = _exp_hostaway_item_date(it)
+        # link to an existing unlinked ledger expense (same listing+amount+date) if present
+        link = None
+        for e in _expenses.values():
+            if _exp_has_real_hostaway_ref(e):
+                continue
+            try:
+                same_amt = amt is not None and abs(round(abs(float(e.get("amount") or 0)), 2) - amt) < 1
+            except (TypeError, ValueError):
+                same_amt = False
+            if e.get("listing_id") == lid and same_amt and (e.get("expense_date") or "")[:10] == dt:
+                link = e
+                break
+        if link is not None:
+            link["hostaway_expense_id"] = hid
+            link["hostaway_ref"] = hid
+            link["hostaway_verified"] = True
+            link["verified_at"] = now
+            link.setdefault("approval_status", "approved")
+            _exp_set_status(link, "verified", reason="hostaway_import", detail="linked from Hostaway")
+            matched_n += 1
+            have_ids.add(hid)
+            continue
+        # create a NEW ledger expense from a Hostaway-only expense (entered directly in Hostaway)
+        eid = _new_expense_id()
+        nm = (get_listings_map() or {}).get(lid) if lid is not None else None
+        concept = (it.get("concept") or it.get("name") or "Hostaway expense")
+        _expenses[eid] = {
+            "id": eid, "ref": _new_expense_ref(), "submission_id": eid,
+            "submitter": "Hostaway", "apartment": nm or (str(lid) if lid is not None else ""),
+            "listing_id": lid, "maintenance_type": "", "category": (it.get("categoryName") or ""),
+            "amount": amt, "expense_date": dt, "receipt_link": "", "vendor": "", "note": str(concept)[:240],
+            "submitted_at": now, "created_at": now, "status": "verified", "approval_status": "approved",
+            "hostaway_ref": hid, "hostaway_expense_id": hid, "hostaway_verified": True, "verified_at": now,
+            "source_kind": "hostaway", "events": [], "audit": [],
+        }
+        _exp4_log(_expenses[eid], "imported_from_hostaway", new="verified", detail="#" + hid)
+        new_n += 1
+        have_ids.add(hid)
+    _finance_last_import.clear()
+    _finance_last_import.update({"at": now, "imported": new_n, "matched": matched_n, "total": len(items)})
+    persist_state()
+    return {"ok": True, "imported": new_n, "matched": matched_n, "total": len(items),
+            "last_import": dict(_finance_last_import)}
 
 def _compute_revenue():
     reservations = get_reservations_cached()
@@ -26585,7 +26682,14 @@ async def _api_finance_units(request):
         out.append({"lid": u["id"], "name": u.get("name"), "owner": owner, "mgmt_pct": mgmt,
                     "cleaning": (info.get("cleaning") if info else None)})
     out.sort(key=lambda x: x["name"] or "")
-    return _json({"units": out})
+    return _json({"units": out, "last_import": dict(_finance_last_import)})
+
+async def _api_finance_import_expenses(request):
+    """Import the expenses list from Hostaway into the ledger (so statements reflect everything
+    in Hostaway). Read-from-Hostaway only; never writes back; never duplicates."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_finance_import_hostaway_expenses))
 
 async def _api_finance_owners(request):
     """GET → the owner+cleaning-fee registry (editable table; ?q= search).
@@ -29687,6 +29791,7 @@ async def start_web_server():
         app.router.add_get("/api/finance/owners", _api_finance_owners)
         app.router.add_post("/api/finance/owners", _api_finance_owners)
         app.router.add_post("/api/finance/bulk", _api_finance_bulk)
+        app.router.add_post("/api/finance/import-expenses", _api_finance_import_expenses)
         app.router.add_get("/api/finance/adjust", _api_finance_adjust)
         app.router.add_post("/api/finance/adjust", _api_finance_adjust)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
@@ -30181,6 +30286,8 @@ def load_state():
             print(f"owner registry: seeded {_n} apartments")
         _finance_adjust.clear()
         _finance_adjust.update(_load_json("finance_adjust.json", {}) or {})
+        _finance_last_import.clear()
+        _finance_last_import.update(_load_json("finance_last_import.json", {}) or {})
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -30267,6 +30374,7 @@ def persist_state():
     _save_json("finance_defaults.json", _finance_defaults)   # Stage 3 item 16
     _save_json("owner_registry.json", _owner_registry)
     _save_json("finance_adjust.json", _finance_adjust)
+    _save_json("finance_last_import.json", _finance_last_import)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
