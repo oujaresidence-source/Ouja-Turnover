@@ -10794,6 +10794,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div class="page-tools">
             <button class="btn ghost sm" onclick="openOwnersTable()" id="finOwnersBtn">👥 <span id="t_fin_owners">المُلّاك والرسوم</span></button>
             <button class="btn ghost sm" onclick="openBulkPdf()" id="finBulkBtn">🧾 <span id="t_fin_bulk">PDF بالجملة</span></button>
+            <button class="btn ghost sm" onclick="openEditStatement()" id="finEditBtn">✏️ <span id="t_fin_edit">تعديل البيان</span></button>
             <button class="btn ghost sm" onclick="financeSaveDefaults()" id="finSaveBtn">💾 <span id="t_fin_save">حفظ كافتراضي</span></button>
             <button class="btn primary sm" onclick="financeGeneratePdf()" id="finPdfBtn">⬇ PDF</button>
           </div>
@@ -19245,6 +19246,8 @@ function financeStatementHTML(){
     h+='<table><thead><tr><th>'+(ar?'التاريخ':'Date')+'</th><th class="num">'+(ar?'المبلغ':'Amount')+'</th></tr></thead><tbody>';
     h+=(r.exp_lines||[]).map(function(e){ return '<tr><td>'+esc(e.date||'')+'</td><td class="num">'+money(e.amount||0)+'</td></tr>'; }).join('')+'</tbody></table>';
   } else { h+='<div class="stmt-note">'+(ar?'لا مصاريف في هذي الفترة':'No expenses this period')+'</div>'; }
+  if(r.comment) h+='<div class="stmt-note"><b>'+(ar?'ملاحظة: ':'Note: ')+'</b>'+esc(r.comment)+'</div>';
+  if(r.adjusted) h+='<div class="stmt-note" style="color:#8B6320;font-size:11px">'+(ar?'• بيان معدّل يدويًا':'• Manually adjusted statement')+'</div>';
   h+=opt(f.closing,'<div class="stmt-note">'+esc(f.closing)+'</div>');
   h+=opt(f.pay_note,'<div class="stmt-note"><b>'+(ar?'ملاحظة الدفع: ':'Payment note: ')+'</b>'+esc(f.pay_note)+'</div>');
   h+=opt(f.notes,'<div class="stmt-note">'+esc(f.notes)+'</div>');
@@ -19346,6 +19349,73 @@ async function ownersAdd(){
   var apt=prompt(L==='ar'?'كود الشقة (مثل FD1):':'Apartment code (e.g. FD1):'); if(!apt) return;
   try{ await post('/api/finance/owners',{apartment:apt, owner:'', mgmt_pct:'', cleaning:{type:'ours',amount:0}}); }catch(e){ toast('⚠'); return; }
   await ownersReload('');
+}
+/* ===== Editable statement: edit/delete expense lines, add manual lines, comment ===== */
+var _finAdj=null;
+function openEditStatement(){
+  var r=D.finReport;
+  if(!r||r.error||!r.period){ toast(L==='ar'?'اعرض التقرير أول':'Show the report first'); return; }
+  var sv=r.saved_adjust||{};
+  _finAdj={lid:r.lid, start:r.period.start, end:r.period.end,
+           overrides:JSON.parse(JSON.stringify(sv.expense_overrides||{})),
+           extra:(sv.extra_lines||[]).slice(), comment:sv.comment||'',
+           raw:(r.exp_lines_raw||[])};
+  openDrawer(L==='ar'?'✏️ تعديل البيان':'✏️ Edit statement', esc(r.apartment||''));
+  finAdjRender();
+}
+function finAdjAddLine(){ if(_finAdj){ _finAdj.extra.push({label:'',amount:0,kind:'expense'}); finAdjRender(); } }
+function finAdjDelExtra(i){ if(_finAdj){ _finAdj.extra.splice(i,1); finAdjRender(); } }
+function finAdjRender(){
+  var ar=(L==='ar'), s=_finAdj;
+  var inp='padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
+  var money=function(x){ return fmt(x)+' ر.س'; };
+  // real expense lines: edit amount / delete
+  var exp='<div style="font-weight:700;font-size:12px;margin:4px 0 6px">'+(ar?'المصاريف الفعلية':'Actual expenses')+'</div>';
+  if((s.raw||[]).length){
+    exp+=s.raw.map(function(e,i){
+      var eid=String(e.id), ov=s.overrides[eid], del=(ov===null);
+      var val=(ov!==undefined&&ov!==null)?ov:e.amount;
+      return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;opacity:'+(del?'.5':'1')+'">'
+        +'<span class="muted" style="font-size:11px;flex:1">'+esc(e.date||'')+'</span>'
+        +'<input type="number" step="0.01" value="'+esc(val)+'" id="fadj_'+i+'" '+(del?'disabled':'')+' style="'+inp+';width:100px">'
+        +'<label class="muted" style="font-size:11px;display:flex;gap:3px;align-items:center"><input type="checkbox" '+(del?'checked':'')+' onchange="finAdjDel('+i+',&#39;'+esc(eid)+'&#39;,this.checked)"> '+(ar?'حذف':'del')+'</label></div>';
+    }).join('');
+  } else { exp+='<div class="muted" style="font-size:11.5px">'+(ar?'لا مصاريف':'none')+'</div>'; }
+  // manual adjustment lines
+  var extra='<div style="font-weight:700;font-size:12px;margin:12px 0 6px">'+(ar?'إضافات يدوية (دخل/مصروف)':'Manual lines (income/expense)')+'</div>';
+  extra+=(s.extra||[]).map(function(x,i){
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">'
+      +'<input value="'+esc(x.label||'')+'" oninput="_finAdj.extra['+i+'].label=this.value" placeholder="'+(ar?'الوصف':'label')+'" style="'+inp+';flex:1">'
+      +'<input type="number" step="0.01" value="'+esc(x.amount||0)+'" oninput="_finAdj.extra['+i+'].amount=this.value" style="'+inp+';width:90px">'
+      +'<select onchange="_finAdj.extra['+i+'].kind=this.value" style="'+inp+'"><option value="expense"'+(x.kind!=='income'?' selected':'')+'>'+(ar?'مصروف':'expense')+'</option><option value="income"'+(x.kind==='income'?' selected':'')+'>'+(ar?'دخل':'income')+'</option></select>'
+      +'<button class="btn ghost xs" onclick="finAdjDelExtra('+i+')">×</button></div>';
+  }).join('');
+  extra+='<button class="btn ghost sm" onclick="finAdjAddLine()" style="margin-top:4px">+ '+(ar?'أضف سطر':'Add line')+'</button>';
+  var comment='<div style="font-weight:700;font-size:12px;margin:12px 0 6px">'+(ar?'ملاحظة على البيان':'Statement comment')+'</div>'
+    +'<textarea id="fadjComment" rows="3" style="'+inp+';width:100%">'+esc(s.comment||'')+'</textarea>';
+  setDrawerBody(exp+extra+comment);
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button><button class="btn primary" onclick="finAdjSave()">'+(ar?'حفظ وعرض':'Save & show')+'</button>');
+}
+function finAdjDel(i, eid, on){
+  if(!_finAdj) return;
+  if(on){ _finAdj.overrides[eid]=null; } else { delete _finAdj.overrides[eid]; }
+  finAdjRender();
+}
+async function finAdjSave(){
+  if(!_finAdj) return; var s=_finAdj;
+  // capture edited amounts for non-deleted real lines
+  (s.raw||[]).forEach(function(e,i){
+    var eid=String(e.id); if(s.overrides[eid]===null) return;   // deleted
+    var el=document.getElementById('fadj_'+i); if(!el) return;
+    var v=parseFloat(el.value);
+    if(!isNaN(v) && v!==e.amount){ s.overrides[eid]=v; } else if(!isNaN(v) && v===e.amount){ delete s.overrides[eid]; }
+  });
+  var comment=(document.getElementById('fadjComment')||{}).value||'';
+  var extra=(s.extra||[]).filter(function(x){ return (x.label||'').trim() || parseFloat(x.amount); })
+                         .map(function(x){ return {label:(x.label||'').trim(), amount:parseFloat(x.amount)||0, kind:(x.kind==='income'?'income':'expense')}; });
+  try{ await post('/api/finance/adjust',{lid:s.lid, start:s.start, end:s.end, adjust:{expense_overrides:s.overrides, extra_lines:extra, comment:comment}}); }
+  catch(e){ toast('⚠ '+e); return; }
+  toast(L==='ar'?'حُفظ ✓':'Saved ✓'); closeDrawer(); financeLoadReport();
 }
 /* ===== Bulk owner-statement PDFs (per-apartment or per-owner) ===== */
 var _bulkPdf=null;
@@ -20576,10 +20646,59 @@ def normalize_reservation(r, listings=None):
         "extras": 0.0,
     }
 
-def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None, cleaning=None):
+_finance_adjust = {}     # "lid|start|end" -> {expense_overrides:{id:amt|None}, extra_lines:[{label,amount,kind}], comment}
+
+def _finance_adjust_key(lid, start, end):
+    return "%s|%s|%s" % (lid if lid is not None else "all", start, end)
+
+def _finance_apply_adjust(rep, adjust):
+    """Apply owner edits to a computed report: edit/delete real expense lines, add manual
+    income/expense lines, attach a comment. Recomputes expenses + owner_net. Predictable:
+    manual lines are post-fee adjustments (Ouja's % is never re-charged on them)."""
+    if not adjust:
+        return rep
+    ov = adjust.get("expense_overrides") or {}
+    lines, exp_total = [], 0.0
+    for e in rep.get("exp_lines", []):
+        eid = str(e.get("id"))
+        if eid in ov:
+            v = ov[eid]
+            if v is None:
+                continue                                   # deleted line
+            e = dict(e)
+            try:
+                e["amount"] = round(float(v), 2)
+            except (TypeError, ValueError):
+                pass
+            e["edited"] = True
+        exp_total += float(e.get("amount") or 0)
+        lines.append(e)
+    extra_income = 0.0
+    for x in (adjust.get("extra_lines") or []):
+        try:
+            amt = round(float(x.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            amt = 0.0
+        if x.get("kind") == "expense":
+            exp_total += amt
+            lines.append({"id": "adj", "date": (x.get("label") or "تعديل"), "amount": amt, "manual": True})
+        else:
+            extra_income += amt
+    rep["exp_lines"] = lines
+    rep["expenses"] = round(exp_total, 2)
+    rep["total_income"] = round(float(rep.get("total_income") or 0) + extra_income, 2)
+    rep["owner_net"] = round(rep["total_income"] - float(rep.get("ouja_fee") or 0) - exp_total
+                             - float((rep.get("cleaning") or {}).get("total") or 0), 2)
+    rep["adjusted"] = True
+    rep["comment"] = adjust.get("comment") or ""
+    rep["extra_lines"] = adjust.get("extra_lines") or []
+    return rep
+
+def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None, cleaning=None, adjust=None):
     """Stage 3 wiring: pull this unit's Hostaway reservations + matched expenses and run the
     verified math. lid=None → portfolio-wide. Never invents a number. Pulls the owner /
-    management % / cleaning policy from the owner registry (explicit args override it)."""
+    management % / cleaning policy from the owner registry (explicit args override it).
+    `adjust` applies the owner's saved statement edits on top."""
     listings = get_listings_map() or {}
     aptname = (listings.get(lid) if lid is not None else None)
     info = _owner_info(aptname) if aptname else None
@@ -20600,6 +20719,12 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
     rep["apartment"] = aptname
     rep["lid"] = lid
     rep["owner"] = (info.get("owner") if info else "") or _unit_owners.get(aptname, "")
+    rep["exp_lines_raw"] = [dict(e) for e in rep.get("exp_lines", [])]   # original lines, for the editor
+    if adjust is None:
+        adjust = _finance_adjust.get(_finance_adjust_key(lid, start.isoformat(), end.isoformat()))
+    if adjust:
+        rep = _finance_apply_adjust(rep, adjust)
+        rep["saved_adjust"] = adjust
     return rep
 
 def _compute_revenue():
@@ -26547,6 +26672,27 @@ def _finance_aggregate(reps, owner, start, end):
             "owner_net": tot("owner_net"), "apartments": parts,
             "reconciliation": {"balanced": balanced}, "n_apartments": len(reps)}
 
+async def _api_finance_adjust(request):
+    """GET ?lid&start&end → saved statement edits; POST {lid,start,end,adjust} → save / clear."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        k = _finance_adjust_key(request.query.get("lid") or "all", request.query.get("start", ""), request.query.get("end", ""))
+        return _json({"ok": True, "adjust": _finance_adjust.get(k, {})})
+    b = await _read_body(request)
+    k = _finance_adjust_key(b.get("lid") if b.get("lid") not in (None, "") else "all",
+                            b.get("start", ""), b.get("end", ""))
+    adj = b.get("adjust") or {}
+    has = bool(adj.get("expense_overrides") or adj.get("extra_lines") or (adj.get("comment") or "").strip())
+    if has:
+        _finance_adjust[k] = {"expense_overrides": adj.get("expense_overrides") or {},
+                              "extra_lines": [x for x in (adj.get("extra_lines") or []) if isinstance(x, dict)][:50],
+                              "comment": (adj.get("comment") or "")[:1000]}
+    else:
+        _finance_adjust.pop(k, None)
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True})
+
 async def _api_finance_bulk(request):
     """Build owner statements for MANY targets at once (for the bulk PDF). POST:
     {mode:'apartment'|'owner', lids:[...] | owners:[...], start, end}. Per-owner aggregates
@@ -29541,6 +29687,8 @@ async def start_web_server():
         app.router.add_get("/api/finance/owners", _api_finance_owners)
         app.router.add_post("/api/finance/owners", _api_finance_owners)
         app.router.add_post("/api/finance/bulk", _api_finance_bulk)
+        app.router.add_get("/api/finance/adjust", _api_finance_adjust)
+        app.router.add_post("/api/finance/adjust", _api_finance_adjust)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
@@ -30031,6 +30179,8 @@ def load_state():
         _n = _owner_seed_if_empty()          # first run → seed from the owner's file (38 apartments)
         if _n:
             print(f"owner registry: seeded {_n} apartments")
+        _finance_adjust.clear()
+        _finance_adjust.update(_load_json("finance_adjust.json", {}) or {})
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -30116,6 +30266,7 @@ def persist_state():
     _save_json("unit_owners.json", _unit_owners)
     _save_json("finance_defaults.json", _finance_defaults)   # Stage 3 item 16
     _save_json("owner_registry.json", _owner_registry)
+    _save_json("finance_adjust.json", _finance_adjust)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
     _save_json("pmo_projects.json", _pmo_projects)
