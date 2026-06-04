@@ -19294,26 +19294,9 @@ async function financeSaveDefaults(){
   try{ await post('/api/finance/defaults',{key:key, defaults:financeFields()}); toast('💾 '+(L==='ar'?'حُفظ كافتراضي':'Saved as default')); }catch(e){ toast('خطأ'); }
 }
 function financeGeneratePdf(){
-  const prev=document.getElementById('financePreview');
-  if(!prev || !D.finReport || D.finReport.error || !D.finReport.period){ toast(L==='ar'?'اعرض التقرير أول':'Show the report first'); return; }
-  const w=window.open('','_blank'); if(!w){ toast(L==='ar'?'اسمح بالنوافذ المنبثقة':'Allow pop-ups'); return; }
-  const css='*{box-sizing:border-box}body{font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:#1A1815;margin:0}'
-    +'.stmt{padding:44px 46px;max-width:760px;margin:0 auto}.stmt-cover{border-bottom:2px solid #A37728;padding-bottom:18px;margin-bottom:22px}'
-    +'.stmt-brand{font-weight:800;letter-spacing:1px;color:#8B6320;font-size:13px}.stmt-h1{font-size:25px;font-weight:800;margin:12px 0 4px;letter-spacing:-.3px}'
-    +'.stmt-meta{color:#8C8475;font-size:12px}.stmt-sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#8B6320;margin:24px 0 8px}'
-    +'table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:start;color:#8C8475;font-size:10.5px;font-weight:600;padding:6px 8px;border-bottom:1px solid #E8E2D5}'
-    +'td{padding:7px 8px;border-bottom:1px solid #EDE8DC}.num{text-align:end;font-variant-numeric:tabular-nums}'
-    +'.stmt-sum{background:#F7F4EE;border-radius:12px;padding:16px 18px;margin:6px 0}.stmt-sum-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}'
-    +'.stmt-sum-row.total{border-top:2px solid #A37728;margin-top:6px;padding-top:10px;font-weight:800;font-size:15px;color:#8B6320}'
-    +'.stmt-note{font-size:12.5px;color:#544D43;line-height:1.75;margin:14px 0}.stmt-sign{margin-top:28px;font-size:12.5px}'
-    +'.stmt-foot{margin-top:24px;border-top:1px solid #E8E2D5;padding-top:10px;font-size:11px;color:#8C8475;text-align:center}'
-    +'.stmt-to{font-size:14px;margin:16px 0 2px}.stmt-to b{color:#8B6320}.recon-bad{color:#C44343}.muted{color:#8C8475}';
-  const dir=(L==='ar')?'rtl':'ltr';
-  w.document.write('<!doctype html><html dir="'+dir+'" lang="'+(L==='ar'?'ar':'en')+'"><head><meta charset="utf-8"><title>Ouja Statement</title>'
-    +'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700;800&display=swap" rel="stylesheet">'
-    +'<style>'+css+'</style></head><body>'+financeStatementHTML()+'</body></html>');
-  w.document.close();
-  setTimeout(function(){ try{ w.focus(); w.print(); }catch(_){ } }, 700);
+  var r=D.finReport;
+  if(!r || r.error || !r.period){ toast(L==='ar'?'اعرض التقرير أول':'Show the report first'); return; }
+  stmtDownload([{label:(r.apartment||''), owner:(r.owner||''), report:r}]);   // elevated single PDF
 }
 /* ===== Owners & cleaning-fee registry (editable table) ===== */
 async function openOwnersTable(){
@@ -19485,7 +19468,121 @@ async function bulkGenerate(){
   toast(L==='ar'?'⏳ نجهّز التقارير…':'⏳ Generating…');
   var r; try{ r=await post('/api/finance/bulk',body); }catch(e){ toast('⚠ '+e); return; }
   if(!r||!r.items||!r.items.length){ toast(L==='ar'?'ما فيه بيانات':'No data'); return; }
-  bulkPrint(r.items);
+  closeDrawer(); stmtDownload(r.items);
+}
+/* ===== Elevated PDF statement + client-side per-file PDF/ZIP engine ===== */
+function _loadScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('load '+src)); }; document.head.appendChild(s); }); }
+var _pdfLibsP=null;
+function loadPdfLibs(){
+  if(_pdfLibsP) return _pdfLibsP;
+  _pdfLibsP=Promise.all([
+    (window.html2pdf?Promise.resolve():_loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js')),
+    (window.JSZip?Promise.resolve():_loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'))
+  ]);
+  return _pdfLibsP;
+}
+function stmtFilename(it){
+  var raw=((it.label||'statement')+' - '+(it.owner||'')), bad='/:*?<>|'+String.fromCharCode(92)+String.fromCharCode(34), out='';
+  for(var i=0;i<raw.length;i++){ var c=raw.charAt(i); out+=(bad.indexOf(c)>=0?'-':c); }
+  return (out.trim()||'statement')+'.pdf';
+}
+function stmtDocHTML(r, label, kind){
+  if(!r) return '';
+  var ar=(L==='ar'), cur=r.currency||'SAR', M=function(x){ return fmt(x||0)+' '+cur; };
+  var G='#A37728', G2='#8B6320', INK='#1A1815', MUT='#8C8475', LINE='#E8E2D5', CREAM='#FAF7F0', SUR='#FFFFFF';
+  var pl=r.period?(r.period.start+'  →  '+r.period.end):'';
+  var clean=r.cleaning||{}; var cleanTxt = (clean.type==='owner') ? ((ar?'يدفعها المالك · ':'owner pays · ')+M(clean.amount)+(clean.cleans!=null?(' × '+clean.cleans):'')) : (ar?'على عوجا (مشمولة)':'on Ouja (included)');
+  function row(l,v,strong,neg){ return '<tr><td style="padding:9px 4px;color:'+(strong?INK:MUT)+';font-size:'+(strong?'14px':'12.5px')+';font-weight:'+(strong?'800':'500')+'">'+l+'</td><td style="padding:9px 4px;text-align:end;font-variant-numeric:tabular-nums;color:'+(neg?'#B23B3B':(strong?G2:INK))+';font-size:'+(strong?'15px':'13px')+';font-weight:'+(strong?'800':'600')+'">'+(neg?'− ':'')+v+'</td></tr>'; }
+  var meta='<div style="display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:10px">';
+  function chip(k,v){ return '<div><div style="font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:'+MUT+'">'+k+'</div><div style="font-size:13px;font-weight:700;color:'+INK+'">'+esc(v)+'</div></div>'; }
+  meta+=chip(ar?'المالك':'Owner', r.owner||'—');
+  meta+=chip(ar?'العقار':'Property', label||r.apartment||'—');
+  meta+=chip(ar?'نسبة الإدارة':'Management', (r.management_pct!=null?r.management_pct+'%':'—'));
+  meta+=chip(ar?'النظافة':'Cleaning', cleanTxt);
+  meta+=chip(ar?'الفترة':'Period', pl);
+  meta+='</div>';
+  var h='<div class="ojstmt" style="width:760px;background:'+SUR+';color:'+INK+';font-family:inherit;padding:0;margin:0 auto;direction:'+(ar?'rtl':'ltr')+'">';
+  h+='<div style="background:'+CREAM+';border-bottom:3px solid '+G+';padding:30px 40px 22px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start"><div>'
+    +'<div style="font-weight:800;letter-spacing:2px;color:'+G2+';font-size:13px">OUJA RESIDENCE · عوجا</div>'
+    +'<div style="font-size:26px;font-weight:800;letter-spacing:-.3px;margin-top:8px">'+(ar?'كشف حساب المالك':'Owner Statement')+'</div></div>'
+    +'<div style="text-align:'+(ar?'left':'right')+';font-size:11px;color:'+MUT+'">'+(ar?'تاريخ الإصدار':'Issued')+'<br><b style="color:'+INK+'">'+esc(new Date().toISOString().slice(0,10))+'</b></div></div>'
+    +meta+'</div>';
+  // summary box
+  h+='<div style="padding:22px 40px 6px"><div style="background:'+CREAM+';border:1px solid '+LINE+';border-radius:14px;padding:18px 22px">'
+    +'<table style="width:100%;border-collapse:collapse">'
+    +row(ar?'إجمالي الدخل':'Total income', M(r.total_income))
+    +row(ar?('رسوم عوجا ('+(r.management_pct||0)+'%)'):('Ouja fee ('+(r.management_pct||0)+'%)'), M(r.ouja_fee), false, true)
+    +row(ar?'المصاريف':'Expenses', M(r.expenses), false, true)
+    +((clean.total)?row(ar?'النظافة':'Cleaning', M(clean.total), false, true):'')
+    +'<tr><td colspan="2" style="border-top:2px solid '+G+';padding-top:2px"></td></tr>'
+    +row(ar?'صافي المالك':'Owner net', M(r.owner_net), true)
+    +'</table></div></div>';
+  // income breakdown
+  h+='<div style="padding:8px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:14px 0 6px">'+(ar?'تفصيل الدخل':'Income breakdown')+'</div>'
+    +'<table style="width:100%;border-collapse:collapse">'
+    +row(ar?'دخل Airbnb (دفعات)':'Airbnb (payouts)', M(r.income_airbnb))
+    +row(ar?'دخل مباشر (−٣٪)':'Direct (−3%)', M(r.income_direct))
+    +((r.extras)?row(ar?'إضافات':'Extras', M(r.extras)):'')+'</table></div>';
+  // reservations table (detailed)
+  var rl=r.resv_lines||[];
+  if(rl.length){
+    h+='<div style="padding:6px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:16px 0 6px">'+(ar?'الحجوزات':'Reservations')+' ('+rl.length+')</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr>'
+      +'<th style="text-align:start;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'القناة':'Channel')+'</th>'
+      +'<th style="text-align:start;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الدخول':'Check-in')+'</th>'
+      +'<th style="text-align:start;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'ليالٍ':'Nights')+'</th>'
+      +'<th style="text-align:end;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>'
+      +rl.map(function(l){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.channel||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.checkin||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+(l.nights||'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+(l.income==null?'—':M(l.income))+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+  }
+  // expenses table (detailed)
+  var el=r.exp_lines||[];
+  h+='<div style="padding:6px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:16px 0 6px">'+(ar?'المصاريف':'Expenses')+' ('+el.length+')</div>';
+  if(el.length){
+    h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px"><tbody>'
+      +el.map(function(e){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(e.date||e.note||'')+(e.manual?' ·':'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+M(e.amount)+'</td></tr>'; }).join('')
+      +'</tbody></table>';
+  } else { h+='<div style="font-size:11.5px;color:'+MUT+'">'+(ar?'لا مصاريف في هذي الفترة':'No expenses this period')+'</div>'; }
+  h+='</div>';
+  // per-apartment breakdown for owner-aggregate
+  if(r.apartments && r.apartments.length){
+    h+='<div style="padding:6px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:16px 0 6px">'+(ar?'حسب الشقة':'By apartment')+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="text-align:start;color:'+MUT+';padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الشقة':'Apartment')+'</th><th style="text-align:end;color:'+MUT+';padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الدخل':'Income')+'</th><th style="text-align:end;color:'+MUT+';padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الصافي':'Net')+'</th></tr></thead><tbody>'
+      +r.apartments.map(function(a){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(a.apartment||'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0">'+M(a.total_income)+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-weight:700">'+M(a.owner_net)+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+  }
+  if(r.comment) h+='<div style="padding:10px 40px 0"><div style="background:'+CREAM+';border-inline-start:3px solid '+G+';border-radius:8px;padding:12px 14px;font-size:12px;color:#544D43">'+esc(r.comment)+'</div></div>';
+  h+='<div style="padding:18px 40px 30px;margin-top:14px;border-top:1px solid '+LINE+';color:'+MUT+';font-size:10px;text-align:center">'
+    +(ar?'كل الأرقام من بيانات فعلية (Hostaway + المصاريف المتحقّقة). عوجا ريزيدنس.':'All figures from real data (Hostaway + verified expenses). Ouja Residence.')
+    +(r.adjusted?(' · '+(ar?'معدّل يدويًا':'manually adjusted')):'')+'</div>';
+  return h+'</div>';
+}
+function stmtNode(it){
+  var d=document.createElement('div');
+  d.style.cssText='position:fixed;left:-9999px;top:0;width:760px;background:#fff';
+  d.innerHTML=stmtDocHTML(it.report, it.label, it.kind);
+  return d;
+}
+async function stmtDownload(items){
+  if(!items||!items.length){ toast(L==='ar'?'ما فيه بيانات':'No data'); return; }
+  try{ await loadPdfLibs(); }catch(e){ toast(L==='ar'?'تعذّر تحميل مكتبة PDF — نفتح للطباعة':'PDF lib failed — opening print'); bulkPrint(items); return; }
+  if(!window.html2pdf){ bulkPrint(items); return; }
+  var opt={margin:[6,0,6,0], image:{type:'jpeg',quality:0.97}, html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy']}};
+  if(items.length===1){
+    var el=stmtNode(items[0]); document.body.appendChild(el);
+    try{ await html2pdf().set(opt).from(el.firstChild).save(stmtFilename(items[0])); } finally{ el.remove(); }
+    toast(L==='ar'?'تم تنزيل الملف ✓':'Downloaded ✓'); return;
+  }
+  var zip=new JSZip();
+  for(var i=0;i<items.length;i++){
+    toast((L==='ar'?'تجهيز ':'building ')+(i+1)+'/'+items.length);
+    var node=stmtNode(items[i]); document.body.appendChild(node);
+    try{ var blob=await html2pdf().set(opt).from(node.firstChild).outputPdf('blob'); zip.file(stmtFilename(items[i]), blob); } finally{ node.remove(); }
+  }
+  var content=await zip.generateAsync({type:'blob'});
+  var url=URL.createObjectURL(content), a=document.createElement('a'); a.href=url; a.download='ouja-statements.zip'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  toast(L==='ar'?('تم · '+items.length+' ملف PDF في ZIP'):('Done · '+items.length+' PDFs in a ZIP'));
 }
 function bulkStatementHTML(r,label,kind){
   if(!r) return '';
