@@ -19253,7 +19253,7 @@ function financeStatementHTML(){
   h+=sr(ar?('رسوم عوجا ('+r.management_pct+'%)'):('Ouja fee ('+r.management_pct+'%)'),'−'+money(r.ouja_fee));
   h+=sr(ar?'المصاريف':'Expenses','−'+money(r.expenses));
   if(r.cleaning){
-    if(r.cleaning.type==='owner') h+=sr(ar?('النظافة ('+r.cleaning.cleans+' × '+fmt(r.cleaning.amount)+')'):('Cleaning ('+r.cleaning.cleans+' × '+fmt(r.cleaning.amount)+')'),'−'+money(r.cleaning.total));
+    if(r.cleaning.type==='owner'){ var _cm=r.cleaning.months||1; h+=sr(ar?('النظافة (شهري'+(_cm>1?(' × '+_cm):'')+')'):('Cleaning (monthly'+(_cm>1?(' × '+_cm):'')+')'),'−'+money(r.cleaning.total)); }
     else h+=sr(ar?'النظافة (علينا)':'Cleaning (on us)', money(0));
   }
   h+=sr(ar?'صافي المالك':'Owner net',money(r.owner_net),'total')+'</div>';
@@ -20786,10 +20786,11 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
     exp_lines = [e for e in expenses if e.get("matched")
                  and _finance_in_period({"checkin": e.get("date"), "checkout": e.get("date")}, start, end, "checkin")]
     expenses_total = sum(float(e.get("amount") or 0) for e in exp_lines)
-    # cleaning fee: owner-pays → amount × number of stays (turnovers) in the period; 'ours' → 0
+    # cleaning fee: owner-pays → a FLAT MONTHLY amount × number of months in the period
+    # (CONFIRMED by Faisal: it's monthly, not per-turnover); 'ours' → 0
     cl = cleaning or {"type": "ours", "amount": 0}
-    cleans = len(resv_lines)
-    cleaning_total = (float(cl.get("amount") or 0) * cleans) if (cl.get("type") == "owner") else 0.0
+    months = max(1, (end.year - start.year) * 12 + (end.month - start.month) + 1)
+    cleaning_total = (float(cl.get("amount") or 0) * months) if (cl.get("type") == "owner") else 0.0
     owner_net = total_income - ouja_fee - expenses_total - cleaning_total
 
     # ---- reconciliation (item 14): totals must equal the sum of the rows, to the riyal ----
@@ -20802,7 +20803,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "total_income": R(total_income), "management_pct": float(management_pct),
         "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
         "cleaning": {"type": cl.get("type", "ours"), "amount": R(float(cl.get("amount") or 0)),
-                     "cleans": cleans, "total": R(cleaning_total)},
+                     "months": months, "total": R(cleaning_total)},
         "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines)},
         "resv_lines": resv_lines, "exp_lines": exp_lines,
         "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout,
@@ -21099,7 +21100,8 @@ def _pdf_statement_bytes(rep, label):
         period.get("end", ""), period.get("start", ""))
     pdf.cell(usable, 5, shape(meta), align="R")
     cl = rep.get("cleaning") or {}
-    clean_txt = ("النظافة: يدفعها المالك · %s/تنظيف × %s" % (_n(cl.get("amount") or 0), cl.get("cleans") if cl.get("cleans") is not None else "—")) if cl.get("type") == "owner" else "النظافة: على عوجا (مشمولة)"
+    _cm = cl.get("months") or 1
+    clean_txt = ("النظافة: يدفعها المالك · %s/شهر%s" % (_n(cl.get("amount") or 0), (" × %s" % _cm) if _cm > 1 else "")) if cl.get("type") == "owner" else "النظافة: على عوجا (مشمولة)"
     pdf.set_xy(M, 33); pdf.cell(usable, 5, shape(clean_txt), align="R")
     pdf.set_y(54)
     # ---- row helper (label right, value left) ----
@@ -27198,7 +27200,9 @@ def _finance_aggregate(reps, owner, start, end):
              for r in reps]
     cleaning_total = R(sum((r.get("cleaning") or {}).get("total", 0) for r in reps))
     balanced = all((r.get("reconciliation") or {}).get("balanced") for r in reps) if reps else True
-    return {"currency": "SAR", "owner": owner,
+    ti = tot("total_income"); fee = tot("ouja_fee")
+    blended = round(fee / ti * 100, 1) if ti else None     # owners can differ per apartment → blended effective %
+    return {"currency": "SAR", "owner": owner, "management_pct": blended,
             "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
             "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
             "extras": tot("extras"), "total_income": tot("total_income"), "ouja_fee": tot("ouja_fee"),
