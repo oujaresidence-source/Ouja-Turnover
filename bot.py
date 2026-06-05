@@ -11985,7 +11985,8 @@ const T = {
     ct_sub:'اختر الشقق اللي يغطيها الفريق الداخلي. لها قنوات تسليم خاصة بالإنجليزية في Discord (اليوم + بكرة)، وجدول يومي مرتّب: تسجيل الدخول اليوم أولاً.',
     ct_assigned:'معيّنة', ct_apply:'⚡ تطبيق / تحديث القنوات', ct_apply_hint:'ينشئ/يعيد تسمية قنوات تسليم اليوم وبكرة فوراً (بدون انتظار ١٢ ص).',
     ct_none:'ما فيه شقق معيّنة بعد — فعّل الخانة جنب أي شقة تحت.', ct_search:'ابحث…', ct_applied:'تم —', ct_changed:'قناة محدّثة', ct_no_change:'القنوات محدّثة — ما فيه جديد.', ct_need_pull:'اسحب الشقق من Hostaway أول (من صفحة الشقق).',
-    ct_route_copy:'نسخ رابط خطة Oujact', ct_route_copied:'نُسخ رابط المسار ✓', ct_missing_map:'رابط الخرائط ناقص', ct_maps_ph:'الصق رابط Google Maps للشقة', ct_dispatch:'خطة اليوم', ct_no_token:'ضع OUJACT_ROUTE_TOKEN (أو CLEANING_TOKEN) في Railway أول', ct_urgent:'عاجلة', ct_open_route:'افتح صفحة المسار',
+    ct_route_copy:'نسخ رابط خطة Oujact', ct_route_copied:'نُسخ رابط المسار ✓', ct_missing_map:'الإحداثيات ناقصة', ct_maps_ph:'الصق رابط Google Maps للشقة', ct_dispatch:'خطة اليوم', ct_no_token:'ضع OUJACT_ROUTE_TOKEN (أو CLEANING_TOKEN) في Railway أول', ct_urgent:'عاجلة', ct_open_route:'افتح صفحة المسار',
+    ct_geo_ph:'ابحث باسم الشقة أو العنوان', ct_geo_save:'🔎 ابحث واحفظ الإحداثيات', ct_geo_ok:'إحداثيات محفوظة', ct_geo_need:'ابحث واحفظ الإحداثيات عشان ETA يشتغل', ct_geo_saved:'تم حفظ الإحداثيات ✓',
     exp_sync:'تحديث المزامنة', exp_status:'حالة المزامنة',
     exp_v2:'المصاريف V2', exp_reconcile_repair:'مطابقة وإصلاح',
     exp_three_source:'تحليل المصادر الثلاثة',
@@ -12235,7 +12236,8 @@ const T = {
     ct_sub:'Pick the apartments the in-house team covers. They get dedicated English turnover channels in Discord (today + tomorrow) and a daily ordered schedule — same-day check-ins first.',
     ct_assigned:'assigned', ct_apply:'⚡ Apply / Refresh channels', ct_apply_hint:'Creates/renames today + tomorrow channels right now (no waiting for 12 AM).',
     ct_none:'No apartments assigned yet — tick the box next to any unit below.', ct_search:'Search…', ct_applied:'Done —', ct_changed:'channels updated', ct_no_change:'Channels up to date — nothing changed.', ct_need_pull:'Pull listings from Hostaway first (Listings page).',
-    ct_route_copy:'Copy Oujact Route Link', ct_route_copied:'Route link copied ✓', ct_missing_map:'Missing Google Maps link', ct_maps_ph:'Paste the apartment Google Maps link', ct_dispatch:"Today's dispatch", ct_no_token:'Set OUJACT_ROUTE_TOKEN (or CLEANING_TOKEN) in Railway first', ct_urgent:'urgent', ct_open_route:'Open route page',
+    ct_route_copy:'Copy Oujact Route Link', ct_route_copied:'Route link copied ✓', ct_missing_map:'Missing coordinates', ct_maps_ph:'Paste the apartment Google Maps link', ct_dispatch:"Today's dispatch", ct_no_token:'Set OUJACT_ROUTE_TOKEN (or CLEANING_TOKEN) in Railway first', ct_urgent:'urgent', ct_open_route:'Open route page',
+    ct_geo_ph:'Search by apartment name or address', ct_geo_save:'🔎 Find + save coordinates', ct_geo_ok:'Coordinates saved', ct_geo_need:'Find and save coordinates so ETA works', ct_geo_saved:'Coordinates saved ✓',
     exp_sync:'Refresh sync', exp_status:'Sync status',
     exp_v2:'Expenses V2', exp_reconcile_repair:'Reconcile & Repair',
     exp_three_source:'Three-source analysis',
@@ -14386,15 +14388,41 @@ function renderOujact(){
       +'<input type="checkbox" '+(u.oujact?'checked':'')+' onchange="listingsSetField('+u.id+',&#39;oujact&#39;,this.checked)" style="accent-color:var(--gold);width:16px;height:16px;cursor:pointer">'
       +'<span style="font-weight:600">'+esc(u.internal_name||('#'+u.id))+'</span>'
       +'<span class="muted" style="font-size:11px">'+esc(u.public_name||'')+'</span>'
-      +(u.oujact&&u.missing_maps?'<span class="chip" style="margin-inline-start:auto;background:var(--gold-tint);color:var(--gold);font-size:10px;padding:2px 7px;border-radius:99px">⚠ '+esc(t().ct_missing_map)+'</span>':dir)
+      +(u.oujact&&u.missing_maps?'<span class="chip" style="margin-inline-start:auto;background:var(--gold-tint);color:var(--gold);font-size:10px;padding:2px 7px;border-radius:99px">⚠ '+esc(t().ct_missing_map)+'</span>':(u.oujact?'<span class="chip" style="margin-inline-start:auto;background:rgba(65,160,105,.14);color:#3e9665;font-size:10px;padding:2px 7px;border-radius:99px">✓ '+esc(t().ct_geo_ok)+'</span>':dir))
       +'</label>';
-    // assigned apartments get an inline Google Maps link field
+    // assigned apartments get both a safe coordinate search and the legacy Google Maps link field.
     if(u.oujact){
-      row+='<div style="padding:0 6px 9px 32px;border-bottom:1px solid var(--border)"><input type="text" value="'+esc(u.maps_link||'')+'" placeholder="'+esc(t().ct_maps_ph)+'" onchange="listingsSetField('+u.id+',&#39;maps_link&#39;,this.value)" style="width:100%;padding:6px 9px;font-size:11.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;color:var(--text)"></div>';
+      var geoVal = u.maps_query || u.maps_address || u.address || u.internal_name || '';
+      var coord = (u.lat!=null&&u.lng!=null) ? (Number(u.lat).toFixed(5)+', '+Number(u.lng).toFixed(5)) : t().ct_geo_need;
+      row+='<div style="padding:0 6px 9px 32px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px">'
+        +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+          +'<input id="geo_'+u.id+'" type="text" value="'+esc(geoVal)+'" placeholder="'+esc(t().ct_geo_ph)+'" style="flex:1;min-width:190px;padding:6px 9px;font-size:11.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;color:var(--text)">'
+          +'<button class="btn sm" onclick="listingsGeocode('+u.id+')" style="height:32px">'+esc(t().ct_geo_save)+'</button>'
+        +'</div>'
+        +'<div class="muted" style="font-size:10.5px">'+esc(coord)+'</div>'
+        +'<input type="text" value="'+esc(u.maps_link||'')+'" placeholder="'+esc(t().ct_maps_ph)+'" onchange="listingsSetField('+u.id+',&#39;maps_link&#39;,this.value)" style="width:100%;padding:6px 9px;font-size:11.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;color:var(--text)">'
+      +'</div>';
     } else { row='<div style="border-bottom:1px solid var(--border)">'+row+'</div>'; }
     return row;
   }).join('')+'</div>';
   renderOujactDispatch();
+}
+
+async function listingsGeocode(id){
+  var inp=document.getElementById('geo_'+id);
+  var q=(inp&&inp.value||'').trim();
+  if(!q){ toast(t().ct_geo_need); return; }
+  toast('⏳ Google Maps…');
+  var r=await post('/api/listings/geocode', {id:id, query:q});
+  if(r && r.ok){
+    var rows=_lsRows();
+    for(var i=0;i<rows.length;i++){ if(rows[i].id===id){ if(r.row) rows[i]=r.row; break; } }
+    renderOujact();
+    if(view==='listings') renderListings();
+    toast(t().ct_geo_saved);
+  } else {
+    toast((r&&r.error)||'Google Maps error');
+  }
 }
 async function renderOujactDispatch(){
   var el=document.getElementById('oujactDispatch'); if(!el) return;
@@ -30177,13 +30205,17 @@ def _ls_row_view(rec):
         # Oujact dispatch config (append-safe; absent on old records → sensible defaults)
         "maps_link": rec.get("maps_link") or "",
         "lat": rec.get("lat"), "lng": rec.get("lng"),
+        "maps_query": rec.get("maps_query") or "",
+        "maps_address": rec.get("maps_address") or "",
+        "maps_place_id": rec.get("maps_place_id") or "",
         "access_notes": rec.get("access_notes") or "",
         "parking_notes": rec.get("parking_notes") or "",
         "clean_min": rec.get("clean_min") or OUJACT_CLEAN_MIN,
         "clean_max": rec.get("clean_max") or OUJACT_CLEAN_MAX,
         "park_buffer": rec.get("park_buffer") if rec.get("park_buffer") is not None else OUJACT_PARK_BUFFER,
         "discord_channel": rec.get("discord_channel") or "",
-        "missing_maps": bool(rec.get("oujact")) and not (rec.get("maps_link") or "").strip(),
+        "missing_maps": bool(rec.get("oujact")) and (
+            rec.get("lat") is None or rec.get("lng") is None) and not _extract_latlng(rec.get("maps_link") or ""),
     }
 
 async def _api_listings_list(request):
@@ -30265,6 +30297,53 @@ async def _api_listings_update(request):
                 pass
     _ls_save()
     return _json({"ok": True, "row": _ls_row_view(rec)})
+
+async def _api_listings_geocode(request):
+    """Resolve an Oujact apartment search/address to exact coordinates and save them locally."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if not GOOGLE_MAPS_API_KEY:
+        return _json({"error": "google_maps_key_missing"}, 400)
+    b = await _read_body(request)
+    rec = _ls_get()["listings"].get(str(b.get("id") or ""))
+    if not rec:
+        return _json({"error": "unknown listing"}, 404)
+    q = str(b.get("query") or "").strip()
+    if not q:
+        q = " ".join([str(rec.get("internal_name") or ""), str(rec.get("address") or ""), "Riyadh Saudi Arabia"]).strip()
+    if len(q) < 3:
+        return _json({"error": "search_required"}, 400)
+    try:
+        resp = requests.get("https://maps.googleapis.com/maps/api/geocode/json",
+                            params={"address": q, "components": "country:SA",
+                                    "region": "sa", "key": GOOGLE_MAPS_API_KEY},
+                            timeout=20)
+        data = resp.json()
+    except Exception as e:
+        print("listings geocode error:", e)
+        return _json({"error": "geocode_request_failed"}, 502)
+    status = data.get("status")
+    results = data.get("results") or []
+    if status != "OK" or not results:
+        err = data.get("error_message") or status or "no_results"
+        print("listings geocode rejected:", err)
+        return _json({"error": err}, 400)
+    result = results[0]
+    loc = (((result.get("geometry") or {}).get("location")) or {})
+    try:
+        lat, lng = float(loc.get("lat")), float(loc.get("lng"))
+    except (TypeError, ValueError):
+        return _json({"error": "geocode_missing_coordinates"}, 400)
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return _json({"error": "geocode_invalid_coordinates"}, 400)
+    rec["lat"], rec["lng"] = lat, lng
+    rec["maps_query"] = q[:300]
+    rec["maps_address"] = str(result.get("formatted_address") or "")[:300]
+    rec["maps_place_id"] = str(result.get("place_id") or "")[:120]
+    rec["maps_link"] = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+    _ls_save()
+    return _json({"ok": True, "row": _ls_row_view(rec),
+                  "address": rec["maps_address"], "lat": lat, "lng": lng})
 
 async def _api_oujact_apply(request):
     """Apply / Refresh — create/rename today's + tomorrow's OujaCT channels right now."""
@@ -31243,6 +31322,7 @@ async def start_web_server():
         app.router.add_get("/api/listings", _api_listings_list)
         app.router.add_post("/api/listings/sync", _api_listings_sync)
         app.router.add_post("/api/listings/update", _api_listings_update)
+        app.router.add_post("/api/listings/geocode", _api_listings_geocode)
         app.router.add_post("/api/oujact/apply", _api_oujact_apply)
         app.router.add_get("/oujact-route", _handle_oujact_route)          # public mobile route page
         app.router.add_get("/api/oujact/route", _api_oujact_route)         # token-gated route data
