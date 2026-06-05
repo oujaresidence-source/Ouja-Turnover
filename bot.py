@@ -2441,9 +2441,14 @@ class CleaningDoneView(discord.ui.View):
         await interaction.response.send_message(
             f"✅ Marked done by {interaction.user.mention}. Closing this channel…",
             ephemeral=False)
+        ch = interaction.channel
+        try:                                   # remember this unit+day is done so it never re-opens
+            _oujact_mark_done(parse_topic_oujact_key(getattr(ch, "topic", "") or ""))
+        except Exception as e:
+            print("mark-done error:", e)
         await asyncio.sleep(2)
         try:
-            await interaction.channel.delete(reason=f"Cleaning completed by {interaction.user}")
+            await ch.delete(reason=f"Cleaning completed by {interaction.user}")
         except Exception as e:
             print("delete error:", e)
 
@@ -2487,6 +2492,20 @@ def parse_topic_oujact_key(topic):
     booking (the reservation-id-based dedup was the cause of duplicate channels)."""
     m = re.search(r"oujact-key:(\d+:\d{4}-\d{2}-\d{2})", topic or "")
     return m.group(1) if m else None
+
+def _oujact_mark_done(key):
+    """Record that this unit+day's cleaning is finished/closed so the sync loop never re-opens
+    its channel (was the cause of channels 'popping back' after Cleaning Done)."""
+    if not key:
+        return
+    _oujact_done[str(key)] = datetime.now(TZ).date().isoformat()
+    try:
+        _save_json("oujact_done.json", _oujact_done)
+    except Exception:
+        pass
+
+def _oujact_is_done(key):
+    return str(key) in _oujact_done
 
 def parse_topic_did(topic):
     """Responsible cleaner's Discord id stored in the topic (None if unassigned)."""
@@ -2593,12 +2612,15 @@ async def sync_checkouts():
 
 # ---- OujaCT (in-house cleaning team) turnover channels + daily schedule ----
 def _oujact_channel(internal_name, checkin_today, team_name=""):
-    """Discord-safe OujaCT channel name, e.g. '12b-team1-oujact' / '12b-team1-oujact-checkin'.
-    The cleaning team's name is baked in so the channel shows which team owns it."""
-    base = channel_name(internal_name)[:46]
-    team = ("-" + channel_name(team_name)[:16]) if team_name else ""
-    suffix = "-oujact-checkin" if checkin_today else "-oujact"
-    return (base + team + suffix)[:100]
+    """Discord-safe cleaning-channel name = unit + the TEAM name, e.g. '12b-stayclean' /
+    '12b-servicu-checkin'. The team name is what the owner sees on the channel; the 'oujact:1'
+    marker lives in the TOPIC (for dedup/cleanup), never the visible name."""
+    base = channel_name(internal_name)[:50]
+    team = channel_name(team_name) if team_name else ""
+    if not team or team == "unit":
+        team = "clean"
+    suffix = "-checkin" if checkin_today else ""
+    return (base + "-" + team[:24] + suffix)[:100]
 
 def _oujact_topic(it, team_name=""):
     """Channel topic carrying the STABLE dedup key (lid:date) + reservation id + check-in flag
@@ -2655,6 +2677,8 @@ async def sync_oujact_turnovers():
     changed = []
     for it in items:
         key = "{}:{}".format(it["lid"], it["checkout_date"])
+        if _oujact_is_done(key):
+            continue                                       # cleaning closed for this unit+day — never re-open
         team_name = _ct_team_name_for_lid(it["lid"])
         topic = _oujact_topic(it, team_name)
         ch = by_key.get(key) or by_res.get(str(it["res_id"]))
@@ -2695,6 +2719,16 @@ async def _oujact_cleanup_channels(guild=None):
     except Exception:
         return 0
     today = datetime.now(TZ).date()
+    # prune done-markers older than 3 days (keeps the store small; ISO dates compare as strings)
+    cutoff = (today - timedelta(days=3)).isoformat()
+    _stale = [k for k, d in list(_oujact_done.items()) if str(d) < cutoff]
+    if _stale:
+        for k in _stale:
+            _oujact_done.pop(k, None)
+        try:
+            _save_json("oujact_done.json", _oujact_done)
+        except Exception:
+            pass
     seen, deleted = set(), 0
     for ch in list(category.text_channels):
         topic = ch.topic or ""
@@ -2845,6 +2879,7 @@ _oujact_status   = _load_json("oujact_status.json", []) or []      # append-only
 _oujact_route_audit = _load_json("oujact_route_audit.json", []) or []
 _oujact_dispatch_log = _load_json("oujact_dispatch_log.json", {}) or {}  # "lid|date" -> {flags}
 _clean_tasks = _load_json("cleaning_tasks.json", {}) or {}         # task_id -> manual cleaning task
+_oujact_done = _load_json("oujact_done.json", {}) or {}            # "lid:date" -> date marked done (don't reopen the channel)
 _cleaning_photo_templates = _load_json("cleaning_photo_templates.json", {}) or {}
 _cleaning_reports = _load_json("cleaning_reports.json", {}) or {}
 _cleaning_report_photos = _load_json("cleaning_report_photos.json", {}) or {}
@@ -3495,6 +3530,8 @@ async def reminder_loop():
     for ch in list(category.text_channels):
         if not parse_topic_res(ch.topic):
             continue                      # only turnover channels
+        if "oujact:1" in (ch.topic or ""):
+            continue                      # in-house team channels: route page + photo flow handle it — no @mention nag
         live_ids.add(ch.id)
         last = _last_reminder.get(ch.id)
         if last and (now - last) < timedelta(minutes=interval):
@@ -31716,8 +31753,10 @@ async def _api_cleaning_report_decision(request):
                 await msg.edit(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
     except Exception as e:
         print("cleanproof discord sync error:", e)
-    # Approved → cleaning signed off; close the apartment's turnover channel (keeps Discord tidy).
+    # Approved → cleaning signed off; close the apartment's turnover channel (keeps Discord tidy)
+    # and mark the unit+day done so the sync loop never re-opens it.
     if decision == "approve" and report.get("status") == "manager_approved":
+        _oujact_mark_done("{}:{}".format(report.get("apartment_id"), report.get("date")))
         try:
             guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
             tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
