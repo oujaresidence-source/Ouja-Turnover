@@ -20512,9 +20512,14 @@ function financeStatementHTML(){
   }
   h+=sr(ar?'صافي المالك':'Owner net',money(r.owner_net),'total')+'</div>';
   h+='<div class="stmt-sec-t">'+(ar?'الحجوزات':'Reservations')+'</div>';
+  var edBadge='<span style="background:rgba(180,140,60,.16);color:var(--gold);font-size:9px;padding:1px 5px;border-radius:99px;margin-inline-start:4px">'+t().fin_edited+'</span>';
   if((r.resv_lines||[]).length){
-    h+='<table><thead><tr><th>'+(ar?'القناة':'Channel')+'</th><th>'+(ar?'الدخول':'Check-in')+'</th><th>'+(ar?'ليالٍ':'Nights')+'</th><th class="num">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>';
-    h+=(r.resv_lines||[]).map(function(l){ var flag=(l.channel==='other')?(ar?'قناة تحتاج قاعدة':'channel needs rule'):(ar?'دفعة ناقصة':'payout missing'); return '<tr><td>'+esc(l.channel)+'</td><td>'+esc(l.checkin||'')+'</td><td>'+(l.nights||'')+'</td><td class="num">'+(l.income==null?('<span class="recon-bad">'+flag+'</span>'):money(l.income))+'</td></tr>'; }).join('')+'</tbody></table>';
+    h+='<table><thead><tr><th>'+(ar?'القناة':'Channel')+'</th><th>'+(ar?'الدخول':'Check-in')+'</th><th>'+(ar?'ليالٍ':'Nights')+'</th><th class="num">'+(ar?'الدخل':'Income')+'</th><th></th></tr></thead><tbody>';
+    h+=(r.resv_lines||[]).map(function(l){
+      var flag=(l.channel==='other')?(ar?'قناة تحتاج قاعدة':'channel needs rule'):(l.needs_review?t().fin_needs_review:(ar?'دفعة ناقصة':'payout missing'));
+      var inv=l.investor_note?('<div class="muted" style="font-size:10px">'+esc(l.investor_note)+'</div>'):'';
+      return '<tr><td>'+esc(l.channel)+(l.edited?edBadge:'')+inv+'</td><td>'+esc(l.display_date||l.checkin||'')+'</td><td>'+(l.nights||'')+'</td><td class="num">'+(l.income==null?('<span class="recon-bad">'+flag+'</span>'):money(l.income))+'</td>'
+        +'<td class="num"><button class="btn ghost xs" onclick="openLineEdit(&#39;resv&#39;,&#39;'+esc(String(l.id))+'&#39;)">'+t().fin_edit+'</button></td></tr>'; }).join('')+'</tbody></table>';
   } else { h+='<div class="stmt-note">'+(ar?'لا حجوزات في هذي الفترة':'No reservations this period')+'</div>'; }
   if((r.manual_income_lines||[]).length){
     h+='<div class="stmt-sec-t">'+t().fin_manual_income+'</div>';
@@ -20523,8 +20528,12 @@ function financeStatementHTML(){
   }
   h+='<div class="stmt-sec-t">'+(ar?'المصاريف':'Expenses')+'</div>';
   if((r.exp_lines||[]).length){
-    h+='<table><thead><tr><th>'+(ar?'التاريخ':'Date')+'</th><th class="num">'+(ar?'المبلغ':'Amount')+'</th></tr></thead><tbody>';
-    h+=(r.exp_lines||[]).map(function(e){ return '<tr><td>'+esc(e.date||'')+'</td><td class="num">'+money(e.amount||0)+'</td></tr>'; }).join('')+'</tbody></table>';
+    h+='<table><thead><tr><th>'+(ar?'التاريخ / الوصف':'Date / description')+'</th><th class="num">'+(ar?'المبلغ':'Amount')+'</th><th></th></tr></thead><tbody>';
+    h+=(r.exp_lines||[]).map(function(e){
+      var src=e.manual?(' <span class="muted" style="font-size:10px">· '+t().fin_source_manual+'</span>'):'';
+      var inv=(e.investor_note||e.description)?('<div class="muted" style="font-size:10px">'+esc(e.investor_note||e.description)+'</div>'):'';
+      return '<tr><td>'+esc(e.display_date||e.date||'')+(e.edited?edBadge:'')+src+inv+'</td><td class="num">'+money(e.amount||0)+'</td>'
+        +'<td class="num"><button class="btn ghost xs" onclick="openLineEdit(&#39;exp&#39;,&#39;'+esc(String(e.id))+'&#39;)">'+t().fin_edit+'</button></td></tr>'; }).join('')+'</tbody></table>';
   } else { h+='<div class="stmt-note">'+(ar?'لا مصاريف في هذي الفترة':'No expenses this period')+'</div>'; }
   if(r.comment) h+='<div class="stmt-note"><b>'+(ar?'ملاحظة: ':'Note: ')+'</b>'+esc(r.comment)+'</div>';
   if(r.adjusted) h+='<div class="stmt-note" style="color:#8B6320;font-size:11px">'+(ar?'• بيان معدّل يدويًا':'• Manually adjusted statement')+'</div>';
@@ -20689,6 +20698,65 @@ async function finAdjSave(){
   toast(L==='ar'?'حُفظ ✓':'Saved ✓'); closeDrawer();
   if(s.bulkIdx!=null){ await bulkRefetchItem(s.bulkIdx); bulkPreviewRender(); }
   else { financeLoadReport(); }
+}
+/* ===== Per-line edit on a READY report (reservation/expense): amount/date/investor note ===== */
+function openLineEdit(kind, id){
+  var r=D.finReport; if(!r||!r.period){ toast('⚠'); return; } var ar=(L==='ar');
+  var arr=(kind==='resv')?(r.resv_lines||[]):(r.exp_lines||[]);
+  var line=arr.filter(function(x){ return String(x.id)===String(id); })[0];
+  if(!line){ toast('⚠'); return; }
+  openDrawer(t().fin_line_edit, esc(kind==='resv'?(line.channel||''):(line.date||line.label||'')));
+  var inp='width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit';
+  var lab='display:block;font-size:11px;color:var(--muted,#8a8270)';
+  var box='background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:9px;margin-bottom:10px;font-size:11.5px';
+  var curAmt=(kind==='resv')?line.income:line.amount;
+  var origAmt=(line.original_amount!=null)?line.original_amount:curAmt;
+  var origDate=(line.original_date!=null)?line.original_date:((kind==='resv')?(line.checkin||''):(line.date||''));
+  var dispDate=line.display_date||origDate||'';
+  var explain='';
+  if(kind==='resv' && line.direct_fee_pct!=null){
+    explain='<div style="'+box+'"><div>'+t().fin_calc_base+': <b>'+money2(line.direct_base)+'</b></div>'
+      +'<div>'+t().fin_direct_pct+': <b>'+line.direct_fee_pct+'%</b> → −'+money2(line.direct_fee_amount)+' = '+money2(line.direct_net)+'</div>'
+      +'<div class="muted">'+t().fin_num_source+': '+esc(line.source_fields||'')+'</div></div>';
+  } else if(kind==='resv' && line.source_fields){
+    explain='<div class="muted" style="font-size:11px;margin-bottom:8px">'+t().fin_num_source+': '+esc(line.source_fields)+'</div>';
+  }
+  var origBlock='<div style="'+box+'"><div>'+t().fin_orig_val+': <b>'+(origAmt!=null?money2(origAmt):'—')+'</b>'+(origDate?(' · '+esc(origDate)):'')+'</div>'
+    +(line.edited?('<div class="muted">'+t().fin_disp_val+': '+(curAmt!=null?money2(curAmt):'—')+(line.edit_reason?(' · '+esc(line.edit_reason)):'')+(line.edited_by?(' · '+esc(line.edited_by)):'')+'</div>'):'')+'</div>';
+  var body=explain+origBlock
+    +'<label style="'+lab+'">'+t().fin_amount+'</label><input id="le_amt" type="number" step="0.01" value="'+esc(curAmt!=null?curAmt:'')+'" style="'+inp+'">'
+    +'<label style="'+lab+'">'+t().fin_date+'</label><input id="le_date" type="date" value="'+esc(dispDate||'')+'" style="'+inp+'">'
+    +'<label style="'+lab+'">'+t().fin_inv_desc+'</label><textarea id="le_inv" rows="2" placeholder="'+(ar?'وصف واضح للمستثمر':'a clear note for investors')+'" style="'+inp+'">'+esc(line.investor_note||'')+'</textarea>'
+    +'<label style="'+lab+'">'+t().fin_edit_reason+'</label><input id="le_reason" value="'+esc(line.edit_reason||'')+'" placeholder="'+esc(t().fin_reason_req)+'" style="'+inp+'">';
+  setDrawerBody(body);
+  var foot='<button class="btn primary sm" onclick="finLineSave(&#39;'+esc(kind)+'&#39;,&#39;'+esc(String(id))+'&#39;)">'+t().fin_save+'</button>';
+  if(line.edited) foot+='<button class="btn ghost sm" onclick="finLineClear(&#39;'+esc(kind)+'&#39;,&#39;'+esc(String(id))+'&#39;)">'+(ar?'إلغاء التعديل':'Revert')+'</button>';
+  foot+='<button class="btn ghost sm" onclick="closeDrawer()">'+t().fin_cancel+'</button>';
+  setDrawerFoot(foot);
+}
+async function finLineSave(kind, id){
+  var r=D.finReport; if(!r||!r.period) return;
+  var arr=(kind==='resv')?(r.resv_lines||[]):(r.exp_lines||[]);
+  var line=arr.filter(function(x){ return String(x.id)===String(id); })[0]||{};
+  var baseAmt=(kind==='resv')?line.income:line.amount;
+  var amtEl=document.getElementById('le_amt'); var amt=amtEl?parseFloat(amtEl.value):NaN;
+  var date=(document.getElementById('le_date')||{}).value||'';
+  var inv=(document.getElementById('le_inv')||{}).value||'';
+  var reason=(document.getElementById('le_reason')||{}).value||'';
+  var body={lid:r.lid, start:r.period.start, end:r.period.end, kind:kind, id:id};
+  if(!isNaN(amt) && amt!==Number(baseAmt)){ if(!reason.trim()){ toast(t().fin_reason_req); return; } body.amount=amt; }
+  if(date) body.date=date;
+  if(inv.trim()) body.investor_note=inv.trim();
+  if(reason.trim()) body.edit_reason=reason.trim();
+  var resp; try{ resp=await post('/api/finance/line-edit', body); }catch(e){ toast('⚠ '+e); return; }
+  if(resp&&resp.ok){ toast(L==='ar'?'حُفظ ✓':'Saved ✓'); closeDrawer(); financeLoadReport(); }
+  else if(resp&&resp.error==='reason_required'){ toast(t().fin_reason_req); }
+  else toast((resp&&resp.error)||'⚠');
+}
+async function finLineClear(kind, id){
+  var r=D.finReport; if(!r||!r.period) return;
+  try{ await post('/api/finance/line-edit',{lid:r.lid,start:r.period.start,end:r.period.end,kind:kind,id:id,clear:true}); }catch(e){ toast('⚠'); return; }
+  toast(L==='ar'?'رجع للأصل ✓':'Reverted ✓'); closeDrawer(); financeLoadReport();
 }
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
 var _ctSel={};
@@ -21033,7 +21101,7 @@ function stmtDocHTML(r, label, kind){
       +'<th style="text-align:start;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الدخول':'Check-in')+'</th>'
       +'<th style="text-align:start;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'ليالٍ':'Nights')+'</th>'
       +'<th style="text-align:end;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>'
-      +rl.map(function(l){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.channel||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.checkin||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+(l.nights||'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+(l.income==null?'—':M(l.income))+'</td></tr>'; }).join('')
+      +rl.map(function(l){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.channel||'')+(l.investor_note?(' — '+esc(l.investor_note)):'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.display_date||l.checkin||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+(l.nights||'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+(l.income==null?'—':M(l.income))+'</td></tr>'; }).join('')
       +'</tbody></table></div>';
   }
   // manual income lines (detailed)
@@ -21049,7 +21117,7 @@ function stmtDocHTML(r, label, kind){
   h+='<div style="padding:6px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:16px 0 6px">'+(ar?'المصاريف':'Expenses')+' ('+el.length+')</div>';
   if(el.length){
     h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px"><tbody>'
-      +el.map(function(e){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(e.date||e.note||'')+(e.manual?' ·':'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+M(e.amount)+'</td></tr>'; }).join('')
+      +el.map(function(e){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(e.investor_note||e.description||e.display_date||e.date||e.note||'')+(e.manual?' ·':'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+M(e.amount)+'</td></tr>'; }).join('')
       +'</tbody></table>';
   } else { h+='<div style="font-size:11.5px;color:'+MUT+'">'+(ar?'لا مصاريف في هذي الفترة':'No expenses this period')+'</div>'; }
   h+='</div>';
@@ -22409,23 +22477,78 @@ def normalize_reservation(r, listings=None):
         "extras": 0.0,
     }
 
-_finance_adjust = {}     # "lid|start|end" -> {expense_overrides:{id:amt|None}, extra_lines:[{label,amount,kind}], comment}
+_finance_adjust = {}     # "lid|start|end" -> {expense_overrides:{id:amt|None}, extra_lines:[...], line_overrides:{...}, comment}
+_finance_audit = []      # append-only audit of per-line report edits (finance_audit.json)
 
 def _finance_adjust_key(lid, start, end):
     return "%s|%s|%s" % (lid if lid is not None else "all", start, end)
 
+def _finance_audit_add(report_key, line_key, action, actor, changes):
+    """Append-only audit entry for a finance line-item edit (item 4 requirement)."""
+    _finance_audit.append({
+        "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+        "report": report_key, "line": line_key, "action": action,
+        "actor": (actor or "")[:80],
+        "changes": {k: v for k, v in (changes or {}).items() if k not in ("edited_by", "edited_at")},
+    })
+    if len(_finance_audit) > 5000:
+        del _finance_audit[:len(_finance_audit) - 5000]
+    try:
+        log_event("finance", "line %s · %s · by %s" % (action, line_key, actor or "?"))
+    except Exception:
+        pass
+
+def _finance_apply_line_override(line, ov, amount_field):
+    """Apply a per-line DISPLAY override (amount/date/description/investor note/category) to a
+    COPY of the line, preserving the original imported values. Raw Hostaway data is never
+    mutated — this only changes what the report displays, and keeps original_* for the audit."""
+    if not ov:
+        return line
+    line = dict(line)
+    if ov.get("amount") not in (None, ""):
+        line.setdefault("original_amount", line.get(amount_field))
+        try:
+            line[amount_field] = round(float(ov["amount"]), 2)
+        except (TypeError, ValueError):
+            pass
+    if ov.get("date"):
+        line.setdefault("original_date", line.get("date") if line.get("date") is not None else line.get("checkin"))
+        line["display_date"] = ov["date"]
+    if ov.get("description"):
+        line.setdefault("original_description", line.get("description") or "")
+        line["description"] = ov["description"]
+    if ov.get("investor_note"):
+        line["investor_note"] = ov["investor_note"]
+    if ov.get("category"):
+        line["category"] = ov["category"]
+    for k in ("edit_reason", "edited_by", "edited_at"):
+        if ov.get(k):
+            line[k] = ov[k]
+    line["edited"] = True
+    return line
+
 def _finance_apply_adjust(rep, adjust):
-    """Apply owner edits to a computed report: edit/delete real expense lines, add manual
-    income/expense lines, attach a comment. Recomputes expenses + owner_net. Predictable:
-    manual lines are post-fee adjustments (Ouja's % is never re-charged on them)."""
+    """Apply owner/admin edits to a computed report: per-line overrides (amount/date/description/
+    investor note) on RESERVATIONS + EXPENSES, edit/delete expense lines, add manual income/
+    expense lines, attach a comment. Totals are RECOMPUTED from the displayed values (the mgmt
+    fee re-applies to booking income; manual income stays post-fee). Raw Hostaway data is never
+    mutated — originals are preserved per line for audit."""
     if not adjust:
         return rep
-    ov = adjust.get("expense_overrides") or {}
+    lov = adjust.get("line_overrides") or {}
+    eov = adjust.get("expense_overrides") or {}
+    # ---- reservations: per-line overrides (preserve originals) ----
+    new_resv = []
+    for l in rep.get("resv_lines", []):
+        o = lov.get("resv:" + str(l.get("id")))
+        new_resv.append(_finance_apply_line_override(l, o, "income") if o else l)
+    rep["resv_lines"] = new_resv
+    # ---- expenses: legacy amount/delete overrides + new per-line overrides ----
     lines, exp_total = [], 0.0
     for e in rep.get("exp_lines", []):
         eid = str(e.get("id"))
-        if eid in ov:
-            v = ov[eid]
+        if eid in eov:
+            v = eov[eid]
             if v is None:
                 continue                                   # deleted line
             e = dict(e)
@@ -22434,8 +22557,12 @@ def _finance_apply_adjust(rep, adjust):
             except (TypeError, ValueError):
                 pass
             e["edited"] = True
+        o = lov.get("exp:" + eid)
+        if o:
+            e = _finance_apply_line_override(e, o, "amount")
         exp_total += float(e.get("amount") or 0)
         lines.append(e)
+    # ---- manual income / expense lines ----
     extra_income = 0.0
     income_lines = []
     for i, x in enumerate(adjust.get("extra_lines") or []):
@@ -22448,20 +22575,27 @@ def _finance_apply_adjust(rep, adjust):
             extra_income += amt
             income_lines.append({"id": "inc-%d" % i, "label": label, "amount": amt,
                                  "manual": True, "kind": "income", "source": "manual"})
-        else:                                  # manual expense (unchanged behaviour, now labelled)
+        else:                                  # manual expense (now labelled)
             exp_total += amt
             lines.append({"id": "exp-adj-%d" % i, "date": label, "label": label, "amount": amt,
                           "manual": True, "source": "manual"})
+    # ---- recompute totals from DISPLAYED values (mgmt fee on booking income only) ----
+    booking_income = sum(float(l["income"]) for l in new_resv if l.get("income") is not None) \
+        + float(rep.get("extras") or 0)
+    mgmt = float(rep.get("management_pct") or 0)
+    ouja_fee = round(mgmt / 100.0 * booking_income, 2)
+    cleaning_total = float((rep.get("cleaning") or {}).get("total") or 0)
     rep["exp_lines"] = lines
     rep["expenses"] = round(exp_total, 2)
     rep["manual_income"] = round(extra_income, 2)
     rep["manual_income_lines"] = income_lines
-    rep["total_income"] = round(float(rep.get("total_income") or 0) + extra_income, 2)
-    rep["owner_net"] = round(rep["total_income"] - float(rep.get("ouja_fee") or 0) - exp_total
-                             - float((rep.get("cleaning") or {}).get("total") or 0), 2)
+    rep["ouja_fee"] = ouja_fee
+    rep["total_income"] = round(booking_income + extra_income, 2)
+    rep["owner_net"] = round(rep["total_income"] - ouja_fee - exp_total - cleaning_total, 2)
     rep["adjusted"] = True
     rep["comment"] = adjust.get("comment") or ""
     rep["extra_lines"] = adjust.get("extra_lines") or []
+    rep["line_overrides"] = lov
     return rep
 
 def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None, cleaning=None, adjust=None):
@@ -22724,7 +22858,7 @@ def _pdf_statement_bytes(rep, label):
         for e in el[:60]:
             y = pdf.get_y(); pdf.set_text_color(*INK)
             pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, money(e.get("amount")), align="L")
-            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(str(e.get("date") or e.get("note") or "")), align="R"); pdf.ln(6)
+            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(str(e.get("investor_note") or e.get("description") or e.get("display_date") or e.get("date") or e.get("note") or "")), align="R"); pdf.ln(6)
     else:
         pdf.set_text_color(*MUT); pdf.set_x(M); pdf.cell(usable, 6, shape("لا مصاريف في هذي الفترة"), align="R"); pdf.ln(6)
     # ---- per-apartment breakdown (owner aggregate) ----
@@ -28799,15 +28933,86 @@ async def _api_finance_adjust(request):
     k = _finance_adjust_key(b.get("lid") if b.get("lid") not in (None, "") else "all",
                             b.get("start", ""), b.get("end", ""))
     adj = b.get("adjust") or {}
-    has = bool(adj.get("expense_overrides") or adj.get("extra_lines") or (adj.get("comment") or "").strip())
+    existing = _finance_adjust.get(k) or {}
+    # preserve per-line overrides (saved via the line editor) when the Edit-Statement drawer saves
+    line_overrides = adj["line_overrides"] if isinstance(adj.get("line_overrides"), dict) else (existing.get("line_overrides") or {})
+    has = bool(adj.get("expense_overrides") or adj.get("extra_lines") or line_overrides or (adj.get("comment") or "").strip())
     if has:
         _finance_adjust[k] = {"expense_overrides": adj.get("expense_overrides") or {},
                               "extra_lines": [x for x in (adj.get("extra_lines") or []) if isinstance(x, dict)][:50],
+                              "line_overrides": line_overrides,
                               "comment": (adj.get("comment") or "")[:1000]}
     else:
         _finance_adjust.pop(k, None)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
+
+async def _api_finance_line_edit(request):
+    """Per-line override for a READY report line (reservation or expense). Stores a DISPLAY
+    override (amount/date/description/investor_note/category) without ever touching raw Hostaway
+    data, with an audit entry. {lid,start,end,kind:'resv'|'exp',id, amount?,date?,description?,
+    investor_note?,category?,edit_reason?,edited_by?,clear?}. Amount edits require a reason."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    kind = (b.get("kind") or "").strip()
+    if kind not in ("resv", "exp"):
+        return _json({"error": "bad kind"}, 400)
+    line_id = str(b.get("id") or "").strip()
+    if not line_id:
+        return _json({"error": "missing id"}, 400)
+    k = _finance_adjust_key(b.get("lid") if b.get("lid") not in (None, "") else "all",
+                            b.get("start", ""), b.get("end", ""))
+    rec = dict(_finance_adjust.get(k) or {})
+    lov = dict(rec.get("line_overrides") or {})
+    ovkey = kind + ":" + line_id
+    actor = (b.get("edited_by") or "").strip()[:80] or _req_actor(request)
+    if b.get("clear"):
+        lov.pop(ovkey, None)
+        _finance_audit_add(k, ovkey, "clear", actor, {})
+    else:
+        ov = {}
+        amount_changed = False
+        if b.get("amount") not in (None, ""):
+            try:
+                ov["amount"] = round(float(b.get("amount")), 2); amount_changed = True
+            except (TypeError, ValueError):
+                return _json({"error": "bad amount"}, 400)
+        for f in ("date", "description", "investor_note", "category"):
+            if b.get(f) not in (None, ""):
+                ov[f] = str(b.get(f))[:500]
+        reason = (b.get("edit_reason") or "").strip()
+        if amount_changed and not reason:
+            return _json({"error": "reason_required"}, 400)     # amount edit needs a reason
+        if reason:
+            ov["edit_reason"] = reason[:300]
+        if not ov:
+            return _json({"error": "nothing to edit"}, 400)
+        ov["edited_by"] = actor
+        ov["edited_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        prev = dict(lov.get(ovkey) or {})
+        prev.update(ov)
+        lov[ovkey] = prev
+        _finance_audit_add(k, ovkey, "edit", actor, ov)
+    rec["line_overrides"] = lov
+    rec.setdefault("expense_overrides", {})
+    rec.setdefault("extra_lines", [])
+    rec.setdefault("comment", "")
+    if not (rec.get("expense_overrides") or rec.get("extra_lines") or rec.get("line_overrides") or (rec.get("comment") or "").strip()):
+        _finance_adjust.pop(k, None)
+    else:
+        _finance_adjust[k] = rec
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "line_overrides": lov})
+
+async def _api_finance_audit(request):
+    """GET ?lid&start&end → the line-edit audit trail for this report (newest first)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    k = _finance_adjust_key(request.query.get("lid") or "all", request.query.get("start", ""), request.query.get("end", ""))
+    rows = [a for a in _finance_audit if a.get("report") == k]
+    rows = list(reversed(rows))[:200]
+    return _json({"ok": True, "audit": rows})
 
 async def _api_finance_bulk(request):
     """Build owner statements for MANY targets at once (for the bulk PDF). POST:
@@ -32288,6 +32493,8 @@ async def start_web_server():
         app.router.add_post("/api/finance/pdf", _api_finance_pdf)
         app.router.add_get("/api/finance/adjust", _api_finance_adjust)
         app.router.add_post("/api/finance/adjust", _api_finance_adjust)
+        app.router.add_post("/api/finance/line-edit", _api_finance_line_edit)
+        app.router.add_get("/api/finance/audit", _api_finance_audit)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
@@ -32780,6 +32987,7 @@ def load_state():
             print(f"owner registry: seeded {_n} apartments")
         _finance_adjust.clear()
         _finance_adjust.update(_load_json("finance_adjust.json", {}) or {})
+        _finance_audit[:] = _load_json("finance_audit.json", []) or []
         _finance_last_import.clear()
         _finance_last_import.update(_load_json("finance_last_import.json", {}) or {})
         try:
@@ -32890,6 +33098,7 @@ def persist_state():
     _save_json("cleaning_teams.json", _cleaning_teams)
     _save_json("clean_early_depart.json", _clean_early_depart)
     _save_json("finance_adjust.json", _finance_adjust)
+    _save_json("finance_audit.json", _finance_audit)
     _save_json("finance_last_import.json", _finance_last_import)
     _save_json("weekly_reports.json", _weekly_reports)
     _save_json("design_requests.json", _design_requests)
