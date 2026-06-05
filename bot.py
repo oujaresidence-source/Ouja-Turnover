@@ -12551,6 +12551,13 @@ const T = {
     st_d_date:'التاريخ', st_d_day:'اليوم', st_d_start:'البداية', st_d_cur:'الحالي', st_d_st:'الحالة', st_d_why:'العوامل', st_d_chg:'تعديلات',
     st_d_booked:'محجوزة ✓', st_d_open:'مفتوحة',
     rev_month:'الإيراد الشهري', rev_sal:'دورة الراتب', rev_units:'أداء الوحدات', rev_no:'ما فيه بيانات بعد',
+    fin_edit:'تعديل', fin_orig_val:'القيمة الأصلية', fin_disp_val:'القيمة المعروضة',
+    fin_inv_desc:'وصف للمستثمر', fin_edit_reason:'سبب التعديل', fin_edited:'معدّل',
+    fin_manual_income:'إيراد مضاف يدويًا', fin_manual_expense:'مصروف مضاف يدويًا',
+    fin_num_source:'مصدر الرقم', fin_direct_pct:'نسبة الإيراد المباشر', fin_calc_base:'أساس الاحتساب',
+    fin_needs_review:'يحتاج مراجعة', fin_save:'حفظ التعديل', fin_cancel:'إلغاء',
+    fin_reason_req:'اكتب سبب تعديل المبلغ', fin_line_edit:'تعديل السطر', fin_amount:'المبلغ',
+    fin_date:'التاريخ', fin_desc:'الوصف', fin_source_ha:'من Hostaway', fin_source_manual:'مُدخل يدويًا',
     log_empty:'لا يوجد نشاط',
     fresh:'آخر تحديث', live:'مباشر',
     wrong:'رمز غير صحيح · Wrong token',
@@ -12803,6 +12810,13 @@ const T = {
     st_d_date:'Date', st_d_day:'Day', st_d_start:'Start', st_d_cur:'Current', st_d_st:'Status', st_d_why:'Factors', st_d_chg:'Moves',
     st_d_booked:'Booked ✓', st_d_open:'Open',
     rev_month:'Monthly revenue', rev_sal:'Salary cycle', rev_units:'Unit performance', rev_no:'No data yet',
+    fin_edit:'Edit', fin_orig_val:'Original value', fin_disp_val:'Displayed value',
+    fin_inv_desc:'Investor description', fin_edit_reason:'Edit reason', fin_edited:'Edited',
+    fin_manual_income:'Manual income', fin_manual_expense:'Manual expense',
+    fin_num_source:'Number source', fin_direct_pct:'Direct revenue percentage', fin_calc_base:'Calculation base',
+    fin_needs_review:'Needs review', fin_save:'Save edit', fin_cancel:'Cancel',
+    fin_reason_req:'Enter a reason for the amount change', fin_line_edit:'Edit line', fin_amount:'Amount',
+    fin_date:'Date', fin_desc:'Description', fin_source_ha:'From Hostaway', fin_source_manual:'Manual entry',
     log_empty:'No activity',
     fresh:'Updated', live:'live',
     wrong:'Wrong token',
@@ -20484,9 +20498,11 @@ function financeStatementHTML(){
   h+=opt(f.cover,'<div class="stmt-note">'+esc(f.cover)+'</div>');
   h+='<div class="stmt-sec-t">'+(ar?'الملخّص':'Summary')+'</div><div class="stmt-sum">';
   const sr=function(l,val,cls){ return '<div class="stmt-sum-row'+(cls?(' '+cls):'')+'"><span>'+l+'</span><span class="num">'+val+'</span></div>'; };
+  var dpct=(r.direct_fee_pct!=null?r.direct_fee_pct:3);
   h+=sr(ar?'إيراد Airbnb (دفعات)':'Airbnb income (payouts)',money(r.income_airbnb));
-  h+=sr(ar?'إيراد مباشر (−٣٪)':'Direct income (−3%)',money(r.income_direct));
+  h+=sr((ar?'إيراد مباشر (−':'Direct income (−')+dpct+'%)',money(r.income_direct));
   if(r.extras) h+=sr(ar?'إضافات':'Extras',money(r.extras));
+  if(r.manual_income) h+=sr(t().fin_manual_income,money(r.manual_income));
   h+=sr(ar?'إجمالي الدخل':'Total income',money(r.total_income));
   h+=sr(ar?('رسوم عوجا ('+r.management_pct+'%)'):('Ouja fee ('+r.management_pct+'%)'),'−'+money(r.ouja_fee));
   h+=sr(ar?'المصاريف':'Expenses','−'+money(r.expenses));
@@ -20500,6 +20516,11 @@ function financeStatementHTML(){
     h+='<table><thead><tr><th>'+(ar?'القناة':'Channel')+'</th><th>'+(ar?'الدخول':'Check-in')+'</th><th>'+(ar?'ليالٍ':'Nights')+'</th><th class="num">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>';
     h+=(r.resv_lines||[]).map(function(l){ var flag=(l.channel==='other')?(ar?'قناة تحتاج قاعدة':'channel needs rule'):(ar?'دفعة ناقصة':'payout missing'); return '<tr><td>'+esc(l.channel)+'</td><td>'+esc(l.checkin||'')+'</td><td>'+(l.nights||'')+'</td><td class="num">'+(l.income==null?('<span class="recon-bad">'+flag+'</span>'):money(l.income))+'</td></tr>'; }).join('')+'</tbody></table>';
   } else { h+='<div class="stmt-note">'+(ar?'لا حجوزات في هذي الفترة':'No reservations this period')+'</div>'; }
+  if((r.manual_income_lines||[]).length){
+    h+='<div class="stmt-sec-t">'+t().fin_manual_income+'</div>';
+    h+='<table><thead><tr><th>'+(ar?'الوصف':'Description')+'</th><th class="num">'+(ar?'المبلغ':'Amount')+'</th></tr></thead><tbody>';
+    h+=(r.manual_income_lines||[]).map(function(l){ return '<tr><td>'+esc(l.label||t().fin_manual_income)+' <span class="muted" style="font-size:10px">· '+t().fin_source_manual+'</span></td><td class="num">'+money(l.amount||0)+'</td></tr>'; }).join('')+'</tbody></table>';
+  }
   h+='<div class="stmt-sec-t">'+(ar?'المصاريف':'Expenses')+'</div>';
   if((r.exp_lines||[]).length){
     h+='<table><thead><tr><th>'+(ar?'التاريخ':'Date')+'</th><th class="num">'+(ar?'المبلغ':'Amount')+'</th></tr></thead><tbody>';
@@ -21000,8 +21021,9 @@ function stmtDocHTML(r, label, kind){
   h+='<div style="padding:8px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:14px 0 6px">'+(ar?'تفصيل الدخل':'Income breakdown')+'</div>'
     +'<table style="width:100%;border-collapse:collapse">'
     +row(ar?'دخل Airbnb (دفعات)':'Airbnb (payouts)', M(r.income_airbnb))
-    +row(ar?'دخل مباشر (−٣٪)':'Direct (−3%)', M(r.income_direct))
-    +((r.extras)?row(ar?'إضافات':'Extras', M(r.extras)):'')+'</table></div>';
+    +row((ar?'دخل مباشر (−':'Direct (−')+(r.direct_fee_pct!=null?r.direct_fee_pct:3)+'%)', M(r.income_direct))
+    +((r.extras)?row(ar?'إضافات':'Extras', M(r.extras)):'')
+    +((r.manual_income)?row(t().fin_manual_income, M(r.manual_income)):'')+'</table></div>';
   // reservations table (detailed)
   var rl=r.resv_lines||[];
   if(rl.length){
@@ -21012,6 +21034,14 @@ function stmtDocHTML(r, label, kind){
       +'<th style="text-align:start;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'ليالٍ':'Nights')+'</th>'
       +'<th style="text-align:end;color:'+MUT+';font-weight:600;padding:5px 4px;border-bottom:1px solid '+LINE+'">'+(ar?'الدخل':'Income')+'</th></tr></thead><tbody>'
       +rl.map(function(l){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.channel||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.checkin||'')+'</td><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+(l.nights||'')+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+(l.income==null?'—':M(l.income))+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+  }
+  // manual income lines (detailed)
+  var mil=r.manual_income_lines||[];
+  if(mil.length){
+    h+='<div style="padding:6px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:16px 0 6px">'+t().fin_manual_income+' ('+mil.length+')</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11.5px"><tbody>'
+      +mil.map(function(l){ return '<tr><td style="padding:6px 4px;border-bottom:1px solid #F1ECE0">'+esc(l.label||t().fin_manual_income)+'</td><td style="padding:6px 4px;text-align:end;border-bottom:1px solid #F1ECE0;font-variant-numeric:tabular-nums">'+M(l.amount)+'</td></tr>'; }).join('')
       +'</tbody></table></div>';
   }
   // expenses table (detailed)
@@ -22407,18 +22437,25 @@ def _finance_apply_adjust(rep, adjust):
         exp_total += float(e.get("amount") or 0)
         lines.append(e)
     extra_income = 0.0
-    for x in (adjust.get("extra_lines") or []):
+    income_lines = []
+    for i, x in enumerate(adjust.get("extra_lines") or []):
         try:
             amt = round(float(x.get("amount") or 0), 2)
         except (TypeError, ValueError):
             amt = 0.0
-        if x.get("kind") == "expense":
-            exp_total += amt
-            lines.append({"id": "adj", "date": (x.get("label") or "تعديل"), "amount": amt, "manual": True})
-        else:
+        label = (x.get("label") or "").strip()
+        if x.get("kind") == "income":          # MANUAL INCOME → visible line + counts in totals
             extra_income += amt
+            income_lines.append({"id": "inc-%d" % i, "label": label, "amount": amt,
+                                 "manual": True, "kind": "income", "source": "manual"})
+        else:                                  # manual expense (unchanged behaviour, now labelled)
+            exp_total += amt
+            lines.append({"id": "exp-adj-%d" % i, "date": label, "label": label, "amount": amt,
+                          "manual": True, "source": "manual"})
     rep["exp_lines"] = lines
     rep["expenses"] = round(exp_total, 2)
+    rep["manual_income"] = round(extra_income, 2)
+    rep["manual_income_lines"] = income_lines
     rep["total_income"] = round(float(rep.get("total_income") or 0) + extra_income, 2)
     rep["owner_net"] = round(rep["total_income"] - float(rep.get("ouja_fee") or 0) - exp_total
                              - float((rep.get("cleaning") or {}).get("total") or 0), 2)
@@ -22656,9 +22693,12 @@ def _pdf_statement_bytes(rep, label):
     # ---- income breakdown ----
     section("تفصيل الدخل")
     kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
-    kv("دخل مباشر (−٣٪)", money(rep.get("income_direct")))
+    _dpct = rep.get("direct_fee_pct")
+    kv("دخل مباشر (−%s٪)" % (_dpct if _dpct is not None else 3), money(rep.get("income_direct")))
     if rep.get("extras"):
         kv("إضافات", money(rep.get("extras")))
+    if rep.get("manual_income"):
+        kv("إيراد مضاف يدويًا", money(rep.get("manual_income")))
     # ---- reservations table ----
     rl = rep.get("resv_lines") or []
     if rl:
@@ -22669,6 +22709,14 @@ def _pdf_statement_bytes(rep, label):
             pdf.set_xy(M + usable * 0.30, y); pdf.set_text_color(*MUT); pdf.cell(usable * 0.20, 6, str(l.get("nights") or ""), align="C")
             pdf.cell(usable * 0.25, 6, str(l.get("checkin") or ""), align="C")
             pdf.set_text_color(*INK); pdf.cell(usable * 0.25, 6, shape(l.get("channel") or ""), align="R"); pdf.ln(6)
+    # ---- manual income lines ----
+    mil = rep.get("manual_income_lines") or []
+    if mil:
+        section("إيراد مضاف يدويًا (%d)" % len(mil)); pdf.set_font(FONT, size=10)
+        for l in mil:
+            y = pdf.get_y(); pdf.set_text_color(*INK)
+            pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, money(l.get("amount")), align="L")
+            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(str(l.get("label") or "إيراد مضاف يدويًا")), align="R"); pdf.ln(6)
     # ---- expenses table ----
     el = rep.get("exp_lines") or []
     section("المصاريف (%d)" % len(el)); pdf.set_font(FONT, size=10)
@@ -28728,10 +28776,14 @@ def _finance_aggregate(reps, owner, start, end):
     balanced = all((r.get("reconciliation") or {}).get("balanced") for r in reps) if reps else True
     ti = tot("total_income"); fee = tot("ouja_fee")
     blended = round(fee / ti * 100, 1) if ti else None     # owners can differ per apartment → blended effective %
+    mil = []
+    for r in reps:
+        mil.extend(r.get("manual_income_lines") or [])
     return {"currency": "SAR", "owner": owner, "management_pct": blended,
             "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
             "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
-            "extras": tot("extras"), "total_income": tot("total_income"), "ouja_fee": tot("ouja_fee"),
+            "extras": tot("extras"), "manual_income": tot("manual_income"), "manual_income_lines": mil,
+            "total_income": tot("total_income"), "ouja_fee": tot("ouja_fee"),
             "expenses": tot("expenses"), "cleaning": {"type": "mixed", "total": cleaning_total, "cleans": None, "amount": None},
             "owner_net": tot("owner_net"), "apartments": parts,
             "reconciliation": {"balanced": balanced}, "n_apartments": len(reps)}
