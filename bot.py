@@ -531,6 +531,111 @@ def oujact_listing_ids():
                 pass
     return out
 
+# ===== Cleaning teams: multiple crews, each with its own apartments + unique external link =====
+_cleaning_teams = {}         # team_id -> {id, name, token, created_at}
+_clean_early_depart = {}     # str(lid) -> {at, reservation, note, source}  (Musaed-detected early checkout)
+
+def _ct_now():
+    return datetime.now(TZ).isoformat(timespec="seconds")
+
+def _ct_new_id():
+    import uuid
+    return "team-" + uuid.uuid4().hex[:8]
+
+def _ct_new_token():
+    import secrets
+    return secrets.token_urlsafe(12)
+
+def _ct_load():
+    global _cleaning_teams, _clean_early_depart
+    _cleaning_teams = {str(k): v for k, v in (_load_json("cleaning_teams.json", {}) or {}).items()
+                       if isinstance(v, dict) and v.get("id")}
+    _clean_early_depart = _load_json("clean_early_depart.json", {}) or {}
+
+def _ct_save():
+    _save_json("cleaning_teams.json", _cleaning_teams)
+    _save_json("clean_early_depart.json", _clean_early_depart)
+
+def _ct_migrate():
+    """First run: create 'Team 1' from the OujaCT-flagged apartments (its link keeps working)."""
+    if _cleaning_teams:
+        return 0
+    tid = "team-1"
+    _cleaning_teams[tid] = {"id": tid, "name": "الفريق الأول", "token": (OUJACT_ROUTE_TOKEN or _ct_new_token()),
+                            "created_at": _ct_now()}
+    n = 0
+    for k, rec in _ls_get()["listings"].items():
+        if rec.get("oujact") and not rec.get("cleaning_team"):
+            rec["cleaning_team"] = tid
+            n += 1
+    try:
+        _ls_save()
+    except Exception:
+        pass
+    _ct_save()
+    return n
+
+def _ct_team_lids(team_id):
+    out = set()
+    for k, rec in _ls_get()["listings"].items():
+        if str(rec.get("cleaning_team") or "") == str(team_id):
+            try:
+                out.add(int(k))
+            except (TypeError, ValueError):
+                pass
+    return out
+
+def _ct_team_by_token(token):
+    if not token:
+        return None
+    for t in _cleaning_teams.values():
+        if t.get("token") and t["token"] == token:
+            return t
+    if OUJACT_ROUTE_TOKEN and token == OUJACT_ROUTE_TOKEN:
+        return _cleaning_teams.get("team-1")
+    return None
+
+def _ct_team_view(t):
+    lids = _ct_team_lids(t["id"])
+    return {"id": t["id"], "name": t.get("name", ""), "token": t.get("token", ""),
+            "link": "/oujact-route?token=" + (t.get("token") or ""),
+            "apartments": len(lids), "lids": sorted(lids)}
+
+# ---- Musaed early-departure: a guest indicating they LEFT early flags the unit urgent ----
+_EARLY_DEPART_PHRASES = (
+    "we left the apartment", "we left", "i left the apartment", "i have left", "we have left",
+    "already left", "checked out early", "left early", "we checked out", "i checked out",
+    "vacated", "we are leaving now", "leaving the apartment now",
+    "نزلنا", "نزلت من الشقة", "طلعنا من الشقة", "طلعت من الشقة", "غادرنا", "غادرت الشقة",
+    "سلمنا الشقة", "سلمت الشقة", "تركنا الشقة", "تركت الشقة", "خلصنا وطلعنا", "طلعنا بدري",
+    "نزلنا بدري", "مشينا من الشقة",
+)
+
+def _is_early_departure_msg(text):
+    t = (text or "").lower()
+    return any(p in t for p in _EARLY_DEPART_PHRASES)
+
+def _clean_flag_early_departure(lid, reservation_id="", note="", source="musaed"):
+    if lid is None:
+        return False
+    _clean_early_depart[str(lid)] = {"at": _ct_now(), "reservation": str(reservation_id or ""),
+                                     "note": (note or "")[:200], "source": source}
+    try:
+        _ct_save()
+    except Exception:
+        pass
+    return True
+
+def _clean_early_departure_active(lid):
+    """True if this unit was flagged as an early departure in the last 18h (today's urgent clean)."""
+    info = _clean_early_depart.get(str(lid))
+    if not info:
+        return False
+    try:
+        return (datetime.now(TZ) - datetime.fromisoformat(info["at"])).total_seconds() < 18 * 3600
+    except Exception:
+        return False
+
 def _extract_directions(L):
     """Find the unit's arrival-guide / 'how to reach the apartment' (directions) link in
     the listing's Custom Fields. Returns (url, custom_field_name) — either may be None.
@@ -671,17 +776,20 @@ def _ha_reservations_window(param_start, param_end, start_iso, end_iso):
     return out
 
 def _oujact_sort_key(it):
-    """Stage 5 priority: check-ins TODAY first, then earliest check-in time,
-    then earliest checkout, then unit name."""
-    return (0 if it["checkin_today"] else 1,
+    """Priority: Musaed-detected EARLY DEPARTURES first (guest already left → clean now), then
+    check-ins TODAY, then earliest check-in time, then earliest checkout, then unit name."""
+    return (0 if it.get("early_departure") else 1,
+            0 if it["checkin_today"] else 1,
             it["checkin_dt"] or _OUJACT_FAR,
             it["checkout"],
             (it["listing"] or "").lower())
 
-def fetch_oujact_turnovers():
-    """Today's + tomorrow's turnovers (departures) for OujaCT-assigned units, each tagged
-    with same-day check-in detection + the next guest's check-in time, priority-ordered."""
-    assigned = oujact_listing_ids()
+def fetch_oujact_turnovers(assigned=None):
+    """Today's + tomorrow's turnovers (departures) for the cleaning units, each tagged with
+    same-day check-in detection + the next guest's check-in time, priority-ordered. Pass
+    `assigned` (a set of listing ids) to scope to ONE team; default = all OujaCT-assigned."""
+    if assigned is None:
+        assigned = oujact_listing_ids()
     if not assigned:
         return []
     listings = get_listings_map()
@@ -736,6 +844,7 @@ def fetch_oujact_turnovers():
             "checkout_date": d_iso,
             "checkin_today": cin is not None,
             "checkin_dt": cin,
+            "early_departure": _clean_early_departure_active(lid),   # Musaed: guest said they left
             "directions_url": rec.get("directions_url"),
         })
     out.sort(key=_oujact_sort_key)
@@ -2966,10 +3075,11 @@ def _oujact_priority(it, cstate, done, now):
         return (3, "checkout_passed")
     return (6, "flexible")
 
-def _oujact_dispatch_plan(today_only=True):
+def _oujact_dispatch_plan(today_only=True, assigned=None):
     """Today's prioritized Oujact dispatch plan (priority tier first; within-tier by check-in
-    time then checkout). Includes config, checkout state, status, reason chips, missing-map flag."""
-    items = fetch_oujact_turnovers()
+    time then checkout). Includes config, checkout state, status, reason chips, missing-map flag.
+    Pass `assigned` (a set of listing ids) to scope the plan to ONE cleaning team."""
+    items = fetch_oujact_turnovers(assigned=assigned)
     today = datetime.now(TZ).date().isoformat()
     if today_only:
         items = [it for it in items if it["checkout_date"] == today]
@@ -5751,6 +5861,14 @@ async def process_assistant_item(it, channel):
             it["guest_prior_stays"] = len(prof.get("reservations", []))
     except Exception as e:
         print("guest profile update error:", e)
+    # Musaed → cleaning: a guest saying they LEFT early flags their unit for an urgent clean.
+    try:
+        if it.get("listing_id") is not None and _is_early_departure_msg(it.get("guest_text")):
+            if _clean_flag_early_departure(it.get("listing_id"), it.get("reservation_id"),
+                                           it.get("guest_text"), "musaed"):
+                log_event("ops", f"تنظيف · مساعد رصد مغادرة مبكرة · {it.get('unit') or it.get('listing_id')}")
+    except Exception as _e:
+        print("early-departure flag error:", _e)
     # ---- Off-hours flag (used below in the draft path) ----
     # New behavior per owner: outside working hours, answer ANY question the
     # bot is confident about (treat off-hours like ASSISTANT_AUTO=ON with the
@@ -30379,13 +30497,116 @@ def _oujact_plan_totals(plan, eta):
             "total_min_low": (cmin + buf + (drive or 0)),
             "total_min_high": (cmax + buf + (drive or 0))}
 
+async def _api_cleaning_teams(request):
+    """GET → teams + apartments (for the management tab). POST {name} create · {id,name} rename ·
+    {id,delete} remove · {id,regen} new token."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        teams = [_ct_team_view(t) for t in sorted(_cleaning_teams.values(), key=lambda x: x.get("created_at") or "")]
+        listings = get_listings_map() or {}
+        store = _ls_get()["listings"]
+        apts = []
+        for lid, nm in sorted(listings.items(), key=lambda x: (x[1] or "")):
+            rec = store.get(str(lid)) or {}
+            if rec.get("active") is False:
+                continue
+            apts.append({"lid": lid, "name": nm, "team_id": rec.get("cleaning_team") or "",
+                         "early": _clean_early_departure_active(lid)})
+        return _json({"ok": True, "teams": teams, "apartments": apts})
+    b = await _read_body(request)
+    tid = (b.get("id") or "").strip()
+    if b.get("delete") and tid:
+        _cleaning_teams.pop(tid, None)
+        for k, rec in _ls_get()["listings"].items():
+            if str(rec.get("cleaning_team") or "") == tid:
+                rec["cleaning_team"] = ""
+        try:
+            _ls_save()
+        except Exception:
+            pass
+        _ct_save()
+        return _json({"ok": True, "deleted": tid})
+    if tid and tid in _cleaning_teams:
+        if b.get("regen"):
+            _cleaning_teams[tid]["token"] = _ct_new_token()
+        if (b.get("name") or "").strip():
+            _cleaning_teams[tid]["name"] = b["name"].strip()[:60]
+        _ct_save()
+        return _json({"ok": True, "team": _ct_team_view(_cleaning_teams[tid])})
+    name = (b.get("name") or "").strip() or ("فريق " + str(len(_cleaning_teams) + 1))
+    nid = _ct_new_id()
+    _cleaning_teams[nid] = {"id": nid, "name": name[:60], "token": _ct_new_token(), "created_at": _ct_now()}
+    _ct_save()
+    return _json({"ok": True, "team": _ct_team_view(_cleaning_teams[nid])})
+
+async def _api_cleaning_assign(request):
+    """Assign an apartment to a team (ONE team per apartment). {lid, team_id} ('' = unassign)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    team_id = (b.get("team_id") or "").strip()
+    if team_id and team_id not in _cleaning_teams:
+        return _json({"error": "bad team"}, 400)
+    rec = _ls_get()["listings"].get(str(lid))
+    if not rec:
+        return _json({"error": "listing not found"}, 404)
+    rec["cleaning_team"] = team_id
+    rec["oujact"] = bool(team_id)             # legacy flag in sync: assigned to a team = in-house cleaning
+    try:
+        _ls_save()
+    except Exception:
+        pass
+    return _json({"ok": True, "lid": lid, "team_id": team_id})
+
+async def _api_cleaning_clear_early(request):
+    """Clear a unit's Musaed early-departure flag once handled. {lid}"""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    _clean_early_depart.pop(str(b.get("lid") or ""), None)
+    _ct_save()
+    return _json({"ok": True})
+
+async def _api_cleaning_teams_analytics(request):
+    """Per-team snapshot for today: apartments, turnovers, early-departures, photo reports."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    today = datetime.now(TZ).date().isoformat()
+    out = []
+    for t in sorted(_cleaning_teams.values(), key=lambda x: x.get("created_at") or ""):
+        lids = _ct_team_lids(t["id"])
+        plan = await asyncio.to_thread(_oujact_dispatch_plan, True, lids)
+        early = sum(1 for lid in lids if _clean_early_departure_active(lid))
+        reports = submitted = approved = 0
+        for lid in lids:
+            rep = _cleaning_reports.get(_cleanproof_report_id(lid, today))
+            if rep:
+                reports += 1
+                st = (rep.get("status") or "").lower()
+                if st in ("approved", "done", "accepted", "verified"):
+                    approved += 1
+                elif st in ("submitted", "in_review", "pending", "review"):
+                    submitted += 1
+        out.append({"id": t["id"], "name": t.get("name", ""), "apartments": len(lids),
+                    "turnovers_today": len(plan), "early_departures": early,
+                    "reports_today": reports, "submitted": submitted, "approved": approved,
+                    "pending": max(0, len(plan) - reports)})
+    return _json({"ok": True, "date": today, "teams": out})
+
 async def _api_oujact_route(request):
     """PUBLIC, token-gated route data for the cleaning team (Oujact only · today · cleaning
     actions only — never the full dashboard). Optional ?start= computes ETA when possible."""
     token = request.query.get("token", "")
-    if not OUJACT_ROUTE_TOKEN or token != OUJACT_ROUTE_TOKEN:
+    team = _ct_team_by_token(token)
+    if not team and not (OUJACT_ROUTE_TOKEN and token == OUJACT_ROUTE_TOKEN):
         return _json({"error": "unauthorized"}, 401)
-    plan = await asyncio.to_thread(_oujact_dispatch_plan)
+    assigned = _ct_team_lids(team["id"]) if team else None     # scope to THIS team's apartments
+    plan = await asyncio.to_thread(_oujact_dispatch_plan, True, assigned)
     start = (request.query.get("start") or "").strip()
     eta = {"available": False, "reason": "no_start", "legs": [], "total_drive_min": None}
     if start:
@@ -30394,6 +30615,7 @@ async def _api_oujact_route(request):
         for i, p in enumerate(plan):
             p["eta_min"] = legs[i] if i < len(legs) else None
     return _json({"ok": True, "date": datetime.now(TZ).date().isoformat(),
+                  "team": {"id": team["id"], "name": team.get("name", "")} if team else None,
                   "plan": plan, "eta": eta, "totals": _oujact_plan_totals(plan, eta),
                   "have_start": bool(start), "maps_key": bool(GOOGLE_MAPS_API_KEY)})
 
@@ -30475,7 +30697,7 @@ async def _api_oujact_status(request):
 
 def _oujact_route_auth(request):
     tok = request.query.get("token", "")
-    return bool(OUJACT_ROUTE_TOKEN) and tok == OUJACT_ROUTE_TOKEN
+    return _ct_team_by_token(tok) is not None or (bool(OUJACT_ROUTE_TOKEN) and tok == OUJACT_ROUTE_TOKEN)
 
 async def _api_oujact_photo_template(request):
     if not _oujact_route_auth(request):
@@ -31326,6 +31548,11 @@ async def start_web_server():
         app.router.add_post("/api/oujact/apply", _api_oujact_apply)
         app.router.add_get("/oujact-route", _handle_oujact_route)          # public mobile route page
         app.router.add_get("/api/oujact/route", _api_oujact_route)         # token-gated route data
+        app.router.add_get("/api/cleaning/teams", _api_cleaning_teams)
+        app.router.add_post("/api/cleaning/teams", _api_cleaning_teams)
+        app.router.add_post("/api/cleaning/assign", _api_cleaning_assign)
+        app.router.add_post("/api/cleaning/clear-early", _api_cleaning_clear_early)
+        app.router.add_get("/api/cleaning/teams-analytics", _api_cleaning_teams_analytics)
         app.router.add_get("/api/oujact/photo-template", _api_oujact_photo_template)
         app.router.add_post("/api/oujact/photo-upload", _api_oujact_photo_upload)
         app.router.add_post("/api/oujact/report-submit", _api_oujact_report_submit)
@@ -31902,6 +32129,13 @@ def load_state():
         _finance_adjust.update(_load_json("finance_adjust.json", {}) or {})
         _finance_last_import.clear()
         _finance_last_import.update(_load_json("finance_last_import.json", {}) or {})
+        try:
+            _ct_load()
+            _ctn = _ct_migrate()      # first run → "Team 1" from the OujaCT-flagged apartments
+            if _ctn:
+                print(f"cleaning teams: migrated {_ctn} apartments into Team 1")
+        except Exception as _e:
+            print("cleaning teams load error:", _e)
         _weekly_reports.clear()
         for k, v in (_load_json("weekly_reports.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
@@ -32000,6 +32234,8 @@ def persist_state():
     _save_json("unit_owners.json", _unit_owners)
     _save_json("finance_defaults.json", _finance_defaults)   # Stage 3 item 16
     _save_json("owner_registry.json", _owner_registry)
+    _save_json("cleaning_teams.json", _cleaning_teams)
+    _save_json("clean_early_depart.json", _clean_early_depart)
     _save_json("finance_adjust.json", _finance_adjust)
     _save_json("finance_last_import.json", _finance_last_import)
     _save_json("weekly_reports.json", _weekly_reports)
