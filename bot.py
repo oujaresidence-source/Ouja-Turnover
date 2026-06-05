@@ -636,6 +636,59 @@ def _clean_early_departure_active(lid):
     except Exception:
         return False
 
+# ---- Manual cleaning tasks: a manager assigns "clean apartment X on date D, type T" ----
+# Preset cleaning types the manager picks from (MCQ/dropdown) and can add a free note to.
+_CLEAN_TYPES = {
+    "checkout": ("تنظيف مغادرة", "Checkout clean"),
+    "standard": ("تنظيف قياسي", "Standard clean"),
+    "regular":  ("تنظيف عادي", "Regular clean"),
+    "deep":     ("تنظيف عميق", "Deep clean"),
+    "linen":    ("تغيير مفارش", "Linen change"),
+    "inspect":  ("فحص فقط", "Inspection only"),
+}
+def _clean_type_label(key, lang="ar"):
+    pair = _CLEAN_TYPES.get(key) or _CLEAN_TYPES["standard"]
+    return pair[0] if lang == "ar" else pair[1]
+
+def _clean_task_add(lid, date_iso, ctype="standard", note="", by=""):
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return None
+    if ctype not in _CLEAN_TYPES:
+        ctype = "standard"
+    import uuid
+    tid = "ctk-" + uuid.uuid4().hex[:10]
+    rec = {"id": tid, "lid": lid, "date": str(date_iso)[:10], "ctype": ctype,
+           "note": (note or "")[:300], "by": (by or "")[:60],
+           "created_at": _ct_now(), "canceled": False}
+    _clean_tasks[tid] = rec
+    _save_json("cleaning_tasks.json", _clean_tasks)
+    return rec
+
+def _clean_task_cancel(tid):
+    rec = _clean_tasks.get(str(tid))
+    if not rec:
+        return False
+    rec["canceled"] = True
+    _save_json("cleaning_tasks.json", _clean_tasks)
+    return True
+
+def _clean_tasks_for(date_iso, lids=None):
+    """Active (non-canceled) manual cleaning tasks for a date, optionally scoped to a set of lids."""
+    day = str(date_iso)[:10]
+    out = []
+    for rec in _clean_tasks.values():
+        if rec.get("canceled") or rec.get("date") != day:
+            continue
+        try:
+            if lids is not None and int(rec.get("lid")) not in lids:
+                continue
+        except (TypeError, ValueError):
+            continue
+        out.append(rec)
+    return out
+
 def _extract_directions(L):
     """Find the unit's arrival-guide / 'how to reach the apartment' (directions) link in
     the listing's Custom Fields. Returns (url, custom_field_name) — either may be None.
@@ -2666,6 +2719,7 @@ _oujact_checkout = _load_json("oujact_checkout.json", {}) or {}    # "lid|date" 
 _oujact_status   = _load_json("oujact_status.json", []) or []      # append-only status actions
 _oujact_route_audit = _load_json("oujact_route_audit.json", []) or []
 _oujact_dispatch_log = _load_json("oujact_dispatch_log.json", {}) or {}  # "lid|date" -> {flags}
+_clean_tasks = _load_json("cleaning_tasks.json", {}) or {}         # task_id -> manual cleaning task
 _cleaning_photo_templates = _load_json("cleaning_photo_templates.json", {}) or {}
 _cleaning_reports = _load_json("cleaning_reports.json", {}) or {}
 _cleaning_report_photos = _load_json("cleaning_report_photos.json", {}) or {}
@@ -3117,10 +3171,89 @@ def _oujact_dispatch_plan(today_only=True, assigned=None):
             "access_notes": cfg.get("access_notes") or "", "parking_notes": cfg.get("parking_notes") or "",
             "discord_channel": cfg.get("discord_channel") or "",
         })
+    # Merge manager-added MANUAL cleaning tasks for the same day (so the cleaning team's route
+    # page + the dashboard both surface them). A manual task on a unit that already checks out
+    # today just annotates that turnover with the chosen cleaning type/note.
+    have = {p["lid"]: p for p in plan}
+    lmap = get_listings_map() or {}
+    for tk in _clean_tasks_for(today, assigned):
+        lid = tk["lid"]
+        if lid in have:
+            have[lid]["manual_type"] = tk["ctype"]
+            have[lid]["manual_note"] = tk.get("note") or ""
+            have[lid]["task_id"] = tk["id"]
+            continue
+        cfg = store.get(str(lid)) or {}
+        maps = (cfg.get("maps_link") or "").strip()
+        parsed_ll = _extract_latlng(maps)
+        lat, lng = parsed_ll if parsed_ll else (cfg.get("lat"), cfg.get("lng"))
+        last = _oujact_latest_status(lid, today)
+        plan.append({
+            "lid": lid, "name": lmap.get(lid) or cfg.get("internal_name") or f"unit-{lid}", "date": today,
+            "district": cfg.get("group") or cfg.get("address") or "",
+            "checkout_time": "—", "checkout_passed": True,
+            "checkin_today": False, "checkin_time": None,
+            "checkout_state": "manual", "status": (last or {}).get("action"),
+            "tier": 2, "reason_code": "manual",
+            "reason_ar": _clean_type_label(tk["ctype"], "ar"),
+            "reason_en": _clean_type_label(tk["ctype"], "en"),
+            "maps_link": maps, "directions_url": cfg.get("directions_url"),
+            "lat": lat, "lng": lng, "missing_maps": not maps,
+            "clean_min": cfg.get("clean_min") or OUJACT_CLEAN_MIN,
+            "clean_max": cfg.get("clean_max") or OUJACT_CLEAN_MAX,
+            "park_buffer": cfg.get("park_buffer") if cfg.get("park_buffer") is not None else OUJACT_PARK_BUFFER,
+            "access_notes": cfg.get("access_notes") or "", "parking_notes": cfg.get("parking_notes") or "",
+            "discord_channel": cfg.get("discord_channel") or "",
+            "manual": True, "manual_type": tk["ctype"], "manual_note": tk.get("note") or "", "task_id": tk["id"],
+        })
     plan.sort(key=lambda p: (p["tier"], p.get("checkin_time") or "99:99", p["checkout_time"]))
     for i, p in enumerate(plan):
         p["rank"] = i + 1
     return plan
+
+def _clean_ops_snapshot(team_lids):
+    """Per-unit cleaning STAGE for today across a set of listing ids (reuses the dispatch plan,
+    which already merges manual tasks). Stage ∈ to_clean | in_progress | review | approved | redo.
+    Drives the Cleaning-Teams operations view + the 3-step pipeline counts."""
+    today = datetime.now(TZ).date().isoformat()
+    plan = _oujact_dispatch_plan(True, team_lids)
+    units = []
+    counts = {"to_clean": 0, "in_progress": 0, "review": 0, "approved": 0, "redo": 0, "urgent": 0, "total": 0}
+    for p in plan:
+        lid = p["lid"]
+        rep = _cleaning_reports.get(_cleanproof_report_id(lid, today))
+        rep_status = (rep or {}).get("status") or ""
+        action = (_oujact_latest_status(lid, today) or {}).get("action") or ""
+        if rep_status == "manager_approved":
+            stage = "approved"
+        elif rep_status in ("manager_rejected", "needs_reshoot"):
+            stage = "redo"
+        elif rep_status in ("pending_manager_review", "submitted_for_review", "issue_found") or action == "done":
+            stage = "review"
+        elif action in ("started", "arrived"):
+            stage = "in_progress"
+        else:
+            stage = "to_clean"
+        counts[stage] = counts.get(stage, 0) + 1
+        counts["total"] += 1
+        if p.get("checkin_today"):
+            counts["urgent"] += 1
+        units.append({
+            "lid": lid, "name": p["name"], "stage": stage,
+            "checkout_time": p.get("checkout_time"), "checkout_passed": p.get("checkout_passed"),
+            "checkin_today": p.get("checkin_today"), "checkin_time": p.get("checkin_time"),
+            "early": _clean_early_departure_active(lid),
+            "manual": bool(p.get("manual")), "manual_type": p.get("manual_type") or "",
+            "task_id": p.get("task_id") or "",
+            "reason_ar": p.get("reason_ar"), "reason_en": p.get("reason_en"),
+            "status": action,
+            "report_id": (rep or {}).get("report_id") or "",
+            "report_status": rep_status,
+            "photos_done": (rep or {}).get("uploaded_required_slots_count") or 0,
+            "photos_req": (rep or {}).get("required_slots_count") or 0,
+            "tier": p.get("tier"),
+        })
+    return {"date": today, "units": units, "counts": counts}
 
 def _oujact_route_eta(start, plan):
     """Leg-by-leg ETA (minutes) in plan order, traffic-aware, ONLY when a Google key + the
@@ -11192,42 +11325,14 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="cleaningOpsSummary"></div>
         <div class="kpis" id="cleanStats"></div>
 
-        <!-- OujaCT — in-house cleaning team assignment + Apply/Refresh -->
-        <div class="card" id="oujactCard">
-          <div class="card-head">
-            <span class="card-title" id="t_ct_title">🧼 فريق التنظيف الداخلي (OujaCT)</span>
-            <span class="card-sub"><b id="oujactCount">0</b> <span id="t_ct_assigned">معيّنة</span></span>
+        <!-- Daily turnover cleaning + photo-proof review MOVED to the "🧽 فرق التنظيف" tab -->
+        <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <div class="card-title">🧽 تنظيف اليوم انتقل لتبويب «فرق التنظيف»</div>
+            <div class="muted" style="font-size:11.5px;margin-top:3px">الخروج اليومي · التنظيف العاجل · مراجعة الصور والتوقيع · فرق ولينكات مستقلة. هنا يبقى جدول <b>الديب كلين</b> فقط.</div>
           </div>
-          <div class="muted" id="t_ct_sub" style="font-size:11.5px;margin:2px 2px 12px"></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-            <button class="btn primary sm" id="oujactApplyBtn" onclick="oujactApply()"><span id="t_ct_apply">⚡ تطبيق / تحديث القنوات</span></button>
-            <span class="muted" id="t_ct_apply_hint" style="font-size:11px"></span>
-          </div>
-          <input id="oujactSearch" placeholder="ابحث…" oninput="renderOujact()" style="width:200px;padding:6px 10px;height:32px;font-size:12px;margin-bottom:8px">
-          <div id="oujactBody"><div class="empty sk">—</div></div>
-        </div>
-
-        <div class="card" id="cleanProofCard">
-          <div class="card-head">
-            <span class="card-title" id="t_cp_title">📷 تقارير صور التنظيف</span>
-            <span class="card-sub" id="cleanProofStorage">—</span>
-          </div>
-          <div class="muted" id="t_cp_sub" style="font-size:11.5px;margin:2px 2px 12px"></div>
-          <div class="kpis" id="cleanProofStats"></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0">
-            <button class="btn ghost sm" onclick="loadCleaningReports()">↻ <span id="t_cp_refresh">تحديث التقارير</span></button>
-            <button class="btn ghost sm" onclick="openCleanTemplateEditor()">⚙ <span id="t_cp_templates">تعديل قائمة الصور</span></button>
-            <select id="cleanProofStatus" onchange="renderCleaningReports()" style="height:34px;padding:6px 10px;font-size:12px">
-              <option value="">All</option>
-              <option value="pending_manager_review">Pending</option>
-              <option value="manager_approved">Approved</option>
-              <option value="manager_rejected">Rejected</option>
-              <option value="needs_reshoot">Needs reshoot</option>
-              <option value="issue_found">Issues</option>
-            </select>
-            <input id="cleanProofSearch" oninput="renderCleaningReports()" placeholder="ابحث..." style="width:220px;padding:6px 10px;height:34px;font-size:12px">
-          </div>
-          <div id="cleanProofBody"><div class="empty sk">—</div></div>
+          <button class="btn primary sm" onclick="go('cleanteams')">فتح فرق التنظيف ←</button>
+          <button class="btn ghost sm" onclick="openCleanTemplateEditor()">⚙ قائمة صور الإثبات</button>
         </div>
 
         <!-- THIS WEEK strip — the supervisor's daily lookup -->
@@ -11305,8 +11410,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <!-- ============ LISTINGS (Hostaway master store) ============ -->
       <section class="view" id="view_cleanteams">
         <div class="page-head">
-          <div><div class="page-title">🧽 فرق التنظيف</div><div class="page-sub">فرق مستقلة · لكل فريق شقق ورابط خاص · رفع صور الإثبات للدرايف</div></div>
+          <div><div class="page-title">🧽 فرق التنظيف</div><div class="page-sub">عمليات اليوم · خروج وتنظيف عاجل · مراجعة صور وتوقيع · لكل فريق رابط خاص</div></div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="ctOpenLog()">📜 السجل</button>
             <button class="btn ghost sm" onclick="loadCleanTeams()">↻ تحديث</button>
             <button class="btn primary sm" onclick="ctCreateTeam()">+ فريق جديد</button>
           </div>
@@ -14325,13 +14431,17 @@ function openCleanProofReport(rid){
   setDrawerFoot(foot+'<button class="btn ghost sm" onclick="closeDrawer()">×</button>');
 }
 async function cleanProofDecision(rid, decision){
-  var notes='';
+  var notes='', by='';
+  if(decision==='approve'){
+    by=(prompt(L==='ar'?'وقّع باسمك للاعتماد:':'Sign your name to approve:','')||'').trim();
+    if(!by) return;
+  }
   if(decision==='reject' || decision==='reshoot'){
     notes=(prompt(decision==='reject'?t().cp_reason:t().cp_notes,'')||'').trim();
     if(!notes) return;
   }
-  var r=await post('/api/cleaning/report-decision',{report_id:rid,decision:decision,notes:notes});
-  if(r&&r.ok){ toast('✓'); await loadCleaningReports(false); openCleanProofReport(rid); }
+  var r=await post('/api/cleaning/report-decision',{report_id:rid,decision:decision,notes:notes,by:by});
+  if(r&&r.ok){ toast('✓'); if(typeof view!=='undefined'&&view==='cleanteams'){ await loadCleanTeams(); } else { await loadCleaningReports(false); } openCleanProofReport(rid); }
   else toast((r&&r.error)||t().err);
 }
 async function openCleanTemplateEditor(){
@@ -20382,22 +20492,71 @@ async function loadCleanTeams(){
   var body=document.getElementById('cleanTeamsBody'); if(!body) return;
   body.innerHTML='<div class="empty sk">—</div>';
   try{ D.ctData=await api('/api/cleaning/teams'); }catch(e){ D.ctData={teams:[],apartments:[]}; }
-  try{ D.ctAnalytics=await api('/api/cleaning/teams-analytics'); }catch(_e){ D.ctAnalytics={teams:[]}; }
+  try{ D.ctAnalytics=await api('/api/cleaning/teams-analytics'); }catch(_e){ D.ctAnalytics={teams:[],summary:{}}; }
+  try{ D.cleanReports=await api('/api/cleaning/reports'); }catch(_e){}
   renderCleanTeams();
+}
+function _ctStageInfo(s){
+  var ar=(L==='ar');
+  if(s==='in_progress') return {t:ar?'قيد التنظيف':'In progress', c:'#3b82c4', ic:'🔄'};
+  if(s==='review') return {t:ar?'بانتظار المراجعة':'Needs review', c:'var(--gold)', ic:'📷'};
+  if(s==='approved') return {t:ar?'معتمد':'Approved', c:'#3e9665', ic:'✓'};
+  if(s==='redo') return {t:ar?'يُعاد':'Redo', c:'var(--down)', ic:'↻'};
+  return {t:ar?'يحتاج تنظيف':'Needs cleaning', c:'#9a8a66', ic:'🧹'};
+}
+function _ctPipe(c){
+  var ar=(L==='ar'); c=c||{};
+  var chip=function(ic,n,lab,col){ return '<div style="flex:1;text-align:center;padding:7px 4px;background:var(--surface-2);border-radius:8px"><div style="font-size:18px;font-weight:800;color:'+col+'">'+(n||0)+'</div><div class="muted" style="font-size:9.5px">'+ic+' '+lab+'</div></div>'; };
+  return '<div style="display:flex;gap:6px;margin:10px 0">'
+    +chip('🧹',c.to_clean,(ar?'يحتاج تنظيف':'to clean'),'#9a8a66')
+    +chip('🔄',c.in_progress,(ar?'قيد التنظيف':'in progress'),'#3b82c4')
+    +chip('📷',c.review,(ar?'للمراجعة':'review'),'var(--gold)')
+    +((c.approved||c.redo)?chip('✓',(c.approved||0),(ar?'معتمد':'done'),'#3e9665'):'')
+    +'</div>';
+}
+function _ctUnitRow(u){
+  var ar=(L==='ar'); var si=_ctStageInfo(u.stage); var b='';
+  if(u.checkin_today) b+='<span style="background:rgba(204,75,75,.14);color:var(--down);font-size:9.5px;padding:2px 6px;border-radius:99px;font-weight:700">🔴 '+(ar?'دخول اليوم':'check-in')+(u.checkin_time?(' '+u.checkin_time):'')+'</span>';
+  if(u.early) b+='<span style="background:rgba(180,140,60,.16);color:var(--gold);font-size:9.5px;padding:2px 6px;border-radius:99px">⏰ '+(ar?'غادر بدري':'left early')+'</span>';
+  if(u.manual) b+='<span style="background:var(--surface-2);border:1px solid var(--border);font-size:9.5px;padding:2px 6px;border-radius:99px">🧹 '+esc(ar?(u.reason_ar||''):(u.reason_en||''))+'</span>';
+  var meta=(u.manual?(ar?'مهمة يدوية':'manual task'):((ar?'خروج ':'out ')+(u.checkout_time||'')+(u.checkout_passed?'':(ar?' (لسه)':' (later)'))));
+  var act='';
+  if(u.report_id && (u.stage==='review'||u.stage==='approved'||u.stage==='redo'))
+    act='<button class="btn '+(u.stage==='review'?'primary':'ghost')+' xs" onclick="openCleanReview(&#39;'+esc(u.report_id)+'&#39;)">'+(ar?'👁 مراجعة':'👁 Review')+'</button>';
+  var cancel=(u.manual&&u.task_id)?('<button class="btn ghost xs" title="'+(ar?'حذف المهمة':'remove')+'" onclick="ctCancelTask(&#39;'+esc(u.task_id)+'&#39;)">✕</button>'):'';
+  return '<div style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border)">'
+    +'<span style="width:7px;height:7px;border-radius:99px;background:'+si.c+';flex:none"></span>'
+    +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(u.name)+'</div>'
+    +'<div class="muted" style="font-size:10px">'+esc(meta)+'</div>'
+    +(b?('<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">'+b+'</div>'):'')+'</div>'
+    +'<span style="font-size:10px;color:'+si.c+';white-space:nowrap">'+si.ic+' '+esc(si.t)+'</span>'+act+cancel+'</div>';
 }
 function renderCleanTeams(){
   var body=document.getElementById('cleanTeamsBody'); if(!body) return;
+  var ar=(L==='ar');
   var d=D.ctData||{teams:[],apartments:[]}, an=((D.ctAnalytics||{}).teams)||[];
+  var sm=(D.ctAnalytics||{}).summary||{};
   var anById={}; an.forEach(function(t){ anById[t.id]=t; });
+  var bigStat=function(ic,n,lab,col){ return '<div style="flex:1;min-width:130px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center"><div style="font-size:24px;font-weight:800;color:'+col+'">'+(n||0)+'</div><div class="muted" style="font-size:11px">'+ic+' '+lab+'</div></div>'; };
+  var summaryHtml='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    +bigStat('🧹',(sm.total||0),(ar?'تنظيفات اليوم':'cleanings today'),'var(--text)')
+    +bigStat('🔴',(sm.urgent||0),(ar?'عاجل · دخول اليوم':'urgent · check-in'),'var(--down)')
+    +bigStat('🔄',(sm.in_progress||0),(ar?'قيد التنظيف':'in progress'),'#3b82c4')
+    +bigStat('📷',(sm.review||0),(ar?'بانتظار المراجعة':'needs review'),'var(--gold)')
+    +'</div>';
   var early=(d.apartments||[]).filter(function(a){ return a.early; });
-  var earlyHtml = early.length ? ('<div style="background:rgba(204,75,75,.1);border:1px solid var(--down);border-radius:10px;padding:12px;margin-bottom:14px"><b style="color:var(--down)">⏰ مغادرة مبكرة رصدها المساعد — '+early.length+'</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+early.map(function(a){ return '<span class="exp-reason">'+esc(a.name)+' <button class="btn ghost xs" onclick="ctClearEarly('+a.lid+')">✓</button></span>'; }).join('')+'</div></div>') : '';
+  var earlyHtml = early.length ? ('<div style="background:rgba(204,75,75,.1);border:1px solid var(--down);border-radius:10px;padding:12px;margin-bottom:14px"><b style="color:var(--down)">⏰ '+(ar?'مغادرة مبكرة رصدها المساعد':'Early departures (Musaed)')+' — '+early.length+'</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+early.map(function(a){ return '<span class="exp-reason">'+esc(a.name)+' <button class="btn ghost xs" onclick="ctClearEarly('+a.lid+')">✓</button></span>'; }).join('')+'</div></div>') : '';
   var teams=(d.teams||[]).map(function(t){
     var a=anById[t.id]||{}; var fullLink=location.origin+t.link;
+    var units=(a.units||[]);
+    var list=units.length ? units.map(_ctUnitRow).join('') : '<div class="muted" style="padding:14px;text-align:center;font-size:11.5px">'+(ar?'ما فيه تنظيف اليوم 🎉':'Nothing to clean today 🎉')+'</div>';
     return '<div class="card" style="border-radius:12px;padding:14px;margin-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font-size:15px">'+esc(t.name)+'</b>'
-        +'<div style="display:flex;gap:6px"><button class="btn ghost xs" onclick="ctRename(&#39;'+t.id+'&#39;)">✏️</button><button class="btn ghost xs" onclick="ctRegen(&#39;'+t.id+'&#39;)" title="رابط جديد">🔄</button><button class="btn ghost xs" onclick="ctDelete(&#39;'+t.id+'&#39;)">🗑</button></div></div>'
-      +'<div style="display:flex;gap:14px;margin-top:8px;font-size:12px;flex-wrap:wrap"><span>🏠 '+t.apartments+'</span><span>🔁 '+(a.turnovers_today||0)+'</span><span style="color:var(--green)">✓ '+(a.approved||0)+'</span><span style="color:var(--gold)">⏳ '+(a.submitted||0)+'</span>'+(a.early_departures?('<span style="color:var(--down)">⏰ '+a.early_departures+'</span>'):'')+'</div>'
-      +'<div style="display:flex;gap:6px;margin-top:10px;align-items:center"><input readonly value="'+esc(fullLink)+'" onclick="this.select()" style="flex:1;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;direction:ltr"><button class="btn ghost sm" onclick="ctCopy(&#39;'+esc(fullLink)+'&#39;)">نسخ</button><a class="btn ghost sm" href="'+esc(t.link)+'" target="_blank">فتح</a></div></div>';
+        +'<div style="display:flex;gap:6px"><button class="btn ghost xs" onclick="ctAddTask(&#39;'+t.id+'&#39;)">➕ '+(ar?'تنظيف':'clean')+'</button><button class="btn ghost xs" onclick="ctRename(&#39;'+t.id+'&#39;)">✏️</button><button class="btn ghost xs" onclick="ctRegen(&#39;'+t.id+'&#39;)" title="'+(ar?'رابط جديد':'new link')+'">🔄</button><button class="btn ghost xs" onclick="ctDelete(&#39;'+t.id+'&#39;)">🗑</button></div></div>'
+      +'<div class="muted" style="font-size:11px;margin-top:3px">🏠 '+t.apartments+' '+(ar?'شقة':'apts')+(a.early_departures?(' · <span style="color:var(--down)">⏰ '+a.early_departures+'</span>'):'')+'</div>'
+      +_ctPipe(a.counts)
+      +'<div style="display:flex;gap:6px;margin:4px 0 8px;align-items:center"><input readonly value="'+esc(fullLink)+'" onclick="this.select()" style="flex:1;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;direction:ltr"><button class="btn ghost sm" onclick="ctCopy(&#39;'+esc(fullLink)+'&#39;)">'+(ar?'نسخ':'copy')+'</button><a class="btn ghost sm" href="'+esc(t.link)+'" target="_blank">'+(ar?'فتح':'open')+'</a></div>'
+      +'<div style="border-top:1px solid var(--border)">'+list+'</div></div>';
   }).join('');
   var teamName=function(id){ var t=(d.teams||[]).filter(function(x){return x.id===id;})[0]; return t?t.name:''; };
   var inp='padding:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
@@ -20416,8 +20575,9 @@ function renderCleanTeams(){
       +'<span style="flex:1;font-size:12.5px">'+esc(a.name)+(a.early?' ⏰':'')+' '+cur+'</span>'
       +'<select onchange="ctAssign('+a.lid+',this.value)" style="'+inp+'">'+opts+'</select></div>';
   }).join('');
-  var assign='<div class="card" style="border-radius:12px;padding:14px;margin-top:6px"><b style="font-size:14px">توزيع الشقق على الفرق</b><div class="muted" style="font-size:11px;margin:4px 0 8px">حدّد عدة شقق وعيّنها لفريق دفعة وحدة · أو غيّر شقة وحدة من القائمة</div>'+bulkBar+(rows||'<div class="muted">لا شقق</div>')+'</div>';
-  body.innerHTML=earlyHtml+(teams||'<div class="empty" style="padding:20px;text-align:center">ما فيه فرق بعد — اضغط «+ فريق جديد»</div>')+assign;
+  var assign='<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:700;font-size:13.5px;padding:9px 4px;background:var(--surface);border:1px solid var(--border);border-radius:10px">'+(ar?'🧩 توزيع الشقق على الفرق':'🧩 Assign apartments to teams')+'</summary><div class="card" style="border-radius:12px;padding:14px;margin-top:6px"><div class="muted" style="font-size:11px;margin:0 0 8px">'+(ar?'حدّد عدة شقق وعيّنها لفريق دفعة وحدة · أو غيّر شقة وحدة من القائمة':'Tick several apartments and assign them at once · or change one from its dropdown')+'</div>'+bulkBar+(rows||'<div class="muted">'+(ar?'لا شقق':'No apartments')+'</div>')+'</div></details>';
+  var emptyTeams='<div class="empty" style="padding:20px;text-align:center">'+(ar?'ما فيه فرق بعد — اضغط «+ فريق جديد»':'No teams yet — tap “+ New team”')+'</div>';
+  body.innerHTML=summaryHtml+earlyHtml+(teams||emptyTeams)+assign;
 }
 async function ctCreateTeam(){ var nm=prompt('اسم الفريق:'); if(nm===null) return; await post('/api/cleaning/teams',{name:nm||''}); loadCleanTeams(); }
 async function ctRename(id){ var nm=prompt('الاسم الجديد:'); if(!nm) return; await post('/api/cleaning/teams',{id:id,name:nm}); loadCleanTeams(); }
@@ -20438,6 +20598,69 @@ async function ctBulkAssign(){
 }
 async function ctClearEarly(lid){ await post('/api/cleaning/clear-early',{lid:lid}); loadCleanTeams(); }
 function ctCopy(txt){ try{ navigator.clipboard.writeText(txt); toast('نُسخ ✓'); }catch(e){ toast(txt); } }
+/* open the in-dashboard photo review drawer (reuses Codex's openCleanProofReport) */
+async function openCleanReview(rid){
+  var r; try{ r=await api('/api/cleaning/report?id='+encodeURIComponent(rid)); }catch(_){ r=null; }
+  if(!r||!r.ok){ toast((r&&r.error)||(t().err||'⚠')); return; }
+  D.cleanReports=D.cleanReports||{reports:[]};
+  var arr=D.cleanReports.reports||(D.cleanReports.reports=[]);
+  var i=arr.findIndex(function(x){return x.report_id===rid;});
+  if(i>=0) arr[i]=r.report; else arr.push(r.report);
+  openCleanProofReport(rid);
+}
+/* manager: add a manual cleaning task to a team (apartment + date + type + note) */
+async function ctAddTask(teamId){
+  var ar=(L==='ar'); var d=D.ctData||{teams:[],apartments:[]};
+  var team=(d.teams||[]).filter(function(x){return x.id===teamId;})[0]||{};
+  var apts=(d.apartments||[]);
+  var mine=apts.filter(function(a){return a.team_id===teamId;});
+  var others=apts.filter(function(a){return a.team_id!==teamId;});
+  var grp=function(list,lab){ if(!list.length) return ''; return '<optgroup label="'+esc(lab)+'">'+list.map(function(a){return '<option value="'+a.lid+'">'+esc(a.name)+'</option>';}).join('')+'</optgroup>'; };
+  var types=D.cleanTypes||[];
+  if(!types.length){ try{ var tr=await api('/api/cleaning/task'); types=D.cleanTypes=tr.types||[]; }catch(_){ types=[]; } }
+  var typeOpts=types.map(function(x){return '<option value="'+x.key+'"'+(x.key==='checkout'?' selected':'')+'>'+esc(ar?x.ar:x.en)+'</option>';}).join('');
+  openDrawer((ar?'➕ تنظيف · ':'➕ Clean · ')+esc(team.name||''), ar?'أضف شقة تحتاج تنظيف':'Add an apartment that needs cleaning');
+  var inp='width:100%;padding:9px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 11px;font-family:inherit';
+  var lab='display:block;font-size:11px;color:var(--muted,#8a8270)';
+  setDrawerBody('<label style="'+lab+'">'+(ar?'الشقة':'Apartment')+'</label><select id="ctkLid" style="'+inp+'">'+grp(mine,ar?'شقق الفريق':'Team apartments')+grp(others,ar?'شقق أخرى':'Other apartments')+'</select>'
+    +'<label style="'+lab+'">'+(ar?'التاريخ':'Date')+'</label><input id="ctkDate" type="date" style="'+inp+'">'
+    +'<label style="'+lab+'">'+(ar?'نوع التنظيف':'Cleaning type')+'</label><select id="ctkType" style="'+inp+'">'+typeOpts+'</select>'
+    +'<label style="'+lab+'">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><textarea id="ctkNote" rows="2" style="'+inp+'" placeholder="'+(ar?'مثال: ركّزوا على المطبخ':'e.g. focus on the kitchen')+'"></textarea>');
+  setDrawerFoot('<button class="btn primary sm" onclick="ctSaveTask()">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+  var di=document.getElementById('ctkDate'); if(di) di.value=((D.ctAnalytics||{}).date)||'';
+}
+async function ctSaveTask(){
+  var lid=(document.getElementById('ctkLid')||{}).value;
+  var date=(document.getElementById('ctkDate')||{}).value;
+  var ctype=(document.getElementById('ctkType')||{}).value;
+  var note=(document.getElementById('ctkNote')||{}).value;
+  if(!lid){ toast(L==='ar'?'اختر شقة':'Pick an apartment'); return; }
+  var r=await post('/api/cleaning/task',{lid:Number(lid),date:date,ctype:ctype,note:note});
+  if(r&&r.ok){ toast(L==='ar'?'تمت الإضافة ✓':'Added ✓'); closeDrawer(); loadCleanTeams(); }
+  else toast((r&&r.error)||(t().err||'⚠'));
+}
+async function ctCancelTask(tid){
+  if(!confirm(L==='ar'?'حذف مهمة التنظيف اليدوية؟':'Remove this manual cleaning task?')) return;
+  await post('/api/cleaning/task',{id:tid,cancel:true}); loadCleanTeams();
+}
+function _ctLogLabel(e){
+  var ar=(L==='ar'); var a=e.action||'';
+  var M={arrived:['🚪 وصل','🚪 Arrived'],started:['🧹 بدأ التنظيف','🧹 Started'],done:['✅ خلّص','✅ Done'],issue:['⚠️ بلاغ','⚠️ Issue'],guest_inside:['🛑 الضيف داخل','🛑 Guest inside'],report_submitted:['📷 رفع التقرير','📷 Report submitted'],manager_approve:['✓ اعتمد','✓ Approved'],manager_reject:['× رفض','× Rejected'],manager_reshoot:['↻ إعادة تصوير','↻ Reshoot'],manual_task_added:['➕ مهمة يدوية','➕ Manual task'],manual_task_canceled:['✕ ألغى مهمة','✕ Task canceled']};
+  var m=M[a]; var lab=m?(ar?m[0]:m[1]):a;
+  return lab+(e.note?(' — '+e.note):'');
+}
+async function ctOpenLog(){
+  var ar=(L==='ar');
+  openDrawer(ar?'📜 سجل التنظيف':'📜 Cleaning log', ar?'آخر الأحداث':'recent activity');
+  setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">×</button>');
+  var r; try{ r=await api('/api/cleaning/log'); }catch(_){ r=null; }
+  if(!r||!r.ok){ setDrawerBody('<div class="empty">—</div>'); return; }
+  var rows=(r.log||[]);
+  if(!rows.length){ setDrawerBody('<div class="empty">'+(ar?'ما فيه أحداث بعد':'No events yet')+'</div>'); return; }
+  setDrawerBody('<div class="list">'+rows.map(function(e){
+    return '<div class="list-row"><span class="l-name">'+esc(_ctLogLabel(e))+'</span><span class="l-val">'+esc(e.name||'')+'</span><span class="l-tag">'+esc((e.ts||'').replace('T',' ').slice(5,16))+(e.by?(' · '+esc(e.by)):'')+'</span></div>';
+  }).join('')+'</div>');
+}
 
 /* ===== Bulk owner-statement PDFs (per-apartment or per-owner) ===== */
 var _bulkPdf=null;
@@ -30658,30 +30881,85 @@ async def _api_cleaning_clear_early(request):
     return _json({"ok": True})
 
 async def _api_cleaning_teams_analytics(request):
-    """Per-team snapshot for today: apartments, turnovers, early-departures, photo reports."""
+    """Per-team TODAY operations: each team's units with their cleaning stage + the 3-step
+    pipeline counts (to-clean / in-progress / done-needs-review) + a global summary."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     today = datetime.now(TZ).date().isoformat()
     out = []
+    summary = {"to_clean": 0, "in_progress": 0, "review": 0, "approved": 0, "redo": 0,
+               "urgent": 0, "total": 0}
     for t in sorted(_cleaning_teams.values(), key=lambda x: x.get("created_at") or ""):
         lids = _ct_team_lids(t["id"])
-        plan = await asyncio.to_thread(_oujact_dispatch_plan, True, lids)
+        snap = await asyncio.to_thread(_clean_ops_snapshot, lids)
+        c = snap["counts"]
+        for k in summary:
+            summary[k] += c.get(k, 0)
         early = sum(1 for lid in lids if _clean_early_departure_active(lid))
-        reports = submitted = approved = 0
-        for lid in lids:
-            rep = _cleaning_reports.get(_cleanproof_report_id(lid, today))
-            if rep:
-                reports += 1
-                st = (rep.get("status") or "").lower()
-                if st in ("approved", "done", "accepted", "verified"):
-                    approved += 1
-                elif st in ("submitted", "in_review", "pending", "review"):
-                    submitted += 1
         out.append({"id": t["id"], "name": t.get("name", ""), "apartments": len(lids),
-                    "turnovers_today": len(plan), "early_departures": early,
-                    "reports_today": reports, "submitted": submitted, "approved": approved,
-                    "pending": max(0, len(plan) - reports)})
-    return _json({"ok": True, "date": today, "teams": out})
+                    "counts": c, "units": snap["units"], "early_departures": early})
+    return _json({"ok": True, "date": today, "teams": out, "summary": summary})
+
+async def _api_cleaning_task(request):
+    """Manager adds a manual cleaning task {lid, date, ctype, note} OR cancels one {id, cancel}.
+    GET returns the preset cleaning types for the picker."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        types = [{"key": k, "ar": v[0], "en": v[1]} for k, v in _CLEAN_TYPES.items()]
+        return _json({"ok": True, "types": types})
+    b = await _read_body(request)
+    if b.get("cancel") and b.get("id"):
+        ok = _clean_task_cancel(str(b.get("id")))
+        return _json({"ok": ok})
+    rec = _clean_task_add(b.get("lid"), b.get("date") or datetime.now(TZ).date().isoformat(),
+                          (b.get("ctype") or "standard"), b.get("note") or "", _req_actor(request))
+    if not rec:
+        return _json({"error": "bad lid"}, 400)
+    return _json({"ok": True, "task": rec})
+
+async def _api_cleaning_report_one(request):
+    """Full single report (photos + audit) for the in-dashboard review drawer. ?id=<report_id>"""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    rid = (request.query.get("id") or "").strip()
+    rep = _cleaning_reports.get(rid)
+    if not rep:
+        return _json({"error": "not found"}, 404)
+    return _json({"ok": True, "report": _cleanproof_report_view(rep, include_photos=True)})
+
+async def _api_cleaning_log(request):
+    """Unified cleaning activity log: cleaner status actions + manager photo-report decisions +
+    manual task adds, newest first. ?lid= scopes to one apartment."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    lmap = get_listings_map() or {}
+    want = (request.query.get("lid") or "").strip()
+    rows = []
+    for e in _oujact_status[-500:]:
+        rows.append({"ts": e.get("ts"), "lid": e.get("lid"),
+                     "name": lmap.get(e.get("lid"), str(e.get("lid"))),
+                     "kind": "status", "action": e.get("action"),
+                     "by": e.get("by") or "", "note": e.get("note") or ""})
+    for a in _cleaning_report_audit[-500:]:
+        act = a.get("action") or ""
+        if not (act.startswith("manager_") or act == "report_submitted"):
+            continue
+        rep = _cleaning_reports.get(a.get("report_id")) or {}
+        rows.append({"ts": a.get("timestamp"), "lid": rep.get("apartment_id"),
+                     "name": a.get("apartment") or rep.get("apartment_name") or "",
+                     "kind": "report", "action": act, "by": a.get("actor") or "",
+                     "note": a.get("detail") or "", "report_id": a.get("report_id")})
+    for tk in _clean_tasks.values():
+        rows.append({"ts": tk.get("created_at"), "lid": tk.get("lid"),
+                     "name": lmap.get(tk.get("lid"), str(tk.get("lid"))),
+                     "kind": "task",
+                     "action": "manual_task_canceled" if tk.get("canceled") else "manual_task_added",
+                     "by": tk.get("by") or "", "note": _clean_type_label(tk.get("ctype"), "ar")})
+    if want:
+        rows = [r for r in rows if str(r.get("lid")) == want]
+    rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    return _json({"ok": True, "log": rows[:250]})
 
 async def _api_oujact_route(request):
     """PUBLIC, token-gated route data for the cleaning team (Oujact only · today · cleaning
@@ -30752,8 +31030,7 @@ async def _api_oujact_status(request):
     """Status action from the route page (token) OR the dashboard. Logs to the audit trail;
     'Guest Still Inside' / 'Issue' fire a safe urgent Discord update. Never marks a report
     verified unless the existing report system confirms it."""
-    tok = request.query.get("token", "")
-    route_ok = bool(OUJACT_ROUTE_TOKEN) and tok == OUJACT_ROUTE_TOKEN
+    route_ok = _oujact_route_auth(request)          # any team token (or the legacy OujaCT link)
     if not (route_ok or _dash_auth(request)):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
@@ -30946,7 +31223,8 @@ async def _api_cleaning_report_decision(request):
         return _json({"error": "not found"}, 404)
     if decision not in ("approve", "reject", "reshoot"):
         return _json({"error": "bad decision"}, 400)
-    report = _cleanproof_decide(report, decision, _req_actor(request), b.get("notes") or "")
+    actor = (b.get("by") or "").strip()[:80] or _req_actor(request)   # manager's signature
+    report = _cleanproof_decide(report, decision, actor, b.get("notes") or "")
     # Keep Discord card in sync when possible.
     try:
         if report.get("discord_review_channel_id") and report.get("discord_review_message_id"):
@@ -31638,6 +31916,10 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/assign", _api_cleaning_assign)
         app.router.add_post("/api/cleaning/clear-early", _api_cleaning_clear_early)
         app.router.add_get("/api/cleaning/teams-analytics", _api_cleaning_teams_analytics)
+        app.router.add_get("/api/cleaning/task", _api_cleaning_task)
+        app.router.add_post("/api/cleaning/task", _api_cleaning_task)
+        app.router.add_get("/api/cleaning/report", _api_cleaning_report_one)
+        app.router.add_get("/api/cleaning/log", _api_cleaning_log)
         app.router.add_get("/api/oujact/photo-template", _api_oujact_photo_template)
         app.router.add_post("/api/oujact/photo-upload", _api_oujact_photo_upload)
         app.router.add_post("/api/oujact/report-submit", _api_oujact_report_submit)
