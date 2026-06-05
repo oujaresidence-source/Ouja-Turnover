@@ -9813,6 +9813,7 @@ _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
     "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
+    "cleanteams",
 ]
 
 def _default_perms(role):
@@ -11302,6 +11303,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       </section>
 
       <!-- ============ LISTINGS (Hostaway master store) ============ -->
+      <section class="view" id="view_cleanteams">
+        <div class="page-head">
+          <div><div class="page-title">🧽 فرق التنظيف</div><div class="page-sub">فرق مستقلة · لكل فريق شقق ورابط خاص · رفع صور الإثبات للدرايف</div></div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadCleanTeams()">↻ تحديث</button>
+            <button class="btn primary sm" onclick="ctCreateTeam()">+ فريق جديد</button>
+          </div>
+        </div>
+        <div id="cleanTeamsBody"><div class="empty sk">—</div></div>
+      </section>
+
       <section class="view" id="view_listings">
         <div class="page-head">
           <div>
@@ -12090,6 +12102,7 @@ const T = {
   ar:{dir:'rtl',
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
+    cleanteams:'فرق التنظيف',
     listings:'الشقق',
     listings_title:'🏘️ سجل الشقق (المصدر الأساسي)',
     listings_sub:'كل الوحدات من Hostaway. هنا تحدّد المجموعة، الحد الأدنى للسعر، وفريق التنظيف الداخلي. الشقة الجديدة تظهر "تحتاج إعداد" لين تحدّد لها مجموعة وحد سعر.',
@@ -12341,6 +12354,7 @@ const T = {
   en:{dir:'ltr',
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
+    cleanteams:'Cleaning Teams',
     listings:'Listings',
     listings_title:'🏘️ Listings (master store)',
     listings_sub:'Every unit from Hostaway. Set the group, hard price floor, and in-house cleaning team for each unit here. A new unit shows "needs setup" until it has a group and a floor.',
@@ -13042,6 +13056,7 @@ const NAV = [
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
+  {id:'cleanteams',ic:'🧽', tk:'cleanteams'},
   {id:'listings',ic:'🏘️', tk:'listings', badge:'listings'},
   {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
   {id:'reviews', ic:'⭐', tk:'reviews', badge:'reviews'},
@@ -13104,7 +13119,7 @@ function badgeInfo(key){
 // exactly one group; order is deliberate (what a manager reaches for, top to bottom).
 const NAV_CATS = [
   {tk:'cat_overview', ids:['home']},
-  {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','listings','quality','pmo','design']},
+  {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','cleanteams','listings','quality','pmo','design']},
   {tk:'cat_pricing',  ids:['pricing','strat','rev','quote']},
   {tk:'cat_finance',  ids:['expenses','finance','weekly']},
   {tk:'cat_guests',   ids:['guests','reviews']},
@@ -13315,6 +13330,7 @@ function go(id){
   if(id==='learn') loadLearnings();
   if(id==='calendar') loadForwardCalendar();
   if(id==='clean') loadCleaning();
+  if(id==='cleanteams') loadCleanTeams();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
   if(id==='tickets') loadTickets();
@@ -20360,6 +20376,43 @@ async function finAdjSave(){
   if(s.bulkIdx!=null){ await bulkRefetchItem(s.bulkIdx); bulkPreviewRender(); }
   else { financeLoadReport(); }
 }
+/* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
+async function loadCleanTeams(){
+  var body=document.getElementById('cleanTeamsBody'); if(!body) return;
+  body.innerHTML='<div class="empty sk">—</div>';
+  try{ D.ctData=await api('/api/cleaning/teams'); }catch(e){ D.ctData={teams:[],apartments:[]}; }
+  try{ D.ctAnalytics=await api('/api/cleaning/teams-analytics'); }catch(_e){ D.ctAnalytics={teams:[]}; }
+  renderCleanTeams();
+}
+function renderCleanTeams(){
+  var body=document.getElementById('cleanTeamsBody'); if(!body) return;
+  var d=D.ctData||{teams:[],apartments:[]}, an=((D.ctAnalytics||{}).teams)||[];
+  var anById={}; an.forEach(function(t){ anById[t.id]=t; });
+  var early=(d.apartments||[]).filter(function(a){ return a.early; });
+  var earlyHtml = early.length ? ('<div style="background:rgba(204,75,75,.1);border:1px solid var(--down);border-radius:10px;padding:12px;margin-bottom:14px"><b style="color:var(--down)">⏰ مغادرة مبكرة رصدها المساعد — '+early.length+'</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+early.map(function(a){ return '<span class="exp-reason">'+esc(a.name)+' <button class="btn ghost xs" onclick="ctClearEarly('+a.lid+')">✓</button></span>'; }).join('')+'</div></div>') : '';
+  var teams=(d.teams||[]).map(function(t){
+    var a=anById[t.id]||{}; var fullLink=location.origin+t.link;
+    return '<div class="card" style="border-radius:12px;padding:14px;margin-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font-size:15px">'+esc(t.name)+'</b>'
+        +'<div style="display:flex;gap:6px"><button class="btn ghost xs" onclick="ctRename(&#39;'+t.id+'&#39;)">✏️</button><button class="btn ghost xs" onclick="ctRegen(&#39;'+t.id+'&#39;)" title="رابط جديد">🔄</button><button class="btn ghost xs" onclick="ctDelete(&#39;'+t.id+'&#39;)">🗑</button></div></div>'
+      +'<div style="display:flex;gap:14px;margin-top:8px;font-size:12px;flex-wrap:wrap"><span>🏠 '+t.apartments+'</span><span>🔁 '+(a.turnovers_today||0)+'</span><span style="color:var(--green)">✓ '+(a.approved||0)+'</span><span style="color:var(--gold)">⏳ '+(a.submitted||0)+'</span>'+(a.early_departures?('<span style="color:var(--down)">⏰ '+a.early_departures+'</span>'):'')+'</div>'
+      +'<div style="display:flex;gap:6px;margin-top:10px;align-items:center"><input readonly value="'+esc(fullLink)+'" onclick="this.select()" style="flex:1;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;direction:ltr"><button class="btn ghost sm" onclick="ctCopy(&#39;'+esc(fullLink)+'&#39;)">نسخ</button><a class="btn ghost sm" href="'+esc(t.link)+'" target="_blank">فتح</a></div></div>';
+  }).join('');
+  var rows=(d.apartments||[]).map(function(a){
+    var opts='<option value="">— بدون —</option>'+(d.teams||[]).map(function(t){ return '<option value="'+t.id+'"'+(a.team_id===t.id?' selected':'')+'>'+esc(t.name)+'</option>'; }).join('');
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border)"><span style="flex:1;font-size:12.5px">'+esc(a.name)+(a.early?' ⏰':'')+'</span><select onchange="ctAssign('+a.lid+',this.value)" style="padding:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'+opts+'</select></div>';
+  }).join('');
+  var assign='<div class="card" style="border-radius:12px;padding:14px;margin-top:6px"><b style="font-size:14px">توزيع الشقق على الفرق</b><div class="muted" style="font-size:11px;margin:4px 0 8px">كل شقة لفريق واحد</div>'+(rows||'<div class="muted">لا شقق</div>')+'</div>';
+  body.innerHTML=earlyHtml+(teams||'<div class="empty" style="padding:20px;text-align:center">ما فيه فرق بعد — اضغط «+ فريق جديد»</div>')+assign;
+}
+async function ctCreateTeam(){ var nm=prompt('اسم الفريق:'); if(nm===null) return; await post('/api/cleaning/teams',{name:nm||''}); loadCleanTeams(); }
+async function ctRename(id){ var nm=prompt('الاسم الجديد:'); if(!nm) return; await post('/api/cleaning/teams',{id:id,name:nm}); loadCleanTeams(); }
+async function ctRegen(id){ if(!confirm('إنشاء رابط جديد؟ الرابط القديم يتوقف عن العمل.')) return; await post('/api/cleaning/teams',{id:id,regen:true}); loadCleanTeams(); }
+async function ctDelete(id){ if(!confirm('حذف الفريق؟ شققه تصير بدون فريق.')) return; await post('/api/cleaning/teams',{id:id,delete:true}); loadCleanTeams(); }
+async function ctAssign(lid,team){ await post('/api/cleaning/assign',{lid:lid,team_id:team}); loadCleanTeams(); }
+async function ctClearEarly(lid){ await post('/api/cleaning/clear-early',{lid:lid}); loadCleanTeams(); }
+function ctCopy(txt){ try{ navigator.clipboard.writeText(txt); toast('نُسخ ✓'); }catch(e){ toast(txt); } }
+
 /* ===== Bulk owner-statement PDFs (per-apartment or per-owner) ===== */
 var _bulkPdf=null;
 async function openBulkPdf(){
