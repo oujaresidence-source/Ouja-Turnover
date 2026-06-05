@@ -206,6 +206,9 @@ OUJACT_PARK_BUFFER   = int(os.environ.get("OUJACT_PARK_BUFFER", "5"))  # parking
 CLEANING_REVIEW_CHANNEL = os.environ.get("CLEANING_REVIEW_CHANNEL", "oujact-review")
 CLEANING_PHOTO_MAX_MB = int(os.environ.get("CLEANING_PHOTO_MAX_MB", "12"))
 CLEANING_DRIVE_ROOT_FOLDER_ID = os.environ.get("CLEANING_DRIVE_ROOT_FOLDER_ID", "")
+CLEANING_DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLEANING_DRIVE_SERVICE_ACCOUNT_JSON", "").strip()
+CLEANING_DRIVE_SERVICE_ACCOUNT_FILE = os.environ.get(
+    "CLEANING_DRIVE_SERVICE_ACCOUNT_FILE", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")).strip()
 
 # ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -2508,6 +2511,7 @@ _cleaning_photo_templates = _load_json("cleaning_photo_templates.json", {}) or {
 _cleaning_reports = _load_json("cleaning_reports.json", {}) or {}
 _cleaning_report_photos = _load_json("cleaning_report_photos.json", {}) or {}
 _cleaning_report_audit = _load_json("cleaning_report_audit.json", []) or []
+_cleaning_drive_service = None
 
 CLEANING_REPORT_STATUSES = (
     "draft", "uploading", "submitted_for_review", "pending_manager_review",
@@ -2687,8 +2691,8 @@ def _cleanproof_get_or_create_report(lid, date_iso, actor="", route_id=""):
         "status": "draft", "required_slots_count": 0,
         "uploaded_required_slots_count": 0, "all_required_complete": False,
         "drive_folder_id": "", "drive_folder_url": "",
-        "storage_provider": "local_fallback",
-        "storage_warning": "Google Drive is not configured. Files are saved under STATE_DIR local storage.",
+        "storage_provider": "google_drive" if _cleanproof_drive_configured() else "local_fallback",
+        "storage_warning": "" if _cleanproof_drive_configured() else "Google Drive is not configured. Files are saved under STATE_DIR local storage.",
         "discord_review_channel_id": "", "discord_review_message_id": "",
         "manager_decision": "", "manager_notes": "",
         "approved_by": "", "approved_at": "", "rejected_by": "", "rejected_at": "",
@@ -2717,6 +2721,110 @@ def _cleanproof_save_local(report, slot_id, filename, data, mime_type):
     with open(path, "wb") as f:
         f.write(data)
     return {"provider": "local_fallback", "path": path, "url": ""}
+
+def _cleanproof_drive_configured():
+    return bool(CLEANING_DRIVE_ROOT_FOLDER_ID and
+                (CLEANING_DRIVE_SERVICE_ACCOUNT_JSON or CLEANING_DRIVE_SERVICE_ACCOUNT_FILE))
+
+def _cleanproof_drive_url(file_id):
+    return f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
+
+def _cleanproof_drive_folder_url(folder_id):
+    return f"https://drive.google.com/drive/folders/{folder_id}" if folder_id else ""
+
+def _cleanproof_drive_escape(s):
+    return str(s or "").replace("\\", "\\\\").replace("'", "\\'")
+
+def _cleanproof_drive_creds_info():
+    raw = CLEANING_DRIVE_SERVICE_ACCOUNT_JSON
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            return json.loads(raw)
+        return json.loads(base64.b64decode(raw).decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"invalid CLEANING_DRIVE_SERVICE_ACCOUNT_JSON: {e}")
+
+def _cleanproof_get_drive_service():
+    global _cleaning_drive_service
+    if _cleaning_drive_service is not None:
+        return _cleaning_drive_service
+    if not _cleanproof_drive_configured():
+        return None
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+    except Exception as e:
+        raise RuntimeError(f"Google Drive libraries missing: {e}")
+    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    info = _cleanproof_drive_creds_info()
+    if info:
+        creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = service_account.Credentials.from_service_account_file(
+            CLEANING_DRIVE_SERVICE_ACCOUNT_FILE, scopes=scopes)
+    _cleaning_drive_service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    return _cleaning_drive_service
+
+def _cleanproof_drive_find_or_create_folder(service, parent_id, name):
+    safe_name = _cleanproof_drive_escape(name)
+    safe_parent = _cleanproof_drive_escape(parent_id)
+    q = ("mimeType='application/vnd.google-apps.folder' and trashed=false "
+         f"and name='{safe_name}' and '{safe_parent}' in parents")
+    found = service.files().list(q=q, fields="files(id,name)", pageSize=1,
+                                 supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+    files = found.get("files") or []
+    if files:
+        return files[0]["id"]
+    body = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
+    created = service.files().create(body=body, fields="id", supportsAllDrives=True).execute()
+    return created["id"]
+
+def _cleanproof_report_drive_folder(report):
+    if report.get("drive_folder_id"):
+        return report["drive_folder_id"]
+    service = _cleanproof_get_drive_service()
+    if service is None:
+        return ""
+    date_folder = str(report.get("date") or datetime.now(TZ).date().isoformat())
+    apt = (report.get("apartment_name") or report.get("apartment_code") or str(report.get("apartment_id"))).strip()
+    rid = report.get("report_id") or "report"
+    root = CLEANING_DRIVE_ROOT_FOLDER_ID
+    yid = _cleanproof_drive_find_or_create_folder(service, root, "Oujact Cleaning Reports")
+    did = _cleanproof_drive_find_or_create_folder(service, yid, date_folder)
+    aid = _cleanproof_drive_find_or_create_folder(service, did, apt[:120] or "Apartment")
+    fid = _cleanproof_drive_find_or_create_folder(service, aid, rid[:120])
+    report["drive_folder_id"] = fid
+    report["drive_folder_url"] = _cleanproof_drive_folder_url(fid)
+    report["storage_provider"] = "google_drive"
+    report["storage_warning"] = ""
+    report["updated_at"] = _cleanproof_now()
+    _cleaning_reports[report["report_id"]] = report
+    _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(report["report_id"], "drive_folder_created", "bot",
+                      report.get("status"), report.get("status"), fid)
+    return fid
+
+def _cleanproof_save_drive(report, slot_id, filename, data, mime_type):
+    from googleapiclient.http import MediaIoBaseUpload
+    service = _cleanproof_get_drive_service()
+    folder_id = _cleanproof_report_drive_folder(report)
+    if service is None or not folder_id:
+        raise RuntimeError("Google Drive is not configured")
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mime_type or "image/jpeg", resumable=False)
+    body = {"name": filename, "parents": [folder_id],
+            "description": f"Oujact cleaning proof {report.get('report_id')} {slot_id}"}
+    created = service.files().create(body=body, media_body=media,
+                                     fields="id,webViewLink", supportsAllDrives=True).execute()
+    file_id = created.get("id", "")
+    return {"provider": "google_drive", "path": "", "url": created.get("webViewLink") or _cleanproof_drive_url(file_id),
+            "file_id": file_id, "folder_id": folder_id, "folder_url": report.get("drive_folder_url") or _cleanproof_drive_folder_url(folder_id)}
+
+def _cleanproof_save_photo(report, slot_id, filename, data, mime_type):
+    if _cleanproof_drive_configured():
+        return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
+    return _cleanproof_save_local(report, slot_id, filename, data, mime_type)
 
 def _cleanproof_photo_view(photo):
     return {
@@ -30180,7 +30288,7 @@ async def _api_oujact_photo_template(request):
     date = (request.query.get("date") or datetime.now(TZ).date().isoformat())[:10]
     report = await asyncio.to_thread(_cleanproof_get_or_create_report, lid, date, "route-link", "oujact-route")
     return _json({"ok": True, "report": _cleanproof_report_view(report),
-                  "drive_configured": bool(CLEANING_DRIVE_ROOT_FOLDER_ID)})
+                  "drive_configured": _cleanproof_drive_configured()})
 
 async def _api_oujact_photo_upload(request):
     if not _oujact_route_auth(request):
@@ -30220,7 +30328,7 @@ async def _api_oujact_photo_upload(request):
         return _json({"error": "bad slot"}, 400)
     filename = _cleanproof_safe_filename(slot_id, report.get("apartment_code"), report.get("report_id"), original_name)
     try:
-        stored = await asyncio.to_thread(_cleanproof_save_local, report, slot_id, filename, file_bytes, mime_type)
+        stored = await asyncio.to_thread(_cleanproof_save_photo, report, slot_id, filename, file_bytes, mime_type)
     except Exception as e:
         _cleanproof_audit(report["report_id"], "drive_upload_failed", fields.get("by") or "route-link",
                           report.get("status"), report.get("status"), str(e)[:300])
@@ -30238,10 +30346,15 @@ async def _api_oujact_photo_upload(request):
         "apartment_id": lid, "file_name": filename, "mime_type": mime_type,
         "file_size": len(file_bytes), "uploaded_at": _cleanproof_now(),
         "uploaded_by": fields.get("by") or "route-link",
-        "drive_file_id": "", "drive_file_url": "", "thumbnail_url": "",
+        "drive_file_id": stored.get("file_id") or "", "drive_file_url": stored.get("url") if stored.get("provider") == "google_drive" else "", "thumbnail_url": "",
         "storage_url": stored.get("url") or "", "local_path": stored.get("path") or "",
         "status": "uploaded", "error_message": "",
     }
+    if stored.get("folder_id"):
+        report["drive_folder_id"] = stored.get("folder_id") or report.get("drive_folder_id", "")
+        report["drive_folder_url"] = stored.get("folder_url") or report.get("drive_folder_url", "")
+    report["storage_provider"] = stored.get("provider") or report.get("storage_provider") or "local_fallback"
+    report["storage_warning"] = "" if report["storage_provider"] == "google_drive" else report.get("storage_warning", "")
     _cleaning_report_photos[pid] = photo
     report["status"] = "uploading" if report.get("status") == "draft" else report.get("status")
     report["updated_at"] = _cleanproof_now()
@@ -30310,9 +30423,9 @@ async def _api_cleaning_reports(request):
         counts[r.get("status", "draft")] += 1
     return _json({"ok": True, "reports": [_cleanproof_report_view(r, include_photos=True) for r in rows[:300]],
                   "counts": dict(counts),
-                  "storage": {"provider": "google_drive" if CLEANING_DRIVE_ROOT_FOLDER_ID else "local_fallback",
-                              "drive_configured": bool(CLEANING_DRIVE_ROOT_FOLDER_ID),
-                              "warning": "" if CLEANING_DRIVE_ROOT_FOLDER_ID else "Google Drive is not configured. Local Railway disk must be backed by a mounted STATE_DIR volume."}})
+                  "storage": {"provider": "google_drive" if _cleanproof_drive_configured() else "local_fallback",
+                              "drive_configured": _cleanproof_drive_configured(),
+                              "warning": "" if _cleanproof_drive_configured() else "Google Drive is not configured. Local Railway disk must be backed by a mounted STATE_DIR volume."}})
 
 async def _api_cleaning_report_decision(request):
     if not _dash_auth(request):
@@ -30396,6 +30509,21 @@ async def _api_cleaning_photo_file(request):
     if not photo or photo.get("status") == "removed":
         return _json({"error": "not found"}, 404)
     path = photo.get("local_path") or ""
+    if path and os.path.exists(path):
+        return web.FileResponse(path, headers={"Content-Type": photo.get("mime_type") or "application/octet-stream"})
+    if photo.get("drive_file_id") and _cleanproof_drive_configured():
+        try:
+            from googleapiclient.http import MediaIoBaseDownload
+            service = _cleanproof_get_drive_service()
+            req = service.files().get_media(fileId=photo["drive_file_id"], supportsAllDrives=True)
+            fh = io.BytesIO()
+            dl = MediaIoBaseDownload(fh, req)
+            done = False
+            while not done:
+                _, done = dl.next_chunk()
+            return web.Response(body=fh.getvalue(), content_type=photo.get("mime_type") or "application/octet-stream")
+        except Exception as e:
+            return _json({"error": "drive file unavailable", "message": str(e)[:200]}, 404)
     if not path or not os.path.exists(path):
         return _json({"error": "file missing"}, 404)
     return web.FileResponse(path, headers={"Content-Type": photo.get("mime_type") or "application/octet-stream"})
