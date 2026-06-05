@@ -11629,6 +11629,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div><div class="page-title">🧽 فرق التنظيف</div><div class="page-sub">عمليات اليوم · خروج وتنظيف عاجل · مراجعة صور وتوقيع · لكل فريق رابط خاص</div></div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="ctSyncChannels()" title="افتح قنوات اليوم واحذف المكرر/القديم">🔄 قنوات ديسكورد</button>
+            <button class="btn ghost sm" onclick="ctRebuildChannels()" title="احذف كل القنوات وأنشئها من جديد بأسماء الفرق">♻️ إعادة بناء</button>
             <button class="btn ghost sm" onclick="ctOpenLog()">📜 السجل</button>
             <button class="btn ghost sm" onclick="loadCleanTeams()">↻ تحديث</button>
             <button class="btn primary sm" onclick="ctCreateTeam()">+ فريق جديد</button>
@@ -20913,6 +20914,14 @@ async function ctSyncChannels(){
   var r; try{ r=await post('/api/oujact/apply',{}); }catch(_){ r=null; }
   if(r&&r.ok){ toast((L==='ar'?'فتح ':'opened ')+(r.created||0)+(L==='ar'?' قناة · حذف ':' · removed ')+(r.pruned||0)); }
   else toast((r&&r.error)||(r&&r.note)||(t().err||'⚠'));
+}
+/* DELETE every cleaning channel and recreate today's with the current team names (clean slate) */
+async function ctRebuildChannels(){
+  if(!confirm(L==='ar'?'حذف كل قنوات التنظيف الحالية وإنشاء قنوات جديدة بأسماء الفرق؟':'Delete ALL current cleaning channels and recreate them with team names?')) return;
+  toast(L==='ar'?'⏳ إعادة بناء القنوات…':'⏳ Rebuilding channels…');
+  var r; try{ r=await post('/api/oujact/rebuild',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast((L==='ar'?'حذف ':'deleted ')+(r.deleted||0)+(L==='ar'?' · أنشأ ':' · created ')+(r.created||0)); }
+  else toast((r&&r.error)||(t().err||'⚠'));
 }
 /* open the in-dashboard photo review drawer (reuses Codex's openCleanProofReport) */
 async function openCleanReview(rid){
@@ -31300,6 +31309,41 @@ async def _api_oujact_apply(request):
     return _json({"ok": True, "changed": changed, "assigned": assigned,
                   "created": created, "pruned": pruned})
 
+async def _api_oujact_rebuild(request):
+    """One-shot clean slate: DELETE every bot-created cleaning channel (topic 'oujact:1'),
+    reset the done-markers, then re-create today's channels with the CURRENT team names. For
+    after the owner re-organizes teams (e.g. OujaCT / StayClean / Servicu)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
+    if guild is None:
+        return _json({"error": "guild not ready"}, 503)
+    deleted = 0
+    try:
+        category = await get_category(guild)
+        for ch in list(category.text_channels):
+            if "oujact:1" in (ch.topic or ""):
+                try:
+                    await ch.delete(reason="OujaCT rebuild — recreate with team names")
+                    deleted += 1
+                except Exception as e:
+                    print("oujact rebuild delete error:", e)
+    except Exception as e:
+        return _json({"error": str(e)}, 500)
+    _oujact_done.clear()                       # reset so today's pending cleanings re-open fresh
+    try:
+        _save_json("oujact_done.json", _oujact_done)
+    except Exception:
+        pass
+    changed = []
+    try:
+        changed = await sync_oujact_turnovers()
+    except Exception as e:
+        print("oujact rebuild sync error:", e)
+    created = sum(1 for c in changed if c.get("action") == "created")
+    log_event("ops", f"OujaCT rebuild · حذف {deleted} · أنشأ {created}")
+    return _json({"ok": True, "deleted": deleted, "created": created})
+
 # ---- Oujact Dispatch APIs ----
 def _oujact_plan_totals(plan, eta):
     """Day totals: cleaning window (Σ min..max), parking buffers, drive time (if ETA), and the
@@ -32439,6 +32483,7 @@ async def start_web_server():
         app.router.add_post("/api/listings/update", _api_listings_update)
         app.router.add_post("/api/listings/geocode", _api_listings_geocode)
         app.router.add_post("/api/oujact/apply", _api_oujact_apply)
+        app.router.add_post("/api/oujact/rebuild", _api_oujact_rebuild)
         app.router.add_get("/oujact-route", _handle_oujact_route)          # public mobile route page
         app.router.add_get("/api/oujact/route", _api_oujact_route)         # token-gated route data
         app.router.add_get("/api/cleaning/teams", _api_cleaning_teams)
