@@ -20500,7 +20500,7 @@ function financeStatementHTML(){
   const sr=function(l,val,cls){ return '<div class="stmt-sum-row'+(cls?(' '+cls):'')+'"><span>'+l+'</span><span class="num">'+val+'</span></div>'; };
   var dpct=(r.direct_fee_pct!=null?r.direct_fee_pct:3);
   h+=sr(ar?'إيراد Airbnb (دفعات)':'Airbnb income (payouts)',money(r.income_airbnb));
-  h+=sr((ar?'إيراد مباشر (−':'Direct income (−')+dpct+'%)',money(r.income_direct));
+  h+=sr((ar?('إيراد مباشر (−'+dpct+'٪)'):('Direct income (−'+dpct+'%)')),money(r.income_direct));
   if(r.extras) h+=sr(ar?'إضافات':'Extras',money(r.extras));
   if(r.manual_income) h+=sr(t().fin_manual_income,money(r.manual_income));
   h+=sr(ar?'إجمالي الدخل':'Total income',money(r.total_income));
@@ -21089,7 +21089,7 @@ function stmtDocHTML(r, label, kind){
   h+='<div style="padding:8px 40px 0"><div style="font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:'+G2+';margin:14px 0 6px">'+(ar?'تفصيل الدخل':'Income breakdown')+'</div>'
     +'<table style="width:100%;border-collapse:collapse">'
     +row(ar?'دخل Airbnb (دفعات)':'Airbnb (payouts)', M(r.income_airbnb))
-    +row((ar?'دخل مباشر (−':'Direct (−')+(r.direct_fee_pct!=null?r.direct_fee_pct:3)+'%)', M(r.income_direct))
+    +row((ar?('دخل مباشر (−'+(r.direct_fee_pct!=null?r.direct_fee_pct:3)+'٪)'):('Direct (−'+(r.direct_fee_pct!=null?r.direct_fee_pct:3)+'%)')), M(r.income_direct))
     +((r.extras)?row(ar?'إضافات':'Extras', M(r.extras)):'')
     +((r.manual_income)?row(t().fin_manual_income, M(r.manual_income)):'')+'</table></div>';
   // reservations table (detailed)
