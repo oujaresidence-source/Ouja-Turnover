@@ -20377,6 +20377,7 @@ async function finAdjSave(){
   else { financeLoadReport(); }
 }
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
+var _ctSel={};
 async function loadCleanTeams(){
   var body=document.getElementById('cleanTeamsBody'); if(!body) return;
   body.innerHTML='<div class="empty sk">—</div>';
@@ -20398,11 +20399,24 @@ function renderCleanTeams(){
       +'<div style="display:flex;gap:14px;margin-top:8px;font-size:12px;flex-wrap:wrap"><span>🏠 '+t.apartments+'</span><span>🔁 '+(a.turnovers_today||0)+'</span><span style="color:var(--green)">✓ '+(a.approved||0)+'</span><span style="color:var(--gold)">⏳ '+(a.submitted||0)+'</span>'+(a.early_departures?('<span style="color:var(--down)">⏰ '+a.early_departures+'</span>'):'')+'</div>'
       +'<div style="display:flex;gap:6px;margin-top:10px;align-items:center"><input readonly value="'+esc(fullLink)+'" onclick="this.select()" style="flex:1;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;direction:ltr"><button class="btn ghost sm" onclick="ctCopy(&#39;'+esc(fullLink)+'&#39;)">نسخ</button><a class="btn ghost sm" href="'+esc(t.link)+'" target="_blank">فتح</a></div></div>';
   }).join('');
+  var teamName=function(id){ var t=(d.teams||[]).filter(function(x){return x.id===id;})[0]; return t?t.name:''; };
+  var inp='padding:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
+  var nSel=Object.keys(_ctSel).filter(function(k){return _ctSel[k];}).length;
+  var bulkOpts='<option value="">— اختر فريق —</option>'+(d.teams||[]).map(function(t){ return '<option value="'+t.id+'">'+esc(t.name)+'</option>'; }).join('')+'<option value="__none__">— إزالة من الفرق —</option>';
+  var bulkBar='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px">'
+    +'<label style="font-size:11.5px"><input type="checkbox" onchange="ctSelAll(this.checked)"> تحديد الكل</label>'
+    +'<span class="muted" style="font-size:11.5px">محدد: <b id="ctSelCount">'+nSel+'</b></span>'
+    +'<select id="ctBulkTeam" style="'+inp+'">'+bulkOpts+'</select>'
+    +'<button class="btn primary sm" onclick="ctBulkAssign()">عيّن المحدد للفريق</button></div>';
   var rows=(d.apartments||[]).map(function(a){
     var opts='<option value="">— بدون —</option>'+(d.teams||[]).map(function(t){ return '<option value="'+t.id+'"'+(a.team_id===t.id?' selected':'')+'>'+esc(t.name)+'</option>'; }).join('');
-    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border)"><span style="flex:1;font-size:12.5px">'+esc(a.name)+(a.early?' ⏰':'')+'</span><select onchange="ctAssign('+a.lid+',this.value)" style="padding:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'+opts+'</select></div>';
+    var cur=a.team_id?('<span class="muted" style="font-size:10px;color:var(--gold)">· '+esc(teamName(a.team_id))+'</span>'):'';
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border)">'
+      +'<input type="checkbox" '+(_ctSel[a.lid]?'checked':'')+' onchange="ctToggleSel('+a.lid+',this.checked)">'
+      +'<span style="flex:1;font-size:12.5px">'+esc(a.name)+(a.early?' ⏰':'')+' '+cur+'</span>'
+      +'<select onchange="ctAssign('+a.lid+',this.value)" style="'+inp+'">'+opts+'</select></div>';
   }).join('');
-  var assign='<div class="card" style="border-radius:12px;padding:14px;margin-top:6px"><b style="font-size:14px">توزيع الشقق على الفرق</b><div class="muted" style="font-size:11px;margin:4px 0 8px">كل شقة لفريق واحد</div>'+(rows||'<div class="muted">لا شقق</div>')+'</div>';
+  var assign='<div class="card" style="border-radius:12px;padding:14px;margin-top:6px"><b style="font-size:14px">توزيع الشقق على الفرق</b><div class="muted" style="font-size:11px;margin:4px 0 8px">حدّد عدة شقق وعيّنها لفريق دفعة وحدة · أو غيّر شقة وحدة من القائمة</div>'+bulkBar+(rows||'<div class="muted">لا شقق</div>')+'</div>';
   body.innerHTML=earlyHtml+(teams||'<div class="empty" style="padding:20px;text-align:center">ما فيه فرق بعد — اضغط «+ فريق جديد»</div>')+assign;
 }
 async function ctCreateTeam(){ var nm=prompt('اسم الفريق:'); if(nm===null) return; await post('/api/cleaning/teams',{name:nm||''}); loadCleanTeams(); }
@@ -20410,6 +20424,18 @@ async function ctRename(id){ var nm=prompt('الاسم الجديد:'); if(!nm) 
 async function ctRegen(id){ if(!confirm('إنشاء رابط جديد؟ الرابط القديم يتوقف عن العمل.')) return; await post('/api/cleaning/teams',{id:id,regen:true}); loadCleanTeams(); }
 async function ctDelete(id){ if(!confirm('حذف الفريق؟ شققه تصير بدون فريق.')) return; await post('/api/cleaning/teams',{id:id,delete:true}); loadCleanTeams(); }
 async function ctAssign(lid,team){ await post('/api/cleaning/assign',{lid:lid,team_id:team}); loadCleanTeams(); }
+function ctToggleSel(lid,on){ if(on) _ctSel[lid]=true; else delete _ctSel[lid]; var el=document.getElementById('ctSelCount'); if(el) el.textContent=Object.keys(_ctSel).length; }
+function ctSelAll(on){ var d=D.ctData||{apartments:[]}; if(on){ (d.apartments||[]).forEach(function(a){ _ctSel[a.lid]=true; }); } else { _ctSel={}; } renderCleanTeams(); }
+async function ctBulkAssign(){
+  var sel=document.getElementById('ctBulkTeam'); var v=sel?sel.value:'';
+  if(v===''){ toast(L==='ar'?'اختر فريق أول':'Pick a team first'); return; }
+  var lids=Object.keys(_ctSel).filter(function(k){ return _ctSel[k]; }).map(Number);
+  if(!lids.length){ toast(L==='ar'?'حدّد شقق أول':'Select apartments first'); return; }
+  var team=(v==='__none__')?'':v;
+  await post('/api/cleaning/assign',{lids:lids,team_id:team});
+  toast((L==='ar'?'تم تعيين ':'Assigned ')+lids.length+(L==='ar'?' شقة':' apartments'));
+  _ctSel={}; loadCleanTeams();
+}
 async function ctClearEarly(lid){ await post('/api/cleaning/clear-early',{lid:lid}); loadCleanTeams(); }
 function ctCopy(txt){ try{ navigator.clipboard.writeText(txt); toast('نُسخ ✓'); }catch(e){ toast(txt); } }
 
@@ -30594,27 +30620,33 @@ async def _api_cleaning_teams(request):
     return _json({"ok": True, "team": _ct_team_view(_cleaning_teams[nid])})
 
 async def _api_cleaning_assign(request):
-    """Assign an apartment to a team (ONE team per apartment). {lid, team_id} ('' = unassign)."""
+    """Assign apartment(s) to a team (ONE team per apartment). Accepts {lid, team_id} OR
+    {lids:[...], team_id} for bulk. team_id '' = unassign."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
-    try:
-        lid = int(b.get("lid"))
-    except (TypeError, ValueError):
-        return _json({"error": "bad lid"}, 400)
     team_id = (b.get("team_id") or "").strip()
     if team_id and team_id not in _cleaning_teams:
         return _json({"error": "bad team"}, 400)
-    rec = _ls_get()["listings"].get(str(lid))
-    if not rec:
-        return _json({"error": "listing not found"}, 404)
-    rec["cleaning_team"] = team_id
-    rec["oujact"] = bool(team_id)             # legacy flag in sync: assigned to a team = in-house cleaning
+    lids = b.get("lids") if isinstance(b.get("lids"), list) else ([b.get("lid")] if b.get("lid") not in (None, "") else [])
+    store = _ls_get()["listings"]
+    done = []
+    for raw in lids:
+        try:
+            lid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        rec = store.get(str(lid))
+        if not rec:
+            continue
+        rec["cleaning_team"] = team_id
+        rec["oujact"] = bool(team_id)         # legacy flag in sync: assigned to a team = in-house cleaning
+        done.append(lid)
     try:
         _ls_save()
     except Exception:
         pass
-    return _json({"ok": True, "lid": lid, "team_id": team_id})
+    return _json({"ok": True, "assigned": done, "team_id": team_id, "count": len(done)})
 
 async def _api_cleaning_clear_early(request):
     """Clear a unit's Musaed early-departure flag once handled. {lid}"""
