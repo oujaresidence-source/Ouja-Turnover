@@ -22226,18 +22226,31 @@ def _finance_in_period(row, start, end, basis):
     d = _parse_date(row.get("checkin" if basis == "checkin" else "checkout"))
     return d is not None and start <= d <= end
 
+def _direct_fee_calc(gross, refund=0.0, pct=3.0):
+    """THE one place the direct-booking fee is computed. Flat `pct`% (default 3.00%) of the
+    direct base = (Hostaway totalPrice − refund). Returns base / pct / fee / net so the report
+    can SHOW exactly how the 3% was derived — no per-booking ambiguity. 2-decimal (halalas)."""
+    try:
+        base = round(float(gross or 0) - float(refund or 0), 2)
+    except (TypeError, ValueError):
+        base = 0.0
+    p = float(pct or 0)
+    fee = round(base * p / 100.0, 2)
+    return {"base": base, "pct": p, "fee": fee, "net": round(base - fee, 2),
+            "source_fields": "totalPrice − refundAmount"}
+
 def compute_owner_report(reservations, expenses, start, end, management_pct, settings=None, cleaning=None):
     """EXACT money math for one apartment/owner over [start, end] (item 13) + the
     reconciliation check (item 14). Pure — verifiable on synthetic data. Never estimates.
     `cleaning` = {'type':'ours'|'owner','amount':per-clean SAR}: when the OWNER pays, deduct
     amount × (number of stays/turnovers in the period); 'ours' = Ouja absorbs it (no deduction)."""
     s = dict(FINANCE_DEFAULTS); s.update(settings or {})
-    basis = s["period_basis"]; rnd = int(s["rounding"]); direct_fee = float(s["direct_fee_pct"]) / 100.0
+    basis = s["period_basis"]; rnd = int(s["rounding"]); direct_fee_pct = float(s["direct_fee_pct"])
     def R(x):
         return round(float(x), rnd) if rnd and rnd > 0 else float(round(float(x)))
 
     inc_airbnb = 0.0; inc_direct = 0.0; extras_total = 0.0
-    resv_lines = []; missing_payout = []; needs_rule = []
+    resv_lines = []; missing_payout = []; needs_rule = []; needs_base = []
     for r in reservations:
         status = (r.get("status") or "").lower()
         if status in _REPORT_CANCELLED:                       # EXCLUDE cancelled
@@ -22249,6 +22262,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         refund = float(r.get("refund") or 0)
         ext = float(r.get("extras") or 0); extras_total += ext
         channel = (r.get("channel") or "").lower()
+        direct_detail = None
         if channel == "airbnb":
             payout = r.get("airbnb_payout")
             if payout is None:                                # NEVER guess a payout
@@ -22257,16 +22271,32 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
                 income = float(payout) - refund               # actual amount received
                 inc_airbnb += income
         elif channel == "direct":
-            income = (float(r.get("direct_revenue") or 0) - refund) * (1.0 - direct_fee)  # 3% on DIRECT only
-            inc_direct += income
+            dr = r.get("direct_revenue")
+            if dr is None:                                    # no totalPrice → base unknown, do NOT guess
+                needs_base.append(r.get("id")); income = None
+            else:
+                direct_detail = _direct_fee_calc(dr, refund, direct_fee_pct)   # the ONE 3% helper
+                income = direct_detail["net"]
+                inc_direct += income
         else:                                                 # 'other' (Booking.com, Vrbo…) — no confirmed rule
             needs_rule.append(r.get("id")); income = None     # flagged, NEVER guessed
-        resv_lines.append({
+        line = {
             "id": r.get("id"), "channel": channel, "apartment": r.get("apartment"),
             "checkin": r.get("checkin"), "checkout": r.get("checkout"), "nights": r.get("nights"),
             "refund": R(refund), "extras": R(ext), "income": (None if income is None else R(income)),
             "gross": (r.get("airbnb_payout") if channel == "airbnb" else r.get("direct_revenue")),
-        })
+        }
+        if direct_detail:                                     # show base + % + fee + source on direct lines
+            line["direct_base"] = direct_detail["base"]
+            line["direct_fee_pct"] = direct_detail["pct"]
+            line["direct_fee_amount"] = direct_detail["fee"]
+            line["direct_net"] = direct_detail["net"]
+            line["source_fields"] = direct_detail["source_fields"]
+        elif channel == "airbnb":
+            line["source_fields"] = "airbnbExpectedPayoutAmount − refundAmount"
+        if income is None:
+            line["needs_review"] = True
+        resv_lines.append(line)
 
     total_income = inc_airbnb + inc_direct + extras_total
     ouja_fee = (float(management_pct) / 100.0) * total_income  # mgmt% BEFORE expenses
@@ -22283,10 +22313,11 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
     # ---- reconciliation (item 14): totals must equal the sum of the rows, to the riyal ----
     rows_income = sum((l["income"] or 0) for l in resv_lines) + extras_total
     gap = R(rows_income) - R(total_income)
-    balanced = (abs(gap) < 0.005) and not missing_payout and not needs_rule
+    balanced = (abs(gap) < 0.005) and not missing_payout and not needs_rule and not needs_base
     return {
         "currency": "SAR", "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": basis},
         "income_airbnb": R(inc_airbnb), "income_direct": R(inc_direct), "extras": R(extras_total),
+        "direct_fee_pct": direct_fee_pct,
         "total_income": R(total_income), "management_pct": float(management_pct),
         "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
         "cleaning": {"type": cl.get("type", "ours"), "amount": R(float(cl.get("amount") or 0)),
@@ -22294,7 +22325,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines)},
         "resv_lines": resv_lines, "exp_lines": exp_lines,
         "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout,
-                           "needs_channel_rule_ids": needs_rule},
+                           "needs_channel_rule_ids": needs_rule, "needs_base_ids": needs_base},
         "settings": s,
     }
 
