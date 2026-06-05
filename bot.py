@@ -20930,15 +20930,18 @@ function ctRebuildChannels(){
     +(ar?'تبي قنوات خروج <b>اليوم</b> ولا خروج <b>بكرة</b>؟':'Channels for <b>today</b> checkouts or <b>tomorrow</b> checkouts?')
     +'<div class="muted" style="font-size:11.5px;margin-top:8px">'
     +(ar?'يحذف قنوات نفس اليوم الحالية وينشئها من جديد · اليوم الثاني ما يتأثر.':'Deletes that day current channels and recreates them · the other day is untouched.')
-    +'</div></div>');
+    +'</div>'
+    +'<label style="display:flex;gap:8px;align-items:center;margin-top:14px;font-size:12.5px;cursor:pointer;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:9px"><input type="checkbox" id="ctRbClearToday"> '
+    +(ar?'مع «بكرة»: احذف كل قنوات خروج اليوم وأغلقها':'With Tomorrow: also delete + close all of today checkout channels')+'</label></div>');
   setDrawerFoot('<button class="btn primary sm" onclick="ctRebuildDo(&#39;today&#39;)">'+(ar?'🧹 خروج اليوم':'🧹 Today')+'</button>'
     +'<button class="btn primary sm" onclick="ctRebuildDo(&#39;tomorrow&#39;)">'+(ar?'📅 خروج بكرة':'📅 Tomorrow')+'</button>'
     +'<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
 }
 async function ctRebuildDo(day){
+  var ct=!!((document.getElementById('ctRbClearToday')||{}).checked) && day==='tomorrow';
   closeDrawer();
   toast(L==='ar'?'⏳ إعادة بناء القنوات…':'⏳ Rebuilding channels…');
-  var r; try{ r=await post('/api/oujact/rebuild',{day:day}); }catch(_){ r=null; }
+  var r; try{ r=await post('/api/oujact/rebuild',{day:day, clear_today:ct}); }catch(_){ r=null; }
   if(r&&r.ok){ toast((L==='ar'?'حذف ':'deleted ')+(r.deleted||0)+(L==='ar'?' · أنشأ ':' · created ')+(r.created||0)); }
   else toast((r&&r.error)||(t().err||'⚠'));
 }
@@ -31343,7 +31346,13 @@ async def _api_oujact_rebuild(request):
     if day not in ("today", "tomorrow"):
         day = "today"
     now = datetime.now(TZ)
-    target = now.date().isoformat() if day == "today" else (now.date() + timedelta(days=1)).isoformat()
+    today_iso = now.date().isoformat()
+    tomorrow_iso = (now.date() + timedelta(days=1)).isoformat()
+    target = today_iso if day == "today" else tomorrow_iso
+    clear_today = bool(b.get("clear_today")) and day == "tomorrow"   # also wipe today's board
+    del_dates = {target}
+    if clear_today:
+        del_dates.add(today_iso)
     deleted = 0
     try:
         category = await get_category(guild)
@@ -31353,10 +31362,13 @@ async def _api_oujact_rebuild(request):
                 continue
             k = parse_topic_oujact_key(topic)
             if k:
-                if (k.split(":")[1] if ":" in k else "") != target:
-                    continue                       # only the chosen day's channels
-            elif day != "today":
-                continue                           # legacy keyless = old backlog → only clear on 'today'
+                kdate = k.split(":")[1] if ":" in k else ""
+                if kdate not in del_dates:
+                    continue
+                if clear_today and kdate == today_iso and kdate != target:
+                    _oujact_mark_done(k)           # close today out so the poll won't re-open it
+            elif not (day == "today" or clear_today):
+                continue                           # legacy keyless = old backlog → delete on 'today' or when clearing today
             try:
                 await ch.delete(reason=f"OujaCT rebuild ({day}) — recreate with team names")
                 deleted += 1
@@ -31364,8 +31376,15 @@ async def _api_oujact_rebuild(request):
                 print("oujact rebuild delete error:", e)
     except Exception as e:
         return _json({"error": str(e)}, 500)
+    if clear_today:                                # mark EVERY today checkout done (even ones with no channel yet)
+        try:
+            for it in await asyncio.to_thread(fetch_oujact_turnovers):
+                if it["checkout_date"] == today_iso:
+                    _oujact_mark_done("{}:{}".format(it["lid"], today_iso))
+        except Exception as e:
+            print("oujact clear-today mark error:", e)
     for key in [k for k in list(_oujact_done) if str(k).endswith(":" + target)]:
-        _oujact_done.pop(key, None)                # reset the chosen day so its cleanings re-open
+        _oujact_done.pop(key, None)                # reset the rebuild day so its cleanings re-open
     try:
         _save_json("oujact_done.json", _oujact_done)
     except Exception:
@@ -31376,8 +31395,8 @@ async def _api_oujact_rebuild(request):
     except Exception as e:
         print("oujact rebuild sync error:", e)
     created = sum(1 for c in changed if c.get("action") == "created")
-    log_event("ops", f"OujaCT rebuild ({day}) · حذف {deleted} · أنشأ {created}")
-    return _json({"ok": True, "deleted": deleted, "created": created, "day": day})
+    log_event("ops", f"OujaCT rebuild ({day}, clear_today={clear_today}) · حذف {deleted} · أنشأ {created}")
+    return _json({"ok": True, "deleted": deleted, "created": created, "day": day, "cleared_today": clear_today})
 
 # ---- Oujact Dispatch APIs ----
 def _oujact_plan_totals(plan, eta):
