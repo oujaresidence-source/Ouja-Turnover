@@ -2647,21 +2647,28 @@ def _oujact_card_embed(it, team_name=""):
     e.set_footer(text="Tap ✅ Cleaning Done when finished to close this channel.")
     return e
 
-async def sync_oujact_turnovers():
-    """Open the OujaCT turnover channel for each apartment ~HOURS_AHEAD (default 12h) BEFORE its
-    checkout — one channel per apartment per checkout day. De-dup is by the STABLE key (lid:date),
-    so a booking modification (new reservation id) never spawns a second channel. The channel name
-    + card show the cleaning team. Stale/duplicate channels are pruned first. Returns a change log
-    for the Apply/Refresh toast."""
+async def sync_oujact_turnovers(day=None):
+    """Open the OujaCT turnover channel for each apartment — one channel per apartment per
+    checkout day. De-dup is by the STABLE key (lid:date), so a booking modification (new
+    reservation id) never spawns a second channel. The channel name + card show the cleaning
+    team. Stale/duplicate channels are pruned first. Returns a change log.
+    `day`: None (automatic) → only checkouts within HOURS_AHEAD (~12h before); 'today' → ALL of
+    today's checkouts; 'tomorrow' → ALL of tomorrow's checkouts (lets the owner build ahead)."""
     guild = bot.get_guild(GUILD_ID)
     if guild is None or not oujact_listing_ids():
         return []
     pruned = await _oujact_cleanup_channels(guild)          # clear the backlog/dupes first
     category = await get_category(guild)
     now = datetime.now(TZ)
+    today_iso = now.date().isoformat()
+    tomorrow_iso = (now.date() + timedelta(days=1)).isoformat()
     items = await asyncio.to_thread(fetch_oujact_turnovers)
-    # only within the lead window: checkout is at most HOURS_AHEAD away (so ~12h before checkout)
-    items = [it for it in items if it["checkout"] <= now + timedelta(hours=HOURS_AHEAD)]
+    if day == "today":
+        items = [it for it in items if it["checkout_date"] == today_iso]
+    elif day == "tomorrow":
+        items = [it for it in items if it["checkout_date"] == tomorrow_iso]
+    else:                                                   # automatic: ~12h before checkout
+        items = [it for it in items if it["checkout"] <= now + timedelta(hours=HOURS_AHEAD)]
     # index existing OujaCT channels by the STABLE key; keep a reservation-id fallback for legacy
     by_key, by_res = {}, {}
     for ch in category.text_channels:
@@ -20915,11 +20922,23 @@ async function ctSyncChannels(){
   if(r&&r.ok){ toast((L==='ar'?'فتح ':'opened ')+(r.created||0)+(L==='ar'?' قناة · حذف ':' · removed ')+(r.pruned||0)); }
   else toast((r&&r.error)||(r&&r.note)||(t().err||'⚠'));
 }
-/* DELETE every cleaning channel and recreate today's with the current team names (clean slate) */
-async function ctRebuildChannels(){
-  if(!confirm(L==='ar'?'حذف كل قنوات التنظيف الحالية وإنشاء قنوات جديدة بأسماء الفرق؟':'Delete ALL current cleaning channels and recreate them with team names?')) return;
+/* Ask Today/Tomorrow, then delete that day's cleaning channels + recreate with team names */
+function ctRebuildChannels(){
+  var ar=(L==='ar');
+  openDrawer(ar?'♻️ إعادة بناء قنوات التنظيف':'♻️ Rebuild cleaning channels', ar?'بأسماء الفرق الحالية':'with current team names');
+  setDrawerBody('<div style="font-size:13.5px;line-height:1.8">'
+    +(ar?'تبي قنوات خروج <b>اليوم</b> ولا خروج <b>بكرة</b>؟':'Channels for <b>today</b> checkouts or <b>tomorrow</b> checkouts?')
+    +'<div class="muted" style="font-size:11.5px;margin-top:8px">'
+    +(ar?'يحذف قنوات نفس اليوم الحالية وينشئها من جديد · اليوم الثاني ما يتأثر.':'Deletes that day current channels and recreates them · the other day is untouched.')
+    +'</div></div>');
+  setDrawerFoot('<button class="btn primary sm" onclick="ctRebuildDo(&#39;today&#39;)">'+(ar?'🧹 خروج اليوم':'🧹 Today')+'</button>'
+    +'<button class="btn primary sm" onclick="ctRebuildDo(&#39;tomorrow&#39;)">'+(ar?'📅 خروج بكرة':'📅 Tomorrow')+'</button>'
+    +'<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+}
+async function ctRebuildDo(day){
+  closeDrawer();
   toast(L==='ar'?'⏳ إعادة بناء القنوات…':'⏳ Rebuilding channels…');
-  var r; try{ r=await post('/api/oujact/rebuild',{}); }catch(_){ r=null; }
+  var r; try{ r=await post('/api/oujact/rebuild',{day:day}); }catch(_){ r=null; }
   if(r&&r.ok){ toast((L==='ar'?'حذف ':'deleted ')+(r.deleted||0)+(L==='ar'?' · أنشأ ':' · created ')+(r.created||0)); }
   else toast((r&&r.error)||(t().err||'⚠'));
 }
@@ -31310,39 +31329,55 @@ async def _api_oujact_apply(request):
                   "created": created, "pruned": pruned})
 
 async def _api_oujact_rebuild(request):
-    """One-shot clean slate: DELETE every bot-created cleaning channel (topic 'oujact:1'),
-    reset the done-markers, then re-create today's channels with the CURRENT team names. For
-    after the owner re-organizes teams (e.g. OujaCT / StayClean / Servicu)."""
+    """Clean slate for ONE day: delete the bot-created cleaning channels for the chosen day
+    (topic 'oujact:1'), reset that day's done-markers, then re-create that day's channels with
+    the CURRENT team names. {day:'today'|'tomorrow'}. Only touches the chosen day, so a 'tomorrow'
+    rebuild never deletes today's live channels (and vice-versa)."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
     if guild is None:
         return _json({"error": "guild not ready"}, 503)
+    b = await _read_body(request)
+    day = (b.get("day") or "today").strip().lower()
+    if day not in ("today", "tomorrow"):
+        day = "today"
+    now = datetime.now(TZ)
+    target = now.date().isoformat() if day == "today" else (now.date() + timedelta(days=1)).isoformat()
     deleted = 0
     try:
         category = await get_category(guild)
         for ch in list(category.text_channels):
-            if "oujact:1" in (ch.topic or ""):
-                try:
-                    await ch.delete(reason="OujaCT rebuild — recreate with team names")
-                    deleted += 1
-                except Exception as e:
-                    print("oujact rebuild delete error:", e)
+            topic = ch.topic or ""
+            if "oujact:1" not in topic:
+                continue
+            k = parse_topic_oujact_key(topic)
+            if k:
+                if (k.split(":")[1] if ":" in k else "") != target:
+                    continue                       # only the chosen day's channels
+            elif day != "today":
+                continue                           # legacy keyless = old backlog → only clear on 'today'
+            try:
+                await ch.delete(reason=f"OujaCT rebuild ({day}) — recreate with team names")
+                deleted += 1
+            except Exception as e:
+                print("oujact rebuild delete error:", e)
     except Exception as e:
         return _json({"error": str(e)}, 500)
-    _oujact_done.clear()                       # reset so today's pending cleanings re-open fresh
+    for key in [k for k in list(_oujact_done) if str(k).endswith(":" + target)]:
+        _oujact_done.pop(key, None)                # reset the chosen day so its cleanings re-open
     try:
         _save_json("oujact_done.json", _oujact_done)
     except Exception:
         pass
     changed = []
     try:
-        changed = await sync_oujact_turnovers()
+        changed = await sync_oujact_turnovers(day=day)
     except Exception as e:
         print("oujact rebuild sync error:", e)
     created = sum(1 for c in changed if c.get("action") == "created")
-    log_event("ops", f"OujaCT rebuild · حذف {deleted} · أنشأ {created}")
-    return _json({"ok": True, "deleted": deleted, "created": created})
+    log_event("ops", f"OujaCT rebuild ({day}) · حذف {deleted} · أنشأ {created}")
+    return _json({"ok": True, "deleted": deleted, "created": created, "day": day})
 
 # ---- Oujact Dispatch APIs ----
 def _oujact_plan_totals(plan, eta):
