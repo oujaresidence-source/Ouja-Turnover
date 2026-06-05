@@ -209,6 +209,9 @@ CLEANING_DRIVE_ROOT_FOLDER_ID = os.environ.get("CLEANING_DRIVE_ROOT_FOLDER_ID", 
 CLEANING_DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLEANING_DRIVE_SERVICE_ACCOUNT_JSON", "").strip()
 CLEANING_DRIVE_SERVICE_ACCOUNT_FILE = os.environ.get(
     "CLEANING_DRIVE_SERVICE_ACCOUNT_FILE", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")).strip()
+CLEANING_DRIVE_OAUTH_CLIENT_JSON = os.environ.get("CLEANING_DRIVE_OAUTH_CLIENT_JSON", "").strip()
+CLEANING_DRIVE_OAUTH_TOKEN_JSON = os.environ.get("CLEANING_DRIVE_OAUTH_TOKEN_JSON", "").strip()
+CLEANING_DRIVE_OAUTH_TOKEN_FILE = os.environ.get("CLEANING_DRIVE_OAUTH_TOKEN_FILE", "").strip()
 
 # ---- AI guest-message assistant (Claude drafts, a human approves, then it sends) ----
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -2724,7 +2727,8 @@ def _cleanproof_save_local(report, slot_id, filename, data, mime_type):
 
 def _cleanproof_drive_configured():
     return bool(CLEANING_DRIVE_ROOT_FOLDER_ID and
-                (CLEANING_DRIVE_SERVICE_ACCOUNT_JSON or CLEANING_DRIVE_SERVICE_ACCOUNT_FILE))
+                (CLEANING_DRIVE_SERVICE_ACCOUNT_JSON or CLEANING_DRIVE_SERVICE_ACCOUNT_FILE or
+                 CLEANING_DRIVE_OAUTH_TOKEN_JSON or CLEANING_DRIVE_OAUTH_TOKEN_FILE))
 
 def _cleanproof_drive_url(file_id):
     return f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
@@ -2746,6 +2750,20 @@ def _cleanproof_drive_creds_info():
     except Exception as e:
         raise RuntimeError(f"invalid CLEANING_DRIVE_SERVICE_ACCOUNT_JSON: {e}")
 
+def _cleanproof_drive_oauth_token_info():
+    raw = CLEANING_DRIVE_OAUTH_TOKEN_JSON
+    if not raw and CLEANING_DRIVE_OAUTH_TOKEN_FILE:
+        with open(CLEANING_DRIVE_OAUTH_TOKEN_FILE, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            return json.loads(raw)
+        return json.loads(base64.b64decode(raw).decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"invalid CLEANING_DRIVE_OAUTH_TOKEN_JSON: {e}")
+
 def _cleanproof_storage_error_message(err):
     raw = str(err or "")
     low = raw.lower()
@@ -2763,6 +2781,8 @@ def _cleanproof_storage_error_message(err):
                 "restart Railway and check the Drive folder permission.")
     if "invalid cleaning_drive_service_account_json" in low:
         return "The Railway service account JSON is invalid. Paste the full JSON key into CLEANING_DRIVE_SERVICE_ACCOUNT_JSON."
+    if "invalid cleaning_drive_oauth_token_json" in low or "refresh token" in low:
+        return "The Google Drive OAuth token is invalid or expired. Regenerate CLEANING_DRIVE_OAUTH_TOKEN_JSON."
     return raw[:300] or "Storage upload failed"
 
 def _cleanproof_get_drive_service():
@@ -2773,16 +2793,21 @@ def _cleanproof_get_drive_service():
         return None
     try:
         from google.oauth2 import service_account
+        from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
     except Exception as e:
         raise RuntimeError(f"Google Drive libraries missing: {e}")
     scopes = ["https://www.googleapis.com/auth/drive"]
-    info = _cleanproof_drive_creds_info()
-    if info:
-        creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    token_info = _cleanproof_drive_oauth_token_info()
+    if token_info:
+        creds = Credentials.from_authorized_user_info(token_info, scopes=scopes)
     else:
-        creds = service_account.Credentials.from_service_account_file(
-            CLEANING_DRIVE_SERVICE_ACCOUNT_FILE, scopes=scopes)
+        info = _cleanproof_drive_creds_info()
+        if info:
+            creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+        else:
+            creds = service_account.Credentials.from_service_account_file(
+                CLEANING_DRIVE_SERVICE_ACCOUNT_FILE, scopes=scopes)
     _cleaning_drive_service = build("drive", "v3", credentials=creds, cache_discovery=False)
     return _cleaning_drive_service
 
