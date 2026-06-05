@@ -12992,6 +12992,9 @@ async function doUserLogin(){
 }
 function esc(s){return (s==null?'':String(s)).replace(/[<>&"']/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]})}
 function fmt(n){return (Math.round(n||0)).toLocaleString('en-US')}
+/* Finance money: keep EXACT decimals (halalas) — 9.50 stays 9.50, never rounded to 10.
+   Used only by the Finance report/statement so dashboard KPIs keep their integer style. */
+function money2(n){var v=(typeof n==='number')?n:parseFloat(n);if(isNaN(v))v=0;return v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show')},2200)}
 function shortTime(s){return (s||'').replace('T',' ').slice(5,16)}
 function dayTime(s){if(!s) return '';try{const d=new Date(s);return d.toLocaleString(L==='ar'?'ar-SA':'en-US',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}catch(_){return shortTime(s)}}
@@ -20467,7 +20470,7 @@ async function financeLoadReport(){
 function financeStatementHTML(){
   const r=D.finReport; const f=financeFields(); const ar=(L==='ar');
   if(!r || r.error || !r.period) return null;
-  const cur=f.currency||'SAR'; const money=function(x){ return fmt(x)+' '+cur; };
+  const cur=f.currency||'SAR'; const money=function(x){ return money2(x)+' '+cur; };
   const opt=function(val,html){ return (val&&(''+val).trim())?html:''; };
   let h='<div class="stmt">';
   h+='<div class="stmt-cover">';
@@ -20519,7 +20522,7 @@ function financeRender(){
   if(!html){ prev.innerHTML='<div class="empty" style="padding:40px;text-align:center">'+((r&&r.error)?'⚠ خطأ بجلب البيانات':'اختر شقة وفترة')+'</div>'; if(reconEl) reconEl.textContent=''; return; }
   const rec=(r.reconciliation)||{}; const cur=financeFields().currency||'SAR';
   if(reconEl) reconEl.innerHTML = rec.balanced ? '<span class="recon-ok">✔ '+(ar?'متوازن':'balanced')+'</span>'
-    : '<span class="recon-bad">✖ '+(ar?'غير متوازن':'mismatch')+(rec.missing_payout_ids&&rec.missing_payout_ids.length?(' · '+rec.missing_payout_ids.length+(ar?' بدون دفعة':' missing payout')):'')+(rec.needs_channel_rule_ids&&rec.needs_channel_rule_ids.length?(' · '+rec.needs_channel_rule_ids.length+(ar?' قناة بلا قاعدة':' channel(s) need rule')):'')+(rec.gap?(' · '+fmt(rec.gap)+' '+cur):'')+'</span>';
+    : '<span class="recon-bad">✖ '+(ar?'غير متوازن':'mismatch')+(rec.missing_payout_ids&&rec.missing_payout_ids.length?(' · '+rec.missing_payout_ids.length+(ar?' بدون دفعة':' missing payout')):'')+(rec.needs_channel_rule_ids&&rec.needs_channel_rule_ids.length?(' · '+rec.needs_channel_rule_ids.length+(ar?' قناة بلا قاعدة':' channel(s) need rule')):'')+(rec.gap?(' · '+money2(rec.gap)+' '+cur):'')+'</span>';
   prev.innerHTML=html;
 }
 async function financeSaveDefaults(){
@@ -20615,7 +20618,7 @@ function finAdjDelExtra(i){ if(_finAdj){ _finAdj.extra.splice(i,1); finAdjRender
 function finAdjRender(){
   var ar=(L==='ar'), s=_finAdj;
   var inp='padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px';
-  var money=function(x){ return fmt(x)+' ر.س'; };
+  var money=function(x){ return money2(x)+' ر.س'; };
   // real expense lines: edit amount / delete
   var exp='<div style="font-weight:700;font-size:12px;margin:4px 0 6px">'+(ar?'المصاريف الفعلية':'Actual expenses')+'</div>';
   if((s.raw||[]).length){
@@ -20963,7 +20966,7 @@ function stmtFilename(it){
 }
 function stmtDocHTML(r, label, kind){
   if(!r) return '';
-  var ar=(L==='ar'), cur=r.currency||'SAR', M=function(x){ return fmt(x||0)+' '+cur; };
+  var ar=(L==='ar'), cur=r.currency||'SAR', M=function(x){ return money2(x||0)+' '+cur; };
   var G='#A37728', G2='#8B6320', INK='#1A1815', MUT='#8C8475', LINE='#E8E2D5', CREAM='#FAF7F0', SUR='#FFFFFF';
   var pl=r.period?(r.period.start+'  →  '+r.period.end):'';
   var clean=r.cleaning||{}; var cleanTxt = (clean.type==='owner') ? ((ar?'يدفعها المالك · ':'owner pays · ')+M(clean.amount)+(clean.cleans!=null?(' × '+clean.cleans):'')) : (ar?'على عوجا (مشمولة)':'on Ouja (included)');
@@ -22563,10 +22566,11 @@ def _pdf_statement_bytes(rep, label):
         return _ar(t) if fp else str(t if t is not None else "")
     W = 210.0; M = 15.0; usable = W - 2 * M
     def _n(x):
+        # exact 2-decimal SAR (halalas preserved) — 9.50 stays 9.50, never rounded to 10
         try:
-            return "{:,}".format(int(round(float(x or 0))))
+            return "{:,.2f}".format(float(x or 0))
         except (TypeError, ValueError):
-            return "0"
+            return "0.00"
     def money(x):
         return _n(x) + " " + cur
     # ---- header band ----
