@@ -601,6 +601,15 @@ def _ct_team_view(t):
             "link": "/oujact-route?token=" + (t.get("token") or ""),
             "apartments": len(lids), "lids": sorted(lids)}
 
+def _ct_team_name_for_lid(lid):
+    """The cleaning-team name an apartment is assigned to ('' if none) — shown on its channel."""
+    try:
+        rec = _ls_get()["listings"].get(str(int(lid))) or {}
+    except (TypeError, ValueError):
+        return ""
+    t = _cleaning_teams.get(str(rec.get("cleaning_team") or ""))
+    return t.get("name", "") if t else ""
+
 # ---- Musaed early-departure: a guest indicating they LEFT early flags the unit urgent ----
 _EARLY_DEPART_PHRASES = (
     "we left the apartment", "we left", "i left the apartment", "i have left", "we have left",
@@ -2472,6 +2481,13 @@ def parse_topic_res(topic):
     m = re.search(r"hostaway-res:(\d+)", topic or "")
     return m.group(1) if m else None
 
+def parse_topic_oujact_key(topic):
+    """Stable per-cleaning key 'lid:YYYY-MM-DD' stored in an OujaCT channel topic. THIS is the
+    de-dup identity — it survives Hostaway reservation-id changes when a guest modifies a
+    booking (the reservation-id-based dedup was the cause of duplicate channels)."""
+    m = re.search(r"oujact-key:(\d+:\d{4}-\d{2}-\d{2})", topic or "")
+    return m.group(1) if m else None
+
 def parse_topic_did(topic):
     """Responsible cleaner's Discord id stored in the topic (None if unassigned)."""
     m = re.search(r"did:(\d+)", topic or "")
@@ -2576,16 +2592,28 @@ async def sync_checkouts():
             print("create error:", e)
 
 # ---- OujaCT (in-house cleaning team) turnover channels + daily schedule ----
-def _oujact_channel(internal_name, checkin_today):
-    """Discord-safe OujaCT channel name. e.g. '12b-oujact' / '12b-oujact-checkin'."""
-    base = channel_name(internal_name)[:70]
+def _oujact_channel(internal_name, checkin_today, team_name=""):
+    """Discord-safe OujaCT channel name, e.g. '12b-team1-oujact' / '12b-team1-oujact-checkin'.
+    The cleaning team's name is baked in so the channel shows which team owns it."""
+    base = channel_name(internal_name)[:46]
+    team = ("-" + channel_name(team_name)[:16]) if team_name else ""
     suffix = "-oujact-checkin" if checkin_today else "-oujact"
-    return (base + suffix)[:100]
+    return (base + team + suffix)[:100]
 
-def _oujact_card_embed(it):
+def _oujact_topic(it, team_name=""):
+    """Channel topic carrying the STABLE dedup key (lid:date) + reservation id + check-in flag
+    + team name. Dedup is by the stable key, NOT the reservation id."""
+    tm = (" team:" + str(team_name).replace(" ", "_")) if team_name else ""
+    return ("oujact:1 oujact-key:{lid}:{date} hostaway-res:{rid} checkin:{ci}{tm}".format(
+            lid=it["lid"], date=it["checkout_date"], rid=it["res_id"],
+            ci=(1 if it["checkin_today"] else 0), tm=tm))
+
+def _oujact_card_embed(it, team_name=""):
     """English turnover card for the in-house team. Reuses the ✅ Cleaning Done button."""
     e = discord.Embed(title="🧹 Turnover — Ready to Clean", color=GOLD)
     e.add_field(name="Unit", value=it["listing"], inline=False)
+    if team_name:
+        e.add_field(name="Cleaning Team", value=team_name, inline=True)
     e.add_field(name="Checkout",
                 value=it["checkout"].strftime("%a %d %b · %I:%M %p"), inline=True)
     if it["checkin_today"]:
@@ -2598,44 +2626,124 @@ def _oujact_card_embed(it):
     return e
 
 async def sync_oujact_turnovers():
-    """Create/rename the OujaCT turnover channels for TODAY's + TOMORROW's turnovers per the
-    current assignments. Idempotent (dedup by reservation id in the channel topic). Returns a
-    list describing what changed, for the Apply/Refresh toast."""
+    """Open the OujaCT turnover channel for each apartment ~HOURS_AHEAD (default 12h) BEFORE its
+    checkout — one channel per apartment per checkout day. De-dup is by the STABLE key (lid:date),
+    so a booking modification (new reservation id) never spawns a second channel. The channel name
+    + card show the cleaning team. Stale/duplicate channels are pruned first. Returns a change log
+    for the Apply/Refresh toast."""
     guild = bot.get_guild(GUILD_ID)
     if guild is None or not oujact_listing_ids():
         return []
+    pruned = await _oujact_cleanup_channels(guild)          # clear the backlog/dupes first
     category = await get_category(guild)
+    now = datetime.now(TZ)
     items = await asyncio.to_thread(fetch_oujact_turnovers)
-    # index existing OujaCT channels by reservation id (only ones we created carry 'oujact:1')
-    existing = {}
+    # only within the lead window: checkout is at most HOURS_AHEAD away (so ~12h before checkout)
+    items = [it for it in items if it["checkout"] <= now + timedelta(hours=HOURS_AHEAD)]
+    # index existing OujaCT channels by the STABLE key; keep a reservation-id fallback for legacy
+    by_key, by_res = {}, {}
     for ch in category.text_channels:
-        if "oujact:1" in (ch.topic or ""):
-            rid = parse_topic_res(ch.topic)
-            if rid:
-                existing[rid] = ch
+        topic = ch.topic or ""
+        if "oujact:1" not in topic:
+            continue
+        k = parse_topic_oujact_key(topic)
+        if k:
+            by_key[k] = ch
+        rid = parse_topic_res(topic)
+        if rid:
+            by_res[rid] = ch
     changed = []
     for it in items:
-        want = _oujact_channel(it["listing"], it["checkin_today"])
-        topic = f"hostaway-res:{it['res_id']} oujact:1 checkin:{1 if it['checkin_today'] else 0}"
-        ch = existing.get(it["res_id"])
+        key = "{}:{}".format(it["lid"], it["checkout_date"])
+        team_name = _ct_team_name_for_lid(it["lid"])
+        topic = _oujact_topic(it, team_name)
+        ch = by_key.get(key) or by_res.get(str(it["res_id"]))
         try:
             if ch is None:
+                want = _oujact_channel(it["listing"], it["checkin_today"], team_name)
                 ch = await guild.create_text_channel(want, category=category, topic=topic)
-                await ch.send(embed=_oujact_card_embed(it), view=CleaningDoneView())
+                await ch.send(embed=_oujact_card_embed(it, team_name), view=CleaningDoneView())
+                by_key[key] = ch
                 changed.append({"unit": it["listing"], "channel": want,
                                 "action": "created", "checkin": it["checkin_today"]})
-                print(f"OujaCT: opened {want} (res {it['res_id']})")
-            elif ch.name != want:
-                # check-in status changed -> rename + flag it in-channel (once)
-                await ch.edit(name=want, topic=topic)
-                if it["checkin_today"]:
+                print(f"OujaCT: opened {want} ({key})")
+            else:
+                # already open — only touch the topic if it lacks the stable key (legacy upgrade)
+                # or the check-in flag flipped; never rename (avoids Discord rate-limit churn).
+                had_checkin = "checkin:1" in (ch.topic or "")
+                if parse_topic_oujact_key(ch.topic or "") != key or had_checkin != it["checkin_today"]:
+                    await ch.edit(topic=topic)
+                if it["checkin_today"] and not had_checkin:
                     await ch.send("🔴 **CHECK-IN TODAY** — same-day arrival, prioritize this turnover.")
-                changed.append({"unit": it["listing"], "channel": want,
-                                "action": "renamed", "checkin": it["checkin_today"]})
-                print(f"OujaCT: renamed -> {want} (res {it['res_id']})")
+                    changed.append({"unit": it["listing"], "channel": ch.name,
+                                    "action": "checkin_flagged", "checkin": True})
         except Exception as e:
             print("OujaCT channel error:", e)
+    if pruned:
+        changed.append({"action": "pruned", "count": pruned})
     return changed
+
+async def _oujact_cleanup_channels(guild=None):
+    """Safely delete ONLY the OujaCT channels the bot created (topic carries 'oujact:1'):
+    duplicates of the same stable key, channels whose checkout day is 2+ days past, and legacy
+    keyless channels older than 3 days. Never touches any other channel. Returns #deleted."""
+    guild = guild or (bot.get_guild(GUILD_ID) if GUILD_ID else None)
+    if guild is None:
+        return 0
+    try:
+        category = await get_category(guild)
+    except Exception:
+        return 0
+    today = datetime.now(TZ).date()
+    seen, deleted = set(), 0
+    for ch in list(category.text_channels):
+        topic = ch.topic or ""
+        if "oujact:1" not in topic:
+            continue
+        key = parse_topic_oujact_key(topic)
+        drop = False
+        if key:
+            if key in seen:                       # duplicate of an apartment+day we already kept
+                drop = True
+            else:
+                seen.add(key)
+                try:
+                    d = datetime.strptime(key.split(":")[1], "%Y-%m-%d").date()
+                    if (today - d).days >= 2:     # checkout day well past — cleaning is long done
+                        drop = True
+                except Exception:
+                    pass
+        else:
+            # legacy channel with no stable key: drop if it's been around 3+ days
+            try:
+                age_days = (datetime.now(TZ) - ch.created_at.astimezone(TZ)).days
+                if age_days >= 3:
+                    drop = True
+            except Exception:
+                pass
+        if drop:
+            try:
+                await ch.delete(reason="OujaCT cleanup: stale/duplicate channel")
+                deleted += 1
+            except Exception as e:
+                print("OujaCT cleanup delete error:", e)
+    if deleted:
+        print(f"OujaCT cleanup: removed {deleted} stale/duplicate channels")
+    return deleted
+
+async def _oujact_find_turnover_channel(guild, lid, date_iso):
+    """The apartment's own OujaCT turnover channel for a given checkout day (by stable key)."""
+    if guild is None:
+        return None
+    try:
+        category = await get_category(guild)
+    except Exception:
+        return None
+    key = "{}:{}".format(lid, str(date_iso)[:10])
+    for ch in category.text_channels:
+        if "oujact:1" in (ch.topic or "") and parse_topic_oujact_key(ch.topic) == key:
+            return ch
+    return None
 
 async def post_oujact_schedule():
     """Daily English schedule of OujaCT turnovers (today + tomorrow), priority-ordered:
@@ -5781,6 +5889,41 @@ class CleaningProofReviewView(discord.ui.View):
     async def reshoot(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(CleaningReportDecisionModal("reshoot", interaction.message.id))
 
+def _cleanproof_photo_bytes(photo):
+    """Raw bytes + filename for one uploaded photo, from the local copy or Google Drive."""
+    name = photo.get("file_name") or "photo.jpg"
+    p = photo.get("local_path") or ""
+    if p:
+        try:
+            with open(p, "rb") as f:
+                return f.read(), name
+        except Exception:
+            pass
+    fid = photo.get("drive_file_id") or ""
+    if fid:
+        try:
+            service = _cleanproof_get_drive_service()
+            if service:
+                data = service.files().get_media(fileId=fid, supportsAllDrives=True).execute()
+                if isinstance(data, (bytes, bytearray)):
+                    return bytes(data), name
+        except Exception as e:
+            print("cleanproof drive media error:", e)
+    return None, None
+
+def _cleanproof_discord_files(report, limit=10):
+    """Up to `limit` uploaded photos as discord.File attachments (≤8MB each — Discord's base cap)."""
+    out = []
+    for ph in _cleanproof_report_photos(report.get("report_id")):
+        if ph.get("status") != "uploaded":
+            continue
+        data, name = _cleanproof_photo_bytes(ph)
+        if data and len(data) <= 8 * 1024 * 1024:
+            out.append(discord.File(io.BytesIO(data), filename=name))
+        if len(out) >= limit:
+            break
+    return out
+
 async def _cleanproof_send_discord_review(report_id):
     report = _cleaning_reports.get(report_id)
     if not report or not GUILD_ID:
@@ -5788,17 +5931,26 @@ async def _cleanproof_send_discord_review(report_id):
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return False, "guild_not_ready"
-    ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
+    # Post into the apartment's OWN turnover channel; fall back to the shared review channel.
+    ch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
+    if ch is None:
+        ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
     if ch is None:
         return False, "channel_not_ready"
-    msg = await ch.send(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
+    files = await asyncio.to_thread(_cleanproof_discord_files, report)
+    try:
+        msg = await ch.send(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView(), files=files)
+    except Exception as e:
+        print("cleanproof photo post error:", e)           # attachments failed → still post the card + Drive link
+        msg = await ch.send(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
     report["discord_review_channel_id"] = str(ch.id)
     report["discord_review_message_id"] = str(msg.id)
     report["updated_at"] = _cleanproof_now()
     _cleaning_reports[report_id] = report
     _save_json("cleaning_reports.json", _cleaning_reports)
     _cleanproof_audit(report_id, "discord_review_sent", "bot", report.get("status"), report.get("status"),
-                      extra={"discord_channel_id": str(ch.id), "discord_message_id": str(msg.id)})
+                      extra={"discord_channel_id": str(ch.id), "discord_message_id": str(msg.id),
+                             "photos_attached": len(files)})
     return True, ""
 
 class ApproveView(discord.ui.View):
@@ -11439,6 +11591,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="page-head">
           <div><div class="page-title">🧽 فرق التنظيف</div><div class="page-sub">عمليات اليوم · خروج وتنظيف عاجل · مراجعة صور وتوقيع · لكل فريق رابط خاص</div></div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="ctSyncChannels()" title="افتح قنوات اليوم واحذف المكرر/القديم">🔄 قنوات ديسكورد</button>
             <button class="btn ghost sm" onclick="ctOpenLog()">📜 السجل</button>
             <button class="btn ghost sm" onclick="loadCleanTeams()">↻ تحديث</button>
             <button class="btn primary sm" onclick="ctCreateTeam()">+ فريق جديد</button>
@@ -20625,6 +20778,13 @@ async function ctBulkAssign(){
 }
 async function ctClearEarly(lid){ await post('/api/cleaning/clear-early',{lid:lid}); loadCleanTeams(); }
 function ctCopy(txt){ try{ navigator.clipboard.writeText(txt); toast('نُسخ ✓'); }catch(e){ toast(txt); } }
+/* open today's turnover channels (12h before checkout) + delete duplicate/stale ones */
+async function ctSyncChannels(){
+  toast(L==='ar'?'⏳ مزامنة قنوات ديسكورد…':'⏳ Syncing Discord channels…');
+  var r; try{ r=await post('/api/oujact/apply',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast((L==='ar'?'فتح ':'opened ')+(r.created||0)+(L==='ar'?' قناة · حذف ':' · removed ')+(r.pruned||0)); }
+  else toast((r&&r.error)||(r&&r.note)||(t().err||'⚠'));
+}
 /* open the in-dashboard photo review drawer (reuses Codex's openCleanProofReport) */
 async function openCleanReview(rid){
   var r; try{ r=await api('/api/cleaning/report?id='+encodeURIComponent(rid)); }catch(_){ r=null; }
@@ -30805,8 +30965,11 @@ async def _api_oujact_apply(request):
     except Exception as e:
         print("oujact apply error:", e)
         return _json({"error": str(e)}, 500)
-    log_event("pricing", f"OujaCT · تطبيق/تحديث · {len(changed)} قناة · {assigned} شقة معيّنة")
-    return _json({"ok": True, "changed": changed, "assigned": assigned})
+    created = sum(1 for c in changed if c.get("action") == "created")
+    pruned = sum(c.get("count", 0) for c in changed if c.get("action") == "pruned")
+    log_event("ops", f"OujaCT قنوات · فتح {created} · حذف {pruned} · {assigned} شقة معيّنة")
+    return _json({"ok": True, "changed": changed, "assigned": assigned,
+                  "created": created, "pruned": pruned})
 
 # ---- Oujact Dispatch APIs ----
 def _oujact_plan_totals(plan, eta):
@@ -31261,6 +31424,15 @@ async def _api_cleaning_report_decision(request):
                 await msg.edit(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
     except Exception as e:
         print("cleanproof discord sync error:", e)
+    # Approved → cleaning signed off; close the apartment's turnover channel (keeps Discord tidy).
+    if decision == "approve" and report.get("status") == "manager_approved":
+        try:
+            guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
+            tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
+            if tch is not None:
+                await tch.delete(reason="OujaCT: cleaning approved by " + (actor or "manager"))
+        except Exception as e:
+            print("oujact close-on-approve error:", e)
     return _json({"ok": True, "report": _cleanproof_report_view(report)})
 
 async def _api_cleaning_templates(request):
