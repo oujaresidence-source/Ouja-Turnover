@@ -812,8 +812,10 @@ def sync_listings_store(raw=None):
 _OUJACT_FAR = datetime.max.replace(tzinfo=TZ)   # sort sentinel for "no check-in"
 
 def _ha_reservations_window(param_start, param_end, start_iso, end_iso):
-    """Paginated reservation pull for a date window (e.g. departures or arrivals)."""
-    out, limit, offset, pages = [], 100, 0, 0
+    """Paginated reservation pull for a date window (e.g. departures or arrivals).
+    De-duplicates by reservation id — paginating across a dataset that changes between page
+    fetches can otherwise return the same reservation twice (a source of duplicate rows)."""
+    out, seen, limit, offset, pages = [], set(), 100, 0, 0
     while pages < 10:
         data = api_get("/reservations", params={
             param_start: start_iso, param_end: end_iso,
@@ -821,7 +823,13 @@ def _ha_reservations_window(param_start, param_end, start_iso, end_iso):
         batch = data.get("result", []) or []
         if not batch:
             break
-        out.extend(batch)
+        for r in batch:
+            rid = r.get("id")
+            if rid is not None and rid in seen:
+                continue
+            if rid is not None:
+                seen.add(rid)
+            out.append(r)
         if len(batch) < limit:
             break
         offset += limit
@@ -856,7 +864,7 @@ def fetch_oujact_turnovers(assigned=None):
     # (listing_id, arrivalDate) -> earliest check-in datetime, for same-day-checkin detection
     arr_by = {}
     for r in arrs:
-        if (r.get("status") or "").lower() in SKIP_STATUSES:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:   # confirmed bookings only
             continue
         lid = r.get("listingMapId")
         a = r.get("arrivalDate")
@@ -870,10 +878,12 @@ def fetch_oujact_turnovers(assigned=None):
         kk = (lid, a[:10])
         if kk not in arr_by or cin < arr_by[kk]:
             arr_by[kk] = cin
-    out = []
+    # One cleaning per apartment per departure day: key by (lid, date) and merge any duplicate
+    # reservation rows (modified copies / overlapping records) into a single turnover.
+    by_key = {}
     for r in deps:
-        if (r.get("status") or "").lower() in SKIP_STATUSES:
-            continue
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:   # confirmed bookings only — never
+            continue                                                    # owner-stays / blocks / pending / inquiries
         lid = r.get("listingMapId")
         if lid not in assigned:
             continue
@@ -886,9 +896,15 @@ def fetch_oujact_turnovers(assigned=None):
             checkout = datetime.strptime(d_iso, "%Y-%m-%d").replace(hour=min(hour, 23), tzinfo=TZ)
         except ValueError:
             continue
+        key = (lid, d_iso)
+        prev = by_key.get(key)
+        if prev is not None:
+            if checkout < prev["checkout"]:            # collapse duplicates; keep earliest checkout
+                prev["checkout"] = checkout
+            continue
         cin = arr_by.get((lid, d_iso))
         rec = store.get(str(lid)) or {}
-        out.append({
+        by_key[key] = {
             "res_id": str(r.get("id")),
             "lid": lid,
             "listing": listings.get(lid) or rec.get("internal_name") or r.get("listingName") or f"unit-{lid}",
@@ -899,7 +915,8 @@ def fetch_oujact_turnovers(assigned=None):
             "checkin_dt": cin,
             "early_departure": _clean_early_departure_active(lid),   # Musaed: guest said they left
             "directions_url": rec.get("directions_url"),
-        })
+        }
+    out = list(by_key.values())
     out.sort(key=_oujact_sort_key)
     return out
 
@@ -3188,7 +3205,7 @@ def _oujact_dispatch_plan(today_only=True, assigned=None):
         parsed_ll = _extract_latlng(maps)
         lat, lng = parsed_ll if parsed_ll else (cfg.get("lat"), cfg.get("lng"))
         last = _oujact_latest_status(lid, today)
-        plan.append({
+        item = {
             "lid": lid, "name": lmap.get(lid) or cfg.get("internal_name") or f"unit-{lid}", "date": today,
             "district": cfg.get("group") or cfg.get("address") or "",
             "checkout_time": "—", "checkout_passed": True,
@@ -3205,7 +3222,17 @@ def _oujact_dispatch_plan(today_only=True, assigned=None):
             "access_notes": cfg.get("access_notes") or "", "parking_notes": cfg.get("parking_notes") or "",
             "discord_channel": cfg.get("discord_channel") or "",
             "manual": True, "manual_type": tk["ctype"], "manual_note": tk.get("note") or "", "task_id": tk["id"],
-        })
+        }
+        plan.append(item)
+        have[lid] = item                 # a 2nd manual task for the same unit annotates, never duplicates
+    # Defensive: exactly one row per apartment (collapse any same-lid duplicates that slipped through).
+    seen_lid, uniq = set(), []
+    for p in plan:
+        if p["lid"] in seen_lid:
+            continue
+        seen_lid.add(p["lid"])
+        uniq.append(p)
+    plan = uniq
     plan.sort(key=lambda p: (p["tier"], p.get("checkin_time") or "99:99", p["checkout_time"]))
     for i, p in enumerate(plan):
         p["rank"] = i + 1
