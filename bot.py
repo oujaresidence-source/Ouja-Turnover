@@ -2746,6 +2746,25 @@ def _cleanproof_drive_creds_info():
     except Exception as e:
         raise RuntimeError(f"invalid CLEANING_DRIVE_SERVICE_ACCOUNT_JSON: {e}")
 
+def _cleanproof_storage_error_message(err):
+    raw = str(err or "")
+    low = raw.lower()
+    if "storage quota" in low or "storagequotaexceeded" in low:
+        return ("Google Drive refused the upload because the service account has no personal storage. "
+                "Use a Shared Drive folder as CLEANING_DRIVE_ROOT_FOLDER_ID and add the service account as Content manager.")
+    if "file not found" in low or "not found" in low:
+        return ("Google Drive cannot see the root folder. Check CLEANING_DRIVE_ROOT_FOLDER_ID and share that folder "
+                "with the service account email as Content manager.")
+    if "insufficient" in low or "forbidden" in low or "permission" in low or "403" in low:
+        return ("Google Drive permission problem. Share the Drive folder with the service account email as Content manager, "
+                "then restart Railway.")
+    if "broken pipe" in low or "connection reset" in low:
+        return ("Upload connection was interrupted while sending to Google Drive. Try one smaller photo; if it repeats, "
+                "restart Railway and check the Drive folder permission.")
+    if "invalid cleaning_drive_service_account_json" in low:
+        return "The Railway service account JSON is invalid. Paste the full JSON key into CLEANING_DRIVE_SERVICE_ACCOUNT_JSON."
+    return raw[:300] or "Storage upload failed"
+
 def _cleanproof_get_drive_service():
     global _cleaning_drive_service
     if _cleaning_drive_service is not None:
@@ -2757,7 +2776,7 @@ def _cleanproof_get_drive_service():
         from googleapiclient.discovery import build
     except Exception as e:
         raise RuntimeError(f"Google Drive libraries missing: {e}")
-    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    scopes = ["https://www.googleapis.com/auth/drive"]
     info = _cleanproof_drive_creds_info()
     if info:
         creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
@@ -2812,7 +2831,7 @@ def _cleanproof_save_drive(report, slot_id, filename, data, mime_type):
     folder_id = _cleanproof_report_drive_folder(report)
     if service is None or not folder_id:
         raise RuntimeError("Google Drive is not configured")
-    media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mime_type or "image/jpeg", resumable=False)
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mime_type or "image/jpeg", resumable=True)
     body = {"name": filename, "parents": [folder_id],
             "description": f"Oujact cleaning proof {report.get('report_id')} {slot_id}"}
     created = service.files().create(body=body, media_body=media,
@@ -20956,7 +20975,8 @@ function uploadPhotoSlot(ev,slot){
  var f=ev.target.files&&ev.target.files[0]; if(!f||PHOTO.busy)return; PHOTO.busy=true;
  var fd=new FormData(); fd.append('lid',PHOTO.lid); fd.append('date',PHOTO.date); fd.append('slot_id',slot); fd.append('file',f);
  fetch('/api/oujact/photo-upload?token='+encodeURIComponent(TOK),{method:'POST',body:fd})
-  .then(function(r){return r.json();}).then(function(d){ if(!d.ok) throw d.message||d.error||'upload failed'; PHOTO.report=d.report; PHOTO.busy=false; renderPhotoSheet(); })
+  .then(function(r){return r.text().then(function(txt){ var d; try{d=JSON.parse(txt);}catch(_){d={ok:false,message:txt||('HTTP '+r.status)}}; d.http_status=r.status; return d; });})
+  .then(function(d){ if(!d.ok) throw d.message||d.error||'upload failed'; PHOTO.report=d.report; PHOTO.busy=false; renderPhotoSheet(); })
   .catch(function(e){ PHOTO.busy=false; alert('⚠ '+e); });
 }
 function submitPhotoReport(){
@@ -30330,9 +30350,11 @@ async def _api_oujact_photo_upload(request):
     try:
         stored = await asyncio.to_thread(_cleanproof_save_photo, report, slot_id, filename, file_bytes, mime_type)
     except Exception as e:
+        msg = _cleanproof_storage_error_message(e)
         _cleanproof_audit(report["report_id"], "drive_upload_failed", fields.get("by") or "route-link",
-                          report.get("status"), report.get("status"), str(e)[:300])
-        return _json({"error": "storage_failed", "message": str(e)[:300]}, 500)
+                          report.get("status"), report.get("status"), msg,
+                          {"raw_error": str(e)[:300]})
+        return _json({"error": "storage_failed", "message": msg}, 500)
     # Replace a single-photo slot by marking older slot photos removed.
     if not slots[slot_id].get("allow_multiple"):
         for p in _cleanproof_report_photos(report["report_id"]):
