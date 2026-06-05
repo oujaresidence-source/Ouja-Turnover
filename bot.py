@@ -2492,10 +2492,57 @@ def _extract_latlng(url):
     """Safely pull (lat, lng) from a Google Maps URL. Returns None if not confidently found."""
     if not url:
         return None
-    for pat in (r"@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)",                # …/@24.77,46.63,17z
-                r"!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)",            # !3dLAT!4dLNG
-                r"[?&](?:q|ll|destination|center)=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)"):
-        m = re.search(pat, url)
+    raw = str(url).strip()
+    coord = r"(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)"
+
+    # Browser geolocation sends the route start as plain "lat,lng".
+    m = re.fullmatch(r"\s*" + coord + r"\s*", raw)
+    if m:
+        try:
+            lat, lng = float(m.group(1)), float(m.group(2))
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                return (lat, lng)
+        except (TypeError, ValueError):
+            pass
+
+    # Some place links encode destination as longitude then latitude. Prefer this
+    # over /dir/ path coordinates because those can be the origin.
+    for pat in (r"!1d(-?\d{1,3}\.\d+)!2d(-?\d{1,3}\.\d+)",):
+        m = re.search(pat, raw)
+        if m:
+            try:
+                lng, lat = float(m.group(1)), float(m.group(2))
+                if -90 <= lat <= 90 and -180 <= lng <= 180:
+                    return (lat, lng)
+            except (TypeError, ValueError):
+                pass
+
+    for pat in (r"!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)",):
+        m = re.search(pat, raw)
+        if m:
+            try:
+                lat, lng = float(m.group(1)), float(m.group(2))
+                if -90 <= lat <= 90 and -180 <= lng <= 180:
+                    return (lat, lng)
+            except (TypeError, ValueError):
+                pass
+
+    # Directions links often have both route endpoints before "/@", then a map-center
+    # coordinate after "/@". Prefer the last explicit endpoint over the viewport center.
+    before_center = raw.split("/@", 1)[0]
+    path_coords = list(re.finditer(r"/" + coord + r"(?=/|$)", before_center))
+    if path_coords:
+        m = path_coords[-1]
+        try:
+            lat, lng = float(m.group(1)), float(m.group(2))
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                return (lat, lng)
+        except (TypeError, ValueError):
+            pass
+
+    for pat in (r"[?&](?:q|ll|destination|center)=" + coord,
+                r"@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)"):              # map center fallback
+        m = re.search(pat, raw)
         if m:
             try:
                 lat, lng = float(m.group(1)), float(m.group(2))
@@ -2939,6 +2986,8 @@ def _oujact_dispatch_plan(today_only=True):
         done = (last or {}).get("action") in ("done",)
         tier, rc = _oujact_priority(it, _oujact_checkout_state(lid, d), done, now)
         maps = (cfg.get("maps_link") or "").strip()
+        parsed_ll = _extract_latlng(maps)
+        lat, lng = parsed_ll if parsed_ll else (cfg.get("lat"), cfg.get("lng"))
         plan.append({
             "lid": lid, "name": it["listing"], "date": d,
             "district": cfg.get("group") or cfg.get("address") or "",
@@ -2951,7 +3000,7 @@ def _oujact_dispatch_plan(today_only=True):
             "reason_ar": _OUJACT_REASON.get(rc, ("", ""))[0],
             "reason_en": _OUJACT_REASON.get(rc, ("", ""))[1],
             "maps_link": maps, "directions_url": cfg.get("directions_url"),
-            "lat": cfg.get("lat"), "lng": cfg.get("lng"), "missing_maps": not maps,
+            "lat": lat, "lng": lng, "missing_maps": not maps,
             "clean_min": cfg.get("clean_min") or OUJACT_CLEAN_MIN,
             "clean_max": cfg.get("clean_max") or OUJACT_CLEAN_MAX,
             "park_buffer": cfg.get("park_buffer") if cfg.get("park_buffer") is not None else OUJACT_PARK_BUFFER,
@@ -2998,6 +3047,23 @@ def _oujact_route_eta(start, plan):
             origin = (p["lat"], p["lng"])
         return {"available": ok_any, "reason": ("ok" if ok_any else "no_legs"),
                 "legs": legs, "total_drive_min": (total if ok_any else None)}
+    except requests.HTTPError as e:
+        resp = getattr(e, "response", None)
+        status = getattr(resp, "status_code", None)
+        reason = "api_error"
+        if status in (401, 403):
+            reason = "api_key_rejected"
+        elif status == 429:
+            reason = "api_rate_limited"
+        elif status and status >= 500:
+            reason = "api_temporary_error"
+        body = ""
+        try:
+            body = (resp.text or "")[:220] if resp is not None else ""
+        except Exception:
+            body = ""
+        print("oujact ETA error:", status or "", body or e)
+        return {"available": False, "reason": reason, "legs": [], "total_drive_min": None}
     except Exception as e:
         print("oujact ETA error:", e)
         return {"available": False, "reason": "api_error", "legs": [], "total_drive_min": None}
@@ -20866,6 +20932,10 @@ var T={
    prio:'الأولوية', reason:'سبب الأولوية', maps:'افتح في Google Maps', chan:'قناة الشقة',
    clean:'الوقت المتوقع للتنظيف', park:'انتظار/مواقف', access:'ملاحظة الوصول',
    nomap:'لا يوجد رابط خرائط', eta_na:'ETA غير متاح حاليًا', within:'أقرب مسار داخل نفس الأولوية',
+   eta_no_api_key:'مفتاح Google Maps غير موجود في Railway', eta_no_start_coords:'ما وصلتنا إحداثيات نقطة البداية',
+   eta_no_legs:'ما عندنا إحداثيات دقيقة للشقق المجدولة', eta_api_key_rejected:'Google رفض مفتاح الخرائط أو API غير مفعّل',
+   eta_api_rate_limited:'Google Maps أوقف الطلب مؤقتًا بسبب الحد اليومي', eta_api_temporary_error:'Google Maps فيه عطل مؤقت',
+   eta_api_error:'تعذر حساب ETA من Google Maps',
    prio_note:'الأولوية التشغيلية مقدّمة على قرب المسافة',
    arrived:'وصلت', started:'بدأ التنظيف', done:'تم', issue:'فيه مشكلة', inside:'الضيف باقي داخل',
    photos:'ارفع صور التنظيف', report:'تقرير تنظيف', req:'صور مطلوبة', opt:'صور اختيارية', missing:'الصورة ناقصة',
@@ -20883,6 +20953,10 @@ var T={
    prio:'Priority', reason:'Why first', maps:'Open in Google Maps', chan:'Apartment channel',
    clean:'Est. cleaning time', park:'Parking / wait', access:'Access note',
    nomap:'No map link', eta_na:'ETA unavailable', within:'Nearest within same priority',
+   eta_no_api_key:'Google Maps key is missing in Railway', eta_no_start_coords:'Starting-point coordinates did not reach the server',
+   eta_no_legs:'Scheduled apartments are missing exact coordinates', eta_api_key_rejected:'Google rejected the Maps key or the API is not enabled',
+   eta_api_rate_limited:'Google Maps temporarily rate-limited the request', eta_api_temporary_error:'Google Maps has a temporary error',
+   eta_api_error:'Google Maps could not calculate ETA',
    prio_note:'Operational priority comes before distance',
    arrived:'Arrived', started:'Started cleaning', done:'Done', issue:'Issue', inside:'Guest still inside',
    photos:'Upload cleaning photos', report:'Cleaning report', req:'Required photos', opt:'Optional photos', missing:'Missing photo',
@@ -20911,6 +20985,7 @@ function useLink(){ var v=(document.getElementById('slink')||{}).value||''; if(!
 function useAddr(){ var v=(document.getElementById('saddr')||{}).value||''; if(!v.trim())return; START={mode:'addr',value:v.trim(),label:v.trim()}; load(); }
 function tierChip(p){ var k=t(); var cls=p.tier<=1?'r':(p.tier<=3?'g':''); return '<span class=\"chip '+cls+'\">'+esc(L==='ar'?p.reason_ar:p.reason_en)+'</span>'; }
 function rankColor(p){ return p.tier<=1?'#B3433F':(p.tier<=3?'var(--gold)':'var(--mut)'); }
+function etaReason(d){ var k=t(), r=((d.eta||{}).reason||''); return k['eta_'+r] || (r==='ok'?'':k.eta_api_error); }
 function mapsHref(p){ var dest=(p.lat!=null&&p.lng!=null)?(p.lat+','+p.lng):(p.maps_link||''); if(!dest) return ''; var o=START?('&origin='+encodeURIComponent(START.value)):''; return 'https://www.google.com/maps/dir/?api=1'+o+'&destination='+encodeURIComponent(dest); }
 function render(){
  document.getElementById('t_title').textContent=t().title;
@@ -20928,7 +21003,7 @@ function render(){
   +'<div class=\"sumtile\"><div class=\"v\" style=\"font-size:13px\">'+esc(route)+'</div><div class=\"l\">'+k.route_t+'</div></div>'
   +'<div class=\"sumtile\"><div class=\"v\" style=\"font-size:13px\">'+(tot.clean_min_total||0)+'–'+(tot.clean_max_total||0)+' '+k.min+'</div><div class=\"l\">'+k.clean_w+'</div></div>'
   +(tot.missing_maps?('<div class=\"sumtile\"><div class=\"v\" style=\"color:var(--gold-2)\">'+tot.missing_maps+'</div><div class=\"l\">'+k.miss+'</div></div>'):'')+'</div>'
-  +'<div class=\"muted\" style=\"font-size:11px;margin-top:8px\">'+esc(k.prio_note)+(eta?'':(' · '+esc(k.eta_na)))+'</div>';
+  +'<div class=\"muted\" style=\"font-size:11px;margin-top:8px\">'+esc(k.prio_note)+(eta?'':(' · '+esc(k.eta_na)+' — '+esc(etaReason(d))))+'</div>';
  var plan=d.plan||[];
  if(!plan.length){ pl.innerHTML='<div class=\"card muted\">'+esc(k.empty)+'</div>'; return; }
  pl.innerHTML=plan.map(function(p){
