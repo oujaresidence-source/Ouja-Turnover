@@ -80,6 +80,9 @@ DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false",
 DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
 DISCOUNT_STATE_FILE_NAME = "discount_state.json"                            # path resolved via _state_path() below (survives redeploys)
+LAST_MINUTE_DIAG_FILE_NAME = "last_minute_pricing_diagnostics.json"
+LAST_MINUTE_RUN_STATE_FILE_NAME = "last_minute_pricing_runs.json"
+DISCOUNT_CATCHUP_MINUTES = int(os.environ.get("DISCOUNT_CATCHUP_MINUTES", "90") or "90")
 # Diagnostics: after each live write, re-read the day and log requested vs actual price.
 DISCOUNT_VERIFY  = os.environ.get("DISCOUNT_VERIFY", "0") in ("1", "true", "True", "yes")
 # Set to a percent (e.g. "15") to run one tier immediately on startup for testing.
@@ -177,6 +180,7 @@ WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split("
 WEEKEND_DISCOUNT_PERCENT = float(os.environ.get("WEEKEND_DISCOUNT_PERCENT", "20"))
 WEEKEND_DISCOUNT_HOUR    = int(os.environ.get("WEEKEND_DISCOUNT_HOUR", "17"))
 WEEKEND_DISCOUNT_MINUTE  = int(os.environ.get("WEEKEND_DISCOUNT_MINUTE", "30"))  # 17:30 = 5:30 PM
+DISCOUNT_WEEKEND_SKIP_TIERS = os.environ.get("DISCOUNT_WEEKEND_SKIP_TIERS", "0") in ("1", "true", "True", "yes")
 
 # ---- cleaning reminders: nag the open turnover channels until ✅ Cleaning Done ----
 REMINDER_START_HOUR = int(os.environ.get("REMINDER_START_HOUR", "12"))  # start at 12 PM
@@ -993,54 +997,228 @@ def _load_discount_state():
 def _save_discount_state(st):
     _save_json(DISCOUNT_STATE_FILE_NAME, st)
 
-def apply_discount_tier(pct):
+def now_riyadh():
+    return datetime.now(TZ)
+
+def pricing_target_date_riyadh(now=None):
+    return (now or now_riyadh()).date().isoformat()
+
+def _lm_step_slug(label, pct):
+    base = re.sub(r"[^a-z0-9]+", "-", str(label or "").lower()).strip("-")
+    return base or f"discount-{int(float(pct or 0))}"
+
+def _load_lm_diag():
+    data = _load_json(LAST_MINUTE_DIAG_FILE_NAME, {"runs": []})
+    return data if isinstance(data, dict) else {"runs": []}
+
+def _append_lm_diag(run):
+    data = _load_lm_diag()
+    runs = data.setdefault("runs", [])
+    runs.append(run)
+    if len(runs) > 120:
+        del runs[:len(runs) - 120]
+    _save_json(LAST_MINUTE_DIAG_FILE_NAME, data)
+    return run
+
+def _load_lm_run_state():
+    data = _load_json(LAST_MINUTE_RUN_STATE_FILE_NAME, {})
+    return data if isinstance(data, dict) else {}
+
+def _save_lm_run_state(data):
+    _save_json(LAST_MINUTE_RUN_STATE_FILE_NAME, data if isinstance(data, dict) else {})
+
+def _lm_run_key(date_iso, step_slug):
+    return f"{str(date_iso)[:10]}|{step_slug}"
+
+def _lm_step_already_done(date_iso, step_slug):
+    return bool(_load_lm_run_state().get(_lm_run_key(date_iso, step_slug)))
+
+def _lm_mark_step_done(date_iso, step_slug, run_id):
+    data = _load_lm_run_state()
+    data[_lm_run_key(date_iso, step_slug)] = {
+        "run_id": run_id,
+        "ts": now_riyadh().isoformat(timespec="seconds"),
+    }
+    # Keep only recent dates so the state file stays tiny.
+    cutoff = (now_riyadh().date() - timedelta(days=14)).isoformat()
+    for k in list(data.keys()):
+        if str(k).split("|", 1)[0] < cutoff:
+            data.pop(k, None)
+    _save_lm_run_state(data)
+
+def _discount_price_from_baseline(baseline, pct, floor=0):
+    baseline = float(baseline or 0)
+    pct = float(pct or 0)
+    raw = int(round(baseline * ((100.0 - pct) / 100.0)))
+    final_floor = int(round(float(floor or 0)))
+    final = max(raw, final_floor) if final_floor else raw
+    return raw, final, bool(final_floor and raw < final_floor)
+
+def _lm_orig_from_note(note):
+    m = re.search(r"ouja-orig:(\d+(?:\.\d+)?)", str(note or ""))
+    return float(m.group(1)) if m else None
+
+def _lm_baseline_from_log(lid, date_iso):
+    vals = []
+    for e in price_change_log(lid, date_iso):
+        if e.get("source") != "last-minute":
+            continue
+        m = re.search(r"السعر الأصلي\s+(\d+(?:\.\d+)?)", str(e.get("reason") or ""))
+        if m:
+            vals.append(float(m.group(1)))
+        elif e.get("old") is not None:
+            vals.append(float(e.get("old")))
+    return vals[0] if vals else None
+
+def _lm_baseline(lid, date_iso, day_orig, day_row):
+    lid_s = str(lid)
+    current = float(day_row.get("price") or 0)
+    sources = [
+        ("state", day_orig.get(lid_s)),
+        ("hostaway_note", _lm_orig_from_note(day_row.get("note"))),
+        ("price_log", _lm_baseline_from_log(lid, date_iso)),
+    ]
+    for source, value in sources:
+        if value:
+            day_orig[lid_s] = float(value)
+            return float(value), source
+    day_orig[lid_s] = current
+    return current, "current_price"
+
+def _lm_floor_context(date_iso):
+    ctx = {"global_floor": int(round(DISCOUNT_FLOOR or 0)),
+           "manual": {}, "unit_bands": {}, "error": ""}
+    try:
+        ctx["manual"] = dict(_pe_floor_overrides)
+    except Exception:
+        pass
+    try:
+        d = datetime.fromisoformat(str(date_iso)[:10]).date()
+        dtype, _ev = _pe_date_type(d)
+        models = _pe_get()
+        ctx["dtype"] = dtype
+        ctx["unit_bands"] = models.get("unit_bands", {}) if isinstance(models, dict) else {}
+    except Exception as e:
+        ctx["error"] = str(e)[:180]
+    return ctx
+
+def _lm_floor_for(lid, ctx):
+    global_floor = int(ctx.get("global_floor") or 0)
+    manual_floor = int(round(float((ctx.get("manual") or {}).get(int(lid), 0) or 0)))
+    dtype = ctx.get("dtype") or "weekday"
+    band = (ctx.get("unit_bands") or {}).get(f"{int(lid)}||{dtype}") or {}
+    median = band.get("median") or 0
+    adr_floor = int(round(0.70 * float(median))) if median else 0
+    return {
+        "global_floor": global_floor,
+        "manual_floor": manual_floor,
+        "adr_median": int(round(float(median))) if median else 0,
+        "adr_floor": adr_floor,
+        "final_floor": max(global_floor, manual_floor, adr_floor),
+        "floor_error": ctx.get("error", ""),
+    }
+
+def latest_last_minute_diagnostics(limit=8):
+    runs = list((_load_lm_diag().get("runs") or []))[-int(limit or 8):]
+    runs.reverse()
+    return runs
+
+def apply_discount_tier(pct, label="last-minute", trigger_source="scheduled",
+                        preview_only=None, force=False, target_date=None):
     """Set tonight's price to `pct`% off the ORIGINAL price, for every still-empty unit.
     The original is captured once per day (state file + Hostaway note) so the two tiers
     never compound. Returns (changes, today). Honors DRY-RUN."""
-    factor = (100.0 - pct) / 100.0
-    today = datetime.now(TZ).date().isoformat()
+    now = now_riyadh()
+    today = target_date or pricing_target_date_riyadh(now)
+    step_slug = _lm_step_slug(label, pct)
+    preview_only = DISCOUNT_DRY_RUN if preview_only is None else bool(preview_only)
+    run_id = f"lm-{int(time.time())}-{random.randint(1000, 9999)}"
+    run = {
+        "run_id": run_id,
+        "timestamp_utc": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "timestamp_riyadh": now.isoformat(timespec="seconds"),
+        "trigger_source": trigger_source,
+        "step": label,
+        "step_slug": step_slug,
+        "target_date": today,
+        "pct": float(pct),
+        "preview_only": bool(preview_only),
+        "dry_run_env": bool(DISCOUNT_DRY_RUN),
+        "items": [],
+        "counts": defaultdict(int),
+    }
+    if not force and trigger_source.startswith("scheduled") and _lm_step_already_done(today, step_slug):
+        run["skipped_run_reason"] = "step_already_processed"
+        run["counts"]["step_already_processed"] += 1
+        _append_lm_diag(_lm_public_run(run))
+        return [], today
     if not strategy_enabled("last-minute"):
-        return [], today                        # last-minute step-down disabled globally
+        run["skipped_run_reason"] = "strategy_disabled_global"
+        run["counts"]["strategy_disabled_global"] += 1
+        _append_lm_diag(_lm_public_run(run))
+        return [], today
     state = _load_discount_state()
     state = {today: state.get(today, {})}      # keep only today's record
     day_orig = state[today]
     listings = get_listings_map()
     changes = []
+    floor_ctx = _lm_floor_context(today)
     for lid, name in listings.items():
-        lid_s = str(lid)
+        item = {"lid": lid, "name": name, "target_date": today,
+                "strategy_enabled": bool(strategy_enabled("last-minute", lid)),
+                "preview_only": bool(preview_only)}
         if is_unit_skipped(lid):
+            item["status"] = "skipped"
+            item["reason"] = "unit_skipped"
+            item["skip_until"] = unit_skip_until_iso(lid)
+            run["items"].append(item); run["counts"]["unit_skipped"] += 1
             continue                                       # owner asked to hold price on this unit
         if not strategy_enabled("last-minute", lid):
+            item["status"] = "skipped"
+            item["reason"] = "strategy_disabled"
+            run["items"].append(item); run["counts"]["strategy_disabled"] += 1
             continue                                       # last-minute step-down disabled for this unit
         try:
             cal = api_get(f"/listings/{lid}/calendar",
                           params={"startDate": today, "endDate": today})
             days = cal.get("result", []) or []
             if not days:
+                item["status"] = "skipped"; item["reason"] = "no_calendar_day"
+                run["items"].append(item); run["counts"]["no_calendar_day"] += 1
                 continue
             d = days[0]
             available = int(d.get("isAvailable", 0) or 0) == 1
             booked = bool(d.get("reservationId"))
             current = d.get("price")
             if not available or booked or not current:
+                item.update({"status": "skipped", "reason": "booked_or_unavailable",
+                             "available": available, "booked": booked,
+                             "current_price": _coerce_price(current)})
+                run["items"].append(item); run["counts"]["booked_or_unavailable"] += 1
                 continue                                   # booked / blocked / no price
             current = float(current)
             # recover tonight's original: remembered state -> Hostaway note -> current
-            original = day_orig.get(lid_s)
-            if original is None:
-                m = re.search(r"ouja-orig:(\d+(?:\.\d+)?)", str(d.get("note") or ""))
-                original = float(m.group(1)) if m else current
-                day_orig[lid_s] = original
-            new_price = round(original * factor)
-            if DISCOUNT_FLOOR and new_price < DISCOUNT_FLOOR:
-                new_price = int(DISCOUNT_FLOOR)
+            original, baseline_source = _lm_baseline(lid, today, day_orig, d)
+            floor = _lm_floor_for(lid, floor_ctx)
+            raw_price, new_price, floor_blocked = _discount_price_from_baseline(
+                original, pct, floor.get("final_floor", 0))
+            item.update({"status": "evaluated", "available": available, "booked": booked,
+                         "current_price": int(round(current)), "baseline_price": int(round(original)),
+                         "baseline_source": baseline_source, "discount_pct": float(pct),
+                         "price_after_step": raw_price, "final_price": int(new_price),
+                         "floor": floor, "floor_blocked": floor_blocked})
             if new_price >= current:
+                item["status"] = "skipped"
+                item["reason"] = "no_change_needed" if not floor_blocked else "floor_blocked_discount"
+                run["items"].append(item); run["counts"][item["reason"]] += 1
                 continue                                   # already at/below this level
-            if not DISCOUNT_DRY_RUN:
+            if not preview_only:
                 resp = api_put(f"/listings/{lid}/calendar",
                         {"startDate": today, "endDate": today,
                          "isAvailable": 1, "price": new_price,
                          "note": f"ouja-orig:{int(original)}"})
+                item["apply_result"] = "requested"
+                item["hostaway_status"] = resp.get("status") if isinstance(resp, dict) else None
                 if DISCOUNT_VERIFY:
                     try:
                         chk = api_get(f"/listings/{lid}/calendar",
@@ -1051,20 +1229,66 @@ def apply_discount_tier(pct):
                         stuck = "✅ stuck" if str(actual) == str(new_price) else "❌ reverted/ignored"
                         print(f"   VERIFY {name}: requested {new_price}, Hostaway now shows "
                               f"{actual} ({stuck}) · PUT status={status}")
+                        item["verified_price"] = _coerce_price(actual)
+                        item["verify_result"] = "confirmed" if str(actual) == str(new_price) else "not_confirmed"
                     except Exception as e:
                         print(f"   VERIFY {name}: read-back failed: {e}")
+                        item["verify_result"] = "readback_failed"
+                        item["verify_error"] = str(e)[:180]
+            else:
+                item["apply_result"] = "preview_only"
             changes.append({"name": name, "orig": int(original),
                             "old": int(current), "new": int(new_price)})
+            item["status"] = "would_apply" if preview_only else "applied"
+            run["items"].append(item); run["counts"][item["status"]] += 1
             log_price_change(lid, today, int(current), int(new_price), "last-minute",
                              f"خصم اللحظة الأخيرة {int(pct)}% من السعر الأصلي {int(original)}",
-                             dry=DISCOUNT_DRY_RUN)
+                             dry=preview_only)
         except Exception as e:
             print(f"discount error for {name}: {e}")
+            item["status"] = "error"; item["reason"] = "api_error"; item["error"] = str(e)[:220]
+            run["items"].append(item); run["counts"]["api_error"] += 1
     _save_discount_state(state)
+    public_run = _lm_public_run(run)
+    _append_lm_diag(public_run)
+    if trigger_source.startswith("scheduled"):
+        _lm_mark_step_done(today, step_slug, run_id)
     return changes, today
 
-def is_weekend_today():
-    return datetime.now(TZ).weekday() in WEEKEND_DAYS
+def _lm_public_run(run):
+    counts = dict(run.get("counts") or {})
+    items = run.get("items") or []
+    run = dict(run)
+    run["counts"] = counts
+    run["items"] = items[:80]
+    run["total_items"] = len(items)
+    run["changed_count"] = counts.get("applied", 0) + counts.get("would_apply", 0)
+    run["skipped_count"] = sum(v for k, v in counts.items()
+                               if k not in ("applied", "would_apply"))
+    return run
+
+def _record_lm_run_skip(pct, label, trigger_source, reason):
+    now = now_riyadh()
+    run = {
+        "run_id": f"lm-skip-{int(time.time())}-{random.randint(1000, 9999)}",
+        "timestamp_utc": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "timestamp_riyadh": now.isoformat(timespec="seconds"),
+        "trigger_source": trigger_source,
+        "step": label,
+        "step_slug": _lm_step_slug(label, pct),
+        "target_date": pricing_target_date_riyadh(now),
+        "pct": float(pct),
+        "preview_only": True,
+        "dry_run_env": bool(DISCOUNT_DRY_RUN),
+        "skipped_run_reason": reason,
+        "items": [],
+        "counts": {reason: 1},
+    }
+    _append_lm_diag(_lm_public_run(run))
+    return run
+
+def is_weekend_today(now=None):
+    return (now or now_riyadh()).weekday() in WEEKEND_DAYS
 
 # ====================================================================
 # Saudi events / high-demand windows. These boost the bot's reasoning
@@ -2074,8 +2298,9 @@ def mark_deep_clean_done(lid, date_iso=None, notes="", cleaner=""):
 
 def compute_tonight_empty():
     """For each unit empty TONIGHT, return its current price + the discount schedule the
-    bot will apply if the unit stays empty (tier 1 at midnight, 2 at noon, 3 at 6 PM, or
-    a single weekend drop on Thu/Fri at 5:30 PM). Also includes the owner-set skip status.
+    bot will apply if the unit stays empty. Weekends now use the normal Riyadh-time tiers
+    unless DISCOUNT_WEEKEND_SKIP_TIERS=1 restores the old weekend-only rule. Also includes
+    the owner-set skip status.
 
     Returned shape (one entry per empty unit):
       {lid, name, price, t1, t2, t3, w, weekend, skipped_until, paused_global,
@@ -2087,11 +2312,9 @@ def compute_tonight_empty():
     listings = get_listings_map()
     now = datetime.now(TZ)
     paused_global = is_discount_paused()
-
-    f1 = (100.0 - DISCOUNT_TIER1_PERCENT) / 100.0
-    f2 = (100.0 - DISCOUNT_TIER2_PERCENT) / 100.0
-    f3 = (100.0 - DISCOUNT_TIER3_PERCENT) / 100.0
-    fw = (100.0 - WEEKEND_DISCOUNT_PERCENT) / 100.0
+    state = _load_discount_state()
+    day_orig = state.get(today_iso, {})
+    floor_ctx = _lm_floor_context(today_iso)
 
     items = []
     for lid, name in listings.items():
@@ -2110,25 +2333,30 @@ def compute_tonight_empty():
             price = float(price)
             # recover the original (anchor) so the tier prices we show match what the
             # discount loop would actually write.
-            m = re.search(r"ouja-orig:(\d+(?:\.\d+)?)", str(d.get("note") or ""))
-            original = float(m.group(1)) if m else price
+            original, baseline_source = _lm_baseline(lid, today_iso, day_orig, d)
+            floor = _lm_floor_for(lid, floor_ctx)
 
             tier_times = []
-            if weekend:
-                tier_times.append({"label": "Weekend",
-                                   "hour": WEEKEND_DISCOUNT_HOUR, "minute": WEEKEND_DISCOUNT_MINUTE,
-                                   "pct": int(WEEKEND_DISCOUNT_PERCENT),
-                                   "price": int(round(original * fw))})
+            schedule = []
+            if weekend and DISCOUNT_WEEKEND_SKIP_TIERS:
+                schedule.append(("Weekend", WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE,
+                                 WEEKEND_DISCOUNT_PERCENT))
             else:
-                tier_times.append({"label": "T1", "hour": DISCOUNT_TIER1_HOUR, "minute": 0,
-                                   "pct": int(DISCOUNT_TIER1_PERCENT),
-                                   "price": int(round(original * f1))})
-                tier_times.append({"label": "T2", "hour": DISCOUNT_TIER2_HOUR, "minute": 0,
-                                   "pct": int(DISCOUNT_TIER2_PERCENT),
-                                   "price": int(round(original * f2))})
-                tier_times.append({"label": "T3", "hour": DISCOUNT_TIER3_HOUR, "minute": 0,
-                                   "pct": int(DISCOUNT_TIER3_PERCENT),
-                                   "price": int(round(original * f3))})
+                schedule.extend([
+                    ("T1", DISCOUNT_TIER1_HOUR, 0, DISCOUNT_TIER1_PERCENT),
+                    ("T2", DISCOUNT_TIER2_HOUR, 0, DISCOUNT_TIER2_PERCENT),
+                    ("T3", DISCOUNT_TIER3_HOUR, 0, DISCOUNT_TIER3_PERCENT),
+                ])
+                if weekend:
+                    schedule.append(("Weekend", WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE,
+                                     WEEKEND_DISCOUNT_PERCENT))
+            for lab, hour, minute, pct in schedule:
+                raw, final, blocked = _discount_price_from_baseline(
+                    original, pct, floor.get("final_floor", 0))
+                tier_times.append({"label": lab, "hour": hour, "minute": minute,
+                                   "pct": int(pct), "price": int(final),
+                                   "price_before_floor": int(raw),
+                                   "floor_blocked": blocked})
 
             # which tier is "next" today (still upcoming)?
             next_tier = None
@@ -2142,9 +2370,13 @@ def compute_tonight_empty():
             items.append({
                 "lid": lid, "name": name,
                 "price": int(round(price)), "original": int(round(original)),
-                "t1": int(round(original * f1)), "t2": int(round(original * f2)),
-                "t3": int(round(original * f3)), "w": int(round(original * fw)),
+                "t1": next((x["price"] for x in tier_times if x["label"] == "T1"), None),
+                "t2": next((x["price"] for x in tier_times if x["label"] == "T2"), None),
+                "t3": next((x["price"] for x in tier_times if x["label"] == "T3"), None),
+                "w": next((x["price"] for x in tier_times if x["label"] == "Weekend"), None),
                 "weekend": weekend, "tier_times": tier_times, "next": next_tier,
+                "weekend_skip_tiers": bool(DISCOUNT_WEEKEND_SKIP_TIERS),
+                "baseline_source": baseline_source, "floor": floor,
                 "skipped_until": unit_skip_until_iso(lid),
                 "paused_global": paused_global,
             })
@@ -3616,13 +3848,16 @@ def discount_pause_status():
     return {"paused": True, "until_ts": _discount_paused_until,
             "until_iso": datetime.fromtimestamp(_discount_paused_until, TZ).isoformat(timespec="minutes")}
 
-async def _run_tier(pct, label):
+async def _run_tier(pct, label, trigger_source="scheduled", force=False, preview_only=None):
     if is_discount_paused():
         print(f"[{label}] skipped — discounts paused by owner until "
               f"{datetime.fromtimestamp(_discount_paused_until, TZ).strftime('%a %H:%M')}")
+        _record_lm_run_skip(pct, label, trigger_source, "paused_by_owner")
         return
     try:
-        changes, today = await asyncio.to_thread(apply_discount_tier, pct)
+        changes, today = await asyncio.to_thread(
+            apply_discount_tier, pct, label=label, trigger_source=trigger_source,
+            preview_only=preview_only, force=force)
         mode = "DRY-RUN" if DISCOUNT_DRY_RUN else "LIVE"
         print(f"[{label} {today}] {mode} {pct:.0f}%: {len(changes)} empty units")
         for c in changes:
@@ -3633,34 +3868,72 @@ async def _run_tier(pct, label):
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER1_HOUR, tzinfo=TZ))
 async def discount_tier1_loop():
-    if is_weekend_today():
+    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
         print("[Tier 1] Thu/Fri — skipping midnight discount (weekend rule)")
+        _record_lm_run_skip(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)",
+                            "scheduled_12am", "weekend_rule_skip")
         return
-    await _run_tier(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)")
+    await _run_tier(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)", "scheduled_12am")
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER2_HOUR, tzinfo=TZ))
 async def discount_tier2_loop():
-    if is_weekend_today():
+    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
         print("[Tier 2] Thu/Fri — skipping noon discount (weekend rule)")
+        _record_lm_run_skip(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)",
+                            "scheduled_12pm", "weekend_rule_skip")
         return
-    await _run_tier(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)")
+    await _run_tier(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)", "scheduled_12pm")
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER3_HOUR, tzinfo=TZ))
 async def discount_tier3_loop():
-    if is_weekend_today():
+    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
         print("[Tier 3] Thu/Fri — skipping evening discount (weekend rule)")
+        _record_lm_run_skip(DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)",
+                            "scheduled_6pm", "weekend_rule_skip")
         return
-    await _run_tier(DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)")
+    await _run_tier(DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)", "scheduled_6pm")
 
 @tasks.loop(time=dt_time(hour=WEEKEND_DISCOUNT_HOUR, minute=WEEKEND_DISCOUNT_MINUTE, tzinfo=TZ))
 async def discount_weekend_loop():
     if not is_weekend_today():
         return                       # only fires on Thu/Fri
-    await _run_tier(WEEKEND_DISCOUNT_PERCENT, "Weekend (Thu/Fri 5:30 PM)")
+    await _run_tier(WEEKEND_DISCOUNT_PERCENT, "Weekend (Thu/Fri 5:30 PM)",
+                    "scheduled_weekend")
+
+def _lm_scheduled_steps_for(now=None):
+    now = now or now_riyadh()
+    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today(now):
+        return [(WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE, WEEKEND_DISCOUNT_PERCENT,
+                 "Weekend (Thu/Fri 5:30 PM)", "scheduled_weekend_late")]
+    steps = [
+        (DISCOUNT_TIER1_HOUR, 0, DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)", "scheduled_12am_late"),
+        (DISCOUNT_TIER2_HOUR, 0, DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)", "scheduled_12pm_late"),
+        (DISCOUNT_TIER3_HOUR, 0, DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)", "scheduled_6pm_late"),
+    ]
+    if is_weekend_today(now):
+        steps.append((WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE, WEEKEND_DISCOUNT_PERCENT,
+                      "Weekend (Thu/Fri 5:30 PM)", "scheduled_weekend_late"))
+    return steps
+
+@tasks.loop(minutes=5)
+async def discount_catchup_loop():
+    if is_discount_paused():
+        return
+    now = now_riyadh()
+    today = pricing_target_date_riyadh(now)
+    for hour, minute, pct, label, source in _lm_scheduled_steps_for(now):
+        fire = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        age_min = (now - fire).total_seconds() / 60.0
+        if age_min < 0 or age_min > DISCOUNT_CATCHUP_MINUTES:
+            continue
+        if _lm_step_already_done(today, _lm_step_slug(label, pct)):
+            continue
+        print(f"[{label}] catch-up run {age_min:.0f} minutes late")
+        await _run_tier(pct, label, source)
 
 def _headsup_table(items, weekend):
     """Build a clean monospace table + an explanatory note for the heads-up preview."""
-    if weekend:
+    if weekend and DISCOUNT_WEEKEND_SKIP_TIERS:
         wp = int(WEEKEND_DISCOUNT_PERCENT)
         c1, c2 = f"-{wp}%", "SAVE"
         header = f"{'UNIT':<16}{'NOW':>6}{c1:>6}{c2:>6}"
@@ -3672,11 +3945,16 @@ def _headsup_table(items, weekend):
                       int(DISCOUNT_TIER3_PERCENT))
         c1, c2, c3 = f"-{p1}%", f"-{p2}%", f"-{p3}%"
         header = f"{'UNIT':<16}{'NOW':>6}{c1:>6}{c2:>6}{c3:>6}"
-        rows = [f"{_clip(it['name'], 16):<16}{it['price']:>6}{it['t1']:>6}"
-                f"{it['t2']:>6}{it['t3']:>6}" for it in items]
+        def _cell(v):
+            return "—" if v is None else str(int(v))
+        rows = [f"{_clip(it['name'], 16):<16}{it['price']:>6}{_cell(it.get('t1')):>6}"
+                f"{_cell(it.get('t2')):>6}{_cell(it.get('t3')):>6}" for it in items]
         note = (f"Prices auto-drop if still empty: **-{p1}% at {_fmt_hour(DISCOUNT_TIER1_HOUR)}** → "
                 f"**-{p2}% at {_fmt_hour(DISCOUNT_TIER2_HOUR)}** → "
                 f"**-{p3}% at {_fmt_hour(DISCOUNT_TIER3_HOUR)}**.")
+        if weekend:
+            note += (f" Weekend extra check also runs at "
+                     f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d}.")
     sep = "─" * len(header)
     # Prefix each line with a zero-width LEFT-TO-RIGHT MARK so an Arabic unit
     # name can't flip the line's direction and scramble the number columns.
@@ -11407,6 +11685,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div id="pricingOpsSummary"></div>
+        <div class="card" id="lmDiagCard">
+          <div id="lastMinuteDiagBody"><div class="empty sk">—</div></div>
+        </div>
         <!-- analytics header -->
         <div class="card">
           <div id="prAnalytics"><div class="empty sk">—</div></div>
@@ -12586,6 +12867,15 @@ const T = {
     eu_now:'السعر الحالي', eu_skip:'تجاهل الخصم على هالشقة', eu_unskip:'إلغاء التجاهل', eu_skipped_until:'متوقفة لين',
     no_empty_tonight:'ما فيه وحدات فاضية الليلة 🎉',
     tier_t1:'منتصف الليل', tier_t2:'الظهر', tier_t3:'العصر', tier_w:'المساء',
+    lm_diag_title:'تشخيص النزول اللحظي', lm_diag_run_now:'شغّل تشخيص النزول الآن',
+    lm_last_run:'آخر تشغيل', lm_riyadh_time:'وقت الرياض', lm_utc_time:'وقت UTC',
+    lm_skip_reason:'سبب التخطي', lm_floor_blocked:'الحد الأدنى منع النزول',
+    lm_strategy_disabled:'الاستراتيجية غير مفعلة', lm_booked:'محجوز', lm_preview_only:'معاينة فقط',
+    lm_applied:'تم التطبيق', lm_apply_failed:'فشل التطبيق', lm_baseline:'السعر الأساسي',
+    lm_discount:'نسبة النزول', lm_after:'السعر بعد النزول', lm_floor:'الحد الأدنى',
+    lm_no_runs:'ما فيه تشغيل مسجل بعد', lm_diag_done:'تم التشخيص بدون تغيير Hostaway',
+    lm_no_change:'لا تغيير مطلوب', lm_timezone:'المنطقة الزمنية', lm_weekend_mode:'نهاية الأسبوع',
+    lm_catchup:'تعويض التشغيل المتأخر', lm_would_apply:'سيتغير بالمعاينة', lm_skipped:'تم التخطي',
     pr_total:'الإجمالي المتوقع', pr_empty:'ما فيه فرص تسعير حالياً',
     pr_apply:'طبّق', pr_apply_all:'طبّق الكل', pr_confirm:'متأكد؟ بيتغيّر السعر فعلياً في تقويمك.',
     pr_change:'تغيير', pr_uplift:'إيراد إضافي تقديري', pr_conf:'الثقة',
@@ -12845,6 +13135,15 @@ const T = {
     eu_now:'Current', eu_skip:'Skip discounts on this unit', eu_unskip:'Resume',  eu_skipped_until:'Skipped until',
     no_empty_tonight:'Every unit is booked tonight 🎉',
     tier_t1:'Midnight', tier_t2:'Noon', tier_t3:'Evening', tier_w:'Weekend',
+    lm_diag_title:'Last-minute pricing diagnostics', lm_diag_run_now:'Run step-down diagnosis now',
+    lm_last_run:'Last run', lm_riyadh_time:'Riyadh time', lm_utc_time:'UTC time',
+    lm_skip_reason:'Skip reason', lm_floor_blocked:'Floor blocked discount',
+    lm_strategy_disabled:'Strategy disabled', lm_booked:'Booked', lm_preview_only:'Preview only',
+    lm_applied:'Applied', lm_apply_failed:'Apply failed', lm_baseline:'Baseline price',
+    lm_discount:'Step-down percentage', lm_after:'Price after step-down', lm_floor:'Floor',
+    lm_no_runs:'No runs recorded yet', lm_diag_done:'Diagnosis ran without changing Hostaway',
+    lm_no_change:'No change needed', lm_timezone:'Timezone', lm_weekend_mode:'Weekend mode',
+    lm_catchup:'Late-run catch-up', lm_would_apply:'Would apply in preview', lm_skipped:'Skipped',
     pr_total:'Total estimate', pr_empty:'No pricing opportunities right now',
     pr_apply:'Apply', pr_apply_all:'Apply all', pr_confirm:'Sure? This changes real prices.',
     pr_change:'change', pr_uplift:'Est. extra revenue', pr_conf:'Confidence',
@@ -13172,6 +13471,68 @@ function renderPricingOpsSummary(){
   if(changed) html+=riskPanel('warn',labelText('راجع العينات قبل تطبيق الشهر','Review samples before applying a month'),labelText('التطبيق الشهري كبير الأثر. افتح شقة، راجع قبل/بعد، ثم طبّق بنطاق واضح.','Month apply is high-impact. Open a unit, review before/after, then apply a clear scope.'),labelText('أول شقة مفعّلة','First active unit'),"document.querySelector('#prListBody .pe-apt-head')&&document.querySelector('#prListBody .pe-apt-head').click()");
   putHtml('pricingOpsSummary', html);
 }
+function lmReasonLabel(k){
+  var map={
+    floor_blocked_discount:t().lm_floor_blocked,
+    strategy_disabled:t().lm_strategy_disabled,
+    strategy_disabled_global:t().lm_strategy_disabled,
+    booked_or_unavailable:t().lm_booked,
+    no_change_needed:t().lm_no_change,
+    apply_failed:t().lm_apply_failed,
+    api_error:t().lm_apply_failed,
+    weekend_rule_skip:t().lm_skip_reason,
+    unit_skipped:labelText('متوقف من المالك','Paused by owner'),
+    paused_by_owner:labelText('متوقف من المالك','Paused by owner'),
+    no_calendar_day:labelText('لا يوجد يوم في تقويم Hostaway','No Hostaway calendar day'),
+    step_already_processed:labelText('تم تشغيل هذي الخطوة قبل','Step already ran')
+  };
+  return map[k]||k||'—';
+}
+function renderLastMinuteDiagnostics(){
+  var box=document.getElementById('lastMinuteDiagBody'); if(!box) return;
+  var d=D.lmDiag||{}, runs=safeArr(d.runs), r=runs[0]||null, c=(r&&r.counts)||{};
+  var chips=[
+    {label:t().lm_timezone,icon:esc(d.timezone||'Asia/Riyadh'),tone:'info'},
+    {label:t().lm_riyadh_time,icon:esc(d.riyadh_now||'—'),tone:'info'},
+    {label:t().lm_preview_only,icon:d.dry_run?'ON':'OFF',tone:d.dry_run?'warn':'ok'},
+    {label:t().lm_weekend_mode,icon:d.weekend_skip_tiers?labelText('نهاية فقط','weekend only'):labelText('الخطوات تعمل','tiers run'),tone:d.weekend_skip_tiers?'warn':'ok'},
+    {label:t().lm_catchup,icon:String(safeNum(d.catchup_minutes))+'m',tone:'info'}
+  ];
+  var html='<div class="card-head"><span class="card-title">⏱ '+esc(t().lm_diag_title)+'</span><button class="btn ghost sm" onclick="runLastMinuteDiagnosis(this)">'+esc(t().lm_diag_run_now)+'</button></div>';
+  html+=statusRail(chips);
+  if(!r){
+    html+='<div class="empty">'+esc(t().lm_no_runs)+'</div>';
+    putHtml('lastMinuteDiagBody', html);
+    return;
+  }
+  html+=opsStrip([
+    {label:t().lm_last_run,value:esc(r.step||'—'),sub:esc((r.target_date||'')+' · '+(r.pct||0)+'%'),tone:'info'},
+    {label:t().lm_would_apply,value:safeNum(c.would_apply||c.applied),sub:t().lm_after,tone:safeNum(c.would_apply||c.applied)?'ok':'info'},
+    {label:t().lm_skipped,value:safeNum(r.skipped_count),sub:t().lm_skip_reason,tone:safeNum(r.skipped_count)?'warn':'ok'},
+    {label:t().lm_floor_blocked,value:safeNum(c.floor_blocked_discount),sub:t().lm_floor,tone:safeNum(c.floor_blocked_discount)?'warn':'info'}
+  ]);
+  html+='<div class="list compact">';
+  safeArr(r.items).slice(0,5).forEach(function(it){
+    var reason=it.reason||it.status||'';
+    var floor=(it.floor||{}).final_floor||0;
+    html+='<div class="rowline"><div><b>'+esc(it.name||it.lid||'—')+'</b><div class="muted">'+esc(t().lm_baseline)+': '+esc(it.baseline_price||'—')+' · '+esc(t().lm_after)+': '+esc(it.final_price||'—')+' · '+esc(t().lm_floor)+': '+esc(floor||'—')+'</div></div><span class="chip">'+esc(lmReasonLabel(reason))+'</span></div>';
+  });
+  html+='</div>';
+  putHtml('lastMinuteDiagBody', html);
+}
+async function runLastMinuteDiagnosis(btn){
+  if(btn) btn.disabled=true;
+  try{
+    var r=await post('/api/pricing/last-minute-diagnose',{});
+    D.lmDiag=await api('/api/pricing/last-minute-diagnostics');
+    renderLastMinuteDiagnostics();
+    toast(t().lm_diag_done+' · '+safeNum((r||{}).changes));
+  }catch(e){
+    toast(t().lm_apply_failed);
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
 function renderStrategiesOpsSummary(){
   var a=D.stratD||{}, attention=safeArr(a.attention||a.needs_attention), units=safeArr(a.units||a.apartments);
   putHtml('strategiesOpsSummary', opsStrip([
@@ -13272,7 +13633,7 @@ function renderFinanceOpsSummary(){
   ]));
 }
 function renderAllPageOps(){
-  renderHomeCommandDeck(); renderInboxOpsSummary(); renderCalendarOpsSummary(); renderPricingOpsSummary();
+  renderHomeCommandDeck(); renderInboxOpsSummary(); renderCalendarOpsSummary(); renderPricingOpsSummary(); renderLastMinuteDiagnostics();
   renderStrategiesOpsSummary(); renderCleaningOpsSummary(); renderListingsOpsSummary(); renderQualityOpsSummary();
   renderGuestsOpsSummary(); renderTicketsOpsSummary(); renderDesignOpsSummary(); renderPmoOpsSummary();
   renderRevenueOpsSummary(); renderExpensesOpsSummary(); renderFinanceOpsSummary();
@@ -13757,11 +14118,12 @@ var _pePanel = null;
 var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'📆',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'🎉',ar:'مناسبة',en:'Event'}};
 async function loadPricing(){
   var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
-  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics')]); D.pr2=rr[0]; D.prA=rr[1]; }
-  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; }
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; }
+  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; if(!D.lmDiag) D.lmDiag={runs:[]}; }
   renderPricingHeader();
   renderPricing2();
   renderPricingOpsSummary();
+  renderLastMinuteDiagnostics();
   loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down (collapsed)
 }
 function _prMonths(){
@@ -13953,8 +14315,8 @@ async function setPeLean(lid, val){
   var r; try{ r=await post('/api/pricing/lean',{lid:lid, lean:val}); }catch(_){ r=null; }
   if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
   toast(L==='ar'?('الميل: '+(val==='fill'?'إشغال':(val==='top'?'أعلى سعر':'متوازن'))):('Lean: '+val));
-  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics')]); D.pr2=rr[0]; D.prA=rr[1]; }catch(_){}
-  renderPricingHeader(); renderPricing2();
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; }catch(_){}
+  renderPricingHeader(); renderPricing2(); renderLastMinuteDiagnostics();
   var btn=document.querySelector('#prListBody .pe-apt-head[onclick="pePeToggle(this,'+lid+')"]');
   if(btn) pePeToggle(btn, lid);   // re-open this apartment so the new preview shows
 }
@@ -13962,8 +14324,8 @@ async function togglePeUnit(key, lid, enabled){
   var r=await post('/api/pricing/strategy-toggle',{name:key, lid:lid, enabled:enabled});
   if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
   toast(enabled?(L==='ar'?'تشغيل ✅':'on ✅'):(L==='ar'?'إيقاف ⏸':'off ⏸'));
-  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics')]); D.pr2=rr[0]; D.prA=rr[1]; }catch(_){}
-  renderPricingHeader(); renderPricing2();
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; }catch(_){}
+  renderPricingHeader(); renderPricing2(); renderLastMinuteDiagnostics();
   var btn=document.querySelector('#prListBody .pe-apt-head[onclick="pePeToggle(this,'+lid+')"]');
   if(btn) pePeToggle(btn, lid);   // re-open this apartment so the new preview shows
 }
@@ -24396,6 +24758,49 @@ async def _api_pricing_analytics(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(await asyncio.to_thread(_pricing_analytics))
 
+def _lm_current_manual_step(now=None):
+    now = now or now_riyadh()
+    steps = _lm_scheduled_steps_for(now)
+    chosen = steps[0] if steps else (
+        DISCOUNT_TIER1_HOUR, 0, DISCOUNT_TIER1_PERCENT,
+        "Tier 1 (midnight)", "manual_preview")
+    for step in steps:
+        fire = now.replace(hour=step[0], minute=step[1], second=0, microsecond=0)
+        if now >= fire:
+            chosen = step
+    return chosen
+
+async def _api_pricing_lm_diagnostics(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({
+        "ok": True,
+        "runs": latest_last_minute_diagnostics(12),
+        "timezone": str(TZ),
+        "riyadh_now": now_riyadh().isoformat(timespec="seconds"),
+        "dry_run": bool(DISCOUNT_DRY_RUN),
+        "weekend_skip_tiers": bool(DISCOUNT_WEEKEND_SKIP_TIERS),
+        "catchup_minutes": DISCOUNT_CATCHUP_MINUTES,
+    })
+
+async def _api_pricing_lm_diagnose(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    _hour, _minute, pct, label, _source = _lm_current_manual_step(now_riyadh())
+    changes, today = await asyncio.to_thread(
+        apply_discount_tier, pct, label=label, trigger_source="manual_preview",
+        preview_only=True, force=True)
+    runs = latest_last_minute_diagnostics(1)
+    return _json({
+        "ok": True,
+        "target_date": today,
+        "step": label,
+        "pct": pct,
+        "changes": len(changes),
+        "run": runs[0] if runs else None,
+        "preview_only": True,
+    })
+
 def _unit_apply_plan(lid):
     """Every date for ONE unit whose final price differs from current — the 'Apply this apartment' set.
     Empty unless the unit is activated (opt-in: nothing is planned for a non-activated unit)."""
@@ -32497,6 +32902,8 @@ async def start_web_server():
         app.router.add_get("/api/pricing/month-preview", _api_pricing_month_preview)
         app.router.add_post("/api/pricing/apply-month", _api_pricing_apply_month)
         app.router.add_get("/api/pricing/analytics", _api_pricing_analytics)
+        app.router.add_get("/api/pricing/last-minute-diagnostics", _api_pricing_lm_diagnostics)
+        app.router.add_post("/api/pricing/last-minute-diagnose", _api_pricing_lm_diagnose)
         app.router.add_post("/api/pricing/apply-unit", _api_pricing_apply_unit)
         app.router.add_post("/api/pricing/activate", _api_pricing_activate)
         app.router.add_post("/api/pricing/lean", _api_pricing_lean)
@@ -34043,8 +34450,11 @@ async def on_ready():
           f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00, "
           f"{DISCOUNT_TIER3_PERCENT:.0f}% at {DISCOUNT_TIER3_HOUR:02d}:00 "
           f"{'(DRY-RUN)' if DISCOUNT_DRY_RUN else '(LIVE)'}")
+    weekend_mode = ("weekend-only compatibility mode" if DISCOUNT_WEEKEND_SKIP_TIERS
+                    else "normal tiers also run on Thu/Fri")
     print(f"Weekend rule (Thu/Fri): {WEEKEND_DISCOUNT_PERCENT:.0f}% at "
-          f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d} only")
+          f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d} · {weekend_mode}")
+    print(f"Last-minute catch-up window: {DISCOUNT_CATCHUP_MINUTES} minutes")
     print(f"Heads-up preview at {HEADS_UP_HOUR:02d}:00 -> #{HEADS_UP_CHANNEL}")
     print(f"Cleaning reminders: every {REMINDER_SLOW_MIN} min "
           f"{REMINDER_START_HOUR:02d}:00–{REMINDER_FAST_HOUR:02d}:00, then every "
@@ -34067,6 +34477,8 @@ async def on_ready():
         discount_tier3_loop.start()
     if not discount_weekend_loop.is_running():
         discount_weekend_loop.start()
+    if not discount_catchup_loop.is_running():
+        discount_catchup_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
     if ASSISTANT_ENABLED:
