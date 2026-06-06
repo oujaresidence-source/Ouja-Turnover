@@ -3664,6 +3664,163 @@ def _clean_ops_snapshot(team_lids):
         })
     return {"date": today, "units": units, "counts": counts}
 
+def _clean_center_setup_missing(lid, plan_item=None):
+    """Manager-facing setup gaps for cleaning ops. Keep this small: daily screens only
+    need to know whether the apartment is operationally ready for team routing."""
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return ["missing_apartment"]
+    rec = (_ls_get().get("listings") or {}).get(str(lid)) or {}
+    p = plan_item or {}
+    missing = []
+    if not rec.get("cleaning_team"):
+        missing.append("team")
+    maps = (rec.get("maps_link") or p.get("maps_link") or "").strip()
+    if not maps:
+        missing.append("map")
+    if not (rec.get("access_notes") or p.get("access_notes") or "").strip():
+        missing.append("access")
+    if not (rec.get("parking_notes") or p.get("parking_notes") or "").strip():
+        missing.append("parking")
+    parsed_ll = _extract_latlng(maps)
+    if not parsed_ll and not (rec.get("lat") and rec.get("lng")) and not (p.get("lat") and p.get("lng")):
+        missing.append("coords")
+    return missing
+
+def _clean_center_next_action(stage, report_id=""):
+    if stage == "to_clean":
+        return "open_team_link"
+    if stage == "in_progress":
+        return "track_progress"
+    if stage == "review":
+        return "review_photos" if report_id else "details"
+    if stage == "approved":
+        return "view_report" if report_id else "details"
+    if stage == "redo":
+        return "follow_reshoot"
+    return "details"
+
+def _clean_center_issue_type(unit, latest, report):
+    action = (latest or {}).get("action") or ""
+    if action == "guest_inside":
+        return "guest_inside"
+    if action == "issue":
+        note = ((latest or {}).get("note") or "").lower()
+        if "access" in note or "دخول" in note or "مفتاح" in note:
+            return "no_access"
+        if "damage" in note or "ضرر" in note or "كسر" in note:
+            return "damage"
+        if "supply" in note or "مستلزم" in note or "ناقص" in note:
+            return "supplies"
+        if "map" in note or "location" in note or "عنوان" in note:
+            return "cannot_find"
+        return "other"
+    if report and report.get("issue_found"):
+        return "damage" if report.get("issue_notes") else "other"
+    if unit.get("stage") == "redo":
+        return "reshoot"
+    return ""
+
+def _clean_center_snapshot():
+    """Cleaning Command Center V2.
+    Dashboard remains source of truth: route actions + cleaning reports are reconciled
+    into one daily manager workflow without changing pricing, finance, or Hostaway data."""
+    today = datetime.now(TZ).date().isoformat()
+    now_iso = datetime.now(TZ).isoformat(timespec="seconds")
+    all_lids = oujact_listing_ids()
+    plan = _oujact_dispatch_plan(True, all_lids)
+    plan_by_lid = {p.get("lid"): p for p in plan}
+    snap = _clean_ops_snapshot(all_lids)
+    teams = []
+    team_by_lid = {}
+    for t in sorted(_cleaning_teams.values(), key=lambda x: (x.get("name") or "", x.get("created_at") or "")):
+        tv = _ct_team_view(t)
+        team_snap = _clean_ops_snapshot(set(tv.get("lids") or []))
+        tv["counts"] = team_snap.get("counts") or {}
+        teams.append(tv)
+        for lid in tv.get("lids") or []:
+            team_by_lid[int(lid)] = {"id": tv["id"], "name": tv.get("name") or "", "link": tv.get("link") or ""}
+
+    jobs = []
+    setup_health = []
+    for u in snap.get("units") or []:
+        lid = u.get("lid")
+        p = plan_by_lid.get(lid) or {}
+        latest = _oujact_latest_status(lid, today) or {}
+        report = _cleaning_reports.get(u.get("report_id") or _cleanproof_report_id(lid, today)) or {}
+        team = team_by_lid.get(int(lid)) if lid is not None and str(lid).isdigit() else {}
+        missing = _clean_center_setup_missing(lid, p)
+        if missing:
+            setup_health.append({"lid": lid, "name": u.get("name") or p.get("name") or str(lid),
+                                 "missing": missing, "team": team.get("name") or ""})
+        issue_type = _clean_center_issue_type(u, latest, report)
+        stage = u.get("stage") or "to_clean"
+        late = bool((stage in ("to_clean", "in_progress") and p.get("checkout_passed")) or stage == "redo")
+        urgent = bool(u.get("checkin_today") or u.get("early") or issue_type or late)
+        reason_keys = []
+        if u.get("early"):
+            reason_keys.append("early_departure")
+        if u.get("checkin_today"):
+            reason_keys.append("same_day")
+        if late:
+            reason_keys.append("late")
+        if issue_type:
+            reason_keys.append("issue")
+        if missing:
+            reason_keys.append("missing_setup")
+        jobs.append({
+            "lid": lid, "name": u.get("name") or p.get("name") or str(lid),
+            "date": today, "stage": stage, "team": team,
+            "checkout_time": u.get("checkout_time") or p.get("checkout_time"),
+            "checkout_passed": bool(p.get("checkout_passed")),
+            "checkin_today": bool(u.get("checkin_today")),
+            "checkin_time": u.get("checkin_time") or p.get("checkin_time"),
+            "early": bool(u.get("early")), "manual": bool(u.get("manual")),
+            "manual_type": u.get("manual_type") or p.get("manual_type") or "",
+            "priority_reason_ar": u.get("reason_ar") or p.get("reason_ar") or "",
+            "priority_reason_en": u.get("reason_en") or p.get("reason_en") or "",
+            "reason_keys": reason_keys, "urgent": urgent, "late": late,
+            "setup_missing": missing, "issue_type": issue_type,
+            "issue_note": (latest.get("note") or report.get("issue_notes") or "")[:240],
+            "last_action": latest.get("action") or "",
+            "last_action_at": latest.get("ts") or report.get("updated_at") or "",
+            "report_id": u.get("report_id") or report.get("report_id") or "",
+            "report_status": u.get("report_status") or report.get("status") or "",
+            "photos_done": int(u.get("photos_done") or report.get("uploaded_required_slots_count") or 0),
+            "photos_req": int(u.get("photos_req") or report.get("required_slots_count") or 0),
+            "next_action": _clean_center_next_action(stage, u.get("report_id") or report.get("report_id") or ""),
+            "maps_link": p.get("maps_link") or "", "directions_url": p.get("directions_url") or "",
+        })
+
+    jobs.sort(key=lambda j: (
+        0 if j.get("urgent") else 1,
+        {"redo": 0, "review": 1, "to_clean": 2, "in_progress": 3, "approved": 4}.get(j.get("stage"), 5),
+        j.get("checkin_time") or "99:99",
+        j.get("checkout_time") or "99:99",
+    ))
+    summary = {
+        "total": len(jobs),
+        "same_day": sum(1 for j in jobs if j.get("checkin_today")),
+        "needs_cleaning": sum(1 for j in jobs if j.get("stage") == "to_clean"),
+        "in_progress": sum(1 for j in jobs if j.get("stage") == "in_progress"),
+        "pending_review": sum(1 for j in jobs if j.get("stage") == "review"),
+        "approved": sum(1 for j in jobs if j.get("stage") == "approved"),
+        "needs_reshoot": sum(1 for j in jobs if j.get("stage") == "redo"),
+        "late_risk": sum(1 for j in jobs if j.get("late") or j.get("urgent")),
+        "missing_setup": len(set(str(s.get("lid")) for s in setup_health)),
+        "issues": sum(1 for j in jobs if j.get("issue_type")),
+    }
+    return {
+        "ok": True, "date": today, "generated_at": now_iso,
+        "summary": summary, "jobs": jobs,
+        "reviews": [j for j in jobs if j.get("stage") == "review"],
+        "issues": [j for j in jobs if j.get("issue_type") or j.get("stage") == "redo"],
+        "teams": teams, "setup_health": setup_health[:200],
+        "storage": {"provider": "google_drive" if _cleanproof_drive_configured() else "local_fallback",
+                    "drive_configured": _cleanproof_drive_configured()},
+    }
+
 def _oujact_route_eta(start, plan):
     """Leg-by-leg ETA (minutes) in plan order, traffic-aware, ONLY when a Google key + the
     start coords + each destination's coords are available. Never fabricates — returns
@@ -10447,7 +10604,7 @@ _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
     "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
-    "cleanteams",
+    "cleanteams", "clean_center",
 ]
 
 def _default_perms(role):
@@ -11166,6 +11323,68 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 @keyframes expXfer{0%{margin-inline-start:-40%}100%{margin-inline-start:100%}}
 .exp-xfer{height:100%;width:40%;background:var(--gold);border-radius:99px;animation:expXfer 1.1s cubic-bezier(0.45,0,0.55,1) infinite}
 @media (prefers-reduced-motion:reduce){.exp-card.just-posted{animation:none}.exp-xfer{animation:none;width:100%;opacity:.5}}
+
+/* ===== Cleaning Command Center V2 ===== */
+.cc-shell{display:flex;flex-direction:column;gap:12px}
+.cc-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+.cc-tab{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:999px;padding:8px 13px;font-size:12px;font-weight:750;min-height:38px}
+.cc-tab.on{background:var(--gold);border-color:var(--gold);color:white}
+.cc-urgent{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--gold-tint);border:1px solid rgba(163,119,40,.24);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:12px}
+.cc-urgent.danger{background:var(--red-soft);border-color:rgba(196,67,67,.25)}
+.cc-urgent .cc-ut{font-weight:850;color:var(--text);font-size:13px}
+.cc-urgent .cc-us{color:var(--text-2);font-size:12px;margin-top:2px}
+.cc-filter{display:flex;gap:7px;flex-wrap:wrap;margin:2px 0 12px}
+.cc-filter button{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:999px;padding:7px 11px;font-size:11.5px;font-weight:700;min-height:34px}
+.cc-filter button.on{background:var(--surface-3);border-color:var(--gold);color:var(--gold-2)}
+.cc-pipeline{display:grid;grid-template-columns:repeat(5,minmax(190px,1fr));gap:10px;align-items:start}
+.cc-col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:10px;min-height:120px}
+.cc-col-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:12px;font-weight:850;color:var(--text)}
+.cc-count{background:var(--surface);border:1px solid var(--line);border-radius:999px;color:var(--mut);font-size:10px;font-weight:800;padding:1px 7px}
+.cc-job{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px;margin-bottom:8px;box-shadow:var(--sh-xs)}
+.cc-job.urgent{border-color:rgba(196,67,67,.38);background:linear-gradient(135deg,var(--red-soft),var(--surface))}
+.cc-job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px}
+.cc-name{font-size:14px;font-weight:850;color:var(--text);line-height:1.3}
+.cc-meta{font-size:11px;color:var(--mut);line-height:1.55}
+.cc-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}
+.cc-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);font-size:10.5px;font-weight:750;padding:3px 8px}
+.cc-chip.ok{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.18)}
+.cc-chip.warn{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(201,150,23,.22)}
+.cc-chip.danger{background:var(--red-soft);color:var(--red);border-color:rgba(196,67,67,.22)}
+.cc-chip.info{background:var(--blue-soft);color:var(--blue);border-color:rgba(62,120,210,.18)}
+.cc-primary{width:100%;margin-top:8px;min-height:38px}
+.cc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.cc-mobile-list{display:none}
+.cc-team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.cc-team{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:13px;box-shadow:var(--sh-xs)}
+.cc-team .cc-team-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px}
+.cc-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}
+.cc-mini{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:7px;text-align:center}
+.cc-mini .v{font-family:var(--font-mono);font-weight:850;font-size:15px;color:var(--text)}
+.cc-mini .l{font-size:9.5px;color:var(--mut);margin-top:2px}
+.cc-setup-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:9px 0}
+.cc-setup-row:last-child{border-bottom:0}
+.cc-mobile-nav{display:none}
+.cc-review-drawer .drawer{width:min(560px,100vw)}
+@media (max-width:1100px){.cc-pipeline{grid-template-columns:1fr 1fr}}
+@media (max-width:760px){
+  #view_clean_center .page-head{position:sticky;top:0;background:var(--bg);z-index:15;padding-top:8px}
+  .cc-tabs{display:none}
+  .cc-mobile-nav{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;position:fixed;left:0;right:0;bottom:0;z-index:70;background:var(--surface);border-top:1px solid var(--line);padding:6px 7px calc(7px + env(safe-area-inset-bottom))}
+  .cc-mobile-nav button{font-size:10.5px;font-weight:800;color:var(--text-3);border-radius:9px;padding:8px 2px;min-height:44px}
+  .cc-mobile-nav button.on{background:var(--gold-soft);color:var(--gold-2)}
+  .cc-urgent{position:sticky;top:72px;z-index:12}
+  .cc-pipeline{display:block}
+  .cc-desktop-pipeline{display:none}
+  .cc-mobile-list{display:grid}
+  .cc-col{background:transparent;border:0;padding:0;min-height:0}
+  .cc-col:not(.cc-active-col){display:none}
+  .cc-col-h{display:none}
+  .cc-list,.cc-team-grid{grid-template-columns:1fr}
+  .cc-job{padding:13px;border-radius:14px}
+  .cc-primary{min-height:44px;font-size:13px}
+  .cc-filter{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}
+  .cc-filter button{white-space:nowrap;min-height:38px}
+}
 .ibox-expand{color:var(--mut);font-size:14px;transition:.15s transform;flex-shrink:0}
 .ibox.open .ibox-expand{transform:rotate(180deg)}
 .ibox-body{display:none;border-top:1px solid var(--line);padding:14px}
@@ -11800,6 +12019,31 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="card"><div id="logBody"><div class="empty sk">—</div></div></div>
       </section>
 
+      <!-- ============ CLEANING COMMAND CENTER V2 ============ -->
+      <section class="view" id="view_clean_center">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_cc_title">🧭 مركز التنظيف</div>
+            <div class="page-sub" id="t_cc_sub">اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadCleaningCenter(true)">↻ <span id="t_cc_refresh">تحديث</span></button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_clean_center" data-help-key="clean_center">
+          <button class="ph-x" onclick="dismissHelp('clean_center')" title="إخفاء">×</button>
+          <div class="ph-t">🧭 تنظيف اليوم بدون تشتت</div>
+          <div class="ph-b">
+            هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده.
+            تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.
+          </div>
+        </div>
+
+        <div class="cc-shell" id="cleanCenterBody"><div class="empty sk">—</div></div>
+        <div class="cc-mobile-nav" id="cleanCenterMobileNav"></div>
+      </section>
+
       <!-- ============ DEEP-CLEAN SCHEDULE ============ -->
       <section class="view" id="view_clean">
         <div class="page-head">
@@ -11829,13 +12073,13 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="cleaningOpsSummary"></div>
         <div class="kpis" id="cleanStats"></div>
 
-        <!-- Daily turnover cleaning + photo-proof review MOVED to the "🧽 فرق التنظيف" tab -->
+        <!-- Daily turnover cleaning + photo-proof review MOVED to the Cleaning Center -->
         <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <div style="flex:1;min-width:220px">
-            <div class="card-title">🧽 تنظيف اليوم انتقل لتبويب «فرق التنظيف»</div>
-            <div class="muted" style="font-size:11.5px;margin-top:3px">الخروج اليومي · التنظيف العاجل · مراجعة الصور والتوقيع · فرق ولينكات مستقلة. هنا يبقى جدول <b>الديب كلين</b> فقط.</div>
+            <div class="card-title">🧭 تنظيف اليوم انتقل إلى «مركز التنظيف»</div>
+            <div class="muted" style="font-size:11.5px;margin-top:3px">الخروج اليومي · التنظيف العاجل · مراجعة الصور والتوقيع · الفرق والمشاكل في مكان واحد. هنا يبقى جدول <b>الديب كلين</b> فقط.</div>
           </div>
-          <button class="btn primary sm" onclick="go('cleanteams')">فتح فرق التنظيف ←</button>
+          <button class="btn primary sm" onclick="go('clean_center')">فتح مركز التنظيف ←</button>
           <button class="btn ghost sm" onclick="openCleanTemplateEditor()">⚙ قائمة صور الإثبات</button>
         </div>
 
@@ -12715,6 +12959,19 @@ const T = {
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
+    clean_center:'مركز التنظيف',
+    cc_title:'🧭 مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
+    cc_help_t:'🧭 تنظيف اليوم بدون تشتت', cc_help_b:'هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.',
+    cc_today:'اليوم', cc_review:'مراجعة', cc_issues:'المشاكل', cc_teams:'الفرق', cc_quality:'الجودة', cc_deep:'التنظيف العميق', cc_settings:'الإعدادات',
+    cc_refresh:'تحديث', cc_last_updated:'آخر تحديث', cc_no_urgent:'ما فيه شيء عاجل حاليًا',
+    cc_total_jobs:'تنظيفات اليوم', cc_same_day:'دخول اليوم', cc_needs_cleaning:'يحتاج تنظيف', cc_in_progress:'قيد التنفيذ', cc_pending_review:'بانتظار المراجعة', cc_approved:'معتمد', cc_late_risk:'متأخر/خطر', cc_missing_setup:'إعداد ناقص', cc_needs_reshoot:'يحتاج إعادة',
+    cc_open_team_link:'افتح رابط الفريق', cc_track_progress:'تابع التقدم', cc_review_photos:'راجع الصور', cc_view_report:'عرض التقرير', cc_follow_reshoot:'متابعة الإعادة', cc_details:'تفاصيل',
+    cc_no_jobs:'ما فيه تنظيفات اليوم', cc_no_reviews:'كل المراجعات مخلصة', cc_no_issues:'ما فيه مشاكل مفتوحة', cc_all_approved:'كل تنظيفات اليوم معتمدة',
+    cc_all:'الكل', cc_urgent:'عاجل', cc_late:'متأخر', cc_needs_my_review:'بانتظار مراجعتي', cc_photo_progress:'الصور', cc_last_action:'آخر حركة', cc_team:'الفريق', cc_open_route:'افتح المسار', cc_copy_route:'نسخ الرابط', cc_no_team:'بدون فريق',
+    cc_setup_health:'صحة إعداد التنظيف', cc_missing_team:'فريق التنظيف ناقص', cc_missing_map:'رابط الخريطة ناقص', cc_missing_access:'تعليمات الدخول ناقصة', cc_missing_parking:'ملاحظات المواقف ناقصة', cc_missing_coords:'الإحداثيات ناقصة',
+    cc_issue_guest_inside:'الضيف باقي داخل', cc_issue_no_access:'ما فيه دخول', cc_issue_damage:'ضرر', cc_issue_supplies:'مستلزمات ناقصة', cc_issue_cannot_find:'ما لقى الشقة', cc_issue_other:'مشكلة أخرى', cc_issue_reshoot:'إعادة تصوير',
+    cc_stage_to_clean:'يحتاج تنظيف', cc_stage_in_progress:'قيد التنفيذ', cc_stage_review:'بانتظار المراجعة', cc_stage_approved:'معتمد', cc_stage_redo:'يحتاج إعادة',
+    cc_reason_same_day:'دخول اليوم', cc_reason_early_departure:'مغادرة مبكرة', cc_reason_late:'متأخر', cc_reason_issue:'مشكلة', cc_reason_missing_setup:'إعداد ناقص',
     listings:'الشقق',
     listings_title:'🏘️ سجل الشقق (المصدر الأساسي)',
     listings_sub:'كل الوحدات من Hostaway. هنا تحدّد المجموعة، الحد الأدنى للسعر، وفريق التنظيف الداخلي. الشقة الجديدة تظهر "تحتاج إعداد" لين تحدّد لها مجموعة وحد سعر.',
@@ -12927,6 +13184,7 @@ const T = {
       strat:   {t:'⚡ الاستراتيجيات المتابَعة', b:'كل فرصة سعر طبقتها = استراتيجية البوت يتابعها يومياً. تشوف هنا: حُجزت ولا لا، الإيراد المتحقق، ومتى انتهت. تقدر <b>توقف</b> أي وحدة.'},
       rev:     {t:'∿ الأرقام الكبيرة', b:'إيراد آخر <b>١٢ شهر</b>، مقارنة بالشهر اللي قبله، أداء كل شقة، وتأثير <b>دورة الراتب</b>. تقدر تصدّر CSV — يفتح بـExcel عربي بدون مشاكل.'},
       log:     {t:'≡ كل ما عمله البوت', b:'رسائل، تصعيدات، تغييرات أسعار، تنظيفات، تذاكر — كله مسجّل هنا بتوقيت Riyadh. استخدم الفلتر فوق تركز على نوع معين.'},
+      clean_center:{t:'🧭 مركز التنظيف', b:'هنا المدير يشوف تنظيف اليوم كامل: العاجل، اللي بدأ، اللي ينتظر مراجعة، واللي تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.'},
       clean:   {t:'🧹 التنظيف العميق', b:'كل شقة تتنظف عميق كل <b>٤٥-٦٠ يوم</b>. تنظيف واحد كل يوم، يتأكد من Hostaway الساعة <b>٩ مساءً</b> الليلة قبل. لو الشقة محجوزة، يبدّلها مع شقة ثانية تلقائي.'},
       quality: {t:'⭐ تقييم نظافة كل شقة', b:'متوسط تقييمات النظافة من الضيوف لكل شقة، مع آخر التعليقات. <b>الترتيب: الأسوأ فوق</b> عشان تشتغل عليها أول.'},
       guests:  {t:'👤 الضيوف اللي زاروك', b:'كل ضيف نزل عندك من قبل — اسمه، رقمه، كم مرة زار، وأي شقق. تقدر تعلّمه <b>VIP</b> فيتنبه له المساعد كل مرة يرجع.'},
@@ -12983,6 +13241,19 @@ const T = {
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
+    clean_center:'Cleaning Center',
+    cc_title:'🧭 Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
+    cc_help_t:'🧭 Cleaning today without scatter', cc_help_b:'Managers can see what is urgent, started, waiting for review, and approved. A team submit is not final until a manager approves the photos.',
+    cc_today:'Today', cc_review:'Review', cc_issues:'Issues', cc_teams:'Teams', cc_quality:'Quality', cc_deep:'Deep Clean', cc_settings:'Settings',
+    cc_refresh:'Refresh', cc_last_updated:'Last updated', cc_no_urgent:'Nothing urgent right now',
+    cc_total_jobs:'Jobs today', cc_same_day:'Same-day check-ins', cc_needs_cleaning:'Needs cleaning', cc_in_progress:'In progress', cc_pending_review:'Pending review', cc_approved:'Approved', cc_late_risk:'Late/risk', cc_missing_setup:'Missing setup', cc_needs_reshoot:'Needs reshoot',
+    cc_open_team_link:'Open team link', cc_track_progress:'Track progress', cc_review_photos:'Review photos', cc_view_report:'View report', cc_follow_reshoot:'Follow reshoot', cc_details:'Details',
+    cc_no_jobs:'No cleaning jobs today', cc_no_reviews:'All reviews are done', cc_no_issues:'No open issues', cc_all_approved:'All cleaning jobs are approved',
+    cc_all:'All', cc_urgent:'Urgent', cc_late:'Late', cc_needs_my_review:'Needs my review', cc_photo_progress:'Photos', cc_last_action:'Last action', cc_team:'Team', cc_open_route:'Open route', cc_copy_route:'Copy link', cc_no_team:'No team',
+    cc_setup_health:'Cleaning setup health', cc_missing_team:'Cleaning team missing', cc_missing_map:'Map link missing', cc_missing_access:'Access notes missing', cc_missing_parking:'Parking notes missing', cc_missing_coords:'Coordinates missing',
+    cc_issue_guest_inside:'Guest still inside', cc_issue_no_access:'No access', cc_issue_damage:'Damage found', cc_issue_supplies:'Missing supplies', cc_issue_cannot_find:'Cannot find apartment', cc_issue_other:'Other issue', cc_issue_reshoot:'Reshoot',
+    cc_stage_to_clean:'Needs cleaning', cc_stage_in_progress:'In progress', cc_stage_review:'Pending review', cc_stage_approved:'Approved', cc_stage_redo:'Needs reshoot',
+    cc_reason_same_day:'Same-day', cc_reason_early_departure:'Early departure', cc_reason_late:'Late', cc_reason_issue:'Issue', cc_reason_missing_setup:'Missing setup',
     listings:'Listings',
     listings_title:'🏘️ Listings (master store)',
     listings_sub:'Every unit from Hostaway. Set the group, hard price floor, and in-house cleaning team for each unit here. A new unit shows "needs setup" until it has a group and a floor.',
@@ -13195,6 +13466,7 @@ const T = {
       strat:   {t:'⚡ Tracked strategies', b:'Every price change you applied = a strategy the bot watches daily. You see whether the night booked, the actual revenue captured, and when it ended. You can <b>stop</b> any unit at any time.'},
       rev:     {t:'∿ The big numbers', b:'Revenue for the last <b>12 months</b>, comparison vs the previous month, per-unit performance, and the <b>salary-cycle</b> effect (demand spikes at month-end). CSV export opens cleanly in Arabic-Excel.'},
       log:     {t:'≡ Everything the bot did', b:'Messages, escalations, price changes, cleanings, tickets — all logged here in Riyadh time. Use the top filter to focus on a specific kind of activity.'},
+      clean_center:{t:'🧭 Cleaning Center', b:'Managers see the whole cleaning day here: urgent jobs, started jobs, pending photo reviews, and approved jobs. A team submit is not final until a manager approves the photos.'},
       clean:   {t:'🧹 Deep cleaning', b:'Every unit gets a deep clean every <b>45-60 days</b>. One clean per day, confirmed against Hostaway at <b>9 PM the night before</b>. If the unit is booked, it auto-swaps with another unit.'},
       quality: {t:'⭐ Cleanliness rating per unit', b:'Average guest cleanliness ratings per unit, with the latest comments. <b>Sorted worst-first</b> so you tackle the highest-impact unit first.'},
       guests:  {t:'👤 Guests who have stayed', b:'Every past guest — name, phone, visit count, and which units. Mark a guest <b>VIP</b> and the assistant will recognise them the next time they reach out.'},
@@ -13679,6 +13951,7 @@ function applyLang(){
     t_calendar:'calendar_title', t_calendar_sub:'calendar_sub',
     t_cal_events_legend:'cal_events_legend', t_bulk_title:'bulk_title',
     t_rev_pace:'rev_pace',
+    t_cc_title:'cc_title', t_cc_sub:'cc_sub', t_cc_refresh:'cc_refresh',
     t_clean:'clean_title', t_clean_sub:'clean_sub', t_clean_link_title:'clean_link_title',
     cf_all:'clean_filter_all', cf_overdue:'clean_filter_overdue', cf_soon:'clean_filter_soon', cf_unsch:'clean_filter_unscheduled',
     t_guests:'guests_title', t_guests_sub:'guests_sub',
@@ -13762,6 +14035,7 @@ const NAV = [
   {id:'home',    ic:'◇', tk:'home'},
   {id:'inbox',   ic:'✉', tk:'inbox', badge:'inbox'},
   {id:'calendar',ic:'📅', tk:'calendar'},
+  {id:'clean_center',ic:'🧭', tk:'clean_center', badge:'clean_center'},
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
@@ -13796,6 +14070,10 @@ function badgeCount(key){
   if(key==='inbox') return (ib.replies?ib.replies.length:0) + (ib.escalations?ib.escalations.filter(function(e){return !e.claimed_by}).length:0);
   if(key==='pricing') return ((D.pr && D.pr.units) || []).length;
   if(key==='clean') return ((D.clean && D.clean.counts) || {}).overdue || 0;
+  if(key==='clean_center'){
+    const s = ((D.cleanCenter||{}).summary)||{};
+    return (s.pending_review||0) + (s.late_risk||0) + (s.issues||0);
+  }
   if(key==='tickets'){
     const c = (D.tickets && D.tickets.counts) || {};
     return (c.overdue||0) + (c.urgent||0);
@@ -13816,7 +14094,7 @@ function badgeInfo(key){
     const ib = D.inbox || {};
     const esc = (ib.escalations||[]).filter(function(e){return !e.claimed_by}).length;
     cls = esc ? 'danger' : 'warn';
-  }else if(key==='tickets' || key==='clean'){
+  }else if(key==='tickets' || key==='clean' || key==='clean_center'){
     cls = 'danger';
   }else if(key==='pricing'){
     cls = 'info';
@@ -13828,7 +14106,7 @@ function badgeInfo(key){
 // exactly one group; order is deliberate (what a manager reaches for, top to bottom).
 const NAV_CATS = [
   {tk:'cat_overview', ids:['home']},
-  {tk:'cat_ops',      ids:['inbox','calendar','tickets','clean','cleanteams','listings','quality','pmo','design']},
+  {tk:'cat_ops',      ids:['inbox','calendar','clean_center','tickets','clean','cleanteams','listings','quality','pmo','design']},
   {tk:'cat_pricing',  ids:['pricing','strat','rev','quote']},
   {tk:'cat_finance',  ids:['expenses','finance','weekly']},
   {tk:'cat_guests',   ids:['guests','reviews']},
@@ -13849,7 +14127,7 @@ function buildSideNav(){
   const collapsed = _navCollapsed();
   function itemHtml(n){
     const b = badgeInfo(n.badge);
-    return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'" title="'+esc(b.label)+'">'+b.count+'</span>':'')+'</a>';
+    return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(&quot;'+n.id+'&quot;)" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'" title="'+esc(b.label)+'">'+b.count+'</span>':'')+'</a>';
   }
   el.innerHTML = NAV_CATS.map(function(cat){
     const items = cat.ids.map(function(id){ return byId[id]; }).filter(function(n){ return n && !(n.adminOnly && !isAdmin); });
@@ -14011,6 +14289,7 @@ function refreshView(id){
     case 'quote':    return loadQuotes();
     case 'weekly':   return loadWeekly();
     case 'clean':    return loadCleaning();
+    case 'clean_center': return loadCleaningCenter();
     case 'quality':  return loadQuality();
     case 'guests':   return loadGuests();
     case 'users':    return loadUsers();
@@ -14039,6 +14318,7 @@ function go(id){
   if(id==='learn') loadLearnings();
   if(id==='calendar') loadForwardCalendar();
   if(id==='clean') loadCleaning();
+  if(id==='clean_center') loadCleaningCenter();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
@@ -14727,6 +15007,197 @@ function renderUrgentStrip(){
     + rows
     + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
     + '</div>';
+}
+
+// ============== CLEANING COMMAND CENTER V2 ==============
+var ccView = 'today';
+var ccFilter = 'all';
+
+async function loadCleaningCenter(showToast){
+  var el = document.getElementById('cleanCenterBody');
+  if(el) el.innerHTML = '<div class="empty sk">—</div>';
+  try{ D.cleanCenter = await api('/api/cleaning/command-center'); }
+  catch(_){ D.cleanCenter = {summary:{}, jobs:[], reviews:[], issues:[], teams:[], setup_health:[]}; }
+  renderCleaningCenter();
+  buildSideNav();
+  buildBottomNav();
+  if(showToast) toast('✓ '+t().fresh);
+}
+function ccSetView(v){ ccView = v || 'today'; ccFilter = 'all'; renderCleaningCenter(); }
+function ccSetFilter(f){ ccFilter = f || 'all'; renderCleaningCenter(); }
+function ccL(k){ return t()[k] || k; }
+function ccStageKey(stage){
+  if(stage==='to_clean') return 'cc_stage_to_clean';
+  if(stage==='in_progress') return 'cc_stage_in_progress';
+  if(stage==='review') return 'cc_stage_review';
+  if(stage==='approved') return 'cc_stage_approved';
+  if(stage==='redo') return 'cc_stage_redo';
+  return 'cc_stage_to_clean';
+}
+function ccStageChip(stage){
+  var cls = stage==='approved' ? 'ok' : (stage==='review' ? 'info' : (stage==='redo' ? 'danger' : (stage==='in_progress' ? 'warn' : '')));
+  return '<span class="cc-chip '+cls+'">'+esc(ccL(ccStageKey(stage)))+'</span>';
+}
+function ccReasonLabel(k){
+  var m = {same_day:'cc_reason_same_day', early_departure:'cc_reason_early_departure', late:'cc_reason_late', issue:'cc_reason_issue', missing_setup:'cc_reason_missing_setup'};
+  return ccL(m[k] || k);
+}
+function ccIssueLabel(k){
+  var m = {guest_inside:'cc_issue_guest_inside', no_access:'cc_issue_no_access', damage:'cc_issue_damage', supplies:'cc_issue_supplies', cannot_find:'cc_issue_cannot_find', other:'cc_issue_other', reshoot:'cc_issue_reshoot'};
+  return ccL(m[k] || 'cc_issue_other');
+}
+function ccMissingLabel(k){
+  var m = {team:'cc_missing_team', map:'cc_missing_map', access:'cc_missing_access', parking:'cc_missing_parking', coords:'cc_missing_coords'};
+  return ccL(m[k] || k);
+}
+function ccTabsHtml(){
+  var tabs = [['today','cc_today'], ['review','cc_review'], ['issues','cc_issues'], ['teams','cc_teams'], ['quality','cc_quality'], ['deep','cc_deep'], ['settings','cc_settings']];
+  return '<div class="cc-tabs">'+tabs.map(function(p){
+    return '<button class="cc-tab '+(ccView===p[0]?'on':'')+'" onclick="ccSetView(&#39;'+p[0]+'&#39;)">'+esc(ccL(p[1]))+'</button>';
+  }).join('')+'</div>';
+}
+function ccMobileNavHtml(){
+  var tabs = [['today','cc_today'], ['review','cc_review'], ['issues','cc_issues'], ['teams','cc_teams']];
+  return tabs.map(function(p){
+    return '<button class="'+(ccView===p[0]?'on':'')+'" onclick="ccSetView(&#39;'+p[0]+'&#39;)">'+esc(ccL(p[1]))+'</button>';
+  }).join('');
+}
+function ccSummaryHtml(s){
+  var cards = [
+    ['cc_total_jobs', s.total||0, ''],
+    ['cc_same_day', s.same_day||0, 'info'],
+    ['cc_needs_cleaning', s.needs_cleaning||0, ''],
+    ['cc_in_progress', s.in_progress||0, 'warn'],
+    ['cc_pending_review', s.pending_review||0, 'info'],
+    ['cc_approved', s.approved||0, 'ok'],
+    ['cc_late_risk', s.late_risk||0, 'danger'],
+    ['cc_missing_setup', s.missing_setup||0, 'warn']
+  ];
+  return '<div class="kpis">'+cards.map(function(c){
+    var color = c[2]==='danger' ? 'var(--red)' : (c[2]==='ok' ? 'var(--green)' : (c[2]==='info' ? 'var(--blue)' : (c[2]==='warn' ? 'var(--yellow)' : 'var(--text)')));
+    return '<div class="kpi"><div class="kpi-val" style="color:'+color+'">'+c[1]+'</div><div class="kpi-lbl">'+esc(ccL(c[0]))+'</div></div>';
+  }).join('')+'</div>';
+}
+function ccUrgentHtml(jobs){
+  var urgent = (jobs||[]).filter(function(j){ return j.urgent || j.late || j.stage==='review' || j.stage==='redo'; });
+  if(!urgent.length) return '<div class="cc-urgent"><div><div class="cc-ut">'+esc(ccL('cc_no_urgent'))+'</div><div class="cc-us">'+esc(ccL('cc_last_updated'))+' · '+esc((((D.cleanCenter||{}).generated_at)||'').replace('T',' ').slice(0,16))+'</div></div><button class="btn ghost sm" onclick="loadCleaningCenter(true)">↻</button></div>';
+  var j = urgent[0];
+  var reason = (j.reason_keys||[]).map(ccReasonLabel).join(' · ');
+  return '<div class="cc-urgent danger"><div><div class="cc-ut">'+esc(j.name||'')+'</div><div class="cc-us">'+esc(reason || ccL('cc_urgent'))+'</div></div><button class="btn primary sm" onclick="ccRunJobAction(&#39;'+esc(j.next_action||'details')+'&#39;,'+Number(j.lid||0)+',&#39;'+esc(j.report_id||'')+'&#39;,&#39;'+esc(j.directions_url||'')+'&#39;)">'+esc(ccActionLabel(j.next_action))+'</button></div>';
+}
+function ccFiltersHtml(){
+  var fs = [['all','cc_all'], ['urgent','cc_urgent'], ['same_day','cc_same_day'], ['late','cc_late'], ['review','cc_needs_my_review']];
+  return '<div class="cc-filter">'+fs.map(function(p){
+    return '<button class="'+(ccFilter===p[0]?'on':'')+'" onclick="ccSetFilter(&#39;'+p[0]+'&#39;)">'+esc(ccL(p[1]))+'</button>';
+  }).join('')+'</div>';
+}
+function ccFilteredJobs(jobs){
+  jobs = jobs || [];
+  if(ccFilter==='urgent') return jobs.filter(function(j){ return j.urgent; });
+  if(ccFilter==='same_day') return jobs.filter(function(j){ return j.checkin_today; });
+  if(ccFilter==='late') return jobs.filter(function(j){ return j.late; });
+  if(ccFilter==='review') return jobs.filter(function(j){ return j.stage==='review'; });
+  return jobs;
+}
+function ccActionLabel(a){
+  if(a==='open_team_link') return ccL('cc_open_team_link');
+  if(a==='track_progress') return ccL('cc_track_progress');
+  if(a==='review_photos') return ccL('cc_review_photos');
+  if(a==='view_report') return ccL('cc_view_report');
+  if(a==='follow_reshoot') return ccL('cc_follow_reshoot');
+  return ccL('cc_details');
+}
+function ccJobCard(j){
+  var chips = [ccStageChip(j.stage)];
+  (j.reason_keys||[]).slice(0,3).forEach(function(k){ chips.push('<span class="cc-chip '+(k==='late'||k==='issue'?'danger':(k==='same_day'?'warn':''))+'">'+esc(ccReasonLabel(k))+'</span>'); });
+  if(j.issue_type) chips.push('<span class="cc-chip danger">'+esc(ccIssueLabel(j.issue_type))+'</span>');
+  if((j.setup_missing||[]).length) chips.push('<span class="cc-chip warn">'+esc(ccL('cc_missing_setup'))+'</span>');
+  var photos = (j.photos_req||0) ? ((j.photos_done||0)+'/'+(j.photos_req||0)+' '+(L==='ar'?'صور':'photos')) : '—';
+  var team = j.team || {};
+  var teamName = team.name || ccL('cc_no_team');
+  var actionLink = (j.next_action==='open_team_link') ? (team.link||'') : (j.directions_url||'');
+  return '<div class="cc-job '+(j.urgent?'urgent':'')+'">'
+    + '<div class="cc-job-head"><div><div class="cc-name">'+esc(j.name||'')+'</div><div class="cc-meta">'+esc(ccL('cc_team'))+': '+esc(teamName)+' · '+esc(ccL('cc_photo_progress'))+': '+esc(photos)+'</div></div><div>'+chips[0]+'</div></div>'
+    + '<div class="cc-row">'+chips.slice(1).join('')+'</div>'
+    + '<div class="cc-meta">'+(j.checkout_time?esc(t().checkout||'Checkout')+': '+esc(j.checkout_time)+' · ':'')+(j.checkin_time?esc(ccL('cc_same_day'))+': '+esc(j.checkin_time)+' · ':'')+esc(ccL('cc_last_action'))+': '+esc(j.last_action_at||'—')+'</div>'
+    + '<button class="btn primary sm cc-primary" onclick="ccRunJobAction(&#39;'+esc(j.next_action||'details')+'&#39;,'+Number(j.lid||0)+',&#39;'+esc(j.report_id||'')+'&#39;,&#39;'+esc(actionLink)+'&#39;)">'+esc(ccActionLabel(j.next_action))+'</button>'
+    + '</div>';
+}
+function ccRunJobAction(action,lid,reportId,link){
+  if((action==='review_photos' || action==='view_report' || action==='follow_reshoot') && reportId){ openCleanReview(reportId); return; }
+  if(action==='open_team_link' && link){ window.open(link, '_blank'); return; }
+  var jobs = ((D.cleanCenter||{}).jobs)||[];
+  var j = jobs.filter(function(x){ return Number(x.lid)===Number(lid); })[0] || {};
+  var team = j.team || {};
+  openDrawer(esc(j.name||ccL('cc_details')), esc(ccL(ccStageKey(j.stage||'to_clean'))));
+  setDrawerBody('<div class="cc-job">'
+    + '<div class="cc-name">'+esc(j.name||'')+'</div>'
+    + '<div class="cc-row">'+ccStageChip(j.stage||'to_clean')+(j.issue_type?'<span class="cc-chip danger">'+esc(ccIssueLabel(j.issue_type))+'</span>':'')+'</div>'
+    + '<div class="cc-meta">'+esc(ccL('cc_team'))+': '+esc(team.name||ccL('cc_no_team'))+'</div>'
+    + '<div class="cc-meta">'+esc(ccL('cc_photo_progress'))+': '+esc((j.photos_done||0)+'/'+(j.photos_req||0))+'</div>'
+    + ((j.setup_missing||[]).length?'<div class="cc-row">'+(j.setup_missing||[]).map(function(k){return '<span class="cc-chip warn">'+esc(ccMissingLabel(k))+'</span>';}).join('')+'</div>':'')
+    + '</div>');
+  setDrawerFoot((link?'<button class="btn primary sm" onclick="window.open(&#39;'+esc(link)+'&#39;,&#39;_blank&#39;)">'+esc(ccL('cc_open_route'))+'</button>':'')+'<button class="btn ghost sm" onclick="closeDrawer()">×</button>');
+}
+function ccPipelineHtml(jobs){
+  var cols = [['to_clean','cc_needs_cleaning'], ['in_progress','cc_in_progress'], ['review','cc_pending_review'], ['approved','cc_approved'], ['redo','cc_needs_reshoot']];
+  return '<div class="cc-pipeline cc-desktop-pipeline">'+cols.map(function(c){
+    var arr = (jobs||[]).filter(function(j){ return j.stage===c[0]; });
+    return '<div class="cc-col"><div class="cc-col-h"><span>'+esc(ccL(c[1]))+'</span><span class="cc-count">'+arr.length+'</span></div>'+(arr.length?arr.map(ccJobCard).join(''):'<div class="empty">'+esc(ccL('cc_no_jobs'))+'</div>')+'</div>';
+  }).join('')+'</div>';
+}
+function ccTodayHtml(){
+  var data = D.cleanCenter || {};
+  var jobs = ccFilteredJobs(data.jobs||[]);
+  return ccSummaryHtml(data.summary||{}) + ccUrgentHtml(data.jobs||[]) + ccFiltersHtml()
+    + ccPipelineHtml(jobs)
+    + '<div class="cc-mobile-list cc-list">'+(jobs.length?jobs.map(ccJobCard).join(''):'<div class="empty">'+esc(ccL('cc_no_jobs'))+'</div>')+'</div>';
+}
+function ccReviewHtml(){
+  var rows = (D.cleanCenter||{}).reviews || [];
+  return ccUrgentHtml((D.cleanCenter||{}).jobs||[]) + '<div class="cc-list">'+(rows.length?rows.map(ccJobCard).join(''):'<div class="empty">'+esc(ccL('cc_no_reviews'))+'</div>')+'</div>';
+}
+function ccIssuesHtml(){
+  var rows = (D.cleanCenter||{}).issues || [];
+  return '<div class="cc-list">'+(rows.length?rows.map(ccJobCard).join(''):'<div class="empty">'+esc(ccL('cc_no_issues'))+'</div>')+'</div>';
+}
+function ccTeamsHtml(){
+  var teams = (D.cleanCenter||{}).teams || [];
+  return '<div class="cc-team-grid">'+(teams.length?teams.map(function(team){
+    var s = team.counts || team.summary || {};
+    return '<div class="cc-team"><div class="cc-team-top"><div><div class="cc-name">'+esc(team.name||ccL('cc_no_team'))+'</div><div class="cc-meta">'+esc(ccL('cc_total_jobs'))+': '+(s.total||0)+'</div></div>'+(team.link?'<button class="btn ghost sm" onclick="window.open(&#39;'+esc(team.link)+'&#39;,&#39;_blank&#39;)">'+esc(ccL('cc_open_route'))+'</button>':'')+'</div>'
+      + '<div class="cc-mini-stats">'
+      + '<div class="cc-mini"><div class="v">'+(s.to_clean||0)+'</div><div class="l">'+esc(ccL('cc_needs_cleaning'))+'</div></div>'
+      + '<div class="cc-mini"><div class="v">'+(s.in_progress||0)+'</div><div class="l">'+esc(ccL('cc_in_progress'))+'</div></div>'
+      + '<div class="cc-mini"><div class="v">'+(s.review||0)+'</div><div class="l">'+esc(ccL('cc_pending_review'))+'</div></div>'
+      + '<div class="cc-mini"><div class="v">'+(s.approved||0)+'</div><div class="l">'+esc(ccL('cc_approved'))+'</div></div>'
+      + '</div></div>';
+  }).join(''):'<div class="empty">—</div>')+'</div>';
+}
+function ccSettingsHtml(){
+  var rows = (D.cleanCenter||{}).setup_health || [];
+  return '<div class="card"><div class="card-head"><span class="card-title">'+esc(ccL('cc_setup_health'))+'</span></div>'
+    + (rows.length?rows.map(function(r){ return '<div class="cc-setup-row"><div><b>'+esc(r.name||'')+'</b><div class="cc-row">'+(r.missing||[]).map(function(k){return '<span class="cc-chip warn">'+esc(ccMissingLabel(k))+'</span>';}).join('')+'</div></div><button class="btn ghost sm" onclick="go(&#39;listings&#39;)">'+esc(ccL('cc_details'))+'</button></div>'; }).join(''):'<div class="empty">'+esc(ccL('cc_all_approved'))+'</div>')
+    + '</div>';
+}
+function ccLinkedSectionHtml(kind){
+  if(kind==='quality') return '<div class="card"><div class="card-head"><span class="card-title">'+esc(ccL('cc_quality'))+'</span></div><div class="empty">'+esc(L==='ar'?'ملخص الجودة الكامل موجود في تبويب الجودة.':'The full quality summary is in the Quality tab.')+'</div><button class="btn primary sm" onclick="go(&#39;quality&#39;)">'+esc(ccL('cc_details'))+'</button></div>';
+  return '<div class="card"><div class="card-head"><span class="card-title">'+esc(ccL('cc_deep'))+'</span></div><div class="empty">'+esc(L==='ar'?'جدول التنظيف العميق مستقل عن تنظيف اليوم.':'Deep-clean scheduling is separate from daily turnover cleaning.')+'</div><button class="btn primary sm" onclick="go(&#39;clean&#39;)">'+esc(ccL('cc_details'))+'</button></div>';
+}
+function renderCleaningCenter(){
+  var body = document.getElementById('cleanCenterBody'); if(!body) return;
+  var nav = document.getElementById('cleanCenterMobileNav'); if(nav) nav.innerHTML = ccMobileNavHtml();
+  var title = document.getElementById('t_cc_title'); if(title) title.textContent = ccL('cc_title');
+  var sub = document.getElementById('t_cc_sub'); if(sub) sub.textContent = ccL('cc_sub');
+  var content = '';
+  if(ccView==='review') content = ccReviewHtml();
+  else if(ccView==='issues') content = ccIssuesHtml();
+  else if(ccView==='teams') content = ccTeamsHtml();
+  else if(ccView==='quality') content = ccLinkedSectionHtml('quality');
+  else if(ccView==='deep') content = ccLinkedSectionHtml('deep');
+  else if(ccView==='settings') content = ccSettingsHtml();
+  else content = ccTodayHtml();
+  body.innerHTML = ccTabsHtml() + content;
 }
 
 // ============== CLEANING QUALITY ==============
@@ -21354,7 +21825,7 @@ async function ctCancelTask(tid){
 }
 function _ctLogLabel(e){
   var ar=(L==='ar'); var a=e.action||'';
-  var M={arrived:['🚪 وصل','🚪 Arrived'],started:['🧹 بدأ التنظيف','🧹 Started'],done:['✅ خلّص','✅ Done'],issue:['⚠️ بلاغ','⚠️ Issue'],guest_inside:['🛑 الضيف داخل','🛑 Guest inside'],report_submitted:['📷 رفع التقرير','📷 Report submitted'],manager_approve:['✓ اعتمد','✓ Approved'],manager_reject:['× رفض','× Rejected'],manager_reshoot:['↻ إعادة تصوير','↻ Reshoot'],manual_task_added:['➕ مهمة يدوية','➕ Manual task'],manual_task_canceled:['✕ ألغى مهمة','✕ Task canceled']};
+  var M={arrived:['🚪 وصل','🚪 Arrived'],started:['🧹 بدأ التنظيف','🧹 Started'],done:['📷 أرسل للمراجعة','📷 Submitted for review'],issue:['⚠️ بلاغ','⚠️ Issue'],guest_inside:['🛑 الضيف داخل','🛑 Guest inside'],report_submitted:['📷 رفع التقرير','📷 Report submitted'],manager_approve:['✓ اعتمد','✓ Approved'],manager_reject:['× رفض','× Rejected'],manager_reshoot:['↻ إعادة تصوير','↻ Reshoot'],manual_task_added:['➕ مهمة يدوية','➕ Manual task'],manual_task_canceled:['✕ ألغى مهمة','✕ Task canceled']};
   var m=M[a]; var lab=m?(ar?m[0]:m[1]):a;
   return lab+(e.note?(' — '+e.note):'');
 }
@@ -22103,13 +22574,13 @@ var T={
    eta_api_rate_limited:'Google Maps أوقف الطلب مؤقتًا بسبب الحد اليومي', eta_api_temporary_error:'Google Maps فيه عطل مؤقت',
    eta_api_error:'تعذر حساب ETA من Google Maps',
    prio_note:'الأولوية التشغيلية مقدّمة على قرب المسافة',
-   arrived:'وصلت', started:'بدأ التنظيف', done:'تم', issue:'فيه مشكلة', inside:'الضيف باقي داخل',
+   arrived:'وصلت', started:'بدأ التنظيف', done:'إرسال للمراجعة', issue:'فيه مشكلة', inside:'الضيف باقي داخل',
    photos:'ارفع صور التنظيف', report:'تقرير تنظيف', req:'صور مطلوبة', opt:'صور اختيارية', missing:'الصورة ناقصة',
    uploaded:'تم الرفع', replace:'استبدال الصورة', submit:'إرسال للمراجعة', pending:'قيد مراجعة المدير',
    approved:'تم اعتماد التنظيف', rejected:'تم رفض التقرير', reshoot:'إعادة تصوير مطلوبة', note:'ملاحظة',
    damage:'فحص الأضرار', close:'إغلاق', choose_file:'اختر/صوّر', progress:'الصور المرفوعة',
    total_apts:'شقق', urgent:'عاجلة', first:'أول شقة', route_t:'وقت المسار', clean_w:'وقت التنظيف', miss:'بدون خريطة',
-   checkin:'دخول اليوم', checkout:'الخروج', min:'دقيقة', done_t:'تم تسجيل الحالة', empty:'ما فيه شقق مجدولة اليوم لفريق Oujact.',
+   checkin:'دخول اليوم', checkout:'الخروج', min:'دقيقة', done_t:'تم إرسالها للمراجعة', empty:'ما فيه شقق مجدولة اليوم لفريق Oujact.',
    bad:'رابط غير صالح أو منتهي.', leg:'قيادة'},
  en:{title:'Oujact Cleaning Route Plan',start_h:'Start here',choose:'Choose a starting point',
    geo:'Use my current location',link:'Paste Google Maps link as starting point',addr:'Type starting address manually',
@@ -22124,13 +22595,13 @@ var T={
    eta_api_rate_limited:'Google Maps temporarily rate-limited the request', eta_api_temporary_error:'Google Maps has a temporary error',
    eta_api_error:'Google Maps could not calculate ETA',
    prio_note:'Operational priority comes before distance',
-   arrived:'Arrived', started:'Started cleaning', done:'Done', issue:'Issue', inside:'Guest still inside',
+   arrived:'Arrived', started:'Started cleaning', done:'Submit for review', issue:'Issue', inside:'Guest still inside',
    photos:'Upload cleaning photos', report:'Cleaning report', req:'Required photos', opt:'Optional photos', missing:'Missing photo',
    uploaded:'Uploaded', replace:'Replace photo', submit:'Submit for review', pending:'Pending manager review',
    approved:'Cleaning approved', rejected:'Report rejected', reshoot:'Reshoot required', note:'Note',
    damage:'Damage check', close:'Close', choose_file:'Choose/camera', progress:'Uploaded photos',
    total_apts:'units', urgent:'urgent', first:'first', route_t:'route time', clean_w:'cleaning', miss:'no map',
-   checkin:'check-in today', checkout:'checkout', min:'min', done_t:'Status saved', empty:'No Oujact apartments scheduled today.',
+   checkin:'check-in today', checkout:'checkout', min:'min', done_t:'Submitted for review', empty:'No Oujact apartments scheduled today.',
    bad:'Invalid or expired link.', leg:'drive'}};
 function t(){return T[L];}
 function esc(s){return (s==null?'':String(s)).replace(/[<>&\"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','\"':'&quot;'})[c];});}
@@ -31922,6 +32393,12 @@ async def _api_cleaning_teams_analytics(request):
                     "counts": c, "units": snap["units"], "early_departures": early})
     return _json({"ok": True, "date": today, "teams": out, "summary": summary})
 
+async def _api_cleaning_command_center(request):
+    """Cleaning Center V2: one manager-friendly daily operations snapshot."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_clean_center_snapshot))
+
 async def _api_cleaning_task(request):
     """Manager adds a manual cleaning task {lid, date, ctype, note} OR cancels one {id, cancel}.
     GET returns the preset cleaning types for the picker."""
@@ -32952,6 +33429,7 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/assign", _api_cleaning_assign)
         app.router.add_post("/api/cleaning/clear-early", _api_cleaning_clear_early)
         app.router.add_get("/api/cleaning/teams-analytics", _api_cleaning_teams_analytics)
+        app.router.add_get("/api/cleaning/command-center", _api_cleaning_command_center)
         app.router.add_get("/api/cleaning/task", _api_cleaning_task)
         app.router.add_post("/api/cleaning/task", _api_cleaning_task)
         app.router.add_get("/api/cleaning/report", _api_cleaning_report_one)
