@@ -2670,28 +2670,93 @@ class CleaningDoneView(discord.ui.View):
     @discord.ui.button(label="📷 Submit for Review", style=discord.ButtonStyle.success,
                        custom_id="ouja_cleaning_done")
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            f"📷 Submitted for manager review by {interaction.user.mention}. Approval is still required in the dashboard.",
-            ephemeral=False)
+        await interaction.response.defer(ephemeral=False, thinking=True)
         ch = interaction.channel
         topic = getattr(ch, "topic", "") or ""
         key = parse_topic_oujact_key(topic)
         try:
-            if key:
-                lid, date_iso = key.split(":", 1)
-                _oujact_log_status(lid, date_iso, "done",
-                                   "Submitted from Discord for manager review",
-                                   str(interaction.user))
-            # Close the dispatch loop for this unit/day so Discord does not
-            # re-open or keep nagging. Dashboard report approval remains separate.
+            if not key:
+                await interaction.followup.send(
+                    "ما قدرت أعرف الشقة واليوم من هذا الروم. افتح رابط الفريق وارفع الصور من هناك، بعدها أرسل للمراجعة.",
+                    ephemeral=False)
+                return
+            lid_raw, date_iso = key.split(":", 1)
+            try:
+                lid = int(lid_raw)
+            except Exception:
+                await interaction.followup.send(
+                    "ما قدرت أقرأ رقم الشقة من هذا الروم. افتح رابط الفريق وارفع الصور من هناك.",
+                    ephemeral=False)
+                return
+            report = await asyncio.to_thread(
+                _cleanproof_get_or_create_report,
+                lid,
+                date_iso,
+                str(interaction.user),
+                "discord",
+            )
+            _cleanproof_recount(report)
+            missing = _cleanproof_missing_required_labels(report, "ar")
+            _cleaning_reports[report["report_id"]] = report
+            _save_json("cleaning_reports.json", _cleaning_reports)
+            if missing:
+                _cleanproof_audit(
+                    report["report_id"],
+                    "discord_submit_blocked_missing_photos",
+                    str(interaction.user),
+                    report.get("status"),
+                    report.get("status"),
+                    ", ".join(missing),
+                )
+                missing_text = "، ".join(missing[:8])
+                if len(missing) > 8:
+                    missing_text += f" +{len(missing) - 8}"
+                await interaction.followup.send(
+                    "ما نقدر نرسلها للمراجعة لين تكتمل الصور المطلوبة.\n"
+                    f"الصور الناقصة: {missing_text}\n"
+                    "ارفع الصور من رابط الفريق لكل خانة، بعدها اضغط Submit for Review مرة ثانية.",
+                    ephemeral=False)
+                return
+            prev = report.get("status")
+            if prev not in ("manager_approved", "manager_rejected", "needs_reshoot"):
+                report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
+                report["updated_at"] = _cleanproof_now()
+                _cleaning_reports[report["report_id"]] = report
+                _save_json("cleaning_reports.json", _cleaning_reports)
+                _cleanproof_audit(
+                    report["report_id"],
+                    "report_submitted_from_discord",
+                    str(interaction.user),
+                    prev,
+                    report.get("status"),
+                    "Discord channel submit button",
+                )
+            ok, err = await _cleanproof_send_discord_review(report["report_id"])
+            if not ok:
+                await interaction.followup.send(
+                    "الصور مكتملة والتقرير محفوظ، بس ما قدرت أرسل كرت المراجعة في Discord. "
+                    f"السبب: {err or 'غير معروف'}",
+                    ephemeral=False)
+                return
+            _oujact_log_status(lid, date_iso, "done",
+                               "Submitted photo report for manager review",
+                               str(interaction.user))
+            # Close the dispatch loop for this unit/day only after the real
+            # photo report is complete and has been sent for manager review.
             _oujact_mark_done(key)
         except Exception as e:
-            print("submit-review mark error:", e)
+            print("submit-review error:", e)
+            await interaction.followup.send(f"صار خطأ أثناء إرسال تقرير الصور للمراجعة: {e}", ephemeral=False)
+            return
         try:
             if "cleaning-review:1" not in topic:
                 await ch.edit(topic=(topic + " cleaning-review:1").strip()[:1024])
         except Exception as e:
             print("submit-review topic error:", e)
+        await interaction.followup.send(
+            f"📷 تم إرسال تقرير الصور للمراجعة بواسطة {interaction.user.mention}. "
+            "الاعتماد يتم من أزرار Discord، والداشبورد يعرض نفس الحالة.",
+            ephemeral=False)
 
 def channel_name(internal_name):
     # Discord channel names must be lowercase, no spaces/symbols.
@@ -3292,6 +3357,23 @@ def _cleanproof_recount(report):
     report["all_required_complete"] = report["uploaded_required_slots_count"] >= report["required_slots_count"]
     return report
 
+def _cleanproof_missing_required_labels(report, lang="ar"):
+    """Manager/team-safe names for required photo slots that are still missing."""
+    key = "label_en" if lang == "en" else "label_ar"
+    uploaded = {
+        p.get("slot_id")
+        for p in _cleanproof_report_photos(report.get("report_id"))
+        if p.get("status") == "uploaded"
+    }
+    missing = []
+    for slot in (report.get("checklist_snapshot") or {}).get("slots", []):
+        if not slot.get("active") or not slot.get("required"):
+            continue
+        sid = slot.get("slot_id")
+        if sid not in uploaded:
+            missing.append(slot.get(key) or slot.get("label_ar") or slot.get("label_en") or sid or "photo")
+    return missing
+
 def _cleanproof_get_or_create_report(lid, date_iso, actor="", route_id=""):
     lid = int(lid)
     date_iso = str(date_iso or datetime.now(TZ).date().isoformat())[:10]
@@ -3646,9 +3728,11 @@ def _clean_ops_snapshot(team_lids):
             stage = "approved"
         elif rep_status in ("manager_rejected", "needs_reshoot"):
             stage = "redo"
-        elif rep_status in ("pending_manager_review", "submitted_for_review", "issue_found") or action == "done":
+        elif rep_status in ("pending_manager_review", "submitted_for_review", "issue_found"):
             stage = "review"
         elif action in ("started", "arrived"):
+            stage = "in_progress"
+        elif action == "done":
             stage = "in_progress"
         else:
             stage = "to_clean"
@@ -6323,7 +6407,35 @@ def _cleanproof_discord_embed(report):
     if report.get("manager_notes"):
         desc.append(f"**Manager notes:** {report.get('manager_notes')}")
     e = discord.Embed(title=title[:256], description="\n".join(desc)[:4000], color=color)
-    if photos:
+    photos_by_slot = {}
+    for photo in photos:
+        sid = photo.get("slot_id") or "photo"
+        photos_by_slot.setdefault(sid, []).append(photo)
+    shown = 0
+    for slot in sorted((report.get("checklist_snapshot") or {}).get("slots", []),
+                       key=lambda s: s.get("display_order") or 999):
+        if not slot.get("active"):
+            continue
+        sid = slot.get("slot_id") or ""
+        label = slot.get("label_ar") or slot.get("label_en") or sid or "Photo"
+        slot_photos = photos_by_slot.get(sid, [])
+        if slot_photos:
+            links = []
+            for i, photo in enumerate(slot_photos[:3], 1):
+                url = photo.get("drive_file_url") or photo.get("storage_url") or ""
+                if url:
+                    links.append(f"[صورة {i}]({url})")
+                else:
+                    links.append(f"صورة {i}")
+            more = f" +{len(slot_photos) - 3}" if len(slot_photos) > 3 else ""
+            value = "✅ " + " · ".join(links) + more
+        else:
+            value = "❌ ناقصة" if slot.get("required") else "اختيارية — لا توجد صورة"
+        e.add_field(name=label[:256], value=value[:1024], inline=True)
+        shown += 1
+        if shown >= 20:
+            break
+    if photos and not shown:
         sample = ", ".join((p.get("slot_id") or "") for p in photos[:6])
         e.add_field(name="Uploaded slots", value=sample or "—", inline=False)
     e.set_footer(text=f"report_id:{report.get('report_id')}")
@@ -6427,6 +6539,22 @@ async def _cleanproof_send_discord_review(report_id):
         ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
     if ch is None:
         return False, "channel_not_ready"
+    old_channel_id = report.get("discord_review_channel_id")
+    old_message_id = report.get("discord_review_message_id")
+    if old_channel_id and old_message_id:
+        try:
+            old_ch = bot.get_channel(int(old_channel_id))
+            if old_ch is None:
+                old_ch = await guild.fetch_channel(int(old_channel_id))
+            old_msg = await old_ch.fetch_message(int(old_message_id))
+            await old_msg.edit(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView())
+            _cleanproof_audit(report_id, "discord_review_updated", "bot",
+                              report.get("status"), report.get("status"),
+                              extra={"discord_channel_id": str(old_channel_id),
+                                     "discord_message_id": str(old_message_id)})
+            return True, ""
+        except Exception as e:
+            print("cleanproof review update fallback:", e)
     files = await asyncio.to_thread(_cleanproof_discord_files, report)
     try:
         msg = await ch.send(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView(), files=files)
@@ -33606,11 +33734,7 @@ async def _api_oujact_report_submit(request):
         report["issue_found"] = True
         report["issue_notes"] = (b.get("issue_notes") or "")[:500]
     if not report.get("all_required_complete"):
-        missing = []
-        uploaded = {p.get("slot_id") for p in _cleanproof_report_photos(report["report_id"]) if p.get("status") == "uploaded"}
-        for s in (report.get("checklist_snapshot") or {}).get("slots", []):
-            if s.get("active") and s.get("required") and s.get("slot_id") not in uploaded:
-                missing.append(s.get("label_ar") or s.get("slot_id"))
+        missing = _cleanproof_missing_required_labels(report, "ar")
         _cleaning_reports[report["report_id"]] = report
         _save_json("cleaning_reports.json", _cleaning_reports)
         return _json({"error": "missing_required_photos", "missing": missing,
