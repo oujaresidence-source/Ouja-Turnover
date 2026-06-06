@@ -12190,6 +12190,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_cc_sub">اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.</div>
           </div>
           <div class="page-tools">
+            <button class="btn primary sm" onclick="ccSendTodayReviews()">📨 <span id="t_cc_send_today_reviews">إرسال مراجعات اليوم إلى Discord</span></button>
             <button class="btn ghost sm" onclick="loadCleaningCenter(true)">↻ <span id="t_cc_refresh">تحديث</span></button>
           </div>
         </div>
@@ -13126,7 +13127,7 @@ const T = {
     cc_title:'🧭 مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
     cc_help_t:'🧭 تنظيف اليوم بدون تشتت', cc_help_b:'هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.',
     cc_today:'اليوم', cc_review:'مراجعة', cc_issues:'المشاكل', cc_teams:'الفرق', cc_quality:'الجودة', cc_deep:'التنظيف العميق', cc_settings:'الإعدادات',
-    cc_refresh:'تحديث', cc_last_updated:'آخر تحديث', cc_no_urgent:'ما فيه شيء عاجل حاليًا',
+    cc_refresh:'تحديث', cc_send_today_reviews:'إرسال مراجعات اليوم إلى Discord', cc_send_today_done:'تم إرسال {sent} مراجعة إلى Discord. تخطينا {skipped}، وفشل {failed}.', cc_send_today_failed:'ما قدرنا نرسل مراجعات اليوم إلى Discord', cc_last_updated:'آخر تحديث', cc_no_urgent:'ما فيه شيء عاجل حاليًا',
     cc_total_jobs:'تنظيفات اليوم', cc_same_day:'دخول اليوم', cc_needs_cleaning:'يحتاج تنظيف', cc_in_progress:'قيد التنفيذ', cc_pending_review:'بانتظار المراجعة', cc_approved:'معتمد', cc_late_risk:'متأخر/خطر', cc_missing_setup:'إعداد ناقص', cc_needs_reshoot:'يحتاج إعادة',
     cc_open_team_link:'افتح رابط الفريق', cc_track_progress:'تابع التقدم', cc_review_photos:'راجع الصور', cc_view_report:'عرض التقرير', cc_follow_reshoot:'متابعة الإعادة', cc_details:'تفاصيل',
     cc_no_jobs:'ما فيه تنظيفات اليوم', cc_no_reviews:'كل المراجعات مخلصة', cc_no_issues:'ما فيه مشاكل مفتوحة', cc_all_approved:'كل تنظيفات اليوم معتمدة',
@@ -13418,7 +13419,7 @@ const T = {
     cc_title:'🧭 Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
     cc_help_t:'🧭 Cleaning today without scatter', cc_help_b:'Managers can see what is urgent, started, waiting for review, and approved. A team submit is not final until a manager approves the photos.',
     cc_today:'Today', cc_review:'Review', cc_issues:'Issues', cc_teams:'Teams', cc_quality:'Quality', cc_deep:'Deep Clean', cc_settings:'Settings',
-    cc_refresh:'Refresh', cc_last_updated:'Last updated', cc_no_urgent:'Nothing urgent right now',
+    cc_refresh:'Refresh', cc_send_today_reviews:"Send today's reviews to Discord", cc_send_today_done:'Sent {sent} reviews to Discord. Skipped {skipped}, failed {failed}.', cc_send_today_failed:"Could not send today's reviews to Discord", cc_last_updated:'Last updated', cc_no_urgent:'Nothing urgent right now',
     cc_total_jobs:'Jobs today', cc_same_day:'Same-day check-ins', cc_needs_cleaning:'Needs cleaning', cc_in_progress:'In progress', cc_pending_review:'Pending review', cc_approved:'Approved', cc_late_risk:'Late/risk', cc_missing_setup:'Missing setup', cc_needs_reshoot:'Needs reshoot',
     cc_open_team_link:'Open team link', cc_track_progress:'Track progress', cc_review_photos:'Review photos', cc_view_report:'View report', cc_follow_reshoot:'Follow reshoot', cc_details:'Details',
     cc_no_jobs:'No cleaning jobs today', cc_no_reviews:'All reviews are done', cc_no_issues:'No open issues', cc_all_approved:'All cleaning jobs are approved',
@@ -14135,7 +14136,7 @@ function applyLang(){
     t_calendar:'calendar_title', t_calendar_sub:'calendar_sub',
     t_cal_events_legend:'cal_events_legend', t_bulk_title:'bulk_title',
     t_rev_pace:'rev_pace',
-    t_cc_title:'cc_title', t_cc_sub:'cc_sub', t_cc_refresh:'cc_refresh',
+    t_cc_title:'cc_title', t_cc_sub:'cc_sub', t_cc_refresh:'cc_refresh', t_cc_send_today_reviews:'cc_send_today_reviews',
     t_clean:'clean_title', t_clean_sub:'clean_sub', t_clean_link_title:'clean_link_title',
     cf_all:'clean_filter_all', cf_overdue:'clean_filter_overdue', cf_soon:'clean_filter_soon', cf_unsch:'clean_filter_unscheduled',
     t_guests:'guests_title', t_guests_sub:'guests_sub',
@@ -15209,6 +15210,20 @@ async function loadCleaningCenter(showToast){
   buildBottomNav();
   if(showToast) toast('✓ '+t().fresh);
 }
+async function ccSendTodayReviews(){
+  try{
+    var r = await post('/api/cleaning/reports/resend-today', {});
+    if(!r || r.error || r.ok===false) throw new Error((r && (r.error || r.message)) || 'send_failed');
+    var msg = ccL('cc_send_today_done')
+      .replace('{sent}', String(r.sent || 0))
+      .replace('{skipped}', String(r.skipped || 0))
+      .replace('{failed}', String(r.failed || 0));
+    toast('✓ '+msg);
+    await loadCleaningCenter(false);
+  }catch(e){
+    toast('⚠ '+ccL('cc_send_today_failed')+': '+(e && e.message ? e.message : e));
+  }
+}
 function ccSetView(v){ ccView = v || 'today'; ccFilter = 'all'; renderCleaningCenter(); }
 function ccSetFilter(f){ ccFilter = f || 'all'; renderCleaningCenter(); }
 function ccL(k){ return t()[k] || k; }
@@ -15375,6 +15390,8 @@ function renderCleaningCenter(){
   var nav = document.getElementById('cleanCenterMobileNav'); if(nav) nav.innerHTML = ccMobileNavHtml();
   var title = document.getElementById('t_cc_title'); if(title) title.textContent = ccL('cc_title');
   var sub = document.getElementById('t_cc_sub'); if(sub) sub.textContent = ccL('cc_sub');
+  var sendToday = document.getElementById('t_cc_send_today_reviews'); if(sendToday) sendToday.textContent = ccL('cc_send_today_reviews');
+  var refresh = document.getElementById('t_cc_refresh'); if(refresh) refresh.textContent = ccL('cc_refresh');
   var content = '';
   if(ccView==='review') content = ccReviewHtml();
   else if(ccView==='issues') content = ccIssuesHtml();
@@ -33782,6 +33799,46 @@ async def _api_cleaning_reports(request):
                               "drive_configured": _cleanproof_drive_configured(),
                               "warning": "" if _cleanproof_drive_configured() else "Google Drive is not configured. Local Railway disk must be backed by a mounted STATE_DIR volume."}})
 
+async def _api_cleaning_reports_resend_today(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    date_iso = str(b.get("date") or datetime.now(TZ).date().isoformat())[:10]
+    actor = _req_actor(request) or "dashboard"
+    review_statuses = {
+        "submitted_for_review",
+        "pending_manager_review",
+        "issue_found",
+        "needs_reshoot",
+    }
+    sent, skipped, failed = [], [], []
+    rows = [r for r in _cleaning_reports.values() if str(r.get("date") or "")[:10] == date_iso]
+    rows.sort(key=lambda r: (r.get("updated_at") or r.get("submitted_at") or ""), reverse=True)
+    for report in rows:
+        rid = report.get("report_id") or ""
+        _cleanproof_recount(report)
+        photos = [p for p in _cleanproof_report_photos(rid) if p.get("status") == "uploaded"]
+        status = report.get("status") or "draft"
+        if not photos:
+            skipped.append({"report_id": rid, "apartment": report.get("apartment_name"), "reason": "no_uploaded_photos"})
+            continue
+        if status not in review_statuses:
+            skipped.append({"report_id": rid, "apartment": report.get("apartment_name"), "reason": "not_waiting_for_review", "status": status})
+            continue
+        ok, err = await _cleanproof_send_discord_review(rid)
+        if ok:
+            sent.append({"report_id": rid, "apartment": report.get("apartment_name"), "photos": len(photos)})
+            _cleanproof_audit(rid, "discord_review_resend_today", actor, status, status,
+                              f"Resent review card to #{CLEANING_REVIEW_CHANNEL}",
+                              extra={"date": date_iso, "photos": len(photos)})
+        else:
+            failed.append({"report_id": rid, "apartment": report.get("apartment_name"), "error": err or "discord_send_failed"})
+            _cleanproof_audit(rid, "discord_review_resend_failed", actor, status, status,
+                              err or "discord_send_failed", extra={"date": date_iso})
+    return _json({"ok": True, "had_errors": bool(failed), "date": date_iso, "sent": len(sent), "skipped": len(skipped),
+                  "failed": len(failed), "items": sent, "skipped_items": skipped[:100],
+                  "errors": failed[:100], "channel": CLEANING_REVIEW_CHANNEL})
+
 async def _api_cleaning_report_decision(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -34542,6 +34599,7 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/insert", _api_cleaning_insert)
         app.router.add_post("/api/cleaning/reschedule-from", _api_cleaning_reschedule_from)
         app.router.add_get("/api/cleaning/reports", _api_cleaning_reports)
+        app.router.add_post("/api/cleaning/reports/resend-today", _api_cleaning_reports_resend_today)
         app.router.add_post("/api/cleaning/report-decision", _api_cleaning_report_decision)
         app.router.add_get("/api/cleaning/templates", _api_cleaning_templates)
         app.router.add_post("/api/cleaning/template-save", _api_cleaning_template_save)
