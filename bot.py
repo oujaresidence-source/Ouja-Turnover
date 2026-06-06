@@ -2755,7 +2755,8 @@ class CleaningDoneView(discord.ui.View):
             print("submit-review topic error:", e)
         await interaction.followup.send(
             f"📷 تم إرسال تقرير الصور للمراجعة بواسطة {interaction.user.mention}. "
-            "الاعتماد يتم من أزرار Discord، والداشبورد يعرض نفس الحالة.",
+            f"راح تلقاه في روم #{CLEANING_REVIEW_CHANNEL}. الاعتماد يتم من أزرار Discord هناك، "
+            "والداشبورد يعرض نفس الحالة.",
             ephemeral=False)
 
 def channel_name(internal_name):
@@ -6404,6 +6405,7 @@ def _cleanproof_discord_embed(report):
         desc.append(f"[Open Drive folder]({report.get('drive_folder_url')})")
     elif report.get("storage_provider") == "local_fallback":
         desc.append("Storage: local fallback under STATE_DIR. Drive is not configured.")
+    desc.append("راجع روابط الصور هنا، وبعدها اعتمد أو ارفض من أزرار Discord تحت.")
     if report.get("manager_notes"):
         desc.append(f"**Manager notes:** {report.get('manager_notes')}")
     e = discord.Embed(title=title[:256], description="\n".join(desc)[:4000], color=color)
@@ -6533,15 +6535,14 @@ async def _cleanproof_send_discord_review(report_id):
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return False, "guild_not_ready"
-    # Post into the apartment's OWN turnover channel; fall back to the shared review channel.
-    ch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
+    # Manager review is centralized in #oujact-review. Apartment turnover channels are
+    # execution-only; approving from scattered channels made today's reviews hard to find.
+    ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
     if ch is None:
-        ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
-    if ch is None:
-        return False, "channel_not_ready"
+        return False, "review_channel_not_ready"
     old_channel_id = report.get("discord_review_channel_id")
     old_message_id = report.get("discord_review_message_id")
-    if old_channel_id and old_message_id:
+    if old_channel_id and old_message_id and str(old_channel_id) == str(ch.id):
         try:
             old_ch = bot.get_channel(int(old_channel_id))
             if old_ch is None:
@@ -6555,6 +6556,13 @@ async def _cleanproof_send_discord_review(report_id):
             return True, ""
         except Exception as e:
             print("cleanproof review update fallback:", e)
+    elif old_channel_id and old_message_id:
+        _cleanproof_audit(report_id, "discord_review_rehomed", "bot",
+                          report.get("status"), report.get("status"),
+                          f"Review moved to #{CLEANING_REVIEW_CHANNEL}",
+                          extra={"old_channel_id": str(old_channel_id),
+                                 "old_message_id": str(old_message_id),
+                                 "new_channel_id": str(ch.id)})
     files = await asyncio.to_thread(_cleanproof_discord_files, report)
     try:
         msg = await ch.send(embed=_cleanproof_discord_embed(report), view=CleaningProofReviewView(), files=files)
