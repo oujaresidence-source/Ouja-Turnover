@@ -10615,7 +10615,7 @@ _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
     "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
-    "cleanteams", "clean_center",
+    "cleanteams", "clean_center", "plab",
 ]
 
 def _default_perms(role):
@@ -11962,6 +11962,22 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="aptBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ PRICING LAB · مختبر التسعير ============ -->
+      <section class="view" id="view_plab">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_plab">🧪 مختبر التسعير</div>
+            <div class="page-sub" id="t_plab_sub"></div>
+          </div>
+          <div class="page-tools">
+            <span id="plabGen" class="muted" style="font-size:11px"></span>
+            <button class="btn ghost sm" onclick="loadPlab(true)">↻ <span id="t_plab_regen">تحديث البيانات</span></button>
+          </div>
+        </div>
+        <div id="plabTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="plabBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ REVENUE VIEW ============ -->
       <section class="view" id="view_rev">
         <div class="page-head">
@@ -13161,6 +13177,16 @@ const T = {
     fin_needs_review:'يحتاج مراجعة', fin_save:'حفظ التعديل', fin_cancel:'إلغاء',
     fin_reason_req:'اكتب سبب تعديل المبلغ', fin_line_edit:'تعديل السطر', fin_amount:'المبلغ',
     fin_date:'التاريخ', fin_desc:'الوصف', fin_source_ha:'من Hostaway', fin_source_manual:'مُدخل يدويًا',
+    plab:'مختبر التسعير', plab_sub:'قرارات تسعير مبنية على بيانات عوجا — أساس محفوظ، تطبيق آمن، ورجوع بضغطة',
+    plab_decision:'لوحة القرار', plab_aptlab:'مختبر الشقق', plab_cal45:'تقويم ٤٥ يوم', plab_profile:'ملف الشقة',
+    plab_logtab:'سجل التطبيق والرجوع', plab_settings:'إعدادات السوق', plab_cur:'السعر الحالي', plab_reco:'السعر المقترح',
+    plab_orig:'السعر الأصلي', plab_reason:'سبب التوصية', plab_conf:'الثقة', plab_apply:'تطبيق يدوي',
+    plab_revert:'رجوع للسعر الأصلي', plab_synced:'تم التزامن ✓', plab_notsynced:'لم يتزامن', plab_thin:'البيانات قليلة',
+    plab_salary:'أيام الراتب', plab_latemonth:'آخر الشهر', plab_weekend:'الويكند', plab_changes:'سجل التغييرات',
+    plab_score:'قوة تسعير الشقة', plab_hold:'ثبّت', plab_raise:'ارفع', plab_lower:'نزّل', plab_floor:'حد أدنى',
+    plab_high:'عالية', plab_med:'متوسطة', plab_low:'منخفضة', plab_nodata:'لا بيانات كافية', plab_diff:'الفرق',
+    plab_exprev:'الإيراد المتوقع', plab_prob:'احتمال الحجز', plab_band:'نطاق السعر التاريخي', plab_booked:'انحجزت',
+    plab_preview:'معاينة', plab_action:'الإجراء', plab_lastgen:'آخر تحديث للبيانات', plab_regen:'تحديث البيانات',
     log_empty:'لا يوجد نشاط',
     fresh:'آخر تحديث', live:'مباشر',
     wrong:'رمز غير صحيح · Wrong token',
@@ -13443,6 +13469,16 @@ const T = {
     fin_needs_review:'Needs review', fin_save:'Save edit', fin_cancel:'Cancel',
     fin_reason_req:'Enter a reason for the amount change', fin_line_edit:'Edit line', fin_amount:'Amount',
     fin_date:'Date', fin_desc:'Description', fin_source_ha:'From Hostaway', fin_source_manual:'Manual entry',
+    plab:'Pricing Lab', plab_sub:'Data-backed pricing decisions from Ouja history — safe baseline, manual apply, one-click revert',
+    plab_decision:'Decision Board', plab_aptlab:'Apartment Lab', plab_cal45:'45-Day Calendar', plab_profile:'Unit Profile',
+    plab_logtab:'Apply & Revert Log', plab_settings:'Saudi Settings', plab_cur:'Current price', plab_reco:'Recommended',
+    plab_orig:'Original price', plab_reason:'Reason', plab_conf:'Confidence', plab_apply:'Manual apply',
+    plab_revert:'Revert to original', plab_synced:'Synced ✓', plab_notsynced:'Not synced', plab_thin:'Thin data',
+    plab_salary:'Salary days', plab_latemonth:'Late month', plab_weekend:'Weekend', plab_changes:'Change log',
+    plab_score:'Unit pricing power', plab_hold:'Hold', plab_raise:'Raise', plab_lower:'Lower', plab_floor:'Floor',
+    plab_high:'High', plab_med:'Medium', plab_low:'Low', plab_nodata:'Not enough data', plab_diff:'Difference',
+    plab_exprev:'Expected revenue', plab_prob:'Booking probability', plab_band:'Historical price band', plab_booked:'Booked',
+    plab_preview:'Preview', plab_action:'Action', plab_lastgen:'Data generated', plab_regen:'Refresh data',
     log_empty:'No activity',
     fresh:'Updated', live:'live',
     wrong:'Wrong token',
@@ -13950,6 +13986,7 @@ function applyLang(){
     t_inbox:'inbox', t_inbox_sub:'inbox_sub',
     t_today:'today', t_today_sub:'today_sub',
     t_pricing:'pricing', t_pr_sub:'pr_sub', t_pr_list:'pr_list', t_pr_total:'pr_total',
+    t_plab_sub:'plab_sub', t_plab_regen:'plab_regen',
     t_strat:'strat', t_strat_sub:'strat_sub',
     t_rev:'rev', t_rev_sub:'rev_sub', t_rev_month:'rev_month', t_rev_sal:'rev_sal', t_rev_units:'rev_units',
     t_log:'log', t_log_sub:'log_sub',
@@ -14048,6 +14085,7 @@ const NAV = [
   {id:'calendar',ic:'📅', tk:'calendar'},
   {id:'clean_center',ic:'🧭', tk:'clean_center', badge:'clean_center'},
   {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
+  {id:'plab',    ic:'🧪', tk:'plab'},
   {id:'strat',   ic:'⚡', tk:'strat'},
   {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
   {id:'cleanteams',ic:'🧽', tk:'cleanteams'},
@@ -14118,7 +14156,7 @@ function badgeInfo(key){
 const NAV_CATS = [
   {tk:'cat_overview', ids:['home']},
   {tk:'cat_ops',      ids:['inbox','calendar','clean_center','tickets','clean','cleanteams','listings','quality','pmo','design']},
-  {tk:'cat_pricing',  ids:['pricing','strat','rev','quote']},
+  {tk:'cat_pricing',  ids:['pricing','plab','strat','rev','quote']},
   {tk:'cat_finance',  ids:['expenses','finance','weekly']},
   {tk:'cat_guests',   ids:['guests','reviews']},
   {tk:'cat_system',   ids:['users','learn','log']}
@@ -14322,6 +14360,7 @@ function go(id){
   window.scrollTo({top:0});
   if(id==='today' && !D.tonight) loadTodayEmpty();
   if(id==='pricing' && (!D.pr || D.pr.loading)) loadPricing();
+  if(id==='plab') loadPlab();
   if(id==='strat' && !D.strat) loadStrategies();
   if(id==='rev' && (!D.rev || D.rev.loading)) loadRevenue();
   if(id==='log') renderLog();
@@ -21647,6 +21686,243 @@ async function finLineClear(kind, id){
   try{ await post('/api/finance/line-edit',{lid:r.lid,start:r.period.start,end:r.period.end,kind:kind,id:id,clear:true}); }catch(e){ toast('⚠'); return; }
   toast(L==='ar'?'رجع للأصل ✓':'Reverted ✓'); closeDrawer(); financeLoadReport();
 }
+/* ===== Pricing Lab (مختبر التسعير) — data-backed decision lab ===== */
+var _plab={tab:'decision', lid:null};
+function plabMoney(n){ return fmt(n)+' '+(L==='ar'?'ر.س':'SAR'); }
+function plabConf(c){ if(c==='high')return{t:t().plab_high,c:'#3e9665'}; if(c==='medium')return{t:t().plab_med,c:'#3b82c4'}; if(c==='low')return{t:t().plab_low,c:'var(--gold)'}; return{t:t().plab_nodata,c:'#8a8270'}; }
+function plabActionInfo(a){ var ar=(L==='ar');
+  if(a==='raise')return{t:t().plab_raise,c:'#3e9665',ic:'▲'};
+  if(a==='lower')return{t:t().plab_lower,c:'var(--down)',ic:'▼'};
+  if(a==='protect_floor')return{t:(ar?'حماية الحد':'protect floor'),c:'var(--gold)',ic:'⊥'};
+  if(a==='no_data')return{t:t().plab_nodata,c:'#8a8270',ic:'?'};
+  return{t:t().plab_hold,c:'#8a8270',ic:'='}; }
+async function loadPlab(force){
+  document.getElementById('t_plab').textContent='🧪 '+t().plab;
+  var sub=document.getElementById('t_plab_sub'); if(sub) sub.textContent=t().plab_sub;
+  var reg=document.getElementById('t_plab_regen'); if(reg) reg.textContent=t().plab_regen;
+  if(force) D.plab=null;
+  plabGo(_plab.tab);
+}
+function plabRenderTabs(){
+  var el=document.getElementById('plabTabs'); if(!el) return;
+  var tabs=[['decision','🎯',t().plab_decision],['apt','🏠',t().plab_aptlab],['cal','📅',t().plab_cal45],['profile','📋',t().plab_profile],['log','📜',t().plab_logtab],['settings','⚙️',t().plab_settings]];
+  el.innerHTML=tabs.map(function(x){ var on=(_plab.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="plabGo(&#39;'+x[0]+'&#39;)">'+x[1]+' '+esc(x[2])+'</button>'; }).join('');
+}
+function plabGo(tab){ _plab.tab=tab; plabRenderTabs(); var b=document.getElementById('plabBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
+  if(tab==='decision') plabDecision(); else if(tab==='apt') plabApt(); else if(tab==='cal') plabCal();
+  else if(tab==='profile') plabProfile(); else if(tab==='log') plabLogView(); else if(tab==='settings') plabSettings(); }
+async function plabUnits(){
+  if(D.plab&&D.plab.units) return D.plab.units;
+  try{ var d=await api('/api/plab/overview'); D.plab=D.plab||{}; D.plab.units=d.units||[]; D.plab.over=d; return D.plab.units; }catch(_){ return []; }
+}
+function plabAptSelect(){
+  var us=(D.plab&&D.plab.units)||[];
+  return '<select id="plabApt" onchange="_plab.lid=this.value;plabReloadApt()" style="padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;max-width:300px;font-family:inherit"><option value="">'+(L==='ar'?'— اختر شقة —':'— pick apartment —')+'</option>'+us.map(function(u){ return '<option value="'+u.lid+'"'+(String(_plab.lid)===String(u.lid)?' selected':'')+'>'+esc(u.name)+'</option>'; }).join('')+'</select>';
+}
+function plabReloadApt(){ if(_plab.tab==='apt') plabAptLoad(); else if(_plab.tab==='cal') plabCalLoad(); else if(_plab.tab==='profile') plabProfLoad(); }
+function plabStat(ic,n,lab){ return '<div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800">'+(n||0)+'</div><div class="muted" style="font-size:11px">'+ic+' '+esc(lab)+'</div></div>'; }
+/* ---- Decision Board ---- */
+async function plabDecision(){
+  var ar=(L==='ar'), b=document.getElementById('plabBody'); if(!b) return;
+  var d; try{ d=await api('/api/plab/overview'); }catch(_){ d=null; }
+  if(!d){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">⚠</div>'; return; }
+  D.plab=D.plab||{}; D.plab.units=d.units||[]; D.plab.over=d;
+  var m=d.meta||{}, o=d.outcomes||{}, gen=document.getElementById('plabGen');
+  if(gen) gen.textContent=(ar?'بيانات: ':'data: ')+(m.booked_nights||0)+(ar?' ليلة · ':' nights · ')+(m.reservations_analyzed||0)+(ar?' حجز':' res');
+  var card='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px';
+  var html='';
+  if(m.thin_units) html+='<div style="'+card+';border-color:var(--gold)">⚠ '+(ar?('بيانات قليلة لـ '+m.thin_units+' شقة — توصياتها بثقة منخفضة'):('thin data for '+m.thin_units+' units — low confidence'))+'</div>';
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+plabStat('🎯',(d.cards||[]).length,ar?'فرص للمراجعة':'opportunities')+plabStat('✅',o.booked_after_apply||0,ar?'طُبّق ثم انحجز':'applied then booked')+plabStat('⚠️',(d.failed||[]).length,ar?'يحتاج إجراء':'need action')+'</div>';
+  if((d.failed||[]).length){ html+='<div style="'+card+';border-color:var(--down)"><b style="color:var(--down)">'+(ar?'فشل تزامن/رجوع':'Failed sync/revert')+'</b>'+d.failed.map(function(s){ return '<div style="display:flex;justify-content:space-between;gap:8px;margin-top:6px"><span>'+esc(s.apartment)+' · '+esc(s.date)+'</span><button class="btn ghost xs" onclick="plabRevert(&#39;'+esc(s.snapshot_id)+'&#39;)">'+(ar?'حاول رجوع':'retry revert')+'</button></div>'; }).join('')+'</div>'; }
+  var cards=(d.cards||[]);
+  html+= cards.length ? ('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">'+cards.map(plabCardHtml).join('')+'</div>') : ('<div class="empty" style="padding:30px;text-align:center">'+(ar?'ما فيه فرص واضحة الحين 👍':'No clear opportunities right now 👍')+'</div>');
+  b.innerHTML=html;
+}
+function plabCardHtml(c){
+  var ar=(L==='ar'), a=plabActionInfo(c.action), cf=plabConf(c.confidence);
+  return '<div class="card" style="border-radius:12px;padding:13px">'
+    +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font-size:13px">'+esc(c.unit||c.lid)+'</b><span style="font-size:11px;color:'+a.c+';font-weight:700">'+a.ic+' '+esc(a.t)+'</span></div>'
+    +'<div class="muted" style="font-size:11px;margin:2px 0 8px">'+esc(c.date)+(c.dtype==='weekend'?(' · '+t().plab_weekend):'')+(c.salary_segment==='salary_window'?(' · '+t().plab_salary):'')+'</div>'
+    +'<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:8px;flex-wrap:wrap"><b>'+plabMoney(c.current)+'</b><span>→</span><b style="color:'+a.c+'">'+plabMoney(c.recommended)+'</b><span class="muted" style="font-size:10px">'+(c.delta_pct>0?'+':'')+c.delta_pct+'%</span></div>'
+    +'<div style="font-size:11.5px;margin-bottom:8px;line-height:1.6">'+esc(ar?c.reason_ar:c.reason_en)+'</div>'
+    +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="font-size:10px;color:'+cf.c+'">● '+esc(t().plab_conf)+': '+esc(cf.t)+'</span><button class="btn primary xs" onclick="plabPreview('+c.lid+',&#39;'+esc(c.date)+'&#39;)" style="margin-inline-start:auto">'+esc(t().plab_preview)+'</button></div></div>';
+}
+/* ---- Apartment Lab ---- */
+async function plabApt(){
+  var ar=(L==='ar'), b=document.getElementById('plabBody'); if(!b) return; await plabUnits();
+  b.innerHTML='<div style="margin-bottom:12px">'+plabAptSelect()+'</div><div id="plabAptBody">'+(_plab.lid?'<div class="empty sk">—</div>':('<div class="empty" style="padding:24px;text-align:center">'+(ar?'اختر شقة':'Pick an apartment')+'</div>'))+'</div>';
+  if(_plab.lid) plabAptLoad();
+}
+async function plabAptLoad(){
+  var ar=(L==='ar'), host=document.getElementById('plabAptBody'); if(!host||!_plab.lid) return;
+  host.innerHTML='<div class="empty sk">—</div>';
+  var d; try{ d=await api('/api/plab/apartment?lid='+encodeURIComponent(_plab.lid)); }catch(_){ d=null; }
+  if(!d||!d.apartment){ host.innerHTML='<div class="empty" style="padding:24px;text-align:center">⚠</div>'; return; }
+  D.plab.apt=d; var a=d.apartment, sal=a.salary||{};
+  var card='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px';
+  var stat=function(s){ return s?('<b>'+plabMoney(s.median)+'</b> <span class="muted" style="font-size:10px">('+s.n+')</span>'):'<span class="muted" style="font-size:11px">'+t().plab_nodata+'</span>'; };
+  var h='<div style="'+card+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><b>'+esc(a.name)+'</b><span class="muted" style="font-size:11px">'+a.n_nights+' '+(ar?'ليلة':'nights')+' · '+esc(plabConf(a.confidence).t)+(a.profile_score!=null?(' · '+t().plab_score+' '+a.profile_score):'')+'</span></div>'
+    +'<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;font-size:12.5px"><div>'+(ar?'وسيط ADR':'median')+': '+stat(a.overall)+'</div><div>'+t().plab_weekend+': '+stat(a.weekend)+'</div><div>'+(ar?'عادي':'weekday')+': '+stat(a.weekday)+'</div><div>'+t().plab_floor+': <b>'+(a.floor?plabMoney(a.floor):'—')+'</b></div></div></div>';
+  if((sal.answers||[]).length) h+='<div style="'+card+'"><b style="font-size:12.5px">'+t().plab_salary+'</b><div style="margin-top:6px;font-size:12px;line-height:1.8">'+sal.answers.map(function(x){return '• '+esc(ar?x[0]:x[1]);}).join('<br>')+'</div></div>';
+  h+='<div style="'+card+'"><b style="font-size:12.5px">'+(ar?'حسب فترة الشهر':'By month segment')+'</b><div style="margin-top:8px">'+(sal.segments||[]).map(function(sg){ return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><span>'+esc(ar?sg.label_ar:sg.label_en)+'</span><span>'+stat(sg.stats)+'</span></div>'; }).join('')+'</div></div>';
+  h+='<div style="'+card+'"><b style="font-size:12.5px">'+(ar?'حسب قرب التاريخ':'By lead time')+'</b><div style="margin-top:8px">'+(a.lead_bands||[]).map(function(lb){ return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><span>'+esc(lb.bucket)+'</span><span>'+stat(lb.stats)+'</span></div>'; }).join('')+'</div></div>';
+  var cmp=(d.comparables||{}).comparables||[];
+  if(cmp.length) h+='<div style="'+card+'"><b style="font-size:12.5px">'+(ar?'شقق مشابهة':'Comparable units')+'</b><div style="margin-top:8px">'+cmp.map(function(c){ return '<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between"><span>'+esc(c.name)+'</span><span>'+(c.median?plabMoney(c.median):'—')+'</span></div><div class="muted" style="font-size:10px">'+(c.why||[]).map(function(w){return esc(ar?w[0]:w[1]);}).join(' · ')+'</div></div>'; }).join('')+'</div></div>';
+  host.innerHTML=h;
+}
+/* ---- 45-Day Calendar ---- */
+async function plabCal(){
+  var ar=(L==='ar'), b=document.getElementById('plabBody'); if(!b) return; await plabUnits();
+  b.innerHTML='<div style="margin-bottom:12px">'+plabAptSelect()+'</div><div id="plabCalBody">'+(_plab.lid?'<div class="empty sk">—</div>':('<div class="empty" style="padding:24px;text-align:center">'+(ar?'اختر شقة':'Pick an apartment')+'</div>'))+'</div>';
+  if(_plab.lid) plabCalLoad();
+}
+async function plabCalLoad(){
+  var ar=(L==='ar'), host=document.getElementById('plabCalBody'); if(!host||!_plab.lid) return;
+  host.innerHTML='<div class="empty sk">—</div>';
+  var d; try{ d=await api('/api/plab/recs?lid='+encodeURIComponent(_plab.lid)); }catch(_){ d=null; }
+  var recs=(d&&d.recs)||[];
+  host.innerHTML= recs.length ? ('<div style="display:flex;flex-direction:column;gap:6px">'+recs.map(plabCalRow).join('')+'</div>') : ('<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه ليالٍ مفتوحة':'No open nights')+'</div>');
+}
+function plabCalRow(c){
+  var ar=(L==='ar'), a=plabActionInfo(c.action), cf=plabConf(c.confidence);
+  var dpct=(c.delta_pct!=null&&c.delta_pct!==0)?(' '+(c.delta_pct>0?'+':'')+c.delta_pct+'%'):'';
+  return '<div style="display:flex;gap:10px;align-items:center;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap">'
+    +'<div style="min-width:78px"><div style="font-size:12px;font-weight:600">'+esc(c.date.slice(5))+'</div><div class="muted" style="font-size:9.5px">'+(c.dtype==='weekend'?t().plab_weekend:'')+(c.salary_segment==='salary_window'?(' '+t().plab_salary):'')+'</div></div>'
+    +'<div style="min-width:74px;font-size:12px">'+plabMoney(c.current)+'</div><span style="color:'+a.c+'">'+a.ic+'</span>'
+    +'<div style="min-width:86px;font-size:12px;font-weight:700;color:'+a.c+'">'+plabMoney(c.recommended)+'<span class="muted" style="font-size:9.5px">'+dpct+'</span></div>'
+    +'<span style="font-size:9.5px;color:'+cf.c+'">● '+esc(cf.t)+'</span>'
+    +'<div class="muted" style="font-size:10.5px;flex:1;min-width:130px">'+esc(ar?c.reason_ar:c.reason_en)+'</div>'
+    +((c.action==='hold'||c.action==='no_data')?'':'<button class="btn primary xs" onclick="plabPreview('+c.lid+',&#39;'+esc(c.date)+'&#39;)">'+esc(t().plab_preview)+'</button>')+'</div>';
+}
+/* ---- Preview → manual apply → revert (sync-verified) ---- */
+async function plabPreview(lid,date){
+  var ar=(L==='ar'); var d; try{ d=await api('/api/plab/recs?lid='+encodeURIComponent(lid)); }catch(_){ d=null; }
+  var rec=((d&&d.recs)||[]).filter(function(r){return r.date===date;})[0];
+  if(!rec){ toast('⚠'); return; }
+  var lad; try{ lad=await api('/api/plab/ladder?lid='+encodeURIComponent(lid)+'&date='+encodeURIComponent(date)); }catch(_){ lad=null; }
+  var a=plabActionInfo(rec.action), cf=plabConf(rec.confidence);
+  openDrawer((ar?'معاينة تطبيق · ':'Preview · ')+esc(rec.unit||lid), esc(date));
+  var box='background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px;font-size:12.5px';
+  var row=function(l,v){ return '<div style="display:flex;justify-content:space-between"><span>'+l+'</span>'+v+'</div>'; };
+  var body='<div style="'+box+'">'+row(t().plab_cur,'<b>'+plabMoney(rec.current)+'</b>')+row(t().plab_reco,'<b style="color:'+a.c+'">'+plabMoney(rec.recommended)+'</b>')+row(t().plab_orig,'<b>'+(rec.current!=null?plabMoney(rec.current):'—')+'</b>')+row(t().plab_conf,'<span style="color:'+cf.c+'">'+esc(cf.t)+'</span>')+'</div>';
+  body+='<div style="'+box+'"><b>'+t().plab_reason+'</b><div style="margin-top:4px;line-height:1.6">'+esc(ar?rec.reason_ar:rec.reason_en)+'</div></div>';
+  if(rec.expected_revenue!=null) body+='<div style="'+box+'">'+t().plab_exprev+': <b>'+plabMoney(rec.expected_revenue)+'</b> <span class="muted" style="font-size:10px">('+t().plab_prob+' '+Math.round((rec.booking_prob||0)*100)+'%)</span></div>';
+  if(lad&&(lad.rungs||[]).length) body+='<div style="'+box+'"><b>'+(ar?'سلّم النزول حسب قرب التاريخ':'Step-down by lead')+'</b><div style="margin-top:6px">'+lad.rungs.map(function(r){ return '<div style="display:flex;justify-content:space-between;font-size:11.5px"><span>'+esc(r.bucket)+'</span><b>'+plabMoney(r.price)+'</b></div>'; }).join('')+'</div></div>';
+  body+='<div style="background:rgba(204,75,75,.08);border:1px solid var(--down);border-radius:8px;padding:9px;font-size:11.5px;color:var(--down)">'+(ar?'⚠ التطبيق يكتب السعر في Hostaway فعليًا — مع حفظ السعر الأصلي وإمكانية الرجوع.':'⚠ Applying writes to Hostaway for real — original is saved, revertible.')+'</div>';
+  setDrawerBody(body);
+  setDrawerFoot('<button class="btn primary sm" onclick="plabApply('+lid+',&#39;'+esc(date)+'&#39;,'+rec.recommended+')">'+t().plab_apply+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+}
+async function plabApply(lid,date,price){
+  var ar=(L==='ar');
+  if(!confirm(ar?('تطبيق '+plabMoney(price)+' ليوم '+date+' في Hostaway؟'):('Apply '+plabMoney(price)+' for '+date+'?'))) return;
+  toast(ar?'⏳ تطبيق + تأكد من التزامن…':'⏳ Applying + verifying…');
+  var r; try{ r=await post('/api/plab/apply',{lid:lid,date:date,price:price,reason:'Pricing Lab'}); }catch(_){ r=null; }
+  var res=(r&&r.results&&r.results[0])||{};
+  if(res.status==='synced') toast(t().plab_synced);
+  else if(res.status==='dry_run') toast(ar?'تجربة (DRY-RUN) — ما تغيّر شي':'Dry-run — nothing changed');
+  else if(res.status==='booked') toast(ar?'الليلة محجوزة':'Night booked');
+  else if(res.status==='below_floor') toast(ar?'أقل من الحد الأدنى':'Below floor');
+  else toast(t().plab_notsynced+(res.error?(' · '+res.error):''));
+  closeDrawer();
+  if(_plab.tab==='cal') plabCalLoad(); else plabDecision();
+}
+async function plabRevert(sid){
+  var ar=(L==='ar');
+  if(!confirm(ar?'رجوع للسعر الأصلي في Hostaway؟':'Revert to original in Hostaway?')) return;
+  toast(ar?'⏳ رجوع + تأكد…':'⏳ Reverting + verifying…');
+  var r; try{ r=await post('/api/plab/revert',{snapshot_id:sid}); }catch(_){ r=null; }
+  if(r&&(r.status==='synced'||r.status==='dry_run')) toast(t().plab_synced); else toast(t().plab_notsynced+((r&&r.error)?(' · '+r.error):''));
+  if(_plab.tab==='log') plabLogView(); else plabDecision();
+}
+/* ---- Unit Profile form ---- */
+var _PLAB_FORM=[['building_type','sel',['old building','average building','modern building','tower','residential complex','compound'],'نوع المبنى','Building type'],
+  ['overall_design','num',null,'التصميم العام ١-١٠','Overall design 1-10'],['luxury_feel','num',null,'الإحساس الفاخر ١-١٠','Luxury feel 1-10'],
+  ['first_photo','num',null,'قوة أول صورة ١-١٠','First-photo strength 1-10'],['photo_quality','num',null,'جودة الصور ١-١٠','Photo quality 1-10'],
+  ['living_design','num',null,'تصميم الصالة ١-١٠','Living-room design 1-10'],['sofa_quality','num',null,'جودة الكنب ١-١٠','Sofa quality 1-10'],
+  ['tv_quality','sel',['standard','smart','4k','premium large tv'],'جودة التلفزيون','TV quality'],['lighting','sel',['weak','good','hotel-like'],'الإضاءة','Lighting'],
+  ['bed_quality','num',null,'جودة السرير ١-١٠','Bed quality 1-10'],['mattress_quality','num',null,'جودة المرتبة ١-١٠','Mattress 1-10'],
+  ['bedroom_design','num',null,'تصميم غرفة النوم ١-١٠','Bedroom design 1-10'],['sleep_comfort','num',null,'راحة النوم ١-١٠','Sleep comfort 1-10'],
+  ['bathroom_condition','sel',['old','acceptable','modern','premium'],'حالة الحمام','Bathroom'],['kitchen_completeness','num',null,'اكتمال المطبخ ١-١٠','Kitchen 1-10'],
+  ['uniqueness','num',null,'التميّز ١-١٠','Uniqueness 1-10']];
+async function plabProfile(){
+  var ar=(L==='ar'), b=document.getElementById('plabBody'); if(!b) return; await plabUnits();
+  b.innerHTML='<div style="margin-bottom:12px">'+plabAptSelect()+'</div><div id="plabProfBody">'+(_plab.lid?'<div class="empty sk">—</div>':('<div class="empty" style="padding:24px;text-align:center">'+(ar?'اختر شقة':'Pick an apartment')+'</div>'))+'</div>';
+  if(_plab.lid) plabProfLoad();
+}
+async function plabProfLoad(){
+  var ar=(L==='ar'), host=document.getElementById('plabProfBody'); if(!host||!_plab.lid) return;
+  host.innerHTML='<div class="empty sk">—</div>';
+  var d; try{ d=await api('/api/plab/profile?lid='+encodeURIComponent(_plab.lid)); }catch(_){ d=null; }
+  var p=(d&&d.profile)||{};
+  var inp='width:100%;padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12.5px;font-family:inherit';
+  var fields=_PLAB_FORM.map(function(f){ var key=f[0], typ=f[1], opts=f[2], lab=(ar?f[3]:f[4]), cur=(p[key]!=null?p[key]:'');
+    var ctl;
+    if(typ==='sel'){ ctl='<select id="pf_'+key+'" style="'+inp+'"><option value="">—</option>'+opts.map(function(o){ return '<option value="'+o+'"'+(String(cur).toLowerCase()===o?' selected':'')+'>'+esc(o)+'</option>'; }).join('')+'</select>'; }
+    else { ctl='<input id="pf_'+key+'" type="number" min="1" max="10" step="1" value="'+esc(cur)+'" style="'+inp+'">'; }
+    return '<div><div class="muted" style="font-size:10.5px;margin-bottom:2px">'+esc(lab)+'</div>'+ctl+'</div>'; }).join('');
+  var scoreCol=(p.score!=null)?(p.score>=70?'#3e9665':(p.score>=45?'var(--gold)':'var(--down)')):'#8a8270';
+  host.innerHTML='<div class="card" style="border-radius:12px;padding:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><div style="font-size:11px" class="muted">'+t().plab_score+(p.score_overridden?(' ('+(ar?'يدوي':'manual')+')'):'')+'</div><div style="font-size:30px;font-weight:800;color:'+scoreCol+'">'+(p.score!=null?p.score:'—')+'</div></div>'
+    +'<div class="muted" style="font-size:11px;text-align:end">'+(ar?'اكتمال الملف':'completeness')+': <b>'+(p.completeness||0)+'%</b>'+(p.updated_at?('<br>'+(ar?'آخر تحديث ':'updated ')+esc((p.updated_at||'').slice(0,16).replace('T',' '))):'')+'</div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px">'+fields+'</div>'
+    +'<div style="margin-top:14px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:180px"><div class="muted" style="font-size:10.5px">'+(ar?'تجاوز يدوي للقوة (٠-١٠٠، اختياري)':'Manual override (0-100, optional)')+'</div><input id="pf_manual_override" type="number" min="0" max="100" value="'+esc(p.manual_override!=null?p.manual_override:'')+'" style="'+inp+'"></div>'
+    +'<button class="btn primary sm" onclick="plabProfSave()">'+(ar?'حفظ الملف':'Save profile')+'</button></div></div>';
+}
+async function plabProfSave(){
+  var ar=(L==='ar'), prof={};
+  _PLAB_FORM.forEach(function(f){ var el=document.getElementById('pf_'+f[0]); if(el&&el.value!=='') prof[f[0]]=(f[1]==='num'?Number(el.value):el.value); });
+  var ov=document.getElementById('pf_manual_override'); if(ov&&ov.value!=='') prof.manual_override=Number(ov.value);
+  var r; try{ r=await post('/api/plab/profile',{lid:Number(_plab.lid),profile:prof}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); plabProfLoad(); } else toast('⚠');
+}
+/* ---- Apply & Revert Log ---- */
+async function plabLogView(){
+  var ar=(L==='ar'), b=document.getElementById('plabBody'); if(!b) return;
+  var d; try{ d=await api('/api/plab/log'); }catch(_){ d=null; }
+  var rows=(d&&d.log)||[], o=(d&&d.outcomes)||{};
+  var head='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+plabStat('📦',o.applied||0,ar?'تطبيقات':'applied')+plabStat('✅',o.booked_after_apply||0,ar?'انحجزت بعده':'booked after')+plabStat('▲',o.raise_booked||0,ar?'رفع ثم حجز':'raise→booked')+'</div>';
+  if(!rows.length){ b.innerHTML=head+'<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه تطبيقات بعد':'No applies yet')+'</div>'; return; }
+  b.innerHTML=head+'<div style="display:flex;flex-direction:column;gap:6px">'+rows.map(function(s){
+    var st=s.status, col=(st==='applied'?'#3e9665':(st==='reverted'?'#8a8270':(st&&st.indexOf('fail')>=0?'var(--down)':'var(--gold)')));
+    var syn=(s.apply_status==='synced')?t().plab_synced:(s.apply_status==='dry_run'?'DRY-RUN':(s.apply_status?t().plab_notsynced:''));
+    var canRevert=(st==='applied');
+    return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>'+esc(s.apartment||s.lid)+' · '+esc(s.date)+'</b><span style="color:'+col+';font-weight:700">'+esc(st)+'</span></div>'
+      +'<div class="muted" style="font-size:11px;margin-top:3px">'+t().plab_orig+': '+plabMoney(s.original_hostaway_price)+' → '+t().plab_reco+': '+plabMoney(s.recommended_price)+(s.verified_price!=null?(' · '+(ar?'مؤكد':'verified')+': '+plabMoney(s.verified_price)):'')+(syn?(' · '+syn):'')+'</div>'
+      +(s.reason?('<div class="muted" style="font-size:10.5px;margin-top:2px">'+esc(s.reason)+'</div>'):'')
+      +(canRevert?('<div style="margin-top:6px"><button class="btn ghost xs" onclick="plabRevert(&#39;'+esc(s.snapshot_id)+'&#39;)">'+t().plab_revert+'</button></div>'):'')+'</div>'; }).join('')+'</div>';
+}
+/* ---- Saudi Demand Settings ---- */
+async function plabSettings(){
+  var ar=(L==='ar'), b=document.getElementById('plabBody'); if(!b) return;
+  var d; try{ d=await api('/api/plab/settings'); }catch(_){ d=null; }
+  var s=(d&&d.settings)||{};
+  var inp='width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit';
+  var lab='display:block;font-size:11px;color:#8a8270;margin-bottom:3px';
+  b.innerHTML='<div class="card" style="border-radius:12px;padding:16px;max-width:520px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div><label style="'+lab+'">'+(ar?'بداية أيام الراتب':'Salary window start')+'</label><input id="ps_start" type="number" min="20" max="31" value="'+esc(s.salary_start)+'" style="'+inp+'"></div>'
+    +'<div><label style="'+lab+'">'+(ar?'نهاية أيام الراتب':'Salary window end')+'</label><input id="ps_end" type="number" min="1" max="10" value="'+esc(s.salary_end)+'" style="'+inp+'"></div>'
+    +'<div><label style="'+lab+'">'+(ar?'أفق التوقع (يوم، حد أقصى ٦٠)':'Horizon (days, max 60)')+'</label><input id="ps_h" type="number" min="7" max="60" value="'+esc(s.horizon)+'" style="'+inp+'"></div>'
+    +'<div><label style="'+lab+'">'+(ar?'حد أدنى للبيانات':'Min data threshold')+'</label><input id="ps_min" type="number" min="3" max="30" value="'+esc(s.min_data)+'" style="'+inp+'"></div>'
+    +'</div>'
+    +'<div style="margin-top:12px"><label style="'+lab+'">'+(ar?'وزن تاريخ الشقة مقابل الشقق المشابهة':'Own history vs comparable weight')+' ('+Math.round((s.own_weight||0.7)*100)+'%)</label><input id="ps_w" type="range" min="0" max="100" value="'+Math.round((s.own_weight||0.7)*100)+'" style="width:100%"></div>'
+    +'<div style="margin-top:14px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:160px"><label style="'+lab+'">'+(ar?'حد أدنى لشقة (اختياري)':'Per-apartment floor (optional)')+'</label>'+plabAptSelect().replace('plabApt','psFloorApt').replace('plabReloadApt()','')+'</div><input id="ps_floor_val" type="number" min="0" placeholder="SAR" style="'+inp+';max-width:120px"><button class="btn ghost sm" onclick="plabSaveFloor()">'+(ar?'حفظ الحد':'Save floor')+'</button></div>'
+    +'<div style="margin-top:14px"><button class="btn primary sm" onclick="plabSaveSettings()">'+(ar?'حفظ الإعدادات':'Save settings')+'</button></div>'
+    +'<div class="muted" style="font-size:11px;margin-top:12px;line-height:1.7">'+(ar?'أيام الراتب الافتراضية ٢٧→١ · المصدر: بيانات عوجا في Hostaway فقط · التطبيق يدوي دائمًا.':'Default salary window 27→1 · source: Ouja Hostaway data only · apply is always manual.')+'</div></div>';
+}
+async function plabSaveSettings(){
+  var ar=(L==='ar');
+  var s={salary_start:Number((document.getElementById('ps_start')||{}).value),salary_end:Number((document.getElementById('ps_end')||{}).value),horizon:Number((document.getElementById('ps_h')||{}).value),min_data:Number((document.getElementById('ps_min')||{}).value),own_weight:Number((document.getElementById('ps_w')||{}).value)/100};
+  var r; try{ r=await post('/api/plab/settings',{settings:s}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); D.plab=null; } else toast('⚠');
+}
+async function plabSaveFloor(){
+  var ar=(L==='ar'), lid=(document.getElementById('psFloorApt')||{}).value, val=(document.getElementById('ps_floor_val')||{}).value;
+  if(!lid){ toast(ar?'اختر شقة':'Pick apartment'); return; }
+  var r; try{ r=await post('/api/plab/settings',{floor:{lid:Number(lid),value:Number(val)||0}}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); } else toast('⚠');
+}
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
 var _ctSel={};
 async function loadCleanTeams(){
@@ -25033,6 +25309,658 @@ def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None):
                 "confirmed": confirmed, "actual": actual, "status": (resp or {}).get("status")}
     except Exception as e:
         return {"ok": False, "error": str(e), "lid": lid, "date": date_iso, "price": price}
+
+# ====================================================================
+#  PRICING LAB (مختبر التسعير) — data-backed decision layer ON TOP of the
+#  engine. Phase 1: Ouja's own Hostaway data only · manual apply only ·
+#  IMMUTABLE baseline snapshots = the revert source of truth · sync-verified
+#  apply/revert · full audit. Reuses _pe_* (bands/recs), _pe_apply_night
+#  (the safe read-back writer) and log_price_change. NEVER auto-writes; NEVER fakes.
+# ====================================================================
+_plab_profiles  = _load_json("pricing_unit_profiles.json", {}) or {}   # str(lid) -> unit profile
+_plab_snapshots = _load_json("pricing_lab_snapshots.json", []) or []   # append-only IMMUTABLE
+_plab_settings  = _load_json("pricing_lab_settings.json", {}) or {}
+PLAB_DEFAULTS = {"salary_start": 27, "salary_end": 1, "horizon": 45, "own_weight": 0.7, "min_data": PE_MIN_UNIT}
+
+def _plab_settings_get():
+    s = dict(PLAB_DEFAULTS); s.update(_plab_settings or {}); return s
+def _plab_save_settings():   _save_json("pricing_lab_settings.json", _plab_settings)
+def _plab_save_profiles():   _save_json("pricing_unit_profiles.json", _plab_profiles)
+def _plab_save_snapshots():  _save_json("pricing_lab_snapshots.json", _plab_snapshots[-8000:])
+
+def _plab_salary_segment(date_iso, s=None):
+    """Saudi salary-cycle segment. salary_window wraps month-end (start..end-of-month OR 1..end)."""
+    d = _parse_date(date_iso)
+    if not d:
+        return None
+    s = s or _plab_settings_get()
+    dom = d.day
+    start = int(s.get("salary_start", 27)); end = int(s.get("salary_end", 1))
+    if dom >= start or dom <= end:
+        return "salary_window"
+    if 2 <= dom <= 10:
+        return "early_month"
+    if 11 <= dom <= 20:
+        return "mid_month"
+    return "late_month"
+
+def _plab_nights(lid=None):
+    """Enriched per-night dataset (salary segment + weekend + month) from the engine cache. R/O."""
+    c = _pe_get()
+    nights = (c.get("data") or {}).get("nights") or []
+    s = _plab_settings_get()
+    out = []
+    for n in nights:
+        if lid is not None and n.get("lid") != lid:
+            continue
+        out.append({**n, "salary_segment": _plab_salary_segment(n["date"], s),
+                    "weekend": (n.get("dtype") == "weekend"), "month": n["date"][:7]})
+    return out
+
+def _plab_dataset_meta(force=False):
+    """Coverage stats + cache. Honest about thin data — never hides gaps."""
+    from collections import defaultdict
+    c = _pe_get(force=force)
+    data = c.get("data") or {}
+    by_unit = defaultdict(int)
+    for n in (data.get("nights") or []):
+        by_unit[n.get("lid")] += 1
+    lm = get_listings_map() or {}
+    thin = sorted(lm.get(l, str(l)) for l, cnt in by_unit.items() if cnt < PE_MIN_UNIT and l in lm)
+    meta = {"generated_at": datetime.now(TZ).isoformat(timespec="minutes"),
+            "reservations_analyzed": data.get("n_confirmed", 0),
+            "booked_nights": data.get("n_used", 0), "apartments": len(by_unit),
+            "date_min": data.get("date_min"), "date_max": data.get("date_max"),
+            "thin_units": len(thin), "thin_names": thin[:25], "engine_error": c.get("error")}
+    try:
+        _save_json("pricing_lab_cache.json", meta)
+    except Exception:
+        pass
+    return meta
+
+def _plab_stat(adrs):
+    """min/median/avg/max/n for a list of ADRs (None if empty)."""
+    import statistics
+    a = [float(x) for x in adrs if isinstance(x, (int, float))]
+    if not a:
+        return None
+    a.sort()
+    return {"n": len(a), "min": round(a[0]), "max": round(a[-1]),
+            "median": round(statistics.median(a)), "avg": round(sum(a) / len(a))}
+
+_PLAB_SEG_LABEL = {"salary_window": ("أيام الراتب (٢٧–١)", "Salary window (27–1)"),
+                   "early_month": ("أول الشهر (٢–١٠)", "Early month (2–10)"),
+                   "mid_month": ("منتصف الشهر (١١–٢٠)", "Mid month (11–20)"),
+                   "late_month": ("آخر الشهر (٢١–٢٦)", "Late month (21–26)")}
+
+def _plab_salary(lid=None):
+    """Salary-cycle behaviour for one apartment (or the whole portfolio). Lets the DATA show
+    whether salary days lift demand — never assumes it. Returns per-segment ADR + uplift +
+    confidence + plain-Arabic answers."""
+    import statistics
+    nights = _plab_nights(lid)
+    by_seg = {}
+    for n in nights:
+        by_seg.setdefault(n["salary_segment"], []).append(n["adr"])
+    segs = []
+    for key, (ar, en) in _PLAB_SEG_LABEL.items():
+        st = _plab_stat(by_seg.get(key, []))
+        segs.append({"seg": key, "label_ar": ar, "label_en": en, "stats": st})
+    sal = by_seg.get("salary_window", [])
+    non = [a for k, v in by_seg.items() if k != "salary_window" for a in v]
+    uplift = (round(statistics.median(sal) / statistics.median(non), 3)
+              if sal and non and statistics.median(non) > 0 else None)
+    wknd_sal = [n["adr"] for n in nights if n["salary_segment"] == "salary_window" and n["weekend"]]
+    conf = "high" if len(sal) >= PE_EVENT_MIN and non else ("low" if sal else "none")
+    answers = []
+    if uplift is not None:
+        if uplift >= 1.05:
+            answers.append(("نعم، أيام الراتب ترفع الطلب لهالشقة (+%d%%)" % round((uplift - 1) * 100),
+                            "Yes — salary days lift demand here (+%d%%)" % round((uplift - 1) * 100)))
+        elif uplift <= 0.97:
+            answers.append(("أيام الراتب أضعف لهالشقة", "Salary days are weaker for this unit"))
+        else:
+            answers.append(("أيام الراتب تقريبًا نفس باقي الشهر", "Salary days are about the same"))
+    if conf != "high":
+        answers.append(("البيانات قليلة — التأثير غير مؤكد", "Thin data — effect not certain"))
+    return {"segments": segs, "salary_uplift": uplift, "salary_weekend_n": len(wknd_sal),
+            "confidence": conf, "answers": answers, "n_nights": len(nights)}
+
+def _plab_lead_bands(lid):
+    """Realized ADR by lead-time bucket for one unit."""
+    by = {}
+    for n in _plab_nights(lid):
+        by.setdefault(n["bucket"], []).append(n["adr"])
+    order = [lbl for _, _, lbl in PE_LEAD_BUCKETS]
+    return [{"bucket": b, "stats": _plab_stat(by.get(b, []))} for b in order]
+
+def _plab_price_bands(lid):
+    """Bucket realized booked ADR into bands; show which prices actually worked (+ thin flags)."""
+    import statistics
+    nights = _plab_nights(lid)
+    adrs = [n["adr"] for n in nights]
+    if not adrs:
+        return []
+    lo, hi = min(adrs), max(adrs)
+    if hi <= lo:
+        hi = lo + 1
+    step = max(50, round((hi - lo) / 5.0 / 50.0) * 50) or 50
+    bands = {}
+    for n in nights:
+        b0 = int(n["adr"] // step) * step
+        bands.setdefault(b0, []).append(n)
+    out = []
+    for b0 in sorted(bands):
+        ns = bands[b0]
+        leads = [x["lead"] for x in ns]
+        out.append({"range": [int(b0), int(b0 + step)], "nights": len(ns),
+                    "revenue": round(sum(x["adr"] for x in ns)),
+                    "median_lead": int(statistics.median(leads)) if leads else None,
+                    "thin": len(ns) < 3})
+    return out
+
+def _plab_apartment(lid):
+    """Apartment Lab: full historical readout for one unit (R/O, from the engine cache)."""
+    lm = get_listings_map() or {}
+    nights = _plab_nights(lid)
+    wkday = [n["adr"] for n in nights if not n["weekend"]]
+    wkend = [n["adr"] for n in nights if n["weekend"]]
+    overall = _plab_stat([n["adr"] for n in nights])
+    return {"lid": lid, "name": lm.get(lid, str(lid)),
+            "n_nights": len(nights), "overall": overall,
+            "weekday": _plab_stat(wkday), "weekend": _plab_stat(wkend),
+            "salary": _plab_salary(lid), "lead_bands": _plab_lead_bands(lid),
+            "price_bands": _plab_price_bands(lid),
+            "confidence": ("high" if len(nights) >= PE_MIN_UNIT else ("low" if nights else "none")),
+            "floor": _pe_floor_overrides.get(lid, 0) or 0,
+            "profile_score": (_plab_profiles.get(str(lid), {}) or {}).get("score")}
+
+# ---- Stage 6: Unit Profile (structured fillable intelligence) + Pricing Power Score ----
+_PLAB_SCORE_FIELDS = {            # field -> (weight, {value: 0..1})  → weighted 0..100
+    "building_type": (10, {"old building": 0.2, "average building": 0.5, "modern building": 0.8,
+                           "tower": 0.9, "residential complex": 0.85, "compound": 1.0}),
+    "living_design": (12, None), "sofa_quality": (6, None), "tv_quality": (6, {"standard": 0.4,
+                           "smart": 0.7, "4k": 0.9, "premium large tv": 1.0}),
+    "lighting": (5, {"weak": 0.3, "good": 0.7, "hotel-like": 1.0}),
+    "first_photo": (12, None), "bed_quality": (8, None), "mattress_quality": (7, None),
+    "bedroom_design": (6, None), "sleep_comfort": (6, None),
+    "bathroom_condition": (6, {"old": 0.2, "acceptable": 0.5, "modern": 0.85, "premium": 1.0}),
+    "kitchen_completeness": (5, None), "overall_design": (12, None), "luxury_feel": (10, None),
+    "uniqueness": (8, None), "photo_quality": (10, None)}
+
+def _plab_unit_score(profile):
+    """Pricing Power Score 0..100 from the filled fields; manual override wins if set."""
+    p = profile or {}
+    ov = p.get("manual_override")
+    if isinstance(ov, (int, float)) and 0 <= ov <= 100:
+        return int(round(ov)), True
+    num, den = 0.0, 0.0
+    for f, (w, vmap) in _PLAB_SCORE_FIELDS.items():
+        v = p.get(f)
+        if v is None or v == "":
+            continue
+        if vmap:
+            frac = vmap.get(str(v).strip().lower())
+            if frac is None:
+                continue
+        else:
+            try:
+                frac = max(0.0, min(1.0, float(v) / 10.0))   # 1..10 scored fields
+            except (TypeError, ValueError):
+                continue
+        num += w * frac; den += w
+    if den <= 0:
+        return None, False
+    return int(round(100.0 * num / den)), False
+
+def _plab_profile_completeness(profile):
+    p = profile or {}
+    keys = list(_PLAB_SCORE_FIELDS.keys())
+    filled = sum(1 for k in keys if p.get(k) not in (None, ""))
+    missing = [k for k in keys if p.get(k) in (None, "")]
+    return round(100.0 * filled / len(keys)), missing[:8]
+
+def _plab_profile_view(lid):
+    p = dict(_plab_profiles.get(str(lid), {}) or {})
+    score, overridden = _plab_unit_score(p)
+    comp, missing = _plab_profile_completeness(p)
+    p["score"] = score; p["score_overridden"] = overridden
+    p["completeness"] = comp; p["missing"] = missing
+    return p
+
+def _plab_comparables(lid, k=4):
+    """Closest comparables — NOT bedroom-only. Distance over (group, beds, type, score, design)."""
+    units = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
+    me = units.get(lid)
+    if not me:
+        return {"lid": lid, "comparables": []}
+    g_me = _pe_group_key(me)
+    s_me = (_plab_profiles.get(str(lid), {}) or {}).get("score")
+    s_me = _plab_unit_score(_plab_profiles.get(str(lid), {}))[0] if s_me is None else s_me
+    out = []
+    for oid, u in units.items():
+        if oid == lid:
+            continue
+        s_o = _plab_unit_score(_plab_profiles.get(str(oid), {}))[0]
+        dist = 0.0; why = []
+        if _pe_group_key(u) == g_me:
+            why.append(("نفس المجموعة/الحي", "same group/area"))
+        else:
+            dist += 2.0
+        if (u.get("bedrooms") or 0) != (me.get("bedrooms") or 0):
+            dist += 1.5
+        else:
+            why.append(("نفس عدد الغرف", "same bedrooms"))
+        if s_me is not None and s_o is not None:
+            dist += abs(s_me - s_o) / 100.0 * 2.0
+            if abs(s_me - s_o) <= 12:
+                why.append(("قوة تسعير متقاربة", "similar pricing power"))
+        else:
+            dist += 0.5
+        ap = _plab_apartment(oid)
+        out.append({"lid": oid, "name": ap["name"], "dist": round(dist, 2),
+                    "score": s_o, "median": (ap["overall"] or {}).get("median"),
+                    "weekend": (ap["weekend"] or {}).get("median"),
+                    "n_nights": ap["n_nights"], "why": why,
+                    "confidence": ap["confidence"]})
+    out.sort(key=lambda x: x["dist"])
+    return {"lid": lid, "name": (units.get(lid) or {}).get("name", str(lid)),
+            "score": s_me, "comparables": out[:k]}
+
+def _plab_reason(rec, seg):
+    """Plain AR+EN reason for one night's recommendation, from the engine signals."""
+    ar, en = [], []
+    bs = rec.get("band_source")
+    if bs == "unit":
+        ar.append("سعر مبني على تاريخ هالشقة"); en.append("based on this unit history")
+    elif bs in ("group", "unit-thin"):
+        ar.append("بيانات الشقة قليلة — استعنّا بشقق مشابهة"); en.append("thin unit data — used similar units")
+    elif bs == "event-est":
+        ar.append("تقدير لمناسبة"); en.append("event estimate")
+    elif rec.get("no_model"):
+        ar.append("ما فيه تاريخ كافٍ — ثبّتنا السعر الحالي"); en.append("no history yet — held current")
+    if rec.get("dtype") == "weekend":
+        ar.append("ويكند"); en.append("weekend")
+    if seg == "salary_window":
+        ar.append("أيام الراتب"); en.append("salary window")
+    elif seg == "late_month":
+        ar.append("آخر الشهر"); en.append("late month")
+    sig = rec.get("signal")
+    if sig == "behind":
+        ar.append("الحجز أبطأ من المعتاد — نزول محسوب"); en.append("pace behind — controlled step-down")
+    elif sig == "ahead":
+        ar.append("الحجز أسرع من المعتاد — نقدر نرفع"); en.append("pace ahead — room to raise")
+    if rec.get("pooled_capped"):
+        ar.append("محدود بأعلى سعر أثبتته الشقة"); en.append("capped at this unit proven max")
+    return " · ".join(ar), " · ".join(en)
+
+def _plab_action(rec):
+    if rec.get("no_model") or rec.get("confidence") == "none":
+        return "no_data"
+    d = rec.get("delta")
+    if d is None:
+        return "hold"
+    if rec.get("recommended") and rec.get("floor") and rec["recommended"] <= rec["floor"]:
+        return "protect_floor"
+    if d > 0:
+        return "raise"
+    if d < 0:
+        return "lower"
+    return "hold"
+
+def _plab_recommend(lid, horizon=None):
+    """45-day per-night recommendations for ONE unit — reuses the engine recs, adds action /
+    reason / confidence / salary segment / expected-revenue (price × historical fill at lead)."""
+    s = _plab_settings_get()
+    horizon = horizon or int(s.get("horizon", 45))
+    recs = (_pe_get_recs() or {}).get("recs") or []
+    out = []
+    for r in recs:
+        if r.get("lid") != lid or (r.get("days_out") or 0) > horizon:
+            continue
+        seg = _plab_salary_segment(r["date"], s)
+        ar, en = _plab_reason(r, seg)
+        prob = r.get("typical_occ")                 # historical fill rate at this lead (honest proxy)
+        exp_rev = (round(r["recommended"] * prob) if (prob is not None and r.get("recommended")) else None)
+        out.append({**r, "salary_segment": seg, "action": _plab_action(r),
+                    "reason_ar": ar, "reason_en": en, "booking_prob": prob, "expected_revenue": exp_rev})
+    out.sort(key=lambda r: r["date"])
+    return out
+
+def _plab_ladder(lid, date_iso):
+    """Per-night price LADDER across lead-time checkpoints (what the rec would be at each)."""
+    c = _pe_get()
+    models, pace = c.get("models") or {}, c.get("pace") or {}
+    units = {u["id"]: u for u in (_catalog_units or []) if u.get("id") is not None}
+    u = units.get(lid)
+    d = _parse_date(date_iso)
+    if not u or not d:
+        return {"error": "bad unit/date"}
+    g = _pe_group_key(u)
+    dtype, ev = _pe_date_type(d)
+    band, source = _pe_resolve_band(models, lid, g, dtype, ev)
+    cur = None
+    try:
+        cal = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+        for day in (cal.get("result") or []):
+            if day.get("date") == date_iso:
+                cur = day.get("price")
+    except Exception:
+        cur = None
+    if not band:
+        return {"lid": lid, "date": date_iso, "current": cur, "rungs": [], "note": "no_model"}
+    own_b = models["unit_bands"].get(f"{lid}||{dtype}")
+    floor = _pe_floor_overrides.get(lid, 0)
+    rungs = []
+    for _lo, _hi, lbl in PE_LEAD_BUCKETS:
+        probe = d - timedelta(days=_lo)            # simulate "today" at this checkpoint
+        r = _pe_reco_for_night(d, probe, dtype, ev, cur, band, source,
+                               models["events"].get(ev) if ev else None,
+                               pace.get(f"{g}||{dtype}"), None, floor,
+                               own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid))
+        if r:
+            rungs.append({"bucket": lbl, "lead": _lo, "price": r["recommended"]})
+    return {"lid": lid, "date": date_iso, "current": (int(round(cur)) if isinstance(cur, (int, float)) else None),
+            "floor": floor or 0, "band_source": source, "median": band.get("median"),
+            "ceiling": (rungs[0]["price"] if rungs else None), "rungs": rungs,
+            "risk_high": "لو ثبّتنا عالي ولم تنحجز قرب التاريخ، تروح الليلة فاضية",
+            "risk_low": "لو نزّلنا بدري، نخسر إيراد كان ممكن نمسكه"}
+
+# ---- Stages 10-14: immutable baseline snapshots + sync-verified apply/revert + outcomes ----
+def _plab_original_for(lid, date_iso, current_live):
+    """The IMMUTABLE original price for (lid,date): the earliest Pricing-Lab snapshot's original
+    if one exists, else the live price now (captured before our first write). Never overwritten."""
+    for s in _plab_snapshots:
+        if s.get("lid") == lid and s.get("date") == date_iso and s.get("original_hostaway_price") is not None:
+            return s["original_hostaway_price"]
+    return current_live
+
+def _plab_read_live(lid, date_iso):
+    try:
+        cal = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
+        for day in (cal.get("result") or []):
+            if day.get("date") == date_iso:
+                p = day.get("price")
+                avail = int(day.get("isAvailable", 0) or 0) == 1
+                booked = (not avail) or bool(day.get("reservationId"))
+                return (int(round(p)) if isinstance(p, (int, float)) else None), booked
+    except Exception as e:
+        print("plab read live:", e)
+    return None, None
+
+def _plab_apply_one(lid, date_iso, recommended, reason, by, floor=None):
+    """Manual apply for ONE night: capture immutable baseline → write via _pe_apply_night (which
+    reads the calendar back) → record verified sync status on the snapshot. Never fakes success."""
+    import uuid
+    current_live, booked = _plab_read_live(lid, date_iso)
+    if booked:
+        return {"ok": False, "status": "booked", "lid": lid, "date": date_iso}
+    if floor and recommended and int(recommended) < int(floor):
+        return {"ok": False, "status": "below_floor", "lid": lid, "date": date_iso, "floor": int(floor)}
+    original = _plab_original_for(lid, date_iso, current_live)
+    snap = {"snapshot_id": "plab-" + uuid.uuid4().hex[:12], "source": "pricing_lab",
+            "lid": lid, "apartment": (get_listings_map() or {}).get(lid, str(lid)), "date": date_iso,
+            "original_hostaway_price": original, "current_at_apply": current_live,
+            "recommended_price": int(recommended), "reason": reason or "", "manual_floor": (int(floor) if floor else None),
+            "created_at": datetime.now(TZ).isoformat(timespec="seconds"), "created_by": by or "",
+            "status": "applying", "requested_price": int(recommended), "verified_price": None,
+            "apply_status": None, "applied_at": None, "applied_by": by or "",
+            "reverted_at": None, "reverted_by": None, "revert_verified_price": None,
+            "booked": None, "booking_reservation_id": None, "outcome": "pending", "error": None}
+    if PRICE_APPLY_DRYRUN:
+        snap.update({"status": "preview", "apply_status": "dry_run"})
+        _plab_snapshots.append(snap); _plab_save_snapshots()
+        return {"ok": True, "status": "dry_run", **{k: snap[k] for k in ("snapshot_id", "lid", "date", "recommended_price")}}
+    res = _pe_apply_night(lid, date_iso, recommended, source="pricing_lab", reason=reason or "Pricing Lab apply", old=current_live)
+    verified, _b = _plab_read_live(lid, date_iso)                 # independent read-back
+    confirmed = bool(res.get("ok")) and verified is not None and abs(verified - int(recommended)) < 1
+    snap.update({"status": "applied" if confirmed else "failed",
+                 "apply_status": "synced" if confirmed else ("hostaway_error" if not res.get("ok") else "not_synced"),
+                 "verified_price": verified, "applied_at": datetime.now(TZ).isoformat(timespec="seconds"),
+                 "error": (None if res.get("ok") else res.get("error"))})
+    _plab_snapshots.append(snap); _plab_save_snapshots()
+    return {"ok": confirmed, "status": snap["apply_status"], "snapshot_id": snap["snapshot_id"],
+            "lid": lid, "date": date_iso, "requested": int(recommended), "verified": verified,
+            "original": original, "error": snap["error"]}
+
+def _plab_revert_one(snapshot_id, by=""):
+    """Revert using the snapshot's IMMUTABLE original price (never the current/changed value),
+    then read Hostaway back to verify."""
+    snap = next((s for s in _plab_snapshots if s.get("snapshot_id") == snapshot_id), None)
+    if not snap:
+        return {"ok": False, "error": "snapshot not found"}
+    lid, date_iso = snap["lid"], snap["date"]
+    original = snap.get("original_hostaway_price")
+    if original is None:
+        return {"ok": False, "error": "no original on snapshot"}
+    _cl, booked = _plab_read_live(lid, date_iso)
+    if booked:
+        return {"ok": False, "status": "booked", "snapshot_id": snapshot_id}
+    if PRICE_APPLY_DRYRUN:
+        snap.update({"status": "reverted", "revert_verified_price": original,
+                     "reverted_at": datetime.now(TZ).isoformat(timespec="seconds"), "reverted_by": by})
+        _plab_save_snapshots()
+        return {"ok": True, "status": "dry_run", "snapshot_id": snapshot_id}
+    res = _pe_apply_night(lid, date_iso, original, source="pricing_lab_revert",
+                          reason="Pricing Lab revert to original", old=snap.get("verified_price"))
+    verified, _b = _plab_read_live(lid, date_iso)
+    ok = bool(res.get("ok")) and verified is not None and abs(verified - int(original)) < 1
+    snap.update({"status": "reverted" if ok else "revert_failed",
+                 "revert_verified_price": verified, "reverted_at": datetime.now(TZ).isoformat(timespec="seconds"),
+                 "reverted_by": by, "error": (None if ok else (res.get("error") or "not synced"))})
+    _plab_save_snapshots()
+    return {"ok": ok, "status": ("synced" if ok else "not_synced"), "snapshot_id": snapshot_id,
+            "original": original, "verified": verified, "error": snap["error"]}
+
+def _plab_backfill_outcomes():
+    """If an applied night later books, record the outcome (correlation, NOT causation)."""
+    try:
+        booked = {}
+        for r in get_reservations_cached():
+            if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+                continue
+            lid = r.get("listingMapId"); ci = _parse_date(r.get("arrivalDate")); nn = _pe_res_nights(r)
+            if not ci or nn <= 0:
+                continue
+            for i in range(nn):
+                booked[(lid, (ci + timedelta(days=i)).isoformat())] = r.get("id")
+        changed = False
+        for s in _plab_snapshots:
+            if s.get("outcome") not in ("pending", None):
+                continue
+            rid = booked.get((s.get("lid"), s.get("date")))
+            if rid is not None:
+                s["booked"] = True; s["booking_reservation_id"] = rid
+                s["outcome"] = ("booked_after_revert" if s.get("status") == "reverted" else "booked_after_apply")
+                changed = True
+        if changed:
+            _plab_save_snapshots()
+    except Exception as e:
+        print("plab outcomes:", e)
+
+def _plab_outcomes_summary():
+    _plab_backfill_outcomes()
+    applied = [s for s in _plab_snapshots if s.get("status") in ("applied", "reverted")]
+    booked = [s for s in applied if s.get("booked")]
+    raised = [s for s in applied if (s.get("recommended_price") or 0) > (s.get("original_hostaway_price") or 0)]
+    raised_booked = [s for s in raised if s.get("booked")]
+    return {"applied": len(applied), "booked_after_apply": len([s for s in booked if s.get("outcome") == "booked_after_apply"]),
+            "not_booked": len([s for s in applied if not s.get("booked")]),
+            "raise_count": len(raised), "raise_booked": len(raised_booked),
+            "note_ar": "ارتبط بالحجز (مو بالضرورة السبب)", "note_en": "correlated with booking (not necessarily the cause)"}
+
+def _plab_log(filters=None):
+    f = filters or {}
+    rows = list(reversed(_plab_snapshots))
+    if f.get("lid"):
+        rows = [s for s in rows if str(s.get("lid")) == str(f["lid"])]
+    if f.get("status"):
+        rows = [s for s in rows if s.get("status") == f["status"]]
+    return rows[:300]
+
+def _plab_decision_board():
+    """The first screen: the few nights that deserve attention now (NOT every date)."""
+    s = _plab_settings_get()
+    recs = (_pe_get_recs() or {}).get("recs") or []
+    cards = []
+    for r in recs:
+        if r.get("no_model") or r.get("current") is None:
+            continue
+        seg = _plab_salary_segment(r["date"], s)
+        action = _plab_action(r); opp = r.get("opportunity") or 0
+        prio = opp
+        if r.get("confidence") == "high":
+            prio *= 1.5
+        if seg == "salary_window" and action == "raise":
+            prio *= 1.3
+        ar, en = _plab_reason(r, seg)
+        cards.append({**r, "action": action, "salary_segment": seg, "reason_ar": ar, "reason_en": en,
+                      "priority": round(prio, 1)})
+    cards = [c for c in cards if c["action"] in ("raise", "lower", "protect_floor") and c.get("opportunity", 0) >= 25]
+    cards.sort(key=lambda c: -c["priority"])
+    failed = [s for s in _plab_snapshots if s.get("status") in ("failed", "revert_failed")][-10:]
+    lm = get_listings_map() or {}
+    units = [{"lid": k, "name": v} for k, v in sorted(lm.items(), key=lambda x: x[1] or "")]
+    return {"cards": cards[:24], "failed": list(reversed(failed)), "units": units,
+            "meta": _plab_dataset_meta(), "outcomes": _plab_outcomes_summary()}
+
+# ---- Pricing Lab endpoints (all dash-auth gated; manual apply only; DRYRUN honored) ----
+async def _api_plab_overview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_plab_decision_board))
+
+async def _api_plab_apartment(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    return _json(await asyncio.to_thread(lambda: {"apartment": _plab_apartment(lid),
+                 "comparables": _plab_comparables(lid), "recs": _plab_recommend(lid),
+                 "profile": _plab_profile_view(lid)}))
+
+async def _api_plab_recs(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    return _json({"recs": await asyncio.to_thread(_plab_recommend, lid)})
+
+async def _api_plab_ladder(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        lid = int(request.query.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    return _json(await asyncio.to_thread(_plab_ladder, lid, (request.query.get("date") or "")[:10]))
+
+async def _api_plab_profile(request):
+    """GET ?lid → profile+score; POST {lid, profile} → save."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        try:
+            lid = int(request.query.get("lid"))
+        except (TypeError, ValueError):
+            return _json({"error": "bad lid"}, 400)
+        return _json({"ok": True, "profile": _plab_profile_view(lid),
+                      "fields": list(_PLAB_SCORE_FIELDS.keys())})
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    prof = b.get("profile") or {}
+    prof = {k: v for k, v in prof.items() if isinstance(k, str)}
+    prof["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    prof["updated_by"] = _req_actor(request)
+    prof["score"] = _plab_unit_score(prof)[0]
+    _plab_profiles[str(lid)] = prof
+    await asyncio.to_thread(_plab_save_profiles)
+    return _json({"ok": True, "profile": _plab_profile_view(lid)})
+
+async def _api_plab_settings(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        return _json({"ok": True, "settings": _plab_settings_get(),
+                      "floors": {str(k): v for k, v in _pe_floor_overrides.items()}})
+    b = await _read_body(request)
+    s = b.get("settings") or {}
+    for k in ("salary_start", "salary_end", "horizon", "min_data"):
+        if k in s:
+            try:
+                _plab_settings[k] = int(s[k])
+            except (TypeError, ValueError):
+                pass
+    if "own_weight" in s:
+        try:
+            _plab_settings["own_weight"] = max(0.0, min(1.0, float(s["own_weight"])))
+        except (TypeError, ValueError):
+            pass
+    if int(_plab_settings.get("horizon", 45)) > 60:
+        _plab_settings["horizon"] = 60                  # safety cap
+    if isinstance(b.get("floor"), dict):                # optional per-apartment manual floor
+        try:
+            lid = int(b["floor"].get("lid"))
+            fv = int(b["floor"].get("value") or 0)
+            if fv > 0:
+                _pe_floor_overrides[lid] = fv
+            else:
+                _pe_floor_overrides.pop(lid, None)
+        except (TypeError, ValueError):
+            pass
+    await asyncio.to_thread(_plab_save_settings)
+    return _json({"ok": True, "settings": _plab_settings_get()})
+
+async def _api_plab_apply(request):
+    """MANUAL apply — explicit scoped action. {lid, dates:[...], prices:{date:price} OR price, reason}.
+    Snapshot-first, sync-verified. Honors PRICE_APPLY_DRYRUN."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        lid = int(b.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"error": "bad lid"}, 400)
+    dates = b.get("dates") or ([b.get("date")] if b.get("date") else [])
+    prices = b.get("prices") if isinstance(b.get("prices"), dict) else {}
+    one_price = b.get("price")
+    by = _req_actor(request)
+    floor = _pe_floor_overrides.get(lid, 0) or None
+    results = []
+    for d in dates:
+        d = str(d)[:10]
+        if not _parse_date(d):
+            continue
+        price = prices.get(d, one_price)
+        try:
+            price = int(round(float(price)))
+        except (TypeError, ValueError):
+            results.append({"ok": False, "status": "bad_price", "date": d}); continue
+        results.append(await asyncio.to_thread(_plab_apply_one, lid, d, price, b.get("reason", ""), by, floor))
+    return _json({"ok": True, "dry_run": PRICE_APPLY_DRYRUN, "results": results})
+
+async def _api_plab_revert(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    sid = (b.get("snapshot_id") or "").strip()
+    if not sid:
+        return _json({"error": "missing snapshot_id"}, 400)
+    return _json(await asyncio.to_thread(_plab_revert_one, sid, _req_actor(request)))
+
+async def _api_plab_log(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    f = {"lid": request.query.get("lid"), "status": request.query.get("status")}
+    return _json({"ok": True, "log": await asyncio.to_thread(_plab_log, f),
+                  "outcomes": await asyncio.to_thread(_plab_outcomes_summary)})
 
 async def _api_pe_recs(request):
     if not _dash_auth(request):
@@ -33400,6 +34328,18 @@ async def start_web_server():
         app.router.add_get("/api/strategies", _api_strategies)
         app.router.add_get("/api/strategies/deep", _api_strategies_deep)
         app.router.add_get("/api/apartment/{lid}", _api_apartment)
+        # ---- Pricing Lab (مختبر التسعير) ----
+        app.router.add_get("/api/plab/overview", _api_plab_overview)
+        app.router.add_get("/api/plab/apartment", _api_plab_apartment)
+        app.router.add_get("/api/plab/recs", _api_plab_recs)
+        app.router.add_get("/api/plab/ladder", _api_plab_ladder)
+        app.router.add_get("/api/plab/profile", _api_plab_profile)
+        app.router.add_post("/api/plab/profile", _api_plab_profile)
+        app.router.add_get("/api/plab/settings", _api_plab_settings)
+        app.router.add_post("/api/plab/settings", _api_plab_settings)
+        app.router.add_post("/api/plab/apply", _api_plab_apply)
+        app.router.add_post("/api/plab/revert", _api_plab_revert)
+        app.router.add_get("/api/plab/log", _api_plab_log)
         app.router.add_post("/api/strategy/stop", _api_strategy_stop)
         app.router.add_get("/api/discount/status", _api_discount_status)
         app.router.add_post("/api/discount/pause", _api_discount_pause)
