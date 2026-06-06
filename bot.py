@@ -5,8 +5,8 @@ Ouja Turnover Bot
 =================
 Watches Hostaway for upcoming checkouts and, 12 hours before each one, opens a
 Discord channel named after the unit's internal name. The channel shows the
-guest name + checkout time and has a "✅ Cleaning Done" button. When a cleaner
-taps it, the channel is deleted instantly.
+guest name + checkout time and has a "📷 Submit for Review" button. When a cleaner
+taps it, the job is sent to manager review and dashboard approval remains required.
 
 Runs 24/7 (e.g. on Railway). All secrets come from environment variables —
 never hard-code them in this file.
@@ -182,7 +182,7 @@ WEEKEND_DISCOUNT_HOUR    = int(os.environ.get("WEEKEND_DISCOUNT_HOUR", "17"))
 WEEKEND_DISCOUNT_MINUTE  = int(os.environ.get("WEEKEND_DISCOUNT_MINUTE", "30"))  # 17:30 = 5:30 PM
 DISCOUNT_WEEKEND_SKIP_TIERS = os.environ.get("DISCOUNT_WEEKEND_SKIP_TIERS", "0") in ("1", "true", "True", "yes")
 
-# ---- cleaning reminders: nag the open turnover channels until ✅ Cleaning Done ----
+# ---- cleaning reminders: nag open turnover channels until work is submitted for review ----
 REMINDER_START_HOUR = int(os.environ.get("REMINDER_START_HOUR", "12"))  # start at 12 PM
 REMINDER_FAST_HOUR  = int(os.environ.get("REMINDER_FAST_HOUR", "15"))   # speed up at 3 PM
 REMINDER_END_HOUR   = int(os.environ.get("REMINDER_END_HOUR", "23"))    # stop at 11 PM
@@ -2667,22 +2667,31 @@ class CleaningDoneView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)   # persistent across restarts
 
-    @discord.ui.button(label="✅ Cleaning Done", style=discord.ButtonStyle.success,
+    @discord.ui.button(label="📷 Submit for Review", style=discord.ButtonStyle.success,
                        custom_id="ouja_cleaning_done")
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            f"✅ Marked done by {interaction.user.mention}. Closing this channel…",
+            f"📷 Submitted for manager review by {interaction.user.mention}. Approval is still required in the dashboard.",
             ephemeral=False)
         ch = interaction.channel
-        try:                                   # remember this unit+day is done so it never re-opens
-            _oujact_mark_done(parse_topic_oujact_key(getattr(ch, "topic", "") or ""))
-        except Exception as e:
-            print("mark-done error:", e)
-        await asyncio.sleep(2)
+        topic = getattr(ch, "topic", "") or ""
+        key = parse_topic_oujact_key(topic)
         try:
-            await ch.delete(reason=f"Cleaning completed by {interaction.user}")
+            if key:
+                lid, date_iso = key.split(":", 1)
+                _oujact_log_status(lid, date_iso, "done",
+                                   "Submitted from Discord for manager review",
+                                   str(interaction.user))
+            # Close the dispatch loop for this unit/day so Discord does not
+            # re-open or keep nagging. Dashboard report approval remains separate.
+            _oujact_mark_done(key)
         except Exception as e:
-            print("delete error:", e)
+            print("submit-review mark error:", e)
+        try:
+            if "cleaning-review:1" not in topic:
+                await ch.edit(topic=(topic + " cleaning-review:1").strip()[:1024])
+        except Exception as e:
+            print("submit-review topic error:", e)
 
 def channel_name(internal_name):
     # Discord channel names must be lowercase, no spaces/symbols.
@@ -2727,7 +2736,7 @@ def parse_topic_oujact_key(topic):
 
 def _oujact_mark_done(key):
     """Record that this unit+day's cleaning is finished/closed so the sync loop never re-opens
-    its channel (was the cause of channels 'popping back' after Cleaning Done)."""
+    its channel (was the cause of channels 'popping back' after cleaner submit)."""
     if not key:
         return
     _oujact_done[str(key)] = datetime.now(TZ).date().isoformat()
@@ -2830,7 +2839,7 @@ async def sync_checkouts():
             if emp:
                 embed.add_field(name="مسؤول التنظيف",
                                 value=(f"<@{did}> ({emp})" if did else emp), inline=False)
-            embed.set_footer(text="Tap the button below once cleaning is complete to close this channel.")
+            embed.set_footer(text="Tap the button below when photos/work are ready for manager review.")
 
             content = f"<@{did}> 🧹 وحدة جاهزة للتنظيف" if did else None
             await ch.send(content=content, embed=embed, view=CleaningDoneView(),
@@ -2863,7 +2872,7 @@ def _oujact_topic(it, team_name=""):
             ci=(1 if it["checkin_today"] else 0), tm=tm))
 
 def _oujact_card_embed(it, team_name=""):
-    """English turnover card for the in-house team. Reuses the ✅ Cleaning Done button."""
+    """English turnover card for the in-house team. Reuses the submit-for-review button."""
     e = discord.Embed(title="🧹 Turnover — Ready to Clean", color=GOLD)
     e.add_field(name="Unit", value=it["listing"], inline=False)
     if team_name:
@@ -2876,7 +2885,7 @@ def _oujact_card_embed(it, team_name=""):
         e.add_field(name="Status", value=f"🔴 CHECK-IN TODAY{when}", inline=True)
     link = it.get("directions_url")
     e.add_field(name="Directions", value=(link if link else "No link"), inline=False)
-    e.set_footer(text="Tap ✅ Cleaning Done when finished to close this channel.")
+    e.set_footer(text="Tap 📷 Submit for Review when photos/work are ready for manager review.")
     return e
 
 async def sync_oujact_turnovers(day=None):
@@ -3908,7 +3917,7 @@ _last_reminder = {}
 
 @tasks.loop(minutes=1)
 async def reminder_loop():
-    """Nag every open turnover channel until cleaning is marked done.
+    """Nag every open turnover channel until cleaning is submitted for review.
     12 PM–3 PM: every 30 min. After 3 PM: every 15 min. Quiet outside those hours."""
     now = datetime.now(TZ)
     hour = now.hour
@@ -3926,6 +3935,8 @@ async def reminder_loop():
     for ch in list(category.text_channels):
         if not parse_topic_res(ch.topic):
             continue                      # only turnover channels
+        if "cleaning-review:1" in (ch.topic or ""):
+            continue                      # cleaner submitted; manager review is tracked in dashboard
         if "oujact:1" in (ch.topic or ""):
             continue                      # in-house team channels: route page + photo flow handle it — no @mention nag
         live_ids.add(ch.id)
@@ -3941,7 +3952,7 @@ async def reminder_loop():
             mention = f"@{OPERATION_ROLE_NAME}"
         try:
             await ch.send(
-                f"{mention} ⏰ تذكير: هالوحدة لسه تحتاج تنظيف — اضغط ✅ Cleaning Done لما تخلص.",
+                f"{mention} ⏰ تذكير: هالوحدة لسه تحتاج تنظيف — اضغط 📷 Submit for Review إذا الصور والشغل جاهزة للمراجعة.",
                 allowed_mentions=discord.AllowedMentions(users=True, roles=True))
             _last_reminder[ch.id] = now
         except Exception as e:
