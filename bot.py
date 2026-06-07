@@ -32343,6 +32343,180 @@ def _fb_last_run(source):
     runs = [r for r in _fb_runs if r.get("source") == source]
     return runs[-1] if runs else None
 
+# ---- Stage 3: Daftra connector (READ-FIRST · graceful failure · never logs the API key) ----
+# NOTE: exact Daftra endpoint paths/auth depend on the live account; each call fails gracefully
+# (endpoint_not_found is tolerated) so a missing endpoint never crashes the import or fakes data.
+_DAFTRA_OBJECTS = [
+    ("accounts",     "/api2/account_lists", "الحسابات · chart of accounts"),
+    ("cost_centers", "/api2/cost_centers",  "مراكز التكلفة · cost centers"),
+    ("suppliers",    "/api2/suppliers",     "الموردين · suppliers"),
+    ("customers",    "/api2/clients",       "العملاء · customers"),
+    ("expenses",     "/api2/expenses",      "المصاريف · expenses"),
+    ("incomes",      "/api2/incomes",       "الإيرادات · incomes"),
+    ("journals",     "/api2/journals",      "القيود · journal entries"),
+    ("treasuries",   "/api2/treasuries",    "الخزائن · treasuries"),
+]
+
+def _daftra_configured():
+    return bool(DAFTRA_BASE_URL and DAFTRA_API_KEY)
+
+def _daftra_get(path, params=None, timeout=25):
+    """GET a Daftra endpoint → (data, error). Never raises; never logs/leaks the API key."""
+    if not _daftra_configured():
+        return None, "not_configured"
+    url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+    try:
+        r = requests.get(url, headers={"APIKEY": DAFTRA_API_KEY, "Accept": "application/json"},
+                         params=params or {}, timeout=timeout)
+        if r.status_code in (401, 403):
+            return None, "auth_rejected"
+        if r.status_code == 404:
+            return None, "endpoint_not_found"
+        r.raise_for_status()
+        try:
+            return r.json(), None
+        except Exception:
+            return None, "bad_json"
+    except requests.Timeout:
+        return None, "timeout"
+    except requests.RequestException as e:
+        msg = str(e)
+        if DAFTRA_API_KEY:
+            msg = msg.replace(DAFTRA_API_KEY, "••••")
+        return None, msg[:300]
+
+def _daftra_test_connection():
+    if not _daftra_configured():
+        return {"ok": False, "configured": False, "error": "not_configured"}
+    last_err = None
+    for path in ("/api2/account", "/api2/clients", "/api2/journals"):
+        data, err = _daftra_get(path, {"limit": 1})
+        if data is not None:
+            return {"ok": True, "configured": True, "probe": path,
+                    "base": DAFTRA_BASE_URL, "key": _fb_mask_key(DAFTRA_API_KEY)}
+        if err and err != "endpoint_not_found":
+            last_err = err
+    return {"ok": False, "configured": True, "base": DAFTRA_BASE_URL, "key": _fb_mask_key(DAFTRA_API_KEY),
+            "error": last_err or "no_known_endpoint_responded"}
+
+def _daftra_extract_list(data):
+    """Daftra responses vary ({data:[…]}/{result:[…]}/[…]/{data:{items:[…]}}) — normalize to a list."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for k in ("data", "result", "items", "rows"):
+            v = data.get(k)
+            if isinstance(v, list):
+                return v
+            if isinstance(v, dict):
+                for kk in ("items", "data", "rows"):
+                    if isinstance(v.get(kk), list):
+                        return v[kk]
+    return []
+
+def _daftra_item_fields(obj_type, it):
+    if not isinstance(it, dict):
+        return {}
+    core = it
+    for k in ((obj_type[:-1] if obj_type.endswith("s") else obj_type), obj_type):
+        if isinstance(it.get(k), dict):
+            core = it[k]
+            break
+    sid = core.get("id") or core.get("code") or it.get("id")
+    name = (core.get("name") or core.get("title") or core.get("business_name") or core.get("staff_name")
+            or core.get("client_business_name") or core.get("description") or "")
+    return {"id": sid, "name": str(name)[:200], "code": core.get("code"),
+            "amount": core.get("amount") or core.get("total") or core.get("value"),
+            "date": core.get("date") or core.get("created") or core.get("transaction_date")}
+
+def _daftra_upsert(obj_type, it):
+    """Idempotent upsert keyed by (source_type, source_id) with a checksum for change detection."""
+    f = _daftra_item_fields(obj_type, it)
+    if f.get("id") is None:
+        return None
+    key = f"{obj_type}:{f['id']}"
+    payload = json.dumps(it, ensure_ascii=False, sort_keys=True)[:20000]
+    h = hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    rec = _fb_external.get(key)
+    amt = (_fb_money_str(f["amount"]) if f.get("amount") is not None else None)
+    if rec:
+        changed = rec.get("source_hash") != h
+        rec.update({"display_name": f["name"], "code": f.get("code"), "amount": amt, "date": f.get("date"),
+                    "last_seen_at": now, "source_payload": it, "source_hash": h,
+                    "sync_status": ("changed" if changed else "imported")})
+        return "updated" if changed else "seen"
+    _fb_external[key] = {"id": key, "source": "daftra", "source_type": obj_type, "source_id": str(f["id"]),
+                         "display_name": f["name"], "code": f.get("code"), "amount": amt, "date": f.get("date"),
+                         "source_payload": it, "source_hash": h, "imported_at": now, "last_seen_at": now,
+                         "sync_status": "imported", "sync_error": ""}
+    return "imported"
+
+def _daftra_import_all(actor=""):
+    run = _fb_run_start("daftra", actor=actor)
+    if not _daftra_configured():
+        _fb_run_finish(run, "failed", error="not_configured")
+        return {"ok": False, "error": "not_configured", "run": run}
+    imp = upd = fail = 0
+    per, errors = {}, []
+    for obj_type, path, label in _DAFTRA_OBJECTS:
+        params = {"limit": 200}
+        if DAFTRA_IMPORT_START_DATE and obj_type in ("expenses", "incomes", "journals"):
+            params["from_date"] = DAFTRA_IMPORT_START_DATE
+        data, err = _daftra_get(path, params)
+        if err == "endpoint_not_found":
+            per[obj_type] = {"label": label, "status": "endpoint_not_available", "count": 0}
+            continue
+        if err:
+            fail += 1
+            per[obj_type] = {"label": label, "status": "error", "error": err, "count": 0}
+            errors.append(f"{obj_type}:{err}")
+            continue
+        items = _daftra_extract_list(data)
+        ci = cu = 0
+        for it in items:
+            r = _daftra_upsert(obj_type, it)
+            if r == "imported":
+                imp += 1; ci += 1
+            elif r == "updated":
+                upd += 1; cu += 1
+        per[obj_type] = {"label": label, "status": "ok", "count": len(items), "imported": ci, "updated": cu}
+    _fb_save("finance_external_records.json", _fb_external)
+    _fb_run_finish(run, ("done" if not errors else "partial"), imported=imp, updated=upd, failed=fail,
+                   error="؛ ".join(errors)[:600])
+    _fb_audit_add(actor, "daftra_import", "import_run", run["id"],
+                  after={"imported": imp, "updated": upd, "failed": fail})
+    return {"ok": True, "run": run, "per_object": per, "imported": imp, "updated": upd, "failed": fail}
+
+def _daftra_counts():
+    from collections import defaultdict
+    c = defaultdict(int)
+    for rec in _fb_external.values():
+        c[rec.get("source_type")] += 1
+    return dict(c)
+
+def _fb_daftra_overview():
+    return {"configured": _daftra_configured(), "base": (DAFTRA_BASE_URL or ""),
+            "key_mask": _fb_mask_key(DAFTRA_API_KEY), "post_enabled": DAFTRA_POST_ENABLED,
+            "counts": _daftra_counts(), "labels": {o[0]: o[2] for o in _DAFTRA_OBJECTS},
+            "last_run": _fb_last_run("daftra"), "total_records": len(_fb_external),
+            "changed": sum(1 for r in _fb_external.values() if r.get("sync_status") == "changed")}
+
+async def _api_fb_daftra(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "overview": _fb_daftra_overview()})
+
+async def _api_fb_daftra_test(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json(await asyncio.to_thread(_daftra_test_connection))
+
+async def _api_fb_daftra_import(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json(await asyncio.to_thread(_daftra_import_all, _req_actor(request)))
+
 def _pmo_task_view(t):
     return {
         "id": t.get("id"), "name": t.get("name", ""), "room": t.get("room") or "عام",
