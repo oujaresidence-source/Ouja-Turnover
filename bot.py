@@ -22358,6 +22358,28 @@ async function fbPullRevenue(){
   if(r&&r.ok){ toast((ar?'✓ تم سحب ':'✓ pulled ')+(r.reservations||0)+(ar?' حجز':' reservations')); fbGo(_fb.tab); }
   else toast((r&&(r.error||r.detail))||'⚠');
 }
+function fbPeriodQS(){ var p=_fb.period||{}; if(p.start&&p.end) return '&start='+encodeURIComponent(p.start)+'&end='+encodeURIComponent(p.end); if(p.month) return '&month='+encodeURIComponent(p.month); return ''; }
+function fbPeriodBar(){
+  var ar=(L==='ar'), p=_fb.period||{};
+  var inp='padding:6px 8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;font-family:inherit';
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">'
+    +'<div><div class="muted" style="font-size:10px;margin-bottom:2px">'+(ar?'الشهر':'Month')+'</div><input type="month" id="fbPMonth" value="'+esc(p.month||'')+'" style="'+inp+'"></div>'
+    +'<div style="align-self:center;color:var(--mut);font-size:11px;padding:0 2px">'+(ar?'أو':'or')+'</div>'
+    +'<div><div class="muted" style="font-size:10px;margin-bottom:2px">'+(ar?'من':'From')+'</div><input type="date" id="fbPFrom" value="'+esc(p.start||'')+'" style="'+inp+'"></div>'
+    +'<div><div class="muted" style="font-size:10px;margin-bottom:2px">'+(ar?'إلى':'To')+'</div><input type="date" id="fbPTo" value="'+esc(p.end||'')+'" style="'+inp+'"></div>'
+    +'<button class="btn primary sm" onclick="fbApplyPeriod()">'+(ar?'تطبيق':'Apply')+'</button>'
+    +'<button class="btn ghost sm" onclick="fbResetPeriod()">'+(ar?'الشهر الحالي':'This month')+'</button></div>';
+}
+function fbApplyPeriod(){
+  var ar=(L==='ar'); var mo=document.getElementById('fbPMonth'), fr=document.getElementById('fbPFrom'), to=document.getElementById('fbPTo');
+  var f=(fr&&fr.value)||'', t=(to&&to.value)||'', m=(mo&&mo.value)||'';
+  if(f&&t){ if(f>t){ toast(ar?'«من» بعد «إلى»':'From is after To'); return; } _fb.period={start:f,end:t}; }
+  else if(f||t){ toast(ar?'حدد التاريخين من وإلى':'Set both From and To'); return; }
+  else if(m){ _fb.period={month:m}; }
+  else { _fb.period={}; }
+  fbGo(_fb.tab);
+}
+function fbResetPeriod(){ _fb.period={}; fbGo(_fb.tab); }
 function fbProfitRow(x){
   var ar=(L==='ar'), linked=x.revenue_connected;
   var rev=linked?('<span style="font-size:11.5px">'+(ar?'إيراد ':'rev ')+'<b>'+fbMoney(x.revenue)+'</b></span>'+(x.ouja_fee!=null?('<span style="font-size:11.5px;color:#3e9665">'+(ar?'عوجا ':'ouja ')+fbMoney(x.ouja_fee)+'</span>'):'')):fbChip(ar?'غير مربوط':'not linked','warn');
@@ -22370,9 +22392,9 @@ function fbProfitRow(x){
     +'<span class="muted" style="font-size:10.5px">'+esc(x.unit_type||'')+(x.ouja_percentage!=null?(' · '+x.ouja_percentage+'%'):'')+'</span>'
     +rev+'<span style="font-size:11.5px">'+(ar?'مصاريف ':'exp ')+fbMoney(x.expenses)+'</span>'+resv+warn+miss+flags+'</div>';
 }
-async function fbUnitP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=unit'); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
+async function fbUnitP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=unit'+fbPeriodQS()); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
   var u=(d&&d.units)||[];
-  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏠 '+(ar?'ربحية الشقق':'Unit profitability')+'</b><button class="btn primary sm" onclick="fbPullRevenue()">'+(ar?'⟳ اسحب الإيرادات':'⟳ Pull revenue')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'+(ar?d.note_ar:d.note_en)+(d.pulled_at?('<br>'+(ar?'آخر سحب: ':'pulled: ')+esc(d.pulled_at)):'')+'</div></div>';
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏠 '+(ar?'ربحية الشقق':'Unit profitability')+' <span class="muted" style="font-size:11px;font-weight:600">'+esc(d.period_label||'')+'</span></b><button class="btn primary sm" onclick="fbPullRevenue()">'+(ar?'⟳ اسحب الإيرادات':'⟳ Pull revenue')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'+(ar?d.note_ar:d.note_en)+(d.pulled_at?('<br>'+(ar?'آخر سحب: ':'pulled: ')+esc(d.pulled_at)):'')+'</div>'+fbPeriodBar()+'</div>';
   if(!u.length){ h+='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ارفع ملف العقود أول':'Upload the contracts file first')+'</div>'; b.innerHTML=h; return; }
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:8px">'
     +fbStatCard(ar?'إجمالي الإيراد':'Total revenue',fbMoney(d.total_revenue),'var(--text)')
@@ -22382,10 +22404,10 @@ async function fbUnitP(){ var ar=(L==='ar'), b=document.getElementById('fbBody')
   h+='<div style="display:flex;flex-direction:column;gap:6px">'+u.map(fbProfitRow).join('')+'</div>';
   b.innerHTML=h;
 }
-async function fbCompanyP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=company'); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
+async function fbCompanyP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=company'+fbPeriodQS()); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
   var cov=(d&&d.coverage)||{}, conn=d.revenue_connected;
   var net=d.ouja_net||'0.00', negative=(String(net).indexOf('-')===0);
-  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏢 '+(ar?'ربحية الشركة':'Company profitability')+'</b><button class="btn primary sm" onclick="fbPullRevenue()">'+(ar?'⟳ اسحب الإيرادات':'⟳ Pull revenue')+'</button></div><div style="font-size:12px;margin-top:6px;color:'+(conn?'var(--text)':'var(--gold)')+'">'+(conn?'':'⚠ ')+esc(ar?d.revenue_note_ar:d.revenue_note_en)+(d.pulled_at?(' · '+(ar?'آخر سحب ':'pulled ')+esc(d.pulled_at)):'')+'</div></div>';
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏢 '+(ar?'ربحية الشركة':'Company profitability')+' <span class="muted" style="font-size:11px;font-weight:600">'+esc(d.period_label||'')+'</span></b><button class="btn primary sm" onclick="fbPullRevenue()">'+(ar?'⟳ اسحب الإيرادات':'⟳ Pull revenue')+'</button></div><div style="font-size:12px;margin-top:6px;color:'+(conn?'var(--text)':'var(--gold)')+'">'+(conn?'':'⚠ ')+esc(ar?d.revenue_note_ar:d.revenue_note_en)+(d.pulled_at?(' · '+(ar?'آخر سحب ':'pulled ')+esc(d.pulled_at)):'')+'</div>'+fbPeriodBar()+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
     +fbStatCard(ar?'إيراد المحفظة':'Portfolio revenue',fbMoney(d.portfolio_revenue),'var(--text)')
     +fbStatCard(ar?'دخل عوجا':'Ouja income',fbMoney(d.ouja_income),'#3e9665')
@@ -33654,6 +33676,21 @@ def _fb_month_range(month):
     end = (date(y, 12, 31) if m == 12 else date(y, m + 1, 1) - timedelta(days=1))
     return start, end
 
+def _fb_period(month=None, dstart=None, dend=None):
+    """Resolve the reporting period. A custom start+end (YYYY-MM-DD) wins; else a month
+    ('YYYY-MM'); else the current month. Returns (start_date, end_date, human_label)."""
+    def pd(s):
+        try:
+            return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+    s, e = pd(dstart), pd(dend)
+    if s and e and s <= e:
+        return s, e, (s.isoformat() + " → " + e.isoformat())
+    mlabel = month or datetime.now(TZ).strftime("%Y-%m")
+    st, en = _fb_month_range(month)
+    return st, en, mlabel
+
 def _fb_tokens(s):
     return [tok for tok in re.split(r"[^0-9a-z؀-ۿ]+", str(s or "").lower()) if tok]
 
@@ -33688,9 +33725,8 @@ def _fb_profile_to_lid(p, lm):
         return cands[0]
     return None
 
-def _fb_unit_profitability(month=None):
-    month = month or datetime.now(TZ).strftime("%Y-%m")
-    start, end = _fb_month_range(month)
+def _fb_unit_profitability(month=None, dstart=None, dend=None):
+    start, end, plabel = _fb_period(month, dstart, dend)
     try:                                          # one normalization pass over the cached pull
         listings = get_listings_map() or {}
         by_lid = {}
@@ -33756,17 +33792,19 @@ def _fb_unit_profitability(month=None):
             pulled = datetime.fromtimestamp(_res_cache["ts"], TZ).isoformat(timespec="minutes")
         except Exception:
             pulled = None
-    return {"month": month, "units": units, "revenue_connected": connected > 0,
+    return {"month": (month or plabel), "period_label": plabel,
+            "period_start": start.isoformat(), "period_end": end.isoformat(),
+            "units": units, "revenue_connected": connected > 0,
             "connected_units": connected, "total_units": len(units),
             "total_revenue": _fb_money_str(tot_rev), "total_ouja_fee": _fb_money_str(tot_ouja),
             "total_expenses": _fb_money_str(tot_exp), "basis": "checkin", "pulled_at": pulled,
             "hostaway_reachable": res_ok,
-            "note_ar": (("الإيراد مربوط بـ Hostaway (أساس تاريخ الوصول، شهر " + month + "). " if connected else ("ما قدرنا نوصل Hostaway. " if not res_ok else "ما فيه شقة مربوطة بعد — اربط Hostaway ID أو طابق الاسم. ")) + "صنّف حركة البنك واكمل مراكز التكلفة لربحية أدق."),
-            "note_en": (("Revenue linked to Hostaway (check-in basis, " + month + "). " if connected else ("Couldn't reach Hostaway. " if not res_ok else "No unit linked yet — set a Hostaway ID or match the name. ")) + "Classify bank movement + complete cost centers for sharper profit.")}
+            "note_ar": (("الإيراد مربوط بـ Hostaway (أساس تاريخ الوصول · " + plabel + "). " if connected else ("ما قدرنا نوصل Hostaway. " if not res_ok else "ما فيه شقة مربوطة بعد — اربط Hostaway ID أو طابق الاسم. ")) + "صنّف حركة البنك واكمل مراكز التكلفة لربحية أدق."),
+            "note_en": (("Revenue linked to Hostaway (check-in basis · " + plabel + "). " if connected else ("Couldn't reach Hostaway. " if not res_ok else "No unit linked yet — set a Hostaway ID or match the name. ")) + "Classify bank movement + complete cost centers for sharper profit.")}
 
-def _fb_company_profitability(month=None):
-    month = month or datetime.now(TZ).strftime("%Y-%m")
-    up = _fb_unit_profitability(month)
+def _fb_company_profitability(month=None, dstart=None, dend=None):
+    up = _fb_unit_profitability(month, dstart, dend)
+    plabel = up.get("period_label") or month
     portfolio_rev = sum((_fb_money(u["revenue"]) for u in up["units"] if u.get("revenue") is not None), Decimal("0.00"))
     ouja_income = Decimal("0.00")
     for u in up["units"]:
@@ -33787,16 +33825,17 @@ def _fb_company_profitability(month=None):
     coverage = {"daftra": _daftra_configured() and bool(_fb_external),
                 "contracts": bool(_fb_contracts), "bank": bool(_fb_bank),
                 "hostaway_revenue": connected}
-    return {"month": month, "currency": "SAR",
-            "revenue_connected": connected,
+    return {"month": (month or plabel), "period_label": plabel,
+            "period_start": up.get("period_start"), "period_end": up.get("period_end"),
+            "currency": "SAR", "revenue_connected": connected,
             "portfolio_revenue": _fb_money_str(portfolio_rev),
             "ouja_income": _fb_money_str(ouja_income), "ouja_net": _fb_money_str(ouja_net),
             "connected_units": up["connected_units"], "total_units": up["total_units"],
             "pulled_at": up.get("pulled_at"), "basis": "checkin",
             "daftra_income": _fb_money_str(daftra_inc), "daftra_expenses": _fb_money_str(daftra_exp),
             "ledger_expenses": _fb_money_str(ledger_exp),
-            "revenue_note_ar": ("الإيراد مربوط بـ Hostaway — أساس تاريخ الوصول، شهر " + month if connected else ("ما قدرنا نوصل Hostaway الحين" if not up.get("hostaway_reachable") else "اضغط «اسحب الإيرادات» وتأكد إن الشقق مربوطة")),
-            "revenue_note_en": ("Revenue linked to Hostaway — check-in basis, " + month if connected else ("Couldn't reach Hostaway right now" if not up.get("hostaway_reachable") else "Press Pull revenue and make sure units are linked")),
+            "revenue_note_ar": ("الإيراد مربوط بـ Hostaway — أساس تاريخ الوصول · " + str(plabel) if connected else ("ما قدرنا نوصل Hostaway الحين" if not up.get("hostaway_reachable") else "اضغط «اسحب الإيرادات» وتأكد إن الشقق مربوطة")),
+            "revenue_note_en": ("Revenue linked to Hostaway — check-in basis · " + str(plabel) if connected else ("Couldn't reach Hostaway right now" if not up.get("hostaway_reachable") else "Press Pull revenue and make sure units are linked")),
             "bank_unmatched": bank_unmatched,
             "ready_to_post": sum(1 for e in _fb_ledger.values() if e.get("status") == "ready_to_post"),
             "failed": sum(1 for e in _fb_ledger.values() if e.get("status") == "failed"),
@@ -33945,9 +33984,11 @@ async def _api_fb_profit(request):
         return _json({"error": "forbidden"}, 403)   # profitability hidden from ops/viewer
     scope = request.query.get("scope", "company")
     month = request.query.get("month") or None
+    dstart = request.query.get("start") or None
+    dend = request.query.get("end") or None
     if scope == "unit":
-        return _json({"ok": True, **_fb_unit_profitability(month)})
-    return _json({"ok": True, **_fb_company_profitability(month)})
+        return _json({"ok": True, **_fb_unit_profitability(month, dstart, dend)})
+    return _json({"ok": True, **_fb_company_profitability(month, dstart, dend)})
 
 async def _api_fb_close(request):
     if not _fb_can_finance(request):
