@@ -22351,21 +22351,50 @@ async function fbSynclog(){ var ar=(L==='ar'), b=document.getElementById('fbBody
   b.innerHTML=h;
 }
 /* ---- Unit + Company Profitability ---- */
+function fbStatCard(label,val,color){ return '<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+esc(label)+'</div><div style="font-size:17px;font-weight:800;color:'+(color||'var(--text)')+'">'+val+'</div></div>'; }
+async function fbPullRevenue(){
+  var ar=(L==='ar'); toast(ar?'⏳ نسحب الإيرادات من Hostaway…':'⏳ Pulling revenue from Hostaway…');
+  var r; try{ r=await post('/api/fb/revenue/pull',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast((ar?'✓ تم سحب ':'✓ pulled ')+(r.reservations||0)+(ar?' حجز':' reservations')); fbGo(_fb.tab); }
+  else toast((r&&(r.error||r.detail))||'⚠');
+}
+function fbProfitRow(x){
+  var ar=(L==='ar'), linked=x.revenue_connected;
+  var rev=linked?('<span style="font-size:11.5px">'+(ar?'إيراد ':'rev ')+'<b>'+fbMoney(x.revenue)+'</b></span>'+(x.ouja_fee!=null?('<span style="font-size:11.5px;color:#3e9665">'+(ar?'عوجا ':'ouja ')+fbMoney(x.ouja_fee)+'</span>'):'')):fbChip(ar?'غير مربوط':'not linked','warn');
+  var resv=(linked&&x.reservations!=null)?('<span class="muted" style="font-size:10.5px">'+x.reservations+(ar?' حجز':' bk')+'</span>'):'';
+  var warn=(linked&&x.balanced===false)?fbChip(ar?'يحتاج مراجعة':'review','warn'):'';
+  var miss=((x.missing||[]).length?('<div class="muted" style="font-size:10px;width:100%">'+(ar?'ناقص: ':'missing: ')+(x.missing||[]).map(function(m){return esc(ar?m[0]:m[1]);}).join(' · ')+'</div>'):'');
+  var flags=((x.flags||[]).length?('<div style="font-size:10px;width:100%;color:var(--gold)">'+(x.flags||[]).map(function(m){return esc(ar?m[0]:m[1]);}).join(' · ')+'</div>'):'');
+  return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<b style="flex:1;min-width:110px;font-size:12.5px">'+esc(x.apartment||'—')+'</b>'
+    +'<span class="muted" style="font-size:10.5px">'+esc(x.unit_type||'')+(x.ouja_percentage!=null?(' · '+x.ouja_percentage+'%'):'')+'</span>'
+    +rev+'<span style="font-size:11.5px">'+(ar?'مصاريف ':'exp ')+fbMoney(x.expenses)+'</span>'+resv+warn+miss+flags+'</div>';
+}
 async function fbUnitP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=unit'); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
-  var u=(d&&d.units)||[]; var h='<div style="'+fbCard()+';border-inline-start:3px solid var(--gold)"><div style="font-size:12.5px">'+(ar?d.note_ar:d.note_en)+'</div></div>';
+  var u=(d&&d.units)||[];
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏠 '+(ar?'ربحية الشقق':'Unit profitability')+'</b><button class="btn primary sm" onclick="fbPullRevenue()">'+(ar?'⟳ اسحب الإيرادات':'⟳ Pull revenue')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'+(ar?d.note_ar:d.note_en)+(d.pulled_at?('<br>'+(ar?'آخر سحب: ':'pulled: ')+esc(d.pulled_at)):'')+'</div></div>';
   if(!u.length){ h+='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ارفع ملف العقود أول':'Upload the contracts file first')+'</div>'; b.innerHTML=h; return; }
-  h+='<div style="display:flex;flex-direction:column;gap:6px">'+u.map(function(x){ return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="flex:1;min-width:120px;font-size:12.5px">'+esc(x.apartment||'—')+'</b><span class="muted" style="font-size:11px">'+esc(x.unit_type||'')+(x.ouja_percentage!=null?(' · '+x.ouja_percentage+'%'):'')+'</span><span style="font-size:11.5px">'+(ar?'مصاريف ':'exp ')+fbMoney(x.expenses)+'</span>'+fbChip(ar?'الإيراد غير مربوط':'no revenue',(x.revenue_connected?'mut':'warn'))+((x.missing||[]).length?('<div class="muted" style="font-size:10px;width:100%">'+(ar?'ناقص: ':'missing: ')+(x.missing||[]).map(function(m){return esc(ar?m[0]:m[1]);}).join(' · ')+'</div>'):'')+'</div>'; }).join('')+'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:8px">'
+    +fbStatCard(ar?'إجمالي الإيراد':'Total revenue',fbMoney(d.total_revenue),'var(--text)')
+    +fbStatCard(ar?'عمولة عوجا':'Ouja fees',fbMoney(d.total_ouja_fee),'#3e9665')
+    +fbStatCard(ar?'مصاريف':'Expenses',fbMoney(d.total_expenses),'var(--down)')
+    +fbStatCard(ar?'شقق مربوطة':'Linked units',(d.connected_units||0)+'/'+(d.total_units||0),(d.connected_units?'var(--text)':'var(--gold)'))+'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:6px">'+u.map(fbProfitRow).join('')+'</div>';
   b.innerHTML=h;
 }
 async function fbCompanyP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=company'); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
-  var cov=(d&&d.coverage)||{};
-  var h='<div style="'+fbCard()+';border-inline-start:3px solid var(--gold)"><div style="font-size:12.5px">⚠ '+(ar?d.revenue_note_ar:d.revenue_note_en)+'</div></div>';
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">'
-    +'<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+(ar?'دخل دافترة':'Daftra income')+'</div><div style="font-size:18px;font-weight:800">'+fbMoney(d.daftra_income)+'</div></div>'
-    +'<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+(ar?'مصاريف دافترة':'Daftra expenses')+'</div><div style="font-size:18px;font-weight:800;color:var(--down)">'+fbMoney(d.daftra_expenses)+'</div></div>'
-    +'<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+(ar?'مصاريف اللوحة':'ledger expenses')+'</div><div style="font-size:18px;font-weight:800">'+fbMoney(d.ledger_expenses)+'</div></div>'
-    +'<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+(ar?'بنك غير مطابق':'bank unmatched')+'</div><div style="font-size:18px;font-weight:800">'+(d.bank_unmatched||0)+'</div></div>'
-    +'<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+(ar?'تم التحقق':'verified')+'</div><div style="font-size:18px;font-weight:800;color:#3e9665">'+(d.verified||0)+'</div></div></div>';
+  var cov=(d&&d.coverage)||{}, conn=d.revenue_connected;
+  var net=d.ouja_net||'0.00', negative=(String(net).indexOf('-')===0);
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏢 '+(ar?'ربحية الشركة':'Company profitability')+'</b><button class="btn primary sm" onclick="fbPullRevenue()">'+(ar?'⟳ اسحب الإيرادات':'⟳ Pull revenue')+'</button></div><div style="font-size:12px;margin-top:6px;color:'+(conn?'var(--text)':'var(--gold)')+'">'+(conn?'':'⚠ ')+esc(ar?d.revenue_note_ar:d.revenue_note_en)+(d.pulled_at?(' · '+(ar?'آخر سحب ':'pulled ')+esc(d.pulled_at)):'')+'</div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
+    +fbStatCard(ar?'إيراد المحفظة':'Portfolio revenue',fbMoney(d.portfolio_revenue),'var(--text)')
+    +fbStatCard(ar?'دخل عوجا':'Ouja income',fbMoney(d.ouja_income),'#3e9665')
+    +fbStatCard(ar?'صافي عوجا':'Ouja net',fbMoney(net),(negative?'var(--down)':'#3e9665'))
+    +fbStatCard(ar?'شقق مربوطة':'Linked units',(d.connected_units||0)+'/'+(d.total_units||0),'var(--text)')
+    +fbStatCard(ar?'دخل دافترة':'Daftra income',fbMoney(d.daftra_income),'var(--text)')
+    +fbStatCard(ar?'مصاريف دافترة':'Daftra expenses',fbMoney(d.daftra_expenses),'var(--down)')
+    +fbStatCard(ar?'مصاريف اللوحة':'Ledger expenses',fbMoney(d.ledger_expenses),'var(--down)')
+    +fbStatCard(ar?'بنك غير مطابق':'Bank unmatched',(d.bank_unmatched||0),'var(--text)')+'</div>';
   h+='<div class="muted" style="font-size:11px;margin-top:10px">'+(ar?'التغطية: ':'coverage: ')+['daftra','contracts','bank','hostaway_revenue'].map(function(k){ return (cov[k]?'✓':'✗')+' '+k; }).join(' · ')+'</div>';
   b.innerHTML=h;
 }
@@ -33613,48 +33642,166 @@ def _fb_expense_total(month=None):
             total += _fb_money(e.get("amount"))
     return total
 
-def _fb_company_profitability(month=None):
-    daftra_exp = sum((_fb_money(r.get("amount")) for r in _fb_external.values()
-                      if r.get("source_type") == "expenses" and r.get("amount")), Decimal("0.00"))
-    daftra_inc = sum((_fb_money(r.get("amount")) for r in _fb_external.values()
-                      if r.get("source_type") == "incomes" and r.get("amount")), Decimal("0.00"))
-    ledger_exp = _fb_expense_total(month)
-    bank_unmatched = sum(1 for x in _fb_bank.values() if x.get("match_status") == "unmatched")
-    coverage = {"daftra": _daftra_configured() and bool(_fb_external),
-                "contracts": bool(_fb_contracts), "bank": bool(_fb_bank),
-                "hostaway_revenue": False}
-    return {"month": month, "currency": "SAR",
-            "daftra_income": _fb_money_str(daftra_inc), "daftra_expenses": _fb_money_str(daftra_exp),
-            "ledger_expenses": _fb_money_str(ledger_exp),
-            "revenue_connected": False, "revenue_note_ar": "مصدر الإيراد (Hostaway) غير مربوط بعد",
-            "revenue_note_en": "revenue source (Hostaway) not connected yet",
-            "bank_unmatched": bank_unmatched,
-            "ready_to_post": sum(1 for e in _fb_ledger.values() if e.get("status") == "ready_to_post"),
-            "failed": sum(1 for e in _fb_ledger.values() if e.get("status") == "failed"),
-            "verified": sum(1 for e in _fb_ledger.values() if e.get("verification_status") == "verified"),
-            "coverage": coverage}
+def _fb_month_range(month):
+    """'YYYY-MM' (or None=current) → (date first, date last). checkin-basis period."""
+    try:
+        y, m = int(str(month)[:4]), int(str(month)[5:7])
+        start = date(y, m, 1)
+    except Exception:
+        today = datetime.now(TZ).date()
+        y, m = today.year, today.month
+        start = date(y, m, 1)
+    end = (date(y, 12, 31) if m == 12 else date(y, m + 1, 1) - timedelta(days=1))
+    return start, end
+
+def _fb_tokens(s):
+    return [tok for tok in re.split(r"[^0-9a-z؀-ۿ]+", str(s or "").lower()) if tok]
+
+def _fb_norm_match(s):
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+def _fb_listing_norm(nm):
+    """Alnum-concat of a listing name with the brand token 'ouja' removed: 'Ouja | MLQ 1' → 'mlq1'."""
+    return "".join(t for t in _fb_tokens(nm) if t != "ouja")
+
+def _fb_profile_to_lid(p, lm):
+    """Map an FB contract profile → Hostaway listing id, conservatively (a WRONG match would
+    attribute the wrong revenue). Tiers: 1) explicit Hostaway ID; 2) UNIQUE exact normalized
+    equality of code/name vs the listing's brand-stripped name ('MLQ1'=='MLQ 1', and crucially
+    'MLQ1'≠'MLQ11'); 3) UNIQUE token-subset of the listing name. Anything ambiguous → None."""
+    if not lm:
+        return None
+    hid = str(p.get("hostaway_listing_id") or "").strip()
+    if hid:
+        for lid in lm:
+            if str(lid) == hid:
+                return lid
+    pn_code = _fb_norm_match(p.get("apartment_code"))
+    pn_name = _fb_norm_match(p.get("apartment_name"))
+    exact = [lid for lid, nm in lm.items()
+             if _fb_listing_norm(nm) and _fb_listing_norm(nm) in (pn_code, pn_name)]
+    if len(set(exact)) == 1:
+        return exact[0]
+    ctoks = set(_fb_tokens(p.get("apartment_code")) or _fb_tokens(p.get("apartment_name")))
+    cands = [lid for lid, nm in lm.items() if ctoks and ctoks.issubset(set(_fb_tokens(nm)) - {"ouja"})]
+    if len(set(cands)) == 1:
+        return cands[0]
+    return None
 
 def _fb_unit_profitability(month=None):
-    units = []
+    month = month or datetime.now(TZ).strftime("%Y-%m")
+    start, end = _fb_month_range(month)
+    try:                                          # one normalization pass over the cached pull
+        listings = get_listings_map() or {}
+        by_lid = {}
+        for r in get_reservations_cached():
+            by_lid.setdefault(r.get("listingMapId"), []).append(normalize_reservation(r, listings))
+        res_ok = True
+    except Exception:
+        listings, by_lid, res_ok = {}, {}, False
+    units, connected = [], 0
+    tot_rev = tot_ouja = tot_exp = Decimal("0.00")
     for p in _fb_contracts.values():
+        pkey = _fb_contract_key(p.get("apartment_name"), p.get("apartment_code"))
         exp = Decimal("0.00")
-        for e in _fb_ledger.values():
-            if e.get("apartment") and _fb_contract_key(e.get("apartment"), "") == _fb_contract_key(p.get("apartment_name"), p.get("apartment_code")):
-                if e.get("direction") in ("expense", "debit"):
-                    exp += _fb_money(e.get("amount"))
+        for e in _fb_ledger.values():             # FB ledger expenses tagged to this unit
+            if e.get("apartment") and _fb_contract_key(e.get("apartment"), "") == pkey and e.get("direction") in ("expense", "debit"):
+                exp += _fb_money(e.get("amount"))
+        for x in _fb_bank.values():               # reviewed bank debits tagged to this unit (real outflows only)
+            if x.get("apartment") and _fb_contract_key(x.get("apartment"), "") == pkey and x.get("category") not in ("founder_funding", "owner_deposit", "internal_transfer", "channel_payout"):
+                exp += _fb_money(x.get("debit"))
         missing = []
         if p.get("ouja_percentage") is None and p.get("unit_type") != "company_operated":
             missing.append(("نسبة عوجا", "Ouja %"))
         if not p.get("daftra_cost_center_id"):
             missing.append(("مركز تكلفة", "cost center"))
+        company = (p.get("unit_type") == "company_operated")
+        lid = _fb_profile_to_lid(p, listings) if res_ok else None
+        rev = ouja_cut = owner_net = None
+        nres = 0; balanced = None; flags = []
+        if lid is not None:
+            try:
+                pct = 100.0 if company else float(p.get("ouja_percentage") or 0)
+                cleaning = {"type": ("owner" if p.get("cleaning_rule") == "owner_monthly_charge" else "ours"),
+                            "amount": float(p.get("cleaning_monthly_amount") or 0)}
+                rep = compute_owner_report(by_lid.get(lid, []), [], start, end, pct, cleaning=cleaning)
+                rev = _fb_money(rep["total_income"]); ouja_cut = _fb_money(rep["ouja_fee"])
+                owner_net = (None if company else _fb_money(rep["owner_net"]))
+                nres = rep["counts"]["reservations"]
+                rc = rep["reconciliation"]; balanced = rc["balanced"]
+                if rc.get("missing_payout_ids"):
+                    flags.append(("دفعات Airbnb ناقصة", "missing Airbnb payouts"))
+                if rc.get("needs_channel_rule_ids"):
+                    flags.append(("قنوات تحتاج قاعدة", "channels need a rule"))
+                if rc.get("needs_base_ids"):
+                    flags.append(("أساس سعر ناقص", "missing price base"))
+                connected += 1
+                tot_rev += rev; tot_ouja += ouja_cut
+            except Exception:
+                flags.append(("خطأ بالحساب", "calc error")); lid = None
+        tot_exp += exp
         units.append({"apartment": p.get("apartment_name"), "unit_type": p.get("unit_type"),
                       "ouja_percentage": p.get("ouja_percentage"), "cleaning_rule": p.get("cleaning_rule"),
-                      "expenses": _fb_money_str(exp), "revenue": None,
-                      "revenue_connected": False, "missing": missing,
+                      "expenses": _fb_money_str(exp),
+                      "revenue": (_fb_money_str(rev) if rev is not None else None),
+                      "ouja_fee": (_fb_money_str(ouja_cut) if ouja_cut is not None else None),
+                      "owner_net": (_fb_money_str(owner_net) if owner_net is not None else None),
+                      "reservations": nres, "linked_lid": lid, "balanced": balanced, "flags": flags,
+                      "revenue_connected": lid is not None, "missing": missing,
                       "health": p.get("validation_status")})
-    return {"month": month, "units": units, "revenue_connected": False,
-            "note_ar": "ما نقدر نحسب الربحية بدقة قبل ربط الإيراد (Hostaway) واكتمال العقود ومراكز التكلفة",
-            "note_en": "accurate profitability needs revenue (Hostaway) connected + complete contracts/cost centers"}
+    units.sort(key=lambda u: (u["revenue_connected"], _fb_money(u["revenue"] or 0)), reverse=True)
+    pulled = None
+    if res_ok and _res_cache.get("ts"):
+        try:
+            pulled = datetime.fromtimestamp(_res_cache["ts"], TZ).isoformat(timespec="minutes")
+        except Exception:
+            pulled = None
+    return {"month": month, "units": units, "revenue_connected": connected > 0,
+            "connected_units": connected, "total_units": len(units),
+            "total_revenue": _fb_money_str(tot_rev), "total_ouja_fee": _fb_money_str(tot_ouja),
+            "total_expenses": _fb_money_str(tot_exp), "basis": "checkin", "pulled_at": pulled,
+            "hostaway_reachable": res_ok,
+            "note_ar": (("الإيراد مربوط بـ Hostaway (أساس تاريخ الوصول، شهر " + month + "). " if connected else ("ما قدرنا نوصل Hostaway. " if not res_ok else "ما فيه شقة مربوطة بعد — اربط Hostaway ID أو طابق الاسم. ")) + "صنّف حركة البنك واكمل مراكز التكلفة لربحية أدق."),
+            "note_en": (("Revenue linked to Hostaway (check-in basis, " + month + "). " if connected else ("Couldn't reach Hostaway. " if not res_ok else "No unit linked yet — set a Hostaway ID or match the name. ")) + "Classify bank movement + complete cost centers for sharper profit.")}
+
+def _fb_company_profitability(month=None):
+    month = month or datetime.now(TZ).strftime("%Y-%m")
+    up = _fb_unit_profitability(month)
+    portfolio_rev = sum((_fb_money(u["revenue"]) for u in up["units"] if u.get("revenue") is not None), Decimal("0.00"))
+    ouja_income = Decimal("0.00")
+    for u in up["units"]:
+        if u.get("revenue") is None:
+            continue
+        if u.get("unit_type") == "company_operated":
+            ouja_income += _fb_money(u["revenue"])           # Ouja keeps the whole revenue
+        elif u.get("ouja_fee") is not None:
+            ouja_income += _fb_money(u["ouja_fee"])          # Ouja keeps only the management fee
+    daftra_exp = sum((_fb_money(r.get("amount")) for r in _fb_external.values()
+                      if r.get("source_type") == "expenses" and r.get("amount")), Decimal("0.00"))
+    daftra_inc = sum((_fb_money(r.get("amount")) for r in _fb_external.values()
+                      if r.get("source_type") == "incomes" and r.get("amount")), Decimal("0.00"))
+    ledger_exp = _fb_expense_total(month)
+    ouja_net = ouja_income - ledger_exp
+    bank_unmatched = sum(1 for x in _fb_bank.values() if x.get("match_status") == "unmatched")
+    connected = up["revenue_connected"]
+    coverage = {"daftra": _daftra_configured() and bool(_fb_external),
+                "contracts": bool(_fb_contracts), "bank": bool(_fb_bank),
+                "hostaway_revenue": connected}
+    return {"month": month, "currency": "SAR",
+            "revenue_connected": connected,
+            "portfolio_revenue": _fb_money_str(portfolio_rev),
+            "ouja_income": _fb_money_str(ouja_income), "ouja_net": _fb_money_str(ouja_net),
+            "connected_units": up["connected_units"], "total_units": up["total_units"],
+            "pulled_at": up.get("pulled_at"), "basis": "checkin",
+            "daftra_income": _fb_money_str(daftra_inc), "daftra_expenses": _fb_money_str(daftra_exp),
+            "ledger_expenses": _fb_money_str(ledger_exp),
+            "revenue_note_ar": ("الإيراد مربوط بـ Hostaway — أساس تاريخ الوصول، شهر " + month if connected else ("ما قدرنا نوصل Hostaway الحين" if not up.get("hostaway_reachable") else "اضغط «اسحب الإيرادات» وتأكد إن الشقق مربوطة")),
+            "revenue_note_en": ("Revenue linked to Hostaway — check-in basis, " + month if connected else ("Couldn't reach Hostaway right now" if not up.get("hostaway_reachable") else "Press Pull revenue and make sure units are linked")),
+            "bank_unmatched": bank_unmatched,
+            "ready_to_post": sum(1 for e in _fb_ledger.values() if e.get("status") == "ready_to_post"),
+            "failed": sum(1 for e in _fb_ledger.values() if e.get("status") == "failed"),
+            "verified": sum(1 for e in _fb_ledger.values() if e.get("verification_status") == "verified"),
+            "coverage": coverage}
 
 def _fb_monthly_close(month=None):
     csum = _fb_contracts_summary()
@@ -33806,6 +33953,22 @@ async def _api_fb_close(request):
     if not _fb_can_finance(request):
         return _json({"error": "forbidden"}, 403)
     return _json({"ok": True, **_fb_monthly_close(request.query.get("month") or None)})
+
+async def _api_fb_revenue_pull(request):
+    """Force-refresh the Hostaway reservation pull so profitability reflects the latest bookings.
+    Read-only from Hostaway (never writes); busts the 30-min reservations cache then repopulates."""
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    def _refresh():
+        _res_cache["data"], _res_cache["ts"] = None, 0
+        data = get_reservations_cached()
+        return len(data or [])
+    try:
+        n = await asyncio.to_thread(_refresh)
+    except Exception as e:
+        return _json({"error": "hostaway_unreachable", "detail": str(e)[:160]}, 502)
+    _fb_audit_add(_req_actor(request), "revenue_pull", "hostaway", "reservations", after={"reservations": n})
+    return _json({"ok": True, "reservations": n})
 
 async def _api_fb_overview(request):
     """Setup-journey state: each step's status + last sync + counts. No fake metrics."""
@@ -36295,6 +36458,7 @@ async def start_web_server():
         app.router.add_get("/api/fb/synclog", _api_fb_synclog)
         app.router.add_get("/api/fb/profit", _api_fb_profit)
         app.router.add_get("/api/fb/close", _api_fb_close)
+        app.router.add_post("/api/fb/revenue/pull", _api_fb_revenue_pull)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
