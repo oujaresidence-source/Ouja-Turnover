@@ -10746,19 +10746,28 @@ _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
     "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
-    "cleanteams", "clean_center", "plab",
+    "cleanteams", "clean_center", "plab", "fb",
 ]
 
 def _default_perms(role):
     """Build the starting permission matrix for a role."""
     if role == "admin":
         return {tab: {"read": True, "write": True, "create": True} for tab in _USER_TABS}
+    if role == "accountant":
+        # accountant: full finance read/write (Financial Brain, finance, expenses, weekly, rev);
+        # read elsewhere; never the users admin tab. Profitability/bank detail allowed.
+        fin = ("fb", "finance", "expenses", "weekly", "rev")
+        return {
+            tab: {"read": tab != "users", "write": tab in fin, "create": tab in fin}
+            for tab in _USER_TABS
+        }
     if role == "ops":
-        # ops can see + modify most things, but only create tickets/quotes
+        # ops can see + modify most things, but only create tickets/quotes. NO finance write,
+        # and the Financial Brain is view-only (sensitive sub-sections are hidden in the UI).
         return {
             tab: {
                 "read":   tab != "users",
-                "write":  tab not in ("users", "rev", "log"),
+                "write":  tab not in ("users", "rev", "log", "fb"),
                 "create": tab in ("tickets", "quote", "weekly", "design"),
             } for tab in _USER_TABS
         }
@@ -10796,7 +10805,7 @@ def _user_create(name, password, role="viewer", perms=None, created_by="system")
         "id": uid,
         "name": (name or "").strip(),
         "password_hash": _hash_password(password or ""),
-        "role": role if role in ("admin", "ops", "viewer") else "viewer",
+        "role": role if role in ("admin", "ops", "viewer", "accountant") else "viewer",
         "perms": perms or _default_perms(role),
         "active": True,
         "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
@@ -32208,6 +32217,131 @@ def _req_actor(request):
         if u:
             return u.get("name") or "—"
     return "—"
+
+def _req_role(request):
+    """Caller's role: legacy dashboard token = admin; else the session user's role; else viewer."""
+    token = request.query.get("token") or request.headers.get("X-Token", "")
+    if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
+        return "admin"
+    sess = _sessions.get(token or "")
+    if sess:
+        u = _users.get(sess.get("user_id"))
+        if u:
+            return u.get("role") or "viewer"
+    return "viewer"
+
+def _fb_can_finance(request):
+    """Admin or accountant — may import, classify, prepare drafts, approve < 3000."""
+    return _req_role(request) in ("admin", "accountant")
+
+def _fb_is_admin(request):
+    """Admin only — approve >= 3000, enable posting, override monthly close, edit mappings."""
+    return _req_role(request) == "admin"
+
+# ====================================================================
+#  OUJA FINANCIAL BRAIN (المركز المالي) — import-first finance control layer AROUND
+#  Daftra (the official ledger). NO fake data · NO auto-post (disabled by default) ·
+#  Decimal money · masked secrets · idempotent imports · full audit. Reuses
+#  _load_json/_save_json, the role system, _post_system_escalation, openpyxl.
+# ====================================================================
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+DAFTRA_BASE_URL = os.environ.get("DAFTRA_BASE_URL", "").strip().rstrip("/")
+DAFTRA_API_KEY = os.environ.get("DAFTRA_API_KEY", "").strip()
+DAFTRA_COMPANY_SLUG = os.environ.get("DAFTRA_COMPANY_SLUG", "").strip()
+DAFTRA_IMPORT_START_DATE = os.environ.get("DAFTRA_IMPORT_START_DATE", "").strip()
+DAFTRA_POST_ENABLED = os.environ.get("DAFTRA_POST_ENABLED", "0") in ("1", "true", "True", "yes")
+FB_APPROVAL_THRESHOLD = Decimal(os.environ.get("FB_APPROVAL_THRESHOLD", "3000"))
+
+# ---- 9 JSON stores (loaded at import; saved on write — same pattern as _finance_adjust) ----
+_fb_runs      = _load_json("finance_import_runs.json", []) or []        # import-run history
+_fb_external  = _load_json("finance_external_records.json", {}) or {}   # "type:source_id" -> Daftra mirror
+_fb_contracts = _load_json("finance_contract_profiles.json", {}) or {}  # apt_key -> contract profile
+_fb_bank      = _load_json("finance_bank_transactions.json", {}) or {}  # txn_hash -> bank txn
+_fb_ledger    = _load_json("finance_ledger_entries.json", {}) or {}     # entry_id -> canonical entry
+_fb_mappings  = _load_json("finance_daftra_mappings.json", {}) or {}    # local_category -> Daftra mapping
+_fb_approvals = _load_json("finance_approvals.json", []) or []          # approval requests/decisions
+_fb_audit     = _load_json("finance_audit_log.json", []) or []          # append-only audit
+_fb_cards     = _load_json("finance_card_mappings.json", {}) or {}      # card_last4 -> employee
+
+def _fb_save(name, obj):
+    try:
+        _save_json(name, obj)
+    except Exception as e:
+        print("fb save", name, e)
+
+# ---- Decimal money (NEVER float; preserves halalas — 9.50 stays 9.50) ----
+def _fb_money(x):
+    if isinstance(x, Decimal):
+        return x
+    if x is None:
+        return Decimal("0.00")
+    s = str(x).strip().replace(",", "").replace("ر.س", "").replace("SAR", "").strip()
+    if not s or s in ("-", "—"):
+        return Decimal("0.00")
+    try:
+        return Decimal(s)
+    except (InvalidOperation, ValueError):
+        return Decimal("0.00")
+
+def _fb_money_str(x):
+    """Exact 2-dp string for storage + display."""
+    try:
+        return str(_fb_money(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except Exception:
+        return "0.00"
+
+# ---- masking (IBAN / card / API key never exposed) ----
+def _fb_mask_iban(s):
+    s = str(s or "")
+    return (s[:2] + "••••" + s[-4:]) if len(s) >= 8 else "••••"
+
+def _fb_mask_card(s):
+    s = "".join(ch for ch in str(s or "") if ch.isdigit())
+    return ("•••• " + s[-4:]) if len(s) >= 4 else "••••"
+
+def _fb_mask_key(s):
+    return ("مضبوط ✓ ••••" + str(s)[-4:]) if s else "غير مضبوط"
+
+# ---- canonical status sets ----
+FB_LEDGER_STATUS = ("draft", "submitted", "accountant_review", "needs_faisal", "approved",
+                    "rejected", "returned", "ready_to_post", "posting", "posted",
+                    "verification_pending", "verified", "failed", "needs_fix", "void")
+FB_DAFTRA_STATUS = ("not_imported", "imported", "draft", "ready_to_post", "posting", "posted",
+                    "verification_pending", "verified", "failed", "needs_fix")
+
+# ---- append-only audit ----
+def _fb_audit_add(actor, action, entity_type, entity_id, before=None, after=None, reason=""):
+    _fb_audit.append({"ts": datetime.now(TZ).isoformat(timespec="seconds"), "actor": (actor or "?")[:80],
+                      "action": action, "entity_type": entity_type, "entity_id": str(entity_id),
+                      "before": before, "after": after, "reason": (reason or "")[:500]})
+    if len(_fb_audit) > 20000:
+        del _fb_audit[:len(_fb_audit) - 20000]
+    _fb_save("finance_audit_log.json", _fb_audit)
+
+# ---- import-run tracking ----
+def _fb_run_start(source, filename="", actor=""):
+    import uuid
+    run = {"id": "frun-" + uuid.uuid4().hex[:10], "source": source, "filename": filename,
+           "status": "running", "started_at": datetime.now(TZ).isoformat(timespec="seconds"),
+           "finished_at": None, "imported_count": 0, "updated_count": 0, "failed_count": 0,
+           "error_summary": "", "actor": actor or ""}
+    _fb_runs.append(run)
+    if len(_fb_runs) > 2000:
+        del _fb_runs[:len(_fb_runs) - 2000]
+    _fb_save("finance_import_runs.json", _fb_runs)
+    return run
+
+def _fb_run_finish(run, status="done", imported=0, updated=0, failed=0, error=""):
+    run.update({"status": status, "finished_at": datetime.now(TZ).isoformat(timespec="seconds"),
+                "imported_count": imported, "updated_count": updated, "failed_count": failed,
+                "error_summary": (error or "")[:600]})
+    _fb_save("finance_import_runs.json", _fb_runs)
+    return run
+
+def _fb_last_run(source):
+    runs = [r for r in _fb_runs if r.get("source") == source]
+    return runs[-1] if runs else None
 
 def _pmo_task_view(t):
     return {
