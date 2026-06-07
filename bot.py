@@ -32884,6 +32884,401 @@ async def _api_fb_cards(request):
     _fb_audit_add(_req_actor(request), "card_mapping", "card", last4)
     return _json({"ok": True, "cards": _fb_cards})
 
+# ---- Stage 6: canonical ledger + Financial Inbox + approval workflow ----
+def _fb_ledger_create(source, amount, direction, category, apartment="", description="",
+                      date="", source_id="", owner="", submitter="", cost_center=""):
+    import uuid
+    eid = "led-" + uuid.uuid4().hex[:12]
+    amt = _fb_money_str(amount)
+    _fb_ledger[eid] = {"id": eid, "source": source, "source_id": str(source_id or ""),
+                       "amount": amt, "currency": "SAR", "direction": direction,  # debit|credit|expense|income
+                       "category": category or "unknown", "apartment": apartment, "owner": owner,
+                       "cost_center": cost_center, "description": (description or "")[:500],
+                       "date": date, "submitter": submitter, "status": "draft",
+                       "match_status": "unmatched", "daftra_status": "not_imported",
+                       "verification_status": "none", "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    return _fb_ledger[eid]
+
+async def _fb_notify_large(entry, actor):
+    """Discord alert for an expense >= threshold (reuses _post_system_escalation; no bank/secret data)."""
+    try:
+        amt = _fb_money(entry.get("amount"))
+        if amt < FB_APPROVAL_THRESHOLD:
+            return
+        await _post_system_escalation(
+            "💰 مصروف يحتاج اعتماد فيصل (≥ %s ر.س)" % str(FB_APPROVAL_THRESHOLD),
+            "المبلغ: %s ر.س · التصنيف: %s · الشقة: %s · المقدّم: %s · الوصف: %s" % (
+                entry.get("amount"), entry.get("category") or "—", entry.get("apartment") or "—",
+                actor or "—", (entry.get("description") or "—")[:120]),
+            severity="high")
+    except Exception as e:
+        print("fb notify error:", e)
+
+def _fb_next_action(e):
+    st = e.get("status")
+    if st == "draft":
+        return ("submit", "أرسل للمراجعة", "submit for review")
+    if st in ("submitted", "accountant_review"):
+        return ("review", "راجع وصنّف", "review & classify")
+    if st == "needs_faisal":
+        return ("faisal", "بانتظار اعتماد فيصل", "awaiting Faisal approval")
+    if st == "approved":
+        return ("draft_journal", "جهّز قيد دافترة", "prepare Daftra journal")
+    if st == "ready_to_post":
+        return ("post", "ترحيل (يحتاج تفعيل)", "post (needs enable)")
+    if st in ("posted", "verification_pending"):
+        return ("verify", "تحقق من دافترة", "verify in Daftra")
+    if st == "failed":
+        return ("retry", "فشل — افتح السبب", "failed — open reason")
+    return ("none", "—", "—")
+
+def _fb_inbox(filters=None):
+    """Unified work queue: canonical ledger entries + bank txns needing review + Sheet expenses."""
+    f = filters or {}
+    items = []
+    for e in _fb_ledger.values():
+        amt = _fb_money(e.get("amount"))
+        na = _fb_next_action(e)
+        items.append({"kind": "ledger", "id": e["id"], "source": e.get("source"), "ref": e.get("source_id") or e["id"],
+                      "apartment": e.get("apartment"), "owner": e.get("owner"), "amount": e.get("amount"),
+                      "direction": e.get("direction"), "category": e.get("category"), "date": e.get("date"),
+                      "description": e.get("description"), "status": e.get("status"),
+                      "match_status": e.get("match_status"), "daftra_status": e.get("daftra_status"),
+                      "verification_status": e.get("verification_status"),
+                      "needs_faisal": amt >= FB_APPROVAL_THRESHOLD, "next_action": na[0],
+                      "next_ar": na[1], "next_en": na[2]})
+    # bank transactions that still need attention (read-only until promoted to a ledger entry)
+    for x in _fb_bank.values():
+        if x.get("status") in ("needs_review", "auto_classified") and x.get("match_status") == "unmatched":
+            amt = _fb_money(x.get("debit")) or _fb_money(x.get("credit"))
+            items.append({"kind": "bank", "id": x["id"], "source": "bank", "ref": x.get("ref") or x["id"][:8],
+                          "apartment": "", "amount": _fb_money_str(amt),
+                          "direction": ("credit" if _fb_money(x.get("credit")) > 0 else "expense"),
+                          "category": x.get("category"), "date": x.get("date"),
+                          "description": x.get("description"), "status": x.get("status"),
+                          "match_status": "unmatched", "daftra_status": "not_imported",
+                          "next_action": "promote", "next_ar": "صنّف وحوّله لقيد", "next_en": "classify & promote"})
+    # existing Google-Sheet expenses (read-only visibility — full flow stays in the Expenses tab)
+    try:
+        for ex in list(_expenses.values())[-200:]:
+            if _exp_canonical_status(ex) in ("verified", "posted"):
+                continue
+            items.append({"kind": "sheet", "id": ex.get("id"), "source": "sheet",
+                          "ref": ex.get("id") or ex.get("ref") or "OJ-EXP",
+                          "apartment": ex.get("apartment"), "amount": _fb_money_str(ex.get("amount")),
+                          "direction": "expense", "category": ex.get("category") or "unknown",
+                          "date": ex.get("expense_date") or ex.get("date"),
+                          "description": (ex.get("description") or ex.get("concept") or "")[:200],
+                          "status": "sheet_intake", "daftra_status": "not_imported",
+                          "next_action": "open_expenses", "next_ar": "افتح في المصاريف", "next_en": "open in Expenses"})
+    except Exception:
+        pass
+    # filters
+    flt = f.get("filter")
+    if flt == "needs_faisal":
+        items = [i for i in items if i.get("needs_faisal") and i.get("status") in ("submitted", "accountant_review", "needs_faisal")]
+    elif flt == "above_3000":
+        items = [i for i in items if _fb_money(i.get("amount")) >= FB_APPROVAL_THRESHOLD]
+    elif flt == "needs_review":
+        items = [i for i in items if i.get("status") in ("needs_review", "auto_classified", "submitted", "accountant_review", "sheet_intake")]
+    elif flt == "ready_to_post":
+        items = [i for i in items if i.get("status") == "ready_to_post"]
+    elif flt == "failed":
+        items = [i for i in items if i.get("status") == "failed"]
+    elif flt == "verified":
+        items = [i for i in items if i.get("verification_status") == "verified"]
+    elif flt == "missing_contract":
+        keys = {_fb_contract_key(p.get("apartment_name"), p.get("apartment_code")) for p in _fb_contracts.values()}
+        items = [i for i in items if i.get("apartment") and _fb_contract_key(i.get("apartment"), "") not in keys]
+    counts = {"total": len(items),
+              "needs_faisal": sum(1 for i in items if i.get("needs_faisal")),
+              "ready_to_post": sum(1 for i in items if i.get("status") == "ready_to_post"),
+              "failed": sum(1 for i in items if i.get("status") == "failed")}
+    items.sort(key=lambda i: (i.get("date") or ""), reverse=True)
+    return {"items": items[:400], "counts": counts}
+
+def _fb_set_status(eid, new, actor, reason=""):
+    e = _fb_ledger.get(eid)
+    if not e:
+        return None
+    prev = e.get("status")
+    e["status"] = new
+    _fb_audit_add(actor, "status_change", "ledger", eid, before=prev, after=new, reason=reason)
+    _fb_save("finance_ledger_entries.json", _fb_ledger)
+    return e
+
+# ---- Stage 7: Daftra journal drafts + verification ----
+def _fb_journal_draft(entry_ids):
+    """Build a journal-entry preview (debit/credit lines) from approved ledger entries + mappings."""
+    lines, total = [], Decimal("0.00")
+    issues = []
+    for eid in entry_ids:
+        e = _fb_ledger.get(eid)
+        if not e:
+            continue
+        if e.get("status") not in ("approved", "ready_to_post"):
+            issues.append((eid, "not approved"))
+            continue
+        amt = _fb_money(e.get("amount"))
+        total += amt
+        m = _fb_mappings.get(e.get("category") or "unknown") or {}
+        acct = m.get("daftra_account_name") or "(غير معيّن / unmapped)"
+        if not m.get("daftra_account_id"):
+            issues.append((eid, "missing account mapping"))
+        side = "credit" if e.get("direction") in ("income", "credit") else "debit"
+        lines.append({"entry_id": eid, "account": acct, "account_id": m.get("daftra_account_id"),
+                      "cost_center": e.get("cost_center") or m.get("daftra_cost_center_id") or "",
+                      "amount": _fb_money_str(amt), "side": side, "memo": e.get("description")})
+    return {"lines": lines, "total": _fb_money_str(total), "n": len(lines),
+            "issues": issues, "post_enabled": DAFTRA_POST_ENABLED, "ready": (not issues and bool(lines))}
+
+def _fb_journal_post(entry_ids, actor=""):
+    """Explicit post — DISABLED unless DAFTRA_POST_ENABLED. Then POST + read-back verify."""
+    draft = _fb_journal_draft(entry_ids)
+    if not DAFTRA_POST_ENABLED:
+        return {"ok": False, "disabled": True,
+                "reason": "الترحيل مغلق — فعّل DAFTRA_POST_ENABLED بعد تأكيد نقاط الربط مع دافترة.",
+                "draft": draft}
+    if not _daftra_configured():
+        return {"ok": False, "error": "not_configured", "draft": draft}
+    if not draft["ready"]:
+        return {"ok": False, "error": "draft_not_ready", "draft": draft}
+    # mark posting → (real Daftra POST endpoint confirmed on the live account) → read-back verify
+    for eid in entry_ids:
+        _fb_set_status(eid, "posting", actor)
+    # NOTE: the exact Daftra journal POST path must be confirmed on the live account before enabling.
+    return {"ok": False, "error": "post_endpoint_unconfirmed",
+            "reason": "أكّد مسار ترحيل القيود في دافترة أولاً ثم نفعّل الترحيل الحقيقي.", "draft": draft}
+
+def _fb_verify_in_daftra(eid):
+    """Read back from Daftra and only mark 'verified' on an exact match (id+amount+date)."""
+    e = _fb_ledger.get(eid)
+    if not e or not e.get("daftra_journal_id"):
+        return {"ok": False, "error": "no_daftra_id"}
+    data, err = _daftra_get(f"/api2/journals/{e['daftra_journal_id']}")
+    if err or not data:
+        e["verification_status"] = "verification_pending"
+        _fb_save("finance_ledger_entries.json", _fb_ledger)
+        return {"ok": False, "error": err or "not_found"}
+    f = _daftra_item_fields("journals", data)
+    match = (str(f.get("id")) == str(e["daftra_journal_id"]) and _fb_money(f.get("amount")) == _fb_money(e.get("amount")))
+    e["verification_status"] = "verified" if match else "needs_fix"
+    e["daftra_status"] = "verified" if match else "needs_fix"
+    e["verified_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _fb_save("finance_ledger_entries.json", _fb_ledger)
+    return {"ok": match, "verification_status": e["verification_status"]}
+
+def _fb_synclog():
+    rows = [e for e in _fb_ledger.values() if e.get("daftra_status") != "not_imported" or e.get("status") in ("ready_to_post", "posting", "posted", "failed")]
+    rows.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+    return {"entries": rows[:200], "runs": list(reversed(_fb_runs))[:50], "post_enabled": DAFTRA_POST_ENABLED}
+
+# ---- Stage 8: profitability (no fake revenue) + monthly close ----
+def _fb_expense_total(month=None):
+    total = Decimal("0.00")
+    for e in _fb_ledger.values():
+        if e.get("direction") in ("expense", "debit") and e.get("status") not in ("rejected", "void", "draft"):
+            if month and not str(e.get("date") or "").startswith(month):
+                continue
+            total += _fb_money(e.get("amount"))
+    return total
+
+def _fb_company_profitability(month=None):
+    daftra_exp = sum((_fb_money(r.get("amount")) for r in _fb_external.values()
+                      if r.get("source_type") == "expenses" and r.get("amount")), Decimal("0.00"))
+    daftra_inc = sum((_fb_money(r.get("amount")) for r in _fb_external.values()
+                      if r.get("source_type") == "incomes" and r.get("amount")), Decimal("0.00"))
+    ledger_exp = _fb_expense_total(month)
+    bank_unmatched = sum(1 for x in _fb_bank.values() if x.get("match_status") == "unmatched")
+    coverage = {"daftra": _daftra_configured() and bool(_fb_external),
+                "contracts": bool(_fb_contracts), "bank": bool(_fb_bank),
+                "hostaway_revenue": False}
+    return {"month": month, "currency": "SAR",
+            "daftra_income": _fb_money_str(daftra_inc), "daftra_expenses": _fb_money_str(daftra_exp),
+            "ledger_expenses": _fb_money_str(ledger_exp),
+            "revenue_connected": False, "revenue_note_ar": "مصدر الإيراد (Hostaway) غير مربوط بعد",
+            "revenue_note_en": "revenue source (Hostaway) not connected yet",
+            "bank_unmatched": bank_unmatched,
+            "ready_to_post": sum(1 for e in _fb_ledger.values() if e.get("status") == "ready_to_post"),
+            "failed": sum(1 for e in _fb_ledger.values() if e.get("status") == "failed"),
+            "verified": sum(1 for e in _fb_ledger.values() if e.get("verification_status") == "verified"),
+            "coverage": coverage}
+
+def _fb_unit_profitability(month=None):
+    units = []
+    for p in _fb_contracts.values():
+        exp = Decimal("0.00")
+        for e in _fb_ledger.values():
+            if e.get("apartment") and _fb_contract_key(e.get("apartment"), "") == _fb_contract_key(p.get("apartment_name"), p.get("apartment_code")):
+                if e.get("direction") in ("expense", "debit"):
+                    exp += _fb_money(e.get("amount"))
+        missing = []
+        if p.get("ouja_percentage") is None and p.get("unit_type") != "company_operated":
+            missing.append(("نسبة عوجا", "Ouja %"))
+        if not p.get("daftra_cost_center_id"):
+            missing.append(("مركز تكلفة", "cost center"))
+        units.append({"apartment": p.get("apartment_name"), "unit_type": p.get("unit_type"),
+                      "ouja_percentage": p.get("ouja_percentage"), "cleaning_rule": p.get("cleaning_rule"),
+                      "expenses": _fb_money_str(exp), "revenue": None,
+                      "revenue_connected": False, "missing": missing,
+                      "health": p.get("validation_status")})
+    return {"month": month, "units": units, "revenue_connected": False,
+            "note_ar": "ما نقدر نحسب الربحية بدقة قبل ربط الإيراد (Hostaway) واكتمال العقود ومراكز التكلفة",
+            "note_en": "accurate profitability needs revenue (Hostaway) connected + complete contracts/cost centers"}
+
+def _fb_monthly_close(month=None):
+    csum = _fb_contracts_summary()
+    inbox = _fb_inbox()
+    over = [i for i in inbox["items"] if _fb_money(i.get("amount")) >= FB_APPROVAL_THRESHOLD and i.get("status") in ("submitted", "accountant_review", "needs_faisal")]
+    checklist = [
+        {"key": "daftra", "ar": "استيراد دافترة", "en": "Daftra imported", "done": bool(_fb_external)},
+        {"key": "contracts", "ar": "مراجعة العقود", "en": "Contracts reviewed", "done": bool(_fb_contracts) and csum["health"].get("incomplete", 0) == 0},
+        {"key": "bank", "ar": "رفع كشف البنك", "en": "Bank uploaded", "done": bool(_fb_bank)},
+        {"key": "classified", "ar": "تصنيف حركة البنك", "en": "Bank classified", "done": _fb_bank_summary()["needs_review"] == 0 if _fb_bank else False},
+        {"key": "approvals", "ar": "اعتماد ما فوق ٣٠٠٠", "en": "≥3000 approved", "done": len(over) == 0},
+        {"key": "mappings", "ar": "اكتمال ربط دافترة", "en": "Daftra mappings complete", "done": bool(_fb_mappings)},
+    ]
+    blockers = [c for c in checklist if not c["done"]]
+    return {"month": month, "checklist": checklist, "can_close": (len(blockers) == 0),
+            "blockers": len(blockers), "over_3000_pending": len(over),
+            "unknown_bank": _fb_bank_summary().get("needs_review", 0) if _fb_bank else 0,
+            "missing_cost_centers": csum["flags"].get("missing_cost_center", 0),
+            "missing_hostaway": csum["flags"].get("missing_hostaway", 0),
+            "note_ar": "ما نقدر نقفل الشهر قبل حل البنود الحرجة — أو تجاوز بقرار وسبب من فيصل."}
+
+# ---- Stage 6-8 endpoints ----
+async def _api_fb_inbox(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _req_role(request) == "ops":
+        return _json({"error": "forbidden_ops"}, 403)   # ops cannot see the finance inbox/profitability
+    return _json({"ok": True, **_fb_inbox({"filter": request.query.get("filter")})})
+
+async def _api_fb_entry(request):
+    """POST actions on a ledger entry: submit / classify / approve / reject / void / promote."""
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    action = (b.get("action") or "").strip()
+    actor, role = _req_actor(request), _req_role(request)
+    if action == "promote":                     # bank/sheet → canonical ledger entry
+        bx = _fb_bank.get(b.get("id"))
+        if not bx:
+            return _json({"error": "bank_txn_not_found"}, 404)
+        e = _fb_ledger_create("bank", _fb_money(bx.get("debit")) or _fb_money(bx.get("credit")),
+                              ("credit" if _fb_money(bx.get("credit")) > 0 else "expense"),
+                              b.get("category") or bx.get("category"), apartment=b.get("apartment", ""),
+                              description=bx.get("description"), date=bx.get("date"), source_id=bx["id"], submitter=actor)
+        bx["match_status"] = "matched"
+        _fb_save("finance_bank_transactions.json", _fb_bank)
+        _fb_audit_add(actor, "promote_bank", "ledger", e["id"], after={"bank": bx["id"]})
+        return _json({"ok": True, "entry": e})
+    eid = (b.get("id") or "").strip()
+    e = _fb_ledger.get(eid)
+    if not e:
+        return _json({"error": "entry_not_found"}, 404)
+    if action == "classify":
+        for k in ("category", "apartment", "owner", "cost_center", "description", "direction"):
+            if k in b and b.get(k) not in (None, ""):
+                e[k] = b.get(k)
+        _fb_audit_add(actor, "classify", "ledger", eid, reason=b.get("reason", ""))
+        _fb_save("finance_ledger_entries.json", _fb_ledger)
+        return _json({"ok": True, "entry": e})
+    if action == "submit":
+        amt = _fb_money(e.get("amount"))
+        new = "needs_faisal" if amt >= FB_APPROVAL_THRESHOLD else "accountant_review"
+        _fb_set_status(eid, new, actor)
+        if amt >= FB_APPROVAL_THRESHOLD:
+            asyncio.ensure_future(_fb_notify_large(e, actor))
+        return _json({"ok": True, "entry": e})
+    if action == "approve":
+        amt = _fb_money(e.get("amount"))
+        if amt >= FB_APPROVAL_THRESHOLD and role != "admin":
+            return _json({"error": "needs_faisal", "message": "هالمبلغ يحتاج اعتماد فيصل"}, 403)
+        _fb_set_status(eid, "approved", actor, reason=b.get("reason", ""))
+        return _json({"ok": True, "entry": e})
+    if action == "reject":
+        _fb_set_status(eid, "rejected", actor, reason=b.get("reason", ""))
+        return _json({"ok": True, "entry": e})
+    if action == "void":                         # no delete of approved/posted — void with reason
+        if not b.get("reason"):
+            return _json({"error": "reason_required"}, 400)
+        _fb_set_status(eid, "void", actor, reason=b.get("reason"))
+        return _json({"ok": True, "entry": e})
+    return _json({"error": "bad_action"}, 400)
+
+async def _api_fb_mappings(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    if request.method == "GET":
+        return _json({"ok": True, "mappings": _fb_mappings,
+                      "daftra_accounts": [r for r in _fb_external.values() if r.get("source_type") == "accounts"][:300],
+                      "cost_centers": [r for r in _fb_external.values() if r.get("source_type") == "cost_centers"][:300]})
+    b = await _read_body(request)
+    cat = (b.get("category") or "").strip()
+    if not cat:
+        return _json({"error": "missing_category"}, 400)
+    _fb_mappings[cat] = {"category": cat, "daftra_account_id": b.get("daftra_account_id") or "",
+                         "daftra_account_name": b.get("daftra_account_name") or "",
+                         "daftra_cost_center_id": b.get("daftra_cost_center_id") or "",
+                         "status": "mapped" if b.get("daftra_account_id") else "unmapped",
+                         "updated_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    _fb_save("finance_daftra_mappings.json", _fb_mappings)
+    _fb_audit_add(_req_actor(request), "mapping", "mapping", cat)
+    return _json({"ok": True, "mappings": _fb_mappings})
+
+async def _api_fb_journal(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    ids = b.get("entry_ids") or []
+    if b.get("post"):
+        if not _fb_is_admin(request):
+            return _json({"error": "admin_only_to_post"}, 403)
+        return _json(await asyncio.to_thread(_fb_journal_post, ids, _req_actor(request)))
+    return _json({"ok": True, "draft": _fb_journal_draft(ids)})
+
+async def _api_fb_synclog(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, **_fb_synclog()})
+
+async def _api_fb_profit(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)   # profitability hidden from ops/viewer
+    scope = request.query.get("scope", "company")
+    month = request.query.get("month") or None
+    if scope == "unit":
+        return _json({"ok": True, **_fb_unit_profitability(month)})
+    return _json({"ok": True, **_fb_company_profitability(month)})
+
+async def _api_fb_close(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json({"ok": True, **_fb_monthly_close(request.query.get("month") or None)})
+
+async def _api_fb_overview(request):
+    """Setup-journey state: each step's status + last sync + counts. No fake metrics."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    dov = _fb_daftra_overview()
+    csum = _fb_contracts_summary()
+    bsum = _fb_bank_summary()
+    steps = [
+        {"key": "daftra_env", "done": dov["configured"], "attention": not dov["configured"]},
+        {"key": "daftra_test", "done": bool(dov["last_run"]) and dov["configured"], "attention": False},
+        {"key": "daftra_import", "done": dov["total_records"] > 0, "attention": dov["configured"] and dov["total_records"] == 0},
+        {"key": "contracts", "done": csum["count"] > 0, "attention": csum["count"] > 0 and csum["health"].get("incomplete", 0) > 0},
+        {"key": "contracts_review", "done": csum["count"] > 0 and csum["health"].get("incomplete", 0) == 0, "attention": False},
+        {"key": "bank", "done": bsum["count"] > 0, "attention": False},
+        {"key": "reconcile", "done": False, "attention": bsum.get("needs_review", 0) > 0},
+        {"key": "approvals", "done": False, "attention": _fb_inbox()["counts"]["needs_faisal"] > 0},
+        {"key": "posting", "done": DAFTRA_POST_ENABLED, "attention": False},
+    ]
+    return _json({"ok": True, "role": _req_role(request), "steps": steps, "daftra": dov,
+                  "contracts": csum, "bank": bsum, "post_enabled": DAFTRA_POST_ENABLED,
+                  "inbox_counts": _fb_inbox()["counts"]})
+
 def _pmo_task_view(t):
     return {
         "id": t.get("id"), "name": t.get("name", ""), "room": t.get("room") or "عام",
@@ -35329,6 +35724,25 @@ async def start_web_server():
         app.router.add_post("/api/finance/adjust", _api_finance_adjust)
         app.router.add_post("/api/finance/line-edit", _api_finance_line_edit)
         app.router.add_get("/api/finance/audit", _api_finance_audit)
+        # ---- Financial Brain (المركز المالي) ----
+        app.router.add_get("/api/fb/overview", _api_fb_overview)
+        app.router.add_get("/api/fb/daftra", _api_fb_daftra)
+        app.router.add_post("/api/fb/daftra/test", _api_fb_daftra_test)
+        app.router.add_post("/api/fb/daftra/import", _api_fb_daftra_import)
+        app.router.add_get("/api/fb/contracts", _api_fb_contracts)
+        app.router.add_post("/api/fb/contracts/import", _api_fb_contracts_import)
+        app.router.add_get("/api/fb/bank", _api_fb_bank)
+        app.router.add_post("/api/fb/bank/import", _api_fb_bank_import)
+        app.router.add_get("/api/fb/cards", _api_fb_cards)
+        app.router.add_post("/api/fb/cards", _api_fb_cards)
+        app.router.add_get("/api/fb/inbox", _api_fb_inbox)
+        app.router.add_post("/api/fb/entry", _api_fb_entry)
+        app.router.add_get("/api/fb/mappings", _api_fb_mappings)
+        app.router.add_post("/api/fb/mappings", _api_fb_mappings)
+        app.router.add_post("/api/fb/journal", _api_fb_journal)
+        app.router.add_get("/api/fb/synclog", _api_fb_synclog)
+        app.router.add_get("/api/fb/profit", _api_fb_profit)
+        app.router.add_get("/api/fb/close", _api_fb_close)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
