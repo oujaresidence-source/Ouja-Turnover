@@ -22199,7 +22199,7 @@ async function fbContracts(){
   var d; try{ d=await api('/api/fb/contracts'); }catch(_){ d=null; }
   var sum=(d&&d.summary)||{count:0,health:{},flags:{}};
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📑 '+t().fb_contracts+'</b>'
-    +'<label class="btn primary sm" style="cursor:pointer">'+t().fb_upload+'<input type="file" accept=".xlsx" style="display:none" onchange="fbUpload(event,&#39;contracts&#39;)"></label></div>';
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap"><a class="btn ghost sm" href="/api/fb/contracts/template?token='+encodeURIComponent(tok())+'">⬇ '+(ar?'تنزيل قالب':'Download template')+'</a><label class="btn primary sm" style="cursor:pointer">'+t().fb_upload+'<input type="file" accept=".xlsx" style="display:none" onchange="fbUpload(event,&#39;contracts&#39;)"></label></div></div>';
   if(!sum.count){ h+='<div class="muted" style="font-size:12.5px;margin-top:8px;line-height:1.8">'+(ar?'ارفع ملف العقود عشان نعرف نسبة عوجا وقواعد النظافة والصيانة لكل شقة. ما نخمّن أي نسبة أو مبلغ ناقص.':'Upload the contracts file so we know each unit Ouja %, cleaning & maintenance rules. We never guess a missing % or amount.')+'</div></div>'; b.innerHTML=h; return; }
   var hh=sum.health||{}, fl=sum.flags||{};
   h+='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px">'+fbChip((ar?'مكتمل ':'complete ')+(hh.complete||0),'ok')+fbChip((ar?'مراجعة ':'review ')+(hh.needs_review||0),'warn')+fbChip((ar?'ناقص ':'incomplete ')+(hh.incomplete||0),'bad')+'</div>';
@@ -33180,6 +33180,36 @@ def _fb_bank_summary():
             "last_run": _fb_last_run("bank")}
 
 # ---- contract + bank + card endpoints ----
+def _fb_contract_template_bytes():
+    """A ready contract template (.xlsx) whose headers match the importer's auto-detect, with
+    example rows for each contract type. Owner fills it and uploads it on the same screen."""
+    import io as _io, openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "العقود"
+    headers = ["اسم الشقة", "كود الشقة", "المالك", "نسبة عوجا %", "النظافة",
+               "الصيانة", "الاسترجاع", "Hostaway ID", "الحالة", "نوع العقد", "ملاحظات"]
+    ws.append(headers)
+    # example rows that TEACH the format (the cleaning column accepts: علينا / مبلغ شهري / المالك)
+    ws.append(["Ouja | T08", "T08", "عبدالله السالم", 25, "علينا", "المالك", "المالك", "", "active", "25% — تشغيل ونظافة على عوجا", ""])
+    ws.append(["Ouja | A11", "A11", "سارة محمد", 18, "1050", "المالك", "المالك", "", "active", "نسبة + نظافة شهرية على المالك", "النظافة ١٠٥٠ شهريًا"])
+    ws.append(["Ouja | B02", "B02", "مستثمر", 20, "1100", "المالك", "المالك", "", "active", "نسبة مخصّصة", ""])
+    ws.append(["Ouja | E15", "E15", "عوجا", "", "علينا", "عوجا", "عوجا", "", "active", "وحدة تشغيل عوجا (شركة)", "ربحيتها كلها لعوجا"])
+    try:
+        ws.sheet_view.rightToLeft = True
+        from openpyxl.utils import get_column_letter
+        for i in range(1, len(headers) + 1):
+            ws.column_dimensions[get_column_letter(i)].width = 20
+    except Exception:
+        pass
+    buf = _io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+async def _api_fb_contract_template(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    data = await asyncio.to_thread(_fb_contract_template_bytes)
+    return web.Response(body=data,
+                        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": "attachment; filename=ouja-contracts-template.xlsx"})
+
 async def _api_fb_contracts(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -36105,6 +36135,7 @@ async def start_web_server():
         app.router.add_get("/api/fb/daftra/diag", _api_fb_daftra_diag)
         app.router.add_post("/api/fb/daftra/import", _api_fb_daftra_import)
         app.router.add_get("/api/fb/contracts", _api_fb_contracts)
+        app.router.add_get("/api/fb/contracts/template", _api_fb_contract_template)
         app.router.add_post("/api/fb/contracts/import", _api_fb_contracts_import)
         app.router.add_get("/api/fb/bank", _api_fb_bank)
         app.router.add_post("/api/fb/bank/import", _api_fb_bank_import)
