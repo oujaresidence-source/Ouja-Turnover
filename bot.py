@@ -32517,6 +32517,373 @@ async def _api_fb_daftra_import(request):
         return _json({"error": "forbidden"}, 403)
     return _json(await asyncio.to_thread(_daftra_import_all, _req_actor(request)))
 
+# ---- Stage 4-5: shared Excel reader + multipart helper ----
+def _fb_read_xlsx(file_bytes):
+    """(headers, rows[]) from the first worksheet. Header row = first non-empty row."""
+    import io as _io, openpyxl
+    wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    rows = []
+    for r in ws.iter_rows(values_only=True):
+        rows.append(list(r))
+    wb.close()
+    # find header row (first row with >=2 non-empty cells)
+    hi = 0
+    for i, r in enumerate(rows[:15]):
+        if sum(1 for c in r if c not in (None, "")) >= 2:
+            hi = i
+            break
+    headers = [str(c).strip() if c is not None else "" for c in (rows[hi] if rows else [])]
+    body = [r for r in rows[hi + 1:] if any(c not in (None, "") for c in r)]
+    return headers, body, hi
+
+async def _fb_read_upload(request):
+    """Read a single uploaded file (multipart) → (bytes, filename, fields)."""
+    reader = await request.multipart()
+    data, fname, fields = b"", "", {}
+    async for part in reader:
+        if part.name == "file":
+            fname = part.filename or "upload.xlsx"
+            chunks, total = [], 0
+            while True:
+                ch = await part.read_chunk()
+                if not ch:
+                    break
+                total += len(ch)
+                if total > 15 * 1024 * 1024:
+                    raise ValueError("file_too_large")
+                chunks.append(ch)
+            data = b"".join(chunks)
+        else:
+            fields[part.name] = (await part.text()).strip()
+    return data, fname, fields
+
+# ---- Stage 4: Contract Profiles importer ----
+_FB_CONTRACT_HINTS = {
+    "apartment_name": ("apartment", "unit name", "الشقة", "اسم الشقة", "الوحدة", "name", "اسم"),
+    "apartment_code": ("code", "كود", "رمز", "id", "معرف"),
+    "owner_name": ("owner", "investor", "مالك", "المالك", "مستثمر", "المستثمر"),
+    "ouja_percentage": ("percent", "%", "نسبة", "عمولة", "عوجا", "ouja"),
+    "cleaning": ("clean", "نظافة", "تنظيف"),
+    "maintenance": ("maint", "صيانة"),
+    "refund": ("refund", "استرجاع", "استرداد", "ريفند"),
+    "hostaway_listing_id": ("hostaway", "listing", "هوست"),
+    "status": ("status", "الحالة", "حالة"),
+    "contract_type": ("contract", "عقد", "نوع العقد", "type"),
+    "notes": ("note", "ملاحظ", "تعليق"),
+}
+
+def _fb_detect_cols(headers):
+    cmap = {}
+    low = [(h or "").strip().lower() for h in headers]
+    for field, hints in _FB_CONTRACT_HINTS.items():
+        for i, h in enumerate(low):
+            if h and any(hint in h for hint in hints) and field not in cmap:
+                cmap[field] = i
+                break
+    return cmap
+
+def _fb_norm_cleaning(val):
+    """Normalize the messy cleaning column → (rule, monthly_amount). Never guesses an amount."""
+    s = str(val or "").strip().lower()
+    if not s:
+        return "unknown", None
+    if any(w in s for w in ("علينا", "عوجا", "ouja", "on us", "our")):
+        return "ouja_pays", None
+    if any(w in s for w in ("owner", "مالك", "المالك")):
+        # owner pays — maybe a monthly figure too
+        amt = _fb_money(s)
+        return ("owner_monthly_charge", str(amt.quantize(Decimal("0.01")))) if amt >= 200 else ("owner_pays", None)
+    amt = _fb_money(s)
+    if amt >= 200:                      # a bare SAR figure → owner monthly charge
+        return "owner_monthly_charge", str(amt.quantize(Decimal("0.01")))
+    if "%" in s:                        # a percentage in the cleaning column is ambiguous
+        return "unknown", None
+    return "unknown", None
+
+def _fb_norm_pct(val):
+    s = str(val or "").strip().replace("%", "").replace("٪", "").strip()
+    if not s:
+        return None
+    try:
+        p = float(s)
+        return round(p * 100, 2) if p <= 1 else round(p, 2)   # 0.25 or 25 → 25.0
+    except ValueError:
+        return None
+
+def _fb_contract_key(name, code):
+    base = (str(code or "").strip() or str(name or "").strip()).lower()
+    return "".join(ch for ch in base if ch.isalnum()) or None
+
+def _fb_contract_validate(p):
+    """Return (validation_status, issues[]). Owner-managed active needs the full set."""
+    issues = []
+    ut = p.get("unit_type")
+    if not p.get("apartment_name"):
+        issues.append(("بدون اسم شقة", "missing apartment name"))
+    if not p.get("apartment_code"):
+        issues.append(("بدون كود", "missing code"))
+    if ut == "company_operated":
+        if not p.get("daftra_cost_center_id"):
+            issues.append(("ناقص مركز تكلفة", "missing cost center"))
+    else:  # owner_managed (or unknown defaults to owner-managed expectations)
+        if not p.get("owner_name"):
+            issues.append(("بدون مالك", "missing owner"))
+        if p.get("ouja_percentage") is None:
+            issues.append(("بدون نسبة عوجا", "missing Ouja %"))
+        if (p.get("cleaning_rule") or "unknown") == "unknown":
+            issues.append(("قاعدة النظافة غير واضحة", "unknown cleaning rule"))
+        if not p.get("daftra_cost_center_id"):
+            issues.append(("ناقص مركز تكلفة", "missing cost center"))
+    if not p.get("hostaway_listing_id"):
+        issues.append(("ناقص Hostaway ID", "missing Hostaway ID"))
+    status = "complete" if not issues else ("needs_review" if len(issues) <= 2 else "incomplete")
+    return status, issues
+
+def _fb_contract_row_to_profile(headers, row, cmap):
+    g = lambda f: (row[cmap[f]] if f in cmap and cmap[f] < len(row) else None)
+    name = str(g("apartment_name") or "").strip()
+    code = str(g("apartment_code") or "").strip()
+    crule, camt = _fb_norm_cleaning(g("cleaning"))
+    owner = str(g("owner_name") or "").strip()
+    # unit type: only company_operated when explicitly Ouja-owned; never guessed
+    owner_low = owner.lower()
+    unit_type = "company_operated" if any(w in owner_low for w in ("ouja", "عوجا", "company", "الشركة")) else ("owner_managed" if owner else "unknown")
+    p = {"apartment_name": name, "apartment_code": code, "owner_name": owner,
+         "unit_type": unit_type, "status": (str(g("status") or "").strip().lower() or "unknown"),
+         "contract_type": str(g("contract_type") or "").strip(),
+         "ouja_percentage": _fb_norm_pct(g("ouja_percentage")),
+         "platform_fee_rule": "before_ouja_percentage",
+         "cleaning_rule": crule, "cleaning_monthly_amount": camt, "cleaning_provider": "",
+         "maintenance_rule": "owner_pays", "refund_rule": "owner_pays",
+         "owner_expense_deduction_rule": "after_ouja_fee",
+         "hostaway_listing_id": str(g("hostaway_listing_id") or "").strip(),
+         "daftra_cost_center_id": "", "owner_daftra_id": "",
+         "notes": str(g("notes") or "").strip()}
+    p["validation_status"], p["validation_issues"] = _fb_contract_validate(p)
+    return p
+
+def _fb_contracts_preview(file_bytes, colmap=None):
+    headers, body, hi = _fb_read_xlsx(file_bytes)
+    cmap = colmap if colmap else _fb_detect_cols(headers)
+    rows = []
+    for i, r in enumerate(body):
+        p = _fb_contract_row_to_profile(headers, r, cmap)
+        if not (p["apartment_name"] or p["apartment_code"]):
+            continue
+        rows.append({"row": hi + 2 + i, "profile": p})
+    return {"headers": headers, "detected": cmap, "rows": rows, "count": len(rows),
+            "fields": list(_FB_CONTRACT_HINTS.keys())}
+
+def _fb_contracts_save(rows, actor=""):
+    saved = updated = 0
+    for item in rows:
+        p = item.get("profile") or item
+        key = _fb_contract_key(p.get("apartment_name"), p.get("apartment_code"))
+        if not key:
+            continue
+        p["validation_status"], p["validation_issues"] = _fb_contract_validate(p)
+        p["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        p["updated_by"] = actor
+        if key in _fb_contracts:
+            # preserve accountant-set mappings on re-import
+            for keep in ("daftra_cost_center_id", "owner_daftra_id", "hostaway_listing_id", "cleaning_provider", "notes"):
+                if _fb_contracts[key].get(keep) and not p.get(keep):
+                    p[keep] = _fb_contracts[key][keep]
+            _fb_contracts[key] = {**_fb_contracts[key], **p}
+            updated += 1
+        else:
+            p["id"] = key
+            _fb_contracts[key] = p
+            saved += 1
+    _fb_save("finance_contract_profiles.json", _fb_contracts)
+    _fb_audit_add(actor, "contracts_import", "import_run", "contracts", after={"saved": saved, "updated": updated})
+    return {"saved": saved, "updated": updated, "total": len(_fb_contracts)}
+
+def _fb_contracts_summary():
+    rows = list(_fb_contracts.values())
+    health = {"complete": 0, "needs_review": 0, "incomplete": 0}
+    flags = {"missing_hostaway": 0, "missing_cost_center": 0, "missing_pct": 0, "unknown_cleaning": 0, "unknown_status": 0}
+    for p in rows:
+        health[p.get("validation_status", "incomplete")] = health.get(p.get("validation_status", "incomplete"), 0) + 1
+        if not p.get("hostaway_listing_id"):
+            flags["missing_hostaway"] += 1
+        if not p.get("daftra_cost_center_id"):
+            flags["missing_cost_center"] += 1
+        if p.get("ouja_percentage") is None and p.get("unit_type") != "company_operated":
+            flags["missing_pct"] += 1
+        if (p.get("cleaning_rule") or "unknown") == "unknown":
+            flags["unknown_cleaning"] += 1
+        if (p.get("status") or "unknown") == "unknown":
+            flags["unknown_status"] += 1
+    return {"count": len(rows), "health": health, "flags": flags, "last_run": _fb_last_run("contracts")}
+
+# ---- Stage 5: Al Rajhi bank Excel parser (Decimal · dedup · mask · classify) ----
+def _fb_bank_classify(desc, debit, credit):
+    s = str(desc or "").lower()
+    if any(w in s for w in ("airbnb", "hostaway", "booking", "agoda", "payout", "تحويل وارد", "إيداع")) and credit > 0:
+        return "channel_payout"
+    if any(w in s for w in ("رسوم", "fee", "عمولة بنك", "bank charge")):
+        return "bank_fee"
+    if any(w in s for w in ("تحويل فوري", "instant transfer", "sarie", "سريع")) and ("رسوم" in s or "fee" in s):
+        return "instant_transfer_fee"
+    if any(w in s for w in ("نظافة", "cleaning", "clean")):
+        return "cleaning_provider"
+    if any(w in s for w in ("صيانة", "maintenance")):
+        return "maintenance"
+    if any(w in s for w in ("wifi", "wi-fi", "نت", "اتصالات", "stc", "internet")):
+        return "wifi"
+    if any(w in s for w in ("اشتراك", "subscription", "saas", "software")):
+        return "software_subscription"
+    if any(w in s for w in ("مدى", "mada", "card", "بطاقة", "pos", "نقطة بيع")):
+        return "employee_card_settlement"
+    return "unknown"
+
+def _fb_card_last4(desc):
+    import re as _re
+    m = _re.search(r"(\d{4})\D*$", str(desc or "")) or _re.search(r"\b(\d{4})\b", str(desc or ""))
+    return m.group(1) if m else None
+
+def _fb_bank_preview(file_bytes, fname="", colmap=None):
+    headers, body, hi = _fb_read_xlsx(file_bytes)
+    low = [(h or "").strip().lower() for h in headers]
+    def find(*hints):
+        for i, h in enumerate(low):
+            if h and any(x in h for x in hints):
+                return i
+        return None
+    cm = colmap or {"date": find("date", "تاريخ"), "desc": find("desc", "بيان", "تفاصيل", "نوع العملية", "narration"),
+                    "debit": find("debit", "مدين", "سحب", "withdraw"), "credit": find("credit", "دائن", "إيداع", "deposit"),
+                    "balance": find("balance", "رصيد"), "ref": find("ref", "مرجع", "reference")}
+    out = []
+    for i, r in enumerate(body):
+        def cell(k):
+            idx = cm.get(k)
+            return r[idx] if (idx is not None and idx < len(r)) else None
+        debit = _fb_money(cell("debit")); credit = _fb_money(cell("credit"))
+        if debit == 0 and credit == 0:
+            continue
+        desc = str(cell("desc") or "").strip()
+        date = str(cell("date") or "").strip()
+        h = hashlib.sha1(("|".join([fname, date, desc, _fb_money_str(debit), _fb_money_str(credit)])).encode("utf-8")).hexdigest()
+        out.append({"row": hi + 2 + i, "date": date, "desc_masked": _fb_mask_iban(desc) if ("iban" in desc.lower() or "sa" == desc[:2].lower()) else desc,
+                    "desc": desc, "debit": _fb_money_str(debit), "credit": _fb_money_str(credit),
+                    "balance": (_fb_money_str(cell("balance")) if cell("balance") is not None else None),
+                    "ref": str(cell("ref") or "").strip(), "card_last4": _fb_card_last4(desc),
+                    "category": _fb_bank_classify(desc, debit, credit), "hash": h,
+                    "duplicate": h in _fb_bank})
+    return {"headers": headers, "detected": cm, "rows": out, "count": len(out),
+            "new": sum(1 for x in out if not x["duplicate"]), "dups": sum(1 for x in out if x["duplicate"]),
+            "filename": fname}
+
+def _fb_bank_save(rows, fname="", actor=""):
+    saved = dup = 0
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    for x in rows:
+        h = x.get("hash")
+        if not h or h in _fb_bank:
+            dup += 1
+            continue
+        _fb_bank[h] = {"id": h, "source_file": fname, "row": x.get("row"), "date": x.get("date"),
+                       "description": x.get("desc"), "debit": x.get("debit"), "credit": x.get("credit"),
+                       "balance": x.get("balance"), "ref": x.get("ref"), "card_last4": x.get("card_last4"),
+                       "category": x.get("category"), "status": "auto_classified" if x.get("category") != "unknown" else "needs_review",
+                       "match_status": "unmatched", "daftra_status": "not_imported",
+                       "imported_at": now, "imported_by": actor}
+        saved += 1
+    _fb_save("finance_bank_transactions.json", _fb_bank)
+    _fb_audit_add(actor, "bank_import", "import_run", fname, after={"saved": saved, "duplicates": dup})
+    return {"saved": saved, "duplicates": dup, "total": len(_fb_bank)}
+
+def _fb_bank_summary():
+    rows = list(_fb_bank.values())
+    by_cat, by_status = {}, {}
+    for x in rows:
+        by_cat[x.get("category", "unknown")] = by_cat.get(x.get("category", "unknown"), 0) + 1
+        by_status[x.get("status", "needs_review")] = by_status.get(x.get("status", "needs_review"), 0) + 1
+    return {"count": len(rows), "by_category": by_cat, "by_status": by_status,
+            "needs_review": by_status.get("needs_review", 0), "unmatched": sum(1 for x in rows if x.get("match_status") == "unmatched"),
+            "last_run": _fb_last_run("bank")}
+
+# ---- contract + bank + card endpoints ----
+async def _api_fb_contracts(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "summary": _fb_contracts_summary(),
+                  "profiles": list(_fb_contracts.values())})
+
+async def _api_fb_contracts_import(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    try:
+        data, fname, fields = await _fb_read_upload(request)
+    except ValueError as e:
+        return _json({"error": str(e)}, 400)
+    if not data:
+        return _json({"error": "empty_file"}, 400)
+    save = (fields.get("save") == "1")
+    colmap = None
+    if fields.get("colmap"):
+        try:
+            colmap = {k: int(v) for k, v in json.loads(fields["colmap"]).items() if v not in (None, "")}
+        except Exception:
+            colmap = None
+    try:
+        prev = await asyncio.to_thread(_fb_contracts_preview, data, colmap)
+    except Exception as e:
+        return _json({"error": "parse_failed", "detail": str(e)[:200]}, 400)
+    if not save:
+        return _json({"ok": True, "preview": prev})
+    run = _fb_run_start("contracts", fname, _req_actor(request))
+    res = await asyncio.to_thread(_fb_contracts_save, prev["rows"], _req_actor(request))
+    _fb_run_finish(run, "done", imported=res["saved"], updated=res["updated"])
+    return _json({"ok": True, "saved": res, "summary": _fb_contracts_summary()})
+
+async def _api_fb_bank(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json({"ok": True, "summary": _fb_bank_summary(),
+                  "transactions": [dict(x, description=None) if False else x for x in list(_fb_bank.values())[-400:]]})
+
+async def _api_fb_bank_import(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    try:
+        data, fname, fields = await _fb_read_upload(request)
+    except ValueError as e:
+        return _json({"error": str(e)}, 400)
+    if not data:
+        return _json({"error": "empty_file"}, 400)
+    try:
+        prev = await asyncio.to_thread(_fb_bank_preview, data, fname)
+    except Exception as e:
+        return _json({"error": "parse_failed", "detail": str(e)[:200]}, 400)
+    if fields.get("save") != "1":
+        return _json({"ok": True, "preview": prev})
+    run = _fb_run_start("bank", fname, _req_actor(request))
+    res = await asyncio.to_thread(_fb_bank_save, prev["rows"], fname, _req_actor(request))
+    _fb_run_finish(run, "done", imported=res["saved"], failed=0)
+    return _json({"ok": True, "saved": res, "summary": _fb_bank_summary()})
+
+async def _api_fb_cards(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    if request.method == "GET":
+        return _json({"ok": True, "cards": _fb_cards})
+    b = await _read_body(request)
+    last4 = "".join(ch for ch in str(b.get("last4") or "") if ch.isdigit())[-4:]
+    if not last4:
+        return _json({"error": "bad_last4"}, 400)
+    if b.get("delete"):
+        _fb_cards.pop(last4, None)
+    else:
+        _fb_cards[last4] = {"last4": last4, "employee": (b.get("employee") or "").strip()[:80],
+                            "active": bool(b.get("active", True)), "notes": (b.get("notes") or "")[:200],
+                            "default_category": (b.get("default_category") or "").strip()}
+    _fb_save("finance_card_mappings.json", _fb_cards)
+    _fb_audit_add(_req_actor(request), "card_mapping", "card", last4)
+    return _json({"ok": True, "cards": _fb_cards})
+
 def _pmo_task_view(t):
     return {
         "id": t.get("id"), "name": t.get("name", ""), "room": t.get("room") or "عام",
