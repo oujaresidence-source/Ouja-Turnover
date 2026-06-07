@@ -22171,7 +22171,7 @@ async function fbDaftra(){
   if(!dov.configured){ h+='<div class="muted" style="font-size:12.5px;margin-top:8px;line-height:1.8">'+(ar?'ما استوردنا بيانات دافترة للحين. اربط دافترة عشان نعرض الحسابات، مراكز التكلفة، والمصاريف الموجودة.':'No Daftra data yet. Connect Daftra to show accounts, cost centers and existing expenses.')+'<br><b>Railway env:</b> DAFTRA_BASE_URL · DAFTRA_API_KEY'+(ar?' · (اختياري) ':' · (optional) ')+'DAFTRA_COMPANY_SLUG · DAFTRA_IMPORT_START_DATE</div></div>'; b.innerHTML=h; return; }
   h+='<div class="muted" style="font-size:11px;margin-top:6px">'+(ar?'الرابط: ':'base: ')+esc(dov.base||'')+' · '+(ar?'المفتاح: ':'key: ')+esc(dov.key_mask||'')+'</div>';
   var lr=dov.last_run; h+='<div class="muted" style="font-size:11px;margin-top:3px">'+t().fb_lastsync+': '+(lr?esc((lr.finished_at||lr.started_at||'').replace('T',' ').slice(0,16))+' · '+(lr.imported_count||0)+'+'+(lr.updated_count||0):'—')+(lr&&lr.error_summary?(' · <span style="color:var(--down)">'+esc(lr.error_summary)+'</span>'):'')+'</div>';
-  h+='<div style="display:flex;gap:8px;margin-top:10px"><button class="btn ghost sm" onclick="fbDaftraTest()">'+t().fb_test+'</button><button class="btn primary sm" onclick="fbDaftraImport()">'+t().fb_import+'</button></div></div>';
+  h+='<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn ghost sm" onclick="fbDaftraTest()">'+t().fb_test+'</button><button class="btn primary sm" onclick="fbDaftraImport()">'+t().fb_import+'</button><button class="btn ghost sm" onclick="fbDaftraDiag()">🔍 '+(ar?'تشخيص':'Diagnose')+'</button></div></div>';
   var counts=dov.counts||{}, labels=dov.labels||{};
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'+Object.keys(labels).map(function(k){ return '<div style="'+fbCard()+';margin:0;text-align:center"><div style="font-size:22px;font-weight:800">'+(counts[k]||0)+'</div><div class="muted" style="font-size:10.5px">'+esc(labels[k])+'</div></div>'; }).join('')+'</div>';
   if(dov.total_records===0) h+='<div class="muted" style="font-size:12px;margin-top:10px;text-align:center">'+(ar?'اضغط «استيراد» عشان نجيب بيانات دافترة الموجودة':'Press Import to pull existing Daftra data')+'</div>';
@@ -22179,6 +22179,20 @@ async function fbDaftra(){
 }
 async function fbDaftraTest(){ var ar=(L==='ar'); toast(ar?'⏳ اختبار…':'⏳ Testing…'); var r; try{ r=await post('/api/fb/daftra/test',{}); }catch(_){ r=null; } if(r&&r.ok) toast(ar?'الربط جاهز ✓':'Connection OK ✓'); else toast((ar?'فشل: ':'Failed: ')+((r&&r.error)||'?')); }
 async function fbDaftraImport(){ var ar=(L==='ar'); toast(ar?'⏳ استيراد دافترة…':'⏳ Importing…'); var r; try{ r=await post('/api/fb/daftra/import',{}); }catch(_){ r=null; } if(r&&r.ok) toast((ar?'استورد ':'imported ')+(r.imported||0)+' · '+(ar?'حدّث ':'updated ')+(r.updated||0)); else toast((r&&r.error)||'⚠'); fbDaftra(); }
+async function fbDaftraDiag(){
+  var ar=(L==='ar'); openDrawer(ar?'🔍 تشخيص دافترة':'🔍 Daftra diagnostics', ar?'حالة كل نقطة API':'status per endpoint'); setDrawerBody('<div class="empty sk">—</div>');
+  var d; try{ d=await api('/api/fb/daftra/diag'); }catch(_){ d=null; }
+  if(!d||!d.configured){ setDrawerBody('<div class="empty">'+(ar?'دافترة غير مربوطة':'Daftra not configured')+'</div>'); return; }
+  var body=Object.keys(d.objects||{}).map(function(obj){
+    var rows=(d.objects[obj]||[]).map(function(p){
+      var ok=(p.status===200); var col=(ok?'#3e9665':(p.status===404?'#8a8270':'var(--down)'));
+      var shape=(p.list_len!=null?((ar?'عناصر ':'items ')+p.list_len):'')+(p.item_model?(' · '+esc(p.item_model)):'')+(p.error?(' · '+esc(p.error)):'');
+      return '<div style="display:flex;gap:8px;font-size:11px;padding:3px 0"><span style="direction:ltr;color:'+col+';min-width:200px">'+esc(p.path)+'</span><span style="color:'+col+'">'+(p.status||p.error||'?')+'</span><span class="muted">'+shape+'</span></div>'; }).join('');
+    return '<div style="margin-bottom:10px"><b style="font-size:12.5px">'+esc(obj)+'</b>'+rows+'</div>';
+  }).join('');
+  setDrawerBody('<div style="font-size:12px;margin-bottom:8px" class="muted">'+(ar?'الأخضر = نقطة شغّالة. أرسل لي هالنتيجة لو ما طلع شي.':'Green = working endpoint. Send me this if nothing imports.')+'</div>'+body);
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">×</button>');
+}
 /* ---- Contract Profiles (upload + preview + health) ---- */
 async function fbContracts(){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
@@ -32733,6 +32747,74 @@ def _daftra_upsert(obj_type, it):
                          "sync_status": "imported", "sync_error": ""}
     return "imported"
 
+# Candidate endpoint paths per object — Daftra naming varies by account/version, so try a few
+# and use whichever returns a JSON list. The diagnostics endpoint reveals the real shape.
+_DAFTRA_PATHS = {
+    "accounts":     ["/api2/account_lists", "/api2/accounts", "/api2/journal_accounts", "/api2/chart_of_accounts"],
+    "cost_centers": ["/api2/cost_centers", "/api2/costcenters", "/api2/cost_center"],
+    "suppliers":    ["/api2/suppliers", "/api2/vendors", "/api2/supplier"],
+    "customers":    ["/api2/clients", "/api2/customers", "/api2/client"],
+    "expenses":     ["/api2/expenses", "/api2/expense"],
+    "incomes":      ["/api2/incomes", "/api2/receipts", "/api2/income"],
+    "journals":     ["/api2/journals", "/api2/journal_transactions", "/api2/journal_entries", "/api2/journal"],
+    "treasuries":   ["/api2/treasuries", "/api2/banks", "/api2/treasury"],
+}
+
+def _daftra_probe(path):
+    """Probe ONE endpoint → status + JSON SHAPE (keys only, never values) for safe diagnosis."""
+    if not _daftra_configured():
+        return {"path": path, "ok": False, "error": "not_configured"}
+    url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+    try:
+        r = requests.get(url, headers={"APIKEY": DAFTRA_API_KEY, "Accept": "application/json"},
+                         params={"limit": 1}, timeout=20)
+        out = {"path": path, "status": r.status_code, "ok": r.status_code == 200}
+        try:
+            j = r.json()
+        except Exception:
+            out["json"] = False
+            out["snippet"] = (r.text or "")[:100]
+            return out
+        out["json"] = True
+        out["top_keys"] = (list(j.keys())[:12] if isinstance(j, dict) else ("list[%d]" % len(j)))
+        lst = _daftra_extract_list(j)
+        out["list_len"] = len(lst)
+        if lst and isinstance(lst[0], dict):
+            out["item_keys"] = list(lst[0].keys())[:12]
+            for k, v in lst[0].items():
+                if isinstance(v, dict):
+                    out["item_model"] = k
+                    out["model_keys"] = list(v.keys())[:15]
+                    break
+        return out
+    except requests.Timeout:
+        return {"path": path, "ok": False, "error": "timeout"}
+    except requests.RequestException as e:
+        m = str(e)
+        if DAFTRA_API_KEY:
+            m = m.replace(DAFTRA_API_KEY, "••••")
+        return {"path": path, "ok": False, "error": m[:160]}
+
+def _daftra_diag():
+    """Per-object: probe each candidate path → status + shape. Reveals the real endpoints/keys."""
+    if not _daftra_configured():
+        return {"configured": False}
+    return {"configured": True, "base": DAFTRA_BASE_URL,
+            "objects": {obj: [_daftra_probe(p) for p in paths] for obj, paths in _DAFTRA_PATHS.items()}}
+
+def _daftra_fetch_object(obj_type, params=None):
+    """Try each candidate path; return (items, used_path, error). First path that responds wins."""
+    last_err = "endpoint_not_found"
+    for p in _DAFTRA_PATHS.get(obj_type, []):
+        data, err = _daftra_get(p, params)
+        if err == "endpoint_not_found":
+            continue
+        if err:
+            last_err = err
+            continue
+        return _daftra_extract_list(data), p, None
+    return [], (_DAFTRA_PATHS.get(obj_type, [None])[0]), last_err
+
 def _daftra_import_all(actor=""):
     run = _fb_run_start("daftra", actor=actor)
     if not _daftra_configured():
@@ -32740,11 +32822,11 @@ def _daftra_import_all(actor=""):
         return {"ok": False, "error": "not_configured", "run": run}
     imp = upd = fail = 0
     per, errors = {}, []
-    for obj_type, path, label in _DAFTRA_OBJECTS:
+    for obj_type, _legacy_path, label in _DAFTRA_OBJECTS:
         params = {"limit": 200}
         if DAFTRA_IMPORT_START_DATE and obj_type in ("expenses", "incomes", "journals"):
             params["from_date"] = DAFTRA_IMPORT_START_DATE
-        data, err = _daftra_get(path, params)
+        items, used_path, err = _daftra_fetch_object(obj_type, params)
         if err == "endpoint_not_found":
             per[obj_type] = {"label": label, "status": "endpoint_not_available", "count": 0}
             continue
@@ -32753,7 +32835,6 @@ def _daftra_import_all(actor=""):
             per[obj_type] = {"label": label, "status": "error", "error": err, "count": 0}
             errors.append(f"{obj_type}:{err}")
             continue
-        items = _daftra_extract_list(data)
         ci = cu = 0
         for it in items:
             r = _daftra_upsert(obj_type, it)
@@ -32761,7 +32842,7 @@ def _daftra_import_all(actor=""):
                 imp += 1; ci += 1
             elif r == "updated":
                 upd += 1; cu += 1
-        per[obj_type] = {"label": label, "status": "ok", "count": len(items), "imported": ci, "updated": cu}
+        per[obj_type] = {"label": label, "status": "ok", "count": len(items), "imported": ci, "updated": cu, "path": used_path}
     _fb_save("finance_external_records.json", _fb_external)
     _fb_run_finish(run, ("done" if not errors else "partial"), imported=imp, updated=upd, failed=fail,
                    error="؛ ".join(errors)[:600])
@@ -32787,6 +32868,11 @@ async def _api_fb_daftra(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     return _json({"ok": True, "overview": _fb_daftra_overview()})
+
+async def _api_fb_daftra_diag(request):
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json(await asyncio.to_thread(_daftra_diag))
 
 async def _api_fb_daftra_test(request):
     if not _fb_can_finance(request):
@@ -36009,6 +36095,7 @@ async def start_web_server():
         app.router.add_get("/api/fb/overview", _api_fb_overview)
         app.router.add_get("/api/fb/daftra", _api_fb_daftra)
         app.router.add_post("/api/fb/daftra/test", _api_fb_daftra_test)
+        app.router.add_get("/api/fb/daftra/diag", _api_fb_daftra_diag)
         app.router.add_post("/api/fb/daftra/import", _api_fb_daftra_import)
         app.router.add_get("/api/fb/contracts", _api_fb_contracts)
         app.router.add_post("/api/fb/contracts/import", _api_fb_contracts_import)
