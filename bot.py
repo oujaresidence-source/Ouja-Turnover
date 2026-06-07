@@ -22211,16 +22211,73 @@ async function fbContracts(){
   b.innerHTML=h;
 }
 /* ---- Bank Upload ---- */
-async function fbBank(){
+async function fbBank(){ return fbBankRender(_fb.bankF||''); }
+async function fbBankRender(status){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
-  var d; try{ d=await api('/api/fb/bank'); }catch(_){ d=null; }
+  _fb.bankF=status||'';
+  var d; try{ d=await api('/api/fb/bank'+(status?('?status='+encodeURIComponent(status)):'')); }catch(_){ d=null; }
   var sum=(d&&d.summary)||{count:0};
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏦 '+t().fb_bank+'</b>'
     +'<label class="btn primary sm" style="cursor:pointer">'+t().fb_upload+'<input type="file" accept=".xlsx" style="display:none" onchange="fbUpload(event,&#39;bank&#39;)"></label></div>';
   if(!sum.count){ h+='<div class="muted" style="font-size:12.5px;margin-top:8px;line-height:1.8">'+(ar?'ارفع كشف الراجحي Excel عشان نطابق المصاريف مع حركة البنك. نحفظ القيم بدقة (٩.٥٠ تبقى ٩.٥٠) ونخفي بيانات الحساب الحساسة.':'Upload the Al Rajhi Excel to match expenses against bank movement. Exact amounts (9.50 stays 9.50); sensitive account data masked.')+'</div></div>'; b.innerHTML=h; return; }
-  h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12px">'+fbChip((ar?'العمليات ':'txns ')+(sum.count||0),'mut')+fbChip((ar?'تحتاج مراجعة ':'needs review ')+(sum.needs_review||0),'warn')+fbChip((ar?'غير مطابقة ':'unmatched ')+(sum.unmatched||0),'mut')+'</div></div>';
-  h+='<div style="display:flex;flex-direction:column;gap:5px">'+(d.transactions||[]).slice(-120).reverse().map(function(x){ var deb=(x.debit&&x.debit!=='0.00'); return '<div style="display:flex;gap:8px;align-items:center;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap"><span class="muted" style="font-size:10.5px;min-width:78px">'+esc(x.date||'')+'</span><span style="flex:1;min-width:120px;font-size:11.5px">'+esc((x.description||'').slice(0,60))+'</span><b style="font-size:12px;color:'+(deb?'var(--down)':'#3e9665')+'">'+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit)+'</b>'+fbChip(x.category||'unknown',(x.category==='unknown'?'warn':'mut'))+'</div>'; }).join('')+'</div>';
+  var total=sum.count||0, nr=sum.needs_review||0, rev=total-nr;
+  var fbtns=[['',ar?'الكل':'All',total],['needs_review',ar?'تحتاج مراجعة':'Needs review',nr],['reviewed',ar?'تمت المراجعة':'Reviewed',rev]];
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'+fbtns.map(function(f){ var on=((status||'')===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbBankRender(&#39;'+f[0]+'&#39;)">'+esc(f[1])+' '+f[2]+'</button>'; }).join('')+'</div></div>';
+  var tx=(d.transactions||[]).slice().reverse();
+  _fb.bankTx={}; tx.forEach(function(x){ _fb.bankTx[x.id]=x; });
+  if(!tx.length){ h+='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه عمليات بهالتصنيف 👌':'No transactions in this filter 👌')+'</div>'; b.innerHTML=h; return; }
+  if((d.matched||0)>tx.length){ h+='<div class="muted" style="font-size:11px;margin:8px 0 0">'+(ar?('عرض '+tx.length+' من '+d.matched):('showing '+tx.length+' of '+d.matched))+'</div>'; }
+  h+='<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px">'+tx.map(fbBankRow).join('')+'</div>';
   b.innerHTML=h;
+}
+function fbBankRow(x){
+  var ar=(L==='ar'); var deb=(x.debit&&x.debit!=='0.00');
+  var st=x.status||'needs_review';
+  var stChip=(st==='reviewed')?fbChip(ar?'تمت':'reviewed','ok'):(st==='auto_classified'?fbChip(ar?'تلقائي':'auto','mut'):fbChip(ar?'مراجعة':'review','warn'));
+  return '<div style="display:flex;gap:8px;align-items:center;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap">'
+    +'<span class="muted" style="font-size:10.5px;min-width:78px">'+esc(x.date||'')+'</span>'
+    +'<span style="flex:1;min-width:120px;font-size:11.5px">'+esc((x.description||'').slice(0,60))+'</span>'
+    +'<b style="font-size:12px;color:'+(deb?'var(--down)':'#3e9665')+'">'+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit)+'</b>'
+    +fbChip(x.category||'unknown',(x.category==='unknown'?'warn':'mut'))+stChip
+    +'<button class="btn ghost xs" onclick="fbBankReview(&#39;'+x.id+'&#39;)">'+(ar?'صنّف':'review')+'</button></div>';
+}
+function _fbBankCats(){ var ar=(L==='ar'); return [
+  ['channel_payout', ar?'دفعة قناة (إيراد)':'Channel payout (revenue)'],
+  ['founder_funding', ar?'تمويل من المؤسس (ليس إيراد)':'Founder funding (not revenue)'],
+  ['owner_deposit', ar?'إيداع/دفعة مالك':'Owner deposit'],
+  ['owner_payout', ar?'تحويل للمالك':'Owner payout'],
+  ['cleaning_provider', ar?'نظافة':'Cleaning'],
+  ['maintenance', ar?'صيانة':'Maintenance'],
+  ['wifi', ar?'إنترنت':'Internet/Wi-Fi'],
+  ['software_subscription', ar?'اشتراكات':'Subscriptions'],
+  ['supplier', ar?'مورّد/شراء':'Supplier/Purchase'],
+  ['salary', ar?'رواتب':'Salary'],
+  ['employee_card_settlement', ar?'تسوية بطاقة موظف':'Employee card'],
+  ['bank_fee', ar?'رسوم بنك':'Bank fee'],
+  ['internal_transfer', ar?'تحويل داخلي':'Internal transfer'],
+  ['other', ar?'أخرى':'Other'],
+  ['unknown', ar?'غير مصنّف':'Unclassified'] ]; }
+function fbBankReview(id){
+  var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]; if(!x){ toast('⚠'); return; }
+  var deb=(x.debit&&x.debit!=='0.00');
+  openDrawer(ar?'مراجعة عملية بنكية':'Review bank transaction', (x.date||'')+' · '+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit));
+  var inp='width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit';
+  var cur=x.category||'unknown';
+  var opts=_fbBankCats().map(function(c){ return '<option value="'+c[0]+'"'+(c[0]===cur?' selected':'')+'>'+esc(c[1])+'</option>'; }).join('');
+  var hint=deb?(ar?'صادر — غالباً مصروف أو تحويل للمالك أو استرجاع للمؤسس':'Outgoing — usually an expense, owner payout, or founder reimbursement'):(ar?'وارد — هل هو إيراد قناة ولا تمويل من المؤسس؟':'Incoming — is it channel revenue or founder funding?');
+  setDrawerBody('<div style="font-size:12px;line-height:1.7;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px">'+esc((x.description||'').slice(0,140))+'</div>'
+    +'<div class="muted" style="font-size:11px;margin-bottom:8px">'+esc(hint)+'</div>'
+    +'<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label><select id="fbb_cat" style="'+inp+'">'+opts+'</select>'
+    +'<label class="muted" style="font-size:11px">'+(ar?'الشقة (اختياري)':'Apartment (optional)')+'</label><input id="fbb_apt" value="'+esc(x.apartment||'')+'" style="'+inp+'">'
+    +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbb_note" value="'+esc(x.note||'')+'" style="'+inp+'">');
+  setDrawerFoot('<button class="btn primary sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;)">'+(ar?'حفظ المراجعة':'Save review')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+}
+async function fbBankReviewSave(id){
+  var ar=(L==='ar'); var body={id:id,action:'bank_classify'};
+  var c=document.getElementById('fbb_cat'), a=document.getElementById('fbb_apt'), n=document.getElementById('fbb_note');
+  if(c){ body.category=c.value; } if(a){ body.apartment=a.value; } if(n){ body.note=n.value; }
+  var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'✓ تمت المراجعة':'✓ Reviewed'); closeDrawer(); fbBankRender(_fb.bankF||''); } else toast((r&&(r.error||r.message))||'⚠');
 }
 async function fbUpload(ev, kind){
   var ar=(L==='ar'), f=ev.target.files&&ev.target.files[0]; if(!f) return;
@@ -33311,8 +33368,12 @@ async def _api_fb_contracts_import(request):
 async def _api_fb_bank(request):
     if not _fb_can_finance(request):
         return _json({"error": "forbidden"}, 403)
+    status = (request.query.get("status") or "").strip()
+    txns = list(_fb_bank.values())
+    if status:
+        txns = [x for x in txns if (x.get("status") or "needs_review") == status]
     return _json({"ok": True, "summary": _fb_bank_summary(),
-                  "transactions": [dict(x, description=None) if False else x for x in list(_fb_bank.values())[-400:]]})
+                  "transactions": txns[-400:], "shown": min(len(txns), 400), "matched": len(txns)})
 
 async def _api_fb_bank_import(request):
     if not _fb_can_finance(request):
@@ -33642,6 +33703,26 @@ async def _api_fb_entry(request):
         _fb_save("finance_bank_transactions.json", _fb_bank)
         _fb_audit_add(actor, "promote_bank", "ledger", e["id"], after={"bank": bx["id"]})
         return _json({"ok": True, "entry": e})
+    if action == "bank_classify":               # owner reviews a bank txn: set the right category + mark reviewed
+        bx = _fb_bank.get(b.get("id"))
+        if not bx:
+            return _json({"error": "bank_txn_not_found"}, 404)
+        before = {"category": bx.get("category"), "status": bx.get("status")}
+        cat = (b.get("category") or "").strip()
+        if cat:
+            bx["category"] = cat
+        if b.get("apartment") is not None:
+            bx["apartment"] = (b.get("apartment") or "").strip()
+        if b.get("note") not in (None, ""):
+            bx["note"] = str(b.get("note"))[:300]
+        # 'unknown' stays needs_review (still undecided); any real category → reviewed
+        bx["status"] = "needs_review" if (bx.get("category") or "unknown") == "unknown" else "reviewed"
+        bx["reviewed_by"] = actor
+        bx["reviewed_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        _fb_save("finance_bank_transactions.json", _fb_bank)
+        _fb_audit_add(actor, "bank_classify", "bank_txn", bx["id"], before=before,
+                      after={"category": bx.get("category"), "status": bx.get("status")}, reason=b.get("note", ""))
+        return _json({"ok": True, "txn": bx})
     eid = (b.get("id") or "").strip()
     e = _fb_ledger.get(eid)
     if not e:
