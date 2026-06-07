@@ -32515,7 +32515,19 @@ def _fb_is_admin(request):
 # ====================================================================
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-DAFTRA_BASE_URL = os.environ.get("DAFTRA_BASE_URL", "").strip().rstrip("/")
+def _daftra_normalize_base(u):
+    """Forgive the common entry mistakes: missing scheme and a bare '…daftra' missing '.com'.
+    e.g. 'oujares.daftra' → 'https://oujares.daftra.com'. Custom https:// domains pass through."""
+    u = (u or "").strip().rstrip("/")
+    if not u:
+        return ""
+    if not u.startswith(("http://", "https://")):
+        u = "https://" + u
+    if re.search(r"\.daftra$", u):     # Daftra is *.daftra.com — append the missing TLD
+        u = u + ".com"
+    return u
+
+DAFTRA_BASE_URL = _daftra_normalize_base(os.environ.get("DAFTRA_BASE_URL", ""))
 DAFTRA_API_KEY = os.environ.get("DAFTRA_API_KEY", "").strip()
 DAFTRA_COMPANY_SLUG = os.environ.get("DAFTRA_COMPANY_SLUG", "").strip()
 DAFTRA_IMPORT_START_DATE = os.environ.get("DAFTRA_IMPORT_START_DATE", "").strip()
