@@ -2696,41 +2696,25 @@ class CleaningDoneView(discord.ui.View):
                 "discord",
             )
             _cleanproof_recount(report)
+            # Allow submit even if some required photos are missing — just FLAG it so the
+            # manager sees it's incomplete and decides. (Was: blocked until complete.)
             missing = _cleanproof_missing_required_labels(report, "ar")
-            _cleaning_reports[report["report_id"]] = report
-            _save_json("cleaning_reports.json", _cleaning_reports)
+            report["photos_incomplete"] = bool(missing)
+            report["missing_required"] = missing
             if missing:
                 _cleanproof_audit(
-                    report["report_id"],
-                    "discord_submit_blocked_missing_photos",
-                    str(interaction.user),
-                    report.get("status"),
-                    report.get("status"),
-                    ", ".join(missing),
-                )
-                missing_text = "، ".join(missing[:8])
-                if len(missing) > 8:
-                    missing_text += f" +{len(missing) - 8}"
-                await interaction.followup.send(
-                    "ما نقدر نرسلها للمراجعة لين تكتمل الصور المطلوبة.\n"
-                    f"الصور الناقصة: {missing_text}\n"
-                    "ارفع الصور من رابط الفريق لكل خانة، بعدها اضغط Submit for Review مرة ثانية.",
-                    ephemeral=False)
-                return
+                    report["report_id"], "submitted_incomplete_photos", str(interaction.user),
+                    report.get("status"), report.get("status"), ", ".join(missing))
             prev = report.get("status")
             if prev not in ("manager_approved", "manager_rejected", "needs_reshoot"):
                 report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
                 report["updated_at"] = _cleanproof_now()
-                _cleaning_reports[report["report_id"]] = report
-                _save_json("cleaning_reports.json", _cleaning_reports)
                 _cleanproof_audit(
-                    report["report_id"],
-                    "report_submitted_from_discord",
-                    str(interaction.user),
-                    prev,
-                    report.get("status"),
-                    "Discord channel submit button",
-                )
+                    report["report_id"], "report_submitted_from_discord", str(interaction.user),
+                    prev, report.get("status"),
+                    (("صور ناقصة: " + ", ".join(missing)) if missing else "Discord channel submit button"))
+            _cleaning_reports[report["report_id"]] = report
+            _save_json("cleaning_reports.json", _cleaning_reports)
             ok, err = await _cleanproof_send_discord_review(report["report_id"])
             if not ok:
                 await interaction.followup.send(
@@ -2753,10 +2737,17 @@ class CleaningDoneView(discord.ui.View):
                 await ch.edit(topic=(topic + " cleaning-review:1").strip()[:1024])
         except Exception as e:
             print("submit-review topic error:", e)
+        _flag = ""
+        try:
+            if report.get("photos_incomplete"):
+                _mt = "، ".join((report.get("missing_required") or [])[:6])
+                _flag = f"\n⚠️ مُرسل مع تنبيه: فيه صور ناقصة ({_mt}). المدير يقرر."
+        except Exception:
+            pass
         await interaction.followup.send(
             f"📷 تم إرسال تقرير الصور للمراجعة بواسطة {interaction.user.mention}. "
             f"راح تلقاه في روم #{CLEANING_REVIEW_CHANNEL}. الاعتماد يتم من أزرار Discord هناك، "
-            "والداشبورد يعرض نفس الحالة.",
+            "والداشبورد يعرض نفس الحالة." + _flag,
             ephemeral=False)
 
 def channel_name(internal_name):
@@ -6399,6 +6390,10 @@ def _cleanproof_discord_embed(report):
         f"**Checklist:** {report.get('uploaded_required_slots_count', 0)}/{report.get('required_slots_count', 0)} required photos",
         f"**Status:** `{status}`",
     ]
+    if report.get("photos_incomplete"):
+        _miss = report.get("missing_required") or []
+        _mt = "، ".join(_miss[:8]) + (f" +{len(_miss) - 8}" if len(_miss) > 8 else "")
+        desc.append(f"⚠️ **صور ناقصة / incomplete photos:** {_mt}")
     if report.get("issue_found"):
         desc.append(f"**Issue:** {report.get('issue_notes') or 'flagged by cleaner'}")
     if report.get("drive_folder_url"):
@@ -23159,7 +23154,7 @@ function uploadPhotoSlot(ev,slot){
 function submitPhotoReport(){
  var notes=(document.getElementById('photoNotes')||{}).value||'', issue=!!((document.getElementById('photoIssue')||{}).checked);
  fetch('/api/oujact/report-submit?token='+encodeURIComponent(TOK),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lid:PHOTO.lid,date:PHOTO.date,issue_found:issue,issue_notes:notes})})
-  .then(function(r){return r.json();}).then(function(d){ if(!d.ok) throw (d.missing&&d.missing.length?d.missing.join('، '):(d.message||d.error||'error')); PHOTO.report=d.report; renderPhotoSheet(); alert(t().pending); })
+  .then(function(r){return r.json();}).then(function(d){ if(!d.ok) throw (d.message||d.error||'error'); PHOTO.report=d.report; renderPhotoSheet(); alert(d.incomplete?'⚠ أُرسلت للمراجعة مع نقص بالصور — المدير يقرّر':t().pending); })
   .catch(function(e){ alert('⚠ '+e); });
 }
 document.documentElement.lang='ar';
@@ -33758,23 +33753,23 @@ async def _api_oujact_report_submit(request):
     if b.get("issue_found"):
         report["issue_found"] = True
         report["issue_notes"] = (b.get("issue_notes") or "")[:500]
-    if not report.get("all_required_complete"):
-        missing = _cleanproof_missing_required_labels(report, "ar")
-        _cleaning_reports[report["report_id"]] = report
-        _save_json("cleaning_reports.json", _cleaning_reports)
-        return _json({"error": "missing_required_photos", "missing": missing,
-                      "report": _cleanproof_report_view(report)}, 400)
+    # Allow submit even if some required photos are missing — FLAG it, never block.
+    missing = _cleanproof_missing_required_labels(report, "ar")
+    report["photos_incomplete"] = bool(missing)
+    report["missing_required"] = missing
     prev = report.get("status", "")
     report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
     report["updated_at"] = _cleanproof_now()
     _cleaning_reports[report["report_id"]] = report
     _save_json("cleaning_reports.json", _cleaning_reports)
-    _cleanproof_audit(report["report_id"], "report_submitted", actor, prev, report["status"])
+    _cleanproof_audit(report["report_id"], ("report_submitted_incomplete" if missing else "report_submitted"),
+                      actor, prev, report["status"], (", ".join(missing) if missing else ""))
     ok, err = await _cleanproof_send_discord_review(report["report_id"])
     if not ok:
         _cleanproof_audit(report["report_id"], "discord_review_failed", "bot",
                           "pending_manager_review", "pending_manager_review", err)
     return _json({"ok": True, "discord_sent": ok, "discord_error": err,
+                  "incomplete": bool(missing), "missing": missing,
                   "report": _cleanproof_report_view(report)})
 
 async def _api_cleaning_reports(request):
