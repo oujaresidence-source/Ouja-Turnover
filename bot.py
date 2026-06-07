@@ -22309,16 +22309,46 @@ async function fbClose(){ var ar=(L==='ar'), b=document.getElementById('fbBody')
 /* ---- Settings / Mapping ---- */
 async function fbMapping(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/mappings'); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'للمحاسبة فقط':'accountants only')+'</div>'; return; }
   var ov=await fbOverview(); var dov=(ov&&ov.daftra)||{};
-  var h='<div style="'+fbCard()+'"><b>⚙️ '+(ar?'ربط دافترة':'Daftra')+'</b><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.8">'+(ar?'الرابط: ':'base: ')+esc(dov.base||(ar?'غير مضبوط':'not set'))+'<br>'+(ar?'المفتاح: ':'key: ')+esc(dov.key_mask||'')+'<br>'+(ar?'الترحيل: ':'posting: ')+(dov.post_enabled?(ar?'مفعّل':'enabled'):(ar?'مغلق (آمن)':'disabled (safe)'))+'</div></div>';
-  var m=(d&&d.mappings)||{};
-  h+='<div style="'+fbCard()+'"><b>'+(ar?'ربط التصنيفات بحسابات دافترة':'Category → Daftra account mapping')+'</b><div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'مطلوب قبل تجهيز القيود.':'Required before preparing journals.')+'</div>';
+  var inp='padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px;font-family:inherit';
+  var h='<div style="'+fbCard()+'"><b>⚙️ '+(ar?'ربط دافترة':'Daftra')+'</b><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.8">'+(ar?'الرابط: ':'base: ')+'<span style="direction:ltr;unicode-bidi:embed">'+esc(dov.base||(ar?'غير مضبوط':'not set'))+'</span><br>'+(ar?'المفتاح: ':'key: ')+esc(dov.key_mask||'')+'<br>'+(ar?'الترحيل: ':'posting: ')+(dov.post_enabled?(ar?'مفعّل':'enabled'):(ar?'مغلق (آمن)':'disabled (safe)'))+'</div></div>';
+  var m=(d&&d.mappings)||{}, accts=(d&&d.daftra_accounts)||[], ccs=(d&&d.cost_centers)||[];
+  h+='<div style="'+fbCard()+'"><b>'+(ar?'ربط التصنيفات بحسابات دافترة':'Category → Daftra account mapping')+'</b><div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'لكل تصنيف اختر حساب دافترة المقابل — مطلوب قبل تجهيز القيود.':'Pick the matching Daftra account for each category — required before journals.')+'</div>';
+  if(!accts.length) h+='<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:8px;padding:9px;margin-top:8px;font-size:11.5px">'+(ar?'ما فيه حسابات دافترة مستوردة. استورد أول من «استيراد دافترة»، أو اكتب اسم الحساب يدويًا الحين.':'No Daftra accounts imported. Import from “Daftra Import” first, or type the account name manually.')+' <button class="btn ghost xs" onclick="fbGo(&#39;daftra&#39;)">'+(ar?'افتح استيراد دافترة':'open Daftra Import')+'</button></div>';
   var cats=['cleaning_provider','maintenance','wifi','software_subscription','bank_fee','channel_payout','owner_payment','operating_expense'];
-  h+='<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px">'+cats.map(function(c){ var mm=m[c]||{}; return '<div style="display:flex;gap:8px;align-items:center;font-size:11.5px;padding:5px 0;border-bottom:1px solid var(--border)"><span style="flex:1">'+esc(c)+'</span>'+(mm.daftra_account_id?fbChip(esc(mm.daftra_account_name||mm.daftra_account_id),'ok'):fbChip(ar?'غير مربوط':'unmapped','warn'))+'</div>'; }).join('')+'</div></div>';
-  // card mapping
+  function acctCtl(c, cur){
+    if(accts.length){
+      return '<select id="map_'+c+'" style="'+inp+';min-width:170px"><option value="">'+(ar?'— اختر حساب —':'— pick account —')+'</option>'+accts.map(function(a){ var v=(a.source_id||'')+'::'+(a.display_name||''); var sel=(cur.daftra_account_id&&String(cur.daftra_account_id)===String(a.source_id))?' selected':''; return '<option value="'+esc(v)+'"'+sel+'>'+esc(a.display_name||a.source_id)+'</option>'; }).join('')+'</select>';
+    }
+    return '<input id="mapn_'+c+'" value="'+esc(cur.daftra_account_name||'')+'" placeholder="'+(ar?'اسم الحساب في دافترة':'Daftra account name')+'" style="'+inp+';min-width:160px">';
+  }
+  function ccCtl(c, cur){ if(!ccs.length) return ''; return '<select id="cc_'+c+'" style="'+inp+'"><option value="">'+(ar?'مركز تكلفة (اختياري)':'cost center (optional)')+'</option>'+ccs.map(function(a){ var v=(a.source_id||'')+'::'+(a.display_name||''); var sel=(cur.daftra_cost_center_id&&String(cur.daftra_cost_center_id)===String(a.source_id))?' selected':''; return '<option value="'+esc(v)+'"'+sel+'>'+esc(a.display_name||a.source_id)+'</option>'; }).join('')+'</select>'; }
+  h+='<div style="display:flex;flex-direction:column;gap:7px;margin-top:10px">'+cats.map(function(c){ var mm=m[c]||{};
+    var chip=mm.daftra_account_id?fbChip(esc(mm.daftra_account_name||mm.daftra_account_id),'ok'):(mm.daftra_account_name?fbChip((ar?'بالاسم — يحتاج ربط':'by name — needs link'),'warn'):fbChip(ar?'غير مربوط':'unmapped','warn'));
+    return '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border)"><span style="flex:1;min-width:120px;font-size:12px;font-weight:600">'+esc(c)+'</span>'+acctCtl(c,mm)+ccCtl(c,mm)+'<button class="btn primary xs" onclick="fbSaveMapping(&#39;'+c+'&#39;)">'+(ar?'حفظ':'Save')+'</button>'+chip+'</div>'; }).join('')+'</div></div>';
+  // card mapping + add form
   var cards={}; try{ cards=(await api('/api/fb/cards')).cards||{}; }catch(_){}
-  h+='<div style="'+fbCard()+'"><b>'+(ar?'بطاقات الموظفين':'Employee cards')+'</b><div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'ربط آخر ٤ أرقام بالموظف.':'Map last-4 digits to an employee.')+'</div><div style="margin-top:8px">'+(Object.keys(cards).length?Object.keys(cards).map(function(k){ var c=cards[k]; return '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--border)"><span>•••• '+esc(k)+'</span><span class="muted">'+esc(c.employee||'—')+'</span></div>'; }).join(''):('<div class="muted" style="font-size:11.5px">'+(ar?'لا بطاقات بعد':'none yet')+'</div>'))+'</div></div>';
+  h+='<div style="'+fbCard()+'"><b>'+(ar?'بطاقات الموظفين':'Employee cards')+'</b><div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'ربط آخر ٤ أرقام بالموظف (يساعد بتصنيف حركة البطاقات).':'Map last-4 digits to an employee.')+'</div>';
+  h+='<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;align-items:center"><input id="cardLast4" maxlength="4" placeholder="'+(ar?'آخر ٤ أرقام':'last 4')+'" style="'+inp+';width:90px"><input id="cardEmp" placeholder="'+(ar?'اسم الموظف':'employee name')+'" style="'+inp+';min-width:150px"><button class="btn ghost sm" onclick="fbAddCard()">+ '+(ar?'أضف بطاقة':'add card')+'</button></div>';
+  h+='<div style="margin-top:8px">'+(Object.keys(cards).length?Object.keys(cards).map(function(k){ var c=cards[k]; return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;padding:5px 0;border-bottom:1px solid var(--border)"><span>•••• '+esc(k)+' · '+esc(c.employee||'—')+'</span><button class="btn ghost xs" onclick="fbDelCard(&#39;'+esc(k)+'&#39;)">🗑</button></div>'; }).join(''):('<div class="muted" style="font-size:11.5px">'+(ar?'لا بطاقات بعد':'none yet')+'</div>'))+'</div></div>';
   b.innerHTML=h;
 }
+async function fbSaveMapping(cat){
+  var ar=(L==='ar'), sel=document.getElementById('map_'+cat), man=document.getElementById('mapn_'+cat), cc=document.getElementById('cc_'+cat);
+  var body={category:cat};
+  if(sel&&sel.value){ var p=sel.value.split('::'); body.daftra_account_id=p[0]; body.daftra_account_name=p[1]||p[0]; }
+  else if(man&&man.value.trim()){ body.daftra_account_name=man.value.trim(); }
+  if(cc&&cc.value){ body.daftra_cost_center_id=cc.value.split('::')[0]; }
+  if(!body.daftra_account_id && !body.daftra_account_name){ toast(ar?'اختر أو اكتب الحساب':'Pick or type an account'); return; }
+  var r; try{ r=await post('/api/fb/mappings',body); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); fbMapping(); } else toast('⚠');
+}
+async function fbAddCard(){
+  var ar=(L==='ar'), l4=(document.getElementById('cardLast4')||{}).value, emp=(document.getElementById('cardEmp')||{}).value;
+  if(!l4||l4.length<4){ toast(ar?'اكتب آخر ٤ أرقام':'Enter last 4 digits'); return; }
+  var r; try{ r=await post('/api/fb/cards',{last4:l4,employee:emp,active:true}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'تمت الإضافة ✓':'Added ✓'); fbMapping(); } else toast('⚠');
+}
+async function fbDelCard(k){ var ar=(L==='ar'); if(!confirm(ar?'حذف البطاقة؟':'Delete card?')) return; try{ await post('/api/fb/cards',{last4:k,delete:true}); }catch(_){}; fbMapping(); }
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
 var _ctSel={};
 async function loadCleanTeams(){
