@@ -33181,23 +33181,48 @@ def _fb_bank_summary():
 
 # ---- contract + bank + card endpoints ----
 def _fb_contract_template_bytes():
-    """A ready contract template (.xlsx) whose headers match the importer's auto-detect, with
-    example rows for each contract type. Owner fills it and uploads it on the same screen."""
+    """Ready contract template (.xlsx) with DROPDOWNS on the fixed-option columns so filling is
+    easy and typo-free. Headers match the importer's auto-detect. Dropdowns are SUGGESTIONS
+    (custom values still allowed, e.g. a custom monthly cleaning amount). Examples live on a
+    SEPARATE 'أمثلة' sheet so they're never imported by mistake (the importer reads sheet 1 only)."""
     import io as _io, openpyxl
-    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "العقود"
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
     headers = ["اسم الشقة", "كود الشقة", "المالك", "نسبة عوجا %", "النظافة",
                "الصيانة", "الاسترجاع", "Hostaway ID", "الحالة", "نوع العقد", "ملاحظات"]
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "العقود"
     ws.append(headers)
-    # example rows that TEACH the format (the cleaning column accepts: علينا / مبلغ شهري / المالك)
-    ws.append(["Ouja | T08", "T08", "عبدالله السالم", 25, "علينا", "المالك", "المالك", "", "active", "25% — تشغيل ونظافة على عوجا", ""])
-    ws.append(["Ouja | A11", "A11", "سارة محمد", 18, "1050", "المالك", "المالك", "", "active", "نسبة + نظافة شهرية على المالك", "النظافة ١٠٥٠ شهريًا"])
-    ws.append(["Ouja | B02", "B02", "مستثمر", 20, "1100", "المالك", "المالك", "", "active", "نسبة مخصّصة", ""])
-    ws.append(["Ouja | E15", "E15", "عوجا", "", "علينا", "عوجا", "عوجا", "", "active", "وحدة تشغيل عوجا (شركة)", "ربحيتها كلها لعوجا"])
+    # dropdowns (suggestions; custom values still allowed) on the fixed-option columns
+    drops = {
+        "D": ["15", "18", "20", "25", "30"],                                 # نسبة عوجا %
+        "E": ["علينا", "المالك", "1000", "1050", "1100"],                    # النظافة (or type a custom amount)
+        "F": ["المالك", "عوجا"],                                             # الصيانة
+        "G": ["المالك", "عوجا"],                                             # الاسترجاع
+        "I": ["active", "inactive", "onboarding", "ending"],                 # الحالة
+        "J": ["إدارة بنسبة", "نسبة + نظافة شهرية", "مخصّص", "تشغيل عوجا"],     # نوع العقد
+    }
+    for col, opts in drops.items():
+        dv = DataValidation(type="list", formula1='"' + ",".join(opts) + '"', allow_blank=True)
+        dv.showErrorMessage = False    # suggestion dropdown — typing a custom value is allowed
+        ws.add_data_validation(dv)
+        dv.add("%s2:%s300" % (col, col))
     try:
-        ws.sheet_view.rightToLeft = True
-        from openpyxl.utils import get_column_letter
+        ws.freeze_panes = "A2"; ws.sheet_view.rightToLeft = True
         for i in range(1, len(headers) + 1):
             ws.column_dimensions[get_column_letter(i)].width = 20
+    except Exception:
+        pass
+    # examples on a SECOND sheet (reference only — NOT imported)
+    ex = wb.create_sheet("أمثلة")
+    ex.append(headers)
+    ex.append(["Ouja | T08", "T08", "عبدالله السالم", 25, "علينا", "المالك", "المالك", "", "active", "إدارة بنسبة", "25% — تشغيل ونظافة على عوجا"])
+    ex.append(["Ouja | A11", "A11", "سارة محمد", 18, "1050", "المالك", "المالك", "", "active", "نسبة + نظافة شهرية", "النظافة 1050 شهريًا على المالك"])
+    ex.append(["Ouja | B02", "B02", "مستثمر", 20, "1100", "المالك", "المالك", "", "active", "مخصّص", ""])
+    ex.append(["Ouja | E15", "E15", "عوجا", "", "علينا", "عوجا", "عوجا", "", "active", "تشغيل عوجا", "وحدة تشغيل عوجا — الربح كله لعوجا"])
+    try:
+        ex.sheet_view.rightToLeft = True
+        for i in range(1, len(headers) + 1):
+            ex.column_dimensions[get_column_letter(i)].width = 20
     except Exception:
         pass
     buf = _io.BytesIO(); wb.save(buf); return buf.getvalue()
