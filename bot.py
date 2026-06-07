@@ -33095,22 +33095,23 @@ def _fb_contracts_summary():
 # ---- Stage 5: Al Rajhi bank Excel parser (Decimal · dedup · mask · classify) ----
 def _fb_bank_classify(desc, debit, credit):
     s = str(desc or "").lower()
-    if any(w in s for w in ("airbnb", "hostaway", "booking", "agoda", "payout", "تحويل وارد", "إيداع")) and credit > 0:
-        return "channel_payout"
-    if any(w in s for w in ("رسوم", "fee", "عمولة بنك", "bank charge")):
+    if "رسوم" in s or "fee" in s or "عمولة" in s:                     # fees first (e.g. رسوم حوالة سريع/فورية)
         return "bank_fee"
-    if any(w in s for w in ("تحويل فوري", "instant transfer", "sarie", "سريع")) and ("رسوم" in s or "fee" in s):
-        return "instant_transfer_fee"
-    if any(w in s for w in ("نظافة", "cleaning", "clean")):
+    if any(w in s for w in ("airbnb", "hostaway", "booking", "agoda", "payout")):
+        return "channel_payout"
+    if any(w in s for w in ("نظافة", "cleaning")):
         return "cleaning_provider"
     if any(w in s for w in ("صيانة", "maintenance")):
         return "maintenance"
-    if any(w in s for w in ("wifi", "wi-fi", "نت", "اتصالات", "stc", "internet")):
+    if any(w in s for w in ("wifi", "wi-fi", "اتصالات", "stc", "internet")):
         return "wifi"
     if any(w in s for w in ("اشتراك", "subscription", "saas", "software")):
         return "software_subscription"
-    if any(w in s for w in ("مدى", "mada", "card", "بطاقة", "pos", "نقطة بيع")):
+    if any(w in s for w in ("مدى", "mada", "نقطة بيع", "pos")) or "بطاقة" in s:
         return "employee_card_settlement"
+    # Generic transfers (وارد/صادر/حوالة/تحويل) are NOT auto-guessed: an incoming transfer
+    # might be a channel payout OR founder funding, an outgoing one a supplier/owner/founder —
+    # leave them 'unknown' so the accountant classifies (never fake revenue).
     return "unknown"
 
 def _fb_card_last4(desc):
@@ -33118,35 +33119,74 @@ def _fb_card_last4(desc):
     m = _re.search(r"(\d{4})\D*$", str(desc or "")) or _re.search(r"\b(\d{4})\b", str(desc or ""))
     return m.group(1) if m else None
 
+def _fb_xlsx_rows(file_bytes):
+    """All rows of the first worksheet as lists (Al Rajhi has metadata rows before the table)."""
+    import io as _io, openpyxl
+    wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    wb.close()
+    return rows
+
+def _fb_redact(s):
+    """Mask long digit runs (account/IBAN/long refs) in free text — keep it readable."""
+    return re.sub(r"\d{10,}", lambda m: "••••" + m.group()[-4:], str(s or ""))
+
+_FB_BANK_HEAD = ("تاريخ", "date", "مدين", "debit", "دائن", "credit", "رصيد", "balance", "تفاصيل", "بيان", "وصف", "narration")
+
 def _fb_bank_preview(file_bytes, fname="", colmap=None):
-    headers, body, hi = _fb_read_xlsx(file_bytes)
+    rows = _fb_xlsx_rows(file_bytes)
+    # Find the TRANSACTION header row: Al Rajhi stacks metadata rows on top, so pick the row
+    # richest in transaction-header keywords that ALSO has a date column + a debit/credit column.
+    hi, best = 0, -1
+    for i, r in enumerate(rows[:40]):
+        cells = [str(c).strip().lower() for c in r if c not in (None, "")]
+        score = sum(1 for c in cells for k in _FB_BANK_HEAD if k in c)
+        has_date = any(("تاريخ" in c or "date" in c) for c in cells)
+        has_amt = any(("مدين" in c or "دائن" in c or "debit" in c or "credit" in c) for c in cells)
+        if has_date and has_amt and score > best:
+            best, hi = score, i
+    headers = [str(c).strip() if c is not None else "" for c in (rows[hi] if rows else [])]
+    body = rows[hi + 1:]
     low = [(h or "").strip().lower() for h in headers]
-    def find(*hints):
-        for i, h in enumerate(low):
-            if h and any(x in h for x in hints):
+    def find(hints, start=0):
+        for i in range(start, len(low)):
+            if low[i] and any(x in low[i] for x in hints):
                 return i
         return None
-    cm = colmap or {"date": find("date", "تاريخ"), "desc": find("desc", "بيان", "تفاصيل", "نوع العملية", "narration"),
-                    "debit": find("debit", "مدين", "سحب", "withdraw"), "credit": find("credit", "دائن", "إيداع", "deposit"),
-                    "balance": find("balance", "رصيد"), "ref": find("ref", "مرجع", "reference")}
+    if colmap:
+        cm = colmap
+    else:
+        d1 = find(["desc", "بيان", "وصف", "تفاصيل", "نوع العملية", "narration"])
+        d2 = find(["desc", "بيان", "وصف", "تفاصيل", "narration"], (d1 + 1) if d1 is not None else 0)
+        cm = {"date": find(["date", "تاريخ"]), "desc": d1, "desc2": d2,
+              "debit": find(["debit", "مدين", "سحب", "withdraw"]), "credit": find(["credit", "دائن", "إيداع", "deposit"]),
+              "balance": find(["balance", "رصيد"]), "ref": find(["ref", "مرجع", "reference"])}
     out = []
     for i, r in enumerate(body):
         def cell(k):
             idx = cm.get(k)
             return r[idx] if (idx is not None and idx < len(r)) else None
-        debit = _fb_money(cell("debit")); credit = _fb_money(cell("credit"))
+        debit = abs(_fb_money(cell("debit")))          # Al Rajhi shows debit as negative → magnitude
+        credit = _fb_money(cell("credit"))
+        date = str(cell("date") or "").strip()
         if debit == 0 and credit == 0:
             continue
-        desc = str(cell("desc") or "").strip()
-        date = str(cell("date") or "").strip()
-        h = hashlib.sha1(("|".join([fname, date, desc, _fb_money_str(debit), _fb_money_str(credit)])).encode("utf-8")).hexdigest()
-        out.append({"row": hi + 2 + i, "date": date, "desc_masked": _fb_mask_iban(desc) if ("iban" in desc.lower() or "sa" == desc[:2].lower()) else desc,
-                    "desc": desc, "debit": _fb_money_str(debit), "credit": _fb_money_str(credit),
+        if not date and not (cell("desc") or cell("desc2")):
+            continue                                   # skip footer / total rows
+        parts = [str(cell("desc") or "").strip(), str(cell("desc2") or "").strip()]
+        desc = _fb_redact(" · ".join([p for p in parts if p]))
+        bal = (_fb_money_str(cell("balance")) if cell("balance") is not None else "")
+        # include running balance so two genuinely-separate identical rows (same day/amount/desc)
+        # stay distinct, while a true re-import of the same file still de-dupes cleanly.
+        h = hashlib.sha1(("|".join([fname, date, desc, _fb_money_str(debit), _fb_money_str(credit), bal])).encode("utf-8")).hexdigest()
+        out.append({"row": hi + 2 + i, "date": date, "desc": desc,
+                    "debit": _fb_money_str(debit), "credit": _fb_money_str(credit),
                     "balance": (_fb_money_str(cell("balance")) if cell("balance") is not None else None),
-                    "ref": str(cell("ref") or "").strip(), "card_last4": _fb_card_last4(desc),
+                    "ref": str(cell("ref") or "").strip(), "card_last4": _fb_card_last4(parts[1] or parts[0]),
                     "category": _fb_bank_classify(desc, debit, credit), "hash": h,
                     "duplicate": h in _fb_bank})
-    return {"headers": headers, "detected": cm, "rows": out, "count": len(out),
+    return {"headers": headers, "detected": cm, "header_row": hi, "rows": out, "count": len(out),
             "new": sum(1 for x in out if not x["duplicate"]), "dups": sum(1 for x in out if x["duplicate"]),
             "filename": fname}
 
