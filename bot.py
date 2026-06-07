@@ -32712,16 +32712,23 @@ def _daftra_extract_list(data):
 def _daftra_item_fields(obj_type, it):
     if not isinstance(it, dict):
         return {}
+    # Daftra wraps each list item under its MODEL name (Client / Journal / CostCenter /
+    # JournalAccount / Supplier / …). Unwrap it generically so we read the real fields.
     core = it
-    for k in ((obj_type[:-1] if obj_type.endswith("s") else obj_type), obj_type):
-        if isinstance(it.get(k), dict):
-            core = it[k]
-            break
+    named = [v for v in it.values() if isinstance(v, dict)]
+    if len(it) == 1 and named:
+        core = named[0]                                  # single wrapper key → the record
+    elif named:
+        for v in named:                                  # else the nested dict that looks like a record
+            if v.get("id") is not None or v.get("name") or v.get("code"):
+                core = v
+                break
     sid = core.get("id") or core.get("code") or it.get("id")
     name = (core.get("name") or core.get("title") or core.get("business_name") or core.get("staff_name")
-            or core.get("client_business_name") or core.get("description") or "")
+            or core.get("client_business_name") or core.get("full_name") or core.get("account_name")
+            or core.get("description") or core.get("code") or "")
     return {"id": sid, "name": str(name)[:200], "code": core.get("code"),
-            "amount": core.get("amount") or core.get("total") or core.get("value"),
+            "amount": core.get("amount") or core.get("total") or core.get("value") or core.get("net_amount"),
             "date": core.get("date") or core.get("created") or core.get("transaction_date")}
 
 def _daftra_upsert(obj_type, it):
@@ -32750,7 +32757,7 @@ def _daftra_upsert(obj_type, it):
 # Candidate endpoint paths per object — Daftra naming varies by account/version, so try a few
 # and use whichever returns a JSON list. The diagnostics endpoint reveals the real shape.
 _DAFTRA_PATHS = {
-    "accounts":     ["/api2/account_lists", "/api2/accounts", "/api2/journal_accounts", "/api2/chart_of_accounts"],
+    "accounts":     ["/api2/journal_accounts", "/api2/account_lists", "/api2/accounts", "/api2/chart_of_accounts"],
     "cost_centers": ["/api2/cost_centers", "/api2/costcenters", "/api2/cost_center"],
     "suppliers":    ["/api2/suppliers", "/api2/vendors", "/api2/supplier"],
     "customers":    ["/api2/clients", "/api2/customers", "/api2/client"],
