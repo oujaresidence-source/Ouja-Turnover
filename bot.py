@@ -13348,6 +13348,8 @@ const T = {
     fb_setup:'الإعداد والاستيراد', fb_daftra:'استيراد دافترة', fb_contracts:'ملفات العقود', fb_bank:'كشف البنك',
     fb_inbox:'الوارد المالي', fb_approval:'مركز الاعتماد', fb_recon:'المطابقة', fb_synclog:'سجل دافترة',
     fb_unitp:'ربحية الشقق', fb_companyp:'ربحية الشركة', fb_close:'الإقفال الشهري', fb_mapping:'الإعدادات والربط',
+    fb_overview:'النظرة المالية', fb_ws_overview:'النظرة المالية', fb_ws_imports:'الاستيراد والإعداد', fb_ws_queue:'قائمة العمل', fb_ws_mapping:'الربط والقواعد', fb_ws_profit:'الربحية والإقفال',
+    fb_act_promote:'حوّل للسجل المالي', fb_act_submit:'إرسال للمراجعة', fb_act_classify:'تصنيف', fb_link_cc:'اربط مركز تكلفة', fb_health:'صحة البيانات المالية', fb_nextbest:'وش تسوي الحين؟', fb_applysimilar:'تطبيق على المشابهة', fb_saverule:'احفظ كقاعدة', fb_col_priority:'الأولوية', fb_search:'بحث', fb_bulk:'إجراء جماعي', fb_selected:'محدد', fb_general_expense:'مصروف عام للشركة', fb_no_apt:'غير مرتبط بشقة',
     fb_st_notstarted:'ما بدأ', fb_st_attention:'يحتاج انتباه', fb_st_ready:'جاهز', fb_st_done:'تم',
     fb_import:'استيراد', fb_test:'اختبار الاتصال', fb_upload:'رفع الملف', fb_notconfigured:'دافترة غير مربوطة',
     fb_verified:'تم التحقق من دافترة', fb_pending:'بانتظار التحقق', fb_failed:'فشل', fb_thin:'البيانات غير مكتملة',
@@ -13648,6 +13650,8 @@ const T = {
     fb_setup:'Setup & Import', fb_daftra:'Daftra Import', fb_contracts:'Contract Profiles', fb_bank:'Bank Upload',
     fb_inbox:'Financial Inbox', fb_approval:'Approval Center', fb_recon:'Reconciliation', fb_synclog:'Daftra Sync Log',
     fb_unitp:'Unit Profitability', fb_companyp:'Company Profitability', fb_close:'Monthly Close', fb_mapping:'Settings / Mapping',
+    fb_overview:'Overview', fb_ws_overview:'Overview', fb_ws_imports:'Imports & Setup', fb_ws_queue:'Work Queue', fb_ws_mapping:'Mapping & Rules', fb_ws_profit:'Profitability & Close',
+    fb_act_promote:'Move to ledger', fb_act_submit:'Submit for review', fb_act_classify:'Classify', fb_link_cc:'Link cost center', fb_health:'Finance data health', fb_nextbest:'Do this next', fb_applysimilar:'Apply to similar', fb_saverule:'Save as rule', fb_col_priority:'Priority', fb_search:'Search', fb_bulk:'Bulk action', fb_selected:'selected', fb_general_expense:'Company general expense', fb_no_apt:'Not linked to a unit',
     fb_st_notstarted:'Not started', fb_st_attention:'Needs attention', fb_st_ready:'Ready', fb_st_done:'Done',
     fb_import:'Import', fb_test:'Test connection', fb_upload:'Upload file', fb_notconfigured:'Daftra not connected',
     fb_verified:'Verified in Daftra', fb_pending:'Verification pending', fb_failed:'Failed', fb_thin:'Data incomplete',
@@ -22115,7 +22119,7 @@ async function plabSaveFloor(){
   if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); } else toast('⚠');
 }
 /* ===== Financial Brain (المركز المالي) — import-first finance control layer ===== */
-var _fb={tab:'setup', ov:null, pending:null};
+var _fb={ws:'overview', tab:'overview', ov:null, pending:null, period:{}, sel:{}};
 function fbMoney(s){ return esc(s==null?'—':String(s))+' ر.س'; }   // exact decimals (backend sends 2-dp string)
 function fbCard(){ return 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px'; }
 function fbChip(label,tone){ var c=(tone==='ok'?'#3e9665':(tone==='warn'?'var(--gold)':(tone==='bad'?'var(--down)':'#8a8270'))); return '<span style="font-size:10.5px;color:'+c+';border:1px solid '+c+';border-radius:99px;padding:1px 8px;white-space:nowrap">'+esc(label)+'</span>'; }
@@ -22126,16 +22130,106 @@ async function loadFb(force){
   if(force) _fb.ov=null;
   fbRenderTabs(); fbGo(_fb.tab);
 }
+function fbWorkspaces(){ var t_=t(); return [
+  ['overview','🧭',t_.fb_ws_overview,[['overview','🧭',t_.fb_overview]]],
+  ['imports','📥',t_.fb_ws_imports,[['setup','🚀',t_.fb_setup],['daftra','📚',t_.fb_daftra],['bank','🏦',t_.fb_bank],['synclog','🧾',t_.fb_synclog]]],
+  ['queue','✅',t_.fb_ws_queue,[['inbox','📋',t_.fb_inbox],['approval','🛡️',t_.fb_approval],['recon','🔗',t_.fb_recon]]],
+  ['mapping','🔗',t_.fb_ws_mapping,[['contracts','📑',t_.fb_contracts],['mapping','⚙️',t_.fb_mapping]]],
+  ['profit','📊',t_.fb_ws_profit,[['unitp','🏠',t_.fb_unitp],['companyp','🏢',t_.fb_companyp],['close','📅',t_.fb_close]]] ]; }
+function fbWsForTab(tab){ var ws=fbWorkspaces(); for(var i=0;i<ws.length;i++){ for(var j=0;j<ws[i][3].length;j++){ if(ws[i][3][j][0]===tab) return ws[i][0]; } } return 'overview'; }
 function fbRenderTabs(){
-  var el=document.getElementById('fbTabs'); if(!el) return; var t_=t();
-  var tabs=[['setup','🚀',t_.fb_setup],['daftra','📚',t_.fb_daftra],['contracts','📑',t_.fb_contracts],['bank','🏦',t_.fb_bank],['inbox','📥',t_.fb_inbox],['approval','✅',t_.fb_approval],['recon','🔗',t_.fb_recon],['synclog','🧾',t_.fb_synclog],['unitp','🏠',t_.fb_unitp],['companyp','🏢',t_.fb_companyp],['close','📅',t_.fb_close],['mapping','⚙️',t_.fb_mapping]];
-  el.innerHTML=tabs.map(function(x){ var on=(_fb.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="fbGo(&#39;'+x[0]+'&#39;)">'+x[1]+' '+esc(x[2])+'</button>'; }).join('');
+  var el=document.getElementById('fbTabs'); if(!el) return; var ws=fbWorkspaces(), cur=_fb.ws||'overview';
+  var def=ws.filter(function(w){return w[0]===cur;})[0]||ws[0];
+  var html='<div style="display:flex;gap:6px;flex-wrap:wrap">'+ws.map(function(w){ var on=(w[0]===cur); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="fbWs(&#39;'+w[0]+'&#39;)">'+w[1]+' '+esc(w[2])+'</button>'; }).join('')+'</div>';
+  if((def[3]||[]).length>1){ html+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'+def[3].map(function(s){ var on=(_fb.tab===s[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbGo(&#39;'+s[0]+'&#39;)">'+s[1]+' '+esc(s[2])+'</button>'; }).join('')+'</div>'; }
+  el.innerHTML=html;
 }
-function fbGo(tab){ _fb.tab=tab; fbRenderTabs(); var b=document.getElementById('fbBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
-  ({setup:fbSetup,daftra:fbDaftra,contracts:fbContracts,bank:fbBank,inbox:fbInbox,approval:fbApproval,recon:fbRecon,synclog:fbSynclog,unitp:fbUnitP,companyp:fbCompanyP,close:fbClose,mapping:fbMapping}[tab]||fbSetup)(); }
+function fbWs(ws){ var def=fbWorkspaces().filter(function(w){return w[0]===ws;})[0]; if(!def) return; _fb.ws=ws; _fb.tab=def[3][0][0]; fbRenderTabs(); fbGo(_fb.tab); }
+function fbGo(tab){ _fb.tab=tab; _fb.ws=fbWsForTab(tab); _fb.sel={}; fbRenderTabs(); var b=document.getElementById('fbBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
+  ({overview:fbOverviewPage,setup:fbSetup,daftra:fbDaftra,contracts:fbContracts,bank:fbBank,inbox:fbInbox,approval:fbApproval,recon:fbRecon,synclog:fbSynclog,unitp:fbUnitP,companyp:fbCompanyP,close:fbClose,mapping:fbMapping}[tab]||fbOverviewPage)(); }
 async function fbOverview(force){
   if(_fb.ov && !force) return _fb.ov;
   try{ var d=await api('/api/fb/overview'); _fb.ov=d; var rl=document.getElementById('fbRole'); if(rl) rl.textContent=(L==='ar'?'صلاحية: ':'role: ')+(d.role||''); return d; }catch(_){ return null; }
+}
+function fbNum(s){ return parseFloat(String(s==null?'':s).replace(/[^0-9.-]/g,''))||0; }
+function fbAlertCard(n,ar_,en_,tab,ctaAr,ctaEn){ var ar=(L==='ar');
+  return '<div style="background:var(--surface);border:1px solid var(--gold);border-radius:10px;padding:11px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+    +'<span style="font-size:20px;font-weight:800;color:var(--gold);min-width:34px;text-align:center">'+n+'</span>'
+    +'<span style="flex:1;min-width:150px;font-size:12px">'+esc(ar?ar_:en_)+'</span>'
+    +'<button class="btn ghost xs" onclick="fbGo(&#39;'+tab+'&#39;)">'+esc(ar?ctaAr:ctaEn)+'</button></div>'; }
+function fbNextAction(d,cp){
+  var dov=d.daftra||{}, cs=d.contracts||{}, bs=d.bank||{}, ic=d.inbox_counts||{}, fl=cs.flags||{}, hh=cs.health||{};
+  if(!dov.configured) return {tab:'mapping',ar:'اربط دافترة: أضف المفاتيح في Railway ثم اختبر الاتصال',en:'Connect Daftra: add keys in Railway then test',ca:'إعدادات الربط',ce:'Open mapping'};
+  if(dov.total_records===0) return {tab:'daftra',ar:'استورد بيانات دافترة (الحسابات ومراكز التكلفة)',en:'Import Daftra data (accounts & cost centers)',ca:'استيراد دافترة',ce:'Daftra import'};
+  if(!(cs.count>0)) return {tab:'contracts',ar:'ارفع ملف العقود عشان نعرف نسبة عوجا وقواعد كل شقة',en:'Upload contracts so we know each unit Ouja % and rules',ca:'ارفع العقود',ce:'Upload contracts'};
+  if(fl.missing_cost_center>0) return {tab:'contracts',ar:'اربط مراكز التكلفة للعقود الناقصة — '+fl.missing_cost_center+' عقد يحتاج ربط',en:'Link cost centers — '+fl.missing_cost_center+' contracts need linking',ca:'اربط مراكز التكلفة',ce:'Link cost centers'};
+  if(!(bs.count>0)) return {tab:'bank',ar:'ارفع كشف الراجحي عشان نطابق الحركة',en:'Upload the Al Rajhi statement to match movement',ca:'ارفع الكشف',ce:'Upload statement'};
+  if(bs.needs_review>0) return {tab:'bank',ar:'صنّف حركة البنك — '+bs.needs_review+' عملية تحتاج مراجعة',en:'Classify bank movement — '+bs.needs_review+' need review',ca:'صنّف الحركة',ce:'Classify'};
+  if(ic.needs_faisal>0) return {tab:'approval',ar:'راجع موافقات فيصل — '+ic.needs_faisal+' عملية فوق ٣٠٠٠',en:'Review Faisal approvals — '+ic.needs_faisal+' over 3000',ca:'مركز الاعتماد',ce:'Approvals'};
+  if(cp && !cp.revenue_connected) return {tab:'unitp',ar:'اسحب الإيرادات من Hostaway عشان نحسب الربحية',en:'Pull Hostaway revenue to compute profit',ca:'الربحية',ce:'Profitability'};
+  return {tab:'companyp',ar:'كل شي مكتمل — راجع ربحية الشركة',en:'All set — review company profitability',ca:'ربحية الشركة',ce:'Company profit'};
+}
+async function fbOverviewPage(){
+  var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
+  var d=await fbOverview(true); if(!d){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">⚠</div>'; return; }
+  var dov=d.daftra||{}, cs=d.contracts||{}, bs=d.bank||{}, ic=d.inbox_counts||{}, fl=(cs.flags||{}), hh=(cs.health||{});
+  var cp=null, up=null;
+  try{ var r=await api('/api/fb/profit?scope=company'); if(r&&!r.error) cp=r; }catch(_){}
+  try{ var ru=await api('/api/fb/profit?scope=unit'); if(ru&&!ru.error) up=ru; }catch(_){}
+  var sig=[{ok:!!dov.configured,ar:'ربط دافترة',en:'Daftra connected'},{ok:(dov.total_records>0),ar:'استيراد دافترة',en:'Daftra imported'},
+    {ok:(cs.count>0),ar:'العقود مرفوعة',en:'Contracts uploaded'},{ok:(cs.count>0&&!(hh.incomplete>0)),ar:'العقود مكتملة',en:'Contracts complete'},
+    {ok:(cs.count>0&&!(fl.missing_cost_center>0)),ar:'مراكز التكلفة مربوطة',en:'Cost centers linked'},{ok:(bs.count>0),ar:'البنك مرفوع',en:'Bank uploaded'},
+    {ok:(bs.count>0&&!(bs.needs_review>0)),ar:'حركة البنك مصنّفة',en:'Bank classified'},{ok:!(ic.needs_faisal>0),ar:'اعتمادات فيصل',en:'Faisal approvals'},
+    {ok:!!(cp&&cp.revenue_connected),ar:'الإيراد مربوط',en:'Revenue connected'}];
+  var okN=sig.filter(function(s){return s.ok;}).length, totN=sig.length, score=Math.round(100*okN/totN);
+  var scol=(score>=80?'#3e9665':(score>=50?'var(--gold)':'var(--down)'));
+  var h='<div style="'+fbCard()+';display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
+    +'<div style="display:flex;flex-direction:column;align-items:center;min-width:92px"><div style="font-size:32px;font-weight:800;color:'+scol+';line-height:1">'+score+'<span style="font-size:14px">%</span></div><div class="muted" style="font-size:10.5px;margin-top:3px;text-align:center">'+esc(t().fb_health)+'</div></div>'
+    +'<div style="flex:1;min-width:200px;display:flex;flex-wrap:wrap;gap:5px">'+sig.map(function(s){ return fbChip((ar?s.ar:s.en),(s.ok?'ok':'warn')); }).join('')+'</div></div>';
+  var nb=fbNextAction(d,cp);
+  if(nb){ h+='<div style="'+fbCard()+';background:var(--surface-2)"><div class="muted" style="font-size:11px">⚡ '+esc(t().fb_nextbest)+'</div><div style="font-size:13.5px;font-weight:700;margin:4px 0 9px;line-height:1.5">'+esc(ar?nb.ar:nb.en)+'</div><button class="btn primary sm" onclick="fbGo(&#39;'+nb.tab+'&#39;)">'+esc(ar?nb.ca:nb.ce)+'</button></div>'; }
+  // coverage cards (counts — safe for all roles)
+  h+='<div style="font-size:12px;font-weight:700;margin:4px 2px 6px">'+(ar?'تغطية البيانات':'Data coverage')+'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">'
+    +fbStatCard(ar?'سجلات دافترة':'Daftra records',(dov.total_records||0),(dov.configured?'var(--text)':'var(--gold)'))
+    +fbStatCard(ar?'عقود':'Contracts',(cs.count||0)+(hh.incomplete?(' · '+hh.incomplete+(ar?' ناقص':' inc')):''),(hh.incomplete?'var(--gold)':'var(--text)'))
+    +fbStatCard(ar?'ناقص مركز تكلفة':'Missing cost ctr',(fl.missing_cost_center||0),((fl.missing_cost_center||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'بنك غير مصنّف':'Bank unclassified',(bs.needs_review||0),((bs.needs_review||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'يحتاج اعتماد فيصل':'Needs Faisal',(ic.needs_faisal||0),((ic.needs_faisal||0)?'var(--down)':'#3e9665'))
+    +fbStatCard(ar?'فشل مزامنة دافترة':'Daftra sync fail',((dov.last_run&&dov.last_run.error_summary)?1:0),((dov.last_run&&dov.last_run.error_summary)?'var(--down)':'#3e9665'))+'</div>';
+  // alerts
+  var alerts=[];
+  if(fl.missing_cost_center>0) alerts.push([fl.missing_cost_center,'عقد يحتاج ربط مركز تكلفة','contracts missing a cost center','contracts','اربط','Link']);
+  if(bs.needs_review>0) alerts.push([bs.needs_review,'عملية بنك غير مصنّفة','bank transactions unclassified','bank','صنّف','Classify']);
+  if(ic.needs_faisal>0) alerts.push([ic.needs_faisal,'عملية فوق ٣٠٠٠ تحتاج اعتماد فيصل','items over 3,000 need Faisal approval','approval','راجع','Review']);
+  if(fl.missing_hostaway>0) alerts.push([fl.missing_hostaway,'شقة بدون Hostaway ID (يصعّب ربط الإيراد)','units missing a Hostaway ID','contracts','اربط','Link']);
+  if(dov.last_run&&dov.last_run.error_summary) alerts.push([1,'فشل في مزامنة دافترة','Daftra sync failure','daftra','افحص','Inspect']);
+  if(alerts.length){ h+='<div style="font-size:12px;font-weight:700;margin:14px 2px 6px">'+(ar?'تنبيهات':'Alerts')+'</div><div style="display:flex;flex-direction:column;gap:7px">'+alerts.map(function(a){ return fbAlertCard(a[0],a[1],a[2],a[3],a[4],a[5]); }).join('')+'</div>'; }
+  // revenue + top/bottom (finance only)
+  if(cp){
+    h+='<div style="font-size:12px;font-weight:700;margin:14px 2px 6px">'+(ar?'الملخص المالي':'Financial summary')+' <span class="muted" style="font-weight:600">'+esc(cp.period_label||'')+'</span></div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">'
+      +fbStatCard(ar?'إيراد المحفظة':'Portfolio revenue',fbMoney(cp.portfolio_revenue),'var(--text)')
+      +fbStatCard(ar?'دخل عوجا':'Ouja income',fbMoney(cp.ouja_income),'#3e9665')
+      +fbStatCard(ar?'مصاريف دافترة':'Daftra expenses',fbMoney(cp.daftra_expenses),'var(--down)')
+      +fbStatCard(ar?'بنك غير مطابق':'Bank unmatched',(cp.bank_unmatched||0),'var(--text)')+'</div>';
+    if(up && up.revenue_connected && (up.units||[]).length){
+      var conn=(up.units||[]).filter(function(u){return u.revenue_connected;}).map(function(u){ return {n:u.apartment,p:(fbNum(u.ouja_fee)-fbNum(u.expenses)),rev:fbNum(u.revenue)}; });
+      var byp=conn.slice().sort(function(a,c){return c.p-a.p;});
+      var top=byp.slice(0,5), bot=byp.slice(-5).reverse();
+      function rankList(list,col){ return '<div style="flex:1;min-width:220px">'+list.map(function(x){ return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:5px 0;border-bottom:1px solid var(--border)"><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(x.n||'—')+'</span><b style="color:'+col+'">'+fbMoney(x.p.toFixed(2))+'</b></div>'; }).join('')+'</div>'; }
+      h+='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px"><div style="flex:1;min-width:220px"><div class="muted" style="font-size:11px;margin-bottom:4px">🟢 '+(ar?'أعلى ٥ ربحًا لعوجا':'Top 5 by Ouja profit')+'</div>'+rankList(top,'#3e9665')+'</div>'
+        +'<div style="flex:1;min-width:220px"><div class="muted" style="font-size:11px;margin-bottom:4px">🔴 '+(ar?'أقل ٥ ربحًا لعوجا':'Bottom 5 by Ouja profit')+'</div>'+rankList(bot,'var(--down)')+'</div></div>';
+    } else {
+      h+='<div style="'+fbCard()+';margin-top:8px;text-align:center"><div class="muted" style="font-size:12px">'+(ar?'أفضل/أقل الشقق غير جاهز بعد — اسحب الإيرادات من Hostaway في صفحة الربحية.':'Top/bottom apartments not ready yet — pull Hostaway revenue in Profitability.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="fbGo(&#39;unitp&#39;)">'+(ar?'افتح الربحية':'Open profitability')+'</button></div>';
+    }
+  }
+  // bank categories breakdown (real counts)
+  var bc=bs.by_category||{}; var keys=Object.keys(bc).filter(function(k){return k!=='unknown';}).sort(function(a,c){return bc[c]-bc[a];}).slice(0,6);
+  if(keys.length){ var mx=Math.max.apply(null,keys.map(function(k){return bc[k];}))||1;
+    h+='<div style="font-size:12px;font-weight:700;margin:14px 2px 6px">'+(ar?'حركة البنك حسب التصنيف':'Bank movement by category')+'</div><div style="'+fbCard()+'">'+keys.map(function(k){ var pct=Math.round(100*bc[k]/mx);
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="min-width:130px;font-size:11px">'+esc(k)+'</span><div style="flex:1;background:var(--surface-2);border-radius:99px;height:8px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var(--gold)"></div></div><span class="muted" style="font-size:11px;min-width:30px;text-align:left">'+bc[k]+'</span></div>'; }).join('')+'</div>'; }
+  b.innerHTML=h;
 }
 /* ---- Setup & Import journey (the first screen — never blank) ---- */
 async function fbSetup(){
