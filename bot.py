@@ -22217,6 +22217,23 @@ async function fbDaily(){
       +'<div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'+esc(t().fb_dist_explain)+'</div>'
       +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+fbChip((ar?'موجود كتوزيع ':'in Daftra ')+(dist.ready||0),(dist.ready?'ok':'mut'))+fbChip((ar?'محتمل ':'possible ')+(dist.review||0),(dist.review?'warn':'mut'))+fbChip((ar?'مربوط ':'linked ')+(dist.linked||0),'mut')+'</div></div>';
   }
+  var flows=(rd&&rd.flows)||{}; function fl(k){ return flows[k]||{count:0,total:'0.00'}; }
+  var co=['cash_out_expense','cash_out_employee_advance','cash_out_bank_fee','cash_out_owner_payment','cash_out_supplier_payment','cash_out_unknown'];
+  var ci=['cash_in_booking_revenue','cash_in_partner_funding','cash_in_recycled_company_revenue','cash_in_other_activity','cash_in_unknown'];
+  function flowChips(keys){ return keys.map(function(k){ var f=fl(k); if(!f.count) return ''; return fbChip(esc((ar?f.ar:f.en)||k)+' '+f.count,'mut'); }).filter(Boolean).join(''); }
+  var coH=flowChips(co), ciH=flowChips(ci);
+  if(coH||ciH){
+    h+='<div style="'+fbCard()+'"><b style="font-size:13.5px">🔀 '+(ar?'تصنيف الحركة المحاسبي':'Accounting flow')+'</b><div class="muted" style="font-size:11px;margin-top:3px">'+(ar?'السحب = البنك دائن · الوارد = البنك مدين':'Cash-out credits the bank · cash-in debits it')+'</div>';
+    if(coH) h+='<div style="margin-top:8px;font-size:11.5px;font-weight:700">'+(ar?'⬆️ المسحوبات':'⬆️ Cash out')+'</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+coH+'</div>';
+    if(ciH) h+='<div style="margin-top:8px;font-size:11.5px;font-weight:700">'+(ar?'⬇️ الواردات':'⬇️ Cash in')+'</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+ciH+'</div>';
+    h+='</div>';
+  }
+  var cust=(rd&&rd.custody)||{employees:[],count:0,open:0,outstanding_total:'0.00'};
+  if((cust.count||0)>0){
+    h+='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13.5px">👤 '+(ar?'العهد':'Employee advances')+'</b>'+fbChip((ar?'رصيد قائم ':'outstanding ')+fbMoney(cust.outstanding_total),(fbNum(cust.outstanding_total)>0?'warn':'ok'))+'</div>'
+      +'<div class="muted" style="font-size:11px;margin-top:4px;line-height:1.6">'+(ar?'العهدة: التحويل يثبتها (مدين عهدة / دائن بنك)، والفواتير تقفلها (مدين مصاريف / دائن عهدة) بدون حركة بنك جديدة.':'Advance issue debits custody/credits bank; invoices settle it (debit expenses/credit custody) with no new bank line.')+'</div>'
+      +'<div style="margin-top:8px">'+(cust.employees||[]).slice(0,5).map(function(e){ return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:4px 0;border-top:1px solid var(--border)"><span>'+esc(e.account)+'</span><b style="white-space:nowrap;color:'+(fbNum(e.outstanding)>0?'var(--gold-2)':'#3e7d5a')+'">'+fbMoney(e.outstanding)+'</b></div>'; }).join('')+'</div></div>';
+  }
   var exc=(dup.possible||0)+(byc.missing_bank_account_mapping||0);
   h+=step(5,'🔎',ar?'راجع الاستثناءات':'Review exceptions',(exc===0),(ar?('عمليات تحتاج قرار: '+exc+((ic.needs_faisal||0)?(' · فوق ٣٠٠٠: '+ic.needs_faisal):'')):('items needing a decision: '+exc)),(ar?'افتح قائمة العمل':'Open work queue'),'fbGo(&#39;inbox&#39;)');
   h+=step(6,'🧮',ar?'جهّز القيود الجديدة':'Prepare new entries',false,(ar?('عمليات جديدة (مو في دافترة): '+(byc.not_found_after_full_check||0)+'. صنّفها واعتمدها قبل تجهيز القيد.'):('new (not in Daftra): '+(byc.not_found_after_full_check||0)+'. Classify & approve before drafting.')),(ar?'افتح القائمة':'Open queue'),'fbGo(&#39;inbox&#39;)');
@@ -34342,6 +34359,106 @@ def _fb_dup_diag():
             "journal_date_min": jmin, "journal_date_max": jmax, "bank_date_min": bmin, "bank_date_max": bmax,
             "date_overlap": overlap, "top_accounts": top_accounts, "verdict": verdict, "reason_ar": ar, "reason_en": en}
 
+# ====== Accounting flow classification + employee custody (العهد) ======
+_FB_CUSTODY_KW = ("عهد", "عهده", "سلفه", "سلف", "custody", "advance", "imprest", "petty")
+_FB_PARTNER_KW = ("جاري", "شريك", "partner", "current account", "current acct")
+_FB_FUNDING_KW = ("تمويل", "اعاده تمويل", "funding", "capital injection")
+_FB_BOOKING_KW = ("حجز", "حجوزات", "ايراد", "booking", "reservation", "payout", "channel", "revenue", "income")
+_FB_FEEACC_KW = ("رسوم", "عموله", "fee", "charge")
+_FB_FLOW_LABELS = {
+    "cash_out_expense": ("سحب لمصروف", "Expense out"),
+    "cash_out_employee_advance": ("سحب عهدة موظف", "Employee advance out"),
+    "employee_advance_settlement": ("تصفية عهدة", "Advance settlement"),
+    "cash_out_bank_fee": ("رسوم بنكية", "Bank fee"),
+    "cash_out_owner_payment": ("دفعة مالك", "Owner payment"),
+    "cash_out_supplier_payment": ("دفعة مورد", "Supplier payment"),
+    "cash_in_booking_revenue": ("إيراد حجوزات", "Booking revenue"),
+    "cash_in_partner_funding": ("تمويل من جاري الشريك", "Partner funding"),
+    "cash_in_recycled_company_revenue": ("إعادة تمويل من إيرادات الشركة", "Recycled revenue"),
+    "cash_in_other_activity": ("إيراد نشاط آخر", "Other activity income"),
+    "cash_in_unknown": ("وارد غير مصنف", "Unclassified incoming"),
+    "cash_out_unknown": ("سحب غير مصنف", "Unclassified outgoing"),
+}
+def _fb_flow_label(flow):
+    return _FB_FLOW_LABELS.get(flow or "", ("", ""))
+
+def _fb_counterpart_blob(txn):
+    """Text of the matched journal's NON-bank counterpart lines (accounting treatment); falls back to
+    the bank-statement description when the txn isn't matched to a journal yet."""
+    eid = txn.get("matched_daftra_id")
+    j = _fb_djournals.get(str(eid)) if eid else None
+    if j:
+        mapped = _fb_mapped_bank_accounts()
+        parts = [((ln.get("account_name") or "") + " " + (ln.get("description") or ""))
+                 for ln in (j.get("lines") or []) if not _fb_line_is_bank(ln, mapped)]
+        if any(p.strip() for p in parts):
+            return _fb_ar_norm(" ".join(parts))
+    return _fb_ar_norm(txn.get("description"))
+
+def _fb_flow_type(txn):
+    """Accounting flow of a bank txn (matched OR not) — direction-aware. Cash-out classifies by the
+    debit counterpart (expense/custody/fee); cash-in by the credit counterpart (partner/funding/booking)."""
+    deb = _fb_money(txn.get("debit"))
+    outgoing = deb > 0
+    blob = _fb_counterpart_blob(txn)
+    has = lambda kws: any(_fb_ar_norm(k) in blob for k in kws)
+    if outgoing:
+        if has(_FB_CUSTODY_KW):
+            return "cash_out_employee_advance"
+        if txn.get("category") == "bank_fee" or (has(_FB_FEEACC_KW) and deb <= 50):
+            return "cash_out_bank_fee"
+        return "cash_out_expense" if blob.strip() else "cash_out_unknown"
+    else:
+        if has(_FB_PARTNER_KW):
+            return "cash_in_partner_funding"
+        if has(_FB_FUNDING_KW):
+            return "cash_in_recycled_company_revenue"
+        if has(_FB_BOOKING_KW):
+            return "cash_in_booking_revenue"
+        return "cash_in_unknown"
+
+def _fb_is_custody_line(ln):
+    n = _fb_ar_norm(ln.get("account_name"))
+    return bool(n and any(_fb_ar_norm(k) in n for k in _FB_CUSTODY_KW))
+
+def _fb_custody_balances():
+    """Per-employee custody (عهدة) balance straight from Daftra journals — handles the no-bank-line
+    settlement entry correctly: Dr custody = issued/increase, Cr custody = settled/decrease."""
+    bal = {}
+    for j in _fb_djournals.values():
+        for ln in (j.get("lines") or []):
+            if not _fb_is_custody_line(ln):
+                continue
+            nm = (ln.get("account_name") or "عهدة").strip()
+            rec = bal.setdefault(nm, {"account": nm, "issued": Decimal("0.00"), "settled": Decimal("0.00"), "entries": 0})
+            rec["issued"] += _fb_money(ln.get("debit"))
+            rec["settled"] += _fb_money(ln.get("credit"))
+            rec["entries"] += 1
+    out = []
+    for r in bal.values():
+        out.append({"account": r["account"], "issued": _fb_money_str(r["issued"]), "settled": _fb_money_str(r["settled"]),
+                    "outstanding": _fb_money_str(r["issued"] - r["settled"]), "entries": r["entries"]})
+    out.sort(key=lambda x: -_fb_money(x["outstanding"]))
+    tot = sum((_fb_money(x["outstanding"]) for x in out), Decimal("0.00"))
+    return {"employees": out, "count": len(out), "outstanding_total": _fb_money_str(tot),
+            "open": sum(1 for x in out if _fb_money(x["outstanding"]) > 0)}
+
+def _fb_flow_summary():
+    """Counts + totals per accounting flow across checked bank txns (for Daily cash-out/cash-in cards)."""
+    out = {}
+    for x in _fb_bank.values():
+        f = x.get("daftra_flow_type")
+        if not f:
+            continue
+        amt = _fb_money(x.get("debit")) or _fb_money(x.get("credit"))
+        rec = out.setdefault(f, {"flow": f, "count": 0, "total": Decimal("0.00")})
+        rec["count"] += 1; rec["total"] += amt
+    res = {}
+    for f, r in out.items():
+        lab = _fb_flow_label(f)
+        res[f] = {"count": r["count"], "total": _fb_money_str(r["total"]), "ar": lab[0], "en": lab[1]}
+    return res
+
 def _fb_dup_check(start=None, end=None, actor="", ids=None):
     """Check bank txns (date range OR ids) against imported Daftra JOURNAL LINES via mapped bank account.
     Honest prerequisites: needs journals imported + a bank-account mapping before claiming 'not found'."""
@@ -34406,6 +34523,7 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
             txn["daftra_duplicate_reason_en"] = "Journals & expenses checked (totals + line distribution), no match"
             txn["matched_daftra_id"] = None; txn["matched_daftra_source_type"] = None; txn["matched_daftra_number"] = None
             txn["matched_daftra_line_ids"] = []
+        txn["daftra_flow_type"] = _fb_flow_type(txn)          # accounting flow (expense/advance/fee/funding/booking)
         counts[status] = counts.get(status, 0) + 1
     _fb_save("finance_bank_transactions.json", _fb_bank)
     _fb_audit_add(actor, "daftra_dup_check", "bank", (start or "ids"),
@@ -34783,7 +34901,8 @@ async def _api_fb_daftra_dup(request):
                           "bank_mapping": bool(_fb_mapped_bank_accounts()), "journals": len(_fb_djournals)})
         if q.get("ready"):
             return _json({"ok": True, "ready": _fb_dup_ready(), "summary": _fb_dup_summary(),
-                          "distributed": _fb_distributed_summary()})
+                          "distributed": _fb_distributed_summary(), "custody": _fb_custody_balances(),
+                          "flows": _fb_flow_summary()})
         jid = q.get("journal")
         if jid:                                  # full journal lines (with consumption) for manual selection
             ent = _fb_djournals.get(str(jid))
@@ -35582,7 +35701,8 @@ def _fb_inbox(filters=None):
                       "daftra_duplicate_reason_en": x.get("daftra_duplicate_reason_en"),
                       "matched_daftra_id": x.get("matched_daftra_id"), "matched_daftra_number": x.get("matched_daftra_number"),
                       "matched_daftra_line_id": x.get("matched_daftra_line_id"), "daftra_match_type": x.get("daftra_match_type"),
-                      "matched_daftra_line_ids": x.get("matched_daftra_line_ids"), "distributed_num_lines": x.get("distributed_num_lines")})
+                      "matched_daftra_line_ids": x.get("matched_daftra_line_ids"), "distributed_num_lines": x.get("distributed_num_lines"),
+                      "daftra_flow_type": x.get("daftra_flow_type")})
     try:
         for ex in list(_expenses.values())[-200:]:
             if _exp_canonical_status(ex) in ("verified", "posted"):
@@ -35597,6 +35717,12 @@ def _fb_inbox(filters=None):
         i.update(_fb_resolve_status(i))
         i["needs_faisal"] = i.get("requires_faisal_approval")
         i["next_ar"], i["next_en"] = i.get("next_action_label_ar"), i.get("next_action_label_en")
+        if i.get("kind") == "bank" and i.get("daftra_flow_type"):    # prefix the accounting flow on the reason chip
+            fa, fe = _fb_flow_label(i["daftra_flow_type"])
+            i["flow_label_ar"], i["flow_label_en"] = fa, fe
+            if fa and i.get("reason_chip_ar"):
+                i["reason_chip_ar"] = fa + " · " + i["reason_chip_ar"]
+                i["reason_chip_en"] = (fe + " · " + i["reason_chip_en"]) if i.get("reason_chip_en") else fe
     lanes = {ln: sum(1 for i in items if i["lane"] == ln) for ln in _FB_LANES}
     flt = f.get("filter")
     if flt in _FB_LANES:
