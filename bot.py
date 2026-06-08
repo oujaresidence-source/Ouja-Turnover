@@ -22288,22 +22288,73 @@ async function fbDaftraDiag(){
   setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">×</button>');
 }
 /* ---- Contract Profiles (upload + preview + health) ---- */
+function fbContractOpts(){ var ar=(L==='ar'); return {
+  unit_type:[['owner_managed',ar?'إدارة بنسبة (مالك)':'Owner-managed'],['company_operated',ar?'تشغيل عوجا':'Company-operated'],['inactive',ar?'غير نشط':'Inactive'],['to_be_removed',ar?'يُزال':'To be removed'],['unknown',ar?'غير محدد':'Unknown']],
+  cleaning_rule:[['ouja_pays',ar?'على عوجا':'Ouja pays'],['owner_monthly_charge',ar?'رسوم شهرية على المالك':'Owner monthly charge'],['owner_pays',ar?'على المالك':'Owner pays'],['custom',ar?'مخصص':'Custom'],['unknown',ar?'غير واضح':'Unknown']],
+  maintenance_rule:[['owner_pays',ar?'على المالك':'Owner pays'],['ouja_pays',ar?'على عوجا':'Ouja pays'],['custom',ar?'مخصص':'Custom']],
+  refund_rule:[['owner_pays',ar?'على المالك':'Owner pays'],['ouja_pays',ar?'على عوجا':'Ouja pays'],['custom',ar?'مخصص':'Custom']],
+  contract_type:[['percent_incl_cleaning',ar?'نسبة شاملة النظافة':'% incl. cleaning'],['percent_plus_owner_cleaning',ar?'نسبة + نظافة على المالك':'% + owner cleaning'],['custom',ar?'مخصص':'Custom'],['company_operated',ar?'تشغيل عوجا':'Company-operated']] }; }
+function fbSelOpts(id, opts, cur){ var c=(cur==null?'':String(cur)); return '<select id="'+id+'" style="'+fbInp()+'">'+opts.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===c?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')+'</select>'; }
+function fbCcOptions(curId){ var ar=(L==='ar'); return '<option value="">'+(ar?'— مركز تكلفة —':'— cost center —')+'</option>'+(_fb.ccs||[]).map(function(c){ var v=(c.source_id||'')+'::'+(c.display_name||''); var sel=(String(curId||'')===String(c.source_id))?' selected':''; return '<option value="'+esc(v)+'"'+sel+'>'+esc(c.display_name||c.source_id)+'</option>'; }).join(''); }
 async function fbContracts(){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
   var d; try{ d=await api('/api/fb/contracts'); }catch(_){ d=null; }
   var sum=(d&&d.summary)||{count:0,health:{},flags:{}};
+  _fb.ccs=(d&&d.cost_centers)||[]; var profs=(d&&d.profiles)||[]; _fb.contractsByKey={}; profs.forEach(function(p){ _fb.contractsByKey[p.key]=p; });
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📑 '+t().fb_contracts+'</b>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap"><a class="btn ghost sm" href="/api/fb/contracts/template?token='+encodeURIComponent(tok())+'">⬇ '+(ar?'تنزيل قالب':'Download template')+'</a><label class="btn primary sm" style="cursor:pointer">'+t().fb_upload+'<input type="file" accept=".xlsx" style="display:none" onchange="fbUpload(event,&#39;contracts&#39;)"></label></div></div>';
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap"><a class="btn ghost sm" href="/api/fb/contracts/template?token='+encodeURIComponent(tok())+'">⬇ '+(ar?'قالب':'Template')+'</a><label class="btn primary sm" style="cursor:pointer">'+t().fb_upload+'<input type="file" accept=".xlsx" style="display:none" onchange="fbUpload(event,&#39;contracts&#39;)"></label></div></div>';
   if(!sum.count){ h+='<div class="muted" style="font-size:12.5px;margin-top:8px;line-height:1.8">'+(ar?'ارفع ملف العقود عشان نعرف نسبة عوجا وقواعد النظافة والصيانة لكل شقة. ما نخمّن أي نسبة أو مبلغ ناقص.':'Upload the contracts file so we know each unit Ouja %, cleaning & maintenance rules. We never guess a missing % or amount.')+'</div></div>'; b.innerHTML=h; return; }
   var hh=sum.health||{}, fl=sum.flags||{};
-  h+='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px">'+fbChip((ar?'مكتمل ':'complete ')+(hh.complete||0),'ok')+fbChip((ar?'مراجعة ':'review ')+(hh.needs_review||0),'warn')+fbChip((ar?'ناقص ':'incomplete ')+(hh.incomplete||0),'bad')+'</div>';
-  h+='<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'ناقص Hostaway: ':'missing Hostaway: ')+(fl.missing_hostaway||0)+' · '+(ar?'ناقص مركز تكلفة: ':'missing cost center: ')+(fl.missing_cost_center||0)+' · '+(ar?'ناقص نسبة: ':'missing %: ')+(fl.missing_pct||0)+' · '+(ar?'نظافة غير واضحة: ':'unknown cleaning: ')+(fl.unknown_cleaning||0)+'</div></div>';
-  h+='<div style="display:flex;flex-direction:column;gap:6px">'+(d.profiles||[]).map(function(p){ var tone=(p.validation_status==='complete'?'ok':(p.validation_status==='needs_review'?'warn':'bad'));
-    return '<div style="display:flex;gap:10px;align-items:center;padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap"><b style="font-size:12.5px;flex:1;min-width:120px">'+esc(p.apartment_name||p.apartment_code||'—')+'</b>'
-      +'<span class="muted" style="font-size:11px">'+esc(p.unit_type||'')+(p.ouja_percentage!=null?(' · '+p.ouja_percentage+'%'):'')+(p.cleaning_rule&&p.cleaning_rule!=='unknown'?(' · '+esc(p.cleaning_rule)):'')+'</span>'+fbChip(p.validation_status||'—',tone)
-      +((p.validation_issues||[]).length?('<div class="muted" style="font-size:10px;width:100%">'+(p.validation_issues||[]).map(function(x){return esc(ar?x[0]:x[1]);}).join(' · ')+'</div>'):'')+'</div>'; }).join('')+'</div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+fbChip((ar?'مكتمل ':'complete ')+(hh.complete||0),'ok')+fbChip((ar?'مراجعة ':'review ')+(hh.needs_review||0),'warn')+fbChip((ar?'ناقص ':'incomplete ')+(hh.incomplete||0),'bad')+'</div>';
+  h+='<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'ناقص مركز تكلفة: ':'missing cost center: ')+'<b>'+(fl.missing_cost_center||0)+'</b> · '+(ar?'ناقص Hostaway: ':'missing Hostaway: ')+(fl.missing_hostaway||0)+' · '+(ar?'ناقص نسبة: ':'missing %: ')+(fl.missing_pct||0)+' · '+(ar?'نظافة غير واضحة: ':'unknown cleaning: ')+(fl.unknown_cleaning||0)+'</div>';
+  if((_fb.ccs||[]).length){ if((fl.missing_cost_center||0)>0) h+='<button class="btn ghost sm" style="margin-top:10px" onclick="fbApplyCcSuggestions()">✨ '+(ar?'اربط المقترحات تلقائيًا (≥٩٠٪)':'Auto-link suggestions (≥90%)')+'</button>'; }
+  else { h+='<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:8px;padding:9px;margin-top:10px;font-size:11.5px">'+(ar?'ما فيه مراكز تكلفة مستوردة من دافترة بعد — استورد دافترة عشان تقدر تربط.':'No Daftra cost centers imported yet — import Daftra to enable linking.')+' <button class="btn ghost xs" onclick="fbGo(&#39;daftra&#39;)">'+(ar?'استيراد دافترة':'Daftra import')+'</button></div>'; }
+  h+='</div><div style="display:flex;flex-direction:column;gap:6px">'+profs.map(fbContractRow).join('')+'</div>';
   b.innerHTML=h;
 }
+function fbContractRow(p){
+  var ar=(L==='ar'); var st=p.validation_status, tone=(st==='complete'?'ok':(st==='needs_review'?'warn':'bad'));
+  var ccCell;
+  if(p.daftra_cost_center_id){ ccCell=fbChip('🏷 '+(p.daftra_cost_center_name||p.daftra_cost_center_id),'ok'); }
+  else if((_fb.ccs||[]).length){
+    var sug=p.cc_suggestion;
+    ccCell='<select id="ccr_'+esc(p.key)+'" style="'+fbInp()+';margin:0;width:auto;min-width:150px">'+fbCcOptions(sug?sug.id:'')+'</select>'
+      +'<button class="btn primary xs" onclick="fbLinkCC(&#39;'+esc(p.key)+'&#39;)">'+esc(t().fb_link_cc)+'</button>'
+      +(sug?('<span class="muted" style="font-size:10px;width:100%">💡 '+esc(ar?sug.reason_ar:sug.reason_en)+' · '+Math.round(sug.confidence*100)+'%</span>'):'');
+  } else { ccCell=fbChip(ar?'ناقص مركز تكلفة':'no cost center','warn'); }
+  return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<b style="flex:1;min-width:110px;font-size:12.5px">'+esc(p.apartment_name||p.apartment_code||'—')+'</b>'
+    +'<span class="muted" style="font-size:10.5px">'+esc(p.owner_name||'')+(p.ouja_percentage!=null?(' · '+p.ouja_percentage+'%'):'')+(p.cleaning_rule&&p.cleaning_rule!=='unknown'?(' · '+esc(p.cleaning_rule)):'')+'</span>'
+    +fbChip(st||'—',tone)+'<button class="btn ghost xs" onclick="fbContractEdit(&#39;'+esc(p.key)+'&#39;)">'+(ar?'تعديل':'Edit')+'</button>'
+    +'<div style="width:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+ccCell+'</div></div>';
+}
+async function fbLinkCC(key){ var ar=(L==='ar'); var s=document.getElementById('ccr_'+key); if(!s||!s.value){ toast(ar?'اختر مركز تكلفة':'Pick a cost center'); return; }
+  var p=s.value.split('::'); var r; try{ r=await post('/api/fb/contract',{key:key,daftra_cost_center_id:p[0],daftra_cost_center_name:p[1]||p[0]}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'تم الربط ✓':'Linked ✓'); fbContracts(); } else toast((r&&r.error)||'⚠'); }
+async function fbApplyCcSuggestions(){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/contract',{action:'apply_cc_suggestions',min_confidence:0.9}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast((ar?'تم ربط ':'linked ')+(r.linked||0)); fbContracts(); } else toast('⚠'); }
+function fbContractEdit(key){ var ar=(L==='ar'); var p=(_fb.contractsByKey||{})[key]; if(!p){ toast('⚠'); return; } var O=fbContractOpts();
+  function lab(s){ return '<label class="muted" style="font-size:11px">'+esc(s)+'</label>'; }
+  openDrawer((ar?'تعديل: ':'Edit: ')+(p.apartment_name||p.apartment_code||''),(ar?'كل الخيارات قوائم — اكتب فقط للمخصص':'All options are dropdowns — type only for custom'));
+  setDrawerBody(lab(ar?'نوع الوحدة':'Unit type')+fbSelOpts('ce_unit',O.unit_type,p.unit_type)
+    +lab(ar?'نوع العقد':'Contract type')+fbSelOpts('ce_ctype',O.contract_type,p.contract_type)
+    +lab(ar?'نسبة عوجا %':'Ouja %')+'<input id="ce_pct" type="number" value="'+(p.ouja_percentage!=null?p.ouja_percentage:'')+'" style="'+fbInp()+'">'
+    +lab(ar?'قاعدة النظافة':'Cleaning rule')+fbSelOpts('ce_clean',O.cleaning_rule,p.cleaning_rule)
+    +lab(ar?'النظافة الشهرية (ر.س)':'Monthly cleaning (SAR)')+'<input id="ce_clamt" type="number" value="'+(p.cleaning_monthly_amount!=null?p.cleaning_monthly_amount:'')+'" style="'+fbInp()+'">'
+    +lab(ar?'الصيانة':'Maintenance')+fbSelOpts('ce_maint',O.maintenance_rule,p.maintenance_rule)
+    +lab(ar?'الاسترجاع':'Refund')+fbSelOpts('ce_refund',O.refund_rule,p.refund_rule)
+    +lab(ar?'مركز التكلفة (دافترة)':'Cost center (Daftra)')+'<select id="ce_cc" style="'+fbInp()+'">'+fbCcOptions(p.daftra_cost_center_id)+'</select>'
+    +lab('Hostaway ID')+'<input id="ce_hid" value="'+esc(p.hostaway_listing_id||'')+'" style="'+fbInp()+'">'
+    +lab(ar?'المالك':'Owner')+'<input id="ce_owner" value="'+esc(p.owner_name||'')+'" style="'+fbInp()+'">'
+    +lab(ar?'ملاحظات':'Notes')+'<input id="ce_notes" value="'+esc(p.notes||'')+'" style="'+fbInp()+'">');
+  setDrawerFoot('<button class="btn primary sm" onclick="fbContractSave(&#39;'+key+'&#39;)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+}
+async function fbContractSave(key){ var ar=(L==='ar'); function v(id){ var e=document.getElementById(id); return e?e.value:undefined; }
+  var body={key:key, unit_type:v('ce_unit'), contract_type:v('ce_ctype'), ouja_percentage:v('ce_pct'), cleaning_rule:v('ce_clean'),
+    cleaning_monthly_amount:v('ce_clamt'), maintenance_rule:v('ce_maint'), refund_rule:v('ce_refund'), hostaway_listing_id:v('ce_hid'), owner_name:v('ce_owner'), notes:v('ce_notes')};
+  var cc=v('ce_cc'); if(cc){ var pp=cc.split('::'); body.daftra_cost_center_id=pp[0]; body.daftra_cost_center_name=pp[1]||pp[0]; }
+  var r; try{ r=await post('/api/fb/contract',body); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); fbContracts(); } else toast((r&&r.error)||'⚠'); }
 /* ---- Bank Upload ---- */
 async function fbBank(){ return fbBankRender(_fb.bankF||''); }
 async function fbBankRender(status){
@@ -33515,11 +33566,115 @@ async def _api_fb_contract_template(request):
                         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         headers={"Content-Disposition": "attachment; filename=ouja-contracts-template.xlsx"})
 
+def _fb_cc_suggest(profile, ccs):
+    """Suggest a Daftra cost center for a contract by name/code token overlap. Conservative:
+    score against the apartment's OWN tokens (so 'MLQ1' never matches 'MLQ 11'); an exact
+    normalized-name/code equality boosts to 0.97 (NOT substring — that's the trap). Returns
+    {id,name,confidence,reason_ar,reason_en} or None. Never auto-applies on its own."""
+    ntoks = set(_fb_tokens(profile.get("apartment_name"))); ntoks.discard("ouja")
+    ctoks = set(_fb_tokens(profile.get("apartment_code")))
+    base = ntoks or ctoks
+    if not base:
+        return None
+    pname = _fb_listing_norm(profile.get("apartment_name"))
+    pcode = _fb_norm_match(profile.get("apartment_code"))
+    best, bestscore, why = None, 0.0, ""
+    for cc in ccs:
+        nm = cc.get("display_name") or ""
+        cctoks = set(_fb_tokens(nm)) | set(_fb_tokens(cc.get("code")))
+        inter = base & cctoks
+        if not inter:
+            continue
+        score = len(inter) / float(len(base))
+        ccnorm = _fb_norm_match(nm)
+        if (pname and pname == ccnorm) or (pcode and pcode == ccnorm):
+            score = max(score, 0.97)
+        score = min(score, 1.0)
+        if score > bestscore:
+            best, bestscore, why = cc, score, " ".join(sorted(inter))
+    if not best:
+        return None
+    return {"id": best.get("source_id"), "name": best.get("display_name"),
+            "confidence": round(bestscore, 2), "reason_ar": "الاسم يحتوي: " + why, "reason_en": "name contains: " + why}
+
 async def _api_fb_contracts(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
+    ccs = [r for r in _fb_external.values() if r.get("source_type") == "cost_centers"]
+    profs = []
+    for key, p in _fb_contracts.items():
+        pv = dict(p); pv["key"] = key
+        if not p.get("daftra_cost_center_id"):
+            sg = _fb_cc_suggest(p, ccs)
+            if sg:
+                pv["cc_suggestion"] = sg
+        profs.append(pv)
     return _json({"ok": True, "summary": _fb_contracts_summary(),
-                  "profiles": list(_fb_contracts.values())})
+                  "cost_centers": [{"source_id": c.get("source_id"), "display_name": c.get("display_name")} for c in ccs][:300],
+                  "profiles": profs})
+
+async def _api_fb_contract(request):
+    """Update one (or bulk) contract profile + recompute validation. Audited. action options:
+    'update' (default, by key) · 'bulk' (keys[] + patch) · 'apply_cc_suggestions' (auto-link
+    high-confidence cost-center matches). Never guesses missing values — only what's sent."""
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    actor = _req_actor(request)
+    ccs = [r for r in _fb_external.values() if r.get("source_type") == "cost_centers"]
+    action = (b.get("action") or "update").strip()
+    FIELDS = ("daftra_cost_center_id", "daftra_cost_center_name", "hostaway_listing_id",
+              "ouja_percentage", "cleaning_rule", "cleaning_monthly_amount", "maintenance_rule",
+              "refund_rule", "unit_type", "owner_name", "contract_type", "notes", "status")
+    def _apply(p, patch):
+        for k in FIELDS:
+            if k not in patch:
+                continue
+            v = patch.get(k)
+            if k == "ouja_percentage":
+                p[k] = (None if v in (None, "") else _fb_norm_pct(v))
+            elif k == "cleaning_monthly_amount":
+                try:
+                    p[k] = (None if v in (None, "") else float(v))
+                except (TypeError, ValueError):
+                    p[k] = None
+            else:
+                p[k] = v
+        p["validation_status"], p["validation_issues"] = _fb_contract_validate(p)
+    if action == "apply_cc_suggestions":
+        thr = float(b.get("min_confidence") or 0.9)
+        n = 0
+        for p in _fb_contracts.values():
+            if p.get("daftra_cost_center_id"):
+                continue
+            s = _fb_cc_suggest(p, ccs)
+            if s and s["id"] and s["confidence"] >= thr:
+                p["daftra_cost_center_id"] = str(s["id"]); p["daftra_cost_center_name"] = s["name"]
+                p["validation_status"], p["validation_issues"] = _fb_contract_validate(p)
+                n += 1
+        _fb_save("finance_contract_profiles.json", _fb_contracts)
+        _fb_audit_add(actor, "contract_cc_autolink", "contracts", "bulk", after={"linked": n, "min_conf": thr})
+        return _json({"ok": True, "linked": n, "summary": _fb_contracts_summary()})
+    if action == "bulk":
+        patch = {k: b.get(k) for k in FIELDS if k in b}
+        n = 0
+        for key in (b.get("keys") or []):
+            p = _fb_contracts.get(key)
+            if p:
+                _apply(p, patch); n += 1
+        _fb_save("finance_contract_profiles.json", _fb_contracts)
+        _fb_audit_add(actor, "contract_bulk_update", "contracts", "bulk", after={"count": n, "fields": list(patch.keys())})
+        return _json({"ok": True, "updated": n, "summary": _fb_contracts_summary()})
+    key = (b.get("key") or "").strip()
+    p = _fb_contracts.get(key)
+    if not p:
+        return _json({"error": "contract_not_found"}, 404)
+    before = {"cost_center": p.get("daftra_cost_center_id"), "status": p.get("validation_status")}
+    _apply(p, b)
+    _fb_save("finance_contract_profiles.json", _fb_contracts)
+    _fb_audit_add(actor, "contract_update", "contracts", key, before=before,
+                  after={"cost_center": p.get("daftra_cost_center_id"), "status": p.get("validation_status")})
+    return _json({"ok": True, "profile": dict(p, key=key), "summary": _fb_contracts_summary()})
 
 async def _api_fb_contracts_import(request):
     if not _fb_can_finance(request):
@@ -36633,6 +36788,7 @@ async def start_web_server():
         app.router.add_get("/api/fb/daftra/diag", _api_fb_daftra_diag)
         app.router.add_post("/api/fb/daftra/import", _api_fb_daftra_import)
         app.router.add_get("/api/fb/contracts", _api_fb_contracts)
+        app.router.add_post("/api/fb/contract", _api_fb_contract)
         app.router.add_get("/api/fb/contracts/template", _api_fb_contract_template)
         app.router.add_post("/api/fb/contracts/import", _api_fb_contracts_import)
         app.router.add_get("/api/fb/bank", _api_fb_bank)
