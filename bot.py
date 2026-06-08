@@ -33885,7 +33885,10 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
     _fb_save("finance_bank_transactions.json", _fb_bank)
     _fb_audit_add(actor, "daftra_dup_check", "bank", (start or "ids"),
                   after={"checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset), **counts})
-    return {"ok": True, "checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset), **counts}
+    nd = counts["strong_possible_duplicate"] + counts["possible_duplicate"] + counts["needs_manual_review"]
+    return {"ok": True, "checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset),
+            "ready_to_link_count": counts["already_in_daftra_verified"], "needs_decision_count": nd,
+            "lanes": _fb_inbox()["lanes"], **counts}
 
 def _fb_dup_summary():
     by = {}
@@ -34094,6 +34097,8 @@ async def _api_fb_daftra_dup(request):
         return _json(res)
     if action == "bulk_link":                    # one-click link all CONFIRMED (Tier-A) matches
         return _json(_fb_dup_bulk_link(actor, b.get("ids")))
+    if action == "fix_statuses":                 # recompute/normalize display states (no re-import)
+        return _json(_fb_fix_statuses(actor))
     if action in ("link", "not_duplicate", "ignore"):
         res = _fb_dup_resolve(b.get("id"), action, actor, daftra=b.get("daftra"), reason=b.get("reason", ""))
         return _json(res, (200 if res.get("ok") else 400))
@@ -34723,70 +34728,168 @@ def _fb_next_action(e):
         return ("retry", "فشل — افتح السبب", "failed — open reason")
     return ("none", "—", "—")
 
+_FB_LANES = ("ready_to_link", "linked_existing", "needs_decision", "missing_setup",
+             "needs_faisal_approval", "ready_for_journal", "needs_review", "completed")
+
+def _fb_resolve_status(item):
+    """THE single authoritative finance-workflow resolver. Daftra duplicate state WINS over raw
+    category/status, so a confirmed-in-Daftra row never sits in plain 'needs review'. Strict
+    priority. Returns lane + bilingual labels + next action + reason + can_* capability flags."""
+    dq = item.get("daftra_duplicate_status")
+    amt = _fb_money(item.get("amount"))
+    has_cat = item.get("category") not in (None, "", "unknown")
+    needs_faisal = amt >= FB_APPROVAL_THRESHOLD
+    kind, st = item.get("kind"), item.get("status")
+    num = item.get("matched_daftra_number")
+    rar = item.get("daftra_duplicate_reason_ar") or ""
+    ren = item.get("daftra_duplicate_reason_en") or ""
+
+    def R(state, lane, s_ar, s_en, na, na_ar, na_en, r_ar, r_en, **flags):
+        d = {"primary_state": state, "lane": lane, "primary_state_label_ar": s_ar, "primary_state_label_en": s_en,
+             "next_action": na, "next_action_label_ar": na_ar, "next_action_label_en": na_en,
+             "reason_chip_ar": r_ar, "reason_chip_en": r_en, "requires_faisal_approval": needs_faisal,
+             "matched_number": num, "can_classify": True, "can_promote_to_ledger": False,
+             "can_prepare_daftra_post": False, "can_link_existing_daftra": False, "can_bulk_link": False,
+             "is_completed": False, "blocking_reason": ""}
+        d.update(flags)
+        return d
+
+    if dq == "linked_existing" or item.get("daftra_status") == "linked_existing":
+        return R("linked_to_daftra", "linked_existing", "مربوط بدافترة", "Linked to Daftra",
+                 "open_daftra", "فتح التفاصيل", "Open details",
+                 ("قيد #" + str(num)) if num else "تم ربطها بسجل موجود في دافترة",
+                 ("Journal #" + str(num)) if num else "Linked to existing Daftra record",
+                 can_classify=False, is_completed=True)
+    if dq == "already_in_daftra_verified":
+        return R("existing_in_daftra_ready_to_link", "ready_to_link", "موجود في دافترة", "Existing in Daftra",
+                 "link_confirm", "ربط واعتماد", "Link & confirm",
+                 rar or "نفس المبلغ والتاريخ وسطر حساب البنك مطابق", ren or "amount/date/bank-line match",
+                 can_classify=False, can_link_existing_daftra=True, can_bulk_link=True, blocking_reason="exists_in_daftra")
+    if dq == "strong_possible_duplicate":
+        return R("strong_possible", "needs_decision", "احتمال تكرار قوي", "Strong possible duplicate",
+                 "open_compare", "فتح المطابقة", "Open comparison", rar, ren,
+                 can_link_existing_daftra=True, blocking_reason="possible_duplicate")
+    if dq == "possible_duplicate":
+        return R("possible", "needs_decision", "احتمال مكرر", "Possible duplicate",
+                 "open_compare", "راجع المطابقة", "Review comparison", rar, ren,
+                 can_link_existing_daftra=True, blocking_reason="possible_duplicate")
+    if dq == "missing_bank_account_mapping":
+        return R("missing_setup", "missing_setup", "ناقص إعداد", "Missing setup",
+                 "complete_setup", "أكمل ربط حساب البنك", "Complete bank mapping",
+                 "ناقص ربط حساب البنك في دافترة", "Daftra bank account mapping missing",
+                 blocking_reason="missing_bank_account_mapping")
+    if dq == "check_failed":
+        return R("check_failed", "needs_decision", "فشل التحقق", "Check failed",
+                 "dup_check", "أعد الفحص", "Retry check", "فشل فحص التكرار مع دافترة", "Daftra check failed",
+                 blocking_reason="check_failed")
+    if kind == "bank" and dq in (None, "", "not_checked"):
+        return R("needs_dup_check", "needs_review", "يحتاج مطابقة دافترة", "Needs Daftra check",
+                 "dup_check", "تأكد من التكرار", "Check duplicates",
+                 "شغّل فحص التكرار مع دافترة قبل أي ترحيل", "run the Daftra duplicate check first",
+                 blocking_reason="not_checked")
+    if needs_faisal and st not in ("approved", "ready_to_post", "posted", "verified"):
+        return R("needs_faisal", "needs_faisal_approval", "يحتاج اعتماد فيصل", "Needs Faisal approval",
+                 "faisal", "إرسال لاعتماد فيصل", "Send for Faisal approval",
+                 "المبلغ ٣٠٠٠ أو أكثر", "amount ≥ 3,000")
+    if dq in ("not_found_after_full_check", "not_duplicate"):
+        if not has_cat:
+            return R("needs_classify", "needs_review", "يحتاج تصنيف", "Needs classification",
+                     "classify", "صنّف", "Classify", "عملية جديدة تحتاج تصنيف", "new — classify it")
+        return R("ready_for_journal", "ready_for_journal", "جاهز للقيد", "Ready for journal",
+                 "draft_journal", "جهّز قيد دافترة", "Prepare Daftra journal",
+                 "جديدة وغير موجودة في دافترة", "new, not in Daftra", can_prepare_daftra_post=True, can_promote_to_ledger=True)
+    if kind == "ledger":
+        if st == "posted" or item.get("verification_status") == "verified":
+            return R("completed", "completed", "مكتمل", "Completed", "none", "—", "—",
+                     "تم الترحيل/التحقق", "posted/verified", can_classify=False, is_completed=True)
+        if st == "ready_to_post":
+            return R("ready_for_journal", "ready_for_journal", "جاهز للترحيل", "Ready to post",
+                     "post", "ترحيل", "Post", "جاهز للترحيل", "ready to post", can_prepare_daftra_post=True)
+        if st == "approved":
+            return R("ready_for_journal", "ready_for_journal", "معتمد — جهّز القيد", "Approved",
+                     "draft_journal", "جهّز قيد دافترة", "Prepare journal", "معتمد", "approved", can_prepare_daftra_post=True)
+        if st == "draft":
+            return R("draft", "needs_review", "مسودة — أرسل للمراجعة", "Draft", "submit", "إرسال للمراجعة", "Submit", "مسودة", "draft")
+    if not has_cat:
+        return R("needs_classify", "needs_review", "يحتاج تصنيف", "Needs classification",
+                 "classify", "صنّف", "Classify", "يحتاج تصنيف", "needs classification")
+    return R("needs_review", "needs_review", "يحتاج مراجعة", "Needs review", "review", "راجع", "Review",
+             "يحتاج مراجعة", "needs review")
+
 def _fb_inbox(filters=None):
-    """Unified work queue: canonical ledger entries + bank txns needing review + Sheet expenses."""
+    """Unified work queue. Every item is resolved through _fb_resolve_status (the single source of
+    truth) so lanes/labels/actions reflect the Daftra duplicate state, not raw stored status."""
     f = filters or {}
     items = []
+    promoted = {e.get("source_id") for e in _fb_ledger.values() if e.get("source") == "bank" and e.get("source_id")}
     for e in _fb_ledger.values():
-        amt = _fb_money(e.get("amount"))
-        na = _fb_next_action(e)
         items.append({"kind": "ledger", "id": e["id"], "source": e.get("source"), "ref": e.get("source_id") or e["id"],
                       "apartment": e.get("apartment"), "owner": e.get("owner"), "amount": e.get("amount"),
                       "direction": e.get("direction"), "category": e.get("category"), "date": e.get("date"),
                       "description": e.get("description"), "status": e.get("status"),
                       "match_status": e.get("match_status"), "daftra_status": e.get("daftra_status"),
                       "verification_status": e.get("verification_status"),
-                      "needs_faisal": amt >= FB_APPROVAL_THRESHOLD, "next_action": na[0],
-                      "next_ar": na[1], "next_en": na[2]})
-    # bank transactions that still need attention (read-only until promoted to a ledger entry)
+                      "daftra_duplicate_status": e.get("daftra_duplicate_status"),
+                      "matched_daftra_id": e.get("matched_daftra_id"), "matched_daftra_number": e.get("matched_daftra_number")})
     for x in _fb_bank.values():
-        if x.get("status") in ("needs_review", "auto_classified") and x.get("match_status") == "unmatched":
-            amt = _fb_money(x.get("debit")) or _fb_money(x.get("credit"))
-            items.append({"kind": "bank", "id": x["id"], "source": "bank", "ref": x.get("ref") or x["id"][:8],
-                          "apartment": "", "amount": _fb_money_str(amt),
-                          "direction": ("credit" if _fb_money(x.get("credit")) > 0 else "expense"),
-                          "category": x.get("category"), "date": x.get("date"),
-                          "description": x.get("description"), "status": x.get("status"),
-                          "match_status": "unmatched", "daftra_status": "not_imported",
-                          "next_action": "promote", "next_ar": "صنّف وحوّله لقيد", "next_en": "classify & promote"})
-    # existing Google-Sheet expenses (read-only visibility — full flow stays in the Expenses tab)
+        if x.get("id") in promoted or x.get("daftra_duplicate_status") == "ignored":
+            continue
+        amt = _fb_money(x.get("debit")) or _fb_money(x.get("credit"))
+        items.append({"kind": "bank", "id": x["id"], "source": "bank", "ref": x.get("ref") or x["id"][:8],
+                      "apartment": x.get("apartment") or "", "amount": _fb_money_str(amt),
+                      "direction": ("expense" if _fb_money(x.get("debit")) > 0 else "credit"),
+                      "category": x.get("category"), "date": x.get("date"), "description": x.get("description"),
+                      "status": x.get("status"), "match_status": x.get("match_status"), "daftra_status": x.get("daftra_status"),
+                      "daftra_duplicate_status": x.get("daftra_duplicate_status"),
+                      "daftra_duplicate_confidence": x.get("daftra_duplicate_confidence"),
+                      "daftra_duplicate_reason_ar": x.get("daftra_duplicate_reason_ar"),
+                      "daftra_duplicate_reason_en": x.get("daftra_duplicate_reason_en"),
+                      "matched_daftra_id": x.get("matched_daftra_id"), "matched_daftra_number": x.get("matched_daftra_number"),
+                      "matched_daftra_line_id": x.get("matched_daftra_line_id")})
     try:
         for ex in list(_expenses.values())[-200:]:
             if _exp_canonical_status(ex) in ("verified", "posted"):
                 continue
-            items.append({"kind": "sheet", "id": ex.get("id"), "source": "sheet",
-                          "ref": ex.get("id") or ex.get("ref") or "OJ-EXP",
-                          "apartment": ex.get("apartment"), "amount": _fb_money_str(ex.get("amount")),
-                          "direction": "expense", "category": ex.get("category") or "unknown",
-                          "date": ex.get("expense_date") or ex.get("date"),
-                          "description": (ex.get("description") or ex.get("concept") or "")[:200],
-                          "status": "sheet_intake", "daftra_status": "not_imported",
-                          "next_action": "open_expenses", "next_ar": "افتح في المصاريف", "next_en": "open in Expenses"})
+            items.append({"kind": "sheet", "id": ex.get("id"), "source": "sheet", "ref": ex.get("id") or "OJ-EXP",
+                          "apartment": ex.get("apartment"), "amount": _fb_money_str(ex.get("amount")), "direction": "expense",
+                          "category": ex.get("category") or "unknown", "date": ex.get("expense_date") or ex.get("date"),
+                          "description": (ex.get("description") or ex.get("concept") or "")[:200], "status": "sheet_intake"})
     except Exception:
         pass
-    # filters
+    for i in items:                                   # resolve EVERY item through the one resolver
+        i.update(_fb_resolve_status(i))
+        i["needs_faisal"] = i.get("requires_faisal_approval")
+        i["next_ar"], i["next_en"] = i.get("next_action_label_ar"), i.get("next_action_label_en")
+    lanes = {ln: sum(1 for i in items if i["lane"] == ln) for ln in _FB_LANES}
     flt = f.get("filter")
-    if flt == "needs_faisal":
-        items = [i for i in items if i.get("needs_faisal") and i.get("status") in ("submitted", "accountant_review", "needs_faisal")]
+    if flt in _FB_LANES:
+        items = [i for i in items if i["lane"] == flt]
+    elif flt == "needs_faisal":
+        items = [i for i in items if i["lane"] == "needs_faisal_approval"]
     elif flt == "above_3000":
         items = [i for i in items if _fb_money(i.get("amount")) >= FB_APPROVAL_THRESHOLD]
-    elif flt == "needs_review":
-        items = [i for i in items if i.get("status") in ("needs_review", "auto_classified", "submitted", "accountant_review", "sheet_intake")]
-    elif flt == "ready_to_post":
-        items = [i for i in items if i.get("status") == "ready_to_post"]
-    elif flt == "failed":
-        items = [i for i in items if i.get("status") == "failed"]
-    elif flt == "verified":
-        items = [i for i in items if i.get("verification_status") == "verified"]
-    elif flt == "missing_contract":
-        keys = {_fb_contract_key(p.get("apartment_name"), p.get("apartment_code")) for p in _fb_contracts.values()}
-        items = [i for i in items if i.get("apartment") and _fb_contract_key(i.get("apartment"), "") not in keys]
-    counts = {"total": len(items),
-              "needs_faisal": sum(1 for i in items if i.get("needs_faisal")),
-              "ready_to_post": sum(1 for i in items if i.get("status") == "ready_to_post"),
+    counts = {"total": sum(lanes.values()), "needs_faisal": lanes.get("needs_faisal_approval", 0),
+              "ready_to_link": lanes.get("ready_to_link", 0), "ready_to_post": lanes.get("ready_for_journal", 0),
               "failed": sum(1 for i in items if i.get("status") == "failed")}
     items.sort(key=lambda i: (i.get("date") or ""), reverse=True)
-    return {"items": items[:400], "counts": counts}
+    return {"items": items[:400], "counts": counts, "lanes": lanes}
+
+def _fb_fix_statuses(actor=""):
+    """Backfill/normalize stored link flags so resolved lanes are consistent (does NOT re-import or
+    re-match; preserves audit). Returns before/after lane counts."""
+    before = _fb_inbox()["lanes"]
+    fixed = 0
+    for x in _fb_bank.values():
+        dq = x.get("daftra_duplicate_status")
+        if dq == "linked_existing":
+            if x.get("match_status") != "matched" or x.get("daftra_status") != "linked_existing":
+                x["match_status"] = "matched"; x["daftra_status"] = "linked_existing"; fixed += 1
+        elif dq == "already_in_daftra_verified" and x.get("match_status") == "matched" and not x.get("matched_daftra_id"):
+            x["match_status"] = "unmatched"; fixed += 1     # was wrongly matched without a link
+    if fixed:
+        _fb_save("finance_bank_transactions.json", _fb_bank)
+    _fb_audit_add(actor, "fix_statuses", "bank", "backfill", after={"fixed": fixed})
+    return {"ok": True, "fixed": fixed, "before": before, "after": _fb_inbox()["lanes"]}
 
 def _fb_set_status(eid, new, actor, reason=""):
     e = _fb_ledger.get(eid)
