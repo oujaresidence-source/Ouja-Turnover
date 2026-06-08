@@ -22480,32 +22480,94 @@ async function fbInbox(filterOverride){ return fbInboxRender('inbox', filterOver
 async function fbApproval(){ return fbInboxRender('approval','needs_faisal'); }
 async function fbInboxRender(mode, filter){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
-  var d; try{ d=await api('/api/fb/inbox'+(filter?('?filter='+filter):'')); }catch(_){ d=null; }
-  if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — الربحية والوارد المالي للمحاسبة.':'Operations see only their expense status — finance inbox is for accountants.')+'</div>'; return; }
-  var items=(d&&d.items)||[], c=(d&&d.counts)||{};
-  _fb.inboxItems={}; items.forEach(function(i){ _fb.inboxItems[i.id]=i; });
-  var filters=[['','الكل','All'],['needs_review','يحتاج مراجعة','Needs review'],['needs_faisal','اعتماد فيصل','Faisal approval'],['above_3000','> ٣٠٠٠','> 3000'],['ready_to_post','جاهز للترحيل','Ready to post'],['failed','فشل','Failed'],['verified','تم التحقق','Verified']];
-  var h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+filters.map(function(f){ var on=((filter||'')===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+mode+'&#39;,&#39;'+f[0]+'&#39;)">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')+'</div>';
-  if(!items.length){ h+='<div class="empty" style="padding:28px;text-align:center">'+(ar?'ما فيه عمليات هنا الحين':'Nothing here right now')+'</div>'; b.innerHTML=h; return; }
-  h+='<div style="display:flex;flex-direction:column;gap:6px">'+items.map(fbInboxRow).join('')+'</div>';
-  b.innerHTML=h;
+  _fb.qmode=mode; _fb.qfilter=(filter!=null?filter:(_fb.qfilter||'')); _fb.sel={}; _fb.qexp=_fb.qexp||{};
+  await fbLoadRefs();
+  var d; try{ d=await api('/api/fb/inbox'+(_fb.qfilter?('?filter='+encodeURIComponent(_fb.qfilter)):'')); }catch(_){ d=null; }
+  if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — قائمة العمل للمحاسبة.':'Operations see only their expense status — the work queue is for accountants.')+'</div>'; return; }
+  _fb.qItems=(d&&d.items)||[]; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
+  fbQueueRender();
 }
-function fbInboxRow(i){
-  var ar=(L==='ar'); var srcic={daftra:'📚',bank:'🏦',sheet:'📝',manual:'✍️'}[i.source]||'•';
+function fbStatusLabel(s){ var ar=(L==='ar'); var m={needs_review:[ 'يحتاج مراجعة','Needs review'],auto_classified:['مصنّف تلقائيًا','Auto-classified'],accountant_review:['مراجعة محاسب','Accountant review'],needs_faisal:['اعتماد فيصل','Faisal approval'],approved:['معتمد','Approved'],rejected:['مرفوض','Rejected'],ready_to_post:['جاهز للترحيل','Ready to post'],posted:['مرحّل','Posted'],verified:['متحقق من دافترة','Verified in Daftra'],failed:['فشل','Failed'],draft:['مسودة','Draft'],sheet_intake:['من Google Sheet','From Sheet'],void:['ملغى','Void']}; var v=m[s]; return v?(ar?v[0]:v[1]):(s||'—'); }
+function fbQueueRender(){
+  var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
+  var filters=[['','الكل','All'],['needs_review','يحتاج مراجعة','Needs review'],['needs_faisal','اعتماد فيصل','Faisal'],['above_3000','> ٣٠٠٠','> 3000'],['ready_to_post','جاهز للترحيل','Ready'],['failed','فشل','Failed'],['verified','تم التحقق','Verified']];
+  var cfilters=[['missing_apartment',ar?'بدون شقة':'No apartment'],['missing_category',ar?'بدون تصنيف':'No category']];
+  var sorts=[['newest',ar?'الأحدث':'Newest'],['oldest',ar?'الأقدم':'Oldest'],['amount',ar?'الأعلى مبلغًا':'Highest amount']];
+  var h='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+    +'<input id="fbq" value="'+esc(_fb.q||'')+'" placeholder="🔎 '+esc(t().fb_search)+'" oninput="_fb.q=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;flex:1;min-width:160px">'
+    +'<select onchange="_fb.sort=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;width:auto">'+sorts.map(function(s){ return '<option value="'+s[0]+'"'+((_fb.sort||'newest')===s[0]?' selected':'')+'>'+esc(s[1])+'</option>'; }).join('')+'</select></div>';
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'+filters.map(function(f){ var on=((_fb.qfilter||'')===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+(_fb.qmode||'inbox')+'&#39;,&#39;'+f[0]+'&#39;)">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')
+    +'<span style="color:var(--mut)">·</span>'+cfilters.map(function(f){ var on=(_fb.cflt===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="_fb.cflt=(_fb.cflt===&#39;'+f[0]+'&#39;?&#39;&#39;:&#39;'+f[0]+'&#39;);fbQueueTable()">'+esc(f[1])+'</button>'; }).join('')+'</div>';
+  h+='<div id="fbqBulk"></div><div id="fbqTable"></div>';
+  b.innerHTML=h; fbQueueTable();
+}
+function fbQueueItems(){
+  var items=(_fb.qItems||[]).slice(); var q=(_fb.q||'').trim().toLowerCase();
+  if(q) items=items.filter(function(i){ return (String(i.description||'')+' '+(i.apartment||'')+' '+(i.ref||'')+' '+(i.amount||'')+' '+(i.category||'')+' '+(i.owner||'')).toLowerCase().indexOf(q)>=0; });
+  if(_fb.cflt==='missing_apartment') items=items.filter(function(i){ return !i.apartment; });
+  else if(_fb.cflt==='missing_category') items=items.filter(function(i){ return !i.category||i.category==='unknown'; });
+  var sort=_fb.sort||'newest';
+  items.sort(function(a,c){ if(sort==='amount') return fbNum(c.amount)-fbNum(a.amount); if(sort==='oldest') return String(a.date||'').localeCompare(String(c.date||'')); return String(c.date||'').localeCompare(String(a.date||'')); });
+  return items;
+}
+function fbQueueTable(){
+  var ar=(L==='ar'), wrap=document.getElementById('fbqTable'); if(!wrap) return;
+  var items=fbQueueItems(); var selN=Object.keys(_fb.sel||{}).length;
+  var bulk=document.getElementById('fbqBulk'); if(bulk) bulk.innerHTML=(selN?fbBulkBar(selN):'');
+  if(!items.length){ wrap.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'ما فيه عمليات هنا':'Nothing here')+'</div>'; return; }
+  var th='color:var(--mut);font-size:10.5px;font-weight:600;padding:6px 5px;text-align:'+(ar?'right':'left');
+  var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr>'
+    +'<th style="'+th+'"><input type="checkbox" onclick="fbSelAll(this.checked)"></th>'
+    +'<th style="'+th+'">'+(ar?'التاريخ':'Date')+'</th><th style="'+th+'">'+(ar?'الوصف':'Description')+'</th><th style="'+th+'">'+(ar?'المبلغ':'Amount')+'</th><th style="'+th+'">'+(ar?'التصنيف':'Category')+'</th><th style="'+th+'">'+(ar?'الشقة':'Apartment')+'</th><th style="'+th+'">'+(ar?'الحالة':'Status')+'</th><th style="'+th+'"></th></tr></thead><tbody>'
+    +items.slice(0,200).map(fbQueueRow).join('')+'</tbody></table></div>';
+  if(items.length>200) h+='<div class="muted" style="font-size:11px;margin-top:6px">'+(ar?('عرض ٢٠٠ من '+items.length):('showing 200 of '+items.length))+'</div>';
+  wrap.innerHTML=h;
+}
+function fbQueueRow(i){
+  var ar=(L==='ar'), sel=!!(_fb.sel||{})[i.id], srcic={daftra:'📚',bank:'🏦',sheet:'📝',manual:'✍️'}[i.source]||'•';
+  var deb=(i.direction==='expense'); var catBad=(!i.category||i.category==='unknown');
+  var stTone=(i.status==='verified'?'ok':(i.status==='failed'?'bad':(catBad?'warn':'mut')));
+  var td='padding:6px 5px;vertical-align:middle';
+  var tr='<tr onclick="fbQexp(&#39;'+i.id+'&#39;)" style="border-top:1px solid var(--border);cursor:pointer;background:'+(sel?'var(--surface-2)':'transparent')+'">'
+    +'<td style="'+td+'" onclick="event.stopPropagation()"><input type="checkbox" '+(sel?'checked':'')+' onclick="fbSelRow(&#39;'+i.id+'&#39;,this.checked)"></td>'
+    +'<td style="'+td+';white-space:nowrap" class="muted">'+esc(String(i.date||'').slice(0,10))+'</td>'
+    +'<td style="'+td+'">'+srcic+' '+esc(String(i.description||'').slice(0,42))+(i.needs_faisal?' <span style="color:var(--gold)">★</span>':'')+'</td>'
+    +'<td style="'+td+';white-space:nowrap;color:'+(deb?'var(--down)':'#3e9665')+';font-weight:700">'+fbMoney(i.amount)+'</td>'
+    +'<td style="'+td+'">'+fbChip(i.category||'unknown',(catBad?'warn':'mut'))+'</td>'
+    +'<td style="'+td+'">'+esc(i.apartment||'—')+'</td>'
+    +'<td style="'+td+'">'+fbChip(fbStatusLabel(i.status),stTone)+'</td>'
+    +'<td style="'+td+';white-space:nowrap" onclick="event.stopPropagation()">'+fbQueueActions(i)+'</td></tr>';
+  if((_fb.qexp||{})[i.id]){ tr+='<tr style="background:var(--surface-2)"><td colspan="8" style="padding:9px 10px"><div style="font-size:11px;line-height:1.9">'
+    +'<b>'+esc(i.ref||'')+'</b> · '+esc(i.source||'')+' · '+(ar?'اتجاه: ':'dir: ')+esc(i.direction||'')+(i.owner?(' · '+esc(i.owner)):'')
+    +'<br>'+esc(i.description||'')
+    +'<br><span class="muted">'+(ar?'الإجراء التالي: ':'next: ')+esc(ar?(i.next_ar||''):(i.next_en||''))+'</span></div></td></tr>'; }
+  return tr;
+}
+function fbQueueActions(i){
   var actions='';
   if(i.kind==='ledger'){
     if(i.status==='draft') actions+='<button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;submit&#39;)">'+esc(t().fb_act_submit)+'</button>';
     if(i.status==='accountant_review'||i.status==='needs_faisal') actions+='<button class="btn green xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;approve&#39;)">'+t().fb_approve+'</button><button class="btn ghost xs" onclick="fbActReason(&#39;'+i.id+'&#39;,&#39;reject&#39;)">'+t().fb_reject+'</button>';
     actions+='<button class="btn ghost xs" onclick="fbClassify(&#39;'+i.id+'&#39;)">'+esc(t().fb_act_classify)+'</button>';
   } else if(i.kind==='bank'){ actions+='<button class="btn ghost xs" onclick="fbBankReviewFromInbox(&#39;'+i.id+'&#39;)">'+esc(t().fb_act_classify)+'</button><button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;promote&#39;)">'+esc(t().fb_act_promote)+'</button>'; }
-  else if(i.kind==='sheet'){ actions+='<button class="btn ghost xs" onclick="go(&#39;expenses&#39;)">'+(ar?'افتح المصاريف':'open Expenses')+'</button>'; }
-  var faisal=i.needs_faisal?fbChip(t().fb_needfaisal,'warn'):'';
-  return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-    +'<span style="font-size:14px">'+srcic+'</span><b style="font-size:12.5px;min-width:90px">'+fbMoney(i.amount)+'</b>'
-    +'<span style="flex:1;min-width:130px;font-size:11.5px">'+esc((i.description||'').slice(0,50))+' <span class="muted">· '+esc(i.apartment||'')+'</span></span>'
-    +fbChip(i.category||'unknown',(i.category==='unknown'?'warn':'mut'))+fbChip(i.status||'—','mut')+faisal
-    +'<span style="width:100%;display:flex;gap:5px;justify-content:flex-end">'+actions+'</span></div>';
+  else if(i.kind==='sheet'){ actions+='<button class="btn ghost xs" onclick="go(&#39;expenses&#39;)">'+(L==='ar'?'المصاريف':'Expenses')+'</button>'; }
+  return actions;
 }
+function fbQexp(id){ _fb.qexp=_fb.qexp||{}; _fb.qexp[id]=!_fb.qexp[id]; fbQueueTable(); }
+function fbSelRow(id, on){ _fb.sel=_fb.sel||{}; if(on) _fb.sel[id]=true; else delete _fb.sel[id]; fbQueueTable(); }
+function fbSelAll(on){ _fb.sel={}; if(on) fbQueueItems().slice(0,200).forEach(function(i){ _fb.sel[i.id]=true; }); fbQueueTable(); }
+function fbBulkBar(n){ var ar=(L==='ar');
+  return '<div style="position:sticky;top:0;z-index:5;background:var(--surface-2);border:1px solid var(--gold);border-radius:10px;padding:9px;margin-bottom:8px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">'
+    +'<b style="font-size:12px;white-space:nowrap">'+n+' '+esc(t().fb_selected)+'</b>'
+    +'<span style="display:inline-flex;align-items:center;gap:4px">'+fbCatSelectInline('fbblk_cat')+'<button class="btn primary xs" onclick="fbBulkApply(&#39;category&#39;)">'+(ar?'طبّق التصنيف':'Set category')+'</button></span>'
+    +'<span style="display:inline-flex;align-items:center;gap:4px">'+fbAptSelectInline('fbblk_apt')+'<button class="btn ghost xs" onclick="fbBulkApply(&#39;apartment&#39;)">'+(ar?'طبّق الشقة':'Set apartment')+'</button></span>'
+    +'<button class="btn ghost xs" onclick="_fb.sel={};fbQueueTable()">'+(ar?'إلغاء التحديد':'Clear')+'</button></div>'; }
+function fbCatSelectInline(id){ return '<select id="'+id+'" style="'+fbInp()+';margin:0;width:auto">'+fbCats().map(function(c){ return '<option value="'+c[0]+'">'+esc(c[1])+'</option>'; }).join('')+'</select>'; }
+function fbAptSelectInline(id){ var ar=(L==='ar'); var refs=_fb.refs||{apts:[]}; return '<select id="'+id+'" style="'+fbInp()+';margin:0;width:auto"><option value="">'+(ar?'— شقة —':'— apartment —')+'</option>'+(refs.apts||[]).map(function(a){ return '<option value="'+esc(a.name)+'">'+esc(a.name)+'</option>'; }).join('')+'</select>'; }
+async function fbBulkApply(op){ var ids=Object.keys(_fb.sel||{}); if(!ids.length) return; var val;
+  if(op==='category'){ var c=document.getElementById('fbblk_cat'); val=c?c.value:''; } else { var a=document.getElementById('fbblk_apt'); val=a?a.value:''; }
+  var r; try{ r=await post('/api/fb/bulk',{ids:ids,op:op,value:val}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast('✓ '+(r.count||0)); _fb.sel={}; fbInboxRender(_fb.qmode,_fb.qfilter); } else toast('⚠'); }
 async function fbAct(id, action){ var r; try{ r=await post('/api/fb/entry',{id:id,action:action}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast((r&&(r.message||r.error))||'⚠'); }
 async function fbActReason(id, action){ var ar=(L==='ar'); var reason=(prompt(ar?'السبب:':'Reason:','')||'').trim(); if(!reason) return; var r; try{ r=await post('/api/fb/entry',{id:id,action:action,reason:reason}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast('⚠'); }
 async function fbClassify(id){ var ar=(L==='ar'); await fbLoadRefs(); var it=(_fb.inboxItems||{})[id]||{};
@@ -34157,6 +34219,42 @@ async def _api_fb_inbox(request):
         return _json({"error": "forbidden_ops"}, 403)   # ops cannot see the finance inbox/profitability
     return _json({"ok": True, **_fb_inbox({"filter": request.query.get("filter")})})
 
+async def _api_fb_bulk(request):
+    """Apply one operation to many work-queue items at once. op ∈ {category, apartment, submit}.
+    Dispatches per item kind (bank txn vs ledger entry). Audited. Never posts to Daftra."""
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    actor = _req_actor(request)
+    ids = b.get("ids") or []
+    op = (b.get("op") or "").strip()
+    val = b.get("value")
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    n = 0
+    for _id in ids:
+        bx = _fb_bank.get(_id)
+        if bx:
+            if op == "category" and val:
+                bx["category"] = val
+                bx["status"] = "reviewed" if val != "unknown" else "needs_review"
+                bx["reviewed_by"] = actor; bx["reviewed_at"] = now; n += 1
+            elif op == "apartment":
+                bx["apartment"] = (val or "").strip(); n += 1
+            continue
+        e = _fb_ledger.get(_id)
+        if e:
+            if op == "category" and val:
+                e["category"] = val; n += 1
+            elif op == "apartment":
+                e["apartment"] = (val or "").strip(); n += 1
+            elif op == "submit":
+                amt = _fb_money(e.get("amount"))
+                _fb_set_status(_id, "needs_faisal" if amt >= FB_APPROVAL_THRESHOLD else "accountant_review", actor); n += 1
+    _fb_save("finance_bank_transactions.json", _fb_bank)
+    _fb_save("finance_ledger_entries.json", _fb_ledger)
+    _fb_audit_add(actor, "bulk_" + (op or "?"), "queue", "bulk", after={"count": n, "value": val})
+    return _json({"ok": True, "count": n})
+
 async def _api_fb_entry(request):
     """POST actions on a ledger entry: submit / classify / approve / reject / void / promote."""
     if not _fb_can_finance(request):
@@ -36797,6 +36895,7 @@ async def start_web_server():
         app.router.add_post("/api/fb/cards", _api_fb_cards)
         app.router.add_get("/api/fb/inbox", _api_fb_inbox)
         app.router.add_post("/api/fb/entry", _api_fb_entry)
+        app.router.add_post("/api/fb/bulk", _api_fb_bulk)
         app.router.add_get("/api/fb/mappings", _api_fb_mappings)
         app.router.add_post("/api/fb/mappings", _api_fb_mappings)
         app.router.add_post("/api/fb/journal", _api_fb_journal)
