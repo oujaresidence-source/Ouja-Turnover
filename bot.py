@@ -37394,7 +37394,9 @@ function viewListing(){
     var cta;
     if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url))+'">احجزها في Airbnb</a>';}
     else{cta='<div class="btn block ghost" style="cursor:default;color:var(--mut)">رابط Airbnb غير متوفر حاليًا</div>';}
-    V.innerHTML='<div style="margin:16px 0">'+gal+'</div>'
+    var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out'),dsum='';
+    if(dci&&dco){dsum='<div class="card" style="padding:10px 12px;margin-bottom:6px;font-size:12.5px"><b>حجزك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div>';}
+    V.innerHTML='<div style="margin:16px 0">'+gal+'</div>'+dsum
       +'<h1 style="font-size:24px;color:var(--brown);margin:6px 0">'+he(l.name_ar||l.name_en)+(l.badge?(' <span class="chip solid">'+he(l.badge)+'</span>'):'')+'</h1>'
       +'<div class="badges">'+badges(l)+'</div>'
       +(desc?('<p style="line-height:1.8;color:var(--ink)">'+he(desc)+'</p>'):'')
@@ -37405,10 +37407,11 @@ function viewListing(){
     if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
     else{track('stay_missing_airbnb_url',{listing_id:l.id});}
   }
-  if(l){render(l);}
+  var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
+  var token=(l&&l.slug)||location.pathname.replace(/^\/stay\/(id\/)?/,'').split('?')[0];
+  if(l && !(ci&&co)){ render(l); }
   else{
-    var token=location.pathname.replace(/^\/stay\/(id\/)?/,'').split('?')[0];
-    fetch('/api/stay/listing/'+encodeURIComponent(token)).then(function(r){return r.json();}).then(function(d){render(d&&d.listing);}).catch(function(){render(null);});
+    fetch('/api/stay/listing/'+encodeURIComponent(token)+((ci&&co)?('?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)):'')).then(function(r){return r.json();}).then(function(d){render((d&&d.listing)||l);}).catch(function(){render(l);});
   }
 }
 
@@ -37475,7 +37478,16 @@ async def _api_stay_listing(request):
     snap, ov = _gw_find_by_slug_or_id(request.match_info.get("id", ""))
     if not snap:
         return _json({"ok": False, "listing": None}, 404)
-    return _json({"ok": True, "listing": _gw_listing_public(snap, ov)})
+    pub = _gw_listing_public(snap, ov)
+    ci, co = request.query.get("check_in"), request.query.get("check_out")
+    if ci and co:
+        avail = await asyncio.to_thread(unit_availability_price, snap.get("id"), ci, co)
+        if avail:
+            pub["available"] = avail.get("available")
+            pub["nights"] = avail.get("nights")
+            pub["est_total"] = avail.get("total")
+            pub["est_avg"] = avail.get("avg")
+    return _json({"ok": True, "listing": pub})
 
 async def _api_stay_event(request):
     try:
