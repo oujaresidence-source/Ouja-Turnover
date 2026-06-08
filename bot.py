@@ -37007,18 +37007,31 @@ def _gw_discover_tags(snaps):
             d["raw"].update(info.get("raw") or []); d["sources"].update(info.get("sources") or [])
     for k, d in seen.items():
         ent = _gw_taxonomy.get(k)
+        amenity_only = (d["sources"] == {"amenity"})    # discovered ONLY from amenities → not a نوع filter
         if not ent:
             seed = _GW_SEED.get(k)
+            if seed:
+                cat, vis = seed[2], seed[3]
+            elif amenity_only:
+                cat, vis = "amenity", "hidden"
+            elif "area" in d["sources"]:
+                cat, vis = "area", "hidden"
+            else:
+                cat, vis = "", "hidden"
             ent = {"key": k, "ar": (seed[0] if seed else ""), "en": (seed[1] if seed else ""),
-                   "category": (seed[2] if seed else ("area" if "area" in d["sources"] else "")),
-                   "visibility": (seed[3] if seed else "hidden"),
-                   "weight": 1, "sort": 0, "aliases": [], "in_noo": True,
+                   "category": cat, "visibility": vis,
+                   "weight": 1, "sort": 0, "aliases": [], "in_noo": (cat != "amenity"),
                    "created": now, "updated": now}
             _gw_taxonomy[k] = ent
         ent["count"] = d["count"]; ent["examples"] = d["examples"]
         ent["raw_values"] = sorted(d["raw"]); ent["sources"] = sorted(d["sources"])
         ent["last_seen"] = now
-        ent["status"] = "mapped" if (ent.get("ar") or ent.get("en")) else "unmapped"
+        if ent.get("category") == "amenity":
+            ent["status"] = "amenity"
+        elif (ent.get("ar") or ent.get("en")):
+            ent["status"] = "mapped"
+        else:
+            ent["status"] = "unmapped"
     _gw_save_tax()
 
 def _gw_sync(force=False):
@@ -37073,6 +37086,63 @@ def _gw_public_tags(snap):
     out.sort(key=lambda x: x["key"])
     return out
 
+def _gw_valid_dates(ci, co):
+    """True only if BOTH parse and check-out is strictly after check-in (>=1 night)."""
+    a, b = _parse_date(ci), _parse_date(co)
+    return bool(a and b and b > a)
+
+# Amenity -> Arabic (substring match); keep raw English if no safe translation.
+_GW_AMEN_AR = {
+    "wireless": "إنترنت", "wi-fi": "إنترنت", "wifi": "إنترنت", "internet": "إنترنت",
+    "television": "تلفزيون", "tv": "تلفزيون", "air condition": "تكييف", " ac": "تكييف", "heating": "تدفئة",
+    "free parking": "موقف مجاني", "parking": "موقف", "garage": "موقف",
+    "washing machine": "غسالة", "washer": "غسالة", "dryer": "نشافة", "hair dryer": "مجفف شعر",
+    "iron": "مكواة", "elevator": "مصعد", "lift": "مصعد", "pool": "مسبح", "gym": "صالة رياضية",
+    "fitness": "صالة رياضية", "balcony": "بلكونة", "terrace": "تراس",
+    "smoke detector": "كاشف دخان", "smoke alarm": "كاشف دخان", "carbon monoxide": "كاشف أول أكسيد الكربون",
+    "first aid": "إسعافات أولية", "fire extinguisher": "طفاية حريق",
+    "self check-in": "دخول ذاتي", "self checkin": "دخول ذاتي", "essentials": "الأساسيات",
+    "towels": "مناشف", "shampoo": "شامبو", "coffee": "قهوة", "refrigerator": "ثلاجة", "fridge": "ثلاجة",
+    "microwave": "ميكروويف", "dishwasher": "غسالة صحون", "oven": "فرن", "stove": "موقد", "kitchenette": "مطبخ صغير",
+    "kitchen": "مطبخ", "workspace": "مساحة عمل", "desk": "مكتب", "crib": "سرير أطفال", "hot water": "ماء ساخن",
+}
+def _gw_amen_ar(a):
+    k = " " + str(a or "").strip().lower()
+    for key, ar in _GW_AMEN_AR.items():
+        if key in k:
+            return ar
+    return a
+_GW_AMEN_GROUPS = [
+    ("essentials", "الأساسيات", ["wireless", "wifi", "wi-fi", "internet", "television", "tv", "air condition", " ac", "heating", "essentials", "towels", "shampoo", "iron", "hair dryer", "hot water", "workspace", "desk"]),
+    ("kitchen", "المطبخ", ["kitchen", "refrigerator", "fridge", "microwave", "dishwasher", "oven", "stove", "coffee", "cookware", "dishes", "kitchenette"]),
+    ("comfort", "الراحة", ["washing machine", "washer", "dryer", "pool", "gym", "fitness", "balcony", "terrace", "elevator", "lift", "crib"]),
+    ("safety", "السلامة", ["smoke detector", "smoke alarm", "carbon monoxide", "first aid", "fire extinguisher", "lock"]),
+    ("access", "المواقف والدخول", ["parking", "free parking", "garage", "self check-in", "self checkin"]),
+]
+def _gw_amenity_groups(amenities):
+    """Bucket + translate amenities into named groups; leftovers go to 'أخرى'. De-duped."""
+    used, groups = set(), []
+    for gkey, gar, kws in _GW_AMEN_GROUPS:
+        items = []
+        for a in (amenities or []):
+            al = " " + str(a).lower()
+            if a not in used and any(kw in al for kw in kws):
+                used.add(a)
+                t = _gw_amen_ar(a)
+                if t not in items:
+                    items.append(t)
+        if items:
+            groups.append({"key": gkey, "ar": gar, "items": items})
+    other = []
+    for a in (amenities or []):
+        if a not in used:
+            t = _gw_amen_ar(a)
+            if t not in other:
+                other.append(t)
+    if other:
+        groups.append({"key": "other", "ar": "أخرى", "items": other})
+    return groups
+
 def _gw_listing_public(snap, ov=None, with_airbnb=True):
     ov = ov if ov is not None else (_gw_overrides.get(str(snap.get("id")), {}) or {})
     url, src = _gw_airbnb_url(snap, ov)
@@ -37090,7 +37160,9 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "images": [im["url"] for im in (snap.get("images") or [])],
         "cover": ((ov.get("hero_image") or snap.get("cover")) or ""),
         "amenities": snap.get("amenities") or [],
+        "amenity_groups": _gw_amenity_groups(snap.get("amenities") or []),
         "tags": _gw_public_tags(snap),
+        "tag_keys": [k for k in (snap.get("tag_keys") or []) if (_gw_taxonomy.get(k) or {}).get("category") != "amenity"],
         "self_entry": ("self_entry" in (snap.get("tag_keys") or [])),
         "airbnb_url": (url if with_airbnb else ""), "airbnb_source": src, "has_airbnb": bool(url),
         "price_base": snap.get("price_base"),
@@ -37131,6 +37203,8 @@ def _gw_noo_options():
 
 def _gw_search(ci=None, co=None, guests=None, typ=None, area=None):
     """Guest listing results. With dates -> only AVAILABLE; else browse mode (no availability claims)."""
+    if ci and co and not _gw_valid_dates(ci, co):     # check-out must be after check-in (server-side)
+        return {"browse": False, "invalid_dates": True, "avail_error": False, "results": []}
     browse = not (ci and co)
     try:
         g = int(guests) if guests else None
@@ -37167,7 +37241,7 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None):
                 0 if (g and s.get("capacity") and int(s["capacity"]) >= g) else 1,
                 -(ov2.get("sort") or 0), 0 if pub["images"] else 1, (pub["name_ar"] or ""))
     results.sort(key=sort_key)
-    return {"browse": browse, "avail_error": (avail_error and not browse), "results": [r[0] for r in results]}
+    return {"browse": browse, "invalid_dates": False, "avail_error": (avail_error and not browse), "results": [r[0] for r in results]}
 
 def _gw_find_by_slug_or_id(token):
     token = str(token or "")
@@ -37434,7 +37508,15 @@ def _stay_render(route="landing", listing=None, base=""):
         desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
         og = listing.get("cover") or ""
         path = "/stay/" + (listing.get("slug") or str(listing.get("id")))
-    data = {"route": route, "listing": listing, "config": {"noo": _gw_noo_options()}}
+    vis = _gw_visible_snaps()
+    hero = ""
+    for s, ov in vis:
+        c = (ov.get("hero_image") or s.get("cover")) or ""
+        if c:
+            hero = c
+            break
+    data = {"route": route, "listing": listing,
+            "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": hero}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return (STAY_HTML
             .replace("/*__STAY_DATA__*/null", blob)
@@ -37480,7 +37562,7 @@ async def _api_stay_listing(request):
         return _json({"ok": False, "listing": None}, 404)
     pub = _gw_listing_public(snap, ov)
     ci, co = request.query.get("check_in"), request.query.get("check_out")
-    if ci and co:
+    if ci and co and _gw_valid_dates(ci, co):
         avail = await asyncio.to_thread(unit_availability_price, snap.get("id"), ci, co)
         if avail:
             pub["available"] = avail.get("available")
