@@ -37375,10 +37375,10 @@ a{color:inherit;text-decoration:none}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .err{display:none;background:rgba(180,84,63,.08);border:1px solid rgba(180,84,63,.4);color:var(--red);font-size:12.5px;border-radius:11px;padding:9px 12px;margin-bottom:10px}
 .err.on{display:block}
-.hero{position:relative;border-radius:22px;overflow:hidden;margin:16px 0 16px;min-height:208px;display:flex;align-items:flex-end;box-shadow:var(--shadow2);background:linear-gradient(135deg,#cdaa6a,#8a6a34)}
+.hero{position:relative;border-radius:22px;overflow:hidden;margin:18px 0 14px;min-height:248px;display:flex;align-items:flex-end;box-shadow:var(--shadow2);background:linear-gradient(135deg,#cdaa6a,#8a6a34)}
 .hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.04)}
-.hero .ov{position:absolute;inset:0;background:linear-gradient(0deg,rgba(34,24,13,.82),rgba(34,24,13,.28) 55%,rgba(34,24,13,.12))}
-.hero .in{position:relative;padding:22px 20px 20px;color:#fff}
+.hero .ov{position:absolute;inset:0;background:linear-gradient(0deg,rgba(28,19,9,.9),rgba(28,19,9,.45) 48%,rgba(28,19,9,.1))}
+.hero .in{position:relative;padding:24px 22px 22px;color:#fff}
 .hero h1{font-size:29px;line-height:1.22;margin:0 0 8px;font-weight:700;text-wrap:balance;letter-spacing:-.01em}
 .hero p{font-size:14.5px;line-height:1.65;margin:0;color:rgba(255,255,255,.92);max-width:34ch}
 .trust{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
@@ -37420,14 +37420,19 @@ a{color:inherit;text-decoration:none}
 .empty .em{font-size:44px}
 .sec{margin:22px 0 0}
 .sec h2{font-size:18px;color:var(--ink);margin:0 0 10px;font-weight:700}
-.gallery{position:relative;margin:14px 0}
-.gal-hero{aspect-ratio:16/11;border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#ece2cd,#ddcfb2);position:relative;box-shadow:var(--shadow)}
-.gal-hero img{width:100%;height:100%;object-fit:cover}
-.count{position:absolute;bottom:10px;inset-inline-end:10px;font-size:11.5px;padding:4px 10px;border-radius:99px;background:rgba(34,24,13,.6);color:#fff;backdrop-filter:blur(4px)}
-.thumbs{display:flex;gap:8px;overflow-x:auto;margin-top:8px;padding-bottom:2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.thumbs::-webkit-scrollbar{display:none}
-.thumbs img{flex:0 0 22%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;cursor:pointer;border:2px solid transparent}
-.thumbs img.on{border-color:var(--gold)}
+.gal2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
+.gal2.one{grid-template-columns:1fr}
+.g-cell{position:relative;aspect-ratio:4/5;border-radius:16px;overflow:hidden;background:linear-gradient(135deg,#ece2cd,#ddcfb2);box-shadow:var(--shadow)}
+.gal2.one .g-cell{aspect-ratio:16/10}
+.g-cell img{width:100%;height:100%;object-fit:cover}
+@media(min-width:560px){.g-cell{aspect-ratio:4/3}}
+.g-all{position:absolute;bottom:10px;inset-inline-end:10px;font:inherit;font-size:12px;font-weight:600;padding:8px 13px;border:0;border-radius:99px;background:rgba(34,24,13,.66);color:#fff;cursor:pointer;backdrop-filter:blur(6px);display:flex;align-items:center;gap:6px}
+.g-all:active{transform:scale(.96)}
+.lb{position:fixed;inset:0;z-index:90;background:rgba(28,20,11,.94);display:flex;flex-direction:column;animation:fade .2s var(--ease)}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.lb-x{position:absolute;top:calc(12px + env(safe-area-inset-top));inset-inline-end:14px;z-index:2;width:42px;height:42px;border:0;border-radius:99px;background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer;backdrop-filter:blur(6px)}
+.lb-strip{flex:1;display:flex;flex-direction:column;gap:10px;overflow-y:auto;padding:64px 14px calc(20px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.lb-strip img{width:100%;border-radius:14px;background:#3a2c1c}
 .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:9px;margin:12px 0}
 .kv div{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center}
 .kv .k{font-size:11px;color:var(--mut)}.kv .v{font-size:17px;font-weight:700;color:var(--ink);margin-top:2px}
@@ -37476,7 +37481,7 @@ function viewLanding(){
   var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(cfg.hero).replace(/"/g,'&quot;')+')"></div>'):'';
   var chips=(cfg.noo||[]).slice(0,7).map(function(o){return '<button type="button" class="pill" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
   V.innerHTML='<section class="hero">'+heroBg+'<div class="ov"></div><div class="in"><h1>اختر إقامتك مع عوجا</h1>'
-    +'<p>حط تاريخك وعدد الضيوف، ونطلع لك وحدات عوجا المتاحة في الرياض.</p>'
+    +'<p>حط تاريخك وعدد الضيوف ونوع الإقامة، ونطلع لك وحدات عوجا المتاحة في الرياض.</p>'
     +'<div class="trust"><span class="tchip">وحدات مختارة</span><span class="tchip">دخول ذاتي</span><span class="tchip">الحجز عبر Airbnb</span></div></div></section>'
     +'<div class="card" style="padding:16px;margin-bottom:14px">'
     +'<div id="err" class="err"></div>'
@@ -37545,7 +37550,7 @@ function viewSearch(){
       V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
     } else {
       track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدة متاحة بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيّر التاريخ أو نوع الوحدة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
+      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
       if(ci&&co){loadSimilar(ty);}
     }
   }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
@@ -37563,12 +37568,16 @@ function viewListing(){
     if(!l){V.innerHTML='<div class="empty"><div class="em">🏠</div><p class="muted">ما لقينا هالوحدة. <a href="/stay">ارجع للبحث</a></p></div>';return;}
     track('stay_listing_view',{listing_id:l.id});
     var imgs=(l.images||[]);
-    var hero,gallery;
+    var gallery;
     if(imgs.length){
-      hero=imgs[0];
-      var thumbs=imgs.slice(0,10).map(function(u,i){return '<img data-i="'+i+'" class="'+(i==0?'on':'')+'" loading="lazy" src="'+he(u)+'" alt="'+he(l.name_ar)+'">';}).join('');
-      gallery='<div class="gallery"><div class="gal-hero"><img id="ghero" src="'+he(hero)+'" alt="'+he(l.name_ar)+'"><span class="count" id="gcount">1 / '+imgs.length+'</span></div>'+(imgs.length>1?('<div class="thumbs" id="thumbs">'+thumbs+'</div>'):'')+'</div>';
-    } else if(l.cover){gallery='<div class="gallery"><div class="gal-hero"><img src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"></div></div>';}
+      var c1='<div class="g-cell"><img loading="lazy" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"></div>';
+      var c2='';
+      if(imgs.length>1){
+        var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">🖼️ عرض كل الصور · '+imgs.length+'</button>'):'';
+        c2='<div class="g-cell"><img loading="lazy" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'">'+moreBtn+'</div>';
+      }
+      gallery='<div class="gal2'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
+    } else if(l.cover){gallery='<div class="gal2 one"><div class="g-cell"><img loading="lazy" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"></div></div>';}
     else{gallery='<div class="card" style="padding:46px;text-align:center;color:var(--mut);margin:14px 0">لا توجد صور لهذه الوحدة</div>';}
     var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','ذاتي']);
     var kv=kvitems.length?('<div class="kv">'+kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
@@ -37605,12 +37614,20 @@ function viewListing(){
     var ab=document.getElementById('abtn');
     if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
     else{track('stay_missing_airbnb_url',{listing_id:l.id});}
-    var th=document.getElementById('thumbs');
-    if(th){th.querySelectorAll('img').forEach(function(im){im.onclick=function(){var i=+im.getAttribute('data-i');document.getElementById('ghero').src=imgs[i];document.getElementById('gcount').textContent=(i+1)+' / '+imgs.length;th.querySelectorAll('img').forEach(function(x){x.classList.remove('on');});im.classList.add('on');};});}
+    var gall=document.getElementById('gall');
+    if(gall){gall.onclick=function(){openGallery(imgs,l.name_ar);};}
     var tg=document.getElementById('amtog');
     if(tg){tg.onclick=function(){var r=document.getElementById('amr');if(r){var open=r.style.display!=='none';r.style.display=open?'none':'block';tg.textContent=open?'عرض كل المميزات':'عرض أقل';}};}
   }
   function agHtml(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
+  function openGallery(imgs,alt){
+    var ov=document.createElement('div');ov.className='lb';
+    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" src="'+he(u)+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+    function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
+    function esc(e){if(e.key==='Escape')close();}
+    ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
+    document.addEventListener('keydown',esc);document.body.style.overflow='hidden';document.body.appendChild(ov);
+  }
   var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
   var token=(l&&l.slug)||location.pathname.replace(/^\/stay\/(id\/)?/,'').split('?')[0];
   var dated=(ci&&co&&co>ci);
