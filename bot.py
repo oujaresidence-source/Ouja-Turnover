@@ -13366,6 +13366,7 @@ const T = {
     fb_ws_daily:'يومي المالي', fb_daily:'يومي المالي', fb_assist:'وش يحتاج انتباهك اليوم؟', fb_bulk_link:'ربط كل المطابقات المؤكدة', fb_link_confirm:'ربط واعتماد', fb_help_first:'أول مرة تستخدم المركز المالي؟',
     gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
     fb_act_promote:'حوّل للسجل المالي', fb_act_submit:'إرسال للمراجعة', fb_act_classify:'تصنيف', fb_link_cc:'اربط مركز تكلفة', fb_health:'صحة البيانات المالية', fb_nextbest:'وش تسوي الحين؟', fb_applysimilar:'تطبيق على المشابهة', fb_saverule:'احفظ كقاعدة', fb_col_priority:'الأولوية', fb_search:'بحث', fb_bulk:'إجراء جماعي', fb_selected:'محدد', fb_general_expense:'مصروف عام للشركة', fb_no_apt:'غير مرتبط بشقة', fb_dupcheck:'تأكد من التكرار مع دافترة', fb_cc_refresh:'تحديث مراكز التكلفة من دافترة', fb_import_journals:'استيراد قيود دافترة', fb_link_daftra:'ربط بسجل موجود في دافترة', fb_open_compare:'فتح المطابقة', fb_not_dup:'مو مكرر', fb_map_bank:'ربط حسابات البنك في دافترة', fb_recheck:'إعادة فحص النتائج السابقة',
+    fb_dist_title:'مطابقة توزيع داخل قيد', fb_dist_sub:'العملية البنكية تطابق مجموعة أسطر داخل قيد دافترة، مو إجمالي القيد كامل', fb_link_dist:'ربط كتوزيع', fb_pick_lines:'اختر أسطر القيد المطابقة', fb_manual_pick:'اختر أسطر يدويًا', fb_open_daftra:'فتح القيد في دافترة', fb_not_this_dist:'مو هذا التوزيع', fb_search_journal:'ابحث عن قيد آخر', fb_confirm_link:'اعتماد الربط', fb_sel_sum:'مجموع الأسطر المختارة', fb_txn_amount:'مبلغ العملية', fb_sum_match:'المجموع مطابق', fb_sum_short:'المجموع ناقص', fb_sum_over:'المجموع زائد', fb_no_double:'لا نقدر نربط نفس السطر مرتين', fb_line_used:'مستخدم سابقًا', fb_dist_done:'تم ربط العملية كتوزيع داخل قيد دافترة', fb_dist_explain:'هذي العملية مب مطابقة لإجمالي القيد، لكنها تطابق أسطر داخل القيد', fb_batch_title:'مطابقة حوالات مجمعة', fb_batch_link:'ربط الحوالات بالقيد', fb_dist_card:'مطابقات التوزيع', fb_dist_review:'راجع توزيعات القيود', fb_cost_center:'مركز التكلفة', fb_included:'مشمول', fb_journal_total:'إجمالي القيد', fb_bank_line:'سطر حساب البنك', fb_lane_dist_ready:'موجود كتوزيع في دافترة', fb_lane_dist_possible:'توزيع محتمل', fb_lane_dist_linked:'مربوط بتوزيع', fb_batch_lane:'حوالة مجمعة', fb_lines_used:'أسطر مستخدمة سابقًا', fb_sum_diff:'فرق في مجموع الأسطر',
     fb_st_notstarted:'ما بدأ', fb_st_attention:'يحتاج انتباه', fb_st_ready:'جاهز', fb_st_done:'تم',
     fb_import:'استيراد', fb_test:'اختبار الاتصال', fb_upload:'رفع الملف', fb_notconfigured:'دافترة غير مربوطة',
     fb_verified:'تم التحقق من دافترة', fb_pending:'بانتظار التحقق', fb_failed:'فشل', fb_thin:'البيانات غير مكتملة',
@@ -13670,6 +13671,7 @@ const T = {
     fb_ws_daily:'Daily Finance Flow', fb_daily:'Daily Finance Flow', fb_assist:'What needs your attention today?', fb_bulk_link:'Link all confirmed matches', fb_link_confirm:'Link & confirm', fb_help_first:'First time using Financial Brain?',
     gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
     fb_act_promote:'Move to ledger', fb_act_submit:'Submit for review', fb_act_classify:'Classify', fb_link_cc:'Link cost center', fb_health:'Finance data health', fb_nextbest:'Do this next', fb_applysimilar:'Apply to similar', fb_saverule:'Save as rule', fb_col_priority:'Priority', fb_search:'Search', fb_bulk:'Bulk action', fb_selected:'selected', fb_general_expense:'Company general expense', fb_no_apt:'Not linked to a unit', fb_dupcheck:'Check duplicates with Daftra', fb_cc_refresh:'Refresh cost centers from Daftra', fb_import_journals:'Import Daftra journal entries', fb_link_daftra:'Link existing Daftra record', fb_open_compare:'Open comparison', fb_not_dup:'Not a duplicate', fb_map_bank:'Map Daftra bank accounts', fb_recheck:'Recheck previous results',
+    fb_dist_title:'Distribution match inside a journal', fb_dist_sub:'The bank transaction matches a group of lines inside a Daftra journal — not the journal total', fb_link_dist:'Link as distribution', fb_pick_lines:'Select the matching journal lines', fb_manual_pick:'Pick lines manually', fb_open_daftra:'Open journal in Daftra', fb_not_this_dist:'Not this distribution', fb_search_journal:'Search another journal', fb_confirm_link:'Confirm link', fb_sel_sum:'Selected lines total', fb_txn_amount:'Transaction amount', fb_sum_match:'Totals match', fb_sum_short:'Total is short', fb_sum_over:'Total exceeds', fb_no_double:'Cannot link the same line twice', fb_line_used:'already used', fb_dist_done:'Linked as a distribution inside a Daftra journal', fb_dist_explain:'This transaction does not equal the journal total, but it matches lines inside the journal', fb_batch_title:'Batch transfers match', fb_batch_link:'Link transfers to journal', fb_dist_card:'Distribution matches', fb_dist_review:'Review journal distributions', fb_cost_center:'Cost center', fb_included:'Included', fb_journal_total:'Journal total', fb_bank_line:'Bank-account line', fb_lane_dist_ready:'In Daftra as distribution', fb_lane_dist_possible:'Possible distribution', fb_lane_dist_linked:'Linked as distribution', fb_batch_lane:'Batch transfer', fb_lines_used:'Lines already used', fb_sum_diff:'Line-sum difference',
     fb_st_notstarted:'Not started', fb_st_attention:'Needs attention', fb_st_ready:'Ready', fb_st_done:'Done',
     fb_import:'Import', fb_test:'Test connection', fb_upload:'Upload file', fb_notconfigured:'Daftra not connected',
     fb_verified:'Verified in Daftra', fb_pending:'Verification pending', fb_failed:'Failed', fb_thin:'Data incomplete',
@@ -22207,6 +22209,12 @@ async function fbDaily(){
   var s3d=(bs.count>0&&(dup.not_checked||0)===0&&(dup.total||0)>0);
   h+=step(3,'🛡️',ar?'فحص التكرار مع دافترة':'Check duplicates with Daftra',s3d,(bm?'':(ar?'⚠ ناقص ربط حساب البنك. ':'⚠ Bank mapping missing. '))+(ar?('غير مفحوص: '+(dup.not_checked||0)):('unchecked: '+(dup.not_checked||0))),(ar?'افحص التكرار':'Check duplicates'),'fbDupCheck()',(s3d?null:[ar?'مطلوب':'todo','warn']));
   h+='<div style="'+fbCard()+';border:1px solid '+(ready.count?'#3e9665':'var(--border)')+'"><div style="display:flex;gap:12px;align-items:flex-start"><div style="width:30px;height:30px;border-radius:99px;background:'+(ready.count?'#3e9665':'var(--surface-2)')+';color:'+(ready.count?'#fff':'var(--mut)')+';display:flex;align-items:center;justify-content:center;font-weight:800;flex:none">4</div><div style="flex:1"><b style="font-size:13.5px">✅ '+(ar?'اعتمد المطابقات الواضحة':'Confirm obvious matches')+'</b><div style="font-size:12.5px;margin:5px 0 8px">'+(ready.count?(ar?('<b>'+ready.count+'</b> عملية موجودة في دافترة وممكن ربطها دفعة واحدة · '+fbMoney(ready.total)):('<b>'+ready.count+'</b> transactions exist in Daftra — link in one click · '+fbMoney(ready.total))):(ar?'ما فيه مطابقات مؤكدة جاهزة الحين.':'No confirmed matches ready right now.'))+'</div>'+(ready.count?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+esc(t().fb_bulk_link)+'</button> <button class="btn ghost sm" onclick="fbGo(&#39;bank&#39;)">'+(ar?'استعراض':'Review')+'</button>'):'')+'</div></div></div>';
+  var dist=(rd&&rd.distributed)||{ready:0,review:0,linked:0,total:0};
+  if((dist.total||0)>0){
+    h+='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13.5px">🧩 '+esc(t().fb_dist_card)+'</b><button class="btn '+(dist.ready?'primary':'ghost')+' sm" onclick="_fb.dfilter=&#39;dist_ready&#39;;fbGo(&#39;inbox&#39;)">'+esc(t().fb_dist_review)+'</button></div>'
+      +'<div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'+esc(t().fb_dist_explain)+'</div>'
+      +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+fbChip((ar?'موجود كتوزيع ':'in Daftra ')+(dist.ready||0),(dist.ready?'ok':'mut'))+fbChip((ar?'محتمل ':'possible ')+(dist.review||0),(dist.review?'warn':'mut'))+fbChip((ar?'مربوط ':'linked ')+(dist.linked||0),'mut')+'</div></div>';
+  }
   var exc=(dup.possible||0)+(byc.missing_bank_account_mapping||0);
   h+=step(5,'🔎',ar?'راجع الاستثناءات':'Review exceptions',(exc===0),(ar?('عمليات تحتاج قرار: '+exc+((ic.needs_faisal||0)?(' · فوق ٣٠٠٠: '+ic.needs_faisal):'')):('items needing a decision: '+exc)),(ar?'افتح قائمة العمل':'Open work queue'),'fbGo(&#39;inbox&#39;)');
   h+=step(6,'🧮',ar?'جهّز القيود الجديدة':'Prepare new entries',false,(ar?('عمليات جديدة (مو في دافترة): '+(byc.not_found_after_full_check||0)+'. صنّفها واعتمدها قبل تجهيز القيد.'):('new (not in Daftra): '+(byc.not_found_after_full_check||0)+'. Classify & approve before drafting.')),(ar?'افتح القائمة':'Open queue'),'fbGo(&#39;inbox&#39;)');
@@ -22563,25 +22571,95 @@ async function fbDupRecheck(){ var ar=(L==='ar'); if(!confirm(ar?'النتائج
 async function fbDupCompare(id){ var ar=(L==='ar'); openDrawer(ar?'المطابقة مع دافترة':'Compare with Daftra',''); setDrawerBody('<div class="empty sk">—</div>');
   var d; try{ d=await api('/api/fb/daftra/dup?txn='+encodeURIComponent(id)); }catch(_){ d=null; }
   if(!d||!d.txn){ setDrawerBody('<div class="empty">⚠</div>'); return; }
-  var x=d.txn; _fb.dupSug=d.suggestions||[]; var deb=(x.debit&&x.debit!=='0.00');
-  var verified=(x.daftra_duplicate_status==='already_in_daftra_verified');
+  var x=d.txn; _fb.dupSug=d.suggestions||[]; _fb.dupTxn=x; var deb=(x.debit&&x.debit!=='0.00'); var tamt=deb?x.debit:x.credit;
+  var status=x.daftra_duplicate_status, isDist=(x.daftra_match_type==='distributed_subset_match');
   var decision='';
-  if(verified){ decision='<div style="background:rgba(62,125,90,.1);border:1px solid #3e7d5a;border-radius:10px;padding:11px 13px;margin-bottom:10px"><b style="color:#2f6e4d;font-size:13px">✅ '+(ar?'مطابقة مؤكدة — تحتاج ربط فقط':'Confirmed match — just needs linking')+'</b><div class="muted" style="font-size:11.5px;margin-top:4px">'+esc(x.daftra_duplicate_reason_ar||'')+'</div></div>'; }
-  else if(['strong_possible_duplicate','possible_duplicate','needs_manual_review'].indexOf(x.daftra_duplicate_status)>=0){ var lb=fbDupLabel(x.daftra_duplicate_status); decision='<div style="background:rgba(184,137,59,.09);border:1px solid var(--gold);border-radius:10px;padding:11px 13px;margin-bottom:10px"><b style="color:var(--gold2);font-size:13px">'+esc(lb?lb[0]:'')+'</b><div class="muted" style="font-size:11.5px;margin-top:4px">'+esc(x.daftra_duplicate_reason_ar||'')+'</div></div>'; }
-  var left=decision+'<div style="'+fbCard()+'"><b style="font-size:12px">'+(ar?'العملية البنكية':'Bank transaction')+'</b><div style="font-size:12px;margin-top:6px;line-height:1.8">'+(ar?'المبلغ: ':'amount: ')+'<b style="color:'+(deb?'var(--down)':'#3e9665')+'">'+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit)+'</b><br>'+(ar?'التاريخ: ':'date: ')+esc(x.date||'')+'<br>'+esc((x.description||'').slice(0,130))+'</div></div>';
-  if(d.bank_mapping===false){ left+='<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:8px;padding:9px;font-size:11.5px;margin-bottom:8px">'+(ar?'ناقص ربط حساب البنك في دافترة — اربطه عشان نجزم.':'Bank account mapping missing — map it for confident matching.')+' <button class="btn ghost xs" onclick="closeDrawer();fbBankMap()">'+(ar?'اربط الآن':'Map now')+'</button></div>'; }
-  function lines(arr){ return (arr||[]).map(function(c){ var v=(c.debit&&c.debit!=='0.00')?((ar?'مدين ':'Dr ')+fbMoney(c.debit)):((ar?'دائن ':'Cr ')+fbMoney(c.credit)); return '<div style="font-size:11px;padding:2px 0">• '+esc(c.account_name||'')+' — '+v+(c.cost_center_name?(' · '+esc(c.cost_center_name)):'')+(c.description?(' · '+esc((c.description||'').slice(0,40))):'')+'</div>'; }).join(''); }
-  var sug=(_fb.dupSug.length?_fb.dupSug.map(function(s,i){ var bl=s.bank_line;
-    return '<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b style="font-size:12px">'+(ar?'قيد #':'Journal #')+esc(s.number||s.entry_id)+'</b>'+fbChip(s.confidence+'%',(s.confidence>=95?'ok':(s.confidence>=85?'warn':'mut')))+'</div>'
-      +'<div style="font-size:11.5px;margin-top:5px;line-height:1.6">'+esc(s.date||'')+' · '+esc((s.description||'').slice(0,80))+'</div>'
-      +(bl?('<div style="font-size:11px;margin-top:5px;color:#3e9665">'+(ar?'سطر البنك: ':'bank line: ')+esc(bl.account_name||'')+' — '+((bl.credit&&bl.credit!=='0.00')?((ar?'دائن ':'Cr ')+fbMoney(bl.credit)):((ar?'مدين ':'Dr ')+fbMoney(bl.debit)))+'</div>'):'')
-      +((s.counterpart&&s.counterpart.length)?('<div style="margin-top:4px"><span class="muted" style="font-size:10.5px">'+(ar?'الطرف المقابل:':'counterpart:')+'</span>'+lines(s.counterpart)+'</div>'):'')
-      +'<div class="muted" style="font-size:10.5px;margin-top:4px">'+esc(ar?s.reason_ar:s.reason_en)+'</div>'
-      +'<button class="btn primary xs" style="margin-top:7px" onclick="fbDupLink(&#39;'+id+'&#39;,'+i+')">'+esc(t().fb_link_daftra)+'</button></div>'; }).join(''):('<div class="empty" style="padding:18px">'+(ar?'ما فيه قيد مطابق — جرّب البحث اليدوي':'No matching journal — try manual search')+'</div>'));
+  if(status==='already_in_daftra_verified'){ decision='<div style="background:rgba(62,125,90,.1);border:1px solid #3e7d5a;border-radius:10px;padding:11px 13px;margin-bottom:8px"><b style="color:#2f6e4d;font-size:13px">'+(isDist?('🧩 '+esc(t().fb_dist_title)):('✅ '+(ar?'مطابقة مؤكدة — تحتاج ربط فقط':'Confirmed match — just needs linking')))+'</b><div class="muted" style="font-size:11.5px;margin-top:4px">'+esc(isDist?t().fb_dist_explain:(ar?(x.daftra_duplicate_reason_ar||''):(x.daftra_duplicate_reason_en||'')))+'</div></div>'; }
+  else if(['strong_possible_duplicate','possible_duplicate','needs_manual_review'].indexOf(status)>=0){ var lb=fbDupLabel(status); decision='<div style="background:rgba(184,137,59,.09);border:1px solid var(--gold);border-radius:10px;padding:11px 13px;margin-bottom:8px"><b style="color:var(--gold-2);font-size:13px">'+(isDist?('🧩 '+esc(t().fb_dist_title)):esc(lb?lb[0]:''))+'</b><div class="muted" style="font-size:11.5px;margin-top:4px">'+esc(ar?(x.daftra_duplicate_reason_ar||''):(x.daftra_duplicate_reason_en||''))+'</div></div>'; }
+  if(isDist) decision+='<div class="muted" style="font-size:11px;margin:-2px 2px 8px">'+esc(t().fb_dist_sub)+'</div>';
+  var left=decision+'<div style="'+fbCard()+'"><b style="font-size:12px">'+(ar?'العملية البنكية':'Bank transaction')+'</b><div style="font-size:12px;margin-top:6px;line-height:1.8">'+esc(t().fb_txn_amount)+': <b style="color:'+(deb?'var(--red)':'#3e9665')+'">'+(deb?'-':'+')+fbMoney(tamt)+'</b><br>'+(ar?'التاريخ: ':'date: ')+esc(x.date||'')+'<br>'+esc((x.description||'').slice(0,130))+(x.source_file?('<br><span class="muted" style="font-size:10px">'+esc(x.source_file)+'</span>'):'')+'</div></div>';
+  if(d.bank_mapping===false){ left+='<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:8px;padding:9px;font-size:11.5px;margin:8px 0">'+(ar?'ناقص ربط حساب البنك في دافترة — اربطه عشان نجزم.':'Bank account mapping missing — map it for confident matching.')+' <button class="btn ghost xs" onclick="closeDrawer();fbBankMap()">'+(ar?'اربط الآن':'Map now')+'</button></div>'; }
+  var sug=(_fb.dupSug.length?_fb.dupSug.map(function(s,i){ return fbSugCard(id,s,i,deb,tamt); }).join(''):('<div class="empty" style="padding:18px">'+(ar?'ما فيه قيد مطابق — جرّب البحث اليدوي':'No matching journal — try manual search')+'</div>'));
   setDrawerBody(left+'<div style="font-size:12px;font-weight:700;margin:10px 2px 4px">'+(ar?'قيود دافترة المقترحة':'Suggested Daftra journals')+'</div>'+sug);
-  setDrawerFoot('<button class="btn ghost sm" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;not_duplicate&#39;)">'+esc(t().fb_not_dup)+'</button><button class="btn ghost sm" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;ignore&#39;)">'+(ar?'تجاهل':'Ignore')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'); }
+  setDrawerFoot('<button class="btn ghost sm" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;not_duplicate&#39;)">'+esc(t().fb_not_dup)+'</button><button class="btn ghost sm" onclick="fbDistSearch(&#39;'+id+'&#39;)">'+esc(t().fb_search_journal)+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'); }
+function fbSugCard(id,s,i,deb,tamt){ var ar=(L==='ar'); var dist=(s.match_type==='distributed_subset_match'); var bl=s.bank_line;
+  function lineRow(c,inSel){ var v=(c.debit&&c.debit!=='0.00')?((ar?'مدين ':'Dr ')+fbMoney(c.debit)):((ar?'دائن ':'Cr ')+fbMoney(c.credit)); return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--surface-2);display:flex;justify-content:space-between;gap:8px"><span>'+(inSel?'✅ ':'• ')+esc(c.account_name||'')+(c.cost_center_name?(' · '+esc(c.cost_center_name)):'')+'</span><span class="muted" style="white-space:nowrap">'+v+'</span></div>'; }
+  var tag=dist?(' <span style="font-size:10px;color:var(--gold-2)">🧩 '+esc(ar?'توزيع':'distributed')+'</span>'):'';
+  var head='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b style="font-size:12px">'+(ar?'قيد #':'Journal #')+esc(s.number||s.entry_id)+tag+'</b>'+fbChip(s.confidence+'%',(s.confidence>=95?'ok':(s.confidence>=85?'warn':'mut')))+'</div>'
+    +'<div style="font-size:11.5px;margin-top:5px;line-height:1.6">'+esc(s.date||'')+' · '+esc((s.description||'').slice(0,80))+'</div>';
+  if(dist){
+    var selSet={}; (s.selected_line_ids||[]).forEach(function(k){ selSet[String(k)]=1; });
+    var rows=(s.lines||[]).map(function(c){ return lineRow(c,selSet[String(c.line_id)]); }).join('');
+    var jt=s.journal_total||'';
+    head+='<div style="font-size:11px;margin-top:6px;color:#3e7d5a">'+esc(t().fb_bank_line)+': '+esc(bl?bl.account_name:'')+' · '+esc(t().fb_journal_total)+': '+fbMoney(jt)+'</div>'
+      +'<div style="margin-top:6px;background:var(--surface-2);border-radius:8px;padding:7px 9px">'+rows
+      +'<div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:800;margin-top:6px;padding-top:5px;border-top:1px solid var(--border);color:#3e7d5a"><span>'+esc(t().fb_sel_sum)+'</span><span>'+fbMoney(tamt)+' = '+esc(t().fb_txn_amount)+'</span></div></div>'
+      +'<div class="muted" style="font-size:10.5px;margin-top:5px">'+esc(ar?s.reason_ar:s.reason_en)+'</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn primary xs" onclick="fbDupLinkDist(&#39;'+id+'&#39;,'+i+')">'+esc(t().fb_link_dist)+'</button>'
+      +'<button class="btn ghost xs" onclick="fbDistManual(&#39;'+id+'&#39;,&#39;'+esc(String(s.entry_id))+'&#39;)">'+esc(t().fb_manual_pick)+'</button>'
+      +'<button class="btn ghost xs" onclick="fbBatch(&#39;'+esc(String(s.entry_id))+'&#39;)">🔀 '+esc(t().fb_batch_title)+'</button>'
+      +'<button class="btn ghost xs" onclick="fbOpenDaftra()">'+esc(t().fb_open_daftra)+'</button></div></div>';
+    return head;
+  }
+  head+=(bl?('<div style="font-size:11px;margin-top:5px;color:#3e9665">'+(ar?'سطر البنك: ':'bank line: ')+esc(bl.account_name||'')+' — '+((bl.credit&&bl.credit!=='0.00')?((ar?'دائن ':'Cr ')+fbMoney(bl.credit)):((ar?'مدين ':'Dr ')+fbMoney(bl.debit)))+'</div>'):'')
+    +((s.counterpart&&s.counterpart.length)?('<div style="margin-top:4px"><span class="muted" style="font-size:10.5px">'+(ar?'الطرف المقابل:':'counterpart:')+'</span>'+s.counterpart.map(function(c){ return lineRow(c,false); }).join('')+'</div>'):'')
+    +'<div class="muted" style="font-size:10.5px;margin-top:4px">'+esc(ar?s.reason_ar:s.reason_en)+'</div>'
+    +'<div style="display:flex;gap:6px;margin-top:7px"><button class="btn primary xs" onclick="fbDupLink(&#39;'+id+'&#39;,'+i+')">'+esc(t().fb_link_daftra)+'</button>'
+    +'<button class="btn ghost xs" onclick="fbDistManual(&#39;'+id+'&#39;,&#39;'+esc(String(s.entry_id))+'&#39;)">'+esc(t().fb_manual_pick)+'</button></div></div>';
+  return head; }
 async function fbDupLink(id,idx){ var ar=(L==='ar'); var s=(_fb.dupSug||[])[idx]; if(!s){ toast('⚠'); return; } var r; try{ r=await post('/api/fb/daftra/dup',{action:'link',id:id,daftra:{source_type:'journal_entry',id:s.entry_id,line_id:(s.bank_line&&s.bank_line.line_id)||null}}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'تم الربط بقيد دافترة ✓':'Linked to Daftra journal ✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
-async function fbDupLinkRow(id){ var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]; if(!x||!x.matched_daftra_id){ fbDupCompare(id); return; } var r; try{ r=await post('/api/fb/daftra/dup',{action:'link',id:id,daftra:{source_type:(x.matched_daftra_source_type||'journal_entry'),id:x.matched_daftra_id,line_id:x.matched_daftra_line_id}}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'تم الربط واعتماد ✓':'Linked & confirmed ✓'); fbGo(_fb.tab); } else toast('⚠'); }
+async function fbDupLinkRow(id){ var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]||(_fb.inboxItems||{})[id]; if(!x||!x.matched_daftra_id){ fbDupCompare(id); return; }
+  if(x.daftra_match_type==='distributed_subset_match'){ fbDupCompare(id); return; }   // confirm the subset visually
+  var r; try{ r=await post('/api/fb/daftra/dup',{action:'link',id:id,daftra:{source_type:(x.matched_daftra_source_type||'journal_entry'),id:x.matched_daftra_id,line_id:x.matched_daftra_line_id}}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'تم الربط واعتماد ✓':'Linked & confirmed ✓'); fbGo(_fb.tab); } else toast('⚠'); }
+async function fbDupLinkDist(id,idx){ var s=(_fb.dupSug||[])[idx]; if(!s||!(s.selected_line_ids&&s.selected_line_ids.length)){ fbDistManual(id,String((s&&s.entry_id)||'')); return; }
+  var r; try{ r=await post('/api/fb/daftra/dup',{action:'link_distributed',id:id,daftra:{journal_id:s.entry_id,journal_number:s.number,line_ids:s.selected_line_ids,confidence:s.confidence}}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(t().fb_dist_done+' ✓'); closeDrawer(); fbGo(_fb.tab); } else toast((r&&r.error_ar)||(r&&r.error)||'⚠'); }
+async function fbDistManual(id,entryId){ var ar=(L==='ar'); var x=_fb.dupTxn||{}; var deb=(x.debit&&x.debit!=='0.00'); var tamt=deb?x.debit:x.credit;
+  _fb.distId=id; _fb.distEntry=entryId; _fb.distTarget=Math.round(parseFloat(tamt||'0')*100);
+  var d; try{ d=await api('/api/fb/daftra/dup?journal='+encodeURIComponent(entryId)); }catch(_){ d=null; }
+  if(!d||!d.lines){ toast('⚠'); return; }
+  openDrawer(t().fb_pick_lines,(ar?'قيد #':'Journal #')+esc(d.number||entryId));
+  var rows=d.lines.map(function(c){ var amt=deb?c.debit:c.credit; var av=parseFloat(amt||'0'); var dir=deb?(c.debit&&c.debit!=='0.00'):(c.credit&&c.credit!=='0.00');
+    if(av<=0||!dir) return ''; var h=Math.round(av*100);
+    return '<label style="display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11.5px;padding:6px 0;border-bottom:1px solid var(--surface-2);'+(c.consumed?'opacity:.55':'')+'"><span style="display:flex;gap:7px;align-items:center"><input type="checkbox" class="fbdl" data-h="'+h+'" data-id="'+esc(String(c.line_id))+'" onchange="fbDistTick()"'+(c.consumed?' disabled':'')+'><span>'+esc(c.account_name||'')+(c.cost_center_name?(' · '+esc(c.cost_center_name)):'')+(c.consumed?(' · '+esc(t().fb_line_used)):'')+'</span></span><b style="white-space:nowrap">'+fbMoney(amt)+'</b></label>'; }).join('');
+  setDrawerBody('<div class="muted" style="font-size:11px;margin-bottom:6px">'+esc(t().fb_dist_explain)+'</div><div style="'+fbCard()+'">'+(rows||('<div class="muted" style="font-size:11.5px">—</div>'))+'</div><div id="fbdlsum" style="margin-top:10px;font-size:12.5px;font-weight:700;text-align:center"></div>');
+  setDrawerFoot('<button id="fbdlbtn" class="btn primary sm" disabled onclick="fbDistConfirm()">'+esc(t().fb_confirm_link)+'</button><button class="btn ghost sm" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+(ar?'رجوع':'Back')+'</button>');
+  fbDistTick(); }
+function fbDistTick(){ var boxes=document.querySelectorAll('.fbdl'); var sum=0,n=0; boxes.forEach(function(b){ if(b.checked){ sum+=parseInt(b.getAttribute('data-h')||'0',10); n++; } });
+  var tgt=_fb.distTarget||0, diff=sum-tgt, ok=(diff===0&&n>0);
+  var state=ok?('<span style="color:#3e7d5a">✅ '+esc(t().fb_sum_match)+'</span>'):(diff<0?('<span style="color:var(--gold-2)">'+esc(t().fb_sum_short)+'</span>'):('<span style="color:var(--red)">'+esc(t().fb_sum_over)+'</span>'));
+  var el=document.getElementById('fbdlsum'), btn=document.getElementById('fbdlbtn');
+  if(el) el.innerHTML=esc(t().fb_sel_sum)+': '+(sum/100).toFixed(2)+' / '+esc(t().fb_txn_amount)+': '+(tgt/100).toFixed(2)+'  ·  '+state;
+  if(btn) btn.disabled=!ok; }
+async function fbDistConfirm(){ var ids=[]; document.querySelectorAll('.fbdl').forEach(function(b){ if(b.checked) ids.push(b.getAttribute('data-id')); }); if(!ids.length) return;
+  var r; try{ r=await post('/api/fb/daftra/dup',{action:'link_distributed',id:_fb.distId,daftra:{journal_id:_fb.distEntry,line_ids:ids}}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(t().fb_dist_done+' ✓'); closeDrawer(); fbGo(_fb.tab); } else toast((r&&r.error_ar)||(r&&r.error)||'⚠'); }
+function fbOpenDaftra(){ try{ window.open('https://oujares.daftra.com','_blank'); }catch(_){} }
+async function fbDistSearch(id){ var ar=(L==='ar'); var q=(prompt(ar?'ابحث عن قيد (رقم/وصف/مبلغ):':'Search journal (no./desc/amount):','')||'').trim(); if(!q) return;
+  var d; try{ d=await api('/api/fb/daftra/dup?q='+encodeURIComponent(q)); }catch(_){ d=null; }
+  var res=(d&&d.results)||[]; openDrawer(t().fb_search_journal,q);
+  var rows=res.length?res.map(function(e){ return '<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between"><b style="font-size:12px">#'+esc(e.number||e.entry_id)+'</b><span class="muted" style="font-size:11px">'+esc(e.date||'')+'</span></div><div style="font-size:11.5px;margin-top:3px">'+esc((e.description||'').slice(0,90))+'</div><button class="btn ghost xs" style="margin-top:6px" onclick="fbDistManual(&#39;'+id+'&#39;,&#39;'+esc(String(e.entry_id))+'&#39;)">'+esc(t().fb_manual_pick)+'</button></div>'; }).join(''):('<div class="empty" style="padding:18px">—</div>');
+  setDrawerBody(rows); setDrawerFoot('<button class="btn ghost sm" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+(ar?'رجوع':'Back')+'</button>'); }
+async function fbBatch(entryId){ var ar=(L==='ar'); var d; try{ d=await api('/api/fb/daftra/dup?batch='+encodeURIComponent(entryId)); }catch(_){ d=null; }
+  if(!d||!d.ok){ toast('⚠'); return; }
+  _fb.batchEntry=entryId; _fb.batchTarget=Math.round(parseFloat(d.remaining||d.bank_total||'0')*100);
+  openDrawer(t().fb_batch_title,(ar?'قيد #':'Journal #')+esc(d.number||entryId));
+  var head='<div style="'+fbCard()+'"><div style="font-size:12px">'+esc(t().fb_bank_line)+': <b>'+esc(d.bank_account||'')+'</b></div><div style="font-size:13px;font-weight:800;margin-top:4px">'+esc(t().fb_journal_total)+': '+fbMoney(d.bank_total)+((d.remaining&&d.remaining!==d.bank_total)?(' · '+(ar?'المتبقي: ':'remaining: ')+fbMoney(d.remaining)):'')+'</div><div class="muted" style="font-size:11px;margin-top:4px">'+esc(t().fb_dist_explain)+'</div></div>';
+  var sugSet={}; (d.suggested_ids||[]).forEach(function(k){ sugSet[String(k)]=1; });
+  var rows=(d.candidates||[]).map(function(c){ var h=Math.round(parseFloat(c.amount||'0')*100);
+    return '<label style="display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11.5px;padding:6px 0;border-bottom:1px solid var(--surface-2)"><span style="display:flex;gap:7px;align-items:center"><input type="checkbox" class="fbbt" data-h="'+h+'" data-id="'+esc(String(c.id))+'" onchange="fbBatchTick()"'+(sugSet[String(c.id)]?' checked':'')+'><span>'+esc(String(c.date||'').slice(0,10))+' · '+esc((c.description||'').slice(0,42))+'</span></span><b style="white-space:nowrap">'+fbMoney(c.amount)+'</b></label>'; }).join('');
+  setDrawerBody(head+'<div style="'+fbCard()+'">'+(rows||('<div class="muted" style="font-size:11.5px">'+(ar?'ما فيه حوالات قريبة بنفس الاتجاه':'No nearby transfers in the same direction')+'</div>'))+'</div><div id="fbbtsum" style="margin-top:10px;font-size:12.5px;font-weight:700;text-align:center"></div>');
+  setDrawerFoot('<button id="fbbtbtn" class="btn primary sm" disabled onclick="fbBatchConfirm()">'+esc(t().fb_batch_link)+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
+  fbBatchTick(); }
+function fbBatchTick(){ var boxes=document.querySelectorAll('.fbbt'); var sum=0,n=0; boxes.forEach(function(b){ if(b.checked){ sum+=parseInt(b.getAttribute('data-h')||'0',10); n++; } });
+  var tgt=_fb.batchTarget||0, diff=sum-tgt, ok=(diff===0&&n>0);
+  var state=ok?('<span style="color:#3e7d5a">✅ '+esc(t().fb_sum_match)+'</span>'):(diff<0?('<span style="color:var(--gold-2)">'+esc(t().fb_sum_short)+'</span>'):('<span style="color:var(--red)">'+esc(t().fb_sum_over)+'</span>'));
+  var el=document.getElementById('fbbtsum'), btn=document.getElementById('fbbtbtn');
+  if(el) el.innerHTML=esc(t().fb_sel_sum)+': '+(sum/100).toFixed(2)+' / '+esc(t().fb_bank_line)+': '+(tgt/100).toFixed(2)+'  ·  '+state;
+  if(btn) btn.disabled=!ok; }
+async function fbBatchConfirm(){ var ids=[]; document.querySelectorAll('.fbbt').forEach(function(b){ if(b.checked) ids.push(b.getAttribute('data-id')); }); if(!ids.length) return;
+  var r; try{ r=await post('/api/fb/daftra/dup',{action:'batch_link',journal_id:_fb.batchEntry,ids:ids}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast((L==='ar'?'تم ربط ':'linked ')+(r.linked||0)+' · '+fbMoney(r.total)); closeDrawer(); fbGo(_fb.tab); } else toast((r&&r.error_ar)||(r&&r.error)||'⚠'); }
 async function fbBankMap(){ var ar=(L==='ar'); var d; try{ d=await api('/api/fb/daftra/bankmap'); }catch(_){ d=null; }
   var accts=(d&&d.daftra_accounts)||[], maps=(d&&d.maps)||[];
   var cur=maps[0]||{};                                  // edit the existing mapping (pre-fill so it never looks unsaved)
@@ -22660,6 +22738,12 @@ function fbQueueRender(){
     +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(rtl?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+(ar?'ربط كل الموجود في دافترة':'Link all existing in Daftra')+' ('+rtl+')</button>'):'')+'<button class="btn ghost sm" onclick="fbQueueRefresh()">↻ '+(ar?'تحديث الحالات':'Refresh statuses')+'</button><button class="btn ghost sm" onclick="fbFixStatuses()">🛠 '+(ar?'إصلاح الحالات':'Fix statuses')+'</button></div></div></div>';
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input id="fbq" value="'+esc(_fb.q||'')+'" placeholder="🔎 '+esc(t().fb_search)+'" oninput="_fb.q=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;flex:1;min-width:160px"><select onchange="_fb.sort=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;width:auto">'+sorts.map(function(s){ return '<option value="'+s[0]+'"'+((_fb.sort||'newest')===s[0]?' selected':'')+'>'+esc(s[1])+'</option>'; }).join('')+'</select></div>';
   h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+lanes.map(function(f){ var on=((_fb.qfilter||'')===f); var lbl=(f===''?(ar?'الكل':'All'):fbLaneLabel(f)); var c=(f===''?(_fb.qItems||[]).length:(ln[f]||0)); if(f!==''&&!c) return ''; return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+(_fb.qmode||'inbox')+'&#39;,&#39;'+f+'&#39;)">'+esc(lbl)+' '+c+'</button>'; }).join('')+'</div>';
+  var dq=(_fb.qItems||[]); function dcnt(fn){ return dq.filter(fn).length; }
+  var dR=dcnt(function(i){return i.daftra_match_type==='distributed_subset_match'&&i.lane==='ready_to_link';});
+  var dP=dcnt(function(i){return i.daftra_match_type==='distributed_subset_match'&&i.lane==='needs_decision';});
+  var dL=dcnt(function(i){return i.daftra_match_type==='distributed_subset_match'&&(i.lane==='linked_existing'||i.lane==='completed');});
+  var dB=dcnt(function(i){return i.daftra_match_type==='batch_bank_line_match';});
+  if(dR+dP+dL+dB>0){ h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center"><span class="muted" style="font-size:10.5px">🧩 '+esc(t().fb_dist_card)+':</span>'+[['',ar?'الكل':'All',dR+dP+dL+dB],['dist_ready',t().fb_lane_dist_ready,dR],['dist_possible',t().fb_lane_dist_possible,dP],['dist_linked',t().fb_lane_dist_linked,dL],['batch',t().fb_batch_lane,dB]].map(function(f){ if(f[0]!==''&&!f[2]) return ''; var on=((_fb.dfilter||'')===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="_fb.dfilter=&#39;'+f[0]+'&#39;;fbQueueTable()">'+esc(f[1])+' '+f[2]+'</button>'; }).join('')+'</div>'; }
   h+='<div id="fbqBulk"></div><div id="fbqTable"></div>';
   b.innerHTML=h; fbQueueTable();
 }
@@ -22668,6 +22752,10 @@ function fbQueueItems(){
   if(q) items=items.filter(function(i){ return (String(i.description||'')+' '+(i.apartment||'')+' '+(i.ref||'')+' '+(i.amount||'')+' '+(i.category||'')+' '+(i.owner||'')).toLowerCase().indexOf(q)>=0; });
   if(_fb.cflt==='missing_apartment') items=items.filter(function(i){ return !i.apartment; });
   else if(_fb.cflt==='missing_category') items=items.filter(function(i){ return !i.category||i.category==='unknown'; });
+  if(_fb.dfilter==='dist_ready') items=items.filter(function(i){ return i.daftra_match_type==='distributed_subset_match'&&i.lane==='ready_to_link'; });
+  else if(_fb.dfilter==='dist_possible') items=items.filter(function(i){ return i.daftra_match_type==='distributed_subset_match'&&i.lane==='needs_decision'; });
+  else if(_fb.dfilter==='dist_linked') items=items.filter(function(i){ return i.daftra_match_type==='distributed_subset_match'&&(i.lane==='linked_existing'||i.lane==='completed'); });
+  else if(_fb.dfilter==='batch') items=items.filter(function(i){ return i.daftra_match_type==='batch_bank_line_match'; });
   var sort=_fb.sort||'newest';
   items.sort(function(a,c){ if(sort==='amount') return fbNum(c.amount)-fbNum(a.amount); if(sort==='oldest') return String(a.date||'').localeCompare(String(c.date||'')); return String(c.date||'').localeCompare(String(a.date||'')); });
   return items;
@@ -22710,7 +22798,7 @@ function fbQueueRow(i){
 function fbQueueActions(i){
   var ar=(L==='ar'), ln=i.lane, id=i.id;
   function cls(){ return (i.kind==='bank'?('fbBankReviewFromInbox(&#39;'+id+'&#39;)'):(i.kind==='sheet'?'go(&#39;expenses&#39;)':'fbClassify(&#39;'+id+'&#39;)')); }
-  if(ln==='ready_to_link') return '<button class="btn primary xs" onclick="fbDupLinkRow(&#39;'+id+'&#39;)">'+esc(t().fb_link_confirm)+'</button> <button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button>';
+  if(ln==='ready_to_link'){ if(i.daftra_match_type==='distributed_subset_match') return '<button class="btn primary xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">🧩 '+esc(t().fb_link_dist)+'</button>'; return '<button class="btn primary xs" onclick="fbDupLinkRow(&#39;'+id+'&#39;)">'+esc(t().fb_link_confirm)+'</button> <button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button>'; }
   if(ln==='linked_existing'||ln==='completed') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+(ar?'التفاصيل':'Details')+'</button>';
   if(ln==='needs_decision') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button> <button class="btn ghost xs" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;not_duplicate&#39;)">'+esc(t().fb_not_dup)+'</button>';
   if(ln==='missing_setup') return '<button class="btn primary xs" onclick="fbBankMap()">'+(ar?'أكمل الربط':'Complete setup')+'</button>';
@@ -34270,6 +34358,13 @@ def _fb_dup_bulk_link(actor="", ids=None):
         x = _fb_bank.get(tid)
         if not x or x.get("daftra_duplicate_status") != "already_in_daftra_verified" or not x.get("matched_daftra_id"):
             continue
+        if x.get("daftra_match_type") == "distributed_subset_match":   # route through line-consumption link
+            res = _fb_dup_resolve(tid, "link_distributed", actor, daftra={
+                "journal_id": x.get("matched_daftra_id"), "journal_number": x.get("matched_daftra_number"),
+                "line_ids": x.get("matched_daftra_line_ids") or [], "confidence": x.get("daftra_duplicate_confidence")})
+            if res.get("ok"):
+                total += (_fb_money(x.get("debit")) or _fb_money(x.get("credit"))); linked += 1
+            continue
         x["daftra_duplicate_status"] = "linked_existing"
         x["daftra_status"] = "linked_existing"
         x["daftra_verification_status"] = "verified"
@@ -35264,6 +35359,8 @@ def _fb_resolve_status(item):
     needs_faisal = amt >= FB_APPROVAL_THRESHOLD
     kind, st = item.get("kind"), item.get("status")
     num = item.get("matched_daftra_number")
+    mt = item.get("daftra_match_type")
+    nlines = item.get("distributed_num_lines")
     rar = item.get("daftra_duplicate_reason_ar") or ""
     ren = item.get("daftra_duplicate_reason_en") or ""
 
@@ -35278,21 +35375,45 @@ def _fb_resolve_status(item):
         return d
 
     if dq == "linked_existing" or item.get("daftra_status") == "linked_existing":
+        if mt == "distributed_subset_match":
+            return R("linked_to_daftra", "linked_existing", "مربوط بتوزيع في دافترة", "Linked as distribution",
+                     "open_daftra", "فتح التفاصيل", "Open details",
+                     "مرتبط بأسطر محددة داخل قيد دافترة" + ((" · قيد #" + str(num)) if num else ""),
+                     "Linked to specific lines inside a Daftra journal", can_classify=False, is_completed=True)
+        if mt == "batch_bank_line_match":
+            return R("linked_to_daftra", "linked_existing", "مربوط بحوالة مجمعة", "Linked (batch)",
+                     "open_daftra", "فتح التفاصيل", "Open details",
+                     "ضمن مجموعة حوالات تساوي سطر البنك" + ((" · قيد #" + str(num)) if num else ""),
+                     "Part of a batch equalling the bank line", can_classify=False, is_completed=True)
         return R("linked_to_daftra", "linked_existing", "مربوط بدافترة", "Linked to Daftra",
                  "open_daftra", "فتح التفاصيل", "Open details",
                  ("قيد #" + str(num)) if num else "تم ربطها بسجل موجود في دافترة",
                  ("Journal #" + str(num)) if num else "Linked to existing Daftra record",
                  can_classify=False, is_completed=True)
     if dq == "already_in_daftra_verified":
+        if mt == "distributed_subset_match":
+            return R("existing_in_daftra_ready_to_link", "ready_to_link", "موجود كتوزيع في دافترة", "In Daftra as distribution",
+                     "open_compare", "ربط كتوزيع", "Link as distribution",
+                     rar or (("مجموع " + str(nlines) + " أسطر داخل قيد دافترة يطابق العملية") if nlines else "مجموع أسطر داخل قيد دافترة يطابق العملية"),
+                     ren or "matches a subset of journal lines",
+                     can_classify=False, can_link_existing_daftra=True, can_bulk_link=True, blocking_reason="exists_in_daftra")
         return R("existing_in_daftra_ready_to_link", "ready_to_link", "موجود في دافترة", "Existing in Daftra",
                  "link_confirm", "ربط واعتماد", "Link & confirm",
                  rar or "نفس المبلغ والتاريخ وسطر حساب البنك مطابق", ren or "amount/date/bank-line match",
                  can_classify=False, can_link_existing_daftra=True, can_bulk_link=True, blocking_reason="exists_in_daftra")
     if dq == "strong_possible_duplicate":
+        if mt == "distributed_subset_match":
+            return R("strong_possible", "needs_decision", "توزيع محتمل", "Possible distribution",
+                     "open_compare", "راجع التوزيع", "Review distribution", rar, ren,
+                     can_link_existing_daftra=True, blocking_reason="possible_duplicate")
         return R("strong_possible", "needs_decision", "احتمال تكرار قوي", "Strong possible duplicate",
                  "open_compare", "فتح المطابقة", "Open comparison", rar, ren,
                  can_link_existing_daftra=True, blocking_reason="possible_duplicate")
     if dq == "possible_duplicate":
+        if mt == "distributed_subset_match":
+            return R("possible", "needs_decision", "توزيع محتمل", "Possible distribution",
+                     "open_compare", "راجع التوزيع", "Review distribution", rar, ren,
+                     can_link_existing_daftra=True, blocking_reason="possible_duplicate")
         return R("possible", "needs_decision", "احتمال مكرر", "Possible duplicate",
                  "open_compare", "راجع المطابقة", "Review comparison", rar, ren,
                  can_link_existing_daftra=True, blocking_reason="possible_duplicate")
@@ -35368,7 +35489,8 @@ def _fb_inbox(filters=None):
                       "daftra_duplicate_reason_ar": x.get("daftra_duplicate_reason_ar"),
                       "daftra_duplicate_reason_en": x.get("daftra_duplicate_reason_en"),
                       "matched_daftra_id": x.get("matched_daftra_id"), "matched_daftra_number": x.get("matched_daftra_number"),
-                      "matched_daftra_line_id": x.get("matched_daftra_line_id")})
+                      "matched_daftra_line_id": x.get("matched_daftra_line_id"), "daftra_match_type": x.get("daftra_match_type"),
+                      "matched_daftra_line_ids": x.get("matched_daftra_line_ids"), "distributed_num_lines": x.get("distributed_num_lines")})
     try:
         for ex in list(_expenses.values())[-200:]:
             if _exp_canonical_status(ex) in ("verified", "posted"):
