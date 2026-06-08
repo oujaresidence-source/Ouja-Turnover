@@ -12133,6 +12133,20 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="fbTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
         <div id="fbBody"><div class="empty sk">—</div></div>
       </section>
+      <section class="view" id="view_gw">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_gw">📱 موقع الضيوف</div>
+            <div class="page-sub" id="t_gw_sub"></div>
+          </div>
+          <div class="page-tools">
+            <a class="btn ghost sm" id="gwOpen" href="/stay" target="_blank">↗</a>
+            <button class="btn ghost sm" onclick="gwSync()" id="gwSyncBtn">⟳</button>
+          </div>
+        </div>
+        <div id="gwTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="gwBody"><div class="empty sk">—</div></div>
+      </section>
 
       <!-- ============ REVENUE VIEW ============ -->
       <section class="view" id="view_rev">
@@ -13349,6 +13363,7 @@ const T = {
     fb_inbox:'الوارد المالي', fb_approval:'مركز الاعتماد', fb_recon:'المطابقة', fb_synclog:'سجل دافترة',
     fb_unitp:'ربحية الشقق', fb_companyp:'ربحية الشركة', fb_close:'الإقفال الشهري', fb_mapping:'الإعدادات والربط',
     fb_overview:'النظرة المالية', fb_ws_overview:'النظرة المالية', fb_ws_imports:'الاستيراد والإعداد', fb_ws_queue:'قائمة العمل', fb_ws_mapping:'الربط والقواعد', fb_ws_profit:'الربحية والإقفال',
+    gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
     fb_act_promote:'حوّل للسجل المالي', fb_act_submit:'إرسال للمراجعة', fb_act_classify:'تصنيف', fb_link_cc:'اربط مركز تكلفة', fb_health:'صحة البيانات المالية', fb_nextbest:'وش تسوي الحين؟', fb_applysimilar:'تطبيق على المشابهة', fb_saverule:'احفظ كقاعدة', fb_col_priority:'الأولوية', fb_search:'بحث', fb_bulk:'إجراء جماعي', fb_selected:'محدد', fb_general_expense:'مصروف عام للشركة', fb_no_apt:'غير مرتبط بشقة',
     fb_st_notstarted:'ما بدأ', fb_st_attention:'يحتاج انتباه', fb_st_ready:'جاهز', fb_st_done:'تم',
     fb_import:'استيراد', fb_test:'اختبار الاتصال', fb_upload:'رفع الملف', fb_notconfigured:'دافترة غير مربوطة',
@@ -13651,6 +13666,7 @@ const T = {
     fb_inbox:'Financial Inbox', fb_approval:'Approval Center', fb_recon:'Reconciliation', fb_synclog:'Daftra Sync Log',
     fb_unitp:'Unit Profitability', fb_companyp:'Company Profitability', fb_close:'Monthly Close', fb_mapping:'Settings / Mapping',
     fb_overview:'Overview', fb_ws_overview:'Overview', fb_ws_imports:'Imports & Setup', fb_ws_queue:'Work Queue', fb_ws_mapping:'Mapping & Rules', fb_ws_profit:'Profitability & Close',
+    gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
     fb_act_promote:'Move to ledger', fb_act_submit:'Submit for review', fb_act_classify:'Classify', fb_link_cc:'Link cost center', fb_health:'Finance data health', fb_nextbest:'Do this next', fb_applysimilar:'Apply to similar', fb_saverule:'Save as rule', fb_col_priority:'Priority', fb_search:'Search', fb_bulk:'Bulk action', fb_selected:'selected', fb_general_expense:'Company general expense', fb_no_apt:'Not linked to a unit',
     fb_st_notstarted:'Not started', fb_st_attention:'Needs attention', fb_st_ready:'Ready', fb_st_done:'Done',
     fb_import:'Import', fb_test:'Test connection', fb_upload:'Upload file', fb_notconfigured:'Daftra not connected',
@@ -14278,6 +14294,7 @@ const NAV = [
   {id:'finance', ic:'🧾', tk:'finance'},
   {id:'fb',      ic:'🧠', tk:'fb'},
   {id:'guests',  ic:'👤', tk:'guests'},
+  {id:'gw',      ic:'📱', tk:'gw'},
   {id:'quality', ic:'⭐', tk:'quality'},
   {id:'rev',     ic:'∿', tk:'rev'},
   {id:'learn',   ic:'📚', tk:'learn'},
@@ -14336,7 +14353,7 @@ const NAV_CATS = [
   {tk:'cat_ops',      ids:['inbox','calendar','clean_center','tickets','clean','cleanteams','listings','quality','pmo','design']},
   {tk:'cat_pricing',  ids:['pricing','plab','strat','rev','quote']},
   {tk:'cat_finance',  ids:['expenses','finance','fb','weekly']},
-  {tk:'cat_guests',   ids:['guests','reviews']},
+  {tk:'cat_guests',   ids:['guests','gw','reviews']},
   {tk:'cat_system',   ids:['users','learn','log']}
 ];
 function _navCollapsed(){ try{ return JSON.parse(localStorage.getItem('ouja:navCollapsed')||'{}')||{}; }catch(_){ return {}; } }
@@ -14540,6 +14557,7 @@ function go(id){
   if(id==='pricing' && (!D.pr || D.pr.loading)) loadPricing();
   if(id==='plab') loadPlab();
   if(id==='fb') loadFb();
+  if(id==='gw') loadGw();
   if(id==='strat' && !D.strat) loadStrategies();
   if(id==='rev' && (!D.rev || D.rev.loading)) loadRevenue();
   if(id==='log') renderLog();
@@ -22753,6 +22771,98 @@ async function fbAddCard(){
   if(r&&r.ok){ toast(ar?'تمت الإضافة ✓':'Added ✓'); fbMapping(); } else toast('⚠');
 }
 async function fbDelCard(k){ var ar=(L==='ar'); if(!confirm(ar?'حذف البطاقة؟':'Delete card?')) return; try{ await post('/api/fb/cards',{last4:k,delete:true}); }catch(_){}; fbMapping(); }
+/* ===== Guest Website (موقع الضيوف) dashboard ===== */
+var _gw={tab:'ov',byId:{},tagById:{}};
+function gwTabs(){ var el=document.getElementById('gwTabs'); if(!el) return; var t_=t();
+  var tabs=[['ov','🧭',t_.gw_ov],['listings','🏠',t_.gw_listings],['tags','🏷️',t_.gw_tags],['airbnb','🔗',t_.gw_airbnb],['analytics','📊',t_.gw_analytics]];
+  el.innerHTML=tabs.map(function(x){ var on=(_gw.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="gwGo(&#39;'+x[0]+'&#39;)">'+x[1]+' '+esc(x[2])+'</button>'; }).join(''); }
+function gwGo(tab){ _gw.tab=tab; gwTabs(); var b=document.getElementById('gwBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
+  ({ov:gwOverview,listings:gwListings,tags:gwTags,airbnb:gwAirbnb,analytics:gwAnalytics}[tab]||gwOverview)(); }
+function loadGw(){ var e=document.getElementById('t_gw'); if(e) e.textContent='📱 '+t().gw; var s=document.getElementById('t_gw_sub'); if(s) s.textContent=t().gw_sub; gwTabs(); gwGo(_gw.tab); }
+async function gwSync(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث من Hostaway…':'⏳ Syncing from Hostaway…'); var r; try{ r=await post('/api/gw/sync',{}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم تحديث ':'synced ')+(r.count||0)+(ar?' وحدة':' listings')); gwGo(_gw.tab); } else toast((r&&r.error)||'⚠'); }
+async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/overview'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📱 '+(ar?'حالة الموقع':'Website status')+'</b>'+(d.total?fbChip(ar?'يعمل':'live','ok'):fbChip(ar?'لا توجد بيانات':'no data','warn'))+'</div><div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'آخر تحديث: ':'last sync: ')+esc(d.synced_at||'—')+' · <a href="/stay" target="_blank">'+(ar?'افتح /stay':'open /stay')+'</a></div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
+    +fbStatCard(ar?'إجمالي الوحدات':'Total listings',d.total||0,'var(--text)')
+    +fbStatCard(ar?'ظاهرة':'Visible',d.visible||0,'#3e9665')
+    +fbStatCard(ar?'بدون رابط Airbnb':'Missing Airbnb',d.missing_airbnb||0,((d.missing_airbnb||0)?'var(--down)':'#3e9665'))
+    +fbStatCard(ar?'بدون صور':'Missing images',d.missing_images||0,((d.missing_images||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'وسوم غير مربوطة':'Unmapped tags',d.unmapped_tags||0,((d.unmapped_tags||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'بحث (٧ أيام)':'Searches (7d)',d.searches_7d||0,'var(--text)')
+    +fbStatCard(ar?'نقرات Airbnb (٧ أيام)':'Airbnb clicks (7d)',d.clicks_7d||0,'var(--text)')
+    +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
+  if(d.missing_airbnb) h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px;font-size:12px">'+(ar?('⚠ '+d.missing_airbnb+' وحدة بدون رابط Airbnb — صفحاتها ما تعرض زر الحجز. راجع تبويب «روابط Airbnb».'):('⚠ '+d.missing_airbnb+' listings missing Airbnb URL — their booking button is hidden. See Airbnb Links.'))+'</div>';
+  b.innerHTML=h; }
+async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/listings'); }catch(_){ d=null; } var ls=(d&&d.listings)||[]; _gw.byId={}; ls.forEach(function(x){ _gw.byId[x.id]=x; });
+  if(!ls.length){ b.innerHTML='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه وحدات — اضغط «تحديث من Hostaway».':'No listings — press Sync.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="gwSync()">'+esc(t().gw_sync)+'</button></div></div>'; return; }
+  var th='color:var(--mut);font-size:10.5px;padding:6px 5px;text-align:'+(ar?'right':'left');
+  b.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'ظاهر':'On')+'</th><th style="'+th+'">'+(ar?'الوحدة':'Listing')+'</th><th style="'+th+'">'+(ar?'المنطقة':'Area')+'</th><th style="'+th+'">Airbnb</th><th style="'+th+'">'+(ar?'صور':'Img')+'</th><th style="'+th+'">'+(ar?'وسوم':'Tags')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+ls.map(gwListRow).join('')+'</tbody></table></div>'; }
+function gwListRow(x){ var ar=(L==='ar');
+  return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px"><input type="checkbox" '+(x.visible?'checked':'')+' onclick="gwToggleVis('+x.id+',this.checked)"></td>'
+    +'<td style="padding:6px 5px"><b>'+esc(x.title_ar||x.name)+'</b><div class="muted" style="font-size:10px">#'+x.id+'</div></td>'
+    +'<td style="padding:6px 5px">'+esc(x.area||'—')+'</td>'
+    +'<td style="padding:6px 5px">'+(x.has_airbnb?fbChip('✓','ok'):fbChip(ar?'مفقود':'missing','warn'))+'</td>'
+    +'<td style="padding:6px 5px">'+x.images+'</td><td style="padding:6px 5px">'+(x.tags||[]).length+'</td>'
+    +'<td style="padding:6px 5px;white-space:nowrap"><button class="btn ghost xs" onclick="gwEdit('+x.id+')">'+(ar?'تعديل':'Edit')+'</button> <a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'View')+'</a> <button class="btn ghost xs" onclick="gwCopy(&#39;'+esc(x.slug)+'&#39;)">📋</button></td></tr>'; }
+async function gwToggleVis(id,on){ try{ await post('/api/gw/listing',{id:String(id),visible:!!on}); toast('✓'); }catch(_){ toast('⚠'); } }
+function gwCopy(slug){ var u=location.origin+'/stay/'+slug; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ الرابط':'Link copied'); }catch(e){ prompt('',u); } }
+function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast('⚠'); return; }
+  openDrawer((ar?'تعديل: ':'Edit: ')+(x.name||''), '#'+id);
+  function f(lbl,i2,val){ return '<label class="muted" style="font-size:11px">'+esc(lbl)+'</label><input id="'+i2+'" value="'+esc(val==null?'':val)+'" style="'+fbInp()+'">'; }
+  setDrawerBody('<label class="muted" style="font-size:11px"><input type="checkbox" id="gwe_vis" '+(x.visible?'checked':'')+'> '+(ar?'ظاهر في الموقع':'Visible on site')+'</label><div style="height:8px"></div>'
+    +f(ar?'عنوان عربي':'Title AR','gwe_tar',x.title_ar)+f(ar?'عنوان إنجليزي':'Title EN','gwe_ten',x.title_en)
+    +f(ar?'وصف قصير عربي':'Short AR','gwe_sar',x.short_ar)+f(ar?'المنطقة':'Area','gwe_area',x.area)
+    +f(ar?'الرابط (slug)':'Slug','gwe_slug',x.slug)+f(ar?'نص الشارة':'Badge','gwe_badge',x.badge)
+    +f(ar?'أولوية الترتيب':'Sort priority','gwe_sort',x.sort)+f(ar?'رابط Airbnb (احتياطي محلي)':'Airbnb URL (local fallback)','gwe_ab',x.airbnb_override)
+    +'<label class="muted" style="font-size:11px">'+(ar?'الصورة الرئيسية':'Hero image')+'</label><select id="gwe_hero" style="'+fbInp()+'"><option value="">'+(ar?'تلقائي':'auto')+'</option>'+(x.image_urls||[]).map(function(u,i){ return '<option value="'+esc(u)+'"'+(x.hero===u?' selected':'')+'>'+(ar?'صورة ':'image ')+(i+1)+'</option>'; }).join('')+'</select>'
+    +f(ar?'ملاحظات داخلية':'Internal notes','gwe_notes',x.notes));
+  setDrawerFoot('<button class="btn primary sm" onclick="gwEditSave('+id+')">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
+async function gwEditSave(id){ var ar=(L==='ar'); function v(i){ var e=document.getElementById(i); return e?e.value:undefined; }
+  var body={id:String(id), visible:document.getElementById('gwe_vis').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
+  var r; try{ r=await post('/api/gw/listing',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwListings(); } else toast('⚠'); }
+async function gwTags(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/tags'); }catch(_){ d=null; } var tags=(d&&d.tags)||[]; _gw.cats=(d&&d.categories)||[]; _gw.vis=(d&&d.visibilities)||[]; _gw.tagById={}; tags.forEach(function(x){ _gw.tagById[x.key]=x; });
+  var unmapped=tags.filter(function(x){return x.status==='unmapped';}).length;
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏷️ '+esc(t().gw_tags)+'</b><button class="btn ghost sm" onclick="gwBulkMap()">✨ '+(ar?'ربط الوسوم الشائعة':'Bulk-map common')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'اربط وسوم Hostaway بأسماء عربية/إنجليزية تظهر للزوار في «نوع» والشارات. ':'Map Hostaway tags to public AR/EN labels for نوع filters + badges. ')+(unmapped?(ar?('فيه '+unmapped+' وسم غير مربوط.'):(unmapped+' unmapped.')):'')+'</div></div>';
+  if(!tags.length){ h+='<div class="empty">'+(ar?'لا وسوم — اضغط تحديث':'No tags — sync first')+'</div>'; b.innerHTML=h; return; }
+  var th='color:var(--mut);font-size:10.5px;padding:6px 5px;text-align:'+(ar?'right':'left');
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'الوسم الخام':'Raw')+'</th><th style="'+th+'">#</th><th style="'+th+'">'+(ar?'عربي':'AR')+'</th><th style="'+th+'">'+(ar?'الفئة':'Cat')+'</th><th style="'+th+'">'+(ar?'الظهور':'Vis')+'</th><th style="'+th+'">'+(ar?'الحالة':'Status')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+tags.map(gwTagRow).join('')+'</tbody></table></div>';
+  b.innerHTML=h; }
+function gwTagRow(x){ var ar=(L==='ar'); var raw=(x.raw_values||[]).slice(0,3).join(', ')||x.key; var stTone=(x.status==='mapped'?'ok':(x.status==='unmapped'?'warn':'mut'));
+  return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px"><b>'+esc(raw)+'</b><div class="muted" style="font-size:10px">'+esc(x.key)+' · '+(x.sources||[]).join('/')+'</div></td>'
+    +'<td style="padding:6px 5px">'+(x.count||0)+'</td><td style="padding:6px 5px">'+esc(x.ar||'—')+'</td>'
+    +'<td style="padding:6px 5px">'+esc(x.category||'—')+'</td><td style="padding:6px 5px">'+esc(x.visibility||'hidden')+'</td>'
+    +'<td style="padding:6px 5px">'+fbChip(x.status||'unmapped',stTone)+'</td>'
+    +'<td style="padding:6px 5px"><button class="btn ghost xs" onclick="gwTagEdit(&#39;'+esc(x.key)+'&#39;)">'+(ar?'ربط':'Map')+'</button></td></tr>'; }
+function gwTagEdit(key){ var ar=(L==='ar'); var x=(_gw.tagById||{})[key]; if(!x){ toast('⚠'); return; }
+  openDrawer((ar?'ربط وسم: ':'Map tag: ')+key,(x.raw_values||[]).join(', '));
+  var cats=(_gw.cats||[]).map(function(c){ return '<option value="'+c+'"'+(x.category===c?' selected':'')+'>'+c+'</option>'; }).join('');
+  var vis=(_gw.vis||[]).map(function(c){ return '<option value="'+c+'"'+(x.visibility===c?' selected':'')+'>'+c+'</option>'; }).join('');
+  setDrawerBody('<label class="muted" style="font-size:11px">'+(ar?'الاسم العربي (يظهر للزوار)':'Public Arabic label')+'</label><input id="gt_ar" value="'+esc(x.ar||'')+'" style="'+fbInp()+'">'
+    +'<label class="muted" style="font-size:11px">'+(ar?'الاسم الإنجليزي':'Public English label')+'</label><input id="gt_en" value="'+esc(x.en||'')+'" style="'+fbInp()+'">'
+    +'<label class="muted" style="font-size:11px">'+(ar?'الفئة':'Category')+'</label><select id="gt_cat" style="'+fbInp()+'">'+cats+'</select>'
+    +'<label class="muted" style="font-size:11px">'+(ar?'الظهور':'Visibility')+'</label><select id="gt_vis" style="'+fbInp()+'">'+vis+'</select>'
+    +'<label class="muted" style="font-size:11px"><input type="checkbox" id="gt_noo" '+(x.in_noo!==false?'checked':'')+'> '+(ar?'يظهر ضمن «نوع»':'Show inside نوع')+'</label>');
+  setDrawerFoot('<button class="btn primary sm" onclick="gwTagSave(&#39;'+esc(key)+'&#39;)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="gwTagHide(&#39;'+esc(key)+'&#39;)">'+(ar?'إخفاء':'Hide')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
+async function gwTagSave(key){ var ar=(L==='ar'); var body={key:key,action:'update',ar:document.getElementById('gt_ar').value,en:document.getElementById('gt_en').value,category:document.getElementById('gt_cat').value,visibility:document.getElementById('gt_vis').value,in_noo:document.getElementById('gt_noo').checked};
+  var r; try{ r=await post('/api/gw/tag',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwTags(); } else toast('⚠'); }
+async function gwTagHide(key){ try{ await post('/api/gw/tag',{key:key,action:'hide'}); toast('✓'); closeDrawer(); gwTags(); }catch(_){ toast('⚠'); } }
+async function gwBulkMap(){ var ar=(L==='ar'); var r; try{ r=await post('/api/gw/tags/bulk',{}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم ربط ':'mapped ')+(r.mapped||0)); gwTags(); } else toast('⚠'); }
+async function gwAirbnb(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/airbnb'); }catch(_){ d=null; } var ls=(d&&d.listings)||[]; var miss=ls.filter(function(x){return !x.has_airbnb;}); var found=ls.length-miss.length;
+  var h='<div style="'+fbCard()+'"><b>🔗 '+esc(t().gw_airbnb)+'</b><div style="display:flex;gap:8px;margin-top:8px">'+fbChip((ar?'موجود ':'found ')+found,'ok')+fbChip((ar?'مفقود ':'missing ')+miss.length,(miss.length?'warn':'ok'))+'</div>';
+  if(miss.length) h+='<div style="font-size:12px;margin-top:8px;color:var(--gold)">'+(ar?'رابط Airbnb غير موجود في بيانات Hostaway لهذه الوحدات. عدّله من Hostaway < Listing < Airbnb/channel link ثم اضغط تحديث — أو حط رابط احتياطي محلي من تبويب الوحدات.':'Airbnb URL not in Hostaway for these. Set it in Hostaway > Listing > Airbnb/channel link then Sync, or add a local fallback in Listings.')+'</div>';
+  h+='</div><div style="display:flex;flex-direction:column;gap:5px">'+ls.map(function(x){ return '<div style="padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="flex:1;min-width:120px;font-size:12px">'+esc(x.name)+'</b>'+(x.has_airbnb?(fbChip('✓ '+(x.source||''),'ok')+'<a class="btn ghost xs" href="'+esc(x.url)+'" target="_blank">Airbnb</a>'):fbChip(ar?'مفقود':'missing','warn'))+'<a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'view')+'</a></div>'; }).join('')+'</div>';
+  b.innerHTML=h; }
+async function gwAnalytics(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/analytics?days=7'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
+  var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">'
+    +fbStatCard(ar?'زيارات':'Visits',d.page_views||0,'var(--text)')+fbStatCard(ar?'عمليات بحث':'Searches',d.searches||0,'var(--text)')
+    +fbStatCard(ar?'بدون نتائج':'No-results',d.no_results||0,((d.no_results||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'مشاهدات وحدات':'Listing views',d.listing_views||0,'var(--text)')+fbStatCard(ar?'نقرات Airbnb':'Airbnb clicks',d.airbnb_clicks||0,'#3e9665')
+    +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
+  function lst(title,arr,fmt){ if(!arr||!arr.length) return ''; return '<div style="'+fbCard()+';margin-top:8px"><b style="font-size:12.5px">'+esc(title)+'</b>'+arr.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--border)"><span>'+esc(fmt?fmt(it[0]):it[0])+'</span><b>'+it[1]+'</b></div>'; }).join('')+'</div>'; }
+  h+=lst(ar?'أكثر الوحدات نقرًا':'Top listings by clicks',d.top_listings,function(id){ var x=(_gw.byId||{})[id]; return x?x.name:('#'+id); });
+  h+=lst(ar?'أكثر «نوع» مختار':'Top نوع selected',d.top_types,function(k){ var x=(_gw.tagById||{})[k]; return x?(x.ar||x.en||k):k; });
+  h+=lst(ar?'المصادر (UTM/إحالة)':'Sources (UTM/referrer)',d.by_utm);
+  b.innerHTML=h+'<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'آخر ٧ أيام · جلسات مجهولة بدون بيانات شخصية':'Last 7 days · anonymous sessions, no personal data')+'</div>'; }
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
 var _ctSel={};
 async function loadCleanTeams(){
@@ -37381,6 +37491,133 @@ async def _api_stay_event(request):
         _gw_track(ev)
     return _json({"ok": True})
 
+# ---- dashboard guest-website controls (token-gated) ----
+async def _api_gw_overview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    snaps = _gw_cache.get("listings") or []
+    diag = _gw_cache.get("diag") or {}
+    a = _gw_analytics_summary(7)
+    return _json({"ok": True, "status": ("live" if snaps else "no_data"),
+                  "synced_at": _gw_cache.get("synced_at"), "total": len(snaps),
+                  "visible": len(_gw_visible_snaps()),
+                  "missing_airbnb": len(diag.get("missing_airbnb") or []),
+                  "missing_images": len(diag.get("missing_images") or []),
+                  "unmapped_tags": sum(1 for e in _gw_taxonomy.values() if e.get("status") == "unmapped"),
+                  "taxonomy": len(_gw_taxonomy), "searches_7d": a["searches"],
+                  "clicks_7d": a["airbnb_clicks"], "ctr": a["ctr"], "views_7d": a["page_views"]})
+
+async def _api_gw_listings(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    out = []
+    for s in (_gw_cache.get("listings") or []):
+        ov = _gw_overrides.get(str(s.get("id")), {}) or {}
+        url, src = _gw_airbnb_url(s, ov)
+        out.append({"id": s.get("id"), "name": s.get("name"), "internal": s.get("internal"),
+                    "title_ar": ov.get("title_ar") or "", "title_en": ov.get("title_en") or "",
+                    "short_ar": ov.get("short_ar") or "", "full_ar": ov.get("full_ar") or "",
+                    "area": (ov.get("area") or s.get("area") or ""),
+                    "visible": (ov.get("visible") if ov.get("visible") is not None else bool(s.get("active"))),
+                    "active": s.get("active"), "has_airbnb": bool(url), "airbnb_source": src,
+                    "airbnb_override": ov.get("airbnb_override") or "",
+                    "images": len(s.get("images") or []),
+                    "tags": [k for k in (s.get("tag_keys") or []) if (_gw_taxonomy.get(k) or {}).get("ar")],
+                    "slug": _gw_slug(s, ov), "sort": (ov.get("sort") or 0), "badge": ov.get("badge") or "",
+                    "notes": ov.get("notes") or "",
+                    "hero": (ov.get("hero_image") or s.get("cover") or ""),
+                    "image_urls": [im["url"] for im in (s.get("images") or [])][:30]})
+    out.sort(key=lambda x: (-(x["sort"] or 0), x["name"] or ""))
+    return _json({"ok": True, "listings": out, "synced_at": _gw_cache.get("synced_at")})
+
+async def _api_gw_listing(request):
+    if not _dash_auth(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    lid = str(b.get("id") or "").strip()
+    if not lid:
+        return _json({"error": "id_required"}, 400)
+    ov = _gw_overrides.get(lid, {}) or {}
+    for k in ("visible", "title_ar", "title_en", "short_ar", "short_en", "full_ar", "full_en",
+              "area", "slug", "badge", "sort", "hero_image", "airbnb_override", "notes"):
+        if k in b:
+            ov[k] = b.get(k)
+    _gw_overrides[lid] = ov
+    _gw_save_ov()
+    return _json({"ok": True, "override": ov})
+
+async def _api_gw_tags(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    tags = sorted(_gw_taxonomy.values(), key=lambda e: (-(e.get("count") or 0), e.get("key") or ""))
+    return _json({"ok": True, "tags": tags, "categories": GW_CATEGORIES, "visibilities": GW_VIS})
+
+async def _api_gw_tag(request):
+    if not _dash_auth(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    ent = _gw_taxonomy.get((b.get("key") or "").strip())
+    if not ent:
+        return _json({"error": "tag_not_found"}, 404)
+    action = (b.get("action") or "update").strip()
+    if action == "hide":
+        ent["visibility"] = "hidden"
+    elif action == "merge":
+        tgt = _gw_taxonomy.get((b.get("into") or "").strip())
+        if tgt:
+            tgt.setdefault("aliases", [])
+            for r in (ent.get("raw_values") or []):
+                if r not in tgt["aliases"]:
+                    tgt["aliases"].append(r)
+            ent["visibility"] = "hidden"; ent["status"] = "alias"; ent["merged_into"] = tgt.get("key")
+    else:
+        for k in ("ar", "en", "category", "visibility", "weight", "sort", "in_noo", "aliases"):
+            if k in b:
+                ent[k] = b.get(k)
+        ent["status"] = "mapped" if (ent.get("ar") or ent.get("en")) else "unmapped"
+    ent["updated"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _gw_save_tax()
+    return _json({"ok": True, "tag": ent})
+
+async def _api_gw_tags_bulk(request):
+    if not _dash_auth(request):
+        return _json({"error": "forbidden"}, 403)
+    n = 0
+    for k, seed in _GW_SEED.items():
+        ent = _gw_taxonomy.get(k)
+        if ent and not (ent.get("ar") or ent.get("en")):
+            ent["ar"], ent["en"], ent["category"], ent["visibility"] = seed
+            ent["status"] = "mapped"; ent["updated"] = datetime.now(TZ).isoformat(timespec="seconds"); n += 1
+    _gw_save_tax()
+    return _json({"ok": True, "mapped": n})
+
+async def _api_gw_airbnb(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    out = []
+    for s in (_gw_cache.get("listings") or []):
+        ov = _gw_overrides.get(str(s.get("id")), {}) or {}
+        url, src = _gw_airbnb_url(s, ov)
+        out.append({"id": s.get("id"), "name": s.get("name"), "has_airbnb": bool(url),
+                    "source": src, "url": url, "slug": _gw_slug(s, ov), "active": s.get("active")})
+    out.sort(key=lambda x: (x["has_airbnb"], x["name"] or ""))
+    return _json({"ok": True, "listings": out})
+
+async def _api_gw_analytics(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        days = int(request.query.get("days", 7) or 7)
+    except (TypeError, ValueError):
+        days = 7
+    return _json({"ok": True, **_gw_analytics_summary(days)})
+
+async def _api_gw_sync(request):
+    if not _dash_auth(request):
+        return _json({"error": "forbidden"}, 403)
+    res = await asyncio.to_thread(_gw_sync, True)
+    return _json(res)
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
@@ -37401,6 +37638,16 @@ async def start_web_server():
         app.router.add_get("/api/stay/search", _api_stay_search)
         app.router.add_get("/api/stay/listing/{id}", _api_stay_listing)
         app.router.add_post("/api/stay/event", _api_stay_event)
+        # ---- dashboard guest-website controls (token-gated) ----
+        app.router.add_get("/api/gw/overview", _api_gw_overview)
+        app.router.add_get("/api/gw/listings", _api_gw_listings)
+        app.router.add_post("/api/gw/listing", _api_gw_listing)
+        app.router.add_get("/api/gw/tags", _api_gw_tags)
+        app.router.add_post("/api/gw/tag", _api_gw_tag)
+        app.router.add_post("/api/gw/tags/bulk", _api_gw_tags_bulk)
+        app.router.add_get("/api/gw/airbnb", _api_gw_airbnb)
+        app.router.add_get("/api/gw/analytics", _api_gw_analytics)
+        app.router.add_post("/api/gw/sync", _api_gw_sync)
         app.router.add_get("/stay/{slug}", _handle_stay_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
