@@ -38961,7 +38961,7 @@ function qs(){return new URLSearchParams(location.search);}
 function utm(){var p=qs(),o={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o[k]=p.get(k);});return o;}
 function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:location.pathname,referrer:document.referrer||''},utm(),extra||{});var s=JSON.stringify(b);if(navigator.sendBeacon){navigator.sendBeacon('/api/stay/event',new Blob([s],{type:'application/json'}));}else{fetch('/api/stay/event',{method:'POST',headers:{'Content-Type':'application/json'},body:s,keepalive:true});}}catch(e){}}
 function money(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US')+' ر.س';}catch(e){return n+' ر.س';}}
-function airbnbUrl(u){if(!u)return '';var sep=(u.indexOf('?')>=0)?'&':'?';return u+sep+'utm_source=ouja_stay&utm_medium=website&utm_campaign=tiktok_conversion';}
+function airbnbUrl(u,ci,co,guests){if(!u)return '';try{var url=new URL(u);if(ci&&co&&co>ci){url.searchParams.set('check_in',ci);url.searchParams.set('check_out',co);}var g=parseInt(guests,10);if(g>0)url.searchParams.set('adults',String(g));url.searchParams.set('utm_source','ouja_stay');url.searchParams.set('utm_medium','website');url.searchParams.set('utm_campaign','tiktok_conversion');return url.toString();}catch(e){var sep=(u.indexOf('?')>=0)?'&':'?';return u+sep+'utm_source=ouja_stay&utm_medium=website&utm_campaign=tiktok_conversion';}}
 function carry(){var p=qs(),o=[];['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o.push(k+'='+encodeURIComponent(p.get(k)));});return o.length?('&'+o.join('&')):'';}
 function nightsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ليلة وحدة';if(n==2)return 'ليلتين';if(n<=10)return n+' ليالٍ';return n+' ليلة';}
 function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar=(s.match(/[؀-ۿ]/g)||[]).length;return lat>ar;}
@@ -39103,9 +39103,10 @@ function viewListing(){
       +kv+price+why+descBlk+amen
       +'<div style="height:96px"></div>';
     var cta;
-    if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url))+'">احجزها في Airbnb ↗</a>';}
+    if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url,dci,dco,pq.get('guests')))+'">احجزها في Airbnb ↗</a>';}
     else{cta='<button class="btn block off" disabled>رابط Airbnb غير متوفر حاليًا</button>';}
-    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+'<div class="disc" style="text-align:center">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb.</div></div>';
+    var note=l.has_airbnb?'<div class="disc" style="text-align:center;margin-bottom:3px">بننقلك إلى Airbnb بنفس التواريخ وعدد الضيوف.</div>':'';
+    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+note+'<div class="disc" style="text-align:center">السعر النهائي والتوفر النهائي داخل Airbnb.</div></div>';
     document.body.appendChild(bar);
     var ab=document.getElementById('abtn');
     if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
