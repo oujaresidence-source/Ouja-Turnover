@@ -22715,31 +22715,68 @@ async function fbSaveImport(){
   else toast((r&&(r.error||r.detail))||'⚠');
 }
 /* ---- Financial Inbox + Approval Center ---- */
-async function fbInbox(filterOverride){ return fbInboxRender('inbox', filterOverride); }
+async function fbInbox(){ _fb.qview='lanes'; _fb.qfilter=''; _fb.dfilter=''; return fbInboxRender('inbox'); }
 async function fbApproval(){ return fbInboxRender('approval','needs_faisal'); }
 async function fbInboxRender(mode, filter){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
-  _fb.qmode=mode; _fb.qfilter=(filter!=null?filter:(_fb.qfilter||'')); _fb.sel={}; _fb.qexp=_fb.qexp||{};
+  _fb.qmode=mode; _fb.sel={}; _fb.qexp=_fb.qexp||{};
+  if(mode==='approval'||filter==='needs_faisal'){ _fb.qview='table'; _fb.qfilter='needs_faisal_approval'; }
+  else if(filter===''||filter===null){ _fb.qview='lanes'; _fb.qfilter=''; }
+  else if(filter!==undefined){ _fb.qfilter=filter; _fb.qview='table'; }
+  if(!_fb.qview) _fb.qview='lanes';
   await fbLoadRefs();
-  var d; try{ d=await api('/api/fb/inbox'+(_fb.qfilter?('?filter='+encodeURIComponent(_fb.qfilter)):'')); }catch(_){ d=null; }
+  var d; try{ d=await api('/api/fb/inbox'); }catch(_){ d=null; }     // load ALL lanes; filter client-side (lane-first UX)
   if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — قائمة العمل للمحاسبة.':'Operations see only their expense status — the work queue is for accountants.')+'</div>'; return; }
   _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
   fbQueueRender();
 }
 function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',needs_review:'warn'})[ln]||'mut'; }
 function fbLaneLabel(ln){ var ar=(L==='ar'); var m={ready_to_link:['جاهز للربط','Ready to link'],linked_existing:['مربوط بدافترة','Linked'],needs_decision:['يحتاج قرار','Needs decision'],missing_setup:['ناقص إعداد','Missing setup'],needs_faisal_approval:['يحتاج اعتماد فيصل','Faisal approval'],ready_for_journal:['جاهز للقيد','Ready for journal'],needs_review:['يحتاج مراجعة','Needs review'],completed:['مكتمل','Completed']}; var v=m[ln]; return v?(ar?v[0]:v[1]):ln; }
-async function fbQueueRefresh(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث الحالات…':'⏳ Refreshing…'); await fbInboxRender(_fb.qmode||'inbox',_fb.qfilter||''); toast(ar?'تم تحديث القائمة':'Queue refreshed'); }
-async function fbFixStatuses(){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/daftra/dup',{action:'fix_statuses'}); }catch(_){ r=null; } if(r&&r.ok){ var a=r.after||{}; toast((ar?'تم الإصلاح · جاهز للربط ':'fixed · ready-to-link ')+(a.ready_to_link||0)+' · '+(ar?'مربوط ':'linked ')+(a.linked_existing||0)); fbInboxRender(_fb.qmode||'inbox',_fb.qfilter||''); } else toast('⚠'); }
+async function fbQueueRefresh(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث الحالات…':'⏳ Refreshing…'); await fbInboxRender(_fb.qmode||'inbox'); toast(ar?'تم تحديث القائمة':'Queue refreshed'); }
+async function fbFixStatuses(){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/daftra/dup',{action:'fix_statuses'}); }catch(_){ r=null; } if(r&&r.ok){ var a=r.after||{}; toast((ar?'تم الإصلاح · جاهز للربط ':'fixed · ready-to-link ')+(a.ready_to_link||0)+' · '+(ar?'مربوط ':'linked ')+(a.linked_existing||0)); fbInboxRender(_fb.qmode||'inbox'); } else toast('⚠'); }
 function fbStatusLabel(s){ var ar=(L==='ar'); var m={needs_review:[ 'يحتاج مراجعة','Needs review'],auto_classified:['مصنّف تلقائيًا','Auto-classified'],accountant_review:['مراجعة محاسب','Accountant review'],needs_faisal:['اعتماد فيصل','Faisal approval'],approved:['معتمد','Approved'],rejected:['مرفوض','Rejected'],ready_to_post:['جاهز للترحيل','Ready to post'],posted:['مرحّل','Posted'],verified:['متحقق من دافترة','Verified in Daftra'],failed:['فشل','Failed'],draft:['مسودة','Draft'],sheet_intake:['من Google Sheet','From Sheet'],void:['ملغى','Void']}; var v=m[s]; return v?(ar?v[0]:v[1]):(s||'—'); }
+function fbLaneMeta(lane){ var ar=(L==='ar'); var m={
+  ready_to_link:['🔗', ar?'موجودة في دافترة — تحتاج ربط فقط، بدون قيد جديد':'In Daftra — just link, no new entry'],
+  needs_decision:['🤔', ar?'فيها احتمال تكرار أو توزيع — تحتاج قرارك':'Possible duplicate/distribution — needs your decision'],
+  missing_setup:['⚙️', ar?'ناقص ربط (حساب بنك/مركز تكلفة) قبل ما نكمل':'A mapping is missing before we can proceed'],
+  needs_faisal_approval:['🛡️', ar?'مبلغ ٣٠٠٠ أو أكثر — يحتاج اعتماد فيصل':'3,000+ — needs Faisal approval'],
+  ready_for_journal:['🧮', ar?'جديدة ومصنّفة — جاهزة لتجهيز قيد دافترة':'New & classified — ready to draft a Daftra entry'],
+  needs_review:['📋', ar?'تحتاج تصنيف أو مراجعة':'Needs classification or review'],
+  linked_existing:['✅', ar?'مربوطة بدافترة':'Linked to Daftra'],
+  completed:['✅', ar?'مكتملة':'Completed'] }; return m[lane]||['•','']; }
+function fbLaneCard(lane, count, items){ var ar=(L==='ar'); var meta=fbLaneMeta(lane), tone=fbLaneTone(lane);
+  var total=items.reduce(function(s,i){ return s+fbNum(i.amount); },0);
+  var top=items.slice(0,3).map(function(i){ return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;border-top:1px solid var(--line)"><span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">'+esc(String(i.date||'').slice(0,10))+' · '+esc(String(i.description||'').slice(0,28))+'</span><b style="white-space:nowrap">'+fbMoney(i.amount)+'</b></div>'; }).join('');
+  var primary;
+  if(lane==='ready_to_link') primary='<button class="btn primary sm" onclick="fbBulkLink()">'+esc(t().fb_bulk_link)+'</button>';
+  else if(lane==='missing_setup') primary='<button class="btn primary sm" onclick="fbGo(&#39;setup&#39;)">'+(ar?'أكمل الإعداد':'Complete setup')+'</button>';
+  else primary='<button class="btn primary sm" onclick="fbLaneOpen(&#39;'+lane+'&#39;)">'+(ar?'افتح':'Open')+'</button>';
+  return '<div style="'+fbCard()+';margin:0"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13.5px">'+meta[0]+' '+esc(fbLaneLabel(lane))+'</b>'+fbChip(String(count),tone)+'</div>'
+    +'<div style="font-size:20px;font-weight:800;margin-top:3px">'+fbMoney(total)+'</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:2px;line-height:1.5">'+esc(meta[1])+'</div>'
+    +(top?('<div style="margin-top:7px">'+top+'</div>'):'')
+    +'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+primary+'<button class="btn ghost sm" onclick="fbLaneOpen(&#39;'+lane+'&#39;)">'+(ar?'عرض الكل':'View all')+'</button></div></div>'; }
+function fbLaneOpen(lane){ _fb.qfilter=lane; _fb.dfilter=''; _fb.qview='table'; fbQueueRender(); }
+function fbLaneBack(){ _fb.qview='lanes'; _fb.qfilter=''; _fb.dfilter=''; fbQueueRender(); }
 function fbQueueRender(){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var ln=_fb.qlanes||{};
-  var lanes=['','ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','needs_review','linked_existing','completed'];
-  var sorts=[['newest',ar?'الأحدث':'Newest'],['oldest',ar?'الأقدم':'Oldest'],['amount',ar?'الأعلى مبلغًا':'Highest amount']];
+  if(!_fb.qview) _fb.qview='lanes';
   var rtl=(ln.ready_to_link||0);
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📋 '+(ar?'قائمة العمل':'Work Queue')+'</b>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(rtl?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+(ar?'ربط كل الموجود في دافترة':'Link all existing in Daftra')+' ('+rtl+')</button>'):'')+'<button class="btn ghost sm" onclick="fbQueueRefresh()">↻ '+(ar?'تحديث الحالات':'Refresh statuses')+'</button><button class="btn ghost sm" onclick="fbFixStatuses()">🛠 '+(ar?'إصلاح الحالات':'Fix statuses')+'</button></div></div></div>';
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(rtl?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+esc(t().fb_bulk_link)+' ('+rtl+')</button>'):'')+'<button class="btn ghost sm" onclick="fbQueueRefresh()">↻ '+(ar?'تحديث':'Refresh')+'</button><button class="btn ghost sm" onclick="fbFixStatuses()">🛠 '+(ar?'إصلاح الحالات':'Fix')+'</button></div></div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:4px">'+(ar?'اشتغل من المسارات — كل مسار يجمع العمليات اللي لها نفس الإجراء.':'Work from lanes — each lane groups items that need the same action.')+'</div></div>';
+  if(_fb.qview==='lanes'){
+    var order=['ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','needs_review','linked_existing','completed'];
+    var byLane={}; (_fb.qItems||[]).forEach(function(i){ (byLane[i.lane]=byLane[i.lane]||[]).push(i); });
+    var cards=order.filter(function(L_){ return (ln[L_]||(byLane[L_]||[]).length); }).map(function(L_){ return fbLaneCard(L_, (ln[L_]||(byLane[L_]||[]).length), byLane[L_]||[]); }).join('');
+    if(!cards) cards='<div class="empty" style="padding:30px;text-align:center;grid-column:1/-1">'+(ar?'كل شي واضح — ما فيه عمليات تحتاج إجراء اليوم 👌':'All clear — nothing needs action today 👌')+'</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:10px">'+cards+'</div>';
+    h+='<div style="text-align:center;margin-top:10px"><button class="btn ghost sm" onclick="fbLaneOpen(&#39;&#39;)">'+(ar?'عرض تفصيلي (كل العمليات)':'Detailed view (all items)')+'</button></div>';
+    b.innerHTML=h; return;
+  }
+  var sorts=[['newest',ar?'الأحدث':'Newest'],['oldest',ar?'الأقدم':'Oldest'],['amount',ar?'الأعلى مبلغًا':'Highest amount']];
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="fbLaneBack()">‹ '+(ar?'المسارات':'Lanes')+'</button><b style="font-size:13px">'+(_fb.qfilter?(fbLaneMeta(_fb.qfilter)[0]+' '+esc(fbLaneLabel(_fb.qfilter))):(ar?'كل العمليات':'All items'))+'</b></div>';
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input id="fbq" value="'+esc(_fb.q||'')+'" placeholder="🔎 '+esc(t().fb_search)+'" oninput="_fb.q=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;flex:1;min-width:160px"><select onchange="_fb.sort=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;width:auto">'+sorts.map(function(s){ return '<option value="'+s[0]+'"'+((_fb.sort||'newest')===s[0]?' selected':'')+'>'+esc(s[1])+'</option>'; }).join('')+'</select></div>';
-  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+lanes.map(function(f){ var on=((_fb.qfilter||'')===f); var lbl=(f===''?(ar?'الكل':'All'):fbLaneLabel(f)); var c=(f===''?(_fb.qItems||[]).length:(ln[f]||0)); if(f!==''&&!c) return ''; return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+(_fb.qmode||'inbox')+'&#39;,&#39;'+f+'&#39;)">'+esc(lbl)+' '+c+'</button>'; }).join('')+'</div>';
   var dq=(_fb.qItems||[]); function dcnt(fn){ return dq.filter(fn).length; }
   var dR=dcnt(function(i){return i.daftra_match_type==='distributed_subset_match'&&i.lane==='ready_to_link';});
   var dP=dcnt(function(i){return i.daftra_match_type==='distributed_subset_match'&&i.lane==='needs_decision';});
@@ -22752,6 +22789,7 @@ function fbQueueRender(){
 function fbQueueItems(){
   var items=(_fb.qItems||[]).slice(); var q=(_fb.q||'').trim().toLowerCase();
   if(q) items=items.filter(function(i){ return (String(i.description||'')+' '+(i.apartment||'')+' '+(i.ref||'')+' '+(i.amount||'')+' '+(i.category||'')+' '+(i.owner||'')).toLowerCase().indexOf(q)>=0; });
+  if(_fb.qfilter) items=items.filter(function(i){ return i.lane===_fb.qfilter; });   // lane-first: client-side lane filter
   if(_fb.cflt==='missing_apartment') items=items.filter(function(i){ return !i.apartment; });
   else if(_fb.cflt==='missing_category') items=items.filter(function(i){ return !i.category||i.category==='unknown'; });
   if(_fb.dfilter==='dist_ready') items=items.filter(function(i){ return i.daftra_match_type==='distributed_subset_match'&&i.lane==='ready_to_link'; });
