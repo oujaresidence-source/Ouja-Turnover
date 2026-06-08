@@ -22581,7 +22581,19 @@ async function fbClassifySave(id){ var body={id:id,action:'classify',category:fb
   var a=document.getElementById('fbc_apt'), n=document.getElementById('fbc_note'); if(a){ body.apartment=a.value; } if(n&&n.value){ body.description=n.value; }
   var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
 /* ---- Reconciliation (light) ---- */
-async function fbRecon(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/bank'); }catch(_){ d=null; } var s=(d&&d.summary)||{count:0}; if(!s.count){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'ارفع كشف البنك أول عشان نبدأ المطابقة.':'Upload the bank statement first to start reconciliation.')+'</div>'; return; } b.innerHTML='<div style="'+fbCard()+'"><b>🔗 '+t().fb_recon+'</b><div style="margin-top:10px;font-size:12.5px;line-height:1.9">'+(ar?'عمليات البنك: ':'bank txns: ')+'<b>'+(s.count||0)+'</b><br>'+(ar?'غير مطابقة: ':'unmatched: ')+'<b style="color:var(--gold)">'+(s.unmatched||0)+'</b><br>'+(ar?'تحتاج مراجعة: ':'needs review: ')+'<b>'+(s.needs_review||0)+'</b></div><div class="muted" style="font-size:11.5px;margin-top:8px">'+(ar?'المطابقة التلقائية مع Hostaway/القيود تجي بعد ربط الإيراد. حالياً صنّف الحركة من «الوارد المالي».':'Auto-match with Hostaway/journals comes after revenue is connected. For now classify from the Financial Inbox.')+'</div></div>'; }
+async function fbRecon(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
+  var d; try{ d=await api('/api/fb/bank'); }catch(_){ d=null; } var s=(d&&d.summary)||{count:0}; var bc=s.by_category||{};
+  if(!s.count){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'ارفع كشف البنك أول عشان نبدأ المطابقة.':'Upload the bank statement first to start reconciliation.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="fbGo(&#39;bank&#39;)">'+(ar?'ارفع الكشف':'Upload statement')+'</button></div></div>'; return; }
+  var founder=(bc.founder_funding||0)+(bc.founder_reimbursement||0)+(bc.owner_deposit||0);
+  var card=(bc.employee_card_settlement||0); var fee=(bc.bank_fee||0)+(bc.platform_fee||0);
+  function sec(icon,title,desc,n,tone,cta,ctab){ return '<div style="'+fbCard()+';margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b style="font-size:13px">'+icon+' '+esc(title)+'</b>'+fbChip(n+(ar?' عملية':' txns'),tone)+'</div><div class="muted" style="font-size:11.5px;margin-top:6px">'+esc(desc)+'</div>'+(cta?('<button class="btn ghost sm" style="margin-top:8px" onclick="fbGo(&#39;'+ctab+'&#39;)">'+esc(cta)+'</button>'):'')+'</div>'; }
+  var h='<div style="'+fbCard()+'"><b>🔗 '+t().fb_recon+'</b><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:12px">'+fbChip((ar?'العمليات ':'txns ')+(s.count||0),'mut')+fbChip((ar?'تحتاج مراجعة ':'needs review ')+(s.needs_review||0),(s.needs_review?'warn':'ok'))+fbChip((ar?'غير مطابقة ':'unmatched ')+(s.unmatched||0),'mut')+'</div></div>';
+  h+=sec('🧾',ar?'البنك ↔ المصاريف':'Bank ↔ Expenses',ar?'طابق مدفوعات النظافة/الصيانة/الاشتراكات مع المصاريف المعتمدة.':'Match cleaning/maintenance/subscription payments to approved expenses.',(bc.cleaning_provider||0)+(bc.maintenance||0)+(bc.wifi||0)+(bc.software_subscription||0),'mut',(ar?'صنّف من قائمة العمل':'Classify in Work Queue'),'inbox');
+  h+=sec('📚',ar?'البنك ↔ دافترة':'Bank ↔ Daftra',ar?'لما يتطابق مبلغ البنك مع قيد مستورد من دافترة نقترح الربط. (يكتمل بعد ربط الحسابات).':'When a bank amount matches an imported Daftra record we suggest a link (completes after account mapping).',fee,'mut','','');
+  h+=sec('👤',ar?'البنك ↔ المؤسس/البطاقات':'Bank ↔ Founder/Card',ar?'تحويلات المؤسس ما تُحسب إيراد. تسويات البطاقات تحتاج تفاصيل البطاقة.':'Founder transfers are never counted as revenue. Card settlements need card details.',founder+card,(founder+card?'warn':'ok'),(ar?'اربط البطاقات':'Map cards'),'mapping');
+  h+=sec('🏨',ar?'البنك ↔ Hostaway/الدفعات':'Bank ↔ Hostaway/Payouts',ar?'مطابقة دفعات القنوات مع حجوزات Hostaway — معاينة، تجي بعد ربط الإيراد.':'Match channel payouts to Hostaway reservations — preview, comes after revenue link.',(bc.channel_payout||0),'mut','','');
+  h+='<div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'المطابقة الآلية الكاملة قيد التطوير — حاليًا صنّف وراجع يدويًا بثقة.':'Full auto-matching is in progress — classify & review manually with confidence for now.')+'</div>';
+  b.innerHTML=h; }
 /* ---- Daftra Sync Log ---- */
 async function fbSynclog(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/synclog'); }catch(_){ d=null; } var en=(d&&d.entries)||[], runs=(d&&d.runs)||[];
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between"><b>🧾 '+t().fb_synclog+'</b>'+(d&&d.post_enabled?fbChip(ar?'الترحيل مفعّل':'posting on','ok'):fbChip(ar?'الترحيل مغلق':'posting off','mut'))+'</div>';
@@ -22619,17 +22631,30 @@ function fbApplyPeriod(){
   fbGo(_fb.tab);
 }
 function fbResetPeriod(){ _fb.period={}; fbGo(_fb.tab); }
+function fbConf(x){ var ar=(L==='ar');
+  if(!x.revenue_connected) return [ar?'ثقة منخفضة':'low confidence','warn'];
+  if(x.balanced===false||(x.flags||[]).length||(x.missing||[]).length) return [ar?'ثقة متوسطة':'medium confidence','warn'];
+  return [ar?'ثقة عالية':'high confidence','ok']; }
+function fbAttn(x){ var ar=(L==='ar'); var rs=[];
+  if(!x.revenue_connected){ rs.push(ar?'غير مربوط بالإيراد':'revenue not linked'); return rs; }
+  if(x.balanced===false||(x.flags||[]).length) rs.push(ar?'دفعات/قنوات تحتاج مراجعة':'payouts/channels need review');
+  var profit=fbNum(x.ouja_fee)-fbNum(x.expenses);
+  if(profit<0) rs.push(ar?'ربح سالب':'negative profit');
+  else if(fbNum(x.revenue)>0 && profit/Math.max(1,fbNum(x.revenue))<0.08) rs.push(ar?'ربح ضعيف مقابل إيراد عالٍ':'low profit vs high revenue');
+  if((x.missing||[]).length) rs.push(ar?'ناقص ربط (مركز تكلفة/Hostaway)':'missing link (cost ctr/Hostaway)');
+  return rs; }
 function fbProfitRow(x){
   var ar=(L==='ar'), linked=x.revenue_connected;
-  var rev=linked?('<span style="font-size:11.5px">'+(ar?'إيراد ':'rev ')+'<b>'+fbMoney(x.revenue)+'</b></span>'+(x.ouja_fee!=null?('<span style="font-size:11.5px;color:#3e9665">'+(ar?'عوجا ':'ouja ')+fbMoney(x.ouja_fee)+'</span>'):'')):fbChip(ar?'غير مربوط':'not linked','warn');
+  var profit=linked?(fbNum(x.ouja_fee)-fbNum(x.expenses)):null;
+  var rev=linked?('<span style="font-size:11.5px">'+(ar?'إيراد ':'rev ')+'<b>'+fbMoney(x.revenue)+'</b></span>'+(x.ouja_fee!=null?('<span style="font-size:11.5px;color:#3e9665">'+(ar?'عوجا ':'ouja ')+fbMoney(x.ouja_fee)+'</span>'):'')+(profit!=null?('<span style="font-size:11.5px;color:'+(profit<0?'var(--down)':'#3e9665')+'">'+(ar?'ربح ':'profit ')+fbMoney(profit.toFixed(2))+'</span>'):'')):fbChip(ar?'غير مربوط':'not linked','warn');
   var resv=(linked&&x.reservations!=null)?('<span class="muted" style="font-size:10.5px">'+x.reservations+(ar?' حجز':' bk')+'</span>'):'';
-  var warn=(linked&&x.balanced===false)?fbChip(ar?'يحتاج مراجعة':'review','warn'):'';
+  var conf=fbConf(x), confChip=fbChip(conf[0],conf[1]);
   var miss=((x.missing||[]).length?('<div class="muted" style="font-size:10px;width:100%">'+(ar?'ناقص: ':'missing: ')+(x.missing||[]).map(function(m){return esc(ar?m[0]:m[1]);}).join(' · ')+'</div>'):'');
   var flags=((x.flags||[]).length?('<div style="font-size:10px;width:100%;color:var(--gold)">'+(x.flags||[]).map(function(m){return esc(ar?m[0]:m[1]);}).join(' · ')+'</div>'):'');
   return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<b style="flex:1;min-width:110px;font-size:12.5px">'+esc(x.apartment||'—')+'</b>'
     +'<span class="muted" style="font-size:10.5px">'+esc(x.unit_type||'')+(x.ouja_percentage!=null?(' · '+x.ouja_percentage+'%'):'')+'</span>'
-    +rev+'<span style="font-size:11.5px">'+(ar?'مصاريف ':'exp ')+fbMoney(x.expenses)+'</span>'+resv+warn+miss+flags+'</div>';
+    +rev+'<span style="font-size:11.5px">'+(ar?'مصاريف ':'exp ')+fbMoney(x.expenses)+'</span>'+resv+confChip+miss+flags+'</div>';
 }
 async function fbUnitP(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/profit?scope=unit'+fbPeriodQS()); }catch(_){ d=null; } if(d&&d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'الربحية للمحاسبة فقط':'Profitability is accountant-only')+'</div>'; return; }
   var u=(d&&d.units)||[];
@@ -22640,6 +22665,12 @@ async function fbUnitP(){ var ar=(L==='ar'), b=document.getElementById('fbBody')
     +fbStatCard(ar?'عمولة عوجا':'Ouja fees',fbMoney(d.total_ouja_fee),'#3e9665')
     +fbStatCard(ar?'مصاريف':'Expenses',fbMoney(d.total_expenses),'var(--down)')
     +fbStatCard(ar?'شقق مربوطة':'Linked units',(d.connected_units||0)+'/'+(d.total_units||0),(d.connected_units?'var(--text)':'var(--gold)'))+'</div>';
+  var cov=Math.round(100*(d.connected_units||0)/Math.max(1,d.total_units||0));
+  h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="muted" style="font-size:11px;min-width:120px">'+(ar?'تغطية الإيراد':'Revenue coverage')+'</span><div style="flex:1;background:var(--surface-2);border-radius:99px;height:8px;overflow:hidden"><div style="width:'+cov+'%;height:100%;background:'+(cov>=80?'#3e9665':'var(--gold)')+'"></div></div><span class="muted" style="font-size:11px">'+cov+'%</span></div>';
+  var attn=u.map(function(x){ return {x:x, rs:fbAttn(x)}; }).filter(function(o){ return o.rs.length; });
+  if(attn.length){ h+='<div style="font-size:12px;font-weight:700;margin:8px 2px 6px">⚠ '+(ar?'شقق تحتاج انتباه':'Units needing attention')+' ('+attn.length+')</div><div style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px">'
+    +attn.slice(0,10).map(function(o){ return '<div style="padding:7px 9px;background:var(--surface);border:1px solid var(--gold);border-radius:8px;font-size:11.5px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b style="flex:1;min-width:100px">'+esc(o.x.apartment||'—')+'</b><span class="muted">'+o.rs.map(function(r){return esc(r);}).join(' · ')+'</span></div>'; }).join('')+'</div>'; }
+  h+='<div style="font-size:12px;font-weight:700;margin:4px 2px 6px">'+(ar?'كل الشقق':'All units')+'</div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px">'+u.map(fbProfitRow).join('')+'</div>';
   b.innerHTML=h;
 }
@@ -22656,15 +22687,27 @@ async function fbCompanyP(){ var ar=(L==='ar'), b=document.getElementById('fbBod
     +fbStatCard(ar?'مصاريف دافترة':'Daftra expenses',fbMoney(d.daftra_expenses),'var(--down)')
     +fbStatCard(ar?'مصاريف اللوحة':'Ledger expenses',fbMoney(d.ledger_expenses),'var(--down)')
     +fbStatCard(ar?'بنك غير مطابق':'Bank unmatched',(d.bank_unmatched||0),'var(--text)')+'</div>';
+  // rule-based insights from real data only
+  var ins=[]; var prev=fbNum(d.portfolio_revenue), inc=fbNum(d.ouja_income);
+  if(conn && prev>0){ ins.push((ar?'هامش عوجا من الإيراد: ':'Ouja margin of revenue: ')+Math.round(100*inc/prev)+'%'); }
+  if((d.bank_unmatched||0)>0) ins.push((ar?'فيه ':'')+ (d.bank_unmatched)+(ar?' عملية بنك غير مطابقة تنقص دقة التقرير':' bank transactions unmatched, reducing report accuracy'));
+  if(!conn) ins.push(ar?'الإيراد غير مربوط — اسحب من Hostaway لإكمال الصورة':'Revenue not linked — pull Hostaway to complete the picture');
+  if(ins.length){ h+='<div style="'+fbCard()+';margin-top:10px;background:var(--surface-2)"><div class="muted" style="font-size:11px;margin-bottom:5px">💡 '+(ar?'ملاحظات':'Insights')+'</div>'+ins.map(function(s){ return '<div style="font-size:12px;padding:3px 0">• '+esc(s)+'</div>'; }).join('')+'</div>'; }
   h+='<div class="muted" style="font-size:11px;margin-top:10px">'+(ar?'التغطية: ':'coverage: ')+['daftra','contracts','bank','hostaway_revenue'].map(function(k){ return (cov[k]?'✓':'✗')+' '+k; }).join(' · ')+'</div>';
   b.innerHTML=h;
 }
 /* ---- Monthly Close ---- */
 async function fbClose(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/close'); }catch(_){ d=null; } if(!d||d.error){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">⚠</div>'; return; }
-  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;align-items:center"><b>📅 '+t().fb_close+'</b>'+(d.can_close?fbChip(ar?'جاهز للإقفال':'ready','ok'):fbChip((ar?'بنود ناقصة ':'blockers ')+d.blockers,'warn'))+'</div>';
-  h+='<div style="margin-top:10px">'+(d.checklist||[]).map(function(c){ return '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>'+(c.done?'✅':'⬜')+'</span><span style="flex:1">'+esc(ar?c.ar:c.en)+'</span>'+fbChip(c.done?t().fb_st_done:t().fb_st_attention,(c.done?'ok':'warn'))+'</div>'; }).join('')+'</div>';
-  h+='<button class="btn '+(d.can_close?'primary':'ghost')+' sm" '+(d.can_close?'':'disabled')+' style="margin-top:12px" onclick="'+(d.can_close?'toast(&#39;'+(ar?'الإقفال التلقائي يجي لاحقًا':'auto-close coming next')+'&#39;)':'')+'">'+(ar?'إقفال الشهر':'Close month')+'</button>';
-  h+='<div class="muted" style="font-size:11px;margin-top:8px">'+esc(d.note_ar?(ar?d.note_ar:d.note_ar):'')+' · '+(ar?'(معاينة فقط حالياً)':'(preview only for now)')+'</div></div>';
+  var TAB={daftra:'daftra',contracts:'contracts',bank:'bank',classified:'bank',approvals:'approval',mappings:'mapping'};
+  var EXTRA={classified:(d.unknown_bank||0),approvals:(d.over_3000_pending||0),contracts:(d.missing_cost_centers||0)};
+  var done=(d.checklist||[]).filter(function(c){return c.done;}).length, tot=(d.checklist||[]).length;
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b>📅 '+t().fb_close+'</b>'+(d.can_close?fbChip(ar?'جاهز للإقفال':'Ready to close','ok'):fbChip((ar?'بنود ناقصة: ':'blockers: ')+d.blockers,'warn'))+'</div>';
+  h+='<div class="muted" style="font-size:11.5px;margin-top:6px">'+done+'/'+tot+' '+(ar?'مكتمل':'complete')+'</div>';
+  h+='<div style="margin-top:10px">'+(d.checklist||[]).map(function(c){ var ex=EXTRA[c.key]; var tab=TAB[c.key];
+    return '<div style="display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="font-size:14px">'+(c.done?'✅':'⬜')+'</span><span style="flex:1;min-width:0">'+esc(ar?c.ar:c.en)+(ex?(' <span style="color:var(--gold)">('+ex+')</span>'):'')+'</span>'
+      +(c.done?fbChip(t().fb_st_done,'ok'):(tab?('<button class="btn ghost xs" onclick="fbGo(&#39;'+tab+'&#39;)">'+(ar?'أصلح الآن':'Fix now')+'</button>'):fbChip(t().fb_st_attention,'warn')))+'</div>'; }).join('')+'</div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap"><button class="btn '+(d.can_close?'primary':'ghost')+' sm" '+(d.can_close?'':'disabled')+' onclick="'+(d.can_close?'toast(&#39;'+(ar?'الإقفال التلقائي مع الترحيل لدافترة يجي لاحقًا':'auto-close + Daftra posting coming next')+'&#39;)':'')+'">'+(ar?'إقفال الشهر':'Close month')+'</button>'
+    +'<span class="muted" style="font-size:11px">'+(d.can_close?(ar?'كل البنود مكتملة':'all items complete'):(ar?'أكمل البنود الناقصة فوق أول':'clear the blockers above first'))+' · '+(ar?'معاينة':'preview')+'</span></div></div>';
   b.innerHTML=h;
 }
 /* ---- Settings / Mapping ---- */
