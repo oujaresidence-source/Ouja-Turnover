@@ -22619,20 +22619,23 @@ async function fbInboxRender(mode, filter){
   await fbLoadRefs();
   var d; try{ d=await api('/api/fb/inbox'+(_fb.qfilter?('?filter='+encodeURIComponent(_fb.qfilter)):'')); }catch(_){ d=null; }
   if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — قائمة العمل للمحاسبة.':'Operations see only their expense status — the work queue is for accountants.')+'</div>'; return; }
-  _fb.qItems=(d&&d.items)||[]; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
+  _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
   fbQueueRender();
 }
+function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',needs_review:'warn'})[ln]||'mut'; }
+function fbLaneLabel(ln){ var ar=(L==='ar'); var m={ready_to_link:['جاهز للربط','Ready to link'],linked_existing:['مربوط بدافترة','Linked'],needs_decision:['يحتاج قرار','Needs decision'],missing_setup:['ناقص إعداد','Missing setup'],needs_faisal_approval:['يحتاج اعتماد فيصل','Faisal approval'],ready_for_journal:['جاهز للقيد','Ready for journal'],needs_review:['يحتاج مراجعة','Needs review'],completed:['مكتمل','Completed']}; var v=m[ln]; return v?(ar?v[0]:v[1]):ln; }
+async function fbQueueRefresh(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث الحالات…':'⏳ Refreshing…'); await fbInboxRender(_fb.qmode||'inbox',_fb.qfilter||''); toast(ar?'تم تحديث القائمة':'Queue refreshed'); }
+async function fbFixStatuses(){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/daftra/dup',{action:'fix_statuses'}); }catch(_){ r=null; } if(r&&r.ok){ var a=r.after||{}; toast((ar?'تم الإصلاح · جاهز للربط ':'fixed · ready-to-link ')+(a.ready_to_link||0)+' · '+(ar?'مربوط ':'linked ')+(a.linked_existing||0)); fbInboxRender(_fb.qmode||'inbox',_fb.qfilter||''); } else toast('⚠'); }
 function fbStatusLabel(s){ var ar=(L==='ar'); var m={needs_review:[ 'يحتاج مراجعة','Needs review'],auto_classified:['مصنّف تلقائيًا','Auto-classified'],accountant_review:['مراجعة محاسب','Accountant review'],needs_faisal:['اعتماد فيصل','Faisal approval'],approved:['معتمد','Approved'],rejected:['مرفوض','Rejected'],ready_to_post:['جاهز للترحيل','Ready to post'],posted:['مرحّل','Posted'],verified:['متحقق من دافترة','Verified in Daftra'],failed:['فشل','Failed'],draft:['مسودة','Draft'],sheet_intake:['من Google Sheet','From Sheet'],void:['ملغى','Void']}; var v=m[s]; return v?(ar?v[0]:v[1]):(s||'—'); }
 function fbQueueRender(){
-  var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
-  var filters=[['','الكل','All'],['needs_review','يحتاج مراجعة','Needs review'],['needs_faisal','اعتماد فيصل','Faisal'],['above_3000','> ٣٠٠٠','> 3000'],['ready_to_post','جاهز للترحيل','Ready'],['failed','فشل','Failed'],['verified','تم التحقق','Verified']];
-  var cfilters=[['missing_apartment',ar?'بدون شقة':'No apartment'],['missing_category',ar?'بدون تصنيف':'No category']];
+  var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var ln=_fb.qlanes||{};
+  var lanes=['','ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','needs_review','linked_existing','completed'];
   var sorts=[['newest',ar?'الأحدث':'Newest'],['oldest',ar?'الأقدم':'Oldest'],['amount',ar?'الأعلى مبلغًا':'Highest amount']];
-  var h='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
-    +'<input id="fbq" value="'+esc(_fb.q||'')+'" placeholder="🔎 '+esc(t().fb_search)+'" oninput="_fb.q=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;flex:1;min-width:160px">'
-    +'<select onchange="_fb.sort=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;width:auto">'+sorts.map(function(s){ return '<option value="'+s[0]+'"'+((_fb.sort||'newest')===s[0]?' selected':'')+'>'+esc(s[1])+'</option>'; }).join('')+'</select></div>';
-  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'+filters.map(function(f){ var on=((_fb.qfilter||'')===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+(_fb.qmode||'inbox')+'&#39;,&#39;'+f[0]+'&#39;)">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')
-    +'<span style="color:var(--mut)">·</span>'+cfilters.map(function(f){ var on=(_fb.cflt===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="_fb.cflt=(_fb.cflt===&#39;'+f[0]+'&#39;?&#39;&#39;:&#39;'+f[0]+'&#39;);fbQueueTable()">'+esc(f[1])+'</button>'; }).join('')+'</div>';
+  var rtl=(ln.ready_to_link||0);
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📋 '+(ar?'قائمة العمل':'Work Queue')+'</b>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(rtl?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+(ar?'ربط كل الموجود في دافترة':'Link all existing in Daftra')+' ('+rtl+')</button>'):'')+'<button class="btn ghost sm" onclick="fbQueueRefresh()">↻ '+(ar?'تحديث الحالات':'Refresh statuses')+'</button><button class="btn ghost sm" onclick="fbFixStatuses()">🛠 '+(ar?'إصلاح الحالات':'Fix statuses')+'</button></div></div></div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input id="fbq" value="'+esc(_fb.q||'')+'" placeholder="🔎 '+esc(t().fb_search)+'" oninput="_fb.q=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;flex:1;min-width:160px"><select onchange="_fb.sort=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;width:auto">'+sorts.map(function(s){ return '<option value="'+s[0]+'"'+((_fb.sort||'newest')===s[0]?' selected':'')+'>'+esc(s[1])+'</option>'; }).join('')+'</select></div>';
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+lanes.map(function(f){ var on=((_fb.qfilter||'')===f); var lbl=(f===''?(ar?'الكل':'All'):fbLaneLabel(f)); var c=(f===''?(_fb.qItems||[]).length:(ln[f]||0)); if(f!==''&&!c) return ''; return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+(_fb.qmode||'inbox')+'&#39;,&#39;'+f+'&#39;)">'+esc(lbl)+' '+c+'</button>'; }).join('')+'</div>';
   h+='<div id="fbqBulk"></div><div id="fbqTable"></div>';
   b.innerHTML=h; fbQueueTable();
 }
@@ -22660,33 +22663,39 @@ function fbQueueTable(){
 }
 function fbQueueRow(i){
   var ar=(L==='ar'), sel=!!(_fb.sel||{})[i.id], srcic={daftra:'📚',bank:'🏦',sheet:'📝',manual:'✍️'}[i.source]||'•';
-  var deb=(i.direction==='expense'); var catBad=(!i.category||i.category==='unknown');
-  var stTone=(i.status==='verified'?'ok':(i.status==='failed'?'bad':(catBad?'warn':'mut')));
+  var deb=(i.direction==='expense'); var tone=fbLaneTone(i.lane);
+  var stateChip=fbChip((ar?i.primary_state_label_ar:i.primary_state_label_en),tone)+(i.matched_number?(' '+fbChip('#'+i.matched_number,'ok')):'');
+  var reason=(ar?i.reason_chip_ar:i.reason_chip_en); var reasonHtml=reason?('<div class="muted" style="font-size:10px;margin-top:2px">'+esc(reason)+'</div>'):'';
+  var showCat=(i.category&&i.category!=='unknown'&&['ready_to_link','linked_existing','completed'].indexOf(i.lane)<0);
   var td='padding:6px 5px;vertical-align:middle';
   var tr='<tr onclick="fbQexp(&#39;'+i.id+'&#39;)" style="border-top:1px solid var(--border);cursor:pointer;background:'+(sel?'var(--surface-2)':'transparent')+'">'
     +'<td style="'+td+'" onclick="event.stopPropagation()"><input type="checkbox" '+(sel?'checked':'')+' onclick="fbSelRow(&#39;'+i.id+'&#39;,this.checked)"></td>'
     +'<td style="'+td+';white-space:nowrap" class="muted">'+esc(String(i.date||'').slice(0,10))+'</td>'
-    +'<td style="'+td+'">'+srcic+' '+esc(String(i.description||'').slice(0,42))+(i.needs_faisal?' <span style="color:var(--gold)">★</span>':'')+'</td>'
+    +'<td style="'+td+'">'+srcic+' '+esc(String(i.description||'').slice(0,40))+(showCat?(' <span class="muted" style="font-size:10px">· '+esc(i.category)+'</span>'):'')+'</td>'
     +'<td style="'+td+';white-space:nowrap;color:'+(deb?'var(--down)':'#3e9665')+';font-weight:700">'+fbMoney(i.amount)+'</td>'
-    +'<td style="'+td+'">'+fbChip(i.category||'unknown',(catBad?'warn':'mut'))+'</td>'
+    +'<td style="'+td+'">'+stateChip+reasonHtml+'</td>'
     +'<td style="'+td+'">'+esc(i.apartment||'—')+'</td>'
-    +'<td style="'+td+'">'+fbChip(fbStatusLabel(i.status),stTone)+'</td>'
     +'<td style="'+td+';white-space:nowrap" onclick="event.stopPropagation()">'+fbQueueActions(i)+'</td></tr>';
-  if((_fb.qexp||{})[i.id]){ tr+='<tr style="background:var(--surface-2)"><td colspan="8" style="padding:9px 10px"><div style="font-size:11px;line-height:1.9">'
-    +'<b>'+esc(i.ref||'')+'</b> · '+esc(i.source||'')+' · '+(ar?'اتجاه: ':'dir: ')+esc(i.direction||'')+(i.owner?(' · '+esc(i.owner)):'')
-    +'<br>'+esc(i.description||'')
-    +'<br><span class="muted">'+(ar?'الإجراء التالي: ':'next: ')+esc(ar?(i.next_ar||''):(i.next_en||''))+'</span></div></td></tr>'; }
+  if((_fb.qexp||{})[i.id]){
+    var dbg='';
+    if(D.me&&D.me.user&&D.me.user.role==='admin'){ dbg='<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:10px;color:var(--mut)"><b>'+(ar?'تفاصيل الحالة:':'Status details:')+'</b> lane='+esc(i.lane||'')+' · dup='+esc(i.daftra_duplicate_status||'-')+' · conf='+esc(String(i.daftra_duplicate_confidence==null?'-':i.daftra_duplicate_confidence))+' · matched='+esc(String(i.matched_daftra_id||'-'))+'/#'+esc(String(i.matched_number||'-'))+' · status='+esc(i.status||'-')+' · next='+esc(i.next_action||'-')+(i.blocking_reason?(' · block='+esc(i.blocking_reason)):'')+'</div>'; }
+    tr+='<tr style="background:var(--surface-2)"><td colspan="7" style="padding:9px 10px"><div style="font-size:11px;line-height:1.9"><b>'+esc(i.ref||'')+'</b> · '+esc(i.source||'')+' · '+(ar?'اتجاه: ':'dir: ')+esc(i.direction||'')+(i.owner?(' · '+esc(i.owner)):'')+'<br>'+esc(i.description||'')+'<br><span class="muted">'+(ar?'الإجراء التالي: ':'next: ')+esc(ar?(i.next_action_label_ar||''):(i.next_action_label_en||''))+'</span>'+dbg+'</div></td></tr>';
+  }
   return tr;
 }
 function fbQueueActions(i){
-  var actions='';
-  if(i.kind==='ledger'){
-    if(i.status==='draft') actions+='<button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;submit&#39;)">'+esc(t().fb_act_submit)+'</button>';
-    if(i.status==='accountant_review'||i.status==='needs_faisal') actions+='<button class="btn green xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;approve&#39;)">'+t().fb_approve+'</button><button class="btn ghost xs" onclick="fbActReason(&#39;'+i.id+'&#39;,&#39;reject&#39;)">'+t().fb_reject+'</button>';
-    actions+='<button class="btn ghost xs" onclick="fbClassify(&#39;'+i.id+'&#39;)">'+esc(t().fb_act_classify)+'</button>';
-  } else if(i.kind==='bank'){ actions+='<button class="btn ghost xs" onclick="fbBankReviewFromInbox(&#39;'+i.id+'&#39;)">'+esc(t().fb_act_classify)+'</button><button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;promote&#39;)">'+esc(t().fb_act_promote)+'</button>'; }
-  else if(i.kind==='sheet'){ actions+='<button class="btn ghost xs" onclick="go(&#39;expenses&#39;)">'+(L==='ar'?'المصاريف':'Expenses')+'</button>'; }
-  return actions;
+  var ar=(L==='ar'), ln=i.lane, id=i.id;
+  function cls(){ return (i.kind==='bank'?('fbBankReviewFromInbox(&#39;'+id+'&#39;)'):(i.kind==='sheet'?'go(&#39;expenses&#39;)':'fbClassify(&#39;'+id+'&#39;)')); }
+  if(ln==='ready_to_link') return '<button class="btn primary xs" onclick="fbDupLinkRow(&#39;'+id+'&#39;)">'+esc(t().fb_link_confirm)+'</button> <button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button>';
+  if(ln==='linked_existing'||ln==='completed') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+(ar?'التفاصيل':'Details')+'</button>';
+  if(ln==='needs_decision') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button> <button class="btn ghost xs" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;not_duplicate&#39;)">'+esc(t().fb_not_dup)+'</button>';
+  if(ln==='missing_setup') return '<button class="btn primary xs" onclick="fbBankMap()">'+(ar?'أكمل الربط':'Complete setup')+'</button>';
+  if(ln==='needs_faisal_approval'){ if(i.kind==='ledger') return '<button class="btn green xs" onclick="fbAct(&#39;'+id+'&#39;,&#39;approve&#39;)">'+t().fb_approve+'</button> <button class="btn ghost xs" onclick="fbActReason(&#39;'+id+'&#39;,&#39;reject&#39;)">'+t().fb_reject+'</button>'; return '<button class="btn ghost xs" onclick="'+cls()+'">'+esc(t().fb_act_classify)+'</button>'; }
+  if(ln==='ready_for_journal') return (i.kind==='bank'?('<button class="btn ghost xs" onclick="fbAct(&#39;'+id+'&#39;,&#39;promote&#39;)">'+esc(t().fb_act_promote)+'</button>'):('<button class="btn ghost xs" onclick="fbGo(&#39;synclog&#39;)">'+(ar?'جهّز قيد':'Draft journal')+'</button>'));
+  var a='';
+  if(i.next_action==='dup_check') a+='<button class="btn primary xs" onclick="fbDupCheck()">🛡️ '+(ar?'افحص':'Check')+'</button> ';
+  a+='<button class="btn ghost xs" onclick="'+cls()+'">'+(i.kind==='sheet'?(ar?'المصاريف':'Expenses'):esc(t().fb_act_classify))+'</button>';
+  return a;
 }
 function fbQexp(id){ _fb.qexp=_fb.qexp||{}; _fb.qexp[id]=!_fb.qexp[id]; fbQueueTable(); }
 function fbSelRow(id, on){ _fb.sel=_fb.sel||{}; if(on) _fb.sel[id]=true; else delete _fb.sel[id]; fbQueueTable(); }
