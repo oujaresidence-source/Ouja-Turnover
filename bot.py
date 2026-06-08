@@ -33745,6 +33745,59 @@ def _fb_text_sim(a, b):
         return 0.0
     return len(ta & tb) / float(len(ta | tb))
 
+def _fb_norm_date(s):
+    """Tolerant date parser for imported bank/Daftra rows → date object (or None).
+    Al Rajhi statements store dates as DD/MM/YYYY text, which the strict-ISO _parse_date
+    can't read — that silently set dd=99 and zeroed EVERY duplicate match despite real
+    bank-account lines existing. Handles ISO, DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, YYYY/MM/DD,
+    YYYYMMDD, datetime/date objects, Excel serials, and Arabic-Indic digits. Day-first for
+    slashed/dashed forms (Saudi bank format)."""
+    if s is None or s == "":
+        return None
+    if isinstance(s, datetime):
+        return s.date()
+    if isinstance(s, date):
+        return s
+    if isinstance(s, (int, float)) and not isinstance(s, bool):
+        try:
+            return (datetime(1899, 12, 30) + timedelta(days=int(s))).date()
+        except Exception:
+            return None
+    t = str(s).strip()
+    for _d, _a in _AR_DIGITS.items():
+        t = t.replace(_d, _a)
+    t = t.split("T")[0].split(" ")[0].strip()
+    iso = _parse_date(t)                          # ISO fast path (unchanged behaviour)
+    if iso:
+        return iso
+    if t.isdigit():
+        if len(t) == 8:                           # YYYYMMDD
+            try:
+                return datetime(int(t[:4]), int(t[4:6]), int(t[6:8])).date()
+            except Exception:
+                pass
+        if 3 <= len(t) <= 6:                      # Excel serial as text
+            try:
+                return (datetime(1899, 12, 30) + timedelta(days=int(t))).date()
+            except Exception:
+                pass
+    for sep in ("/", "-", "."):
+        if sep in t:
+            p = [x.strip() for x in t.split(sep)]
+            if len(p) == 3 and all(x.isdigit() for x in p):
+                try:
+                    if len(p[0]) == 4:            # YYYY{sep}MM{sep}DD
+                        return datetime(int(p[0]), int(p[1]), int(p[2])).date()
+                    dd, mm = int(p[0]), int(p[1])     # day-first (Saudi statements)
+                    if mm > 12 and dd <= 12:         # clearly MM/DD → swap
+                        dd, mm = mm, dd
+                    yr = int(p[2]) + (2000 if len(p[2]) == 2 else 0)
+                    return datetime(yr, mm, dd).date()
+                except Exception:
+                    return None
+            break
+    return None
+
 def _fb_mapped_bank_accounts():
     """Mapped Daftra bank accounts as [{id,code,name}] (active only) — the accounts that represent
     imported bank statements (e.g. Al Rajhi 1039)."""
@@ -33794,7 +33847,7 @@ def _fb_dup_score_journal(txn, jo, mapped):
     if tamt <= 0:
         return 0, "", "", None, []
     entry = jo["entry"]
-    td, ed = _parse_date(txn.get("date")), _parse_date(entry.get("date"))
+    td, ed = _fb_norm_date(txn.get("date")), _fb_norm_date(entry.get("date"))
     dd = abs((td - ed).days) if (td and ed) else 99
     if dd > 3:
         return 0, "", "", None, []
@@ -33880,8 +33933,8 @@ def _fb_dup_diag():
             k = (code, name); acct[k] = acct.get(k, 0) + 1
     top_accounts = [{"code": k[0], "name": k[1], "lines": v}
                     for k, v in sorted(acct.items(), key=lambda kv: -kv[1])[:10]]
-    jd = [d for d in (_parse_date(jo["entry"].get("date")) for jo in jos) if d]
-    bd = [d for d in (_parse_date(t.get("date")) for t in _fb_bank.values()) if d]
+    jd = [d for d in (_fb_norm_date(jo["entry"].get("date")) for jo in jos) if d]
+    bd = [d for d in (_fb_norm_date(t.get("date")) for t in _fb_bank.values()) if d]
     jmin = min(jd).isoformat() if jd else None
     jmax = max(jd).isoformat() if jd else None
     bmin = min(bd).isoformat() if bd else None
@@ -33895,6 +33948,10 @@ def _fb_dup_diag():
         verdict = "mapping_not_in_journals"
         ar = ("فيه " + str(len(_fb_djournals)) + " قيد دافترة، بس ولا سطر مقيّد على حساب البنك المربوط. يعني إما الحساب المربوط غلط، أو قيود دافترة ما تمر على حساب الراجحي. راجع «ربط حسابات البنك» واختر نفس حساب البنك اللي يستخدمه المحاسب.")
         en = (str(len(_fb_djournals)) + " journals imported but NO line posts to the mapped bank account — either the mapped account is wrong or the journals don't touch Al Rajhi. Re-check the mapping.")
+    elif _fb_bank and not bd:
+        verdict = "bank_dates_unparsed"
+        ar = "ما قدرنا نقرأ تواريخ حركات البنك (صيغة غير متوقعة) — لا تقدر المطابقة تشتغل بدون تاريخ. أعد رفع كشف الراجحي أو راجع عمود التاريخ."
+        en = "Could not read the bank transaction dates (unexpected format) — matching needs a date. Re-upload the Al Rajhi statement or check the date column."
     elif not overlap:
         verdict = "date_gap"
         ar = ("قيود دافترة من " + (jmin or "؟") + " إلى " + (jmax or "؟") + "، بس حركات البنك من " + (bmin or "؟") + " إلى " + (bmax or "؟") + " — استورد قيود نفس الأشهر.")
@@ -33927,7 +33984,7 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
             if tid not in ids:
                 continue
         else:
-            td = _parse_date(txn.get("date"))
+            td = _fb_norm_date(txn.get("date"))
             if sd and ed and td and not (sd <= td <= ed):
                 continue
         if txn.get("daftra_duplicate_status") in ("linked_existing", "not_duplicate", "ignored"):
