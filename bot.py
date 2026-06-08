@@ -34001,6 +34001,8 @@ def _fb_search_daftra(q="", amount=None, limit=40):
 def _fb_post_guard(txn):
     """Blockers preventing promote/post of a bank txn (duplicate shield). Returns [(ar,en)]."""
     st = txn.get("daftra_duplicate_status")
+    if st == "linked_existing":
+        return [("هذي العملية مربوطة بقيد موجود في دافترة، ما تنشئ قيد جديد", "Already linked to an existing Daftra journal — don't create a new entry")]
     if not st or st == "not_checked":
         return [("ما نقدر نرحّل قبل فحص التكرار مع قيود دافترة", "Can't post before the Daftra duplicate check is run")]
     if st == "missing_bank_account_mapping":
