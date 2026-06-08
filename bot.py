@@ -13360,7 +13360,7 @@ const T = {
     plab_preview:'معاينة', plab_action:'الإجراء', plab_lastgen:'آخر تحديث للبيانات', plab_regen:'تحديث البيانات',
     fb:'المركز المالي', fb_sub:'طبقة تحكّم ومطابقة حول دافترة — استيراد أول، بلا أرقام وهمية، وترحيل بعد التحقق',
     fb_setup:'الإعداد والاستيراد', fb_daftra:'استيراد دافترة', fb_contracts:'ملفات العقود', fb_bank:'كشف البنك',
-    fb_inbox:'الوارد المالي', fb_approval:'مركز الاعتماد', fb_recon:'المطابقة', fb_synclog:'سجل دافترة',
+    fb_inbox:'الوارد المالي', fb_approval:'مركز الاعتماد', fb_recon:'المطابقة', fb_advances:'العهد', fb_synclog:'سجل دافترة',
     fb_unitp:'ربحية الشقق', fb_companyp:'ربحية الشركة', fb_close:'الإقفال الشهري', fb_mapping:'الإعدادات والربط',
     fb_overview:'النظرة المالية', fb_ws_overview:'النظرة المالية', fb_ws_imports:'الاستيراد والإعداد', fb_ws_queue:'قائمة العمل', fb_ws_mapping:'الربط والقواعد', fb_ws_profit:'الربحية والإقفال',
     fb_ws_daily:'يومي المالي', fb_ws_work:'العمل والمطابقة', fb_ws_setup:'الإعداد والربط', fb_ws_audit:'السجل والمراجعة', fb_daily:'يومي المالي', fb_assist:'وش يحتاج انتباهك اليوم؟', fb_bulk_link:'ربط كل المطابقات المؤكدة', fb_link_confirm:'ربط واعتماد', fb_help_first:'أول مرة تستخدم المركز المالي؟',
@@ -13665,7 +13665,7 @@ const T = {
     plab_preview:'Preview', plab_action:'Action', plab_lastgen:'Data generated', plab_regen:'Refresh data',
     fb:'Financial Brain', fb_sub:'Control + reconciliation layer around Daftra — import-first, no fake numbers, post after verify',
     fb_setup:'Setup & Import', fb_daftra:'Daftra Import', fb_contracts:'Contract Profiles', fb_bank:'Bank Upload',
-    fb_inbox:'Financial Inbox', fb_approval:'Approval Center', fb_recon:'Reconciliation', fb_synclog:'Daftra Sync Log',
+    fb_inbox:'Financial Inbox', fb_approval:'Approval Center', fb_recon:'Reconciliation', fb_advances:'Employee advances', fb_synclog:'Daftra Sync Log',
     fb_unitp:'Unit Profitability', fb_companyp:'Company Profitability', fb_close:'Monthly Close', fb_mapping:'Settings / Mapping',
     fb_overview:'Overview', fb_ws_overview:'Overview', fb_ws_imports:'Imports & Setup', fb_ws_queue:'Work Queue', fb_ws_mapping:'Mapping & Rules', fb_ws_profit:'Profitability & Close',
     fb_ws_daily:'Daily Flow', fb_ws_work:'Work & Reconciliation', fb_ws_setup:'Setup & Mapping', fb_ws_audit:'Audit & Logs', fb_daily:'Daily Flow', fb_assist:'What needs your attention today?', fb_bulk_link:'Link all confirmed matches', fb_link_confirm:'Link & confirm', fb_help_first:'First time using Financial Brain?',
@@ -22155,7 +22155,7 @@ async function loadFb(force){
 }
 function fbWorkspaces(){ var t_=t(); return [
   ['daily','🗓️',t_.fb_ws_daily,[['daily','🗓️',t_.fb_daily]]],
-  ['work','🔗',t_.fb_ws_work,[['inbox','📋',t_.fb_inbox],['bank','🏦',t_.fb_bank],['recon','🧩',t_.fb_recon],['approval','🛡️',t_.fb_approval]]],
+  ['work','🔗',t_.fb_ws_work,[['inbox','📋',t_.fb_inbox],['bank','🏦',t_.fb_bank],['recon','🧩',t_.fb_recon],['advances','👤',t_.fb_advances],['approval','🛡️',t_.fb_approval]]],
   ['setup','🚀',t_.fb_ws_setup,[['setup','🚀',t_.fb_setup],['daftra','📚',t_.fb_daftra],['contracts','📑',t_.fb_contracts],['mapping','⚙️',t_.fb_mapping]]],
   ['profit','📊',t_.fb_ws_profit,[['overview','🧭',t_.fb_overview],['companyp','🏢',t_.fb_companyp],['unitp','🏠',t_.fb_unitp],['close','📅',t_.fb_close]]],
   ['audit','🧾',t_.fb_ws_audit,[['synclog','🧾',t_.fb_synclog]]] ]; }
@@ -22169,7 +22169,7 @@ function fbRenderTabs(){
 }
 function fbWs(ws){ var def=fbWorkspaces().filter(function(w){return w[0]===ws;})[0]; if(!def) return; _fb.ws=ws; _fb.tab=def[3][0][0]; fbRenderTabs(); fbGo(_fb.tab); }
 function fbGo(tab){ _fb.tab=tab; _fb.ws=fbWsForTab(tab); _fb.sel={}; fbRenderTabs(); var b=document.getElementById('fbBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
-  ({daily:fbDaily,overview:fbOverviewPage,setup:fbSetup,daftra:fbDaftra,contracts:fbContracts,bank:fbBank,inbox:fbInbox,approval:fbApproval,recon:fbRecon,synclog:fbSynclog,unitp:fbUnitP,companyp:fbCompanyP,close:fbClose,mapping:fbMapping}[tab]||fbDaily)(); }
+  ({daily:fbDaily,overview:fbOverviewPage,setup:fbSetup,daftra:fbDaftra,contracts:fbContracts,bank:fbBank,inbox:fbInbox,approval:fbApproval,recon:fbRecon,advances:fbAdvances,synclog:fbSynclog,unitp:fbUnitP,companyp:fbCompanyP,close:fbClose,mapping:fbMapping}[tab]||fbDaily)(); }
 /* ---- Daily Finance Flow (default for accountants) ---- */
 async function fbDailySync(){ var ar=(L==='ar'); toast(ar?'⏳ نسحب بيانات دافترة…':'⏳ Pulling Daftra…');
   try{ await post('/api/fb/daftra/import',{}); }catch(_){}
@@ -22926,6 +22926,30 @@ async function fbClassify(id){ var ar=(L==='ar'); await fbLoadRefs(); var it=(_f
 async function fbClassifySave(id){ var body={id:id,action:'classify',category:fbCatValue('fbc_cat')};
   var a=document.getElementById('fbc_apt'), n=document.getElementById('fbc_note'); if(a){ body.apartment=a.value; } if(n&&n.value){ body.description=n.value; }
   var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
+/* ---- Employee advances (العهد) — outstanding custody per employee, straight from Daftra ---- */
+async function fbAdvances(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; b.innerHTML='<div class="empty sk">—</div>';
+  var d; try{ d=await api('/api/fb/daftra/dup?ready=1'); }catch(_){ d=null; }
+  var c=(d&&d.custody)||{employees:[],count:0,open:0,outstanding_total:'0.00'};
+  var totOut=fbNum(c.outstanding_total);
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:15px">👤 '+(ar?'العهد':'Employee advances')+'</b>'+fbChip((ar?'رصيد قائم ':'outstanding ')+fbMoney(c.outstanding_total),(totOut>0?'warn':'ok'))+'</div>'
+    +'<div class="muted" style="font-size:12px;margin-top:5px;line-height:1.75">'+(ar?'العهدة = مبلغ يُعطى للموظف ثم يُقفل بالفواتير. التحويل يثبتها: مدين عهدة الموظف / دائن البنك. الفواتير تقفلها: مدين مصاريف متعددة / دائن عهدة الموظف — بدون حركة بنك جديدة، لذلك لا تتكرر كمصروف بنكي.':'An advance is money given to an employee then settled by invoices. Issue: Dr employee custody / Cr bank. Settlement: Dr expenses / Cr custody — no new bank line, so it is never double-counted as a bank expense.')+'</div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
+    +fbStatCard(ar?'موظفين بعهد':'Employees',c.count||0,'var(--text)')
+    +fbStatCard(ar?'عهد مفتوحة':'Open advances',c.open||0,((c.open||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'إجمالي الرصيد القائم':'Total outstanding',fbMoney(c.outstanding_total),(totOut>0?'var(--gold-2)':'#3e9665'))+'</div>';
+  if(!(c.employees||[]).length){ h+='<div class="empty" style="padding:28px;text-align:center;margin-top:10px">'+(ar?'ما فيه عهد في دافترة بعد. استورد القيود، والعهد تظهر تلقائيًا من حسابات «عهدة …».':'No advances in Daftra yet. Import journals — advances appear automatically from «عهدة …» accounts.')+'</div>'; }
+  else { var tar=(ar?'right':'left'), num=(ar?'left':'right');
+    h+='<div style="'+fbCard()+';margin-top:10px"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+      +'<th style="text-align:'+tar+';color:var(--mut);font-size:10.5px;padding:6px 5px">'+(ar?'الموظف / حساب العهدة':'Employee / custody account')+'</th>'
+      +'<th style="text-align:'+num+';color:var(--mut);font-size:10.5px;padding:6px 5px">'+(ar?'صُرف':'Issued')+'</th>'
+      +'<th style="text-align:'+num+';color:var(--mut);font-size:10.5px;padding:6px 5px">'+(ar?'أُقفل':'Settled')+'</th>'
+      +'<th style="text-align:'+num+';color:var(--mut);font-size:10.5px;padding:6px 5px">'+(ar?'الرصيد القائم':'Outstanding')+'</th></tr></thead><tbody>'
+      +(c.employees||[]).map(function(e){ var o=fbNum(e.outstanding); return '<tr style="border-top:1px solid var(--border)"><td style="padding:7px 5px">'+esc(e.account)+'</td><td style="padding:7px 5px;text-align:'+num+'" class="muted">'+fbMoney(e.issued)+'</td><td style="padding:7px 5px;text-align:'+num+'" class="muted">'+fbMoney(e.settled)+'</td><td style="padding:7px 5px;text-align:'+num+';font-weight:800;color:'+(o>0?'var(--gold-2)':'#3e7d5a')+'">'+fbMoney(e.outstanding)+(o>0?'':' ✓')+'</td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+    h+='<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'الرصيد القائم = ما صُرف − ما أُقفل بالفواتير. صفر = العهدة مكتملة.':'Outstanding = issued − settled by invoices. Zero = advance fully settled.')+'</div>';
+  }
+  b.innerHTML=h;
+}
 /* ---- Reconciliation (light) ---- */
 async function fbRecon(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return;
   var d; try{ d=await api('/api/fb/bank'); }catch(_){ d=null; } var s=(d&&d.summary)||{count:0}; var bc=s.by_category||{};
