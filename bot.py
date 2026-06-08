@@ -33789,6 +33789,9 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
     now = datetime.now(TZ).isoformat(timespec="seconds")
     counts = {k: 0 for k in ("already_in_daftra_verified", "strong_possible_duplicate", "possible_duplicate",
                              "needs_manual_review", "not_found_after_full_check", "missing_bank_account_mapping")}
+    if bankset and not _fb_djournals:
+        # prerequisites missing: never claim "not found" without journals — prompt import instead
+        return {"ok": True, "checked": 0, "journals": 0, "bank_mapping": True, "prereq": "no_journals", **counts}
     checked = 0
     for tid, txn in _fb_bank.items():
         if ids:
