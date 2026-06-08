@@ -37102,6 +37102,285 @@ def _gw_analytics_summary(days=7):
             "top_types": sorted(by_type.items(), key=lambda x: -x[1])[:10],
             "by_utm": sorted(by_utm.items(), key=lambda x: -x[1])[:10], "total_events": len(evs)}
 
+def _gw_he(s):
+    """Minimal HTML-attribute escape for server-injected meta/SSR values."""
+    return (str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+# Public guest site. RAW string (r-prefixed) so any backslash in the embedded JS is literal — no
+# Python mangling, no login-killer. Literal { } are fine (not an f-string). One page, JS-routed by
+# pathname; listing detail gets server-injected data + meta for SEO/share. No backticks (kept even).
+STAY_HTML = r"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__STAY_TITLE__</title>
+<meta name="description" content="__STAY_DESC__">
+<meta property="og:title" content="__STAY_TITLE__">
+<meta property="og:description" content="__STAY_DESC__">
+<meta property="og:image" content="__STAY_OG__">
+<meta property="og:url" content="__STAY_URL__">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="__STAY_URL__">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5efe3;--surface:#fffdf8;--surface2:#efe7d6;--line:#e6dcc6;--ink:#2e2418;--mut:#8a7d63;--gold:#b8893b;--gold2:#9c6f2a;--brown:#3d2f1f;--green:#3e7d5a;--radius:16px;--shadow:0 6px 22px rgba(61,47,31,.10);--ease:cubic-bezier(.23,1,.32,1)}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;-webkit-text-size-adjust:100%}
+img{max-width:100%;display:block}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;padding:14px 20px;font:inherit;font-weight:700;cursor:pointer;background:var(--gold);color:#fff;transition:transform .14s var(--ease),background .14s var(--ease)}
+.btn:hover{background:var(--gold2)}
+.btn:active{transform:scale(.97)}
+.btn.block{width:100%}
+.btn.ghost{background:var(--surface);color:var(--brown);border:1px solid var(--line)}
+.head{position:sticky;top:0;z-index:30;background:rgba(245,239,227,.86);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.head .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+.brand{font-weight:700;font-size:19px;letter-spacing:.5px;color:var(--brown)}
+.brand b{color:var(--gold)}
+.muted{color:var(--mut)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field label{font-size:12.5px;font-weight:600;color:var(--brown)}
+.field input,.field select{font:inherit;font-size:15px;padding:13px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);width:100%}
+.field input:focus,.field select:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hero{padding:34px 0 18px;text-align:center}
+.hero h1{font-size:30px;line-height:1.25;margin:0 0 10px;color:var(--brown);text-wrap:balance}
+.hero p{font-size:15.5px;line-height:1.7;color:var(--mut);margin:0 auto;max-width:36ch}
+.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0 0;font-size:12px;color:var(--gold2)}
+.chip{display:inline-block;font-size:11.5px;padding:3px 10px;border-radius:99px;border:1px solid var(--gold);color:var(--gold2);background:rgba(184,137,59,.07);white-space:nowrap}
+.chip.solid{background:var(--gold);color:#fff;border-color:var(--gold)}
+.grid{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:680px){.grid{grid-template-columns:1fr 1fr}}
+.lc{cursor:pointer;transition:transform .16s var(--ease),box-shadow .16s var(--ease)}
+.lc:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(61,47,31,.14)}
+.lc .ph{aspect-ratio:4/3;background:var(--surface2);position:relative;overflow:hidden}
+.lc .ph img{width:100%;height:100%;object-fit:cover}
+.lc .bd{padding:13px 14px}
+.lc h3{margin:0 0 4px;font-size:16px;color:var(--brown)}
+.facts{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--mut);margin:6px 0}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.price{font-weight:700;font-size:15px;color:var(--brown)}
+.disc{font-size:11px;color:var(--mut);margin-top:6px;line-height:1.5}
+.sk{background:linear-gradient(90deg,var(--surface2) 25%,#f3ecdd 50%,var(--surface2) 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:12px}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.gal{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
+.gal img{flex:0 0 86%;scroll-snap-align:center;aspect-ratio:4/3;object-fit:cover;border-radius:14px}
+@media(min-width:680px){.gal img{flex-basis:48%}}
+.sticky-cta{position:sticky;bottom:0;z-index:20;background:linear-gradient(180deg,rgba(245,239,227,0),var(--bg) 30%);padding:12px 0 16px}
+.summary{position:sticky;top:56px;z-index:20;background:var(--surface);border-bottom:1px solid var(--line);padding:9px 0;font-size:12.5px}
+.summary .wrap{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.empty{text-align:center;padding:40px 16px}
+.empty .em{font-size:40px}
+.sec h2{font-size:17px;color:var(--brown);margin:22px 0 10px}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin:10px 0}
+.kv div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.kv .k{font-size:11px;color:var(--mut)}.kv .v{font-size:15px;font-weight:700;color:var(--brown)}
+.amen{display:flex;gap:7px;flex-wrap:wrap}
+.amen span{font-size:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px 10px}
+.foot{text-align:center;color:var(--mut);font-size:12px;padding:26px 0 30px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="head"><div class="wrap"><a class="brand" href="/stay">عوجا<b>·</b>Ouja</a><a class="muted" href="/stay" style="font-size:12.5px">إقامات الرياض</a></div></header>
+<main id="view" class="wrap"></main>
+<div class="foot">عوجا · إقامات مختارة في الرياض · الحجز والتأكيد داخل Airbnb</div>
+<script>
+var STAY=/*__STAY_DATA__*/null;
+var V=document.getElementById('view');
+function he(s){return (s==null?'':String(s)).replace(/[<>&"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];});}
+function sid(){try{var k='ouja_sid',v=localStorage.getItem(k);if(!v){v='s'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
+function qs(){return new URLSearchParams(location.search);}
+function utm(){var p=qs(),o={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o[k]=p.get(k);});return o;}
+function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:location.pathname,referrer:document.referrer||''},utm(),extra||{});var s=JSON.stringify(b);if(navigator.sendBeacon){navigator.sendBeacon('/api/stay/event',new Blob([s],{type:'application/json'}));}else{fetch('/api/stay/event',{method:'POST',headers:{'Content-Type':'application/json'},body:s,keepalive:true});}}catch(e){}}
+function money(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US')+' ر.س';}catch(e){return n+' ر.س';}}
+function airbnbUrl(u){if(!u)return '';var sep=(u.indexOf('?')>=0)?'&':'?';return u+sep+'utm_source=ouja_stay&utm_medium=website&utm_campaign=tiktok_conversion';}
+function carry(){var p=qs(),o=[];['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o.push(k+'='+encodeURIComponent(p.get(k)));});return o.length?('&'+o.join('&')):'';}
+function facts(l){var f=[];if(l.capacity)f.push('👥 '+l.capacity+' ضيوف');if(l.beds!=null)f.push('🛏 '+(l.beds==0?'استوديو':l.beds+' غرفة'));if(l.baths)f.push('🛁 '+l.baths+' حمام');if(l.area)f.push('📍 '+l.area);return f;}
+function badges(l){return (l.tags||[]).slice(0,4).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
+
+function viewLanding(){
+  track('stay_page_view',{});
+  var cfg=(STAY&&STAY.config)||{noo:[]};
+  var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'">'+he(o.ar||o.en)+'</option>';}).join('');
+  var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'">'+i+'</option>';}
+  V.innerHTML='<section class="hero"><h1>اختر إقامتك مع عوجا</h1>'
+    +'<p>حط تاريخك وعدد الضيوف، ونطلع لك وحدات عوجا المتاحة في الرياض.</p>'
+    +'<div class="trust"><span class="chip">وحدات مختارة في الرياض</span><span class="chip">دخول ذاتي</span><span class="chip">الحجز عبر Airbnb</span></div></section>'
+    +'<div class="card" style="padding:16px;margin-bottom:24px">'
+    +'<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div><div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div></div>'
+    +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>نوع</label><select id="ty">'+opts+'</select></div></div>'
+    +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>';
+  var t=new Date();var iso=function(d){return d.toISOString().slice(0,10);};
+  document.getElementById('ci').min=iso(t);document.getElementById('co').min=iso(new Date(t.getTime()+86400000));
+  document.getElementById('go').onclick=function(){
+    var ci=document.getElementById('ci').value,co=document.getElementById('co').value,g=document.getElementById('g').value,ty=document.getElementById('ty').value;
+    var q='?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty);
+    if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
+    location.href='/stay/search'+q;
+  };
+}
+
+function card(l){
+  var img=l.cover?('<img loading="lazy" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mut);font-size:13px">لا توجد صورة</div>';
+  var price='';
+  if(l.est_total!=null){price='<div class="price">الإجمالي التقريبي للإقامة: '+money(l.est_total)+(l.nights?(' · '+l.nights+' ليالٍ'):'')+'</div>';}
+  else{price='<div class="price" style="color:var(--mut);font-weight:600">السعر يظهر داخل Airbnb</div>';}
+  return '<a class="card lc" href="/stay/'+he(l.slug)+location.search+'"><div class="ph">'+img+(l.badge?('<span class="chip solid" style="position:absolute;top:8px;'+(document.dir==='rtl'?'right':'left')+':8px">'+he(l.badge)+'</span>'):'')+'</div>'
+    +'<div class="bd"><h3>'+he(l.name_ar||l.name_en)+'</h3>'
+    +'<div class="facts">'+facts(l).map(function(x){return '<span>'+he(x)+'</span>';}).join('')+'</div>'
+    +'<div class="badges">'+badges(l)+'</div>'+price
+    +'<div class="disc">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb</div>'
+    +'<div style="margin-top:10px"><span class="btn ghost" style="width:100%">شوف التفاصيل</span></div></div></a>';
+}
+
+function viewSearch(){
+  var p=qs();var ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
+  V.innerHTML='<div class="grid" style="margin:18px 0">'+'<div class="card"><div class="ph sk" style="aspect-ratio:4/3"></div><div class="bd"><div class="sk" style="height:18px;width:60%"></div><div class="sk" style="height:13px;width:40%;margin-top:8px"></div></div></div>'.repeat(4)+'</div>';
+  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
+  track('stay_search',{type:ty,guests:g,check_in:ci,check_out:co});
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var res=(d&&d.results)||[];var browse=d&&d.browse;
+    var sumbits=[];if(ci&&co)sumbits.push(he(ci)+' ← '+he(co));if(g)sumbits.push(g+' ضيوف');
+    var tyl=(((STAY&&STAY.config&&STAY.config.noo)||[]).filter(function(o){return o.key===ty;})[0]);
+    if(ty&&ty!=='all')sumbits.push('نوع: '+he(tyl?(tyl.ar||tyl.en):ty));
+    var head='';
+    if(d&&d.avail_error){head='<div class="card" style="padding:14px;margin:16px 0;color:var(--gold2)">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</div>';}
+    if(browse){head+='<div style="margin:16px 0 4px"><span class="chip">وضع التصفح — حط تاريخ لعرض المتاح</span></div>';}
+    if(res.length){
+      track('stay_results_view',{type:ty,count:res.length});
+      head+='<h2 class="sec" style="margin:14px 0 4px">'+(browse?('عندنا '+res.length+' وحدة'):('لقينا لك '+res.length+' وحدة متاحة'))+'</h2>';
+      if(sumbits.length)head+='<div class="muted" style="font-size:12.5px;margin-bottom:8px">'+sumbits.map(he).join(' · ')+'</div>';
+      V.innerHTML=head+'<div class="grid" style="margin:6px 0 26px">'+res.map(card).join('')+'</div>';
+    } else {
+      track('stay_no_results',{type:ty,check_in:ci,check_out:co});
+      V.innerHTML=head+'<div class="empty"><div class="em">🔍</div><h2 style="margin:10px 0 4px;color:var(--brown)">ما لقينا وحدة متاحة بنفس الاختيارات</h2><p class="muted">جرّب تغيّر التاريخ أو نوع الوحدة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div>';
+    }
+  }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
+}
+
+function viewListing(){
+  var l=(STAY&&STAY.listing)||null;
+  function render(l){
+    if(!l){V.innerHTML='<div class="empty"><div class="em">🏠</div><p class="muted">ما لقينا هالوحدة. <a href="/stay">ارجع للبحث</a></p></div>';return;}
+    track('stay_listing_view',{listing_id:l.id});
+    var imgs=(l.images||[]);
+    var gal=imgs.length?('<div class="gal">'+imgs.slice(0,12).map(function(u){return '<img loading="lazy" alt="'+he(l.name_ar)+'" src="'+he(u)+'">';}).join('')+'</div>'):(l.cover?('<img style="border-radius:14px" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'">'):'<div class="card" style="padding:40px;text-align:center;color:var(--mut)">لا توجد صور</div>');
+    var kv='';facts(l).forEach(function(){});
+    var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','دخول ذاتي']);if(l.area)kvitems.push(['الموقع',l.area]);
+    kv=kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('');
+    var price='';
+    if(l.est_total!=null){price='<div class="price">الإجمالي التقريبي للإقامة: '+money(l.est_total)+(l.nights?(' · '+l.nights+' ليالٍ'):'')+'</div><div class="disc">السعر النهائي يظهر داخل Airbnb</div>';}
+    else{price='<div class="price" style="color:var(--mut);font-weight:600">السعر يظهر داخل Airbnb</div>';}
+    var amen=(l.amenities||[]).length?('<div class="sec sec2"><h2>المميزات</h2><div class="amen">'+(l.amenities||[]).slice(0,24).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>'):'';
+    var why=(l.tags||[]).length?('<div class="sec"><h2>ليش هالوحدة</h2><div class="badges">'+(l.tags||[]).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('')+'</div></div>'):'';
+    var desc=(l.desc_ar||l.short_ar||'');
+    var cta;
+    if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url))+'">احجزها في Airbnb</a>';}
+    else{cta='<div class="btn block ghost" style="cursor:default;color:var(--mut)">رابط Airbnb غير متوفر حاليًا</div>';}
+    V.innerHTML='<div style="margin:16px 0">'+gal+'</div>'
+      +'<h1 style="font-size:24px;color:var(--brown);margin:6px 0">'+he(l.name_ar||l.name_en)+(l.badge?(' <span class="chip solid">'+he(l.badge)+'</span>'):'')+'</h1>'
+      +'<div class="badges">'+badges(l)+'</div>'
+      +(desc?('<p style="line-height:1.8;color:var(--ink)">'+he(desc)+'</p>'):'')
+      +'<div class="kv">'+kv+'</div>'+price+why+amen
+      +'<div style="height:90px"></div>'
+      +'<div class="sticky-cta"><div class="wrap">'+cta+'<div class="disc" style="text-align:center;margin-top:8px">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb.</div></div></div>';
+    var ab=document.getElementById('abtn');
+    if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
+    else{track('stay_missing_airbnb_url',{listing_id:l.id});}
+  }
+  if(l){render(l);}
+  else{
+    var token=location.pathname.replace(/^\/stay\/(id\/)?/,'').split('?')[0];
+    fetch('/api/stay/listing/'+encodeURIComponent(token)).then(function(r){return r.json();}).then(function(d){render(d&&d.listing);}).catch(function(){render(null);});
+  }
+}
+
+(function(){
+  var path=location.pathname;
+  if(path==='/stay'||path==='/stay/'){viewLanding();}
+  else if(path==='/stay/search'){viewSearch();}
+  else{viewListing();}
+})();
+</script>
+</body></html>"""
+
+def _stay_render(route="landing", listing=None, base=""):
+    title = "اختر إقامتك مع عوجا"
+    desc = "وحدات عوجا المتاحة في الرياض · دخول ذاتي · الحجز عبر Airbnb"
+    og = ""
+    path = {"landing": "/stay", "search": "/stay/search", "listing": "/stay"}.get(route, "/stay")
+    if listing:
+        title = (listing.get("name_ar") or title) + " · عوجا"
+        desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
+        og = listing.get("cover") or ""
+        path = "/stay/" + (listing.get("slug") or str(listing.get("id")))
+    data = {"route": route, "listing": listing, "config": {"noo": _gw_noo_options()}}
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    return (STAY_HTML
+            .replace("/*__STAY_DATA__*/null", blob)
+            .replace("__STAY_TITLE__", _gw_he(title))
+            .replace("__STAY_DESC__", _gw_he(desc))
+            .replace("__STAY_OG__", _gw_he(og))
+            .replace("__STAY_URL__", _gw_he((base or "") + path)))
+
+# ---- public guest routes (NO dashboard token) ----
+async def _handle_stay(request):
+    return web.Response(text=_stay_render("landing", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_stay_search(request):
+    return web.Response(text=_stay_render("search", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_stay_id(request):
+    lid = request.match_info.get("lid", "")
+    snap, ov = _gw_find_by_slug_or_id(lid)
+    if snap:
+        slug = _gw_slug(snap, ov)
+        q = ("?" + request.query_string) if request.query_string else ""
+        raise web.HTTPFound("/stay/" + slug + q)
+    return web.Response(text=_stay_render("listing", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_stay_detail(request):
+    token = request.match_info.get("slug", "")
+    snap, ov = _gw_find_by_slug_or_id(token)
+    listing = _gw_listing_public(snap, ov) if snap else None
+    return web.Response(text=_stay_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
+
+async def _api_stay_config(request):
+    return _json({"ok": True, "noo": _gw_noo_options()})
+
+async def _api_stay_search(request):
+    q = request.query
+    out = await asyncio.to_thread(_gw_search, q.get("check_in"), q.get("check_out"),
+                                  q.get("guests"), q.get("type"), q.get("area"))
+    return _json({"ok": True, **out})
+
+async def _api_stay_listing(request):
+    snap, ov = _gw_find_by_slug_or_id(request.match_info.get("id", ""))
+    if not snap:
+        return _json({"ok": False, "listing": None}, 404)
+    return _json({"ok": True, "listing": _gw_listing_public(snap, ov)})
+
+async def _api_stay_event(request):
+    try:
+        b = await request.json()
+    except Exception:
+        b = {}
+    if isinstance(b, dict) and b.get("event"):
+        ev = {k: b.get(k) for k in ("event", "session", "route", "referrer", "listing_id",
+                                    "check_in", "check_out", "guests", "type",
+                                    "utm_source", "utm_medium", "utm_campaign", "utm_content") if b.get(k) is not None}
+        ua = request.headers.get("User-Agent", "")
+        ev["device"] = ("mobile" if re.search(r"Mobi|Android|iPhone", ua) else "desktop")
+        _gw_track(ev)
+    return _json({"ok": True})
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
@@ -37113,6 +37392,16 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
+        # ---- public guest website (no token) — order: static before dynamic slug ----
+        app.router.add_get("/stay", _handle_stay)
+        app.router.add_get("/stay/", _handle_stay)
+        app.router.add_get("/stay/search", _handle_stay_search)
+        app.router.add_get("/stay/id/{lid}", _handle_stay_id)
+        app.router.add_get("/api/stay/config", _api_stay_config)
+        app.router.add_get("/api/stay/search", _api_stay_search)
+        app.router.add_get("/api/stay/listing/{id}", _api_stay_listing)
+        app.router.add_post("/api/stay/event", _api_stay_event)
+        app.router.add_get("/stay/{slug}", _handle_stay_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
         app.router.add_get("/api/overview", _api_overview)
