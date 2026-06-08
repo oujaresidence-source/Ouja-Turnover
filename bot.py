@@ -22533,13 +22533,30 @@ function fbDupChip(x){ var s=x.daftra_duplicate_status; if(!s) return ''; var l=
 function fbDupActionable(x){ return ['already_in_daftra_verified','strong_possible_duplicate','possible_duplicate','needs_manual_review'].indexOf(x.daftra_duplicate_status)>=0; }
 async function fbDupCheck(){ var ar=(L==='ar');
   var st; try{ st=await api('/api/fb/daftra/state'); }catch(_){ st=null; }
-  var jn=(st&&st.journals)||0, bm=(st&&st.bank_mapping);
+  var jn=(st&&st.journals)||0, bm=(st&&st.bank_mapping); var dg=(st&&st.diag)||{}; var bl=dg.bank_lines_matched||0;
   function row(ok,label){ return '<div style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 0"><span>'+(ok?'✅':'⚠️')+'</span><span>'+esc(label)+'</span></div>'; }
   openDrawer(ar?'فحص التكرار مع دافترة':'Daftra duplicate check', ar?'فحص مسبق':'pre-check');
-  setDrawerBody(row(jn>0,(ar?'قيود دافترة مستوردة':'Daftra journals imported')+' ('+jn+')')+row(jn>0,(ar?'سطور القيود مستوردة':'Journal lines imported'))+row(bm,(ar?'ربط حساب البنك في دافترة':'Daftra bank account mapping'))+'<div class="muted" style="font-size:11px;margin-top:6px">'+(ar?'نطابق حركة البنك مع سطور قيود دافترة (سطر الراجحي) — مب بس وصف القيد.':'We match bank movement against Daftra journal lines (the bank-account line), not just the header.')+'</div>');
+  setDrawerBody(row(jn>0,(ar?'قيود دافترة مستوردة':'Daftra journals imported')+' ('+jn+')')+row(bm,(ar?'ربط حساب البنك في دافترة':'Daftra bank account mapping'))+row(bl>0,(ar?'سطور قيود مقيّدة على حساب البنك المربوط':'Journal lines posting to the mapped bank account')+' ('+bl+')')+((dg.verdict&&dg.verdict!=='ready')?('<div style="background:rgba(184,137,59,.1);border:1px solid var(--gold);border-radius:9px;padding:9px 11px;font-size:11.5px;margin-top:8px;line-height:1.65">⚠️ '+esc(ar?dg.reason_ar:dg.reason_en)+'</div>'):'')+'<div class="muted" style="font-size:11px;margin-top:6px">'+(ar?'نطابق حركة البنك مع سطور قيود دافترة (سطر الراجحي) — مب بس وصف القيد.':'We match bank movement against Daftra journal lines (the bank-account line), not just the header.')+'</div>');
   setDrawerFoot((jn===0?('<button class="btn primary sm" onclick="closeDrawer();fbImportJournals()">'+(ar?'استيراد القيود ثم الفحص':'Import journals then check')+'</button>'):('<button class="btn primary sm" onclick="fbDupRun()">'+(ar?'الفحص الآن':'Check now')+'</button>'))+(bm?'':('<button class="btn ghost sm" onclick="closeDrawer();fbBankMap()">'+(ar?'اربط حساب البنك':'Map bank account')+'</button>'))+'<button class="btn ghost sm" onclick="closeDrawer();fbRefreshCC()">'+(ar?'تحديث حسابات دافترة':'Refresh Daftra accounts')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
 async function fbDupRun(start,end){ var ar=(L==='ar'); closeDrawer(); toast(ar?'⏳ نتحقق من التكرار…':'⏳ Checking…'); var body={action:'check'}; if(start)body.start=start; if(end)body.end=end; var r; try{ r=await post('/api/fb/daftra/dup',body); }catch(_){ r=null; }
-  if(r&&r.ok){ if(!r.bank_mapping){ toast(ar?'ناقص ربط حساب البنك — اربطه أول':'Bank mapping missing — map it first'); } else if(!r.journals){ toast(ar?'ما فيه قيود دافترة — استوردها أول':'No Daftra journals — import first'); } else { toast((ar?'فُحص ':'checked ')+(r.checked||0)+' · '+(ar?'موجود ':'in Daftra ')+(r.already_in_daftra_verified||0)+' · '+(ar?'محتمل ':'possible ')+((r.strong_possible_duplicate||0)+(r.possible_duplicate||0)+(r.needs_manual_review||0))+' · '+(ar?'جديد ':'new ')+(r.not_found_after_full_check||0)); } fbGo(_fb.tab); } else toast((r&&(r.error||r.message_ar))||'⚠'); }
+  if(!(r&&r.ok)){ toast((r&&(r.error||r.message_ar))||'⚠'); return; }
+  fbGo(_fb.tab); fbDupResult(r); }
+function fbDupResult(r){ var ar=(L==='ar'); var dg=r.diag||{};
+  var inD=r.already_in_daftra_verified||0, poss=(r.strong_possible_duplicate||0)+(r.possible_duplicate||0)+(r.needs_manual_review||0), neu=r.not_found_after_full_check||0;
+  openDrawer(ar?'نتيجة فحص التكرار مع دافترة':'Daftra duplicate check result', ar?'وش طلع وليش':'what came back & why');
+  function cell(lbl,val,clr){ return '<div style="flex:1;min-width:84px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:8px 10px"><div style="font-size:18px;font-weight:800;color:'+(clr||'var(--text)')+'">'+val+'</div><div class="muted" style="font-size:10.5px">'+esc(lbl)+'</div></div>'; }
+  var stat='<div style="display:flex;gap:7px;flex-wrap:wrap">'+cell(ar?'فُحص':'checked',r.checked||0)+cell(ar?'موجود في دافترة':'in Daftra',inD,(inD?'#3e7d5a':''))+cell(ar?'محتمل':'possible',poss,(poss?'var(--gold)':''))+cell(ar?'جديد':'new',neu)+'</div>';
+  var bad=(dg.verdict==='mapping_not_in_journals'||dg.verdict==='no_mapping'||dg.verdict==='no_journals');
+  var tc=(dg.verdict==='ready'?'#3e7d5a':(bad?'var(--red)':'var(--gold)')), tbg=(dg.verdict==='ready'?'rgba(62,125,90,.1)':(bad?'rgba(196,67,67,.09)':'rgba(184,137,59,.09)'));
+  var why='<div style="background:'+tbg+';border:1px solid '+tc+';border-radius:10px;padding:11px 13px;margin-top:11px"><b style="font-size:12.5px;color:'+tc+'">'+(inD?(ar?'✅ لقينا عمليات موجودة في دافترة':'✅ Found existing-in-Daftra items'):(ar?'ليش ما فيه ولا وحده «موجود في دافترة»؟':'Why nothing matched as in-Daftra'))+'</b><div style="font-size:11.5px;margin-top:5px;line-height:1.7">'+esc(ar?dg.reason_ar:dg.reason_en)+'</div></div>';
+  var nums='<div class="muted" style="font-size:11px;margin-top:9px;line-height:1.85">'+(ar?'قيود دافترة: ':'journals: ')+(dg.journals||0)+' · '+(ar?'سطور على حساب البنك: ':'lines on bank acct: ')+(dg.bank_lines_matched||0)+(dg.journal_date_min?('<br>'+(ar?'فترة القيود: ':'journals span: ')+esc(dg.journal_date_min)+' → '+esc(dg.journal_date_max||'')):'')+(dg.bank_date_min?('<br>'+(ar?'فترة حركات البنك: ':'bank span: ')+esc(dg.bank_date_min)+' → '+esc(dg.bank_date_max||'')):'')+'</div>';
+  setDrawerBody(stat+why+nums);
+  var foot='';
+  if(inD) foot+='<button class="btn primary sm" onclick="closeDrawer();fbBulkLink()">'+(ar?'اربط كل الموجود في دافترة':'Link all existing')+'</button>';
+  if(dg.verdict==='no_mapping'||dg.verdict==='mapping_not_in_journals') foot+='<button class="btn '+(inD?'ghost':'primary')+' sm" onclick="closeDrawer();fbBankMap()">'+(ar?'راجع ربط حساب البنك':'Re-check mapping')+'</button>';
+  if(dg.verdict==='no_journals'||dg.verdict==='date_gap') foot+='<button class="btn '+(inD?'ghost':'primary')+' sm" onclick="closeDrawer();fbImportJournals()">'+(ar?'استورد قيود دافترة':'Import journals')+'</button>';
+  foot+='<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>';
+  setDrawerFoot(foot); }
 async function fbDupRecheck(){ var ar=(L==='ar'); if(!confirm(ar?'النتائج القديمة كانت مبنية على فحص أضعف. بنعيد الفحص بدون حذف السجل. متابعة؟':'Old results used a weaker check. We will recheck without deleting history. Continue?')) return; fbDupRun(); }
 async function fbDupCompare(id){ var ar=(L==='ar'); openDrawer(ar?'المطابقة مع دافترة':'Compare with Daftra',''); setDrawerBody('<div class="empty sk">—</div>');
   var d; try{ d=await api('/api/fb/daftra/dup?txn='+encodeURIComponent(id)); }catch(_){ d=null; }
@@ -33843,18 +33860,56 @@ def _fb_dup_suggest(txn, limit=8):
     out.sort(key=lambda x: -x["confidence"])
     return out[:limit]
 
+def _fb_dup_diag():
+    """WHY might the duplicate check find nothing? Health of mapping↔journals↔dates.
+    Honest: separates 'not set up' from 'set up, but these txns truly aren't in Daftra yet'.
+    The decisive signal is bank_lines_matched: journal lines that post to the mapped bank account."""
+    mapped = _fb_mapped_bank_accounts()
+    jos = _fb_journal_objects(mapped) if _fb_djournals else []
+    jlines = sum(len(jo["entry"].get("lines") or []) for jo in jos)
+    bank_lines = sum(len(jo["bank_lines"]) for jo in jos)
+    jwith = sum(1 for jo in jos if jo["bank_lines"])
+    jd = [d for d in (_parse_date(jo["entry"].get("date")) for jo in jos) if d]
+    bd = [d for d in (_parse_date(t.get("date")) for t in _fb_bank.values()) if d]
+    jmin = min(jd).isoformat() if jd else None
+    jmax = max(jd).isoformat() if jd else None
+    bmin = min(bd).isoformat() if bd else None
+    bmax = max(bd).isoformat() if bd else None
+    overlap = bool(jd and bd and min(jd) <= max(bd) and min(bd) <= max(jd))
+    if not mapped:
+        verdict, ar, en = "no_mapping", "ما فيه ربط لحساب البنك في دافترة — اربط حساب الراجحي أول من «ربط حسابات البنك».", "No Daftra bank account mapped — map Al Rajhi first."
+    elif not _fb_djournals:
+        verdict, ar, en = "no_journals", "ما فيه قيود دافترة مستوردة — استورد قيود نفس الفترة أول.", "No Daftra journals imported — import the period first."
+    elif bank_lines == 0:
+        verdict = "mapping_not_in_journals"
+        ar = ("فيه " + str(len(_fb_djournals)) + " قيد دافترة، بس ولا سطر مقيّد على حساب البنك المربوط. يعني إما الحساب المربوط غلط، أو قيود دافترة ما تمر على حساب الراجحي. راجع «ربط حسابات البنك» واختر نفس حساب البنك اللي يستخدمه المحاسب.")
+        en = (str(len(_fb_djournals)) + " journals imported but NO line posts to the mapped bank account — either the mapped account is wrong or the journals don't touch Al Rajhi. Re-check the mapping.")
+    elif not overlap:
+        verdict = "date_gap"
+        ar = ("قيود دافترة من " + (jmin or "؟") + " إلى " + (jmax or "؟") + "، بس حركات البنك من " + (bmin or "؟") + " إلى " + (bmax or "؟") + " — استورد قيود نفس الأشهر.")
+        en = ("Journals span " + (jmin or "?") + "→" + (jmax or "?") + " but bank txns span " + (bmin or "?") + "→" + (bmax or "?") + " — import journals for the same months.")
+    else:
+        verdict = "ready"
+        ar = "الإعداد سليم: حساب البنك مربوط وفيه " + str(bank_lines) + " سطر قيد عليه. أي عملية ما تطابقت غالبًا مو مسجلة في دافترة بعد — صنّفها وجهّز لها قيد."
+        en = "Setup healthy: bank account mapped with " + str(bank_lines) + " journal lines on it. Anything unmatched is likely not yet recorded in Daftra."
+    return {"mapped": [{"code": m["code"], "name": m["name"]} for m in mapped], "journals": len(_fb_djournals),
+            "journal_lines": jlines, "bank_lines_matched": bank_lines, "journals_with_bank_line": jwith,
+            "journal_date_min": jmin, "journal_date_max": jmax, "bank_date_min": bmin, "bank_date_max": bmax,
+            "date_overlap": overlap, "verdict": verdict, "reason_ar": ar, "reason_en": en}
+
 def _fb_dup_check(start=None, end=None, actor="", ids=None):
     """Check bank txns (date range OR ids) against imported Daftra JOURNAL LINES via mapped bank account.
     Honest prerequisites: needs journals imported + a bank-account mapping before claiming 'not found'."""
     bankset = _fb_mapped_bank_accounts()
     journals = _fb_journal_objects(bankset) if _fb_djournals else []
+    diag = _fb_dup_diag()
     sd, ed = _parse_date(start), _parse_date(end)
     now = datetime.now(TZ).isoformat(timespec="seconds")
     counts = {k: 0 for k in ("already_in_daftra_verified", "strong_possible_duplicate", "possible_duplicate",
                              "needs_manual_review", "not_found_after_full_check", "missing_bank_account_mapping")}
     if bankset and not _fb_djournals:
         # prerequisites missing: never claim "not found" without journals — prompt import instead
-        return {"ok": True, "checked": 0, "journals": 0, "bank_mapping": True, "prereq": "no_journals", **counts}
+        return {"ok": True, "checked": 0, "journals": 0, "bank_mapping": True, "prereq": "no_journals", "diag": diag, **counts}
     checked = 0
     for tid, txn in _fb_bank.items():
         if ids:
@@ -33902,7 +33957,7 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
     nd = counts["strong_possible_duplicate"] + counts["possible_duplicate"] + counts["needs_manual_review"]
     return {"ok": True, "checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset),
             "ready_to_link_count": counts["already_in_daftra_verified"], "needs_decision_count": nd,
-            "lanes": _fb_inbox()["lanes"], **counts}
+            "diag": diag, "lanes": _fb_inbox()["lanes"], **counts}
 
 def _fb_dup_summary():
     by = {}
@@ -34059,7 +34114,7 @@ async def _api_fb_daftra_state(request):
         return _json({"error": "unauthorized"}, 401)
     return _json({"ok": True, "state": _fb_dstate, "journals": len(_fb_djournals),
                   "bank_mapping": bool(_fb_mapped_bank_accounts()), "bankmaps": list(_fb_bankmap.values()),
-                  "dup": _fb_dup_summary(), "counts": _daftra_counts()})
+                  "dup": _fb_dup_summary(), "diag": _fb_dup_diag(), "counts": _daftra_counts()})
 
 async def _api_fb_daftra_bankmap(request):
     """Map an imported bank statement (e.g. alrajhi_1039) to its Daftra account. GET list / POST upsert/delete."""
