@@ -22781,7 +22781,9 @@ function gwGo(tab){ _gw.tab=tab; gwTabs(); var b=document.getElementById('gwBody
 function loadGw(){ var e=document.getElementById('t_gw'); if(e) e.textContent='📱 '+t().gw; var s=document.getElementById('t_gw_sub'); if(s) s.textContent=t().gw_sub; gwTabs(); gwGo(_gw.tab); }
 async function gwSync(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث من Hostaway…':'⏳ Syncing from Hostaway…'); var r; try{ r=await post('/api/gw/sync',{}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم تحديث ':'synced ')+(r.count||0)+(ar?' وحدة':' listings')); gwGo(_gw.tab); } else toast((r&&r.error)||'⚠'); }
 async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/overview'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
-  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📱 '+(ar?'حالة الموقع':'Website status')+'</b>'+(d.total?fbChip(ar?'يعمل':'live','ok'):fbChip(ar?'لا توجد بيانات':'no data','warn'))+'</div><div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'آخر تحديث: ':'last sync: ')+esc(d.synced_at||'—')+' · <a href="/stay" target="_blank">'+(ar?'افتح /stay':'open /stay')+'</a></div></div>';
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📱 '+(ar?'حالة الموقع':'Website status')+'</b>'+(d.total?fbChip(ar?'يعمل':'live','ok'):fbChip(ar?'لا توجد بيانات — اضغط تحديث':'no data — sync','warn'))+'</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'تحكّم بعرض وحدات عوجا للضيوف القادمين من TikTok و Airbnb. آخر تحديث: ':'Control how Ouja units appear to TikTok/Airbnb visitors. Last sync: ')+esc(d.synced_at||'—')+'</div>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><button class="btn primary sm" onclick="gwSync()">⟳ '+esc(t().gw_sync)+'</button><a class="btn ghost sm" href="/stay" target="_blank">↗ '+(ar?'فتح الموقع':'Open site')+'</a><a class="btn ghost sm" href="/stay/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="gwCopyStay()">📋 '+(ar?'نسخ رابط /stay':'Copy /stay link')+'</button></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
     +fbStatCard(ar?'إجمالي الوحدات':'Total listings',d.total||0,'var(--text)')
     +fbStatCard(ar?'ظاهرة':'Visible',d.visible||0,'#3e9665')
@@ -22793,19 +22795,30 @@ async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBod
     +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
   if(d.missing_airbnb) h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px;font-size:12px">'+(ar?('⚠ '+d.missing_airbnb+' وحدة بدون رابط Airbnb — صفحاتها ما تعرض زر الحجز. راجع تبويب «روابط Airbnb».'):('⚠ '+d.missing_airbnb+' listings missing Airbnb URL — their booking button is hidden. See Airbnb Links.'))+'</div>';
   b.innerHTML=h; }
-async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/listings'); }catch(_){ d=null; } var ls=(d&&d.listings)||[]; _gw.byId={}; ls.forEach(function(x){ _gw.byId[x.id]=x; });
-  if(!ls.length){ b.innerHTML='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه وحدات — اضغط «تحديث من Hostaway».':'No listings — press Sync.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="gwSync()">'+esc(t().gw_sync)+'</button></div></div>'; return; }
-  var th='color:var(--mut);font-size:10.5px;padding:6px 5px;text-align:'+(ar?'right':'left');
-  b.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'ظاهر':'On')+'</th><th style="'+th+'">'+(ar?'الوحدة':'Listing')+'</th><th style="'+th+'">'+(ar?'المنطقة':'Area')+'</th><th style="'+th+'">Airbnb</th><th style="'+th+'">'+(ar?'صور':'Img')+'</th><th style="'+th+'">'+(ar?'وسوم':'Tags')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+ls.map(gwListRow).join('')+'</tbody></table></div>'; }
-function gwListRow(x){ var ar=(L==='ar');
-  return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px"><input type="checkbox" '+(x.visible?'checked':'')+' onclick="gwToggleVis('+x.id+',this.checked)"></td>'
-    +'<td style="padding:6px 5px"><b>'+esc(x.title_ar||x.name)+'</b><div class="muted" style="font-size:10px">#'+x.id+'</div></td>'
-    +'<td style="padding:6px 5px">'+esc(x.area||'—')+'</td>'
-    +'<td style="padding:6px 5px">'+(x.has_airbnb?fbChip('✓','ok'):fbChip(ar?'مفقود':'missing','warn'))+'</td>'
-    +'<td style="padding:6px 5px">'+x.images+'</td><td style="padding:6px 5px">'+(x.tags||[]).length+'</td>'
-    +'<td style="padding:6px 5px;white-space:nowrap"><button class="btn ghost xs" onclick="gwEdit('+x.id+')">'+(ar?'تعديل':'Edit')+'</button> <a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'View')+'</a> <button class="btn ghost xs" onclick="gwCopy(&#39;'+esc(x.slug)+'&#39;)">📋</button></td></tr>'; }
+async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/listings'); }catch(_){ d=null; } _gw.listings=(d&&d.listings)||[]; _gw.byId={}; _gw.listings.forEach(function(x){ _gw.byId[x.id]=x; });
+  if(!_gw.listings.length){ b.innerHTML='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه وحدات — اضغط «تحديث من Hostaway».':'No listings — press Sync.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="gwSync()">'+esc(t().gw_sync)+'</button></div></div>'; return; }
+  var filters=[['','الكل','All'],['visible','ظاهرة','Visible'],['hidden','مخفية','Hidden'],['no_airbnb','بدون Airbnb','No Airbnb'],['no_img','بدون صور','No images']];
+  var h='<div style="margin-bottom:8px"><input id="glq" value="'+esc(_gw.lq||'')+'" oninput="_gw.lq=this.value;gwListTable()" placeholder="🔎 '+(ar?'ابحث بالاسم أو الرقم':'search name or ID')+'" style="'+fbInp()+';margin:0;width:100%"></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+filters.map(function(f){ return '<button class="btn ghost xs" onclick="_gw.lf=&#39;'+f[0]+'&#39;;gwListTable()">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')+'</div><div id="gltable"></div>';
+  b.innerHTML=h; _gw.lf=_gw.lf||''; gwListTable(); }
+function gwListTable(){ var ar=(L==='ar'), wrap=document.getElementById('gltable'); if(!wrap) return; var q=(_gw.lq||'').trim().toLowerCase(), f=_gw.lf||'';
+  var ls=(_gw.listings||[]).filter(function(x){
+    if(q && ((x.title_ar||x.name||'')+' '+x.id).toLowerCase().indexOf(q)<0) return false;
+    if(f==='visible') return x.visible; if(f==='hidden') return !x.visible;
+    if(f==='no_airbnb') return !x.has_airbnb; if(f==='no_img') return !x.images; return true; });
+  if(!ls.length){ wrap.innerHTML='<div class="empty" style="padding:20px">'+(ar?'لا وحدات بهالفلتر':'No listings in this filter')+'</div>'; return; }
+  var th='color:var(--mut);font-size:10.5px;padding:7px 5px;text-align:'+(ar?'right':'left');
+  wrap.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'ظاهر':'On')+'</th><th style="'+th+'">'+(ar?'الوحدة':'Listing')+'</th><th style="'+th+'">'+(ar?'المنطقة':'Area')+'</th><th style="'+th+'">Airbnb</th><th style="'+th+'">'+(ar?'صور':'Img')+'</th><th style="'+th+'">'+(ar?'وسوم':'Tags')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+ls.map(gwListRow).join('')+'</tbody></table></div>'; }
+function gwListRow(x){ var ar=(L==='ar'); var thumb=x.hero?('<img src="'+esc(x.hero)+'" style="width:46px;height:46px;border-radius:9px;object-fit:cover;flex:none" loading="lazy" alt="">'):'<div style="width:46px;height:46px;border-radius:9px;background:var(--surface-2);flex:none"></div>';
+  return '<tr style="border-top:1px solid var(--border)"><td style="padding:8px 5px"><input type="checkbox" '+(x.visible?'checked':'')+' onclick="gwToggleVis('+x.id+',this.checked)"></td>'
+    +'<td style="padding:8px 5px"><div style="display:flex;gap:9px;align-items:center">'+thumb+'<div style="min-width:0"><b>'+esc(x.title_ar||x.name)+'</b><div class="muted" style="font-size:10px">#'+x.id+'</div></div></div></td>'
+    +'<td style="padding:8px 5px">'+esc(x.area||'—')+'</td>'
+    +'<td style="padding:8px 5px">'+(x.has_airbnb?fbChip('✓','ok'):fbChip(ar?'مفقود':'missing','warn'))+'</td>'
+    +'<td style="padding:8px 5px">'+x.images+'</td><td style="padding:8px 5px">'+(x.tags||[]).length+'</td>'
+    +'<td style="padding:8px 5px;white-space:nowrap"><button class="btn ghost xs" onclick="gwEdit('+x.id+')">'+(ar?'تعديل':'Edit')+'</button> <a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'View')+'</a> <button class="btn ghost xs" onclick="gwCopy(&#39;'+esc(x.slug)+'&#39;)">📋</button></td></tr>'; }
 async function gwToggleVis(id,on){ try{ await post('/api/gw/listing',{id:String(id),visible:!!on}); toast('✓'); }catch(_){ toast('⚠'); } }
 function gwCopy(slug){ var u=location.origin+'/stay/'+slug; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ الرابط':'Link copied'); }catch(e){ prompt('',u); } }
+function gwCopyStay(){ var u=location.origin+'/stay'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /stay':'/stay link copied'); }catch(e){ prompt('',u); } }
 function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast('⚠'); return; }
   openDrawer((ar?'تعديل: ':'Edit: ')+(x.name||''), '#'+id);
   function f(lbl,i2,val){ return '<label class="muted" style="font-size:11px">'+esc(lbl)+'</label><input id="'+i2+'" value="'+esc(val==null?'':val)+'" style="'+fbInp()+'">'; }
@@ -22820,19 +22833,41 @@ function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast(
 async function gwEditSave(id){ var ar=(L==='ar'); function v(i){ var e=document.getElementById(i); return e?e.value:undefined; }
   var body={id:String(id), visible:document.getElementById('gwe_vis').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
   var r; try{ r=await post('/api/gw/listing',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwListings(); } else toast('⚠'); }
-async function gwTags(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/tags'); }catch(_){ d=null; } var tags=(d&&d.tags)||[]; _gw.cats=(d&&d.categories)||[]; _gw.vis=(d&&d.visibilities)||[]; _gw.tagById={}; tags.forEach(function(x){ _gw.tagById[x.key]=x; });
-  var unmapped=tags.filter(function(x){return x.status==='unmapped';}).length;
-  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏷️ '+esc(t().gw_tags)+'</b><button class="btn ghost sm" onclick="gwBulkMap()">✨ '+(ar?'ربط الوسوم الشائعة':'Bulk-map common')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'اربط وسوم Hostaway بأسماء عربية/إنجليزية تظهر للزوار في «نوع» والشارات. ':'Map Hostaway tags to public AR/EN labels for نوع filters + badges. ')+(unmapped?(ar?('فيه '+unmapped+' وسم غير مربوط.'):(unmapped+' unmapped.')):'')+'</div></div>';
-  if(!tags.length){ h+='<div class="empty">'+(ar?'لا وسوم — اضغط تحديث':'No tags — sync first')+'</div>'; b.innerHTML=h; return; }
+async function gwTags(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/tags'); }catch(_){ d=null; }
+  _gw.tags=(d&&d.tags)||[]; _gw.cats=(d&&d.categories)||[]; _gw.vis=(d&&d.visibilities)||[]; _gw.tagById={}; _gw.tags.forEach(function(x){ _gw.tagById[x.key]=x; }); _gw.tsel={};
+  var unmapped=_gw.tags.filter(function(x){return x.status==='unmapped';}).length, amen=_gw.tags.filter(function(x){return x.category==='amenity';}).length;
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏷️ '+esc(t().gw_tags)+'</b><button class="btn ghost sm" onclick="gwSeed()">✨ '+(ar?'ربط الوسوم الشائعة':'Auto-map common')+'</button></div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'«نوع» للضيف = الوسوم الظاهرة فقط (طبقة/حي/ميزة). المرافق (تلفزيون، تكييف…) منفصلة وما تصير فلتر.':'Guest نوع = shown tags only (layout/area/feature). Amenities (TV, AC…) are separate and never become filters.')+(unmapped?(' · '+unmapped+' '+(ar?'غير مربوط':'unmapped')):'')+(amen?(' · '+amen+' '+(ar?'مرافق':'amenities')):'')+'</div></div>';
+  if(!_gw.tags.length){ h+='<div class="empty">'+(ar?'لا وسوم — اضغط تحديث':'No tags — sync first')+'</div>'; b.innerHTML=h; return; }
+  h+='<div style="margin-bottom:8px"><input id="gtq" value="'+esc(_gw.tagQ||'')+'" oninput="_gw.tagQ=this.value;gwTagsTable()" placeholder="🔎 '+(ar?'ابحث وسم':'search tag')+'" style="'+fbInp()+';margin:0;width:100%"></div>';
+  var filters=[['','الكل','All'],['unmapped','غير مربوط','Unmapped'],['shown','ظاهر للضيف','Shown'],['hidden','مخفي','Hidden'],['amenity','Amenities','Amenities'],['area','أحياء','Areas'],['layout','أنواع','Layouts'],['feature','مميزات','Features']];
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+filters.map(function(f){ return '<button class="btn ghost xs" onclick="_gw.tagF=&#39;'+f[0]+'&#39;;gwTagsTable()">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')+'</div>';
+  h+='<div id="gtbulk"></div><div id="gttable"></div>';
+  b.innerHTML=h; _gw.tagF=_gw.tagF||''; gwTagsTable(); }
+function gwTagsFiltered(){ var q=(_gw.tagQ||'').trim().toLowerCase(), f=_gw.tagF||'';
+  return (_gw.tags||[]).filter(function(x){
+    if(q){ var hay=((x.key||'')+' '+(x.ar||'')+' '+(x.en||'')+' '+((x.raw_values||[]).join(' '))).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+    if(f==='unmapped') return x.status==='unmapped';
+    if(f==='shown') return (x.visibility==='filter'||x.visibility==='filter_badge'||x.visibility==='badge')&&x.category!=='amenity';
+    if(f==='hidden') return x.visibility==='hidden';
+    if(f==='amenity') return x.category==='amenity';
+    if(f==='area'||f==='layout'||f==='feature') return x.category===f;
+    return true; }); }
+function gwTagsTable(){ var ar=(L==='ar'), wrap=document.getElementById('gttable'); if(!wrap) return;
+  var rows=gwTagsFiltered(), sel=Object.keys(_gw.tsel||{}).length, bulk=document.getElementById('gtbulk'); if(bulk) bulk.innerHTML=(sel?gwTagBulkBar(sel):'');
+  if(!rows.length){ wrap.innerHTML='<div class="empty" style="padding:20px">'+(ar?'لا وسوم بهالفلتر':'No tags in this filter')+'</div>'; return; }
   var th='color:var(--mut);font-size:10.5px;padding:6px 5px;text-align:'+(ar?'right':'left');
-  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'الوسم الخام':'Raw')+'</th><th style="'+th+'">#</th><th style="'+th+'">'+(ar?'عربي':'AR')+'</th><th style="'+th+'">'+(ar?'الفئة':'Cat')+'</th><th style="'+th+'">'+(ar?'الظهور':'Vis')+'</th><th style="'+th+'">'+(ar?'الحالة':'Status')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+tags.map(gwTagRow).join('')+'</tbody></table></div>';
-  b.innerHTML=h; }
-function gwTagRow(x){ var ar=(L==='ar'); var raw=(x.raw_values||[]).slice(0,3).join(', ')||x.key; var stTone=(x.status==='mapped'?'ok':(x.status==='unmapped'?'warn':'mut'));
-  return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px"><b>'+esc(raw)+'</b><div class="muted" style="font-size:10px">'+esc(x.key)+' · '+(x.sources||[]).join('/')+'</div></td>'
+  wrap.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'"></th><th style="'+th+'">'+(ar?'الوسم':'Tag')+'</th><th style="'+th+'">#</th><th style="'+th+'">'+(ar?'عربي':'AR')+'</th><th style="'+th+'">'+(ar?'الفئة':'Cat')+'</th><th style="'+th+'">'+(ar?'الحالة':'Status')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+rows.map(gwTagRow).join('')+'</tbody></table></div>'; }
+function gwTagRow(x){ var ar=(L==='ar'); var raw=(x.raw_values||[]).slice(0,3).join(', ')||x.key; var stTone=(x.status==='mapped'?'ok':(x.status==='unmapped'?'warn':'mut')); var sel=!!(_gw.tsel||{})[x.key];
+  return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px"><input type="checkbox" '+(sel?'checked':'')+' onclick="gwTagSel(&#39;'+esc(x.key)+'&#39;,this.checked)"></td>'
+    +'<td style="padding:6px 5px"><b>'+esc(raw)+'</b><div class="muted" style="font-size:10px">'+esc(x.key)+' · '+(x.sources||[]).join('/')+'</div></td>'
     +'<td style="padding:6px 5px">'+(x.count||0)+'</td><td style="padding:6px 5px">'+esc(x.ar||'—')+'</td>'
-    +'<td style="padding:6px 5px">'+esc(x.category||'—')+'</td><td style="padding:6px 5px">'+esc(x.visibility||'hidden')+'</td>'
+    +'<td style="padding:6px 5px">'+esc(x.category||'—')+'</td>'
     +'<td style="padding:6px 5px">'+fbChip(x.status||'unmapped',stTone)+'</td>'
     +'<td style="padding:6px 5px"><button class="btn ghost xs" onclick="gwTagEdit(&#39;'+esc(x.key)+'&#39;)">'+(ar?'ربط':'Map')+'</button></td></tr>'; }
+function gwTagSel(k,on){ _gw.tsel=_gw.tsel||{}; if(on) _gw.tsel[k]=true; else delete _gw.tsel[k]; gwTagsTable(); }
+function gwTagBulkBar(n){ var ar=(L==='ar'); return '<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:10px;padding:9px;margin-bottom:8px;display:flex;gap:7px;flex-wrap:wrap;align-items:center"><b style="font-size:12px">'+n+' '+(ar?'محدد':'selected')+'</b><button class="btn ghost xs" onclick="gwBulkTag(&#39;mark_amenity&#39;)">'+(ar?'علّم كمرفق':'Mark amenity')+'</button><button class="btn ghost xs" onclick="gwBulkTag(&#39;hide&#39;)">'+(ar?'إخفاء من نوع':'Hide from نوع')+'</button><button class="btn ghost xs" onclick="gwBulkTag(&#39;show&#39;)">'+(ar?'إظهار للضيف':'Show to guest')+'</button><button class="btn ghost xs" onclick="_gw.tsel={};gwTagsTable()">'+(ar?'إلغاء':'Clear')+'</button></div>'; }
+async function gwBulkTag(action){ var keys=Object.keys(_gw.tsel||{}); if(!keys.length) return; var r; try{ r=await post('/api/gw/tags/bulk',{action:action,keys:keys}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓ '+(r.count||0)); _gw.tsel={}; gwTags(); } else toast('⚠'); }
 function gwTagEdit(key){ var ar=(L==='ar'); var x=(_gw.tagById||{})[key]; if(!x){ toast('⚠'); return; }
   openDrawer((ar?'ربط وسم: ':'Map tag: ')+key,(x.raw_values||[]).join(', '));
   var cats=(_gw.cats||[]).map(function(c){ return '<option value="'+c+'"'+(x.category===c?' selected':'')+'>'+c+'</option>'; }).join('');
@@ -22846,7 +22881,7 @@ function gwTagEdit(key){ var ar=(L==='ar'); var x=(_gw.tagById||{})[key]; if(!x)
 async function gwTagSave(key){ var ar=(L==='ar'); var body={key:key,action:'update',ar:document.getElementById('gt_ar').value,en:document.getElementById('gt_en').value,category:document.getElementById('gt_cat').value,visibility:document.getElementById('gt_vis').value,in_noo:document.getElementById('gt_noo').checked};
   var r; try{ r=await post('/api/gw/tag',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwTags(); } else toast('⚠'); }
 async function gwTagHide(key){ try{ await post('/api/gw/tag',{key:key,action:'hide'}); toast('✓'); closeDrawer(); gwTags(); }catch(_){ toast('⚠'); } }
-async function gwBulkMap(){ var ar=(L==='ar'); var r; try{ r=await post('/api/gw/tags/bulk',{}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم ربط ':'mapped ')+(r.mapped||0)); gwTags(); } else toast('⚠'); }
+async function gwSeed(){ var ar=(L==='ar'); var r; try{ r=await post('/api/gw/tags/bulk',{action:'seed'}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم ربط ':'mapped ')+(r.mapped||0)); gwTags(); } else toast('⚠'); }
 async function gwAirbnb(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/airbnb'); }catch(_){ d=null; } var ls=(d&&d.listings)||[]; var miss=ls.filter(function(x){return !x.has_airbnb;}); var found=ls.length-miss.length;
   var h='<div style="'+fbCard()+'"><b>🔗 '+esc(t().gw_airbnb)+'</b><div style="display:flex;gap:8px;margin-top:8px">'+fbChip((ar?'موجود ':'found ')+found,'ok')+fbChip((ar?'مفقود ':'missing ')+miss.length,(miss.length?'warn':'ok'))+'</div>';
   if(miss.length) h+='<div style="font-size:12px;margin-top:8px;color:var(--gold)">'+(ar?'رابط Airbnb غير موجود في بيانات Hostaway لهذه الوحدات. عدّله من Hostaway < Listing < Airbnb/channel link ثم اضغط تحديث — أو حط رابط احتياطي محلي من تبويب الوحدات.':'Airbnb URL not in Hostaway for these. Set it in Hostaway > Listing > Airbnb/channel link then Sync, or add a local fallback in Listings.')+'</div>';
@@ -37772,14 +37807,32 @@ async def _api_gw_tag(request):
 async def _api_gw_tags_bulk(request):
     if not _dash_auth(request):
         return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    action = (b.get("action") or "seed").strip()
+    now = datetime.now(TZ).isoformat(timespec="seconds")
     n = 0
-    for k, seed in _GW_SEED.items():
-        ent = _gw_taxonomy.get(k)
-        if ent and not (ent.get("ar") or ent.get("en")):
-            ent["ar"], ent["en"], ent["category"], ent["visibility"] = seed
-            ent["status"] = "mapped"; ent["updated"] = datetime.now(TZ).isoformat(timespec="seconds"); n += 1
+    if action == "seed":                              # auto-map known common tags from the seed
+        for k, seed in _GW_SEED.items():
+            ent = _gw_taxonomy.get(k)
+            if ent and not (ent.get("ar") or ent.get("en")):
+                ent["ar"], ent["en"], ent["category"], ent["visibility"] = seed
+                ent["status"] = "mapped"; ent["updated"] = now; n += 1
+    else:                                             # bulk action on selected keys
+        for k in (b.get("keys") or []):
+            ent = _gw_taxonomy.get(k)
+            if not ent:
+                continue
+            if action == "mark_amenity":
+                ent["category"] = "amenity"; ent["visibility"] = "hidden"; ent["in_noo"] = False; ent["status"] = "amenity"
+            elif action == "hide":
+                ent["visibility"] = "hidden"
+            elif action == "show":
+                ent["visibility"] = "filter_badge"
+                if ent.get("status") == "amenity":
+                    ent["status"] = "mapped" if (ent.get("ar") or ent.get("en")) else "unmapped"
+            ent["updated"] = now; n += 1
     _gw_save_tax()
-    return _json({"ok": True, "mapped": n})
+    return _json({"ok": True, "mapped": n, "count": n})
 
 async def _api_gw_airbnb(request):
     if not _dash_auth(request):
