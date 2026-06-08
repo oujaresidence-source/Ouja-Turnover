@@ -22335,44 +22335,69 @@ function fbBankRow(x){
     +fbChip(x.category||'unknown',(x.category==='unknown'?'warn':'mut'))+stChip
     +'<button class="btn ghost xs" onclick="fbBankReview(&#39;'+x.id+'&#39;)">'+(ar?'صنّف':'review')+'</button></div>';
 }
-function _fbBankCats(){ var ar=(L==='ar'); return [
-  ['channel_payout', ar?'دفعة قناة (إيراد)':'Channel payout (revenue)'],
-  ['founder_funding', ar?'تمويل من المؤسس (ليس إيراد)':'Founder funding (not revenue)'],
-  ['owner_deposit', ar?'إيداع/دفعة مالك':'Owner deposit'],
-  ['owner_payout', ar?'تحويل للمالك':'Owner payout'],
+function fbCats(){ var ar=(L==='ar'); return [
   ['cleaning_provider', ar?'نظافة':'Cleaning'],
   ['maintenance', ar?'صيانة':'Maintenance'],
-  ['wifi', ar?'إنترنت':'Internet/Wi-Fi'],
-  ['software_subscription', ar?'اشتراكات':'Subscriptions'],
-  ['supplier', ar?'مورّد/شراء':'Supplier/Purchase'],
-  ['salary', ar?'رواتب':'Salary'],
-  ['employee_card_settlement', ar?'تسوية بطاقة موظف':'Employee card'],
+  ['wifi', ar?'إنترنت':'Wi-Fi'],
+  ['platform_fee', ar?'رسوم منصة':'Platform fee'],
   ['bank_fee', ar?'رسوم بنك':'Bank fee'],
+  ['software_subscription', ar?'اشتراكات':'Software subscription'],
+  ['customer_support', ar?'دعم العملاء':'Customer support'],
+  ['supplier', ar?'مورّد/شراء':'Supplier / purchase'],
+  ['salary', ar?'رواتب':'Salary'],
+  ['employee_card_settlement', ar?'تسوية بطاقة موظف':'Employee card settlement'],
+  ['owner_charge', ar?'على المالك':'Owner charge'],
+  ['owner_payout', ar?'تحويل للمالك':'Owner payout'],
+  ['owner_deposit', ar?'إيداع/دفعة مالك':'Owner deposit'],
+  ['channel_payout', ar?'دفعة قناة (إيراد)':'Channel payout (revenue)'],
+  ['founder_funding', ar?'تمويل من المؤسس (ليس إيراد)':'Founder funding (not revenue)'],
+  ['founder_reimbursement', ar?'استرجاع للمؤسس':'Founder reimbursement'],
+  ['refund', ar?'استرجاع':'Refund'],
   ['internal_transfer', ar?'تحويل داخلي':'Internal transfer'],
   ['other', ar?'أخرى':'Other'],
-  ['unknown', ar?'غير مصنّف':'Unclassified'] ]; }
-function fbBankReview(id){
+  ['unknown', ar?'غير مصنّف / يحتاج مراجعة':'Unknown / needs review'] ]; }
+function fbInp(){ return 'width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit'; }
+function fbCatSelect(id, cur){ var ar=(L==='ar');
+  var opts=fbCats().map(function(c){ return '<option value="'+c[0]+'"'+(c[0]===(cur||'unknown')?' selected':'')+'>'+esc(c[1])+'</option>'; }).join('');
+  return '<select id="'+id+'" onchange="fbCatOther(&#39;'+id+'&#39;)" style="'+fbInp()+'">'+opts+'</select>'
+    +'<input id="'+id+'_other" placeholder="'+(ar?'اكتب التصنيف':'Type the category')+'" style="'+fbInp()+';display:none">'; }
+function fbCatOther(id){ var s=document.getElementById(id), o=document.getElementById(id+'_other'); if(s&&o){ o.style.display=(s.value==='other'?'block':'none'); } }
+function fbCatValue(id){ var s=document.getElementById(id); if(!s) return ''; if(s.value==='other'){ var o=document.getElementById(id+'_other'); return (o&&o.value.trim())||'other'; } return s.value; }
+async function fbLoadRefs(force){
+  if(_fb.refs && !force) return _fb.refs;
+  var apts=[], ccs=[];
+  try{ var c=await api('/api/fb/contracts'); apts=((c&&c.profiles)||[]).map(function(p){ return {name:(p.apartment_name||p.apartment_code), cc:p.daftra_cost_center_id}; }).filter(function(x){return x.name;}); }catch(_){}
+  try{ var m=await api('/api/fb/mappings'); ccs=((m&&m.cost_centers)||[]).map(function(x){ return {id:x.source_id, name:(x.display_name||x.source_id)}; }); }catch(_){}
+  _fb.refs={apts:apts, ccs:ccs}; return _fb.refs;
+}
+function fbAptSelect(id, cur){ var ar=(L==='ar'); var refs=_fb.refs||{apts:[]};
+  var opts='<option value="">'+(ar?'— عام للشركة / غير مرتبط بشقة —':'— Company general / not unit-linked —')+'</option>';
+  opts+=(refs.apts||[]).map(function(a){ return '<option value="'+esc(a.name)+'"'+(a.name===cur?' selected':'')+'>'+esc(a.name)+(a.cc?'':(ar?' — ناقص مركز تكلفة':' — no cost ctr'))+'</option>'; }).join('');
+  return '<select id="'+id+'" style="'+fbInp()+'">'+opts+'</select>'; }
+async function fbBankReview(id){
   var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]; if(!x){ toast('⚠'); return; }
+  await fbLoadRefs();
   var deb=(x.debit&&x.debit!=='0.00');
-  openDrawer(ar?'مراجعة عملية بنكية':'Review bank transaction', (x.date||'')+' · '+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit));
-  var inp='width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit';
-  var cur=x.category||'unknown';
-  var opts=_fbBankCats().map(function(c){ return '<option value="'+c[0]+'"'+(c[0]===cur?' selected':'')+'>'+esc(c[1])+'</option>'; }).join('');
-  var hint=deb?(ar?'صادر — غالباً مصروف أو تحويل للمالك أو استرجاع للمؤسس':'Outgoing — usually an expense, owner payout, or founder reimbursement'):(ar?'وارد — هل هو إيراد قناة ولا تمويل من المؤسس؟':'Incoming — is it channel revenue or founder funding?');
+  var sug=(x.category&&x.category!=='unknown')?(' · '+(ar?'مقترح: ':'suggested: ')+x.category):'';
+  openDrawer(ar?'مراجعة عملية بنكية':'Review bank transaction', (x.date||'')+' · '+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit)+sug);
+  var hint=deb?(ar?'صادر — غالبًا مصروف أو تحويل للمالك أو استرجاع للمؤسس':'Outgoing — usually an expense, owner payout, or founder reimbursement'):(ar?'وارد — هل هو إيراد قناة ولا تمويل من المؤسس؟':'Incoming — channel revenue or founder funding?');
   setDrawerBody('<div style="font-size:12px;line-height:1.7;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px">'+esc((x.description||'').slice(0,140))+'</div>'
     +'<div class="muted" style="font-size:11px;margin-bottom:8px">'+esc(hint)+'</div>'
-    +'<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label><select id="fbb_cat" style="'+inp+'">'+opts+'</select>'
-    +'<label class="muted" style="font-size:11px">'+(ar?'الشقة (اختياري)':'Apartment (optional)')+'</label><input id="fbb_apt" value="'+esc(x.apartment||'')+'" style="'+inp+'">'
-    +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbb_note" value="'+esc(x.note||'')+'" style="'+inp+'">');
-  setDrawerFoot('<button class="btn primary sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;)">'+(ar?'حفظ المراجعة':'Save review')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+    +'<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label>'+fbCatSelect('fbb_cat',x.category)
+    +'<label class="muted" style="font-size:11px">'+(ar?'الشقة / مركز التكلفة':'Apartment / cost center')+'</label>'+fbAptSelect('fbb_apt',x.apartment)
+    +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbb_note" value="'+esc(x.note||'')+'" style="'+fbInp()+'">');
+  setDrawerFoot('<button class="btn primary sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,false)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,true)">'+esc(t().fb_applysimilar)+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
 }
-async function fbBankReviewSave(id){
-  var ar=(L==='ar'); var body={id:id,action:'bank_classify'};
-  var c=document.getElementById('fbb_cat'), a=document.getElementById('fbb_apt'), n=document.getElementById('fbb_note');
-  if(c){ body.category=c.value; } if(a){ body.apartment=a.value; } if(n){ body.note=n.value; }
+async function fbBankReviewSave(id, similar){
+  var ar=(L==='ar'); var body={id:id,action:'bank_classify',category:fbCatValue('fbb_cat')};
+  var a=document.getElementById('fbb_apt'), n=document.getElementById('fbb_note');
+  if(a){ body.apartment=a.value; } if(n){ body.note=n.value; } if(similar){ body.apply_similar=true; }
   var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; }
-  if(r&&r.ok){ toast(ar?'✓ تمت المراجعة':'✓ Reviewed'); closeDrawer(); fbBankRender(_fb.bankF||''); } else toast((r&&(r.error||r.message))||'⚠');
+  if(r&&r.ok){ toast((ar?'✓ تمت المراجعة':'✓ Reviewed')+(r.applied_similar?(' · +'+r.applied_similar+(ar?' مشابهة':' similar')):'')); closeDrawer(); fbGo(_fb.tab); } else toast((r&&(r.error||r.message))||'⚠');
 }
+function fbBankReviewFromInbox(id){ var it=(_fb.inboxItems||{})[id]; if(!it){ toast('⚠'); return; }
+  _fb.bankTx=_fb.bankTx||{}; _fb.bankTx[id]={id:id, date:it.date, description:it.description, category:it.category, apartment:it.apartment, note:'', debit:(it.direction==='expense'?it.amount:'0.00'), credit:(it.direction==='credit'?it.amount:'0.00')};
+  fbBankReview(id); }
 async function fbUpload(ev, kind){
   var ar=(L==='ar'), f=ev.target.files&&ev.target.files[0]; if(!f) return;
   toast(ar?'⏳ قراءة الملف…':'⏳ Reading…');
@@ -22407,6 +22432,7 @@ async function fbInboxRender(mode, filter){
   var d; try{ d=await api('/api/fb/inbox'+(filter?('?filter='+filter):'')); }catch(_){ d=null; }
   if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — الربحية والوارد المالي للمحاسبة.':'Operations see only their expense status — finance inbox is for accountants.')+'</div>'; return; }
   var items=(d&&d.items)||[], c=(d&&d.counts)||{};
+  _fb.inboxItems={}; items.forEach(function(i){ _fb.inboxItems[i.id]=i; });
   var filters=[['','الكل','All'],['needs_review','يحتاج مراجعة','Needs review'],['needs_faisal','اعتماد فيصل','Faisal approval'],['above_3000','> ٣٠٠٠','> 3000'],['ready_to_post','جاهز للترحيل','Ready to post'],['failed','فشل','Failed'],['verified','تم التحقق','Verified']];
   var h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+filters.map(function(f){ var on=((filter||'')===f[0]); return '<button class="btn '+(on?'primary':'ghost')+' xs" onclick="fbInboxRender(&#39;'+mode+'&#39;,&#39;'+f[0]+'&#39;)">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')+'</div>';
   if(!items.length){ h+='<div class="empty" style="padding:28px;text-align:center">'+(ar?'ما فيه عمليات هنا الحين':'Nothing here right now')+'</div>'; b.innerHTML=h; return; }
@@ -22417,10 +22443,10 @@ function fbInboxRow(i){
   var ar=(L==='ar'); var srcic={daftra:'📚',bank:'🏦',sheet:'📝',manual:'✍️'}[i.source]||'•';
   var actions='';
   if(i.kind==='ledger'){
-    if(i.status==='draft') actions+='<button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;submit&#39;)">'+(ar?'أرسل':'submit')+'</button>';
+    if(i.status==='draft') actions+='<button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;submit&#39;)">'+esc(t().fb_act_submit)+'</button>';
     if(i.status==='accountant_review'||i.status==='needs_faisal') actions+='<button class="btn green xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;approve&#39;)">'+t().fb_approve+'</button><button class="btn ghost xs" onclick="fbActReason(&#39;'+i.id+'&#39;,&#39;reject&#39;)">'+t().fb_reject+'</button>';
-    actions+='<button class="btn ghost xs" onclick="fbClassify(&#39;'+i.id+'&#39;)">'+(ar?'صنّف':'classify')+'</button>';
-  } else if(i.kind==='bank'){ actions+='<button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;promote&#39;)">'+(ar?'حوّله لقيد':'promote')+'</button>'; }
+    actions+='<button class="btn ghost xs" onclick="fbClassify(&#39;'+i.id+'&#39;)">'+esc(t().fb_act_classify)+'</button>';
+  } else if(i.kind==='bank'){ actions+='<button class="btn ghost xs" onclick="fbBankReviewFromInbox(&#39;'+i.id+'&#39;)">'+esc(t().fb_act_classify)+'</button><button class="btn ghost xs" onclick="fbAct(&#39;'+i.id+'&#39;,&#39;promote&#39;)">'+esc(t().fb_act_promote)+'</button>'; }
   else if(i.kind==='sheet'){ actions+='<button class="btn ghost xs" onclick="go(&#39;expenses&#39;)">'+(ar?'افتح المصاريف':'open Expenses')+'</button>'; }
   var faisal=i.needs_faisal?fbChip(t().fb_needfaisal,'warn'):'';
   return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
@@ -22431,10 +22457,16 @@ function fbInboxRow(i){
 }
 async function fbAct(id, action){ var r; try{ r=await post('/api/fb/entry',{id:id,action:action}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast((r&&(r.message||r.error))||'⚠'); }
 async function fbActReason(id, action){ var ar=(L==='ar'); var reason=(prompt(ar?'السبب:':'Reason:','')||'').trim(); if(!reason) return; var r; try{ r=await post('/api/fb/entry',{id:id,action:action,reason:reason}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast('⚠'); }
-function fbClassify(id){ var ar=(L==='ar'); openDrawer(ar?'تصنيف العملية':'Classify',''); var inp='width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit';
-  setDrawerBody('<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label><input id="fbc_cat" style="'+inp+'"><label class="muted" style="font-size:11px">'+(ar?'الشقة':'Apartment')+'</label><input id="fbc_apt" style="'+inp+'"><label class="muted" style="font-size:11px">'+(ar?'الوصف':'Description')+'</label><input id="fbc_desc" style="'+inp+'">');
+async function fbClassify(id){ var ar=(L==='ar'); await fbLoadRefs(); var it=(_fb.inboxItems||{})[id]||{};
+  openDrawer(ar?'تصنيف العملية':'Classify',(it.amount?fbMoney(it.amount):'')+(it.date?(' · '+esc(it.date)):''));
+  setDrawerBody((it.description?('<div style="font-size:12px;line-height:1.7;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px">'+esc(String(it.description).slice(0,140))+'</div>'):'')
+    +'<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label>'+fbCatSelect('fbc_cat',it.category)
+    +'<label class="muted" style="font-size:11px">'+(ar?'الشقة / مركز التكلفة':'Apartment / cost center')+'</label>'+fbAptSelect('fbc_apt',it.apartment)
+    +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbc_note" style="'+fbInp()+'">');
   setDrawerFoot('<button class="btn primary sm" onclick="fbClassifySave(&#39;'+id+'&#39;)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
-async function fbClassifySave(id){ var body={id:id,action:'classify'}; ['cat','apt','desc'].forEach(function(k,idx){ var el=document.getElementById('fbc_'+k); if(el&&el.value){ body[['category','apartment','description'][idx]]=el.value; } }); var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
+async function fbClassifySave(id){ var body={id:id,action:'classify',category:fbCatValue('fbc_cat')};
+  var a=document.getElementById('fbc_apt'), n=document.getElementById('fbc_note'); if(a){ body.apartment=a.value; } if(n&&n.value){ body.description=n.value; }
+  var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
 /* ---- Reconciliation (light) ---- */
 async function fbRecon(){ var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var d; try{ d=await api('/api/fb/bank'); }catch(_){ d=null; } var s=(d&&d.summary)||{count:0}; if(!s.count){ b.innerHTML='<div class="empty" style="padding:28px;text-align:center">'+(ar?'ارفع كشف البنك أول عشان نبدأ المطابقة.':'Upload the bank statement first to start reconciliation.')+'</div>'; return; } b.innerHTML='<div style="'+fbCard()+'"><b>🔗 '+t().fb_recon+'</b><div style="margin-top:10px;font-size:12.5px;line-height:1.9">'+(ar?'عمليات البنك: ':'bank txns: ')+'<b>'+(s.count||0)+'</b><br>'+(ar?'غير مطابقة: ':'unmatched: ')+'<b style="color:var(--gold)">'+(s.unmatched||0)+'</b><br>'+(ar?'تحتاج مراجعة: ':'needs review: ')+'<b>'+(s.needs_review||0)+'</b></div><div class="muted" style="font-size:11.5px;margin-top:8px">'+(ar?'المطابقة التلقائية مع Hostaway/القيود تجي بعد ربط الإيراد. حالياً صنّف الحركة من «الوارد المالي».':'Auto-match with Hostaway/journals comes after revenue is connected. For now classify from the Financial Inbox.')+'</div></div>'; }
 /* ---- Daftra Sync Log ---- */
@@ -33316,6 +33348,12 @@ def _fb_bank_classify(desc, debit, credit):
     # leave them 'unknown' so the accountant classifies (never fake revenue).
     return "unknown"
 
+def _fb_similar_key(desc):
+    """Group bank rows by their transaction TYPE (the part before ' · ', which is the
+    counterparty/reference) so 'apply to similar' can classify repeats in one click."""
+    s = str(desc or "").split(" · ")[0].strip().lower()
+    return re.sub(r"[^0-9a-z؀-ۿ ]+", "", s).strip()[:40]
+
 def _fb_card_last4(desc):
     import re as _re
     m = _re.search(r"(\d{4})\D*$", str(desc or "")) or _re.search(r"\b(\d{4})\b", str(desc or ""))
@@ -33996,13 +34034,29 @@ async def _api_fb_entry(request):
         if b.get("note") not in (None, ""):
             bx["note"] = str(b.get("note"))[:300]
         # 'unknown' stays needs_review (still undecided); any real category → reviewed
+        now_iso = datetime.now(TZ).isoformat(timespec="seconds")
         bx["status"] = "needs_review" if (bx.get("category") or "unknown") == "unknown" else "reviewed"
         bx["reviewed_by"] = actor
-        bx["reviewed_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        bx["reviewed_at"] = now_iso
+        applied = 0
+        if b.get("apply_similar") and cat and cat != "unknown" and bx.get("description"):
+            key = _fb_similar_key(bx.get("description"))
+            if key:
+                for other in _fb_bank.values():
+                    if other.get("id") == bx.get("id") or other.get("status") == "reviewed":
+                        continue
+                    if _fb_similar_key(other.get("description")) == key:
+                        other["category"] = cat
+                        if b.get("apartment") not in (None,):
+                            other["apartment"] = (b.get("apartment") or "").strip()
+                        other["status"] = "reviewed"
+                        other["reviewed_by"] = actor
+                        other["reviewed_at"] = now_iso
+                        applied += 1
         _fb_save("finance_bank_transactions.json", _fb_bank)
         _fb_audit_add(actor, "bank_classify", "bank_txn", bx["id"], before=before,
-                      after={"category": bx.get("category"), "status": bx.get("status")}, reason=b.get("note", ""))
-        return _json({"ok": True, "txn": bx})
+                      after={"category": bx.get("category"), "status": bx.get("status"), "applied_similar": applied}, reason=b.get("note", ""))
+        return _json({"ok": True, "txn": bx, "applied_similar": applied})
     eid = (b.get("id") or "").strip()
     e = _fb_ledger.get(eid)
     if not e:
