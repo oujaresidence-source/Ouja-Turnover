@@ -33253,6 +33253,7 @@ _fb_cards     = _load_json("finance_card_mappings.json", {}) or {}      # card_l
 _fb_djournals = _load_json("finance_daftra_journals.json", {}) or {}    # daftra entry_id -> {entry + lines[]}
 _fb_dstate    = _load_json("finance_daftra_import_state.json", {}) or {} # data_type -> per-type sync state
 _fb_bankmap   = _load_json("finance_bank_account_map.json", {}) or {}    # local_bank_source -> Daftra bank account
+_fb_line_links = _load_json("finance_journal_line_links.json", {}) or {} # entry_id -> {line_id -> {linked_bank_ids[],linked_amount,line_amount}}  (distributed/cost-center allocation consumption)
 
 def _fb_save(name, obj):
     try:
@@ -33837,6 +33838,163 @@ def _fb_journal_objects(mapped):
         out.append({"entry": entry, "bank_lines": bank_lines, "counterpart": (counter or lines)})
     return out
 
+# ====== Distributed / cost-center allocation matching (subset of journal lines) ======
+_FB_LINE_CATS = {
+    "cleaning":    ["نظاف", "تنظيف", "cleaning", "clean", "خدمات المنازل", "مؤسسه", "عماله", "عمال", "housekeeping"],
+    "maintenance": ["صيان", "maintenance", "ترميم", "اصلاح", "سباك", "كهربائي", "تكييف", "repair", "plumb"],
+    "government":  ["حكوم", "government", "رسوم", "غرامه", "بلديه", "وزاره", "جوازات", "مكتب العمل", "تصريح", "license", "gov"],
+    "utilities":   ["كهرباء", "ماء", "مياه", "فاتوره", "electric", "water", "انترنت", "wifi", "اتصالات", "utility"],
+    "supplies":    ["مستلزم", "اثاث", "furniture", "تجهيز", "شراء", "اغراض", "supplies", "purchase"],
+    "salary":      ["راتب", "رواتب", "salary", "اجور", "مكافا", "payroll", "عهده", "سلفه", "custody"],
+}
+
+def _fb_line_cat(line):
+    """Coarse expense category of a journal line from account/desc/cost-center (for subset coherence)."""
+    blob = _fb_ar_norm((line.get("account_name") or "") + " " + (line.get("description") or "") + " " + (line.get("cost_center_name") or ""))
+    if not blob:
+        return "other"
+    for cat, kws in _FB_LINE_CATS.items():
+        for kw in kws:
+            if _fb_ar_norm(kw) in blob:
+                return cat
+    return "other"
+
+def _fb_bank_hint_cats(desc):
+    """Categories implied by the bank-txn description — used only to disambiguate subset candidates."""
+    blob = _fb_ar_norm(desc)
+    hits = set()
+    if not blob:
+        return hits
+    for cat, kws in _FB_LINE_CATS.items():
+        for kw in kws:
+            if _fb_ar_norm(kw) in blob:
+                hits.add(cat); break
+    return hits
+
+def _hal(amount):
+    """Decimal SAR → integer halalas (cents). Exact, never float."""
+    return int((_fb_money(amount) * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+def _fb_line_remaining(entry_id, line_id, line_amount):
+    """Unconsumed amount (Decimal) of a journal line after prior distributed/batch links."""
+    la = _fb_money(line_amount)
+    rec = (_fb_line_links.get(str(entry_id)) or {}).get(str(line_id))
+    return (la - _fb_money(rec.get("linked_amount"))) if rec else la
+
+def _fb_mark_lines_linked(entry_id, chosen, bank_id):
+    """Record line-level consumption so a journal line is never linked to two bank txns. chosen=[(line_id,amt)]."""
+    book = _fb_line_links.setdefault(str(entry_id), {})
+    for lid, amt in chosen:
+        rec = book.setdefault(str(lid), {"linked_bank_ids": [], "linked_amount": "0.00", "line_amount": _fb_money_str(amt)})
+        if bank_id not in rec["linked_bank_ids"]:
+            rec["linked_bank_ids"].append(bank_id)
+        rec["linked_amount"] = _fb_money_str(_fb_money(rec["linked_amount"]) + _fb_money(amt))
+        rec["line_amount"] = _fb_money_str(amt)
+    _fb_save("finance_journal_line_links.json", _fb_line_links)
+
+def _fb_release_lines(bank_id):
+    """Free any journal lines previously consumed by this bank txn (on unlink / 'not this distribution')."""
+    changed = False
+    for eid, book in list(_fb_line_links.items()):
+        for lid, rec in list(book.items()):
+            if bank_id in (rec.get("linked_bank_ids") or []):
+                rec["linked_bank_ids"].remove(bank_id)
+                if not rec["linked_bank_ids"]:
+                    book.pop(lid, None)
+                changed = True
+        if not book:
+            _fb_line_links.pop(eid, None)
+    if changed:
+        _fb_save("finance_journal_line_links.json", _fb_line_links)
+
+def _fb_subset_sum(target, items, max_states=80000):
+    """0/1 subset-sum over integer halalas. items=[(idx, halalas)]. Returns (idx_list|None, capped).
+    Bounded by max_states reachable sums; prefers the fewest lines. Never uses float."""
+    if target <= 0:
+        return None, False
+    reach = {0: ()}
+    capped = False
+    for idx, v in items:
+        if v <= 0 or v > target:
+            continue
+        for s, idxs in list(reach.items()):
+            ns = s + v
+            if ns > target:
+                continue
+            cur = reach.get(ns)
+            if cur is None or (len(idxs) + 1) < len(cur):
+                reach[ns] = idxs + (idx,)
+        if len(reach) > max_states:
+            capped = True
+            break
+    res = reach.get(target)
+    return (list(res) if res else None), capped
+
+def _fb_subset_match_journal(txn, jo, hint_cats=None):
+    """Match a bank txn to a SUBSET (≥2) of one journal's counterpart lines (cost-center allocation).
+    Requires a correct-direction mapped bank-side line whose total ≥ the txn (the txn is a portion of
+    that journal's bank movement). Honours line-level consumption. Returns dict or None (or {capped:True})."""
+    deb, cre = _fb_money(txn.get("debit")), _fb_money(txn.get("credit"))
+    outgoing = deb > 0
+    tamt = deb if outgoing else cre
+    if tamt <= 0:
+        return None
+    bank_line, bank_total = None, Decimal("0.00")
+    for bl in jo["bank_lines"]:
+        side = _fb_money(bl.get("credit")) if outgoing else _fb_money(bl.get("debit"))
+        if side > 0:
+            bank_line, bank_total = bl, side
+            break
+    if bank_line is None or bank_total < tamt:        # need a bank line big enough to contain this portion
+        return None
+    eid = jo["entry"].get("entry_id")
+    cands = []                                         # (line, amount, category) — available, correct direction
+    for ln in jo["counterpart"]:
+        amt = _fb_money(ln.get("debit")) if outgoing else _fb_money(ln.get("credit"))
+        if amt <= 0:
+            continue
+        if _fb_line_remaining(eid, ln.get("line_id"), amt) < amt:    # already consumed by another txn
+            continue
+        cands.append((ln, amt, _fb_line_cat(ln)))
+    if len(cands) < 2 or sum((a for _, a, _c in cands), Decimal("0.00")) < tamt:
+        return None
+    hint_cats = hint_cats if hint_cats is not None else _fb_bank_hint_cats(txn.get("description"))
+    target = _hal(tamt)
+
+    def _search(pool):
+        idxs, capped = _fb_subset_sum(target, [(i, _hal(a)) for i, (ln, a, c) in enumerate(pool)])
+        return ([pool[i] for i in idxs] if (idxs and len(idxs) >= 2) else None), capped
+
+    sel, capped, coherent = None, False, False
+    # 1) hint-restricted first → a COHERENT subset (e.g. only cleaning lines for a cleaning transfer)
+    if hint_cats:
+        pool = [c for c in cands if c[2] in hint_cats]
+        if len(pool) >= 2:
+            sel, capped = _search(pool)
+            if sel:
+                coherent = True
+    # 2) any single non-'other' category group (still coherent) before mixing categories
+    if not sel:
+        groups = {}
+        for c in cands:
+            if c[2] != "other":
+                groups.setdefault(c[2], []).append(c)
+        for cat, pool in groups.items():
+            if len(pool) >= 2:
+                s, cp = _search(pool)
+                if s:
+                    sel, coherent = s, True
+                    break
+    # 3) fallback: any subset across all lines — coherence judged honestly (mixed → needs review)
+    if not sel:
+        sel, capped = _search(cands)
+        if sel:
+            cs = {c[2] for c in sel} - {"other"}
+            coherent = (len(cs) <= 1)
+    if not sel:
+        return {"capped": True} if capped else None
+    return {"bank_line": bank_line, "journal_total": bank_total, "selected": [c[0] for c in sel], "coherent": coherent}
+
 def _fb_dup_score_journal(txn, jo, mapped):
     """DETERMINISTIC accounting tiers FIRST; fuzzy text is only a weak tie-break (never overrides).
     Bank OUTGOING(debit) ↔ a CREDIT to the mapped bank account; INCOMING(credit) ↔ a DEBIT to it.
@@ -33844,35 +34002,53 @@ def _fb_dup_score_journal(txn, jo, mapped):
     deb, cre = _fb_money(txn.get("debit")), _fb_money(txn.get("credit"))
     outgoing = deb > 0
     tamt = deb if outgoing else cre
+    NONE = {"match_type": "no_match_after_full_check"}
     if tamt <= 0:
-        return 0, "", "", None, []
+        return 0, "", "", None, [], NONE
     entry = jo["entry"]
     td, ed = _fb_norm_date(txn.get("date")), _fb_norm_date(entry.get("date"))
     dd = abs((td - ed).days) if (td and ed) else 99
     if dd > 3:
-        return 0, "", "", None, []
+        return 0, "", "", None, [], NONE
     counterpart = jo["counterpart"]
-    # TIER A/B — a MAPPED bank-side line, correct direction, EXACT Decimal amount
+    # TIER A/B — a MAPPED bank-side line, correct direction, EXACT Decimal amount (direct match)
     bank_match = None
     for bl in jo["bank_lines"]:
         side = _fb_money(bl.get("credit")) if outgoing else _fb_money(bl.get("debit"))
-        if side > 0 and side == tamt:
+        if side > 0 and side == tamt and _fb_line_remaining(entry.get("entry_id"), bl.get("line_id"), side) >= tamt:
             bank_match = bl; break
     if bank_match is not None:
+        meta = {"match_type": "direct_bank_line_match"}
         if dd == 0:
-            return 99, "موجود في دافترة: نفس المبلغ، نفس التاريخ، وسطر حساب البنك مطابق", "Existing in Daftra: same amount, same date, bank-account line matches", bank_match, counterpart
+            return 99, "موجود في دافترة: نفس المبلغ، نفس التاريخ، وسطر حساب البنك مطابق", "Existing in Daftra: same amount, same date, bank-account line matches", bank_match, counterpart, meta
         if dd <= 1:
-            return 92, "المبلغ وسطر البنك مطابقين، والتاريخ قريب (±يوم)", "Amount + bank line match, date ±1 day", bank_match, counterpart
-        return 86, "المبلغ وسطر البنك مطابقين، والتاريخ قريب", "Amount + bank line match, date within ±3 days", bank_match, counterpart
-    # TIER C/D — amount matches a line but no mapped bank-side proof (reason names what's missing)
+            return 92, "المبلغ وسطر البنك مطابقين، والتاريخ قريب (±يوم)", "Amount + bank line match, date ±1 day", bank_match, counterpart, meta
+        return 86, "المبلغ وسطر البنك مطابقين، والتاريخ قريب", "Amount + bank line match, date within ±3 days", bank_match, counterpart, meta
+    # TIER DISTRIBUTED — txn equals a SUBSET (≥2) of counterpart lines inside a larger journal
+    sub = _fb_subset_match_journal(txn, jo)
+    if sub and sub.get("selected"):
+        sel, coh = sub["selected"], sub["coherent"]
+        meta = {"match_type": "distributed_subset_match", "selected_line_ids": [s.get("line_id") for s in sel],
+                "selected_lines": sel, "journal_total": _fb_money_str(sub["journal_total"]),
+                "bank_line": sub["bank_line"], "num_lines": len(sel), "coherent": coh}
+        if dd == 0 and coh:
+            return 98, "موجود في دافترة كتوزيع داخل قيد: مجموع الأسطر المختارة يطابق العملية", "In Daftra as a distribution inside a journal: selected lines sum to the txn", sub["bank_line"], counterpart, meta
+        if dd <= 1 and coh:
+            return 92, "المبلغ يطابق توزيع أسطر داخل قيد دافترة، والتاريخ قريب", "Amount matches a distribution of lines inside a Daftra journal, date close", sub["bank_line"], counterpart, meta
+        if dd <= 1:
+            return 80, "فيه توزيع محتمل داخل قيد دافترة، يحتاج تأكيد المحاسب (تصنيف الأسطر مختلط)", "Possible distribution inside a Daftra journal — needs confirmation (mixed categories)", sub["bank_line"], counterpart, meta
+        return 76, "فيه توزيع محتمل داخل قيد دافترة، لكن التاريخ غير مطابق تمامًا", "Possible distribution inside a Daftra journal — date not exact", sub["bank_line"], counterpart, meta
+    # TIER C/D — amount matches a single line but no mapped bank-side proof (reason names what's missing)
     any_line = None
     for ln in (jo["bank_lines"] + counterpart):
-        if (_fb_money(ln.get("debit")) or _fb_money(ln.get("credit"))) == tamt:
+        amt_ln = _fb_money(ln.get("debit")) or _fb_money(ln.get("credit"))
+        if amt_ln == tamt and _fb_line_remaining(entry.get("entry_id"), ln.get("line_id"), amt_ln) >= tamt:
             any_line = ln; break
     if any_line is None:
-        return 0, "", "", None, []
+        return 0, "", "", None, [], NONE
+    meta = {"match_type": "partial_journal_candidate"}
     if not mapped:
-        return 72, "المبلغ مطابق لكن حساب البنك غير مربوط", "Amount matches but bank account not mapped", any_line, counterpart
+        return 72, "المبلغ مطابق لكن حساب البنك غير مربوط", "Amount matches but bank account not mapped", any_line, counterpart, meta
     if dd == 0:
         conf, ar, en = 78, "المبلغ والتاريخ متطابقين، لكن ناقص تأكيد حساب البنك", "Amount + date match, but bank-account confirmation missing"
     elif dd <= 1:
@@ -33882,7 +34058,7 @@ def _fb_dup_score_journal(txn, jo, mapped):
     cdesc = " ".join((c.get("description") or c.get("account_name") or "") for c in counterpart) + " " + (entry.get("description") or "")
     if _fb_text_sim(txn.get("description"), cdesc) >= 0.5:    # weak tie-break only, capped at 84
         conf = min(84, conf + 6)
-    return conf, ar, en, any_line, counterpart
+    return conf, ar, en, any_line, counterpart, meta
 
 def _fb_dup_status_for(score):
     if score >= 95:
@@ -33895,24 +34071,45 @@ def _fb_dup_status_for(score):
         return "needs_manual_review"
     return "not_found_after_full_check"
 
+def _fb_journal_lines_view(ent):
+    """All lines of a journal with line-level remaining/consumed flags (for the manual line picker)."""
+    eid = ent.get("entry_id")
+    out = []
+    for ln in (ent.get("lines") or []):
+        amt = _fb_money(ln.get("debit")) or _fb_money(ln.get("credit"))
+        rem = _fb_line_remaining(eid, ln.get("line_id"), amt)
+        out.append({"line_id": ln.get("line_id"), "account_name": ln.get("account_name"),
+                    "account_code": ln.get("account_code"), "cost_center_name": ln.get("cost_center_name"),
+                    "debit": ln.get("debit"), "credit": ln.get("credit"), "description": ln.get("description"),
+                    "amount": _fb_money_str(amt), "remaining": _fb_money_str(rem), "consumed": (rem < amt)})
+    return out
+
 def _fb_dup_suggest(txn, limit=8):
-    """Scored journal suggestions for a bank txn (for the comparison drawer)."""
+    """Scored journal suggestions for a bank txn (for the comparison drawer). Includes distributed
+    subset selections + full journal lines (with consumption) for manual line selection."""
     bankset = _fb_mapped_bank_accounts()
     out = []
     for jo in _fb_journal_objects(bankset):
-        sc, a, e, line, cp = _fb_dup_score_journal(txn, jo, bankset)
+        sc, a, e, line, cp, meta = _fb_dup_score_journal(txn, jo, bankset)
         if sc <= 0:
             continue
         ent = jo["entry"]
-        out.append({"entry_id": ent.get("entry_id"), "number": ent.get("number"), "date": ent.get("date"),
-                    "description": ent.get("description"), "reference": ent.get("reference"),
-                    "confidence": sc, "reason_ar": a, "reason_en": e,
-                    "bank_line": ({"account_name": line.get("account_name"), "account_code": line.get("account_code"),
-                                   "debit": line.get("debit"), "credit": line.get("credit")} if line else None),
-                    "counterpart": [{"account_name": c.get("account_name"), "debit": c.get("debit"),
-                                     "credit": c.get("credit"), "description": c.get("description"),
-                                     "cost_center_name": c.get("cost_center_name")} for c in (cp or [])[:4]]})
-    out.sort(key=lambda x: -x["confidence"])
+        mt = meta.get("match_type")
+        sug = {"entry_id": ent.get("entry_id"), "number": ent.get("number"), "date": ent.get("date"),
+               "description": ent.get("description"), "reference": ent.get("reference"),
+               "confidence": sc, "reason_ar": a, "reason_en": e, "match_type": mt,
+               "journal_total": meta.get("journal_total"),
+               "bank_line": ({"account_name": line.get("account_name"), "account_code": line.get("account_code"),
+                              "debit": line.get("debit"), "credit": line.get("credit")} if line else None),
+               "lines": _fb_journal_lines_view(ent),
+               "counterpart": [{"account_name": c.get("account_name"), "debit": c.get("debit"),
+                                "credit": c.get("credit"), "description": c.get("description"),
+                                "cost_center_name": c.get("cost_center_name")} for c in (cp or [])[:8]]}
+        if mt == "distributed_subset_match":
+            sug["selected_line_ids"] = meta.get("selected_line_ids") or []
+            sug["num_lines"] = meta.get("num_lines")
+        out.append(sug)
+    out.sort(key=lambda x: (-x["confidence"], 0 if x.get("match_type") == "distributed_subset_match" else 1, len(x.get("selected_line_ids") or [])))
     return out[:limit]
 
 def _fb_dup_diag():
@@ -33999,33 +34196,46 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
             txn["matched_daftra_id"] = None; txn["matched_daftra_source_type"] = None
             counts["missing_bank_account_mapping"] += 1
             continue
-        best_sc, best_rs, best_line, best_entry = 0, ("", ""), None, None
+        best_sc, best_rs, best_line, best_entry, best_meta = 0, ("", ""), None, None, {}
         for jo in journals:
-            sc, a, e, line, cp = _fb_dup_score_journal(txn, jo, bankset)
+            sc, a, e, line, cp, meta = _fb_dup_score_journal(txn, jo, bankset)
             if sc > best_sc:
-                best_sc, best_rs, best_line, best_entry = sc, (a, e), line, jo["entry"]
+                best_sc, best_rs, best_line, best_entry, best_meta = sc, (a, e), line, jo["entry"], meta
         status = _fb_dup_status_for(best_sc)
+        mt = best_meta.get("match_type") if best_sc >= 50 else "no_match_after_full_check"
         txn["daftra_duplicate_status"] = status
         txn["daftra_duplicate_confidence"] = best_sc
+        txn["daftra_match_type"] = mt
         if best_sc >= 50 and best_entry:
             txn["daftra_duplicate_reason_ar"] = best_rs[0]
             txn["daftra_duplicate_reason_en"] = best_rs[1]
             txn["matched_daftra_source_type"] = "journal_entry"
             txn["matched_daftra_id"] = best_entry.get("entry_id")
             txn["matched_daftra_number"] = best_entry.get("number")
-            txn["matched_daftra_line_id"] = (best_line.get("line_id") if best_line else None)
+            if mt == "distributed_subset_match":
+                txn["matched_daftra_line_ids"] = best_meta.get("selected_line_ids") or []
+                txn["matched_daftra_line_id"] = None
+                txn["distributed_journal_total"] = best_meta.get("journal_total")
+                txn["distributed_num_lines"] = best_meta.get("num_lines")
+            else:
+                txn["matched_daftra_line_id"] = (best_line.get("line_id") if best_line else None)
+                txn["matched_daftra_line_ids"] = []
+                txn.pop("distributed_journal_total", None); txn.pop("distributed_num_lines", None)
         else:
-            txn["daftra_duplicate_reason_ar"] = "تم فحص القيود والمصاريف ولا يوجد تطابق قوي"
-            txn["daftra_duplicate_reason_en"] = "Journals & expenses checked, no strong match"
+            txn["daftra_duplicate_reason_ar"] = "تم فحص القيود والمصاريف (إجمالي + توزيع الأسطر) ولا يوجد تطابق"
+            txn["daftra_duplicate_reason_en"] = "Journals & expenses checked (totals + line distribution), no match"
             txn["matched_daftra_id"] = None; txn["matched_daftra_source_type"] = None; txn["matched_daftra_number"] = None
+            txn["matched_daftra_line_ids"] = []
         counts[status] = counts.get(status, 0) + 1
     _fb_save("finance_bank_transactions.json", _fb_bank)
     _fb_audit_add(actor, "daftra_dup_check", "bank", (start or "ids"),
                   after={"checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset), **counts})
     nd = counts["strong_possible_duplicate"] + counts["possible_duplicate"] + counts["needs_manual_review"]
+    distributed = sum(1 for x in _fb_bank.values() if x.get("daftra_match_type") == "distributed_subset_match"
+                      and x.get("daftra_duplicate_status") in ("already_in_daftra_verified", "strong_possible_duplicate", "possible_duplicate", "needs_manual_review", "linked_existing"))
     return {"ok": True, "checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset),
             "ready_to_link_count": counts["already_in_daftra_verified"], "needs_decision_count": nd,
-            "diag": diag, "lanes": _fb_inbox()["lanes"], **counts}
+            "distributed": distributed, "diag": diag, "lanes": _fb_inbox()["lanes"], **counts}
 
 def _fb_dup_summary():
     by = {}
@@ -34071,6 +34281,121 @@ def _fb_dup_bulk_link(actor="", ids=None):
     _fb_audit_add(actor, "daftra_dup_bulk_link", "bank", "bulk", after={"linked": linked, "total": _fb_money_str(total)})
     return {"ok": True, "linked": linked, "total": _fb_money_str(total)}
 
+def _fb_distributed_summary():
+    """Counts for the Daily-Flow 'distribution matches' card + queue chips."""
+    conf = strong = review = linked = 0
+    for x in _fb_bank.values():
+        if x.get("daftra_match_type") not in ("distributed_subset_match", "batch_bank_line_match"):
+            continue
+        dq = x.get("daftra_duplicate_status")
+        if dq == "linked_existing":
+            linked += 1
+        elif dq == "already_in_daftra_verified":
+            conf += 1
+        elif dq == "strong_possible_duplicate":
+            strong += 1
+        elif dq in ("possible_duplicate", "needs_manual_review"):
+            review += 1
+    return {"confirmed": conf, "strong": strong, "review": review, "linked": linked,
+            "ready": conf + strong, "total": conf + strong + review + linked}
+
+def _fb_batch_suggest(entry_id):
+    """Reverse case: ONE journal bank-side line total = SUM of several bank txns on/near its date.
+    Read-only suggestion + candidates for manual multi-select linking (never auto-links)."""
+    mapped = _fb_mapped_bank_accounts()
+    ent = _fb_djournals.get(str(entry_id))
+    if not ent:
+        return None
+    bank_lines = [ln for ln in (ent.get("lines") or []) if _fb_line_is_bank(ln, mapped)]
+    best = None
+    for bl in bank_lines:
+        cr, dr = _fb_money(bl.get("credit")), _fb_money(bl.get("debit"))
+        amt = max(cr, dr); side = "credit" if cr >= dr else "debit"
+        if best is None or amt > best[0]:
+            best = (amt, side, bl)
+    if not best or best[0] <= 0:
+        return {"ok": True, "entry_id": str(entry_id), "number": ent.get("number"), "date": ent.get("date"),
+                "bank_total": "0.00", "candidates": [], "note": "no_bank_line"}
+    bank_total, side, bl = best
+    outgoing = (side == "credit")                  # bank credit (money out) ↔ outgoing bank txns
+    ed = _fb_norm_date(ent.get("date"))
+    consumed = _fb_money(((_fb_line_links.get(str(entry_id)) or {}).get(str(bl.get("line_id"))) or {}).get("linked_amount"))
+    remaining = bank_total - consumed
+    cands = []
+    for tid, x in _fb_bank.items():
+        if x.get("daftra_duplicate_status") in ("linked_existing", "ignored"):
+            continue
+        amt = _fb_money(x.get("debit")) if outgoing else _fb_money(x.get("credit"))
+        if amt <= 0:
+            continue
+        td = _fb_norm_date(x.get("date"))
+        dd = abs((td - ed).days) if (td and ed) else 99
+        if dd > 3:
+            continue
+        cands.append({"id": tid, "date": x.get("date"), "amount": _fb_money_str(amt),
+                      "description": (x.get("description") or "")[:80], "dd": dd})
+    cands.sort(key=lambda c: (c["dd"], c["date"] or ""))
+    items = [(i, _hal(c["amount"])) for i, c in enumerate(cands)]
+    idxs, _cap = _fb_subset_sum(_hal(remaining), items)
+    suggested = [cands[i]["id"] for i in (idxs or [])]
+    return {"ok": True, "entry_id": str(entry_id), "number": ent.get("number"), "date": ent.get("date"),
+            "description": ent.get("description"), "bank_account": bl.get("account_name"),
+            "bank_total": _fb_money_str(bank_total), "remaining": _fb_money_str(remaining),
+            "direction": ("outgoing" if outgoing else "incoming"), "line_id": bl.get("line_id"),
+            "candidates": cands[:40], "suggested_ids": suggested}
+
+def _fb_batch_link(entry_id, bank_ids, actor=""):
+    """Link MULTIPLE bank txns to one journal bank-side line; their sum must equal the line's remaining."""
+    ent = _fb_djournals.get(str(entry_id))
+    if not ent or not bank_ids:
+        return {"error": "bad_batch", "error_ar": "اختر القيد والحوالات"}
+    mapped = _fb_mapped_bank_accounts()
+    bank_lines = [ln for ln in (ent.get("lines") or []) if _fb_line_is_bank(ln, mapped)]
+    best = None
+    for bl in bank_lines:
+        cr, dr = _fb_money(bl.get("credit")), _fb_money(bl.get("debit"))
+        amt = max(cr, dr); side = "credit" if cr >= dr else "debit"
+        if best is None or amt > best[0]:
+            best = (amt, side, bl)
+    if not best or best[0] <= 0:
+        return {"error": "no_bank_line", "error_ar": "القيد ما فيه سطر على حساب البنك المربوط"}
+    bank_total, side, bl = best
+    outgoing = (side == "credit")
+    consumed = _fb_money(((_fb_line_links.get(str(entry_id)) or {}).get(str(bl.get("line_id"))) or {}).get("linked_amount"))
+    remaining = bank_total - consumed
+    total, chosen = Decimal("0.00"), []
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    for tid in bank_ids:
+        x = _fb_bank.get(tid)
+        if not x:
+            return {"error": "txn_not_found", "error_ar": "حوالة غير موجودة"}
+        if x.get("daftra_duplicate_status") == "linked_existing":
+            return {"error": "txn_already_linked", "error_ar": "وحدة من الحوالات مربوطة مسبقًا"}
+        amt = _fb_money(x.get("debit")) if outgoing else _fb_money(x.get("credit"))
+        total += amt; chosen.append((tid, x))
+    if total != remaining:
+        return {"error": "sum_mismatch", "error_ar": "مجموع الحوالات لا يطابق سطر البنك في القيد",
+                "selected": _fb_money_str(total), "bank_line": _fb_money_str(remaining)}
+    book = _fb_line_links.setdefault(str(entry_id), {})
+    rec = book.setdefault(str(bl.get("line_id")), {"linked_bank_ids": [], "linked_amount": "0.00", "line_amount": _fb_money_str(bank_total)})
+    rec["line_amount"] = _fb_money_str(bank_total)
+    rec["linked_amount"] = _fb_money_str(_fb_money(rec["linked_amount"]) + total)
+    for tid, x in chosen:
+        if tid not in rec["linked_bank_ids"]:
+            rec["linked_bank_ids"].append(tid)
+        x["daftra_duplicate_status"] = "linked_existing"; x["daftra_status"] = "linked_existing"
+        x["daftra_match_type"] = "batch_bank_line_match"
+        x["matched_daftra_source_type"] = "journal_entry"; x["matched_daftra_id"] = str(entry_id)
+        x["matched_daftra_number"] = ent.get("number"); x["matched_daftra_line_id"] = bl.get("line_id")
+        x["daftra_verification_status"] = "verified"; x["match_status"] = "matched"
+        x["batch_group_total"] = _fb_money_str(total)
+        x["duplicate_resolved_by"] = actor; x["duplicate_resolved_at"] = now
+    _fb_save("finance_journal_line_links.json", _fb_line_links)
+    _fb_save("finance_bank_transactions.json", _fb_bank)
+    _fb_audit_add(actor, "daftra_batch_link", "bank", str(entry_id),
+                  after={"linked": len(chosen), "total": _fb_money_str(total), "journal": ent.get("number")})
+    return {"ok": True, "linked": len(chosen), "total": _fb_money_str(total), "number": ent.get("number")}
+
 # ---- link existing / resolve ----
 def _fb_dup_resolve(tid, action, actor="", daftra=None, reason=""):
     txn = _fb_bank.get(tid)
@@ -34089,11 +34414,55 @@ def _fb_dup_resolve(tid, action, actor="", daftra=None, reason=""):
         txn["daftra_verification_status"] = ("verified" if (txn.get("daftra_duplicate_confidence") or 0) >= 75 else "linked_unverified")
         txn["duplicate_resolved_by"] = actor; txn["duplicate_resolved_at"] = now
         txn["match_status"] = "matched"
+        txn["daftra_match_type"] = "direct_bank_line_match"
+    elif action == "link_distributed":
+        # link a bank txn to a SUBSET of lines inside ONE Daftra journal (cost-center allocation).
+        d = daftra or {}
+        eid = str(d.get("journal_id") or d.get("id") or "")
+        line_ids = [str(x) for x in (d.get("line_ids") or []) if x is not None]
+        journal = _fb_djournals.get(eid)
+        if not journal or not line_ids:
+            return {"error": "bad_distribution", "error_ar": "اختر الأسطر اللي تخص العملية"}
+        outgoing = _fb_money(txn.get("debit")) > 0
+        tamt = _fb_money(txn.get("debit")) if outgoing else _fb_money(txn.get("credit"))
+        by_id = {str(ln.get("line_id")): ln for ln in (journal.get("lines") or [])}
+        sel_total, chosen = Decimal("0.00"), []
+        for lid in line_ids:
+            ln = by_id.get(lid)
+            if not ln:
+                return {"error": "line_not_found", "error_ar": "سطر القيد غير موجود"}
+            amt = _fb_money(ln.get("debit")) if outgoing else _fb_money(ln.get("credit"))
+            if amt <= 0:
+                return {"error": "wrong_direction", "error_ar": "اتجاه السطر لا يطابق اتجاه العملية"}
+            if _fb_line_remaining(eid, lid, amt) < amt:
+                return {"error": "line_already_linked", "error_ar": "لا نقدر نربط نفس السطر مرتين"}
+            sel_total += amt; chosen.append((lid, amt))
+        if sel_total != tamt:
+            return {"error": "sum_mismatch", "error_ar": "المجموع لا يطابق مبلغ العملية",
+                    "selected": _fb_money_str(sel_total), "txn": _fb_money_str(tamt)}
+        _fb_mark_lines_linked(eid, chosen, tid)
+        txn["daftra_duplicate_status"] = "linked_existing"; txn["daftra_status"] = "linked_existing"
+        txn["daftra_match_type"] = "distributed_subset_match"
+        txn["matched_daftra_source_type"] = "journal_entry"
+        txn["matched_daftra_id"] = eid
+        txn["matched_daftra_number"] = d.get("journal_number") or journal.get("number")
+        txn["matched_daftra_line_ids"] = line_ids
+        txn["distributed_selected_total"] = _fb_money_str(sel_total)
+        txn["bank_transaction_amount"] = _fb_money_str(tamt)
+        txn["distributed_difference"] = "0.00"
+        txn["distributed_num_lines"] = len(line_ids)
+        txn["daftra_verification_status"] = "verified"
+        txn["match_status"] = "matched"
+        txn["daftra_duplicate_confidence"] = d.get("confidence") or txn.get("daftra_duplicate_confidence") or 96
+        txn["duplicate_resolved_by"] = actor; txn["duplicate_resolved_at"] = now
     elif action == "not_duplicate":
-        txn["daftra_duplicate_status"] = "not_duplicate"
+        _fb_release_lines(tid)
+        txn["daftra_duplicate_status"] = "not_duplicate"; txn["daftra_match_type"] = None
+        txn["matched_daftra_id"] = None; txn["matched_daftra_line_ids"] = []
         txn["duplicate_resolution_reason"] = (reason or "")[:300]
         txn["duplicate_resolved_by"] = actor; txn["duplicate_resolved_at"] = now
     elif action == "ignore":
+        _fb_release_lines(tid)
         txn["daftra_duplicate_status"] = "ignored"
         txn["duplicate_resolution_reason"] = (reason or "")[:300]
         txn["duplicate_resolved_by"] = actor; txn["duplicate_resolved_at"] = now
@@ -34226,7 +34595,19 @@ async def _api_fb_daftra_dup(request):
             return _json({"ok": True, "txn": txn, "suggestions": _fb_dup_suggest(txn),
                           "bank_mapping": bool(_fb_mapped_bank_accounts()), "journals": len(_fb_djournals)})
         if q.get("ready"):
-            return _json({"ok": True, "ready": _fb_dup_ready(), "summary": _fb_dup_summary()})
+            return _json({"ok": True, "ready": _fb_dup_ready(), "summary": _fb_dup_summary(),
+                          "distributed": _fb_distributed_summary()})
+        jid = q.get("journal")
+        if jid:                                  # full journal lines (with consumption) for manual selection
+            ent = _fb_djournals.get(str(jid))
+            if not ent:
+                return _json({"error": "journal_not_found"}, 404)
+            return _json({"ok": True, "entry_id": ent.get("entry_id"), "number": ent.get("number"),
+                          "date": ent.get("date"), "description": ent.get("description"),
+                          "lines": _fb_journal_lines_view(ent)})
+        bid = q.get("batch")
+        if bid:                                  # batch suggestion: many bank txns → one journal bank line
+            return _json(_fb_batch_suggest(bid) or {"error": "journal_not_found"})
         return _json({"ok": True, "results": _fb_search_daftra(q.get("q"), q.get("amount"))})
     b = await _read_body(request)
     action = (b.get("action") or "").strip()
@@ -34238,7 +34619,10 @@ async def _api_fb_daftra_dup(request):
         return _json(_fb_dup_bulk_link(actor, b.get("ids")))
     if action == "fix_statuses":                 # recompute/normalize display states (no re-import)
         return _json(_fb_fix_statuses(actor))
-    if action in ("link", "not_duplicate", "ignore"):
+    if action == "batch_link":                   # many bank txns → one journal bank line
+        res = _fb_batch_link(b.get("journal_id"), b.get("ids") or [], actor)
+        return _json(res, (200 if res.get("ok") else 400))
+    if action in ("link", "link_distributed", "not_duplicate", "ignore"):
         res = _fb_dup_resolve(b.get("id"), action, actor, daftra=b.get("daftra"), reason=b.get("reason", ""))
         return _json(res, (200 if res.get("ok") else 400))
     return _json({"error": "bad_action"}, 400)
