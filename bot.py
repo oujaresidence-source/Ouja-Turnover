@@ -37301,6 +37301,7 @@ STAY_HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__STAY_TITLE__</title>
 <meta name="description" content="__STAY_DESC__">
+<meta name="theme-color" content="#F7F1E6">
 <meta property="og:title" content="__STAY_TITLE__">
 <meta property="og:description" content="__STAY_DESC__">
 <meta property="og:image" content="__STAY_OG__">
@@ -37311,68 +37312,108 @@ STAY_HTML = r"""<!doctype html>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f5efe3;--surface:#fffdf8;--surface2:#efe7d6;--line:#e6dcc6;--ink:#2e2418;--mut:#8a7d63;--gold:#b8893b;--gold2:#9c6f2a;--brown:#3d2f1f;--green:#3e7d5a;--radius:16px;--shadow:0 6px 22px rgba(61,47,31,.10);--ease:cubic-bezier(.23,1,.32,1)}
+:root{--bg:#F7F1E6;--surface:#FFFDF8;--elev:#FFFFFF;--ink:#2F241B;--mut:#7A6A58;--gold:#B88935;--gold2:#966C28;--line:#E5D8C4;--amber:#F3E3C3;--green:#3e7d5a;--red:#b4543f;--radius:18px;--shadow:0 8px 28px rgba(47,36,27,.10);--shadow2:0 16px 40px rgba(47,36,27,.16);--ease:cubic-bezier(.23,1,.32,1)}
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;-webkit-text-size-adjust:100%}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;-webkit-text-size-adjust:100%;font-feature-settings:"ss01"}
 img{max-width:100%;display:block}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:760px;margin:0 auto;padding:0 16px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:12px;padding:14px 20px;font:inherit;font-weight:700;cursor:pointer;background:var(--gold);color:#fff;transition:transform .14s var(--ease),background .14s var(--ease)}
-.btn:hover{background:var(--gold2)}
-.btn:active{transform:scale(.97)}
+.wrap{max-width:780px;margin:0 auto;padding:0 16px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:0 20px;min-height:52px;font:inherit;font-size:15.5px;font-weight:700;cursor:pointer;background:var(--gold);color:#fff;box-shadow:0 6px 16px rgba(184,137,59,.28);transition:transform .15s var(--ease),background .15s var(--ease),box-shadow .15s var(--ease)}
+.btn:hover{background:var(--gold2);box-shadow:0 8px 20px rgba(150,108,40,.32)}
+.btn:active{transform:scale(.975)}
 .btn.block{width:100%}
-.btn.ghost{background:var(--surface);color:var(--brown);border:1px solid var(--line)}
-.head{position:sticky;top:0;z-index:30;background:rgba(245,239,227,.86);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-.head .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
-.brand{font-weight:700;font-size:19px;letter-spacing:.5px;color:var(--brown)}
-.brand b{color:var(--gold)}
+.btn.sm{min-height:40px;padding:0 14px;font-size:13px;border-radius:11px;box-shadow:none}
+.btn.ghost{background:var(--surface);color:var(--ink);border:1.5px solid var(--gold);box-shadow:none}
+.btn.ghost:hover{background:var(--amber)}
+.btn[disabled],.btn.off{background:var(--surface2,#efe7d6);color:var(--mut);box-shadow:none;border:1px solid var(--line);cursor:not-allowed}
 .muted{color:var(--mut)}
+.head{position:sticky;top:0;z-index:40;background:rgba(247,241,230,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.head .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
+.brand{font-weight:700;font-size:20px;color:var(--ink);display:flex;align-items:center;gap:7px}
+.brand .dot{width:8px;height:8px;border-radius:99px;background:var(--gold);display:inline-block}
+.brand .en{font-size:12px;color:var(--mut);font-weight:600;letter-spacing:1px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
-.field label{font-size:12.5px;font-weight:600;color:var(--brown)}
-.field input,.field select{font:inherit;font-size:15px;padding:13px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);width:100%}
-.field input:focus,.field select:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.field label{font-size:12.5px;font-weight:600;color:var(--ink)}
+.field input,.field select{font:inherit;font-size:16px;padding:14px 13px;min-height:52px;border:1.5px solid var(--line);border-radius:13px;background:var(--elev);color:var(--ink);width:100%;appearance:none}
+.field input:focus,.field select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,137,59,.16)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.hero{padding:34px 0 18px;text-align:center}
-.hero h1{font-size:30px;line-height:1.25;margin:0 0 10px;color:var(--brown);text-wrap:balance}
-.hero p{font-size:15.5px;line-height:1.7;color:var(--mut);margin:0 auto;max-width:36ch}
-.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0 0;font-size:12px;color:var(--gold2)}
-.chip{display:inline-block;font-size:11.5px;padding:3px 10px;border-radius:99px;border:1px solid var(--gold);color:var(--gold2);background:rgba(184,137,59,.07);white-space:nowrap}
+.err{display:none;background:rgba(180,84,63,.08);border:1px solid rgba(180,84,63,.4);color:var(--red);font-size:12.5px;border-radius:11px;padding:9px 12px;margin-bottom:10px}
+.err.on{display:block}
+.hero{position:relative;border-radius:22px;overflow:hidden;margin:16px 0 16px;min-height:208px;display:flex;align-items:flex-end;box-shadow:var(--shadow2);background:linear-gradient(135deg,#cdaa6a,#8a6a34)}
+.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.04)}
+.hero .ov{position:absolute;inset:0;background:linear-gradient(0deg,rgba(34,24,13,.82),rgba(34,24,13,.28) 55%,rgba(34,24,13,.12))}
+.hero .in{position:relative;padding:22px 20px 20px;color:#fff}
+.hero h1{font-size:29px;line-height:1.22;margin:0 0 8px;font-weight:700;text-wrap:balance;letter-spacing:-.01em}
+.hero p{font-size:14.5px;line-height:1.65;margin:0;color:rgba(255,255,255,.92);max-width:34ch}
+.trust{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.tchip{font-size:11.5px;padding:4px 11px;border-radius:99px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(4px);white-space:nowrap}
+.chip{display:inline-block;font-size:11.5px;padding:4px 11px;border-radius:99px;border:1px solid var(--gold);color:var(--gold2);background:rgba(184,137,59,.08);white-space:nowrap}
 .chip.solid{background:var(--gold);color:#fff;border-color:var(--gold)}
+.pills{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.pills::-webkit-scrollbar{display:none}
+.pill{flex:0 0 auto;font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border-radius:99px;border:1.5px solid var(--line);background:var(--elev);color:var(--ink);cursor:pointer;white-space:nowrap;transition:all .14s var(--ease)}
+.pill.active{background:var(--gold);color:#fff;border-color:var(--gold)}
+.cred{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin:14px 0 26px}
+.cred b{color:var(--gold2)}
 .grid{display:grid;grid-template-columns:1fr;gap:14px}
-@media(min-width:680px){.grid{grid-template-columns:1fr 1fr}}
-.lc{cursor:pointer;transition:transform .16s var(--ease),box-shadow .16s var(--ease)}
-.lc:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(61,47,31,.14)}
-.lc .ph{aspect-ratio:4/3;background:var(--surface2);position:relative;overflow:hidden}
-.lc .ph img{width:100%;height:100%;object-fit:cover}
-.lc .bd{padding:13px 14px}
-.lc h3{margin:0 0 4px;font-size:16px;color:var(--brown)}
-.facts{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--mut);margin:6px 0}
-.badges{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
-.price{font-weight:700;font-size:15px;color:var(--brown)}
-.disc{font-size:11px;color:var(--mut);margin-top:6px;line-height:1.5}
-.sk{background:linear-gradient(90deg,var(--surface2) 25%,#f3ecdd 50%,var(--surface2) 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:12px}
+@media(min-width:700px){.grid{grid-template-columns:1fr 1fr}}
+.lc{cursor:pointer;display:flex;flex-direction:column;transition:transform .18s var(--ease),box-shadow .18s var(--ease)}
+.lc:hover{transform:translateY(-3px);box-shadow:var(--shadow2)}
+.lc:active{transform:translateY(-1px)}
+.ph{aspect-ratio:16/10;background:linear-gradient(135deg,#ece2cd,#ddcfb2);position:relative;overflow:hidden}
+.ph img{width:100%;height:100%;object-fit:cover}
+.noimg{display:flex;align-items:center;justify-content:center;height:100%;color:var(--mut);font-size:13px}
+.ov-row{position:absolute;top:10px;inset-inline:10px;display:flex;gap:6px;flex-wrap:wrap}
+.ov-chip{font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;background:rgba(34,24,13,.62);color:#fff;backdrop-filter:blur(4px)}
+.ov-chip.ok{background:rgba(62,125,90,.92)}
+.ov-chip.gold{background:var(--gold)}
+.bd{padding:13px 14px;display:flex;flex-direction:column;gap:7px;flex:1}
+.lc h3{margin:0;font-size:16px;font-weight:700;color:var(--ink);line-height:1.35}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.meta{display:flex;gap:9px;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
+.badges{display:flex;gap:6px;flex-wrap:wrap}
+.price{font-weight:700;font-size:15px;color:var(--ink)}
+.price.soft{color:var(--mut);font-weight:600;font-size:13.5px}
+.disc{font-size:11px;color:var(--mut);line-height:1.5}
+.sk{background:linear-gradient(90deg,#ece2cd 25%,#f3ecdd 50%,#ece2cd 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:10px}
 @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.gal{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
-.gal img{flex:0 0 86%;scroll-snap-align:center;aspect-ratio:4/3;object-fit:cover;border-radius:14px}
-@media(min-width:680px){.gal img{flex-basis:48%}}
-.sticky-cta{position:sticky;bottom:0;z-index:20;background:linear-gradient(180deg,rgba(245,239,227,0),var(--bg) 30%);padding:12px 0 16px}
-.summary{position:sticky;top:56px;z-index:20;background:var(--surface);border-bottom:1px solid var(--line);padding:9px 0;font-size:12.5px}
-.summary .wrap{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.empty{text-align:center;padding:40px 16px}
-.empty .em{font-size:40px}
-.sec h2{font-size:17px;color:var(--brown);margin:22px 0 10px}
-.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin:10px 0}
-.kv div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-.kv .k{font-size:11px;color:var(--mut)}.kv .v{font-size:15px;font-weight:700;color:var(--brown)}
+.summary{position:sticky;top:58px;z-index:30;background:rgba(255,253,248,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:9px 0;margin-bottom:8px}
+.summary .wrap{display:flex;gap:8px;align-items:center}
+.summary .s{flex:1;font-size:12.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{text-align:center;padding:42px 16px}
+.empty .em{font-size:44px}
+.sec{margin:22px 0 0}
+.sec h2{font-size:18px;color:var(--ink);margin:0 0 10px;font-weight:700}
+.gallery{position:relative;margin:14px 0}
+.gal-hero{aspect-ratio:16/11;border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#ece2cd,#ddcfb2);position:relative;box-shadow:var(--shadow)}
+.gal-hero img{width:100%;height:100%;object-fit:cover}
+.count{position:absolute;bottom:10px;inset-inline-end:10px;font-size:11.5px;padding:4px 10px;border-radius:99px;background:rgba(34,24,13,.6);color:#fff;backdrop-filter:blur(4px)}
+.thumbs{display:flex;gap:8px;overflow-x:auto;margin-top:8px;padding-bottom:2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.thumbs::-webkit-scrollbar{display:none}
+.thumbs img{flex:0 0 22%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;cursor:pointer;border:2px solid transparent}
+.thumbs img.on{border-color:var(--gold)}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:9px;margin:12px 0}
+.kv div{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center}
+.kv .k{font-size:11px;color:var(--mut)}.kv .v{font-size:17px;font-weight:700;color:var(--ink);margin-top:2px}
+.why{display:flex;flex-direction:column;gap:8px}
+.why div{display:flex;gap:9px;align-items:center;font-size:13.5px;color:var(--ink);background:var(--elev);border:1px solid var(--line);border-radius:13px;padding:11px 13px}
+.why .i{color:var(--gold)}
+.ag{margin-bottom:12px}
+.ag h3{font-size:13px;color:var(--gold2);margin:0 0 7px;font-weight:700}
 .amen{display:flex;gap:7px;flex-wrap:wrap}
-.amen span{font-size:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px 10px}
-.foot{text-align:center;color:var(--mut);font-size:12px;padding:26px 0 30px}
+.amen span{font-size:12.5px;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:7px 11px}
+.more{background:none;border:0;color:var(--gold2);font:inherit;font-weight:700;font-size:13px;cursor:pointer;padding:6px 0;text-decoration:underline}
+.descblk{line-height:1.85;color:var(--ink);font-size:14.5px;background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:10px 0}
+.descblk.ltr{direction:ltr;text-align:left}
+.sticky-cta{position:fixed;bottom:0;inset-inline:0;z-index:40;background:rgba(247,241,230,.92);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:11px 0 calc(11px + env(safe-area-inset-bottom))}
+.sticky-cta .wrap{display:flex;flex-direction:column;gap:6px}
+.foot{text-align:center;color:var(--mut);font-size:12px;padding:26px 16px 34px}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<header class="head"><div class="wrap"><a class="brand" href="/stay">عوجا<b>·</b>Ouja</a><a class="muted" href="/stay" style="font-size:12.5px">إقامات الرياض</a></div></header>
+<header class="head"><div class="wrap"><a class="brand" href="/stay"><span class="dot"></span>عوجا <span class="en">OUJA</span></a><span class="muted" style="font-size:12.5px">إقامات الرياض</span></div></header>
 <main id="view" class="wrap"></main>
 <div class="foot">عوجا · إقامات مختارة في الرياض · الحجز والتأكيد داخل Airbnb</div>
 <script>
@@ -37386,25 +37427,40 @@ function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:l
 function money(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US')+' ر.س';}catch(e){return n+' ر.س';}}
 function airbnbUrl(u){if(!u)return '';var sep=(u.indexOf('?')>=0)?'&':'?';return u+sep+'utm_source=ouja_stay&utm_medium=website&utm_campaign=tiktok_conversion';}
 function carry(){var p=qs(),o=[];['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o.push(k+'='+encodeURIComponent(p.get(k)));});return o.length?('&'+o.join('&')):'';}
-function facts(l){var f=[];if(l.capacity)f.push('👥 '+l.capacity+' ضيوف');if(l.beds!=null)f.push('🛏 '+(l.beds==0?'استوديو':l.beds+' غرفة'));if(l.baths)f.push('🛁 '+l.baths+' حمام');if(l.area)f.push('📍 '+l.area);return f;}
-function badges(l){return (l.tags||[]).slice(0,4).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
+function nightsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ليلة وحدة';if(n==2)return 'ليلتين';if(n<=10)return n+' ليالٍ';return n+' ليلة';}
+function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar=(s.match(/[؀-ۿ]/g)||[]).length;return lat>ar;}
+function validateDates(ci,co){if((ci&&!co)||(!ci&&co))return 'حط تاريخ الدخول والخروج، أو خلّهم فاضيين للتصفح.';if(ci&&co&&!(co>ci))return 'تاريخ الخروج لازم يكون بعد تاريخ الدخول.';return '';}
+function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<span style="opacity:.4">·</span>');}
+function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
 
 function viewLanding(){
   track('stay_page_view',{});
-  var cfg=(STAY&&STAY.config)||{noo:[]};
-  var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'">'+he(o.ar||o.en)+'</option>';}).join('');
-  var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'">'+i+'</option>';}
-  V.innerHTML='<section class="hero"><h1>اختر إقامتك مع عوجا</h1>'
+  var cfg=(STAY&&STAY.config)||{noo:[],count:0,hero:''};var p=qs();
+  var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('type')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+'</option>';}).join('');
+  var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
+  var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(cfg.hero).replace(/"/g,'&quot;')+')"></div>'):'';
+  var chips=(cfg.noo||[]).slice(0,7).map(function(o){return '<button type="button" class="pill" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
+  V.innerHTML='<section class="hero">'+heroBg+'<div class="ov"></div><div class="in"><h1>اختر إقامتك مع عوجا</h1>'
     +'<p>حط تاريخك وعدد الضيوف، ونطلع لك وحدات عوجا المتاحة في الرياض.</p>'
-    +'<div class="trust"><span class="chip">وحدات مختارة في الرياض</span><span class="chip">دخول ذاتي</span><span class="chip">الحجز عبر Airbnb</span></div></section>'
-    +'<div class="card" style="padding:16px;margin-bottom:24px">'
+    +'<div class="trust"><span class="tchip">وحدات مختارة</span><span class="tchip">دخول ذاتي</span><span class="tchip">الحجز عبر Airbnb</span></div></div></section>'
+    +'<div class="card" style="padding:16px;margin-bottom:14px">'
+    +'<div id="err" class="err"></div>'
     +'<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div><div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div></div>'
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>نوع</label><select id="ty">'+opts+'</select></div></div>'
-    +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>';
-  var t=new Date();var iso=function(d){return d.toISOString().slice(0,10);};
-  document.getElementById('ci').min=iso(t);document.getElementById('co').min=iso(new Date(t.getTime()+86400000));
+    +(chips?('<div class="pills" id="chips" style="margin:2px 0 14px">'+chips+'</div>'):'')
+    +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
+    +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>';
+  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),tyEl=document.getElementById('ty'),err=document.getElementById('err');
+  var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
+  ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
+  if(p.get('check_in'))ciEl.value=p.get('check_in');if(p.get('check_out'))coEl.value=p.get('check_out');
+  ciEl.onchange=function(){var d=ciEl.value?new Date(ciEl.value):t;coEl.min=iso(new Date(d.getTime()+86400000));};
+  var chipsEl=document.getElementById('chips');
+  if(chipsEl){chipsEl.querySelectorAll('.pill').forEach(function(b){if(b.getAttribute('data-k')===tyEl.value)b.classList.add('active');b.onclick=function(){tyEl.value=b.getAttribute('data-k');track('stay_filter_changed',{type:tyEl.value});chipsEl.querySelectorAll('.pill').forEach(function(x){x.classList.remove('active');});b.classList.add('active');};});}
   document.getElementById('go').onclick=function(){
-    var ci=document.getElementById('ci').value,co=document.getElementById('co').value,g=document.getElementById('g').value,ty=document.getElementById('ty').value;
+    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value,ty=tyEl.value;
+    var ev=validateDates(ci,co);if(ev){err.textContent=ev;err.classList.add('on');return;}
+    err.classList.remove('on');
     var q='?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty);
     if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
     location.href='/stay/search'+q;
@@ -37412,41 +37468,58 @@ function viewLanding(){
 }
 
 function card(l){
-  var img=l.cover?('<img loading="lazy" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--mut);font-size:13px">لا توجد صورة</div>';
-  var price='';
-  if(l.est_total!=null){price='<div class="price">الإجمالي التقريبي للإقامة: '+money(l.est_total)+(l.nights?(' · '+l.nights+' ليالٍ'):'')+'</div>';}
-  else{price='<div class="price" style="color:var(--mut);font-weight:600">السعر يظهر داخل Airbnb</div>';}
-  return '<a class="card lc" href="/stay/'+he(l.slug)+location.search+'"><div class="ph">'+img+(l.badge?('<span class="chip solid" style="position:absolute;top:8px;'+(document.dir==='rtl'?'right':'left')+':8px">'+he(l.badge)+'</span>'):'')+'</div>'
-    +'<div class="bd"><h3>'+he(l.name_ar||l.name_en)+'</h3>'
-    +'<div class="facts">'+facts(l).map(function(x){return '<span>'+he(x)+'</span>';}).join('')+'</div>'
-    +'<div class="badges">'+badges(l)+'</div>'+price
-    +'<div class="disc">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb</div>'
-    +'<div style="margin-top:10px"><span class="btn ghost" style="width:100%">شوف التفاصيل</span></div></div></a>';
+  var avail=(l.available===true);
+  var img=l.cover?('<img loading="lazy" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
+  var ov=[];if(avail)ov.push('<span class="ov-chip ok">متاحة</span>');if(l.badge)ov.push('<span class="ov-chip gold">'+he(l.badge)+'</span>');
+  var price;
+  if(l.est_total!=null&&l.nights>0){price='<div class="price">الإجمالي التقريبي: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div>';}
+  else{price='<div class="price soft">السعر يظهر داخل Airbnb</div>';}
+  return '<a class="card lc" href="/stay/'+he(l.slug)+location.search+'">'
+    +'<div class="ph">'+img+(ov.length?('<div class="ov-row">'+ov.join('')+'</div>'):'')+'</div>'
+    +'<div class="bd"><h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
+    +(l.area?('<div class="meta">📍 '+he(l.area)+'</div>'):'')
+    +'<div class="meta">'+metaRow(l)+'</div>'
+    +(badges(l,3)?('<div class="badges">'+badges(l,3)+'</div>'):'')
+    +price+'<div class="cta-row" style="margin-top:auto;padding-top:4px"><span class="btn block sm">شوف التفاصيل</span></div></div></a>';
+}
+
+function searchSummary(ci,co,g,ty){
+  var bits=[];if(ci&&co)bits.push(he(ci)+' ← '+he(co));else bits.push('تصفح');if(g)bits.push(he(g)+' ضيوف');
+  var tyl=(((STAY&&STAY.config&&STAY.config.noo)||[]).filter(function(o){return o.key===ty;})[0]);
+  if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
+  return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/stay'+location.search+'">تعديل البحث</a></div></div>';
 }
 
 function viewSearch(){
-  var p=qs();var ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
-  V.innerHTML='<div class="grid" style="margin:18px 0">'+'<div class="card"><div class="ph sk" style="aspect-ratio:4/3"></div><div class="bd"><div class="sk" style="height:18px;width:60%"></div><div class="sk" style="height:13px;width:40%;margin-top:8px"></div></div></div>'.repeat(4)+'</div>';
+  var p=qs(),ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
+  var verr=validateDates(ci,co);
+  if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0 4px;color:var(--ink)">'+he(verr)+'</h2><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل التواريخ</a></div></div>';return;}
+  V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="grid" style="margin:6px 0 18px">'+'<div class="card lc"><div class="ph sk"></div><div class="bd"><div class="sk" style="height:18px;width:62%"></div><div class="sk" style="height:13px;width:42%"></div><div class="sk" style="height:40px;width:100%;margin-top:6px"></div></div></div>'.repeat(4)+'</div>';
   var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
   track('stay_search',{type:ty,guests:g,check_in:ci,check_out:co});
   fetch(url).then(function(r){return r.json();}).then(function(d){
-    var res=(d&&d.results)||[];var browse=d&&d.browse;
-    var sumbits=[];if(ci&&co)sumbits.push(he(ci)+' ← '+he(co));if(g)sumbits.push(g+' ضيوف');
-    var tyl=(((STAY&&STAY.config&&STAY.config.noo)||[]).filter(function(o){return o.key===ty;})[0]);
-    if(ty&&ty!=='all')sumbits.push('نوع: '+he(tyl?(tyl.ar||tyl.en):ty));
-    var head='';
-    if(d&&d.avail_error){head='<div class="card" style="padding:14px;margin:16px 0;color:var(--gold2)">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</div>';}
-    if(browse){head+='<div style="margin:16px 0 4px"><span class="chip">وضع التصفح — حط تاريخ لعرض المتاح</span></div>';}
+    var res=(d&&d.results)||[],browse=d&&d.browse,sm=searchSummary(ci,co,g,ty);
+    if(d&&d.invalid_dates){V.innerHTML=sm+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0;color:var(--ink)">تاريخ الخروج لازم يكون بعد تاريخ الدخول.</h2></div>';return;}
+    var head=sm;
+    if(d&&d.avail_error)head+='<div class="card" style="padding:13px 14px;margin:6px 0;color:var(--gold2);font-size:13px">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</div>';
+    if(browse)head+='<div style="margin:8px 0 2px"><span class="chip">وضع التصفح — حط تاريخ لعرض المتاح</span></div>';
     if(res.length){
       track('stay_results_view',{type:ty,count:res.length});
-      head+='<h2 class="sec" style="margin:14px 0 4px">'+(browse?('عندنا '+res.length+' وحدة'):('لقينا لك '+res.length+' وحدة متاحة'))+'</h2>';
-      if(sumbits.length)head+='<div class="muted" style="font-size:12.5px;margin-bottom:8px">'+sumbits.map(he).join(' · ')+'</div>';
-      V.innerHTML=head+'<div class="grid" style="margin:6px 0 26px">'+res.map(card).join('')+'</div>';
+      head+='<h2 class="sec" style="margin:10px 0 2px">'+(browse?('عندنا '+res.length+' وحدة'):('لقينا لك '+res.length+' وحدة متاحة'))+'</h2>';
+      head+='<div class="disc" style="margin-bottom:6px">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb</div>';
+      V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
     } else {
       track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="empty"><div class="em">🔍</div><h2 style="margin:10px 0 4px;color:var(--brown)">ما لقينا وحدة متاحة بنفس الاختيارات</h2><p class="muted">جرّب تغيّر التاريخ أو نوع الوحدة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div>';
+      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدة متاحة بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيّر التاريخ أو نوع الوحدة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
+      if(ci&&co){loadSimilar(ty);}
     }
   }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
+}
+function loadSimilar(ty){
+  fetch('/api/stay/search?type='+encodeURIComponent(ty)).then(function(r){return r.json();}).then(function(d){
+    var res=((d&&d.results)||[]).slice(0,4);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
+    el.innerHTML='<h2 class="sec">وحدات مشابهة — جرّب تواريخ مختلفة</h2><div class="grid" style="margin:6px 0 30px">'+res.map(function(l){l=Object.assign({},l,{available:null,est_total:null});return card(l);}).join('')+'</div>';
+  }).catch(function(){});
 }
 
 function viewListing(){
@@ -37455,37 +37528,60 @@ function viewListing(){
     if(!l){V.innerHTML='<div class="empty"><div class="em">🏠</div><p class="muted">ما لقينا هالوحدة. <a href="/stay">ارجع للبحث</a></p></div>';return;}
     track('stay_listing_view',{listing_id:l.id});
     var imgs=(l.images||[]);
-    var gal=imgs.length?('<div class="gal">'+imgs.slice(0,12).map(function(u){return '<img loading="lazy" alt="'+he(l.name_ar)+'" src="'+he(u)+'">';}).join('')+'</div>'):(l.cover?('<img style="border-radius:14px" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'">'):'<div class="card" style="padding:40px;text-align:center;color:var(--mut)">لا توجد صور</div>');
-    var kv='';facts(l).forEach(function(){});
-    var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','دخول ذاتي']);if(l.area)kvitems.push(['الموقع',l.area]);
-    kv=kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('');
-    var price='';
-    if(l.est_total!=null){price='<div class="price">الإجمالي التقريبي للإقامة: '+money(l.est_total)+(l.nights?(' · '+l.nights+' ليالٍ'):'')+'</div><div class="disc">السعر النهائي يظهر داخل Airbnb</div>';}
-    else{price='<div class="price" style="color:var(--mut);font-weight:600">السعر يظهر داخل Airbnb</div>';}
-    var amen=(l.amenities||[]).length?('<div class="sec sec2"><h2>المميزات</h2><div class="amen">'+(l.amenities||[]).slice(0,24).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>'):'';
-    var why=(l.tags||[]).length?('<div class="sec"><h2>ليش هالوحدة</h2><div class="badges">'+(l.tags||[]).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('')+'</div></div>'):'';
+    var hero,gallery;
+    if(imgs.length){
+      hero=imgs[0];
+      var thumbs=imgs.slice(0,10).map(function(u,i){return '<img data-i="'+i+'" class="'+(i==0?'on':'')+'" loading="lazy" src="'+he(u)+'" alt="'+he(l.name_ar)+'">';}).join('');
+      gallery='<div class="gallery"><div class="gal-hero"><img id="ghero" src="'+he(hero)+'" alt="'+he(l.name_ar)+'"><span class="count" id="gcount">1 / '+imgs.length+'</span></div>'+(imgs.length>1?('<div class="thumbs" id="thumbs">'+thumbs+'</div>'):'')+'</div>';
+    } else if(l.cover){gallery='<div class="gallery"><div class="gal-hero"><img src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"></div></div>';}
+    else{gallery='<div class="card" style="padding:46px;text-align:center;color:var(--mut);margin:14px 0">لا توجد صور لهذه الوحدة</div>';}
+    var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','ذاتي']);
+    var kv=kvitems.length?('<div class="kv">'+kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
+    var WHY={cinema:['🎬','سينما خاصة لتجربة مشاهدة أهدى'],balcony:['🌿','بلكونة مناسبة لجلسة خفيفة'],boulevard:['✨','قريبة من البوليفارد وأهم وجهات الرياض'],tower_view:['🏙️','إطلالة من برج مميز'],self_entry:['🔑','دخول ذاتي بدون انتظار'],family:['👨‍👩‍👧','مساحة مناسبة للعائلة'],studio:['🛋️','استوديو عملي للإقامات القصيرة'],'1br':['🛏️','غرفة وصالة مريحة'],'2br':['🏠','مساحة أوسع تكفي مجموعة']};
+    var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k])wr.push('<div><span class="i">'+WHY[k][0]+'</span><span>'+he(WHY[k][1])+'</span></div>');});
+    if(l.area&&wr.length<4)wr.push('<div><span class="i">📍</span><span>موقع مميز في '+he(l.area)+'</span></div>');
+    var why=wr.length?('<div class="sec"><h2>ليش هالوحدة؟</h2><div class="why">'+wr.slice(0,5).join('')+'</div></div>'):'';
+    var groups=(l.amenity_groups||[]);
+    var amen='';
+    if(groups.length){
+      var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);
+      amen='<div class="sec"><h2>المميزات</h2><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';
+    }
     var desc=(l.desc_ar||l.short_ar||'');
-    var cta;
-    if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url))+'">احجزها في Airbnb</a>';}
-    else{cta='<div class="btn block ghost" style="cursor:default;color:var(--mut)">رابط Airbnb غير متوفر حاليًا</div>';}
+    var descBlk=desc?('<div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div>'):'';
     var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out'),dsum='';
-    if(dci&&dco){dsum='<div class="card" style="padding:10px 12px;margin-bottom:6px;font-size:12.5px"><b>حجزك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div>';}
-    V.innerHTML='<div style="margin:16px 0">'+gal+'</div>'+dsum
-      +'<h1 style="font-size:24px;color:var(--brown);margin:6px 0">'+he(l.name_ar||l.name_en)+(l.badge?(' <span class="chip solid">'+he(l.badge)+'</span>'):'')+'</h1>'
-      +'<div class="badges">'+badges(l)+'</div>'
-      +(desc?('<p style="line-height:1.8;color:var(--ink)">'+he(desc)+'</p>'):'')
-      +'<div class="kv">'+kv+'</div>'+price+why+amen
-      +'<div style="height:90px"></div>'
-      +'<div class="sticky-cta"><div class="wrap">'+cta+'<div class="disc" style="text-align:center;margin-top:8px">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb.</div></div></div>';
+    if(dci&&dco&&dco>dci){dsum='<div class="card" style="padding:11px 13px;margin:10px 0;font-size:13px;display:flex;gap:8px;align-items:center"><span>🗓️</span><b>حجزك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div>';}
+    var price;
+    if(l.est_total!=null&&l.nights>0){price='<div class="card" style="padding:13px 15px;margin:10px 0"><div class="price">الإجمالي التقريبي للإقامة: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div><div class="disc" style="margin-top:3px">السعر النهائي يظهر داخل Airbnb</div></div>';}
+    else{price='';}
+    V.innerHTML=gallery+dsum
+      +'<h1 style="font-size:23px;color:var(--ink);margin:8px 0 4px;line-height:1.3">'+he(l.name_ar||l.name_en)+'</h1>'
+      +(l.area?('<div class="muted" style="font-size:13.5px;margin-bottom:6px">📍 '+he(l.area)+'</div>'):'')
+      +(l.badge?('<span class="chip solid" style="margin-bottom:6px">'+he(l.badge)+'</span>'):'')
+      +(badges(l,6)?('<div class="badges" style="margin:8px 0">'+badges(l,6)+'</div>'):'')
+      +(l.short_ar&&!l.desc_ar?('<p class="muted" style="line-height:1.7;font-size:14px">'+he(l.short_ar)+'</p>'):'')
+      +kv+price+why+descBlk+amen
+      +'<div style="height:96px"></div>';
+    var cta;
+    if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url))+'">احجزها في Airbnb ↗</a>';}
+    else{cta='<button class="btn block off" disabled>رابط Airbnb غير متوفر حاليًا</button>';}
+    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+'<div class="disc" style="text-align:center">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb.</div></div>';
+    document.body.appendChild(bar);
     var ab=document.getElementById('abtn');
     if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
     else{track('stay_missing_airbnb_url',{listing_id:l.id});}
+    var th=document.getElementById('thumbs');
+    if(th){th.querySelectorAll('img').forEach(function(im){im.onclick=function(){var i=+im.getAttribute('data-i');document.getElementById('ghero').src=imgs[i];document.getElementById('gcount').textContent=(i+1)+' / '+imgs.length;th.querySelectorAll('img').forEach(function(x){x.classList.remove('on');});im.classList.add('on');};});}
+    var tg=document.getElementById('amtog');
+    if(tg){tg.onclick=function(){var r=document.getElementById('amr');if(r){var open=r.style.display!=='none';r.style.display=open?'none':'block';tg.textContent=open?'عرض كل المميزات':'عرض أقل';}};}
   }
+  function agHtml(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
   var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
   var token=(l&&l.slug)||location.pathname.replace(/^\/stay\/(id\/)?/,'').split('?')[0];
-  if(l && !(ci&&co)){ render(l); }
+  var dated=(ci&&co&&co>ci);
+  if(l && !dated){ render(l); }
   else{
-    fetch('/api/stay/listing/'+encodeURIComponent(token)+((ci&&co)?('?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)):'')).then(function(r){return r.json();}).then(function(d){render((d&&d.listing)||l);}).catch(function(){render(l);});
+    fetch('/api/stay/listing/'+encodeURIComponent(token)+(dated?('?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)):'')).then(function(r){return r.json();}).then(function(d){render((d&&d.listing)||l);}).catch(function(){render(l);});
   }
 }
 
