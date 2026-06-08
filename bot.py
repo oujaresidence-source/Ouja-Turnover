@@ -22521,27 +22521,58 @@ function fbAptSelect(id, cur){ var ar=(L==='ar'); var refs=_fb.refs||{apts:[]};
   var opts='<option value="">'+(ar?'— عام للشركة / غير مرتبط بشقة —':'— Company general / not unit-linked —')+'</option>';
   opts+=(refs.apts||[]).map(function(a){ return '<option value="'+esc(a.name)+'"'+(a.name===cur?' selected':'')+'>'+esc(a.name)+(a.cc?'':(ar?' — ناقص مركز تكلفة':' — no cost ctr'))+'</option>'; }).join('');
   return '<select id="'+id+'" style="'+fbInp()+'">'+opts+'</select>'; }
-async function fbBankReview(id){
-  var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]; if(!x){ toast('⚠'); return; }
-  await fbLoadRefs();
+function fbBankFlows(out){ var ar=(L==='ar'); return out?[
+  ['cash_out_expense',ar?'مصروف مباشر':'Direct expense'],['cash_out_employee_advance',ar?'عهدة موظف':'Employee advance'],
+  ['cash_out_supplier_payment',ar?'دفعة مورد':'Supplier payment'],['cash_out_owner_payment',ar?'دفعة مالك':'Owner payment'],
+  ['cash_out_bank_fee',ar?'رسوم بنكية':'Bank fee'],['cash_out_unknown',ar?'سحب غير معروف':'Unknown out']]:[
+  ['cash_in_booking_revenue',ar?'حوالة حجوزات':'Booking revenue'],['cash_in_partner_funding',ar?'تمويل من جاري الشريك':'Partner funding'],
+  ['cash_in_recycled_company_revenue',ar?'تمويل من إيرادات الشركة':'Company funding'],['cash_in_other_activity',ar?'إيراد نشاط آخر':'Other activity'],
+  ['cash_in_unknown',ar?'وارد غير معروف':'Unknown in']]; }
+function fbCatLabel(v){ var a=fbCats().filter(function(c){return c[0]===v;})[0]; return a?a[1]:(v||''); }
+function fbBankPrev(){ var ar=(L==='ar'); var c=_fb.bcls||{}; var amt=fbMoney(c.amount); var bank=ar?'البنك':'Bank'; var L1,L2;
+  if(c.out){ var dr;
+    if(c.flow==='cash_out_employee_advance') dr=(ar?'عهدة الموظف':'Employee custody')+(c.emp?(' — '+c.emp):'');
+    else if(c.flow==='cash_out_bank_fee') dr=(ar?'رسوم بنكية':'Bank fees');
+    else if(c.flow==='cash_out_supplier_payment') dr=(ar?'مورد':'Supplier');
+    else if(c.flow==='cash_out_owner_payment') dr=(ar?'مستحقات مالك':'Owner payable');
+    else dr=((c.cat&&c.cat!=='unknown')?fbCatLabel(c.cat):(ar?'مصروف':'Expense'));
+    L1=(ar?'من حـ/ ':'Dr ')+dr; L2=(ar?'إلى حـ/ ':'Cr ')+bank;
+  } else { var cr;
+    if(c.flow==='cash_in_partner_funding') cr=(ar?'جاري الشريك':'Partner current a/c');
+    else if(c.flow==='cash_in_booking_revenue') cr=(ar?'إيرادات الحجوزات':'Booking revenue');
+    else if(c.flow==='cash_in_recycled_company_revenue') cr=(ar?'تمويل من إيرادات الشركة':'Company funding');
+    else if(c.flow==='cash_in_other_activity') cr=(ar?'إيراد نشاط آخر':'Other income');
+    else cr=(ar?'وارد غير مصنف':'Unclassified income');
+    L1=(ar?'من حـ/ ':'Dr ')+bank; L2=(ar?'إلى حـ/ ':'Cr ')+cr;
+  }
+  return '<div style="background:var(--surface-2);border:1px dashed var(--gold);border-radius:10px;padding:10px 12px;margin-top:10px;font-size:12.5px;line-height:1.95"><div class="muted" style="font-size:10.5px;margin-bottom:3px">'+(ar?'معاينة القيد':'Journal preview')+'</div><div>'+esc(L1)+'  <b>'+amt+'</b></div><div>'+esc(L2)+'  <b>'+amt+'</b></div></div>'; }
+function fbBankPrevUpdate(){ var el=document.getElementById('fbbPrev'); if(el) el.innerHTML=(_fb.bcls&&_fb.bcls.flow?fbBankPrev():''); }
+async function fbBankReview(id){ var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]; if(!x){ toast('⚠'); return; } await fbLoadRefs();
   var deb=(x.debit&&x.debit!=='0.00');
-  var sug=(x.category&&x.category!=='unknown')?(' · '+(ar?'مقترح: ':'suggested: ')+x.category):'';
-  openDrawer(ar?'مراجعة عملية بنكية':'Review bank transaction', (x.date||'')+' · '+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit)+sug);
-  var hint=deb?(ar?'صادر — غالبًا مصروف أو تحويل للمالك أو استرجاع للمؤسس':'Outgoing — usually an expense, owner payout, or founder reimbursement'):(ar?'وارد — هل هو إيراد قناة ولا تمويل من المؤسس؟':'Incoming — channel revenue or founder funding?');
-  setDrawerBody('<div style="font-size:12px;line-height:1.7;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px">'+esc((x.description||'').slice(0,140))+'</div>'
-    +'<div class="muted" style="font-size:11px;margin-bottom:8px">'+esc(hint)+'</div>'
-    +'<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label>'+fbCatSelect('fbb_cat',x.category)
-    +'<label class="muted" style="font-size:11px">'+(ar?'الشقة / مركز التكلفة':'Apartment / cost center')+'</label>'+fbAptSelect('fbb_apt',x.apartment)
-    +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbb_note" value="'+esc(x.note||'')+'" style="'+fbInp()+'">');
-  setDrawerFoot('<button class="btn primary sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,false)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,true)">'+esc(t().fb_applysimilar)+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
-}
-async function fbBankReviewSave(id, similar){
-  var ar=(L==='ar'); var body={id:id,action:'bank_classify',category:fbCatValue('fbb_cat')};
+  _fb.bcls={id:id, out:deb, amount:(deb?x.debit:x.credit), flow:'', cat:((x.category&&x.category!=='unknown')?x.category:''), emp:'', desc:x.description, apt:x.apartment, note:(x.note||'')};
+  openDrawer(ar?'مراجعة عملية بنكية':'Review bank transaction', (x.date||'')+' · '+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit));
+  fbBankReviewRender();
+  setDrawerFoot('<button class="btn primary sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,false)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,true)">'+esc(t().fb_applysimilar)+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
+function fbBankReviewRender(){ var ar=(L==='ar'); var c=_fb.bcls||{}; var out=c.out;
+  var dirNote=out?(ar?'هذا سحب من البنك، لذلك البنك دائن في القيد.':'Cash out — the bank is credited.'):(ar?'هذا وارد للبنك، لذلك البنك مدين في القيد.':'Cash in — the bank is debited.');
+  var flows=fbBankFlows(out);
+  var h=(c.desc?('<div style="font-size:12px;line-height:1.7;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px">'+esc(String(c.desc).slice(0,140))+'</div>'):'')
+    +'<div style="background:'+(out?'rgba(196,67,67,.07)':'rgba(62,125,90,.08)')+';border:1px solid '+(out?'var(--red)':'#3e7d5a')+';border-radius:9px;padding:9px 11px;font-size:12.5px;font-weight:800">'+(out?(ar?'⬆️ سحب من البنك':'⬆️ Cash out'):(ar?'⬇️ وارد للبنك':'⬇️ Cash in'))+'<div class="muted" style="font-weight:400;font-size:11px;margin-top:2px">'+esc(dirNote)+'</div></div>'
+    +'<label class="muted" style="font-size:11px;margin-top:9px;display:block">'+(out?(ar?'وش نوع السحب؟':'Type of cash-out?'):(ar?'وش نوع الوارد؟':'Type of cash-in?'))+'</label>'
+    +'<select id="fbb_flow" onchange="_fb.bcls.flow=this.value;fbBankReviewRender()" style="'+fbInp()+'"><option value="">'+(ar?'— اختر —':'— pick —')+'</option>'+flows.map(function(f){ return '<option value="'+f[0]+'"'+(c.flow===f[0]?' selected':'')+'>'+esc(f[1])+'</option>'; }).join('')+'</select>';
+  if(out&&c.flow==='cash_out_expense'){ h+='<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label>'+fbCatSelect('fbb_cat',c.cat)+'<div class="muted" style="font-size:10.5px;margin-top:3px">'+(ar?'لو موزّع على أكثر من مصروف، استخدم «المطابقة» بعد الفحص.':'For a split across expenses, use the match drawer after checking.')+'</div>'; }
+  if(out&&c.flow==='cash_out_employee_advance'){ h+='<label class="muted" style="font-size:11px">'+(ar?'اسم الموظف / حساب العهدة':'Employee / custody account')+'</label><input id="fbb_emp" value="'+esc(c.emp||'')+'" oninput="_fb.bcls.emp=this.value;fbBankPrevUpdate()" placeholder="'+(ar?'مثال: عهدة فهد':'e.g. Faisal custody')+'" style="'+fbInp()+'"><div class="muted" style="font-size:10.5px;margin-top:3px">'+(ar?'العهدة: التحويل يثبتها، والفواتير تقفلها لاحقًا بدون حركة بنك جديدة.':'The transfer opens the advance; invoices settle it later — no new bank line.')+'</div>'; }
+  h+='<label class="muted" style="font-size:11px">'+(ar?'الشقة / مركز التكلفة':'Apartment / cost center')+'</label>'+fbAptSelect('fbb_apt',c.apt)
+    +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbb_note" value="'+esc(c.note||'')+'" oninput="_fb.bcls.note=this.value" style="'+fbInp()+'">'
+    +'<div id="fbbPrev">'+(c.flow?fbBankPrev():'')+'</div>';
+  setDrawerBody(h);
+  var ce=document.getElementById('fbb_cat'); if(ce) ce.onchange=function(){ _fb.bcls.cat=fbCatValue('fbb_cat'); fbBankPrevUpdate(); }; }
+async function fbBankReviewSave(id, similar){ var ar=(L==='ar'); var c=_fb.bcls||{};
+  var body={id:id,action:'bank_classify',category:(document.getElementById('fbb_cat')?fbCatValue('fbb_cat'):(c.cat||'')),flow:(c.flow||''),employee:(c.emp||'')};
   var a=document.getElementById('fbb_apt'), n=document.getElementById('fbb_note');
   if(a){ body.apartment=a.value; } if(n){ body.note=n.value; } if(similar){ body.apply_similar=true; }
   var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; }
-  if(r&&r.ok){ toast((ar?'✓ تمت المراجعة':'✓ Reviewed')+(r.applied_similar?(' · +'+r.applied_similar+(ar?' مشابهة':' similar')):'')); closeDrawer(); fbGo(_fb.tab); } else toast((r&&(r.error||r.message))||'⚠');
-}
+  if(r&&r.ok){ toast((ar?'✓ تمت المراجعة':'✓ Reviewed')+(r.applied_similar?(' · +'+r.applied_similar+(ar?' مشابهة':' similar')):'')); closeDrawer(); fbGo(_fb.tab); } else toast((r&&(r.error||r.message))||'⚠'); }
 function fbBankReviewFromInbox(id){ var it=(_fb.inboxItems||{})[id]; if(!it){ toast('⚠'); return; }
   _fb.bankTx=_fb.bankTx||{}; _fb.bankTx[id]={id:id, date:it.date, description:it.description, category:it.category, apartment:it.apartment, note:'', debit:(it.direction==='expense'?it.amount:'0.00'), credit:(it.direction==='credit'?it.amount:'0.00')};
   fbBankReview(id); }
@@ -34523,7 +34554,8 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
             txn["daftra_duplicate_reason_en"] = "Journals & expenses checked (totals + line distribution), no match"
             txn["matched_daftra_id"] = None; txn["matched_daftra_source_type"] = None; txn["matched_daftra_number"] = None
             txn["matched_daftra_line_ids"] = []
-        txn["daftra_flow_type"] = _fb_flow_type(txn)          # accounting flow (expense/advance/fee/funding/booking)
+        if not txn.get("flow_manual"):                        # respect the accountant's manual flow choice
+            txn["daftra_flow_type"] = _fb_flow_type(txn)       # accounting flow (expense/advance/fee/funding/booking)
         counts[status] = counts.get(status, 0) + 1
     _fb_save("finance_bank_transactions.json", _fb_bank)
     _fb_audit_add(actor, "daftra_dup_check", "bank", (start or "ids"),
@@ -36126,9 +36158,14 @@ async def _api_fb_entry(request):
             bx["apartment"] = (b.get("apartment") or "").strip()
         if b.get("note") not in (None, ""):
             bx["note"] = str(b.get("note"))[:300]
-        # 'unknown' stays needs_review (still undecided); any real category → reviewed
+        if b.get("flow"):                                   # accountant's accounting-flow choice (manual override)
+            bx["daftra_flow_type"] = str(b.get("flow"))[:48]
+            bx["flow_manual"] = True
+        if b.get("employee") not in (None, ""):
+            bx["custody_employee"] = str(b.get("employee"))[:80]
+        # classified if a real category OR an accounting flow was chosen
         now_iso = datetime.now(TZ).isoformat(timespec="seconds")
-        bx["status"] = "needs_review" if (bx.get("category") or "unknown") == "unknown" else "reviewed"
+        bx["status"] = "reviewed" if (((bx.get("category") or "unknown") != "unknown") or b.get("flow")) else "needs_review"
         bx["reviewed_by"] = actor
         bx["reviewed_at"] = now_iso
         applied = 0
