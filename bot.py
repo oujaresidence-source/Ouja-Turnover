@@ -36740,6 +36740,368 @@ async def expense_sheet_loop():
     except Exception as e:
         print("expense sheet loop error:", e)
 
+# ===================== GUEST WEBSITE (موقع الضيوف) — TikTok → Airbnb conversion site =====================
+# Public, READ-ONLY guest site. NEVER writes to Hostaway, never creates reservations, never collects
+# payment. Real listing/availability data only; a local taxonomy + per-listing overrides power
+# filtering and presentation. Bookings happen on Airbnb.
+_gw_taxonomy  = _load_json("guest_taxonomy.json", {}) or {}            # normkey -> mapping
+_gw_overrides = _load_json("guest_overrides.json", {}) or {}           # str(listing_id) -> override
+_gw_cache     = _load_json("guest_cache.json", {"listings": [], "synced_at": None}) or {"listings": [], "synced_at": None}
+_gw_analytics = _load_json("guest_analytics.json", {"events": []}) or {"events": []}
+
+GW_CATEGORIES = ["layout", "area", "feature", "proximity", "audience", "building", "collection", "hidden"]
+GW_VIS = ["hidden", "badge", "filter", "filter_badge"]
+
+# Many raw spellings -> ONE normalized key (transliterations + AR/EN). Raw value is always kept too.
+_GW_SYNONYMS = {
+    "studio": ["studio", "استوديو", "ستوديو", "0br", "0 bedroom"],
+    "1br": ["1br", "1 br", "1 bedroom", "one bedroom", "غرفة وصالة", "غرفه وصاله", "غرفة و صالة"],
+    "2br": ["2br", "2 br", "2 bedroom", "two bedroom", "two bedrooms", "غرفتين", "غرفتان"],
+    "3br": ["3br", "3 br", "3 bedroom", "three bedroom", "ثلاث غرف"],
+    "hittin": ["hittin", "hitten", "hiten", "حطين"],
+    "malqa": ["malqa", "almalqa", "al malqa", "الملقا", "الملقى"],
+    "maseef": ["maseef", "masif", "al maseef", "almaseef", "المصيف"],
+    "muruj": ["muruj", "morooj", "moruj", "al muruj", "المروج"],
+    "balcony": ["balcony", "terrace", "بلكونة", "بلكون", "تراس"],
+    "cinema": ["cinema", "private cinema", "سينما", "سينما خاصة"],
+    "boulevard": ["boulevard", "riyadh boulevard", "البوليفارد", "بوليفارد", "قريب البوليفارد"],
+    "tower_view": ["rafal", "tower", "view", "إطلالة", "اطلالة", "برج"],
+    "family": ["family", "family friendly", "عوائل", "عائلي", "مناسب للعائلة"],
+    "self_entry": ["self entry", "selfentry", "دخول ذاتي"],
+}
+# default public labels (ar, en, category, visibility) — seeded ONLY for keys actually discovered.
+_GW_SEED = {
+    "studio": ("استوديو", "Studio", "layout", "filter_badge"),
+    "1br": ("غرفة وصالة", "1 Bedroom", "layout", "filter_badge"),
+    "2br": ("غرفتين", "2 Bedrooms", "layout", "filter_badge"),
+    "3br": ("٣ غرف", "3 Bedrooms", "layout", "filter_badge"),
+    "hittin": ("حطين", "Hittin", "area", "filter_badge"),
+    "malqa": ("الملقا", "Al Malqa", "area", "filter_badge"),
+    "maseef": ("المصيف", "Al Maseef", "area", "filter_badge"),
+    "muruj": ("المروج", "Al Muruj", "area", "filter_badge"),
+    "balcony": ("بلكونة", "Balcony", "feature", "filter_badge"),
+    "cinema": ("سينما خاصة", "Private Cinema", "feature", "filter_badge"),
+    "boulevard": ("قريب البوليفارد", "Near Boulevard", "proximity", "filter_badge"),
+    "tower_view": ("برج / إطلالة", "Tower / View", "building", "filter_badge"),
+    "family": ("مناسب للعائلة", "Family-friendly", "audience", "filter_badge"),
+    "self_entry": ("دخول ذاتي", "Self check-in", "feature", "filter_badge"),
+}
+
+def _gw_save_tax(): _save_json("guest_taxonomy.json", _gw_taxonomy)
+def _gw_save_ov(): _save_json("guest_overrides.json", _gw_overrides)
+def _gw_save_cache(): _save_json("guest_cache.json", _gw_cache)
+def _gw_save_an(): _save_json("guest_analytics.json", _gw_analytics)
+
+def _gw_normalize(s):
+    """Normalize a raw tag to a stable key: lowercase, trim, collapse separators, map synonyms."""
+    t = re.sub(r"[\s_\-/]+", " ", str(s or "").strip().lower()).strip()
+    if not t:
+        return ""
+    for key, syns in _GW_SYNONYMS.items():
+        for syn in syns:
+            if t == re.sub(r"[\s_\-/]+", " ", syn.lower()).strip():
+                return key
+    return re.sub(r"\s+", "_", t)
+
+def _gw_images(L):
+    out = []
+    for key in ("listingImages", "images", "photos"):
+        for im in (L.get(key) or []):
+            if isinstance(im, dict):
+                u = im.get("url") or im.get("originalUrl") or im.get("largeUrl") or im.get("thumbnailUrl")
+                if u:
+                    out.append({"url": str(u), "sort": im.get("sortOrder") or im.get("sort") or 0, "caption": (im.get("caption") or "")})
+            elif isinstance(im, str) and im.startswith("http"):
+                out.append({"url": im, "sort": 0, "caption": ""})
+        if out:
+            break
+    out.sort(key=lambda x: x.get("sort") or 0)
+    seen, ded = set(), []
+    for im in out:
+        if im["url"] not in seen:
+            seen.add(im["url"]); ded.append(im)
+    return ded
+
+def _gw_raw_tag_candidates(L, beds, amenities, neighbourhood, city):
+    """REAL raw tag strings + provenance. Never invents — each comes from an actual Hostaway field."""
+    cands = []
+    for key in ("tags", "listingTags"):
+        for tg in (L.get(key) or []):
+            v = (tg.get("name") if isinstance(tg, dict) else tg)
+            if v and str(v).strip():
+                cands.append((str(v).strip(), "tag"))
+    for key in ("listingCustomFieldValues", "customFieldValues", "customFields"):
+        for cf in (L.get(key) or []):
+            if not isinstance(cf, dict):
+                continue
+            val = str(cf.get("value") or "").strip()
+            if not val or val.startswith("http") or len(val) > 40:
+                continue
+            cands.append((val, "custom_field"))
+    if beds is not None:
+        try:
+            b = int(beds)
+            cands.append(("studio" if b == 0 else (str(b) + "br"), "bedrooms"))
+        except (TypeError, ValueError):
+            pass
+    for a in (neighbourhood, city):
+        if a and str(a).strip():
+            cands.append((str(a).strip(), "area"))
+    for amt in (amenities or []):
+        cands.append((amt, "amenity"))
+    return cands
+
+def _gw_parse_listing(L):
+    """Raw Hostaway listing -> safe guest snapshot. Defensive."""
+    lid = L.get("id")
+    name = (L.get("name") or L.get("internalListingName") or "").strip()
+    beds = L.get("bedroomsNumber"); baths = L.get("bathroomsNumber")
+    capacity = L.get("personCapacity") or L.get("guestsIncluded") or L.get("maxGuests")
+    city = (L.get("city") or "").strip()
+    neighbourhood = (L.get("neighbourhood") or L.get("neighborhood") or "").strip()
+    area = neighbourhood or city or (L.get("address") or "").strip()
+    amenities = _extract_amenities(L)
+    images = _gw_images(L)
+    norm = {}
+    for raw, src in _gw_raw_tag_candidates(L, beds, amenities, neighbourhood, city):
+        k = _gw_normalize(raw)
+        if not k:
+            continue
+        norm.setdefault(k, {"raw": set(), "sources": set()})
+        norm[k]["raw"].add(raw); norm[k]["sources"].add(src)
+    return {
+        "id": lid, "name": name, "internal": (L.get("internalListingName") or "").strip(),
+        "beds": beds, "baths": baths, "capacity": capacity,
+        "area": area, "city": city, "neighbourhood": neighbourhood,
+        "ptype": (L.get("propertyTypeName") or L.get("propertyType") or "").strip(),
+        "desc": (L.get("description") or "").strip()[:4000],
+        "public_desc": (L.get("publicDescription") or L.get("summary") or "").strip()[:1200],
+        "amenities": amenities[:40], "amenity_tags": _amenity_tags(amenities),
+        "airbnb_url": _airbnb_link(L), "active": _listing_active(L),
+        "images": images[:30], "cover": (images[0]["url"] if images else ""),
+        "tag_keys": sorted(norm.keys()),
+        "tag_raw": {k: {"raw": sorted(v["raw"]), "sources": sorted(v["sources"])} for k, v in norm.items()},
+        "price_base": L.get("price"),
+    }
+
+def _gw_discover_tags(snaps):
+    """Fold discovered tag keys into the taxonomy (count, examples, last_seen, raw values)."""
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    seen = {}
+    for s in snaps:
+        for k, info in (s.get("tag_raw") or {}).items():
+            d = seen.setdefault(k, {"count": 0, "examples": [], "raw": set(), "sources": set()})
+            d["count"] += 1
+            if len(d["examples"]) < 5:
+                d["examples"].append({"id": s["id"], "name": s["name"]})
+            d["raw"].update(info.get("raw") or []); d["sources"].update(info.get("sources") or [])
+    for k, d in seen.items():
+        ent = _gw_taxonomy.get(k)
+        if not ent:
+            seed = _GW_SEED.get(k)
+            ent = {"key": k, "ar": (seed[0] if seed else ""), "en": (seed[1] if seed else ""),
+                   "category": (seed[2] if seed else ("area" if "area" in d["sources"] else "")),
+                   "visibility": (seed[3] if seed else "hidden"),
+                   "weight": 1, "sort": 0, "aliases": [], "in_noo": True,
+                   "created": now, "updated": now}
+            _gw_taxonomy[k] = ent
+        ent["count"] = d["count"]; ent["examples"] = d["examples"]
+        ent["raw_values"] = sorted(d["raw"]); ent["sources"] = sorted(d["sources"])
+        ent["last_seen"] = now
+        ent["status"] = "mapped" if (ent.get("ar") or ent.get("en")) else "unmapped"
+    _gw_save_tax()
+
+def _gw_sync(force=False):
+    """Pull all listings from Hostaway, parse, cache, discover tags. READ-ONLY."""
+    try:
+        raw = _ha_fetch_all_listings()
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200], "synced_at": _gw_cache.get("synced_at")}
+    snaps, diag = [], {"missing_airbnb": [], "missing_images": [], "inactive": 0}
+    for L in raw:
+        s = _gw_parse_listing(L)
+        if not s.get("id"):
+            continue
+        if not s["active"]:
+            diag["inactive"] += 1
+        if not s["airbnb_url"]:
+            diag["missing_airbnb"].append(s["id"])
+        if not s["images"]:
+            diag["missing_images"].append(s["id"])
+        snaps.append(s)
+    _gw_cache["listings"] = snaps
+    _gw_cache["synced_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _gw_cache["diag"] = diag
+    _gw_save_cache(); _gw_discover_tags(snaps)
+    return {"ok": True, "count": len(snaps), "synced_at": _gw_cache["synced_at"],
+            "missing_airbnb": len(diag["missing_airbnb"]), "missing_images": len(diag["missing_images"])}
+
+def _gw_slug(snap, ov=None):
+    ov = ov or {}
+    if ov.get("slug"):
+        return ov["slug"]
+    base = re.sub(r"[^a-z0-9]+", "-", (snap.get("name") or "").lower()).strip("-") or "unit"
+    return (base + "-" + str(snap.get("id")))[:80]
+
+def _gw_airbnb_url(snap, ov=None):
+    ov = ov or {}
+    if snap.get("airbnb_url"):
+        return snap["airbnb_url"].strip(), "hostaway"
+    if (ov.get("airbnb_override") or "").strip():
+        return ov["airbnb_override"].strip(), "override"
+    return "", ""
+
+def _gw_public_tags(snap):
+    out = []
+    for k in (snap.get("tag_keys") or []):
+        ent = _gw_taxonomy.get(k)
+        if not ent or ent.get("visibility") in (None, "hidden", "filter"):
+            continue
+        if not (ent.get("ar") or ent.get("en")):
+            continue
+        out.append({"key": k, "ar": ent.get("ar"), "en": ent.get("en"), "category": ent.get("category")})
+    out.sort(key=lambda x: x["key"])
+    return out
+
+def _gw_listing_public(snap, ov=None, with_airbnb=True):
+    ov = ov if ov is not None else (_gw_overrides.get(str(snap.get("id")), {}) or {})
+    url, src = _gw_airbnb_url(snap, ov)
+    return {
+        "id": snap.get("id"), "slug": _gw_slug(snap, ov),
+        "name_ar": (ov.get("title_ar") or snap.get("name") or ""),
+        "name_en": (ov.get("title_en") or snap.get("name") or ""),
+        "short_ar": (ov.get("short_ar") or snap.get("public_desc") or "")[:300],
+        "short_en": (ov.get("short_en") or "")[:300],
+        "desc_ar": (ov.get("full_ar") or snap.get("desc") or ""),
+        "desc_en": (ov.get("full_en") or ""),
+        "area": (ov.get("area") or snap.get("area") or ""),
+        "beds": snap.get("beds"), "baths": snap.get("baths"), "capacity": snap.get("capacity"),
+        "ptype": snap.get("ptype"), "badge": (ov.get("badge") or ""),
+        "images": [im["url"] for im in (snap.get("images") or [])],
+        "cover": ((ov.get("hero_image") or snap.get("cover")) or ""),
+        "amenities": snap.get("amenities") or [],
+        "tags": _gw_public_tags(snap),
+        "self_entry": ("self_entry" in (snap.get("tag_keys") or [])),
+        "airbnb_url": (url if with_airbnb else ""), "airbnb_source": src, "has_airbnb": bool(url),
+        "price_base": snap.get("price_base"),
+    }
+
+def _gw_visible_snaps():
+    out = []
+    for s in (_gw_cache.get("listings") or []):
+        ov = _gw_overrides.get(str(s.get("id")), {}) or {}
+        if ov.get("visible") is False:
+            continue
+        if not s.get("active") and ov.get("visible") is not True:
+            continue
+        out.append((s, ov))
+    return out
+
+def _gw_noo_options():
+    """نوع options with >=1 visible listing. Category-aware internally; one guest selector."""
+    cats = {"layout", "feature", "proximity", "collection", "audience", "building"}
+    counts = {}
+    for s, ov in _gw_visible_snaps():
+        for k in (s.get("tag_keys") or []):
+            ent = _gw_taxonomy.get(k)
+            if not ent or ent.get("visibility") in (None, "hidden", "badge"):
+                continue
+            if not (ent.get("ar") or ent.get("en")):
+                continue
+            if ent.get("category") not in cats and not (ent.get("category") == "area" and ent.get("in_noo")):
+                continue
+            counts[k] = counts.get(k, 0) + 1
+    opts = []
+    for k, n in counts.items():
+        ent = _gw_taxonomy[k]
+        opts.append({"key": k, "ar": ent.get("ar"), "en": ent.get("en"), "category": ent.get("category"),
+                     "count": n, "sort": ent.get("sort") or 0})
+    opts.sort(key=lambda o: (o["sort"], -o["count"], o["key"]))
+    return opts
+
+def _gw_search(ci=None, co=None, guests=None, typ=None, area=None):
+    """Guest listing results. With dates -> only AVAILABLE; else browse mode (no availability claims)."""
+    browse = not (ci and co)
+    try:
+        g = int(guests) if guests else None
+    except (TypeError, ValueError):
+        g = None
+    results, avail_error = [], False
+    for s, ov in _gw_visible_snaps():
+        if g and s.get("capacity") and int(s["capacity"]) < g:
+            continue
+        if typ and typ not in ("all", "") and typ not in (s.get("tag_keys") or []):
+            continue
+        if area and area not in ("all", "") and area not in (s.get("tag_keys") or []):
+            continue
+        avail = None
+        if not browse:
+            avail = unit_availability_price(s.get("id"), ci, co)
+            if avail is None:
+                avail_error = True
+            elif not avail.get("available"):
+                continue
+        pub = _gw_listing_public(s, ov)
+        pub["available"] = (None if browse else (avail.get("available") if avail else None))
+        pub["nights"] = (avail.get("nights") if avail else None)
+        pub["est_total"] = (avail.get("total") if avail else None)
+        pub["est_avg"] = (avail.get("avg") if avail else None)
+        ms = 10 if (typ and typ in (s.get("tag_keys") or [])) else 0
+        results.append((pub, s, ms, avail))
+
+    def sort_key(t):
+        pub, s, ms, avail = t
+        ov2 = _gw_overrides.get(str(s.get("id")), {}) or {}
+        return (0 if (browse or (avail and avail.get("available"))) else 1,
+                0 if pub["has_airbnb"] else 1, -ms,
+                0 if (g and s.get("capacity") and int(s["capacity"]) >= g) else 1,
+                -(ov2.get("sort") or 0), 0 if pub["images"] else 1, (pub["name_ar"] or ""))
+    results.sort(key=sort_key)
+    return {"browse": browse, "avail_error": (avail_error and not browse), "results": [r[0] for r in results]}
+
+def _gw_find_by_slug_or_id(token):
+    token = str(token or "")
+    for s in (_gw_cache.get("listings") or []):
+        ov = _gw_overrides.get(str(s.get("id")), {}) or {}
+        if token == _gw_slug(s, ov) or token == str(s.get("id")):
+            return s, ov
+    if token.isdigit():
+        for s in (_gw_cache.get("listings") or []):
+            if str(s.get("id")) == token:
+                return s, (_gw_overrides.get(token, {}) or {})
+    return None, None
+
+def _gw_track(ev):
+    try:
+        ev = dict(ev or {})
+        ev["ts"] = datetime.now(TZ).isoformat(timespec="seconds")
+        _gw_analytics["events"].append(ev)
+        if len(_gw_analytics["events"]) > 8000:
+            del _gw_analytics["events"][:len(_gw_analytics["events"]) - 8000]
+        _gw_save_an()
+    except Exception:
+        pass
+
+def _gw_analytics_summary(days=7):
+    cutoff = (datetime.now(TZ) - timedelta(days=days)).isoformat(timespec="seconds")
+    evs = [e for e in _gw_analytics.get("events", []) if (e.get("ts") or "") >= cutoff]
+    def c(t): return sum(1 for e in evs if e.get("event") == t)
+    lv, clk = c("stay_listing_view"), c("stay_airbnb_click")
+    by_listing, by_type, by_utm = {}, {}, {}
+    for e in evs:
+        if e.get("event") == "stay_airbnb_click" and e.get("listing_id") is not None:
+            by_listing[e["listing_id"]] = by_listing.get(e["listing_id"], 0) + 1
+        if e.get("event") == "stay_search" and e.get("type"):
+            by_type[e["type"]] = by_type.get(e["type"], 0) + 1
+        u = e.get("utm_source") or e.get("referrer") or "direct"
+        by_utm[u] = by_utm.get(u, 0) + 1
+    return {"days": days, "page_views": c("stay_page_view"), "searches": c("stay_search"),
+            "no_results": c("stay_no_results"), "listing_views": lv, "airbnb_clicks": clk,
+            "ctr": (round(100.0 * clk / lv, 1) if lv else 0.0),
+            "top_listings": sorted(by_listing.items(), key=lambda x: -x[1])[:10],
+            "top_types": sorted(by_type.items(), key=lambda x: -x[1])[:10],
+            "by_utm": sorted(by_utm.items(), key=lambda x: -x[1])[:10], "total_events": len(evs)}
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
