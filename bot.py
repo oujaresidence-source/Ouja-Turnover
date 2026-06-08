@@ -33124,6 +33124,7 @@ _fb_audit     = _load_json("finance_audit_log.json", []) or []          # append
 _fb_cards     = _load_json("finance_card_mappings.json", {}) or {}      # card_last4 -> employee
 _fb_djournals = _load_json("finance_daftra_journals.json", {}) or {}    # daftra entry_id -> {entry + lines[]}
 _fb_dstate    = _load_json("finance_daftra_import_state.json", {}) or {} # data_type -> per-type sync state
+_fb_bankmap   = _load_json("finance_bank_account_map.json", {}) or {}    # local_bank_source -> Daftra bank account
 
 def _fb_save(name, obj):
     try:
@@ -33524,8 +33525,10 @@ def _daftra_line_fields(ln):
     cre = core.get("credit") or core.get("credit_amount") or core.get("cr") or 0
     return {"line_id": core.get("id"),
             "account_id": core.get("account_id") or core.get("journal_account_id") or core.get("account"),
+            "account_code": str(core.get("account_code") or core.get("code") or core.get("account_no") or "")[:60],
             "account_name": str(core.get("account_name") or core.get("name") or "")[:160],
             "cost_center_id": core.get("cost_center_id") or core.get("project_id") or core.get("cost_center"),
+            "cost_center_name": str(core.get("cost_center_name") or "")[:120],
             "debit": (_fb_money_str(deb) if deb else "0.00"), "credit": (_fb_money_str(cre) if cre else "0.00"),
             "description": str(core.get("description") or core.get("note") or "")[:300],
             "reference": str(core.get("reference") or core.get("ref") or "")[:120]}
@@ -33569,6 +33572,7 @@ def _daftra_import_journals(start=None, end=None, actor=""):
         key = str(eid)
         rec = _fb_djournals.get(key)
         _fb_djournals[key] = {"entry_id": key, "date": edate,
+                              "number": str(core.get("number") or core.get("journal_number") or core.get("code") or core.get("no") or key)[:40],
                               "reference": str(core.get("reference") or core.get("ref") or "")[:120],
                               "description": str(core.get("description") or core.get("note") or f.get("name") or "")[:400],
                               "lines": lines, "status": core.get("status"), "hash": h,
@@ -33584,92 +33588,165 @@ def _daftra_import_journals(start=None, end=None, actor=""):
                   after={"new": new, "updated": upd, "skipped": skipped, "range": [start, end]})
     return {"ok": True, "new": new, "updated": upd, "entries": len(_fb_djournals), "fetched": len(items)}
 
-# ---- Stage 3: duplicate matching engine (bank txn ↔ imported Daftra records) ----
-def _fb_daftra_matchables():
-    """Flat matchable Daftra records: journal lines + imported expenses + incomes."""
-    out = []
-    for entry in _fb_djournals.values():
-        for ln in (entry.get("lines") or []):
-            out.append({"kind": "journal_line", "source_type": "journal_entry", "id": entry["entry_id"],
-                        "line_id": ln.get("line_id") or ln.get("hash"), "amount": ln.get("amount") or "0.00",
-                        "direction": ln.get("direction"), "date": entry.get("date"),
-                        "description": (ln.get("description") or entry.get("description") or ""),
-                        "reference": ln.get("reference") or entry.get("reference") or "",
-                        "account_name": ln.get("account_name"), "cost_center_id": ln.get("cost_center_id")})
-    for rec in _fb_external.values():
-        st = rec.get("source_type")
-        if st in ("expenses", "incomes") and rec.get("amount") is not None:
-            out.append({"kind": st, "source_type": st, "id": rec.get("source_id"), "line_id": None,
-                        "amount": rec.get("amount"), "direction": ("debit" if st == "expenses" else "credit"),
-                        "date": rec.get("date"), "description": rec.get("display_name") or "",
-                        "reference": rec.get("code") or "", "account_name": "", "cost_center_id": None})
-    return out
+# ---- duplicate engine v2: bank txn ↔ Daftra JOURNAL LINES via mapped bank account ----
+_AR_DIGITS = {"٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+              "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4", "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9"}
+_FB_BANK_NOISE = ["حواله فوريه صادره", "حوالات فوريه وارده", "حوالت فوريه وارده", "حواله فوريه وارده",
+                  "رسوم حواله", "حواله", "تحويل", "من الحساب", "الى الحساب", "bank", "name 1", "name 2",
+                  "name-1", "name-2", "sancbkncbk", "reference", "ref"]
+
+def _fb_ar_norm(s):
+    """Normalize AR/EN text for similarity: digits, tatweel, diacritics, alef/ya/ta-marbuta, noise, lower."""
+    t = str(s or "")
+    for d, a in _AR_DIGITS.items():
+        t = t.replace(d, a)
+    t = t.replace("ـ", "")
+    t = "".join(ch for ch in t if not ("ً" <= ch <= "ْ"))      # strip harakat
+    for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ى", "ي"), ("ة", "ه"), ("ؤ", "و"), ("ئ", "ي")):
+        t = t.replace(a, b)
+    t = t.lower()
+    for n in _FB_BANK_NOISE:
+        t = t.replace(n, " ")
+    t = re.sub(r"[^0-9a-z؀-ۿ ]", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 def _fb_text_sim(a, b):
-    ta = set(re.sub(r"[^0-9a-z؀-ۿ ]", " ", str(a or "").lower()).split())
-    tb = set(re.sub(r"[^0-9a-z؀-ۿ ]", " ", str(b or "").lower()).split())
-    ta.discard(""); tb.discard("")
+    ta = set(_fb_ar_norm(a).split()); tb = set(_fb_ar_norm(b).split())
+    ta = {w for w in ta if len(w) >= 2}; tb = {w for w in tb if len(w) >= 2}
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / float(len(ta | tb))
 
-def _fb_dup_score(txn, rec):
-    """Score a bank txn vs a Daftra record (0..100) + (reason_ar, reason_en). Decimal-exact amount."""
+def _fb_mapped_bank_accounts():
+    """Daftra (kind,value) keys (id/code) that represent imported bank statement accounts."""
+    s = set()
+    for m in _fb_bankmap.values():
+        if m.get("active") is False:
+            continue
+        if m.get("daftra_account_id") not in (None, ""):
+            s.add(("id", str(m["daftra_account_id"])))
+        if m.get("daftra_account_code") not in (None, ""):
+            s.add(("code", str(m["daftra_account_code"])))
+    return s
+
+def _fb_line_is_bank(ln, bankset):
+    aid, acode = str(ln.get("account_id") or ""), str(ln.get("account_code") or "")
+    return bool((aid and ("id", aid) in bankset) or (acode and ("code", acode) in bankset))
+
+def _fb_journal_objects(bankset):
+    """Each Daftra journal → {entry, bank_lines, counterpart}. bank_lines hit the mapped bank account."""
+    out = []
+    for entry in _fb_djournals.values():
+        lines = entry.get("lines") or []
+        bank_lines = [ln for ln in lines if _fb_line_is_bank(ln, bankset)]
+        counter = [ln for ln in lines if not _fb_line_is_bank(ln, bankset)]
+        out.append({"entry": entry, "bank_lines": bank_lines, "counterpart": (counter or lines)})
+    return out
+
+def _fb_dup_score_journal(txn, jo, bankset):
+    """Score a bank txn vs ONE journal. Returns (score, reason_ar, reason_en, matched_line, counterpart).
+    PRIMARY signal = a mapped-bank-account line with the correct direction + exact Decimal amount.
+    Bank OUTGOING (debit) ↔ a CREDIT to the bank account; bank INCOMING (credit) ↔ a DEBIT to it."""
     deb, cre = _fb_money(txn.get("debit")), _fb_money(txn.get("credit"))
-    tamt = deb if deb > 0 else cre
-    ramt = _fb_money(rec.get("amount"))
-    if not (tamt > 0 and tamt == ramt):                       # amount must match exactly to be a duplicate
-        return 0, ("ما لقينا سجل مشابه في دافترة", "no similar record")
-    ar, en, score = ["المبلغ مطابق"], ["amount exact"], 45
-    if rec.get("direction") == ("debit" if deb > 0 else "credit"):
-        score += 5
-    td, rd = _parse_date(txn.get("date")), _parse_date(rec.get("date"))
-    if td and rd:
-        dd = abs((td - rd).days)
+    outgoing = deb > 0
+    tamt = deb if outgoing else cre
+    if tamt <= 0:
+        return 0, "", "", None, []
+    entry = jo["entry"]
+    td, ed = _parse_date(txn.get("date")), _parse_date(entry.get("date"))
+    date_pts, date_ar, date_en = 0, "", ""
+    if td and ed:
+        dd = abs((td - ed).days)
         if dd == 0:
-            score += 25; ar.append("نفس التاريخ"); en.append("same date")
+            date_pts, date_ar, date_en = 28, "نفس التاريخ", "same date"
         elif dd <= 1:
-            score += 18; ar.append("التاريخ قريب (±يوم)"); en.append("±1 day")
+            date_pts, date_ar, date_en = 18, "تاريخ ±يوم", "±1 day"
         elif dd <= 3:
-            score += 10; ar.append("التاريخ قريب"); en.append("±3 days")
-    rref = str(rec.get("reference") or "").lower().strip()
-    thay = (str(txn.get("ref") or "") + " " + str(txn.get("description") or "")).lower()
-    if rref and len(rref) >= 4 and rref in thay:
-        score += 18; ar.append("المرجع نفسه"); en.append("reference match")
-    sim = _fb_text_sim(txn.get("description"), rec.get("description"))
-    if sim >= 0.5:
-        score += 12; ar.append("الوصف مشابه"); en.append("description similar")
-    elif sim >= 0.25:
-        score += 6
+            date_pts, date_ar, date_en = 10, "تاريخ ±٣ أيام", "±3 days"
+        else:
+            return 0, "", "", None, []                       # outside ±3 days → not a candidate
+    ar, en, counterpart = [], [], jo["counterpart"]
+    # 1) the strong path: a mapped bank-account line, correct direction, exact amount
+    bank_match = None
+    for bl in jo["bank_lines"]:
+        side = _fb_money(bl.get("credit")) if outgoing else _fb_money(bl.get("debit"))
+        if side > 0 and side == tamt:
+            bank_match = bl; break
+    if bank_match is not None:
+        score = 40 + 30 + date_pts                            # amount(40) + bank-line+direction(30) + date
+        ar = ["نفس المبلغ", "سطر الراجحي مطابق في القيد", "اتجاه صحيح"]
+        en = ["amount exact", "bank account line matches", "direction matches"]
+        if date_ar:
+            ar.append(date_ar); en.append(date_en)
+        matched_line = bank_match
+        cap = 100
     else:
-        ar.append("لكن الوصف مختلف"); en.append("description differs")
-    return min(100, score), (" · ".join(ar), " · ".join(en))
+        # 2) weaker fallback: ANY line in the entry has the exact amount (no bank-side proof) → capped 84
+        any_line = None
+        for ln in (jo["bank_lines"] + jo["counterpart"]):
+            la = _fb_money(ln.get("debit")) or _fb_money(ln.get("credit"))
+            if la > 0 and la == tamt:
+                any_line = ln; break
+        if any_line is None:
+            return 0, "", "", None, []
+        score = 40 + date_pts
+        ar = ["نفس المبلغ"]; en = ["amount exact"]
+        if date_ar:
+            ar.append(date_ar); en.append(date_en)
+        if not bankset:
+            ar.append("ناقص ربط حساب البنك"); en.append("bank account mapping missing")
+        matched_line = any_line
+        cap = 84
+    # secondary: reference + normalized description (never required)
+    thay = _fb_ar_norm(str(txn.get("ref") or "") + " " + str(txn.get("description") or ""))
+    rref = _fb_ar_norm(str(entry.get("reference") or "") + " " + " ".join(str(c.get("reference") or "") for c in counterpart))
+    if rref and any(tok in thay for tok in rref.split() if len(tok) >= 4):
+        score += 20; ar.append("المرجع مطابق"); en.append("reference match")
+    cdesc = " ".join((c.get("description") or c.get("account_name") or "") for c in counterpart) + " " + (entry.get("description") or "")
+    if _fb_text_sim(txn.get("description"), cdesc) >= 0.4:
+        score += 10; ar.append("الوصف مشابه"); en.append("description similar")
+    return min(cap, score), " · ".join(ar), " · ".join(en), matched_line, counterpart
 
 def _fb_dup_status_for(score):
     if score >= 95:
         return "already_in_daftra_verified"
-    if score >= 75:
+    if score >= 85:
+        return "strong_possible_duplicate"
+    if score >= 70:
         return "possible_duplicate"
     if score >= 50:
         return "needs_manual_review"
-    return "not_found_in_daftra"
+    return "not_found_after_full_check"
 
-def _fb_dup_best(txn, matchables=None):
-    """Best Daftra match for a bank txn → (record, score, (reason_ar, reason_en))."""
-    best, best_sc, best_rs = None, 0, ("", "")
-    for rec in (matchables if matchables is not None else _fb_daftra_matchables()):
-        sc, rs = _fb_dup_score(txn, rec)
-        if sc > best_sc:
-            best, best_sc, best_rs = rec, sc, rs
-    return best, best_sc, best_rs
+def _fb_dup_suggest(txn, limit=8):
+    """Scored journal suggestions for a bank txn (for the comparison drawer)."""
+    bankset = _fb_mapped_bank_accounts()
+    out = []
+    for jo in _fb_journal_objects(bankset):
+        sc, a, e, line, cp = _fb_dup_score_journal(txn, jo, bankset)
+        if sc <= 0:
+            continue
+        ent = jo["entry"]
+        out.append({"entry_id": ent.get("entry_id"), "number": ent.get("number"), "date": ent.get("date"),
+                    "description": ent.get("description"), "reference": ent.get("reference"),
+                    "confidence": sc, "reason_ar": a, "reason_en": e,
+                    "bank_line": ({"account_name": line.get("account_name"), "account_code": line.get("account_code"),
+                                   "debit": line.get("debit"), "credit": line.get("credit")} if line else None),
+                    "counterpart": [{"account_name": c.get("account_name"), "debit": c.get("debit"),
+                                     "credit": c.get("credit"), "description": c.get("description"),
+                                     "cost_center_name": c.get("cost_center_name")} for c in (cp or [])[:4]]})
+    out.sort(key=lambda x: -x["confidence"])
+    return out[:limit]
 
 def _fb_dup_check(start=None, end=None, actor="", ids=None):
-    """Check bank txns (date range OR explicit ids) against imported Daftra records."""
-    matchables = _fb_daftra_matchables()
+    """Check bank txns (date range OR ids) against imported Daftra JOURNAL LINES via mapped bank account.
+    Honest prerequisites: needs journals imported + a bank-account mapping before claiming 'not found'."""
+    bankset = _fb_mapped_bank_accounts()
+    journals = _fb_journal_objects(bankset) if _fb_djournals else []
     sd, ed = _parse_date(start), _parse_date(end)
     now = datetime.now(TZ).isoformat(timespec="seconds")
-    counts = {"already_in_daftra_verified": 0, "possible_duplicate": 0, "needs_manual_review": 0,
-              "not_found_in_daftra": 0}
+    counts = {k: 0 for k in ("already_in_daftra_verified", "strong_possible_duplicate", "possible_duplicate",
+                             "needs_manual_review", "not_found_after_full_check", "missing_bank_account_mapping")}
     checked = 0
     for tid, txn in _fb_bank.items():
         if ids:
@@ -33681,25 +33758,40 @@ def _fb_dup_check(start=None, end=None, actor="", ids=None):
                 continue
         if txn.get("daftra_duplicate_status") in ("linked_existing", "not_duplicate", "ignored"):
             continue                                          # keep resolved decisions
-        best, sc, rs = _fb_dup_best(txn, matchables)
-        status = _fb_dup_status_for(sc)
-        txn["daftra_duplicate_status"] = status
-        txn["daftra_duplicate_checked_at"] = now
-        txn["daftra_duplicate_confidence"] = sc
-        txn["daftra_duplicate_reason_ar"] = rs[0] or "ما لقينا سجل مشابه في دافترة"
-        txn["daftra_duplicate_reason_en"] = rs[1] or "no similar record"
-        if best and sc >= 50:
-            txn["matched_daftra_source_type"] = best["source_type"]
-            txn["matched_daftra_id"] = best["id"]
-            txn["matched_daftra_line_id"] = best.get("line_id")
-        else:
-            txn["matched_daftra_source_type"] = None; txn["matched_daftra_id"] = None; txn["matched_daftra_line_id"] = None
-        counts[status] = counts.get(status, 0) + 1
         checked += 1
+        txn["daftra_duplicate_checked_at"] = now
+        if not bankset:                                       # no bank mapping → never say "not found"
+            txn["daftra_duplicate_status"] = "missing_bank_account_mapping"
+            txn["daftra_duplicate_confidence"] = 0
+            txn["daftra_duplicate_reason_ar"] = "ناقص ربط حساب البنك في دافترة، ما نقدر نجزم"
+            txn["daftra_duplicate_reason_en"] = "Daftra bank account mapping missing — can't decide"
+            txn["matched_daftra_id"] = None; txn["matched_daftra_source_type"] = None
+            counts["missing_bank_account_mapping"] += 1
+            continue
+        best_sc, best_rs, best_line, best_entry = 0, ("", ""), None, None
+        for jo in journals:
+            sc, a, e, line, cp = _fb_dup_score_journal(txn, jo, bankset)
+            if sc > best_sc:
+                best_sc, best_rs, best_line, best_entry = sc, (a, e), line, jo["entry"]
+        status = _fb_dup_status_for(best_sc)
+        txn["daftra_duplicate_status"] = status
+        txn["daftra_duplicate_confidence"] = best_sc
+        if best_sc >= 50 and best_entry:
+            txn["daftra_duplicate_reason_ar"] = best_rs[0]
+            txn["daftra_duplicate_reason_en"] = best_rs[1]
+            txn["matched_daftra_source_type"] = "journal_entry"
+            txn["matched_daftra_id"] = best_entry.get("entry_id")
+            txn["matched_daftra_number"] = best_entry.get("number")
+            txn["matched_daftra_line_id"] = (best_line.get("line_id") if best_line else None)
+        else:
+            txn["daftra_duplicate_reason_ar"] = "تم فحص القيود والمصاريف ولا يوجد تطابق قوي"
+            txn["daftra_duplicate_reason_en"] = "Journals & expenses checked, no strong match"
+            txn["matched_daftra_id"] = None; txn["matched_daftra_source_type"] = None; txn["matched_daftra_number"] = None
+        counts[status] = counts.get(status, 0) + 1
     _fb_save("finance_bank_transactions.json", _fb_bank)
     _fb_audit_add(actor, "daftra_dup_check", "bank", (start or "ids"),
-                  after={"checked": checked, "matchables": len(matchables), **counts})
-    return {"ok": True, "checked": checked, "matchables": len(matchables), **counts}
+                  after={"checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset), **counts})
+    return {"ok": True, "checked": checked, "journals": len(_fb_djournals), "bank_mapping": bool(bankset), **counts}
 
 def _fb_dup_summary():
     by = {}
@@ -33709,10 +33801,11 @@ def _fb_dup_summary():
     return {"total": len(_fb_bank), "by_status": by,
             "checked": sum(v for k, v in by.items() if k != "not_checked"),
             "not_checked": by.get("not_checked", 0),
-            "possible": by.get("possible_duplicate", 0) + by.get("needs_manual_review", 0),
+            "missing_bank_account_mapping": by.get("missing_bank_account_mapping", 0),
+            "possible": (by.get("possible_duplicate", 0) + by.get("strong_possible_duplicate", 0) + by.get("needs_manual_review", 0)),
             "in_daftra": by.get("already_in_daftra_verified", 0) + by.get("linked_existing", 0)}
 
-# ---- Stage 4: link existing / resolve ----
+# ---- link existing / resolve ----
 def _fb_dup_resolve(tid, action, actor="", daftra=None, reason=""):
     txn = _fb_bank.get(tid)
     if not txn:
@@ -33746,30 +33839,40 @@ def _fb_dup_resolve(tid, action, actor="", daftra=None, reason=""):
     return {"ok": True, "txn": txn}
 
 def _fb_search_daftra(q="", amount=None, limit=40):
-    """Manual search across matchable Daftra records for the comparison drawer."""
-    ql = str(q or "").lower().strip()
+    """Manual search across imported Daftra journal entries (header+lines) for the comparison drawer."""
+    qn = _fb_ar_norm(q)
     amt = (_fb_money(amount) if amount not in (None, "") else None)
     out = []
-    for rec in _fb_daftra_matchables():
-        if amt is not None and _fb_money(rec.get("amount")) != amt:
+    for ent in _fb_djournals.values():
+        if amt is not None and not any(_fb_money(ln.get("debit")) == amt or _fb_money(ln.get("credit")) == amt for ln in (ent.get("lines") or [])):
             continue
-        if ql and ql not in ((str(rec.get("description") or "") + " " + str(rec.get("reference") or "") + " " + str(rec.get("id") or "")).lower()):
+        hay = _fb_ar_norm(str(ent.get("description") or "") + " " + str(ent.get("reference") or "") + " " + str(ent.get("number") or "") + " "
+                          + " ".join((ln.get("account_name") or "") + " " + (ln.get("description") or "") for ln in (ent.get("lines") or [])))
+        if qn and not all(tok in hay for tok in qn.split()):
             continue
-        out.append(rec)
+        out.append({"entry_id": ent.get("entry_id"), "number": ent.get("number"), "date": ent.get("date"),
+                    "description": ent.get("description"), "reference": ent.get("reference"),
+                    "lines": [{"account_name": ln.get("account_name"), "account_code": ln.get("account_code"),
+                               "debit": ln.get("debit"), "credit": ln.get("credit"),
+                               "description": ln.get("description")} for ln in (ent.get("lines") or [])][:8]})
         if len(out) >= limit:
             break
     return out
 
-# ---- Stage 5: posting guardrails ----
+# ---- posting guardrails ----
 def _fb_post_guard(txn):
     """Blockers preventing promote/post of a bank txn (duplicate shield). Returns [(ar,en)]."""
     st = txn.get("daftra_duplicate_status")
     if not st or st == "not_checked":
-        return [("شغّل التحقق من التكرار مع دافترة قبل الترحيل", "Run Daftra duplicate check before posting")]
+        return [("ما نقدر نرحّل قبل فحص التكرار مع قيود دافترة", "Can't post before the Daftra duplicate check is run")]
+    if st == "missing_bank_account_mapping":
+        return [("ناقص ربط حساب الراجحي مع حسابه في دافترة", "Daftra bank account mapping missing — map Al Rajhi first")]
+    if st == "check_failed":
+        return [("فشل التحقق من التكرار — أعد المحاولة", "Duplicate check failed — retry")]
     if st == "already_in_daftra_verified":
-        return [("موجود في دافترة — اربطه بدل ما تنشئ قيد جديد", "Already in Daftra — link it instead of creating a new entry")]
-    if st in ("possible_duplicate", "needs_manual_review"):
-        return [("احتمال مكرر غير محلول — افتح المقارنة واربطه أو علّمه «مو مكرر»", "Unresolved possible duplicate — open comparison, link it or mark not-duplicate")]
+        return [("هذي العملية موجودة أصلًا في دافترة، اربطها بدل الترحيل", "Already in Daftra — link it instead of posting")]
+    if st in ("strong_possible_duplicate", "possible_duplicate", "needs_manual_review"):
+        return [("في احتمال تكرار، افتح المطابقة قبل الترحيل واربطها أو علّمها «مو مكرر»", "Possible duplicate — open comparison, link it or mark not-duplicate")]
     return []
 
 async def _api_fb_daftra(request):
@@ -33810,7 +33913,36 @@ async def _api_fb_daftra_state(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     return _json({"ok": True, "state": _fb_dstate, "journals": len(_fb_djournals),
+                  "bank_mapping": bool(_fb_mapped_bank_accounts()), "bankmaps": list(_fb_bankmap.values()),
                   "dup": _fb_dup_summary(), "counts": _daftra_counts()})
+
+async def _api_fb_daftra_bankmap(request):
+    """Map an imported bank statement (e.g. alrajhi_1039) to its Daftra account. GET list / POST upsert/delete."""
+    if request.method == "GET":
+        if not _dash_auth(request):
+            return _json({"error": "unauthorized"}, 401)
+        ccs = [{"source_id": r.get("source_id"), "display_name": r.get("display_name"), "code": r.get("code")}
+               for r in _fb_external.values() if r.get("source_type") in ("accounts", "treasuries")][:400]
+        return _json({"ok": True, "maps": list(_fb_bankmap.values()), "daftra_accounts": ccs})
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    src = (b.get("source") or "").strip()
+    if not src:
+        return _json({"error": "source_required"}, 400)
+    if b.get("delete"):
+        _fb_bankmap.pop(src, None)
+        _fb_save("finance_bank_account_map.json", _fb_bankmap)
+        return _json({"ok": True, "deleted": src})
+    _fb_bankmap[src] = {"source": src, "display": (b.get("display") or src),
+                        "daftra_account_id": str(b.get("daftra_account_id") or ""),
+                        "daftra_account_name": (b.get("daftra_account_name") or ""),
+                        "daftra_account_code": str(b.get("daftra_account_code") or ""),
+                        "active": (b.get("active") is not False), "notes": (b.get("notes") or "")[:300],
+                        "updated_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    _fb_save("finance_bank_account_map.json", _fb_bankmap)
+    _fb_audit_add(_req_actor(request), "bank_account_map", "daftra", src, after={"account": _fb_bankmap[src].get("daftra_account_code")})
+    return _json({"ok": True, "map": _fb_bankmap[src]})
 
 async def _api_fb_daftra_dup(request):
     """Duplicate shield. GET: suggestions for a txn / manual search. POST: check / link / not_duplicate / ignore."""
@@ -33823,14 +33955,8 @@ async def _api_fb_daftra_dup(request):
             txn = _fb_bank.get(tid)
             if not txn:
                 return _json({"error": "bank_txn_not_found"}, 404)
-            ms = _fb_daftra_matchables()
-            scored = []
-            for rec in ms:
-                sc, rs = _fb_dup_score(txn, rec)
-                if sc > 0:
-                    scored.append({**rec, "confidence": sc, "reason_ar": rs[0], "reason_en": rs[1]})
-            scored.sort(key=lambda x: -x["confidence"])
-            return _json({"ok": True, "txn": txn, "suggestions": scored[:8]})
+            return _json({"ok": True, "txn": txn, "suggestions": _fb_dup_suggest(txn),
+                          "bank_mapping": bool(_fb_mapped_bank_accounts()), "journals": len(_fb_djournals)})
         return _json({"ok": True, "results": _fb_search_daftra(q.get("q"), q.get("amount"))})
     b = await _read_body(request)
     action = (b.get("action") or "").strip()
@@ -38519,6 +38645,8 @@ async def start_web_server():
         app.router.add_post("/api/fb/daftra/cost-centers/refresh", _api_fb_daftra_cost_centers)
         app.router.add_post("/api/fb/daftra/journals", _api_fb_daftra_journals)
         app.router.add_get("/api/fb/daftra/state", _api_fb_daftra_state)
+        app.router.add_get("/api/fb/daftra/bankmap", _api_fb_daftra_bankmap)
+        app.router.add_post("/api/fb/daftra/bankmap", _api_fb_daftra_bankmap)
         app.router.add_get("/api/fb/daftra/dup", _api_fb_daftra_dup)
         app.router.add_post("/api/fb/daftra/dup", _api_fb_daftra_dup)
         app.router.add_get("/api/fb/contracts", _api_fb_contracts)
