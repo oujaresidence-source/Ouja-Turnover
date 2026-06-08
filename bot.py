@@ -13363,7 +13363,7 @@ const T = {
     fb_inbox:'الوارد المالي', fb_approval:'مركز الاعتماد', fb_recon:'المطابقة', fb_synclog:'سجل دافترة',
     fb_unitp:'ربحية الشقق', fb_companyp:'ربحية الشركة', fb_close:'الإقفال الشهري', fb_mapping:'الإعدادات والربط',
     fb_overview:'النظرة المالية', fb_ws_overview:'النظرة المالية', fb_ws_imports:'الاستيراد والإعداد', fb_ws_queue:'قائمة العمل', fb_ws_mapping:'الربط والقواعد', fb_ws_profit:'الربحية والإقفال',
-    fb_ws_daily:'يومي المالي', fb_daily:'يومي المالي', fb_assist:'وش يحتاج انتباهك اليوم؟', fb_bulk_link:'ربط كل المطابقات المؤكدة', fb_link_confirm:'ربط واعتماد', fb_help_first:'أول مرة تستخدم المركز المالي؟',
+    fb_ws_daily:'يومي المالي', fb_ws_work:'العمل والمطابقة', fb_ws_setup:'الإعداد والربط', fb_ws_audit:'السجل والمراجعة', fb_daily:'يومي المالي', fb_assist:'وش يحتاج انتباهك اليوم؟', fb_bulk_link:'ربط كل المطابقات المؤكدة', fb_link_confirm:'ربط واعتماد', fb_help_first:'أول مرة تستخدم المركز المالي؟',
     gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
     fb_act_promote:'حوّل للسجل المالي', fb_act_submit:'إرسال للمراجعة', fb_act_classify:'تصنيف', fb_link_cc:'اربط مركز تكلفة', fb_health:'صحة البيانات المالية', fb_nextbest:'وش تسوي الحين؟', fb_applysimilar:'تطبيق على المشابهة', fb_saverule:'احفظ كقاعدة', fb_col_priority:'الأولوية', fb_search:'بحث', fb_bulk:'إجراء جماعي', fb_selected:'محدد', fb_general_expense:'مصروف عام للشركة', fb_no_apt:'غير مرتبط بشقة', fb_dupcheck:'تأكد من التكرار مع دافترة', fb_cc_refresh:'تحديث مراكز التكلفة من دافترة', fb_import_journals:'استيراد قيود دافترة', fb_link_daftra:'ربط بسجل موجود في دافترة', fb_open_compare:'فتح المطابقة', fb_not_dup:'مو مكرر', fb_map_bank:'ربط حسابات البنك في دافترة', fb_recheck:'إعادة فحص النتائج السابقة',
     fb_dist_title:'مطابقة توزيع داخل قيد', fb_dist_sub:'العملية البنكية تطابق مجموعة أسطر داخل قيد دافترة، مو إجمالي القيد كامل', fb_link_dist:'ربط كتوزيع', fb_pick_lines:'اختر أسطر القيد المطابقة', fb_manual_pick:'اختر أسطر يدويًا', fb_open_daftra:'فتح القيد في دافترة', fb_not_this_dist:'مو هذا التوزيع', fb_search_journal:'ابحث عن قيد آخر', fb_confirm_link:'اعتماد الربط', fb_sel_sum:'مجموع الأسطر المختارة', fb_txn_amount:'مبلغ العملية', fb_sum_match:'المجموع مطابق', fb_sum_short:'المجموع ناقص', fb_sum_over:'المجموع زائد', fb_no_double:'لا نقدر نربط نفس السطر مرتين', fb_line_used:'مستخدم سابقًا', fb_dist_done:'تم ربط العملية كتوزيع داخل قيد دافترة', fb_dist_explain:'هذي العملية مب مطابقة لإجمالي القيد، لكنها تطابق أسطر داخل القيد', fb_batch_title:'مطابقة حوالات مجمعة', fb_batch_link:'ربط الحوالات بالقيد', fb_dist_card:'مطابقات التوزيع', fb_dist_review:'راجع توزيعات القيود', fb_cost_center:'مركز التكلفة', fb_included:'مشمول', fb_journal_total:'إجمالي القيد', fb_bank_line:'سطر حساب البنك', fb_lane_dist_ready:'موجود كتوزيع في دافترة', fb_lane_dist_possible:'توزيع محتمل', fb_lane_dist_linked:'مربوط بتوزيع', fb_batch_lane:'حوالة مجمعة', fb_lines_used:'أسطر مستخدمة سابقًا', fb_sum_diff:'فرق في مجموع الأسطر',
@@ -13668,7 +13668,7 @@ const T = {
     fb_inbox:'Financial Inbox', fb_approval:'Approval Center', fb_recon:'Reconciliation', fb_synclog:'Daftra Sync Log',
     fb_unitp:'Unit Profitability', fb_companyp:'Company Profitability', fb_close:'Monthly Close', fb_mapping:'Settings / Mapping',
     fb_overview:'Overview', fb_ws_overview:'Overview', fb_ws_imports:'Imports & Setup', fb_ws_queue:'Work Queue', fb_ws_mapping:'Mapping & Rules', fb_ws_profit:'Profitability & Close',
-    fb_ws_daily:'Daily Finance Flow', fb_daily:'Daily Finance Flow', fb_assist:'What needs your attention today?', fb_bulk_link:'Link all confirmed matches', fb_link_confirm:'Link & confirm', fb_help_first:'First time using Financial Brain?',
+    fb_ws_daily:'Daily Flow', fb_ws_work:'Work & Reconciliation', fb_ws_setup:'Setup & Mapping', fb_ws_audit:'Audit & Logs', fb_daily:'Daily Flow', fb_assist:'What needs your attention today?', fb_bulk_link:'Link all confirmed matches', fb_link_confirm:'Link & confirm', fb_help_first:'First time using Financial Brain?',
     gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
     fb_act_promote:'Move to ledger', fb_act_submit:'Submit for review', fb_act_classify:'Classify', fb_link_cc:'Link cost center', fb_health:'Finance data health', fb_nextbest:'Do this next', fb_applysimilar:'Apply to similar', fb_saverule:'Save as rule', fb_col_priority:'Priority', fb_search:'Search', fb_bulk:'Bulk action', fb_selected:'selected', fb_general_expense:'Company general expense', fb_no_apt:'Not linked to a unit', fb_dupcheck:'Check duplicates with Daftra', fb_cc_refresh:'Refresh cost centers from Daftra', fb_import_journals:'Import Daftra journal entries', fb_link_daftra:'Link existing Daftra record', fb_open_compare:'Open comparison', fb_not_dup:'Not a duplicate', fb_map_bank:'Map Daftra bank accounts', fb_recheck:'Recheck previous results',
     fb_dist_title:'Distribution match inside a journal', fb_dist_sub:'The bank transaction matches a group of lines inside a Daftra journal — not the journal total', fb_link_dist:'Link as distribution', fb_pick_lines:'Select the matching journal lines', fb_manual_pick:'Pick lines manually', fb_open_daftra:'Open journal in Daftra', fb_not_this_dist:'Not this distribution', fb_search_journal:'Search another journal', fb_confirm_link:'Confirm link', fb_sel_sum:'Selected lines total', fb_txn_amount:'Transaction amount', fb_sum_match:'Totals match', fb_sum_short:'Total is short', fb_sum_over:'Total exceeds', fb_no_double:'Cannot link the same line twice', fb_line_used:'already used', fb_dist_done:'Linked as a distribution inside a Daftra journal', fb_dist_explain:'This transaction does not equal the journal total, but it matches lines inside the journal', fb_batch_title:'Batch transfers match', fb_batch_link:'Link transfers to journal', fb_dist_card:'Distribution matches', fb_dist_review:'Review journal distributions', fb_cost_center:'Cost center', fb_included:'Included', fb_journal_total:'Journal total', fb_bank_line:'Bank-account line', fb_lane_dist_ready:'In Daftra as distribution', fb_lane_dist_possible:'Possible distribution', fb_lane_dist_linked:'Linked as distribution', fb_batch_lane:'Batch transfer', fb_lines_used:'Lines already used', fb_sum_diff:'Line-sum difference',
@@ -22150,16 +22150,16 @@ async function loadFb(force){
   document.getElementById('t_fb').textContent='🧠 '+t().fb;
   var sub=document.getElementById('t_fb_sub'); if(sub) sub.textContent=t().fb_sub;
   if(force) _fb.ov=null;
+  if(!_fb.tab) _fb.tab='daily';            // Daily Flow is the default landing
   fbRenderTabs(); fbGo(_fb.tab);
 }
 function fbWorkspaces(){ var t_=t(); return [
   ['daily','🗓️',t_.fb_ws_daily,[['daily','🗓️',t_.fb_daily]]],
-  ['overview','🧭',t_.fb_ws_overview,[['overview','🧭',t_.fb_overview]]],
-  ['imports','📥',t_.fb_ws_imports,[['setup','🚀',t_.fb_setup],['daftra','📚',t_.fb_daftra],['bank','🏦',t_.fb_bank],['synclog','🧾',t_.fb_synclog]]],
-  ['queue','✅',t_.fb_ws_queue,[['inbox','📋',t_.fb_inbox],['approval','🛡️',t_.fb_approval],['recon','🔗',t_.fb_recon]]],
-  ['mapping','🔗',t_.fb_ws_mapping,[['contracts','📑',t_.fb_contracts],['mapping','⚙️',t_.fb_mapping]]],
-  ['profit','📊',t_.fb_ws_profit,[['unitp','🏠',t_.fb_unitp],['companyp','🏢',t_.fb_companyp],['close','📅',t_.fb_close]]] ]; }
-function fbWsForTab(tab){ var ws=fbWorkspaces(); for(var i=0;i<ws.length;i++){ for(var j=0;j<ws[i][3].length;j++){ if(ws[i][3][j][0]===tab) return ws[i][0]; } } return 'overview'; }
+  ['work','🔗',t_.fb_ws_work,[['inbox','📋',t_.fb_inbox],['bank','🏦',t_.fb_bank],['recon','🧩',t_.fb_recon],['approval','🛡️',t_.fb_approval]]],
+  ['setup','🚀',t_.fb_ws_setup,[['setup','🚀',t_.fb_setup],['daftra','📚',t_.fb_daftra],['contracts','📑',t_.fb_contracts],['mapping','⚙️',t_.fb_mapping]]],
+  ['profit','📊',t_.fb_ws_profit,[['overview','🧭',t_.fb_overview],['companyp','🏢',t_.fb_companyp],['unitp','🏠',t_.fb_unitp],['close','📅',t_.fb_close]]],
+  ['audit','🧾',t_.fb_ws_audit,[['synclog','🧾',t_.fb_synclog]]] ]; }
+function fbWsForTab(tab){ var ws=fbWorkspaces(); for(var i=0;i<ws.length;i++){ for(var j=0;j<ws[i][3].length;j++){ if(ws[i][3][j][0]===tab) return ws[i][0]; } } return 'daily'; }
 function fbRenderTabs(){
   var el=document.getElementById('fbTabs'); if(!el) return; var ws=fbWorkspaces(), cur=_fb.ws||'overview';
   var def=ws.filter(function(w){return w[0]===cur;})[0]||ws[0];
@@ -22181,7 +22181,9 @@ function fbHelpFirst(){ var ar=(L==='ar'); openDrawer(t().fb_help_first, ar?'٥ 
   var steps=ar?['دافترة هو الدفتر الرسمي.','هنا نطابق البنك مع دافترة قبل أي ترحيل.','إذا العملية موجودة في دافترة، نربطها ولا نكررها.','إذا العملية جديدة، نصنفها ونجهز لها قيد.','أي شيء فوق ٣٠٠٠ يحتاج موافقة فيصل.']:['Daftra is the official ledger.','Here we match the bank against Daftra before any posting.','If a transaction is already in Daftra, we link it — never duplicate.','If it is new, we classify it and prepare a journal entry.','Anything over 3,000 needs Faisal approval.'];
   setDrawerBody(steps.map(function(s,i){ return '<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><b style="color:var(--gold)">'+(i+1)+'</b><span>'+esc(s)+'</span></div>'; }).join(''));
   setDrawerFoot('<button class="btn primary sm" onclick="closeDrawer()">'+(ar?'فهمت':'Got it')+'</button>'); }
-async function fbBulkLink(){ var ar=(L==='ar'); if(!confirm(ar?'بنربط كل المطابقات المؤكدة بقيود دافترة الموجودة (بدون إنشاء قيود جديدة). متابعة؟':'Link all confirmed matches to their existing Daftra journals (no new entries). Continue?')) return; var r; try{ r=await post('/api/fb/daftra/dup',{action:'bulk_link'}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم ربط ':'linked ')+(r.linked||0)+' · '+fbMoney(r.total)); fbGo(_fb.tab); } else toast('⚠'); }
+async function fbBulkLink(){ var ar=(L==='ar'); var cnt=((_fb.qlanes||{}).ready_to_link||0);
+  var m=await fbModal({title:(ar?'ربط كل المؤكد في دافترة':'Link all confirmed in Daftra'), msg:(ar?'بنربط العمليات المؤكدة بقيود دافترة الموجودة — بدون إنشاء أي قيد جديد.':'We link confirmed transactions to their existing Daftra journals — no new entries are created.'), summary:(cnt?((ar?'جاهز للربط: ':'ready to link: ')+cnt):''), confirm:(ar?'اربط الكل':'Link all')});
+  if(!m.ok) return; var r; try{ r=await post('/api/fb/daftra/dup',{action:'bulk_link'}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم ربط ':'linked ')+(r.linked||0)+' · '+fbMoney(r.total)); fbGo(_fb.tab); } else toast('⚠'); }
 async function fbDaily(){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; b.innerHTML='<div class="empty sk">—</div>';
   var ov=null,st=null,rd=null;
@@ -22567,7 +22569,7 @@ function fbDupResult(r){ var ar=(L==='ar'); var dg=r.diag||{};
   if(dg.verdict==='no_journals'||dg.verdict==='date_gap') foot+='<button class="btn '+(inD?'ghost':'primary')+' sm" onclick="closeDrawer();fbImportJournals()">'+(ar?'استورد قيود دافترة':'Import journals')+'</button>';
   foot+='<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>';
   setDrawerFoot(foot); }
-async function fbDupRecheck(){ var ar=(L==='ar'); if(!confirm(ar?'النتائج القديمة كانت مبنية على فحص أضعف. بنعيد الفحص بدون حذف السجل. متابعة؟':'Old results used a weaker check. We will recheck without deleting history. Continue?')) return; fbDupRun(); }
+async function fbDupRecheck(){ var ar=(L==='ar'); var m=await fbModal({title:(ar?'إعادة الفحص':'Recheck'), msg:(ar?'النتائج القديمة كانت مبنية على فحص أضعف. بنعيد الفحص بدون حذف السجل.':'Old results used a weaker check. We will recheck without deleting history.'), confirm:(ar?'أعد الفحص':'Recheck')}); if(!m.ok) return; fbDupRun(); }
 async function fbDupCompare(id){ var ar=(L==='ar'); openDrawer(ar?'المطابقة مع دافترة':'Compare with Daftra',''); setDrawerBody('<div class="empty sk">—</div>');
   var d; try{ d=await api('/api/fb/daftra/dup?txn='+encodeURIComponent(id)); }catch(_){ d=null; }
   if(!d||!d.txn){ setDrawerBody('<div class="empty">⚠</div>'); return; }
@@ -22635,7 +22637,7 @@ async function fbDistConfirm(){ var ids=[]; document.querySelectorAll('.fbdl').f
   var r; try{ r=await post('/api/fb/daftra/dup',{action:'link_distributed',id:_fb.distId,daftra:{journal_id:_fb.distEntry,line_ids:ids}}); }catch(_){ r=null; }
   if(r&&r.ok){ toast(t().fb_dist_done+' ✓'); closeDrawer(); fbGo(_fb.tab); } else toast((r&&r.error_ar)||(r&&r.error)||'⚠'); }
 function fbOpenDaftra(){ try{ window.open('https://oujares.daftra.com','_blank'); }catch(_){} }
-async function fbDistSearch(id){ var ar=(L==='ar'); var q=(prompt(ar?'ابحث عن قيد (رقم/وصف/مبلغ):':'Search journal (no./desc/amount):','')||'').trim(); if(!q) return;
+async function fbDistSearch(id){ var ar=(L==='ar'); var m=await fbModal({title:t().fb_search_journal, msg:(ar?'اكتب رقم القيد أو وصف أو مبلغ.':'Enter a journal number, description or amount.'), field:{ph:(ar?'بحث…':'Search…'),required:true}, confirm:(ar?'بحث':'Search')}); if(!m.ok||!m.value) return; var q=m.value;
   var d; try{ d=await api('/api/fb/daftra/dup?q='+encodeURIComponent(q)); }catch(_){ d=null; }
   var res=(d&&d.results)||[]; openDrawer(t().fb_search_journal,q);
   var rows=res.length?res.map(function(e){ return '<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between"><b style="font-size:12px">#'+esc(e.number||e.entry_id)+'</b><span class="muted" style="font-size:11px">'+esc(e.date||'')+'</span></div><div style="font-size:11.5px;margin-top:3px">'+esc((e.description||'').slice(0,90))+'</div><button class="btn ghost xs" style="margin-top:6px" onclick="fbDistManual(&#39;'+id+'&#39;,&#39;'+esc(String(e.entry_id))+'&#39;)">'+esc(t().fb_manual_pick)+'</button></div>'; }).join(''):('<div class="empty" style="padding:18px">—</div>');
@@ -22679,7 +22681,7 @@ async function fbBankMapSave(){ var ar=(L==='ar'); var src=(document.getElementB
   var p=acc.split('::'); var r; try{ r=await post('/api/fb/daftra/bankmap',{source:src,display:disp,daftra_account_id:p[0],daftra_account_code:p[1],daftra_account_name:p[2]}); }catch(_){ r=null; }
   if(r&&r.ok){ toast(ar?'تم ربط حساب البنك ✓':'Bank account mapped ✓'); fbBankMap(); } else toast((r&&r.error)||'⚠'); }
 async function fbBankMapDel(src){ try{ await post('/api/fb/daftra/bankmap',{source:src,delete:true}); }catch(_){}; fbBankMap(); }
-async function fbDupResolve(id,action){ var ar=(L==='ar'); var reason=(prompt(ar?'السبب:':'Reason:','')||'').trim(); if(!reason) return; var r; try{ r=await post('/api/fb/daftra/dup',{action:action,id:id,reason:reason}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
+async function fbDupResolve(id,action){ var ar=(L==='ar'); var ig=(action==='ignore'); var m=await fbModal({title:(ig?(ar?'تجاهل العملية':'Ignore transaction'):(ar?'تحديد كغير مكرر':'Mark not duplicate')), msg:(ar?'اكتب سبب القرار — يتسجّل في السجل.':'Add a reason — it is saved to the audit log.'), field:{ph:(ar?'السبب':'Reason'),required:true,multiline:true}, danger:ig, confirm:(ar?'تأكيد':'Confirm')}); if(!m.ok) return; var reason=m.value; var r; try{ r=await post('/api/fb/daftra/dup',{action:action,id:id,reason:reason}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); closeDrawer(); fbGo(_fb.tab); } else toast('⚠'); }
 async function fbRefreshCC(){ var ar=(L==='ar'); toast(ar?'⏳ نسحب مراكز التكلفة من دافترة…':'⏳ Pulling cost centers…'); var r; try{ r=await post('/api/fb/daftra/cost-centers/refresh',{}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?('تم تحديث مراكز التكلفة: '+(r.new||0)+' جديد، '+(r.updated||0)+' محدث، '+(r.review||0)+' تحتاج مراجعة'):('cost centers: '+(r.new||0)+' new, '+(r.updated||0)+' updated, '+(r.review||0)+' review')); fbGo(_fb.tab); } else toast((r&&r.error)||'⚠'); }
 function fbImportJournals(){ var ar=(L==='ar'); var now=new Date(),y=now.getFullYear(),mm=('0'+(now.getMonth()+1)).slice(-2); var first=y+'-'+mm+'-01',last=y+'-'+mm+'-'+('0'+new Date(y,now.getMonth()+1,0).getDate()).slice(-2);
   openDrawer(ar?'استيراد قيود دافترة':'Import Daftra journal entries',ar?'حدد المدة':'pick a range');
@@ -22827,7 +22829,7 @@ async function fbBulkApply(op){ var ids=Object.keys(_fb.sel||{}); if(!ids.length
 async function fbAct(id, action){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/entry',{id:id,action:action}); }catch(_){ r=null; }
   if(r&&r.error==='dup_blocked'){ toast((ar?r.message_ar:r.message_en)||'🛡️'); fbDupCompare(id); return; }
   if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast((r&&(r.message_ar||r.message||r.error))||'⚠'); }
-async function fbActReason(id, action){ var ar=(L==='ar'); var reason=(prompt(ar?'السبب:':'Reason:','')||'').trim(); if(!reason) return; var r; try{ r=await post('/api/fb/entry',{id:id,action:action,reason:reason}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast('⚠'); }
+async function fbActReason(id, action){ var ar=(L==='ar'); var rej=(action==='reject'); var m=await fbModal({title:(rej?(ar?'رفض العملية':'Reject'):(ar?'سبب':'Reason')), msg:(ar?'اكتب السبب — يتسجّل في السجل.':'Add a reason — saved to the audit log.'), field:{ph:(ar?'السبب':'Reason'),required:true,multiline:true}, danger:rej, confirm:(ar?'تأكيد':'Confirm')}); if(!m.ok) return; var reason=m.value; var r; try{ r=await post('/api/fb/entry',{id:id,action:action,reason:reason}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓'); fbGo(_fb.tab); } else toast('⚠'); }
 async function fbClassify(id){ var ar=(L==='ar'); await fbLoadRefs(); var it=(_fb.inboxItems||{})[id]||{};
   openDrawer(ar?'تصنيف العملية':'Classify',(it.amount?fbMoney(it.amount):'')+(it.date?(' · '+esc(it.date)):''));
   setDrawerBody((it.description?('<div style="font-size:12px;line-height:1.7;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px">'+esc(String(it.description).slice(0,140))+'</div>'):'')
@@ -23013,7 +23015,7 @@ async function fbAddCard(){
   var r; try{ r=await post('/api/fb/cards',{last4:l4,employee:emp,active:true}); }catch(_){ r=null; }
   if(r&&r.ok){ toast(ar?'تمت الإضافة ✓':'Added ✓'); fbMapping(); } else toast('⚠');
 }
-async function fbDelCard(k){ var ar=(L==='ar'); if(!confirm(ar?'حذف البطاقة؟':'Delete card?')) return; try{ await post('/api/fb/cards',{last4:k,delete:true}); }catch(_){}; fbMapping(); }
+async function fbDelCard(k){ var ar=(L==='ar'); var m=await fbModal({title:(ar?'حذف البطاقة':'Delete card'), msg:(ar?'بنحذف ربط هذي البطاقة بالموظف.':'This removes the card-to-employee mapping.'), danger:true, confirm:(ar?'حذف':'Delete')}); if(!m.ok) return; try{ await post('/api/fb/cards',{last4:k,delete:true}); }catch(_){}; fbMapping(); }
 /* ===== Guest Website (موقع الضيوف) dashboard ===== */
 var _gw={tab:'ov',byId:{},tagById:{}};
 function gwTabs(){ var el=document.getElementById('gwTabs'); if(!el) return; var t_=t();
@@ -23950,6 +23952,28 @@ function closeDrawer(){
   document.body.classList.remove('detailpane');
   drawerOpen = false;
 }
+/* Custom modal — replaces browser confirm()/prompt()/alert() in Financial Brain.
+   Returns a Promise<{ok, value}>. Optional single text field. Themed + reduced-motion-safe (no animation). */
+function fbModal(o){ o=o||{}; var ar=(L==='ar'); return new Promise(function(resolve){
+  var bg=document.createElement('div'); bg.className='fbm-bg';
+  bg.setAttribute('style','position:fixed;inset:0;background:rgba(31,24,17,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px');
+  var fld=o.field;
+  var fieldHtml=fld?(fld.multiline
+      ?'<textarea id="fbmField" rows="3" placeholder="'+esc(fld.ph||'')+'" style="width:100%;margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:9px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box;background:var(--surface)"></textarea>'
+      :'<input id="fbmField" placeholder="'+esc(fld.ph||'')+'" style="width:100%;margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:9px;font-family:inherit;font-size:13px;box-sizing:border-box;background:var(--surface)">'):'';
+  var sumHtml=o.summary?('<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:10px;font-size:12.5px;font-weight:700">'+esc(o.summary)+'</div>'):'';
+  var warnHtml=o.danger?('<div style="color:var(--red);font-size:11.5px;margin-top:8px;font-weight:600">⚠ '+esc(o.dangerMsg||(ar?'إجراء يصعب التراجع عنه':'This action is hard to undo'))+'</div>'):'';
+  var card=document.createElement('div');
+  card.setAttribute('style','background:var(--surface);border:1px solid var(--line);border-radius:16px;max-width:440px;width:100%;box-shadow:0 18px 50px rgba(47,36,27,.22)');
+  card.innerHTML='<div style="padding:16px 18px"><div style="font-size:15px;font-weight:800;margin-bottom:6px">'+esc(o.title||'')+'</div>'+(o.msg?('<div class="muted" style="font-size:12.5px;line-height:1.65">'+esc(o.msg)+'</div>'):'')+sumHtml+warnHtml+fieldHtml+'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface-2);border-radius:0 0 16px 16px"><button class="btn ghost sm" id="fbmCancel">'+esc(o.cancel||(ar?'إلغاء':'Cancel'))+'</button><button class="btn primary sm" id="fbmOk"'+(o.danger?' style="background:var(--red);border-color:var(--red)"':'')+'>'+esc(o.confirm||(ar?'تأكيد':'Confirm'))+'</button></div>';
+  bg.appendChild(card); document.body.appendChild(bg);
+  var f=document.getElementById('fbmField'); if(f) setTimeout(function(){ try{ f.focus(); }catch(_){} },30);
+  function done(ok){ var val=f?((f.value||'').trim()):''; if(ok&&fld&&fld.required&&!val){ if(f){ f.style.borderColor='var(--red)'; f.focus(); } return; } bg.remove(); resolve({ok:ok,value:val}); }
+  document.getElementById('fbmOk').onclick=function(){ done(true); };
+  document.getElementById('fbmCancel').onclick=function(){ done(false); };
+  bg.onclick=function(e){ if(e.target===bg) done(false); };
+}); }
 
 /* ============================================================
    ACTIONS
