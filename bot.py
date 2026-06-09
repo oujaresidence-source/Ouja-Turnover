@@ -27653,16 +27653,17 @@ def _pe_command_confidence(band_source, band_count):
         return "limited_data", "بيانات الشقة قليلة، التوصية محافظة."
     return "similar_units_only", "ما فيه بيانات كفاية لنفس الشقة، استخدمنا شقق مشابهة."
 
-def _pricing_command_snapshot():
-    """Read-only aggregation for the Pricing Command Center — THE single source of truth for that page.
-    Reuses the cached _pe_get_recs() (no Hostaway writes, no extra calendar hammering). Never fabricates:
-    fields the recs engine doesn't provide (booking history) are returned as null + a reason."""
+def _pricing_command_snapshot(force=False):
+    """Read-only aggregation for the Pricing Command Center. Each night's 'current' is the LIVE
+    Hostaway calendar price captured by _pe_fetch_calendars (cached ~15 min via _pe_get_recs; pass
+    force=True to refetch fresh — used by 'Sync from Hostaway now'). Never fabricates: fields the
+    recs engine doesn't provide (booking history) are returned as null + a reason."""
     now = datetime.now(TZ)
     base = {"ok": True, "generated_at": now.isoformat(timespec="seconds"), "currency": "SAR",
-            "dry_run": bool(PRICE_APPLY_DRYRUN), "source": "pe_recs_cache", "partial": False,
-            "warnings": [], "errors": []}
+            "dry_run": bool(PRICE_APPLY_DRYRUN), "source": ("hostaway_calendar_fresh" if force else "hostaway_calendar_cached"),
+            "cache_ttl_sec": 900, "warnings": [], "errors": []}
     try:
-        recs_data = _pe_get_recs() or {}
+        recs_data = _pe_get_recs(force=force) or {}
     except Exception as e:
         base.update({"ok": False, "error": "recs_unavailable", "detail": str(e)[:200], "partial": True,
                      "units": [], "demand": None, "summary": None, "recommended_today": None})
@@ -27758,7 +27759,93 @@ def _pricing_command_snapshot():
 async def _api_pricing_command(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    return _json(await asyncio.to_thread(_pricing_command_snapshot))
+    force = request.query.get("force") in ("1", "true", "yes")
+    return _json(await asyncio.to_thread(_pricing_command_snapshot, force))
+
+def _pricing_truth_check(start_iso=None, end_iso=None, refresh=False):
+    """READ-ONLY. Hostaway calendar is the SOLE source of truth for 'current price'. Fetch FRESH
+    calendars (no cache) for the listings the Command Center displays and compare each shown current
+    to the live calendar. Never fabricates a dashboard value: dashboard_displayed_price is null when
+    the CC asserts nothing for that night. One listing's fetch failure → that row is 'error', the rest
+    still return (never crashes the dashboard)."""
+    now = datetime.now(TZ); today = now.date()
+    sd = _parse_date(start_iso) or today
+    ed = _parse_date(end_iso) or (today + timedelta(days=14))
+    if ed < sd:
+        sd, ed = ed, sd
+    span = max(0, min((ed - sd).days, 60))           # bound the window (≤60 nights)
+    ed = sd + timedelta(days=span)
+    out = {"ok": True, "generated_at": now.isoformat(timespec="seconds"),
+           "source_of_truth": "hostaway_calendar", "refreshed": bool(refresh),
+           "date_range": {"start": sd.isoformat(), "end": ed.isoformat()},
+           "summary": {"listings_checked": 0, "nights_checked": 0, "matched": 0, "mismatched": 0,
+                       "missing_hostaway": 0, "stale_dashboard": 0, "errors": 0},
+           "rows": [], "warnings": [], "errors": []}
+    try:
+        snap = _pricing_command_snapshot(force=refresh)      # what the CC shows (optionally refreshed first)
+    except Exception as e:
+        out.update({"ok": False, "errors": [{"code": "snapshot_failed", "detail": str(e)[:160]}]})
+        return out
+    disp, names, lids = {}, {}, []
+    for u in (snap.get("units") or []):
+        lid = u.get("listing_id")
+        if lid is None:
+            continue
+        lids.append(lid); names[lid] = u.get("name")
+        for x in (u.get("calendar_14") or []):
+            dd = x.get("date")
+            if dd and sd.isoformat() <= dd <= ed.isoformat():
+                disp[(lid, dd)] = {"displayed": _coerce_price(x.get("current_price")),
+                                   "suggested": _coerce_price(x.get("suggested_price"))}
+    if not lids:
+        out["warnings"].append({"code": "no_units", "detail": "no displayed units in range to verify"})
+        return out
+    fresh = _pe_fetch_calendars(lids, sd, span)               # FRESH GET — the truth
+    checked = set()
+    for (lid, dd), d in sorted(disp.items(), key=lambda kv: (str(names.get(kv[0][0]) or ""), kv[0][1])):
+        if d["displayed"] is None:
+            continue                                          # CC asserts no current for this night → nothing to verify
+        out["summary"]["nights_checked"] += 1; checked.add(lid)
+        nm = names.get(lid) or ("Ouja | " + str(lid))
+        row = {"listing_id": lid, "name": nm, "date": dd,
+               "hostaway_current_price": None, "dashboard_displayed_price": d["displayed"],
+               "suggested_price": d["suggested"], "preview_price": None,
+               "baseline_price": pricing_baseline(lid, dd),
+               "status": "error", "reason": "", "last_hostaway_fetch": out["generated_at"]}
+        days = fresh.get(lid)
+        if not days:
+            row["reason"] = "Hostaway calendar fetch failed for this listing"
+            out["summary"]["errors"] += 1; out["rows"].append(row); continue
+        hp = _coerce_price((days.get(dd) or {}).get("price"))
+        row["hostaway_current_price"] = hp
+        if hp is None:
+            row["status"] = "missing"; row["reason"] = "no Hostaway price for this night"
+            out["summary"]["missing_hostaway"] += 1
+        elif hp == d["displayed"]:
+            row["status"] = "matched"; row["reason"] = "dashboard matches Hostaway"
+            out["summary"]["matched"] += 1
+        else:
+            row["status"] = "mismatched"
+            row["reason"] = "dashboard price differs from Hostaway calendar (cached/stale)"
+            out["summary"]["mismatched"] += 1; out["summary"]["stale_dashboard"] += 1
+        out["rows"].append(row)
+    out["summary"]["listings_checked"] = len(checked)
+    out["rows"] = [r for r in out["rows"] if r["status"] != "matched"] + [r for r in out["rows"] if r["status"] == "matched"]
+    return out
+
+async def _api_pricing_truth_check(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q = request.query
+    refresh = q.get("refresh") in ("1", "true", "yes")
+    try:
+        res = await asyncio.to_thread(_pricing_truth_check, (q.get("start") or "")[:10] or None,
+                                      (q.get("end") or "")[:10] or None, refresh)
+        return _json(res)
+    except Exception as e:
+        print("truth-check:", e)
+        return _json({"ok": False, "rows": [], "summary": {"errors": 1},
+                      "errors": [{"code": "truth_check_failed", "detail": str(e)[:160]}]})
 
 _pe_cmd_batches = _load_json("pricing_command_batches.json", {}) or {}   # batch_id -> {ts,actor,dry_run,rows[]}  (revert source)
 def _pe_cmd_batches_save():
@@ -40377,6 +40464,7 @@ async def start_web_server():
         app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
+        app.router.add_get("/api/pricing/truth-check", _api_pricing_truth_check)   # Hostaway-vs-dashboard truth (read-only)
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
         app.router.add_get("/api/pricing/emergency-preview", _api_pricing_emergency_preview)  # 9PM emergency (preview only)
         app.router.add_get("/api/pricing/command/batches", _api_pricing_command_batches)  # apply batches (revert source)
