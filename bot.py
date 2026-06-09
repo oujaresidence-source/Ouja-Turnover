@@ -26550,6 +26550,34 @@ def _pe_resolve_band(models, lid, g, dtype, ev):
         return gb, "group"
     return None, None
 
+def _pe_anchor_reco(cur, median, floor, ceiling, occ, days_out, hour, ev=None, band_count=None, lean="balanced"):
+    """THE pricing brain. ANCHOR = the live current price (Hostaway's DP already demand-adjusted it).
+    DEMAND = real cohort occupancy `occ` (fraction of comparable units booked this date). The median
+    only sets floor/ceiling guardrails — it is NEVER the suggested price by default. Returns
+    (rec, action, reason_ar, signal, confidence). NEVER raises unless occ >= ~0.60; no signal → HOLD
+    the live price; below floor → never drop. Pure."""
+    cur = int(round(cur))
+    near = max(0.0, min(1.0, 1.0 - days_out / 14.0))                  # closeness to check-in 0..1
+    tod = 0.06 if hour < 12 else (0.12 if hour < 18 else 0.18)        # time-of-day deepening (today/tomorrow)
+    if ev:                                                            # real event → demand high, raise on the live price
+        rec = min(ceiling, int(round(cur * (1 + 0.08 + 0.12 * near))))
+        return rec, ("raise" if rec > cur else "hold"), "مناسبة — طلب عالي، نرفع بهدوء.", "ahead", "high"
+    if occ is None or not band_count:                                # no reliable signal → HOLD the live price (not the median)
+        return cur, "hold", "بيانات قليلة لهالتاريخ — ثبّتنا السعر الحالي.", "normal", "low"
+    if occ >= 0.60:                                                  # comparable nights are SELLING → real demand → raise gently
+        up = 0.05 + 0.10 * near * ((occ - 0.60) / 0.40)
+        rec = min(ceiling, int(round(cur * (1 + up))))
+        return rec, ("raise" if rec > cur else "hold"), "وحدات مشابهة تنحجز بنفس التاريخ — طلب فعلي، نرفع بهدوء.", "ahead", "high"
+    if occ <= 0.30:                                                  # cohort mostly EMPTY → weak → step DOWN only
+        if cur <= floor:
+            return cur, "hold", "السعر منخفض أصلًا — ما ننزل أكثر.", "normal", "high"
+        cut = (0.05 + tod) * (0.4 + 0.6 * near)
+        rec = max(floor, int(round(cur * (1 - cut))))
+        if lean == "fill":                                          # fill deepens the down-step (never flips to a raise)
+            rec = max(floor, int(round(rec - PE_LEAN_STRENGTH * (rec - floor))))
+        return rec, ("drop" if rec < cur else "hold"), "أغلب الوحدات المشابهة فاضية بنفس التاريخ — طلب ضعيف، ننزل بهدوء.", "behind", "high"
+    return cur, "hold", "الطلب متوسط — نثبّت قرب السعر الحالي.", "normal", "high"   # mid occupancy → hold near current
+
 def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
                        ev_effect, pace_entry, occ_now_frac, manual_floor=0,
                        own_max=None, lean="balanced"):
@@ -26562,10 +26590,12 @@ def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
     `lean` tilts the result toward occupancy ('fill') or price ('top')."""
     if not band or not band.get("median"):
         return None
+    if not current_price or current_price <= 0:        # the anchor is the LIVE price — no live price → omit, never fake
+        return None
     median = band["median"]
     days_out = (d - today).days
     floor = max(int(round(0.70 * median)), int(manual_floor or 0))
-    ceiling = max(int(round(min(band.get("p90") or median * 1.5, 2.0 * median))), floor)
+    ceiling = max(int(round(min(band.get("p90") or median * 1.3, 1.5 * median))), floor)   # raises capped near median
     # Pooled cap: when borrowing from similar units, don't fly far above this unit's own history.
     pooled_capped = False
     if band_source != "unit" and own_max and not ev:
@@ -26573,46 +26603,19 @@ def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
         if cap < ceiling:
             ceiling = cap
             pooled_capped = True
-    # pace signal: current on-the-books vs historical typical at this same days-out
+    # DEMAND = real cohort occupancy (occ_now_frac); ANCHOR = the live current price; median only guards.
     typ = pace_entry["typical_occ"].get(days_out) if (pace_entry and pace_entry.get("typical_occ")) else None
-    if typ is not None and occ_now_frac is not None:
-        if occ_now_frac > typ * 1.15 + 1e-9:
-            signal = "ahead"
-        elif occ_now_frac < typ * 0.85 - 1e-9:
-            signal = "behind"
-        else:
-            signal = "normal"
-    else:
-        signal = "normal"
-    early_event = bool(ev) and bool(ev_effect) and (ev_effect.get("pace_shift_days") or 0) > 5
-    if days_out > 10:
-        if early_event:
-            rec = median + 0.60 * (ceiling - median)        # events that book early -> raise early
-        elif signal == "ahead":
-            rec = median + 0.40 * (ceiling - median)
-        else:
-            rec = median                                    # hold a confident anchor; do NOT pre-discount
-    else:
-        if signal == "behind":
-            frac = max(0.0, min(1.0, 1.0 - days_out / 10.0))   # closer to check-in -> deeper toward floor
-            rec = median - frac * (median - floor)
-        elif signal == "ahead":
-            rec = median + 0.50 * (ceiling - median)
-        else:
-            rec = median
-    # price↔occupancy dial: fill → pull toward floor; top → push toward ceiling
-    if lean == "fill":
-        rec = rec - PE_LEAN_STRENGTH * (rec - floor)
-    elif lean == "top":
-        rec = rec + PE_LEAN_STRENGTH * (ceiling - rec)
-    rec = int(round(max(floor, min(ceiling, rec))))
+    rec, action, reason_ar, signal, conf = _pe_anchor_reco(
+        current_price, median, floor, ceiling, occ_now_frac, days_out,
+        datetime.now(TZ).hour, ev=ev, band_count=band.get("count"), lean=lean)
+    confidence = conf if band_source == "unit" else "low"
     out = {"date": d.isoformat(), "days_out": days_out, "dtype": dtype, "event": ev,
            "recommended": rec, "floor": floor, "ceiling": ceiling, "median": median,
            "lean": lean, "pooled_capped": pooled_capped,
            "signal": signal, "band_source": band_source, "band_count": band.get("count"),
            "occ_now": (round(occ_now_frac, 3) if occ_now_frac is not None else None),
            "typical_occ": (round(typ, 3) if typ is not None else None),
-           "confidence": "high" if band_source == "unit" else "low"}
+           "confidence": confidence, "action": action, "reason_ar": reason_ar}
     if isinstance(current_price, (int, float)) and current_price > 0:
         out["current"] = int(round(current_price))
         out["delta"] = out["recommended"] - out["current"]
@@ -27303,11 +27306,17 @@ def _pe_night_detail(lid, date_iso):
     factors.append({"icon": "💰", "key": "أسعار حجوزاتك الفعلية",
                     "text": f"آخر {band['count']} حجز لنفس النوع — المتوسط {band['avg']:,}، الأعلى {band['max']:,} ر.س{src_tail}",
                     "effect": f"{band['count']} حجز"})
-    # 3) booking pace (only if we have live occupancy)
-    if rec.get("occ_now") is not None and rec.get("typical_occ") is not None:
-        pace_word = {"ahead": "أسرع", "behind": "أبطأ"}.get(rec["signal"], "مثل")
-        factors.append({"icon": "⏱️", "key": "سرعة الحجز",
-                        "text": f"محجوزة {round(rec['occ_now']*100)}٪ وباقي {rec['days_out']} يوم — {pace_word} من المعتاد ({round(rec['typical_occ']*100)}٪)",
+    # 3) cohort occupancy on this date — THE demand signal
+    occ_now = rec.get("occ_now")
+    if occ_now is not None:
+        occ_pct = round(occ_now * 100)
+        cohort_word = "طلب فعلي قوي" if occ_now >= 0.60 else ("طلب ضعيف" if occ_now <= 0.30 else "طلب متوسط")
+        pace_extra = ""
+        if rec.get("typical_occ") is not None:
+            pw = {"ahead": "أسرع", "behind": "أبطأ"}.get(rec["signal"], "مثل")
+            pace_extra = f" ({pw} من المعتاد {round(rec['typical_occ']*100)}٪)"
+        factors.append({"icon": "⏱️", "key": "إشغال الوحدات المشابهة لنفس الليلة",
+                        "text": f"وحدات مشابهة محجوزة {occ_pct}٪ لنفس الليلة وباقي {rec['days_out']} يوم — {cohort_word}{pace_extra}",
                         "effect": _pe_demand_pill(rec["signal"])})
     # 4) your booking habit (median lead)
     if pe.get("lead_median") is not None:
@@ -27337,9 +27346,15 @@ def _pe_night_detail(lid, date_iso):
     else:
         factors.append({"icon": "⚠️", "key": "مستوى الثقة",
                         "text": "ثقة منخفضة — بيانات قليلة لهالوحدة، فنستأنس بوحدات مشابهة", "effect": "منخفضة"})
-    # summary line
-    sig_phrase = {"ahead": "والحجز أسرع من المعتاد", "behind": "والحجز أبطأ من المعتاد"}.get(rec["signal"], "")
-    summary = f"{dt_label}، وحجوزاتك الفعلية متوسطها {band['median']:,} ر.س {sig_phrase}. نقترح {rec['recommended']:,} ر.س ضمن [{rec['floor']:,}–{rec['ceiling']:,}]."
+    # summary line — anchor on the LIVE current price, signal = cohort occupancy
+    if occ_now is not None:
+        sig_phrase = (f"وإشغال الوحدات المشابهة {round(occ_now*100)}٪ "
+                      + ("(طلب قوي)" if occ_now >= 0.60 else ("(طلب ضعيف)" if occ_now <= 0.30 else "(طلب متوسط)")))
+    else:
+        sig_phrase = "وما فيه إشارة طلب واضحة لهالتاريخ"
+    cur_anchor = rec.get("current")
+    anchor_txt = f"من سعرك الحالي {cur_anchor:,} ر.س" if cur_anchor else "بسعر الوحدة الحالي"
+    summary = f"{dt_label}، {sig_phrase}. نقترح {rec['recommended']:,} ر.س ({anchor_txt}) ضمن حدود [{rec['floor']:,}–{rec['ceiling']:,}]."
     info = _active_layers_for(lid, date_iso, rec["recommended"], rec.get("current"))
     baseline = _pe_baseline_observe(lid, date_iso, rec.get("current"))   # frozen "before"
     own_b = models["unit_bands"].get(f"{lid}||{dtype}")
@@ -28336,15 +28351,7 @@ def _pricing_calendar(lid, start_iso=None, end_iso=None):
                 recs_by_date[r.get("date")] = r
     except Exception as e:
         print("pricing-calendar recs:", e)
-    demand = "normal"
-    try:
-        demand = ((_pricing_command_snapshot().get("demand") or {}).get("signal")) or "normal"
-    except Exception:
-        pass
     hr = now.hour
-    occ_frac = (sum(1 for v in cal.values() if v.get("booked")) / len(cal)) if cal else None
-    unit_median = _coerce_price(next((r.get("median") for r in recs_by_date.values() if r.get("median") is not None), None))
-    dspeed = _pe_unit_drop_speed(unit_median, occ_frac)     # per-unit discount curve from its own history
     days = []; cur_d = sd
     while cur_d < ed:
         ds = cur_d.isoformat(); rowc = cal.get(ds) or {}
@@ -28359,10 +28366,13 @@ def _pricing_calendar(lid, start_iso=None, end_iso=None):
             badge = "last_minute"
         sug = None; action = "hold"; conf = "none"; why = ""
         if not booked and hp is not None:
-            rr = _pricing_rescue_reco("balanced_recovery", hp, floor, median, demand, dleft, hr, drop_speed=dspeed)
-            sug = rr["price"]; why = rr["reason_ar"]
-            action = ("drop" if (sug is not None and sug < hp) else ("raise" if (sug is not None and sug > hp) else "hold"))
-            conf = _pe_command_confidence(rec.get("band_source"), rec.get("band_count"))[0] if rec else "none"
+            if median is not None and floor is not None and ceiling is not None:
+                occ = rec.get("occ_now")    # cohort occupancy this date (the real demand signal) from the engine
+                sug, action, why, _sig, _cf = _pe_anchor_reco(hp, median, floor, ceiling, occ, dleft, hr,
+                                                              ev=(ev or None), band_count=rec.get("band_count"))
+                conf = _cf if rec.get("band_source") == "unit" else "low"
+            else:
+                sug = hp; action = "hold"; why = "بيانات قليلة لهالتاريخ — ثبّتنا السعر الحالي."; conf = "none"
         delta_pct = None
         if hp is not None and prev not in (None, 0) and prev != hp:
             delta_pct = round(100.0 * (hp - prev) / prev, 1)
