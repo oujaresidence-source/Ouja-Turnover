@@ -14724,7 +14724,6 @@ function pccCard(u){
     +'<div><div class="muted" style="font-size:10px">'+(ar?'مهدد ٧ أيام':'At risk 7d')+'</div><b style="color:#a23b30">'+fmt(rk.revenue_at_risk_7||0)+'</b></div></div>'
     +pccMini(u)
     +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="pccWhy('+u.listing_id+')">'+(ar?'ليش هالسعر؟':'Why this price?')+'</button></div>'
-    +(_pcc.why[u.listing_id]?pccWhyPanel(u):'')
     +'</div>';
   return h;
 }
@@ -14733,15 +14732,48 @@ function pccMini(u){
   var cells=cal.slice(0,14).map(function(x){ var sp=x.suggested_price, cp=x.current_price; var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="muted" style="font-size:10px;margin-inline-end:4px">'+(L==='ar'?'١٤ يوم:':'14d:')+'</span>'+cells+'</div>';
 }
-function pccWhy(lid){ _pcc.why[lid]=!_pcc.why[lid]; pccBoard(); }
-function pccWhyPanel(u){
-  var ar=(L==='ar'); var rec=u.recommendation||{}, fl=u.floor||{}, hi=u.history||{};
-  return '<div style="margin-top:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.75">'
-    +'<b>'+(ar?'ليش هالسعر؟':'Why this price?')+'</b><br>'
-    +(ar?'الثقة: ':'Confidence: ')+esc(rec.confidence_reason_ar||rec.confidence||'')+'<br>'
-    +(ar?'أقل سعر آمن (floor): ':'Floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?('غير محدد — '+(fl.missing_reason||'')):'n/a'))+'<br>'
-    +(ar?'متوسط سعر الشقة المحقق: ':'Median ADR: ')+(hi.median_adr!=null?fmt(hi.median_adr):(ar?'غير متوفر':'n/a'))+'<br>'
-    +'<span class="muted" style="font-size:10.5px">'+(ar?'تفاصيل آخر الحجوزات في «مختبر التسعير». التطبيق من «العرض التفصيلي» تحت — بمعاينة وتأكيد.':'Last-bookings detail is in Pricing Lab. Apply from the detailed view below — with preview + confirm.')+'</span></div>';
+function pccWhy(lid){
+  var ar=(L==='ar'); var d=D.pcc||{}; var u=(d.units||[]).filter(function(x){return String(x.listing_id)===String(lid);})[0];
+  if(!u){ return; }
+  var rec=u.recommendation||{}, fl=u.floor||{}, hi=u.history||{}, cur=u.current||{}, rk=u.risk||{}, dm=d.demand||{};
+  var cp=rec.current_price, sp=rec.suggested_price, delta=(sp!=null&&cp!=null)?(sp-cp):null;
+  var act=(delta==null?(ar?'مراجعة':'review'):(delta<0?(ar?'خفض':'drop'):(delta>0?(ar?'رفع':'raise'):(ar?'ثبات':'hold'))));
+  var med=hi.median_adr, adr70=(med!=null?Math.round(med*0.7):null);
+  var belowFloor=(sp!=null&&fl.final_floor!=null&&sp<fl.final_floor);
+  function row(lbl,val){ return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)"><span class="muted">'+esc(lbl)+'</span><b>'+val+'</b></div>'; }
+  function sec(title,inner){ return '<div style="margin-top:12px"><div style="font-size:12px;font-weight:800;margin-bottom:4px">'+esc(title)+'</div>'+inner+'</div>'; }
+  openDrawer((ar?'ليش هالسعر؟ · ':'Why this price? · ')+esc(u.name||('#'+lid)), (cp!=null?fmt(cp):'—')+' → '+(sp!=null?fmt(sp):'—')+' '+(ar?'ر.س':'SAR'));
+  // recommendation summary
+  var summary='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px">'
+    +row(ar?'السعر الحالي':'Current price',(cp!=null?fmt(cp)+' '+(ar?'ر.س':'SAR'):'—'))
+    +row(ar?'المقترح':'Suggested',(sp!=null?fmt(sp)+' '+(ar?'ر.س':'SAR'):'—'))
+    +row(ar?'التغيير':'Change',(delta==null?'—':((delta>0?'+':'')+fmt(delta)+' '+(ar?'ر.س':'SAR'))))
+    +'<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0"><span class="muted">'+(ar?'الإجراء':'Action')+'</span>'+pccChip(act,(act===(ar?'خفض':'drop')?'gold':(act===(ar?'رفع':'raise')?'green':'info')))+'</div></div>';
+  // floor formula
+  var floorInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'
+    +(ar?'أقل سعر آمن = الأعلى بين الـ floor اليدوي و٧٠٪ من متوسط سعر الشقة المحقق.':'Safe floor = max(manual floor, 70% of the unit’s realized median ADR).')+'<br>'
+    +(ar?'٧٠٪ من المتوسط ':'70% of median ')+(med!=null?fmt(med):'—')+' = '+(adr70!=null?fmt(adr70):'—')+'<br>'
+    +'<b>'+(ar?'أقل سعر آمن النهائي: ':'Final floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?'غير محدد':'n/a'))+'</b>'
+    +(fl.final_floor==null&&fl.missing_reason?('<br><span class="muted" style="font-size:10.5px">'+esc(fl.missing_reason)+'</span>'):'')+'</div>'
+    +(belowFloor?('<div style="margin-top:8px;background:rgba(196,67,67,.1);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;color:#a23b30;font-weight:700">'+(ar?'⚠ المقترح أقل من الـ floor. لا ينطبق تلقائيًا — استثناء يحتاج موافقتك فقط لإنقاذ ليلة فاضية.':'⚠ Suggested is below floor. Never automatic — an exception that needs your explicit OK only to save an empty night.')+'</div>'):'');
+  // demand context
+  var demandInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+pccChip(ar?dm.title_ar:dm.title_en,(dm.signal==='weak'?'gold':(dm.signal==='strong'?'green':'info')))+' '+esc(ar?dm.reason_ar:dm.reason_en)+'<br>'+(ar?'فاضي لهالشقة: ':'This unit empty: ')+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+(ar?' (٧/١٤)':' (7/14)')+' · '+(ar?'إيراد مهدد ٧ أيام: ':'at risk 7d: ')+fmt(rk.revenue_at_risk_7||0)+' '+(ar?'ر.س':'SAR')+'</div>';
+  // confidence
+  var confTxt=(rec.confidence==='strong_data'?(ar?'بيانات قوية':'Strong data'):(rec.confidence==='limited_data'?(ar?'بيانات قليلة':'Limited data'):(ar?'شقق مشابهة':'Similar units only')));
+  var confInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+pccChip(confTxt,'info')+' '+esc(rec.confidence_reason_ar||'')+'</div>';
+  // history: snapshot median only — full detail in the Lab
+  var histInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+(ar?'متوسط سعر الشقة المحقق: ':'Realized median ADR: ')+(med!=null?fmt(med)+' '+(ar?'ر.س':'SAR'):(ar?'غير متوفر':'n/a'))+'<br><span class="muted" style="font-size:10.5px">'+(ar?'آخر ٥ حجوزات وأقل/آخر سعر محجوز: في «مختبر التسعير».':'Last 5 bookings + lowest/last booked price: in Pricing Lab.')+'</span></div>';
+  // plain-language
+  var plain=(ar?('باختصار: الطلب '+(dm.signal==='weak'?'ضعيف':(dm.signal==='strong'?'قوي':'طبيعي'))+'، والشقة فيها '+(cur.empty_nights_7||0)+' ليلة فاضية خلال ٧ أيام. '+(delta!=null&&delta<0?('نقترح نزول إلى '+fmt(sp)+' ر.س'+(belowFloor?' (تحت الـ floor — استثناء فقط)':' بدون كسر الـ floor')+'.'):(delta!=null&&delta>0?('نقترح رفع إلى '+fmt(sp)+' ر.س لأن الطلب يسمح.'):'نقترح تثبيت السعر الحالي.')))
+    :('In short: demand is '+(dm.signal||'normal')+', this unit has '+(cur.empty_nights_7||0)+' empty nights in 7 days. '+(delta!=null&&delta<0?('Suggest dropping to '+fmt(sp)+' SAR'+(belowFloor?' (below floor — exception only).':' without breaking the floor.')):(delta!=null&&delta>0?('Suggest raising to '+fmt(sp)+' SAR — demand allows it.'):'Suggest holding the current price.'))));
+  var plainInner='<div style="background:rgba(184,137,59,.08);border:1px solid var(--gold);border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.85">'+esc(plain)+'</div>';
+  setDrawerBody(summary
+    +sec(ar?'أقل سعر آمن (floor)':'Safe floor',floorInner)
+    +sec(ar?'سياق الطلب':'Demand context',demandInner)
+    +sec(ar?'مستوى الثقة':'Confidence',confInner)
+    +sec(ar?'تاريخ الشقة':'Unit history',histInner)
+    +sec(ar?'الخلاصة':'Bottom line',plainInner));
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer();go(&#39;plab&#39;)">'+(ar?'افتح في المختبر':'Open in Lab')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
 }
 function _prMonths(){
   var m={}, t0=new Date(); t0.setHours(0,0,0,0);
