@@ -14675,7 +14675,7 @@ function renderCommandCenter(){
   var sigTone=(dm.signal==='weak'?'gold':(dm.signal==='strong'?'green':'info'));
   var statusTone=(d.partial?'gold':'green'), statusTxt=(d.partial?(ar?'بيانات جزئية':'Partial'):(ar?'مباشر':'Live'));
   var h='<div class="card" style="border:1px solid var(--gold);background:linear-gradient(180deg,rgba(184,137,59,.06),transparent)">'
-    +'<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:16px">📊 '+(ar?'مركز التسعير':'Pricing Command Center')+'</b><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+pccChip(statusTxt,statusTone)+(d.dry_run?pccChip(ar?'وضع المعاينة':'Dry-run','info'):'')+'<button class="btn ghost sm" onclick="loadPricing()">↻</button></span></div>'
+    +'<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:16px">📊 '+(ar?'مركز التسعير':'Pricing Command Center')+'</b><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+pccChip(statusTxt,statusTone)+(d.dry_run?pccChip(ar?'وضع المعاينة':'Dry-run','info'):'')+'<button class="btn ghost sm" onclick="pccBatches()">🧾 '+(ar?'الدُفعات':'Batches')+'</button><button class="btn ghost sm" onclick="loadPricing()">↻</button></span></div>'
     +'<div style="font-size:14px;font-weight:800;margin-top:8px">'+(ar?'وش القرار السعري اليوم؟':'What pricing decision should we make today?')+'</div>'
     +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">'+pccChip(ar?dm.title_ar:dm.title_en,sigTone)+'<span style="font-size:13px">'+esc(ar?dm.reason_ar:dm.reason_en)+'</span></div>'
     +(rt.title_ar?('<div style="margin-top:7px;font-size:13px;font-weight:700;color:#7a5b14">↪ '+esc(ar?rt.title_ar:rt.title_en)+'</div>'):'')
@@ -14759,16 +14759,33 @@ async function pccApply(forceDry){
   if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
   pccApplyResults(res); loadPricing();
 }
+async function pccBatches(){ var ar=(L==='ar'); var d; try{ d=await api('/api/pricing/command/batches'); }catch(_){ d=null; }
+  var bs=(d&&d.batches)||[];
+  openDrawer(ar?'دُفعات التطبيق':'Apply batches', ar?'تراجع آمن — اختبار ثم تأكيد':'Safe revert — test then confirm');
+  var body=bs.length?bs.map(function(b){ return '<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:12px">'+esc(b.batch_id)+'</b>'+(b.dry_run?pccChip(ar?'اختبار':'dry-run','info'):pccChip(ar?'فعلي':'live','green'))+'</div>'
+    +'<div class="muted" style="font-size:11px;margin-top:4px">'+esc(String(b.ts||'').replace('T',' ').slice(0,16))+' · '+(ar?'مطبّق ':'applied ')+(b.applied||0)+' · '+(ar?'قابل للتراجع ':'revertable ')+(b.revertable||0)+'</div>'
+    +(b.revertable&&!b.dry_run?('<div style="display:flex;gap:6px;margin-top:8px"><button class="btn ghost sm" onclick="pccRevert(&#39;'+esc(b.batch_id)+'&#39;,true)">'+(ar?'اختبار التراجع':'Test revert')+'</button><button class="btn primary sm" onclick="pccRevert(&#39;'+esc(b.batch_id)+'&#39;,false)">'+(ar?'تراجع فعلي':'Revert for real')+'</button></div>'):(b.dry_run?'':('<div class="muted" style="font-size:10.5px;margin-top:6px">'+(ar?'ما فيه صفوف قابلة للتراجع — السعر الأصلي غير معروف.':'Nothing revertable — original price unknown.')+'</div>'))) +'</div>'; }).join(''):('<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه دُفعات بعد.':'No batches yet.')+'</div>');
+  setDrawerBody(body); setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
+}
+async function pccRevert(bid, forceDry){ var ar=(L==='ar');
+  if(!forceDry){ var m=await fbModal({title:(ar?'تأكيد تراجع فعلي على Hostaway':'Confirm REAL revert'), msg:(ar?'بنرجّع الأسعار الأصلية لهالدفعة على Hostaway فعليًا، ونتأكد بعد الكتابة بإعادة القراءة.':'We write the original prices of this batch back to Hostaway for real, then verify by re-reading.'), danger:true, confirm:(ar?'تراجع فعلي':'Revert for real'), cancel:(ar?'رجوع':'Back')}); if(!m.ok) return; }
+  toast(ar?'⏳ تراجع + تأكد من Hostaway…':'⏳ Reverting + verifying…');
+  var res; try{ res=await post('/api/pricing/command/revert',{batch_id:bid,dry_run:!!forceDry}); }catch(_){ res=null; }
+  if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
+  pccApplyResults(res); loadPricing();
+}
 function pccApplyResults(res){
   var ar=(L==='ar'); var s=res.summary||{};
-  openDrawer((ar?'نتيجة التطبيق':'Apply result')+(res.dry_run?(ar?' · اختبار':' · dry-run'):''), 'batch '+esc(res.batch_id||''));
+  openDrawer((res.revert?(ar?'نتيجة التراجع':'Revert result'):(ar?'نتيجة التطبيق':'Apply result'))+(res.dry_run?(ar?' · اختبار':' · dry-run'):''), 'batch '+esc(res.batch_id||''));
   var chips=pccChip((ar?'تأكدنا ':'verified ')+(s.verified||0),'green')+pccChip((ar?'غير مؤكد ':'not confirmed ')+(s.not_confirmed||0),(s.not_confirmed?'gold':'mut'))+pccChip((ar?'فشل ':'failed ')+(s.failed||0),(s.failed?'red':'mut'))+pccChip((ar?'محظور ':'floor-blocked ')+(s.floor_blocked||0),(s.floor_blocked?'red':'mut'))+((s.dry_run||0)?pccChip((ar?'اختبار ':'dry-run ')+(s.dry_run||0),'info'):'');
   var STT={verified_applied:[ar?'تأكدنا من Hostaway':'verified','green'],dry_run:[ar?'اختبار':'dry-run','info'],not_confirmed:[ar?'أرسلنا بس ما تأكدنا':'sent, not confirmed','gold'],failed:[ar?'فشل':'failed','red'],skipped:[ar?'تخطّينا':'skipped','mut'],floor_blocked:[ar?'تحت الـ floor':'floor-blocked','red']};
   var rowsH=(res.rows||[]).map(function(r){ var st=STT[r.status]||[r.status,'mut']; return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">#'+esc(String(r.lid))+' · '+esc(r.date||'')+'</span><span>'+(r.old_price!=null?fmt(r.old_price)+' → ':'')+(r.actual_price!=null?fmt(r.actual_price):(r.requested_price!=null?fmt(r.requested_price):''))+' '+pccChip(st[0],st[1])+'</span></div>'; }).join('');
   setDrawerBody('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chips+'</div>'
     +(res.dry_run?('<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+(ar?'اختبار آمن — ما تغيّر شيء في Hostaway. التطبيق الفعلي يحتاج PRICE_APPLY_DRYRUN=0 في Railway ثم زر «تطبيق على Hostaway».':'Safe test — nothing changed in Hostaway. Real writes need PRICE_APPLY_DRYRUN=0 in Railway, then the Apply button.')+'</div>'):'')
     +rowsH);
-  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'تمام':'Done')+'</button>');
+  var canRevert=(!res.revert && !res.dry_run && (((s.verified||0)+(s.not_confirmed||0))>0) && res.batch_id);
+  var revBtn=canRevert?('<button class="btn ghost sm" onclick="pccRevert(&#39;'+esc(res.batch_id)+'&#39;,false)">'+(ar?'تراجع عن هذي الدفعة':'Revert this batch')+'</button>'):'';
+  setDrawerFoot(revBtn+'<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'تمام':'Done')+'</button>');
 }
 function pccBoard(){
   var ar=(L==='ar'); var wrap=document.getElementById('pccBoard'); if(!wrap) return; var d=D.pcc||{}; var units=(d.units||[]).slice();
@@ -27728,6 +27745,77 @@ async def _api_pricing_command_apply(request):
                                   _req_actor(request), bool(b.get("allow_below_floor")), fd)
     return _json(res, (200 if res.get("ok") else 400))
 
+def _pe_cmd_batches_list(limit=30):
+    out = []
+    for bid, b in list(_pe_cmd_batches.items()):
+        rows = b.get("rows") or []
+        applied = sum(1 for r in rows if r.get("status") in ("verified_applied", "not_confirmed"))
+        revertable = sum(1 for r in rows if r.get("status") in ("verified_applied", "not_confirmed") and r.get("old_price") is not None)
+        out.append({"batch_id": bid, "ts": b.get("ts"), "actor": b.get("actor"), "dry_run": bool(b.get("dry_run")),
+                    "rows": len(rows), "applied": applied, "revertable": revertable})
+    out.sort(key=lambda x: x.get("ts") or "", reverse=True)
+    return out[:limit]
+
+def _pricing_command_revert(batch_id, lids=None, date_iso=None, force_dry=None):
+    """Revert a batch (or one apartment / one night within it) by writing the ORIGINAL old price back
+    through the SAME verified writer (_pe_apply_night: write → re-fetch → confirm → log). Only reverts
+    rows that actually wrote AND whose original price is known; otherwise skipped 'original_price_unknown'."""
+    b = _pe_cmd_batches.get(str(batch_id))
+    if not b:
+        return {"ok": False, "error": "batch_not_found"}
+    lidset = None
+    if lids:
+        lidset = set()
+        for x in lids:
+            try:
+                lidset.add(int(x))
+            except (TypeError, ValueError):
+                pass
+    summ = {"requested": 0, "verified": 0, "not_confirmed": 0, "failed": 0, "skipped": 0, "unknown_old": 0, "dry_run": 0}
+    res_rows = []
+    for r in (b.get("rows") or []):
+        if r.get("status") not in ("verified_applied", "not_confirmed"):
+            continue                                       # only rows that actually wrote
+        lid, d = r.get("lid"), r.get("date")
+        if lidset is not None and lid not in lidset:
+            continue
+        if date_iso and d != date_iso:
+            continue
+        old = r.get("old_price")
+        if old is None:
+            res_rows.append({"lid": lid, "date": d, "status": "skipped", "reason": "original_price_unknown"})
+            summ["unknown_old"] += 1; summ["skipped"] += 1; continue
+        summ["requested"] += 1
+        before = r.get("actual_price") if r.get("actual_price") is not None else r.get("requested_price")
+        rr = _pe_apply_night(lid, d, old, source="command-revert", reason="revert " + str(batch_id),
+                             old=before, force_dry=force_dry)
+        if not rr.get("ok"):
+            res_rows.append({"lid": lid, "date": d, "requested_price": old, "status": "failed", "reason": rr.get("error")})
+            summ["failed"] += 1; continue
+        if rr.get("dry_run"):
+            st = "dry_run"; summ["dry_run"] += 1
+        elif rr.get("confirmed"):
+            st = "verified_applied"; summ["verified"] += 1
+        else:
+            st = "not_confirmed"; summ["not_confirmed"] += 1
+        res_rows.append({"lid": lid, "date": d, "old_price": before, "requested_price": old,
+                         "actual_price": rr.get("actual"), "status": st})
+    eff_dry = bool(PRICE_APPLY_DRYRUN if force_dry is None else force_dry)
+    return {"ok": True, "batch_id": str(batch_id), "revert": True, "dry_run": eff_dry, "summary": summ, "rows": res_rows}
+
+async def _api_pricing_command_batches(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "batches": _pe_cmd_batches_list()})
+
+async def _api_pricing_command_revert(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    fd = True if b.get("dry_run") else None
+    res = await asyncio.to_thread(_pricing_command_revert, b.get("batch_id"), b.get("lids"), b.get("date"), fd)
+    return _json(res, (200 if res.get("ok") else 400))
+
 async def _api_pe_recs(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -40136,6 +40224,8 @@ async def start_web_server():
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
+        app.router.add_get("/api/pricing/command/batches", _api_pricing_command_batches)  # apply batches (revert source)
+        app.router.add_post("/api/pricing/command/revert", _api_pricing_command_revert)   # verified revert (dry-run-able)
         app.router.add_get("/api/pricing2/recs", _api_pe_recs)       # engine v2: recommendations
         app.router.add_get("/api/pricing2/night", _api_pe_night)     # engine v2: one-night "ليش هالسعر؟" detail
         app.router.add_post("/api/pricing2/apply", _api_pe_apply)    # engine v2: one-night apply (DRYRUN-gated)
