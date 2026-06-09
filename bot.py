@@ -12170,6 +12170,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div id="revenueOpsSummary"></div>
+        <div id="revDiag"></div>
         <!-- Hero KPI strip: this-month vs prior month -->
         <div class="kpis" id="revKpis"></div>
 
@@ -15326,10 +15327,34 @@ async function loadRevenue(){
     D.rev = r[0];
     D.revCal30 = r[1];
   }catch(_){ D.rev = {loading:true}; D.revCal30 = {days:[]} }
+  renderRevDiag();
   renderRevenueFull();
   renderRevKpis();
   renderRevPace();
   renderRevenueOpsSummary();
+}
+function _revPct(cur,prev){ return (prev!=null&&prev!==0&&cur!=null)?Math.round((cur-prev)/prev*100):null; }
+function renderRevDiag(){
+  var ar=(L==='ar'); var el=document.getElementById('revDiag'); if(!el) return; var rev=D.rev||{};
+  if(rev.loading){ el.innerHTML=''; return; }
+  var months=(rev.monthly||[]); var tm=months[months.length-1]||{}, pm=(months.length>1?months[months.length-2]:null);
+  if(!pm){ el.innerHTML=''; return; }
+  var drP=_revPct(tm.rev,pm.rev), ocP=_revPct(tm.occ,pm.occ), adP=_revPct(tm.adr,pm.adr);
+  var tone, sentence;
+  if(drP==null){ tone='info'; sentence=ar?'ما فيه بيانات كفاية للمقارنة الشهرية بعد.':'Not enough monthly data to compare yet.'; }
+  else if(drP>=0){ tone='green'; sentence=(ar?('الإيراد أعلى من الشهر اللي قبل بـ '+drP+'%.'):('Revenue is up '+drP+'% vs last month.')); }
+  else { var driver='';
+    if(ocP!=null&&adP!=null){ if(ocP<adP) driver=(ar?' النزول أساسه الإشغال أقل، مو السعر فقط.':' Driven mainly by lower occupancy, not just price.'); else if(adP<ocP) driver=(ar?' النزول أساسه الـ ADR أقل.':' Driven mainly by a lower ADR.'); else driver=(ar?' النزول من الإشغال والـ ADR معًا.':' From both occupancy and ADR.'); }
+    else if(ocP!=null&&ocP<0) driver=(ar?' الإشغال أقل من الشهر اللي قبل.':' Occupancy is lower than last month.');
+    tone='gold'; sentence=(ar?('الإيراد أقل من الشهر اللي قبل بـ '+Math.abs(drP)+'%.'):('Revenue is down '+Math.abs(drP)+'% vs last month.'))+driver;
+  }
+  var sm=(D.pcc||{}).summary||{}; var hr=sm.high_risk_units||0, en7=sm.empty_nights_7||0;
+  var extra=(hr>0)?(ar?(' أكثر الخطر الحالي من '+hr+' شقة عالية الخطر و'+en7+' ليلة فاضية خلال ٧ أيام.'):(' Most current risk is '+hr+' high-risk units and '+en7+' empty nights in 7 days.')):'';
+  var pal=({green:['#1f6e45','rgba(62,125,90,.08)','#3e7d5a'],gold:['#7a5b14','rgba(184,137,59,.07)','#A37728'],info:['#2f5f7a','rgba(47,95,122,.07)','#2f5f7a']})[tone];
+  function chip(lbl,v,t){ return pccChip(lbl+' '+v,t); }
+  el.innerHTML='<div class="card" style="border:1px solid '+pal[2]+';background:'+pal[1]+'"><b style="font-size:15px;color:'+pal[0]+'">'+(ar?'ليش تغيّر الإيراد؟':'Why revenue changed')+'</b><div style="font-size:13.5px;margin-top:6px;line-height:1.85">'+esc(sentence+extra)+'</div>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+chip(ar?'الإيراد':'Revenue',(drP!=null?((drP>0?'+':'')+drP+'%'):'—'),(drP==null?'info':(drP>=0?'green':'gold')))+chip('ADR',(adP!=null?((adP>0?'+':'')+adP+'%'):'—'),(adP==null?'info':(adP>=0?'green':'gold')))+chip(ar?'الإشغال':'Occupancy',(ocP!=null?((ocP>0?'+':'')+ocP+'%'):'—'),(ocP==null?'info':(ocP>=0?'green':'gold')))+'</div>'
+    +(hr>0?('<button class="btn ghost sm" style="margin-top:10px" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح مركز التسعير':'Open Pricing Command Center')+'</button>'):'')+'</div>';
 }
 
 function renderRevKpis(){
