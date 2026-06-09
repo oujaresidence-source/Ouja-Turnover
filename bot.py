@@ -11739,6 +11739,35 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .discount-banner .txt{font-size:13px;color:var(--text-2)}
 .discount-banner .txt b{color:var(--text)}
 
+/* ===== Ouja OS redesign components — hero decision block, status chips, clickable rows ===== */
+.greet{font-size:26px;font-weight:800;letter-spacing:-.6px;color:var(--text);margin-bottom:3px}
+.greet-sub{font-size:14px;color:var(--mut);margin-bottom:6px}
+.sec{display:flex;align-items:center;gap:11px;margin:26px 0 14px}
+.sec h2{font-size:18px;font-weight:800;letter-spacing:-.3px}
+.sec .cnt{font-size:12.5px;font-weight:700;color:var(--mut);background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:2px 10px}
+.sec .right{margin-inline-start:auto;display:flex;gap:8px}
+.hero{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--sh-md);overflow:hidden;margin-bottom:16px}
+.hero-h{display:flex;align-items:center;gap:11px;padding:15px 18px;border-bottom:1px solid var(--line)}
+.hero-h .pulse{width:9px;height:9px;border-radius:50%;background:var(--bad);position:relative;flex:none}
+.hero-h .pulse::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--bad);opacity:.4;animation:ping 1.8s var(--ease) infinite}
+@keyframes ping{0%{transform:scale(.7);opacity:.5}100%{transform:scale(1.7);opacity:0}}
+.hero-h h3{font-size:16px;font-weight:800;letter-spacing:-.2px}
+.hero-h .x{margin-inline-start:auto;font-size:12.5px;color:var(--mut)}
+.di{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);transition:background .12s}
+.di:last-child{border-bottom:none}.di:hover{background:var(--tint)}
+.di-ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;flex:none}
+.di-ic svg{width:20px;height:20px;stroke-width:2;fill:none}
+.di-ic.bad{background:var(--bad-bg)}.di-ic.bad svg{stroke:var(--bad)}
+.di-ic.warn{background:var(--warn-bg)}.di-ic.warn svg{stroke:var(--warn)}
+.di-ic.info{background:var(--info-bg)}.di-ic.info svg{stroke:var(--info)}
+.di-b{flex:1;min-width:0}.di-b .t{font-weight:700;font-size:14px;line-height:1.35}.di-b .d{font-size:12.5px;color:var(--mut);margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:20px;padding:3px 11px;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.chip.good{color:var(--good);background:var(--good-bg)}.chip.warn{color:var(--warn);background:var(--warn-bg)}
+.chip.bad{color:var(--bad);background:var(--bad-bg)}.chip.info{color:var(--info);background:var(--info-bg)}
+.chip.flat{color:var(--gray);background:var(--surface-2)}.chip.flat::before{display:none}
+.rowc{cursor:pointer;transition:background .12s}.rowc:hover{background:var(--accent-soft)}
+
 </style>
 </head>
 <body>
@@ -11822,7 +11851,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </script>
         <div class="page-help" id="ph_home" data-help-key="home">
           <button class="ph-x" onclick="dismissHelp('home')" title="إخفاء">×</button>
-          <div class="ph-t">👋 أهلاً وسهلاً</div>
+          <div class="ph-t">أهلاً وسهلاً</div>
           <div class="ph-b">
             هذي الصفحة الرئيسية — كل أرقام اليوم تجي هنا: <b>الإشغال</b>، <b>الإيراد</b>،
             <b>الشقق الفاضية الليلة</b>، <b>التذاكر العاجلة</b>. أي رقم بلون أحمر = يحتاج انتباه، اضغطه يوديك لتفاصيله.
@@ -11844,7 +11873,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <!-- Today's arrivals timeline with per-guest signed/code status -->
         <div class="card">
           <div class="card-head">
-            <span class="card-title">🛬 <span id="t_arrivals">الوصول القادم</span></span>
+            <span class="card-title"><span id="t_arrivals">الوصول القادم</span></span>
             <span class="card-sub" id="arrivalsCount"></span>
           </div>
           <div id="arrivalsTimeline"><div class="empty sk">—</div></div>
@@ -11852,11 +11881,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="grid2">
           <div class="card">
-            <div class="card-head"><span class="card-title">📅 <span id="t_today_h">اليوم</span></span><span class="card-sub" id="t_today_date"></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_today_h">اليوم</span></span><span class="card-sub" id="t_today_date"></span></div>
             <div id="todayBody"><div class="empty sk">—</div></div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">📈 <span id="t_rev_card">الإيراد الشهري</span></span><span class="card-sub" id="revCardSub"></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_rev_card">الإيراد الشهري</span></span><span class="card-sub" id="revCardSub"></span></div>
             <div id="revCardBody"><div class="empty sk">—</div></div>
           </div>
         </div>
@@ -15831,46 +15860,32 @@ function renderAll(){
 function renderUrgentStrip(){
   const el = document.getElementById('urgentStrip');
   if(!el) return;
+  const ar = (L==='ar');
   const d = D.urgent || {items:[], counts:{}};
   const items = d.items || [];
   if(!items.length){
-    el.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:rgba(14,158,95,.18);text-align:center;padding:13px"><span style="color:var(--green);font-weight:600">✓ '+t().urgent_none+'</span></div>';
+    el.innerHTML = '<div class="card" style="background:var(--good-bg);border-color:rgba(19,115,51,.20);text-align:center;padding:15px"><span style="color:var(--good);font-weight:700">'+t().urgent_none+'</span></div>';
     return;
   }
-  // Show up to 6 most urgent inline; collapse the rest
+  // "Needs your decision now" hero — real urgent items, ranked by impact (already sorted by the API).
   const top = items.slice(0, 6);
   const more = items.length - top.length;
-  const sevColor = function(s){ return s==='high' ? 'var(--red)' : (s==='med' ? 'var(--yellow)' : 'var(--blue)') };
-  const sevBg = function(s){ return s==='high' ? 'var(--red-soft)' : (s==='med' ? 'var(--yellow-soft)' : 'var(--blue-soft)') };
-  const kindLabel = function(k){
-    if(k==='escalation') return t().urgent_esc;
-    if(k==='pending_reply') return t().urgent_pending;
-    if(k==='unsigned_agreement') return t().urgent_unsigned;
-    return k;
-  };
+  const tone = function(s){ return s==='high' ? 'bad' : (s==='med' ? 'warn' : 'info'); };
+  const alertIc = _S+'<path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+  const icon = function(k){ if(k==='escalation'||k==='pending_reply') return ICN.inbox; if((k||'').indexOf('ticket')>=0||k==='maintenance') return ICN.tickets; if(k==='unsigned_agreement') return ICN.quote; return alertIc; };
   const rows = top.map(function(it){
-    const age = (it.age_min != null) ? '<span class="muted" style="font-size:11px">· '+it.age_min+'m '+t().urgent_age+'</span>' : '';
-    const detail = it.detail ? '<div class="muted" style="font-size:11.5px;margin-top:3px">'+esc(it.detail)+'</div>' : '';
-    return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer" onclick="go(\\''+(it.action_view||'inbox')+'\\')">'
-      + '<div style="width:6px;align-self:stretch;background:'+sevColor(it.severity)+';border-radius:3px;flex-shrink:0"></div>'
-      + '<div style="flex:1;min-width:0">'
-        + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">'
-          + '<span style="font-weight:600;font-size:13.5px">'+esc(it.title)+'</span>'
-          + '<span class="pill" style="background:'+sevBg(it.severity)+';color:'+sevColor(it.severity)+'">'+kindLabel(it.kind)+'</span>'
-        + '</div>'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px">'
-          + '<span class="muted" style="font-size:12px">'+esc(it.subtitle||'')+' '+age+'</span>'
-        + '</div>'
-        + detail
-      + '</div>'
+    const age = (it.age_min != null) ? '<span class="muted"> · '+it.age_min+'m '+t().urgent_age+'</span>' : '';
+    const sub = esc(it.subtitle || it.detail || '');
+    return '<div class="di rowc" onclick="go(\\''+(it.action_view||'inbox')+'\\')">'
+      + '<div class="di-ic '+tone(it.severity)+'">'+icon(it.kind)+'</div>'
+      + '<div class="di-b"><div class="t">'+esc(it.title)+'</div><div class="d">'+sub+age+'</div></div>'
+      + '<button class="btn ghost xs" onclick="event.stopPropagation();go(\\''+(it.action_view||'inbox')+'\\')">'+(ar?'افتح':'Open')+'</button>'
     + '</div>';
   }).join('');
-  el.innerHTML = '<div class="card" style="padding:0;overflow:hidden">'
-    + '<div class="card-head" style="padding:14px 16px;margin:0;border-bottom:1px solid var(--line)">'
-      + '<span class="card-title">'+t().urgent_title+' <span class="pill danger">'+items.length+'</span></span>'
-    + '</div>'
+  el.innerHTML = '<div class="hero">'
+    + '<div class="hero-h"><span class="pulse"></span><h3>'+t().urgent_title+'</h3><span class="x">'+(ar?'مرتّبة بالأهم — مو بالأحدث':'Ranked by impact, not time')+'</span></div>'
     + rows
-    + (more > 0 ? '<div style="padding:10px;text-align:center;color:var(--mut);font-size:12px">+ '+more+'</div>' : '')
+    + (more > 0 ? '<div style="padding:11px;text-align:center;color:var(--mut);font-size:12.5px">+ '+more+' '+(ar?'غيرها':'more')+'</div>' : '')
     + '</div>';
 }
 
