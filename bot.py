@@ -14741,9 +14741,35 @@ function pccPvRender(){
   if(!rows.length) body='<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه ليالٍ ضمن النطاق لهالإجراء. غيّر التواريخ أو الإجراء.':'No nights in range for this action. Change the dates or action.')+'</div>';
   setDrawerBody(scope+belowT+sum+body);
   var dryNote=(D.pcc&&D.pcc.dry_run)?('<div class="muted" style="font-size:10.5px;margin-top:4px;text-align:center">'+(ar?'وضع المعاينة مفعّل':'Dry-run is ON')+'</div>'):'';
-  setDrawerFoot('<button class="btn primary sm" '+(canN?'':'disabled')+' onclick="pccApplyComing('+canN+')">'+(ar?'تطبيق فعلي على Hostaway':'Confirm apply to Hostaway')+' ('+canN+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'+dryNote);
+  setDrawerFoot('<button class="btn ghost sm" '+(canN?'':'disabled')+' onclick="pccApply(true)">'+(ar?'اختبار آمن':'Safe test')+'</button><button class="btn primary sm" '+(canN?'':'disabled')+' onclick="pccApply(false)">'+(ar?'تطبيق على Hostaway':'Apply to Hostaway')+' ('+canN+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'+dryNote);
 }
-async function pccApplyComing(n){ var ar=(L==='ar'); await fbModal({title:(ar?'تطبيق فعلي على Hostaway':'Apply to Hostaway'), msg:(ar?'هذي معاينة فقط — ما تغيّر شيء في Hostaway. التطبيق الفعلي المُتحقَّق — يكتب السعر ثم يعيد القراءة من Hostaway للتأكيد — يتفعّل بالخطوة الجاية.':'Preview only — nothing changed in Hostaway. The verified live apply (writes the price, then re-fetches Hostaway to confirm) is enabled in the next step.'), confirm:(ar?'فهمت':'Got it'), cancel:(ar?'إغلاق':'Close')}); }
+async function pccApply(forceDry){
+  var ar=(L==='ar'); var rows=pccPvRows().filter(function(r){ return r.canApply; });
+  if(!rows.length){ toast(ar?'ما فيه صفوف قابلة للتطبيق':'Nothing to apply'); return; }
+  var envDry=!!(D.pcc&&D.pcc.dry_run); var willWrite=(!forceDry&&!envDry); var bf=rows.filter(function(r){return r.below;}).length;
+  if(willWrite){
+    var bfTxt=(bf?(ar?(' · منها '+bf+' تحت الـ floor — استثناء.'):(' · '+bf+' below floor — exception.')):'');
+    var msg=(ar?('بنكتب '+rows.length+' سعر فعليًا على Hostaway، ونتأكد بعد الكتابة بإعادة القراءة من Hostaway.'+bfTxt):('Writing '+rows.length+' prices to Hostaway for real, then verifying by re-reading from Hostaway.'+bfTxt));
+    var m=await fbModal({title:(ar?'تأكيد كتابة فعلية على Hostaway':'Confirm REAL write to Hostaway'), msg:msg, summary:(rows.length+(ar?' ليلة':' nights')), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')});
+    if(!m.ok) return;
+  }
+  var payload={dry_run:!!forceDry, allow_below_floor:!!(_pcc.pv&&_pcc.pv.allowBelow), rows:rows.map(function(r){ return {lid:r.lid, date:r.date, price:r.suggested, floor:r.floor, old:r.current}; })};
+  toast(ar?'⏳ نطبّق ونتأكد من Hostaway…':'⏳ Applying + verifying Hostaway…');
+  var res; try{ res=await post('/api/pricing/command/apply', payload); }catch(_){ res=null; }
+  if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
+  pccApplyResults(res); loadPricing();
+}
+function pccApplyResults(res){
+  var ar=(L==='ar'); var s=res.summary||{};
+  openDrawer((ar?'نتيجة التطبيق':'Apply result')+(res.dry_run?(ar?' · اختبار':' · dry-run'):''), 'batch '+esc(res.batch_id||''));
+  var chips=pccChip((ar?'تأكدنا ':'verified ')+(s.verified||0),'green')+pccChip((ar?'غير مؤكد ':'not confirmed ')+(s.not_confirmed||0),(s.not_confirmed?'gold':'mut'))+pccChip((ar?'فشل ':'failed ')+(s.failed||0),(s.failed?'red':'mut'))+pccChip((ar?'محظور ':'floor-blocked ')+(s.floor_blocked||0),(s.floor_blocked?'red':'mut'))+((s.dry_run||0)?pccChip((ar?'اختبار ':'dry-run ')+(s.dry_run||0),'info'):'');
+  var STT={verified_applied:[ar?'تأكدنا من Hostaway':'verified','green'],dry_run:[ar?'اختبار':'dry-run','info'],not_confirmed:[ar?'أرسلنا بس ما تأكدنا':'sent, not confirmed','gold'],failed:[ar?'فشل':'failed','red'],skipped:[ar?'تخطّينا':'skipped','mut'],floor_blocked:[ar?'تحت الـ floor':'floor-blocked','red']};
+  var rowsH=(res.rows||[]).map(function(r){ var st=STT[r.status]||[r.status,'mut']; return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">#'+esc(String(r.lid))+' · '+esc(r.date||'')+'</span><span>'+(r.old_price!=null?fmt(r.old_price)+' → ':'')+(r.actual_price!=null?fmt(r.actual_price):(r.requested_price!=null?fmt(r.requested_price):''))+' '+pccChip(st[0],st[1])+'</span></div>'; }).join('');
+  setDrawerBody('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chips+'</div>'
+    +(res.dry_run?('<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+(ar?'اختبار آمن — ما تغيّر شيء في Hostaway. التطبيق الفعلي يحتاج PRICE_APPLY_DRYRUN=0 في Railway ثم زر «تطبيق على Hostaway».':'Safe test — nothing changed in Hostaway. Real writes need PRICE_APPLY_DRYRUN=0 in Railway, then the Apply button.')+'</div>'):'')
+    +rowsH);
+  setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'تمام':'Done')+'</button>');
+}
 function pccBoard(){
   var ar=(L==='ar'); var wrap=document.getElementById('pccBoard'); if(!wrap) return; var d=D.pcc||{}; var units=(d.units||[]).slice();
   var q=(_pcc.q||'').trim().toLowerCase(); if(q) units=units.filter(function(u){ return String(u.name||'').toLowerCase().indexOf(q)>=0; });
@@ -26813,10 +26839,10 @@ def _pe_night_detail(lid, date_iso):
             "final": info["final"], "final_color": info["color"], "final_source": info["source"],
             "layers": info["layers"], "changelog": _price_log_view(lid, date_iso)}
 
-def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None):
-    """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN). Returns the
-    REAL result — read back to confirm — never a faked success. Logs to BOTH the learning log
-    and the central price-change audit log (old→new · source · reason)."""
+def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None, force_dry=None):
+    """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN, or force_dry to
+    guarantee a no-write test regardless of env). Returns the REAL result — read back to confirm —
+    never a faked success. Logs to BOTH the learning log and the central price-change audit log."""
     try:
         price = int(round(float(price)))
     except Exception:
@@ -26826,7 +26852,8 @@ def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None):
     floor = _pe_floor_overrides.get(lid, 0)
     if floor and price < int(floor):
         return {"ok": False, "error": f"below hard floor {floor}"}
-    if PRICE_APPLY_DRYRUN:
+    dry = PRICE_APPLY_DRYRUN if force_dry is None else bool(force_dry)
+    if dry:
         _pe_log_reco(lid, date_iso, price, applied=True, dry=True)
         log_price_change(lid, date_iso, old, price, source, reason or "تطبيق سعر", dry=True)
         return {"ok": True, "dry_run": True, "lid": lid, "date": date_iso, "price": price,
@@ -27630,6 +27657,76 @@ async def _api_pricing_command(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     return _json(await asyncio.to_thread(_pricing_command_snapshot))
+
+_pe_cmd_batches = _load_json("pricing_command_batches.json", {}) or {}   # batch_id -> {ts,actor,dry_run,rows[]}  (revert source)
+def _pe_cmd_batches_save():
+    try:
+        _save_json("pricing_command_batches.json", dict(list(_pe_cmd_batches.items())[-400:]))
+    except Exception as e:
+        print("cmd batches save:", e)
+
+def _pricing_command_apply(rows, actor="", allow_below_floor=False, force_dry=None):
+    """Apply preview rows via the EXISTING verified writer (_pe_apply_night: write → re-fetch →
+    confirm → log). Honors PRICE_APPLY_DRYRUN (or force_dry for a guaranteed no-write test). Below-floor
+    only with explicit allow (spec). 'verified_applied' ONLY when Hostaway read-back confirms. Records a
+    batch for revert. NEVER fakes success."""
+    if not isinstance(rows, list) or not rows:
+        return {"ok": False, "error": "no_rows"}
+    bid = "cmd-" + datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
+    summ = {"requested": 0, "verified": 0, "not_confirmed": 0, "failed": 0, "skipped": 0, "floor_blocked": 0, "dry_run": 0}
+    res_rows, batch_rows = [], []
+    for r in rows[:600]:                                  # safety cap
+        try:
+            lid = int(r.get("lid"))
+        except (TypeError, ValueError):
+            continue
+        date_iso = str(r.get("date") or "")[:10]
+        if not _parse_date(date_iso):
+            continue
+        try:
+            price = int(round(float(r.get("price"))))
+        except (TypeError, ValueError):
+            price = 0
+        if price <= 0:
+            res_rows.append({"lid": lid, "date": date_iso, "status": "skipped", "reason": "bad_price"}); summ["skipped"] += 1; continue
+        summ["requested"] += 1
+        floor = r.get("floor")
+        below = (floor is not None and price < _coerce_price(floor))
+        if below and not allow_below_floor:
+            res_rows.append({"lid": lid, "date": date_iso, "requested_price": price, "status": "floor_blocked",
+                             "reason": "below_floor_not_allowed", "floor": floor}); summ["floor_blocked"] += 1; continue
+        rr = _pe_apply_night(lid, date_iso, price, source="command",
+                             reason=("command below-floor exception" if below else "command apply"),
+                             old=r.get("old"), force_dry=force_dry)
+        if not rr.get("ok"):
+            res_rows.append({"lid": lid, "date": date_iso, "requested_price": price, "status": "failed",
+                             "reason": rr.get("error")}); summ["failed"] += 1; continue
+        if rr.get("dry_run"):
+            st = "dry_run"; summ["dry_run"] += 1
+        elif rr.get("confirmed"):
+            st = "verified_applied"; summ["verified"] += 1
+        else:
+            st = "not_confirmed"; summ["not_confirmed"] += 1
+        row_res = {"lid": lid, "date": date_iso, "old_price": r.get("old"), "requested_price": price,
+                   "actual_price": rr.get("actual"), "status": st, "below_floor_exception": bool(below)}
+        res_rows.append(row_res); batch_rows.append(row_res)
+    eff_dry = bool(PRICE_APPLY_DRYRUN if force_dry is None else force_dry)
+    if batch_rows:                                        # only record batches that touched (or would touch) Hostaway
+        _pe_cmd_batches[bid] = {"batch_id": bid, "ts": datetime.now(TZ).isoformat(timespec="seconds"),
+                                "actor": actor, "dry_run": eff_dry, "rows": batch_rows}
+        _pe_cmd_batches_save()
+    return {"ok": True, "batch_id": bid, "dry_run": eff_dry, "summary": summ, "rows": res_rows}
+
+async def _api_pricing_command_apply(request):
+    """Deliberate scoped owner apply for the Command Center. Preview rows in → verified per-row out.
+    force_dry=true guarantees a no-write test even if PRICE_APPLY_DRYRUN=0."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    fd = True if b.get("dry_run") else None
+    res = await asyncio.to_thread(_pricing_command_apply, (b.get("rows") or []),
+                                  _req_actor(request), bool(b.get("allow_below_floor")), fd)
+    return _json(res, (200 if res.get("ok") else 400))
 
 async def _api_pe_recs(request):
     if not _dash_auth(request):
@@ -40038,6 +40135,7 @@ async def start_web_server():
         app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
+        app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
         app.router.add_get("/api/pricing2/recs", _api_pe_recs)       # engine v2: recommendations
         app.router.add_get("/api/pricing2/night", _api_pe_night)     # engine v2: one-night "ليش هالسعر؟" detail
         app.router.add_post("/api/pricing2/apply", _api_pe_apply)    # engine v2: one-night apply (DRYRUN-gated)
