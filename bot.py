@@ -23134,8 +23134,8 @@ async function fbInboxRender(mode, filter){
   _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.canApproveHigh=!!(d&&d.can_approve_high_value); _fb.role=(d&&d.role)||''; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
   fbQueueRender();
 }
-function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',journal_draft:'mut',needs_review:'warn',rejected:'warn'})[ln]||'mut'; }
-function fbLaneLabel(ln){ var ar=(L==='ar'); var m={ready_to_link:['جاهز للربط','Ready to link'],linked_existing:['مربوط بدافترة','Linked'],needs_decision:['يحتاج قرار','Needs decision'],missing_setup:['ناقص إعداد','Missing setup'],needs_faisal_approval:['يحتاج اعتماد فيصل','Faisal approval'],ready_for_journal:['جاهز للسجل المالي','Ready for ledger'],journal_draft:['مسودات القيد','Journal drafts'],needs_review:['يحتاج مراجعة','Needs review'],rejected:['مرفوض — يحتاج تصحيح','Rejected'],completed:['مكتمل','Completed']}; var v=m[ln]; return v?(ar?v[0]:v[1]):ln; }
+function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',journal_draft:'mut',needs_classify:'warn',needs_dup_check:'warn',needs_review:'warn',rejected:'warn'})[ln]||'mut'; }
+function fbLaneLabel(ln){ var ar=(L==='ar'); var m={ready_to_link:['جاهز للربط','Ready to link'],linked_existing:['مربوط بدافترة','Linked'],needs_decision:['يحتاج قرار','Needs decision'],missing_setup:['ناقص إعداد','Missing setup'],needs_faisal_approval:['يحتاج اعتماد فيصل','Faisal approval'],ready_for_journal:['جاهز للسجل المالي','Ready for ledger'],journal_draft:['مسودات القيد','Journal drafts'],needs_classify:['يحتاج تصنيف','Needs classification'],needs_dup_check:['يحتاج مطابقة دافترة','Needs Daftra check'],needs_review:['يحتاج مراجعة','Needs review'],rejected:['مرفوض — يحتاج تصحيح','Rejected'],completed:['مكتمل','Completed']}; var v=m[ln]; return v?(ar?v[0]:v[1]):ln; }
 async function fbQueueRefresh(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث الحالات…':'⏳ Refreshing…'); await fbInboxRender(_fb.qmode||'inbox'); toast(ar?'تم تحديث القائمة':'Queue refreshed'); }
 async function fbFixStatuses(){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/daftra/dup',{action:'fix_statuses'}); }catch(_){ r=null; } if(r&&r.ok){ var a=r.after||{}; toast((ar?'تم الإصلاح · جاهز للربط ':'fixed · ready-to-link ')+(a.ready_to_link||0)+' · '+(ar?'مربوط ':'linked ')+(a.linked_existing||0)); fbInboxRender(_fb.qmode||'inbox'); } else toast('⚠'); }
 function fbStatusLabel(s){ var ar=(L==='ar'); var m={needs_review:[ 'يحتاج مراجعة','Needs review'],auto_classified:['مصنّف تلقائيًا','Auto-classified'],accountant_review:['مراجعة محاسب','Accountant review'],needs_faisal:['اعتماد فيصل','Faisal approval'],approved:['معتمد','Approved'],rejected:['مرفوض','Rejected'],ready_to_post:['جاهز للترحيل','Ready to post'],posted:['مرحّل','Posted'],verified:['متحقق من دافترة','Verified in Daftra'],failed:['فشل','Failed'],draft:['مسودة','Draft'],sheet_intake:['من Google Sheet','From Sheet'],void:['ملغى','Void']}; var v=m[s]; return v?(ar?v[0]:v[1]):(s||'—'); }
@@ -23146,7 +23146,9 @@ function fbLaneMeta(lane){ var ar=(L==='ar'); var m={
   needs_faisal_approval:['🛡️', ar?'مبلغ ٣٠٠٠ أو أكثر — يحتاج اعتماد فيصل':'3,000+ — needs Faisal approval'],
   ready_for_journal:['🧮', ar?'جديدة ومصنّفة — حوّلها للسجل المالي':'New & classified — move it to the ledger'],
   journal_draft:['🧾', ar?'في السجل المالي — جهّز أو راجع قيد دافترة':'In the ledger — prepare or review the Daftra journal'],
-  needs_review:['📋', ar?'تحتاج تصنيف أو مراجعة':'Needs classification or review'],
+  needs_classify:['🏷️', ar?'بدون تصنيف — اختر النوع والتصنيف':'No category yet — pick type & category'],
+  needs_dup_check:['🛡️', ar?'لازم فحص التكرار مع دافترة قبل أي خطوة':'Run the Daftra duplicate check first'],
+  needs_review:['📋', ar?'حالة غير واضحة — تحتاج قرار يدوي':'Unclear — needs a manual decision'],
   linked_existing:['✅', ar?'مربوطة بدافترة':'Linked to Daftra'],
   rejected:['⛔', ar?'مرفوضة من فيصل — تحتاج تصحيح وإعادة إرسال':'Rejected by Faisal — correct & resubmit'],
   completed:['✅', ar?'مكتملة':'Completed'] }; return m[lane]||['•','']; }
@@ -23173,7 +23175,7 @@ function fbQueueRender(){
     +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(rtl?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+esc(t().fb_bulk_link)+' ('+rtl+')</button>'):'')+'<button class="btn ghost sm" onclick="fbQueueRefresh()">↻ '+(ar?'تحديث':'Refresh')+'</button><button class="btn ghost sm" onclick="fbFixStatuses()">🛠 '+(ar?'إصلاح الحالات':'Fix')+'</button></div></div>'
     +'<div class="muted" style="font-size:11.5px;margin-top:4px">'+(ar?'اشتغل من المسارات — كل مسار يجمع العمليات اللي لها نفس الإجراء.':'Work from lanes — each lane groups items that need the same action.')+'</div></div>';
   if(_fb.qview==='lanes'){
-    var order=['ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','journal_draft','needs_review','rejected','linked_existing','completed'];
+    var order=['ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','journal_draft','needs_classify','needs_dup_check','needs_review','rejected','linked_existing','completed'];
     var byLane={}; (_fb.qItems||[]).forEach(function(i){ (byLane[i.lane]=byLane[i.lane]||[]).push(i); });
     var cards=order.filter(function(L_){ return (ln[L_]||(byLane[L_]||[]).length); }).map(function(L_){ return fbLaneCard(L_, (ln[L_]||(byLane[L_]||[]).length), byLane[L_]||[]); }).join('');
     if(!cards) cards='<div class="empty" style="padding:30px;text-align:center;grid-column:1/-1">'+(ar?'كل شي واضح — ما فيه عمليات تحتاج إجراء اليوم 👌':'All clear — nothing needs action today 👌')+'</div>';
@@ -36509,7 +36511,8 @@ def _fb_next_action(e):
     return ("none", "—", "—")
 
 _FB_LANES = ("ready_to_link", "linked_existing", "needs_decision", "missing_setup",
-             "needs_faisal_approval", "ready_for_journal", "journal_draft", "needs_review", "rejected", "completed")
+             "needs_faisal_approval", "ready_for_journal", "journal_draft",
+             "needs_classify", "needs_dup_check", "needs_review", "rejected", "completed")
 
 def _fb_resolve_status(item):
     """THE single authoritative finance-workflow resolver. Daftra duplicate state WINS over raw
@@ -36592,7 +36595,7 @@ def _fb_resolve_status(item):
                  "dup_check", "أعد الفحص", "Retry check", "فشل فحص التكرار مع دافترة", "Daftra check failed",
                  blocking_reason="check_failed")
     if kind == "bank" and dq in (None, "", "not_checked"):
-        return R("needs_dup_check", "needs_review", "يحتاج مطابقة دافترة", "Needs Daftra check",
+        return R("needs_dup_check", "needs_dup_check", "يحتاج مطابقة دافترة", "Needs Daftra check",
                  "dup_check", "تأكد من التكرار", "Check duplicates",
                  "شغّل فحص التكرار مع دافترة قبل أي ترحيل", "run the Daftra duplicate check first",
                  blocking_reason="not_checked")
@@ -36637,14 +36640,14 @@ def _fb_resolve_status(item):
                  can_prepare_daftra_post=True)
     if kind != "ledger" and dq in ("not_found_after_full_check", "not_duplicate"):
         if not has_cat:
-            return R("needs_classify", "needs_review", "يحتاج تصنيف", "Needs classification",
+            return R("needs_classify", "needs_classify", "يحتاج تصنيف", "Needs classification",
                      "classify", "صنّف", "Classify", "عملية جديدة تحتاج تصنيف", "new — classify it")
         return R("ready_for_journal", "ready_for_journal", "جاهز للسجل المالي", "Ready for ledger",
                  "promote", "حوّل للسجل المالي", "Move to ledger",
                  "جديدة وغير موجودة في دافترة — حوّلها للسجل المالي", "new, not in Daftra — move to ledger",
                  can_promote_to_ledger=True)
     if not has_cat:
-        return R("needs_classify", "needs_review", "يحتاج تصنيف", "Needs classification",
+        return R("needs_classify", "needs_classify", "يحتاج تصنيف", "Needs classification",
                  "classify", "صنّف", "Classify", "يحتاج تصنيف", "needs classification")
     return R("needs_review", "needs_review", "يحتاج مراجعة", "Needs review", "review", "راجع", "Review",
              "يحتاج مراجعة", "needs review")
