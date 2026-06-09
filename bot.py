@@ -12064,6 +12064,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div id="pcc"></div>
+        <div class="card" style="margin-top:14px"><div class="card-head"><span class="card-title">🏘️ <span id="t_pr_table">إدارة الأسعار — الشقق</span></span><span class="card-sub" id="prTableCount"></span></div><div id="prTable"><div class="empty sk">—</div></div></div>
         <details class="card" id="prDetailed"><summary style="cursor:pointer;font-weight:600;font-size:13px;padding:2px 0">📋 <span id="t_pr_detailed">العرض التفصيلي للأسعار + التطبيق</span></summary><div style="margin-top:10px">
         <div id="pricingOpsSummary"></div>
         <div class="card" id="lmDiagCard">
@@ -14679,7 +14680,7 @@ async function loadPricing(){
   D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; D.pccEmg=rr[4];
   // Each render is wrapped so a throw in one section never leaves another blank.
   function safe(fn,label){ try{ fn(); }catch(e){ try{ console.warn('pricing render '+(label||''),e); }catch(_){} } }
-  safe(renderCommandCenter,'cc'); safe(renderPricingHeader,'hdr'); safe(renderPricing2,'list');
+  safe(renderCommandCenter,'cc'); safe(renderPricingHeader,'hdr'); safe(renderPricingTable,'list');
   safe(renderPricingOpsSummary,'ops'); safe(renderLastMinuteDiagnostics,'lm'); safe(loadTodayEmpty,'today');
 }
 /* ===== Pricing Command Center (Stage 2) — read-only owner decision surface over /api/pricing/command.
@@ -15116,6 +15117,93 @@ function _prMatch(u){
   if(_prCompound && (u.compound||'')!==_prCompound) return false;
   if(_prStrat){ var tg=((D.prA||{}).unit_toggles||{})[String(u.lid)]||{}; if(!tg[_prStrat]) return false; }
   return true;
+}
+/* ===== Hostaway-style listings TABLE + per-unit month CALENDAR (Ouja logic + style) ===== */
+var _prCal={lid:null, month:null, data:null};
+function _prFilterUnits(){
+  var us=(((D.pcc||{}).units)||[]).slice();
+  if(_prSearch){ var q=_prSearch.toLowerCase(); us=us.filter(function(u){ return ((u.name||'')+' '+(u.group||'')).toLowerCase().indexOf(q)>=0; }); }
+  if(_prCompound){ us=us.filter(function(u){ return (u.group||'')===_prCompound; }); }
+  return us;   // backend already sorts by revenue-at-risk desc
+}
+function _prUnitSync(lid){
+  var t=_pcc.truth; if(!t||!t.ok||!t.rows) return null;
+  var any=false, mm=false;
+  t.rows.forEach(function(r){ if(String(r.listing_id)===String(lid)){ any=true; if(r.status==='mismatched') mm=true; } });
+  return any?(mm?'mismatch':'ok'):null;
+}
+function renderPricingTable(){
+  var ar=(L==='ar'); var body=document.getElementById('prTable'), cnt=document.getElementById('prTableCount'); if(!body) return;
+  var tt=document.getElementById('t_pr_table'); if(tt) tt.textContent=(ar?'إدارة الأسعار — الشقق':'Price manager — listings');
+  var d=D.pcc||{};
+  if(d.ok===false){ body.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:#a23b30">'+(ar?'⚠ تعذّر تحميل قائمة الشقق':'⚠ Could not load listings')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. جرّب تحديث.':'Engine did not respond — try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; if(cnt) cnt.textContent=''; return; }
+  var us=_prFilterUnits(); var compounds={}; (d.units||[]).forEach(function(u){ if(u.group) compounds[u.group]=(compounds[u.group]||0)+1; });
+  if(cnt) cnt.textContent=us.length+(ar?' شقة':' units');
+  var inp='padding:7px 10px;height:34px;font-size:12.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--text);font-family:inherit';
+  var compOpts='<option value="">'+(ar?'كل المجمّعات':'All compounds')+'</option>'+Object.keys(compounds).sort().map(function(c){ return '<option value="'+esc(c)+'"'+(_prCompound===c?' selected':'')+'>'+esc(c)+' ('+compounds[c]+')</option>'; }).join('');
+  var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    +'<input id="prSearch" placeholder="'+(ar?'ابحث عن شقة…':'Search units…')+'" value="'+esc(_prSearch)+'" oninput="_prSearch=this.value;renderPricingTable();var s=document.getElementById(&#39;prSearch&#39;);if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);}" style="flex:1;min-width:150px;'+inp+'">'
+    +'<select onchange="_prCompound=this.value;renderPricingTable()" style="'+inp+'">'+compOpts+'</select>'
+    +((_prSearch||_prCompound)?'<button class="btn ghost sm" onclick="_prSearch=&#39;&#39;;_prCompound=&#39;&#39;;renderPricingTable()">✕</button>':'')+'</div>';
+  if(!us.length){ body.innerHTML=bar+'<div class="empty" style="padding:26px;text-align:center">'+(ar?'ما فيه شقق بهالفلتر.':'No units match.')+'</div>'; return; }
+  var th='font-size:10px;color:var(--mut);font-weight:700;text-align:start;padding:6px 8px;white-space:nowrap';
+  var cols=['الشقة|Apartment','الحالة|Status','السعر الحالي (Hostaway)|Current (Hostaway)','الحد الأدنى|Floor','الحد الأقصى|Ceiling','إشغال ٧ أيام|Occ 7d','تعديل|Edit','تقويم|Calendar'];
+  var head='<tr>'+cols.map(function(c){ var p=c.split('|'); return '<th style="'+th+'">'+esc(ar?p[0]:p[1])+'</th>'; }).join('')+'</tr>';
+  var rows=us.map(function(u){ var s=u.summary||{}; var sync=_prUnitSync(u.listing_id); var lid=u.listing_id;
+    var actChip=s.activated?pccChip(ar?'مفعّلة':'On','green'):pccChip(ar?'غير مفعّلة':'Off','mut');
+    var syncChip=(sync==='ok'?(' '+pccChip(ar?'متطابق':'Synced','green')):(sync==='mismatch'?(' '+pccChip(ar?'يحتاج تحديث':'Needs sync','gold')):''));
+    var hi=((u.risk||{}).risk_level==='high');
+    return '<tr style="border-top:1px solid var(--line)'+(hi?';background:rgba(196,67,67,.04)':'')+'">'
+      +'<td style="padding:8px;font-weight:700;font-size:12.5px">'+esc(u.name||('#'+lid))+'</td>'
+      +'<td style="padding:8px">'+actChip+syncChip+'</td>'
+      +'<td style="padding:8px;font-weight:700">'+(s.current!=null?fmt(s.current):'—')+'</td>'
+      +'<td style="padding:8px">'+(s.floor!=null?fmt(s.floor):'—')+'</td>'
+      +'<td style="padding:8px">'+(s.ceiling!=null?fmt(s.ceiling):'—')+'</td>'
+      +'<td style="padding:8px">'+(s.occupancy_7!=null?(s.occupancy_7+'%'):'—')+'</td>'
+      +'<td style="padding:8px"><button class="btn ghost xs" title="'+(ar?'تعديل':'Edit')+'" onclick="pccOpenCalendar('+lid+')">✏️</button></td>'
+      +'<td style="padding:8px"><button class="btn primary xs" onclick="pccOpenCalendar('+lid+')">🗓️ '+(ar?'تقويم':'Calendar')+'</button></td></tr>';
+  }).join('');
+  body.innerHTML=bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'+head+rows+'</table></div>';
+}
+async function pccOpenCalendar(lid, monthIso){
+  _prCal.lid=lid;
+  var ms=monthIso?new Date(monthIso+'T00:00:00'):(function(){ var t=new Date(); return new Date(t.getFullYear(),t.getMonth(),1); })();
+  _prCal.month=ms;
+  var body=document.getElementById('prTable'); if(body) body.innerHTML='<div class="empty sk" style="height:220px">—</div>';
+  var start=_peIso(new Date(ms.getFullYear(),ms.getMonth(),1)), end=_peIso(new Date(ms.getFullYear(),ms.getMonth()+1,0));
+  var d; try{ d=await api('/api/pricing/calendar?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end); }catch(_){ d=null; }
+  _prCal.data=d; renderPricingCalendar();
+}
+function pccCalMonth(dir){ var ms=_prCal.month||new Date(); var n=(dir===0)?(function(){ var t=new Date(); return new Date(t.getFullYear(),t.getMonth(),1); })():new Date(ms.getFullYear(),ms.getMonth()+dir,1); pccOpenCalendar(_prCal.lid, _peIso(n)); }
+function pccCalTile(lid, ds, day, x){
+  var ar=(L==='ar'); var hp=x.hostaway_current, sug=x.ouja_suggested, prev=x.previous_price, dp=x.delta_pct;
+  var bt=(x.badge==='weekend'?(ar?'نهاية أسبوع':'wknd'):(x.badge==='event'?(ar?'مناسبة':'event'):(x.badge==='last_minute'?(ar?'قريب':'soon'):'')));
+  if(x.booked){ return '<div title="'+esc((ar?'محجوزة':'Booked')+(hp!=null?(' · '+fmt(hp)):''))+'" style="border:1px solid var(--line);border-radius:8px;padding:6px;min-height:62px;background:var(--surface-2);opacity:.55"><div style="font-size:11px;font-weight:700">'+day+'</div><div style="font-size:12px;margin-top:5px">'+(hp!=null?fmt(hp):'—')+'</div><div style="font-size:8.5px;color:var(--mut)">🔒 '+(ar?'محجوزة':'booked')+'</div></div>'; }
+  var col=(x.action==='drop'?'#a23b30':(x.action==='raise'?'#1f6e45':'var(--text)'));
+  var tip=(ar?'Hostaway الآن ':'Hostaway now ')+(hp!=null?fmt(hp):'—')+' · '+(ar?'اقتراح ':'sugg ')+(sug!=null?fmt(sug):'—')+' · '+(ar?'الحد الأدنى ':'floor ')+(x.floor!=null?fmt(x.floor):'—')+(x.why_short?(' — '+x.why_short):'');
+  return '<div title="'+esc(tip)+'" onclick="openPeNight('+lid+',&#39;'+ds+'&#39;)" style="border:1px solid var(--line);border-radius:8px;padding:6px;min-height:62px;cursor:pointer;background:var(--surface)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;font-weight:700">'+day+'</span>'+(bt?('<span style="font-size:8px;background:var(--gold-tint);color:#7a5b14;padding:0 4px;border-radius:6px">'+bt+'</span>'):'')+'</div>'
+    +'<div style="font-size:14px;font-weight:800;margin-top:3px;color:'+col+'">'+(sug!=null?fmt(sug):(hp!=null?fmt(hp):'—'))+'</div>'
+    +((prev!=null&&dp!=null)?('<div style="font-size:9px;color:#c98a3a">'+fmt(prev)+' ⟶ '+(dp>0?'+':'')+dp+'%</div>'):'')+'</div>';
+}
+function renderPricingCalendar(){
+  var ar=(L==='ar'); var body=document.getElementById('prTable'); if(!body) return; var d=_prCal.data, ms=_prCal.month;
+  if(!d||!d.ok){ body.innerHTML='<div class="card"><button class="btn ghost sm" onclick="renderPricingTable()">‹ '+(ar?'رجوع للقائمة':'Back to list')+'</button><div class="empty" style="padding:24px;text-align:center">'+(ar?'تعذّر تحميل التقويم. جرّب مرة ثانية.':'Could not load the calendar.')+'</div></div>'; return; }
+  var byDate={}; (d.days||[]).forEach(function(x){ byDate[x.date]=x; });
+  var y=ms.getFullYear(), m=ms.getMonth();
+  var monthName=new Date(y,m,1).toLocaleDateString(ar?'ar-SA':'en',{month:'long',year:'numeric'});
+  var startDow=new Date(y,m,1).getDay(), daysIn=new Date(y,m+1,0).getDate();
+  var dows=(ar?['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat']);
+  var hdr='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<button class="btn ghost sm" onclick="renderPricingTable()">‹ '+(ar?'رجوع للقائمة':'Back')+'</button>'
+    +'<b style="font-size:15px">🗓️ '+esc(d.name||'')+' · '+esc(monthName)+'</b>'
+    +'<div style="display:flex;gap:5px"><button class="btn ghost sm" onclick="pccCalMonth(-1)">‹</button><button class="btn ghost sm" onclick="pccCalMonth(0)">'+(ar?'اليوم':'Today')+'</button><button class="btn ghost sm" onclick="pccCalMonth(1)">›</button></div></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button class="btn green sm" onclick="applyUnit('+d.lid+')">✅ '+(ar?'طبّق أسعار هالشقة':'Apply this unit')+'</button><button class="btn ghost sm" onclick="pccBatches()">🧾 '+(ar?'الدُفعات / تراجع':'Batches / revert')+'</button></div>'
+    +'<div class="muted" style="font-size:10.5px;margin-bottom:8px">'+(ar?'اضغط أي يوم تشوف «ليش هالسعر؟» وتطبّق أو ترجّع. البرتقالي = السعر السابق + نسبة التغيير. لتطبيق نطاق (٧ أيام) استخدم «مركز التسعير» فوق.':'Click any day for «why» + apply/revert. Orange = previous price + %. For a range, use the Command Center above.')+'</div>';
+  var cells=''; var i; for(i=0;i<startDow;i++) cells+='<div></div>';
+  for(var day=1;day<=daysIn;day++){ var ds=y+'-'+('0'+(m+1)).slice(-2)+'-'+('0'+day).slice(-2); cells+=pccCalTile(d.lid, ds, day, byDate[ds]||{}); }
+  var grid='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">'+dows.map(function(w){ return '<div style="text-align:center;font-size:10px;color:var(--mut);font-weight:700;padding:2px">'+w+'</div>'; }).join('')+cells+'</div>';
+  body.innerHTML='<div class="card">'+hdr+grid+'</div>';
 }
 function renderPricing2(){
   var d=D.pr2||{}; var recs=(d.recs||[]);
