@@ -13158,7 +13158,7 @@ const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
-    cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
+    cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
     clean_center:'مركز التنظيف',
     cc_title:'🧭 مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
@@ -13463,7 +13463,7 @@ const T = {
   },
   en:{dir:'ltr',
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
-    cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
+    cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
     clean_center:'Cleaning Center',
     cc_title:'🧭 Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
@@ -14358,7 +14358,8 @@ function badgeInfo(key){
 const NAV_CATS = [
   {tk:'cat_overview', ids:['home']},
   {tk:'cat_ops',      ids:['inbox','calendar','clean_center','tickets','clean','cleanteams','listings','quality','pmo','design']},
-  {tk:'cat_pricing',  ids:['pricing','plab','strat','rev','quote']},
+  {tk:'cat_pricing',  ids:['pricing','plab','strat','rev']},
+  {tk:'cat_owner_sales', ids:['quote']},
   {tk:'cat_finance',  ids:['expenses','finance','fb','weekly']},
   {tk:'cat_guests',   ids:['guests','gw','reviews']},
   {tk:'cat_system',   ids:['users','learn','log']}
