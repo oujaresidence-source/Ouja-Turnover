@@ -27680,7 +27680,7 @@ def _pricing_command_snapshot():
         dt = _parse_date(r.get("date"))
         if not dt or not (today <= dt < d14):
             continue
-        u = units.setdefault(lid, {"lid": lid, "name": r.get("name") or ("Ouja | " + str(lid)),
+        u = units.setdefault(lid, {"lid": lid, "name": r.get("unit") or r.get("name") or ("Ouja | " + str(lid)),
                                    "group": r.get("compound") or "", "enabled": bool(r.get("activated")), "nights": []})
         cur = _coerce_price(r.get("current"))
         sug = _coerce_price(r.get("final") if r.get("final") is not None else r.get("recommended"))
