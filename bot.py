@@ -11612,15 +11612,31 @@ html[data-theme="dark"] .reasoning-box{background:rgba(109,88,194,.10)}
 /* Drawer always slides in from the END side (opposite of the sidebar):
    right edge in LTR, left edge in RTL. inset-inline-end + a single transform
    rule per direction keeps specificity even so .open always wins. */
-.drawer{position:fixed;top:0;bottom:0;inset-inline-end:0;width:min(var(--drawer),100vw);background:var(--surface);box-shadow:var(--sh-drawer);z-index:91;display:flex;flex-direction:column;transition:transform .25s ease;transform:translateX(110%)}
+.drawer{position:fixed;top:0;bottom:0;inset-inline-end:0;width:min(var(--drawer),100vw);background:var(--bg);box-shadow:var(--sh-drawer);z-index:91;display:flex;flex-direction:column;transition:transform .25s ease;transform:translateX(110%)}
 html[dir="rtl"] .drawer{transform:translateX(-110%)}
 html[dir="ltr"] .drawer.open,
 html[dir="rtl"] .drawer.open{transform:translateX(0)}
-.drawer-head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
-.drawer-title{font-size:15px;font-weight:700;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis}
-.drawer-sub{font-size:11.5px;color:var(--mut);margin-top:2px}
-.drawer-body{flex:1;overflow-y:auto;padding:16px 18px}
-.drawer-foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:var(--surface-2)}
+.drawer-head{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start;gap:10px;background:var(--surface)}
+.drawer-title{font-size:21px;font-weight:800;color:var(--text);letter-spacing:-.4px;line-height:1.2;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.drawer-sub{font-size:13px;color:var(--mut);margin-top:3px}
+.drawer-body{flex:1;overflow-y:auto;padding:20px 22px}
+.drawer-foot{padding:16px 22px;border-top:1px solid var(--line);display:flex;gap:10px;background:var(--surface)}
+.drawer-foot .btn{flex:1;justify-content:center}
+/* mockup drawer content — field grid + timeline (used by openRecordDrawer + per-tab detail views) */
+.dr-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.dr-field{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:13px 14px;box-shadow:var(--sh-xs)}
+.dr-field .l{font-size:12px;color:var(--mut);font-weight:500}
+.dr-field .v{font-size:20px;font-weight:800;letter-spacing:-.4px;margin-top:5px;color:var(--text)}
+.dr-field.full{grid-column:1/-1}.dr-field.full .v{font-size:15px;font-weight:600;letter-spacing:0;line-height:1.6}
+.dr-time .tt{font-size:12.5px;font-weight:700;color:var(--mut);margin-bottom:12px}
+.tnode{display:flex;gap:12px;padding-bottom:15px;position:relative}
+.tnode:not(:last-child)::before{content:"";position:absolute;inset-inline-start:5px;top:14px;bottom:-2px;width:2px;background:var(--line-strong)}
+.tnode .dot{width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);flex:none;margin-top:2px;z-index:1}
+.tnode .c .a{font-size:13.5px;font-weight:600;color:var(--text)}.tnode .c .m{font-size:12px;color:var(--mut)}
+/* clickable-row chevron + up/down deltas for redesigned tables */
+.chev{opacity:0;transition:.2s;color:var(--accent);font-weight:700}
+.rowc:hover .chev{opacity:1}
+.up{color:var(--good);font-weight:700;font-size:13px}.dn{color:var(--bad);font-weight:700;font-size:13px}
 @media (max-width:1023px){.drawer{width:100vw}.drawer-body{padding:14px 14px calc(80px + env(safe-area-inset-bottom))}.drawer-head{padding:12px 14px}.drawer-foot{padding:10px 14px}}
 /* ===== Master-detail (Stage 2): on wide screens the drawer docks as a right-hand
    detail pane and main reflows beside it — list stays clickable, full width is used.
@@ -15189,25 +15205,24 @@ function renderPricingTable(){
     +'<select onchange="_prCompound=this.value;renderPricingTable()" style="'+inp+'">'+compOpts+'</select>'
     +((_prSearch||_prCompound)?'<button class="btn ghost sm" onclick="_prSearch=&#39;&#39;;_prCompound=&#39;&#39;;renderPricingTable()">✕</button>':'')+'</div>';
   if(!us.length){ body.innerHTML=bar+'<div class="empty" style="padding:26px;text-align:center">'+(ar?'ما فيه شقق بهالفلتر.':'No units match.')+'</div>'; return; }
-  var th='font-size:10px;color:var(--mut);font-weight:700;text-align:start;padding:6px 8px;white-space:nowrap';
-  var cols=['الشقة|Apartment','الحالة|Status','السعر الحالي (Hostaway)|Current (Hostaway)','الحد الأدنى|Floor','الحد الأقصى|Ceiling','إشغال ٧ أيام|Occ 7d','تعديل|Edit','تقويم|Calendar'];
+  var th='font-size:11px;color:var(--mut);font-weight:700;text-align:start;padding:11px 12px;white-space:nowrap;border-bottom:1px solid var(--line);background:var(--tint)';
+  var cols=['الشقة|Apartment','الحالة|Status','السعر الحالي|Current','الحد الأدنى|Floor','الحد الأقصى|Ceiling','إشغال ٧ أيام|Occ 7d',' | '];
   var head='<tr>'+cols.map(function(c){ var p=c.split('|'); return '<th style="'+th+'">'+esc(ar?p[0]:p[1])+'</th>'; }).join('')+'</tr>';
+  var td='padding:13px 12px;border-bottom:1px solid var(--line)';
   var rows=us.map(function(u){ var s=u.summary||{}; var sync=_prUnitSync(u.listing_id); var lid=u.listing_id;
     var on=!!s.activated;
-    var actChip='<button class="btn ghost xs" onclick="prToggleActivate('+lid+','+(on?0:1)+')" title="'+(ar?(on?'إيقاف التفعيل':'تفعيل الشقة'):(on?'Deactivate':'Activate'))+'" style="border-color:'+(on?'#3e7d5a':'var(--line)')+';color:'+(on?'#1f6e45':'var(--mut)')+';font-weight:700">'+(on?(ar?'🟢 مفعّلة':'🟢 On'):(ar?'⚪ موقوفة':'⚪ Off'))+'</button>';
-    var syncChip=(sync==='ok'?(' '+pccChip(ar?'متطابق':'Synced','green')):(sync==='mismatch'?(' '+pccChip(ar?'يحتاج تحديث':'Needs sync','gold')):''));
-    var hi=((u.risk||{}).risk_level==='high');
-    return '<tr style="border-top:1px solid var(--line)'+(hi?';background:rgba(196,67,67,.04)':'')+'">'
-      +'<td style="padding:8px;font-weight:700;font-size:12.5px">'+esc(u.name||('#'+lid))+'</td>'
-      +'<td style="padding:8px">'+actChip+syncChip+'</td>'
-      +'<td style="padding:8px;font-weight:700">'+(s.current!=null?fmt(s.current):'—')+'</td>'
-      +'<td style="padding:8px">'+(s.floor!=null?fmt(s.floor):'—')+'</td>'
-      +'<td style="padding:8px">'+(s.ceiling!=null?fmt(s.ceiling):'—')+'</td>'
-      +'<td style="padding:8px">'+(s.occupancy_7!=null?(s.occupancy_7+'%'):'—')+'</td>'
-      +'<td style="padding:8px"><button class="btn ghost xs" title="'+(ar?'تعديل':'Edit')+'" onclick="pccOpenCalendar('+lid+')">✏️</button></td>'
-      +'<td style="padding:8px"><button class="btn primary xs" onclick="pccOpenCalendar('+lid+')">🗓️ '+(ar?'تقويم':'Calendar')+'</button></td></tr>';
+    var actChip='<span class="chip '+(on?'good':'flat')+'" onclick="event.stopPropagation();prToggleActivate('+lid+','+(on?0:1)+')" title="'+(ar?'فعّل/أوقف':'Toggle')+'" style="cursor:pointer">'+(on?(ar?'مفعّلة':'On'):(ar?'موقوفة':'Off'))+'</span>';
+    var syncChip=(sync==='ok'?(' <span class="chip good">'+(ar?'متطابق':'Synced')+'</span>'):(sync==='mismatch'?(' <span class="chip warn">'+(ar?'يحتاج تحديث':'Needs sync')+'</span>'):''));
+    return '<tr class="rowc" onclick="pccOpenCalendar('+lid+')">'
+      +'<td style="'+td+';font-weight:700">'+esc(u.name||('#'+lid))+'</td>'
+      +'<td style="'+td+'"><span style="display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap">'+actChip+syncChip+'</span></td>'
+      +'<td style="'+td+'" class="num">'+(s.current!=null?fmt(s.current):'—')+'</td>'
+      +'<td style="'+td+'" class="num muted">'+(s.floor!=null?fmt(s.floor):'—')+'</td>'
+      +'<td style="'+td+'" class="num muted">'+(s.ceiling!=null?fmt(s.ceiling):'—')+'</td>'
+      +'<td style="'+td+'" class="num muted">'+(s.occupancy_7!=null?(s.occupancy_7+'%'):'—')+'</td>'
+      +'<td style="'+td+';text-align:end" class="chev">'+(ar?'‹':'›')+'</td></tr>';
   }).join('');
-  body.innerHTML=bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'+head+rows+'</table></div>';
+  body.innerHTML=bar+'<div style="overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface)"><table style="width:100%;border-collapse:collapse;font-size:13.5px">'+head+rows+'</table></div>';
 }
 async function pccOpenCalendar(lid, monthIso){
   _prCal.lid=lid;
@@ -24781,6 +24796,28 @@ function closeDrawer(){
   document.body.classList.remove('detailpane');
   drawerOpen = false;
   try{ _pcc.pvOpen=false; }catch(_){}
+}
+/* Unified record drawer (mockup): field grid + details + timeline + actions.
+   o = {title, sub, fields:[[label,value,full?],...], note, timeline:[[action,meta],...],
+        actions:[{label,kind,onclick}]}. Any table row-click can call this for a consistent detail view. */
+function openRecordDrawer(o){
+  o=o||{}; var ar=(L==='ar'); openDrawer(o.title||'—', o.sub||'');
+  var html='';
+  if(o.fields && o.fields.length){
+    html+='<div class="dr-grid">'+o.fields.map(function(f){
+      return '<div class="dr-field'+(f[2]?' full':'')+'"><div class="l">'+esc(f[0]!=null?f[0]:'')+'</div><div class="v">'+esc(f[1]!=null?f[1]:'—')+'</div></div>';
+    }).join('')+'</div>';
+  }
+  if(o.note){ html+='<div class="dr-field full" style="margin-bottom:20px"><div class="l">'+(ar?'التفاصيل':'Details')+'</div><div class="v">'+esc(o.note)+'</div></div>'; }
+  if(o.timeline && o.timeline.length){
+    html+='<div class="dr-time"><div class="tt">'+(ar?'المسار الزمني':'Timeline')+'</div>'+o.timeline.map(function(x){
+      return '<div class="tnode"><span class="dot"></span><div class="c"><div class="a">'+esc(x[0]||'')+'</div><div class="m">'+esc(x[1]||'')+'</div></div></div>';
+    }).join('')+'</div>';
+  }
+  setDrawerBody(html);
+  setDrawerFoot((o.actions && o.actions.length)?o.actions.map(function(a){
+    return '<button class="btn '+(a.kind||'ghost')+'" onclick="'+esc(a.onclick||'closeDrawer()')+'">'+esc(a.label||'')+'</button>';
+  }).join(''):'');
 }
 /* Custom modal — replaces browser confirm()/prompt()/alert() in Financial Brain.
    Returns a Promise<{ok, value}>. Optional single text field. Themed + reduced-motion-safe (no animation). */
