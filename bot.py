@@ -12054,6 +12054,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <div id="pcc"></div>
+        <details class="card" id="prDetailed"><summary style="cursor:pointer;font-weight:600;font-size:13px;padding:2px 0">📋 <span id="t_pr_detailed">العرض التفصيلي للأسعار + التطبيق</span></summary><div style="margin-top:10px">
         <div id="pricingOpsSummary"></div>
         <div class="card" id="lmDiagCard">
           <div id="lastMinuteDiagBody"><div class="empty sk">—</div></div>
@@ -12075,6 +12077,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div style="margin-top:10px"><div id="discountBanner"></div>
           <div id="emptyGridWrap"><div class="empty sk">—</div></div></div>
         </details>
+        </div></details>
       </section>
 
       <!-- ============ STRATEGIES VIEW ============ -->
@@ -14648,14 +14651,97 @@ async function loadAll(){
 var _pePanel = null;
 var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'📆',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'🎉',ar:'مناسبة',en:'Event'}};
 async function loadPricing(){
+  var pc=document.getElementById('pcc'); if(pc) pc.innerHTML='<div class="empty sk" style="height:140px">—</div>';
   var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
-  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; }
-  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; if(!D.lmDiag) D.lmDiag={runs:[]}; }
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};}), api('/api/pricing/command').catch(function(e){return {ok:false,error:'command_fetch_failed'};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; }
+  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; if(!D.lmDiag) D.lmDiag={runs:[]}; if(!D.pcc) D.pcc={ok:false,error:'load_failed'}; }
+  renderCommandCenter();
   renderPricingHeader();
   renderPricing2();
   renderPricingOpsSummary();
   renderLastMinuteDiagnostics();
   loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down (collapsed)
+}
+/* ===== Pricing Command Center (Stage 2) — read-only owner decision surface over /api/pricing/command.
+   No apply here; "Review Manually" opens the detailed list below. Max 4 status colors. ===== */
+var _pcc={action:'',q:'',risk:'',why:{}};
+function pccChip(txt,tone){ var c=({gold:['#7a5b14','rgba(184,137,59,.13)'],red:['#a23b30','rgba(196,67,67,.12)'],green:['#1f6e45','rgba(62,125,90,.13)'],info:['#2f5f7a','rgba(47,95,122,.12)'],mut:['var(--mut)','var(--surface-2)']})[tone||'mut']; return '<span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;color:'+c[0]+';background:'+c[1]+'">'+esc(txt)+'</span>'; }
+function pccKpi(label,val,sub,tone){ var col=({gold:'#7a5b14',red:'#a23b30',green:'#1f6e45',info:'#2f5f7a'})[tone||'']||'var(--text)'; return '<div class="card" style="margin:0;padding:11px 13px"><div class="muted" style="font-size:10.5px">'+esc(label)+'</div><div style="font-size:21px;font-weight:800;color:'+col+'">'+val+'</div>'+(sub?('<div class="muted" style="font-size:10px">'+esc(sub)+'</div>'):'')+'</div>'; }
+function renderCommandCenter(){
+  var ar=(L==='ar'); var el=document.getElementById('pcc'); if(!el) return; var d=D.pcc||{};
+  if(d.ok===false){ el.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:#a23b30">'+(ar?'⚠ تعذّر تحميل مركز التسعير':'⚠ Could not load Pricing Command Center')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. العرض التفصيلي تحت يشتغل عادي. جرّب تحديث.':'The engine did not respond. The detailed view below still works. Try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; return; }
+  if(!d.demand){ el.innerHTML='<div class="card"><div class="empty" style="padding:18px;text-align:center">'+(ar?'ما فيه بيانات كفاية للمحرّك بعد — افتح «العرض التفصيلي» تحت.':'Not enough engine data yet — open the detailed view below.')+'</div></div>'; return; }
+  var dm=d.demand, sm=d.summary||{}, rt=d.recommended_today||{}, cf=sm.confidence||{};
+  var sigTone=(dm.signal==='weak'?'gold':(dm.signal==='strong'?'green':'info'));
+  var statusTone=(d.partial?'gold':'green'), statusTxt=(d.partial?(ar?'بيانات جزئية':'Partial'):(ar?'مباشر':'Live'));
+  var h='<div class="card" style="border:1px solid var(--gold);background:linear-gradient(180deg,rgba(184,137,59,.06),transparent)">'
+    +'<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:16px">📊 '+(ar?'مركز التسعير':'Pricing Command Center')+'</b><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+pccChip(statusTxt,statusTone)+(d.dry_run?pccChip(ar?'وضع المعاينة':'Dry-run','info'):'')+'<button class="btn ghost sm" onclick="loadPricing()">↻</button></span></div>'
+    +'<div style="font-size:14px;font-weight:800;margin-top:8px">'+(ar?'وش القرار السعري اليوم؟':'What pricing decision should we make today?')+'</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">'+pccChip(ar?dm.title_ar:dm.title_en,sigTone)+'<span style="font-size:13px">'+esc(ar?dm.reason_ar:dm.reason_en)+'</span></div>'
+    +(rt.title_ar?('<div style="margin-top:7px;font-size:13px;font-weight:700;color:#7a5b14">↪ '+esc(ar?rt.title_ar:rt.title_en)+'</div>'):'')
+    +'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-bottom:10px">'
+    +pccKpi(ar?'ليالٍ فاضية · ٧ أيام':'Empty · 7d',sm.empty_nights_7||0,'',(sm.empty_nights_7?'gold':''))
+    +pccKpi(ar?'ليالٍ فاضية · ١٤ يوم':'Empty · 14d',sm.empty_nights_14||0,'','')
+    +pccKpi(ar?'إيراد مهدد · ٧ أيام':'At risk · 7d',fmt(sm.revenue_at_risk_7||0),(ar?'ر.س':'SAR'),(sm.revenue_at_risk_7?'red':''))
+    +pccKpi(ar?'شقق عالية الخطر':'High-risk units',sm.high_risk_units||0,'',(sm.high_risk_units?'red':'green'))
+    +pccKpi(ar?'ثقة البيانات':'Confidence',(cf.strong_data||0)+' / '+(cf.similar_units_only||0),(ar?'قوي / مشابهة':'strong / similar'),'info')
+    +'</div>';
+  var acts=[['fill_tonight','Fill Tonight',ar?'للشقق الفاضية قريب. معاينة فقط قبل أي تطبيق.':'Soon-empty units. Preview only.'],
+    ['balanced_recovery','Balanced Recovery',ar?'نزول موزون للـ٧ أيام بدون كسر الـ floor.':'Balanced 7-day step-down, no floor break.'],
+    ['protect_adr','Protect ADR',ar?'يحمي الشقق ذات الطلب الجيد أو السعر المنخفض.':'Protect strong-demand / low-priced units.'],
+    ['review','Review Manually',ar?'افتح العرض التفصيلي وقرر وحدة وحدة.':'Open the detailed view, decide unit by unit.']];
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-bottom:6px">'+acts.map(function(a){ var on=(_pcc.action===a[0]); return '<div class="card" style="margin:0;padding:11px 12px;cursor:pointer;border:1px solid '+(on?'var(--gold)':'var(--line)')+'" onclick="pccAct(&#39;'+a[0]+'&#39;)"><div style="font-weight:800;font-size:13px">'+esc(a[1])+'</div><div class="muted" style="font-size:10.5px;margin-top:3px;line-height:1.5">'+esc(a[2])+'</div></div>'; }).join('')+'</div>';
+  h+='<div class="muted" style="font-size:10.5px;margin-bottom:10px">'+(ar?'كل الأزرار هنا معاينة فقط — ما يتغير شيء في Hostaway.':'Every button here is preview only — nothing changes in Hostaway.')+'</div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input value="'+esc(_pcc.q||'')+'" oninput="_pcc.q=this.value;pccBoard()" placeholder="🔎 '+(ar?'بحث شقة':'Search unit')+'" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)">'
+    +'<select onchange="_pcc.risk=this.value;pccBoard()" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"><option value="">'+(ar?'كل المخاطر':'All risk')+'</option><option value="high"'+(_pcc.risk==='high'?' selected':'')+'>'+(ar?'خطر عالي':'High')+'</option><option value="medium"'+(_pcc.risk==='medium'?' selected':'')+'>'+(ar?'خطر متوسط':'Medium')+'</option></select></div>';
+  h+='<div id="pccBoard"></div>';
+  el.innerHTML=h; pccBoard();
+}
+function pccAct(a){ if(a==='review'){ _pcc.action=''; var dt=document.getElementById('prDetailed'); if(dt){ dt.open=true; if(dt.scrollIntoView) dt.scrollIntoView({behavior:'smooth',block:'start'}); } return; } _pcc.action=(_pcc.action===a?'':a); renderCommandCenter(); }
+function pccBoard(){
+  var ar=(L==='ar'); var wrap=document.getElementById('pccBoard'); if(!wrap) return; var d=D.pcc||{}; var units=(d.units||[]).slice();
+  var q=(_pcc.q||'').trim().toLowerCase(); if(q) units=units.filter(function(u){ return String(u.name||'').toLowerCase().indexOf(q)>=0; });
+  if(_pcc.risk) units=units.filter(function(u){ return (u.risk||{}).risk_level===_pcc.risk; });
+  if(_pcc.action==='fill_tonight') units=units.filter(function(u){ return (u.current||{}).empty_nights_7>0; });
+  else if(_pcc.action==='protect_adr') units=units.filter(function(u){ var r=u.recommendation||{}; return r.suggested_price!=null&&r.current_price!=null&&r.suggested_price>=r.current_price; });
+  if(!units.length){ wrap.innerHTML='<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه شقق بهالفلتر. وسّع النطاق أو راجع «الإيرادات».':'No units match. Widen the filter or check Revenue.')+'</div>'; return; }
+  wrap.innerHTML=units.slice(0,60).map(pccCard).join('')+(units.length>60?('<div class="muted" style="font-size:11px;text-align:center;margin-top:6px">'+(ar?('عرض ٦٠ من '+units.length):('showing 60 of '+units.length))+'</div>'):'');
+}
+function pccCard(u){
+  var ar=(L==='ar'); var rec=u.recommendation||{}, rk=u.risk||{}, cur=u.current||{}, fl=u.floor||{};
+  var rkTone=(rk.risk_level==='high'?'red':(rk.risk_level==='medium'?'gold':'green'));
+  var rkTxt=(rk.risk_level==='high'?(ar?'خطر عالي':'High risk'):(rk.risk_level==='medium'?(ar?'خطر متوسط':'Medium'):(ar?'خطر منخفض':'Low')));
+  var conf=rec.confidence, confTxt=(conf==='strong_data'?(ar?'بيانات قوية':'Strong data'):(conf==='limited_data'?(ar?'بيانات قليلة':'Limited data'):(ar?'شقق مشابهة':'Similar units')));
+  var cp=rec.current_price, sp=rec.suggested_price, delta=(sp!=null&&cp!=null)?(sp-cp):null;
+  var deltaTxt=(delta==null?'—':((delta>0?'+':'')+fmt(delta)));
+  var h='<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;align-items:center"><b style="font-size:13.5px">'+esc(u.name||('#'+u.listing_id))+'</b><span style="display:flex;gap:5px;flex-wrap:wrap">'+pccChip(rkTxt,rkTone)+pccChip(confTxt,'info')+(u.enabled_for_pricing?'':pccChip(ar?'غير مفعّلة':'Off','mut'))+'</span></div>'
+    +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12.5px">'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'الحالي':'Current')+'</div><b>'+(cp!=null?fmt(cp):'—')+'</b></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'المقترح':'Suggested')+'</div><b style="color:'+(delta!=null&&delta<0?'#a23b30':(delta!=null&&delta>0?'#1f6e45':'var(--text)'))+'">'+(sp!=null?fmt(sp):'—')+'</b> <span class="muted" style="font-size:10.5px">'+deltaTxt+'</span></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'أقل سعر آمن':'Floor')+'</div><b>'+(fl.final_floor!=null?fmt(fl.final_floor):(ar?'—':'n/a'))+'</b></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'فاضي ٧/١٤':'Empty 7/14')+'</div><b>'+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+'</b></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'مهدد ٧ أيام':'At risk 7d')+'</div><b style="color:#a23b30">'+fmt(rk.revenue_at_risk_7||0)+'</b></div></div>'
+    +pccMini(u)
+    +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="pccWhy('+u.listing_id+')">'+(ar?'ليش هالسعر؟':'Why this price?')+'</button></div>'
+    +(_pcc.why[u.listing_id]?pccWhyPanel(u):'')
+    +'</div>';
+  return h;
+}
+function pccMini(u){
+  var cal=(u.calendar_14||[]); if(!cal.length) return '';
+  var cells=cal.slice(0,14).map(function(x){ var sp=x.suggested_price, cp=x.current_price; var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
+  return '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="muted" style="font-size:10px;margin-inline-end:4px">'+(L==='ar'?'١٤ يوم:':'14d:')+'</span>'+cells+'</div>';
+}
+function pccWhy(lid){ _pcc.why[lid]=!_pcc.why[lid]; pccBoard(); }
+function pccWhyPanel(u){
+  var ar=(L==='ar'); var rec=u.recommendation||{}, fl=u.floor||{}, hi=u.history||{};
+  return '<div style="margin-top:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.75">'
+    +'<b>'+(ar?'ليش هالسعر؟':'Why this price?')+'</b><br>'
+    +(ar?'الثقة: ':'Confidence: ')+esc(rec.confidence_reason_ar||rec.confidence||'')+'<br>'
+    +(ar?'أقل سعر آمن (floor): ':'Floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?('غير محدد — '+(fl.missing_reason||'')):'n/a'))+'<br>'
+    +(ar?'متوسط سعر الشقة المحقق: ':'Median ADR: ')+(hi.median_adr!=null?fmt(hi.median_adr):(ar?'غير متوفر':'n/a'))+'<br>'
+    +'<span class="muted" style="font-size:10.5px">'+(ar?'تفاصيل آخر الحجوزات في «مختبر التسعير». التطبيق من «العرض التفصيلي» تحت — بمعاينة وتأكيد.':'Last-bookings detail is in Pricing Lab. Apply from the detailed view below — with preview + confirm.')+'</span></div>';
 }
 function _prMonths(){
   var m={}, t0=new Date(); t0.setHours(0,0,0,0);
