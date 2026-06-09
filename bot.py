@@ -11105,10 +11105,10 @@ aside.side{grid-area:side}
 }
 
 /* ============== SIDEBAR (desktop) ============== */
-aside.side{display:none;background:var(--surface);border-inline-end:1px solid var(--line);flex-direction:column;padding:18px 12px;position:sticky;top:0;height:100vh;overflow-y:auto}
+aside.side{display:none;background:var(--bg);border-inline-end:1px solid var(--line);flex-direction:column;padding:18px 12px;position:sticky;top:0;height:100vh;overflow-y:auto}
 @media (min-width:1024px){ aside.side{display:flex} }
 .side-brand{display:flex;align-items:center;gap:10px;padding:4px 8px 14px;margin-bottom:8px}
-.side-brand .logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--gold),var(--gold-2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;box-shadow:var(--sh-sm)}
+.side-brand .logo{width:34px;height:34px;border-radius:10px;background:var(--ink);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;box-shadow:var(--sh-sm)}
 .side-brand .name{font-size:16px;font-weight:700;color:var(--text);line-height:1}
 .side-brand .sub{font-size:9.5px;color:var(--mut);margin-top:2px;letter-spacing:1px;text-transform:uppercase}
 .side-nav{display:flex;flex-direction:column;gap:1px;flex:1}
@@ -11123,7 +11123,7 @@ html[lang="ar"] .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5
 .nav-cat-label{flex:1;text-align:start;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;unicode-bidi:isolate}
 .nav-group-h .badge{background:var(--surface-2);color:var(--text-2);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:16px;text-align:center;line-height:1.3}
-.nav-group-h .badge.danger,.side-nav .item .badge.danger,.bn .badge.danger{background:var(--red);color:#fff}
+.nav-group-h .badge.danger,.side-nav .item .badge.danger,.bn .badge.danger{background:var(--bad-bg);color:var(--bad)}
 .nav-group-h .badge.warn,.side-nav .item .badge.warn,.bn .badge.warn{background:var(--yellow-soft);color:var(--yellow);border:1px solid rgba(201,150,23,.24)}
 .nav-group-h .badge.info,.side-nav .item .badge.info,.bn .badge.info{background:var(--blue-soft);color:var(--blue);border:1px solid rgba(47,111,208,.20)}
 .nav-caret{font-size:10px;opacity:.6;transition:transform .18s ease}
@@ -11132,10 +11132,12 @@ html[lang="ar"] .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5
 .nav-group.collapsed .nav-group-items{display:none}
 @media (prefers-reduced-motion:reduce){ .nav-caret{transition:none} }
 .side-nav .item{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r-sm);color:var(--text-2);font-size:13px;font-weight:500;cursor:pointer;transition:.12s;position:relative;user-select:none}
-.side-nav .item:hover{background:var(--surface-2);color:var(--text)}
-.side-nav .item.on{background:var(--gold-tint);color:var(--gold);font-weight:600}
-.side-nav .item.on::before{content:'';position:absolute;inset-inline-start:0;top:8px;bottom:8px;width:3px;background:var(--gold);border-radius:2px}
-.side-nav .item .ic{font-size:14px;width:18px;text-align:center;line-height:1}
+.side-nav .item:hover{background:rgba(0,0,0,.045);color:var(--text)}
+.side-nav .item.on{background:var(--surface);color:var(--text);font-weight:700;box-shadow:var(--sh-sm)}
+.side-nav .item .ic{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.side-nav .item .ic svg{width:19px;height:19px;stroke:var(--text-3);stroke-width:1.8;fill:none;transition:stroke .15s}
+.side-nav .item:hover .ic svg{stroke:var(--text-2)}
+.side-nav .item.on .ic svg{stroke:var(--accent)}
 .side-nav .item .badge{margin-inline-start:auto;background:var(--surface-2);color:var(--text-2);font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:17px;text-align:center;line-height:1.3}
 .side-nav .item.on .badge:not(.danger):not(.warn):not(.info){background:var(--gold);color:#fff}
 .side-foot{display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line);margin-top:6px}
@@ -11701,7 +11703,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 @media (max-width:1023px){.bn{padding:6px 2px;font-size:9px}}
 @media (max-width:1023px){.bn .ic{font-size:15px}}
 .bn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:7px 4px;border-radius:7px;color:var(--text-3);font-size:9.5px;font-weight:500;transition:.12s;position:relative}
-.bn .ic{font-size:16px;line-height:1}
+.bn .ic{width:21px;height:21px;display:inline-flex;align-items:center;justify-content:center}
+.bn .ic svg{width:21px;height:21px;stroke:var(--text-3);stroke-width:1.8;fill:none}
+.bn.on .ic svg{stroke:var(--accent)}
 .bn.on{color:var(--gold)}
 .bn .badge{position:absolute;top:3px;inset-inline-end:14px;background:var(--surface-2);color:var(--text-2);font-size:9px;font-weight:700;padding:1px 5px;border-radius:7px;min-width:13px;text-align:center;line-height:1.3}
 
@@ -14267,40 +14271,71 @@ function _i18nPaintReviews(){
 /* ============================================================
    NAVIGATION
    ============================================================ */
+/* Line-icon set (24×24, fill:none, stroke from CSS, 1.8 stroke, round caps). No emoji UI. */
+const _S='<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">';
+const ICN = {
+  home:_S+'<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 21v-7h6v7"/></svg>',
+  inbox:_S+'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+  calendar:_S+'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>',
+  clean_center:_S+'<circle cx="12" cy="12" r="9"/><path d="m14.8 9.2-2.2 5.6-5.6 2.2 2.2-5.6z"/></svg>',
+  pricing:_S+'<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  plab:_S+'<path d="M9 3h6M10 3v6.5L5.2 18A2 2 0 0 0 7 21h10a2 2 0 0 0 1.8-3L14 9.5V3"/></svg>',
+  strat:_S+'<path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+  clean:_S+'<path d="m12 3 1.6 4.8L18 9l-4.4 1.2L12 15l-1.6-4.8L6 9l4.4-1.2z"/><path d="M18 15.5l.8 1.7 1.7.8-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8z"/></svg>',
+  cleanteams:_S+'<circle cx="9" cy="8" r="3"/><path d="M15 5.2a3 3 0 0 1 0 5.6M3 20a6 6 0 0 1 12 0M16 14a6 6 0 0 1 5 6"/></svg>',
+  listings:_S+'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h.01M15 8h.01M9 12h.01M15 12h.01M9 16h6"/></svg>',
+  tickets:_S+'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.3 2.3-2-2z"/></svg>',
+  reviews:_S+'<path d="m12 3 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.2l1-5.8L3.5 9.2l5.9-.9z"/></svg>',
+  users:_S+'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+  quote:_S+'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
+  weekly:_S+'<path d="M3 3v18h18"/><path d="M7 15v-3M12 15V8M17 15v-6"/></svg>',
+  design:_S+'<path d="M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M4 11a2 2 0 0 1 2 2v2h12v-2a2 2 0 0 1 2-2 2 2 0 0 1 2 2v5H2v-5a2 2 0 0 1 2-2z"/></svg>',
+  pmo:_S+'<path d="M3 21h18M6 21V11l6-3 6 3v10M10 21v-5h4v5"/></svg>',
+  expenses:_S+'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
+  finance:_S+'<path d="M5 3v18l2-1 2 1 2-1 2 1 2-1 2 1V3l-2 1-2-1-2 1-2-1-2 1z"/><path d="M9 8h6M9 12h6"/></svg>',
+  fb:_S+'<rect x="5" y="6" width="14" height="12" rx="3"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M2 9h3M2 14h3M19 9h3M19 14h3"/></svg>',
+  guests:_S+'<circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>',
+  gw:_S+'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10.5 18h3"/></svg>',
+  quality:_S+'<path d="M12 3l7.5 3v6c0 4.5-3 7.5-7.5 9-4.5-1.5-7.5-4.5-7.5-9V6z"/><path d="m9 12 2 2 4-4"/></svg>',
+  rev:_S+'<path d="M3 17l6-6 4 4 7-8"/><path d="M17 7h4v4"/></svg>',
+  learn:_S+'<path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 19a2 2 0 0 0 2 2h12v-4"/></svg>',
+  log:_S+'<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
+  more:_S+'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>'
+};
 const NAV = [
-  {id:'home',    ic:'◇', tk:'home'},
-  {id:'inbox',   ic:'✉', tk:'inbox', badge:'inbox'},
-  {id:'calendar',ic:'📅', tk:'calendar'},
-  {id:'clean_center',ic:'🧭', tk:'clean_center', badge:'clean_center'},
-  {id:'pricing', ic:'$', tk:'pricing', badge:'pricing'},
-  {id:'plab',    ic:'🧪', tk:'plab'},
-  {id:'strat',   ic:'⚡', tk:'strat'},
-  {id:'clean',   ic:'🧹', tk:'clean', badge:'clean'},
-  {id:'cleanteams',ic:'🧽', tk:'cleanteams'},
-  {id:'listings',ic:'🏘️', tk:'listings', badge:'listings'},
-  {id:'tickets', ic:'🔧', tk:'tickets', badge:'tickets'},
-  {id:'reviews', ic:'⭐', tk:'reviews', badge:'reviews'},
-  {id:'users',   ic:'👥', tk:'users', adminOnly:true},
-  {id:'quote',   ic:'📄', tk:'quote'},
-  {id:'weekly',  ic:'📊', tk:'weekly'},
-  {id:'design',  ic:'🛋️', tk:'design'},
-  {id:'pmo',     ic:'🏗️', tk:'pmo'},
-  {id:'expenses',ic:'💸', tk:'expenses', badge:'expenses'},
-  {id:'finance', ic:'🧾', tk:'finance'},
-  {id:'fb',      ic:'🧠', tk:'fb'},
-  {id:'guests',  ic:'👤', tk:'guests'},
-  {id:'gw',      ic:'📱', tk:'gw'},
-  {id:'quality', ic:'⭐', tk:'quality'},
-  {id:'rev',     ic:'∿', tk:'rev'},
-  {id:'learn',   ic:'📚', tk:'learn'},
-  {id:'log',     ic:'≡', tk:'log'}
+  {id:'home',    ic:ICN.home, tk:'home'},
+  {id:'inbox',   ic:ICN.inbox, tk:'inbox', badge:'inbox'},
+  {id:'calendar',ic:ICN.calendar, tk:'calendar'},
+  {id:'clean_center',ic:ICN.clean_center, tk:'clean_center', badge:'clean_center'},
+  {id:'pricing', ic:ICN.pricing, tk:'pricing', badge:'pricing'},
+  {id:'plab',    ic:ICN.plab, tk:'plab'},
+  {id:'strat',   ic:ICN.strat, tk:'strat'},
+  {id:'clean',   ic:ICN.clean, tk:'clean', badge:'clean'},
+  {id:'cleanteams',ic:ICN.cleanteams, tk:'cleanteams'},
+  {id:'listings',ic:ICN.listings, tk:'listings', badge:'listings'},
+  {id:'tickets', ic:ICN.tickets, tk:'tickets', badge:'tickets'},
+  {id:'reviews', ic:ICN.reviews, tk:'reviews', badge:'reviews'},
+  {id:'users',   ic:ICN.users, tk:'users', adminOnly:true},
+  {id:'quote',   ic:ICN.quote, tk:'quote'},
+  {id:'weekly',  ic:ICN.weekly, tk:'weekly'},
+  {id:'design',  ic:ICN.design, tk:'design'},
+  {id:'pmo',     ic:ICN.pmo, tk:'pmo'},
+  {id:'expenses',ic:ICN.expenses, tk:'expenses', badge:'expenses'},
+  {id:'finance', ic:ICN.finance, tk:'finance'},
+  {id:'fb',      ic:ICN.fb, tk:'fb'},
+  {id:'guests',  ic:ICN.guests, tk:'guests'},
+  {id:'gw',      ic:ICN.gw, tk:'gw'},
+  {id:'quality', ic:ICN.quality, tk:'quality'},
+  {id:'rev',     ic:ICN.rev, tk:'rev'},
+  {id:'learn',   ic:ICN.learn, tk:'learn'},
+  {id:'log',     ic:ICN.log, tk:'log'}
 ];
 const MNAV = [
-  {id:'home', ic:'◇', tk:'nav_home'},
-  {id:'inbox', ic:'✉', tk:'nav_inbox', badge:'inbox'},
-  {id:'calendar', ic:'📅', tk:'calendar'},
-  {id:'pricing', ic:'$', tk:'nav_pricing', badge:'pricing'},
-  {id:'more', ic:'⋯', tk:'nav_more'}
+  {id:'home', ic:ICN.home, tk:'nav_home'},
+  {id:'inbox', ic:ICN.inbox, tk:'nav_inbox', badge:'inbox'},
+  {id:'calendar', ic:ICN.calendar, tk:'calendar'},
+  {id:'pricing', ic:ICN.pricing, tk:'nav_pricing', badge:'pricing'},
+  {id:'more', ic:ICN.more, tk:'nav_more'}
 ];
 
 function badgeCount(key){
