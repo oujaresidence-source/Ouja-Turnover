@@ -27346,6 +27346,128 @@ async def _api_plab_log(request):
     return _json({"ok": True, "log": await asyncio.to_thread(_plab_log, f),
                   "outcomes": await asyncio.to_thread(_plab_outcomes_summary)})
 
+def _pe_command_confidence(band_source, band_count):
+    """Honest confidence from the engine's own band sample — never invented."""
+    try:
+        n = int(band_count) if band_count is not None else 0
+    except (TypeError, ValueError):
+        n = 0
+    bs = str(band_source or "").lower()
+    if any(k in bs for k in ("pool", "group", "similar", "type")) and n < 4:
+        return "similar_units_only", "ما فيه حجوزات كفاية لنفس الشقة — التوصية مبنية على شقق مشابهة."
+    if n >= 8:
+        return "strong_data", "عندنا حجوزات كفاية لنفس الشقة."
+    if n >= 1:
+        return "limited_data", "بيانات الشقة قليلة، التوصية محافظة."
+    return "similar_units_only", "ما فيه بيانات كفاية لنفس الشقة، استخدمنا شقق مشابهة."
+
+def _pricing_command_snapshot():
+    """Read-only aggregation for the Pricing Command Center — THE single source of truth for that page.
+    Reuses the cached _pe_get_recs() (no Hostaway writes, no extra calendar hammering). Never fabricates:
+    fields the recs engine doesn't provide (booking history) are returned as null + a reason."""
+    now = datetime.now(TZ)
+    base = {"ok": True, "generated_at": now.isoformat(timespec="seconds"), "currency": "SAR",
+            "dry_run": bool(PRICE_APPLY_DRYRUN), "source": "pe_recs_cache", "partial": False,
+            "warnings": [], "errors": []}
+    try:
+        recs_data = _pe_get_recs() or {}
+    except Exception as e:
+        base.update({"ok": False, "error": "recs_unavailable", "detail": str(e)[:200], "partial": True,
+                     "units": [], "demand": None, "summary": None, "recommended_today": None})
+        return base
+    recs = recs_data.get("recs") or []
+    if recs_data.get("error"):
+        base["warnings"].append({"code": "insufficient_history", "detail": str(recs_data.get("error"))[:160]})
+        base["partial"] = True
+    today = now.date(); d7 = today + timedelta(days=7); d14 = today + timedelta(days=14)
+    units = {}
+    for r in recs:
+        lid = r.get("lid")
+        if lid is None:
+            continue
+        dt = _parse_date(r.get("date"))
+        if not dt or not (today <= dt < d14):
+            continue
+        u = units.setdefault(lid, {"lid": lid, "name": r.get("name") or ("Ouja | " + str(lid)),
+                                   "group": r.get("compound") or "", "enabled": bool(r.get("activated")), "nights": []})
+        cur = _coerce_price(r.get("current"))
+        sug = _coerce_price(r.get("final") if r.get("final") is not None else r.get("recommended"))
+        u["nights"].append({"date": r.get("date"), "dt": dt, "current": cur, "suggested": sug,
+                            "floor": _coerce_price(r.get("floor")), "median": _coerce_price(r.get("median")),
+                            "band_source": r.get("band_source"), "band_count": r.get("band_count")})
+    empty7 = empty14 = high_risk = 0
+    risk7 = risk14 = 0.0
+    conf_counts = {"strong_data": 0, "limited_data": 0, "similar_units_only": 0}
+    unit_list = []
+    for lid, u in units.items():
+        nights = sorted(u["nights"], key=lambda x: x["dt"])
+        n7 = [x for x in nights if x["dt"] < d7]
+        e7, e14 = len(n7), len(nights)               # recs are per OPEN night → these ARE the empty nights
+        empty7 += e7; empty14 += e14
+        r7 = sum((x["suggested"] or x["current"] or 0) for x in n7)        # recoverable price over open nights
+        r14 = sum((x["suggested"] or x["current"] or 0) for x in nights)
+        risk7 += r7; risk14 += r14
+        lvl = "high" if r7 >= 1500 else ("medium" if r7 >= 500 else "low")
+        if lvl == "high":
+            high_risk += 1
+        conf, conf_reason = _pe_command_confidence(nights[0]["band_source"] if nights else None,
+                                                   nights[0]["band_count"] if nights else None)
+        conf_counts[conf] = conf_counts.get(conf, 0) + 1
+        near = nights[0] if nights else None
+        floor_v = (near["floor"] if near else None)
+        unit_list.append({
+            "listing_id": lid, "name": u["name"], "group": u["group"], "active": True,
+            "enabled_for_pricing": u["enabled"],
+            "current": {"price": (near["current"] if near else None), "empty_nights_7": e7, "empty_nights_14": e14},
+            "floor": {"final_floor": floor_v, "source": ("engine" if floor_v else "missing"),
+                      "missing_reason": (None if floor_v else "no floor in engine output for this unit")},
+            "history": {"median_adr": (near["median"] if near else None),
+                        "last_booked_price": None, "lowest_booked_price": None, "last_5_bookings": None,
+                        "_reason": "booking history lives in Pricing Lab / pricing2 night detail — not duplicated here"},
+            "recommendation": {"current_price": (near["current"] if near else None),
+                               "suggested_price": (near["suggested"] if near else None),
+                               "delta": ((near["suggested"] - near["current"]) if (near and near["suggested"] is not None and near["current"] is not None) else None),
+                               "confidence": conf, "confidence_reason_ar": conf_reason},
+            "risk": {"revenue_at_risk_7": round(r7), "revenue_at_risk_14": round(r14), "risk_level": lvl},
+            "calendar_14": [{"date": x["date"], "current_price": x["current"], "suggested_price": x["suggested"],
+                             "floor": x["floor"]} for x in nights],
+        })
+    unit_list.sort(key=lambda x: -(x["risk"]["revenue_at_risk_7"] or 0))    # highest revenue-at-risk first
+    n_units = len(units)
+    per_unit_empty7 = (empty7 / n_units) if n_units else 0
+    if per_unit_empty7 >= 4:
+        signal, s_ar, s_en = "weak", "الطلب ضعيف", "Weak demand"
+    elif per_unit_empty7 >= 2:
+        signal, s_ar, s_en = "normal", "الطلب طبيعي", "Normal demand"
+    else:
+        signal, s_ar, s_en = "strong", "الطلب قوي", "Strong demand"
+    if signal == "weak":
+        primary = "fill_tonight" if high_risk else "balanced_recovery"
+    elif signal == "strong":
+        primary = "protect_adr"
+    else:
+        primary = "review_manually"
+    pa = {"fill_tonight": ("ابدأ بـ Fill Tonight (معاينة فقط)", "Start with Fill Tonight (preview only)"),
+          "balanced_recovery": ("ابدأ بـ Balanced Recovery للـ٧ أيام الجاية", "Start with Balanced Recovery for the next 7 days"),
+          "protect_adr": ("احمِ الـ ADR — الطلب قوي", "Protect ADR — demand is strong"),
+          "review_manually": ("راجع التوصيات وحدة وحدة", "Review recommendations one by one")}.get(primary, ("", ""))
+    base["demand"] = {"signal": signal, "title_ar": s_ar, "title_en": s_en,
+                      "reason_ar": ("عندك " + str(empty7) + " ليلة فاضية خلال ٧ أيام في " + str(n_units) + " شقة." if n_units else "ما فيه بيانات كفاية بعد."),
+                      "reason_en": (str(empty7) + " empty nights over 7 days across " + str(n_units) + " units." if n_units else "Not enough data yet.")}
+    base["summary"] = {"empty_nights_7": empty7, "empty_nights_14": empty14, "high_risk_units": high_risk,
+                       "revenue_at_risk_7": round(risk7), "revenue_at_risk_14": round(risk14),
+                       "units": n_units, "confidence": conf_counts}
+    base["recommended_today"] = {"primary_action": primary, "title_ar": pa[0], "explain_ar": pa[0],
+                                 "title_en": pa[1], "unit_count": high_risk,
+                                 "preview_scope_default": {"start": today.isoformat(), "end": d7.isoformat()}}
+    base["units"] = unit_list
+    return base
+
+async def _api_pricing_command(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_pricing_command_snapshot))
+
 async def _api_pe_recs(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -39752,6 +39874,7 @@ async def start_web_server():
         app.router.add_get("/api/autolog", _api_autolog)
         app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
+        app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
         app.router.add_get("/api/pricing2/recs", _api_pe_recs)       # engine v2: recommendations
         app.router.add_get("/api/pricing2/night", _api_pe_night)     # engine v2: one-night "ليش هالسعر؟" detail
         app.router.add_post("/api/pricing2/apply", _api_pe_apply)    # engine v2: one-night apply (DRYRUN-gated)
