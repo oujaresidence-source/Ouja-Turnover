@@ -12044,7 +12044,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_pricing">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_pricing">التسعير</div>
+            <div class="page-title" id="t_pricing">التسعير الديناميكي</div>
             <div class="page-sub" id="t_pr_sub">السعر النهائي لكل ليلة = توصية المحرّك + طبقات الاستراتيجية. اضغط أي يوم تشوف «ليش هالسعر؟» والسجل الكامل.</div>
           </div>
           <div class="page-tools">
@@ -12063,27 +12063,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
-        <div id="pcc"></div>
         <div class="card" style="margin-top:14px"><div class="card-head"><span class="card-title">🏘️ <span id="t_pr_table">إدارة الأسعار — الشقق</span></span><span class="card-sub" id="prTableCount"></span></div><div id="prTable"><div class="empty sk">—</div></div></div>
-        <details class="card" id="prDetailed"><summary style="cursor:pointer;font-weight:600;font-size:13px;padding:2px 0">📋 <span id="t_pr_detailed">العرض التفصيلي للأسعار + التطبيق</span></summary><div style="margin-top:10px">
-        <div id="pricingOpsSummary"></div>
-        <div class="card" id="lmDiagCard">
-          <div id="lastMinuteDiagBody"><div class="empty sk">—</div></div>
-        </div>
-        <!-- analytics header -->
-        <div class="card">
-          <div id="prAnalytics"><div class="empty sk">—</div></div>
-        </div>
-
-        <!-- the per-apartment listing list now lives in the main #prTable above (Hostaway-style manager) -->
-
-        <!-- folded-in "Today": tonight's vacancies + last-minute step-down (secondary, collapsed) -->
-        <details class="card" id="prTonight">
-          <summary style="cursor:pointer;font-weight:600;font-size:13px;padding:2px 0;list-style:none">◎ <span id="t_pr_tonight">الليلة — الفاضي + خصم اللحظة الأخيرة</span></summary>
-          <div style="margin-top:10px"><div id="discountBanner"></div>
-          <div id="emptyGridWrap"><div class="empty sk">—</div></div></div>
-        </details>
-        </div></details>
       </section>
 
       <!-- ============ STRATEGIES VIEW ============ -->
@@ -12104,6 +12084,15 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="card">
           <div class="card-head"><span class="card-title">🏘️ <span id="t_str_units">الشقق المفعّلة</span></span><span class="card-sub" id="stratUnitsCount"></span></div>
           <div id="stratListBody"><div class="empty sk">—</div></div>
+        </div>
+        <!-- relocated from Pricing: tonight's vacancies + last-minute step-down + diagnostics -->
+        <details class="card" id="prTonight">
+          <summary style="cursor:pointer;font-weight:600;font-size:13px;padding:2px 0;list-style:none">◎ <span id="t_pr_tonight">الليلة — الفاضي + خصم اللحظة الأخيرة</span></summary>
+          <div style="margin-top:10px"><div id="discountBanner"></div>
+          <div id="emptyGridWrap"><div class="empty sk">—</div></div></div>
+        </details>
+        <div class="card" id="lmDiagCard">
+          <div id="lastMinuteDiagBody"><div class="empty sk">—</div></div>
         </div>
       </section>
 
@@ -13165,7 +13154,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
-    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
+    home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير الديناميكي', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
     clean_center:'مركز التنظيف',
@@ -13471,7 +13460,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
-    home:'Home', inbox:'Inbox', today:'Today', pricing:'Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
+    home:'Home', inbox:'Inbox', today:'Today', pricing:'Dynamic Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
     clean_center:'Cleaning Center',
@@ -14662,22 +14651,12 @@ async function loadAll(){
 var _pePanel = null;
 var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'📆',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'🎉',ar:'مناسبة',en:'Event'}};
 async function loadPricing(){
-  var pc=document.getElementById('pcc'); if(pc) pc.innerHTML='<div class="empty sk" style="height:140px">—</div>';
-  var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
-  // Each source is fetched + caught INDEPENDENTLY so one failure can never blank the tab.
+  // One clean tab: the listings table + per-unit month calendar. Fetch only what they need.
+  var body=document.getElementById('prTable'); if(body) body.innerHTML='<div class="empty sk" style="height:220px">—</div>';
   async function pull(path, fallback){ try{ return await api(path); }catch(e){ var f=fallback||{}; f.__error=true; return f; } }
-  var rr=await Promise.all([
-    pull('/api/pricing2/recs',{recs:[],error:'recs_fetch_failed'}),
-    pull('/api/pricing/analytics',{}),
-    pull('/api/pricing/last-minute-diagnostics',{runs:[]}),
-    pull('/api/pricing/command',{ok:false,error:'command_fetch_failed'}),
-    pull('/api/pricing/emergency-preview',{count:0,candidates:[]})
-  ]);
-  D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; D.pccEmg=rr[4];
-  // Each render is wrapped so a throw in one section never leaves another blank.
+  D.pcc=await pull('/api/pricing/command',{ok:false,error:'command_fetch_failed'});
   function safe(fn,label){ try{ fn(); }catch(e){ try{ console.warn('pricing render '+(label||''),e); }catch(_){} } }
-  safe(renderCommandCenter,'cc'); safe(renderPricingHeader,'hdr'); safe(renderPricingTable,'list');
-  safe(renderPricingOpsSummary,'ops'); safe(renderLastMinuteDiagnostics,'lm'); safe(loadTodayEmpty,'today');
+  safe(renderPricingTable,'list');
 }
 /* ===== Pricing Command Center (Stage 2) — read-only owner decision surface over /api/pricing/command.
    No apply here; "Review Manually" opens the detailed list below. Max 4 status colors. ===== */
@@ -15136,6 +15115,12 @@ function _prUnitSync(lid){
   t.rows.forEach(function(r){ if(String(r.listing_id)===String(lid)){ any=true; if(r.status==='mismatched') mm=true; } });
   return any?(mm?'mismatch':'ok'):null;
 }
+async function prToggleActivate(lid,on){
+  var ar=(L==='ar');
+  var r; try{ r=await post('/api/pricing/activate',{lid:lid,on:!!on}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(on?(ar?'فعّلناها ✓':'Activated ✓'):(ar?'أوقفناها':'Paused')); loadPricing(); }
+  else toast((r&&r.error)||'⚠');
+}
 function renderPricingTable(){
   var ar=(L==='ar'); var body=document.getElementById('prTable'), cnt=document.getElementById('prTableCount'); if(!body) return;
   var tt=document.getElementById('t_pr_table'); if(tt) tt.textContent=(ar?'إدارة الأسعار — الشقق':'Price manager — listings');
@@ -15154,7 +15139,8 @@ function renderPricingTable(){
   var cols=['الشقة|Apartment','الحالة|Status','السعر الحالي (Hostaway)|Current (Hostaway)','الحد الأدنى|Floor','الحد الأقصى|Ceiling','إشغال ٧ أيام|Occ 7d','تعديل|Edit','تقويم|Calendar'];
   var head='<tr>'+cols.map(function(c){ var p=c.split('|'); return '<th style="'+th+'">'+esc(ar?p[0]:p[1])+'</th>'; }).join('')+'</tr>';
   var rows=us.map(function(u){ var s=u.summary||{}; var sync=_prUnitSync(u.listing_id); var lid=u.listing_id;
-    var actChip=s.activated?pccChip(ar?'مفعّلة':'On','green'):pccChip(ar?'غير مفعّلة':'Off','mut');
+    var on=!!s.activated;
+    var actChip='<button class="btn ghost xs" onclick="prToggleActivate('+lid+','+(on?0:1)+')" title="'+(ar?(on?'إيقاف التفعيل':'تفعيل الشقة'):(on?'Deactivate':'Activate'))+'" style="border-color:'+(on?'#3e7d5a':'var(--line)')+';color:'+(on?'#1f6e45':'var(--mut)')+';font-weight:700">'+(on?(ar?'🟢 مفعّلة':'🟢 On'):(ar?'⚪ موقوفة':'⚪ Off'))+'</button>';
     var syncChip=(sync==='ok'?(' '+pccChip(ar?'متطابق':'Synced','green')):(sync==='mismatch'?(' '+pccChip(ar?'يحتاج تحديث':'Needs sync','gold')):''));
     var hi=((u.risk||{}).risk_level==='high');
     return '<tr style="border-top:1px solid var(--line)'+(hi?';background:rgba(196,67,67,.04)':'')+'">'
@@ -15209,7 +15195,7 @@ function renderPricingCalendar(){
       +'<button class="btn primary sm" onclick="pccCalApply(&#39;range&#39;)">✅ '+(ar?'طبّق النطاق':'Apply range')+'</button>'
       +'<button class="btn ghost sm" onclick="pccCalApply(&#39;month&#39;)">'+(ar?'طبّق الشهر':'Apply month')+'</button>'
       +'<button class="btn ghost sm" onclick="pccBatches()">🧾 '+(ar?'تراجع':'Revert')+'</button></div>'
-    +'<div class="muted" style="font-size:10.5px;margin-bottom:8px">'+(ar?'اضغط أي يوم تشوف «ليش هالسعر؟» وتطبّق أو ترجّع. البرتقالي = السعر السابق + نسبة التغيير. لتطبيق نطاق (٧ أيام) استخدم «مركز التسعير» فوق.':'Click any day for «why» + apply/revert. Orange = previous price + %. For a range, use the Command Center above.')+'</div>';
+    +'<div class="muted" style="font-size:10.5px;margin-bottom:8px">'+(ar?'اضغط أي يوم تشوف «ليش هالسعر؟» وتطبّق أو ترجّع. البرتقالي = السعر السابق + نسبة التغيير. استخدم حقول «من/إلى» فوق للتطبيق بنطاق.':'Click any day for «why» + apply/revert. Orange = previous price + %. Use the From/To fields above to apply a range.')+'</div>';
   var cells=''; var i; for(i=0;i<startDow;i++) cells+='<div></div>';
   for(var day=1;day<=daysIn;day++){ var ds=y+'-'+('0'+(m+1)).slice(-2)+'-'+('0'+day).slice(-2); cells+=pccCalTile(d.lid, ds, day, byDate[ds]||{}); }
   var grid='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">'+dows.map(function(w){ return '<div style="text-align:center;font-size:10px;color:var(--mut);font-weight:700;padding:2px">'+w+'</div>'; }).join('')+cells+'</div>';
@@ -15570,12 +15556,17 @@ async function applyMonth(month){
 async function loadStrategies(){
   var lb=document.getElementById('stratListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
   try{ D.stratD = await api('/api/strategies/deep'); }catch(_){ D.stratD={units:[],source_breakdown:[]}; }
+  // last-minute diagnostics + tonight's vacancies relocated here from the Pricing tab
+  try{ D.lmDiag = await api('/api/pricing/last-minute-diagnostics'); }catch(_){ D.lmDiag={runs:[]}; }
+  try{ D.tonight = await api('/api/today/empty'); }catch(_){ D.tonight={items:[]}; }
   var ti=document.getElementById('t_str_import'); if(ti) ti.textContent=(L==='ar'?'استيراد من Hostaway':'Import from Hostaway');
   var tu=document.getElementById('t_str_units'); if(tu) tu.textContent=(L==='ar'?'الشقق المفعّلة':'Activated apartments');
   renderStratSafety();
   renderStrategiesHeader();
   renderStrategies();
   renderStrategiesOpsSummary();
+  renderLastMinuteDiagnostics();
+  renderTodayEmpty();
 }
 function renderStratSafety(){
   var ar=(L==='ar'); var el=document.getElementById('stratSafety'); if(!el) return;
@@ -15583,7 +15574,7 @@ function renderStratSafety(){
   var dryChip=(dry===true)?pccChip(ar?'وضع المعاينة مفعّل':'Dry-run ON','green'):((dry===false)?pccChip(ar?'الكتابة الفعلية مفعّلة':'Live writes ON','gold'):'');
   el.innerHTML='<div class="card" style="border:1px solid #3e7d5a;background:rgba(62,125,90,.06)"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:13.5px;color:#1f6e45">🛡️ '+(ar?'أمان الاستراتيجيات':'Strategy safety')+'</b>'+dryChip+'</div>'
     +'<div style="font-size:12.5px;margin-top:6px;line-height:1.8">'+(ar?'«مفعّلة» تعني الشقة داخل التوصيات والمعاينة فقط — ما يُطبّق أي سعر تلقائيًا على Hostaway. كل كتابة فعلية تمر بمعاينة وتأكيد، وتُتحقّق بإعادة القراءة من Hostaway، وتنحفظ في السجل.':'“Enabled” means the unit is included in recommendations and previews only — no price is ever written to Hostaway automatically. Every live write goes through preview + confirm, is verified by re-reading Hostaway, and is logged.')+'</div>'
-    +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح مركز التسعير':'Open Pricing Command Center')+'</button></div></div>';
+    +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح التسعير الديناميكي':'Open Dynamic Pricing')+'</button></div></div>';
 }
 async function strImportHostaway(){
   toast(L==='ar'?'⏳ سحب من Hostaway…':'⏳ Importing…');
@@ -15677,7 +15668,7 @@ function renderRevDiag(){
   function chip(lbl,v,t){ return pccChip(lbl+' '+v,t); }
   el.innerHTML='<div class="card" style="border:1px solid '+pal[2]+';background:'+pal[1]+'"><b style="font-size:15px;color:'+pal[0]+'">'+(ar?'ليش تغيّر الإيراد؟':'Why revenue changed')+'</b><div style="font-size:13.5px;margin-top:6px;line-height:1.85">'+esc(sentence+extra)+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+chip(ar?'الإيراد':'Revenue',(drP!=null?((drP>0?'+':'')+drP+'%'):'—'),(drP==null?'info':(drP>=0?'green':'gold')))+chip('ADR',(adP!=null?((adP>0?'+':'')+adP+'%'):'—'),(adP==null?'info':(adP>=0?'green':'gold')))+chip(ar?'الإشغال':'Occupancy',(ocP!=null?((ocP>0?'+':'')+ocP+'%'):'—'),(ocP==null?'info':(ocP>=0?'green':'gold')))+'</div>'
-    +(hr>0?('<button class="btn ghost sm" style="margin-top:10px" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح مركز التسعير':'Open Pricing Command Center')+'</button>'):'')+'</div>';
+    +(hr>0?('<button class="btn ghost sm" style="margin-top:10px" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح التسعير الديناميكي':'Open Dynamic Pricing')+'</button>'):'')+'</div>';
 }
 
 function renderRevKpis(){
@@ -19848,7 +19839,7 @@ const ROLE_LABEL_EN = {admin:'Admin', ops:'Operator', viewer:'Viewer'};
 const ROLE_PILL = {admin:'gold', ops:'info', viewer:'muted'};
 const TAB_LABEL = {
   home:'الرئيسية', inbox:'الوارد', today:'اليوم', calendar:'التقويم',
-  pricing:'التسعير', strat:'الاستراتيجيات', clean:'التنظيف',
+  pricing:'التسعير الديناميكي', strat:'الاستراتيجيات', clean:'التنظيف',
   tickets:'الصيانة', reviews:'المراجعات', guests:'الضيوف',
   quality:'الجودة', rev:'الإيرادات', learn:'التعلّم', log:'النشاط',
   users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي',
@@ -19856,7 +19847,7 @@ const TAB_LABEL = {
 };
 const TAB_LABEL_EN = {
   home:'Home', inbox:'Inbox', today:'Today', calendar:'Calendar',
-  pricing:'Pricing', strat:'Strategies', clean:'Deep clean',
+  pricing:'Dynamic Pricing', strat:'Strategies', clean:'Deep clean',
   tickets:'Maintenance', reviews:'Reviews', guests:'Guests',
   quality:'Quality', rev:'Revenue', learn:'Learning', log:'Activity',
   users:'Users', quote:'Quotations', weekly:'Weekly report',
@@ -21683,6 +21674,7 @@ function renderDiscountBanner(){
 function renderTodayEmpty(){
   renderDiscountBanner();
   const wrap = document.getElementById('emptyGridWrap');
+  if(!wrap) return;   // host moved to Strategies tab — no-op if that DOM isn't present
   const data = D.tonight || {items:[]};
   const items = data.items || [];
   if(!items.length){ wrap.innerHTML = '<div class="card empty"><span class="ic">🎉</span>'+t().no_empty_tonight+'</div>'; return }
@@ -22526,7 +22518,7 @@ async function plabDecision(){
   if(gen) gen.textContent=(ar?'بيانات: ':'data: ')+(m.booked_nights||0)+(ar?' ليلة · ':' nights · ')+(m.reservations_analyzed||0)+(ar?' حجز':' res');
   var card='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px';
   var html='';
-  html+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.7;margin-bottom:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><div>'+(ar?'🧪 <b>المختبر</b> = تحليل عميق لكل شقة + تطبيق آمن لكل ليلة. <b>مركز التسعير</b> = الطلّة الشاملة، التطبيق القريب بالجملة، الطوارئ، والتراجع بالدُفعات. الاثنين يكتبون بنفس المحرّك ويتسجّلون.':'🧪 <b>The Lab</b> = deep per-apartment analysis + safe per-night apply. <b>Command Center</b> = portfolio view, near-term bulk apply, emergencies and batch revert. Both write via the same verified engine and are logged.')+'</div><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح مركز التسعير':'Open Command Center')+'</button></div>';
+  html+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.7;margin-bottom:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><div>'+(ar?'🧪 <b>المختبر</b> = تحليل عميق لكل شقة + تطبيق آمن لكل ليلة. <b>التسعير الديناميكي</b> = تقويم لكل شقة بالأسعار المقترحة والتطبيق/التراجع. الاثنين يكتبون بنفس المحرّك ويتسجّلون.':'🧪 <b>The Lab</b> = deep per-apartment analysis + safe per-night apply. <b>Dynamic Pricing</b> = a per-apartment calendar with suggested prices and apply/revert. Both write via the same verified engine and are logged.')+'</div><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح التسعير الديناميكي':'Open Dynamic Pricing')+'</button></div>';
   if(d.dry_run) html+='<div style="'+card+';border-color:#2f5f7a;color:#2f5f7a"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'أي تطبيق هنا ما يغيّر Hostaway فعليًا.':'any apply here will NOT change Hostaway.')+'</div>';
   if(m.thin_units) html+='<div style="'+card+';border-color:var(--gold)">⚠ '+(ar?('بيانات قليلة لـ '+m.thin_units+' شقة — توصياتها بثقة منخفضة'):('thin data for '+m.thin_units+' units — low confidence'))+'</div>';
   html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+plabStat('🎯',(d.cards||[]).length,ar?'فرص للمراجعة':'opportunities')+plabStat('✅',o.booked_after_apply||0,ar?'طُبّق ثم انحجز':'applied then booked')+plabStat('⚠️',(d.failed||[]).length,ar?'يحتاج إجراء':'need action')+'</div>';
@@ -24789,11 +24781,11 @@ async function doStopStrategy(lid){
 }
 async function doPause(hours){
   const r = await post('/api/discount/pause',{hours:hours});
-  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='pricing') renderTodayEmpty() }
+  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='strat') renderTodayEmpty() }
 }
 async function doResume(){
   const r = await post('/api/discount/resume',{});
-  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='pricing') renderTodayEmpty() }
+  if(r.ok){ D.disc = r; renderDiscountBanner(); if(view==='strat') renderTodayEmpty() }
 }
 async function doSkipUnit(lid){
   const r = await post('/api/discount/skip-unit',{lid:lid, hours:24});
