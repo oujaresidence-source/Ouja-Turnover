@@ -14653,8 +14653,8 @@ var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',
 async function loadPricing(){
   var pc=document.getElementById('pcc'); if(pc) pc.innerHTML='<div class="empty sk" style="height:140px">—</div>';
   var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
-  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};}), api('/api/pricing/command').catch(function(e){return {ok:false,error:'command_fetch_failed'};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; }
-  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; if(!D.lmDiag) D.lmDiag={runs:[]}; if(!D.pcc) D.pcc={ok:false,error:'load_failed'}; }
+  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};}), api('/api/pricing/command').catch(function(e){return {ok:false,error:'command_fetch_failed'};}), api('/api/pricing/emergency-preview').catch(function(){return {count:0,candidates:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; D.pccEmg=rr[4]; }
+  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; if(!D.lmDiag) D.lmDiag={runs:[]}; if(!D.pcc) D.pcc={ok:false,error:'load_failed'}; if(!D.pccEmg) D.pccEmg={count:0,candidates:[]}; }
   renderCommandCenter();
   renderPricingHeader();
   renderPricing2();
@@ -14680,6 +14680,8 @@ function renderCommandCenter(){
     +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">'+pccChip(ar?dm.title_ar:dm.title_en,sigTone)+'<span style="font-size:13px">'+esc(ar?dm.reason_ar:dm.reason_en)+'</span></div>'
     +(rt.title_ar?('<div style="margin-top:7px;font-size:13px;font-weight:700;color:#7a5b14">↪ '+esc(ar?rt.title_ar:rt.title_en)+'</div>'):'')
     +'</div>';
+  var emg=D.pccEmg||{count:0};
+  if(emg.count>0){ h+='<div class="card" style="border:1px solid var(--red);background:rgba(196,67,67,.05)"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13.5px;color:#a23b30">🚨 '+(ar?'طوارئ ٩م · معاينة فقط':'9PM emergency · preview only')+'</b><button class="btn ghost sm" onclick="pccEmergency()">'+(ar?'افتح المعاينة':'Open preview')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'+(ar?(emg.count+' شقة فاضية الليلة وما فيها حجز جديد من أكثر من يومين — خصم طوارئ مقترح. ما ينطبق تلقائيًا أبدًا.'):(emg.count+' units empty tonight with no booking in 2+ days — emergency discount suggested. Never auto-applied.'))+'</div></div>'; }
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-bottom:10px">'
     +pccKpi(ar?'ليالٍ فاضية · ٧ أيام':'Empty · 7d',sm.empty_nights_7||0,'',(sm.empty_nights_7?'gold':''))
     +pccKpi(ar?'ليالٍ فاضية · ١٤ يوم':'Empty · 14d',sm.empty_nights_14||0,'','')
@@ -14774,6 +14776,27 @@ async function pccRevert(bid, forceDry){ var ar=(L==='ar');
   if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
   pccApplyResults(res); loadPricing();
 }
+function pccEmergency(){ _pcc.emgBelow=false; var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]};
+  openDrawer((ar?'طوارئ ٩م · معاينة':'9PM Emergency · preview'), (ar?'فاضية الليلة + ما حجزت من ':'empty tonight + no booking in ')+(emg.no_booking_days||2)+(ar?' أيام':'d'));
+  pccEmgRender(); }
+function pccEmgRender(){ var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]}; var cs=emg.candidates||[]; var below=!!_pcc.emgBelow;
+  var note='<div style="background:rgba(196,67,67,.07);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;margin-bottom:8px">'+(ar?'هذي معاينة طوارئ — ما تنطبق تلقائيًا. التطبيق قرارك أنت، بمعاينة وتأكيد، ويعيد القراءة من Hostaway للتأكد.':'Emergency preview — never auto-applied. Applying is your deliberate, confirmed action that re-reads Hostaway to verify.')+'</div>';
+  var bt='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(below?'checked':'')+' onchange="_pcc.emgBelow=this.checked;pccEmgRender()"> '+(ar?'اسمح بأسعار تحت الـ floor — استثناء طوارئ':'Allow below-floor emergency prices — exception')+'</label>';
+  var rowsH=cs.length?cs.map(function(c){ var use=(below&&c.below_floor_price!=null)?c.below_floor_price:c.emergency_price; var bf=(c.floor!=null&&use<c.floor);
+    return '<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">'+esc(c.name||('#'+c.listing_id))+'</b>'+(bf?pccChip(ar?'تحت الـ floor':'below floor','red'):pccChip(ar?'عند/فوق الـ floor':'at/above floor','green'))+'</div>'
+      +'<div style="font-size:12.5px;margin-top:5px">'+fmt(c.current_price)+' → <b style="color:#a23b30">'+fmt(use)+'</b>'+(c.floor!=null?(' <span class="muted" style="font-size:11px">· floor '+fmt(c.floor)+'</span>'):'')+'</div>'
+      +'<div class="muted" style="font-size:10.5px;margin-top:3px">'+esc(ar?c.reason_ar:c.reason_en)+'</div></div>'; }).join(''):('<div class="empty" style="padding:20px;text-align:center">'+(ar?'ما فيه حالات طوارئ الحين.':'No emergencies right now.')+'</div>');
+  setDrawerBody(note+bt+rowsH);
+  var n=cs.length;
+  setDrawerFoot(n?('<button class="btn ghost sm" onclick="pccEmergencyApply(true)">'+(ar?'اختبار آمن':'Safe test')+'</button><button class="btn primary sm" onclick="pccEmergencyApply(false)">'+(ar?'تطبيق الطوارئ':'Apply emergency')+' ('+n+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'):('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>')); }
+async function pccEmergencyApply(forceDry){ var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]}; var below=!!_pcc.emgBelow;
+  var rows=(emg.candidates||[]).map(function(c){ var p=(below&&c.below_floor_price!=null)?c.below_floor_price:c.emergency_price; return {lid:c.listing_id, date:c.date, price:p, floor:c.floor, old:c.current_price}; }).filter(function(r){ return r.price&&r.price>0; });
+  if(!rows.length){ toast('⚠'); return; }
+  if(!forceDry){ var envDry=!!(D.pcc&&D.pcc.dry_run); if(!envDry){ var m=await fbModal({title:(ar?'تأكيد خصم طوارئ فعلي':'Confirm REAL emergency discount'), msg:(ar?('بنكتب أسعار طوارئ على '+rows.length+' شقة فعليًا على Hostaway، ونتأكد بعد الكتابة.'+(below?' فيه أسعار تحت الـ floor — استثناء.':'')):('Writing emergency prices to '+rows.length+' units for real, then verifying.'+(below?' Some are below floor — exception.':''))), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')}); if(!m.ok) return; } }
+  toast(ar?'⏳ تطبيق + تأكد من Hostaway…':'⏳ Applying + verifying…');
+  var res; try{ res=await post('/api/pricing/command/apply',{dry_run:!!forceDry, allow_below_floor:below, rows:rows}); }catch(_){ res=null; }
+  if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
+  pccApplyResults(res); loadPricing(); }
 function pccApplyResults(res){
   var ar=(L==='ar'); var s=res.summary||{};
   openDrawer((res.revert?(ar?'نتيجة التراجع':'Revert result'):(ar?'نتيجة التطبيق':'Apply result'))+(res.dry_run?(ar?' · اختبار':' · dry-run'):''), 'batch '+esc(res.batch_id||''));
@@ -27816,6 +27839,68 @@ async def _api_pricing_command_revert(request):
     res = await asyncio.to_thread(_pricing_command_revert, b.get("batch_id"), b.get("lids"), b.get("date"), fd)
     return _json(res, (200 if res.get("ok") else 400))
 
+# ---- Stage 7: 9PM Emergency PREVIEW (computed independently of the scheduled discount loops, so it
+#      can NEVER auto-apply; the owner applies deliberately through the same verified apply flow). ----
+EMERGENCY_DISCOUNT_PCT = int(os.environ.get("EMERGENCY_DISCOUNT_PCT", "35"))   # deeper than the normal tiers
+EMERGENCY_NO_BOOKING_DAYS = int(os.environ.get("EMERGENCY_NO_BOOKING_DAYS", "2"))
+
+def _last_booking_by_lid():
+    """Most recent reservationDate per listing, from the cached reservations (no new API calls)."""
+    out = {}
+    try:
+        for r in (get_reservations_cached() or []):
+            lid = r.get("listingMapId")
+            rd = _parse_date(r.get("reservationDate"))
+            if lid is None or not rd:
+                continue
+            if lid not in out or rd > out[lid]:
+                out[lid] = rd
+    except Exception as e:
+        print("last-booking scan:", e)
+    return out
+
+def _pricing_emergency_preview(pct=None):
+    """READ-ONLY 9PM emergency candidates: units empty TONIGHT that have NOT booked in the past
+    N days → a deeper suggested price, floor-respected (below-floor shown only as an explicit exception).
+    Never writes, never auto-applies."""
+    pct = EMERGENCY_DISCOUNT_PCT if pct is None else pct
+    today = datetime.now(TZ).date(); today_iso = today.isoformat()
+    cutoff = today - timedelta(days=EMERGENCY_NO_BOOKING_DAYS)
+    lastbook = _last_booking_by_lid()
+    snap = _pricing_command_snapshot()
+    cands = []
+    for u in (snap.get("units") or []):
+        lid = u.get("listing_id")
+        tonight = next((x for x in (u.get("calendar_14") or []) if x.get("date") == today_iso), None)
+        if not tonight:
+            continue                                   # not open tonight
+        lb = lastbook.get(lid)
+        if lb and lb >= cutoff:
+            continue                                   # booked recently → not an emergency
+        cur = tonight.get("current_price")
+        if cur is None:
+            cur = (u.get("current") or {}).get("price")
+        if cur is None:
+            continue
+        fl = tonight.get("floor")
+        deep = int(round(float(cur) * (1 - pct / 100.0)))
+        below = (fl is not None and deep < _coerce_price(fl))
+        safe = (max(deep, int(_coerce_price(fl))) if fl is not None else deep)
+        cands.append({"listing_id": lid, "name": u.get("name"), "date": today_iso,
+                      "current_price": cur, "floor": fl, "emergency_price": safe,
+                      "below_floor_price": (deep if below else None), "below_floor": bool(below),
+                      "last_booked": (lb.isoformat() if lb else None),
+                      "reason_ar": ("فاضية الليلة وما فيها حجز جديد من " + (lb.isoformat() if lb else "أكثر من يومين") + " — خصم طوارئ مقترح (معاينة فقط)"),
+                      "reason_en": "Empty tonight, no new booking in " + str(EMERGENCY_NO_BOOKING_DAYS) + "+ days — emergency discount suggested (preview only)"})
+    cands.sort(key=lambda c: -((c["current_price"] or 0) - (c["emergency_price"] or 0)))
+    return {"ok": True, "generated_at": datetime.now(TZ).isoformat(timespec="seconds"), "pct": pct,
+            "no_booking_days": EMERGENCY_NO_BOOKING_DAYS, "preview_only": True, "count": len(cands), "candidates": cands}
+
+async def _api_pricing_emergency_preview(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json(await asyncio.to_thread(_pricing_emergency_preview))
+
 async def _api_pe_recs(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -40224,6 +40309,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
+        app.router.add_get("/api/pricing/emergency-preview", _api_pricing_emergency_preview)  # 9PM emergency (preview only)
         app.router.add_get("/api/pricing/command/batches", _api_pricing_command_batches)  # apply batches (revert source)
         app.router.add_post("/api/pricing/command/revert", _api_pricing_command_revert)   # verified revert (dry-run-able)
         app.router.add_get("/api/pricing2/recs", _api_pe_recs)       # engine v2: recommendations
