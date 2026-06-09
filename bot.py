@@ -13383,6 +13383,7 @@ const T = {
     fb_import:'استيراد', fb_test:'اختبار الاتصال', fb_upload:'رفع الملف', fb_notconfigured:'دافترة غير مربوطة',
     fb_verified:'تم التحقق من دافترة', fb_pending:'بانتظار التحقق', fb_failed:'فشل', fb_thin:'البيانات غير مكتملة',
     fb_lastsync:'آخر مزامنة', fb_nextaction:'الخطوة الجاية', fb_approve:'اعتماد', fb_reject:'رفض', fb_needfaisal:'يحتاج اعتماد فيصل',
+    fb_clarify:'طلب توضيح', fb_no_approve_perm:'ما عندك صلاحية اعتماد مبالغ ٣٠٠٠+', fb_review_approvals:'مراجعة الاعتمادات', fb_bulk_approve:'اعتماد المحدد', fb_reject_reason:'سبب الرفض', fb_clarify_reason:'وش التوضيح المطلوب؟',
     log_empty:'لا يوجد نشاط',
     fresh:'آخر تحديث', live:'مباشر',
     wrong:'رمز غير صحيح · Wrong token',
@@ -13688,6 +13689,7 @@ const T = {
     fb_import:'Import', fb_test:'Test connection', fb_upload:'Upload file', fb_notconfigured:'Daftra not connected',
     fb_verified:'Verified in Daftra', fb_pending:'Verification pending', fb_failed:'Failed', fb_thin:'Data incomplete',
     fb_lastsync:'Last sync', fb_nextaction:'Next action', fb_approve:'Approve', fb_reject:'Reject', fb_needfaisal:'Needs Faisal approval',
+    fb_clarify:'Request clarification', fb_no_approve_perm:'You do not have permission to approve 3,000+ SAR items', fb_review_approvals:'Review approvals', fb_bulk_approve:'Approve selected', fb_reject_reason:'Rejection reason', fb_clarify_reason:'What clarification is needed?',
     log_empty:'No activity',
     fresh:'Updated', live:'live',
     wrong:'Wrong token',
@@ -23129,11 +23131,11 @@ async function fbInboxRender(mode, filter){
   await fbLoadRefs();
   var d; try{ d=await api('/api/fb/inbox'); }catch(_){ d=null; }     // load ALL lanes; filter client-side (lane-first UX)
   if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — قائمة العمل للمحاسبة.':'Operations see only their expense status — the work queue is for accountants.')+'</div>'; return; }
-  _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
+  _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.canApproveHigh=!!(d&&d.can_approve_high_value); _fb.role=(d&&d.role)||''; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
   fbQueueRender();
 }
-function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',needs_review:'warn'})[ln]||'mut'; }
-function fbLaneLabel(ln){ var ar=(L==='ar'); var m={ready_to_link:['جاهز للربط','Ready to link'],linked_existing:['مربوط بدافترة','Linked'],needs_decision:['يحتاج قرار','Needs decision'],missing_setup:['ناقص إعداد','Missing setup'],needs_faisal_approval:['يحتاج اعتماد فيصل','Faisal approval'],ready_for_journal:['جاهز للقيد','Ready for journal'],needs_review:['يحتاج مراجعة','Needs review'],completed:['مكتمل','Completed']}; var v=m[ln]; return v?(ar?v[0]:v[1]):ln; }
+function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',needs_review:'warn',rejected:'warn'})[ln]||'mut'; }
+function fbLaneLabel(ln){ var ar=(L==='ar'); var m={ready_to_link:['جاهز للربط','Ready to link'],linked_existing:['مربوط بدافترة','Linked'],needs_decision:['يحتاج قرار','Needs decision'],missing_setup:['ناقص إعداد','Missing setup'],needs_faisal_approval:['يحتاج اعتماد فيصل','Faisal approval'],ready_for_journal:['جاهز للقيد','Ready for journal'],needs_review:['يحتاج مراجعة','Needs review'],rejected:['مرفوض — يحتاج تصحيح','Rejected'],completed:['مكتمل','Completed']}; var v=m[ln]; return v?(ar?v[0]:v[1]):ln; }
 async function fbQueueRefresh(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث الحالات…':'⏳ Refreshing…'); await fbInboxRender(_fb.qmode||'inbox'); toast(ar?'تم تحديث القائمة':'Queue refreshed'); }
 async function fbFixStatuses(){ var ar=(L==='ar'); var r; try{ r=await post('/api/fb/daftra/dup',{action:'fix_statuses'}); }catch(_){ r=null; } if(r&&r.ok){ var a=r.after||{}; toast((ar?'تم الإصلاح · جاهز للربط ':'fixed · ready-to-link ')+(a.ready_to_link||0)+' · '+(ar?'مربوط ':'linked ')+(a.linked_existing||0)); fbInboxRender(_fb.qmode||'inbox'); } else toast('⚠'); }
 function fbStatusLabel(s){ var ar=(L==='ar'); var m={needs_review:[ 'يحتاج مراجعة','Needs review'],auto_classified:['مصنّف تلقائيًا','Auto-classified'],accountant_review:['مراجعة محاسب','Accountant review'],needs_faisal:['اعتماد فيصل','Faisal approval'],approved:['معتمد','Approved'],rejected:['مرفوض','Rejected'],ready_to_post:['جاهز للترحيل','Ready to post'],posted:['مرحّل','Posted'],verified:['متحقق من دافترة','Verified in Daftra'],failed:['فشل','Failed'],draft:['مسودة','Draft'],sheet_intake:['من Google Sheet','From Sheet'],void:['ملغى','Void']}; var v=m[s]; return v?(ar?v[0]:v[1]):(s||'—'); }
@@ -23145,6 +23147,7 @@ function fbLaneMeta(lane){ var ar=(L==='ar'); var m={
   ready_for_journal:['🧮', ar?'جديدة ومصنّفة — جاهزة لتجهيز قيد دافترة':'New & classified — ready to draft a Daftra entry'],
   needs_review:['📋', ar?'تحتاج تصنيف أو مراجعة':'Needs classification or review'],
   linked_existing:['✅', ar?'مربوطة بدافترة':'Linked to Daftra'],
+  rejected:['⛔', ar?'مرفوضة من فيصل — تحتاج تصحيح وإعادة إرسال':'Rejected by Faisal — correct & resubmit'],
   completed:['✅', ar?'مكتملة':'Completed'] }; return m[lane]||['•','']; }
 function fbLaneCard(lane, count, items){ var ar=(L==='ar'); var meta=fbLaneMeta(lane), tone=fbLaneTone(lane);
   var total=items.reduce(function(s,i){ return s+fbNum(i.amount); },0);
@@ -23152,6 +23155,7 @@ function fbLaneCard(lane, count, items){ var ar=(L==='ar'); var meta=fbLaneMeta(
   var primary;
   if(lane==='ready_to_link') primary='<button class="btn primary sm" onclick="fbBulkLink()">'+esc(t().fb_bulk_link)+'</button>';
   else if(lane==='missing_setup') primary='<button class="btn primary sm" onclick="fbGo(&#39;setup&#39;)">'+(ar?'أكمل الإعداد':'Complete setup')+'</button>';
+  else if(lane==='needs_faisal_approval') primary='<button class="btn primary sm" onclick="fbLaneOpen(&#39;needs_faisal_approval&#39;)">'+esc(t().fb_review_approvals)+'</button>';
   else primary='<button class="btn primary sm" onclick="fbLaneOpen(&#39;'+lane+'&#39;)">'+(ar?'افتح':'Open')+'</button>';
   return '<div style="'+fbCard()+';margin:0"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13.5px">'+meta[0]+' '+esc(fbLaneLabel(lane))+'</b>'+fbChip(String(count),tone)+'</div>'
     +'<div style="font-size:20px;font-weight:800;margin-top:3px">'+fbMoney(total)+'</div>'
@@ -23168,7 +23172,7 @@ function fbQueueRender(){
     +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+(rtl?('<button class="btn primary sm" onclick="fbBulkLink()">🔗 '+esc(t().fb_bulk_link)+' ('+rtl+')</button>'):'')+'<button class="btn ghost sm" onclick="fbQueueRefresh()">↻ '+(ar?'تحديث':'Refresh')+'</button><button class="btn ghost sm" onclick="fbFixStatuses()">🛠 '+(ar?'إصلاح الحالات':'Fix')+'</button></div></div>'
     +'<div class="muted" style="font-size:11.5px;margin-top:4px">'+(ar?'اشتغل من المسارات — كل مسار يجمع العمليات اللي لها نفس الإجراء.':'Work from lanes — each lane groups items that need the same action.')+'</div></div>';
   if(_fb.qview==='lanes'){
-    var order=['ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','needs_review','linked_existing','completed'];
+    var order=['ready_to_link','needs_decision','missing_setup','needs_faisal_approval','ready_for_journal','needs_review','rejected','linked_existing','completed'];
     var byLane={}; (_fb.qItems||[]).forEach(function(i){ (byLane[i.lane]=byLane[i.lane]||[]).push(i); });
     var cards=order.filter(function(L_){ return (ln[L_]||(byLane[L_]||[]).length); }).map(function(L_){ return fbLaneCard(L_, (ln[L_]||(byLane[L_]||[]).length), byLane[L_]||[]); }).join('');
     if(!cards) cards='<div class="empty" style="padding:30px;text-align:center;grid-column:1/-1">'+(ar?'كل شي واضح — ما فيه عمليات تحتاج إجراء اليوم 👌':'All clear — nothing needs action today 👌')+'</div>';
@@ -23244,7 +23248,11 @@ function fbQueueActions(i){
   if(ln==='linked_existing'||ln==='completed') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+(ar?'التفاصيل':'Details')+'</button>';
   if(ln==='needs_decision') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button> <button class="btn ghost xs" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;not_duplicate&#39;)">'+esc(t().fb_not_dup)+'</button>';
   if(ln==='missing_setup') return '<button class="btn primary xs" onclick="fbBankMap()">'+(ar?'أكمل الربط':'Complete setup')+'</button>';
-  if(ln==='needs_faisal_approval'){ if(i.kind==='ledger') return '<button class="btn green xs" onclick="fbAct(&#39;'+id+'&#39;,&#39;approve&#39;)">'+t().fb_approve+'</button> <button class="btn ghost xs" onclick="fbActReason(&#39;'+id+'&#39;,&#39;reject&#39;)">'+t().fb_reject+'</button>'; return '<button class="btn ghost xs" onclick="'+cls()+'">'+esc(t().fb_act_classify)+'</button>'; }
+  if(ln==='needs_faisal_approval'){
+    if(!_fb.canApproveHigh) return '<span class="muted" style="font-size:10.5px">'+esc(t().fb_no_approve_perm)+'</span> <button class="btn ghost xs" onclick="'+cls()+'">'+esc(t().fb_act_classify)+'</button>';
+    return '<button class="btn green xs" onclick="fbAct(&#39;'+id+'&#39;,&#39;approve&#39;)">'+esc(t().fb_approve)+'</button> <button class="btn ghost xs" onclick="fbActReason(&#39;'+id+'&#39;,&#39;reject&#39;)">'+esc(t().fb_reject)+'</button> <button class="btn ghost xs" onclick="fbActReason(&#39;'+id+'&#39;,&#39;clarify&#39;)">'+esc(t().fb_clarify)+'</button>';
+  }
+  if(ln==='rejected') return '<button class="btn ghost xs" onclick="'+cls()+'">'+esc(t().fb_act_classify)+'</button>';
   if(ln==='ready_for_journal') return (i.kind==='bank'?('<button class="btn ghost xs" onclick="fbAct(&#39;'+id+'&#39;,&#39;promote&#39;)">'+esc(t().fb_act_promote)+'</button>'):('<button class="btn ghost xs" onclick="fbGo(&#39;synclog&#39;)">'+(ar?'جهّز قيد':'Draft journal')+'</button>'));
   var a='';
   if(i.next_action==='dup_check') a+='<button class="btn primary xs" onclick="fbDupCheck()">🛡️ '+(ar?'افحص':'Check')+'</button> ';
@@ -34278,6 +34286,78 @@ def _fb_is_admin(request):
     """Admin only — approve >= 3000, enable posting, override monthly close, edit mappings."""
     return _req_role(request) == "admin"
 
+def can_finance_approve_high_value(request):
+    """Permission to APPROVE finance items at/above FB_APPROVAL_THRESHOLD (the Faisal tier).
+    admin or owner always; the legacy dashboard token resolves to admin (Faisal's main login).
+    Accountants may approve only BELOW the threshold (enforced at the call site). ops/viewer never."""
+    return _req_role(request) in ("admin", "owner")
+
+# ---- item lookup that spans the two stores the work queue draws from (bank txns + canonical ledger) ----
+def _fb_find_item(item_id):
+    """Return (kind, dict) for a work-queue id — a bank txn or a ledger entry — else (None, None)."""
+    iid = (item_id or "").strip()
+    if iid in _fb_bank:
+        return ("bank", _fb_bank[iid])
+    if iid in _fb_ledger:
+        return ("ledger", _fb_ledger[iid])
+    return (None, None)
+
+def _fb_item_amount(kind, it):
+    if kind == "bank":
+        return _fb_money(it.get("debit")) or _fb_money(it.get("credit"))
+    return _fb_money(it.get("amount"))
+
+def _fb_item_is_outgoing(kind, it):
+    """True for money leaving Ouja (an expense/withdrawal). Faisal high-value approval is for
+    OUTGOING spend, NOT incoming owner funding (see _fb_resolve_status / spec Part 9 Test 8)."""
+    if kind == "bank":
+        return _fb_money(it.get("debit")) > 0
+    return (it.get("direction") in ("expense", "debit"))
+
+def _fb_save_item(kind, it):
+    if kind == "bank":
+        _fb_save("finance_bank_transactions.json", _fb_bank)
+    elif kind == "ledger":
+        _fb_save("finance_ledger_entries.json", _fb_ledger)
+
+def _fb_do_approval(item_id, decision, actor, reason, can_high, can_fin):
+    """Apply a Faisal/admin approval decision (approve|reject|clarify) to ONE item (bank txn or
+    ledger entry). High-value (>= threshold) needs can_finance_approve_high_value; below-threshold
+    needs finance access. Writes faisal_approval_status + approved_by/at + reason + audit. Never fakes."""
+    kind, it = _fb_find_item(item_id)
+    if not it:
+        return {"error": "item_not_found", "code": 404}
+    amt = _fb_item_amount(kind, it)
+    high = amt >= FB_APPROVAL_THRESHOLD
+    if high and not can_high:
+        return {"error": "no_permission", "code": 403,
+                "message_ar": "ما عندك صلاحية اعتماد مبالغ ٣٠٠٠+",
+                "message_en": "You do not have permission to approve 3,000+ SAR items"}
+    if (not high) and not can_fin:
+        return {"error": "forbidden", "code": 403}
+    if decision == "reject" and not (reason or "").strip():
+        return {"error": "reason_required", "code": 400,
+                "message_ar": "لازم سبب الرفض", "message_en": "Rejection reason required"}
+    now = datetime.now(TZ).isoformat(timespec="seconds")
+    before = {"faisal_approval_status": it.get("faisal_approval_status"), "status": it.get("status")}
+    new_status = {"approve": "approved", "reject": "rejected", "clarify": "needs_clarification"}.get(decision)
+    if not new_status:
+        return {"error": "bad_decision", "code": 400}
+    it["faisal_approval_status"] = new_status
+    it["faisal_approval_actor"] = actor
+    it["faisal_approval_at"] = now
+    if decision == "approve":
+        it["approved_by"] = actor; it["approved_at"] = now
+    if (reason or "").strip():
+        it["approval_reason"] = str(reason)[:400]
+    if kind == "ledger":                       # keep the ledger lifecycle status in step
+        it["status"] = new_status
+    _fb_save_item(kind, it)
+    _fb_audit_add(actor, "faisal_" + decision, kind, item_id, before=before,
+                  after={"faisal_approval_status": new_status}, reason=reason or "")
+    return {"ok": True, "kind": kind, "id": item_id, "amount": _fb_money_str(amt),
+            "faisal_approval_status": new_status}
+
 # ====================================================================
 #  OUJA FINANCIAL BRAIN (المركز المالي) — import-first finance control layer AROUND
 #  Daftra (the official ledger). NO fake data · NO auto-post (disabled by default) ·
@@ -36427,7 +36507,7 @@ def _fb_next_action(e):
     return ("none", "—", "—")
 
 _FB_LANES = ("ready_to_link", "linked_existing", "needs_decision", "missing_setup",
-             "needs_faisal_approval", "ready_for_journal", "needs_review", "completed")
+             "needs_faisal_approval", "ready_for_journal", "needs_review", "rejected", "completed")
 
 def _fb_resolve_status(item):
     """THE single authoritative finance-workflow resolver. Daftra duplicate state WINS over raw
@@ -36436,7 +36516,10 @@ def _fb_resolve_status(item):
     dq = item.get("daftra_duplicate_status")
     amt = _fb_money(item.get("amount"))
     has_cat = item.get("category") not in (None, "", "unknown")
-    needs_faisal = amt >= FB_APPROVAL_THRESHOLD
+    fa_status = item.get("faisal_approval_status")
+    outgoing = item.get("direction") in ("expense", "debit")
+    # Faisal high-value approval is for OUTGOING spend only — incoming owner funding never needs it (spec Part 9 Test 8)
+    needs_faisal = (amt >= FB_APPROVAL_THRESHOLD) and outgoing and (fa_status != "approved")
     kind, st = item.get("kind"), item.get("status")
     num = item.get("matched_daftra_number")
     mt = item.get("daftra_match_type")
@@ -36511,10 +36594,20 @@ def _fb_resolve_status(item):
                  "dup_check", "تأكد من التكرار", "Check duplicates",
                  "شغّل فحص التكرار مع دافترة قبل أي ترحيل", "run the Daftra duplicate check first",
                  blocking_reason="not_checked")
+    if fa_status == "rejected":
+        return R("rejected", "rejected", "مرفوض — يحتاج تصحيح", "Rejected — needs correction",
+                 "classify", "صحّح وأعد الإرسال", "Correct & resubmit",
+                 "اعتماد فيصل: مرفوض" + ((" — " + str(item.get("approval_reason"))) if item.get("approval_reason") else ""),
+                 "Faisal approval: rejected")
+    if fa_status == "needs_clarification":
+        return R("needs_clarification", "needs_review", "يحتاج توضيح لفيصل", "Needs clarification",
+                 "classify", "وضّح وأعد", "Clarify & resubmit",
+                 "اعتماد فيصل: طلب توضيح" + ((" — " + str(item.get("approval_reason"))) if item.get("approval_reason") else ""),
+                 "Faisal: needs clarification")
     if needs_faisal and st not in ("approved", "ready_to_post", "posted", "verified"):
         return R("needs_faisal", "needs_faisal_approval", "يحتاج اعتماد فيصل", "Needs Faisal approval",
                  "faisal", "إرسال لاعتماد فيصل", "Send for Faisal approval",
-                 "المبلغ ٣٠٠٠ أو أكثر", "amount ≥ 3,000")
+                 "المبلغ ٣٠٠٠ أو أكثر", "amount ≥ 3,000", can_approve_high_value=True)
     if dq in ("not_found_after_full_check", "not_duplicate"):
         if not has_cat:
             return R("needs_classify", "needs_review", "يحتاج تصنيف", "Needs classification",
@@ -36554,7 +36647,10 @@ def _fb_inbox(filters=None):
                       "match_status": e.get("match_status"), "daftra_status": e.get("daftra_status"),
                       "verification_status": e.get("verification_status"),
                       "daftra_duplicate_status": e.get("daftra_duplicate_status"),
-                      "matched_daftra_id": e.get("matched_daftra_id"), "matched_daftra_number": e.get("matched_daftra_number")})
+                      "matched_daftra_id": e.get("matched_daftra_id"), "matched_daftra_number": e.get("matched_daftra_number"),
+                      "faisal_approval_status": e.get("faisal_approval_status"), "approval_reason": e.get("approval_reason"),
+                      "ledger_entry_id": e.get("id"), "journal_draft_id": e.get("journal_draft_id"),
+                      "journal_draft_status": e.get("journal_draft_status")})
     for x in _fb_bank.values():
         if x.get("id") in promoted or x.get("daftra_duplicate_status") == "ignored":
             continue
@@ -36571,7 +36667,9 @@ def _fb_inbox(filters=None):
                       "matched_daftra_id": x.get("matched_daftra_id"), "matched_daftra_number": x.get("matched_daftra_number"),
                       "matched_daftra_line_id": x.get("matched_daftra_line_id"), "daftra_match_type": x.get("daftra_match_type"),
                       "matched_daftra_line_ids": x.get("matched_daftra_line_ids"), "distributed_num_lines": x.get("distributed_num_lines"),
-                      "daftra_flow_type": x.get("daftra_flow_type")})
+                      "daftra_flow_type": x.get("daftra_flow_type"),
+                      "faisal_approval_status": x.get("faisal_approval_status"), "approval_reason": x.get("approval_reason"),
+                      "ledger_entry_id": x.get("ledger_entry_id")})
     try:
         for ex in list(_expenses.values())[-200:]:
             if _exp_canonical_status(ex) in ("verified", "posted"):
@@ -36921,7 +37019,8 @@ async def _api_fb_inbox(request):
         return _json({"error": "unauthorized"}, 401)
     if _req_role(request) == "ops":
         return _json({"error": "forbidden_ops"}, 403)   # ops cannot see the finance inbox/profitability
-    return _json({"ok": True, **_fb_inbox({"filter": request.query.get("filter")})})
+    return _json({"ok": True, "can_approve_high_value": can_finance_approve_high_value(request),
+                  "role": _req_role(request), **_fb_inbox({"filter": request.query.get("filter")})})
 
 async def _api_fb_bulk(request):
     """Apply one operation to many work-queue items at once. op ∈ {category, apartment, submit}.
@@ -36965,7 +37064,7 @@ async def _api_fb_entry(request):
         return _json({"error": "forbidden"}, 403)
     b = await _read_body(request)
     action = (b.get("action") or "").strip()
-    actor, role = _req_actor(request), _req_role(request)
+    actor = _req_actor(request)
     if action == "promote":                     # bank/sheet → canonical ledger entry
         bx = _fb_bank.get(b.get("id"))
         if not bx:
@@ -37024,6 +37123,20 @@ async def _api_fb_entry(request):
         _fb_audit_add(actor, "bank_classify", "bank_txn", bx["id"], before=before,
                       after={"category": bx.get("category"), "status": bx.get("status"), "applied_similar": applied}, reason=b.get("note", ""))
         return _json({"ok": True, "txn": bx, "applied_similar": applied})
+    if action in ("approve", "reject", "clarify"):     # Faisal/admin decision — works on bank txns AND ledger entries
+        res = _fb_do_approval(b.get("id"), action, actor, b.get("reason", ""),
+                              can_finance_approve_high_value(request), _fb_can_finance(request))
+        return _json(res, res.get("code", 200 if res.get("ok") else 400))
+    if action == "bulk_approve":                       # approve several selected high-value items at once
+        can_high = can_finance_approve_high_value(request); can_fin = _fb_can_finance(request)
+        done, blocked = 0, []
+        for iid in (b.get("ids") or [])[:200]:
+            r = _fb_do_approval(iid, "approve", actor, b.get("reason", ""), can_high, can_fin)
+            if r.get("ok"):
+                done += 1
+            else:
+                blocked.append({"id": iid, "error": r.get("error")})
+        return _json({"ok": True, "approved": done, "blocked": len(blocked), "blocked_items": blocked})
     eid = (b.get("id") or "").strip()
     e = _fb_ledger.get(eid)
     if not e:
@@ -37041,15 +37154,6 @@ async def _api_fb_entry(request):
         _fb_set_status(eid, new, actor)
         if amt >= FB_APPROVAL_THRESHOLD:
             asyncio.ensure_future(_fb_notify_large(e, actor))
-        return _json({"ok": True, "entry": e})
-    if action == "approve":
-        amt = _fb_money(e.get("amount"))
-        if amt >= FB_APPROVAL_THRESHOLD and role != "admin":
-            return _json({"error": "needs_faisal", "message": "هالمبلغ يحتاج اعتماد فيصل"}, 403)
-        _fb_set_status(eid, "approved", actor, reason=b.get("reason", ""))
-        return _json({"ok": True, "entry": e})
-    if action == "reject":
-        _fb_set_status(eid, "rejected", actor, reason=b.get("reason", ""))
         return _json({"ok": True, "entry": e})
     if action == "void":                         # no delete of approved/posted — void with reason
         if not b.get("reason"):
