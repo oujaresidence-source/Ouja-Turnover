@@ -23389,7 +23389,8 @@ function fbQueueActions(i){
   if(ln==='needs_decision') return '<button class="btn ghost xs" onclick="fbDupCompare(&#39;'+id+'&#39;)">'+esc(t().fb_open_compare)+'</button> <button class="btn ghost xs" onclick="fbDupResolve(&#39;'+id+'&#39;,&#39;not_duplicate&#39;)">'+esc(t().fb_not_dup)+'</button>';
   if(ln==='missing_setup') return '<button class="btn primary xs" onclick="fbBankMap()">'+(ar?'أكمل الربط':'Complete setup')+'</button>';
   if(ln==='needs_faisal_approval'){
-    if(!_fb.canApproveHigh) return '<span class="muted" style="font-size:10.5px">'+esc(t().fb_no_approve_perm)+'</span> <button class="btn ghost xs" onclick="'+cls()+'">'+esc(t().fb_act_classify)+'</button>';
+    // ALWAYS render the actions — the SERVER is the authority (_fb_do_approval) and surfaces
+    // "ما عندك صلاحية…" via the toast only when it actually refuses. No brittle client gate.
     return '<button class="btn green xs" onclick="fbAct(&#39;'+id+'&#39;,&#39;approve&#39;)">'+esc(t().fb_approve)+'</button> <button class="btn ghost xs" onclick="fbActReason(&#39;'+id+'&#39;,&#39;reject&#39;)">'+esc(t().fb_reject)+'</button> <button class="btn ghost xs" onclick="fbActReason(&#39;'+id+'&#39;,&#39;clarify&#39;)">'+esc(t().fb_clarify)+'</button>';
   }
   if(ln==='rejected') return '<button class="btn ghost xs" onclick="'+cls()+'">'+esc(t().fb_act_classify)+'</button>';
@@ -23594,7 +23595,8 @@ async function fbMapping(){ var ar=(L==='ar'), b=document.getElementById('fbBody
   var m=(d&&d.mappings)||{}, accts=(d&&d.daftra_accounts)||[], ccs=(d&&d.cost_centers)||[];
   h+='<div style="'+fbCard()+'"><b>'+(ar?'ربط التصنيفات بحسابات دافترة':'Category → Daftra account mapping')+'</b><div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'لكل تصنيف اختر حساب دافترة المقابل — مطلوب قبل تجهيز القيود.':'Pick the matching Daftra account for each category — required before journals.')+'</div>';
   if(!accts.length) h+='<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:8px;padding:9px;margin-top:8px;font-size:11.5px">'+(ar?'ما فيه حسابات دافترة مستوردة. استورد أول من «استيراد دافترة»، أو اكتب اسم الحساب يدويًا الحين.':'No Daftra accounts imported. Import from “Daftra Import” first, or type the account name manually.')+' <button class="btn ghost xs" onclick="fbGo(&#39;daftra&#39;)">'+(ar?'افتح استيراد دافترة':'open Daftra Import')+'</button></div>';
-  var cats=['cleaning_provider','maintenance','wifi','software_subscription','bank_fee','channel_payout','owner_payment','operating_expense'];
+  var cats=['cleaning_provider','maintenance','wifi','software_subscription','bank_fee','channel_payout','owner_payment','operating_expense','owner_fitout_funding'];
+  function fbMapCatLabel(c){ var mp={owner_fitout_funding:['تمويل تجهيز الشقق من الملاك (دائن)','Owner fit-out funding (credit)'],channel_payout:['تحويلات القنوات','Channel payout'],owner_payment:['دفعات الملاك','Owner payment'],operating_expense:['مصروف تشغيلي','Operating expense'],cleaning_provider:['نظافة','Cleaning'],maintenance:['صيانة','Maintenance'],wifi:['إنترنت','Wi-Fi'],software_subscription:['اشتراكات','Software'],bank_fee:['رسوم بنك','Bank fee']}; var v=mp[c]; return v?(ar?v[0]:v[1]):c; }
   function acctCtl(c, cur){
     if(accts.length){
       return '<select id="map_'+c+'" style="'+inp+';min-width:170px"><option value="">'+(ar?'— اختر حساب —':'— pick account —')+'</option>'+accts.map(function(a){ var v=(a.source_id||'')+'::'+(a.display_name||''); var sel=(cur.daftra_account_id&&String(cur.daftra_account_id)===String(a.source_id))?' selected':''; return '<option value="'+esc(v)+'"'+sel+'>'+esc(a.display_name||a.source_id)+'</option>'; }).join('')+'</select>';
@@ -23604,7 +23606,7 @@ async function fbMapping(){ var ar=(L==='ar'), b=document.getElementById('fbBody
   function ccCtl(c, cur){ if(!ccs.length) return ''; return '<select id="cc_'+c+'" style="'+inp+'"><option value="">'+(ar?'مركز تكلفة (اختياري)':'cost center (optional)')+'</option>'+ccs.map(function(a){ var v=(a.source_id||'')+'::'+(a.display_name||''); var sel=(cur.daftra_cost_center_id&&String(cur.daftra_cost_center_id)===String(a.source_id))?' selected':''; return '<option value="'+esc(v)+'"'+sel+'>'+esc(a.display_name||a.source_id)+'</option>'; }).join('')+'</select>'; }
   h+='<div style="display:flex;flex-direction:column;gap:7px;margin-top:10px">'+cats.map(function(c){ var mm=m[c]||{};
     var chip=mm.daftra_account_id?fbChip(esc(mm.daftra_account_name||mm.daftra_account_id),'ok'):(mm.daftra_account_name?fbChip((ar?'بالاسم — يحتاج ربط':'by name — needs link'),'warn'):fbChip(ar?'غير مربوط':'unmapped','warn'));
-    return '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border)"><span style="flex:1;min-width:120px;font-size:12px;font-weight:600">'+esc(c)+'</span>'+acctCtl(c,mm)+ccCtl(c,mm)+'<button class="btn primary xs" onclick="fbSaveMapping(&#39;'+c+'&#39;)">'+(ar?'حفظ':'Save')+'</button>'+chip+'</div>'; }).join('')+'</div></div>';
+    return '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border)"><span style="flex:1;min-width:120px;font-size:12px;font-weight:600">'+esc(fbMapCatLabel(c))+'</span>'+acctCtl(c,mm)+ccCtl(c,mm)+'<button class="btn primary xs" onclick="fbSaveMapping(&#39;'+c+'&#39;)">'+(ar?'حفظ':'Save')+'</button>'+chip+'</div>'; }).join('')+'</div></div>';
   // card mapping + add form
   var cards={}; try{ cards=(await api('/api/fb/cards')).cards||{}; }catch(_){}
   h+='<div style="'+fbCard()+'"><b>'+(ar?'بطاقات الموظفين':'Employee cards')+'</b><div class="muted" style="font-size:11px;margin-top:4px">'+(ar?'ربط آخر ٤ أرقام بالموظف (يساعد بتصنيف حركة البطاقات).':'Map last-4 digits to an employee.')+'</div>';
@@ -35170,6 +35172,10 @@ def _fb_line_is_bank(ln, mapped):
         mn = _fb_ar_norm(m["name"])
         if mn and len(mn) >= 3 and mn in aname:
             return True
+        # trailing/last-4 digits of the mapped account (e.g. الراجحي «1039») appearing as a whole token in the line
+        for dg in re.findall(r"\d{3,}", str(m["code"] or "") + " " + str(m["name"] or "")):
+            if re.search(r"(?<!\d)" + re.escape(dg) + r"(?!\d)", blob):
+                return True
     return False
 
 def _fb_journal_objects(mapped):
@@ -35402,6 +35408,8 @@ def _fb_dup_score_journal(txn, jo, mapped):
     cdesc = " ".join((c.get("description") or c.get("account_name") or "") for c in counterpart) + " " + (entry.get("description") or "")
     if _fb_text_sim(txn.get("description"), cdesc) >= 0.5:    # weak tie-break only, capped at 84
         conf = min(84, conf + 6)
+    if mapped and not jo.get("bank_lines"):    # mapped, but THIS journal has no recognised bank line → an amount match on a
+        conf = min(conf, 69)                   # counterpart line must NOT masquerade as a likely duplicate (→ needs_manual_review/review)
     return conf, ar, en, any_line, counterpart, meta
 
 def _fb_dup_status_for(score):
@@ -36785,6 +36793,16 @@ def _fb_resolve_status(item):
         return R("possible", "needs_decision", "احتمال مكرر", "Possible duplicate",
                  "open_compare", "راجع المطابقة", "Review comparison", rar, ren,
                  can_link_existing_daftra=True, blocking_reason="possible_duplicate")
+    if dq == "needs_manual_review":                  # medium-confidence (50-69) — a DECISION, not a dead 'needs review'
+        if mt == "distributed_subset_match":
+            return R("possible", "needs_decision", "توزيع محتمل — يحتاج قرار", "Possible distribution — decide",
+                     "open_compare", "راجع التوزيع", "Review distribution", rar, ren,
+                     can_link_existing_daftra=True, blocking_reason="possible_duplicate")
+        return R("manual_review", "needs_decision", "يحتاج قرار يدوي", "Needs manual decision",
+                 "open_compare", "راجع المطابقة", "Review comparison",
+                 rar or "تطابق متوسط — راجع المرشحات أو علّمها «مو مكرر»",
+                 ren or "medium-confidence match — review candidates or mark not-a-duplicate",
+                 can_link_existing_daftra=True, blocking_reason="possible_duplicate")
     if dq == "missing_bank_account_mapping":
         return R("missing_setup", "missing_setup", "ناقص إعداد", "Missing setup",
                  "complete_setup", "أكمل ربط حساب البنك", "Complete bank mapping",
@@ -36851,11 +36869,19 @@ def _fb_resolve_status(item):
                  "promote", "حوّل للسجل المالي", "Move to ledger",
                  "جديدة وغير موجودة في دافترة — حوّلها للسجل المالي", "new, not in Daftra — move to ledger",
                  can_promote_to_ledger=True)
+    if kind == "bank" and dq in (None, "", "not_checked"):     # safety net — should be caught above
+        return R("needs_dup_check", "needs_dup_check", "يحتاج مطابقة دافترة", "Needs Daftra check",
+                 "dup_check", "تأكد من التكرار", "Check duplicates",
+                 "شغّل فحص التكرار مع دافترة قبل أي ترحيل", "run the Daftra duplicate check first",
+                 blocking_reason="not_checked")
     if not has_cat:
         return R("needs_classify", "needs_classify", "يحتاج تصنيف", "Needs classification",
                  "classify", "صنّف", "Classify", "يحتاج تصنيف", "needs classification")
-    return R("needs_review", "needs_review", "يحتاج مراجعة", "Needs review", "review", "راجع", "Review",
-             "يحتاج مراجعة", "needs review")
+    # classified + dup-checked-clean = genuinely ready. Never park an actionable item in a dead 'needs_review'.
+    return R("ready_for_journal", "ready_for_journal", "جاهز للسجل المالي", "Ready for ledger",
+             "promote", "حوّل للسجل المالي", "Move to ledger",
+             "مصنّفة ومفحوصة وما هي بدافترة — حوّلها للسجل المالي", "classified & checked, not in Daftra — move to ledger",
+             can_promote_to_ledger=True)
 
 _FB_UNMATCHED_REASONS = {
     "daftra_journals_not_imported": ("قيود دافترة غير مستوردة للفترة", "Daftra journals not imported for the period", "استيراد القيود"),
@@ -37292,6 +37318,7 @@ async def _api_fb_inbox(request):
         return _json({"error": "unauthorized"}, 401)
     if _req_role(request) == "ops":
         return _json({"error": "forbidden_ops"}, 403)   # ops cannot see the finance inbox/profitability
+    print("fb_inbox role=", _req_role(request), "can_high=", can_finance_approve_high_value(request))   # diag: confirm Faisal's token resolves to admin/owner
     return _json({"ok": True, "can_approve_high_value": can_finance_approve_high_value(request),
                   "role": _req_role(request), **_fb_inbox({"filter": request.query.get("filter")})})
 
@@ -37430,6 +37457,28 @@ async def _api_fb_entry(request):
             else:
                 blocked.append({"id": iid, "error": r.get("error")})
         return _json({"ok": True, "approved": done, "blocked": len(blocked), "blocked_items": blocked})
+    if action == "classify":                          # classify must work on BANK txns too (was ledger-only → 404 → loop)
+        iid0 = (b.get("id") or "").strip()
+        bx = _fb_bank.get(iid0)
+        if bx is not None:
+            before = {"category": bx.get("category"), "status": bx.get("status")}
+            cat = (b.get("category") or "").strip()
+            if cat:
+                bx["category"] = cat
+            if b.get("apartment") is not None:
+                bx["apartment"] = (b.get("apartment") or "").strip()
+            if b.get("description") not in (None, ""):
+                bx["note"] = str(b.get("description"))[:300]
+            if b.get("flow"):
+                bx["daftra_flow_type"] = str(b.get("flow"))[:48]; bx["flow_manual"] = True
+            bx["status"] = "reviewed" if (((bx.get("category") or "unknown") != "unknown") or b.get("flow")) else "needs_review"
+            bx["reviewed_by"] = actor
+            bx["reviewed_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+            _fb_save("finance_bank_transactions.json", _fb_bank)
+            _fb_audit_add(actor, "classify", "bank_txn", iid0, before=before,
+                          after={"category": bx.get("category"), "status": bx.get("status")})
+            return _json({"ok": True, "txn": bx})
+        # not a bank txn → fall through to the ledger-entry classify below
     eid = (b.get("id") or "").strip()
     e = _fb_ledger.get(eid)
     if not e:
