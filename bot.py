@@ -22575,7 +22575,7 @@ async function fbDaily(){
   }
   var flows=(rd&&rd.flows)||{}; function fl(k){ return flows[k]||{count:0,total:'0.00'}; }
   var co=['cash_out_expense','cash_out_employee_advance','cash_out_bank_fee','cash_out_owner_payment','cash_out_supplier_payment','cash_out_unknown'];
-  var ci=['cash_in_booking_revenue','cash_in_partner_funding','cash_in_recycled_company_revenue','cash_in_other_activity','cash_in_unknown'];
+  var ci=['cash_in_booking_revenue','cash_in_owner_fitout_funding','cash_in_partner_funding','cash_in_recycled_company_revenue','cash_in_other_activity','cash_in_unknown'];
   function flowChips(keys){ return keys.map(function(k){ var f=fl(k); if(!f.count) return ''; return fbChip(esc((ar?f.ar:f.en)||k)+' '+f.count,'mut'); }).filter(Boolean).join(''); }
   var coH=flowChips(co), ciH=flowChips(ci);
   if(coH||ciH){
@@ -22881,7 +22881,7 @@ function fbBankFlows(out){ var ar=(L==='ar'); return out?[
   ['cash_out_expense',ar?'مصروف مباشر':'Direct expense'],['cash_out_employee_advance',ar?'عهدة موظف':'Employee advance'],
   ['cash_out_supplier_payment',ar?'دفعة مورد':'Supplier payment'],['cash_out_owner_payment',ar?'دفعة مالك':'Owner payment'],
   ['cash_out_bank_fee',ar?'رسوم بنكية':'Bank fee'],['cash_out_unknown',ar?'سحب غير معروف':'Unknown out']]:[
-  ['cash_in_booking_revenue',ar?'حوالة حجوزات':'Booking revenue'],['cash_in_partner_funding',ar?'تمويل من جاري الشريك':'Partner funding'],
+  ['cash_in_booking_revenue',ar?'حوالة حجوزات':'Booking revenue'],['cash_in_owner_fitout_funding',ar?'حوالات واردة لتجهيز الشقق من الملاك':'Owner fit-out funding'],['cash_in_partner_funding',ar?'تمويل من جاري الشريك':'Partner funding'],
   ['cash_in_recycled_company_revenue',ar?'تمويل من إيرادات الشركة':'Company funding'],['cash_in_other_activity',ar?'إيراد نشاط آخر':'Other activity'],
   ['cash_in_unknown',ar?'وارد غير معروف':'Unknown in']]; }
 function fbCatLabel(v){ var a=fbCats().filter(function(c){return c[0]===v;})[0]; return a?a[1]:(v||''); }
@@ -22896,6 +22896,7 @@ function fbBankPrev(){ var ar=(L==='ar'); var c=_fb.bcls||{}; var amt=fbMoney(c.
   } else { var cr;
     if(c.flow==='cash_in_partner_funding') cr=(ar?'جاري الشريك':'Partner current a/c');
     else if(c.flow==='cash_in_booking_revenue') cr=(ar?'إيرادات الحجوزات':'Booking revenue');
+    else if(c.flow==='cash_in_owner_fitout_funding') cr=(ar?'تمويل تجهيز الشقق من الملاك':'Owner fit-out funding');
     else if(c.flow==='cash_in_recycled_company_revenue') cr=(ar?'تمويل من إيرادات الشركة':'Company funding');
     else if(c.flow==='cash_in_other_activity') cr=(ar?'إيراد نشاط آخر':'Other income');
     else cr=(ar?'وارد غير مصنف':'Unclassified income');
@@ -22905,7 +22906,7 @@ function fbBankPrev(){ var ar=(L==='ar'); var c=_fb.bcls||{}; var amt=fbMoney(c.
 function fbBankPrevUpdate(){ var el=document.getElementById('fbbPrev'); if(el) el.innerHTML=(_fb.bcls&&_fb.bcls.flow?fbBankPrev():''); }
 async function fbBankReview(id){ var ar=(L==='ar'); var x=(_fb.bankTx||{})[id]; if(!x){ toast('⚠'); return; } await fbLoadRefs();
   var deb=(x.debit&&x.debit!=='0.00');
-  _fb.bcls={id:id, out:deb, amount:(deb?x.debit:x.credit), flow:'', cat:((x.category&&x.category!=='unknown')?x.category:''), emp:'', desc:x.description, apt:x.apartment, note:(x.note||'')};
+  _fb.bcls={id:id, out:deb, amount:(deb?x.debit:x.credit), flow:'', cat:((x.category&&x.category!=='unknown')?x.category:''), emp:'', owner:(x.owner||''), desc:x.description, apt:x.apartment, note:(x.note||'')};
   openDrawer(ar?'مراجعة عملية بنكية':'Review bank transaction', (x.date||'')+' · '+(deb?'-':'+')+fbMoney(deb?x.debit:x.credit));
   fbBankReviewRender();
   setDrawerFoot('<button class="btn primary sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,false)">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="fbBankReviewSave(&#39;'+id+'&#39;,true)">'+esc(t().fb_applysimilar)+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
@@ -22918,13 +22919,14 @@ function fbBankReviewRender(){ var ar=(L==='ar'); var c=_fb.bcls||{}; var out=c.
     +'<select id="fbb_flow" onchange="_fb.bcls.flow=this.value;fbBankReviewRender()" style="'+fbInp()+'"><option value="">'+(ar?'— اختر —':'— pick —')+'</option>'+flows.map(function(f){ return '<option value="'+f[0]+'"'+(c.flow===f[0]?' selected':'')+'>'+esc(f[1])+'</option>'; }).join('')+'</select>';
   if(out&&c.flow==='cash_out_expense'){ h+='<label class="muted" style="font-size:11px">'+(ar?'التصنيف':'Category')+'</label>'+fbCatSelect('fbb_cat',c.cat)+'<div class="muted" style="font-size:10.5px;margin-top:3px">'+(ar?'لو موزّع على أكثر من مصروف، استخدم «المطابقة» بعد الفحص.':'For a split across expenses, use the match drawer after checking.')+'</div>'; }
   if(out&&c.flow==='cash_out_employee_advance'){ h+='<label class="muted" style="font-size:11px">'+(ar?'اسم الموظف / حساب العهدة':'Employee / custody account')+'</label><input id="fbb_emp" value="'+esc(c.emp||'')+'" oninput="_fb.bcls.emp=this.value;fbBankPrevUpdate()" placeholder="'+(ar?'مثال: عهدة فهد':'e.g. Faisal custody')+'" style="'+fbInp()+'"><div class="muted" style="font-size:10.5px;margin-top:3px">'+(ar?'العهدة: التحويل يثبتها، والفواتير تقفلها لاحقًا بدون حركة بنك جديدة.':'The transfer opens the advance; invoices settle it later — no new bank line.')+'</div>'; }
+  if(!out&&c.flow==='cash_in_owner_fitout_funding'){ h+='<label class="muted" style="font-size:11px">'+(ar?'المالك (صاحب التمويل)':'Owner (funder)')+'</label><input id="fbb_owner" value="'+esc(c.owner||'')+'" oninput="_fb.bcls.owner=this.value;fbBankPrevUpdate()" placeholder="'+(ar?'اسم المالك':'Owner name')+'" style="'+fbInp()+'"><div class="muted" style="font-size:10.5px;margin-top:3px">'+(ar?'مبلغ من المالك لتجهيز/فرش شقة — يُسجَّل تمويلًا، مو إيراد حجوزات. اربط «owner_fitout_funding» بحساب دافترة من الإعداد.':'Money from the owner to fit out an apartment — recorded as funding, not booking revenue. Map "owner_fitout_funding" to a Daftra account in Setup.')+'</div>'; }
   h+='<label class="muted" style="font-size:11px">'+(ar?'الشقة / مركز التكلفة':'Apartment / cost center')+'</label>'+fbAptSelect('fbb_apt',c.apt)
     +'<label class="muted" style="font-size:11px">'+(ar?'ملاحظة (اختياري)':'Note (optional)')+'</label><input id="fbb_note" value="'+esc(c.note||'')+'" oninput="_fb.bcls.note=this.value" style="'+fbInp()+'">'
     +'<div id="fbbPrev">'+(c.flow?fbBankPrev():'')+'</div>';
   setDrawerBody(h);
   var ce=document.getElementById('fbb_cat'); if(ce) ce.onchange=function(){ _fb.bcls.cat=fbCatValue('fbb_cat'); fbBankPrevUpdate(); }; }
 async function fbBankReviewSave(id, similar){ var ar=(L==='ar'); var c=_fb.bcls||{};
-  var body={id:id,action:'bank_classify',category:(document.getElementById('fbb_cat')?fbCatValue('fbb_cat'):(c.cat||'')),flow:(c.flow||''),employee:(c.emp||'')};
+  var body={id:id,action:'bank_classify',category:(document.getElementById('fbb_cat')?fbCatValue('fbb_cat'):(c.cat||'')),flow:(c.flow||''),employee:(c.emp||''),owner:(c.owner||'')};
   var a=document.getElementById('fbb_apt'), n=document.getElementById('fbb_note');
   if(a){ body.apartment=a.value; } if(n){ body.note=n.value; } if(similar){ body.apply_similar=true; }
   var r; try{ r=await post('/api/fb/entry',body); }catch(_){ r=null; }
@@ -35342,6 +35344,8 @@ _FB_CUSTODY_KW = ("عهد", "عهده", "سلفه", "سلف", "custody", "advanc
 _FB_PARTNER_KW = ("جاري", "شريك", "partner", "current account", "current acct")
 _FB_FUNDING_KW = ("تمويل", "اعاده تمويل", "funding", "capital injection")
 _FB_BOOKING_KW = ("حجز", "حجوزات", "ايراد", "booking", "reservation", "payout", "channel", "revenue", "income")
+# Money owners send specifically to prepare/furnish/set-up an apartment (NOT booking revenue, NOT partner funding)
+_FB_FITOUT_KW = ("تجهيز", "تجهيز شقق", "تجهيز شقه", "فرش", "تاثيث", "تأثيث", "اثاث", "أثاث", "fitout", "fit-out", "fit out", "furnish", "furnishing", "setup", "set-up")
 _FB_FEEACC_KW = ("رسوم", "عموله", "fee", "charge")
 _FB_FLOW_LABELS = {
     "cash_out_expense": ("سحب لمصروف", "Expense out"),
@@ -35351,6 +35355,7 @@ _FB_FLOW_LABELS = {
     "cash_out_owner_payment": ("دفعة مالك", "Owner payment"),
     "cash_out_supplier_payment": ("دفعة مورد", "Supplier payment"),
     "cash_in_booking_revenue": ("إيراد حجوزات", "Booking revenue"),
+    "cash_in_owner_fitout_funding": ("وارد تجهيز شقة من مالك", "Owner fit-out funding"),
     "cash_in_partner_funding": ("تمويل من جاري الشريك", "Partner funding"),
     "cash_in_recycled_company_revenue": ("إعادة تمويل من إيرادات الشركة", "Recycled revenue"),
     "cash_in_other_activity": ("إيراد نشاط آخر", "Other activity income"),
@@ -35387,6 +35392,8 @@ def _fb_flow_type(txn):
             return "cash_out_bank_fee"
         return "cash_out_expense" if blob.strip() else "cash_out_unknown"
     else:
+        if has(_FB_FITOUT_KW):
+            return "cash_in_owner_fitout_funding"
         if has(_FB_PARTNER_KW):
             return "cash_in_partner_funding"
         if has(_FB_FUNDING_KW):
@@ -36639,6 +36646,11 @@ def _fb_resolve_status(item):
         return R("needs_faisal", "needs_faisal_approval", "يحتاج اعتماد فيصل", "Needs Faisal approval",
                  "faisal", "إرسال لاعتماد فيصل", "Send for Faisal approval",
                  "المبلغ ٣٠٠٠ أو أكثر", "amount ≥ 3,000", can_approve_high_value=True)
+    if item.get("daftra_flow_type") == "cash_in_owner_fitout_funding" and not (_fb_mappings.get("owner_fitout_funding") or {}).get("daftra_account_id"):
+        return R("fitout_unmapped", "missing_setup", "ناقص ربط حساب التمويل", "Funding account unmapped",
+                 "map_fitout", "اربط حساب تمويل تجهيز الشقق", "Map fit-out funding account",
+                 "حساب تمويل تجهيز الشقق من الملاك غير مربوط في دافترة", "owner fit-out funding account not mapped",
+                 blocking_reason="fitout_funding_account_unmapped")
     # A ledger entry is ALREADY in the internal ledger — it must NEVER loop back to ready_for_journal
     # or generic needs_review. The whole post-promote lifecycle lives in the journal_draft lane.
     if kind == "ledger":
@@ -37207,8 +37219,12 @@ async def _api_fb_entry(request):
         if b.get("flow"):                                   # accountant's accounting-flow choice (manual override)
             bx["daftra_flow_type"] = str(b.get("flow"))[:48]
             bx["flow_manual"] = True
+            if b.get("flow") == "cash_in_owner_fitout_funding" and (bx.get("category") or "unknown") == "unknown":
+                bx["category"] = "owner_fitout_funding"     # local category mapped to the Daftra credit account
         if b.get("employee") not in (None, ""):
             bx["custody_employee"] = str(b.get("employee"))[:80]
+        if b.get("owner") not in (None, ""):                # owner who sent the fit-out funding
+            bx["owner"] = str(b.get("owner"))[:80]
         # classified if a real category OR an accounting flow was chosen
         now_iso = datetime.now(TZ).isoformat(timespec="seconds")
         bx["status"] = "reviewed" if (((bx.get("category") or "unknown") != "unknown") or b.get("flow")) else "needs_review"
