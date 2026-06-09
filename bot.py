@@ -10986,6 +10986,7 @@ DASHBOARD_HTML = """<!doctype html>
   --sh-md:0 6px 16px rgba(26,24,21,0.07),0 2px 4px rgba(26,24,21,0.04);
   --sh-lg:0 16px 40px rgba(26,24,21,0.10),0 4px 12px rgba(26,24,21,0.06);
   --sh-drawer:-12px 0 40px rgba(26,24,21,0.10);
+  --ease:cubic-bezier(0.23,1,0.32,1);   /* project ease-out — already used inline ~10×; tokenized here */
 
   --side:232px;
   --drawer:520px;
@@ -11304,6 +11305,12 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .card-title{font-size:13.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:7px}
 .card-sub{color:var(--mut);font-size:11.5px}
 .card-actions{display:flex;gap:5px;align-items:center}
+/* Whole-card-clickable affordance — reuses the .kpi hover + .btn press + nav .on vocabulary so a tappable card finally feels tappable. */
+.card.tap{cursor:pointer;transition:transform .14s var(--ease),box-shadow .16s ease,border-color .16s ease}
+.card.tap:hover{border-color:var(--gold);box-shadow:var(--sh-sm);transform:translateY(-1px)}
+.card.tap:active{transform:scale(.985)}
+.card.tap.on{border-color:var(--gold);background:var(--gold-tint)}
+@media (prefers-reduced-motion:reduce){ .card.tap:hover,.card.tap:active{transform:none} }
 
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
@@ -14696,7 +14703,7 @@ function renderCommandCenter(){
     ['balanced_recovery',ar?'تعافي متوازن':'Balanced Recovery',ar?'نزول موزون للـ٧ أيام بدون كسر الحد الأدنى.':'Balanced 7-day step-down, no floor break.'],
     ['protect_adr',ar?'حماية السعر':'Protect ADR',ar?'يحمي الشقق ذات الطلب الجيد أو السعر المنخفض.':'Protect strong-demand / low-priced units.'],
     ['review',ar?'مراجعة يدوية':'Review Manually',ar?'افتح العرض التفصيلي وقرر وحدة وحدة.':'Open the detailed view, decide unit by unit.']];
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-bottom:6px">'+acts.map(function(a){ var on=(_pcc.action===a[0]); return '<div class="card" style="margin:0;padding:11px 12px;cursor:pointer;border:1px solid '+(on?'var(--gold)':'var(--line)')+'" onclick="pccAct(&#39;'+a[0]+'&#39;)"><div style="font-weight:800;font-size:13px">'+esc(a[1])+'</div><div class="muted" style="font-size:10.5px;margin-top:3px;line-height:1.5">'+esc(a[2])+'</div></div>'; }).join('')+'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-bottom:6px">'+acts.map(function(a){ var on=(_pcc.action===a[0]); return '<div class="card tap'+(on?' on':'')+'" style="margin:0;padding:11px 12px" onclick="pccAct(&#39;'+a[0]+'&#39;)"><div style="font-weight:800;font-size:13px">'+esc(a[1])+'</div><div class="muted" style="font-size:10.5px;margin-top:3px;line-height:1.5">'+esc(a[2])+'</div></div>'; }).join('')+'</div>';
   h+='<div class="muted" style="font-size:10.5px;margin-bottom:10px">'+(ar?'كل الأزرار هنا معاينة فقط — ما يتغير شيء في Hostaway.':'Every button here is preview only — nothing changes in Hostaway.')+'</div>';
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input value="'+esc(_pcc.q||'')+'" oninput="_pcc.q=this.value;pccBoard()" placeholder="🔎 '+(ar?'بحث شقة':'Search unit')+'" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)">'
     +'<select onchange="_pcc.risk=this.value;pccBoard()" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"><option value="">'+(ar?'كل المخاطر':'All risk')+'</option><option value="high"'+(_pcc.risk==='high'?' selected':'')+'>'+(ar?'خطر عالي':'High')+'</option><option value="medium"'+(_pcc.risk==='medium'?' selected':'')+'>'+(ar?'خطر متوسط':'Medium')+'</option></select></div>';
