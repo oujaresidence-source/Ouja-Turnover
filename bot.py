@@ -14982,17 +14982,35 @@ function pccBoard(){
   if(!units.length){ wrap.innerHTML='<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه شقق بهالفلتر. وسّع النطاق أو راجع «الإيرادات».':'No units match. Widen the filter or check Revenue.')+'</div>'; return; }
   wrap.innerHTML=units.slice(0,60).map(pccCard).join('')+(units.length>60?('<div class="muted" style="font-size:11px;text-align:center;margin-top:6px">'+(ar?('عرض ٦٠ من '+units.length):('showing 60 of '+units.length))+'</div>'):'');
 }
+/* The board's headline suggestion goes through the SAME rescue logic as the preview — anchored on the
+   live Hostaway price, demand-aware, NEVER a median-chasing raise. (balanced_recovery = the safe board lens;
+   raises only ever appear under an explicit Protect-ADR preview.) */
+function pccCardReco(u){
+  var cal0=(u.calendar_14||[])[0]||{}; var rec=u.recommendation||{}, fl=u.floor||{}, hi=u.history||{};
+  var cp=(cal0.current_price!=null?cal0.current_price:rec.current_price);
+  var flv=(cal0.floor!=null?cal0.floor:fl.final_floor);
+  var med=(cal0.median!=null?cal0.median:hi.median_adr);
+  var demand=((D.pcc||{}).demand||{}).signal||'normal';
+  var dout=(cal0.date?_pccDaysOut(cal0.date,_pccToday()):0);
+  return pccRescueReco('balanced_recovery', cp, flv, med, demand, dout, _pccRiyadhHour());
+}
+function pccKindChip(kind){ var ar=(L==='ar');
+  if(kind==='hold_low') return {t:(ar?'السعر منخفض أصلًا':'Already low'),c:'mut'};
+  if(kind==='drop') return {t:(ar?'ننزّل':'Lower'),c:'gold'};
+  if(kind==='raise') return {t:(ar?'رفع لطيف':'Gentle raise'),c:'green'};
+  return {t:(ar?'نثبّت':'Hold'),c:'mut'}; }
 function pccCard(u){
   var ar=(L==='ar'); var rec=u.recommendation||{}, rk=u.risk||{}, cur=u.current||{}, fl=u.floor||{};
   var rkTone=(rk.risk_level==='high'?'red':(rk.risk_level==='medium'?'gold':'green'));
   var rkTxt=(rk.risk_level==='high'?(ar?'خطر عالي':'High risk'):(rk.risk_level==='medium'?(ar?'خطر متوسط':'Medium'):(ar?'خطر منخفض':'Low')));
   var conf=rec.confidence, confTxt=(conf==='strong_data'?(ar?'بيانات قوية':'Strong data'):(conf==='limited_data'?(ar?'بيانات قليلة':'Limited data'):(ar?'شقق مشابهة':'Similar units')));
-  var cp=rec.current_price, sp=rec.suggested_price, delta=(sp!=null&&cp!=null)?(sp-cp):null;
-  var deltaTxt=(delta==null?'—':((delta>0?'+':'')+fmt(delta)));
+  var cal0=(u.calendar_14||[])[0]||{}; var cp=(cal0.current_price!=null?cal0.current_price:rec.current_price);
+  var rr=pccCardReco(u); var sp=rr.price; var delta=(sp!=null&&cp!=null)?(sp-cp):null;
+  var deltaTxt=(delta==null?'—':((delta>0?'+':'')+fmt(delta))); var rrChip=pccKindChip(rr.kind);
   var h='<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;align-items:center"><b style="font-size:13.5px">'+esc(u.name||('#'+u.listing_id))+'</b><span style="display:flex;gap:5px;flex-wrap:wrap">'+pccChip(rkTxt,rkTone)+pccChip(confTxt,'info')+(u.enabled_for_pricing?'':pccChip(ar?'غير مفعّلة':'Off','mut'))+'</span></div>'
     +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12.5px">'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'Hostaway الآن':'Hostaway now')+'</div><b>'+(cp!=null?fmt(cp):'—')+'</b></div>'
-    +'<div><div class="muted" style="font-size:10px">'+(ar?'اقتراح عوجا':'Ouja suggestion')+'</div><b style="color:'+(delta!=null&&delta<0?'#a23b30':(delta!=null&&delta>0?'#1f6e45':'var(--text)'))+'">'+(sp!=null?fmt(sp):'—')+'</b> <span class="muted" style="font-size:10.5px">'+deltaTxt+'</span></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'اقتراح عوجا':'Ouja suggestion')+'</div><b style="color:'+(delta!=null&&delta<0?'#a23b30':(delta!=null&&delta>0?'#1f6e45':'var(--text)'))+'">'+(sp!=null?fmt(sp):'—')+'</b> <span class="muted" style="font-size:10.5px">'+deltaTxt+'</span> '+pccChip(rrChip.t,rrChip.c)+'</div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'الحد الأدنى':'Floor')+'</div><b>'+(fl.final_floor!=null?fmt(fl.final_floor):(ar?'—':'n/a'))+'</b></div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'فاضي ٧/١٤':'Empty 7/14')+'</div><b>'+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+'</b></div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'مهدد ٧ أيام':'At risk 7d')+'</div><b style="color:#a23b30">'+fmt(rk.revenue_at_risk_7||0)+'</b></div></div>'
@@ -15003,15 +15021,19 @@ function pccCard(u){
 }
 function pccMini(u){
   var cal=(u.calendar_14||[]); if(!cal.length) return '';
-  var cells=cal.slice(0,14).map(function(x){ var sp=x.suggested_price, cp=x.current_price; var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
+  var demand=((D.pcc||{}).demand||{}).signal||'normal'; var hr=_pccRiyadhHour(); var today=_pccToday();
+  var cells=cal.slice(0,14).map(function(x){ var cp=x.current_price;
+    var sp=pccRescueReco('balanced_recovery', cp, x.floor, x.median, demand, _pccDaysOut(x.date,today), hr).price;
+    var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="muted" style="font-size:10px;margin-inline-end:4px">'+(L==='ar'?'١٤ يوم:':'14d:')+'</span>'+cells+'</div>';
 }
 function pccWhy(lid){
   var ar=(L==='ar'); var d=D.pcc||{}; var u=(d.units||[]).filter(function(x){return String(x.listing_id)===String(lid);})[0];
   if(!u){ return; }
   var rec=u.recommendation||{}, fl=u.floor||{}, hi=u.history||{}, cur=u.current||{}, rk=u.risk||{}, dm=d.demand||{};
-  var cp=rec.current_price, sp=rec.suggested_price, delta=(sp!=null&&cp!=null)?(sp-cp):null;
-  var act=(delta==null?(ar?'مراجعة':'review'):(delta<0?(ar?'خفض':'drop'):(delta>0?(ar?'رفع':'raise'):(ar?'ثبات':'hold'))));
+  var cal0=(u.calendar_14||[])[0]||{}; var cp=(cal0.current_price!=null?cal0.current_price:rec.current_price);
+  var rr=pccCardReco(u); var sp=rr.price; var delta=(sp!=null&&cp!=null)?(sp-cp):null;
+  var act=(rr.kind==='drop'?(ar?'ننزّل':'lower'):(rr.kind==='raise'?(ar?'رفع لطيف':'gentle raise'):(rr.kind==='hold_low'?(ar?'منخفض أصلًا':'already low'):(ar?'نثبّت':'hold'))));
   var med=hi.median_adr, adr70=(med!=null?Math.round(med*0.7):null);
   var belowFloor=(sp!=null&&fl.final_floor!=null&&sp<fl.final_floor);
   function row(lbl,val){ return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)"><span class="muted">'+esc(lbl)+'</span><b>'+val+'</b></div>'; }
@@ -15022,7 +15044,7 @@ function pccWhy(lid){
     +row(ar?'Hostaway الآن':'Hostaway now',(cp!=null?fmt(cp)+' '+(ar?'ر.س':'SAR'):'—'))
     +row(ar?'المقترح':'Suggested',(sp!=null?fmt(sp)+' '+(ar?'ر.س':'SAR'):'—'))
     +row(ar?'التغيير':'Change',(delta==null?'—':((delta>0?'+':'')+fmt(delta)+' '+(ar?'ر.س':'SAR'))))
-    +'<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0"><span class="muted">'+(ar?'الإجراء':'Action')+'</span>'+pccChip(act,(act===(ar?'خفض':'drop')?'gold':(act===(ar?'رفع':'raise')?'green':'info')))+'</div></div>';
+    +'<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0"><span class="muted">'+(ar?'الإجراء':'Action')+'</span>'+pccChip(act,(rr.kind==='drop'?'gold':(rr.kind==='raise'?'green':'mut')))+'</div></div>';
   // floor formula
   var floorInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'
     +(ar?'الحد الأدنى الآمن = الأعلى بين الحد الأدنى اليدوي و٧٠٪ من متوسط سعر الشقة المحقق.':'Safe floor = max(manual floor, 70% of the unit’s realized median ADR).')+'<br>'
@@ -15038,8 +15060,8 @@ function pccWhy(lid){
   // history: snapshot median only — full detail in the Lab
   var histInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+(ar?'متوسط سعر الشقة المحقق: ':'Realized median ADR: ')+(med!=null?fmt(med)+' '+(ar?'ر.س':'SAR'):(ar?'غير متوفر':'n/a'))+'<br><span class="muted" style="font-size:10.5px">'+(ar?'آخر ٥ حجوزات وأقل/آخر سعر محجوز: في «مختبر التسعير».':'Last 5 bookings + lowest/last booked price: in Pricing Lab.')+'</span></div>';
   // plain-language
-  var plain=(ar?('باختصار: الطلب '+(dm.signal==='weak'?'ضعيف':(dm.signal==='strong'?'قوي':'طبيعي'))+'، والشقة فيها '+(cur.empty_nights_7||0)+' ليلة فاضية خلال ٧ أيام. '+(delta!=null&&delta<0?('نقترح نزول إلى '+fmt(sp)+' ر.س'+(belowFloor?' (تحت الحد الأدنى — استثناء فقط)':' بدون كسر الحد الأدنى')+'.'):(delta!=null&&delta>0?('نقترح رفع إلى '+fmt(sp)+' ر.س لأن الطلب يسمح.'):'نقترح تثبيت السعر الحالي.')))
-    :('In short: demand is '+(dm.signal||'normal')+', this unit has '+(cur.empty_nights_7||0)+' empty nights in 7 days. '+(delta!=null&&delta<0?('Suggest dropping to '+fmt(sp)+' SAR'+(belowFloor?' (below floor — exception only).':' without breaking the floor.')):(delta!=null&&delta>0?('Suggest raising to '+fmt(sp)+' SAR — demand allows it.'):'Suggest holding the current price.'))));
+  var plain=(ar?('باختصار: نشتغل على سعرك الحالي '+fmt(cp)+' ر.س — مو على المتوسط التاريخي. الطلب '+(dm.signal==='weak'?'ضعيف':(dm.signal==='strong'?'قوي':'طبيعي'))+'، والشقة فيها '+(cur.empty_nights_7||0)+' ليلة فاضية خلال ٧ أيام. '+(rr.reason_ar||'')+(rr.kind==='hold_low'?' — رفع السعر ما يجيب حجز وانت أصلًا تحت الحد الأدنى.':''))
+    :('In short: we work from your live price '+fmt(cp)+' SAR, not the historical median. Demand is '+(dm.signal||'normal')+', this unit has '+(cur.empty_nights_7||0)+' empty nights in 7 days. '+(rr.kind==='hold_low'?'Already below floor — raising would not win a booking.':(rr.kind==='drop'?('Lower toward '+fmt(sp)+' SAR to fill.'):(rr.kind==='raise'?('Gentle raise to '+fmt(sp)+' SAR.'):'Hold the current price.')))));
   var plainInner='<div style="background:rgba(184,137,59,.08);border:1px solid var(--gold);border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.85">'+esc(plain)+'</div>';
   setDrawerBody(summary
     +sec(ar?'الحد الأدنى الآمن':'Safe floor',floorInner)
