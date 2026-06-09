@@ -108,7 +108,9 @@ PRICE_OPP_HOUR      = int(os.environ.get("PRICE_OPP_HOUR", "10"))
 PRICE_OPP_TEST      = os.environ.get("PRICE_OPP_TEST", "0") in ("1", "true", "True", "yes")
 # When you click ✅ apply, the bot writes the new price to your Hostaway calendar.
 # Set PRICE_APPLY_DRYRUN=1 to TEST safely (logs what it would do, changes nothing).
-PRICE_APPLY_DRYRUN  = os.environ.get("PRICE_APPLY_DRYRUN", "0") in ("1", "true", "True", "yes")
+# DEFAULT IS NOW "1" (live writes OFF) until the rescue-pricing fix is verified live;
+# the owner re-enables real writes by setting PRICE_APPLY_DRYRUN=0 in Railway.
+PRICE_APPLY_DRYRUN  = os.environ.get("PRICE_APPLY_DRYRUN", "1") in ("1", "true", "True", "yes")
 # Dynamic pricing strategy: after you Apply, the bot keeps optimizing that unit's open nights
 # toward the best numbers (holds high when far out; steps down as a night stays empty & nears).
 PRICING_STRATEGY_ENABLED = os.environ.get("PRICING_STRATEGY_ENABLED", "1") in ("1", "true", "True", "yes")
@@ -14701,6 +14703,14 @@ async function pccSync(){
   if(!_pcc.truth.ok) toast(ar?'⚠ تعذّرت القراءة من Hostaway':'⚠ Could not read Hostaway');
   else if((sm.mismatched||0)>0) toast(ar?('⚠ فيه '+sm.mismatched+' اختلاف — راجع'):('⚠ '+sm.mismatched+' mismatches — review'));
   else toast(ar?'✓ متطابق مع Hostaway':'✓ Verified against Hostaway');
+  await _pccRebuildPreviewIfOpen();             // an open preview was built from the old snapshot → rebuild it fresh
+}
+async function _pccRebuildPreviewIfOpen(){
+  var ar=(L==='ar');
+  if(drawerOpen && _pcc.pvOpen && _pcc.pv && _pcc.pv.action){
+    try{ await pccPreview(_pcc.pv.action); }catch(_){ closeDrawer(); }
+    toast(ar?'تحدثت الأرقام من Hostaway — أعدنا بناء المعاينة':'Numbers refreshed from Hostaway — preview rebuilt');
+  }
 }
 async function pccMismatches(){
   var ar=(L==='ar'), t=_pcc.truth;
@@ -14761,23 +14771,80 @@ function renderCommandCenter(){
 }
 function pccAct(a){ if(a==='review'){ var dt=document.getElementById('prDetailed'); if(dt){ dt.open=true; if(dt.scrollIntoView) dt.scrollIntoView({behavior:'smooth',block:'start'}); } return; } pccPreview(a); }
 function _pccDefScope(a){ var t=new Date(); t.setHours(0,0,0,0); var days=(a==='fill_tonight'?2:7); return {start:_peIso(t), end:_peIso(new Date(t.getTime()+(days-1)*86400000))}; }
-function pccPreview(a){ var s=_pccDefScope(a); _pcc.pv={action:a, start:s.start, end:s.end, allowBelow:false}; pccPvRender(); }
+function _pccRiyadhHour(){ try{ return parseInt(new Date().toLocaleString('en-US',{timeZone:'Asia/Riyadh',hour:'2-digit',hour12:false}),10)||0; }catch(_){ return 12; } }
+function _pccToday(){ var t=new Date(); t.setHours(0,0,0,0); return t; }
+function _pccDaysOut(dateStr, today){ try{ var d=new Date(dateStr+'T00:00:00'); return Math.round((d-(today||_pccToday()))/86400000); }catch(_){ return 0; } }
+/* JS port of _pricing_rescue_reco — keep IDENTICAL to the Python. Anchors on the LIVE Hostaway price. */
+function pccRescueReco(action, cur, floor, median, demand, daysOut, hr, allowBelow){
+  function pc(v){ if(v==null||v===''||v==='null') return null; var n=Math.round(Number(v)); return isNaN(n)?null:n; }
+  cur=pc(cur); var fl=pc(floor), med=pc(median);
+  function out(price,kind,reason,can,cannot){ return {price:(price!=null?Math.round(price):null),kind:kind,reason_ar:reason,can_apply:!!can,cannot_reason:cannot||''}; }
+  if(cur==null||cur<=0) return out(cur,'hold','ما فيه سعر حالي واضح من Hostaway',false,'no_current_price');
+  var floorV=(fl!=null&&fl>0)?fl:0;
+  if(floorV&&cur<=floorV) return out(cur,'hold_low','السعر الحالي منخفض أصلًا — ما ننزل أكثر',false,'at_or_below_floor');
+  if(action==='manual') return out(cur,'hold','وضع يدوي — اختر السعر بنفسك',false,'manual_mode');
+  if(action==='protect_adr'){
+    if(demand!=='weak'&&med!=null&&cur<med){ var tgt=Math.round(Math.min(med, cur+(med-cur)*0.5)); if(tgt>cur) return out(tgt,'raise','حماية السعر — الطلب يسمح برفع لطيف نحو المتوسط',true); }
+    return out(cur,'hold','حماية السعر — نثبّت السعر الحالي',true);
+  }
+  if(action==='fill_tonight'||action==='balanced_recovery'){
+    var horizon=(action==='fill_tonight')?2:10, maxpct=(action==='fill_tonight')?0.25:0.15;
+    var dleft=(daysOut!=null&&!isNaN(daysOut))?Math.max(0,Math.floor(daysOut)):horizon;
+    var closeness=horizon?Math.max(0,Math.min(1,(horizon-dleft)/horizon)):1;
+    var h=(typeof hr==='number'&&!isNaN(hr))?hr:12;
+    var tod=(h>=18)?1.0:((h>=12)?0.75:0.5);
+    var pct=maxpct*closeness*tod;
+    if(pct<=0) return out(cur,'no_change','بعيد عن موعد الدخول — نثبّت الآن',true);
+    var target=Math.round(cur*(1-pct));
+    var below=(floorV&&target<floorV);
+    if(below&&!allowBelow) target=floorV;
+    if(target>=cur) return out(cur,'no_change','النزول المقترح بسيط — نثبّت',true);
+    var rsn=(action==='fill_tonight')?'ملء الليلة: ننزل السعر مع قرب الموعد':'تعافٍ متوازن: نزول لطيف على الأيام القريبة';
+    if(below&&allowBelow) rsn+=' (تحت الحد الأدنى — استثناء)';
+    return out(target,'drop',rsn,true);
+  }
+  return out(cur,'hold','نثبّت السعر الحالي',true);
+}
+async function pccPreview(a){
+  var ar=(L==='ar'); var s=_pccDefScope(a);
+  _pcc.pv={action:a, start:s.start, end:s.end, allowBelow:false, truth:{}, snap:((D.pcc&&D.pcc.generated_at)||'')};
+  toast(ar?'⏳ نقرأ الأسعار الحيّة من Hostaway…':'⏳ Reading live Hostaway prices…');
+  var tc; try{ tc=await api('/api/pricing/truth-check?refresh=1&start='+encodeURIComponent(s.start)+'&end='+encodeURIComponent(s.end)); }catch(_){ tc=null; }
+  if(tc){ _pcc.truth=tc; (tc.rows||[]).forEach(function(r){ if(r.hostaway_current_price!=null) _pcc.pv.truth[r.listing_id+'|'+r.date]=r.hostaway_current_price; }); }
+  _pcc.pv.snap=((D.pcc&&D.pcc.generated_at)||'');     // bind the preview to the snapshot it was built from
+  pccPvRender();
+}
 function pccPvRows(){
-  var pv=_pcc.pv||{}, d=D.pcc||{}; var rows=[];
+  var pv=_pcc.pv||{}, d=D.pcc||{}; var rows=[]; var truth=pv.truth||{};
+  var demand=((d.demand||{}).signal)||'normal'; var hr=_pccRiyadhHour(); var today=_pccToday();
   (d.units||[]).forEach(function(u){
     if(pv.action==='fill_tonight' && !((u.current||{}).empty_nights_7>0)) return;
-    if(pv.action==='protect_adr'){ var r=u.recommendation||{}; if(!(r.suggested_price!=null&&r.current_price!=null&&r.suggested_price>=r.current_price)) return; }
     (u.calendar_14||[]).forEach(function(x){
       if(!x.date || x.date<pv.start || x.date>pv.end) return;
-      var cp=x.current_price, sp=x.suggested_price, fl=x.floor;
-      if(cp==null||sp==null) return;
-      var delta=sp-cp, below=(fl!=null&&sp<fl), canApply=true, reason='';
-      if(delta===0){ canApply=false; reason='no_change'; }
-      else if(below && !pv.allowBelow){ canApply=false; reason='floor_blocked'; }
-      rows.push({lid:u.listing_id, name:u.name, date:x.date, current:cp, suggested:sp, floor:fl, delta:delta, below:below, canApply:canApply, reason:reason});
+      var fresh=truth[u.listing_id+'|'+x.date];
+      var cur=(fresh!=null?fresh:x.current_price); var stale=(fresh==null);
+      if(cur==null) return;
+      var fl=x.floor, med=x.median, daysOut=_pccDaysOut(x.date, today);
+      var rec=pccRescueReco(pv.action, cur, fl, med, demand, daysOut, hr, !!pv.allowBelow);
+      var sp=rec.price; var delta=(sp!=null?sp-cur:0);
+      var below=(fl!=null&&sp!=null&&sp<fl);
+      var canApply=!!rec.can_apply && (delta!==0) && !stale && !(below&&!pv.allowBelow);
+      var reason=(below&&!pv.allowBelow)?'floor_blocked':(delta===0?'no_change':(rec.cannot_reason||''));
+      rows.push({lid:u.listing_id, name:u.name, date:x.date, current:cur, suggested:sp, floor:fl, median:med,
+                 delta:delta, below:below, canApply:canApply, reason:reason, kind:rec.kind, why:rec.reason_ar,
+                 demand:demand, daysOut:daysOut, stale:stale});
     });
   });
   return rows;
+}
+function pccPvStatus(r){ var ar=(L==='ar');
+  if(r.stale) return {t:(ar?'يحتاج تحديث':'Needs refresh'),c:'gold'};
+  if(r.reason==='floor_blocked'||r.kind==='floor_blocked') return {t:(ar?'محظور بالحد الأدنى':'Floor-blocked'),c:'red'};
+  if(r.kind==='hold_low') return {t:(ar?'السعر منخفض أصلًا':'Already low'),c:'mut'};
+  if(r.kind==='raise') return {t:(ar?'رفع لطيف':'Gentle raise'),c:'green'};
+  if(r.kind==='drop') return {t:(ar?'خفّض':'Lower'),c:'gold'};
+  if(r.kind==='hold' && (_pcc.pv||{}).action==='protect_adr' && r.demand==='weak') return {t:(ar?'لا نرفع في الطلب الضعيف':'No raise in weak demand'),c:'mut'};
+  return {t:(ar?'ثبّت':'Hold'),c:'mut'};
 }
 function pccPvRender(){
   var ar=(L==='ar'); var pv=_pcc.pv||{}; var rows=pccPvRows();
@@ -14787,6 +14854,7 @@ function pccPvRender(){
   rows.forEach(function(r){ if(r.reason==='floor_blocked') fb++; else if(r.below) bf++; if(r.delta<0) dec++; else if(r.delta>0) inc++; else hold++; if(r.canApply&&r.delta<0) risk+=r.suggested; });
   var canN=rows.filter(function(r){return r.canApply;}).length;
   var blockApply=!!(_pcc.truth&&_pcc.truth.ok&&((_pcc.truth.summary||{}).mismatched||0)>0);   // Hostaway truth-check found a mismatch → block real apply
+  var snapStale=!!(_pcc.pv&&D.pcc&&_pcc.pv.snap&&_pcc.pv.snap!==(D.pcc.generated_at||''));      // snapshot changed under the open drawer → rebuild before apply
   var scope='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><label class="muted" style="font-size:11px">'+(ar?'من':'From')+'</label><input type="date" value="'+esc(pv.start)+'" onchange="_pcc.pv.start=this.value;pccPvRender()" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"><label class="muted" style="font-size:11px">'+(ar?'إلى':'To')+'</label><input type="date" value="'+esc(pv.end)+'" onchange="_pcc.pv.end=this.value;pccPvRender()" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"></div>';
   var belowT='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(pv.allowBelow?'checked':'')+' onchange="_pcc.pv.allowBelow=this.checked;pccPvRender()"> '+(ar?'اسمح باستثناء أقل من الحد الأدنى — لإنقاذ ليالٍ فاضية':'Allow below-floor exception — to save empty nights')+'</label>';
   var sum='<div class="card" style="margin:0 0 8px;background:var(--surface-2)"><div style="display:flex;gap:6px;flex-wrap:wrap">'
@@ -14794,25 +14862,44 @@ function pccPvRender(){
     +'</div><div style="font-size:12px;margin-top:6px">'+(ar?'إيراد مهدد ممكن نعالجه: ':'Revenue-at-risk addressed: ')+'<b>'+fmt(Math.round(risk))+' '+(ar?'ر.س':'SAR')+'</b></div></div>';
   var byU={}; rows.forEach(function(r){ (byU[r.lid]=byU[r.lid]||{name:r.name,rows:[]}).rows.push(r); });
   var body=''; var keys=Object.keys(byU);
+  var gcol='grid-template-columns:46px 1fr 1fr 1fr 58px auto;gap:8px';
+  var colHead='<div style="display:grid;'+gcol+';font-size:9.5px;color:var(--mut);font-weight:700;padding:2px 0">'
+    +'<span>'+(ar?'التاريخ':'Date')+'</span><span>Hostaway '+(ar?'الآن':'now')+'</span><span>'+(ar?'اقتراح عوجا':'Ouja')+'</span><span>'+(ar?'بعد التطبيق':'After')+'</span><span>'+(ar?'الفرق':'Diff')+'</span><span>'+(ar?'الحالة':'Status')+'</span></div>';
   keys.forEach(function(lid){ var g=byU[lid];
-    body+='<div class="card" style="margin:0 0 8px"><b style="font-size:13px">'+esc(g.name)+'</b><div style="margin-top:6px">'+g.rows.map(function(r){
-      var st=(r.reason==='floor_blocked'?pccChip(ar?'محظور بالحد الأدنى':'floor-blocked','red'):(r.reason==='no_change'?pccChip(ar?'ثابت':'hold','mut'):(r.below?pccChip(ar?'تحت الحد الأدنى':'below floor','red'):pccChip(ar?'جاهز':'ready','green'))));
-      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid var(--line)"><span class="muted">'+esc(r.date)+'</span><span>'+fmt(r.current)+' → <b style="color:'+(r.delta<0?'#a23b30':(r.delta>0?'#1f6e45':'var(--text)'))+'">'+fmt(r.suggested)+'</b> '+st+'</span></div>';
+    body+='<div class="card" style="margin:0 0 8px"><b style="font-size:13px">'+esc(g.name)+'</b><div style="margin-top:6px">'+colHead+g.rows.map(function(r){
+      var stt=pccPvStatus(r); var afterv=((r.canApply&&r.suggested!=null)?r.suggested:r.current); var diff=afterv-r.current;
+      var wid='pw_'+r.lid+'_'+String(r.date).replace(/-/g,'');
+      return '<div style="display:grid;'+gcol+';align-items:center;font-size:12px;padding:5px 0;border-top:1px solid var(--line)">'
+        +'<span class="muted">'+esc(String(r.date).slice(5))+'</span>'
+        +'<span><b>'+fmt(r.current)+'</b>'+(r.stale?(' <span class="muted" style="font-size:9px">'+(ar?'قديم':'stale')+'</span>'):'')+'</span>'
+        +'<span style="color:'+(r.kind==='drop'?'#a23b30':(r.kind==='raise'?'#1f6e45':'var(--text)'))+'">'+(r.suggested!=null?fmt(r.suggested):'—')+'</span>'
+        +'<span>'+fmt(afterv)+'</span>'
+        +'<span style="color:'+(diff<0?'#a23b30':(diff>0?'#1f6e45':'var(--mut)'))+'">'+(diff>0?'+':'')+fmt(diff)+'</span>'
+        +pccChip(stt.t,stt.c)+'</div>'
+        +'<div style="margin:-1px 0 2px"><button class="btn ghost xs" onclick="var e=document.getElementById(&#39;'+wid+'&#39;);if(e)e.style.display=(e.style.display===&#39;none&#39;?&#39;block&#39;:&#39;none&#39;)">'+(ar?'ليش هالسعر؟':'Why this price?')+'</button>'
+        +'<div id="'+wid+'" style="display:none;font-size:10.5px;line-height:1.8;color:var(--text-2);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-top:3px">'
+          +'Hostaway '+(ar?'الآن':'now')+': <b>'+fmt(r.current)+'</b> · '+(ar?'الحد الأدنى':'Floor')+': '+(r.floor!=null?fmt(r.floor):'—')+' · '+(ar?'المتوسط':'Median')+': '+(r.median!=null?fmt(r.median):'—')
+          +' · '+(ar?'إشارة الطلب':'Demand')+': '+esc(r.demand||'—')+' · '+(ar?'أيام للوصول':'Days out')+': '+(r.daysOut!=null?r.daysOut:'—')
+          +'<br>'+(ar?'السبب':'Reason')+': '+esc(r.why||'—')+'</div></div>';
     }).join('')+'</div></div>';
   });
   if(!rows.length) body='<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه ليالٍ ضمن النطاق لهالإجراء. غيّر التواريخ أو الإجراء.':'No nights in range for this action. Change the dates or action.')+'</div>';
   var pvNote='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;margin-bottom:8px;line-height:1.7">'+(ar?'👁️ Preview فقط — ما يتغير شي في Hostaway إلا بعد «تطبيق» والتأكيد. كل سطر: الأول Hostaway الآن، والثاني اقتراح عوجا.':'👁️ Preview only — nothing changes in Hostaway until you press Apply and confirm. Each row: Hostaway now, then the Ouja suggestion.')+'</div>';
   var mismNote=blockApply?('<div style="background:rgba(196,67,67,.07);border:1px solid var(--red);border-radius:8px;padding:8px 10px;font-size:11.5px;color:#a23b30;margin-bottom:8px">'+(ar?'⛔ فيه اختلاف مع Hostaway. التطبيق متوقف — سوّ «تحديث من Hostaway» وراجع الاختلافات أول.':'⛔ Hostaway mismatch detected. Apply is blocked — Sync from Hostaway and review first.')+'</div>'):'';
-  setDrawerBody(pvNote+mismNote+scope+belowT+sum+body);
+  var staleNote=snapStale?('<div style="background:rgba(184,137,59,.10);border:1px solid var(--gold);border-radius:8px;padding:8px 10px;font-size:11.5px;color:#7a5b14;margin-bottom:8px">'+(ar?'⚠ المعاينة قديمة — تغيّرت بيانات Hostaway. أعد بناء المعاينة قبل التطبيق.':'⚠ Preview is stale — Hostaway data changed. Rebuild the preview before applying.')+'</div>'):'';
+  setDrawerBody(pvNote+mismNote+staleNote+scope+belowT+sum+body);
   var dryNote=(D.pcc&&D.pcc.dry_run)?('<div class="muted" style="font-size:10.5px;margin-top:4px;text-align:center">'+(ar?'وضع المعاينة مفعّل':'Dry-run is ON')+'</div>'):'';
-  setDrawerFoot('<button class="btn ghost sm" '+(canN?'':'disabled')+' onclick="pccApply(true)">'+(ar?'اختبار آمن':'Safe test')+'</button><button class="btn primary sm" '+((canN&&!blockApply)?'':'disabled')+' '+(blockApply?('title="'+(ar?'فيه اختلاف مع Hostaway — سوّ Sync أول':'Hostaway mismatch — Sync first')+'"'):'')+' onclick="pccApply(false)">'+(ar?'تطبيق على Hostaway':'Apply to Hostaway')+' ('+canN+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'+dryNote);
+  setDrawerFoot('<button class="btn ghost sm" '+(canN?'':'disabled')+' onclick="pccApply(true)">'+(ar?'اختبار آمن':'Safe test')+'</button><button class="btn primary sm" '+((canN&&!blockApply&&!snapStale)?'':'disabled')+' '+((blockApply||snapStale)?('title="'+(snapStale?(ar?'المعاينة قديمة — أعد بناءها':'Preview stale — rebuild it'):(ar?'فيه اختلاف مع Hostaway — سوّ Sync أول':'Hostaway mismatch — Sync first'))+'"'):'')+' onclick="pccApply(false)">'+(ar?'تطبيق على Hostaway':'Apply to Hostaway')+' ('+canN+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'+dryNote);
+  _pcc.pvOpen=true;        // mark THIS drawer as the pricing preview (so pccSync can rebuild it)
 }
 async function pccApply(forceDry){
   var ar=(L==='ar'); var rows=pccPvRows().filter(function(r){ return r.canApply; });
   if(!rows.length){ toast(ar?'ما فيه صفوف قابلة للتطبيق':'Nothing to apply'); return; }
   var envDry=!!(D.pcc&&D.pcc.dry_run); var willWrite=(!forceDry&&!envDry); var bf=rows.filter(function(r){return r.below;}).length;
   if(willWrite){
-    var pv=_pcc.pv||{};                          // SAFETY GATE — verify the scope against Hostaway before any real write
+    var pv=_pcc.pv||{};
+    if(pv.snap && D.pcc && pv.snap!==(D.pcc.generated_at||'')){ toast(ar?'المعاينة قديمة — أعد بناءها':'Preview is stale — rebuild it'); renderCommandCenter(); return; }
+    // SAFETY GATE — verify the scope against Hostaway before any real write
     toast(ar?'⏳ نتأكد من Hostaway قبل التطبيق…':'⏳ Verifying against Hostaway first…');
     var tc; try{ tc=await api('/api/pricing/truth-check?start='+encodeURIComponent(pv.start||'')+'&end='+encodeURIComponent(pv.end||'')); }catch(_){ tc=null; }
     if(tc&&tc.ok) _pcc.truth=tc;
@@ -24470,6 +24557,7 @@ function openDrawer(title, sub){
   // body.detailpane reflows main beside it. Mid/mobile keep the overlay.
   document.body.classList.add('detailpane');
   drawerOpen = true;
+  try{ _pcc.pvOpen=false; }catch(_){}    // any drawer opening resets the pricing-preview marker; pccPvRender re-sets it
 }
 function setDrawerTitle(title, sub){
   document.getElementById('drwTitle').textContent = title;
@@ -24485,6 +24573,7 @@ function closeDrawer(){
   document.getElementById('drawerBg').classList.remove('show');
   document.body.classList.remove('detailpane');
   drawerOpen = false;
+  try{ _pcc.pvOpen=false; }catch(_){}
 }
 /* Custom modal — replaces browser confirm()/prompt()/alert() in Financial Brain.
    Returns a Promise<{ok, value}>. Optional single text field. Themed + reduced-motion-safe (no animation). */
@@ -26380,6 +26469,58 @@ def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
         out["opportunity"] = 0
     return out
 
+def _pricing_rescue_reco(action, hostaway_current, floor, median, demand_signal,
+                         days_out, now_riyadh_hour, allow_below_floor=False):
+    """PURE rescue recommendation, anchored on the LIVE Hostaway price (NOT the learned median).
+    fill_tonight / balanced_recovery only ever step DOWN (deeper as check-in nears + later in the
+    Riyadh day); protect_adr is the ONLY mode that may nudge UP (gently, capped at median, and only
+    when demand isn't weak); manual holds. current<=floor → hold_low. Thin/missing inputs → hold at
+    current. Never fabricates. Ported verbatim to JS in pccRescueReco() — keep the two in sync."""
+    cur = _coerce_price(hostaway_current)
+    fl = _coerce_price(floor)
+    med = _coerce_price(median)
+    def out(price, kind, reason_ar, can_apply, cannot=""):
+        return {"price": (int(price) if price is not None else None), "kind": kind,
+                "reason_ar": reason_ar, "can_apply": bool(can_apply), "cannot_reason": cannot}
+    if cur is None or cur <= 0:
+        return out(cur, "hold", "ما فيه سعر حالي واضح من Hostaway", False, "no_current_price")
+    floor_v = fl if (fl is not None and fl > 0) else 0
+    if floor_v and cur <= floor_v:
+        return out(cur, "hold_low", "السعر الحالي منخفض أصلًا — ما ننزل أكثر", False, "at_or_below_floor")
+    if action == "manual":
+        return out(cur, "hold", "وضع يدوي — اختر السعر بنفسك", False, "manual_mode")
+    if action == "protect_adr":
+        if demand_signal != "weak" and med is not None and cur < med:
+            target = int(round(min(med, cur + (med - cur) * 0.5)))   # gentle: half the gap, capped at median
+            if target > cur:
+                return out(target, "raise", "حماية السعر — الطلب يسمح برفع لطيف نحو المتوسط", True)
+        return out(cur, "hold", "حماية السعر — نثبّت السعر الحالي", True)
+    if action in ("fill_tonight", "balanced_recovery"):
+        horizon = 2 if action == "fill_tonight" else 10
+        maxpct = 0.25 if action == "fill_tonight" else 0.15
+        try:
+            dleft = max(0, int(days_out)) if days_out is not None else horizon
+        except (TypeError, ValueError):
+            dleft = horizon
+        closeness = max(0.0, min(1.0, (horizon - dleft) / float(horizon))) if horizon else 1.0
+        hr = now_riyadh_hour if isinstance(now_riyadh_hour, (int, float)) else 12
+        tod = 1.0 if hr >= 18 else (0.75 if hr >= 12 else 0.5)
+        pct = maxpct * closeness * tod
+        if pct <= 0:
+            return out(cur, "no_change", "بعيد عن موعد الدخول — نثبّت الآن", True)
+        target = int(round(cur * (1 - pct)))
+        below = bool(floor_v and target < floor_v)
+        if below and not allow_below_floor:
+            target = floor_v
+        if target >= cur:
+            return out(cur, "no_change", "النزول المقترح بسيط — نثبّت", True)
+        rsn = ("ملء الليلة: ننزل السعر مع قرب الموعد" if action == "fill_tonight"
+               else "تعافٍ متوازن: نزول لطيف على الأيام القريبة")
+        if below and allow_below_floor:
+            rsn += " (تحت الحد الأدنى — استثناء)"
+        return out(target, "drop", rsn, True)
+    return out(cur, "hold", "نثبّت السعر الحالي", True)
+
 def _pe_fetch_calendars(lids, today, horizon):
     """Fetch each unit's forward calendar [today, today+horizon] in parallel (GET only)."""
     start, end = today.isoformat(), (today + timedelta(days=horizon)).isoformat()
@@ -27827,7 +27968,7 @@ def _pricing_command_snapshot(force=False):
                                "confidence": conf, "confidence_reason_ar": conf_reason},
             "risk": {"revenue_at_risk_7": round(r7), "revenue_at_risk_14": round(r14), "risk_level": lvl},
             "calendar_14": [{"date": x["date"], "current_price": x["current"], "suggested_price": x["suggested"],
-                             "floor": x["floor"]} for x in nights],
+                             "floor": x["floor"], "median": x["median"]} for x in nights],
         })
     unit_list.sort(key=lambda x: -(x["risk"]["revenue_at_risk_7"] or 0))    # highest revenue-at-risk first
     n_units = len(units)
@@ -30162,13 +30303,15 @@ def _run_strategy_unit(lid, strat, factors, today):
         strat["active"] = False
         return
     ds = sorted(_parse_date(d) for d in future)
-    booked_now = {}
+    booked_now, note_now, price_now = {}, {}, {}
     try:
         cal = api_get(f"/listings/{lid}/calendar",
                       params={"startDate": ds[0].isoformat(), "endDate": ds[-1].isoformat()})
         for day in (cal.get("result") or []):
             booked_now[day.get("date")] = (int(day.get("isAvailable", 0) or 0) != 1
                                            or bool(day.get("reservationId")))
+            note_now[day.get("date")] = day.get("note")       # for preserving the TRUE ouja-orig
+            price_now[day.get("date")] = day.get("price")      # live price BEFORE this write
     except Exception as e:
         print("strategy calendar error:", e)
         return
@@ -30188,10 +30331,12 @@ def _run_strategy_unit(lid, strat, factors, today):
         cur = rec.get("cur") or want
         if cur and abs(want - cur) / cur >= 0.03:       # only meaningful moves
             if not PRICE_APPLY_DRYRUN:
+                # preserve the TRUE original: existing ouja-orig note → else the live price BEFORE this write
+                _orig = _lm_orig_from_note(note_now.get(dstr)) or _coerce_price(price_now.get(dstr)) or cur or want
                 try:
                     api_put(f"/listings/{lid}/calendar",
                             {"startDate": dstr, "endDate": dstr, "isAvailable": 1,
-                             "price": want, "note": f"ouja-orig:{want}"})
+                             "price": want, "note": "ouja-orig:%d" % int(_orig)})
                 except Exception as e:
                     print(f"strategy put {lid} {dstr}:", e)
                     continue
@@ -39198,10 +39343,12 @@ async def _api_pricing_bulk(request):
                     skipped += 1
                     continue
                 if not PRICE_APPLY_DRYRUN:
+                    # TRUE original: existing ouja-orig note → else the live price BEFORE this write (cur), never new_price
+                    _orig = _lm_orig_from_note(day.get("note")) or cur
                     api_put(f"/listings/{lid}/calendar",
                             {"startDate": d_iso, "endDate": d_iso,
                              "isAvailable": 1, "price": new_price,
-                             "note": f"ouja-orig:{new_price}"})
+                             "note": "ouja-orig:%d" % int(_orig)})
                 applied += 1
         except Exception as e:
             print(f"bulk_apply error ({lid}):", e)
@@ -42047,7 +42194,7 @@ def apply_price_changes(listing_id, changes):
         return (0, 0, [])
     dates = sorted(d for d in (_parse_date(c["date"]) for c in changes) if d)
     available = set()
-    cur_by_date = {}                           # date -> live price BEFORE the write (for the audit log)
+    cur_by_date, orig_by_date = {}, {}         # date -> live price / existing ouja-orig BEFORE the write
     try:
         cal = api_get(f"/listings/{listing_id}/calendar",
                       params={"startDate": dates[0].isoformat(), "endDate": dates[-1].isoformat()})
@@ -42055,6 +42202,7 @@ def apply_price_changes(listing_id, changes):
             dd = _parse_date(day.get("date"))
             if dd:
                 cur_by_date[dd.isoformat()] = day.get("price")
+                orig_by_date[dd.isoformat()] = _lm_orig_from_note(day.get("note"))
             if int(day.get("isAvailable", 0) or 0) == 1 and not day.get("reservationId"):
                 if dd:
                     available.add(dd.isoformat())
@@ -42077,10 +42225,11 @@ def apply_price_changes(listing_id, changes):
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "dry"})
             continue
         try:
+            _orig = orig_by_date.get(c["date"]) or cur_by_date.get(c["date"]) or price
             api_put(f"/listings/{listing_id}/calendar",
                     {"startDate": c["date"], "endDate": c["date"],
                      "isAvailable": 1, "price": price,
-                     "note": f"ouja-orig:{price}"})   # anchor for the discount tiers later
+                     "note": "ouja-orig:%d" % int(_orig)})   # TRUE original anchor for the discount tiers later
             applied += 1
             log_price_change(listing_id, c["date"], cur_by_date.get(c["date"]), price, _src, _rsn, dry=False)
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "applied"})
