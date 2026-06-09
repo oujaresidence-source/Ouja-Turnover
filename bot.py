@@ -14711,10 +14711,18 @@ async function pccMismatches(){
     var hp=(r.hostaway_current_price!=null?fmt(r.hostaway_current_price):'—'), dp=(r.dashboard_displayed_price!=null?fmt(r.dashboard_displayed_price):'—');
     var diff=(r.hostaway_current_price!=null&&r.dashboard_displayed_price!=null)?(r.dashboard_displayed_price-r.hostaway_current_price):null;
     return '<div style="padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:12px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>'+esc(r.name)+' · '+esc(r.date)+'</b>'+pccChip(st[0],st[1])+'</div>'
-      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'#a23b30':'#1f6e45')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+((r.baseline_price!=null)?('<span class="muted">'+(ar?'السابق':'prev')+': '+fmt(r.baseline_price)+'</span>'):'')+'</div></div>';
+      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'#a23b30':'#1f6e45')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+((r.baseline_price!=null)?('<span class="muted">'+(ar?'السابق':'prev')+': '+fmt(r.baseline_price)+'</span>'):'')+'</div><div style="margin-top:7px"><button class="btn ghost xs" onclick="pccRefreshListing('+r.listing_id+')">↻ '+(ar?'حدّث هالشقة من Hostaway':'Refresh this apartment')+'</button></div></div>';
   }).join('');
   setDrawerBody('<div class="muted" style="font-size:11.5px;margin-bottom:9px;line-height:1.7">'+(ar?'هذي ليالٍ السعر المعروض فيها يختلف عن سعر Hostaway الحالي. سوّ «تحديث من Hostaway» عشان تتطابق — وبعدها تقدر تطبّق بأمان.':'These nights show a price that differs from the live Hostaway price. Click Sync from Hostaway to reconcile, then you can apply safely.')+'</div>'+body);
   setDrawerFoot('<button class="btn primary sm" onclick="closeDrawer();pccSync()">↻ '+(ar?'تحديث من Hostaway':'Sync from Hostaway')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
+}
+async function pccRefreshListing(lid){
+  var ar=(L==='ar'); toast(ar?'⏳ نحدّث هالشقة من Hostaway…':'⏳ Refreshing this apartment…');
+  try{ await post('/api/pricing/refresh-listing',{lid:lid}); }catch(_){ }
+  var t; try{ t=await api('/api/pricing/truth-check'); }catch(_){ t=null; }   // recompare (no global force) — this apartment is now reconciled
+  if(t&&t.ok) _pcc.truth=t;
+  await loadPricing();
+  pccMismatches();
 }
 function renderCommandCenter(){
   var ar=(L==='ar'); var el=document.getElementById('pcc'); if(!el) return; var d=D.pcc||{};
@@ -27903,6 +27911,44 @@ async def _api_pricing_truth_check(request):
         return _json({"ok": False, "rows": [], "summary": {"errors": 1},
                       "errors": [{"code": "truth_check_failed", "detail": str(e)[:160]}]})
 
+def _pricing_refresh_listing(lid):
+    """Re-read ONE listing's LIVE Hostaway calendar and patch the cached recs' current price for it,
+    so the dashboard shows fresh prices for that apartment without rebuilding everything. Read-only
+    toward Hostaway (GET); bounded field-only patch of the rec cache; the regular ~15-min rebuild
+    reconfirms it. Powers the per-apartment 'Refresh this apartment' action in the mismatch drawer."""
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "bad_lid"}
+    today = datetime.now(TZ).date()
+    days = (_pe_fetch_calendars([lid], today, PE_HORIZON) or {}).get(lid) or {}
+    if not days:
+        return {"ok": False, "lid": lid, "error": "hostaway_fetch_failed"}
+    recs = ((_pe_rec_cache.get("data") or {}).get("recs")) or []
+    updated = 0
+    for r in recs:
+        if r.get("lid") != lid:
+            continue
+        np = _coerce_price((days.get(r.get("date")) or {}).get("price"))
+        if np is None or np == r.get("current"):
+            continue
+        r["current"] = np                               # freshen the displayed current for this night
+        if r.get("recommended") is not None:
+            r["delta"] = r["recommended"] - np
+            r["delta_pct"] = (round(100.0 * r["delta"] / np, 1) if np else 0.0)
+        updated += 1
+    return {"ok": True, "lid": lid, "nights_checked": len(days), "nights_updated": updated}
+
+async def _api_pricing_refresh_listing(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    try:
+        return _json(await asyncio.to_thread(_pricing_refresh_listing, b.get("lid")))
+    except Exception as e:
+        print("refresh-listing:", e)
+        return _json({"ok": False, "error": "refresh_failed"})
+
 _pe_cmd_batches = _load_json("pricing_command_batches.json", {}) or {}   # batch_id -> {ts,actor,dry_run,rows[]}  (revert source)
 def _pe_cmd_batches_save():
     try:
@@ -40521,6 +40567,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
         app.router.add_get("/api/pricing/truth-check", _api_pricing_truth_check)   # Hostaway-vs-dashboard truth (read-only)
+        app.router.add_post("/api/pricing/refresh-listing", _api_pricing_refresh_listing)  # re-read one apartment from Hostaway
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
         app.router.add_get("/api/pricing/emergency-preview", _api_pricing_emergency_preview)  # 9PM emergency (preview only)
         app.router.add_get("/api/pricing/command/batches", _api_pricing_command_batches)  # apply batches (revert source)
