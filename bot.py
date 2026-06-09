@@ -14692,10 +14692,10 @@ function renderCommandCenter(){
     +pccKpi(ar?'شقق عالية الخطر':'High-risk units',sm.high_risk_units||0,'',(sm.high_risk_units?'red':'green'))
     +pccKpi(ar?'ثقة البيانات':'Confidence',(cf.strong_data||0)+' / '+(cf.similar_units_only||0),(ar?'قوي / مشابهة':'strong / similar'),'info')
     +'</div>';
-  var acts=[['fill_tonight','Fill Tonight',ar?'للشقق الفاضية قريب. معاينة فقط قبل أي تطبيق.':'Soon-empty units. Preview only.'],
-    ['balanced_recovery','Balanced Recovery',ar?'نزول موزون للـ٧ أيام بدون كسر الـ floor.':'Balanced 7-day step-down, no floor break.'],
-    ['protect_adr','Protect ADR',ar?'يحمي الشقق ذات الطلب الجيد أو السعر المنخفض.':'Protect strong-demand / low-priced units.'],
-    ['review','Review Manually',ar?'افتح العرض التفصيلي وقرر وحدة وحدة.':'Open the detailed view, decide unit by unit.']];
+  var acts=[['fill_tonight',ar?'املأ الليلة':'Fill Tonight',ar?'للشقق الفاضية قريب. معاينة فقط قبل أي تطبيق.':'Soon-empty units. Preview only.'],
+    ['balanced_recovery',ar?'تعافي متوازن':'Balanced Recovery',ar?'نزول موزون للـ٧ أيام بدون كسر الحد الأدنى.':'Balanced 7-day step-down, no floor break.'],
+    ['protect_adr',ar?'حماية السعر':'Protect ADR',ar?'يحمي الشقق ذات الطلب الجيد أو السعر المنخفض.':'Protect strong-demand / low-priced units.'],
+    ['review',ar?'مراجعة يدوية':'Review Manually',ar?'افتح العرض التفصيلي وقرر وحدة وحدة.':'Open the detailed view, decide unit by unit.']];
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-bottom:6px">'+acts.map(function(a){ var on=(_pcc.action===a[0]); return '<div class="card" style="margin:0;padding:11px 12px;cursor:pointer;border:1px solid '+(on?'var(--gold)':'var(--line)')+'" onclick="pccAct(&#39;'+a[0]+'&#39;)"><div style="font-weight:800;font-size:13px">'+esc(a[1])+'</div><div class="muted" style="font-size:10.5px;margin-top:3px;line-height:1.5">'+esc(a[2])+'</div></div>'; }).join('')+'</div>';
   h+='<div class="muted" style="font-size:10.5px;margin-bottom:10px">'+(ar?'كل الأزرار هنا معاينة فقط — ما يتغير شيء في Hostaway.':'Every button here is preview only — nothing changes in Hostaway.')+'</div>';
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input value="'+esc(_pcc.q||'')+'" oninput="_pcc.q=this.value;pccBoard()" placeholder="🔎 '+(ar?'بحث شقة':'Search unit')+'" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)">'
@@ -14725,21 +14725,21 @@ function pccPvRows(){
 }
 function pccPvRender(){
   var ar=(L==='ar'); var pv=_pcc.pv||{}; var rows=pccPvRows();
-  var titles={fill_tonight:'Fill Tonight', balanced_recovery:'Balanced Recovery', protect_adr:'Protect ADR'};
+  var titles={fill_tonight:(ar?'املأ الليلة':'Fill Tonight'), balanced_recovery:(ar?'تعافي متوازن':'Balanced Recovery'), protect_adr:(ar?'حماية السعر':'Protect ADR')};
   openDrawer((ar?'معاينة · ':'Preview · ')+(titles[pv.action]||pv.action), (ar?'من ':'from ')+pv.start+(ar?' إلى ':' to ')+pv.end);
   var dec=0,inc=0,hold=0,fb=0,bf=0,risk=0;
   rows.forEach(function(r){ if(r.reason==='floor_blocked') fb++; else if(r.below) bf++; if(r.delta<0) dec++; else if(r.delta>0) inc++; else hold++; if(r.canApply&&r.delta<0) risk+=r.suggested; });
   var canN=rows.filter(function(r){return r.canApply;}).length;
   var scope='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><label class="muted" style="font-size:11px">'+(ar?'من':'From')+'</label><input type="date" value="'+esc(pv.start)+'" onchange="_pcc.pv.start=this.value;pccPvRender()" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"><label class="muted" style="font-size:11px">'+(ar?'إلى':'To')+'</label><input type="date" value="'+esc(pv.end)+'" onchange="_pcc.pv.end=this.value;pccPvRender()" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"></div>';
-  var belowT='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(pv.allowBelow?'checked':'')+' onchange="_pcc.pv.allowBelow=this.checked;pccPvRender()"> '+(ar?'اسمح باستثناء أقل من الـ floor — لإنقاذ ليالٍ فاضية':'Allow below-floor exception — to save empty nights')+'</label>';
+  var belowT='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(pv.allowBelow?'checked':'')+' onchange="_pcc.pv.allowBelow=this.checked;pccPvRender()"> '+(ar?'اسمح باستثناء أقل من الحد الأدنى — لإنقاذ ليالٍ فاضية':'Allow below-floor exception — to save empty nights')+'</label>';
   var sum='<div class="card" style="margin:0 0 8px;background:var(--surface-2)"><div style="display:flex;gap:6px;flex-wrap:wrap">'
-    +pccChip((ar?'ليالٍ ':'nights ')+rows.length,'info')+pccChip((ar?'خفض ':'drops ')+dec,(dec?'gold':'mut'))+pccChip((ar?'رفع ':'raises ')+inc,(inc?'green':'mut'))+pccChip((ar?'ثابت ':'holds ')+hold,'mut')+pccChip((ar?'محظور بالـ floor ':'floor-blocked ')+fb,(fb?'red':'mut'))+(bf?pccChip((ar?'استثناء تحت الـ floor ':'below-floor exc ')+bf,'red'):'')
+    +pccChip((ar?'ليالٍ ':'nights ')+rows.length,'info')+pccChip((ar?'خفض ':'drops ')+dec,(dec?'gold':'mut'))+pccChip((ar?'رفع ':'raises ')+inc,(inc?'green':'mut'))+pccChip((ar?'ثابت ':'holds ')+hold,'mut')+pccChip((ar?'محظور بالحد الأدنى ':'floor-blocked ')+fb,(fb?'red':'mut'))+(bf?pccChip((ar?'استثناء تحت الحد الأدنى ':'below-floor exc ')+bf,'red'):'')
     +'</div><div style="font-size:12px;margin-top:6px">'+(ar?'إيراد مهدد ممكن نعالجه: ':'Revenue-at-risk addressed: ')+'<b>'+fmt(Math.round(risk))+' '+(ar?'ر.س':'SAR')+'</b></div></div>';
   var byU={}; rows.forEach(function(r){ (byU[r.lid]=byU[r.lid]||{name:r.name,rows:[]}).rows.push(r); });
   var body=''; var keys=Object.keys(byU);
   keys.forEach(function(lid){ var g=byU[lid];
     body+='<div class="card" style="margin:0 0 8px"><b style="font-size:13px">'+esc(g.name)+'</b><div style="margin-top:6px">'+g.rows.map(function(r){
-      var st=(r.reason==='floor_blocked'?pccChip(ar?'محظور بالـ floor':'floor-blocked','red'):(r.reason==='no_change'?pccChip(ar?'ثابت':'hold','mut'):(r.below?pccChip(ar?'تحت الـ floor':'below floor','red'):pccChip(ar?'جاهز':'ready','green'))));
+      var st=(r.reason==='floor_blocked'?pccChip(ar?'محظور بالحد الأدنى':'floor-blocked','red'):(r.reason==='no_change'?pccChip(ar?'ثابت':'hold','mut'):(r.below?pccChip(ar?'تحت الحد الأدنى':'below floor','red'):pccChip(ar?'جاهز':'ready','green'))));
       return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid var(--line)"><span class="muted">'+esc(r.date)+'</span><span>'+fmt(r.current)+' → <b style="color:'+(r.delta<0?'#a23b30':(r.delta>0?'#1f6e45':'var(--text)'))+'">'+fmt(r.suggested)+'</b> '+st+'</span></div>';
     }).join('')+'</div></div>';
   });
@@ -14753,7 +14753,7 @@ async function pccApply(forceDry){
   if(!rows.length){ toast(ar?'ما فيه صفوف قابلة للتطبيق':'Nothing to apply'); return; }
   var envDry=!!(D.pcc&&D.pcc.dry_run); var willWrite=(!forceDry&&!envDry); var bf=rows.filter(function(r){return r.below;}).length;
   if(willWrite){
-    var bfTxt=(bf?(ar?(' · منها '+bf+' تحت الـ floor — استثناء.'):(' · '+bf+' below floor — exception.')):'');
+    var bfTxt=(bf?(ar?(' · منها '+bf+' تحت الحد الأدنى — استثناء.'):(' · '+bf+' below floor — exception.')):'');
     var msg=(ar?('بنكتب '+rows.length+' سعر فعليًا على Hostaway، ونتأكد بعد الكتابة بإعادة القراءة من Hostaway.'+bfTxt):('Writing '+rows.length+' prices to Hostaway for real, then verifying by re-reading from Hostaway.'+bfTxt));
     var m=await fbModal({title:(ar?'تأكيد كتابة فعلية على Hostaway':'Confirm REAL write to Hostaway'), msg:msg, summary:(rows.length+(ar?' ليلة':' nights')), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')});
     if(!m.ok) return;
@@ -14784,10 +14784,10 @@ function pccEmergency(){ _pcc.emgBelow=false; var ar=(L==='ar'); var emg=D.pccEm
   pccEmgRender(); }
 function pccEmgRender(){ var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]}; var cs=emg.candidates||[]; var below=!!_pcc.emgBelow;
   var note='<div style="background:rgba(196,67,67,.07);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;margin-bottom:8px">'+(ar?'هذي معاينة طوارئ — ما تنطبق تلقائيًا. التطبيق قرارك أنت، بمعاينة وتأكيد، ويعيد القراءة من Hostaway للتأكد.':'Emergency preview — never auto-applied. Applying is your deliberate, confirmed action that re-reads Hostaway to verify.')+'</div>';
-  var bt='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(below?'checked':'')+' onchange="_pcc.emgBelow=this.checked;pccEmgRender()"> '+(ar?'اسمح بأسعار تحت الـ floor — استثناء طوارئ':'Allow below-floor emergency prices — exception')+'</label>';
+  var bt='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(below?'checked':'')+' onchange="_pcc.emgBelow=this.checked;pccEmgRender()"> '+(ar?'اسمح بأسعار تحت الحد الأدنى — استثناء طوارئ':'Allow below-floor emergency prices — exception')+'</label>';
   var rowsH=cs.length?cs.map(function(c){ var use=(below&&c.below_floor_price!=null)?c.below_floor_price:c.emergency_price; var bf=(c.floor!=null&&use<c.floor);
-    return '<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">'+esc(c.name||('#'+c.listing_id))+'</b>'+(bf?pccChip(ar?'تحت الـ floor':'below floor','red'):pccChip(ar?'عند/فوق الـ floor':'at/above floor','green'))+'</div>'
-      +'<div style="font-size:12.5px;margin-top:5px">'+fmt(c.current_price)+' → <b style="color:#a23b30">'+fmt(use)+'</b>'+(c.floor!=null?(' <span class="muted" style="font-size:11px">· floor '+fmt(c.floor)+'</span>'):'')+'</div>'
+    return '<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">'+esc(c.name||('#'+c.listing_id))+'</b>'+(bf?pccChip(ar?'تحت الحد الأدنى':'below floor','red'):pccChip(ar?'عند/فوق الحد الأدنى':'at/above floor','green'))+'</div>'
+      +'<div style="font-size:12.5px;margin-top:5px">'+fmt(c.current_price)+' → <b style="color:#a23b30">'+fmt(use)+'</b>'+(c.floor!=null?(' <span class="muted" style="font-size:11px">'+(ar?'· الحد الأدنى ':'· floor ')+fmt(c.floor)+'</span>'):'')+'</div>'
       +'<div class="muted" style="font-size:10.5px;margin-top:3px">'+esc(ar?c.reason_ar:c.reason_en)+'</div></div>'; }).join(''):('<div class="empty" style="padding:20px;text-align:center">'+(ar?'ما فيه حالات طوارئ الحين.':'No emergencies right now.')+'</div>');
   setDrawerBody(note+bt+rowsH);
   var n=cs.length;
@@ -14795,7 +14795,7 @@ function pccEmgRender(){ var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]}; v
 async function pccEmergencyApply(forceDry){ var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]}; var below=!!_pcc.emgBelow;
   var rows=(emg.candidates||[]).map(function(c){ var p=(below&&c.below_floor_price!=null)?c.below_floor_price:c.emergency_price; return {lid:c.listing_id, date:c.date, price:p, floor:c.floor, old:c.current_price}; }).filter(function(r){ return r.price&&r.price>0; });
   if(!rows.length){ toast('⚠'); return; }
-  if(!forceDry){ var envDry=!!(D.pcc&&D.pcc.dry_run); if(!envDry){ var m=await fbModal({title:(ar?'تأكيد خصم طوارئ فعلي':'Confirm REAL emergency discount'), msg:(ar?('بنكتب أسعار طوارئ على '+rows.length+' شقة فعليًا على Hostaway، ونتأكد بعد الكتابة.'+(below?' فيه أسعار تحت الـ floor — استثناء.':'')):('Writing emergency prices to '+rows.length+' units for real, then verifying.'+(below?' Some are below floor — exception.':''))), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')}); if(!m.ok) return; } }
+  if(!forceDry){ var envDry=!!(D.pcc&&D.pcc.dry_run); if(!envDry){ var m=await fbModal({title:(ar?'تأكيد خصم طوارئ فعلي':'Confirm REAL emergency discount'), msg:(ar?('بنكتب أسعار طوارئ على '+rows.length+' شقة فعليًا على Hostaway، ونتأكد بعد الكتابة.'+(below?' فيه أسعار تحت الحد الأدنى — استثناء.':'')):('Writing emergency prices to '+rows.length+' units for real, then verifying.'+(below?' Some are below floor — exception.':''))), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')}); if(!m.ok) return; } }
   toast(ar?'⏳ تطبيق + تأكد من Hostaway…':'⏳ Applying + verifying…');
   var res; try{ res=await post('/api/pricing/command/apply',{dry_run:!!forceDry, allow_below_floor:below, rows:rows}); }catch(_){ res=null; }
   if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
@@ -14804,7 +14804,7 @@ function pccApplyResults(res){
   var ar=(L==='ar'); var s=res.summary||{};
   openDrawer((res.revert?(ar?'نتيجة التراجع':'Revert result'):(ar?'نتيجة التطبيق':'Apply result'))+(res.dry_run?(ar?' · اختبار':' · dry-run'):''), 'batch '+esc(res.batch_id||''));
   var chips=pccChip((ar?'تأكدنا ':'verified ')+(s.verified||0),'green')+pccChip((ar?'غير مؤكد ':'not confirmed ')+(s.not_confirmed||0),(s.not_confirmed?'gold':'mut'))+pccChip((ar?'فشل ':'failed ')+(s.failed||0),(s.failed?'red':'mut'))+pccChip((ar?'محظور ':'floor-blocked ')+(s.floor_blocked||0),(s.floor_blocked?'red':'mut'))+((s.dry_run||0)?pccChip((ar?'اختبار ':'dry-run ')+(s.dry_run||0),'info'):'');
-  var STT={verified_applied:[ar?'تأكدنا من Hostaway':'verified','green'],dry_run:[ar?'اختبار':'dry-run','info'],not_confirmed:[ar?'أرسلنا بس ما تأكدنا':'sent, not confirmed','gold'],failed:[ar?'فشل':'failed','red'],skipped:[ar?'تخطّينا':'skipped','mut'],floor_blocked:[ar?'تحت الـ floor':'floor-blocked','red']};
+  var STT={verified_applied:[ar?'تأكدنا من Hostaway':'verified','green'],dry_run:[ar?'اختبار':'dry-run','info'],not_confirmed:[ar?'أرسلنا بس ما تأكدنا':'sent, not confirmed','gold'],failed:[ar?'فشل':'failed','red'],skipped:[ar?'تخطّينا':'skipped','mut'],floor_blocked:[ar?'تحت الحد الأدنى':'floor-blocked','red']};
   var rowsH=(res.rows||[]).map(function(r){ var st=STT[r.status]||[r.status,'mut']; return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="muted">#'+esc(String(r.lid))+' · '+esc(r.date||'')+'</span><span>'+(r.old_price!=null?fmt(r.old_price)+' → ':'')+(r.actual_price!=null?fmt(r.actual_price):(r.requested_price!=null?fmt(r.requested_price):''))+' '+pccChip(st[0],st[1])+'</span></div>'; }).join('');
   setDrawerBody('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chips+'</div>'
     +(res.dry_run?('<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+(ar?'اختبار آمن — ما تغيّر شيء في Hostaway. التطبيق الفعلي يحتاج PRICE_APPLY_DRYRUN=0 في Railway ثم زر «تطبيق على Hostaway».':'Safe test — nothing changed in Hostaway. Real writes need PRICE_APPLY_DRYRUN=0 in Railway, then the Apply button.')+'</div>'):'')
@@ -14833,7 +14833,7 @@ function pccCard(u){
     +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12.5px">'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'الحالي':'Current')+'</div><b>'+(cp!=null?fmt(cp):'—')+'</b></div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'المقترح':'Suggested')+'</div><b style="color:'+(delta!=null&&delta<0?'#a23b30':(delta!=null&&delta>0?'#1f6e45':'var(--text)'))+'">'+(sp!=null?fmt(sp):'—')+'</b> <span class="muted" style="font-size:10.5px">'+deltaTxt+'</span></div>'
-    +'<div><div class="muted" style="font-size:10px">'+(ar?'أقل سعر آمن':'Floor')+'</div><b>'+(fl.final_floor!=null?fmt(fl.final_floor):(ar?'—':'n/a'))+'</b></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'الحد الأدنى':'Floor')+'</div><b>'+(fl.final_floor!=null?fmt(fl.final_floor):(ar?'—':'n/a'))+'</b></div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'فاضي ٧/١٤':'Empty 7/14')+'</div><b>'+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+'</b></div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'مهدد ٧ أيام':'At risk 7d')+'</div><b style="color:#a23b30">'+fmt(rk.revenue_at_risk_7||0)+'</b></div></div>'
     +pccMini(u)
@@ -14865,11 +14865,11 @@ function pccWhy(lid){
     +'<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0"><span class="muted">'+(ar?'الإجراء':'Action')+'</span>'+pccChip(act,(act===(ar?'خفض':'drop')?'gold':(act===(ar?'رفع':'raise')?'green':'info')))+'</div></div>';
   // floor formula
   var floorInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'
-    +(ar?'أقل سعر آمن = الأعلى بين الـ floor اليدوي و٧٠٪ من متوسط سعر الشقة المحقق.':'Safe floor = max(manual floor, 70% of the unit’s realized median ADR).')+'<br>'
+    +(ar?'الحد الأدنى الآمن = الأعلى بين الحد الأدنى اليدوي و٧٠٪ من متوسط سعر الشقة المحقق.':'Safe floor = max(manual floor, 70% of the unit’s realized median ADR).')+'<br>'
     +(ar?'٧٠٪ من المتوسط ':'70% of median ')+(med!=null?fmt(med):'—')+' = '+(adr70!=null?fmt(adr70):'—')+'<br>'
-    +'<b>'+(ar?'أقل سعر آمن النهائي: ':'Final floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?'غير محدد':'n/a'))+'</b>'
+    +'<b>'+(ar?'الحد الأدنى النهائي: ':'Final floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?'غير محدد':'n/a'))+'</b>'
     +(fl.final_floor==null&&fl.missing_reason?('<br><span class="muted" style="font-size:10.5px">'+esc(fl.missing_reason)+'</span>'):'')+'</div>'
-    +(belowFloor?('<div style="margin-top:8px;background:rgba(196,67,67,.1);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;color:#a23b30;font-weight:700">'+(ar?'⚠ المقترح أقل من الـ floor. لا ينطبق تلقائيًا — استثناء يحتاج موافقتك فقط لإنقاذ ليلة فاضية.':'⚠ Suggested is below floor. Never automatic — an exception that needs your explicit OK only to save an empty night.')+'</div>'):'');
+    +(belowFloor?('<div style="margin-top:8px;background:rgba(196,67,67,.1);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;color:#a23b30;font-weight:700">'+(ar?'⚠ المقترح أقل من الحد الأدنى. لا ينطبق تلقائيًا — استثناء يحتاج موافقتك فقط لإنقاذ ليلة فاضية.':'⚠ Suggested is below floor. Never automatic — an exception that needs your explicit OK only to save an empty night.')+'</div>'):'');
   // demand context
   var demandInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+pccChip(ar?dm.title_ar:dm.title_en,(dm.signal==='weak'?'gold':(dm.signal==='strong'?'green':'info')))+' '+esc(ar?dm.reason_ar:dm.reason_en)+'<br>'+(ar?'فاضي لهالشقة: ':'This unit empty: ')+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+(ar?' (٧/١٤)':' (7/14)')+' · '+(ar?'إيراد مهدد ٧ أيام: ':'at risk 7d: ')+fmt(rk.revenue_at_risk_7||0)+' '+(ar?'ر.س':'SAR')+'</div>';
   // confidence
@@ -14878,11 +14878,11 @@ function pccWhy(lid){
   // history: snapshot median only — full detail in the Lab
   var histInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+(ar?'متوسط سعر الشقة المحقق: ':'Realized median ADR: ')+(med!=null?fmt(med)+' '+(ar?'ر.س':'SAR'):(ar?'غير متوفر':'n/a'))+'<br><span class="muted" style="font-size:10.5px">'+(ar?'آخر ٥ حجوزات وأقل/آخر سعر محجوز: في «مختبر التسعير».':'Last 5 bookings + lowest/last booked price: in Pricing Lab.')+'</span></div>';
   // plain-language
-  var plain=(ar?('باختصار: الطلب '+(dm.signal==='weak'?'ضعيف':(dm.signal==='strong'?'قوي':'طبيعي'))+'، والشقة فيها '+(cur.empty_nights_7||0)+' ليلة فاضية خلال ٧ أيام. '+(delta!=null&&delta<0?('نقترح نزول إلى '+fmt(sp)+' ر.س'+(belowFloor?' (تحت الـ floor — استثناء فقط)':' بدون كسر الـ floor')+'.'):(delta!=null&&delta>0?('نقترح رفع إلى '+fmt(sp)+' ر.س لأن الطلب يسمح.'):'نقترح تثبيت السعر الحالي.')))
+  var plain=(ar?('باختصار: الطلب '+(dm.signal==='weak'?'ضعيف':(dm.signal==='strong'?'قوي':'طبيعي'))+'، والشقة فيها '+(cur.empty_nights_7||0)+' ليلة فاضية خلال ٧ أيام. '+(delta!=null&&delta<0?('نقترح نزول إلى '+fmt(sp)+' ر.س'+(belowFloor?' (تحت الحد الأدنى — استثناء فقط)':' بدون كسر الحد الأدنى')+'.'):(delta!=null&&delta>0?('نقترح رفع إلى '+fmt(sp)+' ر.س لأن الطلب يسمح.'):'نقترح تثبيت السعر الحالي.')))
     :('In short: demand is '+(dm.signal||'normal')+', this unit has '+(cur.empty_nights_7||0)+' empty nights in 7 days. '+(delta!=null&&delta<0?('Suggest dropping to '+fmt(sp)+' SAR'+(belowFloor?' (below floor — exception only).':' without breaking the floor.')):(delta!=null&&delta>0?('Suggest raising to '+fmt(sp)+' SAR — demand allows it.'):'Suggest holding the current price.'))));
   var plainInner='<div style="background:rgba(184,137,59,.08);border:1px solid var(--gold);border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.85">'+esc(plain)+'</div>';
   setDrawerBody(summary
-    +sec(ar?'أقل سعر آمن (floor)':'Safe floor',floorInner)
+    +sec(ar?'الحد الأدنى الآمن':'Safe floor',floorInner)
     +sec(ar?'سياق الطلب':'Demand context',demandInner)
     +sec(ar?'مستوى الثقة':'Confidence',confInner)
     +sec(ar?'تاريخ الشقة':'Unit history',histInner)
@@ -15354,7 +15354,7 @@ function renderRevDiag(){
   if(drP==null){ tone='info'; sentence=ar?'ما فيه بيانات كفاية للمقارنة الشهرية بعد.':'Not enough monthly data to compare yet.'; }
   else if(drP>=0){ tone='green'; sentence=(ar?('الإيراد أعلى من الشهر اللي قبل بـ '+drP+'%.'):('Revenue is up '+drP+'% vs last month.')); }
   else { var driver='';
-    if(ocP!=null&&adP!=null){ if(ocP<adP) driver=(ar?' النزول أساسه الإشغال أقل، مو السعر فقط.':' Driven mainly by lower occupancy, not just price.'); else if(adP<ocP) driver=(ar?' النزول أساسه الـ ADR أقل.':' Driven mainly by a lower ADR.'); else driver=(ar?' النزول من الإشغال والـ ADR معًا.':' From both occupancy and ADR.'); }
+    if(ocP!=null&&adP!=null){ if(ocP<adP) driver=(ar?' النزول أساسه الإشغال أقل، مو السعر فقط.':' Driven mainly by lower occupancy, not just price.'); else if(adP<ocP) driver=(ar?' النزول أساسه متوسط سعر الليلة أقل.':' Driven mainly by a lower ADR.'); else driver=(ar?' النزول من الإشغال ومتوسط السعر معًا.':' From both occupancy and ADR.'); }
     else if(ocP!=null&&ocP<0) driver=(ar?' الإشغال أقل من الشهر اللي قبل.':' Occupancy is lower than last month.');
     tone='gold'; sentence=(ar?('الإيراد أقل من الشهر اللي قبل بـ '+Math.abs(drP)+'%.'):('Revenue is down '+Math.abs(drP)+'% vs last month.'))+driver;
   }
@@ -27732,9 +27732,9 @@ def _pricing_command_snapshot():
         primary = "protect_adr"
     else:
         primary = "review_manually"
-    pa = {"fill_tonight": ("ابدأ بـ Fill Tonight (معاينة فقط)", "Start with Fill Tonight (preview only)"),
-          "balanced_recovery": ("ابدأ بـ Balanced Recovery للـ٧ أيام الجاية", "Start with Balanced Recovery for the next 7 days"),
-          "protect_adr": ("احمِ الـ ADR — الطلب قوي", "Protect ADR — demand is strong"),
+    pa = {"fill_tonight": ("ابدأ بـ «املأ الليلة» — معاينة فقط", "Start with Fill Tonight (preview only)"),
+          "balanced_recovery": ("ابدأ بـ «تعافي متوازن» للـ٧ أيام الجاية", "Start with Balanced Recovery for the next 7 days"),
+          "protect_adr": ("احمِ السعر — الطلب قوي", "Protect ADR — demand is strong"),
           "review_manually": ("راجع التوصيات وحدة وحدة", "Review recommendations one by one")}.get(primary, ("", ""))
     base["demand"] = {"signal": signal, "title_ar": s_ar, "title_en": s_en,
                       "reason_ar": ("عندك " + str(empty7) + " ليلة فاضية خلال ٧ أيام في " + str(n_units) + " شقة." if n_units else "ما فيه بيانات كفاية بعد."),
