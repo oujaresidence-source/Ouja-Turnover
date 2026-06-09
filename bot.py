@@ -10944,51 +10944,58 @@ DASHBOARD_HTML = """<!doctype html>
 <title>عوجا · Ouja Operations</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
 
 :root{
-  --font-ar:'IBM Plex Sans Arabic','Inter',-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
+  /* ===== Ouja OS — calm, high-contrast, Apple-grade. Arabic=Tajawal, Latin+numbers=Inter ===== */
+  --font-ar:'Tajawal','IBM Plex Sans Arabic',-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
   --font-en:'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
-  --font-mono:'JetBrains Mono','SF Mono','Menlo',monospace;
+  --font-mono:'Inter','JetBrains Mono','SF Mono','Menlo',monospace;
 
-  --bg:#FAFAF7;
+  --bg:#F5F5F7;
   --surface:#FFFFFF;
-  --surface-2:#F5F2EC;
-  --surface-3:#EDE8DC;
-  --line:#E8E2D5;
-  --line-strong:#D4CDB9;
-  --border:var(--line);   /* alias — was used 107× but never defined (broke borders incl. selects) */
+  --surface-2:#F1F1F4;
+  --surface-3:#E9E9EE;
+  --tint:#FBFBFD;
+  --line:#E8E8ED;
+  --line-strong:#DEDEE3;
+  --border:var(--line);
+  --hair:var(--line); --hair-2:var(--line-strong);
 
-  --text:#1A1815;
-  --text-2:#544D43;
-  --text-3:#8C8475;
-  --mut:#A09989;
+  --text:#1D1D1F;
+  --text-2:#424245;
+  --text-3:#6E6E73;
+  --mut:#86868B;
+  --ink:var(--text); --ink-2:var(--text-2); --gray:var(--text-3); --gray-2:var(--mut);
 
-  --gold:#A37728;
-  --gold-2:#8B6320;
-  --gold-soft:#F4EBD5;
-  --gold-tint:rgba(163,119,40,0.07);
+  /* interactive accent = blue ONLY. Old --gold* tokens remap to it so existing markup adopts the new accent. */
+  --accent:#0A84FF; --accent-soft:#E9F2FF;
+  --gold:var(--accent);
+  --gold-2:#0060DF;
+  --gold-soft:var(--accent-soft);
+  --gold-tint:rgba(10,132,255,0.10);
+  --gold-logo:#B08945;   /* brand mark ONLY */
 
-  --green:#0E9E5F;
-  --green-soft:#DCF3E6;
-  --red:#C44343;
-  --red-soft:#FAE3E3;
-  --yellow:#C99617;
-  --yellow-soft:#FAEED1;
-  --blue:#2F6FD0;
-  --blue-soft:#E0EBFA;
-  --purple:#6D58C2;
-  --purple-soft:#EAE6F8;
+  /* status — the only non-neutral colors */
+  --green:#137333; --green-soft:#E7F5EC;
+  --red:#C5221F;   --red-soft:#FCEAE9;
+  --yellow:#9A6700; --yellow-soft:#FCF3DC;
+  --blue:#1A56DB;  --blue-soft:#E8EFFD;
+  --purple:#6D58C2; --purple-soft:#EDEAF8;
+  --good:var(--green); --good-bg:var(--green-soft);
+  --warn:var(--yellow); --warn-bg:var(--yellow-soft);
+  --bad:var(--red); --bad-bg:var(--red-soft);
+  --info:var(--blue); --info-bg:var(--blue-soft);
 
-  --r-xs:5px; --r-sm:7px; --r:10px; --r-lg:14px;
-  --sh-xs:0 1px 2px rgba(26,24,21,0.04);
-  --sh-sm:0 2px 5px rgba(26,24,21,0.05),0 1px 2px rgba(26,24,21,0.03);
-  --sh-md:0 6px 16px rgba(26,24,21,0.07),0 2px 4px rgba(26,24,21,0.04);
-  --sh-lg:0 16px 40px rgba(26,24,21,0.10),0 4px 12px rgba(26,24,21,0.06);
-  --sh-drawer:-12px 0 40px rgba(26,24,21,0.10);
-  --ease:cubic-bezier(0.23,1,0.32,1);   /* project ease-out — already used inline ~10×; tokenized here */
+  --r-xs:6px; --r-sm:10px; --r:14px; --r-md:14px; --r-lg:18px;
+  --sh-xs:0 1px 2px rgba(0,0,0,0.04);
+  --sh-sm:0 1px 2px rgba(0,0,0,0.04),0 1px 3px rgba(0,0,0,0.06);
+  --sh-md:0 4px 12px rgba(0,0,0,0.06),0 2px 4px rgba(0,0,0,0.04);
+  --sh-lg:0 12px 32px rgba(0,0,0,0.10),0 4px 10px rgba(0,0,0,0.06);
+  --sh-drawer:0 0 60px rgba(0,0,0,0.16);
+  --ease:cubic-bezier(0.22,0.61,0.36,1);   /* project ease-out */
 
   --side:232px;
   --drawer:520px;
@@ -11006,43 +11013,23 @@ DASHBOARD_HTML = """<!doctype html>
 }
 
 html[data-theme="dark"]{
-  --bg:#0E0D0C;
-  --surface:#18171A;
-  --surface-2:#221F1D;
-  --surface-3:#2A2722;
-  --line:#2C2924;
-  --line-strong:#3A362E;
-
-  --text:#F5F0E6;
-  --text-2:#C5BEAF;
-  --text-3:#928A78;
-  --mut:#6E6759;
-
-  --gold:#D4A854;
-  --gold-2:#B8893F;
-  --gold-soft:#2B2317;
-  --gold-tint:rgba(212,168,84,0.08);
-
-  --green:#3ECF8E;
-  --green-soft:#0F2E1F;
-  --red:#E25C5C;
-  --red-soft:#2E1414;
-  --yellow:#E9B94A;
-  --yellow-soft:#2D2210;
-  --blue:#5B9EFF;
-  --blue-soft:#0D1F35;
-  --purple:#8E78D9;
-  --purple-soft:#1B1530;
+  --bg:#1C1C1E; --surface:#2C2C2E; --surface-2:#3A3A3C; --surface-3:#48484A; --tint:#242426;
+  --line:#38383A; --line-strong:#48484A;
+  --text:#F5F5F7; --text-2:#D1D1D6; --text-3:#98989D; --mut:#8E8E93;
+  --accent-soft:#0A2540; --gold-2:#409CFF; --gold-tint:rgba(10,132,255,0.22); --gold-logo:#C79A52;
+  --green:#30D158; --green-soft:#0C2A17; --red:#FF453A; --red-soft:#3A1412;
+  --yellow:#FFD60A; --yellow-soft:#332A05; --blue:#409CFF; --blue-soft:#0A2540;
+  --purple:#BF5AF2; --purple-soft:#241033;
 }
 @media (prefers-color-scheme:dark){
   html[data-theme="auto"]{
-    --bg:#0E0D0C;--surface:#18171A;--surface-2:#221F1D;--surface-3:#2A2722;
-    --line:#2C2924;--line-strong:#3A362E;
-    --text:#F5F0E6;--text-2:#C5BEAF;--text-3:#928A78;--mut:#6E6759;
-    --gold:#D4A854;--gold-2:#B8893F;--gold-soft:#2B2317;--gold-tint:rgba(212,168,84,0.08);
-    --green:#3ECF8E;--green-soft:#0F2E1F;--red:#E25C5C;--red-soft:#2E1414;
-    --yellow:#E9B94A;--yellow-soft:#2D2210;--blue:#5B9EFF;--blue-soft:#0D1F35;
-    --purple:#8E78D9;--purple-soft:#1B1530;
+    --bg:#1C1C1E; --surface:#2C2C2E; --surface-2:#3A3A3C; --surface-3:#48484A; --tint:#242426;
+    --line:#38383A; --line-strong:#48484A;
+    --text:#F5F5F7; --text-2:#D1D1D6; --text-3:#98989D; --mut:#8E8E93;
+    --accent-soft:#0A2540; --gold-2:#409CFF; --gold-tint:rgba(10,132,255,0.22); --gold-logo:#C79A52;
+    --green:#30D158; --green-soft:#0C2A17; --red:#FF453A; --red-soft:#3A1412;
+    --yellow:#FFD60A; --yellow-soft:#332A05; --blue:#409CFF; --blue-soft:#0A2540;
+    --purple:#BF5AF2; --purple-soft:#241033;
   }
 }
 
@@ -11058,6 +11045,7 @@ select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,va
 html[dir="rtl"] select{background-position:14px 14px,9px 14px}
 a{color:inherit;text-decoration:none;cursor:pointer}
 .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-0.02em}
+.num{font-family:var(--font-en);font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;display:inline-block}
 bdi,.bidi,.mono,.kpi-val,.money,.unit-code,.ibox-who,.ibox-unit,.pill,table.data td,table.data th{unicode-bidi:isolate}
 .text-safe,.ibox-preview,.ibox-sum,.log-ltxt,.card-sub,.page-sub,.empty{overflow-wrap:anywhere;word-break:normal}
 html[dir="rtl"] .latin,html[dir="rtl"] .mono,html[dir="rtl"] .unit-code,html[dir="rtl"] .money{direction:ltr;display:inline-block}
@@ -11082,7 +11070,7 @@ a:focus-visible,button:focus-visible,.icbtn:focus-visible,.side-nav .item:focus-
 
 /* ============== LOGIN ============== */
 #login{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;background:var(--bg);z-index:1000}
-#login .brand-lg{font-size:34px;font-weight:700;color:var(--gold)}
+#login .brand-lg{font-size:34px;font-weight:800;color:var(--gold-logo);letter-spacing:-.5px}
 #login .sub{color:var(--mut);font-size:12.5px;margin-top:-10px;letter-spacing:1.5px;text-transform:uppercase}
 #login input{max-width:340px;text-align:center;font-size:15px;padding:13px;border-radius:var(--r);box-shadow:var(--sh-sm);width:100%}
 #login .err{color:var(--red);font-size:12.5px;min-height:18px}
