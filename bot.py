@@ -12048,7 +12048,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_pr_sub">السعر النهائي لكل ليلة = توصية المحرّك + طبقات الاستراتيجية. اضغط أي يوم تشوف «ليش هالسعر؟» والسجل الكامل.</div>
           </div>
           <div class="page-tools">
-            <button class="btn ghost sm" onclick="loadPricing()">↻</button>
+            <button class="btn primary sm" onclick="pccSync()" title="اقرأ الأسعار الحالية من Hostaway وطابق العرض">↻ <span id="t_pr_sync">تحديث من Hostaway</span></button>
+            <button class="btn ghost sm" onclick="loadPricing()" title="تحديث العرض">↻</button>
           </div>
         </div>
 
@@ -14698,16 +14699,16 @@ async function pccMismatches(){
   var ar=(L==='ar'), t=_pcc.truth;
   if(!t){ toast(ar?'اضغط «تحديث من Hostaway» أول':'Sync from Hostaway first'); return; }
   var rows=((t.rows)||[]).filter(function(r){ return r.status!=='matched'; });
-  openDrawer(ar?'مراجعة الاختلافات مع Hostaway':'Hostaway mismatch review', ar?'مصدر الحقيقة: Hostaway':'Source of truth: Hostaway');
-  if(!rows.length){ setDrawerBody('<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه اختلافات — كل الأسعار مقروءة من Hostaway ✓':'No mismatches — all prices verified from Hostaway ✓')+'</div>'); setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'تمام':'Done')+'</button>'); return; }
-  var STT={mismatched:[ar?'مختلف عن Hostaway':'differs','red'],missing:[ar?'مفقود في Hostaway':'missing in Hostaway','gold'],error:[ar?'فشل قراءة Hostaway':'fetch error','red']};
+  openDrawer(ar?'تحديث الأسعار من Hostaway':'Sync prices from Hostaway', ar?'مصدر الحقيقة: Hostaway':'Source of truth: Hostaway');
+  if(!rows.length){ setDrawerBody('<div class="empty" style="padding:24px;text-align:center">'+(ar?'كل شي محدّث — العرض مطابق لأسعار Hostaway ✓':'All up to date — the view matches Hostaway ✓')+'</div>'); setDrawerFoot('<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'تمام':'Done')+'</button>'); return; }
+  var STT={mismatched:[ar?'محتاج تحديث':'needs sync','gold'],missing:[ar?'مفقود في Hostaway':'missing in Hostaway','gold'],error:[ar?'فشل قراءة Hostaway':'fetch error','red']};
   var body=rows.map(function(r){ var st=STT[r.status]||[r.status,'mut'];
     var hp=(r.hostaway_current_price!=null?fmt(r.hostaway_current_price):'—'), dp=(r.dashboard_displayed_price!=null?fmt(r.dashboard_displayed_price):'—');
     var diff=(r.hostaway_current_price!=null&&r.dashboard_displayed_price!=null)?(r.dashboard_displayed_price-r.hostaway_current_price):null;
     return '<div style="padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:12px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>'+esc(r.name)+' · '+esc(r.date)+'</b>'+pccChip(st[0],st[1])+'</div>'
       +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'#a23b30':'#1f6e45')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+((r.baseline_price!=null)?('<span class="muted">'+(ar?'السابق':'prev')+': '+fmt(r.baseline_price)+'</span>'):'')+'</div><div style="margin-top:7px"><button class="btn ghost xs" onclick="pccRefreshListing('+r.listing_id+')">↻ '+(ar?'حدّث هالشقة من Hostaway':'Refresh this apartment')+'</button></div></div>';
   }).join('');
-  setDrawerBody('<div class="muted" style="font-size:11.5px;margin-bottom:9px;line-height:1.7">'+(ar?'هذي ليالٍ السعر المعروض فيها يختلف عن سعر Hostaway الحالي. سوّ «تحديث من Hostaway» عشان تتطابق — وبعدها تقدر تطبّق بأمان.':'These nights show a price that differs from the live Hostaway price. Click Sync from Hostaway to reconcile, then you can apply safely.')+'</div>'+body);
+  setDrawerBody('<div class="muted" style="font-size:11.5px;margin-bottom:9px;line-height:1.7">'+(ar?'السعر المحفوظ بالعرض هنا أقدم من السعر الحالي في Hostaway (غالبًا لأنك فعّلت الشقة للتو أو تغيّر السعر). اضغط «تحديث من Hostaway» عشان نقرأ الأسعار الحالية ويتطابق العرض — وبعدها تقدر تطبّق بأمان. ما تغيّر شيء في Hostaway.':'The saved price shown here is older than the live Hostaway price (usually because you just activated the unit or the price changed). Click Sync from Hostaway to re-read the live prices — then you can apply safely. Nothing in Hostaway has changed.')+'</div>'+body);
   setDrawerFoot('<button class="btn primary sm" onclick="closeDrawer();pccSync()">↻ '+(ar?'تحديث من Hostaway':'Sync from Hostaway')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
 }
 async function pccRefreshListing(lid){
@@ -15124,6 +15125,7 @@ async function prToggleActivate(lid,on){
 function renderPricingTable(){
   var ar=(L==='ar'); var body=document.getElementById('prTable'), cnt=document.getElementById('prTableCount'); if(!body) return;
   var tt=document.getElementById('t_pr_table'); if(tt) tt.textContent=(ar?'إدارة الأسعار — الشقق':'Price manager — listings');
+  var ts=document.getElementById('t_pr_sync'); if(ts) ts.textContent=(ar?'تحديث من Hostaway':'Sync from Hostaway');
   var d=D.pcc||{};
   if(d.ok===false){ body.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:#a23b30">'+(ar?'⚠ تعذّر تحميل قائمة الشقق':'⚠ Could not load listings')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. جرّب تحديث.':'Engine did not respond — try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; if(cnt) cnt.textContent=''; return; }
   var us=_prFilterUnits(); var compounds={}; (d.units||[]).forEach(function(u){ if(u.group) compounds[u.group]=(compounds[u.group]||0)+1; });
@@ -15238,7 +15240,7 @@ async function pccCalApply(mode){
     var tc; try{ tc=await api('/api/pricing/truth-check?start='+encodeURIComponent(dates[0])+'&end='+encodeURIComponent(dates[dates.length-1])); }catch(_){ tc=null; }
     if(tc&&tc.ok) _pcc.truth=tc;
     if(!tc||!tc.ok){ toast(ar?'⚠ ما قدرنا نتأكد من Hostaway — التطبيق متوقف':'⚠ Could not verify Hostaway — halted'); return; }
-    if(((tc.summary||{}).mismatched||0)>0){ toast(ar?'⛔ فيه اختلاف مع Hostaway. سوّ Sync وراجع أول.':'⛔ Hostaway mismatch. Sync and review first.'); pccMismatches(); return; }
+    if(((tc.summary||{}).mismatched||0)>0){ toast(ar?'بعض الأسعار محتاجة «تحديث من Hostaway» قبل التطبيق':'Some prices need a Hostaway sync before applying'); pccMismatches(); return; }
     var m=await fbModal({title:(ar?'تأكيد كتابة فعلية على Hostaway':'Confirm REAL write to Hostaway'), msg:(ar?('بنكتب '+rows.length+' سعر على هالشقة فعليًا، ونتأكد بعد الكتابة بإعادة القراءة من Hostaway.'):('Writing '+rows.length+' prices for this unit, then verifying by re-reading from Hostaway.')), summary:(rows.length+(ar?' ليلة':' nights')), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')});
     if(!m.ok) return;
   }
