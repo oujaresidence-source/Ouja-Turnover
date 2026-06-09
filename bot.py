@@ -14698,7 +14698,52 @@ function renderCommandCenter(){
   h+='<div id="pccBoard"></div>';
   el.innerHTML=h; pccBoard();
 }
-function pccAct(a){ if(a==='review'){ _pcc.action=''; var dt=document.getElementById('prDetailed'); if(dt){ dt.open=true; if(dt.scrollIntoView) dt.scrollIntoView({behavior:'smooth',block:'start'}); } return; } _pcc.action=(_pcc.action===a?'':a); renderCommandCenter(); }
+function pccAct(a){ if(a==='review'){ var dt=document.getElementById('prDetailed'); if(dt){ dt.open=true; if(dt.scrollIntoView) dt.scrollIntoView({behavior:'smooth',block:'start'}); } return; } pccPreview(a); }
+function _pccDefScope(a){ var t=new Date(); t.setHours(0,0,0,0); var days=(a==='fill_tonight'?2:7); return {start:_peIso(t), end:_peIso(new Date(t.getTime()+(days-1)*86400000))}; }
+function pccPreview(a){ var s=_pccDefScope(a); _pcc.pv={action:a, start:s.start, end:s.end, allowBelow:false}; pccPvRender(); }
+function pccPvRows(){
+  var pv=_pcc.pv||{}, d=D.pcc||{}; var rows=[];
+  (d.units||[]).forEach(function(u){
+    if(pv.action==='fill_tonight' && !((u.current||{}).empty_nights_7>0)) return;
+    if(pv.action==='protect_adr'){ var r=u.recommendation||{}; if(!(r.suggested_price!=null&&r.current_price!=null&&r.suggested_price>=r.current_price)) return; }
+    (u.calendar_14||[]).forEach(function(x){
+      if(!x.date || x.date<pv.start || x.date>pv.end) return;
+      var cp=x.current_price, sp=x.suggested_price, fl=x.floor;
+      if(cp==null||sp==null) return;
+      var delta=sp-cp, below=(fl!=null&&sp<fl), canApply=true, reason='';
+      if(delta===0){ canApply=false; reason='no_change'; }
+      else if(below && !pv.allowBelow){ canApply=false; reason='floor_blocked'; }
+      rows.push({lid:u.listing_id, name:u.name, date:x.date, current:cp, suggested:sp, floor:fl, delta:delta, below:below, canApply:canApply, reason:reason});
+    });
+  });
+  return rows;
+}
+function pccPvRender(){
+  var ar=(L==='ar'); var pv=_pcc.pv||{}; var rows=pccPvRows();
+  var titles={fill_tonight:'Fill Tonight', balanced_recovery:'Balanced Recovery', protect_adr:'Protect ADR'};
+  openDrawer((ar?'معاينة · ':'Preview · ')+(titles[pv.action]||pv.action), (ar?'من ':'from ')+pv.start+(ar?' إلى ':' to ')+pv.end);
+  var dec=0,inc=0,hold=0,fb=0,bf=0,risk=0;
+  rows.forEach(function(r){ if(r.reason==='floor_blocked') fb++; else if(r.below) bf++; if(r.delta<0) dec++; else if(r.delta>0) inc++; else hold++; if(r.canApply&&r.delta<0) risk+=r.suggested; });
+  var canN=rows.filter(function(r){return r.canApply;}).length;
+  var scope='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><label class="muted" style="font-size:11px">'+(ar?'من':'From')+'</label><input type="date" value="'+esc(pv.start)+'" onchange="_pcc.pv.start=this.value;pccPvRender()" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"><label class="muted" style="font-size:11px">'+(ar?'إلى':'To')+'</label><input type="date" value="'+esc(pv.end)+'" onchange="_pcc.pv.end=this.value;pccPvRender()" style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--surface)"></div>';
+  var belowT='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(pv.allowBelow?'checked':'')+' onchange="_pcc.pv.allowBelow=this.checked;pccPvRender()"> '+(ar?'اسمح باستثناء أقل من الـ floor — لإنقاذ ليالٍ فاضية':'Allow below-floor exception — to save empty nights')+'</label>';
+  var sum='<div class="card" style="margin:0 0 8px;background:var(--surface-2)"><div style="display:flex;gap:6px;flex-wrap:wrap">'
+    +pccChip((ar?'ليالٍ ':'nights ')+rows.length,'info')+pccChip((ar?'خفض ':'drops ')+dec,(dec?'gold':'mut'))+pccChip((ar?'رفع ':'raises ')+inc,(inc?'green':'mut'))+pccChip((ar?'ثابت ':'holds ')+hold,'mut')+pccChip((ar?'محظور بالـ floor ':'floor-blocked ')+fb,(fb?'red':'mut'))+(bf?pccChip((ar?'استثناء تحت الـ floor ':'below-floor exc ')+bf,'red'):'')
+    +'</div><div style="font-size:12px;margin-top:6px">'+(ar?'إيراد مهدد ممكن نعالجه: ':'Revenue-at-risk addressed: ')+'<b>'+fmt(Math.round(risk))+' '+(ar?'ر.س':'SAR')+'</b></div></div>';
+  var byU={}; rows.forEach(function(r){ (byU[r.lid]=byU[r.lid]||{name:r.name,rows:[]}).rows.push(r); });
+  var body=''; var keys=Object.keys(byU);
+  keys.forEach(function(lid){ var g=byU[lid];
+    body+='<div class="card" style="margin:0 0 8px"><b style="font-size:13px">'+esc(g.name)+'</b><div style="margin-top:6px">'+g.rows.map(function(r){
+      var st=(r.reason==='floor_blocked'?pccChip(ar?'محظور بالـ floor':'floor-blocked','red'):(r.reason==='no_change'?pccChip(ar?'ثابت':'hold','mut'):(r.below?pccChip(ar?'تحت الـ floor':'below floor','red'):pccChip(ar?'جاهز':'ready','green'))));
+      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid var(--line)"><span class="muted">'+esc(r.date)+'</span><span>'+fmt(r.current)+' → <b style="color:'+(r.delta<0?'#a23b30':(r.delta>0?'#1f6e45':'var(--text)'))+'">'+fmt(r.suggested)+'</b> '+st+'</span></div>';
+    }).join('')+'</div></div>';
+  });
+  if(!rows.length) body='<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه ليالٍ ضمن النطاق لهالإجراء. غيّر التواريخ أو الإجراء.':'No nights in range for this action. Change the dates or action.')+'</div>';
+  setDrawerBody(scope+belowT+sum+body);
+  var dryNote=(D.pcc&&D.pcc.dry_run)?('<div class="muted" style="font-size:10.5px;margin-top:4px;text-align:center">'+(ar?'وضع المعاينة مفعّل':'Dry-run is ON')+'</div>'):'';
+  setDrawerFoot('<button class="btn primary sm" '+(canN?'':'disabled')+' onclick="pccApplyComing('+canN+')">'+(ar?'تطبيق فعلي على Hostaway':'Confirm apply to Hostaway')+' ('+canN+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'+dryNote);
+}
+async function pccApplyComing(n){ var ar=(L==='ar'); await fbModal({title:(ar?'تطبيق فعلي على Hostaway':'Apply to Hostaway'), msg:(ar?'هذي معاينة فقط — ما تغيّر شيء في Hostaway. التطبيق الفعلي المُتحقَّق — يكتب السعر ثم يعيد القراءة من Hostaway للتأكيد — يتفعّل بالخطوة الجاية.':'Preview only — nothing changed in Hostaway. The verified live apply (writes the price, then re-fetches Hostaway to confirm) is enabled in the next step.'), confirm:(ar?'فهمت':'Got it'), cancel:(ar?'إغلاق':'Close')}); }
 function pccBoard(){
   var ar=(L==='ar'); var wrap=document.getElementById('pccBoard'); if(!wrap) return; var d=D.pcc||{}; var units=(d.units||[]).slice();
   var q=(_pcc.q||'').trim().toLowerCase(); if(q) units=units.filter(function(u){ return String(u.name||'').toLowerCase().indexOf(q)>=0; });
