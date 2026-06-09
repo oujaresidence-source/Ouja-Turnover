@@ -14667,14 +14667,20 @@ var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',
 async function loadPricing(){
   var pc=document.getElementById('pcc'); if(pc) pc.innerHTML='<div class="empty sk" style="height:140px">—</div>';
   var lb=document.getElementById('prListBody'); if(lb) lb.innerHTML='<div class="empty sk">—</div>';
-  try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};}), api('/api/pricing/command').catch(function(e){return {ok:false,error:'command_fetch_failed'};}), api('/api/pricing/emergency-preview').catch(function(){return {count:0,candidates:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; D.pccEmg=rr[4]; }
-  catch(_){ if(!D.pr2) D.pr2={recs:[],error:'تعذّر جلب التوصيات'}; if(!D.prA) D.prA={}; if(!D.lmDiag) D.lmDiag={runs:[]}; if(!D.pcc) D.pcc={ok:false,error:'load_failed'}; if(!D.pccEmg) D.pccEmg={count:0,candidates:[]}; }
-  renderCommandCenter();
-  renderPricingHeader();
-  renderPricing2();
-  renderPricingOpsSummary();
-  renderLastMinuteDiagnostics();
-  loadTodayEmpty();         // folded-in "Today": tonight's vacancies + last-minute step-down (collapsed)
+  // Each source is fetched + caught INDEPENDENTLY so one failure can never blank the tab.
+  async function pull(path, fallback){ try{ return await api(path); }catch(e){ var f=fallback||{}; f.__error=true; return f; } }
+  var rr=await Promise.all([
+    pull('/api/pricing2/recs',{recs:[],error:'recs_fetch_failed'}),
+    pull('/api/pricing/analytics',{}),
+    pull('/api/pricing/last-minute-diagnostics',{runs:[]}),
+    pull('/api/pricing/command',{ok:false,error:'command_fetch_failed'}),
+    pull('/api/pricing/emergency-preview',{count:0,candidates:[]})
+  ]);
+  D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; D.pcc=rr[3]; D.pccEmg=rr[4];
+  // Each render is wrapped so a throw in one section never leaves another blank.
+  function safe(fn,label){ try{ fn(); }catch(e){ try{ console.warn('pricing render '+(label||''),e); }catch(_){} } }
+  safe(renderCommandCenter,'cc'); safe(renderPricingHeader,'hdr'); safe(renderPricing2,'list');
+  safe(renderPricingOpsSummary,'ops'); safe(renderLastMinuteDiagnostics,'lm'); safe(loadTodayEmpty,'today');
 }
 /* ===== Pricing Command Center (Stage 2) — read-only owner decision surface over /api/pricing/command.
    No apply here; "Review Manually" opens the detailed list below. Max 4 status colors. ===== */
@@ -27956,6 +27962,7 @@ def _pricing_command_snapshot(force=False):
         sug = _coerce_price(r.get("final") if r.get("final") is not None else r.get("recommended"))
         u["nights"].append({"date": r.get("date"), "dt": dt, "current": cur, "suggested": sug,
                             "floor": _coerce_price(r.get("floor")), "median": _coerce_price(r.get("median")),
+                            "ceiling": _coerce_price(r.get("ceiling")), "previous": _coerce_price(pricing_baseline(lid, r.get("date"))),
                             "band_source": r.get("band_source"), "band_count": r.get("band_count")})
     empty7 = empty14 = high_risk = 0
     risk7 = risk14 = 0.0
@@ -27991,8 +27998,13 @@ def _pricing_command_snapshot(force=False):
                                "delta": ((near["suggested"] - near["current"]) if (near and near["suggested"] is not None and near["current"] is not None) else None),
                                "confidence": conf, "confidence_reason_ar": conf_reason},
             "risk": {"revenue_at_risk_7": round(r7), "revenue_at_risk_14": round(r14), "risk_level": lvl},
+            "summary": {"current": (near["current"] if near else None), "floor": floor_v,
+                        "ceiling": (near["ceiling"] if near else None), "median": (near["median"] if near else None),
+                        "empty_7": e7, "occupancy_7": round(100 * (7 - min(e7, 7)) / 7),
+                        "risk_7": round(r7), "activated": bool(u["enabled"]), "hostaway_synced": None},
             "calendar_14": [{"date": x["date"], "current_price": x["current"], "suggested_price": x["suggested"],
-                             "floor": x["floor"], "median": x["median"]} for x in nights],
+                             "floor": x["floor"], "median": x["median"], "ceiling": x.get("ceiling"),
+                             "previous_price": x.get("previous")} for x in nights],
         })
     unit_list.sort(key=lambda x: -(x["risk"]["revenue_at_risk_7"] or 0))    # highest revenue-at-risk first
     n_units = len(units)
@@ -28153,6 +28165,77 @@ async def _api_pricing_refresh_listing(request):
     except Exception as e:
         print("refresh-listing:", e)
         return _json({"ok": False, "error": "refresh_failed"})
+
+def _pricing_calendar(lid, start_iso=None, end_iso=None):
+    """READ-ONLY month calendar for ONE unit: EVERY day (booked + open) with the LIVE Hostaway price,
+    the previous (baseline) price + %Δ, the rescue suggestion + short why, floor/ceiling/median, and the
+    booked flag. Reuses _pe_fetch_calendars (fresh) + _pe_get_recs + pricing_baseline + _pricing_rescue_reco.
+    Never fabricates — missing values are null; booked days carry no suggestion."""
+    now = datetime.now(TZ); today = now.date()
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "bad_lid", "days": []}
+    sd = _parse_date(start_iso) or today
+    ed = _parse_date(end_iso) or (sd + timedelta(days=31))
+    if ed < sd:
+        sd, ed = ed, sd
+    span = max(1, min((ed - sd).days, 62))
+    ed = sd + timedelta(days=span)
+    name = (get_listings_map() or {}).get(lid) or ("Ouja | " + str(lid))
+    cal = (_pe_fetch_calendars([lid], sd, span) or {}).get(lid) or {}      # fresh GET — booked + open
+    recs_by_date = {}
+    try:
+        for r in ((_pe_get_recs() or {}).get("recs") or []):
+            if r.get("lid") == lid:
+                recs_by_date[r.get("date")] = r
+    except Exception as e:
+        print("pricing-calendar recs:", e)
+    demand = "normal"
+    try:
+        demand = ((_pricing_command_snapshot().get("demand") or {}).get("signal")) or "normal"
+    except Exception:
+        pass
+    hr = now.hour
+    days = []; cur_d = sd
+    while cur_d < ed:
+        ds = cur_d.isoformat(); rowc = cal.get(ds) or {}
+        hp = _coerce_price(rowc.get("price")); booked = bool(rowc.get("booked"))
+        prev = _coerce_price(pricing_baseline(lid, ds))
+        rec = recs_by_date.get(ds) or {}
+        floor = _coerce_price(rec.get("floor")); ceiling = _coerce_price(rec.get("ceiling")); median = _coerce_price(rec.get("median"))
+        dtype, ev = _pe_date_type(cur_d)
+        dleft = (cur_d - today).days
+        badge = ("event" if ev else ("weekend" if dtype == "weekend" else None))
+        if badge is None and 0 <= dleft <= 2 and not booked:
+            badge = "last_minute"
+        sug = None; action = "hold"; conf = "none"; why = ""
+        if not booked and hp is not None:
+            rr = _pricing_rescue_reco("balanced_recovery", hp, floor, median, demand, dleft, hr)
+            sug = rr["price"]; why = rr["reason_ar"]
+            action = ("drop" if (sug is not None and sug < hp) else ("raise" if (sug is not None and sug > hp) else "hold"))
+            conf = _pe_command_confidence(rec.get("band_source"), rec.get("band_count"))[0] if rec else "none"
+        delta_pct = None
+        if hp is not None and prev not in (None, 0) and prev != hp:
+            delta_pct = round(100.0 * (hp - prev) / prev, 1)
+        days.append({"date": ds, "hostaway_current": hp, "previous_price": prev, "delta_pct": delta_pct,
+                     "ouja_suggested": sug, "floor": floor, "ceiling": ceiling, "median": median,
+                     "available": bool(rowc.get("avail")), "booked": booked,
+                     "reservation_id": rowc.get("reservation_id") or rowc.get("reservationId"),
+                     "action": action, "confidence": conf, "why_short": why, "badge": badge})
+        cur_d += timedelta(days=1)
+    return {"ok": True, "lid": lid, "name": name, "generated_at": now.isoformat(timespec="seconds"), "days": days}
+
+async def _api_pricing_calendar(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q = request.query
+    try:
+        return _json(await asyncio.to_thread(_pricing_calendar, q.get("lid"),
+                                             (q.get("start") or "")[:10] or None, (q.get("end") or "")[:10] or None))
+    except Exception as e:
+        print("pricing-calendar:", e)
+        return _json({"ok": False, "error": "calendar_failed", "days": []})
 
 _pe_cmd_batches = _load_json("pricing_command_batches.json", {}) or {}   # batch_id -> {ts,actor,dry_run,rows[]}  (revert source)
 def _pe_cmd_batches_save():
@@ -41015,6 +41098,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
         app.router.add_get("/api/pricing/truth-check", _api_pricing_truth_check)   # Hostaway-vs-dashboard truth (read-only)
+        app.router.add_get("/api/pricing/calendar", _api_pricing_calendar)   # per-unit month calendar (read-only)
         app.router.add_post("/api/pricing/refresh-listing", _api_pricing_refresh_listing)  # re-read one apartment from Hostaway
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
         app.router.add_get("/api/pricing/emergency-preview", _api_pricing_emergency_preview)  # 9PM emergency (preview only)
