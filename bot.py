@@ -22213,6 +22213,8 @@ async function plabDecision(){
   if(gen) gen.textContent=(ar?'بيانات: ':'data: ')+(m.booked_nights||0)+(ar?' ليلة · ':' nights · ')+(m.reservations_analyzed||0)+(ar?' حجز':' res');
   var card='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px';
   var html='';
+  html+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.7;margin-bottom:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><div>'+(ar?'🧪 <b>المختبر</b> = تحليل عميق لكل شقة + تطبيق آمن لكل ليلة. <b>مركز التسعير</b> = الطلّة الشاملة، التطبيق القريب بالجملة، الطوارئ، والتراجع بالدُفعات. الاثنين يكتبون بنفس المحرّك ويتسجّلون.':'🧪 <b>The Lab</b> = deep per-apartment analysis + safe per-night apply. <b>Command Center</b> = portfolio view, near-term bulk apply, emergencies and batch revert. Both write via the same verified engine and are logged.')+'</div><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح مركز التسعير':'Open Command Center')+'</button></div>';
+  if(d.dry_run) html+='<div style="'+card+';border-color:#2f5f7a;color:#2f5f7a"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'أي تطبيق هنا ما يغيّر Hostaway فعليًا.':'any apply here will NOT change Hostaway.')+'</div>';
   if(m.thin_units) html+='<div style="'+card+';border-color:var(--gold)">⚠ '+(ar?('بيانات قليلة لـ '+m.thin_units+' شقة — توصياتها بثقة منخفضة'):('thin data for '+m.thin_units+' units — low confidence'))+'</div>';
   html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+plabStat('🎯',(d.cards||[]).length,ar?'فرص للمراجعة':'opportunities')+plabStat('✅',o.booked_after_apply||0,ar?'طُبّق ثم انحجز':'applied then booked')+plabStat('⚠️',(d.failed||[]).length,ar?'يحتاج إجراء':'need action')+'</div>';
   if((d.failed||[]).length){ html+='<div style="'+card+';border-color:var(--down)"><b style="color:var(--down)">'+(ar?'فشل تزامن/رجوع':'Failed sync/revert')+'</b>'+d.failed.map(function(s){ return '<div style="display:flex;justify-content:space-between;gap:8px;margin-top:6px"><span>'+esc(s.apartment)+' · '+esc(s.date)+'</span><button class="btn ghost xs" onclick="plabRevert(&#39;'+esc(s.snapshot_id)+'&#39;)">'+(ar?'حاول رجوع':'retry revert')+'</button></div>'; }).join('')+'</div>'; }
@@ -22290,9 +22292,18 @@ async function plabPreview(lid,date){
   body+='<div style="'+box+'"><b>'+t().plab_reason+'</b><div style="margin-top:4px;line-height:1.6">'+esc(ar?rec.reason_ar:rec.reason_en)+'</div></div>';
   if(rec.expected_revenue!=null) body+='<div style="'+box+'">'+t().plab_exprev+': <b>'+plabMoney(rec.expected_revenue)+'</b> <span class="muted" style="font-size:10px">('+t().plab_prob+' '+Math.round((rec.booking_prob||0)*100)+'%)</span></div>';
   if(lad&&(lad.rungs||[]).length) body+='<div style="'+box+'"><b>'+(ar?'سلّم النزول حسب قرب التاريخ':'Step-down by lead')+'</b><div style="margin-top:6px">'+lad.rungs.map(function(r){ return '<div style="display:flex;justify-content:space-between;font-size:11.5px"><span>'+esc(r.bucket)+'</span><b>'+plabMoney(r.price)+'</b></div>'; }).join('')+'</div></div>';
-  body+='<div style="background:rgba(204,75,75,.08);border:1px solid var(--down);border-radius:8px;padding:9px;font-size:11.5px;color:var(--down)">'+(ar?'⚠ التطبيق يكتب السعر في Hostaway فعليًا — مع حفظ السعر الأصلي وإمكانية الرجوع.':'⚠ Applying writes to Hostaway for real — original is saved, revertible.')+'</div>';
+  var dry=!!(D.plab&&D.plab.over&&D.plab.over.dry_run);
+  if(dry) body+='<div style="background:rgba(47,95,122,.10);border:1px solid #2f5f7a;border-radius:9px;padding:9px 11px;font-size:11.5px;color:#2f5f7a;margin-bottom:8px"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'التطبيق ما يغيّر شيء في Hostaway. للكتابة الفعلية لازم PRICE_APPLY_DRYRUN=0.':'apply will NOT change Hostaway. Real writes need PRICE_APPLY_DRYRUN=0.')+'</div>';
+  body+='<div style="background:rgba(62,125,90,.07);border:1px solid #3e9665;border-radius:9px;padding:10px 11px;font-size:11.5px;line-height:1.7">'
+    +'<b>'+(ar?'تطبيق آمن — وش يصير بالضبط:':'Safe apply — exactly what happens:')+'</b>'
+    +'<div style="margin-top:4px">'+(ar?'• يكتب السعر في Hostaway فعليًا':'• Writes the price to Hostaway for real')+'</div>'
+    +'<div>'+(ar?'• ما ينكتب سعر تحت الحد الأدنى المحفوظ للشقة — يتوقف لو صار':'• Never writes below the saved floor for this unit — blocked if it would')+'</div>'
+    +'<div>'+(ar?'• يحفظ السعر الأصلي ويتأكد بإعادة القراءة من Hostaway — ما يدّعي نجاح':'• Saves the original + verifies by re-reading Hostaway — never fakes success')+'</div>'
+    +'<div>'+(ar?'• رجوع للسعر الأصلي بضغطة من «سجل التطبيق والرجوع»':'• One-click revert to the original from the Apply & Revert Log')+'</div>'
+    +'<div>'+(ar?'• مُسجّل في سجل تغييرات الأسعار المركزي':'• Recorded in the central price-change log')+'</div>'
+    +'</div>';
   setDrawerBody(body);
-  setDrawerFoot('<button class="btn primary sm" onclick="plabApply('+lid+',&#39;'+esc(date)+'&#39;,'+rec.recommended+')">'+t().plab_apply+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
+  setDrawerFoot('<button class="btn primary sm" onclick="plabApply('+lid+',&#39;'+esc(date)+'&#39;,'+rec.recommended+')">'+t().plab_apply+'</button><button class="btn ghost sm" onclick="pccFromLab('+lid+')">'+(ar?'أو طبّق من مركز التسعير':'or apply in Command Center')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>');
 }
 async function plabApply(lid,date,price){
   var ar=(L==='ar');
@@ -22315,6 +22326,12 @@ async function plabRevert(sid){
   var r; try{ r=await post('/api/plab/revert',{snapshot_id:sid}); }catch(_){ r=null; }
   if(r&&(r.status==='synced'||r.status==='dry_run')) toast(t().plab_synced); else toast(t().plab_notsynced+((r&&r.error)?(' · '+r.error):''));
   if(_plab.tab==='log') plabLogView(); else plabDecision();
+}
+/* ---- Cross-link: open this unit in the Command Center (the portfolio-wide apply surface) ---- */
+function pccFromLab(lid){
+  var name=''; try{ var us=(D.plab&&D.plab.units)||[]; for(var i=0;i<us.length;i++){ if(String(us[i].lid)===String(lid)){ name=us[i].name; break; } } }catch(_){}
+  _pcc.q=name||''; _pcc.action=''; _pcc.risk=''; closeDrawer(); go('pricing');
+  var el=document.getElementById('pcc'); if(el&&el.scrollIntoView) el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 /* ---- Unit Profile form ---- */
 var _PLAB_FORM=[['building_type','sel',['old building','average building','modern building','tower','residential complex','compound'],'نوع المبنى','Building type'],
@@ -22363,6 +22380,7 @@ async function plabLogView(){
   var d; try{ d=await api('/api/plab/log'); }catch(_){ d=null; }
   var rows=(d&&d.log)||[], o=(d&&d.outcomes)||{};
   var head='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+plabStat('📦',o.applied||0,ar?'تطبيقات':'applied')+plabStat('✅',o.booked_after_apply||0,ar?'انحجزت بعده':'booked after')+plabStat('▲',o.raise_booked||0,ar?'رفع ثم حجز':'raise→booked')+'</div>';
+  head+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:11px;line-height:1.6;margin-bottom:12px" class="muted">'+(ar?'هذي تغييرات طبّقتها من المختبر — كلها مؤكدة بإعادة القراءة من Hostaway وترجع للسعر الأصلي بضغطة. دُفعات «مركز التسعير» لها سجلها الخاص داخل المركز.':'These are changes you applied from the Lab — each verified by re-reading Hostaway, revertible to the original in one click. Command Center batches have their own history inside the Center.')+'</div>';
   if(!rows.length){ b.innerHTML=head+'<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه تطبيقات بعد':'No applies yet')+'</div>'; return; }
   b.innerHTML=head+'<div style="display:flex;flex-direction:column;gap:6px">'+rows.map(function(s){
     var st=s.status, col=(st==='applied'?'#3e9665':(st==='reverted'?'#8a8270':(st&&st.indexOf('fail')>=0?'var(--down)':'var(--gold)')));
@@ -27472,6 +27490,7 @@ def _plab_decision_board():
     lm = get_listings_map() or {}
     units = [{"lid": k, "name": v} for k, v in sorted(lm.items(), key=lambda x: x[1] or "")]
     return {"cards": cards[:24], "failed": list(reversed(failed)), "units": units,
+            "dry_run": bool(PRICE_APPLY_DRYRUN),
             "meta": _plab_dataset_meta(), "outcomes": _plab_outcomes_summary()}
 
 # ---- Pricing Lab endpoints (all dash-auth gated; manual apply only; DRYRUN honored) ----
