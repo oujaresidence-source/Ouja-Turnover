@@ -11650,11 +11650,11 @@ html[dir="rtl"] .drawer.open{transform:translateX(0)}
 @media (prefers-reduced-motion:reduce){ body.detailpane main.main{transition:none} }
 
 /* ============== PRICING DETAIL TABLE ============== */
-table.data{width:100%;border-collapse:collapse;font-size:12px}
-table.data th{padding:8px 7px;color:var(--mut);font-weight:600;font-size:10.5px;text-align:start;border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;position:sticky;top:0;background:var(--surface);z-index:1}
-table.data td{padding:9px 7px;border-bottom:1px solid var(--line);color:var(--text-2);vertical-align:middle}
+table.data{width:100%;border-collapse:collapse;font-size:13px}
+table.data th{padding:11px 12px;color:var(--mut);font-weight:700;font-size:11px;text-align:start;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;background:var(--tint);z-index:1}
+table.data td{padding:12px;border-bottom:1px solid var(--line);color:var(--text-2);vertical-align:middle}
 table.data tr:last-child td{border:none}
-table.data tr:hover td{background:var(--surface-2)}
+table.data tr:hover td{background:var(--accent-soft)}
 table.data .strong{color:var(--text);font-weight:600}
 table.data .num{font-family:var(--font-mono);text-align:end}
 .pchange{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-weight:600}
@@ -11908,7 +11908,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="card">
           <div class="card-head">
-            <span class="card-title">📋 <span id="t_recent_h">آخر النشاط</span></span>
+            <span class="card-title"><span id="t_recent_h">آخر النشاط</span></span>
             <a class="card-sub" style="cursor:pointer;color:var(--gold);font-weight:600" onclick="go('log')" id="t_seeall">عرض الكل ←</a>
           </div>
           <div id="recentBody"><div class="empty sk">—</div></div>
@@ -11926,7 +11926,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_inbox" data-help-key="inbox">
           <button class="ph-x" onclick="dismissHelp('inbox')" title="إخفاء">×</button>
-          <div class="ph-t">✉️ ردود الضيوف والتصعيدات</div>
+          <div class="ph-t">ردود الضيوف والتصعيدات</div>
           <div class="ph-b">
             كل ما المساعد يحضّر رد لضيف بيظهر هنا. <b>أصفر</b> = يحتاج موافقتك (شك في الرد).
             <b>أحمر</b> = تصعيد، فيه مشكلة جدية. اضغط أي محادثة تشوف النص كامل. الفلاتر فوق
@@ -11968,7 +11968,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_calendar" data-help-key="calendar">
           <button class="ph-x" onclick="dismissHelp('calendar')" title="إخفاء">×</button>
-          <div class="ph-t">📅 تقويم الـ٦٠ يوم</div>
+          <div class="ph-t">تقويم الـ٦٠ يوم</div>
           <div class="ph-b">
             كل خانة = يوم. اللون يبيّن قوة الإشغال: <b>أخضر</b> = ممتاز، <b>أصفر</b> = متوسط،
             <b>أحمر</b> = ضعيف. الأرقام تحت كل تاريخ: محجوزة / فاضية / الإيراد المتوقع.
@@ -11979,7 +11979,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="calendarOpsSummary"></div>
         <!-- Tape-chart: rows = units, columns = next 45 days (items 10-15) -->
         <div class="card" style="padding:12px">
-          <div class="card-head"><span class="card-title">🎞️ <span id="t_tape">شريط الإشغال · ٤٥ يوم</span></span><span class="card-sub" id="tapeRisk"></span></div>
+          <div class="card-head"><span class="card-title"><span id="t_tape">شريط الإشغال · ٤٥ يوم</span></span><span class="card-sub" id="tapeRisk"></span></div>
           <div id="tapeChart"><div class="empty sk">—</div></div>
         </div>
         <div class="card">
@@ -11987,11 +11987,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="grid2">
           <div class="card">
-            <div class="card-head"><span class="card-title">🗓️ <span id="t_cal_events_legend">المناسبات</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_cal_events_legend">المناسبات</span></span></div>
             <div id="calEventsBody"></div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">⚡ <span id="t_bulk_title">تطبيق جماعي على المدى المحدد</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_bulk_title">تطبيق جماعي على المدى المحدد</span></span></div>
             <div id="bulkForm"></div>
           </div>
         </div>
@@ -12101,7 +12101,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
-        <div class="card" style="margin-top:14px"><div class="card-head"><span class="card-title">🏘️ <span id="t_pr_table">إدارة الأسعار — الشقق</span></span><span class="card-sub" id="prTableCount"></span></div><div id="prTable"><div class="empty sk">—</div></div></div>
+        <div class="card" style="margin-top:14px"><div class="card-head"><span class="card-title"><span id="t_pr_table">إدارة الأسعار — الشقق</span></span><span class="card-sub" id="prTableCount"></span></div><div id="prTable"><div class="empty sk">—</div></div></div>
       </section>
 
       <!-- ============ STRATEGIES VIEW ============ -->
@@ -12120,7 +12120,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="strategiesOpsSummary"></div>
         <div class="card"><div id="stratHeader"><div class="empty sk">—</div></div></div>
         <div class="card">
-          <div class="card-head"><span class="card-title">🏘️ <span id="t_str_units">الشقق المفعّلة</span></span><span class="card-sub" id="stratUnitsCount"></span></div>
+          <div class="card-head"><span class="card-title"><span id="t_str_units">الشقق المفعّلة</span></span><span class="card-sub" id="stratUnitsCount"></span></div>
           <div id="stratListBody"><div class="empty sk">—</div></div>
         </div>
         <!-- relocated from Pricing: tonight's vacancies + last-minute step-down + diagnostics -->
@@ -12210,22 +12210,22 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <!-- Forward pace: next 30 days at a glance -->
         <div class="card">
-          <div class="card-head"><span class="card-title">🚀 <span id="t_rev_pace">سرعة الحجز للـ٣٠ يوم القادمة</span></span><span class="card-sub" id="revPaceSub"></span></div>
+          <div class="card-head"><span class="card-title"><span id="t_rev_pace">سرعة الحجز للـ٣٠ يوم القادمة</span></span><span class="card-sub" id="revPaceSub"></span></div>
           <div id="revPaceBody"><div class="empty sk">—</div></div>
         </div>
 
         <div class="grid2">
           <div class="card">
-            <div class="card-head"><span class="card-title">📅 <span id="t_rev_month">الإيراد الشهري</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_rev_month">الإيراد الشهري</span></span></div>
             <div id="revMonthlyBody"></div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">💵 <span id="t_rev_sal">دورة الراتب</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_rev_sal">دورة الراتب</span></span></div>
             <div id="revSalaryBody"></div>
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><span class="card-title">🏠 <span id="t_rev_units">أداء الوحدات</span></span></div>
+          <div class="card-head"><span class="card-title"><span id="t_rev_units">أداء الوحدات</span></span></div>
           <div id="revUnitsBody"></div>
         </div>
       </section>
@@ -12269,7 +12269,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_clean_center" data-help-key="clean_center">
           <button class="ph-x" onclick="dismissHelp('clean_center')" title="إخفاء">×</button>
-          <div class="ph-t">🧭 تنظيف اليوم بدون تشتت</div>
+          <div class="ph-t">تنظيف اليوم بدون تشتت</div>
           <div class="ph-b">
             هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده.
             تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.
@@ -12296,7 +12296,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_clean" data-help-key="clean">
           <button class="ph-x" onclick="dismissHelp('clean')" title="إخفاء">×</button>
-          <div class="ph-t">🧹 التنظيف العميق</div>
+          <div class="ph-t">التنظيف العميق</div>
           <div class="ph-b">
             كل شقة تتنظف عميق كل <b>٤٥-٦٠ يوم</b>. الجدول يوزع <b>تنظيف واحد كل يوم</b> ويتأكد
             من Hostaway الساعة <b>٩ مساءً</b> الليلة قبل. لو الشقة محجوزة، يبدّلها مع شقة ثانية تلقائي.
@@ -12312,7 +12312,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <!-- Daily turnover cleaning + photo-proof review MOVED to the Cleaning Center -->
         <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <div style="flex:1;min-width:220px">
-            <div class="card-title">🧭 تنظيف اليوم انتقل إلى «مركز التنظيف»</div>
+            <div class="card-title">تنظيف اليوم انتقل إلى «مركز التنظيف»</div>
             <div class="muted" style="font-size:11.5px;margin-top:3px">الخروج اليومي · التنظيف العاجل · مراجعة الصور والتوقيع · الفرق والمشاكل في مكان واحد. هنا يبقى جدول <b>الديب كلين</b> فقط.</div>
           </div>
           <button class="btn primary sm" onclick="go('clean_center')">فتح مركز التنظيف ←</button>
@@ -12321,24 +12321,24 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <!-- THIS WEEK strip — the supervisor's daily lookup -->
         <div class="card">
-          <div class="card-head"><span class="card-title">📆 هذا الأسبوع — ٧ أيام قادمة</span></div>
+          <div class="card-head"><span class="card-title">هذا الأسبوع — ٧ أيام قادمة</span></div>
           <div id="cleanWeek"><div class="empty sk">—</div></div>
         </div>
 
         <!-- 60-day visual schedule — the actual SCHEDULE the user asked for -->
         <div class="card">
-          <div class="card-head"><span class="card-title">🗓️ الجدول البصري · ٦٠ يوم قادمة</span><span class="card-sub">اضغط أي يوم للتفاصيل</span></div>
+          <div class="card-head"><span class="card-title">الجدول البصري · ٦٠ يوم قادمة</span><span class="card-sub">اضغط أي يوم للتفاصيل</span></div>
           <div id="cleanVisualGrid"><div class="empty sk">—</div></div>
         </div>
 
         <div class="card">
-          <div class="card-head"><span class="card-title">🔗 <span id="t_clean_link_title">الرابط لشركة التنظيف</span></span></div>
+          <div class="card-head"><span class="card-title"><span id="t_clean_link_title">الرابط لشركة التنظيف</span></span></div>
           <div id="cleanLinkBox"></div>
         </div>
 
         <!-- Tools: insert at date + reset from date -->
         <div class="card">
-          <div class="card-head"><span class="card-title">🛠️ أدوات الجدول</span><span class="card-sub">إضافة فردية أو إعادة ترتيب الكل</span></div>
+          <div class="card-head"><span class="card-title">أدوات الجدول</span><span class="card-sub">إضافة فردية أو إعادة ترتيب الكل</span></div>
           <div style="display:grid;grid-template-columns:1fr;gap:14px;padding:4px 2px">
             <!-- Insert at date -->
             <div style="background:var(--surface-2);padding:14px;border-radius:12px;border:1px solid var(--border)">
@@ -12376,7 +12376,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="card">
           <div class="card-head">
-            <span class="card-title">📋 الجدول الكامل</span>
+            <span class="card-title">الجدول الكامل</span>
             <div class="card-actions">
               <select id="cleanFilter" onchange="renderCleaningList()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
                 <option value="all" id="cf_all">الكل</option>
@@ -12445,7 +12445,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_quality" data-help-key="quality">
           <button class="ph-x" onclick="dismissHelp('quality')" title="إخفاء">×</button>
-          <div class="ph-t">⭐ تقييم نظافة كل شقة</div>
+          <div class="ph-t">تقييم نظافة كل شقة</div>
           <div class="ph-b">
             متوسط تقييمات النظافة من الضيوف لكل شقة، مع آخر التعليقات. <b>الترتيب: الأسوأ فوق</b>
             عشان تشتغل عليها أول. اضغط شقة تشوف التعليقات بالتفصيل.
@@ -12455,11 +12455,11 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="qualityOpsSummary"></div>
         <div class="kpis" id="qualStats"></div>
         <div class="card">
-          <div class="card-head"><span class="card-title">🏠 ترتيب الوحدات</span></div>
+          <div class="card-head"><span class="card-title">ترتيب الوحدات</span></div>
           <div id="qualUnitsBody"><div class="empty sk">—</div></div>
         </div>
         <div class="card">
-          <div class="card-head"><span class="card-title">💬 آخر التعليقات</span></div>
+          <div class="card-head"><span class="card-title">آخر التعليقات</span></div>
           <div id="qualCommentsBody"><div class="empty sk">—</div></div>
         </div>
       </section>
@@ -12478,7 +12478,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_guests" data-help-key="guests">
           <button class="ph-x" onclick="dismissHelp('guests')" title="إخفاء">×</button>
-          <div class="ph-t">👤 الضيوف اللي زاروك</div>
+          <div class="ph-t">الضيوف اللي زاروك</div>
           <div class="ph-b">
             كل ضيف نزل عندك من قبل — اسمه، رقمه، كم مرة زار، وأي شقق. اضغط ضيف تشوف
             <b>ملف كامل</b> + <b>ملاحظات الفريق</b> + <b>ملخص آخر محادثات</b>. تقدر تعلّمه
@@ -12489,7 +12489,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="kpis" id="guestStats"></div>
         <div class="card">
           <div class="card-head">
-            <span class="card-title">📋 القائمة</span>
+            <span class="card-title">القائمة</span>
             <div class="card-actions">
               <select id="guestFilter" onchange="renderGuestList()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
                 <option value="all" id="gf_all">الكل</option>
@@ -12518,7 +12518,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" id="ph_learn" data-help-key="learn">
           <button class="ph-x" onclick="dismissHelp('learn')" title="إخفاء">×</button>
-          <div class="ph-t">📚 ما تعلمه المساعد</div>
+          <div class="ph-t">ما تعلمه المساعد</div>
           <div class="ph-b">
             كل ما الفريق يعدّل رد للمساعد، البوت يتعلّم منه. هذي الصفحة تبيّن لك <b>وش تعلّم اليوم
             مقارنة بأمس والأسبوع الفايت</b>، <b>كم نسبة ثقته</b>، و<b>وش تعلّم عن كل شقة بعينها</b>.
@@ -12534,21 +12534,21 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <!-- Trend charts: confidence, auto-send rate, escalation rate -->
         <div class="grid2">
           <div class="card">
-            <div class="card-head"><span class="card-title">📈 <span id="t_learn_chart1">نسبة الثقة (٣٠ يوم)</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_learn_chart1">نسبة الثقة (٣٠ يوم)</span></span></div>
             <div id="learnChartConf"></div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">⚡ <span id="t_learn_chart2">معدّل الردود التلقائية (٣٠ يوم)</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_learn_chart2">معدّل الردود التلقائية (٣٠ يوم)</span></span></div>
             <div id="learnChartAuto"></div>
           </div>
         </div>
         <div class="grid2">
           <div class="card">
-            <div class="card-head"><span class="card-title">💬 <span id="t_learn_chart3">حجم الردود اليومي</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_learn_chart3">حجم الردود اليومي</span></span></div>
             <div id="learnChartVol"></div>
           </div>
           <div class="card">
-            <div class="card-head"><span class="card-title">🚨 <span id="t_learn_chart4">معدّل التصعيد (٣٠ يوم)</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_learn_chart4">معدّل التصعيد (٣٠ يوم)</span></span></div>
             <div id="learnChartEsc"></div>
           </div>
         </div>
@@ -12556,7 +12556,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <!-- What was learned in the selected window -->
         <div class="card">
           <div class="card-head">
-            <span class="card-title">🆕 <span id="t_learn_recent">آخر ما تعلّمه</span></span>
+            <span class="card-title"><span id="t_learn_recent">آخر ما تعلّمه</span></span>
             <div class="card-actions">
               <select id="learnWindow" onchange="loadLearnToday()" style="font-size:12px;padding:6px 10px;height:32px">
                 <option value="1">اليوم</option>
@@ -12571,12 +12571,12 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <!-- Distilled summaries (existing) -->
         <div class="card">
-          <div class="card-head"><span class="card-title">🌐 <span id="t_learn_general">الملخص العام</span></span><div class="card-actions" id="genActions"></div></div>
+          <div class="card-head"><span class="card-title"><span id="t_learn_general">الملخص العام</span></span><div class="card-actions" id="genActions"></div></div>
           <div id="learnGeneralBody"><div class="empty sk">—</div></div>
         </div>
         <div class="grid2">
           <div class="card">
-            <div class="card-head"><span class="card-title">🏠 <span id="t_learn_apt">ملخصات حسب الشقة</span></span></div>
+            <div class="card-head"><span class="card-title"><span id="t_learn_apt">ملخصات حسب الشقة</span></span></div>
             <input id="learnSearch" placeholder="ابحث عن وحدة…" oninput="renderLearnings()" style="margin-bottom:10px">
             <div id="learnAptList" style="max-height:520px;overflow-y:auto"><div class="empty sk">—</div></div>
           </div>
@@ -12601,7 +12601,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="page-help" data-help-key="finance">
           <button class="ph-x" onclick="dismissHelp('finance')" title="إخفاء">×</button>
-          <div class="ph-t">🧾 التقرير الشهري</div>
+          <div class="ph-t">التقرير الشهري</div>
           <div class="ph-b">اختر الشقة والفترة وعبّي الحقول الاختيارية — المعاينة تتحدّث فوريًا. كل الأرقام من البيانات الفعلية (Hostaway + المصاريف المطابقة). أي دفعة Airbnb ناقصة يبيّنها التدقيق ولا تُخمّن أبدًا.</div>
         </div>
         <div id="financeOpsSummary"></div>
@@ -12661,7 +12661,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="page-help" data-help-key="quote">
           <button class="ph-x" onclick="dismissHelp('quote')" title="إخفاء">×</button>
-          <div class="ph-t">📄 عرض السعر</div>
+          <div class="ph-t">عرض السعر</div>
           <div class="ph-b">
             اضغط <b>"عرض سعر جديد"</b> تفتح نموذج تعبئة (بيانات العميل، البنود، الضريبة، رسوم خدمة، توقيع).
             تقدر تحفظ كمسودة وترجع تعدلها، وتطبع PDF نظيف بضغطة وحدة. كل عرض يحفظ ويسجل في النشاط.
@@ -12684,7 +12684,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="page-help" data-help-key="weekly">
           <button class="ph-x" onclick="dismissHelp('weekly')" title="إخفاء">×</button>
-          <div class="ph-t">📊 التقرير الأسبوعي</div>
+          <div class="ph-t">التقرير الأسبوعي</div>
           <div class="ph-b">
             كل موظف يعبّي تقريره الأسبوعي عن الشقق المسؤول عنها — <b>الخطر</b>،
             <b>التحدي</b>، <b>خطة الاستجابة</b>، و<b>المعالجة</b>. التقرير يطبع جاهز
@@ -12708,7 +12708,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="page-help" data-help-key="design">
           <button class="ph-x" onclick="dismissHelp('design')" title="إخفاء">×</button>
-          <div class="ph-t">🛋️ طلبات التصميم</div>
+          <div class="ph-t">طلبات التصميم</div>
           <div class="ph-b">
             نموذج طلب كامل لشركات التصميم: بيانات العميل، بيانات الوحدة، طريقة الدخول،
             الميزانية، النمط، تفاصيل كل غرفة، ومدير المشروع. يطبع PDF احترافي
@@ -12733,7 +12733,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="page-help" data-help-key="pmo">
           <button class="ph-x" onclick="dismissHelp('pmo')" title="إخفاء">×</button>
-          <div class="ph-t">🏗️ تجهيز الشقق (PMO)</div>
+          <div class="ph-t">تجهيز الشقق (PMO)</div>
           <div class="ph-b">
             تابع كل شقة من <b>المعادلة</b> لين <b>التسليم</b>: ارفع ملف المعادلة (PDF)
             يتحوّل تلقائياً لمهام، حدّث حالة كل مهمة، تابع نسبة الإنجاز والمراحل،
@@ -12757,7 +12757,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
         <div class="page-help" data-help-key="expenses">
           <button class="ph-x" onclick="dismissHelp('expenses')" title="إخفاء">×</button>
-          <div class="ph-t">💸 مركز اعتماد المصاريف</div>
+          <div class="ph-t">مركز اعتماد المصاريف</div>
           <div class="ph-b">
             مسار واحد واضح: الموظف يضيف المصروف في Google Sheet (إدخال فقط) ← تعتمده أو ترفضه من هنا
             ← يتصدّر إلى Hostaway ← يتحقق تلقائياً. علامة الصح الخضراء ما تظهر إلا بعد التأكد من Hostaway فعلياً.
@@ -12782,7 +12782,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="page-help" data-help-key="users">
           <button class="ph-x" onclick="dismissHelp('users')" title="إخفاء">×</button>
-          <div class="ph-t">👥 المستخدمون والصلاحيات</div>
+          <div class="ph-t">المستخدمون والصلاحيات</div>
           <div class="ph-b">
             أنشئ حسابات للموظفين هنا. لكل موظف ٣ مستويات صلاحيات لكل صفحة:
             <b>قراءة</b> (يشوف) · <b>تعديل</b> (يغيّر) · <b>إنشاء</b> (يضيف جديد).
@@ -12826,7 +12826,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <!-- Per-apartment insights (toggled by 📊 تحليل الشقق) -->
         <div class="card" id="rvInsightsCard" style="display:none">
           <div class="card-head">
-            <span class="card-title">📊 تحليل الشقق — درجات التقييم والمشاكل الشائعة</span>
+            <span class="card-title">تحليل الشقق — درجات التقييم والمشاكل الشائعة</span>
             <div class="card-actions">
               <input id="rvInsSearch" placeholder="ابحث باسم الشقة…" oninput="_rvInsFilter()" style="width:200px;padding:6px 10px;height:32px;font-size:12px">
             </div>
@@ -12852,7 +12852,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="card">
           <div class="card-head">
-            <span class="card-title">📋 المراجعات حسب الشقة</span>
+            <span class="card-title">المراجعات حسب الشقة</span>
             <div class="card-actions" style="flex-wrap:wrap;gap:6px">
               <select id="rvFilterSent" onchange="loadReviews()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
                 <option value="">كل المشاعر</option>
@@ -12909,7 +12909,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div class="card">
           <div class="card-head">
-            <span class="card-title">📋 القائمة</span>
+            <span class="card-title">القائمة</span>
             <div class="card-actions" style="flex-wrap:wrap;gap:6px">
               <select id="tkFilterStatus" onchange="loadTickets()" style="width:auto;padding:6px 10px;height:32px;font-size:12px">
                 <option value="">كل الحالات</option>
@@ -22019,7 +22019,7 @@ function renderApartment(d){
     + metric((d.revpar_before!=null?fmt(d.revpar_before)+' → '+fmt(d.revpar_after):'—'), 'RevPAR '+(ar?'قبل ← بعد':'before → after'))
     + '</div></div>';
   // floor & ceiling + why
-  var floors='<div class="card"><div class="card-head"><span class="card-title">🛡️ '+(ar?'الحد الأدنى والأعلى':'Floor & ceiling')+'</span></div>'
+  var floors='<div class="card"><div class="card-head"><span class="card-title">'+(ar?'الحد الأدنى والأعلى':'Floor & ceiling')+'</span></div>'
     +'<div style="font-size:12.5px;color:var(--text-2);padding:4px 2px">'+(ar?'ما ننزل تحت ':'Never below ')+'<b style="color:var(--text)">'+fmt(d.floor||0)+'</b>'+(d.median?(ar?(' · ٧٠٪ من وسيط '+fmt(d.median)):(' · 70% of median '+fmt(d.median))):'')+' · '+(ar?'السقف ':'ceiling ')+'<b style="color:var(--text)">'+fmt(d.ceiling||0)+'</b>'+'</div></div>';
   // pace
   var pace=d.pace||{}; var paceH='';
@@ -22028,10 +22028,10 @@ function renderApartment(d){
       +'<div style="font-size:13px;padding:6px 2px">'+(ar?'محجوزة ':'booked ')+'<b>'+Math.round(pace.occ_now*100)+'%</b>'+(pace.days_out!=null?(' '+(ar?'وباقي ':'· ')+pace.days_out+' '+(ar?'يوم':'days out')):'')+' · '+(ar?'المعتاد ':'typical ')+'<b>'+Math.round(pace.typical_occ*100)+'%</b> '+esc(pace.demand_pill||'')+'</div></div>';
   }
   // calendar
-  var calC='<div class="card"><div class="card-head"><span class="card-title">📅 '+(ar?'تقويم ٦ أسابيع':'6-week calendar')+'</span></div>'+_aptCal(d.nights)+'</div>';
+  var calC='<div class="card"><div class="card-head"><span class="card-title">'+(ar?'تقويم ٦ أسابيع':'6-week calendar')+'</span></div>'+_aptCal(d.nights)+'</div>';
   // story log (§5)
   var story=(d.story||[]);
-  var storyC='<div class="card"><div class="card-head"><span class="card-title">📜 '+(ar?'قصّة كل تغيير':'Story of every change')+'</span></div>'
+  var storyC='<div class="card"><div class="card-head"><span class="card-title">'+(ar?'قصّة كل تغيير':'Story of every change')+'</span></div>'
     +(story.length?('<div style="display:flex;flex-direction:column;gap:8px">'+story.map(function(s){
       return '<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 4px;border-bottom:1px solid var(--line)"><span style="background:'+_aptBucketColor(s.bucket)+';color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:99px;white-space:nowrap;margin-top:1px">'+esc(s.bucket)+'</span><span style="font-size:12.5px;line-height:1.5">'+esc(ar?s.text_ar:s.text_en)+'</span></div>';
     }).join('')+'</div>'):('<div class="muted" style="font-size:12px;padding:6px 2px">'+(ar?'ما فيه تغييرات مؤكّدة بعد.':'No confirmed changes yet.')+'</div>'))+'</div>';
@@ -22039,7 +22039,7 @@ function renderApartment(d){
   var tg=d.toggles||{};
   var togBtns=Object.keys(_PE_STRAT_META).map(function(k){ var on=tg[k]; var m=_PE_STRAT_META[k];
     return '<button class="pe-utog'+(on?' on':'')+'" onclick="togglePeUnit(&#39;'+k+'&#39;,'+d.lid+','+(!on)+');setTimeout(function(){openApartment('+d.lid+')},400)">'+m.ic+' '+(ar?m.ar:m.en)+'</button>'; }).join('');
-  var ctrl='<div class="card"><div class="card-head"><span class="card-title">⚙ '+(ar?'التحكّم':'Controls')+'</span></div>'
+  var ctrl='<div class="card"><div class="card-head"><span class="card-title">'+(ar?'التحكّم':'Controls')+'</span></div>'
     +'<div class="pe-utogs" style="padding:6px 2px">'+togBtns+'</div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;padding:6px 2px">'
     +'<button class="btn primary sm" onclick="aptApply('+d.lid+')">✅ '+(ar?'طبّق هذي الشقة':'Apply this apartment')+'</button>'
