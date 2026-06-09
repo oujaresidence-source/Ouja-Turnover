@@ -13362,7 +13362,7 @@ const T = {
     fin_date:'التاريخ', fin_desc:'الوصف', fin_source_ha:'من Hostaway', fin_source_manual:'مُدخل يدويًا',
     plab:'مختبر التسعير', plab_sub:'قرارات تسعير مبنية على بيانات عوجا — أساس محفوظ، تطبيق آمن، ورجوع بضغطة',
     plab_decision:'لوحة القرار', plab_aptlab:'مختبر الشقق', plab_cal45:'تقويم ٤٥ يوم', plab_profile:'ملف الشقة',
-    plab_logtab:'سجل التطبيق والرجوع', plab_settings:'إعدادات السوق', plab_cur:'السعر الحالي', plab_reco:'السعر المقترح',
+    plab_logtab:'سجل التطبيق والرجوع', plab_settings:'إعدادات السوق', plab_cur:'Hostaway الآن', plab_reco:'اقتراح عوجا',
     plab_orig:'السعر الأصلي', plab_reason:'سبب التوصية', plab_conf:'الثقة', plab_apply:'تطبيق يدوي',
     plab_revert:'رجوع للسعر الأصلي', plab_synced:'تم التزامن ✓', plab_notsynced:'لم يتزامن', plab_thin:'البيانات قليلة',
     plab_salary:'أيام الراتب', plab_latemonth:'آخر الشهر', plab_weekend:'الويكند', plab_changes:'سجل التغييرات',
@@ -13667,7 +13667,7 @@ const T = {
     fin_date:'Date', fin_desc:'Description', fin_source_ha:'From Hostaway', fin_source_manual:'Manual entry',
     plab:'Pricing Lab', plab_sub:'Data-backed pricing decisions from Ouja history — safe baseline, manual apply, one-click revert',
     plab_decision:'Decision Board', plab_aptlab:'Apartment Lab', plab_cal45:'45-Day Calendar', plab_profile:'Unit Profile',
-    plab_logtab:'Apply & Revert Log', plab_settings:'Saudi Settings', plab_cur:'Current price', plab_reco:'Recommended',
+    plab_logtab:'Apply & Revert Log', plab_settings:'Saudi Settings', plab_cur:'Hostaway now', plab_reco:'Ouja suggestion',
     plab_orig:'Original price', plab_reason:'Reason', plab_conf:'Confidence', plab_apply:'Manual apply',
     plab_revert:'Revert to original', plab_synced:'Synced ✓', plab_notsynced:'Not synced', plab_thin:'Thin data',
     plab_salary:'Salary days', plab_latemonth:'Late month', plab_weekend:'Weekend', plab_changes:'Change log',
@@ -14711,7 +14711,7 @@ async function pccMismatches(){
     var hp=(r.hostaway_current_price!=null?fmt(r.hostaway_current_price):'—'), dp=(r.dashboard_displayed_price!=null?fmt(r.dashboard_displayed_price):'—');
     var diff=(r.hostaway_current_price!=null&&r.dashboard_displayed_price!=null)?(r.dashboard_displayed_price-r.hostaway_current_price):null;
     return '<div style="padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:12px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>'+esc(r.name)+' · '+esc(r.date)+'</b>'+pccChip(st[0],st[1])+'</div>'
-      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'#a23b30':'#1f6e45')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+'</div></div>';
+      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'#a23b30':'#1f6e45')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+((r.baseline_price!=null)?('<span class="muted">'+(ar?'السابق':'prev')+': '+fmt(r.baseline_price)+'</span>'):'')+'</div></div>';
   }).join('');
   setDrawerBody('<div class="muted" style="font-size:11.5px;margin-bottom:9px;line-height:1.7">'+(ar?'هذي ليالٍ السعر المعروض فيها يختلف عن سعر Hostaway الحالي. سوّ «تحديث من Hostaway» عشان تتطابق — وبعدها تقدر تطبّق بأمان.':'These nights show a price that differs from the live Hostaway price. Click Sync from Hostaway to reconcile, then you can apply safely.')+'</div>'+body);
   setDrawerFoot('<button class="btn primary sm" onclick="closeDrawer();pccSync()">↻ '+(ar?'تحديث من Hostaway':'Sync from Hostaway')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
