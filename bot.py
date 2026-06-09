@@ -14782,7 +14782,11 @@ function _pccRiyadhHour(){ try{ return parseInt(new Date().toLocaleString('en-US
 function _pccToday(){ var t=new Date(); t.setHours(0,0,0,0); return t; }
 function _pccDaysOut(dateStr, today){ try{ var d=new Date(dateStr+'T00:00:00'); return Math.round((d-(today||_pccToday()))/86400000); }catch(_){ return 0; } }
 /* JS port of _pricing_rescue_reco — keep IDENTICAL to the Python. Anchors on the LIVE Hostaway price. */
-function pccRescueReco(action, cur, floor, median, demand, daysOut, hr, allowBelow){
+function _pccDropSpeed(median, occFrac){ var spd=1, m=(median!=null?Math.round(Number(median)):null);
+  if(m!=null){ if(m>=700) spd*=0.8; else if(m<=350) spd*=1.15; }
+  if(occFrac!=null){ if(occFrac<0.4) spd*=1.25; else if(occFrac>0.7) spd*=0.85; }
+  return Math.max(0.5, Math.min(1.6, spd)); }
+function pccRescueReco(action, cur, floor, median, demand, daysOut, hr, allowBelow, dropSpeed){
   function pc(v){ if(v==null||v===''||v==='null') return null; var n=Math.round(Number(v)); return isNaN(n)?null:n; }
   cur=pc(cur); var fl=pc(floor), med=pc(median);
   function out(price,kind,reason,can,cannot){ return {price:(price!=null?Math.round(price):null),kind:kind,reason_ar:reason,can_apply:!!can,cannot_reason:cannot||''}; }
@@ -14795,7 +14799,8 @@ function pccRescueReco(action, cur, floor, median, demand, daysOut, hr, allowBel
     return out(cur,'hold','حماية السعر — نثبّت السعر الحالي',true);
   }
   if(action==='fill_tonight'||action==='balanced_recovery'){
-    var horizon=(action==='fill_tonight')?2:10, maxpct=(action==='fill_tonight')?0.25:0.15;
+    var horizon=(action==='fill_tonight')?2:10, base=(action==='fill_tonight')?0.25:0.15;
+    var ds=(typeof dropSpeed==='number'&&dropSpeed>0)?dropSpeed:1; var maxpct=Math.min(0.45, base*ds);
     var dleft=(daysOut!=null&&!isNaN(daysOut))?Math.max(0,Math.floor(daysOut)):horizon;
     var closeness=horizon?Math.max(0,Math.min(1,(horizon-dleft)/horizon)):1;
     var h=(typeof hr==='number'&&!isNaN(hr))?hr:12;
@@ -14826,13 +14831,14 @@ function pccPvRows(){
   var demand=((d.demand||{}).signal)||'normal'; var hr=_pccRiyadhHour(); var today=_pccToday();
   (d.units||[]).forEach(function(u){
     if(pv.action==='fill_tonight' && !((u.current||{}).empty_nights_7>0)) return;
+    var dsp=_pccDropSpeed((u.history||{}).median_adr, (((u.summary||{}).occupancy_7)!=null?u.summary.occupancy_7/100:null));
     (u.calendar_14||[]).forEach(function(x){
       if(!x.date || x.date<pv.start || x.date>pv.end) return;
       var fresh=truth[u.listing_id+'|'+x.date];
       var cur=(fresh!=null?fresh:x.current_price); var stale=(fresh==null);
       if(cur==null) return;
       var fl=x.floor, med=x.median, daysOut=_pccDaysOut(x.date, today);
-      var rec=pccRescueReco(pv.action, cur, fl, med, demand, daysOut, hr, !!pv.allowBelow);
+      var rec=pccRescueReco(pv.action, cur, fl, med, demand, daysOut, hr, !!pv.allowBelow, dsp);
       var sp=rec.price; var delta=(sp!=null?sp-cur:0);
       var below=(fl!=null&&sp!=null&&sp<fl);
       var canApply=!!rec.can_apply && (delta!==0) && !stale && !(below&&!pv.allowBelow);
@@ -14999,7 +15005,8 @@ function pccCardReco(u){
   var med=(cal0.median!=null?cal0.median:hi.median_adr);
   var demand=((D.pcc||{}).demand||{}).signal||'normal';
   var dout=(cal0.date?_pccDaysOut(cal0.date,_pccToday()):0);
-  return pccRescueReco('balanced_recovery', cp, flv, med, demand, dout, _pccRiyadhHour());
+  var occ=(((u.summary||{}).occupancy_7)!=null)?((u.summary.occupancy_7)/100):null;
+  return pccRescueReco('balanced_recovery', cp, flv, med, demand, dout, _pccRiyadhHour(), false, _pccDropSpeed(hi.median_adr, occ));
 }
 function pccKindChip(kind){ var ar=(L==='ar');
   if(kind==='hold_low') return {t:(ar?'السعر منخفض أصلًا':'Already low'),c:'mut'};
@@ -15029,8 +15036,9 @@ function pccCard(u){
 function pccMini(u){
   var cal=(u.calendar_14||[]); if(!cal.length) return '';
   var demand=((D.pcc||{}).demand||{}).signal||'normal'; var hr=_pccRiyadhHour(); var today=_pccToday();
+  var dsp=_pccDropSpeed((u.history||{}).median_adr, (((u.summary||{}).occupancy_7)!=null?u.summary.occupancy_7/100:null));
   var cells=cal.slice(0,14).map(function(x){ var cp=x.current_price;
-    var sp=pccRescueReco('balanced_recovery', cp, x.floor, x.median, demand, _pccDaysOut(x.date,today), hr).price;
+    var sp=pccRescueReco('balanced_recovery', cp, x.floor, x.median, demand, _pccDaysOut(x.date,today), hr, false, dsp).price;
     var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="muted" style="font-size:10px;margin-inline-end:4px">'+(L==='ar'?'١٤ يوم:':'14d:')+'</span>'+cells+'</div>';
 }
@@ -26620,8 +26628,26 @@ def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
         out["opportunity"] = 0
     return out
 
+def _pe_unit_drop_speed(median, occ_frac):
+    """Per-unit discount-curve multiplier (×maxpct in _pricing_rescue_reco), from the unit's OWN history:
+    premium realized ADR → protect (drop slower, <1); cheap units → faster (>1); low recent occupancy →
+    faster (needs help filling); filling well → slower. Clamped 0.5–1.6. Never fabricates."""
+    spd = 1.0
+    m = _coerce_price(median)
+    if m is not None:
+        if m >= 700:
+            spd *= 0.8
+        elif m <= 350:
+            spd *= 1.15
+    if occ_frac is not None:
+        if occ_frac < 0.4:
+            spd *= 1.25
+        elif occ_frac > 0.7:
+            spd *= 0.85
+    return max(0.5, min(1.6, spd))
+
 def _pricing_rescue_reco(action, hostaway_current, floor, median, demand_signal,
-                         days_out, now_riyadh_hour, allow_below_floor=False):
+                         days_out, now_riyadh_hour, allow_below_floor=False, drop_speed=1.0):
     """PURE rescue recommendation, anchored on the LIVE Hostaway price (NOT the learned median).
     fill_tonight / balanced_recovery only ever step DOWN (deeper as check-in nears + later in the
     Riyadh day); protect_adr is the ONLY mode that may nudge UP (gently, capped at median, and only
@@ -26648,7 +26674,9 @@ def _pricing_rescue_reco(action, hostaway_current, floor, median, demand_signal,
         return out(cur, "hold", "حماية السعر — نثبّت السعر الحالي", True)
     if action in ("fill_tonight", "balanced_recovery"):
         horizon = 2 if action == "fill_tonight" else 10
-        maxpct = 0.25 if action == "fill_tonight" else 0.15
+        base_maxpct = 0.25 if action == "fill_tonight" else 0.15
+        ds = drop_speed if (isinstance(drop_speed, (int, float)) and drop_speed > 0) else 1.0
+        maxpct = min(0.45, base_maxpct * ds)        # per-unit curve: premium drops slower, slow units faster
         try:
             dleft = max(0, int(days_out)) if days_out is not None else horizon
         except (TypeError, ValueError):
@@ -28318,6 +28346,9 @@ def _pricing_calendar(lid, start_iso=None, end_iso=None):
     except Exception:
         pass
     hr = now.hour
+    occ_frac = (sum(1 for v in cal.values() if v.get("booked")) / len(cal)) if cal else None
+    unit_median = _coerce_price(next((r.get("median") for r in recs_by_date.values() if r.get("median") is not None), None))
+    dspeed = _pe_unit_drop_speed(unit_median, occ_frac)     # per-unit discount curve from its own history
     days = []; cur_d = sd
     while cur_d < ed:
         ds = cur_d.isoformat(); rowc = cal.get(ds) or {}
@@ -28332,7 +28363,7 @@ def _pricing_calendar(lid, start_iso=None, end_iso=None):
             badge = "last_minute"
         sug = None; action = "hold"; conf = "none"; why = ""
         if not booked and hp is not None:
-            rr = _pricing_rescue_reco("balanced_recovery", hp, floor, median, demand, dleft, hr)
+            rr = _pricing_rescue_reco("balanced_recovery", hp, floor, median, demand, dleft, hr, drop_speed=dspeed)
             sug = rr["price"]; why = rr["reason_ar"]
             action = ("drop" if (sug is not None and sug < hp) else ("raise" if (sug is not None and sug > hp) else "hold"))
             conf = _pe_command_confidence(rec.get("band_source"), rec.get("band_count"))[0] if rec else "none"
