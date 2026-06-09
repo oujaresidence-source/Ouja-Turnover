@@ -23131,7 +23131,7 @@ async function fbInboxRender(mode, filter){
   await fbLoadRefs();
   var d; try{ d=await api('/api/fb/inbox'); }catch(_){ d=null; }     // load ALL lanes; filter client-side (lane-first UX)
   if(d&&d.error==='forbidden_ops'){ b.innerHTML='<div class="empty" style="padding:30px;text-align:center">'+(ar?'العمليات تشوف حالة مصاريفها فقط — قائمة العمل للمحاسبة.':'Operations see only their expense status — the work queue is for accountants.')+'</div>'; return; }
-  _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.canApproveHigh=!!(d&&d.can_approve_high_value); _fb.role=(d&&d.role)||''; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
+  _fb.qItems=(d&&d.items)||[]; _fb.qlanes=(d&&d.lanes)||{}; _fb.canApproveHigh=!!(d&&d.can_approve_high_value); _fb.role=(d&&d.role)||''; _fb.qbreakdown=(d&&d.unmatched_breakdown)||{}; _fb.inboxItems={}; _fb.qItems.forEach(function(i){ _fb.inboxItems[i.id]=i; });
   fbQueueRender();
 }
 function fbLaneTone(ln){ return ({ready_to_link:'ok',linked_existing:'ok',completed:'mut',needs_decision:'warn',missing_setup:'warn',needs_faisal_approval:'warn',ready_for_journal:'mut',journal_draft:'mut',needs_classify:'warn',needs_dup_check:'warn',needs_review:'warn',rejected:'warn'})[ln]||'mut'; }
@@ -23167,6 +23167,31 @@ function fbLaneCard(lane, count, items){ var ar=(L==='ar'); var meta=fbLaneMeta(
     +'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+primary+'<button class="btn ghost sm" onclick="fbLaneOpen(&#39;'+lane+'&#39;)">'+(ar?'عرض الكل':'View all')+'</button></div></div>'; }
 function fbLaneOpen(lane){ _fb.qfilter=lane; _fb.dfilter=''; _fb.qview='table'; fbQueueRender(); }
 function fbLaneBack(){ _fb.qview='lanes'; _fb.qfilter=''; _fb.dfilter=''; fbQueueRender(); }
+function fbUnmatchedLabel(code){ var ar=(L==='ar'); var m={
+  daftra_journals_not_imported:['قيود دافترة غير مستوردة للفترة','Daftra journals not imported','استيراد القيود'],
+  journal_lines_missing:['أسطر القيود غير مستوردة','Journal lines not imported','إعادة استيراد القيود'],
+  bank_account_mapping_missing:['حساب البنك غير مربوط بدافترة','Bank account not mapped','ربط حساب البنك'],
+  cost_center_missing:['مركز التكلفة ناقص','Cost center missing','ربط مركز التكلفة'],
+  category_mapping_missing:['تصنيف دافترة ناقص','Category mapping missing','ربط التصنيف'],
+  employee_custody_mapping_missing:['حساب عهدة الموظف غير مربوط','Custody account not mapped','ربط عهدة الموظف'],
+  possible_duplicate_unresolved:['احتمال تكرار غير محسوم','Possible duplicate unresolved','فتح المطابقة'],
+  distributed_match_unresolved:['توزيع داخل قيد يحتاج مراجعة','Distributed match needs review','راجع التوزيع'],
+  not_found_after_full_check:['غير موجود بعد تحقق كامل','Not found after full check','جهّز قيد جديد'],
+  needs_classification:['غير مصنف','Needs classification','صنّف العملية'],
+  needs_faisal_approval:['يحتاج اعتماد فيصل','Needs Faisal approval','إرسال للاعتماد'],
+  amount_difference:['فرق في المبلغ','Amount difference','راجع الفرق'],
+  date_range_not_checked:['الفترة لم تُفحص','Date range not checked','افحص التكرار'],
+  cash_flow_type_unknown:['نوع الحركة غير محدد','Cash flow type unknown','حدد نوع الحركة'] };
+  var v=m[code]; return v?{lab:(ar?v[0]:v[1]),act:v[2]}:{lab:code,act:''}; }
+function fbUnmatchedCard(){ var ar=(L==='ar'); var bd=_fb.qbreakdown||{}; var codes=Object.keys(bd).filter(function(c){return bd[c]>0;});
+  if(!codes.length) return '';
+  codes.sort(function(a,b){ return bd[b]-bd[a]; });
+  var chips=codes.map(function(c){ var m=fbUnmatchedLabel(c); var on=(_fb.qfilter==='reason:'+c);
+    return '<button class="btn '+(on?'primary':'ghost')+' xs" style="margin:2px" onclick="fbLaneOpenReason(&#39;'+c+'&#39;)">'+esc(m.lab)+' · '+bd[c]+'</button>'; }).join('');
+  return '<div style="'+fbCard()+';margin-top:10px"><b style="font-size:13px">🔎 '+(ar?'سبب عدم المطابقة':'Unmatched reason')+'</b>'
+    +'<div class="muted" style="font-size:11px;margin-top:2px">'+(ar?'كل عملية غير مطابقة لها سبب وإجراء واضح — اضغط للتصفية.':'Every unmatched item has a clear reason & next action — click to filter.')+'</div>'
+    +'<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:2px">'+chips+'</div></div>'; }
+function fbLaneOpenReason(code){ _fb.qfilter='reason:'+code; _fb.dfilter=''; _fb.cflt=''; _fb.qview='table'; fbQueueRender(); }
 function fbQueueRender(){
   var ar=(L==='ar'), b=document.getElementById('fbBody'); if(!b) return; var ln=_fb.qlanes||{};
   if(!_fb.qview) _fb.qview='lanes';
@@ -23180,11 +23205,12 @@ function fbQueueRender(){
     var cards=order.filter(function(L_){ return (ln[L_]||(byLane[L_]||[]).length); }).map(function(L_){ return fbLaneCard(L_, (ln[L_]||(byLane[L_]||[]).length), byLane[L_]||[]); }).join('');
     if(!cards) cards='<div class="empty" style="padding:30px;text-align:center;grid-column:1/-1">'+(ar?'كل شي واضح — ما فيه عمليات تحتاج إجراء اليوم 👌':'All clear — nothing needs action today 👌')+'</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:10px">'+cards+'</div>';
+    h+=fbUnmatchedCard();
     h+='<div style="text-align:center;margin-top:10px"><button class="btn ghost sm" onclick="fbLaneOpen(&#39;&#39;)">'+(ar?'عرض تفصيلي (كل العمليات)':'Detailed view (all items)')+'</button></div>';
     b.innerHTML=h; return;
   }
   var sorts=[['newest',ar?'الأحدث':'Newest'],['oldest',ar?'الأقدم':'Oldest'],['amount',ar?'الأعلى مبلغًا':'Highest amount']];
-  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="fbLaneBack()">‹ '+(ar?'المسارات':'Lanes')+'</button><b style="font-size:13px">'+(_fb.qfilter?(fbLaneMeta(_fb.qfilter)[0]+' '+esc(fbLaneLabel(_fb.qfilter))):(ar?'كل العمليات':'All items'))+'</b></div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="fbLaneBack()">‹ '+(ar?'المسارات':'Lanes')+'</button><b style="font-size:13px">'+(_fb.qfilter?(_fb.qfilter.indexOf('reason:')===0?('🔎 '+esc(fbUnmatchedLabel(_fb.qfilter.slice(7)).lab)):(fbLaneMeta(_fb.qfilter)[0]+' '+esc(fbLaneLabel(_fb.qfilter)))):(ar?'كل العمليات':'All items'))+'</b></div>';
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><input id="fbq" value="'+esc(_fb.q||'')+'" placeholder="🔎 '+esc(t().fb_search)+'" oninput="_fb.q=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;flex:1;min-width:160px"><select onchange="_fb.sort=this.value;fbQueueTable()" style="'+fbInp()+';margin:0;width:auto">'+sorts.map(function(s){ return '<option value="'+s[0]+'"'+((_fb.sort||'newest')===s[0]?' selected':'')+'>'+esc(s[1])+'</option>'; }).join('')+'</select></div>';
   var dq=(_fb.qItems||[]); function dcnt(fn){ return dq.filter(fn).length; }
   var dR=dcnt(function(i){return i.daftra_match_type==='distributed_subset_match'&&i.lane==='ready_to_link';});
@@ -23198,7 +23224,7 @@ function fbQueueRender(){
 function fbQueueItems(){
   var items=(_fb.qItems||[]).slice(); var q=(_fb.q||'').trim().toLowerCase();
   if(q) items=items.filter(function(i){ return (String(i.description||'')+' '+(i.apartment||'')+' '+(i.ref||'')+' '+(i.amount||'')+' '+(i.category||'')+' '+(i.owner||'')).toLowerCase().indexOf(q)>=0; });
-  if(_fb.qfilter) items=items.filter(function(i){ return i.lane===_fb.qfilter; });   // lane-first: client-side lane filter
+  if(_fb.qfilter){ if(_fb.qfilter.indexOf('reason:')===0){ var rc=_fb.qfilter.slice(7); items=items.filter(function(i){ return i.unmatched_reason_code===rc; }); } else items=items.filter(function(i){ return i.lane===_fb.qfilter; }); }   // lane- or reason-first client filter
   if(_fb.cflt==='missing_apartment') items=items.filter(function(i){ return !i.apartment; });
   else if(_fb.cflt==='missing_category') items=items.filter(function(i){ return !i.category||i.category==='unknown'; });
   if(_fb.dfilter==='dist_ready') items=items.filter(function(i){ return i.daftra_match_type==='distributed_subset_match'&&i.lane==='ready_to_link'; });
@@ -36652,6 +36678,45 @@ def _fb_resolve_status(item):
     return R("needs_review", "needs_review", "يحتاج مراجعة", "Needs review", "review", "راجع", "Review",
              "يحتاج مراجعة", "needs review")
 
+_FB_UNMATCHED_REASONS = {
+    "daftra_journals_not_imported": ("قيود دافترة غير مستوردة للفترة", "Daftra journals not imported for the period", "استيراد القيود"),
+    "journal_lines_missing":        ("أسطر القيود غير مستوردة", "Journal lines not imported", "إعادة استيراد القيود مع الأسطر"),
+    "bank_account_mapping_missing": ("حساب البنك غير مربوط بدافترة", "Bank account not mapped to Daftra", "ربط حساب البنك"),
+    "cost_center_missing":          ("مركز التكلفة ناقص", "Cost center missing", "ربط مركز التكلفة"),
+    "category_mapping_missing":     ("تصنيف دافترة ناقص", "Daftra category mapping missing", "ربط التصنيف"),
+    "employee_custody_mapping_missing": ("حساب عهدة الموظف غير مربوط", "Employee custody account not mapped", "ربط عهدة الموظف"),
+    "possible_duplicate_unresolved":("احتمال تكرار غير محسوم", "Possible duplicate unresolved", "فتح المطابقة"),
+    "distributed_match_unresolved": ("توزيع داخل قيد يحتاج مراجعة", "Distributed match needs review", "راجع التوزيع"),
+    "not_found_after_full_check":   ("غير موجود بعد تحقق كامل", "Not found after a full check", "جهّز قيد جديد"),
+    "needs_classification":         ("غير مصنف", "Needs classification", "صنّف العملية"),
+    "needs_faisal_approval":        ("يحتاج اعتماد فيصل", "Needs Faisal approval", "إرسال للاعتماد"),
+    "amount_difference":            ("فرق في المبلغ", "Amount difference", "راجع الفرق"),
+    "date_range_not_checked":       ("الفترة لم تُفحص", "Date range not checked", "افحص التكرار"),
+    "cash_flow_type_unknown":       ("نوع الحركة غير محدد", "Cash flow type unknown", "حدد نوع الحركة"),
+}
+
+def _fb_unmatched_reason(item):
+    """Map a resolved (still-open) item to exactly ONE structured unmatched-reason code (spec Part 4),
+    so the queue can group/explain WHY each item is unmatched and what the next action is. Items that
+    are linked/completed return None (they are matched/done)."""
+    lane = item.get("lane"); br = item.get("blocking_reason") or ""; mt = item.get("daftra_match_type")
+    flow = item.get("daftra_flow_type"); has_cat = item.get("category") not in (None, "", "unknown")
+    if lane in ("linked_existing", "completed"):
+        return None
+    if br == "missing_bank_account_mapping":           code = "bank_account_mapping_missing"
+    elif br == "fitout_funding_account_unmapped":      code = "category_mapping_missing"
+    elif lane == "missing_setup" and br == "missing_category": code = "category_mapping_missing"
+    elif lane == "missing_setup":                      code = "cost_center_missing"
+    elif lane == "needs_dup_check":                    code = "date_range_not_checked"
+    elif lane == "needs_decision":                     code = "distributed_match_unresolved" if mt == "distributed_subset_match" else "possible_duplicate_unresolved"
+    elif lane == "needs_faisal_approval":              code = "needs_faisal_approval"
+    elif lane == "ready_for_journal":                  code = "not_found_after_full_check"
+    elif lane == "needs_classify":                     code = "cash_flow_type_unknown" if (item.get("kind") == "bank" and not has_cat and not flow) else "needs_classification"
+    else:                                              code = "needs_classification"
+    ar, en, na = _FB_UNMATCHED_REASONS.get(code, ("", "", ""))
+    return {"unmatched_reason_code": code, "unmatched_reason_label_ar": ar,
+            "unmatched_reason_label_en": en, "unmatched_next_action": na, "unmatched_blocker_details": br}
+
 def _fb_inbox(filters=None):
     """Unified work queue. Every item is resolved through _fb_resolve_status (the single source of
     truth) so lanes/labels/actions reflect the Daftra duplicate state, not raw stored status."""
@@ -36709,6 +36774,14 @@ def _fb_inbox(filters=None):
             if fa and i.get("reason_chip_ar"):
                 i["reason_chip_ar"] = fa + " · " + i["reason_chip_ar"]
                 i["reason_chip_en"] = (fe + " · " + i["reason_chip_en"]) if i.get("reason_chip_en") else fe
+        ur = _fb_unmatched_reason(i)                  # structured "why unmatched" + next action (spec Part 4)
+        if ur:
+            i.update(ur)
+    unmatched_breakdown = {}
+    for i in items:
+        c = i.get("unmatched_reason_code")
+        if c:
+            unmatched_breakdown[c] = unmatched_breakdown.get(c, 0) + 1
     lanes = {ln: sum(1 for i in items if i["lane"] == ln) for ln in _FB_LANES}
     flt = f.get("filter")
     if flt in _FB_LANES:
@@ -36717,11 +36790,13 @@ def _fb_inbox(filters=None):
         items = [i for i in items if i["lane"] == "needs_faisal_approval"]
     elif flt == "above_3000":
         items = [i for i in items if _fb_money(i.get("amount")) >= FB_APPROVAL_THRESHOLD]
+    elif flt and str(flt).startswith("reason:"):
+        items = [i for i in items if i.get("unmatched_reason_code") == str(flt)[7:]]
     counts = {"total": sum(lanes.values()), "needs_faisal": lanes.get("needs_faisal_approval", 0),
               "ready_to_link": lanes.get("ready_to_link", 0), "ready_to_post": lanes.get("ready_for_journal", 0),
               "failed": sum(1 for i in items if i.get("status") == "failed")}
     items.sort(key=lambda i: (i.get("date") or ""), reverse=True)
-    return {"items": items[:400], "counts": counts, "lanes": lanes}
+    return {"items": items[:400], "counts": counts, "lanes": lanes, "unmatched_breakdown": unmatched_breakdown}
 
 def _fb_fix_statuses(actor=""):
     """Backfill/normalize stored link flags so resolved lanes are consistent (does NOT re-import or
