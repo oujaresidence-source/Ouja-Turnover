@@ -15167,28 +15167,47 @@ async function pccOpenCalendar(lid, monthIso){
 function pccCalMonth(dir){ var ms=_prCal.month||new Date(); var n=(dir===0)?(function(){ var t=new Date(); return new Date(t.getFullYear(),t.getMonth(),1); })():new Date(ms.getFullYear(),ms.getMonth()+dir,1); pccOpenCalendar(_prCal.lid, _peIso(n)); }
 function pccCalTile(lid, ds, day, x){
   var ar=(L==='ar'); var hp=x.hostaway_current, sug=x.ouja_suggested, prev=x.previous_price, dp=x.delta_pct;
-  var bt=(x.badge==='weekend'?(ar?'نهاية أسبوع':'wknd'):(x.badge==='event'?(ar?'مناسبة':'event'):(x.badge==='last_minute'?(ar?'قريب':'soon'):'')));
-  if(x.booked){ return '<div title="'+esc((ar?'محجوزة':'Booked')+(hp!=null?(' · '+fmt(hp)):''))+'" style="border:1px solid var(--line);border-radius:8px;padding:6px;min-height:62px;background:var(--surface-2);opacity:.55"><div style="font-size:11px;font-weight:700">'+day+'</div><div style="font-size:12px;margin-top:5px">'+(hp!=null?fmt(hp):'—')+'</div><div style="font-size:8.5px;color:var(--mut)">🔒 '+(ar?'محجوزة':'booked')+'</div></div>'; }
+  var today=_prCal.today||''; var isToday=(ds===today), isPast=(!!today && ds<today);
+  // top row: day number + (today pill) — gold ring marks today
+  var pill=isToday?('<span style="font-size:7.5px;font-weight:800;background:var(--gold);color:#fff;padding:1px 6px;border-radius:99px">'+(ar?'اليوم':'today')+'</span>'):'';
+  var dayH='<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;font-weight:700'+(isPast?';color:var(--mut)':'')+'">'+day+'</span>'+pill+'</div>';
+  var ring=isToday?';border:2px solid var(--gold);box-shadow:0 0 0 1px var(--gold)':'';
+  // booked — muted, locked, price shown, NO apply
+  if(x.booked){
+    return '<div title="'+esc((ar?'محجوزة':'Booked')+(hp!=null?(' · '+fmt(hp)):''))+'" style="border:1px solid var(--line)'+ring+';border-radius:8px;padding:6px;min-height:66px;background:var(--surface-2);opacity:.6">'+dayH
+      +'<div style="font-size:12.5px;font-weight:700;margin-top:3px;color:var(--mut)">'+(hp!=null?fmt(hp):'—')+'</div>'
+      +'<div style="font-size:8.5px;color:var(--mut);margin-top:2px">🔒 '+(ar?'محجوزة':'booked')+'</div></div>';
+  }
+  // past — muted, disabled, NO apply / NO click
+  if(isPast){
+    return '<div title="'+esc(ar?'يوم سابق':'Past day')+'" style="border:1px solid var(--line);border-radius:8px;padding:6px;min-height:66px;background:var(--surface-2);opacity:.45">'+dayH
+      +'<div style="font-size:12.5px;font-weight:600;margin-top:3px;color:var(--mut)">'+(sug!=null?fmt(sug):(hp!=null?fmt(hp):'—'))+'</div></div>';
+  }
+  // future / today — clickable. Calm colors: red=drop, green=raise, neutral=hold.
   var col=(x.action==='drop'?'#a23b30':(x.action==='raise'?'#1f6e45':'var(--text)'));
-  var tip=(ar?'Hostaway الآن ':'Hostaway now ')+(hp!=null?fmt(hp):'—')+' · '+(ar?'اقتراح ':'sugg ')+(sug!=null?fmt(sug):'—')+' · '+(ar?'الحد الأدنى ':'floor ')+(x.floor!=null?fmt(x.floor):'—')+(x.why_short?(' — '+x.why_short):'');
-  return '<div title="'+esc(tip)+'" onclick="openPeNight('+lid+',&#39;'+ds+'&#39;)" style="border:1px solid var(--line);border-radius:8px;padding:6px;min-height:62px;cursor:pointer;background:var(--surface)">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;font-weight:700">'+day+'</span>'+(bt?('<span style="font-size:8px;background:var(--gold-tint);color:#7a5b14;padding:0 4px;border-radius:6px">'+bt+'</span>'):'')+'</div>'
+  var badge=(x.badge==='weekend'?(ar?'نهاية أسبوع':'weekend'):(x.badge==='event'?(ar?'مناسبة':'event'):(x.badge==='last_minute'?(ar?'اللحظة الأخيرة':'last-minute'):'')));
+  var badgeH=badge?('<div style="margin-top:4px"><span style="font-size:8.5px;background:var(--gold-tint);color:#7a5b14;padding:1px 5px;border-radius:6px;font-weight:700">'+badge+'</span></div>'):'';
+  var tip=(ar?'Hostaway الآن ':'Hostaway now ')+(hp!=null?fmt(hp):'—')+' · '+(ar?'اقتراح عوجا ':'Ouja sugg ')+(sug!=null?fmt(sug):'—')+' · '+(ar?'الحد الأدنى ':'floor ')+(x.floor!=null?fmt(x.floor):'—')+(x.why_short?(' — '+x.why_short):'');
+  return '<div title="'+esc(tip)+'" onclick="openPeNight('+lid+',&#39;'+ds+'&#39;)" style="border:1px solid var(--line)'+ring+';border-radius:8px;padding:6px;min-height:66px;cursor:pointer;background:var(--surface)">'+dayH
     +'<div style="font-size:14px;font-weight:800;margin-top:3px;color:'+col+'">'+(sug!=null?fmt(sug):(hp!=null?fmt(hp):'—'))+'</div>'
-    +((prev!=null&&dp!=null)?('<div style="font-size:9px;color:#c98a3a">'+fmt(prev)+' ⟶ '+(dp>0?'+':'')+dp+'%</div>'):'')+'</div>';
+    +((prev!=null&&dp!=null)?('<div style="font-size:9px;color:#c98a3a;margin-top:1px">'+fmt(prev)+' ⟶ '+(dp>0?'+':'')+dp+'%</div>'):'')
+    +badgeH+'</div>';
 }
 function renderPricingCalendar(){
   var ar=(L==='ar'); var body=document.getElementById('prTable'); if(!body) return; var d=_prCal.data, ms=_prCal.month;
   if(!d||!d.ok){ body.innerHTML='<div class="card"><button class="btn ghost sm" onclick="renderPricingTable()">‹ '+(ar?'رجوع للقائمة':'Back to list')+'</button><div class="empty" style="padding:24px;text-align:center">'+(ar?'تعذّر تحميل التقويم. جرّب مرة ثانية.':'Could not load the calendar.')+'</div></div>'; return; }
   var byDate={}; (d.days||[]).forEach(function(x){ byDate[x.date]=x; });
+  _prCal.today=d.today||null;   // Riyadh "today" from the backend — drives the today marker + past-day muting
+  var todayLabel=d.today?new Date(d.today+'T00:00:00').toLocaleDateString(ar?'ar':'en',{weekday:'long',day:'numeric',month:'long',year:'numeric',calendar:'gregory'}):'';
   var y=ms.getFullYear(), m=ms.getMonth();
-  var monthName=new Date(y,m,1).toLocaleDateString(ar?'ar-SA':'en',{month:'long',year:'numeric'});
+  var monthName=new Date(y,m,1).toLocaleDateString(ar?'ar':'en',{month:'long',year:'numeric',calendar:'gregory'});
   var startDow=new Date(y,m,1).getDay(), daysIn=new Date(y,m+1,0).getDate();
   var dows=(ar?['أحد','إثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat']);
   var hdr='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
     +'<button class="btn ghost sm" onclick="renderPricingTable()">‹ '+(ar?'رجوع للقائمة':'Back')+'</button>'
     +'<b style="font-size:15px">🗓️ '+esc(d.name||'')+' · '+esc(monthName)+'</b>'
     +'<div style="display:flex;gap:5px"><button class="btn ghost sm" onclick="pccCalMonth(-1)">‹</button><button class="btn ghost sm" onclick="pccCalMonth(0)">'+(ar?'اليوم':'Today')+'</button><button class="btn ghost sm" onclick="pccCalMonth(1)">›</button></div></div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:11.5px">'
+    +(todayLabel?('<div class="muted" style="font-size:11px;margin-bottom:8px"><span style="display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--gold);margin-inline-end:5px"></span>'+(ar?'اليوم: ':'Today: ')+esc(todayLabel)+'</div>'):'')
       +'<span class="muted">'+(ar?'النطاق:':'Range:')+'</span>'
       +'<input type="date" id="calFrom" value="'+_peIso(new Date())+'" style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-family:inherit;background:var(--surface)">'
       +'<input type="date" id="calTo" value="'+_peIso(new Date(Date.now()+6*86400000))+'" style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-family:inherit;background:var(--surface)">'
@@ -15206,6 +15225,7 @@ async function pccCalApply(mode){
   var fromEl=document.getElementById('calFrom'), toEl=document.getElementById('calTo');
   var from=(mode==='range'&&fromEl)?fromEl.value:null, to=(mode==='range'&&toEl)?toEl.value:null;
   var rows=d.days.filter(function(x){
+    if(d.today && x.date<d.today) return false;   // never apply to past days
     if(x.booked||x.ouja_suggested==null||x.hostaway_current==null||x.ouja_suggested===x.hostaway_current) return false;
     if(mode==='range'){ if(from&&x.date<from) return false; if(to&&x.date>to) return false; }
     return true;
@@ -28374,7 +28394,8 @@ def _pricing_calendar(lid, start_iso=None, end_iso=None):
                      "reservation_id": rowc.get("reservation_id") or rowc.get("reservationId"),
                      "action": action, "confidence": conf, "why_short": why, "badge": badge})
         cur_d += timedelta(days=1)
-    return {"ok": True, "lid": lid, "name": name, "generated_at": now.isoformat(timespec="seconds"), "days": days}
+    return {"ok": True, "lid": lid, "name": name, "today": today.isoformat(),
+            "generated_at": now.isoformat(timespec="seconds"), "days": days}
 
 async def _api_pricing_calendar(request):
     if not _dash_auth(request):
