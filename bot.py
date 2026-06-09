@@ -15198,12 +15198,45 @@ function renderPricingCalendar(){
     +'<button class="btn ghost sm" onclick="renderPricingTable()">‹ '+(ar?'رجوع للقائمة':'Back')+'</button>'
     +'<b style="font-size:15px">🗓️ '+esc(d.name||'')+' · '+esc(monthName)+'</b>'
     +'<div style="display:flex;gap:5px"><button class="btn ghost sm" onclick="pccCalMonth(-1)">‹</button><button class="btn ghost sm" onclick="pccCalMonth(0)">'+(ar?'اليوم':'Today')+'</button><button class="btn ghost sm" onclick="pccCalMonth(1)">›</button></div></div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button class="btn green sm" onclick="applyUnit('+d.lid+')">✅ '+(ar?'طبّق أسعار هالشقة':'Apply this unit')+'</button><button class="btn ghost sm" onclick="pccBatches()">🧾 '+(ar?'الدُفعات / تراجع':'Batches / revert')+'</button></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:11.5px">'
+      +'<span class="muted">'+(ar?'النطاق:':'Range:')+'</span>'
+      +'<input type="date" id="calFrom" value="'+_peIso(new Date())+'" style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-family:inherit;background:var(--surface)">'
+      +'<input type="date" id="calTo" value="'+_peIso(new Date(Date.now()+6*86400000))+'" style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-family:inherit;background:var(--surface)">'
+      +'<button class="btn primary sm" onclick="pccCalApply(&#39;range&#39;)">✅ '+(ar?'طبّق النطاق':'Apply range')+'</button>'
+      +'<button class="btn ghost sm" onclick="pccCalApply(&#39;month&#39;)">'+(ar?'طبّق الشهر':'Apply month')+'</button>'
+      +'<button class="btn ghost sm" onclick="pccBatches()">🧾 '+(ar?'تراجع':'Revert')+'</button></div>'
     +'<div class="muted" style="font-size:10.5px;margin-bottom:8px">'+(ar?'اضغط أي يوم تشوف «ليش هالسعر؟» وتطبّق أو ترجّع. البرتقالي = السعر السابق + نسبة التغيير. لتطبيق نطاق (٧ أيام) استخدم «مركز التسعير» فوق.':'Click any day for «why» + apply/revert. Orange = previous price + %. For a range, use the Command Center above.')+'</div>';
   var cells=''; var i; for(i=0;i<startDow;i++) cells+='<div></div>';
   for(var day=1;day<=daysIn;day++){ var ds=y+'-'+('0'+(m+1)).slice(-2)+'-'+('0'+day).slice(-2); cells+=pccCalTile(d.lid, ds, day, byDate[ds]||{}); }
   var grid='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">'+dows.map(function(w){ return '<div style="text-align:center;font-size:10px;color:var(--mut);font-weight:700;padding:2px">'+w+'</div>'; }).join('')+cells+'</div>';
   body.innerHTML='<div class="card">'+hdr+grid+'</div>';
+}
+async function pccCalApply(mode){
+  var ar=(L==='ar'); var d=_prCal.data; if(!d||!d.days){ toast('⚠'); return; }
+  var fromEl=document.getElementById('calFrom'), toEl=document.getElementById('calTo');
+  var from=(mode==='range'&&fromEl)?fromEl.value:null, to=(mode==='range'&&toEl)?toEl.value:null;
+  var rows=d.days.filter(function(x){
+    if(x.booked||x.ouja_suggested==null||x.hostaway_current==null||x.ouja_suggested===x.hostaway_current) return false;
+    if(mode==='range'){ if(from&&x.date<from) return false; if(to&&x.date>to) return false; }
+    return true;
+  }).map(function(x){ return {lid:d.lid, date:x.date, price:x.ouja_suggested, floor:x.floor, old:x.hostaway_current}; });
+  if(!rows.length){ toast(ar?'ما فيه أيام تحتاج تغيير في هالنطاق':'No days need changing in this scope'); return; }
+  var envDry=!!(D.pcc&&D.pcc.dry_run);
+  if(!envDry){
+    var dates=rows.map(function(r){return r.date;}).sort();   // SAFETY GATE — verify the scope vs Hostaway first
+    toast(ar?'⏳ نتأكد من Hostaway قبل التطبيق…':'⏳ Verifying against Hostaway first…');
+    var tc; try{ tc=await api('/api/pricing/truth-check?start='+encodeURIComponent(dates[0])+'&end='+encodeURIComponent(dates[dates.length-1])); }catch(_){ tc=null; }
+    if(tc&&tc.ok) _pcc.truth=tc;
+    if(!tc||!tc.ok){ toast(ar?'⚠ ما قدرنا نتأكد من Hostaway — التطبيق متوقف':'⚠ Could not verify Hostaway — halted'); return; }
+    if(((tc.summary||{}).mismatched||0)>0){ toast(ar?'⛔ فيه اختلاف مع Hostaway. سوّ Sync وراجع أول.':'⛔ Hostaway mismatch. Sync and review first.'); pccMismatches(); return; }
+    var m=await fbModal({title:(ar?'تأكيد كتابة فعلية على Hostaway':'Confirm REAL write to Hostaway'), msg:(ar?('بنكتب '+rows.length+' سعر على هالشقة فعليًا، ونتأكد بعد الكتابة بإعادة القراءة من Hostaway.'):('Writing '+rows.length+' prices for this unit, then verifying by re-reading from Hostaway.')), summary:(rows.length+(ar?' ليلة':' nights')), danger:true, confirm:(ar?'اكتب فعليًا':'Write for real'), cancel:(ar?'رجوع':'Back')});
+    if(!m.ok) return;
+  }
+  toast(ar?'⏳ نطبّق ونتأكد من Hostaway…':'⏳ Applying + verifying…');
+  var res; try{ res=await post('/api/pricing/command/apply',{dry_run:envDry, allow_below_floor:false, rows:rows}); }catch(_){ res=null; }
+  if(!res||!res.ok){ toast((res&&res.error)||'⚠'); return; }
+  pccApplyResults(res);
+  pccOpenCalendar(d.lid, _peIso(_prCal.month));   // refresh the calendar after apply
 }
 function renderPricing2(){
   var d=D.pr2||{}; var recs=(d.recs||[]);
