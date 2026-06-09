@@ -12092,6 +12092,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <button class="btn ghost sm" onclick="loadStrategies()">↻</button>
           </div>
         </div>
+        <div id="stratSafety"></div>
         <div id="strategiesOpsSummary"></div>
         <div class="card"><div id="stratHeader"><div class="empty sk">—</div></div></div>
         <div class="card">
@@ -15258,9 +15259,18 @@ async function loadStrategies(){
   try{ D.stratD = await api('/api/strategies/deep'); }catch(_){ D.stratD={units:[],source_breakdown:[]}; }
   var ti=document.getElementById('t_str_import'); if(ti) ti.textContent=(L==='ar'?'استيراد من Hostaway':'Import from Hostaway');
   var tu=document.getElementById('t_str_units'); if(tu) tu.textContent=(L==='ar'?'الشقق المفعّلة':'Activated apartments');
+  renderStratSafety();
   renderStrategiesHeader();
   renderStrategies();
   renderStrategiesOpsSummary();
+}
+function renderStratSafety(){
+  var ar=(L==='ar'); var el=document.getElementById('stratSafety'); if(!el) return;
+  var dry=(D.pcc&&typeof D.pcc.dry_run!=='undefined')?D.pcc.dry_run:null;
+  var dryChip=(dry===true)?pccChip(ar?'وضع المعاينة مفعّل':'Dry-run ON','green'):((dry===false)?pccChip(ar?'الكتابة الفعلية مفعّلة':'Live writes ON','gold'):'');
+  el.innerHTML='<div class="card" style="border:1px solid #3e7d5a;background:rgba(62,125,90,.06)"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:13.5px;color:#1f6e45">🛡️ '+(ar?'أمان الاستراتيجيات':'Strategy safety')+'</b>'+dryChip+'</div>'
+    +'<div style="font-size:12.5px;margin-top:6px;line-height:1.8">'+(ar?'«مفعّلة» تعني الشقة داخل التوصيات والمعاينة فقط — ما يُطبّق أي سعر تلقائيًا على Hostaway. كل كتابة فعلية تمر بمعاينة وتأكيد، وتُتحقّق بإعادة القراءة من Hostaway، وتنحفظ في السجل.':'“Enabled” means the unit is included in recommendations and previews only — no price is ever written to Hostaway automatically. Every live write goes through preview + confirm, is verified by re-reading Hostaway, and is logged.')+'</div>'
+    +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح مركز التسعير':'Open Pricing Command Center')+'</button></div></div>';
 }
 async function strImportHostaway(){
   toast(L==='ar'?'⏳ سحب من Hostaway…':'⏳ Importing…');
