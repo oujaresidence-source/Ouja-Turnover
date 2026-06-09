@@ -27771,6 +27771,8 @@ def _pricing_command_apply(rows, actor="", allow_below_floor=False, force_dry=No
     summ = {"requested": 0, "verified": 0, "not_confirmed": 0, "failed": 0, "skipped": 0, "floor_blocked": 0, "dry_run": 0}
     res_rows, batch_rows = [], []
     for r in rows[:600]:                                  # safety cap
+        if not isinstance(r, dict):                       # a malformed row (null/str/number) must not crash the batch
+            continue
         try:
             lid = int(r.get("lid"))
         except (TypeError, ValueError):
@@ -27785,8 +27787,8 @@ def _pricing_command_apply(rows, actor="", allow_below_floor=False, force_dry=No
         if price <= 0:
             res_rows.append({"lid": lid, "date": date_iso, "status": "skipped", "reason": "bad_price"}); summ["skipped"] += 1; continue
         summ["requested"] += 1
-        floor = r.get("floor")
-        below = (floor is not None and price < _coerce_price(floor))
+        floor = _coerce_price(r.get("floor"))             # coerce first: a non-numeric floor must not raise on price < floor
+        below = (floor is not None and price < floor)
         if below and not allow_below_floor:
             res_rows.append({"lid": lid, "date": date_iso, "requested_price": price, "status": "floor_blocked",
                              "reason": "below_floor_not_allowed", "floor": floor}); summ["floor_blocked"] += 1; continue
@@ -27954,7 +27956,11 @@ def _pricing_emergency_preview(pct=None):
 async def _api_pricing_emergency_preview(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    return _json(await asyncio.to_thread(_pricing_emergency_preview))
+    try:
+        return _json(await asyncio.to_thread(_pricing_emergency_preview))
+    except Exception as e:
+        print("emergency-preview:", e)
+        return _json({"ok": False, "count": 0, "candidates": [], "error": "emergency_preview_failed"})
 
 async def _api_pe_recs(request):
     if not _dash_auth(request):
@@ -27981,7 +27987,7 @@ async def _api_pe_apply(request):
         lid = int(b.get("lid"))
     except Exception:
         return _json({"error": "bad lid"}, 400)
-    date_iso = (b.get("date") or "")[:10]
+    date_iso = str(b.get("date") or "")[:10]              # str(): a numeric date in the body must not crash the slice
     if not _parse_date(date_iso):
         return _json({"error": "bad date"}, 400)
     res = await asyncio.to_thread(_pe_apply_night, lid, date_iso, b.get("price"),
@@ -28092,7 +28098,7 @@ async def _api_pricing_apply_month(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
-    month = (b.get("month") or "")[:7]
+    month = str(b.get("month") or "")[:7]                 # str(): a numeric month in the body must not crash the slice
     if not re.match(r"^\d{4}-\d{2}$", month):
         return _json({"error": "bad month"}, 400)
     plan = await asyncio.to_thread(_month_apply_plan, month)
@@ -28481,7 +28487,8 @@ async def _api_inbox(request):
 
 async def _read_body(request):
     try:
-        return await request.json()
+        d = await request.json()
+        return d if isinstance(d, dict) else {}      # always hand callers a dict — a JSON array/scalar body would otherwise crash every b.get(...)
     except Exception:
         return {}
 
