@@ -12075,11 +12075,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div id="prAnalytics"><div class="empty sk">—</div></div>
         </div>
 
-        <!-- collapsible per-apartment list (accordion: one open at a time) -->
-        <div class="card">
-          <div class="card-head"><span class="card-title">🏘️ <span id="t_pr_list">الوحدات</span></span><span class="card-sub" id="prListCount"></span></div>
-          <div id="prListBody"><div class="empty sk">—</div></div>
-        </div>
+        <!-- the per-apartment listing list now lives in the main #prTable above (Hostaway-style manager) -->
 
         <!-- folded-in "Today": tonight's vacancies + last-minute step-down (secondary, collapsed) -->
         <details class="card" id="prTonight">
@@ -15246,7 +15242,7 @@ async function pccCalApply(mode){
   pccApplyResults(res);
   pccOpenCalendar(d.lid, _peIso(_prCal.month));   // refresh the calendar after apply
 }
-function renderPricing2(){
+function renderPricing2(){ return renderPricingTable();   // legacy accordion replaced by the listings table — redirect any caller to it
   var d=D.pr2||{}; var recs=(d.recs||[]);
   var body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
   if(d.error){ if(body) body.innerHTML=emptyState(esc(d.error), labelText('حاول التحديث أو راجع الاتصال بـ Hostaway.','Refresh or check the Hostaway connection.'),'⚠'); return; }
