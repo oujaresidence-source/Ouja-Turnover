@@ -14907,35 +14907,19 @@ const ICN = {
   log:_S+'<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
   more:_S+'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>'
 };
-const NAV = [
-  {id:'home',    ic:ICN.home, tk:'home'},
-  {id:'inbox',   ic:ICN.inbox, tk:'inbox', badge:'inbox'},
-  {id:'calendar',ic:ICN.calendar, tk:'calendar'},
-  {id:'clean_center',ic:ICN.clean_center, tk:'clean_center', badge:'clean_center'},
-  {id:'pricing', ic:ICN.pricing, tk:'pricing', badge:'pricing'},
-  {id:'plab',    ic:ICN.plab, tk:'plab'},
-  {id:'strat',   ic:ICN.strat, tk:'strat'},
-  {id:'clean',   ic:ICN.clean, tk:'clean', badge:'clean'},
-  {id:'cleanteams',ic:ICN.cleanteams, tk:'cleanteams'},
-  {id:'listings',ic:ICN.listings, tk:'listings', badge:'listings'},
-  {id:'tickets', ic:ICN.tickets, tk:'tickets', badge:'tickets'},
-  {id:'reviews', ic:ICN.reviews, tk:'reviews', badge:'reviews'},
-  {id:'users',   ic:ICN.users, tk:'users', adminOnly:true},
-  {id:'quote',   ic:ICN.quote, tk:'quote'},
-  {id:'weekly',  ic:ICN.weekly, tk:'weekly'},
-  {id:'design',  ic:ICN.design, tk:'design'},
-  {id:'pmo',     ic:ICN.pmo, tk:'pmo'},
-  {id:'expenses',ic:ICN.expenses, tk:'expenses', badge:'expenses'},
-  {id:'finance', ic:ICN.finance, tk:'finance'},
-  {id:'erp',     ic:ICN.fb, tk:'erp'},
-  {id:'fb',      ic:ICN.fb, tk:'fb'},
-  {id:'guests',  ic:ICN.guests, tk:'guests'},
-  {id:'gw',      ic:ICN.gw, tk:'gw'},
-  {id:'quality', ic:ICN.quality, tk:'quality'},
-  {id:'rev',     ic:ICN.rev, tk:'rev'},
-  {id:'learn',   ic:ICN.learn, tk:'learn'},
-  {id:'log',     ic:ICN.log, tk:'log'}
-];
+/* Shared nav definition — injected from bot.py's NAV_DEF (the ONE source the
+   dashboard and the ERP shell both render from, so they can never drift).
+   Items carry icon KEYS into the local ICN map; labels merge into T below. */
+const NAVD = __NAV_DEF_JSON__;
+(function(){
+  try{
+    Object.assign(T.ar, NAVD.labels.ar);
+    Object.assign(T.en, NAVD.labels.en);
+  }catch(e){ console.error('nav label merge failed:', e); }
+})();
+const NAV = NAVD.items.map(function(n){
+  return {id:n.id, ic:(ICN[n.ic]||''), tk:n.tk, badge:n.badge, adminOnly:!!n.adminOnly};
+});
 const MNAV = [
   {id:'home', ic:ICN.home, tk:'nav_home'},
   {id:'inbox', ic:ICN.inbox, tk:'nav_inbox', badge:'inbox'},
@@ -14982,17 +14966,9 @@ function badgeInfo(key){
   const label = (L==='ar' ? 'عدد التنبيهات: ' : 'Alert count: ') + count;
   return {count:count, cls:cls, label:label};
 }
-// Stage 3 — the sidebar is sectioned into 6 categories. Every NAV id below appears in
-// exactly one group; order is deliberate (what a manager reaches for, top to bottom).
-const NAV_CATS = [
-  {tk:'cat_overview', ids:['home']},
-  {tk:'cat_ops',      ids:['inbox','calendar','clean_center','tickets','clean','cleanteams','listings','quality','pmo','design']},
-  {tk:'cat_pricing',  ids:['pricing','plab','strat','rev']},
-  {tk:'cat_owner_sales', ids:['quote']},
-  {tk:'cat_finance',  ids:['erp','expenses','finance','fb','weekly']},
-  {tk:'cat_guests',   ids:['guests','gw','reviews']},
-  {tk:'cat_system',   ids:['users','learn','log']}
-];
+// Stage 3 — the sidebar is sectioned into categories. Groups + order come from
+// the SAME shared NAV_DEF (bot.py) the ERP sidebar renders — one source, no drift.
+const NAV_CATS = NAVD.cats;
 function _navCollapsed(){ try{ return JSON.parse(localStorage.getItem('ouja:navCollapsed')||'{}')||{}; }catch(_){ return {}; } }
 function toggleNavCat(tk){
   const c=_navCollapsed(); c[tk]=!c[tk];
@@ -15232,6 +15208,12 @@ function go(id){
    INIT + LOAD
    ============================================================ */
 async function init(){
+  // STEP 0 — accept ?token= from a trusted internal link (the ERP sidebar round-trip),
+  // store it like a manual login, then scrub it from the address bar.
+  try{
+    var _qt = new URLSearchParams(location.search).get('token');
+    if(_qt){ localStorage.setItem(TK, _qt); history.replaceState(null, '', location.pathname + location.hash); }
+  }catch(e){ console.error('token bootstrap failed:', e); }
   // STEP 1 — verify token. Only here can we say "wrong token".
   try{
     document.getElementById('lerr').textContent='';
@@ -28587,6 +28569,100 @@ async def _api_apply(request):
     return _json({"ok": True, "applied": applied, "skipped": skipped,
                   "dry_run": PRICE_APPLY_DRYRUN, "results": results})
 
+# ===================== SHARED GLOBAL NAV (dashboard + ERP shell) =====================
+# THE one definition of the sidebar: sections, order, ids, labels (ar/en), badges,
+# admin gating. The dashboard renders it via the __NAV_DEF_JSON__ injection below;
+# the ERP shell fetches it via GET /api/nav. Icons stay in each front-end (cosmetic);
+# everything that can FUNCTIONALLY drift lives here. `fb` was dropped from the nav
+# (it duplicated `erp` after the v2 cutover); its id still deep-links via go().
+NAV_DEF = {
+    "cats": [
+        {"tk": "cat_overview", "ids": ["home"]},
+        {"tk": "cat_ops", "ids": ["inbox", "calendar", "clean_center", "tickets", "clean",
+                                  "cleanteams", "listings", "quality", "pmo", "design"]},
+        {"tk": "cat_pricing", "ids": ["pricing", "plab", "strat", "rev"]},
+        {"tk": "cat_owner_sales", "ids": ["quote"]},
+        {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly"]},
+        {"tk": "cat_guests", "ids": ["guests", "gw", "reviews"]},
+        {"tk": "cat_system", "ids": ["users", "learn", "log"]},
+    ],
+    "items": [
+        {"id": "home", "ic": "home", "tk": "home"},
+        {"id": "inbox", "ic": "inbox", "tk": "inbox", "badge": "inbox"},
+        {"id": "calendar", "ic": "calendar", "tk": "calendar"},
+        {"id": "clean_center", "ic": "clean_center", "tk": "clean_center", "badge": "clean_center"},
+        {"id": "pricing", "ic": "pricing", "tk": "pricing", "badge": "pricing"},
+        {"id": "plab", "ic": "plab", "tk": "plab"},
+        {"id": "strat", "ic": "strat", "tk": "strat"},
+        {"id": "clean", "ic": "clean", "tk": "clean", "badge": "clean"},
+        {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
+        {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
+        {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
+        {"id": "reviews", "ic": "reviews", "tk": "reviews", "badge": "reviews"},
+        {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
+        {"id": "quote", "ic": "quote", "tk": "quote"},
+        {"id": "weekly", "ic": "weekly", "tk": "weekly"},
+        {"id": "design", "ic": "design", "tk": "design"},
+        {"id": "pmo", "ic": "pmo", "tk": "pmo"},
+        {"id": "expenses", "ic": "expenses", "tk": "expenses", "badge": "expenses"},
+        {"id": "finance", "ic": "finance", "tk": "finance"},
+        {"id": "erp", "ic": "fb", "tk": "erp"},
+        {"id": "guests", "ic": "guests", "tk": "guests"},
+        {"id": "gw", "ic": "gw", "tk": "gw"},
+        {"id": "quality", "ic": "quality", "tk": "quality"},
+        {"id": "rev", "ic": "rev", "tk": "rev"},
+        {"id": "learn", "ic": "learn", "tk": "learn"},
+        {"id": "log", "ic": "log", "tk": "log"},
+    ],
+    # Labels override the same keys inside the dashboard's T.ar/T.en at boot, so the
+    # words in BOTH apps come from here. erp/finance renamed post-cutover: «المركز
+    # المالي» is the ERP itself; «finance» deep-links to the owner statements workspace.
+    "labels": {
+        "ar": {
+            "home": "الرئيسية", "inbox": "صندوق الوارد", "calendar": "التقويم",
+            "clean_center": "مركز التنظيف", "pricing": "التسعير الديناميكي",
+            "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
+            "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة",
+            "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
+            "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
+            "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي",
+            "guests": "الضيوف", "gw": "موقع الضيوف", "quality": "جودة النظافة",
+            "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط",
+            "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
+            "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
+            "cat_finance": "المالية والمحاسبة", "cat_guests": "الضيوف", "cat_system": "النظام",
+        },
+        "en": {
+            "home": "Home", "inbox": "Inbox", "calendar": "Calendar",
+            "clean_center": "Cleaning Center", "pricing": "Dynamic Pricing",
+            "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
+            "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance",
+            "reviews": "Reviews", "users": "Users", "quote": "Quotations",
+            "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
+            "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center",
+            "guests": "Guests", "gw": "Guest Website", "quality": "Cleaning quality",
+            "rev": "Revenue", "learn": "Learnings", "log": "Activity",
+            "cat_overview": "Overview", "cat_ops": "Operations",
+            "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
+            "cat_finance": "Finance & Accounting", "cat_guests": "Guests", "cat_system": "System",
+        },
+    },
+    # Where each id LIVES: the ERP sidebar links dashboard ids to /dashboard#<id>,
+    # and these ids map into ERP workspaces instead (mirrors go()'s cutover table).
+    "erp_targets": {"erp": "today", "expenses": "exp", "finance": "owners"},
+}
+
+_NAV_DEF_JSON = json.dumps(NAV_DEF, ensure_ascii=False)
+# One-time bake at import: the dashboard's `const NAVD = __NAV_DEF_JSON__;` becomes real JS.
+DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
+
+async def _api_nav(request):
+    """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
+    every dashboard read."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "nav": NAV_DEF, "role": _req_role(request)})
+
 async def _handle_dashboard(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
 
@@ -41117,6 +41193,7 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
+        app.router.add_get("/api/nav", _api_nav)            # shared nav (ERP sidebar source)
         # ---- SEO surfaces for the public funnel ----
         app.router.add_get("/robots.txt", _handle_robots)
         app.router.add_get("/sitemap.xml", _handle_sitemap)

@@ -426,6 +426,7 @@
     if (!ws || !ws.built) { location.replace('#today'); return; }
     store.view = ph.view;
     renderNav();
+    renderGSide();
     document.title = t('ws_' + ph.view) + ' · ' + t('app');
     VIEWS[ph.view].show(ph.params);
   }
@@ -2437,6 +2438,132 @@
     }
   };
 
+  /* ============ global sidebar — the SHARED nav (slice 0a v2.1) ============
+     Structure + labels come from GET /api/nav (bot.py's NAV_DEF — the same
+     definition the dashboard renders). Icons are a local copy (cosmetic). */
+  var GICN = (function () {
+    var S = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">';
+    return {
+      home: S + '<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 21v-7h6v7"/></svg>',
+      inbox: S + '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+      calendar: S + '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>',
+      clean_center: S + '<circle cx="12" cy="12" r="9"/><path d="m14.8 9.2-2.2 5.6-5.6 2.2 2.2-5.6z"/></svg>',
+      pricing: S + '<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+      plab: S + '<path d="M9 3h6M10 3v6.5L5.2 18A2 2 0 0 0 7 21h10a2 2 0 0 0 1.8-3L14 9.5V3"/></svg>',
+      strat: S + '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+      clean: S + '<path d="m12 3 1.6 4.8L18 9l-4.4 1.2L12 15l-1.6-4.8L6 9l4.4-1.2z"/><path d="M18 15.5l.8 1.7 1.7.8-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8z"/></svg>',
+      cleanteams: S + '<circle cx="9" cy="8" r="3"/><path d="M15 5.2a3 3 0 0 1 0 5.6M3 20a6 6 0 0 1 12 0M16 14a6 6 0 0 1 5 6"/></svg>',
+      listings: S + '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h.01M15 8h.01M9 12h.01M15 12h.01M9 16h6"/></svg>',
+      tickets: S + '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.3 2.3-2-2z"/></svg>',
+      reviews: S + '<path d="m12 3 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.2l1-5.8L3.5 9.2l5.9-.9z"/></svg>',
+      users: S + '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+      quote: S + '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
+      weekly: S + '<path d="M3 3v18h18"/><path d="M7 15v-3M12 15V8M17 15v-6"/></svg>',
+      design: S + '<path d="M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M4 11a2 2 0 0 1 2 2v2h12v-2a2 2 0 0 1 2-2 2 2 0 0 1 2 2v5H2v-5a2 2 0 0 1 2-2z"/></svg>',
+      pmo: S + '<path d="M3 21h18M6 21V11l6-3 6 3v10M10 21v-5h4v5"/></svg>',
+      expenses: S + '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>',
+      finance: S + '<path d="M5 3v18l2-1 2 1 2-1 2 1 2-1 2 1V3l-2 1-2-1-2 1-2-1-2 1z"/><path d="M9 8h6M9 12h6"/></svg>',
+      fb: S + '<rect x="5" y="6" width="14" height="12" rx="3"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M2 9h3M2 14h3M19 9h3M19 14h3"/></svg>',
+      guests: S + '<circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>',
+      gw: S + '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10.5 18h3"/></svg>',
+      quality: S + '<path d="M12 3l7.5 3v6c0 4.5-3 7.5-7.5 9-4.5-1.5-7.5-4.5-7.5-9V6z"/><path d="m9 12 2 2 4-4"/></svg>',
+      rev: S + '<path d="M3 17l6-6 4 4 7-8"/><path d="M17 7h4v4"/></svg>',
+      learn: S + '<path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 19a2 2 0 0 0 2 2h12v-4"/></svg>',
+      log: S + '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>'
+    };
+  })();
+
+  function gnavLabel(tk) {
+    var nav = store.gnav && store.gnav.nav;
+    if (!nav) return tk;
+    var L = (nav.labels || {})[store.lang] || (nav.labels || {}).ar || {};
+    return L[tk] || ((nav.labels || {}).ar || {})[tk] || tk;
+  }
+  function _gCollapsed() {
+    try { return JSON.parse(localStorage.getItem('erp:navCollapsed') || '{}') || {}; } catch (e) { return {}; }
+  }
+  function dashUrl(id) {
+    return '/dashboard' + (store.token ? '?token=' + encodeURIComponent(store.token) : '') + '#' + id;
+  }
+
+  function renderGSide() {
+    var box = $('#gsideNav');
+    if (!box || !store.gnav || !store.gnav.nav) return;
+    var nav = store.gnav.nav;
+    var role = store.gnav.role || 'admin';
+    var erpTargets = nav.erp_targets || {};
+    var byId = {};
+    (nav.items || []).forEach(function (n) { byId[n.id] = n; });
+    var collapsed = _gCollapsed();
+    function itemHtml(n) {
+      var on = n.id === 'erp';
+      var target = erpTargets[n.id];
+      var href = target ? ('#' + target) : dashUrl(n.id);
+      var h = '<a class="item' + (on ? ' on' : '') + '" href="' + esc(href) + '"' +
+        (on ? ' aria-current="page"' : '') + '><span class="ic">' + (GICN[n.ic] || '') + '</span>' +
+        '<span>' + esc(gnavLabel(n.tk)) + '</span></a>';
+      if (on) {
+        h += '<div class="ws-sub">' + WORKSPACES.map(function (w) {
+          return '<a href="#' + w.id + '" class="' + (store.view === w.id ? 'on' : '') + '">' +
+            esc(t('ws_' + w.id)) + '</a>';
+        }).join('') + '</div>';
+      }
+      return h;
+    }
+    box.innerHTML = (nav.cats || []).map(function (cat) {
+      var items = (cat.ids || []).map(function (id) { return byId[id]; })
+        .filter(function (n) { return n && !(n.adminOnly && role !== 'admin'); });
+      if (!items.length) return '';
+      var activeHere = items.some(function (n) { return n.id === 'erp'; });
+      var isCollapsed = !!collapsed[cat.tk] && !activeHere;
+      return '<div class="nav-group' + (isCollapsed ? ' collapsed' : '') + '">' +
+        '<button class="nav-group-h" type="button" data-cat="' + esc(cat.tk) + '" aria-expanded="' + (isCollapsed ? 'false' : 'true') + '">' +
+        '<span class="nav-cat-label">' + esc(gnavLabel(cat.tk)) + '</span>' +
+        '<span class="nav-caret" aria-hidden="true">⌄</span></button>' +
+        '<div class="nav-group-items">' + items.map(itemHtml).join('') + '</div></div>';
+    }).join('');
+  }
+
+  function loadGNav() {
+    api('/api/nav').then(function (d) {
+      if (d && d.ok) { store.gnav = d; renderGSide(); }
+    }).catch(function () { /* nav stays absent; the wsnav strip still navigates */ });
+  }
+
+  /* sidebar interactions: category collapse + burger (mobile overlay / desktop hide) */
+  document.addEventListener('click', function (ev) {
+    var h = ev.target.closest ? ev.target.closest('.gside .nav-group-h') : null;
+    if (h) {
+      var c = _gCollapsed();
+      c[h.getAttribute('data-cat')] = !c[h.getAttribute('data-cat')];
+      try { localStorage.setItem('erp:navCollapsed', JSON.stringify(c)); } catch (e) {}
+      renderGSide();
+    }
+  });
+  function gsideMobileOpen(open) {
+    document.body.classList.toggle('gside-open', open);
+    var bg = $('#gsideBg');
+    if (bg) bg.hidden = !open;
+  }
+  (function () {
+    var btn = $('#burger');
+    if (btn) btn.addEventListener('click', function () {
+      if (window.matchMedia('(min-width:1024px)').matches) {
+        var off = document.body.classList.toggle('gside-off');
+        try { localStorage.setItem('erp_gside_off', off ? '1' : '0'); } catch (e) {}
+      } else {
+        gsideMobileOpen(!document.body.classList.contains('gside-open'));
+      }
+    });
+    var x = $('#gsideClose');
+    if (x) x.addEventListener('click', function () { gsideMobileOpen(false); });
+    var bg = $('#gsideBg');
+    if (bg) bg.addEventListener('click', function () { gsideMobileOpen(false); });
+    try { if (localStorage.getItem('erp_gside_off') === '1') document.body.classList.add('gside-off'); } catch (e) {}
+    // navigating inside the SPA from the overlay should close it
+    window.addEventListener('hashchange', function () { gsideMobileOpen(false); });
+  })();
+
   /* ---------------- language ---------------- */
   function applyLang() {
     document.documentElement.lang = store.lang;
@@ -2445,6 +2572,7 @@
     $('#langBtn').textContent = store.lang === 'ar' ? 'EN' : 'ع';
     $('#healthLbl').textContent = t('health');
     renderNav();
+    renderGSide();
     if (store.view === 'today' && store.D.today) renderToday(store.D.today);
     else if (store.view === 'bank') { var ph = parseHash(); VIEWS.bank.show(ph.params); }
     else if (store.view === 'setup') loadSetup();
@@ -2470,5 +2598,6 @@
     return function () { clearTimeout(tmr); tmr = setTimeout(saveScroll, 120); };
   })(), { passive: true });
   applyLang();
+  loadGNav();
   route();
 })();

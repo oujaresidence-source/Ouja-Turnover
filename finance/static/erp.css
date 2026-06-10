@@ -469,3 +469,83 @@ html[dir=ltr] .nb-arrow{transform:scaleX(-1)}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
 }
+
+/* ---------- global sidebar (shared nav — slice 0a v2.1) ----------
+   Mirrors the dashboard sidebar (aside.side) so the two shells read as ONE app.
+   Logical properties keep RTL (sidebar right) / LTR (left) automatic. */
+#app{flex-direction:row}
+.erp-main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:100vh}
+.gside{
+  width:232px;flex:none;background:var(--bg);border-inline-end:1px solid var(--line);
+  padding:18px 12px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  display:none;flex-direction:column;z-index:60;
+}
+.gside-brand{display:flex;align-items:center;gap:10px;padding:4px 8px 14px;margin-bottom:8px}
+.gside-brand .logo{
+  width:34px;height:34px;border-radius:10px;background:var(--text);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;box-shadow:var(--sh-sm);
+}
+.gside-brand .name{font-size:16px;font-weight:700;color:var(--text);line-height:1}
+.gside-brand .sub{font-size:9.5px;color:var(--mut);margin-top:2px;letter-spacing:1px;text-transform:uppercase}
+.gside-x{
+  margin-inline-start:auto;border:0;background:none;color:var(--text-3);font-size:15px;
+  cursor:pointer;padding:6px;border-radius:8px;display:none;
+}
+.gside-x:hover{background:var(--surface-2);color:var(--text)}
+.gside-nav{display:flex;flex-direction:column;gap:1px;flex:1}
+.gside .nav-group{display:flex;flex-direction:column}
+.gside .nav-group + .nav-group{margin-top:7px}
+.gside .nav-group-h{
+  display:flex;align-items:center;gap:7px;width:100%;background:none;border:0;cursor:pointer;
+  padding:7px 11px 4px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--mut);user-select:none;text-align:start;
+}
+html[lang=ar] .gside .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5px}
+.gside .nav-group-h:hover{color:var(--text-2)}
+.gside .nav-cat-label{flex:1;text-align:start;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.gside .nav-caret{font-size:10px;opacity:.6;transition:transform .18s var(--ease)}
+.gside .nav-group.collapsed .nav-caret{transform:rotate(-90deg)}
+.gside .nav-group-items{display:flex;flex-direction:column;gap:1px}
+.gside .nav-group.collapsed .nav-group-items{display:none}
+.gside .item{
+  display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r-sm);
+  color:var(--text-2);font-size:13px;font-weight:500;cursor:pointer;transition:.12s;
+  position:relative;user-select:none;text-decoration:none;
+}
+.gside .item:hover{background:rgba(0,0,0,.045);color:var(--text)}
+.gside .item.on{background:var(--surface);color:var(--text);font-weight:700;box-shadow:var(--sh-sm)}
+.gside .item .ic{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.gside .item .ic svg{width:19px;height:19px;stroke:var(--text-3);stroke-width:1.8;fill:none;transition:stroke .15s}
+.gside .item:hover .ic svg{stroke:var(--text-2)}
+.gside .item.on .ic svg{stroke:var(--accent)}
+/* the ERP's own workspaces, nested under the active المركز المالي item */
+.gside .ws-sub{display:flex;flex-direction:column;gap:1px;margin:2px 0 4px;padding-inline-start:30px}
+.gside .ws-sub a{
+  display:block;padding:5.5px 10px;border-radius:8px;color:var(--text-3);font-size:12.5px;
+  font-weight:500;text-decoration:none;transition:.12s;
+}
+.gside .ws-sub a:hover{background:rgba(0,0,0,.045);color:var(--text)}
+.gside .ws-sub a.on{color:var(--accent-deep);background:var(--accent-soft);font-weight:700}
+.burger{
+  width:34px;height:34px;border-radius:8px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--text-2);display:inline-flex;align-items:center;
+  justify-content:center;cursor:pointer;transition:transform .12s var(--press),background .15s;flex:none;
+}
+.burger:hover{background:var(--surface-2)}
+.burger:active{transform:scale(.97)}
+.gside-bg{position:fixed;inset:0;background:rgba(0,0,0,.34);z-index:55}
+/* Desktop: sidebar on by default (body.gside-off hides it → wsnav returns) */
+@media (min-width:1024px){
+  body:not(.gside-off) .gside{display:flex}
+  body:not(.gside-off) .wsnav{display:none}
+  body:not(.gside-off) .gside-bg{display:none!important}
+}
+/* Mobile/tablet: off-canvas overlay via body.gside-open */
+@media (max-width:1023.98px){
+  .gside{position:fixed;inset-inline-start:0;top:0;bottom:0;height:100vh;box-shadow:var(--sh-lg);transform:translateX(0)}
+  body:not(.gside-open) .gside{display:none}
+  body.gside-open .gside{display:flex}
+  body.gside-open .gside-bg{display:block}
+  .gside-x{display:inline-flex}
+}
+@media (prefers-reduced-motion:reduce){ .gside .nav-caret{transition:none} }

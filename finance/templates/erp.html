@@ -12,8 +12,21 @@
 </head>
 <body>
 <div id="app">
+  <div class="gside-bg" id="gsideBg" hidden></div>
+  <aside class="gside" id="gside" aria-label="التنقل الرئيسي">
+    <div class="gside-brand">
+      <div class="logo">ع</div>
+      <div><div class="name">عوجا</div><div class="sub">Operations</div></div>
+      <button class="gside-x" id="gsideClose" type="button" aria-label="إغلاق القائمة">✕</button>
+    </div>
+    <div class="gside-nav" id="gsideNav"></div>
+  </aside>
+  <div class="erp-main">
   <header class="topbar">
     <div class="brand">
+      <button class="burger" id="burger" type="button" aria-label="القائمة الرئيسية">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
       <span class="brand-mark">عوجا</span>
       <span class="brand-title" id="appTitle">المركز المالي</span>
     </div>
@@ -39,6 +52,7 @@
     <span class="bs-sep">·</span>
     <span class="bs-item">__ERP_BUILT__</span>
   </footer>
+  </div>
 </div>
 <div id="toasts" aria-live="polite"></div>
 <script>window.__ERP_BUILD__={version:'__ERP_VERSION__',commit:'__ERP_COMMIT__',built:'__ERP_BUILT__'};</script>
