@@ -24409,8 +24409,20 @@ def _owner_month_report(owner, mkey):
     if hit and (now - hit[1] < ttl):
         return hit[0]
     start, end = _month_bounds(mkey)
-    items = _finance_collect_items("owner", [], [owner], start, end)
-    rep = items[0]["report"] if items else None
+    rep = None
+    _hook = globals().get("_owner_statement_hook")
+    if _hook is not None:
+        # v2.1 (finance/owners.py): effective-dated contracts + statement edits.
+        # Identical to the legacy aggregate when no overlay data exists; any
+        # error falls back to the legacy path so the portal never goes dark.
+        try:
+            rep = _hook(owner, mkey)
+        except Exception as e:
+            print("owner statement hook error:", e)
+            rep = None
+    if rep is None:
+        items = _finance_collect_items("owner", [], [owner], start, end)
+        rep = items[0]["report"] if items else None
     if rep is not None:
         _owner_portal_cache[(owner, mkey)] = (rep, now)
         if len(_owner_portal_cache) > 400:

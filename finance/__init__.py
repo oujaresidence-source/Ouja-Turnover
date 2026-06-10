@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.1.0-s0b"
+ERP_VERSION = "2.1.0-s1"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -430,6 +430,37 @@ async def _h_api_owners_diagnose(request):
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
+async def _h_api_owner_detail(request):
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    return api.jres(OW.owner_detail(owner))
+
+
+async def _h_api_owner_save(request):
+    data, status = OW.owner_save(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_add(request):
+    data, status = OW.unit_add(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_remove(request):
+    data, status = OW.unit_remove(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_terms(request):
+    data, status = OW.unit_terms_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_owner_listings_search(request):
+    return api.jres(OW.listings_search(request.query.get("q") or ""))
+
+
 async def _h_api_owners_link(request):
     # Delegate to the existing owner-link manager (finance-write gated inside;
     # create/regenerate/revoke + full audit live there).
@@ -519,6 +550,9 @@ async def _h_api_contract_link(request):
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
+    # v2.1: the owner portal/PDF/close-checks read the effective-dated statement
+    # through this hook (bot.py falls back to its legacy aggregate on any error).
+    botmod._owner_statement_hook = OW.compute_owner_statement
     app.router.add_get("/erp", _h_erp)
     app.router.add_get("/erp/version", _h_version)
     app.router.add_get("/erp/api/work-queue", _h_api_work_queue)
@@ -553,6 +587,12 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
     app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
     app.router.add_get("/erp/api/owners/diagnose", _guarded(_h_api_owners_diagnose))
+    app.router.add_get("/erp/api/owners/detail", _guarded(_h_api_owner_detail))
+    app.router.add_post("/erp/api/owners/save", _guarded(_h_api_owner_save, write=True))
+    app.router.add_post("/erp/api/owners/unit-add", _guarded(_h_api_unit_add, write=True))
+    app.router.add_post("/erp/api/owners/unit-remove", _guarded(_h_api_unit_remove, write=True))
+    app.router.add_post("/erp/api/owners/unit-terms", _guarded(_h_api_unit_terms, write=True))
+    app.router.add_get("/erp/api/owners/listings-search", _guarded(_h_api_owner_listings_search))
     app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
     app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
     app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))

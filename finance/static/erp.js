@@ -160,6 +160,24 @@
       rsn_needs_channel_rule: 'قناة بدون قاعدة', rsn_cancelled_refunded: 'ملغي — مسترد',
       rsn_unpaid_yet: 'غير مدفوع بعد', rsn_out_of_period: 'خارج الفترة',
       rsn_missing_paid_amount: 'مدفوع جزئيًا بدون مبلغ', rsn_status: 'حالة غير مؤكدة',
+      rsn_outside_contract: 'وحدة خارج فترة العقد',
+      /* --- owner manager (slice 1) --- */
+      o_manage: 'إدارة', om_title: 'إدارة المالك', om_phone: 'الجوال (واتساب)',
+      om_notes: 'ملاحظات', om_active: 'نشط', om_paused: 'موقوف', om_save: 'حفظ البيانات',
+      om_saved: 'انحفظت ✓', om_units: 'الشقق', om_add_unit: 'أضف شقة',
+      om_search_listing: 'ابحث في الشقق (الاسم)…', om_taken: 'مسجلة لـ',
+      om_code: 'كود الشقة بالكشف', om_from: 'بداية العقد', om_to: 'نهاية العقد',
+      om_open_ended: 'مفتوح', om_mgmt: 'نسبة الإدارة %', om_cleaning: 'النظافة',
+      om_cl_ours: 'على عوجا', om_cl_owner: 'يدفعها المالك (شهري)', om_cl_amount: 'مبلغ النظافة/شهر',
+      om_add_do: 'إضافة الشقة', om_added: 'انضافت ✓',
+      om_terms_btn: 'تعديل الشروط', om_terms_title: 'تغيير بتاريخ سريان',
+      om_terms_from: 'يسري من تاريخ', om_terms_hint: 'التغيير ما يلمس الشهور الماضية — كل شهر يقرأ الشروط اللي كانت سارية فيه',
+      om_terms_save: 'حفظ التغيير', om_terms_saved: 'انحفظ — يسري من {d}',
+      om_remove_btn: 'إنهاء العقد', om_remove_title: 'إنهاء عقد الشقة',
+      om_remove_hint: 'إزالة ناعمة: الشهور الماضية تظل تنحسب — والشهور بعد التاريخ تستبعدها',
+      om_reason: 'السبب (إلزامي)…', om_remove_do: 'تأكيد الإنهاء', om_removed: 'انتهى العقد',
+      om_history: 'سجل التغييرات', om_no_changes: 'ما فيه تغييرات بعد',
+      om_contract: 'العقد', om_terms_n: 'تغييرات الشروط', om_now: 'الحالي',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -325,6 +343,23 @@
       rsn_needs_channel_rule: 'Channel without a rule', rsn_cancelled_refunded: 'Cancelled — refunded',
       rsn_unpaid_yet: 'Not paid yet', rsn_out_of_period: 'Outside the period',
       rsn_missing_paid_amount: 'Partially paid, amount unknown', rsn_status: 'Unconfirmed status',
+      rsn_outside_contract: 'Unit outside the contract window',
+      o_manage: 'Manage', om_title: 'Owner manager', om_phone: 'Phone (WhatsApp)',
+      om_notes: 'Notes', om_active: 'Active', om_paused: 'Paused', om_save: 'Save profile',
+      om_saved: 'Saved ✓', om_units: 'Apartments', om_add_unit: 'Add apartment',
+      om_search_listing: 'Search listings (name)…', om_taken: 'belongs to',
+      om_code: 'Statement code', om_from: 'Contract start', om_to: 'Contract end',
+      om_open_ended: 'open', om_mgmt: 'Management %', om_cleaning: 'Cleaning',
+      om_cl_ours: 'On Ouja', om_cl_owner: 'Owner pays (monthly)', om_cl_amount: 'Cleaning amount/month',
+      om_add_do: 'Add apartment', om_added: 'Added ✓',
+      om_terms_btn: 'Change terms', om_terms_title: 'Effective-dated change',
+      om_terms_from: 'Effective from', om_terms_hint: 'Past months are untouched — each month reads the terms that were active then',
+      om_terms_save: 'Save change', om_terms_saved: 'Saved — effective {d}',
+      om_remove_btn: 'End contract', om_remove_title: 'End this apartment’s contract',
+      om_remove_hint: 'Soft removal: past months keep computing — months after the date exclude it',
+      om_reason: 'Reason (required)…', om_remove_do: 'Confirm end', om_removed: 'Contract ended',
+      om_history: 'Change history', om_no_changes: 'No changes yet',
+      om_contract: 'Contract', om_terms_n: 'Term changes', om_now: 'now',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -1427,6 +1462,81 @@
         .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
 
+    /* --- owner manager (slice 1) --- */
+    else if (act === 'om-save') {
+      el.disabled = true;
+      api('/erp/api/owners/save', { method: 'POST', body: {
+        owner: el.getAttribute('data-owner'),
+        phone: $('#omPhone').value, notes: $('#omNotes').value,
+        active: $('#omActive').value === '1'
+      } }).then(function () { el.disabled = false; toast(t('om_saved')); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'om-toggle-form') {
+      var rowM = el.closest('.wq-row');
+      var f = rowM && rowM.querySelector('.om-form[data-form="' + el.getAttribute('data-form') + '"]');
+      if (f) {
+        var show = f.hidden;
+        rowM.querySelectorAll('.om-form').forEach(function (x) { x.hidden = true; });
+        f.hidden = !show;
+      }
+    }
+    else if (act === 'om-terms-save') {
+      var rowT = el.closest('.wq-row');
+      var frm = rowT.querySelector('.om-t-from').value;
+      var reasonT = rowT.querySelector('.om-t-reason').value.trim();
+      if (!frm) { rowT.querySelector('.om-t-from').classList.add('need'); return; }
+      el.disabled = true;
+      api('/erp/api/owners/unit-terms', { method: 'POST', body: {
+        apartment: el.getAttribute('data-apt'), from: frm,
+        mgmt_pct: rowT.querySelector('.om-t-mgmt').value,
+        cleaning: { type: rowT.querySelector('.om-t-cltype').value,
+                    amount: Number(rowT.querySelector('.om-t-clamt').value || 0) },
+        reason: reasonT
+      } }).then(function () {
+        toast(t('om_terms_saved').replace('{d}', frm));
+        loadManage(((store.D.manage || {}).owner) || '');
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'om-remove-do') {
+      var rowR = el.closest('.wq-row');
+      var toD = rowR.querySelector('.om-r-to').value;
+      var reasonR = rowR.querySelector('.om-r-reason').value.trim();
+      if (!toD) { rowR.querySelector('.om-r-to').classList.add('need'); return; }
+      if (!reasonR) { rowR.querySelector('.om-r-reason').classList.add('need'); rowR.querySelector('.om-r-reason').focus(); return; }
+      el.disabled = true;
+      api('/erp/api/owners/unit-remove', { method: 'POST', body: {
+        apartment: el.getAttribute('data-apt'), to: toD, reason: reasonR
+      } }).then(function () {
+        toast(t('om_removed'), 'warn');
+        loadManage(((store.D.manage || {}).owner) || '');
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'om-pick-listing') {
+      $('#omAddForm').hidden = false;
+      $('#omAddLid').value = el.getAttribute('data-lid');
+      var nm = el.getAttribute('data-name') || '';
+      var code = nm.split('|').pop().trim();
+      if (!$('#omAddApt').value) $('#omAddApt').value = code;
+      $('#omLResults').innerHTML = '<div class="wq-sub">✓ ' + esc(nm) + ' <code>#' + esc(el.getAttribute('data-lid')) + '</code></div>';
+      $('#omAddApt').focus();
+    }
+    else if (act === 'om-unit-add') {
+      var aptA = $('#omAddApt').value.trim();
+      if (!aptA) { $('#omAddApt').classList.add('need'); $('#omAddApt').focus(); return; }
+      el.disabled = true;
+      api('/erp/api/owners/unit-add', { method: 'POST', body: {
+        owner: el.getAttribute('data-owner'), apartment: aptA,
+        lid: $('#omAddLid').value || null,
+        from: $('#omAddFrom').value || '',
+        mgmt_pct: $('#omAddMgmt').value,
+        cleaning: { type: $('#omAddClType').value, amount: Number($('#omAddClAmt').value || 0) }
+      } }).then(function () {
+        toast(t('om_added'));
+        loadManage(((store.D.manage || {}).owner) || '');
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- setup --- */
     else if (act === 'retry_setup') loadSetup();
     else if (act === 'st-rule-toggle') {
@@ -2284,7 +2394,8 @@
     var opened = lk.opened_at
       ? esc(t('o_last_open')) + ': <code>' + esc(lk.opened_at.slice(0, 16)) + '</code> · ' + lk.opens + ' ' + esc(t('o_opens'))
       : esc(t('o_never'));
-    var acts = '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '">' + esc(t('o_diag')) + '</a>';
+    var acts = '<a class="btn ghost xs" href="#owners?manage=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
+      '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '">' + esc(t('o_diag')) + '</a>';
     if (lk.exists && lk.active) {
       acts += '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
         '<a class="btn ghost xs" href="' + esc(lk.url) + '" target="_blank" rel="noopener">' + esc(t('o_preview')) + '</a>' +
@@ -2413,6 +2524,120 @@
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
 
+  /* ----- slice 1: owner & apartment manager (effective-dated) ----- */
+  function clTxt(cl) {
+    cl = cl || {};
+    return cl.type === 'owner' ? (t('om_cl_owner') + ' · ' + fmtAmt(cl.amount)) : t('om_cl_ours');
+  }
+
+  function manageUnitHtml(u) {
+    var win = (u.contract_from || '—') + ' ← ' + (u.contract_to || t('om_open_ended'));
+    var terms = (u.terms || []).map(function (x) {
+      return '<div class="wq-sub"><code>' + esc(x.from || '∅') + '</code> → ' +
+        (x.mgmt_pct != null ? (t('om_mgmt') + ' ' + x.mgmt_pct + '%') : '') +
+        (x.cleaning ? (' · ' + clTxt(x.cleaning)) : '') + '</div>';
+    }).join('');
+    return '<div class="wq-row" data-apt="' + esc(u.apartment) + '">' +
+      '<div class="wq-main"><div class="wq-top"><b>' + esc(u.apartment) + '</b>' +
+      '<span class="tag soft">' + esc(u.listing || '') + '</span>' +
+      (u.lid == null ? '<span class="tag bad">' + esc(t('dg_lid_missing')) + '</span>' : '') +
+      '<span class="tag">' + esc(t('om_now')) + ': ' + (u.mgmt_now != null ? u.mgmt_now + '%' : '—') +
+      ' · ' + clTxt(u.cleaning_now) + '</span></div>' +
+      '<div class="wq-sub">' + esc(t('om_contract')) + ': <code>' + esc(win) + '</code></div>' +
+      (terms ? ('<div class="wq-sub"><b>' + esc(t('om_terms_n')) + ':</b></div>' + terms) : '') +
+      '<div class="om-forms">' +
+      /* terms form */
+      '<div class="om-form" data-form="terms" hidden>' +
+        '<b>' + esc(t('om_terms_title')) + '</b><div class="grp-hint" style="padding:0">' + esc(t('om_terms_hint')) + '</div>' +
+        '<div class="om-grid">' +
+        '<label>' + esc(t('om_terms_from')) + '<input type="date" class="in om-t-from"></label>' +
+        '<label>' + esc(t('om_mgmt')) + '<input type="number" step="0.5" min="0" max="60" class="in om-t-mgmt" value="' + (u.mgmt_now != null ? u.mgmt_now : '') + '"></label>' +
+        '<label>' + esc(t('om_cleaning')) + '<select class="in om-t-cltype"><option value="ours"' + ((u.cleaning_now || {}).type !== 'owner' ? ' selected' : '') + '>' + esc(t('om_cl_ours')) + '</option><option value="owner"' + ((u.cleaning_now || {}).type === 'owner' ? ' selected' : '') + '>' + esc(t('om_cl_owner')) + '</option></select></label>' +
+        '<label>' + esc(t('om_cl_amount')) + '<input type="number" step="1" min="0" class="in om-t-clamt" value="' + ((u.cleaning_now || {}).amount || 0) + '"></label>' +
+        '</div><input class="in om-t-reason" placeholder="' + esc(t('om_reason')) + '">' +
+        '<button class="btn primary sm" data-act="om-terms-save" data-apt="' + esc(u.apartment) + '">' + esc(t('om_terms_save')) + '</button>' +
+      '</div>' +
+      /* remove form */
+      '<div class="om-form" data-form="remove" hidden>' +
+        '<b>' + esc(t('om_remove_title')) + '</b><div class="grp-hint" style="padding:0">' + esc(t('om_remove_hint')) + '</div>' +
+        '<div class="om-grid">' +
+        '<label>' + esc(t('om_to')) + '<input type="date" class="in om-r-to"></label>' +
+        '</div><input class="in om-r-reason" placeholder="' + esc(t('om_reason')) + '">' +
+        '<button class="btn danger-ghost sm" data-act="om-remove-do" data-apt="' + esc(u.apartment) + '">' + esc(t('om_remove_do')) + '</button>' +
+      '</div>' +
+      '</div></div>' +
+      '<div class="wq-actions">' +
+      '<button class="btn ghost xs" data-act="om-toggle-form" data-form="terms">' + esc(t('om_terms_btn')) + '</button>' +
+      '<button class="btn danger-ghost xs" data-act="om-toggle-form" data-form="remove">' + esc(t('om_remove_btn')) + '</button>' +
+      '</div></div>';
+  }
+
+  function renderManage(d) {
+    store.D.manage = d;
+    var p = d.profile || {};
+    var vers = (d.versions || []).map(function (v) {
+      return '<div class="wq-sub"><code>' + esc((v.at || '').slice(0, 16)) + '</code> · ' + esc(v.by || '') +
+        ' · <b>' + esc(v.what || '') + '</b> · ' + esc(v.target || '') +
+        (v.reason ? (' — ' + esc(v.reason)) : '') + '</div>';
+    }).join('');
+    $('#view').innerHTML =
+      '<a class="btn ghost sm" href="#owners">' + esc(t('dg_back')) + '</a>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">👤</span>' +
+      '<h2>' + esc(t('om_title')) + ' — ' + esc(d.owner) + '</h2></header>' +
+      '<div class="om-grid" style="padding:0 16px 8px">' +
+      '<label>' + esc(t('om_phone')) + '<input class="in" id="omPhone" dir="ltr" placeholder="9665xxxxxxxx" value="' + esc(p.phone || '') + '"></label>' +
+      '<label>' + esc(t('om_notes')) + '<input class="in" id="omNotes" value="' + esc(p.notes || '') + '"></label>' +
+      '<label>' + esc(t('om_active')) + '<select class="in" id="omActive"><option value="1"' + (p.active !== false ? ' selected' : '') + '>' + esc(t('om_active')) + '</option><option value="0"' + (p.active === false ? ' selected' : '') + '>' + esc(t('om_paused')) + '</option></select></label>' +
+      '</div><div style="padding:0 16px 14px"><button class="btn primary sm" data-act="om-save" data-owner="' + esc(d.owner) + '">' + esc(t('om_save')) + '</button></div>' +
+      '</section>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('om_units')) + '</h2>' +
+      '<span class="cnt">' + (d.units || []).length + '</span></header>' +
+      '<div class="grp-list">' + (d.units || []).map(manageUnitHtml).join('') + '</div>' +
+      '<div style="padding:12px 16px 16px;border-top:1px solid var(--line)">' +
+      '<b>' + esc(t('om_add_unit')) + '</b>' +
+      '<input class="in" id="omLSearch" placeholder="' + esc(t('om_search_listing')) + '" style="margin:8px 0 4px">' +
+      '<div id="omLResults"></div>' +
+      '<div id="omAddForm" hidden>' +
+      '<div class="om-grid">' +
+      '<label>' + esc(t('om_code')) + '<input class="in" id="omAddApt"></label>' +
+      '<label>' + esc(t('om_from')) + '<input type="date" class="in" id="omAddFrom"></label>' +
+      '<label>' + esc(t('om_mgmt')) + '<input type="number" step="0.5" min="0" max="60" class="in" id="omAddMgmt" value="20"></label>' +
+      '<label>' + esc(t('om_cleaning')) + '<select class="in" id="omAddClType"><option value="ours">' + esc(t('om_cl_ours')) + '</option><option value="owner">' + esc(t('om_cl_owner')) + '</option></select></label>' +
+      '<label>' + esc(t('om_cl_amount')) + '<input type="number" step="1" min="0" class="in" id="omAddClAmt" value="0"></label>' +
+      '</div><input type="hidden" id="omAddLid">' +
+      '<button class="btn primary sm" data-act="om-unit-add" data-owner="' + esc(d.owner) + '">' + esc(t('om_add_do')) + '</button>' +
+      '</div></div>' +
+      '</section>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">🗂️</span><h2>' + esc(t('om_history')) + '</h2></header>' +
+      '<div style="padding:0 16px 16px">' + (vers || ('<div class="grp-hint" style="padding:0">' + esc(t('om_no_changes')) + '</div>')) + '</div>' +
+      '</section>';
+    var ls = $('#omLSearch');
+    if (ls) {
+      var tmr = null;
+      ls.addEventListener('input', function () {
+        clearTimeout(tmr);
+        tmr = setTimeout(function () {
+          var q = ls.value.trim();
+          if (q.length < 2) { $('#omLResults').innerHTML = ''; return; }
+          api('/erp/api/owners/listings-search?q=' + encodeURIComponent(q)).then(function (r) {
+            $('#omLResults').innerHTML = (r.rows || []).map(function (x) {
+              return '<button class="acc-opt" data-act="om-pick-listing" data-lid="' + x.lid + '" data-name="' + esc(x.name) + '"' +
+                (x.owner ? ' disabled title="' + esc(t('om_taken') + ' ' + x.owner) + '"' : '') + '>' +
+                esc(x.name) + (x.owner ? ' <span class="tag bad">' + esc(t('om_taken')) + ' ' + esc(x.owner) + '</span>' : '') + '</button>';
+            }).join('');
+          }).catch(function () {});
+        }, 250);
+      });
+    }
+  }
+
+  function loadManage(owner) {
+    $('#view').innerHTML = skeleton(5);
+    api('/erp/api/owners/detail?owner=' + encodeURIComponent(owner))
+      .then(renderManage)
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+  }
+
   function ownerLinkAct(owner, action) {
     return api('/erp/api/owners/link', { method: 'POST', body: { owner: owner, action: action } })
       .then(function () { return api('/erp/api/owners'); })
@@ -2538,7 +2763,9 @@
     owners: {
       show: function (params) {
         var diag = params && params.get('diag');
+        var manage = params && params.get('manage');
         if (diag) loadDiag(diag, params.get('m') || '');
+        else if (manage) loadManage(manage);
         else loadOwners();
       }
     },

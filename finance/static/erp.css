@@ -561,3 +561,13 @@ html[lang=ar] .gside .nav-group-h{text-transform:none;letter-spacing:0;font-size
 .stat.ok{background:var(--green-soft)} .stat.ok b{color:var(--green)}
 .stat.bad{background:var(--red-soft)} .stat.bad b{color:var(--red)}
 tr.off td{color:var(--text-3)}
+
+/* ---------- owner manager forms (slice 1) ---------- */
+.om-forms{margin-top:4px}
+.om-form{
+  background:var(--surface-2);border-radius:var(--r-sm);padding:12px;margin-top:8px;
+  display:flex;flex-direction:column;gap:8px;font-size:13px;
+}
+.om-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.om-grid label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--text-3)}
+.in.need{border-color:var(--red);background:var(--red-soft)}
