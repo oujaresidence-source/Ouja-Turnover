@@ -2053,7 +2053,8 @@
         '<h3>' + esc(t('st_liab')) + '</h3>' + stRows(bs.rows.liability) + totalLine(t('st_liab'), bs.totals.liabilities) +
         '<h3>' + esc(t('st_equity')) + '</h3>' + stRows(bs.rows.equity) +
           totalLine(t('st_earn'), bs.totals.current_earnings) + totalLine(t('st_equity'), bs.totals.equity) +
-        (bs.rows.untyped.length ? '<h3>' + esc(t('st_untyped')) + '</h3>' + stRows(bs.rows.untyped) : '') +
+        (bs.rows.untyped.length ? '<h3>' + esc(t('st_untyped')) + '</h3>' + stRows(bs.rows.untyped) +
+          totalLine(t('st_untyped'), bs.totals.untyped_net_debit) : '') +
         '</div></section>' +
 
       '<section class="card grp st-card"><header class="grp-h"><h2>' + esc(t('st_is')) + '</h2>' +

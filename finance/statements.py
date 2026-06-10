@@ -49,11 +49,24 @@ _TYPE_TOKENS = (
     ("expense", ("expense", "مصروف", "مصاريف", "تكاليف", "تكلفة", "cost", "expenditure")),
 )
 
-_CASH_NAME_TOKENS = ("بنك", "نقد", "صندوق", "كاش", "bank", "cash", "راجحي", "rajhi")
+# cash detection is WORD-based (not substring): «رسوم بنكية» (bank FEES) must
+# never match through the «بنك» substring. Words are normalized (ى→ي، أإآ→ا).
+_CASH_WORDS = {"بنك", "البنك", "بنوك", "نقد", "النقد", "نقديه", "نقدية", "صندوق",
+               "الصندوق", "كاش", "راجحي", "الراجحي", "اهلي", "الاهلي",
+               "bank", "cash", "rajhi", "ahli", "treasury"}
 
 
 def _norm_token(v):
     return str(v or "").strip().lower()
+
+
+def _norm_ar_word(w):
+    return (str(w).strip().lower()
+            .replace("ى", "ي").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا"))
+
+
+def _name_is_cash(name):
+    return any(_norm_ar_word(w) in _CASH_WORDS for w in str(name or "").split())
 
 
 def detect_type(payload):
@@ -87,7 +100,7 @@ def type_accounts(accounts):
         aid = str(rec.get("source_id"))
         typ, key, raw = detect_type(rec.get("source_payload") or {})
         name = rec.get("display_name") or ""
-        is_cash = any(tk in _norm_token(name) for tk in _CASH_NAME_TOKENS)
+        is_cash = _name_is_cash(name)
         if is_cash and typ is None:
             typ_eff = "asset"           # cash accounts are assets even when untyped …
             cash_inferred = True        # … but flagged so the coverage banner stays honest
@@ -218,7 +231,10 @@ def build_statements(journals, accounts, start_iso, end_iso,
                 bs["untyped"].append({**entry, "amount": fnum(cum)})   # raw debit-net, no pretend sign
             totals["untyped"] += cum
 
-    gap = totals["asset"] - (totals["liability"] + totals["equity"] + earnings_cum + totals["untyped"])
+    # accounting equation with the honest untyped bucket on the DEBIT side
+    # (untyped balances are raw debit-nets — in double-entry they sit opposite
+    # the typed credits, so: assets + untyped_debit_net = L + E + earnings).
+    gap = (totals["asset"] + totals["untyped"]) - (totals["liability"] + totals["equity"] + earnings_cum)
     for k in bs:
         bs[k].sort(key=lambda r: r["code"])
     balance_sheet = {
