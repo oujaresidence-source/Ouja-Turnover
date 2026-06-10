@@ -1523,6 +1523,13 @@
     var target = document.getElementById(nb.getAttribute('data-target'));
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+  // clicking the dark backdrop closes any drawer (the card itself stays interactive)
+  document.addEventListener('click', function (ev) {
+    if (ev.target.classList && ev.target.classList.contains('drawer')) {
+      ev.target.hidden = true;
+      ev.target.innerHTML = '';
+    }
+  });
 
   /* ================= المطابقة Matching ================= */
   var matchP = { engine: 'all', p: 1 };
