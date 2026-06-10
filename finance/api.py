@@ -9,9 +9,13 @@ data layer stays single-sourced and untouched.
 
 import json
 import uuid
+from calendar import monthrange
+from decimal import Decimal
 from datetime import datetime
 
 from aiohttp import web
+
+from . import statements as ST
 
 B = None  # bot.py module object — set by finance.mount()
 
@@ -165,8 +169,11 @@ async def work_queue(request):
     done = sum(1 for s in steps if s.get("done"))
     health = int(round(100.0 * done / len(steps))) if steps else 0
 
+    g_budget = budget_alerts_now()
+
     groups = [
         {"key": "approvals", "count": len(approvals), "items": g_approvals},
+        {"key": "budget", "count": len(g_budget), "items": g_budget[:12]},
         {"key": "unclassified", "count": len(uncls), "items": g_uncls},
         {"key": "suggested", "count": len(sugg), "items": g_sugg},
         {"key": "contracts", "count": len(g_contracts), "items": g_contracts[:25]},
@@ -968,6 +975,510 @@ def exp_attach_bank(payload):
 def custody_payload():
     """Per-employee advances from the existing Decimal-correct balance math."""
     return {"ok": True, **B._fb_custody_balances()}
+
+
+# ========== Slice 7: القوائم المالية + الإقفال والترحيل + الميزانية ==========
+
+def _month_key_or_now(v):
+    v = (v or "").strip()[:7]
+    if len(v) == 7 and v[:2] == "20" and v[4] == "-":
+        return v
+    return datetime.now(B.TZ).date().isoformat()[:7]
+
+
+def _month_bounds_iso(mkey):
+    y, m = int(mkey[:4]), int(mkey[5:7])
+    return "%04d-%02d-01" % (y, m), "%04d-%02d-%02d" % (y, m, monthrange(y, m)[1])
+
+
+def _prior_month(mkey):
+    y, m = int(mkey[:4]), int(mkey[5:7]) - 1
+    if m == 0:
+        y, m = y - 1, 12
+    return "%04d-%02d" % (y, m)
+
+
+def _bank_account_ids():
+    return {str((v or {}).get("daftra_account_id"))
+            for v in (B._fb_bankmap or {}).values() if (v or {}).get("daftra_account_id")}
+
+
+def _bank_register_delta(start_iso, end_iso):
+    tot = Decimal(0)
+    for x in B._fb_bank.values():
+        d = (x.get("date") or "")[:10]
+        if start_iso <= d <= end_iso:
+            tot += B._fb_money(x.get("credit")) - B._fb_money(x.get("debit"))
+    return str(tot)
+
+
+def _daftra_sync_stamp():
+    run = B._fb_last_run("daftra") or {}
+    return run.get("finished_at") or run.get("started_at") or "—"
+
+
+def stmts_payload(params):
+    mkey = _month_key_or_now(params.get("m"))
+    start, end = _month_bounds_iso(mkey)
+    pm = _prior_month(mkey)
+    ps, pe = _month_bounds_iso(pm)
+    res = ST.build_statements(B._fb_djournals, _acct_records(), start, end, ps, pe,
+                              _bank_account_ids(), _bank_register_delta(start, end))
+    stamp = _daftra_sync_stamp()
+    res.update({"ok": True, "month": mkey, "prior_month": pm,
+                "journals_count": len(B._fb_djournals),
+                "provenance_ar": "محسوبة من قيود دافترة المستوردة حتى " + str(stamp) + " — دافترة هي المصدر الرسمي",
+                "provenance_en": "Computed from imported Daftra journals as of " + str(stamp) + " — Daftra is the official ledger"})
+    return res
+
+
+def stmts_account_lines(params):
+    mkey = _month_key_or_now(params.get("m"))
+    start, end = _month_bounds_iso(mkey)
+    return {"ok": True,
+            "rows": ST.account_lines(B._fb_djournals, params.get("id") or "", start, end)}
+
+
+def stmts_type_probe():
+    """Diagnostic for «verify Daftra's type field live»: what each imported
+    account's payload actually carries."""
+    rows = []
+    keys_hist = {}
+    for rec in _acct_records():
+        typ, key, raw = ST.detect_type(rec.get("source_payload") or {})
+        if key:
+            keys_hist[key] = keys_hist.get(key, 0) + 1
+        rows.append({"account_id": str(rec.get("source_id")), "code": rec.get("code") or "",
+                     "name": rec.get("display_name") or "", "type": typ,
+                     "probe_key": key, "probe_raw": raw})
+    typed = sum(1 for r in rows if r["type"])
+    return {"ok": True, "rows": rows, "keys_histogram": keys_hist,
+            "typed": typed, "total": len(rows)}
+
+
+def stmts_xlsx(payload):
+    """Excel export — 4 sheets, plain and audit-friendly."""
+    import io
+    import openpyxl
+    wb = openpyxl.Workbook()
+
+    def sheet(title, rows):
+        ws = wb.create_sheet(title)
+        for r in rows:
+            ws.append(r)
+        return ws
+
+    wb.remove(wb.active)
+    bs = payload["balance_sheet"]
+    rows = [["قائمة المركز المالي — " + payload["month"]], []]
+    for sec, label in (("asset", "الأصول"), ("liability", "الخصوم"), ("equity", "حقوق الملكية"), ("untyped", "غير مصنّف النوع")):
+        rows.append([label])
+        for r in bs["rows"][sec]:
+            rows.append([r["code"], r["name"], r["amount"], r.get("prior")])
+        rows.append([])
+    tt = bs["totals"]
+    rows += [["الإجمالي", "الأصول", tt["assets"]], ["", "الخصوم", tt["liabilities"]],
+             ["", "حقوق الملكية", tt["equity"]], ["", "أرباح جارية", tt["current_earnings"]],
+             ["", "الفجوة", tt["gap"]]]
+    sheet("المركز المالي", rows)
+
+    inc = payload["income"]
+    rows = [["قائمة الدخل — " + payload["month"]], [], ["الإيرادات"]]
+    rows += [[r["code"], r["name"], r["amount"], r.get("prior")] for r in inc["income_rows"]]
+    rows += [[], ["المصروفات"]]
+    rows += [[r["code"], r["name"], r["amount"], r.get("prior")] for r in inc["expense_rows"]]
+    rows += [[], ["صافي الدخل", "", inc["totals"]["net"], inc["prior_totals"]["net"]]]
+    rows += [[], ["حسب مركز التكلفة"]]
+    rows += [[c["name"] or c["cost_center_id"], c["income"], c["expense"], c["net"]] for c in inc["by_cost_center"]]
+    sheet("الدخل", rows)
+
+    eq = payload["equity"]
+    sheet("حقوق الملكية", [
+        ["قائمة التغير في حقوق الملكية — " + payload["month"]], [],
+        ["الرصيد الافتتاحي", eq["opening"]], ["صافي الدخل", eq["net_income"]],
+        ["إضافات الملاك", eq["contributions"]], ["مسحوبات", eq["withdrawals"]],
+        ["الرصيد الختامي", eq["closing"]], ["مطابقة مع المركز المالي", "نعم" if eq["ties_to_balance_sheet"] else ("فجوة " + str(eq["gap"]))]])
+
+    cf = payload["cash_flow"]
+    g = cf["groups"]
+    sheet("التدفقات النقدية", [
+        ["قائمة التدفقات النقدية (مباشرة) — " + payload["month"]], [],
+        ["من الإيرادات", g["income"]], ["مصروفات", g["expense"]],
+        ["أصول", g["asset"]], ["التزامات", g["liability"]], ["حقوق/مالك", g["equity"]],
+        ["غير مصنّف", g["untyped"]], [],
+        ["صافي التدفق", cf["net_cash"]],
+        ["نقد افتتاحي", cf["opening_cash"]], ["نقد ختامي", cf["closing_cash"]],
+        ["حركة سجل البنك", cf["bank_register_delta"]],
+        ["مطابقة سجل البنك", {True: "نعم", False: "لا", None: "—"}[cf["ties_bank_register"]]]])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def stmts_pdf(payload):
+    """PDF export. Hard-fails loudly (PdfFontError) if the Arabic font can't load."""
+    from fpdf import FPDF
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+
+    font_path = B._pdf_font()        # raises B.PdfFontError when unavailable
+
+    def ar(s):
+        try:
+            return get_display(arabic_reshaper.reshape(str(s)))
+        except Exception:
+            return str(s)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_font("ar", "", font_path, uni=True)
+
+    def h1(txt):
+        pdf.set_font("ar", size=15)
+        pdf.cell(0, 9, ar(txt), align="R")
+        pdf.ln(11)
+
+    def row(a, b, c=""):
+        pdf.set_font("ar", size=10)
+        pdf.cell(38, 6.5, str(c), align="L")
+        pdf.cell(38, 6.5, str(b), align="L")
+        pdf.cell(0, 6.5, ar(a), align="R")
+        pdf.ln(6.5)
+
+    pdf.add_page()
+    h1("القوائم المالية — " + payload["month"] + " · عوجا")
+    pdf.set_font("ar", size=8.5)
+    pdf.cell(0, 5, ar(payload["provenance_ar"]), align="R")
+    pdf.ln(8)
+
+    bs = payload["balance_sheet"]
+    h1("قائمة المركز المالي")
+    for sec, label in (("asset", "الأصول"), ("liability", "الخصوم"), ("equity", "حقوق الملكية"), ("untyped", "غير مصنّف النوع")):
+        if not bs["rows"][sec]:
+            continue
+        pdf.set_font("ar", size=11)
+        pdf.cell(0, 7, ar(label), align="R")
+        pdf.ln(7.5)
+        for r in bs["rows"][sec][:40]:
+            row(r["name"], "%.2f" % r["amount"], r["code"])
+    tt = bs["totals"]
+    row("الفجوة" if not bs["balanced"] else "متوازنة", "%.2f" % tt["gap"], "")
+    pdf.ln(4)
+
+    inc = payload["income"]
+    pdf.add_page()
+    h1("قائمة الدخل")
+    for r in inc["income_rows"][:35]:
+        row(r["name"], "%.2f" % r["amount"], r["code"])
+    for r in inc["expense_rows"][:35]:
+        row(r["name"], "-%.2f" % r["amount"], r["code"])
+    row("صافي الدخل", "%.2f" % inc["totals"]["net"], "")
+
+    eq = payload["equity"]
+    pdf.ln(4)
+    h1("التغير في حقوق الملكية")
+    row("الرصيد الافتتاحي", "%.2f" % eq["opening"], "")
+    row("صافي الدخل", "%.2f" % eq["net_income"], "")
+    row("إضافات الملاك", "%.2f" % eq["contributions"], "")
+    row("مسحوبات", "%.2f" % eq["withdrawals"], "")
+    row("الرصيد الختامي", "%.2f" % eq["closing"], "")
+
+    cf = payload["cash_flow"]
+    pdf.ln(4)
+    h1("التدفقات النقدية (مباشرة)")
+    labels = {"income": "من الإيرادات", "expense": "مصروفات", "asset": "أصول",
+              "liability": "التزامات", "equity": "حقوق/مالك", "untyped": "غير مصنّف"}
+    for k, v in cf["groups"].items():
+        row(labels.get(k, k), "%.2f" % v, "")
+    row("صافي التدفق", "%.2f" % cf["net_cash"], "")
+    row("حركة سجل البنك", str(cf["bank_register_delta"]), "")
+
+    out = pdf.output(dest="S")
+    return out.encode("latin-1") if isinstance(out, str) else bytes(out)
+
+
+# ---------------- month close (gated checklist → immutable snapshot) ----------------
+
+_CLOSE_FILE = "erp_month_close.json"
+_MIG_FILE = "erp_migrations.json"
+
+
+def _close_store():
+    return B._load_json(_CLOSE_FILE, {}) or {}
+
+
+def close_checks(mkey):
+    start, end = _month_bounds_iso(mkey)
+    in_month = [x for x in B._fb_bank.values() if start <= (x.get("date") or "")[:10] <= end]
+    bank_uncls = sum(1 for x in in_month if x.get("status") == "needs_review")
+    unmatched = sum(1 for x in in_month
+                    if (x.get("match_status") or "unmatched") == "unmatched"
+                    and x.get("daftra_duplicate_status") != "ignored"
+                    and not x.get("ledger_entry_id"))
+    exp_pending = 0
+    for e in B._expenses.values():
+        d = (e.get("expense_date") or "")[:10]
+        if not (start <= d <= end):
+            continue
+        try:
+            st = B._exp4_approval_status(e)
+        except Exception:
+            st = e.get("approval_status") or ""
+        if st in ("pending_approval", "needs_edit"):
+            exp_pending += 1
+    owners_unbalanced = []
+    owners = sorted({(r.get("owner") or "").strip() for r in _registry_rows() if (r.get("owner") or "").strip()})
+    for o in owners:
+        try:
+            rep = B._owner_month_report(o, mkey)
+        except Exception:
+            rep = None
+        if rep and not (rep.get("reconciliation") or {}).get("balanced"):
+            owners_unbalanced.append(o)
+    needs_faisal = B._fb_inbox({})["counts"].get("needs_faisal", 0)
+    checks = [
+        {"key": "bank_classified", "ok": bank_uncls == 0, "count": bank_uncls},
+        {"key": "matching_done", "ok": unmatched == 0, "count": unmatched},
+        {"key": "expenses_approved", "ok": exp_pending == 0, "count": exp_pending},
+        {"key": "owners_balanced", "ok": not owners_unbalanced, "count": len(owners_unbalanced),
+         "owners": owners_unbalanced[:12]},
+        {"key": "approvals_clear", "ok": needs_faisal == 0, "count": needs_faisal},
+    ]
+    return checks, all(c["ok"] for c in checks)
+
+
+def close_get(params):
+    mkey = _month_key_or_now(params.get("m"))
+    checks, all_ok = close_checks(mkey)
+    snap = _close_store().get(mkey)
+    migs = (B._load_json(_MIG_FILE, {}) or {}).get(mkey) or []
+    prev = migrate_entry_ids(mkey)
+    return {"ok": True, "month": mkey, "checks": checks, "all_ok": all_ok,
+            "closed": bool(snap), "snapshot": snap,
+            "post_enabled": bool(getattr(B, "DAFTRA_POST_ENABLED", False)),
+            "migrations": migs, "migratable_entries": len(prev)}
+
+
+def close_do(request, body):
+    if not is_admin(request):
+        return {"error": "forbidden", "message_ar": "إقفال الشهر للأدمن فقط.",
+                "message_en": "Month close is admin-only."}, 403
+    mkey = _month_key_or_now(body.get("month"))
+    store = _close_store()
+    if store.get(mkey):
+        return {"error": "already_closed", "snapshot": store[mkey],
+                "message_ar": "الشهر مقفول من قبل — الإقفال نهائي.",
+                "message_en": "Month already closed — snapshots are immutable."}, 409
+    checks, all_ok = close_checks(mkey)
+    if not all_ok:
+        return {"error": "checklist_incomplete", "checks": checks,
+                "message_ar": "ما نقدر نقفل — فيه بنود ناقصة بالقائمة.",
+                "message_en": "Cannot close — checklist items remain."}, 422
+    start, end = _month_bounds_iso(mkey)
+    stm = stmts_payload({"m": mkey})
+    snap = {"month": mkey, "closed_at": datetime.now(B.TZ).isoformat(timespec="seconds"),
+            "closed_by": actor(request), "checks": checks,
+            "income_totals": stm["income"]["totals"],
+            "balance_totals": stm["balance_sheet"]["totals"],
+            "bank_register_delta": _bank_register_delta(start, end)}
+    store[mkey] = snap
+    B._save_json(_CLOSE_FILE, store)
+    B._fb_audit_add(actor(request), "erp_month_close", "close", mkey, after=snap)
+    return {"ok": True, "snapshot": snap}, 200
+
+
+# ---------------- الترحيل إلى دافترة (idempotent migration) ----------------
+
+def migrate_entry_ids(mkey):
+    start, end = _month_bounds_iso(mkey)
+    ids = []
+    for e in B._fb_ledger.values():
+        d = (e.get("date") or "")[:10]
+        if start <= d <= end and e.get("status") in ("approved", "ready_to_post"):
+            ids.append(e["id"])
+    return sorted(ids)
+
+
+def migrate_preview(params):
+    mkey = _month_key_or_now(params.get("m"))
+    ids = migrate_entry_ids(mkey)
+    draft = B._fb_journal_draft(ids) if ids else {"lines": [], "total": "0.00", "n": 0,
+                                                  "issues": [], "ready": False}
+    closed = bool(_close_store().get(mkey))
+    return {"ok": True, "month": mkey, "entry_ids": ids, "draft": draft,
+            "closed": closed, "post_enabled": bool(getattr(B, "DAFTRA_POST_ENABLED", False))}
+
+
+def migrate_run(request, body):
+    if not is_admin(request):
+        return {"error": "forbidden", "message_ar": "الترحيل للأدمن فقط.",
+                "message_en": "Migration is admin-only."}, 403
+    mkey = _month_key_or_now(body.get("month"))
+    if not _close_store().get(mkey):
+        return {"error": "month_not_closed",
+                "message_ar": "اقفل الشهر أولًا — الترحيل يفتح بعد الإقفال.",
+                "message_en": "Close the month first — migration unlocks after close."}, 409
+    ids = migrate_entry_ids(mkey)
+    if not body.get("confirm"):
+        # DRY-RUN: builds the preview, writes NOTHING anywhere.
+        draft = B._fb_journal_draft(ids) if ids else {"lines": [], "n": 0, "issues": []}
+        return {"ok": True, "dry_run": True, "month": mkey, "entry_ids": ids, "draft": draft}, 200
+    if not ids:
+        return {"ok": True, "month": mkey, "posted": 0, "entry_ids": [],
+                "message_ar": "ما فيه قيود جاهزة للترحيل (الترحيل السابق أخذها — التشغيل المزدوج ما ينشئ شي).",
+                "message_en": "No entries ready (a previous run consumed them — double-run creates nothing)."}, 200
+    res = B._fb_journal_post(ids, actor(request))
+    log = B._load_json(_MIG_FILE, {}) or {}
+    log.setdefault(mkey, []).append({
+        "at": datetime.now(B.TZ).isoformat(timespec="seconds"), "by": actor(request),
+        "entry_ids": ids, "result_ok": bool(res.get("ok")),
+        "disabled": bool(res.get("disabled")),
+        # revert map: every source entry and (once verified) its Daftra journal id
+        "revert_map": [{"entry_id": i,
+                        "daftra_journal_id": (B._fb_ledger.get(i) or {}).get("daftra_journal_id")}
+                       for i in ids]})
+    B._save_json(_MIG_FILE, log)
+    B._fb_audit_add(actor(request), "erp_migrate", "close", mkey,
+                    after={"n": len(ids), "ok": bool(res.get("ok"))})
+    status = 200 if res.get("ok") or res.get("disabled") else 502
+    return {"ok": bool(res.get("ok")), "month": mkey, "result": res,
+            "entry_ids": ids, "disabled": bool(res.get("disabled"))}, status
+
+
+# ---------------- الميزانية budgets ----------------
+
+_BUDGET_FILE = "erp_budgets.json"
+
+
+def _budget_store():
+    return B._load_json(_BUDGET_FILE, {}) or {}
+
+
+def budget_actuals(mkey):
+    """Actuals per Daftra account from CLASSIFIED bank txns in the month
+    (debits − credits — spend-positive)."""
+    start, end = _month_bounds_iso(mkey)
+    out = {}
+    for x in B._fb_bank.values():
+        d = (x.get("date") or "")[:10]
+        if not (start <= d <= end):
+            continue
+        aid = str(((x.get("erp_class") or {}).get("daftra_account_id")) or "")
+        if not aid:
+            continue
+        out[aid] = out.get(aid, Decimal(0)) + B._fb_money(x.get("debit")) - B._fb_money(x.get("credit"))
+    return out
+
+
+def budget_get(params):
+    mkey = _month_key_or_now(params.get("m"))
+    store = _budget_store()
+    month = store.get(mkey) or {"accounts": {}, "versions": []}
+    actuals = budget_actuals(mkey)
+    acct_idx = _acct_by_id()
+    rows = []
+    for aid, cfg in sorted(month["accounts"].items()):
+        acc = acct_idx.get(aid) or {}
+        st = ST.budget_row(cfg.get("amount") or 0, actuals.get(aid, 0))
+        rows.append({"account_id": aid, "code": acc.get("code") or "",
+                     "name": acc.get("display_name") or cfg.get("name") or aid,
+                     "weekly": cfg.get("weekly") or [],
+                     "week_start": cfg.get("week_start") or "sun", **st})
+    # suggestions: last month's budget + 3-month average of actuals
+    last = store.get(_prior_month(mkey)) or {}
+    avg3 = {}
+    mk = mkey
+    for _ in range(3):
+        mk = _prior_month(mk)
+        for aid, v in budget_actuals(mk).items():
+            avg3.setdefault(aid, []).append(v)
+    sugg = {aid: ST.fnum(sum(vals, Decimal(0)) / len(vals)) for aid, vals in avg3.items() if vals}
+    alerts = [r for r in rows if r["alert"]]
+    return {"ok": True, "month": mkey, "rows": rows,
+            "alerts": [{"account_id": r["account_id"], "name": r["name"], "pct": r["pct"],
+                        "alert": r["alert"]} for r in alerts],
+            "last_month_budget": {aid: (cfg.get("amount") or 0)
+                                  for aid, cfg in (last.get("accounts") or {}).items()},
+            "avg3_actuals": sugg, "versions": (month.get("versions") or [])[-10:]}
+
+
+def budget_set(request, body):
+    mkey = _month_key_or_now(body.get("month"))
+    store = _budget_store()
+    month = store.setdefault(mkey, {"accounts": {}, "versions": []})
+    action = (body.get("action") or "set").strip()
+    now = datetime.now(B.TZ).isoformat(timespec="seconds")
+    acct_idx = _acct_by_id()
+    if action == "copy_last":
+        last = store.get(_prior_month(mkey)) or {}
+        if not last.get("accounts"):
+            return {"error": "no_last_month", "message_ar": "ما فيه ميزانية الشهر الماضي.",
+                    "message_en": "No last-month budget to copy."}, 404
+        month["versions"].append({"at": now, "by": actor(request),
+                                  "accounts": json.loads(json.dumps(month["accounts"]))})
+        month["accounts"] = json.loads(json.dumps(last["accounts"]))
+    elif action == "delete":
+        aid = str(body.get("account_id") or "")
+        if aid not in month["accounts"]:
+            return {"error": "not_budgeted"}, 404
+        month["versions"].append({"at": now, "by": actor(request),
+                                  "accounts": json.loads(json.dumps(month["accounts"]))})
+        month["accounts"].pop(aid, None)
+    else:
+        aid = str(body.get("account_id") or "")
+        acc = acct_idx.get(aid)
+        if not acc:
+            return {"error": "account_not_in_chart",
+                    "message_ar": "الميزانية تكون على حساب من دليل دافترة فقط.",
+                    "message_en": "Budgets attach to imported Daftra accounts only."}, 422
+        try:
+            amount = float(body.get("amount") or 0)
+        except (TypeError, ValueError):
+            return {"error": "bad_amount"}, 400
+        weekly = body.get("weekly")
+        if weekly:
+            if not ST.weekly_sums_ok(weekly, amount):
+                return {"error": "weekly_sum_mismatch",
+                        "message_ar": "مجموع الأسابيع لازم يساوي مبلغ الشهر بالضبط.",
+                        "message_en": "Weekly amounts must sum exactly to the month."}, 422
+        else:
+            weekly = ST.split_weekly(amount, weeks=int(body.get("weeks") or 4))
+        month["versions"].append({"at": now, "by": actor(request),
+                                  "accounts": json.loads(json.dumps(month["accounts"]))})
+        month["accounts"][aid] = {"amount": amount, "weekly": weekly,
+                                  "week_start": (body.get("week_start") or "sun"),
+                                  "name": acc.get("display_name") or "",
+                                  "updated_at": now, "updated_by": actor(request)}
+    if len(month["versions"]) > 24:
+        del month["versions"][:len(month["versions"]) - 24]
+    B._save_json(_BUDGET_FILE, store)
+    B._fb_audit_add(actor(request), "erp_budget_" + action, "budget", mkey)
+    return budget_get({"m": mkey}), 200
+
+
+def budget_alerts_now():
+    """Current-month 90%/100% alerts — surfaced in اليوم."""
+    try:
+        mkey = datetime.now(B.TZ).date().isoformat()[:7]
+        store = _budget_store()
+        month = store.get(mkey)
+        if not month or not month.get("accounts"):
+            return []
+        actuals = budget_actuals(mkey)
+        acct_idx = _acct_by_id()
+        out = []
+        for aid, cfg in month["accounts"].items():
+            st = ST.budget_row(cfg.get("amount") or 0, actuals.get(aid, 0))
+            if st["alert"]:
+                acc = acct_idx.get(aid) or {}
+                out.append({"account_id": aid, "name": acc.get("display_name") or cfg.get("name") or aid,
+                            "pct": st["pct"], "alert": st["alert"],
+                            "budget": st["budget"], "actual": st["actual"]})
+        out.sort(key=lambda r: -(r["pct"] or 0))
+        return out
+    except Exception:
+        return []
 
 
 # ====================== الملاك Owners (Slice 6) ======================

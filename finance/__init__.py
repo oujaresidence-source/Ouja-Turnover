@@ -38,7 +38,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s6"
+ERP_VERSION = "2.0.0-s7"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -346,6 +346,75 @@ async def _h_api_custody(request):
     return api.jres(api.custody_payload())
 
 
+async def _h_api_stmts(request):
+    data = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_stmts_account(request):
+    data = await asyncio.to_thread(api.stmts_account_lines, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_stmts_probe(request):
+    return api.jres(api.stmts_type_probe())
+
+
+async def _h_api_stmts_xlsx(request):
+    payload = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    data = await asyncio.to_thread(api.stmts_xlsx, payload)
+    return web.Response(body=data,
+                        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition":
+                                 "attachment; filename=ouja-statements-" + payload["month"] + ".xlsx"})
+
+
+async def _h_api_stmts_pdf(request):
+    payload = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    try:
+        data = await asyncio.to_thread(api.stmts_pdf, payload)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    return web.Response(body=data, content_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 "attachment; filename=ouja-statements-" + payload["month"] + ".pdf"})
+
+
+async def _h_api_close_get(request):
+    data = await asyncio.to_thread(api.close_get, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_close_do(request):
+    body = await _json_body(request)
+    data, status = await asyncio.to_thread(api.close_do, request, body)
+    return api.jres(data, status)
+
+
+async def _h_api_migrate_preview(request):
+    data = await asyncio.to_thread(api.migrate_preview, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_migrate_run(request):
+    body = await _json_body(request)
+    data, status = await asyncio.to_thread(api.migrate_run, request, body)
+    return api.jres(data, status)
+
+
+async def _h_api_budget_get(request):
+    data = await asyncio.to_thread(api.budget_get, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_budget_set(request):
+    body = await _json_body(request)
+    data, status = api.budget_set(request, body)
+    return api.jres(data, status)
+
+
 async def _h_api_owners(request):
     return api.jres(api.owners_payload())
 
@@ -474,6 +543,17 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
     app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
     app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
+    app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))
+    app.router.add_get("/erp/api/stmts/account", _guarded(_h_api_stmts_account))
+    app.router.add_get("/erp/api/stmts/type-probe", _guarded(_h_api_stmts_probe))
+    app.router.add_get("/erp/api/stmts/export.xlsx", _guarded(_h_api_stmts_xlsx))
+    app.router.add_get("/erp/api/stmts/export.pdf", _guarded(_h_api_stmts_pdf))
+    app.router.add_get("/erp/api/close", _guarded(_h_api_close_get))
+    app.router.add_post("/erp/api/close", _guarded(_h_api_close_do, write=True))
+    app.router.add_get("/erp/api/migrate", _guarded(_h_api_migrate_preview))
+    app.router.add_post("/erp/api/migrate", _guarded(_h_api_migrate_run, write=True))
+    app.router.add_get("/erp/api/budget", _guarded(_h_api_budget_get))
+    app.router.add_post("/erp/api/budget", _guarded(_h_api_budget_set, write=True))
     app.router.add_get("/fin/receipt/{expense_id}", _h_receipt_proxy)   # owner-token scoped (public route)
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True

@@ -410,6 +410,28 @@ html[dir=ltr] .nb-arrow{transform:scaleX(-1)}
 .dsum{display:flex;align-items:center;gap:16px;font-size:12px;color:var(--text-3);flex-wrap:wrap}
 .dsum .btn{margin-inline-start:auto}
 
+/* ---------- القوائم Statements ---------- */
+.st-card .st-body{padding:0 var(--s-5) var(--s-4)}
+.st-body h3{font-size:12px;color:var(--mut);margin:14px 0 4px;font-weight:800}
+.st-row{
+  display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:13px;
+  border-bottom:1px dashed var(--line);cursor:pointer;border-radius:6px;
+}
+.st-row:hover{background:var(--tint)}
+.st-row.total{border-bottom:none;font-weight:800;cursor:default;background:var(--tint);padding-inline:8px;border-radius:8px;margin-top:3px}
+.st-row.total.pos .st-amt{color:var(--green)}
+.st-row.total.neg .st-amt{color:var(--red)}
+.st-code{font-size:10.5px;color:var(--mut);min-width:48px}
+.st-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.st-prior{font-size:11px;color:var(--mut);min-width:80px;text-align:end}
+.st-amt{font-size:12.5px;min-width:96px;text-align:end}
+
+/* ---------- budget bars ---------- */
+.bg-bar{height:6px;background:var(--surface-2);border-radius:999px;margin:6px 0 3px;max-width:420px;overflow:hidden}
+.bg-bar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s var(--ease)}
+.bg-bar i.warn{background:var(--yellow)}
+.bg-bar i.over{background:var(--red)}
+
 .pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:6px 0 var(--s-5)}
 .pg-info{font-size:12px;color:var(--text-3)}
 .pg-info b{font-family:var(--font-mono)}

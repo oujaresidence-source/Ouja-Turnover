@@ -145,7 +145,49 @@
       o_regen_confirm: 'تجديد الرابط يقتل الرابط القديم نهائيًا — المالك يحتاج الرابط الجديد. نكمل؟',
       o_revoke_confirm: 'إيقاف الرابط يمنع المالك من فتح كشفه. نكمل؟',
       o_done: 'تم ✓', o_empty: 'ما فيه ملاك في السجل — أضفهم من كشوفات الملاك',
-      o_mgmt: 'نسبة الإدارة'
+      o_mgmt: 'نسبة الإدارة',
+      /* --- today: budget group --- */
+      g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
+      /* --- statements --- */
+      st_month: 'الشهر', st_export_x: 'Excel', st_export_p: 'PDF',
+      st_bs: 'قائمة المركز المالي', st_is: 'قائمة الدخل', st_eq: 'قائمة التغير في حقوق الملكية',
+      st_cf: 'قائمة التدفقات النقدية (مباشرة)',
+      st_assets: 'الأصول', st_liab: 'الخصوم', st_equity: 'حقوق الملكية',
+      st_untyped: 'غير مصنّف النوع', st_earn: 'أرباح جارية',
+      st_balanced: 'متوازنة ✓', st_gap: 'فيه فجوة — ما نتظاهر بالتوازن:',
+      st_income: 'الإيرادات', st_expenses: 'المصروفات', st_net: 'صافي الدخل',
+      st_prior: 'الفترة السابقة', st_by_cc: 'حسب مركز التكلفة / الوحدة',
+      st_opening: 'الرصيد الافتتاحي', st_net_inc: 'صافي الدخل', st_contrib: 'إضافات الملاك',
+      st_withdraw: 'مسحوبات', st_closing: 'الرصيد الختامي', st_ties: 'تطابق المركز المالي ✓',
+      st_cf_income: 'من الإيرادات', st_cf_expense: 'مصروفات', st_cf_asset: 'أصول',
+      st_cf_liability: 'التزامات', st_cf_equity: 'حقوق/مالك', st_cf_untyped: 'غير مصنّف',
+      st_net_cash: 'صافي التدفق', st_open_cash: 'نقد افتتاحي', st_close_cash: 'نقد ختامي',
+      st_bank_delta: 'حركة سجل البنك', st_bank_tie: 'مطابق لسجل البنك ✓', st_bank_gap: 'فرق عن سجل البنك:',
+      st_coverage: 'حساب بنوع من دافترة', st_untyped_n: '{n} حساب بدون نوع — كمّل أنواعها في دافترة ثم حدّث الدليل',
+      st_drill_empty: 'ما فيه حركات لهالحساب في الفترة',
+      /* --- close --- */
+      cl_title: 'إقفال الشهر', cl_checks: 'قائمة الإقفال',
+      ck_bank_classified: 'كل حركات البنك مصنّفة', ck_matching_done: 'المطابقة ١٠٠٪',
+      ck_expenses_approved: 'المصاريف معتمدة', ck_owners_balanced: 'كشوفات الملاك متوازنة',
+      ck_approvals_clear: 'ما فيه موافقات معلّقة',
+      cl_close_btn: 'إقفال الشهر (نهائي)', cl_closed: 'الشهر مقفول ✓',
+      cl_confirm: 'الإقفال نهائي وما ينعكس — ينشئ لقطة ثابتة ويفتح الترحيل لدافترة. متأكد؟',
+      cl_closed_at: 'أُقفل', cl_by: 'بواسطة',
+      cl_remaining: 'باقي', cl_item: 'بند',
+      mg_title: 'الترحيل إلى دافترة', mg_hint: 'يفتح بعد الإقفال — معاينة أولًا، والتأكيد يدفع مرة واحدة فقط (مفاتيح المصدر تمنع التكرار)',
+      mg_preview: 'معاينة (Dry-run)', mg_confirm: 'ترحيل فعلي', mg_locked: 'مقفول لين تقفل الشهر',
+      mg_disabled: 'الترحيل معطّل (DAFTRA_POST_ENABLED=0) — المعاينة شغالة والدفع الفعلي محجوب',
+      mg_entries: 'قيد جاهز', mg_none: 'ما فيه قيود جاهزة للترحيل',
+      mg_confirm_q: 'بيدفع {n} قيد لدافترة (مرة واحدة، بمفاتيح مصدر). نكمل؟',
+      mg_done: 'تم الترحيل ✓', mg_dry_done: 'معاينة فقط — ما انكتب شي',
+      mg_log: 'سجل الترحيلات', mg_issues: 'ملاحظات',
+      /* --- budget --- */
+      bg_title: 'ميزانية الشهر', bg_add: 'أضف حساب…', bg_amount: 'مبلغ الشهر',
+      bg_weekly: 'تقسيم أسبوعي', bg_actual: 'الفعلي', bg_remaining: 'المتبقي',
+      bg_used: 'استُخدم', bg_copy_last: 'انسخ الشهر الماضي', bg_avg3: 'اقتراح: متوسط ٣ أشهر',
+      bg_saved: 'انحفظت ✓', bg_deleted: 'انشالت', bg_empty: 'ما فيه ميزانية لهالشهر — ابدأ بإضافة حساب أو انسخ الشهر الماضي',
+      bg_weekly_err: 'مجموع الأسابيع لازم يساوي الشهر', bg_over: 'تجاوز', bg_warn: '٩٠٪+',
+      bg_del_confirm: 'نشيل ميزانية هالحساب؟'
     },
     en: {
       dir: 'ltr', app: 'Finance Center',
@@ -255,7 +297,45 @@
       o_regen_confirm: 'Regenerating kills the old link permanently — the owner needs the new one. Continue?',
       o_revoke_confirm: 'Revoking blocks the owner from opening their statement. Continue?',
       o_done: 'Done ✓', o_empty: 'No owners in the registry — add them from owner statements',
-      o_mgmt: 'Mgmt %'
+      o_mgmt: 'Mgmt %',
+      g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
+      st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
+      st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
+      st_cf: 'Cash flow (direct)',
+      st_assets: 'Assets', st_liab: 'Liabilities', st_equity: 'Equity',
+      st_untyped: 'Untyped', st_earn: 'Current earnings',
+      st_balanced: 'Balanced ✓', st_gap: 'There is a gap — we do not pretend:',
+      st_income: 'Income', st_expenses: 'Expenses', st_net: 'Net income',
+      st_prior: 'Prior period', st_by_cc: 'By cost center / unit',
+      st_opening: 'Opening balance', st_net_inc: 'Net income', st_contrib: 'Owner contributions',
+      st_withdraw: 'Withdrawals', st_closing: 'Closing balance', st_ties: 'Ties to balance sheet ✓',
+      st_cf_income: 'From revenue', st_cf_expense: 'Expenses', st_cf_asset: 'Assets',
+      st_cf_liability: 'Liabilities', st_cf_equity: 'Equity/owner', st_cf_untyped: 'Untyped',
+      st_net_cash: 'Net cash', st_open_cash: 'Opening cash', st_close_cash: 'Closing cash',
+      st_bank_delta: 'Bank register delta', st_bank_tie: 'Ties to bank register ✓', st_bank_gap: 'Gap vs bank register:',
+      st_coverage: 'accounts typed by Daftra', st_untyped_n: '{n} accounts untyped — set their types in Daftra then refresh the chart',
+      st_drill_empty: 'No lines for this account in the period',
+      cl_title: 'Month close', cl_checks: 'Close checklist',
+      ck_bank_classified: 'All bank txns classified', ck_matching_done: 'Matching 100%',
+      ck_expenses_approved: 'Expenses approved', ck_owners_balanced: 'Owner statements balanced',
+      ck_approvals_clear: 'No pending approvals',
+      cl_close_btn: 'Close month (final)', cl_closed: 'Month closed ✓',
+      cl_confirm: 'Closing is final and irreversible — it snapshots the month and unlocks Daftra migration. Sure?',
+      cl_closed_at: 'Closed', cl_by: 'by',
+      cl_remaining: 'remaining', cl_item: 'items',
+      mg_title: 'Migrate to Daftra', mg_hint: 'Unlocks after close — preview first; confirm pushes ONCE (source keys prevent duplicates)',
+      mg_preview: 'Preview (dry-run)', mg_confirm: 'Migrate for real', mg_locked: 'Locked until the month closes',
+      mg_disabled: 'Posting disabled (DAFTRA_POST_ENABLED=0) — preview works, the real push is blocked',
+      mg_entries: 'entries ready', mg_none: 'No entries ready to migrate',
+      mg_confirm_q: 'Pushes {n} entries to Daftra (once, source-keyed). Continue?',
+      mg_done: 'Migrated ✓', mg_dry_done: 'Dry-run only — nothing was written',
+      mg_log: 'Migration log', mg_issues: 'Issues',
+      bg_title: 'Month budget', bg_add: 'Add account…', bg_amount: 'Month amount',
+      bg_weekly: 'Weekly split', bg_actual: 'Actual', bg_remaining: 'Remaining',
+      bg_used: 'used', bg_copy_last: 'Copy last month', bg_avg3: 'Suggest: 3-month average',
+      bg_saved: 'Saved ✓', bg_deleted: 'Removed', bg_empty: 'No budget for this month — add an account or copy last month',
+      bg_weekly_err: 'Weeks must sum to the month', bg_over: 'over', bg_warn: '90%+',
+      bg_del_confirm: 'Remove this account’s budget?'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -302,9 +382,9 @@
     { id: 'exp', built: true },
     { id: 'custody', built: true },
     { id: 'owners', built: true },
-    { id: 'close', slice: 7 },
-    { id: 'stmts', slice: 7 },
-    { id: 'budget', slice: 7 },
+    { id: 'close', built: true },
+    { id: 'stmts', built: true },
+    { id: 'budget', built: true },
     { id: 'setup', built: true }
   ];
 
@@ -365,8 +445,8 @@
 
   /* ================= اليوم Today ================= */
   var GROUP_META = {
-    approvals: { icon: '🔏' }, unclassified: { icon: '🏦' }, suggested: { icon: '🔗' },
-    contracts: { icon: '📄' }, imports: { icon: '⬇️' }
+    approvals: { icon: '🔏' }, budget: { icon: '📉' }, unclassified: { icon: '🏦' },
+    suggested: { icon: '🔗' }, contracts: { icon: '📄' }, imports: { icon: '⬇️' }
   };
 
   function headerMeta(d) {
@@ -467,6 +547,14 @@
           return rowInfo('<b>' + esc(it.name) + '</b>', it.owner ? esc(it.owner) : '');
         }).join('') + '</div>' +
         '<div class="grp-cta"><a class="btn primary sm" href="#setup">' + esc(t('open_setup')) + '</a></div>';
+      } else if (g.key === 'budget') {
+        html += '<div class="grp-list">' + g.items.map(function (it) {
+          return rowInfo(
+            '<b>' + esc(it.name) + '</b><span class="tag ' + (it.alert === 'over' ? 'bad' : 'warnt') + '">' +
+              it.pct + '%</span>',
+            fmtAmt(it.actual) + ' / ' + fmtAmt(it.budget) + ' ' + esc(t('sar')));
+        }).join('') + '</div>' +
+        '<div class="grp-cta"><a class="btn primary sm" href="#budget">' + esc(t('ws_budget')) + '</a></div>';
       } else if (g.key === 'imports') {
         html += '<div class="grp-list">' + g.items.map(function (it) {
           var lbl = it.status === 'failed' ? t('failed') : t('stale');
@@ -1187,6 +1275,102 @@
     /* --- custody --- */
     else if (act === 'retry_custody') loadCustody();
 
+    /* --- statements --- */
+    else if (act === 'retry_stmts') loadStmts();
+    else if (act === 'st-drill') {
+      var did = el.getAttribute('data-id');
+      var dr2 = $('#stDrill');
+      if (!dr2) return;
+      dr2.hidden = false;
+      dr2.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2><code>' + esc(did) + '</code></h2>' +
+        '<button class="btn ghost xs" data-act="st-drill-close">✕</button></div><div class="drawer-body">' + skeleton(3) + '</div></div>';
+      api('/erp/api/stmts/account?id=' + encodeURIComponent(did) + '&m=' + encodeURIComponent(stP.m || nowMonth()))
+        .then(function (r) {
+          var lines = (r.rows || []).map(function (l) {
+            return '<div class="st-row"><span class="st-name"><code>' + esc(l.date) + '</code> ' + esc(l.description) +
+              (l.cost_center ? ' <span class="tag">' + esc(l.cost_center) + '</span>' : '') +
+              ' <code>#' + esc(l.number || l.entry_id) + '</code></span>' +
+              '<code class="st-prior">' + (l.credit ? fmtAmt(l.credit) + '−' : '') + '</code>' +
+              '<code class="st-amt">' + (l.debit ? fmtAmt(l.debit) : '') + '</code></div>';
+          }).join('');
+          dr2.querySelector('.drawer-body').innerHTML = lines ||
+            '<div class="state-sub">' + esc(t('st_drill_empty')) + '</div>';
+        })
+        .catch(function (e) { dr2.querySelector('.drawer-body').innerHTML = errorCard('st-drill-close', srvMsg(e)); });
+    }
+    else if (act === 'st-drill-close') { var sd = $('#stDrill'); if (sd) { sd.hidden = true; sd.innerHTML = ''; } }
+
+    /* --- close + migrate --- */
+    else if (act === 'retry_close') loadClose();
+    else if (act === 'cl-close') {
+      if (!window.confirm(t('cl_confirm'))) return;
+      el.disabled = true;
+      api('/erp/api/close', { method: 'POST', body: { month: clP.m || nowMonth() } })
+        .then(function () { toast(t('cl_closed')); loadClose(); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'mg-preview') {
+      el.disabled = true;
+      api('/erp/api/migrate', { method: 'POST', body: { month: clP.m || nowMonth() } })
+        .then(function (r) { el.disabled = false; renderMgDraft(r); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'mg-run') {
+      var dcl = store.D.close || {};
+      if (!window.confirm(t('mg_confirm_q').replace('{n}', dcl.migratable_entries || 0))) return;
+      el.disabled = true;
+      api('/erp/api/migrate', { method: 'POST', body: { month: clP.m || nowMonth(), confirm: 1 } })
+        .then(function (r) {
+          toast(r.disabled ? t('mg_disabled') : t('mg_done'), r.disabled ? 'warn' : 'ok');
+          loadClose();
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
+    /* --- budget --- */
+    else if (act === 'retry_budget') loadBudget();
+    else if (act === 'bg-pick-acc') {
+      var ba = el.getAttribute('data-acc');
+      $('#bgAccId').value = ba;
+      var ac = store.chart.byId[ba];
+      $('#bgAccIn').value = ac ? ((ac.code ? ac.code + ' — ' : '') + ac.name) : ba;
+      $('#bgAccList').innerHTML = '';
+      var d3 = (store.D.budget || {}).avg3_actuals || {};
+      if (d3[ba] && !$('#bgAmtIn').value) $('#bgAmtIn').value = d3[ba];
+      $('#bgAmtIn').focus();
+    }
+    else if (act === 'bg-add') {
+      var aid2 = $('#bgAccId').value;
+      var amt2 = Number($('#bgAmtIn').value);
+      if (!aid2) { $('#bgAccIn').classList.add('need'); $('#bgAccIn').focus(); return; }
+      if (!(amt2 > 0)) { $('#bgAmtIn').classList.add('need'); $('#bgAmtIn').focus(); return; }
+      el.disabled = true;
+      api('/erp/api/budget', { method: 'POST', body: { month: bgP.m || nowMonth(), account_id: aid2, amount: amt2 } })
+        .then(function (r) { toast(t('bg_saved')); renderBudget(r); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'bg-save') {
+      var rowB = el.closest('.wq-row');
+      var amtIn = rowB.querySelector('.bg-amt');
+      el.disabled = true;
+      api('/erp/api/budget', { method: 'POST', body: { month: bgP.m || nowMonth(), account_id: el.getAttribute('data-aid'), amount: Number(amtIn.value) } })
+        .then(function (r) { toast(t('bg_saved')); renderBudget(r); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'bg-del') {
+      if (!window.confirm(t('bg_del_confirm'))) return;
+      el.disabled = true;
+      api('/erp/api/budget', { method: 'POST', body: { month: bgP.m || nowMonth(), action: 'delete', account_id: el.getAttribute('data-aid') } })
+        .then(function (r) { toast(t('bg_deleted'), 'warn'); renderBudget(r); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'bg-copy-last') {
+      el.disabled = true;
+      api('/erp/api/budget', { method: 'POST', body: { month: bgP.m || nowMonth(), action: 'copy_last' } })
+        .then(function (r) { toast(t('bg_saved')); renderBudget(r); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- owners --- */
     else if (act === 'retry_owners') loadOwners();
     else if (act === 'o-copy') {
@@ -1295,6 +1479,9 @@
       if (sg) updateDrawerSum(sg);
     }
     else if (el.matches && el.matches('[data-act="x-sel"]')) updateExpBulk();
+    else if (el.id === 'stMonth') { stP.m = el.value; location.hash = '#stmts?m=' + el.value; }
+    else if (el.id === 'clMonth') { clP.m = el.value; location.hash = '#close?m=' + el.value; }
+    else if (el.id === 'bgMonth') { bgP.m = el.value; location.hash = '#budget?m=' + el.value; }
   });
 
   document.addEventListener('input', (function () {
@@ -1811,6 +1998,247 @@
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_custody', srvMsg(e)); });
   }
 
+  /* ================= القوائم المالية Statements ================= */
+  var stP = { m: '' };
+
+  function monthInput(id, val) {
+    return '<input id="' + id + '" class="in date" type="month" value="' + esc(val) + '">';
+  }
+  function nowMonth() { return new Date().toISOString().slice(0, 7); }
+
+  function stRows(rows) {
+    return (rows || []).map(function (r) {
+      return '<div class="st-row" data-act="st-drill" data-id="' + esc(r.account_id) + '">' +
+        '<code class="st-code">' + esc(r.code) + '</code><span class="st-name">' + esc(r.name) + '</span>' +
+        (r.prior !== null && r.prior !== undefined ? '<code class="st-prior">' + fmtAmt(r.prior) + '</code>' : '<code class="st-prior"></code>') +
+        '<code class="st-amt">' + fmtAmt(r.amount) + '</code></div>';
+    }).join('');
+  }
+
+  function renderStmts(d) {
+    store.D.stmts = d;
+    var bs = d.balance_sheet;
+    var inc = d.income;
+    var eq = d.equity;
+    var cf = d.cash_flow;
+    var cov = d.coverage;
+    var covBanner = cov.untyped
+      ? '<div class="mi-note" style="margin:0 0 12px">' +
+        esc(t('st_untyped_n').replace('{n}', cov.untyped)) + ' · ' + cov.pct + '% ' + esc(t('st_coverage')) + '</div>'
+      : '';
+    function totalLine(lbl, v, cls) {
+      return '<div class="st-row total ' + (cls || '') + '"><span class="st-name">' + esc(lbl) + '</span>' +
+        '<code class="st-prior"></code><code class="st-amt">' + fmtAmt(v) + '</code></div>';
+    }
+    var html =
+      '<div class="card bank-bar"><div class="bb-row">' +
+        '<span class="grp-hint" style="padding:0">' + esc(t('st_month')) + '</span>' + monthInput('stMonth', d.month) +
+        '<a class="btn ghost sm" href="/erp/api/stmts/export.xlsx?m=' + esc(d.month) + '&token=' + encodeURIComponent(store.token) + '">⬇ ' + esc(t('st_export_x')) + '</a>' +
+        '<a class="btn ghost sm" href="/erp/api/stmts/export.pdf?m=' + esc(d.month) + '&token=' + encodeURIComponent(store.token) + '">⬇ ' + esc(t('st_export_p')) + '</a>' +
+      '</div><div class="grp-hint" style="padding:8px 0 0">' + esc(store.lang === 'ar' ? d.provenance_ar : d.provenance_en) + '</div></div>' +
+      covBanner +
+
+      '<section class="card grp st-card"><header class="grp-h"><h2>' + esc(t('st_bs')) + '</h2>' +
+        (bs.balanced ? '<span class="tag soft">' + esc(t('st_balanced')) + '</span>'
+                     : '<span class="tag bad">' + esc(t('st_gap')) + ' ' + fmtAmt(bs.totals.gap) + '</span>') + '</header>' +
+        '<div class="st-body">' +
+        '<h3>' + esc(t('st_assets')) + '</h3>' + stRows(bs.rows.asset) + totalLine(t('st_assets'), bs.totals.assets) +
+        '<h3>' + esc(t('st_liab')) + '</h3>' + stRows(bs.rows.liability) + totalLine(t('st_liab'), bs.totals.liabilities) +
+        '<h3>' + esc(t('st_equity')) + '</h3>' + stRows(bs.rows.equity) +
+          totalLine(t('st_earn'), bs.totals.current_earnings) + totalLine(t('st_equity'), bs.totals.equity) +
+        (bs.rows.untyped.length ? '<h3>' + esc(t('st_untyped')) + '</h3>' + stRows(bs.rows.untyped) : '') +
+        '</div></section>' +
+
+      '<section class="card grp st-card"><header class="grp-h"><h2>' + esc(t('st_is')) + '</h2>' +
+        '<span class="cnt">' + esc(t('st_prior')) + ' ←</span></header><div class="st-body">' +
+        '<h3>' + esc(t('st_income')) + '</h3>' + stRows(inc.income_rows) + totalLine(t('st_income'), inc.totals.income) +
+        '<h3>' + esc(t('st_expenses')) + '</h3>' + stRows(inc.expense_rows) + totalLine(t('st_expenses'), inc.totals.expenses) +
+        totalLine(t('st_net'), inc.totals.net, inc.totals.net >= 0 ? 'pos' : 'neg') +
+        (inc.by_cost_center.length
+          ? '<h3>' + esc(t('st_by_cc')) + '</h3>' + inc.by_cost_center.slice(0, 20).map(function (c) {
+              return '<div class="st-row"><span class="st-name">' + esc(c.name || c.cost_center_id) + '</span>' +
+                '<code class="st-prior">' + fmtAmt(c.expense) + '−</code><code class="st-amt">' + fmtAmt(c.net) + '</code></div>';
+            }).join('')
+          : '') +
+        '</div></section>' +
+
+      '<section class="card grp st-card"><header class="grp-h"><h2>' + esc(t('st_eq')) + '</h2>' +
+        (eq.ties_to_balance_sheet ? '<span class="tag soft">' + esc(t('st_ties')) + '</span>'
+                                  : '<span class="tag bad">' + esc(t('st_gap')) + ' ' + fmtAmt(eq.gap) + '</span>') +
+        '</header><div class="st-body">' +
+        totalLine(t('st_opening'), eq.opening) + totalLine(t('st_net_inc'), eq.net_income) +
+        totalLine(t('st_contrib'), eq.contributions) + totalLine(t('st_withdraw'), eq.withdrawals) +
+        totalLine(t('st_closing'), eq.closing) + '</div></section>' +
+
+      '<section class="card grp st-card"><header class="grp-h"><h2>' + esc(t('st_cf')) + '</h2>' +
+        (cf.ties_bank_register === true ? '<span class="tag soft">' + esc(t('st_bank_tie')) + '</span>'
+          : cf.ties_bank_register === false ? '<span class="tag warnt">' + esc(t('st_bank_gap')) + ' ' + fmtAmt(cf.gap_vs_bank) + '</span>' : '') +
+        '</header><div class="st-body">' +
+        ['income', 'expense', 'asset', 'liability', 'equity', 'untyped'].map(function (k) {
+          return totalLine(t('st_cf_' + k), cf.groups[k]);
+        }).join('') +
+        totalLine(t('st_net_cash'), cf.net_cash, cf.net_cash >= 0 ? 'pos' : 'neg') +
+        totalLine(t('st_open_cash'), cf.opening_cash) + totalLine(t('st_close_cash'), cf.closing_cash) +
+        totalLine(t('st_bank_delta'), cf.bank_register_delta === null ? 0 : cf.bank_register_delta) +
+        '</div></section>' +
+      '<div id="stDrill" class="drawer" hidden></div>';
+    $('#view').innerHTML = html;
+    restoreScroll('stmts');
+  }
+
+  function loadStmts() {
+    $('#view').innerHTML = skeleton(8);
+    api('/erp/api/stmts?m=' + encodeURIComponent(stP.m || nowMonth()))
+      .then(renderStmts)
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_stmts', srvMsg(e)); });
+  }
+
+  /* ================= الإقفال Close ================= */
+  var clP = { m: '' };
+
+  function renderClose(d) {
+    store.D.close = d;
+    var checks = (d.checks || []).map(function (c) {
+      return '<div class="wq-row info"><div class="wq-main"><div class="wq-top">' +
+        (c.ok ? '<span class="tag soft">✓</span>' : '<span class="tag bad">' + c.count + ' ' + esc(t('cl_item')) + '</span>') +
+        '<b>' + esc(t('ck_' + c.key)) + '</b>' +
+        ((c.owners || []).length ? '<span class="wq-sub">' + esc(c.owners.join('، ')) + '</span>' : '') +
+        '</div></div></div>';
+    }).join('');
+    var closedBlock = d.closed
+      ? '<div class="mi-note" style="background:var(--green-soft);color:var(--green)">' + esc(t('cl_closed')) +
+        ' — ' + esc(t('cl_closed_at')) + ' <code>' + esc((d.snapshot || {}).closed_at || '') + '</code> ' +
+        esc(t('cl_by')) + ' ' + esc((d.snapshot || {}).closed_by || '') + '</div>'
+      : '<div class="grp-cta"><button class="btn danger sm" data-act="cl-close"' + (d.all_ok ? '' : ' disabled') + '>' +
+        esc(t('cl_close_btn')) + '</button></div>';
+    var migs = (d.migrations || []).map(function (m) {
+      return '<div class="wq-sub"><code>' + esc((m.at || '').slice(0, 16)) + '</code> ' + esc(m.by || '') +
+        ' · ' + (m.entry_ids || []).length + ' ' + esc(t('mg_entries')) +
+        (m.disabled ? ' · <span class="tag warnt">dry</span>' : (m.result_ok ? ' · ✓' : ' · ✗')) + '</div>';
+    }).join('');
+    $('#view').innerHTML =
+      '<div class="card bank-bar"><div class="bb-row">' +
+        '<span class="grp-hint" style="padding:0">' + esc(t('st_month')) + '</span>' + monthInput('clMonth', d.month) +
+      '</div></div>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">🔒</span><h2>' +
+        esc(t('cl_title')) + ' — <code>' + esc(d.month) + '</code></h2></header>' +
+        '<div class="grp-list">' + checks + '</div>' + closedBlock + '</section>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">📤</span><h2>' + esc(t('mg_title')) + '</h2>' +
+        '<span class="cnt">' + d.migratable_entries + ' ' + esc(t('mg_entries')) + '</span></header>' +
+        '<div class="grp-hint">' + esc(t('mg_hint')) + '</div>' +
+        (!d.post_enabled ? '<div class="mi-note" style="margin:8px 20px">' + esc(t('mg_disabled')) + '</div>' : '') +
+        '<div class="grp-cta">' +
+          '<button class="btn ghost sm" data-act="mg-preview">' + esc(t('mg_preview')) + '</button>' +
+          (d.closed
+            ? '<button class="btn primary sm" data-act="mg-run">' + esc(t('mg_confirm')) + '</button>'
+            : '<span class="tag">' + esc(t('mg_locked')) + '</span>') +
+        '</div><div id="mgOut" style="padding:0 20px 14px"></div>' +
+        (migs ? '<div style="padding:0 20px 14px"><h3 style="font-size:12px;margin:6px 0">' + esc(t('mg_log')) + '</h3>' + migs + '</div>' : '') +
+      '</section>';
+    restoreScroll('close');
+  }
+
+  function loadClose() {
+    $('#view').innerHTML = skeleton(6);
+    api('/erp/api/close?m=' + encodeURIComponent(clP.m || nowMonth()))
+      .then(renderClose)
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_close', srvMsg(e)); });
+  }
+
+  function renderMgDraft(d) {
+    var out = $('#mgOut');
+    if (!out) return;
+    var draft = d.draft || {};
+    var lines = (draft.lines || []).slice(0, 30).map(function (l) {
+      return '<div class="st-row"><span class="st-name">' + esc(l.account || '') +
+        (l.cost_center ? ' <span class="tag">' + esc(l.cost_center) + '</span>' : '') + '</span>' +
+        '<code class="st-prior">' + esc(l.side || '') + '</code><code class="st-amt">' + fmtAmt(l.amount) + '</code></div>';
+    }).join('');
+    out.innerHTML = '<div class="mi-note" style="margin:8px 0;background:var(--blue-soft);color:var(--blue)">' +
+      esc(d.dry_run ? t('mg_dry_done') : t('mg_done')) + ' · ' + (d.entry_ids || []).length + ' ' + esc(t('mg_entries')) + '</div>' +
+      (lines || '<div class="wq-sub">' + esc(t('mg_none')) + '</div>') +
+      ((draft.issues || []).length ? '<div class="mi-note">' + esc(t('mg_issues')) + ': ' +
+        esc((draft.issues || []).map(function (i) { return i && (i.ar || i[0] || i); }).join(' · ')) + '</div>' : '');
+  }
+
+  /* ================= الميزانية Budget ================= */
+  var bgP = { m: '' };
+
+  function bgRowHtml(r) {
+    var bar = r.pct === null ? '' :
+      '<div class="bg-bar"><i style="width:' + Math.min(100, r.pct) + '%" class="' +
+      (r.alert === 'over' ? 'over' : r.alert === 'warn' ? 'warn' : '') + '"></i></div>';
+    return '<div class="wq-row" data-aid="' + esc(r.account_id) + '">' +
+      '<div class="wq-main"><div class="wq-top"><b>' + esc(r.name) + '</b>' +
+      (r.code ? '<code>' + esc(r.code) + '</code>' : '') +
+      (r.alert ? '<span class="tag ' + (r.alert === 'over' ? 'bad' : 'warnt') + '">' +
+        esc(r.alert === 'over' ? t('bg_over') : t('bg_warn')) + '</span>' : '') + '</div>' +
+      bar +
+      '<div class="wq-sub">' + esc(t('bg_actual')) + ' <code>' + fmtAmt(r.actual) + '</code> / <code>' + fmtAmt(r.budget) + '</code>' +
+      (r.pct !== null ? ' · ' + r.pct + '% ' + esc(t('bg_used')) : '') +
+      ' · ' + esc(t('bg_remaining')) + ' <code>' + fmtAmt(r.remaining) + '</code>' +
+      (r.weekly && r.weekly.length ? ' · ' + esc(t('bg_weekly')) + ' <code>' + r.weekly.map(fmtAmt).join(' | ') + '</code>' : '') +
+      '</div></div>' +
+      '<div class="wq-actions">' +
+        '<input class="in bg-amt" type="number" step="0.01" value="' + esc(r.budget) + '" style="width:110px">' +
+        '<button class="btn primary xs" data-act="bg-save" data-aid="' + esc(r.account_id) + '">' + esc(t('save')) + '</button>' +
+        '<button class="btn danger-ghost xs" data-act="bg-del" data-aid="' + esc(r.account_id) + '">✕</button>' +
+      '</div></div>';
+  }
+
+  function renderBudget(d) {
+    store.D.budget = d;
+    var rows = (d.rows || []).map(bgRowHtml).join('');
+    $('#view').innerHTML =
+      '<div class="card bank-bar"><div class="bb-row">' +
+        '<span class="grp-hint" style="padding:0">' + esc(t('st_month')) + '</span>' + monthInput('bgMonth', d.month) +
+        '<button class="btn ghost sm" data-act="bg-copy-last">' + esc(t('bg_copy_last')) + '</button>' +
+      '</div>' +
+      '<div class="bb-row" style="margin-top:8px">' +
+        '<input id="bgAccIn" class="in search" type="text" placeholder="' + esc(t('bg_add')) + '" autocomplete="off">' +
+        '<input id="bgAccId" type="hidden">' +
+        '<input id="bgAmtIn" class="in" type="number" step="0.01" placeholder="' + esc(t('bg_amount')) + '" style="width:130px">' +
+        '<button class="btn primary sm" data-act="bg-add">' + esc(t('save')) + '</button>' +
+      '</div><div id="bgAccList" class="acc-list" style="max-width:480px"></div></div>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">📊</span><h2>' +
+        esc(t('bg_title')) + ' — <code>' + esc(d.month) + '</code></h2>' +
+        '<span class="cnt">' + (d.rows || []).length + '</span></header>' +
+        '<div class="grp-list">' +
+        (rows || '<div class="state-card"><div class="state-h">' + esc(t('bg_empty')) + '</div></div>') +
+        '</div></section>';
+    var inp = $('#bgAccIn');
+    if (inp) {
+      ensureChart().then(function () {
+        inp.addEventListener('input', function () { renderBgAccList(inp.value); });
+      }).catch(function () {});
+    }
+    restoreScroll('budget');
+  }
+
+  function renderBgAccList(q) {
+    var box = $('#bgAccList');
+    if (!box || !store.chart) return;
+    var qq = (q || '').trim().toLowerCase();
+    if (!qq) { box.innerHTML = ''; return; }
+    var hits = store.chart.accounts.filter(function (a) {
+      return (a.name || '').toLowerCase().indexOf(qq) >= 0 || (a.code || '').toLowerCase().indexOf(qq) >= 0;
+    }).slice(0, 10);
+    var d = store.D.budget || {};
+    box.innerHTML = hits.map(function (a) {
+      var s3 = (d.avg3_actuals || {})[a.id];
+      return '<button class="acc-opt" data-act="bg-pick-acc" data-acc="' + esc(a.id) + '">' +
+        (a.code ? '<code>' + esc(a.code) + '</code> ' : '') + esc(a.name) +
+        (s3 ? ' <span class="tag soft">' + esc(t('bg_avg3')) + ' ' + fmtAmt(s3) + '</span>' : '') + '</button>';
+    }).join('');
+  }
+
+  function loadBudget() {
+    $('#view').innerHTML = skeleton(5);
+    api('/erp/api/budget?m=' + encodeURIComponent(bgP.m || nowMonth()))
+      .then(renderBudget)
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_budget', srvMsg(e)); });
+  }
+
   /* ================= الملاك Owners ================= */
   function ownerRowHtml(r) {
     var lk = r.link || {};
@@ -1982,6 +2410,9 @@
     },
     custody: { show: function () { loadCustody(); } },
     owners: { show: function () { loadOwners(); } },
+    stmts: { show: function (params) { stP.m = params.get('m') || nowMonth(); loadStmts(); } },
+    close: { show: function (params) { clP.m = params.get('m') || nowMonth(); loadClose(); } },
+    budget: { show: function (params) { bgP.m = params.get('m') || nowMonth(); loadBudget(); } },
     bank: {
       show: function (params) {
         bankP.f = params.get('f') || 'all';
@@ -2013,6 +2444,9 @@
     else if (store.view === 'exp' && store.D.exp) renderExp(store.D.exp);
     else if (store.view === 'custody' && store.D.custody) renderCustody(store.D.custody);
     else if (store.view === 'owners' && store.D.owners) renderOwners(store.D.owners);
+    else if (store.view === 'stmts' && store.D.stmts) renderStmts(store.D.stmts);
+    else if (store.view === 'close' && store.D.close) renderClose(store.D.close);
+    else if (store.view === 'budget' && store.D.budget) renderBudget(store.D.budget);
   }
   $('#langBtn').addEventListener('click', function () {
     store.lang = store.lang === 'ar' ? 'en' : 'ar';
