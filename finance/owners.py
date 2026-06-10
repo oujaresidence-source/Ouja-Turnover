@@ -711,11 +711,29 @@ def statement_for_portal(owner, mkey):
     return compute_owner_statement(owner, mkey)
 
 
+def _receipt_proxy_rewrite(rep, owner):
+    """Expense receipt links open through the owner-scoped proxy (slice 4) so
+    Drive sharing settings never break them — in the EDIT view too. The proxy
+    token is the statement owner's own link token (scope = his apartments)."""
+    try:
+        lk = (getattr(_B(), "_owner_links", None) or {}).get(owner) or {}
+        tok = lk.get("token") if lk.get("active") else None
+        if not tok:
+            return rep
+        for x in rep.get("exp_lines") or []:
+            if (x.get("receipt_url") or "").strip() and str(x.get("id")) in _B()._expenses:
+                x["receipt_url"] = "/fin/receipt/" + str(x["id"]) + "?t=" + tok
+    except Exception:
+        pass
+    return rep
+
+
 def statement_payload(owner, mkey):
     """Everything the editor view needs."""
     live = compute_owner_statement(owner, mkey)
     if live is None:
         return {"error": "owner_not_in_registry"}
+    live = _receipt_proxy_rewrite(live, owner)
     rec = stmt_rec(owner, mkey)
     pub = (rec or {}).get("published") or {}
     return {"ok": True, "owner": owner, "month": mkey,

@@ -24238,7 +24238,18 @@ def _pdf_statement_bytes(rep, label):
         for e in el[:60]:
             y = pdf.get_y(); pdf.set_text_color(*INK)
             pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, money(e.get("amount")), align="L")
-            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(str(e.get("investor_note") or e.get("description") or e.get("display_date") or e.get("date") or e.get("note") or "")), align="R"); pdf.ln(6)
+            desc = str(e.get("investor_note") or e.get("description") or e.get("display_date") or e.get("date") or e.get("note") or "")
+            rurl = (e.get("receipt_url") or "").strip()
+            # slice 4: the receipt rides ON the row — clickable proxy link, or
+            # the honest «بدون فاتورة» marker (manual lines carry neither)
+            if rurl:
+                desc += " · (الفاتورة: اضغط هنا)"
+            elif not e.get("manual"):
+                desc += " · (بدون فاتورة)"
+            pdf.set_xy(M + usable * 0.35, y)
+            pdf.cell(usable * 0.65, 6, shape(desc), align="R",
+                     link=(rurl if rurl.startswith("http") else None))
+            pdf.ln(6)
     else:
         pdf.set_text_color(*MUT); pdf.set_x(M); pdf.cell(usable, 6, shape("لا مصاريف في هذي الفترة"), align="R"); pdf.ln(6)
     # ---- per-apartment breakdown (owner aggregate) ----
@@ -24678,7 +24689,7 @@ var T = {
    chip_done:'مكتمل', chip_upcoming:'حجز قادم', chip_cxl_paid:'ملغي — مدفوع', chip_review:'يحتاج مراجعة',
    wf_gross:'الإجمالي (قبل الخصومات)', wf_fee:'عمولة القناة/المنصة', wf_refund:'مبلغ مسترد للضيف', wf_extras:'إضافات', wf_net:'الصافي لك', wf_src:'مصدر الأرقام',
    open_hostaway:'افتحه في Hostaway ↗', booked_on:'حُجز يوم', lead:'قبل الوصول بـ', days:'يوم', guests:'ضيوف', per_night:'لليلة',
-   sec_exp:'المصاريف', exp_receipt:'الفاتورة ↗', exp_none:'لا مصاريف مسجلة هذا الشهر ✓',
+   sec_exp:'المصاريف', exp_receipt:'الفاتورة', exp_noreceipt:'بدون فاتورة مرفقة', exp_none:'لا مصاريف مسجلة هذا الشهر ✓',
    sec_fee:'عمولة عوجا', fee_formula:'النسبة × إجمالي الدخل', sec_cleaning:'النظافة (شهري حسب العقد)',
    sec_footer:'حركات بدون فلوس (للشفافية)', foot_unpaid:'غير مدفوع بعد', foot_refunded:'ملغي — مسترد بالكامل', foot_expected:'متوقع',
    foot_review:'بانتظار تأكيد المبلغ', foot_ref:'المرجع (ليس دخلًا)', foot_excl_sum:'مستبعد من الدخل لين يتأكد المبلغ',
@@ -24698,7 +24709,7 @@ var T = {
    chip_done:'Completed', chip_upcoming:'Upcoming', chip_cxl_paid:'Cancelled — paid', chip_review:'Needs review',
    wf_gross:'Gross (before deductions)', wf_fee:'Channel/platform fee', wf_refund:'Refunded to guest', wf_extras:'Extras', wf_net:'Your net', wf_src:'Source fields',
    open_hostaway:'Open in Hostaway ↗', booked_on:'Booked on', lead:'Lead time', days:'days', guests:'guests', per_night:'/night',
-   sec_exp:'Expenses', exp_receipt:'Receipt ↗', exp_none:'No expenses recorded this month ✓',
+   sec_exp:'Expenses', exp_receipt:'Receipt', exp_noreceipt:'No receipt attached', exp_none:'No expenses recorded this month ✓',
    sec_fee:'Ouja management fee', fee_formula:'rate × total income', sec_cleaning:'Cleaning (monthly per contract)',
    sec_footer:'Non-money movements (transparency)', foot_unpaid:'Not paid yet', foot_refunded:'Cancelled — fully refunded', foot_expected:'expected',
    foot_review:'Awaiting amount confirmation', foot_ref:'reference (not income)', foot_excl_sum:'excluded from income until confirmed',
@@ -24848,7 +24859,9 @@ function render(){
   else{
     h+=exps.map(function(e){
       return '<div class="foot-line"><span><span class="num">'+he(e.date||'')+'</span> · '+he(e.category||'')+(e.description?(' — '+he(e.description)):'')
-        +(e.receipt_url?(' <a class="res" target="_blank" rel="noopener" href="'+he(e.receipt_url)+'">'+k.exp_receipt+'</a>'):'')
+        +(e.receipt_url
+          ?(' <a class="res" href="'+he(e.receipt_url)+'" onclick="return lb(this.getAttribute(&#39;href&#39;))">🧾 '+k.exp_receipt+'</a>')
+          :(e.manual?'':(' <span class="muted" style="font-size:10.5px">'+k.exp_noreceipt+'</span>')))
         +'</span><b>−'+money(e.amount)+'</b></div>';
     }).join('');
   }
@@ -24947,9 +24960,29 @@ function render(){
   h+='<div class="muted" style="text-align:center;font-size:10.5px;margin-top:14px">'+k.gen_at+' '+he(DATA.generated_at||'')+' · Ouja Residence</div>';
   document.getElementById('app').innerHTML=h;
 }
+function lb(u){
+  var o=document.getElementById('lbx'); if(!o||!u) return true;
+  document.getElementById('lbxImg').setAttribute('src', u);
+  o.style.display='flex';
+  return false;
+}
+function lbClose(){
+  var o=document.getElementById('lbx'); if(!o) return;
+  o.style.display='none';
+  document.getElementById('lbxImg').removeAttribute('src');
+}
+function lbErr(){
+  var im=document.getElementById('lbxImg');
+  if(im&&im.getAttribute('src')){ window.open(im.getAttribute('src'),'_blank'); lbClose(); }
+}
 if(DATA&&DATA.report){ render(); }
 else{ document.getElementById('app').innerHTML='<div class="empty" style="padding:60px 20px">'+t().no_data+'</div>'; }
 </script>
+<div id="lbx" onclick="lbClose()" role="dialog" aria-label="receipt"
+  style="display:none;position:fixed;inset:0;background:rgba(28,21,14,.8);z-index:99;align-items:center;justify-content:center;padding:18px">
+  <img id="lbxImg" onerror="lbErr()" alt="receipt"
+    style="max-width:96%;max-height:92%;border-radius:12px;background:#fff;box-shadow:0 18px 60px rgba(0,0,0,.4)">
+</div>
 </body></html>"""
 
 async def _api_finance_owner_link(request):
@@ -25030,6 +25063,17 @@ async def _handle_owner_portal_pdf(request):
     rep = await asyncio.to_thread(_owner_month_report, owner, mkey)
     if rep is None:
         raise web.HTTPNotFound(text="no data")
+    # Slice 4: expense rows in the PDF carry a clickable ABSOLUTE proxy link to
+    # the receipt (same owner-scoped /fin/receipt proxy the web page uses).
+    try:
+        _tok = request.match_info.get("token", "")
+        _origin = str(request.url.origin())
+        rep = json.loads(json.dumps(rep, ensure_ascii=False))   # never mutate the memoized object
+        for _x in rep.get("exp_lines") or []:
+            if (_x.get("receipt_url") or "").strip() and str(_x.get("id")) in _expenses:
+                _x["receipt_url"] = _origin + "/fin/receipt/" + str(_x["id"]) + "?t=" + _tok
+    except Exception as _e:
+        print("pdf receipt rewrite error:", _e)
     try:
         data, fn, ct = await asyncio.to_thread(
             _finance_pdf_payload, [{"label": owner, "owner": owner, "kind": "owner", "report": rep}])

@@ -2253,8 +2253,7 @@
       '<div class="card grp"><div class="grp-list" id="xList">' +
         (rowsHtml || '<div class="state-card"><div class="state-h">' + esc(t('x_empty')) + '</div></div>') +
       '</div><div id="xMore">' + moreBtn + '</div></div>' +
-      '<div class="bulkbar" id="xBulk" hidden></div>' +
-      '<div id="xModal" class="drawer" hidden></div>';
+      '<div class="bulkbar" id="xBulk" hidden></div>';
     restoreScroll('exp');
   }
 
@@ -2289,8 +2288,13 @@
   function expReceiptLightbox(url) {
     var m = $('#xModal');
     if (!m) return;
-    var driveId = (url.match(/[-\w]{25,}/) || [])[0];
-    var img = driveId ? 'https://drive.google.com/thumbnail?id=' + driveId + '&sz=w1200' : url;
+    var img;
+    if (url.indexOf('/fin/receipt/') === 0) {
+      img = url;                       // owner-scoped proxy serves the bytes directly
+    } else {
+      var driveId = (url.match(/[-\w]{25,}/) || [])[0];
+      img = driveId ? 'https://drive.google.com/thumbnail?id=' + driveId + '&sz=w1200' : url;
+    }
     m.hidden = false;
     m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('x_receipt')) + '</h2>' +
       '<a class="btn ghost xs" href="' + esc(url) + '" target="_blank" rel="noopener">↗</a>' +
@@ -3054,7 +3058,10 @@
   function seExpRow(x) {
     var chips = (x.manual ? '<span class="tag soft">' + esc(t('se_manual_chip')) + '</span>' : '') +
       (x.edited ? '<span class="tag">' + esc(t('se_exp_edit')) + ' ✓</span>' : '') +
-      (x.edit_reason ? '<span class="tag">' + esc(x.edit_reason) + '</span>' : '');
+      (x.edit_reason ? '<span class="tag">' + esc(x.edit_reason) + '</span>' : '') +
+      (x.receipt_url
+        ? ' <button class="btn ghost xs" data-act="x-receipt" data-url="' + esc(x.receipt_url) + '">🧾 ' + esc(t('x_receipt')) + '</button>'
+        : (x.manual ? '' : ' <span class="tag">' + esc(t('x_no_receipt')) + '</span>'));
     return '<div class="wq-row" data-xid="' + esc(String(x.id)) + '" data-manual="' + (x.manual ? '1' : '0') + '">' +
       '<div class="wq-main"><div class="wq-top"><b>' + esc(x.description || x.category || '—') + '</b>' + chips + '</div>' +
       '<div class="wq-sub"><code>' + esc(x.date || '') + '</code>' + (x.apartment ? (' · ' + esc(x.apartment)) : '') + '</div>' +
