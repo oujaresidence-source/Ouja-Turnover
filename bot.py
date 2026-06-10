@@ -12035,6 +12035,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
     <header class="mhead">
       <div class="mhead-brand"><div class="logo">ع</div><div class="name" id="mhead_title">الرئيسية</div></div>
       <div class="mhead-tools">
+        <button class="icbtn" onclick="gsOpen()" aria-label="Search / بحث" title="بحث">⌕</button>
         <button class="icbtn" onclick="toggleTheme()" id="themeBtn" aria-label="Toggle theme / تبديل المظهر" title="Theme">◐</button>
         <button class="icbtn" onclick="toggleLang()" id="langBtn" aria-label="Switch language / تغيير اللغة" title="Language">EN</button>
         <button class="icbtn" onclick="refresh()" id="refreshBtnM" aria-label="Refresh data / تحديث" title="Refresh">↻</button>
@@ -13167,6 +13168,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <div class="side-foot">
         <div class="side-status"><span class="dot" id="sideDot"></span><span id="sideStatus">…</span></div>
         <div class="side-tools">
+          <button class="icbtn" onclick="gsOpen()" aria-label="Search / بحث (Ctrl+K)" title="بحث ⌘K" style="font-weight:700">⌕</button>
           <button class="icbtn" onclick="restoreAllHelp();showWelcome()" aria-label="Show help / استعرض الشرح" title="استعرض الشرح" style="background:var(--gold-tint);color:var(--gold);font-weight:700">💡</button>
           <button class="icbtn" onclick="toggleTheme()" aria-label="Toggle theme / تبديل المظهر" title="theme">◐</button>
           <button class="icbtn" onclick="toggleLang()" id="sLangBtn" aria-label="Switch language / تغيير اللغة">EN</button>
@@ -13181,7 +13183,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
   <!-- Detail drawer -->
   <div class="drawer-backdrop" id="drawerBg" onclick="closeDrawer()"></div>
-  <aside class="drawer" id="drawer">
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drwTitle">
     <div class="drawer-head">
       <div style="min-width:0">
         <div class="drawer-title" id="drwTitle">—</div>
@@ -13197,7 +13199,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 <div id="toast"></div>
 
 <!-- Custom Arabic date picker modal -->
-<div id="datePickerOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(2px)" onclick="if(event.target===this)closeDatePicker()">
+<!-- Global search palette (⌘K / Ctrl+K) — fuzzy over already-loaded client state -->
+<div id="gsOverlay" role="dialog" aria-modal="true" aria-label="بحث شامل / Global search" style="display:none;position:fixed;inset:0;background:rgba(31,24,17,.45);z-index:9998;padding:10vh 18px 18px;justify-content:center;align-items:flex-start;backdrop-filter:blur(2px)" onclick="if(event.target===this)gsClose()">
+  <div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;width:560px;max-width:94vw;box-shadow:0 24px 64px rgba(47,36,27,.28);overflow:hidden">
+    <input id="gsInput" placeholder="ابحث: شقة · ضيف · تذكرة · مصروف…" autocomplete="off"
+      style="width:100%;border:0;border-bottom:1px solid var(--line);background:transparent;padding:15px 18px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box"
+      oninput="gsRun(this.value)" onkeydown="gsKey(event)">
+    <div id="gsResults" style="max-height:46vh;overflow-y:auto;padding:6px"></div>
+  </div>
+</div>
+
+<div id="datePickerOverlay" role="dialog" aria-modal="true" aria-label="اختيار التاريخ / Date picker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(2px)" onclick="if(event.target===this)closeDatePicker()">
   <div style="background:var(--surface);padding:18px;border-radius:16px;width:340px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)" id="datePickerBody"></div>
 </div>
 
@@ -14133,6 +14145,15 @@ function toneBy(n,warn,danger){n=safeNum(n); return n>=safeNum(danger)?'danger':
 function emptyState(title, action, icon){
   return '<div class="empty data-empty"><div class="de-ic">'+esc(icon||'—')+'</div><div class="de-t">'+esc(title||labelText('ما فيه بيانات','No data yet'))+'</div><div class="de-a">'+esc(action||labelText('تظهر هنا أول ما توصل البيانات.','It will appear here as soon as data arrives.'))+'</div></div>';
 }
+/* Render contract: every tab gets skeleton → loaded → empty → ERROR-with-retry.
+   errorState(retryJs) is the shared error card; no tab may ever render blank. */
+function errorState(retryJs, detail){
+  return '<div class="empty data-empty"><div class="de-ic">⚠</div>'
+    + '<div class="de-t">'+esc(labelText('تعذّر التحميل','Could not load'))+'</div>'
+    + '<div class="de-a">'+esc(detail||labelText('فيه مشكلة مؤقتة بالاتصال أو الخادم.','A temporary connection or server problem.'))+'</div>'
+    + (retryJs?('<button class="btn ghost sm" style="margin-top:10px" onclick="'+esc(retryJs)+'">'+esc(labelText('أعد المحاولة','Retry'))+'</button>'):'')
+    + '</div>';
+}
 function opsStrip(cards){
   cards=safeArr(cards).filter(Boolean);
   if(!cards.length) return '';
@@ -14652,6 +14673,15 @@ function toggleNavCat(tk){
   try{ localStorage.setItem('ouja:navCollapsed', JSON.stringify(c)); }catch(_){}
   buildSideNav();
 }
+function canRead(id){
+  // Nav visibility follows the user's read permissions (server enforces writes; this
+  // is the UX layer so fb/finance/plab vanish for roles that can't read them).
+  const me = (D.me && D.me.user) || {role:'admin'};
+  if(me.role === 'admin') return true;
+  const p = (me.perms || {})[id];
+  if(p) return !!p.read;
+  return id !== 'users';   // unknown/legacy tab key: visible, except the admin tab
+}
 function buildSideNav(){
   const el = document.getElementById('sideNav'); if(!el) return;
   // Filter adminOnly tabs based on D.me — legacy token users default to admin.
@@ -14664,7 +14694,7 @@ function buildSideNav(){
     return '<a class="item'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(&quot;'+n.id+'&quot;)" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'" title="'+esc(b.label)+'">'+b.count+'</span>':'')+'</a>';
   }
   el.innerHTML = NAV_CATS.map(function(cat){
-    const items = cat.ids.map(function(id){ return byId[id]; }).filter(function(n){ return n && !(n.adminOnly && !isAdmin); });
+    const items = cat.ids.map(function(id){ return byId[id]; }).filter(function(n){ return n && !(n.adminOnly && !isAdmin) && canRead(n.id); });
     if(!items.length) return '';
     const activeHere = items.some(function(n){ return n.id===view; });
     // active category is always expanded; otherwise honor the saved collapse state
@@ -14697,7 +14727,7 @@ function buildMoreNav(){
     {action:'lang', tk:'EN/ع'},
     {action:'logout', tk:'logout'}
   ];
-  el.innerHTML = '<div class="inbox-list">' + items.map(function(i){
+  el.innerHTML = '<div class="inbox-list">' + items.filter(function(i){ return !i.id || canRead(i.id); }).map(function(i){
     const label = i.tk==='EN/ع' ? 'English / عربي' : t()[i.tk];
     let click;
     if(i.id) click = "go('"+i.id+"')";
@@ -14830,6 +14860,12 @@ function refreshView(id){
     case 'learn':    return loadLearnings();
     case 'today':    return loadTodayEmpty();
     case 'finance':  return loadFinance();
+    case 'log':      return renderLog();
+    case 'listings': return loadListings();
+    case 'cleanteams': return loadCleanTeams();
+    case 'gw':       return loadGw();
+    case 'plab':     return loadPlab();
+    case 'fb':       return loadFb();
     default:         return loadAll();
   }
 }
@@ -14906,24 +14942,55 @@ async function init(){
       if(h && h!==view && document.getElementById('view_'+h)) go(h);
     });
   }catch(e){ console.error('hash routing failed:', e); }
-  setInterval(function(){
-    try{ loadAll(); }catch(e){ console.error('loadAll tick:', e); }
-  }, 15000);
+  startPolling();
 }
-async function loadAll(){
+/* ---- Polling diet: 3 tiers instead of 10 calls × 15s, paused while hidden ----
+   fast 15s  : inbox + discount status + urgent (the live, actionable signals)
+   med  60s  : overview / today / log / autolog (ambient numbers)
+   slow 120s : revenue / arrivals / listings    (server-cached at ~7 min anyway) */
+var _pollTimers = [];
+function startPolling(){
+  stopPolling();
+  _pollTimers.push(setInterval(function(){ try{ loadFast(); }catch(e){ console.error('fast tick:', e); } }, 15000));
+  _pollTimers.push(setInterval(function(){ try{ loadMed(); }catch(e){ console.error('med tick:', e); } }, 60000));
+  _pollTimers.push(setInterval(function(){ try{ loadSlow(); }catch(e){ console.error('slow tick:', e); } }, 120000));
+}
+function stopPolling(){ _pollTimers.forEach(function(id){ clearInterval(id); }); _pollTimers = []; }
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'hidden'){ stopPolling(); }
+  else { try{ loadAll(); }catch(_){ } startPolling(); }
+});
+async function loadFast(){
   try{
     const r = await Promise.all([
-      api('/api/overview'), api('/api/today'), api('/api/inbox'),
-      api('/api/discount/status'), api('/api/log'), api('/api/autolog'),
-      api('/api/revenue').catch(function(){return {loading:true}}),
+      api('/api/inbox'), api('/api/discount/status'),
       api('/api/home/urgent').catch(function(){return {items:[]}}),
+    ]);
+    D.inbox=r[0]; D.disc=r[1]; D.urgent=r[2];
+    populateUnitFilter();
+    if(!openInboxId) renderInbox();
+    renderUrgentStrip(); renderDiscountBanner(); renderKpis();
+    buildSideNav(); buildBottomNav();
+  }catch(e){ if(e==='unauthorized') logout() }
+}
+async function loadMed(){
+  try{
+    const r = await Promise.all([
+      api('/api/overview'), api('/api/today'), api('/api/log'), api('/api/autolog'),
+    ]);
+    D.ov=r[0]; D.today=r[1];
+    D.log=(r[2]||{}).items||[]; D.auto=(r[3]||{}).items||[];
+    renderAll();
+  }catch(e){ if(e==='unauthorized') logout() }
+}
+async function loadSlow(){
+  try{
+    const r = await Promise.all([
+      api('/api/revenue').catch(function(){return {loading:true}}),
       api('/api/home/arrivals?hours=36').catch(function(){return {items:[]}}),
     ]);
-    D.ov=r[0]; D.today=r[1]; D.inbox=r[2]; D.disc=r[3];
-    D.log=(r[4]||{}).items||[]; D.auto=(r[5]||{}).items||[]; D.rev=r[6];
-    D.urgent=r[7]; D.arrivals=r[8];
-    populateUnitFilter();
-    renderAll();
+    D.rev=r[0]; D.arrivals=r[1];
+    renderRevCard(); renderArrivalsTimeline();
     // keep the Listings "needs setup" badge live, but never while the user is editing
     // those rows (listings/clean views own D.listings and render from it).
     if(view!=='listings' && view!=='clean'){
@@ -14931,8 +14998,11 @@ async function loadAll(){
     }
   }catch(e){ if(e==='unauthorized') logout() }
 }
+async function loadAll(){
+  await Promise.all([loadMed(), loadFast(), loadSlow()]);
+}
 var _pePanel = null;
-var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'📆',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'🎉',ar:'مناسبة',en:'Event'}};
+var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'▦',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'✺',ar:'مناسبة',en:'Event'}};
 async function loadPricing(){
   // One clean tab: the listings table + per-unit month calendar. Fetch only what they need.
   var body=document.getElementById('prTable'); if(body) body.innerHTML='<div class="empty sk" style="height:220px">—</div>';
@@ -15034,7 +15104,7 @@ function renderCommandCenter(){
   h+='<div id="pccBoard"></div>';
   el.innerHTML=h; pccBoard();
 }
-function pccAct(a){ if(a==='review'){ var dt=document.getElementById('prDetailed'); if(dt){ dt.open=true; if(dt.scrollIntoView) dt.scrollIntoView({behavior:'smooth',block:'start'}); } return; } pccPreview(a); }
+function pccAct(a){ if(a==='review'){ var dt=document.getElementById('prTable'); if(dt && dt.scrollIntoView) dt.scrollIntoView({behavior:'smooth',block:'start'}); return; } pccPreview(a); }
 function _pccDefScope(a){ var t=new Date(); t.setHours(0,0,0,0); var days=(a==='fill_tonight'?2:7); return {start:_peIso(t), end:_peIso(new Date(t.getTime()+(days-1)*86400000))}; }
 function _pccRiyadhHour(){ try{ return parseInt(new Date().toLocaleString('en-US',{timeZone:'Asia/Riyadh',hour:'2-digit',hour12:false}),10)||0; }catch(_){ return 12; } }
 function _pccToday(){ var t=new Date(); t.setHours(0,0,0,0); return t; }
@@ -15531,65 +15601,6 @@ async function pccCalApply(mode){
   pccApplyResults(res);
   pccOpenCalendar(d.lid, _peIso(_prCal.month));   // refresh the calendar after apply
 }
-function renderPricing2(){ return renderPricingTable();   // legacy accordion replaced by the listings table — redirect any caller to it
-  var d=D.pr2||{}; var recs=(d.recs||[]);
-  var body=document.getElementById('prListBody'), cnt=document.getElementById('prListCount');
-  if(d.error){ if(body) body.innerHTML=emptyState(esc(d.error), labelText('حاول التحديث أو راجع الاتصال بـ Hostaway.','Refresh or check the Hostaway connection.'),'⚠'); return; }
-  if(!recs.length){ if(body) body.innerHTML=emptyState(labelText('ما فيه فرص واضحة حالياً','No clear pricing opportunities'), labelText('الأسعار قريبة من المتوقع. راجع التقويم إذا تبغى نطاق محدد.','Prices are close to expected. Use the calendar for a specific range.'),'$'); return; }
-  var byU={};
-  recs.forEach(function(r){
-    var u=byU[r.lid]; if(!u){ u=byU[r.lid]={lid:r.lid, unit:r.unit, uplift:0, nopp:0, byDate:{}, activated:!!r.activated, compound:r.compound||'', lean:r.lean||'balanced'}; }
-    u.byDate[r.date]=r; u.activated=!!r.activated; if(r.compound) u.compound=r.compound; if(r.lean) u.lean=r.lean;
-    var f=r.final, c=r.current;
-    if(f!=null && c!=null && f!==c){ u.nopp++; if(f>c) u.uplift+=(f-c); }
-  });
-  window._peByUnit=byU;
-  var all=Object.keys(byU).map(function(k){return byU[k];});
-  var compounds={}; all.forEach(function(u){ if(u.compound) compounds[u.compound]=(compounds[u.compound]||0)+1; });
-  var shown=all.filter(_prMatch).sort(function(a,b){return b.uplift-a.uplift;});
-  var act=shown.filter(function(u){return u.activated;}), nact=shown.filter(function(u){return !u.activated;});
-  if(cnt) cnt.textContent=act.length+'/'+all.length+(L==='ar'?' مفعّلة':' activated');
-  var ut=(D.prA||{}).unit_toggles||{};
-  // search + filter bar
-  var compOpts='<option value="">'+(L==='ar'?'كل المجمّعات':'All compounds')+'</option>'+Object.keys(compounds).sort().map(function(c){return '<option value="'+esc(c)+'"'+(_prCompound===c?' selected':'')+'>'+esc(c)+' ('+compounds[c]+')</option>';}).join('');
-  var stratOpts='<option value="">'+(L==='ar'?'كل الاستراتيجيات':'All strategies')+'</option>'+Object.keys(_PE_STRAT_META).map(function(k){return '<option value="'+k+'"'+(_prStrat===k?' selected':'')+'>'+_PE_STRAT_META[k].ic+' '+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'</option>';}).join('');
-  var inp='padding:7px 10px;height:34px;font-size:12.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--text)';
-  var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
-    +'<input id="prSearch" placeholder="'+(L==='ar'?'ابحث عن شقة…':'Search units…')+'" value="'+esc(_prSearch)+'" oninput="_prSearch=this.value;renderPricing2();var s=document.getElementById(&#39;prSearch&#39;);if(s){s.focus();s.setSelectionRange(s.value.length,s.value.length);}" style="flex:1;min-width:150px;'+inp+'">'
-    +'<select onchange="_prCompound=this.value;renderPricing2()" style="'+inp+'">'+compOpts+'</select>'
-    +'<select onchange="_prStrat=this.value;renderPricing2()" style="'+inp+'">'+stratOpts+'</select>'
-    +((_prSearch||_prCompound||_prStrat)?'<button class="btn ghost sm" onclick="_prSearch=&#39;&#39;;_prCompound=&#39;&#39;;_prStrat=&#39;&#39;;renderPricing2()">✕</button>':'')
-    +'</div>';
-  var grpH='font-size:12.5px;font-weight:700;color:var(--text-2);margin:0 0 10px;display:flex;align-items:center;gap:8px';
-  var cntPill='display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 6px;border-radius:99px;font-size:11px;font-weight:700';
-  function rowAct(u){
-    var tg=ut[String(u.lid)]||{};
-    var chips=Object.keys(_PE_STRAT_META).filter(function(k){return tg[k];}).map(function(k){return '<span class="pe-chip" title="'+(L==='ar'?_PE_STRAT_META[k].ar:_PE_STRAT_META[k].en)+'">'+_PE_STRAT_META[k].ic+'</span>';}).join('');
-    return '<div class="pe-apt">'
-      +'<button class="pe-apt-head" type="button" aria-expanded="false" onclick="pePeToggle(this,'+u.lid+')">'
-        +'<span class="pe-apt-caret" aria-hidden="true">⌄</span>'
-        +'<span class="pe-apt-name">'+esc(u.unit||('وحدة '+u.lid))+'</span>'
-        +'<span class="pe-apt-chips">'+chips+'</span>'
-        +'<span class="pe-apt-stats">'+(u.nopp?('<span class="pe-apt-opp">'+u.nopp+(L==='ar'?' فرصة':' opp')+'</span>'):'')+(u.uplift>0?('<span class="pe-apt-up">+'+fmt(u.uplift)+' ر.س</span>'):'')+'</span>'
-      +'</button>'
-      +'<div style="padding:0 16px 8px"><button class="btn ghost xs" onclick="openApartment('+u.lid+',&#39;pricing&#39;)">📄 '+(L==='ar'?'تفاصيل الشقة ←':'Apartment details ←')+'</button></div>'
-      +'<div class="pe-apt-body" id="peapt_'+u.lid+'"></div></div>';
-  }
-  function rowNact(u){
-    return '<div class="pe-apt"><div style="display:flex;align-items:center;gap:12px;padding:12px 16px">'
-      +'<span class="pe-apt-name" style="flex:1;min-width:0">'+esc(u.unit||('وحدة '+u.lid))+(u.compound?(' <span class="muted" style="font-size:11px">· '+esc(u.compound)+'</span>'):'')+'</span>'
-      +'<button class="btn primary sm" onclick="pricingActivate('+u.lid+',true)">✓ '+(L==='ar'?'فعّل التسعير':'Activate')+'</button></div></div>';
-  }
-  var nactComp={}; nact.forEach(function(u){ if(u.compound) nactComp[u.compound]=(nactComp[u.compound]||0)+1; });
-  var bulk=Object.keys(nactComp).sort().map(function(c){return '<button class="btn ghost xs" onclick="pricingActivateCompound(&#39;'+esc(c)+'&#39;)">✓ '+esc(c)+' ('+nactComp[c]+')</button>';}).join(' ');
-  var h=bar
-    +'<div style="'+grpH+'">✅ '+(L==='ar'?'مفعّلة (قلت لها نعم)':'Activated')+'<span style="'+cntPill+';background:var(--green-soft);color:var(--green)">'+act.length+'</span></div>'
-    +(act.length? act.map(rowAct).join('') : '<div class="muted" style="padding:12px 4px;font-size:12px">'+(L==='ar'?'ما فعّلت أي شقة بعد — فعّل من تحت ⬇':'No units activated yet — activate below.')+'</div>')
-    +'<div style="'+grpH+';margin-top:20px">⚪ '+(L==='ar'?'غير مفعّلة':'Not activated')+'<span style="'+cntPill+';background:var(--surface-2);color:var(--mut)">'+nact.length+'</span></div>'
-    +(bulk?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center"><span class="muted" style="font-size:11px">'+(L==='ar'?'فعّل مجمّع كامل:':'Activate a compound:')+'</span>'+bulk+'</div>'):'')
-    +(nact.length? nact.map(rowNact).join('') : '<div class="muted" style="padding:12px 4px;font-size:12px">'+(L==='ar'?'كل الشقق مفعّلة ✓':'All units activated ✓')+'</div>');
-  if(body) body.innerHTML=h;
-}
 async function pricingActivate(lid,on){
   var r; try{ r=await post('/api/pricing/activate',{lid:lid,on:on}); }catch(_){ r=null; }
   if(r&&r.ok){ toast(on?(L==='ar'?'فُعّلت ✅':'Activated ✅'):(L==='ar'?'أُوقفت ⏸':'Deactivated ⏸')); await loadPricing(); }
@@ -15681,7 +15692,7 @@ async function setPeLean(lid, val){
   if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
   toast(L==='ar'?('الميل: '+(val==='fill'?'إشغال':(val==='top'?'أعلى سعر':'متوازن'))):('Lean: '+val));
   try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; }catch(_){}
-  renderPricingHeader(); renderPricing2(); renderLastMinuteDiagnostics();
+  renderPricingHeader(); renderPricingTable(); renderLastMinuteDiagnostics();
   var btn=document.querySelector('#prListBody .pe-apt-head[onclick="pePeToggle(this,'+lid+')"]');
   if(btn) pePeToggle(btn, lid);   // re-open this apartment so the new preview shows
 }
@@ -15690,7 +15701,7 @@ async function togglePeUnit(key, lid, enabled){
   if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
   toast(enabled?(L==='ar'?'تشغيل ✅':'on ✅'):(L==='ar'?'إيقاف ⏸':'off ⏸'));
   try{ var rr=await Promise.all([api('/api/pricing2/recs'), api('/api/pricing/analytics'), api('/api/pricing/last-minute-diagnostics').catch(function(){return {runs:[]};})]); D.pr2=rr[0]; D.prA=rr[1]; D.lmDiag=rr[2]; }catch(_){}
-  renderPricingHeader(); renderPricing2(); renderLastMinuteDiagnostics();
+  renderPricingHeader(); renderPricingTable(); renderLastMinuteDiagnostics();
   var btn=document.querySelector('#prListBody .pe-apt-head[onclick="pePeToggle(this,'+lid+')"]');
   if(btn) pePeToggle(btn, lid);   // re-open this apartment so the new preview shows
 }
@@ -16002,7 +16013,7 @@ function renderRevKpis(){
     {ic:'$', cls:'g', val:fmt(this_m.rev||0)+' SAR', lbl:t().rev_kpi_mtd, delta:delta_mtd},
     {ic:'◌', cls:'b', val:avg_occ+'%', lbl:t().rev_kpi_occ},
     {ic:'∿', cls:'p', val:fmt(avg_adr)+' SAR', lbl:t().rev_kpi_adr},
-    {ic:'🚀', cls:(pace_pct>=60?'g':(pace_pct>=40?'y':'r')), val:pace_pct+'%', lbl:t().rev_kpi_pace},
+    {ic:'↗', cls:(pace_pct>=60?'g':(pace_pct>=40?'y':'r')), val:pace_pct+'%', lbl:t().rev_kpi_pace},
   ];
   el.innerHTML = cards.map(function(c){
     let dh = '';
@@ -16339,10 +16350,10 @@ function renderQualityStats(){
   const el = document.getElementById('qualStats'); if(!el) return;
   const s = (D.quality||{}).stats || {};
   const cards = [
-    {ic:'📤', cls:'b', val:s.sent||0, lbl:t().quality_stat_sent},
+    {ic:'↥', cls:'b', val:s.sent||0, lbl:t().quality_stat_sent},
     {ic:'✓', cls:'g', val:s.responded||0, lbl:t().quality_stat_resp},
     {ic:'%', cls:'p', val:(s.response_rate||0)+'%', lbl:t().quality_stat_rate},
-    {ic:'⭐', cls:'gold', val:s.overall_avg!=null?s.overall_avg:'—', lbl:t().quality_stat_avg},
+    {ic:'★', cls:'gold', val:s.overall_avg!=null?s.overall_avg:'—', lbl:t().quality_stat_avg},
   ];
   el.innerHTML = cards.map(function(c){
     return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
@@ -16413,9 +16424,9 @@ function renderGuestStats(){
   const el = document.getElementById('guestStats'); if(!el) return;
   const c = (D.guests||{}).counts || {};
   const cards = [
-    {ic:'👤', cls:'b', val:c.total||0, lbl:t().guests_stat_total},
-    {ic:'⭐', cls:'gold', val:c.vip||0, lbl:t().guests_stat_vip},
-    {ic:'🔁', cls:'g', val:c.repeat||0, lbl:t().guests_stat_repeat},
+    {ic:'◷', cls:'b', val:c.total||0, lbl:t().guests_stat_total},
+    {ic:'★', cls:'gold', val:c.vip||0, lbl:t().guests_stat_vip},
+    {ic:'⟳', cls:'g', val:c.repeat||0, lbl:t().guests_stat_repeat},
   ];
   el.innerHTML = cards.map(function(c){
     return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
@@ -16717,7 +16728,7 @@ function renderListingsStats(){
   var el=document.getElementById('lsStats'); if(!el) return;
   var s=(D.listings&&D.listings.summary)||{};
   var cards=[
-    {ic:'🏠', cls:'b', val:s.total||0, lbl:t().ls_total},
+    {ic:'⌂', cls:'b', val:s.total||0, lbl:t().ls_total},
     {ic:'✓', cls:'g', val:s.active||0, lbl:t().ls_active},
     {ic:'✨', cls:'p', val:s.new||0, lbl:t().ls_new},
     {ic:'⟳', cls:'b', val:s.changed||0, lbl:t().ls_changed},
@@ -16918,7 +16929,13 @@ async function loadTickets(){
   if(c) qs.set('category', c);
   if(q) qs.set('q', q);
   try{ D.tickets = await api('/api/tickets/list?' + qs.toString()); }
-  catch(_){ D.tickets = {items:[], counts:{}, categories:[]} }
+  catch(_){
+    // ERROR ≠ EMPTY: a failed fetch must never masquerade as "no tickets".
+    D.tickets = {items:[], counts:{}, categories:[], __error:true};
+    if(body) body.innerHTML = errorState('loadTickets()');
+    renderTicketsOpsSummary(); buildSideNav();
+    return;
+  }
   _renderTicketStats();
   _populateTicketCatFilter();
   _renderTicketsBody();
@@ -16931,9 +16948,9 @@ function _renderTicketStats(){
   const el = document.getElementById('ticketStats'); if(!el) return;
   const c = (D.tickets||{}).counts || {};
   const cards = [
-    {ic:'📋', cls:'b', val:c.total||0,        lbl:'إجمالي التذاكر'},
-    {ic:'🆕', cls:'g', val:c.open||0,         lbl:'جديدة'},
-    {ic:'🔧', cls:'a', val:c.in_progress||0,  lbl:'تحت العمل'},
+    {ic:'≡', cls:'b', val:c.total||0,        lbl:'إجمالي التذاكر'},
+    {ic:'+', cls:'g', val:c.open||0,         lbl:'جديدة'},
+    {ic:'✦', cls:'a', val:c.in_progress||0,  lbl:'تحت العمل'},
     {ic:'⚠',  cls:'r', val:c.overdue||0,      lbl:'متأخّرة'},
   ];
   el.innerHTML = cards.map(function(x){
@@ -19136,16 +19153,18 @@ async function pmoDeleteProject(){
 }
 
 /* ============== USERS (المستخدمون) ============== */
-const ROLE_LABEL = {admin:'مدير', ops:'تشغيل', viewer:'مشاهد'};
-const ROLE_LABEL_EN = {admin:'Admin', ops:'Operator', viewer:'Viewer'};
-const ROLE_PILL = {admin:'gold', ops:'info', viewer:'muted'};
+const ROLE_LABEL = {admin:'مدير', ops:'تشغيل', viewer:'مشاهد', accountant:'محاسب'};
+const ROLE_LABEL_EN = {admin:'Admin', ops:'Operator', viewer:'Viewer', accountant:'Accountant'};
+const ROLE_PILL = {admin:'gold', ops:'info', viewer:'muted', accountant:'info'};
 const TAB_LABEL = {
   home:'الرئيسية', inbox:'الوارد', today:'اليوم', calendar:'التقويم',
   pricing:'التسعير الديناميكي', strat:'الاستراتيجيات', clean:'التنظيف',
   tickets:'الصيانة', reviews:'المراجعات', guests:'الضيوف',
   quality:'الجودة', rev:'الإيرادات', learn:'التعلّم', log:'النشاط',
   users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي',
-  design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف'
+  design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف',
+  cleanteams:'فرق التنظيف', clean_center:'مركز النظافة', plab:'مختبر الأسعار',
+  fb:'المركز المالي', gw:'موقع الضيوف', finance:'كشوفات الملاك', listings:'الشقق'
 };
 const TAB_LABEL_EN = {
   home:'Home', inbox:'Inbox', today:'Today', calendar:'Calendar',
@@ -19153,7 +19172,9 @@ const TAB_LABEL_EN = {
   tickets:'Maintenance', reviews:'Reviews', guests:'Guests',
   quality:'Quality', rev:'Revenue', learn:'Learning', log:'Activity',
   users:'Users', quote:'Quotations', weekly:'Weekly report',
-  design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses'
+  design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses',
+  cleanteams:'Cleaning teams', clean_center:'Clean center', plab:'Pricing lab',
+  fb:'Financial center', gw:'Guest website', finance:'Owner statements', listings:'Listings'
 };
 
 async function loadUsers(){
@@ -19379,7 +19400,12 @@ async function loadReviews(){
   if(q) qs.set('q', q);
   if(_rvCurrentDays) qs.set('days', String(_rvCurrentDays));
   try{ D.reviews = await api('/api/reviews/list?' + qs.toString()); }
-  catch(_){ D.reviews = {units:[], counts:{}} }
+  catch(_){
+    D.reviews = {units:[], counts:{}, __error:true};
+    if(body) body.innerHTML = errorState('loadReviews()');
+    buildSideNav();
+    return;
+  }
   _renderReviewsSub();
   _renderReviewsStats();
   _renderTimeFilterStrip();
@@ -19397,10 +19423,10 @@ function _renderReviewsStats(){
   const c = (D.reviews||{}).counts || {};
   const k = t().rvw || {};
   const cards = [
-    {ic:'⭐', cls:'b', val:c.shown||0,    lbl:k.kpi_shown||'في المدى المحدد'},
-    {ic:'💚', cls:'g', val:c.positive||0, lbl:k.kpi_pos||'إيجابية'},
-    {ic:'🚨', cls:'r', val:c.urgent||0,   lbl:k.kpi_urg||'حرجة (≤٢ نجوم)'},
-    {ic:'🤖', cls:'a', val:c.analyzed||0, lbl:k.kpi_an||'تم تحليلها'},
+    {ic:'★', cls:'b', val:c.shown||0,    lbl:k.kpi_shown||'في المدى المحدد'},
+    {ic:'✓', cls:'g', val:c.positive||0, lbl:k.kpi_pos||'إيجابية'},
+    {ic:'!', cls:'r', val:c.urgent||0,   lbl:k.kpi_urg||'حرجة (≤٢ نجوم)'},
+    {ic:'◌', cls:'a', val:c.analyzed||0, lbl:k.kpi_an||'تم تحليلها'},
   ];
   el.innerHTML = cards.map(function(x){
     return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+x.cls+'">'+x.ic+'</div></div>'
@@ -19961,10 +19987,10 @@ function renderCleaningStats(){
   const el = document.getElementById('cleanStats'); if(!el) return;
   const c = (D.clean||{}).counts || {};
   const cards = [
-    {ic:'🏠', cls:'b', val:c.total||0, lbl:t().clean_stat_total},
+    {ic:'⌂', cls:'b', val:c.total||0, lbl:t().clean_stat_total},
     {ic:'⚠', cls:'r', val:c.overdue||0, lbl:t().clean_stat_overdue},
-    {ic:'📅', cls:'g', val:c.scheduled||0, lbl:t().clean_stat_scheduled},
-    {ic:'🔒', cls:'p', val:c.blocked_tomorrow||0, lbl:t().clean_stat_tomorrow},
+    {ic:'▦', cls:'g', val:c.scheduled||0, lbl:t().clean_stat_scheduled},
+    {ic:'•', cls:'p', val:c.blocked_tomorrow||0, lbl:t().clean_stat_tomorrow},
   ];
   el.innerHTML = cards.map(function(c){
     return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+c.ic+'</div></div>'
@@ -20603,8 +20629,8 @@ function renderKpis(){
     {ic:'$', cls:'gold', val:fmt(ov.rev_7)+' SAR', lbl:t().rev_7},
     {ic:'∿', cls:'b', val:fmt(ov.rev_30)+' SAR', lbl:t().rev_30},
     {ic:'⌂', cls:(empty>0?'y':'g'), val:empty, lbl:t().empty_units, sub:(empty>0?'<a onclick="go(\\'today\\')" style="cursor:pointer;color:var(--gold);font-weight:600;font-size:11px">←</a>':'<span class="pill ok">✓</span>')},
-    {ic:'💬', cls:(pending>0?'y':''), val:pending, lbl:t().pending_rep, sub:(pending>0?'<a onclick="go(\\'inbox\\')" style="cursor:pointer;color:var(--gold);font-weight:600;font-size:11px">←</a>':'<span class="muted">—</span>')},
-    {ic:'🚨', cls:(escs>0?'r':''), val:escs, lbl:t().open_esc, sub:(escs>0?'<a onclick="go(\\'inbox\\')" style="cursor:pointer;color:var(--red);font-weight:600;font-size:11px">←</a>':'<span class="muted">—</span>'), vc:(escs>0?'red':'')}
+    {ic:'✉', cls:(pending>0?'y':''), val:pending, lbl:t().pending_rep, sub:(pending>0?'<a onclick="go(\\'inbox\\')" style="cursor:pointer;color:var(--gold);font-weight:600;font-size:11px">←</a>':'<span class="muted">—</span>')},
+    {ic:'!', cls:(escs>0?'r':''), val:escs, lbl:t().open_esc, sub:(escs>0?'<a onclick="go(\\'inbox\\')" style="cursor:pointer;color:var(--red);font-weight:600;font-size:11px">←</a>':'<span class="muted">—</span>'), vc:(escs>0?'red':'')}
   ];
   document.getElementById('kpis').innerHTML = k.map(function(x){
     return '<div class="kpi">'
@@ -23693,7 +23719,11 @@ async function loadLearnings(){
       api('/api/learning/today?days=1').catch(function(){return {apartments:[], total_events:0}}),
     ]);
     D.learn = r[0]; D.learnMetrics = r[1]; D.learnRecent = r[2];
-  }catch(_){ D.learn = {} }
+  }catch(_){
+    D.learn = {__error:true};
+    if(list) list.innerHTML = errorState('loadLearnings()');
+    return;
+  }
   // sync sub copy
   const sub = document.getElementById('t_learn_sub'); if(sub) sub.textContent = t().learn_sub;
   const eSel = document.getElementById('t_learn_empty_sel'); if(eSel) eSel.textContent = t().learn_empty_sel;
@@ -23731,13 +23761,13 @@ function renderLearnStats(){
   const avg_esc     = avg(last7, 'escalations_created');
 
   const cards = [
-    {ic:'💬', cls:'b', val:today.replies_total||0, lbl:t().learn_stat_replies,
+    {ic:'✉', cls:'b', val:today.replies_total||0, lbl:t().learn_stat_replies,
      delta:_delta(today.replies_total||0, avg_replies)},
     {ic:'⚡', cls:'g', val:(today.auto_rate||0)+'%', lbl:t().learn_stat_auto,
      delta:_delta(today.auto_rate||0, avg_auto)},
-    {ic:'🎯', cls:'p', val:(today.avg_confidence||0)+'%', lbl:t().learn_stat_conf,
+    {ic:'◎', cls:'p', val:(today.avg_confidence||0)+'%', lbl:t().learn_stat_conf,
      delta:_delta(today.avg_confidence||0, avg_conf)},
-    {ic:'🚨', cls:(today.escalations_created>0?'r':''), val:today.escalations_created||0, lbl:t().learn_stat_esc,
+    {ic:'!', cls:(today.escalations_created>0?'r':''), val:today.escalations_created||0, lbl:t().learn_stat_esc,
      delta:_delta(today.escalations_created||0, avg_esc), inverted:true},
   ];
   document.getElementById('learnStats').innerHTML = cards.map(function(c){
@@ -24001,6 +24031,7 @@ function showBootstrapStatus(s){
 /* ============================================================
    DRAWER
    ============================================================ */
+var _drawerReturnEl = null;
 function openDrawer(title, sub){
   document.getElementById('drwTitle').textContent = title;
   document.getElementById('drwSub').textContent = sub||'';
@@ -24010,6 +24041,13 @@ function openDrawer(title, sub){
   // body.detailpane reflows main beside it. Mid/mobile keep the overlay.
   document.body.classList.add('detailpane');
   drawerOpen = true;
+  // a11y: remember the opener and move focus INTO the dialog (keyboard users were
+  // left interacting with content behind the open drawer).
+  try{
+    _drawerReturnEl = document.activeElement;
+    var cl = document.querySelector('#drawer .drawer-head .icbtn');
+    if(cl) cl.focus();
+  }catch(_){ }
   try{ _pcc.pvOpen=false; }catch(_){}    // any drawer opening resets the pricing-preview marker; pccPvRender re-sets it
 }
 function setDrawerTitle(title, sub){
@@ -24026,7 +24064,124 @@ function closeDrawer(){
   document.getElementById('drawerBg').classList.remove('show');
   document.body.classList.remove('detailpane');
   drawerOpen = false;
+  try{ if(_drawerReturnEl && _drawerReturnEl.focus) _drawerReturnEl.focus(); _drawerReturnEl=null; }catch(_){ }
   try{ _pcc.pvOpen=false; }catch(_){}
+}
+/* a11y: Escape closes the topmost layer; Tab is trapped inside open dialogs. */
+function _trapFocus(container, e){
+  if(!container) return;
+  var els = container.querySelectorAll('a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])');
+  if(!els.length) return;
+  var first = els[0], last = els[els.length-1];
+  if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
+  else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
+}
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){
+    var gso = document.getElementById('gsOverlay');
+    if(gso && gso.style.display !== 'none' && gso.style.display !== ''){ gsClose(); return; }
+    var dp = document.getElementById('datePickerOverlay');
+    if(dp && dp.style.display !== 'none' && dp.style.display !== ''){ try{ closeDatePicker(); }catch(_){ } return; }
+    var fbm = document.querySelector('.fbm-bg');
+    if(fbm){ var c = document.getElementById('fbmCancel'); if(c) c.click(); return; }
+    if(typeof drawerOpen !== 'undefined' && drawerOpen){ closeDrawer(); return; }
+  }
+  if(e.key === 'Tab'){
+    var fbm2 = document.querySelector('.fbm-bg');
+    if(fbm2){ _trapFocus(fbm2, e); return; }
+    var dp2 = document.getElementById('datePickerOverlay');
+    if(dp2 && dp2.style.display !== 'none' && dp2.style.display !== ''){ _trapFocus(dp2, e); return; }
+    if(typeof drawerOpen !== 'undefined' && drawerOpen) _trapFocus(document.getElementById('drawer'), e);
+  }
+  if((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)){ e.preventDefault(); gsOpen(); }
+});
+
+/* ===== Global search (⌘K): fuzzy over already-loaded state, zero new endpoints ===== */
+var _gsSel = 0, _gsItems = [];
+function gsOpen(){
+  var ov = document.getElementById('gsOverlay'); if(!ov) return;
+  ov.style.display = 'flex';
+  var inp = document.getElementById('gsInput');
+  inp.value = ''; gsRun('');
+  setTimeout(function(){ try{ inp.focus(); }catch(_){ } }, 30);
+}
+function gsClose(){ var ov = document.getElementById('gsOverlay'); if(ov) ov.style.display = 'none'; }
+function _gsScore(hay, q){
+  hay = (hay||'').toLowerCase(); q = (q||'').toLowerCase();
+  if(!q) return 0;
+  if(hay.indexOf(q) === 0) return 3;
+  if(hay.indexOf(q) > 0) return 2;
+  // loose subsequence match (fuzzy)
+  var i = 0;
+  for(var c = 0; c < hay.length && i < q.length; c++){ if(hay[c] === q[i]) i++; }
+  return i === q.length ? 1 : 0;
+}
+function _gsIndex(){
+  var out = [];
+  (((D.listings||{}).listings)||[]).forEach(function(r){
+    out.push({kind:'unit', ic:'⌂', label:r.internal_name||r.public_name||('unit-'+r.id),
+              sub:(L==='ar'?'شقة':'unit'), hay:(r.internal_name||'')+' '+(r.public_name||''),
+              jump:function(){ gsClose(); openApartment(parseInt(r.id,10)); }});
+  });
+  (((D.guests||{}).items)||[]).forEach(function(g){
+    out.push({kind:'guest', ic:'👤', label:g.name||'—', sub:(L==='ar'?'ضيف':'guest')+(g.phone?(' · '+g.phone):''),
+              hay:(g.names||[]).join(' ')+' '+(g.phone||''),
+              jump:function(){ gsClose(); go('guests'); setTimeout(function(){ openGuestDrawer(g.key); }, 250); }});
+  });
+  (((D.tickets||{}).items)||[]).forEach(function(tk){
+    out.push({kind:'ticket', ic:'🔧', label:tk.title||'—', sub:(L==='ar'?'تذكرة':'ticket')+(tk.unit_name?(' · '+tk.unit_name):''),
+              hay:(tk.title||'')+' '+(tk.unit_name||'')+' '+(tk.description||''),
+              jump:function(){ gsClose(); go('tickets'); setTimeout(function(){ openTicketModal(tk.id); }, 250); }});
+  });
+  (((D.exp4||{}).rows)||[]).forEach(function(x){
+    out.push({kind:'expense', ic:'💸', label:(x.ref||'')+' · '+(x.amount||0)+' ر.س',
+              sub:(L==='ar'?'مصروف':'expense')+(x.apartment?(' · '+x.apartment):''),
+              hay:(x.ref||'')+' '+(x.apartment||'')+' '+(x.submitter||'')+' '+(x.note||''),
+              jump:function(){ gsClose(); go('expenses'); setTimeout(function(){ x4Detail(x.expense_id||x.id); }, 250); }});
+  });
+  var ib = D.inbox||{};
+  (ib.replies||[]).concat(ib.escalations||[]).forEach(function(m){
+    var who = m.guest||m.guest_name||m.who||'';
+    if(!who) return;
+    out.push({kind:'inbox', ic:'✉', label:who, sub:(L==='ar'?'محادثة':'conversation')+(m.unit?(' · '+m.unit):''),
+              hay:who+' '+(m.unit||''),
+              jump:function(){ gsClose(); go('inbox'); }});
+  });
+  return out;
+}
+function gsRun(q){
+  var box = document.getElementById('gsResults'); if(!box) return;
+  var idx = _gsIndex();
+  var scored = [];
+  idx.forEach(function(it){
+    var s = _gsScore(it.hay + ' ' + it.label, q);
+    if(s > 0 || !q) scored.push([s, it]);
+  });
+  scored.sort(function(a, b){ return b[0] - a[0]; });
+  _gsItems = scored.slice(0, 12).map(function(p){ return p[1]; });
+  _gsSel = 0;
+  if(!_gsItems.length){
+    box.innerHTML = '<div class="muted" style="padding:16px;text-align:center;font-size:12.5px">'+(L==='ar'?'لا نتائج — البيانات تُفهرس بعد فتح التبويبات':'No matches — data indexes as tabs load')+'</div>';
+    return;
+  }
+  box.innerHTML = _gsItems.map(function(it, i){
+    return '<div class="gs-row" data-i="'+i+'" onclick="_gsItems['+i+'].jump()" onmouseenter="_gsSel='+i+';gsPaint()"'
+      + ' style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;cursor:pointer'+(i===_gsSel?';background:var(--surface-2)':'')+'">'
+      + '<span style="width:22px;text-align:center">'+it.ic+'</span>'
+      + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600">'+esc(it.label)+'</span>'
+      + '<span class="muted" style="font-size:11px;white-space:nowrap">'+esc(it.sub)+'</span></div>';
+  }).join('');
+}
+function gsPaint(){
+  document.querySelectorAll('#gsResults .gs-row').forEach(function(el, i){
+    el.style.background = (i === _gsSel) ? 'var(--surface-2)' : '';
+  });
+}
+function gsKey(e){
+  if(e.key === 'Escape'){ gsClose(); return; }
+  if(e.key === 'ArrowDown'){ e.preventDefault(); if(_gsSel < _gsItems.length-1){ _gsSel++; gsPaint(); } return; }
+  if(e.key === 'ArrowUp'){ e.preventDefault(); if(_gsSel > 0){ _gsSel--; gsPaint(); } return; }
+  if(e.key === 'Enter'){ e.preventDefault(); var it = _gsItems[_gsSel]; if(it) it.jump(); }
 }
 /* Unified record drawer (mockup): field grid + details + timeline + actions.
    o = {title, sub, fields:[[label,value,full?],...], note, timeline:[[action,meta],...],
@@ -24062,11 +24217,13 @@ function fbModal(o){ o=o||{}; var ar=(L==='ar'); return new Promise(function(res
   var sumHtml=o.summary?('<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:10px;font-size:12.5px;font-weight:700">'+esc(o.summary)+'</div>'):'';
   var warnHtml=o.danger?('<div style="color:var(--red);font-size:11.5px;margin-top:8px;font-weight:600">⚠ '+esc(o.dangerMsg||(ar?'إجراء يصعب التراجع عنه':'This action is hard to undo'))+'</div>'):'';
   var card=document.createElement('div');
+  card.setAttribute('role','dialog'); card.setAttribute('aria-modal','true'); card.setAttribute('aria-label', String(o.title||''));
   card.setAttribute('style','background:var(--surface);border:1px solid var(--line);border-radius:16px;max-width:440px;width:100%;box-shadow:0 18px 50px rgba(47,36,27,.22)');
   card.innerHTML='<div style="padding:16px 18px"><div style="font-size:15px;font-weight:800;margin-bottom:6px">'+esc(o.title||'')+'</div>'+(o.msg?('<div class="muted" style="font-size:12.5px;line-height:1.65">'+esc(o.msg)+'</div>'):'')+sumHtml+warnHtml+fieldHtml+'</div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface-2);border-radius:0 0 16px 16px"><button class="btn ghost sm" id="fbmCancel">'+esc(o.cancel||(ar?'إلغاء':'Cancel'))+'</button><button class="btn primary sm" id="fbmOk"'+(o.danger?' style="background:var(--red);border-color:var(--red)"':'')+'>'+esc(o.confirm||(ar?'تأكيد':'Confirm'))+'</button></div>';
   bg.appendChild(card); document.body.appendChild(bg);
-  var f=document.getElementById('fbmField'); if(f) setTimeout(function(){ try{ f.focus(); }catch(_){} },30);
+  var f=document.getElementById('fbmField');
+  setTimeout(function(){ try{ (f||document.getElementById('fbmOk')).focus(); }catch(_){} },30);
   function done(ok){ var val=f?((f.value||'').trim()):''; if(ok&&fld&&fld.required&&!val){ if(f){ f.style.borderColor='var(--red)'; f.focus(); } return; } bg.remove(); resolve({ok:ok,value:val}); }
   document.getElementById('fbmOk').onclick=function(){ done(true); };
   document.getElementById('fbmCancel').onclick=function(){ done(false); };
