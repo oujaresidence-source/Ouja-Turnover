@@ -66,35 +66,40 @@ class DashboardUiContractTest(unittest.TestCase):
             "designOpsSummary",
             "pmoOpsSummary",
             "revenueOpsSummary",
-            "expensesOpsSummary",
-            "financeOpsSummary",
         ]:
             self.assertIn(page_hook, html)
 
         self.assertIn("renderAllPageOps", html)
 
-    def test_expenses_v2_dashboard_contract_is_present(self):
+    def test_erp_v2_cutover_contract(self):
+        """Slice 8: the old finance views are demolished; their sidebar ids
+        redirect into the ERP v2 app (finance/ package) instead."""
         html = dashboard_html()
 
-        for text in [
-            "المصاريف V2",
-            "تحليل المصادر الثلاثة",
-            "مطابقة وإصلاح",
-            "لا تعرض علامة الصح إلا بعد التحقق من Hostaway",
-            "Download diagnostics CSV",
-        ]:
-            self.assertIn(text, html)
+        # condemned views are GONE from the dashboard
+        for dead in ['id="view_fb"', 'id="view_finance"', 'id="view_expenses"',
+                     "function loadFb(", "function loadFinance(", "function loadExpenses(",
+                     "function openBulkPdf(", "function financeGeneratePdf("]:
+            self.assertNotIn(dead, html)
 
-        for helper in [
-            "function expV2Reconcile",
-            "function expV2RepairPlan",
-            "function expV2Split",
-            "function expV2DiagnosticsHtml",
-            "/api/expenses/v2/overview",
-            "/api/expenses/v2/repair-apply",
-            "/api/expenses/v2/split-confirm",
-        ]:
-            self.assertIn(helper, html)
+        # the cutover redirect handles erp/fb/finance/expenses ids in go()
+        self.assertIn("old finance views are cut over to ERP v2", html)
+        for tk in ["erp:'", "fb:'", "finance:'", "expenses:'"]:
+            self.assertIn(tk, html)        # labels stay (entries redirect)
+
+        # shared helpers that other views still use survived the demolition
+        for kept in ["function fbCard()", "function fbChip(", "function fbInp()",
+                     "function fbStatCard(", "function fbModal("]:
+            self.assertIn(kept, html)
+
+        # the new system actually exists and mounts the core routes
+        erp = (ROOT / "finance" / "__init__.py").read_text(encoding="utf-8")
+        for route in ["/erp", "/erp/version", "/erp/api/work-queue", "/erp/api/bank",
+                      "/erp/api/match", "/erp/api/stmts", "/erp/api/close",
+                      "/erp/api/budget", "/fin/receipt/{expense_id}"]:
+            self.assertIn('"' + route + '"', erp)
+        bot_text = BOT.read_text(encoding="utf-8")
+        self.assertIn("_finance_erp.mount(app", bot_text)
 
 
 class ProductBriefContractTest(unittest.TestCase):
