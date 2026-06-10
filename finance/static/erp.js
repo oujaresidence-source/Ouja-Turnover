@@ -198,6 +198,22 @@
       se_excl_chip_manual: 'مستبعد يدويًا', se_incl_chip: 'مُدرج يدويًا',
       se_pct: 'النسبة', se_fee_grp: 'أساس {b} × {p}٪',
       se_footnotes: 'ملاحظات العقد', se_open_page: 'افتح صفحة المالك',
+      /* --- monthly cycle board (slice 3) --- */
+      cy_title: 'دورة الشهر', cy_month: 'الشهر',
+      cy_ready: 'جاهز', cy_sent: 'أُرسل', cy_opened: 'انفتح', cy_flagged: 'يحتاج مراجعة',
+      cy_portfolio: 'صافي المحفظة', cy_done: 'الشهر مكتمل — كل الكشوفات أُرسلت ✓',
+      cy_review_first: 'راجع هذي قبل الإرسال',
+      cy_s_draft: 'مسودة', cy_s_ready: 'جاهز للمراجعة', cy_s_reviewed: 'راجعتها',
+      cy_s_sent: 'أُرسلت', cy_s_opened: 'فتحها المالك',
+      cy_wa: 'أرسل واتساب', cy_wa_no_phone: 'أضف جوال المالك من «إدارة» أول',
+      cy_wa_sent: 'انفتح واتساب — وعلّمناها «أُرسلت» ✓',
+      cy_bulk_to: 'انقل المحدد إلى', cy_selected: 'محدد',
+      cy_regen_all: 'جدّد كل الروابط', cy_regen_confirm: 'بيموت كل رابط قديم عند كل الملاك — لازم ترسل الروابط الجديدة للجميع. متأكد؟',
+      cy_regen_done: 'تجدّدت {n} روابط — انسخها وأرسلها',
+      cy_copy_all: 'انسخ كل الروابط', cy_copied_n: 'انتسخت {n} روابط ✓',
+      cy_template: 'قالب الواتساب', cy_template_hint: 'المتغيرات: {owner} {month} {net} {link}',
+      cy_template_saved: 'انحفظ القالب ✓', cy_no_link: 'بدون رابط نشط',
+      cy_all: 'الكل', cy_anom_none: 'سليم ✓',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -399,6 +415,21 @@
       se_excl_chip_manual: 'Manually excluded', se_incl_chip: 'Manually included',
       se_pct: 'Rate', se_fee_grp: 'base {b} × {p}%',
       se_footnotes: 'Contract notes', se_open_page: 'Open owner page',
+      cy_title: 'Month cycle', cy_month: 'Month',
+      cy_ready: 'Ready', cy_sent: 'Sent', cy_opened: 'Opened', cy_flagged: 'Needs review',
+      cy_portfolio: 'Portfolio net', cy_done: 'Month complete — every statement sent ✓',
+      cy_review_first: 'Review these before sending',
+      cy_s_draft: 'Draft', cy_s_ready: 'Ready for review', cy_s_reviewed: 'Reviewed',
+      cy_s_sent: 'Sent', cy_s_opened: 'Owner opened',
+      cy_wa: 'Send WhatsApp', cy_wa_no_phone: 'Add the owner’s phone in Manage first',
+      cy_wa_sent: 'WhatsApp opened — marked as Sent ✓',
+      cy_bulk_to: 'Move selected to', cy_selected: 'selected',
+      cy_regen_all: 'Regenerate ALL links', cy_regen_confirm: 'Every owner’s old link dies — you must resend the new ones to everyone. Continue?',
+      cy_regen_done: '{n} links regenerated — copy and send them',
+      cy_copy_all: 'Copy all links', cy_copied_n: 'Copied {n} links ✓',
+      cy_template: 'WhatsApp template', cy_template_hint: 'Variables: {owner} {month} {net} {link}',
+      cy_template_saved: 'Template saved ✓', cy_no_link: 'No active link',
+      cy_all: 'All', cy_anom_none: 'Clean ✓',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -1501,6 +1532,72 @@
         .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
 
+    /* --- monthly cycle board (slice 3) --- */
+    else if (act === 'cy-filter') { cyUI.filter = el.getAttribute('data-f'); renderOwners(null); }
+    else if (act === 'cy-sel') { cyUI.sel[el.getAttribute('data-owner')] = el.checked; renderOwners(null); }
+    else if (act === 'cy-tpl') { cyUI.tplOpen = !cyUI.tplOpen; renderOwners(null); }
+    else if (act === 'cy-tpl-save') {
+      el.disabled = true;
+      api('/erp/api/owners/cycle/template', { method: 'POST', body: { text: $('#cyTpl').value } })
+        .then(function (r) {
+          if (store.D.cycle) store.D.cycle.wa_template = r.wa_template;
+          cyUI.tplOpen = false;
+          toast(t('cy_template_saved'));
+          renderOwners(null);
+        }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'cy-status') {
+      el.disabled = true;
+      api('/erp/api/owners/cycle/status', { method: 'POST', body: {
+        owner: el.getAttribute('data-owner'), m: cyUI.m, to: el.getAttribute('data-to') } })
+        .then(function () { return loadCycle(); })
+        .then(function () { toast(t('o_done')); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'cy-bulk') {
+      var ownersSel = Object.keys(cyUI.sel).filter(function (k) { return cyUI.sel[k]; });
+      if (!ownersSel.length) return;
+      el.disabled = true;
+      api('/erp/api/owners/cycle/status', { method: 'POST', body: {
+        owners: ownersSel, m: cyUI.m, to: el.getAttribute('data-to') } })
+        .then(function () { cyUI.sel = {}; return loadCycle(); })
+        .then(function () { toast(t('o_done')); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'cy-wa') {
+      var cyd = store.D.cycle || {};
+      var rw = (cyd.rows || []).filter(function (x) { return x.owner === el.getAttribute('data-owner'); })[0];
+      if (!rw) return;
+      window.open(cyWaLink(rw, cyd), '_blank', 'noopener');
+      api('/erp/api/owners/cycle/status', { method: 'POST', body: { owner: rw.owner, m: cyUI.m, to: 'sent' } })
+        .then(function () { return loadCycle(); })
+        .then(function () { toast(t('cy_wa_sent')); })
+        .catch(function (e) { toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'cy-copy-all') {
+      el.disabled = true;
+      api('/erp/api/owners/cycle/links', { method: 'POST', body: { action: 'copy_all' } })
+        .then(function (r) {
+          el.disabled = false;
+          var txt = (r.links || []).map(function (l) { return l.owner + ': ' + location.origin + l.url; }).join(String.fromCharCode(10));
+          return (navigator.clipboard && navigator.clipboard.writeText
+            ? navigator.clipboard.writeText(txt) : Promise.reject(txt))
+            .then(function () { toast(t('cy_copied_n').replace('{n}', (r.links || []).length)); })
+            .catch(function () { window.prompt('Links', txt); });
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'cy-regen-all') {
+      if (!window.confirm(t('cy_regen_confirm'))) return;
+      el.disabled = true;
+      api('/erp/api/owners/cycle/links', { method: 'POST', body: { action: 'regen_all' } })
+        .then(function (r) {
+          toast(t('cy_regen_done').replace('{n}', r.regenerated || 0), 'warn');
+          return loadCycle();
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- statement editor (slice 2) --- */
     else if (act === 'se-tab') { seUI.tab = el.getAttribute('data-tab'); seRerender(store.D.stmtEd); }
     else if (act === 'se-why') {
@@ -2566,9 +2663,119 @@
       '<div class="wq-actions">' + acts + '</div></div>';
   }
 
+  /* ----- slice 3: دورة الشهر — the monthly cycle board ----- */
+  var cyUI = { m: '', filter: 'all', sel: {}, tplOpen: false };
+
+  function cyWaLink(r, d) {
+    var msg = (d.wa_template || '')
+      .split('{owner}').join(r.owner)
+      .split('{month}').join(d.month)
+      .split('{net}').join(r.net != null ? fmtAmt(r.net) : '—')
+      .split('{link}').join(location.origin + ((r.link || {}).url || ''));
+    var phone = (r.phone || '').replace(/[^0-9]/g, '');
+    return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
+  }
+
+  function cyPills(r) {
+    var order = ['draft', 'ready', 'reviewed', 'sent', 'opened'];
+    var idx = order.indexOf(r.status);
+    return '<div class="cy-pills">' + order.map(function (s, i) {
+      return '<button class="cy-pill' + (i <= idx ? ' on' : '') + (s === r.status ? ' cur' : '') + '"' +
+        ' data-act="cy-status" data-owner="' + esc(r.owner) + '" data-to="' + s + '"' +
+        ' title="' + esc(t('cy_s_' + s)) + '">' + esc(t('cy_s_' + s)) + '</button>';
+    }).join('<span class="cy-arrow">›</span>') + '</div>';
+  }
+
+  function cyRowHtml(r, d) {
+    var anoms = r.flagged
+      ? (r.anomalies || []).map(function (a) {
+          return '<span class="tag ' + (a.sev === 'bad' ? 'bad' : '') + '">' +
+            esc(store.lang === 'ar' ? a.ar : (a.en || a.ar)) + '</span>';
+        }).join(' ')
+      : '<span class="tag soft">' + esc(t('cy_anom_none')) + '</span>';
+    var hasLink = (r.link || {}).url;
+    var wa = (r.phone && hasLink)
+      ? '<button class="btn primary xs" data-act="cy-wa" data-owner="' + esc(r.owner) + '">' + esc(t('cy_wa')) + '</button>'
+      : '<button class="btn ghost xs" disabled title="' + esc(r.phone ? t('cy_no_link') : t('cy_wa_no_phone')) + '">' + esc(t('cy_wa')) + '</button>';
+    return '<div class="wq-row' + (r.flagged ? '' : ' info') + '" data-owner="' + esc(r.owner) + '">' +
+      '<label class="cy-check"><input type="checkbox" data-act="cy-sel" data-owner="' + esc(r.owner) + '"' +
+      (cyUI.sel[r.owner] ? ' checked' : '') + '></label>' +
+      '<div class="wq-main"><div class="wq-top"><b>' + esc(r.owner) + '</b>' +
+      '<span class="tag soft">' + r.units + ' ' + esc(t('o_units')) + '</span>' +
+      (r.net != null ? '<span class="tag"><code>' + fmtAmt(r.net) + '</code></span>' : '') +
+      (r.published_version ? '<span class="tag soft">' + esc(t('se_ver')) + ' ' + r.published_version + '</span>' : '') +
+      '</div>' +
+      '<div class="wq-sub">' + anoms + '</div>' +
+      cyPills(r) + '</div>' +
+      '<div class="wq-actions">' + wa +
+      '<a class="btn ghost xs" href="#owners?stmt=' + encodeURIComponent(r.owner) + '&m=' + esc(d.month) + '">' + esc(t('o_stmt')) + '</a>' +
+      (hasLink ? '<button class="btn ghost xs" data-act="o-copy" data-url="' + esc(r.link.url) + '">' + esc(t('o_copy')) + '</button>' : '') +
+      '</div></div>';
+  }
+
+  function cycleBoardHtml(d) {
+    var c = d.counts || {};
+    function chip(key, label, n) {
+      return '<button class="chip-f' + (cyUI.filter === key ? ' on' : '') + '" data-act="cy-filter" data-f="' + key + '">' +
+        esc(label) + ' <code>' + n + '</code></button>';
+    }
+    var months = [];
+    var now = new Date();
+    for (var i = 0; i < 13; i++) {
+      var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2));
+    }
+    var rows = (d.rows || []).filter(function (r) {
+      if (cyUI.filter === 'flagged') return r.flagged;
+      if (cyUI.filter === 'ready') return r.status === 'ready' || r.status === 'reviewed';
+      if (cyUI.filter === 'sent') return r.status === 'sent' || r.status === 'opened';
+      if (cyUI.filter === 'opened') return r.status === 'opened';
+      return true;
+    });
+    var nsel = Object.keys(cyUI.sel).filter(function (k) { return cyUI.sel[k]; }).length;
+    var bulk = nsel
+      ? '<div class="cy-bulk"><b>' + nsel + ' ' + esc(t('cy_selected')) + '</b> · ' + esc(t('cy_bulk_to')) + ': ' +
+        ['ready', 'reviewed', 'sent'].map(function (s) {
+          return '<button class="btn ghost xs" data-act="cy-bulk" data-to="' + s + '">' + esc(t('cy_s_' + s)) + '</button>';
+        }).join(' ') + '</div>'
+      : '';
+    return '<section class="card grp">' +
+      '<header class="grp-h"><span class="grp-ico">📆</span><h2>' + esc(t('cy_title')) + '</h2>' +
+      '<span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+      '<select class="in" id="cyMonth">' + months.map(function (m) {
+        return '<option value="' + m + '"' + (m === d.month ? ' selected' : '') + '>' + m + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn ghost xs" data-act="cy-copy-all">' + esc(t('cy_copy_all')) + '</button>' +
+      '<button class="btn danger-ghost xs" data-act="cy-regen-all">' + esc(t('cy_regen_all')) + '</button>' +
+      '<button class="btn ghost xs" data-act="cy-tpl">' + esc(t('cy_template')) + '</button>' +
+      '</span></header>' +
+      (cyUI.tplOpen
+        ? '<div class="om-form" style="margin:0 16px 10px"><div class="grp-hint" style="padding:0">' + esc(t('cy_template_hint')) + '</div>' +
+          '<textarea class="in" id="cyTpl" rows="4" style="resize:vertical">' + esc(d.wa_template || '') + '</textarea>' +
+          '<button class="btn primary xs" data-act="cy-tpl-save">' + esc(t('se_save')) + '</button></div>'
+        : '') +
+      '<div class="cy-chips">' +
+      chip('all', t('cy_all'), c.total || 0) +
+      chip('ready', t('cy_ready'), (c.ready || 0) + '/' + (c.total || 0)) +
+      chip('sent', t('cy_sent'), c.sent || 0) +
+      chip('opened', t('cy_opened'), c.opened || 0) +
+      chip('flagged', t('cy_flagged'), c.flagged || 0) +
+      '<span class="tag soft" style="margin-inline-start:auto">' + esc(t('cy_portfolio')) + ' <code>' + fmtAmt(d.portfolio_net) + '</code></span>' +
+      '</div>' +
+      (d.done ? '<div class="wq-row info" style="margin:0 16px 10px"><div class="wq-main"><div class="wq-top">' + esc(t('cy_done')) + '</div></div></div>' : '') +
+      ((c.flagged && cyUI.filter === 'all') ? '<div class="grp-hint">' + esc(t('cy_review_first')) + '</div>' : '') +
+      bulk +
+      '<div class="grp-list">' + rows.map(function (r) { return cyRowHtml(r, d); }).join('') + '</div>' +
+      '</section>';
+  }
+
   function renderOwners(d) {
-    store.D.owners = d;
+    if (d) store.D.owners = d;
+    d = store.D.owners || {};
+    var cy = store.D.cycle;
+    var y = window.scrollY;
     $('#view').innerHTML =
+      (cy ? cycleBoardHtml(cy) : '') +
       '<section class="card grp">' +
         '<header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('o_title')) + '</h2>' +
         '<span class="cnt">' + (d.total || 0) + '</span></header>' +
@@ -2577,13 +2784,32 @@
         ((d.rows || []).length ? d.rows.map(ownerRowHtml).join('')
           : '<div class="state-card"><div class="state-h">' + esc(t('o_empty')) + '</div></div>') +
         '</div></section>';
-    restoreScroll('owners');
+    var sel = $('#cyMonth');
+    if (sel) sel.addEventListener('change', function () {
+      cyUI.m = sel.value;
+      cyUI.sel = {};
+      loadCycle();
+    });
+    window.scrollTo(0, y);
+  }
+
+  function loadCycle() {
+    return api('/erp/api/owners/cycle' + (cyUI.m ? '?m=' + encodeURIComponent(cyUI.m) : ''))
+      .then(function (c) { store.D.cycle = c; cyUI.m = c.month; renderOwners(null); })
+      .catch(function () { /* board absent; the owners list still renders */ });
   }
 
   function loadOwners() {
     $('#view').innerHTML = skeleton(5);
-    api('/erp/api/owners').then(function (d) { renderOwners(d); })
-      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+    Promise.all([
+      api('/erp/api/owners'),
+      api('/erp/api/owners/cycle' + (cyUI.m ? '?m=' + encodeURIComponent(cyUI.m) : '')).catch(function () { return null; })
+    ]).then(function (rs) {
+      store.D.cycle = rs[1];
+      if (rs[1]) cyUI.m = rs[1].month;
+      renderOwners(rs[0]);
+      restoreScroll('owners');
+    }).catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
 
   /* ----- slice 0b: statement diagnosis (line-by-line reconciliation) ----- */

@@ -580,3 +580,32 @@ button.stat.on{outline:2px solid var(--accent);outline-offset:1px}
 .se-explain{background:var(--surface-2);border-radius:var(--r-sm);padding:12px 14px;font-size:12.5px;max-height:320px;overflow-y:auto}
 .se-explain .foot-line{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line)}
 .se-inline{margin-top:6px}
+
+/* ---------- monthly cycle board (slice 3) ---------- */
+.cy-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:2px 16px 12px}
+.chip-f{
+  border:1px solid var(--line-strong);background:var(--surface);border-radius:999px;
+  padding:4px 12px;font-size:12px;font-weight:700;color:var(--text-3);cursor:pointer;
+  transition:transform .12s var(--press),background .15s;
+}
+.chip-f:hover{background:var(--surface-2)}
+.chip-f:active{transform:scale(.97)}
+.chip-f.on{background:var(--accent-soft);color:var(--accent-deep);border-color:transparent}
+.chip-f code{font-size:11px}
+.cy-pills{display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin-top:6px}
+.cy-pill{
+  border:1px solid var(--line);background:var(--surface);border-radius:999px;
+  padding:2.5px 9px;font-size:10.5px;font-weight:700;color:var(--mut);cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.cy-pill.on{background:var(--surface-2);color:var(--text-2);border-color:var(--line-strong)}
+.cy-pill.cur{background:var(--accent-soft);color:var(--accent-deep);border-color:transparent}
+.cy-pill:hover{color:var(--text)}
+.cy-arrow{color:var(--line-strong);font-size:10px}
+.cy-check{display:flex;align-items:center;padding-inline-end:4px}
+.cy-check input{width:15px;height:15px;accent-color:var(--accent)}
+.cy-bulk{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 16px 10px;
+  background:var(--accent-soft);border-radius:var(--r-sm);padding:8px 12px;font-size:12.5px;
+}
+textarea.in{width:100%;font-family:inherit}

@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.1.0-s2"
+ERP_VERSION = "2.1.0-s3"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -487,6 +487,27 @@ async def _h_api_stmt_diff(request):
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
+async def _h_api_cycle(request):
+    mkey = api._month_key_or_now(request.query.get("m"))
+    data = await asyncio.to_thread(OW.cycle_board, mkey)
+    return api.jres(data)
+
+
+async def _h_api_cycle_status(request):
+    data, status = OW.cycle_status_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_cycle_links(request):
+    data, status = OW.cycle_links(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_cycle_template(request):
+    body = await _json_body(request)
+    return api.jres({"ok": True, "wa_template": OW.wa_template_set(request, body.get("text"))})
+
+
 async def _h_api_owners_link(request):
     # Delegate to the existing owner-link manager (finance-write gated inside;
     # create/regenerate/revoke + full audit live there).
@@ -624,6 +645,10 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/statement/edit", _guarded(_h_api_stmt_edit, write=True))
     app.router.add_post("/erp/api/owners/statement/publish", _guarded(_h_api_stmt_publish, write=True))
     app.router.add_get("/erp/api/owners/statement/diff", _guarded(_h_api_stmt_diff))
+    app.router.add_get("/erp/api/owners/cycle", _guarded(_h_api_cycle))
+    app.router.add_post("/erp/api/owners/cycle/status", _guarded(_h_api_cycle_status, write=True))
+    app.router.add_post("/erp/api/owners/cycle/links", _guarded(_h_api_cycle_links, write=True))
+    app.router.add_post("/erp/api/owners/cycle/template", _guarded(_h_api_cycle_template, write=True))
     app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
     app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
     app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))

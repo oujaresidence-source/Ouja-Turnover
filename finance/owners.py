@@ -889,6 +889,238 @@ def statement_recompute_diff(owner, mkey):
             "changed": any((delta[k] or 0) != 0 for k in delta) if snap else True}
 
 
+# ====================== Slice 3: دورة الشهر — the monthly cycle board ======================
+
+import os as _os
+
+# Anomaly thresholds — env-configurable, sane defaults.
+ANOM_NET_DEV_PCT = float(_os.environ.get("OWNER_ANOM_NET_DEV_PCT", "30"))      # vs 3-month avg
+ANOM_EXCLUDED_SAR = float(_os.environ.get("OWNER_ANOM_EXCLUDED_SAR", "500"))   # excluded reference value
+ANOM_RECEIPT_SAR = float(_os.environ.get("OWNER_ANOM_RECEIPT_SAR", "200"))     # expense without receipt (slice 4)
+
+_STATUSES = ("draft", "ready", "reviewed", "sent", "opened")
+
+_WA_DEFAULT = ("مساء الخير {owner} 🌙\n"
+               "كشف حسابك لشهر {month} جاهز — صافيك {net} ريال.\n"
+               "تقدر تفتحه من رابطك الخاص:\n{link}\n"
+               "أي ملاحظة نسولف فيها على طول 🙏")
+
+
+def wa_template():
+    st = _terms_store()
+    return (st.get("settings") or {}).get("wa_template") or _WA_DEFAULT
+
+
+def wa_template_set(request, text):
+    st = _terms_store()
+    st.setdefault("settings", {})
+    before = st["settings"].get("wa_template")
+    st["settings"]["wa_template"] = str(text or "")[:1000] or _WA_DEFAULT
+    terms_version_add(api.actor(request), "wa_template", "settings", before, st["settings"]["wa_template"])
+    return st["settings"]["wa_template"]
+
+
+def _prev_months(mkey, n=3):
+    y, m = int(mkey[:4]), int(mkey[5:7])
+    out = []
+    for _ in range(n):
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+        out.append("%04d-%02d" % (y, m))
+    return out
+
+
+def owner_anomalies(owner, mkey, rep):
+    """Pre-send checks for one owner-month. `rep` = the month's report (memoized)."""
+    B = _B()
+    out = []
+    if rep is None:
+        return [{"key": "no_report", "sev": "bad",
+                 "ar": "ما انحسب كشف", "en": "No statement computed"}]
+    net = float(rep.get("owner_net") or 0)
+    # 1) net deviation vs the owner's own 3-month average
+    prior = []
+    for pm in _prev_months(mkey, 3):
+        try:
+            pr = B._owner_month_report(owner, pm)
+        except Exception:
+            pr = None
+        if pr is not None and pr.get("owner_net") is not None:
+            prior.append(float(pr["owner_net"]))
+    if prior:
+        avg = sum(prior) / len(prior)
+        if abs(avg) > 1 and abs(net - avg) / abs(avg) * 100.0 > ANOM_NET_DEV_PCT:
+            dev = round((net - avg) / abs(avg) * 100.0)
+            out.append({"key": "net_deviation", "sev": "warn",
+                        "ar": "الصافي %+d%% عن متوسط ٣ أشهر (%s)" % (dev, "{:,.0f}".format(avg)),
+                        "en": "Net %+d%% vs 3-month avg (%s)" % (dev, "{:,.0f}".format(avg))})
+    es = rep.get("excluded_summary") or {}
+    # 2) excluded-reservation value above threshold
+    excl_val = float(es.get("needs_review_reference") or 0) + float(es.get("manual_excluded_value") or 0)
+    if excl_val > ANOM_EXCLUDED_SAR:
+        out.append({"key": "excluded_value", "sev": "warn",
+                    "ar": "قيمة مستبعدة %s ريال" % "{:,.0f}".format(excl_val),
+                    "en": "Excluded value SAR %s" % "{:,.0f}".format(excl_val)})
+    # 3) missing payout count
+    if int(es.get("needs_review") or 0) > 0:
+        out.append({"key": "missing_payout", "sev": "bad",
+                    "ar": "%d حجز بانتظار تأكيد المبلغ" % es["needs_review"],
+                    "en": "%d bookings awaiting amount" % es["needs_review"]})
+    # 4) zero-revenue unit (in-contract, whole month, no income)
+    zero_units = [a.get("apartment") for a in (rep.get("apartments") or [])
+                  if not float(a.get("total_income") or 0)]
+    if zero_units:
+        out.append({"key": "zero_revenue_unit", "sev": "warn",
+                    "ar": "وحدة بدون دخل: " + "، ".join(str(u) for u in zero_units[:4]),
+                    "en": "Zero-revenue unit: " + ", ".join(str(u) for u in zero_units[:4])})
+    # 5) unverified expenses on his units (would be missing from the statement)
+    try:
+        listings = B.get_listings_map() or {}
+        lids = set(B._owner_lids(owner, listings))
+        start, end = B._month_bounds(mkey)
+        pend = 0
+        for e in B._expenses.values():
+            if e.get("listing_id") not in lids:
+                continue
+            d = _pdate(e.get("expense_date"))
+            if d is None or not (start <= d <= end):
+                continue
+            if B._exp_canonical_status(e) != "verified":
+                pend += 1
+        if pend:
+            out.append({"key": "pending_expenses", "sev": "warn",
+                        "ar": "%d مصروف غير متحقق على وحداته" % pend,
+                        "en": "%d unverified expenses on his units" % pend})
+    except Exception:
+        pass
+    # 6) big expense without a receipt (slice 4 ties the proxy in)
+    noreceipt = [x for x in (rep.get("exp_lines") or [])
+                 if float(x.get("amount") or 0) >= ANOM_RECEIPT_SAR
+                 and not (x.get("receipt_url") or "").strip() and not x.get("manual")]
+    if noreceipt:
+        out.append({"key": "receipt_missing", "sev": "warn",
+                    "ar": "%d مصروف ≥%d بدون فاتورة" % (len(noreceipt), int(ANOM_RECEIPT_SAR)),
+                    "en": "%d expenses ≥%d without receipt" % (len(noreceipt), int(ANOM_RECEIPT_SAR))})
+    return out
+
+
+def cycle_board(mkey):
+    """One row per owner for the month: status, net, anomalies, link state."""
+    B = _B()
+    owners = sorted({(r.get("owner") or "").strip() for r in api._registry_rows()
+                     if (r.get("owner") or "").strip()})
+    links = getattr(B, "_owner_links", None) or {}
+    rows = []
+    for o in owners:
+        rec = stmt_rec(o, mkey)
+        status = (rec or {}).get("status") or "draft"
+        sent_at = ""
+        for ev in reversed((rec or {}).get("status_log") or []):
+            if ev.get("to") == "sent":
+                sent_at = ev.get("at") or ""
+                break
+        lk = links.get(o) or {}
+        # فتحها flips automatically off the existing opened_at touch
+        if status == "sent" and lk.get("opened_at") and sent_at and lk["opened_at"] >= sent_at:
+            rec = stmt_rec(o, mkey, create=True)
+            rec["status"] = "opened"
+            rec.setdefault("status_log", []).append(
+                {"at": lk["opened_at"], "by": "owner-open", "to": "opened"})
+            status = "opened"
+            _stmt_save()
+        try:
+            rep = B._owner_month_report(o, mkey)
+        except Exception:
+            rep = None
+        anomalies = owner_anomalies(o, mkey, rep)
+        prof = (_terms_store()["owners"] or {}).get(o) or {}
+        pub = (rec or {}).get("published") or {}
+        rows.append({
+            "owner": o, "phone": prof.get("phone") or "",
+            "active": prof.get("active", True),
+            "units": len([r for r in api._registry_rows() if (r.get("owner") or "").strip() == o]),
+            "net": (rep or {}).get("owner_net"),
+            "status": status,
+            "published_version": pub.get("version"),
+            "anomalies": anomalies,
+            "flagged": bool(anomalies),
+            "link": {"exists": bool(lk.get("token")), "active": bool(lk.get("active")),
+                     "url": ("/fin/o/" + lk["token"]) if (lk.get("token") and lk.get("active")) else "",
+                     "opened_at": lk.get("opened_at") or ""},
+        })
+    # flagged first («راجع هذي قبل الإرسال»), then by name
+    rows.sort(key=lambda r: (not r["flagged"], r["owner"]))
+    counts = {"total": len(rows),
+              "ready": sum(1 for r in rows if r["status"] in ("ready", "reviewed", "sent", "opened")),
+              "sent": sum(1 for r in rows if r["status"] in ("sent", "opened")),
+              "opened": sum(1 for r in rows if r["status"] == "opened"),
+              "flagged": sum(1 for r in rows if r["flagged"])}
+    total_net = round(sum(float(r["net"]) for r in rows if r["net"] is not None), 2)
+    return {"ok": True, "month": mkey, "rows": rows, "counts": counts,
+            "portfolio_net": total_net, "wa_template": wa_template(),
+            "thresholds": {"net_dev_pct": ANOM_NET_DEV_PCT,
+                           "excluded_sar": ANOM_EXCLUDED_SAR,
+                           "receipt_sar": ANOM_RECEIPT_SAR},
+            "done": counts["sent"] >= counts["total"] and counts["total"] > 0}
+
+
+def cycle_status_set(request, body):
+    """Status transition for one/many owners (bulk). Forward or back — every
+    move is logged with who/when."""
+    to = (body.get("to") or "").strip()
+    if to not in _STATUSES:
+        return {"error": "bad_status"}, 400
+    mkey = api._month_key_or_now(body.get("m"))
+    owners = body.get("owners") or ([body.get("owner")] if body.get("owner") else [])
+    owners = [str(o).strip() for o in owners if str(o or "").strip()]
+    if not owners:
+        return {"error": "owners_required"}, 400
+    now = datetime.now(_B().TZ).isoformat(timespec="seconds")
+    actor = api.actor(request)
+    changed = []
+    for o in owners:
+        rec = stmt_rec(o, mkey, create=True)
+        if rec.get("status") == to:
+            continue
+        rec.setdefault("status_log", []).append({"at": now, "by": actor,
+                                                 "from": rec.get("status"), "to": to})
+        rec["status"] = to
+        stmt_audit_add(rec, actor, "status", to, None, None, body.get("reason") or "")
+        changed.append(o)
+    _stmt_save()
+    return {"ok": True, "changed": changed, "to": to}, 200
+
+
+def cycle_links(request, body):
+    """Link hygiene: action=regen_all (old tokens die, logged) or copy_all
+    (the owner+URL list for manual sending)."""
+    B = _B()
+    action = (body.get("action") or "").strip()
+    owners = sorted({(r.get("owner") or "").strip() for r in api._registry_rows()
+                     if (r.get("owner") or "").strip()})
+    actor = api.actor(request)
+    if action == "regen_all":
+        out = []
+        for o in owners:
+            rec = B._owner_link_regenerate(o, actor)
+            out.append({"owner": o, "url": "/fin/o/" + rec["token"]})
+        try:
+            B.log_event("finance", "جُدّدت روابط الملاك كلها (%d) — الروابط القديمة ماتت" % len(out))
+        except Exception:
+            pass
+        return {"ok": True, "links": out, "regenerated": len(out)}, 200
+    if action == "copy_all":
+        links = getattr(B, "_owner_links", None) or {}
+        out = []
+        for o in owners:
+            lk = links.get(o) or {}
+            if lk.get("token") and lk.get("active"):
+                out.append({"owner": o, "url": "/fin/o/" + lk["token"]})
+        return {"ok": True, "links": out}, 200
+    return {"error": "bad_action"}, 400
+
+
 def diagnose(owner, mkey):
     """The 0b reconciliation table for (owner, month). Pure read — no writes."""
     B = _B()
