@@ -12,14 +12,26 @@
 </head>
 <body>
 <div id="app">
-  <main class="boot-hero">
-    <div class="boot-card">
-      <div class="boot-logo">عوجا</div>
-      <h1>المركز المالي <span class="v2">v2</span></h1>
-      <p class="boot-sub">النظام الجديد قيد البناء — وصلت المرحلة ٠ للإنتاج بنجاح.</p>
-      <div class="boot-check" id="liveCheck">…</div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">عوجا</span>
+      <span class="brand-title" id="appTitle">المركز المالي</span>
     </div>
-  </main>
+    <div class="top-meta">
+      <div class="health" id="healthWrap" role="img">
+        <svg viewBox="0 0 36 36" width="30" height="30" aria-hidden="true">
+          <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--surface-3)" stroke-width="4"></circle>
+          <circle id="healthArc" cx="18" cy="18" r="15.5" fill="none" stroke="var(--accent)" stroke-width="4"
+                  stroke-linecap="round" stroke-dasharray="0 97.4" transform="rotate(-90 18 18)"></circle>
+        </svg>
+        <span class="health-txt"><b id="healthPct">—</b><i id="healthLbl"></i></span>
+      </div>
+      <div class="chip" id="bankAge" hidden></div>
+      <button class="lang-btn" id="langBtn" type="button">EN</button>
+    </div>
+  </header>
+  <nav class="wsnav" id="wsnav" aria-label="workspaces"></nav>
+  <main id="view" tabindex="-1"></main>
   <footer class="build-stamp" id="buildStamp">
     <span class="bs-item">ERP <b>__ERP_VERSION__</b></span>
     <span class="bs-sep">·</span>
@@ -28,6 +40,7 @@
     <span class="bs-item">__ERP_BUILT__</span>
   </footer>
 </div>
+<div id="toasts" aria-live="polite"></div>
 <script>window.__ERP_BUILD__={version:'__ERP_VERSION__',commit:'__ERP_COMMIT__',built:'__ERP_BUILT__'};</script>
 <script src="/erp/static/erp.js?v=__ERP_COMMIT__"></script>
 </body>

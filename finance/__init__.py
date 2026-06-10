@@ -36,7 +36,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s0"
+ERP_VERSION = "2.0.0-s1"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -115,10 +115,44 @@ async def _h_erp(request):
     return web.Response(text=html, content_type="text/html")
 
 
+# ---------------- API handlers (auth enforced here — /erp/* is outside the
+# /api/* role middleware in bot.py, so nothing is implicit) ----------------
+
+async def _h_api_work_queue(request):
+    if not api.authed(request):
+        return api.jres({"error": "unauthorized"}, 401)
+    if not api.can_finance(request):
+        return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+    try:
+        return api.jres(await api.work_queue(request))
+    except Exception as e:
+        return api.jres({"error": "work_queue_failed", "detail": str(e)[:300]}, 500)
+
+
+async def _h_api_approve(request):
+    if not api.authed(request):
+        return api.jres({"error": "unauthorized"}, 401)
+    if not api.can_finance(request):
+        return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    try:
+        data, status = api.approve(request, body)
+        return api.jres(data, status)
+    except Exception as e:
+        return api.jres({"error": "approve_failed", "detail": str(e)[:300]}, 500)
+
+
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
     app.router.add_get("/erp", _h_erp)
     app.router.add_get("/erp/version", _h_version)
+    app.router.add_get("/erp/api/work-queue", _h_api_work_queue)
+    app.router.add_post("/erp/api/approve", _h_api_approve)
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True

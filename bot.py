@@ -14047,6 +14047,7 @@ const T = {
     plab_high:'عالية', plab_med:'متوسطة', plab_low:'منخفضة', plab_nodata:'لا بيانات كافية', plab_diff:'الفرق',
     plab_exprev:'الإيراد المتوقع', plab_prob:'احتمال الحجز', plab_band:'نطاق السعر التاريخي', plab_booked:'انحجزت',
     plab_preview:'معاينة', plab_action:'الإجراء', plab_lastgen:'آخر تحديث للبيانات', plab_regen:'تحديث البيانات',
+    erp:'المركز المالي الجديد',
     fb:'المركز المالي', fb_sub:'طبقة تحكّم ومطابقة حول دافترة — استيراد أول، بلا أرقام وهمية، وترحيل بعد التحقق',
     fb_setup:'الإعداد والاستيراد', fb_daftra:'استيراد دافترة', fb_contracts:'ملفات العقود', fb_bank:'كشف البنك',
     fb_inbox:'الوارد المالي', fb_approval:'مركز الاعتماد', fb_recon:'المطابقة', fb_advances:'العهد', fb_synclog:'سجل دافترة',
@@ -14368,6 +14369,7 @@ const T = {
     plab_high:'High', plab_med:'Medium', plab_low:'Low', plab_nodata:'Not enough data', plab_diff:'Difference',
     plab_exprev:'Expected revenue', plab_prob:'Booking probability', plab_band:'Historical price band', plab_booked:'Booked',
     plab_preview:'Preview', plab_action:'Action', plab_lastgen:'Data generated', plab_regen:'Refresh data',
+    erp:'Finance ERP (new)',
     fb:'Financial Brain', fb_sub:'Control + reconciliation layer around Daftra — import-first, no fake numbers, post after verify',
     fb_setup:'Setup & Import', fb_daftra:'Daftra Import', fb_contracts:'Contract Profiles', fb_bank:'Bank Upload',
     fb_inbox:'Financial Inbox', fb_approval:'Approval Center', fb_recon:'Reconciliation', fb_advances:'Employee advances', fb_synclog:'Daftra Sync Log',
@@ -15044,6 +15046,7 @@ const NAV = [
   {id:'pmo',     ic:ICN.pmo, tk:'pmo'},
   {id:'expenses',ic:ICN.expenses, tk:'expenses', badge:'expenses'},
   {id:'finance', ic:ICN.finance, tk:'finance'},
+  {id:'erp',     ic:ICN.fb, tk:'erp'},
   {id:'fb',      ic:ICN.fb, tk:'fb'},
   {id:'guests',  ic:ICN.guests, tk:'guests'},
   {id:'gw',      ic:ICN.gw, tk:'gw'},
@@ -15105,7 +15108,7 @@ const NAV_CATS = [
   {tk:'cat_ops',      ids:['inbox','calendar','clean_center','tickets','clean','cleanteams','listings','quality','pmo','design']},
   {tk:'cat_pricing',  ids:['pricing','plab','strat','rev']},
   {tk:'cat_owner_sales', ids:['quote']},
-  {tk:'cat_finance',  ids:['expenses','finance','fb','weekly']},
+  {tk:'cat_finance',  ids:['erp','expenses','finance','fb','weekly']},
   {tk:'cat_guests',   ids:['guests','gw','reviews']},
   {tk:'cat_system',   ids:['users','learn','log']}
 ];
@@ -15312,6 +15315,7 @@ function refreshView(id){
   }
 }
 function go(id){
+  if(id==='erp'){ window.location.href='/erp?token='+encodeURIComponent(tok()); return; }   // the new finance system is its own page
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
