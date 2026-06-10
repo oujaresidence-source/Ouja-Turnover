@@ -1107,7 +1107,7 @@ def _lm_baseline(lid, date_iso, day_orig, day_row):
 
 def _lm_floor_context(date_iso):
     ctx = {"global_floor": int(round(DISCOUNT_FLOOR or 0)),
-           "manual": {}, "unit_bands": {}, "error": ""}
+           "manual": {}, "unit_bands": {}, "error": "", "date": None}
     try:
         ctx["manual"] = dict(_pe_floor_overrides)
     except Exception:
@@ -1117,6 +1117,7 @@ def _lm_floor_context(date_iso):
         dtype, _ev = _pe_date_type(d)
         models = _pe_get()
         ctx["dtype"] = dtype
+        ctx["date"] = d
         ctx["unit_bands"] = models.get("unit_bands", {}) if isinstance(models, dict) else {}
     except Exception as e:
         ctx["error"] = str(e)[:180]
@@ -1128,7 +1129,19 @@ def _lm_floor_for(lid, ctx):
     dtype = ctx.get("dtype") or "weekday"
     band = (ctx.get("unit_bands") or {}).get(f"{int(lid)}||{dtype}") or {}
     median = band.get("median") or 0
-    adr_floor = int(round(0.70 * float(median))) if median else 0
+    # C-2 locked decision: the floor derives from the DNA BASE × 0.75 clamped to the
+    # tier minimum — never from peak, and no longer 0.70×median.
+    adr_floor = 0
+    try:
+        cell, du = _dna_cell_for(int(lid), ctx.get("date") or datetime.now(TZ).date())
+        if cell and cell.get("floor"):
+            adr_floor = int(cell["floor"])
+        elif median:
+            adr_floor = int(round(0.75 * float(median)))
+        if du and du.get("tier_min"):
+            adr_floor = max(adr_floor, int(du["tier_min"]))
+    except Exception:
+        adr_floor = int(round(0.75 * float(median))) if median else 0
     return {
         "global_floor": global_floor,
         "manual_floor": manual_floor,
@@ -15561,59 +15574,37 @@ function _pccDropSpeed(median, occFrac){ var spd=1, m=(median!=null?Math.round(N
   if(m!=null){ if(m>=700) spd*=0.8; else if(m<=350) spd*=1.15; }
   if(occFrac!=null){ if(occFrac<0.4) spd*=1.25; else if(occFrac>0.7) spd*=0.85; }
   return Math.max(0.5, Math.min(1.6, spd)); }
-function pccRescueReco(action, cur, floor, median, demand, daysOut, hr, allowBelow, dropSpeed){
-  function pc(v){ if(v==null||v===''||v==='null') return null; var n=Math.round(Number(v)); return isNaN(n)?null:n; }
-  cur=pc(cur); var fl=pc(floor), med=pc(median);
-  function out(price,kind,reason,can,cannot){ return {price:(price!=null?Math.round(price):null),kind:kind,reason_ar:reason,can_apply:!!can,cannot_reason:cannot||''}; }
-  if(cur==null||cur<=0) return out(cur,'hold','ما فيه سعر حالي واضح من Hostaway',false,'no_current_price');
-  var floorV=(fl!=null&&fl>0)?fl:0;
-  if(floorV&&cur<=floorV) return out(cur,'hold_low','السعر الحالي منخفض أصلًا — ما ننزل أكثر',false,'at_or_below_floor');
-  if(action==='manual') return out(cur,'hold','وضع يدوي — اختر السعر بنفسك',false,'manual_mode');
-  if(action==='protect_adr'){
-    if(demand!=='weak'&&med!=null&&cur<med){ var tgt=Math.round(Math.min(med, cur+(med-cur)*0.5)); if(tgt>cur) return out(tgt,'raise','حماية السعر — الطلب يسمح برفع لطيف نحو المتوسط',true); }
-    return out(cur,'hold','حماية السعر — نثبّت السعر الحالي',true);
-  }
-  if(action==='fill_tonight'||action==='balanced_recovery'){
-    var horizon=(action==='fill_tonight')?2:10, base=(action==='fill_tonight')?0.25:0.15;
-    var ds=(typeof dropSpeed==='number'&&dropSpeed>0)?dropSpeed:1; var maxpct=Math.min(0.45, base*ds);
-    var dleft=(daysOut!=null&&!isNaN(daysOut))?Math.max(0,Math.floor(daysOut)):horizon;
-    var closeness=horizon?Math.max(0,Math.min(1,(horizon-dleft)/horizon)):1;
-    var h=(typeof hr==='number'&&!isNaN(hr))?hr:12;
-    var tod=(h>=18)?1.0:((h>=12)?0.75:0.5);
-    var pct=maxpct*closeness*tod;
-    if(pct<=0) return out(cur,'no_change','بعيد عن موعد الدخول — نثبّت الآن',true);
-    var target=Math.round(cur*(1-pct));
-    var below=(floorV&&target<floorV);
-    if(below&&!allowBelow) target=floorV;
-    if(target>=cur) return out(cur,'no_change','النزول المقترح بسيط — نثبّت',true);
-    var rsn=(action==='fill_tonight')?'ملء الليلة: ننزل السعر مع قرب الموعد':'تعافٍ متوازن: نزول لطيف على الأيام القريبة';
-    if(below&&allowBelow) rsn+=' (تحت الحد الأدنى — استثناء)';
-    return out(target,'drop',rsn,true);
-  }
-  return out(cur,'hold','نثبّت السعر الحالي',true);
-}
 async function pccPreview(a){
   var ar=(L==='ar'); var s=_pccDefScope(a);
-  _pcc.pv={action:a, start:s.start, end:s.end, allowBelow:false, truth:{}, snap:((D.pcc&&D.pcc.generated_at)||'')};
+  _pcc.pv={action:a, start:s.start, end:s.end, allowBelow:false, truth:{}, rescue:{}, snap:((D.pcc&&D.pcc.generated_at)||'')};
   toast(ar?'⏳ نقرأ الأسعار الحيّة من Hostaway…':'⏳ Reading live Hostaway prices…');
-  var tc; try{ tc=await api('/api/pricing/truth-check?refresh=1&start='+encodeURIComponent(s.start)+'&end='+encodeURIComponent(s.end)); }catch(_){ tc=null; }
-  if(tc){ _pcc.truth=tc; (tc.rows||[]).forEach(function(r){ if(r.hostaway_current_price!=null) _pcc.pv.truth[r.listing_id+'|'+r.date]=r.hostaway_current_price; }); }
+  // C-2 one-brain: the SERVER computes every rescue target (action passed through);
+  // this JS only renders what comes back. No local price math.
+  var tc; try{ tc=await api('/api/pricing/truth-check?refresh=1&action='+encodeURIComponent(a)+'&start='+encodeURIComponent(s.start)+'&end='+encodeURIComponent(s.end)); }catch(_){ tc=null; }
+  if(tc){ _pcc.truth=tc; (tc.rows||[]).forEach(function(r){
+    var k=r.listing_id+'|'+r.date;
+    if(r.hostaway_current_price!=null) _pcc.pv.truth[k]=r.hostaway_current_price;
+    if(r.rescue) _pcc.pv.rescue[k]={rescue:r.rescue, floor:r.floor, median:r.median};
+  }); }
   _pcc.pv.snap=((D.pcc&&D.pcc.generated_at)||'');     // bind the preview to the snapshot it was built from
   pccPvRender();
 }
 function pccPvRows(){
-  var pv=_pcc.pv||{}, d=D.pcc||{}; var rows=[]; var truth=pv.truth||{};
-  var demand=((d.demand||{}).signal)||'normal'; var hr=_pccRiyadhHour(); var today=_pccToday();
+  var pv=_pcc.pv||{}, d=D.pcc||{}; var rows=[]; var truth=pv.truth||{}; var rescues=pv.rescue||{};
+  var demand=((d.demand||{}).signal)||'normal'; var today=_pccToday();
   (d.units||[]).forEach(function(u){
     if(pv.action==='fill_tonight' && !((u.current||{}).empty_nights_7>0)) return;
-    var dsp=_pccDropSpeed((u.history||{}).median_adr, (((u.summary||{}).occupancy_7)!=null?u.summary.occupancy_7/100:null));
     (u.calendar_14||[]).forEach(function(x){
       if(!x.date || x.date<pv.start || x.date>pv.end) return;
-      var fresh=truth[u.listing_id+'|'+x.date];
+      var k=u.listing_id+'|'+x.date;
+      var fresh=truth[k];
       var cur=(fresh!=null?fresh:x.current_price); var stale=(fresh==null);
       if(cur==null) return;
-      var fl=x.floor, med=x.median, daysOut=_pccDaysOut(x.date, today);
-      var rec=pccRescueReco(pv.action, cur, fl, med, demand, daysOut, hr, !!pv.allowBelow, dsp);
+      var sr=rescues[k];                      // server-computed (display-only here)
+      if(!sr || !sr.rescue) return;           // no server number → no row (never invent one)
+      var rec=sr.rescue;
+      var fl=(sr.floor!=null?sr.floor:x.floor), med=(sr.median!=null?sr.median:x.median);
+      var daysOut=_pccDaysOut(x.date, today);
       var sp=rec.price; var delta=(sp!=null?sp-cur:0);
       var below=(fl!=null&&sp!=null&&sp<fl);
       var canApply=!!rec.can_apply && (delta!==0) && !stale && !(below&&!pv.allowBelow);
@@ -15776,12 +15767,11 @@ function pccBoard(){
 function pccCardReco(u){
   var cal0=(u.calendar_14||[])[0]||{}; var rec=u.recommendation||{}, fl=u.floor||{}, hi=u.history||{};
   var cp=(cal0.current_price!=null?cal0.current_price:rec.current_price);
-  var flv=(cal0.floor!=null?cal0.floor:fl.final_floor);
-  var med=(cal0.median!=null?cal0.median:hi.median_adr);
-  var demand=((D.pcc||{}).demand||{}).signal||'normal';
-  var dout=(cal0.date?_pccDaysOut(cal0.date,_pccToday()):0);
-  var occ=(((u.summary||{}).occupancy_7)!=null)?((u.summary.occupancy_7)/100):null;
-  return pccRescueReco('balanced_recovery', cp, flv, med, demand, dout, _pccRiyadhHour(), false, _pccDropSpeed(hi.median_adr, occ));
+  // C-2 one-brain: the card shows the SERVER PE rec's final — never local math.
+  var sp=(cal0.suggested_price!=null?cal0.suggested_price:rec.suggested_price);
+  if(sp==null||cp==null) return {price:(sp!=null?sp:cp), kind:'hold', reason_ar:(L==='ar'?'ما فيه اقتراح من المحرك لهالليلة':'no engine suggestion for this night'), can_apply:false};
+  var kind=(sp<cp?'drop':(sp>cp?'raise':'hold'));
+  return {price:sp, kind:kind, reason_ar:(L==='ar'?'اقتراح المحرك (نفس رقم التقويم وليش هالسعر)':'engine suggestion (same number as the calendar)'), can_apply:(sp!==cp)};
 }
 function pccKindChip(kind){ var ar=(L==='ar');
   if(kind==='hold_low') return {t:(ar?'السعر منخفض أصلًا':'Already low'),c:'mut'};
@@ -15810,10 +15800,8 @@ function pccCard(u){
 }
 function pccMini(u){
   var cal=(u.calendar_14||[]); if(!cal.length) return '';
-  var demand=((D.pcc||{}).demand||{}).signal||'normal'; var hr=_pccRiyadhHour(); var today=_pccToday();
-  var dsp=_pccDropSpeed((u.history||{}).median_adr, (((u.summary||{}).occupancy_7)!=null?u.summary.occupancy_7/100:null));
-  var cells=cal.slice(0,14).map(function(x){ var cp=x.current_price;
-    var sp=pccRescueReco('balanced_recovery', cp, x.floor, x.median, demand, _pccDaysOut(x.date,today), hr, false, dsp).price;
+  // C-2 one-brain: the 14-day strip colors by the SERVER PE rec per night.
+  var cells=cal.slice(0,14).map(function(x){ var cp=x.current_price, sp=x.suggested_price;
     var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="muted" style="font-size:10px;margin-inline-end:4px">'+(L==='ar'?'١٤ يوم:':'14d:')+'</span>'+cells+'</div>';
 }
@@ -15824,7 +15812,7 @@ function pccWhy(lid){
   var cal0=(u.calendar_14||[])[0]||{}; var cp=(cal0.current_price!=null?cal0.current_price:rec.current_price);
   var rr=pccCardReco(u); var sp=rr.price; var delta=(sp!=null&&cp!=null)?(sp-cp):null;
   var act=(rr.kind==='drop'?(ar?'ننزّل':'lower'):(rr.kind==='raise'?(ar?'رفع لطيف':'gentle raise'):(rr.kind==='hold_low'?(ar?'منخفض أصلًا':'already low'):(ar?'نثبّت':'hold'))));
-  var med=hi.median_adr, adr70=(med!=null?Math.round(med*0.7):null);
+  var med=hi.median_adr, adr75=(med!=null?Math.round(med*0.75):null);
   var belowFloor=(sp!=null&&fl.final_floor!=null&&sp<fl.final_floor);
   function row(lbl,val){ return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)"><span class="muted">'+esc(lbl)+'</span><b>'+val+'</b></div>'; }
   function sec(title,inner){ return '<div style="margin-top:12px"><div style="font-size:12px;font-weight:800;margin-bottom:4px">'+esc(title)+'</div>'+inner+'</div>'; }
@@ -15837,8 +15825,8 @@ function pccWhy(lid){
     +'<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0"><span class="muted">'+(ar?'الإجراء':'Action')+'</span>'+pccChip(act,(rr.kind==='drop'?'gold':(rr.kind==='raise'?'green':'mut')))+'</div></div>';
   // floor formula
   var floorInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'
-    +(ar?'الحد الأدنى الآمن = الأعلى بين الحد الأدنى اليدوي و٧٠٪ من متوسط سعر الشقة المحقق.':'Safe floor = max(manual floor, 70% of the unit’s realized median ADR).')+'<br>'
-    +(ar?'٧٠٪ من المتوسط ':'70% of median ')+(med!=null?fmt(med):'—')+' = '+(adr70!=null?fmt(adr70):'—')+'<br>'
+    +(ar?'الحد الأدنى الآمن = الأعلى بين: الحد اليدوي، و«أساس بصمة السعر» ×٠٫٧٥، والحد الأدنى للفئة. يُحسب من الأساس — أبداً مو من الذروة.':'Safe floor = max(manual floor, Price-DNA base ×0.75, tier minimum) — derived from BASE, never from peak.')+'<br>'
+    +(ar?'٧٥٪ من المتوسط ':'75% of median ')+(med!=null?fmt(med):'—')+' ≈ '+(adr75!=null?fmt(adr75):'—')+'<br>'
     +'<b>'+(ar?'الحد الأدنى النهائي: ':'Final floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?'غير محدد':'n/a'))+'</b>'
     +(fl.final_floor==null&&fl.missing_reason?('<br><span class="muted" style="font-size:10.5px">'+esc(fl.missing_reason)+'</span>'):'')+'</div>'
     +(belowFloor?('<div style="margin-top:8px;background:rgba(196,67,67,.1);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;color:#a23b30;font-weight:700">'+(ar?'⚠ المقترح أقل من الحد الأدنى. لا ينطبق تلقائيًا — استثناء يحتاج موافقتك فقط لإنقاذ ليلة فاضية.':'⚠ Suggested is below floor. Never automatic — an exception that needs your explicit OK only to save an empty night.')+'</div>'):'');
@@ -27020,52 +27008,86 @@ def _pe_resolve_band(models, lid, g, dtype, ev):
         return gb, "group"
     return None, None
 
-def _pe_anchor_reco(cur, median, floor, ceiling, occ, days_out, hour, ev=None, band_count=None, lean="balanced"):
-    """THE pricing brain. ANCHOR = the live current price (Hostaway's DP already demand-adjusted it).
-    DEMAND = real cohort occupancy `occ` (fraction of comparable units booked this date). The median
-    only sets floor/ceiling guardrails — it is NEVER the suggested price by default. Returns
-    (rec, action, reason_ar, signal, confidence). NEVER raises unless occ >= ~0.60; no signal → HOLD
-    the live price; below floor → never drop. Pure."""
+def _pe_anchor_reco(cur, median, floor, ceiling, occ, days_out, hour, ev=None, band_count=None,
+                    lean="balanced", cohort_n=None, concede=7, dna_conf=None):
+    """THE pricing brain (C-2). ANCHOR = the live current price. DEMAND = real cohort
+    occupancy, but low occupancy is a weak-demand signal ONLY inside the unit's CONCEDE
+    WINDOW (≈2× its median booking lead): in a short-lead market, far-out nights are
+    ALWAYS mostly empty — that's normal, not weakness. This kills the old ratchet where
+    daily compounding cuts walked every soft night to the floor. Time-of-day deepening
+    applies ONLY to days_out ≤ 1. Floors arrive from Price DNA (base×0.75, tier-clamped).
+    Earned raises (occ ≥ 0.60) are allowed at ANY days_out, capped at the ceiling, and
+    every move is capped at ±20% of the live price. Returns
+    (rec, action, reason_ar, signal, confidence). Pure."""
     cur = int(round(cur))
-    near = max(0.0, min(1.0, 1.0 - days_out / 14.0))                  # closeness to check-in 0..1
-    tod = 0.06 if hour < 12 else (0.12 if hour < 18 else 0.18)        # time-of-day deepening (today/tomorrow)
-    if ev:                                                            # real event → demand high, raise on the live price
-        rec = min(ceiling, int(round(cur * (1 + 0.08 + 0.12 * near))))
+    concede = max(3, min(14, int(concede or 7)))
+    near = max(0.0, min(1.0, 1.0 - days_out / float(concede)))
+    tod = (0.06 if hour < 12 else (0.12 if hour < 18 else 0.18)) if days_out <= 1 else 0.0
+    def cap_step(p):                                  # guardrail 3: max single-step ±20%
+        return int(round(max(cur * 0.80, min(cur * 1.20, p))))
+    if ev:                                            # learned-event path, clamped to [floor, ceiling]
+        rec = cap_step(min(ceiling, max(floor, cur * (1 + 0.08 + 0.12 * near))))
+        if lean == "top":                             # lean top widens raises (never converts)
+            rec = cap_step(min(ceiling, rec + PE_LEAN_STRENGTH * max(0, ceiling - rec)))
         return rec, ("raise" if rec > cur else "hold"), "مناسبة — طلب عالي، نرفع بهدوء.", "ahead", "high"
-    if occ is None or not band_count:                                # no reliable signal → HOLD the live price (not the median)
+    if occ is None or (cohort_n is not None and cohort_n < 5) or not band_count:
         return cur, "hold", "بيانات قليلة لهالتاريخ — ثبّتنا السعر الحالي.", "normal", "low"
-    if occ >= 0.60:                                                  # comparable nights are SELLING → real demand → raise gently
+    hi_conf = "high" if (dna_conf == "own" and (cohort_n or 0) >= 5) else "medium"
+    if occ >= 0.60:                                   # EARNED raise — allowed at any days_out
         up = 0.05 + 0.10 * near * ((occ - 0.60) / 0.40)
-        rec = min(ceiling, int(round(cur * (1 + up))))
-        return rec, ("raise" if rec > cur else "hold"), "وحدات مشابهة تنحجز بنفس التاريخ — طلب فعلي، نرفع بهدوء.", "ahead", "high"
-    if occ <= 0.30:                                                  # cohort mostly EMPTY → weak → step DOWN only
-        if cur <= floor:
-            return cur, "hold", "السعر منخفض أصلًا — ما ننزل أكثر.", "normal", "high"
+        rec = cap_step(min(ceiling, cur * (1 + up)))
+        if lean == "top":
+            rec = cap_step(min(ceiling, rec + PE_LEAN_STRENGTH * max(0, ceiling - rec)))
+        return rec, ("raise" if rec > cur else "hold"), \
+            "وحدات مشابهة تنحجز بنفس التاريخ — طلب فعلي، نرفع بهدوء.", "ahead", hi_conf
+    if days_out > concede:                            # far-out emptiness is NORMAL here, not weak
+        return cur, "hold", \
+            f"باقي {days_out} يوم — أطول من نافذة الحجز المعتادة لهالشقة ({concede} يوم). الفراغ البعيد طبيعي، نثبّت.", \
+            "normal", hi_conf
+    if occ <= 0.30:                                   # weak AND inside the concede window
+        if cur <= floor:                              # guardrail 1: never below the floor
+            return cur, "hold", "السعر منخفض أصلًا — ما ننزل أكثر.", "normal", hi_conf
         cut = (0.05 + tod) * (0.4 + 0.6 * near)
-        rec = max(floor, int(round(cur * (1 - cut))))
-        if lean == "fill":                                          # fill deepens the down-step (never flips to a raise)
+        rec = max(floor, cap_step(cur * (1 - cut)))
+        if lean == "fill":                            # fill deepens the down-step (never flips to a raise)
             rec = max(floor, int(round(rec - PE_LEAN_STRENGTH * (rec - floor))))
-        return rec, ("drop" if rec < cur else "hold"), "أغلب الوحدات المشابهة فاضية بنفس التاريخ — طلب ضعيف، ننزل بهدوء.", "behind", "high"
-    return cur, "hold", "الطلب متوسط — نثبّت قرب السعر الحالي.", "normal", "high"   # mid occupancy → hold near current
+        return rec, ("drop" if rec < cur else "hold"), \
+            "أغلب الوحدات المشابهة فاضية والتاريخ داخل نافذة الحجز — ننزل بهدوء.", "behind", hi_conf
+    return cur, "hold", "الطلب متوسط — نثبّت قرب السعر الحالي.", "normal", hi_conf
 
 def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
                        ev_effect, pace_entry, occ_now_frac, manual_floor=0,
-                       own_max=None, lean="balanced"):
-    """PURE. One night's recommendation. Far-out (>10d) holds the anchor and never
-    pre-discounts (raises early only for events that historically book early); near-in
-    (0-10d) moves with the pace signal toward floor (behind) or ceiling (ahead). Never
-    below the hard floor. Returns a dict, or None if there is no band (omit, don't fake).
-    `own_max` caps a POOLED recommendation to this unit's own realized max ×(1+stretch) so
-    we never suggest a price far above what THIS apartment ever proved (events exempt).
-    `lean` tilts the result toward occupancy ('fill') or price ('top')."""
+                       own_max=None, lean="balanced", lid=None, cohort_n=None):
+    """PURE-ish (reads DNA cache + price log). One night's recommendation (C-2):
+    floors/ceilings come from Price DNA (base×0.75 tier-clamped — NEVER 0.70×median),
+    the concede window comes from the unit's median booking lead, anti-ratchet holds a
+    night the bot already moved <20h ago, and every move is capped ±20% of live.
+    Returns a dict, or None if there is no band (omit, don't fake)."""
     if not band or not band.get("median"):
         return None
     if not current_price or current_price <= 0:        # the anchor is the LIVE price — no live price → omit, never fake
         return None
     median = band["median"]
     days_out = (d - today).days
-    floor = max(int(round(0.70 * median)), int(manual_floor or 0))
-    ceiling = max(int(round(min(band.get("p90") or median * 1.3, 1.5 * median))), floor)   # raises capped near median
+    # ---- C-1 consumption: DNA cell drives base/floor/ceiling/lead when available ----
+    dna_cell = dna_unit = None
+    if lid is not None:
+        try:
+            dna_cell, dna_unit = _dna_cell_for(lid, d)
+        except Exception:
+            dna_cell = dna_unit = None
+    dna_conf = (dna_cell or {}).get("confidence")
+    base = (dna_cell.get("base") if (dna_cell and dna_conf and dna_conf != "none") else median) or median
+    tier_min = (dna_unit or {}).get("tier_min") or 0
+    floor = max(int((dna_cell or {}).get("floor") or round(0.75 * base)),
+                int(tier_min), int(manual_floor or 0))
+    ceiling = int((dna_cell or {}).get("peak")
+                  or round(min(band.get("p90") or base * 1.3, 1.5 * base)))
+    ceiling = max(ceiling, floor)
+    lead = ((dna_unit or {}).get("lead_time_median")
+            or (dna_unit or {}).get("segment_lead_median")
+            or (pace_entry or {}).get("lead_median") or 5)
+    concede = max(3, min(14, 2 * int(lead)))
     # Pooled cap: when borrowing from similar units, don't fly far above this unit's own history.
     pooled_capped = False
     if band_source != "unit" and own_max and not ev:
@@ -27073,16 +27095,43 @@ def _pe_reco_for_night(d, today, dtype, ev, current_price, band, band_source,
         if cap < ceiling:
             ceiling = cap
             pooled_capped = True
-    # DEMAND = real cohort occupancy (occ_now_frac); ANCHOR = the live current price; median only guards.
     typ = pace_entry["typical_occ"].get(days_out) if (pace_entry and pace_entry.get("typical_occ")) else None
     rec, action, reason_ar, signal, conf = _pe_anchor_reco(
         current_price, median, floor, ceiling, occ_now_frac, days_out,
-        datetime.now(TZ).hour, ev=ev, band_count=band.get("count"), lean=lean)
-    confidence = conf if band_source == "unit" else "low"
+        datetime.now(TZ).hour, ev=ev, band_count=band.get("count"), lean=lean,
+        cohort_n=cohort_n, concede=concede, dna_conf=dna_conf)
+    # ---- guardrail 2: anti-ratchet — one bot step per night per ~day ----
+    if lid is not None and action in ("drop", "raise"):
+        try:
+            cutoff = datetime.now(TZ) - timedelta(hours=20)
+            for e in price_change_log(lid, d.isoformat()):
+                if e.get("dry"):
+                    continue
+                ets = _parse_date(str(e.get("ts") or "")[:10])
+                full_ts = None
+                try:
+                    full_ts = datetime.fromisoformat(str(e.get("ts")))
+                    if full_ts.tzinfo is None:
+                        full_ts = full_ts.replace(tzinfo=TZ)
+                except Exception:
+                    pass
+                recent = (full_ts and full_ts >= cutoff) or \
+                         (full_ts is None and ets and ets >= cutoff.date())
+                if recent and e.get("source") in ("strategy", "last-minute", "engine", "command", "bulk"):
+                    rec, action = int(round(current_price)), "hold"
+                    reason_ar = "تحرّكنا على هالليلة خلال آخر ٢٠ ساعة — خطوة وحدة باليوم تكفي."
+                    signal = "normal"
+                    break
+        except Exception:
+            pass
+    confidence = conf if (band_source == "unit" or dna_conf == "own") else \
+                 ("low" if conf == "high" else conf)
     out = {"date": d.isoformat(), "days_out": days_out, "dtype": dtype, "event": ev,
            "recommended": rec, "floor": floor, "ceiling": ceiling, "median": median,
-           "lean": lean, "pooled_capped": pooled_capped,
+           "dna_base": ((dna_cell or {}).get("base")), "dna_confidence": dna_conf,
+           "concede_window": concede, "lean": lean, "pooled_capped": pooled_capped,
            "signal": signal, "band_source": band_source, "band_count": band.get("count"),
+           "cohort_n": cohort_n,
            "occ_now": (round(occ_now_frac, 3) if occ_now_frac is not None else None),
            "typical_occ": (round(typ, 3) if typ is not None else None),
            "confidence": confidence, "action": action, "reason_ar": reason_ar}
@@ -27121,7 +27170,8 @@ def _pricing_rescue_reco(action, hostaway_current, floor, median, demand_signal,
     fill_tonight / balanced_recovery only ever step DOWN (deeper as check-in nears + later in the
     Riyadh day); protect_adr is the ONLY mode that may nudge UP (gently, capped at median, and only
     when demand isn't weak); manual holds. current<=floor → hold_low. Thin/missing inputs → hold at
-    current. Never fabricates. Ported verbatim to JS in pccRescueReco() — keep the two in sync."""
+    current. Never fabricates. C-2 ONE BRAIN: this is the ONLY rescue computer — the JS
+    preview renders the `rescue` rows the truth-check endpoint computes with this."""
     cur = _coerce_price(hostaway_current)
     fl = _coerce_price(floor)
     med = _coerce_price(median)
@@ -27210,6 +27260,12 @@ def _pe_compute_recommendations(horizon=None):
     today = datetime.now(TZ).date()
     horizon = horizon or PE_HORIZON
     per_unit = _pe_fetch_calendars(list(l2g.keys()), today, horizon)
+    try:
+        drift = _dp_drift_check(per_unit)     # C-2: who moved our verified prices?
+        if drift:
+            print(f"DP drift: Hostaway moved {len(drift)} night(s) we applied — see dp_drift_hits.json")
+    except Exception as e:
+        print("dp drift check error:", e)
     occ_book, occ_tot = defaultdict(int), defaultdict(int)
     for lid, days in per_unit.items():
         g = l2g.get(lid)
@@ -27252,7 +27308,8 @@ def _pe_compute_recommendations(horizon=None):
                                    models["events"].get(ev) if ev else None,
                                    pace.get(f"{g}||{dtype}"), occf,
                                    _pe_floor_overrides.get(lid, 0),
-                                   own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid))
+                                   own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid),
+                                   lid=lid, cohort_n=(tot or None))
             if not r:
                 continue
             r.update({"lid": lid, "unit": uname, "group": g})
@@ -27757,7 +27814,8 @@ def _pe_night_detail(lid, date_iso):
         rec = _pe_reco_for_night(d, today, dtype, ev, live_cur, band, source,
                                  models["events"].get(ev) if ev else None,
                                  pace.get(f"{g}||{dtype}"), None, _pe_floor_overrides.get(lid, 0),
-                                 own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid))
+                                 own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid),
+                                 lid=lid)
         if rec:
             rec.update({"lid": lid, "unit": uname, "group": g})
     elif live_cur is not None and live_cur > 0:        # refresh the cached rec's current to live
@@ -27779,8 +27837,9 @@ def _pe_night_detail(lid, date_iso):
     factors.append({"icon": "💰", "key": "أسعار حجوزاتك الفعلية",
                     "text": f"آخر {band['count']} حجز لنفس النوع — المتوسط {band['avg']:,}، الأعلى {band['max']:,} ر.س{src_tail}",
                     "effect": f"{band['count']} حجز"})
-    # 3) cohort occupancy on this date — THE demand signal
+    # 3) cohort occupancy + CONCEDE WINDOW — THE demand signal (C-2 wording)
     occ_now = rec.get("occ_now")
+    concede_w = rec.get("concede_window")
     if occ_now is not None:
         occ_pct = round(occ_now * 100)
         cohort_word = "طلب فعلي قوي" if occ_now >= 0.60 else ("طلب ضعيف" if occ_now <= 0.30 else "طلب متوسط")
@@ -27788,14 +27847,24 @@ def _pe_night_detail(lid, date_iso):
         if rec.get("typical_occ") is not None:
             pw = {"ahead": "أسرع", "behind": "أبطأ"}.get(rec["signal"], "مثل")
             pace_extra = f" ({pw} من المعتاد {round(rec['typical_occ']*100)}٪)"
+        window_extra = ""
+        if concede_w:
+            inside = rec.get("days_out", 0) <= concede_w
+            window_extra = (f" · داخل نافذة الحجز ({concede_w} يوم) — الإشارة تُحتسب"
+                            if inside else
+                            f" · أبعد من نافذة الحجز ({concede_w} يوم) — الفراغ البعيد طبيعي بسوقنا، ما ننزل له")
         factors.append({"icon": "⏱️", "key": "إشغال الوحدات المشابهة لنفس الليلة",
-                        "text": f"وحدات مشابهة محجوزة {occ_pct}٪ لنفس الليلة وباقي {rec['days_out']} يوم — {cohort_word}{pace_extra}",
+                        "text": f"وحدات مشابهة محجوزة {occ_pct}٪ لنفس الليلة وباقي {rec['days_out']} يوم — {cohort_word}{pace_extra}{window_extra}",
                         "effect": _pe_demand_pill(rec["signal"])})
-    # 4) your booking habit (median lead)
-    if pe.get("lead_median") is not None:
+    # 4) your booking habit (median lead → the concede window)
+    if pe.get("lead_median") is not None or concede_w:
+        lead_txt = (f"عادةً هالنوع ينحجز قبل ~{pe['lead_median']} يوم من الوصول"
+                    if pe.get("lead_median") is not None else "عادة الحجز قصيرة بسوقنا")
+        if concede_w:
+            lead_txt += f" — لذلك ننزل فقط داخل آخر {concede_w} يوم"
         factors.append({"icon": "📈", "key": "عادة الحجز عندك",
-                        "text": f"عادةً هالنوع ينحجز قبل ~{pe['lead_median']} يوم من الوصول",
-                        "effect": f"~{pe['lead_median']} يوم"})
+                        "text": lead_txt,
+                        "effect": f"~{pe.get('lead_median', concede_w)} يوم"})
     # 5) event (only if a real event applies)
     if ev:
         eff = models["events"].get(ev) or {}
@@ -27848,6 +27917,74 @@ def _pe_night_detail(lid, date_iso):
             "final": info["final"], "final_color": info["color"], "final_source": info["source"],
             "layers": info["layers"], "changelog": _price_log_view(lid, date_iso)}
 
+# ---- C-2: Hostaway DP drift detector ----
+# After any VERIFIED apply we remember {lid,date,price,ts}. The snapshot pass compares
+# the live calendar price: changed within 24h with no booking and no Ouja write →
+# Hostaway's own dynamic pricing moved it. This is the evidence that (a) our applies
+# aren't silently evaporating while both engines run, and (b) times the DP cutover.
+_dp_drift_watch = _load_json("dp_drift_watch.json", {}) or {}   # "lid|date" -> {price, ts}
+_dp_drift_hits = _load_json("dp_drift_hits.json", []) or []     # [{lid,date,ours,live,detected_at}]
+
+def _dp_drift_record(lid, date_iso, price):
+    try:
+        _dp_drift_watch[f"{int(lid)}|{str(date_iso)[:10]}"] = {
+            "price": int(price), "ts": datetime.now(TZ).isoformat(timespec="seconds")}
+        # prune entries older than 3 days (the 24h window + slack)
+        cutoff = (datetime.now(TZ) - timedelta(days=3)).isoformat(timespec="seconds")
+        for k in [k for k, v in _dp_drift_watch.items() if (v or {}).get("ts", "") < cutoff]:
+            _dp_drift_watch.pop(k, None)
+        _save_json("dp_drift_watch.json", _dp_drift_watch)
+    except Exception as e:
+        print("dp drift record error:", e)
+
+def _dp_drift_check(per_listing_rows):
+    """Called from the snapshot pass with {lid: {date: calendar_row}}. Flags watched
+    nights whose LIVE price moved within 24h with no booking and no Ouja write since.
+    Returns today's hits (also appended to the persisted log)."""
+    now = datetime.now(TZ)
+    hits = []
+    for key, rec in list(_dp_drift_watch.items()):
+        try:
+            lid_s, date_iso = key.split("|", 1)
+            lid = int(lid_s)
+            ts = datetime.fromisoformat(rec["ts"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=TZ)
+            if (now - ts) > timedelta(hours=24):
+                continue
+            row = (per_listing_rows.get(lid) or {}).get(date_iso)
+            if not row:
+                continue
+            if row.get("booked"):
+                _dp_drift_watch.pop(key, None)         # booked — drift question is moot
+                continue
+            live = row.get("price")
+            if not isinstance(live, (int, float)):
+                continue
+            if abs(float(live) - rec["price"]) < 1:
+                continue                                # unchanged — still ours
+            # changed: was it an Ouja write since? consult the price log
+            ours_again = False
+            for e in price_change_log(lid, date_iso):
+                if not e.get("dry") and str(e.get("ts") or "") > rec["ts"]:
+                    ours_again = True
+                    break
+            if ours_again:
+                _dp_drift_watch[key] = {"price": int(round(float(live))), "ts": now.isoformat(timespec="seconds")}
+                continue
+            hit = {"lid": lid, "date": date_iso, "ours": rec["price"],
+                   "live": int(round(float(live))), "detected_at": now.isoformat(timespec="seconds")}
+            hits.append(hit)
+            _dp_drift_hits.append(hit)
+            _dp_drift_watch.pop(key, None)              # report once per apply
+        except Exception:
+            continue
+    if hits:
+        del _dp_drift_hits[:max(0, len(_dp_drift_hits) - 500)]
+        _save_json("dp_drift_hits.json", _dp_drift_hits)
+        _save_json("dp_drift_watch.json", _dp_drift_watch)
+    return hits
+
 def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None, force_dry=None):
     """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN, or force_dry to
     guarantee a no-write test regardless of env). Returns the REAL result — read back to confirm —
@@ -27888,6 +28025,7 @@ def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None, 
         log_price_change(lid, date_iso, old, price, source, reason or "تطبيق سعر", dry=False, confirmed=confirmed)
         if confirmed:
             _pe_baseline_record_write(lid, date_iso, price)   # our write — don't refreeze baseline on it
+            _dp_drift_record(lid, date_iso, price)            # C-2: drift detector watches this night
         return {"ok": True, "dry_run": False, "lid": lid, "date": date_iso, "price": price,
                 "confirmed": confirmed, "actual": actual, "status": (resp or {}).get("status")}
     except Exception as e:
@@ -28240,7 +28378,8 @@ def _plab_ladder(lid, date_iso):
         r = _pe_reco_for_night(d, probe, dtype, ev, cur, band, source,
                                models["events"].get(ev) if ev else None,
                                pace.get(f"{g}||{dtype}"), None, floor,
-                               own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid))
+                               own_max=(own_b.get("max") if own_b else None), lean=pe_lean(lid),
+                               lid=lid)
         if r:
             rungs.append({"bucket": lbl, "lead": _lo, "price": r["recommended"]})
     return {"lid": lid, "date": date_iso, "current": (int(round(cur)) if isinstance(cur, (int, float)) else None),
@@ -28676,12 +28815,15 @@ async def _api_pricing_command(request):
     force = request.query.get("force") in ("1", "true", "yes")
     return _json(await asyncio.to_thread(_pricing_command_snapshot, force))
 
-def _pricing_truth_check(start_iso=None, end_iso=None, refresh=False):
+def _pricing_truth_check(start_iso=None, end_iso=None, refresh=False, action=None, allow_below=False):
     """READ-ONLY. Hostaway calendar is the SOLE source of truth for 'current price'. Fetch FRESH
     calendars (no cache) for the listings the Command Center displays and compare each shown current
     to the live calendar. Never fabricates a dashboard value: dashboard_displayed_price is null when
     the CC asserts nothing for that night. One listing's fetch failure → that row is 'error', the rest
-    still return (never crashes the dashboard)."""
+    still return (never crashes the dashboard).
+    C-2 one-brain: when `action` is given (fill_tonight / balanced_recovery / protect_adr),
+    each row also carries a SERVER-computed `rescue` target via _pricing_rescue_reco — the
+    JS preview renders these numbers and NEVER computes its own."""
     now = datetime.now(TZ); today = now.date()
     sd = _parse_date(start_iso) or today
     ed = _parse_date(end_iso) or (today + timedelta(days=14))
@@ -28701,16 +28843,22 @@ def _pricing_truth_check(start_iso=None, end_iso=None, refresh=False):
         out.update({"ok": False, "errors": [{"code": "snapshot_failed", "detail": str(e)[:160]}]})
         return out
     disp, names, lids = {}, {}, []
+    speed, demand_sig = {}, ((snap.get("demand") or {}).get("signal")) or "normal"
     for u in (snap.get("units") or []):
         lid = u.get("listing_id")
         if lid is None:
             continue
         lids.append(lid); names[lid] = u.get("name")
+        occ7 = ((u.get("summary") or {}).get("occupancy_7"))
+        speed[lid] = _pe_unit_drop_speed(((u.get("history") or {}).get("median_adr")),
+                                         (occ7 / 100.0 if isinstance(occ7, (int, float)) else None))
         for x in (u.get("calendar_14") or []):
             dd = x.get("date")
             if dd and sd.isoformat() <= dd <= ed.isoformat():
                 disp[(lid, dd)] = {"displayed": _coerce_price(x.get("current_price")),
-                                   "suggested": _coerce_price(x.get("suggested_price"))}
+                                   "suggested": _coerce_price(x.get("suggested_price")),
+                                   "floor": _coerce_price(x.get("floor")),
+                                   "median": _coerce_price(x.get("median"))}
     if not lids:
         out["warnings"].append({"code": "no_units", "detail": "no displayed units in range to verify"})
         return out
@@ -28742,6 +28890,18 @@ def _pricing_truth_check(start_iso=None, end_iso=None, refresh=False):
             row["status"] = "mismatched"
             row["reason"] = "dashboard price differs from Hostaway calendar (cached/stale)"
             out["summary"]["mismatched"] += 1; out["summary"]["stale_dashboard"] += 1
+        # C-2 one-brain: SERVER computes the rescue target on the LIVE price; JS only renders.
+        if action and hp is not None:
+            try:
+                row["rescue"] = _pricing_rescue_reco(
+                    action, hp, d.get("floor"), d.get("median"), demand_sig,
+                    (_parse_date(dd) - today).days if _parse_date(dd) else None,
+                    now.hour, allow_below_floor=bool(allow_below),
+                    drop_speed=speed.get(lid, 1.0))
+                row["floor"] = d.get("floor"); row["median"] = d.get("median")
+            except Exception as e:
+                row["rescue"] = {"price": None, "kind": "hold", "reason_ar": "تعذّر حساب الاقتراح",
+                                 "can_apply": False, "cannot_reason": str(e)[:120]}
         out["rows"].append(row)
     out["summary"]["listings_checked"] = len(checked)
     out["rows"] = [r for r in out["rows"] if r["status"] != "matched"] + [r for r in out["rows"] if r["status"] == "matched"]
@@ -28752,9 +28912,13 @@ async def _api_pricing_truth_check(request):
         return _json({"error": "unauthorized"}, 401)
     q = request.query
     refresh = q.get("refresh") in ("1", "true", "yes")
+    action = (q.get("action") or "").strip() or None
+    if action not in (None, "fill_tonight", "balanced_recovery", "protect_adr", "manual"):
+        action = None
+    allow_below = q.get("allow_below") in ("1", "true", "yes")
     try:
         res = await asyncio.to_thread(_pricing_truth_check, (q.get("start") or "")[:10] or None,
-                                      (q.get("end") or "")[:10] or None, refresh)
+                                      (q.get("end") or "")[:10] or None, refresh, action, allow_below)
         return _json(res)
     except Exception as e:
         print("truth-check:", e)
@@ -42442,6 +42606,21 @@ async def reviews_refresh_loop():
         _oujact_prune_done()    # daily safety net even when Discord sweeps don't run
     except Exception as e:
         print("oujact done-prune error:", e)
+    # C-2: daily DP-drift count → Discord (evidence for the DP cutover decision).
+    try:
+        day_ago = (datetime.now(TZ) - timedelta(hours=24)).isoformat(timespec="seconds")
+        todays = [h for h in _dp_drift_hits if (h.get("detected_at") or "") >= day_ago]
+        if todays:
+            names = get_listings_map() or {}
+            lines = "، ".join(f"{names.get(h['lid'], h['lid'])} {h['date']} ({h['ours']}→{h['live']})"
+                              for h in todays[:6])
+            await _post_system_escalation(
+                f"📊 Hostaway DP عدّل {len(todays)} ليلة طبّقناها",
+                f"خلال ٢٤ ساعة، أسعار كتبناها وتأكدنا منها تغيّرت بدون حجز وبدون كتابة منا: {lines}"
+                + (" …" if len(todays) > 6 else ""), severity="med")
+            log_event("pricing", f"DP drift · {len(todays)} ليلة تعدّلت من Hostaway DP خلال ٢٤ ساعة")
+    except Exception as e:
+        print("dp drift daily error:", e)
     # C-1: nightly Price DNA rebuild — background, never page-load.
     try:
         await asyncio.to_thread(_dna_get, True)
