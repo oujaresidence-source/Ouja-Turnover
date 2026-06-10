@@ -317,8 +317,14 @@ def listings_search(q):
 
 
 def _invalidate_owner_cache(owner):
-    """Terms changed → the memoized monthly reports for this owner are stale."""
+    """Terms changed → the memoized monthly reports for this owner are stale.
+    v2.2: delegates to bot.py's _owner_cache_bust (the ONE implementation all
+    writers share); falls back to the direct pop for older bot.py builds."""
     try:
+        bust = getattr(_B(), "_owner_cache_bust", None)
+        if bust is not None:
+            bust(owner=owner)
+            return
         cache = _B()._owner_portal_cache
         for key in [k for k in cache if k[0] == owner]:
             cache.pop(key, None)
@@ -737,6 +743,7 @@ def statement_payload(owner, mkey):
     rec = stmt_rec(owner, mkey)
     pub = (rec or {}).get("published") or {}
     return {"ok": True, "owner": owner, "month": mkey,
+            "computed_at": datetime.now(_B().TZ).isoformat(timespec="seconds"),
             "statement": live,
             "explain": _build_explain(live),
             "edits": (rec or {}).get("edits") or {},

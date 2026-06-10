@@ -8727,6 +8727,12 @@ def _exp_set_status(exp, status, *, reason="", by="", detail=""):
     exp["updated_at"] = exp["status_entered_at"]
     if old != status:
         _exp_log_event(exp, "status:" + status, by=by, detail=detail or reason or old or "")
+        # v2.2 slice 0: owner statements count expenses by canonical status — any
+        # transition (verify/archive/discard/…) makes the memoized reports stale.
+        try:
+            _owner_cache_bust(lid=exp.get("listing_id"))
+        except Exception:
+            pass
 
 def _exp_apply_stale_state(exp, now=None):
     canon = _exp_canonical_status(exp, now=now)
@@ -24074,6 +24080,8 @@ def _finance_import_hostaway_expenses():
         have_ids.add(hid)
     _finance_last_import.clear()
     _finance_last_import.update({"at": now, "imported": new_n, "matched": matched_n, "total": len(items)})
+    if new_n:
+        _owner_cache_bust()      # v2.2 slice 0: fresh verified expenses → statements changed
     persist_state()
     return {"ok": True, "imported": new_n, "matched": matched_n, "total": len(items),
             "last_import": dict(_finance_last_import)}
@@ -24422,6 +24430,43 @@ def _month_bounds(mkey):
 
 _owner_portal_cache = {}    # (owner, month) -> (payload_report, built_ts)
 
+def _owner_cache_bust(owner=None, lid=None, mkey=None):
+    """v2.2 Finding 2: drop memoized owner-month reports the moment underlying
+    data changes (statement edits, registry/contract changes, expense
+    verification, publish). Without this the owner page + «معاينة كمالك» + the
+    12-month trend keep serving a stale report for up to 6 hours.
+    owner given → that owner. lid given → every registry owner of that listing.
+    Neither given → everything (registry-wide change). mkey=None → all months."""
+    try:
+        owners = set()
+        if owner:
+            owners.add(str(owner).strip())
+        if lid not in (None, ""):
+            try:
+                lid_i = int(lid)
+            except (TypeError, ValueError):
+                lid_i = None
+            if lid_i is not None:
+                listings = get_listings_map() or {}
+                for rec in _owner_registry.values():
+                    if _owner_resolve_lid(rec, listings) == lid_i:
+                        o = (rec.get("owner") or "").strip()
+                        if o:
+                            owners.add(o)
+        targeted = bool(owner) or (lid not in (None, ""))
+        n = 0
+        for k in list(_owner_portal_cache.keys()):
+            if targeted and k[0] not in owners:
+                continue
+            if mkey and k[1] != mkey:
+                continue
+            _owner_portal_cache.pop(k, None)
+            n += 1
+        return n
+    except Exception as e:
+        print("owner cache bust error:", e)
+        return 0
+
 def _owner_month_report(owner, mkey):
     """The aggregated owner report for one month — the SAME object the PDF renders.
     Memoized: closed months 6h, the current month 15 min."""
@@ -24447,6 +24492,12 @@ def _owner_month_report(owner, mkey):
         items = _finance_collect_items("owner", [], [owner], start, end)
         rep = items[0]["report"] if items else None
     if rep is not None:
+        # «آخر تحديث للبيانات» — the BUILD time rides with the report so cache
+        # hits show when the numbers were actually computed (v2.2 slice 0).
+        try:
+            rep["computed_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        except Exception:
+            pass
         _owner_portal_cache[(owner, mkey)] = (rep, now)
         if len(_owner_portal_cache) > 400:
             for k in sorted(_owner_portal_cache, key=lambda k: _owner_portal_cache[k][1])[:100]:
@@ -24622,6 +24673,7 @@ def _owner_portal_data(owner, mkey):
                            "revenue_partial": (not nxt_known and nxt_rev > 0)},
             "price_actions": actions, "reviews": revs,
             "hostaway_url_template": res_url,
+            "data_as_of": rep.get("computed_at"),
             "generated_at": datetime.now(TZ).isoformat(timespec="minutes")}
 
 # The owner portal page. RAW string (r-prefix): backslashes stay literal, so no Python
@@ -24701,7 +24753,8 @@ var T = {
    actions:'حماية التسعير', actions_txt:'عدّلنا الأسعار {n} مرة هذا الشهر لحماية الإشغال', actions_zero:'ما احتجنا أي تعديل سعر هذا الشهر',
    reviews:'آراء الضيوف هذا الشهر', reviews_none:'ما فيه مراجعات هذا الشهر', pdf:'تحميل PDF', lang:'EN',
    apartments:'الشقق', no_data:'ما فيه بيانات لهذا الشهر', empty_chart:'ما فيه بيانات كافية للرسم',
-   gen_at:'حُسب', month_names:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']},
+   gen_at:'حُسب', data_as_of:'آخر تحديث للبيانات',
+   month_names:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']},
  en:{title:'Owner statement', net:'Owner net', for_month:'For', status_paid:'Final — transfer per the agreed payment cycle',
    vs_prev:'vs last month', vs_yoy:'vs same month last year', driver_n:'nights', driver_adr:'net/night', driver_exp:'expenses',
    recon_ok:'Balanced ✓ — rows equal the total to the riyal', recon_bad:'Needs review — some rows are missing data',
@@ -24721,7 +24774,8 @@ var T = {
    actions:'Price protection', actions_txt:'We adjusted prices {n} times this month to protect occupancy', actions_zero:'No price adjustments were needed this month',
    reviews:'Guest reviews this month', reviews_none:'No reviews this month', pdf:'Download PDF', lang:'ع',
    apartments:'Apartments', no_data:'No data for this month', empty_chart:'Not enough data to draw',
-   gen_at:'Computed', month_names:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']}
+   gen_at:'Computed', data_as_of:'Data last updated',
+   month_names:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']}
 };
 function t(){ return T[L]; }
 function he(s){ return String(s==null?'':s).replace(/[<>&"']/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]; }); }
@@ -24957,7 +25011,9 @@ function render(){
     }).join('');
   }
   h+='</div>';
-  h+='<div class="muted" style="text-align:center;font-size:10.5px;margin-top:14px">'+k.gen_at+' '+he(DATA.generated_at||'')+' · Ouja Residence</div>';
+  h+='<div class="muted" style="text-align:center;font-size:10.5px;margin-top:14px">'
+    +(DATA.data_as_of?(k.data_as_of+': <span class="num">'+he(String(DATA.data_as_of).slice(0,16))+'</span> · '):'')
+    +k.gen_at+' '+he(DATA.generated_at||'')+' · Ouja Residence</div>';
   document.getElementById('app').innerHTML=h;
 }
 function lb(u){
@@ -33307,6 +33363,7 @@ async def _api_finance_owners(request):
     k = _owner_key(apt)
     if b.get("delete"):
         _owner_registry.pop(k, None)
+        _owner_cache_bust()      # v2.2 slice 0: registry change — every owner aggregate may shift
         await asyncio.to_thread(persist_state)
         return _json({"ok": True, "deleted": apt})
     cl = b.get("cleaning") or {}
@@ -33328,6 +33385,7 @@ async def _api_finance_owners(request):
     _owner_registry[k] = {"apartment": apt, "owner": (b.get("owner") or "").strip(),
                           "mgmt_pct": mgmt, "lid": lid,
                           "cleaning": {"type": ctype, "amount": camt if ctype == "owner" else 0}}
+    _owner_cache_bust()          # v2.2 slice 0: unit may have moved owners — bust both sides
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "row": _owner_registry[k]})
 
@@ -33447,6 +33505,9 @@ async def _api_finance_adjust(request):
                               "comment": (adj.get("comment") or "")[:1000]}
     else:
         _finance_adjust.pop(k, None)
+    # v2.2 slice 0: saved adjusts feed the owner portal through build_owner_report —
+    # the memoized owner-month reports are stale the moment one is saved.
+    _owner_cache_bust(lid=b.get("lid"))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
@@ -33505,6 +33566,7 @@ async def _api_finance_line_edit(request):
         _finance_adjust.pop(k, None)
     else:
         _finance_adjust[k] = rec
+    _owner_cache_bust(lid=b.get("lid"))     # v2.2 slice 0: line edits must show on the owner page now
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "line_overrides": lov})
 
@@ -33648,6 +33710,7 @@ async def _api_expenses_update(request):
     e = _expenses.get((b.get("id") or "").strip())
     if not e:
         return _json({"error": "not found"}, 404)
+    old_lid = e.get("listing_id")
     for k in _EXP_EDITABLE:
         if k in b:
             if k == "amount":
@@ -33658,6 +33721,9 @@ async def _api_expenses_update(request):
             else:
                 e[k] = (b[k] or "").strip() if isinstance(b[k], str) else b[k]
     await asyncio.to_thread(_exp_process, e, allow_post=False)
+    _owner_cache_bust(lid=old_lid)                  # v2.2 slice 0
+    if e.get("listing_id") != old_lid:
+        _owner_cache_bust(lid=e.get("listing_id"))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
 
@@ -33828,11 +33894,14 @@ async def _api_expenses_resolve_apartment(request):
     name = (get_listings_map() or {}).get(lid)
     if name:
         e["apartment"] = name
+    old_lid = e.get("listing_id")
     e["listing_id"] = lid
     e["candidates"] = []
     e["apartment_locked"] = lid       # remember the manual choice
     _exp_log_event(e, "apartment_confirmed", by=(b.get("by") or "")[:60], detail=(name or str(lid)))
     await asyncio.to_thread(_exp_process, e, allow_post=True)
+    _owner_cache_bust(lid=old_lid)                  # v2.2 slice 0: the unit changed
+    _owner_cache_bust(lid=lid)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
 
@@ -33859,6 +33928,7 @@ async def _api_expenses_discard(request):
         return _json({"error": "not found"}, 404)
     e["status"] = "discarded"
     e["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _owner_cache_bust(lid=e.get("listing_id"))      # v2.2 slice 0
     await asyncio.to_thread(persist_state)
     log_event("ops", f"تجاهل مصروف [{e.get('ref')}] · {e.get('apartment') or '—'}")
     return _json({"ok": True})
@@ -33884,6 +33954,7 @@ async def _api_expenses_delete(request):
             except Exception as ex:
                 return _json({"error": f"hostaway delete failed: {ex}"}, 502)
     _expenses.pop(e["id"], None)
+    _owner_cache_bust(lid=e.get("listing_id"))      # v2.2 slice 0
     await asyncio.to_thread(persist_state)
     log_event("ops", f"حذف مصروف [{e.get('ref')}]" + (" + من Hostaway" if removed_remote else ""))
     return _json({"ok": True, "removed_hostaway": removed_remote})
@@ -34195,7 +34266,12 @@ async def _api_exp4_edit(request):
     if not e:
         return _json({"error": "not_found"}, 404)
     fields = b.get("fields") if isinstance(b.get("fields"), dict) else {}
+    old_lid = e.get("listing_id")
     _ok, changed = _exp4_edit(e, fields, by=by)
+    if changed:
+        _owner_cache_bust(lid=old_lid)              # v2.2 slice 0
+        if e.get("listing_id") != old_lid:
+            _owner_cache_bust(lid=e.get("listing_id"))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "changed": changed, "view": _exp4_view(e)})
 

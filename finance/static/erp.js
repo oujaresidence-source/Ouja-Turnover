@@ -198,6 +198,7 @@
       se_excl_chip_manual: 'مستبعد يدويًا', se_incl_chip: 'مُدرج يدويًا',
       se_pct: 'النسبة', se_fee_grp: 'أساس {b} × {p}٪',
       se_footnotes: 'ملاحظات العقد', se_open_page: 'افتح صفحة المالك',
+      se_asof: 'آخر تحديث للبيانات',
       /* --- monthly cycle board (slice 3) --- */
       cy_title: 'دورة الشهر', cy_month: 'الشهر',
       cy_ready: 'جاهز', cy_sent: 'أُرسل', cy_opened: 'انفتح', cy_flagged: 'يحتاج مراجعة',
@@ -415,6 +416,7 @@
       se_excl_chip_manual: 'Manually excluded', se_incl_chip: 'Manually included',
       se_pct: 'Rate', se_fee_grp: 'base {b} × {p}%',
       se_footnotes: 'Contract notes', se_open_page: 'Open owner page',
+      se_asof: 'Data last updated',
       cy_title: 'Month cycle', cy_month: 'Month',
       cy_ready: 'Ready', cy_sent: 'Sent', cy_opened: 'Opened', cy_flagged: 'Needs review',
       cy_portfolio: 'Portfolio net', cy_done: 'Month complete — every statement sent ✓',
@@ -3166,6 +3168,7 @@
       '<button class="btn ghost sm" data-act="se-diff">' + esc(t('se_recompute')) + '</button>' +
       '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
       '</span></header>' +
+      (d.computed_at ? '<div class="grp-hint" style="padding-top:0">' + esc(t('se_asof')) + ': <code>' + esc(String(d.computed_at).slice(0, 16)) + '</code></div>' : '') +
       '<div class="wsnav" style="position:static;border:none;padding:4px 16px">' +
       '<a class="ws' + (seUI.tab === 'stmt' ? ' on' : '') + '" data-act="se-tab" data-tab="stmt">' + esc(t('se_tab_stmt')) + '</a>' +
       '<a class="ws' + (seUI.tab === 'audit' ? ' on' : '') + '" data-act="se-tab" data-tab="audit">' + esc(t('se_tab_audit')) + ' (' + (d.audit || []).length + ')</a>' +
