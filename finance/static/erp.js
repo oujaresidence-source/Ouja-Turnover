@@ -146,6 +146,20 @@
       o_revoke_confirm: 'إيقاف الرابط يمنع المالك من فتح كشفه. نكمل؟',
       o_done: 'تم ✓', o_empty: 'ما فيه ملاك في السجل — أضفهم من كشوفات الملاك',
       o_mgmt: 'نسبة الإدارة',
+      /* --- statement diagnosis (slice 0b) --- */
+      o_diag: 'تشخيص', dg_back: '← رجوع للملاك', dg_title: 'تشخيص الكشف',
+      dg_month: 'الشهر', dg_now: 'صافي الكشف الحين', dg_prefix: 'الرقم قبل الإصلاح (محاكاة)',
+      dg_fixed: 'الصافي بعد الإصلاح', dg_lost_tr: 'دخل كان ضايع بسبب الكاش المبتور',
+      dg_lost_unit: 'دخل وحدة ما كانت مسجّلة', dg_units: 'الوحدات',
+      dg_rows: 'كل الحجوزات المرشحة — حجز بحجز', dg_included: 'محسوب', dg_excluded: 'مستبعد',
+      dg_cache_miss: 'ما يشوفه النظام القديم', dg_unit_fix: 'وحدة أُضيفت بالإصلاح',
+      dg_field_hist: 'الحقول الموجودة فعليًا على حجوزات الشهر',
+      dg_empty: 'ما فيه حجوزات مرشحة في هالفترة', dg_ref: 'مرجع',
+      dg_excl_total: 'قيمة مستبعدة بانتظار تأكيد', dg_lid_missing: 'بدون ربط Hostaway!',
+      rsn_missing_payout: 'ما وصل payout من Airbnb', rsn_missing_base: 'بدون مبلغ أساس',
+      rsn_needs_channel_rule: 'قناة بدون قاعدة', rsn_cancelled_refunded: 'ملغي — مسترد',
+      rsn_unpaid_yet: 'غير مدفوع بعد', rsn_out_of_period: 'خارج الفترة',
+      rsn_missing_paid_amount: 'مدفوع جزئيًا بدون مبلغ', rsn_status: 'حالة غير مؤكدة',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -298,6 +312,19 @@
       o_revoke_confirm: 'Revoking blocks the owner from opening their statement. Continue?',
       o_done: 'Done ✓', o_empty: 'No owners in the registry — add them from owner statements',
       o_mgmt: 'Mgmt %',
+      o_diag: 'Diagnose', dg_back: '← Back to owners', dg_title: 'Statement diagnosis',
+      dg_month: 'Month', dg_now: 'Statement net (now)', dg_prefix: 'Pre-fix number (simulated)',
+      dg_fixed: 'Net after the fix', dg_lost_tr: 'Income lost to the truncated cache',
+      dg_lost_unit: 'Income of an unregistered unit', dg_units: 'Units',
+      dg_rows: 'Every candidate reservation — line by line', dg_included: 'Included', dg_excluded: 'Excluded',
+      dg_cache_miss: 'Invisible to the old pull', dg_unit_fix: 'Unit added by the fix',
+      dg_field_hist: 'Fields actually present on this month’s reservations',
+      dg_empty: 'No candidate reservations in this period', dg_ref: 'reference',
+      dg_excl_total: 'Excluded value awaiting confirmation', dg_lid_missing: 'No Hostaway match!',
+      rsn_missing_payout: 'Airbnb payout missing', rsn_missing_base: 'No base amount',
+      rsn_needs_channel_rule: 'Channel without a rule', rsn_cancelled_refunded: 'Cancelled — refunded',
+      rsn_unpaid_yet: 'Not paid yet', rsn_out_of_period: 'Outside the period',
+      rsn_missing_paid_amount: 'Partially paid, amount unknown', rsn_status: 'Unconfirmed status',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -2257,14 +2284,14 @@
     var opened = lk.opened_at
       ? esc(t('o_last_open')) + ': <code>' + esc(lk.opened_at.slice(0, 16)) + '</code> · ' + lk.opens + ' ' + esc(t('o_opens'))
       : esc(t('o_never'));
-    var acts = '';
+    var acts = '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '">' + esc(t('o_diag')) + '</a>';
     if (lk.exists && lk.active) {
-      acts = '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
+      acts += '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
         '<a class="btn ghost xs" href="' + esc(lk.url) + '" target="_blank" rel="noopener">' + esc(t('o_preview')) + '</a>' +
         '<button class="btn ghost xs" data-act="o-regen" data-owner="' + esc(r.owner) + '">' + esc(t('o_regen')) + '</button>' +
         '<button class="btn danger-ghost xs" data-act="o-revoke" data-owner="' + esc(r.owner) + '">' + esc(t('o_revoke')) + '</button>';
     } else {
-      acts = '<button class="btn primary xs" data-act="o-create" data-owner="' + esc(r.owner) + '">' + esc(t('o_create')) + '</button>';
+      acts += '<button class="btn primary xs" data-act="o-create" data-owner="' + esc(r.owner) + '">' + esc(t('o_create')) + '</button>';
     }
     var mgmt = (r.mgmt_pct === null || r.mgmt_pct === undefined) ? ''
       : '<span class="tag">' + esc(t('o_mgmt')) + ' ' + esc(Array.isArray(r.mgmt_pct) ? r.mgmt_pct.join('/') : r.mgmt_pct) + '%</span>';
@@ -2293,6 +2320,96 @@
   function loadOwners() {
     $('#view').innerHTML = skeleton(5);
     api('/erp/api/owners').then(function (d) { renderOwners(d); })
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+  }
+
+  /* ----- slice 0b: statement diagnosis (line-by-line reconciliation) ----- */
+  function rsnLabel(reason) {
+    if (!reason) return '';
+    if (reason.indexOf('status_') === 0) return t('rsn_status') + ' (' + esc(reason.slice(7)) + ')';
+    var k = 'rsn_' + reason;
+    var v = T[store.lang][k] || T.ar[k];
+    return v || esc(reason);
+  }
+
+  function diagRowHtml(r) {
+    var inc = r.verdict === 'included';
+    var amt = inc ? ('<b>' + fmtAmt(r.amount) + '</b>')
+      : (r.reference != null ? ('<span class="tag">' + esc(t('dg_ref')) + ' ' + fmtAmt(r.reference) + '</span>') : '—');
+    var flags = '';
+    if (!r.in_history_cache) flags += ' <span class="tag bad">' + esc(t('dg_cache_miss')) + '</span>';
+    if (r.unit_added_by_fix) flags += ' <span class="tag soft">' + esc(t('dg_unit_fix')) + '</span>';
+    return '<tr class="' + (inc ? '' : 'off') + '">' +
+      '<td>' + esc(r.apartment || '') + '</td>' +
+      '<td><b>' + esc(r.guest || '—') + '</b><div class="wq-sub">' + esc(r.channel || '') + ' · ' + esc(r.status || '') + '</div></td>' +
+      '<td><code>' + esc(r.checkin || '') + '</code> ← <code>' + esc(r.checkout || '') + '</code></td>' +
+      '<td>' + (inc ? '<span class="tag soft">' + esc(t('dg_included')) + '</span>'
+                    : '<span class="tag bad">' + esc(t('dg_excluded')) + '</span> ' + rsnLabel(r.reason)) + flags + '</td>' +
+      '<td class="c-amt">' + amt + '</td></tr>';
+  }
+
+  function renderDiag(d) {
+    store.D.diag = d;
+    var tt = d.totals || {};
+    function stat(label, val, cls) {
+      return '<div class="stat ' + (cls || '') + '"><span>' + esc(label) + '</span><b>' +
+        (val == null ? '—' : fmtAmt(val)) + '</b></div>';
+    }
+    var months = [];
+    var now = new Date();
+    for (var i = 0; i < 13; i++) {
+      var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2));
+    }
+    var monthSel = '<select class="in" id="dgMonth">' + months.map(function (m) {
+      return '<option value="' + m + '"' + (m === d.month ? ' selected' : '') + '>' + m + '</option>';
+    }).join('') + '</select>';
+    var unitsHtml = (d.units || []).map(function (u) {
+      return '<div class="wq-row' + (u.added_by_fix ? '' : ' info') + '"><div class="wq-main"><div class="wq-top"><b>' + esc(u.apartment) + '</b>' +
+        '<span class="tag soft">' + esc(u.listing || '') + '</span>' +
+        (u.mgmt_pct != null ? '<span class="tag">' + esc(t('o_mgmt')) + ' ' + u.mgmt_pct + '%</span>' : '') +
+        (u.added_by_fix ? '<span class="tag bad">' + esc(t('dg_unit_fix')) + '</span>' : '') +
+        (u.lid_unresolved ? '<span class="tag bad">' + esc(t('dg_lid_missing')) + '</span>' : '') + '</div>' +
+        '<div class="wq-sub">' + esc(t('st_income')) + ' ' + fmtAmt(u.income) + ' · ' + esc(t('st_net')) + ' ' + fmtAmt(u.net) + '</div></div></div>';
+    }).join('');
+    var fields = Object.keys(d.field_histogram || {}).sort().map(function (k) {
+      return '<span class="tag"><code>' + esc(k) + '</code> × ' + d.field_histogram[k] + '</span>';
+    }).join(' ');
+    var exs = d.excluded_summary || {};
+    $('#view').innerHTML =
+      '<a class="btn ghost sm" href="#owners">' + esc(t('dg_back')) + '</a>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">🔬</span>' +
+      '<h2>' + esc(t('dg_title')) + ' — ' + esc(d.owner) + '</h2>' +
+      '<span style="margin-inline-start:auto">' + esc(t('dg_month')) + ' ' + monthSel + '</span></header>' +
+      '<div class="stat-row">' +
+      stat(t('dg_now'), tt.statement_net_now) +
+      stat(t('dg_prefix'), tt.pre_fix_net_estimate, 'bad') +
+      stat(t('dg_fixed'), tt.fixed_net, 'ok') +
+      stat(t('dg_lost_tr'), tt.lost_to_truncation_income) +
+      stat(t('dg_lost_unit'), tt.lost_to_missing_unit_income) +
+      (exs.needs_review ? stat(t('dg_excl_total') + ' (' + exs.needs_review + ')', exs.needs_review_reference, 'bad') : '') +
+      '</div>' +
+      '<div class="grp-hint">' + esc(t('dg_units')) + '</div><div class="grp-list">' + unitsHtml + '</div>' +
+      '<div class="grp-hint">' + esc(t('dg_rows')) + ' · ' + (d.rows || []).length + '</div>' +
+      ((d.rows || []).length
+        ? '<div class="table-card" style="border:none;box-shadow:none;overflow-x:auto"><table class="btable"><thead><tr>' +
+          '<th>' + esc(t('unit_label')) + '</th><th>' + esc(t('th_desc')) + '</th><th>' + esc(t('th_date')) + '</th>' +
+          '<th>' + esc(t('th_pipe')) + '</th><th>' + esc(t('th_amount')) + '</th></tr></thead><tbody>' +
+          (d.rows || []).map(diagRowHtml).join('') + '</tbody></table></div>'
+        : '<div class="state-card"><div class="state-h">' + esc(t('dg_empty')) + '</div></div>') +
+      '<div class="grp-hint">' + esc(t('dg_field_hist')) + '</div>' +
+      '<div style="padding:0 16px 16px;display:flex;flex-wrap:wrap;gap:6px">' + (fields || '—') + '</div>' +
+      '</section>';
+    var sel = $('#dgMonth');
+    if (sel) sel.addEventListener('change', function () {
+      location.hash = 'owners?diag=' + encodeURIComponent(d.owner) + '&m=' + sel.value;
+    });
+  }
+
+  function loadDiag(owner, m) {
+    $('#view').innerHTML = skeleton(6);
+    api('/erp/api/owners/diagnose?owner=' + encodeURIComponent(owner) + (m ? '&m=' + encodeURIComponent(m) : ''))
+      .then(renderDiag)
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
 
@@ -2418,7 +2535,13 @@
       }
     },
     custody: { show: function () { loadCustody(); } },
-    owners: { show: function () { loadOwners(); } },
+    owners: {
+      show: function (params) {
+        var diag = params && params.get('diag');
+        if (diag) loadDiag(diag, params.get('m') || '');
+        else loadOwners();
+      }
+    },
     stmts: { show: function (params) { stP.m = params.get('m') || nowMonth(); loadStmts(); } },
     close: { show: function (params) { clP.m = params.get('m') || nowMonth(); loadClose(); } },
     budget: { show: function (params) { bgP.m = params.get('m') || nowMonth(); loadBudget(); } },

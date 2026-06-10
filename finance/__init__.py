@@ -35,10 +35,11 @@ from datetime import datetime, timezone, timedelta
 from aiohttp import web
 
 from . import api
+from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.1.0-s0a"
+ERP_VERSION = "2.1.0-s0b"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -419,6 +420,16 @@ async def _h_api_owners(request):
     return api.jres(api.owners_payload())
 
 
+async def _h_api_owners_diagnose(request):
+    """Slice 0b: line-by-line reconciliation of one owner-month (read-only)."""
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    mkey = api._month_key_or_now(request.query.get("m"))
+    data = await asyncio.to_thread(OW.diagnose, owner, mkey)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
 async def _h_api_owners_link(request):
     # Delegate to the existing owner-link manager (finance-write gated inside;
     # create/regenerate/revoke + full audit live there).
@@ -541,6 +552,7 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/exp/recheck", _guarded(_exp_delegate("_api_exp4_recheck"), write=True))
     app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
     app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
+    app.router.add_get("/erp/api/owners/diagnose", _guarded(_h_api_owners_diagnose))
     app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
     app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
     app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))

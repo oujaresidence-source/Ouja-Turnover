@@ -549,3 +549,15 @@ html[lang=ar] .gside .nav-group-h{text-transform:none;letter-spacing:0;font-size
   .gside-x{display:inline-flex}
 }
 @media (prefers-reduced-motion:reduce){ .gside .nav-caret{transition:none} }
+
+/* ---------- diagnosis stat strip (slice 0b) ---------- */
+.stat-row{display:flex;flex-wrap:wrap;gap:10px;padding:4px 16px 14px}
+.stat{
+  flex:1 1 150px;min-width:140px;background:var(--surface-2);border-radius:var(--r-sm);
+  padding:10px 13px;display:flex;flex-direction:column;gap:2px;
+}
+.stat span{font-size:11px;color:var(--text-3)}
+.stat b{font-size:16.5px;font-family:var(--font-mono);font-weight:600}
+.stat.ok{background:var(--green-soft)} .stat.ok b{color:var(--green)}
+.stat.bad{background:var(--red-soft)} .stat.bad b{color:var(--red)}
+tr.off td{color:var(--text-3)}

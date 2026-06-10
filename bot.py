@@ -23398,6 +23398,35 @@ def _owner_seed_if_empty():
             "cleaning": {"type": ctype, "amount": float(camt or 0)}}
     return len(_owner_registry)
 
+def _owner_registry_migrate():
+    """One-time, MARKED data fixes to the live registry (idempotent; a fix never
+    re-applies, so a deliberate later deletion by Faisal stays deleted).
+    v21-102b (slice 0b root cause #2): أبو فهد عبدالحمن الخطيب owns EIGHT units
+    (101A/B، 102A/B، 201A/B، 202A/B) but the original seed file listed seven —
+    102B was missing, so every 102B reservation was invisible to his statement."""
+    applied = _load_json("owner_registry_migrations.json", []) or []
+    changed = False
+    if "v21-102b" not in applied:
+        owner_101a = _owner_registry.get(_owner_key("101A")) or {}
+        target_owner = owner_101a.get("owner") or "ابو فهد عبدالحمن الخطيب"
+        if _owner_key("102B") not in _owner_registry and owner_101a:
+            _owner_registry[_owner_key("102B")] = {
+                "apartment": "102B", "owner": target_owner,
+                "mgmt_pct": owner_101a.get("mgmt_pct", 18.0),
+                "cleaning": dict(owner_101a.get("cleaning") or {"type": "ours", "amount": 0}),
+            }
+            print("owner registry migration v21-102b: added 102B for", target_owner)
+            try:
+                log_event("finance", "سجل الملاك: أُضيفت الوحدة 102B لـ " + target_owner + " (إصلاح 0b)")
+            except Exception:
+                pass
+        applied.append("v21-102b")
+        changed = True
+    if changed:
+        _save_json("owner_registry_migrations.json", applied)
+        _save_json("owner_registry.json", _owner_registry)
+    return changed
+
 def _owner_norm(s):
     """Normalize for matching: lowercase, keep only alphanumerics + Arabic letters (drop
     spaces, '|', '-', etc.). So code 'A-11' → 'a11' matches a listing 'Ouja | A 11'."""
@@ -23570,6 +23599,8 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
                     missing_payout.append(r.get("id"))
                     resv_lines.append({**base_meta, "refund": R(refund), "extras": 0.0,
                                        "income": None, "gross": None, "needs_review": True,
+                                       "exclude_reason": "missing_paid_amount",
+                                       "reference_total": r.get("total_price"),
                                        "status_kind": "cancelled_paid",
                                        "source_fields": "partial payment without amount field"})
                     continue
@@ -23587,6 +23618,8 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
                     needs_rule.append(r.get("id"))
                     resv_lines.append({**base_meta, "refund": R(refund), "extras": 0.0,
                                        "income": None, "gross": None, "needs_review": True,
+                                       "exclude_reason": "needs_channel_rule",
+                                       "reference_total": (paid_amt or r.get("total_price")),
                                        "status_kind": "cancelled_paid",
                                        "source_fields": "other-channel cancellation with payment signal"})
                 else:
@@ -23643,7 +23676,14 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         elif channel == "airbnb":
             line["source_fields"] = "airbnbExpectedPayoutAmount − refundAmount"
         if income is None:
+            # NEVER invisible (0b rule): the excluded row carries WHY + a reference
+            # amount (booking total — explicitly NOT income, never added to totals)
+            # so the footer can show the riyals waiting on a data fix.
             line["needs_review"] = True
+            line["exclude_reason"] = ("missing_payout" if channel == "airbnb"
+                                      else "missing_base" if channel == "direct"
+                                      else "needs_channel_rule")
+            line["reference_total"] = r.get("total_price")
         resv_lines.append(line)
 
     total_income = inc_airbnb + inc_direct + extras_total
@@ -23662,6 +23702,19 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
     rows_income = sum((l["income"] or 0) for l in resv_lines) + extras_total
     gap = R(rows_income) - R(total_income)
     balanced = (abs(gap) < 0.005) and not missing_payout and not needs_rule and not needs_base
+    # ---- excluded-money summary (0b): every riyal NOT in income, counted + referenced ----
+    nr_lines = [l for l in resv_lines if l.get("needs_review")]
+    excluded_summary = {
+        "needs_review": len(nr_lines),
+        "needs_review_reference": R(sum(float(l.get("reference_total") or 0) for l in nr_lines)),
+        "unpaid": len(unpaid_lines),
+        "unpaid_expected": R(sum(float(u.get("expected") or 0) for u in unpaid_lines)),
+        "refunded": len(refunded_lines),
+        "reasons": {},
+    }
+    for l in nr_lines:
+        k = l.get("exclude_reason") or "needs_review"
+        excluded_summary["reasons"][k] = excluded_summary["reasons"].get(k, 0) + 1
     return {
         "currency": "SAR", "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": basis},
         "income_airbnb": R(inc_airbnb), "income_direct": R(inc_direct), "extras": R(extras_total),
@@ -23672,6 +23725,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
                      "months": months, "total": R(cleaning_total)},
         "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines),
                    "unpaid": len(unpaid_lines), "refunded": len(refunded_lines)},
+        "excluded_summary": excluded_summary,
         "resv_lines": resv_lines, "exp_lines": exp_lines,
         "unpaid_lines": unpaid_lines, "refunded_lines": refunded_lines,
         "basis_note": "paid basis: income = money actually received; unpaid/refunded listed separately",
@@ -23918,7 +23972,9 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
         management_pct = info["mgmt_pct"]
     if cleaning is None:
         cleaning = info["cleaning"] if info else {"type": "ours", "amount": 0}
-    resv = [normalize_reservation(r, listings) for r in get_reservations_cached()
+    # TARGETED window pull (trap #4): the full-history cache truncates at ~6,000 rows
+    # and silently loses the newest bookings — a statement must never read it.
+    resv = [normalize_reservation(r, listings) for r in fetch_reservations_window(start, end)
             if lid is None or r.get("listingMapId") == lid]
     if expenses is None:
         expenses = []
@@ -24192,6 +24248,36 @@ def _pdf_statement_bytes(rep, label):
             pdf.set_xy(M, y); pdf.cell(usable * 0.30, 6, money(a.get("owner_net")), align="L")
             pdf.set_xy(M + usable * 0.30, y); pdf.set_text_color(*MUT); pdf.cell(usable * 0.30, 6, money(a.get("total_income")), align="L")
             pdf.set_text_color(*INK); pdf.cell(usable * 0.40, 6, shape(str(a.get("apartment") or "")), align="R"); pdf.ln(6)
+    # ---- excluded money (0b: NEVER invisible) + unpaid/refunded transparency ----
+    nr = [l for l in rl if l.get("needs_review")]
+    unp = rep.get("unpaid_lines") or []
+    refd = rep.get("refunded_lines") or []
+    if nr or unp or refd:
+        section("حركات بدون فلوس (للشفافية)")
+        pdf.set_font(FONT, size=9.5)
+        for l in nr[:25]:
+            y = pdf.get_y(); pdf.set_text_color(*MUT)
+            pdf.set_xy(M, y)
+            pdf.cell(usable * 0.35, 5.5, (money(l.get("reference_total")) if l.get("reference_total") else "—"), align="L")
+            pdf.set_text_color(*INK)
+            pdf.set_xy(M + usable * 0.35, y)
+            pdf.cell(usable * 0.65, 5.5, shape("بانتظار تأكيد المبلغ (المرجع ليس دخلًا) · %s · %s" % (l.get("guest") or "", l.get("checkin") or "")), align="R")
+            pdf.ln(5.5)
+        exs = rep.get("excluded_summary") or {}
+        if exs.get("needs_review"):
+            pdf.set_text_color(*INK); pdf.set_x(M)
+            pdf.cell(usable, 6, shape("مستبعد من الدخل لين يتأكد المبلغ: %d حجز · مرجع %s" %
+                                      (exs.get("needs_review"), money(exs.get("needs_review_reference")))), align="R")
+            pdf.ln(6)
+        for u in unp[:15]:
+            pdf.set_text_color(*MUT); pdf.set_x(M)
+            pdf.cell(usable, 5.5, shape("غير مدفوع بعد · %s · %s · متوقع %s" %
+                                        (u.get("guest") or "", u.get("checkin") or "", money(u.get("expected")))), align="R")
+            pdf.ln(5.5)
+        for u in refd[:15]:
+            pdf.set_text_color(*MUT); pdf.set_x(M)
+            pdf.cell(usable, 5.5, shape("ملغي — مسترد بالكامل · %s · %s" % (u.get("guest") or "", u.get("checkin") or "")), align="R")
+            pdf.ln(5.5)
     # ---- comment + footer ----
     if rep.get("comment"):
         pdf.ln(2); pdf.set_font(FONT, size=10); pdf.set_text_color(*INK); pdf.set_x(M)
@@ -24571,6 +24657,7 @@ var T = {
    sec_exp:'المصاريف', exp_receipt:'الفاتورة ↗', exp_none:'لا مصاريف مسجلة هذا الشهر ✓',
    sec_fee:'عمولة عوجا', fee_formula:'النسبة × إجمالي الدخل', sec_cleaning:'النظافة (شهري حسب العقد)',
    sec_footer:'حركات بدون فلوس (للشفافية)', foot_unpaid:'غير مدفوع بعد', foot_refunded:'ملغي — مسترد بالكامل', foot_expected:'متوقع',
+   foot_review:'بانتظار تأكيد المبلغ', foot_ref:'المرجع (ليس دخلًا)', foot_excl_sum:'مستبعد من الدخل لين يتأكد المبلغ',
    foot_none:'لا يوجد — كل حجوزات الشهر مدفوعة ✓', perf:'الأداء', trend:'صافي الدخل — آخر ١٢ شهر',
    occ:'الإشغال مقابل متوسط المحفظة', occ_you:'وحداتك', occ_port:'متوسط عوجا (مجهول الهوية)',
    mix:'مصادر الدخل', adr_dt:'متوسط الصافي/ليلة حسب نوع اليوم', dt_wd:'أيام الأسبوع', dt_we:'نهاية الأسبوع (خميس-جمعة)', dt_ev:'مناسبات',
@@ -24589,6 +24676,7 @@ var T = {
    sec_exp:'Expenses', exp_receipt:'Receipt ↗', exp_none:'No expenses recorded this month ✓',
    sec_fee:'Ouja management fee', fee_formula:'rate × total income', sec_cleaning:'Cleaning (monthly per contract)',
    sec_footer:'Non-money movements (transparency)', foot_unpaid:'Not paid yet', foot_refunded:'Cancelled — fully refunded', foot_expected:'expected',
+   foot_review:'Awaiting amount confirmation', foot_ref:'reference (not income)', foot_excl_sum:'excluded from income until confirmed',
    foot_none:'None — every booking this month is paid ✓', perf:'Performance', trend:'Net income — last 12 months',
    occ:'Occupancy vs portfolio average', occ_you:'Your units', occ_port:'Ouja average (anonymized)',
    mix:'Income sources', adr_dt:'Avg net/night by day type', dt_wd:'Weekdays', dt_we:'Weekend (Thu–Fri)', dt_ev:'Events',
@@ -24746,9 +24834,19 @@ function render(){
     +'<div class="kv"><span><b>'+k.net+'</b></span><b style="color:var(--gold2)">'+money(rep.owner_net)+'</b></div></div>';
   // ---- transparency footer ----
   var unpaid=rep.unpaid_lines||[], refunded=rep.refunded_lines||[];
+  var needsRev=(rep.resv_lines||[]).filter(function(l){ return l.needs_review; });
   h+='<div class="card"><h2>'+k.sec_footer+'</h2>';
-  if(!unpaid.length&&!refunded.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
+  if(!unpaid.length&&!refunded.length&&!needsRev.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
   else{
+    h+=needsRev.map(function(u){
+      return '<div class="foot-line"><span><span class="chip bad">'+k.foot_review+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
+        +'<span class="muted">'+k.foot_ref+': '+money(u.reference_total)+'</span></div>';
+    }).join('');
+    var exs=rep.excluded_summary||{};
+    if(exs.needs_review){
+      h+='<div class="foot-line" style="border-top:1px solid var(--line)"><span><b>'+k.foot_excl_sum+'</b> · '+exs.needs_review+'</span>'
+        +'<b>'+money(exs.needs_review_reference)+'</b></div>';
+    }
     h+=unpaid.map(function(u){
       return '<div class="foot-line"><span><span class="chip warn">'+k.foot_unpaid+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
         +'<span class="muted">'+k.foot_expected+' '+money(u.expected)+'</span></div>';
@@ -33225,7 +33323,19 @@ def _finance_aggregate(reps, owner, start, end):
             flagged[k].extend(rc.get(k) or [])
     all_lines.sort(key=lambda l: l.get("checkin") or "")
     all_exp.sort(key=lambda e: e.get("date") or "")
+    # excluded-money rollup (0b): sums of the per-unit summaries, never recomputed
+    exsum = {"needs_review": 0, "needs_review_reference": 0.0, "unpaid": 0,
+             "unpaid_expected": 0.0, "refunded": 0, "reasons": {}}
+    for r in reps:
+        es = r.get("excluded_summary") or {}
+        for k in ("needs_review", "unpaid", "refunded"):
+            exsum[k] += int(es.get(k) or 0)
+        for k in ("needs_review_reference", "unpaid_expected"):
+            exsum[k] = R(exsum[k] + float(es.get(k) or 0))
+        for k, v in (es.get("reasons") or {}).items():
+            exsum["reasons"][k] = exsum["reasons"].get(k, 0) + v
     return {"currency": "SAR", "owner": owner, "management_pct": blended,
+            "excluded_summary": exsum,
             "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
             "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
             "extras": tot("extras"), "manual_income": tot("manual_income"), "manual_income_lines": mil,
@@ -41991,6 +42101,10 @@ def load_state():
         _n = _owner_seed_if_empty()          # first run → seed from the owner's file (38 apartments)
         if _n:
             print(f"owner registry: seeded {_n} apartments")
+        try:
+            _owner_registry_migrate()        # one-time data fixes (e.g. 0b: missing 102B)
+        except Exception as _e:
+            print("owner registry migrate error:", _e)
         _finance_adjust.clear()
         _finance_adjust.update(_load_json("finance_adjust.json", {}) or {})
         _finance_audit[:] = _load_json("finance_audit.json", []) or []
@@ -42441,6 +42555,48 @@ def get_reservations_cached(ttl=1800):
     data = fetch_all_reservations()
     _res_cache["data"], _res_cache["ts"] = data, time.time()
     return data
+
+_res_window_cache = {}   # (start_iso, end_iso) -> (rows, fetched_ts)
+
+def fetch_reservations_window(start, end, pad_days=45):
+    """Every reservation whose stay can touch [start, end] — a TARGETED Hostaway
+    query (CLAUDE.md trap #4). The full-history pull stops at REVENUE_MAX_PAGES
+    (~6,000 rows) and silently drops the NEWEST bookings, which made owner
+    statements undercount real months (the Abu-Fahad June bug). Statements must
+    use THIS. Window = arrivalDate in [start − pad, end]: covers checkin-basis
+    rows, long stays spanning into the period, and checkout-basis rows.
+    On a page-1 failure falls back to the old cache (never worse than before)."""
+    key = (start.isoformat(), end.isoformat())
+    hit = _res_window_cache.get(key)
+    if hit and (time.time() - hit[1]) < 900:
+        return hit[0]
+    out, offset, limit = [], 0, 200
+    a_start = (start - timedelta(days=pad_days)).isoformat()
+    a_end = end.isoformat()
+    failed = False
+    for page in range(40):                      # 40×200 = 8,000 rows for ONE window — ample
+        try:
+            data = api_get("/reservations", params={
+                "arrivalStartDate": a_start, "arrivalEndDate": a_end,
+                "limit": limit, "offset": offset})
+        except Exception as e:
+            print("window reservations fetch error:", e)
+            failed = (page == 0)
+            break
+        rows = data.get("result", []) or []
+        out.extend(rows)
+        if len(rows) < limit:
+            break
+        offset += limit
+    if failed:
+        cached = get_reservations_cached()
+        print("window fetch failed — falling back to full-history cache (%d rows)" % len(cached or []))
+        return cached or []
+    _res_window_cache[key] = (out, time.time())
+    if len(_res_window_cache) > 60:
+        for k in sorted(_res_window_cache, key=lambda k: _res_window_cache[k][1])[:20]:
+            _res_window_cache.pop(k, None)
+    return out
 
 def fetch_calendar_days(listing_id, start, end):
     try:
