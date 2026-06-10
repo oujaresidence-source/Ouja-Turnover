@@ -4669,16 +4669,50 @@ def _pending_lids_for_date(date_iso):
         print("pending lookup error:", e)
     return out
 
+# A.2: get_reservation_status sits on the critical path of EVERY guest message —
+# cache per reservation-id for 10 min; the webhook invalidates on reservation events.
+_res_status_cache = OrderedDict()
+_RES_STATUS_TTL = 600
+_RES_STATUS_MAX = 2000
+
 def get_reservation_status(reservation_id):
-    """Return the reservation status (lowercased), or '' if unknown. Not cached — it can change."""
+    """Return the reservation status (lowercased), or '' if unknown.
+    Cached 10 min per id (webhook invalidates instantly on reservation events)."""
     if not reservation_id:
         return ""
+    key = str(reservation_id)
+    hit = _res_status_cache.get(key)
+    if hit and (time.time() - hit[1]) < _RES_STATUS_TTL:
+        return hit[0]
     try:
         data = api_get(f"/reservations/{reservation_id}")
-        return (data.get("result", {}) or {}).get("status", "").lower()
+        status = (data.get("result", {}) or {}).get("status", "").lower()
+        _bounded_cache_put(_res_status_cache, key, (status, time.time()), _RES_STATUS_MAX)
+        return status
     except Exception as e:
         print(f"reservation status error ({reservation_id}):", e)
         return ""
+
+def _invalidate_reservation_caches(listing_id=None, reservation_id=None):
+    """A.1/A.2: drop availability + status cache entries touched by a reservation event,
+    so Musaed never tells a guest a unit is free right after it was booked. TTLs stay
+    as the fallback when no event arrives."""
+    try:
+        if reservation_id is not None:
+            _res_status_cache.pop(str(reservation_id), None)
+        if listing_id is not None:
+            lid = listing_id
+            try:
+                lid = int(listing_id)
+            except (TypeError, ValueError):
+                pass
+            for k in [k for k in list(_avail_cache.keys()) if k and k[0] == lid]:
+                _avail_cache.pop(k, None)
+        elif reservation_id is not None and listing_id is None:
+            # reservation event without a listing id: safest is to drop ALL availability
+            _avail_cache.clear()
+    except Exception as e:
+        print("cache invalidation error:", e)
 
 # Knowledge base loaded from the #knowledge Discord channel; injected into every draft.
 _knowledge_text = ""
@@ -5475,6 +5509,34 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         f"لا تسأله أبداً 'أي شقة تقصد' أو 'أي وحدة'. الاقتراحات البديلة تظهر فقط لما يطلبها صراحةً.\n\n"
         if unit else ""
     )
+    # ---- A.4: context budget. The assembled prompt could exceed 15k+ tokens with no
+    # measurement. When over budget, drop the LOWEST-priority block first (the catalog,
+    # as a whole block) and only then trim history from the OLDEST lines. Surviving
+    # blocks are byte-identical — no prompt text changes, ever.
+    _budget_chars = int(os.environ.get("ASSISTANT_PROMPT_BUDGET", "40000"))
+    _fixed_len = sum(len(x or "") for x in (unit_guard, profile_block, guest_name, unit,
+                                            status_line, stay_line, guide_line, dates_line,
+                                            own_price_line, early_block, late_block, code_block)) + 600
+    _trimmed = []
+    if _fixed_len + len(facts_block) + len(catalog_block) + len(history_text) > _budget_chars:
+        if catalog_block:
+            _trimmed.append(f"catalog({len(catalog_block)}ch)")
+            catalog_block = ""
+        _hist_room = _budget_chars - _fixed_len - len(facts_block)
+        if len(history_text) > _hist_room:
+            _hist_room = max(2000, _hist_room)      # always keep the newest ~2k chars
+            lines = history_text.split("\n")
+            kept, total = [], 0
+            for line in reversed(lines):            # newest lines first
+                if total + len(line) + 1 > _hist_room:
+                    break
+                kept.append(line); total += len(line) + 1
+            new_hist = "\n".join(reversed(kept))
+            if 0 < len(new_hist) < len(history_text):
+                _trimmed.append(f"history({len(history_text)}→{len(new_hist)}ch)")
+                history_text = new_hist
+    if _trimmed:
+        print(f"assistant: prompt budget ({_budget_chars}ch) trimmed -> {', '.join(_trimmed)}")
     user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
             f"{status_line}{stay_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
@@ -6031,6 +6093,11 @@ def _conv_to_item(c, listings, seen, debug=False):
     history = "\n".join(
         f"{'Guest' if _msg_is_inbound(m) else 'Host'}: {(m.get('body') or '').strip()}"
         for m in msgs[-ASSISTANT_HISTORY_MSGS:] if (m.get("body") or "").strip())
+    # A.5: mark seen at item-CREATION time (not at process time). The webhook and the
+    # poll loop can both reach this message in the same window — claiming the id here
+    # means the second caller's `mid in seen` check returns None instead of drafting a
+    # duplicate. process_assistant_item's own add stays as an idempotent no-op.
+    seen.add(mid)
     return {
         "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
         "listing_id": lm,
@@ -7091,6 +7158,21 @@ async def _handle_hook(request):
         payload = await request.json()
     except Exception:
         payload = {}
+    # A.1/A.2: reservation-shaped events instantly invalidate the availability +
+    # reservation-status caches for the touched listing/reservation, so Musaed never
+    # quotes a unit as free right after it was booked. (TTL stays as fallback.)
+    try:
+        body = payload.get("data") or payload.get("object") or payload.get("body") or {}
+        body = body if isinstance(body, dict) else {}
+        rid = (payload.get("reservationId") or payload.get("reservation_id")
+               or body.get("reservationId") or body.get("reservation_id") or body.get("id"))
+        lid = (payload.get("listingMapId") or body.get("listingMapId")
+               or payload.get("listingId") or body.get("listingId"))
+        evt = str(payload.get("event") or payload.get("type") or payload.get("object") or "").lower()
+        if "reservation" in evt and (rid or lid):
+            _invalidate_reservation_caches(listing_id=lid, reservation_id=rid)
+    except Exception as e:
+        print("hook invalidation error:", e)
     cid = _extract_conversation_id(payload)
     if cid:
         asyncio.create_task(_process_conversation_now(cid))
