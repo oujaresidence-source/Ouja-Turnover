@@ -13920,6 +13920,8 @@ const T = {
     dna_explain:'هذي الأرقام الحقيقية من حجوزات مؤكدة: «الأساس» وسيط السعر المتحقق، «الذروة» سعر الليالي القوية (p90)، «الأرضية» = الأساس ×٠٫٧٥ مع حد أدنى للفئة — الأرضية تُحسب من الأساس، أبداً مو من الذروة.',
     dna_censored:'ملاحظة صدق: هذي أسعار قبلها الضيوف فعلاً — السقف الحقيقي ممكن يكون أعلى. نتعلمه لاحقاً بالاستكشاف وتحليل «سألوا وما حجزوا».',
     dna_refresh:'تحديث',
+    fol_show:'رابط المالك', fol_create:'أنشئ رابط المالك', fol_copy:'نسخ', fol_preview:'عرض كالمالك',
+    fol_regen:'توليد جديد', fol_revoke:'إلغاء', fol_opened:'آخر فتح', fol_never:'ما انفتح بعد', fol_revoked:'الرابط ملغي',
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
@@ -14235,6 +14237,8 @@ const T = {
     dna_explain:'Real numbers from confirmed bookings: Base = median achieved rate, Peak = proven busy-night price (p90), Floor = base ×0.75 clamped to the tier minimum — floors derive from BASE, never from peak.',
     dna_censored:'Honesty note: these are prices guests ACCEPTED — the true ceiling may be higher. We learn it later via exploration + the asked-but-didn’t-book analysis.',
     dna_refresh:'Refresh',
+    fol_show:'Owner link', fol_create:'Create owner link', fol_copy:'Copy', fol_preview:'Preview as owner',
+    fol_regen:'Regenerate', fol_revoke:'Revoke', fol_opened:'Last opened', fol_never:'Never opened yet', fol_revoked:'Link revoked',
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
@@ -22206,7 +22210,42 @@ function ownersRowHtml(r,i){
         +'<select id="own_ct_'+i+'" onchange="ownersToggleClean('+i+')" style="'+inp+'"><option value="ours"'+(cl.type!=='owner'?' selected':'')+'>'+(ar?'علينا':'On us')+'</option><option value="owner"'+(cl.type==='owner'?' selected':'')+'>'+(ar?'المالك يدفع':'Owner pays')+'</option></select></div>'
       +'<div style="flex:1"><div class="muted" style="font-size:10px">'+(ar?'لكل تنظيف (ر.س)':'Per clean (SAR)')+'</div><input id="own_ca_'+i+'" type="number" '+(cl.type==='owner'?'':'disabled')+' value="'+(cl.amount||0)+'" style="'+inp+'"></div>'
       +'<button class="btn primary xs" onclick="ownersSave('+i+')">'+(ar?'حفظ':'Save')+'</button>'
-    +'</div></div>';
+    +'</div>'
+    +(r.owner?('<div id="ownlink_'+i+'" style="margin-top:8px;border-top:1px dashed var(--line);padding-top:7px"><button class="btn ghost xs" onclick="ownerLinkLoad('+i+',&#39;'+esc(r.owner)+'&#39;)">🔗 '+t().fol_show+'</button></div>'):'')
+    +'</div>';
+}
+/* ===== OR2: per-owner live-statement link controls ===== */
+async function ownerLinkLoad(i, owner){
+  var box=document.getElementById('ownlink_'+i); if(!box) return;
+  box.innerHTML='<span class="muted" style="font-size:11px">…</span>';
+  var r; try{ r=await api('/api/finance/owner-link?owner='+encodeURIComponent(owner)); }catch(_){ r=null; }
+  ownerLinkRender(i, owner, r&&r.link);
+}
+function ownerLinkRender(i, owner, lk){
+  var ar=(L==='ar'); var box=document.getElementById('ownlink_'+i); if(!box) return;
+  var k=t();
+  if(!lk || !lk.exists){
+    box.innerHTML='<button class="btn primary xs" onclick="ownerLinkAct('+i+',&#39;'+esc(owner)+'&#39;,&#39;create&#39;)">🔗 '+k.fol_create+'</button>';
+    return;
+  }
+  var opened=lk.opened_at?(k.fol_opened+' '+esc(String(lk.opened_at).replace('T',' ').slice(0,16))+' · '+lk.opens+'×'):k.fol_never;
+  var h='<div class="muted" style="font-size:10.5px;margin-bottom:5px">'+(lk.active?('🟢 '+opened):('⚪ '+k.fol_revoked))+'</div>'
+    +'<div style="display:flex;gap:5px;flex-wrap:wrap">';
+  if(lk.active&&lk.url){
+    h+='<button class="btn ghost xs" data-copy="'+esc(location.origin+lk.url)+'" onclick="_rvCopy(this)">📋 '+k.fol_copy+'</button>'
+      +'<button class="btn ghost xs" onclick="window.open(&#39;'+esc(lk.url)+'&#39;,&#39;_blank&#39;)">👁 '+k.fol_preview+'</button>';
+  }
+  h+='<button class="btn ghost xs" onclick="ownerLinkAct('+i+',&#39;'+esc(owner)+'&#39;,&#39;regenerate&#39;)">⟳ '+k.fol_regen+'</button>';
+  if(lk.active) h+='<button class="btn ghost xs" style="color:var(--red)" onclick="ownerLinkAct('+i+',&#39;'+esc(owner)+'&#39;,&#39;revoke&#39;)">✕ '+k.fol_revoke+'</button>';
+  h+='</div>';
+  box.innerHTML=h;
+}
+async function ownerLinkAct(i, owner, action){
+  if(action==='revoke' && !confirm(L==='ar'?'يلغي الرابط الحالي نهائيًا — المالك ما يقدر يفتحه بعدها. متأكد؟':'This permanently disables the current link. Sure?')) return;
+  if(action==='regenerate' && !confirm(L==='ar'?'يولّد رابط جديد ويبطل القديم. ترسل الجديد للمالك بنفسك. نكمل؟':'Generates a NEW link and kills the old one. You send the new one yourself. Continue?')) return;
+  var r; try{ r=await post('/api/finance/owner-link',{owner:owner, action:action}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast('✓'); ownerLinkRender(i, owner, r.link); }
+  else toast((r&&r.error)||'⚠');
 }
 function ownersToggleClean(i){ var s=document.getElementById('own_ct_'+i), a=document.getElementById('own_ca_'+i); if(s&&a) a.disabled=(s.value!=='owner'); }
 async function ownersSave(i){
@@ -26044,7 +26083,11 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
             if _exp_canonical_status(e) == "verified" and (lid is None or e.get("listing_id") == lid):
                 expenses.append({"id": e.get("id"), "apartment": e.get("apartment"),
                                  "lid": e.get("listing_id"), "amount": e.get("amount"),
-                                 "date": e.get("expense_date"), "matched": True})
+                                 "date": e.get("expense_date"), "matched": True,
+                                 # OR2 owner page: answer "وش هالمصروف؟" on the page itself
+                                 "category": e.get("category") or "",
+                                 "description": (e.get("note") or e.get("maintenance_type") or "")[:200],
+                                 "receipt_url": (e.get("receipt_link") or "").strip() or None})
     rep = compute_owner_report(resv, expenses, start, end, management_pct, settings, cleaning=cleaning)
     rep["apartment"] = aptname
     rep["lid"] = lid
@@ -26354,6 +26397,650 @@ def _finance_pdf_payload(items):
                 fn = fn[:-4] + ("-%d.pdf" % used[fn])
             z.writestr(fn, _pdf_statement_bytes(it["report"], it.get("label")))
     return buf.getvalue(), "ouja-statements.zip", "application/zip"
+
+# ===================== OWNER REPORT 2.0 — tokenized live owner page =====================
+# One token per OWNER (multi-apartment owners get one link). PMO owner-token pattern,
+# hardened: token_urlsafe(32), constant-time lookup, revoke + regenerate (logged).
+_owner_links = _load_json("owner_links.json", {}) or {}   # owner -> {token, active, created_at, regen_log:[], opened_at, opens}
+
+# Hostaway reservation deep-link for owners (they have Hostaway accounts). Configurable —
+# VERIFY the exact pattern once against the live account (open any reservation in the
+# Hostaway dashboard and compare); links render only when an id exists.
+HOSTAWAY_RES_URL_TEMPLATE = os.environ.get("HOSTAWAY_RES_URL_TEMPLATE",
+                                           "https://dashboard.hostaway.com/reservations/{id}")
+
+def _owner_link_save():
+    _save_json("owner_links.json", _owner_links)
+
+def _owner_link_get_or_create(owner, actor=""):
+    rec = _owner_links.get(owner)
+    if not rec:
+        rec = {"token": _secrets_mod.token_urlsafe(32), "active": True,
+               "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+               "created_by": (actor or "")[:60], "regen_log": [], "opened_at": None, "opens": 0}
+        _owner_links[owner] = rec
+        _owner_link_save()
+        log_event("finance", f"رابط مالك جديد · {owner}")
+    return rec
+
+def _owner_link_regenerate(owner, actor=""):
+    rec = _owner_link_get_or_create(owner, actor)
+    rec["regen_log"].append({"ts": datetime.now(TZ).isoformat(timespec="seconds"),
+                             "by": (actor or "")[:60], "old_suffix": rec["token"][-6:]})
+    rec["regen_log"] = rec["regen_log"][-20:]
+    rec["token"] = _secrets_mod.token_urlsafe(32)
+    rec["active"] = True
+    _owner_link_save()
+    log_event("finance", f"رابط مالك أعيد توليده · {owner} · بواسطة {actor or '?'}")
+    return rec
+
+def _owner_link_revoke(owner, actor=""):
+    rec = _owner_links.get(owner)
+    if rec:
+        rec["active"] = False
+        _owner_link_save()
+        log_event("finance", f"رابط مالك أُلغي · {owner} · بواسطة {actor or '?'}")
+    return rec
+
+def _owner_by_token(token):
+    """Constant-time token → owner. Inactive links never match."""
+    if not token:
+        return None
+    for owner, rec in _owner_links.items():
+        t = str(rec.get("token") or "")
+        if rec.get("active") and t and hmac.compare_digest(t, str(token)):
+            return owner
+    return None
+
+def _owner_link_touch(owner):
+    rec = _owner_links.get(owner)
+    if rec:
+        rec["opened_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        rec["opens"] = int(rec.get("opens") or 0) + 1
+        _owner_link_save()
+
+def _month_bounds(mkey):
+    """'YYYY-MM' → (first_day, last_day) dates."""
+    import calendar as _cal
+    y, m = int(mkey[:4]), int(mkey[5:7])
+    return date(y, m, 1), date(y, m, _cal.monthrange(y, m)[1])
+
+_owner_portal_cache = {}    # (owner, month) -> (payload_report, built_ts)
+
+def _owner_month_report(owner, mkey):
+    """The aggregated owner report for one month — the SAME object the PDF renders.
+    Memoized: closed months 6h, the current month 15 min."""
+    now = time.time()
+    hit = _owner_portal_cache.get((owner, mkey))
+    cur_key = datetime.now(TZ).date().isoformat()[:7]
+    ttl = 900 if mkey == cur_key else 6 * 3600
+    if hit and (now - hit[1] < ttl):
+        return hit[0]
+    start, end = _month_bounds(mkey)
+    items = _finance_collect_items("owner", [], [owner], start, end)
+    rep = items[0]["report"] if items else None
+    if rep is not None:
+        _owner_portal_cache[(owner, mkey)] = (rep, now)
+        if len(_owner_portal_cache) > 400:
+            for k in sorted(_owner_portal_cache, key=lambda k: _owner_portal_cache[k][1])[:100]:
+                _owner_portal_cache.pop(k, None)
+    return rep
+
+def _owner_portal_data(owner, mkey):
+    """Everything the owner page renders, computed from real stores only. Missing data
+    stays null/empty and the page shows honest empty-states — nothing interpolated."""
+    import calendar as _cal
+    listings = get_listings_map() or {}
+    lids = _owner_lids(owner, listings)
+    today = datetime.now(TZ).date()
+    rep = _owner_month_report(owner, mkey)
+    if rep is None:
+        return None
+    start, end = _month_bounds(mkey)
+    days_in_month = (end - start).days + 1
+    # ---- 12-month net trend (each month through the SAME money math) ----
+    trend = []
+    y, m = int(mkey[:4]), int(mkey[5:7])
+    for i in range(11, -1, -1):
+        ty, tm = y, m - i
+        while tm <= 0:
+            tm += 12; ty -= 1
+        k = f"{ty}-{tm:02d}"
+        r = _owner_month_report(owner, k)
+        trend.append({"m": k, "net": (r or {}).get("owner_net"),
+                      "income": (r or {}).get("total_income")})
+    prev = trend[-2] if len(trend) >= 2 else {}
+    yoy_key = f"{y-1}-{m:02d}"
+    yoy = _owner_month_report(owner, yoy_key)
+    # ---- occupancy: owner units vs anonymized portfolio average ----
+    own_nights = sum(int(l.get("nights") or 0) for l in (rep.get("resv_lines") or [])
+                     if l.get("income") is not None)
+    avail = max(1, len(lids)) * days_in_month
+    port_booked = 0
+    try:
+        nights_all, _ = _explode_nights(get_reservations_cached())
+        for _lid, d, _nl in nights_all:
+            if start <= d <= end:
+                port_booked += 1
+    except Exception as e:
+        print("portal portfolio occ error:", e)
+        port_booked = None
+    n_listings = max(1, len(listings))
+    occupancy = {"owner_pct": round(own_nights * 100.0 / avail),
+                 "nights": own_nights, "available_nights": avail,
+                 "portfolio_pct": (round(port_booked * 100.0 / (n_listings * days_in_month))
+                                   if port_booked is not None else None)}
+    # ---- channel mix (by income) ----
+    mix = {}
+    for l in (rep.get("resv_lines") or []):
+        if l.get("income") is not None:
+            mix[l.get("channel") or "?"] = round(mix.get(l.get("channel") or "?", 0) + l["income"], 2)
+    # ---- net-per-night by day-type (weekend Thu/Fri, events) ----
+    adr_dt = {"weekday": [], "weekend": [], "event": []}
+    for l in (rep.get("resv_lines") or []):
+        if l.get("income") is None or not l.get("nights"):
+            continue
+        per_night = float(l["income"]) / int(l["nights"])
+        ci = _parse_date(l.get("checkin")); co = _parse_date(l.get("checkout"))
+        if not ci or not co:
+            continue
+        d = ci
+        while d < co:
+            if start <= d <= end:
+                if events_for_date(d):
+                    adr_dt["event"].append(per_night)
+                elif d.weekday() in (3, 4):          # Thu/Fri — the Saudi weekend
+                    adr_dt["weekend"].append(per_night)
+                else:
+                    adr_dt["weekday"].append(per_night)
+            d += timedelta(days=1)
+    adr_daytype = {k: (round(sum(v) / len(v)) if v else None) for k, v in adr_dt.items()}
+    # ---- expense categories ----
+    exp_cats = {}
+    for e in (rep.get("exp_lines") or []):
+        c = e.get("category") or "أخرى"
+        exp_cats[c] = round(exp_cats.get(c, 0) + float(e.get("amount") or 0), 2)
+    # ---- next-month preview (confirmed bookings already on the books) ----
+    ny, nm = (y, m + 1) if m < 12 else (y + 1, 1)
+    n_start, n_end = _month_bounds(f"{ny}-{nm:02d}")
+    nxt_nights = 0; nxt_rev = 0.0; nxt_known = True
+    try:
+        for r in get_reservations_cached():
+            if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+                continue
+            if r.get("listingMapId") not in lids:
+                continue
+            ci = _parse_date(r.get("arrivalDate")); co = _parse_date(r.get("departureDate"))
+            nn = _res_nights(r); tp = r.get("totalPrice")
+            if not ci or not co or nn <= 0:
+                continue
+            d = ci
+            in_m = 0
+            while d < co:
+                if n_start <= d <= n_end:
+                    in_m += 1
+                d += timedelta(days=1)
+            if in_m:
+                nxt_nights += in_m
+                if isinstance(tp, (int, float)) and tp > 0:
+                    nxt_rev += float(tp) / nn * in_m
+                else:
+                    nxt_known = False
+    except Exception as e:
+        print("portal next-month error:", e)
+        nxt_known = False
+    # ---- price-protection actions this month (REAL applies only, never dry-run) ----
+    actions = 0
+    try:
+        for key, entries in _price_log.items():
+            lid_s = key.split("|", 1)[0]
+            try:
+                if int(lid_s) not in lids:
+                    continue
+            except ValueError:
+                continue
+            for e in entries:
+                if not e.get("dry") and str(e.get("ts") or "")[:7] == mkey:
+                    actions += 1
+    except Exception as e:
+        print("portal price-actions error:", e)
+    # ---- this month's reviews for the owner's units ----
+    revs = []
+    try:
+        for rv in _reviews.values():
+            if rv.get("listing_id") not in lids:
+                continue
+            if str(rv.get("date") or "")[:7] != mkey:
+                continue
+            txt = (rv.get("public_review") or "").strip()
+            revs.append({"rating": rv.get("rating"), "guest": (rv.get("guest_name") or "")[:40],
+                         "text": (txt[:140] + ("…" if len(txt) > 140 else "")) if txt else "",
+                         "unit": listings.get(rv.get("listing_id")) or ""})
+        revs.sort(key=lambda x: -(x.get("rating") or 0))
+        revs = revs[:4]
+    except Exception as e:
+        print("portal reviews error:", e)
+    # ---- months available: current + last 12 ----
+    months = []
+    cy, cm = today.year, today.month
+    for i in range(13):
+        my, mm = cy, cm - i
+        while mm <= 0:
+            mm += 12; my -= 1
+        months.append(f"{my}-{mm:02d}")
+    res_url = HOSTAWAY_RES_URL_TEMPLATE if "{id}" in HOSTAWAY_RES_URL_TEMPLATE else ""
+    # ---- driver deltas vs LAST month (computed, never hand-written) ----
+    prev_key = trend[-2]["m"] if len(trend) >= 2 else None
+    prev_rep = _owner_month_report(owner, prev_key) if prev_key else None
+    def _rep_nights(r):
+        return sum(int(l.get("nights") or 0) for l in ((r or {}).get("resv_lines") or [])
+                   if l.get("income") is not None)
+    def _rep_npn(r):    # net per night
+        n = _rep_nights(r)
+        return (round(float(r.get("total_income") or 0) / n) if (r and n) else None)
+    drivers = {"nights_delta": (own_nights - _rep_nights(prev_rep)) if prev_rep is not None else None,
+               "adr_delta": ((_rep_npn(rep) - _rep_npn(prev_rep))
+                             if (_rep_npn(rep) is not None and _rep_npn(prev_rep) is not None) else None),
+               "expenses_delta": (round(float(rep.get("expenses") or 0) - float(prev_rep.get("expenses") or 0), 2)
+                                  if prev_rep is not None else None)}
+    return {"owner": owner, "month": mkey, "months": months,
+            "units": sorted([listings.get(l) or str(l) for l in lids]),
+            "report": rep,
+            "prev_net": prev.get("net"), "yoy_net": (yoy or {}).get("owner_net"),
+            "drivers": drivers,
+            "trend": trend, "occupancy": occupancy, "channel_mix": mix,
+            "adr_daytype": adr_daytype, "expense_cats": exp_cats,
+            "next_month": {"m": f"{ny}-{nm:02d}", "nights": nxt_nights,
+                           "revenue": (round(nxt_rev) if nxt_known or nxt_rev else None),
+                           "revenue_partial": (not nxt_known and nxt_rev > 0)},
+            "price_actions": actions, "reviews": revs,
+            "hostaway_url_template": res_url,
+            "generated_at": datetime.now(TZ).isoformat(timespec="minutes")}
+
+# The owner portal page. RAW string (r-prefix): backslashes stay literal, so no Python
+# mangling inside the JS. No backticks anywhere. Literal { } are fine (not an f-string).
+OWNER_PORTAL_HTML = r"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>كشف المالك · عوجا</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F7F1E6;--surface:#FFFDF8;--ink:#2F241B;--mut:#7A6A58;--gold:#B88935;--gold2:#966C28;--line:#E5D8C4;--green:#3e7d5a;--red:#b4543f;--blue:#2f5f7a;--r:14px;--shadow:0 8px 28px rgba(47,36,27,.08)}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:14px 14px 60px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px;margin-bottom:12px}
+.muted{color:var(--mut)}
+.num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;display:inline-block}
+h1{font-size:19px;margin:0}
+h2{font-size:15px;margin:0 0 10px}
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700}
+.chip.ok{background:rgba(62,125,90,.12);color:var(--green)}
+.chip.warn{background:rgba(184,137,59,.14);color:var(--gold2)}
+.chip.bad{background:rgba(180,84,63,.12);color:var(--red)}
+.chip.info{background:rgba(47,95,122,.10);color:var(--blue)}
+.btn{display:inline-flex;align-items:center;gap:6px;background:var(--ink);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;font-family:inherit}
+.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+select{font-family:inherit;font-size:13px;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-size:10.5px;color:var(--mut);font-weight:700;text-align:start;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.row{cursor:pointer}
+tr.row:active{background:rgba(184,137,59,.05)}
+.bars{display:flex;align-items:flex-end;gap:4px;height:110px;margin-top:8px}
+.bars i{flex:1;background:var(--line);border-radius:4px 4px 0 0;min-height:4px;position:relative}
+.bars i.cur{background:var(--gold)}
+.bars i b{position:absolute;top:-17px;left:0;right:0;text-align:center;font-size:8.5px;color:var(--mut);font-weight:600;direction:ltr}
+.bars i span{position:absolute;bottom:-17px;left:0;right:0;text-align:center;font-size:8px;color:var(--mut);direction:ltr}
+.donut{width:110px;height:110px;border-radius:50%;flex:none}
+.legend{display:flex;flex-direction:column;gap:5px;font-size:12px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-inline-end:5px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+.kv:last-child{border-bottom:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.grid2{grid-template-columns:1fr}}
+.empty{padding:18px;text-align:center;color:var(--mut);font-size:12.5px}
+.foot-line{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:7px 0;border-bottom:1px dashed var(--line)}
+a.res{color:var(--blue);text-decoration:none;font-weight:600}
+.wf{background:rgba(184,137,59,.05);border-radius:10px;padding:10px 12px;margin:4px 0 8px}
+.wf .kv{border-bottom:0;padding:3px 0}
+</style></head>
+<body>
+<div class="wrap" id="app"><div class="empty">…</div></div>
+<script>
+var DATA = /*__OWNER_DATA__*/null;
+var L = 'ar';
+var T = {
+ ar:{title:'كشف المالك', net:'صافي المالك', for_month:'عن شهر', status_paid:'الكشف نهائي — التحويل حسب دورة الدفع المتفقة',
+   vs_prev:'مقابل الشهر الماضي', vs_yoy:'مقابل نفس الشهر السنة الماضية', driver_n:'ليالي', driver_adr:'صافي/ليلة', driver_exp:'مصاريف',
+   recon_ok:'متوازن ✓ — مجموع الصفوف يساوي الإجمالي بالريال', recon_bad:'يحتاج مراجعة — فيه صفوف ناقصة بيانات',
+   tbl_guest:'الضيف', tbl_dates:'الإقامة', tbl_nights:'ليالي', tbl_net:'الصافي', tbl_status:'الحالة',
+   chip_done:'مكتمل', chip_upcoming:'حجز قادم', chip_cxl_paid:'ملغي — مدفوع', chip_review:'يحتاج مراجعة',
+   wf_gross:'الإجمالي (قبل الخصومات)', wf_fee:'عمولة القناة/المنصة', wf_refund:'مبلغ مسترد للضيف', wf_extras:'إضافات', wf_net:'الصافي لك', wf_src:'مصدر الأرقام',
+   open_hostaway:'افتحه في Hostaway ↗', booked_on:'حُجز يوم', lead:'قبل الوصول بـ', days:'يوم', guests:'ضيوف', per_night:'لليلة',
+   sec_exp:'المصاريف', exp_receipt:'الفاتورة ↗', exp_none:'لا مصاريف مسجلة هذا الشهر ✓',
+   sec_fee:'عمولة عوجا', fee_formula:'النسبة × إجمالي الدخل', sec_cleaning:'النظافة (شهري حسب العقد)',
+   sec_footer:'حركات بدون فلوس (للشفافية)', foot_unpaid:'غير مدفوع بعد', foot_refunded:'ملغي — مسترد بالكامل', foot_expected:'متوقع',
+   foot_none:'لا يوجد — كل حجوزات الشهر مدفوعة ✓', perf:'الأداء', trend:'صافي الدخل — آخر ١٢ شهر',
+   occ:'الإشغال مقابل متوسط المحفظة', occ_you:'وحداتك', occ_port:'متوسط عوجا (مجهول الهوية)',
+   mix:'مصادر الدخل', adr_dt:'متوسط الصافي/ليلة حسب نوع اليوم', dt_wd:'أيام الأسبوع', dt_we:'نهاية الأسبوع (خميس-جمعة)', dt_ev:'مناسبات',
+   exp_cats:'المصاريف حسب الفئة', next_m:'الشهر الجاي — المحجوز فعلاً', next_nights:'ليلة محجوزة', next_rev:'إيراد مؤكد حتى الآن', next_partial:'(بعض الحجوزات بدون مبلغ معروف)',
+   actions:'حماية التسعير', actions_txt:'عدّلنا الأسعار {n} مرة هذا الشهر لحماية الإشغال', actions_zero:'ما احتجنا أي تعديل سعر هذا الشهر',
+   reviews:'آراء الضيوف هذا الشهر', reviews_none:'ما فيه مراجعات هذا الشهر', pdf:'تحميل PDF', lang:'EN',
+   apartments:'الشقق', no_data:'ما فيه بيانات لهذا الشهر', empty_chart:'ما فيه بيانات كافية للرسم',
+   gen_at:'حُسب', month_names:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']},
+ en:{title:'Owner statement', net:'Owner net', for_month:'For', status_paid:'Final — transfer per the agreed payment cycle',
+   vs_prev:'vs last month', vs_yoy:'vs same month last year', driver_n:'nights', driver_adr:'net/night', driver_exp:'expenses',
+   recon_ok:'Balanced ✓ — rows equal the total to the riyal', recon_bad:'Needs review — some rows are missing data',
+   tbl_guest:'Guest', tbl_dates:'Stay', tbl_nights:'Nights', tbl_net:'Net', tbl_status:'Status',
+   chip_done:'Completed', chip_upcoming:'Upcoming', chip_cxl_paid:'Cancelled — paid', chip_review:'Needs review',
+   wf_gross:'Gross (before deductions)', wf_fee:'Channel/platform fee', wf_refund:'Refunded to guest', wf_extras:'Extras', wf_net:'Your net', wf_src:'Source fields',
+   open_hostaway:'Open in Hostaway ↗', booked_on:'Booked on', lead:'Lead time', days:'days', guests:'guests', per_night:'/night',
+   sec_exp:'Expenses', exp_receipt:'Receipt ↗', exp_none:'No expenses recorded this month ✓',
+   sec_fee:'Ouja management fee', fee_formula:'rate × total income', sec_cleaning:'Cleaning (monthly per contract)',
+   sec_footer:'Non-money movements (transparency)', foot_unpaid:'Not paid yet', foot_refunded:'Cancelled — fully refunded', foot_expected:'expected',
+   foot_none:'None — every booking this month is paid ✓', perf:'Performance', trend:'Net income — last 12 months',
+   occ:'Occupancy vs portfolio average', occ_you:'Your units', occ_port:'Ouja average (anonymized)',
+   mix:'Income sources', adr_dt:'Avg net/night by day type', dt_wd:'Weekdays', dt_we:'Weekend (Thu–Fri)', dt_ev:'Events',
+   exp_cats:'Expenses by category', next_m:'Next month — already booked', next_nights:'nights booked', next_rev:'confirmed revenue so far', next_partial:'(some bookings have no known amount)',
+   actions:'Price protection', actions_txt:'We adjusted prices {n} times this month to protect occupancy', actions_zero:'No price adjustments were needed this month',
+   reviews:'Guest reviews this month', reviews_none:'No reviews this month', pdf:'Download PDF', lang:'ع',
+   apartments:'Apartments', no_data:'No data for this month', empty_chart:'Not enough data to draw',
+   gen_at:'Computed', month_names:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']}
+};
+function t(){ return T[L]; }
+function he(s){ return String(s==null?'':s).replace(/[<>&"']/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]; }); }
+function money(x){ if(x==null) return '—'; var n=Math.round(Number(x)); return '<span class="num">'+n.toLocaleString('en-US')+'</span> ر.س'; }
+function mlabel(k){ if(!k) return ''; var y=k.slice(0,4), m=parseInt(k.slice(5,7),10); return t().month_names[m-1]+' '+y; }
+function chanName(c){ return c==='airbnb'?'Airbnb':(c==='direct'?(L==='ar'?'مباشر':'Direct'):(c||'?')); }
+function chanIcon(c){ return c==='airbnb'?'◈':(c==='direct'?'◇':'◆'); }
+function setLang(l){ L=l; document.documentElement.lang=l; document.documentElement.dir=(l==='ar'?'rtl':'ltr'); render(); }
+function statusChip(l){
+  var k=t();
+  if(l.needs_review) return '<span class="chip bad">'+k.chip_review+'</span>';
+  if(l.status_kind==='cancelled_paid') return '<span class="chip warn">'+k.chip_cxl_paid+'</span>';
+  var today=(new Date()).toISOString().slice(0,10);
+  if((l.checkin||'')>today) return '<span class="chip info">'+k.chip_upcoming+'</span>';
+  return '<span class="chip ok">'+k.chip_done+'</span>';
+}
+function leadDays(l){
+  if(!l.booked_at||!l.checkin) return null;
+  var a=new Date(l.booked_at), b=new Date(l.checkin);
+  var d=Math.round((b-a)/86400000);
+  return (isNaN(d)||d<0)?null:d;
+}
+function toggleRow(i){
+  var el=document.getElementById('wf'+i);
+  if(el) el.style.display=(el.style.display==='none'?'':'none');
+}
+function rowHtml(l, i){
+  var k=t();
+  var gross=(l.gross!=null?l.gross:null);
+  var fee=(l.direct_fee_amount!=null?l.direct_fee_amount:null);
+  var nights=l.nights||0;
+  var adr=(l.income!=null&&nights)?Math.round(l.income/nights):null;
+  var resUrl=(DATA.hostaway_url_template&&l.id)?DATA.hostaway_url_template.replace('{id}', String(l.id)):'';
+  var guest=he(l.guest||'—');
+  var guestCell=resUrl?('<a class="res" target="_blank" rel="noopener" href="'+he(resUrl)+'" onclick="event.stopPropagation()">'+guest+'</a>'):guest;
+  var lead=leadDays(l);
+  var sub=[chanIcon(l.channel)+' '+chanName(l.channel)];
+  if(DATA.report.n_apartments>1&&l.apartment) sub.push(he(l.apartment));
+  if(l.booked_at) sub.push(k.booked_on+' '+he(l.booked_at)+(lead!=null?(' · '+k.lead+' '+lead+' '+k.days):''));
+  var head='<tr class="row" onclick="toggleRow('+i+')">'
+    +'<td><b>'+guestCell+'</b><div class="muted" style="font-size:10.5px;margin-top:2px">'+sub.join(' · ')+'</div></td>'
+    +'<td style="white-space:nowrap"><span class="num">'+he(l.checkin||'')+'</span> ← <span class="num">'+he(l.checkout||'')+'</span>'
+    +(l.guests_count?('<div class="muted" style="font-size:10.5px">'+l.guests_count+' '+k.guests+'</div>'):'')+'</td>'
+    +'<td class="num">'+nights+(adr!=null?('<div class="muted" style="font-size:10px">'+money(adr)+' '+k.per_night+'</div>'):'')+'</td>'
+    +'<td><b>'+money(l.income)+'</b></td>'
+    +'<td>'+statusChip(l)+'</td></tr>';
+  var wf='<tr id="wf'+i+'" style="display:none"><td colspan="5"><div class="wf">'
+    +(gross!=null?('<div class="kv"><span class="muted">'+k.wf_gross+'</span><b>'+money(gross)+'</b></div>'):'')
+    +(fee!=null?('<div class="kv"><span class="muted">'+k.wf_fee+' ('+(l.direct_fee_pct||0)+'%)</span><b>−'+money(fee)+'</b></div>'):'')
+    +((l.refund&&l.refund>0)?('<div class="kv"><span class="muted">'+k.wf_refund+'</span><b>−'+money(l.refund)+'</b></div>'):'')
+    +((l.extras&&l.extras>0)?('<div class="kv"><span class="muted">'+k.wf_extras+'</span><b>+'+money(l.extras)+'</b></div>'):'')
+    +'<div class="kv" style="border-top:1px solid var(--line);padding-top:7px"><span><b>'+k.wf_net+'</b></span><b>'+money(l.income)+'</b></div>'
+    +(l.source_fields?('<div class="muted" style="font-size:10px;margin-top:5px;direction:ltr;text-align:left">'+k.wf_src+': '+he(l.source_fields)+'</div>'):'')
+    +(resUrl?('<div style="margin-top:7px"><a class="res" target="_blank" rel="noopener" href="'+he(resUrl)+'">'+k.open_hostaway+'</a></div>'):'')
+    +'</div></td></tr>';
+  return head+wf;
+}
+function barsHtml(items, valKey, labKey, curIdx){
+  var max=1; items.forEach(function(x){ if((x[valKey]||0)>max) max=x[valKey]; });
+  return '<div class="bars">'+items.map(function(x,i){
+    var v=x[valKey]; var h=(v==null?0:Math.max(4,Math.round(v/max*100)));
+    return '<i class="'+(i===curIdx?'cur':'')+'" style="height:'+h+'%" title="'+he(x[labKey])+': '+(v==null?'—':Math.round(v).toLocaleString('en-US'))+'">'
+      +(i===curIdx&&v!=null?('<b>'+Math.round(v/1000)+'k</b>'):'')
+      +'<span>'+he(String(x[labKey]).slice(5,7))+'</span></i>';
+  }).join('')+'</div>';
+}
+function donutHtml(mix){
+  var entries=Object.keys(mix).map(function(c){ return [c, mix[c]]; }).filter(function(e){ return e[1]>0; });
+  var total=entries.reduce(function(s,e){ return s+e[1]; },0);
+  if(!total) return '<div class="empty">'+t().empty_chart+'</div>';
+  var cols={airbnb:'#B88935', direct:'#3e7d5a', other:'#2f5f7a'};
+  var acc=0, stops=[];
+  entries.forEach(function(e){
+    var from=acc/total*360; acc+=e[1]; var to=acc/total*360;
+    stops.push((cols[e[0]]||'#7A6A58')+' '+from.toFixed(1)+'deg '+to.toFixed(1)+'deg');
+  });
+  var legend=entries.map(function(e){
+    return '<div><span class="dot" style="background:'+(cols[e[0]]||'#7A6A58')+'"></span>'+chanName(e[0])+' · '+money(e[1])+' ('+Math.round(e[1]/total*100)+'%)</div>';
+  }).join('');
+  return '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
+    +'<div class="donut" style="background:conic-gradient('+stops.join(',')+')"></div>'
+    +'<div class="legend">'+legend+'</div></div>';
+}
+function driverSentence(){
+  var k=t(), d=DATA.drivers||{}, rep=DATA.report;
+  var bits=[];
+  if(DATA.prev_net!=null){
+    var dv=Math.round((rep.owner_net||0)-DATA.prev_net);
+    bits.push(k.vs_prev+': <b style="color:'+(dv>=0?'var(--green)':'var(--red)')+'">'+(dv>=0?'+':'')+money(dv)+'</b>');
+  }
+  if(DATA.yoy_net!=null){
+    var dy=Math.round((rep.owner_net||0)-DATA.yoy_net);
+    bits.push(k.vs_yoy+': <b style="color:'+(dy>=0?'var(--green)':'var(--red)')+'">'+(dy>=0?'+':'')+money(dy)+'</b>');
+  }
+  var why=[];
+  if(d.nights_delta!=null&&d.nights_delta!==0) why.push((d.nights_delta>0?'+':'')+d.nights_delta+' '+k.driver_n);
+  if(d.adr_delta!=null&&d.adr_delta!==0) why.push((d.adr_delta>0?'+':'')+d.adr_delta+' '+k.driver_adr);
+  if(d.expenses_delta!=null&&d.expenses_delta!==0) why.push((d.expenses_delta>0?'+':'')+Math.round(d.expenses_delta)+' '+k.driver_exp);
+  if(why.length) bits.push('('+why.join(' · ')+')');
+  return bits.length?('<div class="muted" style="font-size:12px;margin-top:6px">'+bits.join(' &nbsp;·&nbsp; ')+'</div>'):'';
+}
+function render(){
+  var k=t(), rep=DATA.report, rc=rep.reconciliation||{};
+  var token=location.pathname.split('/')[3]||'';
+  var h='';
+  // ---- header ----
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0 12px;flex-wrap:wrap">'
+    +'<div><div class="muted" style="font-size:11px;letter-spacing:1px">OUJA · عوجا</div><h1>'+k.title+' · '+he(DATA.owner)+'</h1>'
+    +'<div class="muted" style="font-size:11.5px">'+k.apartments+': '+DATA.units.map(he).join('، ')+'</div></div>'
+    +'<div style="display:flex;gap:6px;align-items:center">'
+    +'<select onchange="location.search=&#39;?m=&#39;+this.value">'+DATA.months.map(function(m){ return '<option value="'+m+'"'+(m===DATA.month?' selected':'')+'>'+mlabel(m)+'</option>'; }).join('')+'</select>'
+    +'<button class="btn ghost" onclick="setLang(L===&#39;ar&#39;?&#39;en&#39;:&#39;ar&#39;)">'+k.lang+'</button></div></div>';
+  // ---- hero ----
+  h+='<div class="card" style="text-align:center;padding:22px">'
+    +'<div class="muted" style="font-size:12px">'+k.net+' · '+k.for_month+' '+mlabel(DATA.month)+'</div>'
+    +'<div style="font-size:34px;font-weight:800;color:var(--gold2);margin:4px 0">'+money(rep.owner_net)+'</div>'
+    +driverSentence()
+    +'<div style="margin-top:10px">'+(rc.balanced?('<span class="chip ok">'+k.recon_ok+'</span>'):('<span class="chip bad">'+k.recon_bad+'</span>'))+'</div>'
+    +'<div style="margin-top:12px"><a class="btn" href="/fin/o/'+he(token)+'/pdf?m='+he(DATA.month)+'">⬇ '+k.pdf+'</a></div>'
+    +'</div>';
+  // ---- reservations table ----
+  var lines=rep.resv_lines||[];
+  h+='<div class="card"><h2>'+(L==='ar'?'حجوزات الشهر':'This month’s bookings')+' · '+lines.length+'</h2>';
+  if(!lines.length){ h+='<div class="empty">'+k.no_data+'</div>'; }
+  else{
+    h+='<div style="overflow-x:auto"><table><tr><th>'+k.tbl_guest+'</th><th>'+k.tbl_dates+'</th><th>'+k.tbl_nights+'</th><th>'+k.tbl_net+'</th><th>'+k.tbl_status+'</th></tr>'
+      +lines.map(rowHtml).join('')+'</table></div>';
+  }
+  h+='</div>';
+  // ---- expenses ----
+  var exps=rep.exp_lines||[];
+  h+='<div class="card"><h2>'+k.sec_exp+' · '+money(rep.expenses)+'</h2>';
+  if(!exps.length){ h+='<div class="empty">'+k.exp_none+'</div>'; }
+  else{
+    h+=exps.map(function(e){
+      return '<div class="foot-line"><span><span class="num">'+he(e.date||'')+'</span> · '+he(e.category||'')+(e.description?(' — '+he(e.description)):'')
+        +(e.receipt_url?(' <a class="res" target="_blank" rel="noopener" href="'+he(e.receipt_url)+'">'+k.exp_receipt+'</a>'):'')
+        +'</span><b>−'+money(e.amount)+'</b></div>';
+    }).join('');
+  }
+  h+='</div>';
+  // ---- fee + cleaning ----
+  h+='<div class="card"><div class="kv"><span>'+k.sec_fee+' <span class="muted" style="font-size:11px">('+k.fee_formula+')</span><br>'
+    +'<span class="muted num" style="font-size:11.5px">'+(rep.management_pct!=null?rep.management_pct:'—')+'% × '+Math.round(rep.total_income||0).toLocaleString('en-US')+'</span></span>'
+    +'<b>−'+money(rep.ouja_fee)+'</b></div>'
+    +((rep.cleaning&&rep.cleaning.total)?('<div class="kv"><span>'+k.sec_cleaning+'</span><b>−'+money(rep.cleaning.total)+'</b></div>'):'')
+    +'<div class="kv"><span><b>'+k.net+'</b></span><b style="color:var(--gold2)">'+money(rep.owner_net)+'</b></div></div>';
+  // ---- transparency footer ----
+  var unpaid=rep.unpaid_lines||[], refunded=rep.refunded_lines||[];
+  h+='<div class="card"><h2>'+k.sec_footer+'</h2>';
+  if(!unpaid.length&&!refunded.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
+  else{
+    h+=unpaid.map(function(u){
+      return '<div class="foot-line"><span><span class="chip warn">'+k.foot_unpaid+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
+        +'<span class="muted">'+k.foot_expected+' '+money(u.expected)+'</span></div>';
+    }).join('');
+    h+=refunded.map(function(u){
+      return '<div class="foot-line"><span><span class="chip info">'+k.foot_refunded+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
+        +'<b>'+money(0)+'</b></div>';
+    }).join('');
+  }
+  h+='</div>';
+  // ================= performance =================
+  h+='<h2 style="margin:18px 4px 10px;font-size:16px">'+k.perf+'</h2>';
+  var curIdx=-1; DATA.trend.forEach(function(x,i){ if(x.m===DATA.month) curIdx=i; });
+  h+='<div class="card"><h2>'+k.trend+'</h2>'+barsHtml(DATA.trend,'net','m',curIdx)+'<div style="height:16px"></div></div>';
+  var oc=DATA.occupancy||{};
+  h+='<div class="grid2">';
+  h+='<div class="card"><h2>'+k.occ+'</h2>'
+    +'<div class="kv"><span>'+k.occ_you+'</span><b class="num">'+(oc.owner_pct!=null?oc.owner_pct+'%':'—')+'</b></div>'
+    +'<div style="background:var(--line);border-radius:99px;height:9px;overflow:hidden"><div style="width:'+(oc.owner_pct||0)+'%;background:var(--gold);height:100%"></div></div>'
+    +'<div class="kv" style="margin-top:8px"><span>'+k.occ_port+'</span><b class="num">'+(oc.portfolio_pct!=null?oc.portfolio_pct+'%':'—')+'</b></div>'
+    +'<div style="background:var(--line);border-radius:99px;height:9px;overflow:hidden"><div style="width:'+(oc.portfolio_pct||0)+'%;background:var(--blue);height:100%"></div></div>'
+    +'<div class="muted" style="font-size:10.5px;margin-top:7px"><span class="num">'+(oc.nights||0)+'</span> / <span class="num">'+(oc.available_nights||0)+'</span> '+t().driver_n+'</div></div>';
+  h+='<div class="card"><h2>'+k.mix+'</h2>'+donutHtml(DATA.channel_mix||{})+'</div>';
+  h+='</div>';
+  var ad=DATA.adr_daytype||{};
+  h+='<div class="grid2">';
+  h+='<div class="card"><h2>'+k.adr_dt+'</h2>'
+    +'<div class="kv"><span>'+k.dt_wd+'</span><b>'+money(ad.weekday)+'</b></div>'
+    +'<div class="kv"><span>'+k.dt_we+'</span><b>'+money(ad.weekend)+'</b></div>'
+    +'<div class="kv"><span>'+k.dt_ev+'</span><b>'+money(ad.event)+'</b></div></div>';
+  var cats=DATA.expense_cats||{}; var catKeys=Object.keys(cats);
+  h+='<div class="card"><h2>'+k.exp_cats+'</h2>';
+  if(!catKeys.length){ h+='<div class="empty">'+k.exp_none+'</div>'; }
+  else{
+    var cmax=1; catKeys.forEach(function(c){ if(cats[c]>cmax) cmax=cats[c]; });
+    h+=catKeys.map(function(c){
+      return '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between;font-size:12px"><span>'+he(c)+'</span><b>'+money(cats[c])+'</b></div>'
+        +'<div style="background:var(--line);border-radius:99px;height:7px;overflow:hidden"><div style="width:'+Math.round(cats[c]/cmax*100)+'%;background:var(--red);height:100%;opacity:.65"></div></div></div>';
+    }).join('');
+  }
+  h+='</div></div>';
+  var nm=DATA.next_month||{};
+  h+='<div class="grid2">';
+  h+='<div class="card"><h2>'+k.next_m+' ('+mlabel(nm.m)+')</h2>'
+    +'<div class="kv"><span>'+k.next_nights+'</span><b class="num">'+(nm.nights||0)+'</b></div>'
+    +'<div class="kv"><span>'+k.next_rev+'</span><b>'+money(nm.revenue)+'</b></div>'
+    +(nm.revenue_partial?('<div class="muted" style="font-size:10.5px">'+k.next_partial+'</div>'):'')+'</div>';
+  h+='<div class="card"><h2>'+k.actions+'</h2><div style="font-size:13px;padding:8px 0">'
+    +(DATA.price_actions?k.actions_txt.replace('{n}', String(DATA.price_actions)):k.actions_zero)
+    +'</div></div>';
+  h+='</div>';
+  var rv=DATA.reviews||[];
+  h+='<div class="card"><h2>'+k.reviews+'</h2>';
+  if(!rv.length){ h+='<div class="empty">'+k.reviews_none+'</div>'; }
+  else{
+    h+=rv.map(function(r){
+      var stars=''; for(var s=0;s<5;s++){ stars+=(s<(r.rating||0)?'★':'☆'); }
+      return '<div style="padding:8px 0;border-bottom:1px dashed var(--line)"><div style="color:var(--gold);font-size:13px">'+stars+' <span class="muted" style="font-size:11px">'+he(r.guest||'')+(r.unit&&DATA.units.length>1?(' · '+he(r.unit)):'')+'</span></div>'
+        +(r.text?('<div style="font-size:12.5px;margin-top:3px">"'+he(r.text)+'"</div>'):'')+'</div>';
+    }).join('');
+  }
+  h+='</div>';
+  h+='<div class="muted" style="text-align:center;font-size:10.5px;margin-top:14px">'+k.gen_at+' '+he(DATA.generated_at||'')+' · Ouja Residence</div>';
+  document.getElementById('app').innerHTML=h;
+}
+if(DATA&&DATA.report){ render(); }
+else{ document.getElementById('app').innerHTML='<div class="empty" style="padding:60px 20px">'+t().no_data+'</div>'; }
+</script>
+</body></html>"""
+
+async def _api_finance_owner_link(request):
+    """Faisal's controls for owner links. GET ?owner= → status; POST {owner, action:
+    create|regenerate|revoke} → mutate. Role-gated: finance write (middleware) + here."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    def view(owner):
+        rec = _owner_links.get(owner)
+        if not rec:
+            return {"owner": owner, "exists": False}
+        return {"owner": owner, "exists": True, "active": bool(rec.get("active")),
+                "url": ("/fin/o/" + rec["token"]) if rec.get("active") else None,
+                "created_at": rec.get("created_at"), "opened_at": rec.get("opened_at"),
+                "opens": rec.get("opens") or 0, "regens": len(rec.get("regen_log") or [])}
+    if request.method == "GET":
+        owner = (request.query.get("owner") or "").strip()
+        if owner:
+            return _json({"ok": True, "link": view(owner)})
+        return _json({"ok": True, "links": [view(o) for o in sorted(_owner_links.keys())]})
+    if not _user_can(request, "finance", "write"):
+        return _json({"error": "forbidden"}, 403)
+    b = await _read_body(request)
+    owner = (b.get("owner") or "").strip()
+    action = (b.get("action") or "").strip()
+    if not owner:
+        return _json({"error": "owner required"}, 400)
+    actor = _req_actor(request)
+    if action in ("create", ""):
+        _owner_link_get_or_create(owner, actor)
+    elif action == "regenerate":
+        _owner_link_regenerate(owner, actor)
+    elif action == "revoke":
+        _owner_link_revoke(owner, actor)
+    else:
+        return _json({"error": "bad action"}, 400)
+    return _json({"ok": True, "link": view(owner)})
+
+async def _handle_owner_portal(request):
+    """The tokenized live owner page. Wrong/revoked token → 404 (constant-time compare)."""
+    owner = _owner_by_token(request.match_info.get("token", ""))
+    if not owner:
+        raise web.HTTPNotFound(text="not found")
+    mkey = (request.query.get("m") or "")[:7]
+    if not re.fullmatch(r"20\d{2}-\d{2}", mkey or ""):
+        mkey = datetime.now(TZ).date().isoformat()[:7]
+    data = await asyncio.to_thread(_owner_portal_data, owner, mkey)
+    _owner_link_touch(owner)
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/") if data else "null"
+    return web.Response(text=OWNER_PORTAL_HTML.replace("/*__OWNER_DATA__*/null", blob),
+                        content_type="text/html")
+
+async def _handle_owner_portal_pdf(request):
+    """The PDF for the SAME computed month object — one source of truth, two outputs."""
+    owner = _owner_by_token(request.match_info.get("token", ""))
+    if not owner:
+        raise web.HTTPNotFound(text="not found")
+    mkey = (request.query.get("m") or "")[:7]
+    if not re.fullmatch(r"20\d{2}-\d{2}", mkey or ""):
+        mkey = datetime.now(TZ).date().isoformat()[:7]
+    rep = await asyncio.to_thread(_owner_month_report, owner, mkey)
+    if rep is None:
+        raise web.HTTPNotFound(text="no data")
+    try:
+        data, fn, ct = await asyncio.to_thread(
+            _finance_pdf_payload, [{"label": owner, "owner": owner, "kind": "owner", "report": rep}])
+    except PdfFontError:
+        return web.Response(text="PDF font unavailable — try again in a minute", status=503)
+    return web.Response(body=data, content_type=ct,
+                        headers={"Content-Disposition": "attachment; filename=ouja-statement.pdf"})
 
 def _revenue_movement(nights):
     """'Why revenue moved' — the drivers BEFORE the totals: occupancy Δ, ADR Δ,
@@ -34322,6 +35009,20 @@ def _finance_aggregate(reps, owner, start, end):
     mil = []
     for r in reps:
         mil.extend(r.get("manual_income_lines") or [])
+    # OR2 owner portal: carry the LINES through (each already names its apartment), so the
+    # tokenized page renders one table across all the owner's units from this same object.
+    all_lines = []; all_exp = []; all_unpaid = []; all_refunded = []
+    flagged = {"missing_payout_ids": [], "needs_channel_rule_ids": [], "needs_base_ids": []}
+    for r in reps:
+        all_lines.extend(r.get("resv_lines") or [])
+        all_exp.extend(r.get("exp_lines") or [])
+        all_unpaid.extend(r.get("unpaid_lines") or [])
+        all_refunded.extend(r.get("refunded_lines") or [])
+        rc = r.get("reconciliation") or {}
+        for k in flagged:
+            flagged[k].extend(rc.get(k) or [])
+    all_lines.sort(key=lambda l: l.get("checkin") or "")
+    all_exp.sort(key=lambda e: e.get("date") or "")
     return {"currency": "SAR", "owner": owner, "management_pct": blended,
             "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
             "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
@@ -34329,7 +35030,9 @@ def _finance_aggregate(reps, owner, start, end):
             "total_income": tot("total_income"), "ouja_fee": tot("ouja_fee"),
             "expenses": tot("expenses"), "cleaning": {"type": "mixed", "total": cleaning_total, "cleans": None, "amount": None},
             "owner_net": tot("owner_net"), "apartments": parts,
-            "reconciliation": {"balanced": balanced}, "n_apartments": len(reps)}
+            "resv_lines": all_lines, "exp_lines": all_exp,
+            "unpaid_lines": all_unpaid, "refunded_lines": all_refunded,
+            "reconciliation": {"balanced": balanced, **flagged}, "n_apartments": len(reps)}
 
 async def _api_finance_adjust(request):
     """GET ?lid&start&end → saved statement edits; POST {lid,start,end,adjust} → save / clear."""
@@ -41826,6 +42529,7 @@ async def _handle_robots(request):
            "Disallow: /hook/\n"
            "Disallow: /api/\n"
            "Disallow: /pmo/\n"
+           "Disallow: /fin/\n"
            f"Sitemap: {base}/sitemap.xml\n")
     return web.Response(text=txt, content_type="text/plain")
 
@@ -42290,6 +42994,9 @@ async def start_web_server():
         # ---- SEO surfaces for the public funnel ----
         app.router.add_get("/robots.txt", _handle_robots)
         app.router.add_get("/sitemap.xml", _handle_sitemap)
+        # ---- Owner Report 2.0: tokenized live owner statement (noindex) ----
+        app.router.add_get("/fin/o/{token}", _handle_owner_portal)
+        app.router.add_get("/fin/o/{token}/pdf", _handle_owner_portal_pdf)
         # ---- public guest website (no token) — order: static before dynamic slug ----
         app.router.add_get("/stay", _handle_stay)
         app.router.add_get("/stay/", _handle_stay)
@@ -42531,6 +43238,8 @@ async def start_web_server():
         app.router.add_post("/api/fb/revenue/pull", _api_fb_revenue_pull)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
         app.router.add_get("/api/finance/cancelled-probe", _api_finance_cancelled_probe)  # OR2: paid-basis field verification
+        app.router.add_get("/api/finance/owner-link", _api_finance_owner_link)            # OR2: owner-link status
+        app.router.add_post("/api/finance/owner-link", _api_finance_owner_link)           # OR2: create/regenerate/revoke
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
