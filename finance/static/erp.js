@@ -2713,6 +2713,7 @@
       cyPills(r) + '</div>' +
       '<div class="wq-actions">' + wa +
       '<a class="btn ghost xs" href="#owners?stmt=' + encodeURIComponent(r.owner) + '&m=' + esc(d.month) + '">' + esc(t('o_stmt')) + '</a>' +
+      '<a class="btn ghost xs" href="#owners?manage=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
       (hasLink ? '<button class="btn ghost xs" data-act="o-copy" data-url="' + esc(r.link.url) + '">' + esc(t('o_copy')) + '</button>' : '') +
       '</div></div>';
   }
