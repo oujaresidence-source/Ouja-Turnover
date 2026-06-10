@@ -178,6 +178,26 @@
       om_reason: 'السبب (إلزامي)…', om_remove_do: 'تأكيد الإنهاء', om_removed: 'انتهى العقد',
       om_history: 'سجل التغييرات', om_no_changes: 'ما فيه تغييرات بعد',
       om_contract: 'العقد', om_terms_n: 'تغييرات الشروط', om_now: 'الحالي',
+      /* --- statement editor (slice 2) --- */
+      o_stmt: 'الكشف', se_title: 'محرر الكشف', se_pub: 'نشر النسخة للمالك',
+      se_pub_confirm: 'بينشر هالأرقام للمالك (الرابط الحي + PDF سوا) ويرفع رقم النسخة. نتأكد؟',
+      se_pubd: 'نُشرت نسخة {v} ✓', se_ver: 'نسخة', se_never_pub: 'ما انشرت بعد',
+      se_recompute: 'أعد الحساب', se_diff_title: 'فرق إعادة الحساب (المنشور ← الجديد)',
+      se_diff_none: 'ما تغيّر شي — المنشور مطابق للحساب الجديد ✓',
+      se_diff_apply: 'انشر النسخة الجديدة', se_why: 'ليش؟',
+      se_income: 'الدخل', se_fees: 'رسوم الإدارة', se_expenses: 'المصاريف',
+      se_cleaning: 'النظافة', se_adjust: 'التسويات', se_net: 'الصافي',
+      se_resv: 'الحجوزات', se_excluded: 'المستبعدة', se_exclude: 'استبعد',
+      se_include: 'احسبه', se_amount_req: 'المبلغ المستلم فعليًا (إلزامي للإدراج)',
+      se_reason_req: 'السبب (إلزامي)…', se_manual_chip: 'تسوية يدوية',
+      se_exp_edit: 'تعديل', se_exp_del: 'حذف', se_exp_add: 'أضف مصروف يدوي',
+      se_adj_add: 'أضف تسوية (±)', se_adj_label: 'وصف التسوية', se_amount: 'المبلغ',
+      se_date: 'التاريخ', se_desc: 'الوصف', se_save: 'حفظ', se_saved: 'انحفظ ✓',
+      se_audit: 'سجل التعديلات', se_audit_empty: 'ما فيه تعديلات على هالكشف',
+      se_tab_stmt: 'الكشف', se_tab_audit: 'السجل',
+      se_excl_chip_manual: 'مستبعد يدويًا', se_incl_chip: 'مُدرج يدويًا',
+      se_pct: 'النسبة', se_fee_grp: 'أساس {b} × {p}٪',
+      se_footnotes: 'ملاحظات العقد', se_open_page: 'افتح صفحة المالك',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -360,6 +380,25 @@
       om_reason: 'Reason (required)…', om_remove_do: 'Confirm end', om_removed: 'Contract ended',
       om_history: 'Change history', om_no_changes: 'No changes yet',
       om_contract: 'Contract', om_terms_n: 'Term changes', om_now: 'now',
+      o_stmt: 'Statement', se_title: 'Statement editor', se_pub: 'Publish to owner',
+      se_pub_confirm: 'Publishes these numbers to the owner (live link + PDF together) and bumps the version. Continue?',
+      se_pubd: 'Published version {v} ✓', se_ver: 'Version', se_never_pub: 'Not published yet',
+      se_recompute: 'Recompute', se_diff_title: 'Recompute diff (published ← fresh)',
+      se_diff_none: 'Nothing changed — published matches the fresh compute ✓',
+      se_diff_apply: 'Publish the new version', se_why: 'Why?',
+      se_income: 'Income', se_fees: 'Management fee', se_expenses: 'Expenses',
+      se_cleaning: 'Cleaning', se_adjust: 'Adjustments', se_net: 'Net',
+      se_resv: 'Reservations', se_excluded: 'Excluded', se_exclude: 'Exclude',
+      se_include: 'Include', se_amount_req: 'Amount actually received (required to include)',
+      se_reason_req: 'Reason (required)…', se_manual_chip: 'manual adjustment',
+      se_exp_edit: 'Edit', se_exp_del: 'Delete', se_exp_add: 'Add manual expense',
+      se_adj_add: 'Add adjustment (±)', se_adj_label: 'Adjustment label', se_amount: 'Amount',
+      se_date: 'Date', se_desc: 'Description', se_save: 'Save', se_saved: 'Saved ✓',
+      se_audit: 'Edit log', se_audit_empty: 'No edits on this statement',
+      se_tab_stmt: 'Statement', se_tab_audit: 'Log',
+      se_excl_chip_manual: 'Manually excluded', se_incl_chip: 'Manually included',
+      se_pct: 'Rate', se_fee_grp: 'base {b} × {p}%',
+      se_footnotes: 'Contract notes', se_open_page: 'Open owner page',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -1462,6 +1501,118 @@
         .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
 
+    /* --- statement editor (slice 2) --- */
+    else if (act === 'se-tab') { seUI.tab = el.getAttribute('data-tab'); seRerender(store.D.stmtEd); }
+    else if (act === 'se-why') {
+      var wk = el.getAttribute('data-key');
+      seUI.explain = (seUI.explain === wk ? '' : wk);
+      seRerender(store.D.stmtEd);
+    }
+    else if (act === 'se-x-open' || act === 'se-i-open' || act === 'se-xe-open' || act === 'se-xd-open') {
+      var rowS = el.closest('.wq-row');
+      var formKey = { 'se-x-open': 'se-x', 'se-i-open': 'se-i', 'se-xe-open': 'se-xe', 'se-xd-open': 'se-xd' }[act];
+      rowS.querySelectorAll('.se-inline').forEach(function (f) { f.hidden = f.getAttribute('data-need') !== formKey || !f.hidden; });
+      if (act === 'se-i-open') {
+        var amtF = rowS.querySelector('.se-amt');
+        if (amtF) amtF.hidden = el.getAttribute('data-needamt') !== '1';
+      }
+      var vis = rowS.querySelector('.se-inline:not([hidden]) .se-reason');
+      if (vis) vis.focus();
+    }
+    else if (act === 'se-x-go') {
+      var rowX = el.closest('.wq-row');
+      var rX = rowX.querySelector('.se-inline[data-need="se-x"] .se-reason').value.trim();
+      if (!rX) { rowX.querySelector('.se-inline[data-need="se-x"] .se-reason').classList.add('need'); return; }
+      seEdit({ op: 'resv_exclude', id: rowX.getAttribute('data-rid'), reason: rX }, el);
+    }
+    else if (act === 'se-i-go') {
+      var rowI = el.closest('.wq-row');
+      var box = rowI.querySelector('.se-inline[data-need="se-i"]');
+      var rI = box.querySelector('.se-reason').value.trim();
+      var aF = box.querySelector('.se-amt');
+      if (!rI) { box.querySelector('.se-reason').classList.add('need'); return; }
+      var bodyI = { op: 'resv_include', id: rowI.getAttribute('data-rid'), reason: rI };
+      if (aF && !aF.hidden) {
+        if (!(Number(aF.value) > 0)) { aF.classList.add('need'); aF.focus(); return; }
+        bodyI.amount = Number(aF.value);
+      }
+      seEdit(bodyI, el);
+    }
+    else if (act === 'se-xe-go') {
+      var rowE = el.closest('.wq-row');
+      var boxE = rowE.querySelector('.se-inline[data-need="se-xe"]');
+      var rE = boxE.querySelector('.se-reason').value.trim();
+      if (!rE) { boxE.querySelector('.se-reason').classList.add('need'); return; }
+      seEdit({ op: 'exp_override', id: rowE.getAttribute('data-xid'), reason: rE,
+               amount: boxE.querySelector('.se-e-amt').value,
+               date: boxE.querySelector('.se-e-date').value,
+               description: boxE.querySelector('.se-e-desc').value }, el);
+    }
+    else if (act === 'se-xd-go') {
+      var rowD = el.closest('.wq-row');
+      var rD = rowD.querySelector('.se-inline[data-need="se-xd"] .se-reason').value.trim();
+      if (!rD) { rowD.querySelector('.se-inline[data-need="se-xd"] .se-reason').classList.add('need'); return; }
+      seEdit({ op: 'exp_delete', id: rowD.getAttribute('data-xid'), reason: rD }, el);
+    }
+    else if (act === 'se-man-del') {
+      seEdit({ op: 'exp_manual_del', id: el.closest('.wq-row').getAttribute('data-xid'), reason: '-' }, el);
+    }
+    else if (act === 'se-man-add') {
+      var mr = $('#seManReason').value.trim();
+      if (!(Number($('#seManAmt').value) > 0)) { $('#seManAmt').classList.add('need'); return; }
+      if (!mr) { $('#seManReason').classList.add('need'); return; }
+      seEdit({ op: 'exp_manual_add', amount: Number($('#seManAmt').value),
+               date: $('#seManDate').value, description: $('#seManDesc').value, reason: mr }, el);
+    }
+    else if (act === 'se-adj-add') {
+      var ar2 = $('#seAdjReason').value.trim();
+      var av = Number($('#seAdjAmt').value);
+      if (!av) { $('#seAdjAmt').classList.add('need'); return; }
+      if (!ar2) { $('#seAdjReason').classList.add('need'); return; }
+      seEdit({ op: 'adj_add', amount: av, label: $('#seAdjLabel').value, reason: ar2 }, el);
+    }
+    else if (act === 'se-adj-del') {
+      seEdit({ op: 'adj_del', id: el.closest('.wq-row').getAttribute('data-aid'), reason: '-' }, el);
+    }
+    else if (act === 'se-publish') {
+      if (!window.confirm(t('se_pub_confirm'))) return;
+      var dP = store.D.stmtEd || {};
+      el.disabled = true;
+      api('/erp/api/owners/statement/publish', { method: 'POST', body: { owner: dP.owner, m: dP.month } })
+        .then(function (r) {
+          toast(t('se_pubd').replace('{v}', r.version));
+          loadStmtEd(dP.owner, dP.month);
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'se-diff') {
+      var dD = store.D.stmtEd || {};
+      el.disabled = true;
+      api('/erp/api/owners/statement/diff?owner=' + encodeURIComponent(dD.owner) + '&m=' + encodeURIComponent(dD.month))
+        .then(function (r) {
+          el.disabled = false;
+          var box2 = $('#seDiffBox');
+          if (!box2) return;
+          if (!r.changed) {
+            box2.innerHTML = '<div class="wq-row info" style="margin:8px 16px"><div class="wq-main"><div class="wq-top">' + esc(t('se_diff_none')) + '</div></div></div>';
+            return;
+          }
+          var ks = ['total_income', 'ouja_fee', 'expenses', 'cleaning', 'adjustments', 'owner_net'];
+          var lbl = { total_income: t('se_income'), ouja_fee: t('se_fees'), expenses: t('se_expenses'),
+                      cleaning: t('se_cleaning'), adjustments: t('se_adjust'), owner_net: t('se_net') };
+          box2.innerHTML = '<div class="om-form" style="margin:8px 16px"><b>' + esc(t('se_diff_title')) + '</b>' +
+            ks.map(function (kk) {
+              var dl = (r.delta || {})[kk];
+              return '<div class="foot-line"><span>' + esc(lbl[kk]) + '</span><span><code>' +
+                fmtAmt((r.published || {})[kk]) + '</code> ← <code>' + fmtAmt((r.fresh || {})[kk]) + '</code>' +
+                (dl ? (' <b style="color:' + (dl > 0 ? 'var(--green)' : 'var(--red)') + '">' + (dl > 0 ? '+' : '') + fmtAmt(dl) + '</b>') : '') +
+                '</span></div>';
+            }).join('') +
+            '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_diff_apply')) + '</button></div>';
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- owner manager (slice 1) --- */
     else if (act === 'om-save') {
       el.disabled = true;
@@ -2394,7 +2545,8 @@
     var opened = lk.opened_at
       ? esc(t('o_last_open')) + ': <code>' + esc(lk.opened_at.slice(0, 16)) + '</code> · ' + lk.opens + ' ' + esc(t('o_opens'))
       : esc(t('o_never'));
-    var acts = '<a class="btn ghost xs" href="#owners?manage=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
+    var acts = '<a class="btn ghost xs" href="#owners?stmt=' + encodeURIComponent(r.owner) + '">' + esc(t('o_stmt')) + '</a>' +
+      '<a class="btn ghost xs" href="#owners?manage=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
       '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '">' + esc(t('o_diag')) + '</a>';
     if (lk.exists && lk.active) {
       acts += '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
@@ -2638,6 +2790,227 @@
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
 
+  /* ----- slice 2: statement editor + «ليش هالرقم؟» + audit trail ----- */
+  var seUI = { tab: 'stmt', explain: '' };
+
+  function seReasonRow(cls, extra) {
+    return '<div class="om-form se-inline" data-need="' + cls + '" hidden>' + (extra || '') +
+      '<input class="in se-reason" placeholder="' + esc(t('se_reason_req')) + '">' +
+      '<button class="btn primary xs" data-act="' + cls + '-go">' + esc(t('se_save')) + '</button></div>';
+  }
+
+  function seResvRow(l, kind) {
+    var chips = '';
+    if (l.manual_included) chips += '<span class="tag soft">' + esc(t('se_incl_chip')) + '</span>';
+    if (l.manual_excluded) chips += '<span class="tag bad">' + esc(t('se_excl_chip_manual')) + '</span>';
+    if (!l.manual_excluded && l.exclude_reason) chips += '<span class="tag bad">' + rsnLabel(l.exclude_reason) + '</span>';
+    if (l.edit_reason) chips += '<span class="tag">' + esc(t('se_manual_chip')) + ': ' + esc(l.edit_reason) + '</span>';
+    var amt = (l.income != null) ? ('<b>' + fmtAmt(l.income) + '</b>')
+      : (l.reference_total != null ? ('<span class="tag">' + esc(t('dg_ref')) + ' ' + fmtAmt(l.reference_total) + '</span>') : '—');
+    var pct = (l.mgmt_pct_applied != null) ? ('<span class="tag soft">' + l.mgmt_pct_applied + '%</span>') : '';
+    var act = '';
+    if (kind === 'in') {
+      act = '<button class="btn danger-ghost xs" data-act="se-x-open">' + esc(t('se_exclude')) + '</button>';
+    } else {
+      var needAmt = (l.income == null && !l.manual_excluded);
+      act = '<button class="btn ghost xs" data-act="se-i-open" data-needamt="' + (needAmt ? '1' : '0') + '">' + esc(t('se_include')) + '</button>';
+    }
+    return '<div class="wq-row" data-rid="' + esc(String(l.id)) + '">' +
+      '<div class="wq-main"><div class="wq-top"><b>' + esc(l.guest || '—') + '</b>' +
+      '<span class="tag soft">' + esc(l.apartment || '') + '</span>' + pct + chips + '</div>' +
+      '<div class="wq-sub"><code>' + esc(l.checkin || '') + '</code> ← <code>' + esc(l.checkout || '') + '</code> · ' +
+      esc(l.channel || '') + (l.nights ? (' · ' + l.nights) : '') + '</div>' +
+      seReasonRow('se-x') +
+      seReasonRow('se-i', '<input type="number" step="0.01" class="in se-amt" placeholder="' + esc(t('se_amount_req')) + '" hidden>') +
+      '</div><div class="wq-actions"><span class="c-amt">' + amt + '</span>' + act + '</div></div>';
+  }
+
+  function seExpRow(x) {
+    var chips = (x.manual ? '<span class="tag soft">' + esc(t('se_manual_chip')) + '</span>' : '') +
+      (x.edited ? '<span class="tag">' + esc(t('se_exp_edit')) + ' ✓</span>' : '') +
+      (x.edit_reason ? '<span class="tag">' + esc(x.edit_reason) + '</span>' : '');
+    return '<div class="wq-row" data-xid="' + esc(String(x.id)) + '" data-manual="' + (x.manual ? '1' : '0') + '">' +
+      '<div class="wq-main"><div class="wq-top"><b>' + esc(x.description || x.category || '—') + '</b>' + chips + '</div>' +
+      '<div class="wq-sub"><code>' + esc(x.date || '') + '</code>' + (x.apartment ? (' · ' + esc(x.apartment)) : '') + '</div>' +
+      '<div class="om-form se-inline" data-need="se-xe" hidden>' +
+      '<div class="om-grid">' +
+      '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in se-e-amt" value="' + esc(String(x.amount != null ? x.amount : '')) + '"></label>' +
+      '<label>' + esc(t('se_date')) + '<input type="date" class="in se-e-date" value="' + esc((x.date || '').slice(0, 10)) + '"></label>' +
+      '<label>' + esc(t('se_desc')) + '<input class="in se-e-desc" value="' + esc(x.description || '') + '"></label>' +
+      '</div><input class="in se-reason" placeholder="' + esc(t('se_reason_req')) + '">' +
+      '<button class="btn primary xs" data-act="se-xe-go">' + esc(t('se_save')) + '</button></div>' +
+      seReasonRow('se-xd') +
+      '</div><div class="wq-actions"><span class="c-amt"><b>−' + fmtAmt(x.amount) + '</b></span>' +
+      (x.manual
+        ? '<button class="btn danger-ghost xs" data-act="se-man-del">' + esc(t('se_exp_del')) + '</button>'
+        : '<button class="btn ghost xs" data-act="se-xe-open">' + esc(t('se_exp_edit')) + '</button>' +
+          '<button class="btn danger-ghost xs" data-act="se-xd-open">' + esc(t('se_exp_del')) + '</button>') +
+      '</div></div>';
+  }
+
+  function seExplainHtml(key, ex) {
+    var e = (ex || {})[key];
+    if (!e) return '';
+    var rule = store.lang === 'ar' ? e.rule_ar : (e.rule_en || e.rule_ar);
+    var rows = '';
+    if (key === 'income') {
+      rows = (e.lines || []).map(function (l) {
+        return '<div class="foot-line"><span>' + esc(l.guest || l.id) + ' · ' + esc(l.apartment || '') +
+          ' · <code>' + esc(l.checkin || '') + '</code>' + (l.manual_included ? ' <span class="tag soft">' + esc(t('se_incl_chip')) + '</span>' : '') +
+          '</span><b>' + fmtAmt(l.amount) + '</b></div>';
+      }).join('');
+    } else if (key === 'fees') {
+      rows = (e.groups || []).map(function (g) {
+        return '<div class="foot-line"><span>' + esc(t('se_fee_grp').replace('{b}', fmtAmt(g.base)).replace('{p}', g.pct)) +
+          '</span><b>' + fmtAmt(g.fee) + '</b></div>';
+      }).join('');
+    } else if (key === 'expenses') {
+      rows = (e.lines || []).map(function (l) {
+        return '<div class="foot-line"><span><code>' + esc(l.date || '') + '</code> ' + esc(l.description || '') +
+          (l.manual ? ' <span class="tag soft">' + esc(t('se_manual_chip')) + '</span>' : '') + '</span><b>−' + fmtAmt(l.amount) + '</b></div>';
+      }).join('');
+    } else if (key === 'adjustments') {
+      rows = (e.lines || []).map(function (a) {
+        return '<div class="foot-line"><span>' + esc(a.label || '') + ' — ' + esc(a.reason || '') + '</span><b>' +
+          (a.amount >= 0 ? '+' : '−') + fmtAmt(Math.abs(a.amount)) + '</b></div>';
+      }).join('');
+    } else if (key === 'net') {
+      var v = e.values || {};
+      rows = ['income', 'fees', 'expenses', 'cleaning', 'adjustments'].map(function (kk) {
+        return '<div class="foot-line"><span>' + esc(t('se_' + (kk === 'fees' ? 'fees' : kk))) + '</span><b>' +
+          (kk === 'income' || kk === 'adjustments' ? '' : '−') + fmtAmt(v[kk]) + '</b></div>';
+      }).join('');
+    } else if (key === 'cleaning') {
+      rows = '<div class="foot-line"><span>' + esc(clTxt({ type: e.type, amount: e.amount })) +
+        (e.prorated_days ? (' · ' + e.prorated_days + 'd') : '') + '</span><b>−' + fmtAmt(e.total) + '</b></div>';
+    }
+    return '<div class="se-explain"><div class="grp-hint" style="padding:0 0 6px">' + esc(rule || '') + '</div>' + rows + '</div>';
+  }
+
+  function renderStmt(d) {
+    store.D.stmtEd = d;
+    var s = d.statement || {};
+    var inLines = (s.resv_lines || []).filter(function (l) { return l.income != null; });
+    var nrLines = (s.resv_lines || []).filter(function (l) { return l.income == null; });
+    var exLines = (s.contract_excluded_lines || []).concat(s.manual_excluded_lines || [])
+      .concat((s.refunded_lines || []).map(function (l) {
+        return Object.assign({}, l, { exclude_reason: 'cancelled_refunded' });
+      }))
+      .concat((s.unpaid_lines || []).map(function (l) {
+        return Object.assign({}, l, { exclude_reason: 'unpaid_yet', reference_total: l.expected });
+      }));
+    function statBtn(key, label, val, neg) {
+      var on = seUI.explain === key;
+      return '<button class="stat tap' + (on ? ' on' : '') + '" data-act="se-why" data-key="' + key + '">' +
+        '<span>' + esc(label) + ' · <i style="font-style:normal;color:var(--accent)">' + esc(t('se_why')) + '</i></span>' +
+        '<b>' + (neg ? '−' : '') + fmtAmt(val) + '</b></button>';
+    }
+    var months = [];
+    var now = new Date();
+    for (var i = 0; i < 13; i++) {
+      var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2));
+    }
+    var pub = d.published;
+    var foots = (s.footnotes || []).map(function (f) {
+      return '<span class="tag">' + esc(store.lang === 'ar' ? f.text_ar : (f.text_en || f.text_ar)) + '</span>';
+    }).join(' ');
+    var auditRows = (d.audit || []).map(function (a) {
+      return '<div class="wq-sub"><code>' + esc((a.at || '').slice(0, 16)) + '</code> · ' + esc(a.by || '') +
+        ' · <b>' + esc(a.action || '') + '</b> · ' + esc(a.target || '') +
+        (a.reason ? (' — ' + esc(a.reason)) : '') + '</div>';
+    }).join('');
+    $('#view').innerHTML =
+      '<a class="btn ghost sm" href="#owners">' + esc(t('dg_back')) + '</a>' +
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">🧾</span>' +
+      '<h2>' + esc(t('se_title')) + ' — ' + esc(d.owner) + '</h2>' +
+      '<span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+      '<select class="in" id="seMonth">' + months.map(function (m) {
+        return '<option value="' + m + '"' + (m === d.month ? ' selected' : '') + '>' + m + '</option>';
+      }).join('') + '</select>' +
+      '<span class="tag' + (pub ? ' soft' : '') + '">' + (pub ? (esc(t('se_ver')) + ' ' + pub.version + ' · ' + esc((pub.at || '').slice(0, 10))) : esc(t('se_never_pub'))) + '</span>' +
+      '<button class="btn ghost sm" data-act="se-diff">' + esc(t('se_recompute')) + '</button>' +
+      '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
+      '</span></header>' +
+      '<div class="wsnav" style="position:static;border:none;padding:4px 16px">' +
+      '<a class="ws' + (seUI.tab === 'stmt' ? ' on' : '') + '" data-act="se-tab" data-tab="stmt">' + esc(t('se_tab_stmt')) + '</a>' +
+      '<a class="ws' + (seUI.tab === 'audit' ? ' on' : '') + '" data-act="se-tab" data-tab="audit">' + esc(t('se_tab_audit')) + ' (' + (d.audit || []).length + ')</a>' +
+      '</div>' +
+      (seUI.tab === 'audit'
+        ? ('<div style="padding:4px 16px 16px">' + (auditRows || ('<div class="grp-hint" style="padding:0">' + esc(t('se_audit_empty')) + '</div>')) + '</div>')
+        : (
+          '<div id="seDiffBox"></div>' +
+          '<div class="stat-row">' +
+          statBtn('income', t('se_income'), s.total_income) +
+          statBtn('fees', t('se_fees'), s.ouja_fee, true) +
+          statBtn('expenses', t('se_expenses'), s.expenses, true) +
+          statBtn('cleaning', t('se_cleaning'), (s.cleaning || {}).total, true) +
+          statBtn('adjustments', t('se_adjust'), s.adjustments_total || 0) +
+          statBtn('net', t('se_net'), s.owner_net) +
+          '</div>' +
+          (seUI.explain ? ('<div style="padding:0 16px 10px">' + seExplainHtml(seUI.explain, d.explain) + '</div>') : '') +
+          (foots ? ('<div style="padding:0 16px 10px"><b style="font-size:12px">' + esc(t('se_footnotes')) + ':</b> ' + foots + '</div>') : '') +
+          '<div class="grp-hint">' + esc(t('se_resv')) + ' · ' + inLines.length + '</div>' +
+          '<div class="grp-list">' + inLines.map(function (l) { return seResvRow(l, 'in'); }).join('') + '</div>' +
+          ((nrLines.length + exLines.length)
+            ? ('<div class="grp-hint">' + esc(t('se_excluded')) + ' · ' + (nrLines.length + exLines.length) + '</div>' +
+               '<div class="grp-list">' +
+               nrLines.map(function (l) { return seResvRow(l, 'ex'); }).join('') +
+               exLines.map(function (l) { return seResvRow(l, 'ex'); }).join('') + '</div>')
+            : '') +
+          '<div class="grp-hint">' + esc(t('se_expenses')) + ' · ' + (s.exp_lines || []).length + '</div>' +
+          '<div class="grp-list">' + (s.exp_lines || []).map(seExpRow).join('') + '</div>' +
+          '<div style="padding:10px 16px"><div class="om-grid">' +
+          '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in" id="seManAmt"></label>' +
+          '<label>' + esc(t('se_date')) + '<input type="date" class="in" id="seManDate"></label>' +
+          '<label>' + esc(t('se_desc')) + '<input class="in" id="seManDesc"></label>' +
+          '</div><input class="in" id="seManReason" placeholder="' + esc(t('se_reason_req')) + '" style="margin-top:6px">' +
+          '<button class="btn ghost sm" data-act="se-man-add" style="margin-top:6px">' + esc(t('se_exp_add')) + '</button></div>' +
+          '<div style="padding:0 16px 16px;border-top:1px solid var(--line)"><div class="om-grid" style="margin-top:10px">' +
+          '<label>' + esc(t('se_amount')) + ' (±)<input type="number" step="0.01" class="in" id="seAdjAmt"></label>' +
+          '<label>' + esc(t('se_adj_label')) + '<input class="in" id="seAdjLabel"></label>' +
+          '</div><input class="in" id="seAdjReason" placeholder="' + esc(t('se_reason_req')) + '" style="margin-top:6px">' +
+          '<button class="btn ghost sm" data-act="se-adj-add" style="margin-top:6px">' + esc(t('se_adj_add')) + '</button>' +
+          ((s.adjust_lines || []).length
+            ? ('<div class="grp-list" style="margin-top:8px">' + (s.adjust_lines || []).map(function (a) {
+                return '<div class="wq-row" data-aid="' + esc(a.id) + '"><div class="wq-main"><div class="wq-top"><b>' +
+                  esc(a.label || '') + '</b><span class="tag">' + esc(a.reason || '') + '</span></div></div>' +
+                  '<div class="wq-actions"><span class="c-amt"><b>' + (a.amount >= 0 ? '+' : '−') + fmtAmt(Math.abs(a.amount)) + '</b></span>' +
+                  '<button class="btn danger-ghost xs" data-act="se-adj-del">' + esc(t('se_exp_del')) + '</button></div></div>';
+              }).join('') + '</div>')
+            : '') +
+          '</div>'
+        )) +
+      '</section>';
+    var sel = $('#seMonth');
+    if (sel) sel.addEventListener('change', function () {
+      location.hash = 'owners?stmt=' + encodeURIComponent(d.owner) + '&m=' + sel.value;
+    });
+  }
+
+  function seRerender(payload) {
+    var y = window.scrollY;
+    renderStmt(payload);
+    window.scrollTo(0, y);
+  }
+
+  function loadStmtEd(owner, m) {
+    $('#view').innerHTML = skeleton(6);
+    api('/erp/api/owners/statement?owner=' + encodeURIComponent(owner) + (m ? '&m=' + encodeURIComponent(m) : ''))
+      .then(renderStmt)
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+  }
+
+  function seEdit(body, btn) {
+    var d = store.D.stmtEd || {};
+    body.owner = d.owner;
+    body.m = d.month;
+    if (btn) btn.disabled = true;
+    return api('/erp/api/owners/statement/edit', { method: 'POST', body: body })
+      .then(function (r) { toast(t('se_saved')); seRerender(r); })
+      .catch(function (e) { if (btn) btn.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+  }
+
   function ownerLinkAct(owner, action) {
     return api('/erp/api/owners/link', { method: 'POST', body: { owner: owner, action: action } })
       .then(function () { return api('/erp/api/owners'); })
@@ -2764,8 +3137,10 @@
       show: function (params) {
         var diag = params && params.get('diag');
         var manage = params && params.get('manage');
+        var stmt = params && params.get('stmt');
         if (diag) loadDiag(diag, params.get('m') || '');
         else if (manage) loadManage(manage);
+        else if (stmt) { seUI.tab = 'stmt'; seUI.explain = ''; loadStmtEd(stmt, params.get('m') || ''); }
         else loadOwners();
       }
     },

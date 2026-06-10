@@ -24170,6 +24170,8 @@ def _pdf_statement_bytes(rep, label):
     cl = rep.get("cleaning") or {}
     _cm = cl.get("months") or 1
     clean_txt = ("النظافة: يدفعها المالك · %s/شهر%s" % (_n(cl.get("amount") or 0), (" × %s" % _cm) if _cm > 1 else "")) if cl.get("type") == "owner" else "النظافة: على عوجا (مشمولة)"
+    if rep.get("statement_version"):
+        clean_txt += " · نسخة %s — حُدّثت %s" % (rep["statement_version"], str(rep.get("published_at") or "")[:10])
     pdf.set_xy(M, 33); pdf.cell(usable, 5, shape(clean_txt), align="R")
     pdf.set_y(54)
     # ---- row helper (label right, value left) ----
@@ -24248,6 +24250,16 @@ def _pdf_statement_bytes(rep, label):
             pdf.set_xy(M, y); pdf.cell(usable * 0.30, 6, money(a.get("owner_net")), align="L")
             pdf.set_xy(M + usable * 0.30, y); pdf.set_text_color(*MUT); pdf.cell(usable * 0.30, 6, money(a.get("total_income")), align="L")
             pdf.set_text_color(*INK); pdf.cell(usable * 0.40, 6, shape(str(a.get("apartment") or "")), align="R"); pdf.ln(6)
+    # ---- explicit manual adjustments (slice 2) ----
+    adjl = rep.get("adjust_lines") or []
+    if adjl:
+        section("تسويات (%d)" % len(adjl)); pdf.set_font(FONT, size=10)
+        for a in adjl[:12]:
+            amt_a = float(a.get("amount") or 0)
+            y = pdf.get_y(); pdf.set_text_color(*INK)
+            pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, ("+" if amt_a >= 0 else "-") + money(abs(amt_a)), align="L")
+            pdf.set_xy(M + usable * 0.35, y)
+            pdf.cell(usable * 0.65, 6, shape(str(a.get("label") or "تسوية")), align="R"); pdf.ln(6)
     # ---- excluded money (0b: NEVER invisible) + unpaid/refunded transparency ----
     nr = [l for l in rl if l.get("needs_review")]
     unp = rep.get("unpaid_lines") or []
@@ -24670,6 +24682,7 @@ var T = {
    sec_fee:'عمولة عوجا', fee_formula:'النسبة × إجمالي الدخل', sec_cleaning:'النظافة (شهري حسب العقد)',
    sec_footer:'حركات بدون فلوس (للشفافية)', foot_unpaid:'غير مدفوع بعد', foot_refunded:'ملغي — مسترد بالكامل', foot_expected:'متوقع',
    foot_review:'بانتظار تأكيد المبلغ', foot_ref:'المرجع (ليس دخلًا)', foot_excl_sum:'مستبعد من الدخل لين يتأكد المبلغ',
+   ver_label:'نسخة', ver_updated:'حُدّثت', sec_adjust:'تسويات', foot_excluded_manual:'مستبعد يدويًا',
    foot_none:'لا يوجد — كل حجوزات الشهر مدفوعة ✓', perf:'الأداء', trend:'صافي الدخل — آخر ١٢ شهر',
    occ:'الإشغال مقابل متوسط المحفظة', occ_you:'وحداتك', occ_port:'متوسط عوجا (مجهول الهوية)',
    mix:'مصادر الدخل', adr_dt:'متوسط الصافي/ليلة حسب نوع اليوم', dt_wd:'أيام الأسبوع', dt_we:'نهاية الأسبوع (خميس-جمعة)', dt_ev:'مناسبات',
@@ -24689,6 +24702,7 @@ var T = {
    sec_fee:'Ouja management fee', fee_formula:'rate × total income', sec_cleaning:'Cleaning (monthly per contract)',
    sec_footer:'Non-money movements (transparency)', foot_unpaid:'Not paid yet', foot_refunded:'Cancelled — fully refunded', foot_expected:'expected',
    foot_review:'Awaiting amount confirmation', foot_ref:'reference (not income)', foot_excl_sum:'excluded from income until confirmed',
+   ver_label:'Version', ver_updated:'updated', sec_adjust:'Adjustments', foot_excluded_manual:'Manually excluded',
    foot_none:'None — every booking this month is paid ✓', perf:'Performance', trend:'Net income — last 12 months',
    occ:'Occupancy vs portfolio average', occ_you:'Your units', occ_port:'Ouja average (anonymized)',
    mix:'Income sources', adr_dt:'Avg net/night by day type', dt_wd:'Weekdays', dt_we:'Weekend (Thu–Fri)', dt_ev:'Events',
@@ -24816,6 +24830,7 @@ function render(){
     +driverSentence()
     +'<div style="margin-top:10px">'+(rc.balanced?('<span class="chip ok">'+k.recon_ok+'</span>'):('<span class="chip bad">'+k.recon_bad+'</span>'))+'</div>'
     +'<div style="margin-top:12px"><a class="btn" href="/fin/o/'+he(token)+'/pdf?m='+he(DATA.month)+'">⬇ '+k.pdf+'</a></div>'
+    +(rep.statement_version?('<div class="muted" style="font-size:10.5px;margin-top:8px">'+k.ver_label+' '+rep.statement_version+' — '+k.ver_updated+' <span class="num">'+he(String(rep.published_at||'').slice(0,10))+'</span></div>'):'')
     +'</div>';
   // ---- reservations table ----
   var lines=rep.resv_lines||[];
@@ -24843,13 +24858,21 @@ function render(){
     +'<span class="muted num" style="font-size:11.5px">'+(rep.management_pct!=null?rep.management_pct:'—')+'% × '+Math.round(rep.total_income||0).toLocaleString('en-US')+'</span></span>'
     +'<b>−'+money(rep.ouja_fee)+'</b></div>'
     +((rep.cleaning&&rep.cleaning.total)?('<div class="kv"><span>'+k.sec_cleaning+'</span><b>−'+money(rep.cleaning.total)+'</b></div>'):'')
+    +((rep.adjust_lines&&rep.adjust_lines.length)?rep.adjust_lines.map(function(a){
+      return '<div class="kv"><span>'+k.sec_adjust+': '+he(a.label||'')+'</span><b>'+(a.amount>=0?'+':'−')+money(Math.abs(a.amount||0))+'</b></div>';
+    }).join(''):'')
     +'<div class="kv"><span><b>'+k.net+'</b></span><b style="color:var(--gold2)">'+money(rep.owner_net)+'</b></div></div>';
   // ---- transparency footer ----
   var unpaid=rep.unpaid_lines||[], refunded=rep.refunded_lines||[];
   var needsRev=(rep.resv_lines||[]).filter(function(l){ return l.needs_review; });
+  var manx=rep.manual_excluded_lines||[];
   h+='<div class="card"><h2>'+k.sec_footer+'</h2>';
-  if(!unpaid.length&&!refunded.length&&!needsRev.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
+  if(!unpaid.length&&!refunded.length&&!needsRev.length&&!manx.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
   else{
+    h+=manx.map(function(u){
+      return '<div class="foot-line"><span><span class="chip info">'+k.foot_excluded_manual+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
+        +'<span class="muted">'+k.foot_ref+': '+money(u.reference_total)+'</span></div>';
+    }).join('');
     h+=needsRev.map(function(u){
       return '<div class="foot-line"><span><span class="chip bad">'+k.foot_review+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
         +'<span class="muted">'+k.foot_ref+': '+money(u.reference_total)+'</span></div>';

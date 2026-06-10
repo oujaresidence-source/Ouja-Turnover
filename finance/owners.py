@@ -20,6 +20,8 @@ bot.py's own compute_owner_report on the same normalized rows and correlating
 ids — the table can't drift from the real statement math.
 """
 
+import json
+import uuid
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -337,9 +339,10 @@ def _fnum(x):
     return float(_D(x).quantize(TWO, rounding=ROUND_HALF_UP))
 
 
-def unit_statement(rec, mkey):
+def unit_statement(rec, mkey, force_rederive=False):
     """One unit's month with effective dating applied ON TOP of bot.py's report.
-    No overlay data → the legacy report passes through untouched (safety).
+    No overlay data → the legacy report passes through untouched (safety),
+    unless force_rederive (the statement editor needs per-line mgmt % stamps).
     Returns (report_dict, footnotes[])."""
     B = _B()
     listings = B.get_listings_map() or {}
@@ -355,7 +358,7 @@ def unit_statement(rec, mkey):
     win_s = max(start, cf) if cf else start
     win_e = min(end, ct) if ct else end
     partial = (win_s > start) or (win_e < end)
-    if not has_terms and not partial:
+    if not has_terms and not partial and not force_rederive:
         return rep, []                              # legacy bit-for-bit
     footnotes = []
     if win_e < win_s:
@@ -379,19 +382,20 @@ def unit_statement(rec, mkey):
     for l in rep.get("resv_lines") or []:
         ci = _pdate(l.get("checkin"))
         in_win = (ci is not None) and (win_s <= ci <= win_e) and (win_e >= win_s)
+        # EVERY line carries the % that applies on its check-in date — the
+        # statement editor recomputes fees from these stamps after edits.
+        tm = terms_on(apt, ci or start, rec)
+        pct = _D(tm.get("mgmt_pct") or 0)
+        l = dict(l)
+        l["mgmt_pct_applied"] = float(pct)
         if not in_win:
-            x = dict(l)
-            x["needs_review"] = False
-            x["exclude_reason"] = "outside_contract"
-            x["reference_total"] = l.get("income") if l.get("income") is not None else l.get("reference_total")
-            x["income"] = None
-            excluded.append(x)
+            l["needs_review"] = False
+            l["exclude_reason"] = "outside_contract"
+            l["reference_total"] = l.get("income") if l.get("income") is not None else l.get("reference_total")
+            l["income"] = None
+            excluded.append(l)
             continue
         if l.get("income") is not None:
-            tm = terms_on(apt, ci, rec)
-            pct = _D(tm.get("mgmt_pct") or 0)
-            l = dict(l)
-            l["mgmt_pct_applied"] = float(pct)
             line_money = _D(l["income"]) + _D(l.get("extras") or 0)
             fee += line_money * pct / Decimal(100)   # legacy applies the % to extras too
             income += line_money
@@ -420,6 +424,15 @@ def unit_statement(rec, mkey):
                               "text_ar": apt + ": النظافة محسوبة نسبيًا (" + str(covered) + "/" + str(days_in_month) + " يوم)",
                               "text_en": apt + ": cleaning pro-rated (" + str(covered) + "/" + str(days_in_month) + " days)"})
     out = dict(rep)
+    # stamp the applicable % on the footer lines too — force-including one from
+    # the editor needs to know which management rate its money would carry
+    for fk in ("refunded_lines", "unpaid_lines"):
+        stamped = []
+        for fl in rep.get(fk) or []:
+            fl = dict(fl)
+            fl["mgmt_pct_applied"] = float(_D(terms_on(apt, _pdate(fl.get("checkin")) or start, rec).get("mgmt_pct") or 0))
+            stamped.append(fl)
+        out[fk] = stamped
     out["resv_lines"] = kept
     out["contract_excluded_lines"] = excluded
     out["exp_lines"] = exp_kept
@@ -442,18 +455,213 @@ def unit_statement(rec, mkey):
     return out, footnotes
 
 
-def compute_owner_statement(owner, mkey):
+# ====================== Slice 2: statement store + editor engine ======================
+
+_STMT_FILE = "owner_statements.json"
+_stmt_cache = {"v": None}
+
+
+def _stmt_store():
+    if _stmt_cache["v"] is None:
+        _stmt_cache["v"] = _B()._load_json(_STMT_FILE, {}) or {}
+    return _stmt_cache["v"]
+
+
+def _stmt_save():
+    _B()._save_json(_STMT_FILE, _stmt_cache["v"])
+
+
+def _stmt_key(owner, mkey):
+    return (owner or "") + "|" + (mkey or "")
+
+
+def stmt_rec(owner, mkey, create=False):
+    st = _stmt_store()
+    k = _stmt_key(owner, mkey)
+    rec = st.get(k)
+    if rec is None and create:
+        rec = {"owner": owner, "month": mkey, "status": "draft",
+               "edits": {"resv": {}, "exp_overrides": {}, "exp_manual": [], "adjustments": []},
+               "audit": [], "published": None, "status_log": []}
+        st[k] = rec
+    return rec
+
+
+def stmt_audit_add(rec, actor, action, target, before, after, reason=""):
+    rec.setdefault("audit", []).append({
+        "at": datetime.now(_B().TZ).isoformat(timespec="seconds"),
+        "by": (actor or "")[:60], "action": action, "target": str(target)[:120],
+        "before": before, "after": after, "reason": (reason or "")[:300]})
+    if len(rec["audit"]) > 400:
+        del rec["audit"][:len(rec["audit"]) - 400]
+
+
+def _apply_stmt_edits(agg, edits):
+    """Apply the editor's decisions to a computed statement. Pure recompute from
+    the per-line mgmt stamps — totals always equal the visible rows."""
+    resv_e = edits.get("resv") or {}
+    kept, manual_excluded = [], []
+    income = Decimal(0)
+    fee = Decimal(0)
+    for l in agg.get("resv_lines") or []:
+        e = resv_e.get(str(l.get("id")))
+        if e and e.get("action") == "exclude":
+            x = dict(l)
+            x["manual_excluded"] = True
+            x["exclude_reason"] = "manual_exclude"
+            x["edit_reason"] = e.get("reason") or ""
+            x["reference_total"] = l.get("income") if l.get("income") is not None else l.get("reference_total")
+            x["income"] = None
+            x["needs_review"] = False
+            manual_excluded.append(x)
+            continue
+        if e and e.get("action") == "include":
+            l = dict(l)
+            if l.get("income") is None and e.get("amount") not in (None, ""):
+                l["income"] = round(float(e.get("amount") or 0), 2)
+            l["manual_included"] = True
+            l["edit_reason"] = e.get("reason") or ""
+            l["needs_review"] = False
+            l.pop("exclude_reason", None)
+        if l.get("income") is not None:
+            pct = _D(l.get("mgmt_pct_applied") or agg.get("management_pct") or 0)
+            money = _D(l["income"]) + _D(l.get("extras") or 0)
+            income += money
+            fee += money * pct / Decimal(100)
+        kept.append(l)
+    # force-includes of footer lines (refunded / unpaid): an explicit amount +
+    # reason promotes the row into income at its stamped rate
+    new_footers = {}
+    for fk in ("refunded_lines", "unpaid_lines"):
+        remaining = []
+        for l in agg.get(fk) or []:
+            e = resv_e.get(str(l.get("id")))
+            if e and e.get("action") == "include" and e.get("amount") not in (None, ""):
+                nl = dict(l)
+                nl["income"] = round(float(e["amount"]), 2)
+                nl["manual_included"] = True
+                nl["edit_reason"] = e.get("reason") or ""
+                pct = _D(nl.get("mgmt_pct_applied") or agg.get("management_pct") or 0)
+                income += _D(nl["income"])
+                fee += _D(nl["income"]) * pct / Decimal(100)
+                kept.append(nl)
+                continue
+            remaining.append(l)
+        new_footers[fk] = remaining
+    exp_e = edits.get("exp_overrides") or {}
+    exps, deleted_exps = [], []
+    exp_total = Decimal(0)
+    for x in agg.get("exp_lines") or []:
+        o = exp_e.get(str(x.get("id")))
+        if o:
+            if o.get("deleted"):
+                deleted_exps.append({**x, "edit_reason": o.get("reason") or ""})
+                continue
+            x = dict(x)
+            for f in ("amount", "date", "description"):
+                if o.get(f) not in (None, ""):
+                    x.setdefault("original_" + f, x.get(f))
+                    x[f] = o[f]
+            x["edited"] = True
+            x["edit_reason"] = o.get("reason") or ""
+        exps.append(x)
+        exp_total += _D(x.get("amount"))
+    for m in edits.get("exp_manual") or []:
+        exps.append({"id": m.get("id"), "amount": m.get("amount"), "date": m.get("date"),
+                     "description": m.get("description") or m.get("label") or "",
+                     "category": "يدوي", "manual": True, "edit_reason": m.get("reason") or ""})
+        exp_total += _D(m.get("amount"))
+    adjustments = list(edits.get("adjustments") or [])
+    adj_total = sum((_D(a.get("amount")) for a in adjustments), Decimal(0))
+    manual_income = _D(agg.get("manual_income") or 0)
+    cleaning = _D((agg.get("cleaning") or {}).get("total") or 0)
+    agg = dict(agg)
+    agg["resv_lines"] = kept
+    agg["refunded_lines"] = new_footers.get("refunded_lines", agg.get("refunded_lines") or [])
+    agg["unpaid_lines"] = new_footers.get("unpaid_lines", agg.get("unpaid_lines") or [])
+    agg["manual_excluded_lines"] = manual_excluded
+    agg["exp_lines"] = exps
+    agg["deleted_expense_lines"] = deleted_exps
+    agg["adjust_lines"] = adjustments
+    agg["expenses"] = _fnum(exp_total)
+    agg["total_income"] = _fnum(income + manual_income)
+    agg["ouja_fee"] = _fnum(fee)
+    agg["adjustments_total"] = _fnum(adj_total)
+    agg["owner_net"] = _fnum(income + manual_income - fee - exp_total - cleaning + adj_total)
+    agg["has_manual_edits"] = bool(resv_e or exp_e or edits.get("exp_manual") or adjustments)
+    es = dict(agg.get("excluded_summary") or {})
+    es["manual_excluded"] = len(manual_excluded)
+    es["manual_excluded_value"] = _fnum(sum((_D(x.get("reference_total") or 0) for x in manual_excluded), Decimal(0)))
+    agg["excluded_summary"] = es
+    return agg
+
+
+def _build_explain(agg):
+    """«ليش هالرقم؟» — the exact rows + rule behind every total. Server-built so
+    the editor, the PDF and any future surface tell the SAME story."""
+    inc_lines = [{"id": l.get("id"), "guest": l.get("guest"), "apartment": l.get("apartment"),
+                  "checkin": l.get("checkin"), "amount": l.get("income"),
+                  "pct": l.get("mgmt_pct_applied"),
+                  "manual_included": bool(l.get("manual_included"))}
+                 for l in (agg.get("resv_lines") or []) if l.get("income") is not None]
+    fee_groups = {}
+    for l in inc_lines:
+        p = l.get("pct") if l.get("pct") is not None else agg.get("management_pct")
+        g = fee_groups.setdefault(str(p), {"pct": p, "base": Decimal(0)})
+        g["base"] += _D(l["amount"])
+    fees = [{"pct": g["pct"], "base": _fnum(g["base"]),
+             "fee": _fnum(g["base"] * _D(g["pct"] or 0) / Decimal(100))}
+            for g in fee_groups.values()]
+    cl = agg.get("cleaning") or {}
+    return {
+        "income": {"lines": inc_lines, "manual_income": agg.get("manual_income") or 0,
+                   "total": agg.get("total_income"),
+                   "rule_ar": "مجموع المبالغ المستلمة فعليًا للحجوزات المحسوبة (الأساس النقدي) + الإيراد اليدوي",
+                   "rule_en": "Sum of money actually received for included bookings (paid basis) + manual income"},
+        "fees": {"groups": fees, "total": agg.get("ouja_fee"),
+                 "rule_ar": "لكل حجز: (الدخل + الإضافات) × نسبة الإدارة السارية بتاريخ دخوله",
+                 "rule_en": "Per booking: (income + extras) × the management % effective on its check-in date"},
+        "expenses": {"lines": [{"id": x.get("id"), "date": x.get("date"), "amount": x.get("amount"),
+                                "description": x.get("description") or x.get("category") or "",
+                                "manual": bool(x.get("manual")), "edited": bool(x.get("edited"))}
+                               for x in (agg.get("exp_lines") or [])],
+                     "total": agg.get("expenses"),
+                     "rule_ar": "المصاريف المتحقّقة على وحدات المالك داخل الفترة (+ اليدوية)",
+                     "rule_en": "Verified expenses on the owner's units inside the period (+ manual lines)"},
+        "cleaning": {"type": cl.get("type"), "amount": cl.get("amount"), "total": cl.get("total"),
+                     "prorated_days": cl.get("prorated_days"),
+                     "rule_ar": "مبلغ شهري ثابت إذا كان على المالك — يُحسب نسبيًا لو العقد جزئي",
+                     "rule_en": "Flat monthly amount when owner-paid — pro-rated for partial contracts"},
+        "adjustments": {"lines": agg.get("adjust_lines") or [], "total": agg.get("adjustments_total") or 0,
+                        "rule_ar": "تسويات يدوية صريحة (± مبلغ + سبب) خارج النموذج",
+                        "rule_en": "Explicit manual adjustments (± amount + reason) outside the model"},
+        "net": {"total": agg.get("owner_net"),
+                "values": {"income": agg.get("total_income"), "fees": agg.get("ouja_fee"),
+                           "expenses": agg.get("expenses"),
+                           "cleaning": cl.get("total") or 0,
+                           "adjustments": agg.get("adjustments_total") or 0},
+                "rule_ar": "الصافي = الدخل − رسوم الإدارة − المصاريف − النظافة ± التسويات",
+                "rule_en": "Net = income − management fee − expenses − cleaning ± adjustments"},
+    }
+
+
+def compute_owner_statement(owner, mkey, apply_edits=True):
     """The v2.1 owner-month statement: per-unit effective-dated reports
-    aggregated the same way bot.py aggregates (shape-compatible superset).
+    aggregated the same way bot.py aggregates (shape-compatible superset),
+    then the editor's saved decisions applied on top.
     Returns None when the owner has no registry units (caller falls back)."""
     B = _B()
     start, end = B._month_bounds(mkey)
     recs = [r for r in api._registry_rows() if (r.get("owner") or "").strip() == (owner or "").strip()]
     if not recs:
         return None
+    srec = stmt_rec(owner, mkey)
+    edits = (srec or {}).get("edits") or {}
+    has_edits = bool(edits.get("resv") or edits.get("exp_overrides")
+                     or edits.get("exp_manual") or edits.get("adjustments"))
     reps, foots = [], []
     for rec in recs:
-        rep, fn = unit_statement(rec, mkey)
+        rep, fn = unit_statement(rec, mkey, force_rederive=has_edits)
         if rep is not None:
             reps.append(rep)
             foots.extend(fn)
@@ -477,7 +685,208 @@ def compute_owner_statement(owner, mkey):
     op = (_terms_store()["owners"] or {}).get(owner) or {}
     if op:
         agg["owner_profile"] = {"phone": op.get("phone") or "", "active": op.get("active", True)}
+    if apply_edits and has_edits:
+        agg = _apply_stmt_edits(agg, edits)
+    if srec:
+        agg["statement_status"] = srec.get("status") or "draft"
+        pub = srec.get("published") or {}
+        if pub.get("version"):
+            agg["published_version"] = pub["version"]
+            agg["published_at"] = pub.get("at")
     return agg
+
+
+def statement_for_portal(owner, mkey):
+    """What the OWNER's live link + PDF render: the PUBLISHED snapshot when one
+    exists (stable until an explicit republish), else the live compute. This is
+    the hook bot.py's _owner_month_report consumes."""
+    rec = stmt_rec(owner, mkey)
+    pub = (rec or {}).get("published") or {}
+    snap = pub.get("snapshot")
+    if snap:
+        out = json.loads(json.dumps(snap))           # never hand out the stored object
+        out["statement_version"] = pub.get("version")
+        out["published_at"] = pub.get("at")
+        return out
+    return compute_owner_statement(owner, mkey)
+
+
+def statement_payload(owner, mkey):
+    """Everything the editor view needs."""
+    live = compute_owner_statement(owner, mkey)
+    if live is None:
+        return {"error": "owner_not_in_registry"}
+    rec = stmt_rec(owner, mkey)
+    pub = (rec or {}).get("published") or {}
+    return {"ok": True, "owner": owner, "month": mkey,
+            "statement": live,
+            "explain": _build_explain(live),
+            "edits": (rec or {}).get("edits") or {},
+            "audit": list(reversed(((rec or {}).get("audit") or [])))[:120],
+            "status": (rec or {}).get("status") or "draft",
+            "published": ({"version": pub.get("version"), "at": pub.get("at"),
+                           "by": pub.get("by"),
+                           "net": ((pub.get("snapshot") or {}).get("owner_net"))}
+                          if pub.get("version") else None)}
+
+
+_EDIT_OPS = ("resv_exclude", "resv_include", "exp_override", "exp_delete",
+             "exp_manual_add", "exp_manual_del", "adj_add", "adj_del")
+
+
+def statement_edit(request, body):
+    """ONE mutation endpoint for the editor. Every op requires a reason, lands
+    in the per-statement audit + the global finance audit, and returns the
+    freshly recomputed statement (totals live-update, R1-style)."""
+    B = _B()
+    owner = (body.get("owner") or "").strip()
+    mkey = api._month_key_or_now(body.get("m"))
+    op = (body.get("op") or "").strip()
+    reason = (body.get("reason") or "").strip()
+    if op not in _EDIT_OPS:
+        return {"error": "bad_op"}, 400
+    if not owner:
+        return {"error": "owner_required"}, 400
+    if not reason and op != "exp_manual_del" and op != "adj_del":
+        return {"error": "reason_required",
+                "message_ar": "السبب إلزامي — كل تعديل لازم يُفسَّر.",
+                "message_en": "A reason is required — every edit must be explainable."}, 400
+    rec = stmt_rec(owner, mkey, create=True)
+    e = rec["edits"]
+    actor = api.actor(request)
+    target = str(body.get("id") or "")
+    before = None
+    after = None
+    if op == "resv_exclude":
+        before = e["resv"].get(target)
+        e["resv"][target] = {"action": "exclude", "reason": reason, "by": actor,
+                             "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+        after = e["resv"][target]
+    elif op == "resv_include":
+        before = e["resv"].get(target)
+        entry = {"action": "include", "reason": reason, "by": actor,
+                 "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+        if body.get("amount") not in (None, ""):
+            try:
+                entry["amount"] = round(float(body.get("amount")), 2)
+            except (TypeError, ValueError):
+                return {"error": "bad_amount"}, 400
+        if before and before.get("action") == "exclude":
+            e["resv"].pop(target, None)              # undo an exclude = back to computed
+            after = None
+        else:
+            e["resv"][target] = entry
+            after = entry
+    elif op == "exp_override":
+        before = e["exp_overrides"].get(target)
+        o = {"reason": reason, "by": actor,
+             "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+        for f in ("amount", "date", "description"):
+            if body.get(f) not in (None, ""):
+                o[f] = (round(float(body[f]), 2) if f == "amount" else str(body[f])[:200])
+        e["exp_overrides"][target] = o
+        after = o
+    elif op == "exp_delete":
+        before = e["exp_overrides"].get(target)
+        e["exp_overrides"][target] = {"deleted": True, "reason": reason, "by": actor,
+                                      "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+        after = e["exp_overrides"][target]
+    elif op == "exp_manual_add":
+        try:
+            amt = round(float(body.get("amount")), 2)
+        except (TypeError, ValueError):
+            return {"error": "bad_amount"}, 400
+        row = {"id": "man-" + uuid.uuid4().hex[:8], "amount": amt,
+               "date": str(body.get("date") or "")[:10],
+               "description": str(body.get("description") or "")[:200],
+               "reason": reason, "by": actor,
+               "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+        e["exp_manual"].append(row)
+        target = row["id"]
+        after = row
+    elif op == "exp_manual_del":
+        before = next((x for x in e["exp_manual"] if x.get("id") == target), None)
+        e["exp_manual"] = [x for x in e["exp_manual"] if x.get("id") != target]
+    elif op == "adj_add":
+        try:
+            amt = round(float(body.get("amount")), 2)
+        except (TypeError, ValueError):
+            return {"error": "bad_amount"}, 400
+        row = {"id": "adj-" + uuid.uuid4().hex[:8], "amount": amt,
+               "label": str(body.get("label") or "تسوية")[:120],
+               "reason": reason, "by": actor,
+               "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+        e["adjustments"].append(row)
+        target = row["id"]
+        after = row
+    elif op == "adj_del":
+        before = next((x for x in e["adjustments"] if x.get("id") == target), None)
+        e["adjustments"] = [x for x in e["adjustments"] if x.get("id") != target]
+    stmt_audit_add(rec, actor, op, target, before, after, reason)
+    _stmt_save()
+    try:
+        B._fb_audit_add(actor, "owner_stmt_" + op, "owner_statement",
+                        _stmt_key(owner, mkey), before=before, after=after)
+    except Exception:
+        pass
+    _invalidate_owner_cache(owner)
+    return statement_payload(owner, mkey), 200
+
+
+def statement_publish(request, body):
+    """Freeze the CURRENT live compute as the published snapshot (version+1).
+    The owner's live link + PDF flip to it together; the version marker shows
+    on the page so a stale PDF is recognizable."""
+    B = _B()
+    owner = (body.get("owner") or "").strip()
+    mkey = api._month_key_or_now(body.get("m"))
+    fresh = compute_owner_statement(owner, mkey)
+    if fresh is None:
+        return {"error": "owner_not_in_registry"}, 404
+    rec = stmt_rec(owner, mkey, create=True)
+    old = rec.get("published") or {}
+    ver = int(old.get("version") or 0) + 1
+    rec["published"] = {"version": ver, "at": datetime.now(B.TZ).isoformat(timespec="seconds"),
+                        "by": api.actor(request), "snapshot": fresh}
+    if rec.get("status") in (None, "", "draft"):
+        rec["status"] = "ready"
+    stmt_audit_add(rec, api.actor(request), "publish", "v" + str(ver),
+                   {"version": old.get("version"), "net": (old.get("snapshot") or {}).get("owner_net")},
+                   {"version": ver, "net": fresh.get("owner_net")},
+                   body.get("reason") or "")
+    _stmt_save()
+    _invalidate_owner_cache(owner)
+    try:
+        B.log_event("finance", "نُشر كشف %s — %s (نسخة %d)" % (owner, mkey, ver))
+    except Exception:
+        pass
+    return {"ok": True, "version": ver, "net": fresh.get("owner_net"),
+            "at": rec["published"]["at"]}, 200
+
+
+def statement_recompute_diff(owner, mkey):
+    """«أعد الحساب» preview: published snapshot vs a FRESH compute — the diff
+    the admin must see before republishing a past month."""
+    rec = stmt_rec(owner, mkey)
+    pub = (rec or {}).get("published") or {}
+    snap = pub.get("snapshot")
+    fresh = compute_owner_statement(owner, mkey)
+    if fresh is None:
+        return {"error": "owner_not_in_registry"}
+    def tot(r):
+        return {"total_income": (r or {}).get("total_income"),
+                "ouja_fee": (r or {}).get("ouja_fee"),
+                "expenses": (r or {}).get("expenses"),
+                "cleaning": ((r or {}).get("cleaning") or {}).get("total"),
+                "adjustments": (r or {}).get("adjustments_total") or 0,
+                "owner_net": (r or {}).get("owner_net")}
+    a, b = tot(snap), tot(fresh)
+    delta = {k: (None if (a[k] is None or b[k] is None)
+                 else round(float(b[k]) - float(a[k]), 2)) for k in a}
+    return {"ok": True, "owner": owner, "month": mkey,
+            "published": (a if snap else None), "fresh": b, "delta": delta,
+            "published_version": pub.get("version"),
+            "changed": any((delta[k] or 0) != 0 for k in delta) if snap else True}
 
 
 def diagnose(owner, mkey):
