@@ -7085,6 +7085,14 @@ async def process_assistant_item(it, channel):
             log_event("guest", f"بطاقة رد ({act}) · {it['guest']} · {it['unit']}")
     except Exception as e:
         print("assistant card error:", e)
+    # B.5 (owner-approved): silent maintenance-ticket logger — a pure side-effect AFTER
+    # the card. It never reads or modifies the draft. Escalated messages are skipped:
+    # the escalation flow opens its own properly-prioritized ticket.
+    try:
+        await asyncio.to_thread(_musaed_issue_scan, it,
+                                (result.get("action") == "escalate"))
+    except Exception as e:
+        print("musaed issue scan error:", e)
 
 async def _assistant_channel():
     guild = bot.get_guild(GUILD_ID)
@@ -7772,6 +7780,282 @@ def _ticket_create(title, *, description="", lid=None, priority="med",
     log_event("ops", f"تذكرة جديدة [{t['category']}]: {t['title']}"
                      + (f" · {unit_name}" if unit_name else ""))
     return t
+
+# ---- B.5: silent maintenance-ticket logger (owner-approved) ----
+# Term lists live in CONFIG: defaults below, overridable via STATE_DIR/maintenance_terms.json
+# {"topics": {key: [terms...]}, "problem_signals": [...]} — no redeploy needed to tune them.
+_MUSAED_ISSUE_TOPICS_DEFAULT = {
+    "ac":        ["مكيف", "تكييف", "مكييف", "التكييف", "air condition", "aircon", "cooling"],
+    "leak":      ["تسريب", "يسرب", "تهريب", "تسرب", "leak", "dripping"],
+    "hot_water": ["ماء حار", "الماء الحار", "سخان", "السخان", "hot water", "water heater", "heater"],
+    "elevator":  ["مصعد", "المصعد", "اسانسير", "الأسانسير", "elevator", "lift"],
+    "door":      ["الباب", "القفل", "قفل الباب", "door", "lock", "handle"],
+    "wifi":      ["النت", "الانترنت", "الإنترنت", "واي فاي", "الواي فاي", "wifi", "wi-fi", "internet", "router"],
+    "appliance": ["غسالة", "الغسالة", "ثلاجة", "الثلاجة", "فرن", "الفرن", "ميكروويف", "التلفزيون",
+                  "washer", "washing machine", "fridge", "refrigerator", "oven", "microwave",
+                  "dishwasher", "television"],
+}
+_MUSAED_PROBLEM_SIGNALS_DEFAULT = [
+    "خربان", "معطل", "معطّل", "ما يشتغل", "لا يعمل", "مش شغال", "ما يعمل", "خراب", "مكسور",
+    "عطل", "عطلان", "مشكلة", "مشكله", "ضعيف", "بطيء", "انقطع", "مقطوع", "يعلق", "ما يبرد",
+    "ما يسخن", "صوت عالي", "صوته عالي", "مزعج", "يزعج", "ازعاج", "إزعاج", "ريحة", "رائحة",
+    "not working", "doesn't work", "does not work", "broken", "stopped working", "won't",
+    "wont turn", "faulty", "noisy", "too loud", "very slow", "keeps disconnecting", "smell",
+    "issue with", "problem with",
+]
+
+def _musaed_issue_terms():
+    """Config-first: STATE_DIR/maintenance_terms.json overrides the defaults."""
+    cfg = _load_json("maintenance_terms.json", None)
+    topics = dict(_MUSAED_ISSUE_TOPICS_DEFAULT)
+    signals = list(_MUSAED_PROBLEM_SIGNALS_DEFAULT)
+    if isinstance(cfg, dict):
+        if isinstance(cfg.get("topics"), dict):
+            for k, v in cfg["topics"].items():
+                if isinstance(v, list):
+                    topics[str(k)] = [str(x) for x in v]
+        if isinstance(cfg.get("problem_signals"), list):
+            signals = [str(x) for x in cfg["problem_signals"]]
+    return topics, signals
+
+def _musaed_issue_classify(text):
+    """Return the matched topic key when the guest text mentions BOTH a maintenance
+    topic AND a problem signal — a bare amenity question ('هل فيه واي فاي؟') matches
+    a topic but no problem, so it produces nothing."""
+    low = " " + str(text or "").lower() + " "
+    if len(low) < 6:
+        return None
+    topics, signals = _musaed_issue_terms()
+    if not any(s in low for s in signals):
+        return None
+    for key, terms in topics.items():
+        for term in terms:
+            t = term.lower()
+            if re.fullmatch(r"[a-z0-9 /-]+", t):
+                if re.search(r"(?<![a-z])" + re.escape(t) + r"(?![a-z])", low):
+                    return key
+            elif t in low:
+                return key
+    return None
+
+def _musaed_issue_scan(item, escalated=False):
+    """B.5 side-effect: open ONE low-priority ticket when a guest message mentions a
+    maintenance issue. Idempotent by source_ref=musaed-issue:<cid>:<mid>; skipped when
+    the message escalated (that flow opens its own ticket). No Discord ping (LOW)."""
+    if escalated or not item:
+        return None
+    text = (item.get("guest_text") or "").strip()
+    topic = _musaed_issue_classify(text)
+    if not topic:
+        return None
+    ref = f"musaed-issue:{item.get('conversation_id')}:{item.get('message_id')}"
+    for t in _tickets:
+        if str(t.get("source_ref")) == ref:
+            return t                                   # already logged this message
+    quote = text.replace("\n", " ")[:400]
+    t = _ticket_create(
+        f"رصد تلقائي · {topic} · {item.get('unit') or '—'}",
+        description=(f"رصدها المساعد تلقائيًا من رسالة الضيف (راجعها وتأكد):\n"
+                     f"«{quote}»\n\nمحادثة Hostaway: {item.get('conversation_id')}"),
+        lid=item.get("listing_id"), priority="low", category="صيانة",
+        source="manual", source_ref=ref,
+        guest=item.get("guest"), created_by="musaed-auto")
+    return t
+
+# ---- B.3: "asked-but-didn't-book" archive mining (owner-approved, read-only) ----
+# Walks the conversation archive with the SAME two-step pull the learning bootstrap
+# uses (no second crawler architecture), selects price/availability-intent threads
+# with NO confirmed booking within 14 days, and aggregates "asked at X, walked away"
+# counts by segment × month × price band. Feeds Price DNA's ceiling work LATER —
+# nothing is wired into the pricing brain yet.
+_inquiry_mining = _load_json("inquiry_mining.json", {}) or {}
+_inquiry_state = {"running": False, "started": 0, "finished": 0, "error": "", "result": None}
+
+_SAR_PRICE_RE = re.compile(
+    r"(\d{2,6}(?:[.,]\d{1,2})?)\s*(?:ر\.?\s?س|ريال|﷼|sar|sr)\b"
+    r"|(?:sar|sr)\s*(\d{2,6})", re.IGNORECASE)
+_INQ_DATE_RE = re.compile(r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})")
+
+def _inquiry_quoted_price(reply_text):
+    """First sane SAR amount (50..20000) quoted in the team's reply, else None."""
+    for m in _SAR_PRICE_RE.finditer(str(reply_text or "")):
+        raw = (m.group(1) or m.group(2) or "").replace(",", ".")
+        try:
+            v = float(raw)
+        except ValueError:
+            continue
+        if 50 <= v <= 20000:
+            return round(v)
+    return None
+
+def _inquiry_ask_month(guest_text, msg_ts):
+    """Month the guest asked ABOUT when a date is parseable in their text, else the
+    message month (flagged so the aggregate stays honest)."""
+    m = _INQ_DATE_RE.search(str(guest_text or ""))
+    if m:
+        try:
+            y, mo = int(m.group(1)), int(m.group(2))
+            if 1 <= mo <= 12:
+                return f"{y}-{mo:02d}", True
+        except ValueError:
+            pass
+    return (str(msg_ts or "")[:7] or "unknown"), False
+
+def _inquiry_price_band(p):
+    if p is None: return "unknown"
+    if p < 300: return "<300"
+    if p < 450: return "300-449"
+    if p < 600: return "450-599"
+    if p < 800: return "600-799"
+    if p < 1200: return "800-1199"
+    return "1200+"
+
+def _inquiry_segment(lid):
+    """compound|bedrooms segment from the catalog; '—' when unknown (never invented)."""
+    try:
+        u = next((u for u in _catalog_units if u.get("id") == int(lid)), None)
+    except (TypeError, ValueError):
+        u = None
+    if not u:
+        return "—"
+    area = (u.get("neighbourhood") or u.get("area") or "").strip() or "—"
+    beds = u.get("beds")
+    return f"{area}|{beds if beds is not None else '?'}br"
+
+def _inquiry_mine_run(limit_conversations=400):
+    """The heavy pass (background worker only — never a page load). Returns summary."""
+    # Step 1: pull recent conversations — the bootstrap walker's exact pull pattern.
+    convos, offset, page = [], 0, 100
+    while len(convos) < limit_conversations:
+        try:
+            data = api_get("/conversations",
+                           params={"limit": page, "offset": offset, "includeResources": 1})
+        except Exception as e:
+            print(f"inquiry-mine: /conversations fetch error at offset {offset}: {e}")
+            break
+        batch = data.get("result", []) or []
+        if not batch:
+            break
+        convos.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    convos = convos[:limit_conversations]
+    # confirmed bookings by guest name for the walked-away check
+    booked_by_guest = defaultdict(list)     # name.lower() -> [booking-created dates]
+    for r in get_reservations_cached():
+        if str(r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        nm = (r.get("guestName") or "").strip().lower()
+        bd = _parse_date(r.get("reservationDate") or r.get("insertedOn") or r.get("arrivalDate"))
+        if nm and bd:
+            booked_by_guest[nm].append(bd)
+    agg = {}            # segment -> month -> band -> count
+    samples = []        # a few anonymized examples for the dashboard card
+    scanned = matched = 0
+    for c in convos:
+        cid, lid = c.get("id"), c.get("listingMapId")
+        if not cid:
+            continue
+        try:
+            md = api_get(f"/conversations/{cid}/messages")
+            msgs = sorted(md.get("result", []) or [], key=_msg_sort_key)
+        except Exception:
+            continue
+        scanned += 1
+        guest = (c.get("recipientName") or c.get("guestName") or "").strip()
+        res = c.get("reservation") or {}
+        conv_booked = str(res.get("status") or "").lower() in CONFIRMED_STATUSES
+        for i, m in enumerate(msgs):
+            if not _msg_is_inbound(m):
+                continue
+            qtext = (m.get("body") or "").strip()
+            ql = qtext.lower()
+            if len(qtext) < 6:
+                continue
+            if not (any(h in ql for h in _PRICE_HINTS) or _is_asking_alternatives(qtext)):
+                continue
+            ask_dt = _parse_date(str(_msg_time(m) or "")[:10])
+            # walked away? conversation itself unbooked AND no confirmed booking by the
+            # same guest within 14 days after the ask.
+            if conv_booked:
+                continue
+            booked_after = False
+            if guest and ask_dt:
+                for bd in booked_by_guest.get(guest.lower(), []):
+                    if timedelta(days=0) <= (bd - ask_dt) <= timedelta(days=14):
+                        booked_after = True
+                        break
+            if booked_after:
+                continue
+            # the team's reply to THIS ask (next non-automated outbound) → quoted price
+            quoted = None
+            for j in range(i + 1, len(msgs)):
+                m2 = msgs[j]
+                if _msg_is_inbound(m2):
+                    break
+                body2 = (m2.get("body") or "").strip()
+                if not body2 or _looks_automated(body2):
+                    continue
+                quoted = _inquiry_quoted_price(body2)
+                break
+            month, month_parsed = _inquiry_ask_month(qtext, _msg_time(m))
+            seg = _inquiry_segment(lid)
+            band = _inquiry_price_band(quoted)
+            cell = agg.setdefault(seg, {}).setdefault(month, {})
+            cell[band] = cell.get(band, 0) + 1
+            matched += 1
+            if len(samples) < 12 and quoted:
+                samples.append({"segment": seg, "month": month, "quoted": quoted,
+                                "month_parsed": month_parsed})
+            break          # one walked-away record per conversation (its first price-ask)
+    out = {"generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+           "conversations_scanned": scanned, "walked_away": matched,
+           "by_segment": agg, "samples": samples,
+           "note": "prices are what the TEAM quoted; censored — true willingness-to-pay may differ"}
+    _inquiry_mining.clear()
+    _inquiry_mining.update(out)
+    _save_json("inquiry_mining.json", _inquiry_mining)
+    print(f"inquiry-mine: scanned {scanned} convos → {matched} walked-away asks")
+    return {"scanned": scanned, "walked_away": matched}
+
+async def _api_inquiry_mining(request):
+    """Read-only dataset for the Pricing tab card."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "data": _inquiry_mining or None,
+                  "running": _inquiry_state["running"]})
+
+async def _api_inquiry_mining_status(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, **_inquiry_state})
+
+async def _api_inquiry_mining_run(request):
+    """POST {limit_conversations?} — kick the background pass (409 when running)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _inquiry_state["running"]:
+        return _json({"error": "already running", "started": _inquiry_state["started"]}, 409)
+    b = await _read_body(request)
+    try:
+        limit = max(50, min(2000, int(b.get("limit_conversations", 400))))
+    except Exception:
+        limit = 400
+    async def _run():
+        _inquiry_state.update({"running": True, "started": time.time(),
+                               "finished": 0, "error": "", "result": None})
+        try:
+            _inquiry_state["result"] = await asyncio.to_thread(_inquiry_mine_run, limit)
+        except Exception as e:
+            _inquiry_state["error"] = str(e)
+            print("inquiry-mine error:", e)
+        finally:
+            _inquiry_state["running"] = False
+            _inquiry_state["finished"] = time.time()
+    asyncio.create_task(_run())
+    return _json({"ok": True, "started": True, "limit_conversations": limit,
+                  "note": "Running in background; poll /api/pricing/inquiry-mining/status"})
 
 def _ticket_from_escalation(esc_id, esc):
     """Create (or return existing) ticket linked to an escalation. Idempotent
@@ -12408,6 +12692,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <div class="card" style="margin-top:14px"><div class="card-head"><span class="card-title"><span id="t_pr_table">إدارة الأسعار — الشقق</span></span><span class="card-sub" id="prTableCount"></span></div><div id="prTable"><div class="empty sk">—</div></div></div>
+
+        <!-- B.3: asked-but-didn't-book (read-only; feeds Price DNA's ceiling work later) -->
+        <div class="card" style="margin-top:14px"><div class="card-head"><span class="card-title" id="t_pr_inq">سألوا وما حجزوا</span><span class="card-sub" id="prInqSub"></span></div><div id="prInqCard"><div class="empty sk">—</div></div></div>
       </section>
 
       <!-- ============ STRATEGIES VIEW ============ -->
@@ -13611,6 +13898,10 @@ const T = {
     guests_search:'ابحث بالاسم/الهاتف…',
     guest_name:'الاسم', guest_stays:'إقامات', guest_nights:'ليالي', guest_last:'آخر تفاعل',
     guest_no_data:'ما فيه ضيوف بعد', guest_vip_on:'VIP', guest_dup:'تكرار محتمل',
+    pr_inq_title:'سألوا وما حجزوا', pr_inq_run:'حدّث التحليل', pr_inq_none:'ما فيه بيانات بعد',
+    pr_inq_none_sub:'يتعبأ تلقائياً كل ليلة من أرشيف المحادثات، أو اضغط «حدّث التحليل».',
+    pr_inq_note:'استفسارات سعر/توفّر ما تبعها حجز خلال ١٤ يوم — الأسعار هي اللي ذكرها الفريق (قد يكون السقف الحقيقي أعلى).',
+    pr_inq_seg:'الشريحة', pr_inq_month:'الشهر', pr_inq_n:'عدد', pr_inq_band:'نطاق السعر المذكور',
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
@@ -13917,6 +14208,10 @@ const T = {
     guests_search:'Search name/phone…',
     guest_name:'Name', guest_stays:'stays', guest_nights:'nights', guest_last:'last seen',
     guest_no_data:'No guests recorded yet', guest_vip_on:'VIP', guest_dup:'possible duplicate',
+    pr_inq_title:'Asked but didn’t book', pr_inq_run:'Refresh analysis', pr_inq_none:'No data yet',
+    pr_inq_none_sub:'Fills nightly from the conversation archive, or press “Refresh analysis”.',
+    pr_inq_note:'Price/availability asks with NO booking within 14 days — prices are what the TEAM quoted (the true ceiling may be higher).',
+    pr_inq_seg:'Segment', pr_inq_month:'Month', pr_inq_n:'Count', pr_inq_band:'Quoted price band',
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
@@ -15109,6 +15404,49 @@ async function loadPricing(){
   D.pcc=await pull('/api/pricing/command',{ok:false,error:'command_fetch_failed'});
   function safe(fn,label){ try{ fn(); }catch(e){ try{ console.warn('pricing render '+(label||''),e); }catch(_){} } }
   safe(renderPricingTable,'list');
+  // B.3 card — a cheap cached-JSON read (the heavy mining pass runs nightly/by button)
+  pull('/api/pricing/inquiry-mining',{}).then(function(r){ D.prInq=r; try{ renderInqCard(); }catch(_){ } });
+}
+function renderInqCard(){
+  var el=document.getElementById('prInqCard'); if(!el) return;
+  var ar=(L==='ar');
+  var tEl=document.getElementById('t_pr_inq'); if(tEl) tEl.textContent=t().pr_inq_title;
+  var d=((D.prInq||{}).data)||null;
+  var sub=document.getElementById('prInqSub');
+  var runBtn='<button class="btn ghost sm" onclick="inqRunNow(this)">⟳ '+t().pr_inq_run+'</button>';
+  if(!d || !d.generated_at){
+    el.innerHTML=emptyState(t().pr_inq_none, t().pr_inq_none_sub,'—')+'<div style="text-align:center;margin-top:8px">'+runBtn+'</div>';
+    if(sub) sub.textContent='';
+    return;
+  }
+  if(sub) sub.textContent=(ar?'آخر تحديث ':'updated ')+String(d.generated_at).replace('T',' ').slice(0,16)+' · n='+(d.walked_away||0);
+  var rows=[];
+  var seg=d.by_segment||{};
+  for(var s in seg){ if(!seg.hasOwnProperty(s)) continue;
+    for(var mth in seg[s]){ if(!seg[s].hasOwnProperty(mth)) continue;
+      var bands=seg[s][mth], tot=0, top=null, topN=0;
+      for(var b in bands){ if(!bands.hasOwnProperty(b)) continue; tot+=bands[b]; if(bands[b]>topN){topN=bands[b];top=b;} }
+      rows.push({seg:s, month:mth, n:tot, band:top});
+    }
+  }
+  rows.sort(function(a,b){ return b.n-a.n; });
+  if(!rows.length){
+    el.innerHTML=emptyState(t().pr_inq_none, t().pr_inq_none_sub,'—')+'<div style="text-align:center;margin-top:8px">'+runBtn+'</div>';
+    return;
+  }
+  var h='<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+t().pr_inq_note+'</div>'
+    +'<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+t().pr_inq_seg+'</th><th>'+t().pr_inq_month+'</th><th class="num">'+t().pr_inq_n+'</th><th>'+t().pr_inq_band+'</th></tr></thead><tbody>'
+    +rows.slice(0,8).map(function(r){
+      return '<tr><td>'+esc(r.seg)+'</td><td class="num">'+esc(r.month)+'</td><td class="num">'+r.n+'</td><td class="num">'+esc(r.band==='unknown'?(ar?'بدون سعر مذكور':'no price quoted'):r.band)+'</td></tr>';
+    }).join('')+'</tbody></table></div>'
+    +'<div style="display:flex;justify-content:flex-end;margin-top:8px">'+runBtn+'</div>';
+  el.innerHTML=h;
+}
+async function inqRunNow(btn){
+  if(btn){ btn.disabled=true; }
+  var r; try{ r=await post('/api/pricing/inquiry-mining/run',{}); }catch(_){ r=null; }
+  toast(r&&r.ok?(L==='ar'?'بدأ التحليل بالخلفية — يكتمل خلال دقائق':'Mining started — done in minutes'):((r&&r.error)||'⚠'));
+  if(btn){ setTimeout(function(){ btn.disabled=false; }, 5000); }
 }
 /* ===== Pricing Command Center (Stage 2) — read-only owner decision surface over /api/pricing/command.
    No apply here; "Review Manually" opens the detailed list below. Max 4 status colors. ===== */
@@ -41266,6 +41604,9 @@ async def start_web_server():
         app.router.add_get("/api/pricing/calendar", _api_pricing_calendar)   # per-unit month calendar (read-only)
         app.router.add_post("/api/pricing/refresh-listing", _api_pricing_refresh_listing)  # re-read one apartment from Hostaway
         app.router.add_post("/api/pricing/rebuild", _api_pricing_rebuild)   # manual dataset rebuild (24h TTL override)
+        app.router.add_get("/api/pricing/inquiry-mining", _api_inquiry_mining)            # B.3 read-only dataset
+        app.router.add_get("/api/pricing/inquiry-mining/status", _api_inquiry_mining_status)
+        app.router.add_post("/api/pricing/inquiry-mining/run", _api_inquiry_mining_run)   # background pass
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
         app.router.add_get("/api/pricing/emergency-preview", _api_pricing_emergency_preview)  # 9PM emergency (preview only)
         app.router.add_get("/api/pricing/command/batches", _api_pricing_command_batches)  # apply batches (revert source)
@@ -41722,6 +42063,22 @@ async def reviews_refresh_loop():
         _oujact_prune_done()    # daily safety net even when Discord sweeps don't run
     except Exception as e:
         print("oujact done-prune error:", e)
+    # B.3: nightly inquiry-mining refresh (like Price DNA) — background, never page-load.
+    try:
+        gen = _parse_date(str(_inquiry_mining.get("generated_at") or "")[:10])
+        stale = (gen is None) or ((datetime.now(TZ).date() - gen).days >= 1)
+        if stale and not _inquiry_state["running"]:
+            _inquiry_state.update({"running": True, "started": time.time(),
+                                   "finished": 0, "error": "", "result": None})
+            try:
+                _inquiry_state["result"] = await asyncio.to_thread(_inquiry_mine_run, 400)
+            except Exception as e:
+                _inquiry_state["error"] = str(e)
+            finally:
+                _inquiry_state["running"] = False
+                _inquiry_state["finished"] = time.time()
+    except Exception as e:
+        print("inquiry nightly error:", e)
 
 @tasks.loop(minutes=REVIEW_AUTOANALYZE_MIN)
 async def reviews_autoanalyze_loop():
