@@ -128,8 +128,11 @@ WEEKLY_REVIEW_TEST  = os.environ.get("WEEKLY_REVIEW_TEST", "0") in ("1", "true",
 EXPENSE_POST_DRYRUN   = os.environ.get("EXPENSE_POST_DRYRUN", "1") in ("1", "true", "True", "yes")
 _exp_sheet_last_sync = None   # ISO time of the last successful Google-Sheet poll (for the connection strip)
 # Shared secret the Google Apps Script must send (header X-Ingest-Secret) so only
-# our own form can push submissions. If blank, ingestion is open (not recommended).
+# our own form can push submissions. MANDATORY: if blank, /api/expenses/ingest
+# answers 503 (ingest disabled) instead of accepting anonymous submissions.
 EXPENSE_INGEST_SECRET = os.environ.get("EXPENSE_INGEST_SECRET", "")
+if not EXPENSE_INGEST_SECRET:
+    print("WARNING: EXPENSE_INGEST_SECRET not set — /api/expenses/ingest is DISABLED (503) until it is configured")
 # Hostaway expenses endpoint (relative to BASE which already ends in /v1).
 EXPENSE_HOSTAWAY_PATH = os.environ.get("EXPENSE_HOSTAWAY_PATH", "/expenses")
 # Discord channel where a stuck/failed Hostaway post is announced (with a retry hint).
@@ -238,11 +241,20 @@ ASSISTANT_HISTORY_MSGS = int(os.environ.get("ASSISTANT_HISTORY_MSGS", "14"))  # 
 # ---- Stage 2: Hostaway webhooks (instant replies). 100% optional/backward-compatible:
 # if not set up in Hostaway, the bot just keeps polling as before. ----
 WEBHOOKS_ENABLED = os.environ.get("WEBHOOKS_ENABLED", "1") in ("1", "true", "True", "yes")
-WEBHOOK_SECRET   = os.environ.get("WEBHOOK_SECRET", "ouja-hook")      # the secret path segment
+WEBHOOK_SECRET   = os.environ.get("WEBHOOK_SECRET", "")               # the secret path segment
+if not WEBHOOK_SECRET:
+    # Never run with a guessable default: generate a random path segment at boot.
+    WEBHOOK_SECRET = _secrets_mod.token_urlsafe(24)
+    print("WARNING: WEBHOOK_SECRET not set — generated a random one for this boot: "
+          f"/hook/{WEBHOOK_SECRET} (set WEBHOOK_SECRET in Railway to keep it stable)")
 WEB_PORT         = int(os.environ.get("PORT", "8080"))               # Railway provides PORT
 # ---- Web dashboard (served by the same bot at /dashboard). Protected by a token. ----
 DASHBOARD_ENABLED = os.environ.get("DASHBOARD_ENABLED", "1") in ("1", "true", "True", "yes")
 DASHBOARD_TOKEN   = os.environ.get("DASHBOARD_TOKEN", "")            # REQUIRED to view (set your own)
+# Separate shareable token for the public investor deck (/invest?token=...). The deck
+# shows real portfolio statistics, so it must never be fully public; if this is unset
+# the page answers 401 (a dashboard session also works, for the owner).
+INVEST_TOKEN      = os.environ.get("INVEST_TOKEN", "")
 DASH_TTL          = int(os.environ.get("DASH_TTL", "600"))          # cache computed analytics (sec)
 DASH_REFRESH_MIN  = int(os.environ.get("DASH_REFRESH_MIN", "7"))    # background pre-compute interval (min)
 # Safety: replies are NEVER sent automatically unless you explicitly turn this on later.
@@ -595,9 +607,9 @@ def _ct_team_by_token(token):
     if not token:
         return None
     for t in _cleaning_teams.values():
-        if t.get("token") and t["token"] == token:
+        if t.get("token") and hmac.compare_digest(str(t["token"]), str(token)):
             return t
-    if OUJACT_ROUTE_TOKEN and token == OUJACT_ROUTE_TOKEN:
+    if OUJACT_ROUTE_TOKEN and hmac.compare_digest(str(OUJACT_ROUTE_TOKEN), str(token)):
         return _cleaning_teams.get("team-1")
     return None
 
@@ -2642,17 +2654,13 @@ def compute_headsup():
     return items, tomorrow, weekend
 
 # ---------------- handled-set persistence ----------------
+# Atomic via _save_json/_load_json: a crash mid-write must never truncate the file
+# (a truncated handled-set re-spams every cleaning channel after reboot).
 def load_handled():
-    try:
-        return set(json.load(open(HANDLED_FILE)))
-    except Exception:
-        return set()
+    return set(_load_json("handled.json", []))
 
 def save_handled(s):
-    try:
-        json.dump(list(s), open(HANDLED_FILE, "w"))
-    except Exception:
-        pass
+    _save_json("handled.json", list(s))
 
 handled = load_handled()
 
@@ -2758,11 +2766,22 @@ def channel_name(internal_name):
     return re.sub(r"[^a-z0-9]+", "-", internal_name.lower()).strip("-")[:90] or "unit"
 
 # ---- responsible-person lookup (from assignments.json built off the Excel) ----
-try:
-    ASSIGNMENTS = json.load(open("assignments.json", encoding="utf-8"))
-except Exception as e:
-    print("Could not load assignments.json:", e)
-    ASSIGNMENTS = {"by_day": {}, "discord_ids": {}}
+# Lives on the volume (STATE_DIR) so dashboard edits survive redeploys; the repo
+# copy only seeds it once (one-time migration on first boot with a volume).
+def _load_assignments():
+    vol = _load_json("assignments.json", None)
+    if isinstance(vol, dict) and vol.get("by_day") is not None:
+        return vol
+    try:
+        repo = json.load(open("assignments.json", encoding="utf-8"))
+        _save_json("assignments.json", repo)     # migrate the repo copy to the volume
+        print("assignments.json migrated from repo to STATE_DIR")
+        return repo
+    except Exception as e:
+        print("Could not load assignments.json:", e)
+        return {"by_day": {}, "discord_ids": {}}
+
+ASSIGNMENTS = _load_assignments()
 
 # Python weekday(): Mon=0 ... Sun=6
 ARABIC_DAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
@@ -10748,7 +10767,7 @@ _USER_TABS = [
     "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
     "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
     "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
-    "cleanteams", "clean_center", "plab", "fb",
+    "cleanteams", "clean_center", "plab", "fb", "finance", "gw",
 ]
 
 def _default_perms(role):
@@ -10769,7 +10788,7 @@ def _default_perms(role):
         return {
             tab: {
                 "read":   tab != "users",
-                "write":  tab not in ("users", "rev", "log", "fb"),
+                "write":  tab not in ("users", "rev", "log", "fb", "finance"),
                 "create": tab in ("tickets", "quote", "weekly", "design"),
             } for tab in _USER_TABS
         }
@@ -10857,7 +10876,12 @@ def _user_can(request, tab, action="read"):
         return False
     if u.get("role") == "admin":
         return True
-    return bool(((u.get("perms") or {}).get(tab) or {}).get(action))
+    perm = (u.get("perms") or {}).get(tab)
+    if perm is None:
+        # Tab added after this user was created: fall back to the role default
+        # instead of silently denying (admins can still edit per-user perms).
+        perm = _default_perms(u.get("role") or "viewer").get(tab) or {}
+    return bool(perm.get(action))
 
 # ===================== REVIEWS (Hostaway + AI dispute/AAA) =====================
 # Per review:
@@ -20333,7 +20357,7 @@ function _renderReviewCard(r){
              +    '<div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;margin-top:6px">'
              +      (r.ai.dispute_angle_ar ? '<div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px"><b>زاوية الحجة:</b> '+esc(r.ai.dispute_angle_ar)+'</div>' : '')
              +      (r.ai.dispute_message_en ? '<div dir="ltr" style="font-size:12.5px;line-height:1.6;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.dispute_message_en)+'</div>' : '')
-             +      '<button class="btn primary xs" style="margin-top:8px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.dispute_message_en||'')+')">📋 انسخ رسالة Airbnb</button>'
+             +      '<button class="btn primary xs" style="margin-top:8px" data-copy="'+esc(r.ai.dispute_message_en||'')+'" onclick="_rvCopy(this)">📋 انسخ رسالة Airbnb</button>'
              +    '</div></details>';
       }
     }
@@ -20353,12 +20377,12 @@ function _renderReviewCard(r){
       if(r.ai.public_response_ar){
         html += '<div><div style="font-size:11px;color:var(--mut);margin-bottom:4px;font-weight:600">🇸🇦 عربي</div>'
              +    '<div style="font-size:12.5px;line-height:1.7;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.public_response_ar)+'</div>'
-             +    '<button class="btn ghost xs" style="margin-top:6px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.public_response_ar)+')">📋 نسخ</button></div>';
+             +    '<button class="btn ghost xs" style="margin-top:6px" data-copy="'+esc(r.ai.public_response_ar)+'" onclick="_rvCopy(this)">📋 نسخ</button></div>';
       }
       if(r.ai.public_response_en){
         html += '<div><div style="font-size:11px;color:var(--mut);margin-bottom:4px;font-weight:600">🇺🇸 English</div>'
              +    '<div dir="ltr" style="font-size:12.5px;line-height:1.7;white-space:pre-wrap;background:var(--surface);padding:8px 10px;border-radius:6px">'+esc(r.ai.public_response_en)+'</div>'
-             +    '<button class="btn ghost xs" style="margin-top:6px" onclick="_rvCopy(this, '+JSON.stringify(r.ai.public_response_en)+')">📋 نسخ</button></div>';
+             +    '<button class="btn ghost xs" style="margin-top:6px" data-copy="'+esc(r.ai.public_response_en)+'" onclick="_rvCopy(this)">📋 نسخ</button></div>';
       }
       html += '</div></details>';
     }
@@ -20376,7 +20400,7 @@ function _renderReviewCard(r){
   const _replyTxt = r.ai ? (r.ai.public_response_ar || r.ai.public_response_en || '') : '';
   html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
        +    ((r.ai && _replyTxt && (_notRemovable || isPos))
-            ? '<button class="btn primary xs" onclick="_rvCopy(this, '+JSON.stringify(_replyTxt)+')">✍️ انسخ الرد</button>'
+            ? '<button class="btn primary xs" data-copy="'+esc(_replyTxt)+'" onclick="_rvCopy(this)">✍️ انسخ الرد</button>'
               // Item 40: Hostaway's PUBLIC API does NOT support posting a review response
               // (confirmed: our fetch only GETs /v1/reviews; no reply endpoint exists). So we
               // do NOT fake a publish — we deep-link to the Hostaway reviews dashboard to paste.
@@ -20394,8 +20418,11 @@ function _renderReviewCard(r){
   return html;
 }
 function _rvCopy(btn, txt){
+  // Text travels in data-copy (HTML-escaped at build, auto-unescaped by getAttribute)
+  // so AI/guest-derived content can never break out of an HTML attribute.
+  var v = (txt != null) ? txt : ((btn && btn.getAttribute('data-copy')) || '');
   try {
-    navigator.clipboard.writeText(txt || '').then(function(){ toast('📋 تم النسخ'); });
+    navigator.clipboard.writeText(v || '').then(function(){ toast('📋 تم النسخ'); });
     if(btn){ btn.textContent = '✓ منسوخ'; setTimeout(function(){ btn.textContent = '📋 نسخ' }, 1500); }
   } catch(_){ toast('فشل النسخ'); }
 }
@@ -25005,7 +25032,7 @@ var T={
    checkin:'check-in today', checkout:'checkout', min:'min', done_t:'Submitted for review', empty:'No Oujact apartments scheduled today.',
    bad:'Invalid or expired link.', leg:'drive'}};
 function t(){return T[L];}
-function esc(s){return (s==null?'':String(s)).replace(/[<>&\"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','\"':'&quot;'})[c];});}
+function esc(s){return (s==null?'':String(s)).replace(/[<>&\"']/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','\"':'&quot;',"'":'&#39;'})[c];});}
 function toggleLang(){L=(L==='ar'?'en':'ar');document.documentElement.lang=L;document.documentElement.dir=(L==='ar'?'rtl':'ltr');document.getElementById('langBtn').textContent=(L==='ar'?'EN':'ع');render();}
 function renderStart(){
  var k=t(); var c=document.getElementById('startCard');
@@ -25199,7 +25226,7 @@ header .lang-en{margin-top:14px;padding:8px 18px;background:rgba(255,255,255,.18
   <div class="empty"><span class="ic">⏳</span>جاري التحميل...<br><span style="font-size:11.5px">Loading...</span></div>
 </div>
 <script>
-function esc(s){return (s==null?'':String(s)).replace(/[<>&]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]})}
+function esc(s){return (s==null?'':String(s)).replace(/[<>&\"']/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','\"':'&quot;',"'":'&#39;'})[c]})}
 function wdAr(d){return ['الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت','الأحد'][d]}
 function fmtDate(s){try{const dt=new Date(s);return dt.toLocaleDateString('ar-SA',{day:'numeric',month:'long',year:'numeric'})}catch(_){return s}}
 
@@ -30581,6 +30608,11 @@ def _render_invest_html():
                        .replace("/*__OUJA_SEGMENTS__*/null", seg_payload))
 
 async def _handle_invest(request):
+    # Gated: shareable INVEST_TOKEN (?token=) or an authenticated dashboard session.
+    tok = request.query.get("token") or ""
+    ok = bool(INVEST_TOKEN) and hmac.compare_digest(tok, INVEST_TOKEN)
+    if not ok and not _dash_auth(request):
+        return web.Response(text="unauthorized", status=401)
     return web.Response(text=_render_invest_html(), content_type="text/html")
 
 async def _api_pricing_detail(request):
@@ -32680,20 +32712,38 @@ _login_attempts = {}            # ip -> [timestamps of recent failed attempts]
 _LOGIN_MAX_FAILS = 5
 _LOGIN_WINDOW_S  = 60
 
+def _client_ip(request):
+    """Real client IP behind Railway's load balancer: first hop of X-Forwarded-For.
+    (request.remote is the proxy, so keying on it would lock out EVERYONE at once.)"""
+    xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return xff or (request.remote or "?")
+
 def _login_blocked(ip):
     """True if this IP has too many recent failed logins. Prunes old entries."""
     now = time.time()
     fails = [t for t in _login_attempts.get(ip, []) if now - t < _LOGIN_WINDOW_S]
-    _login_attempts[ip] = fails
+    if fails:
+        _login_attempts[ip] = fails
+    else:
+        _login_attempts.pop(ip, None)   # never keep empty keys (slow memory growth)
     return len(fails) >= _LOGIN_MAX_FAILS
 
 def _login_record_fail(ip):
     _login_attempts.setdefault(ip, []).append(time.time())
 
+def _sessions_save():
+    """Persist sessions to the volume (pruning expired ones) so a redeploy
+    doesn't log the whole team out mid-shift. TTL stays 30 days."""
+    now = time.time()
+    for tok, sess in list(_sessions.items()):
+        if (sess or {}).get("expires_at", 0) < now:
+            _sessions.pop(tok, None)
+    _save_json("sessions.json", _sessions)
+
 async def _api_auth_login(request):
     """POST {username, password} → {ok:true, token, user}.
     Token is a session token good for 30 days."""
-    ip = request.remote or "?"
+    ip = _client_ip(request)
     if _login_blocked(ip):
         return _json({"error": "too many attempts, try again later"}, 429)
     b = await _read_body(request)
@@ -32714,12 +32764,14 @@ async def _api_auth_login(request):
         "user_id": u["id"],
         "expires_at": time.time() + 30 * 86400,
     }
+    await asyncio.to_thread(_sessions_save)
     return _json({"ok": True, "token": tok, "user": _user_view(u)})
 
 async def _api_auth_logout(request):
     token = request.query.get("token") or request.headers.get("X-Token", "")
     if token:
         _sessions.pop(token, None)
+        await asyncio.to_thread(_sessions_save)
     return _json({"ok": True})
 
 async def _api_users_me(request):
@@ -32816,6 +32868,7 @@ async def _api_users_delete(request):
     for tok, sess in list(_sessions.items()):
         if sess.get("user_id") == uid:
             _sessions.pop(tok, None)
+    await asyncio.to_thread(_sessions_save)
     await asyncio.to_thread(persist_state)
     log_event("ops", f"مستخدم · حذف {u.get('name','?')}")
     return _json({"ok": True})
@@ -33218,8 +33271,11 @@ async def _api_expenses_ingest(request):
     """Public webhook for the Google Apps Script. Authenticated by a shared
     secret (header X-Ingest-Secret or ?secret=). Idempotent by submission_id.
     Accepts one submission or a {submissions:[...]} batch."""
+    if not EXPENSE_INGEST_SECRET:
+        # No shared secret configured -> the endpoint is closed (no anonymous ingest).
+        return _json({"error": "ingest disabled: EXPENSE_INGEST_SECRET not set"}, 503)
     secret = request.headers.get("X-Ingest-Secret") or request.query.get("secret") or ""
-    ok_secret = (not EXPENSE_INGEST_SECRET) or hmac.compare_digest(secret, EXPENSE_INGEST_SECRET)
+    ok_secret = hmac.compare_digest(secret, EXPENSE_INGEST_SECRET)
     if not ok_secret and not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
@@ -38713,10 +38769,12 @@ async def _api_pmo_owner_page(request):
     assignees, budget, notes and the activity log."""
     token = request.match_info.get("token", "")
     p = None
-    for proj in _pmo_projects.values():
-        if proj.get("owner_token") and proj.get("owner_token") == token:
-            p = proj
-            break
+    if token:
+        for proj in _pmo_projects.values():
+            t = str(proj.get("owner_token") or "")
+            if t and hmac.compare_digest(t, str(token)):
+                p = proj
+                break
     if not p or not p.get("owner_active", True):
         return web.Response(text=_pmo_owner_inactive_html(), content_type="text/html", status=404)
     return web.Response(text=_pmo_owner_html(p), content_type="text/html")
@@ -38725,7 +38783,7 @@ async def _api_cleaning_public(request):
     """Public data for the cleaning company. Auth via CLEANING_TOKEN query param,
     not the dashboard token — so the link can be shared with the cleaners safely."""
     token = request.query.get("token", "")
-    if not CLEANING_TOKEN or token != CLEANING_TOKEN:
+    if not CLEANING_TOKEN or not hmac.compare_digest(str(token), str(CLEANING_TOKEN)):
         return _json({"error": "unauthorized"}, 401)
     if not _catalog_units:
         await asyncio.to_thread(load_catalog, True)
@@ -39271,9 +39329,14 @@ async def _api_oujact_route(request):
     actions only — never the full dashboard). Optional ?start= computes ETA when possible."""
     token = request.query.get("token", "")
     team = _ct_team_by_token(token)
-    if not team and not (OUJACT_ROUTE_TOKEN and token == OUJACT_ROUTE_TOKEN):
+    if not team and OUJACT_ROUTE_TOKEN and hmac.compare_digest(str(OUJACT_ROUTE_TOKEN), str(token)):
+        # DEPRECATED legacy unscoped link: never expose the full dispatch plan —
+        # scope it to team-1 (the migrated team). External crews see only their units.
+        team = _cleaning_teams.get("team-1")
+        print("WARNING: legacy OUJACT_ROUTE_TOKEN link used — scoped to team-1; move crews to per-team links")
+    if not team:
         return _json({"error": "unauthorized"}, 401)
-    assigned = _ct_team_lids(team["id"]) if team else None     # scope to THIS team's apartments
+    assigned = _ct_team_lids(team["id"])                       # scope to THIS team's apartments
     plan = await asyncio.to_thread(_oujact_dispatch_plan, True, assigned)
     start = (request.query.get("start") or "").strip()
     eta = {"available": False, "reason": "no_start", "legs": [], "total_drive_min": None}
@@ -39639,13 +39702,23 @@ async def _api_cleaning_template_save(request):
     return _json({"ok": True, "template": tpl})
 
 async def _api_cleaning_photo_file(request):
+    dash_ok = _dash_auth(request)
     route_ok = _oujact_route_auth(request)
-    if not (route_ok or _dash_auth(request)):
+    if not (route_ok or dash_ok):
         return _json({"error": "unauthorized"}, 401)
     pid = (request.query.get("photo_id") or "").strip()
     photo = _cleaning_report_photos.get(pid)
     if not photo or photo.get("status") == "removed":
         return _json({"error": "not found"}, 404)
+    if route_ok and not dash_ok:
+        # Team tokens only see photos of THEIR OWN apartments.
+        team = _ct_team_by_token(request.query.get("token", ""))
+        try:
+            owns = team is not None and int(photo.get("apartment_id")) in _ct_team_lids(team["id"])
+        except (TypeError, ValueError):
+            owns = False
+        if not owns:
+            return _json({"error": "forbidden"}, 403)
     path = photo.get("local_path") or ""
     if path and os.path.exists(path):
         return web.FileResponse(path, headers={"Content-Type": photo.get("mime_type") or "application/octet-stream"})
@@ -41302,12 +41375,103 @@ async def _api_gw_sync(request):
     res = await asyncio.to_thread(_gw_sync, True)
     return _json(res)
 
+# ===================== Stage-1 security: role enforcement + headers =====================
+# Mutating /api/ endpoints are matched to a permission tab; the middleware rejects the
+# request with 403 BEFORE the handler runs unless the session may write to that tab.
+# Endpoints with their own auth (team tokens, shared secrets, public forms) are exempt.
+_ROLE_EXEMPT_WRITES = {
+    "/api/auth/login", "/api/auth/logout",   # the login flow itself
+    "/api/expenses/ingest",                  # shared-secret auth (Google Apps Script)
+    "/api/stay/event",                       # public website analytics beacon
+    "/api/clean-feedback",                   # public guest feedback form (token in body)
+    "/api/oujact/photo-upload",              # cleaning-team token auth
+    "/api/oujact/report-submit",             # cleaning-team token auth
+    "/api/oujact/status",                    # team token OR dashboard session
+}
+_ROLE_WRITE_RULES = [
+    # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
+    ("/api/pricing/strategy-toggle", "strat"),
+    ("/api/strategy/", "strat"),
+    ("/api/pricing", "pricing"),             # /api/pricing/* and /api/pricing2/*
+    ("/api/events/", "pricing"),
+    ("/api/discount/", "pricing"),
+    ("/api/plab/", "plab"),
+    ("/api/teach", "learn"),
+    ("/api/learning/", "learn"),
+    ("/api/send", "inbox"),
+    ("/api/reject", "inbox"),
+    ("/api/claim", "inbox"),
+    ("/api/apply", "inbox"),
+    ("/api/listings/", "listings"),
+    ("/api/oujact/", "cleanteams"),
+    ("/api/cleaning/teams", "cleanteams"),
+    ("/api/cleaning/assign", "cleanteams"),
+    ("/api/cleaning/clear-early", "cleanteams"),
+    ("/api/cleaning/import-", "cleanteams"),
+    ("/api/cleaning/report", "clean_center"),
+    ("/api/cleaning/template-save", "clean_center"),
+    ("/api/cleaning/task", "clean_center"),
+    ("/api/cleaning/", "clean"),
+    ("/api/guests/", "guests"),
+    ("/api/tickets/", "tickets"),
+    ("/api/reviews/", "reviews"),
+    ("/api/users/", "users"),
+    ("/api/quotes/", "quote"),
+    ("/api/weekly/", "weekly"),
+    ("/api/expenses/", "expenses"),
+    ("/api/finance/", "finance"),
+    ("/api/fb/", "fb"),
+    ("/api/design/", "design"),
+    ("/api/pmo/", "pmo"),
+    ("/api/gw/", "gw"),
+]
+
+@web.middleware
+async def _role_enforce_mw(request, handler):
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        p = request.path
+        if p.startswith("/api/") and p not in _ROLE_EXEMPT_WRITES:
+            matched = False
+            for prefix, tab in _ROLE_WRITE_RULES:
+                if p.startswith(prefix):
+                    matched = True
+                    if not _user_can(request, tab, "write"):
+                        return _json({"error": "forbidden",
+                                      "detail": "write access to '" + tab + "' required"}, 403)
+                    break
+            if not matched and not _dash_auth(request):
+                # Unmapped future write endpoints still require at least a login.
+                return _json({"error": "unauthorized"}, 401)
+    return await handler(request)
+
+@web.middleware
+async def _security_headers_mw(request, handler):
+    resp = await handler(request)
+    try:
+        h = resp.headers
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        ct = (h.get("Content-Type") or "")
+        if "text/html" in ct:
+            h.setdefault("Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "img-src 'self' https: data: blob:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+    except Exception:
+        pass
+    return resp
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
     if _web_runner is not None or not _HAS_AIOHTTP:
         return
-    app = web.Application()
+    app = web.Application(middlewares=[_security_headers_mw, _role_enforce_mw])
     app.router.add_get("/", _handle_health)                 # health check / browser test
     app.router.add_post("/hook/{secret}", _handle_hook)     # Hostaway posts here
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
@@ -42008,6 +42172,12 @@ def load_state():
         for k, v in (_load_json("users.json", {}) or {}).items():
             if isinstance(v, dict) and v.get("id"):
                 _users[str(k)] = v
+        # Sessions survive a redeploy (pruned by TTL on load + on every save).
+        _sessions.clear()
+        _now_ts = time.time()
+        for k, v in (_load_json("sessions.json", {}) or {}).items():
+            if isinstance(v, dict) and v.get("user_id") and v.get("expires_at", 0) > _now_ts:
+                _sessions[str(k)] = v
         # First-run bootstrap: if no admin user exists, auto-create one
         # using the legacy DASHBOARD_TOKEN as the password. Username is
         # "admin". This guarantees the owner can always log in even if
