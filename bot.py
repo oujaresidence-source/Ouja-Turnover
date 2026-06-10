@@ -12452,10 +12452,17 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <script>
         /* Cast into the standalone investor deck: a gold bloom sweeps the ops UI,
-           then we navigate to /invest, which fades in from the same dark curtain. */
-        function castToInvest(){
+           then we navigate to /invest. The deck is token-gated and dashboard auth is
+           localStorage (not cookies), so a bare navigation would hit the denial page —
+           resolve the tokenized URL from the API FIRST, then sail. */
+        async function castToInvest(){
+          var url='/invest';
           try{
-            var url='/invest';
+            var r = await api('/api/invest/link');
+            if(r && r.ok && r.url) url = r.url;
+            else { toast(L==='ar' ? 'ما قدرت أجيب رابط المستثمرين — جرّب من تبويب المستخدمين' : 'Could not resolve the investor link — try the Users tab'); return; }
+          }catch(e){ toast(L==='ar' ? 'تعذّر الوصول لرابط المستثمرين' : 'Investor link unavailable'); return; }
+          try{
             var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
             if(reduce){ window.location.href=url; return; }
             var ov=document.createElement('div');
@@ -12465,7 +12472,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             var a=ov.animate([{opacity:0},{opacity:1}],{duration:460,easing:'cubic-bezier(0.23,1,0.32,1)',fill:'forwards'});
             a.onfinish=function(){ window.location.href=url; };
             setTimeout(function(){ window.location.href=url; }, 720);
-          }catch(e){ window.location.href='/invest'; }
+          }catch(e){ window.location.href=url; }
         }
         </script>
         <div class="page-help" id="ph_home" data-help-key="home">
@@ -19765,7 +19772,7 @@ async function loadInvestLink(){
     +'<code class="num" style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:11px;direction:ltr;max-width:100%;overflow-x:auto;white-space:nowrap">'+esc(location.origin+r.url)+'</code>'
     +'<button class="btn ghost sm" data-copy="'+esc(location.origin+r.url)+'" onclick="_rvCopy(this)">📋 '+t().inv_link_copy+'</button>'
     +'<button class="btn ghost sm" onclick="window.open(&#39;'+esc(r.url)+'&#39;,&#39;_blank&#39;)">👁 '+t().inv_link_open+'</button>'
-    +'<button class="btn ghost sm" onclick="investLinkRegen()">⟳ '+t().inv_link_regen+'</button>'
+    +(r.can_regenerate?('<button class="btn ghost sm" onclick="investLinkRegen()">⟳ '+t().inv_link_regen+'</button>'):'')
     +'</div>';
 }
 async function investLinkRegen(){
@@ -32241,14 +32248,15 @@ async def _handle_invest(request):
     return web.Response(text=_render_invest_html(), content_type="text/html")
 
 async def _api_invest_link(request):
-    """Admin-only: the investor link (GET → current URL + meta; POST {action:'regenerate'}).
-    The owner copies the link from here — never hand-builds URLs."""
+    """The investor link. GET → current URL + meta (any logged-in dashboard session —
+    the home-page deck button and the Users card both read it). POST regenerate →
+    ADMIN ONLY, server-side. The owner copies the link from here — never hand-builds URLs."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    # explicit admin enforcement (server-side, not hidden buttons)
-    if not _user_can(request, "users", "write"):
-        return _json({"error": "forbidden — admin only"}, 403)
     if request.method == "POST":
+        # regeneration kills every previously shared link — admin only, enforced here
+        if not _user_can(request, "users", "write"):
+            return _json({"error": "forbidden — admin only"}, 403)
         b = await _read_body(request)
         if (b.get("action") or "") == "regenerate":
             _invest_token_regenerate(_req_actor(request))
@@ -32258,7 +32266,8 @@ async def _api_invest_link(request):
     return _json({"ok": True, "url": "/invest?token=" + tok,
                   "source": _invest_link.get("source"),
                   "created_at": _invest_link.get("created_at"),
-                  "regens": len(_invest_link.get("regen_log") or [])})
+                  "regens": len(_invest_link.get("regen_log") or []),
+                  "can_regenerate": _user_can(request, "users", "write")})
 
 async def _api_pricing_detail(request):
     if not _dash_auth(request):
