@@ -13902,6 +13902,11 @@ const T = {
     pr_inq_none_sub:'يتعبأ تلقائياً كل ليلة من أرشيف المحادثات، أو اضغط «حدّث التحليل».',
     pr_inq_note:'استفسارات سعر/توفّر ما تبعها حجز خلال ١٤ يوم — الأسعار هي اللي ذكرها الفريق (قد يكون السقف الحقيقي أعلى).',
     pr_inq_seg:'الشريحة', pr_inq_month:'الشهر', pr_inq_n:'عدد', pr_inq_band:'نطاق السعر المذكور',
+    dna_title:'بصمة السعر', dna_building:'البيانات تُبنى بالخلفية — ثواني وتجهز.',
+    dna_none:'ما فيه ملف سعري بعد', dna_none_sub:'هالشقة ما عندها حجوزات كافية ولا شريحة مشابهة — بيتكوّن ملفها مع أول حجوزات.',
+    dna_explain:'هذي الأرقام الحقيقية من حجوزات مؤكدة: «الأساس» وسيط السعر المتحقق، «الذروة» سعر الليالي القوية (p90)، «الأرضية» = الأساس ×٠٫٧٥ مع حد أدنى للفئة — الأرضية تُحسب من الأساس، أبداً مو من الذروة.',
+    dna_censored:'ملاحظة صدق: هذي أسعار قبلها الضيوف فعلاً — السقف الحقيقي ممكن يكون أعلى. نتعلمه لاحقاً بالاستكشاف وتحليل «سألوا وما حجزوا».',
+    dna_refresh:'تحديث',
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
@@ -14212,6 +14217,11 @@ const T = {
     pr_inq_none_sub:'Fills nightly from the conversation archive, or press “Refresh analysis”.',
     pr_inq_note:'Price/availability asks with NO booking within 14 days — prices are what the TEAM quoted (the true ceiling may be higher).',
     pr_inq_seg:'Segment', pr_inq_month:'Month', pr_inq_n:'Count', pr_inq_band:'Quoted price band',
+    dna_title:'Price DNA', dna_building:'Building in the background — ready in seconds.',
+    dna_none:'No price profile yet', dna_none_sub:'Not enough bookings for this unit and no similar segment — its profile forms with its first bookings.',
+    dna_explain:'Real numbers from confirmed bookings: Base = median achieved rate, Peak = proven busy-night price (p90), Floor = base ×0.75 clamped to the tier minimum — floors derive from BASE, never from peak.',
+    dna_censored:'Honesty note: these are prices guests ACCEPTED — the true ceiling may be higher. We learn it later via exploration + the asked-but-didn’t-book analysis.',
+    dna_refresh:'Refresh',
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
@@ -15942,9 +15952,56 @@ function renderPricingTable(){
       +'<td style="'+td+'" class="num muted">'+(s.floor!=null?fmt(s.floor):'—')+'</td>'
       +'<td style="'+td+'" class="num muted">'+(s.ceiling!=null?fmt(s.ceiling):'—')+'</td>'
       +'<td style="'+td+'" class="num muted">'+(s.occupancy_7!=null?(s.occupancy_7+'%'):'—')+'</td>'
-      +'<td style="'+td+';text-align:end" class="chev">'+(ar?'‹':'›')+'</td></tr>';
+      +'<td style="'+td+';text-align:end;white-space:nowrap"><button class="btn ghost xs" onclick="event.stopPropagation();openDnaPanel('+lid+')" title="'+(ar?'بصمة السعر — أرقام حقيقية من حجوزات هالشقة':'Price DNA — real numbers from this unit’s bookings')+'">DNA</button> <span class="chev">'+(ar?'‹':'›')+'</span></td></tr>';
   }).join('');
   body.innerHTML=bar+'<div style="overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface)"><table style="width:100%;border-collapse:collapse;font-size:13.5px">'+head+rows+'</table></div>';
+}
+/* ===== C-1: Price DNA panel — read-only truth from real bookings ===== */
+async function openDnaPanel(lid){
+  var ar=(L==='ar');
+  openDrawer(t().dna_title,'');
+  setDrawerBody('<div class="empty sk">—</div>');
+  var r; try{ r=await api('/api/pricing/price-dna?lid='+encodeURIComponent(lid)); }catch(_){ r=null; }
+  if(!r || r.building && !r.unit){
+    setDrawerBody('<div class="empty" style="padding:26px;text-align:center">'+t().dna_building+'</div>'
+      +'<div style="text-align:center"><button class="btn ghost sm" onclick="openDnaPanel('+lid+')">↻ '+(ar?'تحقق مرة ثانية':'Check again')+'</button></div>');
+    return;
+  }
+  var u=r.unit;
+  if(!u || !u.by_cell || !Object.keys(u.by_cell).length){
+    setDrawerBody(emptyState(t().dna_none, t().dna_none_sub,'—'));
+    return;
+  }
+  setDrawerTitle(t().dna_title, (u.name||'')+' · '+(ar?'شريحة ':'segment ')+u.segment);
+  var CONF={own:[ar?'من حجوزاتها':'own data','var(--green)'],blended:[ar?'مزيج':'blended','var(--blue,#2f5f7a)'],pooled:[ar?'من الشريحة':'pooled','var(--gold)'],learning:[ar?'يتعلم':'learning','var(--mut)']};
+  var SEASON={normal:ar?'عادي':'normal',riyadh_season:ar?'موسم الرياض':'Riyadh Season',ramadan:ar?'رمضان':'Ramadan',eid_fitr:ar?'عيد الفطر':'Eid al-Fitr',eid_adha:ar?'عيد الأضحى':'Eid al-Adha',hajj:ar?'الحج':'Hajj',national_day:ar?'اليوم الوطني':'National Day',founding_day:ar?'يوم التأسيس':'Founding Day'};
+  var DT={weekday:ar?'أيام الأسبوع':'Weekdays',weekend:ar?'نهاية الأسبوع':'Weekend',event:ar?'مناسبات':'Events'};
+  var h='<div class="muted" style="font-size:11.5px;line-height:1.7;margin-bottom:12px">'+t().dna_explain+'</div>';
+  // how the unit books
+  h+='<div class="dr-grid">'
+    +'<div class="dr-field"><div class="l">'+(ar?'وسيط مدة الحجز المسبق':'Median booking lead')+'</div><div class="v num">'+(u.lead_time_median!=null?(u.lead_time_median+(ar?' يوم':' days')):'—')+'</div></div>'
+    +'<div class="dr-field"><div class="l">'+(ar?'الحد الأدنى للفئة':'Tier minimum')+'</div><div class="v num">'+fmt(u.tier_min)+' SAR</div></div>'
+    +'<div class="dr-field full"><div class="l">'+(ar?'مزيج القنوات':'Channel mix')+'</div><div class="v" style="font-size:12px">'
+    +Object.keys(u.channel_mix||{}).slice(0,4).map(function(c){ return esc(c)+' '+Math.round((u.channel_mix[c]||0)*100)+'%'; }).join(' · ')
+    +' <span class="muted">('+(ar?'متوسط عمولة ':'avg fee ')+u.channel_fee_pct_mix+'%)</span></div></div></div>';
+  // the three numbers per dtype×season — only cells that exist
+  var order=['weekday|normal','weekend|normal','weekday|riyadh_season','weekend|riyadh_season','event|normal','weekday|ramadan','weekend|ramadan'];
+  var keys=Object.keys(u.by_cell); keys.sort(function(a,b){ var ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); });
+  h+='<div style="overflow-x:auto;margin-top:6px"><table class="data"><thead><tr><th>'+(ar?'الخلية':'Cell')+'</th><th class="num">'+(ar?'الأساس':'Base')+'</th><th class="num">'+(ar?'الذروة':'Peak')+'</th><th class="num">'+(ar?'الأرضية':'Floor')+'</th><th class="num">n</th><th>'+(ar?'الثقة':'Confidence')+'</th></tr></thead><tbody>';
+  keys.forEach(function(k){
+    var c=u.by_cell[k]; var p=k.split('|');
+    var cf=CONF[c.confidence]||CONF.learning;
+    h+='<tr><td style="font-size:12px">'+esc((DT[p[0]]||p[0])+' · '+(SEASON[p[1]]||p[1]))+'</td>'
+      +'<td class="num"><b>'+fmt(c.base)+'</b> <span class="muted" style="font-size:10px">'+(ar?'صافي ':'net ')+fmt(c.base_net)+'</span></td>'
+      +'<td class="num">'+fmt(c.peak)+'</td><td class="num">'+fmt(c.floor)+'</td>'
+      +'<td class="num">'+c.n+'</td>'
+      +'<td><span class="pill" style="color:'+cf[1]+'">'+cf[0]+(c.source&&c.source.indexOf('pool')===0?(' · '+esc(u.segment)):'')+'</span></td></tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div class="muted" style="font-size:11px;line-height:1.7;margin-top:12px;background:var(--surface-2);border-radius:10px;padding:10px 12px">'+t().dna_censored+'</div>';
+  setDrawerBody(h);
+  setDrawerFoot('<button class="btn ghost sm" onclick="api(&#39;/api/pricing/price-dna?refresh=1&#39;).then(function(){toast(&#39;⟳&#39;)})">⟳ '+t().dna_refresh+'</button>'
+    +'<button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
 }
 async function pccOpenCalendar(lid, monthIso){
   _prCal.lid=lid;
@@ -26436,10 +26493,16 @@ def _pe_build_dataset(reservations, units, today):
     today_iso = today.isoformat()
     nights = []
     n_conf = n_neg = n_used = 0
+    n_acc_components = n_acc_derived = 0      # DNA: how accommodation-only rate was obtained
+    status_kept = {}
+    status_dropped = {}
     wd_adr = {i: [] for i in range(7)}
     for r in reservations:
-        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+        st = (r.get("status") or "").lower()
+        if st not in CONFIRMED_STATUSES:
+            status_dropped[st or "?"] = status_dropped.get(st or "?", 0) + 1
             continue
+        status_kept[st] = status_kept.get(st, 0) + 1
         n_conf += 1
         ci = _parse_date(r.get("arrivalDate"))
         rd = _parse_date(r.get("reservationDate"))
@@ -26453,6 +26516,22 @@ def _pe_build_dataset(reservations, units, today):
             continue
         n_used += 1
         adr = tp / nn
+        # DNA: accommodation-only nightly rate — strip cleaning/tax fees when Hostaway
+        # provides the components; else the gross ADR is used and counted as 'derived'.
+        fees = 0.0
+        had_components = False
+        for fk in ("cleaningFee", "totalTax", "cityTax", "securityDepositFee"):
+            fv = r.get(fk)
+            if isinstance(fv, (int, float)) and fv > 0:
+                fees += float(fv)
+                had_components = True
+        acc_total = tp - fees
+        if had_components and acc_total > 0:
+            adr_acc = acc_total / nn
+            n_acc_components += 1
+        else:
+            adr_acc = adr
+            n_acc_derived += 1
         lid = r.get("listingMapId")
         grp = l2g.get(lid)                 # None if unit not in the active catalog
         chan = r.get("channelName") or "?"
@@ -26460,13 +26539,16 @@ def _pe_build_dataset(reservations, units, today):
             nd = ci + timedelta(days=i)
             dt, ev = _pe_date_type(nd)
             nights.append({"lid": lid, "group": grp, "date": nd.isoformat(), "dtype": dt,
-                           "event": ev, "adr": round(adr, 2), "lead": lead,
+                           "event": ev, "adr": round(adr, 2), "adr_acc": round(adr_acc, 2),
+                           "lead": lead, "los": nn,
                            "bucket": _pe_lead_bucket(lead), "channel": chan,
                            "arrival": ci.isoformat()})
             wd_adr[nd.weekday()].append(adr)
     wd_median = {i: (round(statistics.median(v)) if v else None) for i, v in wd_adr.items()}
     all_dates = [n["date"] for n in nights]
     return {"nights": nights, "n_confirmed": n_conf, "n_negative_lead": n_neg, "n_used": n_used,
+            "status_kept": status_kept, "status_dropped": status_dropped,
+            "acc_components_used": n_acc_components, "acc_derived": n_acc_derived,
             "wd_median_adr": wd_median, "groups_lid": l2g, "group_units": g2l,
             "n_groups": len(g2l), "n_units": len(l2u),
             "date_min": min(all_dates) if all_dates else None,
@@ -26612,6 +26694,302 @@ def _pe_get(force=False, ttl=86400):
         _pe_cache["error"] = str(e)
         print("pricing-engine v2 build error:", e)
     return _pe_cache
+
+# ===================== C-1: PRICE DNA — the truth layer (READ-ONLY) =====================
+# Teaches the system what every apartment ACTUALLY books at, from real reservations.
+# Zero price writes anywhere in this layer. Consumed later by the C-2 brain.
+#
+# Saudi calendar: a MAINTAINED LOOKUP TABLE (Umm al-Qura-based, 2024–2028) rather than a
+# hijri-conversion pip dependency — deterministic on Railway, covers the full DNA window
+# (24 months back → 18 months ahead), and tags ONLY (uplifts are learned, never hard-coded).
+_DNA_SEASONS = [
+    # (tag, start_iso, end_iso) — priority = list order (first match wins)
+    ("eid_fitr",  "2024-04-10", "2024-04-13"), ("eid_fitr",  "2025-03-30", "2025-04-02"),
+    ("eid_fitr",  "2026-03-20", "2026-03-23"), ("eid_fitr",  "2027-03-09", "2027-03-12"),
+    ("eid_adha",  "2024-06-16", "2024-06-19"), ("eid_adha",  "2025-06-06", "2025-06-09"),
+    ("eid_adha",  "2026-05-27", "2026-05-30"), ("eid_adha",  "2027-05-16", "2027-05-19"),
+    ("hajj",      "2024-06-14", "2024-06-15"), ("hajj",      "2025-06-04", "2025-06-05"),
+    ("hajj",      "2026-05-25", "2026-05-26"), ("hajj",      "2027-05-14", "2027-05-15"),
+    ("ramadan",   "2024-03-11", "2024-04-09"), ("ramadan",   "2025-03-01", "2025-03-29"),
+    ("ramadan",   "2026-02-18", "2026-03-19"), ("ramadan",   "2027-02-08", "2027-03-08"),
+    ("national_day", "2024-09-23", "2024-09-23"), ("national_day", "2025-09-23", "2025-09-23"),
+    ("national_day", "2026-09-23", "2026-09-23"), ("national_day", "2027-09-23", "2027-09-23"),
+    ("founding_day", "2024-02-22", "2024-02-22"), ("founding_day", "2025-02-22", "2025-02-22"),
+    ("founding_day", "2026-02-22", "2026-02-22"), ("founding_day", "2027-02-22", "2027-02-22"),
+]
+# Riyadh Season window (configurable, recurs annually Oct→Mar by default)
+_DNA_RIYADH_SEASON = os.environ.get("DNA_RIYADH_SEASON", "10-15:03-15")
+
+def _dna_season(d):
+    """Season tag for a date (first matching specific window, else riyadh_season in its
+    annual window, else 'normal'). Tags only — never multipliers."""
+    iso = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
+    for tag, s, e in _DNA_SEASONS:
+        if s <= iso <= e:
+            return tag
+    try:
+        start_md, end_md = _DNA_RIYADH_SEASON.split(":")
+        md = iso[5:]
+        if start_md > end_md:        # wraps the new year (Oct → Mar)
+            if md >= start_md or md <= end_md:
+                return "riyadh_season"
+        elif start_md <= md <= end_md:
+            return "riyadh_season"
+    except Exception:
+        pass
+    return "normal"
+
+def _dna_tier_min(beds):
+    """Configurable strategic minimum per bedroom tier (DNA_TIER_MIN env JSON,
+    e.g. {"0":140,"1":170,"2":220,"default":150}). The '1000→300 can never happen'
+    rule: floors derive from BASE × 0.75 and clamp to this — never from peak."""
+    try:
+        cfg = json.loads(os.environ.get("DNA_TIER_MIN", "") or "{}")
+    except Exception:
+        cfg = {}
+    default = int(cfg.get("default", 120))
+    try:
+        return int(cfg.get(str(int(beds)), default))
+    except (TypeError, ValueError):
+        return default
+
+def _dna_channel_fee(channel):
+    """Channel-fee %, configurable via DNA_CHANNEL_FEE_PCT env JSON. Matched loosely
+    against live channelName values; observed channels are reported in the dataset so
+    the owner can verify/correct the map."""
+    try:
+        cfg = json.loads(os.environ.get("DNA_CHANNEL_FEE_PCT", "") or "{}")
+    except Exception:
+        cfg = {}
+    base = {"airbnb": 15.0, "booking": 15.0, "direct": 0.0, "default": 15.0}
+    base.update({str(k).lower(): float(v) for k, v in cfg.items()})
+    cl = str(channel or "").lower()
+    for k, v in base.items():
+        if k != "default" and k in cl:
+            return v
+    return base["default"]
+
+def _dna_percentile(sorted_vals, p):
+    if not sorted_vals:
+        return None
+    k = (len(sorted_vals) - 1) * p
+    f = int(k)
+    c = min(f + 1, len(sorted_vals) - 1)
+    return sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f)
+
+def _dna_clean_rates(rates, unit_median):
+    """Winsorize top/bottom 5% ONLY when n ≥ 20; thinner cells get rule-based removal
+    only (rate < 50 SAR or > 4× unit median). Returns the cleaned list."""
+    vals = sorted(float(v) for v in rates if isinstance(v, (int, float)) and v > 0)
+    if not vals:
+        return []
+    if len(vals) >= 20:
+        lo = _dna_percentile(vals, 0.05)
+        hi = _dna_percentile(vals, 0.95)
+        return [min(max(v, lo), hi) for v in vals]
+    um = unit_median or 0
+    return [v for v in vals if v >= 50 and (not um or v <= 4 * um)]
+
+def _dna_build(pe):
+    """PURE pass over the PE dataset (no second reservation pull). Per unit:
+    by-cell {dtype×season: base/peak/floor (+net), n, confidence, source}, channel mix,
+    lead-time median, segment + pooled-with, coverage stats."""
+    import statistics as _st
+    data = pe.get("data") or {}
+    nights = data.get("nights") or []
+    l2g, g2l, l2u = _pe_groups()
+    today = datetime.now(TZ).date()
+    w_min = (today - timedelta(days=730)).isoformat()     # arrivals 24 months back
+    w_max = (today + timedelta(days=548)).isoformat()     # → 18 months ahead
+    # ---- collect per-unit and per-segment cell rates ----
+    unit_rates = defaultdict(list)        # lid -> all acc rates (for unit median)
+    cell_rates = defaultdict(list)        # (lid, dtype, season) -> [acc rates]
+    seg_rates = defaultdict(list)         # (segment, dtype, season) -> [acc rates]
+    port_rates = defaultdict(list)        # (dtype, season) -> [acc rates] (portfolio fallback)
+    unit_channels = defaultdict(lambda: defaultdict(int))
+    unit_leads = defaultdict(list)
+    seg_leads = defaultdict(list)
+    observed_channels = {}
+    def seg_of(lid):
+        u = l2u.get(lid) or {}
+        g = l2g.get(lid) or "—"
+        beds = u.get("beds")
+        return f"{g}|{beds if beds is not None else '?'}"
+    kept = dropped_window = 0
+    for n in nights:
+        lid = n.get("lid")
+        if lid is None:
+            continue
+        if not (w_min <= n.get("arrival", n.get("date", "")) <= w_max):
+            dropped_window += 1
+            continue
+        kept += 1
+        rate = n.get("adr_acc", n.get("adr"))
+        d = _parse_date(n.get("date"))
+        season = _dna_season(d) if d else "normal"
+        dtype = "weekend" if n.get("dtype") == "weekend" else ("weekday" if n.get("dtype") == "weekday" else "event")
+        unit_rates[lid].append(rate)
+        cell_rates[(lid, dtype, season)].append(rate)
+        seg_rates[(seg_of(lid), dtype, season)].append(rate)
+        port_rates[(dtype, season)].append(rate)
+        ch = n.get("channel") or "?"
+        unit_channels[lid][ch] += 1
+        unit_leads[lid].append(n.get("lead") or 0)
+        seg_leads[seg_of(lid)].append(n.get("lead") or 0)
+        observed_channels[ch] = observed_channels.get(ch, 0) + 1
+    K = 10                                                  # shrinkage constant
+    units_out = {}
+    cov = {"own": 0, "blended": 0, "pooled": 0, "learning": 0}
+    for lid, u in l2u.items():
+        um = _st.median(unit_rates[lid]) if unit_rates.get(lid) else None
+        beds = u.get("beds")
+        tier_min = _dna_tier_min(beds)
+        seg = seg_of(lid)
+        chans = unit_channels.get(lid) or {}
+        total_ch = sum(chans.values()) or 1
+        mix = {c: round(v / total_ch, 3) for c, v in sorted(chans.items(), key=lambda x: -x[1])}
+        fee_mix = sum(_dna_channel_fee(c) * share for c, share in mix.items()) if mix else _dna_channel_fee(None)
+        cells = {}
+        for dtype in ("weekday", "weekend", "event"):
+            for season in ("normal", "riyadh_season", "ramadan", "eid_fitr", "eid_adha",
+                           "hajj", "national_day", "founding_day"):
+                own_raw = cell_rates.get((lid, dtype, season)) or []
+                own = _dna_clean_rates(own_raw, um)
+                seg_raw = seg_rates.get((seg, dtype, season)) or []
+                segv = _dna_clean_rates(seg_raw, um)
+                n_own, n_seg = len(own), len(segv)
+                if n_own == 0 and n_seg == 0:
+                    pv = _dna_clean_rates(port_rates.get((dtype, season)) or [], um)
+                    if not pv:
+                        continue                       # no data anywhere → no cell (never fabricate)
+                    base = _st.median(pv)
+                    src, conf = "portfolio", "learning"
+                    n_used = len(pv)
+                elif n_own >= 8:
+                    base = _st.median(own)
+                    src, conf = "own", "own"
+                    n_used = n_own
+                else:
+                    w = n_own / (n_own + K)
+                    own_med = _st.median(own) if own else 0
+                    seg_med = _st.median(segv) if segv else None
+                    if seg_med is None:
+                        if not own:
+                            continue
+                        base = own_med
+                        src, conf = "own_thin", "blended"
+                    else:
+                        base = w * own_med + (1 - w) * seg_med if own else seg_med
+                        src = f"blend({seg})" if own else f"pooled({seg})"
+                        conf = "blended" if own else "pooled"
+                    n_used = n_own + n_seg
+                pool = sorted(own if conf == "own" else (own + segv if (own or segv) else pv))
+                peak = _dna_percentile(pool, 0.90) if pool else base * 1.25
+                base = round(base)          # the owner must be able to verify floor = base×0.75 by hand
+                floor = max(round(0.75 * base), tier_min)
+                net = lambda v: round(v * (1 - fee_mix / 100.0))
+                cells[f"{dtype}|{season}"] = {
+                    "base": int(base), "peak": round(peak), "floor": int(floor),
+                    "base_net": net(base), "peak_net": net(peak), "floor_net": net(floor),
+                    "n": int(n_own), "n_used": int(n_used),
+                    "confidence": conf, "source": src,
+                }
+                cov[conf] = cov.get(conf, 0) + 1
+        lead_med = int(_st.median(unit_leads[lid])) if unit_leads.get(lid) else None
+        seg_lead = int(_st.median(seg_leads[seg])) if seg_leads.get(seg) else None
+        units_out[str(lid)] = {
+            "lid": lid, "name": u.get("name"), "segment": seg, "bedrooms": beds,
+            "tier_min": tier_min, "channel_mix": mix, "channel_fee_pct_mix": round(fee_mix, 1),
+            "lead_time_median": lead_med, "segment_lead_median": seg_lead,
+            "by_cell": cells,
+            "pickup_curve_ref": f"{l2g.get(lid)}||",     # join with dtype for _pe pace keys
+            "profile": ("none" if not cells else
+                        ("own" if any(c["confidence"] == "own" for c in cells.values())
+                         else ("blended" if any(c["confidence"] == "blended" for c in cells.values())
+                               else ("pooled" if any(c["confidence"] == "pooled" for c in cells.values())
+                                     else "learning")))),
+        }
+    total_cells = sum(cov.values()) or 1
+    return {
+        "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        "window": {"from": w_min, "to": w_max},
+        "nights_kept": kept, "nights_outside_window": dropped_window,
+        "status_kept": data.get("status_kept"), "status_dropped": data.get("status_dropped"),
+        "acc_components_used": data.get("acc_components_used"),
+        "acc_derived": data.get("acc_derived"),
+        "observed_channels": observed_channels,
+        "coverage": {k: {"cells": v, "pct": round(v * 100 / total_cells)} for k, v in cov.items()},
+        "units": units_out,
+        "season_source": "Umm al-Qura lookup table 2024–2028 (in-code; tags only, uplifts learned)",
+    }
+
+_dna_cache = {"data": None, "ts": 0, "running": False}
+
+def _dna_get(force=False, ttl=6 * 3600):
+    """Cached DNA (built from _pe_get's dataset — no extra API pulls)."""
+    if (not force) and _dna_cache["data"] and (time.time() - _dna_cache["ts"] < ttl):
+        return _dna_cache["data"]
+    pe = _pe_get()           # cached 24h; the burst-rebuild keeps it fresh
+    try:
+        _dna_cache["data"] = _dna_build(pe)
+        _dna_cache["ts"] = time.time()
+        _save_json("price_dna.json", {"generated_at": _dna_cache["data"]["generated_at"],
+                                      "coverage": _dna_cache["data"]["coverage"]})
+    except Exception as e:
+        print("price-dna build error:", e)
+    return _dna_cache["data"]
+
+def _dna_cell_for(lid, d):
+    """The DNA cell for one (unit, date) — used by C-2. Returns (cell, unit) or (None, unit)."""
+    dna = _dna_cache.get("data")
+    if not dna:
+        return None, None
+    u = (dna.get("units") or {}).get(str(lid))
+    if not u:
+        return None, None
+    dt, _ev = _pe_date_type(d)
+    dtype = "weekend" if dt == "weekend" else ("weekday" if dt == "weekday" else "event")
+    season = _dna_season(d)
+    cell = (u.get("by_cell") or {}).get(f"{dtype}|{season}")
+    if cell is None:        # graceful fallback: same dtype, normal season
+        cell = (u.get("by_cell") or {}).get(f"{dtype}|normal")
+    return cell, u
+
+async def _api_price_dna(request):
+    """READ-ONLY Price DNA. ?lid= for one unit; ?refresh=1 kicks a background rebuild
+    (the GET itself always serves the cache — heavy work never blocks a page load)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.query.get("refresh") == "1" and not _dna_cache["running"]:
+        _dna_cache["running"] = True
+        async def _run():
+            try:
+                await asyncio.to_thread(_dna_get, True)
+            finally:
+                _dna_cache["running"] = False
+        asyncio.create_task(_run())
+    data = _dna_cache.get("data")
+    if data is None:
+        # first call ever: build in the background, tell the client to poll
+        if not _dna_cache["running"]:
+            _dna_cache["running"] = True
+            async def _boot():
+                try:
+                    await asyncio.to_thread(_dna_get, True)
+                finally:
+                    _dna_cache["running"] = False
+            asyncio.create_task(_boot())
+        return _json({"ok": True, "building": True, "data": None})
+    lid = request.query.get("lid")
+    if lid:
+        u = (data.get("units") or {}).get(str(lid))
+        return _json({"ok": True, "building": _dna_cache["running"],
+                      "generated_at": data.get("generated_at"),
+                      "unit": u, "found": bool(u)})
+    slim = dict(data)
+    slim["units"] = {k: {kk: vv for kk, vv in v.items() if kk != "by_cell"}
+                     for k, v in (data.get("units") or {}).items()}
+    return _json({"ok": True, "building": _dna_cache["running"], "data": slim})
 
 # ---- Stage 3: pace + recommendation engine (per upcoming open night, per unit) ----
 _pe_floor_overrides = {}     # optional {lid: absolute SAR floor} the owner can set; default none
@@ -41604,6 +41982,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing/calendar", _api_pricing_calendar)   # per-unit month calendar (read-only)
         app.router.add_post("/api/pricing/refresh-listing", _api_pricing_refresh_listing)  # re-read one apartment from Hostaway
         app.router.add_post("/api/pricing/rebuild", _api_pricing_rebuild)   # manual dataset rebuild (24h TTL override)
+        app.router.add_get("/api/pricing/price-dna", _api_price_dna)                      # C-1 truth layer (read-only)
         app.router.add_get("/api/pricing/inquiry-mining", _api_inquiry_mining)            # B.3 read-only dataset
         app.router.add_get("/api/pricing/inquiry-mining/status", _api_inquiry_mining_status)
         app.router.add_post("/api/pricing/inquiry-mining/run", _api_inquiry_mining_run)   # background pass
@@ -42063,6 +42442,11 @@ async def reviews_refresh_loop():
         _oujact_prune_done()    # daily safety net even when Discord sweeps don't run
     except Exception as e:
         print("oujact done-prune error:", e)
+    # C-1: nightly Price DNA rebuild — background, never page-load.
+    try:
+        await asyncio.to_thread(_dna_get, True)
+    except Exception as e:
+        print("dna nightly error:", e)
     # B.3: nightly inquiry-mining refresh (like Price DNA) — background, never page-load.
     try:
         gen = _parse_date(str(_inquiry_mining.get("generated_at") or "")[:10])
