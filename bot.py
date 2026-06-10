@@ -5948,10 +5948,21 @@ def distill_learnings():
             by_apt[int(lid)].append(e)
     # per-apartment
     distilled = 0
+    def _new_since(entries, last_distilled_ts):
+        """Entries newer than the last distillation. The old `len(entries) - prior_count`
+        check broke once the rolling log dropped old rows: len could sit BELOW the stored
+        count forever, freezing seasonal units out of updates permanently."""
+        if not last_distilled_ts:
+            return len(entries)
+        try:
+            last_iso = datetime.fromtimestamp(last_distilled_ts, TZ).isoformat(timespec="seconds")
+        except Exception:
+            return len(entries)
+        return sum(1 for e in entries if str(e.get("ts") or "") > last_iso)
     for lid, entries in by_apt.items():
         existing = _apartment_learnings.get(lid, {})
-        prior_count = existing.get("examples_count", 0)
-        if len(entries) - prior_count < LEARNING_MIN_NEW_EXAMPLES and existing.get("summary"):
+        if _new_since(entries, existing.get("last_distilled", 0)) < LEARNING_MIN_NEW_EXAMPLES \
+                and existing.get("summary"):
             continue                                    # not enough new material to re-spend tokens
         summary = _distill_apartment(lid, entries, existing.get("summary", ""))
         if summary and summary.strip():
@@ -5965,8 +5976,8 @@ def distill_learnings():
             log_event("guest", f"تعلّم محدّث · {entries[-1].get('unit','')} ({len(entries)} مثال)")
     # general
     all_entries = list(_learning_log)
-    prior_g = _general_learnings.get("examples_count", 0)
-    if len(all_entries) - prior_g >= LEARNING_MIN_NEW_EXAMPLES or not _general_learnings.get("summary"):
+    if _new_since(all_entries, _general_learnings.get("last_distilled", 0)) >= LEARNING_MIN_NEW_EXAMPLES \
+            or not _general_learnings.get("summary"):
         g_summary = _distill_general(all_entries, _general_learnings.get("summary", ""))
         if g_summary and g_summary.strip():
             _general_learnings["summary"] = g_summary.strip()
@@ -12418,6 +12429,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div id="revenueOpsSummary"></div>
         <div id="revDiag"></div>
+        <!-- WHY revenue moved — the drivers come BEFORE the totals -->
+        <div id="revWhy"></div>
         <!-- Hero KPI strip: this-month vs prior month -->
         <div class="kpis" id="revKpis"></div>
 
@@ -12833,6 +12846,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="fin-row2">
               <div><label>النظافة / Cleaning</label><select id="finCleanType" onchange="financeToggleCleanAmt();financeLoadReport()"><option value="ours">على عوجا / On us</option><option value="owner">المالك يدفع / Owner pays</option></select></div>
               <div><label>قيمة النظافة (شهري) / Cleaning (monthly)</label><input type="number" step="50" id="finCleanAmt" value="0" onchange="financeLoadReport()"></div>
+            </div>
+            <div class="fin-row2">
+              <div><label>التقريب / Rounding</label><select id="finRounding" onchange="financeLoadReport()"><option value="2">هللة (٢ عشرية) / Halalas</option><option value="0">ريال صحيح / Whole SAR</option></select></div>
+              <div><label>ضريبة على الإدارة % / VAT on mgmt %</label><input type="number" step="0.5" id="finVatPct" value="0" onchange="financeLoadReport()" title="0 = كل الأرقام صافية بدون ضريبة"></div>
             </div>
             <div class="fin-sec">حقول اختيارية (الفاضي يُخفى تلقائيًا)</div>
             <div class="fin-row"><label>اسم المستلم / Recipient</label><input id="finRecipient" oninput="financeRender()"></div>
@@ -15434,7 +15451,8 @@ function renderPricingHeader(){
     : '<div class="pr-kpi"><div class="pr-kpi-v" style="font-size:13px;font-weight:600;line-height:1.3">'+(L==='ar'?'لا بيانات بعد':'no data yet')+'</div><div class="pr-kpi-l">'+(L==='ar'?'نسبة الليالي المخفّضة المحجوزة — تظهر بعد تطبيق فعلي (مو تجربة)':'discounted-night hit rate — appears after real (non-dry) applies')+'</div></div>';
   var mbtns=_prMonths().map(function(mk){ return '<button class="btn ghost sm" onclick="applyMonth(&#39;'+mk+'&#39;)">📅 '+(L==='ar'?'طبّق ':'Apply ')+mk+'</button>'; }).join(' ');
   var imports='<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="pricingImportHostaway()">⬇ '+(L==='ar'?'استيراد قوائم من Hostaway':'Import from Hostaway')+'</button>'
-    +'<button class="btn ghost sm" onclick="pricingImportAirbnb()">⬇ '+(L==='ar'?'استيراد من Airbnb':'Import from Airbnb')+'</button></div>';
+    +'<button class="btn ghost sm" onclick="pricingImportAirbnb()">⬇ '+(L==='ar'?'استيراد من Airbnb':'Import from Airbnb')+'</button>'
+    +'<button class="btn ghost sm" onclick="peRebuildNow(this)" title="'+(L==='ar'?'يعيد بناء بيانات محرك التسعير الآن بدل انتظار التحديث اليومي':'Rebuilds the pricing-engine dataset now instead of waiting for the daily refresh')+'">⟳ '+(L==='ar'?'إعادة بناء البيانات':'Rebuild data')+'</button></div>';
   el.innerHTML='<div class="pr-an">'
     + kpi((a.activated_count||0)+'<span style="font-size:12px;font-weight:600;color:var(--mut)"> / '+(a.units||0)+'</span>', (L==='ar'?'شقق مفعّلة (قلت لها نعم)':'apartments activated'))
     + kpi((a.changed_this_month||0), (L==='ar'?'تغييرات مؤكّدة هذا الشهر':'confirmed changes (month)'))
@@ -15611,6 +15629,13 @@ async function pricingActivateCompound(comp){
   var r; try{ r=await post('/api/pricing/activate',{compound:comp,on:true}); }catch(_){ r=null; }
   if(r&&r.ok){ toast((L==='ar'?'فُعّل ':'Activated ')+r.count+(L==='ar'?' شقة':' units')); await loadPricing(); }
   else toast((r&&r.error)||'⚠');
+}
+async function peRebuildNow(btn){
+  if(btn){ btn.disabled=true; btn.textContent='⏳ '+(L==='ar'?'يُعاد البناء…':'Rebuilding…'); }
+  var r; try{ r=await post('/api/pricing/rebuild',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(r.already_running?(L==='ar'?'إعادة البناء شغّالة أصلاً':'Already rebuilding'):(L==='ar'?'بدأت إعادة البناء — النتائج خلال دقائق':'Rebuild started — fresh numbers in minutes')); }
+  else toast('⚠');
+  if(btn){ setTimeout(function(){ btn.disabled=false; btn.textContent='⟳ '+(L==='ar'?'إعادة بناء البيانات':'Rebuild data'); }, 4000); }
 }
 async function pricingImportHostaway(){
   toast(L==='ar'?'⏳ سحب من Hostaway…':'⏳ Importing from Hostaway…');
@@ -15956,6 +15981,7 @@ async function loadRevenue(){
     D.revCal30 = r[1];
   }catch(_){ D.rev = {loading:true}; D.revCal30 = {days:[]} }
   renderRevDiag();
+  renderRevWhy();
   renderRevenueFull();
   renderRevKpis();
   renderRevPace();
@@ -16026,6 +16052,40 @@ function renderRevKpis(){
   }).join('');
 }
 
+function renderRevWhy(){
+  var el = document.getElementById('revWhy'); if(!el) return;
+  var ar = (L==='ar');
+  var mv = (D.rev||{}).movement;
+  if(!mv){ el.innerHTML=''; return; }
+  function block(title, d){
+    if(!d) return '';
+    var up = d.rev_delta >= 0;
+    var col = up ? 'var(--green)' : 'var(--red)';
+    function eff(v, lbl){
+      if(!v) return '';
+      return '<span style="display:inline-flex;align-items:center;gap:5px;background:var(--surface-2);border-radius:99px;padding:4px 11px;font-size:11.5px">'
+        + '<b class="num" style="color:'+(v>=0?'var(--green)':'var(--red)')+'">'+(v>0?'+':'')+fmt(v)+'</b> '+esc(lbl)+'</span>';
+    }
+    var unitsBit = (d.units_added||d.units_removed)
+      ? eff(d.units_added - d.units_removed, ar?('وحدات ('+(d.units_added||0)+'+ / '+(d.units_removed||0)+'−)'):('units ('+(d.units_added||0)+' in / '+(d.units_removed||0)+' out)'))
+      : '';
+    return '<div style="flex:1;min-width:240px">'
+      + '<div class="muted" style="font-size:11px;margin-bottom:5px">'+esc(title)+'</div>'
+      + '<div style="font-size:19px;font-weight:800;color:'+col+'" class="num">'+(up?'+':'')+fmt(d.rev_delta)+' <span style="font-size:11px;font-weight:600;color:var(--mut)">SAR</span></div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">'
+      + eff(d.volume_effect, ar?('إشغال ('+(d.nights_delta>0?'+':'')+d.nights_delta+' ليلة)'):('occupancy ('+(d.nights_delta>0?'+':'')+d.nights_delta+' nights)'))
+      + eff(d.adr_effect, ar?('سعر الليلة ('+(d.adr_delta>0?'+':'')+d.adr_delta+' ر.س)'):('ADR ('+(d.adr_delta>0?'+':'')+d.adr_delta+' SAR)'))
+      + unitsBit
+      + '</div></div>';
+  }
+  el.innerHTML = '<div class="card" style="margin-bottom:12px"><div class="card-head"><span class="card-title">'
+    + (ar?'ليش تحرك الإيراد؟':'Why revenue moved')+'</span>'
+    + '<span class="card-sub">'+(ar?('أول '+(mv.mtd_days||0)+' يوم من الشهر مقارنة بنفس الأيام من الشهر الماضي'):('first '+(mv.mtd_days||0)+' days vs the same days last month'))+'</span></div>'
+    + '<div style="display:flex;gap:18px;flex-wrap:wrap">'
+    + block(ar?'هذا الشهر مقابل نفس الأيام من الشهر الماضي':'MTD vs same days last month', mv.mtd_vs_last_month)
+    + block(ar?'آخر ٣٠ يوم مقابل الـ٣٠ اللي قبلها':'Last 30 days vs prior 30', mv.last30_vs_prior30)
+    + '</div></div>';
+}
 function renderRevPace(){
   const el = document.getElementById('revPaceBody'); if(!el) return;
   const sub = document.getElementById('revPaceSub'); if(sub) sub.textContent = t().rev_pace_sub;
@@ -16278,10 +16338,28 @@ function ccPipelineHtml(jobs){
     return '<div class="cc-col"><div class="cc-col-h"><span>'+esc(ccL(c[1]))+'</span><span class="cc-count">'+arr.length+'</span></div>'+(arr.length?arr.map(ccJobCard).join(''):'<div class="empty">'+esc(ccL('cc_no_jobs'))+'</div>')+'</div>';
   }).join('')+'</div>';
 }
+function ccFunnelHtml(allJobs){
+  // Today's funnel: to_clean → in_progress → review → approved — the morning state
+  // in one glance, computed from the snapshot already in hand (no extra fetch).
+  var n = {to_clean:0, in_progress:0, review:0, approved:0, redo:0};
+  (allJobs||[]).forEach(function(j){ var s=j.stage||'to_clean'; if(n[s]!=null) n[s]++; });
+  var steps = [['to_clean',n.to_clean,'var(--gold)'],['in_progress',n.in_progress,'var(--blue,#2f5f7a)'],
+               ['review',n.review+n.redo,'var(--gold)'],['approved',n.approved,'var(--green)']];
+  var total = (allJobs||[]).length;
+  return '<div class="card" style="padding:12px 14px;margin-bottom:12px"><div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
+    + steps.map(function(s,i){
+        return (i?'<span style="color:var(--mut);font-size:13px;margin:0 2px">←</span>':'')
+          + '<div style="display:flex;align-items:baseline;gap:6px;padding:5px 11px;border-radius:10px;background:var(--surface-2)">'
+          + '<span style="font-size:17px;font-weight:800;color:'+s[2]+'">'+s[1]+'</span>'
+          + '<span class="muted" style="font-size:11px">'+esc(ccL(ccStageKey(s[0])))+'</span></div>';
+      }).join('')
+    + '<span class="muted" style="font-size:11px;margin-inline-start:auto">'+total+' '+esc(ccL('cc_total_jobs'))+'</span>'
+    + '</div></div>';
+}
 function ccTodayHtml(){
   var data = D.cleanCenter || {};
   var jobs = ccFilteredJobs(data.jobs||[]);
-  return ccSummaryHtml(data.summary||{}) + ccUrgentHtml(data.jobs||[]) + ccFiltersHtml()
+  return ccFunnelHtml(data.jobs||[]) + ccSummaryHtml(data.summary||{}) + ccUrgentHtml(data.jobs||[]) + ccFiltersHtml()
     + ccPipelineHtml(jobs)
     + '<div class="cc-mobile-list cc-list">'+(jobs.length?jobs.map(ccJobCard).join(''):'<div class="empty">'+esc(ccL('cc_no_jobs'))+'</div>')+'</div>';
 }
@@ -18644,7 +18722,7 @@ function _pmoRenderCards(){
       + (dl?('<span style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</span>'):'')
       + '</div>'
       // Item 55: budget vs actual (spent = sum of task costs).
-      + (p.budget?('<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-top:7px;color:var(--text-2)"><span>'+(ar?'الميزانية':'Budget')+': <b class="mono">'+fmt(p.spent||0)+'</b> / '+fmt(p.budget)+' SAR</span>'+(((p.spent||0)>p.budget)?('<span class="pill danger">'+(ar?'تجاوز':'over')+'</span>'):'')+'</div>'):'')
+      + (p.budget?('<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-top:7px;color:var(--text-2)"><span>'+(ar?'الميزانية':'Budget')+': <b class="mono">'+fmt(p.spent||0)+'</b> / '+fmt(p.budget)+' SAR</span>'+(((p.spent||0)>p.budget+0.5)?('<span class="pill danger">'+(ar?'تجاوز':'over')+'</span>'):'')+'</div>'):'')
       + '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" onclick="event.stopPropagation()">'
       + '<button class="btn ghost xs" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'+(ar?'افتح':'Open')+'</button>'
       + '<button class="btn ghost xs" onclick="pmoCopyOwnerById(&#39;'+esc(p.id)+'&#39;)">'+(ar?'انسخ رابط المالك':'Copy owner link')+'</button>'
@@ -18794,7 +18872,7 @@ function _pmoBudgetHtml(p){
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
   h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'الميزانية':'Budget')+'</div><div style="font-weight:700">'+(b!=null?pmoMoney(b):'—')+'</div></div>';
   h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'التكلفة المقدّرة':'Estimated cost')+'</div><div style="font-weight:700">'+(sp!=null?pmoMoney(sp):'—')+'</div></div>';
-  h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'الفرق':'Difference')+'</div><div style="font-weight:700;color:'+(diff==null?'var(--text)':(diff>=0?'var(--green)':'var(--red)'))+'">'+(diff!=null?pmoMoney(diff):'—')+'</div></div>';
+  h+='<div style="flex:1;min-width:90px"><div class="muted" style="font-size:11px">'+(ar?'الفرق':'Difference')+'</div><div style="font-weight:700;color:'+(diff==null?'var(--text)':(diff>=-0.5?'var(--green)':'var(--red)'))+'">'+(diff!=null?pmoMoney(diff):'—')+'</div></div>';
   h+='</div><div class="muted" style="font-size:10.5px;margin-top:6px">'+(ar?'داخلي فقط — لا يظهر للمالك':'Internal only — hidden from owner')+'</div></div>';
   return h;
 }
@@ -21524,8 +21602,10 @@ async function financeLoadReport(){
   const m=(document.getElementById('finMgmt')||{}).value||'0';
   const ct=(document.getElementById('finCleanType')||{}).value||'ours';
   const ca=(document.getElementById('finCleanAmt')||{}).value||'0';
+  const rnd=(document.getElementById('finRounding')||{}).value||'2';
+  const vat=(document.getElementById('finVatPct')||{}).value||'0';
   document.getElementById('financePreview').innerHTML='<div class="empty sk" style="padding:40px">…</div>';
-  let r; try{ r=await api('/api/finance/report?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end+'&mgmt='+encodeURIComponent(m)+'&clean_type='+ct+'&clean_amount='+encodeURIComponent(ca)); }catch(e){ r={error:'fetch'}; }
+  let r; try{ r=await api('/api/finance/report?lid='+encodeURIComponent(lid)+'&start='+start+'&end='+end+'&mgmt='+encodeURIComponent(m)+'&clean_type='+ct+'&clean_amount='+encodeURIComponent(ca)+'&rounding='+encodeURIComponent(rnd)+'&vat_pct='+encodeURIComponent(vat)); }catch(e){ r={error:'fetch'}; }
   D.finReport=r; financeRender(); renderFinanceOpsSummary();
 }
 function financeStatementHTML(){
@@ -21600,7 +21680,15 @@ function financeRender(){
   const rec=(r.reconciliation)||{}; const cur=financeFields().currency||'SAR';
   if(reconEl) reconEl.innerHTML = rec.balanced ? '<span class="recon-ok">✔ '+(ar?'متوازن':'balanced')+'</span>'
     : '<span class="recon-bad">✖ '+(ar?'غير متوازن':'mismatch')+(rec.missing_payout_ids&&rec.missing_payout_ids.length?(' · '+rec.missing_payout_ids.length+(ar?' بدون دفعة':' missing payout')):'')+(rec.needs_channel_rule_ids&&rec.needs_channel_rule_ids.length?(' · '+rec.needs_channel_rule_ids.length+(ar?' قناة بلا قاعدة':' channel(s) need rule')):'')+(rec.gap?(' · '+money2(rec.gap)+' '+cur):'')+'</span>';
-  prev.innerHTML=html;
+  // Ambiguous owner match: TWO registry codes matched this listing — wrong owner =
+  // wrong management % on a real statement, so demand explicit confirmation.
+  var amb = (r && r.owner_ambiguous_with && r.owner_ambiguous_with.length)
+    ? riskPanel('danger', ar?'المالك غير مؤكد — راجع قبل الإرسال':'Owner ambiguous — confirm before sending',
+        (ar?'أكثر من كود مالك يطابق هالشقة: ':'More than one registry code matches this unit: ')
+        + r.owner_ambiguous_with.join('، ')
+        + (ar?' — تأكد من سجل الملاك.':' — fix it in the owner registry.'), '', '')
+    : '';
+  prev.innerHTML=amb+html;
 }
 async function financeSaveDefaults(){
   const lid=(document.getElementById('finUnit')||{}).value||''; if(!lid){ toast(L==='ar'?'اختر شقة':'Pick an apartment'); return; }
@@ -22126,7 +22214,11 @@ async function fbDaily(){
   h+='<div style="'+fbCard()+';background:var(--surface-2)"><div class="muted" style="font-size:11px">🤖 '+esc(t().fb_assist)+'</div>'+tips.slice(0,4).map(function(x){return '<div style="font-size:12.5px;padding:3px 0">• '+esc(x)+'</div>';}).join('')+'</div>';
   function step(n,icon,title,done,desc,btnLabel,btnFn,tone){ return '<div style="'+fbCard()+';display:flex;gap:12px;align-items:flex-start"><div style="width:30px;height:30px;border-radius:99px;background:'+(done?'#3e9665':'var(--surface-2)')+';color:'+(done?'#fff':'var(--mut)')+';display:flex;align-items:center;justify-content:center;font-weight:800;flex:none">'+(done?'✓':n)+'</div><div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13.5px">'+icon+' '+esc(title)+'</b>'+(done?fbChip(ar?'تم':'done','ok'):(tone?fbChip(tone[0],tone[1]):''))+'</div><div class="muted" style="font-size:11.5px;margin:4px 0 8px;line-height:1.6">'+esc(desc)+'</div>'+(btnLabel?('<button class="btn '+(done?'ghost':'primary')+' sm" onclick="'+btnFn+'">'+esc(btnLabel)+'</button>'):'')+'</div></div>'; }
   var lr=dov.last_run;
-  h+=step(1,'📚',ar?'تحديث دافترة':'Sync Daftra',(dov.total_records>0&&jn>0),(ar?'اسحب القيود والحسابات ومراكز التكلفة. ':'Pull journals, accounts & cost centers. ')+(ar?('قيود: '+jn+' · سجلات: '+(dov.total_records||0)):('journals: '+jn+' · records: '+(dov.total_records||0)))+(lr?(' · '+(ar?'آخر مزامنة ':'last ')+esc(String(lr.finished_at||lr.started_at||'').replace('T',' ').slice(0,16))):''),(ar?'اسحب آخر بيانات دافترة':'Pull latest Daftra'),'fbDailySync()');
+  // Readiness signal: a page-cap-truncated import is NOT a complete picture.
+  var truncTypes=[]; var stMap=(st&&st.state)||{};
+  for(var stK in stMap){ if(stMap.hasOwnProperty(stK) && stMap[stK] && stMap[stK].truncated) truncTypes.push(stK); }
+  var truncNote = truncTypes.length ? (' · ⚠ '+(ar?('الاستيراد ناقص ('+truncTypes.join('، ')+') — وصل حد الصفحات؛ ما نقدر نضمن اكتمال الفحص'):('import INCOMPLETE ('+truncTypes.join(', ')+') — hit the page cap; checks cannot be trusted as complete'))) : '';
+  h+=step(1,'📚',ar?'تحديث دافترة':'Sync Daftra',(dov.total_records>0&&jn>0&&!truncTypes.length),(ar?'اسحب القيود والحسابات ومراكز التكلفة. ':'Pull journals, accounts & cost centers. ')+(ar?('قيود: '+jn+' · سجلات: '+(dov.total_records||0)):('journals: '+jn+' · records: '+(dov.total_records||0)))+(lr?(' · '+(ar?'آخر مزامنة ':'last ')+esc(String(lr.finished_at||lr.started_at||'').replace('T',' ').slice(0,16))):'')+truncNote,(ar?'اسحب آخر بيانات دافترة':'Pull latest Daftra'),'fbDailySync()',(truncTypes.length?[ar?'ناقص':'incomplete','warn']:null));
   h+=step(2,'🏦',ar?'كشف البنك':'Bank statement',(bs.count>0),(bs.count>0?((ar?'عمليات: ':'transactions: ')+(bs.count||0)+' · '+(ar?'غير مصنّف: ':'unclassified: ')+(bs.needs_review||0)):(ar?'ارفع كشف الراجحي Excel.':'Upload the Al Rajhi Excel.')),(bs.count>0?(ar?'افتح كشف البنك':'Open bank'):(ar?'ارفع كشف البنك':'Upload bank')),'fbGo(&#39;bank&#39;)');
   var s3d=(bs.count>0&&(dup.not_checked||0)===0&&(dup.total||0)>0);
   h+=step(3,'🛡️',ar?'فحص التكرار مع دافترة':'Check duplicates with Daftra',s3d,(bm?'':(ar?'⚠ ناقص ربط حساب البنك. ':'⚠ Bank mapping missing. '))+(ar?('غير مفحوص: '+(dup.not_checked||0)):('unchecked: '+(dup.not_checked||0))),(ar?'افحص التكرار':'Check duplicates'),'fbDupCheck()',(s3d?null:[ar?'مطلوب':'todo','warn']));
@@ -25661,6 +25753,48 @@ def _finance_pdf_payload(items):
             z.writestr(fn, _pdf_statement_bytes(it["report"], it.get("label")))
     return buf.getvalue(), "ouja-statements.zip", "application/zip"
 
+def _revenue_movement(nights):
+    """'Why revenue moved' — the drivers BEFORE the totals: occupancy Δ, ADR Δ,
+    units added/removed. MTD vs same-days-last-month AND last-30d vs prior-30d.
+    Pure decomposition of real booked nights; nothing estimated."""
+    import calendar as _cal
+    today = datetime.now(TZ).date()
+
+    def window(start, end):              # [start, end)
+        rev = 0.0; sold = 0; lids = set()
+        for lid, d, nightly in nights:
+            if start <= d < end:
+                rev += nightly; sold += 1; lids.add(lid)
+        return {"rev": round(rev), "nights": sold,
+                "adr": round(rev / sold) if sold else 0, "units": sorted(lids)}
+
+    def drivers(cur, prev):
+        d_rev = cur["rev"] - prev["rev"]
+        d_n   = cur["nights"] - prev["nights"]
+        d_adr = cur["adr"] - prev["adr"]
+        # decomposition: Δnights at the OLD rate + ΔADR on the NEW volume (mix folded in)
+        vol_effect = round(d_n * (prev["adr"] or 0))
+        adr_effect = round(d_adr * cur["nights"])
+        added   = [l for l in cur["units"] if l not in prev["units"]]
+        removed = [l for l in prev["units"] if l not in cur["units"]]
+        return {"rev_delta": round(d_rev), "nights_delta": d_n, "adr_delta": d_adr,
+                "volume_effect": vol_effect, "adr_effect": adr_effect,
+                "units_added": len(added), "units_removed": len(removed),
+                "cur": {k: cur[k] for k in ("rev", "nights", "adr")} | {"units": len(cur["units"])},
+                "prev": {k: prev[k] for k in ("rev", "nights", "adr")} | {"units": len(prev["units"])}}
+
+    m_start = today.replace(day=1)
+    cur_mtd = window(m_start, today + timedelta(days=1))
+    pm_y, pm_m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    pm_start = m_start.replace(year=pm_y, month=pm_m, day=1)
+    pm_days = min(today.day, _cal.monthrange(pm_y, pm_m)[1])
+    prev_same_days = window(pm_start, pm_start + timedelta(days=pm_days))
+    last30 = window(today - timedelta(days=29), today + timedelta(days=1))
+    prior30 = window(today - timedelta(days=59), today - timedelta(days=29))
+    return {"mtd_vs_last_month": drivers(cur_mtd, prev_same_days),
+            "last30_vs_prior30": drivers(last30, prior30),
+            "mtd_days": today.day, "computed_at": datetime.now(TZ).isoformat(timespec="minutes")}
+
 def _compute_revenue():
     reservations = get_reservations_cached()
     listings = get_listings_map()
@@ -25710,9 +25844,15 @@ def _compute_revenue():
     pace = {"cur": round(cur),
             "mom": round((cur - prev_m) / prev_m * 100) if prev_m else None,
             "yoy": round((cur - prev_y) / prev_y * 100) if prev_y else None}
+    try:
+        movement = _revenue_movement(nights)
+    except Exception as e:
+        print("revenue movement error:", e)
+        movement = None
     return {"monthly": monthly,
             "overall_adr": round(rep.get("overall_adr", 0) or 0),
             "compounds": compounds, "pace": pace,
+            "movement": movement,
             "seasonality": [{"name": m["name"], "adr": round(m["adr"]), "index": round(m["index"], 2)}
                             for m in rep["months"]],
             "salary": {str(k): round(v, 2) for k, v in rep["salary"]["dom_index"].items()},
@@ -25950,6 +26090,7 @@ def _pe_reconstruct_pace(nights, group_units, horizon=PE_HORIZON):
     return out
 
 PE_MIN_UNIT = int(os.environ.get("PE_MIN_UNIT", "8"))     # min bookings to trust a unit's OWN band (else pool to group)
+PE_REBUILD_BURST = int(os.environ.get("PE_REBUILD_BURST", "5"))  # new bookings since last build that trigger an early dataset rebuild
 PE_EVENT_MIN = int(os.environ.get("PE_EVENT_MIN", "10"))  # min event-nights for a high-confidence learned effect
 PE_POOL_STRETCH = float(os.environ.get("PE_POOL_STRETCH", "0.15"))   # pooled rec may exceed THIS unit's own max by ≤15%
 PE_LEAN_STRENGTH = float(os.environ.get("PE_LEAN_STRENGTH", "0.30")) # how hard the price↔occupancy dial pulls (0..1)
@@ -26040,11 +26181,13 @@ def _pe_get(force=False, ttl=86400):
         if not _catalog_units:
             load_catalog(True)
         today = datetime.now(TZ).date()
-        data = _pe_build_dataset(get_reservations_cached(), _catalog_units, today)
+        resv = get_reservations_cached()
+        data = _pe_build_dataset(resv, _catalog_units, today)
         pace = _pe_reconstruct_pace(data["nights"], data["group_units"])
         models = _pe_learn_models(data)
         _pe_backfill_outcomes(data)        # learning loop: record real booked outcomes daily
-        _pe_cache.update({"data": data, "pace": pace, "models": models, "ts": time.time(), "error": None})
+        _pe_cache.update({"data": data, "pace": pace, "models": models, "ts": time.time(),
+                          "error": None, "built_res_count": len(resv)})
     except Exception as e:
         _pe_cache["error"] = str(e)
         print("pricing-engine v2 build error:", e)
@@ -26558,7 +26701,8 @@ def pricing_baseline(lid, date_iso):
 
 def _pe_baseline_observe(lid, date_iso, live_price):
     """Freeze the live price the first time we see (lid,date); refresh ONLY when the live price
-    differs from what Ouja last wrote (a non-Ouja change). Returns the frozen baseline."""
+    differs from what Ouja last wrote (a non-Ouja change). Returns the frozen baseline.
+    Read-modify-write under _price_log_lock: snapshot threads + apply paths race here."""
     if live_price is None:
         return pricing_baseline(lid, date_iso)
     try:
@@ -26566,19 +26710,20 @@ def _pe_baseline_observe(lid, date_iso, live_price):
     except (TypeError, ValueError):
         return pricing_baseline(lid, date_iso)
     k = _bl_key(lid, date_iso)
-    rec = _pricing_baseline.get(k)
-    if rec is None:
-        _pricing_baseline[k] = {"baseline": live, "ouja_wrote": None,
-                                "ts": datetime.now(TZ).isoformat(timespec="minutes")}
-        _pe_baseline_save()
-        return live
-    ow = rec.get("ouja_wrote")
-    if ow is not None and live != ow:        # live moved and it wasn't us → external change
-        rec["baseline"] = live
-        rec["ouja_wrote"] = None
-        rec["ts"] = datetime.now(TZ).isoformat(timespec="minutes")
-        _pe_baseline_save()
-    return rec["baseline"]
+    with _price_log_lock:
+        rec = _pricing_baseline.get(k)
+        if rec is None:
+            _pricing_baseline[k] = {"baseline": live, "ouja_wrote": None,
+                                    "ts": datetime.now(TZ).isoformat(timespec="minutes")}
+            _pe_baseline_save()
+            return live
+        ow = rec.get("ouja_wrote")
+        if ow is not None and live != ow:    # live moved and it wasn't us → external change
+            rec["baseline"] = live
+            rec["ouja_wrote"] = None
+            rec["ts"] = datetime.now(TZ).isoformat(timespec="minutes")
+            _pe_baseline_save()
+        return rec["baseline"]
 
 def _pe_baseline_record_write(lid, date_iso, price):
     """Remember what Ouja wrote (so our own apply never gets mistaken for an external change,
@@ -26588,13 +26733,14 @@ def _pe_baseline_record_write(lid, date_iso, price):
     except (TypeError, ValueError):
         return
     k = _bl_key(lid, date_iso)
-    rec = _pricing_baseline.get(k)
-    if rec is None:
-        _pricing_baseline[k] = {"baseline": p, "ouja_wrote": p,
-                                "ts": datetime.now(TZ).isoformat(timespec="minutes")}
-    else:
-        rec["ouja_wrote"] = p
-    _pe_baseline_save()
+    with _price_log_lock:
+        rec = _pricing_baseline.get(k)
+        if rec is None:
+            _pricing_baseline[k] = {"baseline": p, "ouja_wrote": p,
+                                    "ts": datetime.now(TZ).isoformat(timespec="minutes")}
+        else:
+            rec["ouja_wrote"] = p
+        _pe_baseline_save()
 
 def set_strategy_toggle(name, enabled, lid=None):
     """Enable/disable a strategy globally (lid=None) or for one unit. Returns False on bad name."""
@@ -27854,6 +28000,26 @@ async def _api_pricing_refresh_listing(request):
     except Exception as e:
         print("refresh-listing:", e)
         return _json({"ok": False, "error": "refresh_failed"})
+
+_pe_rebuild_running = {"on": False}
+
+async def _api_pricing_rebuild(request):
+    """Manual 'rebuild now' for the pricing-engine dataset (24h TTL otherwise).
+    Runs in a thread; reports age + whether a rebuild is already in flight."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _pe_rebuild_running["on"]:
+        return _json({"ok": True, "already_running": True})
+    _pe_rebuild_running["on"] = True
+
+    async def _run():
+        try:
+            await asyncio.to_thread(_pe_get, True)
+        finally:
+            _pe_rebuild_running["on"] = False
+    asyncio.create_task(_run())
+    return _json({"ok": True, "started": True,
+                  "age_min": int((time.time() - (_pe_cache.get("ts") or 0)) / 60) if _pe_cache.get("ts") else None})
 
 def _pricing_calendar(lid, start_iso=None, end_iso=None):
     """READ-ONLY month calendar for ONE unit: EVERY day (booked + open) with the LIVE Hostaway price,
@@ -33020,6 +33186,13 @@ async def _api_finance_report(request):
     if q.get("rounding"):
         try:
             settings["rounding"] = int(q.get("rounding"))
+        except Exception:
+            pass
+    if q.get("vat_pct"):
+        # Explicit owner choice (was a buried [CONFIRM] constant): VAT % applied per
+        # the report math; default 0 = all figures net, the historical behavior.
+        try:
+            settings["vat_pct"] = max(0.0, float(q.get("vat_pct")))
         except Exception:
             pass
     if q.get("basis") in ("checkin", "checkout"):
@@ -39646,6 +39819,18 @@ async def dashboard_cache_loop():
         if (not cg) or (time.time() - cg[1] > 1800):       # grid is calendar-heavy too: every ~30 min
             grid = await asyncio.to_thread(_compute_calendar_grid)
             _dash_cache["calendar_grid"] = (grid, time.time())
+        # Booking-burst rebuild: the PE dataset is cached 24h, but a burst of new
+        # reservations (≥ PE_REBUILD_BURST since the last build) makes the recs stale —
+        # rebuild early. The 15-min rec cache on top stays as-is.
+        try:
+            built_n = _pe_cache.get("built_res_count")
+            if _pe_cache.get("data") and built_n is not None:
+                cur_n = len(get_reservations_cached())
+                if cur_n - built_n >= PE_REBUILD_BURST:
+                    print(f"pricing-engine: booking burst ({cur_n - built_n} new) — rebuilding dataset")
+                    await asyncio.to_thread(_pe_get, True)
+        except Exception as e:
+            print("pe burst check error:", e)
         print(f"dashboard cache warmed · units={ov.get('active_units')} rev30={ov.get('rev_30')}")
     except Exception as e:
         print("dashboard cache error:", e)
@@ -40921,6 +41106,7 @@ async def start_web_server():
         app.router.add_get("/api/pricing/truth-check", _api_pricing_truth_check)   # Hostaway-vs-dashboard truth (read-only)
         app.router.add_get("/api/pricing/calendar", _api_pricing_calendar)   # per-unit month calendar (read-only)
         app.router.add_post("/api/pricing/refresh-listing", _api_pricing_refresh_listing)  # re-read one apartment from Hostaway
+        app.router.add_post("/api/pricing/rebuild", _api_pricing_rebuild)   # manual dataset rebuild (24h TTL override)
         app.router.add_post("/api/pricing/command/apply", _api_pricing_command_apply)  # verified scoped apply (dry-run-able)
         app.router.add_get("/api/pricing/emergency-preview", _api_pricing_emergency_preview)  # 9PM emergency (preview only)
         app.router.add_get("/api/pricing/command/batches", _api_pricing_command_batches)  # apply batches (revert source)
