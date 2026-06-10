@@ -40346,6 +40346,7 @@ STAY_HTML = r"""<!doctype html>
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="__STAY_URL__">
+<script type="application/ld+json">/*__STAY_JSONLD__*/null</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -40514,10 +40515,13 @@ function viewLanding(){
 
 function card(l){
   var avail=(l.available===true);
-  var img=l.cover?('<img loading="lazy" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
+  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
   var ov=[];if(avail)ov.push('<span class="ov-chip ok">متاحة</span>');if(l.badge)ov.push('<span class="ov-chip gold">'+he(l.badge)+'</span>');
   var price;
-  if(l.est_total!=null&&l.nights>0){price='<div class="price">الإجمالي التقريبي: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div>';}
+  if(l.est_total!=null&&l.nights>0){
+    var perNight=(l.est_avg!=null&&l.est_avg>0)?('<b>من '+money(l.est_avg)+' / الليلة</b> · '):'';
+    price='<div class="price">'+perNight+'الإجمالي التقريبي: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div>';
+  }
   else{price='<div class="price soft">السعر يظهر داخل Airbnb</div>';}
   return '<a class="card lc" href="/stay/'+he(l.slug)+location.search+'">'
     +'<div class="ph">'+img+(ov.length?('<div class="ov-row">'+ov.join('')+'</div>'):'')+'</div>'
@@ -40575,14 +40579,14 @@ function viewListing(){
     var imgs=(l.images||[]);
     var gallery;
     if(imgs.length){
-      var c1='<div class="g-cell"><img loading="lazy" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"></div>';
+      var c1='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"></div>';
       var c2='';
       if(imgs.length>1){
         var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">🖼️ عرض كل الصور · '+imgs.length+'</button>'):'';
-        c2='<div class="g-cell"><img loading="lazy" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'">'+moreBtn+'</div>';
+        c2='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'">'+moreBtn+'</div>';
       }
       gallery='<div class="gal2'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
-    } else if(l.cover){gallery='<div class="gal2 one"><div class="g-cell"><img loading="lazy" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"></div></div>';}
+    } else if(l.cover){gallery='<div class="gal2 one"><div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"></div></div>';}
     else{gallery='<div class="card" style="padding:46px;text-align:center;color:var(--mut);margin:14px 0">لا توجد صور لهذه الوحدة</div>';}
     var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','ذاتي']);
     var kv=kvitems.length?('<div class="kv">'+kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
@@ -40614,11 +40618,20 @@ function viewListing(){
     var cta;
     if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url,dci,dco,pq.get('guests')))+'">احجزها في Airbnb ↗</a>';}
     else{cta='<button class="btn block off" disabled>رابط Airbnb غير متوفر حاليًا</button>';}
+    // Direct-booking WhatsApp CTA (fee-free) — renders ONLY when a number is configured.
+    var waNum=((STAY&&STAY.config&&STAY.config.whatsapp)||'');
+    var waCta='';
+    if(waNum){
+      var waMsg='مرحبا، أبغى أحجز مباشرة: '+(l.name_ar||l.name_en||'')+(dci&&dco?(' · '+dci+' إلى '+dco):'')+(pq.get('guests')?(' · '+pq.get('guests')+' ضيوف'):'');
+      waCta='<a class="btn block ghost" id="wabtn" target="_blank" rel="noopener" style="margin-top:7px;background:transparent;border:1.5px solid var(--green);color:var(--green)" href="https://wa.me/'+he(waNum)+'?text='+encodeURIComponent(waMsg)+'">احجز مباشرة عبر واتساب 💬</a>';
+    }
     var note=l.has_airbnb?'<div class="disc" style="text-align:center;margin-bottom:3px">بننقلك إلى Airbnb بنفس التواريخ وعدد الضيوف.</div>':'';
-    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+note+'<div class="disc" style="text-align:center">السعر النهائي والتوفر النهائي داخل Airbnb.</div></div>';
+    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+waCta+note+'<div class="disc" style="text-align:center">السعر النهائي والتوفر النهائي داخل Airbnb.</div></div>';
     document.body.appendChild(bar);
     var ab=document.getElementById('abtn');
     if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
+    var wb=document.getElementById('wabtn');
+    if(wb){wb.addEventListener('click',function(){track('stay_whatsapp_click',{listing_id:l.id});});}
     else{track('stay_missing_airbnb_url',{listing_id:l.id});}
     var gall=document.getElementById('gall');
     if(gall){gall.onclick=function(){openGallery(imgs,l.name_ar);};}
@@ -40628,7 +40641,7 @@ function viewListing(){
   function agHtml(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
   function openGallery(imgs,alt){
     var ov=document.createElement('div');ov.className='lb';
-    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" src="'+he(u)+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(u)+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
     function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
     function esc(e){if(e.key==='Escape')close();}
     ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
@@ -40652,6 +40665,43 @@ function viewListing(){
 </script>
 </body></html>"""
 
+# WhatsApp number for the direct-booking CTA on unit pages (digits, intl format e.g.
+# 9665XXXXXXXX). Unset = the button simply doesn't render — we never fake a contact.
+STAY_WHATSAPP = re.sub(r"\D", "", os.environ.get("STAY_WHATSAPP", "") or "")
+
+async def _handle_robots(request):
+    """robots.txt: public funnel pages crawlable, operational surfaces not."""
+    base = str(request.url.origin())
+    txt = ("User-agent: *\n"
+           "Allow: /stay\n"
+           "Disallow: /dashboard\n"
+           "Disallow: /invest\n"
+           "Disallow: /oujact-route\n"
+           "Disallow: /cleaning\n"
+           "Disallow: /hook/\n"
+           "Disallow: /api/\n"
+           "Disallow: /pmo/\n"
+           f"Sitemap: {base}/sitemap.xml\n")
+    return web.Response(text=txt, content_type="text/plain")
+
+async def _handle_sitemap(request):
+    """sitemap.xml of /stay + every active unit page (built from the live GW cache)."""
+    base = str(request.url.origin())
+    urls = [f"{base}/stay", f"{base}/stay/search"]
+    try:
+        for snap in _gw_visible_snaps():
+            ov = _gw_overrides.get(str(snap.get("id"))) if isinstance(_gw_overrides, dict) else None
+            slug = _gw_slug(snap, ov or {})
+            if slug:
+                urls.append(f"{base}/stay/{slug}")
+    except Exception as e:
+        print("sitemap error:", e)
+    body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            + "\n".join(f"  <url><loc>{_gw_he(u)}</loc></url>" for u in urls)
+            + "\n</urlset>\n")
+    return web.Response(text=body, content_type="application/xml")
+
 def _stay_render(route="landing", listing=None, base=""):
     title = "اختر إقامتك مع عوجا"
     desc = "وحدات عوجا المتاحة في الرياض · دخول ذاتي · الحجز عبر Airbnb"
@@ -40667,10 +40717,34 @@ def _stay_render(route="landing", listing=None, base=""):
     if not listing and hcfg.get("url"):
         og = og or hcfg["url"]
     data = {"route": route, "listing": listing,
-            "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""), "hero_cfg": hcfg}}
+            "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""),
+                       "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    # SEO: JSON-LD structured data — LodgingBusiness on /stay, Apartment per unit page.
+    if listing:
+        ld = {"@context": "https://schema.org", "@type": "Apartment",
+              "name": listing.get("name_ar") or listing.get("name_en") or "",
+              "description": desc,
+              "url": (base or "") + path,
+              "numberOfRooms": listing.get("beds"),
+              "occupancy": {"@type": "QuantitativeValue", "maxValue": listing.get("capacity")},
+              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh",
+                          "addressRegion": (listing.get("area") or "Riyadh"), "addressCountry": "SA"}}
+        if listing.get("cover"):
+            ld["image"] = listing["cover"]
+        ld = {k: v for k, v in ld.items() if v not in (None, "", {})}
+    else:
+        ld = {"@context": "https://schema.org", "@type": "LodgingBusiness",
+              "name": "Ouja Residence · عوجا",
+              "description": desc,
+              "url": (base or "") + "/stay",
+              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh", "addressCountry": "SA"}}
+        if hcfg.get("url"):
+            ld["image"] = hcfg["url"]
+    ld_blob = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
     return (STAY_HTML
             .replace("/*__STAY_DATA__*/null", blob)
+            .replace("/*__STAY_JSONLD__*/null", ld_blob)
             .replace("__STAY_TITLE__", _gw_he(title))
             .replace("__STAY_DESC__", _gw_he(desc))
             .replace("__STAY_OG__", _gw_he(og))
@@ -41068,6 +41142,9 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
+        # ---- SEO surfaces for the public funnel ----
+        app.router.add_get("/robots.txt", _handle_robots)
+        app.router.add_get("/sitemap.xml", _handle_sitemap)
         # ---- public guest website (no token) — order: static before dynamic slug ----
         app.router.add_get("/stay", _handle_stay)
         app.router.add_get("/stay/", _handle_stay)
