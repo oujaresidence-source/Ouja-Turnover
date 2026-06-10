@@ -25635,17 +25635,97 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
 
     inc_airbnb = 0.0; inc_direct = 0.0; extras_total = 0.0
     resv_lines = []; missing_payout = []; needs_rule = []; needs_base = []
+    unpaid_lines = []; refunded_lines = []
+    # PAID BASIS (Owner Report 2.0): income = money actually received in the period.
+    #  • cancelled-but-PAID  → INCOME line (chip ملغي — مدفوع), payout/collection verified
+    #  • confirmed-but-UNPAID (explicit payment field says unpaid) → transparency footer
+    #  • cancelled-fully-refunded / no payment evidence → footer at 0 (never invented income)
+    #  • anything with money moved but amount unknowable → needs_review, report refuses to balance
     for r in reservations:
         status = (r.get("status") or "").lower()
-        if status in _REPORT_CANCELLED:                       # EXCLUDE cancelled
-            continue
-        if status not in CONFIRMED_STATUSES:                  # only confirmed/realized
-            continue
+        cancelled = status in _REPORT_CANCELLED
+        if (not cancelled) and (status not in CONFIRMED_STATUSES):
+            continue                                          # pending/inquiry: not money, not a cancellation
         if not _finance_in_period(r, start, end, basis):
             continue
         refund = float(r.get("refund") or 0)
-        ext = float(r.get("extras") or 0); extras_total += ext
         channel = (r.get("channel") or "").lower()
+        pstat = (r.get("payment_status") or "")
+        paid_amt = r.get("paid_amount")
+        pfields = r.get("payment_fields") or []
+        base_meta = {"id": r.get("id"), "guest": r.get("guest") or "", "channel": channel,
+                     "apartment": r.get("apartment"), "checkin": r.get("checkin"),
+                     "checkout": r.get("checkout"), "nights": r.get("nights")}
+        # ---- cancelled rows: only PAID money enters income ----
+        if cancelled:
+            if channel == "airbnb":
+                payout = r.get("airbnb_payout")
+                if payout is None:
+                    # no payout signal on a cancelled row = no money retained (most common:
+                    # cancelled before any payout). NEVER invented as income; listed visibly.
+                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
+                                           "amount": 0.0, "evidence": "no_payout_field"})
+                    continue
+                kept = float(payout) - refund
+                if kept <= 0.005:
+                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
+                                           "amount": 0.0, "evidence": "payout_minus_refund<=0"})
+                    continue
+                income = kept; inc_airbnb += income
+                direct_detail = None
+                src = "airbnb payout − refund (cancelled, retained)"
+            elif channel == "direct":
+                paid_evidence = bool(paid_amt) or pstat in ("paid", "partially paid", "partial")
+                if not paid_evidence:
+                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
+                                           "amount": 0.0, "evidence": ("payment_status=" + pstat) if pstat else "no_payment_field"})
+                    continue
+                collected = paid_amt if paid_amt else (r.get("total_price") if pstat == "paid" else None)
+                if collected is None:                          # money moved, amount unknowable
+                    missing_payout.append(r.get("id"))
+                    resv_lines.append({**base_meta, "refund": R(refund), "extras": 0.0,
+                                       "income": None, "gross": None, "needs_review": True,
+                                       "status_kind": "cancelled_paid",
+                                       "source_fields": "partial payment without amount field"})
+                    continue
+                if float(collected) - refund <= 0.005:
+                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
+                                           "amount": 0.0, "evidence": "collected_minus_refund<=0"})
+                    continue
+                direct_detail = _direct_fee_calc(collected, refund, direct_fee_pct)
+                income = direct_detail["net"]; inc_direct += income
+                src = direct_detail["source_fields"] + " (cancelled, collected: " + (", ".join(pfields) or "paymentStatus") + ")"
+            else:
+                # 'other' channel cancelled: payment signal → needs an explicit rule (blocks
+                # balance, visible); no signal → footer at 0.
+                if pstat or paid_amt:
+                    needs_rule.append(r.get("id"))
+                    resv_lines.append({**base_meta, "refund": R(refund), "extras": 0.0,
+                                       "income": None, "gross": None, "needs_review": True,
+                                       "status_kind": "cancelled_paid",
+                                       "source_fields": "other-channel cancellation with payment signal"})
+                else:
+                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
+                                           "amount": 0.0, "evidence": "no_payment_field"})
+                continue
+            line = {**base_meta, "refund": R(refund), "extras": 0.0, "income": R(income),
+                    "gross": (r.get("airbnb_payout") if channel == "airbnb" else (paid_amt or r.get("total_price"))),
+                    "status_kind": "cancelled_paid", "source_fields": src}
+            if direct_detail:
+                line.update({"direct_base": direct_detail["base"], "direct_fee_pct": direct_detail["pct"],
+                             "direct_fee_amount": direct_detail["fee"], "direct_net": direct_detail["net"]})
+            resv_lines.append(line)
+            continue
+        # ---- confirmed rows ----
+        # explicit unpaid direct booking: visible as COMING money, never counted yet
+        if channel == "direct" and pstat == "unpaid":
+            dr = r.get("direct_revenue")
+            expected = _direct_fee_calc(dr, refund, direct_fee_pct)["net"] if dr is not None else None
+            unpaid_lines.append({**base_meta, "kind": "unpaid_yet",
+                                 "expected": (None if expected is None else R(expected)),
+                                 "evidence": ", ".join(pfields) or "paymentStatus"})
+            continue
+        ext = float(r.get("extras") or 0); extras_total += ext
         direct_detail = None
         if channel == "airbnb":
             payout = r.get("airbnb_payout")
@@ -25665,8 +25745,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         else:                                                 # 'other' (Booking.com, Vrbo…) — no confirmed rule
             needs_rule.append(r.get("id")); income = None     # flagged, NEVER guessed
         line = {
-            "id": r.get("id"), "channel": channel, "apartment": r.get("apartment"),
-            "checkin": r.get("checkin"), "checkout": r.get("checkout"), "nights": r.get("nights"),
+            **base_meta,
             "refund": R(refund), "extras": R(ext), "income": (None if income is None else R(income)),
             "gross": (r.get("airbnb_payout") if channel == "airbnb" else r.get("direct_revenue")),
         }
@@ -25706,8 +25785,11 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
         "cleaning": {"type": cl.get("type", "ours"), "amount": R(float(cl.get("amount") or 0)),
                      "months": months, "total": R(cleaning_total)},
-        "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines)},
+        "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines),
+                   "unpaid": len(unpaid_lines), "refunded": len(refunded_lines)},
         "resv_lines": resv_lines, "exp_lines": exp_lines,
+        "unpaid_lines": unpaid_lines, "refunded_lines": refunded_lines,
+        "basis_note": "paid basis: income = money actually received; unpaid/refunded listed separately",
         "reconciliation": {"balanced": balanced, "gap": R(gap), "missing_payout_ids": missing_payout,
                            "needs_channel_rule_ids": needs_rule, "needs_base_ids": needs_base},
         "settings": s,
@@ -25744,6 +25826,54 @@ def _airbnb_payout(r):
                 pass
     return None
 
+# Payment-status candidates on a Hostaway reservation (paid-basis needs them). Read
+# DEFENSIVELY and record which fields were actually present per line — the exact live
+# field set is confirmed post-deploy via /api/finance/cancelled-probe (REVENUE_DEBUG
+# also logs sample keys). Nothing here is ever guessed from totalPrice alone.
+_PAYMENT_STATUS_FIELDS = ("paymentStatus", "payment_status")
+_PAID_AMOUNT_FIELDS = ("alreadyPaid", "totalPaid", "paidAmount", "already_paid", "total_paid")
+_REMAINING_FIELDS = ("remainingBalance", "remaining_balance", "balanceDue")
+
+def _payment_signal(r):
+    """(status_str|None, paid_amount|None, remaining|None, present_fields[]) from a raw
+    Hostaway reservation. Pure harvesting — no inference."""
+    present = []
+    pstat = None
+    for k in _PAYMENT_STATUS_FIELDS:
+        v = r.get(k)
+        if isinstance(v, str) and v.strip():
+            pstat = v.strip().lower()
+            present.append(k)
+            break
+    paid_amt = None
+    for k in _PAID_AMOUNT_FIELDS:
+        v = r.get(k)
+        if isinstance(v, str):
+            try:
+                v = float(v)
+            except ValueError:
+                continue
+        if isinstance(v, (int, float)) and v > 0:
+            paid_amt = float(v)
+            present.append(k)
+            break
+    remaining = None
+    for k in _REMAINING_FIELDS:
+        v = r.get(k)
+        if isinstance(v, str):
+            try:
+                v = float(v)
+            except ValueError:
+                continue
+        if isinstance(v, (int, float)):
+            remaining = float(v)
+            present.append(k)
+            break
+    if isinstance(r.get("isPaid"), (bool, int)) and not pstat:
+        present.append("isPaid")
+        pstat = "paid" if r.get("isPaid") else "unpaid"
+    return pstat, paid_amt, remaining, present
+
 def normalize_reservation(r, listings=None):
     """One raw Hostaway reservation → a normalized finance row for compute_owner_report."""
     listings = listings or {}
@@ -25751,16 +25881,23 @@ def normalize_reservation(r, listings=None):
     ch = _finance_channel(r)
     refund = r.get("refundAmount")
     tp = r.get("totalPrice")
+    pstat, paid_amt, remaining, pfields = _payment_signal(r)
     return {
         "id": r.get("id") or r.get("reservationId"),
         "source": "hostaway", "channel": ch, "lid": lid,
         "apartment": listings.get(lid) or r.get("listingName") or (f"unit-{lid}" if lid else ""),
         "checkin": r.get("arrivalDate"), "checkout": r.get("departureDate"),
         "nights": _res_nights(r), "status": (r.get("status") or "").lower(),
+        "guest": (r.get("guestName") or "").strip(),
+        "guests_count": r.get("numberOfGuests") or r.get("adults"),
+        "booked_at": (str(r.get("reservationDate") or "")[:10] or None),
         "airbnb_payout": (_airbnb_payout(r) if ch == "airbnb" else None),
         "direct_revenue": (float(tp) if (ch == "direct" and isinstance(tp, (int, float))) else None),
+        "total_price": (float(tp) if isinstance(tp, (int, float)) else None),
         "refund": (float(refund) if isinstance(refund, (int, float)) and refund > 0 else 0.0),
         "extras": 0.0,
+        "payment_status": pstat, "paid_amount": paid_amt,
+        "remaining_balance": remaining, "payment_fields": pfields,
     }
 
 _finance_adjust = {}     # "lid|start|end" -> {expense_overrides:{id:amt|None}, extra_lines:[...], line_overrides:{...}, comment}
@@ -34351,6 +34488,52 @@ async def _api_finance_payout_probe(request):
                 "all_keys_of_first_row": (sorted(rows[0].keys()) if rows else [])}
     return _json(await asyncio.to_thread(_probe))
 
+async def _api_finance_cancelled_probe(request):
+    """Diagnostic for the PAID-basis rules: read LIVE cancelled reservations from Hostaway
+    and report exactly which payout/payment fields exist on them (and which carried money),
+    so the cancelled-paid rule is confirmed from REAL data — open after deploy, on Railway."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    def _probe():
+        try:
+            rows = []
+            for st in ("cancelled", "canceled"):
+                try:
+                    data = api_get("/reservations", params={"limit": 60, "offset": 0, "status": st})
+                    rows.extend(data.get("result", []) or [])
+                except Exception:
+                    pass
+            if not rows:    # some accounts ignore the status param — fall back to a wide pull
+                data = api_get("/reservations", params={"limit": 200, "offset": 0})
+                rows = [r for r in (data.get("result", []) or [])
+                        if (r.get("status") or "").lower() in _REPORT_CANCELLED]
+        except Exception as e:
+            return {"error": str(e)[:300]}
+        money_kw = ("payout", "paid", "payment", "refund", "remaining", "balance", "total", "price")
+        samples, paid_found = [], []
+        for r in rows[:80]:
+            money = {k: v for k, v in r.items()
+                     if (isinstance(v, (int, float)) and v and any(m in k.lower() for m in money_kw))
+                     or (isinstance(v, str) and v and "payment" in k.lower())}
+            pstat, paid_amt, remaining, pfields = _payment_signal(r)
+            row = {"id": r.get("id"), "channel": r.get("channelName"), "status": r.get("status"),
+                   "arrival": r.get("arrivalDate"), "money_fields": money,
+                   "payment_signal": {"status": pstat, "paid_amount": paid_amt,
+                                      "remaining": remaining, "fields_present": pfields},
+                   "airbnb_payout_read": _airbnb_payout(r)}
+            samples.append(row)
+            if (row["airbnb_payout_read"] or paid_amt or pstat in ("paid", "partially paid")):
+                paid_found.append(row)
+        return {"cancelled_fetched": len(rows),
+                "cancelled_with_payment_evidence": len(paid_found),
+                "paid_examples": paid_found[:5], "samples": samples[:10],
+                "candidate_fields": {"payout": list(_AIRBNB_PAYOUT_FIELDS),
+                                     "status": list(_PAYMENT_STATUS_FIELDS),
+                                     "amount": list(_PAID_AMOUNT_FIELDS),
+                                     "remaining": list(_REMAINING_FIELDS)},
+                "note": "paid-basis counts a cancelled row as income ONLY from these signals — confirm here which exist live"}
+    return _json(await asyncio.to_thread(_probe))
+
 async def _api_expenses_get(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -42347,6 +42530,7 @@ async def start_web_server():
         app.router.add_get("/api/fb/close", _api_fb_close)
         app.router.add_post("/api/fb/revenue/pull", _api_fb_revenue_pull)
         app.router.add_get("/api/finance/payout-probe", _api_finance_payout_probe)
+        app.router.add_get("/api/finance/cancelled-probe", _api_finance_cancelled_probe)  # OR2: paid-basis field verification
         app.router.add_get("/api/expenses/get", _api_expenses_get)
         app.router.add_post("/api/expenses/update", _api_expenses_update)
         app.router.add_post("/api/expenses/post", _api_expenses_post)
