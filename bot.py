@@ -43618,6 +43618,13 @@ async def start_web_server():
         app.router.add_post("/api/reject", _api_reject)
         app.router.add_post("/api/claim", _api_claim)
         app.router.add_post("/api/apply", _api_apply)
+    # ---- Ouja Finance ERP v2 — the new finance system lives in finance/, NOT here ----
+    try:
+        import sys as _erp_sys, finance as _finance_erp
+        _finance_erp.mount(app, _erp_sys.modules[__name__])
+        print(f"[erp] mounted /erp (v{_finance_erp.ERP_VERSION})")
+    except Exception as _erp_err:
+        print(f"[erp] mount FAILED: {_erp_err!r}")
     _web_runner = web.AppRunner(app)
     await _web_runner.setup()
     site = web.TCPSite(_web_runner, "0.0.0.0", WEB_PORT)
