@@ -952,6 +952,24 @@ def match_reject(request, body):
     return {"ok": True, "dismissed": dis, "counters": counters_snapshot()}, 200
 
 
+# ============ المصاريف Expenses (V4 re-shell) + العهد Custody (Slice 5) ============
+# The V4 approval-center flow is REUSED via delegation (overview/detail/approve/
+# reject/edit/export/recheck are bot.py handlers). v2 only decorates rows with
+# the bank-match chip (bank_txn_id written by the Matching engine).
+
+def exp_attach_bank(payload):
+    for r in payload.get("rows") or []:
+        ex = B._expenses.get(str(r.get("expense_id")))
+        if ex is not None:
+            r["bank_txn_id"] = ex.get("bank_txn_id") or ""
+    return payload
+
+
+def custody_payload():
+    """Per-employee advances from the existing Decimal-correct balance math."""
+    return {"ok": True, **B._fb_custody_balances()}
+
+
 # ====================== Contracts linking (Setup) ======================
 
 def contracts_list():

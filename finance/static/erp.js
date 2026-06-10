@@ -108,7 +108,33 @@
       m_consumed: 'مستهلك', m_no_sugg: 'ما فيه قيود مقترحة لهالحركة',
       m_promote_confirm: 'ينشئ قيد داخلي «مسودة» لهالحركة — يترحّل لدافترة فقط عبر الترحيل. متأكد؟',
       m_blocked: 'محجوبة: ', m_decision_log: 'سجل القرارات',
-      m_sum_mismatch: 'المجموع لازم يساوي مبلغ الحركة'
+      m_sum_mismatch: 'المجموع لازم يساوي مبلغ الحركة',
+      /* --- expenses + custody --- */
+      x_pending: 'قيد الاعتماد', x_approved: 'معتمدة', x_exported: 'مصدّرة',
+      x_verified: 'متحققة', x_needs_action: 'تحتاج إجراء',
+      x_search: 'بحث بالشقة أو الفئة أو المرسل…',
+      x_approve: 'اعتماد', x_reject: 'رفض', x_edit: 'تعديل', x_export: 'تصدير', x_recheck: 'تحقق الآن',
+      x_receipt: 'الفاتورة', x_no_receipt: 'بدون فاتورة مرفقة',
+      x_bank_ok: 'مرتبط بالبنك ✓', x_bank_no: 'بدون ربط بنكي',
+      x_approved_ok: 'اعتُمدت ✓', x_approved_n: 'اعتُمدت {n} ✓', x_blocked_n: '{n} محجوبة',
+      x_rejected_ok: 'رُفضت', x_exported_ok: 'أُرسلت للتصدير', x_export_skip: '{n} تخطّيناها',
+      x_verified_ok: 'اتحققت ✓', x_not_found: 'ما لقيناها في Hostaway',
+      x_saved: 'انحفظ التعديل ✓', x_more: 'تحميل المزيد',
+      x_empty: 'ما فيه مصاريف في هالتبويب',
+      x_dryrun: 'وضع التجربة فعّال — التصدير ملف فقط',
+      x_missing: 'ناقص: ', x_by: 'من', x_open_match: 'افتح المطابقة',
+      x_amount: 'المبلغ', x_date: 'التاريخ', x_apartment: 'الشقة', x_category: 'الفئة',
+      x_vendor: 'المورد', x_note: 'ملاحظة', x_reject_reason: 'سبب الرفض (إلزامي)…',
+      x_timeline: 'السجل الزمني', x_payload: 'اللي بينرسل لـ Hostaway',
+      /* custody */
+      c_title: 'العهد — السلف المفتوحة',
+      c_explain: 'العهدة = مبلغ يُعطى للموظف ثم يُقفل بالفواتير. التحويل يثبتها: مدين عهدة الموظف / دائن البنك. الفواتير تقفلها: مدين مصاريف متعددة / دائن عهدة الموظف — بدون حركة بنك جديدة، لذلك لا تتكرر كمصروف بنكي.',
+      c_outstanding_note: 'الرصيد القائم = ما صُرف − ما أُقفل بالفواتير. صفر = العهدة مكتملة.',
+      c_employee: 'الموظف / حساب العهدة', c_issued: 'صُرف', c_settled: 'أُقفل',
+      c_outstanding: 'القائم', c_entries: 'قيود',
+      c_total: 'إجمالي القائم', c_open: 'عهد مفتوحة', c_done: 'مكتملة ✓',
+      c_empty: 'ما فيه حسابات عهد في قيود دافترة المستوردة',
+      c_settle_cta: 'طابق تسويات البنك (مؤسس وبطاقات)'
     },
     en: {
       dir: 'ltr', app: 'Finance Center',
@@ -184,7 +210,31 @@
       m_consumed: 'consumed', m_no_sugg: 'No suggested journals for this txn',
       m_promote_confirm: 'Creates an internal DRAFT entry for this txn — it reaches Daftra only via migration. Sure?',
       m_blocked: 'Blocked: ', m_decision_log: 'Decision log',
-      m_sum_mismatch: 'Selected lines must sum to the txn amount'
+      m_sum_mismatch: 'Selected lines must sum to the txn amount',
+      x_pending: 'Pending', x_approved: 'Approved', x_exported: 'Exported',
+      x_verified: 'Verified', x_needs_action: 'Needs action',
+      x_search: 'Search apartment, category or submitter…',
+      x_approve: 'Approve', x_reject: 'Reject', x_edit: 'Edit', x_export: 'Export', x_recheck: 'Verify now',
+      x_receipt: 'Receipt', x_no_receipt: 'No receipt attached',
+      x_bank_ok: 'Bank-matched ✓', x_bank_no: 'No bank match',
+      x_approved_ok: 'Approved ✓', x_approved_n: 'Approved {n} ✓', x_blocked_n: '{n} blocked',
+      x_rejected_ok: 'Rejected', x_exported_ok: 'Queued for export', x_export_skip: '{n} skipped',
+      x_verified_ok: 'Verified ✓', x_not_found: 'Not found in Hostaway',
+      x_saved: 'Edit saved ✓', x_more: 'Load more',
+      x_empty: 'No expenses in this tab',
+      x_dryrun: 'Dry-run is ON — export is file-only',
+      x_missing: 'Missing: ', x_by: 'by', x_open_match: 'Open Matching',
+      x_amount: 'Amount', x_date: 'Date', x_apartment: 'Apartment', x_category: 'Category',
+      x_vendor: 'Vendor', x_note: 'Note', x_reject_reason: 'Rejection reason (required)…',
+      x_timeline: 'Timeline', x_payload: 'Hostaway payload',
+      c_title: 'Custody — open advances',
+      c_explain: 'An advance is money given to an employee then settled by invoices. Issue: Dr employee custody / Cr bank. Settlement: Dr expenses / Cr custody — no new bank line, so it is never double-counted as a bank expense.',
+      c_outstanding_note: 'Outstanding = issued − settled by invoices. Zero = advance fully settled.',
+      c_employee: 'Employee / custody account', c_issued: 'Issued', c_settled: 'Settled',
+      c_outstanding: 'Outstanding', c_entries: 'Entries',
+      c_total: 'Total outstanding', c_open: 'open advances', c_done: 'Settled ✓',
+      c_empty: 'No custody accounts in the imported Daftra journals',
+      c_settle_cta: 'Match bank settlements (founder & cards)'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -228,8 +278,8 @@
     { id: 'today', built: true },
     { id: 'bank', built: true },
     { id: 'match', built: true },
-    { id: 'exp', slice: 5 },
-    { id: 'custody', slice: 5 },
+    { id: 'exp', built: true },
+    { id: 'custody', built: true },
     { id: 'owners', slice: 6 },
     { id: 'close', slice: 7 },
     { id: 'stmts', slice: 7 },
@@ -1033,6 +1083,89 @@
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
 
+    /* --- expenses --- */
+    else if (act === 'retry_exp') loadExp();
+    else if (act === 'x-tab') { expP.tab = el.getAttribute('data-tab'); expP.o = 0; pushExpHash(); }
+    else if (act === 'x-more') { expP.o += EXP_LIMIT; loadExp(true); }
+    else if (act === 'x-modal-close') { var xm = $('#xModal'); if (xm) { xm.hidden = true; xm.innerHTML = ''; } }
+    else if (act === 'x-receipt') { ev.stopPropagation(); expReceiptLightbox(el.getAttribute('data-url')); }
+    else if (act === 'x-detail') expDetail(el.getAttribute('data-id'));
+    else if (act === 'x-edit') expEditDrawer(id);
+    else if (act === 'x-edit-save') {
+      el.disabled = true;
+      var fields = { amount: $('#xe_amount').value, expense_date: $('#xe_expense_date').value,
+                     apartment: $('#xe_apartment').value, category: $('#xe_category').value,
+                     vendor: $('#xe_vendor').value, note: $('#xe_note').value };
+      api('/erp/api/exp/edit', { method: 'POST', body: { id: id, fields: fields } }).then(function () {
+        var xm = $('#xModal'); xm.hidden = true; xm.innerHTML = '';
+        toast(t('x_saved'));
+        loadExp();
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-approve') {
+      el.disabled = true;
+      api('/erp/api/exp/approve', { method: 'POST', body: { id: id } }).then(function (r) {
+        if ((r.approved || []).length) { expRemoveRow(id, t('x_approved_ok')); }
+        else {
+          el.disabled = false;
+          var why = ((r.blocked || [])[0] || {}).reason || t('act_failed');
+          toast(why, 'err');
+        }
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-reject') {
+      var xrow = el.closest('.xrow');
+      openReason(xrow, id, 'reject');
+      var cbtn = xrow.querySelector('[data-act="confirm-reject"]');
+      if (cbtn) cbtn.setAttribute('data-act', 'x-confirm-reject');
+    }
+    else if (act === 'x-confirm-reject') {
+      var xr = el.closest('.xrow');
+      var ta2 = xr.querySelector('.reason-in');
+      var rsn = ta2 ? ta2.value.trim() : '';
+      if (!rsn) { ta2.classList.add('need'); ta2.focus(); return; }
+      el.disabled = true;
+      api('/erp/api/exp/reject', { method: 'POST', body: { id: id, reason: rsn } }).then(function () {
+        expRemoveRow(id, t('x_rejected_ok'));
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-export') {
+      el.disabled = true;
+      api('/erp/api/exp/export', { method: 'POST', body: { id: id } }).then(function (r) {
+        if ((r.queued || []).length) expRemoveRow(id, t('x_exported_ok'));
+        else { el.disabled = false; toast(((r.skipped || [])[0] || {}).reason || t('act_failed'), 'err'); }
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-recheck') {
+      el.disabled = true;
+      api('/erp/api/exp/recheck', { method: 'POST', body: { id: id } }).then(function (r) {
+        if ((r.verified || []).length) expRemoveRow(id, t('x_verified_ok'));
+        else { el.disabled = false; toast(t('x_not_found'), 'warn'); }
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-bulk-approve' || act === 'x-bulk-export') {
+      var xids = expSelectedIds();
+      if (!xids.length) return;
+      el.disabled = true;
+      var ep = act === 'x-bulk-approve' ? '/erp/api/exp/approve' : '/erp/api/exp/export';
+      api(ep, { method: 'POST', body: { ids: xids } }).then(function (r) {
+        var okIds = (r.approved || r.queued || []).map(function (o) { return o.id; });
+        okIds.forEach(function (i) { expRemoveRow(i); });
+        var blocked = (r.blocked || r.skipped || []).length;
+        toast((act === 'x-bulk-approve' ? t('x_approved_n') : t('x_exported_ok')).replace('{n}', okIds.length) +
+              (blocked ? ' · ' + t('x_blocked_n').replace('{n}', blocked) : ''),
+              blocked ? 'warn' : 'ok');
+        var xb = $('#xBulk'); if (xb) { xb.hidden = true; xb.innerHTML = ''; }
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-bulk-clear') {
+      $$('.xrow input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      updateExpBulk();
+    }
+
+    /* --- custody --- */
+    else if (act === 'retry_custody') loadCustody();
+
     /* --- setup --- */
     else if (act === 'retry_setup') loadSetup();
     else if (act === 'st-rule-toggle') {
@@ -1112,15 +1245,21 @@
       var sg = el.closest('.dsugg');
       if (sg) updateDrawerSum(sg);
     }
+    else if (el.matches && el.matches('[data-act="x-sel"]')) updateExpBulk();
   });
 
   document.addEventListener('input', (function () {
     var tmr = null;
     return function (ev) {
-      if (ev.target.id !== 'bkSearch') return;
-      clearTimeout(tmr);
-      var v = ev.target.value;
-      tmr = setTimeout(function () { bankP.q = v.trim(); bankP.p = 1; pushBankHash(); }, 350);
+      if (ev.target.id === 'bkSearch') {
+        clearTimeout(tmr);
+        var v = ev.target.value;
+        tmr = setTimeout(function () { bankP.q = v.trim(); bankP.p = 1; pushBankHash(); }, 350);
+      } else if (ev.target.id === 'xSearch') {
+        clearTimeout(tmr);
+        var v2 = ev.target.value;
+        tmr = setTimeout(function () { expP.q = v2.trim(); expP.o = 0; pushExpHash(); }, 350);
+      }
     };
   })());
 
@@ -1401,6 +1540,228 @@
     if (out) out.textContent = fmtAmt(sum);
   }
 
+  /* ================= المصاريف Expenses (V4 re-shell) ================= */
+  var expP = { tab: 'pending', q: '', o: 0 };
+  var EXP_LIMIT = 60;
+
+  function expHash() {
+    var ps = new URLSearchParams();
+    if (expP.tab !== 'pending') ps.set('tab', expP.tab);
+    if (expP.q) ps.set('q', expP.q);
+    if (expP.o > 0) ps.set('o', String(expP.o));
+    var qs = ps.toString();
+    return '#exp' + (qs ? '?' + qs : '');
+  }
+  function pushExpHash() {
+    var h = expHash();
+    if (location.hash !== h) location.hash = h;
+    else loadExp();
+  }
+
+  function expSelectedIds() {
+    return $$('.xrow input[data-act="x-sel"]:checked').map(function (c) { return c.getAttribute('data-id'); });
+  }
+
+  function expRowHtml(r) {
+    var tab = expP.tab;
+    var acts = '';
+    if (tab === 'pending' || tab === 'needs_action') {
+      acts = '<button class="btn primary xs" data-act="x-approve" data-id="' + esc(r.expense_id) + '">' + esc(t('x_approve')) + '</button>' +
+             '<button class="btn danger-ghost xs" data-act="x-reject" data-id="' + esc(r.expense_id) + '">' + esc(t('x_reject')) + '</button>' +
+             '<button class="btn ghost xs" data-act="x-edit" data-id="' + esc(r.expense_id) + '">' + esc(t('x_edit')) + '</button>';
+    } else if (tab === 'approved') {
+      acts = '<button class="btn primary xs" data-act="x-export" data-id="' + esc(r.expense_id) + '">' + esc(t('x_export')) + '</button>';
+    } else if (tab === 'exported') {
+      acts = '<button class="btn ghost xs" data-act="x-recheck" data-id="' + esc(r.expense_id) + '">' + esc(t('x_recheck')) + '</button>';
+    }
+    var missing = (r.missing_fields || []).length
+      ? '<span class="tag bad">' + esc(t('x_missing')) + esc((r.missing_fields || []).join('، ')) + '</span>' : '';
+    var bank = r.bank_txn_id
+      ? '<a class="tag soft" href="#match">' + esc(t('x_bank_ok')) + '</a>'
+      : '<a class="tag" href="#match" title="' + esc(t('x_open_match')) + '">' + esc(t('x_bank_no')) + '</a>';
+    var receipt = r.receipt_url
+      ? '<button class="btn ghost xs" data-act="x-receipt" data-url="' + esc(r.receipt_url) + '">🧾 ' + esc(t('x_receipt')) + '</button>'
+      : '<span class="tag">' + esc(t('x_no_receipt')) + '</span>';
+    return '<div class="wq-row xrow" data-id="' + esc(r.expense_id) + '">' +
+      '<div class="c-sel"><input type="checkbox" data-act="x-sel" data-id="' + esc(r.expense_id) + '"></div>' +
+      '<div class="wq-main" data-act="x-detail" data-id="' + esc(r.expense_id) + '" style="cursor:pointer">' +
+        '<div class="wq-top"><span class="amt out">' + fmtAmt(r.amount_sar) + ' <i>' + esc(t('sar')) + '</i></span>' +
+        (r.apartment ? '<span class="tag">' + esc(r.apartment) + '</span>' : '') +
+        '<span class="tag soft">' + esc(r.concept || r.category || '') + '</span>' + missing + bank + '</div>' +
+        '<div class="wq-sub"><code>' + esc(r.expense_date || '') + '</code> · ' + esc(t('x_by')) + ' ' + esc(r.submitter || '—') +
+        (r.ouja_reference ? ' · <code>' + esc(r.ouja_reference) + '</code>' : '') +
+        (r.last_error_message ? ' · <span class="tag bad">' + esc(r.last_error_message.slice(0, 60)) + '</span>' : '') + '</div>' +
+      '</div>' +
+      '<div class="wq-actions">' + receipt + acts + '</div>' +
+      '<div class="wq-reason" hidden></div>' +
+    '</div>';
+  }
+
+  function renderExp(d, append) {
+    store.D.exp = d;
+    var tabs = d.tabs || {};
+    var chips = ['pending', 'approved', 'exported', 'verified', 'needs_action'].map(function (k) {
+      return '<button class="fchip' + (expP.tab === k ? ' on' : '') + '" data-act="x-tab" data-tab="' + k + '">' +
+        esc(t('x_' + k)) + (tabs[k] !== undefined ? ' <b>' + tabs[k] + '</b>' : '') + '</button>';
+    }).join('');
+    var rowsHtml = (d.rows || []).map(expRowHtml).join('');
+    var moreBtn = (d.total > expP.o + (d.rows || []).length)
+      ? '<div class="grp-more"><button class="btn ghost sm" data-act="x-more">' + esc(t('x_more')) +
+        ' (' + (d.total - expP.o - (d.rows || []).length) + ')</button></div>' : '';
+    if (append) {
+      var list = $('#xList');
+      if (list) { list.insertAdjacentHTML('beforeend', rowsHtml); var gm = $('#xMore'); if (gm) gm.outerHTML = '<div id="xMore">' + moreBtn + '</div>'; }
+      return;
+    }
+    $('#view').innerHTML =
+      '<div class="card bank-bar">' +
+        '<div class="bb-row">' +
+          '<input id="xSearch" class="in search" type="search" placeholder="' + esc(t('x_search')) + '" value="' + esc(expP.q) + '">' +
+          (d.dryrun_on ? '<span class="tag warnt">' + esc(t('x_dryrun')) + '</span>' : '') +
+        '</div>' +
+        '<div class="bb-chips">' + chips + '</div>' +
+      '</div>' +
+      '<div class="card grp"><div class="grp-list" id="xList">' +
+        (rowsHtml || '<div class="state-card"><div class="state-h">' + esc(t('x_empty')) + '</div></div>') +
+      '</div><div id="xMore">' + moreBtn + '</div></div>' +
+      '<div class="bulkbar" id="xBulk" hidden></div>' +
+      '<div id="xModal" class="drawer" hidden></div>';
+    restoreScroll('exp');
+  }
+
+  function loadExp(append) {
+    if (!append) $('#view').innerHTML = skeleton(6);
+    var ps = new URLSearchParams();
+    ps.set('tab', expP.tab); ps.set('limit', String(EXP_LIMIT)); ps.set('offset', String(expP.o));
+    if (expP.q) ps.set('q', expP.q);
+    api('/erp/api/exp?' + ps.toString()).then(function (d) { renderExp(d, append); })
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_exp', srvMsg(e)); });
+  }
+
+  function updateExpBulk() {
+    var ids = expSelectedIds();
+    var bar = $('#xBulk');
+    if (!bar) return;
+    if (!ids.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+    bar.hidden = false;
+    var btn = expP.tab === 'approved'
+      ? '<button class="btn primary sm" data-act="x-bulk-export">' + esc(t('x_export')) + '</button>'
+      : '<button class="btn primary sm" data-act="x-bulk-approve">' + esc(t('x_approve')) + '</button>';
+    bar.innerHTML = '<b>' + ids.length + '</b> ' + esc(t('bulk_selected')) + ' ' + btn +
+      ' <button class="btn ghost sm" data-act="x-bulk-clear">' + esc(t('bulk_clear')) + '</button>';
+  }
+
+  function expRemoveRow(id, msg) {
+    var row = document.querySelector('.xrow[data-id="' + id + '"]');
+    if (row) removeRow(row);
+    if (msg) toast(msg);
+  }
+
+  function expReceiptLightbox(url) {
+    var m = $('#xModal');
+    if (!m) return;
+    var driveId = (url.match(/[-\w]{25,}/) || [])[0];
+    var img = driveId ? 'https://drive.google.com/thumbnail?id=' + driveId + '&sz=w1200' : url;
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('x_receipt')) + '</h2>' +
+      '<a class="btn ghost xs" href="' + esc(url) + '" target="_blank" rel="noopener">↗</a>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div>' +
+      '<div class="drawer-body" style="text-align:center">' +
+      '<img id="xRcImg" src="' + esc(img) + '" alt="receipt" style="max-width:100%;border-radius:10px">' +
+      '</div></div>';
+    var im = $('#xRcImg');
+    if (im) im.addEventListener('error', function () {
+      im.outerHTML = '<div class="state-sub" style="padding:20px 0">' + esc(t('x_no_receipt')) +
+        ' — <a href="' + esc(url) + '" target="_blank" rel="noopener">↗</a></div>';
+    });
+  }
+
+  function expDetail(id) {
+    var m = $('#xModal');
+    if (!m) return;
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="drawer-body">' + skeleton(4) + '</div></div>';
+    api('/erp/api/exp/detail?id=' + encodeURIComponent(id)).then(function (d) {
+      var v = d.view || {};
+      var tl = (d.timeline || []).slice(-12).reverse().map(function (ev) {
+        return '<div class="wq-sub"><code>' + esc((ev.at || '').slice(0, 16)) + '</code> ' + esc(ev.label_ar || ev.label || ev.kind || '') + '</div>';
+      }).join('');
+      m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(v.concept || v.category || '') + '</h2>' +
+        '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body">' +
+        '<div class="wq-top" style="margin-bottom:8px"><span class="amt out">' + fmtAmt(v.amount_sar) + ' <i>' + esc(t('sar')) + '</i></span>' +
+        '<span class="tag">' + esc(v.apartment || '—') + '</span><code>' + esc(v.expense_date || '') + '</code>' +
+        (d.bank_txn_id ? '<a class="tag soft" href="#match">' + esc(t('x_bank_ok')) + '</a>' : '<span class="tag">' + esc(t('x_bank_no')) + '</span>') + '</div>' +
+        (v.description ? '<div class="wq-desc">' + esc(v.description) + '</div>' : '') +
+        '<div class="wq-sub">' + esc(t('x_by')) + ' ' + esc(v.submitter || '—') +
+          (v.ouja_reference ? ' · <code>' + esc(v.ouja_reference) + '</code>' : '') +
+          (v.hostaway_expense_id ? ' · HA <code>' + esc(v.hostaway_expense_id) + '</code>' : '') + '</div>' +
+        (v.receipt_url ? '<div style="margin:10px 0"><button class="btn ghost sm" data-act="x-receipt" data-url="' + esc(v.receipt_url) + '">🧾 ' + esc(t('x_receipt')) + '</button></div>' : '') +
+        '<h3 style="font-size:12.5px;margin:14px 0 4px">' + esc(t('x_timeline')) + '</h3>' + (tl || '<div class="wq-sub">—</div>') +
+        '</div></div>';
+    }).catch(function (e) {
+      m.innerHTML = '<div class="drawer-card card"><div class="drawer-body">' + errorCard('x-modal-close', srvMsg(e)) + '</div></div>';
+    });
+  }
+
+  function expEditDrawer(id) {
+    var d = store.D.exp;
+    var r = null;
+    (d && d.rows || []).forEach(function (x) { if (String(x.expense_id) === String(id)) r = x; });
+    if (!r) return;
+    var m = $('#xModal');
+    m.hidden = false;
+    function f(label, key, val, type) {
+      return '<label class="cp-f"><span>' + esc(label) + '</span><input class="in" id="xe_' + key + '" type="' + (type || 'text') + '" value="' + esc(val == null ? '' : val) + '"></label>';
+    }
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('x_edit')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body">' +
+      '<div class="cp-grid" style="grid-template-columns:1fr 1fr">' +
+      f(t('x_amount'), 'amount', r.amount_sar, 'number') +
+      f(t('x_date'), 'expense_date', r.expense_date, 'date') +
+      f(t('x_apartment'), 'apartment', r.apartment) +
+      f(t('x_category'), 'category', r.category) +
+      f(t('x_vendor'), 'vendor', r.vendor) +
+      f(t('x_note'), 'note', r.description) +
+      '</div><div class="cp-btns">' +
+      '<button class="btn primary sm" data-act="x-edit-save" data-id="' + esc(id) + '">' + esc(t('save')) + '</button>' +
+      '<button class="btn ghost sm" data-act="x-modal-close">' + esc(t('cancel')) + '</button>' +
+      '</div></div></div>';
+  }
+
+  /* ================= العهد Custody ================= */
+  function renderCustody(d) {
+    var rows = (d.employees || []).map(function (e) {
+      var open = Number(e.outstanding) > 0;
+      return '<tr><td><b>' + esc(e.account) + '</b></td>' +
+        '<td class="c-amt"><code>' + fmtAmt(e.issued) + '</code></td>' +
+        '<td class="c-amt"><code>' + fmtAmt(e.settled) + '</code></td>' +
+        '<td class="c-amt">' + (open ? '<code class="amt out">' + fmtAmt(e.outstanding) + '</code>'
+                                      : '<span class="tag soft">' + esc(t('c_done')) + '</span>') + '</td>' +
+        '<td class="c-amt"><code>' + (e.entries || 0) + '</code></td></tr>';
+    }).join('');
+    $('#view').innerHTML =
+      '<section class="card grp">' +
+        '<header class="grp-h"><span class="grp-ico">🧰</span><h2>' + esc(t('c_title')) + '</h2>' +
+        '<span class="cnt">' + (d.open || 0) + ' ' + esc(t('c_open')) + '</span></header>' +
+        '<div class="grp-hint" style="padding-bottom:10px">' + esc(t('c_explain')) + '</div>' +
+        (rows
+          ? '<div class="table-card" style="border:none;box-shadow:none"><table class="btable"><thead><tr>' +
+            '<th>' + esc(t('c_employee')) + '</th><th>' + esc(t('c_issued')) + '</th><th>' + esc(t('c_settled')) + '</th>' +
+            '<th>' + esc(t('c_outstanding')) + '</th><th>' + esc(t('c_entries')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+            '<div class="prev-stats" style="padding:0 20px 6px"><span class="pstat warn"><b>' + fmtAmt(d.outstanding_total || 0) + '</b>' + esc(t('c_total')) + '</span></div>'
+          : '<div class="state-card"><div class="state-h">' + esc(t('c_empty')) + '</div></div>') +
+        '<div class="grp-hint" style="padding-bottom:8px">' + esc(t('c_outstanding_note')) + '</div>' +
+        '<div class="grp-cta"><a class="btn primary sm" href="#match?engine=founder">' + esc(t('c_settle_cta')) + '</a></div>' +
+      '</section>';
+    restoreScroll('custody');
+  }
+
+  function loadCustody() {
+    $('#view').innerHTML = skeleton(4);
+    api('/erp/api/custody').then(function (d) { store.D.custody = d; renderCustody(d); })
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_custody', srvMsg(e)); });
+  }
+
   /* ================= الإعدادات Setup ================= */
   function ruleRowHtml(r, isAdmin) {
     var m = r.matcher || {};
@@ -1501,6 +1862,15 @@
         loadMatch();
       }
     },
+    exp: {
+      show: function (params) {
+        expP.tab = params.get('tab') || 'pending';
+        expP.q = params.get('q') || '';
+        expP.o = Math.max(0, Number(params.get('o') || 0));
+        loadExp();
+      }
+    },
+    custody: { show: function () { loadCustody(); } },
     bank: {
       show: function (params) {
         bankP.f = params.get('f') || 'all';
@@ -1529,6 +1899,8 @@
     else if (store.view === 'bank') { var ph = parseHash(); VIEWS.bank.show(ph.params); }
     else if (store.view === 'setup') loadSetup();
     else if (store.view === 'match' && store.D.match) renderMatch(store.D.match);
+    else if (store.view === 'exp' && store.D.exp) renderExp(store.D.exp);
+    else if (store.view === 'custody' && store.D.custody) renderCustody(store.D.custody);
   }
   $('#langBtn').addEventListener('click', function () {
     store.lang = store.lang === 'ar' ? 'en' : 'ar';

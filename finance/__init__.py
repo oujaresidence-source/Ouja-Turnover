@@ -38,7 +38,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s4"
+ERP_VERSION = "2.0.0-s5"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -312,6 +312,40 @@ async def _h_api_match_log(request):
     return api.jres({"ok": True, "log": api.match_log_recent()})
 
 
+async def _h_api_exp(request):
+    resp = await api.B._api_exp4_overview(request)
+    try:
+        payload = json.loads(resp.body)
+        if payload.get("ok"):
+            return api.jres(api.exp_attach_bank(payload), resp.status)
+    except Exception:
+        pass
+    return resp
+
+
+async def _h_api_exp_detail(request):
+    resp = await api.B._api_exp4_detail(request)
+    try:
+        payload = json.loads(resp.body)
+        if payload.get("ok"):
+            ex = api.B._expenses.get(str(request.query.get("id") or ""))
+            payload["bank_txn_id"] = (ex or {}).get("bank_txn_id") or ""
+            return api.jres(payload, resp.status)
+    except Exception:
+        pass
+    return resp
+
+
+def _exp_delegate(name):
+    async def h(request):
+        return await getattr(api.B, name)(request)
+    return h
+
+
+async def _h_api_custody(request):
+    return api.jres(api.custody_payload())
+
+
 async def _h_api_contracts(request):
     return api.jres(api.contracts_list())
 
@@ -348,5 +382,13 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/match/daftra", _guarded(_h_api_match_daftra, write=True))
     app.router.add_post("/erp/api/match/promote", _guarded(_h_api_match_promote, write=True))
     app.router.add_get("/erp/api/match/log", _guarded(_h_api_match_log))
+    app.router.add_get("/erp/api/exp", _guarded(_h_api_exp))
+    app.router.add_get("/erp/api/exp/detail", _guarded(_h_api_exp_detail))
+    app.router.add_post("/erp/api/exp/approve", _guarded(_exp_delegate("_api_exp4_approve"), write=True))
+    app.router.add_post("/erp/api/exp/reject", _guarded(_exp_delegate("_api_exp4_reject"), write=True))
+    app.router.add_post("/erp/api/exp/edit", _guarded(_exp_delegate("_api_exp4_edit"), write=True))
+    app.router.add_post("/erp/api/exp/export", _guarded(_exp_delegate("_api_exp4_export"), write=True))
+    app.router.add_post("/erp/api/exp/recheck", _guarded(_exp_delegate("_api_exp4_recheck"), write=True))
+    app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True
