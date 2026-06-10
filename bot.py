@@ -11282,7 +11282,8 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 14px;transition:.15s;box-shadow:var(--sh-xs);position:relative;overflow:hidden}
 .kpi:hover{box-shadow:var(--sh-sm);border-color:var(--line-strong)}
 .kpi-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
-.kpi-ic{width:26px;height:26px;border-radius:7px;background:var(--gold-soft);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:12.5px}
+.kpi-ic{display:none}                            /* mockup KPI cards carry no icon badge — drops the emoji stat glyphs */
+.kpi-ic-x{width:26px;height:26px;border-radius:7px;background:var(--gold-soft);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:12.5px}
 .kpi-ic.g{background:var(--green-soft);color:var(--green)} .kpi-ic.b{background:var(--blue-soft);color:var(--blue)} .kpi-ic.r{background:var(--red-soft);color:var(--red)} .kpi-ic.y{background:var(--yellow-soft);color:var(--yellow)} .kpi-ic.p{background:var(--purple-soft);color:var(--purple)}
 .kpi-val{font-size:23px;font-weight:700;letter-spacing:-.5px;line-height:1.05;color:var(--text);font-family:var(--font-mono)}
 .kpi-val.gold{color:var(--gold)} .kpi-val.green{color:var(--green)} .kpi-val.red{color:var(--red)}
@@ -11674,22 +11675,23 @@ table.data .num{font-family:var(--font-mono);text-align:end}
 /* Calendar heatmap (forward pace view) */
 .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
 @media (max-width:600px){.calgrid{gap:2px}}
-.calday{position:relative;padding:8px 6px 6px;border-radius:8px;cursor:pointer;min-height:62px;border:1.5px solid transparent;transition:.12s;background:var(--surface-2)}
+.calday{position:relative;padding:8px 6px 6px;border-radius:10px;cursor:pointer;min-height:62px;border:1.5px solid var(--line);transition:.12s;background:var(--tint)}
 @media (max-width:600px){.calday{padding:5px 3px 3px;min-height:50px;border-radius:6px}}
 @media (max-width:600px){.calday .cd-dnum{font-size:11px}}
 @media (max-width:600px){.calday .cd-pct{font-size:8.5px;top:3px;inset-inline-end:3px}}
 @media (max-width:600px){.calday .cd-wd{display:none}}
 @media (max-width:600px){.calday .cd-evt{font-size:7.5px;bottom:2px;inset-inline-start:2px;inset-inline-end:2px}}
-.calday:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:var(--sh-sm)}
-.calday.sel{border-color:var(--gold);background:var(--gold-tint)}
-.calday.cal-low{background:#fae3e3}            /* <40% */
-.calday.cal-mid{background:#faeed1}            /* 40-69% */
-.calday.cal-high{background:#dcf3e6}           /* 70-89% */
-.calday.cal-full{background:#a3e0bd}           /* 90%+ */
-html[data-theme="dark"] .calday.cal-low{background:#2e1414}
-html[data-theme="dark"] .calday.cal-mid{background:#2d2210}
-html[data-theme="dark"] .calday.cal-high{background:#0f2e1f}
-html[data-theme="dark"] .calday.cal-full{background:#1a4d33}
+.calday:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:var(--sh-sm)}
+.calday.sel{border-color:var(--accent);background:var(--accent-soft)}
+.calday.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.calday.cal-low{background:var(--bad-bg)}      /* <40% */
+.calday.cal-mid{background:var(--warn-bg)}     /* 40-69% */
+.calday.cal-high{background:var(--good-bg)}    /* 70-89% */
+.calday.cal-full{background:#CDEBD7}           /* 90%+ */
+html[data-theme="dark"] .calday.cal-low{background:#3A1412}
+html[data-theme="dark"] .calday.cal-mid{background:#332A05}
+html[data-theme="dark"] .calday.cal-high{background:#0C2A17}
+html[data-theme="dark"] .calday.cal-full{background:#13351F}
 .calday .cd-dnum{font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--text);line-height:1}
 .calday .cd-pct{position:absolute;top:6px;inset-inline-end:6px;font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--text-2)}
 .calday .cd-wd{font-size:9px;color:var(--mut);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
@@ -11958,7 +11960,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_calendar">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_calendar">📅 تقويم الإيراد · ٦٠ يوم قادمة</div>
+            <div class="page-title" id="t_calendar">تقويم الإيراد · ٦٠ يوم قادمة</div>
             <div class="page-sub" id="t_calendar_sub"></div>
           </div>
           <div class="page-tools">
@@ -12143,7 +12145,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_plab">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_plab">🧪 مختبر التسعير</div>
+            <div class="page-title" id="t_plab">مختبر التسعير</div>
             <div class="page-sub" id="t_plab_sub"></div>
           </div>
           <div class="page-tools">
@@ -12159,7 +12161,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_fb">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_fb">🧠 المركز المالي</div>
+            <div class="page-title" id="t_fb">المركز المالي</div>
             <div class="page-sub" id="t_fb_sub"></div>
           </div>
           <div class="page-tools">
@@ -12173,7 +12175,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_gw">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_gw">📱 موقع الضيوف</div>
+            <div class="page-title" id="t_gw">موقع الضيوف</div>
             <div class="page-sub" id="t_gw_sub"></div>
           </div>
           <div class="page-tools">
@@ -12258,7 +12260,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_clean_center">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_cc_title">🧭 مركز التنظيف</div>
+            <div class="page-title" id="t_cc_title">مركز التنظيف</div>
             <div class="page-sub" id="t_cc_sub">اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.</div>
           </div>
           <div class="page-tools">
@@ -12284,7 +12286,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_clean">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_clean">🧹 جدول التنظيف العميق</div>
+            <div class="page-title" id="t_clean">جدول التنظيف العميق</div>
             <div class="page-sub" id="t_clean_sub"></div>
           </div>
           <div class="page-tools">
@@ -12409,7 +12411,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_listings">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_listings">🏘️ سجل الشقق</div>
+            <div class="page-title" id="t_listings">سجل الشقق</div>
             <div class="page-sub" id="t_listings_sub"></div>
           </div>
           <div class="page-tools">
@@ -12435,7 +12437,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_quality">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_quality">⭐ جودة التنظيف</div>
+            <div class="page-title" id="t_quality">جودة التنظيف</div>
             <div class="page-sub" id="t_quality_sub"></div>
           </div>
           <div class="page-tools">
@@ -12468,7 +12470,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_guests">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_guests">👤 سجل الضيوف</div>
+            <div class="page-title" id="t_guests">سجل الضيوف</div>
             <div class="page-sub" id="t_guests_sub"></div>
           </div>
           <div class="page-tools">
@@ -12507,7 +12509,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_learn">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_learn">📚 ما تعلّمه المساعد</div>
+            <div class="page-title" id="t_learn">ما تعلّمه المساعد</div>
             <div class="page-sub" id="t_learn_sub"></div>
           </div>
           <div class="page-tools">
@@ -12589,7 +12591,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <!-- ============ FINANCE / ACCOUNTING (المالية) ============ -->
       <section class="view" id="view_finance">
         <div class="page-head">
-          <div><div class="page-title" id="t_finance">🧾 المالية</div><div class="page-sub" id="t_finance_sub">تقرير شهري للمُلّاك</div></div>
+          <div><div class="page-title" id="t_finance">المالية</div><div class="page-sub" id="t_finance_sub">تقرير شهري للمُلّاك</div></div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="finImportExpenses()" id="finImpBtn">⬇ <span id="t_fin_imp">استيراد مصاريف Hostaway</span></button>
             <button class="btn ghost sm" onclick="openOwnersTable()" id="finOwnersBtn">👥 <span id="t_fin_owners">المُلّاك والرسوم</span></button>
@@ -12798,7 +12800,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_reviews">
         <div class="page-head">
           <div>
-            <div class="page-title" id="rv_pt">⭐ المراجعات</div>
+            <div class="page-title" id="rv_pt">المراجعات</div>
             <div class="page-sub" id="t_reviews_sub">—</div>
           </div>
           <div class="page-tools">
@@ -12881,7 +12883,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_tickets">
         <div class="page-head">
           <div>
-            <div class="page-title" id="tk_pt">🔧 الصيانة</div>
+            <div class="page-title" id="tk_pt">الصيانة</div>
             <div class="page-sub" id="tk_ps">سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً</div>
           </div>
           <div class="page-tools">
@@ -13196,8 +13198,8 @@ const T = {
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
     clean_center:'مركز التنظيف',
-    cc_title:'🧭 مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
-    cc_help_t:'🧭 تنظيف اليوم بدون تشتت', cc_help_b:'هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.',
+    cc_title:'مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
+    cc_help_t:'تنظيف اليوم بدون تشتت', cc_help_b:'هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.',
     cc_today:'اليوم', cc_review:'مراجعة', cc_issues:'المشاكل', cc_teams:'الفرق', cc_quality:'الجودة', cc_deep:'التنظيف العميق', cc_settings:'الإعدادات',
     cc_refresh:'تحديث', cc_send_today_reviews:'إرسال مراجعات اليوم إلى Discord', cc_send_today_done:'تم إرسال {sent} مراجعة إلى Discord. تخطينا {skipped}، وفشل {failed}.', cc_send_today_failed:'ما قدرنا نرسل مراجعات اليوم إلى Discord', cc_last_updated:'آخر تحديث', cc_no_urgent:'ما فيه شيء عاجل حاليًا',
     cc_total_jobs:'تنظيفات اليوم', cc_same_day:'دخول اليوم', cc_needs_cleaning:'يحتاج تنظيف', cc_in_progress:'قيد التنفيذ', cc_pending_review:'بانتظار المراجعة', cc_approved:'معتمد', cc_late_risk:'متأخر/خطر', cc_missing_setup:'إعداد ناقص', cc_needs_reshoot:'يحتاج إعادة',
@@ -13209,20 +13211,20 @@ const T = {
     cc_stage_to_clean:'يحتاج تنظيف', cc_stage_in_progress:'قيد التنفيذ', cc_stage_review:'بانتظار المراجعة', cc_stage_approved:'معتمد', cc_stage_redo:'يحتاج إعادة',
     cc_reason_same_day:'دخول اليوم', cc_reason_early_departure:'مغادرة مبكرة', cc_reason_late:'متأخر', cc_reason_issue:'مشكلة', cc_reason_missing_setup:'إعداد ناقص',
     listings:'الشقق',
-    listings_title:'🏘️ سجل الشقق (المصدر الأساسي)',
+    listings_title:'سجل الشقق (المصدر الأساسي)',
     listings_sub:'كل الوحدات من Hostaway. هنا تحدّد المجموعة، الحد الأدنى للسعر، وفريق التنظيف الداخلي. الشقة الجديدة تظهر "تحتاج إعداد" لين تحدّد لها مجموعة وحد سعر.',
-    listings_pull:'📥 سحب من Hostaway', listings_last_sync:'آخر مزامنة', listings_never:'لم تتم بعد',
+    listings_pull:'سحب من Hostaway', listings_last_sync:'آخر مزامنة', listings_never:'لم تتم بعد',
     listings_dir_field:'حقل الوصول في Hostaway',
     ls_new:'جديدة', ls_changed:'تغيّرت', ls_inactive:'غير نشطة', ls_needs:'تحتاج إعداد', ls_active:'نشطة', ls_total:'الإجمالي',
     ls_h_unit:'الاسم الداخلي', ls_h_public:'الاسم العام', ls_h_addr:'العنوان', ls_h_beds:'غرف', ls_h_dir:'الوصول', ls_h_group:'المجموعة', ls_h_floor:'حد السعر', ls_h_oujact:'OujaCT',
-    ls_badge_new:'✨ جديدة', ls_badge_changed:'⟳ تغيّرت', ls_badge_inactive:'⏸ غير نشطة', ls_badge_needs:'⚠ تحتاج إعداد',
+    ls_badge_new:'جديدة', ls_badge_changed:'⟳ تغيّرت', ls_badge_inactive:'⏸ غير نشطة', ls_badge_needs:'تحتاج إعداد',
     ls_dir_link:'رابط', ls_no_link:'لا يوجد', ls_search:'ابحث عن شقة…', ls_saved:'حُفظ ✓', ls_empty:'ما فيه شقق بعد — اضغط "سحب من Hostaway".', ls_group_ph:'مثال: الملقا', ls_floor_ph:'ر.س',
-    ct_title:'🧼 فريق التنظيف الداخلي (OujaCT)',
+    ct_title:'فريق التنظيف الداخلي (OujaCT)',
     ct_sub:'اختر الشقق اللي يغطيها الفريق الداخلي. لها قنوات تسليم خاصة بالإنجليزية في Discord (اليوم + بكرة)، وجدول يومي مرتّب: تسجيل الدخول اليوم أولاً.',
-    ct_assigned:'معيّنة', ct_apply:'⚡ تطبيق / تحديث القنوات', ct_apply_hint:'ينشئ/يعيد تسمية قنوات تسليم اليوم وبكرة فوراً (بدون انتظار ١٢ ص).',
+    ct_assigned:'معيّنة', ct_apply:'تطبيق / تحديث القنوات', ct_apply_hint:'ينشئ/يعيد تسمية قنوات تسليم اليوم وبكرة فوراً (بدون انتظار ١٢ ص).',
     ct_none:'ما فيه شقق معيّنة بعد — فعّل الخانة جنب أي شقة تحت.', ct_search:'ابحث…', ct_applied:'تم —', ct_changed:'قناة محدّثة', ct_no_change:'القنوات محدّثة — ما فيه جديد.', ct_need_pull:'اسحب الشقق من Hostaway أول (من صفحة الشقق).',
     ct_route_copy:'نسخ رابط خطة Oujact', ct_route_copied:'نُسخ رابط المسار ✓', ct_missing_map:'الإحداثيات ناقصة', ct_maps_ph:'الصق رابط Google Maps للشقة', ct_dispatch:'خطة اليوم', ct_no_token:'ضع OUJACT_ROUTE_TOKEN (أو CLEANING_TOKEN) في Railway أول', ct_urgent:'عاجلة', ct_open_route:'افتح صفحة المسار',
-    ct_geo_ph:'ابحث باسم الشقة أو العنوان', ct_geo_save:'🔎 ابحث واحفظ الإحداثيات', ct_geo_ok:'إحداثيات محفوظة', ct_geo_need:'ابحث واحفظ الإحداثيات عشان ETA يشتغل', ct_geo_saved:'تم حفظ الإحداثيات ✓',
+    ct_geo_ph:'ابحث باسم الشقة أو العنوان', ct_geo_save:'ابحث واحفظ الإحداثيات', ct_geo_ok:'إحداثيات محفوظة', ct_geo_need:'ابحث واحفظ الإحداثيات عشان ETA يشتغل', ct_geo_saved:'تم حفظ الإحداثيات ✓',
     exp_sync:'تحديث المزامنة', exp_status:'حالة المزامنة',
     exp_v2:'المصاريف V2', exp_reconcile_repair:'مطابقة وإصلاح',
     exp_three_source:'تحليل المصادر الثلاثة',
@@ -13252,9 +13254,9 @@ const T = {
     exp_remaining:'المبلغ المتبقي', exp_split_preview:'معاينة التقسيم', exp_split_confirm:'اعتماد التقسيم',
     exp_no_fake_verified:'لا تعرض علامة الصح إلا بعد التحقق من Hostaway',
     exp_why_not:'ليش ما ترحّل؟', exp_download_diag:'تنزيل تقرير التشخيص CSV',
-    clean_title:'🧹 جدول التنظيف العميق',
+    clean_title:'جدول التنظيف العميق',
     clean_sub:'كل وحدة تُنظَّف عميق كل ٤٥-٦٠ يوم. الجدول يتجدّد تلقائياً ويتأكّد ٩م الليلة قبل.',
-    cp_title:'📷 تقارير صور التنظيف', cp_sub:'المنظّف يرفع الصور من رابط المسار. المدير يعتمد أو يرفض من الداشبورد أو Discord، والأرشيف يبقى محفوظ.',
+    cp_title:'تقارير صور التنظيف', cp_sub:'المنظّف يرفع الصور من رابط المسار. المدير يعتمد أو يرفض من الداشبورد أو Discord، والأرشيف يبقى محفوظ.',
     cp_refresh:'تحديث التقارير', cp_templates:'تعديل قائمة الصور', cp_pending:'قيد مراجعة المدير',
     cp_approved:'تم اعتماد التنظيف', cp_rejected:'تم رفض التقرير', cp_reshoot:'إعادة تصوير مطلوبة',
     cp_draft:'مسودة', cp_uploading:'جاري الرفع', cp_submitted:'مرسل للمراجعة', cp_issue:'فيه مشكلة',
@@ -13269,8 +13271,8 @@ const T = {
     cp_instr_ar:'تعليمات التصوير بالعربي', cp_instr_en:'تعليمات التصوير بالإنجليزي', cp_save_template:'حفظ القائمة',
     cp_damage_check:'فحص الأضرار', cp_supplies:'المستلزمات', cp_tv_remote:'ريموت التلفزيون',
     clean_stat_total:'إجمالي الوحدات', clean_stat_overdue:'متأخّرة', clean_stat_scheduled:'مجدولة', clean_stat_tomorrow:'مؤكدة بكرة',
-    clean_link_title:'🔗 الرابط لشركة التنظيف',
-    clean_link_copy:'انسخ', clean_link_open:'افتح', clean_link_missing:'⚠ متغيّر CLEANING_TOKEN غير معرّف في Railway — أضفه أولاً لإنشاء الرابط',
+    clean_link_title:'الرابط لشركة التنظيف',
+    clean_link_copy:'انسخ', clean_link_open:'افتح', clean_link_missing:'متغيّر CLEANING_TOKEN غير معرّف في Railway — أضفه أولاً لإنشاء الرابط',
     clean_filter_all:'الكل', clean_filter_overdue:'متأخّرة', clean_filter_soon:'قريباً (٧ أيام)', clean_filter_unscheduled:'غير مجدولة',
     clean_unit:'الوحدة', clean_last:'آخر تنظيف', clean_next:'القادم', clean_status:'الحالة', clean_actions:'إجراءات',
     clean_mark_done:'علّم منجز', clean_reschedule:'إعادة جدولة', clean_set_last:'تعديل تاريخ آخر تنظيف',
@@ -13281,23 +13283,23 @@ const T = {
     clean_modal_save:'حفظ', clean_modal_cancel:'إلغاء',
     clean_confirm_done:'تأكيد إنجاز التنظيف لهذي الوحدة اليوم؟',
     copied:'نُسخ ✓',
-    guests:'الضيوف', guests_title:'👤 سجل الضيوف',
+    guests:'الضيوف', guests_title:'سجل الضيوف',
     guests_sub:'كل من تفاعل معنا — أبرز المتكررين والـVIP',
     guests_stat_total:'الإجمالي', guests_stat_vip:'ضيوف VIP', guests_stat_repeat:'عائدون (٢+)',
     guests_filter_all:'الكل', guests_filter_vip:'VIP فقط', guests_filter_repeat:'العائدون',
     guests_search:'ابحث بالاسم/الهاتف…',
     guest_name:'الاسم', guest_stays:'إقامات', guest_nights:'ليالي', guest_last:'آخر تفاعل',
-    guest_no_data:'ما فيه ضيوف بعد', guest_vip_on:'⭐ VIP',
+    guest_no_data:'ما فيه ضيوف بعد', guest_vip_on:'VIP',
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
-    quality:'جودة النظافة', quality_title:'⭐ جودة التنظيف',
+    quality:'جودة النظافة', quality_title:'جودة التنظيف',
     quality_sub:'تقييمات الضيوف لنظافة الوحدات — متوسط كل وحدة + التعليقات',
     quality_stat_sent:'طُلب', quality_stat_resp:'استُجيب', quality_stat_rate:'نسبة الاستجابة', quality_stat_avg:'المتوسط العام',
     quality_unit:'الوحدة', quality_avg:'المتوسط', quality_count:'عدد التقييمات', quality_recent:'آخر تقييم',
     quality_empty:'ما فيه تقييمات بعد · أول تقييم بيوصل بعد ما يدخل ضيف بعد التنظيف العميق',
     quality_comments:'تعليقات',
-    learn_title:'📚 ما تعلّمه المساعد',
+    learn_title:'ما تعلّمه المساعد',
     learn_sub:'الملخصات اللي استخلصها النظام من ردود فريقك — تقدر تعدّل أو تحذف',
     learn_general:'الملخص العام (يطبّق على كل الشقق)', learn_apt:'ملخصات حسب الشقة',
     learn_empty:'ما فيه ملخص بعد · يحتاج تفاعلات أكثر',
@@ -13310,7 +13312,7 @@ const T = {
     learn_bootstrap_confirm:'يقرأ آخر ٣٠٠ محادثة من Hostaway ويستخرج منها دروس لكل شقة. يستغرق ١٠-١٥ دقيقة في الخلفية وتكلفته بسيطة من Claude. متأكد؟',
     learn_bootstrap_started:'بدأ التعلّم التاريخي · بيشتغل في الخلفية',
     learn_bootstrap_running:'⏳ يقرأ المحادثات السابقة الحين… ممكن ياخذ ١٠-١٥ دقيقة. لا تغلق اللوحة.',
-    learn_bootstrap_done:'✅ اكتمل التعلّم التاريخي',
+    learn_bootstrap_done:'اكتمل التعلّم التاريخي',
     learn_bootstrap_scanned:'محادثة مفحوصة', learn_bootstrap_pairs:'سؤال-جواب مستخرج', learn_bootstrap_apts:'شقة تم تلخيصها',
     learn_today:'اليوم', learn_yesterday:'أمس', learn_7d:'٧ أيام', learn_30d:'٣٠ يوم',
     learn_chart1:'نسبة الثقة (٣٠ يوم)', learn_chart2:'معدّل الردود التلقائية (٣٠ يوم)',
@@ -13319,13 +13321,13 @@ const T = {
     learn_stat_replies:'ردود اليوم', learn_stat_auto:'معدّل التلقائي', learn_stat_conf:'متوسط الثقة',
     learn_stat_esc:'تصعيدات اليوم', learn_stat_vs_avg:'مقارنة بمتوسط ٧ أيام',
     learn_event_edited:'مُعدّل', learn_event_sent:'كما هي', learn_event_auto:'تلقائي', learn_event_via:'عبر',
-    calendar:'التقويم', calendar_title:'📅 تقويم الإيراد · ٦٠ يوم قادمة',
+    calendar:'التقويم', calendar_title:'تقويم الإيراد · ٦٠ يوم قادمة',
     calendar_sub:'لون كل يوم = نسبة الإشغال. ضع المؤشر للتفاصيل · اضغط لاختيار مدى للتطبيق الجماعي',
     cal_event:'مناسبة', cal_avg:'متوسط السعر', cal_avail:'فاضي', cal_occ:'مشغول',
     cal_no_events:'لا توجد مناسبات سعودية في هذا النطاق',
     cal_events_legend:'المناسبات',
     cal_pace:'الإشغال', cal_pct:'٪',
-    bulk_title:'⚡ تطبيق جماعي على المدى المحدد',
+    bulk_title:'تطبيق جماعي على المدى المحدد',
     bulk_from:'من', bulk_to:'إلى', bulk_pct:'النسبة', bulk_action:'الإجراء',
     bulk_raise:'رفع', bulk_lower:'خفض', bulk_apply:'طبّق على الكل',
     bulk_select_range:'اختر مدى من الأيام بالضغط عليها',
@@ -13339,7 +13341,7 @@ const T = {
     arrivals:'الوصول القادم', no_arrivals_window:'ما فيه وصول في الـ٣٦ ساعة الجاية',
     arr_signed:'موقّع', arr_unsigned:'غير موقّع', arr_in:'بعد', arr_hours:'ساعة', arr_minutes:'دقيقة',
     arr_now:'الحين', arr_past:'مضى',
-    urgent_title:'🚨 يبيك الحين', urgent_none:'كل شي تحت السيطرة ✓',
+    urgent_title:'يبيك الحين', urgent_none:'كل شي تحت السيطرة ✓',
     urgent_esc:'تصعيد مفتوح', urgent_pending:'رد بانتظار مراجعتك', urgent_unsigned:'عقد غير موقّع · تشيك-إن قريب',
     urgent_age:'منذ', urgent_open:'افتح',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
@@ -13436,42 +13438,42 @@ const T = {
     units_count:'وحدة',
     /* ===== Page-help banner copy (Batch 26) ===== */
     ph:{
-      home:    {t:'👋 أهلاً وسهلاً', b:'هذي الصفحة الرئيسية — كل أرقام اليوم تجي هنا: <b>الإشغال</b>، <b>الإيراد</b>، <b>الشقق الفاضية الليلة</b>، <b>التذاكر العاجلة</b>. أي رقم بلون أحمر = يحتاج انتباه، اضغطه يوديك لتفاصيله. الشريط الجانبي يسار = كل الصفحات.'},
-      inbox:   {t:'✉️ ردود الضيوف والتصعيدات', b:'كل ما المساعد يحضّر رد لضيف بيظهر هنا. <b>أصفر</b> = يحتاج موافقتك (شك في الرد). <b>أحمر</b> = تصعيد، فيه مشكلة جدية. اضغط أي محادثة تشوف النص كامل.'},
+      home:    {t:'أهلاً وسهلاً', b:'هذي الصفحة الرئيسية — كل أرقام اليوم تجي هنا: <b>الإشغال</b>، <b>الإيراد</b>، <b>الشقق الفاضية الليلة</b>، <b>التذاكر العاجلة</b>. أي رقم بلون أحمر = يحتاج انتباه، اضغطه يوديك لتفاصيله. الشريط الجانبي يسار = كل الصفحات.'},
+      inbox:   {t:'ردود الضيوف والتصعيدات', b:'كل ما المساعد يحضّر رد لضيف بيظهر هنا. <b>أصفر</b> = يحتاج موافقتك (شك في الرد). <b>أحمر</b> = تصعيد، فيه مشكلة جدية. اضغط أي محادثة تشوف النص كامل.'},
       today:   {t:'◎ الفاضي الليلة', b:'كل شقة لسا فاضية الليلة، مع <b>السعر الحالي</b> و<b>جدول الخصومات المجدولة</b> الساعة ٢٠، ٢٢، ومنتصف الليل. الهدف: ٩٥٪ إشغال (ما عدا رمضان).'},
-      calendar:{t:'📅 تقويم الـ٦٠ يوم', b:'كل خانة = يوم. اللون يبيّن قوة الإشغال: <b>أخضر</b> = ممتاز، <b>أصفر</b> = متوسط، <b>أحمر</b> = ضعيف. اضغط يوم تشوف اللي حاجز فيه وأي شقق فاضية.'},
+      calendar:{t:'تقويم الـ٦٠ يوم', b:'كل خانة = يوم. اللون يبيّن قوة الإشغال: <b>أخضر</b> = ممتاز، <b>أصفر</b> = متوسط، <b>أحمر</b> = ضعيف. اضغط يوم تشوف اللي حاجز فيه وأي شقق فاضية.'},
       pricing: {t:'$ فرص رفع/تخفيض السعر', b:'البوت يلقى فرص ترفع السعر فيها أو تخفّضه. اضغط أي فرصة، تشوف <b>السبب</b> والـ<b>قبل/بعد</b>. زر "طبّق" يكتب السعر في Hostaway مباشرة.'},
-      strat:   {t:'⚡ الاستراتيجيات المتابَعة', b:'كل فرصة سعر طبقتها = استراتيجية البوت يتابعها يومياً. تشوف هنا: حُجزت ولا لا، الإيراد المتحقق، ومتى انتهت. تقدر <b>توقف</b> أي وحدة.'},
+      strat:   {t:'الاستراتيجيات المتابَعة', b:'كل فرصة سعر طبقتها = استراتيجية البوت يتابعها يومياً. تشوف هنا: حُجزت ولا لا، الإيراد المتحقق، ومتى انتهت. تقدر <b>توقف</b> أي وحدة.'},
       rev:     {t:'∿ الأرقام الكبيرة', b:'إيراد آخر <b>١٢ شهر</b>، مقارنة بالشهر اللي قبله، أداء كل شقة، وتأثير <b>دورة الراتب</b>. تقدر تصدّر CSV — يفتح بـExcel عربي بدون مشاكل.'},
       log:     {t:'≡ كل ما عمله البوت', b:'رسائل، تصعيدات، تغييرات أسعار، تنظيفات، تذاكر — كله مسجّل هنا بتوقيت Riyadh. استخدم الفلتر فوق تركز على نوع معين.'},
-      clean_center:{t:'🧭 مركز التنظيف', b:'هنا المدير يشوف تنظيف اليوم كامل: العاجل، اللي بدأ، اللي ينتظر مراجعة، واللي تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.'},
-      clean:   {t:'🧹 التنظيف العميق', b:'كل شقة تتنظف عميق كل <b>٤٥-٦٠ يوم</b>. تنظيف واحد كل يوم، يتأكد من Hostaway الساعة <b>٩ مساءً</b> الليلة قبل. لو الشقة محجوزة، يبدّلها مع شقة ثانية تلقائي.'},
-      quality: {t:'⭐ تقييم نظافة كل شقة', b:'متوسط تقييمات النظافة من الضيوف لكل شقة، مع آخر التعليقات. <b>الترتيب: الأسوأ فوق</b> عشان تشتغل عليها أول.'},
-      guests:  {t:'👤 الضيوف اللي زاروك', b:'كل ضيف نزل عندك من قبل — اسمه، رقمه، كم مرة زار، وأي شقق. تقدر تعلّمه <b>VIP</b> فيتنبه له المساعد كل مرة يرجع.'},
-      learn:   {t:'📚 ما تعلّمه المساعد', b:'كل ما الفريق يعدّل رد للمساعد، البوت يتعلّم منه. تشوف هنا وش تعلّم اليوم/أمس/الأسبوع الفايت، ونسبة ثقته، وما تعلّمه عن كل شقة.'},
-      tickets: {t:'🔧 الصيانة', b:'كل مشكلة بشقة (سباكة، تكييف، شكوى ضيف…) تنفتح كـ<b>تذكرة</b> هنا. ⚙️ البوت يفتح التذكرة تلقائياً لما يصير تصعيد. 👷 تقدر تضيف يدوي. كل تذكرة فيها: حالة، أولوية، مسؤول، مورّد، تكلفة، وسجل تعليقات.'},
-      reviews: {t:'⭐ المراجعات', b:'كل مراجعات Airbnb / Booking تجي هنا. ⭐ كل مراجعة سلبية يقدر المساعد يقول لك هل تنحذف (HIGH/MEDIUM/LOW). 📝 إذا تنحذف يجهّز <b>رسالة دفاع</b>. 🤝 وإذا ما تنحذف، يكتب <b>رد عام محترم</b> بأسلوب <b>AAA</b>.'}
+      clean_center:{t:'مركز التنظيف', b:'هنا المدير يشوف تنظيف اليوم كامل: العاجل، اللي بدأ، اللي ينتظر مراجعة، واللي تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.'},
+      clean:   {t:'التنظيف العميق', b:'كل شقة تتنظف عميق كل <b>٤٥-٦٠ يوم</b>. تنظيف واحد كل يوم، يتأكد من Hostaway الساعة <b>٩ مساءً</b> الليلة قبل. لو الشقة محجوزة، يبدّلها مع شقة ثانية تلقائي.'},
+      quality: {t:'تقييم نظافة كل شقة', b:'متوسط تقييمات النظافة من الضيوف لكل شقة، مع آخر التعليقات. <b>الترتيب: الأسوأ فوق</b> عشان تشتغل عليها أول.'},
+      guests:  {t:'الضيوف اللي زاروك', b:'كل ضيف نزل عندك من قبل — اسمه، رقمه، كم مرة زار، وأي شقق. تقدر تعلّمه <b>VIP</b> فيتنبه له المساعد كل مرة يرجع.'},
+      learn:   {t:'ما تعلّمه المساعد', b:'كل ما الفريق يعدّل رد للمساعد، البوت يتعلّم منه. تشوف هنا وش تعلّم اليوم/أمس/الأسبوع الفايت، ونسبة ثقته، وما تعلّمه عن كل شقة.'},
+      tickets: {t:'الصيانة', b:'كل مشكلة بشقة (سباكة، تكييف، شكوى ضيف…) تنفتح كـ<b>تذكرة</b> هنا. ⚙️ البوت يفتح التذكرة تلقائياً لما يصير تصعيد. 👷 تقدر تضيف يدوي. كل تذكرة فيها: حالة، أولوية، مسؤول، مورّد، تكلفة، وسجل تعليقات.'},
+      reviews: {t:'المراجعات', b:'كل مراجعات Airbnb / Booking تجي هنا. ⭐ كل مراجعة سلبية يقدر المساعد يقول لك هل تنحذف (HIGH/MEDIUM/LOW). 📝 إذا تنحذف يجهّز <b>رسالة دفاع</b>. 🤝 وإذا ما تنحذف، يكتب <b>رد عام محترم</b> بأسلوب <b>AAA</b>.'}
     },
     /* ===== Tickets ===== */
     tkts:{
-      title:'🔧 الصيانة', sub:'سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً',
-      new:'➕ تذكرة جديدة', list:'📋 القائمة',
+      title:'الصيانة', sub:'سجل التذاكر — كل تصعيد أو مشكلة يفتح تذكرة هنا تلقائياً',
+      new:'تذكرة جديدة', list:'القائمة',
       f_status_all:'كل الحالات', f_prio_all:'كل الأولويات', f_cat_all:'كل التصنيفات',
-      st_open:'🆕 جديدة', st_in:'🔧 تحت العمل', st_fix:'✅ منجزة', st_can:'⛔ ملغية',
+      st_open:'جديدة', st_in:'تحت العمل', st_fix:'منجزة', st_can:'ملغية',
       pr_low:'منخفضة', pr_med:'متوسطة', pr_high:'عالية', pr_urg:'عاجلة',
       kpi_total:'إجمالي التذاكر', kpi_open:'جديدة', kpi_in:'تحت العمل', kpi_over:'متأخّرة',
       empty:'ما فيه تذاكر بعد. اضغط <b>تذكرة جديدة</b> أو انتظر البوت يفتح وحدة تلقائياً.',
-      modal_new:'➕ تذكرة جديدة', modal_edit:'🔧 تعديل التذكرة',
+      modal_new:'تذكرة جديدة', modal_edit:'تعديل التذكرة',
       f_title:'العنوان *', f_desc:'الوصف', f_status:'الحالة', f_prio:'الأولوية',
       f_cat:'التصنيف', f_unit:'الشقة', f_assignee:'المسؤول', f_due:'تاريخ الاستحقاق',
       f_vendor:'المورّد', f_phone:'هاتف المورّد', f_cost:'التكلفة (ر.س)',
-      f_note:'إضافة تعليق', log_title:'📜 سجل التذكرة',
-      btn_cancel:'إلغاء', btn_create:'➕ أنشئ', btn_save:'💾 احفظ', btn_del:'🗑 حذف',
-      src_esc:'🚨 من تصعيد ضيف', src_rev:'⭐ من مراجعة'
+      f_note:'إضافة تعليق', log_title:'سجل التذكرة',
+      btn_cancel:'إلغاء', btn_create:'أنشئ', btn_save:'احفظ', btn_del:'حذف',
+      src_esc:'من تصعيد ضيف', src_rev:'من مراجعة'
     },
     /* ===== Reviews ===== */
     rvw:{
-      title:'⭐ المراجعات',
+      title:'المراجعات',
       refresh:'↻ تحديث من Hostaway',
       last_update:'آخر تحديث:', no_update:'اضغط "تحديث من Hostaway" لجلب المراجعات',
       kpi_shown:'في المدى المحدد', kpi_pos:'إيجابية', kpi_urg:'حرجة (≤٢ نجوم)', kpi_an:'تم تحليلها',
@@ -13480,21 +13482,21 @@ const T = {
       f_fix_all:'الكل', f_fix_no:'غير محلولة', f_fix_yes:'محلولة',
       search_ph:'ابحث بنص المراجعة أو اسم الضيف…',
       auto_en:'ترجم للإنجليزي تلقائياً',
-      bulk:'🤖 حلّل الكل (السلبية أولاً)',
+      bulk:'حلّل الكل (السلبية أولاً)',
       empty:'ما فيه مراجعات بعد. اضغط "↻ تحديث من Hostaway" أعلاه ليجيب لك المراجعات.',
-      group_title:'📋 المراجعات حسب الشقة',
+      group_title:'المراجعات حسب الشقة',
       win_all:'الكل', win_7d:'٧ أيام', win_14d:'١٤ يوم', win_30d:'شهر',
       win_90d:'٣ شهور', win_180d:'٦ شهور', win_365d:'سنة',
-      pos_pill:'💚 إيجابية', fixed_pill:'✓ محلولة',
-      analyzing:'⏳ يترجم…', translate_btn:'🌐 ترجم للإنجليزي',
-      ai_label:'🤖 تحليل المساعد:',
-      dispute_title:'📝 رسالة دفاع لـ Airbnb (English)', dispute_angle:'زاوية الحجة:',
-      reply_pos:'💚 رد شكر شخصي', reply_neg:'🤝 رد عام بأسلوب AAA',
-      copy:'📋 نسخ', copied:'✓ منسوخ',
+      pos_pill:'إيجابية', fixed_pill:'محلولة',
+      analyzing:'⏳ يترجم…', translate_btn:'ترجم للإنجليزي',
+      ai_label:'تحليل المساعد:',
+      dispute_title:'رسالة دفاع لـ Airbnb (English)', dispute_angle:'زاوية الحجة:',
+      reply_pos:'رد شكر شخصي', reply_neg:'رد عام بأسلوب AAA',
+      copy:'نسخ', copied:'منسوخ',
       not_analyzed_pos:'ما فيه رد شكر بعد', not_analyzed_neg:'المساعد ما حلل هذي المراجعة بعد',
-      btn_pos:'🤖 جهّز رد شكر', btn_neg:'🤖 حلّل بـ AI',
-      unfix:'↩ ارجع كغير محلولة', fix:'✓ علّم محلولة',
-      open_ticket:'🔧 افتح تذكرة صيانة', reanalyze:'↻ أعد التحليل'
+      btn_pos:'جهّز رد شكر', btn_neg:'حلّل بـ AI',
+      unfix:'↩ ارجع كغير محلولة', fix:'علّم محلولة',
+      open_ticket:'افتح تذكرة صيانة', reanalyze:'↻ أعد التحليل'
     }
   },
   en:{dir:'ltr',
@@ -13502,8 +13504,8 @@ const T = {
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
     clean_center:'Cleaning Center',
-    cc_title:'🧭 Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
-    cc_help_t:'🧭 Cleaning today without scatter', cc_help_b:'Managers can see what is urgent, started, waiting for review, and approved. A team submit is not final until a manager approves the photos.',
+    cc_title:'Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
+    cc_help_t:'Cleaning today without scatter', cc_help_b:'Managers can see what is urgent, started, waiting for review, and approved. A team submit is not final until a manager approves the photos.',
     cc_today:'Today', cc_review:'Review', cc_issues:'Issues', cc_teams:'Teams', cc_quality:'Quality', cc_deep:'Deep Clean', cc_settings:'Settings',
     cc_refresh:'Refresh', cc_send_today_reviews:"Send today's reviews to Discord", cc_send_today_done:'Sent {sent} reviews to Discord. Skipped {skipped}, failed {failed}.', cc_send_today_failed:"Could not send today's reviews to Discord", cc_last_updated:'Last updated', cc_no_urgent:'Nothing urgent right now',
     cc_total_jobs:'Jobs today', cc_same_day:'Same-day check-ins', cc_needs_cleaning:'Needs cleaning', cc_in_progress:'In progress', cc_pending_review:'Pending review', cc_approved:'Approved', cc_late_risk:'Late/risk', cc_missing_setup:'Missing setup', cc_needs_reshoot:'Needs reshoot',
@@ -13515,20 +13517,20 @@ const T = {
     cc_stage_to_clean:'Needs cleaning', cc_stage_in_progress:'In progress', cc_stage_review:'Pending review', cc_stage_approved:'Approved', cc_stage_redo:'Needs reshoot',
     cc_reason_same_day:'Same-day', cc_reason_early_departure:'Early departure', cc_reason_late:'Late', cc_reason_issue:'Issue', cc_reason_missing_setup:'Missing setup',
     listings:'Listings',
-    listings_title:'🏘️ Listings (master store)',
+    listings_title:'Listings (master store)',
     listings_sub:'Every unit from Hostaway. Set the group, hard price floor, and in-house cleaning team for each unit here. A new unit shows "needs setup" until it has a group and a floor.',
-    listings_pull:'📥 Pull from Hostaway', listings_last_sync:'Last synced', listings_never:'never',
+    listings_pull:'Pull from Hostaway', listings_last_sync:'Last synced', listings_never:'never',
     listings_dir_field:'Hostaway directions field',
     ls_new:'new', ls_changed:'changed', ls_inactive:'inactive', ls_needs:'needs setup', ls_active:'active', ls_total:'total',
     ls_h_unit:'Internal name', ls_h_public:'Public name', ls_h_addr:'Address', ls_h_beds:'Beds', ls_h_dir:'Directions', ls_h_group:'Group', ls_h_floor:'Price floor', ls_h_oujact:'OujaCT',
-    ls_badge_new:'✨ new', ls_badge_changed:'⟳ changed', ls_badge_inactive:'⏸ inactive', ls_badge_needs:'⚠ needs setup',
+    ls_badge_new:'new', ls_badge_changed:'⟳ changed', ls_badge_inactive:'⏸ inactive', ls_badge_needs:'needs setup',
     ls_dir_link:'link', ls_no_link:'none', ls_search:'Search units…', ls_saved:'Saved ✓', ls_empty:'No units yet — click "Pull from Hostaway".', ls_group_ph:'e.g. Malqa', ls_floor_ph:'SAR',
-    ct_title:'🧼 In-house cleaning team (OujaCT)',
+    ct_title:'In-house cleaning team (OujaCT)',
     ct_sub:'Pick the apartments the in-house team covers. They get dedicated English turnover channels in Discord (today + tomorrow) and a daily ordered schedule — same-day check-ins first.',
-    ct_assigned:'assigned', ct_apply:'⚡ Apply / Refresh channels', ct_apply_hint:'Creates/renames today + tomorrow channels right now (no waiting for 12 AM).',
+    ct_assigned:'assigned', ct_apply:'Apply / Refresh channels', ct_apply_hint:'Creates/renames today + tomorrow channels right now (no waiting for 12 AM).',
     ct_none:'No apartments assigned yet — tick the box next to any unit below.', ct_search:'Search…', ct_applied:'Done —', ct_changed:'channels updated', ct_no_change:'Channels up to date — nothing changed.', ct_need_pull:'Pull listings from Hostaway first (Listings page).',
     ct_route_copy:'Copy Oujact Route Link', ct_route_copied:'Route link copied ✓', ct_missing_map:'Missing coordinates', ct_maps_ph:'Paste the apartment Google Maps link', ct_dispatch:"Today's dispatch", ct_no_token:'Set OUJACT_ROUTE_TOKEN (or CLEANING_TOKEN) in Railway first', ct_urgent:'urgent', ct_open_route:'Open route page',
-    ct_geo_ph:'Search by apartment name or address', ct_geo_save:'🔎 Find + save coordinates', ct_geo_ok:'Coordinates saved', ct_geo_need:'Find and save coordinates so ETA works', ct_geo_saved:'Coordinates saved ✓',
+    ct_geo_ph:'Search by apartment name or address', ct_geo_save:'Find + save coordinates', ct_geo_ok:'Coordinates saved', ct_geo_need:'Find and save coordinates so ETA works', ct_geo_saved:'Coordinates saved ✓',
     exp_sync:'Refresh sync', exp_status:'Sync status',
     exp_v2:'Expenses V2', exp_reconcile_repair:'Reconcile & Repair',
     exp_three_source:'Three-source analysis',
@@ -13558,9 +13560,9 @@ const T = {
     exp_remaining:'Remaining amount', exp_split_preview:'Split preview', exp_split_confirm:'Confirm split',
     exp_no_fake_verified:'Do not show checkmark until verified in Hostaway',
     exp_why_not:'Why not exported?', exp_download_diag:'Download diagnostics CSV',
-    clean_title:'🧹 Deep cleaning schedule',
+    clean_title:'Deep cleaning schedule',
     clean_sub:'Every unit gets a deep clean every 45-60 days. The schedule auto-fills and is confirmed at 9pm the night before.',
-    cp_title:'📷 Cleaning photo reports', cp_sub:'Cleaners upload photos from the route link. Managers approve or reject from Dashboard or Discord, with the archive kept in storage.',
+    cp_title:'Cleaning photo reports', cp_sub:'Cleaners upload photos from the route link. Managers approve or reject from Dashboard or Discord, with the archive kept in storage.',
     cp_refresh:'Refresh reports', cp_templates:'Edit photo checklist', cp_pending:'Pending manager review',
     cp_approved:'Cleaning approved', cp_rejected:'Report rejected', cp_reshoot:'Reshoot required',
     cp_draft:'Draft', cp_uploading:'Uploading', cp_submitted:'Submitted for review', cp_issue:'Issue found',
@@ -13575,8 +13577,8 @@ const T = {
     cp_instr_ar:'Arabic photo instructions', cp_instr_en:'English photo instructions', cp_save_template:'Save checklist',
     cp_damage_check:'Damage check', cp_supplies:'Supplies', cp_tv_remote:'TV remote',
     clean_stat_total:'Total units', clean_stat_overdue:'Overdue', clean_stat_scheduled:'Scheduled', clean_stat_tomorrow:'Confirmed tomorrow',
-    clean_link_title:'🔗 Share link for the cleaning company',
-    clean_link_copy:'copy', clean_link_open:'open', clean_link_missing:'⚠ CLEANING_TOKEN env var not set in Railway — add it first to enable the link',
+    clean_link_title:'Share link for the cleaning company',
+    clean_link_copy:'copy', clean_link_open:'open', clean_link_missing:'CLEANING_TOKEN env var not set in Railway — add it first to enable the link',
     clean_filter_all:'All', clean_filter_overdue:'Overdue', clean_filter_soon:'Soon (7 days)', clean_filter_unscheduled:'Unscheduled',
     clean_unit:'Unit', clean_last:'Last cleaned', clean_next:'Next', clean_status:'Status', clean_actions:'Actions',
     clean_mark_done:'mark done', clean_reschedule:'reschedule', clean_set_last:'edit last-cleaned date',
@@ -13587,23 +13589,23 @@ const T = {
     clean_modal_save:'Save', clean_modal_cancel:'Cancel',
     clean_confirm_done:'Mark this unit as deep-cleaned today?',
     copied:'copied ✓',
-    guests:'Guests', guests_title:'👤 Guest profiles',
+    guests:'Guests', guests_title:'Guest profiles',
     guests_sub:'Everyone who has interacted with us — repeats + VIPs surfaced',
     guests_stat_total:'Total', guests_stat_vip:'VIPs', guests_stat_repeat:'Returning (2+)',
     guests_filter_all:'All', guests_filter_vip:'VIPs only', guests_filter_repeat:'Returning',
     guests_search:'Search name/phone…',
     guest_name:'Name', guest_stays:'stays', guest_nights:'nights', guest_last:'last seen',
-    guest_no_data:'No guests recorded yet', guest_vip_on:'⭐ VIP',
+    guest_no_data:'No guests recorded yet', guest_vip_on:'VIP',
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
-    quality:'Cleaning quality', quality_title:'⭐ Cleaning quality',
+    quality:'Cleaning quality', quality_title:'Cleaning quality',
     quality_sub:"Guest ratings on each unit's cleanliness — averages + comments",
     quality_stat_sent:'Requested', quality_stat_resp:'Responded', quality_stat_rate:'Response rate', quality_stat_avg:'Overall avg',
     quality_unit:'Unit', quality_avg:'Avg', quality_count:'Ratings', quality_recent:'Recent',
     quality_empty:'No ratings yet · the first one comes after a guest checks in post-deep-clean',
     quality_comments:'Comments',
-    learn_title:'📚 What the assistant has learned',
+    learn_title:'What the assistant has learned',
     learn_sub:"Summaries the system distilled from your team's replies — you can edit or delete",
     learn_general:'General summary (applies to every unit)', learn_apt:'Per-apartment summaries',
     learn_empty:'No summary yet · needs more interactions',
@@ -13616,7 +13618,7 @@ const T = {
     learn_bootstrap_confirm:'This reads your last 300 Hostaway conversations and distills lessons per apartment. Takes 10-15 minutes in the background; Claude cost is modest. Continue?',
     learn_bootstrap_started:'Historical learning started · running in background',
     learn_bootstrap_running:'⏳ Reading past conversations now… may take 10-15 min. You can keep the dashboard open.',
-    learn_bootstrap_done:'✅ Historical learning complete',
+    learn_bootstrap_done:'Historical learning complete',
     learn_bootstrap_scanned:'conversations scanned', learn_bootstrap_pairs:'Q&A pairs extracted', learn_bootstrap_apts:'apartments distilled',
     learn_today:'Today', learn_yesterday:'Yesterday', learn_7d:'Last 7 days', learn_30d:'Last 30 days',
     learn_chart1:'Avg confidence (30d)', learn_chart2:'Auto-send rate (30d)',
@@ -13625,13 +13627,13 @@ const T = {
     learn_stat_replies:'Replies today', learn_stat_auto:'Auto-send rate', learn_stat_conf:'Avg confidence',
     learn_stat_esc:'Escalations today', learn_stat_vs_avg:'vs 7-day avg',
     learn_event_edited:'edited', learn_event_sent:'sent as-is', learn_event_auto:'auto', learn_event_via:'via',
-    calendar:'Calendar', calendar_title:'📅 Revenue calendar · next 60 days',
+    calendar:'Calendar', calendar_title:'Revenue calendar · next 60 days',
     calendar_sub:'Day color = occupancy. Hover for detail · click to select a range for bulk apply',
     cal_event:'event', cal_avg:'avg price', cal_avail:'open', cal_occ:'booked',
     cal_no_events:'No Saudi events in this range',
     cal_events_legend:'Events',
     cal_pace:'Occupancy', cal_pct:'%',
-    bulk_title:'⚡ Bulk apply to the selected range',
+    bulk_title:'Bulk apply to the selected range',
     bulk_from:'from', bulk_to:'to', bulk_pct:'percent', bulk_action:'action',
     bulk_raise:'raise', bulk_lower:'lower', bulk_apply:'apply to all',
     bulk_select_range:'Click days to select a range',
@@ -13645,7 +13647,7 @@ const T = {
     arrivals:'Upcoming arrivals', no_arrivals_window:'No arrivals in the next 36h',
     arr_signed:'signed', arr_unsigned:'unsigned', arr_in:'in', arr_hours:'h', arr_minutes:'min',
     arr_now:'now', arr_past:'past',
-    urgent_title:'🚨 Needs you', urgent_none:'All clear ✓',
+    urgent_title:'Needs you', urgent_none:'All clear ✓',
     urgent_esc:'open escalation', urgent_pending:'pending reply', urgent_unsigned:'unsigned · check-in soon',
     urgent_age:'ago', urgent_open:'open',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
@@ -21091,6 +21093,7 @@ function renderForwardCalendar(){
   if(!el) return;
   const days = (D.cal||{}).days || [];
   if(!days.length){ el.innerHTML = '<div class="empty">'+t().rev_no+'</div>'; return; }
+  const todayIso = new Date().toISOString().slice(0,10);
   // Group by weekday header row (Sat-Sun-Mon-... for ar / Mon-...-Sun for en)
   const wdLabelsAr = ['الإث','الثل','الأر','الخم','الجم','السب','الأح'];
   const wdLabelsEn = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -21113,7 +21116,7 @@ function renderForwardCalendar(){
     const tip = d.date + ' · ' + t().cal_pace + ' ' + d.pace_pct + '% · ' + d.available + ' ' + t().cal_avail
               + (d.avg_price ? ' · ' + t().cal_avg + ' ' + d.avg_price + ' SAR' : '')
               + (isEvt ? ' · ' + d.events.map(function(e){return e.name}).join(', ') : '');
-    html += '<div class="calday '+cls+(isEvt?' evt':'')+(isWE?' weekend':'')+(isSel?' sel':'')+'"'
+    html += '<div class="calday '+cls+(isEvt?' evt':'')+(isWE?' weekend':'')+(isSel?' sel':'')+(d.date===todayIso?' today':'')+'"'
       + ' title="'+tip+'"'
       + ' onclick="calClick(&#39;'+d.date+'&#39;)">'
       + '<div class="cd-dnum">'+dnum+'</div>'
@@ -21125,11 +21128,11 @@ function renderForwardCalendar(){
   html += '</div>';
   // legend
   html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;color:var(--mut)">'
-    + '<span><span style="display:inline-block;width:14px;height:14px;background:#fae3e3;border-radius:3px;vertical-align:middle"></span> &lt;40%</span>'
-    + '<span><span style="display:inline-block;width:14px;height:14px;background:#faeed1;border-radius:3px;vertical-align:middle"></span> 40-69%</span>'
-    + '<span><span style="display:inline-block;width:14px;height:14px;background:#dcf3e6;border-radius:3px;vertical-align:middle"></span> 70-89%</span>'
-    + '<span><span style="display:inline-block;width:14px;height:14px;background:#a3e0bd;border-radius:3px;vertical-align:middle"></span> 90%+</span>'
-    + '<span><span style="display:inline-block;width:14px;height:14px;border:1.5px solid var(--gold);border-radius:3px;vertical-align:middle"></span> '+t().cal_event+'</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:var(--bad-bg);border-radius:4px;vertical-align:middle"></span> &lt;40%</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:var(--warn-bg);border-radius:4px;vertical-align:middle"></span> 40-69%</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:var(--good-bg);border-radius:4px;vertical-align:middle"></span> 70-89%</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;background:#CDEBD7;border-radius:4px;vertical-align:middle"></span> 90%+</span>'
+    + '<span><span style="display:inline-block;width:14px;height:14px;border:1.5px solid var(--accent);border-radius:4px;vertical-align:middle"></span> '+t().cal_event+'</span>'
     + '</div>';
   el.innerHTML = html;
 }
