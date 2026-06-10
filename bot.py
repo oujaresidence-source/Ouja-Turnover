@@ -36,6 +36,7 @@ import mimetypes
 import random
 import asyncio
 import hashlib
+import statistics
 import hmac
 import threading
 import secrets as _secrets_mod
@@ -400,16 +401,36 @@ def _state_persistent():
 
 HANDLED_FILE = _state_path("handled.json")
 
+# ---- Atomic, persisted ID counters (expense refs, quote numbers). The old
+# max-scan-over-all-records approach raced under concurrent ingest: two threads
+# could scan the same max and issue the SAME ref. ----
+_id_counter_lock = threading.Lock()
+_id_counters = _load_json("id_counters.json", {}) or {}
+
+def _next_counter(name, floor=0):
+    """Monotonic counter, atomic under threads, survives restarts. `floor` seeds it
+    above any historical value (from a one-time scan) so old refs never collide."""
+    with _id_counter_lock:
+        cur = int(_id_counters.get(name, 0) or 0)
+        nxt = max(cur, int(floor or 0)) + 1
+        _id_counters[name] = nxt
+        _save_json("id_counters.json", _id_counters)
+        return nxt
+
 # ---------------- Hostaway ----------------
-_token = {"value": None}
+_token = {"value": None, "expires_at": 0}
 _token_lock = threading.Lock()
 
 def get_token(force=False):
-    if _token["value"] and not force:
+    """Bearer token with PROACTIVE expiry tracking: refresh ~120s before Hostaway
+    expires it, so the 401-retry path becomes a rare fallback, not the routine."""
+    now = time.time()
+    if _token["value"] and not force and now < _token["expires_at"] - 120:
         return _token["value"]
     with _token_lock:
         # Re-check inside the lock: another thread may have refreshed already.
-        if _token["value"] and not force:
+        now = time.time()
+        if _token["value"] and not force and now < _token["expires_at"] - 120:
             return _token["value"]
         r = requests.post(
             f"{BASE}/accessTokens",
@@ -419,66 +440,51 @@ def get_token(force=False):
             timeout=30,
         )
         r.raise_for_status()
-        _token["value"] = r.json()["access_token"]
+        j = r.json()
+        _token["value"] = j["access_token"]
+        try:
+            ttl = int(j.get("expires_in") or 0)
+        except (TypeError, ValueError):
+            ttl = 0
+        # Hostaway tokens are long-lived; if expires_in is absent assume 12h.
+        _token["expires_at"] = now + (ttl if ttl > 0 else 12 * 3600)
         return _token["value"]
 
 # Status codes that mean "your bearer token is no longer accepted — refresh once and retry."
 # Hostaway has been observed to use 403; spec says 401 — accept both to be safe.
 _AUTH_RETRY_CODES = (401, 403)
 
-def api_get(path, params=None, _retry=0):
+def _api_request(method, path, *, params=None, body=None, _retry=0):
+    """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
+    backoff on 429 (5s → 10s → 20s, honoring Retry-After) instead of fixed 10s×3."""
     token = get_token()
-    r = requests.get(
-        f"{BASE}{path}",
-        headers={"Authorization": f"Bearer {token}", "Cache-control": "no-cache"},
-        params=params or {}, timeout=60,
-    )
+    headers = {"Authorization": f"Bearer {token}", "Cache-control": "no-cache"}
+    if method != "GET":
+        headers["Content-Type"] = "application/json"
+    r = requests.request(method, f"{BASE}{path}", headers=headers,
+                         params=params if method == "GET" else None,
+                         json=body if method != "GET" else None, timeout=60)
     if r.status_code in _AUTH_RETRY_CODES and _retry == 0:   # token expired -> refresh once
         get_token(force=True)
-        return api_get(path, params, _retry + 1)
-    if r.status_code == 429:                          # rate limited -> brief backoff
-        time.sleep(10)
-        if _retry < 3:
-            return api_get(path, params, _retry + 1)
+        return _api_request(method, path, params=params, body=body, _retry=_retry + 1)
+    if r.status_code == 429 and _retry < 3:                  # rate limited -> backoff
+        try:
+            wait = float(r.headers.get("Retry-After") or 0)
+        except (TypeError, ValueError):
+            wait = 0
+        time.sleep(wait if wait > 0 else 5 * (2 ** _retry))
+        return _api_request(method, path, params=params, body=body, _retry=_retry + 1)
     r.raise_for_status()
     return r.json()
+
+def api_get(path, params=None, _retry=0):
+    return _api_request("GET", path, params=params, _retry=_retry)
 
 def api_post(path, body, _retry=0):
-    token = get_token()
-    r = requests.post(
-        f"{BASE}{path}",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-                 "Cache-control": "no-cache"},
-        json=body, timeout=60,
-    )
-    if r.status_code in _AUTH_RETRY_CODES and _retry == 0:
-        get_token(force=True)
-        return api_post(path, body, _retry + 1)
-    if r.status_code == 429:
-        time.sleep(10)
-        if _retry < 3:
-            return api_post(path, body, _retry + 1)
-    r.raise_for_status()
-    return r.json()
-
+    return _api_request("POST", path, body=body, _retry=_retry)
 
 def api_put(path, body, _retry=0):
-    token = get_token()
-    r = requests.put(
-        f"{BASE}{path}",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-                 "Cache-control": "no-cache"},
-        json=body, timeout=60,
-    )
-    if r.status_code in _AUTH_RETRY_CODES and _retry == 0:
-        get_token(force=True)
-        return api_put(path, body, _retry + 1)
-    if r.status_code == 429:
-        time.sleep(10)
-        if _retry < 3:
-            return api_put(path, body, _retry + 1)
-    r.raise_for_status()
-    return r.json()
+    return _api_request("PUT", path, body=body, _retry=_retry)
 
 _listings = {"map": {}, "ts": 0}
 
@@ -1177,6 +1183,29 @@ def apply_discount_tier(pct, label="last-minute", trigger_source="scheduled",
     listings = get_listings_map()
     changes = []
     floor_ctx = _lm_floor_context(today)
+    # Prefetch tonight's calendar for every eligible unit IN PARALLEL (same pool
+    # pattern as compute_forward_calendar) — the sequential per-listing fetch made a
+    # tier run take minutes across the portfolio. Writes below stay sequential.
+    eligible = [lid for lid in listings
+                if not is_unit_skipped(lid) and strategy_enabled("last-minute", lid)]
+    # A guest awaiting confirmation must not see tonight's price move under them.
+    pending_lids = _pending_lids_for_date(today)
+    prefetched = {}
+    if eligible:
+        def _fetch_cal(lid):
+            try:
+                cal = api_get(f"/listings/{lid}/calendar",
+                              params={"startDate": today, "endDate": today})
+                return lid, (cal.get("result", []) or []), None
+            except Exception as e:
+                return lid, None, e
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                for fut in as_completed([ex.submit(_fetch_cal, lid) for lid in eligible]):
+                    lid, days_res, err = fut.result()
+                    prefetched[lid] = (days_res, err)
+        except Exception as e:
+            print("discount tier prefetch pool error:", e)
     for lid, name in listings.items():
         item = {"lid": lid, "name": name, "target_date": today,
                 "strategy_enabled": bool(strategy_enabled("last-minute", lid)),
@@ -1192,10 +1221,19 @@ def apply_discount_tier(pct, label="last-minute", trigger_source="scheduled",
             item["reason"] = "strategy_disabled"
             run["items"].append(item); run["counts"]["strategy_disabled"] += 1
             continue                                       # last-minute step-down disabled for this unit
+        if lid in pending_lids:
+            item["status"] = "skipped"
+            item["reason"] = "pending_reservation"
+            run["items"].append(item); run["counts"]["pending_reservation"] += 1
+            continue                                       # guest mid-booking: hold the price
         try:
-            cal = api_get(f"/listings/{lid}/calendar",
-                          params={"startDate": today, "endDate": today})
-            days = cal.get("result", []) or []
+            days, _pf_err = prefetched.get(lid, (None, None))
+            if days is None:
+                if _pf_err is not None:
+                    raise _pf_err
+                cal = api_get(f"/listings/{lid}/calendar",
+                              params={"startDate": today, "endDate": today})
+                days = cal.get("result", []) or []
             if not days:
                 item["status"] = "skipped"; item["reason"] = "no_calendar_day"
                 run["items"].append(item); run["counts"]["no_calendar_day"] += 1
@@ -1398,6 +1436,8 @@ def compute_forward_calendar(days=60):
         d_iso = d.isoformat()
         occupied = 0
         avail_prices = []
+        booked_value = 0.0          # Σ calendar price of BOOKED nights (real projected revenue)
+        booked_priced = 0
         for lid in per_listing:
             row = per_listing[lid].get(d_iso)
             if not row:
@@ -1406,6 +1446,10 @@ def compute_forward_calendar(days=60):
             booked = bool(row.get("reservationId"))
             if booked or not available:
                 occupied += 1
+                price = row.get("price")
+                if booked and isinstance(price, (int, float)) and price > 0:
+                    booked_value += float(price)
+                    booked_priced += 1
             else:
                 price = row.get("price")
                 if isinstance(price, (int, float)) and price > 0:
@@ -1419,6 +1463,8 @@ def compute_forward_calendar(days=60):
             "total": total_units,
             "pace_pct": round((occupied / total_units) * 100) if total_units else 0,
             "avg_price": avg_avail,
+            "booked_value": round(booked_value),
+            "booked_priced": booked_priced,
             "events": [{"name": e["name"], "kind": e["kind"], "boost": e["boost"]} for e in events],
             "event_boost": round(event_boost_for_date(d), 2),
         })
@@ -2129,6 +2175,37 @@ def confirm_tomorrow_deepcleans():
     if confirmed or pushed:
         print(f"deepclean: confirmed={confirmed} pushed={pushed} for {iso}")
 
+def deepclean_lookahead_check(days=7):
+    """Daily early-warning sweep: live-check the next `days` of SCHEDULED deep cleans
+    against Hostaway and resolve booking conflicts NOW — the old flow only discovered
+    them the night before (9pm confirm), leaving no time to re-plan the crew's day.
+    Tomorrow stays the confirm loop's job; this sweeps day 2..days (a handful of calls)."""
+    if not DEEPCLEAN_ENABLED:
+        return 0
+    today = datetime.now(TZ).date()
+    listings = get_listings_map() or {}
+    moved = 0
+    for lid, s in list(_deep_clean_state.items()):
+        if lid in _paused_units:
+            continue
+        nd = _parse_date(s.get("next_scheduled"))
+        if not nd or not (today + timedelta(days=2) <= nd <= today + timedelta(days=days)):
+            continue
+        iso = nd.isoformat()
+        try:
+            if not _dc_calendar_day_free(lid, iso):
+                _dc_handle_booking_conflict(lid, iso)
+                moved += 1
+                name = listings.get(lid, str(lid))
+                new_target = _deep_clean_state.get(lid, {}).get("next_scheduled", "—")
+                log_event("pricing", f"تنظيف عميق · {name}: تعارض مبكر — يوم {iso} انحجز، "
+                                     f"انتقل التنظيف إلى {new_target}")
+        except Exception as e:
+            print(f"deepclean lookahead error ({lid}, {iso}):", e)
+    if moved:
+        print(f"deepclean lookahead: resolved {moved} conflict(s) early")
+    return moved
+
 def _make_feedback_token(lid, res_id):
     """Compact opaque token combining unit + reservation. Random suffix so the
     URL can't be guessed."""
@@ -2153,12 +2230,18 @@ def send_cleaning_feedback_request(reservation_row):
     lid = r.get("listingMapId")
     if not lid:
         return False
-    # Only ask if the unit had a recent deep clean (within last 30 days)
-    s = _deep_clean_state.get(int(lid)) or {}
-    last = _parse_date(s.get("last_done"))
-    if not last:
+    # Only ask if THIS check-in's turnover was actually cleaned (a cleaning report
+    # or an OujaCT done-marker for the arrival date). The old gate (deep clean in the
+    # last 30 days) silently skipped every guest arriving later than that — turnover
+    # cleanliness is what the guest is rating, not deep-clean recency.
+    arrival = str(r.get("arrivalDate") or "")[:10]
+    if not arrival:
         return False
-    if (datetime.now(TZ).date() - last).days > 30:
+    cleaned = _oujact_is_done(_oc_key(int(lid), arrival))
+    if not cleaned:
+        rep = _cleaning_reports.get(_cleanproof_report_id(int(lid), arrival))
+        cleaned = isinstance(rep, dict) and rep.get("status") not in ("", "draft")
+    if not cleaned:
         return False
     token = _make_feedback_token(lid, res_id)
     unit_name = (get_listings_map() or {}).get(lid) or f"unit-{lid}"
@@ -2179,7 +2262,7 @@ def send_cleaning_feedback_request(reservation_row):
             "unit": unit_name, "guest": r.get("guestName", ""),
             "ts_sent": datetime.now(TZ).isoformat(timespec="minutes"),
             "score": None, "comment": "", "ts_done": None,
-            "last_clean_date": s.get("last_done"),
+            "last_clean_date": (_deep_clean_state.get(int(lid)) or {}).get("last_done"),
         }
         _cleaning_feedback_sent.add(res_id)
         log_event("guest", f"تقييم نظافة · أُرسل للضيف {r.get('guestName','')} · {unit_name}")
@@ -2826,6 +2909,26 @@ def _oujact_mark_done(key):
 def _oujact_is_done(key):
     return str(key) in _oujact_done
 
+def _oujact_prune_done(days=3):
+    """Purge done-markers older than `days`. Keyed `lid:date`, so without expiry the
+    SAME unit+date next year would collide and its channel would silently never open.
+    Called from the channel sweep AND the daily loop (so it runs even if Discord is down)."""
+    cutoff = (datetime.now(TZ).date() - timedelta(days=days)).isoformat()
+    stale = [k for k, d in list(_oujact_done.items()) if str(d) < cutoff]
+    if stale:
+        for k in stale:
+            _oujact_done.pop(k, None)
+        try:
+            _save_json("oujact_done.json", _oujact_done)
+        except Exception:
+            pass
+    # The latest-status index is keyed lid:date too — drop entries older than 30 days.
+    idx_cutoff = (datetime.now(TZ).date() - timedelta(days=30)).isoformat()
+    for k, e in list(_oujact_status_last.items()):
+        if str((e or {}).get("date") or "") < idx_cutoff:
+            _oujact_status_last.pop(k, None)
+    return len(stale)
+
 def parse_topic_did(topic):
     """Responsible cleaner's Discord id stored in the topic (None if unassigned)."""
     m = re.search(r"did:(\d+)", topic or "")
@@ -2905,7 +3008,15 @@ async def sync_checkouts():
         try:
             emp, did, day = responsible_for(it["listing"], it["checkout"])
             # topic carries the reservation id + responsible discord id (for reminders)
+            # + the stable oujact-key so the photo-proof Submit button works on LEGACY
+            # channels too (parse_topic_oujact_key needs lid:date — without it the
+            # cleaner's submit errored out on every non-OujaCT unit).
             topic = f"hostaway-res:{it['res_id']} did:{did or ''}"
+            try:
+                if it.get("lid"):
+                    topic += f" oujact-key:{int(it['lid'])}:{it['checkout'].date().isoformat()}"
+            except (TypeError, ValueError, AttributeError):
+                pass
             ch = await guild.create_text_channel(
                 channel_name(it["listing"]), category=category, topic=topic)
             embed = discord.Embed(title="🧹 Turnover Ready", color=GOLD)
@@ -3045,16 +3156,7 @@ async def _oujact_cleanup_channels(guild=None):
     except Exception:
         return 0
     today = datetime.now(TZ).date()
-    # prune done-markers older than 3 days (keeps the store small; ISO dates compare as strings)
-    cutoff = (today - timedelta(days=3)).isoformat()
-    _stale = [k for k, d in list(_oujact_done.items()) if str(d) < cutoff]
-    if _stale:
-        for k in _stale:
-            _oujact_done.pop(k, None)
-        try:
-            _save_json("oujact_done.json", _oujact_done)
-        except Exception:
-            pass
+    _oujact_prune_done()
     seen, deleted = set(), 0
     for ch in list(category.text_channels):
         topic = ch.topic or ""
@@ -3202,6 +3304,9 @@ def _extract_latlng(url):
 # --- small append-safe state stores (existing _load_json/_save_json persistence) ---
 _oujact_checkout = _load_json("oujact_checkout.json", {}) or {}    # "lid|date" -> {state, by, ts}
 _oujact_status   = _load_json("oujact_status.json", []) or []      # append-only status actions
+# O(1) latest-status lookup: {key -> last event}. Rebuilt once at load, kept fresh by
+# _oujact_log_status — replaces an O(5000) scan per unit per dashboard load.
+_oujact_status_last = {e.get("key"): e for e in _oujact_status if isinstance(e, dict) and e.get("key")}
 _oujact_route_audit = _load_json("oujact_route_audit.json", []) or []
 _oujact_dispatch_log = _load_json("oujact_dispatch_log.json", {}) or {}  # "lid|date" -> {flags}
 _clean_tasks = _load_json("cleaning_tasks.json", {}) or {}         # task_id -> manual cleaning task
@@ -3209,6 +3314,10 @@ _oujact_done = _load_json("oujact_done.json", {}) or {}            # "lid:date" 
 _cleaning_photo_templates = _load_json("cleaning_photo_templates.json", {}) or {}
 _cleaning_reports = _load_json("cleaning_reports.json", {}) or {}
 _cleaning_report_photos = _load_json("cleaning_report_photos.json", {}) or {}
+# Guards report read-modify-writes: decisions come from Discord buttons AND the dashboard,
+# and photo uploads mutate reports from to_thread workers — a threading lock covers both
+# (an asyncio.Lock can't, since the writers are real threads).
+_cleanproof_lock = threading.RLock()
 _cleaning_report_audit = _load_json("cleaning_report_audit.json", []) or []
 _cleaning_drive_service = None
 
@@ -3243,18 +3352,14 @@ def _oujact_set_checkout_state(lid, date_iso, state, by=""):
     _save_json("oujact_checkout.json", _oujact_checkout)
     return True
 def _oujact_latest_status(lid, date_iso):
-    k = _oc_key(lid, date_iso)
-    last = None
-    for e in _oujact_status:
-        if e.get("key") == k:
-            last = e
-    return last
+    return _oujact_status_last.get(_oc_key(lid, date_iso))
 def _oujact_log_status(lid, date_iso, action, note="", by=""):
     e = {"key": _oc_key(lid, date_iso), "lid": lid, "date": str(date_iso)[:10],
          "action": action, "note": (note or "")[:300], "by": (by or "")[:60],
          "prev": (_oujact_latest_status(lid, date_iso) or {}).get("action"),
          "ts": datetime.now(TZ).isoformat(timespec="seconds")}
     _oujact_status.append(e)
+    _oujact_status_last[e["key"]] = e
     if len(_oujact_status) > 5000:
         del _oujact_status[:len(_oujact_status) - 5000]
     _save_json("oujact_status.json", _oujact_status)
@@ -3388,6 +3493,10 @@ def _cleanproof_missing_required_labels(report, lang="ar"):
     return missing
 
 def _cleanproof_get_or_create_report(lid, date_iso, actor="", route_id=""):
+    with _cleanproof_lock:
+        return _cleanproof_get_or_create_report_locked(lid, date_iso, actor, route_id)
+
+def _cleanproof_get_or_create_report_locked(lid, date_iso, actor="", route_id=""):
     lid = int(lid)
     date_iso = str(date_iso or datetime.now(TZ).date().isoformat())[:10]
     rid = _cleanproof_report_id(lid, date_iso)
@@ -3578,9 +3687,24 @@ def _cleanproof_save_drive(report, slot_id, filename, data, mime_type):
     return {"provider": "google_drive", "path": "", "url": created.get("webViewLink") or _cleanproof_drive_url(file_id),
             "file_id": file_id, "folder_id": folder_id, "folder_url": report.get("drive_folder_url") or _cleanproof_drive_folder_url(folder_id)}
 
+def _cleanproof_drive_invalidate():
+    """Drop the cached Drive client so a rotated Google key works without a restart."""
+    global _cleaning_drive_service
+    _cleaning_drive_service = None
+
 def _cleanproof_save_photo(report, slot_id, filename, data, mime_type):
     if _cleanproof_drive_configured():
-        return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
+        try:
+            return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
+        except Exception as e:
+            # Auth errors (rotated/revoked key) -> invalidate the cached client + retry
+            # once with fresh credentials before falling back to local storage.
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status in (401, 403) or "invalid_grant" in str(e).lower():
+                print("drive auth error — invalidating cached client and retrying:", e)
+                _cleanproof_drive_invalidate()
+                return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
+            raise
     return _cleanproof_save_local(report, slot_id, filename, data, mime_type)
 
 def _cleanproof_photo_view(photo):
@@ -4520,7 +4644,30 @@ def directions_link(listing_id):
     return get_guide_url(listing_id)
 
 # A booking only counts as "confirmed" (safe to share location/guide) for these statuses.
+# Hostaway statuses that count as a REAL confirmed booking. `pending` (request-to-book /
+# awaiting payment) is EXCLUDED on purpose: it isn't revenue yet and regularly dissolves,
+# so counting it would inflate occupancy and owner statements. BUT a pending request must
+# still BLOCK last-minute discounting of that night — the requester must not watch the
+# price move under them (see _pending_lids_for_date in apply_discount_tier).
 CONFIRMED_STATUSES = {"new", "modified"}
+
+def _pending_lids_for_date(date_iso):
+    """Listing ids with a PENDING reservation covering `date_iso` (one targeted query).
+    Used to hold last-minute discounts on nights a guest is mid-booking."""
+    out = set()
+    try:
+        data = api_get("/reservations", params={
+            "arrivalEndDate": date_iso, "departureStartDate": date_iso, "limit": 200})
+        for r in (data.get("result") or []):
+            if str(r.get("status") or "").lower() != "pending":
+                continue
+            arr = str(r.get("arrivalDate") or "")[:10]
+            dep = str(r.get("departureDate") or "")[:10]
+            if arr and dep and arr <= date_iso < dep and r.get("listingMapId"):
+                out.add(int(r["listingMapId"]))
+    except Exception as e:
+        print("pending lookup error:", e)
+    return out
 
 def get_reservation_status(reservation_id):
     """Return the reservation status (lowercased), or '' if unknown. Not cached — it can change."""
@@ -6375,6 +6522,15 @@ def _cleanproof_find_by_discord_message(message_id):
 def _cleanproof_decide(report, decision, actor, notes=""):
     if not report:
         return None
+    with _cleanproof_lock:
+        return _cleanproof_decide_locked(report, decision, actor, notes)
+
+def _cleanproof_decide_locked(report, decision, actor, notes=""):
+    # Idempotent: a report approved/rejected once stays decided — a second concurrent
+    # click (Discord button + dashboard at the same time) returns the existing decision.
+    # needs_reshoot stays open: the cleaner re-uploads and a final decision follows.
+    if report.get("manager_decision") in ("approved", "rejected"):
+        return report
     prev = report.get("status", "")
     now = _cleanproof_now()
     if decision == "approve":
@@ -7306,6 +7462,26 @@ def _profile_key(name, phone="", email=""):
 def _ensure_profile(key, name="", phone="", email=""):
     if not key:
         return None
+    # Name-keyed profiles (no usable phone/email) can wrongly merge two guests who
+    # share a common name (محمد…) — they'd inherit each other's VIP status and notes.
+    # If the existing profile carries a DIFFERENT phone/email than the incoming stay,
+    # split into a suffixed profile and badge both as possible duplicates.
+    if key.startswith("nm:") and key in _guest_profiles:
+        ex = _guest_profiles[key]
+        in_ph = _normalize_phone(phone)
+        in_em = (email or "").strip().lower()
+        conflict = ((in_ph and ex.get("phone") and in_ph != ex.get("phone")) or
+                    (in_em and ex.get("email") and in_em != ex.get("email")))
+        if conflict:
+            ex["possible_duplicate"] = True
+            n = 2
+            while f"{key}#{n}" in _guest_profiles:
+                cand = _guest_profiles[f"{key}#{n}"]
+                if ((in_ph and cand.get("phone") == in_ph) or
+                        (in_em and cand.get("email") == in_em)):
+                    break          # this suffixed profile IS the same person
+                n += 1
+            key = f"{key}#{n}"
     if key not in _guest_profiles:
         _guest_profiles[key] = {
             "key": key, "names": [], "phone": _normalize_phone(phone),
@@ -7316,6 +7492,8 @@ def _ensure_profile(key, name="", phone="", email=""):
             "total_nights": 0, "total_revenue": 0.0,
         }
     p = _guest_profiles[key]
+    if key.endswith("#2") or "#" in key.split(":", 1)[-1]:
+        p["possible_duplicate"] = True
     nm = (name or "").strip()
     if nm and nm not in p["names"]:
         p["names"].append(nm)
@@ -8045,7 +8223,8 @@ def _new_expense_id():
     return f"ex_{int(time.time()*1000)}_{_expense_seq:06d}"
 
 def _new_expense_ref():
-    """OJ-EXP-XXXX, auto-incrementing."""
+    """OJ-EXP-XXXX from the atomic persisted counter (race-free under concurrent
+    ingest). The scan only seeds the floor so historical refs never collide."""
     used = set()
     for e in _expenses.values():
         r = e.get("ref", "")
@@ -8054,7 +8233,7 @@ def _new_expense_ref():
                 used.add(int(r.rsplit("-", 1)[-1]))
             except Exception:
                 pass
-    return f"OJ-EXP-{(max(used)+1 if used else 1):04d}"
+    return f"OJ-EXP-{_next_counter('expense_ref', floor=max(used) if used else 0):04d}"
 
 def _exp_settings():
     """Defaults deep-merged with any persisted overrides."""
@@ -9439,6 +9618,12 @@ def _exp_verify_in_hostaway(exp):
             _exp_log_event(exp, "verified", detail=("matched by " + found_by))
         return True
     exp["hostaway_verified"] = False
+    # LEGACY 'ok' sentinel (pre-verification era): it WAS posted once — we just can't
+    # match it in the current fetch window. NEVER demote it to 'ready': that path
+    # re-exports and double-posts in Hostaway. It stays legacy-verified, flagged only.
+    if str(exp.get("hostaway_ref") or "") == "ok":
+        exp["verify_note"] = "legacy_ok_unconfirmed"
+        return None
     # Backfill / truth-keeping: an optimistic 'posted' that Hostaway can't confirm is NOT
     # posted — demote it to in_transit (or to ready when there is no real ref to repost).
     if _exp_canonical_status(exp) == "verified" or exp.get("status") == "posted":
@@ -10732,7 +10917,8 @@ def _new_quote_id():
     return f"q_{int(time.time()*1000)}_{_QUOTE_SEQ:04d}"
 
 def _new_quote_number():
-    """OJ-YYYYMM-XXX (auto-incrementing seq within the month)."""
+    """OJ-YYYYMM-XXX — per-month atomic persisted counter (race-free); the scan
+    only seeds the floor so existing quote numbers never collide."""
     now = datetime.now(TZ)
     prefix = f"OJ-{now.year}{now.month:02d}-"
     used = set()
@@ -10743,7 +10929,7 @@ def _new_quote_number():
                 used.add(int(n.rsplit("-", 1)[-1]))
             except Exception:
                 pass
-    nxt = max(used) + 1 if used else 1
+    nxt = _next_counter(f"quote:{now.year}{now.month:02d}", floor=max(used) if used else 0)
     return f"{prefix}{nxt:03d}"
 
 # ===================== USERS + ROLE-BASED PERMISSIONS =====================
@@ -13313,7 +13499,7 @@ const T = {
     guests_filter_all:'الكل', guests_filter_vip:'VIP فقط', guests_filter_repeat:'العائدون',
     guests_search:'ابحث بالاسم/الهاتف…',
     guest_name:'الاسم', guest_stays:'إقامات', guest_nights:'ليالي', guest_last:'آخر تفاعل',
-    guest_no_data:'ما فيه ضيوف بعد', guest_vip_on:'VIP',
+    guest_no_data:'ما فيه ضيوف بعد', guest_vip_on:'VIP', guest_dup:'تكرار محتمل',
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
@@ -13619,7 +13805,7 @@ const T = {
     guests_filter_all:'All', guests_filter_vip:'VIPs only', guests_filter_repeat:'Returning',
     guests_search:'Search name/phone…',
     guest_name:'Name', guest_stays:'stays', guest_nights:'nights', guest_last:'last seen',
-    guest_no_data:'No guests recorded yet', guest_vip_on:'VIP',
+    guest_no_data:'No guests recorded yet', guest_vip_on:'VIP', guest_dup:'possible duplicate',
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
@@ -14196,12 +14382,14 @@ function renderRevenueOpsSummary(){
   ]));
 }
 function renderExpensesOpsSummary(){
-  var q=safeArr(D.expQueue), list=safeArr(D.expList), s=D.expSummary||{};
-  var review=q.length || safeNum(s.queue||s.review||s.pending_review);
+  // Reads the LIVE V4 overview (D.exp4.tabs) — the old strip read V1 state that
+  // nothing populated, so it always showed zeros.
+  var tabs=((D.exp4||{}).tabs)||{};
+  function n(k){ return safeNum((tabs[k]||{}).count); }
   putHtml('expensesOpsSummary', opsStrip([
-    {label:labelText('قائمة مراجعة','Review queue'),value:review||safeNum(s.review),sub:labelText('غامض أو مكرر أو ناقص','ambiguous, duplicate, or missing'),tone:toneBy(review||safeNum(s.review),1,6)},
-    {label:labelText('جاهز للترحيل','Ready to sync'),value:safeNum(s.ready||s.auto_ready),sub:labelText('Hostaway','Hostaway'),tone:'ok'},
-    {label:labelText('كل المصاريف بالفترة','All expenses in period'),value:safeNum(s.count||s.total_count||list.length),sub:labelText('حسب الفلتر الحالي','current filter scope'),tone:'info'}
+    {label:labelText('بانتظار الاعتماد','Awaiting approval'),value:n('pending'),sub:labelText('من الشيت','from the Sheet'),tone:toneBy(n('pending'),1,6)},
+    {label:labelText('معتمد · جاهز للتصدير','Approved · ready to export'),value:n('approved'),sub:'Hostaway',tone:'ok'},
+    {label:labelText('يحتاج إجراء','Needs action'),value:n('needs_action'),sub:labelText('مكرر أو ناقص أو فشل','duplicate, missing, or failed'),tone:toneBy(n('needs_action'),1,3)}
   ]));
 }
 function renderFinanceOpsSummary(){
@@ -15796,20 +15984,19 @@ function renderRevKpis(){
   const delta_mtd = prev_m.rev ? Math.round((this_m.rev - prev_m.rev) / prev_m.rev * 100) : null;
   // 30-day forward pace
   const cal = (D.revCal30||{}).days || [];
-  let booked = 0, total = 0, projRev = 0;
+  let booked = 0, total = 0;
   cal.forEach(function(d){
     booked += d.occupied || 0;
     total += d.total || 0;
-    if(d.avg_price && d.available != null && d.occupied != null){
-      // already-booked nights * their price won't be in d.avg_price (it's only of available);
-      // so project = booked nights * portfolio rough ADR (use overall_adr if visible)
-    }
   });
   const pace_pct = total ? Math.round((booked / total) * 100) : 0;
-  // occupancy + ADR from revenue endpoint
+  // occupancy + ADR from revenue endpoint. ADR is WEIGHTED by booked nights
+  // (rev90/adr = nights): an unweighted mean let one tiny unit skew the KPI.
   const occ_units = (rev.units || []);
   const avg_occ = occ_units.length ? Math.round(occ_units.reduce(function(s,u){return s + (u.occ||0)},0) / occ_units.length) : 0;
-  const avg_adr = occ_units.length ? Math.round(occ_units.reduce(function(s,u){return s + (u.adr||0)},0) / occ_units.length) : 0;
+  let _revSum = 0, _nightSum = 0;
+  occ_units.forEach(function(u){ if(u.adr>0 && u.rev90>0){ _revSum += u.rev90; _nightSum += u.rev90/u.adr; } });
+  const avg_adr = _nightSum > 0 ? Math.round(_revSum/_nightSum) : 0;
 
   const cards = [
     {ic:'$', cls:'g', val:fmt(this_m.rev||0)+' SAR', lbl:t().rev_kpi_mtd, delta:delta_mtd},
@@ -15834,21 +16021,20 @@ function renderRevPace(){
   const cal = (D.revCal30||{}).days || [];
   if(!cal.length){ el.innerHTML = emptyState(t().rev_no, labelText('يظهر شريط السرعة بعد وصول تقويم ٣٠ يوم من Hostaway.','The pace strip appears after the 30-day Hostaway calendar loads.'),'🚀'); return; }
   let booked = 0, open = 0, total = 0;
-  let projRev = 0;
-  // Estimate projected revenue: avg_price across days × open nights doesn't account for booked
-  // night value; we approximate using overall ADR from units (better than nothing).
-  const units = (D.rev||{}).units || [];
-  const avg_adr = units.length ? units.reduce(function(s,u){return s+(u.adr||0)},0)/units.length : 0;
+  // Projected revenue = Σ of the ACTUAL forward-calendar prices on booked nights
+  // (server-computed booked_value) — no more historical-ADR approximation.
+  let projRev = 0, projKnown = false;
   const futureEvents = [];
   cal.forEach(function(d){
     total += d.total || 0;
     booked += d.occupied || 0;
     open += d.available || 0;
+    if(typeof d.booked_value === 'number'){ projRev += d.booked_value; projKnown = true; }
     if((d.events||[]).length){
       futureEvents.push({date:d.date, name:(d.events[0]||{}).name, pace:d.pace_pct});
     }
   });
-  projRev = Math.round(booked * avg_adr);
+  projRev = Math.round(projRev);
   const pace = total ? Math.round((booked/total)*100) : 0;
   // Visual bar: booked vs open
   const barW = Math.max(2, pace);
@@ -15857,7 +16043,7 @@ function renderRevPace(){
     + '<div><div class="kpi-val" style="color:var(--gold)">'+booked+'<span style="font-size:14px;color:var(--mut);font-weight:500">/'+total+'</span></div><div class="muted">'+t().rev_pace_total+'</div></div>'
     + '<div><div class="kpi-val green">'+pace+'%</div><div class="muted">'+t().rev_pace_booked+'</div></div>'
     + '<div><div class="kpi-val">'+open+'</div><div class="muted">'+t().rev_pace_open+'</div></div>'
-    + (avg_adr ? ('<div><div class="kpi-val" style="color:var(--blue)">~'+fmt(projRev)+' SAR</div><div class="muted">'+t().rev_pace_proj+'</div></div>') : '')
+    + ((projKnown && projRev>0) ? ('<div><div class="kpi-val" style="color:var(--blue)">~'+fmt(projRev)+' SAR</div><div class="muted">'+t().rev_pace_proj+'</div></div>') : '')
     + '</div>'
     + '<div style="background:var(--surface-2);border-radius:8px;height:14px;overflow:hidden;border:1px solid var(--line)"><div style="width:'+barW+'%;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2))"></div></div>';
   if(futureEvents.length){
@@ -16264,10 +16450,11 @@ function renderGuestList(){
     const vipTag = g.vip ? ' <span class="pill gold">'+t().guest_vip_on+'</span>' : '';
     const repTag = (!g.vip && g.stays>=2) ? ' <span class="pill info">'+(ar?'متكرر':'repeat')+'</span>' : '';
     const arrTag = g.arriving ? ' <span class="pill ok">🛬 '+(ar?'وصول ':'arr ')+esc(g.arriving)+'</span>' : '';   // item 63
+    const dupTag = g.possible_duplicate ? ' <span class="pill warn" title="'+(ar?'اسم مشترك بدون جوال/إيميل مميز — تأكد قبل دمج الملفين':'shared name without a distinct phone/email — confirm before merging')+'">'+t().guest_dup+'</span>' : '';
     const sentEmoji = g.sentiment==='positive'?'😊 ':g.sentiment==='negative'?'😟 ':g.sentiment==='mixed'?'🙂 ':'';   // item 64
     const ltv = (adr>0 && g.nights) ? ('~'+fmt(Math.round(g.nights*adr))) : '—';
     html += '<tr style="cursor:pointer" onclick="openGuestDrawer(&#39;'+esc(g.key)+'&#39;)">'
-      + '<td class="strong">'+sentEmoji+esc(g.name||'—')+vipTag+repTag+arrTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
+      + '<td class="strong">'+sentEmoji+esc(g.name||'—')+vipTag+repTag+arrTag+dupTag+(g.phone?' <span class="muted" style="font-size:11px">· '+esc(g.phone)+'</span>':'')+'</td>'
       + '<td class="num">'+g.stays+'</td><td class="num">'+g.nights+'</td>'
       + '<td class="num">'+ltv+'</td>'
       + '<td class="muted" style="font-size:11.5px">'+esc((g.last_seen||'').replace('T',' ').slice(0,16))+'</td>'
@@ -17707,962 +17894,16 @@ function printWeekly(){
 }
 
 /* ============== FIELD EXPENSES (المصاريف) ============== */
-const EXP_HOLD = {
-  incomplete:['ناقص — بيانات مفقودة','Incomplete — missing data'],
-  apartment_confirm:['الشقة تحتاج تأكيد','Apartment needs confirmation'],
-  apartment_none:['الشقة غير موجودة','Apartment not found'],
-  high_amount:['مبلغ مرتفع — يحتاج مراجعة','High amount — review'],
-  bad_date:['راجع تاريخ المصروف','Check the expense date'],
-  no_receipt:['بدون فاتورة — يحتاج موافقة','No receipt — approval needed'],
-  duplicate:['تكرار محتمل','Possible duplicate']
-};
-const EXP_STATUS = {
-  draft:['مسودة','Draft'],
-  captured:['مسودة','Draft'],
-  needs_review:['يحتاج مراجعة','Needs review'],
-  held:['يحتاج مراجعة','Needs review'],
-  ready:['جاهز للتصدير','Ready'],
-  queued:['في الطابور','Queued'],
-  sending:['جاري الإرسال','Sending'],
-  sent_unverified:['أُرسل ولم يتأكد','Sent, unverified'],
-  in_transit:['أُرسل ولم يتأكد','Sent, unverified'],
-  verified:['مؤكد في Hostaway','Verified'],
-  posted:['مؤكد في Hostaway','Verified'],
-  failed:['فشل','Failed'],
-  stale_pending:['معلق/قديم','Stale pending'],
-  duplicate:['تكرار محتمل','Possible duplicate'],
-  archived:['مؤرشف','Archived'],
-  discarded:['مؤرشف','Archived']
-};
-let _expPeriod = 'week';   // week | month | custom
-let _expFrom = '', _expTo = '';
-let _expSub = 'queue';     // queue | all | apt | emp
-let _expDraft = null;
 let _expSettingsDraft = null, _expSettingsDryrun = false;
-let _expFilters = {status:'', apartment:'', employee:'', category:'', receipt:'', source:'', q:''};
-let _expFT = null;
 
 function expMoney(n){ var s = fmt(Math.abs(n||0)); return L==='ar' ? (s+' ر.س') : ('SAR '+s); }
-function expReasonLabel(code){ var x = EXP_HOLD[code]; return x ? (L==='ar'?x[0]:x[1]) : code; }
-function _expTh(c){ return '<th style="text-align:start;padding:7px 6px;font-size:10.5px;color:var(--mut);font-weight:600">'+c+'</th>'; }
-function _isoLocal(d){ var m=d.getMonth()+1, day=d.getDate(); return d.getFullYear()+'-'+(m<10?'0'+m:m)+'-'+(day<10?'0'+day:day); }
 function _expJoin(arr){ return (arr||[]).join(String.fromCharCode(10)); }
 function _expLines(id){ var el=document.getElementById(id); if(!el) return [];
   return el.value.split(String.fromCharCode(10)).map(function(s){return s.replace(String.fromCharCode(13),'').trim();}).filter(function(s){return s;}); }
 function _expMapText(m){ var out=[]; for(var k in (m||{})){ if(m.hasOwnProperty(k)) out.push(k+' = '+m[k]); } return out.join(String.fromCharCode(10)); }
 
-function _expStatusChip(st){
-  // Status color = STATE only, max 4 colours (tinted + accessible, no white-on-saturated):
-  // posted/ready = green · held(needs action) = amber · failed = red · ignored = gray.
-  var map={verified:['var(--green-soft)','var(--green)'],posted:['var(--green-soft)','var(--green)'],
-           ready:['var(--green-soft)','var(--green)'],
-           queued:['var(--gold-tint)','var(--gold)'],sending:['var(--gold-tint)','var(--gold)'],
-           sent_unverified:['var(--gold-tint)','var(--gold)'],in_transit:['var(--gold-tint)','var(--gold)'],
-           needs_review:['var(--yellow-soft)','var(--yellow)'],held:['var(--yellow-soft)','var(--yellow)'],
-           duplicate:['var(--yellow-soft)','var(--yellow)'],stale_pending:['var(--yellow-soft)','var(--yellow)'],
-           failed:['var(--red-soft)','var(--red)'],
-           archived:['var(--surface-3)','var(--mut)'],discarded:['var(--surface-3)','var(--mut)'],draft:['var(--surface-3)','var(--mut)'],captured:['var(--surface-3)','var(--mut)']};
-  var c=map[st]||map.captured;
-  var lab=EXP_STATUS[st]?(L==='ar'?EXP_STATUS[st][0]:EXP_STATUS[st][1]):st;
-  return '<span style="background:'+c[0]+';color:'+c[1]+';padding:3px 11px;border-radius:99px;font-size:10.5px;font-weight:700;white-space:nowrap">'+esc(lab)+'</span>';
-}
 function _expTime(iso){ return esc(String(iso||'').replace('T',' ').slice(0,16)); }
-// client-side pipeline (mirrors _exp_pipeline) — used if the server value is missing
-function _expPipeline(e){
-  if(e.pipeline) return e.pipeline;
-  var dry=(D.expSummary||{}).dryrun, st=e.status;
-  var dash=(st==='ready'||st==='verified'||st==='queued'||st==='sending'||st==='sent_unverified')?'done':(st==='archived'||st==='discarded'?'skip':'active');
-  var ha = st==='failed'?'failed' : st==='verified'?'done' : (st==='queued'||st==='sending'||st==='sent_unverified'||st==='stale_pending')?((dry||e.hostaway_ref==='DRYRUN')?'dry':'active') : 'pending';
-  var color=(st==='failed'||e.discrepancy)?'red':(ha==='done'?'green':((ha==='active'||ha==='dry'||dash==='active')?'amber':'gray'));
-  return {sheet:'done',dashboard:dash,hostaway:ha,color:color};
-}
-function _expDiscLabel(c){
-  var m={sheet_not_hostaway:(L==='ar'?'في الشيت وغير موجود بـHostaway':'in Sheet, not in Hostaway'),
-         amount_mismatch:(L==='ar'?'المبلغ يختلف عن Hostaway':'amount differs from Hostaway'),
-         duplicate:(L==='ar'?'تكرار محتمل':'possible duplicate')};
-  return m[c]||c;
-}
-// the 3-step traceability pipeline shown on every card: Sheet → Dashboard → Hostaway
-function _expSyncBadge(e){
-  var p=_expPipeline(e);
-  var COL={done:'var(--green)',active:'var(--gold)',dry:'var(--gold)',failed:'var(--red)',pending:'var(--mut)',skip:'var(--mut)'};
-  var IC={done:'✓',active:'…',dry:'🧪',failed:'✗',pending:'·',skip:'—'};
-  function step(label,state,sub){
-    var c=COL[state]||'var(--mut)';
-    return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:60px">'
-      +'<div style="width:23px;height:23px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;background:'+c+'">'+IC[state]+'</div>'
-      +'<div style="font-size:9.5px;color:var(--text-2);text-align:center;line-height:1.2">'+label+(sub?('<br><span style="color:'+c+'">'+sub+'</span>'):'')+'</div></div>';
-  }
-  function conn(active){ return '<div style="flex:1;height:2px;background:'+(active?'var(--green)':'var(--line)')+';margin-top:11px;min-width:12px"></div>'; }
-  var haSub = p.hostaway==='done'?(L==='ar'?'مؤكّد':'verified'):(p.hostaway==='active'?(L==='ar'?'جاري النقل':'transferring'):(p.hostaway==='dry'?(L==='ar'?'تجريبي':'dry-run'):(p.hostaway==='failed'?(L==='ar'?'فشل':'failed'):'')));
-  var refTxt=(e.hostaway_ref && e.hostaway_ref!=='ok' && e.hostaway_ref!=='DRYRUN')?(' #'+esc(e.hostaway_ref)):'';
-  var rows='<div style="display:flex;align-items:flex-start;gap:0">'
-    + step(esc(e.ref||(L==='ar'?'الشيت':'Sheet')), p.sheet) + conn(p.dashboard!=='active'&&p.dashboard!=='pending')
-    + step((L==='ar'?'اللوحة':'Dashboard'), p.dashboard) + conn(p.hostaway==='done')
-    + step('Hostaway'+refTxt, p.hostaway, haSub) + '</div>';
-  var bar = p.hostaway==='active'
-    ? '<div class="exp-xferbar" style="height:4px;border-radius:99px;overflow:hidden;background:var(--surface-3);margin-top:7px"><div class="exp-xfer"></div></div>' : '';
-  var fail = (p.hostaway==='failed' && e.error)?'<div style="margin-top:6px;font-size:11px;color:var(--red)">✗ '+esc(e.error)+'</div>':'';
-  var disc = e.discrepancy?'<div style="margin-top:6px;font-size:11px;color:var(--red)">⚠ '+esc(_expDiscLabel(e.discrepancy))+'</div>':'';
-  return rows+bar+fail+disc;
-}
-function _expConnStrip(){
-  // B3: plainly show the pipes are live.
-  var s=D.expSummary||{};
-  function pill(ok,lab){ var c=ok?'var(--green)':'var(--mut)', bg=ok?'var(--green-soft)':'var(--surface-3)';
-    return '<span style="display:inline-flex;align-items:center;gap:5px;background:'+bg+';color:'+c+';padding:5px 12px;border-radius:99px;font-size:11.5px;font-weight:600">'+(ok?'✓ ':'• ')+lab+'</span>'; }
-  var sheetOk=!!s.sheet_configured && !!s.sheet_last_sync;
-  var sheetLab='Google Sheet: '+(s.sheet_configured?(sheetOk?((L==='ar'?'متصل':'connected')+(s.sheet_last_sync?(' (' +(L==='ar'?'آخر مزامنة ':'last sync ')+_expTime(s.sheet_last_sync)+')'):'')):(L==='ar'?'مضبوط — بانتظار أول مزامنة':'configured — awaiting first sync')):(L==='ar'?'غير مضبوط':'not configured'));
-  var haLab='Hostaway: '+(s.hostaway_ok?(L==='ar'?'متصل':'connected'):(L==='ar'?'غير متصل':'not connected'));
-  return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+pill(s.sheet_configured,sheetLab)+pill(s.hostaway_ok,haLab)+'</div>';
-}
-function _expPeriodRange(){
-  var now=new Date(), from='', to='';
-  if(_expPeriod==='week'){ var f=new Date(now); f.setDate(f.getDate()-6); from=_isoLocal(f); to=_isoLocal(now); }
-  else if(_expPeriod==='month'){ from=_isoLocal(new Date(now.getFullYear(),now.getMonth(),1)); to=_isoLocal(now); }
-  else { from=_expFrom; to=_expTo; }
-  return {from:from, to:to};
-}
-function _expFind(id){ var arr=(D.expQueue||[]).concat(D.expList||[]); for(var i=0;i<arr.length;i++){ if(arr[i].id===id) return arr[i]; } return null; }
 
-async function loadExpenses(){
-  var body=document.getElementById('expBody');
-  if(body && !D.expOpts) body.innerHTML='<div class="empty sk">—</div>';
-  if(!D.expOpts){ try{ D.expOpts=await api('/api/expenses/options'); }catch(_){ D.expOpts={apartments:[],employees:[],categories:[],maintenance_types:[],payment_methods:[]}; } }
-  var r=_expPeriodRange();
-  var qs='?from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
-  try{ D.expSummary=await api('/api/expenses/summary'+qs); }catch(_){ D.expSummary={}; }
-  try{ var q=await api('/api/expenses/queue'); D.expQueue=q.expenses||[]; }catch(_){ D.expQueue=[]; }
-  if(_expSub==='all') await expReloadList(); else _renderExpenses();
-  renderExpensesOpsSummary();
-  buildSideNav(); buildBottomNav();
-}
-async function expReloadList(){
-  var r=_expPeriodRange(), f=_expFilters;
-  var qs='?from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
-  if(f.status) qs+='&status='+encodeURIComponent(f.status);
-  if(f.apartment) qs+='&apartment='+encodeURIComponent(f.apartment);
-  if(f.employee) qs+='&employee='+encodeURIComponent(f.employee);
-  if(f.category) qs+='&category='+encodeURIComponent(f.category);
-  if(f.q) qs+='&q='+encodeURIComponent(f.q);
-  try{ var x=await api('/api/expenses/list'+qs); D.expList=x.expenses||[]; }catch(_){ D.expList=[]; }
-  _renderExpenses();
-}
-async function expRefresh(){ D.expList=null; await loadExpenses(); }
-
-function expSetPeriod(p){
-  _expPeriod=p;
-  if(p==='custom' && !_expFrom){ var n=new Date(); var f=new Date(n); f.setDate(f.getDate()-30); _expFrom=_isoLocal(f); _expTo=_isoLocal(n); }
-  loadExpenses();
-}
-function _expCustom(){ var f=document.getElementById('expFrom'), t=document.getElementById('expTo'); if(f)_expFrom=f.value; if(t)_expTo=t.value; loadExpenses(); }
-function expSetSub(s){ _expSub=s; if(s==='all'){ D.expList=null; expReloadList(); return; } if(s==='sync'){ expLoadSyncStatus(); return; } _renderExpenses(); }
-function _expF(k,v){ _expFilters[k]=v; clearTimeout(_expFT); _expFT=setTimeout(function(){ expReloadList(); }, k==='q'?350:0); }
-
-function _renderExpenses(){
-  var body=document.getElementById('expBody'); if(!body) return;
-  var h=_expCountersHtml()+_expPeriodHtml()+_expSubHtml();
-  if(_expSub==='queue') h+=_expQueueHtml();
-  else if(_expSub==='all') h+=_expAllHtml();
-  else if(_expSub==='apt') h+=_expByAptHtml();
-  else if(_expSub==='emp') h+=_expByEmpHtml();
-  else if(_expSub==='sync') h+=_expSyncStatusHtml();
-  body.innerHTML=h;
-}
-// ---- THE one sync button: pull sheet + revalidate + re-verify Hostaway + reconcile ----
-async function expSyncRefresh(){
-  var NL=String.fromCharCode(10);
-  toast(L==='ar'?'⏳ نحدّث المزامنة…':'⏳ Refreshing sync…');
-  var r; try{ r=await post('/api/expenses/sync-refresh',{}); }catch(e){ toast('⚠ '+e); return; }
-  if(!r||!r.ok){ toast((r&&r.error)||'⚠'); return; }
-  var d=r.discrepancies||{};
-  var msg=(L==='ar'?'تم تحديث المزامنة':'Sync refreshed')+NL
-    +(L==='ar'?'سُحب من الشيت: ':'pulled: ')+(r.pulled_from_sheet||0)+' · '+(L==='ar'?'أُعيد فحصها: ':'revalidated: ')+(r.revalidated||0)+NL
-    +(L==='ar'?'تعارضات: ':'discrepancies: ')+(L==='ar'?'بالشيت بدون Hostaway ':'sheet→noHA ')+(d.sheet_not_hostaway||0)
-    +' · '+(L==='ar'?'بـHostaway بدون شيت ':'HA→noSheet ')+(d.hostaway_not_sheet||0)
-    +' · '+(L==='ar'?'مبالغ مختلفة ':'amount ')+(d.amount_mismatch||0)
-    +' · '+(L==='ar'?'تكرار ':'dups ')+(d.duplicates||0);
-  if(!d.hostaway_ok) msg+=NL+(L==='ar'?'⚠ تعذّر قراءة Hostaway: ':'⚠ Hostaway unreachable: ')+(d.hostaway_error||'');
-  toast(L==='ar'?'تم ✓':'Done ✓');
-  alert(msg);
-  await expRefresh();
-}
-async function expExportStatus(status){
-  var lab=EXP_STATUS[status]?(L==='ar'?EXP_STATUS[status][0]:EXP_STATUS[status][1]):status;
-  if(!confirm((L==='ar'?'تصدير كل عناصر حالة ':'Export all items with status ')+lab+'؟')) return;
-  var r; try{ r=await post('/api/expenses/export-selected',{status:status}); }catch(e){ toast('⚠ '+e); return; }
-  toast((L==='ar'?'أُضيف للطابور: ':'Queued: ')+((r.queued||[]).length||0));
-  await expRefresh();
-}
-async function expRetryStatus(status){
-  var r; try{ r=await post('/api/expenses/retry',{status:status}); }catch(e){ toast('⚠ '+e); return; }
-  toast((L==='ar'?'أُضيف للطابور: ':'Queued: ')+((r.queued||[]).length||0));
-  await expRefresh();
-}
-async function expVerifyStatus(){
-  var r; try{ r=await post('/api/expenses/verify-selected',{}); }catch(e){ toast('⚠ '+e); return; }
-  var ok=(r.results||[]).filter(function(x){return x.verified;}).length;
-  toast((L==='ar'?'تأكد: ':'Verified: ')+ok+' / '+((r.results||[]).length));
-  await expRefresh();
-}
-async function expArchiveVerified(){
-  if(!confirm(L==='ar'?'أرشفة كل المصاريف المؤكدة؟':'Archive all verified expenses?')) return;
-  var r; try{ r=await post('/api/expenses/archive-verified',{}); }catch(e){ toast('⚠ '+e); return; }
-  toast((L==='ar'?'أُرشف: ':'Archived: ')+((r.archived||[]).length));
-  await expRefresh();
-}
-async function expShowExportLog(){
-  openDrawer(L==='ar'?'سجل تصدير المصاريف':'Expense export log','Hostaway');
-  setDrawerBody('<div class="empty sk" style="padding:30px">—</div>'); setDrawerFoot('');
-  var r; try{ r=await api('/api/expenses/export-log'); }catch(e){ setDrawerBody('<div class="empty">'+esc(e)+'</div>'); return; }
-  var rows=r.rows||[];
-  if(!rows.length){ setDrawerBody('<div class="empty">'+(L==='ar'?'لا يوجد سجل تصدير بعد':'No export attempts yet')+'</div>'); return; }
-  setDrawerBody('<div style="display:flex;flex-direction:column;gap:8px">'+rows.slice(0,160).map(function(x){
-    return '<div style="border:1px solid var(--border);border-radius:8px;padding:9px;background:var(--surface-2)">'
-      +'<div style="display:flex;justify-content:space-between;gap:8px"><b>'+esc(x.ref||'')+'</b>'+_expStatusChip(x.status)+'</div>'
-      +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc((x.ts||'').replace('T',' ').slice(0,16))+' · '+esc(x.event||'')+(x.ok===false?' · '+(L==='ar'?'فشل':'failed'):'')+'</div>'
-      +(x.detail?'<div style="font-size:11.5px;margin-top:4px">'+esc(x.detail)+'</div>':'')
-      +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc(x.apartment||'')+' · '+expMoney(x.amount||0)+'</div></div>';
-  }).join('')+'</div>');
-}
-async function expRepairPreview(){
-  openDrawer(L==='ar'?'إصلاح آمن للمصاريف':'Safe expense repair', L==='ar'?'معاينة فقط':'Preview only');
-  setDrawerBody('<div class="empty sk" style="padding:30px">—</div>'); setDrawerFoot('');
-  var r; try{ r=await api('/api/expenses/repair-preview'); }catch(e){ setDrawerBody('<div class="empty">'+esc(e)+'</div>'); return; }
-  var rows=r.rows||[], counts=r.counts||{};
-  var h='<div class="muted" style="font-size:12px;margin-bottom:10px">'+(L==='ar'?'هذا لا يعيد التصدير. يتحقق أولاً من Hostaway ويقترح الآمن فقط.':'This does not re-export. It verifies Hostaway first and suggests safe work only.')+'</div>';
-  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+Object.keys(counts).map(function(k){return '<span class="pill">'+esc((EXP_STATUS[k]?(L==='ar'?EXP_STATUS[k][0]:EXP_STATUS[k][1]):k))+' · '+counts[k]+'</span>';}).join('')+'</div>';
-  if(!rows.length) h+='<div class="empty">'+(L==='ar'?'لا يوجد شيء عالق':'Nothing stuck')+'</div>';
-  else h+='<div style="display:flex;flex-direction:column;gap:8px">'+rows.slice(0,120).map(function(x){
-    return '<label style="display:flex;gap:8px;align-items:flex-start;border:1px solid var(--border);border-radius:8px;padding:9px;background:var(--surface-2)">'
-      +'<input class="expRepairId" type="checkbox" value="'+esc(x.id)+'" checked>'
-      +'<div style="flex:1"><div><b>'+esc(x.ref||'')+'</b> · '+_expStatusChip(x.status)+' <span class="exp-reason">'+esc(x.reason||'')+'</span></div>'
-      +'<div class="muted" style="font-size:11px;margin-top:3px">'+esc(x.apartment||'')+' · '+esc(x.date||'')+' · '+expMoney(x.amount||0)+' · '+esc(x.safe_action||'')+'</div></div></label>';
-  }).join('')+'</div>';
-  setDrawerBody(h);
-  setDrawerFoot('<button class="btn primary sm" onclick="expRepairApply()">'+(L==='ar'?'طبّق الإصلاح المحدد':'Apply selected repair')+'</button>');
-}
-async function expRepairApply(){
-  var ids=Array.from(document.querySelectorAll('.expRepairId:checked')).map(function(x){return x.value;});
-  if(!ids.length){ toast(L==='ar'?'حدد عناصر أولاً':'Select rows first'); return; }
-  var r; try{ r=await post('/api/expenses/repair-apply',{ids:ids}); }catch(e){ toast('⚠ '+e); return; }
-  toast((L==='ar'?'تحقق ':'Verified ')+((r.verified||[]).filter(function(x){return x.verified;}).length)+' · '+(L==='ar'?'طابور ':'queued ')+((r.queued||[]).length));
-  closeDrawer(); await expRefresh();
-}
-async function expLoadSyncStatus(state){
-  _expSyncFilter=state||'';
-  var qs=_expSyncFilter?('?state='+encodeURIComponent(_expSyncFilter)):'';
-  try{ D.expSync=await api('/api/expenses/sync-status'+qs); }catch(_){ D.expSync={rows:[],totals:{}}; }
-  _renderExpenses();
-}
-var _expSyncFilter='';
-function _expSyncStatusHtml(){
-  var d=D.expSync||{rows:[],totals:{}}; var labs=d.labels||{};
-  var order=['failed','discrepancy','in_transit','ready','held','verified'];
-  var colMap={verified:'var(--green)',in_transit:'var(--gold)',ready:'var(--gold)',held:'var(--mut)',failed:'var(--red)',discrepancy:'var(--red)'};
-  // totals chips = filters (count + SAR) — totals always reflect ALL, even when filtered
-  var chips=order.filter(function(k){return d.totals&&d.totals[k];}).map(function(k){
-    var t=d.totals[k]; var on=_expSyncFilter===k;
-    var lab=(labs[k]?(L==='ar'?labs[k].ar:labs[k].en):k);
-    return '<button class="exp-stat'+(on?' on':'')+'" onclick="expLoadSyncStatus('+(on?"''":"'"+k+"'")+')" style="border-color:'+(on?colMap[k]:'var(--line)')+'">'
-      +'<div class="v" style="color:'+colMap[k]+'">'+t.count+'</div><div class="l">'+esc(lab)+' · '+expMoney(t.sar)+'</div></button>';
-  }).join('');
-  var head='<div class="exp-sumbar" style="margin-bottom:12px">'+chips+'</div>'
-    +(_expSyncFilter?'<div style="margin:-4px 0 10px"><button class="btn ghost xs" onclick="expLoadSyncStatus()">'+(L==='ar'?'✕ كل الحالات':'✕ All')+'</button></div>':'');
-  var rows=(d.rows||[]);
-  if(!rows.length) return head+'<div class="empty" style="padding:30px;text-align:center">'+(L==='ar'?'لا مصاريف في هذي الحالة':'No expenses in this state')+'</div>';
-  var body=rows.map(function(e){
-    return '<div class="exp-card" style="cursor:pointer" onclick="expOpenTimeline(&#39;'+esc(e.id)+'&#39;)">'
-      +'<div style="display:flex;justify-content:space-between;gap:10px"><div class="strong" style="font-size:13px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
-      +'<div class="muted" style="font-size:11px">'+esc(e.by||e.submitter||'')+'</div></div>'
-      +'<div class="muted" style="font-size:11.5px;margin:2px 0 8px">'+esc(e.apartment||'—')+' · '+esc(e.date||'')+'</div>'
-      +_expSyncBadge(e)
-      +'<div style="margin-top:8px;font-size:11px;color:var(--gold)">🕑 '+(L==='ar'?'اضغط للسجل الكامل':'tap for full timeline')+'</div></div>';
-  }).join('');
-  return head+'<div style="display:flex;flex-direction:column;gap:10px">'+body+'</div>';
-}
-var _EXP_EVENT_LABELS={logged:['سُجّل','logged'],pulled:['سُحب','pulled'],apartment_matched:['طوبقت الشقة','apartment matched'],apartment_confirmed:['أكّد الشقة','apartment confirmed'],approved:['اعتمد','approved'],post_requested:['طلب الترحيل','post requested'],sent:['أُرسل لـHostaway','sent to Hostaway'],dry_send:['إرسال تجريبي','dry-run send'],posted:['رُحّل','posted'],verified:['تأكّد في Hostaway ✓','verified in Hostaway ✓'],verify_failed:['لم يتأكّد — أُعيد للطابور','not confirmed — re-queued'],post_failed:['فشل الترحيل','post failed'],discarded:['تجاهل','discarded']};
-async function expOpenTimeline(id){
-  openDrawer('…',''); setDrawerBody('<div class="empty sk" style="padding:36px;text-align:center">…</div>'); setDrawerFoot('');
-  var e=null;
-  (((D.expSync||{}).rows)||[]).forEach(function(x){ if(x.id===id) e=x; });
-  if(!e){ (D.expQueue||[]).concat(D.expList||[]).forEach(function(x){ if(x.id===id) e=x; }); }
-  if(!e){ setDrawerBody('<div class="empty">—</div>'); return; }
-  setDrawerTitle((e.ref||'')+' · '+expMoney(e.amount), (e.apartment||'—')+' · '+(e.date||e.expense_date||''));
-  var pipe='<div style="margin:4px 0 14px">'+_expSyncBadge(e)+'</div>';
-  var evs=(e.events||[]);
-  var tl=evs.length? evs.map(function(ev){
-    var lab=_EXP_EVENT_LABELS[ev.event]?(L==='ar'?_EXP_EVENT_LABELS[ev.event][0]:_EXP_EVENT_LABELS[ev.event][1]):ev.event;
-    return '<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">'
-      +'<div style="width:8px;height:8px;border-radius:50%;background:var(--gold);margin-top:5px;flex:none"></div>'
-      +'<div style="min-width:0"><div style="font-weight:600;font-size:12.5px">'+esc(lab)+(ev.by?(' · <span class="muted">'+esc(ev.by)+'</span>'):'')+'</div>'
-      +'<div class="muted" style="font-size:11px">'+_expTime(ev.ts)+(ev.detail?(' · '+esc(ev.detail)):'')+'</div></div></div>';
-  }).join('') : '<div class="muted" style="font-size:12px">'+(L==='ar'?'لا سجل بعد':'no timeline yet')+'</div>';
-  setDrawerBody(pipe+'<div style="font-weight:700;font-size:12px;margin-bottom:6px">'+(L==='ar'?'السجل الكامل (من سجّل → رُحّل → تأكّد)':'Full timeline (logged → posted → verified)')+'</div>'+tl);
-  var foot='';
-  if(e.status==='failed'||e.status==='stale_pending') foot+='<button class="btn primary sm" onclick="expRetry(&#39;'+esc(e.id)+'&#39;)">🔁 '+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>';
-  if(e.status==='verified'||e.status==='sent_unverified'||e.status==='queued'||e.status==='sending') foot+='<button class="btn ghost sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">🔎 '+(L==='ar'?'تحقّق من Hostaway':'Verify in Hostaway')+'</button>';
-  setDrawerFoot(foot);
-}
-async function expRetry(id){
-  toast(L==='ar'?'⏳ إعادة المحاولة…':'⏳ Retrying…');
-  var r; try{ r=await post('/api/expenses/post',{id:id}); }catch(e){ toast('⚠ '+e); return; }
-  toast(r&&r.ok?(L==='ar'?(r.verified?'تم وتأكّد ✓':'رُحّل — بانتظار التأكيد'):(L==='ar'?'ok':'ok')):((L==='ar'?'فشل: ':'failed: ')+((r&&r.error)||'')));
-  closeDrawer(); await expRefresh(); if(_expSub==='sync') expLoadSyncStatus(_expSyncFilter);
-}
-async function expVerify(id){
-  toast(L==='ar'?'⏳ نتحقّق من Hostaway…':'⏳ Verifying…');
-  var r; try{ r=await post('/api/expenses/verify',{id:id}); }catch(e){ toast('⚠ '+e); return; }
-  toast(r&&r.verified?(L==='ar'?'مؤكّد في Hostaway ✓':'Verified ✓'):(L==='ar'?'لم يُعثر عليه بعد':'not found yet'));
-  closeDrawer(); await expRefresh(); if(_expSub==='sync') expLoadSyncStatus(_expSyncFilter);
-}
-function _expCountersHtml(){
-  var s=D.expSummary||{};
-  var dry = s.dryrun ? '<div style="background:rgba(212,175,55,.12);border:1px solid var(--gold);color:var(--gold);padding:8px 12px;border-radius:10px;font-size:12px;margin-bottom:10px">'+(L==='ar'?'⚠️ وضع تجريبي — لا يكتب على Hostaway فعلياً (EXPENSE_POST_DRYRUN=1)':'⚠️ Dry-run — nothing is written to Hostaway (EXPENSE_POST_DRYRUN=1)')+'</div>' : '';
-  function card(lab,val,col,sub){ return '<div style="flex:1;min-width:126px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px"><div class="muted" style="font-size:11px">'+lab+'</div><div style="font-size:18px;font-weight:800;margin-top:3px;color:'+(col||'var(--text)')+'">'+val+'</div>'+(sub?'<div class="muted" style="font-size:10.5px;margin-top:2px">'+sub+'</div>':'')+'</div>'; }
-  var qp=(s.export_queue||{}), stale=(qp.stale_minutes||{});
-  return _expConnStrip()+dry+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-    + card(L==='ar'?'المصاريف / الفترة':'Expenses / period', expMoney(s.total_sar||0), 'var(--text)', L==='ar'?'هذا الأسبوع: '+expMoney(s.week_sar||0):'week: '+expMoney(s.week_sar||0))
-    + card(L==='ar'?'جاهز':'Ready', fmt(s.ready||0), (s.ready?'var(--green)':'var(--text)'))
-    + card(L==='ar'?'يحتاج مراجعة':'Needs review', fmt((s.needs_review||0)+(s.duplicates||0)), ((s.needs_review||s.duplicates)?'var(--gold)':'var(--text)'))
-    + card(L==='ar'?'طابور/إرسال':'Queued / sending', fmt((s.queued||0)+(s.sending||0)), ((s.queued||s.sending)?'var(--gold)':'var(--text)'), 'workers '+fmt(qp.workers||0))
-    + card(L==='ar'?'مؤكد':'Verified', fmt(s.verified||0), 'var(--green)', expMoney(s.posted_sar||0))
-    + card(L==='ar'?'فشل/معلق':'Failed / stale', fmt((s.failed||0)+(s.stale_pending||0)), ((s.failed||s.stale_pending)?'var(--red)':'var(--text)'), 'stale '+fmt(stale.sent_unverified||30)+'m')
-    + '</div>';
-}
-function _expPeriodHtml(){
-  function b(id,lab){ return '<button class="btn ghost sm" onclick="expSetPeriod(&#39;'+id+'&#39;)" style="'+(_expPeriod===id?'background:var(--gold);color:#1a1a1a;border-color:var(--gold)':'')+'">'+lab+'</button>'; }
-  var custom='';
-  if(_expPeriod==='custom'){
-    custom='<input type="date" id="expFrom" value="'+esc(_expFrom)+'" onchange="_expCustom()" style="padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px"><span class="muted">→</span><input type="date" id="expTo" value="'+esc(_expTo)+'" onchange="_expCustom()" style="padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">';
-  }
-  var r=_expPeriodRange();
-  var csv='/api/expenses/export.csv?token='+encodeURIComponent(tok())+'&from='+encodeURIComponent(r.from)+'&to='+encodeURIComponent(r.to);
-  var actions='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
-    + '<button class="btn ghost sm" onclick="expSyncRefresh()">↻ '+(L==='ar'?'تحديث الشيت وHostaway':'Refresh Sheet + Hostaway')+'</button>'
-    + '<button class="btn ghost sm" onclick="expVerifyStatus()">✓ '+(L==='ar'?'تحقق المحدد':'Verify pending')+'</button>'
-    + '<button class="btn primary sm" onclick="expExportStatus(&#39;ready&#39;)">⬆ '+(L==='ar'?'صدّر الجاهز':'Export ready')+'</button>'
-    + '<button class="btn ghost sm" onclick="expRetryStatus(&#39;failed&#39;)">↺ '+(L==='ar'?'أعد الفاشل':'Retry failed')+'</button>'
-    + '<button class="btn ghost sm" onclick="expRetryStatus(&#39;stale_pending&#39;)">⏱ '+(L==='ar'?'أعد المعلق':'Retry stale')+'</button>'
-    + '<button class="btn ghost sm" onclick="expArchiveVerified()">✓ '+(L==='ar'?'أرشف المؤكد':'Archive verified')+'</button>'
-    + '<button class="btn ghost sm" onclick="expShowExportLog()">☰ '+(L==='ar'?'السجل':'Log')+'</button>'
-    + '<a class="btn ghost sm" href="'+csv+'" target="_blank">⬇ CSV</a></div>';
-  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
-    + b('week',L==='ar'?'أسبوع':'Week') + b('month',L==='ar'?'شهر':'Month') + b('custom',L==='ar'?'مخصص':'Custom')
-    + custom + '<span style="flex:1"></span>'
-    + '<button class="btn ghost sm" onclick="expRepairPreview()">🛠 '+(L==='ar'?'إصلاح آمن':'Safe repair')+'</button></div>'+actions;
-}
-function _expSubHtml(){
-  var qn=((D.expQueue||[]).length);
-  function b(id,lab){ return '<button class="btn ghost sm" onclick="expSetSub(&#39;'+id+'&#39;)" style="'+(_expSub===id?'background:var(--surface);border-color:var(--gold);color:var(--gold)':'')+'">'+lab+'</button>'; }
-  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:10px">'
-    + b('queue',(L==='ar'?'المراجعة':'Review')+(qn?(' ('+qn+')'):''))
-    + b('all',L==='ar'?'الكل':'All')
-    + b('sync',L==='ar'?'📊 حالة المزامنة':'📊 Sync status')
-    + b('apt',L==='ar'?'حسب الشقة':'By apartment')
-    + b('emp',L==='ar'?'حسب الموظف':'By employee') + '</div>';
-}
-function _expQueueHtml(){
-  var items=D.expQueue||[];
-  if(!items.length) return '<div class="empty" style="padding:30px;text-align:center"><div style="font-size:30px">✅</div><div class="muted" style="margin-top:6px">'+(L==='ar'?'ما فيه مصاريف بانتظار المراجعة':'No expenses awaiting review')+'</div></div>';
-  var ar=(L==='ar');
-  var groups={needs_review:[],ready:[],queued:[],sent_unverified:[],verified:[],failed:[],duplicates:[],archived:[]};
-  items.forEach(function(e){
-    if(e.status==='ready') groups.ready.push(e);
-    else if(e.status==='queued'||e.status==='sending') groups.queued.push(e);
-    else if(e.status==='sent_unverified') groups.sent_unverified.push(e);
-    else if(e.status==='verified') groups.verified.push(e);
-    else if(e.status==='failed'||e.status==='stale_pending') groups.failed.push(e);
-    else if(e.status==='duplicate') groups.duplicates.push(e);
-    else if(e.status==='archived') groups.archived.push(e);
-    else groups.needs_review.push(e);
-  });
-  var f=_expQFilter;
-  // ---- summary bar: each count is a clickable filter (item 8) ----
-  function stat(cls,key,v,lab){
-    return '<div class="exp-stat '+cls+(f===key?' on':'')+'" onclick="expQFilter(&#39;'+key+'&#39;)" role="button" tabindex="0">'
-      +'<div class="v">'+v+'</div><div class="l">'+lab+'</div></div>';
-  }
-  var h='<div class="exp-sumbar">'
-    + stat('amber','needs_review',groups.needs_review.length,ar?'يحتاج مراجعة':'Needs review')
-    + stat('green','ready',groups.ready.length,ar?'جاهز':'Ready')
-    + stat('gold','queued',groups.queued.length,ar?'طابور/إرسال':'Queued/Sending')
-    + stat('gold','sent_unverified',groups.sent_unverified.length,ar?'أرسل ولم يتأكد':'Sent unverified')
-    + stat('green','verified',groups.verified.length,ar?'مؤكد':'Verified')
-    + stat('red','failed',groups.failed.length,ar?'فشل/معلق':'Failed/Stale')
-    + stat('amber','duplicates',groups.duplicates.length,ar?'تكرار':'Duplicates')
-    + '</div>';
-  if(f) h+='<div style="margin:-4px 0 10px"><button class="btn ghost xs" onclick="expQFilter(&#39;'+f+'&#39;)">'+(ar?'✕ إلغاء التصفية':'✕ Clear filter')+'</button></div>';
-  function grp(key,title,pill,list){
-    if((f && f!==key) || !list.length) return '';
-    return '<div class="exp-group-h">'+esc(title)+' <span class="pill '+pill+'">'+list.length+'</span></div>'
-      +'<div style="display:flex;flex-direction:column;gap:10px">'+list.map(_expCard).join('')+'</div>';
-  }
-  // ---- ready group first, with the bulk "post all ready" button (item 11) ----
-  if((!f||f==='ready') && groups.ready.length){
-    h+='<div class="exp-group-h">'+(ar?'جاهز للتصدير':'Ready to export')+' <span class="pill ok">'+groups.ready.length+'</span>'
-      +'<button class="btn primary xs" style="margin-inline-start:auto" onclick="expPostAllReady()">'+(ar?('صدّر الكل ('+groups.ready.length+')'):('Export all ('+groups.ready.length+')'))+'</button></div>'
-      +'<div style="display:flex;flex-direction:column;gap:10px">'+groups.ready.map(_expCard).join('')+'</div>';
-  }
-  h+=grp('needs_review',ar?'يحتاج مراجعة':'Needs review','warn',groups.needs_review);
-  h+=grp('queued',ar?'في الطابور / جاري الإرسال':'Queued / Sending','warn',groups.queued);
-  h+=grp('sent_unverified',ar?'أُرسل ولم يتأكد من Hostaway':'Sent, not verified in Hostaway','warn',groups.sent_unverified);
-  h+=grp('failed',ar?'فشل أو عالق':'Failed or stale','danger',groups.failed);
-  h+=grp('duplicates',ar?'تكرار محتمل':'Possible duplicates','warn',groups.duplicates);
-  h+=grp('verified',ar?'مؤكد في Hostaway':'Verified in Hostaway','ok',groups.verified);
-  h+=grp('archived',ar?'مؤرشف':'Archived','',groups.archived);
-  return h;
-}
-var _expQFilter='';
-function expQFilter(k){ _expQFilter=(_expQFilter===k)?'':k; _renderExpenses(); }
-async function expPostAllReady(){
-  var ready=(D.expQueue||[]).filter(function(e){return e.status==='ready';});
-  if(!ready.length){ toast(L==='ar'?'ما فيه جاهز':'Nothing ready'); return; }
-  if(!confirm(L==='ar'?('تصدير '+ready.length+' مصروف لـHostaway؟'):('Export '+ready.length+' expenses to Hostaway?'))) return;
-  toast(L==='ar'?'⏳ نضيفها للطابور…':'⏳ Queueing…');
-  var r=await post('/api/expenses/export-selected',{ids:ready.map(function(e){return e.id;})});
-  toast((L==='ar'?'أُضيف للطابور ':'Queued ')+((r.queued||[]).length));
-  await expRefresh();
-}
-function _expCard(e){
-  var reason = e.status_reason || e.primary_reason || (e.status==='failed'?'failed':'');
-  // ONE neutral reason chip — the status pill carries the colour, the reason is just text.
-  var chips='';
-  if(e.status!=='failed' && e.primary_reason){
-    var _det=''; (e.hold_reasons||[]).forEach(function(r){ if(r.code===e.primary_reason && r.detail) _det=r.detail; });
-    chips='<span class="exp-reason">'+esc(expReasonLabel(e.primary_reason))+(_det?(' · '+esc(_det)):'')+'</span>';
-  }
-  // join only non-empty facts — no dangling "·  · " separators (impeccable: reduce noise)
-  function _j(parts){ return parts.filter(function(x){ return x && (''+x).trim(); }).map(esc).join(' · '); }
-  var _l2=_j([e.apartment||(L==='ar'?'(بدون شقة)':'(no apartment)'), e.expense_date]);
-  var _src=e.submission_id&&String(e.submission_id).indexOf('gs-')===0?'Google Sheet':'Dashboard';
-  var _ha=e.hostaway_expense_id||e.hostaway_ref||'';
-  var _l3=_j([e.submitter, e.maintenance_type, e.category, _src]);
-  var _ops=_j([(e.last_attempt_at?((L==='ar'?'آخر محاولة ':'last attempt ')+_expTime(e.last_attempt_at)):''), (e.retry_count?((L==='ar'?'محاولات ':'tries ')+e.retry_count):''), (_ha?('Hostaway '+_ha):'')]);
-  var head='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-    + '<div style="min-width:0"><div class="strong" style="font-size:13.5px">'+esc(e.ref||'')+' · '+expMoney(e.amount)+'</div>'
-    + (_l2?'<div class="muted" style="font-size:11.5px;margin-top:2px">'+_l2+'</div>':'')
-    + (_l3?'<div class="muted" style="font-size:11px;margin-top:2px">'+_l3+'</div>':'')
-    + (_ops?'<div class="muted" style="font-size:10.5px;margin-top:2px">'+_ops+'</div>':'')
-    + '</div>'
-    + _expStatusChip(e.status)+'</div>';
-  // State cue is a subtle tint of the WHOLE border (impeccable bans side-stripe accents);
-  // the status pill carries the explicit label.
-  var _edge=(e.status==='failed'||e.status==='stale_pending')?'var(--red)':((e.status==='needs_review'||e.status==='duplicate')?'var(--yellow)':((e.status==='archived')?'var(--mut)':(e.status==='queued'||e.status==='sending'||e.status==='sent_unverified'?'var(--gold)':'var(--green)')));
-  return '<div class="exp-card" id="expc_'+esc(e.id)+'" style="border-color:color-mix(in srgb, '+_edge+' 32%, var(--line))">'
-    + head + '<div style="margin-top:6px">'+_expSyncBadge(e)+'</div>'
-    + '<div style="margin-top:7px"><button class="btn ghost xs" onclick="expOpenTimeline(&#39;'+esc(e.id)+'&#39;)">🕑 '+(L==='ar'?'السجل الكامل':'Timeline')+'</button></div>'
-    + (chips?('<div style="margin-top:8px">'+chips+'</div>'):'') + _expCardExtras(e,reason) + _expCardActions(e,reason) + '</div>';
-}
-function _expCardExtras(e,reason){
-  var h='';
-  if(reason==='apartment_confirm'||reason==='apartment_none'){
-    var opts='<option value="">—</option>';
-    var cands=e.candidates||[];
-    if(cands.length){ opts+=cands.map(function(c){return '<option value="'+c.listing_id+'">'+esc(c.name)+'</option>';}).join(''); opts+='<option value="" disabled>──────</option>'; }
-    var aps=((D.expOpts||{}).apartments)||[];
-    opts+=aps.map(function(a){return '<option value="'+a.listing_id+'">'+esc(a.name)+'</option>';}).join('');
-    h+='<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-      +'<span class="muted" style="font-size:11px">'+(L==='ar'?'اختر الشقة:':'Pick apartment:')+'</span>'
-      +'<select id="expApt_'+esc(e.id)+'" style="flex:1;min-width:180px">'+opts+'</select>'
-      +'<button class="btn sm" onclick="expResolveApt(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تأكيد':'Confirm')+'</button></div>';
-  }
-  if(reason==='no_receipt' && e.no_receipt_reason)
-    h+='<div class="muted" style="margin-top:8px;font-size:11.5px">'+(L==='ar'?'سبب عدم وجود فاتورة: ':'No-receipt reason: ')+esc(e.no_receipt_reason)+'</div>';
-  if(e.status==='failed' && e.error)
-    h+='<div style="margin-top:8px;font-size:11.5px;color:var(--red);background:rgba(229,72,77,.08);border-radius:8px;padding:8px">'+esc(e.error)+'</div>';
-  if(reason==='duplicate' && e.dup_twin){
-    var t=e.dup_twin;
-    h+='<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-      +'<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px"><div class="muted" style="font-size:10px;margin-bottom:3px">'+(L==='ar'?'هذا المصروف':'This expense')+'</div><div style="font-size:12px;font-weight:700">'+expMoney(e.amount)+'</div><div class="muted" style="font-size:11px">'+esc(e.expense_date||'')+'</div><div class="muted" style="font-size:11px">'+esc(e.category||'')+'</div></div>'
-      +'<div style="background:var(--surface);border:1px solid var(--gold);border-radius:8px;padding:9px"><div class="muted" style="font-size:10px;margin-bottom:3px">'+(L==='ar'?'المصروف المشابه':'Existing twin')+' · '+esc(t.ref||'')+'</div><div style="font-size:12px;font-weight:700">'+expMoney(t.amount)+'</div><div class="muted" style="font-size:11px">'+esc(t.expense_date||'')+'</div><div class="muted" style="font-size:11px">'+esc(t.category||'')+'</div></div></div>';
-  }
-  if(e.receipt_link)
-    h+='<div style="margin-top:8px"><a href="'+esc(e.receipt_link)+'" target="_blank" style="font-size:11.5px;color:var(--gold)">📎 '+(L==='ar'?'الفاتورة':'Receipt')+'</a></div>';
-  return h;
-}
-function _expCardActions(e,reason){
-  var btns=[];
-  if(e.status==='duplicate' || reason==='duplicate'){
-    btns.push('<button class="btn sm" onclick="expNotDup(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'مو مكرر — رحّله':'Not a duplicate — post')+'</button>');
-    btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل كمكرر':'Discard as duplicate')+'</button>');
-  } else if(reason==='high_amount'||reason==='no_receipt'||reason==='bad_date'){
-    var glab = reason==='no_receipt'?(L==='ar'?'اعتمد بدون فاتورة ورحّل':'Approve no-receipt & post')
-             : reason==='high_amount'?(L==='ar'?'اعتمد المبلغ ورحّل':'Approve amount & post')
-             : (L==='ar'?'اعتمد التاريخ ورحّل':'Approve date & post');
-    btns.push('<button class="btn primary sm" onclick="expApproveAndPost(&#39;'+esc(e.id)+'&#39;,&#39;'+reason+'&#39;)">'+glab+'</button>');
-  } else if(e.status==='ready'){
-    btns.push('<button class="btn primary sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'صدّر لـHostaway':'Export to Hostaway')+'</button>');
-  } else if(e.status==='failed'||e.status==='stale_pending'){
-    btns.push('<button class="btn sm" onclick="expPost(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'إعادة المحاولة':'Retry')+'</button>');
-  } else if(e.status==='sent_unverified'||e.status==='queued'||e.status==='sending'){
-    btns.push('<button class="btn sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تحقق الآن':'Verify now')+'</button>');
-  } else if(e.status==='verified'){
-    btns.push('<button class="btn ghost sm" onclick="expVerify(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'أعد التحقق':'Re-verify')+'</button>');
-  } else if(reason==='apartment_confirm'||reason==='apartment_none'||reason==='incomplete'){
-    // No direct post path here — show WHY posting is blocked: a greyed ترحيل + tooltip
-    // naming the open gate(s). The gate-clearing control sits in _expCardExtras above.
-    var gates=(e.hold_reasons||[]).map(function(r){return expReasonLabel(r.code);}).join('، ')||expReasonLabel(reason);
-    var tip=(L==='ar'?'ما تقدر ترحّل — ':'Can\\'t post — ')+gates;
-    btns.push('<button class="btn sm" disabled title="'+esc(tip)+'">'+(L==='ar'?'ترحيل (مقفل)':'Post (locked)')+'</button>');
-  }
-  btns.push('<button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تعديل':'Edit')+'</button>');
-  if(reason!=='duplicate' && e.status!=='archived') btns.push('<button class="btn ghost sm" onclick="expDiscard(&#39;'+esc(e.id)+'&#39;)">'+(L==='ar'?'تجاهل':'Discard')+'</button>');
-  return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btns.join('')+'</div>';
-}
-function _expSelPairs(key,val,pairs){
-  return '<select onchange="_expF(&#39;'+key+'&#39;,this.value)" style="padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
-    + pairs.map(function(p){return '<option value="'+esc(p[0])+'"'+(val===p[0]?' selected':'')+'>'+esc(p[1])+'</option>';}).join('') + '</select>';
-}
-function _expAllHtml(){
-  var items=D.expList;
-  if(items==null){ expReloadList(); return '<div class="empty sk">—</div>'; }
-  var f=_expFilters, o=D.expOpts||{};
-  var statusPairs=[['',L==='ar'?'كل الحالات':'All statuses'],['needs_review',L==='ar'?'يحتاج مراجعة':'Needs review'],['ready',L==='ar'?'جاهز':'Ready'],['queued',L==='ar'?'في الطابور':'Queued'],['sending',L==='ar'?'جاري الإرسال':'Sending'],['sent_unverified',L==='ar'?'أرسل ولم يتأكد':'Sent unverified'],['verified',L==='ar'?'مؤكد':'Verified'],['failed',L==='ar'?'فشل':'Failed'],['stale_pending',L==='ar'?'معلق':'Stale'],['duplicate',L==='ar'?'تكرار':'Duplicate'],['archived',L==='ar'?'مؤرشف':'Archived']];
-  var aptPairs=[['',L==='ar'?'كل الشقق':'All apartments']].concat(((o.apartments)||[]).map(function(a){return [a.name,a.name];}));
-  var empPairs=[['',L==='ar'?'كل الموظفين':'All employees']].concat(((o.employees)||[]).map(function(x){return [x,x];}));
-  var catPairs=[['',L==='ar'?'كل الفئات':'All categories']].concat(((o.categories)||[]).map(function(x){return [x,x];}));
-  var receiptPairs=[['',L==='ar'?'كل الفواتير':'All receipts'],['yes',L==='ar'?'مع فاتورة':'Has receipt'],['no',L==='ar'?'بدون فاتورة':'No receipt']];
-  var sourcePairs=[['',L==='ar'?'كل المصادر':'All sources'],['sheet','Google Sheet'],['manual',L==='ar'?'يدوي':'Manual']];
-  var bar='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
-    +'<input value="'+esc(f.q)+'" placeholder="'+(L==='ar'?'بحث…':'Search…')+'" oninput="_expF(&#39;q&#39;,this.value)" style="flex:1;min-width:140px;padding:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">'
-    +_expSelPairs('status',f.status,statusPairs)+_expSelPairs('apartment',f.apartment,aptPairs)
-    +_expSelPairs('employee',f.employee,empPairs)+_expSelPairs('category',f.category,catPairs)
-    +_expSelPairs('receipt',f.receipt,receiptPairs)+_expSelPairs('source',f.source,sourcePairs)+'</div>';
-  if(f.receipt) items=items.filter(function(e){ return f.receipt==='yes'?!!e.receipt_link:!e.receipt_link; });
-  if(f.source) items=items.filter(function(e){ var src=e.submission_id&&String(e.submission_id).indexOf('gs-')===0?'sheet':'manual'; return src===f.source; });
-  if(!items.length) return bar+'<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'ما فيه نتائج':'No results')+'</div>';
-  var thead='<tr>'+[L==='ar'?'المرجع':'Ref',L==='ar'?'التاريخ':'Date',L==='ar'?'الشقة':'Apartment',L==='ar'?'الفئة':'Category',L==='ar'?'الوصف/المورد':'Description/vendor',L==='ar'?'المبلغ':'Amount',L==='ar'?'المصدر/فاتورة':'Source/receipt',L==='ar'?'حالة Hostaway':'Hostaway status',L==='ar'?'السبب':'Reason',L==='ar'?'آخر محاولة':'Attempt',L==='ar'?'محاولات':'Retries',L==='ar'?'Hostaway ID':'Hostaway ID',''].map(_expTh).join('')+'</tr>';
-  var rows=items.map(function(e){
-    var src=e.submission_id&&String(e.submission_id).indexOf('gs-')===0?'Sheet':'Manual';
-    var desc=[e.vendor,e.maintenance_type,e.note].filter(function(x){return x;}).join(' · ');
-    return '<tr style="border-bottom:1px solid var(--border)">'
-      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.ref||'')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11.5px;white-space:nowrap">'+esc(e.expense_date||'')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.apartment||'—')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11.5px">'+esc(e.category||'—')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11.5px;min-width:160px">'+esc(desc||e.submitter||'—')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11.5px;font-weight:700;white-space:nowrap">'+expMoney(e.amount)+'</td>'
-      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+src+' '+(e.receipt_link?('<a href="'+esc(e.receipt_link)+'" target="_blank" style="color:var(--gold)">📎</a>'):'—')+'</td>'
-      +'<td style="padding:7px 6px">'+_expStatusChip(e.status)+'</td>'
-      +'<td style="padding:7px 6px;font-size:11px;max-width:140px">'+esc(e.status_reason||e.primary_reason||'')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+_expTime(e.last_attempt_at||e.sent_at||'')+'</td>'
-      +'<td style="padding:7px 6px;font-size:11px;text-align:center">'+fmt(e.retry_count||0)+'</td>'
-      +'<td style="padding:7px 6px;font-size:11px;white-space:nowrap">'+esc(e.hostaway_expense_id||e.hostaway_ref||'')+'</td>'
-      +'<td style="padding:7px 6px;white-space:nowrap"><button class="btn ghost sm" onclick="expEdit(&#39;'+esc(e.id)+'&#39;)">✎</button> <button class="btn ghost sm" onclick="expDelete(&#39;'+esc(e.id)+'&#39;)">🗑</button></td></tr>';
-  }).join('');
-  return bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+thead+rows+'</table></div>';
-}
-async function setUnitOwner(apt, owner){
-  try{ await post('/api/expenses/set-owner',{apartment:apt, owner:owner}); toast('✓'); if(typeof expRefresh==='function') expRefresh(); }catch(e){ toast('خطأ'); }
-}
-function _expByAptHtml(){
-  var arr=((D.expSummary||{}).by_apartment)||[];
-  if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
-  var ar=(L==='ar');
-  // Item 58: flag apartments costing notably more than peers (>= 1.5x the median).
-  var totals=arr.map(function(a){return a.total||0}).filter(function(x){return x>0}).sort(function(x,y){return x-y});
-  var median = totals.length ? totals[Math.floor(totals.length/2)] : 0;
-  // Item 59: per-unit P&L — join 90-day revenue from the revenue view by unit name.
-  var revMap={}; (((D.rev||{}).units)||[]).forEach(function(u){ revMap[u.name]=u.rev90||0; });
-  var hasRev = Object.keys(revMap).length>0;
-  var owners=((D.expSummary||{}).owners)||{};   // item 60
-  var cols=[ar?'الشقة':'Apartment',ar?'المالك':'Owner',ar?'عدد':'Count',ar?'مصاريف':'Expenses'];
-  if(hasRev) cols=cols.concat([ar?'إيراد ٩٠ي':'Rev 90d',ar?'صافي':'Net']);
-  var head='<tr>'+cols.map(_expTh).join('')+'</tr>';
-  var rows=arr.map(function(a){
-    var hot = (totals.length>=4 && median>0 && (a.total||0) >= median*1.5);
-    var badge = hot ? ' <span class="pill danger">⚠ '+(ar?'أعلى من المعتاد':'above peers')+'</span>' : '';
-    var ownInput = '<input value="'+esc(owners[a.apartment]||'')+'" onchange="setUnitOwner(&#39;'+esc(a.apartment)+'&#39;,this.value)" placeholder="'+(ar?'المالك':'owner')+'" style="width:88px;font-size:11px;padding:3px 6px;background:var(--surface);border:1px solid var(--line);border-radius:5px;color:var(--text)">';
-    var tr = '<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 6px;font-size:12px">'+esc(a.apartment)+badge+'</td><td style="padding:8px 6px">'+ownInput+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(a.count)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700'+(hot?';color:var(--red)':'')+'">'+expMoney(a.total)+'</td>';
-    if(hasRev){
-      var rev = revMap[a.apartment]||0; var net = rev-(a.total||0);
-      tr += '<td style="padding:8px 6px;font-size:12px">'+(rev?fmt(rev):'—')+'</td>'
-          + '<td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+(rev?fmt(net):'—')+'</td>';
-    }
-    return tr+'</tr>'; }).join('');
-  var tbl = '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
-  // Item 60: per-owner P&L rollup (revenue − expenses grouped by the owner assigned above).
-  var byOwner={};
-  arr.forEach(function(a){ var o=owners[a.apartment]; if(!o) return; var g=byOwner[o]=byOwner[o]||{units:0,exp:0,rev:0}; g.units++; g.exp+=(a.total||0); g.rev+=(revMap[a.apartment]||0); });
-  var oKeys=Object.keys(byOwner);
-  var ownerTbl;
-  if(oKeys.length){
-    ownerTbl = '<div style="margin-top:16px"><div class="muted" style="font-size:11px;font-weight:600;margin-bottom:6px">'+(ar?'الربح/الخسارة حسب المالك':'P&L by owner')+'</div>'
-      + '<table style="width:100%;border-collapse:collapse"><tr>'+[ar?'المالك':'Owner',ar?'وحدات':'Units',ar?'إيراد':'Revenue',ar?'مصاريف':'Expenses',ar?'صافي':'Net'].map(_expTh).join('')+'</tr>'
-      + oKeys.map(function(o){ var g=byOwner[o]; var net=g.rev-g.exp; return '<tr style="border-bottom:1px solid var(--line)"><td class="strong" style="padding:8px 6px;font-size:12px">'+esc(o)+'</td><td style="padding:8px 6px;font-size:12px">'+g.units+'</td><td style="padding:8px 6px;font-size:12px">'+(g.rev?fmt(g.rev):'—')+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(g.exp)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700;color:'+(net>=0?'var(--green)':'var(--red)')+'">'+fmt(net)+'</td></tr>'; }).join('')
-      + '</table></div>';
-  }else{
-    ownerTbl = '<div class="muted" style="margin-top:12px;font-size:11px;padding:9px 11px;background:var(--surface-2);border-radius:6px">ℹ️ '+(ar?'عيّن مالكًا لكل وحدة في عمود «المالك» فوق، ويطلع لك الربح والخسارة لكل مالك تلقائيًا.':'Assign an owner in the Owner column above and per-owner P&L appears here automatically.')+'</div>';
-  }
-  return tbl + ownerTbl;
-}
-function _expByEmpHtml(){
-  var arr=((D.expSummary||{}).by_employee)||[];
-  if(!arr.length) return '<div class="empty muted" style="padding:24px;text-align:center">'+(L==='ar'?'لا بيانات للفترة':'No data for this period')+'</div>';
-  var head='<tr>'+[L==='ar'?'الموظف':'Employee',L==='ar'?'مُرحّل':'Posted',L==='ar'?'موقوف':'Held',L==='ar'?'إجمالي':'Total'].map(_expTh).join('')+'</tr>';
-  var rows=arr.map(function(x){ return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px;font-size:12px">'+esc(x.employee)+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(x.posted)+'</td><td style="padding:8px 6px;font-size:12px">'+fmt(x.held)+'</td><td style="padding:8px 6px;font-size:12px;font-weight:700">'+expMoney(x.total)+'</td></tr>'; }).join('');
-  return '<table style="width:100%;border-collapse:collapse">'+head+rows+'</table>';
-}
-
-/* ---- expense actions ---- */
-// Emil: gentle green flash on a card in its NEW position, and bring it into view so
-// the user literally sees it move to the مُرحّل group. Reduced-motion safe.
-function _expFlash(id){
-  var c=document.getElementById('expc_'+id);
-  if(!c) return;
-  var rm=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if(rm){ return; }
-  c.classList.add('just-posted');
-  try{ c.scrollIntoView({block:'nearest',behavior:'smooth'}); }catch(_){ }
-}
-async function expPost(id){
-  var r=await post('/api/expenses/post',{id:id});
-  if(r && r.ok){
-    var dry = (r.expense && r.expense.hostaway_ref==='DRYRUN') || ((D.expSummary||{}).dryrun);
-    toast(dry ? (L==='ar'?'تجربة — أُضيف للطابور (لن يكتب على Hostaway)':'Dry-run — queued (nothing written to Hostaway)')
-              : (L==='ar'?'أُضيف للطابور — سنؤكد من Hostaway':'Queued — will verify in Hostaway'));
-    await expRefresh();          // re-fetch summary+queue, re-render → card now sits in مُرحّل, counts update
-    _expFlash(id);               // flash it in its new spot
-    return;
-  }
-  else if(r && r.blocked_by && r.blocked_by.length){
-    // name the EXACT gate(s) that block posting — never the vague "راجع البيانات"
-    var names=r.blocked_by.map(function(b){ return (L==='ar'?b.ar:b.en)+(b.detail?(' · '+b.detail):''); }).join('، ');
-    toast((L==='ar'?'ما تقدر ترحّل: ':'Can\\'t post: ')+names);
-  } else if(r && r.error){
-    toast((L==='ar'?'Hostaway رفض: ':'Hostaway rejected: ')+r.error);   // the REAL API error
-  } else {
-    toast(L==='ar'?'فشل — حدّث الصفحة':'Failed — refresh');
-  }
-  await expRefresh();
-}
-async function expApproveAndPost(id, gate){
-  // The fix for the doom loop: actually APPROVE the soft gate, then post.
-  var a=await post('/api/expenses/approve',{gate:gate, id:id});
-  if(!(a && a.ok)){ toast((L==='ar'?'تعذّرت الموافقة: ':'Approve failed: ')+((a&&a.error)||'')); return; }
-  await expPost(id);
-}
-async function expDiscard(id){
-  var e=_expFind(id);
-  var msg=(L==='ar'?'تجاهل المصروف؟ ':'Discard expense? ')+(e?(e.ref+' · '+expMoney(e.amount)+' · '+(e.apartment||'')+' · '+(e.expense_date||'')):'');
-  if(!confirm(msg)) return;
-  await post('/api/expenses/discard',{id:id});
-  toast(L==='ar'?'تم التجاهل':'Discarded'); await expRefresh();
-}
-async function expNotDup(id){ await post('/api/expenses/not-duplicate',{id:id}); toast(L==='ar'?'تم — مو مكرر':'Marked not duplicate'); await expRefresh(); }
-async function expResolveApt(id){
-  var sel=document.getElementById('expApt_'+id);
-  if(!sel || !sel.value){ toast(L==='ar'?'اختر الشقة':'Pick an apartment'); return; }
-  await post('/api/expenses/resolve-apartment',{id:id, listing_id:parseInt(sel.value,10)});
-  toast(L==='ar'?'تم تحديد الشقة':'Apartment set'); await expRefresh();
-}
-async function expDelete(id){
-  var e=_expFind(id);
-  var msg=(L==='ar'?'حذف المصروف نهائياً؟ ':'Delete expense permanently? ')+(e?(e.ref+' · '+expMoney(e.amount)+' · '+(e.apartment||'')+' · '+(e.expense_date||'')):'');
-  if(!confirm(msg)) return;
-  var removeHa=false;
-  if(e && e.status==='verified' && e.hostaway_ref && e.hostaway_ref!=='DRYRUN')
-    removeHa=confirm(L==='ar'?'حذفه أيضاً من Hostaway؟':'Also remove it from Hostaway?');
-  await post('/api/expenses/delete',{id:id, remove_hostaway:removeHa});
-  toast(L==='ar'?'تم الحذف':'Deleted'); await expRefresh();
-}
-
-/* ---- Expenses V2: clear three-source reconciliation ---- */
-let _expV2View='overview';
-let _expV2SplitDraft=null;
-function expV2L(ar,en){ return L==='ar'?ar:en; }
-function expV2StatusLabel(st){
-  var m={needs_review:[t().exp_needs_review,t().exp_needs_review],ready:[t().exp_ready_export,t().exp_ready_export],
-    in_progress:[t().exp_in_progress,t().exp_in_progress],sent_not_verified:[t().exp_sent_not_verified,t().exp_sent_not_verified],
-    verified:[t().exp_verified_hostaway,t().exp_verified_hostaway],failed:[t().exp_failed,t().exp_failed],
-    duplicate:[t().exp_duplicate_exists,t().exp_duplicate_exists],archived:[t().exp_archived,t().exp_archived],
-    split_parent:[L==='ar'?'مصروف مقسم':'Split Parent',L==='ar'?'مصروف مقسم':'Split Parent']};
-  return (m[st]&&m[st][0])||st||'—';
-}
-function expV2Tone(st){
-  if(st==='verified') return 'ok';
-  if(st==='failed'||st==='sent_not_verified') return 'danger';
-  if(st==='needs_review'||st==='duplicate'||st==='in_progress') return 'warn';
-  if(st==='ready') return 'ok';
-  return 'info';
-}
-function expV2Color(st){
-  var tone=expV2Tone(st);
-  return tone==='ok'?'var(--green)':(tone==='danger'?'var(--red)':(tone==='warn'?'var(--gold)':'var(--mut)'));
-}
-function expV2Pill(label,tone){
-  var col=tone==='ok'?'var(--green)':(tone==='danger'?'var(--red)':(tone==='warn'?'var(--gold)':'var(--mut)'));
-  var bg=tone==='ok'?'var(--green-soft)':(tone==='danger'?'var(--red-soft)':(tone==='warn'?'var(--gold-tint)':'var(--surface-3)'));
-  return '<span style="display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:4px 9px;background:'+bg+';color:'+col+';font-size:10.5px;font-weight:700">'+esc(label)+'</span>';
-}
-function expV2SourceChip(label,present,verified){
-  var tone=verified?'ok':(present?'warn':'info');
-  var mark=verified?'✓':(present?'•':'—');
-  return expV2Pill(mark+' '+label,tone);
-}
-function expV2SetSummary(snap){
-  var totals=(snap&&snap.totals)||{};
-  D.expSummary={queue:(totals.needs_review||0)+(totals.failed||0)+(totals.sent_not_verified||0),
-    ready:totals.ready||0,total_count:(snap.rows||[]).length,review:(totals.needs_review||0),count:(snap.rows||[]).length};
-}
-async function loadExpenses(){
-  var body=document.getElementById('expBody');
-  if(body) body.innerHTML='<div class="empty sk">—</div>';
-  D.expDiagDeep=null;                       // re-fetch root-cause diagnosis lazily on next open
-  if(!D.expOpts){ try{ D.expOpts=await api('/api/expenses/options'); }catch(_){ D.expOpts={apartments:[]}; } }
-  try{ D.expV2=await api('/api/expenses/v2/overview'); }catch(e){ D.expV2={rows:[],totals:{},health:{},diagnostics:{},error:String(e)}; }
-  expV2SetSummary(D.expV2);
-  _renderExpensesV2();
-  renderExpensesOpsSummary();
-  buildSideNav(); buildBottomNav();
-}
-async function expRefresh(){ await loadExpenses(); }
-async function expV2Reconcile(pullSheet){
-  toast(expV2L('⏳ نطابق المصادر…','⏳ Reconciling sources…'));
-  var r; try{ r=await post('/api/expenses/v2/reconcile',{pull_sheet:!!pullSheet}); }catch(e){ toast('⚠ '+e); return; }
-  D.expV2=r; D.expDiagDeep=null; expV2SetSummary(r);
-  if(_expV2View==='diagnostics'){ expV2LoadDeepDiag(); } else { _renderExpensesV2(); }
-  renderExpensesOpsSummary(); buildSideNav();
-  toast(expV2L('تمت المطابقة','Reconciled'));
-}
-async function expV2Action(action){
-  var msg={export_safe_missing:[expV2L('تصدير المصاريف الجاهزة فقط؟','Export ready expenses only?')],
-    retry_temporary:[expV2L('إعادة المحاولة للفشل المؤقت فقط؟','Retry temporary failures only?')],
-    manual_verify:[expV2L('التحقق من المرسل وغير المؤكد فقط؟','Verify sent, not verified expenses only?')],
-    move_unsafe_to_review:[expV2L('نقل غير الآمن إلى تحتاج مراجعة؟','Move unsafe rows to Needs Review?')],
-    skip_duplicate:[expV2L('وضع المكررات كموجودة مسبقاً؟','Mark duplicates as already existing?')],
-    mark_matched_verified:[expV2L('اعتماد المطابق بعد إعادة التحقق؟','Mark matched rows verified after re-check?')]};
-  if(!confirm((msg[action]&&msg[action][0])||action)) return;
-  var r; try{ r=await post('/api/expenses/v2/repair-apply',{action:action}); }catch(e){ toast('⚠ '+e); return; }
-  toast(expV2L('تم: ','Done: ')+(r.changed||[]).length+' / '+(r.queued||[]).length+' / '+(r.verified||[]).length);
-  await loadExpenses();
-}
-function expV2SetView(v){ _expV2View=v; if(v==='diagnostics'&&!D.expDiagDeep){ expV2LoadDeepDiag(); return; } _renderExpensesV2(); }
-// Deep per-expense root-cause diagnosis (diagnosis-first). Read-only; never writes/sends.
-async function expV2LoadDeepDiag(){
-  try{ D.expDiagDeep=await api('/api/expenses/diagnose'); }catch(_){ D.expDiagDeep={overview:{},sample:[],dryrun_on:false}; }
-  _renderExpensesV2();
-}
-function expV2DeepDiagHtml(){
-  var d=D.expDiagDeep; if(!d) return '<div class="empty sk" style="margin-bottom:10px">—</div>';
-  var ov=d.overview||{}, sample=d.sample||[];
-  var dryBanner = d.dryrun_on ? riskPanel('warn', expV2L('السبب الجذري الأرجح: وضع التجربة مفعّل','Most likely root cause: DRY-RUN is ON'),
-    expV2L('EXPENSE_POST_DRYRUN=1 — ما انكتب أي مصروف فعليًا في Hostaway. اضبطه على 0 في Railway ثم رحّل المعتمد.','EXPENSE_POST_DRYRUN=1 — nothing was actually written to Hostaway. Set it to 0 in Railway, then export approved.'), '', '') : '';
-  // Hostaway endpoint truth — the real question once DRY-RUN is off.
-  var hep=ov.hostaway_endpoint||{}; var haBanner='';
-  if(ov.hostaway_endpoint){
-    if(hep.readable){
-      haBanner=riskPanel('ok', expV2L('Hostaway متصل — القراءة تعمل','Hostaway reachable — read works'),
-        expV2L('المسار '+(hep.path||'/expenses')+' يرجّع '+(hep.count||0)+' مصروف. لو مصروفك مو ظاهر، السبب في بطاقته تحت (إرسال/تحقق/ربط)، مو في الاتصال.','Path '+(hep.path||'/expenses')+' returns '+(hep.count||0)+' expenses. If yours is missing, the reason is in its card below (send/verify/mapping), not the connection.'),'','');
-    } else {
-      haBanner=riskPanel('danger', expV2L('Hostaway لا يستجيب لمسار المصاريف','Hostaway expense endpoint is not responding'),
-        expV2L('المسار '+(hep.path||'/expenses')+' رجّع خطأ: '+(hep.error||'—')+'. يمكن المسار غير صحيح — جرّب اختبار المسارات.','Path '+(hep.path||'/expenses')+' returned an error: '+(hep.error||'—')+'. The path may be wrong — run the endpoint test.'),
-        expV2L('اختبر مسارات Hostaway','Test Hostaway endpoints'), "window.open('/api/expenses/hostaway-debug?token='+encodeURIComponent(tok()),'_blank')");
-    }
-  }
-  var bd=ov.by_diagnosis||{}; var bk=Object.keys(bd).sort(function(a,b){return bd[b]-bd[a];});
-  var bdHtml=bk.length?('<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px">'+bk.map(function(k){return '<span class="exp-reason" style="font-size:11.5px">'+esc(k)+': <b>'+bd[k]+'</b></span>';}).join('')+'</div>'):'';
-  var head='<div style="display:flex;gap:8px;align-items:center;margin:4px 0 8px"><b style="font-size:13.5px">🩺 '+expV2L('تشخيص لكل مصروف','Per-expense root cause')+'</b>'
-    +'<span class="muted" style="font-size:11.5px">'+expV2L('إجمالي ','total ')+(ov.total||0)+(d.dryrun_on?(' · DRY-RUN '+(ov.dryrun_count||0)):'')+'</span></div>';
-  var cards=sample.length?sample.map(function(x){
-    function kv(l,v){ return '<div style="font-size:11.5px"><span class="muted">'+esc(l)+':</span> '+esc(v)+'</div>'; }
-    var called = x.dry_run_only?expV2L('لا — وضع تجربة فقط','No — dry-run only'):(x.hostaway_called?expV2L('نعم','Yes'):expV2L('لا — تحديث محلي فقط','No — local only'));
-    return '<div class="card" style="border-radius:8px;margin-bottom:9px"><div style="display:flex;justify-content:space-between;gap:8px"><b>'+esc(x.ref||x.id||'')+' · '+esc(x.apartment||'—')+'</b>'+expV2Pill(esc(x.canonical_status),expV2Tone(x.canonical_status))+'</div>'
-      +'<div style="margin-top:6px;font-size:12.5px"><b>'+expV2L('التشخيص','Diagnosis')+':</b> '+esc(L==='ar'?x.diagnosis_ar:x.diagnosis_en)+'</div>'
-      +'<div style="margin-top:4px;font-size:12px;color:var(--gold)"><b>'+expV2L('الإجراء المقترح','Recommended')+':</b> '+esc(L==='ar'?x.recommended_ar:x.recommended_en)+'</div>'
-      +'<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:3px 14px">'
-        +kv(expV2L('اتصلنا بـHostaway؟','Hostaway called?'), called)
-        +kv(expV2L('مرجع Hostaway','Hostaway ref'), x.hostaway_ref||'—')
-        +kv(expV2L('تأكد','Verified'), x.hostaway_verified?expV2L('نعم ✓','Yes ✓'):expV2L('لا','No'))
-        +kv(expV2L('ربط الشقة','Property map'), (x.apartment_mapping||{}).hostaway_property_id||expV2L('غير مربوط','unmapped'))
-        +kv(expV2L('الرقم في الحمولة','Ref in payload'), x.reference_in_payload?'✓':'✗')
-        +kv(expV2L('تكرار','Duplicate'), x.duplicate_match?(x.duplicate_match.ref||'—'):'—')
-        +(x.last_error?kv(expV2L('آخر خطأ','Last error'), x.last_error):'')
-      +'</div></div>';
-  }).join(''):('<div class="muted" style="padding:14px 0">'+expV2L('ما فيه مصاريف عالقة 🎉','No stuck expenses 🎉')+'</div>');
-  return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'+dryBanner+haBanner+head+bdHtml+cards
-    +'<a class="btn ghost xs" href="/api/expenses/diagnose?format=csv&token='+encodeURIComponent(tok())+'" target="_blank">⬇ '+expV2L('تحميل تقرير التشخيص CSV','Download root-cause CSV')+'</a></div>';
-}
-function expV2Rows(){
-  var rows=((D.expV2||{}).rows)||[];
-  if(_expV2View==='overview') return rows.filter(function(r){return r.v2_status!=='archived';}).slice(0,140);
-  if(_expV2View==='missing') return rows.filter(function(r){return r.v2_status==='ready'||r.v2_status==='sent_not_verified';});
-  if(_expV2View==='sheet_only') return rows.filter(function(r){return ((r.sheet_state||{}).present_in_sheet)&&!((r.hostaway_state||{}).present_in_hostaway);});
-  if(_expV2View==='dashboard_only') return rows.filter(function(r){return ((r.dashboard_state||{}).present_in_dashboard)&&!((r.sheet_state||{}).present_in_sheet)&&!((r.hostaway_state||{}).present_in_hostaway);});
-  if(_expV2View==='hostaway_only') return rows.filter(function(r){return r.source_kind==='hostaway_only';});
-  if(_expV2View==='verified_all') return rows.filter(function(r){return r.v2_status==='verified'&&((r.sheet_state||{}).present_in_sheet)&&((r.dashboard_state||{}).present_in_dashboard);});
-  if(_expV2View==='split') return rows.filter(function(r){return r.v2_status==='split_parent'||((r.dashboard_state||{}).local_parent_id);});
-  if(_expV2View==='diagnostics') return rows;
-  return rows.filter(function(r){return r.v2_status===_expV2View;});
-}
-function expV2HealthCards(){
-  var h=(D.expV2||{}).health||{}, sheet=h.sheet||{}, dash=h.dashboard||{}, ha=h.hostaway||{};
-  function card(title, value, sub, tone){
-    return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:92px">'
-      +'<div class="muted" style="font-size:11px;font-weight:700">'+esc(title)+'</div>'
-      +'<div style="font-size:22px;font-weight:800;margin-top:5px;color:'+expV2Color(tone||'info')+'">'+esc(value)+'</div>'
-      +'<div class="muted" style="font-size:11px;margin-top:4px">'+esc(sub||'')+'</div></div>';
-  }
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0">'
-    +card('Google Sheet', sheet.configured?expV2L('متصل','Connected'):expV2L('غير مضبوط','Not configured'),
-      expV2L('آخر مزامنة: ','last sync: ')+(sheet.resolved_url?expV2L('رابط موجود','URL set'):'—')+' · '+expV2L('صفوف: ','rows: ')+fmt(sheet.data_rows||0), sheet.error?'failed':'verified')
-    +card(expV2L('الداشبورد','Dashboard'), fmt(dash.local_records||0), expV2L('جاهز ','ready ')+fmt(dash.ready||0)+' · '+expV2L('فشل ','failed ')+fmt(dash.failed||0)+' · '+expV2L('تقسيم ','split ')+fmt(dash.split_parents||0), 'in_progress')
-    +card('Hostaway', ha.connected?expV2L('متصل','Connected'):expV2L('غير متصل','Not connected'),
-      expV2L('مؤكد ','verified ')+fmt(ha.verified_matches||0)+' · '+expV2L('مجلب ','fetched ')+fmt(ha.fetched||0)+(ha.api_error?(' · '+ha.api_error):''), ha.connected?'verified':'failed')
-    +'</div>';
-}
-function expV2WorkflowCards(){
-  var totals=(D.expV2||{}).totals||{}, sar=(D.expV2||{}).sar_totals||{};
-  var order=[['needs_review',t().exp_needs_review],['ready',t().exp_ready_export],['in_progress',t().exp_in_progress],['sent_not_verified',t().exp_sent_not_verified],['verified',t().exp_verified_hostaway],['failed',t().exp_failed],['duplicate',t().exp_duplicate_exists],['split',t().exp_split]];
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0 16px">'
-    +order.map(function(p){ var key=p[0], on=_expV2View===key; var val= key==='split'?(totals.split_parent||0):(totals[key]||0); var money=key==='split'?(sar.split_parent||0):(sar[key]||0);
-      return '<button class="exp-stat '+expV2Tone(key)+' '+(on?'on':'')+'" onclick="expV2SetView(&#39;'+key+'&#39;)" style="text-align:start;border-color:'+(on?'var(--gold)':'var(--border)')+'">'
-        +'<div class="v">'+fmt(val)+'</div><div class="l">'+esc(p[1])+' · '+expMoney(money)+'</div></button>';
-    }).join('')+'</div>';
-}
-function expV2Actions(){
-  var csv='/api/expenses/v2/diagnostics.csv?token='+encodeURIComponent(tok());
-  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px">'
-    +'<button class="btn ghost sm" onclick="expV2Reconcile(true)">'+expV2L('تحديث الشيت','Refresh Sheet')+'</button>'
-    +'<button class="btn ghost sm" onclick="expV2Reconcile(false)">'+expV2L('تحديث Hostaway','Refresh Hostaway')+'</button>'
-    +'<button class="btn primary sm" onclick="expV2Reconcile(true)">'+expV2L('طابق الآن','Reconcile Now')+'</button>'
-    +'<button class="btn primary sm" onclick="expV2Action(&#39;export_safe_missing&#39;)">'+expV2L('صدّر الجاهز','Export Ready')+'</button>'
-    +'<button class="btn ghost sm" onclick="expV2Action(&#39;retry_temporary&#39;)">'+expV2L('أعد الفاشل','Retry Failed')+'</button>'
-    +'<button class="btn ghost sm" onclick="expV2Action(&#39;manual_verify&#39;)">'+expV2L('تحقق من المرسل','Verify Sent')+'</button>'
-    +'<button class="btn ghost sm" onclick="expV2RepairPlan()">🧭 '+t().exp_reconcile_repair+'</button>'
-    +'<button class="btn ghost sm" onclick="expV2SetView(&#39;diagnostics&#39;)">'+expV2L('التشخيص','Open Diagnostics')+'</button>'
-    +'<a class="btn ghost sm" href="'+csv+'" target="_blank">'+t().exp_download_diag+'</a></div>';
-}
-function expV2FilterTabs(){
-  var tabs=[['overview',expV2L('نظرة عامة','Overview')],['missing',t().exp_missing_hostaway],['sheet_only',expV2L('الشيت فقط','Sheet only')],
-    ['dashboard_only',expV2L('الداشبورد فقط','Dashboard only')],['hostaway_only',expV2L('Hostaway فقط','Hostaway only')],
-    ['verified_all',expV2L('مؤكد في الثلاثة','Verified in all')],['duplicate',t().exp_duplicate_exists],['split',t().exp_split],['diagnostics',expV2L('التشخيص','Diagnostics')]];
-  return '<div style="display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px">'
-    +tabs.map(function(tb){return '<button class="btn ghost sm" onclick="expV2SetView(&#39;'+tb[0]+'&#39;)" style="'+(_expV2View===tb[0]?'background:var(--surface);border-color:var(--gold);color:var(--gold)':'')+'">'+esc(tb[1])+'</button>';}).join('')+'</div>';
-}
-function expV2RowCard(r){
-  var ss=r.sheet_state||{}, ds=r.dashboard_state||{}, hs=r.hostaway_state||{};
-  var status=expV2Pill(expV2StatusLabel(r.v2_status), expV2Tone(r.v2_status));
-  var reason=expV2Pill((r.reason_label&&r.reason_label[L])||r.reason||'', expV2Tone(r.v2_status));
-  var src='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
-    +expV2SourceChip(t().exp_present_sheet, !!ss.present_in_sheet, false)
-    +expV2SourceChip(t().exp_present_dashboard, !!ds.present_in_dashboard, false)
-    +expV2SourceChip(t().exp_present_hostaway, !!hs.present_in_hostaway, r.v2_status==='verified')+'</div>';
-  var actions='<button class="btn ghost xs" onclick="expV2Open(&#39;'+esc(r.id)+'&#39;)">'+expV2L('عرض','View')+'</button>';
-  if(ds.present_in_dashboard) actions+=' <button class="btn ghost xs" onclick="expEdit(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تعديل/إصلاح','Edit/Fix')+'</button>';
-  if(r.can_export) actions+=' <button class="btn primary xs" onclick="expV2ExportOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('ترحيل','Export')+'</button>';
-  if(r.can_verify) actions+=' <button class="btn ghost xs" onclick="expV2VerifyOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تحقق','Verify')+'</button>';
-  if(ds.present_in_dashboard && r.v2_status!=='split_parent') actions+=' <button class="btn ghost xs" onclick="expV2Split(&#39;'+esc(r.id)+'&#39;)">'+t().exp_split+'</button>';
-  var facts=[r.date,r.apartment,r.category,(r.source||''),r.last_attempt_at?(expV2L('آخر محاولة ','last attempt ')+_expTime(r.last_attempt_at)):'',r.attempts?(expV2L('محاولات ','attempts ')+r.attempts):''].filter(Boolean).map(esc).join(' · ');
-  return '<div class="exp-card" style="border-color:color-mix(in srgb, '+expV2Color(r.v2_status)+' 34%, var(--line));cursor:pointer" onclick="if(event.target.tagName!==&#39;BUTTON&#39;&&event.target.tagName!==&#39;A&#39;)expV2Open(&#39;'+esc(r.id)+'&#39;)">'
-    +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="min-width:0">'
-    +'<div class="strong" style="font-size:14px">'+esc(r.ref||r.id||'—')+' · '+expMoney(r.amount||0)+'</div>'
-    +'<div class="muted" style="font-size:11.5px;margin-top:3px">'+facts+'</div></div><div>'+status+'</div></div>'
-    +src+'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px"><span class="muted" style="font-size:11px">'+t().exp_why_not+'</span>'+reason+'<span class="muted" style="font-size:11px">'+esc(r.recommended_action||'')+'</span></div>'
-    +'<div style="margin-top:10px;display:flex;gap:7px;flex-wrap:wrap">'+actions+'</div></div>';
-}
-function expV2DiagnosticsHtml(){
-  var deep=expV2DeepDiagHtml();
-  var d=(D.expV2||{}).diagnostics||{}, keys=Object.keys(d).sort(function(a,b){return (d[b].count||0)-(d[a].count||0);});
-  if(!keys.length) return deep+emptyState(expV2L('لا توجد مجموعات مشاكل','No grouped issues'),expV2L('شغل مطابقة الآن لتحديث التجميع.','Run Reconcile Now to refresh grouping.'),'✓');
-  var grouped='<div style="font-size:12px;font-weight:700;color:var(--text-2);margin:4px 0 8px">'+expV2L('تجميع حسب السبب','Grouped by reason')+'</div><div style="display:grid;gap:10px">'+keys.map(function(k){
-    var g=d[k]||{};
-    var examples=(g.examples||[]).map(function(x){return '<span class="exp-reason">'+esc((x.ref||x.id||'')+' · '+(x.apartment||'')+' · '+expMoney(x.amount||0))+'</span>';}).join(' ');
-    return '<div class="card" style="border-radius:8px"><div style="display:flex;justify-content:space-between;gap:10px"><b>'+esc(k)+'</b>'+expV2Pill(fmt(g.count||0),expV2Tone(k))+'</div><div class="muted" style="font-size:11.5px;margin-top:6px">'+examples+'</div></div>';
-  }).join('')+'</div>';
-  return deep+grouped;
-}
-function _renderExpensesV2(){
-  var body=document.getElementById('expBody'); if(!body) return;
-  var snap=D.expV2||{}, rows=expV2Rows();
-  var banner=riskPanel('info',t().exp_three_source,expV2L('هنا تشوف المصروف هل هو موجود في الشيت، الداشبورد، وHostaway — وعشان كذا نعرف وين المشكلة بالضبط.','This view reconciles Sheet, Dashboard, and Hostaway so you can see exactly where the issue is.'),'', '');
-  var html=banner+expV2HealthCards()+expV2WorkflowCards()+expV2Actions()+expV2FilterTabs();
-  if(_expV2View==='diagnostics') html+=expV2DiagnosticsHtml();
-  else if(!rows.length) html+=emptyState(expV2L('ما فيه مصاريف في هذا الفلتر','No expenses in this filter'),expV2L('غيّر الفلتر أو شغّل مطابقة الآن.','Change the filter or run Reconcile Now.'),'—');
-  else html+='<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(expV2RowCard).join('')+'</div>';
-  body.innerHTML=html;
-}
-function expV2Find(id){ var rows=((D.expV2||{}).rows)||[]; for(var i=0;i<rows.length;i++){ if(String(rows[i].id)===String(id)) return rows[i]; } return null; }
-function expV2Pre(obj){ return '<pre style="white-space:pre-wrap;direction:ltr;text-align:left;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;max-height:220px;overflow:auto">'+esc(JSON.stringify(obj||{},null,2))+'</pre>'; }
-function expV2Open(id){
-  var r=expV2Find(id); if(!r) return;
-  openDrawer(r.ref||r.id||'—', expMoney(r.amount||0)+' · '+(r.apartment||''));
-  var hs=r.hostaway_state||{}, ds=r.dashboard_state||{}, ss=r.sheet_state||{};
-  var h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+expV2Pill(expV2StatusLabel(r.v2_status), expV2Tone(r.v2_status))+expV2Pill((r.reason_label&&r.reason_label[L])||r.reason, expV2Tone(r.v2_status))+'</div>'
-    +'<div class="muted" style="font-size:12px;margin-bottom:12px">'+t().exp_recommended_action+': <b>'+esc(r.recommended_action||'')+'</b></div>'
-    +'<div style="display:grid;grid-template-columns:1fr;gap:10px">'
-    +'<div><b>'+t().exp_present_sheet+'</b>'+expV2Pre(ss)+'</div>'
-    +'<div><b>'+t().exp_present_dashboard+'</b>'+expV2Pre(ds)+'</div>'
-    +'<div><b>'+t().exp_present_hostaway+'</b>'+expV2Pre(hs)+'</div>'
-    +'<div><b>'+expV2L('السجل','Timeline')+'</b>'+expV2Pre({events:r.events,export_attempts:r.export_attempts})+'</div></div>';
-  setDrawerBody(h);
-  var foot='';
-  if(ds.present_in_dashboard) foot+='<button class="btn ghost sm" onclick="expEdit(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تعديل/إصلاح','Edit/Fix')+'</button>';
-  if(r.can_export) foot+='<button class="btn primary sm" onclick="expV2ExportOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('ترحيل','Export')+'</button>';
-  if(r.can_verify) foot+='<button class="btn ghost sm" onclick="expV2VerifyOne(&#39;'+esc(r.id)+'&#39;)">'+expV2L('تحقق','Verify')+'</button>';
-  if(ds.present_in_dashboard && r.v2_status!=='split_parent') foot+='<button class="btn ghost sm" onclick="expV2Split(&#39;'+esc(r.id)+'&#39;)">'+t().exp_split+'</button>';
-  setDrawerFoot(foot);
-}
-async function expV2ExportOne(id){ await post('/api/expenses/v2/repair-apply',{action:'export_safe_missing',ids:[id]}); closeDrawer(); await loadExpenses(); }
-async function expV2VerifyOne(id){ await post('/api/expenses/v2/repair-apply',{action:'manual_verify',ids:[id]}); closeDrawer(); await loadExpenses(); }
-async function expV2RepairPlan(){
-  openDrawer(t().exp_reconcile_repair, expV2L('معاينة فقط','Preview only')); setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('');
-  var p; try{ p=await api('/api/expenses/v2/repair-plan'); }catch(e){ setDrawerBody('<div class="empty">'+esc(e)+'</div>'); return; }
-  D.expV2Plan=p; var s=p.summary||{};
-  function row(action,label,count,body){
-    return '<div style="border:1px solid var(--border);border-radius:8px;padding:11px;margin-bottom:8px;background:var(--surface-2)"><div style="display:flex;justify-content:space-between;gap:8px"><b>'+esc(label)+'</b>'+expV2Pill(fmt(count||0),count?'warn':'info')+'</div><div class="muted" style="font-size:11.5px;margin-top:4px">'+esc(body)+'</div>'+(count?'<button class="btn primary sm" style="margin-top:8px" onclick="expV2Action(&#39;'+action+'&#39;)">'+esc(label)+'</button>':'')+'</div>';
-  }
-  var h='<div class="muted" style="font-size:12px;margin-bottom:12px">'+expV2L('كل إجراء يقول بالضبط وش بيسوي. ما فيه زر واحد يطابِق ويصدّر كل شيء.','Each action says exactly what it will do. There is no one vague button that queues everything.')+'</div>'
-    +row('mark_matched_verified',expV2L('علّم المطابق كمتحقق','Mark matched as Verified'),s.already_verified,expV2L('يعيد التحقق ثم يعتمد الموجود فعلاً في Hostaway.','Re-checks then marks only rows actually found in Hostaway.'))
-    +row('move_unsafe_to_review',expV2L('انقل غير الآمن للمراجعة','Move unsafe to Needs Review'),s.unsafe_to_export,expV2L('ناقص شقة أو مبلغ أو تاريخ أو تصنيف أو تقسيم غير متوازن.','Missing apartment, amount, date, category, or unbalanced split.'))
-    +row('export_safe_missing',expV2L('صدّر الناقص الآمن فقط','Export only safe missing'),s.missing_from_hostaway,expV2L('يصّدر فقط المصاريف الجاهزة التي لا تملك رقم Hostaway حقيقي.','Exports only ready rows that do not already have a real Hostaway id.'))
-    +row('retry_temporary',expV2L('أعد الفشل المؤقت فقط','Retry temporary failures'),s.temporary_failures,expV2L('لا يعيد تصدير المكررات أو الصفوف التي لها رقم Hostaway.','Does not re-export duplicates or rows with a Hostaway id.'))
-    +row('manual_verify',expV2L('راجع المرسل وغير المؤكد','Review sent, not verified'),s.manual_review,expV2L('صفوف عندها رقم Hostaway محلي لكن لم نجدها في التحديث.','Rows have a local Hostaway id but were not found in the refresh.'))
-    +row('skip_duplicate',expV2L('تجاهل المكررات','Skip duplicates'),s.duplicates,expV2L('يضعها كموجودة مسبقاً ولا يصدّرها تلقائياً.','Marks as already existing and never exports automatically.'));
-  setDrawerBody(h);
-}
-function expV2Split(id){
-  var r=expV2Find(id); if(!r) return;
-  _expV2SplitDraft={id:id,mode:'percentage',rows:[{listing_id:'',apartment:'',value:50},{listing_id:'',apartment:'',value:50}],preview:null};
-  openDrawer(t().exp_split, (r.ref||'')+' · '+expMoney(r.amount||0)); expV2RenderSplit();
-}
-function expV2SplitOptions(sel){
-  var opts='<option value="">—</option>';
-  (((D.expOpts||{}).apartments)||[]).forEach(function(a){ opts+='<option value="'+esc(a.listing_id)+'"'+(String(sel)===String(a.listing_id)?' selected':'')+'>'+esc(a.name)+'</option>'; });
-  return opts;
-}
-function expV2SplitSet(i,k,v){
-  var d=_expV2SplitDraft; if(!d) return;
-  d.rows[i][k]=v;
-  if(k==='listing_id'){ var a=(((D.expOpts||{}).apartments)||[]).filter(function(x){return String(x.listing_id)===String(v);})[0]; d.rows[i].apartment=a?a.name:''; }
-}
-function expV2SplitAdd(){ if(_expV2SplitDraft){ _expV2SplitDraft.rows.push({listing_id:'',apartment:'',value:0}); expV2RenderSplit(); } }
-function expV2SplitDel(i){ if(_expV2SplitDraft&&_expV2SplitDraft.rows.length>2){ _expV2SplitDraft.rows.splice(i,1); expV2RenderSplit(); } }
-function expV2RenderSplit(){
-  var d=_expV2SplitDraft; if(!d) return;
-  var modeBtns='<div style="display:flex;gap:8px;margin-bottom:10px"><button class="btn ghost sm" onclick="_expV2SplitDraft.mode=&#39;percentage&#39;;expV2RenderSplit()" style="'+(d.mode==='percentage'?'background:var(--gold);color:#1a1a1a':'')+'">'+t().exp_split_pct+'</button><button class="btn ghost sm" onclick="_expV2SplitDraft.mode=&#39;amount&#39;;expV2RenderSplit()" style="'+(d.mode==='amount'?'background:var(--gold);color:#1a1a1a':'')+'">'+t().exp_split_amount+'</button></div>';
-  var rows=d.rows.map(function(r,i){
-    return '<div style="display:grid;grid-template-columns:1.5fr .8fr auto;gap:8px;margin-bottom:8px;align-items:center">'
-      +'<select onchange="expV2SplitSet('+i+',&#39;listing_id&#39;,this.value)">'+expV2SplitOptions(r.listing_id)+'</select>'
-      +'<input type="number" step="0.01" value="'+esc(r.value)+'" oninput="expV2SplitSet('+i+',&#39;value&#39;,this.value)" placeholder="'+(d.mode==='percentage'?'%':'SAR')+'">'
-      +'<button class="btn ghost sm" onclick="expV2SplitDel('+i+')">×</button></div>';
-  }).join('');
-  var prev=d.preview?expV2Pre(d.preview):'<div class="muted" style="font-size:12px">'+t().exp_split_preview+'</div>';
-  setDrawerBody(modeBtns+rows+'<button class="btn ghost sm" onclick="expV2SplitAdd()">+ '+expV2L('أضف شقة','Add apartment')+'</button><div style="margin-top:12px">'+prev+'</div>');
-  setDrawerFoot('<button class="btn ghost sm" onclick="expV2SplitPreview()">'+t().exp_split_preview+'</button><button class="btn primary sm" onclick="expV2SplitConfirm()">'+t().exp_split_confirm+'</button>');
-}
-async function expV2SplitPreview(){
-  var d=_expV2SplitDraft; if(!d) return;
-  var r=await post('/api/expenses/v2/split-preview',{id:d.id,mode:d.mode,rows:d.rows});
-  d.preview=r; expV2RenderSplit();
-}
-async function expV2SplitConfirm(){
-  var d=_expV2SplitDraft; if(!d) return;
-  var r=await post('/api/expenses/v2/split-confirm',{id:d.id,mode:d.mode,rows:d.rows});
-  if(!r.ok){ d.preview=r; expV2RenderSplit(); return; }
-  toast(expV2L('تم التقسيم','Split created')); closeDrawer(); await loadExpenses();
-}
 
 /* ---- edit overlay ---- */
 function _ensureExpOv(){
@@ -18673,47 +17914,6 @@ function _ensureExpOv(){
   document.body.appendChild(ov); return ov;
 }
 function closeExp(){ var ov=document.getElementById('expOverlay'); if(ov) ov.style.display='none'; }
-function _expSetField(k,v){ if(_expDraft) _expDraft[k]=v; }
-async function expEdit(id){
-  _ensureExpOv();
-  var d=null; try{ var x=await api('/api/expenses/get?id='+encodeURIComponent(id)); d=x.expense; }catch(_){}
-  if(!d){ toast(L==='ar'?'تعذّر الفتح':'Could not open'); return; }
-  _expDraft=d; _renderExpEditor();
-  document.getElementById('expOverlay').style.display='block';
-}
-function _renderExpEditor(){
-  var d=_expDraft||{}, o=D.expOpts||{};
-  function inp(k,ph,type){ return '<input '+(type?('type="'+type+'" '):'')+'value="'+esc(d[k]==null?'':d[k])+'" oninput="_expSetField(&#39;'+k+'&#39;,this.value)" placeholder="'+(ph||'')+'" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'; }
-  function sel(k,arr){ var h='<select onchange="_expSetField(&#39;'+k+'&#39;,this.value)" style="width:100%;padding:8px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px"><option value="">—</option>'; (arr||[]).forEach(function(op){ h+='<option value="'+esc(op)+'"'+(d[k]===op?' selected':'')+'>'+esc(op)+'</option>'; }); h+='</select>'; return h; }
-  function lbl(n,c){ return '<div><label class="muted" style="font-size:11px;font-weight:600">'+n+'</label>'+c+'</div>'; }
-  var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
-    +'<div style="font-size:17px;font-weight:700">💸 '+(L==='ar'?'تعديل مصروف':'Edit expense')+' · <span style="color:var(--gold);font-size:12px">'+esc(d.ref||'')+'</span></div>'
-    +'<button onclick="closeExp()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px">×</button></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-    + lbl(L==='ar'?'الموظف':'Employee', sel('submitter',o.employees))
-    + lbl(L==='ar'?'الشقة':'Apartment', inp('apartment'))
-    + lbl(L==='ar'?'نوع الصيانة':'Maintenance type', sel('maintenance_type',o.maintenance_types))
-    + lbl(L==='ar'?'الفئة':'Category', sel('category',o.categories))
-    + lbl(L==='ar'?'المبلغ (ر.س)':'Amount (SAR)', inp('amount','','number'))
-    + lbl(L==='ar'?'تاريخ المصروف':'Expense date', inp('expense_date','','date'))
-    + lbl(L==='ar'?'المورّد':'Vendor', inp('vendor'))
-    + lbl(L==='ar'?'طريقة الدفع':'Payment method', sel('payment_method',o.payment_methods))
-    + lbl(L==='ar'?'رابط الفاتورة (Drive)':'Receipt link (Drive)', inp('receipt_link'))
-    + lbl(L==='ar'?'سبب عدم الفاتورة':'No-receipt reason', inp('no_receipt_reason'))
-    +'</div>' + lbl(L==='ar'?'ملاحظة':'Note', inp('note'))
-    +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
-    +'<button class="btn ghost" onclick="closeExp()">'+(L==='ar'?'إلغاء':'Cancel')+'</button>'
-    +'<button class="btn" onclick="expSaveEdit()">'+(L==='ar'?'حفظ ومراجعة':'Save & re-check')+'</button></div>';
-  document.getElementById('expEditBody').innerHTML=html;
-}
-async function expSaveEdit(){
-  var d=_expDraft; if(!d) return;
-  await post('/api/expenses/update',{id:d.id, submitter:d.submitter, apartment:d.apartment,
-    maintenance_type:d.maintenance_type, category:d.category, amount:d.amount, expense_date:d.expense_date,
-    receipt_link:d.receipt_link, no_receipt_reason:d.no_receipt_reason, vendor:d.vendor,
-    payment_method:d.payment_method, note:d.note});
-  closeExp(); toast(L==='ar'?'تم الحفظ':'Saved'); await expRefresh();
-}
 
 /* ---- settings overlay ---- */
 async function expShowSettings(){
@@ -18769,13 +17969,14 @@ async function expSaveSettings(){
 }
 
 /* ============================================================
-   EXPENSES V4 — Expense Approval Center (supersedes V1/V2 UI;
-   the old renderers stay in code but are no longer reached).
+   EXPENSES V4 — Expense Approval Center (the ONLY expense UI;
+   the V1/V2 renderers + their dead endpoints were removed).
    Sheet=intake · Dashboard=approval · Hostaway=export. No raw
    backslash escapes in any string (String.fromCharCode for newlines).
    ============================================================ */
 var _x4Tab='pending'; var _x4Q=''; var _x4Split=null;
 function x4Color(tab){ return tab==='verified'?'var(--green)':(tab==='needs_action'?'var(--down)':'var(--gold)'); }
+async function expRefresh(){ D.exp4=null; D.expOpts=null; await loadExpenses(); }
 async function loadExpenses(){
   var body=document.getElementById('expBody'); if(!body) return;
   body.innerHTML='<div class="empty sk">—</div>';
@@ -25603,21 +24804,57 @@ def _owner_norm(s):
     spaces, '|', '-', etc.). So code 'A-11' → 'a11' matches a listing 'Ouja | A 11'."""
     return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
 
+def _owner_tokens(s):
+    """Alphanumeric/Arabic tokens of a name, lowercased — the unit of boundary matching."""
+    return [t for t in re.split(r"[^0-9a-zA-Z؀-ۿ]+", str(s or "").lower()) if t]
+
+def _owner_code_in_name(code_norm, name):
+    """True if the registry code equals one token or a run of CONSECUTIVE tokens of the
+    name. 'a11' matches 'Ouja | A 11'; 'c8' matches 'Ouja | C8' but can NEVER match
+    'BC8' (the old substring match picked the wrong owner = wrong management %)."""
+    if not code_norm:
+        return False
+    toks = _owner_tokens(name)
+    for i in range(len(toks)):
+        run = ""
+        for j in range(i, len(toks)):
+            run += toks[j]
+            if len(run) > len(code_norm):
+                break
+            if run == code_norm:
+                return True
+    return False
+
 def _owner_info(apt):
-    """Look up an apartment's owner/mgmt/cleaning by code. Exact key first, then a NORMALIZED
-    substring match (ignores spaces/dashes/case) preferring the LONGEST code so 'MLQ1' doesn't
-    steal the 'MLQ11' listing. The registry uses short codes; Hostaway names embed them."""
+    """Look up an apartment's owner/mgmt/cleaning by code. Exact key first, then a
+    TOKEN-BOUNDARY match preferring the LONGEST code ('MLQ1' can't steal 'MLQ11').
+    If TWO different registry codes match the same listing, the longest still wins but
+    the result carries `ambiguous_with` so the statement shows 'confirm owner' instead
+    of silently choosing — wrong owner = wrong management % on a real statement."""
     k = _owner_key(apt)
     if k in _owner_registry:
         return _owner_registry[k]
     nk = _owner_norm(apt)
     if not nk:
         return None
-    best, best_len = None, 0
+    matches = []
     for rec in _owner_registry.values():
         rn = _owner_norm(rec.get("apartment"))
-        if rn and (rn in nk or nk in rn) and len(rn) > best_len:
-            best, best_len = rec, len(rn)
+        if rn and (_owner_code_in_name(rn, apt) or rn == nk):
+            matches.append((len(rn), rec))
+    if not matches:
+        return None
+    matches.sort(key=lambda x: -x[0])
+    best = matches[0][1]
+    # Drop shorter codes fully contained in the winner (MLQ1 inside MLQ11 = same family,
+    # not ambiguity); different surviving codes = real ambiguity.
+    bn = _owner_norm(best.get("apartment"))
+    others = [r for ln, r in matches[1:]
+              if _owner_norm(r.get("apartment")) and _owner_norm(r.get("apartment")) not in bn
+              and (r.get("owner") or "") != (best.get("owner") or "")]
+    if others:
+        best = dict(best)
+        best["ambiguous_with"] = sorted({(r.get("apartment") or "?") for r in others})
     return best
 
 def _owner_resolve_lid(rec, listings):
@@ -25656,14 +24893,20 @@ def _finance_in_period(row, start, end, basis):
 def _direct_fee_calc(gross, refund=0.0, pct=3.0):
     """THE one place the direct-booking fee is computed. Flat `pct`% (default 3.00%) of the
     direct base = (Hostaway totalPrice − refund). Returns base / pct / fee / net so the report
-    can SHOW exactly how the 3% was derived — no per-booking ambiguity. 2-decimal (halalas)."""
-    try:
-        base = round(float(gross or 0) - float(refund or 0), 2)
-    except (TypeError, ValueError):
-        base = 0.0
-    p = float(pct or 0)
-    fee = round(base * p / 100.0, 2)
-    return {"base": base, "pct": p, "fee": fee, "net": round(base - fee, 2),
+    can SHOW exactly how the 3% was derived — no per-booking ambiguity. Decimal math,
+    ROUND_HALF_UP to halalas (float rounding could drift a halala on real statements)."""
+    from decimal import Decimal, ROUND_HALF_UP
+    TWO = Decimal("0.01")
+    def D(x):
+        try:
+            return Decimal(str(x if x is not None else 0))
+        except Exception:
+            return Decimal("0")
+    base = (D(gross) - D(refund)).quantize(TWO, rounding=ROUND_HALF_UP)
+    p = D(pct)
+    fee = (base * p / Decimal("100")).quantize(TWO, rounding=ROUND_HALF_UP)
+    return {"base": float(base), "pct": float(p), "fee": float(fee),
+            "net": float((base - fee).quantize(TWO, rounding=ROUND_HALF_UP)),
             "source_fields": "totalPrice − refundAmount"}
 
 def compute_owner_report(reservations, expenses, start, end, management_pct, settings=None, cleaning=None):
@@ -25955,6 +25198,9 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
     rep["apartment"] = aptname
     rep["lid"] = lid
     rep["owner"] = (info.get("owner") if info else "") or _unit_owners.get(aptname, "")
+    if info and info.get("ambiguous_with"):
+        # Two registry codes matched this listing — the statement must say so.
+        rep["owner_ambiguous_with"] = info["ambiguous_with"]
     rep["exp_lines_raw"] = [dict(e) for e in rep.get("exp_lines", [])]   # original lines, for the editor
     if adjust is None:
         adjust = _finance_adjust.get(_finance_adjust_key(lid, start.isoformat(), end.isoformat()))
@@ -26039,12 +25285,18 @@ def _finance_import_hostaway_expenses():
 # ===================== Server-side PDF owner statements (proper Arabic shaping) =====================
 _PDF_FONT_PATH = None
 
+class PdfFontError(RuntimeError):
+    """Arabic PDF font unavailable — statements must FAIL, never ship broken Arabic."""
+
 def _pdf_font():
-    """Fetch + cache an Arabic-capable TTF once (runtime download → STATE_DIR/fonts). Returns
-    a path or None. Avoids bundling a binary in the repo; Railway has internet."""
+    """Arabic-capable TTF: repo copy first (vendored), then the volume cache, then a
+    one-time download → STATE_DIR/fonts. Returns a path or None."""
     global _PDF_FONT_PATH
     if _PDF_FONT_PATH and os.path.exists(_PDF_FONT_PATH):
         return _PDF_FONT_PATH
+    repo_font = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "ouja-ar.ttf")
+    if os.path.exists(repo_font) and os.path.getsize(repo_font) > 20000:
+        _PDF_FONT_PATH = repo_font; return repo_font
     try:
         d = os.path.join(STATE_DIR, "fonts"); os.makedirs(d, exist_ok=True)
     except Exception:
@@ -26085,16 +25337,17 @@ def _pdf_statement_bytes(rep, label):
     fp = _pdf_font()
     cur = "ر.س"
     GOLD = (163, 119, 40); INK = (26, 24, 21); MUT = (140, 132, 117); CREAM = (250, 247, 240); LINE = (232, 226, 213)
+    if not fp:
+        # HARD FAIL: Helvetica can't shape Arabic — the owner would receive a statement
+        # full of broken glyphs and nobody would know. The caller alerts + returns 503.
+        raise PdfFontError("Arabic PDF font unavailable (repo copy missing, volume cache empty, CDN fetch failed)")
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(True, margin=16)
     pdf.add_page()
-    if fp:
-        pdf.add_font("ar", "", fp, uni=True)
-        FONT = "ar"
-    else:
-        FONT = "Helvetica"
+    pdf.add_font("ar", "", fp, uni=True)
+    FONT = "ar"
     def shape(t):
-        return _ar(t) if fp else str(t if t is not None else "")
+        return _ar(t)
     W = 210.0; M = 15.0; usable = W - 2 * M
     def _n(x):
         # exact 2-decimal SAR (halalas preserved) — 9.50 stays 9.50, never rounded to 10
@@ -31464,6 +30717,7 @@ async def _api_guests_list(request):
             "first_seen": p.get("first_seen"),
             "last_seen": p.get("last_seen"),
             "summaries_count": len(p.get("summaries", [])),
+            "possible_duplicate": bool(p.get("possible_duplicate")),
         })
     out.sort(key=lambda x: (not x["vip"], -(x["stays"] or 0)))
     return _json({"items": out, "counts": {
@@ -32013,21 +31267,14 @@ def _ticket_view(t):
         "overdue": overdue,
     }
 
-async def _api_tickets_list(request):
-    """GET /api/tickets/list?status=&priority=&category=&q=&lid="""
-    if not _dash_auth(request):
-        return _json({"error": "unauthorized"}, 401)
-    q  = (request.query.get("q", "") or "").lower().strip()
-    st = (request.query.get("status", "") or "").strip()
-    pr = (request.query.get("priority", "") or "").strip()
-    cat = (request.query.get("category", "") or "").strip()
-    try:
-        lid_f = int(request.query.get("lid")) if request.query.get("lid") else None
-    except Exception:
-        lid_f = None
-    # Items 31/33: which units are occupied now or arriving soon — one cheap query
-    # reused for all tickets, so impact can drive the sort and show the next booking.
-    today = datetime.now(TZ).date()
+_tickets_ctx_cache = {"ts": 0, "hot_lids": set(), "next_arr": {}}
+
+def _tickets_context(today):
+    """Occupied-now + arriving-soon context for ticket impact sorting, cached 5 min
+    (fetch_inhouse is a live Hostaway query — once per tab-load was wasteful)."""
+    now = time.time()
+    if now - _tickets_ctx_cache["ts"] < 300:
+        return _tickets_ctx_cache["hot_lids"], _tickets_ctx_cache["next_arr"]
     hot_lids, next_arr = set(), {}
     try:
         for r in fetch_inhouse(today):
@@ -32043,8 +31290,27 @@ async def _api_tickets_list(request):
                     next_arr[lid] = a.isoformat()
                 if 0 <= (a - today).days <= 2:
                     hot_lids.add(lid)
+        _tickets_ctx_cache.update({"ts": now, "hot_lids": hot_lids, "next_arr": next_arr})
+    except Exception as e:
+        print("tickets context error:", e)
+    return hot_lids, next_arr
+
+async def _api_tickets_list(request):
+    """GET /api/tickets/list?status=&priority=&category=&q=&lid="""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    q  = (request.query.get("q", "") or "").lower().strip()
+    st = (request.query.get("status", "") or "").strip()
+    pr = (request.query.get("priority", "") or "").strip()
+    cat = (request.query.get("category", "") or "").strip()
+    try:
+        lid_f = int(request.query.get("lid")) if request.query.get("lid") else None
     except Exception:
-        pass
+        lid_f = None
+    # Items 31/33: which units are occupied now or arriving soon. Cached 5 min and
+    # computed off the event loop — this was a LIVE Hostaway call on every tab load.
+    today = datetime.now(TZ).date()
+    hot_lids, next_arr = await asyncio.to_thread(_tickets_context, today)
     items = []
     for t in _tickets:
         if st and t.get("status") != st: continue
@@ -32067,16 +31333,15 @@ async def _api_tickets_list(request):
                               0 if x["overdue"] else 1,
                               -(rank.get(x["priority"], 1)),
                               x.get("created_at") or ""), reverse=False)
-    # Counts
-    counts = {
-        "total": len(_tickets),
-        "open": sum(1 for t in _tickets if t.get("status") == "open"),
-        "in_progress": sum(1 for t in _tickets if t.get("status") == "in_progress"),
-        "fixed": sum(1 for t in _tickets if t.get("status") == "fixed"),
-        "overdue": sum(1 for v in items if v["overdue"]),
-        "urgent": sum(1 for t in _tickets
-                      if t.get("priority") == "urgent" and t.get("status") in ("open", "in_progress")),
-    }
+    # Counts — single pass over _tickets (was 4 separate full scans per load)
+    counts = {"total": len(_tickets), "open": 0, "in_progress": 0, "fixed": 0,
+              "overdue": sum(1 for v in items if v["overdue"]), "urgent": 0}
+    for t in _tickets:
+        st_t = t.get("status")
+        if st_t in counts and st_t in ("open", "in_progress", "fixed"):
+            counts[st_t] += 1
+        if t.get("priority") == "urgent" and st_t in ("open", "in_progress"):
+            counts["urgent"] += 1
     return _json({
         "items": items, "counts": counts,
         "categories": _TICKET_CATS,
@@ -32874,24 +32139,31 @@ async def _api_users_delete(request):
     return _json({"ok": True})
 
 # ===================== QUOTATIONS API =====================
-def _quote_totals(items, service_rate, vat_rate, vat_on):
-    """Compute totals from a quote's items + rates. All amounts in SAR."""
-    subtotal = 0.0
-    for it in (items or []):
+def _quote_totals(items, service_rate, vat_rate, vat_on, vat_on_service=True):
+    """Compute totals from a quote's items + rates. All amounts in SAR.
+    Decimal end-to-end (float accumulation drifted by halalas on long quotes).
+    `vat_on_service`: whether VAT applies to the service fee too — an explicit
+    per-quote flag now; True = the historical behavior, so old quotes don't move."""
+    from decimal import Decimal, ROUND_HALF_UP
+    TWO = Decimal("0.01")
+    def D(x):
         try:
-            qty = float(it.get("qty") or 0)
-            price = float(it.get("price") or 0)
-            subtotal += qty * price
+            return Decimal(str(x if x is not None else 0))
         except Exception:
-            pass
-    service_amt = subtotal * (float(service_rate or 0) / 100.0)
-    base_for_vat = subtotal + service_amt
-    vat_amt = base_for_vat * (float(vat_rate or 0) / 100.0) if vat_on else 0.0
+            return Decimal("0")
+    subtotal = Decimal("0")
+    for it in (items or []):
+        subtotal += D(it.get("qty")) * D(it.get("price"))
+    service_amt = subtotal * D(service_rate) / Decimal("100")
+    base_for_vat = (subtotal + service_amt) if vat_on_service else subtotal
+    vat_amt = base_for_vat * D(vat_rate) / Decimal("100") if vat_on else Decimal("0")
+    q = lambda x: float(x.quantize(TWO, rounding=ROUND_HALF_UP))
     return {
-        "subtotal":    round(subtotal, 2),
-        "service_amt": round(service_amt, 2),
-        "vat_amt":     round(vat_amt, 2),
-        "grand_total": round(subtotal + service_amt + vat_amt, 2),
+        "subtotal":    q(subtotal),
+        "service_amt": q(service_amt),
+        "vat_amt":     q(vat_amt),
+        "grand_total": q(subtotal + service_amt + vat_amt),
+        "vat_on_service": bool(vat_on_service),
     }
 
 async def _api_quotes_list(request):
@@ -32973,9 +32245,12 @@ async def _api_quotes_save(request):
         except Exception: pass
     if "vat_on" in b:
         q["vat_on"] = bool(b["vat_on"])
-    # Recompute totals
+    if "vat_on_service" in b:
+        q["vat_on_service"] = bool(b["vat_on_service"])
+    # Recompute totals (vat_on_service default True = historical behavior)
     q["totals"] = _quote_totals(q.get("items"), q.get("service_rate", 5),
-                                 q.get("vat_rate", 15), q.get("vat_on", True))
+                                 q.get("vat_rate", 15), q.get("vat_on", True),
+                                 q.get("vat_on_service", True))
     q["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
     await asyncio.to_thread(persist_state)
     if is_new:
@@ -33335,7 +32610,19 @@ async def _api_expenses_list(request):
             continue
         items.append(_exp_view(e))
     items.sort(key=lambda e: (e.get("submitted_at") or e.get("created_at") or ""), reverse=True)
-    return _json({"expenses": items[:500], "count": len(items)})
+    # Pagination instead of a silent 500-row cliff: ?offset=&limit= (limit ≤ 500).
+    try:
+        offset = max(0, int(q.get("offset", "0")))
+    except (TypeError, ValueError):
+        offset = 0
+    try:
+        limit = min(500, max(1, int(q.get("limit", "500"))))
+    except (TypeError, ValueError):
+        limit = 500
+    page = items[offset:offset + limit]
+    return _json({"expenses": page, "count": len(items),
+                  "offset": offset, "limit": limit,
+                  "has_more": offset + limit < len(items)})
 
 async def _api_expenses_queue(request):
     """The review queue: Held + Failed + Ready-but-not-yet-posted, newest first, PLUS the
@@ -33405,7 +32692,10 @@ async def _api_expenses_summary(request):
         "posted_sar": round(posted_sar, 2), "held": held, "posted_n": posted_n,
         "in_transit_n": in_transit_n, "in_transit_sar": round(in_transit_sar, 2),
         "ready": ready_n, "queued": queued_n, "sending": sending_n,
-        "sent_unverified": in_transit_n, "stale_pending": stale_n,
+        # honest label: ONLY expenses actually sent-but-not-verified (the old value
+        # lumped queued+sending in, overstating what reached Hostaway)
+        "sent_unverified": max(0, in_transit_n - queued_n - sending_n),
+        "stale_pending": stale_n,
         "duplicates": duplicate_n, "archived": archived_n,
         "failed": failed, "week_sar": round(week_sar, 2),
         "total_sar": round(total_sar, 2),
@@ -33476,6 +32766,17 @@ async def _api_finance_pdf(request):
         return _json({"error": "no items"}, 400)
     try:
         data, fn, ct = await asyncio.to_thread(_finance_pdf_payload, items)
+    except PdfFontError as e:
+        # Loud failure path: the owner must never receive broken-Arabic statements.
+        print("finance pdf FONT FAILURE:", e)
+        try:
+            await _post_system_escalation("⚠️ كشوفات PDF متوقفة — خط العربي غير متوفر",
+                                          "تعذّر تحميل خط العربي للـ PDF (الريبو/الفولت/الشبكة). "
+                                          "ما راح نصدر كشف مكسور — أصلح الخط أول.", severity="high")
+        except Exception as ex:
+            print("pdf font alert error:", ex)
+        return _json({"error": "pdf_font_unavailable",
+                      "message": "خط العربي غير متوفر — لن نُصدر كشفًا بحروف مكسورة. حاول بعد دقائق أو تأكد من اتصال الخادم."}, 503)
     except Exception as e:
         print("finance pdf error:", e)
         return _json({"error": "pdf_failed: " + str(e)[:160]}, 500)
@@ -33821,47 +33122,6 @@ async def _api_expenses_post(request):
         out["error"] = why
     return _json(out)
 
-async def _api_expenses_export_selected(request):
-    if not _dash_auth(request):
-        return _json({"error": "unauthorized"}, 401)
-    b = await _read_body(request)
-    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
-    status = (b.get("status") or "").strip()
-    by = (b.get("by") or "")[:60]
-    if not ids and status:
-        ids = [e.get("id") for e in _expenses.values() if _exp_canonical_status(e) == status]
-    queued, skipped = [], []
-    for eid in ids:
-        e = _expenses.get(str(eid))
-        if e and _exp_canonical_status(e) == "ready":
-            await asyncio.to_thread(_exp_validate, e)
-        ok, why = _exp_queue_for_export(e, by=by, reason="bulk_export", retry=False)
-        (queued if ok else skipped).append({"id": str(eid), "reason": why})
-    if queued:
-        _exp_ensure_export_worker()
-    await asyncio.to_thread(persist_state)
-    return _json({"ok": True, "queued": queued, "skipped": skipped, "queue": _exp_queue_snapshot()})
-
-async def _api_expenses_retry(request):
-    if not _dash_auth(request):
-        return _json({"error": "unauthorized"}, 401)
-    b = await _read_body(request)
-    ids = b.get("ids") if isinstance(b.get("ids"), list) else []
-    status = (b.get("status") or "").strip()
-    by = (b.get("by") or "")[:60]
-    if not ids:
-        wanted = {status} if status else {"failed", "stale_pending"}
-        ids = [e.get("id") for e in _expenses.values() if _exp_canonical_status(e) in wanted]
-    queued, skipped = [], []
-    for eid in ids:
-        e = _expenses.get(str(eid))
-        ok, why = _exp_queue_for_export(e, by=by, reason="retry", retry=True)
-        (queued if ok else skipped).append({"id": str(eid), "reason": why})
-    if queued:
-        _exp_ensure_export_worker()
-    await asyncio.to_thread(persist_state)
-    return _json({"ok": True, "queued": queued, "skipped": skipped, "queue": _exp_queue_snapshot()})
-
 async def _api_expenses_verify_selected(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -34198,36 +33458,6 @@ async def _exp_alert_failure(exp):
         log_event("ops", f"تنبيه فشل ترحيل مصروف [{exp.get('ref')}] · {exp.get('error','')[:80]}")
     except Exception as ex:
         print("exp alert error:", ex)
-
-async def _api_expenses_sync_refresh(request):
-    """THE one button ('تحديث المزامنة'): pull the sheet, re-validate everything not yet
-    posted, RE-VERIFY every posted expense against live Hostaway, and run the reconciliation
-    engine. Refreshes statuses only — it never auto-posts (posting stays a manual action)."""
-    if not _dash_auth(request):
-        return _json({"error": "unauthorized"}, 401)
-    pulled = await asyncio.to_thread(_exp_poll_sheet)
-
-    def _refresh():
-        _exp_fetch_hostaway(force=True)                 # ONE fresh pull; per-item verify hits the cache
-        rev = 0
-        for e in list(_expenses.values()):
-            if _exp_canonical_status(e) == "archived":
-                continue
-            # re-verify everything already sent (posted OR in_transit), incl. legacy optimistic
-            if _exp_canonical_status(e) in ("verified", "sent_unverified", "queued", "sending", "stale_pending"):
-                _exp_verify_in_hostaway(e)              # promotes to posted / re-queues if not found
-                _exp_apply_stale_state(e)
-            else:
-                before = e.get("status")
-                _exp_validate(e)
-                if e.get("status") != before:
-                    rev += 1
-        return rev
-    revalidated = await asyncio.to_thread(_refresh)
-    disc = await asyncio.to_thread(_exp_discrepancies)
-    await asyncio.to_thread(persist_state)
-    return _json({"ok": True, "pulled_from_sheet": pulled, "revalidated": revalidated,
-                  "discrepancies": disc, "dryrun": EXPENSE_POST_DRYRUN})
 
 async def _api_expenses_verify(request):
     """Re-check ONE expense against live Hostaway (the ✓ only turns green here)."""
@@ -35308,12 +34538,19 @@ def _dstate_set(data_type, status, imported=0, updated=0, failed=0, count=0, err
     _fb_dstate[data_type] = {"data_type": data_type, "status": status,
                              "last_sync_at": datetime.now(TZ).isoformat(timespec="seconds"),
                              "imported_count": imported, "updated_count": updated, "failed_count": failed,
-                             "count": count, "error_summary": (error or "")[:300]}
+                             "count": count, "error_summary": (error or "")[:300],
+                             # readiness signal: the page cap cut this import short
+                             "truncated": bool(_daftra_truncated.get(data_type))}
     _fb_save("finance_daftra_import_state.json", _fb_dstate)
 
+_daftra_truncated = {}   # obj_type -> True when the page cap stopped a full import
+
 def _daftra_paginate(obj_type, base_params=None, max_pages=30):
-    """Fetch ALL items of an object across pages (Daftra page/limit). Defensive; stops on short page."""
+    """Fetch ALL items of an object across pages (Daftra page/limit). Defensive; stops on
+    short page. If the PAGE CAP (not a short page) ends the loop, the import is INCOMPLETE —
+    log loudly + flag it for the FB readiness scorecard instead of pretending it's all."""
     out, page, used_path, first_err = [], 1, None, None
+    truncated = False
     while page <= max_pages:
         params = dict(base_params or {}); params.update({"limit": 100, "page": page})
         items, used, err = _daftra_fetch_object(obj_type, params)
@@ -35325,7 +34562,13 @@ def _daftra_paginate(obj_type, base_params=None, max_pages=30):
         out.extend(items)
         if len(items) < 100:
             break
+        if page == max_pages:
+            truncated = True
         page += 1
+    if truncated:
+        print(f"WARNING: Daftra import of '{obj_type}' stopped at the {max_pages}-page cap "
+              f"({len(out)} records) — IMPORT INCOMPLETE; raise max_pages or narrow the filter")
+    _daftra_truncated[obj_type] = truncated
     return out, used_path, first_err
 
 # ---- Stage 1: refresh cost centers (idempotent; mark stale, never delete) ----
@@ -35408,6 +34651,7 @@ def _daftra_import_journals(start=None, end=None, actor=""):
     if end:
         params["to_date"] = end; params["date_to"] = end
     items, used, err = _daftra_paginate("journals", params)
+    _daftra_truncated["journal_entries"] = bool(_daftra_truncated.get("journals"))
     if err and not items:
         _dstate_set("journal_entries", "error", error=err)
         return {"ok": False, "error": err}
@@ -35430,7 +34674,10 @@ def _daftra_import_journals(start=None, end=None, actor=""):
             amt = lf["debit"] if lf["debit"] != "0.00" else lf["credit"]
             lf["amount"] = amt
             lf["direction"] = ("debit" if lf["debit"] != "0.00" else "credit")
-            lf["hash"] = hashlib.sha1(("|".join([str(eid), str(lf.get("account_id")), amt, edate, lf["description"]])).encode("utf-8")).hexdigest()
+            # Identity hash EXCLUDES the description: editing a narrative in Daftra must
+            # not break the duplicate link. Description changes tracked separately.
+            lf["hash"] = hashlib.sha1(("|".join([str(eid), str(lf.get("account_id")), amt, edate])).encode("utf-8")).hexdigest()
+            lf["desc_hash"] = hashlib.sha1(str(lf.get("description") or "").encode("utf-8")).hexdigest()[:12]
             lines.append(lf)
         payload = json.dumps(it, ensure_ascii=False, sort_keys=True)[:20000]
         h = hashlib.sha1(payload.encode("utf-8")).hexdigest()
@@ -39487,34 +38734,35 @@ async def _api_oujact_photo_upload(request):
                           {"raw_error": str(e)[:300]})
         return _json({"error": "storage_failed", "message": msg}, 500)
     # Replace a single-photo slot by marking older slot photos removed.
-    if not slots[slot_id].get("allow_multiple"):
-        for p in _cleanproof_report_photos(report["report_id"]):
-            if p.get("slot_id") == slot_id and p.get("status") == "uploaded":
-                p["status"] = "removed"
-                p["removed_at"] = _cleanproof_now()
-                _cleaning_report_photos[p["photo_id"]] = p
-    pid = "clp-" + hashlib.sha1(f"{report['report_id']}|{slot_id}|{filename}|{time.time()}".encode()).hexdigest()[:16]
-    photo = {
-        "photo_id": pid, "report_id": report["report_id"], "slot_id": slot_id,
-        "apartment_id": lid, "file_name": filename, "mime_type": mime_type,
-        "file_size": len(file_bytes), "uploaded_at": _cleanproof_now(),
-        "uploaded_by": fields.get("by") or "route-link",
-        "drive_file_id": stored.get("file_id") or "", "drive_file_url": stored.get("url") if stored.get("provider") == "google_drive" else "", "thumbnail_url": "",
-        "storage_url": stored.get("url") or "", "local_path": stored.get("path") or "",
-        "status": "uploaded", "error_message": "",
-    }
-    if stored.get("folder_id"):
-        report["drive_folder_id"] = stored.get("folder_id") or report.get("drive_folder_id", "")
-        report["drive_folder_url"] = stored.get("folder_url") or report.get("drive_folder_url", "")
-    report["storage_provider"] = stored.get("provider") or report.get("storage_provider") or "local_fallback"
-    report["storage_warning"] = "" if report["storage_provider"] == "google_drive" else report.get("storage_warning", "")
-    _cleaning_report_photos[pid] = photo
-    report["status"] = "uploading" if report.get("status") == "draft" else report.get("status")
-    report["updated_at"] = _cleanproof_now()
-    _cleanproof_recount(report)
-    _cleaning_reports[report["report_id"]] = report
-    _save_json("cleaning_report_photos.json", _cleaning_report_photos)
-    _save_json("cleaning_reports.json", _cleaning_reports)
+    with _cleanproof_lock:
+        if not slots[slot_id].get("allow_multiple"):
+            for p in _cleanproof_report_photos(report["report_id"]):
+                if p.get("slot_id") == slot_id and p.get("status") == "uploaded":
+                    p["status"] = "removed"
+                    p["removed_at"] = _cleanproof_now()
+                    _cleaning_report_photos[p["photo_id"]] = p
+        pid = "clp-" + hashlib.sha1(f"{report['report_id']}|{slot_id}|{filename}|{time.time()}".encode()).hexdigest()[:16]
+        photo = {
+            "photo_id": pid, "report_id": report["report_id"], "slot_id": slot_id,
+            "apartment_id": lid, "file_name": filename, "mime_type": mime_type,
+            "file_size": len(file_bytes), "uploaded_at": _cleanproof_now(),
+            "uploaded_by": fields.get("by") or "route-link",
+            "drive_file_id": stored.get("file_id") or "", "drive_file_url": stored.get("url") if stored.get("provider") == "google_drive" else "", "thumbnail_url": "",
+            "storage_url": stored.get("url") or "", "local_path": stored.get("path") or "",
+            "status": "uploaded", "error_message": "",
+        }
+        if stored.get("folder_id"):
+            report["drive_folder_id"] = stored.get("folder_id") or report.get("drive_folder_id", "")
+            report["drive_folder_url"] = stored.get("folder_url") or report.get("drive_folder_url", "")
+        report["storage_provider"] = stored.get("provider") or report.get("storage_provider") or "local_fallback"
+        report["storage_warning"] = "" if report["storage_provider"] == "google_drive" else report.get("storage_warning", "")
+        _cleaning_report_photos[pid] = photo
+        report["status"] = "uploading" if report.get("status") == "draft" else report.get("status")
+        report["updated_at"] = _cleanproof_now()
+        _cleanproof_recount(report)
+        _cleaning_reports[report["report_id"]] = report
+        _save_json("cleaning_report_photos.json", _cleaning_report_photos)
+        _save_json("cleaning_reports.json", _cleaning_reports)
     _cleanproof_audit(report["report_id"], "slot_photo_uploaded", photo["uploaded_by"],
                       "", report.get("status"), slot_id,
                       {"photo_id": pid, "file_size": len(file_bytes), "storage_provider": report.get("storage_provider")})
@@ -39531,19 +38779,20 @@ async def _api_oujact_report_submit(request):
     date = (b.get("date") or datetime.now(TZ).date().isoformat())[:10]
     actor = (b.get("by") or "route-link")[:80]
     report = await asyncio.to_thread(_cleanproof_get_or_create_report, lid, date, actor, "oujact-route")
-    _cleanproof_recount(report)
-    if b.get("issue_found"):
-        report["issue_found"] = True
-        report["issue_notes"] = (b.get("issue_notes") or "")[:500]
-    # Allow submit even if some required photos are missing — FLAG it, never block.
-    missing = _cleanproof_missing_required_labels(report, "ar")
-    report["photos_incomplete"] = bool(missing)
-    report["missing_required"] = missing
-    prev = report.get("status", "")
-    report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
-    report["updated_at"] = _cleanproof_now()
-    _cleaning_reports[report["report_id"]] = report
-    _save_json("cleaning_reports.json", _cleaning_reports)
+    with _cleanproof_lock:
+        _cleanproof_recount(report)
+        if b.get("issue_found"):
+            report["issue_found"] = True
+            report["issue_notes"] = (b.get("issue_notes") or "")[:500]
+        # Allow submit even if some required photos are missing — FLAG it, never block.
+        missing = _cleanproof_missing_required_labels(report, "ar")
+        report["photos_incomplete"] = bool(missing)
+        report["missing_required"] = missing
+        prev = report.get("status", "")
+        report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
+        report["updated_at"] = _cleanproof_now()
+        _cleaning_reports[report["report_id"]] = report
+        _save_json("cleaning_reports.json", _cleaning_reports)
     _cleanproof_audit(report["report_id"], ("report_submitted_incomplete" if missing else "report_submitted"),
                       actor, prev, report["status"], (", ".join(missing) if missing else ""))
     ok, err = await _cleanproof_send_discord_review(report["report_id"])
@@ -41725,8 +40974,6 @@ async def start_web_server():
         app.router.add_post("/api/expenses/settings", _api_expenses_settings_save)
         app.router.add_get("/api/expenses/export.csv", _api_expenses_export)
         app.router.add_get("/api/expenses/export-log", _api_expenses_export_log)
-        app.router.add_post("/api/expenses/export-selected", _api_expenses_export_selected)
-        app.router.add_post("/api/expenses/retry", _api_expenses_retry)
         app.router.add_post("/api/expenses/verify-selected", _api_expenses_verify_selected)
         app.router.add_post("/api/expenses/archive-verified", _api_expenses_archive_verified)
         app.router.add_get("/api/expenses/repair-preview", _api_expenses_repair_preview)
@@ -41734,7 +40981,6 @@ async def start_web_server():
         app.router.add_post("/api/expenses/reconcile", _api_expenses_reconcile)
         app.router.add_get("/api/expenses/sheet-debug", _api_expenses_sheet_debug)
         app.router.add_get("/api/expenses/hostaway-debug", _api_expenses_hostaway_debug)
-        app.router.add_post("/api/expenses/sync-refresh", _api_expenses_sync_refresh)
         app.router.add_get("/api/expenses/sync-status", _api_expenses_sync_status)
         app.router.add_get("/api/expenses/diagnose", _api_expenses_diagnose)
         app.router.add_post("/api/expenses/verify", _api_expenses_verify)
@@ -41939,11 +41185,18 @@ async def agreement_reminder_loop():
 
 @tasks.loop(hours=4)
 async def deepclean_schedule_loop():
-    """Top up the deep-clean schedule for any unit that doesn't have a next date."""
+    """Top up the deep-clean schedule for any unit that doesn't have a next date,
+    then sweep the next 7 days for booking conflicts (early re-planning)."""
     try:
         await asyncio.to_thread(schedule_deep_cleans)
     except Exception as e:
         print("deepclean_schedule_loop error:", e)
+    try:
+        moved = await asyncio.to_thread(deepclean_lookahead_check)
+        if moved:
+            await asyncio.to_thread(persist_state)
+    except Exception as e:
+        print("deepclean lookahead error:", e)
 
 @tasks.loop(time=dt_time(hour=DEEPCLEAN_CONFIRM_HOUR, tzinfo=TZ))
 async def deepclean_confirm_loop():
@@ -41963,6 +41216,10 @@ async def reviews_refresh_loop():
         print(f"reviews: daily refresh pulled {n} from Hostaway — total {len(_reviews)}")
     except Exception as e:
         print("reviews_refresh_loop error:", e)
+    try:
+        _oujact_prune_done()    # daily safety net even when Discord sweeps don't run
+    except Exception as e:
+        print("oujact done-prune error:", e)
 
 @tasks.loop(minutes=REVIEW_AUTOANALYZE_MIN)
 async def reviews_autoanalyze_loop():
@@ -42449,14 +41706,23 @@ def compute_revenue_report(reservations, listings_map):
         adr = (rev90[lid] / s) if s else None
         if adr:
             adrs.append(adr)
-    adr_median = sorted(adrs)[len(adrs) // 2] if adrs else None
+    adr_median = statistics.median(adrs) if adrs else None
+    # Onboarding proxy: a unit's first-ever booked night. Dividing a NEW unit's sold
+    # nights by the full window made it look chronically empty and drew false "lower"
+    # recommendations — divide by the nights it was actually listed in-window.
+    first_night = {}
+    for lid, d, nightly in nights:
+        if lid not in first_night or d < first_night[lid]:
+            first_night[lid] = d
     all_lids = set(list(sold90) + list(booked30))
     for lid in all_lids:
         s = sold90[lid]
-        occ90 = s / REVENUE_WINDOW_DAYS
+        listed_from = max(w_start, first_night.get(lid, w_start))
+        listed_days = max(1, (today - listed_from).days)
+        occ90 = min(1.0, s / listed_days)
         adr = (rev90[lid] / s) if s else None
         pace30 = booked30[lid] / 30
-        revpar = (rev90[lid] / REVENUE_WINDOW_DAYS) if REVENUE_WINDOW_DAYS else 0
+        revpar = (rev90[lid] / listed_days) if listed_days else 0
         key, label, reason, pct = _unit_reco(pace30, occ90, adr, adr_median)
         units.append({
             "lid": lid, "name": listings_map.get(lid) or f"unit-{lid}",
