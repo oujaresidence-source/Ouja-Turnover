@@ -211,3 +211,231 @@ def approve(request, body):
         return res, int(res.get("code") or 400)
     res["counters"] = counters_snapshot()
     return res, 200
+
+
+# ====================== البنك Bank workspace ======================
+
+def _acct_records():
+    return [r for r in B._fb_external.values() if r.get("source_type") == "accounts"]
+
+
+def _cc_records():
+    return [r for r in B._fb_external.values() if r.get("source_type") == "cost_centers"]
+
+
+def _acct_by_id():
+    return {str(r.get("source_id")): r for r in _acct_records()}
+
+
+def accounts_payload():
+    """The REAL Daftra chart (دليل الحسابات) as imported — classification options.
+    Free text is rejected at classify time; this list is the whole universe."""
+    accs = sorted(_acct_records(), key=lambda r: ((r.get("code") or ""), (r.get("display_name") or "")))
+    ccs = sorted(_cc_records(), key=lambda r: (r.get("display_name") or ""))
+    units = sorted({(p.get("apartment_name") or "").strip()
+                    for p in B._fb_contracts.values() if (p.get("apartment_name") or "").strip()})
+    return {"ok": True,
+            "accounts": [{"id": str(r.get("source_id")), "code": r.get("code") or "",
+                          "name": r.get("display_name") or ""} for r in accs],
+            "cost_centers": [{"id": str(r.get("source_id")), "code": r.get("code") or "",
+                              "name": r.get("display_name") or ""} for r in ccs],
+            "units": units,
+            "counts": {"accounts": len(accs), "cost_centers": len(ccs)}}
+
+
+def _bank_row(x):
+    """Compact row view + the pipeline chip states (مُصنّف → مُتحقق → مُرحّل)."""
+    amount, dirn = _amt(x)
+    ec = x.get("erp_class") or {}
+    dq = x.get("daftra_duplicate_status") or "not_checked"
+    migrated = bool(x.get("matched_daftra_id")) and dq in ("already_in_daftra_verified", "linked_existing")
+    verified = dq in ("already_in_daftra_verified", "linked_existing", "not_found_after_full_check")
+    return {"id": x["id"], "date": x.get("date") or "", "desc": x.get("description") or "",
+            "amount": amount, "dir": dirn, "ref": x.get("ref") or "", "card": x.get("card_last4") or "",
+            "category": x.get("category") or "unknown", "status": x.get("status") or "needs_review",
+            "match_status": x.get("match_status") or "unmatched",
+            "dup": dq, "dup_conf": x.get("daftra_duplicate_confidence"),
+            "journal_no": x.get("matched_daftra_number"),
+            "cls": {"account_id": str(ec.get("daftra_account_id") or ""),
+                    "code": ec.get("account_code") or "", "name": ec.get("account_name") or "",
+                    "cost_center_id": str(ec.get("cost_center_id") or ""),
+                    "cost_center": ec.get("cost_center_name") or "",
+                    "counterparty": ec.get("counterparty") or "", "unit": ec.get("unit") or ""},
+            "classified": bool(ec.get("daftra_account_id")) or (x.get("status") == "reviewed"),
+            "verified": verified, "migrated": migrated}
+
+
+def _sim_index():
+    """description-key -> [(account_id, uses)] built from already erp-classified txns."""
+    idx = {}
+    for x in B._fb_bank.values():
+        ec = x.get("erp_class") or {}
+        aid = str(ec.get("daftra_account_id") or "")
+        if not aid:
+            continue
+        key = B._fb_similar_key(x.get("description") or "")
+        if not key:
+            continue
+        idx.setdefault(key, {})
+        idx[key][aid] = idx[key].get(aid, 0) + 1
+    return {k: sorted(v.items(), key=lambda kv: kv[1], reverse=True) for k, v in idx.items()}
+
+
+def _bank_suggestions(x, acct_idx, sim_idx):
+    """Top-3 account suggestions: category mapping first, then same-description history."""
+    out, seen = [], set()
+    m = B._fb_mappings.get(x.get("category") or "")
+    if m and m.get("daftra_account_id"):
+        aid = str(m["daftra_account_id"])
+        acc = acct_idx.get(aid)
+        if acc:
+            out.append({"account_id": aid, "code": acc.get("code") or "",
+                        "name": acc.get("display_name") or "",
+                        "why_ar": "ربط فئة «" + (x.get("category") or "") + "»",
+                        "why_en": "category mapping"})
+            seen.add(aid)
+    key = B._fb_similar_key(x.get("description") or "")
+    for aid, n in (sim_idx.get(key) or []):
+        if len(out) >= 3:
+            break
+        if aid in seen:
+            continue
+        acc = acct_idx.get(aid)
+        if not acc:
+            continue
+        out.append({"account_id": aid, "code": acc.get("code") or "",
+                    "name": acc.get("display_name") or "",
+                    "why_ar": "استُخدم " + str(n) + "× لوصف مشابه",
+                    "why_en": "used " + str(n) + "x for similar"})
+        seen.add(aid)
+    return out
+
+
+def bank_register(params):
+    """Server-side pagination over the FULL register (no 400-row cap) + filter counts."""
+    f = (params.get("f") or "all").strip()
+    q = (params.get("q") or "").strip().lower()
+    dfrom = (params.get("from") or "").strip()
+    dto = (params.get("to") or "").strip()
+    try:
+        page = max(1, int(params.get("p") or 1))
+    except Exception:
+        page = 1
+    try:
+        ps = min(200, max(10, int(params.get("ps") or 50)))
+    except Exception:
+        ps = 50
+
+    def in_range(x):
+        d = (x.get("date") or "")[:10]
+        if dfrom and d and d < dfrom:
+            return False
+        if dto and d and d > dto:
+            return False
+        if q:
+            hay = ((x.get("description") or "") + " " + (x.get("ref") or "") + " " +
+                   (x.get("debit") or "") + " " + (x.get("credit") or "")).lower()
+            if q not in hay:
+                return False
+        return True
+
+    base = [x for x in B._fb_bank.values() if in_range(x)]
+
+    def is_done(x):
+        return x.get("status") == "reviewed"
+
+    def ge3000(x):
+        return float(B._fb_money(x.get("debit"))) >= 3000.0
+
+    counts = {"all": len(base),
+              "needs_review": sum(1 for x in base if x.get("status") == "needs_review"),
+              "done": sum(1 for x in base if is_done(x)),
+              "unmatched": sum(1 for x in base if (x.get("match_status") or "unmatched") == "unmatched"),
+              "ge3000": sum(1 for x in base if ge3000(x))}
+
+    if f == "needs_review":
+        sel = [x for x in base if x.get("status") == "needs_review"]
+    elif f == "done":
+        sel = [x for x in base if is_done(x)]
+    elif f == "unmatched":
+        sel = [x for x in base if (x.get("match_status") or "unmatched") == "unmatched"]
+    elif f == "ge3000":
+        sel = [x for x in base if ge3000(x)]
+    else:
+        sel = base
+
+    sel.sort(key=lambda x: ((x.get("date") or ""), str(x.get("row") or "")), reverse=True)
+    total = len(sel)
+    pages = max(1, (total + ps - 1) // ps)
+    page = min(page, pages)
+    chunk = sel[(page - 1) * ps: (page - 1) * ps + ps]
+
+    acct_idx = _acct_by_id()
+    sim_idx = _sim_index()
+    rows = []
+    for x in chunk:
+        r = _bank_row(x)
+        if x.get("status") == "needs_review":
+            r["suggestions"] = _bank_suggestions(x, acct_idx, sim_idx)
+        rows.append(r)
+    return {"ok": True, "rows": rows, "total": total, "page": page, "pages": pages,
+            "page_size": ps, "counts": counts}
+
+
+def bank_classify(request, body):
+    """v2 classification: ONLY a real imported Daftra account is accepted.
+    Stores {daftra_account_id, account_code, cost_center, counterparty, unit} on the
+    txn (erp_class), flips status to reviewed, audits, saves. Bulk via ids[]."""
+    ids = body.get("ids") or ([body.get("id")] if body.get("id") else [])
+    ids = [str(i) for i in ids if i]
+    if not ids:
+        return {"error": "no_ids"}, 400
+    clear = bool(body.get("clear"))
+    acct_idx = _acct_by_id()
+    acc = cc = None
+    aid = ccid = ""
+    if not clear:
+        aid = str(body.get("account_id") or "").strip()
+        acc = acct_idx.get(aid)
+        if not acc:
+            return {"error": "account_not_in_chart",
+                    "message_ar": "اختر حسابًا من دليل دافترة المستورد — النص الحر مرفوض.",
+                    "message_en": "Pick an account from the imported Daftra chart — free text is rejected."}, 422
+        ccid = str(body.get("cost_center_id") or "").strip()
+        if ccid:
+            cc = next((r for r in _cc_records() if str(r.get("source_id")) == ccid), None)
+            if not cc:
+                return {"error": "cost_center_unknown",
+                        "message_ar": "مركز التكلفة غير موجود في المستورد من دافترة.",
+                        "message_en": "Cost center not found in the imported Daftra data."}, 422
+    now = datetime.now(B.TZ).isoformat(timespec="seconds")
+    who = actor(request)
+    rows, missing = [], []
+    for i in ids:
+        x = B._fb_bank.get(i)
+        if not x:
+            missing.append(i)
+            continue
+        before = {"status": x.get("status"), "erp_class": x.get("erp_class")}
+        if clear:
+            x.pop("erp_class", None)
+            x["status"] = "needs_review"
+        else:
+            x["erp_class"] = {"daftra_account_id": aid, "account_code": acc.get("code") or "",
+                              "account_name": acc.get("display_name") or "",
+                              "cost_center_id": ccid,
+                              "cost_center_name": (cc or {}).get("display_name") or "",
+                              "counterparty": str(body.get("counterparty") or "").strip()[:120],
+                              "unit": str(body.get("unit") or "").strip()[:80],
+                              "by": who, "at": now}
+            x["status"] = "reviewed"
+            x["reviewed_by"] = who
+            x["reviewed_at"] = now
+            if (body.get("unit") or "").strip():
+                x["apartment"] = str(body.get("unit")).strip()[:80]
+        B._fb_audit_add(who, "erp_unclassify" if clear else "erp_classify", "bank", i,
+                        before=before, after=x.get("erp_class"))
+        rows.append(_bank_row(x))
+    if rows:
+        B._fb_save("finance_bank_transactions.json", B._fb_bank)
+    return {"ok": True, "rows": rows, "missing": missing, "counters": counters_snapshot()}, 200

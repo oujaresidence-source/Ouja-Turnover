@@ -27,6 +27,7 @@ Files:
 
 import os
 import time
+import asyncio
 import pathlib
 from datetime import datetime, timezone, timedelta
 
@@ -36,7 +37,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s1"
+ERP_VERSION = "2.0.0-s2"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -147,6 +148,63 @@ async def _h_api_approve(request):
         return api.jres({"error": "approve_failed", "detail": str(e)[:300]}, 500)
 
 
+def _guarded(handler, write=False):
+    """Wrap a handler with the standard auth + role gate + error envelope."""
+    async def wrapped(request):
+        if not api.authed(request):
+            return api.jres({"error": "unauthorized"}, 401)
+        if not api.can_finance(request):
+            return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+        try:
+            return await handler(request)
+        except Exception as e:
+            return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+    return wrapped
+
+
+async def _h_api_bank(request):
+    return api.jres(api.bank_register(request.query))
+
+
+async def _h_api_bank_upload(request):
+    # Delegate to bot.py's importer (multipart `file` + `save` field, two-step
+    # preview→confirm, dup shield inside). It enforces _fb_can_finance itself too.
+    return await api.B._api_fb_bank_import(request)
+
+
+async def _h_api_bank_classify(request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    data, status = api.bank_classify(request, body if isinstance(body, dict) else {})
+    return api.jres(data, status)
+
+
+async def _h_api_accounts(request):
+    return api.jres(api.accounts_payload())
+
+
+_refresh_lock = {"busy": False}
+
+
+async def _h_api_accounts_refresh(request):
+    """Re-pull the chart/cost-centers/etc. from Daftra (idempotent import)."""
+    if _refresh_lock["busy"]:
+        return api.jres({"error": "busy", "message_ar": "فيه استيراد شغال الحين — انتظره يخلص.",
+                         "message_en": "An import is already running."}, 409)
+    _refresh_lock["busy"] = True
+    try:
+        res = await asyncio.to_thread(api.B._daftra_import_all, api.actor(request))
+        return api.jres({"ok": True, "result": {
+            "imported": res.get("imported"), "updated": res.get("updated"),
+            "failed": res.get("failed"),
+            "accounts": (res.get("per_object") or {}).get("accounts")},
+            "chart": api.accounts_payload()["counts"]})
+    finally:
+        _refresh_lock["busy"] = False
+
+
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
@@ -154,5 +212,10 @@ def mount(app, botmod):
     app.router.add_get("/erp/version", _h_version)
     app.router.add_get("/erp/api/work-queue", _h_api_work_queue)
     app.router.add_post("/erp/api/approve", _h_api_approve)
+    app.router.add_get("/erp/api/bank", _guarded(_h_api_bank))
+    app.router.add_post("/erp/api/bank/upload", _guarded(_h_api_bank_upload, write=True))
+    app.router.add_post("/erp/api/bank/classify", _guarded(_h_api_bank_classify, write=True))
+    app.router.add_get("/erp/api/accounts", _guarded(_h_api_accounts))
+    app.router.add_post("/erp/api/accounts/refresh", _guarded(_h_api_accounts_refresh, write=True))
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True
