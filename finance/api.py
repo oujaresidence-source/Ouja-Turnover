@@ -8,6 +8,7 @@ data layer stays single-sourced and untouched.
 """
 
 import json
+import uuid
 from datetime import datetime
 
 from aiohttp import web
@@ -260,7 +261,8 @@ def _bank_row(x):
                     "code": ec.get("account_code") or "", "name": ec.get("account_name") or "",
                     "cost_center_id": str(ec.get("cost_center_id") or ""),
                     "cost_center": ec.get("cost_center_name") or "",
-                    "counterparty": ec.get("counterparty") or "", "unit": ec.get("unit") or ""},
+                    "counterparty": ec.get("counterparty") or "", "unit": ec.get("unit") or "",
+                    "rule_id": ec.get("rule_id") or "", "auto": bool(ec.get("auto"))},
             "classified": bool(ec.get("daftra_account_id")) or (x.get("status") == "reviewed"),
             "verified": verified, "migrated": migrated}
 
@@ -439,3 +441,268 @@ def bank_classify(request, body):
     if rows:
         B._fb_save("finance_bank_transactions.json", B._fb_bank)
     return {"ok": True, "rows": rows, "missing": missing, "counters": counters_snapshot()}, 200
+
+
+# ====================== Rules engine (Slice 3) ======================
+# Rules are NEW v2 data (erp_rules.json in STATE_DIR) — they never mutate the
+# sacred stores except by writing erp_class on needs_review bank txns, exactly
+# like a human classification (and ALWAYS leaving the >=3000 Faisal approval
+# lane untouched: classification never bypasses approval).
+
+_RULES_FILE = "erp_rules.json"
+_rules_cache = {"v": None}
+
+
+def rules():
+    if _rules_cache["v"] is None:
+        _rules_cache["v"] = B._load_json(_RULES_FILE, []) or []
+    return _rules_cache["v"]
+
+
+def _rules_save():
+    B._save_json(_RULES_FILE, _rules_cache["v"])
+
+
+def _norm(s):
+    try:
+        return B._fb_ar_norm(s or "")
+    except Exception:
+        return (s or "").lower()
+
+
+def rule_matches(rule, x):
+    m = rule.get("matcher") or {}
+    c = m.get("desc_contains") or ""
+    if c and _norm(c) not in _norm(x.get("description")):
+        return False
+    deb = B._fb_money(x.get("debit"))
+    cred = B._fb_money(x.get("credit"))
+    d = m.get("direction") or "any"
+    if d == "out" and not deb > 0:
+        return False
+    if d == "in" and not cred > 0:
+        return False
+    amt = deb if deb > 0 else cred
+    try:
+        if m.get("amount_min") not in (None, "") and float(amt) < float(m["amount_min"]):
+            return False
+        if m.get("amount_max") not in (None, "") and float(amt) > float(m["amount_max"]):
+            return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _rule_apply_to_txn(rule, x, who, now):
+    s = rule.get("set") or {}
+    x["erp_class"] = {"daftra_account_id": s.get("account_id") or "",
+                      "account_code": s.get("account_code") or "",
+                      "account_name": s.get("account_name") or "",
+                      "cost_center_id": s.get("cost_center_id") or "",
+                      "cost_center_name": s.get("cost_center_name") or "",
+                      "counterparty": s.get("counterparty") or "",
+                      "unit": s.get("unit") or "",
+                      "by": who, "at": now, "rule_id": rule["id"], "auto": True}
+    x["status"] = "reviewed"
+    x["reviewed_by"] = who
+    x["reviewed_at"] = now
+    if s.get("unit"):
+        x["apartment"] = s.get("unit")
+
+
+def rules_apply_pending(who, only_rule=None):
+    """Run enabled rules over ALL needs_review txns (idempotent — only fills
+    unclassified rows). Returns the changed rows. >=3000 approval unaffected."""
+    now = datetime.now(B.TZ).isoformat(timespec="seconds")
+    active = [r for r in rules()
+              if r.get("enabled", True) and int(r.get("strength") or 0) > 0
+              and (only_rule is None or r["id"] == only_rule)]
+    if not active:
+        return []
+    changed = []
+    for x in B._fb_bank.values():
+        if x.get("status") != "needs_review":
+            continue
+        for r in active:
+            if rule_matches(r, x):
+                _rule_apply_to_txn(r, x, who, now)
+                r["hits"] = int(r.get("hits") or 0) + 1
+                r["last_hit_at"] = now
+                changed.append(_bank_row(x))
+                break
+    if changed:
+        B._fb_save("finance_bank_transactions.json", B._fb_bank)
+        _rules_save()
+    return changed
+
+
+def rules_list(request):
+    return {"ok": True, "rules": rules(), "is_admin": is_admin(request)}
+
+
+def rule_create(request, body):
+    """Create a rule from a classification («طبّق على المشابهة») and optionally
+    apply it now to every matching unclassified txn."""
+    aid = str(body.get("account_id") or "").strip()
+    acc = _acct_by_id().get(aid)
+    if not acc:
+        return {"error": "account_not_in_chart",
+                "message_ar": "القاعدة لازم تشير لحساب من دليل دافترة.",
+                "message_en": "A rule must target an imported Daftra account."}, 422
+    contains = str(body.get("contains") or "").strip()
+    if len(contains) < 2:
+        return {"error": "matcher_too_weak",
+                "message_ar": "حدد نص مطابقة أطول (حرفين على الأقل).",
+                "message_en": "Give the matcher at least 2 characters."}, 422
+    ccid = str(body.get("cost_center_id") or "").strip()
+    cc = None
+    if ccid:
+        cc = next((r for r in _cc_records() if str(r.get("source_id")) == ccid), None)
+        if not cc:
+            return {"error": "cost_center_unknown"}, 422
+    now = datetime.now(B.TZ).isoformat(timespec="seconds")
+    rule = {"id": "rule-" + uuid.uuid4().hex[:10],
+            "matcher": {"desc_contains": contains,
+                        "direction": (body.get("direction") or "any"),
+                        "amount_min": body.get("amount_min"),
+                        "amount_max": body.get("amount_max")},
+            "set": {"account_id": aid, "account_code": acc.get("code") or "",
+                    "account_name": acc.get("display_name") or "",
+                    "cost_center_id": ccid,
+                    "cost_center_name": (cc or {}).get("display_name") or "",
+                    "counterparty": str(body.get("counterparty") or "").strip()[:120],
+                    "unit": str(body.get("unit") or "").strip()[:80]},
+            "enabled": True, "hits": 0, "strength": 3, "weakened": 0,
+            "created_by": actor(request), "created_at": now, "last_hit_at": ""}
+    rules().insert(0, rule)
+    _rules_save()
+    B._fb_audit_add(actor(request), "erp_rule_create", "rule", rule["id"], after=rule)
+    applied = rules_apply_pending(actor(request), only_rule=rule["id"]) if body.get("apply_now") else []
+    return {"ok": True, "rule": rule, "rows": applied, "applied": len(applied),
+            "counters": counters_snapshot()}, 200
+
+
+def rule_toggle(request, body):
+    rid = str(body.get("id") or "")
+    r = next((x for x in rules() if x["id"] == rid), None)
+    if not r:
+        return {"error": "rule_not_found"}, 404
+    r["enabled"] = bool(body.get("enabled"))
+    if r["enabled"] and int(r.get("strength") or 0) <= 0:
+        r["strength"] = 1          # re-enabling revives a weakened-out rule at minimum strength
+    _rules_save()
+    B._fb_audit_add(actor(request), "erp_rule_toggle", "rule", rid, after={"enabled": r["enabled"]})
+    return {"ok": True, "rule": r}, 200
+
+
+def rule_delete(request, body):
+    if not is_admin(request):
+        return {"error": "forbidden", "message_ar": "حذف القواعد للأدمن فقط.",
+                "message_en": "Deleting rules is admin-only."}, 403
+    rid = str(body.get("id") or "")
+    before = len(rules())
+    _rules_cache["v"] = [x for x in rules() if x["id"] != rid]
+    if len(rules()) == before:
+        return {"error": "rule_not_found"}, 404
+    _rules_save()
+    B._fb_audit_add(actor(request), "erp_rule_delete", "rule", rid)
+    return {"ok": True, "id": rid}, 200
+
+
+def rule_undo(request, body):
+    """One-click undo of an auto-classification: clears the txn back to
+    needs_review and WEAKENS the rule (strength-1; 0 disables it)."""
+    txid = str(body.get("txn_id") or "")
+    x = B._fb_bank.get(txid)
+    if not x:
+        return {"error": "txn_not_found"}, 404
+    ec = x.get("erp_class") or {}
+    rid = ec.get("rule_id")
+    if not (rid and ec.get("auto")):
+        return {"error": "not_auto_classified"}, 400
+    x.pop("erp_class", None)
+    x["status"] = "needs_review"
+    r = next((q for q in rules() if q["id"] == rid), None)
+    if r:
+        r["strength"] = max(0, int(r.get("strength") or 0) - 1)
+        r["weakened"] = int(r.get("weakened") or 0) + 1
+        if r["strength"] == 0:
+            r["enabled"] = False
+        _rules_save()
+    B._fb_save("finance_bank_transactions.json", B._fb_bank)
+    B._fb_audit_add(actor(request), "erp_rule_undo", "bank", txid,
+                    after={"rule_id": rid, "strength": (r or {}).get("strength")})
+    return {"ok": True, "row": _bank_row(x), "rule": r, "counters": counters_snapshot()}, 200
+
+
+def rules_precision():
+    """Replay every rule against txns that carry a NON-auto (human) classification —
+    the measured precision the slice proof requires. No writes."""
+    ground = [x for x in B._fb_bank.values()
+              if (x.get("erp_class") or {}).get("daftra_account_id")
+              and not (x.get("erp_class") or {}).get("auto")]
+    out, tot_match, tot_correct = [], 0, 0
+    for r in rules():
+        m = [x for x in ground if rule_matches(r, x)]
+        correct = sum(1 for x in m
+                      if str((x.get("erp_class") or {}).get("daftra_account_id")) ==
+                         str((r.get("set") or {}).get("account_id")))
+        pending = sum(1 for x in B._fb_bank.values()
+                      if x.get("status") == "needs_review" and rule_matches(r, x))
+        tot_match += len(m)
+        tot_correct += correct
+        out.append({"id": r["id"], "contains": (r.get("matcher") or {}).get("desc_contains"),
+                    "account": (r.get("set") or {}).get("account_name"),
+                    "enabled": r.get("enabled", True), "hits": r.get("hits", 0),
+                    "matched_human": len(m), "agree": correct,
+                    "precision": (round(100.0 * correct / len(m)) if m else None),
+                    "would_apply_now": pending})
+    overall = (round(100.0 * tot_correct / tot_match) if tot_match else None)
+    return {"ok": True, "rules": out, "ground_truth_rows": len(ground),
+            "overall_precision": overall}
+
+
+# ====================== Contracts linking (Setup) ======================
+
+def contracts_list():
+    rows = []
+    for k, p in B._fb_contracts.items():
+        rows.append({"key": p.get("id") or k, "name": p.get("apartment_name") or k,
+                     "owner": p.get("owner_name") or "",
+                     "cc_id": str(p.get("daftra_cost_center_id") or ""),
+                     "cc_name": p.get("daftra_cost_center_name") or "",
+                     "status": p.get("validation_status") or "incomplete"})
+    rows.sort(key=lambda r: (bool(r["cc_id"]), r["name"]))
+    return {"ok": True, "rows": rows,
+            "unlinked": sum(1 for r in rows if not r["cc_id"])}
+
+
+def contract_link(request, body):
+    key = str(body.get("key") or "")
+    p = B._fb_contracts.get(key) or next(
+        (v for v in B._fb_contracts.values() if (v.get("id") or "") == key), None)
+    if not p:
+        return {"error": "contract_not_found"}, 404
+    ccid = str(body.get("cost_center_id") or "").strip()
+    if not ccid:
+        return {"error": "missing_cost_center"}, 400
+    cc = next((r for r in _cc_records() if str(r.get("source_id")) == ccid), None)
+    if not cc:
+        return {"error": "cost_center_unknown",
+                "message_ar": "مركز التكلفة مو موجود في المستورد من دافترة.",
+                "message_en": "Cost center not in the imported Daftra data."}, 422
+    before = {"daftra_cost_center_id": p.get("daftra_cost_center_id")}
+    p["daftra_cost_center_id"] = ccid
+    p["daftra_cost_center_name"] = cc.get("display_name") or ""
+    try:
+        p["validation_status"], p["validation_issues"] = B._fb_contract_validate(p)
+    except Exception:
+        pass
+    B._fb_save("finance_contract_profiles.json", B._fb_contracts)
+    B._fb_audit_add(actor(request), "erp_contract_link", "contract", key,
+                    before=before, after={"daftra_cost_center_id": ccid})
+    return {"ok": True, "row": {"key": key, "name": p.get("apartment_name") or key,
+                                "owner": p.get("owner_name") or "", "cc_id": ccid,
+                                "cc_name": p.get("daftra_cost_center_name"),
+                                "status": p.get("validation_status") or ""},
+            "counters": counters_snapshot()}, 200

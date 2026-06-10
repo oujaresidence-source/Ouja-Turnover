@@ -26,6 +26,7 @@ Files:
 """
 
 import os
+import json
 import time
 import asyncio
 import pathlib
@@ -37,7 +38,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s2"
+ERP_VERSION = "2.0.0-s3"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -169,7 +170,18 @@ async def _h_api_bank(request):
 async def _h_api_bank_upload(request):
     # Delegate to bot.py's importer (multipart `file` + `save` field, two-step
     # preview→confirm, dup shield inside). It enforces _fb_can_finance itself too.
-    return await api.B._api_fb_bank_import(request)
+    resp = await api.B._api_fb_bank_import(request)
+    try:
+        payload = json.loads(resp.body)
+    except Exception:
+        return resp
+    # After a confirmed save, auto-apply the stored rules to the new
+    # needs_review rows (idempotent — rules only fill unclassified txns).
+    if payload.get("ok") and payload.get("saved"):
+        applied = api.rules_apply_pending(api.actor(request))
+        payload["rules_applied"] = len(applied)
+        return api.jres(payload, resp.status)
+    return resp
 
 
 async def _h_api_bank_classify(request):
@@ -205,6 +217,51 @@ async def _h_api_accounts_refresh(request):
         _refresh_lock["busy"] = False
 
 
+async def _json_body(request):
+    try:
+        b = await request.json()
+        return b if isinstance(b, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _h_api_rules_list(request):
+    return api.jres(api.rules_list(request))
+
+
+async def _h_api_rule_create(request):
+    data, status = api.rule_create(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rule_toggle(request):
+    data, status = api.rule_toggle(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rule_delete(request):
+    data, status = api.rule_delete(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rule_undo(request):
+    data, status = api.rule_undo(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rules_precision(request):
+    return api.jres(api.rules_precision())
+
+
+async def _h_api_contracts(request):
+    return api.jres(api.contracts_list())
+
+
+async def _h_api_contract_link(request):
+    data, status = api.contract_link(request, await _json_body(request))
+    return api.jres(data, status)
+
+
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
@@ -217,5 +274,13 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/bank/classify", _guarded(_h_api_bank_classify, write=True))
     app.router.add_get("/erp/api/accounts", _guarded(_h_api_accounts))
     app.router.add_post("/erp/api/accounts/refresh", _guarded(_h_api_accounts_refresh, write=True))
+    app.router.add_get("/erp/api/rules", _guarded(_h_api_rules_list))
+    app.router.add_post("/erp/api/rules", _guarded(_h_api_rule_create, write=True))
+    app.router.add_post("/erp/api/rules/toggle", _guarded(_h_api_rule_toggle, write=True))
+    app.router.add_post("/erp/api/rules/delete", _guarded(_h_api_rule_delete, write=True))
+    app.router.add_post("/erp/api/rules/undo", _guarded(_h_api_rule_undo, write=True))
+    app.router.add_get("/erp/api/rules/precision", _guarded(_h_api_rules_precision))
+    app.router.add_get("/erp/api/contracts", _guarded(_h_api_contracts))
+    app.router.add_post("/erp/api/contracts/link", _guarded(_h_api_contract_link, write=True))
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True

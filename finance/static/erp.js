@@ -44,7 +44,7 @@
       g_approvals: 'تحتاج اعتماد فيصل (≥ 3000)', g_approvals_hint: 'مبالغ طالعة كبيرة — تتحرك بس بقرارك',
       g_unclassified: 'حركات بنك بدون تصنيف', g_unclassified_hint: 'افتحها من «البنك» وصنّفها بالكيبورد',
       g_suggested: 'مطابقات مقترحة من دافترة', g_suggested_hint: 'القرار النهائي يفتح في «المطابقة» (شريحة ٤)',
-      g_contracts: 'عقود بدون مركز تكلفة', g_contracts_hint: 'الربط يفتح مع إدارة العقود (شريحة ٣)',
+      g_contracts: 'عقود بدون مركز تكلفة', g_contracts_hint: 'اربطها من «الإعدادات»',
       g_imports: 'استيرادات متعثرة أو قديمة', g_imports_hint: '',
       more: 'غيرها', open_bank: 'افتح البنك',
       approve: 'اعتماد', reject: 'رفض', clarify: 'استيضاح',
@@ -77,7 +77,24 @@
       bulk_selected: 'محدد', bulk_classify: 'صنّف المحدد', bulk_clear: 'إلغاء التحديد',
       page: 'صفحة', of: 'من', rows_total: 'حركة',
       empty_bank: 'ما فيه حركات تطابق الفلتر', empty_bank_all: 'السجل فاضي — ابدأ باستيراد كشف البنك',
-      sugg: 'اقتراح'
+      sugg: 'اقتراح',
+      /* --- rules + setup --- */
+      mk_rule: 'طبّق على المشابهة (قاعدة)', rule_contains: 'الوصف يحتوي…',
+      rule_dir_any: 'أي اتجاه', rule_dir_out: 'طالع فقط', rule_dir_in: 'داخل فقط',
+      rule_created: 'انحفظت القاعدة وطبّقت على {n} حركة', rule_created_0: 'انحفظت القاعدة ✓',
+      auto_chip: 'صُنّف تلقائيًا — قاعدة', undo: 'تراجع',
+      undo_ok: 'رجعناها «تحتاج تصنيف» وضعّفنا القاعدة',
+      rules_applied_toast: 'القواعد صنّفت {n} حركة تلقائيًا',
+      setup_rules: 'قواعد التصنيف', setup_rules_hint: 'تنطبق تلقائيًا على كل استيراد — ومبالغ ٣٠٠٠+ تظل تحتاج اعتماد فيصل دايمًا',
+      setup_contracts: 'ربط العقود بمراكز التكلفة', setup_contracts_hint: 'العقد بدون مركز تكلفة ما يدخل في ربحية الوحدة',
+      rl_matcher: 'الشرط', rl_target: 'الحساب', rl_hits: 'تطبيقات', rl_strength: 'القوة',
+      rl_on: 'فعّالة', rl_off: 'موقوفة', rl_delete: 'حذف', rl_empty: 'ما فيه قواعد بعد — أنشئها من شاشة البنك عند التصنيف',
+      precision_btn: 'قِس دقة القواعد', precision_hint: 'إعادة تشغيل القواعد على المصنّف يدويًا',
+      pr_matched: 'طابقت', pr_agree: 'اتفقت', pr_precision: 'الدقة', pr_pending: 'بتُطبّق على',
+      pr_overall: 'الدقة الإجمالية', pr_ground: 'أساس القياس: {n} حركة مصنّفة يدويًا',
+      link_cc: 'اربط', linked_ok: 'انربط ✓', pick_cc: 'اختر مركز التكلفة…',
+      all_linked: 'كل العقود مربوطة بمراكز تكلفة ✓', unlinked_n: '{n} بدون مركز تكلفة',
+      open_setup: 'افتح الإعدادات'
     },
     en: {
       dir: 'ltr', app: 'Finance Center',
@@ -92,7 +109,7 @@
       g_approvals: 'Needs Faisal approval (≥ 3000)', g_approvals_hint: 'Large outgoing amounts — they move only on your decision',
       g_unclassified: 'Unclassified bank transactions', g_unclassified_hint: 'Open Bank and classify with the keyboard',
       g_suggested: 'Suggested Daftra matches', g_suggested_hint: 'Final decision opens in Matching (slice 4)',
-      g_contracts: 'Contracts missing cost center', g_contracts_hint: 'Linking opens with contract management (slice 3)',
+      g_contracts: 'Contracts missing cost center', g_contracts_hint: 'Link them in Setup',
       g_imports: 'Stale or failed imports', g_imports_hint: '',
       more: 'more', open_bank: 'Open Bank',
       approve: 'Approve', reject: 'Reject', clarify: 'Clarify',
@@ -124,7 +141,23 @@
       bulk_selected: 'selected', bulk_classify: 'Classify selected', bulk_clear: 'Clear selection',
       page: 'Page', of: 'of', rows_total: 'transactions',
       empty_bank: 'No transactions match this filter', empty_bank_all: 'Register is empty — start by importing a bank statement',
-      sugg: 'suggestion'
+      sugg: 'suggestion',
+      mk_rule: 'Apply to similar (rule)', rule_contains: 'Description contains…',
+      rule_dir_any: 'Any direction', rule_dir_out: 'Outgoing only', rule_dir_in: 'Incoming only',
+      rule_created: 'Rule saved and applied to {n} txns', rule_created_0: 'Rule saved ✓',
+      auto_chip: 'Auto-classified — rule', undo: 'Undo',
+      undo_ok: 'Back to needs-classification; rule weakened',
+      rules_applied_toast: 'Rules auto-classified {n} txns',
+      setup_rules: 'Classification rules', setup_rules_hint: 'Auto-apply on every import — 3000+ still always needs Faisal approval',
+      setup_contracts: 'Link contracts to cost centers', setup_contracts_hint: 'A contract without a cost center is excluded from unit profitability',
+      rl_matcher: 'Matcher', rl_target: 'Account', rl_hits: 'Hits', rl_strength: 'Strength',
+      rl_on: 'Active', rl_off: 'Disabled', rl_delete: 'Delete', rl_empty: 'No rules yet — create them from the Bank screen while classifying',
+      precision_btn: 'Measure rule precision', precision_hint: 'Replay rules against the human-classified rows',
+      pr_matched: 'Matched', pr_agree: 'Agreed', pr_precision: 'Precision', pr_pending: 'Would apply to',
+      pr_overall: 'Overall precision', pr_ground: 'Ground truth: {n} human-classified txns',
+      link_cc: 'Link', linked_ok: 'Linked ✓', pick_cc: 'Pick a cost center…',
+      all_linked: 'Every contract is linked to a cost center ✓', unlinked_n: '{n} without a cost center',
+      open_setup: 'Open Setup'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -174,7 +207,7 @@
     { id: 'close', slice: 7 },
     { id: 'stmts', slice: 7 },
     { id: 'budget', slice: 7 },
-    { id: 'setup', slice: 3 }
+    { id: 'setup', built: true }
   ];
 
   function parseHash() {
@@ -334,7 +367,8 @@
       } else if (g.key === 'contracts') {
         html += '<div class="grp-list">' + g.items.map(function (it) {
           return rowInfo('<b>' + esc(it.name) + '</b>', it.owner ? esc(it.owner) : '');
-        }).join('') + '</div>';
+        }).join('') + '</div>' +
+        '<div class="grp-cta"><a class="btn primary sm" href="#setup">' + esc(t('open_setup')) + '</a></div>';
       } else if (g.key === 'imports') {
         html += '<div class="grp-list">' + g.items.map(function (it) {
           var lbl = it.status === 'failed' ? t('failed') : t('stale');
@@ -506,6 +540,8 @@
         (r.cls.code ? ' <code>' + esc(r.cls.code) + '</code>' : '') +
         (r.cls.cost_center ? '<span class="tag">' + esc(r.cls.cost_center) + '</span>' : '') +
         (r.cls.unit ? '<span class="tag">' + esc(r.cls.unit) + '</span>' : '') +
+        (r.cls.auto ? '<span class="tag warnt">' + esc(t('auto_chip')) + '</span>' +
+          '<button class="btn ghost xs" data-act="bk-undo-rule" data-id="' + esc(r.id) + '">' + esc(t('undo')) + '</button>' : '') +
         '<button class="btn ghost xs" data-act="bk-open-cls" data-id="' + esc(r.id) + '">' + esc(t('edit_class')) + '</button></div>';
     }
     var h = '<div class="cls-todo">';
@@ -581,6 +617,12 @@
 
   function openCls(ids, anchorRow) {
     closeCls();
+    var seedContains = '';
+    if (anchorRow) {
+      var d1 = anchorRow.querySelector('.c-desc .d1');
+      var words = ((d1 && d1.textContent) || '').trim().split(/\s+/).filter(function (w) { return w.length > 1; });
+      seedContains = words.slice(0, 2).join(' ').slice(0, 40);
+    }
     ensureChart().then(function (chart) {
       var tr = document.createElement('tr');
       tr.id = 'clsPanelRow';
@@ -600,6 +642,17 @@
           '<label class="cp-f"><span>' + esc(t('unit_label')) + '</span><input id="clsUnit" class="in" type="text" list="unitsDl" maxlength="80">' +
             '<datalist id="unitsDl">' + unitList + '</datalist></label>' +
         '</div>' +
+        '<div class="cp-rule">' +
+          '<label class="cp-check"><input type="checkbox" id="clsMkRule"> ' + esc(t('mk_rule')) + '</label>' +
+          '<span id="clsRuleFields" hidden>' +
+            '<input id="clsRuleContains" class="in" type="text" placeholder="' + esc(t('rule_contains')) + '" value="' + esc(seedContains) + '" maxlength="60">' +
+            '<select id="clsRuleDir" class="in">' +
+              '<option value="out">' + esc(t('rule_dir_out')) + '</option>' +
+              '<option value="any">' + esc(t('rule_dir_any')) + '</option>' +
+              '<option value="in">' + esc(t('rule_dir_in')) + '</option>' +
+            '</select>' +
+          '</span>' +
+        '</div>' +
         '<div class="cp-btns">' +
           '<button class="btn primary sm" data-act="bk-save-cls">' + esc(t('save')) + '</button>' +
           '<button class="btn ghost sm" data-act="bk-cancel-cls">' + esc(t('cancel')) + '</button>' +
@@ -610,6 +663,8 @@
       var inp = $('#clsAccIn');
       renderAccList('');
       inp.addEventListener('input', function () { renderAccList(inp.value); });
+      var mk = $('#clsMkRule');
+      if (mk) mk.addEventListener('change', function () { $('#clsRuleFields').hidden = !mk.checked; });
       inp.focus();
     }).catch(function (e) { toast(srvMsg(e) || t('load_err'), 'err'); });
   }
@@ -788,6 +843,7 @@
         $('#bkPreview').innerHTML = '';
         store.pendingFile = null;
         toast(t('import_ok').replace('{n}', s.saved).replace('{d}', s.duplicates));
+        if (r.rules_applied) toast(t('rules_applied_toast').replace('{n}', r.rules_applied));
         loadBankData();
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
@@ -809,13 +865,39 @@
       var ids = panel.getAttribute('data-ids').split(',').filter(Boolean);
       var accSel = $('#clsAccId').value;
       if (!accSel) { $('#clsAccIn').classList.add('need'); $('#clsAccIn').focus(); return; }
+      var mkRule = $('#clsMkRule') && $('#clsMkRule').checked;
       el.disabled = true;
+      if (mkRule) {
+        var contains = ($('#clsRuleContains').value || '').trim();
+        if (contains.length < 2) { $('#clsRuleContains').classList.add('need'); $('#clsRuleContains').focus(); el.disabled = false; return; }
+        api('/erp/api/rules', { method: 'POST', body: {
+          account_id: accSel, cost_center_id: $('#clsCc').value,
+          counterparty: $('#clsCp').value.trim(), unit: $('#clsUnit').value.trim(),
+          contains: contains, direction: $('#clsRuleDir').value, apply_now: 1
+        } }).then(function (r) {
+          (r.rows || []).forEach(patchBankRow);
+          adjustBankCounts(r.rows ? r.rows.length : 0, false);
+          patchCounters(r.counters);
+          toast(r.applied ? t('rule_created').replace('{n}', r.applied) : t('rule_created_0'));
+          closeCls();
+        }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+        return;
+      }
       postClassify(ids, {
         account_id: accSel,
         cost_center_id: $('#clsCc').value,
         counterparty: $('#clsCp').value.trim(),
         unit: $('#clsUnit').value.trim()
       }).then(closeCls).catch(function () { el.disabled = false; });
+    }
+    else if (act === 'bk-undo-rule') {
+      el.disabled = true;
+      api('/erp/api/rules/undo', { method: 'POST', body: { txn_id: id } }).then(function (r) {
+        patchBankRow(r.row);
+        adjustBankCounts(1, true);
+        patchCounters(r.counters);
+        toast(t('undo_ok'), 'warn');
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'bk-cancel-cls') closeCls();
     else if (act === 'bk-clear-cls') {
@@ -836,6 +918,66 @@
         toast(t('chart_done') + ' (' + (r.chart && r.chart.accounts) + ')');
       }).catch(function (e) { toast(srvMsg(e) || t('act_failed'), 'err'); })
         .then(function () { el.disabled = false; el.textContent = old; });
+    }
+
+    /* --- setup --- */
+    else if (act === 'retry_setup') loadSetup();
+    else if (act === 'st-rule-toggle') {
+      el.disabled = true;
+      api('/erp/api/rules/toggle', { method: 'POST', body: { id: id, enabled: el.getAttribute('data-en') === '1' } })
+        .then(function () { loadSetup(); })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'st-rule-del') {
+      el.disabled = true;
+      api('/erp/api/rules/delete', { method: 'POST', body: { id: id } })
+        .then(function () {
+          var tr = el.closest('tr');
+          if (tr) tr.remove();
+          toast(t('rl_delete') + ' ✓', 'warn');
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'st-precision') {
+      el.disabled = true;
+      api('/erp/api/rules/precision').then(function (r) {
+        el.disabled = false;
+        var box = $('#precisionOut');
+        if (!box) return;
+        var rows = (r.rules || []).map(function (x) {
+          return '<tr><td>«' + esc(x.contains || '') + '»</td><td>' + esc(x.account || '') + '</td>' +
+            '<td class="c-amt"><code>' + x.matched_human + '</code></td>' +
+            '<td class="c-amt"><code>' + x.agree + '</code></td>' +
+            '<td class="c-amt"><code>' + (x.precision === null ? '—' : x.precision + '%') + '</code></td>' +
+            '<td class="c-amt"><code>' + x.would_apply_now + '</code></td></tr>';
+        }).join('');
+        box.innerHTML = '<div class="prev-stats" style="padding:0 20px">' +
+          '<span class="pstat ok"><b>' + (r.overall_precision === null ? '—' : r.overall_precision + '%') + '</b>' + esc(t('pr_overall')) + '</span>' +
+          '<span class="pstat"><b>' + r.ground_truth_rows + '</b>' + esc(t('pr_ground').replace('{n}', r.ground_truth_rows)) + '</span></div>' +
+          (rows ? '<div class="table-card" style="border:none;box-shadow:none"><table class="btable mini"><thead><tr>' +
+            '<th>' + esc(t('rl_matcher')) + '</th><th>' + esc(t('rl_target')) + '</th><th>' + esc(t('pr_matched')) + '</th>' +
+            '<th>' + esc(t('pr_agree')) + '</th><th>' + esc(t('pr_precision')) + '</th><th>' + esc(t('pr_pending')) + '</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table></div>' : '');
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'st-link-cc') {
+      var rowEl = el.closest('.wq-row');
+      var sel = rowEl.querySelector('.ct-cc');
+      var ccv = sel ? sel.value : '';
+      if (!ccv) { if (sel) { sel.classList.add('need'); sel.focus(); } return; }
+      el.disabled = true;
+      api('/erp/api/contracts/link', { method: 'POST', body: { key: el.getAttribute('data-key'), cost_center_id: ccv } })
+        .then(function (r) {
+          patchCounters(r.counters);
+          toast(t('linked_ok'));
+          var c = r.row;
+          rowEl.outerHTML = '<div class="wq-row info"><div class="wq-main"><div class="wq-top"><b>' + esc(c.name) + '</b>' +
+            '<span class="tag soft">' + esc(c.cc_name || '') + '</span></div>' +
+            (c.owner ? '<div class="wq-sub">' + esc(c.owner) + '</div>' : '') + '</div></div>';
+          var cnt = $('#ctUnlinked');
+          if (cnt && r.counters) cnt.textContent = r.counters.contracts ? t('unlinked_n').replace('{n}', r.counters.contracts) : '0';
+        })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
   });
 
@@ -890,9 +1032,99 @@
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
+  /* ================= الإعدادات Setup ================= */
+  function ruleRowHtml(r, isAdmin) {
+    var m = r.matcher || {};
+    var s = r.set || {};
+    var matcher = (m.desc_contains ? '«' + esc(m.desc_contains) + '»' : '') +
+      (m.direction && m.direction !== 'any' ? ' · ' + esc(m.direction === 'out' ? t('rule_dir_out') : t('rule_dir_in')) : '');
+    return '<tr class="rl-row' + (r.enabled ? '' : ' off') + '" data-id="' + esc(r.id) + '">' +
+      '<td>' + matcher + '</td>' +
+      '<td><b>' + esc(s.account_name || '') + '</b>' + (s.unit ? ' <span class="tag">' + esc(s.unit) + '</span>' : '') + '</td>' +
+      '<td class="c-amt"><code>' + (r.hits || 0) + '</code></td>' +
+      '<td class="c-amt"><code>' + (r.strength || 0) + '</code></td>' +
+      '<td><button class="btn ghost xs" data-act="st-rule-toggle" data-id="' + esc(r.id) + '" data-en="' + (r.enabled ? '0' : '1') + '">' +
+        (r.enabled ? esc(t('rl_on')) + ' ✓' : esc(t('rl_off'))) + '</button>' +
+        (isAdmin ? ' <button class="btn danger-ghost xs" data-act="st-rule-del" data-id="' + esc(r.id) + '">' + esc(t('rl_delete')) + '</button>' : '') +
+      '</td></tr>';
+  }
+
+  function renderSetup(d) {
+    var rulesRows = (d.rules || []).map(function (r) { return ruleRowHtml(r, d.is_admin); }).join('');
+    var html =
+      '<section class="card grp">' +
+        '<header class="grp-h"><span class="grp-ico">⚙️</span><h2>' + esc(t('setup_rules')) + '</h2>' +
+        '<span class="cnt">' + (d.rules || []).length + '</span></header>' +
+        '<div class="grp-hint">' + esc(t('setup_rules_hint')) + '</div>' +
+        ((d.rules || []).length
+          ? '<div class="table-card" style="border:none;box-shadow:none"><table class="btable"><thead><tr>' +
+            '<th>' + esc(t('rl_matcher')) + '</th><th>' + esc(t('rl_target')) + '</th><th>' + esc(t('rl_hits')) + '</th>' +
+            '<th>' + esc(t('rl_strength')) + '</th><th></th></tr></thead><tbody>' + rulesRows + '</tbody></table></div>'
+          : '<div class="grp-hint" style="padding-bottom:16px">' + esc(t('rl_empty')) + '</div>') +
+        '<div class="grp-cta"><button class="btn ghost sm" data-act="st-precision">' + esc(t('precision_btn')) + '</button>' +
+        ' <span class="grp-hint" style="padding:0">' + esc(t('precision_hint')) + '</span></div>' +
+        '<div id="precisionOut"></div>' +
+      '</section>' +
+      '<section class="card grp" id="setupContracts">' +
+        '<header class="grp-h"><span class="grp-ico">📄</span><h2>' + esc(t('setup_contracts')) + '</h2>' +
+        '<span class="cnt" id="ctUnlinked">…</span></header>' +
+        '<div class="grp-hint">' + esc(t('setup_contracts_hint')) + '</div>' +
+        '<div class="grp-list" id="ctList">' + skeleton(3).replace('card sk-card', 'sk-inline') + '</div>' +
+      '</section>';
+    $('#view').innerHTML = html;
+    loadSetupContracts();
+    restoreScroll('setup');
+  }
+
+  function contractRowHtml(c, ccOpts) {
+    if (c.cc_id) {
+      return '<div class="wq-row info" data-key="' + esc(c.key) + '"><div class="wq-main"><div class="wq-top"><b>' + esc(c.name) + '</b>' +
+        '<span class="tag soft">' + esc(c.cc_name || c.cc_id) + '</span></div>' +
+        (c.owner ? '<div class="wq-sub">' + esc(c.owner) + '</div>' : '') + '</div></div>';
+    }
+    return '<div class="wq-row" data-key="' + esc(c.key) + '"><div class="wq-main"><div class="wq-top"><b>' + esc(c.name) + '</b>' +
+      '<span class="tag bad">' + esc(t('f_needs')) + '</span></div>' +
+      (c.owner ? '<div class="wq-sub">' + esc(c.owner) + '</div>' : '') + '</div>' +
+      '<div class="wq-actions"><select class="in ct-cc">' + ccOpts + '</select>' +
+      '<button class="btn primary sm" data-act="st-link-cc" data-key="' + esc(c.key) + '">' + esc(t('link_cc')) + '</button></div></div>';
+  }
+
+  function loadSetupContracts() {
+    Promise.all([api('/erp/api/contracts'), ensureChart()]).then(function (rs) {
+      var d = rs[0], chart = rs[1];
+      var box = $('#ctList');
+      if (!box) return;
+      $('#ctUnlinked').textContent = d.unlinked ? t('unlinked_n').replace('{n}', d.unlinked) : '0';
+      var ccOpts = '<option value="">' + esc(t('pick_cc')) + '</option>' + chart.cost_centers.map(function (c) {
+        return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>';
+      }).join('');
+      if (!d.rows.length) { box.innerHTML = '<div class="grp-hint" style="padding-bottom:14px">—</div>'; return; }
+      if (!d.unlinked) {
+        box.innerHTML = '<div class="wq-row info"><div class="wq-main"><div class="wq-top">' + esc(t('all_linked')) + '</div></div></div>' +
+          d.rows.slice(0, 8).map(function (c) { return contractRowHtml(c, ccOpts); }).join('');
+        return;
+      }
+      box.innerHTML = d.rows.map(function (c) { return contractRowHtml(c, ccOpts); }).join('');
+    }).catch(function (e) {
+      var box = $('#ctList');
+      if (box) box.innerHTML = errorCard('retry_setup', srvMsg(e));
+    });
+  }
+
+  function loadSetup() {
+    $('#view').innerHTML = skeleton(5);
+    api('/erp/api/rules').then(function (d) {
+      store.D.setup = d;
+      renderSetup(d);
+    }).catch(function (e) {
+      $('#view').innerHTML = errorCard('retry_setup', srvMsg(e));
+    });
+  }
+
   /* ---------------- views registry ---------------- */
   var VIEWS = {
     today: { show: function () { loadToday(); } },
+    setup: { show: function () { loadSetup(); } },
     bank: {
       show: function (params) {
         bankP.f = params.get('f') || 'all';
@@ -919,6 +1151,7 @@
     renderNav();
     if (store.view === 'today' && store.D.today) renderToday(store.D.today);
     else if (store.view === 'bank') { var ph = parseHash(); VIEWS.bank.show(ph.params); }
+    else if (store.view === 'setup') loadSetup();
   }
   $('#langBtn').addEventListener('click', function () {
     store.lang = store.lang === 'ar' ? 'en' : 'ar';
