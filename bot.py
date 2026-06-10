@@ -13403,6 +13403,12 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
 
+        <!-- admin-only special links (investor deck) -->
+        <div class="card" id="investLinkCard" style="margin-bottom:12px">
+          <div class="card-head"><span class="card-title" id="t_inv_link">رابط المستثمرين</span><span class="card-sub" id="invLinkSub"></span></div>
+          <div id="invLinkBody"><div class="empty sk">—</div></div>
+        </div>
+
         <div id="usersBody"><div class="empty sk">—</div></div>
       </section>
 
@@ -13922,6 +13928,10 @@ const T = {
     dna_refresh:'تحديث',
     fol_show:'رابط المالك', fol_create:'أنشئ رابط المالك', fol_copy:'نسخ', fol_preview:'عرض كالمالك',
     fol_regen:'توليد جديد', fol_revoke:'إلغاء', fol_opened:'آخر فتح', fol_never:'ما انفتح بعد', fol_revoked:'الرابط ملغي',
+    inv_link_title:'رابط المستثمرين', inv_link_sub:'هذا هو الرابط الرسمي لصفحة /invest — انسخه وأرسله للمستثمرين. توليد رابط جديد يبطل القديم فورًا.',
+    inv_link_copy:'نسخ', inv_link_open:'فتح', inv_link_regen:'توليد جديد', inv_link_regens:'أُعيد توليده',
+    inv_link_regen_q:'توليد رابط جديد يبطل كل الروابط القديمة المرسلة. متأكد؟', inv_link_regen_done:'الرابط الجديد جاهز — انسخه وأرسله',
+    inv_link_admin_only:'هذا القسم للمدير فقط',
     guest_drw_stays:'الإقامات', guest_drw_summaries:'ملخصات المحادثات',
     guest_drw_notes:'ملاحظات داخلية (لا يراها الضيف)', guest_drw_save:'حفظ',
     guest_drw_toggle_vip:'تبديل VIP',
@@ -14239,6 +14249,10 @@ const T = {
     dna_refresh:'Refresh',
     fol_show:'Owner link', fol_create:'Create owner link', fol_copy:'Copy', fol_preview:'Preview as owner',
     fol_regen:'Regenerate', fol_revoke:'Revoke', fol_opened:'Last opened', fol_never:'Never opened yet', fol_revoked:'Link revoked',
+    inv_link_title:'Investor link', inv_link_sub:'The official /invest URL — copy and send it to investors. Regenerating kills old links instantly.',
+    inv_link_copy:'Copy', inv_link_open:'Open', inv_link_regen:'Regenerate', inv_link_regens:'Regenerated',
+    inv_link_regen_q:'Regenerating invalidates every previously shared link. Sure?', inv_link_regen_done:'New link ready — copy and send it',
+    inv_link_admin_only:'Admin only',
     guest_drw_stays:'Stays', guest_drw_summaries:'Conversation summaries',
     guest_drw_notes:'Internal notes (guest never sees these)', guest_drw_save:'Save',
     guest_drw_toggle_vip:'Toggle VIP',
@@ -19733,6 +19747,32 @@ async function loadUsers(){
     return;
   }
   _renderUsersBody();
+  loadInvestLink();
+}
+/* ===== Admin: the investor link (the owner never hand-builds URLs) ===== */
+async function loadInvestLink(){
+  var el=document.getElementById('invLinkBody'); if(!el) return;
+  var tEl=document.getElementById('t_inv_link'); if(tEl) tEl.textContent=t().inv_link_title;
+  var r; try{ r=await api('/api/invest/link'); }catch(_){ r=null; }
+  if(!r || !r.ok){
+    el.innerHTML=errorState('loadInvestLink()', r&&r.error==='forbidden — admin only'?t().inv_link_admin_only:null);
+    return;
+  }
+  var sub=document.getElementById('invLinkSub');
+  if(sub) sub.textContent=(r.regens?(t().inv_link_regens+' '+r.regens+'×'):'');
+  el.innerHTML='<div class="muted" style="font-size:11.5px;margin-bottom:8px">'+t().inv_link_sub+'</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+    +'<code class="num" style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:11px;direction:ltr;max-width:100%;overflow-x:auto;white-space:nowrap">'+esc(location.origin+r.url)+'</code>'
+    +'<button class="btn ghost sm" data-copy="'+esc(location.origin+r.url)+'" onclick="_rvCopy(this)">📋 '+t().inv_link_copy+'</button>'
+    +'<button class="btn ghost sm" onclick="window.open(&#39;'+esc(r.url)+'&#39;,&#39;_blank&#39;)">👁 '+t().inv_link_open+'</button>'
+    +'<button class="btn ghost sm" onclick="investLinkRegen()">⟳ '+t().inv_link_regen+'</button>'
+    +'</div>';
+}
+async function investLinkRegen(){
+  if(!confirm(t().inv_link_regen_q)) return;
+  var r; try{ r=await post('/api/invest/link',{action:'regenerate'}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast('✓ '+t().inv_link_regen_done); loadInvestLink(); }
+  else toast((r&&r.error)||'⚠');
 }
 function _roleLabel(r){ return (L==='en' ? ROLE_LABEL_EN : ROLE_LABEL)[r] || r }
 function _tabLabel(tab){ return (L==='en' ? TAB_LABEL_EN : TAB_LABEL)[tab] || tab }
@@ -31155,6 +31195,9 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
       </div>
     </div>
 
+    <!-- live numbers strip: renders ONLY when real computed stats exist -->
+    <div id="heroLive" hidden style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 4px"></div>
+
     <a class="cue" href="#calc" aria-label="Go to the calculator">
       <span data-ar="اضبط الأرقام بنفسك" data-en="Adjust the numbers yourself">اضبط الأرقام بنفسك</span>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
@@ -31332,6 +31375,62 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
     </div>
   </section>
 
+  <!-- ===== الأداء: 12-month real trends (renders ONLY with real data) ===== -->
+  <section id="performance" hidden>
+    <div class="section-head wrap" data-reveal>
+      <div class="section-eyebrow" data-ar="الأداء الفعلي" data-en="Actual performance">الأداء الفعلي</div>
+      <h2 class="section-title" data-ar="١٢ شهرًا من التشغيل الحقيقي" data-en="Twelve months of real operation">١٢ شهرًا من التشغيل الحقيقي</h2>
+    </div>
+    <div class="wrap" data-reveal>
+      <div class="proof-note" style="margin-bottom:10px" data-ar="إشغال المحفظة شهريًا — انخفاض رمضان طبيعي وموسمي." data-en="Monthly portfolio occupancy — the Ramadan dip is normal seasonality.">إشغال المحفظة شهريًا — انخفاض رمضان طبيعي وموسمي.</div>
+      <div id="perfOcc" style="display:flex;align-items:flex-end;gap:5px;height:120px"></div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:22px">
+        <div style="flex:1;min-width:240px"><div class="proof-note" data-ar="متوسط سعر الليلة (ADR)" data-en="Average daily rate (ADR)">متوسط سعر الليلة (ADR)</div><div id="perfAdr" style="display:flex;align-items:flex-end;gap:4px;height:80px;margin-top:6px"></div></div>
+        <div style="flex:1;min-width:240px"><div class="proof-note" data-ar="الإيراد لكل وحدة متاحة (RevPAR)" data-en="Revenue per available unit (RevPAR)">الإيراد لكل وحدة متاحة (RevPAR)</div><div id="perfRevpar" style="display:flex;align-items:flex-end;gap:4px;height:80px;margin-top:6px"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== الآلة: what runs the portfolio ===== -->
+  <section id="machine">
+    <div class="section-head wrap" data-reveal>
+      <div class="section-eyebrow" data-ar="منظومة التشغيل" data-en="The operating machine">منظومة التشغيل</div>
+      <h2 class="section-title" data-ar="ليست إدارة يدوية" data-en="Not manual management">ليست إدارة يدوية</h2>
+    </div>
+    <div class="wrap" data-reveal style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px">
+      <div class="proof-card"><b data-ar="مساعد ضيوف ذكي 24/7" data-en="24/7 AI guest assistant">مساعد ضيوف ذكي 24/7</b>
+        <div class="proof-note" id="machineMusaed" data-ar="«مساعد» يرد على الضيوف بالعربي والإنجليزي على مدار الساعة، ويصعّد ما يحتاج البشر." data-en="“Musaed” answers guests in Arabic and English around the clock, escalating what needs humans.">«مساعد» يرد على الضيوف بالعربي والإنجليزي على مدار الساعة، ويصعّد ما يحتاج البشر.</div>
+        <div class="proof-note" id="machineMusaedN" hidden></div>
+        <a class="btn-ghost2" style="margin-top:8px;display:inline-block" href="/musaed-showcase" target="_blank" rel="noopener" data-ar="شاهد محادثات حقيقية ↗" data-en="See real conversations ↗">شاهد محادثات حقيقية ↗</a></div>
+      <div class="proof-card"><b data-ar="تشغيل مُثبت بالصور" data-en="Photo-verified operations">تشغيل مُثبت بالصور</b>
+        <div class="proof-note" data-ar="كل تنظيف يُوثّق بصور إلزامية تُراجع قبل دخول الضيف — الجودة نظام، مو وعود." data-en="Every cleaning is documented with mandatory photos reviewed before check-in — quality as a system, not promises.">كل تنظيف يُوثّق بصور إلزامية تُراجع قبل دخول الضيف — الجودة نظام، مو وعود.</div></div>
+      <div class="proof-card"><b data-ar="تسعير ديناميكي" data-en="Dynamic pricing">تسعير ديناميكي</b>
+        <div class="proof-note" data-ar="محرّك تسعير يتعلّم من حجوزات كل وحدة ومواسم السعودية، ويعدّل الأسعار يوميًا بحدود أمان." data-en="A pricing engine that learns each unit's bookings and Saudi seasonality, adjusting daily within safety floors.">محرّك تسعير يتعلّم من حجوزات كل وحدة ومواسم السعودية، ويعدّل الأسعار يوميًا بحدود أمان.</div></div>
+    </div>
+    <div class="wrap" data-reveal style="margin-top:14px">
+      <div class="proof-note" data-ar="الهدف المعلن: النمو من ~70 وحدة مُدارة إلى 150 وحدة — هدف وليس وعدًا، والنمو مرهون بجودة كل وحدة تنضم." data-en="Stated target: growing from ~70 managed units to 150 — a target, not a promise; growth is gated on the quality of every unit that joins.">الهدف المعلن: النمو من ~70 وحدة مُدارة إلى 150 وحدة — هدف وليس وعدًا، والنمو مرهون بجودة كل وحدة تنضم.</div>
+    </div>
+  </section>
+
+  <!-- ===== النموذج الاستثماري (نص فيصل) ===== -->
+  <section id="model">
+    <div class="section-head wrap" data-reveal>
+      <div class="section-eyebrow" data-ar="نموذج العمل" data-en="The model">نموذج العمل</div>
+      <h2 class="section-title" data-ar="كيف نشتغل مع الملاك والمستثمرين" data-en="How we work with owners and investors">كيف نشتغل مع الملاك والمستثمرين</h2>
+    </div>
+    <div class="wrap" data-reveal>
+      <div class="proof-note" style="border:1.5px dashed #B88935;border-radius:12px;padding:14px" data-ar="[FAISAL: نص النموذج الاستثماري — نسبة الإدارة، نموذج ضمان الإيراد، الشروط]" data-en="[FAISAL: investment model copy — management %, revenue-guarantee model, terms]">[FAISAL: نص النموذج الاستثماري — نسبة الإدارة، نموذج ضمان الإيراد، الشروط]</div>
+    </div>
+  </section>
+
+  <!-- ===== تواصل ===== -->
+  <section id="contact">
+    <div class="wrap takeaway-wrap" data-reveal>
+      <h2 data-ar="نكمل الحديث؟" data-en="Shall we talk?">نكمل الحديث؟</h2>
+      <div class="cta-row" id="contactRow"></div>
+    </div>
+  </section>
+
   <section id="takeaway">
     <div class="wrap takeaway-wrap" data-reveal>
       <h2 data-ar="جاهز تشوف أرقامك مطبوعة؟" data-en="Ready to see your numbers in print?">جاهز تشوف أرقامك مطبوعة؟</h2>
@@ -31350,7 +31449,8 @@ html.lang-en .takeaway-wrap h2{font-family:var(--f-en);font-weight:400}
 </footer>
 
 <script>window.OUJA_PROOF = /*__OUJA_PROOF__*/null;
-window.OUJA_SEGMENTS = /*__OUJA_SEGMENTS__*/null;</script>
+window.OUJA_SEGMENTS = /*__OUJA_SEGMENTS__*/null;
+window.OUJA_CONTACT = /*__OUJA_CONTACT__*/null;</script>
 <script>
 var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 var _calcReady = false;
@@ -31811,7 +31911,70 @@ function initCalc(){
   populateSegments();
   setupReveals();
 }
+/* ===== Live deck stats — every number real + computed, sections hide without data ===== */
+function deckNum(n){ return (n==null)?null:Math.round(n).toLocaleString('en-US'); }
+function renderDeckLive(){
+  var p = window.OUJA_PROOF || {};
+  // hero: three live numbers + the computed-at stamp
+  var hero = document.getElementById('heroLive');
+  if(hero){
+    var chips = [];
+    function chip(val, ar, en){
+      if(val==null) return;
+      chips.push('<div style="background:rgba(184,137,59,.10);border:1px solid rgba(184,137,59,.35);border-radius:12px;padding:9px 15px">'
+        +'<div class="num" style="font-size:20px;font-weight:800;color:#B88935">'+val+'</div>'
+        +'<div style="font-size:11px;color:#7A6A58"><span data-ar="'+ar+'" data-en="'+en+'">'+ar+'</span></div></div>');
+    }
+    chip(deckNum(p.units), 'وحدة تحت الإدارة', 'units under management');
+    chip(p.occ_90!=null?(p.occ_90+'%'):null, 'إشغال آخر ٩٠ يوم', 'occupancy, last 90 days');
+    chip(deckNum(p.nights_hosted), 'ليلة استضفناها', 'nights hosted');
+    if(chips.length){
+      hero.innerHTML = chips.join('')
+        + (p.computed_at?('<div style="align-self:flex-end;font-size:10px;color:#7A6A58"><span data-ar="بتاريخ " data-en="as of ">بتاريخ </span><span class="num">'+p.computed_at+'</span></div>'):'');
+      hero.hidden = false;
+    }
+  }
+  // performance trends — render only with real series
+  var tr = p.trend_12 || [];
+  if(tr.length){
+    var sec = document.getElementById('performance');
+    if(sec) sec.hidden = false;
+    function bars(elId, key, suffix, color){
+      var el = document.getElementById(elId); if(!el) return;
+      var vals = tr.map(function(x){ return x[key]; });
+      var max = 1; vals.forEach(function(v){ if(v!=null && v>max) max=v; });
+      el.innerHTML = tr.map(function(x, i){
+        var v = x[key];
+        var h = (v==null)?3:Math.max(4, Math.round(v/max*100));
+        return '<div title="'+x.m+': '+(v==null?'—':deckNum(v)+(suffix||''))+'" style="flex:1;height:'+h+'%;background:'+(i===tr.length-1?'#B88935':'#E5D8C4')+';border-radius:4px 4px 0 0"></div>';
+      }).join('');
+    }
+    bars('perfOcc', 'occ', '%');
+    bars('perfAdr', 'adr', '');
+    bars('perfRevpar', 'revpar', '');
+  }
+  // Musaed real 30-day activity (counts only — never an invented rate)
+  var ms = p.musaed_30d;
+  if(ms && ms.replies){
+    var mEl = document.getElementById('machineMusaedN');
+    if(mEl){
+      mEl.innerHTML = '<b class="num">'+deckNum(ms.replies)+'</b> <span data-ar="رد للضيوف خلال آخر ٣٠ يوم، منها " data-en="guest replies in the last 30 days, of which ">رد للضيوف خلال آخر ٣٠ يوم، منها </span><b class="num">'+deckNum(ms.auto)+'</b> <span data-ar="آلية بالكامل" data-en="fully automatic">آلية بالكامل</span>';
+      mEl.hidden = false;
+    }
+  }
+  // contact: only configured channels render — never a dead link
+  var c = window.OUJA_CONTACT || {};
+  var row = document.getElementById('contactRow');
+  if(row){
+    var btns = [];
+    if(c.wa) btns.push('<a class="btn-gold" target="_blank" rel="noopener" href="https://wa.me/'+c.wa+'?text='+encodeURIComponent('مرحبا، مهتم بالاستثمار مع عوجا')+'" data-ar="واتساب عوجا 💬" data-en="WhatsApp Ouja 💬">واتساب عوجا 💬</a>');
+    if(c.email) btns.push('<a class="btn-ghost2" href="mailto:'+c.email+'" data-ar="إيميل" data-en="Email">إيميل</a>');
+    if(btns.length) row.innerHTML = btns.join('');
+    else { var cs = document.getElementById('contact'); if(cs) cs.hidden = true; }   // no channel → no section, never a dead link
+  }
+}
 initCalc();
+try{ renderDeckLive(); }catch(e){ console.error('deck live:', e); }
 </script>
 </body>
 </html>
@@ -31848,7 +32011,56 @@ def _invest_proof():
         proof["areas"] = areas[:5]            # strongest few areas (already sorted by occ)
     if adrs:
         proof["portfolio_adr"] = int(round(sum(adrs) / len(adrs)))
-    if proof.get("portfolio_occ") is None and not proof.get("areas"):
+    # ---- live deck stats (all guarded: a metric that can't be computed is OMITTED) ----
+    # 90-day portfolio occupancy: mean of per-unit occ90 from the warmed revenue cache.
+    try:
+        occs = [u.get("occ") for u in (rv.get("units") or []) if isinstance(u.get("occ"), (int, float))] \
+               if isinstance(rv, dict) else []
+        if occs:
+            proof["occ_90"] = int(round(sum(occs) / len(occs)))
+    except Exception:
+        pass
+    # nights hosted (all-time) + 12-month occupancy/ADR/RevPAR trends from the cached pull.
+    try:
+        resv = _res_cache.get("data")
+        if resv:
+            nights, _ = _explode_nights(resv)
+            today = datetime.now(TZ).date()
+            past = [(lid, d, nl) for lid, d, nl in nights if d <= today]
+            proof["nights_hosted"] = len(past)
+            n_units = max(1, int(proof.get("units") or len({l for l, _, _ in past}) or 1))
+            import calendar as _cal
+            trend = []
+            y, m = today.year, today.month
+            for i in range(11, -1, -1):
+                ty, tm = y, m - i
+                while tm <= 0:
+                    tm += 12; ty -= 1
+                dim = _cal.monthrange(ty, tm)[1]
+                mk = f"{ty}-{tm:02d}"
+                mn = [(d, nl) for _l, d, nl in past if d.isoformat()[:7] == mk]
+                sold = len(mn); rev = sum(nl for _d, nl in mn)
+                trend.append({"m": mk,
+                              "occ": int(round(sold * 100.0 / (n_units * dim))),
+                              "adr": (int(round(rev / sold)) if sold else None),
+                              "revpar": int(round(rev / (n_units * dim)))})
+            proof["trend_12"] = trend
+    except Exception as e:
+        print("invest trend error:", e)
+    # Musaed real activity (last 30 days) from the daily metrics — counts, never invented rates.
+    try:
+        cutoff = (datetime.now(TZ).date() - timedelta(days=30)).isoformat()
+        tot = auto = 0
+        for day, row in (_daily_metrics or {}).items():
+            if day >= cutoff and isinstance(row, dict):
+                tot += int(row.get("replies_total") or 0)
+                auto += int(row.get("replies_auto") or 0)
+        if tot:
+            proof["musaed_30d"] = {"replies": tot, "auto": auto}
+    except Exception:
+        pass
+    proof["computed_at"] = datetime.now(TZ).date().isoformat()
+    if proof.get("portfolio_occ") is None and not proof.get("areas") and not proof.get("trend_12"):
         return None                           # nothing trustworthy -> omit the panel
     return proof
 
@@ -31966,16 +32178,87 @@ def _render_invest_html():
     except Exception as e:
         print("invest segments error:", e)
     seg_payload = json.dumps(seg, ensure_ascii=False) if seg else "null"
+    contact = {"wa": (STAY_WHATSAPP or None),
+               "email": (os.environ.get("OUJA_CONTACT_EMAIL") or "").strip() or None}
     return (INVEST_HTML.replace("/*__OUJA_PROOF__*/null", payload)
-                       .replace("/*__OUJA_SEGMENTS__*/null", seg_payload))
+                       .replace("/*__OUJA_SEGMENTS__*/null", seg_payload)
+                       .replace("/*__OUJA_CONTACT__*/null", json.dumps(contact)))
+
+# ---- /invest token: env seeds it, STATE_DIR persists it, the dashboard manages it ----
+# The page must NEVER be dead because of a missing env var (the bug that killed it):
+# boot resolution = persisted store → else seed from INVEST_TOKEN env → else generate.
+# Regeneration (admin-only) replaces the persisted value and invalidates old links.
+_invest_link = _load_json("invest_token.json", {}) or {}
+
+def _invest_token_get():
+    tok = (_invest_link.get("token") or "").strip()
+    if tok:
+        return tok
+    tok = (INVEST_TOKEN or "").strip() or _secrets_mod.token_urlsafe(24)
+    _invest_link.update({"token": tok,
+                         "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+                         "source": ("env" if INVEST_TOKEN else "generated"),
+                         "regen_log": _invest_link.get("regen_log") or []})
+    _save_json("invest_token.json", _invest_link)
+    print(f"invest: link token ready (source={_invest_link['source']}) — share /invest?token=…")
+    return tok
+
+def _invest_token_regenerate(actor=""):
+    old = (_invest_link.get("token") or "")[-6:]
+    _invest_link.setdefault("regen_log", []).append(
+        {"ts": datetime.now(TZ).isoformat(timespec="seconds"), "by": (actor or "")[:60],
+         "old_suffix": old})
+    _invest_link["regen_log"] = _invest_link["regen_log"][-20:]
+    _invest_link["token"] = _secrets_mod.token_urlsafe(24)
+    _invest_link["source"] = "regenerated"
+    _save_json("invest_token.json", _invest_link)
+    log_event("ops", f"رابط المستثمرين أُعيد توليده · بواسطة {actor or '?'}")
+    return _invest_link["token"]
+
+# Branded bilingual gate page — investors never see raw 401 text or JSON.
+_INVEST_DENIED_HTML = r"""<!doctype html><html lang="ar" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>عوجا · Ouja</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F7F1E6;color:#2F241B;font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;text-align:center}
+.c{max-width:420px;background:#FFFDF8;border:1px solid #E5D8C4;border-radius:18px;padding:36px 28px;box-shadow:0 8px 28px rgba(47,36,27,.08)}
+.logo{font-size:30px;font-weight:700;color:#B88935;margin-bottom:14px}
+h1{font-size:17px;margin:0 0 8px}p{font-size:13.5px;color:#7A6A58;line-height:1.8;margin:0}</style></head>
+<body><div class="c"><div class="logo">عوجا · OUJA</div>
+<h1>هذا الرابط غير صالح أو منتهي</h1>
+<p>تواصل مع عوجا للحصول على رابط محدّث لصفحة المستثمرين.</p>
+<p style="margin-top:14px;direction:ltr">This link is invalid or expired —<br>contact Ouja for an updated investor link.</p>
+</div></body></html>"""
 
 async def _handle_invest(request):
-    # Gated: shareable INVEST_TOKEN (?token=) or an authenticated dashboard session.
+    # Gated: the shareable investor token (?token=) or an authenticated dashboard session.
     tok = request.query.get("token") or ""
-    ok = bool(INVEST_TOKEN) and hmac.compare_digest(tok, INVEST_TOKEN)
+    cur = _invest_token_get()
+    ok = bool(tok) and hmac.compare_digest(str(tok), str(cur))
     if not ok and not _dash_auth(request):
-        return web.Response(text="unauthorized", status=401)
+        return web.Response(text=_INVEST_DENIED_HTML, content_type="text/html", status=403)
     return web.Response(text=_render_invest_html(), content_type="text/html")
+
+async def _api_invest_link(request):
+    """Admin-only: the investor link (GET → current URL + meta; POST {action:'regenerate'}).
+    The owner copies the link from here — never hand-builds URLs."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    # explicit admin enforcement (server-side, not hidden buttons)
+    if not _user_can(request, "users", "write"):
+        return _json({"error": "forbidden — admin only"}, 403)
+    if request.method == "POST":
+        b = await _read_body(request)
+        if (b.get("action") or "") == "regenerate":
+            _invest_token_regenerate(_req_actor(request))
+        else:
+            return _json({"error": "bad action"}, 400)
+    tok = _invest_token_get()
+    return _json({"ok": True, "url": "/invest?token=" + tok,
+                  "source": _invest_link.get("source"),
+                  "created_at": _invest_link.get("created_at"),
+                  "regens": len(_invest_link.get("regen_log") or [])})
 
 async def _api_pricing_detail(request):
     if not _dash_auth(request):
@@ -43023,6 +43306,8 @@ async def start_web_server():
         app.router.add_get("/stay/{slug}", _handle_stay_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
+        app.router.add_get("/api/invest/link", _api_invest_link)    # admin: copy the investor URL
+        app.router.add_post("/api/invest/link", _api_invest_link)   # admin: regenerate (kills old links)
         app.router.add_get("/api/overview", _api_overview)
         app.router.add_get("/api/revenue", _api_revenue)
         app.router.add_get("/api/pricing", _api_pricing)
