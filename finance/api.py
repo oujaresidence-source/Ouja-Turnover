@@ -662,6 +662,296 @@ def rules_precision():
             "overall_precision": overall}
 
 
+# ====================== المطابقة Matching (Slice 4) ======================
+# ONE queue across four engines. Engine 1 (بنك↔دافترة) REUSES the existing dup
+# machinery wholesale (suggestions + link/link_distributed/not_duplicate via
+# delegation). Engines 2-4 (مصاريف/مؤسس وبطاقات/Hostaway) are new scorers that
+# write additive fields only. EVERY decision is appended to erp_match_log.json
+# with who/when/what-was-suggested.
+
+_MATCH_LOG_FILE = "erp_match_log.json"
+_DISMISS_KEY = "erp_match_dismissed"
+
+
+def match_log_add(request, txn_id, engine, action, detail):
+    log = B._load_json(_MATCH_LOG_FILE, []) or []
+    log.append({"at": datetime.now(B.TZ).isoformat(timespec="seconds"),
+                "by": actor(request), "txn": txn_id, "engine": engine,
+                "action": action, "detail": detail})
+    if len(log) > 8000:
+        del log[:len(log) - 8000]
+    B._save_json(_MATCH_LOG_FILE, log)
+
+
+def match_log_recent(limit=80):
+    log = B._load_json(_MATCH_LOG_FILE, []) or []
+    return list(reversed(log[-limit:]))
+
+
+def _pdate(s):
+    try:
+        return datetime.fromisoformat(str(s)[:10]).date()
+    except Exception:
+        return None
+
+
+def _exp_candidates(x, limit=3):
+    """Engine 2: bank debit ↔ OJ-EXP expense records (amount tight, ±7d, text sim)."""
+    deb = float(B._fb_money(x.get("debit")))
+    if deb <= 0:
+        return []
+    d0 = _pdate(x.get("date"))
+    out = []
+    for ex in B._expenses.values():
+        try:
+            amt = float(ex.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0 or abs(amt - deb) > max(2.0, deb * 0.01):
+            continue
+        if ex.get("bank_txn_id"):
+            continue                       # already consumed by another bank txn
+        d1 = _pdate(ex.get("expense_date") or ex.get("date"))
+        dd = abs((d1 - d0).days) if (d0 and d1) else None
+        if dd is None or dd > 7:
+            continue
+        txt = " ".join(str(ex.get(k) or "") for k in ("concept", "apartment", "category"))
+        try:
+            sim = B._fb_text_sim(x.get("description") or "", txt)
+        except Exception:
+            sim = 0.0
+        score = 58 + (20 if dd <= 1 else 12 if dd <= 3 else 6) + min(18, int(sim * 40)) \
+                + (3 if abs(amt - deb) < 0.01 else 0)
+        out.append({"engine": "exp", "key": str(ex.get("id")), "score": min(score, 99),
+                    "label": (ex.get("concept") or ex.get("category") or "OJ-EXP"),
+                    "sub": ex.get("apartment") or "",
+                    "date": ex.get("expense_date") or "", "amount": B._fb_money_str(amt)})
+    out.sort(key=lambda c: -c["score"])
+    return out[:limit]
+
+
+def _hostaway_candidates(x, res_list, limit=3):
+    """Engine 4: channel_payout credits ↔ cached Hostaway reservations (تقريبي —
+    payout ≈ totalPrice minus 0–4.5% channel fee, departure within ±10d)."""
+    cred = float(B._fb_money(x.get("credit")))
+    if cred <= 0 or (x.get("category") or "") != "channel_payout":
+        return []
+    d0 = _pdate(x.get("date"))
+    out = []
+    for r in res_list or []:
+        if (r.get("status") or "") not in ("new", "modified"):
+            continue
+        try:
+            tp = float(r.get("totalPrice") or 0)
+        except (TypeError, ValueError):
+            continue
+        if tp <= 0 or not (tp * 0.955 - 1 <= cred <= tp + 1):
+            continue
+        d1 = _pdate(r.get("departureDate")) or _pdate(r.get("arrivalDate"))
+        dd = abs((d1 - d0).days) if (d0 and d1) else None
+        if dd is None or dd > 10:
+            continue
+        closeness = 1.0 - min(1.0, abs(tp - cred) / max(tp, 1.0) / 0.045)
+        score = int(50 + 25 * closeness + (15 if dd <= 2 else 8 if dd <= 5 else 3))
+        out.append({"engine": "hostaway", "key": str(r.get("id")), "score": min(score, 95),
+                    "label": r.get("guestName") or "حجز", "sub": str(r.get("listingMapId") or ""),
+                    "date": r.get("departureDate") or "", "amount": B._fb_money_str(tp),
+                    "approx": True})
+    out.sort(key=lambda c: -c["score"])
+    return out[:limit]
+
+
+def _founder_candidates(x):
+    """Engine 3: card settlements (via the card→employee registry) + founder/
+    partner/fit-out transfer suggestions from the existing keyword sets."""
+    out = []
+    card = (x.get("card_last4") or "").strip()
+    if card:
+        m = (B._fb_cards or {}).get(card)
+        if m and m.get("employee"):
+            out.append({"engine": "founder", "key": "card:" + card, "score": 84, "kind": "card",
+                        "label": "تسوية بطاقة — " + m["employee"], "label_en": "Card settlement — " + m["employee"],
+                        "sub": m["employee"], "flow": "employee_advance_settlement",
+                        "employee": m["employee"]})
+    if float(B._fb_money(x.get("credit"))) > 0:
+        desc = _norm(x.get("description"))
+        try:
+            if any(_norm(k) in desc for k in B._FB_FITOUT_KW):
+                out.append({"engine": "founder", "key": "flow:fitout", "score": 64, "kind": "flow",
+                            "label": "وارد تجهيز من مالك", "label_en": "Owner fit-out funding",
+                            "sub": "", "flow": "cash_in_owner_fitout_funding"})
+            elif any(_norm(k) in desc for k in (tuple(B._FB_PARTNER_KW) + tuple(B._FB_FUNDING_KW))):
+                out.append({"engine": "founder", "key": "flow:partner", "score": 66, "kind": "flow",
+                            "label": "تمويل من جاري الشريك/المؤسس", "label_en": "Partner/founder funding",
+                            "sub": "", "flow": "cash_in_partner_funding"})
+        except Exception:
+            pass
+    return out
+
+
+_DAFTRA_SUGGESTED = ("possible_duplicate", "strong_possible_duplicate",
+                     "needs_manual_review", "already_in_daftra_verified")
+
+
+def _daftra_candidate(x):
+    dq = x.get("daftra_duplicate_status")
+    if dq not in _DAFTRA_SUGGESTED or x.get("match_status") == "matched":
+        return None
+    return {"engine": "daftra", "key": str(x.get("matched_daftra_id") or ""),
+            "score": int(x.get("daftra_duplicate_confidence") or 0),
+            "label": ("قيد #" + str(x.get("matched_daftra_number"))) if x.get("matched_daftra_number") else "قيد دافترة",
+            "label_en": ("Journal #" + str(x.get("matched_daftra_number"))) if x.get("matched_daftra_number") else "Daftra journal",
+            "sub": x.get("daftra_duplicate_reason_ar") or "",
+            "sub_en": x.get("daftra_duplicate_reason_en") or "",
+            "needs_drawer": True}
+
+
+def _match_item_for(x, res_list):
+    dismissed = x.get(_DISMISS_KEY) or {}
+    cands = []
+    dc = None if dismissed.get("daftra") else _daftra_candidate(x)
+    if dc:
+        cands.append(dc)
+    if not dismissed.get("exp"):
+        cands.extend(_exp_candidates(x))
+    if not dismissed.get("founder"):
+        cands.extend(_founder_candidates(x))
+    if not dismissed.get("hostaway"):
+        cands.extend(_hostaway_candidates(x, res_list))
+    cands.sort(key=lambda c: -c["score"])
+    amount, dirn = _amt(x)
+    return {"id": x["id"], "date": x.get("date") or "", "desc": (x.get("description") or "")[:160],
+            "amount": amount, "dir": dirn, "category": x.get("category") or "unknown",
+            "card": x.get("card_last4") or "", "dup": x.get("daftra_duplicate_status") or "not_checked",
+            "cands": cands, "dismissed": dismissed}
+
+
+def match_queue(params):
+    """The ONE matching queue. Heavy-ish (scans expenses × unmatched txns) —
+    the handler runs it in a thread."""
+    engine = (params.get("engine") or "all").strip()
+    try:
+        page = max(1, int(params.get("p") or 1))
+    except Exception:
+        page = 1
+    ps = 30
+    res_list = []
+    need_hostaway = any(
+        (x.get("category") or "") == "channel_payout"
+        and float(B._fb_money(x.get("credit"))) > 0
+        and (x.get("match_status") or "unmatched") == "unmatched"
+        for x in B._fb_bank.values())
+    if need_hostaway:
+        try:
+            res_list = B.get_reservations_cached() or []
+        except Exception:
+            res_list = []
+    items = []
+    for x in B._fb_bank.values():
+        if (x.get("match_status") or "unmatched") == "matched":
+            continue
+        if x.get("daftra_duplicate_status") == "ignored" or x.get("ledger_entry_id"):
+            continue
+        items.append(_match_item_for(x, res_list))
+    counts = {"all": len(items),
+              "daftra": sum(1 for i in items if any(c["engine"] == "daftra" for c in i["cands"])),
+              "exp": sum(1 for i in items if any(c["engine"] == "exp" for c in i["cands"])),
+              "founder": sum(1 for i in items if any(c["engine"] == "founder" for c in i["cands"])),
+              "hostaway": sum(1 for i in items if any(c["engine"] == "hostaway" for c in i["cands"])),
+              "none": sum(1 for i in items if not i["cands"])}
+    if engine in ("daftra", "exp", "founder", "hostaway"):
+        items = [i for i in items if any(c["engine"] == engine for c in i["cands"])]
+    elif engine == "none":
+        items = [i for i in items if not i["cands"]]
+    items.sort(key=lambda i: (-(i["cands"][0]["score"] if i["cands"] else -1), i["date"]), reverse=False)
+    total = len(items)
+    pages = max(1, (total + ps - 1) // ps)
+    page = min(page, pages)
+    return {"ok": True, "items": items[(page - 1) * ps: (page - 1) * ps + ps],
+            "total": total, "page": page, "pages": pages, "counts": counts,
+            "hostaway_cache": len(res_list)}
+
+
+def match_accept(request, body):
+    """Accept a non-Daftra candidate (Daftra accepts go through the delegated
+    dup endpoint so verification semantics stay identical)."""
+    x = B._fb_bank.get(str(body.get("id") or ""))
+    if not x:
+        return {"error": "txn_not_found"}, 404
+    engine = (body.get("engine") or "").strip()
+    key = str(body.get("key") or "")
+    now = datetime.now(B.TZ).isoformat(timespec="seconds")
+    who = actor(request)
+    if engine == "exp":
+        ex = B._expenses.get(key) or next(
+            (e for e in B._expenses.values() if str(e.get("id")) == key), None)
+        if not ex:
+            return {"error": "expense_not_found"}, 404
+        if ex.get("bank_txn_id") and ex.get("bank_txn_id") != x["id"]:
+            return {"error": "expense_already_matched",
+                    "message_ar": "هذا المصروف مرتبط بحركة بنك ثانية.",
+                    "message_en": "This expense is already matched to another bank txn."}, 409
+        x["match_status"] = "matched"
+        x["erp_match"] = {"engine": "exp", "key": str(ex.get("id")), "at": now, "by": who,
+                          "label": ex.get("concept") or "", "amount": str(ex.get("amount") or "")}
+        ex["bank_txn_id"] = x["id"]
+        ex["bank_match_at"] = now
+        B._save_json("expenses.json", B._expenses)
+    elif engine == "hostaway":
+        x["match_status"] = "matched"
+        x["erp_match"] = {"engine": "hostaway", "key": key, "at": now, "by": who,
+                          "label": body.get("label") or "", "approx": True}
+    elif engine == "founder":
+        flow = (body.get("flow") or "").strip()
+        if flow not in ("employee_advance_settlement", "cash_in_owner_fitout_funding",
+                        "cash_in_partner_funding"):
+            return {"error": "bad_flow"}, 400
+        x["daftra_flow_type"] = flow
+        x["flow_manual"] = True
+        if flow == "employee_advance_settlement":
+            if body.get("employee"):
+                x["custody_employee"] = str(body.get("employee"))[:80]
+            if (x.get("category") or "unknown") == "unknown":
+                x["category"] = "employee_card_settlement"
+        elif flow == "cash_in_owner_fitout_funding":
+            if (x.get("category") or "unknown") == "unknown":
+                x["category"] = "owner_fitout_funding"
+        else:
+            if (x.get("category") or "unknown") == "unknown":
+                x["category"] = "founder_funding"
+        if x.get("status") == "needs_review":
+            x["status"] = "reviewed"
+            x["reviewed_by"] = who
+            x["reviewed_at"] = now
+        x["match_status"] = "matched"
+        x["erp_match"] = {"engine": "founder", "key": key, "at": now, "by": who, "flow": flow}
+    else:
+        return {"error": "bad_engine"}, 400
+    B._fb_save("finance_bank_transactions.json", B._fb_bank)
+    B._fb_audit_add(who, "erp_match_accept", "bank", x["id"],
+                    after={"engine": engine, "key": key})
+    match_log_add(request, x["id"], engine, "accept",
+                  {"key": key, "suggested": body.get("suggested") or []})
+    return {"ok": True, "row": _bank_row(x), "counters": counters_snapshot()}, 200
+
+
+def match_reject(request, body):
+    """Dismiss an engine's candidates for this txn (it leaves that engine's queue)."""
+    x = B._fb_bank.get(str(body.get("id") or ""))
+    if not x:
+        return {"error": "txn_not_found"}, 404
+    engine = (body.get("engine") or "").strip()
+    if engine not in ("daftra", "exp", "founder", "hostaway"):
+        return {"error": "bad_engine"}, 400
+    dis = x.get(_DISMISS_KEY) or {}
+    dis[engine] = True
+    x[_DISMISS_KEY] = dis
+    B._fb_save("finance_bank_transactions.json", B._fb_bank)
+    match_log_add(request, x["id"], engine, "reject",
+                  {"suggested": body.get("suggested") or []})
+    return {"ok": True, "dismissed": dis, "counters": counters_snapshot()}, 200
+
+
 # ====================== Contracts linking (Setup) ======================
 
 def contracts_list():

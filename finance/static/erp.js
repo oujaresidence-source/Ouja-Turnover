@@ -94,7 +94,21 @@
       pr_overall: 'الدقة الإجمالية', pr_ground: 'أساس القياس: {n} حركة مصنّفة يدويًا',
       link_cc: 'اربط', linked_ok: 'انربط ✓', pick_cc: 'اختر مركز التكلفة…',
       all_linked: 'كل العقود مربوطة بمراكز تكلفة ✓', unlinked_n: '{n} بدون مركز تكلفة',
-      open_setup: 'افتح الإعدادات'
+      open_setup: 'افتح الإعدادات',
+      /* --- matching --- */
+      me_all: 'الكل', me_daftra: 'دافترة', me_exp: 'مصاريف', me_founder: 'مؤسس وبطاقات',
+      me_hostaway: 'Hostaway', me_none: 'بدون مرشح',
+      m_accept: 'اعتماد', m_reject: 'رفض', m_split: 'تقسيم', m_nocp: 'ما له مقابل',
+      m_kbd: '↑↓ تنقّل · ←→ اختيار مرشح · A اعتماد · R رفض · S تقسيم/تفاصيل · N ما له مقابل',
+      m_accepted: 'انربطت ✓', m_rejected: 'انشال الترشيح', m_promoted: 'انعمل قيد داخلي (مسودة) ✓',
+      m_empty: 'ما فيه حركات بدون مقابل — المطابقة خالصة ✓',
+      m_approx: 'تقريبي', m_score: 'تطابق',
+      m_drawer_title: 'قيود دافترة المقترحة', m_lines_sum: 'مجموع المحدد', m_txn_amt: 'مبلغ الحركة',
+      m_link_sel: 'اربط المحدد', m_not_dup: 'مو نفس القيد', m_ignore: 'تجاهل الحركة',
+      m_consumed: 'مستهلك', m_no_sugg: 'ما فيه قيود مقترحة لهالحركة',
+      m_promote_confirm: 'ينشئ قيد داخلي «مسودة» لهالحركة — يترحّل لدافترة فقط عبر الترحيل. متأكد؟',
+      m_blocked: 'محجوبة: ', m_decision_log: 'سجل القرارات',
+      m_sum_mismatch: 'المجموع لازم يساوي مبلغ الحركة'
     },
     en: {
       dir: 'ltr', app: 'Finance Center',
@@ -157,7 +171,20 @@
       pr_overall: 'Overall precision', pr_ground: 'Ground truth: {n} human-classified txns',
       link_cc: 'Link', linked_ok: 'Linked ✓', pick_cc: 'Pick a cost center…',
       all_linked: 'Every contract is linked to a cost center ✓', unlinked_n: '{n} without a cost center',
-      open_setup: 'Open Setup'
+      open_setup: 'Open Setup',
+      me_all: 'All', me_daftra: 'Daftra', me_exp: 'Expenses', me_founder: 'Founder & cards',
+      me_hostaway: 'Hostaway', me_none: 'No candidate',
+      m_accept: 'Accept', m_reject: 'Reject', m_split: 'Split', m_nocp: 'No counterpart',
+      m_kbd: '↑↓ move · ←→ pick candidate · A accept · R reject · S split/details · N no counterpart',
+      m_accepted: 'Matched ✓', m_rejected: 'Candidate dismissed', m_promoted: 'Internal DRAFT entry created ✓',
+      m_empty: 'Nothing unmatched — matching is done ✓',
+      m_approx: 'approx.', m_score: 'match',
+      m_drawer_title: 'Suggested Daftra journals', m_lines_sum: 'Selected total', m_txn_amt: 'Txn amount',
+      m_link_sel: 'Link selected', m_not_dup: 'Not the same entry', m_ignore: 'Ignore txn',
+      m_consumed: 'consumed', m_no_sugg: 'No suggested journals for this txn',
+      m_promote_confirm: 'Creates an internal DRAFT entry for this txn — it reaches Daftra only via migration. Sure?',
+      m_blocked: 'Blocked: ', m_decision_log: 'Decision log',
+      m_sum_mismatch: 'Selected lines must sum to the txn amount'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -200,7 +227,7 @@
   var WORKSPACES = [
     { id: 'today', built: true },
     { id: 'bank', built: true },
-    { id: 'match', slice: 4 },
+    { id: 'match', built: true },
     { id: 'exp', slice: 5 },
     { id: 'custody', slice: 5 },
     { id: 'owners', slice: 6 },
@@ -781,6 +808,43 @@
     rows[i].focus();
     rows[i].scrollIntoView({ block: 'nearest' });
   }
+  function focusedMatchItem() {
+    var a = document.activeElement;
+    return a && a.classList && a.classList.contains('mitem') ? a : null;
+  }
+  function moveMatchFocus(delta) {
+    var rows = $$('.mitem');
+    if (!rows.length) return;
+    var cur = focusedMatchItem();
+    var i = cur ? rows.indexOf(cur) + delta : 0;
+    if (i < 0) i = 0;
+    if (i >= rows.length) i = rows.length - 1;
+    rows[i].focus();
+    rows[i].scrollIntoView({ block: 'nearest' });
+  }
+  document.addEventListener('keydown', function (ev) {
+    if (store.view !== 'match') return;
+    var tag = (ev.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    var item = focusedMatchItem();
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); moveMatchFocus(1); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); moveMatchFocus(-1); }
+    else if (ev.key === 'Escape') { var drw = $('#mDrawer'); if (drw) { drw.hidden = true; drw.innerHTML = ''; } }
+    else if (item && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
+      ev.preventDefault();
+      var pills = $$('.cand', item);
+      if (!pills.length) return;
+      var cur = Number(item.getAttribute('data-sel') || 0);
+      var dirStep = (ev.key === 'ArrowRight' ? 1 : -1) * (store.lang === 'ar' ? -1 : 1);
+      var nxt = Math.max(0, Math.min(pills.length - 1, cur + dirStep));
+      item.setAttribute('data-sel', String(nxt));
+      pills.forEach(function (p, i) { p.classList.toggle('sel', i === nxt); });
+    }
+    else if (item && (ev.key === 'a' || ev.key === 'A' || ev.key === 'ش')) { ev.preventDefault(); matchAccept(item); }
+    else if (item && (ev.key === 'r' || ev.key === 'R' || ev.key === 'ق')) { ev.preventDefault(); matchReject(item); }
+    else if (item && (ev.key === 's' || ev.key === 'S' || ev.key === 'س')) { ev.preventDefault(); var md = matchItemData(item); if (md) openMatchDrawer(item, md); }
+    else if (item && (ev.key === 'n' || ev.key === 'N' || ev.key === 'ى')) { ev.preventDefault(); matchPromote(item); }
+  });
   document.addEventListener('keydown', function (ev) {
     if (store.view !== 'bank') return;
     var tag = (ev.target.tagName || '').toLowerCase();
@@ -920,6 +984,55 @@
         .then(function () { el.disabled = false; el.textContent = old; });
     }
 
+    /* --- matching --- */
+    else if (act === 'retry_match') loadMatch();
+    else if (act === 'm-filter') { matchP.engine = el.getAttribute('data-e'); matchP.p = 1; pushMatchHash(); }
+    else if (act === 'm-page') { var mp = Number(el.getAttribute('data-p')); if (mp >= 1) { matchP.p = mp; pushMatchHash(); } }
+    else if (act === 'm-pick') {
+      var item = el.closest('.mitem');
+      item.setAttribute('data-sel', String(el.getAttribute('data-idx')));
+      $$('.cand', item).forEach(function (c) { c.classList.remove('sel'); });
+      el.classList.add('sel');
+    }
+    else if (act === 'm-accept') matchAccept(el.closest('.mitem'));
+    else if (act === 'm-reject') matchReject(el.closest('.mitem'));
+    else if (act === 'm-promote') matchPromote(el.closest('.mitem'));
+    else if (act === 'm-drawer') { var mi = el.closest('.mitem'); var md = matchItemData(mi); if (md) openMatchDrawer(mi, md); }
+    else if (act === 'm-drawer-close') { var drw = $('#mDrawer'); drw.hidden = true; drw.innerHTML = ''; }
+    else if (act === 'm-link-sel') {
+      var sugg = el.closest('.dsugg');
+      var lids = $$('input[type=checkbox]:checked', sugg).map(function (c) { return c.getAttribute('data-lid'); });
+      if (!lids.length) { toast(t('m_sum_mismatch'), 'err'); return; }
+      el.disabled = true;
+      api('/erp/api/match/daftra', { method: 'POST', body: {
+        action: 'link_distributed', id: id,
+        daftra: { journal_id: sugg.getAttribute('data-eid'), line_ids: lids,
+                  journal_number: sugg.getAttribute('data-num'),
+                  confidence: Number(sugg.getAttribute('data-conf')) || 90 }
+      } }).then(function () {
+        var drw = $('#mDrawer'); drw.hidden = true; drw.innerHTML = '';
+        var item = document.querySelector('.mitem[data-id="' + id + '"]');
+        if (item) removeMatchItem(item, t('m_accepted'));
+      }).catch(function (e) {
+        el.disabled = false;
+        var b = e && e.body;
+        toast((b && (b.error_ar || b.error)) || srvMsg(e) || t('act_failed'), 'err');
+      });
+    }
+    else if (act === 'm-notdup' || act === 'm-ignore') {
+      el.disabled = true;
+      api('/erp/api/match/daftra', { method: 'POST', body: {
+        action: act === 'm-notdup' ? 'not_duplicate' : 'ignore', id: id, reason: ''
+      } }).then(function () {
+        var drw = $('#mDrawer'); drw.hidden = true; drw.innerHTML = '';
+        var item = document.querySelector('.mitem[data-id="' + id + '"]');
+        if (item) {
+          if (act === 'm-ignore') removeMatchItem(item, t('m_rejected'));
+          else { item.classList.remove('busy'); loadMatch(); }
+        }
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- setup --- */
     else if (act === 'retry_setup') loadSetup();
     else if (act === 'st-rule-toggle') {
@@ -995,6 +1108,10 @@
     }
     else if (el.id === 'bkFrom') { bankP.from = el.value; bankP.p = 1; pushBankHash(); }
     else if (el.id === 'bkTo') { bankP.to = el.value; bankP.p = 1; pushBankHash(); }
+    else if (el.matches && el.matches('.dln input[type=checkbox]')) {
+      var sg = el.closest('.dsugg');
+      if (sg) updateDrawerSum(sg);
+    }
   });
 
   document.addEventListener('input', (function () {
@@ -1031,6 +1148,258 @@
     var target = document.getElementById(nb.getAttribute('data-target'));
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+
+  /* ================= المطابقة Matching ================= */
+  var matchP = { engine: 'all', p: 1 };
+  var ENGINE_ICONS = { daftra: '📒', exp: '🧾', founder: '👤', hostaway: '🌐' };
+
+  function matchHash() {
+    var ps = new URLSearchParams();
+    if (matchP.engine !== 'all') ps.set('engine', matchP.engine);
+    if (matchP.p > 1) ps.set('p', String(matchP.p));
+    var qs = ps.toString();
+    return '#match' + (qs ? '?' + qs : '');
+  }
+  function pushMatchHash() {
+    var h = matchHash();
+    if (location.hash !== h) location.hash = h;
+    else loadMatch();
+  }
+
+  function candPill(c, idx, selected) {
+    var lbl = (store.lang === 'ar' ? c.label : (c.label_en || c.label)) || '';
+    var sub = (store.lang === 'ar' ? c.sub : (c.sub_en || c.sub)) || '';
+    return '<button class="cand' + (selected ? ' sel' : '') + '" data-act="m-pick" data-idx="' + idx + '">' +
+      '<span class="cand-eng">' + (ENGINE_ICONS[c.engine] || '') + '</span>' +
+      '<span class="cand-main"><b>' + esc(lbl) + '</b>' +
+      (sub ? '<i>' + esc(sub) + '</i>' : '') + '</span>' +
+      '<span class="cand-meta">' +
+        (c.amount ? '<code>' + fmtAmt(c.amount) + '</code>' : '') +
+        (c.date ? '<code>' + esc(c.date) + '</code>' : '') +
+        '<em class="cand-score">' + c.score + '%</em>' +
+        (c.approx ? '<em class="tag warnt">' + esc(t('m_approx')) + '</em>' : '') +
+      '</span></button>';
+  }
+
+  function matchItemHtml(it) {
+    var amtCls = it.dir === 'in' ? 'in' : 'out';
+    var cands = (it.cands || []).map(function (c, i) { return candPill(c, i, i === 0); }).join('');
+    return '<div class="mitem card" tabindex="0" data-id="' + esc(it.id) + '" data-sel="0">' +
+      '<div class="mi-head">' +
+        '<span class="amt ' + amtCls + '">' + (it.dir === 'in' ? '+' : '−') + fmtAmt(it.amount) + ' <i>' + esc(t('sar')) + '</i></span>' +
+        '<code>' + esc(it.date) + '</code>' +
+        '<span class="tag">' + esc(it.category) + '</span>' +
+        (it.card ? '<span class="tag">💳 ' + esc(it.card) + '</span>' : '') +
+      '</div>' +
+      '<div class="mi-desc">' + esc(it.desc) + '</div>' +
+      (cands ? '<div class="mi-cands">' + cands + '</div>' : '') +
+      '<div class="mi-actions">' +
+        (it.cands && it.cands.length
+          ? '<button class="btn primary sm" data-act="m-accept">' + esc(t('m_accept')) + ' <kbd>A</kbd></button>' +
+            '<button class="btn ghost sm" data-act="m-reject">' + esc(t('m_reject')) + ' <kbd>R</kbd></button>'
+          : '') +
+        '<button class="btn ghost sm" data-act="m-drawer">' + esc(t('m_split')) + ' <kbd>S</kbd></button>' +
+        '<button class="btn danger-ghost sm" data-act="m-promote">' + esc(t('m_nocp')) + ' <kbd>N</kbd></button>' +
+      '</div>' +
+      '<div class="mi-note" hidden></div>' +
+    '</div>';
+  }
+
+  function renderMatch(d) {
+    store.D.match = d;
+    var chips =
+      [['all', 'me_all', d.counts.all], ['daftra', 'me_daftra', d.counts.daftra],
+       ['exp', 'me_exp', d.counts.exp], ['founder', 'me_founder', d.counts.founder],
+       ['hostaway', 'me_hostaway', d.counts.hostaway], ['none', 'me_none', d.counts.none]]
+      .map(function (c) {
+        return '<button class="fchip' + (matchP.engine === c[0] ? ' on' : '') + '" data-act="m-filter" data-e="' + c[0] + '">' +
+          esc(t(c[1])) + ' <b>' + c[2] + '</b></button>';
+      }).join('');
+    var pager = '';
+    if (d.pages > 1) {
+      pager = '<div class="pager">' +
+        '<button class="btn ghost sm" data-act="m-page" data-p="' + (d.page - 1) + '"' + (d.page <= 1 ? ' disabled' : '') + '>‹</button>' +
+        '<span class="pg-info">' + esc(t('page')) + ' <b>' + d.page + '</b> ' + esc(t('of')) + ' ' + d.pages + ' · ' + d.total + '</span>' +
+        '<button class="btn ghost sm" data-act="m-page" data-p="' + (d.page + 1) + '"' + (d.page >= d.pages ? ' disabled' : '') + '>›</button></div>';
+    }
+    var body = d.items.length
+      ? d.items.map(matchItemHtml).join('') + pager
+      : '<div class="card state-card"><div class="state-ico ok">✓</div><div class="state-h">' + esc(t('m_empty')) + '</div></div>';
+    $('#view').innerHTML =
+      '<div class="card bank-bar"><div class="bb-chips" style="margin-top:0">' + chips + '</div>' +
+      '<div class="kbd-hint">' + esc(t('m_kbd')) + '</div></div>' + body +
+      '<div id="mDrawer" class="drawer" hidden></div>';
+    restoreScroll('match');
+  }
+
+  function loadMatch() {
+    $('#view').innerHTML = skeleton(6);
+    var ps = new URLSearchParams();
+    if (matchP.engine !== 'all') ps.set('engine', matchP.engine);
+    ps.set('p', String(matchP.p));
+    api('/erp/api/match?' + ps.toString()).then(renderMatch).catch(function (e) {
+      $('#view').innerHTML = errorCard('retry_match', srvMsg(e));
+    });
+  }
+
+  function matchItemData(el) {
+    var id = el.getAttribute('data-id');
+    var d = store.D.match;
+    if (!d) return null;
+    for (var i = 0; i < d.items.length; i++) if (d.items[i].id === id) return d.items[i];
+    return null;
+  }
+
+  function removeMatchItem(el, okMsg) {
+    var next = el.nextElementSibling;
+    el.classList.add('leaving');
+    setTimeout(function () {
+      el.remove();
+      if (next && next.classList && next.classList.contains('mitem')) next.focus();
+    }, 200);
+    if (okMsg) toast(okMsg);
+  }
+
+  function matchAccept(el) {
+    var it = matchItemData(el);
+    if (!it || !it.cands.length) return;
+    var idx = Number(el.getAttribute('data-sel') || 0);
+    var c = it.cands[Math.min(idx, it.cands.length - 1)];
+    if (c.engine === 'daftra') { daftraQuickLink(el, it); return; }
+    el.classList.add('busy');
+    api('/erp/api/match/accept', { method: 'POST', body: {
+      id: it.id, engine: c.engine, key: c.key, flow: c.flow || '', employee: c.employee || '',
+      label: c.label || '', suggested: it.cands
+    } }).then(function (r) {
+      patchCounters(r.counters);
+      removeMatchItem(el, t('m_accepted'));
+    }).catch(function (e) { el.classList.remove('busy'); toast(srvMsg(e) || t('act_failed'), 'err'); });
+  }
+
+  function daftraQuickLink(el, it) {
+    el.classList.add('busy');
+    api('/erp/api/match/daftra?txn=' + encodeURIComponent(it.id)).then(function (d) {
+      var s = (d.suggestions || [])[0];
+      if (!s) { el.classList.remove('busy'); openMatchDrawer(el, it); return; }
+      var body;
+      if (s.match_type === 'distributed_subset_match' && (s.selected_line_ids || []).length) {
+        body = { action: 'link_distributed', id: it.id,
+                 daftra: { journal_id: s.entry_id, line_ids: s.selected_line_ids,
+                           journal_number: s.number, confidence: s.confidence } };
+      } else {
+        body = { action: 'link', id: it.id,
+                 daftra: { source_type: 'journal_entry', id: s.entry_id } };
+      }
+      return api('/erp/api/match/daftra', { method: 'POST', body: body }).then(function () {
+        removeMatchItem(el, t('m_accepted'));
+      });
+    }).catch(function (e) {
+      el.classList.remove('busy');
+      var b = e && e.body;
+      toast((b && (b.error_ar || b.error)) || srvMsg(e) || t('act_failed'), 'err');
+    });
+  }
+
+  function matchReject(el) {
+    var it = matchItemData(el);
+    if (!it || !it.cands.length) return;
+    var idx = Number(el.getAttribute('data-sel') || 0);
+    var c = it.cands[Math.min(idx, it.cands.length - 1)];
+    el.classList.add('busy');
+    api('/erp/api/match/reject', { method: 'POST', body: { id: it.id, engine: c.engine, suggested: it.cands } })
+      .then(function (r) {
+        patchCounters(r.counters);
+        var remaining = it.cands.filter(function (x) { return x.engine !== c.engine; });
+        it.cands = remaining;
+        if (matchP.engine !== 'all' || !remaining.length) removeMatchItem(el, t('m_rejected'));
+        else {
+          el.classList.remove('busy');
+          el.setAttribute('data-sel', '0');
+          var box = el.querySelector('.mi-cands');
+          if (box) box.innerHTML = remaining.map(function (cc, i) { return candPill(cc, i, i === 0); }).join('');
+          toast(t('m_rejected'), 'warn');
+        }
+      })
+      .catch(function (e) { el.classList.remove('busy'); toast(srvMsg(e) || t('act_failed'), 'err'); });
+  }
+
+  function matchPromote(el) {
+    var it = matchItemData(el);
+    if (!it) return;
+    if (!window.confirm(t('m_promote_confirm'))) return;
+    el.classList.add('busy');
+    api('/erp/api/match/promote', { method: 'POST', body: { action: 'promote', id: it.id } })
+      .then(function () { removeMatchItem(el, t('m_promoted')); })
+      .catch(function (e) {
+        el.classList.remove('busy');
+        var b = e && e.body;
+        if (b && b.error === 'dup_blocked') {
+          var note = el.querySelector('.mi-note');
+          var msgs = (b.blockers || []).map(function (p) { return esc(store.lang === 'ar' ? p[0] : p[1]); }).join(' · ');
+          note.hidden = false;
+          note.innerHTML = '⚠️ ' + esc(t('m_blocked')) + msgs;
+        } else toast(srvMsg(e) || t('act_failed'), 'err');
+      });
+  }
+
+  /* ----- daftra drawer (details + split) ----- */
+  function openMatchDrawer(el, it) {
+    var dr = $('#mDrawer');
+    if (!dr) return;
+    dr.hidden = false;
+    dr.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('m_drawer_title')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="m-drawer-close">✕</button></div><div class="drawer-body">' + skeleton(3) + '</div></div>';
+    api('/erp/api/match/daftra?txn=' + encodeURIComponent(it.id)).then(function (d) {
+      var body = dr.querySelector('.drawer-body');
+      var amount = Number(it.amount);
+      if (!(d.suggestions || []).length) {
+        body.innerHTML = '<div class="state-sub">' + esc(t('m_no_sugg')) + '</div>' +
+          '<div class="cp-btns">' +
+          '<button class="btn ghost sm" data-act="m-notdup" data-id="' + esc(it.id) + '">' + esc(t('m_not_dup')) + '</button>' +
+          '<button class="btn danger-ghost sm" data-act="m-ignore" data-id="' + esc(it.id) + '">' + esc(t('m_ignore')) + '</button></div>';
+        return;
+      }
+      body.innerHTML = d.suggestions.slice(0, 5).map(function (s, si) {
+        var lines = (s.lines || []).map(function (ln, li) {
+          var amt = Number(ln.debit) > 0 ? ln.debit : ln.credit;
+          var pre = (s.selected_line_ids || []).indexOf(String(ln.line_id)) >= 0;
+          var consumed = ln.consumed || ln.fully_consumed;
+          return '<label class="dln' + (consumed ? ' consumed' : '') + '">' +
+            '<input type="checkbox" data-amt="' + esc(amt) + '" data-lid="' + esc(ln.line_id) + '"' +
+            (pre ? ' checked' : '') + (consumed ? ' disabled' : '') + '>' +
+            '<span class="dln-acc">' + esc(ln.account_name || '') + '</span>' +
+            '<span class="dln-desc">' + esc((ln.description || '').slice(0, 50)) + '</span>' +
+            '<code>' + fmtAmt(amt) + '</code>' +
+            (consumed ? '<em class="tag bad">' + esc(t('m_consumed')) + '</em>' : '') +
+          '</label>';
+        }).join('');
+        return '<div class="dsugg" data-eid="' + esc(s.entry_id) + '" data-num="' + esc(s.number || '') + '" data-conf="' + (s.confidence || 0) + '">' +
+          '<div class="dsugg-h"><b>#' + esc(s.number || s.entry_id) + '</b><code>' + esc(s.date || '') + '</code>' +
+          '<em class="cand-score">' + (s.confidence || 0) + '%</em>' +
+          '<span class="wq-sub">' + esc(store.lang === 'ar' ? (s.reason_ar || '') : (s.reason_en || '')) + '</span></div>' +
+          '<div class="wq-sub">' + esc((s.description || '').slice(0, 90)) + '</div>' +
+          '<div class="dlines">' + lines + '</div>' +
+          '<div class="dsum"><span>' + esc(t('m_lines_sum')) + ': <code class="dsum-val">0.00</code></span>' +
+          '<span>' + esc(t('m_txn_amt')) + ': <code>' + fmtAmt(amount) + '</code></span>' +
+          '<button class="btn primary sm" data-act="m-link-sel" data-id="' + esc(it.id) + '">' + esc(t('m_link_sel')) + '</button></div>' +
+        '</div>';
+      }).join('') +
+      '<div class="cp-btns" style="margin-top:14px">' +
+        '<button class="btn ghost sm" data-act="m-notdup" data-id="' + esc(it.id) + '">' + esc(t('m_not_dup')) + '</button>' +
+        '<button class="btn danger-ghost sm" data-act="m-ignore" data-id="' + esc(it.id) + '">' + esc(t('m_ignore')) + '</button>' +
+      '</div>';
+      $$('.dsugg', body).forEach(updateDrawerSum);
+    }).catch(function (e) {
+      dr.querySelector('.drawer-body').innerHTML = errorCard('m-drawer-noop', srvMsg(e));
+    });
+  }
+
+  function updateDrawerSum(sugg) {
+    var sum = 0;
+    $$('input[type=checkbox]:checked', sugg).forEach(function (c) { sum += Number(c.getAttribute('data-amt')) || 0; });
+    var out = sugg.querySelector('.dsum-val');
+    if (out) out.textContent = fmtAmt(sum);
+  }
 
   /* ================= الإعدادات Setup ================= */
   function ruleRowHtml(r, isAdmin) {
@@ -1125,6 +1494,13 @@
   var VIEWS = {
     today: { show: function () { loadToday(); } },
     setup: { show: function () { loadSetup(); } },
+    match: {
+      show: function (params) {
+        matchP.engine = params.get('engine') || 'all';
+        matchP.p = Math.max(1, Number(params.get('p') || 1));
+        loadMatch();
+      }
+    },
     bank: {
       show: function (params) {
         bankP.f = params.get('f') || 'all';
@@ -1152,6 +1528,7 @@
     if (store.view === 'today' && store.D.today) renderToday(store.D.today);
     else if (store.view === 'bank') { var ph = parseHash(); VIEWS.bank.show(ph.params); }
     else if (store.view === 'setup') loadSetup();
+    else if (store.view === 'match' && store.D.match) renderMatch(store.D.match);
   }
   $('#langBtn').addEventListener('click', function () {
     store.lang = store.lang === 'ar' ? 'en' : 'ar';

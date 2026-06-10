@@ -38,7 +38,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s3"
+ERP_VERSION = "2.0.0-s4"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -253,6 +253,65 @@ async def _h_api_rules_precision(request):
     return api.jres(api.rules_precision())
 
 
+async def _h_api_match(request):
+    # candidate scoring scans stores and may touch the Hostaway reservation
+    # cache (cold cache = one HTTP pull) — keep it off the event loop.
+    data = await asyncio.to_thread(api.match_queue, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_match_accept(request):
+    data, status = api.match_accept(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_match_reject(request):
+    data, status = api.match_reject(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_match_daftra(request):
+    """Delegate to the existing dup machinery (suggestions / journal lines /
+    link / link_distributed / not_duplicate / ignore) so verification semantics
+    stay byte-identical — then append to the v2 decision log on writes."""
+    resp = await api.B._api_fb_daftra_dup(request)
+    if request.method == "POST" and resp.status == 200:
+        try:
+            body = await request.json()
+            payload = json.loads(resp.body)
+            if payload.get("ok") and body.get("action") in (
+                    "link", "link_distributed", "not_duplicate", "ignore"):
+                api.match_log_add(request, str(body.get("id") or ""), "daftra",
+                                  body.get("action"), {"daftra": body.get("daftra"),
+                                                       "reason": body.get("reason") or ""})
+        except Exception:
+            pass
+    return resp
+
+
+async def _h_api_match_promote(request):
+    """«ما له مقابل» — create the missing side as a canonical ledger entry
+    (becomes a DRAFT Daftra journal; posts only via migration). Delegates to
+    the existing promote action with its dup-shield guard intact."""
+    body = await _json_body(request)
+    if body.get("action") != "promote":
+        return api.jres({"error": "only_promote_allowed"}, 400)
+    resp = await api.B._api_fb_entry(request)
+    if resp.status == 200:
+        try:
+            payload = json.loads(resp.body)
+            if payload.get("ok"):
+                api.match_log_add(request, str(body.get("id") or ""), "ledger", "promote",
+                                  {"entry": (payload.get("entry") or {}).get("id")})
+        except Exception:
+            pass
+    return resp
+
+
+async def _h_api_match_log(request):
+    return api.jres({"ok": True, "log": api.match_log_recent()})
+
+
 async def _h_api_contracts(request):
     return api.jres(api.contracts_list())
 
@@ -282,5 +341,12 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/rules/precision", _guarded(_h_api_rules_precision))
     app.router.add_get("/erp/api/contracts", _guarded(_h_api_contracts))
     app.router.add_post("/erp/api/contracts/link", _guarded(_h_api_contract_link, write=True))
+    app.router.add_get("/erp/api/match", _guarded(_h_api_match))
+    app.router.add_post("/erp/api/match/accept", _guarded(_h_api_match_accept, write=True))
+    app.router.add_post("/erp/api/match/reject", _guarded(_h_api_match_reject, write=True))
+    app.router.add_get("/erp/api/match/daftra", _guarded(_h_api_match_daftra))
+    app.router.add_post("/erp/api/match/daftra", _guarded(_h_api_match_daftra, write=True))
+    app.router.add_post("/erp/api/match/promote", _guarded(_h_api_match_promote, write=True))
+    app.router.add_get("/erp/api/match/log", _guarded(_h_api_match_log))
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True
