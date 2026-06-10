@@ -66,7 +66,10 @@ Behavior flags:
 4. **Reservation history pagination truncates (~6,000 rows).** Counting current occupancy
    from the full history undercounts in-house stays. For "tonight"/occupancy, use a
    **targeted Hostaway query** that filters by arrival/departure date window
-   (`fetch_inhouse`) rather than scanning all history.
+   (`fetch_inhouse`) rather than scanning all history. **Owner statements/financial
+   reports must use `fetch_reservations_window(start, end)` — NEVER
+   `get_reservations_cached()`** (the truncation silently dropped the newest months and
+   produced a wrong owner statement: the 18,842-instead-of-48,114 bug, fixed 2026-06-10).
 5. **Editing this huge file is error-prone.** Make minimal, targeted edits. After ANY edit,
    re-view the surrounding code before the next edit (don't edit from stale memory).
 
