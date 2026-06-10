@@ -134,7 +134,18 @@
       c_outstanding: 'القائم', c_entries: 'قيود',
       c_total: 'إجمالي القائم', c_open: 'عهد مفتوحة', c_done: 'مكتملة ✓',
       c_empty: 'ما فيه حسابات عهد في قيود دافترة المستوردة',
-      c_settle_cta: 'طابق تسويات البنك (مؤسس وبطاقات)'
+      c_settle_cta: 'طابق تسويات البنك (مؤسس وبطاقات)',
+      /* --- owners --- */
+      o_title: 'الملاك — كشوفات وروابط',
+      o_hint: 'لكل مالك رابط واحد لكل وحداته — يفتح الكشف الحي بدون تسجيل دخول',
+      o_units: 'وحدة', o_no_link: 'ما انعمل رابط', o_active: 'نشط', o_revoked: 'موقوف',
+      o_opens: 'فتحات', o_last_open: 'آخر فتح', o_never: 'ما انفتح بعد',
+      o_copy: 'نسخ الرابط', o_copied: 'انتسخ ✓', o_preview: 'معاينة كمالك',
+      o_regen: 'تجديد الرابط', o_revoke: 'إيقاف', o_create: 'إنشاء رابط',
+      o_regen_confirm: 'تجديد الرابط يقتل الرابط القديم نهائيًا — المالك يحتاج الرابط الجديد. نكمل؟',
+      o_revoke_confirm: 'إيقاف الرابط يمنع المالك من فتح كشفه. نكمل؟',
+      o_done: 'تم ✓', o_empty: 'ما فيه ملاك في السجل — أضفهم من كشوفات الملاك',
+      o_mgmt: 'نسبة الإدارة'
     },
     en: {
       dir: 'ltr', app: 'Finance Center',
@@ -234,7 +245,17 @@
       c_outstanding: 'Outstanding', c_entries: 'Entries',
       c_total: 'Total outstanding', c_open: 'open advances', c_done: 'Settled ✓',
       c_empty: 'No custody accounts in the imported Daftra journals',
-      c_settle_cta: 'Match bank settlements (founder & cards)'
+      c_settle_cta: 'Match bank settlements (founder & cards)',
+      o_title: 'Owners — statements & links',
+      o_hint: 'One link per owner for all their units — opens the live statement without a login',
+      o_units: 'units', o_no_link: 'No link yet', o_active: 'Active', o_revoked: 'Revoked',
+      o_opens: 'opens', o_last_open: 'Last open', o_never: 'Never opened',
+      o_copy: 'Copy link', o_copied: 'Copied ✓', o_preview: 'Preview as owner',
+      o_regen: 'Regenerate', o_revoke: 'Revoke', o_create: 'Create link',
+      o_regen_confirm: 'Regenerating kills the old link permanently — the owner needs the new one. Continue?',
+      o_revoke_confirm: 'Revoking blocks the owner from opening their statement. Continue?',
+      o_done: 'Done ✓', o_empty: 'No owners in the registry — add them from owner statements',
+      o_mgmt: 'Mgmt %'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -280,7 +301,7 @@
     { id: 'match', built: true },
     { id: 'exp', built: true },
     { id: 'custody', built: true },
-    { id: 'owners', slice: 6 },
+    { id: 'owners', built: true },
     { id: 'close', slice: 7 },
     { id: 'stmts', slice: 7 },
     { id: 'budget', slice: 7 },
@@ -1166,6 +1187,34 @@
     /* --- custody --- */
     else if (act === 'retry_custody') loadCustody();
 
+    /* --- owners --- */
+    else if (act === 'retry_owners') loadOwners();
+    else if (act === 'o-copy') {
+      var absUrl = location.origin + el.getAttribute('data-url');
+      (navigator.clipboard && navigator.clipboard.writeText
+        ? navigator.clipboard.writeText(absUrl)
+        : Promise.reject()
+      ).then(function () { toast(t('o_copied')); })
+       .catch(function () { window.prompt('URL', absUrl); });
+    }
+    else if (act === 'o-create') {
+      el.disabled = true;
+      ownerLinkAct(el.getAttribute('data-owner'), 'create')
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'o-regen') {
+      if (!window.confirm(t('o_regen_confirm'))) return;
+      el.disabled = true;
+      ownerLinkAct(el.getAttribute('data-owner'), 'regenerate')
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'o-revoke') {
+      if (!window.confirm(t('o_revoke_confirm'))) return;
+      el.disabled = true;
+      ownerLinkAct(el.getAttribute('data-owner'), 'revoke')
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- setup --- */
     else if (act === 'retry_setup') loadSetup();
     else if (act === 'st-rule-toggle') {
@@ -1762,6 +1811,67 @@
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_custody', srvMsg(e)); });
   }
 
+  /* ================= الملاك Owners ================= */
+  function ownerRowHtml(r) {
+    var lk = r.link || {};
+    var state = !lk.exists ? '<span class="tag">' + esc(t('o_no_link')) + '</span>'
+      : lk.active ? '<span class="tag soft">' + esc(t('o_active')) + '</span>'
+                  : '<span class="tag bad">' + esc(t('o_revoked')) + '</span>';
+    var opened = lk.opened_at
+      ? esc(t('o_last_open')) + ': <code>' + esc(lk.opened_at.slice(0, 16)) + '</code> · ' + lk.opens + ' ' + esc(t('o_opens'))
+      : esc(t('o_never'));
+    var acts = '';
+    if (lk.exists && lk.active) {
+      acts = '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
+        '<a class="btn ghost xs" href="' + esc(lk.url) + '" target="_blank" rel="noopener">' + esc(t('o_preview')) + '</a>' +
+        '<button class="btn ghost xs" data-act="o-regen" data-owner="' + esc(r.owner) + '">' + esc(t('o_regen')) + '</button>' +
+        '<button class="btn danger-ghost xs" data-act="o-revoke" data-owner="' + esc(r.owner) + '">' + esc(t('o_revoke')) + '</button>';
+    } else {
+      acts = '<button class="btn primary xs" data-act="o-create" data-owner="' + esc(r.owner) + '">' + esc(t('o_create')) + '</button>';
+    }
+    var mgmt = (r.mgmt_pct === null || r.mgmt_pct === undefined) ? ''
+      : '<span class="tag">' + esc(t('o_mgmt')) + ' ' + esc(Array.isArray(r.mgmt_pct) ? r.mgmt_pct.join('/') : r.mgmt_pct) + '%</span>';
+    return '<div class="wq-row" id="ow_' + esc(r.owner) + '">' +
+      '<div class="wq-main"><div class="wq-top"><b>' + esc(r.owner) + '</b>' +
+      '<span class="tag soft">' + r.units + ' ' + esc(t('o_units')) + '</span>' + mgmt + state + '</div>' +
+      '<div class="wq-sub">' + esc((r.apartments || []).join(' · ')) + '</div>' +
+      '<div class="wq-sub">' + opened + '</div></div>' +
+      '<div class="wq-actions">' + acts + '</div></div>';
+  }
+
+  function renderOwners(d) {
+    store.D.owners = d;
+    $('#view').innerHTML =
+      '<section class="card grp">' +
+        '<header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('o_title')) + '</h2>' +
+        '<span class="cnt">' + (d.total || 0) + '</span></header>' +
+        '<div class="grp-hint">' + esc(t('o_hint')) + '</div>' +
+        '<div class="grp-list">' +
+        ((d.rows || []).length ? d.rows.map(ownerRowHtml).join('')
+          : '<div class="state-card"><div class="state-h">' + esc(t('o_empty')) + '</div></div>') +
+        '</div></section>';
+    restoreScroll('owners');
+  }
+
+  function loadOwners() {
+    $('#view').innerHTML = skeleton(5);
+    api('/erp/api/owners').then(function (d) { renderOwners(d); })
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+  }
+
+  function ownerLinkAct(owner, action) {
+    return api('/erp/api/owners/link', { method: 'POST', body: { owner: owner, action: action } })
+      .then(function () { return api('/erp/api/owners'); })
+      .then(function (d) {
+        store.D.owners = d;
+        var fresh = null;
+        (d.rows || []).forEach(function (r) { if (r.owner === owner) fresh = r; });
+        var rowEl = document.getElementById('ow_' + owner);
+        if (rowEl && fresh) rowEl.outerHTML = ownerRowHtml(fresh);
+        toast(t('o_done'));
+      });
+  }
+
   /* ================= الإعدادات Setup ================= */
   function ruleRowHtml(r, isAdmin) {
     var m = r.matcher || {};
@@ -1871,6 +1981,7 @@
       }
     },
     custody: { show: function () { loadCustody(); } },
+    owners: { show: function () { loadOwners(); } },
     bank: {
       show: function (params) {
         bankP.f = params.get('f') || 'all';
@@ -1901,6 +2012,7 @@
     else if (store.view === 'match' && store.D.match) renderMatch(store.D.match);
     else if (store.view === 'exp' && store.D.exp) renderExp(store.D.exp);
     else if (store.view === 'custody' && store.D.custody) renderCustody(store.D.custody);
+    else if (store.view === 'owners' && store.D.owners) renderOwners(store.D.owners);
   }
   $('#langBtn').addEventListener('click', function () {
     store.lang = store.lang === 'ar' ? 'en' : 'ar';

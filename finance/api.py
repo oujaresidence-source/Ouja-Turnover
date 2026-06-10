@@ -970,6 +970,54 @@ def custody_payload():
     return {"ok": True, **B._fb_custody_balances()}
 
 
+# ====================== الملاك Owners (Slice 6) ======================
+
+def _registry_rows():
+    reg = getattr(B, "_owner_registry", None) or {}
+    return list(reg.values()) if isinstance(reg, dict) else list(reg)
+
+
+def owner_apartments(owner):
+    """(apartment names, listing ids) belonging to one owner — the receipt-proxy scope."""
+    apts, lids = set(), set()
+    for r in _registry_rows():
+        if (r.get("owner") or "").strip() == (owner or "").strip():
+            if (r.get("apartment") or "").strip():
+                apts.add(r.get("apartment").strip())
+            if r.get("lid") not in (None, ""):
+                lids.add(str(r.get("lid")))
+    return apts, lids
+
+
+def owners_payload():
+    """Faisal's owners list: units + link state (آخر فتح، عدد الفتحات) per owner."""
+    by_owner = {}
+    for r in _registry_rows():
+        o = (r.get("owner") or "").strip()
+        if not o:
+            continue
+        d = by_owner.setdefault(o, {"owner": o, "apartments": [], "mgmt_pcts": set()})
+        if (r.get("apartment") or "").strip():
+            d["apartments"].append(r.get("apartment").strip())
+        if r.get("mgmt_pct") is not None:
+            d["mgmt_pcts"].add(float(r.get("mgmt_pct")))
+    links = getattr(B, "_owner_links", None) or {}
+    rows = []
+    for o, d in sorted(by_owner.items()):
+        lk = links.get(o) or {}
+        rows.append({"owner": o, "units": len(d["apartments"]),
+                     "apartments": sorted(d["apartments"])[:12],
+                     "mgmt_pct": (sorted(d["mgmt_pcts"])[0] if len(d["mgmt_pcts"]) == 1
+                                  else (list(sorted(d["mgmt_pcts"])) or None)),
+                     "link": {"exists": bool(lk.get("token")),
+                              "active": bool(lk.get("active")),
+                              "url": ("/fin/o/" + lk["token"]) if lk.get("token") else "",
+                              "created_at": lk.get("created_at") or "",
+                              "opened_at": lk.get("opened_at") or "",
+                              "opens": int(lk.get("opens") or 0)}})
+    return {"ok": True, "rows": rows, "total": len(rows)}
+
+
 # ====================== Contracts linking (Setup) ======================
 
 def contracts_list():

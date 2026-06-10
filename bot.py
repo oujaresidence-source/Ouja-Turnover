@@ -27070,6 +27070,23 @@ async def _handle_owner_portal(request):
         mkey = datetime.now(TZ).date().isoformat()[:7]
     data = await asyncio.to_thread(_owner_portal_data, owner, mkey)
     _owner_link_touch(owner)
+    # ERP v2 (finance/): receipts open through the owner-scoped proxy so Drive
+    # sharing settings never break them. Rewrite ONLY rows whose expense id
+    # resolves locally; anything else keeps its original link (no dead links).
+    try:
+        _tok = request.match_info.get("token", "")
+        def _rw_receipts(o):
+            if isinstance(o, dict):
+                if o.get("receipt_url") and str(o.get("id")) in _expenses:
+                    o["receipt_url"] = "/fin/receipt/" + str(o["id"]) + "?t=" + _tok
+                for _v in o.values():
+                    _rw_receipts(_v)
+            elif isinstance(o, list):
+                for _v in o:
+                    _rw_receipts(_v)
+        _rw_receipts(data)
+    except Exception:
+        pass
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/") if data else "null"
     return web.Response(text=OWNER_PORTAL_HTML.replace("/*__OWNER_DATA__*/null", blob),
                         content_type="text/html")

@@ -38,7 +38,7 @@ from . import api
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.0.0-s5"
+ERP_VERSION = "2.0.0-s6"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -346,6 +346,87 @@ async def _h_api_custody(request):
     return api.jres(api.custody_payload())
 
 
+async def _h_api_owners(request):
+    return api.jres(api.owners_payload())
+
+
+async def _h_api_owners_link(request):
+    # Delegate to the existing owner-link manager (finance-write gated inside;
+    # create/regenerate/revoke + full audit live there).
+    return await api.B._api_finance_owner_link(request)
+
+
+# ---------- /fin/receipt/{expense_id}?t=<owner_token> — the receipt PROXY ----------
+# PUBLIC route (owners hold no dashboard session). The owner token IS the auth;
+# scope = that owner's apartments only. Fetches the file through the existing
+# Google Drive service account so the guest's sharing settings never break it.
+# Missing receipt → an honest «بدون فاتورة مرفقة» page — never a dead link.
+
+_RECEIPT_NOTE_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>عوجا — الفاتورة</title><style>body{margin:0;font-family:'IBM Plex Sans Arabic','Tajawal',system-ui,sans-serif;
+background:#F7F1E6;color:#2F241B;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{background:#FFFDF8;border:1px solid #E5D8C4;border-radius:14px;padding:36px 40px;max-width:400px;text-align:center}
+h1{font-size:17px;margin:0 0 8px}p{font-size:13.5px;color:#7A6A58;line-height:1.9;margin:0}</style></head>
+<body><div class="c"><h1>__T__</h1><p>__P__</p></div></body></html>"""
+
+
+def _receipt_note(title, sub, status=200):
+    return web.Response(text=_RECEIPT_NOTE_HTML.replace("__T__", title).replace("__P__", sub),
+                        content_type="text/html", status=status)
+
+
+async def _h_receipt_proxy(request):
+    B = api.B
+    token = (request.query.get("t") or "").strip()
+    eid = (request.match_info.get("expense_id") or "").strip()
+    try:
+        owner = B._owner_by_token(token) if token else None
+    except Exception:
+        owner = None
+    if not owner:
+        return _receipt_note("هالرابط محمي 🔒", "افتح الفاتورة من داخل كشف حسابك.", 403)
+    ex = B._expenses.get(eid) or next(
+        (e for e in B._expenses.values() if str(e.get("id")) == eid), None)
+    if not ex:
+        return _receipt_note("بدون فاتورة مرفقة", "ما لقينا هالمصروف في السجل.", 404)
+    apts, lids = api.owner_apartments(owner)
+    if not (((ex.get("apartment") or "").strip() in apts)
+            or (str(ex.get("listing_id") or "") in lids)):
+        return _receipt_note("هالرابط محمي 🔒", "الفاتورة تخص شقة خارج حسابك.", 403)
+    link = ex.get("receipt_link") or ""
+    import re as _re
+    m = _re.search(r"[-\w]{25,}", link)
+    if not m:
+        return _receipt_note("بدون فاتورة مرفقة", "هالمصروف انسجّل بدون فاتورة.")
+
+    file_id = m.group(0)
+
+    def _download():
+        svc = B._cleanproof_get_drive_service()
+        if not svc:
+            return None, None
+        import io as _io
+        from googleapiclient.http import MediaIoBaseDownload
+        meta = svc.files().get(fileId=file_id, fields="mimeType,name").execute()
+        buf = _io.BytesIO()
+        dn = MediaIoBaseDownload(buf, svc.files().get_media(fileId=file_id))
+        done = False
+        while not done:
+            _, done = dn.next_chunk()
+        return buf.getvalue(), (meta.get("mimeType") or "application/octet-stream")
+
+    try:
+        data, mime = await asyncio.to_thread(_download)
+    except Exception:
+        data, mime = None, None
+    if not data:
+        return _receipt_note("تعذّر جلب الفاتورة الحين", "حاول بعد دقيقة — أو كلمنا ونرسلها لك مباشرة.")
+    return web.Response(body=data, content_type=mime,
+                        headers={"Cache-Control": "private, max-age=600",
+                                 "X-Robots-Tag": "noindex"})
+
+
 async def _h_api_contracts(request):
     return api.jres(api.contracts_list())
 
@@ -390,5 +471,9 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/exp/export", _guarded(_exp_delegate("_api_exp4_export"), write=True))
     app.router.add_post("/erp/api/exp/recheck", _guarded(_exp_delegate("_api_exp4_recheck"), write=True))
     app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
+    app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
+    app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
+    app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
+    app.router.add_get("/fin/receipt/{expense_id}", _h_receipt_proxy)   # owner-token scoped (public route)
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True
