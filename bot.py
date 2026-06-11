@@ -24421,12 +24421,24 @@ def _month_bounds(mkey):
 # 13-month rebuild from Hostaway took minutes, and every deploy made owners'
 # links crawl. TTL semantics are unchanged (15 min current month / 6 h closed,
 # enforced from the original build ts); busts delete persisted entries too.
+#
+# v2.2.4: BUMP THIS whenever the statement money rules change (compute_owner_report
+# classification, fee rules, …). Persisted reports from an older rule set are
+# DROPPED at boot — the April bug: after the v2.2.3 policy change the owner page
+# kept serving pre-policy numbers from the persisted cache while the editor
+# computed fresh ones. A deploy with a rules bump = a full clean rebuild.
+_MONEY_RULES_VERSION = 3        # 3 = cancelled reservations never auto-count (v2.2.3)
+
 def _owner_portal_cache_load():
     out = {}
     try:
         raw = _load_json("owner_portal_cache.json", {}) or {}
+        if raw.get("rules") != _MONEY_RULES_VERSION:
+            if raw:
+                print("owner portal cache: rules version changed — starting clean")
+            return out
         now = time.time()
-        for k, v in raw.items():
+        for k, v in (raw.get("entries") or {}).items():
             if not isinstance(v, dict) or v.get("rep") is None:
                 continue
             ts = float(v.get("ts") or 0)
@@ -24454,7 +24466,9 @@ def _owner_portal_cache_save(force=False):
         st["ts"] = now
         try:
             _save_json("owner_portal_cache.json",
-                       {"%s|%s" % k: {"rep": v[0], "ts": v[1]} for k, v in _owner_portal_cache.items()})
+                       {"rules": _MONEY_RULES_VERSION,
+                        "entries": {"%s|%s" % k: {"rep": v[0], "ts": v[1]}
+                                    for k, v in _owner_portal_cache.items()}})
         except Exception as e:
             print("owner portal cache save error:", e)
 
