@@ -43307,6 +43307,1258 @@ async def on_message(message):
         except Exception:
             pass
 
+# ====================================================================
+#  DISCORD TICKETS — native ticketing for صيانة (maintenance) + RR
+#  (reimbursement requests). Replaces the third-party Ticket Tool bot.
+#
+#  Maintenance: panel button → apartment/priority/category pickers →
+#  modal (summary + details) → a private ticket channel under the
+#  «صيانه» category with an info card, the responsible employee pinged
+#  (per-apartment map, Excel-importable), and a LIVE «فحص الإشغال»
+#  button that asks Hostaway who's in the unit right now / today /
+#  tomorrow / last checkout / next check-in + the safe work window.
+#  Every Discord ticket ALSO lands in the dashboard's _tickets tracker.
+#
+#  RR: panel button → issue-type + evidence pickers → modal (reservation
+#  code, date discovered, Arabic story, itemized claim, total) → channel
+#  under «RR» with the Arabic record + a Claude-written ENGLISH «RR
+#  TICKET» (deterministic template; the model only translates) for the
+#  English-only back office, enriched from Hostaway (guest/stay/channel
+#  + the 14-day AirCover filing deadline).
+# ====================================================================
+MAINT_CATEGORY       = os.environ.get("MAINT_CATEGORY", "صيانه")
+RR_CATEGORY          = os.environ.get("RR_CATEGORY", "RR")
+MAINT_PANEL_CHANNEL  = os.environ.get("MAINT_PANEL_CHANNEL", "فتح-تذكرة-صيانة")
+RR_PANEL_CHANNEL     = os.environ.get("RR_PANEL_CHANNEL", "فتح-تذكرة-rr")
+MAINT_URGENT_ROLE_ID = int(os.environ.get("MAINT_URGENT_ROLE_ID", "0") or 0)
+RR_MODEL             = os.environ.get("RR_MODEL", "")   # empty → premium model
+
+_dtk_lock = threading.Lock()
+_dtk = _load_json("discord_tickets.json", None)
+if not isinstance(_dtk, dict):
+    _dtk = {}
+_dtk.setdefault("panels", {})    # kind -> {channel_id, message_id}
+_dtk.setdefault("tickets", {})   # str(channel_id) -> ticket record
+
+def _dtk_save():
+    with _dtk_lock:
+        _save_json("discord_tickets.json", _dtk)
+
+_maint_assign = _load_json("maint_assign.json", None)
+if not isinstance(_maint_assign, dict):
+    _maint_assign = {}
+_maint_assign.setdefault("by_lid", {})   # str(lid) -> {name, discord_id}
+_maint_assign.setdefault("default", None)
+
+def _maint_assign_save():
+    _save_json("maint_assign.json", _maint_assign)
+
+def maint_assignee_for(lid):
+    """(name, discord_id) for the employee responsible for this apartment."""
+    rec = _maint_assign["by_lid"].get(str(lid)) or _maint_assign.get("default") or {}
+    return (rec.get("name") or None, rec.get("discord_id") or None)
+
+def _tk_mention(name, did):
+    if did:
+        return f"<@{int(did)}>" + (f" ({name})" if name else "")
+    if name:
+        return f"**{name}**"
+    return "⚠️ ما فيه مسؤول معيّن لهذي الشقة — اربطه بـ `!ouja صيانة-تعيينات`"
+
+def _tk_unit_name(lid):
+    try:
+        rec = _ls_get()["listings"].get(str(int(lid))) or {}
+        nm = rec.get("internal_name") or rec.get("public_name")
+        if nm:
+            return nm
+    except Exception:
+        pass
+    try:
+        return (get_listings_map() or {}).get(lid) or f"unit-{lid}"
+    except Exception:
+        return f"unit-{lid}"
+
+def _tk_listings():
+    """Active apartments [(lid, name)] sorted by name — the dropdown source."""
+    out = []
+    try:
+        for k, rec in _ls_get()["listings"].items():
+            if not rec.get("active", True):
+                continue
+            try:
+                lid = int(k)
+            except (TypeError, ValueError):
+                continue
+            nm = (rec.get("internal_name") or rec.get("public_name") or f"unit-{lid}").strip()
+            out.append((lid, nm))
+    except Exception as e:
+        print("tickets: listings store read error:", e)
+    if not out:
+        try:
+            out = list((get_listings_map() or {}).items())
+        except Exception:
+            out = []
+    out.sort(key=lambda x: (x[1] or "").lower())
+    return out
+
+def _tk_norm_name(s):
+    """Loose apartment-name key: drop the brand, pipes, dashes, extra spaces."""
+    s = str(s or "").lower().strip()
+    s = s.replace("ouja", "").replace("عوجا", "").replace("|", " ")
+    s = re.sub(r"[\s\-_·.]+", " ", s).strip()
+    return s
+
+def _tk_find_listings(query):
+    """Apartments matching a free-text search — exact normalized hit wins."""
+    qn = _tk_norm_name(query)
+    if not qn:
+        return []
+    exact, partial = [], []
+    for lid, nm in _tk_listings():
+        n = _tk_norm_name(nm)
+        if n == qn:
+            exact.append((lid, nm))
+        elif qn in n or n in qn:
+            partial.append((lid, nm))
+    return exact or partial
+
+_AR_DIGIT_MAP = str.maketrans({"٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+                               "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+                               "٫": ".", "٬": ""})
+
+def _tk_num(s):
+    """Parse a SAR amount the team typed — Arabic-Indic digits, ر.س, commas all OK."""
+    s = str(s or "").translate(_AR_DIGIT_MAP).replace(",", "")
+    s = re.sub(r"[^0-9.]", "", s)
+    if not s or s == ".":
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+def _tk_sar(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return f"{f:,.0f}" if abs(f - round(f)) < 0.005 else f"{f:,.2f}"
+
+def _tk_fmt_d(d):
+    if not d:
+        return "—"
+    return f"{ARABIC_DAYS[d.weekday()]} {d.day}/{d.month}/{d.year}"
+
+def _tk_rec_for(channel):
+    """The ticket record for a channel; falls back to the topic tag if the
+    store was lost, so the buttons keep working."""
+    rec = _dtk["tickets"].get(str(channel.id))
+    if rec:
+        return rec
+    topic = getattr(channel, "topic", "") or ""
+    m = re.search(r"ouja-ticket:(\w+)\s+lid:(\d+)", topic)
+    if m:
+        return {"kind": m.group(1), "lid": int(m.group(2)), "_volatile": True}
+    return None
+
+def _dash_ticket(tid):
+    if not tid:
+        return None
+    return next((t for t in _tickets if t.get("id") == tid), None)
+
+_tk_bg_tasks = set()
+
+def _tk_spawn(coro):
+    """create_task + a strong reference — the loop only keeps weak refs, so an
+    unreferenced background task can be garbage-collected mid-flight."""
+    t = asyncio.create_task(coro)
+    _tk_bg_tasks.add(t)
+    t.add_done_callback(_tk_bg_tasks.discard)
+    return t
+
+def _tk_cat_norm(s):
+    return str(s or "").strip().lower().replace("ة", "ه")
+
+async def _tk_category(guild, kind):
+    """The صيانه / RR category (created on first use; صيانة spelling matches too)."""
+    want_name = MAINT_CATEGORY if kind == "maint" else RR_CATEGORY
+    want = _tk_cat_norm(want_name)
+    for cat in guild.categories:
+        if _tk_cat_norm(cat.name) == want:
+            return cat
+    return await guild.create_category(want_name)
+
+# ---------------- live occupancy check (the «فحص الإشغال» button) ----------------
+def _avail_rows(lid, today):
+    """FRESH targeted pull of one listing's reservations around today (the button
+    promises the truth at press-time, not a 15-min-old cache). Falls back to the
+    cached window on error; returns None when Hostaway is fully unreachable."""
+    lid = int(lid)
+    try:
+        rows, offset = [], 0
+        for _ in range(5):
+            data = api_get("/reservations", params={
+                "listingMapId": lid,
+                "arrivalStartDate": (today - timedelta(days=120)).isoformat(),
+                "arrivalEndDate": (today + timedelta(days=60)).isoformat(),
+                "limit": 200, "offset": offset})
+            batch = data.get("result", []) or []
+            rows.extend(batch)
+            if len(batch) < 200:
+                break
+            offset += 200
+        return [r for r in rows if r.get("listingMapId") == lid]
+    except Exception as e:
+        print(f"avail fetch error ({lid}):", e)
+        try:
+            rows = fetch_reservations_window(today - timedelta(days=60),
+                                             today + timedelta(days=60))
+            return [r for r in rows if r.get("listingMapId") == lid]
+        except Exception:
+            return None
+
+def _avail_classify(rows, lid, today):
+    """Pure occupancy classifier for ONE listing (synthetic-testable, no I/O).
+    Confirmed stays only — cancelled rows never count (the v2.2.3 policy)."""
+    stays = []
+    for r in rows or []:
+        if r.get("listingMapId") != lid or not _res_realized(r):
+            continue
+        a, d = _parse_date(r.get("arrivalDate")), _parse_date(r.get("departureDate"))
+        if not a or not d or d <= a:
+            continue
+        stays.append({"a": a, "d": d, "guest": (r.get("guestName") or "ضيف").strip(),
+                      "id": r.get("id"), "channel": (r.get("channelName") or "")})
+    stays.sort(key=lambda s: s["a"])
+    cur = next((s for s in stays if s["a"] <= today < s["d"]), None)
+    arr_today = next((s for s in stays if s["a"] == today), None)
+    arr_tom = next((s for s in stays if s["a"] == today + timedelta(days=1)), None)
+    past = [s for s in stays if s["d"] <= today]
+    last_out = max(past, key=lambda s: s["d"]) if past else None
+    future = [s for s in stays if s["a"] > today]
+    next_in = min(future, key=lambda s: s["a"]) if future else None
+    if cur:                                   # work window opens after the current guest leaves
+        win_start = cur["d"]
+        nxt = next((s for s in stays if s is not cur and s["a"] >= cur["d"]), None)
+        win_end = nxt["a"] if nxt else None
+    else:                                     # vacant now — window runs to the next arrival
+        win_start = today
+        win_end = next_in["a"] if next_in else None
+    win_days = (win_end - win_start).days if (win_end and win_start) else None
+    return {"current": cur, "arr_today": arr_today, "arr_tomorrow": arr_tom,
+            "last_checkout": last_out, "next_checkin": next_in,
+            "win_start": win_start, "win_end": win_end, "win_days": win_days}
+
+def _avail_embed(unit_name, c, today):
+    cur = c["current"]
+    e = discord.Embed(title=f"🔍 فحص الإشغال — {unit_name}"[:256],
+                      color=(0xE5484D if cur else 0x3BA55D))
+    if cur:
+        left = (cur["d"] - today).days
+        e.description = (f"🔴 **مشغولة الحين** — الضيف **{cur['guest']}**\n"
+                         f"دخل {_tk_fmt_d(cur['a'])} · يطلع {_tk_fmt_d(cur['d'])}"
+                         f" ({'يطلع اليوم' if left == 0 else f'باقي له {left} ليلة'})")
+    else:
+        e.description = "🟢 **شاغرة الحين** — ما فيه ضيف ساكن"
+    at = c["arr_today"]
+    e.add_field(name="📥 دخول اليوم",
+                value=(f"✅ {at['guest']}" if at else "ما فيه"), inline=True)
+    am = c["arr_tomorrow"]
+    e.add_field(name="📥 دخول بكرة",
+                value=(f"✅ {am['guest']} — {_tk_fmt_d(am['a'])}" if am else "ما فيه"), inline=True)
+    lo = c["last_checkout"]
+    if lo:
+        ago = (today - lo["d"]).days
+        ago_txt = "طلع اليوم" if ago == 0 else f"قبل {ago} يوم"
+        e.add_field(name="📤 آخر مغادرة",
+                    value=f"**{lo['guest']}** — من {_tk_fmt_d(lo['a'])} إلى {_tk_fmt_d(lo['d'])} ({ago_txt})",
+                    inline=False)
+    else:
+        e.add_field(name="📤 آخر مغادرة", value="ما لقيت مغادرات سابقة (آخر 120 يوم)", inline=False)
+    ni = c["next_checkin"]
+    if ni:
+        days = (ni["a"] - today).days
+        when = "بكرة" if days == 1 else f"بعد {days} يوم"
+        e.add_field(name="📅 أقرب حجز جاي",
+                    value=f"**{ni['guest']}** — يدخل {_tk_fmt_d(ni['a'])} ({when})", inline=False)
+    else:
+        e.add_field(name="📅 أقرب حجز جاي", value="ما فيه حجوزات جاية (آخر 60 يوم قدام)", inline=False)
+    if c["win_days"] is not None and c["win_days"] <= 0:
+        win = "⚠️ **ما فيه نافذة** — الدخول الجاي بنفس يوم المغادرة (تنسيق دقيق مطلوب)"
+    elif c["win_days"] is not None:
+        win = (f"من {_tk_fmt_d(c['win_start'])} إلى {_tk_fmt_d(c['win_end'])}"
+               f" → **{c['win_days']} يوم** صافية للشغل")
+    elif c["win_start"]:
+        win = f"من {_tk_fmt_d(c['win_start'])} — **مفتوحة** (ما فيه حجز بعدها)"
+    else:
+        win = "—"
+    e.add_field(name="🛠️ نافذة الشغل الآمنة", value=win, inline=False)
+    e.set_footer(text=f"وقت الفحص: {datetime.now(TZ).strftime('%H:%M')} · المصدر: Hostaway مباشرة")
+    return e
+
+# ---------------- maintenance flow ----------------
+_URGENCY = [
+    ("urgent", "🔴 عاجل — يحتاج تدخل اليوم", "urgent", 0xE5484D),
+    ("normal", "🟡 عادي — خلال يوم أو يومين", "med", 0xE2B33C),
+    ("low",    "🟢 غير مستعجل — وقت ما يتيسر", "low", 0x3BA55D),
+]
+
+def _urgency_rec(key):
+    return next((u for u in _URGENCY if u[0] == key), _URGENCY[1])
+
+class _MaintAptSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        chunk = parent.listings[parent.page * 25:(parent.page + 1) * 25]
+        opts = [discord.SelectOption(label=nm[:100], value=str(lid), default=(lid == parent.lid))
+                for lid, nm in chunk]
+        if not opts:
+            opts = [discord.SelectOption(label="(القائمة فاضية)", value="0")]
+        super().__init__(placeholder=f"🏠 اختر الشقة — صفحة {parent.page + 1}/{parent.pages}",
+                         options=opts, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            lid = int(self.values[0])
+        except ValueError:
+            lid = 0
+        self.parent_view.lid = lid or None
+        self.parent_view.refresh()
+        await interaction.response.edit_message(view=self.parent_view)
+
+class _MaintUrgSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        opts = [discord.SelectOption(label=lbl, value=key, default=(key == parent.urgency))
+                for key, lbl, _p, _c in _URGENCY]
+        super().__init__(placeholder="⏱️ الأولوية", options=opts, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.urgency = self.values[0]
+        await interaction.response.defer()
+
+class _MaintCatSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        opts = [discord.SelectOption(label=c, value=c, default=(c == parent.category))
+                for c in _TICKET_CATS]
+        super().__init__(placeholder="🗂️ التصنيف (الافتراضي: صيانة)", options=opts, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.category = self.values[0]
+        await interaction.response.defer()
+
+class _MaintNavBtn(discord.ui.Button):
+    def __init__(self, parent, delta, label, disabled):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=3, disabled=disabled)
+        self.parent_view_ref, self.delta = parent, delta
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        p.page = max(0, min(p.pages - 1, p.page + self.delta))
+        p.refresh()
+        await interaction.response.edit_message(view=p)
+
+class _MaintGoBtn(discord.ui.Button):
+    def __init__(self, parent):
+        super().__init__(label="✍️ متابعة — اكتب المشكلة", style=discord.ButtonStyle.success, row=3)
+        self.parent_view_ref = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        if not p.lid:
+            await interaction.response.send_message("🙏 اختر الشقة أول من القائمة.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            MaintModal(p.lid, _tk_unit_name(p.lid), p.urgency, p.category))
+
+class MaintPickView(discord.ui.View):
+    """Ephemeral picker: apartment (paged — Discord caps a menu at 25) + priority
+    + category, then the modal."""
+    def __init__(self, listings):
+        super().__init__(timeout=900)
+        self.listings = listings
+        self.pages = max(1, (len(listings) + 24) // 25)
+        self.page = 0
+        self.lid = None
+        self.urgency = "normal"
+        self.category = "صيانة"
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(_MaintAptSelect(self))
+        self.add_item(_MaintUrgSelect(self))
+        self.add_item(_MaintCatSelect(self))
+        if self.pages > 1:
+            self.add_item(_MaintNavBtn(self, -1, "◀ الشقق السابقة", self.page <= 0))
+            self.add_item(_MaintNavBtn(self, +1, "الشقق التالية ▶", self.page >= self.pages - 1))
+        self.add_item(_MaintGoBtn(self))
+
+class MaintModal(discord.ui.Modal, title="🛠️ تذكرة صيانة جديدة"):
+    def __init__(self, lid, unit_name, urgency, category):
+        super().__init__()
+        self.lid, self.unit_name = lid, unit_name
+        self.urgency, self.category = urgency, category
+        self.summary = discord.ui.TextInput(label="ملخص المشكلة (سطر واحد)", max_length=100,
+                                            placeholder="مثال: مكيف الصالة ما يبرد")
+        self.details = discord.ui.TextInput(label="وصف المشكلة بالتفصيل",
+                                            style=discord.TextStyle.paragraph, max_length=1500,
+                                            placeholder="من متى؟ وش صار بالضبط؟ جربتوا شي؟")
+        self.location = discord.ui.TextInput(label="وين بالضبط داخل الشقة؟ (اختياري)", required=False,
+                                             max_length=100, placeholder="مثال: حمام الغرفة الرئيسية")
+        self.access = discord.ui.TextInput(label="ملاحظات الدخول والتنسيق (اختياري)", required=False,
+                                           max_length=200,
+                                           placeholder="مثال: فيه ضيف — لازم تنسيق قبل الدخول")
+        for item in (self.summary, self.details, self.location, self.access):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            ch = await _maint_open_ticket(
+                interaction, self.lid, self.unit_name, self.urgency, self.category,
+                str(self.summary.value).strip(), str(self.details.value).strip(),
+                str(self.location.value or "").strip(), str(self.access.value or "").strip())
+            await interaction.followup.send(f"✅ انفتحت تذكرتك: {ch.mention}", ephemeral=True)
+        except Exception as e:
+            print("maint ticket open error:", e)
+            await interaction.followup.send(
+                "⚠️ صار خطأ وما انفتحت التذكرة — جرّب مرة ثانية أو بلّغ فيصل.", ephemeral=True)
+
+async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
+                             summary, details, location, access):
+    guild = interaction.guild
+    lid = int(lid)
+    ukey, ulbl, uprio, ucolor = _urgency_rec(urgency)
+    seq = _next_counter("maint_ticket")
+    cat = await _tk_category(guild, "maint")
+    slug = re.sub(r"^ouja-", "", channel_name(unit_name))[:40]
+    ch = await guild.create_text_channel(
+        f"صيانة-{seq:03d}-{slug}", category=cat,
+        topic=f"ouja-ticket:maint lid:{lid} seq:{seq}")
+    aname, aid = maint_assignee_for(lid)
+    today = datetime.now(TZ).date()
+    # the same ticket lands in the dashboard tracker (one source of truth)
+    desc = details
+    if location:
+        desc += f"\n\n📍 الموقع: {location}"
+    if access:
+        desc += f"\n🚪 الدخول: {access}"
+    desc += f"\n\n(فُتحت من ديسكورد — روم التذكرة: #{ch.name})"
+    dash = _ticket_create(summary, description=desc, lid=lid, priority=uprio,
+                          category=category, source="manual", source_ref=f"discord:{ch.id}",
+                          created_by=str(interaction.user), assignee=aname)
+    try:
+        _save_json("tickets.json", _tickets[:1000])
+    except Exception:
+        pass
+    dup_ch = None                       # another OPEN ticket on the same unit? warn, don't block
+    for cid, r in _dtk["tickets"].items():
+        if r.get("kind") == "maint" and r.get("lid") == lid and r.get("status") != "closed":
+            dup_ch = cid
+            break
+    rec = {"kind": "maint", "seq": seq, "lid": lid, "unit": unit_name,
+           "urgency": ukey, "category": category, "summary": summary[:200],
+           "opener_id": interaction.user.id, "opener": str(interaction.user),
+           "assignee": aname, "assignee_id": aid, "dash_id": dash["id"],
+           "status": "open", "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    _dtk["tickets"][str(ch.id)] = rec
+    _dtk_save()
+    card = discord.Embed(title=f"🛠️ تذكرة صيانة #{seq:03d} — {ulbl}"[:256],
+                         description=f"**{summary}**\n\n{details}"[:4000], color=ucolor)
+    card.add_field(name="🏠 الشقة", value=unit_name[:1024], inline=True)
+    card.add_field(name="🗂️ التصنيف", value=category, inline=True)
+    card.add_field(name="🙋 فاتح التذكرة", value=interaction.user.mention, inline=True)
+    if location:
+        card.add_field(name="📍 الموقع داخل الشقة", value=location[:1024], inline=True)
+    if access:
+        card.add_field(name="🚪 ملاحظات الدخول", value=access[:1024], inline=False)
+    card.add_field(name="👷 المسؤول", value=_tk_mention(aname, aid), inline=False)
+    if dup_ch:
+        card.add_field(name="⚠️ تنبيه",
+                       value=f"فيه تذكرة ثانية مفتوحة لنفس الشقة: <#{dup_ch}>", inline=False)
+    card.set_footer(text="افحصوا الإشغال 🔍 قبل ما تروحون للشقة — وارفعوا صور المشكلة هنا 📎")
+    embeds = [card]
+    rows = await asyncio.to_thread(_avail_rows, lid, today)   # occupancy snapshot at open
+    if rows is not None:
+        embeds.append(_avail_embed(unit_name, _avail_classify(rows, lid, today), today))
+    mentions = [interaction.user.mention]
+    if aid:
+        mentions.append(f"<@{int(aid)}>")
+    content = " ".join(mentions) + " — تذكرة صيانة جديدة"
+    if ukey == "urgent":
+        if MAINT_URGENT_ROLE_ID:
+            content = f"<@&{MAINT_URGENT_ROLE_ID}> " + content
+        content = "🚨 **عاجل** · " + content
+    msg = await ch.send(content=content, embeds=embeds, view=MaintTicketView(),
+                        allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+    rec["card_msg_id"] = msg.id
+    _dtk_save()
+    try:
+        await msg.pin()
+    except Exception:
+        pass
+    return ch
+
+class _TkCloseConfirm(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @discord.ui.button(label="✅ نعم، اقفلها", style=discord.ButtonStyle.danger)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="🔒 جاري الإغلاق…", view=None)
+        await _tk_close(interaction)
+
+    @discord.ui.button(label="رجوع", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="تم التراجع — التذكرة باقية مفتوحة.", view=None)
+
+async def _tk_close(interaction):
+    """Close a ticket channel (maint or RR): store + dashboard status, lock the
+    room read-only, rename with مغلقة-, kill the card buttons. Channel is KEPT
+    as the audit trail — deleting is a manual human decision."""
+    ch = interaction.channel
+    rec = _dtk["tickets"].get(str(ch.id))
+    now = datetime.now(TZ)
+    dur_txt = ""
+    if rec:
+        rec["status"] = "closed"
+        rec["closed_by"] = str(interaction.user)
+        rec["closed_at"] = now.isoformat(timespec="seconds")
+        _dtk_save()
+        try:
+            opened = datetime.fromisoformat(rec.get("created_at"))
+            hrs = (now - opened).total_seconds() / 3600
+            dur_txt = (f" · مدة التذكرة: {hrs / 24:.1f} يوم" if hrs >= 48
+                       else f" · مدة التذكرة: {hrs:.1f} ساعة")
+        except Exception:
+            pass
+        if rec.get("kind") == "maint":
+            dash = _dash_ticket(rec.get("dash_id"))
+            if dash and dash.get("status") not in ("fixed", "cancelled"):
+                dash["status"] = "fixed"
+                _ticket_log(dash, str(interaction.user), "أُغلقت من ديسكورد")
+                try:
+                    _save_json("tickets.json", _tickets[:1000])
+                except Exception:
+                    pass
+        if rec.get("card_msg_id"):
+            try:
+                m = await ch.fetch_message(rec["card_msg_id"])
+                await m.edit(view=None)
+            except Exception:
+                pass
+    try:
+        await ch.set_permissions(ch.guild.default_role, send_messages=False)
+    except Exception as e:
+        print("ticket lock error:", e)
+    try:
+        if not ch.name.startswith("مغلقة-"):
+            await ch.edit(name=("مغلقة-" + ch.name)[:100])
+    except Exception as e:
+        print("ticket rename error:", e)
+    log_event("ops", f"أُغلقت تذكرة {ch.name} بواسطة {interaction.user}")
+    await ch.send(f"🔒 **أُغلقت التذكرة** بواسطة {interaction.user.mention}{dur_txt}",
+                  allowed_mentions=discord.AllowedMentions(users=True))
+
+class MaintTicketView(discord.ui.View):
+    """Lives on every maintenance-ticket card. Persistent across restarts."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔍 فحص الإشغال الحين", style=discord.ButtonStyle.primary,
+                       custom_id="maint_avail")
+    async def avail(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _tk_rec_for(interaction.channel)
+        lid = (rec or {}).get("lid")
+        if not lid:
+            await interaction.response.send_message("⚠️ ما قدرت أعرف شقة هذي التذكرة.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        today = datetime.now(TZ).date()
+        rows = await asyncio.to_thread(_avail_rows, lid, today)
+        if rows is None:
+            await interaction.followup.send("⚠️ Hostaway ما رد عليّ — جرّب بعد دقيقة.")
+            return
+        unit = (rec or {}).get("unit") or _tk_unit_name(lid)
+        await interaction.followup.send(
+            embed=_avail_embed(unit, _avail_classify(rows, lid, today), today))
+
+    @discord.ui.button(label="🙋 أستلم التذكرة", style=discord.ButtonStyle.secondary,
+                       custom_id="maint_claim")
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        who = interaction.user
+        if rec:
+            rec["claimed_by"] = str(who)
+            rec["claimed_by_id"] = who.id
+            if rec.get("status") == "open":
+                rec["status"] = "in_progress"
+            _dtk_save()
+            dash = _dash_ticket(rec.get("dash_id"))
+            if dash:
+                if dash.get("status") == "open":
+                    dash["status"] = "in_progress"
+                if not dash.get("assignee"):
+                    dash["assignee"] = who.display_name
+                _ticket_log(dash, str(who), "استلم التذكرة من ديسكورد")
+                try:
+                    _save_json("tickets.json", _tickets[:1000])
+                except Exception:
+                    pass
+        await interaction.response.send_message(
+            f"🙋 **{who.display_name}** استلم التذكرة وبيشتغل عليها.",
+            allowed_mentions=discord.AllowedMentions(users=False))
+
+    @discord.ui.button(label="✅ إغلاق التذكرة", style=discord.ButtonStyle.success,
+                       custom_id="maint_close")
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("متأكد تبغى تقفل التذكرة؟",
+                                                view=_TkCloseConfirm(), ephemeral=True)
+
+class MaintPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🛠️ افتح تذكرة صيانة", style=discord.ButtonStyle.primary,
+                       custom_id="maint_open")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        listings = await asyncio.to_thread(_tk_listings)
+        if not listings:
+            await interaction.response.send_message(
+                "⚠️ ما قدرت أجيب قائمة الشقق — جرّب بعد دقيقة.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "**تذكرة صيانة جديدة** — اختر من القوائم ثم اضغط «متابعة»:",
+            view=MaintPickView(listings), ephemeral=True)
+
+# ---------------- RR (reimbursement request) flow ----------------
+_RR_TYPES = [
+    ("damage",  "🔨 تلفيات بالشقة أو الأثاث",      "Damage to property"),
+    ("missing", "📦 غرض مفقود",                    "Missing item"),
+    ("theft",   "🚨 سرقة",                          "Stolen item"),
+    ("mess",    "🧹 نظافة غير طبيعية / فوضى",       "Excessive mess requiring extra cleaning"),
+    ("smoking", "🚬 تدخين داخل الوحدة",             "Smoking violation"),
+    ("party",   "🎉 حفلة / ضيوف غير مصرّح بهم",     "Party / unauthorized guests"),
+    ("late",    "⏰ تأخر بالمغادرة",                "Late checkout"),
+    ("rules",   "📋 مخالفة قوانين أخرى",            "Other house-rule violation"),
+    ("other",   "❓ أخرى",                          "Other"),
+]
+_RR_EVIDENCE = [
+    ("photos",  "📷 صور للمشكلة",                    "Photos of the issue"),
+    ("video",   "🎥 فيديو",                          "Video evidence"),
+    ("invoice", "🧾 فاتورة الشراء الأصلية",          "Original purchase invoice"),
+    ("quote",   "💵 فاتورة/عرض سعر للبديل أو الإصلاح", "Replacement or repair invoice/quote"),
+    ("chat",    "💬 محادثة الضيف (اعتراف)",          "Guest acknowledgment messages"),
+    ("airbnb",  "📱 سكرينات Airbnb Resolution Center", "Airbnb Resolution Center screenshots"),
+    ("ops",     "📋 تقرير فريق التشغيل/التنظيف",     "Operations/cleaning team report"),
+    ("receipt", "🔧 إيصال إصلاح أو تنظيف مدفوع",     "Paid repair/cleaning receipt"),
+]
+_RR_STATUS = [("new", "🆕 جديدة"), ("submitted", "📤 أُرسلت للمنصة"),
+              ("approved", "✅ مقبولة"), ("denied", "❌ مرفوضة"),
+              ("paid", "💰 تم استلام المبلغ")]
+
+class _RRTypeSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        opts = [discord.SelectOption(label=ar, value=key, default=(key == parent.issue_type))
+                for key, ar, _en in _RR_TYPES]
+        super().__init__(placeholder="🏷️ وش نوع المشكلة؟", options=opts, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.issue_type = self.values[0]
+        await interaction.response.defer()
+
+class _RREvidenceSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        opts = [discord.SelectOption(label=ar, value=key, default=(key in parent.evidence))
+                for key, ar, _en in _RR_EVIDENCE]
+        super().__init__(placeholder="📎 الأدلة المتوفرة (اختر كل اللي عندكم)",
+                         min_values=0, max_values=len(opts), options=opts, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.evidence = list(self.values)
+        await interaction.response.defer()
+
+class _RRGoBtn(discord.ui.Button):
+    def __init__(self, parent):
+        super().__init__(label="✍️ متابعة — اكتب التفاصيل", style=discord.ButtonStyle.success, row=2)
+        self.parent_view_ref = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        if not p.issue_type:
+            await interaction.response.send_message("🙏 اختر نوع المشكلة أول.", ephemeral=True)
+            return
+        await interaction.response.send_modal(RRModal(p.issue_type, p.evidence))
+
+class RRPickView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=900)
+        self.issue_type = None
+        self.evidence = []
+        self.add_item(_RRTypeSelect(self))
+        self.add_item(_RREvidenceSelect(self))
+        self.add_item(_RRGoBtn(self))
+
+class RRModal(discord.ui.Modal, title="🧾 طلب تعويض RR"):
+    def __init__(self, issue_type, evidence):
+        super().__init__()
+        self.issue_type, self.evidence = issue_type, evidence
+        self.code = discord.ui.TextInput(label="رقم الحجز / كود التأكيد", max_length=60,
+                                         placeholder="مثال: HMABC123XY أو رقم Hostaway")
+        self.found = discord.ui.TextInput(label="متى اكتشفتوا المشكلة؟ (اختياري)", required=False,
+                                          max_length=40, placeholder="2026-06-10 أو: يوم مغادرة الضيف")
+        self.story = discord.ui.TextInput(label="وش صار بالضبط؟ القصة كاملة بالعربي",
+                                          style=discord.TextStyle.paragraph, max_length=1800,
+                                          placeholder="اشرح كل شي: وش انكسر/ضاع، وش قال الضيف، وش سويتوا…")
+        self.items = discord.ui.TextInput(label="المطالبة سطر سطر: الغرض - العدد - المبلغ",
+                                          style=discord.TextStyle.paragraph, max_length=1000,
+                                          placeholder="تلفزيون 55 بوصة - 1 - 1316")
+        self.total = discord.ui.TextInput(label="إجمالي المبلغ المطلوب (ريال)", max_length=20,
+                                          placeholder="1316")
+        for item in (self.code, self.found, self.story, self.items, self.total):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            ch = await _rr_open_ticket(
+                interaction, self.issue_type, self.evidence,
+                str(self.code.value).strip(), str(self.found.value or "").strip(),
+                str(self.story.value).strip(), str(self.items.value).strip(),
+                str(self.total.value).strip())
+            await interaction.followup.send(
+                f"✅ انفتح طلب التعويض: {ch.mention} — النسخة الإنجليزية بتنزل هناك خلال لحظات.",
+                ephemeral=True)
+        except Exception as e:
+            print("rr ticket open error:", e)
+            await interaction.followup.send(
+                "⚠️ صار خطأ وما انفتح الطلب — جرّب مرة ثانية أو بلّغ فيصل.", ephemeral=True)
+
+async def _rr_open_ticket(interaction, issue_type, evidence, code, found, story, items_raw, total_raw):
+    guild = interaction.guild
+    seq = _next_counter("rr_ticket")
+    cat = await _tk_category(guild, "rr")
+    slug = re.sub(r"[^a-z0-9]+", "-", code.lower()).strip("-")[:30] or issue_type
+    ch = await guild.create_text_channel(f"rr-{seq:03d}-{slug}", category=cat,
+                                         topic=f"ouja-ticket:rr seq:{seq} code:{code[:40]}")
+    rec = {"kind": "rr", "seq": seq, "code": code, "type": issue_type,
+           "evidence": list(evidence or []), "found_date": found,
+           "narrative": story, "items_raw": items_raw, "total_raw": total_raw,
+           "opener_id": interaction.user.id, "opener": str(interaction.user),
+           "status": "new", "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    _dtk["tickets"][str(ch.id)] = rec
+    _dtk_save()
+    type_ar = next((ar for k, ar, _en in _RR_TYPES if k == issue_type), issue_type)
+    total_v = _tk_num(total_raw)
+    card = discord.Embed(title=f"🧾 طلب تعويض RR #{seq:03d}", color=GOLD,
+                         description=story[:3800])
+    card.add_field(name="🔖 رقم الحجز", value=code[:1024] or "—", inline=True)
+    card.add_field(name="🏷️ النوع", value=type_ar, inline=True)
+    card.add_field(name="📅 تاريخ الاكتشاف", value=found or "—", inline=True)
+    card.add_field(name="💰 المبلغ المطلوب",
+                   value=(f"{_tk_sar(total_v)} ر.س" if total_v is not None else (total_raw or "—")),
+                   inline=True)
+    card.add_field(name="🙋 فاتح الطلب", value=interaction.user.mention, inline=True)
+    ev_txt = "\n".join("• " + ar for k, ar, _en in _RR_EVIDENCE if k in (evidence or []))
+    card.add_field(name="📎 الأدلة المتوفرة", value=ev_txt or "— (حدّدوها لاحقاً)", inline=False)
+    card.add_field(name="🧮 المطالبة (كما كتبتها)", value=items_raw[:1024] or "—", inline=False)
+    card.set_footer(text="ارفعوا الصور والفواتير والسكرينات هنا بالروم 📎")
+    msg = await ch.send(content=f"{interaction.user.mention} فتح طلب تعويض جديد",
+                        embed=card, view=RRTicketView(),
+                        allowed_mentions=discord.AllowedMentions(users=True))
+    rec["card_msg_id"] = msg.id
+    _dtk_save()
+    try:
+        await msg.pin()
+    except Exception:
+        pass
+    log_event("ops", f"طلب RR جديد #{seq:03d} · {code} · {type_ar}")
+    _tk_spawn(_rr_generate_english(ch, rec))
+    return ch
+
+def _rr_enrich(code):
+    """Find the reservation in Hostaway by code/id — EXACT match only (a money
+    claim must never attach the wrong guest). Returns {} when not found."""
+    code = str(code or "").strip()
+    if not code:
+        return {}
+    res = None
+    if code.isdigit():
+        try:
+            r = (api_get(f"/reservations/{code}") or {}).get("result")
+            if isinstance(r, dict) and r.get("id"):
+                res = r
+        except Exception:
+            res = None
+    if res is None:
+        want = re.sub(r"\s+", "", code).upper()
+        today = datetime.now(TZ).date()
+        try:
+            rows = fetch_reservations_window(today - timedelta(days=180),
+                                             today + timedelta(days=45))
+        except Exception:
+            rows = []
+        for r in rows:
+            for k in ("confirmationCode", "channelReservationId", "reservationId",
+                      "hostawayReservationId", "externalReservationId", "id"):
+                v = re.sub(r"\s+", "", str(r.get(k) or "")).upper()
+                if v and v == want:
+                    res = r
+                    break
+            if res:
+                break
+    if not res:
+        return {}
+    a, d = _parse_date(res.get("arrivalDate")), _parse_date(res.get("departureDate"))
+    lid = res.get("listingMapId")
+    today = datetime.now(TZ).date()
+    out = {"guest": (res.get("guestName") or "").strip(),
+           "unit": _tk_unit_name(lid) if lid else "",
+           "arrival": a.isoformat() if a else "", "departure": d.isoformat() if d else "",
+           "channel": (res.get("channelName") or ""), "status": (res.get("status") or "")}
+    if d:
+        deadline = d + timedelta(days=14)
+        out["deadline"] = deadline.isoformat()
+        out["days_left"] = (deadline - today).days
+        out["deadline_passed"] = today > deadline
+        out["in_house"] = bool(a and a <= today < d)
+    return out
+
+_RR_SYSTEM = (
+    "You are a professional short-term-rental claims writer for Ouja Residence (Riyadh). "
+    "You convert an Arabic operations report into clear, factual English for an Airbnb "
+    "AirCover / OTA reimbursement claim reviewed by an English-only back office. "
+    "NEVER invent facts, amounts, dates, or evidence — translate and organize ONLY what is given. "
+    "Keep every amount EXACTLY as provided (SAR). Neutral, professional, persuasive but honest. "
+    "Return ONLY a JSON object, no prose around it, with keys: "
+    "what_happened (1-2 English paragraphs telling the full story in past tense), "
+    "items (array of {item, qty, desc, cost_sar} — parse EVERY line of the itemized claim; "
+    "qty is a number, cost_sar is the line amount as a number), "
+    "requested_action (one sentence like 'Reimbursement of X SAR via AirCover for ...'), "
+    "date_discovered_en (the discovery date as e.g. 'Mar 28, 2026' — resolve phrases like "
+    "يوم المغادرة using the checkout date if provided; if unknown use 'Not provided')."
+)
+
+def _rr_translate(rec, enrich):
+    type_en = next((en for k, _ar, en in _RR_TYPES if k == rec.get("type")), "Other")
+    facts = [f"Issue type: {type_en}",
+             f"Reservation code: {rec.get('code') or 'Not provided'}"]
+    if enrich.get("guest"):
+        facts.append(f"Guest name (from PMS): {enrich['guest']}")
+    if enrich.get("unit"):
+        facts.append(f"Unit (from PMS): {enrich['unit']}")
+    if enrich.get("departure"):
+        facts.append(f"Checkout date (from PMS): {enrich['departure']}")
+    facts.append("Date discovered (as written by the team, may be Arabic): "
+                 + (rec.get("found_date") or "Not provided"))
+    user = ("FACTS:\n" + "\n".join(facts)
+            + "\n\nARABIC REPORT (what happened):\n" + (rec.get("narrative") or "")
+            + "\n\nARABIC ITEMIZED CLAIM (each line: item - qty - amount in SAR):\n"
+            + (rec.get("items_raw") or "")
+            + f"\n\nTOTAL REQUESTED (SAR): {rec.get('total_raw') or ''}"
+            + "\n\nReturn the JSON object now.")
+    return claude_json(_RR_SYSTEM, user, max_tokens=1400,
+                       model=RR_MODEL or CLAUDE_MODEL_PREMIUM)
+
+def _rr_render_english(rec, enrich, data):
+    """Deterministic RR TICKET template — the model only supplies translations.
+    Codes, amounts headline, evidence, and the deadline are rendered from data
+    we control, so a hallucination can't change the money lines."""
+    type_en = next((en for k, _ar, en in _RR_TYPES if k == rec.get("type")), "Other")
+    total = _tk_num(rec.get("total_raw"))
+    L = [f"RR TICKET — #{int(rec.get('seq') or 0):03d}", ""]
+    L.append(f"Reservation code: {rec.get('code') or 'Not provided'}")
+    if enrich.get("guest"):
+        L.append(f"Guest: {enrich['guest']}")
+    if enrich.get("unit"):
+        L.append(f"Unit: {enrich['unit']}")
+    if enrich.get("arrival") or enrich.get("departure"):
+        stay = f"Stay: {enrich.get('arrival') or '?'} → {enrich.get('departure') or '?'}"
+        if enrich.get("channel"):
+            stay += f" ({enrich['channel']})"
+        L.append(stay)
+    date_en = (data or {}).get("date_discovered_en") or (rec.get("found_date") or "Not provided")
+    L.append(f"Date issue discovered: {date_en}")
+    L.append(f"Issue type: {type_en}")
+    L += ["", "WHAT HAPPENED"]
+    if data and data.get("what_happened"):
+        L.append(str(data["what_happened"]).strip())
+    else:
+        L.append("(Automatic translation unavailable — original Arabic report below)")
+        L.append(rec.get("narrative") or "")
+    L += ["", "ITEMIZED CLAIM (SAR)", ""]
+    items = (data or {}).get("items")
+    if isinstance(items, list) and items:
+        L.append("Item | Qty | Description | Cost (SAR)")
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            qty = it.get("qty")
+            try:
+                qty = int(qty) if float(qty) == int(float(qty)) else float(qty)
+            except (TypeError, ValueError):
+                qty = qty or 1
+            L.append(f"{str(it.get('item') or '').strip()} | {qty} | "
+                     f"{str(it.get('desc') or '').strip()} | {_tk_sar(it.get('cost_sar') or 0)}")
+    else:
+        L.append("(as written by the team, Arabic)")
+        L.append(rec.get("items_raw") or "")
+    L.append("")
+    L.append(f"TOTAL: {_tk_sar(total)} SAR" if total is not None
+             else f"TOTAL: {rec.get('total_raw') or 'Not provided'}")
+    L += ["", "EVIDENCE AVAILABLE", ""]
+    evs = rec.get("evidence") or []
+    if evs:
+        for key in evs:
+            en = next((en for k, _ar, en in _RR_EVIDENCE if k == key), key)
+            L.append(f"- {en}")
+    else:
+        L.append("- Not specified (evidence will be attached in the ticket thread)")
+    L += ["", "REQUESTED ACTION"]
+    if data and data.get("requested_action"):
+        L.append(str(data["requested_action"]).strip())
+    else:
+        amt = f"{_tk_sar(total)} SAR " if total is not None else ""
+        L.append(f"Reimbursement of {amt}via the booking channel's resolution process ({type_en}).")
+    if enrich.get("departure"):
+        L += ["", "FILING WINDOW"]
+        if enrich.get("in_house"):
+            L.append(f"Guest is still in-house (checkout {enrich['departure']}). For Airbnb, "
+                     "file via the Resolution Center within 14 days of checkout.")
+        else:
+            left = enrich.get("days_left")
+            tail = (f"{left} days left" if isinstance(left, int) and left >= 0
+                    else "DEADLINE PASSED — file immediately")
+            L.append(f"Checkout was {enrich['departure']} — AirCover claims must be filed "
+                     f"within 14 days (deadline {enrich.get('deadline', '')}, {tail}).")
+    return "\n".join(L)
+
+async def _tk_send_block(channel, intro, text):
+    """Long text → copy-paste-friendly ```text``` blocks under Discord's 2000 cap."""
+    if intro:
+        await channel.send(intro)
+    lines = []
+    for ln in (text or "").split("\n"):       # hard-wrap monster lines first
+        while len(ln) > 1800:
+            lines.append(ln[:1800])
+            ln = ln[1800:]
+        lines.append(ln)
+    buf, size = [], 0
+    for ln in lines:
+        if size + len(ln) + 1 > 1850 and buf:
+            await channel.send("```text\n" + "\n".join(buf) + "\n```")
+            buf, size = [], 0
+        buf.append(ln)
+        size += len(ln) + 1
+    if buf:
+        await channel.send("```text\n" + "\n".join(buf) + "\n```")
+
+async def _rr_generate_english(channel, rec):
+    """Hostaway enrichment + Claude translation + the English RR TICKET post.
+    Runs as a background task so the modal closes instantly."""
+    try:
+        async with channel.typing():
+            enrich = await asyncio.to_thread(_rr_enrich, rec.get("code", ""))
+            data = await asyncio.to_thread(_rr_translate, rec, enrich)
+        if enrich:
+            bits = []
+            if enrich.get("guest"):
+                bits.append(f"الضيف **{enrich['guest']}**")
+            if enrich.get("unit"):
+                bits.append(f"شقة **{enrich['unit']}**")
+            if enrich.get("arrival") and enrich.get("departure"):
+                bits.append(f"من {enrich['arrival']} إلى {enrich['departure']}")
+            if enrich.get("channel"):
+                bits.append(f"القناة: {enrich['channel']}")
+            if enrich.get("in_house"):
+                bits.append("⚠️ الضيف لسا ساكن")
+            elif isinstance(enrich.get("days_left"), int):
+                bits.append("🚨 **مهلة AirCover خلصت!**" if enrich.get("deadline_passed")
+                            else f"⏳ باقي **{enrich['days_left']} يوم** على مهلة AirCover")
+            await channel.send("📇 لقيت الحجز في Hostaway: " + " · ".join(bits))
+        else:
+            await channel.send(f"⚠️ ما لقيت حجز برقم «{rec.get('code')}» في Hostaway — "
+                               "تأكدوا من الرقم. النسخة الإنجليزية بتطلع بدون بيانات الحجز.")
+        text = _rr_render_english(rec, enrich, data)
+        rec["english_ok"] = bool(data)
+        _dtk_save()
+        await _tk_send_block(channel,
+                             "🇬🇧 **النسخة الإنجليزية — انسخها كاملة للباك أوفيس:**", text)
+        if data is None:
+            await channel.send("⚠️ الترجمة الآلية تعطلت فحطيت النص العربي داخل القالب — "
+                               "اضغطوا **🔁 إعادة توليد الإنجليزي** بعد شوي.")
+        tot = _tk_num(rec.get("total_raw"))
+        if data and isinstance(data.get("items"), list):
+            s = sum((_tk_num(i.get("cost_sar")) or 0) for i in data["items"] if isinstance(i, dict))
+            if tot and s and abs(s - tot) > 0.51:
+                await channel.send(f"⚠️ **انتبهوا:** مجموع البنود ({_tk_sar(s)} ر.س) ما يطابق "
+                                   f"الإجمالي المطلوب ({_tk_sar(tot)} ر.س) — راجعوها قبل الإرسال.")
+    except Exception as e:
+        print("rr english error:", e)
+        try:
+            await channel.send("⚠️ تعطل توليد النسخة الإنجليزية — اضغطوا **🔁 إعادة توليد الإنجليزي**.")
+        except Exception:
+            pass
+
+class _RRStatusSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(placeholder="📌 حدّث حالة المطالبة…", custom_id="rr_status", row=0,
+                         options=[discord.SelectOption(label=lbl, value=k) for k, lbl in _RR_STATUS])
+
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        lbl = dict(_RR_STATUS).get(key, key)
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if rec:
+            rec["status"] = key
+            _dtk_save()
+        log_event("ops", f"RR #{(rec or {}).get('seq', '?')}: الحالة → {lbl}")
+        await interaction.response.send_message(
+            f"📌 حالة المطالبة صارت: **{lbl}** (حدّثها {interaction.user.display_name})",
+            allowed_mentions=discord.AllowedMentions(users=False))
+
+class RRTicketView(discord.ui.View):
+    """Lives on every RR card: claim-status tracker + regenerate + close."""
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(_RRStatusSelect())
+
+    @discord.ui.button(label="🔁 إعادة توليد الإنجليزي", style=discord.ButtonStyle.secondary,
+                       custom_id="rr_regen", row=1)
+    async def regen(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "rr":
+            await interaction.response.send_message(
+                "⚠️ ما لقيت بيانات هذا الطلب (انحذف سجله؟) — افتح طلب جديد.", ephemeral=True)
+            return
+        await interaction.response.send_message("🔁 أعيد التوليد…")
+        await _rr_generate_english(interaction.channel, rec)
+
+    @discord.ui.button(label="✅ إغلاق", style=discord.ButtonStyle.success,
+                       custom_id="rr_close", row=1)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("متأكد تبغى تقفل طلب التعويض؟",
+                                                view=_TkCloseConfirm(), ephemeral=True)
+
+class RRPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🧾 افتح طلب تعويض RR", style=discord.ButtonStyle.primary,
+                       custom_id="rr_open")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "**طلب RR جديد** — حدد النوع والأدلة ثم اضغط «متابعة»:",
+            view=RRPickView(), ephemeral=True)
+
+# ---------------- panels + admin commands ----------------
+async def ensure_ticket_panels(guild):
+    """The two «افتح تذكرة» rooms exist under their categories, each holding ONE
+    live panel message with the button (re-posted automatically if deleted)."""
+    defs = [
+        ("maint", MAINT_PANEL_CHANNEL, MaintPanelView(), "🛠️ تذاكر الصيانة",
+         "عندك مشكلة بشقة؟ اضغط الزر تحت 👇\n\n"
+         "1️⃣ اختر الشقة + الأولوية + التصنيف\n"
+         "2️⃣ اكتب ملخص المشكلة وتفاصيلها\n"
+         "3️⃣ ينفتح روم خاص بالتذكرة ويتنبّه المسؤول تلقائياً\n\n"
+         "وداخل كل تذكرة زر **🔍 فحص الإشغال** يعطيك حالة الشقة لحظتها:\n"
+         "ساكنها أحد؟ فيه دخول اليوم أو بكرة؟ منو آخر ضيف طلع؟ ومتى أقرب نافذة شغل آمنة."),
+        ("rr", RR_PANEL_CHANNEL, RRPanelView(), "🧾 طلبات التعويض — RR",
+         "تلفيات؟ مفقودات؟ نظافة غير طبيعية؟ افتح طلب RR من الزر 👇\n\n"
+         "1️⃣ اختر نوع المشكلة والأدلة المتوفرة\n"
+         "2️⃣ عبّي التفاصيل **بالعربي** براحتك\n"
+         "3️⃣ البوت يجهّز النسخة الإنجليزية الرسمية كاملة لفريق المطالبات،\n"
+         "ويجيب بيانات الحجز من Hostaway، ويحسب مهلة الـ 14 يوم حقت AirCover ⏳\n\n"
+         "بعد فتح التذكرة ارفعوا الصور والفواتير داخل الروم 📎"),
+    ]
+    for kind, ch_name, view, title, desc in defs:
+        try:
+            cat = await _tk_category(guild, kind)
+            meta = _dtk["panels"].get(kind) or {}
+            # stored channel id first — survives the panel room being RENAMED
+            ch = guild.get_channel(meta.get("channel_id") or 0)
+            if ch is None:
+                ch = await ensure_channel(guild, ch_name, cat)
+            if ch is None:
+                continue
+            msg = None
+            if meta.get("message_id") and meta.get("channel_id") == ch.id:
+                try:
+                    msg = await ch.fetch_message(meta["message_id"])
+                except Exception:
+                    msg = None
+            if msg is None:
+                emb = discord.Embed(title=title, description=desc, color=GOLD)
+                msg = await ch.send(embed=emb, view=view)
+                try:
+                    await msg.pin()
+                except Exception:
+                    pass
+                _dtk["panels"][kind] = {"channel_id": ch.id, "message_id": msg.id}
+                _dtk_save()
+        except Exception as e:
+            print(f"ticket panel setup error ({kind}):", e)
+
+def _tk_is_admin(user):
+    p = getattr(user, "guild_permissions", None)
+    return bool(p and (p.administrator or p.manage_guild))
+
+async def _tk_resolve_member(guild, raw):
+    """(display_name, discord_id) from a mention / raw ID / name. Name lookup uses
+    query_members — works WITHOUT the privileged members intent (flipping that
+    intent blind would take the live bot down, so we never require it)."""
+    raw = str(raw or "").strip()
+    m = re.search(r"<@!?(\d+)>", raw) or re.fullmatch(r"(\d{15,21})", raw)
+    if m:
+        uid = int(m.group(1))
+        member = guild.get_member(uid)
+        if member is None:
+            try:
+                member = await guild.fetch_member(uid)
+            except Exception:
+                member = None
+        if member:
+            return member.display_name, member.id
+        return raw, None
+    try:
+        found = await guild.query_members(query=raw, limit=5)
+    except Exception:
+        found = []
+    low = raw.lower()
+    best = (next((x for x in found
+                  if x.display_name.lower() == low or x.name.lower() == low), None)
+            or (found[0] if len(found) == 1 else None))
+    if best:
+        return best.display_name, best.id
+    return raw, None
+
+async def _maint_import_assignments(guild, attachment):
+    """Excel/CSV bulk import: column A = apartment, column B = employee
+    (mention, Discord ID, or display name). Returns the Arabic report text."""
+    import io as _io
+    try:
+        raw = await attachment.read()
+    except Exception as e:
+        return f"⚠️ ما قدرت أقرأ الملف: {e}"
+    fname = (attachment.filename or "").lower()
+    rows = []
+    try:
+        if fname.endswith((".xlsx", ".xlsm")):
+            import openpyxl
+            wb = openpyxl.load_workbook(_io.BytesIO(raw), data_only=True)
+            ws = wb.worksheets[0]
+            for r in ws.iter_rows(values_only=True):
+                if r and len(r) >= 2 and (r[0] is not None or r[1] is not None):
+                    rows.append((str(r[0] or "").strip(), str(r[1] or "").strip()))
+        else:
+            text = raw.decode("utf-8-sig", errors="replace")
+            sample = [l for l in text.splitlines() if l.strip()][:5]
+            delim = max([",", ";", "\t"],
+                        key=lambda d: sum(len(l.split(d)) >= 2 for l in sample)) if sample else ","
+            for line in text.splitlines():
+                parts = [p.strip().strip('"') for p in line.split(delim)]
+                if len(parts) >= 2:
+                    rows.append((parts[0], parts[1]))
+    except Exception as e:
+        return f"⚠️ ما قدرت أفك الملف ({attachment.filename}): {e}"
+    linked, unmatched_apt, unresolved_emp = 0, [], []
+    header_words = ("الشقة", "شقة", "الوحدة", "apartment", "unit", "listing")
+    for apt_raw, emp_raw in rows:
+        if not apt_raw or not emp_raw:
+            continue
+        matches = _tk_find_listings(apt_raw)
+        if len(matches) != 1:
+            if _tk_norm_name(apt_raw) not in (_tk_norm_name(w) for w in header_words):
+                unmatched_apt.append(apt_raw)
+            continue
+        lid, nm = matches[0]
+        name, did = await _tk_resolve_member(guild, emp_raw)
+        _maint_assign["by_lid"][str(lid)] = {"name": name or emp_raw, "discord_id": did}
+        linked += 1
+        if not did:
+            unresolved_emp.append(f"{emp_raw} ({nm})")
+    _maint_assign_save()
+    out = [f"✅ ربطت **{linked}** شقة بمسؤوليها."]
+    if unresolved_emp:
+        out.append(f"⚠️ {len(unresolved_emp)} اسم ما لقيت حسابه بديسكورد "
+                   "(انحفظ كاسم بس — بدون منشن تلقائي):\n"
+                   + "\n".join("• " + x for x in unresolved_emp[:10]))
+    if unmatched_apt:
+        out.append(f"⚠️ {len(unmatched_apt)} سطر ما عرفت أي شقة يقصد:\n"
+                   + "\n".join("• " + x for x in unmatched_apt[:10]))
+    return "\n".join(out)
+
+@bot.command(name="تذاكر-تجهيز", aliases=["tickets-setup"])
+async def tickets_setup_cmd(ctx):
+    """Re-create the two ticket panels (auto-runs on boot too)."""
+    if not _tk_is_admin(ctx.author):
+        await ctx.reply("هذا الأمر للإدارة فقط 🙏")
+        return
+    await ensure_ticket_panels(ctx.guild)
+    await ctx.reply("✅ رومات فتح التذاكر جاهزة (صيانة + RR).")
+
+@bot.command(name="صيانة-تعيينات", aliases=["maint-assign", "صيانه-تعيينات"])
+async def maint_assign_cmd(ctx, *, args: str = ""):
+    """apartment→responsible map: show / set one / set default / bulk Excel import.
+      !ouja صيانة-تعيينات                      → show the map
+      !ouja صيانة-تعيينات @user نخلة 23        → link one apartment
+      !ouja صيانة-تعيينات @user افتراضي        → fallback assignee for unmapped units
+      (attach the Excel/CSV with the command)  → bulk import
+    """
+    if not _tk_is_admin(ctx.author):
+        await ctx.reply("هذا الأمر للإدارة فقط 🙏")
+        return
+    if ctx.message.attachments:
+        report = await _maint_import_assignments(ctx.guild, ctx.message.attachments[0])
+        await ctx.reply(report[:1900])
+        return
+    args = (args or "").strip()
+    m = re.search(r"<@!?(\d+)>", args)
+    if m:
+        uid = int(m.group(1))
+        member = ctx.guild.get_member(uid)
+        if member is None:
+            try:
+                member = await ctx.guild.fetch_member(uid)
+            except Exception:
+                member = None
+        if member is None:
+            await ctx.reply("ما لقيت هذا العضو بالسيرفر.")
+            return
+        rest = re.sub(r"<@!?\d+>", "", args).strip()
+        if not rest or rest in ("افتراضي", "default"):
+            _maint_assign["default"] = {"name": member.display_name, "discord_id": member.id}
+            _maint_assign_save()
+            await ctx.reply(f"✅ **{member.display_name}** صار المسؤول الافتراضي "
+                            "لكل الشقق اللي ما لها مسؤول مربوط.")
+            return
+        matches = _tk_find_listings(rest)
+        if not matches:
+            await ctx.reply(f"ما لقيت شقة تطابق «{rest}».")
+            return
+        if len(matches) > 1:
+            names = "\n".join(f"• {nm}" for _l, nm in matches[:8])
+            await ctx.reply(f"لقيت أكثر من شقة تطابق «{rest}» — حدد أكثر:\n{names}")
+            return
+        lid, nm = matches[0]
+        _maint_assign["by_lid"][str(lid)] = {"name": member.display_name, "discord_id": member.id}
+        _maint_assign_save()
+        await ctx.reply(f"✅ ربطت **{nm}** ← **{member.display_name}**.")
+        return
+    lines = []
+    for lid, nm in _tk_listings():
+        a = _maint_assign["by_lid"].get(str(lid))
+        lines.append(f"• {nm} ← {a['name'] if a else '⚠️ بدون مسؤول'}")
+    d = _maint_assign.get("default")
+    out = (f"**خريطة مسؤولي الصيانة** (الافتراضي: {d['name'] if d else 'ما فيه'})\n"
+           + ("\n".join(lines) or "ما فيه شقق بالقائمة بعد."))
+    for i in range(0, len(out), 1900):
+        await ctx.send(out[i:i + 1900])
+
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
@@ -43315,6 +44567,10 @@ async def on_ready():
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
     bot.add_view(CleaningProofReviewView())  # re-bind cleaning photo approval buttons
+    bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR)
+    bot.add_view(RRPanelView())
+    bot.add_view(MaintTicketView())
+    bot.add_view(RRTicketView())
     # On the FIRST start only (no saved state yet), mark the whole current inbox as
     # already-seen so we never replay old backlog. After this, ONLY genuinely new message
     # IDs get a card — and persistence keeps _assistant_seen across restarts, so redeploys
@@ -43331,6 +44587,12 @@ async def on_ready():
                   f"— from now on only NEW messages get cards")
         except Exception as e:
             print("assistant baseline error:", e)
+    try:                               # the صيانة/RR ticket panels exist + buttons live
+        _tk_guild = bot.get_guild(GUILD_ID)
+        if _tk_guild is not None:
+            await ensure_ticket_panels(_tk_guild)
+    except Exception as e:
+        print("ticket panels setup error:", e)
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
     print(f"Weekday tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
           f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00, "
