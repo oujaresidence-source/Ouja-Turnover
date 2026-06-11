@@ -8730,7 +8730,7 @@ def _exp_set_status(exp, status, *, reason="", by="", detail=""):
         # v2.2 slice 0: owner statements count expenses by canonical status — any
         # transition (verify/archive/discard/…) makes the memoized reports stale.
         try:
-            _owner_cache_bust(lid=exp.get("listing_id"))
+            _owner_cache_bust(lid=exp.get("listing_id"), mkey=_exp_mkey(exp.get("expense_date")))
         except Exception:
             pass
 
@@ -24460,7 +24460,51 @@ def _month_bounds(mkey):
     y, m = int(mkey[:4]), int(mkey[5:7])
     return date(y, m, 1), date(y, m, _cal.monthrange(y, m)[1])
 
-_owner_portal_cache = {}    # (owner, month) -> (payload_report, built_ts)
+# v2.2.2 perf: the memoized owner-month reports PERSIST across restarts — a cold
+# 13-month rebuild from Hostaway took minutes, and every deploy made owners'
+# links crawl. TTL semantics are unchanged (15 min current month / 6 h closed,
+# enforced from the original build ts); busts delete persisted entries too.
+def _owner_portal_cache_load():
+    out = {}
+    try:
+        raw = _load_json("owner_portal_cache.json", {}) or {}
+        now = time.time()
+        for k, v in raw.items():
+            if not isinstance(v, dict) or v.get("rep") is None:
+                continue
+            ts = float(v.get("ts") or 0)
+            if now - ts > 6 * 3600:
+                continue
+            o, _, m = str(k).partition("|")
+            if o and m:
+                out[(o, m)] = (v["rep"], ts)
+    except Exception as e:
+        print("owner portal cache load error:", e)
+    return out
+
+_owner_portal_cache = _owner_portal_cache_load()    # (owner, month) -> (payload_report, built_ts)
+_owner_partial_cache = {}   # (owner, mkey, ndays) -> (net, ts) — the editor's first-N-days compare
+
+_owner_portal_cache_save_state = {"lock": threading.Lock(), "ts": 0.0}
+
+def _owner_portal_cache_save(force=False):
+    """Atomic, locked, lightly throttled — parallel month warm-ups all call this."""
+    st = _owner_portal_cache_save_state
+    with st["lock"]:
+        now = time.time()
+        if not force and now - st["ts"] < 5:
+            return
+        st["ts"] = now
+        try:
+            _save_json("owner_portal_cache.json",
+                       {"%s|%s" % k: {"rep": v[0], "ts": v[1]} for k, v in _owner_portal_cache.items()})
+        except Exception as e:
+            print("owner portal cache save error:", e)
+
+def _exp_mkey(d):
+    """'YYYY-MM-DD…' → 'YYYY-MM' for month-scoped cache busts; junk → None (= all months)."""
+    s = str(d or "")[:7]
+    return s if re.fullmatch(r"20\d{2}-\d{2}", s) else None
 
 def _owner_cache_bust(owner=None, lid=None, mkey=None):
     """v2.2 Finding 2: drop memoized owner-month reports the moment underlying
@@ -24468,7 +24512,8 @@ def _owner_cache_bust(owner=None, lid=None, mkey=None):
     verification, publish). Without this the owner page + «معاينة كمالك» + the
     12-month trend keep serving a stale report for up to 6 hours.
     owner given → that owner. lid given → every registry owner of that listing.
-    Neither given → everything (registry-wide change). mkey=None → all months."""
+    Neither given → everything (registry-wide change). mkey=None → all months —
+    v2.2.2: pass mkey wherever derivable; broad busts force cold rebuilds."""
     try:
         owners = set()
         if owner:
@@ -24494,6 +24539,15 @@ def _owner_cache_bust(owner=None, lid=None, mkey=None):
                 continue
             _owner_portal_cache.pop(k, None)
             n += 1
+        # the first-N-days comparison partials follow the same scoping
+        for k in list(_owner_partial_cache.keys()):
+            if targeted and k[0] not in owners:
+                continue
+            if mkey and k[1] != mkey:
+                continue
+            _owner_partial_cache.pop(k, None)
+        if n:
+            _owner_portal_cache_save(force=True)    # deletions must never be lost
         return n
     except Exception as e:
         print("owner cache bust error:", e)
@@ -24534,6 +24588,7 @@ def _owner_month_report(owner, mkey):
         if len(_owner_portal_cache) > 400:
             for k in sorted(_owner_portal_cache, key=lambda k: _owner_portal_cache[k][1])[:100]:
                 _owner_portal_cache.pop(k, None)
+        _owner_portal_cache_save()      # v2.2.2: survive restarts
     return rep
 
 def _owner_portal_data(owner, mkey):
@@ -24551,11 +24606,23 @@ def _owner_portal_data(owner, mkey):
     # ---- 12-month net trend (each month through the SAME money math) ----
     trend = []
     y, m = int(mkey[:4]), int(mkey[5:7])
+    tkeys = []
     for i in range(11, -1, -1):
         ty, tm = y, m - i
         while tm <= 0:
             tm += 12; ty -= 1
-        k = f"{ty}-{tm:02d}"
+        tkeys.append(f"{ty}-{tm:02d}")
+    # v2.2.2 perf: warm cache-missed months in PARALLEL — a cold rebuild was 13
+    # serial Hostaway window pulls (minutes); 4 workers cut it to a few batches.
+    _warm = [k for k in tkeys + [f"{y-1}-{m:02d}"] if (owner, k) not in _owner_portal_cache]
+    if len(_warm) > 1:
+        try:
+            with ThreadPoolExecutor(max_workers=4) as _ex:
+                list(_ex.map(lambda k: _owner_month_report(owner, k), _warm))
+            _owner_portal_cache_save(force=True)
+        except Exception as e:
+            print("portal trend warmup error:", e)
+    for k in tkeys:
         r = _owner_month_report(owner, k)
         trend.append({"m": k, "net": (r or {}).get("owner_net"),
                       "income": (r or {}).get("total_income")})
@@ -33572,7 +33639,9 @@ async def _api_finance_adjust(request):
         _finance_adjust.pop(k, None)
     # v2.2 slice 0: saved adjusts feed the owner portal through build_owner_report —
     # the memoized owner-month reports are stale the moment one is saved.
-    _owner_cache_bust(lid=b.get("lid"))
+    _adj_mk = _exp_mkey(b.get("start"))
+    _owner_cache_bust(lid=b.get("lid"),
+                      mkey=(_adj_mk if _adj_mk and _adj_mk == _exp_mkey(b.get("end")) else None))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
@@ -33631,7 +33700,9 @@ async def _api_finance_line_edit(request):
         _finance_adjust.pop(k, None)
     else:
         _finance_adjust[k] = rec
-    _owner_cache_bust(lid=b.get("lid"))     # v2.2 slice 0: line edits must show on the owner page now
+    _le_mk = _exp_mkey(b.get("start"))      # v2.2 slice 0: line edits must show on the owner page now
+    _owner_cache_bust(lid=b.get("lid"),
+                      mkey=(_le_mk if _le_mk and _le_mk == _exp_mkey(b.get("end")) else None))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "line_overrides": lov})
 
@@ -33775,7 +33846,7 @@ async def _api_expenses_update(request):
     e = _expenses.get((b.get("id") or "").strip())
     if not e:
         return _json({"error": "not found"}, 404)
-    old_lid = e.get("listing_id")
+    old_lid, old_mk = e.get("listing_id"), _exp_mkey(e.get("expense_date"))
     for k in _EXP_EDITABLE:
         if k in b:
             if k == "amount":
@@ -33786,9 +33857,8 @@ async def _api_expenses_update(request):
             else:
                 e[k] = (b[k] or "").strip() if isinstance(b[k], str) else b[k]
     await asyncio.to_thread(_exp_process, e, allow_post=False)
-    _owner_cache_bust(lid=old_lid)                  # v2.2 slice 0
-    if e.get("listing_id") != old_lid:
-        _owner_cache_bust(lid=e.get("listing_id"))
+    for _lid2, _mk2 in {(old_lid, old_mk), (e.get("listing_id"), _exp_mkey(e.get("expense_date")))}:
+        _owner_cache_bust(lid=_lid2, mkey=_mk2)     # v2.2 slice 0 (+2.2.2 month-scoped)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
 
@@ -33965,8 +34035,9 @@ async def _api_expenses_resolve_apartment(request):
     e["apartment_locked"] = lid       # remember the manual choice
     _exp_log_event(e, "apartment_confirmed", by=(b.get("by") or "")[:60], detail=(name or str(lid)))
     await asyncio.to_thread(_exp_process, e, allow_post=True)
-    _owner_cache_bust(lid=old_lid)                  # v2.2 slice 0: the unit changed
-    _owner_cache_bust(lid=lid)
+    _ra_mk = _exp_mkey(e.get("expense_date"))       # v2.2 slice 0: the unit changed
+    _owner_cache_bust(lid=old_lid, mkey=_ra_mk)
+    _owner_cache_bust(lid=lid, mkey=_ra_mk)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
 
@@ -33993,7 +34064,7 @@ async def _api_expenses_discard(request):
         return _json({"error": "not found"}, 404)
     e["status"] = "discarded"
     e["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
-    _owner_cache_bust(lid=e.get("listing_id"))      # v2.2 slice 0
+    _owner_cache_bust(lid=e.get("listing_id"), mkey=_exp_mkey(e.get("expense_date")))   # v2.2 slice 0
     await asyncio.to_thread(persist_state)
     log_event("ops", f"تجاهل مصروف [{e.get('ref')}] · {e.get('apartment') or '—'}")
     return _json({"ok": True})
@@ -34019,7 +34090,7 @@ async def _api_expenses_delete(request):
             except Exception as ex:
                 return _json({"error": f"hostaway delete failed: {ex}"}, 502)
     _expenses.pop(e["id"], None)
-    _owner_cache_bust(lid=e.get("listing_id"))      # v2.2 slice 0
+    _owner_cache_bust(lid=e.get("listing_id"), mkey=_exp_mkey(e.get("expense_date")))   # v2.2 slice 0
     await asyncio.to_thread(persist_state)
     log_event("ops", f"حذف مصروف [{e.get('ref')}]" + (" + من Hostaway" if removed_remote else ""))
     return _json({"ok": True, "removed_hostaway": removed_remote})
@@ -34331,12 +34402,11 @@ async def _api_exp4_edit(request):
     if not e:
         return _json({"error": "not_found"}, 404)
     fields = b.get("fields") if isinstance(b.get("fields"), dict) else {}
-    old_lid = e.get("listing_id")
+    old_lid, old_mk = e.get("listing_id"), _exp_mkey(e.get("expense_date"))
     _ok, changed = _exp4_edit(e, fields, by=by)
     if changed:
-        _owner_cache_bust(lid=old_lid)              # v2.2 slice 0
-        if e.get("listing_id") != old_lid:
-            _owner_cache_bust(lid=e.get("listing_id"))
+        for _lid2, _mk2 in {(old_lid, old_mk), (e.get("listing_id"), _exp_mkey(e.get("expense_date")))}:
+            _owner_cache_bust(lid=_lid2, mkey=_mk2)     # v2.2 slice 0 (+2.2.2 month-scoped)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "changed": changed, "view": _exp4_view(e)})
 

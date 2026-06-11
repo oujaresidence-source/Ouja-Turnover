@@ -21,7 +21,9 @@ ids — the table can't drift from the real statement math.
 """
 
 import json
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -316,17 +318,19 @@ def listings_search(q):
     return {"ok": True, "rows": rows[:30]}
 
 
-def _invalidate_owner_cache(owner):
+def _invalidate_owner_cache(owner, mkey=None):
     """Terms changed → the memoized monthly reports for this owner are stale.
     v2.2: delegates to bot.py's _owner_cache_bust (the ONE implementation all
-    writers share); falls back to the direct pop for older bot.py builds."""
+    writers share); falls back to the direct pop for older bot.py builds.
+    v2.2.2: pass mkey when the change is month-scoped (statement edits) so the
+    other 12 cached months survive — broad busts forced cold rebuilds."""
     try:
         bust = getattr(_B(), "_owner_cache_bust", None)
         if bust is not None:
-            bust(owner=owner)
+            bust(owner=owner, mkey=mkey)
             return
         cache = _B()._owner_portal_cache
-        for key in [k for k in cache if k[0] == owner]:
+        for key in [k for k in cache if k[0] == owner and (not mkey or k[1] == mkey)]:
             cache.pop(key, None)
     except Exception:
         pass
@@ -468,15 +472,27 @@ def _partial_net(owner, mkey, ndays):
     same-days-of-last-month comparison the editor header shows. Runs the real
     statement engine over the partial window (booking-driven; month-keyed
     manual adjusts don't apply to partial windows — it's a labeled pace
-    indicator, not a statement)."""
+    indicator, not a statement).
+    v2.2.2: memoized in bot.py's _owner_partial_cache (busted with the month) —
+    uncached this was a fresh Hostaway window pull on EVERY editor load (~29s)."""
     B = _B()
+    ck = (owner, mkey, int(ndays))
+    pc = getattr(B, "_owner_partial_cache", None)
+    if pc is not None:
+        hit = pc.get(ck)
+        if hit and (time.time() - hit[1] < 6 * 3600):
+            return hit[0]
     start, end = B._month_bounds(mkey)
     pend = min(end, start + timedelta(days=max(1, int(ndays)) - 1))
     items = B._finance_collect_items("owner", [], [owner], start, pend)
     rep = items[0]["report"] if items else None
-    if rep is None:
-        return None
-    return _fnum(rep.get("owner_net") or 0)
+    val = _fnum(rep.get("owner_net") or 0) if rep is not None else None
+    if pc is not None and val is not None:
+        pc[ck] = (val, time.time())
+        if len(pc) > 300:
+            for k in sorted(pc, key=lambda k: pc[k][1])[:100]:
+                pc.pop(k, None)
+    return val
 
 
 def month_meta(owner, mkey, rep=None, with_compare=False):
@@ -1049,7 +1065,7 @@ def statement_edit(request, body):
                         _stmt_key(owner, mkey), before=before, after=after)
     except Exception:
         pass
-    _invalidate_owner_cache(owner)
+    _invalidate_owner_cache(owner, mkey)
     return statement_payload(owner, mkey), 200
 
 
@@ -1075,7 +1091,7 @@ def statement_publish(request, body):
                    {"version": ver, "net": fresh.get("owner_net")},
                    body.get("reason") or "")
     _stmt_save()
-    _invalidate_owner_cache(owner)
+    _invalidate_owner_cache(owner, mkey)
     try:
         B.log_event("finance", "نُشر كشف %s — %s (نسخة %d)" % (owner, mkey, ver))
     except Exception:
@@ -1128,12 +1144,23 @@ def owner_profile(owner):
     cur = today.isoformat()[:7]
     months = []
     y, m = int(cur[:4]), int(cur[5:7])
+    mkeys = []
     for i in range(12):
         ty, tm = y, m - i
         while tm <= 0:
             tm += 12
             ty -= 1
-        k = "%04d-%02d" % (ty, tm)
+        mkeys.append("%04d-%02d" % (ty, tm))
+    # v2.2.2 perf: warm missing months in parallel (cold grid was 12 serial pulls)
+    try:
+        pcache = getattr(B, "_owner_portal_cache", {}) or {}
+        warm = [k for k in mkeys if (owner, k) not in pcache]
+        if len(warm) > 1:
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                list(ex.map(lambda k: B._owner_month_report(owner, k), warm))
+    except Exception as e:
+        print("owner_profile warmup error:", e)
+    for k in mkeys:
         try:
             rep = B._owner_month_report(owner, k)
         except Exception as e:
