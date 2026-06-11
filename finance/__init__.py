@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.2.0-s1"
+ERP_VERSION = "2.2.0-s2"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -487,6 +487,16 @@ async def _h_api_stmt_diff(request):
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
+async def _h_api_stmt_tieout(request):
+    """v2.2 slice 2: تطابق الكشوف — per-unit subtotals vs aggregate vs PDF fixture."""
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    data = await asyncio.to_thread(OW.statement_tieout, owner, mkey)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
 async def _h_api_cycle(request):
     mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.cycle_board, mkey)
@@ -645,6 +655,7 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/statement/edit", _guarded(_h_api_stmt_edit, write=True))
     app.router.add_post("/erp/api/owners/statement/publish", _guarded(_h_api_stmt_publish, write=True))
     app.router.add_get("/erp/api/owners/statement/diff", _guarded(_h_api_stmt_diff))
+    app.router.add_get("/erp/api/owners/statement/tieout", _guarded(_h_api_stmt_tieout))
     app.router.add_get("/erp/api/owners/cycle", _guarded(_h_api_cycle))
     app.router.add_post("/erp/api/owners/cycle/status", _guarded(_h_api_cycle_status, write=True))
     app.router.add_post("/erp/api/owners/cycle/links", _guarded(_h_api_cycle_links, write=True))

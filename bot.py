@@ -24548,7 +24548,10 @@ def _owner_portal_data(owner, mkey):
     avail = max(1, len(lids)) * days_in_month
     port_booked = 0
     try:
-        nights_all, _ = _explode_nights(get_reservations_cached())
+        # v2.2 slice 2 (trap #4): the full-history cache truncates and silently
+        # drops the NEWEST months — portfolio occupancy must use the same
+        # targeted window pull the statement itself uses.
+        nights_all, _ = _explode_nights(fetch_reservations_window(start, end))
         for _lid, d, _nl in nights_all:
             if start <= d <= end:
                 port_booked += 1
@@ -24595,7 +24598,9 @@ def _owner_portal_data(owner, mkey):
     n_start, n_end = _month_bounds(f"{ny}-{nm:02d}")
     nxt_nights = 0; nxt_rev = 0.0; nxt_known = True
     try:
-        for r in get_reservations_cached():
+        # v2.2 slice 2 (trap #4): next-month preview reads a targeted window —
+        # NEVER the truncating full-history cache.
+        for r in fetch_reservations_window(n_start, n_end):
             if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
                 continue
             if r.get("listingMapId") not in lids:

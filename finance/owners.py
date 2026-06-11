@@ -512,6 +512,101 @@ def month_meta(owner, mkey, rep=None, with_compare=False):
     return out
 
 
+# ---- v2.2 slice 2: تطابق الكشوف — per-unit subtotals vs the aggregate + hard fixtures ----
+
+TIEOUT_FIXTURES = [
+    {
+        # أبو فهد الخطيب — May 2026: his 8 system-generated per-apartment PDFs
+        # (01-05 → 31-05) sum to net 48,115.05 exactly. THE regression anchor
+        # for the whole money engine — never force totals to match it; a diff
+        # means a rule changed and must be explained per unit.
+        "owner_keys": ["فهد", "خطيب"],
+        "month": "2026-05",
+        "totals": {"net": 48115.05, "income": 59016.76, "fees": 9962.90,
+                   "expenses": 938.81, "manual_income": 3667.30},
+        "units": {"101a": 7674.62, "101b": 6864.72, "102a": 6999.52, "102b": 6441.11,
+                  "201b": 5272.71, "201a": 5302.78, "202a": 4894.07, "202b": 4665.52},
+    },
+]
+
+
+def _tieout_fixture(owner, mkey):
+    for f in TIEOUT_FIXTURES:
+        if f["month"] == mkey and all(k in (owner or "") for k in f["owner_keys"]):
+            return f
+    return None
+
+
+def statement_tieout(owner, mkey):
+    """Per-apartment subtotals (the SAME per-unit engine the apartment PDFs
+    render) vs the live aggregate statement, plus the hard-number PDF fixture
+    when one exists for (owner, month). Read-only; mismatches are SHOWN per
+    unit with their deltas — totals are never forced."""
+    B = _B()
+    recs = [r for r in api._registry_rows() if (r.get("owner") or "").strip() == (owner or "").strip()]
+    if not recs:
+        return {"error": "owner_not_in_registry", "owner": owner}
+    fixture = _tieout_fixture(owner, mkey)
+    fx_units = {B._owner_key(k): v for k, v in ((fixture or {}).get("units") or {}).items()}
+    units = []
+    sums = {"income": Decimal(0), "fees": Decimal(0), "expenses": Decimal(0),
+            "cleaning": Decimal(0), "net": Decimal(0), "manual_income": Decimal(0)}
+    for rec in recs:
+        apt = rec.get("apartment") or ""
+        rep, _fn = unit_statement(rec, mkey)
+        if rep is None:
+            units.append({"apartment": apt, "lid": None, "error": "no_report",
+                          "fixture_net": fx_units.get(B._owner_key(apt)),
+                          "delta_vs_fixture": None})
+            continue
+        row = {"apartment": apt, "lid": rep.get("lid"),
+               "income": rep.get("total_income"), "fees": rep.get("ouja_fee"),
+               "expenses": rep.get("expenses"),
+               "cleaning": (rep.get("cleaning") or {}).get("total") or 0,
+               "manual_income": rep.get("manual_income") or 0,
+               "net": rep.get("owner_net")}
+        for k in ("income", "fees", "expenses", "cleaning", "net", "manual_income"):
+            sums[k] += _D(row[k])
+        fxn = fx_units.get(B._owner_key(apt))
+        row["fixture_net"] = fxn
+        row["delta_vs_fixture"] = (_fnum(_D(row["net"]) - _D(fxn)) if fxn is not None else None)
+        units.append(row)
+    agg = compute_owner_statement(owner, mkey)             # WITH the editor's saved edits
+    agg_t = {"income": (agg or {}).get("total_income"), "fees": (agg or {}).get("ouja_fee"),
+             "expenses": (agg or {}).get("expenses"),
+             "cleaning": ((agg or {}).get("cleaning") or {}).get("total") or 0,
+             "net": (agg or {}).get("owner_net"),
+             "adjustments": (agg or {}).get("adjustments_total") or 0,
+             "has_manual_edits": bool((agg or {}).get("has_manual_edits"))}
+    sums_f = {k: _fnum(v) for k, v in sums.items()}
+    # aggregate − sum(units): nonzero ONLY when owner-level editor decisions
+    # (excludes / includes / manual lines / adjustments) moved the totals.
+    agg_minus_units = {k: (_fnum(_D(agg_t.get(k)) - _D(sums_f.get(k)))
+                           if agg_t.get(k) is not None else None)
+                       for k in ("income", "fees", "expenses", "cleaning", "net")}
+    out = {"ok": True, "owner": owner, "month": mkey,
+           "generated_at": datetime.now(B.TZ).isoformat(timespec="seconds"),
+           "units": units, "units_sum": sums_f,
+           "aggregate": agg_t, "agg_minus_units": agg_minus_units,
+           "balanced": all((v is None or abs(v) < 0.02) for v in agg_minus_units.values()),
+           "month_meta": month_meta(owner, mkey)}
+    if fixture:
+        mism = [u["apartment"] for u in units
+                if u.get("delta_vs_fixture") is not None and abs(u["delta_vs_fixture"]) >= 0.02]
+        missing = [k for k in ((fixture.get("units") or {}))
+                   if B._owner_key(k) not in {B._owner_key(u["apartment"]) for u in units}]
+        d_units = _fnum(_D(sums_f["net"]) - _D(fixture["totals"]["net"]))
+        out["fixture"] = {
+            "month": fixture["month"], "totals": fixture["totals"],
+            "delta_net_units_sum": d_units,
+            "delta_net_aggregate": (_fnum(_D(agg_t["net"]) - _D(fixture["totals"]["net"]))
+                                    if agg_t.get("net") is not None else None),
+            "unit_mismatches": mism, "fixture_units_missing": missing,
+            "passed": (abs(d_units) < 0.02 and not mism and not missing),
+        }
+    return out
+
+
 # ====================== Slice 2: statement store + editor engine ======================
 
 _STMT_FILE = "owner_statements.json"

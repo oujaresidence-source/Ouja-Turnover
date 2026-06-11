@@ -221,6 +221,15 @@
       mm_final: 'نهائي', mm_cur: 'جاري',
       mm_cmp: 'أول {d} يوم من {pm}: {a} — {cm}: {b}',
       mnames: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
+      /* --- v2.2 slice 2: تطابق الكشوف --- */
+      to_btn: 'تطابق الكشوف', to_unit: 'الشقة', to_net: 'الصافي', to_fix: 'مرجع PDF',
+      to_delta: 'الفرق', to_inc: 'الدخل', to_fee: 'الرسوم', to_exp: 'المصاريف', to_clean: 'النظافة',
+      to_units_sum: 'مجموع الشقق', to_agg: 'إجمالي الكشف (بعد التعديلات)',
+      to_balanced: 'متطابق ✓ — مجموع الشقق يساوي الإجمالي',
+      to_adj_note: 'الفرق سببه قرارات المحرر (استبعاد/إدراج/مصاريف يدوية/تسويات) — مو خطأ حساب',
+      to_fix_pass: 'مطابق لكشوف الـ PDF ✓', to_fix_fail: 'ما يطابق مرجع الـ PDF — راجع الوحدات المعلّمة',
+      to_drill: 'تشخيص', to_nofix: 'ما فيه مرجع PDF محفوظ لهذا الشهر — الجدول يقارن الشقق بالإجمالي',
+      to_missing: 'وحدات في المرجع ما هي بالسجل: ',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -444,6 +453,15 @@
       mm_final: 'final', mm_cur: 'in progress',
       mm_cmp: 'First {d} days of {pm}: {a} — {cm}: {b}',
       mnames: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      /* --- v2.2 slice 2: statement tie-out --- */
+      to_btn: 'Tie-out check', to_unit: 'Unit', to_net: 'Net', to_fix: 'PDF reference',
+      to_delta: 'Delta', to_inc: 'Income', to_fee: 'Fees', to_exp: 'Expenses', to_clean: 'Cleaning',
+      to_units_sum: 'Units total', to_agg: 'Statement total (after edits)',
+      to_balanced: 'Balanced ✓ — units sum equals the aggregate',
+      to_adj_note: 'Difference comes from editor decisions (exclude/include/manual lines/adjustments) — not a math error',
+      to_fix_pass: 'Matches the PDF statements ✓', to_fix_fail: 'Does NOT match the PDF reference — check the flagged units',
+      to_drill: 'Diagnose', to_nofix: 'No PDF reference stored for this month — comparing units vs aggregate only',
+      to_missing: 'Units in the reference missing from the registry: ',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -1694,6 +1712,13 @@
           toast(t('se_pubd').replace('{v}', r.version));
           loadStmtEd(dP.owner, dP.month);
         })
+        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'se-tieout') {
+      var dT = store.D.stmtEd || {};
+      el.disabled = true;
+      api('/erp/api/owners/statement/tieout?owner=' + encodeURIComponent(dT.owner) + '&m=' + encodeURIComponent(dT.month))
+        .then(function (r) { el.disabled = false; renderTieout(r); })
         .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'se-diff') {
@@ -3081,6 +3106,71 @@
   /* ----- slice 2: statement editor + «ليش هالرقم؟» + audit trail ----- */
   var seUI = { tab: 'stmt', explain: '' };
 
+  /* v2.2 slice 2: per-apartment subtotal bar — always on top of the editor */
+  function seUnitsBar(s) {
+    var parts = s.apartments || [];
+    if (!parts.length) return '';
+    return '<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 16px 8px">' +
+      parts.map(function (p) {
+        return '<div style="flex:none;border:1px solid var(--line);border-radius:10px;padding:6px 12px;min-width:108px;background:var(--surface)">' +
+          '<div style="font-size:11px;color:var(--mut)">' + esc(p.apartment || '—') + '</div>' +
+          '<div style="font-weight:700;font-size:13px"><code>' + fmtAmt(p.owner_net) + '</code></div>' +
+          '<div style="font-size:10px;color:var(--mut)" dir="ltr">' + fmtAmt(p.total_income) + ' − ' + fmtAmt(p.ouja_fee) + ' − ' + fmtAmt(p.expenses || 0) + '</div>' +
+          '</div>';
+      }).join('') + '</div>';
+  }
+
+  /* v2.2 slice 2: تطابق الكشوف — the tie-out table */
+  function renderTieout(r) {
+    var box = $('#seTieBox');
+    if (!box) return;
+    function fa(x) { return x == null ? '—' : fmtAmt(x); }
+    var fx = r.fixture;
+    var head = '<tr><th>' + esc(t('to_unit')) + '</th><th>' + esc(t('to_inc')) + '</th><th>' + esc(t('to_fee')) + '</th>' +
+      '<th>' + esc(t('to_exp')) + '</th><th>' + esc(t('to_clean')) + '</th><th>' + esc(t('to_net')) + '</th>' +
+      (fx ? ('<th>' + esc(t('to_fix')) + '</th><th>' + esc(t('to_delta')) + '</th>') : '') + '<th></th></tr>';
+    var rows = (r.units || []).map(function (u) {
+      var bad = u.delta_vs_fixture != null && Math.abs(u.delta_vs_fixture) >= 0.02;
+      var drill = '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '&m=' + esc(r.month) + '">' + esc(t('to_drill')) + '</a>';
+      return '<tr' + (bad ? ' style="background:var(--red-soft)"' : '') + '>' +
+        '<td><b>' + esc(u.apartment || '—') + '</b>' + (u.error ? ' <span class="tag bad">' + esc(u.error) + '</span>' : '') + '</td>' +
+        '<td class="c-amt"><code>' + fa(u.income) + '</code></td>' +
+        '<td class="c-amt"><code>' + fa(u.fees) + '</code></td>' +
+        '<td class="c-amt"><code>' + fa(u.expenses) + '</code></td>' +
+        '<td class="c-amt"><code>' + fa(u.cleaning) + '</code></td>' +
+        '<td class="c-amt"><b><code>' + fa(u.net) + '</code></b></td>' +
+        (fx ? ('<td class="c-amt"><code>' + (u.fixture_net != null ? fa(u.fixture_net) : '—') + '</code></td>' +
+               '<td class="c-amt">' + (u.delta_vs_fixture == null ? '—'
+                 : (Math.abs(u.delta_vs_fixture) < 0.02 ? '<span class="tag soft">✓</span>'
+                   : '<b style="color:var(--red)"><code>' + (u.delta_vs_fixture > 0 ? '+' : '') + fa(u.delta_vs_fixture) + '</code></b>')) + '</td>') : '') +
+        '<td>' + drill + '</td></tr>';
+    }).join('');
+    var us = r.units_sum || {}, ag = r.aggregate || {}, dl = r.agg_minus_units || {};
+    var sumRow = '<tr style="border-top:2px solid var(--line)"><td><b>' + esc(t('to_units_sum')) + '</b></td>' +
+      '<td class="c-amt"><code>' + fa(us.income) + '</code></td><td class="c-amt"><code>' + fa(us.fees) + '</code></td>' +
+      '<td class="c-amt"><code>' + fa(us.expenses) + '</code></td><td class="c-amt"><code>' + fa(us.cleaning) + '</code></td>' +
+      '<td class="c-amt"><b><code>' + fa(us.net) + '</code></b></td>' + (fx ? '<td></td><td></td>' : '') + '<td></td></tr>' +
+      '<tr><td><b>' + esc(t('to_agg')) + '</b></td>' +
+      '<td class="c-amt"><code>' + fa(ag.income) + '</code></td><td class="c-amt"><code>' + fa(ag.fees) + '</code></td>' +
+      '<td class="c-amt"><code>' + fa(ag.expenses) + '</code></td><td class="c-amt"><code>' + fa(ag.cleaning) + '</code></td>' +
+      '<td class="c-amt"><b><code>' + fa(ag.net) + '</code></b></td>' + (fx ? '<td></td><td></td>' : '') + '<td></td></tr>';
+    var verdict = r.balanced
+      ? '<span class="tag soft">' + esc(t('to_balanced')) + '</span>'
+      : '<span class="tag warnt">Δ ' + fa(dl.net) + ' — ' + esc(t('to_adj_note')) + '</span>';
+    var fxLine = '';
+    if (fx) {
+      fxLine = '<div style="padding:6px 0">' +
+        (fx.passed ? '<span class="tag soft" style="font-weight:700">' + esc(t('to_fix_pass')) + '</span>'
+                   : '<span class="tag bad" style="font-weight:700">' + esc(t('to_fix_fail')) + ' (Δ <code>' + fa(fx.delta_net_units_sum) + '</code>)</span>') +
+        ((fx.fixture_units_missing || []).length ? ' <span class="tag bad">' + esc(t('to_missing')) + esc(fx.fixture_units_missing.join('، ')) + '</span>' : '') +
+        '</div>';
+    } else {
+      fxLine = '<div class="grp-hint" style="padding:6px 0 0">' + esc(t('to_nofix')) + '</div>';
+    }
+    box.innerHTML = '<div class="om-form" style="margin:8px 16px"><b>' + esc(t('to_btn')) + ' — <code>' + esc(r.month) + '</code></b> ' + verdict + fxLine +
+      '<div class="table-card" style="border:none;box-shadow:none;overflow-x:auto"><table class="btable"><thead>' + head + '</thead><tbody>' + rows + sumRow + '</tbody></table></div></div>';
+  }
+
   function seReasonRow(cls, extra) {
     return '<div class="om-form se-inline" data-need="' + cls + '" hidden>' + (extra || '') +
       '<input class="in se-reason" placeholder="' + esc(t('se_reason_req')) + '">' +
@@ -3215,6 +3305,7 @@
       '<span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
       '<select class="in" id="seMonth">' + monthOptions(months, d.month) + '</select>' +
       '<span class="tag' + (pub ? ' soft' : '') + '">' + (pub ? (esc(t('se_ver')) + ' ' + pub.version + ' · ' + esc((pub.at || '').slice(0, 10))) : esc(t('se_never_pub'))) + '</span>' +
+      '<button class="btn ghost sm" data-act="se-tieout">' + esc(t('to_btn')) + '</button>' +
       '<button class="btn ghost sm" data-act="se-diff">' + esc(t('se_recompute')) + '</button>' +
       '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
       '</span></header>' +
@@ -3227,6 +3318,8 @@
       (seUI.tab === 'audit'
         ? ('<div style="padding:4px 16px 16px">' + (auditRows || ('<div class="grp-hint" style="padding:0">' + esc(t('se_audit_empty')) + '</div>')) + '</div>')
         : (
+          seUnitsBar(s) +
+          '<div id="seTieBox"></div>' +
           '<div id="seDiffBox"></div>' +
           '<div class="stat-row">' +
           statBtn('income', t('se_income') + (running ? ' (' + t('mm_sofar') + ')' : ''), s.total_income) +
