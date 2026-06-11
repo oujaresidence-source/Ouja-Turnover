@@ -215,6 +215,12 @@
       cy_template: 'قالب الواتساب', cy_template_hint: 'المتغيرات: {owner} {month} {net} {link}',
       cy_template_saved: 'انحفظ القالب ✓', cy_no_link: 'بدون رابط نشط',
       cy_all: 'الكل', cy_anom_none: 'سليم ✓',
+      /* --- v2.2 slice 1: the month must never lie --- */
+      mm_running: 'شهر جاري — اليوم {d} من {n}', mm_sofar: 'حتى الآن',
+      mm_proj: 'متوقع بنهاية الشهر', mm_est: 'تقديري — وتيرة خطية',
+      mm_final: 'نهائي', mm_cur: 'جاري',
+      mm_cmp: 'أول {d} يوم من {pm}: {a} — {cm}: {b}',
+      mnames: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -432,6 +438,12 @@
       cy_template: 'WhatsApp template', cy_template_hint: 'Variables: {owner} {month} {net} {link}',
       cy_template_saved: 'Template saved ✓', cy_no_link: 'No active link',
       cy_all: 'All', cy_anom_none: 'Clean ✓',
+      /* --- v2.2 slice 1: the month must never lie --- */
+      mm_running: 'Month in progress — day {d} of {n}', mm_sofar: 'so far',
+      mm_proj: 'Projected month-end', mm_est: 'estimate — linear pace',
+      mm_final: 'final', mm_cur: 'in progress',
+      mm_cmp: 'First {d} days of {pm}: {a} — {cm}: {b}',
+      mnames: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -2639,6 +2651,55 @@
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_budget', srvMsg(e)); });
   }
 
+  /* ----- v2.2 slice 1: month-state helpers — the month must never lie ----- */
+  function curMonthKey() {
+    var n = new Date();
+    return n.getFullYear() + '-' + ('0' + (n.getMonth() + 1)).slice(-2);
+  }
+  function monthState(m) {
+    var c = curMonthKey();
+    return m === c ? 'running' : (m < c ? 'closed' : 'future');
+  }
+  function mName(m) {
+    var i = parseInt(String(m).slice(5, 7), 10) - 1;
+    var arr = t('mnames');
+    return (arr && arr[i] ? arr[i] : m) + ' ' + String(m).slice(0, 4);
+  }
+  function monthOptions(list, selected) {
+    return list.map(function (m) {
+      var st = monthState(m);
+      var mark = st === 'running' ? (' — ' + t('mm_cur')) : (st === 'closed' ? ' — ' + t('mm_final') + ' ✓' : '');
+      return '<option value="' + m + '"' + (m === selected ? ' selected' : '') + '>' + esc(m + mark) + '</option>';
+    }).join('');
+  }
+  function lastNMonths(n) {
+    var out = [], now = new Date();
+    for (var i = 0; i < n; i++) {
+      var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2));
+    }
+    return out;
+  }
+  function mmStrip(meta) {
+    /* the prominent running-month strip: badge + projection + same-days compare */
+    if (!meta || meta.state !== 'running') return '';
+    var h = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:2px 16px 8px">' +
+      '<span class="tag warnt" style="font-weight:700">⏳ ' +
+      esc(t('mm_running').replace('{d}', meta.day_of_month).replace('{n}', meta.days_in_month)) + '</span>';
+    if (meta.projection != null) {
+      h += '<span class="tag">' + esc(t('mm_proj')) + ': ~<code>' + fmtAmt(meta.projection) + '</code> <span style="color:var(--mut)">(' + esc(t('mm_est')) + ')</span></span>';
+    }
+    var c = meta.compare;
+    if (c && c.prev_net != null && c.cur_net != null) {
+      var dl = c.cur_net - c.prev_net;
+      h += '<span class="tag soft">' + esc(
+        t('mm_cmp').replace('{d}', c.days).replace('{pm}', mName(c.prev_month))
+          .replace('{cm}', mName(meta.month)).replace('{a}', fmtAmt(c.prev_net)).replace('{b}', fmtAmt(c.cur_net))) +
+        ' <b style="color:' + (dl >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (dl >= 0 ? '+' : '−') + fmtAmt(Math.abs(dl)) + '</b></span>';
+    }
+    return h + '</div>';
+  }
+
   /* ================= الملاك Owners ================= */
   function ownerRowHtml(r) {
     var lk = r.link || {};
@@ -2726,12 +2787,7 @@
       return '<button class="chip-f' + (cyUI.filter === key ? ' on' : '') + '" data-act="cy-filter" data-f="' + key + '">' +
         esc(label) + ' <code>' + n + '</code></button>';
     }
-    var months = [];
-    var now = new Date();
-    for (var i = 0; i < 13; i++) {
-      var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2));
-    }
+    var months = lastNMonths(13);
     var rows = (d.rows || []).filter(function (r) {
       if (cyUI.filter === 'flagged') return r.flagged;
       if (cyUI.filter === 'ready') return r.status === 'ready' || r.status === 'reviewed';
@@ -2749,13 +2805,12 @@
     return '<section class="card grp">' +
       '<header class="grp-h"><span class="grp-ico">📆</span><h2>' + esc(t('cy_title')) + '</h2>' +
       '<span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
-      '<select class="in" id="cyMonth">' + months.map(function (m) {
-        return '<option value="' + m + '"' + (m === d.month ? ' selected' : '') + '>' + m + '</option>';
-      }).join('') + '</select>' +
+      '<select class="in" id="cyMonth">' + monthOptions(months, d.month) + '</select>' +
       '<button class="btn ghost xs" data-act="cy-copy-all">' + esc(t('cy_copy_all')) + '</button>' +
       '<button class="btn danger-ghost xs" data-act="cy-regen-all">' + esc(t('cy_regen_all')) + '</button>' +
       '<button class="btn ghost xs" data-act="cy-tpl">' + esc(t('cy_template')) + '</button>' +
       '</span></header>' +
+      mmStrip(d.month_meta) +
       (cyUI.tplOpen
         ? '<div class="om-form" style="margin:0 16px 10px"><div class="grp-hint" style="padding:0">' + esc(t('cy_template_hint')) + '</div>' +
           '<textarea class="in" id="cyTpl" rows="4" style="resize:vertical">' + esc(d.wa_template || '') + '</textarea>' +
@@ -3141,12 +3196,9 @@
         '<span>' + esc(label) + ' · <i style="font-style:normal;color:var(--accent)">' + esc(t('se_why')) + '</i></span>' +
         '<b>' + (neg ? '−' : '') + fmtAmt(val) + '</b></button>';
     }
-    var months = [];
-    var now = new Date();
-    for (var i = 0; i < 13; i++) {
-      var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2));
-    }
+    var months = lastNMonths(13);
+    var mm = d.month_meta || {};
+    var running = mm.state === 'running';
     var pub = d.published;
     var foots = (s.footnotes || []).map(function (f) {
       return '<span class="tag">' + esc(store.lang === 'ar' ? f.text_ar : (f.text_en || f.text_ar)) + '</span>';
@@ -3161,13 +3213,12 @@
       '<section class="card grp"><header class="grp-h"><span class="grp-ico">🧾</span>' +
       '<h2>' + esc(t('se_title')) + ' — ' + esc(d.owner) + '</h2>' +
       '<span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
-      '<select class="in" id="seMonth">' + months.map(function (m) {
-        return '<option value="' + m + '"' + (m === d.month ? ' selected' : '') + '>' + m + '</option>';
-      }).join('') + '</select>' +
+      '<select class="in" id="seMonth">' + monthOptions(months, d.month) + '</select>' +
       '<span class="tag' + (pub ? ' soft' : '') + '">' + (pub ? (esc(t('se_ver')) + ' ' + pub.version + ' · ' + esc((pub.at || '').slice(0, 10))) : esc(t('se_never_pub'))) + '</span>' +
       '<button class="btn ghost sm" data-act="se-diff">' + esc(t('se_recompute')) + '</button>' +
       '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
       '</span></header>' +
+      mmStrip(mm) +
       (d.computed_at ? '<div class="grp-hint" style="padding-top:0">' + esc(t('se_asof')) + ': <code>' + esc(String(d.computed_at).slice(0, 16)) + '</code></div>' : '') +
       '<div class="wsnav" style="position:static;border:none;padding:4px 16px">' +
       '<a class="ws' + (seUI.tab === 'stmt' ? ' on' : '') + '" data-act="se-tab" data-tab="stmt">' + esc(t('se_tab_stmt')) + '</a>' +
@@ -3178,12 +3229,12 @@
         : (
           '<div id="seDiffBox"></div>' +
           '<div class="stat-row">' +
-          statBtn('income', t('se_income'), s.total_income) +
+          statBtn('income', t('se_income') + (running ? ' (' + t('mm_sofar') + ')' : ''), s.total_income) +
           statBtn('fees', t('se_fees'), s.ouja_fee, true) +
           statBtn('expenses', t('se_expenses'), s.expenses, true) +
           statBtn('cleaning', t('se_cleaning'), (s.cleaning || {}).total, true) +
           statBtn('adjustments', t('se_adjust'), s.adjustments_total || 0) +
-          statBtn('net', t('se_net'), s.owner_net) +
+          statBtn('net', t('se_net') + (running ? ' (' + t('mm_sofar') + ')' : ''), s.owner_net) +
           '</div>' +
           (seUI.explain ? ('<div style="padding:0 16px 10px">' + seExplainHtml(seUI.explain, d.explain) + '</div>') : '') +
           (foots ? ('<div style="padding:0 16px 10px"><b style="font-size:12px">' + esc(t('se_footnotes')) + ':</b> ' + foots + '</div>') : '') +

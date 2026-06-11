@@ -461,6 +461,57 @@ def unit_statement(rec, mkey, force_rederive=False):
     return out, footnotes
 
 
+# ====================== v2.2 slice 1: the month must never lie ======================
+
+def _partial_net(owner, mkey, ndays):
+    """Owner aggregate net for the FIRST `ndays` days of a month — the
+    same-days-of-last-month comparison the editor header shows. Runs the real
+    statement engine over the partial window (booking-driven; month-keyed
+    manual adjusts don't apply to partial windows — it's a labeled pace
+    indicator, not a statement)."""
+    B = _B()
+    start, end = B._month_bounds(mkey)
+    pend = min(end, start + timedelta(days=max(1, int(ndays)) - 1))
+    items = B._finance_collect_items("owner", [], [owner], start, pend)
+    rep = items[0]["report"] if items else None
+    if rep is None:
+        return None
+    return _fnum(rep.get("owner_net") or 0)
+
+
+def month_meta(owner, mkey, rep=None, with_compare=False):
+    """Honest month-state block rendered everywhere a month shows (v2.2 slice 1):
+    state (running/closed/future), day counters, net-so-far, a LABELED linear
+    pace projection, and (editor only) first-N-days vs last month."""
+    B = _B()
+    today = datetime.now(B.TZ).date()
+    cur = today.isoformat()[:7]
+    start, end = B._month_bounds(mkey)
+    days_in_month = (end - start).days + 1
+    state = "running" if mkey == cur else ("closed" if mkey < cur else "future")
+    out = {"month": mkey, "state": state, "days_in_month": days_in_month,
+           "day_of_month": today.day if state == "running" else None}
+    if state != "running":
+        return out
+    elapsed = max(1, today.day)
+    net = float((rep or {}).get("owner_net") or 0) if rep is not None else None
+    if net is not None:
+        out["net_so_far"] = _fnum(net)
+        out["projection"] = int(round(net / elapsed * days_in_month))
+        out["projection_basis"] = "linear"
+    if with_compare and owner:
+        try:
+            pm = api._prior_month(mkey)
+            prev_partial = _partial_net(owner, pm, elapsed)
+            if prev_partial is not None:
+                out["compare"] = {"prev_month": pm, "days": elapsed,
+                                  "prev_net": prev_partial,
+                                  "cur_net": (_fnum(net) if net is not None else None)}
+        except Exception as e:
+            print("month_meta compare error:", e)
+    return out
+
+
 # ====================== Slice 2: statement store + editor engine ======================
 
 _STMT_FILE = "owner_statements.json"
@@ -744,6 +795,7 @@ def statement_payload(owner, mkey):
     pub = (rec or {}).get("published") or {}
     return {"ok": True, "owner": owner, "month": mkey,
             "computed_at": datetime.now(_B().TZ).isoformat(timespec="seconds"),
+            "month_meta": month_meta(owner, mkey, live, with_compare=True),
             "statement": live,
             "explain": _build_explain(live),
             "edits": (rec or {}).get("edits") or {},
@@ -765,7 +817,7 @@ def statement_edit(request, body):
     freshly recomputed statement (totals live-update, R1-style)."""
     B = _B()
     owner = (body.get("owner") or "").strip()
-    mkey = api._month_key_or_now(body.get("m"))
+    mkey = api._month_key_or_prev(body.get("m"))
     op = (body.get("op") or "").strip()
     reason = (body.get("reason") or "").strip()
     if op not in _EDIT_OPS:
@@ -864,7 +916,7 @@ def statement_publish(request, body):
     on the page so a stale PDF is recognizable."""
     B = _B()
     owner = (body.get("owner") or "").strip()
-    mkey = api._month_key_or_now(body.get("m"))
+    mkey = api._month_key_or_prev(body.get("m"))
     fresh = compute_owner_statement(owner, mkey)
     if fresh is None:
         return {"error": "owner_not_in_registry"}, 404
@@ -1083,6 +1135,7 @@ def cycle_board(mkey):
               "flagged": sum(1 for r in rows if r["flagged"])}
     total_net = round(sum(float(r["net"]) for r in rows if r["net"] is not None), 2)
     return {"ok": True, "month": mkey, "rows": rows, "counts": counts,
+            "month_meta": month_meta(None, mkey),
             "portfolio_net": total_net, "wa_template": wa_template(),
             "thresholds": {"net_dev_pct": ANOM_NET_DEV_PCT,
                            "excluded_sar": ANOM_EXCLUDED_SAR,
@@ -1096,7 +1149,7 @@ def cycle_status_set(request, body):
     to = (body.get("to") or "").strip()
     if to not in _STATUSES:
         return {"error": "bad_status"}, 400
-    mkey = api._month_key_or_now(body.get("m"))
+    mkey = api._month_key_or_prev(body.get("m"))
     owners = body.get("owners") or ([body.get("owner")] if body.get("owner") else [])
     owners = [str(o).strip() for o in owners if str(o or "").strip()]
     if not owners:

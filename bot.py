@@ -24170,6 +24170,12 @@ def _pdf_statement_bytes(rep, label):
     pdf.cell(usable, 9, shape("كشف حساب المالك"), align="R")
     pdf.set_xy(M, 27); pdf.set_font(FONT, size=10); pdf.set_text_color(*MUT)
     period = (rep.get("period") or {})
+    # v2.2 slice 1: a month in progress must SAY so — on the PDF too.
+    _ps = _parse_date(period.get("start", "")); _pe = _parse_date(period.get("end", ""))
+    _pdf_today = datetime.now(TZ).date()
+    _running = bool(_ps and _pe and _ps <= _pdf_today <= _pe)
+    _elapsed = ((_pdf_today - _ps).days + 1) if _running else 0
+    _total_days = ((_pe - _ps).days + 1) if _running else 0
     meta = "المالك: %s   ·   العقار: %s   ·   الإدارة: %s%%   ·   الفترة: %s ← %s" % (
         rep.get("owner") or "—", label or rep.get("apartment") or "—",
         (rep.get("management_pct") if rep.get("management_pct") is not None else "—"),
@@ -24210,8 +24216,14 @@ def _pdf_statement_bytes(rep, label):
     if cl.get("total"):
         kvbox("النظافة", money(cl.get("total")), neg=True)
     pdf.set_draw_color(*GOLD); pdf.line(M + 5, pdf.get_y() + 1, W - M - 5, pdf.get_y() + 1); pdf.ln(2)
-    kvbox("صافي المالك", money(rep.get("owner_net")), big=True)
+    kvbox("صافي المالك" + (" (حتى الآن)" if _running else ""), money(rep.get("owner_net")), big=True)
     pdf.set_y(box_y + 56)
+    if _running:
+        _proj = round(float(rep.get("owner_net") or 0) / max(1, _elapsed) * _total_days)
+        pdf.set_font(FONT, size=10); pdf.set_text_color(*GOLD); pdf.set_x(M)
+        pdf.cell(usable, 6, shape("شهر جاري — اليوم %d من %d · الأرقام حتى الآن · متوقع بنهاية الشهر: ~%s (تقديري)"
+                                  % (_elapsed, _total_days, money(_proj))), align="R")
+        pdf.ln(7)
     # ---- income breakdown ----
     section("تفصيل الدخل")
     kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
@@ -24661,7 +24673,19 @@ def _owner_portal_data(owner, mkey):
                              if (_rep_npn(rep) is not None and _rep_npn(prev_rep) is not None) else None),
                "expenses_delta": (round(float(rep.get("expenses") or 0) - float(prev_rep.get("expenses") or 0), 2)
                                   if prev_rep is not None else None)}
+    # ---- v2.2 slice 1: the month must never lie — running-month meta + pace ----
+    cur_key = today.isoformat()[:7]
+    m_state = "running" if mkey == cur_key else ("closed" if mkey < cur_key else "future")
+    month_meta = {"state": m_state, "days_in_month": days_in_month,
+                  "day_of_month": today.day if m_state == "running" else None}
+    if m_state == "running":
+        _elapsed = max(1, today.day)
+        _net_now = float(rep.get("owner_net") or 0)
+        month_meta["net_so_far"] = round(_net_now, 2)
+        month_meta["projection"] = int(round(_net_now / _elapsed * days_in_month))
+        month_meta["projection_basis"] = "linear"
     return {"owner": owner, "month": mkey, "months": months,
+            "month_meta": month_meta,
             "units": sorted([listings.get(l) or str(l) for l in lids]),
             "report": rep,
             "prev_net": prev.get("net"), "yoy_net": (yoy or {}).get("owner_net"),
@@ -24754,6 +24778,8 @@ var T = {
    reviews:'آراء الضيوف هذا الشهر', reviews_none:'ما فيه مراجعات هذا الشهر', pdf:'تحميل PDF', lang:'EN',
    apartments:'الشقق', no_data:'ما فيه بيانات لهذا الشهر', empty_chart:'ما فيه بيانات كافية للرسم',
    gen_at:'حُسب', data_as_of:'آخر تحديث للبيانات',
+   mm_running:'شهر جاري — اليوم {d} من {n}', mm_sofar:'حتى الآن',
+   mm_proj:'متوقع بنهاية الشهر', mm_est:'تقديري — حسب وتيرة الشهر', mm_final:'نهائي', mm_cur:'جاري',
    month_names:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']},
  en:{title:'Owner statement', net:'Owner net', for_month:'For', status_paid:'Final — transfer per the agreed payment cycle',
    vs_prev:'vs last month', vs_yoy:'vs same month last year', driver_n:'nights', driver_adr:'net/night', driver_exp:'expenses',
@@ -24775,6 +24801,8 @@ var T = {
    reviews:'Guest reviews this month', reviews_none:'No reviews this month', pdf:'Download PDF', lang:'ع',
    apartments:'Apartments', no_data:'No data for this month', empty_chart:'Not enough data to draw',
    gen_at:'Computed', data_as_of:'Data last updated',
+   mm_running:'Month in progress — day {d} of {n}', mm_sofar:'so far',
+   mm_proj:'Projected month-end', mm_est:'estimate — based on this month’s pace', mm_final:'final', mm_cur:'in progress',
    month_names:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']}
 };
 function t(){ return T[L]; }
@@ -24880,18 +24908,26 @@ function driverSentence(){
 function render(){
   var k=t(), rep=DATA.report, rc=rep.reconciliation||{};
   var token=location.pathname.split('/')[3]||'';
+  var mm=DATA.month_meta||{};
+  var running=(mm.state==='running');
   var h='';
   // ---- header ----
   h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0 12px;flex-wrap:wrap">'
     +'<div><div class="muted" style="font-size:11px;letter-spacing:1px">OUJA · عوجا</div><h1>'+k.title+' · '+he(DATA.owner)+'</h1>'
     +'<div class="muted" style="font-size:11.5px">'+k.apartments+': '+DATA.units.map(he).join('، ')+'</div></div>'
     +'<div style="display:flex;gap:6px;align-items:center">'
-    +'<select onchange="location.search=&#39;?m=&#39;+this.value">'+DATA.months.map(function(m){ return '<option value="'+m+'"'+(m===DATA.month?' selected':'')+'>'+mlabel(m)+'</option>'; }).join('')+'</select>'
+    +'<select onchange="location.search=&#39;?m=&#39;+this.value">'+DATA.months.map(function(m){
+      var mark=(m===DATA.months[0])?(' — '+k.mm_cur):(' ✓ '+k.mm_final);
+      return '<option value="'+m+'"'+(m===DATA.month?' selected':'')+'>'+mlabel(m)+mark+'</option>'; }).join('')+'</select>'
     +'<button class="btn ghost" onclick="setLang(L===&#39;ar&#39;?&#39;en&#39;:&#39;ar&#39;)">'+k.lang+'</button></div></div>';
   // ---- hero ----
   h+='<div class="card" style="text-align:center;padding:22px">'
-    +'<div class="muted" style="font-size:12px">'+k.net+' · '+k.for_month+' '+mlabel(DATA.month)+'</div>'
+    +(running?('<div style="margin-bottom:8px"><span class="chip warn" style="font-size:12px;padding:4px 14px">⏳ '
+      +k.mm_running.replace('{d}', String(mm.day_of_month)).replace('{n}', String(mm.days_in_month))+'</span></div>'):'')
+    +'<div class="muted" style="font-size:12px">'+k.net+(running?(' — '+k.mm_sofar):'')+' · '+k.for_month+' '+mlabel(DATA.month)+'</div>'
     +'<div style="font-size:34px;font-weight:800;color:var(--gold2);margin:4px 0">'+money(rep.owner_net)+'</div>'
+    +(running&&mm.projection!=null?('<div class="muted" style="font-size:12px">'+k.mm_proj+': ~'+money(mm.projection)
+      +' <span style="font-size:10.5px">('+k.mm_est+')</span></div>'):'')
     +driverSentence()
     +'<div style="margin-top:10px">'+(rc.balanced?('<span class="chip ok">'+k.recon_ok+'</span>'):('<span class="chip bad">'+k.recon_bad+'</span>'))+'</div>'
     +'<div style="margin-top:12px"><a class="btn" href="/fin/o/'+he(token)+'/pdf?m='+he(DATA.month)+'">⬇ '+k.pdf+'</a></div>'

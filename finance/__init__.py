@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.2.0-s0"
+ERP_VERSION = "2.2.0-s1"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -425,7 +425,7 @@ async def _h_api_owners_diagnose(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    mkey = api._month_key_or_now(request.query.get("m"))
+    mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.diagnose, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
@@ -465,7 +465,7 @@ async def _h_api_stmt_get(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    mkey = api._month_key_or_now(request.query.get("m"))
+    mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.statement_payload, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
@@ -482,13 +482,13 @@ async def _h_api_stmt_publish(request):
 
 async def _h_api_stmt_diff(request):
     owner = (request.query.get("owner") or "").strip()
-    mkey = api._month_key_or_now(request.query.get("m"))
+    mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.statement_recompute_diff, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
 async def _h_api_cycle(request):
-    mkey = api._month_key_or_now(request.query.get("m"))
+    mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.cycle_board, mkey)
     return api.jres(data)
 
