@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.2.0-s3"
+ERP_VERSION = "2.1.0-s4.1"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -425,7 +425,7 @@ async def _h_api_owners_diagnose(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    mkey = api._month_key_or_prev(request.query.get("m"))
+    mkey = api._month_key_or_now(request.query.get("m"))
     data = await asyncio.to_thread(OW.diagnose, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
@@ -435,15 +435,6 @@ async def _h_api_owner_detail(request):
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
     return api.jres(OW.owner_detail(owner))
-
-
-async def _h_api_owner_profile(request):
-    """v2.2 slice 3: the owner profile — header + chips + 12-month grid."""
-    owner = (request.query.get("owner") or "").strip()
-    if not owner:
-        return api.jres({"error": "owner_required"}, 400)
-    data = await asyncio.to_thread(OW.owner_profile, owner)
-    return api.jres(data, 200 if data.get("ok") else 404)
 
 
 async def _h_api_owner_save(request):
@@ -474,7 +465,7 @@ async def _h_api_stmt_get(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    mkey = api._month_key_or_prev(request.query.get("m"))
+    mkey = api._month_key_or_now(request.query.get("m"))
     data = await asyncio.to_thread(OW.statement_payload, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
@@ -491,23 +482,13 @@ async def _h_api_stmt_publish(request):
 
 async def _h_api_stmt_diff(request):
     owner = (request.query.get("owner") or "").strip()
-    mkey = api._month_key_or_prev(request.query.get("m"))
+    mkey = api._month_key_or_now(request.query.get("m"))
     data = await asyncio.to_thread(OW.statement_recompute_diff, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
-async def _h_api_stmt_tieout(request):
-    """v2.2 slice 2: تطابق الكشوف — per-unit subtotals vs aggregate vs PDF fixture."""
-    owner = (request.query.get("owner") or "").strip()
-    if not owner:
-        return api.jres({"error": "owner_required"}, 400)
-    mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.statement_tieout, owner, mkey)
-    return api.jres(data, 200 if data.get("ok") else 404)
-
-
 async def _h_api_cycle(request):
-    mkey = api._month_key_or_prev(request.query.get("m"))
+    mkey = api._month_key_or_now(request.query.get("m"))
     data = await asyncio.to_thread(OW.cycle_board, mkey)
     return api.jres(data)
 
@@ -655,7 +636,6 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
     app.router.add_get("/erp/api/owners/diagnose", _guarded(_h_api_owners_diagnose))
     app.router.add_get("/erp/api/owners/detail", _guarded(_h_api_owner_detail))
-    app.router.add_get("/erp/api/owners/profile", _guarded(_h_api_owner_profile))
     app.router.add_post("/erp/api/owners/save", _guarded(_h_api_owner_save, write=True))
     app.router.add_post("/erp/api/owners/unit-add", _guarded(_h_api_unit_add, write=True))
     app.router.add_post("/erp/api/owners/unit-remove", _guarded(_h_api_unit_remove, write=True))
@@ -665,7 +645,6 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/statement/edit", _guarded(_h_api_stmt_edit, write=True))
     app.router.add_post("/erp/api/owners/statement/publish", _guarded(_h_api_stmt_publish, write=True))
     app.router.add_get("/erp/api/owners/statement/diff", _guarded(_h_api_stmt_diff))
-    app.router.add_get("/erp/api/owners/statement/tieout", _guarded(_h_api_stmt_tieout))
     app.router.add_get("/erp/api/owners/cycle", _guarded(_h_api_cycle))
     app.router.add_post("/erp/api/owners/cycle/status", _guarded(_h_api_cycle_status, write=True))
     app.router.add_post("/erp/api/owners/cycle/links", _guarded(_h_api_cycle_links, write=True))
