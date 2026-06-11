@@ -23942,7 +23942,9 @@ def _finance_apply_adjust(rep, adjust):
         if x.get("kind") == "income":          # MANUAL INCOME → visible line + counts in totals
             extra_income += amt
             income_lines.append({"id": "inc-%d" % i, "label": label, "amount": amt,
-                                 "manual": True, "kind": "income", "source": "manual"})
+                                 "manual": True, "kind": "income", "source": "manual",
+                                 # v2.2 slice 3: the editor's per-apartment tabs need the unit
+                                 "apartment": rep.get("apartment"), "lid": rep.get("lid")})
         else:                                  # manual expense (now labelled)
             exp_total += amt
             lines.append({"id": "exp-adj-%d" % i, "date": label, "label": label, "amount": amt,
@@ -33476,7 +33478,8 @@ def _finance_aggregate(reps, owner, start, end):
     per-apartment breakdown). Used for the per-owner bulk PDF."""
     R = lambda x: round(float(x or 0), 2)
     tot = lambda k: R(sum(float(r.get(k) or 0) for r in reps))
-    parts = [{"apartment": r.get("apartment"), "total_income": r.get("total_income"),
+    parts = [{"apartment": r.get("apartment"), "lid": r.get("lid"),
+              "total_income": r.get("total_income"),
               "ouja_fee": r.get("ouja_fee"), "expenses": r.get("expenses"),
               "cleaning": (r.get("cleaning") or {}).get("total", 0), "owner_net": r.get("owner_net")}
              for r in reps]

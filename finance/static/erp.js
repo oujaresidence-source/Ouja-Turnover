@@ -230,6 +230,16 @@
       to_fix_pass: 'مطابق لكشوف الـ PDF ✓', to_fix_fail: 'ما يطابق مرجع الـ PDF — راجع الوحدات المعلّمة',
       to_drill: 'تشخيص', to_nofix: 'ما فيه مرجع PDF محفوظ لهذا الشهر — الجدول يقارن الشقق بالإجمالي',
       to_missing: 'وحدات في المرجع ما هي بالسجل: ',
+      /* --- v2.2 slice 3: owner profile + editor unit tabs + manual income --- */
+      pr_title: 'ملف المالك', pr_months: 'الشهور — آخر ١٢ شهر', pr_all: 'الكل',
+      pr_pub_v: 'نُشر نسخة {v}', pr_flag: 'فيه ملاحظات تحتاج نظرة', pr_no_data: 'ما انحسب',
+      pr_unit_terms: 'إعدادات الشقة', pr_net_of: 'صافي', pr_open_month: 'افتح الشهر في المحرر',
+      pr_active: 'نشط', pr_paused: 'موقوف', pr_phone_missing: 'أضف جوال المالك من الحقل فوق',
+      se_units_all: 'الكل', se_unit_pdf: 'أرقام كشف الشقة (مثل الـ PDF)',
+      se_inc_title: 'الإيرادات اليدوية (معفاة من الرسوم)',
+      se_inc_add: 'أضف إيراد يدوي', se_inc_label: 'الوصف / المصدر', se_inc_unit: 'الشقة',
+      se_inc_hint: 'يدخل كشف الشقة والـ PDF وما تنحسب عليه رسوم إدارة — مثل سطر «سلطان عبدالله 2,844» في مايو',
+      se_inc_pick_unit: 'اختر الشقة أول',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -462,6 +472,16 @@
       to_fix_pass: 'Matches the PDF statements ✓', to_fix_fail: 'Does NOT match the PDF reference — check the flagged units',
       to_drill: 'Diagnose', to_nofix: 'No PDF reference stored for this month — comparing units vs aggregate only',
       to_missing: 'Units in the reference missing from the registry: ',
+      /* --- v2.2 slice 3: owner profile + editor unit tabs + manual income --- */
+      pr_title: 'Owner profile', pr_months: 'Months — last 12', pr_all: 'All',
+      pr_pub_v: 'Published v{v}', pr_flag: 'Has anomalies worth a look', pr_no_data: 'Not computed',
+      pr_unit_terms: 'Unit settings', pr_net_of: 'Net', pr_open_month: 'Open month in editor',
+      pr_active: 'Active', pr_paused: 'Paused', pr_phone_missing: 'Add the owner phone above',
+      se_units_all: 'All', se_unit_pdf: 'Unit statement numbers (PDF layout)',
+      se_inc_title: 'Manual income (fee-exempt)',
+      se_inc_add: 'Add manual income', se_inc_label: 'Description / source', se_inc_unit: 'Apartment',
+      se_inc_hint: 'Shows on the unit statement + PDF with no management fee — like May’s Sultan Abdullah 2,844 line',
+      se_inc_pick_unit: 'Pick the apartment first',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -1538,6 +1558,20 @@
 
     /* --- owners --- */
     else if (act === 'retry_owners') loadOwners();
+    /* --- v2.2 slice 3: owner profile --- */
+    else if (act === 'pr-unit') {
+      prUI.unit = el.getAttribute('data-lid') || '';
+      var dPr = store.D.profile || {};
+      try {
+        history.replaceState(null, '', '#owners?profile=' + encodeURIComponent(dPr.owner || '') +
+          (prUI.unit ? ('&unit=' + encodeURIComponent(prUI.unit)) : ''));
+      } catch (ePr) {}
+      renderProfile(dPr);
+    }
+    else if (act === 'pr-wa') {
+      var dWa = store.D.profile || {};
+      window.open(prWaLink(dWa), '_blank', 'noopener');
+    }
     else if (act === 'o-copy') {
       var absUrl = location.origin + el.getAttribute('data-url');
       (navigator.clipboard && navigator.clipboard.writeText
@@ -1632,6 +1666,31 @@
 
     /* --- statement editor (slice 2) --- */
     else if (act === 'se-tab') { seUI.tab = el.getAttribute('data-tab'); seRerender(store.D.stmtEd); }
+    /* --- v2.2 slice 3: per-apartment tabs + manual income --- */
+    else if (act === 'se-unit') {
+      seUI.unit = el.getAttribute('data-lid') || '';
+      var dU = store.D.stmtEd || {};
+      try {
+        history.replaceState(null, '', '#owners?stmt=' + encodeURIComponent(dU.owner || '') +
+          '&m=' + encodeURIComponent(dU.month || '') +
+          (seUI.unit ? ('&unit=' + encodeURIComponent(seUI.unit)) : ''));
+      } catch (eU) {}
+      seRerender(dU);
+    }
+    else if (act === 'se-inc-add') {
+      var incLid = $('#seIncLid') ? $('#seIncLid').value : '';
+      var incReason = $('#seIncReason').value.trim();
+      if (!incLid) { $('#seIncLid').classList.add('need'); return; }
+      if (!(Number($('#seIncAmt').value) > 0)) { $('#seIncAmt').classList.add('need'); return; }
+      if (!incReason) { $('#seIncReason').classList.add('need'); return; }
+      seEdit({ op: 'inc_manual_add', lid: incLid, amount: Number($('#seIncAmt').value),
+               label: $('#seIncLabel').value, reason: incReason }, el);
+    }
+    else if (act === 'se-inc-del') {
+      var rowInc = el.closest('.wq-row');
+      seEdit({ op: 'inc_manual_del', id: rowInc.getAttribute('data-incid'),
+               lid: rowInc.getAttribute('data-inclid'), reason: '-' }, el);
+    }
     else if (act === 'se-why') {
       var wk = el.getAttribute('data-key');
       seUI.explain = (seUI.explain === wk ? '' : wk);
@@ -1756,8 +1815,10 @@
         owner: el.getAttribute('data-owner'),
         phone: $('#omPhone').value, notes: $('#omNotes').value,
         active: $('#omActive').value === '1'
-      } }).then(function () { el.disabled = false; toast(t('om_saved')); })
-        .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+      } }).then(function () {
+        toast(t('om_saved'));
+        loadProfile(el.getAttribute('data-owner'), prUI.unit);   // WhatsApp button picks the phone up
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'om-toggle-form') {
       var rowM = el.closest('.wq-row');
@@ -1782,7 +1843,7 @@
         reason: reasonT
       } }).then(function () {
         toast(t('om_terms_saved').replace('{d}', frm));
-        loadManage(((store.D.manage || {}).owner) || '');
+        loadProfile((((store.D.profile || store.D.manage || {})).owner) || '', prUI.unit);
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'om-remove-do') {
@@ -1796,7 +1857,7 @@
         apartment: el.getAttribute('data-apt'), to: toD, reason: reasonR
       } }).then(function () {
         toast(t('om_removed'), 'warn');
-        loadManage(((store.D.manage || {}).owner) || '');
+        loadProfile((((store.D.profile || store.D.manage || {})).owner) || '', prUI.unit);
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'om-pick-listing') {
@@ -1820,7 +1881,7 @@
         cleaning: { type: $('#omAddClType').value, amount: Number($('#omAddClAmt').value || 0) }
       } }).then(function () {
         toast(t('om_added'));
-        loadManage(((store.D.manage || {}).owner) || '');
+        loadProfile((((store.D.profile || store.D.manage || {})).owner) || '', prUI.unit);
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
 
@@ -2735,7 +2796,7 @@
       ? esc(t('o_last_open')) + ': <code>' + esc(lk.opened_at.slice(0, 16)) + '</code> · ' + lk.opens + ' ' + esc(t('o_opens'))
       : esc(t('o_never'));
     var acts = '<a class="btn ghost xs" href="#owners?stmt=' + encodeURIComponent(r.owner) + '">' + esc(t('o_stmt')) + '</a>' +
-      '<a class="btn ghost xs" href="#owners?manage=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
+      '<a class="btn ghost xs" href="#owners?profile=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
       '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '">' + esc(t('o_diag')) + '</a>';
     if (lk.exists && lk.active) {
       acts += '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
@@ -2748,7 +2809,8 @@
     var mgmt = (r.mgmt_pct === null || r.mgmt_pct === undefined) ? ''
       : '<span class="tag">' + esc(t('o_mgmt')) + ' ' + esc(Array.isArray(r.mgmt_pct) ? r.mgmt_pct.join('/') : r.mgmt_pct) + '%</span>';
     return '<div class="wq-row" id="ow_' + esc(r.owner) + '">' +
-      '<div class="wq-main"><div class="wq-top"><b>' + esc(r.owner) + '</b>' +
+      '<div class="wq-main"><div class="wq-top">' +
+      '<a href="#owners?profile=' + encodeURIComponent(r.owner) + '" style="color:inherit;text-decoration:none"><b>' + esc(r.owner) + '</b></a>' +
       '<span class="tag soft">' + r.units + ' ' + esc(t('o_units')) + '</span>' + mgmt + state + '</div>' +
       '<div class="wq-sub">' + esc((r.apartments || []).join(' · ')) + '</div>' +
       '<div class="wq-sub">' + opened + '</div></div>' +
@@ -2792,7 +2854,8 @@
     return '<div class="wq-row' + (r.flagged ? '' : ' info') + '" data-owner="' + esc(r.owner) + '">' +
       '<label class="cy-check"><input type="checkbox" data-act="cy-sel" data-owner="' + esc(r.owner) + '"' +
       (cyUI.sel[r.owner] ? ' checked' : '') + '></label>' +
-      '<div class="wq-main"><div class="wq-top"><b>' + esc(r.owner) + '</b>' +
+      '<div class="wq-main"><div class="wq-top">' +
+      '<a href="#owners?profile=' + encodeURIComponent(r.owner) + '" style="color:inherit;text-decoration:none"><b>' + esc(r.owner) + '</b></a>' +
       '<span class="tag soft">' + r.units + ' ' + esc(t('o_units')) + '</span>' +
       (r.net != null ? '<span class="tag"><code>' + fmtAmt(r.net) + '</code></span>' : '') +
       (r.published_version ? '<span class="tag soft">' + esc(t('se_ver')) + ' ' + r.published_version + '</span>' : '') +
@@ -2801,7 +2864,7 @@
       cyPills(r) + '</div>' +
       '<div class="wq-actions">' + wa +
       '<a class="btn ghost xs" href="#owners?stmt=' + encodeURIComponent(r.owner) + '&m=' + esc(d.month) + '">' + esc(t('o_stmt')) + '</a>' +
-      '<a class="btn ghost xs" href="#owners?manage=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
+      '<a class="btn ghost xs" href="#owners?profile=' + encodeURIComponent(r.owner) + '">' + esc(t('o_manage')) + '</a>' +
       (hasLink ? '<button class="btn ghost xs" data-act="o-copy" data-url="' + esc(r.link.url) + '">' + esc(t('o_copy')) + '</button>' : '') +
       '</div></div>';
   }
@@ -3037,27 +3100,117 @@
       '</div></div>';
   }
 
-  function renderManage(d) {
-    store.D.manage = d;
+  /* ----- v2.2 slice 3: the OWNER PROFILE — owner → apartments → month → editor ----- */
+  var prUI = { unit: '' };          // '' = all units; else the unit's lid (string)
+
+  function shortApt(name) {
+    var s = String(name || '');
+    return (s.indexOf('|') >= 0 ? s.split('|').pop() : s).trim() || s;
+  }
+
+  function prWaLink(d) {
+    var defm = d.default_month;
+    var mo = (d.months || []).filter(function (x) { return x.m === defm; })[0] || {};
+    var msg = (d.wa_template || '')
+      .split('{owner}').join(d.owner)
+      .split('{month}').join(defm)
+      .split('{net}').join(mo.net != null ? fmtAmt(mo.net) : '—')
+      .split('{link}').join(location.origin + ((d.link || {}).url || ''));
+    var phone = ((d.profile || {}).phone || '').replace(/[^0-9]/g, '');
+    return 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
+  }
+
+  function prStatusChip(mo) {
+    if (mo.state === 'running') return '<span class="tag warnt">' + esc(t('mm_cur')) + '</span>';
+    if (mo.status === 'opened') return '<span class="tag soft">' + esc(t('cy_s_opened')) + ' ✓</span>';
+    if (mo.status === 'sent') return '<span class="tag soft">' + esc(t('cy_s_sent')) + '</span>';
+    if (mo.published_version) return '<span class="tag">' + esc(t('pr_pub_v').replace('{v}', mo.published_version)) + '</span>';
+    return '<span class="tag">' + esc(t('cy_s_' + (mo.status || 'draft'))) + '</span>';
+  }
+
+  function prMonthCard(mo, d, activeUnit) {
+    var net = mo.net;
+    if (activeUnit) {
+      net = (mo.unit_nets || {})[activeUnit.listing] != null
+        ? (mo.unit_nets || {})[activeUnit.listing]
+        : (mo.unit_nets || {})[activeUnit.apartment];
+    }
+    var href = '#owners?stmt=' + encodeURIComponent(d.owner) + '&m=' + esc(mo.m) +
+      (prUI.unit ? ('&unit=' + encodeURIComponent(prUI.unit)) : '');
+    var flag = mo.flagged
+      ? '<span class="tag bad" title="' + esc((mo.anomalies || []).map(function (a) {
+          return store.lang === 'ar' ? a.ar : (a.en || a.ar);
+        }).join(' · ')) + '">⚑</span>'
+      : '';
+    return '<a href="' + href + '" title="' + esc(t('pr_open_month')) + '"' +
+      ' style="display:block;border:1px solid var(--line);border-radius:12px;padding:10px 12px;text-decoration:none;color:inherit;background:var(--surface)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px">' +
+      '<span style="font-size:11.5px;color:var(--mut)">' + esc(mName(mo.m)) + '</span>' + flag + '</div>' +
+      '<div style="font-weight:700;font-size:15px;margin:3px 0"><code>' + (net != null ? fmtAmt(net) : '—') + '</code>' +
+      (mo.state === 'running' ? ' <span style="font-size:10px;color:var(--mut)">' + esc(t('mm_sofar')) + '</span>' : '') + '</div>' +
+      '<div style="display:flex;gap:4px;flex-wrap:wrap">' + prStatusChip(mo) + '</div></a>';
+  }
+
+  function renderProfile(d) {
+    store.D.profile = d;
     var p = d.profile || {};
+    var lk = d.link || {};
+    var units = d.units || [];
+    var activeUnit = prUI.unit
+      ? (units.filter(function (u) { return String(u.lid) === String(prUI.unit); })[0] || null)
+      : null;
+    if (prUI.unit && !activeUnit) prUI.unit = '';
     var vers = (d.versions || []).map(function (v) {
       return '<div class="wq-sub"><code>' + esc((v.at || '').slice(0, 16)) + '</code> · ' + esc(v.by || '') +
         ' · <b>' + esc(v.what || '') + '</b> · ' + esc(v.target || '') +
         (v.reason ? (' — ' + esc(v.reason)) : '') + '</div>';
     }).join('');
+    // -- header: identity + link controls + WhatsApp --
+    var linkBtns;
+    if (lk.exists && lk.active) {
+      linkBtns = '<button class="btn primary xs" data-act="o-copy" data-url="' + esc(lk.url) + '">' + esc(t('o_copy')) + '</button>' +
+        '<a class="btn ghost xs" href="' + esc(lk.url) + '" target="_blank" rel="noopener">' + esc(t('o_preview')) + '</a>' +
+        '<button class="btn ghost xs" data-act="o-regen" data-owner="' + esc(d.owner) + '">' + esc(t('o_regen')) + '</button>' +
+        '<button class="btn danger-ghost xs" data-act="o-revoke" data-owner="' + esc(d.owner) + '">' + esc(t('o_revoke')) + '</button>';
+    } else {
+      linkBtns = '<span class="tag' + (lk.exists ? ' bad' : '') + '">' + esc(lk.exists ? t('o_revoked') : t('o_no_link')) + '</span>' +
+        '<button class="btn primary xs" data-act="o-create" data-owner="' + esc(d.owner) + '">' + esc(t('o_create')) + '</button>';
+    }
+    var phone = (p.phone || '').replace(/[^0-9]/g, '');
+    var waOk = phone && lk.exists && lk.active;
+    var wa = '<button class="btn ' + (waOk ? 'primary' : 'ghost') + ' xs" data-act="pr-wa"' + (waOk ? '' : ' disabled title="' + esc(phone ? t('cy_no_link') : t('pr_phone_missing')) + '"') + '>' + esc(t('cy_wa')) + '</button>';
+    var opened = lk.opened_at
+      ? (esc(t('o_last_open')) + ': <code>' + esc(String(lk.opened_at).slice(0, 16)) + '</code> · ' + (lk.opens || 0) + ' ' + esc(t('o_opens')))
+      : esc(t('o_never'));
+    // -- apartment chips --
+    var chips = '<button class="btn ' + (!prUI.unit ? 'primary' : 'ghost') + ' xs" data-act="pr-unit" data-lid="">' + esc(t('pr_all')) + '</button>' +
+      units.map(function (u) {
+        var on = String(u.lid) === String(prUI.unit);
+        return '<button class="btn ' + (on ? 'primary' : 'ghost') + ' xs" data-act="pr-unit" data-lid="' + esc(String(u.lid != null ? u.lid : '')) + '"' +
+          (u.lid == null ? ' disabled title="' + esc(t('dg_lid_missing')) + '"' : '') + '>' +
+          esc(u.apartment) + (u.mgmt_now != null ? ' <code style="font-size:10px">' + u.mgmt_now + '%</code>' : '') + '</button>';
+      }).join('');
     $('#view').innerHTML =
       '<a class="btn ghost sm" href="#owners">' + esc(t('dg_back')) + '</a>' +
+      // 1) header
       '<section class="card grp"><header class="grp-h"><span class="grp-ico">👤</span>' +
-      '<h2>' + esc(t('om_title')) + ' — ' + esc(d.owner) + '</h2></header>' +
+      '<h2>' + esc(t('pr_title')) + ' — ' + esc(d.owner) + '</h2>' +
+      '<span class="tag' + (p.active === false ? ' bad' : ' soft') + '">' + esc(p.active === false ? t('pr_paused') : t('pr_active')) + '</span>' +
+      '<span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' + wa + linkBtns + '</span></header>' +
+      '<div class="wq-sub" style="padding:0 16px 6px">' + opened + '</div>' +
       '<div class="om-grid" style="padding:0 16px 8px">' +
       '<label>' + esc(t('om_phone')) + '<input class="in" id="omPhone" dir="ltr" placeholder="9665xxxxxxxx" value="' + esc(p.phone || '') + '"></label>' +
       '<label>' + esc(t('om_notes')) + '<input class="in" id="omNotes" value="' + esc(p.notes || '') + '"></label>' +
       '<label>' + esc(t('om_active')) + '<select class="in" id="omActive"><option value="1"' + (p.active !== false ? ' selected' : '') + '>' + esc(t('om_active')) + '</option><option value="0"' + (p.active === false ? ' selected' : '') + '>' + esc(t('om_paused')) + '</option></select></label>' +
       '</div><div style="padding:0 16px 14px"><button class="btn primary sm" data-act="om-save" data-owner="' + esc(d.owner) + '">' + esc(t('om_save')) + '</button></div>' +
       '</section>' +
+      // 2) apartment chips + the selected unit's contract panel + add-unit
       '<section class="card grp"><header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('om_units')) + '</h2>' +
-      '<span class="cnt">' + (d.units || []).length + '</span></header>' +
-      '<div class="grp-list">' + (d.units || []).map(manageUnitHtml).join('') + '</div>' +
+      '<span class="cnt">' + units.length + '</span></header>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;padding:2px 16px 10px">' + chips + '</div>' +
+      (activeUnit
+        ? ('<div class="grp-hint" style="padding-top:0">' + esc(t('pr_unit_terms')) + '</div><div class="grp-list">' + manageUnitHtml(activeUnit) + '</div>')
+        : '') +
       '<div style="padding:12px 16px 16px;border-top:1px solid var(--line)">' +
       '<b>' + esc(t('om_add_unit')) + '</b>' +
       '<input class="in" id="omLSearch" placeholder="' + esc(t('om_search_listing')) + '" style="margin:8px 0 4px">' +
@@ -3073,6 +3226,14 @@
       '<button class="btn primary sm" data-act="om-unit-add" data-owner="' + esc(d.owner) + '">' + esc(t('om_add_do')) + '</button>' +
       '</div></div>' +
       '</section>' +
+      // 3) the 12-month grid
+      '<section class="card grp"><header class="grp-h"><span class="grp-ico">📆</span><h2>' + esc(t('pr_months')) +
+      (activeUnit ? (' — ' + esc(activeUnit.apartment)) : '') + '</h2></header>' +
+      mmStrip(d.month_meta) +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;padding:4px 16px 16px">' +
+      (d.months || []).map(function (mo) { return prMonthCard(mo, d, activeUnit); }).join('') +
+      '</div></section>' +
+      // 4) change history
       '<section class="card grp"><header class="grp-h"><span class="grp-ico">🗂️</span><h2>' + esc(t('om_history')) + '</h2></header>' +
       '<div style="padding:0 16px 16px">' + (vers || ('<div class="grp-hint" style="padding:0">' + esc(t('om_no_changes')) + '</div>')) + '</div>' +
       '</section>';
@@ -3096,28 +3257,87 @@
     }
   }
 
-  function loadManage(owner) {
-    $('#view').innerHTML = skeleton(5);
-    api('/erp/api/owners/detail?owner=' + encodeURIComponent(owner))
-      .then(renderManage)
+  function loadProfile(owner, unit) {
+    prUI.unit = unit || '';
+    $('#view').innerHTML = skeleton(6);
+    api('/erp/api/owners/profile?owner=' + encodeURIComponent(owner))
+      .then(renderProfile)
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
 
-  /* ----- slice 2: statement editor + «ليش هالرقم؟» + audit trail ----- */
-  var seUI = { tab: 'stmt', explain: '' };
+  function loadManage(owner) {        // old hash alias → the profile
+    loadProfile(owner, '');
+  }
 
-  /* v2.2 slice 2: per-apartment subtotal bar — always on top of the editor */
+  /* ----- slice 2: statement editor + «ليش هالرقم؟» + audit trail ----- */
+  var seUI = { tab: 'stmt', explain: '', unit: '' };   // unit = lid (v2.2 slice 3 tabs)
+
+  function seActivePart(s) {
+    if (!seUI.unit) return null;
+    return (s.apartments || []).filter(function (p) {
+      return String(p.lid) === String(seUI.unit);
+    })[0] || null;
+  }
+
+  /* v2.2 slice 2+3: per-apartment subtotal bar = the unit TABS (الكل · 101a · …) */
   function seUnitsBar(s) {
     var parts = s.apartments || [];
     if (!parts.length) return '';
-    return '<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 16px 8px">' +
+    function tabChip(lid, label, net, on, disabled) {
+      return '<button class="btn ' + (on ? 'primary' : 'ghost') + ' xs" data-act="se-unit" data-lid="' + esc(String(lid)) + '"' +
+        (disabled ? ' disabled' : '') + ' style="flex:none">' + esc(label) +
+        (net != null ? ' <code style="font-size:10px">' + fmtAmt(net) + '</code>' : '') + '</button>';
+    }
+    return '<div style="display:flex;gap:6px;overflow-x:auto;padding:2px 16px 8px;align-items:center">' +
+      tabChip('', t('se_units_all'), s.owner_net, !seUI.unit, false) +
       parts.map(function (p) {
-        return '<div style="flex:none;border:1px solid var(--line);border-radius:10px;padding:6px 12px;min-width:108px;background:var(--surface)">' +
-          '<div style="font-size:11px;color:var(--mut)">' + esc(p.apartment || '—') + '</div>' +
-          '<div style="font-weight:700;font-size:13px"><code>' + fmtAmt(p.owner_net) + '</code></div>' +
-          '<div style="font-size:10px;color:var(--mut)" dir="ltr">' + fmtAmt(p.total_income) + ' − ' + fmtAmt(p.ouja_fee) + ' − ' + fmtAmt(p.expenses || 0) + '</div>' +
-          '</div>';
+        return tabChip(p.lid != null ? p.lid : '', shortApt(p.apartment || '—'), p.owner_net,
+                       p.lid != null && String(p.lid) === String(seUI.unit), p.lid == null);
       }).join('') + '</div>';
+  }
+
+  /* v2.2 slice 3: the selected unit's own statement numbers — the PDF layout */
+  function seUnitSummary(p) {
+    if (!p) return '';
+    function cell(lbl, v, neg) {
+      return '<span class="tag" style="flex:none">' + esc(lbl) + ' <code>' + (neg ? '−' : '') + fmtAmt(v) + '</code></span>';
+    }
+    return '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:0 16px 8px">' +
+      '<b style="font-size:12px">' + esc(t('se_unit_pdf')) + ' — ' + esc(shortApt(p.apartment)) + ':</b> ' +
+      cell(t('to_inc'), p.total_income) + cell(t('to_fee'), p.ouja_fee, true) +
+      cell(t('to_exp'), p.expenses, true) + cell(t('to_clean'), p.cleaning, true) +
+      '<span class="tag soft" style="flex:none;font-weight:700">' + esc(t('to_net')) + ' <code>' + fmtAmt(p.owner_net) + '</code></span></div>';
+  }
+
+  /* v2.2 slice 3: manual income (fee-exempt, per apartment — the May pattern) */
+  function seIncBlock(s, unitName) {
+    var parts = s.apartments || [];
+    var lines = s.manual_income_lines || [];
+    if (unitName) lines = lines.filter(function (l) { return (l.apartment || '') === unitName; });
+    var rows = lines.map(function (l) {
+      return '<div class="wq-row" data-incid="' + esc(String(l.id)) + '" data-inclid="' + esc(String(l.lid != null ? l.lid : '')) + '">' +
+        '<div class="wq-main"><div class="wq-top"><b>' + esc(l.label || '—') + '</b>' +
+        (l.apartment ? '<span class="tag soft">' + esc(shortApt(l.apartment)) + '</span>' : '') +
+        '<span class="tag">' + esc(t('se_inc_title')) + '</span></div></div>' +
+        '<div class="wq-actions"><span class="c-amt"><b>+' + fmtAmt(l.amount) + '</b></span>' +
+        (l.lid != null ? '<button class="btn danger-ghost xs" data-act="se-inc-del">' + esc(t('se_exp_del')) + '</button>' : '') +
+        '</div></div>';
+    }).join('');
+    var act = seActivePart(s);
+    var unitOpts = act
+      ? '<option value="' + esc(String(act.lid)) + '" selected>' + esc(shortApt(act.apartment)) + '</option>'
+      : '<option value="">' + esc(t('se_inc_pick_unit')) + '</option>' + parts.map(function (p) {
+          return p.lid == null ? '' : '<option value="' + esc(String(p.lid)) + '">' + esc(shortApt(p.apartment)) + '</option>';
+        }).join('');
+    return '<div class="grp-hint">' + esc(t('se_inc_title')) + ' · ' + lines.length + '</div>' +
+      (rows ? ('<div class="grp-list">' + rows + '</div>') : '') +
+      '<div style="padding:10px 16px"><div class="grp-hint" style="padding:0 0 6px">' + esc(t('se_inc_hint')) + '</div>' +
+      '<div class="om-grid">' +
+      '<label>' + esc(t('se_inc_unit')) + '<select class="in" id="seIncLid">' + unitOpts + '</select></label>' +
+      '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in" id="seIncAmt"></label>' +
+      '<label>' + esc(t('se_inc_label')) + '<input class="in" id="seIncLabel"></label>' +
+      '</div><input class="in" id="seIncReason" placeholder="' + esc(t('se_reason_req')) + '" style="margin-top:6px">' +
+      '<button class="btn ghost sm" data-act="se-inc-add" style="margin-top:6px">' + esc(t('se_inc_add')) + '</button></div>';
   }
 
   /* v2.2 slice 2: تطابق الكشوف — the tie-out table */
@@ -3131,7 +3351,10 @@
       (fx ? ('<th>' + esc(t('to_fix')) + '</th><th>' + esc(t('to_delta')) + '</th>') : '') + '<th></th></tr>';
     var rows = (r.units || []).map(function (u) {
       var bad = u.delta_vs_fixture != null && Math.abs(u.delta_vs_fixture) >= 0.02;
-      var drill = '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '&m=' + esc(r.month) + '">' + esc(t('to_drill')) + '</a>';
+      var drill = (u.lid != null
+        ? '<button class="btn ghost xs" data-act="se-unit" data-lid="' + esc(String(u.lid)) + '">' + esc(shortApt(u.apartment)) + ' ⇠</button> '
+        : '') +
+        '<a class="btn ghost xs" href="#owners?diag=' + encodeURIComponent(r.owner) + '&m=' + esc(r.month) + '">' + esc(t('to_drill')) + '</a>';
       return '<tr' + (bad ? ' style="background:var(--red-soft)"' : '') + '>' +
         '<td><b>' + esc(u.apartment || '—') + '</b>' + (u.error ? ' <span class="tag bad">' + esc(u.error) + '</span>' : '') + '</td>' +
         '<td class="c-amt"><code>' + fa(u.income) + '</code></td>' +
@@ -3271,15 +3494,23 @@
   function renderStmt(d) {
     store.D.stmtEd = d;
     var s = d.statement || {};
-    var inLines = (s.resv_lines || []).filter(function (l) { return l.income != null; });
-    var nrLines = (s.resv_lines || []).filter(function (l) { return l.income == null; });
-    var exLines = (s.contract_excluded_lines || []).concat(s.manual_excluded_lines || [])
+    var activePart = seActivePart(s);
+    if (seUI.unit && !activePart) seUI.unit = '';
+    var unitName = activePart ? (activePart.apartment || '') : '';
+    function unitFilter(arr) {
+      if (!unitName) return arr;
+      return arr.filter(function (l) { return (l.apartment || '') === unitName; });
+    }
+    var inLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income != null; }));
+    var nrLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income == null; }));
+    var exLines = unitFilter((s.contract_excluded_lines || []).concat(s.manual_excluded_lines || [])
       .concat((s.refunded_lines || []).map(function (l) {
         return Object.assign({}, l, { exclude_reason: 'cancelled_refunded' });
       }))
       .concat((s.unpaid_lines || []).map(function (l) {
         return Object.assign({}, l, { exclude_reason: 'unpaid_yet', reference_total: l.expected });
-      }));
+      })));
+    var expLines = unitFilter(s.exp_lines || []);
     function statBtn(key, label, val, neg) {
       var on = seUI.explain === key;
       return '<button class="stat tap' + (on ? ' on' : '') + '" data-act="se-why" data-key="' + key + '">' +
@@ -3319,6 +3550,7 @@
         ? ('<div style="padding:4px 16px 16px">' + (auditRows || ('<div class="grp-hint" style="padding:0">' + esc(t('se_audit_empty')) + '</div>')) + '</div>')
         : (
           seUnitsBar(s) +
+          seUnitSummary(activePart) +
           '<div id="seTieBox"></div>' +
           '<div id="seDiffBox"></div>' +
           '<div class="stat-row">' +
@@ -3339,8 +3571,9 @@
                nrLines.map(function (l) { return seResvRow(l, 'ex'); }).join('') +
                exLines.map(function (l) { return seResvRow(l, 'ex'); }).join('') + '</div>')
             : '') +
-          '<div class="grp-hint">' + esc(t('se_expenses')) + ' · ' + (s.exp_lines || []).length + '</div>' +
-          '<div class="grp-list">' + (s.exp_lines || []).map(seExpRow).join('') + '</div>' +
+          '<div class="grp-hint">' + esc(t('se_expenses')) + ' · ' + expLines.length + '</div>' +
+          '<div class="grp-list">' + expLines.map(seExpRow).join('') + '</div>' +
+          seIncBlock(s, unitName) +
           '<div style="padding:10px 16px"><div class="om-grid">' +
           '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in" id="seManAmt"></label>' +
           '<label>' + esc(t('se_date')) + '<input type="date" class="in" id="seManDate"></label>' +
@@ -3365,7 +3598,8 @@
       '</section>';
     var sel = $('#seMonth');
     if (sel) sel.addEventListener('change', function () {
-      location.hash = 'owners?stmt=' + encodeURIComponent(d.owner) + '&m=' + sel.value;
+      location.hash = 'owners?stmt=' + encodeURIComponent(d.owner) + '&m=' + sel.value +
+        (seUI.unit ? ('&unit=' + encodeURIComponent(seUI.unit)) : '');
     });
   }
 
@@ -3375,7 +3609,8 @@
     window.scrollTo(0, y);
   }
 
-  function loadStmtEd(owner, m) {
+  function loadStmtEd(owner, m, unit) {
+    seUI.unit = unit || '';
     $('#view').innerHTML = skeleton(6);
     api('/erp/api/owners/statement?owner=' + encodeURIComponent(owner) + (m ? '&m=' + encodeURIComponent(m) : ''))
       .then(renderStmt)
@@ -3402,6 +3637,10 @@
         var rowEl = document.getElementById('ow_' + owner);
         if (rowEl && fresh) rowEl.outerHTML = ownerRowHtml(fresh);
         toast(t('o_done'));
+        // v2.2 slice 3: refresh the profile header when it's the active view
+        if ((store.D.profile || {}).owner === owner && location.hash.indexOf('rofile=') >= 0) {
+          loadProfile(owner, prUI.unit);
+        }
       });
   }
 
@@ -3517,11 +3756,13 @@
     owners: {
       show: function (params) {
         var diag = params && params.get('diag');
+        var profile = params && params.get('profile');
         var manage = params && params.get('manage');
         var stmt = params && params.get('stmt');
         if (diag) loadDiag(diag, params.get('m') || '');
+        else if (profile) loadProfile(profile, params.get('unit') || '');
         else if (manage) loadManage(manage);
-        else if (stmt) { seUI.tab = 'stmt'; seUI.explain = ''; loadStmtEd(stmt, params.get('m') || ''); }
+        else if (stmt) { seUI.tab = 'stmt'; seUI.explain = ''; loadStmtEd(stmt, params.get('m') || '', params.get('unit') || ''); }
         else loadOwners();
       }
     },

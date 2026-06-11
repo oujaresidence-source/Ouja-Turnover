@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.2.0-s2"
+ERP_VERSION = "2.2.0-s3"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -437,6 +437,15 @@ async def _h_api_owner_detail(request):
     return api.jres(OW.owner_detail(owner))
 
 
+async def _h_api_owner_profile(request):
+    """v2.2 slice 3: the owner profile — header + chips + 12-month grid."""
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    data = await asyncio.to_thread(OW.owner_profile, owner)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
 async def _h_api_owner_save(request):
     data, status = OW.owner_save(request, await _json_body(request))
     return api.jres(data, status)
@@ -646,6 +655,7 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
     app.router.add_get("/erp/api/owners/diagnose", _guarded(_h_api_owners_diagnose))
     app.router.add_get("/erp/api/owners/detail", _guarded(_h_api_owner_detail))
+    app.router.add_get("/erp/api/owners/profile", _guarded(_h_api_owner_profile))
     app.router.add_post("/erp/api/owners/save", _guarded(_h_api_owner_save, write=True))
     app.router.add_post("/erp/api/owners/unit-add", _guarded(_h_api_unit_add, write=True))
     app.router.add_post("/erp/api/owners/unit-remove", _guarded(_h_api_unit_remove, write=True))

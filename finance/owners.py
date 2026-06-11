@@ -903,7 +903,8 @@ def statement_payload(owner, mkey):
 
 
 _EDIT_OPS = ("resv_exclude", "resv_include", "exp_override", "exp_delete",
-             "exp_manual_add", "exp_manual_del", "adj_add", "adj_del")
+             "exp_manual_add", "exp_manual_del", "adj_add", "adj_del",
+             "inc_manual_add", "inc_manual_del")
 
 
 def statement_edit(request, body):
@@ -919,7 +920,7 @@ def statement_edit(request, body):
         return {"error": "bad_op"}, 400
     if not owner:
         return {"error": "owner_required"}, 400
-    if not reason and op != "exp_manual_del" and op != "adj_del":
+    if not reason and op not in ("exp_manual_del", "adj_del", "inc_manual_del"):
         return {"error": "reason_required",
                 "message_ar": "السبب إلزامي — كل تعديل لازم يُفسَّر.",
                 "message_en": "A reason is required — every edit must be explainable."}, 400
@@ -994,6 +995,53 @@ def statement_edit(request, body):
     elif op == "adj_del":
         before = next((x for x in e["adjustments"] if x.get("id") == target), None)
         e["adjustments"] = [x for x in e["adjustments"] if x.get("id") != target]
+    elif op == "inc_manual_add":
+        # v2.2 slice 3: per-apartment MANUAL INCOME — fee-exempt. Lands in the
+        # legacy per-lid adjust store so the unit PDF and the owner aggregate
+        # read the SAME line (exactly May's «سلطان عبدالله 2,844» pattern).
+        try:
+            amt = round(float(body.get("amount")), 2)
+        except (TypeError, ValueError):
+            return {"error": "bad_amount"}, 400
+        try:
+            lid = int(body.get("lid"))
+        except (TypeError, ValueError):
+            return {"error": "lid_required",
+                    "message_ar": "حدد الشقة أول.", "message_en": "Pick the apartment first."}, 400
+        start, end = B._month_bounds(mkey)
+        ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+        adj = B._finance_adjust.get(ak) or {}
+        for kdef, vdef in (("expense_overrides", {}), ("extra_lines", []),
+                           ("line_overrides", {}), ("comment", "")):
+            adj.setdefault(kdef, vdef)
+        line = {"kind": "income",
+                "label": (str(body.get("label") or "").strip() or "إيراد يدوي")[:120],
+                "amount": amt}
+        adj["extra_lines"] = list(adj.get("extra_lines") or []) + [line]
+        B._finance_adjust[ak] = adj
+        B.persist_state()
+        target = ak + " inc[" + str(len(adj["extra_lines"]) - 1) + "]"
+        after = line
+    elif op == "inc_manual_del":
+        try:
+            lid = int(body.get("lid"))
+            idx = int(str(body.get("id") or "").replace("inc-", ""))
+        except (TypeError, ValueError):
+            return {"error": "bad_target"}, 400
+        start, end = B._month_bounds(mkey)
+        ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+        adj = B._finance_adjust.get(ak)
+        lines = list((adj or {}).get("extra_lines") or [])
+        if not (0 <= idx < len(lines)) or (lines[idx] or {}).get("kind") != "income":
+            return {"error": "income_line_not_found"}, 404
+        before = lines[idx]
+        del lines[idx]
+        adj["extra_lines"] = lines
+        if not (adj.get("expense_overrides") or adj.get("extra_lines")
+                or adj.get("line_overrides") or (adj.get("comment") or "").strip()):
+            B._finance_adjust.pop(ak, None)
+        B.persist_state()
+        target = ak + " inc[" + str(idx) + "]"
     stmt_audit_add(rec, actor, op, target, before, after, reason)
     _stmt_save()
     try:
@@ -1059,6 +1107,65 @@ def statement_recompute_diff(owner, mkey):
             "published": (a if snap else None), "fresh": b, "delta": delta,
             "published_version": pub.get("version"),
             "changed": any((delta[k] or 0) != 0 for k in delta) if snap else True}
+
+
+# ====================== v2.2 slice 3: the owner profile ======================
+
+def owner_profile(owner):
+    """Everything the owner-profile page renders: header (profile + link),
+    apartment chips (with live contract terms), and the 12-month grid with
+    per-month net / status / anomaly flag / per-unit nets. Reads the memoized
+    month reports — first load computes, then it's warm."""
+    B = _B()
+    det = owner_detail(owner)
+    if not det.get("ok"):
+        return det
+    if not det.get("units"):
+        return {"error": "owner_not_in_registry", "owner": owner}
+    links = getattr(B, "_owner_links", None) or {}
+    lk = links.get(owner) or {}
+    today = datetime.now(B.TZ).date()
+    cur = today.isoformat()[:7]
+    months = []
+    y, m = int(cur[:4]), int(cur[5:7])
+    for i in range(12):
+        ty, tm = y, m - i
+        while tm <= 0:
+            tm += 12
+            ty -= 1
+        k = "%04d-%02d" % (ty, tm)
+        try:
+            rep = B._owner_month_report(owner, k)
+        except Exception as e:
+            print("owner_profile month %s error: %s" % (k, e))
+            rep = None
+        srec = stmt_rec(owner, k) or {}
+        pub = srec.get("published") or {}
+        try:
+            anomalies = owner_anomalies(owner, k, rep) if rep is not None else []
+        except Exception:
+            anomalies = []
+        unit_nets = {}
+        for p in (rep or {}).get("apartments") or []:
+            unit_nets[str(p.get("apartment") or "")] = p.get("owner_net")
+        months.append({"m": k,
+                       "state": "running" if k == cur else "closed",
+                       "net": (rep or {}).get("owner_net"),
+                       "status": srec.get("status") or "draft",
+                       "published_version": pub.get("version"),
+                       "flagged": bool(anomalies), "anomalies": anomalies[:4],
+                       "unit_nets": unit_nets})
+    return {"ok": True, "owner": owner,
+            "profile": det.get("profile") or {},
+            "units": det.get("units") or [],
+            "versions": (det.get("versions") or [])[:20],
+            "months": months,
+            "link": {"exists": bool(lk.get("token")), "active": bool(lk.get("active")),
+                     "url": ("/fin/o/" + lk["token"]) if (lk.get("token") and lk.get("active")) else "",
+                     "opened_at": lk.get("opened_at") or "", "opens": lk.get("opens") or 0},
+            "wa_template": wa_template(),
+            "default_month": api._month_key_or_prev(None),
+            "month_meta": month_meta(owner, cur)}
 
 
 # ====================== Slice 3: دورة الشهر — the monthly cycle board ======================
