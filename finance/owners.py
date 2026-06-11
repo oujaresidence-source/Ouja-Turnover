@@ -1457,8 +1457,10 @@ def diagnose(owner, mkey):
                     verdicts[rid] = {"verdict": "included", "reason": "",
                                      "amount": l.get("income"), "reference": None}
             for l in rep_full.get("refunded_lines") or []:
-                verdicts[str(l.get("id"))] = {"verdict": "excluded", "reason": "cancelled_refunded",
-                                              "amount": 0.0, "reference": None,
+                verdicts[str(l.get("id"))] = {"verdict": "excluded",
+                                              "reason": l.get("kind") or "cancelled_refunded",
+                                              "amount": 0.0,
+                                              "reference": l.get("reference_total"),
                                               "evidence": l.get("evidence")}
             for l in rep_full.get("unpaid_lines") or []:
                 verdicts[str(l.get("id"))] = {"verdict": "excluded", "reason": "unpaid_yet",

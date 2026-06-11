@@ -158,6 +158,7 @@
       dg_excl_total: 'قيمة مستبعدة بانتظار تأكيد', dg_lid_missing: 'بدون ربط Hostaway!',
       rsn_missing_payout: 'ما وصل payout من Airbnb', rsn_missing_base: 'بدون مبلغ أساس',
       rsn_needs_channel_rule: 'قناة بدون قاعدة', rsn_cancelled_refunded: 'ملغي — مسترد',
+      rsn_cancelled_no_money: 'ملغي — ما انستلم منه شي',
       rsn_unpaid_yet: 'غير مدفوع بعد', rsn_out_of_period: 'خارج الفترة',
       rsn_missing_paid_amount: 'مدفوع جزئيًا بدون مبلغ', rsn_status: 'حالة غير مؤكدة',
       rsn_outside_contract: 'وحدة خارج فترة العقد',
@@ -403,6 +404,7 @@
       dg_excl_total: 'Excluded value awaiting confirmation', dg_lid_missing: 'No Hostaway match!',
       rsn_missing_payout: 'Airbnb payout missing', rsn_missing_base: 'No base amount',
       rsn_needs_channel_rule: 'Channel without a rule', rsn_cancelled_refunded: 'Cancelled — refunded',
+      rsn_cancelled_no_money: 'Cancelled — nothing collected',
       rsn_unpaid_yet: 'Not paid yet', rsn_out_of_period: 'Outside the period',
       rsn_missing_paid_amount: 'Partially paid, amount unknown', rsn_status: 'Unconfirmed status',
       rsn_outside_contract: 'Unit outside the contract window',
@@ -3505,7 +3507,10 @@
     var nrLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income == null; }));
     var exLines = unitFilter((s.contract_excluded_lines || []).concat(s.manual_excluded_lines || [])
       .concat((s.refunded_lines || []).map(function (l) {
-        return Object.assign({}, l, { exclude_reason: 'cancelled_refunded' });
+        return Object.assign({}, l, {
+          exclude_reason: (l.kind === 'cancelled_no_money' ? 'cancelled_no_money' : 'cancelled_refunded'),
+          reference_total: (l.reference_total != null ? l.reference_total : l.amount)
+        });
       }))
       .concat((s.unpaid_lines || []).map(function (l) {
         return Object.assign({}, l, { exclude_reason: 'unpaid_yet', reference_total: l.expected });

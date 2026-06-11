@@ -23579,21 +23579,28 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         # ---- cancelled rows: only PAID money enters income ----
         if cancelled:
             if channel == "airbnb":
-                payout = r.get("airbnb_payout")
-                if payout is None:
-                    # no payout signal on a cancelled row = no money retained (most common:
-                    # cancelled before any payout). NEVER invented as income; listed visibly.
-                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
-                                           "amount": 0.0, "evidence": "no_payout_field"})
+                # v2.2.1 (the Mohameed bug, owner-verified against Airbnb): the
+                # expected/cancellation-payout fields are itinerary MATH and exist
+                # even on withdrawn/declined requests where no money ever moved.
+                # The ONLY actual-money field Hostaway carries for Airbnb is
+                # airbnbTotalPaidAmount — income on a cancelled row comes from it
+                # or not at all. Everything else lands in the transparency footer
+                # (visible + force-includable from the editor with an amount).
+                actually_paid = r.get("airbnb_paid_amount")
+                if actually_paid is None:
+                    refunded_lines.append({**base_meta, "kind": "cancelled_no_money",
+                                           "amount": 0.0,
+                                           "reference_total": r.get("airbnb_payout"),
+                                           "evidence": "expected-payout math only — airbnbTotalPaidAmount absent"})
                     continue
-                kept = float(payout) - refund
+                kept = float(actually_paid) - refund
                 if kept <= 0.005:
                     refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
-                                           "amount": 0.0, "evidence": "payout_minus_refund<=0"})
+                                           "amount": 0.0, "evidence": "paid_minus_refund<=0"})
                     continue
                 income = kept; inc_airbnb += income
                 direct_detail = None
-                src = "airbnb payout − refund (cancelled, retained)"
+                src = "airbnbTotalPaidAmount − refund (cancelled, retained)"
             elif channel == "direct":
                 paid_evidence = bool(paid_amt) or pstat in ("paid", "partially paid", "partial")
                 if not paid_evidence:
@@ -23633,7 +23640,7 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
                                            "amount": 0.0, "evidence": "no_payment_field"})
                 continue
             line = {**base_meta, "refund": R(refund), "extras": 0.0, "income": R(income),
-                    "gross": (r.get("airbnb_payout") if channel == "airbnb" else (paid_amt or r.get("total_price"))),
+                    "gross": (r.get("airbnb_paid_amount") if channel == "airbnb" else (paid_amt or r.get("total_price"))),
                     "status_kind": "cancelled_paid", "source_fields": src}
             if direct_detail:
                 line.update({"direct_base": direct_detail["base"], "direct_fee_pct": direct_detail["pct"],
@@ -23771,6 +23778,13 @@ def _airbnb_payout(r):
                 pass
     return None
 
+def _num_or_none(v):
+    try:
+        f = float(v)
+        return f if f > 0 else None
+    except (TypeError, ValueError):
+        return None
+
 # Payment-status candidates on a Hostaway reservation (paid-basis needs them). Read
 # DEFENSIVELY and record which fields were actually present per line — the exact live
 # field set is confirmed post-deploy via /api/finance/cancelled-probe (REVENUE_DEBUG
@@ -23837,6 +23851,10 @@ def normalize_reservation(r, listings=None):
         "guests_count": r.get("numberOfGuests") or r.get("adults"),
         "booked_at": (str(r.get("reservationDate") or "")[:10] or None),
         "airbnb_payout": (_airbnb_payout(r) if ch == "airbnb" else None),
+        # v2.2.1: the ONLY Airbnb field that means money actually moved. Expected/
+        # cancellation-payout fields are itinerary MATH — they exist even on
+        # declined/withdrawn requests (the Mohameed phantom-income bug).
+        "airbnb_paid_amount": (_num_or_none(r.get("airbnbTotalPaidAmount")) if ch == "airbnb" else None),
         "direct_revenue": (float(tp) if (ch == "direct" and isinstance(tp, (int, float))) else None),
         "total_price": (float(tp) if isinstance(tp, (int, float)) else None),
         "refund": (float(refund) if isinstance(refund, (int, float)) and refund > 0 else 0.0),
@@ -24777,6 +24795,7 @@ var T = {
    sec_footer:'حركات بدون فلوس (للشفافية)', foot_unpaid:'غير مدفوع بعد', foot_refunded:'ملغي — مسترد بالكامل', foot_expected:'متوقع',
    foot_review:'بانتظار تأكيد المبلغ', foot_ref:'المرجع (ليس دخلًا)', foot_excl_sum:'مستبعد من الدخل لين يتأكد المبلغ',
    ver_label:'نسخة', ver_updated:'حُدّثت', sec_adjust:'تسويات', foot_excluded_manual:'مستبعد يدويًا',
+   foot_cxl_nomoney:'ملغي — ما انستلم منه شي',
    foot_none:'لا يوجد — كل حجوزات الشهر مدفوعة ✓', perf:'الأداء', trend:'صافي الدخل — آخر ١٢ شهر',
    occ:'الإشغال مقابل متوسط المحفظة', occ_you:'وحداتك', occ_port:'متوسط عوجا (مجهول الهوية)',
    mix:'مصادر الدخل', adr_dt:'متوسط الصافي/ليلة حسب نوع اليوم', dt_wd:'أيام الأسبوع', dt_we:'نهاية الأسبوع (خميس-جمعة)', dt_ev:'مناسبات',
@@ -24800,6 +24819,7 @@ var T = {
    sec_footer:'Non-money movements (transparency)', foot_unpaid:'Not paid yet', foot_refunded:'Cancelled — fully refunded', foot_expected:'expected',
    foot_review:'Awaiting amount confirmation', foot_ref:'reference (not income)', foot_excl_sum:'excluded from income until confirmed',
    ver_label:'Version', ver_updated:'updated', sec_adjust:'Adjustments', foot_excluded_manual:'Manually excluded',
+   foot_cxl_nomoney:'Cancelled — nothing was collected',
    foot_none:'None — every booking this month is paid ✓', perf:'Performance', trend:'Net income — last 12 months',
    occ:'Occupancy vs portfolio average', occ_you:'Your units', occ_port:'Ouja average (anonymized)',
    mix:'Income sources', adr_dt:'Avg net/night by day type', dt_wd:'Weekdays', dt_we:'Weekend (Thu–Fri)', dt_ev:'Events',
@@ -24997,8 +25017,9 @@ function render(){
         +'<span class="muted">'+k.foot_expected+' '+money(u.expected)+'</span></div>';
     }).join('');
     h+=refunded.map(function(u){
-      return '<div class="foot-line"><span><span class="chip info">'+k.foot_refunded+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
-        +'<b>'+money(0)+'</b></div>';
+      var nomoney=(u.kind==='cancelled_no_money');
+      return '<div class="foot-line"><span><span class="chip info">'+(nomoney?k.foot_cxl_nomoney:k.foot_refunded)+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
+        +((nomoney&&u.reference_total!=null)?('<span class="muted">'+k.foot_ref+': '+money(u.reference_total)+'</span>'):('<b>'+money(0)+'</b>'))+'</div>';
     }).join('');
   }
   h+='</div>';
