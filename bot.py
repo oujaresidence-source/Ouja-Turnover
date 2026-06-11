@@ -8727,6 +8727,12 @@ def _exp_set_status(exp, status, *, reason="", by="", detail=""):
     exp["updated_at"] = exp["status_entered_at"]
     if old != status:
         _exp_log_event(exp, "status:" + status, by=by, detail=detail or reason or old or "")
+        # v2.2 slice 0: owner statements count expenses by canonical status — any
+        # transition (verify/archive/discard/…) makes the memoized reports stale.
+        try:
+            _owner_cache_bust(lid=exp.get("listing_id"))
+        except Exception:
+            pass
 
 def _exp_apply_stale_state(exp, now=None):
     canon = _exp_canonical_status(exp, now=now)
@@ -23936,7 +23942,9 @@ def _finance_apply_adjust(rep, adjust):
         if x.get("kind") == "income":          # MANUAL INCOME → visible line + counts in totals
             extra_income += amt
             income_lines.append({"id": "inc-%d" % i, "label": label, "amount": amt,
-                                 "manual": True, "kind": "income", "source": "manual"})
+                                 "manual": True, "kind": "income", "source": "manual",
+                                 # v2.2 slice 3: the editor's per-apartment tabs need the unit
+                                 "apartment": rep.get("apartment"), "lid": rep.get("lid")})
         else:                                  # manual expense (now labelled)
             exp_total += amt
             lines.append({"id": "exp-adj-%d" % i, "date": label, "label": label, "amount": amt,
@@ -24074,6 +24082,8 @@ def _finance_import_hostaway_expenses():
         have_ids.add(hid)
     _finance_last_import.clear()
     _finance_last_import.update({"at": now, "imported": new_n, "matched": matched_n, "total": len(items)})
+    if new_n:
+        _owner_cache_bust()      # v2.2 slice 0: fresh verified expenses → statements changed
     persist_state()
     return {"ok": True, "imported": new_n, "matched": matched_n, "total": len(items),
             "last_import": dict(_finance_last_import)}
@@ -24162,6 +24172,12 @@ def _pdf_statement_bytes(rep, label):
     pdf.cell(usable, 9, shape("كشف حساب المالك"), align="R")
     pdf.set_xy(M, 27); pdf.set_font(FONT, size=10); pdf.set_text_color(*MUT)
     period = (rep.get("period") or {})
+    # v2.2 slice 1: a month in progress must SAY so — on the PDF too.
+    _ps = _parse_date(period.get("start", "")); _pe = _parse_date(period.get("end", ""))
+    _pdf_today = datetime.now(TZ).date()
+    _running = bool(_ps and _pe and _ps <= _pdf_today <= _pe)
+    _elapsed = ((_pdf_today - _ps).days + 1) if _running else 0
+    _total_days = ((_pe - _ps).days + 1) if _running else 0
     meta = "المالك: %s   ·   العقار: %s   ·   الإدارة: %s%%   ·   الفترة: %s ← %s" % (
         rep.get("owner") or "—", label or rep.get("apartment") or "—",
         (rep.get("management_pct") if rep.get("management_pct") is not None else "—"),
@@ -24202,8 +24218,14 @@ def _pdf_statement_bytes(rep, label):
     if cl.get("total"):
         kvbox("النظافة", money(cl.get("total")), neg=True)
     pdf.set_draw_color(*GOLD); pdf.line(M + 5, pdf.get_y() + 1, W - M - 5, pdf.get_y() + 1); pdf.ln(2)
-    kvbox("صافي المالك", money(rep.get("owner_net")), big=True)
+    kvbox("صافي المالك" + (" (حتى الآن)" if _running else ""), money(rep.get("owner_net")), big=True)
     pdf.set_y(box_y + 56)
+    if _running:
+        _proj = round(float(rep.get("owner_net") or 0) / max(1, _elapsed) * _total_days)
+        pdf.set_font(FONT, size=10); pdf.set_text_color(*GOLD); pdf.set_x(M)
+        pdf.cell(usable, 6, shape("شهر جاري — اليوم %d من %d · الأرقام حتى الآن · متوقع بنهاية الشهر: ~%s (تقديري)"
+                                  % (_elapsed, _total_days, money(_proj))), align="R")
+        pdf.ln(7)
     # ---- income breakdown ----
     section("تفصيل الدخل")
     kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
@@ -24422,6 +24444,43 @@ def _month_bounds(mkey):
 
 _owner_portal_cache = {}    # (owner, month) -> (payload_report, built_ts)
 
+def _owner_cache_bust(owner=None, lid=None, mkey=None):
+    """v2.2 Finding 2: drop memoized owner-month reports the moment underlying
+    data changes (statement edits, registry/contract changes, expense
+    verification, publish). Without this the owner page + «معاينة كمالك» + the
+    12-month trend keep serving a stale report for up to 6 hours.
+    owner given → that owner. lid given → every registry owner of that listing.
+    Neither given → everything (registry-wide change). mkey=None → all months."""
+    try:
+        owners = set()
+        if owner:
+            owners.add(str(owner).strip())
+        if lid not in (None, ""):
+            try:
+                lid_i = int(lid)
+            except (TypeError, ValueError):
+                lid_i = None
+            if lid_i is not None:
+                listings = get_listings_map() or {}
+                for rec in _owner_registry.values():
+                    if _owner_resolve_lid(rec, listings) == lid_i:
+                        o = (rec.get("owner") or "").strip()
+                        if o:
+                            owners.add(o)
+        targeted = bool(owner) or (lid not in (None, ""))
+        n = 0
+        for k in list(_owner_portal_cache.keys()):
+            if targeted and k[0] not in owners:
+                continue
+            if mkey and k[1] != mkey:
+                continue
+            _owner_portal_cache.pop(k, None)
+            n += 1
+        return n
+    except Exception as e:
+        print("owner cache bust error:", e)
+        return 0
+
 def _owner_month_report(owner, mkey):
     """The aggregated owner report for one month — the SAME object the PDF renders.
     Memoized: closed months 6h, the current month 15 min."""
@@ -24447,6 +24506,12 @@ def _owner_month_report(owner, mkey):
         items = _finance_collect_items("owner", [], [owner], start, end)
         rep = items[0]["report"] if items else None
     if rep is not None:
+        # «آخر تحديث للبيانات» — the BUILD time rides with the report so cache
+        # hits show when the numbers were actually computed (v2.2 slice 0).
+        try:
+            rep["computed_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        except Exception:
+            pass
         _owner_portal_cache[(owner, mkey)] = (rep, now)
         if len(_owner_portal_cache) > 400:
             for k in sorted(_owner_portal_cache, key=lambda k: _owner_portal_cache[k][1])[:100]:
@@ -24485,7 +24550,10 @@ def _owner_portal_data(owner, mkey):
     avail = max(1, len(lids)) * days_in_month
     port_booked = 0
     try:
-        nights_all, _ = _explode_nights(get_reservations_cached())
+        # v2.2 slice 2 (trap #4): the full-history cache truncates and silently
+        # drops the NEWEST months — portfolio occupancy must use the same
+        # targeted window pull the statement itself uses.
+        nights_all, _ = _explode_nights(fetch_reservations_window(start, end))
         for _lid, d, _nl in nights_all:
             if start <= d <= end:
                 port_booked += 1
@@ -24532,7 +24600,9 @@ def _owner_portal_data(owner, mkey):
     n_start, n_end = _month_bounds(f"{ny}-{nm:02d}")
     nxt_nights = 0; nxt_rev = 0.0; nxt_known = True
     try:
-        for r in get_reservations_cached():
+        # v2.2 slice 2 (trap #4): next-month preview reads a targeted window —
+        # NEVER the truncating full-history cache.
+        for r in fetch_reservations_window(n_start, n_end):
             if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
                 continue
             if r.get("listingMapId") not in lids:
@@ -24610,7 +24680,19 @@ def _owner_portal_data(owner, mkey):
                              if (_rep_npn(rep) is not None and _rep_npn(prev_rep) is not None) else None),
                "expenses_delta": (round(float(rep.get("expenses") or 0) - float(prev_rep.get("expenses") or 0), 2)
                                   if prev_rep is not None else None)}
+    # ---- v2.2 slice 1: the month must never lie — running-month meta + pace ----
+    cur_key = today.isoformat()[:7]
+    m_state = "running" if mkey == cur_key else ("closed" if mkey < cur_key else "future")
+    month_meta = {"state": m_state, "days_in_month": days_in_month,
+                  "day_of_month": today.day if m_state == "running" else None}
+    if m_state == "running":
+        _elapsed = max(1, today.day)
+        _net_now = float(rep.get("owner_net") or 0)
+        month_meta["net_so_far"] = round(_net_now, 2)
+        month_meta["projection"] = int(round(_net_now / _elapsed * days_in_month))
+        month_meta["projection_basis"] = "linear"
     return {"owner": owner, "month": mkey, "months": months,
+            "month_meta": month_meta,
             "units": sorted([listings.get(l) or str(l) for l in lids]),
             "report": rep,
             "prev_net": prev.get("net"), "yoy_net": (yoy or {}).get("owner_net"),
@@ -24622,6 +24704,7 @@ def _owner_portal_data(owner, mkey):
                            "revenue_partial": (not nxt_known and nxt_rev > 0)},
             "price_actions": actions, "reviews": revs,
             "hostaway_url_template": res_url,
+            "data_as_of": rep.get("computed_at"),
             "generated_at": datetime.now(TZ).isoformat(timespec="minutes")}
 
 # The owner portal page. RAW string (r-prefix): backslashes stay literal, so no Python
@@ -24701,7 +24784,10 @@ var T = {
    actions:'حماية التسعير', actions_txt:'عدّلنا الأسعار {n} مرة هذا الشهر لحماية الإشغال', actions_zero:'ما احتجنا أي تعديل سعر هذا الشهر',
    reviews:'آراء الضيوف هذا الشهر', reviews_none:'ما فيه مراجعات هذا الشهر', pdf:'تحميل PDF', lang:'EN',
    apartments:'الشقق', no_data:'ما فيه بيانات لهذا الشهر', empty_chart:'ما فيه بيانات كافية للرسم',
-   gen_at:'حُسب', month_names:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']},
+   gen_at:'حُسب', data_as_of:'آخر تحديث للبيانات',
+   mm_running:'شهر جاري — اليوم {d} من {n}', mm_sofar:'حتى الآن',
+   mm_proj:'متوقع بنهاية الشهر', mm_est:'تقديري — حسب وتيرة الشهر', mm_final:'نهائي', mm_cur:'جاري',
+   month_names:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']},
  en:{title:'Owner statement', net:'Owner net', for_month:'For', status_paid:'Final — transfer per the agreed payment cycle',
    vs_prev:'vs last month', vs_yoy:'vs same month last year', driver_n:'nights', driver_adr:'net/night', driver_exp:'expenses',
    recon_ok:'Balanced ✓ — rows equal the total to the riyal', recon_bad:'Needs review — some rows are missing data',
@@ -24721,7 +24807,10 @@ var T = {
    actions:'Price protection', actions_txt:'We adjusted prices {n} times this month to protect occupancy', actions_zero:'No price adjustments were needed this month',
    reviews:'Guest reviews this month', reviews_none:'No reviews this month', pdf:'Download PDF', lang:'ع',
    apartments:'Apartments', no_data:'No data for this month', empty_chart:'Not enough data to draw',
-   gen_at:'Computed', month_names:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']}
+   gen_at:'Computed', data_as_of:'Data last updated',
+   mm_running:'Month in progress — day {d} of {n}', mm_sofar:'so far',
+   mm_proj:'Projected month-end', mm_est:'estimate — based on this month’s pace', mm_final:'final', mm_cur:'in progress',
+   month_names:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']}
 };
 function t(){ return T[L]; }
 function he(s){ return String(s==null?'':s).replace(/[<>&"']/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]; }); }
@@ -24826,18 +24915,26 @@ function driverSentence(){
 function render(){
   var k=t(), rep=DATA.report, rc=rep.reconciliation||{};
   var token=location.pathname.split('/')[3]||'';
+  var mm=DATA.month_meta||{};
+  var running=(mm.state==='running');
   var h='';
   // ---- header ----
   h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0 12px;flex-wrap:wrap">'
     +'<div><div class="muted" style="font-size:11px;letter-spacing:1px">OUJA · عوجا</div><h1>'+k.title+' · '+he(DATA.owner)+'</h1>'
     +'<div class="muted" style="font-size:11.5px">'+k.apartments+': '+DATA.units.map(he).join('، ')+'</div></div>'
     +'<div style="display:flex;gap:6px;align-items:center">'
-    +'<select onchange="location.search=&#39;?m=&#39;+this.value">'+DATA.months.map(function(m){ return '<option value="'+m+'"'+(m===DATA.month?' selected':'')+'>'+mlabel(m)+'</option>'; }).join('')+'</select>'
+    +'<select onchange="location.search=&#39;?m=&#39;+this.value">'+DATA.months.map(function(m){
+      var mark=(m===DATA.months[0])?(' — '+k.mm_cur):(' ✓ '+k.mm_final);
+      return '<option value="'+m+'"'+(m===DATA.month?' selected':'')+'>'+mlabel(m)+mark+'</option>'; }).join('')+'</select>'
     +'<button class="btn ghost" onclick="setLang(L===&#39;ar&#39;?&#39;en&#39;:&#39;ar&#39;)">'+k.lang+'</button></div></div>';
   // ---- hero ----
   h+='<div class="card" style="text-align:center;padding:22px">'
-    +'<div class="muted" style="font-size:12px">'+k.net+' · '+k.for_month+' '+mlabel(DATA.month)+'</div>'
+    +(running?('<div style="margin-bottom:8px"><span class="chip warn" style="font-size:12px;padding:4px 14px">⏳ '
+      +k.mm_running.replace('{d}', String(mm.day_of_month)).replace('{n}', String(mm.days_in_month))+'</span></div>'):'')
+    +'<div class="muted" style="font-size:12px">'+k.net+(running?(' — '+k.mm_sofar):'')+' · '+k.for_month+' '+mlabel(DATA.month)+'</div>'
     +'<div style="font-size:34px;font-weight:800;color:var(--gold2);margin:4px 0">'+money(rep.owner_net)+'</div>'
+    +(running&&mm.projection!=null?('<div class="muted" style="font-size:12px">'+k.mm_proj+': ~'+money(mm.projection)
+      +' <span style="font-size:10.5px">('+k.mm_est+')</span></div>'):'')
     +driverSentence()
     +'<div style="margin-top:10px">'+(rc.balanced?('<span class="chip ok">'+k.recon_ok+'</span>'):('<span class="chip bad">'+k.recon_bad+'</span>'))+'</div>'
     +'<div style="margin-top:12px"><a class="btn" href="/fin/o/'+he(token)+'/pdf?m='+he(DATA.month)+'">⬇ '+k.pdf+'</a></div>'
@@ -24957,7 +25054,9 @@ function render(){
     }).join('');
   }
   h+='</div>';
-  h+='<div class="muted" style="text-align:center;font-size:10.5px;margin-top:14px">'+k.gen_at+' '+he(DATA.generated_at||'')+' · Ouja Residence</div>';
+  h+='<div class="muted" style="text-align:center;font-size:10.5px;margin-top:14px">'
+    +(DATA.data_as_of?(k.data_as_of+': <span class="num">'+he(String(DATA.data_as_of).slice(0,16))+'</span> · '):'')
+    +k.gen_at+' '+he(DATA.generated_at||'')+' · Ouja Residence</div>';
   document.getElementById('app').innerHTML=h;
 }
 function lb(u){
@@ -33307,6 +33406,7 @@ async def _api_finance_owners(request):
     k = _owner_key(apt)
     if b.get("delete"):
         _owner_registry.pop(k, None)
+        _owner_cache_bust()      # v2.2 slice 0: registry change — every owner aggregate may shift
         await asyncio.to_thread(persist_state)
         return _json({"ok": True, "deleted": apt})
     cl = b.get("cleaning") or {}
@@ -33328,6 +33428,7 @@ async def _api_finance_owners(request):
     _owner_registry[k] = {"apartment": apt, "owner": (b.get("owner") or "").strip(),
                           "mgmt_pct": mgmt, "lid": lid,
                           "cleaning": {"type": ctype, "amount": camt if ctype == "owner" else 0}}
+    _owner_cache_bust()          # v2.2 slice 0: unit may have moved owners — bust both sides
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "row": _owner_registry[k]})
 
@@ -33377,7 +33478,8 @@ def _finance_aggregate(reps, owner, start, end):
     per-apartment breakdown). Used for the per-owner bulk PDF."""
     R = lambda x: round(float(x or 0), 2)
     tot = lambda k: R(sum(float(r.get(k) or 0) for r in reps))
-    parts = [{"apartment": r.get("apartment"), "total_income": r.get("total_income"),
+    parts = [{"apartment": r.get("apartment"), "lid": r.get("lid"),
+              "total_income": r.get("total_income"),
               "ouja_fee": r.get("ouja_fee"), "expenses": r.get("expenses"),
               "cleaning": (r.get("cleaning") or {}).get("total", 0), "owner_net": r.get("owner_net")}
              for r in reps]
@@ -33447,6 +33549,9 @@ async def _api_finance_adjust(request):
                               "comment": (adj.get("comment") or "")[:1000]}
     else:
         _finance_adjust.pop(k, None)
+    # v2.2 slice 0: saved adjusts feed the owner portal through build_owner_report —
+    # the memoized owner-month reports are stale the moment one is saved.
+    _owner_cache_bust(lid=b.get("lid"))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
@@ -33505,6 +33610,7 @@ async def _api_finance_line_edit(request):
         _finance_adjust.pop(k, None)
     else:
         _finance_adjust[k] = rec
+    _owner_cache_bust(lid=b.get("lid"))     # v2.2 slice 0: line edits must show on the owner page now
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "line_overrides": lov})
 
@@ -33648,6 +33754,7 @@ async def _api_expenses_update(request):
     e = _expenses.get((b.get("id") or "").strip())
     if not e:
         return _json({"error": "not found"}, 404)
+    old_lid = e.get("listing_id")
     for k in _EXP_EDITABLE:
         if k in b:
             if k == "amount":
@@ -33658,6 +33765,9 @@ async def _api_expenses_update(request):
             else:
                 e[k] = (b[k] or "").strip() if isinstance(b[k], str) else b[k]
     await asyncio.to_thread(_exp_process, e, allow_post=False)
+    _owner_cache_bust(lid=old_lid)                  # v2.2 slice 0
+    if e.get("listing_id") != old_lid:
+        _owner_cache_bust(lid=e.get("listing_id"))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
 
@@ -33828,11 +33938,14 @@ async def _api_expenses_resolve_apartment(request):
     name = (get_listings_map() or {}).get(lid)
     if name:
         e["apartment"] = name
+    old_lid = e.get("listing_id")
     e["listing_id"] = lid
     e["candidates"] = []
     e["apartment_locked"] = lid       # remember the manual choice
     _exp_log_event(e, "apartment_confirmed", by=(b.get("by") or "")[:60], detail=(name or str(lid)))
     await asyncio.to_thread(_exp_process, e, allow_post=True)
+    _owner_cache_bust(lid=old_lid)                  # v2.2 slice 0: the unit changed
+    _owner_cache_bust(lid=lid)
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "expense": _exp_view(e)})
 
@@ -33859,6 +33972,7 @@ async def _api_expenses_discard(request):
         return _json({"error": "not found"}, 404)
     e["status"] = "discarded"
     e["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _owner_cache_bust(lid=e.get("listing_id"))      # v2.2 slice 0
     await asyncio.to_thread(persist_state)
     log_event("ops", f"تجاهل مصروف [{e.get('ref')}] · {e.get('apartment') or '—'}")
     return _json({"ok": True})
@@ -33884,6 +33998,7 @@ async def _api_expenses_delete(request):
             except Exception as ex:
                 return _json({"error": f"hostaway delete failed: {ex}"}, 502)
     _expenses.pop(e["id"], None)
+    _owner_cache_bust(lid=e.get("listing_id"))      # v2.2 slice 0
     await asyncio.to_thread(persist_state)
     log_event("ops", f"حذف مصروف [{e.get('ref')}]" + (" + من Hostaway" if removed_remote else ""))
     return _json({"ok": True, "removed_hostaway": removed_remote})
@@ -34195,7 +34310,12 @@ async def _api_exp4_edit(request):
     if not e:
         return _json({"error": "not_found"}, 404)
     fields = b.get("fields") if isinstance(b.get("fields"), dict) else {}
+    old_lid = e.get("listing_id")
     _ok, changed = _exp4_edit(e, fields, by=by)
+    if changed:
+        _owner_cache_bust(lid=old_lid)              # v2.2 slice 0
+        if e.get("listing_id") != old_lid:
+            _owner_cache_bust(lid=e.get("listing_id"))
     await asyncio.to_thread(persist_state)
     return _json({"ok": True, "changed": changed, "view": _exp4_view(e)})
 

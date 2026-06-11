@@ -317,8 +317,14 @@ def listings_search(q):
 
 
 def _invalidate_owner_cache(owner):
-    """Terms changed → the memoized monthly reports for this owner are stale."""
+    """Terms changed → the memoized monthly reports for this owner are stale.
+    v2.2: delegates to bot.py's _owner_cache_bust (the ONE implementation all
+    writers share); falls back to the direct pop for older bot.py builds."""
     try:
+        bust = getattr(_B(), "_owner_cache_bust", None)
+        if bust is not None:
+            bust(owner=owner)
+            return
         cache = _B()._owner_portal_cache
         for key in [k for k in cache if k[0] == owner]:
             cache.pop(key, None)
@@ -453,6 +459,152 @@ def unit_statement(rec, mkey, force_rederive=False):
     es["outside_contract_value"] = _fnum(sum((_D(x.get("reference_total") or 0) for x in excluded), Decimal(0)))
     out["excluded_summary"] = es
     return out, footnotes
+
+
+# ====================== v2.2 slice 1: the month must never lie ======================
+
+def _partial_net(owner, mkey, ndays):
+    """Owner aggregate net for the FIRST `ndays` days of a month — the
+    same-days-of-last-month comparison the editor header shows. Runs the real
+    statement engine over the partial window (booking-driven; month-keyed
+    manual adjusts don't apply to partial windows — it's a labeled pace
+    indicator, not a statement)."""
+    B = _B()
+    start, end = B._month_bounds(mkey)
+    pend = min(end, start + timedelta(days=max(1, int(ndays)) - 1))
+    items = B._finance_collect_items("owner", [], [owner], start, pend)
+    rep = items[0]["report"] if items else None
+    if rep is None:
+        return None
+    return _fnum(rep.get("owner_net") or 0)
+
+
+def month_meta(owner, mkey, rep=None, with_compare=False):
+    """Honest month-state block rendered everywhere a month shows (v2.2 slice 1):
+    state (running/closed/future), day counters, net-so-far, a LABELED linear
+    pace projection, and (editor only) first-N-days vs last month."""
+    B = _B()
+    today = datetime.now(B.TZ).date()
+    cur = today.isoformat()[:7]
+    start, end = B._month_bounds(mkey)
+    days_in_month = (end - start).days + 1
+    state = "running" if mkey == cur else ("closed" if mkey < cur else "future")
+    out = {"month": mkey, "state": state, "days_in_month": days_in_month,
+           "day_of_month": today.day if state == "running" else None}
+    if state != "running":
+        return out
+    elapsed = max(1, today.day)
+    net = float((rep or {}).get("owner_net") or 0) if rep is not None else None
+    if net is not None:
+        out["net_so_far"] = _fnum(net)
+        out["projection"] = int(round(net / elapsed * days_in_month))
+        out["projection_basis"] = "linear"
+    if with_compare and owner:
+        try:
+            pm = api._prior_month(mkey)
+            prev_partial = _partial_net(owner, pm, elapsed)
+            if prev_partial is not None:
+                out["compare"] = {"prev_month": pm, "days": elapsed,
+                                  "prev_net": prev_partial,
+                                  "cur_net": (_fnum(net) if net is not None else None)}
+        except Exception as e:
+            print("month_meta compare error:", e)
+    return out
+
+
+# ---- v2.2 slice 2: تطابق الكشوف — per-unit subtotals vs the aggregate + hard fixtures ----
+
+TIEOUT_FIXTURES = [
+    {
+        # أبو فهد الخطيب — May 2026: his 8 system-generated per-apartment PDFs
+        # (01-05 → 31-05) sum to net 48,115.05 exactly. THE regression anchor
+        # for the whole money engine — never force totals to match it; a diff
+        # means a rule changed and must be explained per unit.
+        "owner_keys": ["فهد", "خطيب"],
+        "month": "2026-05",
+        "totals": {"net": 48115.05, "income": 59016.76, "fees": 9962.90,
+                   "expenses": 938.81, "manual_income": 3667.30},
+        "units": {"101a": 7674.62, "101b": 6864.72, "102a": 6999.52, "102b": 6441.11,
+                  "201b": 5272.71, "201a": 5302.78, "202a": 4894.07, "202b": 4665.52},
+    },
+]
+
+
+def _tieout_fixture(owner, mkey):
+    for f in TIEOUT_FIXTURES:
+        if f["month"] == mkey and all(k in (owner or "") for k in f["owner_keys"]):
+            return f
+    return None
+
+
+def statement_tieout(owner, mkey):
+    """Per-apartment subtotals (the SAME per-unit engine the apartment PDFs
+    render) vs the live aggregate statement, plus the hard-number PDF fixture
+    when one exists for (owner, month). Read-only; mismatches are SHOWN per
+    unit with their deltas — totals are never forced."""
+    B = _B()
+    recs = [r for r in api._registry_rows() if (r.get("owner") or "").strip() == (owner or "").strip()]
+    if not recs:
+        return {"error": "owner_not_in_registry", "owner": owner}
+    fixture = _tieout_fixture(owner, mkey)
+    fx_units = {B._owner_key(k): v for k, v in ((fixture or {}).get("units") or {}).items()}
+    units = []
+    sums = {"income": Decimal(0), "fees": Decimal(0), "expenses": Decimal(0),
+            "cleaning": Decimal(0), "net": Decimal(0), "manual_income": Decimal(0)}
+    for rec in recs:
+        apt = rec.get("apartment") or ""
+        rep, _fn = unit_statement(rec, mkey)
+        if rep is None:
+            units.append({"apartment": apt, "lid": None, "error": "no_report",
+                          "fixture_net": fx_units.get(B._owner_key(apt)),
+                          "delta_vs_fixture": None})
+            continue
+        row = {"apartment": apt, "lid": rep.get("lid"),
+               "income": rep.get("total_income"), "fees": rep.get("ouja_fee"),
+               "expenses": rep.get("expenses"),
+               "cleaning": (rep.get("cleaning") or {}).get("total") or 0,
+               "manual_income": rep.get("manual_income") or 0,
+               "net": rep.get("owner_net")}
+        for k in ("income", "fees", "expenses", "cleaning", "net", "manual_income"):
+            sums[k] += _D(row[k])
+        fxn = fx_units.get(B._owner_key(apt))
+        row["fixture_net"] = fxn
+        row["delta_vs_fixture"] = (_fnum(_D(row["net"]) - _D(fxn)) if fxn is not None else None)
+        units.append(row)
+    agg = compute_owner_statement(owner, mkey)             # WITH the editor's saved edits
+    agg_t = {"income": (agg or {}).get("total_income"), "fees": (agg or {}).get("ouja_fee"),
+             "expenses": (agg or {}).get("expenses"),
+             "cleaning": ((agg or {}).get("cleaning") or {}).get("total") or 0,
+             "net": (agg or {}).get("owner_net"),
+             "adjustments": (agg or {}).get("adjustments_total") or 0,
+             "has_manual_edits": bool((agg or {}).get("has_manual_edits"))}
+    sums_f = {k: _fnum(v) for k, v in sums.items()}
+    # aggregate − sum(units): nonzero ONLY when owner-level editor decisions
+    # (excludes / includes / manual lines / adjustments) moved the totals.
+    agg_minus_units = {k: (_fnum(_D(agg_t.get(k)) - _D(sums_f.get(k)))
+                           if agg_t.get(k) is not None else None)
+                       for k in ("income", "fees", "expenses", "cleaning", "net")}
+    out = {"ok": True, "owner": owner, "month": mkey,
+           "generated_at": datetime.now(B.TZ).isoformat(timespec="seconds"),
+           "units": units, "units_sum": sums_f,
+           "aggregate": agg_t, "agg_minus_units": agg_minus_units,
+           "balanced": all((v is None or abs(v) < 0.02) for v in agg_minus_units.values()),
+           "month_meta": month_meta(owner, mkey)}
+    if fixture:
+        mism = [u["apartment"] for u in units
+                if u.get("delta_vs_fixture") is not None and abs(u["delta_vs_fixture"]) >= 0.02]
+        missing = [k for k in ((fixture.get("units") or {}))
+                   if B._owner_key(k) not in {B._owner_key(u["apartment"]) for u in units}]
+        d_units = _fnum(_D(sums_f["net"]) - _D(fixture["totals"]["net"]))
+        out["fixture"] = {
+            "month": fixture["month"], "totals": fixture["totals"],
+            "delta_net_units_sum": d_units,
+            "delta_net_aggregate": (_fnum(_D(agg_t["net"]) - _D(fixture["totals"]["net"]))
+                                    if agg_t.get("net") is not None else None),
+            "unit_mismatches": mism, "fixture_units_missing": missing,
+            "passed": (abs(d_units) < 0.02 and not mism and not missing),
+        }
+    return out
 
 
 # ====================== Slice 2: statement store + editor engine ======================
@@ -737,6 +889,8 @@ def statement_payload(owner, mkey):
     rec = stmt_rec(owner, mkey)
     pub = (rec or {}).get("published") or {}
     return {"ok": True, "owner": owner, "month": mkey,
+            "computed_at": datetime.now(_B().TZ).isoformat(timespec="seconds"),
+            "month_meta": month_meta(owner, mkey, live, with_compare=True),
             "statement": live,
             "explain": _build_explain(live),
             "edits": (rec or {}).get("edits") or {},
@@ -749,7 +903,8 @@ def statement_payload(owner, mkey):
 
 
 _EDIT_OPS = ("resv_exclude", "resv_include", "exp_override", "exp_delete",
-             "exp_manual_add", "exp_manual_del", "adj_add", "adj_del")
+             "exp_manual_add", "exp_manual_del", "adj_add", "adj_del",
+             "inc_manual_add", "inc_manual_del")
 
 
 def statement_edit(request, body):
@@ -758,14 +913,14 @@ def statement_edit(request, body):
     freshly recomputed statement (totals live-update, R1-style)."""
     B = _B()
     owner = (body.get("owner") or "").strip()
-    mkey = api._month_key_or_now(body.get("m"))
+    mkey = api._month_key_or_prev(body.get("m"))
     op = (body.get("op") or "").strip()
     reason = (body.get("reason") or "").strip()
     if op not in _EDIT_OPS:
         return {"error": "bad_op"}, 400
     if not owner:
         return {"error": "owner_required"}, 400
-    if not reason and op != "exp_manual_del" and op != "adj_del":
+    if not reason and op not in ("exp_manual_del", "adj_del", "inc_manual_del"):
         return {"error": "reason_required",
                 "message_ar": "السبب إلزامي — كل تعديل لازم يُفسَّر.",
                 "message_en": "A reason is required — every edit must be explainable."}, 400
@@ -840,6 +995,53 @@ def statement_edit(request, body):
     elif op == "adj_del":
         before = next((x for x in e["adjustments"] if x.get("id") == target), None)
         e["adjustments"] = [x for x in e["adjustments"] if x.get("id") != target]
+    elif op == "inc_manual_add":
+        # v2.2 slice 3: per-apartment MANUAL INCOME — fee-exempt. Lands in the
+        # legacy per-lid adjust store so the unit PDF and the owner aggregate
+        # read the SAME line (exactly May's «سلطان عبدالله 2,844» pattern).
+        try:
+            amt = round(float(body.get("amount")), 2)
+        except (TypeError, ValueError):
+            return {"error": "bad_amount"}, 400
+        try:
+            lid = int(body.get("lid"))
+        except (TypeError, ValueError):
+            return {"error": "lid_required",
+                    "message_ar": "حدد الشقة أول.", "message_en": "Pick the apartment first."}, 400
+        start, end = B._month_bounds(mkey)
+        ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+        adj = B._finance_adjust.get(ak) or {}
+        for kdef, vdef in (("expense_overrides", {}), ("extra_lines", []),
+                           ("line_overrides", {}), ("comment", "")):
+            adj.setdefault(kdef, vdef)
+        line = {"kind": "income",
+                "label": (str(body.get("label") or "").strip() or "إيراد يدوي")[:120],
+                "amount": amt}
+        adj["extra_lines"] = list(adj.get("extra_lines") or []) + [line]
+        B._finance_adjust[ak] = adj
+        B.persist_state()
+        target = ak + " inc[" + str(len(adj["extra_lines"]) - 1) + "]"
+        after = line
+    elif op == "inc_manual_del":
+        try:
+            lid = int(body.get("lid"))
+            idx = int(str(body.get("id") or "").replace("inc-", ""))
+        except (TypeError, ValueError):
+            return {"error": "bad_target"}, 400
+        start, end = B._month_bounds(mkey)
+        ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+        adj = B._finance_adjust.get(ak)
+        lines = list((adj or {}).get("extra_lines") or [])
+        if not (0 <= idx < len(lines)) or (lines[idx] or {}).get("kind") != "income":
+            return {"error": "income_line_not_found"}, 404
+        before = lines[idx]
+        del lines[idx]
+        adj["extra_lines"] = lines
+        if not (adj.get("expense_overrides") or adj.get("extra_lines")
+                or adj.get("line_overrides") or (adj.get("comment") or "").strip()):
+            B._finance_adjust.pop(ak, None)
+        B.persist_state()
+        target = ak + " inc[" + str(idx) + "]"
     stmt_audit_add(rec, actor, op, target, before, after, reason)
     _stmt_save()
     try:
@@ -857,7 +1059,7 @@ def statement_publish(request, body):
     on the page so a stale PDF is recognizable."""
     B = _B()
     owner = (body.get("owner") or "").strip()
-    mkey = api._month_key_or_now(body.get("m"))
+    mkey = api._month_key_or_prev(body.get("m"))
     fresh = compute_owner_statement(owner, mkey)
     if fresh is None:
         return {"error": "owner_not_in_registry"}, 404
@@ -905,6 +1107,65 @@ def statement_recompute_diff(owner, mkey):
             "published": (a if snap else None), "fresh": b, "delta": delta,
             "published_version": pub.get("version"),
             "changed": any((delta[k] or 0) != 0 for k in delta) if snap else True}
+
+
+# ====================== v2.2 slice 3: the owner profile ======================
+
+def owner_profile(owner):
+    """Everything the owner-profile page renders: header (profile + link),
+    apartment chips (with live contract terms), and the 12-month grid with
+    per-month net / status / anomaly flag / per-unit nets. Reads the memoized
+    month reports — first load computes, then it's warm."""
+    B = _B()
+    det = owner_detail(owner)
+    if not det.get("ok"):
+        return det
+    if not det.get("units"):
+        return {"error": "owner_not_in_registry", "owner": owner}
+    links = getattr(B, "_owner_links", None) or {}
+    lk = links.get(owner) or {}
+    today = datetime.now(B.TZ).date()
+    cur = today.isoformat()[:7]
+    months = []
+    y, m = int(cur[:4]), int(cur[5:7])
+    for i in range(12):
+        ty, tm = y, m - i
+        while tm <= 0:
+            tm += 12
+            ty -= 1
+        k = "%04d-%02d" % (ty, tm)
+        try:
+            rep = B._owner_month_report(owner, k)
+        except Exception as e:
+            print("owner_profile month %s error: %s" % (k, e))
+            rep = None
+        srec = stmt_rec(owner, k) or {}
+        pub = srec.get("published") or {}
+        try:
+            anomalies = owner_anomalies(owner, k, rep) if rep is not None else []
+        except Exception:
+            anomalies = []
+        unit_nets = {}
+        for p in (rep or {}).get("apartments") or []:
+            unit_nets[str(p.get("apartment") or "")] = p.get("owner_net")
+        months.append({"m": k,
+                       "state": "running" if k == cur else "closed",
+                       "net": (rep or {}).get("owner_net"),
+                       "status": srec.get("status") or "draft",
+                       "published_version": pub.get("version"),
+                       "flagged": bool(anomalies), "anomalies": anomalies[:4],
+                       "unit_nets": unit_nets})
+    return {"ok": True, "owner": owner,
+            "profile": det.get("profile") or {},
+            "units": det.get("units") or [],
+            "versions": (det.get("versions") or [])[:20],
+            "months": months,
+            "link": {"exists": bool(lk.get("token")), "active": bool(lk.get("active")),
+                     "url": ("/fin/o/" + lk["token"]) if (lk.get("token") and lk.get("active")) else "",
+                     "opened_at": lk.get("opened_at") or "", "opens": lk.get("opens") or 0},
+            "wa_template": wa_template(),
+            "default_month": api._month_key_or_prev(None),
+            "month_meta": month_meta(owner, cur)}
 
 
 # ====================== Slice 3: دورة الشهر — the monthly cycle board ======================
@@ -1076,6 +1337,7 @@ def cycle_board(mkey):
               "flagged": sum(1 for r in rows if r["flagged"])}
     total_net = round(sum(float(r["net"]) for r in rows if r["net"] is not None), 2)
     return {"ok": True, "month": mkey, "rows": rows, "counts": counts,
+            "month_meta": month_meta(None, mkey),
             "portfolio_net": total_net, "wa_template": wa_template(),
             "thresholds": {"net_dev_pct": ANOM_NET_DEV_PCT,
                            "excluded_sar": ANOM_EXCLUDED_SAR,
@@ -1089,7 +1351,7 @@ def cycle_status_set(request, body):
     to = (body.get("to") or "").strip()
     if to not in _STATUSES:
         return {"error": "bad_status"}, 400
-    mkey = api._month_key_or_now(body.get("m"))
+    mkey = api._month_key_or_prev(body.get("m"))
     owners = body.get("owners") or ([body.get("owner")] if body.get("owner") else [])
     owners = [str(o).strip() for o in owners if str(o or "").strip()]
     if not owners:

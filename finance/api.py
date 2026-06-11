@@ -986,6 +986,17 @@ def _month_key_or_now(v):
     return datetime.now(B.TZ).date().isoformat()[:7]
 
 
+def _month_key_or_prev(v):
+    """v2.2 slice 1: the owner flow (editor, cycle board, diff, diagnosis)
+    DEFAULTS to the last COMPLETE month — that's what actually gets sent to
+    owners. The running month stays one click away in the picker. (June-shown-
+    as-if-final caused the 19,470-vs-48,114 confusion.)"""
+    v = (v or "").strip()[:7]
+    if len(v) == 7 and v[:2] == "20" and v[4] == "-":
+        return v
+    return _prior_month(datetime.now(B.TZ).date().isoformat()[:7])
+
+
 def _month_bounds_iso(mkey):
     y, m = int(mkey[:4]), int(mkey[5:7])
     return "%04d-%02d-01" % (y, m), "%04d-%02d-%02d" % (y, m, monthrange(y, m)[1])
