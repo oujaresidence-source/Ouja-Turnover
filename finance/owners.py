@@ -1308,6 +1308,14 @@ def owner_anomalies(owner, mkey, rep):
         out.append({"key": "receipt_missing", "sev": "warn",
                     "ar": "%d مصروف ≥%d بدون فاتورة" % (len(noreceipt), int(ANOM_RECEIPT_SAR)),
                     "en": "%d expenses ≥%d without receipt" % (len(noreceipt), int(ANOM_RECEIPT_SAR))})
+    # 7) v2.2.3: cancelled rows carrying a REAL payment signal — by policy they
+    # never auto-count; this reminds Faisal to review and add manually if real.
+    sig = [x for x in (rep.get("refunded_lines") or [])
+           if x.get("kind") == "cancelled_money_signal"]
+    if sig:
+        out.append({"key": "cancelled_money_signal", "sev": "warn",
+                    "ar": "%d إلغاء فيه إشارة دفع — يحتاج مراجعتك اليدوية" % len(sig),
+                    "en": "%d cancellations with a payment signal — review manually" % len(sig)})
     return out
 
 

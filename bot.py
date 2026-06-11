@@ -23576,76 +23576,33 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         base_meta = {"id": r.get("id"), "guest": r.get("guest") or "", "channel": channel,
                      "apartment": r.get("apartment"), "checkin": r.get("checkin"),
                      "checkout": r.get("checkout"), "nights": r.get("nights")}
-        # ---- cancelled rows: only PAID money enters income ----
+        # ---- cancelled rows: NEVER income, by policy (v2.2.3, Faisal's call) ----
+        # Hostaway's payment fields proved untrustworthy on cancellations (withdrawn
+        # requests arrive as cancelled + «Paid» + payout math — the Mohameed bug).
+        # So NO cancelled reservation auto-counts — any channel, any evidence.
+        # They land in the editor's excluded list; rows that DO carry a real money
+        # signal are flagged «فيه إشارة دفع» so Faisal reviews and adds the true
+        # retained amount MANUALLY (force-include with amount / manual income line).
+        # The owner-facing page does not list cancelled rows at all.
         if cancelled:
+            ev = []
             if channel == "airbnb":
-                # v2.2.1 (the Mohameed bug, owner-verified against Airbnb): the
-                # expected/cancellation-payout fields are itinerary MATH and exist
-                # even on withdrawn/declined requests where no money ever moved.
-                # The ONLY actual-money field Hostaway carries for Airbnb is
-                # airbnbTotalPaidAmount — income on a cancelled row comes from it
-                # or not at all. Everything else lands in the transparency footer
-                # (visible + force-includable from the editor with an amount).
-                actually_paid = r.get("airbnb_paid_amount")
-                if actually_paid is None:
-                    refunded_lines.append({**base_meta, "kind": "cancelled_no_money",
-                                           "amount": 0.0,
-                                           "reference_total": r.get("airbnb_payout"),
-                                           "evidence": "expected-payout math only — airbnbTotalPaidAmount absent"})
-                    continue
-                kept = float(actually_paid) - refund
-                if kept <= 0.005:
-                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
-                                           "amount": 0.0, "evidence": "paid_minus_refund<=0"})
-                    continue
-                income = kept; inc_airbnb += income
-                direct_detail = None
-                src = "airbnbTotalPaidAmount − refund (cancelled, retained)"
-            elif channel == "direct":
-                paid_evidence = bool(paid_amt) or pstat in ("paid", "partially paid", "partial")
-                if not paid_evidence:
-                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
-                                           "amount": 0.0, "evidence": ("payment_status=" + pstat) if pstat else "no_payment_field"})
-                    continue
-                collected = paid_amt if paid_amt else (r.get("total_price") if pstat == "paid" else None)
-                if collected is None:                          # money moved, amount unknowable
-                    missing_payout.append(r.get("id"))
-                    resv_lines.append({**base_meta, "refund": R(refund), "extras": 0.0,
-                                       "income": None, "gross": None, "needs_review": True,
-                                       "exclude_reason": "missing_paid_amount",
-                                       "reference_total": r.get("total_price"),
-                                       "status_kind": "cancelled_paid",
-                                       "source_fields": "partial payment without amount field"})
-                    continue
-                if float(collected) - refund <= 0.005:
-                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
-                                           "amount": 0.0, "evidence": "collected_minus_refund<=0"})
-                    continue
-                direct_detail = _direct_fee_calc(collected, refund, direct_fee_pct)
-                income = direct_detail["net"]; inc_direct += income
-                src = direct_detail["source_fields"] + " (cancelled, collected: " + (", ".join(pfields) or "paymentStatus") + ")"
+                if r.get("airbnb_paid_amount"):
+                    ev.append("airbnbTotalPaidAmount=%s" % r["airbnb_paid_amount"])
+                reference = r.get("airbnb_paid_amount") or r.get("airbnb_payout")
             else:
-                # 'other' channel cancelled: payment signal → needs an explicit rule (blocks
-                # balance, visible); no signal → footer at 0.
-                if pstat or paid_amt:
-                    needs_rule.append(r.get("id"))
-                    resv_lines.append({**base_meta, "refund": R(refund), "extras": 0.0,
-                                       "income": None, "gross": None, "needs_review": True,
-                                       "exclude_reason": "needs_channel_rule",
-                                       "reference_total": (paid_amt or r.get("total_price")),
-                                       "status_kind": "cancelled_paid",
-                                       "source_fields": "other-channel cancellation with payment signal"})
-                else:
-                    refunded_lines.append({**base_meta, "kind": "cancelled_refunded",
-                                           "amount": 0.0, "evidence": "no_payment_field"})
-                continue
-            line = {**base_meta, "refund": R(refund), "extras": 0.0, "income": R(income),
-                    "gross": (r.get("airbnb_paid_amount") if channel == "airbnb" else (paid_amt or r.get("total_price"))),
-                    "status_kind": "cancelled_paid", "source_fields": src}
-            if direct_detail:
-                line.update({"direct_base": direct_detail["base"], "direct_fee_pct": direct_detail["pct"],
-                             "direct_fee_amount": direct_detail["fee"], "direct_net": direct_detail["net"]})
-            resv_lines.append(line)
+                if paid_amt:
+                    ev.append("paid_amount=%s" % paid_amt)
+                if pstat in ("paid", "partially paid", "partial"):
+                    ev.append("paymentStatus=" + pstat)
+                reference = paid_amt or r.get("total_price")
+            if refund > 0:
+                ev.append("refundAmount=%s" % refund)
+            refunded_lines.append({**base_meta,
+                                   "kind": ("cancelled_money_signal" if ev else "cancelled_no_money"),
+                                   "amount": 0.0,
+                                   "reference_total": reference,
+                                   "evidence": ("; ".join(ev) if ev else "no money evidence")})
             continue
         # ---- confirmed rows ----
         # explicit unpaid direct booking: visible as COMING money, never counted yet
@@ -25060,11 +25017,13 @@ function render(){
     }).join(''):'')
     +'<div class="kv"><span><b>'+k.net+'</b></span><b style="color:var(--gold2)">'+money(rep.owner_net)+'</b></div></div>';
   // ---- transparency footer ----
-  var unpaid=rep.unpaid_lines||[], refunded=rep.refunded_lines||[];
+  // v2.2.3 (policy): cancelled reservations are NOT listed on the owner page at
+  // all — they live in the editor only, where Faisal reviews them manually.
+  var unpaid=rep.unpaid_lines||[];
   var needsRev=(rep.resv_lines||[]).filter(function(l){ return l.needs_review; });
   var manx=rep.manual_excluded_lines||[];
   h+='<div class="card"><h2>'+k.sec_footer+'</h2>';
-  if(!unpaid.length&&!refunded.length&&!needsRev.length&&!manx.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
+  if(!unpaid.length&&!needsRev.length&&!manx.length){ h+='<div class="empty">'+k.foot_none+'</div>'; }
   else{
     h+=manx.map(function(u){
       return '<div class="foot-line"><span><span class="chip info">'+k.foot_excluded_manual+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
@@ -25082,11 +25041,6 @@ function render(){
     h+=unpaid.map(function(u){
       return '<div class="foot-line"><span><span class="chip warn">'+k.foot_unpaid+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
         +'<span class="muted">'+k.foot_expected+' '+money(u.expected)+'</span></div>';
-    }).join('');
-    h+=refunded.map(function(u){
-      var nomoney=(u.kind==='cancelled_no_money');
-      return '<div class="foot-line"><span><span class="chip info">'+(nomoney?k.foot_cxl_nomoney:k.foot_refunded)+'</span> '+he(u.guest||'')+' · <span class="num">'+he(u.checkin||'')+'</span></span>'
-        +((nomoney&&u.reference_total!=null)?('<span class="muted">'+k.foot_ref+': '+money(u.reference_total)+'</span>'):('<b>'+money(0)+'</b>'))+'</div>';
     }).join('');
   }
   h+='</div>';
