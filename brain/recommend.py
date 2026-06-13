@@ -7,7 +7,7 @@ the Governor immediately accounts for everyone in the package.
 
 import json
 from collections import Counter
-from . import db, signals as sig_mod, campaigns, audience as aud_mod, governor, adapters, members
+from . import db, signals as sig_mod, campaigns, audience as aud_mod, governor, adapters, members, settings
 from .util import now_iso, today_iso
 
 
@@ -97,6 +97,8 @@ def _row_view(row, include_signals=True):
     except (ValueError, TypeError):
         pass
     camp = campaigns.get_campaign(d.get("campaign_code")) if d.get("campaign_code") else None
+    token = settings.get("karzoum_name_token") or "{name}"
+    paste_message = ((camp.get("message_template") or "").replace("{name}", token)) if camp else None
     preview = []
     if ids:
         mrows = {m["id"]: m for m in members.get_by_ids(ids[:60])}
@@ -114,6 +116,7 @@ def _row_view(row, include_signals=True):
                       "lever": camp.get("lever"), "message_template": camp.get("message_template"),
                       "image_prompt": camp.get("image_prompt"), "tier_targets": camp.get("tier_targets")}
                      if camp else None),
+        "paste_message": paste_message,
         "audience_size": d.get("audience_size"),
         "audience_preview": preview,
         "projected": {"replies": d.get("projected_replies"), "bookings": d.get("projected_bookings"),
@@ -138,18 +141,12 @@ def get_view(rec_id):
 # ---------------- approve / reject ----------------
 
 def _build_package(rec_row):
+    """Audience-only rows (Name/Phone/Tag) — Karzoum does the name merge in its own composer,
+    so we do NOT pre-merge the message here."""
     ids = json.loads(rec_row["audience"] or "[]")
-    camp = campaigns.get_campaign(rec_row["campaign_code"])
-    template = (camp or {}).get("message_template") or "{name}"
-    win = governor.send_window()
-    pkg = []
-    for m in members.get_by_ids(ids):
-        first = m.get("first_name") or ""
-        msg = template.replace("{name}", first).strip()
-        pkg.append({"member_id": m["id"], "first_name": first, "phone": m.get("phone"),
-                    "tier": m.get("tier"), "merged_message": msg, "media_url": "",
-                    "scheduled_time": win["scheduled_time"], "campaign_code": rec_row["campaign_code"]})
-    return pkg
+    return [{"member_id": m["id"], "first_name": m.get("first_name") or "",
+             "phone": m.get("phone"), "tier": m.get("tier"),
+             "campaign_code": rec_row["campaign_code"]} for m in members.get_by_ids(ids)]
 
 
 def approve(rec_id, actor="owner"):

@@ -46,6 +46,7 @@ DEFAULTS = {
     # ---- approval ----
     "human_approval_required": (1, "int", "approval", "موافقة بشرية إلزامية", "Human approval required", "Phase 1: always 1 (nothing auto-sends)"),
     "active_sender_adapter":   ("csv", "str", "approval", "قناة التسليم", "Sender adapter", "csv (export) | karzoum (Phase 2)"),
+    "karzoum_name_token":      ("{name}", "str", "approval", "رمز الاسم في كرزوم", "Karzoum name token", "What Karzoum substitutes the Name into, e.g. {name} / {{name}} / [Name]"),
 }
 
 _CAST = {"int": int, "float": float, "str": str}

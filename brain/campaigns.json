@@ -1,45 +1,307 @@
-{
-  "_note": "DRAFT Arabic copy + image prompts — placeholders so the dashboard preview renders. Replace message_template / image_prompt for each code with the real Ouja Elite manual text; everything else (trigger_type, tier_targets, cooldown_class) is the live wiring the selector uses. {name} is merged per member.",
-  "campaigns": [
-    {"code": "C01", "name": "Member rate", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "member_rate", "offer": "سعر العضو", "lever": "price", "cooldown_class": "soft", "active": 1,
-     "message_template": "هلا {name} 👋 سعر العضو في عوجا متاح لك هذا الأسبوع — تبي نجهّز لك وحدة؟", "image_prompt": "Premium Riyadh serviced apartment interior at golden hour, warm cream and gold palette, calm luxury, no text overlay"},
-    {"code": "C02", "name": "3rd night free", "tier_targets": ["Gold", "Turaif"], "trigger_type": "long_weekday_gap", "offer": "الليلة الثالثة هدية", "lever": "free_night", "cooldown_class": "promo", "active": 1,
-     "message_template": "{name}، خصيناك: احجز ليلتين والثالثة علينا في عوجا 🌙 العرض محدود.", "image_prompt": "Cozy bedroom with three pillows arranged, soft gold lamp light, inviting, Saudi premium short-stay aesthetic"},
-    {"code": "C03", "name": "Stay-more ladder", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "stay_more", "offer": "كل ما طولت وفّرت", "lever": "tiered_discount", "cooldown_class": "promo", "active": 1,
-     "message_template": "{name} كل ما طوّلت إقامتك في عوجا وفّرت أكثر — 3 ليالي خصم، 5 ليالي خصم أكبر. تحب التفاصيل؟", "image_prompt": "Minimal staircase-of-savings concept, warm neutrals, premium apartment background, no text"},
-    {"code": "C04", "name": "Ouja credit (bounce-back)", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "bounce_back", "offer": "رصيد عوجا", "lever": "credit", "cooldown_class": "promo", "active": 1,
-     "message_template": "شكراً لإقامتك معنا {name} 🤍 وهديناك رصيد عوجا لإقامتك الجاية — صالح لفترة محدودة.", "image_prompt": "Elegant gift-card style gold credit concept on cream surface, luxury hospitality, no readable text"},
-    {"code": "C05", "name": "Stamp card", "tier_targets": ["Gold", "Turaif"], "trigger_type": "milestone", "offer": "بطاقة الأختام", "lever": "loyalty", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} قربت تكمّل ختمك الأخير في عوجا — إقامة وحدة وتجيك مكافأتك 🎁", "image_prompt": "Loyalty stamp card with gold seals, premium stationery look, warm tones, no text"},
-    {"code": "C06", "name": "Book direct", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "checkout_today", "offer": "احجز مباشرة", "lever": "direct", "cooldown_class": "soft", "active": 1,
-     "message_template": "نتمنى إقامتك كانت ممتعة {name} 🌟 المرة الجاية احجز مباشرة مع عوجا وخذ سعر أفضل — رابطنا جاهز لك.", "image_prompt": "Welcoming apartment door with keycard, warm gold light, direct-booking concept, premium calm"},
-    {"code": "C07", "name": "Free upgrade", "tier_targets": ["Turaif", "Gold"], "trigger_type": "upgrade_empty_premium", "offer": "ترقية مجانية", "lever": "upgrade", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} عندنا وحدة أرقى فاضية ونبي نرقّيك لها بدون فرق سعر — تبي؟ 👑", "image_prompt": "Upgraded premium suite, skyline view, warm gold accents, aspirational but calm"},
-    {"code": "C08", "name": "Welcome amenity", "tier_targets": ["Turaif", "Gold"], "trigger_type": "welcome_amenity", "offer": "ضيافة ترحيب", "lever": "amenity", "cooldown_class": "soft", "active": 1,
-     "message_template": "حياك الله {name} 🤍 جهّزنا لك ضيافة ترحيب بسيطة في وحدتك القادمة — على عوجا.", "image_prompt": "Welcome amenity tray with dates and Arabic coffee, gold and cream, premium hospitality, no text"},
-    {"code": "C09", "name": "Late checkout / early check-in", "tier_targets": ["Turaif"], "trigger_type": "perk_lowpressure", "offer": "تسجيل مرن", "lever": "flex_time", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} لأنك من ضيوف تُرَيف — خروج متأخر أو دخول مبكر بدون رسوم في إقامتك الجاية ⏰", "image_prompt": "Clock and key concept, relaxed morning light in a premium apartment, warm tones"},
-    {"code": "C10", "name": "Flash 48h", "tier_targets": ["Turaif", "Gold"], "trigger_type": "flash_imminent", "offer": "فلاش ٤٨ ساعة", "lever": "price", "cooldown_class": "flash", "active": 1,
-     "message_template": "⚡ {name} عرض فلاش ٤٨ ساعة على وحدات مختارة في عوجا — أول ما يخلص ينتهي.", "image_prompt": "High-energy but tasteful flash-sale concept, gold lightning motif on dark cream, premium"},
-    {"code": "C11", "name": "Advance purchase", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "advance_purchase", "offer": "احجز بدري", "lever": "price", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} خطط بدري ووفّر — احجز تواريخك القادمة في عوجا بسعر أهدى الحين 📅", "image_prompt": "Calendar with circled future date, planning concept, warm neutrals, premium apartment hint"},
-    {"code": "C12", "name": "Last-minute", "tier_targets": ["Silver", "Gold"], "trigger_type": "last_minute", "offer": "اللحظة الأخيرة", "lever": "price", "cooldown_class": "flash", "active": 1,
-     "message_template": "{name} عندنا ليالي قريبة فاضية بسعر اللحظة الأخيرة في عوجا — تبي وحدة الليلة/بكرة؟", "image_prompt": "Tonight's-stay concept, lit apartment window at dusk, warm and immediate, premium calm"},
-    {"code": "C13", "name": "Summer package", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "summer_broad", "offer": "باقة الصيف", "lever": "package", "cooldown_class": "promo", "active": 1,
-     "message_template": "صيفك أحلى مع عوجا {name} ☀️ باقة صيفية بمزايا إضافية — تحب نرسل لك التفاصيل؟", "image_prompt": "Summer premium staycation vibe, bright airy apartment, warm palette, refreshing, no text"},
-    {"code": "C14", "name": "Family package", "tier_targets": ["Gold", "Turaif"], "trigger_type": "family_large_empty", "offer": "باقة العائلة", "lever": "package", "cooldown_class": "promo", "active": 1,
-     "message_template": "{name} وحداتنا العائلية الكبيرة جاهزة لإجازة العيال — باقة عائلية مريحة من عوجا 👨‍👩‍👧‍👦", "image_prompt": "Spacious family-friendly apartment, warm and safe, premium Saudi family aesthetic, no text"},
-    {"code": "C15", "name": "Win-back", "tier_targets": ["Silver"], "trigger_type": "winback_dormant", "offer": "اشتقنا لك", "lever": "price", "cooldown_class": "promo", "active": 1,
-     "message_template": "اشتقنا لك {name} 🤍 رجعتك لعوجا لها سعر خاص — جهّزنا لك مفاجأة بسيطة.", "image_prompt": "Warm 'welcome back' concept, open door with gold light, nostalgic premium feel, no text"},
-    {"code": "C16", "name": "Birthday / occasion", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "occasion", "offer": "مناسبتك علينا", "lever": "amenity", "cooldown_class": "soft", "active": 1,
-     "message_template": "كل عام وأنت بخير {name} 🎉 احتفل في عوجا ولنا لمسة خاصة لمناسبتك.", "image_prompt": "Subtle celebration setup in a premium apartment, gold accents, tasteful, no balloons-clutter, no text"},
-    {"code": "C17", "name": "Refer a friend", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "referral", "offer": "رشّح صديق", "lever": "credit", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} عجبتك إقامتك؟ رشّح عوجا لصاحبك وكلكم تستفيدون رصيد 🤝", "image_prompt": "Two-hands sharing concept, warm gold tones, friendly premium hospitality, no text"},
-    {"code": "C18", "name": "Month-close gratitude", "tier_targets": ["Silver", "Gold", "Turaif"], "trigger_type": "month_close", "offer": "شكراً نهاية الشهر", "lever": "goodwill", "cooldown_class": "soft", "active": 1,
-     "message_template": "شهر يكمّل وإنتو معنا {name} 🤍 شكراً لثقتك بعوجا — ولك لفتة بسيطة هالشهر.", "image_prompt": "Month-end gratitude concept, calm premium interior, warm cream and gold, no text"},
-    {"code": "C19", "name": "Turaif early access", "tier_targets": ["Turaif"], "trigger_type": "turaif_early_access", "offer": "وصول مبكر تُرَيف", "lever": "exclusivity", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} لأنك من تُرَيف — لك أولوية الحجز على وحدتنا الجديدة قبل الجميع 👑", "image_prompt": "Brand-new premium unit reveal, exclusive first-look concept, gold ribbon hint, luxury calm, no text"},
-    {"code": "C20", "name": "Ouja Moments", "tier_targets": ["Turaif"], "trigger_type": "vip_nonprice", "offer": "لحظات عوجا", "lever": "experience", "cooldown_class": "soft", "active": 1,
-     "message_template": "{name} حضّرنا لك لحظة عوجا خاصة — تجربة صغيرة تقديراً لك، بدون أي مقابل 🤍", "image_prompt": "Exclusive VIP experiential gift concept, refined, gold and cream, emotional premium, no text"}
-  ]
-}
+[
+  {
+    "code": "C01",
+    "name": "عرض العضو الأساسي",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "filler_start_of_week",
+    "offer": "سعر العضو ٢٠٪ + تأخير خروج",
+    "lever": "belonging",
+    "message_template": "{name}، سعرك كـ عضو في عوجا إيليت أرخص دايمًا 🤍\nـ٢٠٪ على ليالي الأحد–الأربعاء، وتأخير خروج مجاني.\nنجهّز لك وحدتك هالأسبوع؟",
+    "image_prompt": "SCENE: a matte-black membership card with a thin brushed-gold edge resting on warm travertine beside a single brass room key and three dates, soft golden-hour light from the left, intimate and exclusive.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "promo",
+    "active": true
+  },
+  {
+    "code": "C02",
+    "name": "الليلة الثالثة هدية (٢ والثالثة علينا)",
+    "tier_targets": [
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "long_consecutive_gaps",
+    "offer": "احجز ٢ والثالثة هدية",
+    "lever": "loss_aversion",
+    "message_template": "{name}، عرض خاص لك:\nاحجز ليلتين من الأحد للأربعاء، والثالثة هدية منّا 🤍\nنمسك لك التواريخ قبل تنحجز؟",
+    "image_prompt": "SCENE: three plush cream pillows neatly stacked on a luxury bed, the top one tied with a thin gold ribbon like a gift, warm golden-hour light spilling across the linen.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "promo",
+    "active": true
+  },
+  {
+    "code": "C03",
+    "name": "سلّم الليالي (كل ما طوّلت وفّرت)",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "soft_week_long_stay",
+    "offer": "خصم يكبر مع الليالي",
+    "lever": "escalation",
+    "message_template": "{name}، كل ما طوّلت، وفّرت أكثر:\n٣ ليالي خصم أكبر، و٥ ليالي = الخامسة هدية 🤍\nكم ليلة بخاطرك وأرتب لك؟",
+    "image_prompt": "SCENE: a series of ascending warm travertine steps leading up toward a softly glowing doorway, each step catching more golden light than the last, a visual sense of more equals better.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "promo",
+    "active": true
+  },
+  {
+    "code": "C04",
+    "name": "رصيد عوجا (احجز الحين، استفد مرتين)",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "return_loop_midcycle",
+    "offer": "رصيد ١٠٠ ريال للإقامة الجاية",
+    "lever": "return_loop",
+    "message_template": "{name}، احجز هالشهر، وخذ رصيد [١٠٠] ريال لإقامتك الجاية 🤍\nيعني استفدت مرتين. نبدأ لك إقامة؟",
+    "image_prompt": "SCENE: a single polished brass coin-like token resting on a small cream linen square on travertine, lit by a warm shaft of golden light, a subtle 'credit' motif, no text or symbol on the token.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "loyalty",
+    "active": true
+  },
+  {
+    "code": "C05",
+    "name": "بطاقة الإقامات (كل ٤ ليالي = ليلة مجانية)",
+    "tier_targets": [
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "near_milestone",
+    "offer": "كل ٤ ليالي = ليلة مجانية",
+    "lever": "gamification",
+    "message_template": "{name}، جمعت معنا ليالي حلوة 🤍\nكل ٤ ليالي = ليلة مجانية. قربت توصل! نكمّل لك إقامة هالأسبوع؟",
+    "image_prompt": "SCENE: a row of five small brushed-brass medallions arranged on cream linen, four matte and the fifth glowing warm gold, lit by golden-hour light, a loyalty-milestone feeling, no text on the medallions.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "loyalty",
+    "active": true
+  },
+  {
+    "code": "C06",
+    "name": "احجز مباشر معنا",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "checkout_today",
+    "offer": "سعر مباشر أفضل من المنصات",
+    "lever": "ownership_value",
+    "message_template": "{name}، المرة الجاية احجز معنا مباشرة 🤍\nسعر أفضل، تأخير خروج، وخدمة مباشرة — بدون وسيط.\nأرتب لك إقامتك الجاية من هنا؟",
+    "image_prompt": "SCENE: a single elegant dark-walnut front door of a Najdi-modern villa with a brushed-brass handle, warm welcome light glowing from within and spilling onto a clean travertine step, an inviting 'come straight to us' feeling.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "direct",
+    "active": true
+  },
+  {
+    "code": "C07",
+    "name": "ترقية مجانية",
+    "tier_targets": [
+      "Turaif",
+      "Gold"
+    ],
+    "trigger_type": "higher_unit_empty",
+    "offer": "ترقية وحدة مجانية",
+    "lever": "status_surprise",
+    "message_template": "{name}، لأنك من أعضائنا المميّزين 🤍\nإقامتك الجاية فيها ترقية وحدة مجانية (حسب التوفر).\nنرتب لك التاريخ؟",
+    "image_prompt": "SCENE: a more luxurious, larger living room revealed through a softly opening dark door, warm lamplight and gold accents inside, a sense of an upgraded space being unveiled as a surprise.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "perk",
+    "active": true
+  },
+  {
+    "code": "C08",
+    "name": "هدية الترحيب",
+    "tier_targets": [
+      "Turaif",
+      "Gold"
+    ],
+    "trigger_type": "relationship_open",
+    "offer": "هدية ترحيب مجانية",
+    "lever": "reciprocity",
+    "message_template": "{name}، حبينا نبدأ بشي لك 🤍\nهدية ترحيب بانتظارك في وحدتك على إقامتك الجاية، بدون ما تطلبها.\nمتى نجهّز لك؟",
+    "image_prompt": "SCENE: an arrival welcome tray on warm travertine bearing fresh dates, a small brass cup of Arabic gahwa, a folded cream towel and a sprig of fresh greenery, lit by soft golden-hour light, a generous and thoughtful welcome.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "perk",
+    "active": true
+  },
+  {
+    "code": "C09",
+    "name": "تأخير الخروج / دخول مبكر",
+    "tier_targets": [
+      "Turaif"
+    ],
+    "trigger_type": "low_pressure_perk",
+    "offer": "تأخير خروج + دخول مبكر",
+    "lever": "easy_value",
+    "message_template": "{name}، وقتك يهمّنا 🤍\nكـ عضو، لك تأخير خروج مضمون ودخول مبكر حسب التوفر على كل إقامة.\nنرتب لك إقامة هالأسبوع؟",
+    "image_prompt": "SCENE: a serene late-morning luxury bedroom, soft golden light filtering through sheer linen curtains across a perfectly made bed, a calm unhurried atmosphere of lingering a little longer.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "perk",
+    "active": true
+  },
+  {
+    "code": "C10",
+    "name": "فلاش ٤٨ ساعة",
+    "tier_targets": [
+      "Turaif",
+      "Gold"
+    ],
+    "trigger_type": "imminent_open_nights",
+    "offer": "أفضل سعر — ٤٨ ساعة",
+    "lever": "scarcity",
+    "message_template": "{name}، عرض ٤٨ ساعة لأعضاء إيليت فقط ⚡\nأفضل سعر هالأسبوع على ليالي الأحد–الأربعاء.\nينتهي بعد يومين — ردّ بكلمة (إيليت) وأبدأ لك.",
+    "image_prompt": "SCENE: a refined brushed-brass hourglass on a dark stone surface with warm rim light, a softly blurred luxury interior behind it, restrained urgency, premium not loud.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "promo",
+    "active": true
+  },
+  {
+    "code": "C11",
+    "name": "الحجز المبكر",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "at_risk_far_date",
+    "offer": "احجز بدري وخذ خصم إضافي",
+    "lever": "early_commitment",
+    "message_template": "{name}، خطّط بدري ووفّر أكثر 🤍\nاحجز قبل أسبوعين وخذ خصم إضافي على سعر العضو.\nنثبّت لك تاريخ من الحين؟",
+    "image_prompt": "SCENE: a calm planning still life — a brass key resting on a blank travertine block beside a small sprig of greenery, soft golden light, an unhurried 'plan ahead' feeling, no text or numbers on the block.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "promo",
+    "active": true
+  },
+  {
+    "code": "C12",
+    "name": "عرض اللحظة الأخيرة",
+    "tier_targets": [
+      "Silver",
+      "Gold"
+    ],
+    "trigger_type": "open_nights_72h",
+    "offer": "ليالي هالأسبوع بسعر خاص",
+    "lever": "immediacy",
+    "message_template": "{name}، ليالي هالأسبوع المتبقية بسعر خاص لك 🤍\nلو ودك تهرب من حر الرياض، الحين وقتها.\nأرتب لك وحدة الليلة/بكرة؟",
+    "image_prompt": "SCENE: a freshly made luxury bed in warm dusk light with a softly open door beyond it revealing a glowing room, a sense of 'tonight' immediacy and a ready, waiting space.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "promo",
+    "active": true
+  },
+  {
+    "code": "C13",
+    "name": "باقة الصيف (الهروب من الحر)",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "hot_season_softness",
+    "offer": "باقة: إقامة + مزايا",
+    "lever": "bundled_value",
+    "message_template": "{name}، باقة الهروب من الحر 🌙\nليلتان وسط الأسبوع + تأخير خروج + هدية ترحيب، في وحدة فيها أجواء تنسيك الصيف.\nنجهّز لك؟",
+    "image_prompt": "SCENE: a shaded private courtyard pool oasis at golden hour, a cold drink sweating on the stone ledge, a neatly folded towel on a lounger, palm shadows, the feeling of a cool escape from desert heat.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "package",
+    "active": true
+  },
+  {
+    "code": "C14",
+    "name": "باقة العائلة",
+    "tier_targets": [
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "school_break_large_units",
+    "offer": "وحدة واسعة للعائلة",
+    "lever": "relevance",
+    "message_template": "{name}، إجازة العيال على الأبواب 🤍\nوحدة واسعة، أجواء عائلية، وتأخير خروج — بسعرك كـ عضو.\nنرتب لكم إقامة هالأسبوع؟",
+    "image_prompt": "SCENE: a warm, spacious living room arranged for a family — a low Najdi-style majlis with plush cushions, soft lamplight, a cozy and welcoming golden-hour atmosphere.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "package",
+    "active": true
+  },
+  {
+    "code": "C15",
+    "name": "وحشتنا (استرجاع الضيف)",
+    "tier_targets": [
+      "Silver"
+    ],
+    "trigger_type": "dormant_guest",
+    "offer": "سعر عودة خاص",
+    "lever": "curiosity_nostalgia",
+    "message_template": "{name}، وحشتنا 🤍\nجهّزنا لك سعر عودة خاص عشان نشوفك من جديد في عوجا.\nتبي أرتب لك إقامة هالأسبوع؟",
+    "image_prompt": "SCENE: a warm welcoming doorway at dusk with golden light spilling out across a path toward the viewer, an empty inviting threshold, the feeling of a 'welcome back home'.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "winback",
+    "active": true
+  },
+  {
+    "code": "C16",
+    "name": "تهنئة المناسبة (ميلاد/مناسبة)",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "guest_occasion",
+    "offer": "تهنئة + مفاجأة",
+    "lever": "emotional_peakend",
+    "message_template": "{name}، كل عام وأنت بخير 🤍\nحبينا نهنّيك، ولك مفاجأة صغيرة لو احتفلت معنا في عوجا.\nنجهّز لك شي مميّز؟",
+    "image_prompt": "SCENE: an elegant celebration still life — a single lit candle on a brushed-brass plate beside fresh dates and a folded blank cream card, warm golden glow, intimate and special, no text on the card.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "loyalty",
+    "active": true
+  },
+  {
+    "code": "C17",
+    "name": "عرّف صديق",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "after_successful_stay",
+    "offer": "خصم له ورصيد لك",
+    "lever": "social_proof",
+    "message_template": "{name}، عجبتك إقامتك؟ شاركها 🤍\nعرّف صديق على عوجا — له خصم، ولك رصيد على إقامتك الجاية.\nعطني اسمه ورقمه والباقي علي.",
+    "image_prompt": "SCENE: two brushed-brass room keys tied together with a thin cream-and-gold ribbon, resting side by side on warm travertine in golden-hour light, a feeling of sharing something good with a friend.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "referral",
+    "active": true
+  },
+  {
+    "code": "C18",
+    "name": "الوداع الممتن (ختام الشهر)",
+    "tier_targets": [
+      "Silver",
+      "Gold",
+      "Turaif"
+    ],
+    "trigger_type": "end_of_month",
+    "offer": "شكر + آخر نافذة بالشهر",
+    "lever": "peak_end",
+    "message_template": "{name}، شكرًا إنك جزء من عوجا 🤍\nقبل ما يخلص الشهر، سعرك كـ عضو لا زال لك — أحد إلى أربعاء.\nنقفل الشهر بإقامة تليق فيك؟",
+    "image_prompt": "SCENE: a gracious parting still life — a folded blank cream card tied with a thin gold thread on a linen-draped tray with a brass cup of gahwa and three dates, warm golden-hour light by a window, gratitude and warmth.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "loyalty",
+    "active": true
+  },
+  {
+    "code": "C19",
+    "name": "الوصول المبكر للطريف",
+    "tier_targets": [
+      "Turaif"
+    ],
+    "trigger_type": "new_premium_unit",
+    "offer": "معاينة قبل ٤٨ ساعة",
+    "lever": "exclusivity",
+    "message_template": "{name}، لأنك من طريف، تشوفها قبل الكل 🤍\nفتحنا أفضل وحداتنا لأيام الأسبوع — لك ٤٨ ساعة قبل بقية الأعضاء.\nأحجز المفضلة قبل تنحجز؟",
+    "image_prompt": "SCENE: an exclusive VIP first-look — a luxury suite interior bathed in warm golden light beyond a brushed-brass stanchion holding a soft cream-and-gold velvet rope, one perfect armchair in a pool of light, privileged early access.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "exclusive",
+    "active": true
+  },
+  {
+    "code": "C20",
+    "name": "لحظات عوجا (تجارب حصرية)",
+    "tier_targets": [
+      "Turaif"
+    ],
+    "trigger_type": "vip_loyalty",
+    "offer": "تجربة حصرية مع الإقامة",
+    "lever": "status_priceless",
+    "message_template": "{name} 🤍 لأنك من طريف، إقامتك تستاهل أكثر:\nتجربة حصرية مع إقامتك — سيارة خاصة أو ضيافة مميّزة.\nنرتب لك شي استثنائي؟",
+    "image_prompt": "SCENE: an exclusive money-can't-buy experience tableau — a single luxury car key on a dark leather tray beside a brass cup of gahwa on travertine, warm golden-hour light, understated VIP privilege, no logos.\n\nPHOTOREALISTIC, ultra-detailed, editorial luxury-hospitality photograph. AESTHETIC: high-end Saudi boutique hospitality in the visual language of Aman Resorts and JW Marriott / Marriott Bonvoy editorial, fused with Najdi / Diriyah heritage. STRICT COLOR PALETTE: warm gold #C8A96E, deep near-black ink #161310, soft cream #F7F1E6, warm travertine beige, brushed-brass accents — absolutely no neon, no saturated primaries, no cool blue or teal grade. LIGHTING: warm golden-hour sunlight, low raking angle, long soft shadows, gentle volumetric haze, cinematic, ~5200K, soft highlight falloff. MATERIALS & TEXTURE: hand-troweled Najdi mud-brick, travertine and warm limestone, brushed brass, linen and boucle textiles, dark walnut wood, woven palm detail — visible fine micro-texture. CAMERA: medium-format Phase One, 80mm lens, f/2.8, shallow depth of field, creamy bokeh, tack-sharp focal subject. COMPOSITION: vertical 4:5 frame; place the main subject in the LOWER TWO-THIRDS and keep the TOP THIRD clean empty negative space for Arabic text (no object in the top third). MOOD: calm, premium, exclusive, serene, aspirational. POST: subtle fine film grain, natural rich contrast, gentle highlight roll-off, NO HDR look. OUTPUT: hyper-realistic, magazine-cover quality, 8k.\n\nNEGATIVE — DO NOT INCLUDE: any text, letters, Arabic or English writing, numbers, logos, watermarks, UI; no human faces, no deformed hands; no Western/European architecture, no skyscrapers, no snow; no clutter, no plastic, no cartoon or 3D-render look, no oversaturation, no blue/teal grade, no busy patterns in the top third.",
+    "cooldown_class": "experience",
+    "active": true
+  }
+]

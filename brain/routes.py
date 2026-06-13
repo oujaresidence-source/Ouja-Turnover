@@ -151,6 +151,23 @@ async def api_seed(request):
     return HOST.json_response({"ok": True, "result": members.recompute(full=True)})
 
 
+async def api_seed_import(request):
+    """Upload the cleaned member file (JSON array, or {members:[...]}). Saved to the volume
+    (PII stays off git) and seeded immediately; auto-reseeds on future redeploys."""
+    g = _guard(request)
+    if g:
+        return g
+    try:
+        data = await request.json()
+    except Exception:
+        return HOST.json_response({"ok": False, "error": "bad_json"}, 400)
+    rows = data.get("members") if isinstance(data, dict) else data
+    if not isinstance(rows, list) or not rows:
+        return HOST.json_response({"ok": False, "error": "expected_member_array"}, 400)
+    res = members.import_member_file(rows)
+    return HOST.json_response({"ok": True, "total": members.count(), **res})
+
+
 async def api_optout(request):
     g = _guard(request)
     if g:
@@ -200,4 +217,5 @@ def register(app):
     app.router.add_post("/api/brain/approve", api_approve)
     app.router.add_post("/api/brain/reject", api_reject)
     app.router.add_post("/api/brain/seed", api_seed)
+    app.router.add_post("/api/brain/seed-import", api_seed_import)
     app.router.add_post("/api/brain/optout", api_optout)

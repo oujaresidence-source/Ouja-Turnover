@@ -1,17 +1,17 @@
 """
 brain.members — the member list and tiers.
 
-Phase-1 seed source (Faisal's choice): the existing phone-keyed guest CRM in bot.py
-(_guest_profiles), so we have real members immediately. A cleaned member file can be
-merged later via seed_from_file() — file rows win on phone/tier.
+Seed sources (Faisal): the cleaned member file (authoritative on phone/tier) merged with the
+existing guest CRM (_guest_profiles) for anyone the file doesn't have. The member file holds
+4.5k real phone numbers, so it is NOT committed to git — it is uploaded once via the dashboard
+and stored on the Railway volume (brain_members_seed.json), exactly like guest_profiles.json.
 
-Tiers (section 5): Turaif 4+ stays · Gold 2–3 · Silver 1 · Quarantine >20 (internal/
-corporate — flagged & excluded from sends). All cutoffs are editable settings.
+Tiers (section 5): Turaif 4+ stays · Gold 2–3 · Silver 1 · Quarantine >20 (internal/corporate,
+flagged & excluded). The file's tier is honored; quarantine (>20 stays) is always enforced.
 
-has_upcoming_booking / in_house are refreshed from a forward reservation window so we
-never message someone who is arriving or in-house. NOTE: this matches reservations to
-members BY PHONE; whether Hostaway's /reservations rows expose a phone on this account
-is the one thing to confirm live (we try several field names and log coverage).
+has_upcoming_booking / in_house come from a forward reservation window matched BY PHONE.
+Whether Hostaway's /reservations rows expose a phone on this account is the one live thing to
+confirm — we try several field names and log coverage.
 """
 
 from . import db, settings
@@ -21,10 +21,19 @@ from .util import now_iso, today_iso, days_from_now, parse_date, first_name_of
 _RES_PHONE_FIELDS = ("phone", "guestPhone", "phoneNumber", "guestPhoneNumber",
                      "guestMobile", "mobile")
 _CONFIRMED = {"new", "modified"}
+_KNOWN_TIERS = {"Silver", "Gold", "Turaif", "Quarantine"}
+SEED_FILE_NAME = "brain_members_seed.json"
 
 
 def valid_phone(p):
     return bool(p) and p.startswith("+") and len(p) >= 9
+
+
+def _norm(p):
+    p = (p or "").strip()
+    if HOST.normalize_phone and p:
+        p = HOST.normalize_phone(p)
+    return p
 
 
 def tier_for(stays):
@@ -41,6 +50,16 @@ def tier_for(stays):
     return "Silver"
 
 
+def _resolve_tier(file_tier, stays):
+    """File tier wins for the Silver/Gold/Turaif split; quarantine (>20) is always enforced."""
+    q = settings.get_int("quarantine_min_stays")
+    if stays and int(stays) > q:
+        return "Quarantine"
+    if file_tier in _KNOWN_TIERS:
+        return file_tier
+    return tier_for(stays)
+
+
 def _last_stay(profile):
     last = None
     for r in profile.get("reservations", []):
@@ -50,95 +69,115 @@ def _last_stay(profile):
     return last.isoformat() if last else None
 
 
-def _upsert(phone, first_name, stays, spend, last_stay, source):
-    """Insert or update a member by phone, preserving governor/engagement state."""
-    tier = tier_for(stays)
-    existing = db.q1("SELECT id FROM members WHERE phone=?", (phone,))
-    if existing:
-        db.execute(
-            "UPDATE members SET first_name=COALESCE(NULLIF(?,''), first_name), tier=?, "
-            "stays_count=?, total_spend=?, last_stay_date=?, source=?, updated_at=? "
-            "WHERE phone=?",
-            (first_name, tier, stays, spend, last_stay, source, now_iso(), phone))
-        return existing["id"], False
-    mid = db.execute(
-        "INSERT INTO members(first_name, phone, tier, stays_count, total_spend, "
-        "last_stay_date, source, updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        (first_name, phone, tier, stays, spend, last_stay, source, now_iso()))
-    return mid, True
+# --------------------------------------------------------------------------
+# Bulk upsert — ONE connection, executemany. (Per-row execute on 4.5k rows would
+# open thousands of connections and block the first dashboard hit.)
+# --------------------------------------------------------------------------
 
-
-def seed_from_crm():
-    """Build/refresh members from _guest_profiles. Returns a summary dict."""
+def _bulk_upsert(rows, source, insert_only=False):
+    """rows = [{first_name, phone, tier(opt), stays, spend, last}]. Preserves each member's
+    governor/engagement columns on update (only refreshes the profile fields)."""
     db.init_db()
+    # normalize + dedupe by phone (keep last), drop invalid
+    norm = {}
+    for r in rows or []:
+        ph = _norm(r.get("phone"))
+        if not valid_phone(ph):
+            continue
+        stays = int(r.get("stays") or 0)
+        norm[ph] = (first_name_of(r.get("first_name") or r.get("name") or ""), ph,
+                    _resolve_tier(r.get("tier"), stays), stays,
+                    float(r.get("spend") or 0), r.get("last"), source, now_iso())
+    if not norm:
+        return {"inserted": 0, "updated": 0, "skipped": 0}
+    existing = {r["phone"] for r in db.q("SELECT phone FROM members")}
+    inserts, updates = [], []
+    for ph, t in norm.items():
+        if ph in existing:
+            if not insert_only:
+                # (first_name, tier, stays, spend, last, source, updated_at, phone)
+                updates.append((t[0], t[2], t[3], t[4], t[5], t[6], t[7], ph))
+        else:
+            inserts.append(t)        # (first_name, phone, tier, stays, spend, last, source, updated_at)
+    if inserts:
+        db.executemany(
+            "INSERT INTO members(first_name, phone, tier, stays_count, total_spend, "
+            "last_stay_date, source, updated_at) VALUES(?,?,?,?,?,?,?,?)", inserts)
+    if updates:
+        db.executemany(
+            "UPDATE members SET first_name=?, tier=?, stays_count=?, total_spend=?, "
+            "last_stay_date=?, source=?, updated_at=? WHERE phone=?", updates)
+    return {"inserted": len(inserts), "updated": len(updates),
+            "skipped": len(rows or []) - len(norm)}
+
+
+def seed_from_file(rows):
+    """Seed/refresh from the cleaned member file (authoritative on phone/tier)."""
+    out = _bulk_upsert([{
+        "first_name": r.get("first_name") or r.get("name"),
+        "phone": r.get("phone"), "tier": r.get("tier") or r.get("tag"),
+        "stays": r.get("stays_count"), "spend": r.get("total_spend"),
+        "last": r.get("last_stay_date"),
+    } for r in (rows or [])], "file")
+    db.audit("system", "seed_from_file", out)
+    return out
+
+
+def seed_from_crm(insert_only=False):
+    """Seed/enrich from the guest CRM. insert_only=True (used after the file seed) adds only
+    members the file didn't have, never overwriting file tiers."""
     profiles = {}
     try:
         profiles = HOST.guest_profiles() if HOST.guest_profiles else {}
     except Exception:
         profiles = {}
-    seen = inserted = updated = skipped_no_phone = 0
+    rows = []
     for p in (profiles or {}).values():
-        phone = (p.get("phone") or "").strip()
-        if HOST.normalize_phone and phone:
-            phone = HOST.normalize_phone(phone)
-        if not valid_phone(phone):
-            skipped_no_phone += 1
-            continue
-        seen += 1
         names = p.get("names") or []
-        first = first_name_of(names[0] if names else "")
-        stays = len(p.get("reservations", []))
-        spend = float(p.get("total_revenue") or 0)
-        _id, is_new = _upsert(phone, first, stays, spend, _last_stay(p), "crm")
-        inserted += 1 if is_new else 0
-        updated += 0 if is_new else 1
-    db.audit("system", "seed_from_crm",
-             {"seen": seen, "inserted": inserted, "updated": updated,
-              "skipped_no_phone": skipped_no_phone})
-    return {"seen": seen, "inserted": inserted, "updated": updated,
-            "skipped_no_phone": skipped_no_phone}
+        rows.append({"first_name": names[0] if names else "", "phone": p.get("phone"),
+                     "tier": None, "stays": len(p.get("reservations", [])),
+                     "spend": p.get("total_revenue"), "last": _last_stay(p)})
+    out = _bulk_upsert(rows, "crm", insert_only=insert_only)
+    db.audit("system", "seed_from_crm", {**out, "insert_only": insert_only})
+    return out
 
 
-def seed_from_file(rows):
-    """Merge a cleaned member file: rows = [{name, phone, tag}]. File wins on phone/tier.
-    `tag` (if a known tier) overrides the derived tier; otherwise tier is derived later."""
-    db.init_db()
-    inserted = updated = skipped = 0
-    tier_tags = {"silver": "Silver", "gold": "Gold", "turaif": "Turaif",
-                 "تريف": "Turaif", "تُرَيف": "Turaif", "ذهبي": "Gold", "فضي": "Silver"}
-    for r in rows or []:
-        phone = (r.get("phone") or "").strip()
-        if HOST.normalize_phone and phone:
-            phone = HOST.normalize_phone(phone)
-        if not valid_phone(phone):
-            skipped += 1
-            continue
-        first = first_name_of(r.get("name") or "")
-        existing = db.q1("SELECT id, stays_count, total_spend, last_stay_date FROM members WHERE phone=?", (phone,))
-        stays = existing["stays_count"] if existing else 0
-        spend = existing["total_spend"] if existing else 0
-        last = existing["last_stay_date"] if existing else None
-        _id, is_new = _upsert(phone, first, stays, spend, last, "file")
-        tag = tier_tags.get((r.get("tag") or "").strip().lower())
-        if tag:
-            db.execute("UPDATE members SET tier=? WHERE phone=?", (tag, phone))
-        inserted += 1 if is_new else 0
-        updated += 0 if is_new else 1
-    db.audit("system", "seed_from_file", {"inserted": inserted, "updated": updated, "skipped": skipped})
-    return {"inserted": inserted, "updated": updated, "skipped": skipped}
+# ---- seed file on the volume (PII stays off git) ----
+
+def load_seed_file():
+    try:
+        data = HOST.load_json(SEED_FILE_NAME, None) if HOST.load_json else None
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        data = data.get("members")
+    return data if isinstance(data, list) and data else None
+
+
+def save_seed_file(rows):
+    if HOST.save_json:
+        HOST.save_json(SEED_FILE_NAME, rows)
+
+
+def import_member_file(rows):
+    """Dashboard upload: persist the file to the volume + seed (file authoritative, then CRM
+    fills the gaps)."""
+    save_seed_file(rows)
+    res = {"file": seed_from_file(rows), "crm_enrich": seed_from_crm(insert_only=True)}
+    db.audit("dashboard", "import_member_file", {"rows": len(rows or []), **res["file"]})
+    return res
 
 
 def sync_upcoming_and_inhouse():
-    """Refresh has_upcoming_booking + in_house from a forward reservation window, matched
-    by phone. Resets the flags first so departures clear correctly."""
+    """Refresh has_upcoming_booking + in_house from a forward reservation window, matched by
+    phone. Resets the flags first so departures clear correctly."""
     db.init_db()
     db.execute("UPDATE members SET has_upcoming_booking=0, in_house=0")
     if not HOST.ha_reservations_window:
         return {"scanned": 0, "matched_phone": 0, "no_phone": 0, "note": "host not wired"}
-    start = today_iso()
-    end = days_from_now(120)
     try:
-        res = HOST.ha_reservations_window("arrivalStartDate", "arrivalEndDate", start, end) or []
+        res = HOST.ha_reservations_window("arrivalStartDate", "arrivalEndDate",
+                                          today_iso(), days_from_now(120)) or []
     except Exception as e:
         return {"scanned": 0, "matched_phone": 0, "no_phone": 0, "error": str(e)[:200]}
     today = today_iso()
@@ -148,34 +187,30 @@ def sync_upcoming_and_inhouse():
             continue
         phone = ""
         for fld in _RES_PHONE_FIELDS:
-            v = r.get(fld)
-            if v:
-                phone = str(v)
+            if r.get(fld):
+                phone = _norm(r.get(fld))
                 break
-        if not phone:
-            no_phone += 1
-            continue
-        if HOST.normalize_phone:
-            phone = HOST.normalize_phone(phone)
         if not valid_phone(phone):
             no_phone += 1
             continue
         arr = parse_date(r.get("arrivalDate"))
         dep = parse_date(r.get("departureDate"))
         in_house = 1 if (arr and dep and arr.isoformat() <= today < dep.isoformat()) else 0
-        upd = db.execute(
-            "UPDATE members SET has_upcoming_booking=1, in_house=MAX(in_house,?) WHERE phone=?",
-            (in_house, phone))
-        if upd:
+        if db.execute("UPDATE members SET has_upcoming_booking=1, in_house=MAX(in_house,?) "
+                      "WHERE phone=?", (in_house, phone)):
             matched += 1
-    db.audit("system", "sync_upcoming_and_inhouse",
-             {"scanned": len(res), "matched_phone": matched, "no_phone": no_phone})
-    return {"scanned": len(res), "matched_phone": matched, "no_phone": no_phone}
+    out = {"scanned": len(res), "matched_phone": matched, "no_phone": no_phone}
+    db.audit("system", "sync_upcoming_and_inhouse", out)
+    return out
 
 
 def recompute(full=True):
-    """Full refresh: re-seed from CRM (re-derives tiers) + sync upcoming/in-house."""
-    out = {"crm": seed_from_crm()}
+    """Full refresh: file (if present, authoritative) + CRM enrichment, then upcoming/in-house."""
+    rows = load_seed_file()
+    if rows:
+        out = {"file": seed_from_file(rows), "crm_enrich": seed_from_crm(insert_only=True)}
+    else:
+        out = {"crm": seed_from_crm()}
     if full:
         out["upcoming"] = sync_upcoming_and_inhouse()
     return out
@@ -188,10 +223,15 @@ def count():
 
 
 def ensure_seeded():
-    """First-run convenience: if there are no members yet, seed from the CRM so the
-    dashboard has real data on its very first hit. No-op once seeded."""
+    """First-run: seed from the uploaded file if present, else the CRM, so the dashboard has
+    real data on its first hit. No-op once seeded."""
     if count() == 0:
-        seed_from_crm()
+        rows = load_seed_file()
+        if rows:
+            seed_from_file(rows)
+            seed_from_crm(insert_only=True)
+        else:
+            seed_from_crm()
     return count()
 
 
@@ -216,7 +256,6 @@ def eligible_pool(tier_targets):
 
 
 def health_counts():
-    """Live List-Health numbers for the dashboard gauge."""
     db.init_db()
     total = db.q1("SELECT COUNT(*) c FROM members")["c"]
     by_tier = {r["tier"]: r["c"] for r in db.q("SELECT tier, COUNT(*) c FROM members GROUP BY tier")}
@@ -225,8 +264,7 @@ def health_counts():
                    (today_iso(),))["c"]
     upcoming = db.q1("SELECT COUNT(*) c FROM members WHERE has_upcoming_booking=1")["c"]
     inhouse = db.q1("SELECT COUNT(*) c FROM members WHERE in_house=1")["c"]
-    # rolling opt-out rate over last 30 days
-    opt30 = db.q1("SELECT COUNT(*) c FROM opt_outs WHERE opted_out_at > ?",
-                  (days_from_now(-30),))["c"]
+    opt30 = db.q1("SELECT COUNT(*) c FROM opt_outs WHERE opted_out_at > ?", (days_from_now(-30),))["c"]
+    have_file = bool(load_seed_file())
     return {"total": total, "by_tier": by_tier, "opted_out": opted, "rested": rested,
-            "upcoming": upcoming, "in_house": inhouse, "opt_out_30d": opt30}
+            "upcoming": upcoming, "in_house": inhouse, "opt_out_30d": opt30, "have_seed_file": have_file}

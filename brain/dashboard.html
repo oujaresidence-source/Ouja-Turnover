@@ -210,7 +210,7 @@ const T = {
   k_occ:["الإشغال القريب","Near occupancy"], k_aud:["جمهور اليوم","Audience today"],
   silent_title:["أرسل لا شيء اليوم","Send nothing today"],
   approve:["اعتماد وتسليم لكرزوم","Approve & hand to Karzoum"], reject:["رفض","Reject"],
-  recompute:["إعادة الحساب","Recompute"], dl:["تنزيل ملف CSV","Download CSV"],
+  recompute:["إعادة الحساب","Recompute"], dl:["تنزيل ملف الجمهور","Download audience CSV"],
   audience:["الجمهور","Audience"], excluded:["مستبعدون (الحارس)","Excluded (Governor)"],
   proj_replies:["ردود متوقعة","Replies"], proj_book:["حجوزات متوقعة","Bookings"], proj_rev:["إيراد متوقع","Revenue"],
   sched:["موعد الإرسال","Scheduled"], cap:["السقف اليومي","Daily cap"], remain:["المتبقي اليوم","Remaining today"],
@@ -225,8 +225,16 @@ const T = {
   loading:["جارٍ التحميل…","Loading…"], none_today:["لا توجد حركة محسوبة بعد","No move computed yet"],
   approved:["تم الاعتماد — نزّل الملف لكرزوم","Approved — download the file for Karzoum"],
   no_data:["لا توجد بيانات كافية بعد (المخزون يُحمَّل).","Not enough data yet (inventory warming up)."],
-  prov:["أعمدة الـCSV مبدئية حتى تصل مواصفات كرزوم.","CSV columns are provisional until Karzoum's spec arrives."],
   why:["لماذا هذه الحركة؟","Why this move?"],
+  msg_karzoum:["الرسالة — الصقها في كرزوم","Message — paste into Karzoum"],
+  paste_hint:["انسخ النص والصقه في منشئ حملة كرزوم","Copy & paste into Karzoum's composer"],
+  sample:["مثال بالاسم","Sample with a name"],
+  image_for:["وصف الصورة — أرفقها في كرزوم","Image prompt — attach in Karzoum"],
+  copy:["نسخ","Copy"], copied:["تم النسخ ✓","Copied ✓"],
+  csv_note2:["ملف الجمهور = الاسم + الجوال + الفئة فقط. النص والصورة تلصقها داخل كرزوم.","Audience file = Name + Phone + Tag only. The message + image you paste into Karzoum."],
+  import_members:["استيراد ملف الأعضاء","Import member file"],
+  importing:["جارٍ الاستيراد…","Importing…"],
+  step1:["١) نزّل ملف الجمهور","1) Download audience"], step2:["٢) الصق الرسالة + الصورة في كرزوم","2) Paste message + image in Karzoum"],
 };
 const tx = k => (T[k]||["",""])[LANG==="ar"?0:1];
 const num = n => (n==null?"—":Number(n).toLocaleString(LANG==="ar"?"ar-EG":"en-US"));
@@ -234,6 +242,9 @@ const money = n => (n==null?"—":num(Math.round(n))+" "+(LANG==="ar"?"ر.س":"S
 
 function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2600); }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function copyEl(id){ const el=document.getElementById(id); if(!el) return; const t=el.innerText||el.textContent||"";
+  if(navigator.clipboard){ navigator.clipboard.writeText(t).then(()=>toast(tx("copied"))).catch(()=>toast("⧉")); } else { toast("⧉"); } }
 
 async function api(path, opts){
   const sep = path.includes("?")?"&":"?";
@@ -319,9 +330,13 @@ function renderMove(){
 
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px" id="mvcols">
       <div>
-        <div class="h2">${tx("msg_preview")}</div>
-        <div class="msg"><div class="who">${sampleName} · ${LANG==="ar"?"معاينة":"preview"}</div>${msg||"—"}</div>
-        ${c.image_prompt?`<div class="imgp"><b>${tx("img_prompt")}:</b> ${c.image_prompt}</div>`:""}
+        <div class="h2">${tx("msg_karzoum")}</div>
+        <div class="msg" style="white-space:pre-wrap"><div class="who">${tx("paste_hint")}</div><span id="pasteMsg">${esc(m.paste_message||msg||"—")}</span></div>
+        <div style="margin-top:6px"><button class="btn ghost sm" onclick="copyEl('pasteMsg')">⧉ ${tx("copy")}</button></div>
+        <div class="imgp" style="margin-top:12px;white-space:pre-wrap"><div class="who" style="margin-bottom:4px">${tx("sample")}: ${esc(sampleName)}</div>${esc(msg)}</div>
+        ${c.image_prompt?`<div class="h2" style="margin-top:14px">${tx("image_for")}</div>
+          <div class="imgp" style="white-space:pre-wrap;max-height:170px;overflow:auto"><span id="pasteImg">${esc(c.image_prompt)}</span></div>
+          <div style="margin-top:6px"><button class="btn ghost sm" onclick="copyEl('pasteImg')">⧉ ${tx("copy")}</button></div>`:""}
       </div>
       <div>
         <div class="h2">${tx("audience")} · <span class="mono">${num(m.audience_size)}</span></div>
@@ -345,7 +360,9 @@ function renderMove(){
            <button class="btn danger sm" id="rejectBtn">✕ ${tx("reject")}</button>`}
       <button class="btn ghost sm" id="recomputeBtn">↻ ${tx("recompute")}</button>
     </div>
-    <div class="note">ℹ️ ${tx("prov")}</div>
+    ${status==="approved"
+      ? `<div class="note" style="border-color:rgba(134,185,111,.3);background:rgba(134,185,111,.08)">✓ <b>${tx("step1")}</b> · ${tx("step2")}</div>`
+      : `<div class="note">ℹ️ ${tx("csv_note2")}</div>`}
   </div>`;
 }
 
@@ -420,8 +437,10 @@ function renderHealth(){
         <div class="stat"><div class="v">${(d.adapter||"csv").toUpperCase()}</div><div class="k">${LANG==="ar"?"قناة التسليم":"Sender"}</div></div>
       </div>
       ${d.last_sync?`<div class="note">${LANG==="ar"?"آخر مزامنة حجوزات":"Last booking sync"}: ${(d.last_sync.at||"").replace("T"," ")} · ${LANG==="ar"?"تطابق بالجوال":"phone-matched"}: <b>${num(d.last_sync.matched_phone)}</b> · ${LANG==="ar"?"بدون جوال":"no phone"}: <b>${num(d.last_sync.no_phone)}</b></div>`:""}
-      <div class="actions" style="margin-top:14px">
+      <div class="actions" style="margin-top:14px;align-items:center">
+        <label class="btn gold sm" style="cursor:pointer">⬆ ${tx("import_members")}<input id="memFile" type="file" accept=".json,application/json" style="display:none"></label>
         <button class="btn ghost sm" id="seedBtn">↻ ${LANG==="ar"?"إعادة مزامنة الأعضاء":"Resync members"}</button>
+        <span class="muted" style="font-size:12px">${(h.have_seed_file)?(LANG==="ar"?"✓ ملف الأعضاء محمَّل":"✓ member file loaded"):(LANG==="ar"?"لا يوجد ملف بعد — استورده مرة وحدة":"no file yet — import once")}</span>
       </div>
     </div>
   </div></div>`;
@@ -484,6 +503,13 @@ function wirePanel(){
   if(rc) rc.onclick=async()=>{ rc.disabled=true; const r=await post("/api/brain/recompute",{}); STATE.move=r.move; renderKpis(); renderPanel(); toast("↻"); };
   const sd=document.getElementById("seedBtn");
   if(sd) sd.onclick=async()=>{ sd.disabled=true; sd.textContent="…"; await post("/api/brain/seed",{}); await loadHealth(); renderPanel(); toast("✓"); };
+  const mf=document.getElementById("memFile");
+  if(mf) mf.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; toast(tx("importing"));
+    try{ const rows=JSON.parse(await f.text());
+      const r=await post("/api/brain/seed-import", Array.isArray(rows)?{members:rows}:rows);
+      if(r.ok){ toast((LANG==="ar"?"تم استيراد ":"Imported ")+num(r.total||0)); STATE.move=null; await loadHealth(); await loadMove(); renderPanel(); }
+      else toast(r.error||"error");
+    }catch(err){ toast(LANG==="ar"?"ملف غير صالح":"invalid file"); } };
   const sv=document.getElementById("saveSetBtn");
   if(sv) sv.onclick=async()=>{ const upd={}; document.querySelectorAll("#panel input[data-key]").forEach(i=>upd[i.getAttribute("data-key")]=i.value);
     const r=await post("/api/brain/settings",{settings:upd}); STATE.settings=r.settings; toast(tx("saved")); };

@@ -25,12 +25,12 @@ def _recency_days(m):
     return (now_dt().date() - d).days
 
 
-def _match_score(m, trigger_type):
+def _match_score(m, is_winback):
     """Higher = better fit. Tier + frequency + recency, with a win-back inversion."""
     score = _TIER_W.get(m.get("tier"), 1) * 2.0
     score += min(int(m.get("stays_count") or 0), 10) * 0.5
     rd = _recency_days(m)
-    if trigger_type == "winback_dormant":
+    if is_winback:
         # dormant guests are the POINT of win-back: older last stay scores higher
         if rd is None:
             score += 1
@@ -89,13 +89,14 @@ def build_audience(decision):
                 "demand": demand_cap(0, 0), "projected": {"replies": 0, "bookings": 0, "revenue": 0}}
 
     tier_targets = camp.get("tier_targets", [])
-    trigger_type = camp.get("trigger_type", "")
+    trigger_type = (camp.get("trigger_type", "") or "").lower()
+    is_winback = code == "C15" or "dormant" in trigger_type or "winback" in trigger_type or "win-back" in trigger_type
     pool = members.eligible_pool(tier_targets)
     screened = governor.screen(pool, code)
     eligible = screened["included"]
 
     for m in eligible:
-        m["_score"] = _match_score(m, trigger_type)
+        m["_score"] = _match_score(m, is_winback)
     eligible.sort(key=lambda m: m["_score"], reverse=True)
 
     cap = demand_cap(decision.get("nights_to_fill", 0), len(eligible))

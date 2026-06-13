@@ -12,22 +12,29 @@ import os
 import json
 from . import db
 
-_WIRING_FIELDS = ("name", "tier_targets", "trigger_type", "offer", "lever",
-                  "cooldown_class", "active")
+_seeded_this_process = False
 
 
 def _catalog_path():
     return os.path.join(os.path.dirname(__file__), "campaigns.json")
 
 
-def seed_campaigns():
+def seed_campaigns(force=False):
+    """Sync the campaign catalog from campaigns.json into SQLite. campaigns.json is the
+    SOURCE OF TRUTH for ALL fields including the Arabic message + image prompt (no in-dashboard
+    copy editing yet), so we full-refresh on every (new-process) seed. Accepts either a bare
+    list (the Ouja Elite manual export) or a {"campaigns": [...]} wrapper. Seeds once per
+    process for speed; pass force=True to re-run."""
+    global _seeded_this_process
+    if _seeded_this_process and not force:
+        return 0
     db.init_db()
     try:
         with open(_catalog_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return 0
-    rows = data.get("campaigns", [])
+    rows = data if isinstance(data, list) else data.get("campaigns", [])
     existing = {r["code"] for r in db.q("SELECT code FROM campaigns")}
     n = 0
     for c in rows:
@@ -35,20 +42,21 @@ def seed_campaigns():
         if not code:
             continue
         tier_json = json.dumps(c.get("tier_targets", []), ensure_ascii=False)
+        vals = (c.get("name", ""), tier_json, c.get("trigger_type", ""), c.get("offer", ""),
+                c.get("lever", ""), c.get("message_template", ""), c.get("image_prompt", ""),
+                c.get("cooldown_class", "soft"), int(bool(c.get("active", 1))))
         if code in existing:
             db.execute(
-                "UPDATE campaigns SET name=?, tier_targets=?, trigger_type=?, offer=?, "
-                "lever=?, cooldown_class=?, active=? WHERE code=?",
-                (c.get("name", ""), tier_json, c.get("trigger_type", ""), c.get("offer", ""),
-                 c.get("lever", ""), c.get("cooldown_class", "soft"), int(c.get("active", 1)), code))
+                "UPDATE campaigns SET name=?, tier_targets=?, trigger_type=?, offer=?, lever=?, "
+                "message_template=?, image_prompt=?, cooldown_class=?, active=? WHERE code=?",
+                vals + (code,))
         else:
             db.execute(
                 "INSERT INTO campaigns(code, name, tier_targets, trigger_type, offer, lever, "
                 "message_template, image_prompt, cooldown_class, active) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (code, c.get("name", ""), tier_json, c.get("trigger_type", ""), c.get("offer", ""),
-                 c.get("lever", ""), c.get("message_template", ""), c.get("image_prompt", ""),
-                 c.get("cooldown_class", "soft"), int(c.get("active", 1))))
+                (code,) + vals)
             n += 1
+    _seeded_this_process = True
     return n
 
 
