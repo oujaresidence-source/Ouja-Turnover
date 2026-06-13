@@ -67,6 +67,7 @@ def compute_today(force=False):
                    (existing["id"],))
     signals = sig_mod.compute_signals()
     decision = campaigns.select_campaign(signals)
+    signals["nights_to_fill"] = decision.get("nights_to_fill", 0)   # the nights this move tries to fill
     aud = None if decision.get("silent") else aud_mod.build_audience(decision)
     return _store(decision, aud, signals)
 
@@ -108,8 +109,23 @@ def _row_view(row, include_signals=True):
                 preview.append({"first_name": m.get("first_name"), "tier": m.get("tier"),
                                 "phone": _mask_phone(m.get("phone")), "stays": m.get("stays_count")})
     win = governor.send_window()
+    # KPI / success bar — success = the targeted open nights actually book up (Faisal's call)
+    import math
+    ntf = int((signals or {}).get("nights_to_fill") or 0)
+    conv = settings.get_float("expected_bookings_per_message")
+    fill_pct = settings.get_int("success_fill_pct")
+    asize = int(d.get("audience_size") or 0)
+    kpi = {
+        "audience": asize,
+        "expected_bookings": round(asize * conv, 1),
+        "conv_pct": round(conv * 100, 1),
+        "nights_to_fill": ntf,
+        "success_nights": math.ceil(ntf * fill_pct / 100) if ntf else 0,
+        "success_pct": fill_pct,
+    }
     return {
         "id": d.get("id"), "date": d.get("date"), "status": d.get("status"),
+        "kpi": kpi,
         "silent": d.get("status") == "silent",
         "code": d.get("campaign_code"),
         "campaign": ({"code": camp.get("code"), "name": camp.get("name"), "offer": camp.get("offer"),

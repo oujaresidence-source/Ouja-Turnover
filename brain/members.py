@@ -289,6 +289,7 @@ def health_counts():
     upcoming = db.q1("SELECT COUNT(*) c FROM members WHERE has_upcoming_booking=1")["c"]
     inhouse = db.q1("SELECT COUNT(*) c FROM members WHERE in_house=1")["c"]
     opt30 = db.q1("SELECT COUNT(*) c FROM opt_outs WHERE opted_out_at > ?", (days_from_now(-30),))["c"]
-    have_file = bool(load_seed_file())
+    seed_rows = len(load_seed_file() or [])
     return {"total": total, "by_tier": by_tier, "opted_out": opted, "rested": rested,
-            "upcoming": upcoming, "in_house": inhouse, "opt_out_30d": opt30, "have_seed_file": have_file}
+            "upcoming": upcoming, "in_house": inhouse, "opt_out_30d": opt30,
+            "have_seed_file": seed_rows > 0, "seed_file_rows": seed_rows}

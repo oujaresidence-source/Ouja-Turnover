@@ -42,6 +42,7 @@ DEFAULTS = {
     "imminent_hours":        (72, "int", "signals", "وشيك (ساعة)", "Imminent (hours)", "Open nights within this window are 'imminent'"),
     "gap_long_nights":       (3, "int", "signals", "فجوة طويلة (ليالي)", "Long gap (nights)", "Consecutive empty nights that count as a long gap"),
     "healthy_pace_pct":      (90, "int", "signals", "إشغال صحي %", "Healthy occupancy %", "At/above this and nothing soft => stay SILENT"),
+    "success_fill_pct":      (70, "int", "signals", "نجاح: نسبة ملء الليالي %", "Success: nights filled %", "Campaign succeeds if at least this % of the targeted open nights book up"),
 
     # ---- approval ----
     "human_approval_required": (1, "int", "approval", "موافقة بشرية إلزامية", "Human approval required", "Phase 1: always 1 (nothing auto-sends)"),
