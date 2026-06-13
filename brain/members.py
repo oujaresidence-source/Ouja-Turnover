@@ -111,14 +111,28 @@ def _bulk_upsert(rows, source, insert_only=False):
             "skipped": len(rows or []) - len(norm)}
 
 
+def _lc(r):
+    """Lower-case a row's keys so we read it CASE-INSENSITIVELY (the shipped files use
+    capitalized Karzoum keys Name/Phone/Tag; older exports use first_name/phone/tier)."""
+    return {str(k).lower(): v for k, v in r.items()} if isinstance(r, dict) else {}
+
+
 def seed_from_file(rows):
-    """Seed/refresh from the cleaned member file (authoritative on phone/tier)."""
-    out = _bulk_upsert([{
-        "first_name": r.get("first_name") or r.get("name"),
-        "phone": r.get("phone"), "tier": r.get("tier") or r.get("tag"),
-        "stays": r.get("stays_count"), "spend": r.get("total_spend"),
-        "last": r.get("last_stay_date"),
-    } for r in (rows or [])], "file")
+    """Seed/refresh from a member file (authoritative on phone/tier). Accepts BOTH the
+    Karzoum-style Name/Phone/Tag and the richer first_name/phone/tier/stays_count keys,
+    matched case-insensitively."""
+    mapped = []
+    for r in (rows or []):
+        rr = _lc(r)
+        mapped.append({
+            "first_name": rr.get("first_name") or rr.get("name"),
+            "phone": rr.get("phone"),
+            "tier": rr.get("tier") or rr.get("tag"),
+            "stays": rr.get("stays_count") or rr.get("stays"),
+            "spend": rr.get("total_spend") or rr.get("spend"),
+            "last": rr.get("last_stay_date") or rr.get("last_stay") or rr.get("last"),
+        })
+    out = _bulk_upsert(mapped, "file")
     db.audit("system", "seed_from_file", out)
     return out
 
@@ -160,11 +174,21 @@ def save_seed_file(rows):
 
 
 def import_member_file(rows):
-    """Dashboard upload: persist the file to the volume + seed (file authoritative, then CRM
-    fills the gaps)."""
-    save_seed_file(rows)
-    res = {"file": seed_from_file(rows), "crm_enrich": seed_from_crm(insert_only=True)}
-    db.audit("dashboard", "import_member_file", {"rows": len(rows or []), **res["file"]})
+    """Dashboard upload: MERGE rows into the volume seed file (union by phone, newest wins),
+    then seed (file authoritative) + CRM fill. Merging means importing the Silver/Gold/Turaif
+    files one by one ACCUMULATES instead of overwriting; importing ALL_members works too."""
+    incoming = [r for r in (rows or []) if isinstance(r, dict)]
+    merged = {}
+    for r in (load_seed_file() or []) + incoming:
+        ph = _norm(_lc(r).get("phone"))
+        if ph:
+            merged[ph] = r                      # later (incoming) overwrites earlier
+    allrows = list(merged.values())
+    save_seed_file(allrows)
+    res = {"received": len(incoming), "stored_total": len(allrows),
+           "file": seed_from_file(allrows), "crm_enrich": seed_from_crm(insert_only=True)}
+    db.audit("dashboard", "import_member_file",
+             {"received": len(incoming), "stored_total": len(allrows), **res["file"]})
     return res
 
 
