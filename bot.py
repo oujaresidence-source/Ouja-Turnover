@@ -55,6 +55,16 @@ try:
 except ImportError:
     _HAS_AIOHTTP = False
 
+# Ouja Brain — additive WhatsApp-marketing decision layer (brain/ package). Imported
+# defensively so any issue inside it can never take down the live bot/dashboard.
+try:
+    import brain as _brain
+    _HAS_BRAIN = True
+except Exception as _brain_err:        # pragma: no cover
+    print("[brain] import failed (Brain disabled, bot unaffected):", _brain_err)
+    _brain = None
+    _HAS_BRAIN = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -15175,6 +15185,7 @@ function refreshView(id){
   }
 }
 function go(id){
+  if(id==='brain'){ window.location.href='/brain?token='+encodeURIComponent(tok()); return; }   // Ouja Brain is its own page
   if(id==='erp'||id==='fb'||id==='finance'||id==='expenses'){ var _ws={erp:'today',fb:'today',finance:'owners',expenses:'exp'}[id]; window.location.href='/erp?token='+encodeURIComponent(tok())+'#'+_ws; return; }   // old finance views are cut over to ERP v2
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
@@ -28912,7 +28923,7 @@ NAV_DEF = {
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "calendar", "clean_center", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
-        {"tk": "cat_pricing", "ids": ["pricing", "plab", "strat", "rev"]},
+        {"tk": "cat_pricing", "ids": ["brain", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly"]},
         {"tk": "cat_guests", "ids": ["guests", "gw", "reviews"]},
@@ -28920,6 +28931,7 @@ NAV_DEF = {
     ],
     "items": [
         {"id": "home", "ic": "home", "tk": "home"},
+        {"id": "brain", "ic": "strat", "tk": "brain"},
         {"id": "inbox", "ic": "inbox", "tk": "inbox", "badge": "inbox"},
         {"id": "calendar", "ic": "calendar", "tk": "calendar"},
         {"id": "clean_center", "ic": "clean_center", "tk": "clean_center", "badge": "clean_center"},
@@ -28951,7 +28963,7 @@ NAV_DEF = {
     # المالي» is the ERP itself; «finance» deep-links to the owner statements workspace.
     "labels": {
         "ar": {
-            "home": "الرئيسية", "inbox": "صندوق الوارد", "calendar": "التقويم",
+            "home": "الرئيسية", "brain": "أوجا برين", "inbox": "صندوق الوارد", "calendar": "التقويم",
             "clean_center": "مركز التنظيف", "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة",
@@ -28965,7 +28977,7 @@ NAV_DEF = {
             "cat_finance": "المالية والمحاسبة", "cat_guests": "الضيوف", "cat_system": "النظام",
         },
         "en": {
-            "home": "Home", "inbox": "Inbox", "calendar": "Calendar",
+            "home": "Home", "brain": "Ouja Brain", "inbox": "Inbox", "calendar": "Calendar",
             "clean_center": "Cleaning Center", "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance",
@@ -41670,6 +41682,31 @@ async def start_web_server():
         app.router.add_get("/api/home/arrivals", _api_home_arrivals)
         app.router.add_get("/api/calendar/forward", _api_calendar_forward)
         app.router.add_get("/api/calendar/grid", _api_calendar_grid)
+
+        # ---- Ouja Brain (WhatsApp-marketing decision layer) — additive, read-only ----
+        if _HAS_BRAIN:
+            try:
+                _brain.wire({
+                    "state_path": _state_path, "load_json": _load_json, "save_json": _save_json,
+                    "state_dir": STATE_DIR,
+                    "dash_auth": _dash_auth, "json_response": _json, "web": web,
+                    "cache_get": _cache_get, "kick_compute": _kick_compute,
+                    "compute_calendar_grid": _compute_calendar_grid,
+                    "get_forward_calendar": get_forward_calendar,
+                    "latest_last_minute_diagnostics": latest_last_minute_diagnostics,
+                    "load_discount_state": _load_discount_state,
+                    "ha_reservations_window": _ha_reservations_window,
+                    "fetch_upcoming_checkouts": fetch_upcoming_checkouts,
+                    "get_listings_map": get_listings_map, "ls_get": _ls_get,
+                    "guest_profiles": (lambda: _guest_profiles),
+                    "normalize_phone": _normalize_phone,
+                    "tz": TZ, "now": now_riyadh, "weekend_days": WEEKEND_DAYS,
+                })
+                _brain.register_routes(app)
+                print("[brain] wired + routes registered (/brain, /api/brain/*)")
+            except Exception as _be:
+                print("[brain] wiring failed (Brain disabled, bot unaffected):", _be)
+
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
         app.router.add_post("/api/events/save", _api_events_save)
