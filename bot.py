@@ -12763,6 +12763,64 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ OUJA BRAIN · أوجا برين ============ -->
+      <style>
+        .brn-grid2{display:grid;grid-template-columns:1.12fr .88fr;gap:14px}
+        @media(max-width:900px){.brn-grid2{grid-template-columns:1fr}}
+        .brn-silent{text-align:center;padding:30px 18px}
+        .brn-silent .big{font-size:24px;font-weight:700;letter-spacing:-.4px;margin:8px 0 6px}
+        .brn-msg{white-space:pre-wrap;line-height:1.75;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px 15px;font-size:14px}
+        .brn-imgp{white-space:pre-wrap;line-height:1.55;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;font-size:12px;color:var(--text-2);max-height:150px;overflow:auto}
+        .brn-chips{display:flex;flex-wrap:wrap;gap:6px}
+        .brn-chip{font-size:12px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px 9px;display:inline-flex;gap:6px;align-items:center}
+        .brn-tier{font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px}
+        .brn-tier.Turaif{background:var(--gold-tint);color:var(--gold-2)}
+        .brn-tier.Gold{background:var(--yellow-soft);color:var(--yellow)}
+        .brn-tier.Silver{background:var(--surface-3);color:var(--text-2)}
+        .brn-exc{display:grid;gap:6px}
+        .brn-exc .r{display:flex;justify-content:space-between;gap:8px;font-size:13px;padding:7px 11px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm)}
+        .brn-exc .n{font-weight:700;color:var(--text-2);font-family:var(--font-mono)}
+        .brn-hm{overflow-x:auto;padding-bottom:4px}
+        .brn-hm table{border-collapse:separate;border-spacing:2px;min-width:max-content}
+        .brn-hm th{font-size:10px;color:var(--mut);font-weight:600;padding:0 0 5px;font-family:var(--font-mono)}
+        .brn-hm th.we{color:var(--accent)}
+        .brn-hm td.nm{font-size:11px;color:var(--text-2);white-space:nowrap;padding-inline-end:9px;text-align:start;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+        .brn-cell{width:15px;height:15px;border-radius:3px;background:var(--surface-3);border:1px solid var(--line)}
+        .brn-cell.booked{background:var(--good-bg);border-color:transparent}
+        .brn-cell.empty{background:var(--warn-bg);border-color:transparent}
+        .brn-cell.soft{background:var(--accent);border-color:var(--accent)}
+        .brn-cell.blocked{background:var(--surface-2)}
+        .brn-bars{display:grid;gap:8px}
+        .brn-bar{display:grid;grid-template-columns:72px 1fr 44px;align-items:center;gap:9px;font-size:12px}
+        .brn-bar .tk{height:8px;background:var(--surface-3);border-radius:99px;overflow:hidden}
+        .brn-bar .fl{height:100%;background:var(--accent);border-radius:99px}
+        .brn-bar .fl.g{background:var(--green)} .brn-bar .fl.r{background:var(--red)}
+        .brn-bar .n{text-align:end;font-weight:700;font-family:var(--font-mono)}
+        .brn-legend{display:flex;gap:13px;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin-top:11px}
+        .brn-legend span{display:inline-flex;gap:5px;align-items:center}
+        .brn-sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+        .brn-set{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        @media(max-width:680px){.brn-set{grid-template-columns:1fr}}
+        .brn-fld{display:grid;gap:4px}
+        .brn-fld label{font-size:12.5px;color:var(--text-2)}
+        .brn-fld .hp{font-size:11px;color:var(--mut)}
+        .brn-fld input{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font:inherit;font-family:var(--font-mono);font-size:13px}
+        .brn-fld input:focus{outline:none;border-color:var(--accent)}
+      </style>
+      <section class="view" id="view_brain">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_brain">أوجا برين</div>
+            <div class="page-sub" id="t_brain_sub">متى ننشر حملة، لأي ضيوف، وكم — حسب التقويم والإشغال. الحارس يمنع الإزعاج.</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadBrain(true)" title="تحديث">↻</button>
+          </div>
+        </div>
+        <div id="brainTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="brainBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ APARTMENT PAGE (full-width, opened by Details) ============ -->
       <section class="view" id="view_apartment">
         <div id="aptBody"><div class="empty sk">—</div></div>
@@ -15181,11 +15239,11 @@ function refreshView(id){
     case 'cleanteams': return loadCleanTeams();
     case 'gw':       return loadGw();
     case 'plab':     return loadPlab();
+    case 'brain':    return loadBrain();
     default:         return loadAll();
   }
 }
 function go(id){
-  if(id==='brain'){ window.location.href='/brain?token='+encodeURIComponent(tok()); return; }   // Ouja Brain is its own page
   if(id==='erp'||id==='fb'||id==='finance'||id==='expenses'){ var _ws={erp:'today',fb:'today',finance:'owners',expenses:'exp'}[id]; window.location.href='/erp?token='+encodeURIComponent(tok())+'#'+_ws; return; }   // old finance views are cut over to ERP v2
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
@@ -15219,6 +15277,7 @@ function go(id){
   if(id==='design') loadDesigns();
   if(id==='pmo') loadPmo();
   if(id==='listings') loadListings();
+  if(id==='brain') loadBrain();
 }
 
 /* ============================================================
@@ -22739,6 +22798,112 @@ async function doUnskip(lid){
   const r = await post('/api/discount/unskip-unit',{lid:lid});
   if(r.ok){ toast(t().resumed); loadTodayEmpty() }
 }
+
+/* ============================================================
+   OUJA BRAIN — native marketing-decision tab (data from /api/brain/*)
+   ============================================================ */
+var _brn = {tab:'move', move:null, heat:null, health:null, settings:null};
+function brnMoney(n){ return fmt(Math.round(n||0))+(L==='ar'?' ر.س':' SAR'); }
+function brnCopy(id){ var el=document.getElementById(id); if(!el) return; var s=el.innerText||el.textContent||'';
+  if(navigator.clipboard){ navigator.clipboard.writeText(s).then(function(){ toast(L==='ar'?'تم النسخ ✓':'Copied ✓'); }).catch(function(){ toast('⧉'); }); } else { toast('⧉'); } }
+function loadBrain(force){ var ti=document.getElementById('t_brain'); if(ti) ti.textContent=(L==='ar'?'أوجا برين':'Ouja Brain');
+  if(force){ _brn.move=null; _brn.heat=null; _brn.health=null; _brn.settings=null; } brainTabs(); brainGo(_brn.tab||'move'); }
+function brainTabs(){ var el=document.getElementById('brainTabs'); if(!el) return;
+  var tabs=[['move',(L==='ar'?'حركة اليوم':"Today's Move")],['cal',(L==='ar'?'التقويم':'Calendar')],['list',(L==='ar'?'القائمة':'List')],['set',(L==='ar'?'الإعدادات':'Settings')]];
+  el.innerHTML=tabs.map(function(x){ var on=(_brn.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="brainGo(&#39;'+x[0]+'&#39;)">'+esc(x[1])+'</button>'; }).join(''); }
+function brainGo(tab){ _brn.tab=tab; brainTabs(); var b=document.getElementById('brainBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
+  ({move:brnMove,cal:brnCal,list:brnHealth,set:brnSettings}[tab]||brnMove)(); }
+
+function brnMove(){ var b=document.getElementById('brainBody'); if(!b) return; if(_brn.move){ brnRenderMove(_brn.move); return; }
+  api('/api/brain/today').then(function(r){ _brn.move=(r&&r.move)||null; brnRenderMove(_brn.move); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; }); }
+function brnRenderMove(m){ var b=document.getElementById('brainBody'); if(!b) return; if(!m){ b.innerHTML='<div class="empty">—</div>'; return; } var ar=(L==='ar');
+  if(m.silent){ b.innerHTML='<div class="card"><div class="brn-silent"><div class="pill ok">'+(ar?'يوم هادئ':'Quiet day')
+    +'</div><div class="big">'+(ar?'ما في داعي نرسل اليوم':'Send nothing today')+'</div><div class="muted" style="max-width:560px;margin:0 auto">'
+    +esc(ar?m.rationale:(m.rationale_en||m.rationale)||'')+'</div><div style="margin-top:16px"><button class="btn ghost sm" onclick="brnRecompute()">↻ '
+    +(ar?'إعادة الحساب':'Recompute')+'</button></div></div></div>'; return; }
+  var c=m.campaign||{}; var sig=m.signals||{}; var pj=m.projected||{};
+  var tiers=(c.tier_targets||[]).map(function(t){ return '<span class="brn-tier '+t+'">'+t+'</span>'; }).join(' ');
+  var kpis=[{v:fmt(m.audience_size),l:(ar?'الجمهور اليوم':'Audience today')},{v:fmt(pj.bookings),l:(ar?'حجوزات متوقعة':'Est. bookings')},
+    {v:brnMoney(pj.revenue),l:(ar?'إيراد متوقع':'Est. revenue')},{v:fmt(sig.open_weekday_nights!=null?sig.open_weekday_nights:sig.open_nights_total),l:(ar?'ليالي فاضية':'Open nights')}];
+  var kpiHtml=kpis.map(function(x){ return '<div class="kpi"><div class="kpi-val">'+x.v+'</div><div class="kpi-lbl">'+esc(x.l)+'</div></div>'; }).join('');
+  var sample=(m.audience_preview&&m.audience_preview[0]&&m.audience_preview[0].first_name)||(ar?'فيصل':'Guest');
+  var pasteMsg=m.paste_message||(c.message_template||''); var sampleMsg=(c.message_template||'').split('{name}').join(sample);
+  var chips=(m.audience_preview||[]).slice(0,18).map(function(a){ return '<span class="brn-chip">'+esc(a.first_name||'—')+' <span class="brn-tier '+(a.tier||'')+'">'+(a.tier||'')+'</span></span>'; }).join('');
+  var exc=m.excluded||{}; var by=exc.by_reason||{};
+  var excRows=Object.keys(by).sort(function(a,bb){ return by[bb]-by[a]; }).map(function(k){ return '<div class="r"><span>'+esc(k)+'</span><span class="n">'+fmt(by[k])+'</span></div>'; }).join('');
+  var approved=(m.status==='approved');
+  var actions=approved?('<a class="btn primary sm" href="/api/brain/export/'+m.id+'?token='+encodeURIComponent(tok())+'">⬇ '+(ar?'تنزيل ملف الجمهور':'Download audience')+'</a>')
+    :('<button class="btn primary sm" onclick="brnApprove('+m.id+')">'+(ar?'اعتماد وتجهيز لكرزوم':'Approve & prep for Karzoum')+'</button> <button class="btn ghost sm" onclick="brnReject('+m.id+')">'+(ar?'رفض':'Reject')+'</button>');
+  var stepNote=approved?('<div class="pill ok" style="margin-top:10px">'+(ar?'١. نزّل ملف الجمهور  ·  ٢. الصق الرسالة والصورة في كرزوم':'1. Download audience  ·  2. Paste message + image into Karzoum')+'</div>')
+    :('<div class="muted" style="font-size:12px;margin-top:10px">'+(ar?'ملف الجمهور = الاسم + الجوال + الفئة فقط. النص والصورة تلصقها داخل كرزوم.':'Audience file = Name + Phone + Tag. You paste the message + image into Karzoum.')+'</div>');
+  b.innerHTML='<div class="kpis">'+kpiHtml+'</div><div class="card" style="margin-top:14px">'
+    +'<div class="card-head"><span class="card-title">'+esc(c.name||'')+' <span class="pill info">'+esc(c.code||'')+'</span></span><span class="card-sub">'+tiers+'</span></div>'
+    +'<div class="brn-msg" style="background:var(--accent-soft);border-color:transparent">'+esc(ar?m.rationale:(m.rationale_en||m.rationale)||'')+'</div>'
+    +'<div class="brn-grid2" style="margin-top:14px"><div>'
+      +'<div class="card-title" style="margin-bottom:6px">'+(ar?'الرسالة — انسخها في كرزوم':'Message — paste into Karzoum')+'</div>'
+      +'<div class="brn-msg" id="brnPaste">'+esc(pasteMsg)+'</div><div style="margin-top:6px"><button class="btn ghost sm" onclick="brnCopy(&#39;brnPaste&#39;)">⧉ '+(ar?'نسخ':'Copy')+'</button></div>'
+      +'<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'مثال بالاسم':'Sample')+': '+esc(sample)+'</div><div class="brn-msg" style="font-size:13px;margin-top:3px">'+esc(sampleMsg)+'</div>'
+      +(c.image_prompt?('<div class="card-title" style="margin:14px 0 6px">'+(ar?'وصف الصورة — أرفقها في كرزوم':'Image prompt — attach in Karzoum')+'</div><div class="brn-imgp" id="brnImg">'+esc(c.image_prompt)+'</div><div style="margin-top:6px"><button class="btn ghost sm" onclick="brnCopy(&#39;brnImg&#39;)">⧉ '+(ar?'نسخ':'Copy')+'</button></div>'):'')
+    +'</div><div>'
+      +'<div class="card-title" style="margin-bottom:6px">'+(ar?'الجمهور':'Audience')+' · '+fmt(m.audience_size)+'</div><div class="brn-chips">'+(chips||'<span class="muted">—</span>')+'</div>'
+      +'<div class="card-title" style="margin:14px 0 6px">'+(ar?'مستبعدون (الحارس)':'Held back (Governor)')+' · '+fmt(exc.total||0)+'</div><div class="brn-exc">'+(excRows||'<span class="muted">—</span>')+'</div>'
+    +'</div></div>'
+    +'<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-2);margin-top:14px"><span>'+(ar?'موعد مقترح':'Suggested time')+': <b>'+esc((m.scheduled_time||'').replace('T',' '))+'</b></span><span>'+(ar?'السقف اليومي':'Daily cap')+': <b>'+fmt(m.daily_cap)+'</b></span><span>'+(ar?'المتبقي اليوم':'Remaining')+': <b>'+fmt(m.remaining_today)+'</b></span></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">'+actions+' <button class="btn ghost sm" onclick="brnRecompute()">↻ '+(ar?'إعادة الحساب':'Recompute')+'</button></div>'+stepNote+'</div>'; }
+function brnApprove(id){ var ar=(L==='ar'); if(!confirm(ar?'اعتماد الحملة وتجهيز ملف الجمهور لكرزوم؟':'Approve and prepare the audience file for Karzoum?')) return;
+  post('/api/brain/approve',{rec_id:id}).then(function(r){ if(r&&r.ok){ toast(ar?'تم الاعتماد ✓':'Approved ✓'); window.location='/api/brain/export/'+id+'?token='+encodeURIComponent(tok()); _brn.move=null; brnMove(); } else toast((r&&r.error)||'⚠'); }); }
+function brnReject(id){ post('/api/brain/reject',{rec_id:id}).then(function(){ toast('✕'); _brn.move=null; brnMove(); }); }
+function brnRecompute(){ var b=document.getElementById('brainBody'); if(b) b.innerHTML='<div class="empty sk">—</div>'; post('/api/brain/recompute',{}).then(function(r){ _brn.move=(r&&r.move)||null; brnRenderMove(_brn.move); toast('↻'); }); }
+
+function brnCal(){ var b=document.getElementById('brainBody'); if(!b) return; if(_brn.heat){ brnRenderCal(_brn.heat); return; }
+  api('/api/brain/heatmap?days=30').then(function(r){ _brn.heat=(r&&r.heatmap)||null; brnRenderCal(_brn.heat); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; }); }
+function brnRenderCal(h){ var b=document.getElementById('brainBody'); if(!b) return; var ar=(L==='ar');
+  if(!h||!h.units||!h.units.length){ b.innerHTML='<div class="card"><div class="empty">'+(ar?'لا توجد بيانات تقويم بعد (المخزون يُحمّل).':'No calendar data yet (inventory warming up).')+'</div></div>'; return; }
+  var days=h.days||[]; var head=days.map(function(d){ return '<th class="'+(d.weekend?'we':'')+'">'+((d.date||'').slice(8,10))+'</th>'; }).join('');
+  var rows=h.units.map(function(u){ var cells=u.cells.map(function(c,i){ var cls='brn-cell'; if(c.s==='booked')cls+=' booked'; else if(c.s==='blocked')cls+=' blocked'; else if(c.s==='empty')cls+=(c.soft?' soft':' empty');
+    var dt=(days[i]&&days[i].date)||''; var pr=c.p?(' · '+c.p):''; return '<td><div class="'+cls+'" title="'+esc(u.name)+' · '+dt+' · '+(c.s||'')+pr+'"></div></td>'; }).join('');
+    return '<tr><td class="nm">'+esc(u.name)+'</td>'+cells+'</tr>'; }).join('');
+  b.innerHTML='<div class="card"><div class="card-head"><span class="card-title">'+(ar?'٣٠ يوم · إشغال الوحدات':'30 days · unit occupancy')+'</span></div>'
+    +'<div class="muted" style="font-size:12px;margin-bottom:12px">'+(ar?'كل صف وحدة، كل عمود ليلة. الأزرق = ليالٍ خفّض محرّك التسعير سعرها (أفضل مرشّحي الحملة).':'Each row a unit, each column a night. Blue = nights the pricing engine already softened.')+'</div>'
+    +'<div class="brn-hm"><table><thead><tr><th></th>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div class="brn-legend"><span><i class="brn-sw" style="background:var(--good-bg)"></i>'+(ar?'محجوز':'Booked')+'</span><span><i class="brn-sw" style="background:var(--warn-bg)"></i>'+(ar?'فاضي':'Empty')+'</span><span><i class="brn-sw" style="background:var(--accent)"></i>'+(ar?'مخفّض':'Softened')+'</span><span><i class="brn-sw" style="background:var(--surface-2)"></i>'+(ar?'محظور':'Blocked')+'</span></div></div>'; }
+
+function brnHealth(){ var b=document.getElementById('brainBody'); if(!b) return;
+  api('/api/brain/health').then(function(r){ _brn.health=r||null; brnRenderHealth(r); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; }); }
+function brnRenderHealth(d){ var b=document.getElementById('brainBody'); if(!b||!d) return; var ar=(L==='ar'); var h=d.health||{}; var bt=h.by_tier||{}; var total=h.total||0;
+  var tmax=Math.max(1,bt.Turaif||0,bt.Gold||0,bt.Silver||0);
+  function bar(lab,v,mx,cls){ var p=mx?Math.min(100,Math.round(v/mx*100)):0; return '<div class="brn-bar"><span class="muted">'+esc(lab)+'</span><span class="tk"><span class="fl '+(cls||'')+'" style="width:'+p+'%"></span></span><span class="n">'+fmt(v)+'</span></div>'; }
+  var avail=Math.max(0,total-(h.opted_out||0)-(h.rested||0)-(h.upcoming||0)-(h.in_house||0));
+  var kpis=[{v:fmt(total),l:(ar?'إجمالي الأعضاء':'Total members')},{v:fmt(avail),l:(ar?'متاحون للإرسال':'Available')},{v:fmt(d.remaining_today),l:(ar?'المتبقي اليوم':'Remaining today')},{v:(d.adapter||'csv').toUpperCase(),l:(ar?'قناة التسليم':'Sender')}];
+  var kpiHtml=kpis.map(function(x){ return '<div class="kpi"><div class="kpi-val">'+x.v+'</div><div class="kpi-lbl">'+esc(x.l)+'</div></div>'; }).join('');
+  var fileMsg=h.have_seed_file?(ar?'✓ ملف الأعضاء محمَّل':'✓ member file loaded'):(ar?'لا يوجد ملف بعد — استورده مرة وحدة':'no file yet — import once');
+  b.innerHTML='<div class="kpis">'+kpiHtml+'</div><div class="brn-grid2" style="margin-top:14px">'
+    +'<div class="card"><div class="card-head"><span class="card-title">'+(ar?'الأعضاء حسب الفئة':'Members by grade')+'</span></div><div class="brn-bars">'
+    +bar('Turaif',bt.Turaif||0,tmax,'')+bar('Gold',bt.Gold||0,tmax,'')+bar('Silver',bt.Silver||0,tmax,'')+(bt.Quarantine?bar((ar?'محجوز':'Quarantine'),bt.Quarantine,tmax,'r'):'')+'</div>'
+    +'<div class="card-head" style="margin-top:16px"><span class="card-title">'+(ar?'الإتاحة':'Availability')+'</span></div><div class="brn-bars">'
+    +bar((ar?'متاحون':'Available'),avail,total,'g')+bar((ar?'في راحة':'Resting'),h.rested||0,total,'')+bar((ar?'ألغوا':'Opted-out'),h.opted_out||0,total,'r')+bar((ar?'حجز قادم':'Upcoming'),h.upcoming||0,total,'')+'</div></div>'
+    +'<div class="card"><div class="card-head"><span class="card-title">'+(ar?'استيراد الأعضاء':'Import members')+'</span></div>'
+    +'<div class="muted" style="font-size:12.5px;line-height:1.6">'+(ar?'ارفع ملف الأعضاء (JSON) مرة وحدة — يُحفظ على الخادم ويتحدّث تلقائياً بعدها.':'Upload the member file (JSON) once — it is saved on the server and reused automatically afterwards.')+'</div>'
+    +'<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="file" id="brnFile" accept=".json,application/json" style="display:none" onchange="brnImport(this)">'
+    +'<button class="btn primary sm" onclick="document.getElementById(&#39;brnFile&#39;).click()">⬆ '+(ar?'اختر ملف الأعضاء':'Choose member file')+'</button>'
+    +'<button class="btn ghost sm" onclick="brnResync()">↻ '+(ar?'إعادة مزامنة':'Resync')+'</button></div>'
+    +'<div class="muted" style="font-size:12px;margin-top:10px">'+fileMsg+'</div>'
+    +(d.last_sync?('<div class="muted" style="font-size:11.5px;margin-top:8px">'+(ar?'آخر مزامنة حجوزات':'Last booking sync')+': '+esc((d.last_sync.at||'').replace('T',' '))+'</div>'):'')+'</div></div>'; }
+async function brnImport(el){ var ar=(L==='ar'); var f=el.files&&el.files[0]; if(!f){ return; } toast(ar?'⏳ جارٍ الاستيراد…':'⏳ Importing…');
+  try{ var rows=JSON.parse(await f.text()); var r=await post('/api/brain/seed-import', Array.isArray(rows)?{members:rows}:rows);
+    if(r&&r.ok){ toast((ar?'تم استيراد ':'Imported ')+fmt(r.total||0)); _brn.move=null; _brn.health=null; brnHealth(); } else { toast((r&&r.error)||'⚠'); } }
+  catch(e){ toast(ar?'ملف غير صالح':'invalid file'); } el.value=''; }
+function brnResync(){ var ar=(L==='ar'); toast(ar?'⏳ مزامنة…':'⏳ Syncing…'); post('/api/brain/seed',{}).then(function(){ _brn.health=null; _brn.move=null; brnHealth(); toast('✓'); }); }
+
+function brnSettings(){ var b=document.getElementById('brainBody'); if(!b) return;
+  api('/api/brain/settings').then(function(r){ _brn.settings=(r&&r.settings)||null; brnRenderSettings(_brn.settings); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; }); }
+function brnRenderSettings(s){ var b=document.getElementById('brainBody'); if(!b||!s) return; var ar=(L==='ar');
+  var groups=[['governor',(ar?'الحارس (منع الإزعاج)':'Governor (anti-nag)')],['demand',(ar?'مطابقة الطلب':'Demand match')],['volume',(ar?'الحجم والإحماء':'Volume & warm-up')],['tiers',(ar?'الفئات':'Grades')],['signals',(ar?'الإشارات':'Signals')],['approval',(ar?'الاعتماد':'Approval')]];
+  var html=groups.filter(function(g){ return s[g[0]]; }).map(function(g){ var flds=s[g[0]].map(function(f){ return '<div class="brn-fld"><label>'+esc(ar?f.label_ar:f.label_en)+'</label><input data-k="'+esc(f.key)+'" value="'+esc(f.value)+'"><span class="hp">'+esc(f.help||'')+'</span></div>'; }).join('');
+    return '<div class="card"><div class="card-head"><span class="card-title">'+esc(g[1])+'</span></div><div class="brn-set">'+flds+'</div></div>'; }).join('');
+  b.innerHTML=html+'<div style="margin-top:12px"><button class="btn primary sm" onclick="brnSaveSettings()">'+(ar?'حفظ':'Save')+'</button></div>'; }
+function brnSaveSettings(){ var ar=(L==='ar'); var upd={}; document.querySelectorAll('#brainBody input[data-k]').forEach(function(i){ upd[i.getAttribute('data-k')]=i.value; });
+  post('/api/brain/settings',{settings:upd}).then(function(r){ _brn.settings=(r&&r.settings)||_brn.settings; _brn.move=null; toast(ar?'تم الحفظ ✓':'Saved ✓'); }); }
 
 /* ============================================================
    BOOT

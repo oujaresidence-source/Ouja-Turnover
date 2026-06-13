@@ -6,7 +6,6 @@ HOST.json_response (Arabic-safe). Nothing here sends WhatsApp live; Approve = CS
 
 import json
 from . import db, settings, signals, members, recommend, campaigns, adapters, governor
-from . import dashboard
 from .host import HOST
 
 
@@ -27,9 +26,11 @@ async def _body(request):
 # ---------------- page ----------------
 
 async def page(request):
-    if not HOST.dash_auth(request):
-        return HOST.web.Response(text=dashboard.locked_html(), content_type="text/html", status=401)
-    return HOST.web.Response(text=dashboard.page_html(), content_type="text/html")
+    """Ouja Brain is now a NATIVE tab inside the dashboard (not a separate page). Redirect any
+    direct hit / old bookmark to the dashboard's #brain tab so the sidebar is always present."""
+    token = request.query.get("token") or ""
+    dest = ("/dashboard?token=" + token + "#brain") if token else "/dashboard#brain"
+    raise HOST.web.HTTPFound(dest)
 
 
 # ---------------- reads ----------------
