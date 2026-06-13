@@ -43,18 +43,19 @@ def seed_campaigns(force=False):
             continue
         tier_json = json.dumps(c.get("tier_targets", []), ensure_ascii=False)
         vals = (c.get("name", ""), tier_json, c.get("trigger_type", ""), c.get("offer", ""),
-                c.get("lever", ""), c.get("message_template", ""), c.get("image_prompt", ""),
+                c.get("lever", ""), c.get("message_template", ""), c.get("template_name", ""),
+                c.get("footer", ""), c.get("image_prompt", ""),
                 c.get("cooldown_class", "soft"), int(bool(c.get("active", 1))))
         if code in existing:
             db.execute(
                 "UPDATE campaigns SET name=?, tier_targets=?, trigger_type=?, offer=?, lever=?, "
-                "message_template=?, image_prompt=?, cooldown_class=?, active=? WHERE code=?",
-                vals + (code,))
+                "message_template=?, template_name=?, footer=?, image_prompt=?, cooldown_class=?, "
+                "active=? WHERE code=?", vals + (code,))
         else:
             db.execute(
                 "INSERT INTO campaigns(code, name, tier_targets, trigger_type, offer, lever, "
-                "message_template, image_prompt, cooldown_class, active) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (code,) + vals)
+                "message_template, template_name, footer, image_prompt, cooldown_class, active) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (code,) + vals)
             n += 1
     _seeded_this_process = True
     return n

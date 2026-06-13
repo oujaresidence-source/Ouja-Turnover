@@ -22823,8 +22823,9 @@ function brnRenderMove(m){ var b=document.getElementById('brainBody'); if(!b) re
     +(ar?'إعادة الحساب':'Recompute')+'</button></div></div></div>'; return; }
   var c=m.campaign||{}; var k=m.kpi||{};
   var tiers=(c.tier_targets||[]).map(function(t){ return '<span class="brn-tier '+t+'">'+t+'</span>'; }).join(' ');
-  var sample=(m.audience_preview&&m.audience_preview[0]&&m.audience_preview[0].first_name)||(ar?'فيصل':'Guest');
-  var pasteMsg=m.paste_message||(c.message_template||''); var sampleMsg=(c.message_template||'').split('{name}').join(sample);
+  var sample=(m.audience_preview&&m.audience_preview[0]&&m.audience_preview[0].first_name)||(ar?'فهد':'Guest');
+  var tpl=c.template_name||''; var pasteMsg=c.message_template||'';
+  var sampleMsg=pasteMsg.split('{{1}}').join(sample).split('{name}').join(sample);
   var chips=(m.audience_preview||[]).slice(0,16).map(function(a){ return '<span class="brn-chip">'+esc(a.first_name||'—')+' <span class="brn-tier '+(a.tier||'')+'">'+(a.tier||'')+'</span></span>'; }).join('');
   var exc=m.excluded||{}; var approved=(m.status==='approved');
   function step(n,label,body){ return '<div style="display:flex;gap:12px;padding:13px 0;border-top:0.5px solid var(--line)"><div style="flex:0 0 26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px">'+n+'</div><div style="flex:1;min-width:0"><div class="muted" style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px">'+label+'</div>'+body+'</div></div>'; }
@@ -22833,13 +22834,16 @@ function brnRenderMove(m){ var b=document.getElementById('brainBody'); if(!b) re
   var sucTxt=ar?('ناجحة إذا انحجزت <b>≥ '+fmt(k.success_nights)+'</b> من '+fmt(k.nights_to_fill)+' ليلة ('+fmt(k.success_pct)+'%).')
     :('A win if <b>≥ '+fmt(k.success_nights)+'</b> of '+fmt(k.nights_to_fill)+' nights book ('+fmt(k.success_pct)+'%).');
   var assets='<div class="brn-grid2" style="margin-top:6px">'
-    +'<div><div class="muted" style="font-size:11px;font-weight:600;text-transform:uppercase;margin-bottom:5px">'+(ar?'الرسالة — انسخها لكرزوم':'Message — copy to Karzoum')+'</div>'
-      +'<div class="brn-msg" id="brnPaste">'+esc(pasteMsg)+'</div><div style="margin-top:6px"><button class="btn ghost sm" onclick="brnCopy(&#39;brnPaste&#39;)">⧉ '+(ar?'نسخ الرسالة':'Copy message')+'</button></div>'
-      +'<div class="muted" style="font-size:11px;margin-top:7px">'+(ar?'مثال':'Sample')+' ('+esc(sample)+'): '+esc(sampleMsg)+'</div></div>'
+    +'<div><div class="muted" style="font-size:11px;font-weight:600;text-transform:uppercase;margin-bottom:5px">'+(ar?'القالب المعتمد في ميتا — اختره في كرزوم':'Meta-approved template — pick it in Karzoum')+'</div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span id="brnTpl" style="font-family:var(--font-mono);font-size:13px;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:5px 9px;direction:ltr">'+esc(tpl||'—')+'</span><button class="btn ghost sm" onclick="brnCopy(&#39;brnTpl&#39;)">⧉ '+(ar?'نسخ الاسم':'Copy name')+'</button></div>'
+      +'<div class="muted" style="font-size:11px;font-weight:600;text-transform:uppercase;margin:12px 0 5px">'+(ar?'النص المعتمد':'Approved text')+'</div>'
+      +'<div class="brn-msg" id="brnPaste">'+esc(pasteMsg)+'</div>'
+      +'<div class="muted" style="font-size:11px;margin-top:7px">'+(ar?'مثال':'Sample')+' ('+esc(sample)+'): '+esc(sampleMsg)+'</div>'
+      +'<div class="muted" style="font-size:11px;margin-top:4px"><span style="font-family:var(--font-mono)">{{1}}</span> = '+(ar?'الاسم الأول (من ملف الجمهور)':'first name (from the audience file)')+'</div></div>'
     +'<div>'+(c.image_prompt?('<div class="muted" style="font-size:11px;font-weight:600;text-transform:uppercase;margin-bottom:5px">'+(ar?'برومبت الصورة — انسخه لـChatGPT':'Image prompt — copy to ChatGPT')+'</div><div class="brn-imgp" id="brnImg">'+esc(c.image_prompt)+'</div><div style="margin-top:6px"><button class="btn ghost sm" onclick="brnCopy(&#39;brnImg&#39;)">⧉ '+(ar?'نسخ البرومبت':'Copy prompt')+'</button></div>'):'')+'</div></div>';
   var actions=approved?('<a class="btn primary sm" href="/api/brain/export/'+m.id+'?token='+encodeURIComponent(tok())+'">⬇ '+(ar?'تنزيل ملف الجمهور لكرزوم':'Download audience for Karzoum')+'</a>')
     :('<button class="btn primary sm" onclick="brnApprove('+m.id+')">'+(ar?'اعتماد — جهّز الجمهور':'Approve — prepare audience')+'</button> <button class="btn ghost sm" onclick="brnReject('+m.id+')">'+(ar?'رفض':'Reject')+'</button>');
-  var note=approved?('<div class="pill ok" style="margin-top:10px">'+(ar?'١. نزّل ملف الجمهور  ·  ٢. الصق الرسالة والصورة في كرزوم':'1. Download audience  ·  2. Paste message + image into Karzoum')+'</div>'):'';
+  var note=approved?('<div class="pill ok" style="margin-top:10px">'+(ar?'١. نزّل ملف الجمهور  ·  ٢. في كرزوم اختر القالب وأرفق الصورة':'1. Download audience  ·  2. In Karzoum pick the template + attach the image')+'</div>'):'';
   b.innerHTML='<div class="card"><div class="muted" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">'+(ar?'حركة اليوم':'Today move')+' · '+esc(m.date||'')+'</div>'
     +step('1',(ar?'القرار — حملة اليوم':'The move — today campaign'),'<div style="font-size:17px;font-weight:500">'+esc(c.name||'')+' <span class="pill info">'+esc(c.code||'')+'</span></div>')
     +step('2',(ar?'ليش — حسب الأيام الفاضية':'Why — from the open days'),'<div style="font-size:14px;line-height:1.6">'+esc(ar?m.rationale:(m.rationale_en||m.rationale)||'')+'</div>')

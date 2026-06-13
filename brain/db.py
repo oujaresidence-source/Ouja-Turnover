@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS campaigns (
     trigger_type     TEXT,
     offer            TEXT,
     lever            TEXT,
-    message_template TEXT,
+    message_template TEXT,                      -- Meta-approved body (uses {{1}} for the name)
+    template_name    TEXT,                      -- Meta-approved template id (what Karzoum selects)
+    footer           TEXT,
     image_prompt     TEXT,
     cooldown_class   TEXT,
     active           INTEGER DEFAULT 1
@@ -146,6 +148,23 @@ def connect():
     return cx
 
 
+# Columns added after the first release — applied to already-deployed brain.db files.
+_MIGRATIONS = [
+    ("campaigns", "template_name", "ALTER TABLE campaigns ADD COLUMN template_name TEXT"),
+    ("campaigns", "footer", "ALTER TABLE campaigns ADD COLUMN footer TEXT"),
+]
+
+
+def _migrate(cx):
+    for table, col, sql in _MIGRATIONS:
+        try:
+            cols = {r[1] for r in cx.execute("PRAGMA table_info(%s)" % table).fetchall()}
+            if col not in cols:
+                cx.execute(sql)
+        except sqlite3.OperationalError:
+            pass
+
+
 def init_db():
     """Create tables once per process per path. Safe to call repeatedly."""
     path = db_path()
@@ -156,6 +175,7 @@ def init_db():
             return
         with connect() as cx:
             cx.executescript(SCHEMA)
+            _migrate(cx)
         _initialized_paths.add(path)
 
 

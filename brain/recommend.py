@@ -130,6 +130,7 @@ def _row_view(row, include_signals=True):
         "code": d.get("campaign_code"),
         "campaign": ({"code": camp.get("code"), "name": camp.get("name"), "offer": camp.get("offer"),
                       "lever": camp.get("lever"), "message_template": camp.get("message_template"),
+                      "template_name": camp.get("template_name"), "footer": camp.get("footer"),
                       "image_prompt": camp.get("image_prompt"), "tier_targets": camp.get("tier_targets")}
                      if camp else None),
         "paste_message": paste_message,
