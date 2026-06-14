@@ -880,6 +880,7 @@
 
   function bankLayout() {
     return '' +
+    '<div class="trust-strip">🔒 ' + esc(store.lang === 'ar' ? 'ولا ريال يدخل دفترة إلا بعد ما تعتمده بنفسك — التصنيف هنا يُحفظ محلياً فقط.' : 'Not one riyal enters Daftra until you approve it — classifying here is saved locally only.') + '</div>' +
     '<div class="card bank-bar">' +
       '<div class="bb-row">' +
         '<button class="btn primary sm" data-act="bk-upload-btn">⬆ ' + esc(t('bk_upload')) + '</button>' +
@@ -935,13 +936,21 @@
           '<button class="btn ghost xs" data-act="bk-undo-rule" data-id="' + esc(r.id) + '">' + esc(t('undo')) + '</button>' : '') +
         '<button class="btn ghost xs" data-act="bk-open-cls" data-id="' + esc(r.id) + '">' + esc(t('edit_class')) + '</button></div>';
     }
+    var suggs = (r.suggestions || []).slice(0, 3);
+    var arx = store.lang === 'ar';
     var h = '<div class="cls-todo">';
-    (r.suggestions || []).slice(0, 3).forEach(function (s, i) {
-      h += '<button class="sugg" data-act="bk-sugg" data-id="' + esc(r.id) + '" data-acc="' + esc(s.account_id) + '"' +
-        ' title="' + esc(store.lang === 'ar' ? s.why_ar : s.why_en) + '">' +
-        '<kbd>' + (i + 1) + '</kbd> ' + esc(s.name) + '</button>';
-    });
-    h += '<button class="btn primary xs" data-act="bk-open-cls" data-id="' + esc(r.id) + '">' + esc(t('classify')) + '</button>';
+    if (suggs.length) {
+      h += '<div class="cls-hint">' + esc(arx ? 'اقتراح النظام — اضغط للتأكيد، أو «تعديل»:' : 'System suggestion — tap to confirm, or Edit:') + '</div><div class="cls-suggs">';
+      suggs.forEach(function (s, i) {
+        var why = arx ? s.why_ar : s.why_en;
+        h += '<button class="sugg" data-act="bk-sugg" data-id="' + esc(r.id) + '" data-acc="' + esc(s.account_id) + '">' +
+          '<kbd>' + (i + 1) + '</kbd> <b>' + esc(s.name) + '</b>' +
+          (why ? '<span class="sugg-why">' + esc(why) + '</span>' : '') + '</button>';
+      });
+      h += '</div>';
+    }
+    h += '<button class="btn ' + (suggs.length ? 'ghost' : 'primary') + ' xs" data-act="bk-open-cls" data-id="' + esc(r.id) + '">' +
+      esc(suggs.length ? (arx ? 'تعديل / تصنيف يدوي' : 'Edit / manual') : t('classify')) + '</button>';
     return h + '</div>';
   }
 
@@ -2054,6 +2063,9 @@
     else loadMatch();
   }
 
+  // Honest word-confidence from the real candidate score (no fabricated numbers).
+  function confWord(sc) { sc = Number(sc) || 0; var ar = store.lang === 'ar'; return sc >= 85 ? (ar ? 'متأكد' : 'High') : sc >= 60 ? (ar ? 'شبه متأكد' : 'Medium') : (ar ? 'يحتاج مراجعتك' : 'Review'); }
+  function confCls(sc) { sc = Number(sc) || 0; return sc >= 85 ? 'cf-hi' : sc >= 60 ? 'cf-md' : 'cf-lo'; }
   function candPill(c, idx, selected) {
     var lbl = (store.lang === 'ar' ? c.label : (c.label_en || c.label)) || '';
     var sub = (store.lang === 'ar' ? c.sub : (c.sub_en || c.sub)) || '';
@@ -2064,7 +2076,7 @@
       '<span class="cand-meta">' +
         (c.amount ? '<code>' + fmtAmt(c.amount) + '</code>' : '') +
         (c.date ? '<code>' + esc(c.date) + '</code>' : '') +
-        '<em class="cand-score">' + c.score + '%</em>' +
+        '<em class="cand-score ' + confCls(c.score) + '">' + esc(confWord(c.score)) + ' · ' + c.score + '%</em>' +
         (c.approx ? '<em class="tag warnt">' + esc(t('m_approx')) + '</em>' : '') +
       '</span></button>';
   }
