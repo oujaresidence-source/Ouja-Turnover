@@ -3803,20 +3803,50 @@
     ['رسوم (fee)', 'رسوم بنكية أو خدمة، مو مصروف تشغيلي عادي.']
   ];
   var FB_GUIDE_BUTTONS = [
-    { b: ['استيراد كشف الراجحي', 'Import Al-Rajhi statement'], d: ['يقرأ ملف الكشف ويعرض الحركات الجديدة/المكررة للمراجعة قبل الحفظ.', 'Reads the statement file and shows new/duplicate rows for review before saving.'], w: ['معاينة فقط — ما يحفظ', 'Preview only — saves nothing'], r: ['نعم، تقدر تلغي', 'Yes, you can cancel'] },
-    { b: ['تأكيد الاستيراد', 'Confirm import'], d: ['يحفظ الحركات الجديدة ويطبّق عليها القواعد تلقائياً.', 'Saves the new rows and auto-applies your rules.'], w: ['يُحفظ محلياً', 'Saved locally'], r: ['محمي من الازدواج؛ الاستيراد نفسه ما له تراجع', 'Dup-shielded; the import itself has no undo'] },
-    { b: ['اقتراح التصنيف (ضغط الحساب المقترح)', 'Suggestion chip'], d: ['يصنّف الحركة على الحساب اللي يقترحه النظام بضغطة وحدة.', 'One-click classify onto the system’s suggested account.'], w: ['يُحفظ محلياً — ما يدخل دفترة', 'Local — not Daftra'], r: ['نعم (إزالة التصنيف يرجّعها)', 'Yes (clear to reverse)'] },
-    { b: ['احفظ كقاعدة / تطبيق على المشابهة', 'Save as rule / apply to similar'], d: ['يخلّي تصنيفك يتطبّق تلقائياً على الحركات المشابهة مستقبلاً — أنت تعلّم النظام.', 'Makes your classification auto-apply to similar future rows — you teach the system.'], w: ['يُحفظ محلياً', 'Local'], r: ['نعم (تقدر تعطّل أو تحذف القاعدة)', 'Yes (toggle/delete the rule)'] },
-    { b: ['تراجع', 'Undo'], d: ['يلغي تصنيفاً طبّقته قاعدة ويضعّف القاعدة.', 'Reverses a rule-applied classification and weakens the rule.'], w: ['يُحفظ محلياً', 'Local'], r: ['هذا نفسه هو التراجع', 'This is the undo'] },
-    { b: ['اعتماد (بند الوارد ٣٠٠٠+)', 'Approve (3000+ inbox item)'], d: ['يعتمد بنداً يحتاج موافقة فيصل.', 'Approves an item that needs Faisal’s sign-off.'], w: ['قرار محلي — ما يدخل دفترة', 'Local decision — not Daftra'], r: ['لا تراجع مباشر — قرار نهائي', 'No direct undo — final decision'], danger: true },
-    { b: ['رفض', 'Reject'], d: ['يرفض البند (يطلب سبب).', 'Rejects the item (reason required).'], w: ['قرار محلي', 'Local'], r: ['نهائي', 'Final'], danger: true },
-    { b: ['استيضاح', 'Request clarification'], d: ['يرجّع البند ويطلب توضيح بدل الرفض.', 'Sends it back asking for clarification instead of rejecting.'], w: ['محلي', 'Local'], r: ['يرجع للطابور', 'Re-queues'] },
-    { b: ['اعتماد (مصروف)', 'Approve (expense)'], d: ['يعتمد المصروف وينقله لخطوة التصدير.', 'Approves the expense and moves it to export.'], w: ['يُحفظ محلياً', 'Local'], r: ['ينتقل للتبويب التالي — ما فيه تراجع مباشر', 'Moves tab — no direct undo'] },
-    { b: ['تصدير (مصروف)', 'Export (expense)'], d: ['يرفع المصروف إلى Hostaway.', 'Pushes the expense to Hostaway.'], w: ['يكتب في Hostaway (مو دفترة)؛ لو وضع التجربة شغّال = ملف فقط', 'Writes to Hostaway (not Daftra); test-mode = file only'], r: ['حسب وضع التجربة', 'Depends on test-mode'] },
-    { b: ['تحقّق الآن', 'Verify now'], d: ['يرجع يدوّر على المصروف في Hostaway ويأكّده.', 'Re-checks Hostaway and confirms the expense.'], w: ['قراءة وتأكيد', 'Read-back verify'], r: ['آمن — يعيد المحاولة', 'Safe — idempotent'] },
-    { b: ['معاينة (Dry-run) — الترحيل', 'Preview (Dry-run) — migration'], d: ['يبني مسودة الترحيل بدون ما يكتب أي شي.', 'Builds the migration draft without writing anything.'], w: ['معاينة فقط', 'Preview only'], r: ['آمن تماماً', 'Completely safe'] },
-    { b: ['إقفال الشهر (نهائي)', 'Close month (final)'], d: ['يقفل الشهر بعد ما تكتمل قائمة الجاهزية.', 'Closes the month after the readiness checklist passes.'], w: ['يثبّت لقطة نهائية', 'Writes an immutable snapshot'], r: ['نهائي — لا تراجع', 'Final — irreversible'], danger: true },
-    { b: ['ترحيل فعلي', 'Real migration'], d: ['يدفع القيود إلى دفترة (مرة واحدة).', 'Posts the entries to Daftra (once).'], w: ['يكتب في دفترة — وحالياً مقفول', 'Writes to Daftra — currently disabled'], r: ['نهائي — أكّد قبل', 'Final — confirm first'], danger: true }
+    // ---- البنك / Bank ----
+    { s: ['البنك', 'Bank'], b: ['استيراد كشف الراجحي', 'Import Al-Rajhi statement'], d: ['يقرأ ملف الكشف ويعرض الحركات الجديدة/المكررة للمراجعة قبل الحفظ.', 'Reads the statement and shows new/duplicate rows before saving.'], w: ['معاينة فقط — ما يحفظ', 'Preview only — saves nothing'], r: ['نعم، تقدر تلغي', 'Yes, cancellable'] },
+    { s: ['البنك', 'Bank'], b: ['تأكيد الاستيراد', 'Confirm import'], d: ['يحفظ الحركات الجديدة ويطبّق القواعد عليها تلقائياً.', 'Saves the new rows and auto-applies your rules.'], w: ['يُحفظ محلياً', 'Saved locally'], r: ['محمي من الازدواج؛ الاستيراد نفسه ما له تراجع', 'Dup-shielded; no undo of the import itself'] },
+    { s: ['البنك', 'Bank'], b: ['تحديث دليل الحسابات', 'Refresh chart of accounts'], d: ['يسحب الحسابات ومراكز التكلفة من دفترة (قراءة فقط).', 'Pulls accounts + cost-centers FROM Daftra (read only).'], w: ['قراءة من دفترة — ما يكتب فيها', 'Reads from Daftra — writes nothing'], r: ['آمن — يعيد نفسه', 'Safe — idempotent'] },
+    { s: ['البنك', 'Bank'], b: ['اقتراح التصنيف (ضغط الحساب المقترح)', 'Suggestion chip'], d: ['يصنّف الحركة على الحساب اللي يقترحه النظام بضغطة.', 'One-click classify onto the suggested account.'], w: ['يُحفظ محلياً — ما يدخل دفترة', 'Local — not Daftra'], r: ['نعم (إزالة التصنيف ترجّعها)', 'Yes (clear to reverse)'] },
+    { s: ['البنك', 'Bank'], b: ['صنّف / تعديل + حفظ', 'Classify / Edit + Save'], d: ['يفتح لوحة التصنيف (حساب + مركز تكلفة + طرف) ويحفظها.', 'Opens the classify panel (account + cost-center + party) and saves.'], w: ['يُحفظ محلياً', 'Local'], r: ['نعم (إزالة التصنيف)', 'Yes (clear)'] },
+    { s: ['البنك', 'Bank'], b: ['احفظ كقاعدة / تطبيق على المشابهة', 'Save as rule / apply to similar'], d: ['يخلّي تصنيفك يتطبّق تلقائياً على المشابه مستقبلاً — أنت تعلّم النظام.', 'Makes your classification auto-apply to similar rows — you teach it.'], w: ['يُحفظ محلياً', 'Local'], r: ['نعم (تعطّل/تحذف القاعدة)', 'Yes (toggle/delete rule)'] },
+    { s: ['البنك', 'Bank'], b: ['إزالة التصنيف', 'Clear classification'], d: ['يرجّع الحركة «تحتاج تصنيف».', 'Sends the row back to "needs classification".'], w: ['يُحفظ محلياً', 'Local'], r: ['هذا نفسه هو الرجوع', 'This is the reversal'] },
+    { s: ['البنك', 'Bank'], b: ['تراجع', 'Undo'], d: ['يلغي تصنيفاً طبّقته قاعدة ويضعّف القاعدة.', 'Reverses a rule-applied classification and weakens the rule.'], w: ['يُحفظ محلياً', 'Local'], r: ['هذا نفسه هو التراجع', 'This is the undo'] },
+    // ---- اليوم / Inbox approvals ----
+    { s: ['اليوم — الوارد', 'Today — Inbox'], b: ['اعتماد (بند ٣٠٠٠+)', 'Approve (3000+ item)'], d: ['يعتمد بنداً يحتاج موافقة فيصل.', 'Approves an item needing Faisal’s sign-off.'], w: ['قرار محلي — ما يدخل دفترة', 'Local decision — not Daftra'], r: ['لا تراجع مباشر — نهائي', 'No direct undo — final'], danger: true },
+    { s: ['اليوم — الوارد', 'Today — Inbox'], b: ['رفض', 'Reject'], d: ['يرفض البند (يطلب سبب).', 'Rejects the item (reason required).'], w: ['قرار محلي', 'Local'], r: ['نهائي', 'Final'], danger: true },
+    { s: ['اليوم — الوارد', 'Today — Inbox'], b: ['استيضاح', 'Request clarification'], d: ['يرجّع البند ويطلب توضيح بدل الرفض.', 'Sends it back for clarification instead of rejecting.'], w: ['محلي', 'Local'], r: ['يرجع للطابور', 'Re-queues'] },
+    // ---- المطابقة / Matching ----
+    { s: ['المطابقة', 'Matching'], b: ['اعتماد المطابقة', 'Accept match'], d: ['يربط حركة البنك بالقيد المقابل اللي اخترته.', 'Links the bank txn to the candidate you picked.'], w: ['يُحفظ محلياً (ربط)', 'Local link'], r: ['ما فيه تراجع مباشر', 'No direct undo'] },
+    { s: ['المطابقة', 'Matching'], b: ['رفض المطابقة', 'Reject match'], d: ['يرفض المرشّح المقترح.', 'Rejects the suggested candidate.'], w: ['محلي', 'Local'], r: ['يرجع يظهر بالتحميل الجاي', 'Re-surfaces next load'] },
+    { s: ['المطابقة', 'Matching'], b: ['تفاصيل / تقسيم', 'Details / split'], d: ['يفتح قيد دفترة بسطوره لتربط جزءاً منه.', 'Opens the Daftra journal lines to link part of it.'], w: ['عرض فقط', 'View only'], r: ['—', '—'] },
+    { s: ['المطابقة', 'Matching'], b: ['اربط المحدد', 'Link selected'], d: ['يربط السطور المحددة (مجموعها لازم يساوي المبلغ).', 'Links the selected lines (sum must equal the amount).'], w: ['يُحفظ محلياً (ربط)', 'Local link'], r: ['ما فيه تراجع', 'No undo'] },
+    { s: ['المطابقة', 'Matching'], b: ['مو نفس القيد / تجاهل الحركة', 'Not a duplicate / Ignore'], d: ['يعلّم إنها ليست مكررة، أو يتجاهل الحركة.', 'Marks it not-duplicate, or ignores the txn.'], w: ['محلي', 'Local'], r: ['ما فيه تراجع', 'No undo'] },
+    { s: ['المطابقة', 'Matching'], b: ['ما له مقابل', 'No counterpart'], d: ['ينشئ الطرف الناقص كـ«مسودة» داخلية (يطلب تأكيد).', 'Creates the missing side as an internal DRAFT (confirms first).'], w: ['مسودة محلية — توصل دفترة فقط عند الترحيل', 'Local draft — reaches Daftra only at migration'], r: ['ما فيه تراجع؛ محمي من التكرار', 'No undo; dup-shielded'] },
+    // ---- المصاريف / Expenses ----
+    { s: ['المصاريف', 'Expenses'], b: ['اعتماد (مصروف)', 'Approve (expense)'], d: ['يعتمد المصروف وينقله لخطوة التصدير.', 'Approves the expense, moves it to export.'], w: ['يُحفظ محلياً', 'Local'], r: ['ينتقل للتبويب التالي — ما فيه تراجع مباشر', 'Moves tab — no direct undo'] },
+    { s: ['المصاريف', 'Expenses'], b: ['رفض / تعديل', 'Reject / Edit'], d: ['يرفض المصروف (يطلب سبب)، أو يعدّل بياناته.', 'Rejects (reason) or edits the expense fields.'], w: ['يُحفظ محلياً', 'Local'], r: ['التعديل يرجع؛ الرفض نهائي', 'Edit reversible; reject final'] },
+    { s: ['المصاريف', 'Expenses'], b: ['تصدير (مصروف)', 'Export (expense)'], d: ['يرفع المصروف إلى Hostaway.', 'Pushes the expense to Hostaway.'], w: ['يكتب في Hostaway (مو دفترة)؛ وضع التجربة = ملف فقط', 'Writes to Hostaway (not Daftra); test-mode = file only'], r: ['حسب وضع التجربة', 'Depends on test-mode'] },
+    { s: ['المصاريف', 'Expenses'], b: ['تحقّق الآن', 'Verify now'], d: ['يرجع يدوّر على المصروف في Hostaway ويأكّده.', 'Re-checks Hostaway and confirms it.'], w: ['قراءة وتأكيد', 'Read-back verify'], r: ['آمن — يعيد نفسه', 'Safe — idempotent'] },
+    // ---- الملاك / Owners ----
+    { s: ['الملاك', 'Owners'], b: ['نسخ رابط المالك', 'Copy owner link'], d: ['ينسخ رابط كشف المالك للمشاركة.', 'Copies the owner statement share-link.'], w: ['نسخ فقط', 'Copy only'], r: ['—', '—'] },
+    { s: ['الملاك', 'Owners'], b: ['تجديد / إيقاف الرابط', 'Regenerate / revoke link'], d: ['ينشئ رابطاً جديداً (يقتل القديم) أو يوقف الرابط.', 'Issues a new link (kills the old) or revokes it.'], w: ['يُحفظ محلياً', 'Local'], r: ['نهائي — الرابط القديم يموت', 'Final — old link dies'], danger: true },
+    { s: ['الملاك', 'Owners'], b: ['حفظ المالك / إضافة شقة / تعديل الشروط', 'Save owner / add unit / edit terms'], d: ['يحفظ بيانات المالك ووحداته وشروطه (الشروط مؤرّخة، الماضي محفوظ).', 'Saves owner, units, and terms (effective-dated; past preserved).'], w: ['يُحفظ محلياً', 'Local'], r: ['نعم — قابل للتعديل', 'Yes — editable'] },
+    { s: ['الملاك', 'Owners'], b: ['إنهاء العقد', 'End contract'], d: ['يلغي ربط الشقة بالمالك (يطلب سبب).', 'Soft-removes the unit↔owner link (reason required).'], w: ['يُحفظ محلياً', 'Local'], r: ['قابل للإرجاع', 'Reversible'] },
+    { s: ['الملاك', 'Owners'], b: ['أعد الحساب', 'Recompute'], d: ['يعرض معاينة الفرق قبل النشر.', 'Shows a diff preview before publishing.'], w: ['معاينة فقط', 'Preview only'], r: ['آمن', 'Safe'] },
+    { s: ['الملاك', 'Owners'], b: ['نشر النسخة الجديدة', 'Publish new version'], d: ['ينشر لقطة الكشف للمالك (يطلب تأكيد).', 'Publishes the statement snapshot to the owner (confirms).'], w: ['يُحفظ محلياً ويظهر للمالك', 'Local; visible to owner'], r: ['تستبدله نسخة أحدث', 'Superseded by next publish'] },
+    // ---- الإقفال والترحيل / Close & Migrate ----
+    { s: ['الإقفال والترحيل', 'Close & Migrate'], b: ['معاينة (Dry-run)', 'Preview (Dry-run)'], d: ['يبني مسودة الترحيل بدون ما يكتب أي شي.', 'Builds the migration draft, writing nothing.'], w: ['معاينة فقط', 'Preview only'], r: ['آمن تماماً', 'Completely safe'] },
+    { s: ['الإقفال والترحيل', 'Close & Migrate'], b: ['إقفال الشهر (نهائي)', 'Close month (final)'], d: ['يقفل الشهر بعد ما تكتمل قائمة الجاهزية.', 'Closes the month after the readiness checklist passes.'], w: ['يثبّت لقطة نهائية', 'Immutable snapshot'], r: ['نهائي — لا تراجع', 'Final — irreversible'], danger: true },
+    { s: ['الإقفال والترحيل', 'Close & Migrate'], b: ['ترحيل فعلي', 'Real migration'], d: ['يدفع القيود إلى دفترة (مرة واحدة).', 'Posts the entries to Daftra (once).'], w: ['يكتب في دفترة — وحالياً مقفول', 'Writes to Daftra — currently disabled'], r: ['نهائي — أكّد قبل', 'Final — confirm first'], danger: true },
+    // ---- الإعدادات / Setup ----
+    { s: ['الإعدادات', 'Setup'], b: ['تفعيل / حذف قاعدة', 'Toggle / delete rule'], d: ['يشغّل أو يوقف أو يحذف قاعدة تصنيف.', 'Enables/disables/deletes a classification rule.'], w: ['يُحفظ محلياً', 'Local'], r: ['التفعيل يرجع؛ الحذف لا', 'Toggle reversible; delete not'] },
+    { s: ['الإعدادات', 'Setup'], b: ['قِس دقة القواعد', 'Measure rule precision'], d: ['يقيس كم القواعد تطابقت صح (للمراجعة).', 'Measures how accurate the rules are (review only).'], w: ['قراءة فقط', 'Read only'], r: ['—', '—'] },
+    { s: ['الإعدادات', 'Setup'], b: ['اربط العقد بمركز التكلفة', 'Link contract to cost-center'], d: ['يربط عقداً بمركز تكلفة عشان تُنسب مصاريفه صح.', 'Links a contract to a cost-center so its costs attribute right.'], w: ['يُحفظ محلياً', 'Local'], r: ['قابل للتعديل', 'Editable'] },
+    // ---- الميزانية / Budget ----
+    { s: ['الميزانية', 'Budget'], b: ['حفظ / حذف بند / انسخ الشهر الماضي', 'Save / delete / copy last month'], d: ['يدير ميزانية كل حساب (مقارنة بالفعلي).', 'Manages each account’s budget vs. actuals.'], w: ['يُحفظ محلياً', 'Local'], r: ['نعم — قابل للتعديل والحذف', 'Yes — editable/deletable'] },
+    // ---- القوائم / Statements ----
+    { s: ['القوائم', 'Statements'], b: ['فتح حساب / تصدير XLSX·PDF', 'Open account / export XLSX·PDF'], d: ['يعرض تفاصيل حساب أو يصدّر القوائم.', 'Drills into an account or exports the statements.'], w: ['قراءة فقط', 'Read only'], r: ['—', '—'] }
   ];
   function gAcc(title, inner) {
     return '<details class="g-acc"><summary>' + esc(title) + '</summary><div class="g-acc-b">' + inner + '</div></details>';
@@ -3848,14 +3878,18 @@
     GUIDE_FAQ.forEach(function (f) { h += gAcc(f.q[i], '<p>' + esc(f.a[i]) + '</p>'); });
     h += '</div>';
     h += '<div class="card"><h3>' + (ar ? 'دليل الأزرار' : 'Button guide') + '</h3>' +
-      '<p class="g-sub">' + (ar ? 'لكل زر: وش يسوي، وين يروح، ويرجع ولا لا.' : 'For each button: what it does, where it goes, reversible or not.') + '</p><div class="g-btns">';
+      '<p class="g-sub">' + (ar ? 'لكل زر: وش يسوي، وين يروح، ويرجع ولا لا — مرتّبة حسب التبويب.' : 'For each button: what it does, where it goes, reversible or not — grouped by tab.') + '</p>';
+    var curSec = null;
     FB_GUIDE_BUTTONS.forEach(function (b) {
+      var sec = b.s ? b.s[i] : '';
+      if (sec !== curSec) { if (curSec !== null) h += '</div>'; curSec = sec; h += '<h4 class="g-bsec">' + esc(sec) + '</h4><div class="g-btns">'; }
       h += '<div class="g-btn' + (b.danger ? ' danger' : '') + '"><div class="g-btn-h">🔘 ' + esc(b.b[i]) + '</div>' +
         '<div class="g-btn-r"><span>✅ ' + (ar ? 'وش يسوي' : 'Does') + '</span>' + esc(b.d[i]) + '</div>' +
         '<div class="g-btn-r"><span>📍 ' + (ar ? 'وين يروح' : 'Where') + '</span>' + esc(b.w[i]) + '</div>' +
         '<div class="g-btn-r"><span>↩️ ' + (ar ? 'يرجع؟' : 'Reversible?') + '</span>' + esc(b.r[i]) + '</div></div>';
     });
-    h += '</div><p class="g-sub">' + (ar ? '(هذي الأزرار الأساسية — نكمّل بقية الأزرار في التحديث الجاي.)' : '(Core buttons — the rest are added next.)') + '</p></div>';
+    if (curSec !== null) h += '</div>';
+    h += '</div>';
     h += '<div class="card"><h3>' + (ar ? 'الكلمات اللي بتشوفها' : 'Glossary') + '</h3><div class="g-gloss">';
     GUIDE_GLOSSARY.forEach(function (g) { h += '<div class="g-term"><b>' + esc(g[0]) + '</b><span>' + esc(g[1]) + '</span></div>'; });
     h += '</div></div></div>';

@@ -631,6 +631,8 @@ textarea.in{width:100%;font-family:inherit}
 .g-acc-b{padding:13px 15px}
 .g-acc-b p{margin:0;line-height:1.85;color:var(--text-2);font-size:13.5px}
 .g-do{margin-top:10px;background:var(--accent-soft);color:var(--accent-deep);border-radius:8px;padding:8px 11px;font-size:13px}
+.g-bsec{font-size:13px;font-weight:800;color:var(--accent-deep);margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+.g-bsec:first-of-type{margin-top:6px}
 .g-btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
 .g-btn{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface-2);padding:12px 13px}
 .g-btn.danger{border-color:#E7B7B5;background:#FCEAE9}
