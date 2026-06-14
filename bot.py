@@ -21904,6 +21904,9 @@ async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBod
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📱 '+(ar?'حالة الموقع':'Website status')+'</b>'+(d.total?fbChip(ar?'يعمل':'live','ok'):fbChip(ar?'لا توجد بيانات — اضغط تحديث':'no data — sync','warn'))+'</div>'
     +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'تحكّم بعرض وحدات عوجا للضيوف القادمين من TikTok و Airbnb. آخر تحديث: ':'Control how Ouja units appear to TikTok/Airbnb visitors. Last sync: ')+esc(d.synced_at||'—')+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><button class="btn primary sm" onclick="gwSync()">⟳ '+esc(t().gw_sync)+'</button><button class="btn ghost sm" onclick="gwGo(&#39;hero&#39;)">🖼️ '+(ar?'صورة الواجهة':'Landing hero')+'</button><a class="btn ghost sm" href="/stay" target="_blank">↗ '+(ar?'فتح الموقع':'Open site')+'</a><a class="btn ghost sm" href="/stay/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="gwCopyStay()">📋 '+(ar?'نسخ رابط /stay':'Copy /stay link')+'</button></div></div>';
+  h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>✦ '+(ar?'موقع عوجا إيليت — النسخة المميّزة':'Ouja Elite — VIP site')+'</b>'+fbChip(ar?'حجز عبر واتساب':'WhatsApp booking','ok')+'</div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'نفس وحدات عوجا — بدون Airbnb، والحجز عبر كونسيرج واتساب. مخفي عن جوجل افتراضيًا. يحتاج ضبط ELITE_WHATSAPP في Railway.':'Same Ouja units — no Airbnb, booking via WhatsApp concierge. Hidden from Google by default. Needs ELITE_WHATSAPP on Railway.')+'</div>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><a class="btn primary sm" href="/elite" target="_blank">✦ '+(ar?'فتح موقع إيليت':'Open Elite')+'</a><a class="btn ghost sm" href="/elite/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="gwCopyElite()">📋 '+(ar?'نسخ رابط /elite':'Copy /elite link')+'</button></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
     +fbStatCard(ar?'إجمالي الوحدات':'Total listings',d.total||0,'var(--text)')
     +fbStatCard(ar?'ظاهرة':'Visible',d.visible||0,'#3e9665')
@@ -21939,6 +21942,7 @@ function gwListRow(x){ var ar=(L==='ar'); var thumb=x.hero?('<img src="'+esc(x.h
 async function gwToggleVis(id,on){ try{ await post('/api/gw/listing',{id:String(id),visible:!!on}); toast('✓'); }catch(_){ toast('⚠'); } }
 function gwCopy(slug){ var u=location.origin+'/stay/'+slug; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ الرابط':'Link copied'); }catch(e){ prompt('',u); } }
 function gwCopyStay(){ var u=location.origin+'/stay'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /stay':'/stay link copied'); }catch(e){ prompt('',u); } }
+function gwCopyElite(){ var u=location.origin+'/elite'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /elite':'/elite link copied'); }catch(e){ prompt('',u); } }
 function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast('⚠'); return; }
   openDrawer((ar?'تعديل: ':'Edit: ')+(x.name||''), '#'+id);
   function f(lbl,i2,val){ return '<label class="muted" style="font-size:11px">'+esc(lbl)+'</label><input id="'+i2+'" value="'+esc(val==null?'':val)+'" style="'+fbInp()+'">'; }
@@ -41273,6 +41277,9 @@ async def _handle_robots(request):
     base = str(request.url.origin())
     txt = ("User-agent: *\n"
            "Allow: /stay\n"
+           # Ouja Elite is a discreet members site — keep it out of search by default.
+           # Flip this to "Allow: /elite\n" (and add it to the sitemap) to make it public.
+           "Disallow: /elite\n"
            "Disallow: /dashboard\n"
            "Disallow: /invest\n"
            "Disallow: /oujact-route\n"
@@ -41422,6 +41429,564 @@ async def _handle_stay_hero_image(request):
         raise web.HTTPNotFound()
     ct = (_gw_hero or {}).get("upload_ct") or "image/jpeg"
     return web.Response(body=body, content_type=ct, headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ============================================================================================
+# OUJA ELITE — members booking site (/elite). VIP twin of /stay: Marriott-Bonvoy editorial.
+# Public, READ-ONLY. Reuses the live GW data + /api/stay/search + /api/stay/listing/{id}.
+# Conversion is WhatsApp-ONLY (concierge). NO Airbnb anywhere. RAW string (r-prefixed) so any
+# backslash in the embedded JS is literal — no Python mangling. No backticks; literal { } are JS.
+# ============================================================================================
+ELITE_HTML = r"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__ELITE_TITLE__</title>
+<meta name="description" content="__ELITE_DESC__">
+<meta name="theme-color" content="#FBF7EF">
+<meta name="robots" content="noindex">
+<meta property="og:title" content="__ELITE_TITLE__">
+<meta property="og:description" content="__ELITE_DESC__">
+<meta property="og:image" content="__ELITE_OG__">
+<meta property="og:url" content="__ELITE_URL__">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="__ELITE_URL__">
+<script type="application/ld+json">/*__ELITE_JSONLD__*/null</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Reem+Kufi:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--canvas:#FBF7EF;--surface:#FFFFFF;--surface-2:#F4EDE0;--ink:#1F2D3A;--ink-soft:#5B6976;--mut:#8C7E6A;--gold:#B0894E;--gold-deep:#8A6B33;--gold-soft:#E7D7B4;--line:rgba(31,45,58,.12);--line-gold:rgba(176,137,78,.40);--ease:cubic-bezier(.23,1,.32,1);--maxw:1040px}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--canvas);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;font-weight:400;line-height:1.78;-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+@media(max-width:560px){.wrap{padding:0 18px}}
+.serif{font-family:"Cormorant Garamond",serif}
+.kufi{font-family:"Reem Kufi","IBM Plex Sans Arabic",serif}
+.num{font-family:"Cormorant Garamond",serif;font-weight:600;font-feature-settings:"lnum" 1}
+.center{text-align:center}
+.eyebrow{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.34em;font-size:12px;font-weight:600;color:var(--gold-deep);display:block;margin-bottom:10px}
+.eyebrow.center{text-align:center}
+.muted{color:var(--mut)}
+.sec{margin-top:60px}
+@media(min-width:760px){.sec{margin-top:92px}}
+.sec-head{margin-bottom:24px}
+.h-sec{font-size:27px;line-height:1.25;font-weight:500;margin:0;color:var(--ink);text-wrap:balance}
+@media(min-width:760px){.h-sec{font-size:33px}}
+/* register mark */
+.reg-wrap{display:flex;justify-content:center;margin:56px 0}
+@media(min-width:760px){.reg-wrap{margin:84px 0}}
+.reg{display:block;color:var(--gold);opacity:.9}
+/* header */
+.head{position:sticky;top:0;z-index:50;background:rgba(251,247,239,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.head-in{display:flex;align-items:center;justify-content:space-between;height:62px}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand-ar{font-family:"Reem Kufi",serif;font-size:21px;font-weight:600;color:var(--ink);letter-spacing:.01em}
+.brand-en{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.32em;font-size:12px;color:var(--gold-deep);font-weight:600}
+.conc-link{font-size:13px;color:var(--ink-soft);font-weight:500;display:flex;align-items:center;gap:6px;min-height:44px;padding-inline:4px}
+.conc-link:hover{color:var(--gold-deep)}
+.head-reg{display:flex;justify-content:center;padding:7px 0 0}
+.head-reg .reg{opacity:.7}
+/* hero */
+.hero{position:relative;min-height:74vh;display:flex;align-items:flex-end;overflow:hidden;background:linear-gradient(135deg,#2a3a47,#16212b)}
+.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.06);animation:ken 22s ease-out both}
+.hero .ph-hero{background:radial-gradient(120% 90% at 70% 10%,#3a4a55,#16212b)}
+.hero-ov{position:absolute;inset:0;background:linear-gradient(to top,var(--canvas) 0,rgba(251,247,239,0) 72px),linear-gradient(to top,rgba(31,45,58,.60) 0,rgba(31,45,58,.30) 50%,rgba(31,45,58,.46) 100%)}
+.hero-in{position:relative;width:100%;padding-bottom:74px;padding-top:90px}
+@media(min-width:760px){.hero-in{padding-bottom:92px}}
+.hero .eyebrow{color:var(--gold-soft)}
+.h-hero{font-size:clamp(30px,7vw,48px);line-height:1.24;font-weight:500;color:#fff;margin:0 0 14px;max-width:18ch;text-wrap:balance;text-shadow:0 1px 30px rgba(15,22,30,.45)}
+.hero-sub{font-style:italic;font-size:clamp(17px,2.4vw,21px);color:rgba(255,255,255,.86);margin-bottom:14px;letter-spacing:.01em}
+.hero-lead{font-size:15.5px;line-height:1.8;color:rgba(255,255,255,.9);margin:0;max-width:42ch}
+/* widget */
+.band-tight{margin-top:-44px;position:relative;z-index:10}
+.widget{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 26px 60px rgba(31,45,58,.12)}
+@media(max-width:560px){.widget{padding:20px}}
+.wfields{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:14px}
+@media(min-width:760px){.wfields{grid-template-columns:repeat(4,1fr)}}
+.field{display:flex;flex-direction:column;gap:7px}
+.field label{font-size:12px;font-weight:600;color:var(--ink-soft);letter-spacing:.01em}
+.field input,.field select{font:inherit;font-size:16px;padding:13px 13px;min-height:52px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);width:100%;appearance:none}
+.field input:focus,.field select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(176,137,78,.18)}
+.err{display:none;background:rgba(180,84,63,.07);border:1px solid rgba(180,84,63,.34);color:#a04a37;font-size:13px;border-radius:9px;padding:10px 13px;margin-bottom:13px}
+.err.on{display:block}
+.qps{display:flex;gap:9px;overflow-x:auto;padding:2px 0 13px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.qps::-webkit-scrollbar{display:none}
+.qp{flex:0 0 auto;font:inherit;font-size:13px;font-weight:500;padding:0 16px;min-height:44px;display:inline-flex;align-items:center;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;white-space:nowrap;transition:all .2s var(--ease)}
+.qp.active{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
+/* buttons — the Bonvoy register */
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:2px;padding:0 28px;min-height:54px;font:inherit;font-size:15px;font-weight:500;cursor:pointer;background:var(--ink);color:var(--canvas);transition:transform .25s var(--ease),background .25s var(--ease)}
+.btn .lbl{font-weight:500}
+.btn .micro{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.3em;font-size:10px;font-weight:600;opacity:.74}
+.btn.stacked{flex-direction:column;gap:2px;line-height:1.15;padding-top:9px;padding-bottom:9px}
+.btn::after{content:"";position:absolute;inset-inline:24px;bottom:11px;height:1px;background:var(--gold);transform:scaleX(0);transition:transform .35s var(--ease)}
+.btn:hover{background:#16212b}
+.btn:hover::after{transform:scaleX(1)}
+.btn:active{transform:scale(.975)}
+.btn.block{display:flex;width:100%}
+.btn.secondary{background:var(--canvas);color:var(--gold-deep);border:1px solid var(--line-gold)}
+.btn.secondary:hover{background:var(--surface-2)}
+.btn.secondary::after{background:var(--gold-deep)}
+.btn.off,.btn[disabled]{background:var(--surface-2);color:var(--mut);cursor:not-allowed;border:1px solid var(--line)}
+.btn.off::after{display:none}
+.btn .wag{width:19px;height:19px;flex:0 0 auto}
+/* promise band */
+.pillars{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line);border-inline-start:1px solid var(--line)}
+@media(min-width:760px){.pillars{grid-template-columns:repeat(4,1fr)}}
+.pillar{padding:24px 18px;border-bottom:1px solid var(--line);border-inline-end:1px solid var(--line)}
+.pi{color:var(--gold);margin-bottom:13px}
+.pi svg{width:26px;height:26px}
+.pl{font-family:"Reem Kufi",serif;font-size:15.5px;font-weight:500;color:var(--ink);margin-bottom:5px}
+.pt{font-size:13px;color:var(--ink-soft);line-height:1.65}
+/* collection grid + cards */
+.grid{display:grid;grid-template-columns:1fr;gap:22px}
+@media(min-width:760px){.grid{grid-template-columns:1fr 1fr}}
+.col-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:11px;overflow:hidden;cursor:pointer;transition:transform .3s var(--ease),box-shadow .3s var(--ease),border-color .3s var(--ease)}
+.col-card:hover{transform:translateY(-4px);border-color:var(--line-gold);box-shadow:0 20px 44px rgba(31,45,58,.11)}
+.col-card:active{transform:translateY(-1px)}
+.cover{position:relative;aspect-ratio:3/2;overflow:hidden;background:linear-gradient(135deg,var(--surface-2),var(--gold-soft))}
+.cover img{width:100%;height:100%;object-fit:cover;transition:transform .65s var(--ease)}
+.col-card:hover .cover img{transform:scale(1.04)}
+.cover .frame{position:absolute;inset:10px;border:1px solid var(--line-gold);pointer-events:none;border-radius:3px}
+.mono{display:flex;align-items:center;justify-content:center;height:100%;font-family:"Cormorant Garamond",serif;font-size:62px;color:rgba(138,107,51,.42)}
+.tags{position:absolute;top:14px;inset-inline-start:14px;display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:600;padding:4px 11px;border-radius:999px;background:rgba(22,33,43,.7);color:#fff;backdrop-filter:blur(5px);letter-spacing:.02em}
+.tag.ok{background:rgba(56,107,79,.92)}
+.tag.gold{background:var(--gold)}
+.cc-body{padding:17px 18px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
+.cc-area{font-size:12px;letter-spacing:.04em;color:var(--mut);text-transform:uppercase;font-family:"Cormorant Garamond",serif;font-weight:600}
+.cc-name{font-size:19px;font-weight:500;color:var(--ink);line-height:1.35;margin:0}
+.cc-meta{display:flex;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft)}
+.cc-meta i{opacity:.4;font-style:normal}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:11.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line-gold);color:var(--gold-deep);background:rgba(176,137,78,.06);white-space:nowrap}
+.chip.solid{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
+.cc-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+.price{font-size:15px;color:var(--ink);font-weight:500}
+.price .num{font-size:20px;margin-inline-end:2px}
+.price-sub{font-size:12px;color:var(--mut);margin-top:2px}
+.price.soft{color:var(--mut);font-weight:400;font-size:13.5px}
+.discover{font-size:12.5px;color:var(--gold-deep);font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:5px}
+.discover .arr{transition:transform .3s var(--ease)}
+.col-card:hover .discover .arr{transform:translateX(-4px)}
+/* tiers */
+.tiers{border-top:1px solid var(--line)}
+.tier{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:start;padding:22px 4px;border-bottom:1px solid var(--line)}
+.rn{font-size:38px;line-height:.9;color:var(--gold-deep);min-width:46px}
+.tn{font-size:18px;font-weight:500;color:var(--ink);margin-bottom:4px}
+.tn-en{text-transform:uppercase;letter-spacing:.18em;font-size:13px;color:var(--mut);margin-inline-start:8px;font-weight:600}
+.tb{font-size:14px;color:var(--ink-soft);line-height:1.6}
+/* ouja standard */
+.standard{padding:8px 0}
+.h-standard{font-size:clamp(26px,5vw,40px);font-weight:500;color:var(--ink);line-height:1.3;margin:8px 0 16px;text-wrap:balance}
+.standard-p{font-size:15.5px;color:var(--ink-soft);line-height:1.85;max-width:46ch;margin:0 auto}
+/* concierge band */
+.concierge{border:1px solid var(--line-gold);border-radius:14px;background:linear-gradient(180deg,rgba(176,137,78,.05),rgba(176,137,78,.02));padding:40px 26px;text-align:center;margin-top:60px}
+@media(min-width:760px){.concierge{margin-top:92px;padding:52px 30px}}
+.conc-h{font-size:25px;font-weight:500;color:var(--ink);margin:6px 0 10px;text-wrap:balance}
+.conc-p{font-size:15px;color:var(--ink-soft);line-height:1.8;max-width:40ch;margin:0 auto 22px}
+/* search summary */
+.summary{position:sticky;top:62px;z-index:30;background:rgba(251,247,239,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.summary-in{display:flex;gap:12px;align-items:center;height:54px}
+.summary .s{flex:1;font-size:13.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.mini{min-height:44px;padding:0 16px;font-size:13px;border-radius:2px}
+.note{font-size:12.5px;color:var(--mut);letter-spacing:.01em;display:flex;align-items:center;gap:7px;margin:14px 0}
+.note::before{content:"";flex:0 0 16px;height:1px;background:var(--line-gold)}
+.res-head{font-size:24px;font-weight:500;color:var(--ink);margin:22px 0 4px}
+.state{text-align:center;padding:56px 18px}
+.state .em{color:var(--gold);margin-bottom:14px}
+.state h2{font-size:20px;font-weight:500;color:var(--ink);margin:0 0 8px}
+.state p{color:var(--ink-soft);margin:0 0 20px}
+/* listing */
+.gal{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}
+.gal.one{grid-template-columns:1fr}
+.gcell{position:relative;aspect-ratio:4/5;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,var(--surface-2),var(--gold-soft))}
+.gal.one .gcell{aspect-ratio:16/10}
+.gcell img{width:100%;height:100%;object-fit:cover}
+.gcell .frame{position:absolute;inset:9px;border:1px solid var(--line-gold);pointer-events:none;border-radius:3px}
+@media(min-width:560px){.gcell{aspect-ratio:4/3}}
+.g-all{position:absolute;bottom:14px;inset-inline-end:14px;font:inherit;font-size:12px;font-weight:500;padding:0 16px;min-height:44px;border:0;border-radius:999px;background:rgba(22,33,43,.72);color:#fff;cursor:pointer;backdrop-filter:blur(6px);display:flex;align-items:center;gap:6px}
+.g-all:active{transform:scale(.96)}
+.lb{position:fixed;inset:0;z-index:90;background:rgba(15,22,30,.95);display:flex;flex-direction:column;animation:fade .25s var(--ease)}
+.lb-x{position:absolute;top:calc(14px + env(safe-area-inset-top));inset-inline-end:16px;z-index:2;width:44px;height:44px;border:0;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-size:17px;cursor:pointer;backdrop-filter:blur(6px)}
+.lb-strip{flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding:66px 16px calc(22px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.lb-strip img{width:100%;border-radius:10px;background:#243039}
+.l-eyebrow{margin-top:6px}
+.l-title{font-family:"Reem Kufi",serif;font-size:27px;font-weight:500;color:var(--ink);line-height:1.3;margin:2px 0 6px;text-wrap:balance}
+.l-area{font-size:14px;color:var(--mut);font-family:"Cormorant Garamond",serif;letter-spacing:.04em;text-transform:uppercase;font-weight:600;margin-bottom:10px}
+.booking-strip{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin:14px 0;font-size:13.5px;color:var(--ink);background:var(--surface)}
+.booking-strip .num{font-size:15px}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(74px,1fr));margin:18px 0;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.fact{padding:15px 10px;text-align:center;border-inline-start:1px solid var(--line)}
+.fact:first-child{border-inline-start:0}
+.fk{font-size:11.5px;color:var(--mut);margin-bottom:4px}
+.fv{font-family:"Cormorant Garamond",serif;font-size:23px;font-weight:600;color:var(--ink);line-height:1}
+.why{display:flex;flex-direction:column;gap:9px}
+.why-row{display:flex;gap:11px;align-items:center;font-size:14px;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:13px 15px;background:var(--surface)}
+.wi{color:var(--gold);flex:0 0 auto}.wi svg{width:20px;height:20px;display:block}
+.amen-group{margin-bottom:16px}
+.ag-h{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.18em;font-size:12px;color:var(--gold-deep);font-weight:600;margin:0 0 9px}
+.amen{display:flex;gap:8px;flex-wrap:wrap}
+.amen span{font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 13px;color:var(--ink-soft)}
+.more{background:none;border:0;color:var(--gold-deep);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;text-decoration:underline;text-underline-offset:3px}
+.descblk{line-height:1.9;color:var(--ink);font-size:15px;border-inline-start:2px solid var(--line-gold);padding:4px 16px;margin:10px 0}
+.descblk.ltr{direction:ltr;text-align:left;border-inline-start:0;border-inline-end:2px solid var(--line-gold)}
+.perks{display:grid;grid-template-columns:1fr;gap:0;border-top:1px solid var(--line)}
+.perk{display:flex;gap:12px;align-items:flex-start;padding:15px 2px;border-bottom:1px solid var(--line)}
+.perk .pk-i{color:var(--gold);flex:0 0 auto;margin-top:2px}.perk .pk-i svg{width:20px;height:20px;display:block}
+.perk b{font-weight:500;color:var(--ink);font-size:14.5px}
+.perk span{font-size:13px;color:var(--ink-soft)}
+.sticky-cta{position:fixed;bottom:0;inset-inline:0;z-index:40;background:rgba(251,247,239,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line-gold);padding:12px 0 calc(12px + env(safe-area-inset-bottom))}
+.sticky-cta .wrap{display:flex;flex-direction:column;gap:7px}
+.reassure{text-align:center;font-size:12px;color:var(--mut);letter-spacing:.01em}
+/* footer */
+.foot{background:var(--ink);color:rgba(255,255,255,.74);margin-top:70px;padding:48px 0 56px;text-align:center;border-top:2px solid var(--gold)}
+.foot .reg{color:var(--gold);margin:0 auto 20px}
+.foot-line{font-family:"Reem Kufi",serif;font-size:19px;color:#fff;font-weight:500;margin-bottom:9px}
+.foot-sub{font-size:13px;color:rgba(255,255,255,.6);margin-bottom:5px}
+.foot-sub.serif{font-style:italic;letter-spacing:.02em;font-size:14px;color:var(--gold-soft)}
+/* skeleton + motion */
+.sk{background:linear-gradient(90deg,var(--surface-2) 25%,#f7f0e3 50%,var(--surface-2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:7px}
+.cover.sk{border-radius:0}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes ken{from{transform:scale(1.06)}to{transform:scale(1.13)}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.rise{animation:rise .55s var(--ease) both}
+@keyframes rise{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:none}}
+.btn:focus-visible,.qp:focus-visible,.col-card:focus-visible,.conc-link:focus-visible,.more:focus-visible,.g-all:focus-visible,.lb-x:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
+.has-cta .foot{padding-bottom:118px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.hero .bgimg{transform:none}}
+</style>
+</head>
+<body>
+<header class="head"><div class="wrap head-in"><a class="brand" href="/elite"><span class="brand-ar">عوجا إيليت</span><span class="brand-en">Ouja Elite</span></a><a class="conc-link" id="headConc" href="#"><svg class="wag" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Z" opacity=".18"/><path d="M12 4a8 8 0 0 0-6.9 12l.3.5-.7 2.5 2.6-.7.5.3A8 8 0 1 0 12 4Z"/></svg>كونسيرج</a></div><div class="wrap head-reg"></div></header>
+<main id="view"></main>
+<footer class="foot"><div class="wrap"><div class="reg-foot"></div><div class="foot-line">من أهل الدرعية وقلبٍ أبيض</div><div class="foot-sub serif">Ouja Elite · Curated residences in Riyadh</div><div class="foot-sub">إقامات مختارة في الرياض</div></div></footer>
+<script>
+var ELITE=/*__ELITE_DATA__*/null;
+var V=document.getElementById('view');
+var GEN_MSG='حياك الله 🤍 أبغى أستفسر عن إقامات عوجا إيليت';
+var WAG='<svg class="wag" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm0 2a8 8 0 1 1-4.2 14.8l-.5-.3-2.6.7.7-2.5-.3-.5A8 8 0 0 1 12 4Zm5.6 12.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.5-2.7-1.2-4.4-3.9-4.6-4.1-.1-.2-1-1.4-1-2.7s.6-1.9.9-2.1c.2-.3.4-.3.6-.3h.4c.2 0 .4 0 .5.4l.7 1.8c.1.1.1.3 0 .4l-.3.5-.3.3c-.1.1-.3.3-.1.5.1.3.6 1 1.3 1.6.8.7 1.5 1 1.8 1.1.2.1.3.1.5-.1l.6-.7c.2-.2.3-.2.5-.1l1.7.8c.2.1.4.2.4.3.1.1.1.5-.1 1.1Z"/></svg>';
+var REG='<svg class="reg" width="200" height="16" viewBox="0 0 200 16" fill="none" aria-hidden="true"><path d="M8 12 H85" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M85 12 L91 12 L91 9 L96 9 L96 6 L100 3 L104 6 L104 9 L109 9 L109 12 L115 12" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/><path d="M115 12 H192" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>';
+var IC={bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h14M12 6.5a5.5 5.5 0 0 0-5.5 5.5V18h11v-6A5.5 5.5 0 0 0 12 6.5ZM12 6.5V4M10.5 4h3"/></svg>',car:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l1.6-4.6A2 2 0 0 1 7.5 7h9a2 2 0 0 1 1.9 1.4L20 13v5h-2.2v-1.8H6.2V18H4v-5Z"/><path d="M7.5 15.4h.01M16.5 15.4h.01"/></svg>',badge:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M8.5 12.2l2.3 2.3 4.6-4.8"/></svg>',key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="3.6"/><path d="M10.6 11.6 19 20M16.2 17.2l1.8-1.8M14.4 15.4l1.8-1.8"/></svg>',spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.6 4.8L18.4 12l-4.8 1.6L12 18l-1.6-4.4L5.6 12l4.8-1.6Z"/></svg>'};
+function he(s){return (s==null?'':String(s)).replace(/[<>&"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];});}
+function sid(){try{var k='ouja_elite_sid',v=localStorage.getItem(k);if(!v){v='e'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
+function qs(){return new URLSearchParams(location.search);}
+function utm(){var p=qs(),o={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o[k]=p.get(k);});return o;}
+function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:location.pathname,referrer:document.referrer||''},utm(),extra||{});var s=JSON.stringify(b);if(navigator.sendBeacon){navigator.sendBeacon('/api/stay/event',new Blob([s],{type:'application/json'}));}else{fetch('/api/stay/event',{method:'POST',headers:{'Content-Type':'application/json'},body:s,keepalive:true});}}catch(e){}}
+function grp(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US');}catch(e){return ''+n;}}
+function carry(){var p=qs(),o=[];['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o.push(k+'='+encodeURIComponent(p.get(k)));});return o.length?('&'+o.join('&')):'';}
+function nightsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ليلة وحدة';if(n==2)return 'ليلتين';if(n<=10)return n+' ليالٍ';return n+' ليلة';}
+function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar=(s.match(/[؀-ۿ]/g)||[]).length;return lat>ar;}
+function validateDates(ci,co){if((ci&&!co)||(!ci&&co))return 'حط تاريخ الدخول والخروج، أو خلّهم فاضيين للتصفح.';if(ci&&co&&!(co>ci))return 'تاريخ الخروج لازم يكون بعد تاريخ الدخول.';return '';}
+function waNum(){return (ELITE&&ELITE.config&&ELITE.config.whatsapp)||'';}
+function waHref(text){var n=waNum();return n?('https://wa.me/'+n+'?text='+encodeURIComponent(text)):'';}
+function waBook(l,ci,co,nights,guests){var NL=String.fromCharCode(10);var x=['حياك الله 🤍 معك عضو عوجا إيليت، أرغب بالحجز:'];x.push('🏛️ الإقامة: '+(l.name_ar||l.name_en||''));if(ci&&co&&co>ci){x.push('🗓️ الدخول: '+ci);x.push('🗓️ الخروج: '+co);}if(Number(nights)>0)x.push('🌙 الليالي: '+nights);if(guests)x.push('👥 الضيوف: '+guests);var tg=(l.tags||[]).slice(0,4).map(function(t){return t.ar||t.en;}).filter(Boolean);if(tg.length)x.push('🏷️ '+tg.join(' · '));if(l.area)x.push('📍 '+l.area);x.push('');x.push('أبغى أأكد التوفر والسعر، مشكورين 🌟');return x.join(NL);}
+function waBtn(text,ev,cls,label){var h=waHref(text);var c='btn '+(cls||'primary block');if(!h)return '<button class="'+c+' off" disabled>'+WAG+'<span class="lbl">'+he(label||'الكونسيرج غير متاح حاليًا')+'</span></button>';return '<a class="'+c+'" target="_blank" rel="noopener" data-ev="'+he(ev||'')+'" href="'+he(h)+'">'+WAG+'<span class="lbl">'+he(label||'تواصل مع الكونسيرج')+'</span></a>';}
+function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<i>·</i>');}
+function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
+function divider(){return '<div class="reg-wrap">'+REG+'</div>';}
+function monoPh(){return '<div class="mono">ع</div>';}
+function skeletons(n){var s='';for(var i=0;i<(n||2);i++){s+='<div class="col-card"><div class="cover sk"></div><div class="cc-body"><div class="sk" style="height:13px;width:38%"></div><div class="sk" style="height:20px;width:72%;margin-top:8px"></div><div class="sk" style="height:13px;width:52%;margin-top:10px"></div><div class="sk" style="height:34px;width:100%;margin-top:12px"></div></div></div>';}return s;}
+
+function pillarsHtml(){
+  var P=[[IC.bell,'كونسيرج خاص ٢٤/٧','فريق يرتّب كل تفصيل قبل وبعد وصولك.'],
+   [IC.car,'سائق خاص','مرسيدس · سواري المسافر تحت طلبك.'],
+   [IC.badge,'حجز مباشر بدون رسوم','تحجز معنا مباشرة بلا رسوم منصات.'],
+   [IC.key,'دخول ذاتي ووصول سلس','تدخل إقامتك بدون انتظار ولا تعقيد.']];
+  return P.map(function(p){return '<div class="pillar"><div class="pi">'+p[0]+'</div><div class="pl">'+he(p[1])+'</div><div class="pt">'+he(p[2])+'</div></div>';}).join('');
+}
+function tiersHtml(){
+  var T=[['I','Diriyah Diamond','ديريّة دايموند','أعلى أولوية، ترقيات تلقائية، وكونسيرج مخصّص لك.'],
+   ['II','Najd Gold','نجد جولد','أسعار العضوية، دخول مبكر، وهدايا ترحيب.'],
+   ['III','Riyadh Silver','الرياض سيلفر','مزايا الحجز المباشر وعروض مختارة على مدار السنة.']];
+  return '<div class="tiers">'+T.map(function(t){return '<div class="tier"><div class="rn num">'+t[0]+'</div><div><div class="tn kufi">'+he(t[2])+'<span class="tn-en serif">'+he(t[1])+'</span></div><div class="tb">'+he(t[3])+'</div></div></div>';}).join('')+'</div>';
+}
+function conciergeBand(){
+  return '<span class="eyebrow center">كونسيرج عوجا إيليت</span><div class="conc-h kufi">نرتّب إقامتك من أولها لآخرها</div><p class="conc-p">راسلنا على واتساب ونتكفّل بالباقي — التوفر، السعر، والوصول.</p>'+waBtn(GEN_MSG,'elite_whatsapp_click','primary',null);
+}
+
+function viewHome(){
+  track('elite_page_view',{});
+  var cfg=(ELITE&&ELITE.config)||{noo:[],count:0};var p=qs();
+  var hero=cfg.hero||'';
+  var heroBg=hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(hero).replace(/"/g,'&quot;')+')"></div>'):'<div class="bgimg ph-hero"></div>';
+  var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('type')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+'</option>';}).join('');
+  var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
+  var chips=(cfg.noo||[]).slice(0,6).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
+  V.innerHTML=
+    '<section class="hero">'+heroBg+'<div class="hero-ov"></div><div class="hero-in"><div class="wrap rise">'
+      +'<span class="eyebrow">Ouja Elite · عضوية مختارة</span>'
+      +'<h1 class="h-hero kufi">إقاماتٌ مختارة، وضيافةٌ على قدر المقام</h1>'
+      +'<div class="hero-sub serif">A curated residence collection · Riyadh</div>'
+      +'<p class="hero-lead">نختار لك من إقامات عوجا ما يليق بضيافتك، ونرتّب كل تفصيل قبل وصولك.</p>'
+    +'</div></div></section>'
+    +'<section class="wrap band-tight"><div class="widget rise" style="animation-delay:.08s">'
+      +'<span class="eyebrow">احجز إقامتك</span>'
+      +'<div id="err" class="err"></div>'
+      +'<div class="wfields">'
+        +'<div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div>'
+        +'<div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div>'
+        +'<div class="field"><label>الضيوف</label><select id="g">'+gopt+'</select></div>'
+        +'<div class="field"><label>نوع الإقامة</label><select id="ty">'+opts+'</select></div>'
+      +'</div>'
+      +(chips?('<div class="qps" id="chips">'+chips+'</div>'):'')
+      +'<button class="btn primary block stacked" id="go"><span class="micro">View Residences</span><span class="lbl">اعرض الإقامات المتاحة</span></button>'
+    +'</div></section>'
+    +'<div class="wrap">'+divider()+'</div>'
+    +'<section class="wrap sec"><span class="eyebrow center">لماذا عوجا إيليت</span><div class="pillars">'+pillarsHtml()+'</div></section>'
+    +'<section class="wrap sec"><div class="sec-head"><span class="eyebrow">إقامات مختارة</span><h2 class="h-sec kufi">مجموعتنا المنتقاة</h2></div>'
+      +'<div id="collection" class="grid">'+skeletons(2)+'</div>'
+      +'<div class="center" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
+    +'</section>'
+    +'<div class="wrap">'+divider()+'</div>'
+    +'<section class="wrap sec"><div class="sec-head"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
+    +'<div class="wrap">'+divider()+'</div>'
+    +'<section class="wrap sec standard center"><span class="eyebrow center">معيار عوجا</span><div class="h-standard kufi">من أهل الدرعية وقلبٍ أبيض</div><p class="standard-p">نقدّم ضيافة على مستوى ريتز كارلتون: تفاصيل دقيقة، خصوصية تامة، وحضور هادئ يسبق طلبك.</p></section>'
+    +'<section class="wrap"><div class="concierge">'+conciergeBand()+'</div></section>';
+  setupWidget();
+  loadCollection();
+}
+
+function setupWidget(){
+  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),tyEl=document.getElementById('ty'),err=document.getElementById('err'),p=qs();
+  if(!ciEl)return;
+  var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
+  ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
+  if(p.get('check_in'))ciEl.value=p.get('check_in');if(p.get('check_out'))coEl.value=p.get('check_out');
+  ciEl.onchange=function(){var d=ciEl.value?new Date(ciEl.value):t;coEl.min=iso(new Date(d.getTime()+86400000));};
+  var chipsEl=document.getElementById('chips');
+  if(chipsEl){chipsEl.querySelectorAll('.qp').forEach(function(b){if(b.getAttribute('data-k')===tyEl.value)b.classList.add('active');b.onclick=function(){tyEl.value=b.getAttribute('data-k');track('elite_filter_changed',{type:tyEl.value});chipsEl.querySelectorAll('.qp').forEach(function(x){x.classList.remove('active');});b.classList.add('active');};});}
+  document.getElementById('go').onclick=function(){
+    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value,ty=tyEl.value;
+    var ev=validateDates(ci,co);if(ev){err.textContent=ev;err.classList.add('on');return;}
+    err.classList.remove('on');
+    var q='?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty);
+    if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
+    location.href='/elite/search'+q;
+  };
+}
+
+function loadCollection(){
+  fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
+    var res=((d&&d.results)||[]).slice(0,4);var el=document.getElementById('collection');if(!el)return;
+    if(!res.length){el.innerHTML='<p class="muted" style="grid-column:1/-1">تواصل مع الكونسيرج لعرض الإقامات المتاحة.</p>';return;}
+    el.innerHTML=res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('');
+  }).catch(function(){var el=document.getElementById('collection');if(el)el.innerHTML='<p class="muted" style="grid-column:1/-1">تعذّر تحميل الإقامات حاليًا، جرّب بعد قليل.</p>';});
+}
+
+function card(l){
+  var avail=(l.available===true);
+  var cov=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'" src="'+he(l.cover)+'">'):monoPh();
+  var ovr=[];if(avail)ovr.push('<span class="tag ok">متاحة</span>');if(l.badge)ovr.push('<span class="tag gold">'+he(l.badge)+'</span>');
+  var price;
+  if(l.est_total!=null&&l.nights>0){
+    var per=(l.est_avg!=null&&l.est_avg>0)?('<div class="price"><span class="num">'+grp(l.est_avg)+'</span> ر.س / الليلة</div>'):'';
+    price=per+'<div class="price-sub">الإجمالي التقريبي <span class="num" style="font-size:14px">'+grp(l.est_total)+'</span> ر.س · '+nightsLabel(l.nights)+'</div>';
+  } else {price='<div class="price soft">السعر يظهر مع الكونسيرج</div>';}
+  return '<a class="col-card" href="/elite/'+he(l.slug)+location.search+'">'
+    +'<div class="cover">'+cov+'<div class="frame"></div>'+(ovr.length?('<div class="tags">'+ovr.join('')+'</div>'):'')+'</div>'
+    +'<div class="cc-body">'
+      +(l.area?('<div class="cc-area">'+he(l.area)+'</div>'):'')
+      +'<h3 class="cc-name kufi">'+he(l.name_ar||l.name_en)+'</h3>'
+      +'<div class="cc-meta">'+metaRow(l)+'</div>'
+      +(badges(l,3)?('<div class="chips">'+badges(l,3)+'</div>'):'')
+      +'<div class="cc-foot"><div>'+price+'</div><span class="discover">اكتشف الإقامة <span class="arr">←</span></span></div>'
+    +'</div></a>';
+}
+
+function searchSummary(ci,co,g,ty){
+  var bits=[];if(ci&&co)bits.push(he(ci)+' ← '+he(co));else bits.push('تصفّح');if(g)bits.push(he(g)+' ضيوف');
+  var tyl=(((ELITE&&ELITE.config&&ELITE.config.noo)||[]).filter(function(o){return o.key===ty;})[0]);
+  if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
+  return '<div class="summary"><div class="wrap summary-in"><span class="s">'+bits.join(' · ')+'</span><a class="btn secondary mini" href="/elite'+location.search+'">تعديل البحث</a></div></div>';
+}
+
+function viewSearch(){
+  var p=qs(),ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
+  var verr=validateDates(ci,co);
+  if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>'+he(verr)+'</h2><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل التواريخ</span></a></div></div>';return;}
+  V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="grid" style="margin:20px 0">'+skeletons(4)+'</div></div>';
+  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
+  track('elite_search',{type:ty,guests:g,check_in:ci,check_out:co});
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    var res=(d&&d.results)||[],browse=d&&d.browse,sm=searchSummary(ci,co,g,ty);
+    if(d&&d.invalid_dates){V.innerHTML=sm+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>تاريخ الخروج لازم يكون بعد تاريخ الدخول.</h2></div></div>';return;}
+    var head='<div class="wrap">';
+    if(d&&d.avail_error)head+='<div class="note">تعذّر تحديث التوفر حاليًا، جرّب بعد قليل.</div>';
+    if(res.length){
+      track('elite_results_view',{type:ty,count:res.length});
+      head+='<h2 class="res-head">'+(browse?('عندنا '+res.length+' إقامة مختارة'):('لقينا لك '+res.length+' إقامة مختارة'))+'</h2>';
+      head+='<div class="note">التوفر والسعر النهائي يتأكّد مع الكونسيرج</div>';
+      V.innerHTML=sm+head+'<div class="grid" style="margin:8px 0 30px">'+res.map(card).join('')+'</div>'+inlineConcierge()+'</div>';
+    } else {
+      track('elite_no_results',{type:ty,check_in:ci,check_out:co});
+      V.innerHTML=sm+head+'<div class="state"><div class="em">'+IC.spark+'</div><h2>ما لقينا إقامات بنفس الاختيارات</h2><p>جرّب تغيير التاريخ أو نوع الإقامة — أو خلّ الكونسيرج يرشّح لك.</p><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل البحث</span></a></div><div id="sim"></div>'+inlineConcierge()+'</div>';
+      loadSimilar(ty);
+    }
+  }).catch(function(){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>تعذّر تحديث التوفر حاليًا</h2><p>جرّب بعد قليل، أو راسل الكونسيرج مباشرة.</p></div>'+inlineConcierge()+'</div>';});
+}
+function inlineConcierge(){return '<div class="concierge" style="margin:30px 0 40px">'+conciergeBand()+'</div>';}
+function loadSimilar(ty){
+  fetch('/api/stay/search?type='+encodeURIComponent(ty)).then(function(r){return r.json();}).then(function(d){
+    var res=((d&&d.results)||[]).slice(0,4);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
+    el.innerHTML='<h2 class="res-head" style="font-size:20px">إقامات مشابهة — جرّب تواريخ مختلفة</h2><div class="grid" style="margin:8px 0 20px">'+res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('')+'</div>';
+  }).catch(function(){});
+}
+
+function viewListing(){
+  var l=(ELITE&&ELITE.listing)||null;
+  function agHtml(gp){return '<div class="amen-group"><h3 class="ag-h">'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
+  function openGallery(imgs,alt){
+    var ov=document.createElement('div');ov.className='lb';
+    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(u)+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+    function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
+    function esc(e){if(e.key==='Escape')close();}
+    ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
+    document.addEventListener('keydown',esc);document.body.style.overflow='hidden';document.body.appendChild(ov);
+  }
+  function render(l){
+    if(!l){V.innerHTML='<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>ما لقينا هالإقامة</h2><p>يمكن تكون اتغيّرت. <a href="/elite" style="color:var(--gold-deep)">ارجع للمجموعة</a></p></div></div>';return;}
+    track('elite_listing_view',{listing_id:l.id});
+    var imgs=(l.images||[]);
+    var gallery;
+    if(imgs.length){
+      var c1='<div class="gcell"><img loading="lazy" width="800" height="600" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div>';
+      var c2='';
+      if(imgs.length>1){var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">كل الصور · '+imgs.length+'</button>'):'';c2='<div class="gcell"><img loading="lazy" width="800" height="600" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div>'+moreBtn+'</div>';}
+      gallery='<div class="gal'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
+    } else if(l.cover){gallery='<div class="gal one"><div class="gcell"><img loading="lazy" width="800" height="600" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div></div>';}
+    else{gallery='<div class="gcell" style="aspect-ratio:16/10;margin:18px 0">'+monoPh()+'<div class="frame"></div></div>';}
+    var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out');
+    var dsum='';
+    if(dci&&dco&&dco>dci){dsum='<div class="booking-strip"><span style="color:var(--gold)">'+IC.spark+'</span><div><b>طلبك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div></div>';}
+    var kv=[];if(l.capacity)kv.push(['الضيوف',l.capacity]);if(l.beds!=null)kv.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kv.push(['الحمامات',l.baths]);if(l.self_entry)kv.push(['الدخول','ذاتي']);
+    var facts=kv.length?('<div class="facts">'+kv.map(function(x){return '<div class="fact"><div class="fk">'+he(x[0])+'</div><div class="fv">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
+    var WHY={cinema:[IC.spark,'سينما خاصة لتجربة مشاهدة أهدى'],balcony:[IC.spark,'بلكونة مناسبة لجلسة خفيفة'],boulevard:[IC.spark,'قريبة من البوليفارد وأهم وجهات الرياض'],tower_view:[IC.spark,'إطلالة من برج مميز'],self_entry:[IC.key,'دخول ذاتي بدون انتظار'],family:[IC.spark,'مساحة مناسبة للعائلة'],studio:[IC.spark,'استوديو عملي للإقامات القصيرة'],'1br':[IC.spark,'غرفة وصالة مريحة'],'2br':[IC.spark,'مساحة أوسع تكفي مجموعة']};
+    var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k])wr.push('<div class="why-row"><span class="wi">'+WHY[k][0]+'</span><span>'+he(WHY[k][1])+'</span></div>');});
+    if(l.area&&wr.length<4)wr.push('<div class="why-row"><span class="wi">'+IC.spark+'</span><span>موقع مميز في '+he(l.area)+'</span></div>');
+    var why=wr.length?('<div class="sec" style="margin-top:32px"><span class="eyebrow">ليش هالإقامة؟</span><div class="why">'+wr.slice(0,5).join('')+'</div></div>'):'';
+    var groups=(l.amenity_groups||[]);
+    var amen='';
+    if(groups.length){var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);amen='<div class="sec" style="margin-top:32px"><span class="eyebrow">المميزات</span><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';}
+    var desc=(l.desc_ar||l.short_ar||'');
+    var descBlk=desc?('<div class="sec" style="margin-top:32px"><span class="eyebrow">عن الإقامة</span><div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div></div>'):'';
+    var perks='<div class="sec" style="margin-top:32px"><span class="eyebrow">امتيازات عوجا إيليت</span><div class="perks">'
+      +'<div class="perk"><span class="pk-i">'+IC.bell+'</span><div><b>كونسيرج خاص ٢٤/٧</b> <span>— نرتّب طلباتك قبل وأثناء الإقامة.</span></div></div>'
+      +'<div class="perk"><span class="pk-i">'+IC.car+'</span><div><b>سائق خاص</b> <span>— مرسيدس · سواري المسافر تحت طلبك.</span></div></div>'
+      +'<div class="perk"><span class="pk-i">'+IC.badge+'</span><div><b>حجز مباشر</b> <span>— بدون رسوم منصات الحجز.</span></div></div>'
+      +'<div class="perk"><span class="pk-i">'+IC.spark+'</span><div><b>أولوية العضوية</b> <span>— أفضليّة في التوفر والترقيات.</span></div></div>'
+      +'<div class="perk"><span class="pk-i">'+IC.key+'</span><div><b>دخول ذاتي</b> <span>— وصول سلس بدون انتظار.</span></div></div>'
+    +'</div></div>';
+    V.innerHTML='<div class="wrap">'+gallery+dsum
+      +'<div class="l-eyebrow eyebrow">Ouja Elite Residence</div>'
+      +'<h1 class="l-title">'+he(l.name_ar||l.name_en)+'</h1>'
+      +(l.area?('<div class="l-area">'+he(l.area)+'</div>'):'')
+      +((l.badge?('<span class="chip solid">'+he(l.badge)+'</span> '):'')+(badges(l,6)?('<span class="chips" style="display:inline-flex">'+badges(l,6)+'</span>'):''))
+      +facts+why+descBlk+amen+perks
+      +'<div style="height:120px"></div></div>';
+    var num=waNum();
+    var msg=waBook(l,dci,dco,(l.nights||0),pq.get('guests'));
+    var cta=num?('<a class="btn primary block" id="wabtn" target="_blank" rel="noopener" href="'+he(waHref(msg))+'">'+WAG+'<span class="lbl">احجز عبر كونسيرج واتساب</span></a>'):('<button class="btn primary block off" disabled>'+WAG+'<span class="lbl">الكونسيرج غير متاح حاليًا</span></button>');
+    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+'<div class="reassure">السعر النهائي يتأكّد مع الكونسيرج · ضيافة عوجا إيليت</div></div>';
+    document.body.appendChild(bar);document.body.classList.add('has-cta');
+    var wb=document.getElementById('wabtn');if(wb){wb.addEventListener('click',function(){track('elite_whatsapp_click',{listing_id:l.id});});}
+    var gall=document.getElementById('gall');if(gall){gall.onclick=function(){openGallery(imgs,l.name_ar);};}
+    var tg=document.getElementById('amtog');if(tg){tg.onclick=function(){var r=document.getElementById('amr');if(r){var open=r.style.display!=='none';r.style.display=open?'none':'block';tg.textContent=open?'عرض كل المميزات':'عرض أقل';}};}
+  }
+  var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
+  var token=(l&&l.slug)||location.pathname.replace(/^\/elite\/(id\/)?/,'').split('?')[0];
+  var dated=(ci&&co&&co>ci);
+  if(l&&!dated){render(l);}
+  else{fetch('/api/stay/listing/'+encodeURIComponent(token)+(dated?('?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)):'')).then(function(r){return r.json();}).then(function(d){render((d&&d.listing)||l);}).catch(function(){render(l);});}
+}
+
+(function(){
+  try{var hc=document.getElementById('headConc');if(hc){var h=waHref(GEN_MSG);if(h){hc.href=h;hc.setAttribute('target','_blank');hc.setAttribute('rel','noopener');hc.addEventListener('click',function(){track('elite_whatsapp_click',{src:'header'});});}else{hc.style.display='none';}}}catch(e){}
+  try{var rf=document.querySelector('.reg-foot');if(rf)rf.innerHTML=REG;var rh=document.querySelector('.head-reg');if(rh)rh.innerHTML=REG;}catch(e){}
+  var path=location.pathname;
+  if(path==='/elite'||path==='/elite/'){viewHome();}
+  else if(path==='/elite/search'){viewSearch();}
+  else{viewListing();}
+})();
+</script>
+</body></html>"""
+
+# WhatsApp concierge number for /elite (digits, intl e.g. 9665XXXXXXXX). Falls back to
+# STAY_WHATSAPP; if BOTH empty the booking button renders a graceful disabled state (no dead link).
+ELITE_WHATSAPP = re.sub(r"\D", "", os.environ.get("ELITE_WHATSAPP", "") or "") or STAY_WHATSAPP
+
+def _elite_render(route="home", listing=None, base=""):
+    title = "عوجا إيليت · إقامات مختارة في الرياض"
+    desc = "عضوية عوجا إيليت — إقامات منتقاة في الرياض، كونسيرج خاص، وحجز مباشر عبر واتساب."
+    og = ""
+    path = {"home": "/elite", "search": "/elite/search", "listing": "/elite"}.get(route, "/elite")
+    if listing:
+        title = (listing.get("name_ar") or title) + " · عوجا إيليت"
+        desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
+        og = listing.get("cover") or ""
+        path = "/elite/" + (listing.get("slug") or str(listing.get("id")))
+    vis = _gw_visible_snaps()
+    hcfg = _gw_hero_resolve()
+    if not listing and hcfg.get("url"):
+        og = og or hcfg["url"]
+    data = {"route": route, "listing": listing,
+            "config": {"noo": _gw_noo_options(), "count": len(vis),
+                       "hero": (hcfg.get("url") or ""), "whatsapp": ELITE_WHATSAPP}}
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    # SEO/share JSON-LD — Apartment per unit, LodgingBusiness on the landing.
+    if listing:
+        ld = {"@context": "https://schema.org", "@type": "Apartment",
+              "name": listing.get("name_ar") or listing.get("name_en") or "",
+              "description": desc, "url": (base or "") + path,
+              "numberOfRooms": listing.get("beds"),
+              "occupancy": {"@type": "QuantitativeValue", "maxValue": listing.get("capacity")},
+              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh",
+                          "addressRegion": (listing.get("area") or "Riyadh"), "addressCountry": "SA"}}
+        if listing.get("cover"):
+            ld["image"] = listing["cover"]
+        ld = {k: v for k, v in ld.items() if v not in (None, "", {})}
+    else:
+        ld = {"@context": "https://schema.org", "@type": "LodgingBusiness",
+              "name": "Ouja Elite · عوجا إيليت",
+              "description": desc, "url": (base or "") + "/elite",
+              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh", "addressCountry": "SA"}}
+        if hcfg.get("url"):
+            ld["image"] = hcfg["url"]
+    ld_blob = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
+    return (ELITE_HTML
+            .replace("/*__ELITE_DATA__*/null", blob)
+            .replace("/*__ELITE_JSONLD__*/null", ld_blob)
+            .replace("__ELITE_TITLE__", _gw_he(title))
+            .replace("__ELITE_DESC__", _gw_he(desc))
+            .replace("__ELITE_OG__", _gw_he(og))
+            .replace("__ELITE_URL__", _gw_he((base or "") + path)))
+
+# ---- Ouja Elite public routes (NO dashboard token); reuse /api/stay/* endpoints ----
+async def _handle_elite(request):
+    return web.Response(text=_elite_render("home", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_elite_search(request):
+    return web.Response(text=_elite_render("search", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_elite_id(request):
+    lid = request.match_info.get("lid", "")
+    snap, ov = _gw_find_by_slug_or_id(lid)
+    if snap:
+        slug = _gw_slug(snap, ov)
+        q = ("?" + request.query_string) if request.query_string else ""
+        raise web.HTTPFound("/elite/" + slug + q)
+    return web.Response(text=_elite_render("listing", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_elite_detail(request):
+    token = request.match_info.get("slug", "")
+    snap, ov = _gw_find_by_slug_or_id(token)
+    listing = _gw_listing_public(snap, ov, with_airbnb=False) if snap else None   # with_airbnb=False — Elite never shows Airbnb
+    return web.Response(text=_elite_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
+
 
 async def _api_gw_hero(request):
     """Dashboard hero control. GET → config + resolved + listings-with-images for the chooser. POST → save/reset."""
@@ -41773,6 +42338,12 @@ async def start_web_server():
         app.router.add_post("/api/gw/hero", _api_gw_hero)
         app.router.add_post("/api/gw/hero/upload", _api_gw_hero_upload)
         app.router.add_get("/stay/{slug}", _handle_stay_detail)
+        # ---- Ouja Elite members site (no token); reuses /api/stay/*; {slug} catch-all LAST ----
+        app.router.add_get("/elite", _handle_elite)
+        app.router.add_get("/elite/", _handle_elite)
+        app.router.add_get("/elite/search", _handle_elite_search)
+        app.router.add_get("/elite/id/{lid}", _handle_elite_id)
+        app.router.add_get("/elite/{slug}", _handle_elite_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
         app.router.add_get("/api/invest/link", _api_invest_link)    # admin: copy the investor URL
