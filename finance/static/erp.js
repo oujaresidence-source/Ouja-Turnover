@@ -88,6 +88,8 @@
       rules_applied_toast: 'القواعد صنّفت {n} حركة تلقائيًا',
       setup_rules: 'قواعد التصنيف', setup_rules_hint: 'تنطبق تلقائيًا على كل استيراد — ومبالغ ٣٠٠٠+ تظل تحتاج اعتماد فيصل دايمًا',
       setup_contracts: 'ربط العقود بمراكز التكلفة', setup_contracts_hint: 'العقد بدون مركز تكلفة ما يدخل في ربحية الوحدة',
+      setup_custody: 'ربط حسابات العهدة والمصاريف', setup_custody_hint: 'اربط كل مشرف بحساب عهدته، وكل شقة بحساب مصروفها — يستخدمها قيد العهدة تلقائياً',
+      cust_sup: 'المشرفون ← حساب العهدة (دائن)', cust_apt: 'الشقق ← حساب المصروف (مدين)', cust_linked: 'تم الربط ✓', cust_nosave: '⚠ ما انحفظ',
       rl_matcher: 'الشرط', rl_target: 'الحساب', rl_hits: 'تطبيقات', rl_strength: 'القوة',
       rl_on: 'فعّالة', rl_off: 'موقوفة', rl_delete: 'حذف', rl_empty: 'ما فيه قواعد بعد — أنشئها من شاشة البنك عند التصنيف',
       precision_btn: 'قِس دقة القواعد', precision_hint: 'إعادة تشغيل القواعد على المصنّف يدويًا',
@@ -340,6 +342,8 @@
       rules_applied_toast: 'Rules auto-classified {n} txns',
       setup_rules: 'Classification rules', setup_rules_hint: 'Auto-apply on every import — 3000+ still always needs Faisal approval',
       setup_contracts: 'Link contracts to cost centers', setup_contracts_hint: 'A contract without a cost center is excluded from unit profitability',
+      setup_custody: 'Custody & expense account links', setup_custody_hint: 'Link each supervisor to their custody account, and each apartment to its expense account — used by the custody journal',
+      cust_sup: 'Supervisors → custody account (credit)', cust_apt: 'Apartments → expense account (debit)', cust_linked: 'Linked ✓', cust_nosave: '⚠ not saved',
       rl_matcher: 'Matcher', rl_target: 'Account', rl_hits: 'Hits', rl_strength: 'Strength',
       rl_on: 'Active', rl_off: 'Disabled', rl_delete: 'Delete', rl_empty: 'No rules yet — create them from the Bank screen while classifying',
       precision_btn: 'Measure rule precision', precision_hint: 'Replay rules against the human-classified rows',
@@ -3717,9 +3721,16 @@
         '<span class="cnt" id="ctUnlinked">…</span></header>' +
         '<div class="grp-hint">' + esc(t('setup_contracts_hint')) + '</div>' +
         '<div class="grp-list" id="ctList">' + skeleton(3).replace('card sk-card', 'sk-inline') + '</div>' +
+      '</section>' +
+      '<section class="card grp" id="setupCustody">' +
+        '<header class="grp-h"><span class="grp-ico">🔗</span><h2>' + esc(t('setup_custody')) + '</h2></header>' +
+        '<div class="grp-hint">' + esc(t('setup_custody_hint')) + '</div>' +
+        '<h4 class="g-bsec">' + esc(t('cust_sup')) + '</h4><div class="grp-list" id="custSup"><div class="grp-hint" style="padding-bottom:10px">…</div></div>' +
+        '<h4 class="g-bsec">' + esc(t('cust_apt')) + '</h4><div class="grp-list" id="custApt"><div class="grp-hint" style="padding-bottom:10px">…</div></div>' +
       '</section>';
     $('#view').innerHTML = html;
     loadSetupContracts();
+    loadCustodyMap();
     restoreScroll('setup');
   }
 
@@ -3756,6 +3767,43 @@
       var box = $('#ctList');
       if (box) box.innerHTML = errorCard('retry_setup', srvMsg(e));
     });
+  }
+
+  function accOptions(accounts, selId) {
+    return '<option value="">—</option>' + (accounts || []).map(function (a) {
+      return '<option value="' + esc(a.id) + '"' + (a.id === selId ? ' selected' : '') + '>' + esc((a.code ? a.code + ' · ' : '') + a.name) + '</option>';
+    }).join('');
+  }
+  function custMapRow(kind, name, acc, count, accounts) {
+    return '<div class="wq-row' + (acc ? ' info' : '') + '"><div class="wq-main"><div class="wq-top"><b>' + esc(name) + '</b>' +
+      (acc ? '<span class="tag soft">' + esc((acc.code ? acc.code + ' · ' : '') + acc.name) + '</span>'
+           : (count ? '<span class="tag" style="opacity:.65">' + count + '</span>' : '')) +
+      '</div></div><div class="wq-actions"><select class="in cust-acc" data-kind="' + esc(kind) + '" data-key="' + esc(name) + '">' +
+      accOptions(accounts, acc ? acc.id : '') + '</select></div></div>';
+  }
+  function loadCustodyMap() {
+    api('/erp/api/custody-map').then(function (d) {
+      var accs = d.accounts || [];
+      var sup = $('#custSup');
+      if (sup) sup.innerHTML = (d.supervisors || []).length
+        ? d.supervisors.map(function (s) { return custMapRow('supervisors', s.name, s.acc, s.count, accs); }).join('')
+        : '<div class="grp-hint" style="padding-bottom:12px">—</div>';
+      var apt = $('#custApt');
+      if (apt) apt.innerHTML = (d.apartments || []).length
+        ? d.apartments.map(function (a) { return custMapRow('apartments', a.name, a.acc, null, accs); }).join('')
+        : '<div class="grp-hint" style="padding-bottom:12px">—</div>';
+      ['custSup', 'custApt'].forEach(function (id) {
+        var box = $('#' + id);
+        if (!box) return;
+        box.addEventListener('change', function (e) {
+          var s = e.target;
+          if (!s.classList || !s.classList.contains('cust-acc')) return;
+          api('/erp/api/custody-map', { method: 'POST', body: { kind: s.getAttribute('data-kind'), key: s.getAttribute('data-key'), account_id: s.value } })
+            .then(function (r) { if (r && r.ok) toast(t('cust_linked')); })
+            .catch(function () { toast(t('cust_nosave')); });
+        });
+      });
+    }).catch(function () {});
   }
 
   function loadSetup() {

@@ -251,6 +251,66 @@ def accounts_payload():
             "counts": {"accounts": len(accs), "cost_centers": len(ccs)}}
 
 
+# ===== Custody / expense account links (feed the custody journal) =====
+# Maps each maintenance-form supervisor -> his Daftra custody account, and each
+# apartment -> its Daftra expense account. The custody journal (Dr apartment-expense /
+# Cr supervisor-custody) reads these. Stored on the volume; nothing posts to Daftra here.
+_CUSTODY_MAP_FILE = "finance_custody_map.json"
+
+
+def _custody_map_load():
+    m = B._load_json(_CUSTODY_MAP_FILE, {}) or {}
+    if not isinstance(m, dict):
+        m = {}
+    m.setdefault("supervisors", {})
+    m.setdefault("apartments", {})
+    return m
+
+
+def custody_map_data():
+    """Supervisors (distinct maintenance-form submitters) + apartments (from the listings
+    store), each with its current Daftra account link, plus the chart accounts for the picker."""
+    m = _custody_map_load()
+    sc = {}
+    for e in B._expenses.values():
+        nm = (e.get("submitter") or "").strip()
+        if nm:
+            sc[nm] = sc.get(nm, 0) + 1
+    supervisors = [{"name": nm, "count": c, "acc": m["supervisors"].get(nm)}
+                   for nm, c in sorted(sc.items(), key=lambda x: (-x[1], x[0]))]
+    apts = []
+    try:
+        for rec in (B._ls_get().get("listings") or {}).values():
+            nm = (rec.get("internal_name") or "").strip()
+            if nm:
+                apts.append({"name": nm, "acc": m["apartments"].get(nm)})
+    except Exception:
+        pass
+    apts.sort(key=lambda x: x["name"])
+    return {"ok": True, "supervisors": supervisors, "apartments": apts,
+            "accounts": accounts_payload()["accounts"]}
+
+
+def custody_map_set(request, body):
+    kind = (body.get("kind") or "").strip()
+    key = (body.get("key") or "").strip()
+    acc_id = (body.get("account_id") or "").strip()
+    if kind not in ("supervisors", "apartments") or not key:
+        return {"ok": False, "error": "bad_request"}, 400
+    m = _custody_map_load()
+    if not acc_id:
+        m[kind].pop(key, None)
+        saved = None
+    else:
+        acc = next((a for a in accounts_payload()["accounts"] if a["id"] == acc_id), None)
+        if not acc:
+            return {"ok": False, "error": "unknown_account"}, 400
+        saved = {"id": acc["id"], "code": acc["code"], "name": acc["name"]}
+        m[kind][key] = saved
+    B._save_json(_CUSTODY_MAP_FILE, m)
+    return {"ok": True, "saved": saved}, 200
+
+
 def _bank_row(x):
     """Compact row view + the pipeline chip states (مُصنّف → مُتحقق → مُرحّل)."""
     amount, dirn = _amt(x)

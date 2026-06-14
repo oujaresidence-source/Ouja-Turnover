@@ -613,6 +613,15 @@ async def _h_api_contract_link(request):
     return api.jres(data, status)
 
 
+async def _h_api_custody_map(request):
+    return api.jres(api.custody_map_data())
+
+
+async def _h_api_custody_map_set(request):
+    data, status = api.custody_map_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
@@ -637,6 +646,8 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/rules/precision", _guarded(_h_api_rules_precision))
     app.router.add_get("/erp/api/contracts", _guarded(_h_api_contracts))
     app.router.add_post("/erp/api/contracts/link", _guarded(_h_api_contract_link, write=True))
+    app.router.add_get("/erp/api/custody-map", _guarded(_h_api_custody_map))
+    app.router.add_post("/erp/api/custody-map", _guarded(_h_api_custody_map_set, write=True))
     app.router.add_get("/erp/api/match", _guarded(_h_api_match))
     app.router.add_post("/erp/api/match/accept", _guarded(_h_api_match_accept, write=True))
     app.router.add_post("/erp/api/match/reject", _guarded(_h_api_match_reject, write=True))
