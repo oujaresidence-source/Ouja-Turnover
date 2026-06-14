@@ -4128,6 +4128,45 @@
     document.title = t('ws_' + store.view) + ' · ' + t('app');
   });
 
+  /* ---------------- help: first-run welcome + always-on «؟» button ----------------
+     Built for the accounting team (especially the change-averse): a calm orientation on
+     first open, and help always one tap away. Additive — injected into the body. */
+  function setupHelp() {
+    var btn = document.createElement('button');
+    btn.id = 'erpHelp'; btn.className = 'erp-help'; btn.type = 'button';
+    btn.title = store.lang === 'ar' ? 'مساعدة' : 'Help';
+    btn.textContent = '؟';
+    btn.onclick = function () { showWelcome(); };
+    document.body.appendChild(btn);
+    var ov = document.createElement('div');
+    ov.id = 'erpWelcome'; ov.className = 'erp-ov'; ov.hidden = true;
+    document.body.appendChild(ov);
+    var seen = false; try { seen = localStorage.getItem('erp_welcomed') === '1'; } catch (e) {}
+    if (!seen) showWelcome();
+  }
+  function showWelcome() {
+    var ar = store.lang === 'ar';
+    var ov = document.getElementById('erpWelcome'); if (!ov) return;
+    ov.innerHTML = '<div class="erp-ov-card">' +
+      '<h2>' + (ar ? 'أهلاً في المركز المالي 🙂' : 'Welcome to the Finance Center 🙂') + '</h2>' +
+      '<p>' + (ar ? 'النظام يساعدك تراجع وتقرّر — هو يقترح بس، وأنت اللي تقرّر. ولا ريال يدخل دفترة إلا بعد ما تعتمده بنفسك. خذها خطوة بخطوة:' : 'It helps you review and decide — it only suggests, you decide. Nothing enters Daftra until you approve it. Take it step by step:') + '</p>' +
+      '<ol class="erp-ov-steps">' +
+        '<li><b>' + (ar ? '١) استورد' : '1) Import') + '</b> — ' + (ar ? 'كشف البنك' : 'the bank statement') + '</li>' +
+        '<li><b>' + (ar ? '٢) راجع' : '2) Review') + '</b> — ' + (ar ? 'اقتراحات التصنيف (تأكّد أو عدّل)' : 'the suggestions (confirm or edit)') + '</li>' +
+        '<li><b>' + (ar ? '٣) اعتمد' : '3) Approve') + '</b> — ' + (ar ? 'المتبقي' : 'the rest') + '</li>' +
+      '</ol>' +
+      '<p class="erp-ov-tip">' + (ar ? 'وأي وقت تحتاج شرح: افتح تبويب «الدليل»، أو اضغط زر «؟» في الزاوية.' : 'Anytime you need help: open the «Guide» tab, or the «?» button in the corner.') + '</p>' +
+      '<div class="erp-ov-act">' +
+        '<a class="btn primary" href="#guide" id="ovGuide">' + (ar ? 'افتح الدليل' : 'Open the Guide') + '</a>' +
+        '<button class="btn ghost" id="ovClose" type="button">' + (ar ? 'تمام، نبدأ' : 'Got it') + '</button>' +
+      '</div></div>';
+    ov.hidden = false;
+    function close() { ov.hidden = true; try { localStorage.setItem('erp_welcomed', '1'); } catch (e) {} }
+    var c = document.getElementById('ovClose'); if (c) c.onclick = close;
+    var g = document.getElementById('ovGuide'); if (g) g.onclick = close;
+    ov.onclick = function (e) { if (e.target === ov) close(); };
+  }
+
   /* ---------------- boot ---------------- */
   window.addEventListener('hashchange', route);
   window.addEventListener('scroll', (function () {
@@ -4137,4 +4176,5 @@
   applyLang();
   loadGNav();
   route();
+  setupHelp();
 })();
