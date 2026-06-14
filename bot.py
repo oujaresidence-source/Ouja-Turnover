@@ -41573,20 +41573,31 @@ a{color:inherit;text-decoration:none}
 .discover .arr{transition:transform .3s var(--ease)}
 .col-card:hover .discover .arr{transform:translateX(-4px)}
 .cc-foot{flex-wrap:wrap}
-.was{color:var(--mut);text-decoration:line-through;text-decoration-color:rgba(140,126,106,.6);font-family:"Cormorant Garamond",serif;font-weight:600;font-size:13px;margin-inline-end:6px}
-.now{color:var(--ink);font-weight:600}
-.lbln{font-size:12px;color:var(--mut);margin-inline-start:3px}
+.lbln{font-size:12px;color:var(--mut);margin-inline-start:2px}
 .from{font-size:11.5px;color:var(--mut);margin-inline-end:5px}
-.off{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--gold);color:#fff;margin-inline-start:7px;letter-spacing:.01em;vertical-align:middle}
-.price-sub .was{font-size:11.5px;margin-inline-end:5px}
-.price-sub b{color:var(--ink);font-weight:600}
-.l-price{border:1px solid var(--line-gold);border-radius:12px;padding:15px 18px;margin:16px 0;background:linear-gradient(180deg,rgba(176,137,78,.07),rgba(176,137,78,.02))}
-.lp-main{display:flex;align-items:baseline;gap:5px;flex-wrap:wrap;font-size:16px;color:var(--ink)}
-.lp-main .now .num{font-size:30px}
-.lp-main .was{font-size:16px}
-.lp-sub{font-size:13px;color:var(--ink-soft);margin-top:7px}
-.lp-sub .was{font-size:12.5px}
-.lp-note{font-size:12px;color:var(--mut);margin-top:9px;display:flex;align-items:center;gap:7px}
+/* card deal — compact before/after */
+.deal-mini{display:flex;flex-direction:column;gap:3px}
+.dm-top{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.dm-was{text-decoration:line-through;text-decoration-color:rgba(140,126,106,.6);color:var(--mut);font-family:"Cormorant Garamond",serif;font-weight:600;font-size:14px}
+.dm-now{color:var(--ink);font-weight:600}
+.dm-now .num{font-family:"Cormorant Garamond",serif;font-size:23px;margin-inline-end:2px}
+.dm-save{font-size:11.5px;font-weight:600;color:var(--gold-deep)}
+/* listing deal — the hero moment */
+.l-price{position:relative;overflow:hidden;border:1px solid var(--line-gold);border-radius:14px;padding:20px 22px;margin:18px 0;background:linear-gradient(180deg,rgba(176,137,78,.12),rgba(176,137,78,.02))}
+.lp-seal{position:absolute;top:18px;inset-inline-end:18px;background:var(--gold);color:#fff;font-weight:700;font-size:13px;letter-spacing:.01em;padding:6px 14px;border-radius:999px;box-shadow:0 5px 14px rgba(176,137,78,.4)}
+.lp-reg{font-size:13px;color:var(--mut);margin-bottom:13px}
+.lp-reg-lbl{margin-inline-end:7px}
+.lp-was{text-decoration:line-through;text-decoration-color:rgba(140,126,106,.7);font-family:"Cormorant Garamond",serif;font-weight:600}
+.lp-mlabel{font-size:12px;color:var(--gold-deep);font-weight:600;margin-bottom:4px}
+.lp-now{display:flex;align-items:baseline;gap:7px;line-height:1}
+.lp-now .num{font-family:"Cormorant Garamond",serif;font-size:46px;font-weight:600;color:var(--ink)}
+.lp-cur{font-size:18px;color:var(--ink);font-weight:600}
+.lp-per{font-size:13px;color:var(--mut)}
+.lp-total{font-size:13.5px;color:var(--ink-soft);margin-top:14px}
+.lp-total .lp-was{font-size:12.5px;margin-inline-end:6px}
+.lp-total b{color:var(--ink);font-weight:600}
+.lp-save{display:inline-flex;align-items:center;gap:7px;margin-top:14px;font-size:13.5px;font-weight:600;color:var(--gold-deep);background:rgba(176,137,78,.13);border:1px solid var(--line-gold);border-radius:999px;padding:8px 15px}
+.lp-note{font-size:12px;color:var(--mut);margin-top:13px;display:flex;align-items:center;gap:7px}
 .lp-note::before{content:"";flex:0 0 16px;height:1px;background:var(--line-gold)}
 /* tiers */
 .tiers{border-top:1px solid var(--line)}
@@ -41735,28 +41746,36 @@ function conciergeBand(){
   return '<span class="eyebrow center">كونسيرج عوجا إيليت</span><div class="conc-h kufi">نرتّب إقامتك من أولها لآخرها</div><p class="conc-p">راسلنا على واتساب ونتكفّل بالباقي — التوفر، السعر، والوصول.</p>'+waBtn(GEN_MSG,'elite_whatsapp_click','primary',null);
 }
 function disc(n){return Math.round(Number(n)*(1-DISCOUNT));}
+function save(n){return Number(n)-disc(n);}
 function priceHtml(l){
   if(l.est_avg!=null&&l.est_avg>0&&l.nights>0){
-    return '<div class="price"><span class="was">'+grp(l.est_avg)+'</span><span class="now"><span class="num">'+grp(disc(l.est_avg))+'</span> ر.س</span><span class="lbln">/ الليلة</span><span class="off">'+OFF+'</span></div>'
-      +'<div class="price-sub">الإجمالي <span class="was">'+grp(l.est_total)+'</span> <b class="num">'+grp(disc(l.est_total))+'</b> ر.س · '+nightsLabel(l.nights)+'</div>';
+    return '<div class="deal-mini"><div class="dm-top"><span class="dm-was">'+grp(l.est_avg)+' ر.س</span><span class="dm-now"><span class="num">'+grp(disc(l.est_avg))+'</span> ر.س</span><span class="lbln">/ الليلة</span></div><div class="dm-save">'+OFF+' · وفّرت '+grp(save(l.est_avg))+' ر.س كل ليلة</div></div>';
   }
   if(l.price_base!=null&&Number(l.price_base)>0){
-    return '<div class="price"><span class="from">تبدأ من</span><span class="was">'+grp(l.price_base)+'</span><span class="now"><span class="num">'+grp(disc(l.price_base))+'</span> ر.س</span><span class="lbln">/ الليلة</span><span class="off">'+OFF+'</span></div>';
+    return '<div class="deal-mini"><div class="dm-top"><span class="from">تبدأ من</span><span class="dm-was">'+grp(l.price_base)+'</span><span class="dm-now"><span class="num">'+grp(disc(l.price_base))+'</span> ر.س</span><span class="lbln">/ الليلة</span></div><div class="dm-save">'+OFF+' · وفّرت '+grp(save(l.price_base))+' ر.س كل ليلة</div></div>';
   }
   return '<div class="price soft">السعر يظهر مع الكونسيرج</div>';
 }
 function listingPrice(l){
-  var body;
+  var seal='<div class="lp-seal">'+OFF+'</div>';
   if(l.est_avg!=null&&l.est_avg>0&&l.nights>0){
-    body='<div class="lp-main"><span class="was">'+grp(l.est_avg)+'</span><span class="now"><span class="num">'+grp(disc(l.est_avg))+'</span> ر.س</span><span class="lbln">/ الليلة</span><span class="off">'+OFF+'</span></div>'
-      +'<div class="lp-sub">الإجمالي التقريبي <span class="was">'+grp(l.est_total)+'</span> <b class="num">'+grp(disc(l.est_total))+'</b> ر.س · '+nightsLabel(l.nights)+' · شامل خصم العضوية</div>';
-  } else if(l.price_base!=null&&Number(l.price_base)>0){
-    body='<div class="lp-main"><span class="from">تبدأ من</span><span class="was">'+grp(l.price_base)+'</span><span class="now"><span class="num">'+grp(disc(l.price_base))+'</span> ر.س</span><span class="lbln">/ الليلة</span><span class="off">'+OFF+'</span></div>'
-      +'<div class="lp-sub">حط تواريخك ونحسب لك الإجمالي بالخصم.</div>';
-  } else {
-    return '<div class="l-price"><div class="lp-main"><span class="from">السعر يظهر مع الكونسيرج</span></div><div class="lp-note">أعضاء طُريف يحصلون على أكثر من خصم 20%</div></div>';
+    return '<div class="l-price">'+seal
+      +'<div class="lp-reg"><span class="lp-reg-lbl">السعر العادي</span><span class="lp-was">'+grp(l.est_avg)+' ر.س / الليلة</span></div>'
+      +'<div class="lp-mlabel">سعر عضو عوجا إيليت — بعد الخصم</div>'
+      +'<div class="lp-now"><span class="num">'+grp(disc(l.est_avg))+'</span><span class="lp-cur">ر.س</span><span class="lp-per">/ الليلة</span></div>'
+      +'<div class="lp-total">الإجمالي لـ '+nightsLabel(l.nights)+': <span class="lp-was">'+grp(l.est_total)+' ر.س</span> <b>'+grp(disc(l.est_total))+' ر.س</b></div>'
+      +'<div class="lp-save">🤎 وفّرت '+grp(save(l.est_total))+' ر.س مع عضوية عوجا إيليت</div>'
+      +'<div class="lp-note">السعر النهائي يتأكّد مع الكونسيرج · أعضاء طُريف يحصلون على أكثر</div></div>';
   }
-  return '<div class="l-price">'+body+'<div class="lp-note">السعر النهائي يتأكّد مع الكونسيرج · أعضاء طُريف يحصلون على أكثر</div></div>';
+  if(l.price_base!=null&&Number(l.price_base)>0){
+    return '<div class="l-price">'+seal
+      +'<div class="lp-reg"><span class="lp-reg-lbl">السعر العادي</span><span class="lp-was">'+grp(l.price_base)+' ر.س / الليلة</span></div>'
+      +'<div class="lp-mlabel">سعر عضو عوجا إيليت — بعد الخصم</div>'
+      +'<div class="lp-now"><span class="num">'+grp(disc(l.price_base))+'</span><span class="lp-cur">ر.س</span><span class="lp-per">/ الليلة</span></div>'
+      +'<div class="lp-save">🤎 وفّرت '+grp(save(l.price_base))+' ر.س كل ليلة · حط تواريخك للإجمالي</div>'
+      +'<div class="lp-note">السعر النهائي يتأكّد مع الكونسيرج · أعضاء طُريف يحصلون على أكثر</div></div>';
+  }
+  return '<div class="l-price"><div class="lp-mlabel">سعر عضو عوجا إيليت</div><div class="lp-now"><span class="lp-cur">يظهر مع الكونسيرج</span></div><div class="lp-note">أعضاء طُريف يحصلون على أكثر من خصم 20%</div></div>';
 }
 
 function viewHome(){
