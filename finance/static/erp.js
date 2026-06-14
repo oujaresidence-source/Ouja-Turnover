@@ -21,6 +21,7 @@
 
   var store = {
     lang: (function () { try { return localStorage.getItem('erp_lang') || 'ar'; } catch (e) { return 'ar'; } })(),
+    adv: (function () { try { return localStorage.getItem('erp_adv') === '1'; } catch (e) { return false; } })(),
     token: (new URLSearchParams(location.search)).get('token') || '',
     view: 'today',
     D: {},                     // per-view data cache
@@ -576,6 +577,9 @@
     { id: 'setup', built: true },
     { id: 'guide', built: true }
   ];
+  // Calm default: with «وضع متقدم» OFF the nav shows only the daily-core lane below.
+  // The rest stay reachable via deep-link/hash and appear when Advanced is ON.
+  var CORE_WS = { today: 1, bank: 1, exp: 1, owners: 1, guide: 1 };
 
   function parseHash() {
     var h = (location.hash || '#today').slice(1);
@@ -587,7 +591,8 @@
 
   function renderNav() {
     var el = $('#wsnav');
-    el.innerHTML = WORKSPACES.map(function (w) {
+    var ar = store.lang === 'ar';
+    var html = WORKSPACES.filter(function (w) { return store.adv || CORE_WS[w.id]; }).map(function (w) {
       var label = t('ws_' + w.id);
       if (w.built) {
         var on = store.view === w.id;
@@ -597,6 +602,16 @@
       return '<span class="ws soon" title="' + esc(t('slice') + ' ' + w.slice) + '">' +
              esc(label) + '<em>' + esc(t('soon')) + '</em></span>';
     }).join('');
+    html += '<button class="ws-adv' + (store.adv ? ' on' : '') + '" id="advToggle" type="button" title="' +
+            esc(ar ? 'إظهار/إخفاء التبويبات المتقدمة' : 'Show/hide advanced tabs') + '">⚙ ' +
+            esc(store.adv ? (ar ? 'إخفاء المتقدم' : 'Hide advanced') : (ar ? 'وضع متقدم' : 'Advanced')) + '</button>';
+    el.innerHTML = html;
+    var tg = document.getElementById('advToggle');
+    if (tg) tg.onclick = function () {
+      store.adv = !store.adv;
+      try { localStorage.setItem('erp_adv', store.adv ? '1' : '0'); } catch (e) {}
+      if (!store.adv && !CORE_WS[store.view]) { location.replace('#today'); } else { renderNav(); }
+    };
   }
 
   function saveScroll() {
