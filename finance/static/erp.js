@@ -35,7 +35,7 @@
       dir: 'rtl', app: 'المركز المالي',
       ws_today: 'اليوم', ws_bank: 'البنك', ws_match: 'المطابقة', ws_exp: 'المصاريف',
       ws_custody: 'العهد', ws_owners: 'الملاك', ws_close: 'الإقفال', ws_stmts: 'القوائم',
-      ws_budget: 'الميزانية', ws_setup: 'الإعدادات',
+      ws_budget: 'الميزانية', ws_setup: 'الإعدادات', ws_guide: 'الدليل',
       soon: 'قريبًا', slice: 'شريحة',
       health: 'صحة البيانات', health_steps: 'خطوة جاهزة',
       bank_today: 'آخر استيراد بنك: اليوم', bank_days_1: 'آخر استيراد بنك: قبل يوم',
@@ -289,7 +289,7 @@
       dir: 'ltr', app: 'Finance Center',
       ws_today: 'Today', ws_bank: 'Bank', ws_match: 'Matching', ws_exp: 'Expenses',
       ws_custody: 'Custody', ws_owners: 'Owners', ws_close: 'Close', ws_stmts: 'Statements',
-      ws_budget: 'Budget', ws_setup: 'Setup',
+      ws_budget: 'Budget', ws_setup: 'Setup', ws_guide: 'Guide',
       soon: 'soon', slice: 'slice',
       health: 'Data health', health_steps: 'steps ready',
       bank_today: 'Last bank import: today', bank_days_1: 'Last bank import: 1 day ago',
@@ -573,7 +573,8 @@
     { id: 'close', built: true },
     { id: 'stmts', built: true },
     { id: 'budget', built: true },
-    { id: 'setup', built: true }
+    { id: 'setup', built: true },
+    { id: 'guide', built: true }
   ];
 
   function parseHash() {
@@ -3741,8 +3742,129 @@
   }
 
   /* ---------------- views registry ---------------- */
+  /* ============================================================
+     الدليل / Guide — a calm plain reference for the accounting team.
+     Chunk 1: answers their two live questions (the 5 expense tabs +
+     why approved expenses go to Hostaway not Daftra), plus intro,
+     trust, the 3 steps, a glossary, and a core button registry.
+     Content is bilingual data here so the 524-key dict isn't bloated.
+     ============================================================ */
+  var GUIDE_EXP_TABS = [
+    { t: ['قيد الاعتماد', 'Pending'],
+      d: ['مصاريف جديدة نزلت من فورم الصيانة (قوقل شيت) أو أُضيفت يدوي، بياناتها كاملة، وتنتظر اعتمادك. ما يُرسل شي لـHostaway قبل ما تعتمدها.',
+          'New expenses from the maintenance form (Google Sheet) or added manually, complete, waiting for your approval. Nothing goes to Hostaway before you approve.'],
+      a: ['اعتمِد / ارفض / عدّل', 'Approve / Reject / Edit'] },
+    { t: ['معتمدة', 'Approved'],
+      d: ['اعتمدتها، والأرقام ثبتت، بس لسا ما انرفعت لـHostaway — تنتظر ضغطة «تصدير».',
+          'Approved and locked, but not yet pushed to Hostaway — waiting for the Export click.'],
+      a: ['صدّر', 'Export'] },
+    { t: ['مصدّرة', 'Exported'],
+      d: ['انرفعت في Hostaway وجا لها رقم، بس النظام لسا ما تأكّد منها بنفسه. ⚠️ لو «وضع التجربة» شغّال، التصدير ملف فقط، والمصروف يضل عالق هنا وما يوصل «متحققة» إلا لما يُطفّأ وضع التجربة.',
+          'Created in Hostaway (got an id) but the system has not re-confirmed it yet. ⚠️ If test-mode is on, export is file-only and the row stays stuck here until test-mode is turned off.'],
+      a: ['تحقّق الآن', 'Verify now'] },
+    { t: ['متحققة', 'Verified'],
+      d: ['النظام رجع وتأكّد إن المصروف موجود فعلاً في Hostaway بمطابقة عالية (الشقة + المبلغ + التاريخ). هذي الحالة النهائية الناجحة.',
+          'The system re-checked Hostaway and confirmed the record is really there with a tight match. Terminal success state.'],
+      a: ['ما يحتاج إجراء', 'No action needed'] },
+    { t: ['تحتاج إجراء', 'Needs action'],
+      d: ['أي مصروف متعطّل: بيانات ناقصة (شقة/تصنيف)، أو مرفوض، أو فشل إرساله، أو مكرر، أو أصل مقسّم لعدة بنود.',
+          'Anything stuck: missing fields (unit/category), rejected, failed to send, a duplicate, or a split parent.'],
+      a: ['عدّل وكمّل، أو راجِع وأعد التصدير', 'Edit & complete, or review & re-export'] }
+  ];
+  var GUIDE_FAQ = [
+    { q: ['ليش المصروف المعتمد ما راح لدفترة؟ راح بس لـHostaway.', 'Why did the approved expense not reach Daftra — only Hostaway?'],
+      a: ['هذا بالتصميم. وحدة المصاريف ترفع المصروف لـHostaway (السجل التشغيلي). أمّا دفترة فتاخذ القيد من جهة البنك: لما المصروف ينصرف ويظهر في كشف الراجحي، تصنّفه أو تطابقه في «البنك/المطابقة»، ثم «الترحيل الشهري» يدفعه لدفترة. كذا ما ينحسب مرتين. ملاحظة مهمة: المصاريف المدفوعة كاش من العهدة (مو من البنك) حالياً ما توصل دفترة تلقائياً — نعالجها قريباً.',
+          'By design. The expenses module records to Hostaway (the operational record). Daftra gets the accounting entry from the bank side: when the expense is paid and appears in the Al-Rajhi statement, you classify/match it in Bank/Matching, then the monthly Migration posts it to Daftra — so it is never counted twice. Note: cash expenses paid from custody (not the bank) do not currently reach Daftra automatically — we will address that.'] },
+    { q: ['لو صنّف النظام غلط؟', 'What if the system classifies something wrong?'],
+      a: ['كل اقتراح تقدر تعدّله، وتقدر «تحفظه كقاعدة» عشان يتعلّم ويطبّقه على المشابه. النظام يقترح فقط — أنت اللي تقرّر.',
+          'Every suggestion is editable, and you can "save as a rule" so it learns and applies to similar items. The system only suggests — you decide.'] },
+    { q: ['لو ضغطت زر بالغلط؟', 'What if I click a button by mistake?'],
+      a: ['معظم الأزرار محلية وتقدر تتراجع عنها. الأزرار النهائية فقط (إقفال الشهر، الترحيل الفعلي) تطلب تأكيد صريح قبل التنفيذ وتنبّهك إنها نهائية.',
+          'Most buttons are local and reversible. Only the final ones (Close month, Real migration) ask for an explicit confirm and warn you they cannot be undone.'] },
+    { q: ['كيف أتأكد إنه ما رفع شي لدفترة بدون علمي؟', 'How do I know nothing was posted to Daftra without me?'],
+      a: ['الزر الوحيد في النظام كله اللي يكتب في دفترة هو «الترحيل الفعلي» — وهو شهري، يطلب تأكيد، ومحجوب حتى تقفل الشهر، وحالياً مقفول أصلاً. كل شي ثاني تضغطه يُحفظ محلياً فقط.',
+          'The only button in the whole system that writes to Daftra is "Real migration" — monthly, confirm-gated, blocked until the month is closed, and currently disabled. Everything else you click is saved locally only.'] },
+    { q: ['من وين أبدأ كل يوم؟', 'Where do I start each day?'],
+      a: ['من تبويب «اليوم»: استورد كشف البنك، راجع اقتراحات التصنيف، واعتمد المتبقي. والعدّاد يبيّن لك كم باقي.',
+          'From the "Today" tab: import the bank statement, review the classification suggestions, and approve the rest. The counter shows how many are left.'] },
+    { q: ['ليش فيه بند ينتظر اعتماد فيصل؟', 'Why does an item wait for Faisal’s approval?'],
+      a: ['أي مبلغ ٣٠٠٠ ريال فأكثر يحتاج اعتماد فيصل كطبقة حماية إضافية قبل أي إجراء عليه.',
+          'Any amount of 3000 SAR or more needs Faisal’s approval as an extra safety layer before it proceeds.'] }
+  ];
+  var GUIDE_GLOSSARY = [
+    ['السجل المالي', 'السجل الداخلي اللي نجمع فيه كل الحركات قبل ترحيلها — مصدر الحقيقة عندنا.'],
+    ['المطابقة', 'نربط حركة البنك بقيدها المقابل (في دفترة أو مصروف) عشان نتأكد ما فيه تكرار أو نقص.'],
+    ['العهدة / العهد', 'مبلغ كاش يُسلّم لموظف يصرف منه؛ يُحسب: المصروف − المُصفّى = المتبقّي عليه.'],
+    ['مركز التكلفة', 'الجهة اللي ننسب لها المصروف (شقة، مبنى، الشركة عموماً) عشان نعرف ربحية كل وحدة.'],
+    ['قيد دفترة', 'القيد المحاسبي داخل نظام دفترة (مدين/دائن).'],
+    ['الترحيل', 'دفع القيود من نظامنا إلى دفترة — يتم شهرياً بعد الإقفال، وبموافقة.'],
+    ['الإقفال الشهري', 'إغلاق الشهر بشكل نهائي بعد التأكد إن كل شي متوازن.'],
+    ['تمويل (funding)', 'دخول مبلغ لتمويل التشغيل (مو إيراد حجز).'],
+    ['رسوم (fee)', 'رسوم بنكية أو خدمة، مو مصروف تشغيلي عادي.']
+  ];
+  var FB_GUIDE_BUTTONS = [
+    { b: ['استيراد كشف الراجحي', 'Import Al-Rajhi statement'], d: ['يقرأ ملف الكشف ويعرض الحركات الجديدة/المكررة للمراجعة قبل الحفظ.', 'Reads the statement file and shows new/duplicate rows for review before saving.'], w: ['معاينة فقط — ما يحفظ', 'Preview only — saves nothing'], r: ['نعم، تقدر تلغي', 'Yes, you can cancel'] },
+    { b: ['تأكيد الاستيراد', 'Confirm import'], d: ['يحفظ الحركات الجديدة ويطبّق عليها القواعد تلقائياً.', 'Saves the new rows and auto-applies your rules.'], w: ['يُحفظ محلياً', 'Saved locally'], r: ['محمي من الازدواج؛ الاستيراد نفسه ما له تراجع', 'Dup-shielded; the import itself has no undo'] },
+    { b: ['اقتراح التصنيف (ضغط الحساب المقترح)', 'Suggestion chip'], d: ['يصنّف الحركة على الحساب اللي يقترحه النظام بضغطة وحدة.', 'One-click classify onto the system’s suggested account.'], w: ['يُحفظ محلياً — ما يدخل دفترة', 'Local — not Daftra'], r: ['نعم (إزالة التصنيف يرجّعها)', 'Yes (clear to reverse)'] },
+    { b: ['احفظ كقاعدة / تطبيق على المشابهة', 'Save as rule / apply to similar'], d: ['يخلّي تصنيفك يتطبّق تلقائياً على الحركات المشابهة مستقبلاً — أنت تعلّم النظام.', 'Makes your classification auto-apply to similar future rows — you teach the system.'], w: ['يُحفظ محلياً', 'Local'], r: ['نعم (تقدر تعطّل أو تحذف القاعدة)', 'Yes (toggle/delete the rule)'] },
+    { b: ['تراجع', 'Undo'], d: ['يلغي تصنيفاً طبّقته قاعدة ويضعّف القاعدة.', 'Reverses a rule-applied classification and weakens the rule.'], w: ['يُحفظ محلياً', 'Local'], r: ['هذا نفسه هو التراجع', 'This is the undo'] },
+    { b: ['اعتماد (بند الوارد ٣٠٠٠+)', 'Approve (3000+ inbox item)'], d: ['يعتمد بنداً يحتاج موافقة فيصل.', 'Approves an item that needs Faisal’s sign-off.'], w: ['قرار محلي — ما يدخل دفترة', 'Local decision — not Daftra'], r: ['لا تراجع مباشر — قرار نهائي', 'No direct undo — final decision'], danger: true },
+    { b: ['رفض', 'Reject'], d: ['يرفض البند (يطلب سبب).', 'Rejects the item (reason required).'], w: ['قرار محلي', 'Local'], r: ['نهائي', 'Final'], danger: true },
+    { b: ['استيضاح', 'Request clarification'], d: ['يرجّع البند ويطلب توضيح بدل الرفض.', 'Sends it back asking for clarification instead of rejecting.'], w: ['محلي', 'Local'], r: ['يرجع للطابور', 'Re-queues'] },
+    { b: ['اعتماد (مصروف)', 'Approve (expense)'], d: ['يعتمد المصروف وينقله لخطوة التصدير.', 'Approves the expense and moves it to export.'], w: ['يُحفظ محلياً', 'Local'], r: ['ينتقل للتبويب التالي — ما فيه تراجع مباشر', 'Moves tab — no direct undo'] },
+    { b: ['تصدير (مصروف)', 'Export (expense)'], d: ['يرفع المصروف إلى Hostaway.', 'Pushes the expense to Hostaway.'], w: ['يكتب في Hostaway (مو دفترة)؛ لو وضع التجربة شغّال = ملف فقط', 'Writes to Hostaway (not Daftra); test-mode = file only'], r: ['حسب وضع التجربة', 'Depends on test-mode'] },
+    { b: ['تحقّق الآن', 'Verify now'], d: ['يرجع يدوّر على المصروف في Hostaway ويأكّده.', 'Re-checks Hostaway and confirms the expense.'], w: ['قراءة وتأكيد', 'Read-back verify'], r: ['آمن — يعيد المحاولة', 'Safe — idempotent'] },
+    { b: ['معاينة (Dry-run) — الترحيل', 'Preview (Dry-run) — migration'], d: ['يبني مسودة الترحيل بدون ما يكتب أي شي.', 'Builds the migration draft without writing anything.'], w: ['معاينة فقط', 'Preview only'], r: ['آمن تماماً', 'Completely safe'] },
+    { b: ['إقفال الشهر (نهائي)', 'Close month (final)'], d: ['يقفل الشهر بعد ما تكتمل قائمة الجاهزية.', 'Closes the month after the readiness checklist passes.'], w: ['يثبّت لقطة نهائية', 'Writes an immutable snapshot'], r: ['نهائي — لا تراجع', 'Final — irreversible'], danger: true },
+    { b: ['ترحيل فعلي', 'Real migration'], d: ['يدفع القيود إلى دفترة (مرة واحدة).', 'Posts the entries to Daftra (once).'], w: ['يكتب في دفترة — وحالياً مقفول', 'Writes to Daftra — currently disabled'], r: ['نهائي — أكّد قبل', 'Final — confirm first'], danger: true }
+  ];
+  function gAcc(title, inner) {
+    return '<details class="g-acc"><summary>' + esc(title) + '</summary><div class="g-acc-b">' + inner + '</div></details>';
+  }
+  function renderGuide() {
+    var ar = store.lang === 'ar', i = ar ? 0 : 1;
+    var h = '<div class="g-wrap">';
+    h += '<div class="card g-hero"><h2>' + (ar ? 'دليل المركز المالي' : 'Finance Center Guide') + '</h2>' +
+      '<p>' + (ar ? 'المركز المالي طبقة مراجعة فوق نظام دفترة. النظام يقترح فقط، وأنت اللي تقرّر. ما يوصل دفترة أي شي إلا بعد اعتمادك، وما نخترع أي رقم — لو البيان ناقص نكتب «غير متوفر».'
+      : 'The Finance Center is a checking layer on top of Daftra. The system only suggests; you decide. Nothing reaches Daftra without your approval, and we never invent a number — missing data shows "not available".') + '</p>' +
+      '<div class="g-trust">🔒 ' + (ar ? 'ولا ريال يدخل دفترة إلا بعد ما تعتمده بنفسك. الدفع لدفترة يتم فقط عند «الترحيل الشهري» — وحالياً مقفول.'
+      : 'Not one riyal enters Daftra until you approve it. Posting happens only at the monthly Migration — currently disabled.') + '</div></div>';
+    h += '<div class="card"><h3>' + (ar ? 'ابدأ من هنا — ٣ خطوات' : 'Start here — 3 steps') + '</h3><div class="g-steps">';
+    var steps = ar ? [['١', 'استيراد', 'ارفع كشف الراجحي. (مصاريف الصيانة تجي من الشيت تلقائياً.)'], ['٢', 'راجع الاقتراحات', 'النظام يقترح التصنيف — تأكّد أو عدّل.'], ['٣', 'اعتمد', 'اعتمد المتبقي. ٣٠٠٠+ يحتاج اعتماد فيصل.']]
+      : [['1', 'Import', 'Upload the Al-Rajhi statement. (Maintenance expenses arrive from the Sheet automatically.)'], ['2', 'Review suggestions', 'The system suggests a category — confirm or correct.'], ['3', 'Approve', 'Approve the rest. 3000+ needs Faisal.']];
+    steps.forEach(function (s, idx) {
+      if (idx) h += '<div class="g-arrow">' + (ar ? '←' : '→') + '</div>';
+      h += '<div class="g-step"><span class="g-n">' + s[0] + '</span><b>' + esc(s[1]) + '</b><p>' + esc(s[2]) + '</p></div>';
+    });
+    h += '</div></div>';
+    h += '<div class="card"><h3>' + (ar ? 'أقسام المصاريف الخمسة' : 'The five expense tabs') + '</h3>' +
+      '<p class="g-sub">' + (ar ? 'المصروف يمشي بالترتيب: قيد الاعتماد ← معتمدة ← مصدّرة ← متحققة. و«تحتاج إجراء» = أي مصروف تعطّل.'
+      : 'An expense moves: Pending → Approved → Exported → Verified. "Needs action" = anything stuck.') + '</p>';
+    GUIDE_EXP_TABS.forEach(function (x) {
+      h += gAcc(x.t[i], '<p>' + esc(x.d[i]) + '</p><div class="g-do"><b>' + (ar ? 'الإجراء: ' : 'Action: ') + '</b>' + esc(x.a[i]) + '</div>');
+    });
+    h += '</div>';
+    h += '<div class="card"><h3>' + (ar ? 'أسئلة شائعة' : 'FAQ') + '</h3>';
+    GUIDE_FAQ.forEach(function (f) { h += gAcc(f.q[i], '<p>' + esc(f.a[i]) + '</p>'); });
+    h += '</div>';
+    h += '<div class="card"><h3>' + (ar ? 'دليل الأزرار' : 'Button guide') + '</h3>' +
+      '<p class="g-sub">' + (ar ? 'لكل زر: وش يسوي، وين يروح، ويرجع ولا لا.' : 'For each button: what it does, where it goes, reversible or not.') + '</p><div class="g-btns">';
+    FB_GUIDE_BUTTONS.forEach(function (b) {
+      h += '<div class="g-btn' + (b.danger ? ' danger' : '') + '"><div class="g-btn-h">🔘 ' + esc(b.b[i]) + '</div>' +
+        '<div class="g-btn-r"><span>✅ ' + (ar ? 'وش يسوي' : 'Does') + '</span>' + esc(b.d[i]) + '</div>' +
+        '<div class="g-btn-r"><span>📍 ' + (ar ? 'وين يروح' : 'Where') + '</span>' + esc(b.w[i]) + '</div>' +
+        '<div class="g-btn-r"><span>↩️ ' + (ar ? 'يرجع؟' : 'Reversible?') + '</span>' + esc(b.r[i]) + '</div></div>';
+    });
+    h += '</div><p class="g-sub">' + (ar ? '(هذي الأزرار الأساسية — نكمّل بقية الأزرار في التحديث الجاي.)' : '(Core buttons — the rest are added next.)') + '</p></div>';
+    h += '<div class="card"><h3>' + (ar ? 'الكلمات اللي بتشوفها' : 'Glossary') + '</h3><div class="g-gloss">';
+    GUIDE_GLOSSARY.forEach(function (g) { h += '<div class="g-term"><b>' + esc(g[0]) + '</b><span>' + esc(g[1]) + '</span></div>'; });
+    h += '</div></div></div>';
+    $('#view').innerHTML = h;
+  }
+
   var VIEWS = {
     today: { show: function () { loadToday(); } },
+    guide: { show: function () { renderGuide(); } },
     setup: { show: function () { loadSetup(); } },
     match: {
       show: function (params) {
