@@ -42038,6 +42038,7 @@ var WAG='<svg class="wag" viewBox="0 0 24 24" fill="currentColor" aria-hidden="t
 var REG='<svg class="reg" width="200" height="16" viewBox="0 0 200 16" fill="none" aria-hidden="true"><path d="M8 12 H85" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M85 12 L91 12 L91 9 L96 9 L96 6 L100 3 L104 6 L104 9 L109 9 L109 12 L115 12" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/><path d="M115 12 H192" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>';
 var IC={bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h14M12 6.5a5.5 5.5 0 0 0-5.5 5.5V18h11v-6A5.5 5.5 0 0 0 12 6.5ZM12 6.5V4M10.5 4h3"/></svg>',car:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l1.6-4.6A2 2 0 0 1 7.5 7h9a2 2 0 0 1 1.9 1.4L20 13v5h-2.2v-1.8H6.2V18H4v-5Z"/><path d="M7.5 15.4h.01M16.5 15.4h.01"/></svg>',badge:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M8.5 12.2l2.3 2.3 4.6-4.8"/></svg>',key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="3.6"/><path d="M10.6 11.6 19 20M16.2 17.2l1.8-1.8M14.4 15.4l1.8-1.8"/></svg>',spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.6 4.8L18.4 12l-4.8 1.6L12 18l-1.6-4.4L5.6 12l4.8-1.6Z"/></svg>'};
 function he(s){return (s==null?'':String(s)).replace(/[<>&"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];});}
+function pimg(u,w){if(!u)return u;try{if(ELITE&&ELITE.config&&ELITE.config.imgproxy)return '/elite/img?u='+encodeURIComponent(u)+(w?('&w='+w):'');}catch(e){}return u;}
 function sid(){try{var k='ouja_elite_sid',v=localStorage.getItem(k);if(!v){v='e'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
 function qs(){return new URLSearchParams(location.search);}
 function utm(){var p=qs(),o={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o[k]=p.get(k);});return o;}
@@ -42222,8 +42223,9 @@ function viewHome(){
   track('elite_page_view',{});
   var cfg=(ELITE&&ELITE.config)||{noo:[],count:0};var p=qs();
   var hero=cfg.hero||'';
-  var heroBg=hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(hero).replace(/"/g,'&quot;')+')"></div>'):'<div class="bgimg ph-hero"></div>';
-  var heroVid=(cfg.video)?('<video class="bgvid" autoplay muted loop playsinline preload="auto"'+(hero?(' poster="'+he(hero)+'"'):'')+'><source src="'+he(cfg.video)+'" type="video/mp4"></video>'):'';
+  var heroSrc=pimg(hero,1600);
+  var heroBg=hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(heroSrc).replace(/"/g,'&quot;')+')"></div>'):'<div class="bgimg ph-hero"></div>';
+  var heroVid=(cfg.video)?('<video class="bgvid" autoplay muted loop playsinline preload="auto"'+(hero?(' poster="'+he(heroSrc)+'"'):'')+'><source src="'+he(cfg.video)+'" type="video/mp4"></video>'):'';
   var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('type')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+'</option>';}).join('');
   var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
   var chips=(cfg.noo||[]).slice(0,6).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
@@ -42296,7 +42298,7 @@ function loadCollection(){
 function card(l,novt){
   var avail=(l.available===true);
   var vt=(novt?'':' style="view-transition-name:r'+he(l.id)+'"');
-  var cov=l.cover?('<img class="fadein" loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'"'+vt+' src="'+he(l.cover)+'">'):monoPh();
+  var cov=l.cover?('<img class="fadein" loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'"'+vt+' src="'+he(pimg(l.cover,800))+'">'):monoPh();
   var ovr=[];if(avail)ovr.push('<span class="tag ok">متاحة</span>');if(l.badge)ovr.push('<span class="tag gold">'+he(l.badge)+'</span>');
   var price=priceHtml(l);
   return '<a class="col-card reveal" href="/elite/'+he(l.slug)+location.search+'">'
@@ -42355,7 +42357,7 @@ function viewListing(){
   function agHtml(gp){return '<div class="amen-group"><h3 class="ag-h">'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
   function openGallery(imgs,alt){
     var ov=document.createElement('div');ov.className='lb';
-    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(u)+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(pimg(u,1600))+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
     function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
     function esc(e){if(e.key==='Escape')close();}
     ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
@@ -42368,11 +42370,11 @@ function viewListing(){
     var imgs=(l.images||[]);
     var gallery;
     if(imgs.length){
-      var c1='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div>';
+      var c1='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(pimg(imgs[0],1200))+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div>';
       var c2='';
-      if(imgs.length>1){var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">كل الصور · '+imgs.length+'</button>'):'';c2='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div>'+moreBtn+'</div>';}
+      if(imgs.length>1){var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">كل الصور · '+imgs.length+'</button>'):'';c2='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" src="'+he(pimg(imgs[1],1200))+'" alt="'+he(l.name_ar)+'"><div class="frame"></div>'+moreBtn+'</div>';}
       gallery='<div class="gal'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
-    } else if(l.cover){gallery='<div class="gal one"><div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div></div>';}
+    } else if(l.cover){gallery='<div class="gal one"><div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(pimg(l.cover,1200))+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div></div>';}
     else{gallery='<div class="gcell" style="aspect-ratio:16/10;margin:18px 0">'+monoPh()+'<div class="frame"></div></div>';}
     var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out');
     var dsum='';
@@ -42439,6 +42441,17 @@ function viewListing(){
 # STAY_WHATSAPP; if BOTH empty the booking button renders a graceful disabled state (no dead link).
 ELITE_WHATSAPP = re.sub(r"\D", "", os.environ.get("ELITE_WHATSAPP", "") or "") or STAY_WHATSAPP
 
+# WebP image proxy for /elite — re-encodes Hostaway photos on the fly (+ disk cache).
+# FAIL-SAFE by design: any error or unknown host -> 302 redirect to the original URL,
+# so images NEVER break. Disabled automatically if Pillow is missing.
+try:
+    from PIL import Image as _PILImage
+    _ELITE_PIL = True
+except Exception:
+    _ELITE_PIL = False
+ELITE_IMG_PROXY = (os.environ.get("ELITE_IMG_PROXY", "1") != "0") and _ELITE_PIL
+_ELITE_IMG_HOSTS = ("hostaway", "amazonaws", "cloudfront", "googleusercontent", "akamaized", "cloudinary", "imgix")
+
 def _elite_render(route="home", listing=None, base=""):
     title = "عوجا إيليت · إقامات مختارة في الرياض"
     desc = "عضوية عوجا إيليت — إقامات منتقاة في الرياض، كونسيرج خاص، وحجز مباشر عبر واتساب."
@@ -42455,7 +42468,7 @@ def _elite_render(route="home", listing=None, base=""):
         og = og or hcfg["url"]
     data = {"route": route, "listing": listing,
             "config": {"noo": _gw_noo_options(), "count": len(vis),
-                       "hero": (hcfg.get("url") or ""), "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""), "whatsapp": ELITE_WHATSAPP}}
+                       "hero": (hcfg.get("url") or ""), "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""), "imgproxy": ELITE_IMG_PROXY, "whatsapp": ELITE_WHATSAPP}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO/share JSON-LD — Apartment per unit, LodgingBusiness on the landing.
     if listing:
@@ -42506,6 +42519,50 @@ async def _handle_elite_detail(request):
     snap, ov = _gw_find_by_slug_or_id(token)
     listing = _gw_listing_public(snap, ov, with_airbnb=False) if snap else None   # with_airbnb=False — Elite never shows Airbnb
     return web.Response(text=_elite_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
+
+
+async def _handle_elite_img(request):
+    """On-the-fly WebP proxy for /elite photos. Fail-safe: any problem -> 302 to the original URL."""
+    u = request.query.get("u", "") or ""
+    try:
+        w = int(request.query.get("w", "0") or 0)
+    except Exception:
+        w = 0
+    if not u.lower().startswith(("http://", "https://")):
+        raise web.HTTPNotFound()
+    if (not ELITE_IMG_PROXY) or (not any(h in u.lower() for h in _ELITE_IMG_HOSTS)):
+        raise web.HTTPFound(u)                                  # disabled / unknown host -> original
+    headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+    key = hashlib.sha1((u + "|" + str(w)).encode("utf-8")).hexdigest() + ".webp"
+    cpath = None
+    try:
+        base = _state_path("elite_imgcache"); os.makedirs(base, exist_ok=True)
+        cpath = os.path.join(base, key)
+        if os.path.isfile(cpath) and os.path.getsize(cpath) > 0:
+            with open(cpath, "rb") as f:
+                return web.Response(body=f.read(), content_type="image/webp", headers=headers)
+    except Exception:
+        cpath = None
+    def _work():
+        r = requests.get(u, timeout=12)
+        r.raise_for_status()
+        im = _PILImage.open(io.BytesIO(r.content)).convert("RGB")
+        if w and im.width > w:
+            im = im.resize((w, max(1, int(im.height * (w / float(im.width))))), _PILImage.LANCZOS)
+        out = io.BytesIO()
+        im.save(out, format="WEBP", quality=82, method=5)
+        return out.getvalue()
+    try:
+        data = await asyncio.get_event_loop().run_in_executor(None, _work)
+    except Exception:
+        raise web.HTTPFound(u)                                  # transcode/fetch failed -> original
+    if cpath:
+        try:
+            with open(cpath, "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+    return web.Response(body=data, content_type="image/webp", headers=headers)
 
 
 async def _api_gw_hero(request):
@@ -42863,6 +42920,7 @@ async def start_web_server():
         app.router.add_get("/elite/", _handle_elite)
         app.router.add_get("/elite/search", _handle_elite_search)
         app.router.add_get("/elite/id/{lid}", _handle_elite_id)
+        app.router.add_get("/elite/img", _handle_elite_img)
         app.router.add_get("/elite/{slug}", _handle_elite_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
