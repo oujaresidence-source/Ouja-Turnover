@@ -41494,11 +41494,11 @@ a{color:inherit;text-decoration:none}
 .hero{position:relative;min-height:74vh;display:flex;align-items:flex-end;overflow:hidden;background:linear-gradient(135deg,#2a3a47,#16212b)}
 .hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.06);animation:ken 22s ease-out both}
 .hero .ph-hero{background:radial-gradient(120% 90% at 70% 10%,#3a4a55,#16212b)}
-.hero-ov{position:absolute;inset:0;background:linear-gradient(to top,var(--canvas) 0,rgba(251,247,239,0) 72px),linear-gradient(to top,rgba(31,45,58,.60) 0,rgba(31,45,58,.30) 50%,rgba(31,45,58,.46) 100%)}
-.hero-in{position:relative;width:100%;padding-bottom:74px;padding-top:90px}
+.hero-ov{position:absolute;inset:0;z-index:2;background:linear-gradient(to top,var(--canvas) 0,rgba(251,247,239,0) 80px),radial-gradient(95% 75% at 80% 6%,rgba(176,137,78,.24),transparent 55%),linear-gradient(to top,rgba(22,33,43,.74) 0,rgba(31,45,58,.30) 46%,rgba(31,45,58,.52) 100%)}
+.hero-in{position:relative;z-index:4;width:100%;padding-bottom:74px;padding-top:90px}
 @media(min-width:760px){.hero-in{padding-bottom:92px}}
 .hero .eyebrow{color:var(--gold-soft)}
-.h-hero{font-size:clamp(30px,7vw,48px);line-height:1.24;font-weight:500;color:#fff;margin:0 0 14px;max-width:18ch;text-wrap:balance;text-shadow:0 1px 30px rgba(15,22,30,.45)}
+.h-hero{font-size:clamp(33px,7.6vw,53px);line-height:1.22;font-weight:500;color:#fff;margin:0 0 14px;max-width:18ch;text-wrap:balance;text-shadow:0 1px 30px rgba(15,22,30,.45)}
 .hero-sub{font-style:italic;font-size:clamp(17px,2.4vw,21px);color:rgba(255,255,255,.86);margin-bottom:14px;letter-spacing:.01em}
 .hero-lead{font-size:15.5px;line-height:1.8;color:rgba(255,255,255,.9);margin:0;max-width:42ch}
 /* widget */
@@ -41537,8 +41537,8 @@ a{color:inherit;text-decoration:none}
 .pillars{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line);border-inline-start:1px solid var(--line)}
 @media(min-width:760px){.pillars{grid-template-columns:repeat(4,1fr)}}
 .pillar{padding:24px 18px;border-bottom:1px solid var(--line);border-inline-end:1px solid var(--line)}
-.pi{color:var(--gold);margin-bottom:13px}
-.pi svg{width:26px;height:26px}
+.pi{display:inline-flex;align-items:center;justify-content:center;width:50px;height:50px;border-radius:999px;border:1px solid var(--line-gold);background:radial-gradient(120% 120% at 30% 20%,rgba(176,137,78,.13),rgba(176,137,78,.02));color:var(--gold-deep);margin-bottom:14px}
+.pi svg{width:24px;height:24px}
 .pl{font-family:"Reem Kufi",serif;font-size:15.5px;font-weight:500;color:var(--ink);margin-bottom:5px}
 .pt{font-size:13px;color:var(--ink-soft);line-height:1.65}
 /* collection grid + cards */
@@ -41688,12 +41688,59 @@ a{color:inherit;text-decoration:none}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .rise{animation:rise .55s var(--ease) both}
 @keyframes rise{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:none}}
+/* ===== ELEVATION PASS — cinematic luxury, same palette ===== */
+html{scroll-behavior:smooth}
+.grain{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:140px 140px}
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .75s var(--ease),transform .75s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+.reveal.d1{transition-delay:.07s}.reveal.d2{transition-delay:.14s}.reveal.d3{transition-delay:.21s}.reveal.d4{transition-delay:.28s}
+.hero-grain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.12;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='m'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23m)'/%3E%3C/svg%3E")}
+.hero-frame{position:absolute;inset:14px;z-index:3;border:1px solid rgba(231,215,180,.42);border-radius:2px;pointer-events:none}
+@media(min-width:760px){.hero-frame{inset:22px}}
+.h-rule{display:block;width:62px;height:1px;background:linear-gradient(90deg,var(--gold-soft),rgba(231,215,180,0));margin:4px 0 16px;transform-origin:right;animation:ruleIn 1s var(--ease) both;animation-delay:.12s}
+@keyframes ruleIn{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
+.reg-wrap .reg path{stroke-dasharray:300;stroke-dashoffset:300;transition:stroke-dashoffset 1.2s var(--ease)}
+.reg-wrap.in .reg path{stroke-dashoffset:0}
+.pillar{transition:background .3s var(--ease)}
+.pillar:hover{background:rgba(176,137,78,.045)}
+.tags,.cover .frame{z-index:2}
+.cover::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.22) 48%,transparent 60%);transform:translateX(-130%);transition:transform .9s var(--ease)}
+.col-card:hover .cover::after{transform:translateX(130%)}
+.col-card:hover .cover .frame{border-color:rgba(176,137,78,.6);inset:8px}
+.tier-sub{margin-bottom:6px}
+.tier-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:18px}
+@media(min-width:760px){.tier-grid{grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}}
+.tier-card{position:relative;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:24px 22px;overflow:hidden;transition:transform .3s var(--ease),box-shadow .3s var(--ease),border-color .3s var(--ease)}
+.tier-card:hover{transform:translateY(-4px);box-shadow:0 20px 44px rgba(31,45,58,.11);border-color:var(--line-gold)}
+.tier-card:active{transform:translateY(-1px)}
+.tier-card.top{border-color:var(--line-gold);background:linear-gradient(180deg,rgba(176,137,78,.11),rgba(176,137,78,.015))}
+.tier-card.top::before{content:"";position:absolute;top:0;inset-inline:0;height:3px;background:linear-gradient(90deg,rgba(176,137,78,0),var(--gold),rgba(176,137,78,0))}
+.tc-seal{position:absolute;top:16px;inset-inline-end:18px;color:var(--gold)}
+.tc-seal svg{width:30px;height:30px}
+.tc-head{display:flex;align-items:center;gap:13px;margin-bottom:4px}
+.tc-rn{font-family:"Cormorant Garamond",serif;font-size:34px;font-weight:600;color:var(--gold-deep);line-height:1;min-width:32px}
+.tc-name{display:block;font-family:"Reem Kufi",serif;font-size:19px;font-weight:500;color:var(--ink);line-height:1.2}
+.tc-en{display:block;font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.22em;font-size:11.5px;color:var(--mut);font-weight:600;margin-top:3px}
+.tc-badge{display:inline-block;font-size:10.5px;font-weight:600;padding:3px 11px;border-radius:999px;background:var(--gold);color:#fff;letter-spacing:.04em;margin:10px 0 0}
+.tc-body{font-size:14px;color:var(--ink-soft);line-height:1.7;margin:12px 0 18px}
+.tc-cta{margin-top:auto}
+.tc-cta .btn{width:100%}
+.concierge{position:relative;overflow:hidden}
+.concierge::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(80% 120% at 50% 0,rgba(176,137,78,.10),transparent 60%)}
+.concierge>*{position:relative;z-index:1}
+.conc-mark{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:999px;border:1px solid var(--line-gold);color:var(--gold-deep);background:radial-gradient(120% 120% at 30% 20%,rgba(176,137,78,.14),rgba(176,137,78,.02));margin-bottom:14px}
+.conc-mark svg{width:30px;height:30px}
+.standard{position:relative}
+.standard .crest{display:block;color:var(--gold);margin:0 auto 10px}
+.standard .crest svg{width:26px;height:26px;margin:0 auto}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1!important;transform:none!important}.reg-wrap .reg path{stroke-dashoffset:0!important}.h-rule{animation:none}}
 .btn:focus-visible,.qp:focus-visible,.col-card:focus-visible,.conc-link:focus-visible,.more:focus-visible,.g-all:focus-visible,.lb-x:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
 .has-cta .foot{padding-bottom:118px}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.hero .bgimg{transform:none}}
 </style>
 </head>
 <body>
+<div class="grain" aria-hidden="true"></div>
 <header class="head"><div class="wrap head-in"><a class="brand" href="/elite"><span class="brand-ar">عوجا إيليت</span><span class="brand-en">Ouja Elite</span></a><a class="conc-link" id="headConc" href="#"><svg class="wag" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Z" opacity=".18"/><path d="M12 4a8 8 0 0 0-6.9 12l.3.5-.7 2.5 2.6-.7.5.3A8 8 0 1 0 12 4Z"/></svg>كونسيرج</a></div><div class="wrap head-reg"></div></header>
 <main id="view"></main>
 <footer class="foot"><div class="wrap"><div class="reg-foot"></div><div class="foot-line">من أهل الدرعية 🤎</div><div class="foot-sub serif">Ouja Elite · Curated residences in Riyadh</div><div class="foot-sub">إقامات مختارة في الرياض</div></div></footer>
@@ -41721,9 +41768,16 @@ function waBook(l,ci,co,nights,guests){var NL=String.fromCharCode(10);var x=['ح
 function waBtn(text,ev,cls,label){var h=waHref(text);var c='btn '+(cls||'primary block');if(!h)return '<button class="'+c+' off" disabled>'+WAG+'<span class="lbl">'+he(label||'الكونسيرج غير متاح حاليًا')+'</span></button>';return '<a class="'+c+'" target="_blank" rel="noopener" data-ev="'+he(ev||'')+'" href="'+he(h)+'">'+WAG+'<span class="lbl">'+he(label||'تواصل مع الكونسيرج')+'</span></a>';}
 function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<i>·</i>');}
 function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
-function divider(){return '<div class="reg-wrap">'+REG+'</div>';}
+function divider(){return '<div class="reg-wrap reveal">'+REG+'</div>';}
 function monoPh(){return '<div class="mono">ع</div>';}
 function skeletons(n){var s='';for(var i=0;i<(n||2);i++){s+='<div class="col-card"><div class="cover sk"></div><div class="cc-body"><div class="sk" style="height:13px;width:38%"></div><div class="sk" style="height:20px;width:72%;margin-top:8px"></div><div class="sk" style="height:13px;width:52%;margin-top:10px"></div><div class="sk" style="height:34px;width:100%;margin-top:12px"></div></div></div>';}return s;}
+var _io=null;
+function reveal(){
+  var ns=document.querySelectorAll('.reveal:not(.in)');
+  if(!('IntersectionObserver' in window)){ns.forEach(function(e){e.classList.add('in');});return;}
+  if(!_io){_io=new IntersectionObserver(function(en){en.forEach(function(x){if(x.isIntersecting){x.target.classList.add('in');_io.unobserve(x.target);}});},{rootMargin:'0px 0px -7% 0px',threshold:.06});}
+  ns.forEach(function(e){_io.observe(e);});
+}
 
 function pillarsHtml(){
   var P=[[IC.bell,'كونسيرج خاص ٢٤/٧','فريق يرتّب كل تفصيل قبل وبعد وصولك.'],
@@ -41733,17 +41787,24 @@ function pillarsHtml(){
   return P.map(function(p){return '<div class="pillar"><div class="pi">'+p[0]+'</div><div class="pl">'+he(p[1])+'</div><div class="pt">'+he(p[2])+'</div></div>';}).join('');
 }
 function tiersHtml(){
+  var crown='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 18.2h14l1.2-9.4-4.8 3.2L12 5l-3.6 7-4.8-3.2 1.2 9.4Zm0 1.5h14V21H5v-1.3Z"/></svg>';
   var T=[['I','طُريف','TURAIF','أرقى عضوياتنا — أكثر من خصم 20%: ترقيات تلقائية، أولوية في التوفر، وكونسيرج مخصّص لك.','elite_join_turaif','حياك الله 🤍 أرغب بعضوية عوجا إيليت — طُريف (الأعلى)، وأبغى أعرف المزايا الإضافية.',true],
    ['II','ذهب','GOLD','خصم 20% ثابت على إقاماتك، دخول مبكر، وهدايا ترحيب مختارة.','elite_join_gold','حياك الله 🤍 أرغب بعضوية عوجا إيليت — ذهب (Gold).',false],
    ['III','فضّة','SILVER','خصم 20% على الحجز المباشر ومزايا الأعضاء على مدار السنة.','elite_join_silver','حياك الله 🤍 أرغب بعضوية عوجا إيليت — فضّة (Silver).',false]];
-  var sub='<div class="tier-sub">كل الأعضاء يحصلون على خصم 20% على إقاماتهم — وأعضاء طُريف يحصلون على أكثر.</div>';
-  return sub+'<div class="tiers">'+T.map(function(t){
-    var cta=waBtn(t[5],t[4],'secondary mini tier-cta','تواصل عن '+t[1]);
-    return '<div class="tier'+(t[6]?' tier-top':'')+'"><div class="rn num">'+t[0]+'</div><div class="tier-b"><div class="tn kufi">عوجا '+he(t[1])+'<span class="tn-en serif">'+he(t[2])+'</span>'+(t[6]?'<span class="tier-badge">الأعلى</span>':'')+'</div><div class="tb">'+he(t[3])+'</div><div class="tier-act">'+cta+'</div></div></div>';
+  var sub='<div class="tier-sub reveal">كل الأعضاء يحصلون على خصم 20% على إقاماتهم — وأعضاء طُريف يحصلون على أكثر.</div>';
+  return sub+'<div class="tier-grid">'+T.map(function(t,i){
+    var cta=waBtn(t[5],t[4],'secondary mini','تواصل عن '+t[1]);
+    var seal=t[6]?('<span class="tc-seal">'+crown+'</span>'):'';
+    var badge=t[6]?'<span class="tc-badge">الأعلى</span>':'';
+    return '<div class="tier-card reveal d'+(i+1)+(t[6]?' top':'')+'">'+seal
+      +'<div class="tc-head"><span class="tc-rn num">'+t[0]+'</span><span><span class="tc-name kufi">عوجا '+he(t[1])+'</span><span class="tc-en serif">'+he(t[2])+'</span></span></div>'
+      +badge
+      +'<div class="tc-body">'+he(t[3])+'</div>'
+      +'<div class="tc-cta">'+cta+'</div></div>';
   }).join('')+'</div>';
 }
 function conciergeBand(){
-  return '<span class="eyebrow center">كونسيرج عوجا إيليت</span><div class="conc-h kufi">نرتّب إقامتك من أولها لآخرها</div><p class="conc-p">راسلنا على واتساب ونتكفّل بالباقي — التوفر، السعر، والوصول.</p>'+waBtn(GEN_MSG,'elite_whatsapp_click','primary',null);
+  return '<span class="conc-mark">'+WAG+'</span><span class="eyebrow center">كونسيرج عوجا إيليت</span><div class="conc-h kufi">نرتّب إقامتك من أولها لآخرها</div><p class="conc-p">راسلنا على واتساب ونتكفّل بالباقي — التوفر، السعر، والوصول.</p>'+waBtn(GEN_MSG,'elite_whatsapp_click','primary',null);
 }
 function disc(n){return Math.round(Number(n)*(1-DISCOUNT));}
 function save(n){return Number(n)-disc(n);}
@@ -41787,13 +41848,14 @@ function viewHome(){
   var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
   var chips=(cfg.noo||[]).slice(0,6).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
   V.innerHTML=
-    '<section class="hero">'+heroBg+'<div class="hero-ov"></div><div class="hero-in"><div class="wrap rise">'
-      +'<span class="eyebrow">Ouja Elite · عضوية مختارة</span>'
-      +'<h1 class="h-hero kufi">إقاماتٌ مختارة، وضيافةٌ على قدر المقام</h1>'
-      +'<div class="hero-sub serif">A curated residence collection · Riyadh</div>'
-      +'<p class="hero-lead">نختار لك من إقامات عوجا ما يليق بضيافتك، ونرتّب كل تفصيل قبل وصولك.</p>'
+    '<section class="hero">'+heroBg+'<div class="hero-grain"></div><div class="hero-ov"></div><div class="hero-frame"></div><div class="hero-in"><div class="wrap">'
+      +'<span class="eyebrow rise" style="animation-delay:.02s">Ouja Elite · عضوية مختارة</span>'
+      +'<span class="h-rule"></span>'
+      +'<h1 class="h-hero kufi rise" style="animation-delay:.16s">إقاماتٌ مختارة، وضيافةٌ على قدر المقام</h1>'
+      +'<div class="hero-sub serif rise" style="animation-delay:.30s">A curated residence collection · Riyadh</div>'
+      +'<p class="hero-lead rise" style="animation-delay:.40s">نختار لك من إقامات عوجا ما يليق بضيافتك، ونرتّب كل تفصيل قبل وصولك.</p>'
     +'</div></div></section>'
-    +'<section class="wrap band-tight"><div class="widget rise" style="animation-delay:.08s">'
+    +'<section class="wrap band-tight"><div class="widget rise" style="animation-delay:.52s">'
       +'<span class="eyebrow">احجز إقامتك</span>'
       +'<div id="err" class="err"></div>'
       +'<div class="wfields">'
@@ -41806,18 +41868,19 @@ function viewHome(){
       +'<button class="btn primary block stacked" id="go"><span class="micro">View Residences</span><span class="lbl">اعرض الإقامات المتاحة</span></button>'
     +'</div></section>'
     +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec"><span class="eyebrow center">لماذا عوجا إيليت</span><div class="pillars">'+pillarsHtml()+'</div></section>'
-    +'<section class="wrap sec"><div class="sec-head"><span class="eyebrow">إقامات مختارة</span><h2 class="h-sec kufi">مجموعتنا المنتقاة</h2></div>'
+    +'<section class="wrap sec"><span class="eyebrow center reveal">لماذا عوجا إيليت</span><div class="pillars reveal d1">'+pillarsHtml()+'</div></section>'
+    +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">إقامات مختارة</span><h2 class="h-sec kufi">مجموعتنا المنتقاة</h2></div>'
       +'<div id="collection" class="grid">'+skeletons(2)+'</div>'
-      +'<div class="center" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
+      +'<div class="center reveal" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
     +'</section>'
     +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec"><div class="sec-head"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
+    +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
     +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec standard center"><span class="eyebrow center">معيار عوجا</span><div class="h-standard kufi">من أهل الدرعية 🤎</div><p class="standard-p">في عوجا، لا نقيس أنفسنا بمدارس الضيافة القائمة… نحن نبني المدرسة التي سيُقاس بها غيرنا.</p></section>'
-    +'<section class="wrap"><div class="concierge">'+conciergeBand()+'</div></section>';
+    +'<section class="wrap sec standard center reveal"><span class="crest"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 7.4L21 12l-7.4 1.6L12 21l-1.6-7.4L3 12l7.4-1.6L12 3Z"/></svg></span><span class="eyebrow center">معيار عوجا</span><div class="h-standard kufi">من أهل الدرعية 🤎</div><p class="standard-p">في عوجا، لا نقيس أنفسنا بمدارس الضيافة القائمة… نحن نبني المدرسة التي سيُقاس بها غيرنا.</p></section>'
+    +'<section class="wrap"><div class="concierge reveal">'+conciergeBand()+'</div></section>';
   setupWidget();
   loadCollection();
+  reveal();
 }
 
 function setupWidget(){
@@ -41843,7 +41906,7 @@ function loadCollection(){
   fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
     var res=((d&&d.results)||[]).slice(0,4);var el=document.getElementById('collection');if(!el)return;
     if(!res.length){el.innerHTML='<p class="muted" style="grid-column:1/-1">تواصل مع الكونسيرج لعرض الإقامات المتاحة.</p>';return;}
-    el.innerHTML=res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('');
+    el.innerHTML=res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('');reveal();
   }).catch(function(){var el=document.getElementById('collection');if(el)el.innerHTML='<p class="muted" style="grid-column:1/-1">تعذّر تحميل الإقامات حاليًا، جرّب بعد قليل.</p>';});
 }
 
@@ -41852,7 +41915,7 @@ function card(l){
   var cov=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'" src="'+he(l.cover)+'">'):monoPh();
   var ovr=[];if(avail)ovr.push('<span class="tag ok">متاحة</span>');if(l.badge)ovr.push('<span class="tag gold">'+he(l.badge)+'</span>');
   var price=priceHtml(l);
-  return '<a class="col-card" href="/elite/'+he(l.slug)+location.search+'">'
+  return '<a class="col-card reveal" href="/elite/'+he(l.slug)+location.search+'">'
     +'<div class="cover">'+cov+'<div class="frame"></div>'+(ovr.length?('<div class="tags">'+ovr.join('')+'</div>'):'')+'</div>'
     +'<div class="cc-body">'
       +(l.area?('<div class="cc-area">'+he(l.area)+'</div>'):'')
@@ -41886,7 +41949,7 @@ function viewSearch(){
       track('elite_results_view',{type:ty,count:res.length});
       head+='<h2 class="res-head">'+(browse?('عندنا '+res.length+' إقامة مختارة'):('لقينا لك '+res.length+' إقامة مختارة'))+'</h2>';
       head+='<div class="note">التوفر والسعر النهائي يتأكّد مع الكونسيرج</div>';
-      V.innerHTML=sm+head+'<div class="grid" style="margin:8px 0 30px">'+res.map(card).join('')+'</div>'+inlineConcierge()+'</div>';
+      V.innerHTML=sm+head+'<div class="grid" style="margin:8px 0 30px">'+res.map(card).join('')+'</div>'+inlineConcierge()+'</div>';reveal();
     } else {
       track('elite_no_results',{type:ty,check_in:ci,check_out:co});
       V.innerHTML=sm+head+'<div class="state"><div class="em">'+IC.spark+'</div><h2>ما لقينا إقامات بنفس الاختيارات</h2><p>جرّب تغيير التاريخ أو نوع الإقامة — أو خلّ الكونسيرج يرشّح لك.</p><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل البحث</span></a></div><div id="sim"></div>'+inlineConcierge()+'</div>';
@@ -41898,7 +41961,7 @@ function inlineConcierge(){return '<div class="concierge" style="margin:30px 0 4
 function loadSimilar(ty){
   fetch('/api/stay/search?type='+encodeURIComponent(ty)).then(function(r){return r.json();}).then(function(d){
     var res=((d&&d.results)||[]).slice(0,4);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
-    el.innerHTML='<h2 class="res-head" style="font-size:20px">إقامات مشابهة — جرّب تواريخ مختلفة</h2><div class="grid" style="margin:8px 0 20px">'+res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('')+'</div>';
+    el.innerHTML='<h2 class="res-head" style="font-size:20px">إقامات مشابهة — جرّب تواريخ مختلفة</h2><div class="grid" style="margin:8px 0 20px">'+res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('')+'</div>';reveal();
   }).catch(function(){});
 }
 
@@ -41935,13 +41998,13 @@ function viewListing(){
     var WHY={cinema:[IC.spark,'سينما خاصة لتجربة مشاهدة أهدى'],balcony:[IC.spark,'بلكونة مناسبة لجلسة خفيفة'],boulevard:[IC.spark,'قريبة من البوليفارد وأهم وجهات الرياض'],tower_view:[IC.spark,'إطلالة من برج مميز'],self_entry:[IC.key,'دخول ذاتي بدون انتظار'],family:[IC.spark,'مساحة مناسبة للعائلة'],studio:[IC.spark,'استوديو عملي للإقامات القصيرة'],'1br':[IC.spark,'غرفة وصالة مريحة'],'2br':[IC.spark,'مساحة أوسع تكفي مجموعة']};
     var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k])wr.push('<div class="why-row"><span class="wi">'+WHY[k][0]+'</span><span>'+he(WHY[k][1])+'</span></div>');});
     if(l.area&&wr.length<4)wr.push('<div class="why-row"><span class="wi">'+IC.spark+'</span><span>موقع مميز في '+he(l.area)+'</span></div>');
-    var why=wr.length?('<div class="sec" style="margin-top:32px"><span class="eyebrow">ليش هالإقامة؟</span><div class="why">'+wr.slice(0,5).join('')+'</div></div>'):'';
+    var why=wr.length?('<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">ليش هالإقامة؟</span><div class="why">'+wr.slice(0,5).join('')+'</div></div>'):'';
     var groups=(l.amenity_groups||[]);
     var amen='';
-    if(groups.length){var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);amen='<div class="sec" style="margin-top:32px"><span class="eyebrow">المميزات</span><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';}
+    if(groups.length){var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);amen='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">المميزات</span><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';}
     var desc=(l.desc_ar||l.short_ar||'');
-    var descBlk=desc?('<div class="sec" style="margin-top:32px"><span class="eyebrow">عن الإقامة</span><div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div></div>'):'';
-    var perks='<div class="sec" style="margin-top:32px"><span class="eyebrow">امتيازات عوجا إيليت</span><div class="perks">'
+    var descBlk=desc?('<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">عن الإقامة</span><div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div></div>'):'';
+    var perks='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">امتيازات عوجا إيليت</span><div class="perks">'
       +'<div class="perk"><span class="pk-i">'+IC.bell+'</span><div><b>كونسيرج خاص ٢٤/٧</b> <span>— نرتّب طلباتك قبل وأثناء الإقامة.</span></div></div>'
       +'<div class="perk"><span class="pk-i">'+IC.car+'</span><div><b>سائق خاص</b> <span>— مرسيدس · سواري المسافر تحت طلبك.</span></div></div>'
       +'<div class="perk"><span class="pk-i">'+IC.badge+'</span><div><b>حجز مباشر</b> <span>— بدون رسوم منصات الحجز.</span></div></div>'
@@ -41960,7 +42023,7 @@ function viewListing(){
     var msg=waBook(l,dci,dco,(l.nights||0),pq.get('guests'));
     var cta=num?('<a class="btn primary block" id="wabtn" target="_blank" rel="noopener" href="'+he(waHref(msg))+'">'+WAG+'<span class="lbl">احجز عبر كونسيرج واتساب</span></a>'):('<button class="btn primary block off" disabled>'+WAG+'<span class="lbl">الكونسيرج غير متاح حاليًا</span></button>');
     var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+'<div class="reassure">السعر النهائي يتأكّد مع الكونسيرج · ضيافة عوجا إيليت</div></div>';
-    document.body.appendChild(bar);document.body.classList.add('has-cta');
+    document.body.appendChild(bar);document.body.classList.add('has-cta');reveal();
     var wb=document.getElementById('wabtn');if(wb){wb.addEventListener('click',function(){track('elite_whatsapp_click',{listing_id:l.id});});}
     var gall=document.getElementById('gall');if(gall){gall.onclick=function(){openGallery(imgs,l.name_ar);};}
     var tg=document.getElementById('amtog');if(tg){tg.onclick=function(){var r=document.getElementById('amr');if(r){var open=r.style.display!=='none';r.style.display=open?'none':'block';tg.textContent=open?'عرض كل المميزات':'عرض أقل';}};}
