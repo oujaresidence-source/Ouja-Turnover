@@ -42141,14 +42141,16 @@ function listingPrice(l){
 }
 
 var DISTRICTS=[
-  {k:'الدرعية',alt:['درعية','الدرعيه','diriyah','bujairi','البجيري','طريف'],en:'Diriyah',x:78,y:82},
-  {k:'حطين',alt:['hittin','hittеen'],en:'Hittin',x:98,y:152},
-  {k:'الملقا',alt:['malqa','ملقا','almalqa'],en:'Al Malqa',x:168,y:60},
-  {k:'النرجس',alt:['narjis','alnarjis'],en:'Al Narjis',x:252,y:48},
-  {k:'الياسمين',alt:['yasmin','الياسمن','jasmine'],en:'Al Yasmin',x:268,y:94},
-  {k:'الصحافة',alt:['sahafa','alsahafa'],en:'Al Sahafa',x:208,y:110},
-  {k:'النخيل',alt:['nakheel','nakhil','نخيل'],en:'Al Nakheel',x:236,y:152},
-  {k:'العليا',alt:['olaya','البوليفارد','boulevard','owa','عليا','عُليا'],en:'Olaya · Boulevard',x:204,y:194}
+  {k:'الماجدية',alt:['ماجدية','الماجديه','majdiah','almajdiah'],en:'Al Majdiah',x:96,y:44},
+  {k:'الملقا',alt:['ملقا','malqa','almalqa'],en:'Al Malqa',x:170,y:54},
+  {k:'النرجس',alt:['نرجس','narjis','alnarjis'],en:'Al Narjis',x:256,y:46},
+  {k:'الدرعية',alt:['درعية','الدرعيه','diriyah','bujairi','البجيري','طريف'],en:'Diriyah',x:70,y:98},
+  {k:'الياسمين',alt:['ياسمين','الياسمن','yasmin','jasmine'],en:'Al Yasmin',x:274,y:92},
+  {k:'الصحافة',alt:['صحافة','sahafa','alsahafa'],en:'Al Sahafa',x:214,y:104},
+  {k:'العقيق',alt:['عقيق','aqiq','al-aqiq','alaqiq','kafd','financial'],en:'Al Aqiq · KAFD',x:150,y:130},
+  {k:'النخيل',alt:['نخيل','nakheel','nakhil'],en:'Al Nakheel',x:242,y:148},
+  {k:'حطين',alt:['حطين','hittin'],en:'Hittin',x:104,y:162},
+  {k:'العليا',alt:['عليا','olaya','البوليفارد','boulevard','owa'],en:'Olaya · Boulevard',x:206,y:196}
 ];
 var AREA_GUIDES={
   'الدرعية':'مهد الدولة وموطن التراث — البجيري ومطاعمه على ضفاف وادي حنيفة. من هنا نحن: من أهل الدرعية 🤎',
@@ -42158,13 +42160,17 @@ var AREA_GUIDES={
   'الياسمين':'حيٌّ عائلي محبوب، مقاهٍ وحدائق وقربٌ من الوجهات الشمالية.',
   'الصحافة':'حيٌّ شمالي راقٍ، خدمات متكاملة وقربٌ من المراكز الحيوية.',
   'النخيل':'قلب الأعمال والمراكز التجارية، قريب من برج المملكة والوجهات المركزية.',
-  'العليا':'نبض الرياض — البوليفارد، أرقى المطاعم والتسوّق والحياة على بُعد دقائق.'
+  'العليا':'نبض الرياض — البوليفارد، أرقى المطاعم والتسوّق والحياة على بُعد دقائق.',
+  'العقيق':'موطن مركز الملك عبدالله المالي (KAFD) وأبراجه — حيٌّ حديث نابض قرب أهم وجهات الأعمال.',
+  'الماجدية':'شمال غرب الرياض — هدوء ومساحات جديدة بعيدًا عن الزحام.'
 };
-function matchDistrict(area){
-  var a=(area||'').toLowerCase();if(!a)return null;
-  for(var i=0;i<DISTRICTS.length;i++){var d=DISTRICTS[i],kk=d.k.toLowerCase();
-    if(a.indexOf(kk)>=0||kk.indexOf(a)>=0)return d.k;
-    var alt=d.alt||[];for(var j=0;j<alt.length;j++){if(alt[j]&&a.indexOf(alt[j].toLowerCase())>=0)return d.k;}
+function matchListing(l){
+  var hay=((l.name_ar||'')+' '+(l.name_en||'')+' '+(l.area||'')).toLowerCase();
+  var tk=(l.tag_keys||[]);
+  if(tk&&tk.indexOf&&tk.indexOf('boulevard')>=0)return 'العليا';
+  for(var i=0;i<DISTRICTS.length;i++){var d=DISTRICTS[i];
+    if(hay.indexOf(d.k.toLowerCase())>=0)return d.k;
+    var alt=d.alt||[];for(var j=0;j<alt.length;j++){if(alt[j]&&hay.indexOf(alt[j].toLowerCase())>=0)return d.k;}
   }
   return null;
 }
@@ -42183,9 +42189,11 @@ function mapHtml(){
 }
 function loadAreas(){
   fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
-    var res=(d&&d.results)||[];if(!res.length)return;
-    var byKey={},extra={};
-    res.forEach(function(l){var a=(l.area||'').trim();if(!a)return;var dk=matchDistrict(a);if(dk){(byKey[dk]=byKey[dk]||[]).push(l);}else{(extra[a]=extra[a]||[]).push(l);}});
+    var res=(d&&d.results)||[];
+    var byKey={},extra={},GEN={'riyadh':1,'الرياض':1,'رياض':1,'ksa':1,'saudi arabia':1,'sa':1};
+    res.forEach(function(l){var dk=matchListing(l);if(dk){(byKey[dk]=byKey[dk]||[]).push(l);return;}var a=(l.area||'').trim();if(a&&!GEN[a.toLowerCase()]){(extra[a]=extra[a]||[]).push(l);}});
+    var sec=document.querySelector('.explore');
+    if(!Object.keys(byKey).length&&!Object.keys(extra).length){if(sec)sec.style.display='none';return;}
     window._eliteAreas={byKey:byKey,extra:extra};
     DISTRICTS.forEach(function(dd){var g=document.querySelector('.pin[data-k="'+dd.k+'"]');if(!g)return;var list=byKey[dd.k]||[];if(list.length){g.classList.remove('empty');var pc=g.querySelector('.pcount');if(pc)pc.textContent=list.length;g.onclick=function(){selectArea(dd.k);};}});
     var chips='';
@@ -42195,7 +42203,7 @@ function loadAreas(){
     if(ce){ce.innerHTML=chips;ce.querySelectorAll('.area-chip').forEach(function(b){b.onclick=function(){var k=b.getAttribute('data-k'),a=b.getAttribute('data-a');if(k)selectArea(k);else selectExtra(a);};});}
     var best=null,bn=0;DISTRICTS.forEach(function(dd){var n=(byKey[dd.k]||[]).length;if(n>bn){bn=n;best=dd.k;}});
     if(best)selectArea(best);else{var ek=Object.keys(extra)[0];if(ek)selectExtra(ek);}
-  }).catch(function(){});
+  }).catch(function(){var sec=document.querySelector('.explore');if(sec)sec.style.display='none';});
 }
 function selectArea(k){
   var A=window._eliteAreas||{byKey:{}};var list=A.byKey[k]||[];var d=null;DISTRICTS.forEach(function(dd){if(dd.k===k)d=dd;});
@@ -42256,7 +42264,7 @@ function viewHome(){
       +'<div class="center reveal" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
     +'</section>'
     +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec explore"><div class="sec-head reveal"><span class="eyebrow">استكشف الرياض</span><h2 class="h-sec kufi">إقاماتنا حسب الحي</h2></div>'+mapHtml()+'</section>'
+    +'<section class="wrap sec explore"><div class="sec-head reveal"><span class="eyebrow">استكشف الرياض</span><h2 class="h-sec kufi">أحياء مختارة في الرياض</h2></div>'+mapHtml()+'</section>'
     +'<div class="wrap">'+divider()+'</div>'
     +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
     +'<div class="wrap">'+divider()+'</div>'
