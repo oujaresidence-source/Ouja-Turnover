@@ -42573,6 +42573,47 @@ async def _handle_elite_img(request):
     return web.Response(body=data, content_type="image/webp", headers=headers)
 
 
+def _elite_geo_points():
+    """{id: [approx_lat, approx_lng]} for visible Elite listings that have stored coordinates
+    (reused from the dispatch Listings store — maps_link or saved lat/lng). Coordinates are
+    deliberately APPROXIMATE: a stable per-listing jitter (~300m) + rounding to ~110m, so the
+    public map shows the general area, never the exact building. Returns (points, count, total)."""
+    listings = (_ls_get().get("listings") or {})
+    pts, total = {}, 0
+    for s, ov in _gw_visible_snaps():
+        total += 1
+        lid = s.get("id")
+        if lid is None:
+            continue
+        rec = listings.get(str(lid)) or listings.get(lid) or {}
+        ll = _extract_latlng(rec.get("maps_link") or "")
+        if not ll and rec.get("lat") is not None and rec.get("lng") is not None:
+            try:
+                ll = (float(rec["lat"]), float(rec["lng"]))
+            except (TypeError, ValueError):
+                ll = None
+        if not ll:
+            continue
+        lat, lng = ll
+        if not (24.0 <= lat <= 25.6 and 46.0 <= lng <= 47.6):   # Riyadh sanity bounds
+            continue
+        h = int(hashlib.sha1(str(lid).encode("utf-8")).hexdigest(), 16)
+        dlat = ((h % 1000) / 1000.0 - 0.5) * 0.0060            # +/- ~0.003 deg (~330m)
+        dlng = (((h // 1000) % 1000) / 1000.0 - 0.5) * 0.0060
+        pts[str(lid)] = [round(lat + dlat, 3), round(lng + dlng, 3)]
+    return pts, len(pts), total
+
+
+async def _handle_elite_geo(request):
+    """Public — APPROXIMATE per-listing coordinates for the Elite map (never exact)."""
+    try:
+        pts, count, total = _elite_geo_points()
+    except Exception as e:
+        print("elite geo error:", e)
+        pts, count, total = {}, 0, 0
+    return web.json_response({"points": pts, "count": count, "total": total})
+
+
 async def _api_gw_hero(request):
     """Dashboard hero control. GET → config + resolved + listings-with-images for the chooser. POST → save/reset."""
     if request.method == "GET":
@@ -42929,6 +42970,7 @@ async def start_web_server():
         app.router.add_get("/elite/search", _handle_elite_search)
         app.router.add_get("/elite/id/{lid}", _handle_elite_id)
         app.router.add_get("/elite/img", _handle_elite_img)
+        app.router.add_get("/api/elite/geo", _handle_elite_geo)
         app.router.add_get("/elite/{slug}", _handle_elite_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
