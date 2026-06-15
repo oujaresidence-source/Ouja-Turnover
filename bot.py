@@ -9168,6 +9168,199 @@ def _exp_sheet_row_to_sub(idx, row):
 
 _exp_sheet_diag = {}     # last sheet-poll diagnostics (for troubleshooting)
 
+# ============================================================================
+# MANUAL SHEET INTAKE — accountant-controlled pull (Google Sheet → website)
+# ----------------------------------------------------------------------------
+# The field-expense Sheet → website pull used to run automatically every few
+# minutes. The accountants were anxious about duplicates, so Faisal asked for
+# FULL manual control:
+#   • autopull defaults OFF — nothing enters the website until someone clicks «اسحب».
+#   • Pull a chosen DATE RANGE (by expense date; the form timestamp is the fallback).
+#   • A preview first SHOWS how many rows are already in the system, so re-pulling
+#     is visibly safe — intake is idempotent (dedupe by submission_id) and can
+#     never create a duplicate; the preview just makes that trust visible.
+#   • «احذف الكل» wipes the sheet-sourced expenses LOCALLY (backup first); it
+#     NEVER touches Hostaway or Daftra.
+# ============================================================================
+_exp_intake = _load_json("exp_intake.json", {}) or {}
+_exp_intake.setdefault("autopull", os.environ.get("EXPENSE_SHEET_AUTOPULL", "0") in ("1", "true", "True", "yes"))
+_exp_intake.setdefault("pulls", [])      # append-only log of manual pulls (kept to last 200)
+
+def _exp_intake_save():
+    _exp_intake["pulls"] = (_exp_intake.get("pulls") or [])[-200:]
+    _save_json("exp_intake.json", {"autopull": bool(_exp_intake.get("autopull")),
+                                   "pulls": _exp_intake["pulls"]})
+
+def _exp_amt_num(a):
+    """Sheet amount string → float (0.0 on anything unparseable). Display/sum only."""
+    try:
+        return round(float(str(a).replace(",", "").strip()), 2) if a not in (None, "") else 0.0
+    except Exception:
+        return 0.0
+
+def _exp_sub_eff_date(sub):
+    """Effective date for range-filtering one sheet row: the expense_date if it is a real
+    YYYY-MM-DD, else the date part of the form timestamp. '' if neither is usable."""
+    d = (sub.get("expense_date") or "").strip()[:10]
+    if re.match(r"\d{4}-\d{2}-\d{2}$", d):
+        return d
+    ts = _exp_parse_sheet_date(sub.get("submitted_at") or "")
+    return ts if re.match(r"\d{4}-\d{2}-\d{2}$", ts or "") else ""
+
+def _exp_sheet_subs():
+    """Fetch + parse the sheet into (list-of-submission-dicts, diag). No ingest, no
+    Hostaway — reuses the exact same fetch/colmap/row-map as the auto poller."""
+    diag = {"configured": bool(EXPENSE_SHEET_CSV_URL), "error": None,
+            "http_status": None, "rows_parsed": 0, "data_rows": 0}
+    if not EXPENSE_SHEET_CSV_URL:
+        diag["error"] = "EXPENSE_SHEET_CSV_URL not set on Railway"
+        return [], diag
+    fetched = _exp_fetch_sheet(timeout=30)
+    diag["http_status"] = fetched.get("status")
+    text = fetched.get("text")
+    if not text:
+        diag["error"] = fetched.get("error") or "no data returned"
+        return [], diag
+    import csv as _csv, io as _io
+    rows = list(_csv.reader(_io.StringIO(text)))
+    diag["rows_parsed"] = len(rows)
+    if len(rows) < 2:
+        diag["error"] = diag["error"] or ("no data rows (only %d)" % len(rows))
+        return [], diag
+    idx = _exp_sheet_colmap(rows[0])
+    subs = []
+    for raw in rows[1:]:
+        if not any(str(c).strip() for c in raw):
+            continue
+        diag["data_rows"] += 1
+        sub = _exp_sheet_row_to_sub(idx, raw)
+        if sub:
+            subs.append(sub)
+    return subs, diag
+
+def _exp_pull_args(b):
+    """Normalize {from,to,all_dates} from a request body."""
+    frm = str((b or {}).get("from") or "").strip()[:10]
+    to  = str((b or {}).get("to") or "").strip()[:10]
+    alld = bool((b or {}).get("all_dates"))
+    if frm and to and frm > to:
+        frm, to = to, frm
+    return frm, to, alld
+
+def _exp_in_range(ed, frm, to, all_dates):
+    return bool(all_dates or (ed and frm and to and frm <= ed <= to))
+
+def _exp_prior_pull_for(frm, to):
+    """Most recent matching manual pull of this exact range (for the «سحبتها قبل» note)."""
+    for p in reversed(_exp_intake.get("pulls") or []):
+        if not p.get("all_dates") and p.get("from") == frm and p.get("to") == to:
+            return {"at": p.get("at"), "by": p.get("by"), "created": p.get("created"),
+                    "existing": p.get("existing")}
+    return None
+
+def _exp_scan_range(frm, to, all_dates=False):
+    """READ-ONLY: what a pull of this range WOULD bring in. Surfaces 'already in system'
+    so the accountant sees re-pulling won't duplicate. No ingest, no Hostaway."""
+    subs, diag = _exp_sheet_subs()
+    have = {str(e.get("submission_id")) for e in _expenses.values()}
+    out = {"ok": not bool(diag.get("error")), "error": diag.get("error"),
+           "configured": bool(diag.get("configured")), "http_status": diag.get("http_status"),
+           "from": frm, "to": to, "all_dates": bool(all_dates),
+           "scanned": len(subs), "in_range": 0, "out_of_range": 0, "undated": 0,
+           "new": 0, "existing": 0, "new_sar": 0.0, "existing_sar": 0.0,
+           "sample_new": [], "sample_existing": [], "prior_pull": _exp_prior_pull_for(frm, to)}
+    for sub in subs:
+        ed = _exp_sub_eff_date(sub)
+        if not ed and not all_dates:
+            out["undated"] += 1
+            continue
+        if not _exp_in_range(ed, frm, to, all_dates):
+            out["out_of_range"] += 1
+            continue
+        out["in_range"] += 1
+        amt = _exp_amt_num(sub.get("amount"))
+        sample = {"date": ed, "amount": amt, "apartment": (sub.get("apartment") or "")[:40],
+                  "submitter": (sub.get("submitter") or "")[:40]}
+        if str(sub.get("submission_id")) in have:
+            out["existing"] += 1; out["existing_sar"] += amt
+            if len(out["sample_existing"]) < 8: out["sample_existing"].append(sample)
+        else:
+            out["new"] += 1; out["new_sar"] += amt
+            if len(out["sample_new"]) < 8: out["sample_new"].append(sample)
+    out["new_sar"] = round(out["new_sar"], 2)
+    out["existing_sar"] = round(out["existing_sar"], 2)
+    return out
+
+def _exp_pull_range(frm, to, by="", all_dates=False):
+    """EXECUTE a manual range pull. Idempotent (dedupe by submission_id) — already-present
+    rows are skipped, never duplicated. Records the pull in the ledger."""
+    subs, diag = _exp_sheet_subs()
+    if diag.get("error"):
+        return {"ok": False, "error": diag["error"], "configured": bool(diag.get("configured"))}
+    created = existing = in_range = undated = 0
+    created_sar = 0.0
+    for sub in subs:
+        ed = _exp_sub_eff_date(sub)
+        if not ed and not all_dates:
+            undated += 1
+            continue
+        if not _exp_in_range(ed, frm, to, all_dates):
+            continue
+        in_range += 1
+        try:
+            _e, was_new = _exp_ingest(sub)
+        except Exception as ex:
+            print("manual pull ingest error:", ex)
+            continue
+        if was_new:
+            created += 1; created_sar += _exp_amt_num(sub.get("amount"))
+        else:
+            existing += 1
+    stamp = datetime.now(TZ).isoformat(timespec="minutes")
+    entry = {"id": "pl-" + datetime.now(TZ).strftime("%Y%m%d%H%M%S"),
+             "from": frm, "to": to, "all_dates": bool(all_dates), "at": stamp,
+             "by": (by or "dashboard")[:60], "scanned": len(subs), "in_range": in_range,
+             "created": created, "existing": existing, "undated": undated,
+             "created_sar": round(created_sar, 2)}
+    _exp_intake.setdefault("pulls", []).append(entry)
+    global _exp_sheet_last_sync
+    _exp_sheet_last_sync = stamp
+    _exp_intake_save()
+    persist_state()
+    if created:
+        scope = "كل التواريخ" if all_dates else (str(frm) + "→" + str(to))
+        log_event("ops", "مصاريف الميدان · سحب يدوي " + str(created) + " مصروف جديد (" + scope + ")")
+    return {"ok": True, **entry}
+
+def _exp_delete_all_sheet(by="", confirm=""):
+    """LOCAL-ONLY wipe of sheet-sourced (gs-) expenses so the team can start clean and
+    re-pull. Backs up the full ledger first; NEVER calls Hostaway/Daftra. Split
+    parents/children are kept (deleting them would orphan the split)."""
+    if str(confirm or "").strip().upper() not in ("DELETE", "حذف", "نعم", "احذف"):
+        return {"ok": False, "error": "confirm_required"}
+    victims, kept_split, were_in_hostaway, total_sar = [], 0, 0, 0.0
+    for eid, e in list(_expenses.items()):
+        if not str(e.get("submission_id") or "").startswith("gs-"):
+            continue
+        if e.get("is_split_parent") or e.get("split_parent_id"):
+            kept_split += 1
+            continue
+        victims.append(eid)
+        if e.get("hostaway_ref") or e.get("hostaway_expense_id"):
+            were_in_hostaway += 1
+        total_sar += abs(_exp_amt_num(e.get("amount")))
+    backup = "expenses_backup_" + datetime.now(TZ).strftime("%Y%m%d-%H%M%S") + ".json"
+    _save_json(backup, _expenses)        # recoverable snapshot BEFORE we mutate
+    for eid in victims:
+        _expenses.pop(eid, None)
+    _exp_intake["pulls"] = []            # fresh slate for the duplicate-warning ledger
+    _exp_intake_save()
+    persist_state()
+    log_event("ops", "مصاريف الميدان · حذف الكل (محلي) " + str(len(victims)) +
+              " مصروف من الموقع — Hostaway/دافترة لم يُمسّا")
+    return {"ok": True, "deleted": len(victims), "deleted_sar": round(total_sar, 2),
+            "kept_split": kept_split, "were_in_hostaway": were_in_hostaway, "backup": backup}
+
 def _exp_poll_sheet():
     """Fetch the shared Google Sheet as CSV and ingest any new rows. Idempotent
     (rows dedupe by a stable submission_id). Returns count of newly-created expenses.
@@ -34731,6 +34924,50 @@ async def _api_exp4_approve_all(request):
     by = _exp4_actor(request, await _read_body(request))
     return _json(await asyncio.to_thread(_exp4_approve_all_pending, by))
 
+# ---- Manual sheet intake (Sheet → website): state, preview, pull, delete-all ----
+async def _api_exp4_intake_get(request):
+    """Manual-pull panel state: auto on/off, sheet configured?, last sync, recent pulls."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "autopull": bool(_exp_intake.get("autopull")),
+                  "configured": bool(EXPENSE_SHEET_CSV_URL), "last_sync": _exp_sheet_last_sync,
+                  "pulls": list(reversed((_exp_intake.get("pulls") or [])[-20:]))})
+
+async def _api_exp4_intake_set(request):
+    """Turn the automatic sheet poll on/off (default off = fully manual)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    _exp_intake["autopull"] = bool(b.get("autopull"))
+    await asyncio.to_thread(_exp_intake_save)
+    return _json({"ok": True, "autopull": _exp_intake["autopull"]})
+
+async def _api_exp4_pull_preview(request):
+    """Read-only preview of a date-range pull (shows 'already in system' → no duplicates)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    frm, to, alld = _exp_pull_args(await _read_body(request))
+    if not alld and not (frm and to):
+        return _json({"ok": False, "error": "dates_required"}, 400)
+    return _json(await asyncio.to_thread(_exp_scan_range, frm, to, alld))
+
+async def _api_exp4_pull_run(request):
+    """Execute a manual date-range pull (idempotent — re-pulling never duplicates)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    frm, to, alld = _exp_pull_args(b)
+    if not alld and not (frm and to):
+        return _json({"ok": False, "error": "dates_required"}, 400)
+    return _json(await asyncio.to_thread(_exp_pull_range, frm, to, by, alld))
+
+async def _api_exp4_delete_all(request):
+    """LOCAL-ONLY delete of sheet-sourced expenses (typed confirm). Never touches Hostaway."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    return _json(await asyncio.to_thread(_exp_delete_all_sheet, by, b.get("confirm") or ""))
+
 async def _api_expenses_sync_status(request):
     """The 'حالة المزامنة' page: every expense + its pipeline stage + who touched it +
     totals per state (count + SAR). Optional ?state= filter."""
@@ -40451,6 +40688,8 @@ async def expense_sheet_loop():
         print("expenses V4 recover error:", e)
     if not EXPENSE_SHEET_CSV_URL:
         return
+    if not _exp_intake.get("autopull"):
+        return        # manual mode (default): the sheet is pulled ONLY from the ERP «اسحب» button
     try:
         n = await asyncio.to_thread(_exp_poll_sheet)
         global _exp_sheet_last_sync
@@ -41734,6 +41973,51 @@ html{scroll-behavior:smooth}
 .standard .crest{display:block;color:var(--gold);margin:0 auto 10px}
 .standard .crest svg{width:26px;height:26px;margin:0 auto}
 @media(prefers-reduced-motion:reduce){.reveal{opacity:1!important;transform:none!important}.reg-wrap .reg path{stroke-dashoffset:0!important}.h-rule{animation:none}}
+/* ===== BEST PASS — hero video, image fade-in, motion craft, explore map ===== */
+/* #1 cinematic hero video */
+.bgvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;transform:scale(1.04)}
+/* #8 image fade-in (blur-up feel) */
+.fadein{opacity:0;transform:scale(1.015);transition:opacity .8s var(--ease),transform .8s var(--ease)}
+.fadein.loaded{opacity:1;transform:none}
+/* #9 cross-page view-transition morph (card photo -> listing hero) */
+@view-transition{navigation:auto}
+::view-transition-group(*){animation-duration:.5s;animation-timing-function:cubic-bezier(.23,1,.32,1)}
+/* #9 brand intro (first visit per session) */
+.intro{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--canvas)}
+.intro.show{display:flex;animation:introOut .6s var(--ease) .9s forwards}
+.intro-mark{color:var(--gold);animation:introMark .9s var(--ease) both}
+.intro-mark svg{width:40px;height:40px}
+.intro-ar{font-size:30px;color:var(--ink);font-weight:600;letter-spacing:.02em;animation:introUp .8s var(--ease) .12s both}
+.intro-en{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.42em;font-size:12px;color:var(--gold-deep);font-weight:600;animation:introUp .8s var(--ease) .22s both}
+@keyframes introMark{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
+@keyframes introUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes introOut{to{opacity:0;visibility:hidden}}
+/* #6 explore Riyadh map */
+.map-wrap{position:relative;border:1px solid var(--line-gold);border-radius:16px;overflow:hidden;background:radial-gradient(120% 100% at 50% 0,#fdfaf3,#f4ede0)}
+.map-svg{display:block;width:100%;height:auto}
+.map-svg .wadi{fill:none;stroke:var(--gold);stroke-width:2.4;opacity:.5;stroke-linecap:round}
+.map-svg .rlabel{fill:var(--mut);font-family:"Cormorant Garamond",serif;font-size:12px;letter-spacing:.34em}
+.pin{cursor:pointer}
+.pin .dot{fill:var(--surface);stroke:var(--gold);stroke-width:1.6;transition:transform .25s var(--ease),fill .25s var(--ease);transform-box:fill-box;transform-origin:center}
+.pin .ring{fill:none;stroke:var(--gold);stroke-width:1.1;opacity:0;transition:opacity .25s var(--ease)}
+.pin .plabel{fill:var(--ink);font-family:"Reem Kufi",serif;font-size:12px;font-weight:500}
+.pin .pcount{fill:var(--gold-deep);font-family:"Cormorant Garamond",serif;font-size:12px;font-weight:700}
+.pin:hover .dot,.pin.on .dot{fill:var(--gold);transform:scale(1.25)}
+.pin.on .ring{opacity:.55}
+.pin.empty{opacity:.3;pointer-events:none}
+.area-panel{padding:20px 18px}
+.area-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.area-name{font-family:"Reem Kufi",serif;font-size:20px;font-weight:500;color:var(--ink)}
+.area-en{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.2em;font-size:11.5px;color:var(--mut);font-weight:600}
+.area-guide{font-size:14px;color:var(--ink-soft);line-height:1.75;margin:0 0 16px}
+.area-res{display:grid;grid-template-columns:1fr;gap:14px}
+.area-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.area-chip{font:inherit;font-size:13px;font-weight:500;padding:0 14px;min-height:40px;display:inline-flex;align-items:center;gap:7px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;transition:background .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease)}
+.area-chip.on{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
+.area-chip .ac-n{font-family:"Cormorant Garamond",serif;font-weight:700;color:var(--gold-deep)}
+.area-chip.on .ac-n{color:var(--gold-soft)}
+@media(min-width:820px){.map-wrap{display:grid;grid-template-columns:1.1fr .9fr;align-items:stretch}.map-svg{height:100%}.area-panel{border-inline-start:1px solid var(--line)}}
+@media (prefers-reduced-motion: reduce){.fadein{opacity:1!important;transform:none!important}.intro{display:none!important}.bgvid{display:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
 .btn:focus-visible,.qp:focus-visible,.col-card:focus-visible,.conc-link:focus-visible,.more:focus-visible,.g-all:focus-visible,.lb-x:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
 .has-cta .foot{padding-bottom:118px}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.hero .bgimg{transform:none}}
@@ -41741,6 +42025,7 @@ html{scroll-behavior:smooth}
 </head>
 <body>
 <div class="grain" aria-hidden="true"></div>
+<div class="intro" id="introScreen" aria-hidden="true"><div class="intro-mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 7.4L21 12l-7.4 1.6L12 21l-1.6-7.4L3 12l7.4-1.6L12 3Z"/></svg></div><div class="intro-ar kufi">عوجا إيليت</div><div class="intro-en">Ouja Elite</div></div>
 <header class="head"><div class="wrap head-in"><a class="brand" href="/elite"><span class="brand-ar">عوجا إيليت</span><span class="brand-en">Ouja Elite</span></a><a class="conc-link" id="headConc" href="#"><svg class="wag" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Z" opacity=".18"/><path d="M12 4a8 8 0 0 0-6.9 12l.3.5-.7 2.5 2.6-.7.5.3A8 8 0 1 0 12 4Z"/></svg>كونسيرج</a></div><div class="wrap head-reg"></div></header>
 <main id="view"></main>
 <footer class="foot"><div class="wrap"><div class="reg-foot"></div><div class="foot-line">من أهل الدرعية 🤎</div><div class="foot-sub serif">Ouja Elite · Curated residences in Riyadh</div><div class="foot-sub">إقامات مختارة في الرياض</div></div></footer>
@@ -41772,11 +42057,26 @@ function divider(){return '<div class="reg-wrap reveal">'+REG+'</div>';}
 function monoPh(){return '<div class="mono">ع</div>';}
 function skeletons(n){var s='';for(var i=0;i<(n||2);i++){s+='<div class="col-card"><div class="cover sk"></div><div class="cc-body"><div class="sk" style="height:13px;width:38%"></div><div class="sk" style="height:20px;width:72%;margin-top:8px"></div><div class="sk" style="height:13px;width:52%;margin-top:10px"></div><div class="sk" style="height:34px;width:100%;margin-top:12px"></div></div></div>';}return s;}
 var _io=null;
+var RM=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
+function imgFade(){
+  document.querySelectorAll('img.fadein:not(.loaded)').forEach(function(i){
+    if(i.complete&&i.naturalWidth>0){i.classList.add('loaded');}
+    else{i.addEventListener('load',function(){i.classList.add('loaded');});i.addEventListener('error',function(){i.classList.add('loaded');});}
+  });
+}
+function magnetize(){
+  if(RM||!(window.matchMedia&&matchMedia('(pointer:fine)').matches))return;
+  document.querySelectorAll('.btn.primary:not([data-mag])').forEach(function(b){
+    b.setAttribute('data-mag','1');
+    b.addEventListener('mousemove',function(e){var r=b.getBoundingClientRect();var x=Math.max(-8,Math.min(8,(e.clientX-(r.left+r.width/2))*0.15));var y=Math.max(-6,Math.min(6,(e.clientY-(r.top+r.height/2))*0.3));b.style.transform='translate('+x.toFixed(1)+'px,'+y.toFixed(1)+'px)';});
+    b.addEventListener('mouseleave',function(){b.style.transform='';});
+  });
+}
 function reveal(){
   var ns=document.querySelectorAll('.reveal:not(.in)');
-  if(!('IntersectionObserver' in window)){ns.forEach(function(e){e.classList.add('in');});return;}
-  if(!_io){_io=new IntersectionObserver(function(en){en.forEach(function(x){if(x.isIntersecting){x.target.classList.add('in');_io.unobserve(x.target);}});},{rootMargin:'0px 0px -7% 0px',threshold:.06});}
-  ns.forEach(function(e){_io.observe(e);});
+  if(!('IntersectionObserver' in window)){ns.forEach(function(e){e.classList.add('in');});}
+  else{if(!_io){_io=new IntersectionObserver(function(en){en.forEach(function(x){if(x.isIntersecting){x.target.classList.add('in');_io.unobserve(x.target);}});},{rootMargin:'0px 0px -7% 0px',threshold:.06});}ns.forEach(function(e){_io.observe(e);});}
+  imgFade();magnetize();
 }
 
 function pillarsHtml(){
@@ -41839,16 +42139,96 @@ function listingPrice(l){
   return '<div class="l-price"><div class="lp-mlabel">سعر عضو عوجا إيليت</div><div class="lp-now"><span class="lp-cur">يظهر مع الكونسيرج</span></div><div class="lp-note">أعضاء طُريف يحصلون على أكثر من خصم 20%</div></div>';
 }
 
+var DISTRICTS=[
+  {k:'الدرعية',alt:['درعية','الدرعيه','diriyah','bujairi','البجيري','طريف'],en:'Diriyah',x:78,y:82},
+  {k:'حطين',alt:['hittin','hittеen'],en:'Hittin',x:98,y:152},
+  {k:'الملقا',alt:['malqa','ملقا','almalqa'],en:'Al Malqa',x:168,y:60},
+  {k:'النرجس',alt:['narjis','alnarjis'],en:'Al Narjis',x:252,y:48},
+  {k:'الياسمين',alt:['yasmin','الياسمن','jasmine'],en:'Al Yasmin',x:268,y:94},
+  {k:'الصحافة',alt:['sahafa','alsahafa'],en:'Al Sahafa',x:208,y:110},
+  {k:'النخيل',alt:['nakheel','nakhil','نخيل'],en:'Al Nakheel',x:236,y:152},
+  {k:'العليا',alt:['olaya','البوليفارد','boulevard','owa','عليا','عُليا'],en:'Olaya · Boulevard',x:204,y:194}
+];
+var AREA_GUIDES={
+  'الدرعية':'مهد الدولة وموطن التراث — البجيري ومطاعمه على ضفاف وادي حنيفة. من هنا نحن: من أهل الدرعية 🤎',
+  'حطين':'حيٌّ راقٍ هادئ غرب الرياض، قريب من وادي حنيفة وأرقى المطاعم والمقاهي — مثالي لإقامة عائلية مريحة.',
+  'الملقا':'وجهة شمالية أنيقة، مقاهٍ ومطاعم عصرية وشوارع واسعة — قريبة من كل شيء.',
+  'النرجس':'شمال الرياض الجديد، مساحات رحبة وسكنٌ هادئ بعيد عن الزحام.',
+  'الياسمين':'حيٌّ عائلي محبوب، مقاهٍ وحدائق وقربٌ من الوجهات الشمالية.',
+  'الصحافة':'حيٌّ شمالي راقٍ، خدمات متكاملة وقربٌ من المراكز الحيوية.',
+  'النخيل':'قلب الأعمال والمراكز التجارية، قريب من برج المملكة والوجهات المركزية.',
+  'العليا':'نبض الرياض — البوليفارد، أرقى المطاعم والتسوّق والحياة على بُعد دقائق.'
+};
+function matchDistrict(area){
+  var a=(area||'').toLowerCase();if(!a)return null;
+  for(var i=0;i<DISTRICTS.length;i++){var d=DISTRICTS[i],kk=d.k.toLowerCase();
+    if(a.indexOf(kk)>=0||kk.indexOf(a)>=0)return d.k;
+    var alt=d.alt||[];for(var j=0;j<alt.length;j++){if(alt[j]&&a.indexOf(alt[j].toLowerCase())>=0)return d.k;}
+  }
+  return null;
+}
+function mapHtml(){
+  var pins=DISTRICTS.map(function(d){
+    return '<g class="pin empty" data-k="'+he(d.k)+'" transform="translate('+d.x+','+d.y+')">'
+      +'<circle class="ring" r="13"></circle><circle class="dot" r="5.5"></circle>'
+      +'<text class="plabel" x="0" y="-12" text-anchor="middle">'+he(d.k)+'</text>'
+      +'<text class="pcount" x="0" y="22" text-anchor="middle"></text></g>';
+  }).join('');
+  var svg='<svg class="map-svg" viewBox="0 0 400 270" role="img" aria-label="خريطة أحياء عوجا في الرياض">'
+    +'<path class="wadi" d="M74 6 C 58 56, 108 104, 80 156 S 122 226, 152 264"></path>'
+    +'<text class="rlabel" x="200" y="256" text-anchor="middle">RIYADH · الرياض</text>'
+    +pins+'</svg>';
+  return '<div class="map-wrap">'+svg+'<div class="area-panel" id="areaPanel"><div class="muted" style="font-size:13px">اختر حيًّا من الخريطة لعرض إقاماته.</div></div></div><div class="area-chips" id="areaChips"></div>';
+}
+function loadAreas(){
+  fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
+    var res=(d&&d.results)||[];if(!res.length)return;
+    var byKey={},extra={};
+    res.forEach(function(l){var a=(l.area||'').trim();if(!a)return;var dk=matchDistrict(a);if(dk){(byKey[dk]=byKey[dk]||[]).push(l);}else{(extra[a]=extra[a]||[]).push(l);}});
+    window._eliteAreas={byKey:byKey,extra:extra};
+    DISTRICTS.forEach(function(dd){var g=document.querySelector('.pin[data-k="'+dd.k+'"]');if(!g)return;var list=byKey[dd.k]||[];if(list.length){g.classList.remove('empty');var pc=g.querySelector('.pcount');if(pc)pc.textContent=list.length;g.onclick=function(){selectArea(dd.k);};}});
+    var chips='';
+    DISTRICTS.forEach(function(dd){var n=(byKey[dd.k]||[]).length;if(n)chips+='<button class="area-chip" data-k="'+he(dd.k)+'">'+he(dd.k)+' <span class="ac-n">'+n+'</span></button>';});
+    Object.keys(extra).forEach(function(a){chips+='<button class="area-chip" data-a="'+he(a)+'">'+he(a)+' <span class="ac-n">'+extra[a].length+'</span></button>';});
+    var ce=document.getElementById('areaChips');
+    if(ce){ce.innerHTML=chips;ce.querySelectorAll('.area-chip').forEach(function(b){b.onclick=function(){var k=b.getAttribute('data-k'),a=b.getAttribute('data-a');if(k)selectArea(k);else selectExtra(a);};});}
+    var best=null,bn=0;DISTRICTS.forEach(function(dd){var n=(byKey[dd.k]||[]).length;if(n>bn){bn=n;best=dd.k;}});
+    if(best)selectArea(best);else{var ek=Object.keys(extra)[0];if(ek)selectExtra(ek);}
+  }).catch(function(){});
+}
+function selectArea(k){
+  var A=window._eliteAreas||{byKey:{}};var list=A.byKey[k]||[];var d=null;DISTRICTS.forEach(function(dd){if(dd.k===k)d=dd;});
+  document.querySelectorAll('.pin').forEach(function(p){p.classList.toggle('on',p.getAttribute('data-k')===k);});
+  document.querySelectorAll('.area-chip').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-k')===k);});
+  paintArea(k,(d&&d.en)||'',AREA_GUIDES[k]||'حيٌّ راقٍ في الرياض، باقة من إقامات عوجا المختارة.',list);
+  track('elite_area_select',{area:k});
+}
+function selectExtra(a){
+  var A=window._eliteAreas||{extra:{}};var list=A.extra[a]||[];
+  document.querySelectorAll('.pin').forEach(function(p){p.classList.remove('on');});
+  document.querySelectorAll('.area-chip').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-a')===a);});
+  paintArea(a,'',AREA_GUIDES[a]||'حيٌّ راقٍ في الرياض، باقة من إقامات عوجا المختارة.',list);
+  track('elite_area_select',{area:a});
+}
+function paintArea(name,en,guide,list){
+  var el=document.getElementById('areaPanel');if(!el)return;
+  var cards=(list||[]).map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}),true);}).join('');
+  el.innerHTML='<div class="area-h"><span class="area-name kufi">'+he(name)+'</span>'+(en?('<span class="area-en serif">'+he(en)+'</span>'):'')+'</div>'
+    +'<p class="area-guide">'+he(guide)+'</p>'
+    +(cards?('<div class="area-res">'+cards+'</div>'):'<div class="muted" style="font-size:13px">تواصل مع الكونسيرج لعرض إقامات هذا الحي.</div>');
+  reveal();
+}
 function viewHome(){
   track('elite_page_view',{});
   var cfg=(ELITE&&ELITE.config)||{noo:[],count:0};var p=qs();
   var hero=cfg.hero||'';
   var heroBg=hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(hero).replace(/"/g,'&quot;')+')"></div>'):'<div class="bgimg ph-hero"></div>';
+  var heroVid=(cfg.video)?('<video class="bgvid" autoplay muted loop playsinline preload="auto"'+(hero?(' poster="'+he(hero)+'"'):'')+'><source src="'+he(cfg.video)+'" type="video/mp4"></video>'):'';
   var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('type')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+'</option>';}).join('');
   var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
   var chips=(cfg.noo||[]).slice(0,6).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
   V.innerHTML=
-    '<section class="hero">'+heroBg+'<div class="hero-grain"></div><div class="hero-ov"></div><div class="hero-frame"></div><div class="hero-in"><div class="wrap">'
+    '<section class="hero">'+heroBg+heroVid+'<div class="hero-grain"></div><div class="hero-ov"></div><div class="hero-frame"></div><div class="hero-in"><div class="wrap">'
       +'<span class="eyebrow rise" style="animation-delay:.02s">Ouja Elite · عضوية مختارة</span>'
       +'<span class="h-rule"></span>'
       +'<h1 class="h-hero kufi rise" style="animation-delay:.16s">إقاماتٌ مختارة، وضيافةٌ على قدر المقام</h1>'
@@ -41874,12 +42254,15 @@ function viewHome(){
       +'<div class="center reveal" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
     +'</section>'
     +'<div class="wrap">'+divider()+'</div>'
+    +'<section class="wrap sec explore"><div class="sec-head reveal"><span class="eyebrow">استكشف الرياض</span><h2 class="h-sec kufi">إقاماتنا حسب الحي</h2></div>'+mapHtml()+'</section>'
+    +'<div class="wrap">'+divider()+'</div>'
     +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
     +'<div class="wrap">'+divider()+'</div>'
     +'<section class="wrap sec standard center reveal"><span class="crest"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 7.4L21 12l-7.4 1.6L12 21l-1.6-7.4L3 12l7.4-1.6L12 3Z"/></svg></span><span class="eyebrow center">معيار عوجا</span><div class="h-standard kufi">من أهل الدرعية 🤎</div><p class="standard-p">في عوجا، لا نقيس أنفسنا بمدارس الضيافة القائمة… نحن نبني المدرسة التي سيُقاس بها غيرنا.</p></section>'
     +'<section class="wrap"><div class="concierge reveal">'+conciergeBand()+'</div></section>';
   setupWidget();
   loadCollection();
+  loadAreas();
   reveal();
 }
 
@@ -41910,9 +42293,10 @@ function loadCollection(){
   }).catch(function(){var el=document.getElementById('collection');if(el)el.innerHTML='<p class="muted" style="grid-column:1/-1">تعذّر تحميل الإقامات حاليًا، جرّب بعد قليل.</p>';});
 }
 
-function card(l){
+function card(l,novt){
   var avail=(l.available===true);
-  var cov=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'" src="'+he(l.cover)+'">'):monoPh();
+  var vt=(novt?'':' style="view-transition-name:r'+he(l.id)+'"');
+  var cov=l.cover?('<img class="fadein" loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'"'+vt+' src="'+he(l.cover)+'">'):monoPh();
   var ovr=[];if(avail)ovr.push('<span class="tag ok">متاحة</span>');if(l.badge)ovr.push('<span class="tag gold">'+he(l.badge)+'</span>');
   var price=priceHtml(l);
   return '<a class="col-card reveal" href="/elite/'+he(l.slug)+location.search+'">'
@@ -41949,7 +42333,7 @@ function viewSearch(){
       track('elite_results_view',{type:ty,count:res.length});
       head+='<h2 class="res-head">'+(browse?('عندنا '+res.length+' إقامة مختارة'):('لقينا لك '+res.length+' إقامة مختارة'))+'</h2>';
       head+='<div class="note">التوفر والسعر النهائي يتأكّد مع الكونسيرج</div>';
-      V.innerHTML=sm+head+'<div class="grid" style="margin:8px 0 30px">'+res.map(card).join('')+'</div>'+inlineConcierge()+'</div>';reveal();
+      V.innerHTML=sm+head+'<div class="grid" style="margin:8px 0 30px">'+res.map(function(l){return card(l);}).join('')+'</div>'+inlineConcierge()+'</div>';reveal();
     } else {
       track('elite_no_results',{type:ty,check_in:ci,check_out:co});
       V.innerHTML=sm+head+'<div class="state"><div class="em">'+IC.spark+'</div><h2>ما لقينا إقامات بنفس الاختيارات</h2><p>جرّب تغيير التاريخ أو نوع الإقامة — أو خلّ الكونسيرج يرشّح لك.</p><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل البحث</span></a></div><div id="sim"></div>'+inlineConcierge()+'</div>';
@@ -41984,11 +42368,11 @@ function viewListing(){
     var imgs=(l.images||[]);
     var gallery;
     if(imgs.length){
-      var c1='<div class="gcell"><img loading="lazy" width="800" height="600" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div>';
+      var c1='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div>';
       var c2='';
-      if(imgs.length>1){var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">كل الصور · '+imgs.length+'</button>'):'';c2='<div class="gcell"><img loading="lazy" width="800" height="600" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div>'+moreBtn+'</div>';}
+      if(imgs.length>1){var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">كل الصور · '+imgs.length+'</button>'):'';c2='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'"><div class="frame"></div>'+moreBtn+'</div>';}
       gallery='<div class="gal'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
-    } else if(l.cover){gallery='<div class="gal one"><div class="gcell"><img loading="lazy" width="800" height="600" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div></div>';}
+    } else if(l.cover){gallery='<div class="gal one"><div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div></div>';}
     else{gallery='<div class="gcell" style="aspect-ratio:16/10;margin:18px 0">'+monoPh()+'<div class="frame"></div></div>';}
     var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out');
     var dsum='';
@@ -42040,6 +42424,7 @@ function viewListing(){
 }
 
 (function(){
+  try{var _intro=document.getElementById('introScreen');if(_intro){if(!RM&&!sessionStorage.getItem('ouja_elite_intro')){sessionStorage.setItem('ouja_elite_intro','1');_intro.classList.add('show');_intro.onclick=function(){if(_intro.parentNode)_intro.parentNode.removeChild(_intro);};setTimeout(function(){if(_intro&&_intro.parentNode)_intro.parentNode.removeChild(_intro);},2000);}else if(_intro.parentNode){_intro.parentNode.removeChild(_intro);}}}catch(e){}
   try{var hc=document.getElementById('headConc');if(hc){var h=waHref(GEN_MSG);if(h){hc.href=h;hc.setAttribute('target','_blank');hc.setAttribute('rel','noopener');hc.addEventListener('click',function(){track('elite_whatsapp_click',{src:'header'});});}else{hc.style.display='none';}}}catch(e){}
   try{var rf=document.querySelector('.reg-foot');if(rf)rf.innerHTML=REG;var rh=document.querySelector('.head-reg');if(rh)rh.innerHTML=REG;}catch(e){}
   var path=location.pathname;
@@ -42070,7 +42455,7 @@ def _elite_render(route="home", listing=None, base=""):
         og = og or hcfg["url"]
     data = {"route": route, "listing": listing,
             "config": {"noo": _gw_noo_options(), "count": len(vis),
-                       "hero": (hcfg.get("url") or ""), "whatsapp": ELITE_WHATSAPP}}
+                       "hero": (hcfg.get("url") or ""), "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""), "whatsapp": ELITE_WHATSAPP}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO/share JSON-LD — Apartment per unit, LodgingBusiness on the landing.
     if listing:
@@ -42776,6 +43161,11 @@ async def start_web_server():
         app.router.add_post("/api/expenses/v4/approve-all-pending", _api_exp4_approve_all)
         app.router.add_get("/api/expenses/v4/batches", _api_exp4_batches)
         app.router.add_get("/api/expenses/v4/batch-file", _api_exp4_batch_file)
+        app.router.add_get("/api/expenses/v4/intake", _api_exp4_intake_get)
+        app.router.add_post("/api/expenses/v4/intake", _api_exp4_intake_set)
+        app.router.add_post("/api/expenses/v4/pull-preview", _api_exp4_pull_preview)
+        app.router.add_post("/api/expenses/v4/pull", _api_exp4_pull_run)
+        app.router.add_post("/api/expenses/v4/delete-all", _api_exp4_delete_all)
         # Design requests
         app.router.add_get("/api/design/list", _api_design_list)
         app.router.add_get("/api/design/get", _api_design_get)
@@ -43397,6 +43787,8 @@ def persist_state():
     _save_json("expenses.json", _expenses)
     _save_json("import_batches.json", _exp4_batches)
     _save_json("expense_settings.json", _expense_settings)
+    _save_json("exp_intake.json", {"autopull": bool(_exp_intake.get("autopull")),
+                                   "pulls": (_exp_intake.get("pulls") or [])[-200:]})
     # Sessions are intentionally NOT persisted — restarts force re-login
     _save_json("guest_profiles.json", _guest_profiles)
     _save_json("cleaning_feedback.json", _cleaning_feedback)
