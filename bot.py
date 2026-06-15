@@ -42017,6 +42017,15 @@ html{scroll-behavior:smooth}
 .area-chip .ac-n{font-family:"Cormorant Garamond",serif;font-weight:700;color:var(--gold-deep)}
 .area-chip.on .ac-n{color:var(--gold-soft)}
 @media(min-width:820px){.map-wrap{display:grid;grid-template-columns:1.1fr .9fr;align-items:stretch}.map-svg{height:100%}.area-panel{border-inline-start:1px solid var(--line)}}
+.emap{height:360px;width:100%;background:var(--surface-2)}
+@media(min-width:820px){.emap{height:auto;min-height:420px}}
+.emap .leaflet-tile-pane{filter:sepia(.12) saturate(.94) brightness(1.02)}
+.leaflet-container{font-family:inherit;background:var(--surface-2)}
+.leaflet-control-attribution{font-size:9px;background:rgba(251,247,239,.72);color:var(--mut)}
+.leaflet-control-attribution a{color:var(--gold-deep)}
+.leaflet-bar a{color:var(--ink)}
+.leaflet-tooltip{background:var(--ink);color:var(--canvas);border:0;border-radius:5px;font:500 12px "IBM Plex Sans Arabic",sans-serif;box-shadow:0 6px 16px rgba(31,45,58,.22);padding:5px 9px}
+.leaflet-tooltip-top::before{border-top-color:var(--ink)}
 @media (prefers-reduced-motion: reduce){.fadein{opacity:1!important;transform:none!important}.intro{display:none!important}.bgvid{display:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
 .btn:focus-visible,.qp:focus-visible,.col-card:focus-visible,.conc-link:focus-visible,.more:focus-visible,.g-all:focus-visible,.lb-x:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
 .has-cta .foot{padding-bottom:118px}
@@ -42175,35 +42184,48 @@ function matchListing(l){
   return null;
 }
 function mapHtml(){
-  var pins=DISTRICTS.map(function(d){
-    return '<g class="pin empty" data-k="'+he(d.k)+'" transform="translate('+d.x+','+d.y+')">'
-      +'<circle class="ring" r="13"></circle><circle class="dot" r="5.5"></circle>'
-      +'<text class="plabel" x="0" y="-12" text-anchor="middle">'+he(d.k)+'</text>'
-      +'<text class="pcount" x="0" y="22" text-anchor="middle"></text></g>';
-  }).join('');
-  var svg='<svg class="map-svg" viewBox="0 0 400 270" role="img" aria-label="خريطة أحياء عوجا في الرياض">'
-    +'<path class="wadi" d="M74 6 C 58 56, 108 104, 80 156 S 122 226, 152 264"></path>'
-    +'<text class="rlabel" x="200" y="256" text-anchor="middle">RIYADH · الرياض</text>'
-    +pins+'</svg>';
-  return '<div class="map-wrap">'+svg+'<div class="area-panel" id="areaPanel"><div class="muted" style="font-size:13px">اختر حيًّا من الخريطة لعرض إقاماته.</div></div></div><div class="area-chips" id="areaChips"></div>';
+  return '<div class="map-wrap"><div id="emap" class="emap"></div><div class="area-panel" id="areaPanel"><div class="muted" style="font-size:13px">اختر دائرة على الخريطة لعرض الإقامة — المواقع تقريبية للخصوصية.</div></div></div>';
+}
+function withLeaflet(cb){
+  if(typeof L!=='undefined'){cb();return;}
+  window._lfQ=window._lfQ||[];window._lfQ.push(cb);
+  if(window._lfLoading)return;window._lfLoading=true;
+  var css=document.createElement('link');css.rel='stylesheet';css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);
+  var sc=document.createElement('script');sc.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  sc.onload=function(){(window._lfQ||[]).forEach(function(f){try{f();}catch(e){}});window._lfQ=[];};
+  sc.onerror=function(){var sec=document.querySelector('.explore');if(sec)sec.style.display='none';};
+  document.head.appendChild(sc);
 }
 function loadAreas(){
-  fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
-    var res=(d&&d.results)||[];
-    var byKey={},extra={},GEN={'riyadh':1,'الرياض':1,'رياض':1,'ksa':1,'saudi arabia':1,'sa':1};
-    res.forEach(function(l){var dk=matchListing(l);if(dk){(byKey[dk]=byKey[dk]||[]).push(l);return;}var a=(l.area||'').trim();if(a&&!GEN[a.toLowerCase()]){(extra[a]=extra[a]||[]).push(l);}});
-    var sec=document.querySelector('.explore');
-    if(!Object.keys(byKey).length&&!Object.keys(extra).length){if(sec)sec.style.display='none';return;}
-    window._eliteAreas={byKey:byKey,extra:extra};
-    DISTRICTS.forEach(function(dd){var g=document.querySelector('.pin[data-k="'+dd.k+'"]');if(!g)return;var list=byKey[dd.k]||[];if(list.length){g.classList.remove('empty');var pc=g.querySelector('.pcount');if(pc)pc.textContent=list.length;g.onclick=function(){selectArea(dd.k);};}});
-    var chips='';
-    DISTRICTS.forEach(function(dd){var n=(byKey[dd.k]||[]).length;if(n)chips+='<button class="area-chip" data-k="'+he(dd.k)+'">'+he(dd.k)+' <span class="ac-n">'+n+'</span></button>';});
-    Object.keys(extra).forEach(function(a){chips+='<button class="area-chip" data-a="'+he(a)+'">'+he(a)+' <span class="ac-n">'+extra[a].length+'</span></button>';});
-    var ce=document.getElementById('areaChips');
-    if(ce){ce.innerHTML=chips;ce.querySelectorAll('.area-chip').forEach(function(b){b.onclick=function(){var k=b.getAttribute('data-k'),a=b.getAttribute('data-a');if(k)selectArea(k);else selectExtra(a);};});}
-    var best=null,bn=0;DISTRICTS.forEach(function(dd){var n=(byKey[dd.k]||[]).length;if(n>bn){bn=n;best=dd.k;}});
-    if(best)selectArea(best);else{var ek=Object.keys(extra)[0];if(ek)selectExtra(ek);}
-  }).catch(function(){var sec=document.querySelector('.explore');if(sec)sec.style.display='none';});
+  var sec=document.querySelector('.explore');
+  Promise.all([
+    fetch('/api/elite/geo').then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('/api/stay/search').then(function(r){return r.json();}).catch(function(){return null;})
+  ]).then(function(rs){
+    var pts=((rs[0]||{}).points)||{},list=((rs[1]||{}).results)||[];
+    var ids=Object.keys(pts);
+    if(!ids.length){if(sec)sec.style.display='none';return;}
+    var byId={};list.forEach(function(l){byId[String(l.id)]=l;});
+    withLeaflet(function(){initEmap(pts,byId,ids,sec);});
+  }).catch(function(){if(sec)sec.style.display='none';});
+}
+function initEmap(pts,byId,ids,sec){
+  if(typeof L==='undefined'){if(sec)sec.style.display='none';return;}
+  var el=document.getElementById('emap');if(!el)return;
+  var map=L.map(el,{scrollWheelZoom:false,zoomAnimation:!RM,fadeAnimation:!RM,markerZoomAnimation:!RM}).setView([24.71,46.68],11);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd',attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+  var grp=[];
+  ids.forEach(function(id){
+    var p=pts[id],l=byId[id];if(!p)return;
+    var c=L.circle([p[0],p[1]],{radius:600,color:'#B0894E',weight:1.4,opacity:.9,fillColor:'#B0894E',fillOpacity:.16}).addTo(map);
+    grp.push(c);
+    if(l){
+      c.on('click',function(){paintArea(l.name_ar||l.name_en||'','',(l.area?('في '+l.area):'الموقع تقريبي للخصوصية'),[l]);try{track('elite_geo_select',{listing_id:l.id});}catch(e){}});
+      c.bindTooltip(he(l.name_ar||l.name_en||''),{direction:'top'});
+    }
+  });
+  try{if(grp.length){map.fitBounds(L.featureGroup(grp).getBounds().pad(0.2));}}catch(e){}
+  setTimeout(function(){try{map.invalidateSize();}catch(e){}},250);
 }
 function selectArea(k){
   var A=window._eliteAreas||{byKey:{}};var list=A.byKey[k]||[];var d=null;DISTRICTS.forEach(function(dd){if(dd.k===k)d=dd;});
@@ -42264,7 +42286,7 @@ function viewHome(){
       +'<div class="center reveal" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
     +'</section>'
     +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec explore"><div class="sec-head reveal"><span class="eyebrow">استكشف الرياض</span><h2 class="h-sec kufi">أحياء مختارة في الرياض</h2></div>'+mapHtml()+'</section>'
+    +'<section class="wrap sec explore"><div class="sec-head reveal"><span class="eyebrow">استكشف الرياض</span><h2 class="h-sec kufi">خريطة إقاماتنا في الرياض</h2></div>'+mapHtml()+'</section>'
     +'<div class="wrap">'+divider()+'</div>'
     +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
     +'<div class="wrap">'+divider()+'</div>'
@@ -42573,30 +42595,62 @@ async def _handle_elite_img(request):
     return web.Response(body=data, content_type="image/webp", headers=headers)
 
 
+_ELITE_GEO_URL = "https://oujaguide.netlify.app/data.json"
+_elite_geo_cache = {"map": None, "ts": 0.0}
+
+def _elite_geo_norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+def _elite_geo_fetch():
+    """Fetch the oujaguide data.json -> {normalized listing_name: (lat,lng)} parsed from each
+    record's map_link. Best-effort; {} on any failure. BLOCKING — call via run_in_executor."""
+    out = {}
+    try:
+        r = requests.get(_ELITE_GEO_URL, timeout=12)
+        r.raise_for_status()
+        for d in (r.json() or []):
+            m = re.search(r"(-?\d{2}\.\d+)[, ]+(-?\d{2}\.\d+)", str(d.get("map_link") or ""))
+            if not m:
+                continue
+            lat, lng = float(m.group(1)), float(m.group(2))
+            if not (24.0 <= lat <= 25.6 and 46.0 <= lng <= 47.6):
+                continue
+            nm = _elite_geo_norm(d.get("listing_name"))
+            if nm:
+                out[nm] = (lat, lng)
+    except Exception as e:
+        print("oujaguide data.json fetch error:", e)
+    return out
+
+def _elite_geo_refresh():
+    """Refresh the cached name->coords map if stale (6h TTL). BLOCKING — executor only."""
+    now = time.time()
+    if _elite_geo_cache["map"] is None or (now - _elite_geo_cache["ts"]) > 21600:
+        m = _elite_geo_fetch()
+        if m or _elite_geo_cache["map"] is None:
+            _elite_geo_cache["map"] = m
+            _elite_geo_cache["ts"] = now
+
 def _elite_geo_points():
-    """{id: [approx_lat, approx_lng]} for visible Elite listings that have stored coordinates
-    (reused from the dispatch Listings store — maps_link or saved lat/lng). Coordinates are
-    deliberately APPROXIMATE: a stable per-listing jitter (~300m) + rounding to ~110m, so the
-    public map shows the general area, never the exact building. Returns (points, count, total)."""
-    listings = (_ls_get().get("listings") or {})
+    """{id: [approx_lat, approx_lng]} for visible Elite listings matched (by name) to the
+    oujaguide guide coordinates. APPROXIMATE on purpose: a stable per-listing jitter (~330m)
+    + rounding to ~110m, so the public map shows the general area, never the exact building.
+    Cache-only (no network here). Returns (points, count, total)."""
+    gmap = _elite_geo_cache.get("map") or {}
     pts, total = {}, 0
     for s, ov in _gw_visible_snaps():
         total += 1
-        lid = s.get("id")
+        try:
+            pub = _gw_listing_public(s, ov, with_airbnb=False)
+        except Exception:
+            continue
+        lid = pub.get("id")
         if lid is None:
             continue
-        rec = listings.get(str(lid)) or listings.get(lid) or {}
-        ll = _extract_latlng(rec.get("maps_link") or "")
-        if not ll and rec.get("lat") is not None and rec.get("lng") is not None:
-            try:
-                ll = (float(rec["lat"]), float(rec["lng"]))
-            except (TypeError, ValueError):
-                ll = None
+        ll = gmap.get(_elite_geo_norm(pub.get("name_en"))) or gmap.get(_elite_geo_norm(pub.get("name_ar")))
         if not ll:
             continue
         lat, lng = ll
-        if not (24.0 <= lat <= 25.6 and 46.0 <= lng <= 47.6):   # Riyadh sanity bounds
-            continue
         h = int(hashlib.sha1(str(lid).encode("utf-8")).hexdigest(), 16)
         dlat = ((h % 1000) / 1000.0 - 0.5) * 0.0060            # +/- ~0.003 deg (~330m)
         dlng = (((h // 1000) % 1000) / 1000.0 - 0.5) * 0.0060
@@ -42607,6 +42661,7 @@ def _elite_geo_points():
 async def _handle_elite_geo(request):
     """Public — APPROXIMATE per-listing coordinates for the Elite map (never exact)."""
     try:
+        await asyncio.get_event_loop().run_in_executor(None, _elite_geo_refresh)
         pts, count, total = _elite_geo_points()
     except Exception as e:
         print("elite geo error:", e)
