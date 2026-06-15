@@ -129,6 +129,27 @@
       x_amount: 'المبلغ', x_date: 'التاريخ', x_apartment: 'الشقة', x_category: 'الفئة',
       x_vendor: 'المورد', x_note: 'ملاحظة', x_reject_reason: 'سبب الرفض (إلزامي)…',
       x_timeline: 'السجل الزمني', x_payload: 'اللي بينرسل لـ Hostaway',
+      /* manual sheet intake (الشيت → الموقع) */
+      xi_title: 'سحب المصاريف من الشيت',
+      xi_sub: 'يدوي بالكامل — ما يدخل أي مصروف للموقع إلا لما تسحب بنفسك.',
+      xi_from: 'من تاريخ', xi_to: 'إلى تاريخ', xi_all: 'كل التواريخ',
+      xi_preview: 'تحقّق قبل السحب', xi_pull: 'اسحب الآن', xi_delete_all: 'احذف الكل',
+      xi_auto_on: 'السحب التلقائي: مُفعّل', xi_auto_off: 'السحب التلقائي: موقوف (يدوي)',
+      xi_last_sync: 'آخر سحب', xi_never: 'ما صار سحب بعد',
+      xi_not_configured: 'رابط الشيت غير مُهيّأ (EXPENSE_SHEET_CSV_URL) — كلّم الدعم.',
+      xi_dates_required: 'اختر تاريخ البداية والنهاية، أو فعّل «كل التواريخ».',
+      xi_none_new: 'كلها موجودة مسبقًا — ما فيه جديد يُسحب (ما راح يتكرر شي).',
+      xi_some_new: '{new} مصروف جديد بيتسحب · {dup} موجودة مسبقًا بتُتخطّى (ما تتكرر).',
+      xi_in_range: 'في المدة: {in} صف', xi_outrange: '{n} خارج المدة', xi_undated_n: '{n} بدون تاريخ',
+      xi_prior: 'سبق وسحبت نفس المدة في {at} (حينها {n} جديدة).',
+      xi_pulled: 'انسحب {n} مصروف جديد ✓', xi_pulled_none: 'ما فيه جديد — كله موجود مسبقًا ✓',
+      xi_deleted: 'انحذف {n} مصروف من الموقع ✓ — Hostaway ودافترة ما تأثّروا',
+      xi_del_title: 'حذف كل مصاريف الشيت من الموقع',
+      xi_del_body: 'هذا يمسح المصاريف المسحوبة من الشيت من الموقع فقط. Hostaway ودافترة ما يتأثرون، وفيه نسخة احتياطية تلقائية، وتقدر تعيد السحب بأي وقت.',
+      xi_del_scope: 'بينحذف {n} مصروف ({h} منها موجودة بـ Hostaway وتبقى هناك زي ما هي).',
+      xi_del_ph: 'اكتب: حذف', xi_del_word: 'حذف', xi_del_confirm: 'أكّد الحذف', xi_cancel: 'إلغاء',
+      xi_checking: 'يفحص…', xi_pulling: 'يسحب…', xi_deleting: 'يحذف…', xi_saved: 'انحفظ ✓',
+      xi_label_new: 'جديدة', xi_label_dup: 'موجودة',
       /* custody */
       c_title: 'العهد — السلف المفتوحة',
       c_explain: 'العهدة = مبلغ يُعطى للموظف ثم يُقفل بالفواتير. التحويل يثبتها: مدين عهدة الموظف / دائن البنك. الفواتير تقفلها: مدين مصاريف متعددة / دائن عهدة الموظف — بدون حركة بنك جديدة، لذلك لا تتكرر كمصروف بنكي.',
@@ -381,6 +402,27 @@
       x_amount: 'Amount', x_date: 'Date', x_apartment: 'Apartment', x_category: 'Category',
       x_vendor: 'Vendor', x_note: 'Note', x_reject_reason: 'Rejection reason (required)…',
       x_timeline: 'Timeline', x_payload: 'Hostaway payload',
+      /* manual sheet intake (Sheet → website) */
+      xi_title: 'Pull expenses from the sheet',
+      xi_sub: 'Fully manual — nothing enters the site until you pull it yourself.',
+      xi_from: 'From', xi_to: 'To', xi_all: 'All dates',
+      xi_preview: 'Check first', xi_pull: 'Pull now', xi_delete_all: 'Delete all',
+      xi_auto_on: 'Auto-pull: ON', xi_auto_off: 'Auto-pull: OFF (manual)',
+      xi_last_sync: 'Last pull', xi_never: 'No pull yet',
+      xi_not_configured: 'Sheet link not configured (EXPENSE_SHEET_CSV_URL) — contact support.',
+      xi_dates_required: 'Pick a start and end date, or tick “All dates”.',
+      xi_none_new: 'All already in the system — nothing new to pull (no duplicates).',
+      xi_some_new: '{new} new will be pulled · {dup} already here will be skipped (no duplicates).',
+      xi_in_range: 'In range: {in} rows', xi_outrange: '{n} outside range', xi_undated_n: '{n} undated',
+      xi_prior: 'You already pulled this range on {at} ({n} new then).',
+      xi_pulled: 'Pulled {n} new ✓', xi_pulled_none: 'Nothing new — all already present ✓',
+      xi_deleted: 'Deleted {n} from the site ✓ — Hostaway & Daftra untouched',
+      xi_del_title: 'Delete all sheet expenses from the site',
+      xi_del_body: 'This wipes sheet-pulled expenses from the SITE only. Hostaway and Daftra are untouched, a backup is saved automatically, and you can re-pull anytime.',
+      xi_del_scope: '{n} will be deleted ({h} of them also exist in Hostaway and stay there).',
+      xi_del_ph: 'Type: DELETE', xi_del_word: 'DELETE', xi_del_confirm: 'Confirm delete', xi_cancel: 'Cancel',
+      xi_checking: 'Checking…', xi_pulling: 'Pulling…', xi_deleting: 'Deleting…', xi_saved: 'Saved ✓',
+      xi_label_new: 'new', xi_label_dup: 'here',
       c_title: 'Custody — open advances',
       c_explain: 'An advance is money given to an employee then settled by invoices. Issue: Dr employee custody / Cr bank. Settlement: Dr expenses / Cr custody — no new bank line, so it is never double-counted as a bank expense.',
       c_outstanding_note: 'Outstanding = issued − settled by invoices. Zero = advance fully settled.',
@@ -1490,6 +1532,54 @@
       updateExpBulk();
     }
 
+    /* --- manual sheet intake (Sheet → website) --- */
+    else if (act === 'x-auto-toggle') {
+      var xiWant = !(expP.intake && expP.intake.autopull);
+      el.disabled = true;
+      api('/erp/api/exp/intake', { method: 'POST', body: { autopull: xiWant } }).then(function (r) {
+        if (expP.intake) expP.intake.autopull = r.autopull;
+        toast(t('xi_saved'));
+        var xiBox = $('#xIntake'); if (xiBox) xiBox.outerHTML = intakePanelHtml();
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-pull-preview' || act === 'x-pull') {
+      if (!expP.pullAll && (!expP.pullFrom || !expP.pullTo)) { toast(t('xi_dates_required'), 'warn'); return; }
+      var xpRun = act === 'x-pull';
+      var xpBody = expP.pullAll ? { all_dates: true } : { from: expP.pullFrom, to: expP.pullTo };
+      var xpPrev = el.textContent;
+      el.disabled = true; el.textContent = xpRun ? t('xi_pulling') : t('xi_checking');
+      api(xpRun ? '/erp/api/exp/pull' : '/erp/api/exp/pull-preview', { method: 'POST', body: xpBody }).then(function (r) {
+        el.disabled = false; el.textContent = xpPrev;
+        if (r && r.ok === false) { toast(r.error === 'dates_required' ? t('xi_dates_required') : (r.error || t('act_failed')), 'warn'); return; }
+        if (xpRun) {
+          toast(r.created ? t('xi_pulled').replace('{n}', r.created) : t('xi_pulled_none'), r.created ? 'ok' : 'warn');
+          expP.preview = null; expP.o = 0;
+          refreshIntake(); loadExp();
+        } else {
+          expP.preview = r;
+          var xpw = $('#xPreview'); if (xpw) xpw.innerHTML = previewHtml(r);
+        }
+      }).catch(function (e) { el.disabled = false; el.textContent = xpPrev; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-delete-all') delAllDialog();
+    else if (act === 'x-del-go') {
+      var xDelI = $('#xDelWord');
+      var xDelW = (xDelI && xDelI.value || '').trim();
+      if (!xDelW) { if (xDelI) { xDelI.classList.add('need'); xDelI.focus(); } return; }
+      el.disabled = true;
+      api('/erp/api/exp/delete-all', { method: 'POST', body: { confirm: xDelW } }).then(function (r) {
+        if (r && r.ok === false) {
+          el.disabled = false;
+          if (xDelI) { xDelI.classList.add('need'); xDelI.value = ''; xDelI.focus(); }
+          toast(t('xi_del_ph'), 'warn'); return;
+        }
+        var xm2 = $('#xModal'); if (xm2) { xm2.hidden = true; xm2.innerHTML = ''; }
+        toast(t('xi_deleted').replace('{n}', (r && r.deleted) || 0), 'ok');
+        expP.preview = null; expP.o = 0;
+        refreshIntake(); loadExp();
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+
     /* --- custody --- */
     else if (act === 'retry_custody') loadCustody();
 
@@ -2001,6 +2091,14 @@
     else if (el.id === 'stMonth') { stP.m = el.value; location.hash = '#stmts?m=' + el.value; }
     else if (el.id === 'clMonth') { clP.m = el.value; location.hash = '#close?m=' + el.value; }
     else if (el.id === 'bgMonth') { bgP.m = el.value; location.hash = '#budget?m=' + el.value; }
+    else if (el.id === 'xpFrom') { expP.pullFrom = el.value; }
+    else if (el.id === 'xpTo') { expP.pullTo = el.value; }
+    else if (el.id === 'xpAll') {
+      expP.pullAll = el.checked;
+      var xpf = $('#xpFrom'), xpt = $('#xpTo');
+      if (xpf) xpf.disabled = el.checked;
+      if (xpt) xpt.disabled = el.checked;
+    }
   });
 
   document.addEventListener('input', (function () {
@@ -2306,7 +2404,7 @@
   }
 
   /* ================= المصاريف Expenses (V4 re-shell) ================= */
-  var expP = { tab: 'pending', q: '', o: 0 };
+  var expP = { tab: 'pending', q: '', o: 0, intake: null, preview: null, pullFrom: '', pullTo: '', pullAll: false };
   var EXP_LIMIT = 60;
 
   function expHash() {
@@ -2362,6 +2460,85 @@
     '</div>';
   }
 
+  /* ---- manual sheet intake (Sheet → website): panel + preview + delete dialog ---- */
+  function xiRep(s, m) { Object.keys(m).forEach(function (k) { s = String(s).replace('{' + k + '}', m[k]); }); return s; }
+
+  function previewHtml(pv) {
+    if (!pv) return '';
+    if (pv.ok === false || pv.error) {
+      var em = pv.error === 'dates_required' ? t('xi_dates_required') : (pv.error || t('act_failed'));
+      return '<div style="margin-top:8px"><span class="tag bad">' + esc(em) + '</span></div>';
+    }
+    var head = pv.new > 0 ? xiRep(t('xi_some_new'), { new: pv.new, dup: pv.existing }) : t('xi_none_new');
+    var bits = ['<span class="tag soft">' + esc(xiRep(t('xi_in_range'), { in: pv.in_range })) + '</span>'];
+    if (pv.out_of_range) bits.push('<span class="tag">' + esc(xiRep(t('xi_outrange'), { n: pv.out_of_range })) + '</span>');
+    if (pv.undated) bits.push('<span class="tag">' + esc(xiRep(t('xi_undated_n'), { n: pv.undated })) + '</span>');
+    var prior = pv.prior_pull
+      ? '<div style="margin-top:6px"><span class="tag warnt">' + esc(xiRep(t('xi_prior'), { at: pv.prior_pull.at || '', n: pv.prior_pull.created || 0 })) + '</span></div>'
+      : '';
+    var samp = (pv.sample_new || []).slice(0, 5).map(function (x) {
+      return '<div class="wq-sub" style="padding:1px 0"><code>' + esc(x.date || '') + '</code> · ' + fmtAmt(x.amount) + ' ' + esc(t('sar')) +
+        (x.apartment ? ' · ' + esc(x.apartment) : '') + (x.submitter ? ' · ' + esc(x.submitter) : '') + '</div>';
+    }).join('');
+    return '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,rgba(0,0,0,.08))">' +
+      '<div style="font-weight:600;font-size:13px">' + esc(head) + '</div>' +
+      '<div class="bb-row" style="gap:6px;flex-wrap:wrap;margin-top:6px">' + bits.join('') + '</div>' +
+      prior + (samp ? '<div style="margin-top:6px">' + samp + '</div>' : '') + '</div>';
+  }
+
+  function intakePanelHtml() {
+    var s = expP.intake;
+    if (!s) return '<div class="card" id="xIntake">' + skeleton(2) + '</div>';
+    if (!s.configured) {
+      return '<div class="card" id="xIntake"><div style="font-weight:650">' + esc(t('xi_title')) + '</div>' +
+        '<div style="margin-top:6px"><span class="tag bad">' + esc(t('xi_not_configured')) + '</span></div></div>';
+    }
+    var autoOn = !!s.autopull;
+    var last = s.last_sync ? esc(s.last_sync) : esc(t('xi_never'));
+    var dis = expP.pullAll ? ' disabled' : '';
+    return '' +
+    '<div class="card" id="xIntake">' +
+      '<div class="bb-row" style="justify-content:space-between;align-items:flex-start;gap:10px">' +
+        '<div><div style="font-weight:650">' + esc(t('xi_title')) + '</div>' +
+          '<div style="color:var(--text-3);font-size:12px;margin-top:2px">' + esc(t('xi_sub')) + '</div></div>' +
+        '<button class="btn ghost xs" data-act="x-auto-toggle">' + esc(autoOn ? t('xi_auto_on') : t('xi_auto_off')) + '</button>' +
+      '</div>' +
+      '<div class="bb-row" style="gap:8px;flex-wrap:wrap;margin-top:10px;align-items:flex-end">' +
+        '<label class="cp-f"><span>' + esc(t('xi_from')) + '</span><input id="xpFrom" class="in date" type="date" value="' + esc(expP.pullFrom || '') + '"' + dis + '></label>' +
+        '<label class="cp-f"><span>' + esc(t('xi_to')) + '</span><input id="xpTo" class="in date" type="date" value="' + esc(expP.pullTo || '') + '"' + dis + '></label>' +
+        '<label style="display:flex;align-items:center;gap:5px;font-size:12.5px"><input type="checkbox" id="xpAll"' + (expP.pullAll ? ' checked' : '') + '> ' + esc(t('xi_all')) + '</label>' +
+        '<button class="btn ghost sm" data-act="x-pull-preview">' + esc(t('xi_preview')) + '</button>' +
+        '<button class="btn primary sm" data-act="x-pull">' + esc(t('xi_pull')) + '</button>' +
+        '<button class="btn danger-ghost sm" data-act="x-delete-all" style="margin-inline-start:auto">' + esc(t('xi_delete_all')) + '</button>' +
+      '</div>' +
+      '<div style="color:var(--text-3);font-size:12px;margin-top:8px">' + esc(t('xi_last_sync')) + ': ' + last + '</div>' +
+      '<div id="xPreview">' + (expP.preview ? previewHtml(expP.preview) : '') + '</div>' +
+    '</div>';
+  }
+
+  function refreshIntake() {
+    api('/erp/api/exp/intake').then(function (s) {
+      expP.intake = s;
+      var box = $('#xIntake');
+      if (box) box.outerHTML = intakePanelHtml();
+    }).catch(function () {});
+  }
+
+  function delAllDialog() {
+    var m = $('#xModal');
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('xi_del_title')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body">' +
+      '<p style="line-height:1.6">' + esc(t('xi_del_body')) + '</p>' +
+      '<label class="cp-f" style="margin-top:8px"><span>' + esc(t('xi_del_ph')) + '</span>' +
+      '<input class="in" id="xDelWord" type="text" autocomplete="off" placeholder="' + esc(t('xi_del_word')) + '"></label>' +
+      '<div class="cp-btns" style="margin-top:12px">' +
+      '<button class="btn danger-ghost sm" data-act="x-del-go">' + esc(t('xi_del_confirm')) + '</button>' +
+      '<button class="btn ghost sm" data-act="x-modal-close">' + esc(t('xi_cancel')) + '</button>' +
+      '</div></div></div>';
+    var inp = $('#xDelWord'); if (inp) inp.focus();
+  }
+
   function renderExp(d, append) {
     store.D.exp = d;
     var tabs = d.tabs || {};
@@ -2379,6 +2556,7 @@
       return;
     }
     $('#view').innerHTML =
+      intakePanelHtml() +
       '<div class="card bank-bar">' +
         '<div class="bb-row">' +
           '<input id="xSearch" class="in search" type="search" placeholder="' + esc(t('x_search')) + '" value="' + esc(expP.q) + '">' +
@@ -2391,6 +2569,7 @@
       '</div><div id="xMore">' + moreBtn + '</div></div>' +
       '<div class="bulkbar" id="xBulk" hidden></div>';
     restoreScroll('exp');
+    if (!expP.intake) refreshIntake();
   }
 
   function loadExp(append) {
