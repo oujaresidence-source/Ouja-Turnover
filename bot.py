@@ -42190,8 +42190,8 @@ function withLeaflet(cb){
   if(typeof L!=='undefined'){cb();return;}
   window._lfQ=window._lfQ||[];window._lfQ.push(cb);
   if(window._lfLoading)return;window._lfLoading=true;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);
-  var sc=document.createElement('script');sc.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  var css=document.createElement('link');css.rel='stylesheet';css.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);
+  var sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
   sc.onload=function(){(window._lfQ||[]).forEach(function(f){try{f();}catch(e){}});window._lfQ=[];};
   sc.onerror=function(){var sec=document.querySelector('.explore');if(sec)sec.style.display='none';};
   document.head.appendChild(sc);
@@ -42968,7 +42968,7 @@ async def _security_headers_mw(request, handler):
             h.setdefault("Content-Security-Policy",
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
                 "font-src 'self' https://fonts.gstatic.com data:; "
                 "img-src 'self' https: data: blob:; "
                 "connect-src 'self'; "
