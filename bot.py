@@ -35550,21 +35550,41 @@ def _daftra_get(path, params=None, timeout=25):
             msg = msg.replace(DAFTRA_API_KEY, "••••")
         return None, msg[:300]
 
-def _daftra_post(path, payload, timeout=30):
+def _daftra_form_encode(payload):
+    """Flatten {Journal:{...}, JournalTransaction:[{...}]} → CakePHP bracket form fields
+    (Journal[date], JournalTransaction[0][account_id], …). Daftra api2 often wants this."""
+    out = {}
+    def walk(prefix, val):
+        if isinstance(val, dict):
+            for k, v in val.items():
+                walk((prefix + "[" + str(k) + "]") if prefix else str(k), v)
+        elif isinstance(val, list):
+            for i, v in enumerate(val):
+                walk(prefix + "[" + str(i) + "]", v)
+        else:
+            out[prefix] = "" if val is None else val
+    walk("", payload)
+    return out
+
+def _daftra_post(path, payload, timeout=30, form=False):
     """POST to a Daftra endpoint → (data, error, status). Never raises; never leaks the key.
-    The WRITE counterpart of _daftra_get — used only behind DAFTRA_POST_ENABLED."""
+    form=True sends application/x-www-form-urlencoded (CakePHP-style) instead of JSON.
+    On a non-JSON body, returns data={"_raw": <text>} so the real error stays visible."""
     if not _daftra_configured():
         return None, "not_configured", 0
     url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+    headers = {"APIKEY": DAFTRA_API_KEY, "Accept": "application/json"}
     try:
-        r = requests.post(url, headers={"APIKEY": DAFTRA_API_KEY, "Accept": "application/json",
-                                        "Content-Type": "application/json"},
-                          json=payload, timeout=timeout)
+        if form:
+            r = requests.post(url, headers=headers, data=payload, timeout=timeout)
+        else:
+            headers["Content-Type"] = "application/json"
+            r = requests.post(url, headers=headers, json=payload, timeout=timeout)
         st = r.status_code
         try:
             data = r.json()
         except Exception:
-            data = None
+            data = {"_raw": (r.text or "")[:300]}
         if st in (401, 403):
             return data, "auth_rejected", st
         if st == 404:
@@ -35606,7 +35626,7 @@ def _daftra_resp_msg(data):
     """A short human message out of a Daftra response (for diagnosing a failed create)."""
     if not isinstance(data, dict):
         return ""
-    for k in ("message", "error", "errors", "result", "msg", "validation_errors"):
+    for k in ("message", "error", "errors", "result", "msg", "validation_errors", "_raw"):
         v = data.get(k)
         if isinstance(v, str) and v:
             return v[:300]
@@ -35974,7 +35994,7 @@ def _daftra_build_journal_payload(date, lines, memo, shape, line_key="journal_ac
         if ln.get("cost_center_id"):
             d["cost_center_id"] = ln["cost_center_id"]
         jl.append(d)
-    head = {"date": date, "notes": memo, "description": memo, "draft": 0}
+    head = {"date": date, "notes": memo, "description": memo, "draft": 0, "currency_code": "SAR"}
     if shape == "journal_nested":
         h = dict(head); h[line_key] = jl
         return {"Journal": h}
@@ -36027,17 +36047,23 @@ def _daftra_write_selftest():
     lines = [{"account_id": acct_ids[0], "debit": 1, "credit": 0, "description": memo},
              {"account_id": acct_ids[1], "debit": 0, "credit": 1, "description": memo}]
     created_id = None
-    for shape in ("journal_sibling", "journal_nested", "flat", "journal_cap_sibling"):
+    # try a small matrix: JSON vs form-encoded (CakePHP) × envelope shape
+    matrix = [("form", "journal_sibling"), ("json", "journal_sibling"),
+              ("form", "journal_nested"), ("json", "journal_nested"),
+              ("form", "flat")]
+    for fmt, shape in matrix:
         payload = _daftra_build_journal_payload(today, lines, memo, shape, line_key)
-        data, err, st = _daftra_post("/api2/journals", payload)
+        body = _daftra_form_encode(payload) if fmt == "form" else payload
+        data, err, st = _daftra_post("/api2/journals", body, form=(fmt == "form"))
         nid = _daftra_extract_new_id(data)
-        rep["attempts"].append({"shape": shape, "status": st, "error": err, "got_id": bool(nid),
-                                "message": _daftra_resp_msg(data),
+        rep["attempts"].append({"format": fmt, "shape": shape, "status": st, "error": err,
+                                "got_id": bool(nid), "message": _daftra_resp_msg(data),
                                 "resp_keys": sorted([str(k) for k in data.keys()])[:20]
                                             if isinstance(data, dict) else None})
         if nid:
             created_id = nid
             rep["created_shape"] = shape
+            rep["created_format"] = fmt
             break
     rep["created_id"] = created_id
     rep["line_key_used"] = line_key
