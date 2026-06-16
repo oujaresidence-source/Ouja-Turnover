@@ -35602,6 +35602,18 @@ def _daftra_delete(path, timeout=25):
             msg = msg.replace(DAFTRA_API_KEY, "••••")
         return None, msg[:300], 0
 
+def _daftra_resp_msg(data):
+    """A short human message out of a Daftra response (for diagnosing a failed create)."""
+    if not isinstance(data, dict):
+        return ""
+    for k in ("message", "error", "errors", "result", "msg", "validation_errors"):
+        v = data.get(k)
+        if isinstance(v, str) and v:
+            return v[:300]
+        if isinstance(v, (list, dict)) and v:
+            return str(v)[:300]
+    return ""
+
 def _daftra_extract_new_id(data):
     """Pull the new record id out of a Daftra create response (shape varies)."""
     if not isinstance(data, dict):
@@ -35891,7 +35903,7 @@ def _daftra_unwrap(it):
 
 def _daftra_journal_lines(core):
     """Find the line list inside a Daftra journal entry, defensively."""
-    for k in ("journal_accounts", "JournalAccount", "lines", "items", "details", "rows", "transactions", "entries"):
+    for k in ("JournalTransaction", "journal_accounts", "JournalAccount", "lines", "items", "details", "rows", "transactions", "entries"):
         v = core.get(k)
         if isinstance(v, list) and v and isinstance(v[0], dict):
             return v
@@ -35926,8 +35938,8 @@ def _daftra_line_fields(ln):
 # test journal, read it back, then DELETE it. Everything is gated behind
 # DAFTRA_POST_ENABLED and reported with the API key masked.
 # ============================================================================
-_DAFTRA_LINE_KEYS = ("journal_accounts", "JournalAccount", "lines", "items",
-                     "details", "rows", "transactions", "entries")
+_DAFTRA_LINE_KEYS = ("JournalTransaction", "journal_accounts", "JournalAccount", "lines",
+                     "items", "details", "rows", "transactions", "entries")
 
 def _daftra_journal_introspect():
     """READ-ONLY: read one real journal and report its EXACT structure (field names only,
@@ -36020,6 +36032,7 @@ def _daftra_write_selftest():
         data, err, st = _daftra_post("/api2/journals", payload)
         nid = _daftra_extract_new_id(data)
         rep["attempts"].append({"shape": shape, "status": st, "error": err, "got_id": bool(nid),
+                                "message": _daftra_resp_msg(data),
                                 "resp_keys": sorted([str(k) for k in data.keys()])[:20]
                                             if isinstance(data, dict) else None})
         if nid:
@@ -36027,8 +36040,12 @@ def _daftra_write_selftest():
             rep["created_shape"] = shape
             break
     rep["created_id"] = created_id
+    rep["line_key_used"] = line_key
     if not created_id:
         rep["error"] = "create_failed"
+        a = next((x for x in rep["attempts"] if x.get("message")), (rep["attempts"][0] if rep["attempts"] else {}))
+        rep["summary"] = "create_failed · line_key=%s · status=%s · %s" % (
+            line_key, a.get("status"), (a.get("message") or a.get("error") or "")[:180])
         return rep
     vdata, verr = _daftra_get("/api2/journals/%s" % created_id)
     rep["verified"] = bool(vdata and not verr)

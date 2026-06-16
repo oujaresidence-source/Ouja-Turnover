@@ -2064,7 +2064,7 @@
               : api('/erp/api/daftra/introspect')).then(function (r) {
         el.disabled = false;
         if (dwOut) dwOut.textContent = JSON.stringify(r, null, 2);
-        if (dwTest) toast(r && r.ok ? t('dw_ok') : (t('dw_fail') + (r && r.error ? ': ' + r.error : '')),
+        if (dwTest) toast(r && r.ok ? t('dw_ok') : (r && r.summary ? r.summary : (t('dw_fail') + (r && r.error ? ': ' + r.error : ''))),
                           (r && r.ok) ? 'ok' : 'warn');
       }).catch(function (e) {
         el.disabled = false;
