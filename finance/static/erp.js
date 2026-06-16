@@ -89,6 +89,10 @@
       setup_rules: 'قواعد التصنيف', setup_rules_hint: 'تنطبق تلقائيًا على كل استيراد — ومبالغ ٣٠٠٠+ تظل تحتاج اعتماد فيصل دايمًا',
       setup_contracts: 'ربط العقود بمراكز التكلفة', setup_contracts_hint: 'العقد بدون مركز تكلفة ما يدخل في ربحية الوحدة',
       setup_custody: 'ربط حسابات العهدة والمصاريف', setup_custody_hint: 'اربط كل مشرف بحساب عهدته، وكل شقة بحساب مصروفها — يستخدمها قيد العهدة تلقائياً',
+      dw_title: 'تشخيص دفترة — الكتابة (API)',
+      dw_hint: 'نتأكد إن الكتابة في دفترة تشتغل قبل ما نفعّل تصدير المصاريف لها. «فحص البنية» قراءة فقط (آمن تمامًا). «اختبار كتابة» يكتب قيد تجريبي 1 ر.س ويحذفه فورًا — يتطلب تفعيل DAFTRA_POST_ENABLED=1 على Railway.',
+      dw_introspect: 'فحص بنية القيد (آمن)', dw_write_test: 'اختبار كتابة (1 ر.س ثم حذف)',
+      dw_running: 'يشتغل…', dw_ok: 'الكتابة في دفترة شغّالة ✓', dw_fail: 'فشل الاختبار',
       cust_sup: 'المشرفون ← حساب العهدة (دائن)', cust_apt: 'الشقق ← حساب المصروف (مدين)', cust_linked: 'تم الربط ✓', cust_nosave: '⚠ ما انحفظ',
       rl_matcher: 'الشرط', rl_target: 'الحساب', rl_hits: 'تطبيقات', rl_strength: 'القوة',
       rl_on: 'فعّالة', rl_off: 'موقوفة', rl_delete: 'حذف', rl_empty: 'ما فيه قواعد بعد — أنشئها من شاشة البنك عند التصنيف',
@@ -364,6 +368,10 @@
       setup_rules: 'Classification rules', setup_rules_hint: 'Auto-apply on every import — 3000+ still always needs Faisal approval',
       setup_contracts: 'Link contracts to cost centers', setup_contracts_hint: 'A contract without a cost center is excluded from unit profitability',
       setup_custody: 'Custody & expense account links', setup_custody_hint: 'Link each supervisor to their custody account, and each apartment to its expense account — used by the custody journal',
+      dw_title: 'Daftra diagnostics — Write (API)',
+      dw_hint: 'Confirm writing to Daftra works before enabling expense export to it. “Inspect schema” is read-only (fully safe). “Write test” creates a 1 SAR test journal and deletes it immediately — requires DAFTRA_POST_ENABLED=1 on Railway.',
+      dw_introspect: 'Inspect journal schema (safe)', dw_write_test: 'Write test (1 SAR, then delete)',
+      dw_running: 'Running…', dw_ok: 'Daftra write works ✓', dw_fail: 'Test failed',
       cust_sup: 'Supervisors → custody account (credit)', cust_apt: 'Apartments → expense account (debit)', cust_linked: 'Linked ✓', cust_nosave: '⚠ not saved',
       rl_matcher: 'Matcher', rl_target: 'Account', rl_hits: 'Hits', rl_strength: 'Strength',
       rl_on: 'Active', rl_off: 'Disabled', rl_delete: 'Delete', rl_empty: 'No rules yet — create them from the Bank screen while classifying',
@@ -2047,6 +2055,22 @@
             '<th>' + esc(t('pr_agree')) + '</th><th>' + esc(t('pr_precision')) + '</th><th>' + esc(t('pr_pending')) + '</th>' +
             '</tr></thead><tbody>' + rows + '</tbody></table></div>' : '');
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'dw-introspect' || act === 'dw-write-test') {
+      var dwOut = $('#dwOut'); if (dwOut) dwOut.textContent = t('dw_running');
+      var dwTest = act === 'dw-write-test';
+      el.disabled = true;
+      (dwTest ? api('/erp/api/daftra/write-test', { method: 'POST', body: {} })
+              : api('/erp/api/daftra/introspect')).then(function (r) {
+        el.disabled = false;
+        if (dwOut) dwOut.textContent = JSON.stringify(r, null, 2);
+        if (dwTest) toast(r && r.ok ? t('dw_ok') : (t('dw_fail') + (r && r.error ? ': ' + r.error : '')),
+                          (r && r.ok) ? 'ok' : 'warn');
+      }).catch(function (e) {
+        el.disabled = false;
+        if (dwOut) dwOut.textContent = (srvMsg(e) || t('act_failed'));
+        toast(srvMsg(e) || t('act_failed'), 'err');
+      });
     }
     else if (act === 'st-link-cc') {
       var rowEl = el.closest('.wq-row');
@@ -3913,6 +3937,15 @@
         '<div class="grp-hint">' + esc(t('setup_custody_hint')) + '</div>' +
         '<h4 class="g-bsec">' + esc(t('cust_sup')) + '</h4><div class="grp-list" id="custSup"><div class="grp-hint" style="padding-bottom:10px">…</div></div>' +
         '<h4 class="g-bsec">' + esc(t('cust_apt')) + '</h4><div class="grp-list" id="custApt"><div class="grp-hint" style="padding-bottom:10px">…</div></div>' +
+      '</section>' +
+      '<section class="card grp" id="setupDaftra">' +
+        '<header class="grp-h"><span class="grp-ico">📒</span><h2>' + esc(t('dw_title')) + '</h2></header>' +
+        '<div class="grp-hint">' + esc(t('dw_hint')) + '</div>' +
+        '<div class="grp-cta" style="flex-wrap:wrap;gap:8px">' +
+          '<button class="btn ghost sm" data-act="dw-introspect">' + esc(t('dw_introspect')) + '</button>' +
+          '<button class="btn primary sm" data-act="dw-write-test">' + esc(t('dw_write_test')) + '</button>' +
+        '</div>' +
+        '<pre id="dwOut" style="white-space:pre-wrap;font-size:11.5px;background:rgba(0,0,0,.04);padding:10px;border-radius:8px;margin:10px 16px;overflow:auto;max-height:340px"></pre>' +
       '</section>';
     $('#view').innerHTML = html;
     loadSetupContracts();

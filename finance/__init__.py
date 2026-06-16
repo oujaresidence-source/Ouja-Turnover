@@ -667,6 +667,8 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/exp/pull-preview", _guarded(_exp_delegate("_api_exp4_pull_preview"), write=True))
     app.router.add_post("/erp/api/exp/pull", _guarded(_exp_delegate("_api_exp4_pull_run"), write=True))
     app.router.add_post("/erp/api/exp/delete-all", _guarded(_exp_delegate("_api_exp4_delete_all"), write=True))
+    app.router.add_get("/erp/api/daftra/introspect", _guarded(_exp_delegate("_api_daftra_introspect")))
+    app.router.add_post("/erp/api/daftra/write-test", _guarded(_exp_delegate("_api_daftra_write_test"), write=True))
     app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
     app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
     app.router.add_get("/erp/api/owners/diagnose", _guarded(_h_api_owners_diagnose))

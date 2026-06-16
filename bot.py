@@ -35550,6 +35550,75 @@ def _daftra_get(path, params=None, timeout=25):
             msg = msg.replace(DAFTRA_API_KEY, "••••")
         return None, msg[:300]
 
+def _daftra_post(path, payload, timeout=30):
+    """POST to a Daftra endpoint → (data, error, status). Never raises; never leaks the key.
+    The WRITE counterpart of _daftra_get — used only behind DAFTRA_POST_ENABLED."""
+    if not _daftra_configured():
+        return None, "not_configured", 0
+    url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+    try:
+        r = requests.post(url, headers={"APIKEY": DAFTRA_API_KEY, "Accept": "application/json",
+                                        "Content-Type": "application/json"},
+                          json=payload, timeout=timeout)
+        st = r.status_code
+        try:
+            data = r.json()
+        except Exception:
+            data = None
+        if st in (401, 403):
+            return data, "auth_rejected", st
+        if st == 404:
+            return data, "endpoint_not_found", st
+        if st >= 400:
+            return data, ("http_%d" % st), st
+        return data, None, st
+    except requests.Timeout:
+        return None, "timeout", 0
+    except requests.RequestException as e:
+        msg = str(e)
+        if DAFTRA_API_KEY:
+            msg = msg.replace(DAFTRA_API_KEY, "••••")
+        return None, msg[:300], 0
+
+def _daftra_delete(path, timeout=25):
+    """DELETE a Daftra record → (data, error, status). Used to clean up the write self-test."""
+    if not _daftra_configured():
+        return None, "not_configured", 0
+    url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+    try:
+        r = requests.delete(url, headers={"APIKEY": DAFTRA_API_KEY, "Accept": "application/json"},
+                            timeout=timeout)
+        st = r.status_code
+        try:
+            data = r.json()
+        except Exception:
+            data = None
+        if st >= 400:
+            return data, ("http_%d" % st), st
+        return data, None, st
+    except requests.RequestException as e:
+        msg = str(e)
+        if DAFTRA_API_KEY:
+            msg = msg.replace(DAFTRA_API_KEY, "••••")
+        return None, msg[:300], 0
+
+def _daftra_extract_new_id(data):
+    """Pull the new record id out of a Daftra create response (shape varies)."""
+    if not isinstance(data, dict):
+        return None
+    for k in ("id", "Id", "ID"):
+        if data.get(k) not in (None, ""):
+            return data.get(k)
+    for k in ("data", "result", "Journal", "journal"):
+        v = data.get(k)
+        if isinstance(v, dict):
+            for kk in ("id", "Id"):
+                if v.get(kk) not in (None, ""):
+                    return v.get(kk)
+        elif isinstance(v, (int, str)) and str(v).isdigit():
+            return v
+    return None
+
 def _daftra_test_connection():
     if not _daftra_configured():
         return {"ok": False, "configured": False, "error": "not_configured"}
@@ -35848,6 +35917,125 @@ def _daftra_line_fields(ln):
             "debit": (_fb_money_str(deb) if deb else "0.00"), "credit": (_fb_money_str(cre) if cre else "0.00"),
             "description": str(core.get("description") or core.get("note") or "")[:300],
             "reference": str(core.get("reference") or core.get("ref") or "")[:120]}
+
+# ============================================================================
+# DAFTRA WRITE — confirm-then-enable (Faisal's call: expenses → Daftra JOURNAL).
+# Reading from Daftra works; writing was never confirmed. Before wiring the real
+# expense→journal export, we confirm the live POST endpoint with a SAFE self-test:
+# introspect a real journal to learn the exact schema, post a tiny balanced 1.00
+# test journal, read it back, then DELETE it. Everything is gated behind
+# DAFTRA_POST_ENABLED and reported with the API key masked.
+# ============================================================================
+_DAFTRA_LINE_KEYS = ("journal_accounts", "JournalAccount", "lines", "items",
+                     "details", "rows", "transactions", "entries")
+
+def _daftra_journal_introspect():
+    """READ-ONLY: read one real journal and report its EXACT structure (field names only,
+    no sensitive values) so the write payload mirrors what this Daftra account uses."""
+    data, err = _daftra_get("/api2/journals", {"limit": 3})
+    if err or data is None:
+        return {"ok": False, "error": err or "no_data"}
+    items = _daftra_extract_list(data)
+    if not items:
+        return {"ok": True, "journals": 0, "note": "no journals to introspect"}
+    core = _daftra_unwrap(items[0])
+    line_key = next((k for k in _DAFTRA_LINE_KEYS if isinstance(core.get(k), list) and core.get(k)), None)
+    lines = _daftra_journal_lines(core)
+    sample = lines[0] if lines else {}
+    sample_core = _daftra_unwrap(sample) if isinstance(sample, dict) else {}
+    return {"ok": True, "journals": len(items),
+            "top_level_keys": sorted([str(k) for k in core.keys()])[:40],
+            "line_key_detected": line_key,
+            "line_field_names": sorted([str(k) for k in sample_core.keys()])[:40],
+            "decoded_line_has": {"account_id": _daftra_line_fields(sample).get("account_id") is not None,
+                                 "cost_center_id": _daftra_line_fields(sample).get("cost_center_id") is not None}
+                                if lines else {}}
+
+def _daftra_build_journal_payload(date, lines, memo, shape, line_key="journal_accounts"):
+    """Build a create-journal body in one of several candidate envelope shapes. `lines` =
+    [{account_id, debit, credit, cost_center_id?, description?}]."""
+    jl = []
+    for ln in lines:
+        d = {"account_id": ln["account_id"],
+             "debit": ln.get("debit", 0), "credit": ln.get("credit", 0),
+             "description": ln.get("description", memo)}
+        if ln.get("cost_center_id"):
+            d["cost_center_id"] = ln["cost_center_id"]
+        jl.append(d)
+    head = {"date": date, "notes": memo, "description": memo, "draft": 0}
+    if shape == "journal_nested":
+        h = dict(head); h[line_key] = jl
+        return {"Journal": h}
+    if shape == "journal_sibling":
+        return {"Journal": head, line_key: jl}
+    if shape == "journal_cap_sibling":
+        return {"Journal": head, "JournalAccount": jl}
+    if shape == "flat":
+        h = dict(head); h[line_key] = jl
+        return h
+    return {"Journal": head, line_key: jl}
+
+def _daftra_sample_account_ids(n=2):
+    """Two real, postable account ids — taken from existing journals' lines so they are
+    guaranteed valid on this account (the safest source for a balanced test journal)."""
+    data, err = _daftra_get("/api2/journals", {"limit": 12})
+    ids = []
+    for it in _daftra_extract_list(data or []):
+        for ln in _daftra_journal_lines(_daftra_unwrap(it)):
+            aid = _daftra_line_fields(ln).get("account_id")
+            if aid and aid not in ids:
+                ids.append(aid)
+                if len(ids) >= n:
+                    return ids, None
+    return ids, (err if len(ids) < n else None)
+
+def _daftra_write_selftest():
+    """SAFE confirmation of the Daftra write API: introspect → post a tiny balanced 1.00
+    journal → read back → DELETE. Gated by DAFTRA_POST_ENABLED. Returns a masked report."""
+    rep = {"configured": _daftra_configured(), "post_enabled": DAFTRA_POST_ENABLED,
+           "base": DAFTRA_BASE_URL, "key": _fb_mask_key(DAFTRA_API_KEY),
+           "introspect": None, "attempts": [], "created_id": None, "created_shape": None,
+           "verified": False, "deleted": None, "ok": False, "error": None}
+    if not _daftra_configured():
+        rep["error"] = "not_configured"
+        return rep
+    rep["introspect"] = _daftra_journal_introspect()
+    if not DAFTRA_POST_ENABLED:
+        rep["error"] = "post_disabled"
+        rep["hint"] = "فعّل DAFTRA_POST_ENABLED=1 على Railway ثم أعد الاختبار."
+        return rep
+    line_key = (rep["introspect"] or {}).get("line_key_detected") or "journal_accounts"
+    acct_ids, aerr = _daftra_sample_account_ids(2)
+    if len(acct_ids) < 2:
+        rep["error"] = "need_two_accounts"
+        rep["accounts_error"] = aerr
+        return rep
+    today = datetime.now(TZ).date().isoformat()
+    memo = "OUJA API write-test — آمن للحذف"
+    lines = [{"account_id": acct_ids[0], "debit": 1, "credit": 0, "description": memo},
+             {"account_id": acct_ids[1], "debit": 0, "credit": 1, "description": memo}]
+    created_id = None
+    for shape in ("journal_sibling", "journal_nested", "flat", "journal_cap_sibling"):
+        payload = _daftra_build_journal_payload(today, lines, memo, shape, line_key)
+        data, err, st = _daftra_post("/api2/journals", payload)
+        nid = _daftra_extract_new_id(data)
+        rep["attempts"].append({"shape": shape, "status": st, "error": err, "got_id": bool(nid),
+                                "resp_keys": sorted([str(k) for k in data.keys()])[:20]
+                                            if isinstance(data, dict) else None})
+        if nid:
+            created_id = nid
+            rep["created_shape"] = shape
+            break
+    rep["created_id"] = created_id
+    if not created_id:
+        rep["error"] = "create_failed"
+        return rep
+    vdata, verr = _daftra_get("/api2/journals/%s" % created_id)
+    rep["verified"] = bool(vdata and not verr)
+    ddata, derr, dst = _daftra_delete("/api2/journals/%s" % created_id)
+    rep["deleted"] = {"status": dst, "ok": (derr is None), "error": derr}
+    rep["ok"] = bool(created_id)
+    return rep
 
 def _daftra_import_journals(start=None, end=None, actor=""):
     if not _daftra_configured():
@@ -36837,6 +37025,19 @@ async def _api_fb_daftra_test(request):
     if not _fb_can_finance(request):
         return _json({"error": "forbidden"}, 403)
     return _json(await asyncio.to_thread(_daftra_test_connection))
+
+async def _api_daftra_introspect(request):
+    """READ-ONLY: report the real Daftra journal schema so we mirror it when writing."""
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json(await asyncio.to_thread(_daftra_journal_introspect))
+
+async def _api_daftra_write_test(request):
+    """Confirm the Daftra WRITE API with a tiny, auto-deleted test journal. Writes to the
+    LIVE ledger — gated by DAFTRA_POST_ENABLED (checked inside) + finance role."""
+    if not _fb_can_finance(request):
+        return _json({"error": "forbidden"}, 403)
+    return _json(await asyncio.to_thread(_daftra_write_selftest))
 
 async def _api_fb_daftra_import(request):
     if not _fb_can_finance(request):
