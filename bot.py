@@ -35412,6 +35412,12 @@ DAFTRA_API_KEY = os.environ.get("DAFTRA_API_KEY", "").strip()
 DAFTRA_COMPANY_SLUG = os.environ.get("DAFTRA_COMPANY_SLUG", "").strip()
 DAFTRA_IMPORT_START_DATE = os.environ.get("DAFTRA_IMPORT_START_DATE", "").strip()
 DAFTRA_POST_ENABLED = os.environ.get("DAFTRA_POST_ENABLED", "0") in ("1", "true", "True", "yes")
+# OAuth2 (token-based) — Daftra's write API often needs a Bearer token, not the read APIKEY.
+# Token endpoint: POST {base}/api2/v2/oauth/token, grant_type=password (client_id+secret+user+pass).
+DAFTRA_CLIENT_ID = os.environ.get("DAFTRA_CLIENT_ID", "").strip()
+DAFTRA_CLIENT_SECRET = os.environ.get("DAFTRA_CLIENT_SECRET", "").strip()
+DAFTRA_USERNAME = os.environ.get("DAFTRA_USERNAME", "").strip()
+DAFTRA_PASSWORD = os.environ.get("DAFTRA_PASSWORD", "").strip()
 FB_APPROVAL_THRESHOLD = Decimal(os.environ.get("FB_APPROVAL_THRESHOLD", "3000"))
 
 # ---- 9 JSON stores (loaded at import; saved on write — same pattern as _finance_adjust) ----
@@ -35621,6 +35627,77 @@ def _daftra_delete(path, timeout=25):
         if DAFTRA_API_KEY:
             msg = msg.replace(DAFTRA_API_KEY, "••••")
         return None, msg[:300], 0
+
+_daftra_oauth_cache = {"token": None, "exp": 0.0}
+
+def _daftra_oauth_mask(msg):
+    for s in (DAFTRA_CLIENT_SECRET, DAFTRA_PASSWORD, DAFTRA_API_KEY):
+        if s:
+            msg = msg.replace(s, "••••")
+    return msg
+
+def _daftra_oauth_token(force=False):
+    """Daftra OAuth2 access token (cached). Daftra's documented grant is 'password'
+    (client_id+secret+username+password); falls back to client_credentials if no user/pass.
+    Returns (token, error). Never leaks secrets."""
+    if not (DAFTRA_BASE_URL and DAFTRA_CLIENT_ID and DAFTRA_CLIENT_SECRET):
+        return None, "oauth_not_configured"
+    now = time.time()
+    if not force and _daftra_oauth_cache["token"] and now < _daftra_oauth_cache["exp"]:
+        return _daftra_oauth_cache["token"], None
+    body = {"client_id": DAFTRA_CLIENT_ID, "client_secret": DAFTRA_CLIENT_SECRET}
+    if DAFTRA_USERNAME and DAFTRA_PASSWORD:
+        body.update({"grant_type": "password", "username": DAFTRA_USERNAME, "password": DAFTRA_PASSWORD})
+    else:
+        body["grant_type"] = "client_credentials"
+    try:
+        r = requests.post(DAFTRA_BASE_URL + "/api2/v2/oauth/token", data=body,
+                          headers={"Accept": "application/json"}, timeout=30)
+        try:
+            d = r.json()
+        except Exception:
+            d = {}
+        tok = d.get("access_token") if isinstance(d, dict) else None
+        if tok:
+            _daftra_oauth_cache["token"] = tok
+            _daftra_oauth_cache["exp"] = now + int(d.get("expires_in") or 3600) - 60
+            return tok, None
+        detail = (d.get("message") or d.get("error") or d.get("error_description") or (r.text or "")[:140]) if (isinstance(d, dict) or r.text) else ""
+        return None, _daftra_oauth_mask("oauth_http_%d: %s" % (r.status_code, detail))
+    except requests.RequestException as e:
+        return None, _daftra_oauth_mask(str(e))[:200]
+
+def _daftra_post_bearer(path, payload, token, timeout=30):
+    """POST JSON with an OAuth Bearer token → (data, error, status)."""
+    url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+    try:
+        r = requests.post(url, headers={"Authorization": "Bearer " + token, "Accept": "application/json",
+                                        "Content-Type": "application/json"}, json=payload, timeout=timeout)
+        st = r.status_code
+        try:
+            data = r.json()
+        except Exception:
+            data = {"_raw": (r.text or "")[:300]}
+        if st >= 400:
+            return data, ("http_%d" % st), st
+        return data, None, st
+    except requests.RequestException as e:
+        return None, _daftra_oauth_mask(str(e))[:200], 0
+
+def _daftra_delete_any(path):
+    """Delete a record by whatever auth works (APIKEY first, then OAuth Bearer)."""
+    data, err, st = _daftra_delete(path)
+    if err is None:
+        return {"status": st, "ok": True, "via": "apikey"}
+    tok, _t = _daftra_oauth_token()
+    if tok:
+        url = DAFTRA_BASE_URL + (path if path.startswith("/") else "/" + path)
+        try:
+            r = requests.delete(url, headers={"Authorization": "Bearer " + tok, "Accept": "application/json"}, timeout=25)
+            return {"status": r.status_code, "ok": r.status_code < 400, "via": "oauth"}
+        except requests.RequestException as e:
+            return {"status": 0, "ok": False, "error": _daftra_oauth_mask(str(e))[:160], "via": "oauth"}
+    return {"status": st, "ok": False, "error": err, "via": "apikey"}
 
 def _daftra_resp_msg(data):
     """A short human message out of a Daftra response (for diagnosing a failed create)."""
@@ -36026,6 +36103,8 @@ def _daftra_write_selftest():
     journal → read back → DELETE. Gated by DAFTRA_POST_ENABLED. Returns a masked report."""
     rep = {"configured": _daftra_configured(), "post_enabled": DAFTRA_POST_ENABLED,
            "base": DAFTRA_BASE_URL, "key": _fb_mask_key(DAFTRA_API_KEY),
+           "oauth_creds": {"client_id": bool(DAFTRA_CLIENT_ID), "client_secret": bool(DAFTRA_CLIENT_SECRET),
+                           "username": bool(DAFTRA_USERNAME), "password": bool(DAFTRA_PASSWORD)},
            "introspect": None, "attempts": [], "created_id": None, "created_shape": None,
            "verified": False, "deleted": None, "ok": False, "error": None}
     if not _daftra_configured():
@@ -36075,32 +36154,53 @@ def _daftra_write_selftest():
     candidates.append(("std", {"Journal": _hs, line_key: [_ln(acct_ids[0], 1, 0, False), _ln(acct_ids[1], 0, 1, False)]}))
     rep["sent_sample"] = candidates[0][1] if candidates else None   # exact body we POST (for Daftra support)
     created_id = None
+    created_path = "/api2/journals"
+    # Pass 1 — APIKEY header (works for reads; may be read-only for writes)
     for label, payload in candidates:
         data, err, st = _daftra_post("/api2/journals", payload)     # JSON — the proven content type
         if "first_response" not in rep:
             rep["first_response"] = data if isinstance(data, dict) else {"_raw": str(data)[:400]}
         nid = _daftra_extract_new_id(data)
-        rep["attempts"].append({"variant": label, "status": st, "error": err, "got_id": bool(nid),
+        rep["attempts"].append({"auth": "apikey", "variant": label, "status": st, "error": err, "got_id": bool(nid),
                                 "message": _daftra_resp_msg(data),
                                 "resp_keys": sorted([str(k) for k in data.keys()])[:20]
                                             if isinstance(data, dict) else None})
         if nid:
-            created_id = nid
-            rep["created_variant"] = label
-            break
+            created_id = nid; rep["created_variant"] = label; rep["created_auth"] = "apikey"; break
+    # Pass 2 — OAuth Bearer (Daftra's write API usually needs this), if creds are set
+    if not created_id and DAFTRA_CLIENT_ID and DAFTRA_CLIENT_SECRET:
+        tok, terr = _daftra_oauth_token(force=True)
+        rep["oauth"] = {"configured": True, "have_user_pass": bool(DAFTRA_USERNAME and DAFTRA_PASSWORD),
+                        "token_ok": bool(tok), "token_error": terr}
+        if tok:
+            sample = candidates[0][1] if candidates else None
+            for opath in ("/api2/journals", "/api2/v2/journals", "/v2/journals"):
+                if not sample:
+                    break
+                data, err, st = _daftra_post_bearer(opath, sample, tok)
+                nid = _daftra_extract_new_id(data)
+                rep["attempts"].append({"auth": "oauth", "path": opath, "status": st, "error": err,
+                                        "got_id": bool(nid), "message": _daftra_resp_msg(data)})
+                if nid:
+                    created_id = nid; rep["created_variant"] = "mirror"; rep["created_auth"] = "oauth"
+                    created_path = opath; break
+    elif not created_id:
+        rep["oauth"] = {"configured": False,
+                        "hint": "أضف DAFTRA_CLIENT_ID و DAFTRA_CLIENT_SECRET (و DAFTRA_USERNAME/DAFTRA_PASSWORD) في Railway للكتابة عبر OAuth"}
     rep["created_id"] = created_id
     rep["line_key_used"] = line_key
     if not created_id:
         rep["error"] = "create_failed"
         rep["summary"] = ("create_failed · line_key=%s · " % line_key) + " · ".join(
-            "%s→%s:%s" % (a.get("variant"), a.get("status"), (a.get("message") or a.get("error") or "")[:60])
+            "%s/%s→%s:%s" % (a.get("auth"), a.get("variant") or a.get("path"), a.get("status"),
+                             (a.get("message") or a.get("error") or "")[:50])
             for a in rep["attempts"])
         return rep
-    vdata, verr = _daftra_get("/api2/journals/%s" % created_id)
+    vdata, verr = _daftra_get("%s/%s" % (created_path, created_id))
     rep["verified"] = bool(vdata and not verr)
-    ddata, derr, dst = _daftra_delete("/api2/journals/%s" % created_id)
-    rep["deleted"] = {"status": dst, "ok": (derr is None), "error": derr}
+    rep["deleted"] = _daftra_delete_any("%s/%s" % (created_path, created_id))
     rep["ok"] = bool(created_id)
+    rep["summary"] = "✓ write OK via %s (%s)" % (rep.get("created_auth"), created_path)
     return rep
 
 def _daftra_import_journals(start=None, end=None, actor=""):
