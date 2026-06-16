@@ -36073,9 +36073,12 @@ def _daftra_write_selftest():
     _hs = {"date": today, "description": memo, "notes": memo, "draft": 0}
     candidates.append(("currency", {"Journal": _hc, line_key: [_ln(acct_ids[0], 1, 0, True), _ln(acct_ids[1], 0, 1, True)]}))
     candidates.append(("std", {"Journal": _hs, line_key: [_ln(acct_ids[0], 1, 0, False), _ln(acct_ids[1], 0, 1, False)]}))
+    rep["sent_sample"] = candidates[0][1] if candidates else None   # exact body we POST (for Daftra support)
     created_id = None
     for label, payload in candidates:
         data, err, st = _daftra_post("/api2/journals", payload)     # JSON — the proven content type
+        if "first_response" not in rep:
+            rep["first_response"] = data if isinstance(data, dict) else {"_raw": str(data)[:400]}
         nid = _daftra_extract_new_id(data)
         rep["attempts"].append({"variant": label, "status": st, "error": err, "got_id": bool(nid),
                                 "message": _daftra_resp_msg(data),
