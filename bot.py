@@ -36036,7 +36036,7 @@ def _daftra_write_selftest():
         rep["error"] = "post_disabled"
         rep["hint"] = "فعّل DAFTRA_POST_ENABLED=1 على Railway ثم أعد الاختبار."
         return rep
-    line_key = (rep["introspect"] or {}).get("line_key_detected") or "journal_accounts"
+    line_key = (rep["introspect"] or {}).get("line_key_detected") or "JournalTransaction"
     acct_ids, aerr = _daftra_sample_account_ids(2)
     if len(acct_ids) < 2:
         rep["error"] = "need_two_accounts"
@@ -36044,34 +36044,54 @@ def _daftra_write_selftest():
         return rep
     today = datetime.now(TZ).date().isoformat()
     memo = "OUJA API write-test — آمن للحذف"
-    lines = [{"account_id": acct_ids[0], "debit": 1, "credit": 0, "description": memo},
-             {"account_id": acct_ids[1], "debit": 0, "credit": 1, "description": memo}]
+    # Envelope is PROVEN (Daftra's Invoice/InvoiceItem pattern): JSON {"Journal":{…}, "<line_key>":[…]}.
+    # Only the line FIELDS are unknown, so try: mirror-a-real-journal, currency_* fields, plain debit/credit.
+    def _ln(aid, deb, cre, currency):
+        d = {"account_id": aid, "description": memo, "debit": deb, "credit": cre}
+        if currency:
+            d["currency_debit"] = deb; d["currency_credit"] = cre; d["currency_rate"] = 1
+        return d
+    candidates = []
+    try:                                  # 1) mirror a real journal's header scalars + line field names
+        _jd, _je = _daftra_get("/api2/journals", {"limit": 1})
+        _items = _daftra_extract_list(_jd or [])
+        if _items:
+            _core = _daftra_unwrap(_items[0])
+            _rl = _daftra_journal_lines(_core)
+            _lk = set((_daftra_unwrap(_rl[0]) if _rl else {}).keys())
+            _hdr = {"date": today, "description": memo, "notes": memo, "draft": 0}
+            for _k in ("currency_code", "currency_rate", "branch_id"):
+                if _core.get(_k) not in (None, ""):
+                    _hdr[_k] = _core.get(_k)
+            _hdr.setdefault("currency_code", "SAR"); _hdr.setdefault("currency_rate", 1)
+            _cur = ("currency_debit" in _lk or "currency_credit" in _lk)
+            candidates.append(("mirror", {"Journal": _hdr,
+                line_key: [_ln(acct_ids[0], 1, 0, _cur), _ln(acct_ids[1], 0, 1, _cur)]}))
+    except Exception as _e:
+        rep["mirror_error"] = str(_e)[:120]
+    _hc = {"date": today, "description": memo, "notes": memo, "draft": 0, "currency_code": "SAR", "currency_rate": 1}
+    _hs = {"date": today, "description": memo, "notes": memo, "draft": 0}
+    candidates.append(("currency", {"Journal": _hc, line_key: [_ln(acct_ids[0], 1, 0, True), _ln(acct_ids[1], 0, 1, True)]}))
+    candidates.append(("std", {"Journal": _hs, line_key: [_ln(acct_ids[0], 1, 0, False), _ln(acct_ids[1], 0, 1, False)]}))
     created_id = None
-    # try a small matrix: JSON vs form-encoded (CakePHP) × envelope shape
-    matrix = [("form", "journal_sibling"), ("json", "journal_sibling"),
-              ("form", "journal_nested"), ("json", "journal_nested"),
-              ("form", "flat")]
-    for fmt, shape in matrix:
-        payload = _daftra_build_journal_payload(today, lines, memo, shape, line_key)
-        body = _daftra_form_encode(payload) if fmt == "form" else payload
-        data, err, st = _daftra_post("/api2/journals", body, form=(fmt == "form"))
+    for label, payload in candidates:
+        data, err, st = _daftra_post("/api2/journals", payload)     # JSON — the proven content type
         nid = _daftra_extract_new_id(data)
-        rep["attempts"].append({"format": fmt, "shape": shape, "status": st, "error": err,
-                                "got_id": bool(nid), "message": _daftra_resp_msg(data),
+        rep["attempts"].append({"variant": label, "status": st, "error": err, "got_id": bool(nid),
+                                "message": _daftra_resp_msg(data),
                                 "resp_keys": sorted([str(k) for k in data.keys()])[:20]
                                             if isinstance(data, dict) else None})
         if nid:
             created_id = nid
-            rep["created_shape"] = shape
-            rep["created_format"] = fmt
+            rep["created_variant"] = label
             break
     rep["created_id"] = created_id
     rep["line_key_used"] = line_key
     if not created_id:
         rep["error"] = "create_failed"
-        a = next((x for x in rep["attempts"] if x.get("message")), (rep["attempts"][0] if rep["attempts"] else {}))
-        rep["summary"] = "create_failed · line_key=%s · status=%s · %s" % (
-            line_key, a.get("status"), (a.get("message") or a.get("error") or "")[:180])
+        rep["summary"] = ("create_failed · line_key=%s · " % line_key) + " · ".join(
+            "%s→%s:%s" % (a.get("variant"), a.get("status"), (a.get("message") or a.get("error") or "")[:60])
+            for a in rep["attempts"])
         return rep
     vdata, verr = _daftra_get("/api2/journals/%s" % created_id)
     rep["verified"] = bool(vdata and not verr)
