@@ -24939,6 +24939,44 @@ def _owner_month_report(owner, mkey):
         _owner_portal_cache_save()      # v2.2.2: survive restarts
     return rep
 
+def _owner_warm_reports():
+    """Pre-compute the owners cycle-board inputs so «دورة الشهر» is never cold. Builds the
+    current + last-complete month report for every owner; a call is a near-instant no-op
+    when the report is still within its cache TTL. All owners in a month share ONE
+    Hostaway window pull (_res_window_cache), so a cold pass ≈ 1 pull + N aggregations."""
+    try:
+        cur = datetime.now(TZ).date().isoformat()[:7]
+        y, m = int(cur[:4]), int(cur[5:7]) - 1
+        if m == 0:
+            y, m = y - 1, 12
+        prev = "%04d-%02d" % (y, m)
+        owners = sorted({(v or "").strip() for v in _unit_owners.values() if (v or "").strip()})
+        if not owners:
+            return 0
+        n = 0
+        for mkey in (cur, prev):
+            for o in owners:
+                try:
+                    if _owner_month_report(o, mkey) is not None:
+                        n += 1
+                except Exception as e:
+                    print("owner warm error:", o, mkey, str(e)[:120])
+        return n
+    except Exception as e:
+        print("owner warm build error:", e)
+        return 0
+
+@tasks.loop(minutes=10)
+async def owner_warm_loop():
+    """Keep «دورة الشهر» fast: the current-month report cache TTL is only 15 min and a
+    restart starts cold, so refresh in the background (first run right after boot)."""
+    try:
+        n = await asyncio.to_thread(_owner_warm_reports)
+        if n:
+            print("owner warm: %d owner-month report(s) ready" % n)
+    except Exception as e:
+        print("owner warm loop error:", e)
+
 def _owner_portal_data(owner, mkey):
     """Everything the owner page renders, computed from real stores only. Missing data
     stays null/empty and the page shows honest empty-states — nothing interpolated."""
@@ -46096,6 +46134,8 @@ async def on_ready():
         discount_catchup_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
+    if not owner_warm_loop.is_running():
+        owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
     if ASSISTANT_ENABLED:
         guild0 = bot.get_guild(GUILD_ID)
         if guild0 is not None:

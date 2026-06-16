@@ -226,7 +226,7 @@
       se_footnotes: 'ملاحظات العقد', se_open_page: 'افتح صفحة المالك',
       se_asof: 'آخر تحديث للبيانات',
       /* --- monthly cycle board (slice 3) --- */
-      cy_title: 'دورة الشهر', cy_month: 'الشهر',
+      cy_title: 'دورة الشهر', cy_month: 'الشهر', cy_loading: 'نحضّر أرقام الملّاك لهالشهر… (تظهر بعد ثواني)',
       cy_ready: 'جاهز', cy_sent: 'أُرسل', cy_opened: 'انفتح', cy_flagged: 'يحتاج مراجعة',
       cy_portfolio: 'صافي المحفظة', cy_done: 'الشهر مكتمل — كل الكشوفات أُرسلت ✓',
       cy_review_first: 'راجع هذي قبل الإرسال',
@@ -493,7 +493,7 @@
       se_pct: 'Rate', se_fee_grp: 'base {b} × {p}%',
       se_footnotes: 'Contract notes', se_open_page: 'Open owner page',
       se_asof: 'Data last updated',
-      cy_title: 'Month cycle', cy_month: 'Month',
+      cy_title: 'Month cycle', cy_month: 'Month', cy_loading: 'Preparing this month’s owner figures… (appears in a few seconds)',
       cy_ready: 'Ready', cy_sent: 'Sent', cy_opened: 'Opened', cy_flagged: 'Needs review',
       cy_portfolio: 'Portfolio net', cy_done: 'Month complete — every statement sent ✓',
       cy_review_first: 'Review these before sending',
@@ -3033,7 +3033,7 @@
   }
 
   /* ----- slice 3: دورة الشهر — the monthly cycle board ----- */
-  var cyUI = { m: '', filter: 'all', sel: {}, tplOpen: false };
+  var cyUI = { m: '', filter: 'all', sel: {}, tplOpen: false, loading: false };
 
   function cyWaLink(r, d) {
     var msg = (d.wa_template || '')
@@ -3140,7 +3140,7 @@
     var cy = store.D.cycle;
     var y = window.scrollY;
     $('#view').innerHTML =
-      (cy ? cycleBoardHtml(cy) : '') +
+      (cy ? cycleBoardHtml(cy) : (cyUI.loading ? cycleLoadingHtml() : '')) +
       '<section class="card grp">' +
         '<header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('o_title')) + '</h2>' +
         '<span class="cnt">' + (d.total || 0) + '</span></header>' +
@@ -3158,21 +3158,28 @@
     window.scrollTo(0, y);
   }
 
+  function cycleLoadingHtml() {
+    return '<section class="card grp">' +
+      '<header class="grp-h"><span class="grp-ico">📆</span><h2>' + esc(t('cy_title')) + '</h2></header>' +
+      '<div class="grp-hint">' + esc(t('cy_loading')) + '</div>' + skeleton(4) + '</section>';
+  }
+
+  // The owners LIST is cheap; the «دورة الشهر» board computes every owner and used to
+  // block the whole page. Now: render the list instantly, fill the board in after.
   function loadCycle() {
+    cyUI.loading = true;
+    store.D.cycle = null;
+    renderOwners(null);              // list + board spinner, immediately
     return api('/erp/api/owners/cycle' + (cyUI.m ? '?m=' + encodeURIComponent(cyUI.m) : ''))
-      .then(function (c) { store.D.cycle = c; cyUI.m = c.month; renderOwners(null); })
-      .catch(function () { /* board absent; the owners list still renders */ });
+      .then(function (c) { cyUI.loading = false; store.D.cycle = c; cyUI.m = c.month; renderOwners(null); })
+      .catch(function () { cyUI.loading = false; renderOwners(null); });
   }
 
   function loadOwners() {
     $('#view').innerHTML = skeleton(5);
-    Promise.all([
-      api('/erp/api/owners'),
-      api('/erp/api/owners/cycle' + (cyUI.m ? '?m=' + encodeURIComponent(cyUI.m) : '')).catch(function () { return null; })
-    ]).then(function (rs) {
-      store.D.cycle = rs[1];
-      if (rs[1]) cyUI.m = rs[1].month;
-      renderOwners(rs[0]);
+    api('/erp/api/owners').then(function (d) {
+      store.D.owners = d;
+      loadCycle();                   // renders list + board spinner, then fills the board
       restoreScroll('owners');
     }).catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
