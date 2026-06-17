@@ -6863,13 +6863,32 @@ class CleaningProofReviewView(discord.ui.View):
         # approval is already persisted by _cleanproof_decide, so deleting loses no data.
         if report and report.get("status") == "manager_approved":
             _oujact_mark_done("{}:{}".format(report.get("apartment_id"), report.get("date")))
+            key = "{}:{}".format(report.get("apartment_id"), str(report.get("date"))[:10])
+            reason = "OujaCT: cleaning approved by " + (str(interaction.user) or "manager")
             try:
-                guild = interaction.guild or (bot.get_guild(GUILD_ID) if GUILD_ID else None)
-                tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
-                if tch is not None:
-                    await tch.delete(reason="OujaCT: cleaning approved by " + (str(interaction.user) or "manager"))
+                # The review card now lives in the apartment's OWN turnover channel, so the
+                # channel to close is the one we're in. Delete it DIRECTLY (verified by its
+                # oujact key) — this does NOT rely on category lookup, which silently misses
+                # channels once the turnovers category overflows Discord's 50-per-category cap.
+                ch = interaction.channel
+                if parse_topic_oujact_key(getattr(ch, "topic", "") or "") == key:
+                    await ch.delete(reason=reason)
+                else:
+                    # Card isn't in the turnover channel (e.g. an older central-room card):
+                    # find the apartment's turnover channel by key and delete that instead.
+                    guild = interaction.guild or (bot.get_guild(GUILD_ID) if GUILD_ID else None)
+                    tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
+                    if tch is not None:
+                        await tch.delete(reason=reason)
             except Exception as e:
+                # Surface WHY it didn't delete (e.g. Missing Permissions) instead of failing
+                # silently — the channel still exists here, so the ephemeral note will arrive.
                 print("oujact close-on-approve (discord) error:", e)
+                try:
+                    await interaction.followup.send(
+                        f"⚠️ تم الاعتماد، بس ما قدرت أحذف روم الشقة: {e}", ephemeral=True)
+                except Exception:
+                    pass
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger,
                        custom_id="ouja_cleanproof_reject")
