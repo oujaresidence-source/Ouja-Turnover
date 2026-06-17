@@ -46605,9 +46605,9 @@ async def maint_assign_cmd(ctx, *, args: str = ""):
 # ---- /deletethischannel : delete the channel the command is run in (admins only) ----
 # Standalone utility, nothing to do with cleaning. Exposed BOTH as a slash command and an
 # "!ouja deletethischannel" prefix command (the prefix one is a guaranteed fallback in case the
-# bot wasn't invited with the applications.commands scope, so slash sync is unavailable). A
-# one-tap confirm guards it because deleting a channel is permanent. Gated to admins / people
-# with Manage-Channels so regular members (e.g. the cleaning team) can't delete rooms.
+# bot wasn't invited with the applications.commands scope, so slash sync is unavailable). Deletes
+# immediately, no confirm (owner's choice). Gated to admins / people with Manage-Channels so
+# regular members (e.g. the cleaning team) can't delete rooms.
 def _can_delete_channels(user):
     try:
         if _tk_is_admin(user):
@@ -46617,66 +46617,44 @@ def _can_delete_channels(user):
     p = getattr(user, "guild_permissions", None)
     return bool(p and (p.administrator or p.manage_channels))
 
-class ConfirmDeleteChannelView(discord.ui.View):
-    def __init__(self, channel_id, requested_by):
-        super().__init__(timeout=60)
-        self.channel_id = int(channel_id)
-        self.requested_by = requested_by
-
-    @discord.ui.button(label="🗑️ احذف الروم", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not _can_delete_channels(interaction.user):
-            await interaction.response.send_message("🚫 ما عندك صلاحية لحذف الرومات.", ephemeral=True)
-            return
-        ch = interaction.client.get_channel(self.channel_id) or interaction.channel
-        try:
-            await interaction.response.edit_message(content="🗑️ يتم حذف الروم…", view=None)
-        except Exception:
-            pass
-        try:
-            await ch.delete(reason=f"deletethischannel by {self.requested_by}")
-        except Exception as e:
-            print("deletethischannel error:", e)
-            try:
-                await interaction.followup.send(
-                    f"⚠️ ما قدرت أحذف الروم: {e}\n(غالباً البوت يحتاج صلاحية «Manage Channels» على هذا الروم.)",
-                    ephemeral=True)
-            except Exception:
-                pass
-
-    @discord.ui.button(label="إلغاء", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            await interaction.response.edit_message(content="تم الإلغاء — الروم باقي 👍", view=None)
-        except Exception:
-            pass
-
-async def _prompt_delete_channel(send, channel, user):
-    """Shared gate + confirm. `send(content, view)` posts the prompt (ephemeral for slash)."""
-    if not _can_delete_channels(user):
-        await send("🚫 هذا الأمر للإدارة فقط (يحتاج صلاحية إدارة القنوات).", None)
-        return
-    nm = getattr(channel, "name", None) or "this channel"
-    await send(f"⚠️ متأكد تبي تحذف هذا الروم **#{nm}**؟ الحذف نهائي وما يمكن التراجع عنه.",
-               ConfirmDeleteChannelView(channel.id, str(user)))
-
 @bot.tree.command(name="deletethischannel",
                   description="Delete the channel this command is used in (admins only)")
 async def slash_delete_this_channel(interaction: discord.Interaction):
-    async def _send(content, view):
-        if view is None:
-            await interaction.response.send_message(content, ephemeral=True)
-        else:
-            await interaction.response.send_message(content, view=view, ephemeral=True)
-    await _prompt_delete_channel(_send, interaction.channel, interaction.user)
+    if not _can_delete_channels(interaction.user):
+        await interaction.response.send_message(
+            "🚫 هذا الأمر للإدارة فقط (يحتاج صلاحية إدارة القنوات).", ephemeral=True)
+        return
+    ch = interaction.channel
+    try:                               # ack first so the interaction doesn't show as failed
+        await interaction.response.send_message("🗑️ يتم حذف الروم…", ephemeral=True)
+    except Exception:
+        pass
+    try:
+        await ch.delete(reason=f"deletethischannel by {interaction.user}")
+    except Exception as e:
+        print("deletethischannel error:", e)
+        try:
+            await interaction.followup.send(
+                f"⚠️ ما قدرت أحذف الروم: {e}\n(غالباً البوت يحتاج صلاحية «Manage Channels» على هذا الروم.)",
+                ephemeral=True)
+        except Exception:
+            pass
 
 @bot.command(name="deletethischannel", aliases=["delete-this-channel", "احذف-الروم", "احذف-القناة"])
 async def cmd_delete_this_channel(ctx):
     """!ouja deletethischannel — delete the current channel (admins only). Prefix fallback for
     the /deletethischannel slash command."""
-    async def _send(content, view):
-        await ctx.reply(content) if view is None else await ctx.reply(content, view=view)
-    await _prompt_delete_channel(_send, ctx.channel, ctx.author)
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط (يحتاج صلاحية إدارة القنوات).")
+        return
+    try:
+        await ctx.channel.delete(reason=f"deletethischannel by {ctx.author}")
+    except Exception as e:
+        print("deletethischannel error:", e)
+        try:
+            await ctx.send(f"⚠️ ما قدرت أحذف الروم: {e}\n(غالباً البوت يحتاج صلاحية «Manage Channels».)")
+        except Exception:
+            pass
 
 @bot.event
 async def on_ready():
