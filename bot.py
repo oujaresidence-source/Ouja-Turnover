@@ -6848,8 +6848,28 @@ class CleaningProofReviewView(discord.ui.View):
             await interaction.response.send_message("Report not found.", ephemeral=True)
             return
         report = _cleanproof_decide(report, "approve", str(interaction.user), "")
-        await interaction.response.edit_message(embed=_cleanproof_discord_embed(report),
-                                                view=CleaningProofReviewView())
+        # Acknowledge first (the card flips to approved/green). If the card lives in the
+        # apartment's turnover channel, the next step deletes that channel — so this edit may
+        # disappear with it; that's expected.
+        try:
+            await interaction.response.edit_message(embed=_cleanproof_discord_embed(report),
+                                                    view=CleaningProofReviewView())
+        except Exception as e:
+            print("cleanproof approve card edit error:", e)
+        # Owner decision 2026-06-17: approving signs the cleaning off → delete the apartment's
+        # turnover channel to keep Discord tidy, and mark the unit+day done so the sync loop
+        # never re-opens it. Mirrors the dashboard approve path. _oujact_find_turnover_channel
+        # matches the exact unit+date key, so the central review room is never touched. The
+        # approval is already persisted by _cleanproof_decide, so deleting loses no data.
+        if report and report.get("status") == "manager_approved":
+            _oujact_mark_done("{}:{}".format(report.get("apartment_id"), report.get("date")))
+            try:
+                guild = interaction.guild or (bot.get_guild(GUILD_ID) if GUILD_ID else None)
+                tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
+                if tch is not None:
+                    await tch.delete(reason="OujaCT: cleaning approved by " + (str(interaction.user) or "manager"))
+            except Exception as e:
+                print("oujact close-on-approve (discord) error:", e)
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger,
                        custom_id="ouja_cleanproof_reject")
