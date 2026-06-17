@@ -1828,9 +1828,9 @@ def _check_agreement_for_one(r, now):
       2) If agreement required + NOT signed + check-in close → resend signing link.
       3) Either way: if check-in time has PASSED + no door-code message has been
          sent to the guest in last 24h:
-            - apartment NOT ready (cleaning still ongoing) → tell the guest the
-              unit is being prepared, AND raise a system escalation telling ops
-              to follow up once cleaning completes.
+            - apartment NOT ready (cleaning channel still open — an UNRELIABLE signal) →
+              send the guest a NEUTRAL reassurance that never mentions cleaning/readiness,
+              AND raise a system escalation telling ops to follow up.
             - apartment IS ready + still no code → raise a HIGH escalation to
               operations: "code wasn't sent, please send it now."
     Returns True if we took ANY action (so the loop logs it)."""
@@ -1889,16 +1889,17 @@ def _check_agreement_for_one(r, now):
     # Is the apartment even ready?
     ready = _is_unit_ready_for_checkin(lid)
     if not ready and res_id not in _not_ready_escalated:
-        # Tell the guest the apartment is being prepared (no code yet — we never send it)
+        # Reassure the guest a human is on it — WITHOUT claiming any cleaning/readiness status.
+        # (Owner rule 2026-06-17: never tell the guest the unit is/isn't clean or ready; our
+        #  open-cleaning-channel signal is unreliable. The ops escalation below handles it.)
         is_ar = _has_arabic(guest_name) or True
         msg = (
-            "حياك الله 🤍\nالشقة الحين قاعدين يجهّزونها — تنظيف عميق قبل وصولك. "
-            "الكود بيُرسَل لك مباشرة من الفريق المختص فور ما تكون جاهزة. "
-            "شكراً لصبرك ودقايق وراح نعطيك تأكيد."
+            "حياك الله 🤍\nرفعنا طلبك للفريق المختص ونتأكد من آخر التفاصيل، وكود الدخول "
+            "بيوصلك منهم مباشرة خلال لحظات. شكراً لصبرك ودقايق وراح نعطيك تأكيد."
             if is_ar else
-            "Hi 🤍\nThe apartment is being prepped right now — a deep clean before you arrive. "
-            "Our team will send the access code directly the moment it's ready. "
-            "Thanks for your patience — confirmation coming shortly."
+            "Hi 🤍\nWe've flagged this to our team and we're finalizing the last details — "
+            "your access code will reach you directly from them shortly. Thanks for your "
+            "patience, confirmation coming soon."
         )
         try:
             send_guest_message(cid, msg, "email")
@@ -4571,6 +4572,12 @@ you "have" the code from context, do NOT type it. Code-release is reserved for \
 the operations team. If a guest asks for the code: tell them the team will send \
 it directly. If they're stuck, escalate. (This rule has no exceptions — typing \
 a 4–6 digit number in a code context = wrong reply.)
+- 🚫 TELL THE GUEST WHETHER THE UNIT IS CLEAN, READY, or DONE being prepared — in EITHER \
+direction. Never say it's ready, never say it's "still being cleaned / not ready yet / being \
+prepared," and never give a readiness/cleaning time. Our only signal for this is unreliable, so \
+it is a HUMAN call. If the guest asks ANYTHING about whether their apartment is ready, clean, or \
+done being cleaned (e.g. "هل الشقة جاهزة؟"، "خلص التنظيف؟"، "is it ready/clean yet?"), set \
+action="escalate" and draft no reply — the team will check the real status and answer.
 - Share any building security info, lock instructions, or override codes
 - Share other guests', owners', or internal/financial information
 - Handle any complaint, dispute, damage claim, or an upset guest
@@ -5155,6 +5162,70 @@ def _is_code_question(text):
     t = (text or "").lower()
     return any(h in t for h in _CODE_Q_HINTS)
 
+# ---- Readiness / cleanliness questions -> ALWAYS a human (owner decision 2026-06-17) ----
+# The ONLY readiness signal the bot has is whether a turnover-cleaning Discord channel is
+# still open (see _is_unit_ready_for_checkin) — and that is UNRELIABLE: the cleaning team or
+# supervisor often just hasn't ticked the "done" mark yet, even though the unit is finished
+# or nearly so. That made Musaed tell guests "the apartment isn't clean / still being
+# prepared" when it wasn't true. So the assistant must NEVER tell a guest whether the unit is
+# clean or ready — in either direction — and every such question is forced to a human
+# escalation, no matter how confident the model was.
+_READY_Q_HINTS_AR = (
+    "الشقة جاهزة", "الشقه جاهزه", "جاهزة الشقة", "جاهزه الشقه", "الوحدة جاهزة",
+    "الوحده جاهزه", "جاهزة ولا", "جاهزه ولا", "جاهزة الحين", "جاهزة الان", "جاهزة الآن",
+    "متى تجهز", "متى بتجهز", "متى تخلص", "متى تنتهي", "جهزتوا", "جهزتو", "جهزتوها",
+    "خلصت الشقة", "خلصتوا الشقة", "خلصتو الشقة", "خلص التنظيف", "خلصتوا التنظيف",
+    "خلصتو التنظيف", "خلصوا التنظيف", "نظفتوا", "نظفتو", "نظفتوها", "تنظفت", "اتنظفت",
+    "نظيفة ولا", "نظيفه ولا", "الشقة نظيفة", "الشقه نظيفه",
+)
+_READY_Q_HINTS_EN = (
+    "apartment ready", "apt ready", "unit ready", "room ready", "place ready",
+    "flat ready", "is it ready", "is it cleaned", "is it clean", "ready yet",
+    "ready for check", "cleaned yet", "clean yet", "done cleaning", "finished cleaning",
+    "still cleaning", "being cleaned", "is the room clean", "is the apartment clean",
+    "is the apartment ready", "is my apartment ready", "is the unit ready", "housekeeping done",
+)
+def _ready_norm(s):
+    """Fold the common Arabic spelling variants so a single hint catches all the ways guests
+    type it (ة/ه, أ/إ/آ/ا, ى/ي, and stray tatweel). Applied to BOTH text and hints."""
+    return ((s or "")
+            .replace("ة", "ه").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+            .replace("ى", "ي").replace("ـ", ""))
+
+def _is_readiness_question(text):
+    """True if the guest is asking whether their unit is clean / ready / finished cleaning."""
+    raw = text or ""
+    low = raw.lower()
+    norm = _ready_norm(raw)
+    return (any(h in low for h in _READY_Q_HINTS_EN)
+            or any(_ready_norm(h) in norm for h in _READY_Q_HINTS_AR))
+
+def _latest_guest_line(history_text):
+    """The newest inbound 'Guest: ...' line in the assembled history, so deterministic intent
+    gates fire on the guest's CURRENT message and not on something they said several turns ago.
+    History is built as 'Guest: ...' / 'Host: ...' lines (see fetch_new_guest_messages)."""
+    for line in reversed((history_text or "").split("\n")):
+        s = line.strip()
+        if s.startswith("Guest:"):
+            return s[len("Guest:"):].strip()
+    parts = [l for l in (history_text or "").split("\n") if l.strip()]
+    return parts[-1].strip() if parts else ""
+
+def _force_human_if_readiness(d, history_text):
+    """Owner rule (2026-06-17): the assistant NEVER tells a guest if the unit is clean/ready.
+    If the guest's latest message is a readiness/cleanliness question, force a human escalation
+    regardless of what the model drafted — our cleaning signal is unreliable. Single chokepoint:
+    every claude_draft result passes through here before any consumer reads `action`."""
+    if not isinstance(d, dict):
+        return d
+    if _is_readiness_question(_latest_guest_line(history_text)):
+        d["action"] = "escalate"
+        d["reply"] = ""
+        d["intent"] = "جاهزية/نظافة الشقة"
+        d["reason"] = ("سؤال عن جاهزية/نظافة الشقة — يُحوَّل لبشري دايماً (قرار المالك). "
+                       "المساعد ما يقول أبداً إن الشقة جاهزة أو لا؛ الإشارة عندنا غير موثوقة.")
+    return d
+
 # Kept for back-compat; nothing reads it directly anymore (replaced by _is_asking_alternatives).
 _ALT_HINTS = _ALT_PHRASES
 
@@ -5429,13 +5500,18 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                     f"- {when}.\n"
                     f"- " + ("هذه الوحدة **لا تتطلّب** عقد توقيع." if not needs_agr
                             else ("العقد موقّع ✅" if signed else "العقد غير موقّع ❌")) + "\n"
-                    "- حالة الشقة: " + ("جاهزة (التنظيف انتهى)" if apt_ready
-                                          else "**لازالت تحت التنظيف** (قناة التنظيف مفتوحة)") + "\n"
+                    "- حالة الشقة (داخلي فقط — ممنوع تذكرها للضيف إطلاقاً؛ الإشارة غير موثوقة): "
+                    + ("التنظيف يبدو منتهي" if apt_ready
+                       else "قناة التنظيف لسه مفتوحة") + "\n"
                     "- " + ("الكود **أُرسل** للضيف خلال آخر ٢٤ ساعة ✅" if code_already_sent
                             else "الكود **لم يُرسَل** بعد ❌") + "\n\n"
                     "🚫 قاعدة لا تُكسر: ممنوع تكتب أي كود أو رقم أرقام بسياق الدخول. "
                     "ممنوع تكرّر كود ذكره الضيف. الكود يرسله الفريق المختص فقط، لا أنت ولا "
-                    "أي رد آلي.\n\n"
+                    "أي رد آلي.\n"
+                    "🚫 قاعدة ثانية لا تُكسر: ممنوع نهائياً تقول للضيف إن الشقة 'تحت التنظيف' "
+                    "أو 'تتجهّز' أو 'ما خلّصت' أو 'جاهزة' أو 'مو جاهزة' أو أي شي عن حالة "
+                    "النظافة/الجاهزية. هذي إشارة داخلية غير موثوقة وقرارها بشري. لو الضيف سأل "
+                    "صراحةً عن الجاهزية أو النظافة → action='escalate' بدون ما تجاوب عليها.\n\n"
                     "كيف ترد (حسب الحالة بالضبط):\n"
                 )
                 if needs_agr and not signed:
@@ -5452,9 +5528,10 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                         )
                 elif not apt_ready and hrs < 6:
                     code_block += (
-                        "- الشقة لازالت تحت التنظيف، ولهذا ما وصله الكود بعد. اعتذر بلطف وقل "
-                        "إن الفريق المختص بيرسل الكود فور ما تجهز الوحدة. action='reply'. "
-                        "ممنوع تذكر وقت محدد لجاهزية الشقة."
+                        "- الكود ما وصل بعد. **action='escalate'** عشان الفريق المختص يتحقّق "
+                        "ويرسل الكود للضيف. للضيف: اعتذر بلطف وقل إن الفريق بيرسل له كود الدخول "
+                        "حالاً. 🚫 ممنوع تقول إن الشقة 'تحت التنظيف' أو 'تتجهّز' أو 'مو جاهزة' "
+                        "أو أي شي عن حالة النظافة/الجاهزية."
                     )
                 elif not code_already_sent and hrs <= 0 and apt_ready:
                     # Check-in day, agreement SIGNED, apartment ready, code not sent, and the
@@ -5582,7 +5659,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         try:
-            return json.loads(text)
+            return _force_human_if_readiness(json.loads(text), history_text)
         except json.JSONDecodeError:
             # The model sometimes wraps the JSON in a sentence ("Here's the reply: {...}").
             # Pull out the first balanced {...} block and try again instead of dropping the
@@ -5590,7 +5667,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             m = re.search(r"\{.*\}", text, re.DOTALL)
             if m:
                 try:
-                    return json.loads(m.group(0))
+                    return _force_human_if_readiness(json.loads(m.group(0)), history_text)
                 except Exception:
                     pass
             print("claude_draft: could not parse JSON · raw=", text[:300])
