@@ -2832,7 +2832,7 @@ class CleaningDoneView(discord.ui.View):
                     (("صور ناقصة: " + ", ".join(missing)) if missing else "Discord channel submit button"))
             _cleaning_reports[report["report_id"]] = report
             _save_json("cleaning_reports.json", _cleaning_reports)
-            ok, err = await _cleanproof_send_discord_review(report["report_id"])
+            ok, err = await _cleanproof_send_discord_review(report["report_id"], target_channel=ch)
             if not ok:
                 await interaction.followup.send(
                     "الصور مكتملة والتقرير محفوظ، بس ما قدرت أرسل كرت المراجعة في Discord. "
@@ -2863,7 +2863,7 @@ class CleaningDoneView(discord.ui.View):
             pass
         await interaction.followup.send(
             f"📷 تم إرسال تقرير الصور للمراجعة بواسطة {interaction.user.mention}. "
-            f"راح تلقاه في روم #{CLEANING_REVIEW_CHANNEL}. الاعتماد يتم من أزرار Discord هناك، "
+            "كرت المراجعة تم نشره هنا في نفس الروم — الاعتماد أو الرفض من أزرار الكرت، "
             "والداشبورد يعرض نفس الحالة." + _flag,
             ephemeral=False)
 
@@ -3722,13 +3722,31 @@ def _cleanproof_save_photo(report, slot_id, filename, data, mime_type):
             return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
         except Exception as e:
             # Auth errors (rotated/revoked key) -> invalidate the cached client + retry
-            # once with fresh credentials before falling back to local storage.
+            # once with fresh credentials before deciding.
             status = getattr(getattr(e, "resp", None), "status", None)
             if status in (401, 403) or "invalid_grant" in str(e).lower():
                 print("drive auth error — invalidating cached client and retrying:", e)
                 _cleanproof_drive_invalidate()
-                return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
-            raise
+                try:
+                    return _cleanproof_save_drive(report, slot_id, filename, data, mime_type)
+                except Exception as e2:
+                    e = e2
+            # Drive is configured but the upload still failed — most often a service account
+            # with no My-Drive quota (storageQuotaExceeded) or a folder/permission problem.
+            # NEVER block the cleaner on a storage misconfig: save the photo on the volume so
+            # the upload always succeeds, and flag the report so the owner can fix the Drive
+            # (Shared Drive) config later. Photos are served + attached to the Discord review
+            # card from the local copy either way (_cleanproof_photo_bytes reads local first).
+            print("drive upload failed — saving photo locally instead:", e)
+            try:
+                report["storage_provider"] = "local_fallback"
+                report["storage_warning"] = _cleanproof_storage_error_message(e)
+                _cleanproof_audit(report.get("report_id"), "drive_upload_fallback_local", "bot",
+                                  report.get("status"), report.get("status"),
+                                  _cleanproof_storage_error_message(e), {"raw_error": str(e)[:300]})
+            except Exception:
+                pass
+            return _cleanproof_save_local(report, slot_id, filename, data, mime_type)
     return _cleanproof_save_local(report, slot_id, filename, data, mime_type)
 
 def _cleanproof_photo_view(photo):
@@ -6878,16 +6896,53 @@ def _cleanproof_discord_files(report, limit=10):
             break
     return out
 
-async def _cleanproof_send_discord_review(report_id):
+def _oujact_find_cleaning_channel(guild, lid):
+    """The apartment's own turnover/cleaning Discord channel (OujaCT or plain) by listing id,
+    mirroring the naming in _is_unit_ready_for_checkin. None if not found."""
+    if guild is None or not lid:
+        return None
+    category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+    if category is None:
+        return None
+    listings = get_listings_map() or {}
+    try:
+        name = listings.get(int(lid)) or listings.get(lid) or ""
+    except Exception:
+        name = listings.get(lid) or ""
+    if not name:
+        return None
+    expected = channel_name(name)
+    exp70 = expected[:70]
+    candidates = {expected, exp70 + "-oujact", exp70 + "-oujact-checkin"}
+    for ch in category.text_channels:
+        if ch.name in candidates:
+            return ch
+    return None
+
+async def _cleanproof_send_discord_review(report_id, target_channel=None):
     report = _cleaning_reports.get(report_id)
     if not report or not GUILD_ID:
         return False, "missing_report_or_guild"
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return False, "guild_not_ready"
-    # Manager review is centralized in #oujact-review. Apartment turnover channels are
-    # execution-only; approving from scattered channels made today's reviews hard to find.
-    ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
+    # Owner decision 2026-06-17: the manager review card lives in the SAME cleaning channel the
+    # cleaner submitted from (the apartment's turnover room), so the whole flow stays in one
+    # place. Resolution order: the channel 'Submit for Review' was pressed in (target_channel)
+    # → the channel the card was first posted in (resends/updates) → the apartment's own
+    # cleaning channel by listing id → and only as a last resort the central #oujact-review.
+    ch = target_channel
+    if ch is None:
+        old_cid = report.get("discord_review_channel_id")
+        if old_cid:
+            try:
+                ch = bot.get_channel(int(old_cid)) or await guild.fetch_channel(int(old_cid))
+            except Exception:
+                ch = None
+    if ch is None:
+        ch = _oujact_find_cleaning_channel(guild, report.get("apartment_id"))
+    if ch is None:
+        ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
     if ch is None:
         return False, "review_channel_not_ready"
     old_channel_id = report.get("discord_review_channel_id")
@@ -40507,7 +40562,7 @@ async def _api_cleaning_reports_resend_today(request):
         if ok:
             sent.append({"report_id": rid, "apartment": report.get("apartment_name"), "photos": len(photos)})
             _cleanproof_audit(rid, "discord_review_resend_today", actor, status, status,
-                              f"Resent review card to #{CLEANING_REVIEW_CHANNEL}",
+                              "Resent review card to the apartment's cleaning channel",
                               extra={"date": date_iso, "photos": len(photos)})
         else:
             failed.append({"report_id": rid, "apartment": report.get("apartment_name"), "error": err or "discord_send_failed"})
