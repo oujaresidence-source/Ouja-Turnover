@@ -25359,28 +25359,40 @@ def _owner_month_report(owner, mkey):
     return rep
 
 def _owner_warm_reports():
-    """Pre-compute the owners cycle-board inputs so «دورة الشهر» is never cold. Builds the
-    current + last-complete month report for every owner; a call is a near-instant no-op
-    when the report is still within its cache TTL. All owners in a month share ONE
-    Hostaway window pull (_res_window_cache), so a cold pass ≈ 1 pull + N aggregations."""
+    """Pre-compute the owners-section inputs so «دورة الشهر» AND the statement editor are
+    never cold. Warms the current month + the 4 prior months for every owner: that span
+    covers both the board's month (current or last-complete) and the 3-prior-month window
+    `owner_anomalies` reads for each — the part that used to recompute on the first load.
+    A warm report is a near-instant no-op within its cache TTL; all owners in a month share
+    ONE Hostaway window pull (_res_window_cache). Months are warmed in PARALLEL so the cold
+    pass triggers the (network) window pulls concurrently instead of one-after-another."""
     try:
+        from concurrent.futures import ThreadPoolExecutor
         cur = datetime.now(TZ).date().isoformat()[:7]
-        y, m = int(cur[:4]), int(cur[5:7]) - 1
-        if m == 0:
-            y, m = y - 1, 12
-        prev = "%04d-%02d" % (y, m)
+        months = [cur]
+        y, m = int(cur[:4]), int(cur[5:7])
+        for _ in range(4):                       # current + 4 prior = the owners-section span
+            m -= 1
+            if m == 0:
+                y, m = y - 1, 12
+            months.append("%04d-%02d" % (y, m))
         owners = sorted({(v or "").strip() for v in _unit_owners.values() if (v or "").strip()})
         if not owners:
             return 0
-        n = 0
-        for mkey in (cur, prev):
-            for o in owners:
-                try:
+        def _warm_month(mkey):
+            c = 0
+            for o in owners:                     # serial within a month: first owner pulls
+                try:                             # the shared window, the rest reuse it
                     if _owner_month_report(o, mkey) is not None:
-                        n += 1
+                        c += 1
                 except Exception as e:
                     print("owner warm error:", o, mkey, str(e)[:120])
-        return n
+            return c
+        # each month is a DISTINCT window key, so parallel month-tasks never collide on
+        # _res_window_cache; concurrent _owner_portal_cache writes are already how the
+        # owner portal warms its 12-month trend.
+        with ThreadPoolExecutor(max_workers=min(5, len(months))) as ex:
+            return sum(ex.map(_warm_month, months))
     except Exception as e:
         print("owner warm build error:", e)
         return 0
