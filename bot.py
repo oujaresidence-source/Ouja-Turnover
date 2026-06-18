@@ -22282,7 +22282,7 @@ async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBod
     +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
   if(d.missing_airbnb) h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px;font-size:12px">'+(ar?('⚠ '+d.missing_airbnb+' وحدة بدون رابط Airbnb — صفحاتها ما تعرض زر الحجز. راجع تبويب «روابط Airbnb».'):('⚠ '+d.missing_airbnb+' listings missing Airbnb URL — their booking button is hidden. See Airbnb Links.'))+'</div>';
   b.innerHTML=h; }
-async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/listings'); }catch(_){ d=null; } _gw.listings=(d&&d.listings)||[]; _gw.byId={}; _gw.listings.forEach(function(x){ _gw.byId[x.id]=x; });
+async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/listings'); }catch(_){ d=null; } _gw.listings=(d&&d.listings)||[]; _gw.nbhds=(d&&d.neighborhoods)||[]; _gw.byId={}; _gw.listings.forEach(function(x){ _gw.byId[x.id]=x; });
   if(!_gw.listings.length){ b.innerHTML='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه وحدات — اضغط «تحديث من Hostaway».':'No listings — press Sync.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="gwSync()">'+esc(t().gw_sync)+'</button></div></div>'; return; }
   var filters=[['','الكل','All'],['visible','ظاهرة','Visible'],['hidden','مخفية','Hidden'],['no_airbnb','بدون Airbnb','No Airbnb'],['no_img','بدون صور','No images']];
   var h='<div style="margin-bottom:8px"><input id="glq" value="'+esc(_gw.lq||'')+'" oninput="_gw.lq=this.value;gwListTable()" placeholder="🔎 '+(ar?'ابحث بالاسم أو الرقم':'search name or ID')+'" style="'+fbInp()+';margin:0;width:100%"></div>'
@@ -22297,15 +22297,17 @@ function gwListTable(){ var ar=(L==='ar'), wrap=document.getElementById('gltable
     if(f==='no_airbnb') return !x.has_airbnb; if(f==='no_img') return !x.images; return true; });
   if(!ls.length){ wrap.innerHTML='<div class="empty" style="padding:20px">'+(ar?'لا وحدات بهالفلتر':'No listings in this filter')+'</div>'; return; }
   var th='color:var(--mut);font-size:10.5px;padding:7px 5px;text-align:'+(ar?'right':'left');
-  wrap.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'ظاهر':'On')+'</th><th style="'+th+'">'+(ar?'الوحدة':'Listing')+'</th><th style="'+th+'">'+(ar?'المنطقة':'Area')+'</th><th style="'+th+'">Airbnb</th><th style="'+th+'">'+(ar?'صور':'Img')+'</th><th style="'+th+'">'+(ar?'وسوم':'Tags')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+ls.map(gwListRow).join('')+'</tbody></table></div>'; }
+  wrap.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr><th style="'+th+'">'+(ar?'ظاهر':'On')+'</th><th style="'+th+'">'+(ar?'الوحدة':'Listing')+'</th><th style="'+th+'">'+(ar?'الحي':'Neighborhood')+'</th><th style="'+th+'">Airbnb</th><th style="'+th+'">'+(ar?'صور':'Img')+'</th><th style="'+th+'">'+(ar?'وسوم':'Tags')+'</th><th style="'+th+'"></th></tr></thead><tbody>'+ls.map(gwListRow).join('')+'</tbody></table></div>'; }
 function gwListRow(x){ var ar=(L==='ar'); var thumb=x.hero?('<img src="'+esc(x.hero)+'" style="width:46px;height:46px;border-radius:9px;object-fit:cover;flex:none" loading="lazy" alt="">'):'<div style="width:46px;height:46px;border-radius:9px;background:var(--surface-2);flex:none"></div>';
   return '<tr style="border-top:1px solid var(--border)"><td style="padding:8px 5px"><input type="checkbox" '+(x.visible?'checked':'')+' onclick="gwToggleVis('+x.id+',this.checked)"></td>'
     +'<td style="padding:8px 5px"><div style="display:flex;gap:9px;align-items:center">'+thumb+'<div style="min-width:0"><b>'+esc(x.title_ar||x.name)+'</b><div class="muted" style="font-size:10px">#'+x.id+'</div></div></div></td>'
-    +'<td style="padding:8px 5px">'+esc(x.area||'—')+'</td>'
+    +'<td style="padding:8px 5px"><select onchange="gwSetNbhd('+x.id+',this.value)" style="font-size:11px;padding:4px 6px;border-radius:7px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);max-width:150px">'+gwNbOptions(x.neighborhood||'')+'</select></td>'
     +'<td style="padding:8px 5px">'+(x.has_airbnb?fbChip('✓','ok'):fbChip(ar?'مفقود':'missing','warn'))+'</td>'
     +'<td style="padding:8px 5px">'+x.images+'</td><td style="padding:8px 5px">'+(x.tags||[]).length+'</td>'
     +'<td style="padding:8px 5px;white-space:nowrap"><button class="btn ghost xs" onclick="gwEdit('+x.id+')">'+(ar?'تعديل':'Edit')+'</button> <a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'View')+'</a> <button class="btn ghost xs" onclick="gwCopy(&#39;'+esc(x.slug)+'&#39;)">📋</button></td></tr>'; }
 async function gwToggleVis(id,on){ try{ await post('/api/gw/listing',{id:String(id),visible:!!on}); toast('✓'); }catch(_){ toast('⚠'); } }
+function gwNbOptions(sel){ var ar=(L==='ar'); return '<option value="">'+(ar?'— الحي —':'— area —')+'</option>'+(_gw.nbhds||[]).map(function(o){ return '<option value="'+esc(o.key)+'"'+(o.key===sel?' selected':'')+'>'+esc(ar?o.ar:o.en)+'</option>'; }).join(''); }
+async function gwSetNbhd(id,val){ try{ await post('/api/gw/listing',{id:String(id),neighborhood:val}); if((_gw.byId||{})[id])_gw.byId[id].neighborhood=val; toast('✓'); }catch(_){ toast('⚠'); } }
 function gwCopy(slug){ var u=location.origin+'/stay/'+slug; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ الرابط':'Link copied'); }catch(e){ prompt('',u); } }
 function gwCopyStay(){ var u=location.origin+'/stay'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /stay':'/stay link copied'); }catch(e){ prompt('',u); } }
 function gwCopyElite(){ var u=location.origin+'/elite'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /elite':'/elite link copied'); }catch(e){ prompt('',u); } }
@@ -22314,14 +22316,15 @@ function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast(
   function f(lbl,i2,val){ return '<label class="muted" style="font-size:11px">'+esc(lbl)+'</label><input id="'+i2+'" value="'+esc(val==null?'':val)+'" style="'+fbInp()+'">'; }
   setDrawerBody('<label class="muted" style="font-size:11px"><input type="checkbox" id="gwe_vis" '+(x.visible?'checked':'')+'> '+(ar?'ظاهر في الموقع':'Visible on site')+'</label><div style="height:8px"></div>'
     +f(ar?'عنوان عربي':'Title AR','gwe_tar',x.title_ar)+f(ar?'عنوان إنجليزي':'Title EN','gwe_ten',x.title_en)
-    +f(ar?'وصف قصير عربي':'Short AR','gwe_sar',x.short_ar)+f(ar?'المنطقة':'Area','gwe_area',x.area)
+    +f(ar?'وصف قصير عربي':'Short AR','gwe_sar',x.short_ar)+f(ar?'المنطقة (نص حر)':'Area (free text)','gwe_area',x.area)
+    +'<label class="muted" style="font-size:11px">'+(ar?'الحي (للفلترة)':'Neighborhood (for filter)')+'</label><select id="gwe_nb" style="'+fbInp()+'">'+gwNbOptions(x.neighborhood||'')+'</select>'
     +f(ar?'الرابط (slug)':'Slug','gwe_slug',x.slug)+f(ar?'نص الشارة':'Badge','gwe_badge',x.badge)
     +f(ar?'أولوية الترتيب':'Sort priority','gwe_sort',x.sort)+f(ar?'رابط Airbnb (احتياطي محلي)':'Airbnb URL (local fallback)','gwe_ab',x.airbnb_override)
     +'<label class="muted" style="font-size:11px">'+(ar?'الصورة الرئيسية':'Hero image')+'</label><select id="gwe_hero" style="'+fbInp()+'"><option value="">'+(ar?'تلقائي':'auto')+'</option>'+(x.image_urls||[]).map(function(u,i){ return '<option value="'+esc(u)+'"'+(x.hero===u?' selected':'')+'>'+(ar?'صورة ':'image ')+(i+1)+'</option>'; }).join('')+'</select>'
     +f(ar?'ملاحظات داخلية':'Internal notes','gwe_notes',x.notes));
   setDrawerFoot('<button class="btn primary sm" onclick="gwEditSave('+id+')">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="gwStructure('+id+',this)">✨ '+(x.has_structured?(ar?'إعادة صياغة البطاقات':'Regenerate cards'):(ar?'صياغة بطاقات بالذكاء':'Generate cards'))+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
 async function gwEditSave(id){ var ar=(L==='ar'); function v(i){ var e=document.getElementById(i); return e?e.value:undefined; }
-  var body={id:String(id), visible:document.getElementById('gwe_vis').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
+  var body={id:String(id), visible:document.getElementById('gwe_vis').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), neighborhood:v('gwe_nb'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
   var r; try{ r=await post('/api/gw/listing',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwListings(); } else toast('⚠'); }
 async function gwStructure(id,btn){ var ar=(L==='ar'); if(btn){ btn.disabled=true; btn.textContent='⏳ '+(ar?'جاري الصياغة…':'Generating…'); } var r; try{ r=await post('/api/gw/structure',{id:String(id)}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'تم — البطاقات صارت لايف ✨':'Done — cards are live ✨'); if((_gw.byId||{})[id]) _gw.byId[id].has_structured=true; closeDrawer(); gwListings(); } else { toast((r&&r.message)||(ar?'⚠ ما تمت الصياغة':'⚠ failed')); if(btn){ btn.disabled=false; btn.textContent='✨ '+(ar?'صياغة بطاقات بالذكاء':'Generate cards'); } } }
 async function gwStructureAll(){ var ar=(L==='ar'); var ids=(_gw.listings||[]).filter(function(x){return x.visible;}).map(function(x){return x.id;}); if(!ids.length){ toast(ar?'ما فيه وحدات ظاهرة':'No visible units'); return; } if(!confirm(ar?('بنصيغ بطاقات لـ '+ids.length+' وحدة (مكالمة ذكاء لكل وحدة). نكمل؟'):('Generate cards for '+ids.length+' units (one AI call each). Continue?'))) return; var btn=document.getElementById('gwStructAll'), pg=document.getElementById('gwStructProg'); if(btn) btn.disabled=true; var ok=0,fail=0; for(var i=0;i<ids.length;i++){ if(pg) pg.textContent=(i+1)+'/'+ids.length+(fail?(' · '+fail+(ar?' فشل':' failed')):''); var r; try{ r=await post('/api/gw/structure',{id:String(ids[i])}); }catch(_){ r=null; } if(r&&r.ok){ ok++; if((_gw.byId||{})[ids[i]]) _gw.byId[ids[i]].has_structured=true; } else fail++; } if(pg) pg.textContent=(ar?('تمت: '+ok+' · فشل: '+fail):('done: '+ok+' · failed: '+fail)); if(btn) btn.disabled=false; toast(ar?('خلصنا — '+ok+' بطاقة جاهزة'):('Finished — '+ok+' done')); gwListings(); }
@@ -41602,6 +41605,75 @@ def _gw_amenity_groups(amenities):
         groups.append({"key": "other", "ar": "أخرى", "items": other})
     return groups
 
+# ---- Riyadh neighborhoods (owner chose the FULL list) — assigned per-unit in the dashboard,
+# used for the neighborhood filter on /stay + /elite. key = stable slug; (ar, en) for display.
+RIYADH_NEIGHBORHOODS = [
+    ("hittin", "حطين", "Hittin"), ("al_malqa", "الملقا", "Al Malqa"),
+    ("al_yasmin", "الياسمين", "Al Yasmin"), ("al_narjis", "النرجس", "Al Narjis"),
+    ("al_aqiq", "العقيق", "Al Aqiq"), ("al_sahafah", "الصحافة", "Al Sahafah"),
+    ("al_ghadir", "الغدير", "Al Ghadir"), ("al_wadi", "الوادي", "Al Wadi"),
+    ("al_nakheel", "النخيل", "Al Nakheel"), ("al_rahmaniyah", "الرحمانية", "Al Rahmaniyah"),
+    ("al_muruj", "المروج", "Al Muruj"), ("al_mughrizat", "المغرزات", "Al Mughrizat"),
+    ("al_izdihar", "الازدهار", "Al Izdihar"), ("al_falah", "الفلاح", "Al Falah"),
+    ("al_qirawan", "القيروان", "Al Qirawan"), ("al_arid", "العارض", "Al Arid"),
+    ("al_nada", "الندى", "Al Nada"), ("al_taawun", "التعاون", "Al Taawun"),
+    ("al_wuroud", "الورود", "Al Wurud"), ("al_nuzha", "النزهة", "Al Nuzha"),
+    ("al_muhammadiyah", "المحمدية", "Al Muhammadiyah"), ("al_rabi", "الربيع", "Al Rabi"),
+    ("al_qadisiyah", "القادسية", "Al Qadisiyah"), ("al_mursalat", "المرسلات", "Al Mursalat"),
+    ("kafd", "المركز المالي (كافد)", "KAFD"), ("al_safarat", "حي السفارات", "Diplomatic Quarter"),
+    ("al_olaya", "العليا", "Al Olaya"), ("al_sulimaniyah", "السليمانية", "Al Sulimaniyah"),
+    ("al_malaz", "الملز", "Al Malaz"), ("al_murabba", "المربع", "Al Murabba"),
+    ("al_wizarat", "الوزارات", "Al Wizarat"), ("al_futah", "الفوطة", "Al Futah"),
+    ("al_dirah", "الديرة", "Al Dirah"), ("al_batha", "البطحاء", "Al Batha"),
+    ("al_morabba", "المعذر", "Al Maather"), ("al_mathar_north", "المعذر الشمالي", "Al Maather North"),
+    ("al_khuzama", "الخزامى", "Al Khuzama"), ("al_rabwah", "الربوة", "Al Rabwah"),
+    ("al_rawdah", "الروضة", "Al Rawdah"), ("al_salam", "السلام", "Al Salam"),
+    ("al_jazirah", "الجزيرة", "Al Jazirah"), ("al_manar", "المنار", "Al Manar"),
+    ("al_rajhi", "الرجاء", "Al Raja"), ("al_wurud2", "المروة", "Al Marwah"),
+    ("irqah", "عرقة", "Irqah"), ("al_raid", "الرائد", "Al Raid"),
+    ("umm_al_hamam_west", "أم الحمام الغربي", "Umm Al Hamam West"),
+    ("umm_al_hamam_east", "أم الحمام الشرقي", "Umm Al Hamam East"),
+    ("dhahrat_laban", "ظهرة لبن", "Dhahrat Laban"), ("laban", "لبن", "Laban"),
+    ("namar", "نمار", "Namar"), ("tuwaiq", "طويق", "Tuwaiq"), ("dirab", "ديراب", "Dirab"),
+    ("al_mahdiyah", "المهدية", "Al Mahdiyah"), ("al_uraija", "العريجاء", "Al Uraija"),
+    ("al_suwaidi", "السويدي", "Al Suwaidi"), ("shubra", "شبرا", "Shubra"),
+    ("al_badiah", "البديعة", "Al Badiah"), ("al_hazm", "الحزم", "Al Hazm"),
+    ("al_shifa", "الشفا", "Al Shifa"), ("al_faisaliyah", "الفيصلية", "Al Faisaliyah"),
+    ("al_aziziyah", "العزيزية", "Al Aziziyah"), ("al_dar_al_baida", "الدار البيضاء", "Al Dar Al Baida"),
+    ("badr", "بدر", "Badr"), ("al_mansouriyah", "المنصورية", "Al Mansuriyah"),
+    ("manfuhah", "منفوحة", "Manfuha"), ("al_naseem", "النسيم", "Al Naseem"),
+    ("al_rayyan", "الريان", "Al Rayyan"), ("al_rawabi", "الروابي", "Al Rawabi"),
+    ("qurtubah", "قرطبة", "Qurtubah"), ("ghirnatah", "غرناطة", "Granada"),
+    ("al_hamra", "الحمراء", "Al Hamra"), ("al_munisiyah", "المونسية", "Al Munisiyah"),
+    ("al_quds", "القدس", "Al Quds"), ("ishbiliyah", "إشبيلية", "Ishbiliyah"),
+    ("al_khaleej", "الخليج", "Al Khaleej"), ("al_rimal", "الرمال", "Al Rimal"),
+    ("al_andalus", "الأندلس", "Al Andalus"), ("al_yarmuk", "اليرموك", "Al Yarmouk"),
+    ("al_nahdah", "النهضة", "Al Nahdah"), ("al_fayha", "الفيحاء", "Al Fayha"),
+    ("al_iskan", "الإسكان", "Al Iskan"), ("al_difa", "الدفاع", "Al Difa"),
+    ("al_maizilah", "المعيزلة", "Al Maizilah"), ("al_qadisiyah_e", "غبيرة", "Ghubairah"),
+    ("al_wusham", "الوشام", "Al Wisham"), ("al_jaradiyah", "الجرادية", "Al Jaradiyah"),
+    ("al_shimaisi", "الشميسي", "Al Shimaisi"), ("al_oud", "العود", "Al Oud"),
+    ("al_marqab", "المرقب", "Al Marqab"), ("al_doha", "الدوح", "Al Doh"),
+    ("al_masif", "المصيف", "Al Maseef"), ("al_wadi2", "النموذجية", "Al Namudhajiyah"),
+]
+_RIYADH_BY_KEY = {k: (a, e) for (k, a, e) in RIYADH_NEIGHBORHOODS}
+def _riyadh_name(key, ar=True):
+    t = _RIYADH_BY_KEY.get(key or "")
+    return ("" if not t else (t[0] if ar else t[1]))
+def _gw_neighborhoods_all():
+    return [{"key": k, "ar": a, "en": e} for (k, a, e) in RIYADH_NEIGHBORHOODS]
+def _gw_neighborhoods_with_counts():
+    """Only neighborhoods that have >=1 visible unit (for the public filter dropdown)."""
+    counts = {}
+    for _s, ov in _gw_visible_snaps():
+        nb = ov.get("neighborhood")
+        if nb:
+            counts[nb] = counts.get(nb, 0) + 1
+    out = [{"key": k, "ar": a, "en": e, "count": counts[k]}
+           for (k, a, e) in RIYADH_NEIGHBORHOODS if counts.get(k)]
+    out.sort(key=lambda o: (-o["count"], o["ar"]))
+    return out
+
 def _gw_listing_public(snap, ov=None, with_airbnb=True):
     ov = ov if ov is not None else (_gw_overrides.get(str(snap.get("id")), {}) or {})
     url, src = _gw_airbnb_url(snap, ov)
@@ -41613,7 +41685,8 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "short_en": (ov.get("short_en") or "")[:300],
         "desc_ar": (ov.get("full_ar") or snap.get("desc") or ""),
         "desc_en": (ov.get("full_en") or ""),
-        "area": (ov.get("area") or snap.get("area") or ""),
+        "area": (_riyadh_name(ov.get("neighborhood")) or ov.get("area") or snap.get("area") or ""),
+        "neighborhood": (ov.get("neighborhood") or ""),
         "beds": snap.get("beds"), "baths": snap.get("baths"), "capacity": snap.get("capacity"),
         "ptype": snap.get("ptype"), "badge": (ov.get("badge") or ""),
         "images": [im["url"] for im in (snap.get("images") or [])],
@@ -41747,8 +41820,10 @@ def _gw_noo_options():
     opts.sort(key=lambda o: (o["sort"], -o["count"], o["key"]))
     return opts
 
-def _gw_search(ci=None, co=None, guests=None, typ=None, area=None):
-    """Guest listing results. With dates -> only AVAILABLE; else browse mode (no availability claims)."""
+def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=None, tags=None):
+    """Guest listing results. With dates -> only AVAILABLE; else browse mode (no availability claims).
+    neighborhood = a RIYADH_NEIGHBORHOODS key (assigned per-unit in the dashboard). tags = comma-
+    separated tag keys; a unit must carry ALL of them (AND)."""
     if ci and co and not _gw_valid_dates(ci, co):     # check-out must be after check-in (server-side)
         return {"browse": False, "invalid_dates": True, "avail_error": False, "results": []}
     browse = not (ci and co)
@@ -41757,6 +41832,7 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None):
     except (TypeError, ValueError):
         g = None
     results, avail_error = [], False
+    tag_list = [t for t in ((tags or "").split(",")) if t and t not in ("all",)]
     for s, ov in _gw_visible_snaps():
         if g and s.get("capacity") and int(s["capacity"]) < g:
             continue
@@ -41764,6 +41840,12 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None):
             continue
         if area and area not in ("all", "") and area not in (s.get("tag_keys") or []):
             continue
+        if neighborhood and neighborhood not in ("all", "") and ov.get("neighborhood") != neighborhood:
+            continue
+        if tag_list:
+            _tk = s.get("tag_keys") or []
+            if not all(t in _tk for t in tag_list):
+                continue
         avail = None
         if not browse:
             avail = unit_availability_price(s.get("id"), ci, co)
@@ -41991,35 +42073,39 @@ function structuredCards(st){if(!st)return '';var out='';(st.sections||[]).forEa
 function viewLanding(){
   track('stay_page_view',{});
   var cfg=(STAY&&STAY.config)||{noo:[],count:0,hero:''};var hc=cfg.hero_cfg||{};var p=qs();
-  var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('type')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+'</option>';}).join('');
+  var nbs=(cfg.neighborhoods||[]);var nbopts='<option value="">كل الأحياء</option>'+nbs.map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('neighborhood')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+(o.count?(' ('+o.count+')'):'')+'</option>';}).join('');
   var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
   var fpos=({center:'center',top:'top center',bottom:'bottom center',left:'center left',right:'center right'})[hc.focal||'center']||'center';
   var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(cfg.hero).replace(/"/g,'&quot;')+');background-position:'+fpos+'"></div>'):'';
   var ovOp=(hc.overlay!=null?(hc.overlay/100):1);
   var hTrust=hc.trust?('<div class="trust"><span class="tchip">'+he(hc.trust)+'</span></div>'):'<div class="trust"><span class="tchip">وحدات مختارة</span><span class="tchip">دخول ذاتي</span><span class="tchip">الحجز عبر Airbnb</span></div>';
-  var chips=(cfg.noo||[]).slice(0,7).map(function(o){return '<button type="button" class="pill" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
+  var chips=(cfg.noo||[]).slice(0,16).map(function(o){return '<button type="button" class="pill" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
   V.innerHTML='<section class="hero">'+heroBg+'<div class="ov" style="opacity:'+ovOp+'"></div><div class="in"><h1>'+he(hc.title||'اختر إقامتك مع عوجا')+'</h1>'
     +'<p>'+he(hc.subtitle||'حط تاريخك وعدد الضيوف ونوع الإقامة، ونطلع لك وحدات عوجا المتاحة في الرياض.')+'</p>'
     +hTrust+'</div></section>'
     +'<div class="card" style="padding:16px;margin-bottom:14px">'
     +'<div id="err" class="err"></div>'
     +'<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div><div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div></div>'
-    +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>نوع</label><select id="ty">'+opts+'</select></div></div>'
-    +(chips?('<div class="pills" id="chips" style="margin:2px 0 14px">'+chips+'</div>'):'')
+    +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
+    +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>';
-  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),tyEl=document.getElementById('ty'),err=document.getElementById('err');
+  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
   var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
   ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
   if(p.get('check_in'))ciEl.value=p.get('check_in');if(p.get('check_out'))coEl.value=p.get('check_out');
   ciEl.onchange=function(){var d=ciEl.value?new Date(ciEl.value):t;coEl.min=iso(new Date(d.getTime()+86400000));};
   var chipsEl=document.getElementById('chips');
-  if(chipsEl){chipsEl.querySelectorAll('.pill').forEach(function(b){if(b.getAttribute('data-k')===tyEl.value)b.classList.add('active');b.onclick=function(){tyEl.value=b.getAttribute('data-k');track('stay_filter_changed',{type:tyEl.value});chipsEl.querySelectorAll('.pill').forEach(function(x){x.classList.remove('active');});b.classList.add('active');};});}
+  var preTags=(p.get('tags')||'').split(',').filter(Boolean);
+  if(chipsEl){chipsEl.querySelectorAll('.pill').forEach(function(b){if(preTags.indexOf(b.getAttribute('data-k'))>=0)b.classList.add('active');b.onclick=function(){b.classList.toggle('active');track('stay_filter_changed',{});};});}
   document.getElementById('go').onclick=function(){
-    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value,ty=tyEl.value;
+    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value;
+    var nb=(document.getElementById('nb')||{}).value||'';var tg=[];if(chipsEl){chipsEl.querySelectorAll('.pill.active').forEach(function(x){tg.push(x.getAttribute('data-k'));});}
     var ev=validateDates(ci,co);if(ev){err.textContent=ev;err.classList.add('on');return;}
     err.classList.remove('on');
-    var q='?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty);
+    var q='?guests='+encodeURIComponent(g);
+    if(tg.length)q+='&tags='+encodeURIComponent(tg.join(','));
+    if(nb)q+='&neighborhood='+encodeURIComponent(nb);
     if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
     location.href='/stay/search'+q;
   };
@@ -42046,8 +42132,10 @@ function card(l){
 
 function searchSummary(ci,co,g,ty){
   var bits=[];if(ci&&co)bits.push(he(ci)+' ← '+he(co));else bits.push('تصفح');if(g)bits.push(he(g)+' ضيوف');
-  var tyl=(((STAY&&STAY.config&&STAY.config.noo)||[]).filter(function(o){return o.key===ty;})[0]);
-  if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
+  var pp=qs();var noo=((STAY&&STAY.config&&STAY.config.noo)||[]);
+  var nb=pp.get('neighborhood')||'';var nbl=((STAY&&STAY.config&&STAY.config.neighborhoods)||[]).filter(function(o){return o.key===nb;})[0];if(nb&&nbl)bits.push('📍 '+he(nbl.ar||nbl.en));
+  (pp.get('tags')||'').split(',').filter(Boolean).forEach(function(k){var o=noo.filter(function(x){return x.key===k;})[0];bits.push(he(o?(o.ar||o.en):k));});
+  var tyl=noo.filter(function(o){return o.key===ty;})[0];if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
   return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/stay'+location.search+'">تعديل البحث</a></div></div>';
 }
 
@@ -42056,7 +42144,7 @@ function viewSearch(){
   var verr=validateDates(ci,co);
   if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0 4px;color:var(--ink)">'+he(verr)+'</h2><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل التواريخ</a></div></div>';return;}
   V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="grid" style="margin:6px 0 18px">'+'<div class="card lc"><div class="ph sk"></div><div class="bd"><div class="sk" style="height:18px;width:62%"></div><div class="sk" style="height:13px;width:42%"></div><div class="sk" style="height:40px;width:100%;margin-top:6px"></div></div></div>'.repeat(4)+'</div>';
-  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
+  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+((p.get('tags'))?('&tags='+encodeURIComponent(p.get('tags'))):'')+((p.get('neighborhood'))?('&neighborhood='+encodeURIComponent(p.get('neighborhood'))):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
   track('stay_search',{type:ty,guests:g,check_in:ci,check_out:co});
   fetch(url).then(function(r){return r.json();}).then(function(d){
     var res=(d&&d.results)||[],browse=d&&d.browse,sm=searchSummary(ci,co,g,ty);
@@ -42237,7 +42325,8 @@ def _stay_render(route="landing", listing=None, base=""):
         og = og or hcfg["url"]
     data = {"route": route, "listing": listing,
             "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""),
-                       "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP}}
+                       "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP,
+                       "neighborhoods": _gw_neighborhoods_with_counts()}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO: JSON-LD structured data — LodgingBusiness on /stay, Apartment per unit page.
     if listing:
@@ -42292,12 +42381,14 @@ async def _handle_stay_detail(request):
     return web.Response(text=_stay_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
 
 async def _api_stay_config(request):
-    return _json({"ok": True, "noo": _gw_noo_options()})
+    return _json({"ok": True, "noo": _gw_noo_options(),
+                  "neighborhoods": _gw_neighborhoods_with_counts()})
 
 async def _api_stay_search(request):
     q = request.query
     out = await asyncio.to_thread(_gw_search, q.get("check_in"), q.get("check_out"),
-                                  q.get("guests"), q.get("type"), q.get("area"))
+                                  q.get("guests"), q.get("type"), q.get("area"),
+                                  q.get("neighborhood"), q.get("tags"))
     return _json({"ok": True, **out})
 
 async def _api_stay_listing(request):
@@ -42932,9 +43023,9 @@ function viewHome(){
   var heroSrc=pimg(hero,1600);
   var heroBg=hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(heroSrc).replace(/"/g,'&quot;')+')"></div>'):'<div class="bgimg ph-hero"></div>';
   var heroVid=(cfg.video)?('<video class="bgvid" autoplay muted loop playsinline preload="auto"'+(hero?(' poster="'+he(heroSrc)+'"'):'')+'><source src="'+he(cfg.video)+'" type="video/mp4"></video>'):'';
-  var opts='<option value="all">الكل</option>'+(cfg.noo||[]).map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('type')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+'</option>';}).join('');
+  var nbs=(cfg.neighborhoods||[]);var nbopts='<option value="">كل الأحياء</option>'+nbs.map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('neighborhood')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+(o.count?(' ('+o.count+')'):'')+'</option>';}).join('');
   var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
-  var chips=(cfg.noo||[]).slice(0,6).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
+  var chips=(cfg.noo||[]).slice(0,16).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
   V.innerHTML=
     '<section class="hero">'+heroBg+heroVid+'<div class="hero-grain"></div><div class="hero-ov"></div><div class="hero-frame"></div><div class="hero-in"><div class="wrap">'
       +'<span class="eyebrow rise" style="animation-delay:.02s">Ouja Elite · عضوية مختارة</span>'
@@ -42950,9 +43041,9 @@ function viewHome(){
         +'<div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div>'
         +'<div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div>'
         +'<div class="field"><label>الضيوف</label><select id="g">'+gopt+'</select></div>'
-        +'<div class="field"><label>نوع الإقامة</label><select id="ty">'+opts+'</select></div>'
+        +'<div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div>'
       +'</div>'
-      +(chips?('<div class="qps" id="chips">'+chips+'</div>'):'')
+      +(chips?('<div class="qps" id="chips" style="margin-top:8px">'+chips+'</div>'):'')
       +'<button class="btn primary block stacked" id="go"><span class="micro">View Residences</span><span class="lbl">اعرض الإقامات المتاحة</span></button>'
     +'</div></section>'
     +'<div class="wrap">'+divider()+'</div>'
@@ -42975,19 +43066,23 @@ function viewHome(){
 }
 
 function setupWidget(){
-  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),tyEl=document.getElementById('ty'),err=document.getElementById('err'),p=qs();
+  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err'),p=qs();
   if(!ciEl)return;
   var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
   ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
   if(p.get('check_in'))ciEl.value=p.get('check_in');if(p.get('check_out'))coEl.value=p.get('check_out');
   ciEl.onchange=function(){var d=ciEl.value?new Date(ciEl.value):t;coEl.min=iso(new Date(d.getTime()+86400000));};
   var chipsEl=document.getElementById('chips');
-  if(chipsEl){chipsEl.querySelectorAll('.qp').forEach(function(b){if(b.getAttribute('data-k')===tyEl.value)b.classList.add('active');b.onclick=function(){tyEl.value=b.getAttribute('data-k');track('elite_filter_changed',{type:tyEl.value});chipsEl.querySelectorAll('.qp').forEach(function(x){x.classList.remove('active');});b.classList.add('active');};});}
+  var preTags=(p.get('tags')||'').split(',').filter(Boolean);
+  if(chipsEl){chipsEl.querySelectorAll('.qp').forEach(function(b){if(preTags.indexOf(b.getAttribute('data-k'))>=0)b.classList.add('active');b.onclick=function(){b.classList.toggle('active');track('elite_filter_changed',{});};});}
   document.getElementById('go').onclick=function(){
-    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value,ty=tyEl.value;
+    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value;
+    var nb=(document.getElementById('nb')||{}).value||'';var tg=[];if(chipsEl){chipsEl.querySelectorAll('.qp.active').forEach(function(x){tg.push(x.getAttribute('data-k'));});}
     var ev=validateDates(ci,co);if(ev){err.textContent=ev;err.classList.add('on');return;}
     err.classList.remove('on');
-    var q='?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty);
+    var q='?guests='+encodeURIComponent(g);
+    if(tg.length)q+='&tags='+encodeURIComponent(tg.join(','));
+    if(nb)q+='&neighborhood='+encodeURIComponent(nb);
     if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
     location.href='/elite/search'+q;
   };
@@ -43020,8 +43115,10 @@ function card(l,novt){
 
 function searchSummary(ci,co,g,ty){
   var bits=[];if(ci&&co)bits.push(he(ci)+' ← '+he(co));else bits.push('تصفّح');if(g)bits.push(he(g)+' ضيوف');
-  var tyl=(((ELITE&&ELITE.config&&ELITE.config.noo)||[]).filter(function(o){return o.key===ty;})[0]);
-  if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
+  var pp=qs();var noo=((ELITE&&ELITE.config&&ELITE.config.noo)||[]);
+  var nb=pp.get('neighborhood')||'';var nbl=((ELITE&&ELITE.config&&ELITE.config.neighborhoods)||[]).filter(function(o){return o.key===nb;})[0];if(nb&&nbl)bits.push('📍 '+he(nbl.ar||nbl.en));
+  (pp.get('tags')||'').split(',').filter(Boolean).forEach(function(k){var o=noo.filter(function(x){return x.key===k;})[0];bits.push(he(o?(o.ar||o.en):k));});
+  var tyl=noo.filter(function(o){return o.key===ty;})[0];if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
   return '<div class="summary"><div class="wrap summary-in"><span class="s">'+bits.join(' · ')+'</span><a class="btn secondary mini" href="/elite'+location.search+'">تعديل البحث</a></div></div>';
 }
 
@@ -43030,7 +43127,7 @@ function viewSearch(){
   var verr=validateDates(ci,co);
   if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>'+he(verr)+'</h2><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل التواريخ</span></a></div></div>';return;}
   V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="grid" style="margin:20px 0">'+skeletons(4)+'</div></div>';
-  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
+  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+((p.get('tags'))?('&tags='+encodeURIComponent(p.get('tags'))):'')+((p.get('neighborhood'))?('&neighborhood='+encodeURIComponent(p.get('neighborhood'))):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
   track('elite_search',{type:ty,guests:g,check_in:ci,check_out:co});
   fetch(url).then(function(r){return r.json();}).then(function(d){
     var res=(d&&d.results)||[],browse=d&&d.browse,sm=searchSummary(ci,co,g,ty);
@@ -43178,7 +43275,8 @@ def _elite_render(route="home", listing=None, base=""):
         og = og or hcfg["url"]
     data = {"route": route, "listing": listing,
             "config": {"noo": _gw_noo_options(), "count": len(vis),
-                       "hero": (hcfg.get("url") or ""), "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""), "imgproxy": ELITE_IMG_PROXY, "whatsapp": ELITE_WHATSAPP}}
+                       "hero": (hcfg.get("url") or ""), "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""), "imgproxy": ELITE_IMG_PROXY, "whatsapp": ELITE_WHATSAPP,
+                       "neighborhoods": _gw_neighborhoods_with_counts()}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO/share JSON-LD — Apartment per unit, LodgingBusiness on the landing.
     if listing:
@@ -43456,10 +43554,12 @@ async def _api_gw_listings(request):
                     "slug": _gw_slug(s, ov), "sort": (ov.get("sort") or 0), "badge": ov.get("badge") or "",
                     "notes": ov.get("notes") or "",
                     "has_structured": bool(ov.get("structured")),
+                    "neighborhood": ov.get("neighborhood") or "",
                     "hero": (ov.get("hero_image") or s.get("cover") or ""),
                     "image_urls": [im["url"] for im in (s.get("images") or [])][:30]})
     out.sort(key=lambda x: (-(x["sort"] or 0), x["name"] or ""))
-    return _json({"ok": True, "listings": out, "synced_at": _gw_cache.get("synced_at")})
+    return _json({"ok": True, "listings": out, "synced_at": _gw_cache.get("synced_at"),
+                  "neighborhoods": _gw_neighborhoods_all()})
 
 async def _api_gw_listing(request):
     if not _dash_auth(request):
@@ -43470,7 +43570,8 @@ async def _api_gw_listing(request):
         return _json({"error": "id_required"}, 400)
     ov = _gw_overrides.get(lid, {}) or {}
     for k in ("visible", "title_ar", "title_en", "short_ar", "short_en", "full_ar", "full_en",
-              "area", "slug", "badge", "sort", "hero_image", "airbnb_override", "notes", "structured"):
+              "area", "neighborhood", "slug", "badge", "sort", "hero_image", "airbnb_override",
+              "notes", "structured"):
         if k in b:
             ov[k] = b.get(k)
     _gw_overrides[lid] = ov
