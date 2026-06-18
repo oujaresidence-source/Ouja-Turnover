@@ -9623,6 +9623,68 @@ def _exp_delete_all_sheet(by="", confirm=""):
     return {"ok": True, "deleted": len(victims), "deleted_sar": round(total_sar, 2),
             "kept_split": kept_split, "were_in_hostaway": were_in_hostaway, "backup": backup}
 
+def _exp_bank_norm_date(s):
+    """Best-effort YYYY-MM-DD from an Al Rajhi statement date cell ('' if unparseable)."""
+    s = str(s or "").strip()
+    if not s:
+        return ""
+    m = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", s)          # 2026-06-15 / 2026/6/15
+    if m:
+        y, mo, d = m.groups()
+        return "%04d-%02d-%02d" % (int(y), int(mo), int(d))
+    m = re.match(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", s)          # 15/06/2026 (Al Rajhi)
+    if m:
+        d, mo, y = m.groups()
+        return "%04d-%02d-%02d" % (int(y), int(mo), int(d))
+    return ""
+
+def _exp_bank_ingest_debits(file_bytes, fname="", by=""):
+    """Import an Al Rajhi statement: every MONEY-OUT (debit) row becomes one PENDING expense
+    tagged source=bank (submission_id 'bank-…'). apartment + category are intentionally left
+    BLANK so the posting gate (_exp4_missing_required) blocks ترحيل until the accountant fills
+    them from the dropdowns. Idempotent — re-importing the same file de-dupes by submission_id
+    (the bank parser's stable per-row hash). Reuses _fb_bank_preview so the parser is never
+    re-implemented. Credits/deposits (money in) are never imported as expenses."""
+    prev = _fb_bank_preview(file_bytes, fname)
+    rows = prev.get("rows") or []
+    created = existing = skipped_credit = 0
+    created_sar = 0.0
+    for x in rows:
+        try:
+            debit = float(str(x.get("debit") or "0").replace(",", "") or "0")
+        except (TypeError, ValueError):
+            debit = 0.0
+        if debit <= 0:                       # money-OUT only; deposits are not expenses
+            skipped_credit += 1
+            continue
+        sub = {
+            "submission_id": "bank-" + str(x.get("hash") or "")[:24],
+            "submitter": ("البنك · " + (fname or "Al Rajhi"))[:80],
+            "apartment": "",                 # mandatory-blank (MCQ) → blocks posting until set
+            "category": "",                  # mandatory-blank (MCQ) → blocks posting until set
+            "maintenance_type": "",
+            "amount": round(debit, 2),
+            "expense_date": _exp_bank_norm_date(x.get("date")),
+            "vendor": "",
+            "note": (x.get("desc") or "")[:300],
+            "submitted_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        }
+        try:
+            _e, was_new = _exp_ingest(sub)
+        except Exception as ex:
+            print("bank→expense ingest error:", ex)
+            continue
+        if was_new:
+            created += 1
+            created_sar += debit
+        else:
+            existing += 1
+    persist_state()
+    if created:
+        log_event("ops", "مصاريف · استيراد من البنك " + str(created) + " مصروف (" + (fname or "") + ")")
+    return {"ok": True, "created": created, "existing": existing, "skipped_credit": skipped_credit,
+            "created_sar": round(created_sar, 2), "parsed": len(rows), "filename": fname}
+
 def _exp_poll_sheet():
     """Fetch the shared Google Sheet as CSV and ingest any new rows. Idempotent
     (rows dedupe by a stable submission_id). Returns count of newly-created expenses.
@@ -10980,7 +11042,7 @@ def _exp4_view(exp):
     return {
         "expense_id": exp.get("id"),
         "ouja_reference": exp.get("ref") or "",
-        "source": "split" if exp.get("split_parent_id") else ("google_sheet" if sub_id.startswith("gs-") else "manual"),
+        "source": "split" if exp.get("split_parent_id") else ("google_sheet" if sub_id.startswith("gs-") else ("bank" if sub_id.startswith("bank-") else "manual")),
         "source_row_id": sub_id,
         "submitted_at": exp.get("submitted_at") or exp.get("created_at") or "",
         "imported_at": exp.get("created_at") or "",
@@ -35265,6 +35327,32 @@ def _exp4_actor(request, body=None):
     u = _users.get(sess.get("user_id")) or {}
     return str(u.get("name") or u.get("username") or (body or {}).get("by") or "dashboard")[:60]
 
+def _exp4_field_options():
+    """Dropdown (MCQ) options for the expense editor: apartment names from the listings store
+    (+ any already used on expenses), and categories from the settings category_map (+ any
+    already used). Lets bank/sheet expenses be completed with a picker, not free text."""
+    apts = []
+    try:
+        for rec in (_ls_get().get("listings") or {}).values():
+            nm = (rec.get("internal_name") or "").strip()
+            if nm and nm not in apts:
+                apts.append(nm)
+    except Exception:
+        pass
+    for e in _expenses.values():
+        nm = (e.get("apartment") or "").strip()
+        if nm and nm not in apts:
+            apts.append(nm)
+    cats = []
+    for k in (_exp_settings().get("category_map") or {}).keys():
+        if k and k not in cats:
+            cats.append(k)
+    for e in _expenses.values():
+        c = (e.get("category") or "").strip()
+        if c and c not in cats:
+            cats.append(c)
+    return {"apartments": sorted(apts), "categories": cats}
+
 def _exp4_overview_data(tab="pending", q="", limit=120, offset=0):
     tabs = {k: {"count": 0, "sar": 0.0} for k in ("pending", "approved", "exported", "verified", "needs_action")}
     ql = (q or "").strip().lower()
@@ -35284,7 +35372,26 @@ def _exp4_overview_data(tab="pending", q="", limit=120, offset=0):
             rows.append(v)
     rows.sort(key=lambda r: (r.get("created_at") or ""), reverse=True)
     return {"ok": True, "tab": tab, "tabs": tabs, "total": len(rows),
-            "rows": rows[offset:offset + limit], "dryrun_on": EXPENSE_POST_DRYRUN}
+            "rows": rows[offset:offset + limit], "dryrun_on": EXPENSE_POST_DRYRUN,
+            "options": _exp4_field_options()}
+
+async def _api_exp4_bank_import(request):
+    """Upload a bank statement (Al Rajhi .xlsx) → every money-out (debit) row becomes a pending
+    expense tagged source=bank. Same multipart contract as the bank-register import."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    try:
+        data, fname, _fields = await _fb_read_upload(request)
+    except ValueError as e:
+        return _json({"error": str(e)}, 400)
+    if not data:
+        return _json({"error": "empty_file"}, 400)
+    by = _req_actor(request)
+    try:
+        res = await asyncio.to_thread(_exp_bank_ingest_debits, data, fname, by)
+    except Exception as e:
+        return _json({"error": "parse_failed", "message": str(e)[:300]}, 400)
+    return _json(res)
 
 async def _api_exp4_overview(request):
     """Ledger-only Approval Center data (fast; no Hostaway calls). ?tab=&q=&limit=&offset="""

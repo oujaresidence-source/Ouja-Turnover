@@ -130,6 +130,10 @@
       x_empty: 'ما فيه مصاريف في هالتبويب',
       x_dryrun: 'وضع التجربة فعّال — التصدير ملف فقط',
       x_missing: 'ناقص: ', x_by: 'من', x_open_match: 'افتح المطابقة',
+      xsrc_sheet: 'قوقل شيت', xsrc_bank: 'البنك', xsrc_manual: 'يدوي', x_choose: '— اختر —',
+      bk_to_exp: 'استيراد مصاريف من كشف البنك',
+      bk_exp_hint: 'ارفع كشف الراجحي (Excel) — كل حركة «مدين/سحب» تنزل كمصروف بانتظار تعبئة الشقة والتصنيف قبل الترحيل.',
+      bk_exp_done: 'تم: {n} مصروف جديد من البنك ({s} ر.س)', bk_exp_none: 'ما فيه حركات جديدة — كلها مستوردة من قبل', bk_exp_err: 'تعذّر قراءة ملف الكشف',
       x_amount: 'المبلغ', x_date: 'التاريخ', x_apartment: 'الشقة', x_category: 'الفئة',
       x_vendor: 'المورد', x_note: 'ملاحظة', x_reject_reason: 'سبب الرفض (إلزامي)…',
       x_timeline: 'السجل الزمني', x_payload: 'اللي بينرسل لـ Hostaway',
@@ -407,6 +411,10 @@
       x_empty: 'No expenses in this tab',
       x_dryrun: 'Dry-run is ON — export is file-only',
       x_missing: 'Missing: ', x_by: 'by', x_open_match: 'Open Matching',
+      xsrc_sheet: 'Google Sheet', xsrc_bank: 'Bank', xsrc_manual: 'Manual', x_choose: '— choose —',
+      bk_to_exp: 'Import expenses from bank statement',
+      bk_exp_hint: 'Upload the Al Rajhi statement (Excel) — every money-out (debit) row lands as an expense, pending apartment + category before it can be posted.',
+      bk_exp_done: 'Done: {n} new bank expenses ({s} SAR)', bk_exp_none: 'Nothing new — all rows already imported', bk_exp_err: 'Could not read the statement file',
       x_amount: 'Amount', x_date: 'Date', x_apartment: 'Apartment', x_category: 'Category',
       x_vendor: 'Vendor', x_note: 'Note', x_reject_reason: 'Rejection reason (required)…',
       x_timeline: 'Timeline', x_payload: 'Hostaway payload',
@@ -1550,6 +1558,25 @@
         var xiBox = $('#xIntake'); if (xiBox) xiBox.outerHTML = intakePanelHtml();
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
+    else if (act === 'x-bank-imp') {
+      var bkInp = document.createElement('input');
+      bkInp.type = 'file'; bkInp.accept = '.xlsx,.xls';
+      bkInp.onchange = function () {
+        var f = bkInp.files && bkInp.files[0]; if (!f) return;
+        el.disabled = true;
+        var fd = new FormData(); fd.append('file', f, f.name);
+        api('/erp/api/exp/bank-import', { method: 'POST', form: fd }).then(function (r) {
+          el.disabled = false;
+          if ((r && r.created) > 0) {
+            toast(xiRep(t('bk_exp_done'), { n: r.created, s: fmtAmt(r.created_sar) }));
+            expP.tab = 'pending'; expP.o = 0; loadExp();
+          } else {
+            toast(t('bk_exp_none'), 'warn');
+          }
+        }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('bk_exp_err'), 'err'); });
+      };
+      bkInp.click();
+    }
     else if (act === 'x-pull-preview' || act === 'x-pull') {
       if (!expP.pullAll && (!expP.pullFrom || !expP.pullTo)) { toast(t('xi_dates_required'), 'warn'); return; }
       var xpRun = act === 'x-pull';
@@ -2463,9 +2490,13 @@
     }
     var missing = (r.missing_fields || []).length
       ? '<span class="tag bad">' + esc(t('x_missing')) + esc((r.missing_fields || []).join('، ')) + '</span>' : '';
-    var bank = r.bank_txn_id
-      ? '<a class="tag soft" href="#match">' + esc(t('x_bank_ok')) + '</a>'
-      : '<a class="tag" href="#match" title="' + esc(t('x_open_match')) + '">' + esc(t('x_bank_no')) + '</a>';
+    var srccls = r.source === 'google_sheet' ? 'srcsheet' : (r.source === 'bank' ? 'srcbank' : 'srcman');
+    var srctxt = r.source === 'google_sheet' ? t('xsrc_sheet') : (r.source === 'bank' ? t('xsrc_bank') : t('xsrc_manual'));
+    var srcbadge = '<span class="tag ' + srccls + '">' + esc(srctxt) + '</span>';
+    var bank = (r.source === 'bank') ? ''     // a bank-sourced expense IS the bank — no "no match" tag
+      : (r.bank_txn_id
+        ? '<a class="tag soft" href="#match">' + esc(t('x_bank_ok')) + '</a>'
+        : '<a class="tag" href="#match" title="' + esc(t('x_open_match')) + '">' + esc(t('x_bank_no')) + '</a>');
     var receipt = r.receipt_url
       ? '<button class="btn ghost xs" data-act="x-receipt" data-url="' + esc(r.receipt_url) + '">🧾 ' + esc(t('x_receipt')) + '</button>'
       : '<span class="tag">' + esc(t('x_no_receipt')) + '</span>';
@@ -2474,7 +2505,7 @@
       '<div class="wq-main" data-act="x-detail" data-id="' + esc(r.expense_id) + '" style="cursor:pointer">' +
         '<div class="wq-top"><span class="amt out">' + fmtAmt(r.amount_sar) + ' <i>' + esc(t('sar')) + '</i></span>' +
         (r.apartment ? '<span class="tag">' + esc(r.apartment) + '</span>' : '') +
-        '<span class="tag soft">' + esc(r.concept || r.category || '') + '</span>' + missing + bank + '</div>' +
+        '<span class="tag soft">' + esc(r.concept || r.category || '') + '</span>' + srcbadge + missing + bank + '</div>' +
         '<div class="wq-sub"><code>' + esc(r.expense_date || '') + '</code> · ' + esc(t('x_by')) + ' ' + esc(r.submitter || '—') +
         (r.ouja_reference ? ' · <code>' + esc(r.ouja_reference) + '</code>' : '') +
         (r.last_error_message ? ' · <span class="tag bad">' + esc(r.last_error_message.slice(0, 60)) + '</span>' : '') + '</div>' +
@@ -2540,6 +2571,17 @@
     '</div>';
   }
 
+  function bankImportHtml() {
+    return '' +
+    '<div class="card" id="xBankImp">' +
+      '<div style="font-weight:650">🏦 ' + esc(t('bk_to_exp')) + '</div>' +
+      '<div style="color:var(--text-3);font-size:12px;margin-top:2px">' + esc(t('bk_exp_hint')) + '</div>' +
+      '<div class="bb-row" style="margin-top:10px">' +
+        '<button class="btn primary sm" data-act="x-bank-imp">⬆ ' + esc(t('bk_upload')) + '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
   function refreshIntake() {
     api('/erp/api/exp/intake').then(function (s) {
       expP.intake = s;
@@ -2581,6 +2623,7 @@
     }
     $('#view').innerHTML =
       intakePanelHtml() +
+      bankImportHtml() +
       '<div class="card bank-bar">' +
         '<div class="bb-row">' +
           '<input id="xSearch" class="in search" type="search" placeholder="' + esc(t('x_search')) + '" value="' + esc(expP.q) + '">' +
@@ -2685,13 +2728,23 @@
     function f(label, key, val, type) {
       return '<label class="cp-f"><span>' + esc(label) + '</span><input class="in" id="xe_' + key + '" type="' + (type || 'text') + '" value="' + esc(val == null ? '' : val) + '"></label>';
     }
+    var opts = (d && d.options) || { apartments: [], categories: [] };
+    // MCQ dropdown for the mandatory fields (apartment/category) so bank/sheet rows are
+    // completed with a picker, not free text. Keeps an unknown current value selectable.
+    function fsel(label, key, val, list) {
+      var cur = (val == null ? '' : String(val)), inlist = false;
+      var o = '<option value="">' + esc(t('x_choose')) + '</option>';
+      (list || []).forEach(function (op) { var s = String(op); if (s === cur) inlist = true; o += '<option value="' + esc(s) + '"' + (s === cur ? ' selected' : '') + '>' + esc(s) + '</option>'; });
+      if (cur && !inlist) o = '<option value="' + esc(cur) + '" selected>' + esc(cur) + '</option>' + o;
+      return '<label class="cp-f"><span>' + esc(label) + '</span><select class="in" id="xe_' + key + '">' + o + '</select></label>';
+    }
     m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('x_edit')) + '</h2>' +
       '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body">' +
       '<div class="cp-grid" style="grid-template-columns:1fr 1fr">' +
       f(t('x_amount'), 'amount', r.amount_sar, 'number') +
       f(t('x_date'), 'expense_date', r.expense_date, 'date') +
-      f(t('x_apartment'), 'apartment', r.apartment) +
-      f(t('x_category'), 'category', r.category) +
+      fsel(t('x_apartment'), 'apartment', r.apartment, opts.apartments) +
+      fsel(t('x_category'), 'category', r.category, opts.categories) +
       f(t('x_vendor'), 'vendor', r.vendor) +
       f(t('x_note'), 'note', r.description) +
       '</div><div class="cp-btns">' +

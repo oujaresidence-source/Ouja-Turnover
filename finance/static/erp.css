@@ -179,6 +179,9 @@ html[dir=ltr] .nb-arrow{transform:scaleX(-1)}
 .tag.soft{color:var(--blue);background:var(--blue-soft)}
 .tag.bad{color:var(--red);background:var(--red-soft)}
 .tag.warnt{color:var(--yellow);background:var(--yellow-soft)}
+.tag.srcsheet{color:var(--green);background:var(--green-soft)}
+.tag.srcbank{color:var(--blue);background:var(--blue-soft)}
+.tag.srcman{color:var(--text-3);background:var(--surface-2)}
 
 /* actions */
 .wq-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
