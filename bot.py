@@ -24853,6 +24853,195 @@ def _pdf_statement_bytes(rep, label):
             pdf.set_text_color(*MUT); pdf.set_x(M)
             pdf.cell(usable, 5.5, shape("ملغي — مسترد بالكامل · %s · %s" % (u.get("guest") or "", u.get("checkin") or "")), align="R")
             pdf.ln(5.5)
+    # ---- performance block — mirrors the live owner page's «الأداء» section so the
+    #      downloaded PDF shows the SAME information as the link: 12-month net trend,
+    #      occupancy vs portfolio, channel mix, net/night by day type, expenses by
+    #      category, next month, price protection, and guest reviews. Additive and
+    #      fully guarded — any data edge case skips it without touching the statement
+    #      that already rendered above. Only the owner-portal PDF passes rep["_portal"];
+    #      the apartment/bulk statement PDFs never do, so they are unchanged.
+    portal = rep.get("_portal") or {}
+    if portal:
+        try:
+            RED = (180, 84, 63); BLUE = (47, 95, 122)
+            PAGE_H = 297.0; BOT = 16.0
+            _MN = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+                   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+            def _ensure(need):
+                if pdf.get_y() + need > PAGE_H - BOT:
+                    pdf.add_page()
+            def moneyi(x):                       # rounded SAR — matches the page's analytics
+                try:
+                    return "{:,}".format(int(round(float(x)))) + " " + cur
+                except (TypeError, ValueError):
+                    return "—"
+            def _mlabel(kk):
+                try:
+                    return "%s %s" % (_MN[int(str(kk)[5:7]) - 1], str(kk)[:4])
+                except Exception:
+                    return str(kk or "")
+            def chan_name(c):
+                return "Airbnb" if c == "airbnb" else ("مباشر" if c == "direct" else (c or "؟"))
+            def perf_title(txt):
+                _ensure(14); pdf.ln(2); pdf.set_font(FONT, size=10.5); pdf.set_text_color(*GOLD)
+                pdf.set_x(M); pdf.cell(usable, 6, shape(txt), align="R"); pdf.ln(7)
+                pdf.set_draw_color(*LINE); pdf.line(M, pdf.get_y() - 2, W - M, pdf.get_y() - 2)
+            def perf_row(lbl, val):              # label right, value left (page kv style)
+                _ensure(7); y = pdf.get_y()
+                pdf.set_font(FONT, size=10); pdf.set_text_color(*INK)
+                pdf.set_xy(M + usable * 0.45, y); pdf.cell(usable * 0.55, 6, shape(lbl), align="R")
+                pdf.set_xy(M, y); pdf.cell(usable * 0.45, 6, val, align="L"); pdf.set_y(y + 7)
+
+            # ---- big section heading ----
+            _ensure(16); pdf.ln(5)
+            pdf.set_font(FONT, size=13); pdf.set_text_color(*GOLD); pdf.set_x(M)
+            pdf.cell(usable, 8, shape("الأداء"), align="R"); pdf.ln(9)
+
+            # ---- driver comparison (vs last month / vs same month last year) ----
+            net_now = float(rep.get("owner_net") or 0)
+            cmp_bits = []
+            if portal.get("prev_net") is not None:
+                dv = int(round(net_now - float(portal["prev_net"])))
+                cmp_bits.append("مقابل الشهر الماضي: %s%s" % (("+" if dv >= 0 else "−"), moneyi(abs(dv))))
+            if portal.get("yoy_net") is not None:
+                dy = int(round(net_now - float(portal["yoy_net"])))
+                cmp_bits.append("مقابل نفس الشهر السنة الماضية: %s%s" % (("+" if dy >= 0 else "−"), moneyi(abs(dy))))
+            for _b in cmp_bits:
+                _ensure(6); pdf.set_font(FONT, size=10); pdf.set_text_color(*MUT); pdf.set_x(M)
+                pdf.cell(usable, 5.5, shape(_b), align="R"); pdf.ln(5.5)
+            dvr = portal.get("drivers") or {}
+            why = []
+            if dvr.get("nights_delta"):
+                why.append("%+d ليالي" % int(dvr["nights_delta"]))
+            if dvr.get("adr_delta"):
+                why.append("%+d صافي/ليلة" % int(dvr["adr_delta"]))
+            if dvr.get("expenses_delta"):
+                why.append("%+d مصاريف" % int(round(dvr["expenses_delta"])))
+            if why:
+                _ensure(6); pdf.set_font(FONT, size=9.5); pdf.set_text_color(*MUT); pdf.set_x(M)
+                pdf.cell(usable, 5.5, shape("(" + " · ".join(why) + ")"), align="R"); pdf.ln(6)
+
+            # ---- 12-month net trend (bars, chronological → current month in gold) ----
+            trend = list(portal.get("trend") or [])
+            if trend:
+                perf_title("صافي الدخل — آخر ١٢ شهر")
+                _ensure(54)
+                cur_m = portal.get("month")
+                vals = [float(x.get("net") or 0) for x in trend]
+                vmax = max(vals + [1.0]) or 1.0
+                n = len(trend); gap = 2.2
+                bw = (usable - gap * (n - 1)) / n
+                chart_h = 36.0
+                top_y = pdf.get_y() + 6
+                base_y = top_y + chart_h
+                for i, x in enumerate(trend):
+                    v = float(x.get("net") or 0)
+                    hh = max(1.5, (v / vmax) * chart_h)
+                    bx = M + i * (bw + gap)
+                    by = base_y - hh
+                    is_cur = (x.get("m") == cur_m)
+                    pdf.set_fill_color(*(GOLD if is_cur else LINE))
+                    pdf.rect(bx, by, bw, hh, "F")
+                    pdf.set_font(FONT, size=6.5); pdf.set_text_color(*MUT)
+                    pdf.set_xy(bx, base_y + 0.5); pdf.cell(bw, 3.5, str(x.get("m") or "")[5:7], align="C")
+                    if is_cur:
+                        pdf.set_xy(bx - 5, by - 4.5); pdf.set_text_color(*GOLD); pdf.set_font(FONT, size=6.5)
+                        pdf.cell(bw + 10, 4, str(int(round(v / 1000.0))) + "k", align="C")
+                pdf.set_y(base_y + 6)
+
+            # ---- occupancy: your units vs portfolio average ----
+            occ = portal.get("occupancy") or {}
+            perf_title("الإشغال مقابل متوسط المحفظة")
+            def occ_row(lbl, pct, col):
+                _ensure(8); y = pdf.get_y()
+                pdf.set_font(FONT, size=10); pdf.set_text_color(*INK)
+                pdf.set_xy(M + usable * 0.55, y); pdf.cell(usable * 0.45, 6, shape(lbl), align="R")
+                val = (str(int(round(pct))) + "%") if pct is not None else "—"
+                pdf.set_xy(M, y); pdf.cell(usable * 0.18, 6, val, align="L")
+                bx = M + usable * 0.20; bw2 = usable * 0.33
+                pdf.set_fill_color(*LINE); pdf.rect(bx, y + 1.6, bw2, 3.0, "F")
+                if pct:
+                    pdf.set_fill_color(*col); pdf.rect(bx, y + 1.6, bw2 * min(100.0, float(pct)) / 100.0, 3.0, "F")
+                pdf.set_y(y + 7)
+            occ_row("وحداتك", occ.get("owner_pct"), GOLD)
+            occ_row("متوسط عوجا (مجهول الهوية)", occ.get("portfolio_pct"), BLUE)
+            if occ.get("available_nights"):
+                _ensure(6); pdf.set_font(FONT, size=9); pdf.set_text_color(*MUT); pdf.set_x(M)
+                pdf.cell(usable, 5, shape("%d / %d ليالي" % (int(occ.get("nights") or 0),
+                         int(occ.get("available_nights") or 0))), align="R"); pdf.ln(5.5)
+
+            # ---- income sources (channel mix) ----
+            mix = portal.get("channel_mix") or {}
+            mix_items = [(c, float(a or 0)) for c, a in mix.items() if float(a or 0) > 0]
+            if mix_items:
+                mix_total = sum(a for _, a in mix_items) or 1.0
+                perf_title("مصادر الدخل")
+                for c, a in sorted(mix_items, key=lambda e: -e[1]):
+                    perf_row("%s · %d%%" % (chan_name(c), round(a / mix_total * 100)), moneyi(a))
+
+            # ---- avg net/night by day type ----
+            ad = portal.get("adr_daytype") or {}
+            perf_title("متوسط الصافي/ليلة حسب نوع اليوم")
+            for _lbl, _key in (("أيام الأسبوع", "weekday"),
+                               ("نهاية الأسبوع (خميس-جمعة)", "weekend"),
+                               ("مناسبات", "event")):
+                perf_row(_lbl, moneyi(ad.get(_key)) if ad.get(_key) is not None else "—")
+
+            # ---- expenses by category (bars) ----
+            cats = portal.get("expense_cats") or {}
+            cat_items = [(c, float(a or 0)) for c, a in cats.items() if float(a or 0) > 0]
+            if cat_items:
+                cmax = max(a for _, a in cat_items) or 1.0
+                perf_title("المصاريف حسب الفئة")
+                for c, a in sorted(cat_items, key=lambda e: -e[1])[:12]:
+                    _ensure(7); y = pdf.get_y()
+                    pdf.set_font(FONT, size=10); pdf.set_text_color(*INK)
+                    pdf.set_xy(M + usable * 0.50, y); pdf.cell(usable * 0.50, 6, shape(str(c)), align="R")
+                    pdf.set_xy(M, y); pdf.cell(usable * 0.22, 6, moneyi(a), align="L")
+                    bx = M + usable * 0.24; bw2 = usable * 0.24
+                    pdf.set_fill_color(*LINE); pdf.rect(bx, y + 1.6, bw2, 3.0, "F")
+                    pdf.set_fill_color(*RED); pdf.rect(bx, y + 1.6, bw2 * (a / cmax), 3.0, "F")
+                    pdf.set_y(y + 7)
+
+            # ---- next month — already booked ----
+            nm = portal.get("next_month") or {}
+            perf_title("الشهر الجاي — المحجوز فعلاً (%s)" % _mlabel(nm.get("m")))
+            perf_row("ليلة محجوزة", str(int(nm.get("nights") or 0)))
+            perf_row("إيراد مؤكد حتى الآن", moneyi(nm.get("revenue")) if nm.get("revenue") is not None else "—")
+            if nm.get("revenue_partial"):
+                _ensure(6); pdf.set_font(FONT, size=9); pdf.set_text_color(*MUT); pdf.set_x(M)
+                pdf.cell(usable, 5, shape("(بعض الحجوزات بدون مبلغ معروف)"), align="R"); pdf.ln(5.5)
+
+            # ---- price protection ----
+            pa = int(portal.get("price_actions") or 0)
+            perf_title("حماية التسعير")
+            _ensure(7); pdf.set_font(FONT, size=10); pdf.set_text_color(*INK); pdf.set_x(M)
+            pa_txt = ("عدّلنا الأسعار %d مرة هذا الشهر لحماية الإشغال" % pa) if pa else "ما احتجنا أي تعديل سعر هذا الشهر"
+            pdf.cell(usable, 6, shape(pa_txt), align="R"); pdf.ln(7)
+
+            # ---- guest reviews this month ----
+            rv = portal.get("reviews") or []
+            units = portal.get("units") or []
+            perf_title("آراء الضيوف هذا الشهر")
+            if not rv:
+                _ensure(6); pdf.set_font(FONT, size=9.5); pdf.set_text_color(*MUT); pdf.set_x(M)
+                pdf.cell(usable, 5.5, shape("ما فيه مراجعات هذا الشهر"), align="R"); pdf.ln(6)
+            else:
+                for r in rv[:4]:
+                    _ensure(12); rating = int(r.get("rating") or 0)
+                    head = "التقييم %d/5" % rating
+                    if r.get("guest"):
+                        head += " · " + str(r.get("guest"))
+                    if r.get("unit") and len(units) > 1:
+                        head += " · " + str(r.get("unit"))
+                    pdf.set_font(FONT, size=10); pdf.set_text_color(*GOLD); pdf.set_x(M)
+                    pdf.cell(usable, 6, shape(head), align="R"); pdf.ln(6)
+                    if r.get("text"):
+                        pdf.set_font(FONT, size=9.5); pdf.set_text_color(*INK); pdf.set_x(M)
+                        pdf.multi_cell(usable, 5, shape('"' + str(r.get("text")) + '"'), align="R")
+                    pdf.ln(1.5)
+        except Exception as _perr:
+            print("pdf performance block error:", _perr)
     # ---- comment + footer ----
     if rep.get("comment"):
         pdf.ln(2); pdf.set_font(FONT, size=10); pdf.set_text_color(*INK); pdf.set_x(M)
@@ -25801,27 +25990,47 @@ async def _handle_owner_portal(request):
                         content_type="text/html")
 
 async def _handle_owner_portal_pdf(request):
-    """The PDF for the SAME computed month object — one source of truth, two outputs."""
+    """The PDF for the SAME data the live owner page renders — the statement AND the
+    full performance block. One source of truth, two outputs: the link is interactive,
+    the PDF is a static (non-clickable) copy of everything shown on it."""
     owner = _owner_by_token(request.match_info.get("token", ""))
     if not owner:
         raise web.HTTPNotFound(text="not found")
     mkey = (request.query.get("m") or "")[:7]
     if not re.fullmatch(r"20\d{2}-\d{2}", mkey or ""):
         mkey = datetime.now(TZ).date().isoformat()[:7]
-    rep = await asyncio.to_thread(_owner_month_report, owner, mkey)
-    if rep is None:
+    # Read the exact object the page reads (_owner_portal_data = statement + trend,
+    # occupancy, channel mix, net/night by day type, next-month, reviews, drivers …)
+    # so the PDF shows the SAME information the owner sees on the link — not just the
+    # bare statement (which is all _owner_month_report alone carried).
+    pdata = await asyncio.to_thread(_owner_portal_data, owner, mkey)
+    if not pdata or pdata.get("report") is None:
         raise web.HTTPNotFound(text="no data")
+    rep = pdata["report"]
+    try:
+        rep = json.loads(json.dumps(rep, ensure_ascii=False))   # detach from the memoized cache object
+    except Exception as _e:
+        print("pdf report copy error:", _e)
     # Slice 4: expense rows in the PDF carry a clickable ABSOLUTE proxy link to
     # the receipt (same owner-scoped /fin/receipt proxy the web page uses).
     try:
         _tok = request.match_info.get("token", "")
         _origin = str(request.url.origin())
-        rep = json.loads(json.dumps(rep, ensure_ascii=False))   # never mutate the memoized object
         for _x in rep.get("exp_lines") or []:
             if (_x.get("receipt_url") or "").strip() and str(_x.get("id")) in _expenses:
                 _x["receipt_url"] = _origin + "/fin/receipt/" + str(_x["id"]) + "?t=" + _tok
     except Exception as _e:
         print("pdf receipt rewrite error:", _e)
+    # Carry the performance block onto the (detached) report so _pdf_statement_bytes
+    # renders the same «الأداء» section as the page. Guarded there by `if portal`,
+    # so the apartment/bulk PDF paths (no _portal key) are unaffected.
+    try:
+        rep["_portal"] = {_k: pdata.get(_k) for _k in (
+            "month", "months", "month_meta", "units", "prev_net", "yoy_net",
+            "drivers", "trend", "occupancy", "channel_mix", "adr_daytype",
+            "expense_cats", "next_month", "price_actions", "reviews")}
+    except Exception as _e:
+        print("pdf portal-extras attach error:", _e)
     try:
         data, fn, ct = await asyncio.to_thread(
             _finance_pdf_payload, [{"label": owner, "owner": owner, "kind": "owner", "report": rep}])
