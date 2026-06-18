@@ -3499,6 +3499,44 @@ def _cleanproof_recount(report):
     report["all_required_complete"] = report["uploaded_required_slots_count"] >= report["required_slots_count"]
     return report
 
+def _cleanproof_fmt_clock(iso):
+    """Local 'HH:MM' from an ISO timestamp; '—' if it can't be parsed."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(TZ).strftime("%H:%M")
+    except Exception:
+        return "—"
+
+def _cleanproof_fmt_duration(minutes):
+    """Bilingual duration label from a minute count; '—' when unknown."""
+    if minutes is None:
+        return "—"
+    if minutes < 60:
+        return f"{minutes} دقيقة / {minutes} min"
+    h, m = divmod(minutes, 60)
+    return f"{h} س {m} د / {h}h {m}m"
+
+def _cleanproof_timing(report):
+    """Best-effort timing for one cleaning report:
+    (started_iso, ended_iso, minutes, photo_count).
+    started = first photo upload (fallback: report created_at);
+    ended   = submit time (fallback: last photo upload, then updated_at);
+    minutes = None when it can't be computed. Works on old reports too — it leans on the
+    photo `uploaded_at` stamps that have always been recorded."""
+    photos = [p for p in _cleanproof_report_photos(report.get("report_id"))
+              if p.get("status") == "uploaded"]
+    ups = sorted(p.get("uploaded_at") for p in photos if p.get("uploaded_at"))
+    started = (ups[0] if ups else "") or report.get("created_at") or ""
+    ended = report.get("submitted_at") or (ups[-1] if ups else "") or report.get("updated_at") or ""
+    minutes = None
+    try:
+        if started and ended:
+            delta = (datetime.fromisoformat(ended) - datetime.fromisoformat(started)).total_seconds() / 60.0
+            if delta >= 0:
+                minutes = int(round(delta))
+    except Exception:
+        minutes = None
+    return started, ended, minutes, len(photos)
+
 def _cleanproof_missing_required_labels(report, lang="ar"):
     """Manager/team-safe names for required photo slots that are still missing."""
     key = "label_en" if lang == "en" else "label_ar"
@@ -6862,6 +6900,13 @@ class CleaningProofReviewView(discord.ui.View):
         # matches the exact unit+date key, so the central review room is never touched. The
         # approval is already persisted by _cleanproof_decide, so deleting loses no data.
         if report and report.get("status") == "manager_approved":
+            # Post the approval digest to the central #oujact-review channel (start/end,
+            # duration, photo count, who approved) BEFORE we tidy up the apartment room —
+            # the summary goes to a different channel, so the delete below won't touch it.
+            try:
+                await _cleanproof_send_approval_summary(report, str(interaction.user))
+            except Exception as e:
+                print("cleanproof approval summary (discord) error:", e)
             _oujact_mark_done("{}:{}".format(report.get("apartment_id"), report.get("date")))
             key = "{}:{}".format(report.get("apartment_id"), str(report.get("date"))[:10])
             reason = "OujaCT: cleaning approved by " + (str(interaction.user) or "manager")
@@ -7021,6 +7066,52 @@ async def _cleanproof_send_discord_review(report_id, target_channel=None):
     _cleanproof_audit(report_id, "discord_review_sent", "bot", report.get("status"), report.get("status"),
                       extra={"discord_channel_id": str(ch.id), "discord_message_id": str(msg.id),
                              "photos_attached": len(files)})
+    return True, ""
+
+async def _cleanproof_send_approval_summary(report, approver):
+    """When a manager approves a cleaning card, post a compact bilingual summary to the
+    central #oujact-review channel: when the cleaning started/ended, how long it took, how
+    many pictures it had, and who approved it. This is a digest/log — separate from the
+    per-apartment review card (which still lives in the unit's own turnover channel). Sent
+    once per report (guarded by approval_summary_sent_at), so a second approve click — or
+    both the Discord button and the dashboard firing — won't double-post."""
+    if not report or not GUILD_ID:
+        return False, "missing_report_or_guild"
+    if report.get("approval_summary_sent_at"):
+        return True, "already_sent"
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return False, "guild_not_ready"
+    ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
+    if ch is None:
+        return False, "review_channel_not_ready"
+    started, ended, minutes, n_photos = _cleanproof_timing(report)
+    pics = f"نعم — {n_photos} صورة / yes — {n_photos}" if n_photos else "لا — بدون صور / none"
+    approver = (approver or "—")[:80]
+    desc = [
+        f"**الشقة / Apartment:** {report.get('apartment_name')}",
+        f"**التاريخ / Date:** {report.get('date')}",
+        f"**بدأ التنظيف / Started:** {_cleanproof_fmt_clock(started)}",
+        f"**انتهى / Ended:** {_cleanproof_fmt_clock(ended)}",
+        f"**المدة / Duration:** {_cleanproof_fmt_duration(minutes)}",
+        f"**الصور / Pictures:** {pics}",
+        f"**اعتمدها / Approved by:** {approver}",
+    ]
+    title = f"✅ Cleaning approved · {report.get('apartment_code') or report.get('apartment_name')}"
+    e = discord.Embed(title=title[:256], description="\n".join(desc)[:4000], color=0x0E9E5F)
+    e.set_footer(text=f"report_id:{report.get('report_id')}")
+    try:
+        await ch.send(embed=e)
+    except Exception as ex:
+        print("cleanproof approval summary error:", ex)
+        return False, str(ex)
+    with _cleanproof_lock:
+        report["approval_summary_sent_at"] = _cleanproof_now()
+        _cleaning_reports[report["report_id"]] = report
+        _save_json("cleaning_reports.json", _cleaning_reports)
+    _cleanproof_audit(report.get("report_id"), "approval_summary_sent", "bot",
+                      report.get("status"), report.get("status"), f"#{CLEANING_REVIEW_CHANNEL}",
+                      extra={"minutes": minutes, "photos": n_photos, "approver": approver})
     return True, ""
 
 class ApproveView(discord.ui.View):
@@ -40816,6 +40907,9 @@ async def _api_oujact_report_submit(request):
         report["missing_required"] = missing
         prev = report.get("status", "")
         report["status"] = "issue_found" if report.get("issue_found") else "pending_manager_review"
+        # Stamp the submit time = when the cleaner finished the work. Used as the "ended"
+        # time in the approval summary; latest submit wins (re-submits after a reshoot).
+        report["submitted_at"] = _cleanproof_now()
         report["updated_at"] = _cleanproof_now()
         _cleaning_reports[report["report_id"]] = report
         _save_json("cleaning_reports.json", _cleaning_reports)
@@ -40916,6 +41010,13 @@ async def _api_cleaning_report_decision(request):
     # Approved → cleaning signed off; close the apartment's turnover channel (keeps Discord tidy)
     # and mark the unit+day done so the sync loop never re-opens it.
     if decision == "approve" and report.get("status") == "manager_approved":
+        # Post the approval digest to the central #oujact-review channel (start/end,
+        # duration, photo count, who approved). Idempotent, so it won't double up with the
+        # Discord Approve button if both fire for the same report.
+        try:
+            await _cleanproof_send_approval_summary(report, actor)
+        except Exception as e:
+            print("cleanproof approval summary error:", e)
         _oujact_mark_done("{}:{}".format(report.get("apartment_id"), report.get("date")))
         try:
             guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
