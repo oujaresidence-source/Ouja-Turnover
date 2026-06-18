@@ -22286,7 +22286,9 @@ async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBod
   if(!_gw.listings.length){ b.innerHTML='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه وحدات — اضغط «تحديث من Hostaway».':'No listings — press Sync.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="gwSync()">'+esc(t().gw_sync)+'</button></div></div>'; return; }
   var filters=[['','الكل','All'],['visible','ظاهرة','Visible'],['hidden','مخفية','Hidden'],['no_airbnb','بدون Airbnb','No Airbnb'],['no_img','بدون صور','No images']];
   var h='<div style="margin-bottom:8px"><input id="glq" value="'+esc(_gw.lq||'')+'" oninput="_gw.lq=this.value;gwListTable()" placeholder="🔎 '+(ar?'ابحث بالاسم أو الرقم':'search name or ID')+'" style="'+fbInp()+';margin:0;width:100%"></div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+filters.map(function(f){ return '<button class="btn ghost xs" onclick="_gw.lf=&#39;'+f[0]+'&#39;;gwListTable()">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')+'</div><div id="gltable"></div>';
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+filters.map(function(f){ return '<button class="btn ghost xs" onclick="_gw.lf=&#39;'+f[0]+'&#39;;gwListTable()">'+esc(ar?f[1]:f[2])+'</button>'; }).join('')+'</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><button class="btn ghost xs" id="gwStructAll" onclick="gwStructureAll()">✨ '+(ar?'صياغة بطاقات لكل الوحدات':'Generate cards for all')+'</button><span class="muted" id="gwStructProg" style="font-size:11px"></span></div>'
+    +'<div id="gltable"></div>';
   b.innerHTML=h; _gw.lf=_gw.lf||''; gwListTable(); }
 function gwListTable(){ var ar=(L==='ar'), wrap=document.getElementById('gltable'); if(!wrap) return; var q=(_gw.lq||'').trim().toLowerCase(), f=_gw.lf||'';
   var ls=(_gw.listings||[]).filter(function(x){
@@ -22317,10 +22319,12 @@ function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast(
     +f(ar?'أولوية الترتيب':'Sort priority','gwe_sort',x.sort)+f(ar?'رابط Airbnb (احتياطي محلي)':'Airbnb URL (local fallback)','gwe_ab',x.airbnb_override)
     +'<label class="muted" style="font-size:11px">'+(ar?'الصورة الرئيسية':'Hero image')+'</label><select id="gwe_hero" style="'+fbInp()+'"><option value="">'+(ar?'تلقائي':'auto')+'</option>'+(x.image_urls||[]).map(function(u,i){ return '<option value="'+esc(u)+'"'+(x.hero===u?' selected':'')+'>'+(ar?'صورة ':'image ')+(i+1)+'</option>'; }).join('')+'</select>'
     +f(ar?'ملاحظات داخلية':'Internal notes','gwe_notes',x.notes));
-  setDrawerFoot('<button class="btn primary sm" onclick="gwEditSave('+id+')">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
+  setDrawerFoot('<button class="btn primary sm" onclick="gwEditSave('+id+')">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="gwStructure('+id+',this)">✨ '+(x.has_structured?(ar?'إعادة صياغة البطاقات':'Regenerate cards'):(ar?'صياغة بطاقات بالذكاء':'Generate cards'))+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
 async function gwEditSave(id){ var ar=(L==='ar'); function v(i){ var e=document.getElementById(i); return e?e.value:undefined; }
   var body={id:String(id), visible:document.getElementById('gwe_vis').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
   var r; try{ r=await post('/api/gw/listing',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwListings(); } else toast('⚠'); }
+async function gwStructure(id,btn){ var ar=(L==='ar'); if(btn){ btn.disabled=true; btn.textContent='⏳ '+(ar?'جاري الصياغة…':'Generating…'); } var r; try{ r=await post('/api/gw/structure',{id:String(id)}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'تم — البطاقات صارت لايف ✨':'Done — cards are live ✨'); if((_gw.byId||{})[id]) _gw.byId[id].has_structured=true; closeDrawer(); gwListings(); } else { toast((r&&r.message)||(ar?'⚠ ما تمت الصياغة':'⚠ failed')); if(btn){ btn.disabled=false; btn.textContent='✨ '+(ar?'صياغة بطاقات بالذكاء':'Generate cards'); } } }
+async function gwStructureAll(){ var ar=(L==='ar'); var ids=(_gw.listings||[]).filter(function(x){return x.visible;}).map(function(x){return x.id;}); if(!ids.length){ toast(ar?'ما فيه وحدات ظاهرة':'No visible units'); return; } if(!confirm(ar?('بنصيغ بطاقات لـ '+ids.length+' وحدة (مكالمة ذكاء لكل وحدة). نكمل؟'):('Generate cards for '+ids.length+' units (one AI call each). Continue?'))) return; var btn=document.getElementById('gwStructAll'), pg=document.getElementById('gwStructProg'); if(btn) btn.disabled=true; var ok=0,fail=0; for(var i=0;i<ids.length;i++){ if(pg) pg.textContent=(i+1)+'/'+ids.length+(fail?(' · '+fail+(ar?' فشل':' failed')):''); var r; try{ r=await post('/api/gw/structure',{id:String(ids[i])}); }catch(_){ r=null; } if(r&&r.ok){ ok++; if((_gw.byId||{})[ids[i]]) _gw.byId[ids[i]].has_structured=true; } else fail++; } if(pg) pg.textContent=(ar?('تمت: '+ok+' · فشل: '+fail):('done: '+ok+' · failed: '+fail)); if(btn) btn.disabled=false; toast(ar?('خلصنا — '+ok+' بطاقة جاهزة'):('Finished — '+ok+' done')); gwListings(); }
 async function gwTags(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/tags'); }catch(_){ d=null; }
   _gw.tags=(d&&d.tags)||[]; _gw.cats=(d&&d.categories)||[]; _gw.vis=(d&&d.visibilities)||[]; _gw.tagById={}; _gw.tags.forEach(function(x){ _gw.tagById[x.key]=x; }); _gw.tsel={};
   var unmapped=_gw.tags.filter(function(x){return x.status==='unmapped';}).length, amen=_gw.tags.filter(function(x){return x.category==='amenity';}).length;
@@ -41621,7 +41625,94 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "self_entry": ("self_entry" in (snap.get("tag_keys") or [])),
         "airbnb_url": (url if with_airbnb else ""), "airbnb_source": src, "has_airbnb": bool(url),
         "price_base": snap.get("price_base"),
+        "structured": (ov.get("structured") or None),
     }
+
+# ---- Smart description structuring (Claude): raw Hostaway text -> emblems + cards ----
+# The dashboard "✨ Generate layout" button calls this; output is stored per-unit in
+# guest_overrides.json under "structured" and rendered by BOTH /stay and /elite (they read the
+# same _gw_listing_public JSON). Owner decision 2026-06-17: generating publishes live instantly;
+# admins can still edit the fields or regenerate. The frontend maps each emblem icon to an emoji,
+# so Claude must only use icons from _GW_EMBLEM_ICONS (anything unknown becomes "default").
+_GW_EMBLEM_ICONS = (
+    "wifi", "parking", "pool", "kitchen", "ac", "tv", "washer", "dryer", "view", "tower",
+    "balcony", "terrace", "garden", "bed", "bath", "family", "kids", "gym", "elevator",
+    "security", "location", "coffee", "workspace", "self_entry", "bbq", "sauna", "jacuzzi",
+    "netflix", "sound", "dishwasher", "heating", "pets", "smart", "cleaning", "luxury", "default",
+)
+_GW_STRUCTURE_SYS = (
+    "You are a luxury short-term-rental content structurer for Ouja Residence, a premium Saudi "
+    "(Riyadh) brand. You receive ONE apartment's raw listing text plus known facts and reorganize "
+    "it into clean, scannable structured content for a booking website. Return ONLY a JSON object:\n"
+    "- tagline_ar, tagline_en: one short punchy line each (max ~60 chars).\n"
+    "- emblems: array of 4 to 6 objects {icon, ar, en}; each a 1-3 word highlight. 'icon' MUST be "
+    "exactly one of: " + ", ".join(_GW_EMBLEM_ICONS) + ".\n"
+    "- sections: array of 2 to 4 objects {title_ar, title_en, body_ar, body_en}; group the content "
+    "into themes (e.g. the space, amenities, the building, who it suits). Each body 1-3 sentences.\n"
+    "- neighborhood_ar, neighborhood_en: 1-2 sentences about the area (empty strings if the input "
+    "says nothing about location).\n"
+    "RULES: Arabic must be natural Saudi/Najdi — warm, premium, never robotic, never Levantine or "
+    "Egyptian. English clean and elegant. NEVER invent amenities, views, numbers, or facts not in "
+    "the input. Mention self check-in only if the facts include it. No emojis inside the text. "
+    "Output the JSON object and nothing else."
+)
+
+def _gw_structure_normalize(data):
+    """Validate + clamp Claude's structured output. Returns a clean dict or None."""
+    if not isinstance(data, dict):
+        return None
+    def _s(x):
+        return str(x).strip() if x is not None else ""
+    emblems = []
+    for e in (data.get("emblems") or [])[:6]:
+        if not isinstance(e, dict):
+            continue
+        icon = _s(e.get("icon")).lower().replace(" ", "_").replace("-", "_")
+        if icon not in _GW_EMBLEM_ICONS:
+            icon = "default"
+        ar, en = _s(e.get("ar"))[:40], _s(e.get("en"))[:40]
+        if ar or en:
+            emblems.append({"icon": icon, "ar": ar, "en": en})
+    sections = []
+    for s in (data.get("sections") or [])[:4]:
+        if not isinstance(s, dict):
+            continue
+        sec = {"title_ar": _s(s.get("title_ar"))[:70], "title_en": _s(s.get("title_en"))[:70],
+               "body_ar": _s(s.get("body_ar"))[:700], "body_en": _s(s.get("body_en"))[:700]}
+        if any(sec.values()):
+            sections.append(sec)
+    out = {
+        "tagline_ar": _s(data.get("tagline_ar"))[:90], "tagline_en": _s(data.get("tagline_en"))[:90],
+        "emblems": emblems, "sections": sections,
+        "neighborhood_ar": _s(data.get("neighborhood_ar"))[:500],
+        "neighborhood_en": _s(data.get("neighborhood_en"))[:500],
+        "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+    }
+    if not (out["emblems"] or out["sections"] or out["tagline_ar"] or out["tagline_en"]):
+        return None
+    return out
+
+def _gw_structure_one(snap, ov):
+    """Claude: turn a unit's raw description + facts into structured emblems/cards. Returns a
+    normalized dict or None. Blocking — call via asyncio.to_thread; does NOT persist."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    raw = (ov.get("full_ar") or snap.get("desc") or snap.get("public_desc") or "").strip()
+    name = (ov.get("title_ar") or snap.get("name") or "").strip()
+    amen = ", ".join([a for a in (snap.get("amenities") or []) if a][:60])
+    facts = []
+    if snap.get("beds") is not None: facts.append("bedrooms: %s" % snap.get("beds"))
+    if snap.get("baths") is not None: facts.append("bathrooms: %s" % snap.get("baths"))
+    if snap.get("capacity"): facts.append("sleeps: %s" % snap.get("capacity"))
+    _area = ov.get("area") or snap.get("area")
+    if _area: facts.append("area: %s" % _area)
+    if "self_entry" in (snap.get("tag_keys") or []): facts.append("self check-in available")
+    if not raw and not amen:
+        return None
+    user = ("Apartment name: %s\nFacts: %s\nAmenities: %s\n\nRaw description:\n%s\n\nReturn the JSON now."
+            % (name or "n/a", "; ".join(facts) or "n/a", amen or "n/a", raw[:4000] or "(none)"))
+    return _gw_structure_normalize(claude_json(_GW_STRUCTURE_SYS, user, max_tokens=1500,
+                                               model=GUEST_DRAFT_MODEL))
 
 def _gw_visible_snaps():
     out = []
@@ -41893,6 +41984,9 @@ function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar
 function validateDates(ci,co){if((ci&&!co)||(!ci&&co))return 'حط تاريخ الدخول والخروج، أو خلّهم فاضيين للتصفح.';if(ci&&co&&!(co>ci))return 'تاريخ الخروج لازم يكون بعد تاريخ الدخول.';return '';}
 function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<span style="opacity:.4">·</span>');}
 function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
+var EMBL={wifi:'📶',parking:'🅿️',pool:'🏊',kitchen:'🍳',ac:'❄️',tv:'📺',washer:'🧺',dryer:'🌀',view:'🌆',tower:'🏙️',balcony:'🪟',terrace:'🌿',garden:'🌳',bed:'🛏️',bath:'🛁',family:'👨‍👩‍👧',kids:'🧸',gym:'🏋️',elevator:'🛗',security:'🔒',location:'📍',coffee:'☕',workspace:'💻',self_entry:'🚪',bbq:'🍢',sauna:'🧖',jacuzzi:'♨️',netflix:'🎬',sound:'🔊',dishwasher:'🍽️',heating:'🔥',pets:'🐾',smart:'🤖',cleaning:'🧹',luxury:'✨',default:'✨'};
+function emblemsRow(st){if(!st||!st.emblems||!st.emblems.length)return '';return '<div class="badges" style="margin:12px 0">'+st.emblems.map(function(e){return '<span class="chip">'+(EMBL[e.icon]||EMBL.default)+' '+he(e.ar||e.en)+'</span>';}).join('')+'</div>';}
+function structuredCards(st){if(!st)return '';var out='';(st.sections||[]).forEach(function(s){var ti=(s.title_ar||s.title_en||''),bo=(s.body_ar||s.body_en||'');if(!ti&&!bo)return;out+='<div class="sec"><h2>'+he(ti)+'</h2><div class="descblk'+(isLatin(bo)?' ltr':'')+'">'+he(bo)+'</div></div>';});var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)out+='<div class="sec"><h2>📍 الموقع والحي</h2><div class="descblk'+(isLatin(nb)?' ltr':'')+'">'+he(nb)+'</div></div>';return out;}
 
 function viewLanding(){
   track('stay_page_view',{});
@@ -42020,6 +42114,8 @@ function viewListing(){
     }
     var desc=(l.desc_ar||l.short_ar||'');
     var descBlk=desc?('<div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div>'):'';
+    var st=l.structured, embl=emblemsRow(st), stcards=structuredCards(st);
+    var tagline=(st&&(st.tagline_ar||st.tagline_en))?('<p style="font-size:15px;color:var(--gold,#a9803f);font-weight:600;margin:2px 0 8px;line-height:1.5">'+he(st.tagline_ar||st.tagline_en)+'</p>'):'';
     var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out'),dsum='';
     if(dci&&dco&&dco>dci){dsum='<div class="card" style="padding:11px 13px;margin:10px 0;font-size:13px;display:flex;gap:8px;align-items:center"><span>🗓️</span><b>حجزك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div>';}
     var price;
@@ -42030,8 +42126,9 @@ function viewListing(){
       +(l.area?('<div class="muted" style="font-size:13.5px;margin-bottom:6px">📍 '+he(l.area)+'</div>'):'')
       +(l.badge?('<span class="chip solid" style="margin-bottom:6px">'+he(l.badge)+'</span>'):'')
       +(badges(l,6)?('<div class="badges" style="margin:8px 0">'+badges(l,6)+'</div>'):'')
-      +(l.short_ar&&!l.desc_ar?('<p class="muted" style="line-height:1.7;font-size:14px">'+he(l.short_ar)+'</p>'):'')
-      +kv+price+why+descBlk+amen
+      +tagline
+      +(!st&&l.short_ar&&!l.desc_ar?('<p class="muted" style="line-height:1.7;font-size:14px">'+he(l.short_ar)+'</p>'):'')
+      +kv+price+embl+(stcards||descBlk)+why+amen
       +'<div style="height:96px"></div>';
     var cta;
     if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url,dci,dco,pq.get('guests')))+'">احجزها في Airbnb ↗</a>';}
@@ -42639,6 +42736,9 @@ function waBook(l,ci,co,nights,guests){var NL=String.fromCharCode(10);var x=['ح
 function waBtn(text,ev,cls,label){var h=waHref(text);var c='btn '+(cls||'primary block');if(!h)return '<button class="'+c+' off" disabled>'+WAG+'<span class="lbl">'+he(label||'الكونسيرج غير متاح حاليًا')+'</span></button>';return '<a class="'+c+'" target="_blank" rel="noopener" data-ev="'+he(ev||'')+'" href="'+he(h)+'">'+WAG+'<span class="lbl">'+he(label||'تواصل مع الكونسيرج')+'</span></a>';}
 function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<i>·</i>');}
 function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
+var EMBL={wifi:'📶',parking:'🅿️',pool:'🏊',kitchen:'🍳',ac:'❄️',tv:'📺',washer:'🧺',dryer:'🌀',view:'🌆',tower:'🏙️',balcony:'🪟',terrace:'🌿',garden:'🌳',bed:'🛏️',bath:'🛁',family:'👨‍👩‍👧',kids:'🧸',gym:'🏋️',elevator:'🛗',security:'🔒',location:'📍',coffee:'☕',workspace:'💻',self_entry:'🚪',bbq:'🍢',sauna:'🧖',jacuzzi:'♨️',netflix:'🎬',sound:'🔊',dishwasher:'🍽️',heating:'🔥',pets:'🐾',smart:'🤖',cleaning:'🧹',luxury:'✨',default:'✨'};
+function emblemsRow(st){if(!st||!st.emblems||!st.emblems.length)return '';return '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:18px 0">'+st.emblems.map(function(e){return '<span class="chip">'+(EMBL[e.icon]||EMBL.default)+' '+he(e.ar||e.en)+'</span>';}).join('')+'</div>';}
+function structuredCards(st){if(!st)return '';var out='';(st.sections||[]).forEach(function(s){var ti=(s.title_ar||s.title_en||''),bo=(s.body_ar||s.body_en||'');if(!ti&&!bo)return;out+='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">'+he(ti)+'</span><div class="descblk'+(isLatin(bo)?' ltr':'')+'">'+he(bo)+'</div></div>';});var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)out+='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">الموقع والحي</span><div class="descblk'+(isLatin(nb)?' ltr':'')+'">'+he(nb)+'</div></div>';return out;}
 function divider(){return '<div class="reg-wrap reveal">'+REG+'</div>';}
 function monoPh(){return '<div class="mono">ع</div>';}
 function skeletons(n){var s='';for(var i=0;i<(n||2);i++){s+='<div class="col-card"><div class="cover sk"></div><div class="cc-body"><div class="sk" style="height:13px;width:38%"></div><div class="sk" style="height:20px;width:72%;margin-top:8px"></div><div class="sk" style="height:13px;width:52%;margin-top:10px"></div><div class="sk" style="height:34px;width:100%;margin-top:12px"></div></div></div>';}return s;}
@@ -42996,6 +43096,8 @@ function viewListing(){
     if(groups.length){var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);amen='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">المميزات</span><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';}
     var desc=(l.desc_ar||l.short_ar||'');
     var descBlk=desc?('<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">عن الإقامة</span><div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div></div>'):'';
+    var st=l.structured, embl=emblemsRow(st), stcards=structuredCards(st);
+    var tagline=(st&&(st.tagline_ar||st.tagline_en))?('<div style="font-size:16px;opacity:.82;margin:10px 0 2px;line-height:1.5"'+(isLatin(st.tagline_ar||st.tagline_en)?' dir="ltr"':'')+'>'+he(st.tagline_ar||st.tagline_en)+'</div>'):'';
     var perks='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">امتيازات عوجا إيليت</span><div class="perks">'
       +'<div class="perk"><span class="pk-i">'+IC.bell+'</span><div><b>كونسيرج خاص ٢٤/٧</b> <span>— نرتّب طلباتك قبل وأثناء الإقامة.</span></div></div>'
       +'<div class="perk"><span class="pk-i">'+IC.car+'</span><div><b>سائق خاص</b> <span>— مرسيدس · سواري المسافر تحت طلبك.</span></div></div>'
@@ -43007,9 +43109,11 @@ function viewListing(){
       +'<div class="l-eyebrow eyebrow">Ouja Elite Residence</div>'
       +'<h1 class="l-title">'+he(l.name_ar||l.name_en)+'</h1>'
       +(l.area?('<div class="l-area">'+he(l.area)+'</div>'):'')
+      +tagline
       +((l.badge?('<span class="chip solid">'+he(l.badge)+'</span> '):'')+(badges(l,6)?('<span class="chips" style="display:inline-flex">'+badges(l,6)+'</span>'):''))
+      +embl
       +listingPrice(l)
-      +facts+why+descBlk+amen+perks
+      +facts+why+(stcards||descBlk)+amen+perks
       +'<div style="height:120px"></div></div>';
     var num=waNum();
     var msg=waBook(l,dci,dco,(l.nights||0),pq.get('guests'));
@@ -43351,6 +43455,7 @@ async def _api_gw_listings(request):
                     "tags": [k for k in (s.get("tag_keys") or []) if (_gw_taxonomy.get(k) or {}).get("ar")],
                     "slug": _gw_slug(s, ov), "sort": (ov.get("sort") or 0), "badge": ov.get("badge") or "",
                     "notes": ov.get("notes") or "",
+                    "has_structured": bool(ov.get("structured")),
                     "hero": (ov.get("hero_image") or s.get("cover") or ""),
                     "image_urls": [im["url"] for im in (s.get("images") or [])][:30]})
     out.sort(key=lambda x: (-(x["sort"] or 0), x["name"] or ""))
@@ -43365,12 +43470,40 @@ async def _api_gw_listing(request):
         return _json({"error": "id_required"}, 400)
     ov = _gw_overrides.get(lid, {}) or {}
     for k in ("visible", "title_ar", "title_en", "short_ar", "short_en", "full_ar", "full_en",
-              "area", "slug", "badge", "sort", "hero_image", "airbnb_override", "notes"):
+              "area", "slug", "badge", "sort", "hero_image", "airbnb_override", "notes", "structured"):
         if k in b:
             ov[k] = b.get(k)
     _gw_overrides[lid] = ov
     _gw_save_ov()
     return _json({"ok": True, "override": ov})
+
+async def _api_gw_structure(request):
+    """Generate structured emblems/cards for ONE unit via Claude and save it live.
+    The dashboard 'Generate for all' button loops this per unit (shows progress, no timeout)."""
+    if not _dash_auth(request):
+        return _json({"error": "forbidden"}, 403)
+    if not ANTHROPIC_API_KEY:
+        return _json({"error": "no_api_key", "message": "اضبط ANTHROPIC_API_KEY أول."}, 400)
+    b = await _read_body(request)
+    lid = str(b.get("id") or "").strip()
+    if not lid:
+        return _json({"error": "id_required"}, 400)
+    snap = next((s for s in (_gw_cache.get("listings") or []) if str(s.get("id")) == lid), None)
+    if snap is None:
+        return _json({"error": "not_found"}, 404)
+    ov = _gw_overrides.get(lid, {}) or {}
+    try:
+        structured = await asyncio.to_thread(_gw_structure_one, snap, ov)
+    except Exception as e:
+        print("gw structure error:", e)
+        structured = None
+    if not structured:
+        return _json({"error": "generate_failed",
+                      "message": "ما قدرت أصيغ الوصف — جرّب مرة ثانية."}, 502)
+    ov["structured"] = structured
+    _gw_overrides[lid] = ov
+    _gw_save_ov()
+    return _json({"ok": True, "structured": structured})
 
 async def _api_gw_tags(request):
     if not _dash_auth(request):
@@ -43584,6 +43717,7 @@ async def start_web_server():
         app.router.add_get("/api/gw/overview", _api_gw_overview)
         app.router.add_get("/api/gw/listings", _api_gw_listings)
         app.router.add_post("/api/gw/listing", _api_gw_listing)
+        app.router.add_post("/api/gw/structure", _api_gw_structure)
         app.router.add_get("/api/gw/tags", _api_gw_tags)
         app.router.add_post("/api/gw/tag", _api_gw_tag)
         app.router.add_post("/api/gw/tags/bulk", _api_gw_tags_bulk)
