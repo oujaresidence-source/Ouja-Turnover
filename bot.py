@@ -24756,6 +24756,17 @@ def _pdf_statement_bytes(rep, label):
         pdf.cell(usable, 6, shape("شهر جاري — اليوم %d من %d · الأرقام حتى الآن · متوقع بنهاية الشهر: ~%s (تقديري)"
                                   % (_elapsed, _total_days, money(_proj))), align="R")
         pdf.ln(7)
+    # ---- reconciliation line (mirrors the owner page's balanced / needs-review chip) ----
+    rc = rep.get("reconciliation") or {}
+    if rc:
+        pdf.set_font(FONT, size=9.5); pdf.set_x(M)
+        if rc.get("balanced"):
+            pdf.set_text_color(62, 125, 90)
+            pdf.cell(usable, 6, shape("متوازن — مجموع الصفوف يساوي الإجمالي بالريال"), align="R")
+        else:
+            pdf.set_text_color(181, 59, 59)
+            pdf.cell(usable, 6, shape("يحتاج مراجعة — فيه صفوف ناقصة بيانات"), align="R")
+        pdf.ln(7)
     # ---- income breakdown ----
     section("تفصيل الدخل")
     kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
@@ -24765,16 +24776,52 @@ def _pdf_statement_bytes(rep, label):
         kv("إضافات", money(rep.get("extras")))
     if rep.get("manual_income"):
         kv("إيراد مضاف يدويًا", money(rep.get("manual_income")))
-    # ---- reservations table ----
+    # ---- reservations table — guest name LEADS each row, with the same detail the
+    #      owner page shows (dates, nights + net/night, channel, status). Two lines per
+    #      booking: net + guest on top, a muted detail line beneath. ----
     rl = rep.get("resv_lines") or []
     if rl:
-        section("الحجوزات (%d)" % len(rl)); pdf.set_font(FONT, size=10); pdf.set_text_color(*INK)
-        for l in rl[:40]:
+        section("الحجوزات (%d)" % len(rl))
+        _today_str = datetime.now(TZ).date().isoformat()
+        _n_apt = rep.get("n_apartments") or len(rep.get("apartments") or []) or 1
+        def _chan(c):
+            return {"airbnb": "Airbnb", "direct": "مباشر"}.get(c, c or "")
+        def _resv_status(l):
+            if l.get("needs_review"):
+                return "يحتاج مراجعة"
+            if l.get("status_kind") == "cancelled_paid":
+                return "ملغي — مدفوع"
+            if (l.get("checkin") or "") > _today_str:
+                return "حجز قادم"
+            return "مكتمل"
+        for l in rl[:60]:
+            nights = int(l.get("nights") or 0)
+            adr = (round(float(l["income"]) / nights) if (l.get("income") is not None and nights) else None)
+            # line 1 — net (left, bold) + guest name (right, bold)
             y = pdf.get_y()
-            pdf.set_xy(M, y); pdf.cell(usable * 0.30, 6, (money(l.get("income")) if l.get("income") is not None else "—"), align="L")
-            pdf.set_xy(M + usable * 0.30, y); pdf.set_text_color(*MUT); pdf.cell(usable * 0.20, 6, str(l.get("nights") or ""), align="C")
-            pdf.cell(usable * 0.25, 6, str(l.get("checkin") or ""), align="C")
-            pdf.set_text_color(*INK); pdf.cell(usable * 0.25, 6, shape(l.get("channel") or ""), align="R"); pdf.ln(6)
+            pdf.set_font(FONT, size=10); pdf.set_text_color(*INK)
+            pdf.set_xy(M, y)
+            pdf.cell(usable * 0.32, 6, (money(l.get("income")) if l.get("income") is not None else "—"), align="L")
+            pdf.set_xy(M + usable * 0.32, y)
+            pdf.cell(usable * 0.68, 6, shape(str(l.get("guest") or "—")), align="R"); pdf.ln(5.5)
+            # line 2 — date range in its OWN left/LTR cell (keeps the Latin dates from
+            #          being reordered by bidi), Arabic detail (status · nights · net/night
+            #          · channel) on the right
+            y2 = pdf.get_y()
+            pdf.set_font(FONT, size=8.5); pdf.set_text_color(*MUT)
+            dates = str(l.get("checkin") or "")
+            if l.get("checkout"):
+                dates += " → " + str(l.get("checkout"))
+            pdf.set_xy(M, y2); pdf.cell(usable * 0.42, 5, dates, align="L")
+            det = [_resv_status(l), "%d ليالي" % nights]
+            if adr is not None:
+                det.append("{:,} {}/ليلة".format(int(adr), cur))
+            det.append(_chan(l.get("channel")))
+            if _n_apt > 1 and l.get("apartment"):
+                det.append(str(l.get("apartment")))
+            pdf.set_xy(M + usable * 0.42, y2)
+            pdf.cell(usable * 0.58, 5, shape(" · ".join(p for p in det if p)), align="R")
+            pdf.ln(6)
     # ---- manual income lines ----
     mil = rep.get("manual_income_lines") or []
     if mil:
@@ -24790,7 +24837,12 @@ def _pdf_statement_bytes(rep, label):
         for e in el[:60]:
             y = pdf.get_y(); pdf.set_text_color(*INK)
             pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, money(e.get("amount")), align="L")
-            desc = str(e.get("investor_note") or e.get("description") or e.get("display_date") or e.get("date") or e.get("note") or "")
+            # match the owner page: «{date} · {category} — {description}»
+            _ed = str(e.get("date") or e.get("display_date") or "")
+            _ec = str(e.get("category") or "")
+            _etxt = str(e.get("investor_note") or e.get("description") or e.get("note") or "")
+            _ehead = " · ".join(p for p in (_ed, _ec) if p)
+            desc = (_ehead + (" — " + _etxt if _etxt else "")) if _ehead else (_etxt or "—")
             rurl = (e.get("receipt_url") or "").strip()
             # slice 4: the receipt rides ON the row — clickable proxy link, or
             # the honest «بدون فاتورة» marker (manual lines carry neither)
