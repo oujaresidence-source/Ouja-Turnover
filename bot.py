@@ -7211,19 +7211,38 @@ def _reservation_channel_info(reservation_id):
     _RES_CHANNEL_CACHE[rid] = info
     return info
 
+def _airbnb_confirmation_code(channel_res_id):
+    """Pull the Airbnb HM-code out of Hostaway's channelReservationId. Hostaway
+    stores Airbnb as a composite, e.g. '462594-guest-29408500-confirmation-HMR4K3XTZQ'
+    -> 'HMR4K3XTZQ'. Falls back to a bare HM-code, then to an already-clean code.
+    Returns '' when nothing usable is found."""
+    s = str(channel_res_id or "").strip().upper()
+    if not s:
+        return ""
+    m = re.search(r"CONFIRMATION-([A-Z0-9]+)", s)      # the composite form
+    if m:
+        return m.group(1)
+    m = re.search(r"(HM[A-Z0-9]{6,})", s)              # a bare HM-code anywhere
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[A-Z0-9]{6,12}", s):             # already just the code
+        return s
+    return ""
+
 def guest_conversation_link(reservation_id, comm_type=""):
     """Best 'open the conversation' deep link for an escalation, as (url, label),
     or (None, None) when we have nothing reliable to link to. BLOCKING (calls
     Hostaway) — call via asyncio.to_thread from the event loop."""
     info = _reservation_channel_info(reservation_id)
     chan = (info.get("channel") or "").lower()
-    code = (info.get("airbnb_code") or "").strip()
     is_airbnb = ("airbnb" in chan) or (str(comm_type or "").lower() == "airbnb")
-    # Airbnb confirmation codes are short alphanumerics (e.g. HMABC123); guard so a
-    # stray value never builds a junk link.
-    if is_airbnb and re.match(r"^[A-Za-z0-9]{6,12}$", code):
-        return (f"https://www.airbnb.com/hosting/reservations/details/{code}",
-                "افتح محادثة الضيف في Airbnb")
+    if is_airbnb:
+        code = _airbnb_confirmation_code(info.get("airbnb_code"))
+        if code:
+            # Universal link to the Airbnb reservation (the page with the guest's
+            # Message button): opens the Airbnb APP on a phone, the web on desktop.
+            return (f"https://www.airbnb.com/hosting/stay/{code}",
+                    "افتح محادثة الضيف في Airbnb")
     rid = str(reservation_id or "").strip()
     if rid and "{id}" in HOSTAWAY_RES_URL_TEMPLATE:
         return (HOSTAWAY_RES_URL_TEMPLATE.format(id=rid), "افتح الحجز في Hostaway")
