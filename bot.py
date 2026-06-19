@@ -24030,6 +24030,73 @@ def _json(data, status=200):
     return web.json_response(data, status=status,
                              dumps=lambda o: json.dumps(o, ensure_ascii=False))
 
+async def _handle_diag_airbnb(request):
+    """READ-ONLY discovery: dump the raw Hostaway conversation + reservation +
+    latest-message fields for one Airbnb thread, so we can find the channel/thread
+    id Airbnb uses for a *direct* DM deep link. Token-gated, no writes. Optional
+    ?res=<reservationId> or ?cid=<conversationId> to target a specific guest."""
+    if not _dash_auth(request):
+        return web.Response(status=403, text="forbidden")
+    want_res = (request.query.get("res") or "").strip()
+    want_cid = (request.query.get("cid") or "").strip()
+
+    def _probe():
+        out = {"scanned": 0, "picked": None, "candidates": [],
+               "conversation": {}, "reservation": {}, "latest_message": {}}
+        try:
+            data = api_get("/conversations", params={"limit": 30, "includeResources": 1})
+        except Exception as e:
+            out["error"] = f"conversations fetch: {e}"
+            return out
+        convos = data.get("result", []) or []
+        out["scanned"] = len(convos)
+        chosen = None
+        for c in convos:
+            res = c.get("reservation") or {}
+            chan = (res.get("channelName") or c.get("channelName") or "").lower()
+            if want_cid and str(c.get("id")) == want_cid:
+                chosen = c; break
+            if want_res and str(c.get("reservationId") or res.get("id")) == want_res:
+                chosen = c; break
+            if not (want_res or want_cid) and "airbnb" in chan:
+                chosen = c; break
+        if not chosen and convos:
+            chosen = convos[0]
+        if not chosen:
+            out["error"] = "no conversations found"
+            return out
+        out["conversation"] = chosen
+        rid = chosen.get("reservationId") or (chosen.get("reservation") or {}).get("id")
+        out["picked"] = {"conversation_id": chosen.get("id"), "reservation_id": rid,
+                         "guest": chosen.get("recipientName") or chosen.get("guestName")}
+        if rid:
+            try:
+                out["reservation"] = (api_get(f"/reservations/{rid}") or {}).get("result") or {}
+            except Exception as e:
+                out["reservation"] = {"_error": str(e)}
+        try:
+            md = api_get(f"/conversations/{chosen.get('id')}/messages")
+            msgs = md.get("result", []) or []
+            if msgs:
+                out["latest_message"] = msgs[-1]
+        except Exception as e:
+            out["latest_message"] = {"_error": str(e)}
+        # surface every field that might carry an Airbnb thread/recipient/channel id
+        hints = ("thread", "recipient", "channelconversation", "channelthread",
+                 "airbnb", "external", "channelid", "channelreservation", "conversation")
+        def _scan(obj, src):
+            if not isinstance(obj, dict):
+                return
+            for k, v in obj.items():
+                if any(h in str(k).lower() for h in hints):
+                    out["candidates"].append({"src": src, "key": k, "value": v})
+        _scan(out["conversation"], "conversation")
+        _scan(out["reservation"], "reservation")
+        _scan(out["latest_message"], "message")
+        return out
+
+    return _json(await asyncio.to_thread(_probe))
+
 def _cache_get(key):
     hit = _dash_cache.get(key)
     return hit[0] if hit else None
@@ -44372,6 +44439,7 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
+        app.router.add_get("/diag/airbnb", _handle_diag_airbnb)  # read-only Airbnb thread-id probe
         app.router.add_get("/api/nav", _api_nav)            # shared nav (ERP sidebar source)
         # ---- SEO surfaces for the public funnel ----
         app.router.add_get("/robots.txt", _handle_robots)
