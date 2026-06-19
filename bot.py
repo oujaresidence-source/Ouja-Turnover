@@ -47883,6 +47883,14 @@ async def _eval_ensure_channel(guild):
     ch = await ensure_channel(guild, EVAL_CHANNEL, cat)
     if ch is None:
         return None
+    try:                                   # ensure the bot can operate in its OWN scoreboard room
+        me = guild.me                      # (the room may be restricted to specific people; the
+        if me is not None:                 #  bot still needs to post the panel + results here)
+            await ch.set_permissions(
+                me, view_channel=True, send_messages=True, embed_links=True,
+                attach_files=True, read_message_history=True)
+    except Exception as e:
+        print("eval channel self-perm error (delivery falls back to a private reply):", e)
     try:
         already = False
         async for m in ch.history(limit=30):
@@ -47906,17 +47914,39 @@ async def _eval_ensure_channel(guild):
         print("eval panel post error:", e)
     return ch
 
-async def _eval_run_and_post(channel, triggered_by):
-    """Run the quality check and post a LIVE checklist + result card to `channel`.
-    Shared by the button and the weekly loop. The heavy work runs in a worker thread
-    so the event loop (and every other bot loop) stays responsive. Never messages a guest."""
+async def _eval_run_and_post(channel, triggered_by, interaction=None):
+    """Run the quality check and post a LIVE checklist + result card. Shared by the button
+    and the weekly loop. Heavy work runs in a worker thread so the event loop (and every
+    other bot loop) stays responsive. Delivery is PERMISSION-RESILIENT: if the bot can't
+    post in `channel` (e.g. a locked-down room → 403 Missing Access) it falls back to a
+    private reply to whoever pressed the button, so results are never lost. Never messages a guest."""
+    # Resilient send/edit: try the channel; on failure fall back to an ephemeral reply to
+    # the person who triggered it. Returns (message_or_None, posted_publicly_bool).
+    async def _send(**kw):
+        try:
+            return await channel.send(**kw), True
+        except Exception as ce:
+            if interaction is not None:
+                try:
+                    return await interaction.followup.send(ephemeral=True, **kw), False
+                except Exception as fe:
+                    print("eval send failed (channel + followup):", ce, fe)
+            else:
+                print("eval send failed (channel, no interaction):", ce)
+            return None, False
+
+    async def _edit(message, **kw):
+        if message is None:
+            return
+        try:
+            await message.edit(**kw)
+        except Exception:
+            pass
+
     try:
         import eval_musaed                       # lazy import (guardrail G4)
     except Exception as e:
-        try:
-            await channel.send(f"⚠️ تعذّر تحميل أداة الجودة (eval_musaed): {e}")
-        except Exception:
-            pass
+        await _send(content=f"⚠️ تعذّر تحميل أداة الجودة (eval_musaed): {e}")
         print("eval import failed:", e)
         return
     try:
@@ -47924,10 +47954,9 @@ async def _eval_run_and_post(channel, triggered_by):
     except Exception as _se:
         print("eval seed (run path):", _se)
     if not eval_musaed.golden_exists():        # only true if even the built-in seed is gone
-        await channel.send(
-            "🧪 **لوحة الجودة** — ما فيه golden set بعد.\n"
+        await _send(content=("🧪 **لوحة الجودة** — ما فيه golden set بعد.\n"
             "ابنِ واحد من الطرفية: `python eval_musaed.py --build-golden --limit 200` "
-            "ثم نظّفه واحفظه باسم `golden_set.jsonl` على نفس مجلّد البيانات.")
+            "ثم نظّفه واحفظه باسم `golden_set.jsonl` على نفس مجلّد البيانات."))
         return
 
     STEPS = [("drafting", "✍️ كتابة المسودات · Drafting replies"),
@@ -47947,7 +47976,7 @@ async def _eval_run_and_post(channel, triggered_by):
                     inline=False)
         return e
 
-    msg = await channel.send(embed=checklist_embed())
+    msg, _public = await _send(embed=checklist_embed())
 
     def cb(step, status):                        # called from the worker thread (simple dict write)
         if step in state:
@@ -47959,24 +47988,19 @@ async def _eval_run_and_post(channel, triggered_by):
         snap = tuple(state.values())
         if snap != last:
             last = snap
-            try:
-                await msg.edit(embed=checklist_embed())
-            except Exception:
-                pass
+            await _edit(msg, embed=checklist_embed())
         await asyncio.sleep(1.5)
-    try:
-        await msg.edit(embed=checklist_embed())
-    except Exception:
-        pass
+    await _edit(msg, embed=checklist_embed())
 
     try:
         summary, results, diff, html_path = await task
     except Exception as e:
-        try:
-            await msg.edit(embed=discord.Embed(
-                title="🧪 فحص الجودة — خطأ", description=f"تعذّر إكمال الفحص: {e}", color=0xB3261E))
-        except Exception:
-            pass
+        err = discord.Embed(title="🧪 فحص الجودة — خطأ",
+                            description=f"تعذّر إكمال الفحص: {e}", color=0xB3261E)
+        if msg is not None:
+            await _edit(msg, embed=err)
+        else:
+            await _send(embed=err)
         print("eval run error:", e)
         log_event("eval", f"eval run error: {e}")
         return
@@ -48009,15 +48033,22 @@ async def _eval_run_and_post(channel, triggered_by):
     rule = ("✅ آمن للنشر · 0 أخطاء حرجة والمتوسط ما نزل"
             if safe else "🛑 لا تنشر · فيه خطأ حرج أو المتوسط نزل")
     res.set_footer(text=f"{rule} · شغّله: {triggered_by}")
-    try:
-        await msg.edit(embed=res)
-    except Exception:
-        pass
+    if msg is not None:
+        await _edit(msg, embed=res)
+    else:
+        await _send(embed=res)
     if html_path and os.path.isfile(html_path):
         try:
             await channel.send(file=discord.File(html_path, filename="musaed_quality.html"))
-        except Exception as e:
-            print("eval report attach error:", e)
+        except Exception as ce:
+            if interaction is not None:
+                try:
+                    await interaction.followup.send(
+                        ephemeral=True, file=discord.File(html_path, filename="musaed_quality.html"))
+                except Exception as fe:
+                    print("eval report attach error:", ce, fe)
+            else:
+                print("eval report attach error:", ce)
     log_event("eval", f"جودة المساعد · متوسط {summary['mean_overall']:.0f} · "
                       f"نجاح {summary['pass_rate']*100:.0f}% · أخطاء حرجة {hf} · ({triggered_by})")
 
@@ -48034,8 +48065,9 @@ class MusaedEvalView(discord.ui.View):
                 await interaction.response.send_message("هذا الأمر للإدارة فقط 🙏", ephemeral=True)
                 return
             await interaction.response.send_message(
-                "🧪 شغّلت فحص الجودة… النتيجة بتنزل تحت في نفس القناة.", ephemeral=True)
-            await _eval_run_and_post(interaction.channel, f"@{interaction.user.display_name}")
+                "🧪 شغّلت فحص الجودة… النتيجة بتنزل تحت (ولو القناة مقفّلة على البوت بترجع لك هنا بشكل خاص).",
+                ephemeral=True)
+            await _eval_run_and_post(interaction.channel, f"@{interaction.user.display_name}", interaction)
         except Exception as e:
             print("eval button error:", e)
             try:
