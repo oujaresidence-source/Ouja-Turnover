@@ -47919,7 +47919,11 @@ async def _eval_run_and_post(channel, triggered_by):
             pass
         print("eval import failed:", e)
         return
-    if not eval_musaed.golden_exists():
+    try:
+        eval_musaed.seed_golden()              # best-effort: write the volume copy if missing
+    except Exception as _se:
+        print("eval seed (run path):", _se)
+    if not eval_musaed.golden_exists():        # only true if even the built-in seed is gone
         await channel.send(
             "🧪 **لوحة الجودة** — ما فيه golden set بعد.\n"
             "ابنِ واحد من الطرفية: `python eval_musaed.py --build-golden --limit 200` "

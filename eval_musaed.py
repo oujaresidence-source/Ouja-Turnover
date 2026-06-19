@@ -101,8 +101,23 @@ def report_path(dirpath=None):
     return os.path.join(runs_dir(dirpath), "latest_report.html")
 
 
+def repo_seed_path():
+    """The curated seed shipped next to this module (always deployed with the code,
+    so it's available even if the volume copy was never written)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_set.seed.jsonl")
+
+
+def active_golden_path(dirpath=None):
+    """The golden set to actually run against: the curated VOLUME copy if present,
+    otherwise the built-in repo seed (read-only fallback so the button always works
+    even if the volume copy is missing / the volume isn't writable)."""
+    gp = golden_path(dirpath)
+    return gp if os.path.isfile(gp) else repo_seed_path()
+
+
 def golden_exists(dirpath=None):
-    return os.path.isfile(golden_path(dirpath))
+    # True if EITHER the curated volume copy OR the built-in repo seed is available.
+    return os.path.isfile(golden_path(dirpath)) or os.path.isfile(repo_seed_path())
 
 
 def _ensure_dir(p):
@@ -624,9 +639,14 @@ def seed_golden(force=False, dirpath=None):
         print("eval: seed file has no valid cases.")
         return None
     _ensure_dir(dirpath)
-    with open(gp, "w", encoding="utf-8") as f:
-        for c in cases:
-            f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    try:
+        with open(gp, "w", encoding="utf-8") as f:
+            for c in cases:
+                f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"eval: could not write golden set to {gp}: {e} "
+              f"(scoreboard will fall back to the built-in seed)")
+        return None
     print(f"eval: installed {len(cases)} seed cases → {gp}")
     print("Next:  python eval_musaed.py   (or tap «🧪 Run quality check» in Discord)")
     return gp
@@ -795,7 +815,7 @@ def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
                 pass
 
     if cases is None:
-        gp = golden_path(dirpath)
+        gp = active_golden_path(dirpath)
         if not os.path.isfile(gp):
             raise FileNotFoundError(gp)
         cases = _read_jsonl(gp)
