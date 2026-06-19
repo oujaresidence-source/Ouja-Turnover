@@ -6393,10 +6393,9 @@ class NameSelect(discord.ui.Select):
             embed = msg.embeds[0] if msg.embeds else discord.Embed()
             embed.add_field(name="✅ تم الاستلام", value=f"بواسطة **{name}**", inline=False)
             embed.color = 0x3BA55D
-            done = ClaimView(convo_url=(esc or {}).get("convo_url"),
-                             convo_label=(esc or {}).get("convo_label"))
+            done = ClaimView(links=(esc or {}).get("convo_links"))
             for c in done.children:
-                if getattr(c, "url", None):   # keep the conversation link tappable
+                if getattr(c, "url", None):   # keep the reach-guest links tappable
                     continue
                 c.disabled = True
             await msg.edit(embed=embed, view=done)
@@ -6418,17 +6417,19 @@ class NameSelect(discord.ui.Select):
             await interaction.followup.send(dm, ephemeral=True)
 
 class ClaimView(discord.ui.View):
-    def __init__(self, convo_url=None, convo_label=None):
+    def __init__(self, links=None):
         super().__init__(timeout=None)   # persistent across restarts
-        # Optional per-message deep link to the guest's live thread (Airbnb app/web,
-        # or Hostaway). A URL button is baked into the message on Discord's side, so
-        # it keeps working after a restart WITHOUT re-registration — that's why the
-        # no-arg ClaimView() used by on_ready persistence and by disable-after-claim
-        # can safely omit it. Kept tappable (never disabled) when a card is closed.
-        if convo_url:
-            self.add_item(discord.ui.Button(
-                label=(convo_label or "💬 افتح المحادثة")[:80],
-                style=discord.ButtonStyle.link, url=convo_url))
+        # Optional per-message deep links to reach the guest (WhatsApp, Airbnb,
+        # Hostaway), each a list item (url, label). URL buttons are baked into the
+        # message on Discord's side, so they keep working after a restart WITHOUT
+        # re-registration — that's why the no-arg ClaimView() used by on_ready
+        # persistence and by disable-after-claim can safely omit them. Kept tappable
+        # (never disabled) when a card is closed.
+        for url, label in (links or []):
+            if url:
+                self.add_item(discord.ui.Button(
+                    label=(label or "💬 افتح المحادثة")[:80],
+                    style=discord.ButtonStyle.link, url=url))
 
     @discord.ui.button(label="🙋 أخذ المهمة / Claim", style=discord.ButtonStyle.primary,
                        custom_id="ouja_claim")
@@ -7183,48 +7184,70 @@ _assistant_seen = _BoundedSet(maxlen=20000)
 
 _SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج"}
 
-# --- "Open the guest conversation" deep link for escalation cards --------------
-# The team's pain: when an escalation lands, finding the right DM inside Airbnb's
-# inbox is slow. We attach a one-tap link. Airbnb gives NO external link to a
-# specific guest's *native* chat (a reservation link renders as a web view inside
-# the app), so for Airbnb we open the app's native Messages inbox — the guest is
-# the card's title and sits at the top of the list since the thread is freshly
-# active. Every other channel -> the Hostaway reservation, which always works.
+# --- "Reach the guest" deep links for escalation cards ------------------------
+# The team's pain: when an escalation lands, reaching the guest fast is what cuts
+# the SLA. We attach one-tap buttons. Hostaway facts we verified on live data:
+#   • Guest phone IS available on booked reservations -> a wa.me/<phone> link opens
+#     WhatsApp directly = the fastest reply path for operational escalations.
+#   • Airbnb only exposes the chat THREAD id for inquiries (in channelReservationId
+#     as "...-thread-<id>-..."); once booked it's replaced by "confirmation-<HM>" and
+#     the thread id is gone everywhere. So: inquiry -> direct Airbnb chat; booked ->
+#     the Airbnb reservation page (has the guest's Message button); else the inbox.
+#   • Non-Airbnb channels -> the Hostaway reservation.
 # Read-only Hostaway lookup, cached, run off the event loop.
-_RES_CHANNEL_CACHE = {}   # reservation_id -> {"channel","ts"}
+_RES_CHANNEL_CACHE = {}   # reservation_id -> {"channel","phone","confirmation","channel_res_id","ts"}
 
 def _reservation_channel_info(reservation_id):
-    """Return {'channel'} for a reservation (cached 1h). Safe, read-only.
-    Returns {} when the reservation can't be looked up."""
+    """Return {'channel','phone','confirmation','channel_res_id'} for a reservation
+    (cached 1h). Safe, read-only. Returns {} when it can't be looked up."""
     rid = str(reservation_id or "").strip()
     if not rid:
         return {}
     hit = _RES_CHANNEL_CACHE.get(rid)
     if hit and (time.time() - hit.get("ts", 0) < 3600):
         return hit
-    info = {"channel": "", "ts": time.time()}
+    info = {"channel": "", "phone": "", "confirmation": "", "channel_res_id": "",
+            "ts": time.time()}
     try:
         r = (api_get(f"/reservations/{rid}") or {}).get("result") or {}
         info["channel"] = (r.get("channelName") or "").strip()
+        info["phone"] = (r.get("phone") or "").strip()
+        info["confirmation"] = (r.get("confirmationCode") or "").strip()
+        info["channel_res_id"] = (r.get("channelReservationId") or "").strip()
     except Exception as e:
         print(f"_reservation_channel_info error ({rid}):", e)
     _RES_CHANNEL_CACHE[rid] = info
     return info
 
-def guest_conversation_link(reservation_id, comm_type=""):
-    """Best 'open the conversation' deep link for an escalation, as (url, label),
-    or (None, None) when we have nothing reliable to link to. BLOCKING (calls
-    Hostaway) — call via asyncio.to_thread from the event loop."""
+def guest_conversation_links(reservation_id, comm_type=""):
+    """Deep links for the escalation card as a list of (url, label): a WhatsApp link
+    (when the guest's phone is known) + the best Airbnb/Hostaway link. BLOCKING
+    (calls Hostaway) — call via asyncio.to_thread from the event loop."""
     info = _reservation_channel_info(reservation_id)
+    links = []
+    # WhatsApp — fastest reply path when we have the guest's number
+    phone = re.sub(r"[^0-9]", "", str(info.get("phone") or ""))
+    if len(phone) >= 8:
+        links.append((f"https://wa.me/{phone}", "📱 واتساب الضيف"))
     chan = (info.get("channel") or "").lower()
     is_airbnb = ("airbnb" in chan) or (str(comm_type or "").lower() == "airbnb")
     if is_airbnb:
-        return ("https://www.airbnb.com/hosting/messages",
-                "افتح صندوق رسائل Airbnb")
-    rid = str(reservation_id or "").strip()
-    if rid and "{id}" in HOSTAWAY_RES_URL_TEMPLATE:
-        return (HOSTAWAY_RES_URL_TEMPLATE.format(id=rid), "افتح الحجز في Hostaway")
-    return (None, None)
+        m = re.search(r"thread-(\d+)", str(info.get("channel_res_id") or ""))
+        code = (info.get("confirmation") or "").strip()
+        if m:                                   # inquiry -> the real direct chat
+            links.append((f"https://www.airbnb.com/hosting/messages/{m.group(1)}",
+                          "💬 محادثة Airbnb"))
+        elif re.match(r"^[A-Za-z0-9]{6,12}$", code):   # booked -> reservation page
+            links.append((f"https://www.airbnb.com/hosting/stay/{code}",
+                          "💬 حجز الضيف في Airbnb"))
+        else:
+            links.append(("https://www.airbnb.com/hosting/messages",
+                          "💬 صندوق Airbnb"))
+    else:
+        rid = str(reservation_id or "").strip()
+        if rid and "{id}" in HOSTAWAY_RES_URL_TEMPLATE:
+            links.append((HOSTAWAY_RES_URL_TEMPLATE.format(id=rid), "💬 الحجز في Hostaway"))
+    return links
 
 async def post_assistant_card(channel, item, result, guide=None, confirmed=False):
     g = item["guest"]
@@ -7293,18 +7316,20 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
         embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {round(conf*100)}% · "
                               f"يُذكَّر الفريق كل ~{ESCALATION_REPING_MIN} دقيقة (بحد أقصى {ESCALATION_REPING_MAX_PINGS} تذكيرات، ويهدأ خارج أوقات العمل)")
-        # One-tap deep link to the guest's live thread so the team doesn't have to
-        # hunt for the DM inside Airbnb's inbox. Read-only Hostaway lookup, off-loop.
+        # One-tap "reach the guest" buttons (WhatsApp + Airbnb/Hostaway) so the team
+        # responds fast instead of hunting inside Airbnb's inbox. Read-only Hostaway
+        # lookup, off-loop.
         try:
-            convo_url, convo_label = await asyncio.to_thread(
-                guest_conversation_link, item.get("reservation_id"), item.get("comm_type"))
+            convo_links = await asyncio.to_thread(
+                guest_conversation_links, item.get("reservation_id"), item.get("comm_type"))
         except Exception as _le:
             print("escalation link build error:", _le)
-            convo_url, convo_label = (None, None)
-        convo_btn = ("💬 " + convo_label) if convo_label else None
-        if convo_url:
-            embed.add_field(name="💬 محادثة الضيف",
-                            value=f"[{convo_label} ←]({convo_url})", inline=False)
+            convo_links = []
+        if convo_links:
+            embed.add_field(
+                name="📞 تواصل مع الضيف",
+                value="\n".join(f"[{label} ←]({url})" for url, label in convo_links),
+                inline=False)
         # post to the dedicated escalations channel and @mention the operation team
         guild = channel.guild
         esc_channel = await ensure_channel(guild, ESCALATION_CHANNEL,
@@ -7315,7 +7340,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
         try:
             msg = await target.send(content=f"{mention} 🚨 تصعيد جديد يحتاج استلام",
                                     embed=embed,
-                                    view=ClaimView(convo_url=convo_url, convo_label=convo_btn),
+                                    view=ClaimView(links=convo_links),
                                     allowed_mentions=discord.AllowedMentions(roles=True))
             _escalations[msg.id] = {"channel_id": target.id, "guest": g, "unit": item["unit"],
                                     "conversation_id": item["conversation_id"],
@@ -7323,7 +7348,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                     "reason": result.get("reason", ""), "history": item["history"],
                                     "last_ping": time.time(), "attempts": 0, "claimed_by": None,
                                     "last_msg_id": item.get("message_id") or 0,
-                                    "convo_url": convo_url, "convo_label": convo_btn,
+                                    "convo_links": convo_links,
                                     "acks": list(_esc_sent_acks.get(item["conversation_id"], []))}
             # Open a linked maintenance ticket so the issue lives in the
             # dashboard's ticket log too — survives Discord scroll-back and
@@ -24029,112 +24054,6 @@ def _dash_auth(request):
 def _json(data, status=200):
     return web.json_response(data, status=status,
                              dumps=lambda o: json.dumps(o, ensure_ascii=False))
-
-async def _handle_diag_airbnb(request):
-    """READ-ONLY discovery: dump the raw Hostaway conversation + reservation +
-    latest-message fields for one Airbnb thread, so we can find the channel/thread
-    id Airbnb uses for a *direct* DM deep link. Token-gated, no writes. Optional
-    ?res=<reservationId> or ?cid=<conversationId> to target a specific guest."""
-    if not _dash_auth(request):
-        return web.Response(status=403, text="forbidden")
-    want_res = (request.query.get("res") or "").strip()
-    want_cid = (request.query.get("cid") or "").strip()
-    find = (request.query.get("find") or "").strip()   # search every field for this value
-
-    def _probe():
-        out = {"scanned": 0, "picked": None, "candidates": [],
-               "conversation": {}, "reservation": {}, "latest_message": {}}
-        # Definitive path: fetch a specific reservation directly (bypasses the
-        # recent-conversation window). Used to check whether a BOOKED reservation
-        # exposes the Airbnb thread id anywhere in its fields.
-        if want_res:
-            try:
-                r = (api_get(f"/reservations/{want_res}") or {}).get("result") or {}
-            except Exception as e:
-                r = {"_error": str(e)}
-            out["reservation"] = r
-            out["picked"] = {"reservation_id": want_res, "guest": r.get("guestName"),
-                             "status": r.get("status"),
-                             "channelReservationId": r.get("channelReservationId")}
-            if find:
-                out["matches"] = [{"src": "reservation", "key": k, "value": v}
-                                  for k, v in r.items()
-                                  if isinstance(v, (str, int)) and find in str(v)]
-                out["match_count"] = len(out["matches"])
-            return out
-        try:
-            data = api_get("/conversations",
-                           params={"limit": 100 if find else 30, "includeResources": 1})
-        except Exception as e:
-            out["error"] = f"conversations fetch: {e}"
-            return out
-        convos = data.get("result", []) or []
-        out["scanned"] = len(convos)
-        # Targeted hunt: which Hostaway field holds a known value (e.g. the Airbnb
-        # thread id pulled from the host inbox URL)? Scans conversation + embedded
-        # reservation fields across the recent list.
-        if find:
-            matches = []
-            for c in convos:
-                for k, v in (c or {}).items():
-                    if isinstance(v, (str, int)) and find in str(v):
-                        matches.append({"src": "conversation", "cid": c.get("id"),
-                                        "key": k, "value": v})
-                for k, v in ((c.get("reservation") or {})).items():
-                    if isinstance(v, (str, int)) and find in str(v):
-                        matches.append({"src": "reservation", "cid": c.get("id"),
-                                        "res": (c.get("reservation") or {}).get("id"),
-                                        "key": k, "value": v})
-            out["find"] = find
-            out["matches"] = matches
-            out["match_count"] = len(matches)
-            return out
-        chosen = None
-        for c in convos:
-            res = c.get("reservation") or {}
-            chan = (res.get("channelName") or c.get("channelName") or "").lower()
-            if want_cid and str(c.get("id")) == want_cid:
-                chosen = c; break
-            if want_res and str(c.get("reservationId") or res.get("id")) == want_res:
-                chosen = c; break
-            if not (want_res or want_cid) and "airbnb" in chan:
-                chosen = c; break
-        if not chosen and convos:
-            chosen = convos[0]
-        if not chosen:
-            out["error"] = "no conversations found"
-            return out
-        out["conversation"] = chosen
-        rid = chosen.get("reservationId") or (chosen.get("reservation") or {}).get("id")
-        out["picked"] = {"conversation_id": chosen.get("id"), "reservation_id": rid,
-                         "guest": chosen.get("recipientName") or chosen.get("guestName")}
-        if rid:
-            try:
-                out["reservation"] = (api_get(f"/reservations/{rid}") or {}).get("result") or {}
-            except Exception as e:
-                out["reservation"] = {"_error": str(e)}
-        try:
-            md = api_get(f"/conversations/{chosen.get('id')}/messages")
-            msgs = md.get("result", []) or []
-            if msgs:
-                out["latest_message"] = msgs[-1]
-        except Exception as e:
-            out["latest_message"] = {"_error": str(e)}
-        # surface every field that might carry an Airbnb thread/recipient/channel id
-        hints = ("thread", "recipient", "channelconversation", "channelthread",
-                 "airbnb", "external", "channelid", "channelreservation", "conversation")
-        def _scan(obj, src):
-            if not isinstance(obj, dict):
-                return
-            for k, v in obj.items():
-                if any(h in str(k).lower() for h in hints):
-                    out["candidates"].append({"src": src, "key": k, "value": v})
-        _scan(out["conversation"], "conversation")
-        _scan(out["reservation"], "reservation")
-        _scan(out["latest_message"], "message")
-        return out
-
-    return _json(await asyncio.to_thread(_probe))
 
 def _cache_get(key):
     hit = _dash_cache.get(key)
@@ -44478,7 +44397,6 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
-        app.router.add_get("/diag/airbnb", _handle_diag_airbnb)  # read-only Airbnb thread-id probe
         app.router.add_get("/api/nav", _api_nav)            # shared nav (ERP sidebar source)
         # ---- SEO surfaces for the public funnel ----
         app.router.add_get("/robots.txt", _handle_robots)
@@ -44913,10 +44831,9 @@ async def _resolve_escalation(mid, esc, reason="رد عليه أحد المضي�
         ch = bot.get_channel(esc.get("channel_id"))
         if ch:
             msg = await ch.fetch_message(mid)
-            done = ClaimView(convo_url=esc.get("convo_url"),
-                             convo_label=esc.get("convo_label"))
+            done = ClaimView(links=esc.get("convo_links"))
             for c in done.children:
-                if getattr(c, "url", None):   # keep the conversation link tappable
+                if getattr(c, "url", None):   # keep the reach-guest links tappable
                     continue
                 c.disabled = True
             emb = msg.embeds[0] if msg.embeds else discord.Embed()
