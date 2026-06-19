@@ -472,6 +472,36 @@ def real_judge(case, draft):
     return _parse_judge(out)
 
 
+def anthropic_diagnostic():
+    """Tiny READ-ONLY call to Anthropic to capture the EXACT failure (invalid key /
+    out of credits / rate limited / network), so the owner knows precisely what to fix.
+    Returns (ok: bool, detail: str). Never contacts a guest."""
+    b = _bot()
+    key = getattr(b, "ANTHROPIC_API_KEY", None)
+    if not key:
+        return False, "ANTHROPIC_API_KEY غير مضبوط على الخادم / not set on the server"
+    try:
+        import requests
+        model = getattr(b, "CLAUDE_MODEL", None) or "claude-haiku-4-5-20251001"
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": model, "max_tokens": 5,
+                  "messages": [{"role": "user", "content": "ping"}]},
+            timeout=20)
+        if r.status_code == 200:
+            return True, "ok"
+        try:
+            err = (r.json() or {}).get("error", {}) or {}
+            detail = f"HTTP {r.status_code} {err.get('type', '')}: {err.get('message', '')}".strip()
+        except Exception:
+            detail = f"HTTP {r.status_code}: {(r.text or '')[:160]}"
+        return False, detail
+    except Exception as e:
+        return False, f"connection error: {e}"
+
+
 # ===========================================================================
 # Scoring one case
 # ===========================================================================
@@ -842,16 +872,11 @@ def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
     # the whole golden set. Fails fast with a clear, owner-readable message instead of
     # silently returning 0/100 when the key is wrong or we're being rate-limited.
     if draft_fn is real_draft:
-        try:
-            ping = _bot().claude_text("Reply with the single word OK.", "ping", 5)
-        except Exception as e:
-            ping = None
-            print("eval preflight error:", e)
-        if not ping:
+        ok, detail = anthropic_diagnostic()
+        if not ok:
             raise RuntimeError(
-                "تعذّر الوصول لخدمة Claude — تأكد من ANTHROPIC_API_KEY وحدود الاستخدام "
-                "(rate limits) ثم أعد المحاولة. / Anthropic API not reachable (check "
-                "ANTHROPIC_API_KEY / rate limits).")
+                "تعذّر الوصول لخدمة Claude / Anthropic API error — " + detail
+                + " · تحقّق من ANTHROPIC_API_KEY والرصيد والحدود في لوحة Anthropic ثم أعد المحاولة.")
 
     ts = _ts()
 
@@ -1220,10 +1245,16 @@ def main(argv=None):
                     help="install the curated seed golden set onto the volume")
     ap.add_argument("--force", action="store_true",
                     help="with --seed: overwrite an existing golden set")
+    ap.add_argument("--diagnose", action="store_true",
+                    help="check Anthropic API reachability and print the exact error")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
+    if args.diagnose:
+        ok, detail = anthropic_diagnostic()
+        print("OK — Anthropic API reachable" if ok else f"FAIL — {detail}")
+        return 0 if ok else 1
     if args.seed:
         return 0 if seed_golden(force=args.force) else 1
     if args.set_baseline:
