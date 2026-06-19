@@ -47742,6 +47742,89 @@ async def cmd_build_today_cleanings(ctx):
     created = sum(1 for c in changed if c.get("action") == "created")
     await ctx.send(f"✅ فتحت {created} قناة تنظيف لليوم. أي قناة تقفلها من الحين تنقفل نهائياً وما ترجع مع أي نشر.")
 
+def _oujact_turnover_channels(category):
+    """All open OujaCT turnover channels in the Turnovers category (topic has oujact:1)."""
+    return [ch for ch in list(category.text_channels) if "oujact:1" in (ch.topic or "")]
+
+def _oujact_channel_is_cleaned(ch):
+    """True if the system has CONFIRMED this turnover's cleaning: a done-marker for its
+    unit+day, or the cleaner submitted the photo report (cleaning-review flag on the topic)."""
+    topic = ch.topic or ""
+    key = parse_topic_oujact_key(topic)
+    return bool((key and _oujact_is_done(key)) or "cleaning-review:1" in topic)
+
+@bot.command(name="احذف-المؤكدة",
+             aliases=["delete-cleaned", "احذف-المنجزة", "delete-confirmed-clean", "احذف-المكتملة"])
+async def cmd_delete_confirmed_clean(ctx):
+    """!ouja احذف-المؤكدة — delete ONLY the turnover channels the system has confirmed cleaned
+    (cleaner submitted the cleaning report). NEVER touches a pending/not-yet-cleaned channel.
+    Safe to run anytime. Admins only."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    try:
+        category = await get_category(ctx.guild)
+    except Exception as e:
+        await ctx.reply(f"⚠️ ما قدرت أوصل لتصنيف Turnovers: {e}")
+        return
+    chans = _oujact_turnover_channels(category)
+    targets = [ch for ch in chans if _oujact_channel_is_cleaned(ch)]
+    pending = len(chans) - len(targets)
+    if not targets:
+        await ctx.reply(f"ما فيه قنوات تنظيف *مؤكدة* للحذف. (المفتوحة حالياً: {len(chans)}، كلها لسه تحت التنظيف)")
+        return
+    await ctx.reply(f"⏳ أحذف {len(targets)} قناة تنظيف **مؤكدة الإنجاز** فقط، وأخلي {pending} لسه تحت التنظيف…")
+    done = 0
+    for ch in targets:
+        key = parse_topic_oujact_key(ch.topic or "")
+        if key:
+            _oujact_mark_opened(key)
+        try:
+            await ch.delete(reason=f"delete confirmed-clean by {ctx.author}")
+            done += 1
+        except Exception as e:
+            print("delete-confirmed-clean error:", e)
+    log_event("ops", f"حذف قنوات تنظيف مؤكدة · {done} · أبقى {pending} تحت التنظيف · بواسطة {ctx.author}")
+    try:
+        await ctx.send(f"✅ حذفت {done} قناة مؤكدة الإنجاز، وأبقيت {pending} قناة لسه تحت التنظيف. المحذوفة ما ترجع تنفتح.")
+    except Exception:
+        pass
+
+@bot.command(name="احذف-كل-التنظيفات",
+             aliases=["delete-all-cleanings", "احذف-الكل-تنظيفات", "nuke-cleanings", "احذف-كل-التنظيف"])
+async def cmd_delete_all_cleanings(ctx):
+    """!ouja احذف-كل-التنظيفات — delete ALL open turnover cleaning channels regardless of state
+    (including ones still being cleaned). Use only when you're sure everything is handled.
+    Each is locked so it won't auto-reopen. Admins only."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    try:
+        category = await get_category(ctx.guild)
+    except Exception as e:
+        await ctx.reply(f"⚠️ ما قدرت أوصل لتصنيف Turnovers: {e}")
+        return
+    targets = _oujact_turnover_channels(category)
+    if not targets:
+        await ctx.reply("ما فيه قنوات تنظيف مفتوحة حالياً 👍")
+        return
+    await ctx.reply(f"⏳ أحذف **كل** قنوات التنظيف ({len(targets)}) بغض النظر عن حالتها…")
+    done = 0
+    for ch in targets:
+        key = parse_topic_oujact_key(ch.topic or "")
+        if key:
+            _oujact_mark_opened(key)
+        try:
+            await ch.delete(reason=f"delete ALL cleanings by {ctx.author}")
+            done += 1
+        except Exception as e:
+            print("delete-all-cleanings error:", e)
+    log_event("ops", f"حذف كل قنوات التنظيف · {done} · بواسطة {ctx.author}")
+    try:
+        await ctx.send(f"✅ حذفت {done} قناة تنظيف. ولا وحدة ترجع تنفتح تلقائياً.")
+    except Exception:
+        pass
+
 @bot.event
 async def on_guild_channel_delete(channel):
     """When a turnover cleaning channel is closed/deleted by ANYONE (owner, team, or a bot
