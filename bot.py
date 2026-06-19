@@ -47723,6 +47723,57 @@ async def cmd_delete_this_channel(ctx):
         except Exception:
             pass
 
+@bot.command(name="اغلق-التنظيفات",
+             aliases=["close-cleanings", "اغلق-تنظيفات", "أغلق-التنظيفات", "close-turnovers"])
+async def cmd_close_cleanings(ctx):
+    """!ouja اغلق-التنظيفات — close (delete) ALL open OujaCT turnover cleaning channels at once
+    and lock each so it never auto-reopens. Admins only. Use when today's cleanings are done."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط (يحتاج صلاحية إدارة القنوات).")
+        return
+    try:
+        category = await get_category(ctx.guild)
+    except Exception as e:
+        await ctx.reply(f"⚠️ ما قدرت أوصل لتصنيف Turnovers: {e}")
+        return
+    targets = [ch for ch in list(category.text_channels) if "oujact:1" in (ch.topic or "")]
+    if not targets:
+        await ctx.reply("ما فيه قنوات تنظيف مفتوحة حالياً 👍")
+        return
+    await ctx.reply(f"⏳ أغلق {len(targets)} قناة تنظيف وأقفلها عن إعادة الفتح…")
+    closed = 0
+    for ch in targets:
+        key = parse_topic_oujact_key(ch.topic or "")
+        if key:
+            _oujact_mark_opened(key)        # lock first, so it can never auto-reopen
+        try:
+            await ch.delete(reason=f"bulk close cleanings by {ctx.author}")
+            closed += 1
+        except Exception as e:
+            print("close-cleanings delete error:", e)
+    log_event("ops", f"إغلاق جماعي لقنوات التنظيف · {closed} قناة · بواسطة {ctx.author}")
+    try:
+        await ctx.send(f"✅ تم إغلاق {closed} قناة تنظيف. ما راح ترجع تنفتح تلقائياً بعد اليوم.")
+    except Exception:
+        pass
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    """When a turnover cleaning channel is closed/deleted by ANYONE (owner, team, or a bot
+    sweep), permanently remember its unit+day so the automatic sync never re-opens it on the
+    next deploy or poll. This makes 'close a channel' stick forever — the durable answer to
+    cleaned channels popping back. (Explicit dashboard rebuild still overrides via force.)"""
+    try:
+        topic = getattr(channel, "topic", "") or ""
+        if "oujact:1" not in topic:
+            return
+        key = parse_topic_oujact_key(topic)
+        if key:
+            _oujact_mark_opened(key)
+            print(f"OujaCT: channel closed → locked {key} (won't auto-reopen)")
+    except Exception as e:
+        print("on_guild_channel_delete error:", e)
+
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
