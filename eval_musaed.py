@@ -606,6 +606,32 @@ def set_baseline(dirpath=None):
     return baseline_path(dirpath)
 
 
+def seed_golden(force=False, dirpath=None):
+    """Install the hand-curated repo seed (golden_set.seed.jsonl) onto the volume as
+    golden_set.jsonl so the scoreboard works on day one. Won't overwrite unless force."""
+    dirpath = dirpath or data_dir()
+    gp = golden_path(dirpath)
+    if os.path.isfile(gp) and not force:
+        print(f"eval: a golden set already exists at {gp}\n"
+              f"      (use --force to overwrite). Leaving it untouched.")
+        return gp
+    seed = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_set.seed.jsonl")
+    if not os.path.isfile(seed):
+        print(f"eval: seed file not found: {seed}")
+        return None
+    cases = _read_jsonl(seed)
+    if not cases:
+        print("eval: seed file has no valid cases.")
+        return None
+    _ensure_dir(dirpath)
+    with open(gp, "w", encoding="utf-8") as f:
+        for c in cases:
+            f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    print(f"eval: installed {len(cases)} seed cases → {gp}")
+    print("Next:  python eval_musaed.py   (or tap «🧪 Run quality check» in Discord)")
+    return gp
+
+
 def _kpi_color(value, good, ok):
     if value >= good:
         return "#1f7a4d"  # green
@@ -1139,10 +1165,16 @@ def main(argv=None):
                     help="freeze the latest run as the baseline")
     ap.add_argument("--no-baseline", action="store_true",
                     help="skip the baseline comparison for this run")
+    ap.add_argument("--seed", action="store_true",
+                    help="install the curated seed golden set onto the volume")
+    ap.add_argument("--force", action="store_true",
+                    help="with --seed: overwrite an existing golden set")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
+    if args.seed:
+        return 0 if seed_golden(force=args.force) else 1
     if args.set_baseline:
         return 0 if set_baseline() else 1
     if args.build_golden:
