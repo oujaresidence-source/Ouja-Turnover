@@ -48006,9 +48006,12 @@ async def _eval_run_and_post(channel, triggered_by, interaction=None):
         return
 
     hf = summary["hard_fails"]
-    safe = (hf == 0) and (not diff.get("has_baseline") or (diff.get("mean_delta") or 0) >= 0)
+    errs = summary.get("errors", 0)
+    inconclusive = errs >= max(1, summary["n"])     # every draft failed → run didn't measure anything
+    safe = (not inconclusive) and (hf == 0) and \
+        (not diff.get("has_baseline") or (diff.get("mean_delta") or 0) >= 0)
     res = discord.Embed(title="🧪 نتيجة جودة المساعد / Musaed quality result",
-                        color=(0x1F7A4D if safe else 0xB3261E))
+                        color=(0x9A6B00 if inconclusive else (0x1F7A4D if safe else 0xB3261E)))
     res.add_field(name="متوسط الجودة / Mean", value=f"**{summary['mean_overall']:.0f}**/100", inline=True)
     res.add_field(name="نسبة النجاح / Pass", value=f"{summary['pass_rate']*100:.0f}%", inline=True)
     res.add_field(name="دقة التوجيه / Routing", value=f"{summary['routing_accuracy']*100:.0f}%", inline=True)
@@ -48016,6 +48019,12 @@ async def _eval_run_and_post(channel, triggered_by, interaction=None):
                   value=("✅ 0 — آمن" if hf == 0 else f"🛑 {hf} — يمنع النشر"), inline=True)
     res.add_field(name="تحذيرات / Warnings", value=f"{summary['warnings']}", inline=True)
     res.add_field(name="حالات / Cases", value=f"{summary['n']}", inline=True)
+    if errs:
+        res.add_field(
+            name="⚠️ أخطاء مسودة / Draft errors",
+            value=(f"{errs} حالة تعذّر إنشاء مسودة لها — غالباً حدود استخدام Claude (rate limit) "
+                   f"أو مفتاح API. النتيجة غير مكتملة. / couldn't draft (rate limit / API key)."),
+            inline=False)
     if diff.get("has_baseline"):
         md, pd = (diff.get("mean_delta") or 0), (diff.get("pass_delta") or 0)
         line = f"Δ متوسط: **{md:+.1f}** · Δ نجاح: **{pd*100:+.0f}%**"
@@ -48030,8 +48039,12 @@ async def _eval_run_and_post(channel, triggered_by, interaction=None):
         res.add_field(name="مقارنة بالأساس / vs baseline", value=line, inline=False)
     else:
         res.add_field(name="الأساس / Baseline", value=(diff.get("note") or "—"), inline=False)
-    rule = ("✅ آمن للنشر · 0 أخطاء حرجة والمتوسط ما نزل"
-            if safe else "🛑 لا تنشر · فيه خطأ حرج أو المتوسط نزل")
+    if inconclusive:
+        rule = "⚠️ فحص غير مكتمل · تعذّر إنشاء المسودات (تحقّق من المفتاح/حدود الاستخدام وأعد المحاولة)"
+    elif safe:
+        rule = "✅ آمن للنشر · 0 أخطاء حرجة والمتوسط ما نزل"
+    else:
+        rule = "🛑 لا تنشر · فيه خطأ حرج أو المتوسط نزل"
     res.set_footer(text=f"{rule} · شغّله: {triggered_by}")
     if msg is not None:
         await _edit(msg, embed=res)

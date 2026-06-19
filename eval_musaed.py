@@ -41,6 +41,7 @@ import re
 import sys
 import json
 import html
+import time
 import argparse
 import datetime
 import traceback
@@ -428,22 +429,37 @@ def _parse_judge(text):
 # so --selftest can run with mocks and ZERO network/keys.
 # ---------------------------------------------------------------------------
 def real_draft(case):
-    """Draft via Musaed's real brain. Returns the draft dict or None."""
+    """Draft via Musaed's real brain. Returns the draft dict or None.
+
+    claude_draft has no retry of its own, so a burst of eval calls can hit Anthropic
+    rate limits and return None. We retry with backoff here so transient 429/529s don't
+    sink the whole run (the live assistant rarely hits this — it calls one at a time)."""
     b = _bot()
     guest_name = case.get("guest") or "Guest"
     unit = case.get("unit") or ""
     hist = render_history(case.get("history"), last_guest_line(case))
     dates = case.get("dates") or [None, None]
     dates_t = (dates[0], dates[1]) if (dates and len(dates) >= 2) else None
-    return b.claude_draft(
-        guest_name, unit, hist,
-        case.get("guide_url"),                # guide_url (optional; read-only)
-        bool(case.get("confirmed")),          # confirmed
-        dates_t,                              # dates
-        case.get("listing_id"),
-        case.get("reservation_id"),
-        None,                                 # profile_key — never write profiles from eval
-    )
+    for attempt in range(3):
+        try:
+            d = b.claude_draft(
+                guest_name, unit, hist,
+                case.get("guide_url"),                # guide_url (optional; read-only)
+                bool(case.get("confirmed")),          # confirmed
+                dates_t,                              # dates
+                case.get("listing_id"),
+                case.get("reservation_id"),
+                None,                                 # profile_key — never write profiles from eval
+            )
+        except Exception as e:                        # claude_draft shouldn't throw, but be safe
+            d = None
+            if attempt == 0:
+                print(f"eval draft exception ({case.get('id')}): {e}")
+        if d is not None:
+            return d
+        if attempt < 2:
+            time.sleep(1.2 * (attempt + 1))           # backoff for transient rate limits
+    return None
 
 
 def real_judge(case, draft):
@@ -802,9 +818,9 @@ def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
     judge_fn = judge_fn or real_judge
     if max_workers is None:
         try:
-            max_workers = int(os.environ.get("EVAL_MAX_WORKERS", "4"))
+            max_workers = int(os.environ.get("EVAL_MAX_WORKERS", "3"))   # gentle on rate limits
         except Exception:
-            max_workers = 4
+            max_workers = 3
     max_workers = max(1, min(8, max_workers))  # G9: keep the pool small (cap)
 
     def cb(step, status):
@@ -821,6 +837,21 @@ def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
         cases = _read_jsonl(gp)
     if not cases:
         raise ValueError("golden set is empty")
+
+    # Pre-flight: on the REAL path, make sure Claude is reachable before grinding through
+    # the whole golden set. Fails fast with a clear, owner-readable message instead of
+    # silently returning 0/100 when the key is wrong or we're being rate-limited.
+    if draft_fn is real_draft:
+        try:
+            ping = _bot().claude_text("Reply with the single word OK.", "ping", 5)
+        except Exception as e:
+            ping = None
+            print("eval preflight error:", e)
+        if not ping:
+            raise RuntimeError(
+                "تعذّر الوصول لخدمة Claude — تأكد من ANTHROPIC_API_KEY وحدود الاستخدام "
+                "(rate limits) ثم أعد المحاولة. / Anthropic API not reachable (check "
+                "ANTHROPIC_API_KEY / rate limits).")
 
     ts = _ts()
 
