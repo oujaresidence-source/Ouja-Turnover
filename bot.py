@@ -48257,7 +48257,13 @@ async def on_ready():
         print(f"DISCOUNT_TEST — running a {pct:.0f}% tier now "
               f"({'DRY-RUN' if DISCOUNT_DRY_RUN else 'LIVE'})")
         await _run_tier(pct, "Test (startup)")
-    # ---- Musaed Quality Scoreboard: ensure the channel/panel + optional weekly loop (additive) ----
+    # ---- Musaed Quality Scoreboard: auto-seed golden set + ensure channel/panel + weekly loop (additive) ----
+    try:
+        import eval_musaed as _evseed
+        if not _evseed.golden_exists():
+            _evseed.seed_golden()          # install the curated seed onto the volume on first boot
+    except Exception as e:
+        print("eval seed error:", e)
     try:
         _eg = bot.get_guild(GUILD_ID)
         if _eg is not None:
