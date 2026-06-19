@@ -2933,6 +2933,35 @@ def _oujact_mark_done(key):
 def _oujact_is_done(key):
     return str(key) in _oujact_done
 
+# We ALSO remember every unit+day we've opened a channel for — once. The automatic sync
+# (poll loop + the startup tick discord.py fires the moment .start() runs) must never
+# RE-open a channel that was already opened and then closed/deleted (the cause of cleaned
+# channels "popping back" on every Railway deploy). A channel closed without a photo report
+# is never marked done, so the done-marker alone wasn't enough; this makes creation idempotent
+# per turnover. An explicit dashboard rebuild (day='today'/'tomorrow') bypasses this guard.
+def _oujact_mark_opened(key):
+    if not key or str(key) in _oujact_opened:
+        return                                  # only write when it's genuinely new (no churn)
+    _oujact_opened[str(key)] = datetime.now(TZ).date().isoformat()
+    try:
+        _save_json("oujact_opened.json", _oujact_opened)
+    except Exception:
+        pass
+
+def _oujact_was_opened(key):
+    return str(key) in _oujact_opened
+
+def _oujact_prune_opened(days=3):
+    cutoff = (datetime.now(TZ).date() - timedelta(days=days)).isoformat()
+    stale = [k for k, d in list(_oujact_opened.items()) if str(d) < cutoff]
+    if stale:
+        for k in stale:
+            _oujact_opened.pop(k, None)
+        try:
+            _save_json("oujact_opened.json", _oujact_opened)
+        except Exception:
+            pass
+
 def _oujact_prune_done(days=3):
     """Purge done-markers older than `days`. Keyed `lid:date`, so without expiry the
     SAME unit+date next year would collide and its channel would silently never open.
@@ -3111,6 +3140,7 @@ async def sync_oujact_turnovers(day=None):
     guild = bot.get_guild(GUILD_ID)
     if guild is None or not oujact_listing_ids():
         return []
+    force = day is not None              # an explicit dashboard rebuild may re-open; the auto path never does
     pruned = await _oujact_cleanup_channels(guild)          # clear the backlog/dupes first
     category = await get_category(guild)
     now = datetime.now(TZ)
@@ -3143,6 +3173,8 @@ async def sync_oujact_turnovers(day=None):
         team_name = _ct_team_name_for_lid(it["lid"])
         topic = _oujact_topic(it, team_name)
         ch = by_key.get(key) or by_res.get(str(it["res_id"]))
+        if ch is None and not force and _oujact_was_opened(key):
+            continue                                       # opened once already & since closed → don't auto-reopen (restart/poll)
         try:
             if ch is None:
                 want = _oujact_channel(it["listing"], it["checkin_today"], team_name)
@@ -3164,6 +3196,8 @@ async def sync_oujact_turnovers(day=None):
                                     "action": "checkin_flagged", "checkin": True})
         except Exception as e:
             print("OujaCT channel error:", e)
+        if ch is not None:
+            _oujact_mark_opened(key)        # remember it exists so we never auto-reopen it once closed
     if pruned:
         changed.append({"action": "pruned", "count": pruned})
     return changed
@@ -3181,6 +3215,7 @@ async def _oujact_cleanup_channels(guild=None):
         return 0
     today = datetime.now(TZ).date()
     _oujact_prune_done()
+    _oujact_prune_opened()
     seen, deleted = set(), 0
     for ch in list(category.text_channels):
         topic = ch.topic or ""
@@ -3335,6 +3370,7 @@ _oujact_route_audit = _load_json("oujact_route_audit.json", []) or []
 _oujact_dispatch_log = _load_json("oujact_dispatch_log.json", {}) or {}  # "lid|date" -> {flags}
 _clean_tasks = _load_json("cleaning_tasks.json", {}) or {}         # task_id -> manual cleaning task
 _oujact_done = _load_json("oujact_done.json", {}) or {}            # "lid:date" -> date marked done (don't reopen the channel)
+_oujact_opened = _load_json("oujact_opened.json", {}) or {}        # "lid:date" -> date a channel was first opened (don't auto-reopen after it's closed)
 _cleaning_photo_templates = _load_json("cleaning_photo_templates.json", {}) or {}
 _cleaning_reports = _load_json("cleaning_reports.json", {}) or {}
 _cleaning_report_photos = _load_json("cleaning_report_photos.json", {}) or {}
@@ -45148,6 +45184,7 @@ async def reviews_refresh_loop():
         print("reviews_refresh_loop error:", e)
     try:
         _oujact_prune_done()    # daily safety net even when Discord sweeps don't run
+        _oujact_prune_opened()
     except Exception as e:
         print("oujact done-prune error:", e)
     # C-2: daily DP-drift count → Discord (evidence for the DP cutover decision).
