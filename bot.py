@@ -24055,6 +24055,100 @@ def _json(data, status=200):
     return web.json_response(data, status=status,
                              dumps=lambda o: json.dumps(o, ensure_ascii=False))
 
+async def _handle_diag_musaed(request):
+    """READ-ONLY coaching export: recent guest<->assistant transcripts as plain text,
+    so Musaed's real conversation skills can be studied. Token-gated, no writes.
+      ?n=<threads>   how many threads (default 30, max 120)
+      ?page=<n>      older batches (100 conversations per page)
+      ?flagged=1     only threads that escalated, used a laugh token, or had a
+                     negative-sounding guest message — i.e. the instructive ones."""
+    if not _dash_auth(request):
+        return web.Response(status=403, text="forbidden")
+    try:
+        n = max(1, min(120, int(request.query.get("n", "30"))))
+    except Exception:
+        n = 30
+    try:
+        page = max(0, int(request.query.get("page", "0")))
+    except Exception:
+        page = 0
+    flagged_only = request.query.get("flagged") in ("1", "true", "yes")
+
+    LAUGH = ("ههه", "هههه", "هه ", "😂", "🤣", "😅", "😆", "lol", "haha", "lmao", "ﻫﻫ")
+    NEG = ("زعلان", "سيء", "سيئة", "زفت", "مزعج", "تأخير", "متأخر", "ما يصير", "رديء",
+           "مشكلة", "شكوى", "تعبنا", "مستاء", "ما عجبني", "زعل", "قهر", "معصب", "حرام عليكم",
+           "bad", "terrible", "worst", "awful", "angry", "upset", "disappointed",
+           "ridiculous", "unacceptable", "scam", "نصب", "احتيال")
+    ESC = ("صعّدنا", "صعدنا", "تم تصعيد", "القسم المختص", "الفريق المختص", "رفعت",
+           "specialized team", "escalated", "i've flagged", "flagged this")
+
+    def _build():
+        listings = get_listings_map()
+        threads, scanned = [], 0
+        try:
+            data = api_get("/conversations", params={"limit": 100, "offset": page * 100,
+                                                     "includeResources": 1})
+        except Exception as e:
+            return {"error": f"conversations: {e}"}
+        for c in (data.get("result", []) or []):
+            if len(threads) >= n:
+                break
+            cid = c.get("id")
+            if not cid:
+                continue
+            try:
+                msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result", []) or []
+            except Exception:
+                continue
+            if not msgs:
+                continue
+            scanned += 1
+            msgs = sorted(msgs, key=_msg_sort_key)
+            lines, has_guest, laugh, neg, esc = [], False, False, False, False
+            for m in msgs:
+                body = (m.get("body") or "").strip()
+                if not body:
+                    continue
+                low = body.lower()
+                if _msg_is_inbound(m):
+                    has_guest = True
+                    who = "ضيف"
+                    if any(t in low for t in NEG):
+                        neg = True
+                else:
+                    who = "عوجا"
+                    if any(t in low for t in LAUGH):
+                        laugh = True
+                    if any(t.lower() in low for t in ESC):
+                        esc = True
+                lines.append(f"{who}: {body[:300]}")
+            if not has_guest:
+                continue
+            flags = []
+            if esc:   flags.append("تصعيد")
+            if laugh: flags.append("ضحك")
+            if neg:   flags.append("سلبي")
+            if flagged_only and not flags:
+                continue
+            lm = c.get("listingMapId")
+            threads.append({
+                "unit": listings.get(lm) or c.get("listingName") or f"unit-{lm}",
+                "guest": c.get("recipientName") or c.get("guestName") or "Guest",
+                "flags": flags, "lines": lines})
+        return {"scanned": scanned, "returned": len(threads), "page": page, "threads": threads}
+
+    res = await asyncio.to_thread(_build)
+    if "error" in res:
+        return web.Response(status=502, text=res["error"])
+    out = [f"# Musaed audit · page {res['page']} · returned {res['returned']} · scanned {res['scanned']}",
+           "# ضيف = الضيف · عوجا = رد البوت/الفريق · flags: تصعيد/ضحك/سلبي\n"]
+    for i, t in enumerate(res["threads"], 1):
+        tag = (" · " + "، ".join(t["flags"])) if t["flags"] else ""
+        out.append(f"━━━ {i} · {t['unit']} · {t['guest']}{tag} ━━━")
+        out.extend(t["lines"])
+        out.append("")
+    return web.Response(text="\n".join(out), content_type="text/plain", charset="utf-8")
+
 def _cache_get(key):
     hit = _dash_cache.get(key)
     return hit[0] if hit else None
@@ -44397,6 +44491,7 @@ async def start_web_server():
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
+        app.router.add_get("/diag/musaed-audit", _handle_diag_musaed)  # read-only coaching export
         app.router.add_get("/api/nav", _api_nav)            # shared nav (ERP sidebar source)
         # ---- SEO surfaces for the public funnel ----
         app.router.add_get("/robots.txt", _handle_robots)
