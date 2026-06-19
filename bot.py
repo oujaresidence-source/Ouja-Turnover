@@ -24039,17 +24039,38 @@ async def _handle_diag_airbnb(request):
         return web.Response(status=403, text="forbidden")
     want_res = (request.query.get("res") or "").strip()
     want_cid = (request.query.get("cid") or "").strip()
+    find = (request.query.get("find") or "").strip()   # search every field for this value
 
     def _probe():
         out = {"scanned": 0, "picked": None, "candidates": [],
                "conversation": {}, "reservation": {}, "latest_message": {}}
         try:
-            data = api_get("/conversations", params={"limit": 30, "includeResources": 1})
+            data = api_get("/conversations",
+                           params={"limit": 100 if find else 30, "includeResources": 1})
         except Exception as e:
             out["error"] = f"conversations fetch: {e}"
             return out
         convos = data.get("result", []) or []
         out["scanned"] = len(convos)
+        # Targeted hunt: which Hostaway field holds a known value (e.g. the Airbnb
+        # thread id pulled from the host inbox URL)? Scans conversation + embedded
+        # reservation fields across the recent list.
+        if find:
+            matches = []
+            for c in convos:
+                for k, v in (c or {}).items():
+                    if isinstance(v, (str, int)) and find in str(v):
+                        matches.append({"src": "conversation", "cid": c.get("id"),
+                                        "key": k, "value": v})
+                for k, v in ((c.get("reservation") or {})).items():
+                    if isinstance(v, (str, int)) and find in str(v):
+                        matches.append({"src": "reservation", "cid": c.get("id"),
+                                        "res": (c.get("reservation") or {}).get("id"),
+                                        "key": k, "value": v})
+            out["find"] = find
+            out["matches"] = matches
+            out["match_count"] = len(matches)
+            return out
         chosen = None
         for c in convos:
             res = c.get("reservation") or {}
