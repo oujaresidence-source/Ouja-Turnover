@@ -411,6 +411,18 @@ def _state_persistent():
 
 HANDLED_FILE = _state_path("handled.json")
 
+# ---- Musaed Quality Scoreboard (eval) — ADDITIVE. Scores Musaed's drafts against a
+# curated golden set and blocks unsafe drafts. All logic lives in eval_musaed.py and is
+# imported LAZILY (never at module top level) so it can never break startup or the bot.
+# Data persists on the volume (reuses STATE_DIR) so the golden set/baseline survive deploys.
+EVAL_CATEGORY     = os.environ.get("EVAL_CATEGORY", "🛠️ Operations")
+EVAL_CHANNEL      = os.environ.get("EVAL_CHANNEL", "musaed-quality")
+EVAL_DATA_DIR     = os.environ.get("EVAL_DATA_DIR", STATE_DIR)
+EVAL_JUDGE_MODEL  = os.environ.get("EVAL_JUDGE_MODEL", "claude-sonnet-4-6")
+EVAL_WEEKLY       = os.environ.get("EVAL_WEEKLY", "0") == "1"
+EVAL_WEEKLY_HOUR  = int(os.environ.get("EVAL_WEEKLY_HOUR", "9"))   # Monday, Riyadh time
+os.environ.setdefault("EVAL_DATA_DIR", EVAL_DATA_DIR)             # eval_musaed reads this
+
 # ---- Atomic, persisted ID counters (expense refs, quote numbers). The old
 # max-scan-over-all-records approach raced under concurrent ingest: two threads
 # could scan the same max and issue the SAME ref. ----
@@ -47842,6 +47854,222 @@ async def on_guild_channel_delete(channel):
     except Exception as e:
         print("on_guild_channel_delete error:", e)
 
+# ============================================================================
+# Musaed Quality Scoreboard — ADDITIVE Discord surface for eval_musaed.py.
+# Everything here is new and self-contained. eval_musaed is imported LAZILY inside
+# try/except so any error in it can never break on_ready, the dashboard, or the bot.
+# This NEVER messages a guest — it only drafts + scores via the eval engine.
+# ============================================================================
+def _eval_norm_cat(name):
+    """Normalize a category name (lowercase, keep only letters/digits) so the configured
+    EVAL_CATEGORY ('🛠️ Operations') reuses the EXISTING 'Operations' category instead of
+    creating a near-duplicate."""
+    return re.sub(r"[^0-9a-z؀-ۿ]+", "", (name or "").lower())
+
+async def _eval_get_category(guild):
+    want = _eval_norm_cat(EVAL_CATEGORY)
+    for cat in guild.categories:
+        if _eval_norm_cat(cat.name) == want:
+            return cat                          # reuse existing (never rename it)
+    try:
+        return await guild.create_category(EVAL_CATEGORY)
+    except Exception as e:
+        print("eval category create error:", e)
+        return None
+
+async def _eval_ensure_channel(guild):
+    """Get-or-create #musaed-quality under Operations and post the panel once (idempotent)."""
+    cat = await _eval_get_category(guild)
+    ch = await ensure_channel(guild, EVAL_CHANNEL, cat)
+    if ch is None:
+        return None
+    try:
+        already = False
+        async for m in ch.history(limit=30):
+            if (m.author == guild.me and m.embeds
+                    and (m.embeds[0].footer.text or "").startswith("eval-panel")):
+                already = True
+                break
+        if not already:
+            e = discord.Embed(
+                title="🧪 لوحة جودة المساعد / Musaed Quality Scoreboard",
+                description=(
+                    "اضغط الزر تحت عشان تشغّل فحص جودة المساعد (فيصل). بيكتب مسودات على حالات "
+                    "حقيقية، يقيّمها مقابل أفضل رد، ويوريك إذا التغيير حسّن أو خرّب. أي مسودة "
+                    "خطيرة (كود باب، لهجة غير سعودية، تصعيد فايت) تُرصد كـ«خطأ حرج» ويمنع نشرها.\n\n"
+                    "Tap the button to score Musaed against the golden set. A full run takes "
+                    "~1–2 minutes. This is read-only — it never messages a guest."),
+                color=GOLD)
+            e.set_footer(text="eval-panel · musaed-quality")
+            await ch.send(embed=e, view=MusaedEvalView())
+    except Exception as e:
+        print("eval panel post error:", e)
+    return ch
+
+async def _eval_run_and_post(channel, triggered_by):
+    """Run the quality check and post a LIVE checklist + result card to `channel`.
+    Shared by the button and the weekly loop. The heavy work runs in a worker thread
+    so the event loop (and every other bot loop) stays responsive. Never messages a guest."""
+    try:
+        import eval_musaed                       # lazy import (guardrail G4)
+    except Exception as e:
+        try:
+            await channel.send(f"⚠️ تعذّر تحميل أداة الجودة (eval_musaed): {e}")
+        except Exception:
+            pass
+        print("eval import failed:", e)
+        return
+    if not eval_musaed.golden_exists():
+        await channel.send(
+            "🧪 **لوحة الجودة** — ما فيه golden set بعد.\n"
+            "ابنِ واحد من الطرفية: `python eval_musaed.py --build-golden --limit 200` "
+            "ثم نظّفه واحفظه باسم `golden_set.jsonl` على نفس مجلّد البيانات.")
+        return
+
+    STEPS = [("drafting", "✍️ كتابة المسودات · Drafting replies"),
+             ("scoring", "🧮 التقييم مقابل المعيار · Scoring vs golden"),
+             ("aggregating", "📊 التجميع · Aggregating"),
+             ("baseline", "📈 المقارنة بالأساس · Comparing to baseline")]
+    state = {k: "pending" for k, _ in STEPS}
+    _EM = {"pending": "⬜", "start": "⏳", "done": "✅", "skip": "➖"}
+
+    def checklist_embed(note=""):
+        e = discord.Embed(
+            title="🧪 فحص جودة المساعد / Musaed quality check",
+            description=(note or "يستغرق دقيقة–دقيقتين عادةً · usually 1–2 min"),
+            color=GOLD)
+        e.add_field(name="الخطوات / Steps",
+                    value="\n".join(f"{_EM.get(state[k],'⬜')} {label}" for k, label in STEPS),
+                    inline=False)
+        return e
+
+    msg = await channel.send(embed=checklist_embed())
+
+    def cb(step, status):                        # called from the worker thread (simple dict write)
+        if step in state:
+            state[step] = status
+
+    task = asyncio.create_task(asyncio.to_thread(eval_musaed.run_quality_check, progress_cb=cb))
+    last = None
+    while not task.done():
+        snap = tuple(state.values())
+        if snap != last:
+            last = snap
+            try:
+                await msg.edit(embed=checklist_embed())
+            except Exception:
+                pass
+        await asyncio.sleep(1.5)
+    try:
+        await msg.edit(embed=checklist_embed())
+    except Exception:
+        pass
+
+    try:
+        summary, results, diff, html_path = await task
+    except Exception as e:
+        try:
+            await msg.edit(embed=discord.Embed(
+                title="🧪 فحص الجودة — خطأ", description=f"تعذّر إكمال الفحص: {e}", color=0xB3261E))
+        except Exception:
+            pass
+        print("eval run error:", e)
+        log_event("eval", f"eval run error: {e}")
+        return
+
+    hf = summary["hard_fails"]
+    safe = (hf == 0) and (not diff.get("has_baseline") or (diff.get("mean_delta") or 0) >= 0)
+    res = discord.Embed(title="🧪 نتيجة جودة المساعد / Musaed quality result",
+                        color=(0x1F7A4D if safe else 0xB3261E))
+    res.add_field(name="متوسط الجودة / Mean", value=f"**{summary['mean_overall']:.0f}**/100", inline=True)
+    res.add_field(name="نسبة النجاح / Pass", value=f"{summary['pass_rate']*100:.0f}%", inline=True)
+    res.add_field(name="دقة التوجيه / Routing", value=f"{summary['routing_accuracy']*100:.0f}%", inline=True)
+    res.add_field(name="أخطاء حرجة / Hard fails",
+                  value=("✅ 0 — آمن" if hf == 0 else f"🛑 {hf} — يمنع النشر"), inline=True)
+    res.add_field(name="تحذيرات / Warnings", value=f"{summary['warnings']}", inline=True)
+    res.add_field(name="حالات / Cases", value=f"{summary['n']}", inline=True)
+    if diff.get("has_baseline"):
+        md, pd = (diff.get("mean_delta") or 0), (diff.get("pass_delta") or 0)
+        line = f"Δ متوسط: **{md:+.1f}** · Δ نجاح: **{pd*100:+.0f}%**"
+        regs = diff.get("regressions") or []
+        if regs:
+            line += "\n**تراجع / regressions:** " + "، ".join(
+                f"{r['id']} ({r['from']}→{r['to']})" for r in regs[:8])
+            if len(regs) > 8:
+                line += f" +{len(regs) - 8}"
+        else:
+            line += "\nلا تراجع مقابل الأساس ✔"
+        res.add_field(name="مقارنة بالأساس / vs baseline", value=line, inline=False)
+    else:
+        res.add_field(name="الأساس / Baseline", value=(diff.get("note") or "—"), inline=False)
+    rule = ("✅ آمن للنشر · 0 أخطاء حرجة والمتوسط ما نزل"
+            if safe else "🛑 لا تنشر · فيه خطأ حرج أو المتوسط نزل")
+    res.set_footer(text=f"{rule} · شغّله: {triggered_by}")
+    try:
+        await msg.edit(embed=res)
+    except Exception:
+        pass
+    if html_path and os.path.isfile(html_path):
+        try:
+            await channel.send(file=discord.File(html_path, filename="musaed_quality.html"))
+        except Exception as e:
+            print("eval report attach error:", e)
+    log_event("eval", f"جودة المساعد · متوسط {summary['mean_overall']:.0f} · "
+                      f"نجاح {summary['pass_rate']*100:.0f}% · أخطاء حرجة {hf} · ({triggered_by})")
+
+class MusaedEvalView(discord.ui.View):
+    """Persistent panel button for the Musaed Quality Scoreboard. Admin/team only."""
+    def __init__(self):
+        super().__init__(timeout=None)         # persistent across restarts
+
+    @discord.ui.button(label="🧪 Run quality check", style=discord.ButtonStyle.primary,
+                       custom_id="ouja_eval_run")
+    async def run_check(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if not _tk_is_admin(interaction.user):
+                await interaction.response.send_message("هذا الأمر للإدارة فقط 🙏", ephemeral=True)
+                return
+            await interaction.response.send_message(
+                "🧪 شغّلت فحص الجودة… النتيجة بتنزل تحت في نفس القناة.", ephemeral=True)
+            await _eval_run_and_post(interaction.channel, f"@{interaction.user.display_name}")
+        except Exception as e:
+            print("eval button error:", e)
+            try:
+                await interaction.followup.send(f"⚠️ خطأ في فحص الجودة: {e}", ephemeral=True)
+            except Exception:
+                pass
+
+@bot.command(name="جودة-المساعد", aliases=["musaed-quality", "eval-musaed"])
+async def musaed_quality_cmd(ctx):
+    """Run the Musaed quality check from any channel (admin only)."""
+    if not _tk_is_admin(ctx.author):
+        await ctx.reply("هذا الأمر للإدارة فقط 🙏")
+        return
+    await _eval_run_and_post(ctx.channel, f"@{ctx.author.display_name}")
+
+@tasks.loop(time=dt_time(hour=EVAL_WEEKLY_HOUR, tzinfo=TZ))
+async def eval_weekly_loop():
+    """Optional weekly auto-run (Mondays). Only started when EVAL_WEEKLY=1 and a golden set exists."""
+    try:
+        if now_riyadh().weekday() != 0:        # Monday only (Python: Mon=0)
+            return
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        try:
+            import eval_musaed as _ev
+        except Exception:
+            return
+        if not _ev.golden_exists():
+            return
+        ch = await _eval_ensure_channel(guild)
+        if ch is None:
+            return
+        await ch.send("🗓️ الفحص الأسبوعي للجودة / weekly Musaed quality check …")
+        await _eval_run_and_post(ch, "الجدولة الأسبوعية / weekly")
+    except Exception as e:
+        print("eval weekly loop error:", e)
+
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
@@ -47854,6 +48082,7 @@ async def on_ready():
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
     bot.add_view(RRTicketView())
+    bot.add_view(MusaedEvalView())     # Musaed Quality Scoreboard button (additive)
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)
@@ -48028,6 +48257,21 @@ async def on_ready():
         print(f"DISCOUNT_TEST — running a {pct:.0f}% tier now "
               f"({'DRY-RUN' if DISCOUNT_DRY_RUN else 'LIVE'})")
         await _run_tier(pct, "Test (startup)")
+    # ---- Musaed Quality Scoreboard: ensure the channel/panel + optional weekly loop (additive) ----
+    try:
+        _eg = bot.get_guild(GUILD_ID)
+        if _eg is not None:
+            await _eval_ensure_channel(_eg)
+    except Exception as e:
+        print("eval channel setup error:", e)
+    try:
+        if EVAL_WEEKLY and not eval_weekly_loop.is_running():
+            import eval_musaed as _evchk
+            if _evchk.golden_exists():
+                eval_weekly_loop.start()
+                print(f"eval: weekly Musaed quality loop started (Mondays {EVAL_WEEKLY_HOUR:02d}:00 Riyadh)")
+    except Exception as e:
+        print("eval weekly loop start error:", e)
 
 if __name__ == "__main__":
     missing = [k for k in ("HOSTAWAY_ACCOUNT_ID", "HOSTAWAY_API_KEY", "DISCORD_TOKEN", "DISCORD_GUILD_ID")
