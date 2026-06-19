@@ -7185,49 +7185,31 @@ _SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج"}
 
 # --- "Open the guest conversation" deep link for escalation cards --------------
 # The team's pain: when an escalation lands, finding the right DM inside Airbnb's
-# inbox (hundreds of threads) is slow. We attach a one-tap link to the live thread.
-# Airbnb reservations -> a universal airbnb.com link (opens the Airbnb APP on a
-# phone, the web on a computer); every other channel -> the Hostaway reservation,
-# which always works. Read-only Hostaway lookup, cached, run off the event loop.
-_RES_CHANNEL_CACHE = {}   # reservation_id -> {"channel","airbnb_code","ts"}
+# inbox is slow. We attach a one-tap link. Airbnb gives NO external link to a
+# specific guest's *native* chat (a reservation link renders as a web view inside
+# the app), so for Airbnb we open the app's native Messages inbox — the guest is
+# the card's title and sits at the top of the list since the thread is freshly
+# active. Every other channel -> the Hostaway reservation, which always works.
+# Read-only Hostaway lookup, cached, run off the event loop.
+_RES_CHANNEL_CACHE = {}   # reservation_id -> {"channel","ts"}
 
 def _reservation_channel_info(reservation_id):
-    """Return {'channel','airbnb_code'} for a reservation (cached 1h). Safe,
-    read-only; the Airbnb HM-code lives in channelReservationId, not the numeric
-    Hostaway id. Returns {} when the reservation can't be looked up."""
+    """Return {'channel'} for a reservation (cached 1h). Safe, read-only.
+    Returns {} when the reservation can't be looked up."""
     rid = str(reservation_id or "").strip()
     if not rid:
         return {}
     hit = _RES_CHANNEL_CACHE.get(rid)
     if hit and (time.time() - hit.get("ts", 0) < 3600):
         return hit
-    info = {"channel": "", "airbnb_code": "", "ts": time.time()}
+    info = {"channel": "", "ts": time.time()}
     try:
         r = (api_get(f"/reservations/{rid}") or {}).get("result") or {}
         info["channel"] = (r.get("channelName") or "").strip()
-        info["airbnb_code"] = (r.get("channelReservationId") or "").strip()
     except Exception as e:
         print(f"_reservation_channel_info error ({rid}):", e)
     _RES_CHANNEL_CACHE[rid] = info
     return info
-
-def _airbnb_confirmation_code(channel_res_id):
-    """Pull the Airbnb HM-code out of Hostaway's channelReservationId. Hostaway
-    stores Airbnb as a composite, e.g. '462594-guest-29408500-confirmation-HMR4K3XTZQ'
-    -> 'HMR4K3XTZQ'. Falls back to a bare HM-code, then to an already-clean code.
-    Returns '' when nothing usable is found."""
-    s = str(channel_res_id or "").strip().upper()
-    if not s:
-        return ""
-    m = re.search(r"CONFIRMATION-([A-Z0-9]+)", s)      # the composite form
-    if m:
-        return m.group(1)
-    m = re.search(r"(HM[A-Z0-9]{6,})", s)              # a bare HM-code anywhere
-    if m:
-        return m.group(1)
-    if re.fullmatch(r"[A-Z0-9]{6,12}", s):             # already just the code
-        return s
-    return ""
 
 def guest_conversation_link(reservation_id, comm_type=""):
     """Best 'open the conversation' deep link for an escalation, as (url, label),
@@ -7237,12 +7219,8 @@ def guest_conversation_link(reservation_id, comm_type=""):
     chan = (info.get("channel") or "").lower()
     is_airbnb = ("airbnb" in chan) or (str(comm_type or "").lower() == "airbnb")
     if is_airbnb:
-        code = _airbnb_confirmation_code(info.get("airbnb_code"))
-        if code:
-            # Universal link to the Airbnb reservation (the page with the guest's
-            # Message button): opens the Airbnb APP on a phone, the web on desktop.
-            return (f"https://www.airbnb.com/hosting/stay/{code}",
-                    "افتح محادثة الضيف في Airbnb")
+        return ("https://www.airbnb.com/hosting/messages",
+                "افتح صندوق رسائل Airbnb")
     rid = str(reservation_id or "").strip()
     if rid and "{id}" in HOSTAWAY_RES_URL_TEMPLATE:
         return (HOSTAWAY_RES_URL_TEMPLATE.format(id=rid), "افتح الحجز في Hostaway")
