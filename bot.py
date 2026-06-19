@@ -4536,6 +4536,28 @@ formal, be a touch more formal — but always simple and natural, never over-for
 هلق، هيك، كتير)، أعد صياغة الجملة.
 
 - Keep replies short, human, and to the point. Never reveal you are an AI unless asked.
+- Do NOT sign your reply or add any closing like "مساعد - عوجا" or "فريق عوجا" — the system
+  appends ONE signature automatically. Adding your own creates an embarrassing double sign-off.
+
+READING THE GUEST'S MOOD — sarcasm, frustration, passive-aggression (CRITICAL)
+- Saudis very often express anger POLITELY or through SARCASM, not by cursing. NEVER assume a
+  calm-looking or "funny" message is "ok". Read between the lines and the whole thread.
+- Treat the message as upset/sarcastic (NOT ok) when you see signs like: mocking your replies
+  ("اما عاد نفس الاجابه", "يا مشاعر", "الـAI لازم يكون ذكي", "روبوت"), bitter rhetorical offers
+  ("تبون قهوه؟", "تبون شاهي؟", "اسوّي لكم عشاء؟"), hospitality jabs ("وين الضيافة السعودية"),
+  exhaustion ("لعبت فيني الشمس", "تعبنا", "منهك", "من ساعات وانا انتظر"), elongated letters
+  ("افففف", "ييييل", "؟؟؟", "!!!"), "محد رد / مافيه أحد / وش صار", or threats to cancel,
+  contact support, or leave a bad review.
+- 🚫 NEVER reply with humor, a joke, laughter, or 😄/😂/ههه, and never a playful comeback, to a
+  guest who is — or might be — annoyed or sarcastic, EVEN if their words look like a joke.
+  Answering a bitter "تبون قهوه؟" with "وعلى راس الشغل قهوتك 😄" is a SERIOUS failure.
+- Only treat laughter/jokes as genuine when the guest is clearly relaxed and there is NO tension
+  or complaint anywhere in the thread (e.g. a happy "هههه" after a smooth exchange, or they say
+  "أمزح"). When unsure: stay warm but serious, never jokey.
+- When the guest is upset OR sarcastic: drop the cheerful tone, name their specific feeling,
+  apologize sincerely (not a canned line), make NO promises, and set action="escalate" with
+  sentiment="upset" (anger/complaint/exhaustion) or "sarcastic" (mocking/irony) so a human takes
+  over fast and the guest gets a serious, human reply — not another bright bot message.
 
 CHOOSE ONE OF THREE ACTIONS
 - "auto" → a VERY simple, safe, low-risk reply you are highly confident about, where a wrong \
@@ -4551,6 +4573,33 @@ always safe. Only choose "escalate" when the request matches the MUST-escalate l
 refund, booking change, upset guest, security info). A question you can answer from the info and the \
 live availability you're given is NOT a reason to escalate — just answer it (never punt to "check the \
 link" instead of answering). Never gamble on "auto".
+
+UNDERSTANDING SAUDI / NAJDI WORDING (do NOT escalate just because the phrasing is unfamiliar)
+Guests write fast, casual Najdi. Understand it from context — unfamiliar slang is NOT a reason to
+escalate. Common meanings:
+- "ابشر / ابشر على خشمي / على راسي / عليه الشحم / من عيوني / تامر أمر" = yes, gladly, consider it done.
+- "طال عمرك / يا طويل العمر / يا بعد حيّي / يا بعد الدنيا / يا غالي / يا بعدي" = warm respectful address.
+- "تبشر بالخير / تبشر بالجنة / الله يبشرك / يعطيك العافية / ما تقصّر / تسلم / كثّر خيرك" = thanks / blessing.
+- "وش / إيش = what · كم / بكم = how much · وين = where · متى = when · ليش = why · مين = who".
+- "يمدي / يصير / ينفع = is it possible / can I · الحين = now · بدري = early · عقب / بعدين = later".
+- "الوقع غلط / موديني برحة / موديني مكان ثاني = the map sent me to the wrong place".
+- "محد رد / مافيه أحد / وش صار / ما فيه PING / يالييل = I've had no answer yet (impatience)".
+- "خربانة / مب نظيفة / فيها حشرات / موب شغّال / خرب / مايشتغل = a real problem → handle or escalate".
+- "أمزح / أمزح معك = I'm joking (genuine only if there is no complaint around it)".
+If a word is genuinely unclear AND it changes what the guest is asking for, ask ONE short clarifying
+question — do not escalate for language alone. Escalate only for the real reasons in the lists below.
+
+DO NOT ESCALATE THESE — answer them (keep action "reply"; a human still approves before sending)
+- Simple clarifications / reassurances: e.g. "the agreement says 5 guests but the portal says 6" —
+  reassure that the listing's stated capacity is what applies and it's not a problem; do NOT escalate
+  a non-issue.
+- Amenity / house-rules / facilities questions: smoking, shisha, sports channels (beIN), cinema room,
+  pool, kitchen, parking, etc. Answer from the info you're given. If one specific detail isn't in your
+  info, answer what you can and say you'll confirm just that detail — still "reply", never a dead-end.
+- Multi-part messages: ANSWER every part you can; only the part that truly needs a human gets a "I'll
+  check that with the team" line. NEVER ignore the other questions, and NEVER escalate the whole
+  message because of one part. (e.g. "beIN? + where exactly? + is there a cinema room?" → answer all
+  three from the info, don't reply with only one.)
 
 YOU MAY draft replies (auto or reply) about
 - Unit amenities (wifi, parking, pool, kitchen, facilities)
@@ -4618,6 +4667,11 @@ repeat the same ask you already made earlier in this same thread. The context te
 the rental-agreement status: if it is already SIGNED (or not required for this unit), do \
 NOT ask them to sign — acknowledge it's done and move on. Only ask to sign when the status \
 is genuinely UNSIGNED.
+- NEVER LOOP: do not ask a question the guest already answered, and do not send the same \
+question or the same reassurance/empathy line twice in one conversation. If you already asked \
+once for the dates or the number of guests and it's still unclear, do NOT robotically re-ask \
+the same way — infer from what they gave you, or escalate. Asking "كم ضيف معك؟" several times \
+in a row is a serious failure that makes us look like a dumb bot.
 
 YOU MUST NOT do these — instead set action to "escalate"
 - Confirm, modify, cancel, or refund a booking
@@ -4647,9 +4701,13 @@ OUTPUT — respond with ONLY a JSON object, nothing else:
 {"action": "auto" | "reply" | "escalate",
  "reply": "the drafted message to the guest IN THE GUEST'S OWN LANGUAGE; empty string if escalating",
  "intent": "short label IN ARABIC, e.g. واي فاي، اتجاهات، تسجيل دخول، تسعير، شكوى، تعديل حجز",
- "sentiment": "ok" | "upset",
+ "sentiment": "ok" | "upset" | "sarcastic",
  "reason": "one short line IN ARABIC for the human reviewer explaining your choice (the team reads Arabic)",
  "confidence": 0.0-1.0}
+
+SENTIMENT: use "ok" ONLY when the guest is genuinely calm or positive. Use "upset" for anger,
+complaint, or exhaustion. Use "sarcastic" for mocking / irony / passive-aggression. "upset" and
+"sarcastic" both mean a human should take over — pair them with action="escalate".
 
 IMPORTANT: "reply" stays in the guest's language (Najdi Arabic if they wrote Arabic). But "intent" and \
 "reason" must ALWAYS be written in Arabic, because the Ouja team reading these cards speaks Arabic."""
@@ -5282,6 +5340,38 @@ def _force_human_if_readiness(d, history_text):
                        "المساعد ما يقول أبداً إن الشقة جاهزة أو لا؛ الإشارة عندنا غير موثوقة.")
     return d
 
+# Unmistakable sarcasm / frustration markers. The prompt handles the nuanced cases; this is a
+# deterministic safety net so the BLATANT ones never slip through as a cheerful "ok" reply.
+_UPSET_MARKERS = (
+    "نفس الاجابه", "نفس الإجابة", "نفس الرد", "يا مشاعر", "يامشاعر", "وين الضيافة",
+    "استفزاز", "مستفز", "مو ذكي", "ما يصير كذا", "عيب عليكم", "حرام عليكم", "مقصرين",
+    "تجربة سيئة", "سيئة جدا", "سيئ جدا", "زفت", "نصب", "احتيال", "ابي اشتكي", "أبي اشتكي",
+    "ابي مسؤول", "اكلم الدعم", "بكلم الدعم", "بكلم الدعم", "تبون قهوه", "تبون شاهي",
+    "تامرون قهوه", "تبغون قهوه", "ما تردون", "محد يرد", "ولا احد رد", "تعبتونا", "قهرتونا",
+    "وش صار بشرني", "يالييل", "ييييل",
+)
+
+def _looks_upset_or_sarcastic(text):
+    t = (text or "")
+    return any(m in t for m in _UPSET_MARKERS)
+
+def _force_human_if_upset(d, history_text):
+    """Owner rule (2026-06-19): a sarcastic or clearly fed-up guest must NEVER get a cheerful or
+    joking reply. On the clearest signals, force escalation + a negative sentiment so the card
+    pings a human and the holding message becomes the serious, apologetic one (not the chirpy ack).
+    The model-driven path (sentiment/READING-THE-MOOD rules) handles the subtle cases."""
+    if not isinstance(d, dict):
+        return d
+    if _looks_upset_or_sarcastic(_latest_guest_line(history_text)):
+        d["action"] = "escalate"
+        d["reply"] = ""
+        d["sentiment"] = "sarcastic"
+        if not d.get("intent"):
+            d["intent"] = "ضيف منزعج/ساخر"
+        d["reason"] = ("الضيف يبدو منزعج/ساخر — يُحوَّل لبشري فوراً برد جدّي واعتذار بدون أي مرح. "
+                       + (d.get("reason") or ""))[:300]
+    return d
+
 # Kept for back-compat; nothing reads it directly anymore (replaced by _is_asking_alternatives).
 _ALT_HINTS = _ALT_PHRASES
 
@@ -5715,7 +5805,8 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         try:
-            return _force_human_if_readiness(json.loads(text), history_text)
+            return _force_human_if_upset(
+                _force_human_if_readiness(json.loads(text), history_text), history_text)
         except json.JSONDecodeError:
             # The model sometimes wraps the JSON in a sentence ("Here's the reply: {...}").
             # Pull out the first balanced {...} block and try again instead of dropping the
@@ -5723,7 +5814,8 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             m = re.search(r"\{.*\}", text, re.DOTALL)
             if m:
                 try:
-                    return _force_human_if_readiness(json.loads(m.group(0)), history_text)
+                    return _force_human_if_upset(
+                        _force_human_if_readiness(json.loads(m.group(0)), history_text), history_text)
                 except Exception:
                     pass
             print("claude_draft: could not parse JSON · raw=", text[:300])
@@ -5911,10 +6003,12 @@ _DIALECT_LOCK = (
 
 def claude_escalation_ack(guest, unit, history, guest_text):
     """An empathetic, problem-specific holding message for a repeat escalation."""
-    sys = ("أنت تكتب رسالة طمأنة قصيرة لضيف في عوجا تصعّد موضوعه مرة ثانية وهو لا يزال ينتظر أو منزعج. "
+    sys = ("أنت تكتب رسالة طمأنة قصيرة لضيف في عوجا منزعج أو ساخر أو لا يزال ينتظر. "
            "اكتب بأسلوب سعودي نجدي دافئ وراقٍ: اعترف بمشكلته تحديداً، تفهّم شعوره، اعتذر بصدق، "
            "وطمّنه إن الفريق المختص يشتغل على موضوعه الحين وبيتواصل معه قريب جداً. "
-           "لا تكتبها كأنها قالب آلي مكرر. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط."
+           "⛔ ممنوع تماماً أي مزح أو نكتة أو ضحك أو رموز ضحك (😄/😂/ههه) أو رد خفيف — النبرة جدّية "
+           "ومتعاطفة لأن الضيف غير مرتاح. لا تكتبها كأنها قالب آلي مكرر، ولا تكرر نفس الكلام اللي "
+           "انرسل له قبل. لو الضيف يكتب إنجليزي رد بالإنجليزي. اكتب نص الرسالة فقط."
            + _DIALECT_LOCK)
     user = (f"الوحدة: {unit}\nالضيف: {guest}\nالمحادثة:\n{history}\n\n"
             f"آخر رسالة من الضيف: {guest_text}")
@@ -7182,7 +7276,8 @@ class ApproveView(discord.ui.View):
 
 _assistant_seen = _BoundedSet(maxlen=20000)
 
-_SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج"}
+_SENTIMENT_AR = {"ok": "عادي", "upset": "غاضب/منزعج", "sarcastic": "ساخر/مستفز"}
+_NEG_SENTIMENTS = ("upset", "sarcastic")
 
 # --- "Reach the guest" deep links for escalation cards ------------------------
 # The team's pain: when an escalation lands, reaching the guest fast is what cuts
@@ -7257,7 +7352,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     conf = float(result.get("confidence", 0) or 0)
     action = result.get("action", "escalate")
     reply = (result.get("reply") or "").strip()
-    escalate = action == "escalate" or sentiment == "upset" or conf < ESCALATE_BELOW
+    escalate = action == "escalate" or sentiment in _NEG_SENTIMENTS or conf < ESCALATE_BELOW
 
     # daily metrics: every draft counts, with confidence + topic + apartment
     metric_bump("drafts_made")
@@ -7280,10 +7375,14 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             _esc_ack_count[cid] = _esc_ack_count.get(cid, 0) + 1
             n = _esc_ack_count[cid]
             is_ar = _has_arabic(item["guest_text"])
+            # An upset/sarcastic guest must get a serious, apologetic, problem-specific reply —
+            # NOT the chirpy static ack and NOT the off-hours boilerplate — even on the first
+            # message. The empathetic generator (below) handles that, so treat them like a repeat.
+            is_neg = sentiment in _NEG_SENTIMENTS
             # Off-hours ack: tell the guest exactly what happens next AND when.
             # In-hours ack: the regular static or the empathetic re-ack on repeats.
             offhours_now = bool(item.get("_offhours"))
-            if offhours_now and n == 1:
+            if offhours_now and n == 1 and not is_neg:
                 back = next_work_start()
                 same_day = back.date() == datetime.now(TZ).date()
                 back_ar = back.strftime("%H:%M") + (" بكرة" if not same_day else "")
@@ -7299,9 +7398,9 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                     f"they'll reach out the moment they start their day. Any extra detail you "
                     f"add here will be the first thing they see when they're back."
                 )
-            elif n == 1:
+            elif n == 1 and not is_neg:
                 ack = ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN
-            else:                                  # repeat: empathetic, problem-specific
+            else:                                  # repeat OR upset/sarcastic: empathetic, problem-specific
                 ack = await asyncio.to_thread(claude_escalation_ack, g, item["unit"],
                                               item["history"], item["guest_text"]) \
                        or (ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN)
@@ -7458,7 +7557,7 @@ async def process_assistant_item(it, channel):
     try:
         await post_assistant_card(channel, it, result, guide, confirmed)
         act = result.get("action", "reply")
-        if act == "escalate" or result.get("sentiment") == "upset":
+        if act == "escalate" or result.get("sentiment") in _NEG_SENTIMENTS:
             log_event("escalation", f"تصعيد · {it['guest']} · {it['unit']}")
         else:
             log_event("guest", f"بطاقة رد ({act}) · {it['guest']} · {it['unit']}")
