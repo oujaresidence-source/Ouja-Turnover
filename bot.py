@@ -24044,6 +24044,24 @@ async def _handle_diag_airbnb(request):
     def _probe():
         out = {"scanned": 0, "picked": None, "candidates": [],
                "conversation": {}, "reservation": {}, "latest_message": {}}
+        # Definitive path: fetch a specific reservation directly (bypasses the
+        # recent-conversation window). Used to check whether a BOOKED reservation
+        # exposes the Airbnb thread id anywhere in its fields.
+        if want_res:
+            try:
+                r = (api_get(f"/reservations/{want_res}") or {}).get("result") or {}
+            except Exception as e:
+                r = {"_error": str(e)}
+            out["reservation"] = r
+            out["picked"] = {"reservation_id": want_res, "guest": r.get("guestName"),
+                             "status": r.get("status"),
+                             "channelReservationId": r.get("channelReservationId")}
+            if find:
+                out["matches"] = [{"src": "reservation", "key": k, "value": v}
+                                  for k, v in r.items()
+                                  if isinstance(v, (str, int)) and find in str(v)]
+                out["match_count"] = len(out["matches"])
+            return out
         try:
             data = api_get("/conversations",
                            params={"limit": 100 if find else 30, "includeResources": 1})
