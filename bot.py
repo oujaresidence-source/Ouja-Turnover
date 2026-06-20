@@ -6513,11 +6513,43 @@ def with_signature(text):
     """Append a (rotating) support signature, language-matched to the message."""
     return f"{str(text).rstrip()}\n\n{_pick_signature(_has_arabic(text))}"
 
-# EMERGENCY KILL SWITCH (2026-06-20): hard-stop ALL guest-facing sends. Defaults to ON
-# (blocked) after a spam incident. Set ASSISTANT_SEND_KILL=0 in Railway to re-enable once
-# the root cause is confirmed fixed. While killed, the bot still drafts/escalates internally
-# but sends NOTHING to a guest.
-ASSISTANT_SEND_KILL = os.environ.get("ASSISTANT_SEND_KILL", "1") in ("1", "true", "True", "yes")
+# EMERGENCY KILL SWITCH (2026-06-20): set ASSISTANT_SEND_KILL=1 in Railway to hard-stop ALL
+# guest-facing sends instantly (the bot still drafts/escalates internally but sends nothing).
+# Default OFF (normal) now that the duplicate-send guard below is in place.
+ASSISTANT_SEND_KILL = os.environ.get("ASSISTANT_SEND_KILL", "0") in ("1", "true", "True", "yes")
+
+# Persisted duplicate-AUTO-send guard. The 2026-06-20 spam was overlapping bot copies (from
+# rapid redeploys) each auto-replying off-hours to the same guest message. This claim is stored
+# on the volume so it holds across restarts AND overlapping instances.
+_AUTO_SEND_FILE = "auto_sent.json"
+_AUTO_SEND_COOLDOWN = int(os.environ.get("ASSISTANT_AUTOSEND_COOLDOWN_SEC", "180"))  # per-convo
+
+def _auto_send_claim(message_id, conversation_id):
+    """Claim the right to AUTO-send for this guest message. Returns True if we may send (and
+    records it, persisted), False if we ALREADY auto-sent for this exact message OR auto-sent to
+    this conversation within the cooldown. This is the guard that stops duplicate auto-replies."""
+    mid, cid = str(message_id or ""), str(conversation_id or "")
+    if not mid:
+        return True
+    try:
+        store = _load_json(_AUTO_SEND_FILE, {}) or {}
+        msgs = dict(store.get("msgs", {})); convs = dict(store.get("convs", {}))
+    except Exception:
+        msgs, convs = {}, {}
+    now = time.time()
+    if mid in msgs:
+        return False                                   # already auto-sent for THIS message
+    last = convs.get(cid, 0)
+    if last and (now - last) < _AUTO_SEND_COOLDOWN:
+        return False                                   # auto-sent to this convo moments ago (overlap guard)
+    msgs[mid] = now
+    convs[cid] = now
+    if len(msgs) > 3000:                               # prune (~3 days)
+        cutoff = now - 3 * 24 * 3600
+        msgs = {k: v for k, v in msgs.items() if v > cutoff}
+        convs = {k: v for k, v in convs.items() if v > cutoff}
+    _save_json(_AUTO_SEND_FILE, {"msgs": msgs, "convs": convs})
+    return True
 
 def send_guest_message(conversation_id, body, comm_type="email"):
     if ASSISTANT_SEND_KILL:
@@ -7545,6 +7577,14 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     can_auto = (not escalate and bool(reply) and conf >= ASSISTANT_AUTO_CONF and
                 (ASSISTANT_AUTO or offhours))
     if can_auto:
+        if not _auto_send_claim(item.get("message_id"), item["conversation_id"]):
+            print(f"[dedup] auto-send skipped (duplicate) · conv {item['conversation_id']} · "
+                  f"mid {item.get('message_id')}")
+            try:
+                log_event("assistant", f"⏭️ تجاهل تكرار رد تلقائي · {g} · {item['unit']}")
+            except Exception:
+                pass
+            return
         try:
             await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
                                     item["comm_type"])
