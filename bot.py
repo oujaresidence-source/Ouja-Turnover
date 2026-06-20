@@ -6556,28 +6556,44 @@ def _auto_send_claim(message_id, conversation_id):
     _save_json(_AUTO_SEND_FILE, {"msgs": msgs, "convs": convs})
     return True
 
-# CHOKE-POINT dedup: every guest send goes through send_guest_message, so de-dup HERE on
-# (conversation + exact body) and NO path can deliver the same message twice — auto-reply,
-# escalation ack, off-hours hold, re-ping, or overlapping bot copies. Persisted to the volume.
-_SEND_DEDUP_FILE = "send_dedup.json"
-_SEND_DEDUP_TTL = int(os.environ.get("ASSISTANT_SEND_DEDUP_TTL_SEC", "7200"))   # 2h
+# Race-proof, cross-process ONE-TIME claim via the shared volume. os.open(O_CREAT|O_EXCL) is
+# atomic even across simultaneous bot copies, so only ONE caller can ever win a given key — the
+# definitive fix for the duplicate-send incident. Used (a) per guest message, so only one copy
+# handles it, and (b) per (conversation+RAW body) at the send choke point, so the same message
+# can never be delivered twice (the RAW body skips the randomized signature that fooled the old hash).
+_ONCE_TTL = int(os.environ.get("ASSISTANT_DEDUP_TTL_SEC", "21600"))   # 6h
 
-def _send_dedup_ok(conversation_id, full_body):
+def _once_claim(name, ttl=None):
+    """True if THIS caller is the first to claim `name`; False if already claimed within ttl."""
+    ttl = ttl or _ONCE_TTL
     import hashlib
-    key = f"{conversation_id}:{hashlib.sha1((full_body or '').encode('utf-8')).hexdigest()[:16]}"
     try:
-        store = _load_json(_SEND_DEDUP_FILE, {}) or {}
-    except Exception:
-        store = {}
-    now = time.time()
-    last = store.get(key, 0)
-    if last and (now - last) < _SEND_DEDUP_TTL:
-        return False                                    # exact same message already sent here
-    store[key] = now
-    if len(store) > 5000:
-        store = {k: v for k, v in store.items() if v > now - _SEND_DEDUP_TTL}
-    _save_json(_SEND_DEDUP_FILE, store)
-    return True
+        d = _state_path("once_locks")
+        os.makedirs(d, exist_ok=True)
+        marker = os.path.join(d, hashlib.sha1(str(name).encode("utf-8")).hexdigest()[:24])
+        try:
+            fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.write(fd, str(time.time()).encode()); os.close(fd)
+            if random.random() < 0.03:                       # opportunistic prune of stale markers
+                now = time.time()
+                for f in os.listdir(d):
+                    try:
+                        if now - os.path.getmtime(os.path.join(d, f)) > ttl:
+                            os.remove(os.path.join(d, f))
+                    except Exception:
+                        pass
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(marker) > ttl:
+                    os.utime(marker, None)                   # stale → allow one re-send much later
+                    return True
+            except Exception:
+                pass
+            return False
+    except Exception as e:
+        print("once_claim error (allowing):", e)
+        return True                                          # never block a legit send on an FS error
 
 def send_guest_message(conversation_id, body, comm_type="email"):
     if ASSISTANT_SEND_KILL:
@@ -6587,16 +6603,16 @@ def send_guest_message(conversation_id, body, comm_type="email"):
         except Exception:
             pass
         return None
-    full = with_signature(body)
-    if not _send_dedup_ok(conversation_id, full):
-        print(f"[dedup] identical guest message suppressed · conv {conversation_id}")
+    # de-dup on the RAW body (before the randomized signature) so the same message can't go twice
+    if not _once_claim(f"send:{conversation_id}:{(body or '').strip()}"):
+        print(f"[dedup] duplicate guest message suppressed · conv {conversation_id}")
         try:
-            log_event("assistant", f"⏭️ منع رسالة مكرّرة مطابقة · conv {conversation_id}")
+            log_event("assistant", f"⏭️ منع رسالة مكرّرة · conv {conversation_id}")
         except Exception:
             pass
         return None
     return api_post(f"/conversations/{conversation_id}/messages",
-                    {"body": full, "communicationType": comm_type})
+                    {"body": with_signature(body), "communicationType": comm_type})
 
 # pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
 _escalations = {}
@@ -7668,6 +7684,12 @@ async def process_assistant_item(it, channel):
     """Draft + post a card (or escalate) for ONE guest message. Shared by the poll
     loop and the webhook handler so both behave identically."""
     _assistant_seen.add(it["message_id"])
+    # Cross-process claim: only ONE bot copy may handle a given guest message — even if copies
+    # briefly overlap during a deploy. Stops the duplicate escalation-acks/auto-replies at the source.
+    _mid = str(it.get("message_id") or "")
+    if _mid and not _once_claim("msg:" + _mid):
+        print(f"[dedup] guest message {_mid} already handled by another copy — skipping")
+        return
     if not it["guest_text"]:
         return
     # Update guest profile with this conversation's reservation (silent, fast).
