@@ -42,6 +42,7 @@ import sys
 import json
 import html
 import time
+import hashlib
 import argparse
 import datetime
 import traceback
@@ -463,11 +464,13 @@ def real_draft(case):
 
 
 def real_judge(case, draft):
-    """Judge via bot.claude_text using the configured judge model."""
+    """Judge via bot.claude_text. Defaults to the CHEAP model (Haiku) to save credits — the
+    judge only scores quality; the safety BLOCKERS are deterministic and don't use it.
+    Override with EVAL_JUDGE_MODEL=claude-sonnet-4-6 for a stricter (pricier) judge."""
     b = _bot()
     model = (os.environ.get("EVAL_JUDGE_MODEL")
-             or getattr(b, "CLAUDE_MODEL_PREMIUM", None)
-             or "claude-sonnet-4-6")
+             or getattr(b, "CLAUDE_MODEL", None)            # Haiku — cheap, fine for rubric scoring
+             or "claude-haiku-4-5-20251001")
     out = b.claude_text(JUDGE_SYSTEM, _judge_user(case, draft), 800, model)
     return _parse_judge(out)
 
@@ -827,6 +830,71 @@ def write_report(summary, results, diff, dirpath):
 
 
 # ===========================================================================
+# Result cache — drafting + judging the SAME case under the SAME Musaed rules gives the
+# SAME answer, so we cache per-case results and only pay Claude for what actually changed.
+# This makes repeat runs (and idle daily auto-runs) cost ~nothing. The fingerprint changes
+# only when the case, Musaed's rules (ASSISTANT_RULES), or the models change.
+# ===========================================================================
+_CACHE_VERSION = "v1"   # bump to invalidate every cached result if scoring logic changes
+
+
+def _rules_fp():
+    """Fingerprint of everything about Musaed that affects a draft/score."""
+    try:
+        b = _bot()
+        parts = [getattr(b, "ASSISTANT_RULES", "") or "",
+                 getattr(b, "GUEST_DRAFT_MODEL", "") or "",
+                 os.environ.get("EVAL_JUDGE_MODEL", "") or getattr(b, "CLAUDE_MODEL", "") or "",
+                 _CACHE_VERSION]
+    except Exception:
+        parts = [_CACHE_VERSION]
+    return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _case_fp(case, rules_fp):
+    blob = json.dumps(case, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1((rules_fp + "\x1f" + blob).encode("utf-8")).hexdigest()[:20]
+
+
+def _cache_path(dirpath=None):
+    return os.path.join(dirpath or data_dir(), "eval_cache.json")
+
+
+def _load_cache(dirpath=None):
+    try:
+        with open(_cache_path(dirpath), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_cache(dirpath, cache):
+    try:
+        if len(cache) > 1200:                       # keep the most recent entries only
+            cache = dict(list(cache.items())[-1200:])
+        tmp = _cache_path(dirpath) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, _cache_path(dirpath))
+    except Exception as e:
+        print("eval cache save error:", e)
+
+
+def world_fingerprint(dirpath=None):
+    """A single hash of (live golden set + Musaed rules + models). Changes ONLY when those
+    change — used by the daily auto-run to SKIP (spend $0) when nothing is new to measure."""
+    try:
+        rules_fp = _rules_fp()
+        gp = active_golden_path(dirpath)
+        cases = _read_jsonl(gp) if os.path.isfile(gp) else []
+        fps = sorted(_case_fp(c, rules_fp) for c in cases)
+        return hashlib.sha1((rules_fp + "|" + "|".join(fps)).encode("utf-8")).hexdigest()[:20]
+    except Exception as e:
+        print("eval world_fingerprint error:", e)
+        return ""
+
+
+# ===========================================================================
 # THE PUBLIC CORE — run_quality_check (drives the Discord live checklist via cb)
 # ===========================================================================
 def _ts():
@@ -834,24 +902,28 @@ def _ts():
 
 
 def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
-                      draft_fn=None, judge_fn=None, baseline=True, max_workers=None):
+                      draft_fn=None, judge_fn=None, baseline=True, max_workers=None,
+                      use_cache=True):
     """Run the whole quality check. Returns (summary, results, diff, html_path).
 
     progress_cb(step_name, status) is called as each coarse step starts/finishes:
-      steps: "drafting", "scoring", "aggregating", "baseline"  · status: "start"/"done"/"skip"
+      steps: "drafting", "scoring", "aggregating", "baseline" · status: "start"/"done"/"skip"
 
-    This function NEVER sends anything to a guest — it only drafts and scores.
-    Injectable draft_fn / judge_fn / cases let --selftest run with no network/keys.
+    COST CONTROL: per-case results are CACHED (keyed by case + Musaed rules + models), so a
+    re-run pays Claude ONLY for the cases that actually changed; an unchanged re-run is ~$0.
+    NEVER messages a guest. Injectable draft_fn / judge_fn / cases let --selftest run offline.
     """
     dirpath = dirpath or data_dir()
     draft_fn = draft_fn or real_draft
     judge_fn = judge_fn or real_judge
+    real_path = (draft_fn is real_draft and judge_fn is real_judge)
+    use_cache = use_cache and real_path            # only cache real runs (mocks vary fn, not fp)
     if max_workers is None:
         try:
             max_workers = int(os.environ.get("EVAL_MAX_WORKERS", "3"))   # gentle on rate limits
         except Exception:
             max_workers = 3
-    max_workers = max(1, min(8, max_workers))  # G9: keep the pool small (cap)
+    max_workers = max(1, min(8, max_workers))      # G9: keep the pool small (cap)
 
     def cb(step, status):
         if progress_cb:
@@ -868,21 +940,33 @@ def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
     if not cases:
         raise ValueError("golden set is empty")
 
-    # Pre-flight: on the REAL path, make sure Claude is reachable before grinding through
-    # the whole golden set. Fails fast with a clear, owner-readable message instead of
-    # silently returning 0/100 when the key is wrong or we're being rate-limited.
-    if draft_fn is real_draft:
+    ts = _ts()
+    n = len(cases)
+    results = [None] * n
+
+    # ---- Reuse cached results; only the CHANGED cases will cost Claude credits ----
+    cache = _load_cache(dirpath) if use_cache else {}
+    rules_fp = _rules_fp() if use_cache else ""
+    fps = [(_case_fp(c, rules_fp) if use_cache else None) for c in cases]
+    fresh = []
+    for i in range(n):
+        if use_cache and fps[i] in cache:
+            results[i] = dict(cache[fps[i]])
+        else:
+            fresh.append(i)
+
+    # Pre-flight ONLY when there's fresh work (a fully-cached run spends $0 and needs no API).
+    # Fails fast with the exact error if Claude is unreachable.
+    if real_path and fresh:
         ok, detail = anthropic_diagnostic()
         if not ok:
             raise RuntimeError(
                 "تعذّر الوصول لخدمة Claude / Anthropic API error — " + detail
                 + " · تحقّق من ANTHROPIC_API_KEY والرصيد والحدود في لوحة Anthropic ثم أعد المحاولة.")
 
-    ts = _ts()
-
-    # ---- Step 1: draft every case (parallel, capped pool) ----
+    # ---- Step 1: draft the FRESH cases (parallel, capped pool) ----
     cb("drafting", "start")
-    drafts = [None] * len(cases)
+    drafts = {}
 
     def _do_draft(i):
         try:
@@ -891,26 +975,33 @@ def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
             print(f"eval: draft error on case {cases[i].get('id','?')}: {e}")
             return i, None
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        for i, d in ex.map(_do_draft, range(len(cases))):
-            drafts[i] = d
+    if fresh:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for i, d in ex.map(_do_draft, fresh):
+                drafts[i] = d
     cb("drafting", "done")
 
-    # ---- Step 2: deterministic gates + judge (parallel, capped pool) ----
+    # ---- Step 2: score the FRESH cases (gates + judge), then cache them ----
     cb("scoring", "start")
-    results = [None] * len(cases)
 
     def _do_score(i):
-        return i, score_case(cases[i], drafts[i], judge_fn)
+        return i, score_case(cases[i], drafts.get(i), judge_fn)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        for i, r in ex.map(_do_score, range(len(cases))):
-            results[i] = r
+    if fresh:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for i, r in ex.map(_do_score, fresh):
+                results[i] = r
+                if use_cache:
+                    cache[fps[i]] = r
+        if use_cache:
+            _save_cache(dirpath, cache)
     cb("scoring", "done")
 
     # ---- Step 3: aggregate ----
     cb("aggregating", "start")
     summary = aggregate(results, ts)
+    summary["fresh"] = len(fresh)
+    summary["cached"] = n - len(fresh)
     cb("aggregating", "done")
 
     # ---- Step 4: baseline diff + write artifacts ----

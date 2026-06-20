@@ -418,13 +418,14 @@ HANDLED_FILE = _state_path("handled.json")
 EVAL_CATEGORY     = os.environ.get("EVAL_CATEGORY", "🛠️ Operations")
 EVAL_CHANNEL      = os.environ.get("EVAL_CHANNEL", "musaed-quality")
 EVAL_DATA_DIR     = os.environ.get("EVAL_DATA_DIR", STATE_DIR)
-EVAL_JUDGE_MODEL  = os.environ.get("EVAL_JUDGE_MODEL", "claude-sonnet-4-6")
+EVAL_JUDGE_MODEL  = os.environ.get("EVAL_JUDGE_MODEL", CLAUDE_MODEL)  # cheap Haiku judge (save credits)
 EVAL_AUTO_SCORE   = os.environ.get("EVAL_AUTO_SCORE", "1") == "1"  # daily auto quality check
 EVAL_DAILY_HOUR   = int(os.environ.get("EVAL_DAILY_HOUR", "9"))    # Riyadh time
 EVAL_AUTO_EXPORT  = os.environ.get("EVAL_AUTO_EXPORT", "1") == "1" # weekly fresh-chats export to curate
 EVAL_EXPORT_HOUR  = int(os.environ.get("EVAL_EXPORT_HOUR", "8"))   # Riyadh time
 EVAL_EXPORT_DOW   = int(os.environ.get("EVAL_EXPORT_DOW", "5"))    # 5=Saturday (Python: Mon=0..Sun=6)
 os.environ.setdefault("EVAL_DATA_DIR", EVAL_DATA_DIR)             # eval_musaed reads this
+os.environ.setdefault("EVAL_JUDGE_MODEL", EVAL_JUDGE_MODEL)       # keep judge model consistent for caching
 
 # ---- Atomic, persisted ID counters (expense refs, quote numbers). The old
 # max-scan-over-all-records approach raced under concurrent ingest: two threads
@@ -48256,7 +48257,14 @@ async def _eval_run_and_post(channel, triggered_by, interaction=None):
         rule = "✅ آمن للنشر · 0 أخطاء حرجة والمتوسط ما نزل"
     else:
         rule = "🛑 لا تنشر · فيه خطأ حرج أو المتوسط نزل"
-    res.set_footer(text=f"{rule} · شغّله: {triggered_by}")
+    fresh = summary.get("fresh")
+    if fresh == 0:
+        cost_note = " · ♻️ من الذاكرة · ٠ رصيد جديد / cached, $0"
+    elif fresh:
+        cost_note = f" · 🆕 {fresh} حالة جديدة فقط / fresh only"
+    else:
+        cost_note = ""
+    res.set_footer(text=f"{rule} · شغّله: {triggered_by}{cost_note}")
     if msg is not None:
         await _edit(msg, embed=res)
     else:
@@ -48321,10 +48329,26 @@ async def eval_auto_score_loop():
             return
         if not _ev.golden_exists():
             return
+        # COST GUARD: if Musaed's rules + the golden set are unchanged since the last
+        # auto-run, there's nothing new to measure — skip entirely (no API calls, $0).
+        fp = ""
+        try:
+            fp = await asyncio.to_thread(_ev.world_fingerprint)
+            if fp and fp == (_load_json("eval_auto_fp.json", {}) or {}).get("fp"):
+                print("eval: daily auto-run skipped — nothing changed (0 credits)")
+                return
+        except Exception as _fe:
+            print("eval auto fingerprint error:", _fe)
         ch = await _eval_ensure_channel(guild)
         if ch is None:
             return
         await _eval_run_and_post(ch, "الفحص اليومي التلقائي / daily auto-run")
+        try:
+            if fp:
+                _save_json("eval_auto_fp.json",
+                           {"fp": fp, "ts": now_riyadh().isoformat(timespec="seconds")})
+        except Exception:
+            pass
     except Exception as e:
         print("eval auto-score loop error:", e)
 
