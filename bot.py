@@ -6513,7 +6513,20 @@ def with_signature(text):
     """Append a (rotating) support signature, language-matched to the message."""
     return f"{str(text).rstrip()}\n\n{_pick_signature(_has_arabic(text))}"
 
+# EMERGENCY KILL SWITCH (2026-06-20): hard-stop ALL guest-facing sends. Defaults to ON
+# (blocked) after a spam incident. Set ASSISTANT_SEND_KILL=0 in Railway to re-enable once
+# the root cause is confirmed fixed. While killed, the bot still drafts/escalates internally
+# but sends NOTHING to a guest.
+ASSISTANT_SEND_KILL = os.environ.get("ASSISTANT_SEND_KILL", "1") in ("1", "true", "True", "yes")
+
 def send_guest_message(conversation_id, body, comm_type="email"):
+    if ASSISTANT_SEND_KILL:
+        print(f"[KILL] guest send BLOCKED (conv {conversation_id}): {str(body)[:80]}")
+        try:
+            log_event("assistant", f"⛔ إرسال موقوف (kill switch) · conv {conversation_id}")
+        except Exception:
+            pass
+        return None
     return api_post(f"/conversations/{conversation_id}/messages",
                     {"body": with_signature(body), "communicationType": comm_type})
 
