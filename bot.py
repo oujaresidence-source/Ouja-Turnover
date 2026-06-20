@@ -4744,13 +4744,18 @@ action="escalate" and draft no reply — the team will check the real status and
 guest asks to come in BEFORE check-in time or leave AFTER check-out, do NOT escalate and do NOT \
 promise or guarantee it. Reply warmly and honestly — there is normally a guest before/after them, so \
 the unit needs turnover time; if they want in well before midday it's usually not possible (the \
-previous guest is still in); state the official check-in/out time; say you can't guarantee \
-earlier/later but you'll follow up with the team and message them the MOMENT it's ready. You MAY give \
-this GENERAL turnover/schedule reason — but you still must NOT claim a SPECIFIC unit's current state, \
-and a direct "is MY unit clean/ready yet?" still escalates. If the guest pushes back ("you don't need \
-that long", "I'll wait inside", "I'm already here"), stay warm but hold the line: the team needs the \
-full turnover window and nobody can enter during prep, but you're tracking it and will tell them the \
-instant it's done.
+previous guest is still in); ALWAYS state the official check-in/out time; and make clear that early \
+entry / late exit can NEVER be guaranteed. You MAY give this GENERAL turnover/schedule reason — but \
+you must NOT claim a SPECIFIC unit's current state, and a direct "is MY unit clean/ready yet?" still \
+escalates. 🚫 NEVER use early check-in to push a guest to BOOK, and NEVER promise that the team will \
+arrange early entry or will "get back to you" about it — an unkept promise like that causes real \
+trouble. If the booking is NOT confirmed yet (a pre-booking inquiry): just give the official check-in \
+time and that early entry isn't guaranteed; do NOT encourage booking on the basis of getting in \
+early, and do NOT send a booking link as a way to secure early access. Only when the booking is \
+already CONFIRMED may you add that you'll pass the request to the team and that IF the unit happens to \
+be ready sooner they might let them in — never as a firm promise and never a commitment that the team \
+will contact them. On pushback ("you don't need that long", "I'll wait inside", "I'm already here"), \
+stay warm but hold the line: the team needs the full turnover window and nobody can enter during prep.
 - Share any building security info, lock instructions, or override codes
 - Share other guests', owners', or internal/financial information
 - Handle any complaint, dispute, damage claim, or an upset guest
@@ -6551,6 +6556,29 @@ def _auto_send_claim(message_id, conversation_id):
     _save_json(_AUTO_SEND_FILE, {"msgs": msgs, "convs": convs})
     return True
 
+# CHOKE-POINT dedup: every guest send goes through send_guest_message, so de-dup HERE on
+# (conversation + exact body) and NO path can deliver the same message twice — auto-reply,
+# escalation ack, off-hours hold, re-ping, or overlapping bot copies. Persisted to the volume.
+_SEND_DEDUP_FILE = "send_dedup.json"
+_SEND_DEDUP_TTL = int(os.environ.get("ASSISTANT_SEND_DEDUP_TTL_SEC", "7200"))   # 2h
+
+def _send_dedup_ok(conversation_id, full_body):
+    import hashlib
+    key = f"{conversation_id}:{hashlib.sha1((full_body or '').encode('utf-8')).hexdigest()[:16]}"
+    try:
+        store = _load_json(_SEND_DEDUP_FILE, {}) or {}
+    except Exception:
+        store = {}
+    now = time.time()
+    last = store.get(key, 0)
+    if last and (now - last) < _SEND_DEDUP_TTL:
+        return False                                    # exact same message already sent here
+    store[key] = now
+    if len(store) > 5000:
+        store = {k: v for k, v in store.items() if v > now - _SEND_DEDUP_TTL}
+    _save_json(_SEND_DEDUP_FILE, store)
+    return True
+
 def send_guest_message(conversation_id, body, comm_type="email"):
     if ASSISTANT_SEND_KILL:
         print(f"[KILL] guest send BLOCKED (conv {conversation_id}): {str(body)[:80]}")
@@ -6559,8 +6587,16 @@ def send_guest_message(conversation_id, body, comm_type="email"):
         except Exception:
             pass
         return None
+    full = with_signature(body)
+    if not _send_dedup_ok(conversation_id, full):
+        print(f"[dedup] identical guest message suppressed · conv {conversation_id}")
+        try:
+            log_event("assistant", f"⏭️ منع رسالة مكرّرة مطابقة · conv {conversation_id}")
+        except Exception:
+            pass
+        return None
     return api_post(f"/conversations/{conversation_id}/messages",
-                    {"body": with_signature(body), "communicationType": comm_type})
+                    {"body": full, "communicationType": comm_type})
 
 # pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
 _escalations = {}
