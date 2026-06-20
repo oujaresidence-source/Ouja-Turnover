@@ -48236,6 +48236,20 @@ async def _eval_run_and_post(channel, triggered_by, interaction=None):
         res.add_field(name="مقارنة بالأساس / vs baseline", value=line, inline=False)
     else:
         res.add_field(name="الأساس / Baseline", value=(diff.get("note") or "—"), inline=False)
+    # name the actual hard-fail cases + reasons (the count alone isn't actionable)
+    hard_cases = [r for r in results if r.get("hard_fails")]
+    if hard_cases:
+        hl = []
+        for r in hard_cases[:6]:
+            hl.append(f"• `{r.get('id','?')}` ({r.get('intent','')}): " + "؛ ".join(r["hard_fails"]))
+        if len(hard_cases) > 6:
+            hl.append(f"…+{len(hard_cases) - 6}")
+        res.add_field(name="🛑 الأخطاء الحرجة / Hard fails", value=("\n".join(hl))[:1024], inline=False)
+    by = summary.get("by_intent") or {}
+    if by and not inconclusive:
+        worst = sorted(by.items(), key=lambda kv: kv[1]["mean"])[:3]
+        res.add_field(name="أضعف الأنواع / Weakest", inline=False,
+                      value=("\n".join(f"• {k}: {v['mean']:.0f}/100 ({v['n']})" for k, v in worst))[:1024])
     if inconclusive:
         rule = "⚠️ فحص غير مكتمل · تعذّر إنشاء المسودات (تحقّق من المفتاح/حدود الاستخدام وأعد المحاولة)"
     elif safe:
