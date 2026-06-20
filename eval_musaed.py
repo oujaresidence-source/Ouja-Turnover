@@ -670,6 +670,46 @@ def set_baseline(dirpath=None):
     return baseline_path(dirpath)
 
 
+# Bump this whenever the built-in seed changes so it auto-propagates to volumes still
+# running an untouched seed — WITHOUT ever overwriting a set the owner curated via /eval.
+_SEED_VERSION = 2
+
+
+def _seed_meta_path(dirpath=None):
+    return os.path.join(dirpath or data_dir(), "eval_golden_source.json")
+
+
+def _write_seed_meta(dirpath, source, version=None):
+    try:
+        with open(_seed_meta_path(dirpath), "w", encoding="utf-8") as f:
+            json.dump({"source": source, "version": version}, f, ensure_ascii=False)
+    except Exception as e:
+        print("eval seed-meta write error:", e)
+
+
+def refresh_seed_if_untouched(dirpath=None):
+    """Boot helper. Installs the built-in seed if no golden set exists; updates it if the live
+    set is still the (untouched) seed AND the built-in seed has a newer version; NEVER touches a
+    set the owner imported via /eval. Returns 'installed' | 'updated' | 'kept' | 'no-seed'."""
+    dirpath = dirpath or data_dir()
+    if not os.path.isfile(repo_seed_path()):
+        return "no-seed"
+    gp = golden_path(dirpath)
+    try:
+        meta = json.load(open(_seed_meta_path(dirpath), encoding="utf-8")) or {}
+    except Exception:
+        meta = {}
+    if not os.path.isfile(gp):
+        seed_golden(force=True, dirpath=dirpath)
+        return "installed"
+    if meta.get("source") == "import":
+        return "kept"                                   # owner curated — leave it alone
+    if int(meta.get("version") or 0) < _SEED_VERSION:   # untouched seed + the seed improved
+        seed_golden(force=True, dirpath=dirpath)
+        return "updated"
+    return "kept"
+
+
 def seed_golden(force=False, dirpath=None):
     """Install the hand-curated repo seed (golden_set.seed.jsonl) onto the volume as
     golden_set.jsonl so the scoreboard works on day one. Won't overwrite unless force."""
@@ -696,6 +736,7 @@ def seed_golden(force=False, dirpath=None):
         print(f"eval: could not write golden set to {gp}: {e} "
               f"(scoreboard will fall back to the built-in seed)")
         return None
+    _write_seed_meta(dirpath, "seed", _SEED_VERSION)
     print(f"eval: installed {len(cases)} seed cases → {gp}")
     print("Next:  python eval_musaed.py   (or tap «🧪 Run quality check» in Discord)")
     return gp
@@ -1215,6 +1256,7 @@ def import_golden_text(text, dirpath=None):
         return {"ok": False, "imported": 0, "skipped": len(skipped), "warnings": warnings,
                 "errors": [f"write failed: {e}"],
                 "message": f"تعذّر الحفظ / could not save: {e}"}
+    _write_seed_meta(dirpath, "import", None)            # mark as owner-curated — never auto-overwrite
     return {"ok": True, "imported": len(valid), "skipped": len(skipped),
             "warnings": warnings[:60], "errors": skipped[:60], "path": gp,
             "message": f"تم استيراد {len(valid)} حالة / imported {len(valid)} cases"}

@@ -48573,8 +48573,9 @@ async def on_ready():
     # ---- Musaed Quality Scoreboard: auto-seed golden set + ensure channel/panel + weekly loop (additive) ----
     try:
         import eval_musaed as _evseed
-        if not _evseed.golden_exists():
-            _evseed.seed_golden()          # install the curated seed onto the volume on first boot
+        _act = _evseed.refresh_seed_if_untouched()   # install/update the built-in seed; never clobbers a curated set
+        if _act in ("installed", "updated"):
+            print(f"eval: golden seed {_act} on boot")
     except Exception as e:
         print("eval seed error:", e)
     try:
