@@ -419,8 +419,11 @@ EVAL_CATEGORY     = os.environ.get("EVAL_CATEGORY", "🛠️ Operations")
 EVAL_CHANNEL      = os.environ.get("EVAL_CHANNEL", "musaed-quality")
 EVAL_DATA_DIR     = os.environ.get("EVAL_DATA_DIR", STATE_DIR)
 EVAL_JUDGE_MODEL  = os.environ.get("EVAL_JUDGE_MODEL", "claude-sonnet-4-6")
-EVAL_WEEKLY       = os.environ.get("EVAL_WEEKLY", "0") == "1"
-EVAL_WEEKLY_HOUR  = int(os.environ.get("EVAL_WEEKLY_HOUR", "9"))   # Monday, Riyadh time
+EVAL_AUTO_SCORE   = os.environ.get("EVAL_AUTO_SCORE", "1") == "1"  # daily auto quality check
+EVAL_DAILY_HOUR   = int(os.environ.get("EVAL_DAILY_HOUR", "9"))    # Riyadh time
+EVAL_AUTO_EXPORT  = os.environ.get("EVAL_AUTO_EXPORT", "1") == "1" # weekly fresh-chats export to curate
+EVAL_EXPORT_HOUR  = int(os.environ.get("EVAL_EXPORT_HOUR", "8"))   # Riyadh time
+EVAL_EXPORT_DOW   = int(os.environ.get("EVAL_EXPORT_DOW", "5"))    # 5=Saturday (Python: Mon=0..Sun=6)
 os.environ.setdefault("EVAL_DATA_DIR", EVAL_DATA_DIR)             # eval_musaed reads this
 
 # ---- Atomic, persisted ID counters (expense refs, quote numbers). The old
@@ -44627,6 +44630,197 @@ async def _security_headers_mw(request, handler):
         pass
     return resp
 
+# ============================================================================
+# Musaed Quality — /eval page (ADDITIVE, standalone, token-gated). Lets the owner build
+# the golden set with NO code/terminal: Download real chats → curate in Claude → Upload.
+# Kept OFF the big DASHBOARD_HTML so it can't break the Control Center. eval_musaed is
+# imported LAZILY inside try/except so it can never break the web server.
+# ============================================================================
+_EVAL_CURATION_PROMPT = (
+    "You are curating a quality test set for \"Musaed\" (فيصل), the Arabic-first guest-message "
+    "assistant of Ouja Residence, a premium short-term-rental company in Riyadh, Saudi Arabia.\n\n"
+    "I will attach a JSONL file: one JSON object per line, each a REAL guest message with the "
+    "team's ACTUAL reply. Turn each line into a clean \"golden\" case = the IDEAL way Musaed "
+    "should handle it.\n\n"
+    "For EACH line, output the SAME JSON object with these fields fixed:\n"
+    "- \"intent\": a short Arabic label (2-3 words), e.g. واي فاي، اتجاهات، تسجيل دخول، تسجيل خروج، "
+    "كود الدخول، جاهزية الشقة، تسعير، تمديد حجز، شكوى، نزاع مالي، موقف سيارات، مرافق.\n"
+    "- \"golden_action\": EXACTLY one of \"reply\", \"escalate\", or \"auto\" (use the RULES below).\n"
+    "- \"golden_reply\": the IDEAL reply in natural Najdi/Saudi Arabic (warm, brief, human — NOT "
+    "stiff MSA, NOT any other dialect). Polish the team's existing reply; fix tone/dialect; keep it "
+    "accurate. If golden_action is \"escalate\", set this to \"\" (empty string).\n"
+    "- Keep ALL other fields unchanged (id, guest, unit, history, guest_text, confirmed, dates, "
+    "listing_id, reservation_id, lang).\n\n"
+    "RULES:\n"
+    "1) ESCALATE (empty reply) for: asking whether the unit is ready/clean/done (either way — NEVER "
+    "state readiness); complaints or anything broken (AC, water, wifi down, smell, noise, bugs, "
+    "power); an upset or sarcastic guest; disputes about money/deposit/damage/refund/cancellation; "
+    "early check-in or late check-out (can't promise what we can't verify); anything needing a human "
+    "to physically act (extra towels, lost item, invoice); anything you're unsure about.\n"
+    "2) REPLY for normal answerable questions: wifi, directions/location, check-in/out times, "
+    "parking, amenities info, pre-booking questions, \"are you a bot\", recommendations, policies.\n"
+    "3) NEVER in a reply: reveal a door/access code or ANY 4-6 digit code (say the team sends it "
+    "directly before check-in — no digits); claim the unit is clean/ready; reveal you are an AI/bot "
+    "(you are \"فيصل from Ouja\"); add a signature/sign-off (one is added automatically); before "
+    "booking (confirmed=false) share the exact address or unit number — give the district/area only.\n\n"
+    "OUTPUT: ONLY the JSONL — one JSON object per line, same order. No commentary, no code fences, "
+    "no extra text. Every line must be valid JSON. Drop a line only if it is truly unusable."
+)
+
+_EVAL_PAGE = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Musaed — Golden Set</title>
+<style>
+:root{--bg:#faf8f4;--card:#fff;--ink:#23201b;--muted:#7a7468;--gold:#b8893a;--line:#efe9df}
+*{box-sizing:border-box}
+body{font-family:-apple-system,'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);
+color:var(--ink);margin:0;padding:24px;max-width:840px;margin-inline:auto}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 18px;font-size:13px;line-height:1.6}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px}
+.step{font-size:12px;color:var(--gold);font-weight:700;letter-spacing:.04em;margin:0 0 6px}
+h2{font-size:16px;margin:0 0 8px}p{margin:6px 0;font-size:14px;line-height:1.7}
+.btn{display:inline-block;background:var(--gold);color:#fff;border:0;border-radius:10px;
+padding:11px 18px;font-size:14px;font-weight:700;cursor:pointer;text-decoration:none}
+.btn.sec{background:#f0ece4;color:var(--ink)}
+textarea{width:100%;height:230px;border:1px solid var(--line);border-radius:10px;padding:12px;
+font-family:'SFMono-Regular',Menlo,monospace;font-size:12px;direction:ltr;text-align:left;background:#fbfaf7;color:var(--ink)}
+input[type=file]{font-size:13px;margin:8px 0}
+.status{display:inline-block;background:#f0ece4;border-radius:8px;padding:4px 10px;font-size:12px;color:var(--muted)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.muted{color:var(--muted);font-size:12px;line-height:1.6}code{background:#f0ece4;padding:1px 6px;border-radius:5px;font-size:12px}
+</style></head><body>
+<h1>🧪 جهّز قائمة جودة المساعد / Build Musaed's golden set</h1>
+<p class="sub">حمّل المحادثات الحقيقية ← نظّفها مع Claude ← ارفعها هنا. بدون كود ولا طرفية.<br>
+Download real chats ← curate in Claude ← upload here. No code, no terminal.</p>
+<p><span class="status">القائمة الحالية / current set: <b>__COUNT__</b> · المصدر / source: __SOURCE__</span></p>
+
+<div class="card"><p class="step">الخطوة ١ · STEP 1</p>
+<h2>⬇️ حمّل البيانات / Download data</h2>
+<p>يسحب آخر محادثات الضيوف من Hostaway (سؤال الضيف + رد الفريق الفعلي). قراءة فقط، وما يحتاج مفتاح Claude. قد ياخذ دقيقة.<br>
+Pulls recent guest chats (guest question + the team's real reply). Read-only; no Claude key needed. May take ~1 min.</p>
+<p class="row"><a class="btn" href="/eval/download?token=__TOKEN__&amp;limit=150">⬇️ تحميل / Download (~150)</a>
+<a class="btn sec" href="/eval/download?token=__TOKEN__&amp;limit=50">⚡ سريع / Quick (~50)</a></p></div>
+
+<div class="card"><p class="step">الخطوة ٢ · STEP 2</p>
+<h2>🤖 نظّفها مع Claude / Curate in Claude</h2>
+<p>افتح <code>claude.ai</code>، الصق هذا الـ prompt، وأرفق الملف اللي نزّلته. Claude يرجّع لك ملف نظيف.<br>
+Open <code>claude.ai</code>, paste this prompt, attach the file you downloaded. Claude returns a clean file.</p>
+<textarea id="p" readonly>__PROMPT__</textarea>
+<p class="row"><button class="btn sec" onclick="navigator.clipboard.writeText(document.getElementById('p').value);this.textContent='✓ تم النسخ / Copied'">📋 انسخ الـ prompt / Copy</button></p></div>
+
+<div class="card"><p class="step">الخطوة ٣ · STEP 3</p>
+<h2>⬆️ ارفع القائمة / Import golden set</h2>
+<p>ارفع الملف اللي رجّعه Claude (.jsonl). نتأكد منه ونحفظه كقائمة الجودة الرسمية على الخادم.<br>
+Upload the file Claude returned (.jsonl). We validate it and save it as the live golden set.</p>
+<form action="/eval/import?token=__TOKEN__" method="post" enctype="multipart/form-data">
+<input type="file" name="file" accept=".jsonl,.json,.txt" required><br>
+<button class="btn" type="submit">⬆️ رفع واستيراد / Upload &amp; import</button></form></div>
+
+<p class="muted">بعدها: افتح <b>#musaed-quality</b> في Discord واضغط «🧪 Run quality check» (يحتاج مفتاح Claude شغّال).<br>
+Then open <b>#musaed-quality</b> in Discord and tap «🧪 Run quality check» (needs a working Claude key).</p>
+</body></html>"""
+
+
+def _eval_html_escape(s):
+    return (str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+async def _handle_eval_page(request):
+    """Standalone token-gated page to build the golden set (download/curate/upload)."""
+    if not _dash_auth(request):
+        return web.Response(status=403, text="forbidden")
+    import urllib.parse
+    token = request.query.get("token", "")
+    try:
+        import eval_musaed
+        st = eval_musaed.golden_status()
+    except Exception as e:
+        print("eval page status error:", e)
+        st = {"count": 0, "source": "none"}
+    src = {"volume": "محفوظة على الخادم / saved", "seed": "النسخة المدمجة / built-in seed",
+           "none": "—"}.get(st.get("source"), st.get("source"))
+    page = (_EVAL_PAGE
+            .replace("__TOKEN__", urllib.parse.quote(token, safe=""))
+            .replace("__COUNT__", str(st.get("count", 0)))
+            .replace("__SOURCE__", _eval_html_escape(src))
+            .replace("__PROMPT__", _eval_html_escape(_EVAL_CURATION_PROMPT)))
+    return web.Response(text=page, content_type="text/html", charset="utf-8")
+
+
+async def _handle_eval_download(request):
+    """Download a starter JSONL of real conversations (read-only Hostaway pull; no key)."""
+    if not _dash_auth(request):
+        return web.Response(status=403, text="forbidden")
+    try:
+        limit = max(5, min(300, int(request.query.get("limit", "150"))))
+    except Exception:
+        limit = 150
+    try:
+        import eval_musaed
+        text, n = await asyncio.to_thread(eval_musaed.export_starter_jsonl, limit, False)
+    except Exception as e:
+        print("eval download error:", e)
+        return _json({"error": "export_failed", "detail": str(e)}, 500)
+    return web.Response(
+        text=text, content_type="text/plain", charset="utf-8",
+        headers={"Content-Disposition": 'attachment; filename="musaed_starter.jsonl"',
+                 "X-Eval-Count": str(n)})
+
+
+async def _handle_eval_import(request):
+    """Accept a curated JSONL upload and save it as the live golden set (validated)."""
+    if not _dash_auth(request):
+        return web.Response(status=403, text="forbidden")
+    try:
+        data, _fname, _fields = await _fb_read_upload(request)
+    except Exception as e:
+        return web.Response(status=400, content_type="text/html", charset="utf-8",
+                            text=_eval_result_page({"ok": False, "message": f"upload failed: {e}"}))
+    text = ""
+    try:
+        text = (data or b"").decode("utf-8", "replace")
+    except Exception:
+        pass
+    try:
+        import eval_musaed
+        res = await asyncio.to_thread(eval_musaed.import_golden_text, text)
+    except Exception as e:
+        print("eval import error:", e)
+        res = {"ok": False, "message": f"import error: {e}"}
+    if res.get("ok"):
+        log_event("eval", f"golden set updated via /eval · {res.get('imported')} حالة "
+                          f"({res.get('skipped',0)} متجاهلة)")
+    return web.Response(text=_eval_result_page(res), content_type="text/html", charset="utf-8")
+
+
+def _eval_result_page(res):
+    esc = _eval_html_escape
+    ok = res.get("ok")
+    head = "✅ تم الاستيراد / Imported" if ok else "⚠️ ما تم الاستيراد / Not imported"
+    color = "#1f7a4d" if ok else "#b3261e"
+    rows = [f"<p style='font-size:15px'><b>{esc(res.get('message',''))}</b></p>"]
+    if ok:
+        rows.append(f"<p>استوردنا <b>{res.get('imported',0)}</b> حالة، وتجاهلنا "
+                    f"<b>{res.get('skipped',0)}</b>. / imported {res.get('imported',0)}, "
+                    f"skipped {res.get('skipped',0)}.</p>")
+    warns = res.get("warnings") or []
+    errs = res.get("errors") or []
+    if warns:
+        rows.append("<p style='color:#9a6b00'><b>تنبيهات / warnings:</b></p><ul>"
+                    + "".join(f"<li>{esc(w)}</li>" for w in warns[:30]) + "</ul>")
+    if errs:
+        rows.append("<p style='color:#b3261e'><b>أسطر متجاهلة / skipped lines:</b></p><ul>"
+                    + "".join(f"<li>{esc(x)}</li>" for x in errs[:30]) + "</ul>")
+    return (f"<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'>"
+            f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<title>Import result</title><style>body{{font-family:-apple-system,'Segoe UI',Tahoma,"
+            f"Arial,sans-serif;background:#faf8f4;color:#23201b;margin:0;padding:24px;max-width:760px;"
+            f"margin-inline:auto}}a{{color:#b8893a}}ul{{font-size:13px;line-height:1.6}}</style></head>"
+            f"<body><h1 style='color:{color};font-size:20px'>{head}</h1>{''.join(rows)}"
+            f"<p style='margin-top:18px'>↩︎ <a href='javascript:history.back()'>رجوع / back to /eval</a> · "
+            f"بعدها افتح #musaed-quality في Discord واضغط «🧪 Run quality check».</p></body></html>")
+
+
 async def start_web_server():
     """Run a tiny HTTP server so Hostaway can push new-message events to us."""
     global _web_runner
@@ -44639,6 +44833,9 @@ async def start_web_server():
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
         app.router.add_get("/diag/musaed-audit", _handle_diag_musaed)  # read-only coaching export
+        app.router.add_get("/eval", _handle_eval_page)          # Musaed golden-set builder (token-gated)
+        app.router.add_get("/eval/download", _handle_eval_download)  # export real chats (read-only)
+        app.router.add_post("/eval/import", _handle_eval_import)     # upload curated golden set
         app.router.add_get("/api/nav", _api_nav)            # shared nav (ERP sidebar source)
         # ---- SEO surfaces for the public funnel ----
         app.router.add_get("/robots.txt", _handle_robots)
@@ -48096,12 +48293,11 @@ async def musaed_quality_cmd(ctx):
         return
     await _eval_run_and_post(ctx.channel, f"@{ctx.author.display_name}")
 
-@tasks.loop(time=dt_time(hour=EVAL_WEEKLY_HOUR, tzinfo=TZ))
-async def eval_weekly_loop():
-    """Optional weekly auto-run (Mondays). Only started when EVAL_WEEKLY=1 and a golden set exists."""
+@tasks.loop(time=dt_time(hour=EVAL_DAILY_HOUR, tzinfo=TZ))
+async def eval_auto_score_loop():
+    """Daily auto quality check (EVAL_AUTO_SCORE=1). Posts the scoreboard to #musaed-quality
+    each morning so nobody has to tap the button. (Shows 'inconclusive' until the Claude key works.)"""
     try:
-        if now_riyadh().weekday() != 0:        # Monday only (Python: Mon=0)
-            return
         guild = bot.get_guild(GUILD_ID)
         if guild is None:
             return
@@ -48114,10 +48310,40 @@ async def eval_weekly_loop():
         ch = await _eval_ensure_channel(guild)
         if ch is None:
             return
-        await ch.send("🗓️ الفحص الأسبوعي للجودة / weekly Musaed quality check …")
-        await _eval_run_and_post(ch, "الجدولة الأسبوعية / weekly")
+        await _eval_run_and_post(ch, "الفحص اليومي التلقائي / daily auto-run")
     except Exception as e:
-        print("eval weekly loop error:", e)
+        print("eval auto-score loop error:", e)
+
+@tasks.loop(time=dt_time(hour=EVAL_EXPORT_HOUR, tzinfo=TZ))
+async def eval_auto_export_loop():
+    """Weekly fresh-chats export (EVAL_AUTO_EXPORT=1). Once a week posts a starter JSONL of
+    recent real conversations to #musaed-quality so the team can curate + grow the golden set.
+    Read-only Hostaway pull — needs no Claude key."""
+    try:
+        if now_riyadh().weekday() != EVAL_EXPORT_DOW:
+            return
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        try:
+            import eval_musaed as _ev
+            import io
+        except Exception:
+            return
+        ch = await _eval_ensure_channel(guild)
+        if ch is None:
+            return
+        text, n = await asyncio.to_thread(_ev.export_starter_jsonl, 150, False)
+        if not n:
+            return
+        f = discord.File(io.BytesIO(text.encode("utf-8")), filename="musaed_fresh_chats.jsonl")
+        await ch.send(
+            content=(f"🗓️ تصدير أسبوعي / weekly export — **{n}** محادثة جديدة. نظّفها مع Claude "
+                     f"وارفعها في صفحة /eval لتكبير قائمة الجودة. / curate in Claude, import on /eval."),
+            file=f)
+        log_event("eval", f"تصدير تلقائي · {n} محادثة → #{EVAL_CHANNEL}")
+    except Exception as e:
+        print("eval auto-export loop error:", e)
 
 @bot.event
 async def on_ready():
@@ -48320,13 +48546,14 @@ async def on_ready():
     except Exception as e:
         print("eval channel setup error:", e)
     try:
-        if EVAL_WEEKLY and not eval_weekly_loop.is_running():
-            import eval_musaed as _evchk
-            if _evchk.golden_exists():
-                eval_weekly_loop.start()
-                print(f"eval: weekly Musaed quality loop started (Mondays {EVAL_WEEKLY_HOUR:02d}:00 Riyadh)")
+        if EVAL_AUTO_SCORE and not eval_auto_score_loop.is_running():
+            eval_auto_score_loop.start()
+            print(f"eval: daily auto-score loop started ({EVAL_DAILY_HOUR:02d}:00 Riyadh)")
+        if EVAL_AUTO_EXPORT and not eval_auto_export_loop.is_running():
+            eval_auto_export_loop.start()
+            print(f"eval: weekly auto-export loop started (dow={EVAL_EXPORT_DOW} {EVAL_EXPORT_HOUR:02d}:00 Riyadh)")
     except Exception as e:
-        print("eval weekly loop start error:", e)
+        print("eval auto loop start error:", e)
 
 if __name__ == "__main__":
     missing = [k for k in ("HOSTAWAY_ACCOUNT_ID", "HOSTAWAY_API_KEY", "DISCORD_TOKEN", "DISCORD_GUILD_ID")

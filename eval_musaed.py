@@ -951,26 +951,23 @@ def _is_arabic(s):
     return bool(re.search(r"[؀-ۿ]", s or ""))
 
 
-def build_golden(limit=200, dirpath=None):
-    """Pull recent conversations, pair each guest question with the team's next
-    NON-automated reply, auto-label intent, and write golden_set.starter.jsonl."""
+def _pull_starter_cases(limit=200, label=False):
+    """Pull recent Hostaway conversations and pair each guest's latest question with the
+    team's next NON-automated reply. READ-ONLY (api_get). `label=True` adds one cheap
+    Claude call per case to guess the intent (needs the API key); label=False leaves it
+    blank so this works with NO key (the curation step in Claude fills it in)."""
     b = _bot()
-    dirpath = dirpath or data_dir()
-    _ensure_dir(dirpath)
     listings = {}
     try:
         listings = b.get_listings_map() or {}
     except Exception as e:
         print("eval: listings map error (continuing without unit names):", e)
-
-    print(f"eval: pulling up to {limit} conversations from Hostaway…")
-    convs = []
     try:
         data = b.api_get("/conversations", params={"limit": limit, "includeResources": 1})
         convs = (data or {}).get("result", []) or []
     except Exception as e:
         print("eval: could not fetch conversations:", e)
-        return None
+        return []
 
     cases = []
     for c in convs:
@@ -989,9 +986,7 @@ def build_golden(limit=200, dirpath=None):
             msgs = sorted(msgs, key=b._msg_sort_key)
         except Exception:
             pass
-
-        # find the most recent guest message that has a NON-automated team reply after it
-        chosen_idx = None
+        chosen_idx, golden_reply = None, ""
         for i in range(len(msgs) - 1, -1, -1):
             if not b._msg_is_inbound(msgs[i]):
                 continue
@@ -1000,29 +995,25 @@ def build_golden(limit=200, dirpath=None):
                     if not b._msg_is_inbound(m) and not b._looks_automated(m.get("body") or "")]
             if team:
                 chosen_idx = i
-                _golden_reply = (team[0].get("body") or "").strip()
+                golden_reply = (team[0].get("body") or "").strip()
                 break
         if chosen_idx is None:
             continue
-
         gmsg = msgs[chosen_idx]
         guest_text = (gmsg.get("body") or "").strip()
         if not guest_text:
             continue
-
         history = []
         for m in msgs[:chosen_idx + 1]:
             body = (m.get("body") or "").strip()
-            if not body:
-                continue
-            history.append({"role": "guest" if b._msg_is_inbound(m) else "host", "text": body})
-
+            if body:
+                history.append({"role": "guest" if b._msg_is_inbound(m) else "host", "text": body})
         lm = c.get("listingMapId")
         unit = listings.get(lm) or c.get("listingName") or (f"unit-{lm}" if lm else "")
         res = c.get("reservation") or {}
-        case = {
+        cases.append({
             "id": f"conv{cid}-{gmsg.get('id')}",
-            "intent": _label_intent(b, guest_text),
+            "intent": (_label_intent(b, guest_text) if label else ""),
             "lang": "ar" if _is_arabic(guest_text) else "en",
             "guest": c.get("recipientName") or c.get("guestName") or "Guest",
             "unit": unit,
@@ -1032,20 +1023,123 @@ def build_golden(limit=200, dirpath=None):
             "dates": [res.get("arrivalDate"), res.get("departureDate")],
             "history": history,
             "guest_text": guest_text,
-            "golden_reply": _golden_reply,   # CURATE: polish to Najdi voice
-            "golden_action": "reply",        # CURATE: fix to auto/reply/escalate
-        }
-        cases.append(case)
-        print(f"  + {case['id']} · {case['intent']} · {unit or '—'}")
+            "golden_reply": golden_reply,   # the team's ACTUAL reply — curate/polish to Najdi
+            "golden_action": "reply",       # CURATE: fix to auto|reply|escalate
+        })
+    return cases
 
+
+_EXPORT_HEADER = (
+    "# Musaed golden-set STARTER — real guest messages paired with the team's ACTUAL reply.\n"
+    "# Curate with Claude (paste the prompt + this file), then UPLOAD the result on /eval.\n"
+    "# Per line: set intent, fix golden_action (auto|reply|escalate), polish golden_reply to\n"
+    "# natural Najdi (empty it for escalate). One JSON object per line; keep these # lines.\n"
+)
+
+
+def export_starter_jsonl(limit=200, label=False):
+    """Return (jsonl_text, count) of starter cases for the /eval Download button.
+    READ-ONLY; needs NO API key when label=False."""
+    cases = _pull_starter_cases(limit=limit, label=label)
+    body = "\n".join(json.dumps(c, ensure_ascii=False) for c in cases)
+    return (_EXPORT_HEADER + (body + "\n" if body else "")), len(cases)
+
+
+def build_golden(limit=200, dirpath=None):
+    """CLI: pull + auto-label + write golden_set.starter.jsonl for curation."""
+    _bot()                                  # ensure bot importable / key present for labeling
+    dirpath = dirpath or data_dir()
+    _ensure_dir(dirpath)
+    print(f"eval: pulling up to {limit} conversations from Hostaway…")
+    cases = _pull_starter_cases(limit=limit, label=True)
     sp = starter_path(dirpath)
     with open(sp, "w", encoding="utf-8") as f:
+        f.write(_EXPORT_HEADER)
         for c in cases:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
-    print(f"\neval: wrote {len(cases)} starter cases → {sp}")
-    print("Curate it (fix golden_action, polish golden_reply to our Najdi voice, add edge "
-          "cases), then save it as golden_set.jsonl in the same folder.")
+    print(f"eval: wrote {len(cases)} starter cases → {sp}")
+    print("Curate (set intent, fix golden_action, polish golden_reply to Najdi), then save as "
+          "golden_set.jsonl — or upload it on the /eval page.")
     return sp
+
+
+def import_golden_text(text, dirpath=None):
+    """Validate curated JSONL and write it as the LIVE golden_set.jsonl on the volume.
+    Lenient but safe: skips bad lines, never overwrites with zero valid cases. Returns a
+    summary dict {ok, imported, skipped, warnings, errors, path, message}."""
+    dirpath = dirpath or data_dir()
+    valid, skipped, warnings, seen = [], [], [], set()
+    for ln, line in enumerate((text or "").splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        try:
+            o = json.loads(s)
+        except Exception as e:
+            skipped.append(f"line {ln}: invalid JSON ({e})")
+            continue
+        cid = str(o.get("id") or "").strip()
+        action = str(o.get("golden_action") or "").strip().lower()
+        if not cid:
+            skipped.append(f"line {ln}: missing id")
+            continue
+        if action not in ("auto", "reply", "escalate"):
+            skipped.append(f"line {ln} ({cid}): golden_action must be auto|reply|escalate")
+            continue
+        if cid in seen:
+            skipped.append(f"line {ln} ({cid}): duplicate id")
+            continue
+        if not (o.get("history") or (o.get("guest_text") or "").strip()):
+            skipped.append(f"line {ln} ({cid}): no history/guest_text")
+            continue
+        reply = o.get("golden_reply") or ""
+        if action == "escalate":
+            o["golden_reply"] = ""                      # escalate => empty reply
+        else:
+            if not reply.strip():
+                skipped.append(f"line {ln} ({cid}): reply/auto case needs a golden_reply")
+                continue
+            d = dialect_hits(reply)
+            if d:
+                warnings.append(f"{cid}: gold uses non-Saudi dialect ({'، '.join(d)})")
+            if door_code_leak(reply, o.get("guest_text", ""), o.get("intent", ""))[0]:
+                warnings.append(f"{cid}: gold appears to reveal a door code")
+        o["golden_action"] = action
+        o.setdefault("lang", "ar" if _is_arabic(reply or o.get("guest_text", "")) else "en")
+        o.setdefault("intent", "غير مصنّف")
+        seen.add(cid)
+        valid.append(o)
+
+    if not valid:
+        return {"ok": False, "imported": 0, "skipped": len(skipped), "warnings": warnings,
+                "errors": skipped[:60],
+                "message": "لا توجد حالات صالحة — لم يتغيّر شي / no valid cases — nothing changed"}
+    gp = golden_path(dirpath)
+    _ensure_dir(dirpath)
+    try:
+        with open(gp, "w", encoding="utf-8") as f:
+            for o in valid:
+                f.write(json.dumps(o, ensure_ascii=False) + "\n")
+    except Exception as e:
+        return {"ok": False, "imported": 0, "skipped": len(skipped), "warnings": warnings,
+                "errors": [f"write failed: {e}"],
+                "message": f"تعذّر الحفظ / could not save: {e}"}
+    return {"ok": True, "imported": len(valid), "skipped": len(skipped),
+            "warnings": warnings[:60], "errors": skipped[:60], "path": gp,
+            "message": f"تم استيراد {len(valid)} حالة / imported {len(valid)} cases"}
+
+
+def golden_status(dirpath=None):
+    """Current LIVE golden set: count + source (curated volume copy vs built-in seed)."""
+    dirpath = dirpath or data_dir()
+    gp = golden_path(dirpath)
+    for path, src in ((gp, "volume"), (repo_seed_path(), "seed")):
+        if os.path.isfile(path):
+            try:
+                return {"count": len(_read_jsonl(path)), "source": src, "path": path}
+            except Exception:
+                return {"count": 0, "source": src, "path": path}
+    return {"count": 0, "source": "none", "path": gp}
 
 
 # ===========================================================================
