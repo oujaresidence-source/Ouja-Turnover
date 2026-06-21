@@ -46775,6 +46775,19 @@ RR_PANEL_CHANNEL     = os.environ.get("RR_PANEL_CHANNEL", "فتح-تذكرة-rr"
 MAINT_URGENT_ROLE_ID = int(os.environ.get("MAINT_URGENT_ROLE_ID", "0") or 0)
 RR_MODEL             = os.environ.get("RR_MODEL", "")   # empty → premium model
 
+# ---- vendor-purchase tickets (kind = proc): vendor → approval chain → paid ----
+PROC_CATEGORY           = os.environ.get("PROC_CATEGORY", "مشتريات")
+PROC_PANEL_CHANNEL      = os.environ.get("PROC_PANEL_CHANNEL", "فتح-تذكرة-مشتريات")
+PROC_SUPERVISOR_ROLE_ID = int(os.environ.get("PROC_SUPERVISOR_ROLE_ID", "0") or 0)   # @SV
+PROC_ACCOUNTING_ROLE_ID = int(os.environ.get("PROC_ACCOUNTING_ROLE_ID", "0") or 0)
+PROC_CLOSE_ROLE_ID      = int(os.environ.get("PROC_CLOSE_ROLE_ID", "0") or 0)         # head of operations
+PROC_OWNER_IDS          = [int(x) for x in os.environ.get("PROC_OWNER_IDS", "").replace(" ", "").split(",") if x]  # Faisal
+PROC_ESCALATE_ROLE_ID   = int(os.environ.get("PROC_ESCALATE_ROLE_ID", "0") or 0)
+PROC_REMINDER_MAX       = int(os.environ.get("PROC_REMINDER_MAX", "3") or 3)
+PROC_PING_EVERY_HOURS   = float(os.environ.get("PROC_PING_EVERY_HOURS", "3") or 3)
+PROC_PING_WINDOWS       = os.environ.get("PROC_PING_WINDOWS", "11:00-13:00,17:00-24:00")
+PROC_REMINDER_POLL_MIN  = int(os.environ.get("PROC_REMINDER_POLL_MIN", "20") or 20)
+
 _dtk_lock = threading.Lock()
 _dtk = _load_json("discord_tickets.json", None)
 if not isinstance(_dtk, dict):
@@ -46922,8 +46935,9 @@ def _tk_cat_norm(s):
     return str(s or "").strip().lower().replace("ة", "ه")
 
 async def _tk_category(guild, kind):
-    """The صيانه / RR category (created on first use; صيانة spelling matches too)."""
-    want_name = MAINT_CATEGORY if kind == "maint" else RR_CATEGORY
+    """The صيانه / RR / مشتريات category (created on first use; spelling-tolerant match)."""
+    want_name = {"maint": MAINT_CATEGORY, "rr": RR_CATEGORY,
+                 "proc": PROC_CATEGORY}.get(kind, RR_CATEGORY)
     want = _tk_cat_norm(want_name)
     for cat in guild.categories:
         if _tk_cat_norm(cat.name) == want:
@@ -47288,7 +47302,12 @@ async def _tk_close(interaction):
         if rec.get("card_msg_id"):
             try:
                 m = await ch.fetch_message(rec["card_msg_id"])
-                await m.edit(view=None)
+                # purchase tickets re-render their card to the closed state; others
+                # just drop the buttons (their card has no live status line).
+                if rec.get("kind") == "proc":
+                    await m.edit(embed=_proc_card(rec), view=None)
+                else:
+                    await m.edit(view=None)
             except Exception:
                 pass
     try:
@@ -47797,6 +47816,656 @@ class RRPanelView(discord.ui.View):
             "**طلب RR جديد** — حدد النوع والأدلة ثم اضغط «متابعة»:",
             view=RRPickView(), ephemeral=True)
 
+# ====================================================================
+# Vendor-purchase tickets (kind = proc) — تذاكر المشتريات
+#   Tracks every purchase from a vendor through an approval chain so the team
+#   stops losing which invoices were received and paid. Mirrors the maint/RR
+#   framework: ephemeral picker → modal → ticket room → persistent buttons.
+#   open → received → confirmed → transferred → closed (each stage role-gated,
+#   pinged on its own clock inside the configured Riyadh windows).
+# ====================================================================
+_PROC_STATUS = [
+    ("open",        "🟡 مفتوحة — بانتظار صورة الفاتورة/الإيصال", 0xE2B33C),
+    ("received",    "🔵 الصورة وصلت — بانتظار تأكيد المشرف",      0x3B82F6),
+    ("confirmed",   "🟣 مؤكدة — بانتظار التحويل (المحاسبة)",      0x8B5CF6),
+    ("transferred", "🟢 تم التحويل — بانتظار الإغلاق",            0x3BA55D),
+    ("closed",      "🔒 مغلقة",                                   0x808080),
+]
+_PROC_REASONS = [
+    ("routine", "🔄 روتيني"),
+    ("missing", "📦 مفقود"),
+    ("damaged", "🛠️ متلف"),
+    ("newfit",  "✨ تجهيز جديد"),
+    ("other",   "❓ أخرى"),
+]
+# what to say to the next party when a stage advances
+_PROC_ADVANCE_MSG = {
+    "received":    "📸 انرفعت صورة الفاتورة/الإيصال — مطلوب **تأكيد المشرف** ✅",
+    "confirmed":   "✅ أكّد المشرف — مطلوب **تحويل المبلغ** من المحاسبة 💰",
+    "transferred": "💰 تم تحويل المبلغ — التذكرة جاهزة **للإغلاق** من مدير العمليات 🔒",
+}
+# the recurring nudge line per holding stage
+_PROC_NUDGE_MSG = {
+    "open":        "ارفع صورة الفاتورة/الإيصال واضغط «✅ أرفقت الصورة» 📸",
+    "received":    "مطلوب تأكيد المشرف ✅",
+    "confirmed":   "مطلوب تحويل المبلغ 💰",
+    "transferred": "التذكرة جاهزة للإغلاق 🔒",
+}
+
+def _proc_status_meta(status):
+    for k, lbl, c in _PROC_STATUS:
+        if k == status:
+            return (lbl, c)
+    return (_PROC_STATUS[0][1], _PROC_STATUS[0][2])
+
+def _proc_fmt_dt(iso):
+    if not iso:
+        return "—"
+    try:
+        d = datetime.fromisoformat(iso)
+        return f"{d.day}/{d.month} {d.strftime('%H:%M')}"
+    except Exception:
+        return str(iso)
+
+def _proc_amt_txt(rec):
+    a = _tk_num(rec.get("amount_raw"))
+    return f"{_tk_sar(a)} ر.س" if a is not None else (rec.get("amount_raw") or "—")
+
+def _proc_vendor_slug(vendor):
+    """Channel-safe vendor slug: keep Arabic + a-z0-9, everything else → '-'."""
+    s = str(vendor or "").strip().lower()
+    s = re.sub(r"[^a-z0-9؀-ۿ]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s[:80]
+
+def _proc_has_role(user, role_id):
+    """Role gate. An UNSET role id (0) means the gate is open — so the flow works
+    on day one before the owner wires roles up. (Close is the exception, §5.)"""
+    if not role_id:
+        return True
+    try:
+        return any(getattr(r, "id", None) == role_id for r in (getattr(user, "roles", []) or []))
+    except Exception:
+        return False
+
+def _proc_can_close(user):
+    """ONLY head of operations (PROC_CLOSE_ROLE_ID) or an owner ID (Faisal) may
+    close. Server-admin does NOT auto-pass, and an unset gate does NOT open."""
+    try:
+        if PROC_OWNER_IDS and getattr(user, "id", None) in PROC_OWNER_IDS:
+            return True
+        if PROC_CLOSE_ROLE_ID and any(getattr(r, "id", None) == PROC_CLOSE_ROLE_ID
+                                      for r in (getattr(user, "roles", []) or [])):
+            return True
+    except Exception:
+        pass
+    return False
+
+def _proc_holder_mention(rec, status):
+    """Who currently must act on this stage — the mention we ping."""
+    if status == "open":
+        oid = rec.get("opener_id")
+        return f"<@{int(oid)}>" if oid else (rec.get("opener") or "فاتح التذكرة")
+    if status == "received":
+        return f"<@&{PROC_SUPERVISOR_ROLE_ID}>" if PROC_SUPERVISOR_ROLE_ID else "**المشرف**"
+    if status == "confirmed":
+        return f"<@&{PROC_ACCOUNTING_ROLE_ID}>" if PROC_ACCOUNTING_ROLE_ID else "**المحاسبة**"
+    if status == "transferred":
+        if PROC_CLOSE_ROLE_ID:
+            return f"<@&{PROC_CLOSE_ROLE_ID}>"
+        if PROC_OWNER_IDS:
+            return " ".join(f"<@{i}>" for i in PROC_OWNER_IDS)
+        return "**مدير العمليات**"
+    return "—"
+
+def _proc_trail_lines(rec):
+    """Audit trail rendered from the stamped {stage}_by / {stage}_at fields."""
+    L = []
+
+    def add(emoji, label, by, at):
+        if by or at:
+            L.append(f"{emoji} {label}: {by or '—'} · {_proc_fmt_dt(at)}")
+    add("🟡", "فُتحت", rec.get("opener"), rec.get("created_at"))
+    add("📸", "صورة مرفقة", rec.get("received_by"), rec.get("received_at"))
+    add("✅", "تأكيد المشرف", rec.get("confirmed_by"), rec.get("confirmed_at"))
+    add("💰", "تم التحويل", rec.get("transferred_by"), rec.get("transferred_at"))
+    add("🔒", "أُغلقت", rec.get("closed_by"), rec.get("closed_at"))
+    if rec.get("returned_by"):
+        note = (rec.get("return_note") or "").strip()
+        L.append(f"↩️ رُجّعت للموظف: {rec.get('returned_by')} · {_proc_fmt_dt(rec.get('returned_at'))}"
+                 + (f" — {note}" if note else ""))
+    return "\n".join(L)
+
+def _proc_card(rec):
+    """The pinned GOLD-family status card for a purchase ticket (pure → rec only)."""
+    seq = int(rec.get("seq") or 0)
+    status = rec.get("status") or "open"
+    slbl, scolor = _proc_status_meta(status)
+    late = bool(rec.get("escalated")) and status != "closed"
+    title = (f"🚨 متأخرة — تذكرة مشتريات #{seq:03d}" if late
+             else f"🧾 تذكرة مشتريات #{seq:03d}")
+    e = discord.Embed(title=title[:256], color=(0xE5484D if late else scolor),
+                      description=f"**المورّد:** {rec.get('vendor') or '—'}"[:4000])
+    e.add_field(name="🔢 آخر 4 من عرض السعر", value=str(rec.get("last4") or "—"), inline=True)
+    e.add_field(name="💰 المبلغ", value=_proc_amt_txt(rec), inline=True)
+    e.add_field(name="📌 الحالة", value=slbl, inline=True)
+    e.add_field(name="📦 الأصناف", value=(str(rec.get("items") or "—"))[:1024], inline=False)
+    units = rec.get("units") or []
+    apt_txt = "\n".join("• " + str(u) for u in units) if units else "—"
+    e.add_field(name=f"🏠 الشقق ({len(units)})", value=apt_txt[:1024], inline=False)
+    reason_lbl = dict(_PROC_REASONS).get(rec.get("reason"))
+    if reason_lbl:
+        e.add_field(name="📝 سبب الطلب", value=reason_lbl, inline=True)
+    opener_id = rec.get("opener_id")
+    e.add_field(name="🙋 فاتح التذكرة",
+                value=(f"<@{int(opener_id)}>" if opener_id else (rec.get("opener") or "—")),
+                inline=True)
+    trail = _proc_trail_lines(rec)
+    if trail:
+        e.add_field(name="🧾 السجل", value=trail[:1024], inline=False)
+    e.set_footer(text="ارفعوا صورة الفاتورة/الإيصال داخل الروم 📎")
+    return e
+
+# ---- reminder windows (Riyadh) ----
+def _proc_parse_windows(spec):
+    """'11:00-13:00,17:00-24:00' → [(660,780),(1020,1440)] minute pairs. A 00:00
+    end is treated as midnight (1440) so 17:00-00:00 == 17:00-24:00."""
+    out = []
+    for part in str(spec or "").split(","):
+        part = part.strip()
+        if not part or "-" not in part:
+            continue
+        a, b = part.split("-", 1)
+        try:
+            sh, sm = a.split(":")
+            eh, em = b.split(":")
+            s = int(sh) * 60 + int(sm)
+            ee = int(eh) * 60 + int(em)
+            if ee == 0:
+                ee = 24 * 60
+            if ee > s:
+                out.append((s, ee))
+        except Exception:
+            continue
+    return out
+
+_PROC_WINDOWS = _proc_parse_windows(PROC_PING_WINDOWS)
+
+def _proc_in_window(now):
+    m = now.hour * 60 + now.minute
+    return any(s <= m < e for s, e in _PROC_WINDOWS)
+
+# ---- open form: paged multi-apartment select + reason, then the modal ----
+class _ProcAptSelect(discord.ui.Select):
+    """Paged AND multi: Discord caps a menu at 25 but Ouja has 70+ listings, so
+    picks must survive page changes — we reconcile ONLY the current page."""
+    def __init__(self, parent):
+        self.parent_view = parent
+        chunk = parent.listings[parent.page * 25:(parent.page + 1) * 25]
+        self._page_ids = {lid for lid, _ in chunk}
+        opts = [discord.SelectOption(label=nm[:100], value=str(lid),
+                                     default=(lid in parent.selected))
+                for lid, nm in chunk]
+        if not opts:
+            opts = [discord.SelectOption(label="(القائمة فاضية)", value="0")]
+        super().__init__(placeholder=f"🏠 اختر الشقة/الشقق — صفحة {parent.page + 1}/{parent.pages}",
+                         min_values=0, max_values=len(opts), options=opts, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        page_ids = self._page_ids
+        chosen = {int(v) for v in self.values if v != "0"}
+        self.parent_view.selected = (self.parent_view.selected - page_ids) | chosen
+        self.parent_view.refresh()
+        await interaction.response.edit_message(view=self.parent_view)
+
+class _ProcReasonSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        opts = [discord.SelectOption(label=lbl, value=k, default=(k == parent.reason))
+                for k, lbl in _PROC_REASONS]
+        super().__init__(placeholder="📝 سبب الطلب (اختياري)", min_values=0, max_values=1,
+                         options=opts, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.reason = self.values[0] if self.values else None
+        await interaction.response.defer()
+
+class _ProcNavBtn(discord.ui.Button):
+    def __init__(self, parent, delta, label, disabled):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=2, disabled=disabled)
+        self.parent_view_ref, self.delta = parent, delta
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        p.page = max(0, min(p.pages - 1, p.page + self.delta))
+        p.refresh()
+        await interaction.response.edit_message(view=p)
+
+class _ProcGoBtn(discord.ui.Button):
+    def __init__(self, parent):
+        super().__init__(label="✍️ متابعة — بيانات الفاتورة", style=discord.ButtonStyle.success, row=2)
+        self.parent_view_ref = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        if not p.selected:
+            await interaction.response.send_message("🙏 اختر شقة وحدة على الأقل أول.", ephemeral=True)
+            return
+        await interaction.response.send_modal(ProcModal(p.selected_units(), p.reason))
+
+class ProcPickView(discord.ui.View):
+    """Ephemeral picker: apartment(s) (paged multi-select) + reason, then modal."""
+    def __init__(self, listings):
+        super().__init__(timeout=900)
+        self.listings = listings
+        self.pages = max(1, (len(listings) + 24) // 25)
+        self.page = 0
+        self.selected = set()
+        self.reason = None
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(_ProcAptSelect(self))
+        self.add_item(_ProcReasonSelect(self))
+        if self.pages > 1:
+            self.add_item(_ProcNavBtn(self, -1, "◀ الشقق السابقة", self.page <= 0))
+            self.add_item(_ProcNavBtn(self, +1, "الشقق التالية ▶", self.page >= self.pages - 1))
+        self.add_item(_ProcGoBtn(self))
+
+    def selected_units(self):
+        names = dict(self.listings)
+        return [(lid, names.get(lid) or _tk_unit_name(lid)) for lid in sorted(self.selected)]
+
+class ProcModal(discord.ui.Modal, title="🧾 تذكرة مشتريات جديدة"):
+    def __init__(self, units, reason):
+        super().__init__()
+        self.units, self.reason = units, reason
+        self.last4 = discord.ui.TextInput(label="آخر 4 أرقام من عرض السعر", max_length=12,
+                                          placeholder="مثال: 4827")
+        self.vendor = discord.ui.TextInput(label="اسم المورّد", max_length=80,
+                                           placeholder="مثال: مؤسسة الركن")
+        self.items = discord.ui.TextInput(label="الأصناف", style=discord.TextStyle.paragraph,
+                                          max_length=1000,
+                                          placeholder="مثال: 3 مكيفات سبليت + تركيب")
+        self.amount = discord.ui.TextInput(label="المبلغ (ريال)", max_length=20,
+                                           placeholder="مثال: 4500")
+        for item in (self.last4, self.vendor, self.items, self.amount):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            ch = await _proc_open_ticket(
+                interaction, self.units, self.reason,
+                str(self.last4.value).strip(), str(self.vendor.value).strip(),
+                str(self.items.value).strip(), str(self.amount.value).strip())
+            await interaction.followup.send(f"✅ انفتحت تذكرة المشتريات: {ch.mention}", ephemeral=True)
+        except Exception as e:
+            print("proc ticket open error:", e)
+            await interaction.followup.send(
+                "⚠️ صار خطأ وما انفتحت التذكرة — جرّب مرة ثانية أو بلّغ فيصل.", ephemeral=True)
+
+async def _proc_open_ticket(interaction, units, reason, last4, vendor, items, amount_raw):
+    guild = interaction.guild
+    seq = _next_counter("proc_ticket")
+    cat = await _tk_category(guild, "proc")
+    last4c = (re.sub(r"\D", "", str(last4).translate(_AR_DIGIT_MAP))[-4:]
+              or re.sub(r"\s+", "", str(last4))[:4] or "0000")
+    vslug = _proc_vendor_slug(vendor)
+    chname = (f"{last4c}-{vslug}" if vslug else f"{last4c}-مشتريات")[:90]
+    ch = await guild.create_text_channel(
+        chname, category=cat, topic=f"ouja-ticket:proc seq:{seq} q4:{last4c}")
+    now = datetime.now(TZ)
+    rec = {"kind": "proc", "seq": seq, "last4": last4c, "vendor": vendor,
+           "items": items, "amount_raw": amount_raw, "reason": reason,
+           "units": [nm for _l, nm in units], "unit_ids": [_l for _l, _nm in units],
+           "opener_id": interaction.user.id, "opener": str(interaction.user),
+           "status": "open", "created_at": now.isoformat(timespec="seconds"),
+           "stage_at": now.isoformat(timespec="seconds"),
+           "nudges": 0, "last_nudge_at": None, "escalated": False,
+           "trail": [{"status": "open", "by": str(interaction.user),
+                      "at": now.isoformat(timespec="seconds")}]}
+    _dtk["tickets"][str(ch.id)] = rec
+    _dtk_save()
+    content = (f"{interaction.user.mention} فتح تذكرة مشتريات جديدة — "
+               "ارفع صورة الفاتورة/الإيصال واضغط «✅ أرفقت الصورة» 📸")
+    try:
+        msg = await ch.send(content=content, embed=_proc_card(rec), view=ProcTicketView(),
+                            allowed_mentions=discord.AllowedMentions(users=True))
+        rec["card_msg_id"] = msg.id
+        _dtk_save()
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+    except Exception as e:
+        print("proc card post error:", e)
+    log_event("ops", f"تذكرة مشتريات جديدة #{seq:03d} · {vendor} · عرض …{last4c} · {_proc_amt_txt(rec)}")
+    return ch
+
+async def _proc_advance(interaction, new_status, actor):
+    """Stamp the stage, refresh the card, ping the next party, reset the nudge clock."""
+    ch = interaction.channel
+    rec = _dtk["tickets"].get(str(ch.id))
+    if not rec:
+        return
+    now = datetime.now(TZ)
+    rec["status"] = new_status
+    rec[f"{new_status}_by"] = str(actor)
+    rec[f"{new_status}_at"] = now.isoformat(timespec="seconds")
+    rec.setdefault("trail", []).append(
+        {"status": new_status, "by": str(actor), "at": now.isoformat(timespec="seconds")})
+    rec["stage_at"] = now.isoformat(timespec="seconds")
+    rec["nudges"] = 0
+    rec["last_nudge_at"] = None
+    rec["escalated"] = False
+    _dtk_save()
+    try:
+        if rec.get("card_msg_id"):
+            m = await ch.fetch_message(rec["card_msg_id"])
+            await m.edit(embed=_proc_card(rec))
+    except Exception as e:
+        print("proc card refresh error:", e)
+    log_event("ops", f"تذكرة مشتريات #{int(rec.get('seq') or 0):03d}: "
+                     f"الحالة → {_proc_status_meta(new_status)[0]} بواسطة {actor}")
+    try:
+        await ch.send(f"{_proc_holder_mention(rec, new_status)} — "
+                      f"{_PROC_ADVANCE_MSG.get(new_status, 'تم تحديث الحالة.')}",
+                      allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+    except Exception as e:
+        print("proc advance ping error:", e)
+
+async def _proc_has_attachment(channel):
+    """Soft check that a photo/file was uploaded before the opener marks it received."""
+    try:
+        async for m in channel.history(limit=30):
+            if m.attachments:
+                return True
+    except Exception as e:
+        print("proc attachment scan error:", e)
+        return True            # never block the flow on a history-read hiccup
+    return False
+
+class _ProcRejectModal(discord.ui.Modal, title="↩️ إرجاع التذكرة للموظف"):
+    def __init__(self):
+        super().__init__()
+        self.why = discord.ui.TextInput(label="ليش ترجعها؟ (يوصل للموظف)",
+                                        style=discord.TextStyle.paragraph, max_length=500,
+                                        placeholder="مثال: الصورة مو واضحة / المبلغ غلط / ناقص تفاصيل")
+        self.add_item(self.why)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "proc":
+            return
+        now = datetime.now(TZ)
+        note = str(self.why.value or "").strip()
+        rec["status"] = "open"
+        rec["returned_by"] = str(interaction.user)
+        rec["returned_at"] = now.isoformat(timespec="seconds")
+        rec["return_note"] = note
+        rec.setdefault("trail", []).append(
+            {"status": "returned", "by": str(interaction.user),
+             "at": now.isoformat(timespec="seconds"), "note": note})
+        rec["stage_at"] = now.isoformat(timespec="seconds")
+        rec["nudges"] = 0
+        rec["last_nudge_at"] = None
+        rec["escalated"] = False
+        _dtk_save()
+        try:
+            if rec.get("card_msg_id"):
+                m = await interaction.channel.fetch_message(rec["card_msg_id"])
+                await m.edit(embed=_proc_card(rec))
+        except Exception as e:
+            print("proc reject card error:", e)
+        log_event("ops", f"تذكرة مشتريات #{int(rec.get('seq') or 0):03d}: "
+                         f"رُجّعت للموظف بواسطة {interaction.user}")
+        opener = rec.get("opener_id")
+        ping = f"<@{int(opener)}>" if opener else (rec.get("opener") or "الموظف")
+        try:
+            await interaction.channel.send(
+                f"↩️ {ping} — رُجّعت لك التذكرة من {interaction.user.mention}.\n"
+                f"**السبب:** {note or '—'}\n"
+                "صلّح المطلوب وارفع صورة جديدة ثم اضغط «✅ أرفقت الصورة».",
+                allowed_mentions=discord.AllowedMentions(users=True))
+        except Exception as e:
+            print("proc reject ping error:", e)
+
+class ProcTicketView(discord.ui.View):
+    """Persistent buttons on every purchase-ticket card. Each is stage-gated AND
+    role-gated; a press out of turn / without the role is a quiet ephemeral that
+    does NOT advance the ticket."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ أرفقت الصورة", style=discord.ButtonStyle.success,
+                       custom_id="proc_received", row=0)
+    async def received(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "proc":
+            await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
+            return
+        if not (interaction.user.id == rec.get("opener_id") or _tk_is_admin(interaction.user)):
+            await interaction.response.send_message("🙏 هذا الزر لفاتح التذكرة فقط.", ephemeral=True)
+            return
+        if rec.get("status") != "open":
+            await interaction.response.send_message(
+                f"⚠️ هذي الخطوة مو دورها الحين — الحالة: {_proc_status_meta(rec.get('status'))[0]}",
+                ephemeral=True)
+            return
+        # ack first (the gate checks above are instant), THEN do the history scan so
+        # a slow channel.history() never blows the 3-second interaction deadline.
+        await interaction.response.defer()
+        if not await _proc_has_attachment(interaction.channel):
+            await interaction.followup.send(
+                "📎 ارفع صورة الفاتورة/الإيصال بالروم أول، بعدين اضغط الزر.", ephemeral=True)
+            return
+        await _proc_advance(interaction, "received", interaction.user)
+
+    @discord.ui.button(label="✅ تأكيد (مشرف)", style=discord.ButtonStyle.primary,
+                       custom_id="proc_confirm", row=0)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "proc":
+            await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
+            return
+        if not (_tk_is_admin(interaction.user) or _proc_has_role(interaction.user, PROC_SUPERVISOR_ROLE_ID)):
+            await interaction.response.send_message("🙏 هذا الزر للمشرف فقط.", ephemeral=True)
+            return
+        if rec.get("status") != "received":
+            await interaction.response.send_message(
+                f"⚠️ هذي الخطوة مو دورها الحين — الحالة: {_proc_status_meta(rec.get('status'))[0]}",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        await _proc_advance(interaction, "confirmed", interaction.user)
+
+    @discord.ui.button(label="💰 تم التحويل", style=discord.ButtonStyle.primary,
+                       custom_id="proc_paid", row=0)
+    async def paid(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "proc":
+            await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
+            return
+        if not (_tk_is_admin(interaction.user) or _proc_has_role(interaction.user, PROC_ACCOUNTING_ROLE_ID)):
+            await interaction.response.send_message("🙏 هذا الزر للمحاسبة فقط.", ephemeral=True)
+            return
+        if rec.get("status") != "confirmed":
+            await interaction.response.send_message(
+                f"⚠️ هذي الخطوة مو دورها الحين — الحالة: {_proc_status_meta(rec.get('status'))[0]}",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        await _proc_advance(interaction, "transferred", interaction.user)
+
+    @discord.ui.button(label="↩️ إرجاع للموظف", style=discord.ButtonStyle.secondary,
+                       custom_id="proc_reject", row=1)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "proc":
+            await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
+            return
+        if not (_tk_is_admin(interaction.user)
+                or _proc_has_role(interaction.user, PROC_SUPERVISOR_ROLE_ID)
+                or _proc_has_role(interaction.user, PROC_ACCOUNTING_ROLE_ID)):
+            await interaction.response.send_message("🙏 الإرجاع للمشرف أو المحاسبة فقط.", ephemeral=True)
+            return
+        if rec.get("status") not in ("received", "confirmed"):
+            await interaction.response.send_message(
+                "⚠️ الإرجاع يصير بس بعد وصول الصورة وقبل التحويل.", ephemeral=True)
+            return
+        await interaction.response.send_modal(_ProcRejectModal())
+
+    @discord.ui.button(label="🔒 إغلاق", style=discord.ButtonStyle.danger,
+                       custom_id="proc_close", row=1)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec or rec.get("kind") != "proc":
+            await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
+            return
+        if not _proc_can_close(interaction.user):
+            extra = ("" if (PROC_OWNER_IDS or PROC_CLOSE_ROLE_ID)
+                     else "\n(لسا ما تعيّن مدير عمليات — عيّن PROC_CLOSE_ROLE_ID أو PROC_OWNER_IDS.)")
+            await interaction.response.send_message(
+                "🙏 الإغلاق لمدير العمليات أو المالك فقط." + extra, ephemeral=True)
+            return
+        if rec.get("status") == "closed":
+            await interaction.response.send_message("التذكرة مغلقة أصلاً.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "متأكد تبغى تقفل تذكرة المشتريات؟", view=_TkCloseConfirm(), ephemeral=True)
+
+class ProcPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🧾 افتح تذكرة مشتريات", style=discord.ButtonStyle.primary,
+                       custom_id="proc_open")
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        listings = await asyncio.to_thread(_tk_listings)
+        if not listings:
+            await interaction.response.send_message(
+                "⚠️ ما قدرت أجيب قائمة الشقق — جرّب بعد دقيقة.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "**تذكرة مشتريات جديدة** — اختر الشقة/الشقق وسبب الطلب ثم اضغط «متابعة»:",
+            view=ProcPickView(listings), ephemeral=True)
+
+# ---- nudge loop: ping the current holder every N hours inside the windows ----
+async def _proc_run_reminders():
+    now = datetime.now(TZ)
+    if not _proc_in_window(now):
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    every = timedelta(hours=PROC_PING_EVERY_HOURS)
+    for cid, rec in list(_dtk["tickets"].items()):
+        if not isinstance(rec, dict) or rec.get("kind") != "proc":
+            continue
+        status = rec.get("status")
+        if status in (None, "closed"):
+            continue
+        ref = rec.get("last_nudge_at") or rec.get("stage_at") or rec.get("created_at")
+        try:
+            ref_dt = datetime.fromisoformat(ref) if ref else None
+        except Exception:
+            ref_dt = None
+        if ref_dt is not None:
+            if ref_dt.tzinfo is None:
+                ref_dt = ref_dt.replace(tzinfo=TZ)
+            if (now - ref_dt) < every:
+                continue
+        ch = guild.get_channel(int(cid))
+        if ch is None:
+            continue
+        try:
+            n = int(rec.get("nudges") or 0)
+            holder = _proc_holder_mention(rec, status)
+            slbl = _proc_status_meta(status)[0]
+            seq = int(rec.get("seq") or 0)
+            if n >= PROC_REMINDER_MAX:
+                esc = f"<@&{PROC_ESCALATE_ROLE_ID}> " if PROC_ESCALATE_ROLE_ID else ""
+                if not rec.get("escalated"):
+                    rec["escalated"] = True
+                    _dtk_save()
+                    try:
+                        if rec.get("card_msg_id"):
+                            m = await ch.fetch_message(rec["card_msg_id"])
+                            await m.edit(embed=_proc_card(rec))
+                    except Exception as e:
+                        print("proc escalate card error:", e)
+                await ch.send(
+                    f"🚨 {esc}**تذكرة مشتريات متأخرة #{seq:03d}** — {holder} تجاوزت عدد التنبيهات. الحالة: {slbl}",
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+            else:
+                await ch.send(
+                    f"⏰ {holder} — تذكير: {_PROC_NUDGE_MSG.get(status, 'التذكرة بانتظار إجراء')} "
+                    f"(تذكير {n + 1}/{PROC_REMINDER_MAX})",
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+            rec["nudges"] = n + 1
+            rec["last_nudge_at"] = now.isoformat(timespec="seconds")
+            _dtk_save()
+        except Exception as e:
+            print(f"proc nudge error ({cid}):", e)
+
+@tasks.loop(minutes=PROC_REMINDER_POLL_MIN)
+async def proc_reminder_loop():
+    """Every ~20 min: nudge whoever holds each open purchase ticket, but only inside
+    PROC_PING_WINDOWS and at most once per PROC_PING_EVERY_HOURS per ticket."""
+    try:
+        await _proc_run_reminders()
+    except Exception as e:
+        print("proc_reminder_loop error:", e)
+
+@bot.command(name="مشتريات-بحث", aliases=["proc-search", "مشتريات-البحث"])
+async def proc_search_cmd(ctx, *, query: str = ""):
+    """Search the purchase-ticket archive by last-4 / amount / vendor (admins only).
+       !ouja مشتريات-بحث 4827        → by quote last-4
+       !ouja مشتريات-بحث الركن        → by vendor name
+       !ouja مشتريات-بحث 4500         → by amount
+    Answers "did we already receive/pay this invoice?" in one command."""
+    if not _tk_is_admin(ctx.author):
+        await ctx.reply("هذا الأمر للإدارة فقط 🙏")
+        return
+    q = (query or "").strip()
+    if not q:
+        await ctx.reply("اكتب وش تبي تدوّر: آخر 4 من عرض السعر، أو المبلغ، أو اسم المورّد.\n"
+                        "مثال: `!ouja مشتريات-بحث 4827`")
+        return
+    qn = q.lower()
+    qdigits = re.sub(r"\D", "", q.translate(_AR_DIGIT_MAP))
+    qnum = _tk_num(q)
+    hits = []
+    for cid, rec in _dtk["tickets"].items():
+        if not isinstance(rec, dict) or rec.get("kind") != "proc":
+            continue
+        last4 = str(rec.get("last4") or "")
+        vendor = (rec.get("vendor") or "").lower()
+        items = (rec.get("items") or "").lower()
+        amt = _tk_num(rec.get("amount_raw"))
+        match = ((qn and (qn in vendor or qn in items))
+                 or (qdigits and qdigits in last4)
+                 or (qnum is not None and amt is not None and abs(amt - qnum) < 0.01))
+        if match:
+            hits.append((cid, rec))
+    if not hits:
+        await ctx.reply(f"ما لقيت تذاكر مشتريات تطابق «{q}».")
+        return
+    hits.sort(key=lambda x: int(x[1].get("seq") or 0), reverse=True)
+    lines = [f"🔎 **نتائج البحث عن «{q}»** — {len(hits)} تذكرة:"]
+    for cid, rec in hits[:20]:
+        slbl = _proc_status_meta(rec.get("status") or "open")[0]
+        lines.append(f"• #{int(rec.get('seq') or 0):03d} — {rec.get('vendor') or '—'} · "
+                     f"عرض …{rec.get('last4') or '—'} · {_proc_amt_txt(rec)} · {slbl} → <#{cid}>")
+    if len(hits) > 20:
+        lines.append(f"… و{len(hits) - 20} تذكرة ثانية (ضيّق البحث أكثر).")
+    out = "\n".join(lines)
+    for i in range(0, len(out), 1900):
+        await ctx.send(out[i:i + 1900])
+
 # ---------------- panels + admin commands ----------------
 async def ensure_ticket_panels(guild):
     """The two «افتح تذكرة» rooms exist under their categories, each holding ONE
@@ -47816,6 +48485,14 @@ async def ensure_ticket_panels(guild):
          "3️⃣ البوت يجهّز النسخة الإنجليزية الرسمية كاملة لفريق المطالبات،\n"
          "ويجيب بيانات الحجز من Hostaway، ويحسب مهلة الـ 14 يوم حقت AirCover ⏳\n\n"
          "بعد فتح التذكرة ارفعوا الصور والفواتير داخل الروم 📎"),
+        ("proc", PROC_PANEL_CHANNEL, ProcPanelView(), "🧾 تذاكر المشتريات",
+         "شريت من مورّد؟ سجّل الفاتورة هنا عشان ما تضيع 👇\n\n"
+         "1️⃣ اختر الشقة/الشقق وسبب الطلب\n"
+         "2️⃣ اكتب آخر 4 من عرض السعر + اسم المورّد + الأصناف + المبلغ\n"
+         "3️⃣ ينفتح روم للتذكرة وتمشي بسلسلة الاعتماد:\n"
+         "📸 صورة الفاتورة ← ✅ تأكيد المشرف ← 💰 تحويل المحاسبة ← 🔒 إغلاق مدير العمليات\n\n"
+         "وكل تذكرة يذكّر صاحب الدور تلقائياً لين يخلّص — "
+         "والبحث `!ouja مشتريات-بحث` يلقّط أي فاتورة قديمة لو وصلت متأخرة."),
     ]
     for kind, ch_name, view, title, desc in defs:
         try:
@@ -48513,10 +49190,12 @@ async def on_ready():
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
     bot.add_view(CleaningProofReviewView())  # re-bind cleaning photo approval buttons
-    bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR)
+    bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR/مشتريات)
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
     bot.add_view(RRTicketView())
+    bot.add_view(ProcPanelView())      # vendor-purchase ticket panel + room buttons
+    bot.add_view(ProcTicketView())
     bot.add_view(MusaedEvalView())     # Musaed Quality Scoreboard button (additive)
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
@@ -48587,6 +49266,8 @@ async def on_ready():
         headsup_loop.start()
     if not owner_warm_loop.is_running():
         owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
+    if not proc_reminder_loop.is_running():
+        proc_reminder_loop.start()     # nudges the holder of each open purchase ticket
     if ASSISTANT_ENABLED:
         guild0 = bot.get_guild(GUILD_ID)
         if guild0 is not None:
