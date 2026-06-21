@@ -46778,7 +46778,8 @@ RR_MODEL             = os.environ.get("RR_MODEL", "")   # empty → premium mode
 # ---- vendor-purchase tickets (kind = proc): vendor → approval chain → paid ----
 PROC_CATEGORY           = os.environ.get("PROC_CATEGORY", "مشتريات")
 PROC_PANEL_CHANNEL      = os.environ.get("PROC_PANEL_CHANNEL", "فتح-تذكرة-مشتريات")
-PROC_SUPERVISOR_ROLE_ID = int(os.environ.get("PROC_SUPERVISOR_ROLE_ID", "0") or 0)   # @SV
+PROC_OPERATIONS_ROLE_ID = int(os.environ.get("PROC_OPERATIONS_ROLE_ID", "0") or 0)   # field/ops team (attach the receipt)
+PROC_SUPERVISOR_ROLE_ID = int(os.environ.get("PROC_SUPERVISOR_ROLE_ID", "0") or 0)   # operations leaders (confirm)
 PROC_ACCOUNTING_ROLE_ID = int(os.environ.get("PROC_ACCOUNTING_ROLE_ID", "0") or 0)
 PROC_CLOSE_ROLE_ID      = int(os.environ.get("PROC_CLOSE_ROLE_ID", "0") or 0)         # head of operations
 PROC_OWNER_IDS          = [int(x) for x in os.environ.get("PROC_OWNER_IDS", "").replace(" ", "").split(",") if x]  # Faisal
@@ -47825,11 +47826,11 @@ class RRPanelView(discord.ui.View):
 #   pinged on its own clock inside the configured Riyadh windows).
 # ====================================================================
 _PROC_STATUS = [
-    ("open",        "🟡 مفتوحة — بانتظار صورة الفاتورة/الإيصال", 0xE2B33C),
-    ("received",    "🔵 الصورة وصلت — بانتظار تأكيد المشرف",      0x3B82F6),
-    ("confirmed",   "🟣 مؤكدة — بانتظار التحويل (المحاسبة)",      0x8B5CF6),
-    ("transferred", "🟢 تم التحويل — بانتظار الإغلاق",            0x3BA55D),
-    ("closed",      "🔒 مغلقة",                                   0x808080),
+    ("open",        "🟡 مفتوحة — بانتظار صورة الفاتورة/الإيصال (العمليات)", 0xE2B33C),
+    ("received",    "🔵 الصورة وصلت — بانتظار تأكيد قادة العمليات",          0x3B82F6),
+    ("confirmed",   "🟣 مؤكدة — بانتظار التحويل (المحاسبة)",                 0x8B5CF6),
+    ("transferred", "🟢 تم التحويل — بانتظار إغلاق الإدارة",                 0x3BA55D),
+    ("closed",      "🔒 مغلقة",                                             0x808080),
 ]
 _PROC_REASONS = [
     ("routine", "🔄 روتيني"),
@@ -47840,16 +47841,16 @@ _PROC_REASONS = [
 ]
 # what to say to the next party when a stage advances
 _PROC_ADVANCE_MSG = {
-    "received":    "📸 انرفعت صورة الفاتورة/الإيصال — مطلوب **تأكيد المشرف** ✅",
-    "confirmed":   "✅ أكّد المشرف — مطلوب **تحويل المبلغ** من المحاسبة 💰",
-    "transferred": "💰 تم تحويل المبلغ — التذكرة جاهزة **للإغلاق** من مدير العمليات 🔒",
+    "received":    "📸 انرفعت صورة الفاتورة/الإيصال — مطلوب **تأكيد قادة العمليات** ✅",
+    "confirmed":   "✅ أكّدوا قادة العمليات — مطلوب **تحويل المبلغ** من المحاسبة 💰",
+    "transferred": "💰 تم تحويل المبلغ — التذكرة جاهزة **لإغلاق الإدارة** 🔒",
 }
 # the recurring nudge line per holding stage
 _PROC_NUDGE_MSG = {
     "open":        "ارفع صورة الفاتورة/الإيصال واضغط «✅ أرفقت الصورة» 📸",
-    "received":    "مطلوب تأكيد المشرف ✅",
+    "received":    "مطلوب تأكيد قادة العمليات ✅",
     "confirmed":   "مطلوب تحويل المبلغ 💰",
-    "transferred": "التذكرة جاهزة للإغلاق 🔒",
+    "transferred": "التذكرة جاهزة لإغلاق الإدارة 🔒",
 }
 
 def _proc_status_meta(status):
@@ -47878,24 +47879,65 @@ def _proc_vendor_slug(vendor):
     s = re.sub(r"-+", "-", s).strip("-")
     return s[:80]
 
-def _proc_has_role(user, role_id):
-    """Role gate. An UNSET role id (0) means the gate is open — so the flow works
-    on day one before the owner wires roles up. (Close is the exception, §5.)"""
+# ---- per-stage role config: a persisted store (set from Discord) over env defaults ----
+_proc_roles = _load_json("proc_roles.json", None)
+if not isinstance(_proc_roles, dict):
+    _proc_roles = {}
+
+def _proc_roles_save():
+    _save_json("proc_roles.json", _proc_roles)
+
+# stage key → the four/five business tiers the owner named
+_PROC_ROLE_LABELS = [
+    ("operations", "🧰 العمليات — يرفع صورة الفاتورة"),
+    ("leaders",    "🧑‍✈️ قادة العمليات — يأكدون"),
+    ("accountant", "💰 المحاسبة — يحوّلون"),
+    ("managers",   "👔 الإدارة — يقفلون"),
+    ("escalate",   "🚨 التصعيد — يتنبهون للمتأخرة"),
+]
+
+def _proc_role(key):
+    """Configured role id for a stage — the Discord-set store first, then the env
+    var fallback. Returns 0 when unset."""
+    v = _proc_roles.get(key)
+    if v:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+    return {"operations": PROC_OPERATIONS_ROLE_ID,
+            "leaders": PROC_SUPERVISOR_ROLE_ID,
+            "accountant": PROC_ACCOUNTING_ROLE_ID,
+            "managers": PROC_CLOSE_ROLE_ID,
+            "escalate": PROC_ESCALATE_ROLE_ID}.get(key, 0)
+
+def _proc_roles_set(key, role_id):
+    _proc_roles[key] = int(role_id or 0)
+    _proc_roles_save()
+
+def _proc_in_role(user, role_id):
+    """STRICT membership: an unset role (0) is NOT a pass (unlike _proc_has_role)."""
     if not role_id:
-        return True
+        return False
     try:
         return any(getattr(r, "id", None) == role_id for r in (getattr(user, "roles", []) or []))
     except Exception:
         return False
 
+def _proc_has_role(user, role_id):
+    """Role gate. An UNSET role id (0) means the gate is open — so the flow works
+    on day one before the owner wires roles up. (Close is the exception, §5.)"""
+    if not role_id:
+        return True
+    return _proc_in_role(user, role_id)
+
 def _proc_can_close(user):
-    """ONLY head of operations (PROC_CLOSE_ROLE_ID) or an owner ID (Faisal) may
-    close. Server-admin does NOT auto-pass, and an unset gate does NOT open."""
+    """ONLY the managers role or an owner ID (Faisal) may close. Server-admin does
+    NOT auto-pass, and an unset gate does NOT open."""
     try:
         if PROC_OWNER_IDS and getattr(user, "id", None) in PROC_OWNER_IDS:
             return True
-        if PROC_CLOSE_ROLE_ID and any(getattr(r, "id", None) == PROC_CLOSE_ROLE_ID
-                                      for r in (getattr(user, "roles", []) or [])):
+        if _proc_in_role(user, _proc_role("managers")):
             return True
     except Exception:
         pass
@@ -47907,15 +47949,18 @@ def _proc_holder_mention(rec, status):
         oid = rec.get("opener_id")
         return f"<@{int(oid)}>" if oid else (rec.get("opener") or "فاتح التذكرة")
     if status == "received":
-        return f"<@&{PROC_SUPERVISOR_ROLE_ID}>" if PROC_SUPERVISOR_ROLE_ID else "**المشرف**"
+        r = _proc_role("leaders")
+        return f"<@&{r}>" if r else "**قادة العمليات**"
     if status == "confirmed":
-        return f"<@&{PROC_ACCOUNTING_ROLE_ID}>" if PROC_ACCOUNTING_ROLE_ID else "**المحاسبة**"
+        r = _proc_role("accountant")
+        return f"<@&{r}>" if r else "**المحاسبة**"
     if status == "transferred":
-        if PROC_CLOSE_ROLE_ID:
-            return f"<@&{PROC_CLOSE_ROLE_ID}>"
+        r = _proc_role("managers")
+        if r:
+            return f"<@&{r}>"
         if PROC_OWNER_IDS:
             return " ".join(f"<@{i}>" for i in PROC_OWNER_IDS)
-        return "**مدير العمليات**"
+        return "**الإدارة**"
     return "—"
 
 def _proc_trail_lines(rec):
@@ -48131,7 +48176,7 @@ async def _proc_open_ticket(interaction, units, reason, last4, vendor, items, am
     content = (f"{interaction.user.mention} فتح تذكرة مشتريات جديدة — "
                "ارفع صورة الفاتورة/الإيصال واضغط «✅ أرفقت الصورة» 📸")
     try:
-        msg = await ch.send(content=content, embed=_proc_card(rec), view=ProcTicketView(),
+        msg = await ch.send(content=content, embed=_proc_card(rec), view=ProcTicketView("open"),
                             allowed_mentions=discord.AllowedMentions(users=True))
         rec["card_msg_id"] = msg.id
         _dtk_save()
@@ -48164,7 +48209,7 @@ async def _proc_advance(interaction, new_status, actor):
     try:
         if rec.get("card_msg_id"):
             m = await ch.fetch_message(rec["card_msg_id"])
-            await m.edit(embed=_proc_card(rec))
+            await m.edit(embed=_proc_card(rec), view=ProcTicketView(new_status))
     except Exception as e:
         print("proc card refresh error:", e)
     log_event("ops", f"تذكرة مشتريات #{int(rec.get('seq') or 0):03d}: "
@@ -48217,7 +48262,7 @@ class _ProcRejectModal(discord.ui.Modal, title="↩️ إرجاع التذكرة
         try:
             if rec.get("card_msg_id"):
                 m = await interaction.channel.fetch_message(rec["card_msg_id"])
-                await m.edit(embed=_proc_card(rec))
+                await m.edit(embed=_proc_card(rec), view=ProcTicketView("open"))
         except Exception as e:
             print("proc reject card error:", e)
         log_event("ops", f"تذكرة مشتريات #{int(rec.get('seq') or 0):03d}: "
@@ -48234,11 +48279,28 @@ class _ProcRejectModal(discord.ui.Modal, title="↩️ إرجاع التذكرة
             print("proc reject ping error:", e)
 
 class ProcTicketView(discord.ui.View):
-    """Persistent buttons on every purchase-ticket card. Each is stage-gated AND
-    role-gated; a press out of turn / without the role is a quiet ephemeral that
-    does NOT advance the ticket."""
-    def __init__(self):
+    """Persistent buttons on every purchase-ticket card. QUEST-STYLE: a posted card
+    shows ONLY the current stage's button(s) (pass `status`). The no-arg view keeps
+    ALL five buttons so every custom_id has a registered handler after a restart;
+    clicks always route by custom_id, so the subset cards still work. Each button is
+    stage- AND role-gated; a press out of turn / without the role is a quiet ephemeral
+    that does NOT advance the ticket."""
+    # which button custom_ids belong to each stage (the quest step)
+    _STAGE_BTNS = {
+        "open":        {"proc_received"},
+        "received":    {"proc_confirm", "proc_reject"},
+        "confirmed":   {"proc_paid", "proc_reject"},
+        "transferred": {"proc_close"},
+        "closed":      set(),
+    }
+
+    def __init__(self, status=None):
         super().__init__(timeout=None)
+        if status is not None:
+            keep = self._STAGE_BTNS.get(status, set())
+            for item in list(self.children):
+                if getattr(item, "custom_id", None) not in keep:
+                    self.remove_item(item)
 
     @discord.ui.button(label="✅ أرفقت الصورة", style=discord.ButtonStyle.success,
                        custom_id="proc_received", row=0)
@@ -48247,8 +48309,11 @@ class ProcTicketView(discord.ui.View):
         if not rec or rec.get("kind") != "proc":
             await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
             return
-        if not (interaction.user.id == rec.get("opener_id") or _tk_is_admin(interaction.user)):
-            await interaction.response.send_message("🙏 هذا الزر لفاتح التذكرة فقط.", ephemeral=True)
+        if not (interaction.user.id == rec.get("opener_id")
+                or _tk_is_admin(interaction.user)
+                or _proc_in_role(interaction.user, _proc_role("operations"))):
+            await interaction.response.send_message(
+                "🙏 هذا الزر لفريق العمليات (أو فاتح التذكرة).", ephemeral=True)
             return
         if rec.get("status") != "open":
             await interaction.response.send_message(
@@ -48271,8 +48336,8 @@ class ProcTicketView(discord.ui.View):
         if not rec or rec.get("kind") != "proc":
             await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
             return
-        if not (_tk_is_admin(interaction.user) or _proc_has_role(interaction.user, PROC_SUPERVISOR_ROLE_ID)):
-            await interaction.response.send_message("🙏 هذا الزر للمشرف فقط.", ephemeral=True)
+        if not (_tk_is_admin(interaction.user) or _proc_has_role(interaction.user, _proc_role("leaders"))):
+            await interaction.response.send_message("🙏 هذا الزر لقادة العمليات فقط.", ephemeral=True)
             return
         if rec.get("status") != "received":
             await interaction.response.send_message(
@@ -48289,7 +48354,7 @@ class ProcTicketView(discord.ui.View):
         if not rec or rec.get("kind") != "proc":
             await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
             return
-        if not (_tk_is_admin(interaction.user) or _proc_has_role(interaction.user, PROC_ACCOUNTING_ROLE_ID)):
+        if not (_tk_is_admin(interaction.user) or _proc_has_role(interaction.user, _proc_role("accountant"))):
             await interaction.response.send_message("🙏 هذا الزر للمحاسبة فقط.", ephemeral=True)
             return
         if rec.get("status") != "confirmed":
@@ -48308,9 +48373,10 @@ class ProcTicketView(discord.ui.View):
             await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
             return
         if not (_tk_is_admin(interaction.user)
-                or _proc_has_role(interaction.user, PROC_SUPERVISOR_ROLE_ID)
-                or _proc_has_role(interaction.user, PROC_ACCOUNTING_ROLE_ID)):
-            await interaction.response.send_message("🙏 الإرجاع للمشرف أو المحاسبة فقط.", ephemeral=True)
+                or _proc_has_role(interaction.user, _proc_role("leaders"))
+                or _proc_has_role(interaction.user, _proc_role("accountant"))):
+            await interaction.response.send_message(
+                "🙏 الإرجاع لقادة العمليات أو المحاسبة فقط.", ephemeral=True)
             return
         if rec.get("status") not in ("received", "confirmed"):
             await interaction.response.send_message(
@@ -48326,10 +48392,10 @@ class ProcTicketView(discord.ui.View):
             await interaction.response.send_message("⚠️ ما لقيت بيانات هذي التذكرة.", ephemeral=True)
             return
         if not _proc_can_close(interaction.user):
-            extra = ("" if (PROC_OWNER_IDS or PROC_CLOSE_ROLE_ID)
-                     else "\n(لسا ما تعيّن مدير عمليات — عيّن PROC_CLOSE_ROLE_ID أو PROC_OWNER_IDS.)")
+            extra = ("" if (PROC_OWNER_IDS or _proc_role("managers"))
+                     else "\n(لسا ما تعيّنت الإدارة — استخدم `!ouja مشتريات-أدوار` وحدد دور «الإدارة».)")
             await interaction.response.send_message(
-                "🙏 الإغلاق لمدير العمليات أو المالك فقط." + extra, ephemeral=True)
+                "🙏 الإغلاق للإدارة أو المالك فقط." + extra, ephemeral=True)
             return
         if rec.get("status") == "closed":
             await interaction.response.send_message("التذكرة مغلقة أصلاً.", ephemeral=True)
@@ -48352,6 +48418,43 @@ class ProcPanelView(discord.ui.View):
         await interaction.response.send_message(
             "**تذكرة مشتريات جديدة** — اختر الشقة/الشقق وسبب الطلب ثم اضغط «متابعة»:",
             view=ProcPickView(listings), ephemeral=True)
+
+# ---- role setup straight from Discord (no Railway needed) — RoleSelect dropdowns ----
+class _ProcRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, key, label):
+        super().__init__(placeholder=label, min_values=0, max_values=1)
+        self._key = key
+
+    async def callback(self, interaction: discord.Interaction):
+        rid = self.values[0].id if self.values else 0
+        _proc_roles_set(self._key, rid)
+        lbl = dict(_PROC_ROLE_LABELS).get(self._key, self._key)
+        who = f"<@&{rid}>" if rid else "بدون (مفتوح للكل)"
+        await interaction.response.send_message(
+            f"✅ {lbl} ← {who}", ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none())
+
+class ProcRolesView(discord.ui.View):
+    """Admin setup panel: one role dropdown per stage. Saves on each pick."""
+    def __init__(self):
+        super().__init__(timeout=600)
+        for key, label in _PROC_ROLE_LABELS:
+            self.add_item(_ProcRoleSelect(key, label))
+
+@bot.command(name="مشتريات-أدوار", aliases=["proc-roles", "مشتريات-الادوار"])
+async def proc_roles_cmd(ctx):
+    """Show + set the purchase-ticket roles for each stage (admins only). Pick from
+    the dropdowns — no Discord IDs, no Railway env editing needed."""
+    if not _tk_is_admin(ctx.author):
+        await ctx.reply("هذا الأمر للإدارة فقط 🙏")
+        return
+    lines = ["**أدوار تذاكر المشتريات الحالية:**"]
+    for key, label in _PROC_ROLE_LABELS:
+        r = _proc_role(key)
+        lines.append(f"{label}: " + (f"<@&{r}>" if r else "— بدون (مفتوح للكل)"))
+    lines.append("\nاختر الدور لكل مرحلة من القوائم تحت 👇 (ينحفظ مباشرة)")
+    await ctx.reply("\n".join(lines), view=ProcRolesView(),
+                    allowed_mentions=discord.AllowedMentions.none())
 
 # ---- nudge loop: ping the current holder every N hours inside the windows ----
 async def _proc_run_reminders():
@@ -48490,7 +48593,7 @@ async def ensure_ticket_panels(guild):
          "1️⃣ اختر الشقة/الشقق وسبب الطلب\n"
          "2️⃣ اكتب آخر 4 من عرض السعر + اسم المورّد + الأصناف + المبلغ\n"
          "3️⃣ ينفتح روم للتذكرة وتمشي بسلسلة الاعتماد:\n"
-         "📸 صورة الفاتورة ← ✅ تأكيد المشرف ← 💰 تحويل المحاسبة ← 🔒 إغلاق مدير العمليات\n\n"
+         "📸 صورة الفاتورة (العمليات) ← ✅ تأكيد قادة العمليات ← 💰 تحويل المحاسبة ← 🔒 إغلاق الإدارة\n\n"
          "وكل تذكرة يذكّر صاحب الدور تلقائياً لين يخلّص — "
          "والبحث `!ouja مشتريات-بحث` يلقّط أي فاتورة قديمة لو وصلت متأخرة."),
     ]
