@@ -30,6 +30,7 @@ import re
 import io
 import json
 import time
+import shutil
 import html as _html
 import base64
 import mimetypes
@@ -225,6 +226,11 @@ OUJACT_CLEAN_MAX     = int(os.environ.get("OUJACT_CLEAN_MAX", "40"))
 OUJACT_PARK_BUFFER   = int(os.environ.get("OUJACT_PARK_BUFFER", "5"))  # parking/waiting buffer (min)
 CLEANING_REVIEW_CHANNEL = os.environ.get("CLEANING_REVIEW_CHANNEL", "oujact-review")
 CLEANING_PHOTO_MAX_MB = int(os.environ.get("CLEANING_PHOTO_MAX_MB", "12"))
+# Local cleaning-photo retention: date-folders under STATE_DIR/cleaning_photos older than this
+# are auto-purged daily so the volume can't slowly fill (the bug that filled /data). 0 disables.
+# When Drive works, new photos go to Drive and nothing accumulates locally anyway; this reclaims
+# the local-fallback copies once their review/dispute window has passed.
+CLEANING_PHOTO_RETENTION_DAYS = int(os.environ.get("CLEANING_PHOTO_RETENTION_DAYS", "30"))
 CLEANING_DRIVE_ROOT_FOLDER_ID = os.environ.get("CLEANING_DRIVE_ROOT_FOLDER_ID", "")
 CLEANING_DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLEANING_DRIVE_SERVICE_ACCOUNT_JSON", "").strip()
 CLEANING_DRIVE_SERVICE_ACCOUNT_FILE = os.environ.get(
@@ -3660,6 +3666,44 @@ def _cleanproof_save_local(report, slot_id, filename, data, mime_type):
     with open(path, "wb") as f:
         f.write(data)
     return {"provider": "local_fallback", "path": path, "url": ""}
+
+def _cleanproof_purge_local_photos(retention_days=None):
+    """Delete local cleaning-photo date-folders older than the retention window so the volume
+    can't slowly fill (this is what filled /data and broke the whole bot on 2026-06-23). Photos
+    are stored as STATE_DIR/cleaning_photos/<YYYY-MM-DD>/<report_id>/..., so we only ever remove
+    whole date-folders whose NAME is a real calendar date older than the cutoff — non-date entries
+    are never touched. Safe + idempotent; returns (folders_deleted, mb_reclaimed)."""
+    days = CLEANING_PHOTO_RETENTION_DAYS if retention_days is None else retention_days
+    base = os.path.join(STATE_DIR, "cleaning_photos")
+    if days is None or days < 1 or not os.path.isdir(base):
+        return (0, 0.0)
+    cutoff = datetime.now(TZ).date() - timedelta(days=days)
+    deleted, freed = 0, 0
+    for name in os.listdir(base):
+        folder = os.path.join(base, name)
+        if not os.path.isdir(folder):
+            continue
+        try:
+            folder_date = datetime.strptime(name, "%Y-%m-%d").date()
+        except ValueError:
+            continue                       # not a date-named folder → leave it alone
+        if folder_date >= cutoff:
+            continue
+        try:
+            for r, _d, files in os.walk(folder):
+                for f in files:
+                    try:
+                        freed += os.path.getsize(os.path.join(r, f))
+                    except OSError:
+                        pass
+            shutil.rmtree(folder)
+            deleted += 1
+        except Exception as e:
+            print("cleaning-photo purge: could not remove", folder, "-", e)
+    if deleted:
+        print("cleaning photos: purged %d folder(s) older than %d days, reclaimed %.1f MB"
+              % (deleted, days, freed / 1e6))
+    return (deleted, round(freed / 1e6, 1))
 
 def _cleanproof_drive_configured():
     return bool(CLEANING_DRIVE_ROOT_FOLDER_ID and
@@ -45519,6 +45563,11 @@ async def reviews_refresh_loop():
         _oujact_prune_opened()
     except Exception as e:
         print("oujact done-prune error:", e)
+    # Reclaim old local cleaning photos so the volume can't slowly fill (the 2026-06-23 bug).
+    try:
+        await asyncio.to_thread(_cleanproof_purge_local_photos)
+    except Exception as e:
+        print("cleaning-photo purge error:", e)
     # C-2: daily DP-drift count → Discord (evidence for the DP cutover decision).
     try:
         day_ago = (datetime.now(TZ) - timedelta(hours=24)).isoformat(timespec="seconds")
