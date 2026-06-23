@@ -16,7 +16,7 @@ Plus send-window + warm-up daily cap (applied as the final volume ceiling).
 
 from datetime import timedelta
 from . import db, settings
-from .util import now_dt, now_iso, today_iso, parse_date
+from .util import now_dt, now_iso, today_iso, parse_date, clampi
 
 
 def _reason(code_ar, code_en):
@@ -95,10 +95,12 @@ def send_window(now=None):
     """Compute the next allowed scheduled send time. Default 20:30 KSA; never before the
     earliest hour; Friday 00:00–HH:00 is quiet (the default 20:30 already clears it)."""
     now = now or now_dt()
-    hour = settings.get_int("gov_send_hour")
-    minute = settings.get_int("gov_send_minute")
-    earliest = settings.get_int("gov_earliest_hour")
-    fri_until = settings.get_int("gov_no_friday_until_hour")
+    # Clamp to valid clock ranges — an out-of-range setting (e.g. hour 24 typed in the
+    # Settings tab) must never crash datetime.replace() and 500 the whole "Today's Move".
+    hour = clampi(settings.get_int("gov_send_hour"), 0, 23)
+    minute = clampi(settings.get_int("gov_send_minute"), 0, 59)
+    earliest = clampi(settings.get_int("gov_earliest_hour"), 0, 23)
+    fri_until = clampi(settings.get_int("gov_no_friday_until_hour"), 0, 23)
     hour = max(hour, earliest)
 
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)

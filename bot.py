@@ -23710,7 +23710,7 @@ function brainGo(tab){ _brn.tab=tab; brainTabs(); var b=document.getElementById(
   ({move:brnMove,cal:brnCal,list:brnHealth,set:brnSettings}[tab]||brnMove)(); }
 
 function brnMove(){ var b=document.getElementById('brainBody'); if(!b) return; if(_brn.move){ brnRenderMove(_brn.move); return; }
-  api('/api/brain/today').then(function(r){ _brn.move=(r&&r.move)||null; brnRenderMove(_brn.move); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; }); }
+  api('/api/brain/today').then(function(r){ if(r&&r.ok===false){ b.innerHTML='<div class="empty">⚠ '+esc(r.error||'')+'</div>'; return; } _brn.move=(r&&r.move)||null; brnRenderMove(_brn.move); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; }); }
 function brnRenderMove(m){ var b=document.getElementById('brainBody'); if(!b) return; if(!m){ b.innerHTML='<div class="empty">—</div>'; return; } var ar=(L==='ar');
   if(m.silent){ b.innerHTML='<div class="card"><div class="brn-silent"><div class="pill ok">'+(ar?'يوم هادئ':'Quiet day')
     +'</div><div class="big">'+(ar?'ما في داعي نرسل اليوم':'Send nothing today')+'</div><div class="muted" style="max-width:560px;margin:0 auto">'

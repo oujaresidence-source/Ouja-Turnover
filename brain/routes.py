@@ -5,6 +5,7 @@ HOST.json_response (Arabic-safe). Nothing here sends WhatsApp live; Approve = CS
 """
 
 import json
+import traceback
 from . import db, settings, signals, members, recommend, campaigns, adapters, governor
 from .host import HOST
 
@@ -13,6 +14,21 @@ def _guard(request):
     if not HOST.dash_auth(request):
         return HOST.json_response({"error": "unauthorized"}, 401)
     return None
+
+
+def _safe(fn):
+    """Wrap an API handler so any unhandled exception becomes a clean JSON error the
+    dashboard can SHOW (instead of a bare 500 that the page renders as a mute ⚠). The
+    full traceback still goes to the Railway logs. Read-only — changes no handler logic."""
+    async def _wrapped(request):
+        try:
+            return await fn(request)
+        except Exception as e:
+            traceback.print_exc()
+            return HOST.json_response(
+                {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}, 200)
+    _wrapped.__name__ = getattr(fn, "__name__", "wrapped")
+    return _wrapped
 
 
 async def _body(request):
@@ -206,17 +222,17 @@ async def api_export(request):
 def register(app):
     """Wire every Brain route onto the existing aiohttp app."""
     app.router.add_get("/brain", page)
-    app.router.add_get("/api/brain/today", api_today)
-    app.router.add_get("/api/brain/heatmap", api_heatmap)
-    app.router.add_get("/api/brain/health", api_health)
-    app.router.add_get("/api/brain/campaigns", api_campaigns)
-    app.router.add_get("/api/brain/settings", api_settings_get)
-    app.router.add_get("/api/brain/audience/{rec_id}", api_audience)
+    app.router.add_get("/api/brain/today", _safe(api_today))
+    app.router.add_get("/api/brain/heatmap", _safe(api_heatmap))
+    app.router.add_get("/api/brain/health", _safe(api_health))
+    app.router.add_get("/api/brain/campaigns", _safe(api_campaigns))
+    app.router.add_get("/api/brain/settings", _safe(api_settings_get))
+    app.router.add_get("/api/brain/audience/{rec_id}", _safe(api_audience))
     app.router.add_get("/api/brain/export/{rec_id}", api_export)
-    app.router.add_post("/api/brain/recompute", api_recompute)
-    app.router.add_post("/api/brain/settings", api_settings_set)
-    app.router.add_post("/api/brain/approve", api_approve)
-    app.router.add_post("/api/brain/reject", api_reject)
-    app.router.add_post("/api/brain/seed", api_seed)
-    app.router.add_post("/api/brain/seed-import", api_seed_import)
-    app.router.add_post("/api/brain/optout", api_optout)
+    app.router.add_post("/api/brain/recompute", _safe(api_recompute))
+    app.router.add_post("/api/brain/settings", _safe(api_settings_set))
+    app.router.add_post("/api/brain/approve", _safe(api_approve))
+    app.router.add_post("/api/brain/reject", _safe(api_reject))
+    app.router.add_post("/api/brain/seed", _safe(api_seed))
+    app.router.add_post("/api/brain/seed-import", _safe(api_seed_import))
+    app.router.add_post("/api/brain/optout", _safe(api_optout))
