@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.4.0"
+ERP_VERSION = "2.4.1"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -473,7 +473,13 @@ async def _h_api_owner_listings_search(request):
 def _range_items(request):
     """Shared parser for the custom-range owner report. Query → bot.py's verified engine
     [{label, owner, kind, report}]. Returns (items, None) or (None, (error_code, status)).
-    Reuses the exact arbitrary-date-range engine the (headless) /api/finance/pdf endpoint uses."""
+
+    Resolves the owner's units exactly like the (working) monthly statement, via
+    OW._owner_units — which matches the owner name with .strip() on both sides. bot.py's
+    _owner_lids matches WITHOUT strip, so reusing _finance_collect_items('owner', …)
+    silently returned ZERO units (→ all-zero report) for any owner whose registry name
+    carried stray whitespace. We build per-unit reports and aggregate the same way
+    _finance_collect_items does for owner mode."""
     q = request.query
     owner = (q.get("owner") or "").strip()
     if not owner:
@@ -484,17 +490,19 @@ def _range_items(request):
         return None, ("bad_dates", 400)
     if end < start:
         return None, ("end_before_start", 400)
+    units, _listings = OW._owner_units(owner)
     apt = (q.get("apt") or "").strip()
     if apt:
-        lid, _cands = api.B._exp_match_apartment(apt)
-        if lid is None:
-            return None, ("unit_unmatched", 404)
-        items = api.B._finance_collect_items("apartment", [lid], [], start, end)
-    else:
-        items = api.B._finance_collect_items("owner", [], [owner], start, end)
-    if not items:
+        units = [u for u in units if (u.get("apartment") or "").strip() == apt]
+    lids = [u["lid"] for u in units if u.get("lid") is not None]
+    if not lids:
         return None, ("no_units", 404)
-    return items, None
+    reps = [api.B.build_owner_report(lid, start, end, 0, {}) for lid in lids]
+    if apt and len(reps) == 1:
+        report, label, kind = reps[0], (reps[0].get("apartment") or apt), "apartment"
+    else:
+        report, label, kind = api.B._finance_aggregate(reps, owner, start, end), owner, "owner"
+    return [{"label": label, "owner": owner, "kind": kind, "report": report}], None
 
 
 async def _h_api_owners_range_report(request):

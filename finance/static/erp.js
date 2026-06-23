@@ -1799,17 +1799,20 @@
       var rrS = ($('#rrStart') || {}).value || '', rrE = ($('#rrEnd') || {}).value || '';
       if (!rrOwner || !rrS || !rrE) { toast(t('rr_need'), 'warn'); return; }
       if (rrE < rrS) { toast(t('rr_end_before'), 'warn'); return; }
-      var rrDl = act === 'rr-download';
       var rrQs = 'owner=' + encodeURIComponent(rrOwner) + (rrUnit ? '&apt=' + encodeURIComponent(rrUnit) : '') +
         '&start=' + encodeURIComponent(rrS) + '&end=' + encodeURIComponent(rrE) + '&token=' + encodeURIComponent(store.token);
-      el.disabled = true;
-      if (!rrDl) {
+      if (act === 'rr-preview') {
+        // The page CSP (default-src 'self') blocks a blob: PDF inside an <iframe>, so open the
+        // exact PDF in a NEW TAB (top-level nav isn't frame-restricted) and show the numbers
+        // summary in the card for an instant in-page read.
+        window.open('/erp/api/owners/range-report.pdf?' + rrQs, '_blank', 'noopener');
         var rrSum = $('#rrSummary'); if (rrSum) rrSum.innerHTML = '<div class="wq-sub">' + esc(t('rr_loading')) + '</div>';
-        api('/erp/api/owners/range-report?' + rrQs).then(rrRenderSummary).catch(function () {
-          var s2 = $('#rrSummary'); if (s2) s2.innerHTML = '';
-        });
+        api('/erp/api/owners/range-report?' + rrQs).then(rrRenderSummary)
+          .catch(function (e) { var s2 = $('#rrSummary'); if (s2) s2.innerHTML = ''; toast(srvMsg(e) || t('rr_pdf_unavail'), 'err'); });
+        return;
       }
-      fetch('/erp/api/owners/range-report.pdf?' + rrQs + (rrDl ? '&dl=1' : ''), { headers: { 'X-Token': store.token } })
+      el.disabled = true;
+      fetch('/erp/api/owners/range-report.pdf?' + rrQs + '&dl=1', { headers: { 'X-Token': store.token } })
         .then(function (r) {
           if (!r.ok) return r.json().catch(function () { return null; }).then(function (j) { throw { status: r.status, body: j }; });
           return r.blob();
@@ -1817,14 +1820,10 @@
         .then(function (blob) {
           el.disabled = false;
           var url = URL.createObjectURL(blob);
-          if (rrDl) {
-            var a = document.createElement('a');
-            a.href = url; a.download = 'ouja-' + rrOwner.replace(/[^\w؀-ۿ.-]+/g, '-') + '-' + rrS + '_' + rrE + '.pdf';
-            document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-          } else {
-            var ifr = $('#rrFrame'); if (ifr) { ifr.style.display = 'block'; ifr.src = url; }
-          }
+          var a = document.createElement('a');
+          a.href = url; a.download = 'ouja-' + rrOwner.replace(/[^\w؀-ۿ.-]+/g, '-') + '-' + rrS + '_' + rrE + '.pdf';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
         })
         .catch(function (er) { el.disabled = false; toast(srvMsg(er) || t('rr_pdf_unavail'), 'err'); });
     }
@@ -3413,7 +3412,6 @@
           '<button class="btn ghost sm" data-act="rr-download">⬇ ' + esc(t('rr_download')) + '</button>' +
         '</div>' +
         '<div id="rrSummary"></div>' +
-        '<iframe id="rrFrame" title="' + esc(t('rr_title')) + '" style="display:none;width:100%;height:560px;border:1px solid var(--line);border-radius:12px;margin-top:12px"></iframe>' +
       '</div>' +
     '</section>';
   }
