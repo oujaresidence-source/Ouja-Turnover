@@ -67,27 +67,35 @@ def _resolve_path():
     global _resolved_path
     if _DB_PATH_OVERRIDE:
         return _DB_PATH_OVERRIDE
-    if _resolved_path:
+    # Once we've settled on the REAL volume it's stable — keep it and skip the per-call probe.
+    # But if we're currently on a FALLBACK, re-probe the primary every time so we SELF-HEAL back
+    # to the volume the instant it recovers (e.g. after the owner grows the Railway volume) —
+    # no container restart required.
+    if _resolved_path and not STORAGE.get("is_fallback"):
         return _resolved_path
     primary = HOST.require("state_path")("brain.db")
     pdir = os.path.dirname(primary) or "."
     STORAGE["primary"] = primary
     ok, why = _dir_writable(pdir)
     if ok:
+        if _resolved_path and STORAGE.get("is_fallback"):
+            print("[brain] STORAGE: %s is writable again — switching back from fallback to the volume" % pdir)
         _resolved_path = primary
         STORAGE.update(path=primary, is_fallback=False, reason="", free_mb=_free_mb(pdir))
         return _resolved_path
-    # Primary volume is not writable — pick the first writable fallback.
+    # Primary volume is not writable — use the first writable fallback (or keep the current one).
     for cand in (os.path.join(tempfile.gettempdir(), "ouja_brain"),
                  os.path.join(os.getcwd(), ".brain_fallback")):
         cok, _ = _dir_writable(cand)
         if cok:
+            was_fallback = STORAGE.get("is_fallback")
             _resolved_path = os.path.join(cand, "brain.db")
             STORAGE.update(path=_resolved_path, is_fallback=True,
                            reason="%s not writable (%s); free=%sMB" % (pdir, why, _free_mb(pdir)),
                            free_mb=_free_mb(cand))
-            print("[brain] STORAGE WARNING: %s not writable (%s) — using fallback %s" %
-                  (pdir, why, _resolved_path))
+            if not was_fallback:        # log only on the transition into fallback, not each re-probe
+                print("[brain] STORAGE WARNING: %s not writable (%s) — using fallback %s" %
+                      (pdir, why, _resolved_path))
             return _resolved_path
     # Nothing writable anywhere (extreme) — keep primary so the error stays honest.
     _resolved_path = primary

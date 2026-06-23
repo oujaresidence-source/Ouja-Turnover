@@ -76,6 +76,31 @@ _COMMIT = _detect_commit()
 _BUILT = datetime.fromtimestamp(_BOOT, _KSA).strftime("%Y-%m-%d %H:%M") + " KSA"
 
 
+def _state_storage_health():
+    """Unauthenticated, secrets-free read of the shared STATE_DIR (Railway volume) so a full or
+    detached volume is visible at a glance — a full volume silently breaks brain.db AND every
+    other state writer (auto_sent.json, caches, owner statements...)."""
+    d = os.environ.get("STATE_DIR", "/data")
+    info = {"state_dir": d, "exists": False, "writable": False, "free_mb": None, "err": ""}
+    try:
+        info["exists"] = os.path.isdir(d)
+        st = os.statvfs(d)
+        info["free_mb"] = round(st.f_bavail * st.f_frsize / 1e6, 1)
+        info["total_mb"] = round(st.f_blocks * st.f_frsize / 1e6, 1)
+    except Exception as e:
+        info["err"] = "%s: %s" % (type(e).__name__, e)
+    try:
+        import tempfile
+        fd, p = tempfile.mkstemp(prefix=".erp_probe.", dir=d)
+        os.write(fd, b"ok"); os.close(fd); os.remove(p)
+        info["writable"] = True
+    except Exception as e:
+        info["writable"] = False
+        if not info["err"]:
+            info["err"] = "%s: %s" % (type(e).__name__, e)
+    return info
+
+
 def version_info():
     return {
         "ok": True,
@@ -84,6 +109,7 @@ def version_info():
         "commit": _COMMIT,
         "built": _BUILT,
         "uptime_s": int(time.time() - _BOOT),
+        "storage": _state_storage_health(),
     }
 
 
