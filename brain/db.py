@@ -150,12 +150,16 @@ def _ensure_parent_dir(path):
         os.makedirs(d, exist_ok=True)
 
 
-def _open_diagnostic(path, err):
-    """Build a precise message when the DB still won't open after we've ensured the dir —
-    tells us (and the owner, on screen) whether it's a missing mount or a permission issue
-    on the Railway volume, instead of the opaque 'unable to open database file'."""
+def _diag(e):
+    """Wrap any sqlite OperationalError with volume context so the dashboard shows WHY the
+    Brain DB failed (e.g. 'disk I/O error', 'unable to open database file') instead of a bare,
+    unactionable message. Idempotent — re-wrapping an already-enriched error is a no-op."""
+    msg = str(e)
+    if msg.startswith("brain.db error at "):
+        return e
+    path = db_path()
     d = os.path.dirname(path) or "."
-    dir_exists = os.path.isdir(d)
+    exists = os.path.isdir(d)
     writable = False
     try:
         probe = os.path.join(d, ".brain_write_probe")
@@ -165,28 +169,31 @@ def _open_diagnostic(path, err):
         writable = True
     except Exception:
         writable = False
-    return ("cannot open brain.db at %s — dir_exists=%s dir_writable=%s. If dir_writable=False "
-            "the STATE_DIR volume isn't mounted/writable on this deploy (a Railway volume issue, "
-            "not a code bug). [%s]" % (path, dir_exists, writable, err))
+    return sqlite3.OperationalError(
+        "brain.db error at %s — dir_exists=%s dir_writable=%s [%s]" % (path, exists, writable, msg))
 
 
 def connect():
+    """Open the Brain DB. We deliberately AVOID WAL: Railway / overlay / network volumes usually
+    can't back WAL's shared-memory (-shm) file, so WAL turns every query into 'disk I/O error'.
+    EXCLUSIVE locking keeps the wal-index in heap (no -shm needed) so we can still read/convert a
+    db previously left in WAL mode; the plain rollback journal (DELETE) needs neither. Every
+    PRAGMA is guarded so journal setup can never by itself crash a request."""
     path = db_path()
     try:
         _ensure_parent_dir(path)
     except Exception:
         pass
-    try:
-        cx = sqlite3.connect(path, timeout=30)
-        cx.row_factory = sqlite3.Row
+    cx = sqlite3.connect(path, timeout=30)
+    cx.row_factory = sqlite3.Row
+    for pragma in ("PRAGMA locking_mode=EXCLUSIVE",
+                   "PRAGMA journal_mode=DELETE",
+                   "PRAGMA foreign_keys=ON"):
         try:
-            cx.execute("PRAGMA journal_mode=WAL")
+            cx.execute(pragma)
         except sqlite3.OperationalError:
-            pass        # some volume filesystems can't back WAL's shared memory; default journal is fine
-        cx.execute("PRAGMA foreign_keys=ON")
-        return cx
-    except sqlite3.OperationalError as e:
-        raise sqlite3.OperationalError(_open_diagnostic(path, e))
+            pass
+    return cx
 
 
 # Columns added after the first release — applied to already-deployed brain.db files.
@@ -214,9 +221,12 @@ def init_db():
     with _init_lock:
         if path in _initialized_paths:
             return
-        with connect() as cx:
-            cx.executescript(SCHEMA)
-            _migrate(cx)
+        try:
+            with connect() as cx:
+                cx.executescript(SCHEMA)
+                _migrate(cx)
+        except sqlite3.OperationalError as e:
+            raise _diag(e)
         _initialized_paths.add(path)
 
 
@@ -225,31 +235,43 @@ def init_db():
 def q(sql, args=()):
     """SELECT -> list of sqlite3.Row."""
     init_db()
-    with connect() as cx:
-        return list(cx.execute(sql, args).fetchall())
+    try:
+        with connect() as cx:
+            return list(cx.execute(sql, args).fetchall())
+    except sqlite3.OperationalError as e:
+        raise _diag(e)
 
 
 def q1(sql, args=()):
     """SELECT one -> sqlite3.Row or None."""
     init_db()
-    with connect() as cx:
-        return cx.execute(sql, args).fetchone()
+    try:
+        with connect() as cx:
+            return cx.execute(sql, args).fetchone()
+    except sqlite3.OperationalError as e:
+        raise _diag(e)
 
 
 def execute(sql, args=()):
     """INSERT/UPDATE/DELETE -> lastrowid."""
     init_db()
-    with connect() as cx:
-        cur = cx.execute(sql, args)
-        cx.commit()
-        return cur.lastrowid
+    try:
+        with connect() as cx:
+            cur = cx.execute(sql, args)
+            cx.commit()
+            return cur.lastrowid
+    except sqlite3.OperationalError as e:
+        raise _diag(e)
 
 
 def executemany(sql, seq):
     init_db()
-    with connect() as cx:
-        cx.executemany(sql, seq)
-        cx.commit()
+    try:
+        with connect() as cx:
+            cx.executemany(sql, seq)
+            cx.commit()
+    except sqlite3.OperationalError as e:
+        raise _diag(e)
 
 
 def audit(actor, action, payload=None):
