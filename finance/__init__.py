@@ -98,6 +98,28 @@ def _state_storage_health():
         info["writable"] = False
         if not info["err"]:
             info["err"] = "%s: %s" % (type(e).__name__, e)
+    # Breakdown: which top-level entries under STATE_DIR are eating the space (du -s style).
+    # Names only (e.g. "cleaning_photos"), no file contents — so we can pinpoint the culprit
+    # of a full volume without guessing. Bounded + exception-safe.
+    try:
+        sizes = []
+        for name in os.listdir(d):
+            full = os.path.join(d, name)
+            total = 0
+            if os.path.isfile(full):
+                total = os.path.getsize(full)
+            else:
+                for root, _dirs, files in os.walk(full):
+                    for f in files:
+                        try:
+                            total += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+            sizes.append((name, total))
+        sizes.sort(key=lambda kv: kv[1], reverse=True)
+        info["top"] = [{"name": n, "mb": round(b / 1e6, 1)} for n, b in sizes[:10]]
+    except Exception as e:
+        info["top"] = "err: %s: %s" % (type(e).__name__, e)
     return info
 
 
