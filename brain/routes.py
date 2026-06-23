@@ -89,6 +89,7 @@ async def api_health(request):
                                "sent_today": governor.sent_today(),
                                "remaining_today": governor.remaining_today(),
                                "adapter": adapters.get_active().name,
+                               "storage": db.STORAGE,
                                "last_sync": sync_info})
 
 

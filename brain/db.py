@@ -29,19 +29,84 @@ _DB_PATH_OVERRIDE = None       # tests set this to a temp file
 _init_lock = threading.Lock()
 _initialized_paths = set()
 _journal_normalized = set()    # paths whose WAL->DELETE conversion we've already forced once
+_resolved_path = None          # the path we actually opened (primary, or a fallback if /data is dead)
+STORAGE = {"path": None, "primary": None, "is_fallback": False, "reason": "", "free_mb": None}
+
+
+def _dir_writable(d):
+    """True iff we can actually create+write+delete a file in d right now (unique name, so
+    concurrent probes never race each other into a false negative)."""
+    try:
+        os.makedirs(d, exist_ok=True)
+        fd, p = tempfile.mkstemp(prefix=".brain_probe.", dir=d)
+        os.write(fd, b"ok")
+        os.close(fd)
+        os.remove(p)
+        return True, ""
+    except Exception as e:
+        return False, "%s: %s" % (type(e).__name__, e)
+
+
+def _free_mb(d):
+    try:
+        st = os.statvfs(d)
+        return round(st.f_bavail * st.f_frsize / 1e6, 1)
+    except Exception:
+        return None
+
+
+def _resolve_path():
+    """Decide ONCE per process where brain.db lives. Normally the Railway volume
+    (STATE_DIR/brain.db). But if that directory can't be written RIGHT NOW (volume full,
+    detached, or read-only — which would otherwise hard-500 the whole Brain tab), fall back to a
+    writable local dir so the Brain still works. The fallback is ephemeral (resets on redeploy),
+    but the Brain rebuilds itself from the campaign catalog + guest CRM, and Phase 1 sends
+    nothing live, so a working-but-ephemeral Brain beats a dead page. The chosen path + the
+    reason are recorded in STORAGE and surfaced on the health endpoint so the real volume
+    problem is visible and not silently masked."""
+    global _resolved_path
+    if _DB_PATH_OVERRIDE:
+        return _DB_PATH_OVERRIDE
+    if _resolved_path:
+        return _resolved_path
+    primary = HOST.require("state_path")("brain.db")
+    pdir = os.path.dirname(primary) or "."
+    STORAGE["primary"] = primary
+    ok, why = _dir_writable(pdir)
+    if ok:
+        _resolved_path = primary
+        STORAGE.update(path=primary, is_fallback=False, reason="", free_mb=_free_mb(pdir))
+        return _resolved_path
+    # Primary volume is not writable — pick the first writable fallback.
+    for cand in (os.path.join(tempfile.gettempdir(), "ouja_brain"),
+                 os.path.join(os.getcwd(), ".brain_fallback")):
+        cok, _ = _dir_writable(cand)
+        if cok:
+            _resolved_path = os.path.join(cand, "brain.db")
+            STORAGE.update(path=_resolved_path, is_fallback=True,
+                           reason="%s not writable (%s); free=%sMB" % (pdir, why, _free_mb(pdir)),
+                           free_mb=_free_mb(cand))
+            print("[brain] STORAGE WARNING: %s not writable (%s) — using fallback %s" %
+                  (pdir, why, _resolved_path))
+            return _resolved_path
+    # Nothing writable anywhere (extreme) — keep primary so the error stays honest.
+    _resolved_path = primary
+    STORAGE.update(path=primary, is_fallback=False,
+                   reason="no writable location found; %s: %s" % (pdir, why), free_mb=_free_mb(pdir))
+    return _resolved_path
 
 
 def db_path():
-    if _DB_PATH_OVERRIDE:
-        return _DB_PATH_OVERRIDE
-    return HOST.require("state_path")("brain.db")
+    return _resolve_path()
 
 
 def set_db_path_for_tests(path):
     """Point the Brain at a throwaway db (used by the synthetic-data logic tests)."""
-    global _DB_PATH_OVERRIDE
+    global _DB_PATH_OVERRIDE, _resolved_path
     _DB_PATH_OVERRIDE = path
+    _resolved_path = None
     _initialized_paths.discard(path)
+    _journal_normalized.discard(path)
 
 
 SCHEMA = """
@@ -169,20 +234,12 @@ def _diag(e):
     path = db_path()
     d = os.path.dirname(path) or "."
     exists = os.path.isdir(d)
-    writable = False
-    try:
-        # Unique name per probe: several Brain API calls fail together on a page load and all
-        # land here at once — a FIXED filename made them race (one's os.remove hit "already
-        # gone") and falsely report dir_writable=False on a perfectly writable volume.
-        fd, probe = tempfile.mkstemp(prefix=".brain_write_probe.", dir=d)
-        os.write(fd, b"ok")
-        os.close(fd)
-        os.remove(probe)
-        writable = True
-    except Exception:
-        writable = False
+    # Unique probe name (mkstemp) so concurrent failures can't race into a false negative.
+    writable, why = _dir_writable(d)
+    free = _free_mb(d)
     return sqlite3.OperationalError(
-        "brain.db error at %s — dir_exists=%s dir_writable=%s [%s]" % (path, exists, writable, msg))
+        "brain.db error at %s — dir_exists=%s dir_writable=%s free=%sMB probe=[%s] [%s] (brain-storage-v2)"
+        % (path, exists, writable, free, why, msg))
 
 
 def _normalize_journal(path):
