@@ -39,7 +39,7 @@ from . import owners as OW
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.3.0"
+ERP_VERSION = "2.4.0"
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -470,6 +470,61 @@ async def _h_api_owner_listings_search(request):
     return api.jres(OW.listings_search(request.query.get("q") or ""))
 
 
+def _range_items(request):
+    """Shared parser for the custom-range owner report. Query → bot.py's verified engine
+    [{label, owner, kind, report}]. Returns (items, None) or (None, (error_code, status)).
+    Reuses the exact arbitrary-date-range engine the (headless) /api/finance/pdf endpoint uses."""
+    q = request.query
+    owner = (q.get("owner") or "").strip()
+    if not owner:
+        return None, ("missing_owner", 400)
+    start = api.B._parse_date(q.get("start") or "")
+    end = api.B._parse_date(q.get("end") or "")
+    if not start or not end:
+        return None, ("bad_dates", 400)
+    if end < start:
+        return None, ("end_before_start", 400)
+    apt = (q.get("apt") or "").strip()
+    if apt:
+        lid, _cands = api.B._exp_match_apartment(apt)
+        if lid is None:
+            return None, ("unit_unmatched", 404)
+        items = api.B._finance_collect_items("apartment", [lid], [], start, end)
+    else:
+        items = api.B._finance_collect_items("owner", [], [owner], start, end)
+    if not items:
+        return None, ("no_units", 404)
+    return items, None
+
+
+async def _h_api_owners_range_report(request):
+    """On-screen numbers preview for an arbitrary date range (JSON, fast/mobile-safe)."""
+    items, err = await asyncio.to_thread(_range_items, request)
+    if err:
+        return api.jres({"error": err[0]}, err[1])
+    return api.jres({"ok": True, "items": [
+        {"label": it.get("label"), "owner": it.get("owner"),
+         "kind": it.get("kind"), "report": it.get("report")} for it in items]})
+
+
+async def _h_api_owners_range_report_pdf(request):
+    """The exact PDF for an arbitrary date range — inline preview, or attachment with ?dl=1.
+    Same loud PdfFontError guard as the statements PDF (owner never gets broken-Arabic PDFs)."""
+    items, err = await asyncio.to_thread(_range_items, request)
+    if err:
+        return api.jres({"error": err[0]}, err[1])
+    try:
+        data, _fn, ctype = await asyncio.to_thread(api.B._finance_pdf_payload, items)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    dispo = "attachment" if (request.query.get("dl") not in (None, "", "0")) else "inline"
+    ascii_fn = "ouja-range-statement." + ("zip" if ctype == "application/zip" else "pdf")
+    return web.Response(body=data, content_type=ctype,
+                        headers={"Content-Disposition": '%s; filename="%s"' % (dispo, ascii_fn)})
+
+
 async def _h_api_stmt_get(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
@@ -668,6 +723,8 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/exp/pull", _guarded(_exp_delegate("_api_exp4_pull_run"), write=True))
     app.router.add_post("/erp/api/exp/delete-all", _guarded(_exp_delegate("_api_exp4_delete_all"), write=True))
     app.router.add_post("/erp/api/exp/bank-import", _guarded(_exp_delegate("_api_exp4_bank_import"), write=True))
+    app.router.add_post("/erp/api/exp/split-preview", _guarded(_exp_delegate("_api_exp4_split_preview"), write=True))
+    app.router.add_post("/erp/api/exp/split-apply", _guarded(_exp_delegate("_api_exp4_split_apply"), write=True))
     app.router.add_get("/erp/api/daftra/introspect", _guarded(_exp_delegate("_api_daftra_introspect")))
     app.router.add_post("/erp/api/daftra/write-test", _guarded(_exp_delegate("_api_daftra_write_test"), write=True))
     app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
@@ -691,6 +748,8 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/cycle/template", _guarded(_h_api_cycle_template, write=True))
     app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
     app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
+    app.router.add_get("/erp/api/owners/range-report", _guarded(_h_api_owners_range_report))
+    app.router.add_get("/erp/api/owners/range-report.pdf", _guarded(_h_api_owners_range_report_pdf))
     app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))
     app.router.add_get("/erp/api/stmts/account", _guarded(_h_api_stmts_account))
     app.router.add_get("/erp/api/stmts/type-probe", _guarded(_h_api_stmts_probe))

@@ -137,6 +137,12 @@
       x_amount: 'المبلغ', x_date: 'التاريخ', x_apartment: 'الشقة', x_category: 'الفئة',
       x_vendor: 'المورد', x_note: 'ملاحظة', x_reject_reason: 'سبب الرفض (إلزامي)…',
       x_timeline: 'السجل الزمني', x_payload: 'اللي بينرسل لـ Hostaway',
+      /* split one expense across apartments */
+      x_split: 'تقسيم على عدة شقق', xsp_hint: 'وزّع هالمبلغ على أكثر من شقة — كل شقة تصير مصروف مستقل.',
+      xsp_mode_sar: 'مبلغ (ر.س)', xsp_mode_pct: 'نسبة %', xsp_equal: 'تقسيم بالتساوي', xsp_addrow: 'أضف شقة',
+      xsp_alloc: 'موزّع', xsp_remain: 'متبقّي', xsp_confirm: 'تأكيد التقسيم', xsp_done: 'انقسم إلى {n} شقق ✓',
+      xsp_need2: 'لازم شقتين على الأقل', xsp_cat_hint: 'بدون فئة — الأبناء بيحتاجون فئة قبل الاعتماد.',
+      xsp_err_already_split: 'مقسوم من قبل', xsp_err_already_in_hostaway: 'مرحّل لـ Hostaway — ما ينقسم',
       /* manual sheet intake (الشيت → الموقع) */
       xi_title: 'سحب المصاريف من الشيت',
       xi_sub: 'يدوي بالكامل — ما يدخل أي مصروف للموقع إلا لما تسحب بنفسك.',
@@ -178,6 +184,12 @@
       o_revoke_confirm: 'إيقاف الرابط يمنع المالك من فتح كشفه. نكمل؟',
       o_done: 'تم ✓', o_empty: 'ما فيه ملاك في السجل — أضفهم من كشوفات الملاك',
       o_mgmt: 'نسبة الإدارة',
+      /* --- custom-range owner report (preview + PDF) --- */
+      rr_title: 'تقرير لفترة مخصّصة', rr_hint: 'اختر المالك والفترة — تشوف الأرقام على الشاشة وتحمّل PDF لنفس المدة.',
+      rr_owner: 'المالك', rr_unit: 'الوحدة', rr_all_units: 'كل الوحدات', rr_start: 'من تاريخ', rr_end: 'إلى تاريخ',
+      rr_preview: 'معاينة', rr_download: 'تحميل PDF', rr_need: 'اختر المالك وحدّد التواريخ', rr_end_before: 'تاريخ النهاية قبل البداية',
+      rr_pdf_unavail: 'تعذّر إنشاء الـ PDF — جرّب بعد قليل', rr_loading: 'نجهّز التقرير…',
+      rr_inc: 'الدخل', rr_fee: 'رسوم عوجا', rr_exp: 'المصاريف', rr_clean: 'التنظيف', rr_net: 'صافي المالك',
       /* --- statement diagnosis (slice 0b) --- */
       o_diag: 'تشخيص', dg_back: '← رجوع للملاك', dg_title: 'تشخيص الكشف',
       dg_month: 'الشهر', dg_now: 'صافي الكشف الحين', dg_prefix: 'الرقم قبل الإصلاح (محاكاة)',
@@ -418,6 +430,12 @@
       x_amount: 'Amount', x_date: 'Date', x_apartment: 'Apartment', x_category: 'Category',
       x_vendor: 'Vendor', x_note: 'Note', x_reject_reason: 'Rejection reason (required)…',
       x_timeline: 'Timeline', x_payload: 'Hostaway payload',
+      /* split one expense across apartments */
+      x_split: 'Split across apartments', xsp_hint: 'Spread this amount over several apartments — each becomes its own expense.',
+      xsp_mode_sar: 'Amount (SAR)', xsp_mode_pct: 'Percent %', xsp_equal: 'Split equally', xsp_addrow: 'Add apartment',
+      xsp_alloc: 'Allocated', xsp_remain: 'Remaining', xsp_confirm: 'Confirm split', xsp_done: 'Split into {n} apartments ✓',
+      xsp_need2: 'Need at least two apartments', xsp_cat_hint: 'No category — children will need one before approval.',
+      xsp_err_already_split: 'Already split', xsp_err_already_in_hostaway: 'Already in Hostaway — cannot split',
       /* manual sheet intake (Sheet → website) */
       xi_title: 'Pull expenses from the sheet',
       xi_sub: 'Fully manual — nothing enters the site until you pull it yourself.',
@@ -457,6 +475,12 @@
       o_revoke_confirm: 'Revoking blocks the owner from opening their statement. Continue?',
       o_done: 'Done ✓', o_empty: 'No owners in the registry — add them from owner statements',
       o_mgmt: 'Mgmt %',
+      /* --- custom-range owner report (preview + PDF) --- */
+      rr_title: 'Custom-range report', rr_hint: 'Pick an owner and a date range — see the numbers on screen and download a PDF for the same period.',
+      rr_owner: 'Owner', rr_unit: 'Unit', rr_all_units: 'All units', rr_start: 'From', rr_end: 'To',
+      rr_preview: 'Preview', rr_download: 'Download PDF', rr_need: 'Pick an owner and set the dates', rr_end_before: 'End date is before the start',
+      rr_pdf_unavail: 'Could not build the PDF — try again shortly', rr_loading: 'Preparing the report…',
+      rr_inc: 'Income', rr_fee: 'Ouja fee', rr_exp: 'Expenses', rr_clean: 'Cleaning', rr_net: 'Owner net',
       o_diag: 'Diagnose', dg_back: '← Back to owners', dg_title: 'Statement diagnosis',
       dg_month: 'Month', dg_now: 'Statement net (now)', dg_prefix: 'Pre-fix number (simulated)',
       dg_fixed: 'Net after the fix', dg_lost_tr: 'Income lost to the truncated cache',
@@ -1308,6 +1332,14 @@
     }
   });
 
+  /* live recalc for the split editor (amount/percent rows + category hint) */
+  function _xSplitWatch(ev) {
+    var tgt = ev.target;
+    if (tgt && tgt.closest && (tgt.closest('#xSplitBox') || tgt.id === 'xe_category')) xSplitRecalc();
+  }
+  document.addEventListener('input', _xSplitWatch);
+  document.addEventListener('change', _xSplitWatch);
+
   /* ---------------- event delegation ---------------- */
   document.addEventListener('click', function (ev) {
     var el = ev.target.closest('[data-act]');
@@ -1484,6 +1516,52 @@
       api('/erp/api/exp/edit', { method: 'POST', body: { id: id, fields: fields } }).then(function () {
         var xm = $('#xModal'); xm.hidden = true; xm.innerHTML = '';
         toast(t('x_saved'));
+        loadExp();
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'x-split-open') {
+      var sb = $('#xSplitBox');
+      if (sb) { sb.hidden = !sb.hidden; if (!sb.hidden) { xSplitRecalc(); sb.scrollIntoView({ block: 'nearest' }); } }
+    }
+    else if (act === 'x-split-mode') {
+      xSplitMode = el.getAttribute('data-mode') || 'sar';
+      $$('.xsp-mode').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-mode') === xSplitMode); });
+      xSplitRecalc();
+    }
+    else if (act === 'x-split-addrow') {
+      var rowsBox = $('#xSplitRows');
+      if (rowsBox) { rowsBox.insertAdjacentHTML('beforeend', xSplitRowHtml('', '')); xSplitRecalc(); }
+    }
+    else if (act === 'x-split-delrow') {
+      var drow = el.closest('.xsp-row');
+      if (drow) { drow.remove(); xSplitRecalc(); }
+    }
+    else if (act === 'x-split-equal') {
+      var erows = $$('#xSplitRows .xsp-row'), nn = erows.length;
+      if (nn >= 1) {
+        var total = xSplitMode === 'percent' ? 100 : xSplitParent;
+        var base = Math.floor((total / nn) * 100) / 100;
+        erows.forEach(function (row, i) {
+          $('.xsp-val', row).value = (i === nn - 1) ? Math.round((total - base * (nn - 1)) * 100) / 100 : base;
+        });
+        xSplitRecalc();
+      }
+    }
+    else if (act === 'x-split-apply') {
+      var srows = xSplitReadRows().filter(function (r) { return r.apartment && r.value !== ''; })
+        .map(function (r) { return { apartment: r.apartment, value: Number(r.value) }; });
+      if (srows.length < 2) { toast(t('xsp_need2'), 'warn'); return; }
+      el.disabled = true;
+      var catEl2 = $('#xe_category'), cat2 = catEl2 ? (catEl2.value || '').trim() : '';
+      var pre = (cat2 && cat2 !== xSplitCat0)
+        ? api('/erp/api/exp/edit', { method: 'POST', body: { id: id, fields: { category: cat2 } } })
+        : Promise.resolve();
+      pre.then(function () {
+        return api('/erp/api/exp/split-apply', { method: 'POST', body: { id: id, mode: xSplitMode, rows: srows } });
+      }).then(function (r) {
+        if (!r || !r.ok) { el.disabled = false; toast(xSplitErr(r && r.reason), 'err'); return; }
+        var xm = $('#xModal'); if (xm) { xm.hidden = true; xm.innerHTML = ''; }
+        toast(xiRep(t('xsp_done'), { n: (r.child_ids || []).length }));
         loadExp();
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
@@ -1716,6 +1794,40 @@
 
     /* --- owners --- */
     else if (act === 'retry_owners') loadOwners();
+    else if (act === 'rr-preview' || act === 'rr-download') {
+      var rrOwner = ($('#rrOwner') || {}).value || '', rrUnit = ($('#rrUnit') || {}).value || '';
+      var rrS = ($('#rrStart') || {}).value || '', rrE = ($('#rrEnd') || {}).value || '';
+      if (!rrOwner || !rrS || !rrE) { toast(t('rr_need'), 'warn'); return; }
+      if (rrE < rrS) { toast(t('rr_end_before'), 'warn'); return; }
+      var rrDl = act === 'rr-download';
+      var rrQs = 'owner=' + encodeURIComponent(rrOwner) + (rrUnit ? '&apt=' + encodeURIComponent(rrUnit) : '') +
+        '&start=' + encodeURIComponent(rrS) + '&end=' + encodeURIComponent(rrE) + '&token=' + encodeURIComponent(store.token);
+      el.disabled = true;
+      if (!rrDl) {
+        var rrSum = $('#rrSummary'); if (rrSum) rrSum.innerHTML = '<div class="wq-sub">' + esc(t('rr_loading')) + '</div>';
+        api('/erp/api/owners/range-report?' + rrQs).then(rrRenderSummary).catch(function () {
+          var s2 = $('#rrSummary'); if (s2) s2.innerHTML = '';
+        });
+      }
+      fetch('/erp/api/owners/range-report.pdf?' + rrQs + (rrDl ? '&dl=1' : ''), { headers: { 'X-Token': store.token } })
+        .then(function (r) {
+          if (!r.ok) return r.json().catch(function () { return null; }).then(function (j) { throw { status: r.status, body: j }; });
+          return r.blob();
+        })
+        .then(function (blob) {
+          el.disabled = false;
+          var url = URL.createObjectURL(blob);
+          if (rrDl) {
+            var a = document.createElement('a');
+            a.href = url; a.download = 'ouja-' + rrOwner.replace(/[^\w؀-ۿ.-]+/g, '-') + '-' + rrS + '_' + rrE + '.pdf';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+          } else {
+            var ifr = $('#rrFrame'); if (ifr) { ifr.style.display = 'block'; ifr.src = url; }
+          }
+        })
+        .catch(function (er) { el.disabled = false; toast(srvMsg(er) || t('rr_pdf_unavail'), 'err'); });
+    }
     /* --- v2.2 slice 3: owner profile --- */
     else if (act === 'pr-unit') {
       prUI.unit = el.getAttribute('data-lid') || '';
@@ -2718,6 +2830,73 @@
     });
   }
 
+  /* ---- split one expense across apartments (reuses bot.py _exp4_split engine) ---- */
+  var xSplitApts = [], xSplitMode = 'sar', xSplitParent = 0, xSplitCat0 = '';
+  function xSplitRowHtml(apt, val) {
+    var cur = String(apt || '');
+    var o = '<option value="">' + esc(t('x_choose')) + '</option>';
+    xSplitApts.forEach(function (s) { s = String(s); o += '<option value="' + esc(s) + '"' + (s === cur ? ' selected' : '') + '>' + esc(s) + '</option>'; });
+    return '<div class="xsp-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+      '<select class="in xsp-apt" style="flex:1;min-width:0">' + o + '</select>' +
+      '<input class="in xsp-val" type="number" min="0" step="0.01" inputmode="decimal" style="width:120px" value="' + esc(val == null ? '' : val) + '">' +
+      '<button class="btn ghost xs" type="button" data-act="x-split-delrow" aria-label="remove">✕</button>' +
+      '</div>';
+  }
+  function xSplitSectionHtml(id) {
+    return '<div class="xsp-wrap" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">' +
+      '<button class="btn ghost sm" type="button" data-act="x-split-open">🔀 ' + esc(t('x_split')) + '</button>' +
+      '<div id="xSplitBox" hidden style="margin-top:10px">' +
+        '<div class="grp-hint" style="padding:0 0 8px">' + esc(t('xsp_hint')) + '</div>' +
+        '<div class="xsp-modes" style="display:flex;gap:6px;margin-bottom:10px">' +
+          '<button class="btn ghost xs xsp-mode on" type="button" data-act="x-split-mode" data-mode="sar">' + esc(t('xsp_mode_sar')) + '</button>' +
+          '<button class="btn ghost xs xsp-mode" type="button" data-act="x-split-mode" data-mode="percent">' + esc(t('xsp_mode_pct')) + '</button>' +
+        '</div>' +
+        '<div id="xSplitRows">' + xSplitRowHtml('', '') + xSplitRowHtml('', '') + '</div>' +
+        '<div class="cp-btns" style="margin:8px 0">' +
+          '<button class="btn ghost xs" type="button" data-act="x-split-addrow">＋ ' + esc(t('xsp_addrow')) + '</button>' +
+          '<button class="btn ghost xs" type="button" data-act="x-split-equal">' + esc(t('xsp_equal')) + '</button>' +
+        '</div>' +
+        '<div id="xSplitInfo" class="wq-sub" style="margin:6px 0"></div>' +
+        '<div class="grp-hint" id="xSplitCatHint" style="padding:0 0 8px"></div>' +
+        '<div class="cp-btns">' +
+          '<button class="btn primary sm" id="xSplitGo" type="button" data-act="x-split-apply" data-id="' + esc(id) + '" disabled>' + esc(t('xsp_confirm')) + '</button>' +
+        '</div>' +
+      '</div></div>';
+  }
+  function xSplitReadRows() {
+    return $$('#xSplitRows .xsp-row').map(function (row) {
+      return { apartment: ($('.xsp-apt', row).value || '').trim(), value: ($('.xsp-val', row).value || '').trim() };
+    });
+  }
+  function xSplitRecalc() {
+    var info = $('#xSplitInfo'), go = $('#xSplitGo');
+    if (!info) return;
+    var filled = xSplitReadRows().filter(function (r) {
+      return r.apartment && r.value !== '' && isFinite(Number(r.value)) && Number(r.value) > 0;
+    });
+    var sum = filled.reduce(function (a, r) { return a + Number(r.value); }, 0);
+    var ok, msg;
+    if (xSplitMode === 'percent') {
+      var rem = Math.round((100 - sum) * 100) / 100;
+      ok = filled.length >= 2 && Math.abs(rem) < 0.1;
+      msg = esc(t('xsp_alloc')) + ': ' + fmtAmt(sum) + '% · ' + esc(t('xsp_remain')) + ': ' + fmtAmt(rem) + '%';
+    } else {
+      var rem2 = Math.round((xSplitParent - sum) * 100) / 100;
+      ok = filled.length >= 2 && Math.abs(rem2) < 0.01;
+      msg = fmtAmt(xSplitParent) + ' ' + esc(t('sar')) + ' · ' + esc(t('xsp_alloc')) + ': ' + fmtAmt(sum) +
+            ' · ' + esc(t('xsp_remain')) + ': ' + fmtAmt(rem2);
+    }
+    if (filled.length < 2) msg += ' · <span class="tag warnt">' + esc(t('xsp_need2')) + '</span>';
+    info.innerHTML = msg;
+    var catHint = $('#xSplitCatHint'), catEl = $('#xe_category');
+    if (catHint) catHint.innerHTML = (catEl && (catEl.value || '').trim()) ? '' : esc(t('xsp_cat_hint'));
+    if (go) go.disabled = !ok;
+  }
+  function xSplitErr(reason) {
+    var k = 'xsp_err_' + String(reason || '');
+    return (T[store.lang][k] || T.ar[k]) || t('act_failed');
+  }
+
   function expEditDrawer(id) {
     var d = store.D.exp;
     var r = null;
@@ -2729,6 +2908,8 @@
       return '<label class="cp-f"><span>' + esc(label) + '</span><input class="in" id="xe_' + key + '" type="' + (type || 'text') + '" value="' + esc(val == null ? '' : val) + '"></label>';
     }
     var opts = (d && d.options) || { apartments: [], categories: [] };
+    xSplitApts = (opts.apartments || []).slice(); xSplitMode = 'sar';
+    xSplitParent = Number(r.amount_sar) || 0; xSplitCat0 = (r.category || '');
     // MCQ dropdown for the mandatory fields (apartment/category) so bank/sheet rows are
     // completed with a picker, not free text. Keeps an unknown current value selectable.
     function fsel(label, key, val, list) {
@@ -2750,7 +2931,7 @@
       '</div><div class="cp-btns">' +
       '<button class="btn primary sm" data-act="x-edit-save" data-id="' + esc(id) + '">' + esc(t('save')) + '</button>' +
       '<button class="btn ghost sm" data-act="x-modal-close">' + esc(t('cancel')) + '</button>' +
-      '</div></div></div>';
+      '</div>' + xSplitSectionHtml(id) + '</div></div>';
   }
 
   /* ================= العهد Custody ================= */
@@ -3211,6 +3392,51 @@
       '</section>';
   }
 
+  /* ---- custom-range owner report: card + on-screen numbers summary ---- */
+  function rangeReportCardHtml(d) {
+    var rows = (d && d.rows) || [];
+    if (!rows.length) return '';
+    var oo = '<option value="">' + esc(t('x_choose')) + '</option>' +
+      rows.map(function (r) { return '<option value="' + esc(r.owner) + '">' + esc(r.owner) + '</option>'; }).join('');
+    return '<section class="card grp">' +
+      '<header class="grp-h"><span class="grp-ico">📄</span><h2>' + esc(t('rr_title')) + '</h2></header>' +
+      '<div class="grp-hint">' + esc(t('rr_hint')) + '</div>' +
+      '<div style="padding:6px 20px 16px">' +
+        '<div class="cp-grid" style="grid-template-columns:1fr 1fr">' +
+          '<label class="cp-f"><span>' + esc(t('rr_owner')) + '</span><select class="in" id="rrOwner">' + oo + '</select></label>' +
+          '<label class="cp-f"><span>' + esc(t('rr_unit')) + '</span><select class="in" id="rrUnit"><option value="">' + esc(t('rr_all_units')) + '</option></select></label>' +
+          '<label class="cp-f"><span>' + esc(t('rr_start')) + '</span><input class="in date" type="date" id="rrStart"></label>' +
+          '<label class="cp-f"><span>' + esc(t('rr_end')) + '</span><input class="in date" type="date" id="rrEnd"></label>' +
+        '</div>' +
+        '<div class="cp-btns" style="margin-top:12px">' +
+          '<button class="btn primary sm" data-act="rr-preview">' + esc(t('rr_preview')) + '</button>' +
+          '<button class="btn ghost sm" data-act="rr-download">⬇ ' + esc(t('rr_download')) + '</button>' +
+        '</div>' +
+        '<div id="rrSummary"></div>' +
+        '<iframe id="rrFrame" title="' + esc(t('rr_title')) + '" style="display:none;width:100%;height:560px;border:1px solid var(--line);border-radius:12px;margin-top:12px"></iframe>' +
+      '</div>' +
+    '</section>';
+  }
+  function rrRenderSummary(j) {
+    var el = $('#rrSummary');
+    if (!el) return;
+    var items = (j && j.items) || [];
+    if (!items.length) { el.innerHTML = ''; return; }
+    var rep = items[0].report || {}, per = rep.period || {};
+    function line(lbl, val, strong) {
+      return '<div class="wq-sub" style="display:flex;justify-content:space-between;gap:12px">' +
+        '<span>' + esc(lbl) + '</span><code' + (strong ? ' class="amt"' : '') + '>' + fmtAmt(val) + ' ' + esc(t('sar')) + '</code></div>';
+    }
+    el.innerHTML = '<div class="state-card" style="margin:10px 0;padding:12px 16px">' +
+      '<div class="wq-sub" style="margin-bottom:6px"><b>' + esc(items[0].label || '') + '</b> · ' + esc(per.start || '') + ' → ' + esc(per.end || '') + '</div>' +
+      line(t('rr_inc'), rep.total_income) +
+      line(t('rr_fee'), rep.ouja_fee) +
+      line(t('rr_exp'), rep.expenses) +
+      ((rep.cleaning && rep.cleaning.total) ? line(t('rr_clean'), rep.cleaning.total) : '') +
+      line(t('rr_net'), rep.owner_net, true) +
+    '</div>';
+  }
+
   function renderOwners(d) {
     if (d) store.D.owners = d;
     d = store.D.owners || {};
@@ -3218,6 +3444,7 @@
     var y = window.scrollY;
     $('#view').innerHTML =
       (cy ? cycleBoardHtml(cy) : (cyUI.loading ? cycleLoadingHtml() : '')) +
+      rangeReportCardHtml(d) +
       '<section class="card grp">' +
         '<header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('o_title')) + '</h2>' +
         '<span class="cnt">' + (d.total || 0) + '</span></header>' +
@@ -3231,6 +3458,15 @@
       cyUI.m = sel.value;
       cyUI.sel = {};
       loadCycle();
+    });
+    var ro = $('#rrOwner');
+    if (ro) ro.addEventListener('change', function () {
+      var u = $('#rrUnit'); if (!u) return;
+      var rec = null, ows = (store.D.owners && store.D.owners.rows) || [];
+      ows.forEach(function (r) { if (r.owner === ro.value) rec = r; });
+      var apts = (rec && rec.apartments) || [];
+      u.innerHTML = '<option value="">' + esc(t('rr_all_units')) + '</option>' +
+        apts.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('');
     });
     window.scrollTo(0, y);
   }
