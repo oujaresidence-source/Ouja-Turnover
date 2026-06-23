@@ -11,6 +11,7 @@ WAL mode for concurrent reads while the aiohttp loop serves the dashboard. Every
 goes through a short-lived `with connect() as cx:` block so it commits and closes cleanly.
 """
 
+import os
 import sqlite3
 import json
 import threading
@@ -140,12 +141,52 @@ CREATE TABLE IF NOT EXISTS audit_log (
 """
 
 
+def _ensure_parent_dir(path):
+    """SQLite never creates missing directories — it just raises 'unable to open database
+    file'. Every other STATE_DIR writer in bot.py makedirs() first; the Brain's raw sqlite
+    open is the one place that didn't. Mirror that here so a cold volume can't 500 the Brain."""
+    d = os.path.dirname(path)
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+
+
+def _open_diagnostic(path, err):
+    """Build a precise message when the DB still won't open after we've ensured the dir —
+    tells us (and the owner, on screen) whether it's a missing mount or a permission issue
+    on the Railway volume, instead of the opaque 'unable to open database file'."""
+    d = os.path.dirname(path) or "."
+    dir_exists = os.path.isdir(d)
+    writable = False
+    try:
+        probe = os.path.join(d, ".brain_write_probe")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        writable = True
+    except Exception:
+        writable = False
+    return ("cannot open brain.db at %s — dir_exists=%s dir_writable=%s. If dir_writable=False "
+            "the STATE_DIR volume isn't mounted/writable on this deploy (a Railway volume issue, "
+            "not a code bug). [%s]" % (path, dir_exists, writable, err))
+
+
 def connect():
-    cx = sqlite3.connect(db_path(), timeout=30)
-    cx.row_factory = sqlite3.Row
-    cx.execute("PRAGMA journal_mode=WAL")
-    cx.execute("PRAGMA foreign_keys=ON")
-    return cx
+    path = db_path()
+    try:
+        _ensure_parent_dir(path)
+    except Exception:
+        pass
+    try:
+        cx = sqlite3.connect(path, timeout=30)
+        cx.row_factory = sqlite3.Row
+        try:
+            cx.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass        # some volume filesystems can't back WAL's shared memory; default journal is fine
+        cx.execute("PRAGMA foreign_keys=ON")
+        return cx
+    except sqlite3.OperationalError as e:
+        raise sqlite3.OperationalError(_open_diagnostic(path, e))
 
 
 # Columns added after the first release — applied to already-deployed brain.db files.
