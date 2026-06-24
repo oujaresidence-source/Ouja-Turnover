@@ -11559,7 +11559,24 @@ def _exp4_migrate_all():
     return migrated
 
 def _exp4_approve(exp, by=""):
-    """Pending/Needs-Edit → Approved (only when required fields are present)."""
+    """Pending/Needs-Edit → Approved. HONEST: refuses no-ops. _exp4_tab gives export-status
+    precedence, so 'approving' an already-verified/exported/failed/duplicate/split expense
+    would flip approval_status yet never move the row — a silent no-op the UI reports as
+    success (root cause of the 'press اعتماد → returns to متحققة' bug). Refuse with a reason
+    instead, so the frontend can show it as blocked rather than fake a move."""
+    if exp.get("hostaway_verified"):
+        _exp4_log(exp, "approve_blocked", actor=by, detail="already_verified")
+        return False, "already_verified"
+    es = _exp4_export_status(exp)
+    if es in ("export_requested", "exporting", "exported_not_verified"):
+        _exp4_log(exp, "approve_blocked", actor=by, detail="already_exported")
+        return False, "already_exported"
+    if es in ("failed", "duplicate_found"):
+        _exp4_log(exp, "approve_blocked", actor=by, detail=es)
+        return False, "needs_recheck" if es == "failed" else "duplicate"
+    if exp.get("is_split_parent"):
+        _exp4_log(exp, "approve_blocked", actor=by, detail="split_parent")
+        return False, "split_parent"
     miss = _exp4_missing_required(exp)
     if miss:
         exp["approval_status"] = "needs_edit"
