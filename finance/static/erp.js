@@ -126,6 +126,8 @@
       x_approved_ok: 'اعتُمدت ✓', x_approved_n: 'اعتُمدت {n} ✓', x_blocked_n: '{n} محجوبة',
       x_blk_already_verified: 'متحقق مسبقًا في Hostaway', x_blk_already_exported: 'مُصدّر — ما يحتاج اعتماد',
       x_blk_needs_recheck: 'فشل التصدير — أعد الفحص', x_blk_duplicate: 'مكرر في Hostaway', x_blk_split_parent: 'مصروف مقسّم — أدر الأبناء',
+      x_reverify: 'أعد فحص المتحققة', x_rv_checking: 'نفحص المتحققة مع Hostaway…', x_rv_unreach: 'ما قدرنا نوصل Hostaway — جرّب بعدين',
+      x_rv_allgood: 'كل المتحققة ({n}) موجودة في Hostaway ✓', x_rv_confirm: '{n} مصروف مأشّر «متحقق» لكنه مو موجود في Hostaway. نرجّعها لقيد الاعتماد؟', x_rv_done: 'تم — رجّعنا {n} لقيد الاعتماد',
       x_rejected_ok: 'رُفضت', x_exported_ok: 'أُرسلت للتصدير', x_export_skip: '{n} تخطّيناها',
       x_verified_ok: 'اتحققت ✓', x_not_found: 'ما لقيناها في Hostaway',
       x_saved: 'انحفظ التعديل ✓', x_more: 'تحميل المزيد',
@@ -421,6 +423,8 @@
       x_approved_ok: 'Approved ✓', x_approved_n: 'Approved {n} ✓', x_blocked_n: '{n} blocked',
       x_blk_already_verified: 'Already verified in Hostaway', x_blk_already_exported: 'Exported — no approval needed',
       x_blk_needs_recheck: 'Export failed — recheck it', x_blk_duplicate: 'Duplicate in Hostaway', x_blk_split_parent: 'Split parent — manage its children',
+      x_reverify: 'Re-check verified', x_rv_checking: 'Checking verified against Hostaway…', x_rv_unreach: "Couldn't reach Hostaway — try again",
+      x_rv_allgood: 'All {n} verified are in Hostaway ✓', x_rv_confirm: '{n} expenses are marked Verified but are NOT in Hostaway. Move them back to Pending?', x_rv_done: 'Done — moved {n} back to Pending',
       x_rejected_ok: 'Rejected', x_exported_ok: 'Queued for export', x_export_skip: '{n} skipped',
       x_verified_ok: 'Verified ✓', x_not_found: 'Not found in Hostaway',
       x_saved: 'Edit saved ✓', x_more: 'Load more',
@@ -1633,6 +1637,25 @@
       $$('.xrow input[type=checkbox]').forEach(function (c) { c.checked = false; });
       updateExpBulk();
     }
+    else if (act === 'x-reverify') {
+      // Re-check every Verified expense against Hostaway; un-verify the ones that are gone.
+      // Dry-run first (report) -> confirm the count -> apply. Backend only demotes a definite miss.
+      el.disabled = true;
+      toast(t('x_rv_checking'));
+      api('/erp/api/exp/reverify', { method: 'POST', body: { apply: false } }).then(function (r) {
+        el.disabled = false;
+        if (!r.ok) { toast(t('x_rv_unreach'), 'err'); return; }
+        if (!r.absent) { toast(t('x_rv_allgood').replace('{n}', r.present), 'ok'); return; }
+        if (!window.confirm(t('x_rv_confirm').replace('{n}', r.absent))) return;
+        el.disabled = true;
+        api('/erp/api/exp/reverify', { method: 'POST', body: { apply: true } }).then(function (r2) {
+          el.disabled = false;
+          toast(t('x_rv_done').replace('{n}', (r2.demoted || []).length), 'ok');
+          expApplyCounts(r2.tabs);
+          loadExp();
+        }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
 
     /* --- manual sheet intake (Sheet → website) --- */
     else if (act === 'x-auto-toggle') {
@@ -2781,6 +2804,7 @@
         '<div class="bb-row">' +
           '<input id="xSearch" class="in search" type="search" placeholder="' + esc(t('x_search')) + '" value="' + esc(expP.q) + '">' +
           (d.dryrun_on ? '<span class="tag warnt">' + esc(t('x_dryrun')) + '</span>' : '') +
+          '<button class="btn ghost sm" data-act="x-reverify" style="margin-inline-start:auto">↻ ' + esc(t('x_reverify')) + '</button>' +
         '</div>' +
         '<div class="bb-chips">' + chips + '</div>' +
       '</div>' +

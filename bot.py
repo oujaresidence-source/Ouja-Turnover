@@ -12274,6 +12274,80 @@ def _exp4_reset_unverified(by=""):
     return {"ok": ok, "error": err, "hostaway_count": len(items or []),
             "reverified": reverified, "reset_to_pending": reset, "kept_verified": kept}
 
+def _exp4_demote_verified(exp, by=""):
+    """Un-verify an expense that is no longer in Hostaway: clear the verified/Hostaway link and
+    send it back to its real lane (Pending / Needs-Edit). NEVER deletes; fully logged + reversible.
+    This is the missing other half of verification — the flag used to be a one-way latch."""
+    for k in ("hostaway_ref", "hostaway_expense_id", "hostaway_match_snapshot", "verified_at",
+              "verify_note", "export_job", "sending_at", "queued_at"):
+        exp.pop(k, None)
+    exp["hostaway_verified"] = False
+    exp["retry_count"] = 0
+    exp["approval_status"] = "needs_edit" if _exp4_missing_required(exp) else "pending_approval"
+    _exp_set_status(exp, "captured", reason="reverify_absent", by=by, detail="no longer in Hostaway")
+    exp["updated_at"] = _exp_now().isoformat(timespec="seconds")
+    _exp4_log(exp, "demoted_unverified", actor=by, new=exp["approval_status"],
+              detail="re-check: not found in Hostaway")
+
+async def _exp4_reverify_verified(apply=False, by=""):
+    """Re-check every VERIFIED expense against live Hostaway; demote (un-verify) the ones that are
+    DEFINITELY gone. Closes the one-way-latch bug where an expense deleted/changed in Hostaway
+    stayed متحققة forever (the 271-not-in-Hostaway report).
+
+    SAFE BY CONSTRUCTION — an expense is demoted ONLY when a direct id-GET that the deployment
+    supports answers 'no such expense'. List-miss alone never demotes (the Hostaway list is
+    paginated/capped — that was the 'المصاريف 0' bug), an unreachable Hostaway changes nothing,
+    and if the deployment can't GET-by-id at all we demote nothing (everything stays 'inconclusive').
+    apply=False is a dry-run that only reports."""
+    items, ok, err = await asyncio.to_thread(_exp_fetch_hostaway, None, True)
+    if not ok:
+        return {"ok": False, "error": err or "hostaway_unreachable", "checked": 0, "present": 0,
+                "absent": 0, "inconclusive": 0, "demoted": [], "applied": False, "direct_works": False}
+    present_ids = set()
+    for it in items:
+        iid = _exp_hostaway_item_id(it)
+        if iid:
+            present_ids.add(str(iid))
+    # Does this deployment actually support direct id-GET? Probe a known-present id. If the probe
+    # fails we never demote (a broken GET would otherwise look like 'everything is gone').
+    direct_works = False
+    if present_ids:
+        probe = next(iter(present_ids))
+        pit, pok, _pe = await asyncio.to_thread(_exp_fetch_hostaway_one, probe)
+        direct_works = bool(pok and str(_exp_hostaway_item_id(pit) or "") == probe)
+    verified = [e for e in _expenses.values()
+                if not e.get("archived") and not e.get("is_split_parent")
+                and _exp4_export_status(e) == "verified"]
+    present = inconclusive = 0
+    gone = []
+    for e in verified:
+        rid = (str(e.get("hostaway_expense_id") or e.get("hostaway_ref") or "")
+               if _exp_has_real_hostaway_ref(e) else "")
+        if rid and rid in present_ids:
+            present += 1
+            continue
+        if not rid or not direct_works:
+            inconclusive += 1                      # can't safely confirm absence -> keep verified
+            continue
+        dit, dok, _de = await asyncio.to_thread(_exp_fetch_hostaway_one, rid)
+        if dok and str(_exp_hostaway_item_id(dit) or "") == rid:
+            present += 1                           # beyond the list window, but really there
+        elif dok:
+            gone.append(e)                         # endpoint answered, no such expense -> demote
+        else:
+            inconclusive += 1                      # network blip -> keep verified
+    demoted_refs = []
+    for e in gone:
+        demoted_refs.append(e.get("ref") or e.get("id"))
+        if apply:
+            _exp4_demote_verified(e, by=by)
+    if apply and demoted_refs:
+        _owner_cache_bust()                        # statements changed → bust the cache
+        await asyncio.to_thread(persist_state)
+    return {"ok": True, "checked": len(verified), "present": present, "absent": len(gone),
+            "inconclusive": inconclusive, "demoted": demoted_refs, "applied": bool(apply),
+            "direct_works": direct_works}
+
 def _exp4_approve_all_pending(by=""):
     """Approve every Pending expense that passes validation (bulk). Invalid ones stay
     Needs-Edit. Returns counts."""
@@ -36072,6 +36146,18 @@ async def _api_exp4_recheck(request):
     await asyncio.to_thread(persist_state)
     out["tabs"] = _exp4_tab_counts()
     return _json(out)
+
+async def _api_exp4_reverify(request):
+    """Re-check VERIFIED expenses against live Hostaway; un-verify the ones that are gone.
+    POST {apply:false} = dry-run report; {apply:true} = also demote. Safe: demotes only on a
+    direct id-GET 'not found' (never on a list-miss or an unreachable Hostaway)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request); by = _exp4_actor(request, b)
+    res = await _exp4_reverify_verified(apply=bool(b.get("apply")), by=by)
+    if res.get("applied"):
+        res["tabs"] = _exp4_tab_counts()
+    return _json(res)
 
 async def _api_exp4_match(request):
     """View Hostaway Match — a LIVE Hostaway lookup for one expense (explicit action)."""

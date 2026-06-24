@@ -773,6 +773,7 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/exp/edit", _guarded(_exp_delegate("_api_exp4_edit"), write=True))
     app.router.add_post("/erp/api/exp/export", _guarded(_exp_delegate("_api_exp4_export"), write=True))
     app.router.add_post("/erp/api/exp/recheck", _guarded(_exp_delegate("_api_exp4_recheck"), write=True))
+    app.router.add_post("/erp/api/exp/reverify", _guarded(_exp_delegate("_api_exp4_reverify"), write=True))
     app.router.add_get("/erp/api/exp/intake", _guarded(_exp_delegate("_api_exp4_intake_get")))
     app.router.add_post("/erp/api/exp/intake", _guarded(_exp_delegate("_api_exp4_intake_set"), write=True))
     app.router.add_post("/erp/api/exp/pull-preview", _guarded(_exp_delegate("_api_exp4_pull_preview"), write=True))
