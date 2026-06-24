@@ -12289,64 +12289,104 @@ def _exp4_demote_verified(exp, by=""):
     _exp4_log(exp, "demoted_unverified", actor=by, new=exp["approval_status"],
               detail="re-check: not found in Hostaway")
 
-async def _exp4_reverify_verified(apply=False, by=""):
-    """Re-check every VERIFIED expense against live Hostaway; demote (un-verify) the ones that are
-    DEFINITELY gone. Closes the one-way-latch bug where an expense deleted/changed in Hostaway
-    stayed متحققة forever (the 271-not-in-Hostaway report).
+def _lid_eq(a, b):
+    try:
+        return int(a) == int(b)
+    except (TypeError, ValueError):
+        return False
 
-    SAFE BY CONSTRUCTION — an expense is demoted ONLY when a direct id-GET that the deployment
-    supports answers 'no such expense'. List-miss alone never demotes (the Hostaway list is
-    paginated/capped — that was the 'المصاريف 0' bug), an unreachable Hostaway changes nothing,
-    and if the deployment can't GET-by-id at all we demote nothing (everything stays 'inconclusive').
-    apply=False is a dry-run that only reports."""
+async def _exp4_reverify_verified(apply=False, by=""):
+    """Re-check every VERIFIED expense against live Hostaway. Two findings:
+      - ABSENT: nothing in Hostaway resembles it -> un-verify (demote back to Pending). Closes the
+        one-way-latch bug where an expense deleted in Hostaway stayed متحققة forever.
+      - listing_diff: it IS in Hostaway but filed under a DIFFERENT listing than ours -> kept, but
+        reported (the 'verified yet not under this apartment' case the owner caught).
+
+    SAFE BY CONSTRUCTION. An expense is found 'present' if ANY of: its real id is in the live list,
+    a direct id-GET resolves it, our reference is embedded in a Hostaway expense, or a Hostaway
+    expense shares its amount+date. It is demoted ONLY when NONE of those hold AND the Hostaway
+    list came back COMPLETE (we did not hit the page cap — list-miss on a capped list never demotes,
+    the 'المصاريف 0' trap). Unreachable Hostaway changes nothing. apply=False is a dry-run."""
     items, ok, err = await asyncio.to_thread(_exp_fetch_hostaway, None, True)
     if not ok:
         return {"ok": False, "error": err or "hostaway_unreachable", "checked": 0, "present": 0,
-                "absent": 0, "inconclusive": 0, "demoted": [], "applied": False, "direct_works": False}
-    present_ids = set()
+                "absent": 0, "inconclusive": 0, "listing_ok": 0, "listing_diff": 0,
+                "mismatches": [], "demoted": [], "applied": False, "direct_works": False, "complete": False}
+    present_items = {}
     for it in items:
         iid = _exp_hostaway_item_id(it)
         if iid:
-            present_ids.add(str(iid))
-    # Does this deployment actually support direct id-GET? Probe a known-present id. If the probe
-    # fails we never demote (a broken GET would otherwise look like 'everything is gone').
+            present_items[str(iid)] = it
+    complete = len(items) < EXPENSE_HA_MAX_PAGES * 100      # didn't hit the page cap → the full list
+    # Does this deployment support direct id-GET? Probe a known-present id; if not, we lean on the list.
     direct_works = False
-    if present_ids:
-        probe = next(iter(present_ids))
+    if present_items:
+        probe = next(iter(present_items))
         pit, pok, _pe = await asyncio.to_thread(_exp_fetch_hostaway_one, probe)
         direct_works = bool(pok and str(_exp_hostaway_item_id(pit) or "") == probe)
+
+    def amount_date_anywhere(e):
+        try:
+            want_amt = round(abs(float(e.get("amount") or 0)), 2)
+        except (TypeError, ValueError):
+            return None
+        want_date = str(e.get("expense_date") or "")[:10]
+        if not want_date:
+            return None
+        for it in items:
+            if _exp_hostaway_item_amount(it) == want_amt and _exp_hostaway_item_date(it) == want_date:
+                return it
+        return None
+
     verified = [e for e in _expenses.values()
                 if not e.get("archived") and not e.get("is_split_parent")
                 and _exp4_export_status(e) == "verified"]
-    present = inconclusive = 0
-    gone = []
+    present = inconclusive = listing_ok = listing_diff = 0
+    gone, mismatches = [], []
     for e in verified:
         rid = (str(e.get("hostaway_expense_id") or e.get("hostaway_ref") or "")
                if _exp_has_real_hostaway_ref(e) else "")
-        if rid and rid in present_ids:
+        ha_item = None
+        if rid and rid in present_items:
+            ha_item = present_items[rid]                    # its id is in the live Hostaway list
+        elif rid and direct_works:
+            dit, dok, _de = await asyncio.to_thread(_exp_fetch_hostaway_one, rid)
+            if dok and str(_exp_hostaway_item_id(dit) or "") == rid:
+                ha_item = dit                               # beyond the list window, but really there
+        if ha_item is None:                                 # no id hit → try reference / amount+date match
+            m = _exp_match_hostaway_item(e, items)
+            if m.get("present") and m.get("confidence", 0) >= 0.80:
+                ha_item = m.get("item")
+            else:
+                ha_item = amount_date_anywhere(e)
+        if ha_item is not None:
             present += 1
-            continue
-        if not rid or not direct_works:
-            inconclusive += 1                      # can't safely confirm absence -> keep verified
-            continue
-        dit, dok, _de = await asyncio.to_thread(_exp_fetch_hostaway_one, rid)
-        if dok and str(_exp_hostaway_item_id(dit) or "") == rid:
-            present += 1                           # beyond the list window, but really there
-        elif dok:
-            gone.append(e)                         # endpoint answered, no such expense -> demote
+            our_lid, ha_lid = e.get("listing_id"), _exp_hostaway_item_lid(ha_item)
+            if our_lid is not None and ha_lid is not None and not _lid_eq(our_lid, ha_lid):
+                listing_diff += 1
+                if len(mismatches) < 80:
+                    mismatches.append({"ref": e.get("ref") or e.get("id"), "apartment": e.get("apartment") or "",
+                                       "our_listing": our_lid, "ha_listing": ha_lid,
+                                       "amount": round(abs(float(e.get("amount") or 0)), 2),
+                                       "date": str(e.get("expense_date") or "")[:10]})
+            else:
+                listing_ok += 1
+        elif complete:
+            gone.append(e)                                  # nothing in the COMPLETE Hostaway list resembles it
         else:
-            inconclusive += 1                      # network blip -> keep verified
+            inconclusive += 1                               # list may be capped → can't be sure
     demoted_refs = []
     for e in gone:
         demoted_refs.append(e.get("ref") or e.get("id"))
         if apply:
             _exp4_demote_verified(e, by=by)
     if apply and demoted_refs:
-        _owner_cache_bust()                        # statements changed → bust the cache
+        _owner_cache_bust()                                 # statements changed → bust the cache
         await asyncio.to_thread(persist_state)
     return {"ok": True, "checked": len(verified), "present": present, "absent": len(gone),
-            "inconclusive": inconclusive, "demoted": demoted_refs, "applied": bool(apply),
-            "direct_works": direct_works}
+            "inconclusive": inconclusive, "listing_ok": listing_ok, "listing_diff": listing_diff,
+            "mismatches": mismatches, "demoted": demoted_refs, "applied": bool(apply),
+            "direct_works": direct_works, "complete": complete}
 
 def _exp4_approve_all_pending(by=""):
     """Approve every Pending expense that passes validation (bulk). Invalid ones stay
