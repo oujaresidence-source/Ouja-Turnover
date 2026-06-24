@@ -35914,8 +35914,20 @@ def _exp4_field_options():
             cats.append(c)
     return {"apartments": sorted(apts), "categories": cats}
 
-def _exp4_overview_data(tab="pending", q="", limit=120, offset=0):
+def _exp4_tab_counts():
+    """Single source of truth for the 5 lifecycle tab badges: {tab: {count, sar}}.
+    Used by the overview AND returned on every action response so the chips stay live."""
     tabs = {k: {"count": 0, "sar": 0.0} for k in ("pending", "approved", "exported", "verified", "needs_action")}
+    for e in _expenses.values():
+        v = _exp4_view(e)
+        t = v["tab"]
+        if t in tabs:
+            tabs[t]["count"] += 1
+            tabs[t]["sar"] = round(tabs[t]["sar"] + v["amount_sar"], 2)
+    return tabs
+
+def _exp4_overview_data(tab="pending", q="", limit=120, offset=0):
+    tabs = _exp4_tab_counts()
     ql = (q or "").strip().lower()
     rows = []
     for e in _expenses.values():
@@ -35923,9 +35935,6 @@ def _exp4_overview_data(tab="pending", q="", limit=120, offset=0):
         t = v["tab"]
         if t == "archived":
             continue
-        if t in tabs:
-            tabs[t]["count"] += 1
-            tabs[t]["sar"] = round(tabs[t]["sar"] + v["amount_sar"], 2)
         if t == tab:
             if ql and ql not in (" ".join([str(v.get(k) or "") for k in
                                            ("ouja_reference", "apartment", "submitter", "category", "concept")])).lower():
@@ -35999,6 +36008,7 @@ async def _api_exp4_approve(request):
         ok, why = _exp4_approve(e, by=by)
         (out["approved"] if ok else out["blocked"]).append({"id": str(i), "reason": why})
     await asyncio.to_thread(persist_state)
+    out["tabs"] = _exp4_tab_counts()                 # live chip counts so the UI never goes stale
     return _json(out)
 
 async def _api_exp4_reject(request):
@@ -36010,7 +36020,7 @@ async def _api_exp4_reject(request):
         return _json({"error": "not_found"}, 404)
     _exp4_reject(e, by=by, reason=(b.get("reason") or ""))
     await asyncio.to_thread(persist_state)
-    return _json({"ok": True, "view": _exp4_view(e)})
+    return _json({"ok": True, "view": _exp4_view(e), "tabs": _exp4_tab_counts()})
 
 async def _api_exp4_edit(request):
     if not _dash_auth(request):
@@ -36042,6 +36052,7 @@ async def _api_exp4_export(request):
         ok, why = _exp4_request_export(e, by=by)
         (out["queued"] if ok else out["skipped"]).append({"id": str(i), "reason": why})
     await asyncio.to_thread(persist_state)
+    out["tabs"] = _exp4_tab_counts()
     return _json(out)
 
 async def _api_exp4_recheck(request):
@@ -36059,6 +36070,7 @@ async def _api_exp4_recheck(request):
         ok, why = await _exp4_verify_now(e)
         (out["verified"] if ok else out["not_found"]).append({"id": str(i), "reason": why})
     await asyncio.to_thread(persist_state)
+    out["tabs"] = _exp4_tab_counts()
     return _json(out)
 
 async def _api_exp4_match(request):

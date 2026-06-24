@@ -55,5 +55,20 @@ class ApproveHonesty(unittest.TestCase):
         self.assertEqual(why, "split_parent")
 
 
+class TabCounts(unittest.TestCase):
+    def test_counts_equal_rows_per_tab(self):
+        bot._expenses.clear()
+        bot._expenses["p"] = mk(id="p", approval_status="pending_approval")
+        bot._expenses["a"] = mk(id="a", approval_status="approved")
+        bot._expenses["v"] = mk(id="v", hostaway_verified=True, hostaway_ref="9", approval_status="approved")
+        counts = bot._exp4_tab_counts()
+        self.assertEqual(counts["pending"]["count"], 1)
+        self.assertEqual(counts["approved"]["count"], 1)
+        self.assertEqual(counts["verified"]["count"], 1)
+        # the overview must agree with the standalone counter (single source of truth)
+        ov = bot._exp4_overview_data(tab="pending")
+        self.assertEqual(ov["tabs"], counts)
+
+
 if __name__ == "__main__":
     unittest.main()
