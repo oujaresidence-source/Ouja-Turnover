@@ -10239,11 +10239,18 @@ def _exp_hostaway_probe():
 
 _exp_ha_cache = {"items": None, "ok": False, "err": None, "ts": 0.0}
 EXPENSE_HA_CACHE_TTL = int(os.environ.get("EXPENSE_HA_CACHE_TTL", "45"))  # sec; speeds up bulk verify
+# Page ceiling for the Hostaway expense list (x100 rows/page). MUST exceed the real
+# expense count or the NEWEST expenses fall outside the window and never verify — which
+# silently hid posted expenses from owner statements. The loop still short-circuits the
+# moment Hostaway returns a partial page, so a generous ceiling is cheap.
+EXPENSE_HA_MAX_PAGES = max(10, int(os.environ.get("EXPENSE_HA_MAX_PAGES", "60") or "60"))
 
-def _exp_fetch_hostaway(max_pages=10, force=False):
-    """Fetch existing Hostaway expenses (paginated, capped), CACHED for a few seconds so a
+def _exp_fetch_hostaway(max_pages=None, force=False):
+    """Fetch existing Hostaway expenses (paginated), CACHED for a few seconds so a
     bulk verify/reconcile over many expenses makes ONE Hostaway pull, not N. Returns
     (list, ok, error). Pass force=True to bypass the cache (manual 'تحديث المزامنة')."""
+    if max_pages is None:
+        max_pages = EXPENSE_HA_MAX_PAGES
     c = _exp_ha_cache
     if (not force) and c["items"] is not None and (time.time() - c["ts"] < EXPENSE_HA_CACHE_TTL):
         return c["items"], c["ok"], c["err"]
@@ -10305,6 +10312,21 @@ EXPENSE_V2_REASON_LABELS = {
 def _exp_has_real_hostaway_ref(exp):
     ref = exp.get("hostaway_ref") or exp.get("hostaway_expense_id")
     return bool(ref) and str(ref) not in ("DRYRUN", "ok", "existing", "None", "none", "FILE")
+
+def _exp_posted_to_hostaway(exp):
+    """True when an expense is genuinely recorded in Hostaway and must therefore appear
+    on the owner statement. 'verified' (hostaway_verified) is the gold signal — but an
+    expense the owner already exported, that carries a REAL Hostaway expense id, is just
+    as real money on the unit. The secondary 'verify' re-fetch is fragile (the Hostaway
+    expense list is paginated/capped and may not echo our reference, plus read-after-write
+    lag), so its failure must NOT silently hide a posted expense from the owner — that was
+    the 'المصاريف 0' bug. Dry-run / the legacy 'ok' sentinel / failed / not-yet-sent
+    never count."""
+    if exp.get("hostaway_verified"):
+        return True
+    if not _exp_has_real_hostaway_ref(exp):
+        return False
+    return _exp_canonical_status(exp) in ("verified", "sent_unverified", "stale_pending")
 
 def _exp_hostaway_item_id(item):
     if not isinstance(item, dict):
@@ -11665,7 +11687,20 @@ async def _exp4_verify(exp):
     if EXPENSE_POST_DRYRUN:
         exp["verify_note"] = "dryrun"
         return False
-    match = await asyncio.to_thread(_exp4_find_in_hostaway, exp)
+    match = None
+    # Strongest proof first: a direct GET of the exact Hostaway expense id. This is
+    # independent of the expense LIST size — a freshly-created expense can sit beyond the
+    # paginated list window and never appear there, so the list alone misses it. (Mirrors
+    # _exp_verify_in_hostaway, which already checks by id first.)
+    if _exp_has_real_hostaway_ref(exp):
+        direct, direct_ok, _de = await asyncio.to_thread(
+            _exp_fetch_hostaway_one, exp.get("hostaway_ref") or exp.get("hostaway_expense_id"))
+        if direct_ok and isinstance(direct, dict):
+            dm = _exp_match_hostaway_item(exp, [], direct_item=direct)
+            if dm.get("present") and dm.get("confidence", 0) >= 0.95:
+                match = dm
+    if match is None:
+        match = await asyncio.to_thread(_exp4_find_in_hostaway, exp)
     if match.get("present") and match.get("confidence", 0) >= 0.95:
         exp["hostaway_verified"] = True
         exp["hostaway_expense_id"] = match.get("id") or exp.get("hostaway_expense_id")
@@ -25199,13 +25234,17 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
     if expenses is None:
         expenses = []
         for e in _expenses.values():
-            # count expenses that are REAL in Hostaway (verified) — covers V4 'verified',
-            # legacy 'posted', and Hostaway-imported expenses. (Was status=='posted' only,
-            # which missed every V4-verified expense.)
-            if _exp_canonical_status(e) == "verified" and (lid is None or e.get("listing_id") == lid):
+            # Count every expense that is REAL in Hostaway — verified OR already exported
+            # with a genuine Hostaway expense id. (Was 'verified'-only, which silently
+            # dropped expenses the owner posted to Hostaway when the fragile re-verify
+            # step never confirmed them: the 'المصاريف 0' owner-statement bug.)
+            if _exp_posted_to_hostaway(e) and (lid is None or e.get("listing_id") == lid):
                 expenses.append({"id": e.get("id"), "apartment": e.get("apartment"),
                                  "lid": e.get("listing_id"), "amount": e.get("amount"),
                                  "date": e.get("expense_date"), "matched": True,
+                                 # mark posted-but-not-yet-verified rows so the statement
+                                 # can footnote them honestly (still counted as real money)
+                                 "pending_verify": not bool(e.get("hostaway_verified")),
                                  # OR2 owner page: answer "وش هالمصروف؟" on the page itself
                                  "category": e.get("category") or "",
                                  "description": (e.get("note") or e.get("maintenance_type") or "")[:200],
