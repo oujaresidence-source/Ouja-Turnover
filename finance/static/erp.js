@@ -2720,8 +2720,11 @@
     store.D.exp = d;
     var tabs = d.tabs || {};
     var chips = ['pending', 'approved', 'exported', 'verified', 'needs_action'].map(function (k) {
+      var tb = tabs[k] || {};                       // tab value is {count, sar} — read .count, never stringify the object
       return '<button class="fchip' + (expP.tab === k ? ' on' : '') + '" data-act="x-tab" data-tab="' + k + '">' +
-        esc(t('x_' + k)) + (tabs[k] !== undefined ? ' <b>' + tabs[k] + '</b>' : '') + '</button>';
+        esc(t('x_' + k)) +
+        (tb.count != null ? ' <b>' + tb.count + '</b>' : '') +
+        (tb.sar ? ' <i class="chip-sar">' + fmtAmt(tb.sar) + '</i>' : '') + '</button>';
     }).join('');
     var rowsHtml = (d.rows || []).map(expRowHtml).join('');
     var moreBtn = (d.total > expP.o + (d.rows || []).length)

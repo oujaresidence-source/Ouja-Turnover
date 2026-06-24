@@ -285,6 +285,8 @@ html[dir=ltr] .nb-arrow{transform:scaleX(-1)}
   transition:background .15s,color .15s,transform .12s var(--press);
 }
 .fchip b{font-family:var(--font-mono);font-weight:600;margin-inline-start:3px}
+.fchip .chip-sar{font-style:normal;font-size:10.5px;font-weight:600;color:var(--mut);margin-inline-start:4px;unicode-bidi:isolate}
+.fchip.on .chip-sar{color:var(--accent-deep)}
 .fchip:hover{background:var(--surface-2)}
 .fchip:active{transform:scale(.97)}
 .fchip.on{background:var(--accent-soft);border-color:transparent;color:var(--accent-deep)}
