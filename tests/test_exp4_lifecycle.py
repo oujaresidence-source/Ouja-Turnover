@@ -70,5 +70,51 @@ class TabCounts(unittest.TestCase):
         self.assertEqual(ov["tabs"], counts)
 
 
+class TabPrecedence(unittest.TestCase):
+    def test_each_state_lands_in_the_right_tab(self):
+        self.assertEqual(bot._exp4_tab(mk(approval_status="pending_approval")), "pending")
+        self.assertEqual(bot._exp4_tab(mk(approval_status="approved")), "approved")
+        self.assertEqual(bot._exp4_tab(mk(approval_status="approved", hostaway_verified=True, hostaway_ref="9")), "verified")
+        self.assertEqual(bot._exp4_tab(mk(approval_status="approved", status="sent_unverified",
+                                          hostaway_ref="9", sent_at="2026-05-20T00:00:00")), "exported")
+        self.assertEqual(bot._exp4_tab(mk(approval_status="needs_edit", category="")), "needs_action")
+        self.assertEqual(bot._exp4_tab(mk(approval_status="approved", is_split_parent=True)), "needs_action")
+        self.assertEqual(bot._exp4_tab(mk(approval_status="rejected", archived=True)), "archived")
+
+    def test_verified_precedence_beats_approval(self):
+        # both flags set: export status (verified) must win over the approval lane
+        e = mk(approval_status="approved", hostaway_verified=True, hostaway_ref="9")
+        self.assertEqual(bot._exp4_tab(e), "verified")
+
+
+class ExportGate(unittest.TestCase):
+    def test_export_refuses_non_approved(self):
+        ok, why = bot._exp4_request_export(mk(approval_status="pending_approval"))
+        self.assertFalse(ok)
+        self.assertEqual(why, "needs_approval")
+
+    def test_export_refuses_split_parent(self):
+        ok, why = bot._exp4_request_export(mk(approval_status="approved", is_split_parent=True))
+        self.assertFalse(ok)
+        self.assertEqual(why, "split_parent_not_exportable")
+
+    def test_export_accepts_approved(self):
+        ok, why = bot._exp4_request_export(mk(id="okexp", approval_status="approved"))
+        self.assertTrue(ok)
+
+
+class RecheckDryRun(unittest.TestCase):
+    def test_dryrun_never_verifies(self):
+        import asyncio
+        orig = bot.EXPENSE_POST_DRYRUN
+        bot.EXPENSE_POST_DRYRUN = True
+        try:
+            e = mk(approval_status="approved", hostaway_ref="9")
+            self.assertFalse(asyncio.run(bot._exp4_verify(e)))
+            self.assertNotEqual(bot._exp4_tab(e), "verified")
+        finally:
+            bot.EXPENSE_POST_DRYRUN = orig
+
+
 if __name__ == "__main__":
     unittest.main()
