@@ -91,8 +91,13 @@ From the repo root:
 ```
 rm -rf __pycache__
 python3 -W error::SyntaxWarning -m py_compile bot.py        # must compile clean
-python3 -m pyflakes bot.py                                  # ignore "imported but unused"
+python3 -m pyflakes bot.py finance/*.py                     # finance package too; ignore "imported but unused"
+node --check finance/static/erp.js                          # the ERP SPA JS MUST parse (one bad token = dead login)
+python3 -m unittest discover -s tests -p "test_*.py"        # all tests incl. V4 lifecycle + ERP contract (no pytest here)
 ```
+> For `finance/static/erp.js`, `node --check` is the authority — do NOT gate on raw paren
+> balance: the file has unmatched `)` inside Arabic/English string literals (e.g. `(≥ 3000)`),
+> so the count is legitimately offset. Brace/backtick balance still hold and may be checked.
 Then verify the embedded dashboard string is intact (extract `DASHBOARD_HTML` and check):
 - `count("{") == count("}")`, `count("(") == count(")")`, `count("`") is even`.
 - Every `tb` tab `id` has a label key in both `T.ar` and `T.en`.
@@ -111,6 +116,24 @@ Then verify the embedded dashboard string is intact (extract `DASHBOARD_HTML` an
   never put a backslash-escape inside the embedded JS.
 And run a quick **synthetic-data logic test** for any new computation (e.g. feed fake
 reservations into the new function and assert the numbers) before trusting it on live data.
+
+## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
+The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
+of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log
+in** — `node --check finance/static/erp.js` is now part of the routine, and `tests/` has two
+guards (`test_exp4_lifecycle.py`, `test_erp_exp_contract.py`).
+1. **Contract drift:** erp.js must read the SHAPE `bot.py` returns. The expense tab badges are
+   `{count, sar}` objects — read `.count` (stringifying the object renders `[object Object]`;
+   this reached the owner). Every other counter in the ERP is a scalar — don't confuse them.
+2. **Optimistic UI must reconcile:** never `removeRow` + success-toast on assumption. Remove only
+   the ids the server actually returned (`approved`/`queued`/`verified`); show `blocked` with a
+   reason; patch chip counts from `r.tabs`. A no-op that looks like success is the worst kind.
+3. **Terminal-state affordances:** `_exp4_tab` gives export-status precedence, so "approving" a
+   verified/exported/failed/duplicate/split expense is a silent no-op. `_exp4_approve` refuses
+   these with a reason; the bulk bar + per-row both read `expBulkAction(tab)` (approve only on
+   pending/needs_action). Never offer an action the state machine can't honor.
+4. **Dry-run:** `EXPENSE_POST_DRYRUN` makes export file-only — items legitimately stop at
+   `exported` and never auto-verify. Surface it (the `x_dryrun` tag); never read it as a failure.
 
 ## Design skills installed — USE THEM EVERY SESSION
 Three design skills live in `.claude/skills/` and MUST be applied to any UI work:
