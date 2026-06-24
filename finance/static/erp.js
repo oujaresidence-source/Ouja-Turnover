@@ -124,6 +124,8 @@
       x_receipt: 'الفاتورة', x_no_receipt: 'بدون فاتورة مرفقة',
       x_bank_ok: 'مرتبط بالبنك ✓', x_bank_no: 'بدون ربط بنكي',
       x_approved_ok: 'اعتُمدت ✓', x_approved_n: 'اعتُمدت {n} ✓', x_blocked_n: '{n} محجوبة',
+      x_blk_already_verified: 'متحقق مسبقًا في Hostaway', x_blk_already_exported: 'مُصدّر — ما يحتاج اعتماد',
+      x_blk_needs_recheck: 'فشل التصدير — أعد الفحص', x_blk_duplicate: 'مكرر في Hostaway', x_blk_split_parent: 'مصروف مقسّم — أدر الأبناء',
       x_rejected_ok: 'رُفضت', x_exported_ok: 'أُرسلت للتصدير', x_export_skip: '{n} تخطّيناها',
       x_verified_ok: 'اتحققت ✓', x_not_found: 'ما لقيناها في Hostaway',
       x_saved: 'انحفظ التعديل ✓', x_more: 'تحميل المزيد',
@@ -417,6 +419,8 @@
       x_receipt: 'Receipt', x_no_receipt: 'No receipt attached',
       x_bank_ok: 'Bank-matched ✓', x_bank_no: 'No bank match',
       x_approved_ok: 'Approved ✓', x_approved_n: 'Approved {n} ✓', x_blocked_n: '{n} blocked',
+      x_blk_already_verified: 'Already verified in Hostaway', x_blk_already_exported: 'Exported — no approval needed',
+      x_blk_needs_recheck: 'Export failed — recheck it', x_blk_duplicate: 'Duplicate in Hostaway', x_blk_split_parent: 'Split parent — manage its children',
       x_rejected_ok: 'Rejected', x_exported_ok: 'Queued for export', x_export_skip: '{n} skipped',
       x_verified_ok: 'Verified ✓', x_not_found: 'Not found in Hostaway',
       x_saved: 'Edit saved ✓', x_more: 'Load more',
@@ -1568,11 +1572,10 @@
     else if (act === 'x-approve') {
       el.disabled = true;
       api('/erp/api/exp/approve', { method: 'POST', body: { id: id } }).then(function (r) {
-        if ((r.approved || []).length) { expRemoveRow(id, t('x_approved_ok')); }
+        if ((r.approved || []).length) { expApplyCounts(r.tabs); expRemoveRow(id, t('x_approved_ok')); }
         else {
           el.disabled = false;
-          var why = ((r.blocked || [])[0] || {}).reason || t('act_failed');
-          toast(why, 'err');
+          toast(expBlockMsg(r.blocked) || t('act_failed'), 'err');   // friendly bilingual reason, not a raw code
         }
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
@@ -1588,21 +1591,24 @@
       var rsn = ta2 ? ta2.value.trim() : '';
       if (!rsn) { ta2.classList.add('need'); ta2.focus(); return; }
       el.disabled = true;
-      api('/erp/api/exp/reject', { method: 'POST', body: { id: id, reason: rsn } }).then(function () {
-        expRemoveRow(id, t('x_rejected_ok'));
+      api('/erp/api/exp/reject', { method: 'POST', body: { id: id, reason: rsn } }).then(function (r) {
+        var nt = (r.view && r.view.tab) || '';
+        expApplyCounts(r.tabs);
+        if (nt && nt !== expP.tab) { expRemoveRow(id, t('x_rejected_ok')); }   // it left this tab
+        else { toast(t('x_rejected_ok')); loadExp(); }                          // stays here (e.g. needs_action) -> refresh in place
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'x-export') {
       el.disabled = true;
       api('/erp/api/exp/export', { method: 'POST', body: { id: id } }).then(function (r) {
-        if ((r.queued || []).length) expRemoveRow(id, t('x_exported_ok'));
+        if ((r.queued || []).length) { expApplyCounts(r.tabs); expRemoveRow(id, t('x_exported_ok')); }
         else { el.disabled = false; toast(((r.skipped || [])[0] || {}).reason || t('act_failed'), 'err'); }
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'x-recheck') {
       el.disabled = true;
       api('/erp/api/exp/recheck', { method: 'POST', body: { id: id } }).then(function (r) {
-        if ((r.verified || []).length) expRemoveRow(id, t('x_verified_ok'));
+        if ((r.verified || []).length) { expApplyCounts(r.tabs); expRemoveRow(id, t('x_verified_ok')); }
         else { el.disabled = false; toast(t('x_not_found'), 'warn'); }
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
@@ -1613,12 +1619,14 @@
       var ep = act === 'x-bulk-approve' ? '/erp/api/exp/approve' : '/erp/api/exp/export';
       api(ep, { method: 'POST', body: { ids: xids } }).then(function (r) {
         var okIds = (r.approved || r.queued || []).map(function (o) { return o.id; });
-        okIds.forEach(function (i) { expRemoveRow(i); });
-        var blocked = (r.blocked || r.skipped || []).length;
-        toast((act === 'x-bulk-approve' ? t('x_approved_n') : t('x_exported_ok')).replace('{n}', okIds.length) +
-              (blocked ? ' · ' + t('x_blocked_n').replace('{n}', blocked) : ''),
-              blocked ? 'warn' : 'ok');
+        okIds.forEach(function (i) { expRemoveRow(i); });          // remove ONLY what the server actually moved
+        var blocked = (r.blocked || r.skipped || []);
+        expApplyCounts(r.tabs);                                    // chips stay live
+        if (okIds.length) toast((act === 'x-bulk-approve' ? t('x_approved_n') : t('x_exported_ok')).replace('{n}', okIds.length), 'ok');
+        if (blocked.length) toast(expBlockMsg(blocked), 'warn');   // honest: show blocked count + reason
         var xb = $('#xBulk'); if (xb) { xb.hidden = true; xb.innerHTML = ''; }
+        $$('.xrow input[type=checkbox]').forEach(function (c) { c.checked = false; });
+        if (!document.querySelector('#xList .xrow')) loadExp();    // list drained -> show empty-state + fresh data
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'x-bulk-clear') {
@@ -2587,6 +2595,34 @@
     return $$('.xrow input[data-act="x-sel"]:checked').map(function (c) { return c.getAttribute('data-id'); });
   }
 
+  // ONE source of truth for "what bulk action does this tab afford" — per-row and bulk read it,
+  // so we never offer an action the state machine can't honor (the verified/exported no-op bug).
+  // pending/needs_action -> approve ; approved -> export ; exported/verified -> none (terminal).
+  function expBulkAction(tab) {
+    if (tab === 'pending' || tab === 'needs_action') return 'approve';
+    if (tab === 'approved') return 'export';
+    return '';
+  }
+  var EXP_BLK = { already_verified: 'x_blk_already_verified', already_exported: 'x_blk_already_exported',
+    needs_recheck: 'x_blk_needs_recheck', duplicate: 'x_blk_duplicate', split_parent: 'x_blk_split_parent' };
+  function expBlockMsg(list) {
+    if (!list || !list.length) return '';
+    var first = list[0] || {}, code = String(first.reason || '');
+    var label = EXP_BLK[code] ? t(EXP_BLK[code])
+      : (code.indexOf('needs_edit') === 0 ? t('x_missing') + code.slice(11).replace(/,/g, '، ') : code);
+    return t('x_blocked_n').replace('{n}', list.length) + (label ? ' · ' + label : '');
+  }
+  // Patch the chip badges in place from a {tab:{count,sar}} map — keeps counts live after an action.
+  function expApplyCounts(tabs) {
+    if (!tabs) return;
+    if (store.D.exp) store.D.exp.tabs = tabs;
+    $$('#view .fchip').forEach(function (chip) {
+      var k = chip.getAttribute('data-tab'); if (!k || !tabs[k]) return;
+      var b = chip.querySelector('b'); if (b) b.textContent = tabs[k].count;
+      var i = chip.querySelector('.chip-sar'); if (i) i.textContent = tabs[k].sar ? fmtAmt(tabs[k].sar) : '';
+    });
+  }
+
   function expRowHtml(r) {
     var tab = expP.tab;
     var acts = '';
@@ -2611,8 +2647,11 @@
     var receipt = r.receipt_url
       ? '<button class="btn ghost xs" data-act="x-receipt" data-url="' + esc(r.receipt_url) + '">🧾 ' + esc(t('x_receipt')) + '</button>'
       : '<span class="tag">' + esc(t('x_no_receipt')) + '</span>';
+    var selCell = expBulkAction(tab)                    // no checkbox on terminal tabs (verified/exported) — no bulk action there
+      ? '<div class="c-sel"><input type="checkbox" data-act="x-sel" data-id="' + esc(r.expense_id) + '"></div>'
+      : '<div class="c-sel"></div>';
     return '<div class="wq-row xrow" data-id="' + esc(r.expense_id) + '">' +
-      '<div class="c-sel"><input type="checkbox" data-act="x-sel" data-id="' + esc(r.expense_id) + '"></div>' +
+      selCell +
       '<div class="wq-main" data-act="x-detail" data-id="' + esc(r.expense_id) + '" style="cursor:pointer">' +
         '<div class="wq-top"><span class="amt out">' + fmtAmt(r.amount_sar) + ' <i>' + esc(t('sar')) + '</i></span>' +
         (r.apartment ? '<span class="tag">' + esc(r.apartment) + '</span>' : '') +
@@ -2766,9 +2805,10 @@
     var ids = expSelectedIds();
     var bar = $('#xBulk');
     if (!bar) return;
-    if (!ids.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+    var action = expBulkAction(expP.tab);              // single source of truth — matches the per-row affordance
+    if (!action || !ids.length) { bar.hidden = true; bar.innerHTML = ''; return; }
     bar.hidden = false;
-    var btn = expP.tab === 'approved'
+    var btn = action === 'export'
       ? '<button class="btn primary sm" data-act="x-bulk-export">' + esc(t('x_export')) + '</button>'
       : '<button class="btn primary sm" data-act="x-bulk-approve">' + esc(t('x_approve')) + '</button>';
     bar.innerHTML = '<b>' + ids.length + '</b> ' + esc(t('bulk_selected')) + ' ' + btn +
