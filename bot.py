@@ -42723,9 +42723,68 @@ def _gw_neighborhoods_with_counts():
     out.sort(key=lambda o: (-o["count"], o["ar"]))
     return out
 
+_gw_ratings_cache = {"t": 0.0, "map": {}}
+def _gw_ratings_map(min_count=3, max_age=3600):
+    """Cheap cached per-listing rating summary from the in-memory _reviews store.
+    Returns {listing_id(int): {"rating": <avg 1-5, 2dp>, "count": n}}. Read-only;
+    never triggers a Hostaway pull. Gated by min_count so thin samples don't show."""
+    now = time.time()
+    c = _gw_ratings_cache
+    if c["map"] and (now - c["t"]) < max_age:
+        return c["map"]
+    agg = {}
+    for rev in _reviews.values():
+        if not isinstance(rev, dict):
+            continue
+        lid = rev.get("listing_id")
+        try:
+            lid = int(lid)
+            rt = float(rev.get("rating") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rt <= 0:
+            continue
+        a = agg.setdefault(lid, [0.0, 0])
+        a[0] += rt
+        a[1] += 1
+    out = {}
+    for lid, (s, n) in agg.items():
+        if n >= min_count:
+            out[lid] = {"rating": round(s / n, 2), "count": n}
+    c["t"], c["map"] = now, out
+    return out
+
+_gw_overall_cache = {"t": 0.0, "val": None, "set": False}
+def _gw_ratings_overall(min_total=20, max_age=3600):
+    """Weighted overall rating across ALL reviews — for the hero trust chip.
+    {"avg": <1dp>, "count": <total>} or None if too few. Read-only, cached."""
+    now = time.time()
+    c = _gw_overall_cache
+    if c["set"] and (now - c["t"]) < max_age:
+        return c["val"]
+    tot, wsum = 0, 0.0
+    for rev in _reviews.values():
+        if not isinstance(rev, dict):
+            continue
+        try:
+            rt = float(rev.get("rating") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rt <= 0:
+            continue
+        tot += 1
+        wsum += rt
+    val = {"avg": round(wsum / tot, 1), "count": tot} if tot >= min_total else None
+    c["t"], c["val"], c["set"] = now, val, True
+    return val
+
 def _gw_listing_public(snap, ov=None, with_airbnb=True):
     ov = ov if ov is not None else (_gw_overrides.get(str(snap.get("id")), {}) or {})
     url, src = _gw_airbnb_url(snap, ov)
+    try:
+        _rt = _gw_ratings_map().get(int(snap.get("id")))
+    except (TypeError, ValueError):
+        _rt = None
     return {
         "id": snap.get("id"), "slug": _gw_slug(snap, ov),
         "name_ar": (ov.get("title_ar") or snap.get("name") or ""),
@@ -42748,6 +42807,8 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "airbnb_url": (url if with_airbnb else ""), "airbnb_source": src, "has_airbnb": bool(url),
         "price_base": snap.get("price_base"),
         "structured": (ov.get("structured") or None),
+        "rating": (_rt["rating"] if _rt else None),
+        "reviews_count": (_rt["count"] if _rt else 0),
     }
 
 # ---- Smart description structuring (Claude): raw Hostaway text -> emblems + cards ----
@@ -43022,8 +43083,8 @@ a{color:inherit;text-decoration:none}
 .hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.04)}
 .hero .ov{position:absolute;inset:0;background:linear-gradient(0deg,rgba(28,19,9,.9),rgba(28,19,9,.45) 48%,rgba(28,19,9,.1))}
 .hero .in{position:relative;padding:24px 22px 22px;color:#fff}
-.hero h1{font-size:29px;line-height:1.22;margin:0 0 8px;font-weight:700;text-wrap:balance;letter-spacing:-.01em}
-.hero p{font-size:14.5px;line-height:1.65;margin:0;color:rgba(255,255,255,.92);max-width:34ch}
+.hero h1{font-size:clamp(28px,6.4vw,40px);line-height:1.18;margin:0 0 9px;font-weight:700;text-wrap:balance;letter-spacing:-.02em}
+.hero p{font-size:15px;line-height:1.65;margin:0;color:rgba(255,255,255,.94);max-width:38ch}
 .trust{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
 .tchip{font-size:11.5px;padding:4px 11px;border-radius:99px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(4px);white-space:nowrap}
 .chip{display:inline-block;font-size:11.5px;padding:4px 11px;border-radius:99px;border:1px solid var(--gold);color:var(--gold2);background:rgba(184,137,59,.08);white-space:nowrap}
@@ -43051,9 +43112,12 @@ a{color:inherit;text-decoration:none}
 .clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .meta{display:flex;gap:9px;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
 .badges{display:flex;gap:6px;flex-wrap:wrap}
+.rate{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ink);font-weight:700;margin:1px 0}
+.rate .st{color:var(--gold);font-size:14px;line-height:1}
+.rate .ct{color:var(--mut);font-weight:600;font-size:12px}
 .price{font-weight:700;font-size:15px;color:var(--ink)}
 .price.soft{color:var(--mut);font-weight:600;font-size:13.5px}
-.disc{font-size:11px;color:var(--mut);line-height:1.5}
+.disc{font-size:11.5px;color:#6e5d4b;line-height:1.55}
 .sk{background:linear-gradient(90deg,#ece2cd 25%,#f3ecdd 50%,#ece2cd 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:10px}
 @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .summary{position:sticky;top:58px;z-index:30;background:rgba(255,253,248,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:9px 0;margin-bottom:8px}
@@ -43115,6 +43179,7 @@ function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar
 function validateDates(ci,co){if((ci&&!co)||(!ci&&co))return 'حط تاريخ الدخول والخروج، أو خلّهم فاضيين للتصفح.';if(ci&&co&&!(co>ci))return 'تاريخ الخروج لازم يكون بعد تاريخ الدخول.';return '';}
 function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<span style="opacity:.4">·</span>');}
 function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
+function ratingHtml(l){if(l==null||l.rating==null||!l.reviews_count)return '';var r=Math.round(l.rating*100)/100;return '<div class="rate"><span class="st">★</span>'+r+' <span class="ct">('+l.reviews_count+' تقييم)</span></div>';}
 var EMBL={wifi:'📶',parking:'🅿️',pool:'🏊',kitchen:'🍳',ac:'❄️',tv:'📺',washer:'🧺',dryer:'🌀',view:'🌆',tower:'🏙️',balcony:'🪟',terrace:'🌿',garden:'🌳',bed:'🛏️',bath:'🛁',family:'👨‍👩‍👧',kids:'🧸',gym:'🏋️',elevator:'🛗',security:'🔒',location:'📍',coffee:'☕',workspace:'💻',self_entry:'🚪',bbq:'🍢',sauna:'🧖',jacuzzi:'♨️',netflix:'🎬',sound:'🔊',dishwasher:'🍽️',heating:'🔥',pets:'🐾',smart:'🤖',cleaning:'🧹',luxury:'✨',default:'✨'};
 function emblemsRow(st){if(!st||!st.emblems||!st.emblems.length)return '';return '<div class="badges" style="margin:12px 0">'+st.emblems.map(function(e){return '<span class="chip">'+(EMBL[e.icon]||EMBL.default)+' '+he(e.ar||e.en)+'</span>';}).join('')+'</div>';}
 function structuredCards(st){if(!st)return '';var out='';(st.sections||[]).forEach(function(s){var ti=(s.title_ar||s.title_en||''),bo=(s.body_ar||s.body_en||'');if(!ti&&!bo)return;out+='<div class="sec"><h2>'+he(ti)+'</h2><div class="descblk'+(isLatin(bo)?' ltr':'')+'">'+he(bo)+'</div></div>';});var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)out+='<div class="sec"><h2>📍 الموقع والحي</h2><div class="descblk'+(isLatin(nb)?' ltr':'')+'">'+he(nb)+'</div></div>';return out;}
@@ -43127,7 +43192,9 @@ function viewLanding(){
   var fpos=({center:'center',top:'top center',bottom:'bottom center',left:'center left',right:'center right'})[hc.focal||'center']||'center';
   var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(cfg.hero).replace(/"/g,'&quot;')+');background-position:'+fpos+'"></div>'):'';
   var ovOp=(hc.overlay!=null?(hc.overlay/100):1);
-  var hTrust=hc.trust?('<div class="trust"><span class="tchip">'+he(hc.trust)+'</span></div>'):'<div class="trust"><span class="tchip">وحدات مختارة</span><span class="tchip">دخول ذاتي</span><span class="tchip">الحجز عبر Airbnb</span></div>';
+  var ro=(cfg.rating_overall||null);
+  var ratingChip=(ro&&ro.avg)?('<span class="tchip">★ '+ro.avg+' · '+ro.count+' تقييم</span>'):'';
+  var hTrust=hc.trust?('<div class="trust">'+ratingChip+'<span class="tchip">'+he(hc.trust)+'</span></div>'):('<div class="trust">'+(ratingChip||'<span class="tchip">وحدات مختارة</span>')+'<span class="tchip">دخول ذاتي</span><span class="tchip">الحجز عبر Airbnb</span></div>');
   var chips=(cfg.noo||[]).slice(0,16).map(function(o){return '<button type="button" class="pill" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
   V.innerHTML='<section class="hero">'+heroBg+'<div class="ov" style="opacity:'+ovOp+'"></div><div class="in"><h1>'+he(hc.title||'اختر إقامتك مع عوجا')+'</h1>'
     +'<p>'+he(hc.subtitle||'حط تاريخك وعدد الضيوف ونوع الإقامة، ونطلع لك وحدات عوجا المتاحة في الرياض.')+'</p>'
@@ -43138,7 +43205,8 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
-    +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>';
+    +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
+    +'<div id="feat" class="sec" style="margin-top:4px"></div>';
   var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
   var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
   ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
@@ -43158,6 +43226,19 @@ function viewLanding(){
     if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
     location.href='/stay/search'+q;
   };
+  // Featured available units — show real inventory on the landing so a visitor sees
+  // product immediately instead of an empty search form (browse mode, no dates).
+  (function(){
+    var fe=document.getElementById('feat');if(!fe)return;
+    var skel='<div class="card lc"><div class="ph sk"></div><div class="bd"><div class="sk" style="height:16px;width:60%"></div><div class="sk" style="height:12px;width:40%"></div><div class="sk" style="height:38px;width:100%;margin-top:6px"></div></div></div>';
+    fe.innerHTML='<h2 style="font-size:18px;color:var(--ink);margin:0 0 10px;font-weight:700">إقامات مختارة</h2><div class="grid">'+skel+skel+'</div>';
+    fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
+      var res=((d&&d.results)||[]).slice(0,4);
+      if(!res.length){fe.innerHTML='';return;}
+      fe.innerHTML='<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 10px"><h2 style="font-size:18px;color:var(--ink);margin:0;font-weight:700">إقامات مختارة</h2><a class="more" href="/stay/search'+location.search+'">عرض الكل</a></div><div class="grid">'+res.map(card).join('')+'</div>';
+      track('stay_featured_view',{count:res.length});
+    }).catch(function(){fe.innerHTML='';});
+  })();
 }
 
 function card(l){
@@ -43173,6 +43254,7 @@ function card(l){
   return '<a class="card lc" href="/stay/'+he(l.slug)+location.search+'">'
     +'<div class="ph">'+img+(ov.length?('<div class="ov-row">'+ov.join('')+'</div>'):'')+'</div>'
     +'<div class="bd"><h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
+    +ratingHtml(l)
     +(l.area?('<div class="meta">📍 '+he(l.area)+'</div>'):'')
     +'<div class="meta">'+metaRow(l)+'</div>'
     +(badges(l,3)?('<div class="badges">'+badges(l,3)+'</div>'):'')
@@ -43261,6 +43343,7 @@ function viewListing(){
     V.innerHTML=gallery+dsum
       +'<h1 style="font-size:23px;color:var(--ink);margin:8px 0 4px;line-height:1.3">'+he(l.name_ar||l.name_en)+'</h1>'
       +(l.area?('<div class="muted" style="font-size:13.5px;margin-bottom:6px">📍 '+he(l.area)+'</div>'):'')
+      +(ratingHtml(l)?('<div style="margin:0 0 8px">'+ratingHtml(l)+'</div>'):'')
       +(l.badge?('<span class="chip solid" style="margin-bottom:6px">'+he(l.badge)+'</span>'):'')
       +(badges(l,6)?('<div class="badges" style="margin:8px 0">'+badges(l,6)+'</div>'):'')
       +tagline
@@ -43375,7 +43458,8 @@ def _stay_render(route="landing", listing=None, base=""):
     data = {"route": route, "listing": listing,
             "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""),
                        "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP,
-                       "neighborhoods": _gw_neighborhoods_with_counts()}}
+                       "neighborhoods": _gw_neighborhoods_with_counts(),
+                       "rating_overall": _gw_ratings_overall()}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO: JSON-LD structured data — LodgingBusiness on /stay, Apartment per unit page.
     if listing:
