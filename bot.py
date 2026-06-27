@@ -49630,6 +49630,512 @@ async def eval_auto_export_loop():
     except Exception as e:
         print("eval auto-export loop error:", e)
 
+# ============================================================================
+# Conversation Watchman «الرقيب» — re-reads FINISHED guest conversations and
+#   (1) flags info the team answered that is MISSING from the apartment's guide
+#       page  -> a "guide gaps" card, and
+#   (2) catches concrete PROMISES a team member made (action / money / timing)
+#       -> a card that @mentions the responder and chases it to completion
+#       (deadline -> nudge -> manager escalation).
+#
+# Ships DORMANT: WATCHMAN_ENABLED=0 by default, so deploying this changes nothing
+# and never messages a guest. When enabled it still starts in WATCHMAN_DRYRUN=1
+# (watch-only): it analyzes + LOGS what it WOULD post and sends nothing. The first
+# dry-run also doubles as the live verification of what Hostaway returns per
+# message (it prints the outgoing-message field shape + the sender it detected).
+# Flip WATCHMAN_DRYRUN=0 to go live. Everything reuses existing helpers (api_get,
+# claude_json, directions_link, _load_json/_save_json, ensure_channel) — additive,
+# no new dependencies. NOTE: this is ordinary Python (NOT inside DASHBOARD_HTML),
+# so normal string escapes are fine here.
+# ============================================================================
+def _wm_flag(name, default="0"):
+    return os.environ.get(name, default) in ("1", "true", "True", "yes")
+
+WATCHMAN_ENABLED          = _wm_flag("WATCHMAN_ENABLED", "0")
+WATCHMAN_DRYRUN           = _wm_flag("WATCHMAN_DRYRUN", "1")     # watch-only until owner flips to 0
+WATCHMAN_QUIET_MIN        = int(os.environ.get("WATCHMAN_QUIET_MIN", "45"))   # silence before we analyze
+WATCHMAN_POLL_MIN         = float(os.environ.get("WATCHMAN_POLL_MIN", "10"))  # how often the loop runs
+WATCHMAN_SCAN             = int(os.environ.get("WATCHMAN_SCAN", "30"))        # recent conversations to look at
+WATCHMAN_MAX_PER_TICK     = int(os.environ.get("WATCHMAN_MAX_PER_TICK", "8")) # AI passes per tick (cost cap)
+WATCHMAN_HISTORY_MSGS     = int(os.environ.get("WATCHMAN_HISTORY_MSGS", "30"))
+WATCHMAN_GAPS_CHANNEL     = os.environ.get("WATCHMAN_GAPS_CHANNEL", "guide-gaps")
+WATCHMAN_PROMISES_CHANNEL = os.environ.get("WATCHMAN_PROMISES_CHANNEL", "promises")
+WATCHMAN_GUIDE_OWNER      = os.environ.get("WATCHMAN_GUIDE_OWNER", "").strip()   # who fixes guides (id / role:id)
+WATCHMAN_MANAGER_ROLE     = os.environ.get("WATCHMAN_MANAGER_ROLE", "").strip()  # escalation target (id / role:id)
+WATCHMAN_ACTION_DUE_H     = float(os.environ.get("WATCHMAN_ACTION_DUE_H", "6"))
+WATCHMAN_MONEY_DUE_H      = float(os.environ.get("WATCHMAN_MONEY_DUE_H", "24"))
+WATCHMAN_TIMING_FALLBACK_H = float(os.environ.get("WATCHMAN_TIMING_FALLBACK_H", "12"))
+WATCHMAN_ESCALATE_AFTER_H = float(os.environ.get("WATCHMAN_ESCALATE_AFTER_H", "3"))
+WATCHMAN_MIN_CONF         = float(os.environ.get("WATCHMAN_MIN_CONF", "0.6"))
+
+def _wm_name_map():
+    """Hostaway-responder-name -> Discord mention id. JSON in WATCHMAN_NAME_MAP, e.g.
+    {"Ahmed":"123456789012345678","Sara":"role:9999"}. Keys are matched case-insensitively."""
+    raw = os.environ.get("WATCHMAN_NAME_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+        return {str(k).strip().lower(): str(v).strip() for k, v in d.items()}
+    except Exception as e:
+        print("WATCHMAN_NAME_MAP parse error:", e)
+        return {}
+
+WATCHMAN_NAME_MAP = _wm_name_map()
+
+# in-memory stores (mirrored to the STATE_DIR volume so tickets survive redeploys)
+_wm_seen        = {}    # conversation_id(str) -> last-analyzed last-message timestamp
+_wm_gaps        = {}    # gap_key -> record   (open guide-gap cards, for dedup / "+N guests")
+_wm_promises    = {}    # promise_id -> record (lifecycle: open/nudged/escalated/done)
+_wm_msg2promise = {}    # discord message id(str) -> promise_id  (for the Done button)
+_wm_loaded_flag = {"v": False}
+_wm_diag_logged = {"v": False}   # print the outgoing-message shape once per process (Step-0 fold-in)
+_wm_guide_cache = {}    # listing_id -> (flattened_text, ts)
+
+def _wm_load():
+    global _wm_seen, _wm_gaps, _wm_promises, _wm_msg2promise
+    _wm_seen        = _load_json("watchman_seen.json", {})
+    _wm_gaps        = _load_json("watchman_gaps.json", {})
+    _wm_promises    = _load_json("watchman_promises.json", {})
+    _wm_msg2promise = _load_json("watchman_msg2promise.json", {})
+
+def _wm_save():
+    _save_json("watchman_seen.json", _wm_seen)
+    _save_json("watchman_gaps.json", _wm_gaps)
+    _save_json("watchman_promises.json", _wm_promises)
+    _save_json("watchman_msg2promise.json", _wm_msg2promise)
+
+_WM_SENDER_KEYS = ("userName", "agentName", "sentBy", "fromName", "senderName", "authorName")
+
+def _wm_sender_name(m):
+    """Best-effort: which team member sent this OUTGOING Hostaway message. '' if unknown
+    (e.g. a reply typed in the Airbnb app, which arrives without an individual sender)."""
+    u = m.get("user")
+    if isinstance(u, dict):
+        nm = (u.get("name")
+              or " ".join(str(x) for x in (u.get("firstName"), u.get("lastName")) if x)).strip()
+        if nm:
+            return nm
+    for k in _WM_SENDER_KEYS:
+        v = str(m.get(k) or "").strip()
+        if v:
+            return v
+    return ""
+
+def _wm_guide_text(listing_id):
+    """Fetch + flatten the guide PAGE behind the apartment's directions link to plain text
+    (cached 6h). '' when there is no link or it can't be read — the caller then falls back
+    to the #knowledge facts for that apartment."""
+    if not listing_id:
+        return ""
+    cached = _wm_guide_cache.get(listing_id)
+    if cached and time.time() - cached[1] < 6 * 3600:
+        return cached[0]
+    text = ""
+    try:
+        url = directions_link(listing_id)
+    except Exception:
+        url = None
+    if url:
+        try:
+            r = requests.get(url, timeout=20, headers={"User-Agent": "OujaWatchman/1.0"})
+            if r.status_code == 200 and r.text:
+                raw = r.text
+                raw = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
+                raw = re.sub(r"(?s)<[^>]+>", " ", raw)
+                raw = re.sub(r"&[a-z#0-9]+;", " ", raw)
+                text = re.sub(r"\s+", " ", raw).strip()[:6000]
+        except Exception as e:
+            print(f"watchman: guide fetch error listing {listing_id}: {e}")
+    _wm_guide_cache[listing_id] = (text, time.time())
+    return text
+
+_WM_SYSTEM = (
+    "You audit ONE finished guest conversation for a Riyadh short-term-rental company (Ouja). "
+    "You receive the apartment name, the GUIDE TEXT the guest can already see (may be empty), and "
+    "the full conversation with each line labeled by who sent it. Return STRICT JSON only — no prose, "
+    "no markdown fences.\n\n"
+    "Find TWO things:\n\n"
+    "1) guide_gaps — a piece of practical info the TEAM gave the guest that is NOT already present in "
+    "the GUIDE TEXT, and that FUTURE guests of THIS apartment would also need: wifi, parking, AC, the "
+    "entry/door-code method, appliances, checkout steps, location/landmark, trash, water/electricity, "
+    "etc. Include it ONLY if it is genuinely ABSENT from the GUIDE TEXT provided. If the GUIDE TEXT is "
+    "empty, set used_fallback=true and be conservative (only clearly guide-type facts). Do NOT include "
+    "one-off, guest-specific things (a personal refund, a late checkout granted just to them).\n\n"
+    "2) promises — a CONCRETE commitment the TEAM (never the guest) made: ACTION we must do ('we'll send "
+    "a technician', 'we'll bring towels', 'we'll replace it'), MONEY ('refund', 'discount', "
+    "'compensation', 'no charge'), or TIMING ('early check-in at 12', 'late checkout till 2', 'we'll "
+    "confirm by tonight'). IGNORE vague pleasantries ('we'll do our best', 'enjoy your stay', 'let us "
+    "know if you need anything'). For each promise, copy the exact sender label of the line that made it "
+    "into 'responder', and quote the promise text.\n\n"
+    "Return JSON exactly in this shape:\n"
+    '{"guide_gaps":[{"topic":"...","guest_question":"...","our_answer":"...","suggested_guide_text":"...",'
+    '"used_fallback":false,"confidence":0.0}],'
+    '"promises":[{"type":"action|money|timing","summary":"...","quote":"...","responder":"...",'
+    '"due_hint":"","confidence":0.0}]}\n'
+    "Write topic / suggested_guide_text / summary in ARABIC (the Ouja team reads Arabic); keep 'quote' "
+    "verbatim in its original language. confidence is 0.0-1.0. If nothing qualifies, return empty lists. "
+    "Never invent facts."
+)
+
+def run_watchman_scan():
+    """SYNC: scan recent conversations, analyze the quiet + not-yet-seen ones, update the
+    stores, and RETURN a list of (kind, payload) intents for the async layer to POST. In
+    dry-run it still analyzes (and marks conversations seen, so going live won't re-spend
+    tokens on old chats) but emits only 'dry_*' intents and does NOT create ticket records."""
+    if not WATCHMAN_ENABLED:
+        return []
+    import hashlib
+    try:
+        listings = get_listings_map()
+    except Exception:
+        listings = {}
+    try:
+        data = api_get("/conversations", params={"limit": WATCHMAN_SCAN, "includeResources": 1})
+    except Exception as e:
+        print("watchman fetch error:", e)
+        return []
+    convos = data.get("result", []) or []
+    now = datetime.now(TZ)
+    intents = []
+    analyzed = 0
+    for c in convos:
+        if analyzed >= WATCHMAN_MAX_PER_TICK:
+            break
+        cid = c.get("id")
+        if not cid:
+            continue
+        try:
+            md = api_get(f"/conversations/{cid}/messages")
+            msgs = [m for m in (md.get("result", []) or []) if (m.get("body") or "").strip()]
+        except Exception:
+            continue
+        if len(msgs) < 2:
+            continue
+        msgs = sorted(msgs, key=_msg_sort_key)
+        last_ts = _msg_time(msgs[-1])
+        last_dt = _parse_msg_dt(last_ts)
+        if last_dt is None:
+            continue
+        if (now - last_dt).total_seconds() < WATCHMAN_QUIET_MIN * 60:
+            continue                                  # not quiet yet — wait
+        if _wm_seen.get(str(cid)) == last_ts:
+            continue                                  # already analyzed up to this message
+        if not _wm_diag_logged["v"]:                  # Step-0: learn the real sender shape, once
+            out = next((m for m in msgs if not _msg_is_inbound(m)), None)
+            if out is not None:
+                print("watchman STEP0 outgoing-message keys:", sorted(out.keys()))
+                print("watchman STEP0 sender detected:", repr(_wm_sender_name(out)))
+                _wm_diag_logged["v"] = True
+        lm = c.get("listingMapId")
+        apt = listings.get(lm) or c.get("listingName") or f"unit-{lm}"
+        guest = c.get("recipientName") or c.get("guestName") or "Guest"
+        convo_lines = []
+        for m in msgs[-WATCHMAN_HISTORY_MSGS:]:
+            who = "Guest" if _msg_is_inbound(m) else (_wm_sender_name(m) or "Team")
+            convo_lines.append(f"{who}: {(m.get('body') or '').strip()}")
+        convo_text = "\n".join(convo_lines)
+        guide_text = _wm_guide_text(lm)
+        if not guide_text and lm:
+            try:
+                facts = _knowledge_apartment_facts.get(int(lm), [])
+            except (TypeError, ValueError):
+                facts = []
+            guide_text = "[no readable guide page — fallback facts] " + (" ".join(facts) or _knowledge_text or "[none]")
+            used_fallback_default = True
+        else:
+            used_fallback_default = not bool(guide_text)
+            if not guide_text:
+                guide_text = "[none]"
+        user = (f"APARTMENT: {apt}\n\nGUIDE TEXT (what the guest can already see):\n{guide_text}\n\n"
+                f"CONVERSATION:\n{convo_text}")
+        result = claude_json(_WM_SYSTEM, user, max_tokens=1100, model=CLAUDE_MODEL_PREMIUM) or {}
+        analyzed += 1
+        _wm_seen[str(cid)] = last_ts                  # mark seen even in dry-run (no re-spend)
+
+        for g in (result.get("guide_gaps") or []):
+            if float(g.get("confidence") or 0) < WATCHMAN_MIN_CONF:
+                continue
+            topic = str(g.get("topic") or "").strip()
+            if not topic:
+                continue
+            payload = {
+                "listing_id": lm, "apartment": apt, "topic": topic,
+                "guest_question": str(g.get("guest_question") or "").strip(),
+                "our_answer": str(g.get("our_answer") or "").strip(),
+                "suggested": str(g.get("suggested_guide_text") or "").strip(),
+                "fallback": bool(g.get("used_fallback")) or used_fallback_default,
+                "confidence": float(g.get("confidence") or 0),
+                "conversation_id": cid, "guest": guest,
+            }
+            if WATCHMAN_DRYRUN:
+                intents.append(("dry_gap", payload))
+                continue
+            key = f"{lm}::" + hashlib.md5(topic.strip().lower().encode("utf-8")).hexdigest()[:10]
+            existing = _wm_gaps.get(key)
+            if existing:
+                if not existing.get("resolved"):
+                    existing["count"] = int(existing.get("count", 1)) + 1
+                    existing["last_guest"] = guest
+                    intents.append(("gap_bump", {"key": key, "count": existing["count"]}))
+                continue                              # resolved gaps are not re-flagged
+            payload.update({"key": key, "count": 1, "resolved": False, "msg_id": None,
+                            "opened": now.isoformat(timespec="seconds")})
+            _wm_gaps[key] = payload
+            intents.append(("gap_new", payload))
+
+        for p in (result.get("promises") or []):
+            if float(p.get("confidence") or 0) < WATCHMAN_MIN_CONF:
+                continue
+            ptype = str(p.get("type") or "action").strip().lower()
+            if ptype not in ("action", "money", "timing"):
+                ptype = "action"
+            summary = str(p.get("summary") or "").strip()
+            if not summary:
+                continue
+            responder = str(p.get("responder") or "").strip()
+            payload = {
+                "conversation_id": cid, "listing_id": lm, "apartment": apt, "guest": guest,
+                "type": ptype, "summary": summary, "quote": str(p.get("quote") or "").strip(),
+                "responder": responder, "due_hint": str(p.get("due_hint") or "").strip(),
+            }
+            if WATCHMAN_DRYRUN:
+                intents.append(("dry_promise", payload))
+                continue
+            pid = "wm-%s-%s" % (cid, hashlib.md5((ptype + "|" + summary).encode("utf-8")).hexdigest()[:10])
+            if pid in _wm_promises:
+                continue                              # already tracked (open or done)
+            due_h = {"money": WATCHMAN_MONEY_DUE_H, "timing": WATCHMAN_TIMING_FALLBACK_H}.get(
+                ptype, WATCHMAN_ACTION_DUE_H)
+            payload.update({
+                "id": pid, "discord_id": WATCHMAN_NAME_MAP.get(responder.lower(), ""),
+                "due": (now + timedelta(hours=due_h)).isoformat(timespec="seconds"),
+                "opened": now.isoformat(timespec="seconds"),
+                "state": "open", "msg_id": None, "nudged": 0, "escalated": False,
+            })
+            _wm_promises[pid] = payload
+            intents.append(("promise_new", payload))
+    _wm_save()
+    return intents
+
+def _wm_mention(raw):
+    """Render a configured id as a Discord mention. Accepts an already-formatted '<@..>' /
+    '<@&..>', a bare numeric user id, or 'role:<id>' for a role. '' stays ''."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("<@"):
+        return raw
+    if raw.lower().startswith("role:"):
+        return f"<@&{raw.split(':', 1)[1].strip()}>"
+    if raw.isdigit():
+        return f"<@{raw}>"
+    return raw
+
+async def _wm_channel(name):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return None
+    return await ensure_channel(guild, name, await get_assistant_category(guild))
+
+class WatchmanPromiseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)            # persistent across restarts
+
+    @discord.ui.button(label="✅ تم التنفيذ / Done", style=discord.ButtonStyle.success,
+                       custom_id="wm_promise_done")
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pid = _wm_msg2promise.get(str(interaction.message.id))
+        rec = _wm_promises.get(pid) if pid else None
+        if not rec:
+            await interaction.response.send_message("⚠️ ما لقيت هذا الوعد في السجل.", ephemeral=True)
+            return
+        rec["state"] = "done"
+        rec["done_by"] = str(interaction.user)
+        rec["done_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        _wm_save()
+        try:
+            v = WatchmanPromiseView()
+            for ch_ in v.children:
+                ch_.disabled = True
+            await interaction.message.edit(view=v)
+        except Exception:
+            pass
+        await interaction.response.send_message(
+            f"✅ تم — سجّلت إنك خلّصت الوعد، {interaction.user.mention}.")
+
+class WatchmanGapView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ أضفته للدليل / Added", style=discord.ButtonStyle.success,
+                       custom_id="wm_gap_added")
+    async def added(self, interaction: discord.Interaction, button: discord.ui.Button):
+        key = None
+        if interaction.message.embeds:
+            foot = (interaction.message.embeds[0].footer.text or "") if interaction.message.embeds[0].footer else ""
+            m = re.match(r"wm-gap:(.+)", foot)
+            if m:
+                key = m.group(1)
+        rec = _wm_gaps.get(key) if key else None
+        if rec:
+            rec["resolved"] = True
+            _wm_save()
+        try:
+            v = WatchmanGapView()
+            for ch_ in v.children:
+                ch_.disabled = True
+            await interaction.message.edit(view=v)
+        except Exception:
+            pass
+        await interaction.response.send_message("✅ تم — أزلته من قائمة النواقص.", ephemeral=True)
+
+async def _wm_post_gap(rec):
+    ch = await _wm_channel(WATCHMAN_GAPS_CHANNEL)
+    if ch is None:
+        return
+    owner = _wm_mention(WATCHMAN_GUIDE_OWNER)
+    warn = "\n\n⚠️ ثقة أقل — ما قدرت أقرأ صفحة الدليل (راجع يدوياً)." if rec.get("fallback") else ""
+    emb = discord.Embed(
+        title=f"🧭 نقص في الدليل · {rec['apartment']}",
+        description=(f"**الموضوع:** {rec['topic']}\n"
+                     f"**سؤال الضيف:** {rec.get('guest_question') or '—'}\n"
+                     f"**ردّينا عليه بـ:** {rec.get('our_answer') or '—'}\n\n"
+                     f"**أضِف للدليل:**\n> {rec.get('suggested') or rec.get('our_answer') or '—'}{warn}"),
+        color=0xC9A24B)
+    emb.set_footer(text=f"wm-gap:{rec['key']}")
+    msg = await ch.send(content=(owner or None), embed=emb, view=WatchmanGapView())
+    rec["msg_id"] = str(msg.id)
+    _wm_save()
+
+async def _wm_bump_gap(payload):
+    rec = _wm_gaps.get(payload["key"])
+    if not rec or not rec.get("msg_id"):
+        return
+    ch = await _wm_channel(WATCHMAN_GAPS_CHANNEL)
+    if ch is None:
+        return
+    try:
+        msg = await ch.fetch_message(int(rec["msg_id"]))
+        if msg.embeds:
+            emb = msg.embeds[0]
+            emb.title = f"🧭 نقص في الدليل · {rec['apartment']}  ·  ({payload['count']}× ضيوف سألوا)"
+            await msg.edit(embed=emb)
+    except Exception:
+        pass
+
+async def _wm_post_promise(rec):
+    ch = await _wm_channel(WATCHMAN_PROMISES_CHANNEL)
+    if ch is None:
+        return
+    if rec.get("discord_id"):
+        who = _wm_mention(rec["discord_id"])
+        wholine = f"**الموظف:** {who} ({rec.get('responder') or '—'})"
+        content = who
+    else:
+        wholine = (f"**الموظف:** غير معروف ({rec.get('responder') or 'بدون اسم'}) — رد من تطبيق Airbnb، "
+                   f"المدير يستلمها.")
+        content = _wm_mention(WATCHMAN_MANAGER_ROLE) or None
+    label = {"action": "إجراء", "money": "مبلغ/تعويض", "timing": "وقت"}.get(rec["type"], rec["type"])
+    emb = discord.Embed(
+        title=f"🤝 وعد للضيف · {rec['apartment']}",
+        description=(f"{wholine}\n"
+                     f"**النوع:** {label}\n"
+                     f"**الوعد:** {rec['summary']}\n"
+                     f"**نصّه:** “{rec.get('quote') or '—'}”\n"
+                     f"**الضيف:** {rec.get('guest')}\n"
+                     f"**الموعد النهائي:** {rec['due'][:16].replace('T', ' ')}"),
+        color=0x4B89C9)
+    emb.set_footer(text=f"wm-promise:{rec['id']}")
+    msg = await ch.send(content=content, embed=emb, view=WatchmanPromiseView())
+    rec["msg_id"] = str(msg.id)
+    _wm_msg2promise[str(msg.id)] = rec["id"]
+    _wm_save()
+
+async def _wm_promise_followup(rec, escalate):
+    ch = await _wm_channel(WATCHMAN_PROMISES_CHANNEL)
+    if ch is None:
+        return
+    if escalate:
+        who = _wm_mention(WATCHMAN_MANAGER_ROLE) or _wm_mention(rec.get("discord_id", ""))
+        txt = (f"🚨 {who} وعد متأخّر ما تنفّذ: **{rec['summary']}** "
+               f"({rec['apartment']} · الضيف {rec.get('guest')}). محتاج متابعة الحين.")
+    else:
+        who = _wm_mention(rec.get("discord_id", "")) or _wm_mention(WATCHMAN_MANAGER_ROLE)
+        txt = (f"⏰ {who} تذكير: وعدت الضيف بـ **{rec['summary']}** "
+               f"({rec['apartment']}). اضغط ✅ لما تخلّصه.")
+    try:
+        if rec.get("msg_id"):
+            ref = await ch.fetch_message(int(rec["msg_id"]))
+            await ref.reply(txt or "تذكير")
+        else:
+            await ch.send(txt or "تذكير")
+    except Exception:
+        try:
+            await ch.send(txt or "تذكير")
+        except Exception:
+            pass
+
+async def _wm_followups():
+    """Nudge / escalate overdue promises. Skipped in dry-run."""
+    if WATCHMAN_DRYRUN or not _wm_promises:
+        return
+    now = datetime.now(TZ)
+    changed = False
+    for rec in list(_wm_promises.values()):
+        if rec.get("state") == "done":
+            continue
+        due = _parse_msg_dt(rec.get("due", ""))
+        if due is None:
+            continue
+        overdue_h = (now - due).total_seconds() / 3600.0
+        if overdue_h < 0:
+            continue
+        if overdue_h >= WATCHMAN_ESCALATE_AFTER_H and not rec.get("escalated"):
+            await _wm_promise_followup(rec, escalate=True)
+            rec["escalated"] = True
+            rec["state"] = "escalated"
+            changed = True
+        elif rec.get("nudged", 0) == 0:
+            await _wm_promise_followup(rec, escalate=False)
+            rec["nudged"] = 1
+            if rec.get("state") == "open":
+                rec["state"] = "nudged"
+            changed = True
+    if changed:
+        _wm_save()
+
+@tasks.loop(minutes=WATCHMAN_POLL_MIN)
+async def watchman_loop():
+    if not WATCHMAN_ENABLED:
+        return
+    await bot.wait_until_ready()
+    if not _wm_loaded_flag["v"]:
+        _wm_load()
+        _wm_loaded_flag["v"] = True
+    try:
+        intents = await asyncio.to_thread(run_watchman_scan)
+    except Exception as e:
+        print("watchman scan error:", e)
+        return
+    try:
+        await _wm_followups()
+    except Exception as e:
+        print("watchman followup error:", e)
+    for kind, payload in intents:
+        try:
+            if kind in ("dry_gap", "dry_promise"):
+                what = payload.get("topic") or payload.get("summary") or ""
+                print(f"watchman DRYRUN would open {kind[4:]}: {payload.get('apartment')} · {what}")
+            elif kind == "gap_new":
+                await _wm_post_gap(payload)
+            elif kind == "gap_bump":
+                await _wm_bump_gap(payload)
+            elif kind == "promise_new":
+                await _wm_post_promise(payload)
+        except Exception as e:
+            print("watchman post error:", e)
+
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
@@ -49645,6 +50151,8 @@ async def on_ready():
     bot.add_view(ProcPanelView())      # vendor-purchase ticket panel + room buttons
     bot.add_view(ProcTicketView())
     bot.add_view(MusaedEvalView())     # Musaed Quality Scoreboard button (additive)
+    bot.add_view(WatchmanPromiseView())  # «الرقيب» promise "Done" buttons (re-bind after restart)
+    bot.add_view(WatchmanGapView())      # «الرقيب» guide-gap "Added" buttons (re-bind after restart)
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)
@@ -49716,6 +50224,8 @@ async def on_ready():
         owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():
         proc_reminder_loop.start()     # nudges the holder of each open purchase ticket
+    if WATCHMAN_ENABLED and not watchman_loop.is_running():
+        watchman_loop.start()          # «الرقيب»: re-reads finished chats → guide-gap + promise tickets
     if ASSISTANT_ENABLED:
         guild0 = bot.get_guild(GUILD_ID)
         if guild0 is not None:
