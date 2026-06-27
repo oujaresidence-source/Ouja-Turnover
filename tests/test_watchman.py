@@ -57,7 +57,7 @@ class WatchmanScan(unittest.TestCase):
         self._tmp = tempfile.mkdtemp()
         self._saved = {k: getattr(bot, k) for k in (
             "STATE_DIR", "api_get", "claude_json", "get_listings_map", "_wm_guide_text",
-            "WATCHMAN_ENABLED", "WATCHMAN_DRYRUN", "WATCHMAN_NAME_MAP")}
+            "WATCHMAN_ENABLED", "WATCHMAN_DRYRUN", "WATCHMAN_NAME_MAP", "_wm_meta")}
         bot.STATE_DIR = self._tmp
         bot.api_get = _fake_api_get
         bot.claude_json = _fake_result
@@ -66,6 +66,7 @@ class WatchmanScan(unittest.TestCase):
         bot.WATCHMAN_ENABLED = True
         bot.WATCHMAN_NAME_MAP = {"ahmed": "111222333"}
         bot._wm_seen, bot._wm_gaps, bot._wm_promises, bot._wm_msg2promise = {}, {}, {}, {}
+        bot._wm_meta = {"baselined": True}      # skip the first-live-run baseline in most tests
         bot._wm_diag_logged = {"v": True}
 
     def tearDown(self):
@@ -100,6 +101,18 @@ class WatchmanScan(unittest.TestCase):
         self.assertEqual(pr["type"], "action")
         self.assertEqual(pr["discord_id"], "111222333")
         self.assertEqual(pr["state"], "open")
+
+    def test_first_live_run_baselines_without_posting(self):
+        # going live with a fresh (never-baselined) store must NOT dump backlog tickets:
+        # it marks the existing conversations seen and opens nothing this tick.
+        bot.WATCHMAN_DRYRUN = False
+        bot._wm_meta = {}
+        intents = bot.run_watchman_scan()
+        self.assertEqual(intents, [])
+        self.assertEqual(bot._wm_gaps, {})
+        self.assertEqual(bot._wm_promises, {})
+        self.assertEqual(bot._wm_seen.get("555"), _OLD)     # backlog marked seen
+        self.assertTrue(bot._wm_meta.get("baselined"))
 
     def test_unknown_responder_stays_unassigned(self):
         bot.WATCHMAN_DRYRUN = False

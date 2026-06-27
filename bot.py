@@ -49651,8 +49651,8 @@ async def eval_auto_export_loop():
 def _wm_flag(name, default="0"):
     return os.environ.get(name, default) in ("1", "true", "True", "yes")
 
-WATCHMAN_ENABLED          = _wm_flag("WATCHMAN_ENABLED", "0")
-WATCHMAN_DRYRUN           = _wm_flag("WATCHMAN_DRYRUN", "1")     # watch-only until owner flips to 0
+WATCHMAN_ENABLED          = _wm_flag("WATCHMAN_ENABLED", "1")   # on by default (owner: go fully live)
+WATCHMAN_DRYRUN           = _wm_flag("WATCHMAN_DRYRUN", "0")     # LIVE: posts cards + pings (set 1 for watch-only)
 WATCHMAN_QUIET_MIN        = int(os.environ.get("WATCHMAN_QUIET_MIN", "45"))   # silence before we analyze
 WATCHMAN_POLL_MIN         = float(os.environ.get("WATCHMAN_POLL_MIN", "10"))  # how often the loop runs
 WATCHMAN_SCAN             = int(os.environ.get("WATCHMAN_SCAN", "30"))        # recent conversations to look at
@@ -49688,22 +49688,25 @@ _wm_seen        = {}    # conversation_id(str) -> last-analyzed last-message tim
 _wm_gaps        = {}    # gap_key -> record   (open guide-gap cards, for dedup / "+N guests")
 _wm_promises    = {}    # promise_id -> record (lifecycle: open/nudged/escalated/done)
 _wm_msg2promise = {}    # discord message id(str) -> promise_id  (for the Done button)
+_wm_meta        = {}    # small persisted flags, e.g. {"baselined": True}
 _wm_loaded_flag = {"v": False}
 _wm_diag_logged = {"v": False}   # print the outgoing-message shape once per process (Step-0 fold-in)
 _wm_guide_cache = {}    # listing_id -> (flattened_text, ts)
 
 def _wm_load():
-    global _wm_seen, _wm_gaps, _wm_promises, _wm_msg2promise
+    global _wm_seen, _wm_gaps, _wm_promises, _wm_msg2promise, _wm_meta
     _wm_seen        = _load_json("watchman_seen.json", {})
     _wm_gaps        = _load_json("watchman_gaps.json", {})
     _wm_promises    = _load_json("watchman_promises.json", {})
     _wm_msg2promise = _load_json("watchman_msg2promise.json", {})
+    _wm_meta        = _load_json("watchman_meta.json", {})
 
 def _wm_save():
     _save_json("watchman_seen.json", _wm_seen)
     _save_json("watchman_gaps.json", _wm_gaps)
     _save_json("watchman_promises.json", _wm_promises)
     _save_json("watchman_msg2promise.json", _wm_msg2promise)
+    _save_json("watchman_meta.json", _wm_meta)
 
 _WM_SENDER_KEYS = ("userName", "agentName", "sentBy", "fromName", "senderName", "authorName")
 
@@ -49799,6 +49802,12 @@ def run_watchman_scan():
     now = datetime.now(TZ)
     intents = []
     analyzed = 0
+    # Safety baseline: the FIRST time we go live (not dry-run, never baselined) we mark the
+    # whole existing backlog as already-seen WITHOUT analyzing — so flipping the switch can't
+    # dump dozens of old-conversation tickets into the channels at once. Only genuinely NEW
+    # conversations get tickets after this. (Dry-run never baselines — it analyzes backlog into
+    # the LOG on purpose, so the owner can see what it would do.)
+    baseline = (not WATCHMAN_DRYRUN) and (not _wm_meta.get("baselined"))
     for c in convos:
         if analyzed >= WATCHMAN_MAX_PER_TICK:
             break
@@ -49819,6 +49828,9 @@ def run_watchman_scan():
             continue
         if (now - last_dt).total_seconds() < WATCHMAN_QUIET_MIN * 60:
             continue                                  # not quiet yet — wait
+        if baseline:
+            _wm_seen[str(cid)] = last_ts              # mark the existing backlog seen, don't analyze
+            continue
         if _wm_seen.get(str(cid)) == last_ts:
             continue                                  # already analyzed up to this message
         if not _wm_diag_logged["v"]:                  # Step-0: learn the real sender shape, once
@@ -49915,6 +49927,14 @@ def run_watchman_scan():
             })
             _wm_promises[pid] = payload
             intents.append(("promise_new", payload))
+    if baseline:
+        _wm_meta["baselined"] = True
+        _wm_save()
+        print(f"watchman: baselined {len(_wm_seen)} existing conversations (first live run) — "
+              f"only NEW chats get tickets from now")
+        return []
+    if not WATCHMAN_DRYRUN:
+        _wm_meta["baselined"] = True              # stays set once we've run live at least once
     _wm_save()
     return intents
 
@@ -49937,6 +49957,31 @@ async def _wm_channel(name):
     if guild is None:
         return None
     return await ensure_channel(guild, name, await get_assistant_category(guild))
+
+def _wm_member_mention(guild, name):
+    """Best-effort: find a Discord member whose name matches the Hostaway responder name and
+    return '<@id>'. '' if no confident match (then the promise stays unassigned). Only as good
+    as the members the bot has cached — the explicit WATCHMAN_NAME_MAP always wins over this."""
+    if guild is None or not name:
+        return ""
+    n = name.strip().lower()
+    if not n:
+        return ""
+    members = list(getattr(guild, "members", []) or [])
+    # 1) exact match on display name / username / global name
+    for mem in members:
+        cands = {(mem.display_name or "").lower(), (mem.name or "").lower(),
+                 (getattr(mem, "global_name", None) or "").lower()}
+        if n in cands:
+            return f"<@{mem.id}>"
+    # 2) first-name match (e.g. responder 'Ahmed' vs display 'Ahmed | Ops'), only if unambiguous
+    first = n.split()[0]
+    hits = [mem for mem in members
+            if (mem.display_name or "").lower().split()[:1] == [first]
+            or (mem.name or "").lower().split()[:1] == [first]]
+    if len(hits) == 1:
+        return f"<@{hits[0].id}>"
+    return ""
 
 class WatchmanPromiseView(discord.ui.View):
     def __init__(self):
@@ -50028,8 +50073,10 @@ async def _wm_post_promise(rec):
     ch = await _wm_channel(WATCHMAN_PROMISES_CHANNEL)
     if ch is None:
         return
-    if rec.get("discord_id"):
-        who = _wm_mention(rec["discord_id"])
+    who = _wm_mention(rec.get("discord_id", ""))     # explicit WATCHMAN_NAME_MAP wins
+    if not who:                                       # else best-effort: match the name in Discord
+        who = _wm_member_mention(ch.guild, rec.get("responder", ""))
+    if who:
         wholine = f"**الموظف:** {who} ({rec.get('responder') or '—'})"
         content = who
     else:
