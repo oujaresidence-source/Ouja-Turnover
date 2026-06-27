@@ -49662,7 +49662,7 @@ WATCHMAN_ADMIN_CHANNEL    = os.environ.get("WATCHMAN_ADMIN_CHANNEL", "مطابق
 # guide-gaps + promises now each open their OWN ticket channel under «صيانه» (no shared channel).
 WATCHMAN_GAP_PREFIX       = os.environ.get("WATCHMAN_GAP_PREFIX", "نقص")
 WATCHMAN_PROMISE_PREFIX   = os.environ.get("WATCHMAN_PROMISE_PREFIX", "وعد")
-WATCHMAN_KNOWN_NAMES      = os.environ.get("WATCHMAN_KNOWN_NAMES", "Ohoud,nasser,Noura,Aseel,Mohammed,Maather")
+WATCHMAN_KNOWN_NAMES      = os.environ.get("WATCHMAN_KNOWN_NAMES", "Ohoud,nasser,Noura,Aseel,Mohammed,Maather,Faisal")
 WATCHMAN_GUIDE_OWNER      = os.environ.get("WATCHMAN_GUIDE_OWNER", "").strip()   # who fixes guides (id / role:id)
 WATCHMAN_MANAGER_ROLE     = os.environ.get("WATCHMAN_MANAGER_ROLE", "").strip()  # escalation target (id / role:id)
 WATCHMAN_ACTION_DUE_H     = float(os.environ.get("WATCHMAN_ACTION_DUE_H", "6"))
@@ -49685,6 +49685,37 @@ def _wm_name_map():
         return {}
 
 WATCHMAN_NAME_MAP = _wm_name_map()
+
+# Promises only count from a MATCHED human or the owner — NEVER from the AI (Musaed). Our bot
+# appends a Musaid/مساعد signature on every send, so a signed/automated outgoing message = AI.
+_WM_AI_SIGS = tuple(s for s in
+                    ([ASSISTANT_SIGNATURE_AR, ASSISTANT_SIGNATURE_EN] + SIGNATURES_AR + SIGNATURES_EN)
+                    if s)
+_WM_OWNER_NAMES = {s.strip().lower() for s in
+                   os.environ.get("WATCHMAN_OWNER_NAMES", "Faisal,فيصل").split(",") if s.strip()}
+
+def _wm_is_ai_message(m):
+    """True if this OUTGOING message came from our bot/Musaed (carries a Musaid signature) or
+    looks automated — i.e. NOT an accountable human promise."""
+    body = m.get("body") or ""
+    if not body.strip():
+        return False
+    for sig in _WM_AI_SIGS:
+        if sig and sig in body:
+            return True
+    if "Musaid" in body:
+        return True
+    return _looks_automated(body)
+
+def _wm_promise_allowed(responder):
+    """Owner rule: only a promise from a MATCHED human (or the owner Faisal) opens a ticket.
+    The AI ('AI-Assistant'), a generic 'Team', or an unmatched/anonymous sender → no ticket."""
+    n = (responder or "").strip().lower()
+    if not n or n in ("ai-assistant", "team", "musaid", "مساعد"):
+        return False
+    if n in _WM_OWNER_NAMES:
+        return True
+    return bool(_wm_resolve_id(responder))
 
 # in-memory stores (mirrored to the STATE_DIR volume so tickets survive redeploys)
 _wm_seen        = {}    # conversation_id(str) -> last-analyzed last-message timestamp
@@ -49784,7 +49815,10 @@ _WM_SYSTEM = (
     "'compensation', 'no charge'), or TIMING ('early check-in at 12', 'late checkout till 2', 'we'll "
     "confirm by tonight'). IGNORE vague pleasantries ('we'll do our best', 'enjoy your stay', 'let us "
     "know if you need anything'). For each promise, copy the exact sender label of the line that made it "
-    "into 'responder', and quote the promise text.\n\n"
+    "into 'responder', and quote the promise text. CRITICAL: lines labeled 'AI-Assistant' are automated "
+    "bot messages — NEVER extract a promise from an 'AI-Assistant' line; a promise only counts when a "
+    "NAMED human team member made it. (For guide_gaps, information from ANY line still counts — a gap is "
+    "a gap no matter who answered.)\n\n"
     "Return JSON exactly in this shape:\n"
     '{"guide_gaps":[{"topic":"...","guest_question":"...","our_answer":"...","suggested_guide_text":"...",'
     '"used_fallback":false,"confidence":0.0}],'
@@ -49860,7 +49894,12 @@ def run_watchman_scan():
         guest = c.get("recipientName") or c.get("guestName") or "Guest"
         convo_lines = []
         for m in msgs[-WATCHMAN_HISTORY_MSGS:]:
-            who = "Guest" if _msg_is_inbound(m) else (_wm_sender_name(m) or "Team")
+            if _msg_is_inbound(m):
+                who = "Guest"
+            elif _wm_is_ai_message(m):
+                who = "AI-Assistant"               # our bot/Musaed — never an accountable promise
+            else:
+                who = _wm_sender_name(m) or "Team"
             convo_lines.append(f"{who}: {(m.get('body') or '').strip()}")
         convo_text = "\n".join(convo_lines)
         guide_text = _wm_guide_text(lm)
@@ -49922,6 +49961,15 @@ def run_watchman_scan():
             if not summary:
                 continue
             responder = str(p.get("responder") or "").strip()
+            # remember real human-looking names so the «مطابقة-الأسماء» channel can map them
+            if responder and responder.lower() not in ("ai-assistant", "team"):
+                names = _wm_meta.setdefault("names", [])
+                if responder.lower() not in [n.lower() for n in names]:
+                    names.append(responder)
+            # OWNER RULE: only open a promise ticket for a promise made by a MATCHED human
+            # (or Faisal). Never for the AI assistant (Musaed) or an anonymous/unmatched sender.
+            if not _wm_promise_allowed(responder):
+                continue
             payload = {
                 "conversation_id": cid, "listing_id": lm, "apartment": apt, "guest": guest,
                 "type": ptype, "summary": summary, "quote": str(p.get("quote") or "").strip(),
@@ -49933,10 +49981,6 @@ def run_watchman_scan():
             pid = "wm-%s-%s" % (cid, hashlib.md5((ptype + "|" + summary).encode("utf-8")).hexdigest()[:10])
             if pid in _wm_promises:
                 continue                              # already tracked (open or done)
-            if responder:                             # remember the name so the admin channel can map it
-                names = _wm_meta.setdefault("names", [])
-                if responder not in names and responder.lower() not in [n.lower() for n in names]:
-                    names.append(responder)
             due_h = {"money": WATCHMAN_MONEY_DUE_H, "timing": WATCHMAN_TIMING_FALLBACK_H}.get(
                 ptype, WATCHMAN_ACTION_DUE_H)
             payload.update({
@@ -50150,7 +50194,7 @@ class WatchmanPromiseView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)            # persistent across restarts
 
-    @discord.ui.button(label="✅ تم التنفيذ / Done", style=discord.ButtonStyle.success,
+    @discord.ui.button(label="✅ تم الوفاء بالوعد / Promise accomplished", style=discord.ButtonStyle.success,
                        custom_id="wm_promise_done")
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
         pid = _wm_msg2promise.get(str(interaction.message.id))

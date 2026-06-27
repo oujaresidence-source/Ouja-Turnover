@@ -115,12 +115,40 @@ class WatchmanScan(unittest.TestCase):
         self.assertEqual(bot._wm_seen.get("555"), _OLD)     # backlog marked seen
         self.assertTrue(bot._wm_meta.get("baselined"))
 
-    def test_unknown_responder_stays_unassigned(self):
+    def test_unmatched_responder_opens_no_promise(self):
+        # owner rule: an unmatched human name does NOT open a promise ticket (but the gap still does,
+        # and the name is recorded so it can be matched in «مطابقة-الأسماء»).
         bot.WATCHMAN_DRYRUN = False
-        bot.WATCHMAN_NAME_MAP = {}                       # Ahmed no longer mapped
+        bot.WATCHMAN_NAME_MAP = {}                        # Ahmed not matched anywhere
+        intents = bot.run_watchman_scan()
+        self.assertEqual(bot._wm_promises, {})           # no promise ticket
+        self.assertIn("gap_new", [k for k, _ in intents])  # gap still opens
+        self.assertIn("Ahmed", bot._wm_meta.get("names", []))
+
+    def test_ai_promise_is_never_ticketed(self):
+        # a promise the AI assistant (Musaed) made must NEVER open a ticket
+        bot.WATCHMAN_DRYRUN = False
+        bot.claude_json = lambda *a, **k: {
+            "guide_gaps": [],
+            "promises": [{"type": "action", "summary": "نرسل فني", "responder": "AI-Assistant",
+                          "confidence": 0.95}],
+        }
+        intents = bot.run_watchman_scan()
+        self.assertEqual(bot._wm_promises, {})
+        self.assertNotIn("promise_new", [k for k, _ in intents])
+
+    def test_owner_faisal_promise_is_allowed(self):
+        bot.WATCHMAN_DRYRUN = False
+        bot.WATCHMAN_NAME_MAP = {}                        # Faisal not in the map…
+        bot.claude_json = lambda *a, **k: {
+            "guide_gaps": [],
+            "promises": [{"type": "money", "summary": "نرجّع لك مبلغ", "responder": "Faisal",
+                          "confidence": 0.95}],
+        }
         bot.run_watchman_scan()
+        self.assertEqual(len(bot._wm_promises), 1)        # …but the owner is always allowed
         pr = next(iter(bot._wm_promises.values()))
-        self.assertEqual(pr["discord_id"], "")           # -> unassigned managers path
+        self.assertEqual(pr["responder"], "Faisal")
 
     def test_admin_namemap_wins_over_env(self):
         bot.WATCHMAN_DRYRUN = False
@@ -166,6 +194,28 @@ class WatchmanHelpers(unittest.TestCase):
         self.assertEqual(bot._wm_sender_name(
             {"user": {"firstName": "Abu", "lastName": "Fahad"}}), "Abu Fahad")
         self.assertEqual(bot._wm_sender_name({"body": "hi"}), "")   # Airbnb-app: no sender
+
+    def test_ai_message_detection(self):
+        # a body carrying the Musaid/مساعد signature is an AI send, not a human
+        signed = "أبشر نرسل لك فني.\n\n" + bot.ASSISTANT_SIGNATURE_AR
+        self.assertTrue(bot._wm_is_ai_message({"body": signed}))
+        self.assertTrue(bot._wm_is_ai_message({"body": "Sure!\n\nBest regards,\nMusaid – Ouja"}))
+        self.assertFalse(bot._wm_is_ai_message({"body": "أرسل لك الفني بكرة الساعة 5"}))  # plain human
+        self.assertFalse(bot._wm_is_ai_message({"body": ""}))
+
+    def test_promise_allowed_rule(self):
+        saved = (bot._wm_namemap, bot.WATCHMAN_NAME_MAP)
+        try:
+            bot._wm_namemap = {"noura": "777"}
+            bot.WATCHMAN_NAME_MAP = {}
+            self.assertTrue(bot._wm_promise_allowed("Noura"))     # matched human
+            self.assertTrue(bot._wm_promise_allowed("Faisal"))    # owner
+            self.assertFalse(bot._wm_promise_allowed("AI-Assistant"))
+            self.assertFalse(bot._wm_promise_allowed("Team"))
+            self.assertFalse(bot._wm_promise_allowed("Ghost"))    # human but unmatched
+            self.assertFalse(bot._wm_promise_allowed(""))
+        finally:
+            bot._wm_namemap, bot.WATCHMAN_NAME_MAP = saved
 
     def test_mention_rendering(self):
         self.assertEqual(bot._wm_mention("123"), "<@123>")
