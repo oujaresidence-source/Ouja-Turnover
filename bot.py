@@ -49658,8 +49658,10 @@ WATCHMAN_POLL_MIN         = float(os.environ.get("WATCHMAN_POLL_MIN", "10"))  # 
 WATCHMAN_SCAN             = int(os.environ.get("WATCHMAN_SCAN", "30"))        # recent conversations to look at
 WATCHMAN_MAX_PER_TICK     = int(os.environ.get("WATCHMAN_MAX_PER_TICK", "8")) # AI passes per tick (cost cap)
 WATCHMAN_HISTORY_MSGS     = int(os.environ.get("WATCHMAN_HISTORY_MSGS", "30"))
-WATCHMAN_GAPS_CHANNEL     = os.environ.get("WATCHMAN_GAPS_CHANNEL", "guide-gaps")
-WATCHMAN_PROMISES_CHANNEL = os.environ.get("WATCHMAN_PROMISES_CHANNEL", "promises")
+WATCHMAN_GAPS_CHANNEL     = os.environ.get("WATCHMAN_GAPS_CHANNEL", "نواقص-الدليل")
+WATCHMAN_PROMISES_CHANNEL = os.environ.get("WATCHMAN_PROMISES_CHANNEL", "وعود-للضيوف")
+WATCHMAN_ADMIN_CHANNEL    = os.environ.get("WATCHMAN_ADMIN_CHANNEL", "مطابقة-الأسماء")  # name↔Discord
+WATCHMAN_KNOWN_NAMES      = os.environ.get("WATCHMAN_KNOWN_NAMES", "Ohoud,nasser,Noura,Aseel,Mohammed,Maather")
 WATCHMAN_GUIDE_OWNER      = os.environ.get("WATCHMAN_GUIDE_OWNER", "").strip()   # who fixes guides (id / role:id)
 WATCHMAN_MANAGER_ROLE     = os.environ.get("WATCHMAN_MANAGER_ROLE", "").strip()  # escalation target (id / role:id)
 WATCHMAN_ACTION_DUE_H     = float(os.environ.get("WATCHMAN_ACTION_DUE_H", "6"))
@@ -49688,18 +49690,20 @@ _wm_seen        = {}    # conversation_id(str) -> last-analyzed last-message tim
 _wm_gaps        = {}    # gap_key -> record   (open guide-gap cards, for dedup / "+N guests")
 _wm_promises    = {}    # promise_id -> record (lifecycle: open/nudged/escalated/done)
 _wm_msg2promise = {}    # discord message id(str) -> promise_id  (for the Done button)
-_wm_meta        = {}    # small persisted flags, e.g. {"baselined": True}
+_wm_namemap     = {}    # lowercased Hostaway/Airbnb responder name -> Discord user id (admin-assigned)
+_wm_meta        = {}    # small persisted flags, e.g. {"baselined": True, "names": [...], "carded": [...]}
 _wm_loaded_flag = {"v": False}
 _wm_diag_logged = {"v": False}   # print the outgoing-message shape once per process (Step-0 fold-in)
 _wm_guide_cache = {}    # listing_id -> (flattened_text, ts)
 
 def _wm_load():
-    global _wm_seen, _wm_gaps, _wm_promises, _wm_msg2promise, _wm_meta
+    global _wm_seen, _wm_gaps, _wm_promises, _wm_msg2promise, _wm_meta, _wm_namemap
     _wm_seen        = _load_json("watchman_seen.json", {})
     _wm_gaps        = _load_json("watchman_gaps.json", {})
     _wm_promises    = _load_json("watchman_promises.json", {})
     _wm_msg2promise = _load_json("watchman_msg2promise.json", {})
     _wm_meta        = _load_json("watchman_meta.json", {})
+    _wm_namemap     = _load_json("watchman_names.json", {})
 
 def _wm_save():
     _save_json("watchman_seen.json", _wm_seen)
@@ -49707,6 +49711,15 @@ def _wm_save():
     _save_json("watchman_promises.json", _wm_promises)
     _save_json("watchman_msg2promise.json", _wm_msg2promise)
     _save_json("watchman_meta.json", _wm_meta)
+    _save_json("watchman_names.json", _wm_namemap)
+
+def _wm_resolve_id(responder):
+    """Discord id for a Hostaway/Airbnb responder name. Admin-assigned map (the
+    «مطابقة-الأسماء» channel) wins, then the WATCHMAN_NAME_MAP env override. '' if neither."""
+    n = (responder or "").strip().lower()
+    if not n:
+        return ""
+    return _wm_namemap.get(n) or WATCHMAN_NAME_MAP.get(n) or ""
 
 _WM_SENDER_KEYS = ("userName", "agentName", "sentBy", "fromName", "senderName", "authorName")
 
@@ -49917,10 +49930,14 @@ def run_watchman_scan():
             pid = "wm-%s-%s" % (cid, hashlib.md5((ptype + "|" + summary).encode("utf-8")).hexdigest()[:10])
             if pid in _wm_promises:
                 continue                              # already tracked (open or done)
+            if responder:                             # remember the name so the admin channel can map it
+                names = _wm_meta.setdefault("names", [])
+                if responder not in names and responder.lower() not in [n.lower() for n in names]:
+                    names.append(responder)
             due_h = {"money": WATCHMAN_MONEY_DUE_H, "timing": WATCHMAN_TIMING_FALLBACK_H}.get(
                 ptype, WATCHMAN_ACTION_DUE_H)
             payload.update({
-                "id": pid, "discord_id": WATCHMAN_NAME_MAP.get(responder.lower(), ""),
+                "id": pid, "discord_id": _wm_resolve_id(responder),
                 "due": (now + timedelta(hours=due_h)).isoformat(timespec="seconds"),
                 "opened": now.isoformat(timespec="seconds"),
                 "state": "open", "msg_id": None, "nudged": 0, "escalated": False,
@@ -49956,7 +49973,7 @@ async def _wm_channel(name):
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return None
-    return await ensure_channel(guild, name, await get_assistant_category(guild))
+    return await ensure_channel(guild, name, await _tk_category(guild, "maint"))   # under «صيانه»
 
 def _wm_member_mention(guild, name):
     """Best-effort: find a Discord member whose name matches the Hostaway responder name and
@@ -49982,6 +49999,130 @@ def _wm_member_mention(guild, name):
     if len(hits) == 1:
         return f"<@{hits[0].id}>"
     return ""
+
+# ---- admin name-matching channel «مطابقة-الأسماء»: Hostaway/Airbnb name -> Discord user ----
+_WM_NAME_FOOT = "wm-name:"
+
+def _wm_known_names():
+    """Names to map: the env seed (WATCHMAN_KNOWN_NAMES) + every responder the watcher has
+    actually seen (stored in _wm_meta['names']). De-duplicated, original casing kept."""
+    seed = [s.strip() for s in (WATCHMAN_KNOWN_NAMES or "").split(",") if s.strip()]
+    seen = _wm_meta.get("names", []) if isinstance(_wm_meta, dict) else []
+    out, low = [], set()
+    for nm in list(seed) + list(seen):
+        k = (nm or "").strip().lower()
+        if k and k not in low:
+            low.add(k)
+            out.append(nm.strip())
+    return out
+
+def _wm_name_card_embed(name):
+    assigned = _wm_namemap.get(name.strip().lower())
+    if assigned:
+        body = (f"**{name}**  ←  <@{assigned}>\n✅ مربوط — أي وعد باسم «{name}» بيوسم هذا الحساب.\n"
+                f"تبي تغيّره؟ اختر حساب ثاني من القائمة.")
+        color = 0x4CAF50
+    else:
+        body = (f"**{name}**\n⚠️ غير مربوط بعد — اختر حساب الموظف في ديسكورد من القائمة تحت.")
+        color = 0xC9A24B
+    emb = discord.Embed(title=f"👤 مطابقة اسم · {name}", description=body, color=color)
+    emb.set_footer(text=f"{_WM_NAME_FOOT}{name.strip().lower()}")
+    return emb
+
+class WatchmanNameSelect(discord.ui.UserSelect):
+    def __init__(self):
+        super().__init__(custom_id="wm_name_select", placeholder="اختر حساب الموظف في ديسكورد…",
+                         min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        name = ""
+        if interaction.message.embeds and interaction.message.embeds[0].footer:
+            foot = interaction.message.embeds[0].footer.text or ""
+            if foot.startswith(_WM_NAME_FOOT):
+                name = foot[len(_WM_NAME_FOOT):]
+        if not name:
+            await interaction.response.send_message("⚠️ ما عرفت الاسم من البطاقة.", ephemeral=True)
+            return
+        if not _wm_namemap:                            # lazy-load if a restart cleared memory
+            _wm_load()
+        user = self.values[0]
+        _wm_namemap[name.strip().lower()] = str(user.id)
+        _wm_save()
+        try:
+            await interaction.message.edit(embed=_wm_name_card_embed(name), view=WatchmanNameView())
+        except Exception:
+            pass
+        await interaction.response.send_message(f"✅ ربطت «{name}» بـ {user.mention}.", ephemeral=True)
+
+class WatchmanNameView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(WatchmanNameSelect())
+
+async def _wm_ensure_name_card(guild, name):
+    """Post a mapping card for `name` in the admin channel if one isn't there yet (idempotent
+    via the _wm_meta['carded'] list, so we don't re-scan history every promise)."""
+    if guild is None or not name:
+        return
+    low = name.strip().lower()
+    carded = _wm_meta.setdefault("carded", [])
+    if low in [c.lower() for c in carded]:
+        return
+    ch = await ensure_channel(guild, WATCHMAN_ADMIN_CHANNEL, await _tk_category(guild, "maint"))
+    if ch is None:
+        return
+    try:
+        await ch.send(embed=_wm_name_card_embed(name), view=WatchmanNameView())
+        carded.append(name.strip())
+        _wm_save()
+    except Exception as e:
+        print("watchman name card error:", e)
+
+async def ensure_watchman_admin(guild):
+    """Create the «مطابقة-الأسماء» admin channel under «صيانه» and post one card per known
+    name (intro once, cards idempotent by embed footer). Called on boot."""
+    if not WATCHMAN_ENABLED or guild is None:
+        return
+    ch = await ensure_channel(guild, WATCHMAN_ADMIN_CHANNEL, await _tk_category(guild, "maint"))
+    if ch is None:
+        return
+    have, intro_seen = set(), False
+    try:
+        async for msg in ch.history(limit=200):
+            if msg.embeds and msg.embeds[0].footer:
+                ft = msg.embeds[0].footer.text or ""
+                if ft.startswith(_WM_NAME_FOOT):
+                    have.add(ft[len(_WM_NAME_FOOT):])
+                elif ft == "wm-name-intro":
+                    intro_seen = True
+    except Exception:
+        pass
+    if not intro_seen:
+        intro = discord.Embed(
+            title="🔗 مطابقة أسماء الموظفين  ·  Hostaway/Airbnb ← Discord",
+            description=("اربط اسم كل موظف — زي ما يظهر في Hostaway/Airbnb — بحسابه في ديسكورد.\n"
+                         "لما «الرقيب» يمسك وعد من موظف، بيوسم حسابه حسب الربط هنا.\n"
+                         "اختر من القائمة تحت كل بطاقة. تقدر تغيّر الربط أي وقت."),
+            color=0x4B89C9)
+        intro.set_footer(text="wm-name-intro")
+        try:
+            await ch.send(embed=intro)
+        except Exception:
+            pass
+    carded = _wm_meta.setdefault("carded", [])
+    for name in _wm_known_names():
+        low = name.strip().lower()
+        if low in {h.lower() for h in have}:
+            if name.strip() not in carded:
+                carded.append(name.strip())
+            continue
+        try:
+            await ch.send(embed=_wm_name_card_embed(name), view=WatchmanNameView())
+            if name.strip() not in carded:
+                carded.append(name.strip())
+        except Exception as e:
+            print("watchman admin seed card error:", e)
+    _wm_save()
 
 class WatchmanPromiseView(discord.ui.View):
     def __init__(self):
@@ -50073,9 +50214,15 @@ async def _wm_post_promise(rec):
     ch = await _wm_channel(WATCHMAN_PROMISES_CHANNEL)
     if ch is None:
         return
-    who = _wm_mention(rec.get("discord_id", ""))     # explicit WATCHMAN_NAME_MAP wins
-    if not who:                                       # else best-effort: match the name in Discord
+    # admin-assigned map (re-checked now, in case it was set after the scan) → env → name match
+    who = _wm_mention(_wm_resolve_id(rec.get("responder", "")) or rec.get("discord_id", ""))
+    if not who:
         who = _wm_member_mention(ch.guild, rec.get("responder", ""))
+    if not who and rec.get("responder"):              # unmapped → make sure a mapping card exists
+        try:
+            await _wm_ensure_name_card(ch.guild, rec["responder"])
+        except Exception:
+            pass
     if who:
         wholine = f"**الموظف:** {who} ({rec.get('responder') or '—'})"
         content = who
@@ -50200,6 +50347,7 @@ async def on_ready():
     bot.add_view(MusaedEvalView())     # Musaed Quality Scoreboard button (additive)
     bot.add_view(WatchmanPromiseView())  # «الرقيب» promise "Done" buttons (re-bind after restart)
     bot.add_view(WatchmanGapView())      # «الرقيب» guide-gap "Added" buttons (re-bind after restart)
+    bot.add_view(WatchmanNameView())     # «الرقيب» name-matching user pickers (re-bind after restart)
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)
@@ -50273,6 +50421,16 @@ async def on_ready():
         proc_reminder_loop.start()     # nudges the holder of each open purchase ticket
     if WATCHMAN_ENABLED and not watchman_loop.is_running():
         watchman_loop.start()          # «الرقيب»: re-reads finished chats → guide-gap + promise tickets
+    if WATCHMAN_ENABLED:
+        try:
+            _wg = bot.get_guild(GUILD_ID)
+            if _wg is not None:
+                if not _wm_loaded_flag["v"]:
+                    _wm_load()
+                    _wm_loaded_flag["v"] = True
+                await ensure_watchman_admin(_wg)   # «مطابقة-الأسماء» channel + seed name cards
+        except Exception as e:
+            print("watchman admin setup error:", e)
     if ASSISTANT_ENABLED:
         guild0 = bot.get_guild(GUILD_ID)
         if guild0 is not None:

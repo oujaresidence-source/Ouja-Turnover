@@ -57,7 +57,7 @@ class WatchmanScan(unittest.TestCase):
         self._tmp = tempfile.mkdtemp()
         self._saved = {k: getattr(bot, k) for k in (
             "STATE_DIR", "api_get", "claude_json", "get_listings_map", "_wm_guide_text",
-            "WATCHMAN_ENABLED", "WATCHMAN_DRYRUN", "WATCHMAN_NAME_MAP", "_wm_meta")}
+            "WATCHMAN_ENABLED", "WATCHMAN_DRYRUN", "WATCHMAN_NAME_MAP", "_wm_meta", "_wm_namemap")}
         bot.STATE_DIR = self._tmp
         bot.api_get = _fake_api_get
         bot.claude_json = _fake_result
@@ -66,6 +66,7 @@ class WatchmanScan(unittest.TestCase):
         bot.WATCHMAN_ENABLED = True
         bot.WATCHMAN_NAME_MAP = {"ahmed": "111222333"}
         bot._wm_seen, bot._wm_gaps, bot._wm_promises, bot._wm_msg2promise = {}, {}, {}, {}
+        bot._wm_namemap = {}
         bot._wm_meta = {"baselined": True}      # skip the first-live-run baseline in most tests
         bot._wm_diag_logged = {"v": True}
 
@@ -121,6 +122,19 @@ class WatchmanScan(unittest.TestCase):
         pr = next(iter(bot._wm_promises.values()))
         self.assertEqual(pr["discord_id"], "")           # -> unassigned managers path
 
+    def test_admin_namemap_wins_over_env(self):
+        bot.WATCHMAN_DRYRUN = False
+        bot.WATCHMAN_NAME_MAP = {"ahmed": "111"}         # env says 111
+        bot._wm_namemap = {"ahmed": "999"}               # admin-assigned says 999
+        bot.run_watchman_scan()
+        pr = next(iter(bot._wm_promises.values()))
+        self.assertEqual(pr["discord_id"], "999")        # admin channel wins
+
+    def test_responder_name_recorded_for_admin_mapping(self):
+        bot.WATCHMAN_DRYRUN = False
+        bot.run_watchman_scan()
+        self.assertIn("Ahmed", bot._wm_meta.get("names", []))   # surfaces in «مطابقة-الأسماء»
+
     def test_low_confidence_is_dropped(self):
         bot.WATCHMAN_DRYRUN = False
         bot.claude_json = lambda *a, **k: {
@@ -145,6 +159,30 @@ class WatchmanHelpers(unittest.TestCase):
         self.assertEqual(bot._wm_mention("role:999"), "<@&999>")
         self.assertEqual(bot._wm_mention("<@123>"), "<@123>")
         self.assertEqual(bot._wm_mention(""), "")
+
+    def test_resolve_id_priority(self):
+        saved = (bot._wm_namemap, bot.WATCHMAN_NAME_MAP)
+        try:
+            bot._wm_namemap = {"noura": "777"}
+            bot.WATCHMAN_NAME_MAP = {"noura": "111", "nasser": "222"}
+            self.assertEqual(bot._wm_resolve_id("Noura"), "777")   # admin map wins
+            self.assertEqual(bot._wm_resolve_id("nasser"), "222")  # falls back to env
+            self.assertEqual(bot._wm_resolve_id("ghost"), "")      # neither
+            self.assertEqual(bot._wm_resolve_id(""), "")
+        finally:
+            bot._wm_namemap, bot.WATCHMAN_NAME_MAP = saved
+
+    def test_known_names_seed(self):
+        saved = (bot.WATCHMAN_KNOWN_NAMES, bot._wm_meta)
+        try:
+            bot.WATCHMAN_KNOWN_NAMES = "Ohoud,nasser,Noura,Aseel,Mohammed,Maather"
+            bot._wm_meta = {"names": ["Khalid", "nasser"]}   # discovered; nasser dupes the seed
+            names = bot._wm_known_names()
+            self.assertIn("Ohoud", names)
+            self.assertIn("Khalid", names)                  # discovered names included
+            self.assertEqual(sum(1 for n in names if n.lower() == "nasser"), 1)  # de-duped
+        finally:
+            bot.WATCHMAN_KNOWN_NAMES, bot._wm_meta = saved
 
     def test_name_map_parses_and_lowercases(self):
         import os
