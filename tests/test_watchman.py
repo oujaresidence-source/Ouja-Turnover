@@ -135,6 +135,19 @@ class WatchmanScan(unittest.TestCase):
         bot.run_watchman_scan()
         self.assertIn("Ahmed", bot._wm_meta.get("names", []))   # surfaces in «مطابقة-الأسماء»
 
+    def test_skips_when_no_team_message(self):
+        # a conversation with only the guest talking (no team/host reply) is not audited
+        bot.WATCHMAN_DRYRUN = False
+        guest_only = [{"id": 1, "isIncoming": 1, "body": "وين أركن؟", "date": _OLD},
+                      {"id": 2, "isIncoming": 1, "body": "؟", "date": _OLD}]
+        bot.api_get = lambda path, params=None: (
+            {"result": [{"id": 555, "listingMapId": 101, "recipientName": "M", "reservation": {}}]}
+            if path == "/conversations" else
+            {"result": list(guest_only)} if str(path).endswith("/messages") else {})
+        intents = bot.run_watchman_scan()
+        self.assertEqual(intents, [])
+        self.assertEqual(bot._wm_promises, {})
+
     def test_low_confidence_is_dropped(self):
         bot.WATCHMAN_DRYRUN = False
         bot.claude_json = lambda *a, **k: {

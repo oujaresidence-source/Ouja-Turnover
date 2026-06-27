@@ -49658,9 +49658,10 @@ WATCHMAN_POLL_MIN         = float(os.environ.get("WATCHMAN_POLL_MIN", "10"))  # 
 WATCHMAN_SCAN             = int(os.environ.get("WATCHMAN_SCAN", "30"))        # recent conversations to look at
 WATCHMAN_MAX_PER_TICK     = int(os.environ.get("WATCHMAN_MAX_PER_TICK", "8")) # AI passes per tick (cost cap)
 WATCHMAN_HISTORY_MSGS     = int(os.environ.get("WATCHMAN_HISTORY_MSGS", "30"))
-WATCHMAN_GAPS_CHANNEL     = os.environ.get("WATCHMAN_GAPS_CHANNEL", "نواقص-الدليل")
-WATCHMAN_PROMISES_CHANNEL = os.environ.get("WATCHMAN_PROMISES_CHANNEL", "وعود-للضيوف")
 WATCHMAN_ADMIN_CHANNEL    = os.environ.get("WATCHMAN_ADMIN_CHANNEL", "مطابقة-الأسماء")  # name↔Discord
+# guide-gaps + promises now each open their OWN ticket channel under «صيانه» (no shared channel).
+WATCHMAN_GAP_PREFIX       = os.environ.get("WATCHMAN_GAP_PREFIX", "نقص")
+WATCHMAN_PROMISE_PREFIX   = os.environ.get("WATCHMAN_PROMISE_PREFIX", "وعد")
 WATCHMAN_KNOWN_NAMES      = os.environ.get("WATCHMAN_KNOWN_NAMES", "Ohoud,nasser,Noura,Aseel,Mohammed,Maather")
 WATCHMAN_GUIDE_OWNER      = os.environ.get("WATCHMAN_GUIDE_OWNER", "").strip()   # who fixes guides (id / role:id)
 WATCHMAN_MANAGER_ROLE     = os.environ.get("WATCHMAN_MANAGER_ROLE", "").strip()  # escalation target (id / role:id)
@@ -49834,6 +49835,8 @@ def run_watchman_scan():
             continue
         if len(msgs) < 2:
             continue
+        if not any(not _msg_is_inbound(m) for m in msgs):
+            continue                                  # no message sent by OUR team yet — nothing to audit
         msgs = sorted(msgs, key=_msg_sort_key)
         last_ts = _msg_time(msgs[-1])
         last_dt = _parse_msg_dt(last_ts)
@@ -49969,11 +49972,30 @@ def _wm_mention(raw):
         return f"<@{raw}>"
     return raw
 
-async def _wm_channel(name):
-    guild = bot.get_guild(GUILD_ID)
-    if guild is None:
-        return None
-    return await ensure_channel(guild, name, await _tk_category(guild, "maint"))   # under «صيانه»
+def _wm_guild():
+    return bot.get_guild(GUILD_ID)
+
+def _wm_slug(apartment):
+    return re.sub(r"^ouja-", "", channel_name(apartment or "unit"))[:34]
+
+async def _wm_close_channel(ch, by_mention, note):
+    """Close a Watchman ticket room the same way maintenance tickets close: lock it
+    read-only, rename with «مغلقة-», keep it as the audit trail (no delete)."""
+    if ch is None:
+        return
+    try:
+        await ch.set_permissions(ch.guild.default_role, send_messages=False)
+    except Exception:
+        pass
+    try:
+        if not ch.name.startswith("مغلقة-"):
+            await ch.edit(name=("مغلقة-" + ch.name)[:100])
+    except Exception:
+        pass
+    try:
+        await ch.send(f"🔒 {note} — بواسطة {by_mention}")
+    except Exception:
+        pass
 
 def _wm_member_mention(guild, name):
     """Best-effort: find a Discord member whose name matches the Hostaway responder name and
@@ -50149,6 +50171,11 @@ class WatchmanPromiseView(discord.ui.View):
             pass
         await interaction.response.send_message(
             f"✅ تم — سجّلت إنك خلّصت الوعد، {interaction.user.mention}.")
+        try:                                           # close the ticket room (lock + rename)
+            await _wm_close_channel(interaction.channel, interaction.user.mention,
+                                    "أُغلق الوعد (تم التنفيذ)")
+        except Exception:
+            pass
 
 class WatchmanGapView(discord.ui.View):
     def __init__(self):
@@ -50175,79 +50202,115 @@ class WatchmanGapView(discord.ui.View):
         except Exception:
             pass
         await interaction.response.send_message("✅ تم — أزلته من قائمة النواقص.", ephemeral=True)
+        try:                                           # close the ticket room (lock + rename)
+            await _wm_close_channel(interaction.channel, interaction.user.mention,
+                                    "أُغلق النقص (أُضيف للدليل)")
+        except Exception:
+            pass
 
 async def _wm_post_gap(rec):
-    ch = await _wm_channel(WATCHMAN_GAPS_CHANNEL)
-    if ch is None:
+    """Open a dedicated guide-gap TICKET ROOM (its own channel under «صيانه»)."""
+    guild = _wm_guild()
+    if guild is None:
+        return
+    cat = await _tk_category(guild, "maint")
+    seq = _next_counter("watchman_gap")
+    try:
+        ch = await guild.create_text_channel(
+            f"{WATCHMAN_GAP_PREFIX}-{seq:03d}-{_wm_slug(rec.get('apartment'))}", category=cat,
+            topic=f"ouja-watchman:gap key:{rec['key']}")
+    except Exception as e:
+        print("watchman gap channel error:", e)
         return
     owner = _wm_mention(WATCHMAN_GUIDE_OWNER)
     warn = "\n\n⚠️ ثقة أقل — ما قدرت أقرأ صفحة الدليل (راجع يدوياً)." if rec.get("fallback") else ""
     emb = discord.Embed(
-        title=f"🧭 نقص في الدليل · {rec['apartment']}",
+        title=f"🧭 نقص في الدليل #{seq:03d} · {rec['apartment']}",
         description=(f"**الموضوع:** {rec['topic']}\n"
                      f"**سؤال الضيف:** {rec.get('guest_question') or '—'}\n"
                      f"**ردّينا عليه بـ:** {rec.get('our_answer') or '—'}\n\n"
-                     f"**أضِف للدليل:**\n> {rec.get('suggested') or rec.get('our_answer') or '—'}{warn}"),
+                     f"**أضِف للدليل:**\n> {rec.get('suggested') or rec.get('our_answer') or '—'}{warn}\n\n"
+                     f"اضغط «أضفته للدليل» لما تحدّث صفحة الشقة — بيتقفل الروم."),
         color=0xC9A24B)
     emb.set_footer(text=f"wm-gap:{rec['key']}")
     msg = await ch.send(content=(owner or None), embed=emb, view=WatchmanGapView())
+    try:
+        await msg.pin()
+    except Exception:
+        pass
+    rec["channel_id"] = str(ch.id)
     rec["msg_id"] = str(msg.id)
     _wm_save()
 
 async def _wm_bump_gap(payload):
     rec = _wm_gaps.get(payload["key"])
-    if not rec or not rec.get("msg_id"):
+    if not rec or not rec.get("channel_id"):
         return
-    ch = await _wm_channel(WATCHMAN_GAPS_CHANNEL)
+    ch = bot.get_channel(int(rec["channel_id"]))
     if ch is None:
         return
     try:
-        msg = await ch.fetch_message(int(rec["msg_id"]))
-        if msg.embeds:
-            emb = msg.embeds[0]
-            emb.title = f"🧭 نقص في الدليل · {rec['apartment']}  ·  ({payload['count']}× ضيوف سألوا)"
-            await msg.edit(embed=emb)
+        await ch.send(f"🔁 ضيف ثاني سأل نفس الشي — صاروا **{payload['count']}× ضيوف**. "
+                      f"الدليل لسا ناقص هالمعلومة.")
     except Exception:
         pass
 
 async def _wm_post_promise(rec):
-    ch = await _wm_channel(WATCHMAN_PROMISES_CHANNEL)
-    if ch is None:
+    """Open a dedicated promise TICKET ROOM (its own channel under «صيانه»), @mention the
+    employee who made it, and close it when they press Done."""
+    guild = _wm_guild()
+    if guild is None:
         return
+    cat = await _tk_category(guild, "maint")
     # admin-assigned map (re-checked now, in case it was set after the scan) → env → name match
     who = _wm_mention(_wm_resolve_id(rec.get("responder", "")) or rec.get("discord_id", ""))
     if not who:
-        who = _wm_member_mention(ch.guild, rec.get("responder", ""))
+        who = _wm_member_mention(guild, rec.get("responder", ""))
     if not who and rec.get("responder"):              # unmapped → make sure a mapping card exists
         try:
-            await _wm_ensure_name_card(ch.guild, rec["responder"])
+            await _wm_ensure_name_card(guild, rec["responder"])
         except Exception:
             pass
+    seq = _next_counter("watchman_promise")
+    try:
+        ch = await guild.create_text_channel(
+            f"{WATCHMAN_PROMISE_PREFIX}-{seq:03d}-{_wm_slug(rec.get('apartment'))}", category=cat,
+            topic=f"ouja-watchman:promise id:{rec['id']}")
+    except Exception as e:
+        print("watchman promise channel error:", e)
+        return
     if who:
         wholine = f"**الموظف:** {who} ({rec.get('responder') or '—'})"
         content = who
     else:
-        wholine = (f"**الموظف:** غير معروف ({rec.get('responder') or 'بدون اسم'}) — رد من تطبيق Airbnb، "
-                   f"المدير يستلمها.")
+        wholine = (f"**الموظف:** غير معروف ({rec.get('responder') or 'بدون اسم'}) — رد من تطبيق Airbnb. "
+                   f"اربط الاسم في «{WATCHMAN_ADMIN_CHANNEL}».")
         content = _wm_mention(WATCHMAN_MANAGER_ROLE) or None
     label = {"action": "إجراء", "money": "مبلغ/تعويض", "timing": "وقت"}.get(rec["type"], rec["type"])
     emb = discord.Embed(
-        title=f"🤝 وعد للضيف · {rec['apartment']}",
+        title=f"🤝 وعد للضيف #{seq:03d} · {rec['apartment']}",
         description=(f"{wholine}\n"
                      f"**النوع:** {label}\n"
                      f"**الوعد:** {rec['summary']}\n"
                      f"**نصّه:** “{rec.get('quote') or '—'}”\n"
                      f"**الضيف:** {rec.get('guest')}\n"
-                     f"**الموعد النهائي:** {rec['due'][:16].replace('T', ' ')}"),
+                     f"**الموعد النهائي:** {rec['due'][:16].replace('T', ' ')}\n\n"
+                     f"اضغط «تم التنفيذ» لما تخلّصه — بيتقفل الروم."),
         color=0x4B89C9)
     emb.set_footer(text=f"wm-promise:{rec['id']}")
-    msg = await ch.send(content=content, embed=emb, view=WatchmanPromiseView())
+    msg = await ch.send(content=content, embed=emb, view=WatchmanPromiseView(),
+                        allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+    try:
+        await msg.pin()
+    except Exception:
+        pass
+    rec["channel_id"] = str(ch.id)
     rec["msg_id"] = str(msg.id)
     _wm_msg2promise[str(msg.id)] = rec["id"]
     _wm_save()
 
 async def _wm_promise_followup(rec, escalate):
-    ch = await _wm_channel(WATCHMAN_PROMISES_CHANNEL)
+    ch = bot.get_channel(int(rec["channel_id"])) if rec.get("channel_id") else None
     if ch is None:
         return
     if escalate:
