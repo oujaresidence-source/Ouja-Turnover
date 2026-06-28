@@ -14233,6 +14233,39 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ CLEANING PHOTOS (locate submitted photos by apartment + date) ============ -->
+      <section class="view" id="view_cphotos">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_cphotos">صور التنظيف</div>
+            <div class="page-sub" id="t_cphotos_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadCleaningPhotos()">↻</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title" id="t_cphotos_filter">بحث</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;padding:6px 2px">
+            <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--mut)">
+              <span id="t_cphotos_apt">الشقة</span>
+              <select id="cpApt" onchange="cpFetch(false)" style="min-width:220px;padding:7px 10px;height:36px;font-size:13px"></select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--mut)">
+              <span id="t_cphotos_from">من تاريخ</span>
+              <input id="cpFrom" type="date" onchange="cpFetch(false)" style="padding:6px 10px;height:36px;font-size:13px">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--mut)">
+              <span id="t_cphotos_to">إلى تاريخ</span>
+              <input id="cpTo" type="date" onchange="cpFetch(false)" style="padding:6px 10px;height:36px;font-size:13px">
+            </label>
+            <button class="btn ghost sm" id="cpClear" onclick="cpClearFilters()">✕</button>
+          </div>
+        </div>
+        <div id="cpSummary" class="muted" style="font-size:12px;margin:4px 2px 10px"></div>
+        <div id="cpBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ GUESTS (profiles + VIP + summaries) ============ -->
       <section class="view" id="view_guests">
         <div class="page-head">
@@ -16323,6 +16356,7 @@ function refreshView(id){
     case 'weekly':   return loadWeekly();
     case 'clean':    return loadCleaning();
     case 'clean_center': return loadCleaningCenter();
+    case 'cphotos':  return loadCleaningPhotos();
     case 'quality':  return loadQuality();
     case 'guests':   return loadGuests();
     case 'users':    return loadUsers();
@@ -16360,6 +16394,7 @@ function go(id){
   if(id==='calendar') loadForwardCalendar();
   if(id==='clean') loadCleaning();
   if(id==='clean_center') loadCleaningCenter();
+  if(id==='cphotos') loadCleaningPhotos();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
@@ -18313,6 +18348,79 @@ async function loadListings(){
   renderListingsSyncBar(); renderListingsStats(); renderListings();
   renderListingsOpsSummary();
   try{ buildSideNav(); }catch(_){}
+}
+
+/* ============ CLEANING PHOTOS LOCATOR (find submitted photos by apartment + date) ============ */
+async function loadCleaningPhotos(){
+  var st=function(id,txt){ var el=document.getElementById(id); if(el) el.textContent=txt; };
+  st('t_cphotos', labelText('صور التنظيف','Cleaning Photos'));
+  st('t_cphotos_sub', labelText('دوّر على صور أي شقة في أي يوم — الصور اللي رفعها فريق التنظيف.','Locate any apartment’s cleaning photos on any day — the shots the cleaning team uploaded.'));
+  st('t_cphotos_filter', labelText('بحث','Search'));
+  st('t_cphotos_apt', labelText('الشقة','Apartment'));
+  st('t_cphotos_from', labelText('من تاريخ','From date'));
+  st('t_cphotos_to', labelText('إلى تاريخ','To date'));
+  await cpFetch(true);
+}
+async function cpFetch(rebuildApts){
+  var body=document.getElementById('cpBody'); if(body) body.innerHTML='<div class="empty sk">—</div>';
+  var apt=(document.getElementById('cpApt')||{}).value||'';
+  var f=(document.getElementById('cpFrom')||{}).value||'';
+  var to=(document.getElementById('cpTo')||{}).value||'';
+  var qs='/api/cleaning/photos-find?apt='+encodeURIComponent(apt)+'&from='+encodeURIComponent(f)+'&to='+encodeURIComponent(to);
+  var d; try{ d=await api(qs); }catch(e){ if(body) body.innerHTML=emptyState(labelText('تعذّر التحميل','Could not load'),'','⚠️'); return; }
+  D.cphotos=d;
+  if(rebuildApts) cpBuildAptOptions((d&&d.apartments)||[]);
+  cpRender(d);
+}
+function cpBuildAptOptions(apts){
+  var sel=document.getElementById('cpApt'); if(!sel) return;
+  var cur=sel.value;
+  var opts='<option value="">'+esc(labelText('كل الشقق','All apartments'))+'</option>';
+  apts.forEach(function(a){ opts+='<option value="'+esc(a.id)+'">'+esc(a.name)+' ('+(a.count||0)+')</option>'; });
+  sel.innerHTML=opts;
+  sel.value=cur;
+}
+function cpClearFilters(){
+  var a=document.getElementById('cpApt'); if(a) a.value='';
+  var f=document.getElementById('cpFrom'); if(f) f.value='';
+  var t2=document.getElementById('cpTo'); if(t2) t2.value='';
+  cpFetch(false);
+}
+function cpStatusLabel(s){
+  var m={
+    manager_approved: labelText('معتمدة','Approved'),
+    manager_rejected: labelText('مرفوضة','Rejected'),
+    pending_manager_review: labelText('بانتظار المراجعة','Pending review'),
+    submitted_for_review: labelText('بانتظار المراجعة','Pending review'),
+    needs_reshoot: labelText('تتطلب إعادة تصوير','Needs reshoot'),
+    issue_found: labelText('فيها ملاحظة','Issue found')
+  };
+  return m[s]||s;
+}
+function cpRender(d){
+  var body=document.getElementById('cpBody'); if(!body) return;
+  var reps=(d&&d.reports)||[];
+  var sum=document.getElementById('cpSummary');
+  if(sum) sum.innerHTML = reps.length ? (esc(labelText('عدد الصور','Photos'))+': <b>'+((d&&d.total)||0)+'</b> &nbsp;·&nbsp; '+esc(labelText('عدد التقارير','Reports'))+': <b>'+reps.length+'</b>') : '';
+  if(!reps.length){ body.innerHTML=emptyState(labelText('ما فيه صور بهالبحث','No photos for this search'), labelText('جرّب شقة ثانية أو وسّع نطاق التاريخ.','Try another apartment or widen the date range.'),'📷'); return; }
+  body.innerHTML=reps.map(cpReportCard).join('');
+}
+function cpReportCard(r){
+  var tk_=encodeURIComponent(tok());
+  var meta=esc(r.date||'');
+  if(r.status) meta+=' &nbsp;·&nbsp; '+esc(cpStatusLabel(r.status));
+  meta+=' &nbsp;·&nbsp; '+((r.photos||[]).length)+' '+esc(labelText('صورة','photos'));
+  var drive=r.drive_folder_url?(' &nbsp;·&nbsp; <a href="'+esc(r.drive_folder_url)+'" target="_blank" rel="noopener" style="color:var(--gold)">Drive</a>'):'';
+  var head='<div class="card-head"><span class="card-title">'+esc(r.apartment_name||'—')+'</span>'
+    +'<span class="muted" style="font-size:12px">'+meta+drive+'</span></div>';
+  var thumbs=(r.photos||[]).map(function(p){
+    var src='/api/cleaning/photo?photo_id='+encodeURIComponent(p.photo_id)+'&token='+tk_;
+    var cap=esc((p.slot_id||'')+' · '+String(p.uploaded_at||'').replace('T',' ').slice(0,16));
+    return '<a href="'+src+'" target="_blank" rel="noopener" title="'+cap+'" style="display:block">'
+      +'<img loading="lazy" src="'+src+'" style="width:132px;height:132px;object-fit:cover;border-radius:10px;border:1px solid var(--border);background:var(--surface-2)"></a>';
+  }).join('');
+  return '<div class="card" style="margin-bottom:12px">'+head
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 2px 2px">'+thumbs+'</div></div>';
 }
 
 function renderListingsSyncBar(){
@@ -30628,7 +30736,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "calendar", "clean_center", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "calendar", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
@@ -30642,6 +30750,7 @@ NAV_DEF = {
         {"id": "inbox", "ic": "inbox", "tk": "inbox", "badge": "inbox"},
         {"id": "calendar", "ic": "calendar", "tk": "calendar"},
         {"id": "clean_center", "ic": "clean_center", "tk": "clean_center", "badge": "clean_center"},
+        {"id": "cphotos", "ic": "clean_center", "tk": "cphotos"},
         {"id": "pricing", "ic": "pricing", "tk": "pricing", "badge": "pricing"},
         {"id": "plab", "ic": "plab", "tk": "plab"},
         {"id": "strat", "ic": "strat", "tk": "strat"},
@@ -30671,7 +30780,7 @@ NAV_DEF = {
     "labels": {
         "ar": {
             "home": "الرئيسية", "brain": "أوجا برين", "inbox": "صندوق الوارد", "calendar": "التقويم",
-            "clean_center": "مركز التنظيف", "pricing": "التسعير الديناميكي",
+            "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
@@ -30685,7 +30794,7 @@ NAV_DEF = {
         },
         "en": {
             "home": "Home", "brain": "Ouja Brain", "inbox": "Inbox", "calendar": "Calendar",
-            "clean_center": "Cleaning Center", "pricing": "Dynamic Pricing",
+            "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
@@ -41945,6 +42054,68 @@ async def _api_cleaning_photo_file(request):
         return _json({"error": "file missing"}, 404)
     return web.FileResponse(path, headers={"Content-Type": photo.get("mime_type") or "application/octet-stream"})
 
+async def _api_cleaning_photos_find(request):
+    """Dashboard photo locator: find submitted cleaning photos by apartment + date.
+    Always returns the `apartments` facet (every apartment that has at least one photo,
+    with a count) so the dropdown can populate; the optional `apt` (listing id),
+    `from` and `to` (YYYY-MM-DD) query params narrow the returned reports."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    apt = (request.query.get("apt") or "").strip()
+    d_from = (request.query.get("from") or "").strip()
+    d_to = (request.query.get("to") or "").strip()
+
+    apt_counts = {}   # lid -> {"id","name","count"}
+    rows = []
+    for pid, ph in list(_cleaning_report_photos.items()):
+        if (ph.get("status") or "") == "removed":
+            continue
+        rep = _cleaning_reports.get(ph.get("report_id")) or {}
+        lid = str(ph.get("apartment_id") or rep.get("apartment_id") or "")
+        name = rep.get("apartment_name") or ("شقة " + lid if lid else "—")
+        date = rep.get("date") or (ph.get("uploaded_at") or "")[:10]
+        a = apt_counts.setdefault(lid, {"id": lid, "name": name, "count": 0})
+        a["count"] += 1
+        if a["name"] in ("", "—") and name not in ("", "—"):
+            a["name"] = name
+        rows.append((pid, ph, rep, lid, name, date))
+
+    apartments = sorted(apt_counts.values(), key=lambda x: x["name"])
+
+    groups = {}
+    for pid, ph, rep, lid, name, date in rows:
+        if apt and lid != apt:
+            continue
+        if d_from and (date or "") < d_from:
+            continue
+        if d_to and (date or "") > d_to:
+            continue
+        rid = ph.get("report_id") or ("_" + pid)
+        g = groups.get(rid)
+        if not g:
+            g = groups[rid] = {
+                "report_id": rid,
+                "date": date,
+                "apartment_id": lid,
+                "apartment_name": name,
+                "status": rep.get("status") or "",
+                "approved_by": rep.get("approved_by") or "",
+                "drive_folder_url": rep.get("drive_folder_url") or "",
+                "photos": [],
+            }
+        g["photos"].append({
+            "photo_id": pid,
+            "slot_id": ph.get("slot_id") or "",
+            "uploaded_at": ph.get("uploaded_at") or "",
+            "mime_type": ph.get("mime_type") or "",
+        })
+
+    reports = sorted(groups.values(), key=lambda g: (g["date"] or "", g["report_id"]), reverse=True)
+    for g in reports:
+        g["photos"].sort(key=lambda p: p.get("uploaded_at") or "")
+    total = sum(len(g["photos"]) for g in reports)
+    return _json({"apartments": apartments, "reports": reports, "total": total})
+
 async def _handle_oujact_route(request):
     return web.Response(text=OUJACT_ROUTE_HTML, content_type="text/html")
 
@@ -45495,6 +45666,7 @@ async def start_web_server():
         app.router.add_get("/api/cleaning/templates", _api_cleaning_templates)
         app.router.add_post("/api/cleaning/template-save", _api_cleaning_template_save)
         app.router.add_get("/api/cleaning/photo", _api_cleaning_photo_file)
+        app.router.add_get("/api/cleaning/photos-find", _api_cleaning_photos_find)
         # Maintenance tickets (صيانة)
         app.router.add_get("/api/tickets/list", _api_tickets_list)
         app.router.add_post("/api/tickets/create", _api_tickets_create)
