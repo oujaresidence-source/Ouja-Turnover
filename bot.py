@@ -49717,6 +49717,16 @@ def _wm_promise_allowed(responder):
         return True
     return bool(_wm_resolve_id(responder))
 
+# Entry/door/access code is intentionally sent ~1h before check-in — it is NOT a static guide
+# gap, so never open a gap ticket about it. (Wifi password etc. are fine — they have no entry word.)
+_WM_CODE_WORDS  = ("code", "passcode", "pincode", "pin code", "كود", "رمز", "الرقم السري", "رقم سري")
+_WM_ENTRY_WORDS = ("entry", "door", "access", "lock", "gate", "check-in", "checkin", "self check",
+                   "self-entry", "self entry", "دخول", "الباب", "باب", "قفل", "بوابة", "الدخول الذاتي")
+
+def _wm_is_entry_code_gap(*parts):
+    blob = " ".join(p for p in parts if p).lower()
+    return any(w in blob for w in _WM_CODE_WORDS) and any(w in blob for w in _WM_ENTRY_WORDS)
+
 # in-memory stores (mirrored to the STATE_DIR volume so tickets survive redeploys)
 _wm_seen        = {}    # conversation_id(str) -> last-analyzed last-message timestamp
 _wm_gaps        = {}    # gap_key -> record   (open guide-gap cards, for dedup / "+N guests")
@@ -49809,7 +49819,10 @@ _WM_SYSTEM = (
     "entry/door-code method, appliances, checkout steps, location/landmark, trash, water/electricity, "
     "etc. Include it ONLY if it is genuinely ABSENT from the GUIDE TEXT provided. If the GUIDE TEXT is "
     "empty, set used_fallback=true and be conservative (only clearly guide-type facts). Do NOT include "
-    "one-off, guest-specific things (a personal refund, a late checkout granted just to them).\n\n"
+    "one-off, guest-specific things (a personal refund, a late checkout granted just to them). Do NOT "
+    "flag the apartment ENTRY / DOOR / ACCESS code, lock code or passcode as a gap — it is sent ~1 hour "
+    "before check-in on purpose and is NOT part of the static guide (the wifi password, by contrast, IS "
+    "fine to flag).\n\n"
     "2) promises — a CONCRETE commitment the TEAM (never the guest) made: ACTION we must do ('we'll send "
     "a technician', 'we'll bring towels', 'we'll replace it'), MONEY ('refund', 'discount', "
     "'compensation', 'no charge'), or TIMING ('early check-in at 12', 'late checkout till 2', 'we'll "
@@ -49926,11 +49939,16 @@ def run_watchman_scan():
             topic = str(g.get("topic") or "").strip()
             if not topic:
                 continue
+            gq = str(g.get("guest_question") or "").strip()
+            ga = str(g.get("our_answer") or "").strip()
+            gs = str(g.get("suggested_guide_text") or "").strip()
+            if _wm_is_entry_code_gap(topic, gq, ga, gs):
+                continue                              # entry/door code → sent 1h before check-in, not a gap
             payload = {
                 "listing_id": lm, "apartment": apt, "topic": topic,
-                "guest_question": str(g.get("guest_question") or "").strip(),
-                "our_answer": str(g.get("our_answer") or "").strip(),
-                "suggested": str(g.get("suggested_guide_text") or "").strip(),
+                "guest_question": gq,
+                "our_answer": ga,
+                "suggested": gs,
                 "fallback": bool(g.get("used_fallback")) or used_fallback_default,
                 "confidence": float(g.get("confidence") or 0),
                 "conversation_id": cid, "guest": guest,
@@ -50022,24 +50040,20 @@ def _wm_guild():
 def _wm_slug(apartment):
     return re.sub(r"^ouja-", "", channel_name(apartment or "unit"))[:34]
 
-async def _wm_close_channel(ch, by_mention, note):
-    """Close a Watchman ticket room the same way maintenance tickets close: lock it
-    read-only, rename with «مغلقة-», keep it as the audit trail (no delete)."""
+async def _wm_close_channel(ch, note):
+    """Close a Watchman ticket room by DELETING the channel (owner: closed tickets are
+    removed, not kept). The record stays in the JSON stores as the audit trail."""
     if ch is None:
         return
     try:
-        await ch.set_permissions(ch.guild.default_role, send_messages=False)
+        await ch.send(f"✅ {note} — بيتحذف الروم خلال ثواني. 🗑️")
     except Exception:
         pass
     try:
-        if not ch.name.startswith("مغلقة-"):
-            await ch.edit(name=("مغلقة-" + ch.name)[:100])
-    except Exception:
-        pass
-    try:
-        await ch.send(f"🔒 {note} — بواسطة {by_mention}")
-    except Exception:
-        pass
+        await asyncio.sleep(3)
+        await ch.delete(reason="watchman: ticket closed")
+    except Exception as e:
+        print("watchman channel delete error:", e)
 
 def _wm_member_mention(guild, name):
     """Best-effort: find a Discord member whose name matches the Hostaway responder name and
@@ -50215,9 +50229,9 @@ class WatchmanPromiseView(discord.ui.View):
             pass
         await interaction.response.send_message(
             f"✅ تم — سجّلت إنك خلّصت الوعد، {interaction.user.mention}.")
-        try:                                           # close the ticket room (lock + rename)
-            await _wm_close_channel(interaction.channel, interaction.user.mention,
-                                    "أُغلق الوعد (تم التنفيذ)")
+        try:                                           # close the ticket room (delete it)
+            await _wm_close_channel(interaction.channel,
+                                    f"تم الوفاء بالوعد بواسطة {interaction.user.mention}")
         except Exception:
             pass
 
@@ -50246,9 +50260,9 @@ class WatchmanGapView(discord.ui.View):
         except Exception:
             pass
         await interaction.response.send_message("✅ تم — أزلته من قائمة النواقص.", ephemeral=True)
-        try:                                           # close the ticket room (lock + rename)
-            await _wm_close_channel(interaction.channel, interaction.user.mention,
-                                    "أُغلق النقص (أُضيف للدليل)")
+        try:                                           # close the ticket room (delete it)
+            await _wm_close_channel(interaction.channel,
+                                    f"أُضيف للدليل بواسطة {interaction.user.mention}")
         except Exception:
             pass
 

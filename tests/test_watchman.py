@@ -137,6 +137,18 @@ class WatchmanScan(unittest.TestCase):
         self.assertEqual(bot._wm_promises, {})
         self.assertNotIn("promise_new", [k for k, _ in intents])
 
+    def test_entry_code_gap_is_skipped(self):
+        # the entry/door code is sent ~1h before check-in → never a guide-gap ticket
+        bot.WATCHMAN_DRYRUN = False
+        bot.claude_json = lambda *a, **k: {
+            "guide_gaps": [{"topic": "كود الدخول للشقة", "our_answer": "الكود 4477",
+                            "suggested_guide_text": "كود الباب 4477", "confidence": 0.95}],
+            "promises": [],
+        }
+        intents = bot.run_watchman_scan()
+        self.assertEqual(bot._wm_gaps, {})
+        self.assertNotIn("gap_new", [k for k, _ in intents])
+
     def test_owner_faisal_promise_is_allowed(self):
         bot.WATCHMAN_DRYRUN = False
         bot.WATCHMAN_NAME_MAP = {}                        # Faisal not in the map…
@@ -202,6 +214,14 @@ class WatchmanHelpers(unittest.TestCase):
         self.assertTrue(bot._wm_is_ai_message({"body": "Sure!\n\nBest regards,\nMusaid – Ouja"}))
         self.assertFalse(bot._wm_is_ai_message({"body": "أرسل لك الفني بكرة الساعة 5"}))  # plain human
         self.assertFalse(bot._wm_is_ai_message({"body": ""}))
+
+    def test_entry_code_gap_detector(self):
+        self.assertTrue(bot._wm_is_entry_code_gap("كود الدخول", "", "", ""))
+        self.assertTrue(bot._wm_is_entry_code_gap("entry code", "", "", ""))
+        self.assertTrue(bot._wm_is_entry_code_gap("رمز الباب", "", "", ""))
+        self.assertTrue(bot._wm_is_entry_code_gap("door access code", "", "", ""))
+        self.assertFalse(bot._wm_is_entry_code_gap("رمز الواي فاي", "", "", ""))   # wifi password: keep
+        self.assertFalse(bot._wm_is_entry_code_gap("موقف السيارة", "", "", ""))    # parking: keep
 
     def test_promise_allowed_rule(self):
         saved = (bot._wm_namemap, bot.WATCHMAN_NAME_MAP)
