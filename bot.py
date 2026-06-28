@@ -13915,6 +13915,21 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="brainBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ WEEKDAY-GAP ENGINE · فجوات منتصف الأسبوع ============ -->
+      <section class="view" id="view_gaps">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_gaps">فجوات منتصف الأسبوع</div>
+            <div class="page-sub" id="t_gaps_sub">كل ليلة فاضية أحد–أربعاء في الأسبوع الجاي: أي حملة ندفع، وليش، ولمين — والرسالة جاهزة. نهايات الأسبوع ما نلمسها.</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="gapsRetier()" id="gapsRetierBtn" title="إعادة تصنيف الأعضاء">⟳ <span id="t_gaps_retier">إعادة التصنيف</span></button>
+            <button class="btn ghost sm" onclick="loadGaps(true)" title="تحديث">↻</button>
+          </div>
+        </div>
+        <div id="gapsBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ APARTMENT PAGE (full-width, opened by Details) ============ -->
       <section class="view" id="view_apartment">
         <div id="aptBody"><div class="empty sk">—</div></div>
@@ -16368,6 +16383,7 @@ function refreshView(id){
     case 'gw':       return loadGw();
     case 'plab':     return loadPlab();
     case 'brain':    return loadBrain();
+    case 'gaps':     return loadGaps();
     default:         return loadAll();
   }
 }
@@ -16407,6 +16423,7 @@ function go(id){
   if(id==='pmo') loadPmo();
   if(id==='listings') loadListings();
   if(id==='brain') loadBrain();
+  if(id==='gaps') loadGaps();
 }
 
 /* ============================================================
@@ -24123,6 +24140,70 @@ function brnSaveSettings(){ var ar=(L==='ar'); var upd={}; document.querySelecto
   post('/api/brain/settings',{settings:upd}).then(function(r){ _brn.settings=(r&&r.settings)||_brn.settings; _brn.move=null; toast(ar?'تم الحفظ ✓':'Saved ✓'); }); }
 
 /* ============================================================
+   WEEKDAY-GAP ENGINE — daily push cards (data from /api/brain/gaps)
+   ============================================================ */
+var _gap={data:null,agent:''};
+function gapAgentGet(){ try{ return localStorage.getItem('ouja_gap_agent')||''; }catch(e){ return ''; } }
+function gapAgentSet(v){ _gap.agent=v||''; try{ localStorage.setItem('ouja_gap_agent',_gap.agent); }catch(e){} }
+function gapNeedAgent(){ var ar=(L==='ar'); if(!_gap.agent){ toast(ar?'اكتب اسمك فوق أول':'Set your name up top first'); var el=document.getElementById('gapAgent'); if(el) el.focus(); return true; } return false; }
+function gapMoney(n){ return fmt(Math.round(n||0))+(L==='ar'?' ر.س':' SAR'); }
+function loadGaps(force){ var ti=document.getElementById('t_gaps'); if(ti) ti.textContent=(L==='ar'?'فجوات منتصف الأسبوع':'Weekday Gaps');
+  _gap.agent=gapAgentGet(); var b=document.getElementById('gapsBody'); if(!b) return;
+  if(force||!_gap.data){ b.innerHTML='<div class="empty sk">—</div>';
+    api('/api/brain/gaps').then(function(r){ if(r&&r.ok===false){ b.innerHTML='<div class="empty">⚠ '+esc(r.error||'')+'</div>'; return; } _gap.data=r||null; gapRender(); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; });
+  } else gapRender(); }
+function gapPrioStyle(p){ if(p===1) return 'background:var(--accent-soft);color:var(--accent)'; if(p===2) return 'background:var(--surface-2);color:var(--text-2)'; return 'background:var(--surface-2);color:var(--mut)'; }
+function gapStrip(strip){ var ar=(L==='ar'); if(!strip||!strip.length) return '';
+  var cells=strip.map(function(d){ var we=d.weekend; var bg=we?'background:var(--surface-2);opacity:.6':'background:var(--surface)';
+    var cnt=we?(ar?'إجازة':'leave'):(d.gaps?('<b style="font-size:18px">'+d.gaps+'</b>'):'<span style="color:var(--mut)">0</span>');
+    return '<div style="flex:1;min-width:64px;text-align:center;border:0.5px solid var(--line);border-radius:10px;padding:9px 6px;'+bg+'"><div class="muted" style="font-size:11px">'+esc(d.label||'')+'</div><div style="margin-top:5px;font-size:13px">'+cnt+'</div></div>'; }).join('');
+  return '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+cells+'</div>'; }
+function gapTargets(c){ var ar=(L==='ar'); var ts=c.targets||[]; if(!ts.length) return '';
+  var rows=ts.slice(0,8).map(function(t){ var reason=ar?(t.reason_ar||''):(t.reason_en||''); return '<div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:0.5px solid var(--line)"><span style="min-width:90px;font-weight:500">'+esc(t.name||'—')+'</span><span class="brn-tier '+esc(t.tier||'')+'">'+esc(t.tier||'')+'</span><span class="muted" style="font-size:12px">'+esc(reason)+'</span></div>'; }).join('');
+  var more=(ts.length>8)?('<div class="muted" style="font-size:11.5px;margin-top:5px">+'+(ts.length-8)+(ar?' غيرهم':' more')+'</div>'):'';
+  return '<div style="margin-top:8px">'+rows+more+'</div>'; }
+function gapCard(c,idx){ var ar=(L==='ar'); var of=c.offer||{};
+  var lock=c.protected?('<span title="'+(ar?'محميّة — ترقية فقط':'protected — upgrade only')+'">🔒 </span>'):'';
+  var name=ar?c.campaign_name_ar:c.campaign_name_en; var dates=(c.gap_dates||[]).join(' – ');
+  var head='<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span class="pill" style="'+gapPrioStyle(c.priority_num)+';font-weight:600">'+esc(c.priority||'')+'</span>'
+    +'<span style="font-size:16px;font-weight:600">'+esc(name||'')+'</span><span class="pill info">'+esc(c.campaign||'')+'</span>'
+    +'<span style="margin-inline-start:auto" class="muted">'+gapMoney(c.at_risk)+(ar?' معرّضة':' at risk')+'</span></div>';
+  var unitline='<div style="margin-top:7px;font-size:14px">'+lock+'<b>'+esc(c.unit||'')+'</b> · '+esc(dates)+' · '+(c.nights||1)+(ar?' ليلة':' nights')+'</div>';
+  var whyline='<div style="margin-top:8px;font-size:13.5px;line-height:1.6;color:var(--text-2)">'+esc(ar?c.why_ar:c.why_en)+'</div>';
+  var deep=of.deep_allowed?(' <span class="muted">· '+(ar?('يُسمح بخصم أعمق لضيف موثوق (≥'+of.deep_min_score+') في ليلة ميتة فقط'):('deeper allowed for a vetted guest (≥'+of.deep_min_score+') on a dead night only'))+'</span>'):'';
+  var offerline='<div style="margin-top:7px;font-size:12.5px;background:var(--surface-2);border-radius:8px;padding:7px 10px">'+esc(ar?of.text_ar:of.text_en)+deep+'</div>';
+  var tcount='<div style="margin-top:11px;font-size:13px;font-weight:500">'+(ar?'الأهداف':'Targets')+': '+(c.target_count||0)+' <span class="muted" style="font-weight:400">'+(ar?'من':'of')+' '+(c.pool_eligible||0)+'</span></div>';
+  var act='';
+  if(c.sent_at){ act='<span class="pill ok">✓ '+(ar?'أُرسلت':'Sent')+(c.sent_by?(' · '+esc(c.sent_by)):'')+(c.sent_count?(' · '+c.sent_count):'')+'</span>'; }
+  else { var claim=c.claimed_by?(c.claimed_by===_gap.agent?('<span class="pill ok">'+(ar?'مستلمة لك':'Yours')+'</span>'):('<span class="pill warn">'+(ar?'محجوزة لـ ':'Claimed · ')+esc(c.claimed_by)+'</span>')):('<button class="btn primary sm" onclick="gapClaim('+idx+')">'+(ar?'استلام':'Claim')+'</button>');
+    act=claim+' <button class="btn ghost sm" onclick="gapCopy('+idx+')">⧉ '+(ar?'نسخ الرسالة':'Copy message')+'</button>'
+      +' <button class="btn ghost sm" onclick="gapSent('+idx+')">✓ '+(ar?'تم الإرسال':'Mark sent')+'</button>'
+      +' <button class="btn ghost sm" onclick="gapSnooze('+idx+')">⏲ '+(ar?'تأجيل':'Snooze')+'</button>'; }
+  var msg=ar?c.message_ar:c.message_en;
+  var msgbox='<div class="brn-msg" style="margin-top:10px" id="gapMsg'+idx+'">'+esc(msg||'')+'</div>';
+  return '<div class="card" style="margin-bottom:12px">'+head+unitline+whyline+offerline+tcount+gapTargets(c)+msgbox+'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;align-items:center">'+act+'</div></div>'; }
+function gapRender(){ var b=document.getElementById('gapsBody'); if(!b) return; var ar=(L==='ar'); var d=_gap.data||{}; var cards=d.cards||[]; var s=d.summary||{};
+  var agentBar='<div class="card" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="muted">'+(ar?'أنا:':'I am:')+'</span><input id="gapAgent" value="'+esc(_gap.agent||'')+'" placeholder="'+(ar?'اسمك':'your name')+'" oninput="gapAgentSet(this.value)" style="background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;max-width:160px">'
+    +'<span class="muted" style="margin-inline-start:auto;font-size:12px">'+(ar?'نمط الإشغال':'pace')+': '+esc(d.pace_mode||'')+' · '+(ar?'محميّة':'protected')+': '+esc((d.protected_units||[]).join(', ')||'—')+'</span></div>';
+  var headline='';
+  if(s.gap_count){ var big=s.biggest_unit?((ar?'أكبر فرصة: ':'Biggest opportunity: ')+esc(s.biggest_unit)+' ('+esc(s.biggest_class||'')+')'):'';
+    headline='<div class="card" style="margin-bottom:14px"><div style="font-size:15px;line-height:1.6">'+(ar?('اليوم: <b>'+s.gap_count+'</b> فجوة منتصف أسبوع في <b>'+s.unit_count+'</b> وحدة. '+big+'. ادفع <b>'+(s.p1_count||0)+'</b> بأولوية قصوى أول.'):('Today: <b>'+s.gap_count+'</b> weekday gaps across <b>'+s.unit_count+'</b> units. '+big+'. Push the <b>'+(s.p1_count||0)+'</b> P1 first.'))+'</div></div>'; }
+  b.innerHTML=agentBar+headline+gapStrip(d.strip);
+  if(!cards.length){ b.innerHTML+='<div class="card"><div class="empty">'+(s.gap_count?(ar?'فيه فجوات بس ما فيه جمهور مطابق بعد — اضغط «إعادة التصنيف» لبناء قاعدة الأعضاء من الحجوزات.':'Gaps exist but no matching audience yet — press “Re-tier” to build the member base from reservations.'):(ar?'ما في فجوات منتصف الأسبوع هالأسبوع 🎉':'No weekday gaps this week 🎉'))+'</div></div>'; return; }
+  b.innerHTML+=cards.map(function(c,i){ return gapCard(c,i); }).join(''); }
+function gapClaim(i){ if(gapNeedAgent()) return; var c=(_gap.data.cards||[])[i]; if(!c) return;
+  post('/api/brain/gaps/claim',{card_key:c.card_key,agent:_gap.agent,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(r){ if(r&&r.ok){ c.claimed_by=_gap.agent; gapRender(); toast(L==='ar'?'استلمتها ✓':'Claimed ✓'); } else toast((r&&r.error==='already_claimed')?((L==='ar'?'محجوزة لـ ':'Claimed by ')+(r.by||'')):'⚠'); }); }
+function gapSent(i){ if(gapNeedAgent()) return; var ar=(L==='ar'); var c=(_gap.data.cards||[])[i]; if(!c) return; if(!confirm(ar?'تأكيد: أرسلت رسالة هذي البطاقة للضيوف؟':'Confirm: you sent this card to the guests?')) return;
+  post('/api/brain/gaps/sent',{card_key:c.card_key,agent:_gap.agent,count:c.target_count,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(r){ if(r&&r.ok){ c.sent_at=1; c.sent_by=_gap.agent; c.sent_count=c.target_count; gapRender(); toast(ar?'سُجّل الإرسال ✓':'Logged ✓'); } else toast('⚠'); }); }
+function gapSnooze(i){ var c=(_gap.data.cards||[])[i]; if(!c) return;
+  post('/api/brain/gaps/snooze',{card_key:c.card_key,hours:6,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(){ _gap.data.cards.splice(i,1); gapRender(); toast(L==='ar'?'أُجّلت':'Snoozed'); }); }
+function gapCopy(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var msg=(L==='ar'?c.message_ar:c.message_en)||'';
+  if(navigator.clipboard){ navigator.clipboard.writeText(msg).then(function(){ toast(L==='ar'?'تم نسخ الرسالة ✓':'Message copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+function gapsRetier(){ var ar=(L==='ar'); if(!confirm(ar?'إعادة بناء تصنيف الأعضاء من حجوزات هوست أواي؟ ياخذ شوي.':'Rebuild member tiers from Hostaway stays? Takes a moment.')) return;
+  var btn=document.getElementById('gapsRetierBtn'); if(btn) btn.disabled=true; toast(ar?'⏳ إعادة التصنيف…':'⏳ Re-tiering…');
+  post('/api/brain/gaps/retier',{}).then(function(r){ if(btn) btn.disabled=false; if(r&&r.ok){ var res=r.result||{}; toast((ar?'تم — أعضاء: ':'Done — members: ')+fmt(res.written||0)); loadGaps(true); } else toast((r&&r.error)||'⚠'); }).catch(function(){ if(btn) btn.disabled=false; toast('⚠'); }); }
+
+/* ============================================================
    BOOT
    ============================================================ */
 applyTheme();
@@ -30738,7 +30819,7 @@ NAV_DEF = {
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "calendar", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
-        {"tk": "cat_pricing", "ids": ["brain", "pricing", "plab", "strat", "rev"]},
+        {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly"]},
         {"tk": "cat_guests", "ids": ["guests", "gw", "reviews"]},
@@ -30747,6 +30828,7 @@ NAV_DEF = {
     "items": [
         {"id": "home", "ic": "home", "tk": "home"},
         {"id": "brain", "ic": "strat", "tk": "brain"},
+        {"id": "gaps", "ic": "calendar", "tk": "gaps"},
         {"id": "inbox", "ic": "inbox", "tk": "inbox", "badge": "inbox"},
         {"id": "calendar", "ic": "calendar", "tk": "calendar"},
         {"id": "clean_center", "ic": "clean_center", "tk": "clean_center", "badge": "clean_center"},
@@ -30779,7 +30861,7 @@ NAV_DEF = {
     # المالي» is the ERP itself; «finance» deep-links to the owner statements workspace.
     "labels": {
         "ar": {
-            "home": "الرئيسية", "brain": "أوجا برين", "inbox": "صندوق الوارد", "calendar": "التقويم",
+            "home": "الرئيسية", "brain": "أوجا برين", "gaps": "فجوات منتصف الأسبوع", "inbox": "صندوق الوارد", "calendar": "التقويم",
             "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة",
@@ -30793,7 +30875,7 @@ NAV_DEF = {
             "cat_finance": "المالية والمحاسبة", "cat_guests": "الضيوف", "cat_system": "النظام",
         },
         "en": {
-            "home": "Home", "brain": "Ouja Brain", "inbox": "Inbox", "calendar": "Calendar",
+            "home": "Home", "brain": "Ouja Brain", "gaps": "Weekday Gaps", "inbox": "Inbox", "calendar": "Calendar",
             "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance",

@@ -14,6 +14,7 @@ Usage from bot.py (inside start_web_server):
 
 from .host import HOST, wire as _wire_host
 from . import db, settings, campaigns, members, signals, audience, governor, recommend, adapters, routes
+from . import gaps, retier, playbook, cards, gap_routes
 
 __all__ = ["wire", "register_routes", "HOST"]
 
@@ -38,3 +39,4 @@ def wire(caps):
 
 def register_routes(app):
     routes.register(app)
+    gap_routes.register(app)

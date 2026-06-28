@@ -220,6 +220,25 @@ CREATE TABLE IF NOT EXISTS audit_log (
     payload    TEXT,                           -- JSON
     created_at TEXT
 );
+
+-- Weekday-Gap Engine: per-card claim/snooze/sent state (the cards themselves are recomputed
+-- live each load, so a card disappears the instant its night books — kill-on-book is free).
+-- card_key = lid:first-gap-date:campaign, stable for a given gap+campaign on a given day.
+CREATE TABLE IF NOT EXISTS gap_actions (
+    card_key      TEXT PRIMARY KEY,
+    date          TEXT,                         -- the day this card was surfaced (Riyadh)
+    lid           TEXT,
+    unit          TEXT,
+    campaign      TEXT,
+    claimed_by    TEXT,
+    claimed_at    TEXT,
+    snoozed_until TEXT,                         -- ISO datetime; hide until then
+    sent_by       TEXT,
+    sent_at       TEXT,
+    sent_count    INTEGER DEFAULT 0,
+    updated_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_gap_actions_date ON gap_actions(date);
 """
 
 
@@ -307,6 +326,18 @@ def connect():
 _MIGRATIONS = [
     ("campaigns", "template_name", "ALTER TABLE campaigns ADD COLUMN template_name TEXT"),
     ("campaigns", "footer", "ALTER TABLE campaigns ADD COLUMN footer TEXT"),
+    # ---- Weekday-Gap Engine: richer RFM re-tiering (build spec §1) ----
+    ("members", "score", "ALTER TABLE members ADD COLUMN score REAL DEFAULT 0"),
+    ("members", "days_since", "ALTER TABLE members ADD COLUMN days_since INTEGER"),
+    ("members", "weekday_pattern", "ALTER TABLE members ADD COLUMN weekday_pattern INTEGER DEFAULT 0"),
+    ("members", "preferred_unit", "ALTER TABLE members ADD COLUMN preferred_unit TEXT"),
+    ("members", "cancellations", "ALTER TABLE members ADD COLUMN cancellations INTEGER DEFAULT 0"),
+    ("members", "median_adr", "ALTER TABLE members ADD COLUMN median_adr REAL DEFAULT 0"),
+    ("members", "nights_total", "ALTER TABLE members ADD COLUMN nights_total INTEGER DEFAULT 0"),
+    # trust_ok = incident/payment/ID-vetted for no-deposit direct offers. Defaults 0 (false)
+    # until we have the flags (build spec §1 note + §10); an agent can override per member.
+    ("members", "trust_ok", "ALTER TABLE members ADD COLUMN trust_ok INTEGER DEFAULT 0"),
+    ("members", "last_retier", "ALTER TABLE members ADD COLUMN last_retier TEXT"),
 ]
 
 

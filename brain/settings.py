@@ -48,6 +48,16 @@ DEFAULTS = {
     "human_approval_required": (1, "int", "approval", "موافقة بشرية إلزامية", "Human approval required", "Phase 1: always 1 (nothing auto-sends)"),
     "active_sender_adapter":   ("csv", "str", "approval", "قناة التسليم", "Sender adapter", "csv (export) | karzoum (Phase 2)"),
     "karzoum_name_token":      ("{{1}}", "str", "approval", "رمز الاسم (ميتا)", "WhatsApp name variable", "Meta templates use {{1}} for the first name. Karzoum/WhatsApp fills it from the Name column."),
+
+    # ---- Weekday-Gap Engine (build spec §1, §3, §4) ----
+    "retier_lookback_days":    (540, "int", "gaps", "نافذة إعادة التصنيف (يوم)", "Re-tier lookback (days)", "How far back to read realized stays when re-tiering the base"),
+    "gap_horizon_days":        (7, "int", "gaps", "أفق الفجوات (يوم)", "Gap horizon (days)", "How many days ahead to scan for weekday gaps"),
+    "gap_protected_units":     ("F1,F2", "str", "gaps", "وحدات محميّة (لا خصم)", "Protected units (no discount)", "Comma-separated unit names that never get a discount — upgrade/access only"),
+    "discount_ceiling_pct":    (13, "int", "gaps", "سقف الخصم المباشر %", "Direct discount ceiling %", "Free ceiling on a direct booking = the Airbnb fee we save (build spec §HARD RULES 3)"),
+    "deep_discount_min_score": (75, "int", "gaps", "أدنى ثقة لخصم أعمق", "Deep-discount min score", "Deeper % only to a vetted guest at/above this score, on a P1 dead night"),
+    "deep_discount_floor_pct": (55, "int", "gaps", "نسبة أرضية p5 %", "Fallback floor (p5 ×%)", "Fallback pricing floor when a unit has no configured floor: p5 × this %"),
+    "gap_elite_msgs_per_7d":   (1, "int", "gaps", "أقصى رسائل إيليت / 7 أيام", "Max Elite msgs / 7 days", "≤1 Elite message per guest per 7 days total (build spec §HARD RULES 4)"),
+    "gap_targets_per_card":    (25, "int", "gaps", "أقصى أهداف لكل بطاقة", "Max targets / card", "Cap the audience size shown on each push card"),
 }
 
 _CAST = {"int": int, "float": float, "str": str}
