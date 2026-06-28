@@ -50139,6 +50139,39 @@ class WatchmanNameView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(WatchmanNameSelect())
 
+def _wm_is_watchman_ticket_channel(ch, closed_only=True):
+    """True if `ch` is one of the watchman's own ticket rooms (نقص-/وعد- under صيانه),
+    identified by its topic. closed_only → only the leftover «مغلقة-» ones."""
+    topic = getattr(ch, "topic", "") or ""
+    if not topic.startswith("ouja-watchman:"):
+        return False
+    if closed_only:
+        return (ch.name or "").startswith("مغلقة-")
+    return True
+
+class WatchmanCleanupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🗑️ احذف التذاكر المقفولة القديمة / Delete old closed tickets",
+                       style=discord.ButtonStyle.danger, custom_id="wm_cleanup_closed")
+    async def cleanup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        deleted, failed = 0, 0
+        for ch in list(guild.text_channels):
+            if _wm_is_watchman_ticket_channel(ch, closed_only=True):
+                try:
+                    await ch.delete(reason="watchman: bulk cleanup of closed tickets")
+                    deleted += 1
+                except Exception as e:
+                    failed += 1
+                    print("watchman cleanup delete error:", e)
+        msg = f"🗑️ حذفت **{deleted}** تذكرة مقفولة."
+        if failed:
+            msg += f" (تعذّر حذف {failed} — تأكد إن للبوت صلاحية إدارة القنوات.)"
+        await interaction.followup.send(msg, ephemeral=True)
+
 async def _wm_ensure_name_card(guild, name):
     """Post a mapping card for `name` in the admin channel if one isn't there yet (idempotent
     via the _wm_meta['carded'] list, so we don't re-scan history every promise)."""
@@ -50166,7 +50199,7 @@ async def ensure_watchman_admin(guild):
     ch = await ensure_channel(guild, WATCHMAN_ADMIN_CHANNEL, await _tk_category(guild, "maint"))
     if ch is None:
         return
-    have, intro_seen = set(), False
+    have, intro_seen, cleanup_seen = set(), False, False
     try:
         async for msg in ch.history(limit=200):
             if msg.embeds and msg.embeds[0].footer:
@@ -50175,8 +50208,21 @@ async def ensure_watchman_admin(guild):
                     have.add(ft[len(_WM_NAME_FOOT):])
                 elif ft == "wm-name-intro":
                     intro_seen = True
+                elif ft == "wm-cleanup":
+                    cleanup_seen = True
     except Exception:
         pass
+    if not cleanup_seen:
+        cl = discord.Embed(
+            title="🗑️ تنظيف التذاكر المقفولة",
+            description=("التذاكر الجديدة تنحذف تلقائياً أول ما تُقفل. هذا الزر يحذف **التذاكر القديمة "
+                         "المقفولة** (اللي اسمها يبدأ بـ «مغلقة-») دفعة وحدة — اضغطه وقت ما تبي تنظّف."),
+            color=0xC0552B)
+        cl.set_footer(text="wm-cleanup")
+        try:
+            await ch.send(embed=cl, view=WatchmanCleanupView())
+        except Exception:
+            pass
     if not intro_seen:
         intro = discord.Embed(
             title="🔗 مطابقة أسماء الموظفين  ·  Hostaway/Airbnb ← Discord",
@@ -50469,6 +50515,7 @@ async def on_ready():
     bot.add_view(WatchmanPromiseView())  # «الرقيب» promise "Done" buttons (re-bind after restart)
     bot.add_view(WatchmanGapView())      # «الرقيب» guide-gap "Added" buttons (re-bind after restart)
     bot.add_view(WatchmanNameView())     # «الرقيب» name-matching user pickers (re-bind after restart)
+    bot.add_view(WatchmanCleanupView())  # «الرقيب» bulk "delete old closed tickets" button
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)

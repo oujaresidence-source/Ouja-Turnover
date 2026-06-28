@@ -223,6 +223,19 @@ class WatchmanHelpers(unittest.TestCase):
         self.assertFalse(bot._wm_is_entry_code_gap("رمز الواي فاي", "", "", ""))   # wifi password: keep
         self.assertFalse(bot._wm_is_entry_code_gap("موقف السيارة", "", "", ""))    # parking: keep
 
+    def test_closed_ticket_channel_detection(self):
+        class Ch:
+            def __init__(self, name, topic):
+                self.name, self.topic = name, topic
+        self.assertTrue(bot._wm_is_watchman_ticket_channel(
+            Ch("مغلقة-نقص-036-jood12", "ouja-watchman:gap key:1")))         # closed watchman room
+        self.assertFalse(bot._wm_is_watchman_ticket_channel(
+            Ch("نقص-036-jood12", "ouja-watchman:gap key:1")))               # open → not deleted
+        self.assertFalse(bot._wm_is_watchman_ticket_channel(
+            Ch("مغلقة-صيانة-001", "ouja-ticket:maint lid:1")))              # a maintenance ticket, not watchman
+        self.assertTrue(bot._wm_is_watchman_ticket_channel(
+            Ch("نقص-036", "ouja-watchman:gap key:1"), closed_only=False))   # any watchman room
+
     def test_promise_allowed_rule(self):
         saved = (bot._wm_namemap, bot.WATCHMAN_NAME_MAP)
         try:
