@@ -543,18 +543,14 @@ def _range_items(request):
         return None, ("bad_dates", 400)
     if end < start:
         return None, ("end_before_start", 400)
-    units, _listings = OW._owner_units(owner)
-    apt = (q.get("apt") or "").strip()
-    if apt:
-        units = [u for u in units if (u.get("apartment") or "").strip() == apt]
-    lids = [u["lid"] for u in units if u.get("lid") is not None]
-    if not lids:
-        return None, ("no_units", 404)
-    reps = [api.B.build_owner_report(lid, start, end, 0, {}) for lid in lids]
-    if apt and len(reps) == 1:
-        report, label, kind = reps[0], (reps[0].get("apartment") or apt), "apartment"
-    else:
-        report, label, kind = api.B._finance_aggregate(reps, owner, start, end), owner, "owner"
+    apt = (q.get("apt") or "").strip() or None
+    # The custom-range report = the SUM of the monthly statements over the window,
+    # so manual expenses / edits / adjustments entered in the monthly editor all
+    # appear (was: raw build_owner_report, which only saw Hostaway-matched data).
+    report, err = OW.compute_owner_range(owner, start, end, apt)
+    if err:
+        return None, (err, 404 if err in ("no_units", "no_data") else 400)
+    label, kind = ((report.get("apartment") or apt), "apartment") if apt else (owner, "owner")
     return [{"label": label, "owner": owner, "kind": kind, "report": report}], None
 
 

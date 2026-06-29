@@ -921,6 +921,133 @@ def compute_owner_statement(owner, mkey, apply_edits=True):
     return agg
 
 
+def _iter_months(start, end):
+    """Every calendar month touched by [start,end] → (slice_start, slice_end,
+    mkey, is_whole_month). A whole month means the range fully covers it."""
+    B = _B()
+    out = []
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        mk = "%04d-%02d" % (y, m)
+        ms, me = B._month_bounds(mk)
+        s, e = max(ms, start), min(me, end)
+        out.append((s, e, mk, s == ms and e == me))
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return out
+
+
+def _aggregate_period(reports, owner, start, end):
+    """Sum several monthly/slice reports into ONE range report. Totals come from
+    each report's TOP-LEVEL values (so manual expenses / edits / adjustments the
+    editor added are already included); the per-apartment breakdown is merged by
+    apartment (Hostaway-level — owner-scoped manual lines live only in the totals,
+    exactly like the monthly statement). Shape mirrors B._finance_aggregate."""
+    R = lambda x: round(float(x or 0), 2)
+    tot = lambda k: R(sum(float(r.get(k) or 0) for r in reports))
+    cleaning_total = R(sum(float((r.get("cleaning") or {}).get("total") or 0) for r in reports))
+    parts_by = {}
+    for r in reports:
+        aps = r.get("apartments") or [{
+            "apartment": r.get("apartment"), "lid": r.get("lid"),
+            "total_income": r.get("total_income"), "ouja_fee": r.get("ouja_fee"),
+            "expenses": r.get("expenses"), "cleaning": (r.get("cleaning") or {}).get("total", 0),
+            "owner_net": r.get("owner_net")}]
+        for p in aps:
+            key = (p.get("apartment"), p.get("lid"))
+            acc = parts_by.setdefault(key, {"apartment": p.get("apartment"), "lid": p.get("lid"),
+                  "total_income": 0.0, "ouja_fee": 0.0, "expenses": 0.0, "cleaning": 0.0, "owner_net": 0.0})
+            for k in ("total_income", "ouja_fee", "expenses", "cleaning", "owner_net"):
+                acc[k] = R(acc[k] + float(p.get(k) or 0))
+    concat = lambda k: [x for r in reports for x in (r.get(k) or [])]
+    all_lines = concat("resv_lines"); all_lines.sort(key=lambda l: l.get("checkin") or "")
+    all_exp = concat("exp_lines"); all_exp.sort(key=lambda e: e.get("date") or "")
+    exsum = {"needs_review": 0, "needs_review_reference": 0.0, "unpaid": 0,
+             "unpaid_expected": 0.0, "refunded": 0, "reasons": {}}
+    for r in reports:
+        es = r.get("excluded_summary") or {}
+        for k in ("needs_review", "unpaid", "refunded"):
+            exsum[k] += int(es.get(k) or 0)
+        for k in ("needs_review_reference", "unpaid_expected"):
+            exsum[k] = R(exsum[k] + float(es.get(k) or 0))
+        for k, v in (es.get("reasons") or {}).items():
+            exsum["reasons"][k] = exsum["reasons"].get(k, 0) + v
+    ti, fee = tot("total_income"), tot("ouja_fee")
+    out = {"currency": "SAR", "owner": owner,
+           "management_pct": (round(fee / ti * 100, 1) if ti else None),
+           "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
+           "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
+           "extras": tot("extras"), "manual_income": tot("manual_income"),
+           "manual_income_lines": concat("manual_income_lines"),
+           "total_income": ti, "ouja_fee": fee, "expenses": tot("expenses"),
+           "cleaning": {"type": "mixed", "total": cleaning_total, "cleans": None, "amount": None},
+           "owner_net": tot("owner_net"), "apartments": list(parts_by.values()),
+           "resv_lines": all_lines, "exp_lines": all_exp,
+           "unpaid_lines": concat("unpaid_lines"), "refunded_lines": concat("refunded_lines"),
+           "adjust_lines": concat("adjust_lines"), "adjustments_total": tot("adjustments_total"),
+           "excluded_summary": exsum, "n_apartments": len(parts_by),
+           "reconciliation": {"balanced": all((r.get("reconciliation") or {}).get("balanced", True) for r in reports),
+                              "missing_payout_ids": [], "needs_channel_rule_ids": [], "needs_base_ids": []}}
+    foots = concat("footnotes")
+    if foots:
+        out["footnotes"] = foots
+    if any(r.get("has_manual_edits") for r in reports):
+        out["has_manual_edits"] = True
+    cx = concat("contract_excluded_lines")
+    if cx:
+        out["contract_excluded_lines"] = cx
+    return out
+
+
+def compute_owner_range(owner, start, end, apt=None):
+    """Custom-range owner report = the SUM of the monthly statements across the
+    window, so manual expenses / edits / adjustments entered in the monthly editor
+    all appear (parity with what the owner sees month by month). Whole months use
+    compute_owner_statement (full editor overlay); a partial edge month falls back
+    to the raw engine (month-scoped manual edits can't be pro-rated) and is
+    footnoted. `apt` slices to one apartment. Returns (report, error_code)."""
+    B = _B()
+    units, _listings = _owner_units(owner)
+    sel = [u for u in units if (u.get("apartment") or "").strip() == apt] if apt else units
+    lids = [u["lid"] for u in sel if u.get("lid") is not None]
+    if not lids:
+        return None, "no_units"
+    # owner-scoped manual lines are attributable only when the slice IS the whole
+    # owner (or a single-unit owner). A multi-unit owner filtered to one apartment
+    # can't carry owner-level manual entries → raw per-apartment, footnoted.
+    owner_total_units = len([u for u in units if u.get("lid") is not None])
+    owner_level = (not apt) or owner_total_units <= 1
+    month_reports, footnotes = [], []
+    for (m_start, m_end, mkey, whole) in _iter_months(start, end):
+        if whole and owner_level:
+            rep = compute_owner_statement(owner, mkey)
+        else:
+            reps = [B.build_owner_report(lid, m_start, m_end, 0, {}) for lid in lids]
+            reps = [r for r in reps if r is not None]
+            rep = B._finance_aggregate(reps, owner, m_start, m_end) if reps else None
+            if rep is not None and not whole:
+                footnotes.append({"kind": "partial_month_manual_excluded", "month": mkey,
+                                  "text_ar": mkey + ": شهر جزئي — التسويات اليدوية ما تدخل بالتناسب",
+                                  "text_en": mkey + ": partial month — manual edits not pro-rated"})
+            elif rep is not None and not owner_level:
+                footnotes.append({"kind": "apt_filter_owner_manual_excluded", "month": mkey,
+                                  "text_ar": mkey + ": التسويات اليدوية على مستوى المالك تظهر في تقرير المالك",
+                                  "text_en": mkey + ": owner-level manual entries appear on the owner report"})
+        if rep is not None:
+            month_reports.append(rep)
+    if not month_reports:
+        return None, "no_data"
+    agg = _aggregate_period(month_reports, owner, start, end)
+    if apt:
+        agg["apartment"] = apt
+        if len(agg.get("apartments") or []) == 1:
+            agg["lid"] = (agg["apartments"][0] or {}).get("lid")
+    if footnotes:
+        agg["footnotes"] = (agg.get("footnotes") or []) + footnotes
+    return agg, None
+
+
 def statement_for_portal(owner, mkey):
     """What the OWNER's live link + PDF render: the PUBLISHED snapshot when one
     exists (stable until an explicit republish), else the live compute. This is
