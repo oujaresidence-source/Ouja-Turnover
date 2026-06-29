@@ -13924,6 +13924,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="gapsCsv()" id="gapsCsvBtn" title="تحميل قائمة الإرسال">⬇ <span id="t_gaps_csv">تحميل CSV</span></button>
+            <button class="btn ghost sm" onclick="gapsTemplates()" id="gapsTplBtn" title="تصدير قوالب ميتا/كرزون">⬇ <span id="t_gaps_tpl">تصدير القوالب</span></button>
             <button class="btn ghost sm" onclick="gapsRetier()" id="gapsRetierBtn" title="إعادة تصنيف الأعضاء">⟳ <span id="t_gaps_retier">إعادة التصنيف</span></button>
             <button class="btn ghost sm" onclick="loadGaps(true)" title="تحديث">↻</button>
           </div>
@@ -24149,6 +24150,7 @@ function gapAgentSet(v){ _gap.agent=v||''; try{ localStorage.setItem('ouja_gap_a
 function gapNeedAgent(){ var ar=(L==='ar'); if(!_gap.agent){ toast(ar?'اكتب اسمك فوق أول':'Set your name up top first'); var el=document.getElementById('gapAgent'); if(el) el.focus(); return true; } return false; }
 function gapMoney(n){ return fmt(Math.round(n||0))+(L==='ar'?' ر.س':' SAR'); }
 function loadGaps(force){ var ti=document.getElementById('t_gaps'); if(ti) ti.textContent=(L==='ar'?'فجوات منتصف الأسبوع':'Weekday Gaps');
+  var tt=document.getElementById('t_gaps_tpl'); if(tt) tt.textContent=(L==='ar'?'تصدير القوالب':'Export templates');
   _gap.agent=gapAgentGet(); var b=document.getElementById('gapsBody'); if(!b) return;
   if(force||!_gap.data){ b.innerHTML='<div class="empty sk">—</div>';
     api('/api/brain/gaps').then(function(r){ if(r&&r.ok===false){ b.innerHTML='<div class="empty">⚠ '+esc(r.error||'')+'</div>'; return; } _gap.data=r||null; gapRender(); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; });
@@ -24180,6 +24182,8 @@ function gapCard(c,idx){ var ar=(L==='ar'); var of=c.offer||{};
     act=claim+' <button class="btn ghost sm" onclick="gapCopy('+idx+')">⧉ '+(ar?'نسخ الرسالة':'Copy message')+'</button>'
       +' <button class="btn ghost sm" onclick="gapSent('+idx+')">✓ '+(ar?'تم الإرسال':'Mark sent')+'</button>'
       +' <button class="btn ghost sm" onclick="gapSnooze('+idx+')">⏲ '+(ar?'تأجيل':'Snooze')+'</button>'; }
+  // the raw Meta/Karzoun template (variables intact) — the one-time submission text, always available
+  act+=' <button class="btn ghost sm" onclick="gapCopyTpl('+idx+')" title="'+(ar?'نص القالب الخام لتقديمه مرة واحدة في ميتا/كرزون':'Raw template text to submit once in Meta/Karzoun')+'">▣ '+(ar?'نسخ قالب كرزون':'Copy Karzoun template')+'</button>';
   var msg=ar?c.message_ar:c.message_en;
   var msgbox='<div class="brn-msg" style="margin-top:10px" id="gapMsg'+idx+'">'+esc(msg||'')+'</div>';
   return '<div class="card" style="margin-bottom:12px">'+head+unitline+whyline+offerline+tcount+gapTargets(c)+msgbox+'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;align-items:center">'+act+'</div></div>'; }
@@ -24201,8 +24205,22 @@ function gapSent(i){ if(gapNeedAgent()) return; var ar=(L==='ar'); var c=(_gap.d
   post('/api/brain/gaps/sent',{card_key:c.card_key,agent:_gap.agent,count:c.target_count,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(r){ if(r&&r.ok){ c.sent_at=1; c.sent_by=_gap.agent; c.sent_count=c.target_count; gapRender(); toast(ar?'سُجّل الإرسال ✓':'Logged ✓'); } else toast('⚠'); }); }
 function gapSnooze(i){ var c=(_gap.data.cards||[])[i]; if(!c) return;
   post('/api/brain/gaps/snooze',{card_key:c.card_key,hours:6,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(){ _gap.data.cards.splice(i,1); gapRender(); toast(L==='ar'?'أُجّلت':'Snoozed'); }); }
-function gapCopy(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var msg=(L==='ar'?c.message_ar:c.message_en)||'';
-  if(navigator.clipboard){ navigator.clipboard.writeText(msg).then(function(){ toast(L==='ar'?'تم نسخ الرسالة ✓':'Message copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+function gapCopy(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var ar=(L==='ar'); var msg=(ar?c.message_ar:c.message_en)||'';
+  // per-guest merged message: {{2}}=unit & {{3}}=date already merged server-side; fill {{1}}=name
+  var t=(c.targets||[])[0]||{}; var nm=t.first||t.name||''; if(nm){ msg=msg.split('{{1}}').join(nm).split('{name}').join(nm); }
+  if(navigator.clipboard){ navigator.clipboard.writeText(msg).then(function(){ toast(ar?'تم نسخ الرسالة ✓':'Message copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+function gapCopyTpl(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var ar=(L==='ar'); var tp=(ar?c.tpl_ar:c.tpl_en)||{}; var NL=String.fromCharCode(10);
+  var sv=tp.sample||{}; var keys=Object.keys(sv).sort(); var samp=keys.map(function(k){ return k+'='+sv[k]; }).join('  ');
+  var lines=[];
+  lines.push((tp.template_name||c.campaign||'')+'  ['+(tp.category||'MARKETING')+']');
+  if(tp.header) lines.push((ar?'العنوان: ':'Header: ')+tp.header);
+  lines.push((ar?'النص: ':'Body: ')+(tp.body||''));
+  if(tp.footer) lines.push((ar?'التذييل: ':'Footer: ')+tp.footer);
+  if(tp.button) lines.push((ar?'الزر: ':'Button: ')+tp.button);
+  if(samp) lines.push((ar?'عينات: ':'Samples: ')+samp);
+  var txt=lines.join(NL);
+  if(navigator.clipboard){ navigator.clipboard.writeText(txt).then(function(){ toast(ar?'نُسخ قالب كرزون ✓':'Karzoun template copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+function gapsTemplates(){ window.open('/api/brain/gaps/templates-export?token='+encodeURIComponent(tok()),'_blank'); }
 function gapsCsv(){ var ar=(L==='ar'); if(!_gap.data||!(_gap.data.cards||[]).length){ toast(ar?'ما في بطاقات للتحميل':'No cards to export'); return; } window.open('/api/brain/gaps/export?token='+encodeURIComponent(tok()),'_blank'); }
 function gapsRetier(){ var ar=(L==='ar'); if(!confirm(ar?'إعادة بناء تصنيف الأعضاء من حجوزات هوست أواي؟ ياخذ شوي.':'Rebuild member tiers from Hostaway stays? Takes a moment.')) return;
   var btn=document.getElementById('gapsRetierBtn'); if(btn) btn.disabled=true; toast(ar?'⏳ إعادة التصنيف…':'⏳ Re-tiering…');

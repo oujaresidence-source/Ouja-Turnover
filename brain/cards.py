@@ -173,12 +173,26 @@ def _offer(gap, camp, cfg, floor_fn):
 
 # -------------------------- message + why merge --------------------------
 
+# The owner-approved copy carries the Karzoun/Meta WhatsApp variables {{1}}..{{5}}:
+#   {{1}}=guest name  {{2}}=unit  {{3}}=night/date  {{4}}=upgrade-target/value  {{5}}=hold-until
+# We merge {{2}}=unit and {{3}}=dates from the LIVE card here; {{1}} stays for the per-guest fill
+# (the agent / CSV substitutes the name), and {{4}}/{{5}} stay for the agent to complete. The legacy
+# {unit}/{dates}/{wd}/… tokens are still merged (harmless no-ops on the new copy, used by why-lines).
+
+def _tpl_vars(text, gap):
+    """Fill the Karzoun template variables from the live card: {{2}}=unit, {{3}}=dates."""
+    labels = gap.get("gap_labels") or []
+    return (str(text or "")
+            .replace("{{2}}", gap.get("unit", ""))
+            .replace("{{3}}", " – ".join(labels)))
+
+
 def _merge(text, gap):
     labels = gap.get("gap_labels") or []
     wd0 = gap.get("weekdays", [None])[0]
     first = labels[0] if labels else ""
     last = labels[-1] if labels else ""
-    return (str(text or "")
+    return (_tpl_vars(text, gap)
             .replace("{unit}", gap.get("unit", ""))
             .replace("{dates}", " – ".join(labels))
             .replace("{date_in}", first).replace("{date_out}", last).replace("{date}", first)
@@ -192,7 +206,7 @@ def _merge_ar(text, gap):
     wd0 = gap.get("weekdays", [None])[0]
     first = labels[0] if labels else ""
     last = labels[-1] if labels else ""
-    return (str(text or "")
+    return (_tpl_vars(text, gap)
             .replace("{unit}", gap.get("unit", ""))
             .replace("{dates}", " – ".join(labels))
             .replace("{date_in}", first).replace("{date_out}", last).replace("{date}", first)
@@ -254,9 +268,28 @@ def build_card(gap, members, cfg=None, floor_fn=None, pace_mode="normal",
         "target_count": len(chosen),
         "pool_eligible": len(elig),
         "targets": [_target_view(m, gap) for m in chosen],
+        # the per-guest message: {{2}}=unit / {{3}}=dates merged; {{1}} kept for the name fill
         "message_ar": _merge_ar(camp.get("msg_ar"), gap),
         "message_en": _merge(camp.get("msg_en"), gap),
+        # the RAW Karzoun/Meta template (variables {{1}}..{{5}} INTACT) for the one-time submission
+        "template_name": camp.get("template_name"),
+        "category": camp.get("category"),
+        "approval_note": camp.get("approval_note"),
+        "tpl_ar": _raw_tpl(camp, "ar"),
+        "tpl_en": _raw_tpl(camp, "en"),
     }
+
+
+def _raw_tpl(camp, lang):
+    """The raw Marketing-variant template block for `lang` (header/body/footer/button + samples +
+    category) with the {{1}}..{{5}} variables untouched — what the «Copy Karzoun template» button
+    copies. Always the Marketing variant (the engine's default), never the Utility one."""
+    block = camp.get(lang) or {}
+    sample = camp.get("sample_%s" % lang) or {}
+    return {"header": block.get("header") or "", "body": block.get("body") or "",
+            "footer": block.get("footer") or "", "button": block.get("button") or "",
+            "sample": sample, "category": camp.get("category"),
+            "template_name": camp.get("template_name")}
 
 
 def _week_strip(grid, gaps, horizon):
@@ -429,8 +462,9 @@ def build_today_csv(payload):
         for t in c.get("targets") or []:
             nm = t.get("first") or t.get("name") or ""
             phone = (t.get("phone") or "").lstrip("+")
-            msg_ar = str(c.get("message_ar") or "").replace("{name}", nm)
-            msg_en = str(c.get("message_en") or "").replace("{name}", nm)
+            # {{1}} is the guest-name variable in the owner-approved copy ({name} = legacy fallback)
+            msg_ar = str(c.get("message_ar") or "").replace("{{1}}", nm).replace("{name}", nm)
+            msg_en = str(c.get("message_en") or "").replace("{{1}}", nm).replace("{name}", nm)
             w.writerow([when, c.get("campaign") or "", t.get("name") or "", phone,
                         t.get("tier") or "", msg_ar, msg_en])
     return "ouja_gaps_today.csv", buf.getvalue()

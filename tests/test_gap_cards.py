@@ -172,15 +172,16 @@ class WhyAndMessage(unittest.TestCase):
 
     def test_message_merges_unit_keeps_name_token(self):
         c = cards.build_card(gap(), [member(1, "Sara", "Gold")])
-        self.assertIn("9B HTN", c["message_en"])           # {unit} merged
-        self.assertIn("{name}", c["message_en"])           # sender fills the name (Karzoum-style)
-        self.assertIn("{name}", c["message_ar"])
+        self.assertIn("9B HTN", c["message_en"])           # {{2}} merged to the unit
+        self.assertIn("{{1}}", c["message_en"])            # name variable kept for the per-guest fill
+        self.assertIn("{{1}}", c["message_ar"])
 
     def test_dated_campaign_merges_the_date(self):
-        # TOMORROW v2 copy uses {date} -> must be merged to the gap's date label
+        # TOMORROW copy uses {{3}} (date) -> must be merged to the gap's date label
         c = cards.build_card(gap(cls="TOMORROW", prio=1, nights=1, labels=["Mon 29 Jun"]),
                              [member(1, "Sara", "Gold")])
         self.assertIn("Mon 29 Jun", c["message_en"])
+        self.assertNotIn("{{3}}", c["message_en"])
 
 
 class CsvExport(unittest.TestCase):
@@ -213,7 +214,8 @@ class CsvExport(unittest.TestCase):
         self.assertEqual(rows[0][2], "Omar Khan")            # full name in the Name column
         self.assertEqual(rows[0][3], "966512345678")         # phone without the leading +
         self.assertEqual(rows[0][4], "Silver")               # Tag = tier
-        self.assertNotIn("{name}", rows[0][5])               # {name} merged (AR)
+        self.assertNotIn("{{1}}", rows[0][5])                # {{1}} name merged (AR)
+        self.assertNotIn("{name}", rows[0][5])               # no legacy token leak
         self.assertIn("Omar", rows[0][6])                    # first name merged (EN)
         self.assertEqual(rows[1][1], "MIDWEEK-2")            # P2 card second
 
@@ -229,24 +231,26 @@ class PlaybookSanity(unittest.TestCase):
         for cls, code in playbook.CLASS_PRIMARY.items():
             self.assertIn(code, playbook.CAMPAIGNS)
 
-    def test_v2_copy_merged_with_principle_and_tier_focus(self):
-        from brain import playbook_v2
+    def test_copy_comes_from_the_template_catalogue(self):
         for code, c in playbook.CAMPAIGNS.items():
             self.assertTrue(c.get("principle"), "%s missing principle" % code)
             self.assertTrue(c.get("tier_focus"), "%s missing tier_focus" % code)
-            # the message body came from the v2 file, not the old draft
-            self.assertEqual(c["msg_en"], playbook_v2.CAMPAIGNS[code]["en"])
-            self.assertEqual(c["msg_ar"], playbook_v2.CAMPAIGNS[code]["ar"])
-        # structural fields the engine reads must survive the swap
+            # the engine's send body IS the Marketing-variant body from the new catalogue
+            self.assertEqual(c["msg_en"], c["en"]["body"])
+            self.assertEqual(c["msg_ar"], c["ar"]["body"])
+        # structural fields the engine reads must survive the merge
         self.assertEqual(playbook.CAMPAIGNS["TURAIF-MIDWEEK"]["filter"], {"tier_only": "Turaif"})
         self.assertEqual(playbook.CAMPAIGNS["UPGRADE-MIDWEEK"]["offer_mode"], "upgrade")
 
-    def test_v2_date_tokens_merge_clean_no_leftover_braces(self):
-        # LONG-GAP copy uses {date_in}/{date_out}; make sure they merge (no raw tokens leak)
+    def test_template_vars_merge_clean_no_leftover_unit_or_date(self):
+        # LONG-GAP copy uses {{2}}=unit/{{3}}=dates; make sure they merge (no raw vars leak)
         g = gap(cls="LONG-GAP", nights=3, labels=["Sun 28 Jun", "Mon 29 Jun", "Tue 30 Jun"])
         c = cards.build_card(g, [member(1, "Sara", "Gold", nights=9)])
-        self.assertNotIn("{date", c["message_en"])
-        self.assertNotIn("{date", c["message_ar"])
+        for m in (c["message_en"], c["message_ar"]):
+            self.assertNotIn("{{2}}", m)     # unit merged
+            self.assertNotIn("{{3}}", m)     # dates merged
+            self.assertNotIn("{date", m)     # no legacy token leak
+            self.assertIn("{{1}}", m)        # name kept for the per-guest fill
 
 
 if __name__ == "__main__":

@@ -191,6 +191,18 @@ async def api_export(request):
                             headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
 
 
+async def api_templates_export(request):
+    """Download ALL 20 campaigns (both languages + both utility variants, ~44 rows) as the
+    Meta/Karzoun one-time template-submission CSV. Static catalogue — no live data needed."""
+    g = _guard(request)
+    if g:
+        return g
+    from . import playbook
+    filename, text = playbook.build_templates_csv()
+    return HOST.web.Response(text=text, content_type="text/csv", charset="utf-8",
+                            headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
+
+
 async def api_retier(request):
     """Rebuild the member base from realized Hostaway stays (build spec §1). Runs in a thread."""
     g = _guard(request)
@@ -205,6 +217,7 @@ def register(app):
     app.router.add_get("/api/brain/gaps", _safe(api_gaps))
     app.router.add_get("/api/brain/gaps/conversion", _safe(api_conversion))
     app.router.add_get("/api/brain/gaps/export", api_export)
+    app.router.add_get("/api/brain/gaps/templates-export", api_templates_export)
     app.router.add_post("/api/brain/gaps/claim", _safe(api_claim))
     app.router.add_post("/api/brain/gaps/snooze", _safe(api_snooze))
     app.router.add_post("/api/brain/gaps/sent", _safe(api_sent))
