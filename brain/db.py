@@ -338,6 +338,12 @@ _MIGRATIONS = [
     # until we have the flags (build spec §1 note + §10); an agent can override per member.
     ("members", "trust_ok", "ALTER TABLE members ADD COLUMN trust_ok INTEGER DEFAULT 0"),
     ("members", "last_retier", "ALTER TABLE members ADD COLUMN last_retier TEXT"),
+    # full guest name (first + last) for display/CSV; first_name stays the greeting token.
+    ("members", "full_name", "ALTER TABLE members ADD COLUMN full_name TEXT"),
+    # last-minute booker (books with lead <= 2 days) — a fit signal for TONIGHT/TOMORROW/ORPHAN.
+    ("members", "lastmin", "ALTER TABLE members ADD COLUMN lastmin INTEGER DEFAULT 0"),
+    # area/compound of the guest's modal listing (the listings store `group`) — a soft fit signal.
+    ("members", "preferred_area", "ALTER TABLE members ADD COLUMN preferred_area TEXT"),
 ]
 
 

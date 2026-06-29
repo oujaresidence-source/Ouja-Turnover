@@ -13923,6 +13923,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_gaps_sub">كل ليلة فاضية أحد–أربعاء في الأسبوع الجاي: أي حملة ندفع، وليش، ولمين — والرسالة جاهزة. نهايات الأسبوع ما نلمسها.</div>
           </div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="gapsCsv()" id="gapsCsvBtn" title="تحميل قائمة الإرسال">⬇ <span id="t_gaps_csv">تحميل CSV</span></button>
             <button class="btn ghost sm" onclick="gapsRetier()" id="gapsRetierBtn" title="إعادة تصنيف الأعضاء">⟳ <span id="t_gaps_retier">إعادة التصنيف</span></button>
             <button class="btn ghost sm" onclick="loadGaps(true)" title="تحديث">↻</button>
           </div>
@@ -24185,10 +24186,13 @@ function gapCard(c,idx){ var ar=(L==='ar'); var of=c.offer||{};
 function gapRender(){ var b=document.getElementById('gapsBody'); if(!b) return; var ar=(L==='ar'); var d=_gap.data||{}; var cards=d.cards||[]; var s=d.summary||{};
   var agentBar='<div class="card" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="muted">'+(ar?'أنا:':'I am:')+'</span><input id="gapAgent" value="'+esc(_gap.agent||'')+'" placeholder="'+(ar?'اسمك':'your name')+'" oninput="gapAgentSet(this.value)" style="background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;max-width:160px">'
     +'<span class="muted" style="margin-inline-start:auto;font-size:12px">'+(ar?'نمط الإشغال':'pace')+': '+esc(d.pace_mode||'')+' · '+(ar?'محميّة':'protected')+': '+esc((d.protected_units||[]).join(', ')||'—')+'</span></div>';
+  var banner='';
+  var topName=ar?s.top_campaign_name_ar:s.top_campaign_name_en;
+  if(topName){ banner='<div class="card" style="margin-bottom:14px;background:var(--accent-soft);border-color:var(--accent)"><div style="font-size:16px;font-weight:600;color:var(--accent)">'+(ar?'اليوم نرسل: ':'Today we send: ')+esc(topName)+' — '+(s.top_eligible||0)+(ar?' ضيف':' guests')+'</div></div>'; }
   var headline='';
   if(s.gap_count){ var big=s.biggest_unit?((ar?'أكبر فرصة: ':'Biggest opportunity: ')+esc(s.biggest_unit)+' ('+esc(s.biggest_class||'')+')'):'';
     headline='<div class="card" style="margin-bottom:14px"><div style="font-size:15px;line-height:1.6">'+(ar?('اليوم: <b>'+s.gap_count+'</b> فجوة منتصف أسبوع في <b>'+s.unit_count+'</b> وحدة. '+big+'. ادفع <b>'+(s.p1_count||0)+'</b> بأولوية قصوى أول.'):('Today: <b>'+s.gap_count+'</b> weekday gaps across <b>'+s.unit_count+'</b> units. '+big+'. Push the <b>'+(s.p1_count||0)+'</b> P1 first.'))+'</div></div>'; }
-  b.innerHTML=agentBar+headline+gapStrip(d.strip);
+  b.innerHTML=agentBar+banner+headline+gapStrip(d.strip);
   if(!cards.length){ b.innerHTML+='<div class="card"><div class="empty">'+(s.gap_count?(ar?'فيه فجوات بس ما فيه جمهور مطابق بعد — اضغط «إعادة التصنيف» لبناء قاعدة الأعضاء من الحجوزات.':'Gaps exist but no matching audience yet — press “Re-tier” to build the member base from reservations.'):(ar?'ما في فجوات منتصف الأسبوع هالأسبوع 🎉':'No weekday gaps this week 🎉'))+'</div></div>'; return; }
   b.innerHTML+=cards.map(function(c,i){ return gapCard(c,i); }).join(''); }
 function gapClaim(i){ if(gapNeedAgent()) return; var c=(_gap.data.cards||[])[i]; if(!c) return;
@@ -24199,6 +24203,7 @@ function gapSnooze(i){ var c=(_gap.data.cards||[])[i]; if(!c) return;
   post('/api/brain/gaps/snooze',{card_key:c.card_key,hours:6,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(){ _gap.data.cards.splice(i,1); gapRender(); toast(L==='ar'?'أُجّلت':'Snoozed'); }); }
 function gapCopy(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var msg=(L==='ar'?c.message_ar:c.message_en)||'';
   if(navigator.clipboard){ navigator.clipboard.writeText(msg).then(function(){ toast(L==='ar'?'تم نسخ الرسالة ✓':'Message copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+function gapsCsv(){ var ar=(L==='ar'); if(!_gap.data||!(_gap.data.cards||[]).length){ toast(ar?'ما في بطاقات للتحميل':'No cards to export'); return; } window.open('/api/brain/gaps/export?token='+encodeURIComponent(tok()),'_blank'); }
 function gapsRetier(){ var ar=(L==='ar'); if(!confirm(ar?'إعادة بناء تصنيف الأعضاء من حجوزات هوست أواي؟ ياخذ شوي.':'Rebuild member tiers from Hostaway stays? Takes a moment.')) return;
   var btn=document.getElementById('gapsRetierBtn'); if(btn) btn.disabled=true; toast(ar?'⏳ إعادة التصنيف…':'⏳ Re-tiering…');
   post('/api/brain/gaps/retier',{}).then(function(r){ if(btn) btn.disabled=false; if(r&&r.ok){ var res=r.result||{}; toast((ar?'تم — أعضاء: ':'Done — members: ')+fmt(res.written||0)); loadGaps(true); } else toast((r&&r.error)||'⚠'); }).catch(function(){ if(btn) btn.disabled=false; toast('⚠'); }); }

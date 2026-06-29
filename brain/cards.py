@@ -20,6 +20,9 @@ from .playbook import TIER_RANK
 _WD_AR = {6: "الأحد", 0: "الاثنين", 1: "الثلاثاء", 2: "الأربعاء", 3: "الخميس", 4: "الجمعة", 5: "السبت"}
 _WD_EN = {6: "Sunday", 0: "Monday", 1: "Tuesday", 2: "Wednesday", 3: "Thursday", 4: "Friday", 5: "Saturday"}
 _P1_DEAD = frozenset({"TONIGHT", "TOMORROW", "ORPHAN-NIGHT"})
+# Campaign families used by the fit score (change 1): weekday-regular fit vs last-minute fit.
+_WEEKDAY_TYPE = frozenset({"MIDWEEK-2", "WEEKDAY-REGULAR", "THIS-WEEK"})
+_LASTMIN_TYPE = frozenset({"TONIGHT", "TOMORROW", "ORPHAN-NIGHT"})
 
 DEFAULT_CFG = {
     "targets_per_card": 25,
@@ -68,17 +71,41 @@ def _match(m, gap, filt):
     return True
 
 
-def _rank_key(m, gap):
-    """Audience ranking (build spec §4): tier -> fit (preferred unit, weekday regular) ->
-    recency (lower days_since first) -> score. Sorted descending on this tuple."""
-    pref = 1 if m.get("preferred_unit") == gap.get("unit") else 0
-    wd = 1 if m.get("weekday_pattern") else 0
+def _fit_score(m, gap, code, card_area):
+    """Per-guest fit for THIS card (change 1). Higher = better fit, regardless of tier:
+        +3 favourite unit is the gap's unit
+        +2 weekday campaign AND the guest is a Sun–Wed regular
+        +2 last-minute campaign AND the guest books last-minute (lead ≤ 2d)
+        +1 favourite is a DIFFERENT unit but in the same area as the gap."""
+    fit = 0
+    pref_unit = m.get("preferred_unit")
+    if pref_unit and pref_unit == gap.get("unit"):
+        fit += 3
+    if code in _WEEKDAY_TYPE and m.get("weekday_pattern"):
+        fit += 2
+    if code in _LASTMIN_TYPE and m.get("lastmin"):
+        fit += 2
+    parea = m.get("preferred_area")
+    if card_area and parea and parea == card_area and pref_unit != gap.get("unit"):
+        fit += 1
+    return fit
+
+
+def _rank_key(m, gap, code, card_area):
+    """Audience ranking (change 1): FIT first, tier only as a tie-breaker, then recency.
+    Sorted descending on this tuple (recency encoded so lower days_since ranks higher)."""
     ds = m.get("days_since")
     rec = -int(ds) if ds is not None else -99999      # nearer last stay ranks first
-    return (TIER_RANK.get(m.get("tier"), 0), pref, wd, rec, float(m.get("score") or 0))
+    return (_fit_score(m, gap, code, card_area), TIER_RANK.get(m.get("tier"), 0), rec,
+            float(m.get("score") or 0))
 
 
 # -------------------------- per-guest reason --------------------------
+
+def _full_name(m):
+    """Full guest name (first + last) for display/CSV, falling back to the greeting token."""
+    return (m.get("full_name") or m.get("first_name") or "").strip()
+
 
 def _reason(m, gap):
     stays = int(m.get("stays_count") or 0)
@@ -97,13 +124,16 @@ def _reason(m, gap):
     if m.get("weekday_pattern"):
         en.append("books Sun–Wed")
         ar.append("يحجز منتصف الأسبوع")
+    if m.get("lastmin"):
+        en.append("last-minute booker")
+        ar.append("يحجز بسرعة باللحظة الأخيرة")
     return ", ".join(en), "، ".join(ar)
 
 
 def _target_view(m, gap):
     reason_en, reason_ar = _reason(m, gap)
-    return {"name": m.get("first_name") or "", "phone": m.get("phone"),
-            "tier": m.get("tier"), "score": m.get("score"),
+    return {"name": _full_name(m) or "—", "first": m.get("first_name") or "",
+            "phone": m.get("phone"), "tier": m.get("tier"), "score": m.get("score"),
             "reason_en": reason_en, "reason_ar": reason_ar}
 
 
@@ -144,21 +174,29 @@ def _offer(gap, camp, cfg, floor_fn):
 # -------------------------- message + why merge --------------------------
 
 def _merge(text, gap):
+    labels = gap.get("gap_labels") or []
     wd0 = gap.get("weekdays", [None])[0]
-    dates = " – ".join(gap.get("gap_labels") or [])
+    first = labels[0] if labels else ""
+    last = labels[-1] if labels else ""
     return (str(text or "")
             .replace("{unit}", gap.get("unit", ""))
-            .replace("{dates}", dates)
+            .replace("{dates}", " – ".join(labels))
+            .replace("{date_in}", first).replace("{date_out}", last).replace("{date}", first)
+            .replace("{occasion}", "the occasion")
             .replace("{wd}", _WD_EN.get(wd0, ""))
             .replace("{nights}", str(gap.get("nights", 1))))
 
 
 def _merge_ar(text, gap):
+    labels = gap.get("gap_labels") or []
     wd0 = gap.get("weekdays", [None])[0]
-    dates = " – ".join(gap.get("gap_labels") or [])
+    first = labels[0] if labels else ""
+    last = labels[-1] if labels else ""
     return (str(text or "")
             .replace("{unit}", gap.get("unit", ""))
-            .replace("{dates}", dates)
+            .replace("{dates}", " – ".join(labels))
+            .replace("{date_in}", first).replace("{date_out}", last).replace("{date}", first)
+            .replace("{occasion}", "المناسبة")
             .replace("{wd}", _WD_AR.get(wd0, ""))
             .replace("{nights}", str(gap.get("nights", 1))))
 
@@ -195,7 +233,8 @@ def build_card(gap, members, cfg=None, floor_fn=None, pace_mode="normal",
             continue
         if _match(m, gap, filt):
             elig.append(m)
-    elig.sort(key=lambda m: _rank_key(m, gap), reverse=True)
+    card_area = gap.get("area")
+    elig.sort(key=lambda m: _rank_key(m, gap, code, card_area), reverse=True)
     chosen = elig[: int(cfg.get("targets_per_card", 25))]
 
     why_ar, why_en = _why(camp, gap, len(chosen))
@@ -207,7 +246,7 @@ def build_card(gap, members, cfg=None, floor_fn=None, pace_mode="normal",
         "priority": gap.get("priority_label"), "priority_num": gap.get("priority"),
         "unit": gap.get("unit"), "lid": gap.get("lid"),
         "protected": bool(gap.get("protected")),
-        "gap_class": gap.get("gap_class"),
+        "gap_class": gap.get("gap_class"), "days_out": gap.get("days_out"),
         "gap_dates": gap.get("gap_labels"), "gap_dates_iso": gap.get("gap_dates"),
         "nights": gap.get("nights"), "at_risk": gap.get("at_risk"),
         "why_ar": why_ar, "why_en": why_en,
@@ -239,19 +278,26 @@ def _week_strip(grid, gaps, horizon):
 
 
 def daily_summary(gaps, cards):
-    """The §6 top narrative: how many weekday gaps across how many units, and the biggest
-    opportunity (most revenue-at-risk among P1)."""
+    """The §6 top narrative + the today banner (change 4): how many weekday gaps across how many
+    units, the biggest opportunity, and the single highest-priority campaign + its eligible count."""
     units = {g.get("lid") for g in gaps}
-    p1 = [c for c in cards if c.get("priority_num") == 1 and c.get("target_count")]
+    live = [c for c in cards if c.get("target_count")]
+    p1 = [c for c in live if c.get("priority_num") == 1]
     biggest = max(cards, key=lambda c: (c.get("at_risk") or 0), default=None) if cards else None
+    # top = highest priority (lowest priority_num), tie-broken by revenue-at-risk
+    top = min(live, key=lambda c: (c.get("priority_num", 9), -(c.get("at_risk") or 0)), default=None)
     return {
         "gap_count": len(gaps),
         "unit_count": len(units),
         "p1_count": len(p1),
-        "card_count": len([c for c in cards if c.get("target_count")]),
+        "card_count": len(live),
         "biggest_unit": (biggest or {}).get("unit"),
         "biggest_class": (biggest or {}).get("gap_class"),
         "biggest_at_risk": (biggest or {}).get("at_risk"),
+        "top_campaign": (top or {}).get("campaign"),
+        "top_campaign_name_ar": (top or {}).get("campaign_name_ar"),
+        "top_campaign_name_en": (top or {}).get("campaign_name_en"),
+        "top_eligible": (top or {}).get("pool_eligible") or 0,
     }
 
 
@@ -267,6 +313,12 @@ def _protected_lids(ls, names_csv):
         if rec.get("protected") or (nm and nm in want):
             out.add(str(lid))
     return out
+
+
+def _area_lookup(ls):
+    """lid -> area/compound (the listings store `group`)."""
+    return {str(lid): (rec.get("group") or "")
+            for lid, rec in ((ls or {}).get("listings") or {}).items()}
 
 
 def _floor_lookup(ls):
@@ -311,6 +363,9 @@ def build_cards():
     grid = gaps_mod.pull_grid(days=max(8, horizon + 1))
     live_gaps = gaps_mod.detect_gaps(grid, protected_lids=protected, horizon_days=horizon)
     strip = _week_strip(grid, live_gaps, horizon)
+    area_map = _area_lookup(ls)
+    for g in live_gaps:
+        g["area"] = area_map.get(str(g.get("lid")))
 
     # candidate members: everyone not structurally excluded; the Governor refines per send.
     rows = [dict(r) for r in db.q(
@@ -334,5 +389,48 @@ def build_cards():
     cards = [build_card(g, included, cfg=cfg, floor_fn=floor_fn, pace_mode=pace,
                         contacted_7d=contacted_7d) for g in live_gaps]
     cards = [c for c in cards if c.get("target_count")]            # drop empty-audience cards
+    # protected units shown by NAME (not raw listing id) in the header
+    _listings = (ls or {}).get("listings") or {}
+    protected_names = sorted({(_listings.get(str(l)) or {}).get("internal_name")
+                              or (_listings.get(str(l)) or {}).get("public_name") or str(l)
+                              for l in protected})
     return {"summary": daily_summary(live_gaps, cards), "cards": cards, "strip": strip,
-            "pace_mode": pace, "protected_units": sorted(protected), "generated_at": now_iso()}
+            "pace_mode": pace, "protected_units": protected_names, "generated_at": now_iso()}
+
+
+# Column order is a contract (matches Ouja_Send_List_Today_First.csv) — bilingual headers, do not reorder.
+CSV_COLUMNS = ["متى نرسل · When", "الحملة · Campaign", "الاسم · Name", "الجوال · Phone",
+               "الفئة · Tag", "الرسالة (عربي)", "Message (English)"]
+
+
+def _csv_when(card):
+    d = card.get("days_out")
+    if d == 0:
+        return "اليوم · Today"
+    if d == 1:
+        return "بكرة · Tomorrow"
+    return " / ".join(card.get("gap_dates") or [])
+
+
+def build_today_csv(payload):
+    """Flatten the current cards' targets into a today-first send list (change 3), matching the
+    Ouja_Send_List_Today_First.csv format. Rows are ordered P1 cards first (today-first), and
+    within a card by the fit ranking already applied; {name} is merged per guest (first name) and
+    the phone is written without the leading '+'. Returns (filename, text)."""
+    import csv
+    import io
+    cards = sorted((payload or {}).get("cards") or [],
+                   key=lambda c: (c.get("priority_num", 9), -(c.get("at_risk") or 0)))
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(CSV_COLUMNS)
+    for c in cards:
+        when = _csv_when(c)
+        for t in c.get("targets") or []:
+            nm = t.get("first") or t.get("name") or ""
+            phone = (t.get("phone") or "").lstrip("+")
+            msg_ar = str(c.get("message_ar") or "").replace("{name}", nm)
+            msg_en = str(c.get("message_en") or "").replace("{name}", nm)
+            w.writerow([when, c.get("campaign") or "", t.get("name") or "", phone,
+                        t.get("tier") or "", msg_ar, msg_en])
+    return "ouja_gaps_today.csv", buf.getvalue()

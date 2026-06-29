@@ -127,6 +127,8 @@ def retier(rows, today=None, weights=DEFAULT_WEIGHTS, quarantine_min=None):
         r["tier"] = _tier(stays, spend, ds, sp75, sp90, quarantine_min)
         wshare = r.get("weekday_share")
         r["weekday_pattern"] = 1 if (wshare is not None and float(wshare) >= 0.5) else 0
+        lshare = r.get("lastmin_share")
+        r["lastmin"] = 1 if (lshare is not None and float(lshare) >= 0.5) else 0
 
     return {"rows": rows, "sp75": round(sp75), "sp90": round(sp90),
             "population": len(rows), "repeaters": len(repeater_spend)}
@@ -181,6 +183,13 @@ def load_aggregates(lookback_days=None):
         listings = (HOST.get_listings_map() or {}) if HOST.get_listings_map else {}
     except Exception:
         listings = {}
+    groups = {}            # lid -> area/compound (the listings store `group`)
+    try:
+        ls = HOST.ls_get() if HOST.ls_get else {}
+        for lid, rec in ((ls or {}).get("listings") or {}).items():
+            groups[str(lid)] = rec.get("group") or ""
+    except Exception:
+        groups = {}
 
     by_phone = {}                         # phone -> aggregate accumulator
     seen_res = set()                      # dedup by reservation id across overlapping windows
@@ -204,11 +213,14 @@ def load_aggregates(lookback_days=None):
                 continue
             acc = by_phone.get(phone)
             if acc is None:
-                acc = by_phone[phone] = {"phone": phone, "name": "", "stays": 0, "spend": 0.0,
-                                         "nights": 0, "cancels": 0, "last_stay": None,
-                                         "wd_hits": 0, "_adrs": [], "_units": Counter()}
-            if not acc["name"]:
-                acc["name"] = first_name_of(r.get("guestName") or "")
+                acc = by_phone[phone] = {"phone": phone, "full": "", "first": "", "stays": 0,
+                                         "spend": 0.0, "nights": 0, "cancels": 0, "last_stay": None,
+                                         "wd_hits": 0, "lastmin_hits": 0, "_adrs": [],
+                                         "_unit_lids": Counter()}
+            if not acc["full"]:
+                gn = (r.get("guestName") or "").strip()
+                acc["full"] = gn
+                acc["first"] = first_name_of(gn)
             if status in _CANCELLED:
                 acc["cancels"] += 1
                 cancelled_rows += 1
@@ -228,20 +240,29 @@ def load_aggregates(lookback_days=None):
                 acc["wd_hits"] += 1
             if price > 0 and nights > 0:
                 acc["_adrs"].append(price / nights)
+            bd = parse_date(r.get("reservationDate") or r.get("insertedOn"))
+            if bd and arr:
+                lead = (arr - bd).days
+                if 0 <= lead <= 2:
+                    acc["lastmin_hits"] += 1
             lid = str(r.get("listingMapId") or "")
             if lid:
-                acc["_units"][listings.get(lid) or lid] += 1
+                acc["_unit_lids"][lid] += 1
 
     rows = []
     for acc in by_phone.values():
         stays = acc["stays"]
         adrs = sorted(acc["_adrs"])
+        pref_lid = acc["_unit_lids"].most_common(1)[0][0] if acc["_unit_lids"] else None
         rows.append({
-            "phone": acc["phone"], "name": acc["name"], "stays": stays,
+            "phone": acc["phone"], "full_name": acc["full"], "first": acc["first"],
+            "name": acc["full"], "stays": stays,
             "spend": round(acc["spend"], 2), "nights": acc["nights"], "cancels": acc["cancels"],
             "last_stay": acc["last_stay"],
             "weekday_share": (acc["wd_hits"] / stays) if stays else 0.0,
-            "preferred_unit": (acc["_units"].most_common(1)[0][0] if acc["_units"] else None),
+            "lastmin_share": (acc["lastmin_hits"] / stays) if stays else 0.0,
+            "preferred_unit": (listings.get(pref_lid) or pref_lid) if pref_lid else None,
+            "preferred_area": groups.get(pref_lid) if pref_lid else None,
             "median_adr": round(percentile(adrs, 50)) if adrs else 0,
         })
     coverage = {"scanned": scanned, "realized": matched, "cancelled": cancelled_rows,
@@ -266,9 +287,12 @@ def recompute_tiers(lookback_days=None):
     inserts, updates = [], []
     for r in enriched:
         ph = r["phone"]
-        common = (r.get("name") or "", r["tier"], int(r["stays"]), float(r["spend"]),
+        first = r.get("first") or r.get("full_name") or r.get("name") or ""
+        full = r.get("full_name") or r.get("name") or first
+        common = (first, full, r["tier"], int(r["stays"]), float(r["spend"]),
                   r.get("last_stay"), r.get("score"), r.get("days_since"),
-                  int(r.get("weekday_pattern") or 0), r.get("preferred_unit"),
+                  int(r.get("weekday_pattern") or 0), int(r.get("lastmin") or 0),
+                  r.get("preferred_unit"), r.get("preferred_area"),
                   int(r.get("cancels") or 0), float(r.get("median_adr") or 0),
                   int(r.get("nights") or 0), now, now)
         if ph in existing:
@@ -278,15 +302,16 @@ def recompute_tiers(lookback_days=None):
 
     if inserts:
         db.executemany(
-            "INSERT INTO members(phone, first_name, tier, stays_count, total_spend, last_stay_date, "
-            "score, days_since, weekday_pattern, preferred_unit, cancellations, median_adr, "
-            "nights_total, last_retier, updated_at, source) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'retier')", inserts)
+            "INSERT INTO members(phone, first_name, full_name, tier, stays_count, total_spend, "
+            "last_stay_date, score, days_since, weekday_pattern, lastmin, preferred_unit, "
+            "preferred_area, cancellations, median_adr, nights_total, last_retier, updated_at, source) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'retier')", inserts)
     if updates:
         db.executemany(
-            "UPDATE members SET first_name=?, tier=?, stays_count=?, total_spend=?, last_stay_date=?, "
-            "score=?, days_since=?, weekday_pattern=?, preferred_unit=?, cancellations=?, median_adr=?, "
-            "nights_total=?, last_retier=?, updated_at=? WHERE phone=?", updates)
+            "UPDATE members SET first_name=?, full_name=?, tier=?, stays_count=?, total_spend=?, "
+            "last_stay_date=?, score=?, days_since=?, weekday_pattern=?, lastmin=?, preferred_unit=?, "
+            "preferred_area=?, cancellations=?, median_adr=?, nights_total=?, last_retier=?, "
+            "updated_at=? WHERE phone=?", updates)
 
     out = {"written": len(enriched), "inserted": len(inserts), "updated": len(updates),
            "sp75": res["sp75"], "sp90": res["sp90"], **coverage}

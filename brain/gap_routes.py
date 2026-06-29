@@ -180,6 +180,17 @@ async def api_sent(request):
     return HOST.json_response({"ok": True})
 
 
+async def api_export(request):
+    """Download the current cards' targets as a today-first send-list CSV (change 3)."""
+    g = _guard(request)
+    if g:
+        return g
+    payload = await _in_thread(_build_payload, False)
+    filename, text = cards.build_today_csv(payload)
+    return HOST.web.Response(text=text, content_type="text/csv", charset="utf-8",
+                            headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
+
+
 async def api_retier(request):
     """Rebuild the member base from realized Hostaway stays (build spec §1). Runs in a thread."""
     g = _guard(request)
@@ -193,6 +204,7 @@ async def api_retier(request):
 def register(app):
     app.router.add_get("/api/brain/gaps", _safe(api_gaps))
     app.router.add_get("/api/brain/gaps/conversion", _safe(api_conversion))
+    app.router.add_get("/api/brain/gaps/export", api_export)
     app.router.add_post("/api/brain/gaps/claim", _safe(api_claim))
     app.router.add_post("/api/brain/gaps/snooze", _safe(api_snooze))
     app.router.add_post("/api/brain/gaps/sent", _safe(api_sent))

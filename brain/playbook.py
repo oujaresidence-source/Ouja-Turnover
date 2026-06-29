@@ -28,7 +28,7 @@ CAMPAIGNS = {
     "TONIGHT": {
         "name_ar": "الليلة", "name_en": "Tonight",
         "fires_on": ["TONIGHT"], "offer_mode": "value_add",
-        "filter": {"tier_min": "Silver", "weekday_pattern": True, "days_since_max": 120},
+        "filter": {"tier_min": "Silver", "days_since_max": 120},
         "why_ar": "فاضية الليلة في {unit}؛ {n} ضيوف منتظمين يحجزون بسرعة وما تواصلنا معهم من {d} يوم.",
         "why_en": "Empty tonight on {unit}; {n} last-minute midweek regulars, not contacted in {d}d.",
         "msg_ar": "مساك الله بالخير {name} 👋 فتحت لك ليلة الليلة في {unit} ({dates}). لو يناسبك نثبتها باسمك الحين — قول لي وأرتّبها.",
@@ -55,7 +55,7 @@ CAMPAIGNS = {
     "MIDWEEK-2": {
         "name_ar": "ليلتين منتصف الأسبوع", "name_en": "Midweek two-night",
         "fires_on": ["MIDWEEK-2"], "offer_mode": "value_add",
-        "filter": {"tier_min": "Gold", "weekday_pattern": True},
+        "filter": {"tier_min": "Silver"},
         "why_ar": "فجوة ليلتين منتصف الأسبوع في {unit}؛ {n} ضيوف ذهبيين منتظمين بالأيام العادية.",
         "why_en": "Two-night midweek gap on {unit}; {n} Gold weekday regulars.",
         "msg_ar": "هلا {name} 👋 {unit} فاضية ليلتين ({dates}) — هدوء منتصف الأسبوع اللي تحبه. أرتّبها لك؟",
@@ -73,7 +73,7 @@ CAMPAIGNS = {
     "THIS-WEEK": {
         "name_ar": "هالأسبوع", "name_en": "This week",
         "fires_on": ["THIS-WEEK"], "offer_mode": "value_add",
-        "filter": {"tier_min": "Gold", "score_min": 60},
+        "filter": {"tier_min": "Silver"},
         "why_ar": "ليالي منتصف الأسبوع مفتوحة في {unit}؛ {n} منتظمين موثوقين.",
         "why_en": "Open midweek nights on {unit}; {n} trusted regulars.",
         "msg_ar": "هلا {name} 🌟 فيه ليالي منتصف الأسبوع فاضية في {unit} ({dates}). تبي أحجز لك وحدة منها؟",
@@ -206,6 +206,28 @@ CAMPAIGNS = {
         "msg_en": "{name} we'd love your review of your stay 🤍 and if you'd like to return, {unit} is open midweek ({dates}) — easy to hold for you.",
     },
 }
+
+# ---------------------------------------------------------------------------
+# v2 copy (build change 5): the owner-authored hooks + persuasion principle live verbatim in
+# brain/playbook_v2.py (so that file stays the single source of truth for the message text).
+# We swap ONLY the ar/en message body and add principle/tier_focus here, preserving every
+# structural field above (filter / offer_mode / fires_on / why / names) that the engine reads.
+# ---------------------------------------------------------------------------
+try:
+    from . import playbook_v2 as _v2
+    for _code, _c in _v2.CAMPAIGNS.items():
+        _dst = CAMPAIGNS.get(_code)
+        if _dst is None:
+            continue
+        if _c.get("ar"):
+            _dst["msg_ar"] = _c["ar"]
+        if _c.get("en"):
+            _dst["msg_en"] = _c["en"]
+        _dst["principle"] = _c.get("principle")
+        _dst["tier_focus"] = _c.get("tier_focus")
+except Exception as _e:        # never let a copy-file issue break the engine
+    print("[brain] playbook_v2 merge skipped:", _e)
+
 
 # Tier ordering for tier_min comparisons.
 TIER_RANK = {"Prospect": 0, "Silver": 1, "Gold": 2, "Turaif": 3, "Quarantine": -1}
