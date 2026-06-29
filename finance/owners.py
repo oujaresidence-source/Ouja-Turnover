@@ -94,7 +94,15 @@ def terms_on(apt, d, registry_rec=None):
         if best.get("mgmt_pct") is not None:
             base["mgmt_pct"] = best["mgmt_pct"]
         if best.get("cleaning"):
-            base["cleaning"] = best["cleaning"]
+            # per-month cleaning overrides live on the registry record (the single
+            # source, written by «نظافة بالشهر»). An effective-dated term replaces
+            # the base type/amount but must NOT wipe a month-specific override —
+            # carry it across unless the term defines its own overrides.
+            bc = dict(best["cleaning"])
+            reg_ov = (rec.get("cleaning") or {}).get("overrides")
+            if reg_ov and not bc.get("overrides"):
+                bc["overrides"] = dict(reg_ov)
+            base["cleaning"] = bc
     return base
 
 

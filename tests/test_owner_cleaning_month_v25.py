@@ -123,6 +123,48 @@ class PerMonthCleaningTest(unittest.TestCase):
         self.assertEqual(apr["cleaning"]["total"], 1000.0)
 
 
+class PerMonthCleaningWithTermTest(unittest.TestCase):
+    """Regression: a per-month override must win even when an EFFECTIVE-DATED
+    terms change carries its own cleaning block. The owner's L-07 has a term
+    (2026-04-01 → 15% / owner-paid / 1,250). Editing «نظافة بالشهر» to 1,300 for
+    2026-04 saved the override on the registry record, but terms_on replaced the
+    registry cleaning (with overrides) by the term's cleaning (no overrides), so
+    the statement kept showing 1,250."""
+
+    def setUp(self):
+        OW._terms_cache["v"] = None
+        bot._save_json("owner_terms.json", {"owners": {}, "units": {}, "versions": []})
+        bot._owner_registry.clear()
+        bot._owner_registry[bot._owner_key("L-07")] = {
+            "apartment": "L-07", "owner": "احمد الصغير", "mgmt_pct": 15.0, "lid": 7001,
+            "cleaning": {"type": "owner", "amount": 1250.0}}
+        self._patches = (bot.fetch_reservations_window, bot.get_listings_map)
+        bot.fetch_reservations_window = lambda s, e, pad_days=45: []   # isolate cleaning math
+        bot.get_listings_map = lambda: {7001: "شقة 7 - الماجديه"}
+        bot._expenses.clear()
+        bot._owner_portal_cache.clear()
+        # effective-dated term that carries its own cleaning (no overrides)
+        OW.unit_terms_set(_FakeReq(), {"apartment": "L-07", "from": "2026-04-01",
+                                     "mgmt_pct": 15.0,
+                                     "cleaning": {"type": "owner", "amount": 1250.0}})
+        OW._terms_cache["v"] = None
+        bot._owner_portal_cache.clear()
+
+    def tearDown(self):
+        bot.fetch_reservations_window, bot.get_listings_map = self._patches
+        OW._terms_cache["v"] = None
+
+    def test_override_wins_over_term_cleaning(self):
+        data, status = OW.unit_cleaning_month_set(
+            _FakeReq(), {"apartment": "L-07", "month": "2026-04", "amount": 1300})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["overrides"]["2026-04"], 1300.0)
+        OW._terms_cache["v"] = None
+        bot._owner_portal_cache.clear()
+        apr = OW.compute_owner_statement("احمد الصغير", "2026-04")
+        self.assertEqual(apr["cleaning"]["total"], 1300.0)   # was 1250 (term base)
+
+
 class CleaningMonthEndpointTest(unittest.TestCase):
     def setUp(self):
         OW._terms_cache["v"] = None
