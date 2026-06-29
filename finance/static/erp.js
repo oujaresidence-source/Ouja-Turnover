@@ -224,6 +224,11 @@
       om_terms_btn: 'تعديل الشروط', om_terms_title: 'تغيير بتاريخ سريان',
       om_terms_from: 'يسري من تاريخ', om_terms_hint: 'التغيير ما يلمس الشهور الماضية — كل شهر يقرأ الشروط اللي كانت سارية فيه',
       om_terms_save: 'حفظ التغيير', om_terms_saved: 'انحفظ — يسري من {d}',
+      om_clm_btn: 'نظافة بالشهر', om_clm_title: 'مبلغ نظافة مختلف لكل شهر',
+      om_clm_hint: 'حدّد للنظافة مبلغ خاص لشهر معيّن — باقي الشهور تستخدم المبلغ الأساسي. مفيد لو النظافة تختلف من شهر لشهر.',
+      om_clm_needs_owner: 'النظافة على عوجا لهالوحدة — خلِّها «يدفعها المالك» أول عشان تقدر تخصص مبلغ شهري.',
+      om_clm_month: 'الشهر', om_clm_save: 'حفظ مبلغ الشهر', om_clm_clear: 'رجّعه للمبلغ الأساسي',
+      om_clm_saved: 'انحفظ مبلغ نظافة {m}', om_clm_cleared: 'رجع شهر {m} للمبلغ الأساسي',
       om_remove_btn: 'إنهاء العقد', om_remove_title: 'إنهاء عقد الشقة',
       om_remove_hint: 'إزالة ناعمة: الشهور الماضية تظل تنحسب — والشهور بعد التاريخ تستبعدها',
       om_reason: 'السبب (إلزامي)…', om_remove_do: 'تأكيد الإنهاء', om_removed: 'انتهى العقد',
@@ -518,6 +523,11 @@
       om_terms_btn: 'Change terms', om_terms_title: 'Effective-dated change',
       om_terms_from: 'Effective from', om_terms_hint: 'Past months are untouched — each month reads the terms that were active then',
       om_terms_save: 'Save change', om_terms_saved: 'Saved — effective {d}',
+      om_clm_btn: 'Monthly cleaning', om_clm_title: 'A different cleaning amount per month',
+      om_clm_hint: 'Set a custom cleaning amount for a specific month — other months use the base amount. Handy when cleaning varies month to month.',
+      om_clm_needs_owner: 'Cleaning is on Ouja for this unit — set it to «owner pays» first to set a monthly amount.',
+      om_clm_month: 'Month', om_clm_save: 'Save month amount', om_clm_clear: 'Reset to base amount',
+      om_clm_saved: 'Saved cleaning for {m}', om_clm_cleared: 'Reset {m} to the base amount',
       om_remove_btn: 'End contract', om_remove_title: 'End this apartment’s contract',
       om_remove_hint: 'Soft removal: past months keep computing — months after the date exclude it',
       om_reason: 'Reason (required)…', om_remove_do: 'Confirm end', om_removed: 'Contract ended',
@@ -2160,6 +2170,29 @@
         loadProfile((((store.D.profile || store.D.manage || {})).owner) || '', prUI.unit);
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
+    else if (act === 'om-clmonth-save') {
+      var rowC = el.closest('.wq-row');
+      var clM = rowC.querySelector('.om-clm-month').value;
+      var clA = rowC.querySelector('.om-clm-amt').value;
+      if (!clM) { rowC.querySelector('.om-clm-month').classList.add('need'); return; }
+      if (clA === '' || clA == null) { rowC.querySelector('.om-clm-amt').classList.add('need'); rowC.querySelector('.om-clm-amt').focus(); return; }
+      el.disabled = true;
+      api('/erp/api/owners/unit-cleaning-month', { method: 'POST', body: {
+        apartment: el.getAttribute('data-apt'), month: clM, amount: Number(clA)
+      } }).then(function () {
+        toast(t('om_clm_saved').replace('{m}', clM));
+        loadProfile((((store.D.profile || store.D.manage || {})).owner) || '', prUI.unit);
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'om-clmonth-clear') {
+      el.disabled = true;
+      api('/erp/api/owners/unit-cleaning-month', { method: 'POST', body: {
+        apartment: el.getAttribute('data-apt'), month: el.getAttribute('data-m'), clear: true
+      } }).then(function () {
+        toast(t('om_clm_cleared').replace('{m}', el.getAttribute('data-m')), 'warn');
+        loadProfile((((store.D.profile || store.D.manage || {})).owner) || '', prUI.unit);
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
     else if (act === 'om-remove-do') {
       var rowR = el.closest('.wq-row');
       var toD = rowR.querySelector('.om-r-to').value;
@@ -3679,6 +3712,13 @@
         (x.mgmt_pct != null ? (t('om_mgmt') + ' ' + x.mgmt_pct + '%') : '') +
         (x.cleaning ? (' · ' + clTxt(x.cleaning)) : '') + '</div>';
     }).join('');
+    var clOv = ((u.cleaning || {}).overrides) || {};
+    var clOvKeys = Object.keys(clOv).sort();
+    var clOvChips = clOvKeys.map(function (m) {
+      return '<span class="tag" style="margin:2px 4px 2px 0">' + esc(m) + ': <code>' + fmtAmt(clOv[m]) + '</code> ' +
+        '<button class="btn danger-ghost xs" style="padding:0 6px;margin-inline-start:4px" data-act="om-clmonth-clear" data-apt="' + esc(u.apartment) + '" data-m="' + esc(m) + '" title="' + esc(t('om_clm_clear')) + '">✕</button></span>';
+    }).join('');
+    var clIsOwner = (u.cleaning_now || {}).type === 'owner';
     return '<div class="wq-row" data-apt="' + esc(u.apartment) + '">' +
       '<div class="wq-main"><div class="wq-top"><b>' + esc(u.apartment) + '</b>' +
       '<span class="tag soft">' + esc(u.listing || '') + '</span>' +
@@ -3699,6 +3739,17 @@
         '</div><input class="in om-t-reason" placeholder="' + esc(t('om_reason')) + '">' +
         '<button class="btn primary sm" data-act="om-terms-save" data-apt="' + esc(u.apartment) + '">' + esc(t('om_terms_save')) + '</button>' +
       '</div>' +
+      /* per-month cleaning form */
+      '<div class="om-form" data-form="clmonth" hidden>' +
+        '<b>' + esc(t('om_clm_title')) + '</b><div class="grp-hint" style="padding:0">' + esc(t('om_clm_hint')) + '</div>' +
+        (clIsOwner ? '' : '<div class="wq-sub" style="color:var(--warn,#B88935)">' + esc(t('om_clm_needs_owner')) + '</div>') +
+        (clOvChips ? ('<div class="wq-sub" style="margin:6px 0">' + clOvChips + '</div>') : '') +
+        '<div class="om-grid">' +
+        '<label>' + esc(t('om_clm_month')) + '<input type="month" class="in om-clm-month"></label>' +
+        '<label>' + esc(t('om_cl_amount')) + '<input type="number" step="1" min="0" class="in om-clm-amt" placeholder="' + ((u.cleaning_now || {}).amount || 0) + '"></label>' +
+        '</div>' +
+        '<button class="btn primary sm"' + (clIsOwner ? '' : ' disabled') + ' data-act="om-clmonth-save" data-apt="' + esc(u.apartment) + '">' + esc(t('om_clm_save')) + '</button>' +
+      '</div>' +
       /* remove form */
       '<div class="om-form" data-form="remove" hidden>' +
         '<b>' + esc(t('om_remove_title')) + '</b><div class="grp-hint" style="padding:0">' + esc(t('om_remove_hint')) + '</div>' +
@@ -3710,6 +3761,7 @@
       '</div></div>' +
       '<div class="wq-actions">' +
       '<button class="btn ghost xs" data-act="om-toggle-form" data-form="terms">' + esc(t('om_terms_btn')) + '</button>' +
+      '<button class="btn ghost xs" data-act="om-toggle-form" data-form="clmonth">' + esc(t('om_clm_btn')) + (clOvKeys.length ? (' <code>' + clOvKeys.length + '</code>') : '') + '</button>' +
       '<button class="btn danger-ghost xs" data-act="om-toggle-form" data-form="remove">' + esc(t('om_remove_btn')) + '</button>' +
       '</div></div>';
   }

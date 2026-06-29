@@ -514,6 +514,11 @@ async def _h_api_unit_terms(request):
     return api.jres(data, status)
 
 
+async def _h_api_unit_cleaning_month(request):
+    data, status = OW.unit_cleaning_month_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
 async def _h_api_owner_listings_search(request):
     return api.jres(OW.listings_search(request.query.get("q") or ""))
 
@@ -793,6 +798,7 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/unit-add", _guarded(_h_api_unit_add, write=True))
     app.router.add_post("/erp/api/owners/unit-remove", _guarded(_h_api_unit_remove, write=True))
     app.router.add_post("/erp/api/owners/unit-terms", _guarded(_h_api_unit_terms, write=True))
+    app.router.add_post("/erp/api/owners/unit-cleaning-month", _guarded(_h_api_unit_cleaning_month, write=True))
     app.router.add_get("/erp/api/owners/listings-search", _guarded(_h_api_owner_listings_search))
     app.router.add_get("/erp/api/owners/statement", _guarded(_h_api_stmt_get))
     app.router.add_post("/erp/api/owners/statement/edit", _guarded(_h_api_stmt_edit, write=True))

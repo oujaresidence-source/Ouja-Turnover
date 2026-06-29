@@ -25138,6 +25138,31 @@ def _owner_lids(owner, listings):
             out.append(lid)
     return out
 
+def _owner_info_by_lid(lid, listings=None):
+    """The registry record whose resolved Hostaway listing id == lid. Used when the
+    listing NAME can't be matched to a registry code (e.g. listing «شقة 7 - الماجديه»
+    carries no «L-07» token), so `_owner_info(name)` returns None and the management %
+    / cleaning policy would silently default — the رسوم-عوجا-=-0 bug. Explicit lid
+    overrides win; otherwise fall back to the same normalized auto-match `_owner_lids`
+    uses, so a unit resolves identically whichever direction we come from."""
+    if lid is None:
+        return None
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return None
+    listings = listings if listings is not None else (get_listings_map() or {})
+    for rec in _owner_registry.values():                  # explicit lid override first
+        try:
+            if rec.get("lid") is not None and int(rec["lid"]) == lid:
+                return rec
+        except (TypeError, ValueError):
+            pass
+    for rec in _owner_registry.values():                  # else normalized name auto-match
+        if rec.get("lid") is None and _owner_resolve_lid(rec, listings) == lid:
+            return rec
+    return None
+
 def _finance_in_period(row, start, end, basis):
     d = _parse_date(row.get("checkin" if basis == "checkin" else "checkout"))
     return d is not None and start <= d <= end
@@ -25160,6 +25185,37 @@ def _direct_fee_calc(gross, refund=0.0, pct=3.0):
     return {"base": float(base), "pct": float(p), "fee": float(fee),
             "net": float((base - fee).quantize(TWO, rounding=ROUND_HALF_UP)),
             "source_fields": "totalPrice − refundAmount"}
+
+def _cleaning_month_amount(cl, y, m):
+    """Owner-paid cleaning for one calendar month. type!='owner' → 0 (Ouja absorbs it).
+    Else the explicit per-month override for that 'YYYY-MM' if the owner set one (0 is a
+    valid override = free that month), otherwise the unit's base monthly amount. This is
+    what lets the cleaning fee differ month-to-month instead of one fixed value."""
+    cl = cl or {}
+    if cl.get("type") != "owner":
+        return 0.0
+    key = "%04d-%02d" % (y, m)
+    ov = cl.get("overrides") or {}
+    val = ov[key] if key in ov else cl.get("amount")
+    try:
+        return float(val or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+def _cleaning_total_window(cl, start, end):
+    """Sum owner-paid cleaning across every calendar month touched by [start,end], using
+    per-month overrides. Returns (total, [{m:'YYYY-MM', amount}]). Whole-month basis — the
+    range report doesn't pro-rate; the monthly statement pro-rates the single month itself."""
+    total = 0.0; per = []
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        amt = _cleaning_month_amount(cl, y, m)
+        per.append({"m": "%04d-%02d" % (y, m), "amount": round(amt, 2)})
+        total += amt
+        m += 1
+        if m > 12:
+            m = 1; y += 1
+    return round(total, 2), per
 
 def compute_owner_report(reservations, expenses, start, end, management_pct, settings=None, cleaning=None):
     """EXACT money math for one apartment/owner over [start, end] (item 13) + the
@@ -25279,11 +25335,12 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
     exp_lines = [e for e in expenses if e.get("matched")
                  and _finance_in_period({"checkin": e.get("date"), "checkout": e.get("date")}, start, end, "checkin")]
     expenses_total = sum(float(e.get("amount") or 0) for e in exp_lines)
-    # cleaning fee: owner-pays → a FLAT MONTHLY amount × number of months in the period
-    # (CONFIRMED by Faisal: it's monthly, not per-turnover); 'ours' → 0
+    # cleaning fee: owner-pays → a MONTHLY amount, summed over each month in the period
+    # (CONFIRMED by Faisal: it's monthly, not per-turnover); 'ours' → 0. Each month can
+    # carry its OWN amount via per-month overrides (default = the unit's base amount).
     cl = cleaning or {"type": "ours", "amount": 0}
     months = max(1, (end.year - start.year) * 12 + (end.month - start.month) + 1)
-    cleaning_total = (float(cl.get("amount") or 0) * months) if (cl.get("type") == "owner") else 0.0
+    cleaning_total, cleaning_per_month = _cleaning_total_window(cl, start, end)
     owner_net = total_income - ouja_fee - expenses_total - cleaning_total
 
     # ---- reconciliation (item 14): totals must equal the sum of the rows, to the riyal ----
@@ -25310,7 +25367,8 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         "total_income": R(total_income), "management_pct": float(management_pct),
         "ouja_fee": R(ouja_fee), "expenses": R(expenses_total), "owner_net": R(owner_net),
         "cleaning": {"type": cl.get("type", "ours"), "amount": R(float(cl.get("amount") or 0)),
-                     "months": months, "total": R(cleaning_total)},
+                     "months": months, "total": R(cleaning_total),
+                     "overrides": dict(cl.get("overrides") or {}), "per_month": cleaning_per_month},
         "counts": {"reservations": len(resv_lines), "expenses": len(exp_lines),
                    "unpaid": len(unpaid_lines), "refunded": len(refunded_lines)},
         "excluded_summary": excluded_summary,
@@ -25569,6 +25627,12 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
     listings = get_listings_map() or {}
     aptname = (listings.get(lid) if lid is not None else None)
     info = _owner_info(aptname) if aptname else None
+    # Name-match can fail when the Hostaway listing name doesn't carry the registry
+    # code (e.g. «شقة 7 - الماجديه» has no «L-07»). Resolve owner terms by listing id
+    # so the management % / cleaning policy never silently fall back to 0/ours — this
+    # is the fix for the «رسوم عوجا = صفر» owner-statement bug (range report + الكشف).
+    if lid is not None and (info is None or info.get("mgmt_pct") is None):
+        info = _owner_info_by_lid(lid, listings) or info
     if (not management_pct) and info and info.get("mgmt_pct") is not None:
         management_pct = info["mgmt_pct"]
     if cleaning is None:

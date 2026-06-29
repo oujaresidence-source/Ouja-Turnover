@@ -300,6 +300,50 @@ def unit_terms_set(request, body):
     return {"ok": True, "terms": terms}, 200
 
 
+def unit_cleaning_month_set(request, body):
+    """Set (or clear) the cleaning amount for ONE specific month on a unit — lets the
+    owner give each month a different cleaning value instead of one fixed amount. Writes
+    cleaning.overrides = {'YYYY-MM': amount} on the registry record. Pass clear:true (or
+    an empty amount) to drop a month back to the unit's base amount."""
+    B = _B()
+    apt = (body.get("apartment") or "").strip()
+    k = B._owner_key(apt)
+    rec = B._owner_registry.get(k)
+    if not rec:
+        return {"error": "apartment_not_found"}, 404
+    month = (body.get("month") or "").strip()[:7]
+    if not (len(month) == 7 and month[4] == "-" and month[:4].isdigit() and month[5:].isdigit()
+            and 1 <= int(month[5:]) <= 12):
+        return {"error": "bad_month",
+                "message_ar": "حدد الشهر بصيغة YYYY-MM.", "message_en": "Month must be YYYY-MM."}, 400
+    cl = dict(rec.get("cleaning") or {"type": "ours", "amount": 0})
+    if cl.get("type") != "owner":
+        return {"error": "not_owner_paid",
+                "message_ar": "النظافة على عوجا لهالوحدة — خلِّها «على المالك» أول.",
+                "message_en": "Cleaning is on Ouja for this unit — set it to «owner-paid» first."}, 400
+    overrides = dict(cl.get("overrides") or {})
+    before = dict(overrides)
+    clear = bool(body.get("clear")) or body.get("amount") in (None, "")
+    if clear:
+        overrides.pop(month, None)
+    else:
+        try:
+            overrides[month] = round(float(body.get("amount")), 2)
+        except (TypeError, ValueError):
+            return {"error": "bad_amount"}, 400
+    if overrides:
+        cl["overrides"] = overrides
+    else:
+        cl.pop("overrides", None)
+    rec = dict(rec); rec["cleaning"] = cl
+    B._owner_registry[k] = rec
+    B._save_json("owner_registry.json", B._owner_registry)
+    terms_version_add(api.actor(request), "cleaning_month", (rec.get("owner") or "") + " / " + apt,
+                      before, overrides, (body.get("reason") or month))
+    _invalidate_owner_cache(rec.get("owner") or "")
+    return {"ok": True, "apartment": apt, "cleaning": cl, "overrides": overrides}, 200
+
+
 def listings_search(q):
     """Search the listings store for the add-apartment picker."""
     B = _B()
@@ -425,9 +469,12 @@ def unit_statement(rec, mkey, force_rederive=False):
     days_in_month = (end - start).days + 1
     covered = max(0, (win_e - win_s).days + 1) if win_e >= win_s else 0
     cl_now = terms_on(apt, win_s if win_e >= win_s else start, rec).get("cleaning") or {}
+    # per-month override: this exact month may carry its own cleaning amount
+    _cl_ov = cl_now.get("overrides") or {}
+    cl_month_amt = _cl_ov[mkey] if mkey in _cl_ov else cl_now.get("amount")
     cleaning_total = Decimal(0)
     if cl_now.get("type") == "owner" and covered:
-        cleaning_total = (_D(cl_now.get("amount")) * Decimal(covered) / Decimal(days_in_month)
+        cleaning_total = (_D(cl_month_amt) * Decimal(covered) / Decimal(days_in_month)
                           ).quantize(TWO, rounding=ROUND_HALF_UP)
         if covered < days_in_month:
             footnotes.append({"apartment": apt, "kind": "cleaning_prorated",
@@ -450,7 +497,9 @@ def unit_statement(rec, mkey, force_rederive=False):
     out["total_income"] = _fnum(income + manual)
     out["ouja_fee"] = _fnum(fee)
     out["expenses"] = _fnum(exp_total)
-    out["cleaning"] = {"type": cl_now.get("type", "ours"), "amount": _fnum(cl_now.get("amount") or 0),
+    out["cleaning"] = {"type": cl_now.get("type", "ours"), "amount": _fnum(cl_month_amt or 0),
+                       "base_amount": _fnum(cl_now.get("amount") or 0),
+                       "overridden": mkey in _cl_ov,
                        "months": 1, "total": _fnum(cleaning_total),
                        "prorated_days": (covered if covered < days_in_month else None)}
     out["owner_net"] = _fnum(income + manual - fee - exp_total - cleaning_total)
