@@ -1,21 +1,25 @@
+# -*- coding: utf-8 -*-
 """
-brain.gap_routes — aiohttp handlers for the Weekday-Gap Engine screen (/api/brain/gaps*).
+brain.gap_routes — aiohttp handlers for the Elite v5 "Brain" screen (/api/brain/gaps*).
 
-READ-ONLY against the business: the list endpoint computes live gaps + cards and overlays each
-agent's claim/snooze/sent state from gap_actions; nothing here messages a guest. The heavier work
-(building cards = a live calendar pull; re-tiering = many reservation windows) runs in a thread
-executor so it never blocks the bot's single event loop.
+READ-ONLY against the business: the list endpoint computes today's ranked pushes + the 20-campaign
+catalogue from the live grid + member base; NOTHING here messages a guest. Campaigns are pushed
+MANUALLY through Karzoun → WhatsApp. The one write is the fatigue log: when an agent exports a
+campaign's send list (the handoff to Karzoun), we record it in contact_log so the ≤1-msg/guest/7d
+and never-the-same-campaign-within-14d guardrails hold across days. Kill-on-book is free: the
+audience is recomputed live, so anyone who books drops out instantly.
 
-Kill-on-book is free: cards are recomputed from the live grid every load, so a card vanishes the
-instant Hostaway shows its night booked.
+The heavy work (live calendar pull, re-tiering many reservation windows) runs in a thread executor
+so it never blocks the bot's single event loop.
 """
 
 import asyncio
 import json
 import traceback
-from . import db, settings, cards, retier
+from datetime import date
+from . import db, settings, cards, retier, playbook, triggers
 from .host import HOST
-from .util import now_iso, today_iso, now_dt
+from .util import now_iso, today_iso
 
 
 def _guard(request):
@@ -44,167 +48,137 @@ async def _body(request):
 
 
 async def _in_thread(fn, *a):
-    """Run a blocking host/DB call off the event loop."""
     return await asyncio.get_event_loop().run_in_executor(None, fn, *a)
 
 
-def _actions_map():
-    rows = db.q("SELECT * FROM gap_actions")
-    return {r["card_key"]: dict(r) for r in rows}
-
-
 # --------------------------- reads ---------------------------
-
-def _build_payload(show_snoozed):
-    out = cards.build_cards()
-    acts = _actions_map()
-    now = now_dt().isoformat(timespec="seconds")
-    visible = []
-    for c in out.get("cards", []):
-        a = acts.get(c.get("card_key")) or {}
-        c["claimed_by"] = a.get("claimed_by")
-        c["claimed_at"] = a.get("claimed_at")
-        c["sent_at"] = a.get("sent_at")
-        c["sent_by"] = a.get("sent_by")
-        c["sent_count"] = a.get("sent_count") or 0
-        snz = a.get("snoozed_until")
-        c["snoozed"] = bool(snz and snz > now)
-        if c["snoozed"] and not show_snoozed:
-            continue
-        visible.append(c)
-    out["cards"] = visible
-    # refresh the summary to reflect what's actually shown
-    out["summary"]["card_count"] = len(visible)
-    out["summary"]["p1_count"] = len([c for c in visible if c.get("priority_num") == 1])
-    return out
-
 
 async def api_gaps(request):
     g = _guard(request)
     if g:
         return g
-    show_snoozed = request.query.get("snoozed") in ("1", "true", "yes")
-    payload = await _in_thread(_build_payload, show_snoozed)
+    payload = await _in_thread(cards.build_cards)
     return HOST.json_response({"ok": True, **payload})
 
 
 async def api_conversion(request):
+    """Per-campaign handoff counts (how many guests were exported to Karzoun) + any attributed
+    bookings. Read-only learning surface; no live data is needed."""
     g = _guard(request)
     if g:
         return g
-    # per-campaign: how many cards were sent, and any attributed bookings/revenue
-    sent = {r["campaign"]: {"sent_cards": r["c"], "sent_targets": r["t"] or 0}
-            for r in db.q("SELECT campaign, COUNT(*) c, SUM(sent_count) t FROM gap_actions "
-                          "WHERE sent_at IS NOT NULL GROUP BY campaign")}
+    sent = {r["campaign_code"]: {"handed_off": r["c"]}
+            for r in db.q("SELECT campaign_code, COUNT(*) c FROM contact_log GROUP BY campaign_code")}
     for r in db.q("SELECT campaign_code, COUNT(*) c, SUM(revenue) rev FROM attributions GROUP BY campaign_code"):
-        row = sent.setdefault(r["campaign_code"], {"sent_cards": 0, "sent_targets": 0})
+        row = sent.setdefault(r["campaign_code"], {"handed_off": 0})
         row["bookings"] = r["c"]
         row["revenue"] = round(r["rev"] or 0)
     return HOST.json_response({"ok": True, "conversion": sent})
 
 
-# --------------------------- actions (writes) ---------------------------
+async def api_calendar(request):
+    """The editable Saudi trigger calendar (holiday dates resolved for the year + per-campaign
+    trigger rules)."""
+    g = _guard(request)
+    if g:
+        return g
+    try:
+        yr = int(request.query.get("year") or today_iso()[:4])
+    except (ValueError, TypeError):
+        yr = date.today().year
+    overrides = cards._holiday_overrides()
+    return HOST.json_response({"ok": True, "calendar": triggers.calendar_table(yr, overrides)})
 
-def _upsert(card_key, fields, meta=None):
-    """Insert-or-update a gap_actions row, setting `fields` (dict). meta carries date/lid/unit/
-    campaign on first touch so the row is self-describing."""
+
+# --------------------------- writes (settings / handoff log) ---------------------------
+
+async def api_assumptions(request):
+    """GET current assumptions; POST {click_through_pct, click_to_book_pct} to edit them. These
+    flow straight into the conversion math + Y on the next load."""
+    g = _guard(request)
+    if g:
+        return g
+    if request.method == "POST":
+        d = await _body(request)
+        if "click_through_pct" in d:
+            settings.set_value("assume_click_through_pct", d.get("click_through_pct"))
+        if "click_to_book_pct" in d:
+            settings.set_value("assume_click_to_book_pct", d.get("click_to_book_pct"))
+        db.audit("dashboard", "gap_assumptions_set",
+                 {"ct": settings.get_int("assume_click_through_pct"),
+                  "cb": settings.get_int("assume_click_to_book_pct")})
+    return HOST.json_response({"ok": True, "assumptions": cards._assumptions_from_settings()})
+
+
+async def api_holidays(request):
+    """POST {holidays: {NAME: 'YYYY-MM-DD', ...}} to override exact Saudi holiday dates."""
+    g = _guard(request)
+    if g:
+        return g
+    d = await _body(request)
+    hol = d.get("holidays")
+    if isinstance(hol, dict):
+        settings.set_value("gap_holidays", json.dumps(hol, ensure_ascii=False))
+        db.audit("dashboard", "gap_holidays_set", {"keys": sorted(hol.keys())})
+    return HOST.json_response({"ok": True, "holidays": cards._holiday_overrides()})
+
+
+def _log_handoff(code, audience):
+    """Record a manual Karzoun handoff so the fatigue guardrails hold across days. Inserts one
+    contact_log row per member (status 'queued'); the dashboard itself never sends anything."""
+    if not audience:
+        return 0
     db.init_db()
-    meta = meta or {}
-    existing = db.q1("SELECT card_key FROM gap_actions WHERE card_key=?", (card_key,))
-    now = now_iso()
-    if not existing:
-        db.execute("INSERT INTO gap_actions(card_key, date, lid, unit, campaign, updated_at) "
-                   "VALUES(?,?,?,?,?,?)",
-                   (card_key, meta.get("date") or today_iso(), meta.get("lid"), meta.get("unit"),
-                    meta.get("campaign"), now))
-    sets = ", ".join("%s=?" % k for k in fields) + ", updated_at=?"
-    db.execute("UPDATE gap_actions SET %s WHERE card_key=?" % sets,
-               tuple(list(fields.values()) + [now, card_key]))
-
-
-async def api_claim(request):
-    g = _guard(request)
-    if g:
-        return g
-    d = await _body(request)
-    key = (d.get("card_key") or "").strip()
-    agent = (d.get("agent") or "agent").strip()
-    if not key:
-        return HOST.json_response({"ok": False, "error": "no_card_key"}, 400)
-    row = db.q1("SELECT claimed_by FROM gap_actions WHERE card_key=?", (key,))
-    if row and row["claimed_by"] and row["claimed_by"] != agent:
-        # one agent owns a card (dedup / no double-send) — refuse a second claim
-        return HOST.json_response({"ok": False, "error": "already_claimed", "by": row["claimed_by"]}, 200)
-    _upsert(key, {"claimed_by": agent, "claimed_at": now_iso()},
-            meta={"date": d.get("date"), "lid": d.get("lid"), "unit": d.get("unit"),
-                  "campaign": d.get("campaign")})
-    db.audit(agent, "gap_claim", {"card_key": key})
-    return HOST.json_response({"ok": True, "claimed_by": agent})
-
-
-async def api_snooze(request):
-    g = _guard(request)
-    if g:
-        return g
-    d = await _body(request)
-    key = (d.get("card_key") or "").strip()
-    if not key:
-        return HOST.json_response({"ok": False, "error": "no_card_key"}, 400)
-    from datetime import timedelta
-    hours = int(d.get("hours") or 6)
-    until = (now_dt() + timedelta(hours=hours)).isoformat(timespec="seconds")
-    _upsert(key, {"snoozed_until": until},
-            meta={"date": d.get("date"), "lid": d.get("lid"), "unit": d.get("unit"),
-                  "campaign": d.get("campaign")})
-    db.audit("dashboard", "gap_snooze", {"card_key": key, "until": until})
-    return HOST.json_response({"ok": True, "snoozed_until": until})
-
-
-async def api_sent(request):
-    """Mark a card as sent (agent logs that they pushed the message). Records the send for the
-    Governor + the per-campaign conversion learning. Does NOT itself message anyone."""
-    g = _guard(request)
-    if g:
-        return g
-    d = await _body(request)
-    key = (d.get("card_key") or "").strip()
-    agent = (d.get("agent") or "agent").strip()
-    count = int(d.get("count") or 0)
-    if not key:
-        return HOST.json_response({"ok": False, "error": "no_card_key"}, 400)
-    _upsert(key, {"sent_by": agent, "sent_at": now_iso(), "sent_count": count,
-                  "claimed_by": agent, "claimed_at": now_iso()},
-            meta={"date": d.get("date"), "lid": d.get("lid"), "unit": d.get("unit"),
-                  "campaign": d.get("campaign")})
-    db.audit(agent, "gap_sent", {"card_key": key, "count": count})
-    return HOST.json_response({"ok": True})
+    sent_at = now_iso()
+    db.executemany(
+        "INSERT INTO contact_log(member_id, campaign_code, sent_at, status, replied) "
+        "VALUES(?,?,?,?,0)",
+        [(m.get("id"), code, sent_at, "queued") for m in audience if m.get("id")])
+    ids = [m.get("id") for m in audience if m.get("id")]
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        db.execute("UPDATE members SET last_contacted=? WHERE id IN (%s)" % marks,
+                   tuple([sent_at] + ids))
+    db.audit("dashboard", "gap_handoff", {"campaign": code, "count": len(ids)})
+    return len(ids)
 
 
 async def api_export(request):
-    """Download the current cards' targets as a today-first send-list CSV (change 3)."""
+    """Download one campaign's segment as a send list (first_name, phone, tier, campaign, language)
+    — deduped, opt-out + fatigue + kill-on-book filtered — and log the handoff for the fatigue cap."""
     g = _guard(request)
     if g:
         return g
-    payload = await _in_thread(_build_payload, False)
-    filename, text = cards.build_today_csv(payload)
+    code = (request.query.get("campaign") or "").strip()
+    lang = "en" if (request.query.get("lang") == "en") else "ar"
+    if code not in playbook.CAMPAIGNS:
+        return HOST.json_response({"ok": False, "error": "unknown_campaign"}, 400)
+
+    def work():
+        guests = cards.load_guests()
+        aud = cards.segment_audience(code, guests)
+        fn, text = cards.build_send_list_csv(code, guests, lang)
+        _log_handoff(code, aud)
+        return fn, text
+
+    filename, text = await _in_thread(work)
     return HOST.web.Response(text=text, content_type="text/csv", charset="utf-8",
                             headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
 
 
 async def api_templates_export(request):
-    """Download ALL 20 campaigns (both languages + both utility variants, ~44 rows) as the
-    Meta/Karzoun one-time template-submission CSV. Static catalogue — no live data needed."""
+    """Download ALL 20 campaigns × both languages (40 rows) as the Meta/Karzoun one-time
+    template-submission CSV. Static catalogue — variables left as {{1}}."""
     g = _guard(request)
     if g:
         return g
-    from . import playbook
     filename, text = playbook.build_templates_csv()
     return HOST.web.Response(text=text, content_type="text/csv", charset="utf-8",
                             headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
 
 
 async def api_retier(request):
-    """Rebuild the member base from realized Hostaway stays (build spec §1). Runs in a thread."""
+    """Rebuild the member base from realized Hostaway stays. Runs in a thread."""
     g = _guard(request)
     if g:
         return g
@@ -216,9 +190,10 @@ async def api_retier(request):
 def register(app):
     app.router.add_get("/api/brain/gaps", _safe(api_gaps))
     app.router.add_get("/api/brain/gaps/conversion", _safe(api_conversion))
+    app.router.add_get("/api/brain/gaps/calendar", _safe(api_calendar))
+    app.router.add_get("/api/brain/gaps/assumptions", _safe(api_assumptions))
+    app.router.add_post("/api/brain/gaps/assumptions", _safe(api_assumptions))
+    app.router.add_post("/api/brain/gaps/holidays", _safe(api_holidays))
     app.router.add_get("/api/brain/gaps/export", api_export)
     app.router.add_get("/api/brain/gaps/templates-export", api_templates_export)
-    app.router.add_post("/api/brain/gaps/claim", _safe(api_claim))
-    app.router.add_post("/api/brain/gaps/snooze", _safe(api_snooze))
-    app.router.add_post("/api/brain/gaps/sent", _safe(api_sent))
     app.router.add_post("/api/brain/gaps/retier", _safe(api_retier))

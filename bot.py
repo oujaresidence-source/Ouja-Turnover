@@ -13919,11 +13919,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <section class="view" id="view_gaps">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_gaps">فجوات منتصف الأسبوع</div>
-            <div class="page-sub" id="t_gaps_sub">كل ليلة فاضية أحد–أربعاء في الأسبوع الجاي: أي حملة ندفع، وليش، ولمين — والرسالة جاهزة. نهايات الأسبوع ما نلمسها.</div>
+            <div class="page-title" id="t_gaps">أوجا برين — توصية اليوم</div>
+            <div class="page-sub" id="t_gaps_sub">متى ننشر، أي حملة، لأي شريحة، وكم شقة نتوقع نعمّرها — حسب التقويم والإشغال. الإرسال يدوي عبر كرزون؛ اللوحة ما ترسل شي.</div>
           </div>
           <div class="page-tools">
-            <button class="btn ghost sm" onclick="gapsCsv()" id="gapsCsvBtn" title="تحميل قائمة الإرسال">⬇ <span id="t_gaps_csv">تحميل CSV</span></button>
             <button class="btn ghost sm" onclick="gapsTemplates()" id="gapsTplBtn" title="تصدير قوالب ميتا/كرزون">⬇ <span id="t_gaps_tpl">تصدير القوالب</span></button>
             <button class="btn ghost sm" onclick="gapsRetier()" id="gapsRetierBtn" title="إعادة تصنيف الأعضاء">⟳ <span id="t_gaps_retier">إعادة التصنيف</span></button>
             <button class="btn ghost sm" onclick="loadGaps(true)" title="تحديث">↻</button>
@@ -24142,86 +24141,90 @@ function brnSaveSettings(){ var ar=(L==='ar'); var upd={}; document.querySelecto
   post('/api/brain/settings',{settings:upd}).then(function(r){ _brn.settings=(r&&r.settings)||_brn.settings; _brn.move=null; toast(ar?'تم الحفظ ✓':'Saved ✓'); }); }
 
 /* ============================================================
-   WEEKDAY-GAP ENGINE — daily push cards (data from /api/brain/gaps)
+   OUJA BRAIN — Today's Push (v5, link-driven). Data from /api/brain/gaps.
+   The dashboard only TELLS the human what to do; it never sends a message.
+   Campaigns are pushed manually through Karzoun. No unit or date is ever merged.
    ============================================================ */
-var _gap={data:null,agent:''};
-function gapAgentGet(){ try{ return localStorage.getItem('ouja_gap_agent')||''; }catch(e){ return ''; } }
-function gapAgentSet(v){ _gap.agent=v||''; try{ localStorage.setItem('ouja_gap_agent',_gap.agent); }catch(e){} }
-function gapNeedAgent(){ var ar=(L==='ar'); if(!_gap.agent){ toast(ar?'اكتب اسمك فوق أول':'Set your name up top first'); var el=document.getElementById('gapAgent'); if(el) el.focus(); return true; } return false; }
-function gapMoney(n){ return fmt(Math.round(n||0))+(L==='ar'?' ر.س':' SAR'); }
-function loadGaps(force){ var ti=document.getElementById('t_gaps'); if(ti) ti.textContent=(L==='ar'?'فجوات منتصف الأسبوع':'Weekday Gaps');
+var _gap={data:null};
+function loadGaps(force){ var ti=document.getElementById('t_gaps'); if(ti) ti.textContent=(L==='ar'?'أوجا برين — توصية اليوم':'Ouja Brain — Today’s Push');
   var tt=document.getElementById('t_gaps_tpl'); if(tt) tt.textContent=(L==='ar'?'تصدير القوالب':'Export templates');
-  _gap.agent=gapAgentGet(); var b=document.getElementById('gapsBody'); if(!b) return;
+  var b=document.getElementById('gapsBody'); if(!b) return;
   if(force||!_gap.data){ b.innerHTML='<div class="empty sk">—</div>';
     api('/api/brain/gaps').then(function(r){ if(r&&r.ok===false){ b.innerHTML='<div class="empty">⚠ '+esc(r.error||'')+'</div>'; return; } _gap.data=r||null; gapRender(); }).catch(function(){ b.innerHTML='<div class="empty">⚠</div>'; });
   } else gapRender(); }
-function gapPrioStyle(p){ if(p===1) return 'background:var(--accent-soft);color:var(--accent)'; if(p===2) return 'background:var(--surface-2);color:var(--text-2)'; return 'background:var(--surface-2);color:var(--mut)'; }
-function gapStrip(strip){ var ar=(L==='ar'); if(!strip||!strip.length) return '';
-  var cells=strip.map(function(d){ var we=d.weekend; var bg=we?'background:var(--surface-2);opacity:.6':'background:var(--surface)';
+function gapCampByCode(code){ var cs=(_gap.data&&_gap.data.campaigns)||[]; for(var i=0;i<cs.length;i++){ if(cs[i].campaign===code) return cs[i]; } return null; }
+function gapClip(txt,okmsg){ if(navigator.clipboard&&txt){ navigator.clipboard.writeText(txt).then(function(){ toast(okmsg); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+function gapStrip(strip,xUnits){ var ar=(L==='ar'); if(!strip||!strip.length) return '';
+  var cells=strip.map(function(d){ var we=d.weekend; var bg=we?'background:var(--surface-2);opacity:.55':'background:var(--surface)';
     var cnt=we?(ar?'إجازة':'leave'):(d.gaps?('<b style="font-size:18px">'+d.gaps+'</b>'):'<span style="color:var(--mut)">0</span>');
-    return '<div style="flex:1;min-width:64px;text-align:center;border:0.5px solid var(--line);border-radius:10px;padding:9px 6px;'+bg+'"><div class="muted" style="font-size:11px">'+esc(d.label||'')+'</div><div style="margin-top:5px;font-size:13px">'+cnt+'</div></div>'; }).join('');
-  return '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px">'+cells+'</div>'; }
-function gapTargets(c){ var ar=(L==='ar'); var ts=c.targets||[]; if(!ts.length) return '';
-  var rows=ts.slice(0,8).map(function(t){ var reason=ar?(t.reason_ar||''):(t.reason_en||''); return '<div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:0.5px solid var(--line)"><span style="min-width:90px;font-weight:500">'+esc(t.name||'—')+'</span><span class="brn-tier '+esc(t.tier||'')+'">'+esc(t.tier||'')+'</span><span class="muted" style="font-size:12px">'+esc(reason)+'</span></div>'; }).join('');
-  var more=(ts.length>8)?('<div class="muted" style="font-size:11.5px;margin-top:5px">+'+(ts.length-8)+(ar?' غيرهم':' more')+'</div>'):'';
-  return '<div style="margin-top:8px">'+rows+more+'</div>'; }
-function gapCard(c,idx){ var ar=(L==='ar'); var of=c.offer||{};
-  var lock=c.protected?('<span title="'+(ar?'محميّة — ترقية فقط':'protected — upgrade only')+'">🔒 </span>'):'';
-  var name=ar?c.campaign_name_ar:c.campaign_name_en; var dates=(c.gap_dates||[]).join(' – ');
-  var head='<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span class="pill" style="'+gapPrioStyle(c.priority_num)+';font-weight:600">'+esc(c.priority||'')+'</span>'
-    +'<span style="font-size:16px;font-weight:600">'+esc(name||'')+'</span><span class="pill info">'+esc(c.campaign||'')+'</span>'
-    +'<span style="margin-inline-start:auto" class="muted">'+gapMoney(c.at_risk)+(ar?' معرّضة':' at risk')+'</span></div>';
-  var unitline='<div style="margin-top:7px;font-size:14px">'+lock+'<b>'+esc(c.unit||'')+'</b> · '+esc(dates)+' · '+(c.nights||1)+(ar?' ليلة':' nights')+'</div>';
-  var whyline='<div style="margin-top:8px;font-size:13.5px;line-height:1.6;color:var(--text-2)">'+esc(ar?c.why_ar:c.why_en)+'</div>';
-  var deep=of.deep_allowed?(' <span class="muted">· '+(ar?('يُسمح بخصم أعمق لضيف موثوق (≥'+of.deep_min_score+') في ليلة ميتة فقط'):('deeper allowed for a vetted guest (≥'+of.deep_min_score+') on a dead night only'))+'</span>'):'';
-  var offerline='<div style="margin-top:7px;font-size:12.5px;background:var(--surface-2);border-radius:8px;padding:7px 10px">'+esc(ar?of.text_ar:of.text_en)+deep+'</div>';
-  var tcount='<div style="margin-top:11px;font-size:13px;font-weight:500">'+(ar?'الأهداف':'Targets')+': '+(c.target_count||0)+' <span class="muted" style="font-weight:400">'+(ar?'من':'of')+' '+(c.pool_eligible||0)+'</span></div>';
-  var act='';
-  if(c.sent_at){ act='<span class="pill ok">✓ '+(ar?'أُرسلت':'Sent')+(c.sent_by?(' · '+esc(c.sent_by)):'')+(c.sent_count?(' · '+c.sent_count):'')+'</span>'; }
-  else { var claim=c.claimed_by?(c.claimed_by===_gap.agent?('<span class="pill ok">'+(ar?'مستلمة لك':'Yours')+'</span>'):('<span class="pill warn">'+(ar?'محجوزة لـ ':'Claimed · ')+esc(c.claimed_by)+'</span>')):('<button class="btn primary sm" onclick="gapClaim('+idx+')">'+(ar?'استلام':'Claim')+'</button>');
-    act=claim+' <button class="btn ghost sm" onclick="gapCopy('+idx+')">⧉ '+(ar?'نسخ الرسالة':'Copy message')+'</button>'
-      +' <button class="btn ghost sm" onclick="gapSent('+idx+')">✓ '+(ar?'تم الإرسال':'Mark sent')+'</button>'
-      +' <button class="btn ghost sm" onclick="gapSnooze('+idx+')">⏲ '+(ar?'تأجيل':'Snooze')+'</button>'; }
-  // the raw Meta/Karzoun template (variables intact) — the one-time submission text, always available
-  act+=' <button class="btn ghost sm" onclick="gapCopyTpl('+idx+')" title="'+(ar?'نص القالب الخام لتقديمه مرة واحدة في ميتا/كرزون':'Raw template text to submit once in Meta/Karzoun')+'">▣ '+(ar?'نسخ قالب كرزون':'Copy Karzoun template')+'</button>';
+    return '<div style="flex:1;min-width:62px;text-align:center;border:0.5px solid var(--line);border-radius:10px;padding:9px 6px;'+bg+'"><div class="muted" style="font-size:11px">'+esc(d.label||'')+'</div><div style="margin-top:5px;font-size:13px">'+cnt+'</div></div>'; }).join('');
+  var head='<div style="font-size:13px;color:var(--text-2);margin-bottom:8px">'+(ar?('<b>'+(xUnits||0)+'</b> شقة فاضية أحد–أربعاء هذا الأسبوع · نهايات الأسبوع ما نلمسها'):('<b>'+(xUnits||0)+'</b> apartments open Sun–Wed this week · weekends untouched'))+'</div>';
+  return '<div style="margin-bottom:16px">'+head+'<div style="display:flex;gap:7px;flex-wrap:wrap">'+cells+'</div></div>'; }
+function gapKarzounBtns(code){ var ar=(L==='ar');
+  return '<button class="btn ghost sm" onclick="gapCopyTpl(&#39;'+code+'&#39;)" title="'+(ar?'النص الخام لتقديمه مرة واحدة في ميتا/كرزون':'Raw template to submit once in Meta/Karzoun')+'">▣ '+(ar?'نسخ قالب كرزون':'Copy Karzoun template')+'</button>'
+    +' <button class="btn ghost sm" onclick="gapCopyMsg(&#39;'+code+'&#39;)" title="'+(ar?'الرسالة الجاهزة (كرزون يعبّي الاسم)':'The ready message (Karzoun fills the name)')+'">⧉ '+(ar?'نسخ رسالة الإرسال':'Copy send message')+'</button>'
+    +' <button class="btn ghost sm" onclick="gapExport(&#39;'+code+'&#39;)" title="'+(ar?'قائمة الإرسال لهالحملة (CSV)':'This campaign’s send list (CSV)')+'">⬇ '+(ar?'تصدير القوائم':'Export send list')+'</button>'; }
+function gapChip(label,val){ return '<div style="background:var(--surface-2);border-radius:8px;padding:6px 10px;text-align:center;min-width:74px"><div style="font-size:17px;font-weight:700">'+esc(String(val))+'</div><div class="muted" style="font-size:11px">'+esc(label)+'</div></div>'; }
+function gapRecCard(r,i){ var ar=(L==='ar'); var name=ar?r.name_ar:r.name_en;
+  var head='<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span class="pill" style="background:var(--accent-soft);color:var(--accent);font-weight:700">'+(ar?('توصية '+(i+1)):('Pick '+(i+1)))+'</span>'
+    +'<span style="font-size:16px;font-weight:600">'+esc(name||'')+'</span><span class="pill info">'+esc(r.campaign||'')+'</span>'
+    +'<span style="margin-inline-start:auto" class="muted">'+esc(ar?r.time_label_ar:r.time_label_en)+'</span></div>';
+  var statement='<div style="margin-top:9px;font-size:14.5px;line-height:1.7">'+esc(ar?r.statement_ar:r.statement_en)+'</div>';
+  var chips='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">'
+    +gapChip(ar?'الشريحة':'Segment',r.N+(ar?' عضو':''))
+    +gapChip(ar?'شقق فاضية':'Open apts',r.X)
+    +gapChip(ar?'تحويل مفترض':'Assumed conv',r.combined_pct+'%')
+    +gapChip(ar?'تعمّر ~':'Fills ~',r.Y+(r.capped?'*':''))
+    +'</div>';
+  var why='<div style="margin-top:10px;font-size:12.5px;color:var(--text-2);line-height:1.6">'+esc(ar?r.why_ar:r.why_en)+'</div>';
+  var m=r.math||{}; var capnote=r.capped?(ar?' (محدودة بعدد الشقق الفاضية)':' (capped at open apartments)'):'';
+  var math='<div class="muted" style="margin-top:6px;font-size:11.5px">'+(ar?'الحساب':'Math')+': '+m.N+' × '+m.click_pct+'% × '+m.book_pct+'% ≈ '+m.raw_fill+' → '+(ar?'تعمّر ':'fill ')+m.Y+esc(capnote)+'</div>';
+  var seg='<div class="muted" style="margin-top:6px;font-size:12px">'+(ar?'إلى: ':'To: ')+esc(ar?r.segment_label_ar:r.segment_label_en)+'</div>';
+  var btns='<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">'+gapKarzounBtns(r.campaign)+'</div>';
+  return '<div class="card" style="margin-bottom:12px;border-color:var(--accent)">'+head+statement+chips+seg+why+math+btns+'</div>'; }
+function gapCatCard(c,j){ var ar=(L==='ar'); var name=ar?c.name_ar:c.name_en;
+  var elig=c.eligible_today?('<span class="pill ok">'+(ar?'مناسبة اليوم':'Live today')+'</span>'):('<span class="pill" style="background:var(--surface-2);color:var(--mut)">'+(ar?'خارج الموسم':'Off-window')+'</span>');
+  var head='<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600">'+esc(name||'')+'</span><span class="pill info">'+esc(c.campaign||'')+'</span>'+elig
+    +'<span style="margin-inline-start:auto" class="muted">'+c.N+(ar?' عضو':' people')+'</span></div>';
+  var trig='<div class="muted" style="margin-top:6px;font-size:12px">'+(ar?'الزناد: ':'Trigger: ')+esc(c.trigger_text||'')+' · '+(ar?'إلى ':'to ')+esc(ar?c.segment_label_ar:c.segment_label_en)+' · '+esc(ar?c.time_label_ar:c.time_label_en)+'</div>';
   var msg=ar?c.message_ar:c.message_en;
-  var msgbox='<div class="brn-msg" style="margin-top:10px" id="gapMsg'+idx+'">'+esc(msg||'')+'</div>';
-  return '<div class="card" style="margin-bottom:12px">'+head+unitline+whyline+offerline+tcount+gapTargets(c)+msgbox+'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;align-items:center">'+act+'</div></div>'; }
-function gapRender(){ var b=document.getElementById('gapsBody'); if(!b) return; var ar=(L==='ar'); var d=_gap.data||{}; var cards=d.cards||[]; var s=d.summary||{};
-  var agentBar='<div class="card" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="muted">'+(ar?'أنا:':'I am:')+'</span><input id="gapAgent" value="'+esc(_gap.agent||'')+'" placeholder="'+(ar?'اسمك':'your name')+'" oninput="gapAgentSet(this.value)" style="background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;max-width:160px">'
-    +'<span class="muted" style="margin-inline-start:auto;font-size:12px">'+(ar?'نمط الإشغال':'pace')+': '+esc(d.pace_mode||'')+' · '+(ar?'محميّة':'protected')+': '+esc((d.protected_units||[]).join(', ')||'—')+'</span></div>';
-  var banner='';
-  var topName=ar?s.top_campaign_name_ar:s.top_campaign_name_en;
-  if(topName){ banner='<div class="card" style="margin-bottom:14px;background:var(--accent-soft);border-color:var(--accent)"><div style="font-size:16px;font-weight:600;color:var(--accent)">'+(ar?'اليوم نرسل: ':'Today we send: ')+esc(topName)+' — '+(s.top_eligible||0)+(ar?' ضيف':' guests')+'</div></div>'; }
-  var headline='';
-  if(s.gap_count){ var big=s.biggest_unit?((ar?'أكبر فرصة: ':'Biggest opportunity: ')+esc(s.biggest_unit)+' ('+esc(s.biggest_class||'')+')'):'';
-    headline='<div class="card" style="margin-bottom:14px"><div style="font-size:15px;line-height:1.6">'+(ar?('اليوم: <b>'+s.gap_count+'</b> فجوة منتصف أسبوع في <b>'+s.unit_count+'</b> وحدة. '+big+'. ادفع <b>'+(s.p1_count||0)+'</b> بأولوية قصوى أول.'):('Today: <b>'+s.gap_count+'</b> weekday gaps across <b>'+s.unit_count+'</b> units. '+big+'. Push the <b>'+(s.p1_count||0)+'</b> P1 first.'))+'</div></div>'; }
-  b.innerHTML=agentBar+banner+headline+gapStrip(d.strip);
-  if(!cards.length){ b.innerHTML+='<div class="card"><div class="empty">'+(s.gap_count?(ar?'فيه فجوات بس ما فيه جمهور مطابق بعد — اضغط «إعادة التصنيف» لبناء قاعدة الأعضاء من الحجوزات.':'Gaps exist but no matching audience yet — press “Re-tier” to build the member base from reservations.'):(ar?'ما في فجوات منتصف الأسبوع هالأسبوع 🎉':'No weekday gaps this week 🎉'))+'</div></div>'; return; }
-  b.innerHTML+=cards.map(function(c,i){ return gapCard(c,i); }).join(''); }
-function gapClaim(i){ if(gapNeedAgent()) return; var c=(_gap.data.cards||[])[i]; if(!c) return;
-  post('/api/brain/gaps/claim',{card_key:c.card_key,agent:_gap.agent,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(r){ if(r&&r.ok){ c.claimed_by=_gap.agent; gapRender(); toast(L==='ar'?'استلمتها ✓':'Claimed ✓'); } else toast((r&&r.error==='already_claimed')?((L==='ar'?'محجوزة لـ ':'Claimed by ')+(r.by||'')):'⚠'); }); }
-function gapSent(i){ if(gapNeedAgent()) return; var ar=(L==='ar'); var c=(_gap.data.cards||[])[i]; if(!c) return; if(!confirm(ar?'تأكيد: أرسلت رسالة هذي البطاقة للضيوف؟':'Confirm: you sent this card to the guests?')) return;
-  post('/api/brain/gaps/sent',{card_key:c.card_key,agent:_gap.agent,count:c.target_count,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(r){ if(r&&r.ok){ c.sent_at=1; c.sent_by=_gap.agent; c.sent_count=c.target_count; gapRender(); toast(ar?'سُجّل الإرسال ✓':'Logged ✓'); } else toast('⚠'); }); }
-function gapSnooze(i){ var c=(_gap.data.cards||[])[i]; if(!c) return;
-  post('/api/brain/gaps/snooze',{card_key:c.card_key,hours:6,lid:c.lid,unit:c.unit,campaign:c.campaign}).then(function(){ _gap.data.cards.splice(i,1); gapRender(); toast(L==='ar'?'أُجّلت':'Snoozed'); }); }
-function gapCopy(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var ar=(L==='ar'); var msg=(ar?c.message_ar:c.message_en)||'';
-  // per-guest merged message: {{2}}=unit & {{3}}=date already merged server-side; fill {{1}}=name
-  var t=(c.targets||[])[0]||{}; var nm=t.first||t.name||''; if(nm){ msg=msg.split('{{1}}').join(nm).split('{name}').join(nm); }
-  if(navigator.clipboard){ navigator.clipboard.writeText(msg).then(function(){ toast(ar?'تم نسخ الرسالة ✓':'Message copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
-function gapCopyTpl(i){ var c=(_gap.data.cards||[])[i]; if(!c) return; var ar=(L==='ar'); var tp=(ar?c.tpl_ar:c.tpl_en)||{}; var NL=String.fromCharCode(10);
-  var sv=tp.sample||{}; var keys=Object.keys(sv).sort(); var samp=keys.map(function(k){ return k+'='+sv[k]; }).join('  ');
+  var msgbox='<div class="brn-msg" style="margin-top:9px;white-space:pre-wrap">'+esc(msg||'')+'</div>';
+  var btns='<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">'+gapKarzounBtns(c.campaign)+'</div>';
+  return '<div class="card" style="margin-bottom:12px">'+head+trig+msgbox+btns+'</div>'; }
+function gapAssumePanel(a){ var ar=(L==='ar'); a=a||{};
+  return '<div class="card" style="margin-bottom:14px">'
+    +'<div style="font-weight:600;font-size:14px">'+(ar?'افتراضات التحويل':'Conversion assumptions')+'</div>'
+    +'<div class="muted" style="font-size:12px;margin:4px 0 9px">'+(ar?'افتراض مبدئي — بدّلها ببيانات حقيقية لما تتوفر.':'An assumption — replace with real data once you have it.')+'</div>'
+    +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+    +'<label style="font-size:12px">'+(ar?'فتح الرابط %':'Click-through %')+'<br><input id="asCt" type="number" min="0" max="100" step="0.5" value="'+esc(String(a.click_through_pct||0))+'" style="width:90px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font:inherit;margin-top:3px"></label>'
+    +'<label style="font-size:12px">'+(ar?'الحجز بعد الفتح %':'Click → book %')+'<br><input id="asCb" type="number" min="0" max="100" step="0.5" value="'+esc(String(a.click_to_book_pct||0))+'" style="width:90px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font:inherit;margin-top:3px"></label>'
+    +'<button class="btn primary sm" onclick="gapSaveAssume()">'+(ar?'حفظ':'Save')+'</button>'
+    +'</div></div>'; }
+function gapRender(){ var b=document.getElementById('gapsBody'); if(!b) return; var ar=(L==='ar'); var d=_gap.data||{};
+  var recs=d.recommendations||[]; var cats=d.campaigns||[]; var av=d.availability||{}; var X=av.open_units||0;
+  var html='';
+  html+='<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:10px"><span style="font-size:17px;font-weight:700">'+(ar?'توصية اليوم':'Today’s Push')+'</span><span class="muted" style="font-size:12px">'+(ar?'الأعضاء: ':'Members: ')+(d.members_total||0)+'</span></div>';
+  if(!recs.length){ html+='<div class="card"><div class="empty">'+(X<=0?(ar?'كل الشقق محجوزة وسط الأسبوع — ما في داعي ندفع شي اليوم 🎉':'Everything is booked midweek — nothing to push today 🎉'):(ar?'ما فيه شريحة مناسبة اليوم. لو القاعدة فاضية، اضغط «إعادة التصنيف».':'No matching segment today. If the base is empty, press “Re-tier”.'))+'</div></div>'; }
+  else { html+=recs.map(function(r,i){ return gapRecCard(r,i); }).join(''); }
+  html+=gapAssumePanel(d.assumptions);
+  html+=gapStrip(av.strip,X);
+  html+='<div style="font-size:15px;font-weight:600;margin:6px 0 10px">'+(ar?'كل الحملات (٢٠)':'All campaigns (20)')+'</div>';
+  html+=cats.map(function(c,j){ return gapCatCard(c,j); }).join('');
+  b.innerHTML=html; }
+function gapCopyTpl(code){ var c=gapCampByCode(code); if(!c) return; var ar=(L==='ar'); var t=c.template||{}; var blk=(ar?t.ar:t.en)||{}; var NL=String.fromCharCode(10);
   var lines=[];
-  lines.push((tp.template_name||c.campaign||'')+'  ['+(tp.category||'MARKETING')+']');
-  if(tp.header) lines.push((ar?'العنوان: ':'Header: ')+tp.header);
-  lines.push((ar?'النص: ':'Body: ')+(tp.body||''));
-  if(tp.footer) lines.push((ar?'التذييل: ':'Footer: ')+tp.footer);
-  if(tp.button) lines.push((ar?'الزر: ':'Button: ')+tp.button);
-  if(samp) lines.push((ar?'عينات: ':'Samples: ')+samp);
-  var txt=lines.join(NL);
-  if(navigator.clipboard){ navigator.clipboard.writeText(txt).then(function(){ toast(ar?'نُسخ قالب كرزون ✓':'Karzoun template copied ✓'); }).catch(function(){ toast('⧉'); }); } else toast('⧉'); }
+  lines.push((t.template_name||code)+'  ['+(t.category||'MARKETING')+']');
+  if(blk.header) lines.push((ar?'العنوان: ':'Header: ')+blk.header);
+  lines.push((ar?'النص: ':'Body: ')+(blk.body||''));
+  if(blk.footer) lines.push((ar?'التذييل: ':'Footer: ')+blk.footer);
+  lines.push((ar?'الزر: ':'Button: ')+(blk.button||'')+' → '+(t.button_url||''));
+  var sv=blk.sample||{}; var ks=Object.keys(sv); if(ks.length){ lines.push((ar?'عينة: ':'Sample: ')+ks.map(function(k){ return k+'='+sv[k]; }).join('  ')); }
+  gapClip(lines.join(NL), ar?'نُسخ قالب كرزون ✓':'Karzoun template copied ✓'); }
+function gapCopyMsg(code){ var c=gapCampByCode(code); if(!c) return; var ar=(L==='ar'); gapClip(ar?c.message_ar:c.message_en, ar?'نُسخت رسالة الإرسال ✓ (كرزون يعبّي الاسم)':'Send message copied ✓ (Karzoun fills the name)'); }
+function gapExport(code){ window.open('/api/brain/gaps/export?campaign='+encodeURIComponent(code)+'&lang='+(L==='ar'?'ar':'en')+'&token='+encodeURIComponent(tok()),'_blank'); }
+function gapSaveAssume(){ var ct=document.getElementById('asCt'); var cb=document.getElementById('asCb'); if(!ct||!cb) return; var ar=(L==='ar');
+  post('/api/brain/gaps/assumptions',{click_through_pct:parseFloat(ct.value)||0,click_to_book_pct:parseFloat(cb.value)||0}).then(function(r){ if(r&&r.ok){ toast(ar?'تم الحفظ ✓':'Saved ✓'); loadGaps(true); } else toast('⚠'); }).catch(function(){ toast('⚠'); }); }
 function gapsTemplates(){ window.open('/api/brain/gaps/templates-export?token='+encodeURIComponent(tok()),'_blank'); }
-function gapsCsv(){ var ar=(L==='ar'); if(!_gap.data||!(_gap.data.cards||[]).length){ toast(ar?'ما في بطاقات للتحميل':'No cards to export'); return; } window.open('/api/brain/gaps/export?token='+encodeURIComponent(tok()),'_blank'); }
 function gapsRetier(){ var ar=(L==='ar'); if(!confirm(ar?'إعادة بناء تصنيف الأعضاء من حجوزات هوست أواي؟ ياخذ شوي.':'Rebuild member tiers from Hostaway stays? Takes a moment.')) return;
   var btn=document.getElementById('gapsRetierBtn'); if(btn) btn.disabled=true; toast(ar?'⏳ إعادة التصنيف…':'⏳ Re-tiering…');
   post('/api/brain/gaps/retier',{}).then(function(r){ if(btn) btn.disabled=false; if(r&&r.ok){ var res=r.result||{}; toast((ar?'تم — أعضاء: ':'Done — members: ')+fmt(res.written||0)); loadGaps(true); } else toast((r&&r.error)||'⚠'); }).catch(function(){ if(btn) btn.disabled=false; toast('⚠'); }); }

@@ -1,256 +1,184 @@
 # -*- coding: utf-8 -*-
-"""Weekday-Gap decision engine — synthetic, no network, no DB.
+"""Elite v5 Brain decision engine — synthetic, no network, no DB.
 
-Drives brain.cards.build_card with hand-built gaps + member rows and asserts the §4/§5 contract:
-campaign selection by class, protected units are upgrade-only (never discounted), audience filter
-+ tier→fit→recency ranking, the frequency/flag exclusions, per-guest reasons, the floor, and the
-merged AR/EN message.
+Drives brain.cards (segments + guardrails + recommend_today + send-list CSV) and brain.gaps
+(open-apartment inventory) with hand-built guests/availability and asserts the build spec:
+the right campaign fires for the right calendar day, the segment + guardrails select the audience,
+the fill estimate Y never exceeds the open apartments X, and the CSV is deduped + filtered.
 """
+import csv
+import io
 import unittest
+from datetime import date
 
-from brain import cards, playbook
-
-
-def member(mid, name, tier, stays=3, score=70, days_since=20, weekday=1,
-           preferred=None, nights=6, opted_out=0, lastmin=0, preferred_area=None, full_name=None,
-           phone_plus=None):
-    return {"id": mid, "first_name": name, "full_name": full_name,
-            "phone": phone_plus or ("+96650000%04d" % mid),
-            "tier": tier, "stays_count": stays, "score": score, "days_since": days_since,
-            "weekday_pattern": weekday, "lastmin": lastmin, "preferred_unit": preferred,
-            "preferred_area": preferred_area, "nights_total": nights, "opted_out": opted_out}
+from brain import cards, gaps
 
 
-def gap(unit="9B HTN", lid="9B", cls="MIDWEEK-2", prio=2, protected=False,
-        labels=None, weekdays=None, prices=None, nights=2, area=None, days_out=1):
-    return {"lid": lid, "unit": unit, "protected": protected, "gap_class": cls,
-            "priority": prio, "priority_label": "P%d" % prio, "days_out": days_out, "nights": nights,
-            "area": area, "gap_dates": ["2026-06-30", "2026-07-01"],
-            "gap_labels": labels or ["Mon 30 Jun", "Tue 01 Jul"],
-            "weekdays": weekdays or [0, 1], "prices": prices or [600, 600],
-            "at_risk": sum(prices or [600, 600])}
+def member(mid, tier="Silver", stays=5, days_since=400, lastmin=0, occasion=0,
+           opted_out=0, in_house=0, upcoming=0, recent_contact=0, recent_campaigns=(),
+           first_name=None, phone=None):
+    return {"id": mid, "first_name": first_name or ("G%d" % mid),
+            "phone": phone or ("+96650000%04d" % mid), "tier": tier, "stays_count": stays,
+            "days_since": days_since, "lastmin": lastmin, "occasion_soon": occasion,
+            "opted_out": opted_out, "in_house": in_house, "has_upcoming_booking": upcoming,
+            "recent_contact": recent_contact, "recent_campaigns": set(recent_campaigns)}
 
 
-class CampaignSelection(unittest.TestCase):
-    def test_midweek2_picks_midweek2(self):
-        c = cards.build_card(gap(), [member(1, "Sara", "Gold")])
-        self.assertEqual(c["campaign"], "MIDWEEK-2")
-
-    def test_protected_forces_upgrade_campaign(self):
-        c = cards.build_card(gap(unit="F1", lid="F1", protected=True), [member(1, "Sara", "Gold")])
-        self.assertEqual(c["campaign"], "UPGRADE-MIDWEEK")
-
-    def test_full_pace_swaps_to_relationship(self):
-        c = cards.build_card(gap(), [member(1, "Sara", "Gold", preferred="9B HTN")], pace_mode="full")
-        self.assertEqual(c["campaign"], "YOUR-UNIT-FREE")
-        self.assertEqual(c["offer"]["mode"], "relationship")
+AVAIL = {"open_units": 5, "open_unit_nights": 9}
+A = {"click_through": 0.12, "click_to_book": 0.08}
 
 
-class ProtectedNeverDiscounted(unittest.TestCase):
-    def test_f1_offer_is_upgrade_only_no_pct(self):
-        c = cards.build_card(gap(unit="F1", lid="F1", protected=True), [member(1, "A", "Turaif")])
-        self.assertEqual(c["offer"]["mode"], "upgrade")
-        self.assertEqual(c["offer"]["max_pct"], 0)
-        self.assertIsNone(c["offer"]["floor"])
+# --------------------------- segments ---------------------------
+
+class Segments(unittest.TestCase):
+    def test_all_members_matches_any_non_quarantine_tier(self):
+        for t in ("Silver", "Gold", "Turaif"):
+            self.assertTrue(cards.match_segment(member(1, tier=t), "HEATWAVE"))
+        self.assertFalse(cards.match_segment(member(1, tier="Quarantine"), "HEATWAVE"))
+
+    def test_loyal_thanks_is_gold_and_turaif_only(self):
+        self.assertTrue(cards.match_segment(member(1, tier="Gold"), "LOYAL-THANKS"))
+        self.assertTrue(cards.match_segment(member(1, tier="Turaif"), "LOYAL-THANKS"))
+        self.assertFalse(cards.match_segment(member(1, tier="Silver"), "LOYAL-THANKS"))
+
+    def test_dormant_window(self):
+        self.assertTrue(cards.match_segment(member(1, days_since=120), "DORMANT-COMEBACK"))
+        self.assertFalse(cards.match_segment(member(1, days_since=30), "DORMANT-COMEBACK"))
+        self.assertFalse(cards.match_segment(member(1, days_since=400), "DORMANT-COMEBACK"))
+
+    def test_first_timer_stays(self):
+        self.assertTrue(cards.match_segment(member(1, stays=2, days_since=30), "FIRST-TIMER"))
+        self.assertFalse(cards.match_segment(member(1, stays=5, days_since=30), "FIRST-TIMER"))
+
+    def test_last_minute_flag(self):
+        self.assertTrue(cards.match_segment(member(1, lastmin=1), "LAST-MINUTE"))
+        self.assertFalse(cards.match_segment(member(1, lastmin=0), "LAST-MINUTE"))
+
+    def test_post_stay_recency(self):
+        self.assertTrue(cards.match_segment(member(1, days_since=2), "POST-STAY"))
+        self.assertFalse(cards.match_segment(member(1, days_since=10), "POST-STAY"))
 
 
-class OfferAndFloor(unittest.TestCase):
-    def test_value_add_caps_at_ceiling_and_respects_floor(self):
-        c = cards.build_card(gap(), [member(1, "A", "Gold")],
-                             cfg={"ceiling_pct": 13},
-                             floor_fn=lambda lid: 660)
-        self.assertEqual(c["offer"]["mode"], "value_add")
-        self.assertEqual(c["offer"]["max_pct"], 13)
-        self.assertEqual(c["offer"]["floor"], 660)
+# --------------------------- guardrails ---------------------------
 
-    def test_floor_falls_back_to_p5_times_pct_when_unset(self):
-        c = cards.build_card(gap(prices=[600, 600]), [member(1, "A", "Gold")],
-                             cfg={"deep_floor_pct": 55})
-        self.assertEqual(c["offer"]["floor"], 330)            # 600 × 0.55
-
-    def test_deep_allowed_only_on_p1_dead_night(self):
-        tonight = gap(cls="TONIGHT", prio=1, nights=1, prices=[500])
-        c = cards.build_card(tonight, [member(1, "A", "Silver")])
-        self.assertTrue(c["offer"]["deep_allowed"])
-        midweek = cards.build_card(gap(), [member(1, "A", "Gold")])
-        self.assertFalse(midweek["offer"]["deep_allowed"])
-
-
-class AudienceFilterAndRank(unittest.TestCase):
-    def test_midweek2_includes_a_tier_mix_not_all_turaif(self):
-        # The bug being fixed: cards used to be 100% Turaif. A normal MIDWEEK-2 must mix tiers.
+class Guardrails(unittest.TestCase):
+    def test_opt_out_kill_on_book_fatigue_and_same_campaign(self):
         people = [
-            member(1, "Sara", "Gold", weekday=1, preferred="9B HTN"),
-            member(2, "Noor", "Silver", weekday=1),
-            member(3, "Turki", "Turaif", weekday=0, preferred="F1"),
-            member(4, "Hala", "Silver", weekday=0),
+            member(1),                                   # clean -> kept
+            member(2, opted_out=1),                      # opted out
+            member(3, in_house=1),                       # kill-on-book (in house)
+            member(4, upcoming=1),                       # kill-on-book (has upcoming)
+            member(5, recent_contact=1),                 # messaged within 7d
+            member(6, recent_campaigns=["HEATWAVE"]),    # same campaign within 14d
         ]
-        c = cards.build_card(gap(), people)
-        tiers = set(t["tier"] for t in c["targets"])
-        self.assertIn("Silver", tiers)
-        self.assertIn("Gold", tiers)
-        self.assertGreaterEqual(len(tiers), 2, "a normal MIDWEEK-2 card must show a tier MIX")
+        aud = cards.segment_audience("HEATWAVE", people)
+        self.assertEqual([m["id"] for m in aud], [1])
 
-    def test_rank_is_fit_first_tier_only_breaks_ties(self):
-        # A fitting Gold (favourite unit + weekday regular) must outrank a no-fit Turaif.
-        people = [
-            member(1, "GoldFit", "Gold", weekday=1, preferred="9B HTN", days_since=120),
-            member(2, "TuraifNoFit", "Turaif", weekday=0, preferred="F1", days_since=200),
-            member(3, "SilverFit", "Silver", weekday=1, preferred="9B HTN", days_since=30),
+    def test_same_campaign_block_is_per_campaign(self):
+        # blocked for HEATWAVE but still reachable by a DIFFERENT campaign
+        m = member(1, recent_campaigns=["HEATWAVE"])
+        self.assertEqual(cards.segment_audience("HEATWAVE", [m]), [])
+        self.assertEqual(len(cards.segment_audience("MIDWEEK-RESET", [m])), 1)
+
+    def test_dedupe_by_phone(self):
+        people = [member(1, phone="+966500000001"), member(2, phone="+966500000001")]
+        self.assertEqual(len(cards.segment_audience("HEATWAVE", people)), 1)
+
+
+# --------------------------- recommend_today ---------------------------
+
+class RecommendToday(unittest.TestCase):
+    def _people(self, n=50, tier="Silver"):
+        return [member(i, tier=tier) for i in range(1, n + 1)]
+
+    def test_day_27_picks_payday(self):
+        recs = cards.recommend_today(date(2026, 4, 27), AVAIL, self._people(), A)
+        self.assertTrue(recs)
+        self.assertEqual(recs[0]["campaign"], "PAYDAY-DROPPED")
+
+    def test_day_23_picks_end_of_month(self):
+        recs = cards.recommend_today(date(2026, 4, 23), AVAIL, self._people(), A)
+        self.assertTrue(recs)
+        self.assertEqual(recs[0]["campaign"], "END-OF-MONTH")
+
+    def test_july_makes_heatwave_eligible(self):
+        recs = cards.recommend_today(date(2026, 7, 13), AVAIL, self._people(), A, limit=20)
+        self.assertIn("HEATWAVE", [r["campaign"] for r in recs])
+
+    def test_y_never_exceeds_x(self):
+        recs = cards.recommend_today(date(2026, 4, 27), {"open_units": 3, "open_unit_nights": 6},
+                                     self._people(1000), {"click_through": 0.5, "click_to_book": 0.5})
+        top = recs[0]
+        self.assertEqual(top["X"], 3)
+        self.assertEqual(top["Y"], 3)            # raw 250 capped to 3
+        self.assertTrue(top["capped"])
+
+    def test_assumptions_flow_through_to_y(self):
+        big = self._people(1000)
+        low = cards.recommend_today(date(2026, 4, 27), {"open_units": 999}, big,
+                                    {"click_through": 0.10, "click_to_book": 0.10})[0]
+        high = cards.recommend_today(date(2026, 4, 27), {"open_units": 999}, big,
+                                     {"click_through": 0.50, "click_to_book": 0.50})[0]
+        self.assertLess(low["Y"], high["Y"])     # 10 vs 250
+        self.assertEqual(low["math"]["click_pct"], 10.0)
+
+    def test_full_portfolio_recommends_nothing(self):
+        self.assertEqual(cards.recommend_today(date(2026, 4, 27), {"open_units": 0},
+                                               self._people(), A), [])
+
+    def test_no_audience_campaign_is_skipped(self):
+        # day 27 + only Quarantine members -> PAYDAY has no audience -> no recs
+        q = [member(i, tier="Quarantine") for i in range(1, 10)]
+        self.assertEqual(cards.recommend_today(date(2026, 4, 27), AVAIL, q, A), [])
+
+    def test_statement_is_bilingual_and_names_no_unit(self):
+        r = cards.recommend_today(date(2026, 4, 27), AVAIL, self._people(), A)[0]
+        self.assertTrue(r["statement_ar"])
+        self.assertTrue(r["statement_en"])
+        self.assertIn("apartments", r["statement_en"])
+        self.assertEqual(r["url"], "https://oujares.com/elite")
+
+
+# --------------------------- send list CSV ---------------------------
+
+class SendListCsv(unittest.TestCase):
+    def test_columns_and_filtering(self):
+        people = [member(1, first_name="Noura", phone="+966512345678"),
+                  member(2, opted_out=1), member(3, recent_contact=1)]
+        fn, text = cards.build_send_list_csv("HEATWAVE", people, "ar")
+        self.assertTrue(fn.endswith(".csv"))
+        rows = list(csv.reader(io.StringIO(text)))
+        self.assertEqual(rows[0], cards.SEND_CSV_COLUMNS)
+        self.assertEqual(rows[0], ["first_name", "phone", "tier", "campaign", "language"])
+        body = rows[1:]
+        self.assertEqual(len(body), 1)                       # opted-out + fatigued dropped
+        self.assertEqual(body[0], ["Noura", "966512345678", "Silver", "HEATWAVE", "ar"])
+
+
+# --------------------------- availability (gaps) ---------------------------
+
+class OpenInventory(unittest.TestCase):
+    def _grid(self):
+        # Sun..Wed midweek, then Thu/Fri/Sat weekend.
+        days = [{"date": "2026-06-28", "weekday": 6}, {"date": "2026-06-29", "weekday": 0},
+                {"date": "2026-06-30", "weekday": 1}, {"date": "2026-07-01", "weekday": 2},
+                {"date": "2026-07-02", "weekday": 3}, {"date": "2026-07-03", "weekday": 4}]
+        def cell(s):
+            return {"status": s, "price": 400}
+        units = [
+            {"lid": "A", "name": "A", "cells": [cell("empty"), cell("empty"), cell("booked"), cell("booked"), cell("empty"), cell("empty")]},
+            {"lid": "B", "name": "B", "cells": [cell("booked"), cell("empty"), cell("empty"), cell("empty"), cell("empty"), cell("empty")]},
+            {"lid": "C", "name": "C", "cells": [cell("booked"), cell("booked"), cell("booked"), cell("booked"), cell("booked"), cell("booked")]},
         ]
-        c = cards.build_card(gap(), people)
-        order = [t["name"] for t in c["targets"]]
-        self.assertEqual(order[0], "GoldFit")              # fit (+3 unit +2 weekday) beats Turaif's tier
-        # GoldFit and SilverFit tie on fit (both +5); tier breaks it -> Gold above Silver
-        self.assertLess(order.index("GoldFit"), order.index("SilverFit"))
-        self.assertEqual(order[-1], "TuraifNoFit")         # highest tier, but no fit -> last
+        return {"days": days, "units": units}
 
-    def test_lastmin_fit_boost_on_p1_dead_night(self):
-        tonight = gap(cls="TONIGHT", prio=1, nights=1, prices=[500])
-        people = [
-            member(1, "FastTuraif", "Turaif", weekday=0, lastmin=1, days_since=40),
-            member(2, "SlowTuraif", "Turaif", weekday=0, lastmin=0, days_since=10),
-        ]
-        c = cards.build_card(tonight, people)
-        self.assertEqual(c["targets"][0]["name"], "FastTuraif")   # +2 last-minute fit wins
-
-    def test_area_fit_boost(self):
-        g = gap(area="Hittin")
-        people = [
-            member(1, "SameArea", "Silver", weekday=0, preferred="Other Unit", preferred_area="Hittin"),
-            member(2, "NoArea", "Silver", weekday=0, preferred="Far Unit", preferred_area="Olaya"),
-        ]
-        c = cards.build_card(g, people)
-        self.assertEqual(c["targets"][0]["name"], "SameArea")     # +1 area fit
-
-    def test_target_cap_applies(self):
-        people = [member(i, "G%d" % i, "Gold") for i in range(1, 40)]
-        c = cards.build_card(gap(), people, cfg={"targets_per_card": 10})
-        self.assertEqual(c["target_count"], 10)
-        self.assertEqual(c["pool_eligible"], 39)
-
-
-class Exclusions(unittest.TestCase):
-    def test_contacted_within_7d_and_optout_and_risk_excluded(self):
-        people = [
-            member(1, "Fresh", "Gold"),
-            member(2, "Recent7d", "Gold"),
-            member(3, "OptedOut", "Gold", opted_out=1),
-            member(4, "Risky", "Gold"),
-        ]
-        c = cards.build_card(gap(), people, contacted_7d={2}, risk_ids={4})
-        names = sorted(t["name"] for t in c["targets"])
-        self.assertEqual(names, ["Fresh"])
-
-    def test_quarantine_never_targeted(self):
-        c = cards.build_card(gap(), [member(1, "Q", "Quarantine")])
-        self.assertEqual(c["target_count"], 0)
-
-
-class FullNames(unittest.TestCase):
-    def test_display_uses_full_name_not_first_only(self):
-        c = cards.build_card(gap(), [member(1, "Mohammed", "Gold", full_name="Mohammed Al-Qahtani")])
-        t = c["targets"][0]
-        self.assertEqual(t["name"], "Mohammed Al-Qahtani")     # full name displayed
-        self.assertEqual(t["first"], "Mohammed")               # first name kept for {name} merge
-
-    def test_single_letter_first_name_falls_back_gracefully(self):
-        # full_name present even when first_name is a stray single letter -> show the full name
-        c = cards.build_card(gap(), [member(1, "A", "Gold", full_name="Abdullah Nasser")])
-        self.assertEqual(c["targets"][0]["name"], "Abdullah Nasser")
-
-
-class WhyAndMessage(unittest.TestCase):
-    def test_card_carries_why_and_per_guest_reasons(self):
-        c = cards.build_card(gap(), [member(1, "Sara", "Gold", stays=4, days_since=21, preferred="9B HTN")])
-        self.assertTrue(c["why_en"])
-        self.assertTrue(c["why_ar"])
-        t = c["targets"][0]
-        self.assertIn("favourite unit", t["reason_en"])
-        self.assertIn("last 21d ago", t["reason_en"])
-        self.assertIn("Sun–Wed", t["reason_en"])
-
-    def test_message_merges_unit_keeps_name_token(self):
-        c = cards.build_card(gap(), [member(1, "Sara", "Gold")])
-        self.assertIn("9B HTN", c["message_en"])           # {{2}} merged to the unit
-        self.assertIn("{{1}}", c["message_en"])            # name variable kept for the per-guest fill
-        self.assertIn("{{1}}", c["message_ar"])
-
-    def test_dated_campaign_merges_the_date(self):
-        # TOMORROW copy uses {{3}} (date) -> must be merged to the gap's date label
-        c = cards.build_card(gap(cls="TOMORROW", prio=1, nights=1, labels=["Mon 29 Jun"]),
-                             [member(1, "Sara", "Gold")])
-        self.assertIn("Mon 29 Jun", c["message_en"])
-        self.assertNotIn("{{3}}", c["message_en"])
-
-
-class CsvExport(unittest.TestCase):
-    def _payload(self):
-        # two cards: a P2 MIDWEEK-2 and a P1 TONIGHT (today) — the P1 must export first.
-        c_p2 = cards.build_card(gap(cls="MIDWEEK-2", prio=2),
-                                [member(1, "Sara", "Gold", full_name="Sara Ali", preferred="9B HTN")])
-        c_p1 = cards.build_card(gap(unit="F2 GO", lid="F2", cls="TONIGHT", prio=1, nights=1,
-                                    days_out=0, prices=[500], labels=["Sun 28 Jun"]),
-                                [member(2, "Omar", "Silver", full_name="Omar Khan", phone_plus="+966512345678")])
-        return {"cards": [c_p2, c_p1]}    # deliberately P2 before P1 to prove the sort
-
-    def test_columns_exact_order(self):
-        import csv as _csv
-        import io
-        fn, text = cards.build_today_csv(self._payload())
-        self.assertEqual(fn, "ouja_gaps_today.csv")
-        rows = list(_csv.reader(io.StringIO(text)))
-        self.assertEqual(rows[0], cards.CSV_COLUMNS)         # bilingual headers, exact order
-        self.assertEqual(rows[0][0], "متى نرسل · When")
-        self.assertEqual(rows[0][6], "Message (English)")
-
-    def test_today_first_sort_name_merge_and_phone(self):
-        import csv as _csv
-        import io
-        fn, text = cards.build_today_csv(self._payload())
-        rows = list(_csv.reader(io.StringIO(text)))[1:]      # drop header
-        self.assertEqual(rows[0][0], "اليوم · Today")        # days_out 0 -> Today
-        self.assertEqual(rows[0][1], "TONIGHT")              # P1 card exported first
-        self.assertEqual(rows[0][2], "Omar Khan")            # full name in the Name column
-        self.assertEqual(rows[0][3], "966512345678")         # phone without the leading +
-        self.assertEqual(rows[0][4], "Silver")               # Tag = tier
-        self.assertNotIn("{{1}}", rows[0][5])                # {{1}} name merged (AR)
-        self.assertNotIn("{name}", rows[0][5])               # no legacy token leak
-        self.assertIn("Omar", rows[0][6])                    # first name merged (EN)
-        self.assertEqual(rows[1][1], "MIDWEEK-2")            # P2 card second
-
-
-class PlaybookSanity(unittest.TestCase):
-    def test_every_campaign_has_both_languages(self):
-        for code, c in playbook.CAMPAIGNS.items():
-            for k in ("name_ar", "name_en", "why_ar", "why_en", "msg_ar", "msg_en"):
-                self.assertTrue(c.get(k), "%s missing %s" % (code, k))
-            self.assertIn(c["offer_mode"], ("relationship", "value_add", "deeper", "upgrade"))
-
-    def test_every_class_primary_resolves_to_a_real_campaign(self):
-        for cls, code in playbook.CLASS_PRIMARY.items():
-            self.assertIn(code, playbook.CAMPAIGNS)
-
-    def test_copy_comes_from_the_template_catalogue(self):
-        for code, c in playbook.CAMPAIGNS.items():
-            self.assertTrue(c.get("principle"), "%s missing principle" % code)
-            self.assertTrue(c.get("tier_focus"), "%s missing tier_focus" % code)
-            # the engine's send body IS the Marketing-variant body from the new catalogue
-            self.assertEqual(c["msg_en"], c["en"]["body"])
-            self.assertEqual(c["msg_ar"], c["ar"]["body"])
-        # structural fields the engine reads must survive the merge
-        self.assertEqual(playbook.CAMPAIGNS["TURAIF-MIDWEEK"]["filter"], {"tier_only": "Turaif"})
-        self.assertEqual(playbook.CAMPAIGNS["UPGRADE-MIDWEEK"]["offer_mode"], "upgrade")
-
-    def test_template_vars_merge_clean_no_leftover_unit_or_date(self):
-        # LONG-GAP copy uses {{2}}=unit/{{3}}=dates; make sure they merge (no raw vars leak)
-        g = gap(cls="LONG-GAP", nights=3, labels=["Sun 28 Jun", "Mon 29 Jun", "Tue 30 Jun"])
-        c = cards.build_card(g, [member(1, "Sara", "Gold", nights=9)])
-        for m in (c["message_en"], c["message_ar"]):
-            self.assertNotIn("{{2}}", m)     # unit merged
-            self.assertNotIn("{{3}}", m)     # dates merged
-            self.assertNotIn("{date", m)     # no legacy token leak
-            self.assertIn("{{1}}", m)        # name kept for the per-guest fill
+    def test_counts_distinct_apartments_and_nights_excluding_weekends(self):
+        inv = gaps.open_midweek_inventory(self._grid(), horizon_days=6)
+        self.assertEqual(inv["open_units"], 2)               # A and B have midweek empties; C none
+        self.assertEqual(inv["open_unit_nights"], 5)         # A:2 (Sun,Mon) + B:3 (Mon,Tue,Wed)
+        # the Thu/Fri empties (idx 4,5) are NEVER counted
+        weekend = [s for s in inv["strip"] if s["weekend"]]
+        self.assertTrue(all(s["weekday"] in (3, 4, 5) for s in weekend))
 
 
 if __name__ == "__main__":

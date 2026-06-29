@@ -58,6 +58,11 @@ DEFAULTS = {
     "deep_discount_floor_pct": (55, "int", "gaps", "نسبة أرضية p5 %", "Fallback floor (p5 ×%)", "Fallback pricing floor when a unit has no configured floor: p5 × this %"),
     "gap_elite_msgs_per_7d":   (1, "int", "gaps", "أقصى رسائل إيليت / 7 أيام", "Max Elite msgs / 7 days", "≤1 Elite message per guest per 7 days total (build spec §HARD RULES 4)"),
     "gap_targets_per_card":    (25, "int", "gaps", "أقصى أهداف لكل بطاقة", "Max targets / card", "Cap the audience size shown on each push card"),
+
+    # ---- Elite v5 Brain: conversion assumptions (editable; clearly "assumption, not real data yet") ----
+    "assume_click_through_pct": (12, "int", "gaps", "افتراض: نسبة فتح الرابط %", "Assume click-through %", "ASSUMPTION (replace with real data): how many recipients open the /elite link"),
+    "assume_click_to_book_pct": (8, "int", "gaps", "افتراض: نسبة الحجز بعد الفتح %", "Assume click→book %", "ASSUMPTION (replace with real data): how many of those who click then book"),
+    "gap_holidays":            ("{}", "str", "gaps", "تواريخ المناسبات (تعديل)", "Holiday date overrides (JSON)", "Override exact Saudi holiday dates as JSON, e.g. {\"EID-FITR\":\"2026-03-20\"}"),
 }
 
 _CAST = {"int": int, "float": float, "str": str}

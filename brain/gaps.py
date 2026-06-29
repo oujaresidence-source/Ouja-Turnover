@@ -172,3 +172,46 @@ def gaps_today(protected_lids=None, horizon_days=7):
     """Production entry point: pull the live grid and detect this week's weekday gaps."""
     grid = pull_grid(days=max(8, horizon_days + 1))
     return detect_gaps(grid, protected_lids=protected_lids, horizon_days=horizon_days)
+
+
+# ---------------------------------------------------------------------------
+# Open-inventory summary for the Brain's "X apartments are open" number. PURE function of the
+# grid: counts empty Sun–Wed nights in the horizon, the distinct apartments that have any, and a
+# per-day strip (weekends greyed «إجازة»). Reuses the SAME eligibility rule as detect_gaps so the
+# weekend exclusion is identical and a single source of truth.
+# ---------------------------------------------------------------------------
+
+def open_midweek_inventory(grid, horizon_days=7):
+    """{open_units, open_unit_nights, by_unit:[{lid,unit,nights}], strip:[{date,label,weekday,
+    weekend,gaps}]}. open_units = distinct apartments with ≥1 empty Sun–Wed night this week (the
+    cap X for «fill ~Y apartments»); open_unit_nights = total empty midweek nights."""
+    days = (grid or {}).get("days") or []
+    units = (grid or {}).get("units") or []
+    horizon = max(1, int(horizon_days or 7))
+    span = min(horizon, len(days))
+    by_unit = []
+    open_unit_nights = 0
+    per_day = {}
+    for u in units:
+        cells = u.get("cells") or []
+        nights = 0
+        for idx in range(min(span, len(cells))):
+            if _eligible(cells[idx], days[idx]):
+                nights += 1
+                d_iso = days[idx].get("date")
+                per_day[d_iso] = per_day.get(d_iso, 0) + 1
+        if nights:
+            by_unit.append({"lid": str(u.get("lid")), "unit": u.get("name") or str(u.get("lid")),
+                            "nights": nights})
+            open_unit_nights += nights
+    by_unit.sort(key=lambda r: -r["nights"])
+    strip = []
+    for idx in range(span):
+        day = days[idx]
+        wd = day.get("weekday")
+        strip.append({"date": day.get("date"), "weekday": wd,
+                      "weekend": wd not in WEEKDAY_NIGHTS,
+                      "label": _label(day.get("date"), wd),
+                      "gaps": per_day.get(day.get("date"), 0)})
+    return {"open_units": len(by_unit), "open_unit_nights": open_unit_nights,
+            "by_unit": by_unit, "strip": strip}

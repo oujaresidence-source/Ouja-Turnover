@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Meta/Karzoun template catalogue — the 20 owner-approved WhatsApp templates in brain.playbook.
+"""Elite v5 campaign catalogue — the 20 link-driven WhatsApp templates in brain.playbook.
 
 Validates the SHAPE Meta/Karzoun requires (no network, no DB): every campaign carries non-empty
-bilingual copy within WhatsApp's length limits, bodies never start/end on a bare variable, the two
-F1/F2 protected campaigns carry zero price-cut wording, and the template-export CSV has the exact
-columns + both utility variants (~44 rows).
+bilingual copy within WhatsApp's length limits, the ONLY variable is {{1}} (no unit/date/extra
+variable ever), every CTA is the same /elite URL, and the template-export CSV has the exact v5
+columns with the variable left intact (40 rows).
 """
 import csv
 import io
@@ -13,92 +13,89 @@ import unittest
 
 from brain import playbook
 
-VAR = re.compile(r"\{\{[1-5]\}\}")            # a Karzoun variable token
+VAR1 = re.compile(r"\{\{1\}\}")
+BAD_TOKEN = re.compile(r"\{\{[2-9]\}\}|\{unit\}|\{dates?\}|\{date_in\}|\{date_out\}|\{wd\}|\{name\}")
 
 
-def _bodies(block):
-    return (block or {}).get("body", "")
+def _body(c, lang):
+    return ((c.get(lang) or {}).get("body")) or ""
 
 
 class CatalogueShape(unittest.TestCase):
     def test_exactly_twenty_campaigns(self):
         self.assertEqual(len(playbook.CAMPAIGNS), 20)
 
-    def test_every_campaign_has_nonempty_bilingual_copy(self):
+    def test_every_campaign_nonempty_bilingual(self):
         for code, c in playbook.CAMPAIGNS.items():
-            ar, en = c.get("ar") or {}, c.get("en") or {}
-            self.assertTrue(_bodies(ar).strip(), "%s: empty ar.body" % code)
-            self.assertTrue(_bodies(en).strip(), "%s: empty en.body" % code)
-            self.assertTrue(c.get("template_name"), "%s: no template_name" % code)
-            self.assertIn(c.get("category"), ("MARKETING", "UTILITY"))
+            self.assertTrue(_body(c, "ar").strip(), "%s empty ar.body" % code)
+            self.assertTrue(_body(c, "en").strip(), "%s empty en.body" % code)
+            self.assertTrue(c.get("template_name"), "%s no template_name" % code)
+            self.assertEqual(c.get("category"), "MARKETING")
+            self.assertTrue(c.get("trigger"), "%s no trigger text" % code)
 
     def test_bodies_never_start_or_end_on_a_variable(self):
         for code, c in playbook.CAMPAIGNS.items():
             for lang in ("ar", "en"):
-                body = _bodies(c.get(lang)).strip()
-                self.assertFalse(body.startswith("{{"), "%s/%s body starts on a variable" % (code, lang))
-                self.assertFalse(body.endswith("}}"), "%s/%s body ends on a variable" % (code, lang))
+                b = _body(c, lang).strip()
+                self.assertFalse(b.startswith("{{"), "%s/%s starts on a variable" % (code, lang))
+                self.assertFalse(b.endswith("}}"), "%s/%s ends on a variable" % (code, lang))
 
     def test_meta_length_limits(self):
-        # WhatsApp/Meta caps: body ≤1024, header ≤60, footer ≤60, button ≤20.
+        for code, c in playbook.CAMPAIGNS.items():
+            btn = c.get("button") or {}
+            for lang in ("ar", "en"):
+                blk = c.get(lang) or {}
+                self.assertLessEqual(len(blk.get("body") or ""), 1024, "%s/%s body too long" % (code, lang))
+                self.assertLessEqual(len(blk.get("header") or ""), 60, "%s/%s header too long" % (code, lang))
+                self.assertLessEqual(len(c.get("footer_%s" % lang) or ""), 60, "%s/%s footer too long" % (code, lang))
+                self.assertLessEqual(len(btn.get("text_%s" % lang) or ""), 20, "%s/%s button too long" % (code, lang))
+
+
+class LinkDrivenAndVagueOnly(unittest.TestCase):
+    def test_only_variable_is_first_name(self):
         for code, c in playbook.CAMPAIGNS.items():
             for lang in ("ar", "en"):
-                b = c.get(lang) or {}
-                self.assertLessEqual(len(b.get("body") or ""), 1024, "%s/%s body too long" % (code, lang))
-                self.assertLessEqual(len(b.get("header") or ""), 60, "%s/%s header too long" % (code, lang))
-                self.assertLessEqual(len(b.get("footer") or ""), 60, "%s/%s footer too long" % (code, lang))
-                self.assertLessEqual(len(b.get("button") or ""), 20, "%s/%s button too long" % (code, lang))
+                b = _body(c, lang)
+                self.assertTrue(VAR1.search(b), "%s/%s missing {{1}}" % (code, lang))
+                self.assertIsNone(BAD_TOKEN.search(b),
+                                  "%s/%s names a unit/date or an extra variable" % (code, lang))
 
-    def test_at_least_one_variable_per_body(self):
+    def test_every_cta_is_the_elite_url(self):
         for code, c in playbook.CAMPAIGNS.items():
+            self.assertEqual(playbook.button_url(code), playbook.ELITE_URL, "%s CTA != /elite" % code)
+            self.assertEqual((c.get("button") or {}).get("type"), "URL", "%s button not URL" % code)
+
+    def test_assembled_message_keeps_name_var_and_elite_link(self):
+        for code in playbook.CODES:
             for lang in ("ar", "en"):
-                self.assertTrue(VAR.search(_bodies(c.get(lang))), "%s/%s has no variable" % (code, lang))
-
-
-class ProtectedNoPriceCut(unittest.TestCase):
-    # F1/F2 protected templates: access/upgrade ONLY — never a discount.
-    FORBIDDEN_AR = ["خصم", "تخفيض", "نسبة", "أرخص", "تنزيل", "٪", "%"]
-    FORBIDDEN_EN = ["discount", "cheaper", "price cut", "% off", "percent off", "sale", "%"]
-
-    def test_upgrade_and_turaif_have_no_discount_words(self):
-        for code in ("UPGRADE-MIDWEEK", "TURAIF-MIDWEEK"):
-            c = playbook.CAMPAIGNS[code]
-            self.assertTrue(c.get("protected"), "%s should be protected=True" % code)
-            ar = _bodies(c.get("ar"))
-            en = _bodies(c.get("en")).lower()
-            for w in self.FORBIDDEN_AR:
-                self.assertNotIn(w, ar, "%s AR body contains forbidden '%s'" % (code, w))
-            for w in self.FORBIDDEN_EN:
-                self.assertNotIn(w, en, "%s EN body contains forbidden '%s'" % (code, w))
+                msg = playbook.assembled_message(code, lang)
+                self.assertIn("{{1}}", msg)
+                self.assertIn(playbook.ELITE_URL, msg)
+                self.assertIsNone(BAD_TOKEN.search(msg), "%s/%s assembled names unit/date" % (code, lang))
 
 
 class TemplateExportCsv(unittest.TestCase):
     def _rows(self):
         fn, text = playbook.build_templates_csv()
-        self.assertEqual(fn, "ouja_meta_templates.csv")
+        self.assertEqual(fn, "ouja_elite_templates.csv")
         return list(csv.reader(io.StringIO(text)))
 
     def test_columns_exact(self):
         rows = self._rows()
         self.assertEqual(rows[0], playbook.TEMPLATE_CSV_COLUMNS)
         self.assertEqual(rows[0], ["template_name", "category", "language", "header", "body",
-                                   "footer", "button", "sample_values", "approval_note"])
+                                   "footer", "button_text", "button_url", "trigger"])
 
-    def test_row_count_includes_both_languages_and_both_utility_variants(self):
+    def test_forty_rows_both_languages(self):
         body = self._rows()[1:]
-        # 20 campaigns × 2 langs (Marketing) + 2 utility campaigns × 2 langs = 44
-        self.assertEqual(len(body), 44)
-        util = [r for r in body if r[1] == "UTILITY"]
-        names = {r[0] for r in util}
-        self.assertEqual(names, {"post_checkout_thanks", "review_specific_stay"})
-        self.assertEqual(len(util), 4)                       # both langs of both utility variants
-        langs = sorted(r[2] for r in util)
-        self.assertEqual(langs, ["ar", "ar", "en", "en"])
+        self.assertEqual(len(body), 40)                      # 20 campaigns × 2 languages
+        langs = sorted(set(r[2] for r in body))
+        self.assertEqual(langs, ["ar", "en"])
 
-    def test_variables_left_intact_in_export(self):
-        # the export is the ONE-TIME submission text — variables must stay {{n}}, never merged
+    def test_variable_intact_and_url_present(self):
         for r in self._rows()[1:]:
-            self.assertTrue(VAR.search(r[4]), "exported body has no variable: %s" % r[:3])
+            self.assertTrue(VAR1.search(r[4]), "exported body lost {{1}}: %s" % r[:3])
+            self.assertEqual(r[7], playbook.ELITE_URL)       # button_url column
 
 
 if __name__ == "__main__":
