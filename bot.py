@@ -66,6 +66,15 @@ except Exception as _brain_err:        # pragma: no cover
     _brain = None
     _HAS_BRAIN = False
 
+# Auto-Coverage Duty Roster — additive, isolated, never takes down the live bot/dashboard.
+try:
+    import roster as _roster
+    _HAS_ROSTER = True
+except Exception as _roster_err:       # pragma: no cover
+    print("[roster] import failed (roster disabled, bot unaffected):", _roster_err)
+    _roster = None
+    _HAS_ROSTER = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -4563,6 +4572,85 @@ async def headsup_loop():
         await post_headsup(items, tomorrow, weekend)
     except Exception as e:
         print("headsup error:", e)
+
+# ====================== Auto-Coverage Duty Roster — notifications ======================
+# Event-driven (absence/override/owner-change touching today/tomorrow) + ONE morning digest.
+# No 3-hour ping schedule (that is the vendor-ticket pattern, not this one — build spec §8).
+ROSTER_ENABLED        = os.environ.get("ROSTER_ENABLED", "1") in ("1", "true", "True", "yes")
+ROSTER_NOTIFY_DRYRUN  = os.environ.get("ROSTER_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
+ROSTER_DIGEST_HOUR    = int(os.environ.get("ROSTER_DIGEST_HOUR", "8"))      # 08:00 Riyadh
+ROSTER_OPS_CHANNEL    = os.environ.get("ROSTER_OPS_CHANNEL", "roster")      # ops summary channel
+ROSTER_ESCALATE_IDS   = [s.strip() for s in os.environ.get("ROSTER_ESCALATE_IDS", "").split(",") if s.strip()]
+
+def _roster_notify(messages):
+    """HOST.notify hook — called synchronously on the event loop by roster.notify.fire().
+    Schedules the async Discord delivery. Never raises into a route handler."""
+    if not (ROSTER_ENABLED and _HAS_ROSTER):
+        return
+    try:
+        asyncio.create_task(_roster_deliver(messages))
+    except RuntimeError:
+        pass   # no running loop (tests / import-time) — silently skip
+
+async def _roster_deliver(messages):
+    nl = chr(10)
+    if ROSTER_NOTIFY_DRYRUN:
+        print("[roster] (dryrun) would notify:", messages.get("reason"),
+              "· employees=%d" % len(messages.get("per_employee", [])),
+              "· escalate=%s" % bool(messages.get("escalation")))
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    # 1) per-employee DM (their own day's list, bilingual code block)
+    for pe in messages.get("per_employee", []):
+        did = pe.get("discord_id")
+        if not did:
+            continue
+        try:
+            member = guild.get_member(int(did)) or await bot.fetch_user(int(did))
+            await member.send("```" + nl + pe["text"] + nl + "```")
+        except Exception as e:
+            print("[roster] dm failed for", pe.get("name"), e)
+    # 2) ops-channel summary
+    ch = None
+    try:
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, ROSTER_OPS_CHANNEL, cat)
+        if ch is not None:
+            await ch.send("```" + nl + messages["channel"] + nl + "```")
+    except Exception as e:
+        print("[roster] ops summary failed:", e)
+    # 3) escalation — urgent DM to ops_manager + Faisal, plus @here in the ops channel
+    esc = messages.get("escalation")
+    if esc:
+        for did in ROSTER_ESCALATE_IDS:
+            try:
+                u = await bot.fetch_user(int(did))
+                await u.send(esc)
+            except Exception as e:
+                print("[roster] escalation dm failed:", e)
+        try:
+            if ch is not None:
+                await ch.send("@here" + nl + esc)
+        except Exception:
+            pass
+
+@tasks.loop(time=dt_time(hour=ROSTER_DIGEST_HOUR, minute=0, tzinfo=TZ))
+async def roster_digest_loop():
+    """Morning digest (build spec §8): everyone gets their day's list once, ops gets a summary."""
+    if not (ROSTER_ENABLED and _HAS_ROSTER):
+        return
+    try:
+        today = now_riyadh().date().isoformat()
+        enriched = await asyncio.to_thread(_roster.routes.roster_for, today)
+        await asyncio.to_thread(_roster.routes._persist_log, today, enriched)
+        _roster.notify.fire(today, enriched["weekday"], enriched, reason="digest")
+        print("[roster] morning digest fired for", today,
+              "· coverage %d/%d gaps %d" % (enriched["status"]["assigned"],
+                                            enriched["status"]["total"], enriched["status"]["gaps"]))
+    except Exception as e:
+        print("[roster] digest error:", e)
 
 # ====================== AI guest-message assistant ======================
 # Claude drafts a reply, a human approves it in Discord, and only then is it sent.
@@ -13491,6 +13579,40 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .di-b{flex:1;min-width:0}.di-b .t{font-weight:700;font-size:14px;line-height:1.35}.di-b .d{font-size:12.5px;color:var(--mut);margin-top:2px}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:20px;padding:3px 11px;white-space:nowrap}
 .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+/* ===== Auto-Coverage Duty Roster ===== */
+.ros-date{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:var(--r-sm);padding:7px 10px;font-family:var(--font-en);font-size:12.5px}
+.ros-banner{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
+.ros-stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 10px;text-align:center;box-shadow:var(--sh)}
+.ros-stat .v{font-weight:800;font-size:26px;line-height:1.05}
+.ros-stat .k{font-size:11.5px;color:var(--mut);margin-top:4px}
+.ros-good{color:var(--good)} .ros-bad{color:var(--bad)}
+.ros-meta{color:var(--mut);font-size:12.5px;font-weight:600;margin:0 2px 14px}
+.ros-absent{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.ros-gapbox{background:var(--bad-bg);border:1px solid var(--bad);border-radius:var(--r);padding:13px 14px;margin-bottom:14px}
+.ros-gapbox b{color:var(--bad)}
+.ros-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ros-ovbar{background:var(--gold-tint);border:1px solid var(--accent);border-radius:var(--r);padding:11px 13px;margin-bottom:14px}
+.ros-ovrow{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.ros-input{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:var(--r-sm);padding:7px 10px;font-family:var(--font-ar);font-size:13px;min-height:38px}
+.ros-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:18px}
+.ros-card{padding:15px}
+.ros-chd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
+.ros-who{display:flex;align-items:center;gap:10px;min-width:0}
+.ros-ava{width:38px;height:38px;border-radius:50%;background:var(--gold-soft);color:var(--accent);display:grid;place-items:center;font-weight:800;font-size:15px;flex:none}
+.ros-nm{font-weight:800;font-size:15.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ros-load{font-weight:800;font-size:15px;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:4px 12px;flex:none}
+.ros-grp{margin-top:9px}
+.ros-lab{font-size:11.5px;color:var(--mut);font-weight:700;margin-bottom:6px}
+.ros-unit::before{display:none}
+.ros-unit.tap{cursor:pointer;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1)),background .12s}
+.ros-unit.tap:hover{background:var(--gold-tint);border-color:var(--accent)}
+.ros-unit.tap:active{transform:scale(.97)}
+.chip.cov{background:var(--gold-soft)}
+.ros-mgmt{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.ros-form{padding:15px} .ros-formh{font-weight:800;font-size:14px;margin-bottom:11px}
+.ros-formrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ros-uarow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line)}
+@media (prefers-reduced-motion:reduce){.ros-unit.tap{transition:none}}
 .chip.good{color:var(--good);background:var(--good-bg)}.chip.warn{color:var(--warn);background:var(--warn-bg)}
 .chip.bad{color:var(--bad);background:var(--bad-bg)}.chip.info{color:var(--info);background:var(--info-bg)}
 .chip.flat{color:var(--gray);background:var(--surface-2)}.chip.flat::before{display:none}
@@ -13929,6 +14051,22 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
         </div>
         <div id="gapsBody"><div class="empty sk">—</div></div>
+      </section>
+
+      <!-- ============ AUTO-COVERAGE DUTY ROSTER · التوزيع اليومي ============ -->
+      <section class="view" id="view_roster">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_roster">التوزيع اليومي</div>
+            <div class="page-sub" id="t_roster_sub">من يغطّي أي شقة اليوم — تلقائياً حسب الإجازات وأيام الراحة. التغطية دائماً مكتملة بدون فجوات.</div>
+          </div>
+          <div class="page-tools">
+            <input type="date" id="rosterDate" class="ros-date" onchange="loadRoster(true)">
+            <button class="btn ghost sm" id="rosterSyncBtn" onclick="rosterSync()" title="مزامنة Hostaway">⟳ <span id="t_roster_sync">مزامنة</span></button>
+            <button class="btn ghost sm" onclick="loadRoster(true)" title="تحديث">↻</button>
+          </div>
+        </div>
+        <div id="rosterBody"><div class="empty sk">—</div></div>
       </section>
 
       <!-- ============ APARTMENT PAGE (full-width, opened by Details) ============ -->
@@ -15981,6 +16119,191 @@ async function post(path, body){
   const r = await fetch(path + '?token=' + encodeURIComponent(tok()), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body||{})});
   return r.json().catch(function(){return {}});
 }
+async function rdelete(path){
+  const r = await fetch(path + '?token=' + encodeURIComponent(tok()), {method:'DELETE'});
+  return r.json().catch(function(){return {}});
+}
+
+/* ============================================================
+   AUTO-COVERAGE DUTY ROSTER — التوزيع اليومي (one engine, same numbers everywhere)
+   ============================================================ */
+var _rosSel = null;   /* the unit currently being reassigned (override), or null */
+
+function loadRoster(force){
+  var ti=document.getElementById('t_roster'); if(ti) ti.textContent=labelText('التوزيع اليومي','Duty Roster');
+  var st=document.getElementById('t_roster_sub'); if(st) st.textContent=labelText('من يغطّي أي شقة اليوم — تلقائياً حسب الإجازات وأيام الراحة. التغطية دائماً مكتملة بدون فجوات.','Who covers which unit today — auto, by leave and days off. Coverage stays complete, zero gaps.');
+  var sy=document.getElementById('t_roster_sync'); if(sy) sy.textContent=labelText('مزامنة','Sync');
+  var di=document.getElementById('rosterDate');
+  var qd=(di && di.value) ? di.value : '';
+  var url='/api/roster'+(qd?('?date='+encodeURIComponent(qd)):'');
+  document.getElementById('rosterBody').innerHTML='<div class="empty sk">'+String.fromCharCode(8230)+'</div>';
+  Promise.all([api(url), api('/api/properties')]).then(function(res){
+    var x=res[0]||{}, pp=res[1]||{};
+    if(!x.ok){ document.getElementById('rosterBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التوزيع','Could not load roster')+'</div>'; return; }
+    D.roster=x.roster; D.rosterEmps=(pp.employees||[]); D.rosterUnassigned=(pp.unassigned||[]); D.rosterCanWrite=!!x.can_write;
+    if(di && !di.value){ di.value=x.roster.date; }
+    renderRoster();
+  }).catch(function(){ document.getElementById('rosterBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التوزيع','Could not load roster')+'</div>'; });
+}
+
+function _rosEmpOptions(selId){
+  var o='<option value="">'+labelText('— اختر —','— pick —')+'</option>';
+  (D.rosterEmps||[]).forEach(function(e){
+    var sel=(String(selId)===String(e.id))?' selected':'';
+    o+='<option value="'+e.id+'"'+sel+'>'+esc(e.name)+'</option>';
+  });
+  return o;
+}
+
+function renderRoster(){
+  if(!D.roster){ return; }
+  var r=D.roster, s=r.status, cw=D.rosterCanWrite, h='';
+  var WD={sun:labelText('الأحد','Sunday'),mon:labelText('الإثنين','Monday'),tue:labelText('الثلاثاء','Tuesday'),wed:labelText('الأربعاء','Wednesday'),thu:labelText('الخميس','Thursday'),fri:labelText('الجمعة','Friday'),sat:labelText('السبت','Saturday')};
+
+  /* status banner */
+  h+='<div class="ros-banner">';
+  h+='<div class="ros-stat"><div class="v num">'+s.total+'</div><div class="k">'+labelText('إجمالي الشقق','Total units')+'</div></div>';
+  h+='<div class="ros-stat"><div class="v num">'+s.available+'</div><div class="k">'+labelText('المتاحون','Available')+'</div></div>';
+  h+='<div class="ros-stat"><div class="v num ros-good">'+s.assigned+'</div><div class="k">'+labelText('مغطّاة','Covered')+'</div></div>';
+  h+='<div class="ros-stat"><div class="v num '+(s.gaps>0?'ros-bad':'ros-good')+'">'+s.gaps+'</div><div class="k">'+labelText('فجوات','Gaps')+'</div></div>';
+  h+='</div>';
+  h+='<div class="ros-meta">'+esc(WD[r.weekday]||r.weekday)+' · <span class="num">'+esc(r.date)+'</span></div>';
+
+  /* absent strip */
+  if(r.absent && r.absent.length){
+    h+='<div class="ros-absent">';
+    r.absent.forEach(function(a){
+      var cls=(a.reason==='leave')?'danger':'warn';
+      var lab=(a.reason==='leave')?(labelText('إجازة','Leave')+(a.type?(' · '+esc(a.type)):'')):labelText('يوم راحة','Day off');
+      h+='<span class="pill '+cls+'">'+esc(a.name)+' · '+lab+'</span>';
+    });
+    h+='</div>';
+  }
+
+  /* gaps escalation box */
+  if(r.gaps && r.gaps.length){
+    h+='<div class="ros-gapbox"><b>'+labelText('تحتاج تغطية عاجلة','Needs urgent coverage')+' ('+r.gaps.length+')</b><div class="ros-chips" style="margin-top:8px">';
+    r.gaps.forEach(function(g){ h+='<span class="chip">'+esc(g.name)+'</span>'; });
+    h+='</div></div>';
+  }
+
+  /* override bar (when a unit is selected) */
+  if(cw && _rosSel){
+    h+='<div class="ros-ovbar"><div class="ros-ovrow"><b>'+labelText('إعادة تعيين','Reassign')+': '+esc(_rosSel.name)+'</b>'
+     + '<select id="rosOvTo" class="ros-input">'+_rosEmpOptions('')+'</select>'
+     + '<input id="rosOvReason" class="ros-input" placeholder="'+labelText('السبب (مطلوب)','reason (required)')+'">'
+     + '<button class="btn sm" onclick="rosterDoOverride()">'+labelText('تأكيد','Confirm')+'</button>'
+     + '<button class="btn ghost sm" onclick="rosterCancelOverride()">'+labelText('إلغاء','Cancel')+'</button>'
+     + '</div></div>';
+  }
+
+  /* the board */
+  h+='<div class="ros-board">';
+  r.board.forEach(function(e){
+    h+='<div class="card ros-card"><div class="ros-chd"><div class="ros-who"><div class="ros-ava">'+esc(e.initial||e.name.slice(0,1))+'</div><div class="ros-nm">'+esc(e.name)+'</div></div><div class="ros-load num">'+e.load+'</div></div>';
+    if(e.primary && e.primary.length){
+      h+='<div class="ros-grp"><div class="ros-lab">'+labelText('ملكه','Own')+' ('+e.primary.length+')</div><div class="ros-chips">';
+      e.primary.forEach(function(p){ h+='<span class="chip ros-unit'+(cw?' tap':'')+'" data-pid="'+p.id+'" data-pname="'+esc(p.name)+'">'+esc(p.name)+'</span>'; });
+      h+='</div></div>';
+    }
+    if(e.covered && e.covered.length){
+      h+='<div class="ros-grp"><div class="ros-lab">'+labelText('يغطّي','Covering')+' ('+e.covered.length+')</div><div class="ros-chips">';
+      e.covered.forEach(function(c){ h+='<span class="chip cov ros-unit'+(cw?' tap':'')+'" data-pid="'+c.id+'" data-pname="'+esc(c.name)+'">'+esc(c.name)+' <b>'+labelText('بدل','for')+' '+esc(c.orig_name||'')+'</b></span>'; });
+      h+='</div></div>';
+    }
+    h+='</div>';
+  });
+  h+='</div>';
+
+  /* management (write roles only) */
+  if(cw){
+    h+='<div class="ros-mgmt">';
+    /* log leave */
+    h+='<div class="card ros-form"><div class="ros-formh">'+labelText('تسجيل إجازة / غياب','Log leave / absence')+'</div><div class="ros-formrow">'
+     + '<select id="rosLeaveEmp" class="ros-input">'+_rosEmpOptions('')+'</select>'
+     + '<select id="rosLeaveType" class="ros-input">'
+       + '<option value="sick">'+labelText('مرضي','Sick')+'</option>'
+       + '<option value="vacation">'+labelText('إجازة','Vacation')+'</option>'
+       + '<option value="emergency">'+labelText('طارئ','Emergency')+'</option>'
+       + '<option value="half_day">'+labelText('نصف يوم','Half day')+'</option>'
+       + '<option value="late">'+labelText('تأخير','Late')+'</option>'
+       + '<option value="training">'+labelText('تدريب','Training')+'</option>'
+       + '<option value="no_show">'+labelText('غياب بدون إذن','No-show')+'</option>'
+       + '<option value="unpaid">'+labelText('بدون راتب','Unpaid')+'</option>'
+     + '</select>'
+     + '<input id="rosLeaveStart" type="date" class="ros-input" value="'+esc(r.date)+'">'
+     + '<input id="rosLeaveEnd" type="date" class="ros-input" value="'+esc(r.date)+'">'
+     + '<input id="rosLeaveNote" class="ros-input" placeholder="'+labelText('ملاحظة','note')+'">'
+     + '<button class="btn sm" onclick="rosterLeave()">'+labelText('حفظ','Save')+'</button>'
+     + '</div></div>';
+    /* unassigned units */
+    var ua=D.rosterUnassigned||[];
+    h+='<div class="card ros-form"><div class="ros-formh">'+labelText('شقق بلا مسؤول','Unassigned units')+' ('+ua.length+')</div>';
+    if(!ua.length){ h+='<div class="ros-lab">'+labelText('كل الشقق لها مسؤول','Every unit has an owner')+'</div>'; }
+    ua.forEach(function(u){
+      h+='<div class="ros-uarow"><span>'+esc(u.name)+'</span><select class="ros-input ros-owner-sel" data-pid="'+u.id+'">'+_rosEmpOptions('')+'</select></div>';
+    });
+    h+='</div></div>';
+  }
+
+  document.getElementById('rosterBody').innerHTML=h;
+  if(!window._rosWired){
+    window._rosWired=true;
+    var body=document.getElementById('rosterBody');
+    body.addEventListener('click', function(ev){
+      var c=ev.target.closest ? ev.target.closest('.ros-unit.tap') : null;
+      if(c){ _rosSel={pid:parseInt(c.getAttribute('data-pid'),10), name:c.getAttribute('data-pname')||''}; renderRoster(); }
+    });
+    body.addEventListener('change', function(ev){
+      var sel=ev.target;
+      if(sel && sel.classList && sel.classList.contains('ros-owner-sel')){
+        rosterSetOwner(parseInt(sel.getAttribute('data-pid'),10), sel.value);
+      }
+    });
+  }
+}
+
+function rosterLeave(){
+  var emp=document.getElementById('rosLeaveEmp').value;
+  if(!emp){ toast(labelText('اختر الموظف','Pick an employee')); return; }
+  post('/api/absence', {employee_id:parseInt(emp,10), type:document.getElementById('rosLeaveType').value,
+    start_date:document.getElementById('rosLeaveStart').value, end_date:document.getElementById('rosLeaveEnd').value,
+    note:document.getElementById('rosLeaveNote').value}).then(function(j){
+    if(j && j.ok){ toast(labelText('تم التسجيل','Saved')); loadRoster(true); }
+    else { toast((j&&j.error)?j.error:labelText('تعذّر الحفظ','Could not save')); }
+  });
+}
+
+function rosterSetOwner(pid, ownerId){
+  post('/api/properties/'+pid+'/owner', {owner_id: ownerId?parseInt(ownerId,10):null}).then(function(j){
+    if(j && j.ok){ toast(labelText('تم تعيين المسؤول','Owner set')); loadRoster(true); }
+    else { toast((j&&j.error)?j.error:labelText('تعذّر التعيين','Could not set')); }
+  });
+}
+
+function rosterDoOverride(){
+  var to=document.getElementById('rosOvTo').value;
+  var reason=document.getElementById('rosOvReason').value;
+  if(!to){ toast(labelText('اختر الموظف','Pick an employee')); return; }
+  if(!reason || !reason.trim()){ toast(labelText('السبب مطلوب','Reason required')); return; }
+  post('/api/assignment/override', {date:D.roster.date, property:_rosSel.pid, to:parseInt(to,10), reason:reason.trim()}).then(function(j){
+    if(j && j.ok){ toast(labelText('تم التحويل','Reassigned')); _rosSel=null; D.roster=j.roster; renderRoster(); loadRoster(true); }
+    else { toast((j&&j.error)?j.error:labelText('تعذّر التحويل','Could not reassign')); }
+  });
+}
+function rosterCancelOverride(){ _rosSel=null; renderRoster(); }
+
+function rosterSync(){
+  var b=document.getElementById('rosterSyncBtn'); if(b){ b.setAttribute('aria-busy','true'); }
+  post('/api/hostaway/sync', {}).then(function(j){
+    if(b){ b.removeAttribute('aria-busy'); }
+    if(j && j.ok){
+      var rp=j.report||{};
+      toast(labelText('مزامنة: ','Sync: ')+labelText('ربط ','linked ')+((rp.linked||[]).length)+' · '+labelText('جديد ','new ')+((rp.created||[]).length));
+      loadRoster(true);
+    } else { toast((j&&j.error)?j.error:labelText('تعذّرت المزامنة','Sync failed')); }
+  });
+}
 
 /* ============================================================
    THEME + LANG
@@ -16425,6 +16748,7 @@ function go(id){
   if(id==='listings') loadListings();
   if(id==='brain') loadBrain();
   if(id==='gaps') loadGaps();
+  if(id==='roster') loadRoster();
 }
 
 /* ============================================================
@@ -30907,7 +31231,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "calendar", "clean_center", "cphotos", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "calendar", "roster", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
@@ -30930,6 +31254,7 @@ NAV_DEF = {
         {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
+        {"id": "roster", "ic": "cleanteams", "tk": "roster"},
         {"id": "reviews", "ic": "reviews", "tk": "reviews", "badge": "reviews"},
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
@@ -30954,7 +31279,7 @@ NAV_DEF = {
             "home": "الرئيسية", "brain": "أوجا برين", "gaps": "فجوات منتصف الأسبوع", "inbox": "صندوق الوارد", "calendar": "التقويم",
             "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
-            "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة",
+            "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة", "roster": "التوزيع اليومي",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي",
@@ -30968,7 +31293,7 @@ NAV_DEF = {
             "home": "Home", "brain": "Ouja Brain", "gaps": "Weekday Gaps", "inbox": "Inbox", "calendar": "Calendar",
             "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
-            "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance",
+            "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance", "roster": "Duty Roster",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center",
@@ -45785,6 +46110,22 @@ async def start_web_server():
             except Exception as _be:
                 print("[brain] wiring failed (Brain disabled, bot unaffected):", _be)
 
+        # ---- Auto-Coverage Duty Roster — additive; reuses brain.db + the existing auth ----
+        if _HAS_ROSTER:
+            try:
+                _roster.wire({
+                    "state_path": _state_path, "load_json": _load_json, "save_json": _save_json,
+                    "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json, "web": web,
+                    "get_listings_map": get_listings_map, "ls_get": _ls_get,
+                    "notify": _roster_notify if ROSTER_ENABLED else None,
+                    "tz": TZ, "now": now_riyadh,
+                })
+                _roster.register_routes(app)
+                print("[roster] wired + routes registered (/roster, /api/roster, /api/absence, "
+                      "/api/properties, /api/hostaway/sync, /api/assignment/override)")
+            except Exception as _re3:
+                print("[roster] wiring failed (roster disabled, bot unaffected):", _re3)
+
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
         app.router.add_post("/api/events/save", _api_events_save)
@@ -50927,6 +51268,8 @@ async def on_ready():
         discount_catchup_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
+    if _HAS_ROSTER and ROSTER_ENABLED and not roster_digest_loop.is_running():
+        roster_digest_loop.start()     # morning duty-roster digest (default 08:00 Riyadh)
     if not owner_warm_loop.is_running():
         owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():

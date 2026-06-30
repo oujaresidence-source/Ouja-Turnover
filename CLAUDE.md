@@ -117,6 +117,30 @@ Then verify the embedded dashboard string is intact (extract `DASHBOARD_HTML` an
 And run a quick **synthetic-data logic test** for any new computation (e.g. feed fake
 reservations into the new function and assert the numbers) before trusting it on live data.
 
+## Auto-Coverage Duty Roster (التوزيع اليومي) — the `roster/` package
+A self-contained coverage roster built like the Brain: a pure, deterministic engine
+(`roster/engine.py` — `compute_roster`) is the SINGLE source of truth; the dashboard tab
+(`view_roster` + `loadRoster`/`renderRoster` in `DASHBOARD_HTML`), the standalone mobile page
+(`roster/page.py` → `/roster`), and every Discord notification all render from it, so the
+numbers can never disagree. Storage REUSES `brain.db` via `roster/db.py` (tables prefixed
+`roster_*`). Wired in `start_web_server` via `roster.wire({...})` + `roster.register_routes(app)`.
+- **Engine invariants are TDD-locked** (`tests/test_roster_engine.py`): gaps==0 every weekday,
+  load balanced, stacked-absence + capacity-escalation + lock behaviour. Run before any UI edit.
+- **`roster/page.py` has the SAME backslash trap as `DASHBOARD_HTML`** (normal triple-quoted
+  string). It contains ZERO backslashes — template/real-newlines + event delegation, no inline
+  onclick quote-building. esprima-parse it after edits.
+- **Seed (`roster/seed.py`) is from real data + editable.** `assignments.json` holds 54 units
+  across 4 custodians; عهود is NOT in repo data → seeded with 0 units (flagged). Fix her units
+  in the Owners panel or via `roster_owner_overrides.json` on the volume. Don't hard-code "55".
+- New env vars: `ROSTER_ENABLED`(1), `ROSTER_NOTIFY_DRYRUN`(1 — flip to 0 to actually DM),
+  `ROSTER_DIGEST_HOUR`(8), `ROSTER_OPS_CHANNEL`(roster), `ROSTER_ESCALATE_IDS`(csv Discord ids).
+
+## Design skills are INSTALLED and MUST be used every session
+**Superpowers + Impeccable + emil-design-eng** live in `.claude/skills/` and govern all work:
+Superpowers = the PROCESS (brainstorm → plan → TDD → build → verify, no skipping); Impeccable =
+audit → critique → polish → harden every view (kill AI-slop); emil-design-eng = the FEEL
+(micro-interactions, motion, the drawer/transition craft). Use them on every UI change.
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log
