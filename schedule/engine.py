@@ -103,7 +103,7 @@ def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None)
     for e in working:
         b = board[e["id"]]
         working_out.append({"id": e["id"], "name": e["name"], "color": e.get("color"),
-                            "sort_order": e.get("sort_order", 0),
+                            "emoji": e.get("emoji"), "sort_order": e.get("sort_order", 0),
                             "own": b["own"], "coverage": b["coverage"], "load": b["load"]})
 
     off_out = []
@@ -112,7 +112,7 @@ def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None)
             continue
         mine = [a for a in apts if a.get("owner_id") == e["id"]]
         off_out.append({
-            "id": e["id"], "name": e["name"], "color": e.get("color"),
+            "id": e["id"], "name": e["name"], "color": e.get("color"), "emoji": e.get("emoji"),
             "reason": "leave" if e["id"] in leave else "off",
             "apartments": [{"apartment": a,
                             "covering_id": covered.get(a["id"], {}).get("covering_id"),

@@ -113,7 +113,7 @@ def schedule_week():
         rows.append({"weekday": wd, "weekday_ar": _DAY_AR[wd],
                      "has_coverage": r["has_coverage"], "cells": cells})
     cols = [{"id": e["id"], "name": e["name"], "color": e.get("color"),
-             "sort_order": e.get("sort_order", 0)} for e in emps]
+             "emoji": e.get("emoji"), "sort_order": e.get("sort_order", 0)} for e in emps]
     return {"columns": cols, "rows": rows, "today": engine.to_weekday(_today_iso())}
 
 
@@ -175,14 +175,15 @@ async def api_employee_save(request):
     off_day = b.get("off_day")
     off_day = int(off_day) if off_day not in (None, "") else None
     color = b.get("color") or "#6A3A5D"
+    emoji = (b.get("emoji") or "").strip()[:8] or None   # free-text marker; cap length, keep NULL when blank
     sort_order = int(b.get("sort_order") or 0)
     eid = b.get("id")
     if eid:
-        db.execute("UPDATE schedule_employees SET name=?,off_day=?,color=?,sort_order=? WHERE id=?",
-                   (name, off_day, color, sort_order, int(eid)))
+        db.execute("UPDATE schedule_employees SET name=?,off_day=?,color=?,emoji=?,sort_order=? WHERE id=?",
+                   (name, off_day, color, emoji, sort_order, int(eid)))
     else:
-        eid = db.execute("INSERT INTO schedule_employees(name,off_day,color,sort_order,created_at) "
-                         "VALUES(?,?,?,?,?)", (name, off_day, color, sort_order, db.now_iso()))
+        eid = db.execute("INSERT INTO schedule_employees(name,off_day,color,emoji,sort_order,created_at) "
+                         "VALUES(?,?,?,?,?,?)", (name, off_day, color, emoji, sort_order, db.now_iso()))
     return HOST.json_response({"ok": True, "id": eid})
 
 

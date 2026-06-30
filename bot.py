@@ -3125,16 +3125,32 @@ async def sync_checkouts():
             print("create error:", e)
 
 # ---- OujaCT (in-house cleaning team) turnover channels + daily schedule ----
-def _oujact_channel(internal_name, checkin_today, team_name=""):
-    """Discord-safe cleaning-channel name = unit + the TEAM name, e.g. '12b-stayclean' /
-    '12b-servicu-checkin'. The team name is what the owner sees on the channel; the 'oujact:1'
-    marker lives in the TOPIC (for dedup/cleanup), never the visible name."""
+def _oujact_cover_info(listing_name, date_iso):
+    """{name, emoji, ...} of the employee responsible for cleaning this apartment on `date_iso`,
+    looked up via the Employee Schedule (best-effort name match), or None when the listing can't
+    be matched to a schedule apartment. Never raises — channel creation must not break on a
+    schedule miss. The caller supplies the neutral placeholder (⚪) for the channel name."""
+    if not (_HAS_SCHEDULE and _schedule):
+        return None
+    try:
+        return _schedule.coverage.cover_for_listing(listing_name, date_iso)
+    except Exception as e:
+        print("OujaCT cover lookup failed:", e)
+        return None
+
+def _oujact_channel(internal_name, checkin_today, team_name="", cover_emoji=""):
+    """Discord-safe cleaning-channel name = unit + the responsible-employee EMOJI + the TEAM name,
+    e.g. '12b🟢-stayclean' / '12b🟢-servicu-checkin'. The emoji (whoever covers the unit that day,
+    from the Employee Schedule) sits right after the apartment name so the owner can see who's in
+    charge at a glance. The team name is what the owner sees; the 'oujact:1' marker lives in the
+    TOPIC (for dedup/cleanup), never the visible name."""
     base = channel_name(internal_name)[:50]
     team = channel_name(team_name) if team_name else ""
     if not team or team == "unit":
         team = "clean"
     suffix = "-checkin" if checkin_today else ""
-    return (base + "-" + team[:24] + suffix)[:100]
+    em = (cover_emoji or "").strip()
+    return (base + em + "-" + team[:24] + suffix)[:100]
 
 def _oujact_topic(it, team_name=""):
     """Channel topic carrying the STABLE dedup key (lid:date) + reservation id + check-in flag
@@ -3144,10 +3160,16 @@ def _oujact_topic(it, team_name=""):
             lid=it["lid"], date=it["checkout_date"], rid=it["res_id"],
             ci=(1 if it["checkin_today"] else 0), tm=tm))
 
-def _oujact_card_embed(it, team_name=""):
-    """English turnover card for the in-house team. Reuses the submit-for-review button."""
+def _oujact_card_embed(it, team_name="", cover=None):
+    """English turnover card for the in-house team. Reuses the submit-for-review button.
+    `cover` (optional) = {name, emoji} of the employee responsible for this unit today, shown so
+    the team can see who's in charge at a glance."""
     e = discord.Embed(title="🧹 Turnover — Ready to Clean", color=GOLD)
     e.add_field(name="Unit", value=it["listing"], inline=False)
+    if cover and (cover.get("name") or cover.get("emoji")):
+        e.add_field(name="Responsible",
+                    value=((cover.get("emoji") or "") + " " + (cover.get("name") or "")).strip(),
+                    inline=True)
     if team_name:
         e.add_field(name="Cleaning Team", value=team_name, inline=True)
     e.add_field(name="Checkout",
@@ -3208,9 +3230,11 @@ async def sync_oujact_turnovers(day=None):
             continue                                       # opened once already & since closed → don't auto-reopen (restart/poll)
         try:
             if ch is None:
-                want = _oujact_channel(it["listing"], it["checkin_today"], team_name)
+                cover = _oujact_cover_info(it["listing"], it["checkout_date"])
+                cover_emoji = (cover.get("emoji") if cover else "") or "⚪"
+                want = _oujact_channel(it["listing"], it["checkin_today"], team_name, cover_emoji)
                 ch = await guild.create_text_channel(want, category=category, topic=topic)
-                await ch.send(embed=_oujact_card_embed(it, team_name), view=CleaningDoneView())
+                await ch.send(embed=_oujact_card_embed(it, team_name, cover), view=CleaningDoneView())
                 by_key[key] = ch
                 changed.append({"unit": it["listing"], "channel": want,
                                 "action": "created", "checkin": it["checkin_today"]})
@@ -16170,7 +16194,7 @@ function renderSchedToday(){
 function schedCard(w){
   var ex=SCHED.exp[w.id];
   var h='<div class="card sched-card" data-semp="'+w.id+'" style="border-inline-start:4px solid '+esc(w.color||'#B29A6A')+'">';
-  h+='<div class="sched-chd"><div class="sched-nm">'+esc(w.name)+'</div><div class="sched-lo num">'+w.load+'</div></div>';
+  h+='<div class="sched-chd"><div class="sched-nm">'+(w.emoji?(esc(w.emoji)+' '):'')+esc(w.name)+'</div><div class="sched-lo num">'+w.load+'</div></div>';
   h+='<div class="sched-sub">'+labelText('أصلي','own')+' '+w.own.length+(w.coverage.length?(' · '+labelText('تغطية','cover')+' '+w.coverage.length):'')+'</div>';
   if(ex){
     h+='<div class="sched-det">';
@@ -16184,7 +16208,7 @@ function schedCard(w){
 function schedOffCard(o){
   var ex=SCHED.exp[o.id];
   var h='<div class="card sched-card off" data-semp="'+o.id+'" style="border-inline-start:4px solid '+esc(o.color||'#8B3748')+'">';
-  h+='<div class="sched-chd"><div class="sched-nm">'+esc(o.name)+'</div><div class="sched-tag">'+(o.reason==='leave'?labelText('إجازة','Leave'):labelText('يوم راحة','Day off'))+'</div></div>';
+  h+='<div class="sched-chd"><div class="sched-nm">'+(o.emoji?(esc(o.emoji)+' '):'')+esc(o.name)+'</div><div class="sched-tag">'+(o.reason==='leave'?labelText('إجازة','Leave'):labelText('يوم راحة','Day off'))+'</div></div>';
   h+='<div class="sched-sub">'+o.apartments.length+' '+labelText('شقة يغطّيها الفريق','units covered')+'</div>';
   if(ex){
     h+='<div class="sched-det">';
@@ -16199,7 +16223,7 @@ function schedOffCard(o){
 function renderSchedWeek(){
   var w=SCHED.week; if(!w){ document.getElementById('schedBody').innerHTML='<div class="empty sk">—</div>'; return; }
   var h='<div class="sched-mwrap"><table class="sched-mx"><thead><tr><th>'+labelText('اليوم','Day')+'</th>';
-  w.columns.forEach(function(c){ h+='<th style="background:'+esc(c.color||'#6A3A5D')+';color:#fff">'+esc(c.name)+'</th>'; });
+  w.columns.forEach(function(c){ h+='<th style="background:'+esc(c.color||'#6A3A5D')+';color:#fff">'+(c.emoji?(esc(c.emoji)+' '):'')+esc(c.name)+'</th>'; });
   h+='</tr></thead><tbody>';
   w.rows.forEach(function(row){
     var tr=(row.weekday===w.today)?' class="today"':'';
@@ -16260,6 +16284,7 @@ function schedEmpRow(e){
   for(var i=0;i<7;i++){ h+='<option value="'+i+'"'+(String(e.off_day)===String(i)?' selected':'')+'>'+SCHED_DAYS[i]+'</option>'; }
   h+='</select>';
   h+='<input type="color" id="se_color_'+id+'" value="'+esc(e.color||'#6A3A5D')+'" class="sched-color">';
+  h+='<input class="ros-input" id="se_emoji_'+id+'" value="'+esc(e.emoji||'')+'" maxlength="8" placeholder="🟢" title="'+labelText('رمز يظهر بعد اسم الشقة','Emoji shown after the apartment name')+'" style="flex:0 0 54px;text-align:center;font-size:18px">';
   h+='<input class="ros-input num" id="se_sort_'+id+'" value="'+(e.sort_order||0)+'" style="flex:0 0 52px" title="ترتيب">';
   h+='<button class="btn sm" onclick="schedSaveEmp('+id+')">'+(id?'حفظ':'إضافة')+'</button>';
   if(id){ h+='<button class="btn ghost sm" onclick="schedDelEmp('+id+')" style="color:var(--bad)">حذف</button>'; }
@@ -16310,7 +16335,8 @@ function schedAfterWrite(reopenManage){
 }
 function schedSaveEmp(id){
   var body={name:document.getElementById('se_name_'+id).value, off_day:document.getElementById('se_off_'+id).value,
-    color:document.getElementById('se_color_'+id).value, sort_order:document.getElementById('se_sort_'+id).value};
+    color:document.getElementById('se_color_'+id).value, emoji:document.getElementById('se_emoji_'+id).value,
+    sort_order:document.getElementById('se_sort_'+id).value};
   if(id) body.id=id;
   post('/api/schedule/employee', body).then(function(j){ if(j&&j.ok){ toast(labelText('تم','Saved')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } });
 }

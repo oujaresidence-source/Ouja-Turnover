@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS schedule_employees (
     name        TEXT NOT NULL,
     off_day     INTEGER,                 -- 0=الأحد .. 6=السبت (NULL = no day off)
     color       TEXT,
+    emoji       TEXT,                    -- per-employee marker shown after the apartment name
     sort_order  INTEGER DEFAULT 0,
     created_at  TEXT
 );
@@ -68,8 +69,23 @@ def _ensure():
         return
     with closing(_bdb.connect()) as cx:
         cx.executescript(SCHEMA)
+        _migrate(cx)
         cx.commit()
     _inited.add(path)
+
+
+def _migrate(cx):
+    """Additive column migrations for an already-existing brain.db (CREATE TABLE IF NOT EXISTS
+    never adds columns to a table that already exists). Each ALTER is guarded by table_info."""
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_employees)").fetchall()}
+    if "emoji" not in cols:
+        cx.execute("ALTER TABLE schedule_employees ADD COLUMN emoji TEXT")
+        # Backfill the default emoji for the known seed employees so an existing roster isn't all
+        # blank after the upgrade. Only fills NULL/blank — never overwrites an owner-set emoji.
+        from . import seed as _seed
+        for e in _seed.EMPLOYEES:
+            cx.execute("UPDATE schedule_employees SET emoji=? WHERE name=? AND (emoji IS NULL OR emoji='')",
+                       (e.get("emoji"), e["name"]))
 
 
 def reset_init_cache():

@@ -108,6 +108,7 @@ var DAY = null;        // current day result
 var WEEK = null;
 
 function esc(s){ s=(s==null?'':String(s)); var m={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}; return s.replace(/[&<>"']/g,function(c){return m[c];}); }
+function enm(e){ return (e&&e.emoji?(esc(e.emoji)+' '):'')+esc(e&&e.name); }   // emoji + name
 function gdate(iso){ try{ return new Date(iso+'T00:00:00').toLocaleDateString('ar-SA',{day:'numeric',month:'long',year:'numeric'}); }catch(e){ return iso; } }
 
 async function apiGet(path){
@@ -143,10 +144,10 @@ function renderToday(){
   for (var i=0;i<7;i++){ h += '<button class="day" data-wd="'+i+'" aria-selected="'+(i===sel)+'">'+DAYS[i]+'</button>'; }
   h += '</div><div class="grid">';
   DAY.working.slice().sort(function(a,b){return a.sort_order-b.sort_order;}).forEach(function(w){
-    h += '<div class="ecard" data-emp="'+w.id+'" style="--c:'+esc(w.color||'#B29A6A')+'"><div class="nm">'+esc(w.name)+'</div><div class="lo">'+w.load+'</div><div class="meta">أصلي '+w.own.length+(w.coverage.length?(' · تغطية '+w.coverage.length):'')+'</div></div>';
+    h += '<div class="ecard" data-emp="'+w.id+'" style="--c:'+esc(w.color||'#B29A6A')+'"><div class="nm">'+enm(w)+'</div><div class="lo">'+w.load+'</div><div class="meta">أصلي '+w.own.length+(w.coverage.length?(' · تغطية '+w.coverage.length):'')+'</div></div>';
   });
   DAY.off.forEach(function(o){
-    h += '<div class="ecard offc" data-emp="'+o.id+'" style="--c:'+esc(o.color||'#8B3748')+'"><div class="nm">'+esc(o.name)+'</div><div class="tag">'+(o.reason==='leave'?'إجازة':'في إجازة اليوم')+'</div><div class="meta">'+o.apartments.length+' شقة يغطّيها الفريق</div></div>';
+    h += '<div class="ecard offc" data-emp="'+o.id+'" style="--c:'+esc(o.color||'#8B3748')+'"><div class="nm">'+enm(o)+'</div><div class="tag">'+(o.reason==='leave'?'إجازة':'في إجازة اليوم')+'</div><div class="meta">'+o.apartments.length+' شقة يغطّيها الفريق</div></div>';
   });
   h += '</div>';
   document.getElementById('root').innerHTML = h;
@@ -156,7 +157,7 @@ function renderWeek(){
   if (!WEEK){ document.getElementById('root').innerHTML='<div class="center">…</div>'; loadWeek(); return; }
   var cols = WEEK.columns;
   var h = '<div class="mwrap"><table><thead><tr><th style="background:var(--ink)">اليوم</th>';
-  cols.forEach(function(c){ h += '<th style="background:'+esc(c.color||'#6A3A5D')+'">'+esc(c.name)+'</th>'; });
+  cols.forEach(function(c){ h += '<th style="background:'+esc(c.color||'#6A3A5D')+'">'+enm(c)+'</th>'; });
   h += '</tr></thead><tbody>';
   WEEK.rows.forEach(function(row){
     var tr = (row.weekday===WEEK.today)?' class="today"':'';
@@ -178,7 +179,7 @@ function openSheet(empId){
   var o = DAY.off.filter(function(x){return x.id===empId;})[0];
   var h = '';
   if (w){
-    h += '<div class="sheeth"><div class="nm">'+esc(w.name)+'</div><button class="x" data-close="1">&times;</button></div>';
+    h += '<div class="sheeth"><div class="nm">'+enm(w)+'</div><button class="x" data-close="1">&times;</button></div>';
     h += '<div class="big">'+w.load+'</div><div class="sub">إجمالي شقق اليوم</div>';
     h += '<div class="grp"><div class="h"><span>عقاراتك الأصلية</span><span>'+w.own.length+'</span></div>';
     w.own.forEach(function(a){ h += '<div class="row own"><span class="dot"></span>'+esc(a.name)+'</div>'; });
@@ -189,7 +190,7 @@ function openSheet(empId){
       h += '</div>';
     }
   } else if (o){
-    h += '<div class="sheeth"><div class="nm">'+esc(o.name)+'</div><button class="x" data-close="1">&times;</button></div>';
+    h += '<div class="sheeth"><div class="nm">'+enm(o)+'</div><button class="x" data-close="1">&times;</button></div>';
     h += '<div class="grp"><div class="h"><span>'+(o.reason==='leave'?'في إجازة':'في إجازة اليوم')+'</span><span>'+o.apartments.length+'</span></div>';
     o.apartments.forEach(function(a){ h += '<div class="row cov"><span class="dot"></span>'+esc(a.apartment.name)+'<span class="for">يغطّيها '+esc(a.covering_name||'—')+'</span></div>'; });
     h += '</div>';
