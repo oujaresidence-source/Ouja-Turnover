@@ -137,6 +137,10 @@ morning ops summary all render from it. Storage REUSES `brain.db` via `schedule/
   esprima-parse it (and every DASHBOARD_HTML `<script>`) after edits.
 - **Editing** is gated on `can_edit_schedule(request)` = multi-user role in (admin, ops); viewers
   see Today + Weekly but no controls; every write endpoint re-checks it.
+- **Share link = `/team-calendar`, read-only, NO login/token.** `GET /api/schedule/day` + `/week`
+  are PUBLIC (`_safe_public`, no auth) so the ops team opens the link with nothing — don't re-gate
+  them. `manage` + ALL writes stay behind `_safe` (login) AND `can_edit_schedule` (double-gated).
+  The dashboard Manage tab has a «رابط فريق العمليات» copy panel (`location.origin + /team-calendar`).
 - Env vars: `SCHEDULE_ENABLED`(1), `SCHEDULE_NOTIFY_DRYRUN`(1 — flip to 0 to post the morning
   ops summary), `SCHEDULE_DIGEST_HOUR`(8), `SCHEDULE_OPS_CHANNEL`(team-calendar).
 

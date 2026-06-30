@@ -37,10 +37,25 @@ def _deny():
 
 
 def _safe(fn):
+    """Auth-required wrapper: needs a valid dashboard/session token (used for manage + writes)."""
     async def _w(request):
         g = _guard(request)
         if g:
             return g
+        try:
+            return await fn(request)
+        except Exception as e:
+            traceback.print_exc()
+            return HOST.json_response({"ok": False, "error": "%s: %s" % (type(e).__name__, e)}, 200)
+    _w.__name__ = getattr(fn, "__name__", "w")
+    return _w
+
+
+def _safe_public(fn):
+    """PUBLIC read wrapper — NO auth. Used ONLY for the read-only day/week endpoints the shared
+    /team-calendar link calls (no login, no token). These never write and always report
+    can_edit=False for anonymous callers, so the share link is strictly view-only."""
+    async def _w(request):
         try:
             return await fn(request)
         except Exception as e:
@@ -312,8 +327,10 @@ async def handle_page(request):
 def register(app):
     g = app.router.add_get
     p = app.router.add_post
-    g("/api/schedule/day", _safe(api_day))
-    g("/api/schedule/week", _safe(api_week))
+    # READ-ONLY + PUBLIC: the shared /team-calendar link calls these with no login/token.
+    g("/api/schedule/day", _safe_public(api_day))
+    g("/api/schedule/week", _safe_public(api_week))
+    # manage = editor data (employee/apartment lists) -> stays behind login.
     g("/api/schedule/manage", _safe(api_manage))
     p("/api/schedule/employee", _safe(api_employee_save))
     app.router.add_delete("/api/schedule/employee/{id}", _safe(api_employee_delete))

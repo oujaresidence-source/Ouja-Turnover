@@ -129,6 +129,22 @@ class TestScheduleAPI(unittest.TestCase):
         self.assertEqual(day["total"], 53)
         run(routes.api_absence_del(_Req(match={"id": str(add.data["id"])})))
 
+    def test_public_read_no_auth_but_writes_gated(self):
+        """The shared /team-calendar link reads with NO login; writes stay double-gated."""
+        from schedule.host import HOST
+        orig = HOST.dash_auth
+        HOST.dash_auth = lambda req: False        # simulate an anonymous visitor (no token)
+        try:
+            pub = routes._safe_public(routes.api_day)
+            r = run(pub(_Req(query={"date": "2026-06-28"}, role="viewer")))
+            self.assertTrue(r.data["ok"])         # public read works without auth
+            self.assertFalse(r.data["can_edit"])  # ...and reports no edit ability
+            gated = routes._safe(routes.api_employee_save)
+            w = run(gated(_Req(role="viewer", body={"name": "x"})))
+            self.assertEqual(w.status, 401)       # write rejected at the auth guard
+        finally:
+            HOST.dash_auth = orig
+
     def test_reset(self):
         run(routes.api_apartment_delete(_Req(match={"id": str(sdb.apartments()[0]["id"])})))
         self.assertEqual(len(sdb.apartments()), 52)

@@ -111,7 +111,10 @@ function esc(s){ s=(s==null?'':String(s)); var m={'&':'&amp;','<':'&lt;','>':'&g
 function gdate(iso){ try{ return new Date(iso+'T00:00:00').toLocaleDateString('ar-SA',{day:'numeric',month:'long',year:'numeric'}); }catch(e){ return iso; } }
 
 async function apiGet(path){
-  var r = await fetch(path + (path.indexOf('?')>=0?'&':'?') + 'token=' + encodeURIComponent(TOK));
+  // Public read-only endpoints — no login needed. A token is appended only if the page was
+  // opened from inside the dashboard (harmless); the shared link carries none.
+  var url = path + (TOK ? ((path.indexOf('?')>=0?'&':'?') + 'token=' + encodeURIComponent(TOK)) : '');
+  var r = await fetch(url);
   if (r.status===401 || r.status===403) { return {__auth:false}; }
   return r.json();
 }
@@ -222,7 +225,8 @@ document.addEventListener('click', function(ev){
   }
 });
 
-if (!TOK){ noauth(); } else { loadDay(null); loadWeek(); }
+// Read-only share link: load immediately, no login required.
+loadDay(null); loadWeek();
 </script>
 </body>
 </html>"""

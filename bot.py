@@ -13586,6 +13586,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .sched-erow,.sched-arow,.sched-ovrow{display:flex;flex-wrap:wrap;gap:7px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
 .sched-ovrow{justify-content:space-between}
 .sched-color{width:38px;height:38px;border:1px solid var(--line);border-radius:var(--r-sm);padding:2px;background:var(--surface);cursor:pointer}
+.sched-share{border:1px solid var(--accent);background:var(--gold-tint)}
+.sched-shrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sched-shrow .ros-input{font-family:var(--font-en);direction:ltr;font-size:12.5px}
+.sched-shhint{color:var(--mut);font-size:12px;margin-top:9px;line-height:1.6}
 @media (prefers-reduced-motion:reduce){.sched-card,.sched-tab,.sched-day{transition:none}}
 .chip.good{color:var(--good);background:var(--good-bg)}.chip.warn{color:var(--warn);background:var(--warn-bg)}
 .chip.bad{color:var(--bad);background:var(--bad-bg)}.chip.info{color:var(--info);background:var(--info-bg)}
@@ -16216,6 +16220,11 @@ function renderSchedManage(){
   var m=SCHED.manage; if(!m){ document.getElementById('schedBody').innerHTML='<div class="empty sk">—</div>'; return; }
   var emps=m.employees||[], apts=m.apartments||[];
   var h='';
+  /* share link (read-only, no login) — editor-only panel */
+  var shareUrl=location.origin+'/team-calendar';
+  h+='<div class="card sched-mgmt sched-share"><div class="sched-mh">'+labelText('رابط فريق العمليات','Operations team link')+'</div>';
+  h+='<div class="sched-shrow"><input readonly class="ros-input" id="schedShareUrl" value="'+esc(shareUrl)+'" onclick="this.select()" style="flex:1 1 220px"><button class="btn sm" onclick="schedCopyShare()">'+labelText('نسخ الرابط','Copy link')+'</button></div>';
+  h+='<div class="sched-shhint">'+labelText('هذا الرابط للعرض فقط — أرسله لفريق العمليات، ولا أحد يقدر يعدّل منه. التعديل يتم من هذه اللوحة فقط.','View-only link — share it with the ops team; nobody can edit from it. Editing happens only in this dashboard.')+'</div></div>';
   /* employees */
   h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('الموظفون','Employees')+'</div>';
   emps.forEach(function(e){ h+=schedEmpRow(e); });
@@ -16324,6 +16333,17 @@ function schedSaveSettings(){
 }
 function schedReset(){ if(!confirm(labelText('إعادة كل البيانات للوضع الافتراضي؟ سيُحذف كل تعديل.','Reset ALL data to default? This erases edits.'))) return;
   post('/api/schedule/reset', {}).then(function(j){ if(j&&j.ok){ toast(labelText('تمت الإعادة','Reset done')); SCHED.manage=null; loadSchedule(true); schedSetView('manage'); } }); }
+function schedCopyShare(){
+  var el=document.getElementById('schedShareUrl');
+  var url=el?el.value:(location.origin+'/team-calendar');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(function(){ toast(labelText('تم نسخ الرابط','Link copied')); }, function(){ schedCopyFallback(el); });
+  } else { schedCopyFallback(el); }
+}
+function schedCopyFallback(el){
+  try{ if(el){ el.focus(); el.select(); document.execCommand('copy'); toast(labelText('تم نسخ الرابط','Link copied')); } }
+  catch(e){ toast(labelText('انسخ الرابط يدوياً','Copy manually')); }
+}
 
 function schedWireOnce(){
   if(window._schedWired) return; window._schedWired=true;
