@@ -45585,6 +45585,815 @@ async def _handle_elite_geo(request):
     return web.json_response({"points": pts, "count": count, "total": total})
 
 
+# ==================== Ouja Monthly (عوجا بالشهر) — /monthly ====================
+# A public lead site for MONTHLY apartment stays. Sibling of /stay + /elite: same SPA
+# architecture, reuses _gw_cache listings + _gw_overrides (no new Hostaway sync). Guest picks a
+# move-in date + number of months; we sum the real Hostaway calendar nightly prices = the "before",
+# apply the visible default discount = the "after" (always shown), and tease "up to 30%". The real
+# max discount is unlocked only by contacting the team on WhatsApp. WhatsApp-only conversion.
+MONTHLY_ENABLED = os.environ.get("MONTHLY_ENABLED", "1") != "0"
+# Own WhatsApp number for monthly leads; falls back to the shared STAY_WHATSAPP until set.
+MONTHLY_WHATSAPP = re.sub(r"\D", "", os.environ.get("MONTHLY_WHATSAPP", "") or "") or STAY_WHATSAPP
+MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /elite WebP proxy machinery
+
+def _monthly_default_cfg():
+    """Seed config. Owner-editable later via the admin endpoint / dashboard tab (v2)."""
+    try:
+        _d = float(os.environ.get("MONTHLY_DISCOUNT_DEFAULT", "0.15"))
+    except ValueError:
+        _d = 0.15
+    try:
+        _c = float(os.environ.get("MONTHLY_DISCOUNT_MAX", "0.30"))
+    except ValueError:
+        _c = 0.30
+    return {
+        "default_pct": _d, "ceiling_pct": _c,
+        "promo": {"on": False, "pct": 0.0, "label_ar": "", "label_en": ""},
+        "hidden": [],
+        "addons": [
+            {"key": "parking", "ar": "موقف خاص", "en": "Private parking",
+             "match": ["parking", "garage", "carport", "موقف", "مواقف", "كراج", "كراچ"]},
+            {"key": "entry", "ar": "دخول خاص / مستقل", "en": "Private entry",
+             "match": ["self check-in", "self check in", "private entrance", "self entry",
+                       "separate entrance", "دخول ذاتي", "مدخل خاص", "دخول مستقل", "مدخل مستقل"]},
+        ],
+    }
+
+def _monthly_cfg_load():
+    base = _monthly_default_cfg()
+    saved = _load_json("monthly_config.json", None)
+    if isinstance(saved, dict):
+        for k in ("default_pct", "ceiling_pct"):
+            if isinstance(saved.get(k), (int, float)):
+                base[k] = float(saved[k])
+        if isinstance(saved.get("promo"), dict):
+            p = saved["promo"]
+            base["promo"] = {"on": bool(p.get("on")),
+                             "pct": float(p.get("pct") or 0.0),
+                             "label_ar": str(p.get("label_ar") or ""),
+                             "label_en": str(p.get("label_en") or "")}
+        if isinstance(saved.get("hidden"), list):
+            base["hidden"] = [str(x) for x in saved["hidden"]]
+        if isinstance(saved.get("addons"), list) and saved["addons"]:
+            base["addons"] = saved["addons"]
+    return base
+
+_monthly_cfg = _monthly_cfg_load()
+
+def _monthly_cfg_save():
+    _save_json("monthly_config.json", _monthly_cfg)
+
+# ---- pure pricing math (unit-tested in tests/test_monthly_pricing.py; no network) ----
+def _add_months(d, n):
+    """Add n calendar months to date d, clamping the day to the target month's length."""
+    import calendar as _cal
+    m = d.month - 1 + int(n)
+    y = d.year + m // 12
+    m = m % 12 + 1
+    last = _cal.monthrange(y, m)[1]
+    return date(y, m, min(d.day, last))
+
+def monthly_pricing(before_total, months, cfg):
+    """Before/after for a whole stay. The VISIBLE discount = max(default, promo-if-on), capped at
+    the ceiling. The ceiling itself is only advertised ('up to 30%'), never used as the price."""
+    before = int(round(float(before_total or 0)))
+    months = max(1, int(months or 1))
+    default = float(cfg.get("default_pct") or 0.0)
+    ceiling = float(cfg.get("ceiling_pct") or 0.0)
+    promo = cfg.get("promo") or {}
+    promo_on = bool(promo.get("on"))
+    pct = default
+    if promo_on:
+        pct = max(pct, float(promo.get("pct") or 0.0))
+    pct = max(0.0, min(pct, ceiling))
+    after = int(round(before * (1.0 - pct)))
+    return {
+        "before": before, "after": after, "saved": before - after,
+        "pct": round(pct, 4), "ceiling": round(ceiling, 4),
+        "per_month_before": int(round(before / months)),
+        "per_month_after": int(round(after / months)),
+        "promo": promo_on and pct >= default and float(promo.get("pct") or 0.0) > default,
+        "promo_label": (promo.get("label_ar") or "") if promo_on else "",
+    }
+
+def _monthly_hidden_set():
+    return set(str(x) for x in (_monthly_cfg.get("hidden") or []))
+
+def _monthly_visible_snaps():
+    hid = _monthly_hidden_set()
+    return [(s, ov) for (s, ov) in _gw_visible_snaps() if str(s.get("id")) not in hid]
+
+def monthly_quote(listing_id, move_in, months, snap=None):
+    """Price a monthly stay. Prefers the real Hostaway calendar sum (the 'before'); falls back to
+    price_base * nights (flagged estimated) so before/after ALWAYS render. Returns None on bad
+    input or when no price is knowable at all."""
+    mi = _parse_date(move_in)
+    try:
+        months = int(months)
+    except (TypeError, ValueError):
+        return None
+    if not mi or months < 1 or months > 12:
+        return None
+    mo = _add_months(mi, months)
+    nights = (mo - mi).days
+    if nights < 1:
+        return None
+    before, available, estimated = None, None, False
+    av = unit_availability_price(listing_id, mi.isoformat(), mo.isoformat())
+    if av and av.get("total"):
+        before = av["total"]
+        available = bool(av.get("available"))
+    else:
+        pb = (snap or {}).get("price_base")
+        try:
+            pbf = float(pb) if pb is not None else 0.0
+        except (TypeError, ValueError):
+            pbf = 0.0
+        if pbf > 0:
+            before = round(pbf * nights)
+            estimated = True
+            available = (av.get("available") if av else None)
+    if before is None:
+        return None
+    out = monthly_pricing(before, months, _monthly_cfg)
+    out.update({"months": months, "nights": nights,
+                "move_in": mi.isoformat(), "move_out": mo.isoformat(),
+                "available": available, "estimated": estimated})
+    return out
+
+def _monthly_addons_for(snap):
+    """Per-listing add-on availability + the matching Hostaway amenity text (the 'text from
+    Hostaway' the owner wanted). Every add-on is always selectable as a request; in_listing just
+    surfaces that the unit already advertises it."""
+    amen = [str(a) for a in (snap.get("amenities") or []) if a]
+    hay = (" ".join(amen) + " " + str(snap.get("desc") or "") + " "
+           + str(snap.get("public_desc") or "")).lower()
+    out = []
+    for a in (_monthly_cfg.get("addons") or []):
+        keys = [str(k).lower() for k in (a.get("match") or [])]
+        note = ""
+        for am in amen:
+            al = am.lower()
+            if any(k and k in al for k in keys):
+                note = am
+                break
+        in_listing = bool(note) or any(k and k in hay for k in keys)
+        out.append({"key": a.get("key"), "ar": a.get("ar"), "en": a.get("en"),
+                    "in_listing": in_listing, "note": note})
+    return out
+
+def _monthly_card(snap, ov, move_in=None, months=None):
+    """Public listing JSON for /monthly cards + detail, with before/after attached. Without dates
+    we show a per-month 'from' before/after off price_base; with dates we attach the full quote."""
+    pub = _gw_listing_public(snap, ov, with_airbnb=False)     # WhatsApp-only, like /elite
+    pub["addons"] = _monthly_addons_for(snap)
+    # always-present per-month estimate (so before/after show even before a date is picked)
+    pb = pub.get("price_base")
+    try:
+        pbf = float(pb) if pb is not None else 0.0
+    except (TypeError, ValueError):
+        pbf = 0.0
+    if pbf > 0:
+        est = monthly_pricing(round(pbf * 30), 1, _monthly_cfg)
+        pub["m_before"] = est["per_month_before"]
+        pub["m_after"] = est["per_month_after"]
+        pub["m_pct"] = est["pct"]
+    else:
+        pub["m_before"] = pub["m_after"] = None
+        pub["m_pct"] = monthly_pricing(0, 1, _monthly_cfg)["pct"]
+    pub["ceiling"] = monthly_pricing(0, 1, _monthly_cfg)["ceiling"]
+    if move_in and months:
+        q = monthly_quote(snap.get("id"), move_in, months, snap)
+        if q:
+            pub["quote"] = q
+    return pub
+
+def _monthly_search(move_in=None, months=None, typ=None, area=None, neighborhood=None,
+                    tags=None, guests=None):
+    """Monthly results. With a move-in+months we attach a per-unit quote and drop sold-out units;
+    without, it's browse mode (per-month 'from' before/after only)."""
+    try:
+        g = int(guests) if guests else None
+    except (TypeError, ValueError):
+        g = None
+    tag_list = [t for t in ((tags or "").split(",")) if t and t not in ("all",)]
+    dated = bool(move_in and months)
+    results, avail_error = [], False
+    for s, ov in _monthly_visible_snaps():
+        if g and s.get("capacity") and int(s["capacity"]) < g:
+            continue
+        if typ and typ not in ("all", "") and typ not in (s.get("tag_keys") or []):
+            continue
+        if area and area not in ("all", "") and area not in (s.get("tag_keys") or []):
+            continue
+        if neighborhood and neighborhood not in ("all", "") and ov.get("neighborhood") != neighborhood:
+            continue
+        if tag_list and not all(t in (s.get("tag_keys") or []) for t in tag_list):
+            continue
+        card = _monthly_card(s, ov, move_in if dated else None, months if dated else None)
+        if dated:
+            q = card.get("quote")
+            if not q:
+                avail_error = True
+            elif q.get("available") is False:
+                continue
+        results.append((card, ov))
+    def sort_key(t):
+        card, ov2 = t
+        return (-(ov2.get("sort") or 0), 0 if card.get("images") else 1, (card.get("name_ar") or ""))
+    results.sort(key=sort_key)
+    return {"browse": (not dated), "avail_error": (avail_error and dated),
+            "results": [r[0] for r in results]}
+
+def _monthly_featured(limit=6):
+    feat = [(s, ov) for s, ov in _monthly_visible_snaps() if ov.get("featured")]
+    if feat:
+        feat.sort(key=lambda t: (-(t[1].get("sort") or 0), (t[0].get("name") or "")))
+        chosen = feat[:limit]
+        auto = False
+    else:
+        chosen = _monthly_visible_snaps()[:limit]
+        auto = True
+    return {"results": [_monthly_card(s, ov) for s, ov in chosen], "auto": auto}
+
+def _monthly_cfg_public():
+    c = _monthly_cfg
+    return {"default_pct": c.get("default_pct"), "ceiling_pct": c.get("ceiling_pct"),
+            "promo": {"on": bool((c.get("promo") or {}).get("on")),
+                      "pct": (c.get("promo") or {}).get("pct") or 0.0,
+                      "label_ar": (c.get("promo") or {}).get("label_ar") or "",
+                      "label_en": (c.get("promo") or {}).get("label_en") or ""},
+            "addons": [{"key": a.get("key"), "ar": a.get("ar"), "en": a.get("en")}
+                       for a in (c.get("addons") or [])],
+            "count": len(_monthly_visible_snaps())}
+
+
+MONTHLY_HTML = r"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__MONTHLY_TITLE__</title>
+<meta name="description" content="__MONTHLY_DESC__">
+<meta name="theme-color" content="#FAF6F0">
+<meta property="og:title" content="__MONTHLY_TITLE__">
+<meta property="og:description" content="__MONTHLY_DESC__">
+<meta property="og:image" content="__MONTHLY_OG__">
+<meta property="og:url" content="__MONTHLY_URL__">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="__MONTHLY_URL__">
+<script type="application/ld+json">/*__MONTHLY_JSONLD__*/null</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--canvas:#FAF6F0;--surface:#FFFFFF;--surface-2:#F1EBE0;--ink:#22302B;--ink-soft:#586259;--mut:#8A8073;--accent:#5E7B6B;--accent-deep:#415C4C;--accent-soft:#D8E2D6;--clay:#B27A4F;--clay-deep:#8F5E36;--clay-soft:#F0E0D0;--line:rgba(34,48,43,.12);--line-accent:rgba(94,123,107,.40);--ok:#3C7A57;--ease:cubic-bezier(.23,1,.32,1);--maxw:1060px}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--canvas);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;font-weight:400;line-height:1.78;-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit;text-decoration:none}
+.num{font-family:"Inter",sans-serif;font-feature-settings:"tnum" 1;font-weight:700}
+.en{font-family:"Inter",sans-serif}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+@media(max-width:560px){.wrap{padding:0 16px}}
+.center{text-align:center}
+.muted{color:var(--mut)}
+.eyebrow{font-family:"Inter",sans-serif;text-transform:uppercase;letter-spacing:.22em;font-size:11.5px;font-weight:600;color:var(--accent-deep);display:block;margin-bottom:10px}
+.sec{margin-top:56px}
+@media(min-width:760px){.sec{margin-top:84px}}
+.sec-head{margin-bottom:22px}
+.h-sec{font-size:25px;line-height:1.3;font-weight:700;margin:0;color:var(--ink);text-wrap:balance}
+@media(min-width:760px){.h-sec{font-size:31px}}
+.sec-sub{color:var(--ink-soft);font-size:15px;margin:8px 0 0;max-width:54ch}
+/* header */
+.head{position:sticky;top:0;z-index:50;background:rgba(250,246,240,.86);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.head-in{display:flex;align-items:center;justify-content:space-between;height:60px}
+.brand{display:flex;align-items:baseline;gap:9px}
+.brand-ar{font-size:20px;font-weight:700;color:var(--ink);letter-spacing:.01em}
+.brand-en{font-family:"Inter",sans-serif;text-transform:uppercase;letter-spacing:.2em;font-size:11px;color:var(--accent-deep);font-weight:600}
+.head-wa{font-size:13.5px;color:var(--ink-soft);font-weight:600;display:flex;align-items:center;gap:7px;min-height:44px;padding-inline:6px}
+.head-wa:hover{color:var(--accent-deep)}
+.head-wa svg{width:17px;height:17px}
+/* promo ribbon */
+.ribbon{background:linear-gradient(90deg,var(--clay-deep),var(--clay));color:#fff;text-align:center;font-size:13.5px;font-weight:600;padding:9px 16px;letter-spacing:.01em}
+.ribbon b{font-weight:700}
+/* hero */
+.hero{position:relative;min-height:62vh;display:flex;align-items:flex-end;overflow:hidden;background:linear-gradient(135deg,#2c3b34,#1b2620)}
+.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.05);animation:ken 20s ease-out both;opacity:.9}
+@keyframes ken{from{transform:scale(1.12)}to{transform:scale(1.02)}}
+.hero-ov{position:absolute;inset:0;z-index:2;background:linear-gradient(to top,var(--canvas) 0,rgba(250,246,240,0) 84px),linear-gradient(to top,rgba(27,38,32,.78) 0,rgba(34,48,43,.28) 50%,rgba(34,48,43,.48) 100%)}
+.hero-in{position:relative;z-index:4;width:100%;padding:96px 0 56px}
+@media(min-width:760px){.hero-in{padding:110px 0 64px}}
+.hero .eyebrow{color:var(--accent-soft)}
+.h-hero{font-size:clamp(30px,6.6vw,50px);line-height:1.2;font-weight:700;color:#fff;margin:0 0 12px;max-width:17ch;text-wrap:balance;text-shadow:0 1px 26px rgba(15,22,18,.42)}
+.hero-sub{font-size:clamp(15.5px,2.2vw,19px);color:rgba(255,255,255,.9);margin:0;max-width:44ch;line-height:1.7}
+.hero-teaser{display:inline-flex;align-items:center;gap:8px;margin-top:16px;background:rgba(178,122,79,.22);border:1px solid rgba(240,224,208,.4);color:#fff;font-size:13.5px;font-weight:600;padding:8px 14px;border-radius:999px;backdrop-filter:blur(4px)}
+.hero-teaser b{color:#fff}
+/* picker widget */
+.band-tight{margin-top:-40px;position:relative;z-index:10}
+.widget{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:0 24px 56px rgba(34,48,43,.13)}
+@media(max-width:560px){.widget{padding:18px}}
+.w-lead{font-size:13px;font-weight:600;color:var(--accent-deep);margin:0 0 14px;display:flex;align-items:center;gap:8px}
+.wfields{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:680px){.wfields{grid-template-columns:1.1fr 1fr auto;align-items:end}}
+.field{display:flex;flex-direction:column;gap:7px}
+.field label{font-size:12px;font-weight:600;color:var(--ink-soft)}
+.field input,.field select{font:inherit;font-size:16px;padding:0 14px;min-height:54px;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink);width:100%;appearance:none}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,123,107,.18)}
+.field select{background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%23415C4C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');background-repeat:no-repeat;background-position:left 14px center;padding-inline-start:36px}
+/* buttons */
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:12px;padding:0 26px;min-height:54px;font:inherit;font-size:15.5px;font-weight:600;cursor:pointer;background:var(--accent-deep);color:#fff;transition:transform .25s var(--ease),background .25s var(--ease),box-shadow .25s var(--ease)}
+.btn:hover{background:#374f41;box-shadow:0 10px 24px rgba(65,92,76,.26)}
+.btn:active{transform:scale(.975)}
+.btn.block{display:flex;width:100%}
+.btn.wa{background:#1f9d57}
+.btn.wa:hover{background:#178a4b}
+.btn.secondary{background:var(--surface);color:var(--accent-deep);border:1px solid var(--line-accent)}
+.btn.secondary:hover{background:var(--surface-2)}
+.btn.off,.btn[disabled]{background:var(--surface-2);color:var(--mut);cursor:not-allowed;border:1px solid var(--line)}
+.btn svg{width:19px;height:19px;flex:0 0 auto}
+.btn.lg{min-height:58px;font-size:16px}
+/* how it works */
+.steps{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:760px){.steps{grid-template-columns:repeat(4,1fr)}}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 18px}
+.step-n{font-family:"Inter",sans-serif;font-weight:700;font-size:13px;color:var(--accent-deep);background:var(--accent-soft);width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;margin-bottom:12px}
+.step-h{font-size:16px;font-weight:700;color:var(--ink);margin:0 0 5px}
+.step-p{font-size:13.5px;color:var(--ink-soft);line-height:1.65;margin:0}
+/* grid + cards */
+.grid{display:grid;grid-template-columns:1fr;gap:20px}
+@media(min-width:680px){.grid{grid-template-columns:1fr 1fr}}
+@media(min-width:1000px){.grid.three{grid-template-columns:repeat(3,1fr)}}
+.card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;transition:transform .3s var(--ease),box-shadow .3s var(--ease),border-color .3s var(--ease)}
+.card:hover{transform:translateY(-4px);border-color:var(--line-accent);box-shadow:0 20px 42px rgba(34,48,43,.12)}
+.cover{position:relative;aspect-ratio:3/2;overflow:hidden;background:linear-gradient(135deg,var(--surface-2),var(--accent-soft))}
+.cover img{width:100%;height:100%;object-fit:cover;transition:transform .6s var(--ease),opacity .6s var(--ease)}
+.card:hover .cover img{transform:scale(1.04)}
+img.fadein{opacity:0}
+img.fadein.loaded{opacity:1}
+.mono{display:flex;align-items:center;justify-content:center;height:100%;font-size:54px;color:rgba(65,92,76,.34);font-weight:700}
+.ctag{position:absolute;top:12px;inset-inline-start:12px;display:flex;gap:6px;flex-wrap:wrap}
+.ctag span{font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:rgba(27,38,32,.72);color:#fff;backdrop-filter:blur(5px)}
+.ctag .soldout{background:rgba(143,94,54,.92)}
+.cbody{padding:16px 17px 17px;display:flex;flex-direction:column;gap:7px;flex:1}
+.carea{font-family:"Inter",sans-serif;font-size:11.5px;letter-spacing:.05em;color:var(--mut);text-transform:uppercase;font-weight:600}
+.cname{font-size:18px;font-weight:700;color:var(--ink);line-height:1.34;margin:0}
+.cmeta{display:flex;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft)}
+.cmeta i{opacity:.4;font-style:normal}
+.cfoot{margin-top:auto;padding-top:12px;border-top:1px solid var(--line)}
+/* deal block (before/after) */
+.deal{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.deal .was{color:var(--mut);text-decoration:line-through;font-family:"Inter",sans-serif;font-weight:600;font-size:14px}
+.deal .now{color:var(--clay-deep);font-size:15px;font-weight:600}
+.deal .now b{font-family:"Inter",sans-serif;font-size:21px;font-weight:700}
+.deal .per{color:var(--ink-soft);font-size:12.5px;font-weight:500}
+.off{font-size:11.5px;font-weight:700;color:#fff;background:var(--clay);padding:3px 9px;border-radius:999px;font-family:"IBM Plex Sans Arabic"}
+.deal-teaser{font-size:12px;color:var(--clay-deep);margin-top:6px;font-weight:500}
+.deal-soft{color:var(--ink-soft);font-size:14px;font-weight:600}
+/* listing */
+.gal{display:grid;grid-template-columns:1fr;gap:8px;border-radius:16px;overflow:hidden}
+@media(min-width:760px){.gal{grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;max-height:460px}.gal .g0{grid-row:1/3}}
+.gal .gimg{position:relative;overflow:hidden;background:var(--surface-2);aspect-ratio:3/2}
+@media(min-width:760px){.gal .gimg{aspect-ratio:auto;height:100%;min-height:140px}.gal .g0{min-height:300px}}
+.gal img{width:100%;height:100%;object-fit:cover}
+.lwrap{display:grid;grid-template-columns:1fr;gap:28px;margin-top:28px}
+@media(min-width:900px){.lwrap{grid-template-columns:1.6fr 1fr;align-items:start}}
+.lh1{font-size:26px;font-weight:700;margin:0 0 6px;color:var(--ink);line-height:1.28}
+@media(min-width:760px){.lh1{font-size:31px}}
+.larea{font-family:"Inter",sans-serif;font-size:12.5px;letter-spacing:.05em;color:var(--mut);text-transform:uppercase;font-weight:600;margin-bottom:14px}
+.lmeta{display:flex;gap:10px;flex-wrap:wrap;font-size:14.5px;color:var(--ink-soft);margin-bottom:18px}
+.lmeta i{opacity:.4;font-style:normal}
+.descblk{font-size:15px;line-height:1.85;color:var(--ink-soft);white-space:pre-line}
+.descblk.ltr{direction:ltr;text-align:left}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
+.chip{font-size:12.5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line-accent);color:var(--accent-deep);background:rgba(94,123,107,.06);white-space:nowrap}
+.amen{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;font-size:14px;color:var(--ink-soft)}
+@media(min-width:560px){.amen{grid-template-columns:1fr 1fr 1fr}}
+.amen div{display:flex;align-items:center;gap:8px;padding:3px 0}
+.amen svg{width:16px;height:16px;color:var(--accent);flex:0 0 auto}
+/* price panel */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:0 18px 44px rgba(34,48,43,.10);position:sticky;top:78px}
+.p-mini{display:flex;gap:9px;align-items:center;margin-bottom:14px}
+.p-mini label{font-size:12px;font-weight:600;color:var(--ink-soft)}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.stepper button{width:42px;height:46px;border:0;background:var(--surface);font-size:20px;color:var(--accent-deep);cursor:pointer;font-weight:600}
+.stepper button:hover{background:var(--surface-2)}
+.stepper button:disabled{color:var(--mut);cursor:not-allowed}
+.stepper .val{min-width:78px;text-align:center;font-size:14.5px;font-weight:700;color:var(--ink)}
+.p-date{width:100%;font:inherit;font-size:16px;padding:0 14px;min-height:50px;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink);margin-bottom:14px}
+.p-date:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,123,107,.18)}
+.p-was{color:var(--mut);font-size:14px}
+.p-was s{font-family:"Inter",sans-serif;font-weight:600}
+.p-now{display:flex;align-items:baseline;gap:7px;margin:4px 0 2px}
+.p-now b{font-family:"Inter",sans-serif;font-size:34px;font-weight:700;color:var(--clay-deep);line-height:1}
+.p-now span{font-size:15px;color:var(--ink-soft);font-weight:600}
+.p-permonth{font-size:13.5px;color:var(--ink-soft);margin-top:2px}
+.p-save{display:inline-flex;align-items:center;gap:7px;background:var(--clay-soft);color:var(--clay-deep);font-size:13px;font-weight:700;padding:7px 12px;border-radius:10px;margin:12px 0}
+.p-nudge{font-size:13px;color:var(--accent-deep);background:var(--accent-soft);border-radius:10px;padding:9px 12px;margin-bottom:12px;line-height:1.6}
+.p-note{font-size:12px;color:var(--mut);line-height:1.6;margin-top:12px}
+.p-soldout{background:var(--clay-soft);color:var(--clay-deep);font-size:13.5px;font-weight:600;padding:10px 13px;border-radius:11px;margin-bottom:12px}
+.p-teaser{font-size:12.5px;color:var(--clay-deep);font-weight:600;margin-top:4px}
+/* add-ons */
+.addbox{margin:14px 0}
+.addbox .ah{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:9px}
+.addon{display:flex;align-items:flex-start;gap:11px;border:1px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:9px;cursor:pointer;transition:border-color .2s var(--ease),background .2s var(--ease)}
+.addon:hover{border-color:var(--line-accent)}
+.addon.on{border-color:var(--accent);background:rgba(94,123,107,.06)}
+.addon .box{width:22px;height:22px;border-radius:7px;border:1.6px solid var(--line-accent);flex:0 0 auto;display:flex;align-items:center;justify-content:center;margin-top:1px;transition:background .2s var(--ease),border-color .2s var(--ease)}
+.addon.on .box{background:var(--accent);border-color:var(--accent)}
+.addon .box svg{width:13px;height:13px;color:#fff;opacity:0;transition:opacity .2s var(--ease)}
+.addon.on .box svg{opacity:1}
+.addon .at{font-size:14.5px;font-weight:600;color:var(--ink)}
+.addon .an{font-size:12.5px;color:var(--ink-soft);line-height:1.55;margin-top:2px}
+.addon .badge{font-size:11px;color:var(--ok);font-weight:600;margin-top:3px}
+/* misc */
+.back{display:inline-flex;align-items:center;gap:7px;font-size:14px;color:var(--ink-soft);font-weight:600;margin:18px 0;min-height:44px}
+.back:hover{color:var(--accent-deep)}
+.empty{text-align:center;padding:56px 20px;color:var(--ink-soft)}
+.empty .big{font-size:40px;margin-bottom:10px}
+.sk{background:linear-gradient(90deg,var(--surface-2) 25%,#eee6d8 37%,var(--surface-2) 63%);background-size:400% 100%;animation:sh 1.4s ease infinite;border-radius:8px}
+@keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.foot{margin-top:72px;border-top:1px solid var(--line);padding:38px 0;text-align:center;color:var(--ink-soft)}
+.foot .fl{font-size:15px;font-weight:600;color:var(--ink)}
+.foot .fs{font-family:"Inter",sans-serif;font-size:12px;letter-spacing:.06em;color:var(--mut);margin-top:6px;text-transform:uppercase}
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}.hero .bgimg{transform:none}}
+.btn:focus-visible,.card:focus-visible,.addon:focus-visible,a:focus-visible,.stepper button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+</style>
+</head>
+<body>
+<div id="ribbon"></div>
+<header class="head"><div class="wrap head-in"><a class="brand" href="/monthly"><span class="brand-ar">عوجا · بالشهر</span><span class="brand-en">Ouja Monthly</span></a><a class="head-wa" id="headWa" href="#" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm0 2a8 8 0 1 1-4.2 14.8l-.5-.3-2.6.7.7-2.5-.3-.5A8 8 0 0 1 12 4Z"/></svg>كلّمنا واتساب</a></div></header>
+<main id="view"></main>
+<footer class="foot"><div class="wrap"><div class="fl">سكن شهري في الرياض — من أهل الدرعية 🤎</div><div class="fs">Ouja Monthly · Furnished apartments by the month</div></div></footer>
+<script>
+var MONTHLY=/*__MONTHLY_DATA__*/null;
+var CFG=(MONTHLY&&MONTHLY.config)||{};
+var V=document.getElementById('view');
+var WA='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm0 2a8 8 0 1 1-4.2 14.8l-.5-.3-2.6.7.7-2.5-.3-.5A8 8 0 0 1 12 4Zm5.6 12.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.5-2.7-1.2-4.4-3.9-4.6-4.1-.1-.2-1-1.4-1-2.7s.6-1.9.9-2.1c.2-.3.4-.3.6-.3h.4c.2 0 .4 0 .5.4l.7 1.8c.1.1.1.3 0 .4l-.3.5-.3.3c-.1.1-.3.3-.1.5.1.3.6 1 1.3 1.6.8.7 1.5 1 1.8 1.1.2.1.3.1.5-.1l.6-.7c.2-.2.3-.2.5-.1l1.7.8c.2.1.4.2.4.3.1.1.1.5-.1 1.1Z"/></svg>';
+var CK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"/></svg>';
+function he(s){return (s==null?'':String(s)).replace(/[<>&"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];});}
+function pimg(u,w){if(!u)return u;try{if(CFG.imgproxy)return '/monthly/img?u='+encodeURIComponent(u)+(w?('&w='+w):'');}catch(e){}return u;}
+function grp(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US');}catch(e){return ''+n;}}
+function pct(p){return Math.round((Number(p)||0)*100)+'%';}
+function ceilTxt(){return pct(CFG.ceiling_pct||0.30);}
+function qsp(){return new URLSearchParams(location.search);}
+function sid(){try{var k='ouja_m_sid',v=localStorage.getItem(k);if(!v){v='m'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
+function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:location.pathname,referrer:document.referrer||''},extra||{});var s=JSON.stringify(b);if(navigator.sendBeacon){navigator.sendBeacon('/api/stay/event',new Blob([s],{type:'application/json'}));}else{fetch('/api/stay/event',{method:'POST',headers:{'Content-Type':'application/json'},body:s,keepalive:true});}}catch(e){}}
+function monthsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'شهر';if(n==2)return 'شهرين';if(n<=10)return n+' أشهر';return n+' شهر';}
+function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar=(s.match(/[؀-ۿ]/g)||[]).length;return lat>ar;}
+function todayStr(){var d=new Date();d.setDate(d.getDate()+1);return d.toISOString().slice(0,10);}
+function waNum(){return CFG.whatsapp||'';}
+function waHref(text){var n=waNum();return n?('https://wa.me/'+n+'?text='+encodeURIComponent(text)):'';}
+function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' أشخاص');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' دورة مياه');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<i>·</i>');}
+function img(u,w,cls){if(!u)return '<div class="mono">ع</div>';return '<img class="fadein '+(cls||'')+'" src="'+he(pimg(u,w))+'" alt="" loading="lazy">';}
+function imgFade(){document.querySelectorAll('img.fadein:not(.loaded)').forEach(function(i){if(i.complete&&i.naturalWidth>0){i.classList.add('loaded');}else{i.addEventListener('load',function(){i.classList.add('loaded');});i.addEventListener('error',function(){i.classList.add('loaded');});}});}
+var _io=null;
+function reveal(){var ns=document.querySelectorAll('.reveal:not(.in)');if(!('IntersectionObserver' in window)){ns.forEach(function(e){e.classList.add('in');});}else{if(!_io){_io=new IntersectionObserver(function(en){en.forEach(function(x){if(x.isIntersecting){x.target.classList.add('in');_io.unobserve(x.target);}});},{rootMargin:'0px 0px -6% 0px',threshold:.05});}ns.forEach(function(e){_io.observe(e);});}imgFade();}
+function skeletons(n){var s='';for(var i=0;i<(n||3);i++){s+='<div class="card"><div class="cover sk"></div><div class="cbody"><div class="sk" style="height:12px;width:36%"></div><div class="sk" style="height:19px;width:70%;margin-top:8px"></div><div class="sk" style="height:30px;width:100%;margin-top:14px"></div></div></div>';}return s;}
+/* before/after deal block */
+function dealCard(l){
+  if(l.quote&&l.quote.before>0){var q=l.quote;
+    return '<div class="deal"><span class="was">'+grp(q.before)+'</span><span class="now"><b>'+grp(q.after)+'</b> ر.س</span><span class="per">/ '+monthsLabel(q.months)+'</span><span class="off">خصم '+pct(q.pct)+'</span></div>'
+      +'<div class="deal-teaser">≈ '+grp(q.per_month_after)+' ر.س بالشهر · يوصل خصمك '+ceilTxt()+' — كلّمنا</div>';
+  }
+  if(l.m_before>0){
+    return '<div class="deal"><span class="was">'+grp(l.m_before)+'</span><span class="now"><b>'+grp(l.m_after)+'</b> ر.س</span><span class="per">/ شهر</span><span class="off">خصم '+pct(l.m_pct)+'</span></div>'
+      +'<div class="deal-teaser">يوصل خصمك '+ceilTxt()+' في بعض الشهور — كلّمنا تعرف خصمك</div>';
+  }
+  return '<div class="deal-soft">كلّمنا للسعر والتوفر</div>';
+}
+function cardHtml(l){
+  var ci=qsp().get('move_in'),mo=qsp().get('months');
+  var carry=(ci&&mo)?('?move_in='+encodeURIComponent(ci)+'&months='+encodeURIComponent(mo)):'';
+  var so=(l.quote&&l.quote.available===false)?'<span class="soldout">محجوزة هالفترة</span>':'';
+  var cv=l.cover?img(l.cover,640):'<div class="mono">ع</div>';
+  return '<a class="card reveal" href="/monthly/'+he(l.slug||l.id)+carry+'" data-ev="monthly_card" data-id="'+he(l.id)+'">'
+    +'<div class="cover">'+cv+(so?'<div class="ctag">'+so+'</div>':'')+'</div>'
+    +'<div class="cbody"><div class="carea">'+he(l.area||'الرياض')+'</div><h3 class="cname">'+he(l.name_ar||l.name_en||'')+'</h3>'
+    +'<div class="cmeta">'+metaRow(l)+'</div>'
+    +'<div class="cfoot">'+dealCard(l)+'</div></div></a>';
+}
+/* picker */
+function pickerHtml(){
+  var ci=qsp().get('move_in')||'',mo=qsp().get('months')||'1';
+  var opts='';for(var i=1;i<=6;i++){opts+='<option value="'+i+'"'+(String(i)===String(mo)?' selected':'')+'>'+monthsLabel(i)+'</option>';}
+  return '<div class="widget reveal"><div class="w-lead">🗓️ اختر تاريخ دخولك والمدة — نوريك السعر قبل وبعد الخصم</div>'
+    +'<form id="pk" class="wfields">'
+    +'<div class="field"><label>تاريخ الدخول</label><input type="date" id="mi" value="'+he(ci)+'" min="'+todayStr()+'"></div>'
+    +'<div class="field"><label>المدة</label><select id="mo">'+opts+'</select></div>'
+    +'<div class="field"><button class="btn lg" type="submit">اعرض الأسعار</button></div>'
+    +'</form></div>';
+}
+function bindPicker(){
+  var f=document.getElementById('pk');if(!f)return;
+  f.addEventListener('submit',function(e){e.preventDefault();
+    var mi=(document.getElementById('mi')||{}).value||'';var mo=(document.getElementById('mo')||{}).value||'1';
+    var q='?months='+encodeURIComponent(mo)+(mi?('&move_in='+encodeURIComponent(mi)):'');
+    track('monthly_search_submit',{months:mo});location.href='/monthly/search'+q;
+  });
+}
+/* ---------- views ---------- */
+function viewLanding(){
+  var hero=CFG.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(pimg(CFG.hero,1600))+')"></div>'):'<div class="bgimg" style="background:radial-gradient(120% 90% at 70% 10%,#3a4f43,#1b2620)"></div>';
+  V.innerHTML=
+    '<section class="hero">'+hero+'<div class="hero-ov"></div><div class="hero-in"><div class="wrap">'
+      +'<span class="eyebrow">عوجا · سكن شهري</span>'
+      +'<h1 class="h-hero">بيتك في الرياض، بالشهر</h1>'
+      +'<p class="hero-sub">شقق مفروشة جاهزة، دخول ذاتي، وخدمة عوجا. كل ما طولت إقامتك، رخص سعرك.</p>'
+      +'<span class="hero-teaser">🎉 خصم يصل إلى <b>'+ceilTxt()+'</b> في بعض الشهور</span>'
+    +'</div></div></section>'
+    +'<div class="band-tight"><div class="wrap">'+pickerHtml()+'</div></div>'
+    +'<section class="sec"><div class="wrap"><div class="sec-head"><span class="eyebrow">شقق مختارة</span><h2 class="h-sec">سكن جاهز يستاهل</h2></div><div id="feat" class="grid three">'+skeletons(3)+'</div></div></section>'
+    +'<section class="sec"><div class="wrap"><div class="sec-head"><span class="eyebrow">كيف تشتغل</span><h2 class="h-sec">٤ خطوات وأنت بشقتك</h2></div><div class="steps">'
+      +stepHtml(1,'اختر تاريخك والمدة','من شهر لستة أشهر — قدها وقدود.')
+      +stepHtml(2,'شوف السعر قبل وبعد','نوريك السعر الكامل والسعر بعد الخصم، بشفافية.')
+      +stepHtml(3,'كلّمنا واتساب','نرتّب لك التوفر، أقصى خصم، وأي إضافة تبيها.')
+      +stepHtml(4,'كل ما طولت، رخصت','الخصم يكبر مع المدة — يوصل '+ceilTxt()+'.')
+    +'</div></div></section>';
+  bindPicker();reveal();
+  fetch('/api/monthly/featured').then(function(r){return r.json();}).then(function(d){
+    var el=document.getElementById('feat');if(!el)return;var rs=(d&&d.results)||[];
+    el.innerHTML=rs.length?rs.map(cardHtml).join(''):'<div class="empty"><div class="big">🏠</div>قريبًا شقق شهرية.</div>';reveal();
+  }).catch(function(){var el=document.getElementById('feat');if(el)el.innerHTML='<div class="empty">تعذّر التحميل.</div>';});
+  track('monthly_landing');
+}
+function stepHtml(n,h,p){return '<div class="step reveal"><div class="step-n">'+n+'</div><div class="step-h">'+he(h)+'</div><p class="step-p">'+he(p)+'</p></div>';}
+function viewSearch(){
+  var ci=qsp().get('move_in'),mo=qsp().get('months');
+  V.innerHTML='<div class="wrap" style="padding-top:30px">'+pickerHtml()
+    +'<div class="sec-head" style="margin-top:30px"><h2 class="h-sec">'+(ci&&mo?('شقق متوفرة · '+monthsLabel(mo)):'الشقق الشهرية')+'</h2>'
+    +(ci&&mo?'<p class="sec-sub">الدخول '+he(ci)+' · الأسعار تشمل خصمك الحالي، وفي خصم أكبر يوصل '+ceilTxt()+' — كلّمنا.</p>':'<p class="sec-sub">حط تاريخ دخولك والمدة فوق عشان نحسب لك الإجمالي بالضبط.</p>')
+    +'</div><div id="res" class="grid">'+skeletons(4)+'</div></div>';
+  bindPicker();reveal();
+  var u='/api/monthly/search?'+qsp().toString();
+  fetch(u).then(function(r){return r.json();}).then(function(d){
+    var el=document.getElementById('res');if(!el)return;var rs=(d&&d.results)||[];
+    if(!rs.length){el.innerHTML='<div class="empty"><div class="big">🗓️</div>ما لقينا شقق متوفرة بالضبط لهالفترة. كلّمنا واتساب ونرتّب لك.</div>';return;}
+    el.innerHTML=rs.map(cardHtml).join('');
+    if(d.avail_error){el.insertAdjacentHTML('beforebegin','<div class="p-note" style="margin-bottom:14px">بعض الشقق ما قدرنا نتأكد من توفرها الحين — كلّمنا للتأكيد.</div>');}
+    reveal();
+  }).catch(function(){var el=document.getElementById('res');if(el)el.innerHTML='<div class="empty">تعذّر التحميل.</div>';});
+  track('monthly_results',{months:mo||''});
+}
+/* listing state */
+var L=null,MI='',MO=1,SEL={};
+function viewListing(){
+  var slug=location.pathname.split('/').filter(Boolean).pop();
+  MI=qsp().get('move_in')||'';MO=parseInt(qsp().get('months')||'1',10)||1;
+  V.innerHTML='<div class="wrap"><a class="back" href="/monthly'+(location.search||'')+'">‹ رجوع للشقق</a><div class="gal"><div class="gimg g0 sk"></div><div class="gimg sk"></div><div class="gimg sk"></div></div><div class="lwrap"><div><div class="sk" style="height:30px;width:60%"></div></div><div class="panel"><div class="sk" style="height:120px"></div></div></div></div>';
+  var u='/api/monthly/listing/'+encodeURIComponent(slug)+'?'+qsp().toString();
+  fetch(u).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.listing){V.innerHTML='<div class="wrap"><div class="empty"><div class="big">🏠</div>ما لقينا هالشقة. <a href="/monthly" style="color:var(--accent-deep);font-weight:600">رجوع</a></div></div>';return;}
+    L=d.listing;renderListing();
+  }).catch(function(){V.innerHTML='<div class="wrap"><div class="empty">تعذّر التحميل.</div></div>';});
+}
+function galHtml(l){
+  var im=(l.images||[]).slice(0,3);if(!im.length)return '<div class="gal"><div class="gimg g0"><div class="mono">ع</div></div></div>';
+  var h='<div class="gal"><div class="gimg g0">'+img(im[0],1200)+'</div>';
+  for(var i=1;i<im.length;i++){h+='<div class="gimg">'+img(im[i],700)+'</div>';}
+  return h+'</div>';
+}
+function amenHtml(l){
+  var a=(l.amenities||[]).slice(0,12);if(!a.length)return '';
+  return '<div class="sec" style="margin-top:30px"><h3 class="step-h" style="font-size:18px;margin-bottom:12px">المرافق</h3><div class="amen">'+a.map(function(x){return '<div>'+CK.replace('stroke-width="3"','stroke-width="2.4"')+'<span>'+he(x)+'</span></div>';}).join('')+'</div></div>';
+}
+function descHtml(l){
+  var t=l.desc_ar||l.desc_en||l.short_ar||'';if(!t)return '';
+  return '<div class="sec" style="margin-top:30px"><h3 class="step-h" style="font-size:18px;margin-bottom:10px">عن الشقة</h3><div class="descblk'+(isLatin(t)?' ltr':'')+'">'+he(t)+'</div></div>';
+}
+function addonsHtml(l){
+  var ad=l.addons||[];if(!ad.length)return '';
+  var rows=ad.map(function(a){var on=!!SEL[a.key];
+    var badge=a.in_listing?('<div class="badge">✓ متوفرة بالشقة'+(a.note?(' · '+he(a.note)):'')+'</div>'):'';
+    return '<div class="addon'+(on?' on':'')+'" data-add="'+he(a.key)+'" role="button" tabindex="0"><div class="box">'+CK+'</div><div><div class="at">'+he(a.ar||a.en)+'</div><div class="an">نضيفها لطلبك ونتفق عليها بالواتساب.</div>'+badge+'</div></div>';
+  }).join('');
+  return '<div class="addbox"><div class="ah">تبي إضافات؟ اختر واطلبها معنا</div>'+rows+'</div>';
+}
+function pricePanel(l){
+  var q=l.quote;
+  var dateField='<input type="date" class="p-date" id="pdate" value="'+he(MI)+'" min="'+todayStr()+'">';
+  var stepper='<div class="p-mini"><label>المدة:</label><div class="stepper"><button id="mminus" '+(MO<=1?'disabled':'')+'>−</button><span class="val">'+monthsLabel(MO)+'</span><button id="mplus" '+(MO>=6?'disabled':'')+'>+</button></div></div>';
+  var body='';
+  if(q&&q.before>0){
+    var sold=(q.available===false)?'<div class="p-soldout">محجوزة لكامل هالفترة — كلّمنا نلقى لك بديل أو فترة ثانية.</div>':'';
+    var estnote=q.estimated?'<div class="p-teaser">سعر تقديري — يتأكد بالضبط بالواتساب.</div>':'';
+    var nudge=(MO<6)?'<div class="p-nudge">➕ زد شهر يكبر خصمك — يوصل '+ceilTxt()+'. كلّمنا تعرف أقصى خصم لك.</div>':'<div class="p-nudge">طوّلت زين 👏 كلّمنا تعرف أقصى خصم لك.</div>';
+    body=sold
+      +'<div class="p-was">السعر قبل الخصم <s>'+grp(q.before)+' ر.س</s></div>'
+      +'<div class="p-now"><b>'+grp(q.after)+'</b><span>ر.س / '+monthsLabel(q.months)+'</span></div>'
+      +'<div class="p-permonth">≈ '+grp(q.per_month_after)+' ر.س بالشهر</div>'
+      +'<div class="p-save">🎉 وفّرت '+grp(q.saved)+' ر.س · خصم '+pct(q.pct)+'</div>'
+      +estnote+nudge;
+  } else if(l.m_before>0){
+    body='<div class="p-was">يبدأ من <s>'+grp(l.m_before)+' ر.س</s> بالشهر</div>'
+      +'<div class="p-now"><b>'+grp(l.m_after)+'</b><span>ر.س / شهر</span></div>'
+      +'<div class="p-teaser">حط تاريخ دخولك تحت عشان نحسب الإجمالي بالضبط.</div>'
+      +'<div class="p-nudge">يوصل خصمك '+ceilTxt()+' — كلّمنا تعرف أقصى خصم لك.</div>';
+  } else {
+    body='<div class="deal-soft" style="margin-bottom:10px">كلّمنا للسعر والتوفر — نرتّب لك كل شي.</div>';
+  }
+  var wbtn=waNum()?('<a class="btn wa block lg" id="waBtn" href="#" target="_blank" rel="noopener" data-ev="monthly_whatsapp">'+WA+'رتّب سكنك على واتساب</a>')
+    :('<button class="btn off block lg" disabled>'+WA+'الواتساب غير متاح حاليًا</button>');
+  return '<div class="panel">'+stepper+'<label class="field" style="margin-bottom:0"><span style="font-size:12px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:6px">تاريخ الدخول</span></label>'+dateField
+    +body+addonsHtml(l)+wbtn+'<div class="p-note">عوجا بالشهر سكن طويل — الحجز والسعر النهائي وأقصى خصم نتفق عليها بالواتساب. ما في حجز فوري.</div></div>';
+}
+function renderListing(){
+  document.title=(L.name_ar||L.name_en||'شقة شهرية')+' · عوجا بالشهر';
+  var chips=(L.tags||[]).slice(0,5).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');
+  V.innerHTML='<div class="wrap"><a class="back" href="/monthly'+(location.search||'')+'">‹ رجوع للشقق</a>'
+    +galHtml(L)
+    +'<div class="lwrap"><div><h1 class="lh1">'+he(L.name_ar||L.name_en||'')+'</h1><div class="larea">'+he(L.area||'الرياض')+'</div>'
+      +'<div class="lmeta">'+metaRow(L)+'</div>'+(chips?'<div class="chips">'+chips+'</div>':'')
+      +descHtml(L)+amenHtml(L)+'</div>'
+      +'<div>'+pricePanel(L)+'</div></div></div>';
+  bindListing();reveal();track('monthly_listing',{listing_id:L.id});
+}
+function selectedAddons(){return (L.addons||[]).filter(function(a){return SEL[a.key];}).map(function(a){return a.ar||a.en;});}
+function buildMsg(){
+  var NL=String.fromCharCode(10);var q=L.quote;var x=['حياك الله 🤍 مهتم بسكن شهري مع عوجا:'];
+  x.push('🏠 الشقة: '+(L.name_ar||L.name_en||''));
+  if(MI){x.push('🗓️ الدخول: '+MI);}
+  x.push('🗓️ المدة: '+monthsLabel(MO));
+  if(q&&q.move_out){x.push('🗓️ الخروج التقريبي: '+q.move_out);}
+  if(q&&q.before>0){x.push('💰 قبل الخصم: '+grp(q.before)+' ر.س');x.push('✅ بعد خصم '+pct(q.pct)+': '+grp(q.after)+' ر.س');}
+  var ad=selectedAddons();if(ad.length){x.push('➕ إضافات: '+ad.join('، '));}
+  if(L.area){x.push('📍 '+L.area);}
+  x.push('');x.push('أبغى أعرف أقصى خصم ممكن لي 🙏');
+  return x.join(NL);
+}
+function refreshWa(){var b=document.getElementById('waBtn');if(b){var h=waHref(buildMsg());if(h)b.setAttribute('href',h);}var hw=document.getElementById('headWa');if(hw){var hh=waHref('حياك الله 🤍 أبغى أستفسر عن السكن الشهري في عوجا');if(hh)hw.setAttribute('href',hh);}}
+function reloadQuote(){
+  if(!MI){L.quote=null;document.querySelector('.panel').outerHTML=pricePanel(L);bindListing();return;}
+  var u='/api/monthly/quote?id='+encodeURIComponent(L.id)+'&move_in='+encodeURIComponent(MI)+'&months='+MO;
+  fetch(u).then(function(r){return r.json();}).then(function(d){L.quote=(d&&d.quote)||null;var p=document.querySelector('.panel');if(p){p.outerHTML=pricePanel(L);bindListing();}});
+}
+function bindListing(){
+  refreshWa();
+  var mp=document.getElementById('mplus'),mm=document.getElementById('mminus'),pd=document.getElementById('pdate');
+  if(mp)mp.addEventListener('click',function(){if(MO<6){MO++;reloadQuote();}});
+  if(mm)mm.addEventListener('click',function(){if(MO>1){MO--;reloadQuote();}});
+  if(pd)pd.addEventListener('change',function(){MI=pd.value||'';reloadQuote();});
+  document.querySelectorAll('.addon').forEach(function(el){
+    function tog(){var k=el.getAttribute('data-add');SEL[k]=!SEL[k];el.classList.toggle('on',!!SEL[k]);refreshWa();}
+    el.addEventListener('click',tog);
+    el.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();tog();}});
+  });
+}
+/* promo ribbon + header wa */
+function initChrome(){
+  var p=CFG.promo||{};if(p.on){var lab=p.label_ar||('خصم '+pct(p.pct)+' هالموسم');document.getElementById('ribbon').innerHTML='<div class="ribbon">🎉 <b>'+he(lab)+'</b> — كلّمنا تعرف أقصى خصم لك</div>';}
+  var hw=document.getElementById('headWa');var hh=waHref('حياك الله 🤍 أبغى أستفسر عن السكن الشهري في عوجا');if(hh&&hw){hw.setAttribute('href',hh);}else if(hw){hw.style.display='none';}
+}
+/* delegated card analytics */
+document.addEventListener('click',function(e){var c=e.target.closest&&e.target.closest('[data-ev]');if(c){track(c.getAttribute('data-ev'),{listing_id:c.getAttribute('data-id')||''});}},true);
+/* route */
+(function(){
+  initChrome();
+  var p=location.pathname;
+  if(p==='/monthly'||p==='/monthly/'){viewLanding();}
+  else if(p==='/monthly/search'){viewSearch();}
+  else{viewListing();}
+})();
+</script>
+</body></html>"""
+
+def _monthly_render(route="home", listing=None, base=""):
+    title = "عوجا بالشهر · شقق مفروشة شهرية في الرياض"
+    desc = "استأجر شقة عوجا مفروشة بالشهر في الرياض — اختر تاريخ دخولك والمدة، شوف السعر قبل وبعد الخصم، وكلّمنا واتساب."
+    og = ""
+    path = {"home": "/monthly", "search": "/monthly/search", "listing": "/monthly"}.get(route, "/monthly")
+    if listing:
+        title = (listing.get("name_ar") or title) + " · عوجا بالشهر"
+        desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
+        og = listing.get("cover") or ""
+        path = "/monthly/" + (listing.get("slug") or str(listing.get("id")))
+    hcfg = _gw_hero_resolve()
+    if not listing and hcfg.get("url"):
+        og = og or hcfg["url"]
+    cfg = _monthly_cfg_public()
+    cfg.update({"hero": (hcfg.get("url") or ""), "imgproxy": MONTHLY_IMG_PROXY,
+                "whatsapp": MONTHLY_WHATSAPP, "noo": _gw_noo_options(),
+                "neighborhoods": _gw_neighborhoods_with_counts()})
+    data = {"route": route, "listing": listing, "config": cfg}
+    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    if listing:
+        ld = {"@context": "https://schema.org", "@type": "Apartment",
+              "name": listing.get("name_ar") or listing.get("name_en") or "",
+              "description": desc, "url": (base or "") + path,
+              "numberOfRooms": listing.get("beds"),
+              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh",
+                          "addressRegion": (listing.get("area") or "Riyadh"), "addressCountry": "SA"}}
+        if listing.get("cover"):
+            ld["image"] = listing["cover"]
+        ld = {k: v for k, v in ld.items() if v not in (None, "", {})}
+    else:
+        ld = {"@context": "https://schema.org", "@type": "LodgingBusiness",
+              "name": "Ouja Monthly · عوجا بالشهر", "description": desc,
+              "url": (base or "") + "/monthly",
+              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh", "addressCountry": "SA"}}
+        if hcfg.get("url"):
+            ld["image"] = hcfg["url"]
+    ld_blob = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
+    return (MONTHLY_HTML
+            .replace("/*__MONTHLY_DATA__*/null", blob)
+            .replace("/*__MONTHLY_JSONLD__*/null", ld_blob)
+            .replace("__MONTHLY_TITLE__", _gw_he(title))
+            .replace("__MONTHLY_DESC__", _gw_he(desc))
+            .replace("__MONTHLY_OG__", _gw_he(og))
+            .replace("__MONTHLY_URL__", _gw_he((base or "") + path)))
+
+# ---- Ouja Monthly public routes (NO token); reuse /api/stay/event + /elite/img machinery ----
+def _monthly_off():
+    return web.Response(status=404, text="not found")
+
+async def _handle_monthly(request):
+    if not MONTHLY_ENABLED:
+        return _monthly_off()
+    return web.Response(text=_monthly_render("home", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_monthly_search(request):
+    if not MONTHLY_ENABLED:
+        return _monthly_off()
+    return web.Response(text=_monthly_render("search", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_monthly_id(request):
+    if not MONTHLY_ENABLED:
+        return _monthly_off()
+    lid = request.match_info.get("lid", "")
+    snap, ov = _gw_find_by_slug_or_id(lid)
+    if snap:
+        q = ("?" + request.query_string) if request.query_string else ""
+        raise web.HTTPFound("/monthly/" + _gw_slug(snap, ov) + q)
+    return web.Response(text=_monthly_render("listing", base=str(request.url.origin())), content_type="text/html")
+
+async def _handle_monthly_detail(request):
+    if not MONTHLY_ENABLED:
+        return _monthly_off()
+    token = request.match_info.get("slug", "")
+    snap, ov = _gw_find_by_slug_or_id(token)
+    listing = _gw_listing_public(snap, ov, with_airbnb=False) if snap else None
+    return web.Response(text=_monthly_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
+
+async def _api_monthly_config(request):
+    return _json({"ok": True, **_monthly_cfg_public()})
+
+async def _api_monthly_featured(request):
+    out = await asyncio.to_thread(_monthly_featured, 6)
+    return _json({"ok": True, **out})
+
+async def _api_monthly_search(request):
+    q = request.query
+    out = await asyncio.to_thread(_monthly_search, q.get("move_in"), q.get("months"),
+                                  q.get("type"), q.get("area"), q.get("neighborhood"),
+                                  q.get("tags"), q.get("guests"))
+    return _json({"ok": True, **out})
+
+async def _api_monthly_listing(request):
+    snap, ov = _gw_find_by_slug_or_id(request.match_info.get("id", ""))
+    if not snap:
+        return _json({"ok": False, "listing": None}, 404)
+    mi, mo = request.query.get("move_in"), request.query.get("months")
+    card = await asyncio.to_thread(_monthly_card, snap, ov, mi, mo)
+    return _json({"ok": True, "listing": card})
+
+async def _api_monthly_quote(request):
+    snap, ov = _gw_find_by_slug_or_id(request.query.get("id", ""))
+    if not snap:
+        return _json({"ok": False, "quote": None}, 404)
+    q = await asyncio.to_thread(monthly_quote, snap.get("id"),
+                                request.query.get("move_in"), request.query.get("months"), snap)
+    return _json({"ok": True, "quote": q})
+
+async def _api_monthly_admin(request):
+    """Token-gated config control (dashboard Manage tab is v2; this is the API behind it)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "GET":
+        listings = [{"id": s.get("id"), "name": s.get("name"),
+                     "hidden": str(s.get("id")) in _monthly_hidden_set()}
+                    for s in (_gw_cache.get("listings") or [])]
+        listings.sort(key=lambda x: (x["name"] or ""))
+        return _json({"ok": True, "config": _monthly_cfg, "listings": listings})
+    b = await _read_body(request)
+    if isinstance(b.get("default_pct"), (int, float)):
+        _monthly_cfg["default_pct"] = max(0.0, min(float(b["default_pct"]), 0.95))
+    if isinstance(b.get("ceiling_pct"), (int, float)):
+        _monthly_cfg["ceiling_pct"] = max(0.0, min(float(b["ceiling_pct"]), 0.95))
+    if isinstance(b.get("promo"), dict):
+        p = b["promo"]
+        _monthly_cfg["promo"] = {"on": bool(p.get("on")), "pct": max(0.0, min(float(p.get("pct") or 0.0), 0.95)),
+                                 "label_ar": str(p.get("label_ar") or "")[:80],
+                                 "label_en": str(p.get("label_en") or "")[:80]}
+    if isinstance(b.get("hidden"), list):
+        _monthly_cfg["hidden"] = [str(x) for x in b["hidden"]]
+    if isinstance(b.get("addons"), list) and b["addons"]:
+        _monthly_cfg["addons"] = b["addons"]
+    _monthly_cfg_save()
+    return _json({"ok": True, "config": _monthly_cfg})
+
+
 async def _api_gw_hero(request):
     """Dashboard hero control. GET → config + resolved + listings-with-images for the chooser. POST → save/reset."""
     if request.method == "GET":
@@ -46173,6 +46982,20 @@ async def start_web_server():
         app.router.add_get("/elite/img", _handle_elite_img)
         app.router.add_get("/api/elite/geo", _handle_elite_geo)
         app.router.add_get("/elite/{slug}", _handle_elite_detail)
+        # ---- Ouja Monthly site (no token); reuses /elite/img + /api/stay/event; {slug} LAST ----
+        app.router.add_get("/monthly", _handle_monthly)
+        app.router.add_get("/monthly/", _handle_monthly)
+        app.router.add_get("/monthly/search", _handle_monthly_search)
+        app.router.add_get("/monthly/id/{lid}", _handle_monthly_id)
+        app.router.add_get("/monthly/img", _handle_elite_img)        # reuse the proven WebP proxy
+        app.router.add_get("/api/monthly/config", _api_monthly_config)
+        app.router.add_get("/api/monthly/featured", _api_monthly_featured)
+        app.router.add_get("/api/monthly/search", _api_monthly_search)
+        app.router.add_get("/api/monthly/listing/{id}", _api_monthly_listing)
+        app.router.add_get("/api/monthly/quote", _api_monthly_quote)
+        app.router.add_get("/api/monthly/admin", _api_monthly_admin)
+        app.router.add_post("/api/monthly/admin", _api_monthly_admin)
+        app.router.add_get("/monthly/{slug}", _handle_monthly_detail)
         app.router.add_get("/musaed-showcase", _handle_musaed_showcase)
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
         app.router.add_get("/api/invest/link", _api_invest_link)    # admin: copy the investor URL
