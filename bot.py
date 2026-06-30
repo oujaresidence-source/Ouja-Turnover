@@ -45599,9 +45599,9 @@ MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /el
 def _monthly_default_cfg():
     """Seed config. Owner-editable later via the admin endpoint / dashboard tab (v2)."""
     try:
-        _d = float(os.environ.get("MONTHLY_DISCOUNT_DEFAULT", "0.15"))
+        _d = float(os.environ.get("MONTHLY_DISCOUNT_DEFAULT", "0.20"))
     except ValueError:
-        _d = 0.15
+        _d = 0.20
     try:
         _c = float(os.environ.get("MONTHLY_DISCOUNT_MAX", "0.30"))
     except ValueError:
@@ -45768,19 +45768,36 @@ def _monthly_card(snap, ov, move_in=None, months=None):
             pub["quote"] = q
     return pub
 
-def _monthly_search(move_in=None, months=None, typ=None, area=None, neighborhood=None,
-                    tags=None, guests=None):
-    """Monthly results. With a move-in+months we attach a per-unit quote and drop sold-out units;
-    without, it's browse mode (per-month 'from' before/after only)."""
+def _monthly_beds_match(snap, beds):
+    """beds filter: 'studio'=0, '1','2' exact, '3' = 3 or more. Empty/all = pass."""
+    if not beds or beds in ("all", ""):
+        return True
+    try:
+        b = int(snap.get("beds")) if snap.get("beds") is not None else None
+    except (TypeError, ValueError):
+        b = None
+    if b is None:
+        return False
+    if beds == "studio":
+        return b == 0
+    try:
+        want = int(beds)
+    except ValueError:
+        return True
+    return b >= 3 if want >= 3 else b == want
+
+def _monthly_filter(beds=None, typ=None, area=None, neighborhood=None, tags=None, guests=None):
+    """Non-availability filters (no network) — runs before the concurrent calendar pulls."""
     try:
         g = int(guests) if guests else None
     except (TypeError, ValueError):
         g = None
     tag_list = [t for t in ((tags or "").split(",")) if t and t not in ("all",)]
-    dated = bool(move_in and months)
-    results, avail_error = [], False
+    out = []
     for s, ov in _monthly_visible_snaps():
         if g and s.get("capacity") and int(s["capacity"]) < g:
+            continue
+        if not _monthly_beds_match(s, beds):
             continue
         if typ and typ not in ("all", "") and typ not in (s.get("tag_keys") or []):
             continue
@@ -45790,31 +45807,138 @@ def _monthly_search(move_in=None, months=None, typ=None, area=None, neighborhood
             continue
         if tag_list and not all(t in (s.get("tag_keys") or []) for t in tag_list):
             continue
-        card = _monthly_card(s, ov, move_in if dated else None, months if dated else None)
-        if dated:
-            q = card.get("quote")
-            if not q:
-                avail_error = True
-            elif q.get("available") is False:
-                continue
-        results.append((card, ov))
-    def sort_key(t):
-        card, ov2 = t
-        return (-(ov2.get("sort") or 0), 0 if card.get("images") else 1, (card.get("name_ar") or ""))
-    results.sort(key=sort_key)
-    return {"browse": (not dated), "avail_error": (avail_error and dated),
-            "results": [r[0] for r in results]}
+        out.append((s, ov))
+    return out
+
+def _monthly_sort_cards(rows):
+    """rows: [(card, ov)] -> [card] in the site's default order."""
+    rows.sort(key=lambda t: (-((t[1].get("sort") or 0)),
+                             0 if t[0].get("images") else 1, (t[0].get("name_ar") or "")))
+    return [r[0] for r in rows]
+
+async def _monthly_search_async(move_in=None, months=None, beds=None, typ=None, area=None,
+                                neighborhood=None, tags=None, guests=None):
+    """Monthly results. The slow part — one Hostaway calendar pull per unit — now runs CONCURRENTLY
+    (semaphore-bounded) instead of serially, and unit_availability_price caches for ~15m, so the
+    search returns fast and repeat searches are instant. Browse mode (no dates) does zero network."""
+    snaps = await asyncio.to_thread(_monthly_filter, beds, typ, area, neighborhood, tags, guests)
+    if not (move_in and months):
+        rows = [(_monthly_card(s, ov), ov) for s, ov in snaps]
+        return {"browse": True, "avail_error": False, "results": _monthly_sort_cards(rows)}
+    sem = asyncio.Semaphore(8)
+    async def one(s, ov):
+        async with sem:
+            q = await asyncio.to_thread(monthly_quote, s.get("id"), move_in, months, s)
+        return (s, ov, q)
+    got = await asyncio.gather(*[one(s, ov) for s, ov in snaps])
+    rows, avail_error = [], False
+    for s, ov, q in got:
+        if not q:
+            avail_error = True
+            continue
+        if q.get("available") is False:
+            continue
+        card = _monthly_card(s, ov)          # cheap: quote already computed, no extra network
+        card["quote"] = q
+        rows.append((card, ov))
+    return {"browse": False, "avail_error": avail_error, "results": _monthly_sort_cards(rows)}
+
+def _monthly_rating_of(snap):
+    """(rating, reviews_count) for a snap, (0.0, 0) when unknown."""
+    try:
+        rt = _gw_ratings_map().get(int(snap.get("id")))
+    except (TypeError, ValueError):
+        rt = None
+    if rt:
+        try:
+            return (float(rt.get("rating") or 0), int(rt.get("count") or 0))
+        except (TypeError, ValueError):
+            return (0.0, 0)
+    return (0.0, 0)
+
+def _monthly_hero_url():
+    """Landing cover photo. Owner pick: the '101 QUR' apartment's photo; falls back to the shared
+    /stay hero, then any visible cover, so the hero is never blank."""
+    snaps = _monthly_visible_snaps()
+    for s, ov in snaps:
+        nm = ((s.get("name") or "") + " " + (s.get("internal") or "")).lower()
+        if "101" in nm and "qur" in nm:
+            c = (ov.get("hero_image") or s.get("cover") or "")
+            if c:
+                return c
+    h = _gw_hero_resolve()
+    if h.get("url"):
+        return h["url"]
+    for s, ov in snaps:
+        c = (ov.get("hero_image") or s.get("cover") or "")
+        if c:
+            return c
+    return ""
 
 def _monthly_featured(limit=6):
-    feat = [(s, ov) for s, ov in _monthly_visible_snaps() if ov.get("featured")]
-    if feat:
-        feat.sort(key=lambda t: (-(t[1].get("sort") or 0), (t[0].get("name") or "")))
-        chosen = feat[:limit]
-        auto = False
-    else:
-        chosen = _monthly_visible_snaps()[:limit]
-        auto = True
-    return {"results": [_monthly_card(s, ov) for s, ov in chosen], "auto": auto}
+    """Featured strip = the highest-rated apartments we have (owner request)."""
+    rows = []
+    for s, ov in _monthly_visible_snaps():
+        r, n = _monthly_rating_of(s)
+        rows.append((-r, -n, 0 if ov.get("featured") else 1, (s.get("name") or ""), s, ov))
+    rows.sort(key=lambda x: x[:4])
+    return {"results": [_monthly_card(s, ov) for (_a, _b, _c, _d, s, ov) in rows[:limit]], "auto": True}
+
+# ---- underperformer "deals" engine: apartments with moderate occupancy that have room to fill ----
+_monthly_deals_cache = {"data": None, "ts": 0.0}
+
+def _monthly_booked_nights(listing_id, start, end):
+    """Reserved nights in [start,end) from the Hostaway calendar. A night counts as booked ONLY if
+    it carries a reservationId — so Airbnb/manual BLOCKS (unavailable, no reservation) are NOT
+    counted as bookings. Returns (booked, blocked, days) or None on error."""
+    try:
+        data = api_get("/listings/%s/calendar" % listing_id,
+                       params={"startDate": start, "endDate": end})
+        days = data.get("result", []) or []
+    except Exception:
+        return None
+    booked = blocked = 0
+    for d in days:
+        if int(d.get("isAvailable", 1) or 0) == 1:
+            continue
+        if d.get("reservationId") or d.get("reservation_id"):
+            booked += 1
+        else:
+            blocked += 1
+    return (booked, blocked, len(days))
+
+async def _monthly_deals_async(limit=6, ttl=10800):
+    """Apartments with 5-15 reserved nights in the next ~30 days = underperforming but in demand:
+    proven bookings, yet half-empty, so a monthly tenant is the best fill. Excludes dead/blocked
+    units (<5 reserved, which is where Airbnb-blocked + no-booking units land) and healthy units
+    (>15). Concurrent calendar pulls (semaphore-bounded) + 3h cache so it never slows the page."""
+    c = _monthly_deals_cache
+    if c["data"] is not None and (time.time() - c["ts"]) < ttl:
+        return c["data"]
+    today = datetime.now(TZ).date()
+    start, end = today.isoformat(), _add_months(today, 1).isoformat()
+    snaps = _monthly_visible_snaps()
+    sem = asyncio.Semaphore(8)
+    async def one(s, ov):
+        async with sem:
+            r = await asyncio.to_thread(_monthly_booked_nights, s.get("id"), start, end)
+        if not r:
+            return None
+        booked, _blocked, _days = r
+        if 5 <= booked <= 15:
+            return (s, ov, booked)
+        return None
+    rows = [x for x in await asyncio.gather(*[one(s, ov) for s, ov in snaps]) if x]
+    rows.sort(key=lambda t: (-_monthly_rating_of(t[0])[0], -_monthly_rating_of(t[0])[1]))
+    out = []
+    for s, ov, booked in rows[:limit]:
+        card = _monthly_card(s, ov)
+        card["deal"] = True
+        card["deal_booked"] = booked
+        out.append(card)
+    res = {"results": out}
+    c["data"], c["ts"] = res, time.time()
+    return res
 
 def _monthly_cfg_public():
     c = _monthly_cfg
@@ -45894,8 +46018,8 @@ a{color:inherit;text-decoration:none}
 .widget{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:0 24px 56px rgba(34,48,43,.13)}
 @media(max-width:560px){.widget{padding:18px}}
 .w-lead{font-size:13px;font-weight:600;color:var(--accent-deep);margin:0 0 14px;display:flex;align-items:center;gap:8px}
-.wfields{display:grid;grid-template-columns:1fr;gap:12px}
-@media(min-width:680px){.wfields{grid-template-columns:1.1fr 1fr auto;align-items:end}}
+.wfields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(min-width:680px){.wfields{grid-template-columns:repeat(4,1fr)}}
 .field{display:flex;flex-direction:column;gap:7px}
 .field label{font-size:12px;font-weight:600;color:var(--ink-soft)}
 .field input,.field select{font:inherit;font-size:16px;padding:0 14px;min-height:54px;border:1px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink);width:100%;appearance:none}
@@ -45935,6 +46059,7 @@ img.fadein.loaded{opacity:1}
 .ctag{position:absolute;top:12px;inset-inline-start:12px;display:flex;gap:6px;flex-wrap:wrap}
 .ctag span{font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:rgba(27,38,32,.72);color:#fff;backdrop-filter:blur(5px)}
 .ctag .soldout{background:rgba(143,94,54,.92)}
+.ctag .dealt{background:var(--clay)}
 .cbody{padding:16px 17px 17px;display:flex;flex-direction:column;gap:7px;flex:1}
 .carea{font-family:"Inter",sans-serif;font-size:11.5px;letter-spacing:.05em;color:var(--mut);text-transform:uppercase;font-weight:600}
 .cname{font-size:18px;font-weight:700;color:var(--ink);line-height:1.34;margin:0}
@@ -46067,31 +46192,42 @@ function dealCard(l){
 function cardHtml(l){
   var ci=qsp().get('move_in'),mo=qsp().get('months');
   var carry=(ci&&mo)?('?move_in='+encodeURIComponent(ci)+'&months='+encodeURIComponent(mo)):'';
-  var so=(l.quote&&l.quote.available===false)?'<span class="soldout">محجوزة هالفترة</span>':'';
+  var tags='';
+  if(l.quote&&l.quote.available===false){tags+='<span class="soldout">محجوزة هالفترة</span>';}
+  if(l.deal){tags+='<span class="dealt">🔥 فرصة الشهر</span>';}
   var cv=l.cover?img(l.cover,640):'<div class="mono">ع</div>';
+  var foot=dealCard(l)+(l.deal?'<div class="deal-teaser" style="color:var(--clay-deep);font-weight:700">🔥 فرصة هالشهر — كلّمنا واتساب تحصل على سعر مميز</div>':'');
   return '<a class="card reveal" href="/monthly/'+he(l.slug||l.id)+carry+'" data-ev="monthly_card" data-id="'+he(l.id)+'">'
-    +'<div class="cover">'+cv+(so?'<div class="ctag">'+so+'</div>':'')+'</div>'
+    +'<div class="cover">'+cv+(tags?'<div class="ctag">'+tags+'</div>':'')+'</div>'
     +'<div class="cbody"><div class="carea">'+he(l.area||'الرياض')+'</div><h3 class="cname">'+he(l.name_ar||l.name_en||'')+'</h3>'
     +'<div class="cmeta">'+metaRow(l)+'</div>'
-    +'<div class="cfoot">'+dealCard(l)+'</div></div></a>';
+    +'<div class="cfoot">'+foot+'</div></div></a>';
 }
 /* picker */
 function pickerHtml(){
-  var ci=qsp().get('move_in')||'',mo=qsp().get('months')||'1';
-  var opts='';for(var i=1;i<=6;i++){opts+='<option value="'+i+'"'+(String(i)===String(mo)?' selected':'')+'>'+monthsLabel(i)+'</option>';}
-  return '<div class="widget reveal"><div class="w-lead">🗓️ اختر تاريخ دخولك والمدة — نوريك السعر قبل وبعد الخصم</div>'
-    +'<form id="pk" class="wfields">'
+  var p=qsp();var ci=p.get('move_in')||'',mo=p.get('months')||'1',bd=p.get('beds')||'',nb=p.get('neighborhood')||'';
+  var mopts='';for(var i=1;i<=6;i++){mopts+='<option value="'+i+'"'+(String(i)===String(mo)?' selected':'')+'>'+monthsLabel(i)+'</option>';}
+  var bo=[['','كل الغرف'],['studio','استوديو'],['1','غرفة'],['2','غرفتين'],['3','٣ غرف أو أكثر']];
+  var bopts=bo.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===bd?' selected':'')+'>'+o[1]+'</option>';}).join('');
+  var nopts='<option value="">كل الأحياء</option>'+(CFG.neighborhoods||[]).map(function(n){return '<option value="'+he(n.key)+'"'+(n.key===nb?' selected':'')+'>'+he(n.ar||n.en)+' ('+n.count+')</option>';}).join('');
+  return '<div class="widget reveal"><div class="w-lead">🗓️ اختر تاريخ دخولك، المدة، ونوع الشقة — نوريك السعر قبل وبعد الخصم</div>'
+    +'<form id="pk"><div class="wfields">'
     +'<div class="field"><label>تاريخ الدخول</label><input type="date" id="mi" value="'+he(ci)+'" min="'+todayStr()+'"></div>'
-    +'<div class="field"><label>المدة</label><select id="mo">'+opts+'</select></div>'
-    +'<div class="field"><button class="btn lg" type="submit">اعرض الأسعار</button></div>'
-    +'</form></div>';
+    +'<div class="field"><label>المدة</label><select id="mo">'+mopts+'</select></div>'
+    +'<div class="field"><label>عدد الغرف</label><select id="bd">'+bopts+'</select></div>'
+    +'<div class="field"><label>الحي</label><select id="nb">'+nopts+'</select></div>'
+    +'</div><button class="btn lg block" type="submit" style="margin-top:14px">اعرض الأسعار</button></form></div>';
 }
 function bindPicker(){
   var f=document.getElementById('pk');if(!f)return;
   f.addEventListener('submit',function(e){e.preventDefault();
-    var mi=(document.getElementById('mi')||{}).value||'';var mo=(document.getElementById('mo')||{}).value||'1';
-    var q='?months='+encodeURIComponent(mo)+(mi?('&move_in='+encodeURIComponent(mi)):'');
-    track('monthly_search_submit',{months:mo});location.href='/monthly/search'+q;
+    function val(id){var el=document.getElementById(id);return el?(el.value||''):'';}
+    var mi=val('mi'),mo=val('mo')||'1',bd=val('bd'),nb=val('nb');
+    var q='?months='+encodeURIComponent(mo);
+    if(mi)q+='&move_in='+encodeURIComponent(mi);
+    if(bd)q+='&beds='+encodeURIComponent(bd);
+    if(nb)q+='&neighborhood='+encodeURIComponent(nb);
+    track('monthly_search_submit',{months:mo,beds:bd});location.href='/monthly/search'+q;
   });
 }
 /* ---------- views ---------- */
@@ -46105,7 +46241,8 @@ function viewLanding(){
       +'<span class="hero-teaser">🎉 خصم يصل إلى <b>'+ceilTxt()+'</b> في بعض الشهور</span>'
     +'</div></div></section>'
     +'<div class="band-tight"><div class="wrap">'+pickerHtml()+'</div></div>'
-    +'<section class="sec"><div class="wrap"><div class="sec-head"><span class="eyebrow">شقق مختارة</span><h2 class="h-sec">سكن جاهز يستاهل</h2></div><div id="feat" class="grid three">'+skeletons(3)+'</div></div></section>'
+    +'<section class="sec"><div class="wrap"><div class="sec-head"><span class="eyebrow">الأعلى تقييمًا</span><h2 class="h-sec">سكن جاهز يستاهل</h2></div><div id="feat" class="grid three">'+skeletons(3)+'</div></div></section>'
+    +'<section class="sec" id="dealsSec" style="display:none"><div class="wrap"><div class="sec-head"><span class="eyebrow">فرص هالشهر</span><h2 class="h-sec">🔥 وفّر أكثر — عروض الشهر</h2><p class="sec-sub">شقق فيها فرصة هالشهر: احجزها بالشهر وكلّمنا واتساب، نعطيك سعر مميز أكبر.</p></div><div id="deals" class="grid three"></div></div></section>'
     +'<section class="sec"><div class="wrap"><div class="sec-head"><span class="eyebrow">كيف تشتغل</span><h2 class="h-sec">٤ خطوات وأنت بشقتك</h2></div><div class="steps">'
       +stepHtml(1,'اختر تاريخك والمدة','من شهر لستة أشهر — قدها وقدود.')
       +stepHtml(2,'شوف السعر قبل وبعد','نوريك السعر الكامل والسعر بعد الخصم، بشفافية.')
@@ -46117,6 +46254,10 @@ function viewLanding(){
     var el=document.getElementById('feat');if(!el)return;var rs=(d&&d.results)||[];
     el.innerHTML=rs.length?rs.map(cardHtml).join(''):'<div class="empty"><div class="big">🏠</div>قريبًا شقق شهرية.</div>';reveal();
   }).catch(function(){var el=document.getElementById('feat');if(el)el.innerHTML='<div class="empty">تعذّر التحميل.</div>';});
+  fetch('/api/monthly/deals').then(function(r){return r.json();}).then(function(d){
+    var rs=(d&&d.results)||[];var sec=document.getElementById('dealsSec'),el=document.getElementById('deals');
+    if(!el||!rs.length)return;el.innerHTML=rs.map(cardHtml).join('');if(sec)sec.style.display='';reveal();
+  }).catch(function(){});
   track('monthly_landing');
 }
 function stepHtml(n,h,p){return '<div class="step reveal"><div class="step-n">'+n+'</div><div class="step-h">'+he(h)+'</div><p class="step-p">'+he(p)+'</p></div>';}
@@ -46273,7 +46414,7 @@ def _monthly_render(route="home", listing=None, base=""):
     if not listing and hcfg.get("url"):
         og = og or hcfg["url"]
     cfg = _monthly_cfg_public()
-    cfg.update({"hero": (hcfg.get("url") or ""), "imgproxy": MONTHLY_IMG_PROXY,
+    cfg.update({"hero": _monthly_hero_url(), "imgproxy": MONTHLY_IMG_PROXY,
                 "whatsapp": MONTHLY_WHATSAPP, "noo": _gw_noo_options(),
                 "neighborhoods": _gw_neighborhoods_with_counts()})
     data = {"route": route, "listing": listing, "config": cfg}
@@ -46345,9 +46486,13 @@ async def _api_monthly_featured(request):
 
 async def _api_monthly_search(request):
     q = request.query
-    out = await asyncio.to_thread(_monthly_search, q.get("move_in"), q.get("months"),
-                                  q.get("type"), q.get("area"), q.get("neighborhood"),
-                                  q.get("tags"), q.get("guests"))
+    out = await _monthly_search_async(q.get("move_in"), q.get("months"), q.get("beds"),
+                                      q.get("type"), q.get("area"), q.get("neighborhood"),
+                                      q.get("tags"), q.get("guests"))
+    return _json({"ok": True, **out})
+
+async def _api_monthly_deals(request):
+    out = await _monthly_deals_async(6)
     return _json({"ok": True, **out})
 
 async def _api_monthly_listing(request):
@@ -46990,6 +47135,7 @@ async def start_web_server():
         app.router.add_get("/monthly/img", _handle_elite_img)        # reuse the proven WebP proxy
         app.router.add_get("/api/monthly/config", _api_monthly_config)
         app.router.add_get("/api/monthly/featured", _api_monthly_featured)
+        app.router.add_get("/api/monthly/deals", _api_monthly_deals)
         app.router.add_get("/api/monthly/search", _api_monthly_search)
         app.router.add_get("/api/monthly/listing/{id}", _api_monthly_listing)
         app.router.add_get("/api/monthly/quote", _api_monthly_quote)

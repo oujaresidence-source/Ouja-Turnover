@@ -39,7 +39,7 @@ def card(i, name, area, cap, beds, baths, pm_before, quote=None):
     c = {"id": 100 + i, "slug": "ouja-%d" % i, "name_ar": name, "name_en": name,
          "area": area, "capacity": cap, "beds": beds, "baths": baths,
          "cover": COVERS[i % 4], "images": COVERS, "tags": [],
-         "m_before": pm_before, "m_after": round(pm_before * 0.85), "m_pct": 0.15, "ceiling": 0.30,
+         "m_before": pm_before, "m_after": round(pm_before * 0.80), "m_pct": 0.20, "ceiling": 0.30,
          "amenities": ["واي فاي سريع", "مطبخ مجهّز", "تكييف", "غسالة", "مواقف خاصة", "دخول ذاتي"],
          "desc_ar": "شقة مفروشة مريحة في قلب الرياض، جاهزة للسكن الشهري بلمسة عوجا — "
                     "مساحات منظمة، دخول ذاتي، وكل ما تحتاجه لإقامة طويلة هادئة.",
@@ -66,7 +66,10 @@ CFG = {"hero": HERO, "whatsapp": "966500000000", "imgproxy": False,
        "promo": {"on": True, "pct": 0.20, "label_ar": "عرض الصيف · خصم يصل ٢٠٪", "label_en": ""},
        "addons": [{"key": "parking", "ar": "موقف خاص", "en": "Private parking"},
                   {"key": "entry", "ar": "دخول خاص / مستقل", "en": "Private entry"}],
-       "count": 14, "noo": [], "neighborhoods": []}
+       "count": 14, "noo": [],
+       "neighborhoods": [{"key": "almalqa", "ar": "الملقا", "en": "Al Malqa", "count": 5},
+                         {"key": "hittin", "ar": "حطين", "en": "Hittin", "count": 3},
+                         {"key": "alnakheel", "ar": "النخيل", "en": "Al Nakheel", "count": 2}]}
 
 DATA = {"config": CFG, "listing": None}
 
@@ -76,6 +79,9 @@ PAGE = (HTML
         .replace("__MONTHLY_TITLE__", "Ouja Monthly").replace("__MONTHLY_DESC__", "Ouja Monthly")
         .replace("__MONTHLY_OG__", "").replace("__MONTHLY_URL__", "https://ouja.test/monthly"))
 
+DEALCARDS = [dict(card(1, "Ouja | استوديو النخيل الهادئ", "النخيل", 2, 0, 1, 5200), deal=True),
+             dict(card(2, "Ouja | شقة حطين العائلية", "حطين", 6, 3, 2, 12500), deal=True)]
+DEALS = json.dumps({"ok": True, "results": DEALCARDS}, ensure_ascii=False)
 FEAT = json.dumps({"ok": True, "results": CARDS, "auto": True}, ensure_ascii=False)
 SEARCH = json.dumps({"ok": True, "results": DATED, "browse": False, "avail_error": False}, ensure_ascii=False)
 LIST = json.dumps({"ok": True, "listing": LISTING}, ensure_ascii=False)
@@ -98,6 +104,8 @@ def run():
                 u = r.request.url
                 if "fonts.g" in u:
                     return r.continue_()
+                if "/api/monthly/deals" in u:
+                    return r.fulfill(status=200, content_type="application/json", body=DEALS)
                 if "/api/monthly/featured" in u:
                     return r.fulfill(status=200, content_type="application/json", body=FEAT)
                 if "/api/monthly/search" in u:
