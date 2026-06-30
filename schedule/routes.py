@@ -9,7 +9,7 @@ and notifications all show identical numbers.
 import datetime
 import traceback
 
-from . import db, engine, seed, notify, page
+from . import db, engine, seed, notify, page, coverage
 from .host import HOST
 
 # Editing is gated on the existing multi-user roles (build spec §2). admin/ops may edit; every
@@ -153,14 +153,33 @@ async def api_week(request):
                                "can_edit": can_edit_schedule(request)})
 
 
+def _hostaway_listings():
+    """All Hostaway listings for the picker, best-effort (never raises). [] when unavailable."""
+    try:
+        return list(HOST.listings() or []) if HOST.listings else []
+    except Exception:
+        traceback.print_exc()
+        return []
+
+
 async def api_manage(request):
     """Everything the editor UI needs in one shot."""
     return HOST.json_response({
         "ok": True, "can_edit": can_edit_schedule(request),
         "employees": db.employees(), "apartments": db.apartments(),
         "overrides": db.overrides(), "settings": db.settings() or {},
+        "hostaway": _hostaway_listings(),
         "day_names": _DAY_AR,
     })
+
+
+async def api_hostaway_listings(request):
+    """The Hostaway listing list for the picker (editor-only)."""
+    if not can_edit_schedule(request):
+        return _deny()
+    linked = {int(a["listing_id"]): a["id"] for a in db.apartments()
+              if a.get("listing_id") is not None}
+    return HOST.json_response({"ok": True, "listings": _hostaway_listings(), "linked": linked})
 
 
 # ---------------- employee CRUD ----------------
@@ -218,14 +237,66 @@ async def api_apartment_save(request):
     if owner_id and not db.q1("SELECT id FROM schedule_employees WHERE id=?", (owner_id,)):
         return HOST.json_response({"ok": False, "error": "موظف غير معروف"}, 200)
     sort_order = int(b.get("sort_order") or 0)
+    # listing_id is only touched when the caller actually sends it (so the plain owner/name save
+    # from the apartment row never wipes an existing Hostaway link).
+    has_lid = "listing_id" in b
+    lid = b.get("listing_id")
+    lid = int(lid) if lid not in (None, "", 0, "0") else None
     aid = b.get("id")
     if aid:
-        db.execute("UPDATE schedule_apartments SET name=?,owner_id=?,sort_order=? WHERE id=?",
-                   (name, owner_id, sort_order, int(aid)))
+        if has_lid:
+            db.execute("UPDATE schedule_apartments SET name=?,owner_id=?,sort_order=?,listing_id=? WHERE id=?",
+                       (name, owner_id, sort_order, lid, int(aid)))
+        else:
+            db.execute("UPDATE schedule_apartments SET name=?,owner_id=?,sort_order=? WHERE id=?",
+                       (name, owner_id, sort_order, int(aid)))
     else:
-        aid = db.execute("INSERT INTO schedule_apartments(name,owner_id,sort_order,created_at) "
-                         "VALUES(?,?,?,?)", (name, owner_id, sort_order, db.now_iso()))
+        aid = db.execute("INSERT INTO schedule_apartments(name,owner_id,listing_id,sort_order,created_at) "
+                         "VALUES(?,?,?,?,?)", (name, owner_id, lid, sort_order, db.now_iso()))
     return HOST.json_response({"ok": True, "id": aid})
+
+
+async def api_apartment_link(request):
+    """Set/clear ONLY the Hostaway listing link for an apartment (no name/owner change). Pass
+    listing_id null to unlink. Used by the picker on existing rows."""
+    if not can_edit_schedule(request):
+        return _deny()
+    b = await _body(request)
+    try:
+        aid = int(b.get("id"))
+    except Exception:
+        return HOST.json_response({"ok": False, "error": "id required"}, 200)
+    lid = b.get("listing_id")
+    lid = int(lid) if lid not in (None, "", 0, "0") else None
+    db.execute("UPDATE schedule_apartments SET listing_id=? WHERE id=?", (lid, aid))
+    return HOST.json_response({"ok": True, "id": aid, "listing_id": lid})
+
+
+def autolink_listings():
+    """One-time best-effort: fill the Hostaway listing_id for apartments that don't have one yet,
+    by name-matching against the Hostaway listing list. Only fills blanks — never overwrites an
+    owner-set link. Returns a report. Safe to call repeatedly (idempotent once linked)."""
+    listings = _hostaway_listings()
+    if not listings:
+        return {"linked": 0, "total": 0, "unmatched": 0, "skipped": "no_hostaway_listings"}
+    apts = db.apartments()
+    linked, unmatched = 0, 0
+    for a in apts:
+        if a.get("listing_id") is not None:
+            continue
+        lid = coverage.best_listing(a.get("name"), listings)
+        if lid is not None:
+            db.execute("UPDATE schedule_apartments SET listing_id=? WHERE id=?", (int(lid), a["id"]))
+            linked += 1
+        else:
+            unmatched += 1
+    return {"linked": linked, "total": len(apts), "unmatched": unmatched}
+
+
+async def api_autolink(request):
+    if not can_edit_schedule(request):
+        return _deny()
+    return HOST.json_response({"ok": True, "report": autolink_listings()})
 
 
 async def api_apartment_delete(request):
@@ -333,6 +404,9 @@ def register(app):
     g("/api/schedule/week", _safe_public(api_week))
     # manage = editor data (employee/apartment lists) -> stays behind login.
     g("/api/schedule/manage", _safe(api_manage))
+    g("/api/schedule/hostaway-listings", _safe(api_hostaway_listings))
+    p("/api/schedule/apartment-link", _safe(api_apartment_link))
+    p("/api/schedule/autolink", _safe(api_autolink))
     p("/api/schedule/employee", _safe(api_employee_save))
     app.router.add_delete("/api/schedule/employee/{id}", _safe(api_employee_delete))
     p("/api/schedule/apartment", _safe(api_apartment_save))

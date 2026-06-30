@@ -3125,32 +3125,53 @@ async def sync_checkouts():
             print("create error:", e)
 
 # ---- OujaCT (in-house cleaning team) turnover channels + daily schedule ----
-def _oujact_cover_info(listing_name, date_iso):
+def _schedule_hostaway_listings():
+    """All Hostaway listings for the Employee-Schedule picker: [{id, name, active, oujact}].
+    OujaCT-assigned units sort first. Best-effort; returns [] if Hostaway is unreachable."""
+    try:
+        store = _ls_get()["listings"]
+        out = []
+        for lid, nm in get_listings_map().items():
+            rec = store.get(str(lid)) or {}
+            out.append({"id": int(lid), "name": rec.get("internal_name") or nm,
+                        "active": bool(rec.get("active", True)), "oujact": bool(rec.get("oujact"))})
+        out.sort(key=lambda x: (not x["oujact"], x["name"] or ""))
+        return out
+    except Exception as e:
+        print("schedule hostaway-listings provider error:", e)
+        return []
+
+def _oujact_cover_info(listing_name, date_iso, lid=None):
     """{name, emoji, ...} of the employee responsible for cleaning this apartment on `date_iso`,
-    looked up via the Employee Schedule (best-effort name match), or None when the listing can't
-    be matched to a schedule apartment. Never raises — channel creation must not break on a
-    schedule miss. The caller supplies the neutral placeholder (⚪) for the channel name."""
+    looked up via the Employee Schedule. Tries the EXACT Hostaway-listing-id link first (reliable),
+    then falls back to a best-effort name match for apartments not yet linked. Returns None when
+    nothing matches. Never raises — channel creation must not break on a schedule miss."""
     if not (_HAS_SCHEDULE and _schedule):
         return None
     try:
-        return _schedule.coverage.cover_for_listing(listing_name, date_iso)
+        info = None
+        if lid is not None:
+            info = _schedule.coverage.cover_for_listing_id(lid, date_iso)
+        if info is None:
+            info = _schedule.coverage.cover_for_listing(listing_name, date_iso)
+        return info
     except Exception as e:
         print("OujaCT cover lookup failed:", e)
         return None
 
 def _oujact_channel(internal_name, checkin_today, team_name="", cover_emoji=""):
-    """Discord-safe cleaning-channel name = unit + the responsible-employee EMOJI + the TEAM name,
-    e.g. '12b🟢-stayclean' / '12b🟢-servicu-checkin'. The emoji (whoever covers the unit that day,
-    from the Employee Schedule) sits right after the apartment name so the owner can see who's in
-    charge at a glance. The team name is what the owner sees; the 'oujact:1' marker lives in the
-    TOPIC (for dedup/cleanup), never the visible name."""
+    """Discord-safe cleaning-channel name = unit + TEAM name + the responsible-employee EMOJI at the
+    END, e.g. '103-nrjs-oujact🟢' / '12b-stayclean-checkin🟢'. The emoji (whoever covers the unit
+    that day, from the Employee Schedule) sits at the very end so the owner spots who's in charge at
+    a glance. The team name is what the owner sees; the 'oujact:1' marker lives in the TOPIC (for
+    dedup/cleanup), never the visible name."""
     base = channel_name(internal_name)[:50]
     team = channel_name(team_name) if team_name else ""
     if not team or team == "unit":
         team = "clean"
     suffix = "-checkin" if checkin_today else ""
     em = (cover_emoji or "").strip()
-    return (base + em + "-" + team[:24] + suffix)[:100]
+    return (base + "-" + team[:24] + suffix)[:100 - len(em)] + em
 
 def _oujact_topic(it, team_name=""):
     """Channel topic carrying the STABLE dedup key (lid:date) + reservation id + check-in flag
@@ -3230,7 +3251,7 @@ async def sync_oujact_turnovers(day=None):
             continue                                       # opened once already & since closed → don't auto-reopen (restart/poll)
         try:
             if ch is None:
-                cover = _oujact_cover_info(it["listing"], it["checkout_date"])
+                cover = _oujact_cover_info(it["listing"], it["checkout_date"], it["lid"])
                 cover_emoji = (cover.get("emoji") if cover else "") or "⚪"
                 want = _oujact_channel(it["listing"], it["checkin_today"], team_name, cover_emoji)
                 ch = await guild.create_text_channel(want, category=category, topic=topic)
@@ -16256,6 +16277,11 @@ function renderSchedManage(){
   h+='</div>';
   /* apartments */
   h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('العقارات','Apartments')+' <span class="num">('+apts.length+')</span></div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
+  h+='<button class="btn sm" onclick="schedOpenPicker(0)">'+labelText('＋ اختر من Hostaway','＋ Pick from Hostaway')+'</button>';
+  h+='<button class="btn ghost sm" onclick="schedAutolink()" title="'+labelText('يربط الشقق غير المرتبطة بأسمائها من Hostaway','Link unlinked apartments by name')+'">🔗 '+labelText('ربط تلقائي','Auto-link')+'</button>';
+  h+='</div>';
+  h+='<div id="schedPicker" style="display:none;border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;background:var(--bg)"></div>';
   h+='<input class="ros-input" id="schedAptSearch" placeholder="'+labelText('بحث','search')+'" oninput="schedFilterApts()" style="margin-bottom:8px;width:100%">';
   h+='<div id="schedAptList">';
   apts.forEach(function(a){ h+=schedAptRow(a, emps); });
@@ -16299,9 +16325,73 @@ function schedAptRow(a, emps){
   (emps||[]).forEach(function(e){ h+='<option value="'+e.id+'"'+(String(a.owner_id)===String(e.id)?' selected':'')+'>'+esc(e.name)+'</option>'; });
   h+='</select>';
   h+='<button class="btn sm" onclick="schedSaveApt('+id+')">'+(id?'حفظ':'إضافة')+'</button>';
+  if(id){ h+='<button class="btn ghost sm" onclick="schedOpenPicker('+id+')" title="'+labelText('ربط بـ Hostaway','Link to Hostaway')+'">🔗</button>'; }
   if(id){ h+='<button class="btn ghost sm" onclick="schedDelApt('+id+')" style="color:var(--bad)">حذف</button>'; }
+  if(id){
+    var hn=a.listing_id?schedHostName(a.listing_id):'';
+    h+='<span style="flex:1 1 100%;font-size:12px;margin-top:2px;color:'+(a.listing_id?'#4A6246':'var(--muted)')+'">'
+      +(a.listing_id?('🔗 Hostaway: '+esc(hn||('#'+a.listing_id))):labelText('غير مرتبطة بـ Hostaway','not linked to Hostaway'))+'</span>';
+  }
   h+='</div>';
   return h;
+}
+function schedHostName(lid){
+  var hs=(SCHED.manage&&SCHED.manage.hostaway)||[];
+  for(var i=0;i<hs.length;i++){ if(String(hs[i].id)===String(lid)) return hs[i].name; }
+  return '';
+}
+function schedAptName(aptId){
+  var as=(SCHED.manage&&SCHED.manage.apartments)||[];
+  for(var i=0;i<as.length;i++){ if(String(as[i].id)===String(aptId)) return as[i].name; }
+  return '';
+}
+function schedOpenPicker(aptId){
+  SCHED.pickTarget=aptId;
+  var p=document.getElementById('schedPicker'); if(!p){ return; }
+  p.style.display='';
+  var ttl=aptId?(labelText('ربط شقة بـ Hostaway: ','Link to Hostaway: ')+esc(schedAptName(aptId))):labelText('اختر شقة من Hostaway','Pick an apartment from Hostaway');
+  var hh='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13px">'+ttl+'</b>';
+  hh+='<button class="btn ghost sm" onclick="schedClosePicker()">'+labelText('إغلاق','Close')+'</button></div>';
+  hh+='<input class="ros-input" id="schedPickSearch" placeholder="'+labelText('بحث في Hostaway','search Hostaway')+'" oninput="schedRenderPicker()" style="width:100%;margin:8px 0">';
+  if(aptId){ hh+='<button class="btn ghost sm" onclick="schedUnlink('+aptId+')" style="color:var(--bad);margin-bottom:6px">'+labelText('إزالة الربط','Remove link')+'</button>'; }
+  hh+='<div id="schedPickList" style="max-height:280px;overflow-y:auto"></div>';
+  p.innerHTML=hh; schedRenderPicker();
+  p.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function schedRenderPicker(){
+  var hs=(SCHED.manage&&SCHED.manage.hostaway)||[];
+  var si=document.getElementById('schedPickSearch'); var q=(si?si.value:'')||''; q=q.trim().toLowerCase();
+  var linked={}; (SCHED.manage.apartments||[]).forEach(function(a){ if(a.listing_id!=null){ linked[String(a.listing_id)]=a; } });
+  var h='', n=0;
+  for(var i=0;i<hs.length;i++){
+    var L=hs[i];
+    if(q && (String(L.name||'').toLowerCase().indexOf(q)<0)){ continue; }
+    var lk=linked[String(L.id)];
+    h+='<div onclick="schedPickListing('+L.id+')" style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;margin-bottom:5px;cursor:pointer;background:var(--panel)">';
+    h+='<span>'+(L.oujact?'🧹 ':'')+esc(L.name)+(L.active?'':' <i style="color:var(--muted)">('+labelText('غير نشطة','inactive')+')</i>')+'</span>';
+    h+='<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+(lk?('🔗 '+esc(lk.name)):'')+'</span></div>';
+    n++; if(n>=250){ break; }
+  }
+  if(!h){ h='<div class="sched-sub">'+labelText('لا نتائج','No results')+'</div>'; }
+  document.getElementById('schedPickList').innerHTML=h;
+}
+function schedPickListing(lid){
+  var t=SCHED.pickTarget||0;
+  if(t){ post('/api/schedule/apartment-link',{id:t,listing_id:lid}).then(schedPickDone); }
+  else { var nm=schedHostName(lid)||('unit-'+lid); post('/api/schedule/apartment',{name:nm,listing_id:lid}).then(schedPickDone); }
+}
+function schedPickDone(j){
+  if(j&&j.ok){ toast(labelText('تم الربط','Linked')); schedClosePicker(); schedAfterWrite(); }
+  else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+}
+function schedClosePicker(){ SCHED.pickTarget=null; var p=document.getElementById('schedPicker'); if(p){ p.style.display='none'; p.innerHTML=''; } }
+function schedUnlink(aptId){ post('/api/schedule/apartment-link',{id:aptId,listing_id:null}).then(schedPickDone); }
+function schedAutolink(){
+  if(!confirm(labelText('ربط كل الشقق غير المرتبطة تلقائياً من أسمائها؟','Auto-link all unlinked apartments by name?'))){ return; }
+  post('/api/schedule/autolink',{}).then(function(j){
+    if(j&&j.ok){ var r=j.report||{}; toast(labelText('تم الربط: ','Linked: ')+(r.linked||0)+' / '+(r.total||0)); schedAfterWrite(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+  });
 }
 function schedFilterApts(){
   var q=(document.getElementById('schedAptSearch').value||'').trim();
@@ -46198,10 +46288,22 @@ async def start_web_server():
                     "state_path": _state_path, "load_json": _load_json, "save_json": _save_json,
                     "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json, "web": web,
                     "notify": _schedule_notify if SCHEDULE_ENABLED else None,
+                    "listings": _schedule_hostaway_listings,
                     "tz": TZ, "now": now_riyadh,
                 })
                 _schedule.register_routes(app)
                 print("[schedule] wired + routes registered (/team-calendar, /api/schedule/*)")
+                # FIRST-RUN ONLY best-effort: auto-link existing typed apartments to their Hostaway
+                # listing by name. Runs only when NOTHING is linked yet (the boot right after this
+                # upgrade) so an apartment the owner later unlinks on purpose is never re-linked on a
+                # restart. After that the owner controls links via the picker / «ربط تلقائي» button.
+                try:
+                    _apts = _schedule.db.apartments()
+                    if _apts and not any(a.get("listing_id") for a in _apts):
+                        _alrep = _schedule.routes.autolink_listings()
+                        print("[schedule] first-run hostaway auto-link:", _alrep)
+                except Exception as _ale:
+                    print("[schedule] auto-link skipped:", _ale)
             except Exception as _se3:
                 print("[schedule] wiring failed (schedule disabled, bot unaffected):", _se3)
 

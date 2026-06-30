@@ -79,6 +79,46 @@ def match_apartment(listing_name, apts):
     return best
 
 
+def best_listing(apt_name, listings):
+    """Reverse of match_apartment: for a schedule apartment NAME, the best Hostaway listing id whose
+    name contains all the apartment's distinctive tokens (longest match wins), or None. Used by the
+    one-time auto-link. `listings` = [{id, name}, ...]."""
+    toks = _tokens(apt_name)
+    if not toks or not _distinctive(toks):
+        return None
+    best, best_score = None, 0
+    for L in listings or []:
+        hay = _norm(L.get("name"))
+        if hay and all(t in hay for t in toks):
+            score = sum(len(t) for t in toks)
+            if score > best_score:
+                best, best_score = L.get("id"), score
+    return best
+
+
+def cover_for_listing_id(listing_id, date_iso):
+    """EXACT cover lookup: {name, emoji, color, apartment} of whoever covers the schedule apartment
+    linked to Hostaway `listing_id` on `date_iso`, or None if no apartment is linked to it / no
+    covering employee. Preferred over the fuzzy name match. Never raises."""
+    try:
+        listing_id = int(listing_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        m, apts = cover_map(date_iso)
+        for a in apts:
+            if a.get("listing_id") is not None and int(a["listing_id"]) == listing_id:
+                cov = m.get(a["id"])
+                if not cov:
+                    return None
+                out = dict(cov)
+                out["apartment"] = a.get("name")
+                return out
+        return None
+    except Exception:
+        return None
+
+
 def cover_for_listing(listing_name, date_iso):
     """{name, emoji, color, apartment} of whoever covers the apartment behind `listing_name` on
     `date_iso`, or None on any miss. Never raises."""

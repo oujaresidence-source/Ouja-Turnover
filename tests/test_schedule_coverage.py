@@ -15,12 +15,18 @@ EMPLOYEES = [
     {"id": 2, "name": "نورة", "off_day": 1, "emoji": "🟣", "sort_order": 1},   # off Monday
 ]
 APARTMENTS = [
-    {"id": 10, "name": "الملقا 1", "owner_id": 1, "sort_order": 0},
-    {"id": 11, "name": "A5",       "owner_id": 1, "sort_order": 1},
-    {"id": 12, "name": "F1",       "owner_id": 2, "sort_order": 0},
-    {"id": 13, "name": "Jood12",   "owner_id": 1, "sort_order": 2},
-    {"id": 14, "name": "Jood13",   "owner_id": 1, "sort_order": 3},
-    {"id": 99, "name": "1",        "owner_id": 1, "sort_order": 9},   # non-distinctive: must never match
+    {"id": 10, "name": "الملقا 1", "owner_id": 1, "listing_id": None, "sort_order": 0},
+    {"id": 11, "name": "A5",       "owner_id": 1, "listing_id": 5011, "sort_order": 1},
+    {"id": 12, "name": "F1",       "owner_id": 2, "listing_id": 5012, "sort_order": 0},
+    {"id": 13, "name": "Jood12",   "owner_id": 1, "listing_id": None, "sort_order": 2},
+    {"id": 14, "name": "Jood13",   "owner_id": 1, "listing_id": None, "sort_order": 3},
+    {"id": 99, "name": "1",        "owner_id": 1, "listing_id": None, "sort_order": 9},   # non-distinctive: never matches
+]
+HOSTAWAY = [
+    {"id": 5011, "name": "Ouja | A5 self entry"},
+    {"id": 7001, "name": "Ouja | Jood12 Studio"},
+    {"id": 7002, "name": "Ouja | Jood13 Penthouse"},
+    {"id": 7003, "name": "Ouja | Riyadh Tower Z"},
 ]
 
 
@@ -54,6 +60,14 @@ class MatcherTests(unittest.TestCase):
     def test_no_match_returns_none(self):
         self.assertIsNone(coverage.match_apartment("Ouja | Riyadh Tower Z", APARTMENTS))
 
+    def test_best_listing_reverse_match(self):
+        # Schedule apartment name -> Hostaway listing id (used by the one-time auto-link).
+        self.assertEqual(coverage.best_listing("Jood13", HOSTAWAY), 7002)
+        self.assertEqual(coverage.best_listing("Jood12", HOSTAWAY), 7001)
+        self.assertEqual(coverage.best_listing("A5", HOSTAWAY), 5011)
+        self.assertIsNone(coverage.best_listing("القيروان D7", HOSTAWAY))   # no Hostaway name matches
+        self.assertIsNone(coverage.best_listing("1", HOSTAWAY))             # non-distinctive
+
 
 class EmojiLookupTests(unittest.TestCase):
     def setUp(self):
@@ -86,6 +100,20 @@ class EmojiLookupTests(unittest.TestCase):
         info = coverage.cover_for_listing("Ouja | F1", sun)
         self.assertEqual(info["name"], "نورة")
         self.assertEqual(info["emoji"], "🟣")
+
+    def test_exact_listing_id_lookup_owner_day(self):
+        # A5 is linked to Hostaway listing 5011 -> exact lookup, no name guessing.
+        sun = _date_for_weekday(0)
+        self.assertEqual(coverage.cover_for_listing_id(5011, sun)["emoji"], "🟢")
+
+    def test_exact_listing_id_lookup_on_day_off(self):
+        # On ناصر's day off, the linked A5 returns the covering employee's emoji.
+        tue = _date_for_weekday(2)
+        self.assertEqual(coverage.cover_for_listing_id(5011, tue)["emoji"], "🟣")
+
+    def test_exact_listing_id_unlinked_returns_none(self):
+        sun = _date_for_weekday(0)
+        self.assertIsNone(coverage.cover_for_listing_id(99999, sun))
 
 
 if __name__ == "__main__":

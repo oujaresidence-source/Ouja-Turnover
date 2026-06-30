@@ -13,6 +13,7 @@ class _Host:
     json_response = None     # _json(data, status=200)
     web = None               # aiohttp web module
     notify = None            # (payload) -> None  (optional Discord push)
+    listings = None          # () -> [{id, name, active, oujact}]  Hostaway listings for the picker
     tz = None
     now = None               # () -> tz-aware datetime in Riyadh
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS schedule_apartments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
     owner_id    INTEGER REFERENCES schedule_employees(id) ON DELETE RESTRICT,
+    listing_id  INTEGER,                 -- Hostaway listingMapId this apartment maps to (NULL = unlinked)
     sort_order  INTEGER DEFAULT 0,
     created_at  TEXT
 );
@@ -86,6 +87,9 @@ def _migrate(cx):
         for e in _seed.EMPLOYEES:
             cx.execute("UPDATE schedule_employees SET emoji=? WHERE name=? AND (emoji IS NULL OR emoji='')",
                        (e.get("emoji"), e["name"]))
+    acols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_apartments)").fetchall()}
+    if "listing_id" not in acols:
+        cx.execute("ALTER TABLE schedule_apartments ADD COLUMN listing_id INTEGER")
 
 
 def reset_init_cache():
