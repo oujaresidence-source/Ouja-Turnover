@@ -117,23 +117,28 @@ Then verify the embedded dashboard string is intact (extract `DASHBOARD_HTML` an
 And run a quick **synthetic-data logic test** for any new computation (e.g. feed fake
 reservations into the new function and assert the numbers) before trusting it on live data.
 
-## Auto-Coverage Duty Roster (التوزيع اليومي) — the `roster/` package
-A self-contained coverage roster built like the Brain: a pure, deterministic engine
-(`roster/engine.py` — `compute_roster`) is the SINGLE source of truth; the dashboard tab
-(`view_roster` + `loadRoster`/`renderRoster` in `DASHBOARD_HTML`), the standalone mobile page
-(`roster/page.py` → `/roster`), and every Discord notification all render from it, so the
-numbers can never disagree. Storage REUSES `brain.db` via `roster/db.py` (tables prefixed
-`roster_*`). Wired in `start_web_server` via `roster.wire({...})` + `roster.register_routes(app)`.
-- **Engine invariants are TDD-locked** (`tests/test_roster_engine.py`): gaps==0 every weekday,
-  load balanced, stacked-absence + capacity-escalation + lock behaviour. Run before any UI edit.
-- **`roster/page.py` has the SAME backslash trap as `DASHBOARD_HTML`** (normal triple-quoted
-  string). It contains ZERO backslashes — template/real-newlines + event delegation, no inline
-  onclick quote-building. esprima-parse it after edits.
-- **Seed (`roster/seed.py`) is from real data + editable.** `assignments.json` holds 54 units
-  across 4 custodians; عهود is NOT in repo data → seeded with 0 units (flagged). Fix her units
-  in the Owners panel or via `roster_owner_overrides.json` on the volume. Don't hard-code "55".
-- New env vars: `ROSTER_ENABLED`(1), `ROSTER_NOTIFY_DRYRUN`(1 — flip to 0 to actually DM),
-  `ROSTER_DIGEST_HOUR`(8), `ROSTER_OPS_CHANNEL`(roster), `ROSTER_ESCALATE_IDS`(csv Discord ids).
+## Employee Schedule & Coverage Calendar (تقويم الموظفين) — the `schedule/` package
+The team-leader-spec'd coverage calendar (it SUPERSEDED the earlier `roster/` package — do not
+reintroduce roster). A pure, deterministic engine (`schedule/engine.py` — `compute_day`) is the
+SINGLE source of truth; the dashboard tab (`view_schedule` + `loadSchedule`/`renderSched*` in
+`DASHBOARD_HTML`), the standalone page (`schedule/page.py` → `/team-calendar`), and the optional
+morning ops summary all render from it. Storage REUSES `brain.db` via `schedule/db.py` (tables
+`schedule_*`). Wired in `start_web_server` via `schedule.wire({...})` + `register_routes(app)`.
+- **Model:** each employee owns base apartments + has ONE weekly `off_day` (0=الأحد..6=السبت);
+  on an off-day their apartments auto-distribute (count-balanced) to whoever's working; recurring
+  per-weekday OVERRIDES pin a unit to a chosen coverer. PLUS an Ouja add-on: ad-hoc date-specific
+  LEAVE (`schedule_absences`) treated as an extra day off. Thu/Fri = nobody off = base only.
+- **Engine invariants are TDD-locked** (`tests/test_schedule_engine.py`): Sunday 13/13/13/14=53,
+  Thu/Fri base 11/12/9/11/10, balance (max−min≤1), override pin, stale-override skip, leave. Run
+  before any UI edit. The 53-apartment seed (incl. عهود) is `schedule/seed.py`, owner-editable in
+  the Manage tab; «إعادة تعيين للوضع الافتراضي» (POST `/api/schedule/reset`) restores it.
+- **`schedule/page.py` has the SAME backslash trap as `DASHBOARD_HTML`** (normal triple-quoted
+  string). ZERO backslashes — real newlines + event delegation, no inline-onclick quote-building.
+  esprima-parse it (and every DASHBOARD_HTML `<script>`) after edits.
+- **Editing** is gated on `can_edit_schedule(request)` = multi-user role in (admin, ops); viewers
+  see Today + Weekly but no controls; every write endpoint re-checks it.
+- Env vars: `SCHEDULE_ENABLED`(1), `SCHEDULE_NOTIFY_DRYRUN`(1 — flip to 0 to post the morning
+  ops summary), `SCHEDULE_DIGEST_HOUR`(8), `SCHEDULE_OPS_CHANNEL`(team-calendar).
 
 ## Design skills are INSTALLED and MUST be used every session
 **Superpowers + Impeccable + emil-design-eng** live in `.claude/skills/` and govern all work:

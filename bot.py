@@ -66,14 +66,14 @@ except Exception as _brain_err:        # pragma: no cover
     _brain = None
     _HAS_BRAIN = False
 
-# Auto-Coverage Duty Roster — additive, isolated, never takes down the live bot/dashboard.
+# Employee Schedule & Coverage Calendar — additive, isolated, never takes down the bot/dashboard.
 try:
-    import roster as _roster
-    _HAS_ROSTER = True
-except Exception as _roster_err:       # pragma: no cover
-    print("[roster] import failed (roster disabled, bot unaffected):", _roster_err)
-    _roster = None
-    _HAS_ROSTER = False
+    import schedule as _schedule
+    _HAS_SCHEDULE = True
+except Exception as _schedule_err:     # pragma: no cover
+    print("[schedule] import failed (schedule disabled, bot unaffected):", _schedule_err)
+    _schedule = None
+    _HAS_SCHEDULE = False
 
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
@@ -4573,84 +4573,51 @@ async def headsup_loop():
     except Exception as e:
         print("headsup error:", e)
 
-# ====================== Auto-Coverage Duty Roster — notifications ======================
-# Event-driven (absence/override/owner-change touching today/tomorrow) + ONE morning digest.
-# No 3-hour ping schedule (that is the vendor-ticket pattern, not this one — build spec §8).
-ROSTER_ENABLED        = os.environ.get("ROSTER_ENABLED", "1") in ("1", "true", "True", "yes")
-ROSTER_NOTIFY_DRYRUN  = os.environ.get("ROSTER_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
-ROSTER_DIGEST_HOUR    = int(os.environ.get("ROSTER_DIGEST_HOUR", "8"))      # 08:00 Riyadh
-ROSTER_OPS_CHANNEL    = os.environ.get("ROSTER_OPS_CHANNEL", "roster")      # ops summary channel
-ROSTER_ESCALATE_IDS   = [s.strip() for s in os.environ.get("ROSTER_ESCALATE_IDS", "").split(",") if s.strip()]
+# ============= Employee Schedule & Coverage Calendar — optional morning ops summary =============
+# The feature is a calendar PAGE; this is a small add-on that posts the day's coverage to the
+# ops channel once each morning. DRY-RUN by default (logs, doesn't post) until you flip it.
+SCHEDULE_ENABLED       = os.environ.get("SCHEDULE_ENABLED", "1") in ("1", "true", "True", "yes")
+SCHEDULE_NOTIFY_DRYRUN = os.environ.get("SCHEDULE_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
+SCHEDULE_DIGEST_HOUR   = int(os.environ.get("SCHEDULE_DIGEST_HOUR", "8"))       # 08:00 Riyadh
+SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")  # ops summary channel
 
-def _roster_notify(messages):
-    """HOST.notify hook — called synchronously on the event loop by roster.notify.fire().
-    Schedules the async Discord delivery. Never raises into a route handler."""
-    if not (ROSTER_ENABLED and _HAS_ROSTER):
+def _schedule_notify(payload):
+    """HOST.notify hook — schedules the async ops-channel post. Never raises into a handler."""
+    if not (SCHEDULE_ENABLED and _HAS_SCHEDULE):
         return
     try:
-        asyncio.create_task(_roster_deliver(messages))
+        asyncio.create_task(_schedule_deliver(payload))
     except RuntimeError:
-        pass   # no running loop (tests / import-time) — silently skip
+        pass
 
-async def _roster_deliver(messages):
+async def _schedule_deliver(payload):
     nl = chr(10)
-    if ROSTER_NOTIFY_DRYRUN:
-        print("[roster] (dryrun) would notify:", messages.get("reason"),
-              "· employees=%d" % len(messages.get("per_employee", [])),
-              "· escalate=%s" % bool(messages.get("escalation")))
+    if SCHEDULE_NOTIFY_DRYRUN:
+        print("[schedule] (dryrun) would post day summary for", payload.get("date"))
         return
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
-    # 1) per-employee DM (their own day's list, bilingual code block)
-    for pe in messages.get("per_employee", []):
-        did = pe.get("discord_id")
-        if not did:
-            continue
-        try:
-            member = guild.get_member(int(did)) or await bot.fetch_user(int(did))
-            await member.send("```" + nl + pe["text"] + nl + "```")
-        except Exception as e:
-            print("[roster] dm failed for", pe.get("name"), e)
-    # 2) ops-channel summary
-    ch = None
     try:
         cat = await get_category(guild)
-        ch = await ensure_channel(guild, ROSTER_OPS_CHANNEL, cat)
+        ch = await ensure_channel(guild, SCHEDULE_OPS_CHANNEL, cat)
         if ch is not None:
-            await ch.send("```" + nl + messages["channel"] + nl + "```")
+            await ch.send("```" + nl + payload["channel"] + nl + "```")
     except Exception as e:
-        print("[roster] ops summary failed:", e)
-    # 3) escalation — urgent DM to ops_manager + Faisal, plus @here in the ops channel
-    esc = messages.get("escalation")
-    if esc:
-        for did in ROSTER_ESCALATE_IDS:
-            try:
-                u = await bot.fetch_user(int(did))
-                await u.send(esc)
-            except Exception as e:
-                print("[roster] escalation dm failed:", e)
-        try:
-            if ch is not None:
-                await ch.send("@here" + nl + esc)
-        except Exception:
-            pass
+        print("[schedule] ops summary failed:", e)
 
-@tasks.loop(time=dt_time(hour=ROSTER_DIGEST_HOUR, minute=0, tzinfo=TZ))
-async def roster_digest_loop():
-    """Morning digest (build spec §8): everyone gets their day's list once, ops gets a summary."""
-    if not (ROSTER_ENABLED and _HAS_ROSTER):
+@tasks.loop(time=dt_time(hour=SCHEDULE_DIGEST_HOUR, minute=0, tzinfo=TZ))
+async def schedule_digest_loop():
+    """Morning ops summary of today's coverage."""
+    if not (SCHEDULE_ENABLED and _HAS_SCHEDULE):
         return
     try:
         today = now_riyadh().date().isoformat()
-        enriched = await asyncio.to_thread(_roster.routes.roster_for, today)
-        await asyncio.to_thread(_roster.routes._persist_log, today, enriched)
-        _roster.notify.fire(today, enriched["weekday"], enriched, reason="digest")
-        print("[roster] morning digest fired for", today,
-              "· coverage %d/%d gaps %d" % (enriched["status"]["assigned"],
-                                            enriched["status"]["total"], enriched["status"]["gaps"]))
+        day = await asyncio.to_thread(_schedule.routes.schedule_day, today)
+        _schedule.notify.fire(day)
+        print("[schedule] morning summary fired for", today, "· total", day.get("total"))
     except Exception as e:
-        print("[roster] digest error:", e)
+        print("[schedule] digest error:", e)
 
 # ====================== AI guest-message assistant ======================
 # Claude drafts a reply, a human approves it in Discord, and only then is it sent.
@@ -13579,40 +13546,47 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .di-b{flex:1;min-width:0}.di-b .t{font-weight:700;font-size:14px;line-height:1.35}.di-b .d{font-size:12.5px;color:var(--mut);margin-top:2px}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:20px;padding:3px 11px;white-space:nowrap}
 .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
-/* ===== Auto-Coverage Duty Roster ===== */
+/* ===== Employee Schedule & Coverage Calendar ===== */
 .ros-date{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:var(--r-sm);padding:7px 10px;font-family:var(--font-en);font-size:12.5px}
-.ros-banner{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
-.ros-stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 10px;text-align:center;box-shadow:var(--sh)}
-.ros-stat .v{font-weight:800;font-size:26px;line-height:1.05}
-.ros-stat .k{font-size:11.5px;color:var(--mut);margin-top:4px}
-.ros-good{color:var(--good)} .ros-bad{color:var(--bad)}
-.ros-meta{color:var(--mut);font-size:12.5px;font-weight:600;margin:0 2px 14px}
-.ros-absent{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
-.ros-gapbox{background:var(--bad-bg);border:1px solid var(--bad);border-radius:var(--r);padding:13px 14px;margin-bottom:14px}
-.ros-gapbox b{color:var(--bad)}
-.ros-chips{display:flex;flex-wrap:wrap;gap:6px}
-.ros-ovbar{background:var(--gold-tint);border:1px solid var(--accent);border-radius:var(--r);padding:11px 13px;margin-bottom:14px}
-.ros-ovrow{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
 .ros-input{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:var(--r-sm);padding:7px 10px;font-family:var(--font-ar);font-size:13px;min-height:38px}
-.ros-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:18px}
-.ros-card{padding:15px}
-.ros-chd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
-.ros-who{display:flex;align-items:center;gap:10px;min-width:0}
-.ros-ava{width:38px;height:38px;border-radius:50%;background:var(--gold-soft);color:var(--accent);display:grid;place-items:center;font-weight:800;font-size:15px;flex:none}
-.ros-nm{font-weight:800;font-size:15.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ros-load{font-weight:800;font-size:15px;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:4px 12px;flex:none}
-.ros-grp{margin-top:9px}
-.ros-lab{font-size:11.5px;color:var(--mut);font-weight:700;margin-bottom:6px}
-.ros-unit::before{display:none}
-.ros-unit.tap{cursor:pointer;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1)),background .12s}
-.ros-unit.tap:hover{background:var(--gold-tint);border-color:var(--accent)}
-.ros-unit.tap:active{transform:scale(.97)}
-.chip.cov{background:var(--gold-soft)}
-.ros-mgmt{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
-.ros-form{padding:15px} .ros-formh{font-weight:800;font-size:14px;margin-bottom:11px}
-.ros-formrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.ros-uarow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line)}
-@media (prefers-reduced-motion:reduce){.ros-unit.tap{transition:none}}
+.chip.cov{background:var(--gold-soft)} .chip.cov::before{display:none}
+.sched-tabs{display:flex;gap:8px;margin-bottom:14px}
+.sched-tab{flex:0 1 auto;border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:999px;padding:8px 16px;font-family:var(--font-ar);font-weight:700;font-size:13.5px;cursor:pointer;min-height:40px;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1)),background .15s,color .15s}
+.sched-tab.on{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.sched-tab:active{transform:scale(.97)}
+.sched-days{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px}
+.sched-day{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;color:var(--text-2);min-height:40px;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1)),background .15s,color .15s}
+.sched-day.on{background:var(--gold);color:#fff;border-color:var(--gold)}
+.sched-day:active{transform:scale(.96)}
+.sched-meta{color:var(--mut);font-size:12.5px;font-weight:600;margin:0 2px 14px}
+.sched-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:11px}
+.sched-card{padding:14px;cursor:pointer;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1))}
+.sched-card:active{transform:scale(.985)}
+.sched-card.off{background:var(--bad-bg)}
+.sched-chd{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sched-nm{font-weight:800;font-size:16px;color:var(--ink)}
+.sched-lo{font-weight:800;font-size:24px;color:var(--ink)}
+.sched-tag{color:var(--bad);font-weight:700;font-size:14px}
+.sched-sub{color:var(--mut);font-size:12px;margin-top:4px}
+.sched-det{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.sched-unit::before{display:none}
+.sched-unit b{font-weight:700;color:var(--mut);font-size:11px}
+.sched-ovi{background:var(--gold);color:#fff;font-style:normal;font-size:9.5px;font-weight:700;border-radius:4px;padding:1px 5px}
+.sched-mwrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh)}
+.sched-mx{border-collapse:collapse;width:100%;min-width:480px}
+.sched-mx th,.sched-mx td{padding:9px 8px;text-align:center;font-size:13px;border-bottom:1px solid var(--line)}
+.sched-mx th{font-weight:700;color:var(--ink);font-size:12.5px;background:var(--surface-2)}
+.sched-mx td.dn{font-weight:700;color:var(--ink);background:var(--surface-2);white-space:nowrap}
+.sched-mx tr.today td{background:var(--gold-tint)} .sched-mx tr.today td.dn{color:var(--gold)}
+.sched-mx td.mc{cursor:pointer}
+.sched-mx .mv{font-weight:700;font-size:15px} .sched-mx td.off .mv{color:var(--bad);font-size:12.5px}
+.sched-mx .mb{display:block;color:var(--mut);font-size:10px}
+.sched-mgmt{padding:15px;margin-bottom:12px}
+.sched-mh{font-weight:800;font-size:14.5px;margin-bottom:11px;color:var(--ink)}
+.sched-erow,.sched-arow,.sched-ovrow{display:flex;flex-wrap:wrap;gap:7px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.sched-ovrow{justify-content:space-between}
+.sched-color{width:38px;height:38px;border:1px solid var(--line);border-radius:var(--r-sm);padding:2px;background:var(--surface);cursor:pointer}
+@media (prefers-reduced-motion:reduce){.sched-card,.sched-tab,.sched-day{transition:none}}
 .chip.good{color:var(--good);background:var(--good-bg)}.chip.warn{color:var(--warn);background:var(--warn-bg)}
 .chip.bad{color:var(--bad);background:var(--bad-bg)}.chip.info{color:var(--info);background:var(--info-bg)}
 .chip.flat{color:var(--gray);background:var(--surface-2)}.chip.flat::before{display:none}
@@ -14053,20 +14027,25 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="gapsBody"><div class="empty sk">—</div></div>
       </section>
 
-      <!-- ============ AUTO-COVERAGE DUTY ROSTER · التوزيع اليومي ============ -->
-      <section class="view" id="view_roster">
+      <!-- ============ EMPLOYEE SCHEDULE & COVERAGE CALENDAR · تقويم الموظفين ============ -->
+      <section class="view" id="view_schedule">
         <div class="page-head">
           <div>
-            <div class="page-title" id="t_roster">التوزيع اليومي</div>
-            <div class="page-sub" id="t_roster_sub">من يغطّي أي شقة اليوم — تلقائياً حسب الإجازات وأيام الراحة. التغطية دائماً مكتملة بدون فجوات.</div>
+            <div class="page-title" id="t_sched">تقويم موظفي عوجا</div>
+            <div class="page-sub" id="t_sched_sub">مَن يغطّي أي شقة في كل يوم — توزيع متوازن تلقائي حسب أيام الراحة، مع إمكانية التعديل اليدوي.</div>
           </div>
           <div class="page-tools">
-            <input type="date" id="rosterDate" class="ros-date" onchange="loadRoster(true)">
-            <button class="btn ghost sm" id="rosterSyncBtn" onclick="rosterSync()" title="مزامنة Hostaway">⟳ <span id="t_roster_sync">مزامنة</span></button>
-            <button class="btn ghost sm" onclick="loadRoster(true)" title="تحديث">↻</button>
+            <input type="date" id="schedDate" class="ros-date" onchange="schedPickDate()">
+            <button class="btn ghost sm" id="schedManageBtn" onclick="schedToggleManage()" title="إدارة">⚙ <span>إدارة</span></button>
+            <button class="btn ghost sm" onclick="loadSchedule(true)" title="تحديث">↻</button>
           </div>
         </div>
-        <div id="rosterBody"><div class="empty sk">—</div></div>
+        <div class="sched-tabs" id="schedTabs">
+          <button class="sched-tab on" data-sv="today" onclick="schedSetView('today')">اليوم</button>
+          <button class="sched-tab" data-sv="week" onclick="schedSetView('week')">التقويم الأسبوعي</button>
+          <button class="sched-tab" data-sv="manage" id="schedManageTab" onclick="schedSetView('manage')" style="display:none">الإدارة</button>
+        </div>
+        <div id="schedBody"><div class="empty sk">—</div></div>
       </section>
 
       <!-- ============ APARTMENT PAGE (full-width, opened by Details) ============ -->
@@ -16125,183 +16104,239 @@ async function rdelete(path){
 }
 
 /* ============================================================
-   AUTO-COVERAGE DUTY ROSTER — التوزيع اليومي (one engine, same numbers everywhere)
+   EMPLOYEE SCHEDULE & COVERAGE CALENDAR — تقويم الموظفين (one engine, same numbers everywhere)
    ============================================================ */
-var _rosSel = null;   /* the unit currently being reassigned (override), or null */
+var SCHED = {day:null, week:null, manage:null, view:'today', canEdit:false, exp:{}};
+var SCHED_DAYS = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
 
-function loadRoster(force){
-  var ti=document.getElementById('t_roster'); if(ti) ti.textContent=labelText('التوزيع اليومي','Duty Roster');
-  var st=document.getElementById('t_roster_sub'); if(st) st.textContent=labelText('من يغطّي أي شقة اليوم — تلقائياً حسب الإجازات وأيام الراحة. التغطية دائماً مكتملة بدون فجوات.','Who covers which unit today — auto, by leave and days off. Coverage stays complete, zero gaps.');
-  var sy=document.getElementById('t_roster_sync'); if(sy) sy.textContent=labelText('مزامنة','Sync');
-  var di=document.getElementById('rosterDate');
-  var qd=(di && di.value) ? di.value : '';
-  var url='/api/roster'+(qd?('?date='+encodeURIComponent(qd)):'');
-  document.getElementById('rosterBody').innerHTML='<div class="empty sk">'+String.fromCharCode(8230)+'</div>';
-  Promise.all([api(url), api('/api/properties')]).then(function(res){
-    var x=res[0]||{}, pp=res[1]||{};
-    if(!x.ok){ document.getElementById('rosterBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التوزيع','Could not load roster')+'</div>'; return; }
-    D.roster=x.roster; D.rosterEmps=(pp.employees||[]); D.rosterUnassigned=(pp.unassigned||[]); D.rosterCanWrite=!!x.can_write;
-    if(di && !di.value){ di.value=x.roster.date; }
-    renderRoster();
-  }).catch(function(){ document.getElementById('rosterBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التوزيع','Could not load roster')+'</div>'; });
+function loadSchedule(force){
+  var ti=document.getElementById('t_sched');
+  var di=document.getElementById('schedDate');
+  var qd=(di&&di.value)?di.value:'';
+  var dayUrl='/api/schedule/day'+(qd?('?date='+encodeURIComponent(qd)):'');
+  document.getElementById('schedBody').innerHTML='<div class="empty sk">'+String.fromCharCode(8230)+'</div>';
+  Promise.all([api(dayUrl), api('/api/schedule/week')]).then(function(res){
+    var d=res[0]||{}, w=res[1]||{};
+    if(!d.ok){ document.getElementById('schedBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التقويم','Could not load')+'</div>'; return; }
+    SCHED.day=d.day; SCHED.week=(w.week||null); SCHED.canEdit=!!d.can_edit; SCHED.exp={};
+    if(d.title&&ti) ti.textContent=d.title;
+    if(di&&!di.value) di.value=d.day.date;
+    document.getElementById('schedManageBtn').style.display=SCHED.canEdit?'':'none';
+    document.getElementById('schedManageTab').style.display=SCHED.canEdit?'':'none';
+    schedWireOnce(); renderSched();
+  }).catch(function(){ document.getElementById('schedBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التقويم','Could not load')+'</div>'; });
 }
 
-function _rosEmpOptions(selId){
-  var o='<option value="">'+labelText('— اختر —','— pick —')+'</option>';
-  (D.rosterEmps||[]).forEach(function(e){
-    var sel=(String(selId)===String(e.id))?' selected':'';
-    o+='<option value="'+e.id+'"'+sel+'>'+esc(e.name)+'</option>';
-  });
-  return o;
+function schedSetView(v){
+  if(v==='manage'&&!SCHED.canEdit) return;
+  SCHED.view=v;
+  var tabs=document.querySelectorAll('#schedTabs .sched-tab');
+  for(var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sv')===v); }
+  if(v==='manage'&&!SCHED.manage){ api('/api/schedule/manage').then(function(m){ SCHED.manage=m; renderSched(); }); return; }
+  renderSched();
+}
+function schedToggleManage(){ schedSetView('manage'); }
+function schedPickDate(){ loadSchedule(true); }
+
+function renderSched(){
+  if(SCHED.view==='today') renderSchedToday();
+  else if(SCHED.view==='week') renderSchedWeek();
+  else renderSchedManage();
 }
 
-function renderRoster(){
-  if(!D.roster){ return; }
-  var r=D.roster, s=r.status, cw=D.rosterCanWrite, h='';
-  var WD={sun:labelText('الأحد','Sunday'),mon:labelText('الإثنين','Monday'),tue:labelText('الثلاثاء','Tuesday'),wed:labelText('الأربعاء','Wednesday'),thu:labelText('الخميس','Thursday'),fri:labelText('الجمعة','Friday'),sat:labelText('السبت','Saturday')};
+function schedLoadWeekday(wd){
+  api('/api/schedule/day?weekday='+wd).then(function(d){ if(d&&d.ok){ SCHED.day=d.day; SCHED.exp={}; SCHED.view='today';
+    var tabs=document.querySelectorAll('#schedTabs .sched-tab'); for(var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sv')==='today'); }
+    renderSched(); } });
+}
 
-  /* status banner */
-  h+='<div class="ros-banner">';
-  h+='<div class="ros-stat"><div class="v num">'+s.total+'</div><div class="k">'+labelText('إجمالي الشقق','Total units')+'</div></div>';
-  h+='<div class="ros-stat"><div class="v num">'+s.available+'</div><div class="k">'+labelText('المتاحون','Available')+'</div></div>';
-  h+='<div class="ros-stat"><div class="v num ros-good">'+s.assigned+'</div><div class="k">'+labelText('مغطّاة','Covered')+'</div></div>';
-  h+='<div class="ros-stat"><div class="v num '+(s.gaps>0?'ros-bad':'ros-good')+'">'+s.gaps+'</div><div class="k">'+labelText('فجوات','Gaps')+'</div></div>';
+/* ---------- Today ---------- */
+function renderSchedToday(){
+  var d=SCHED.day; if(!d){ return; }
+  var h='<div class="sched-days">';
+  for(var i=0;i<7;i++){ h+='<button class="sched-day'+(i===d.weekday?' on':'')+'" data-swd="'+i+'">'+SCHED_DAYS[i]+'</button>'; }
   h+='</div>';
-  h+='<div class="ros-meta">'+esc(WD[r.weekday]||r.weekday)+' · <span class="num">'+esc(r.date)+'</span></div>';
-
-  /* absent strip */
-  if(r.absent && r.absent.length){
-    h+='<div class="ros-absent">';
-    r.absent.forEach(function(a){
-      var cls=(a.reason==='leave')?'danger':'warn';
-      var lab=(a.reason==='leave')?(labelText('إجازة','Leave')+(a.type?(' · '+esc(a.type)):'')):labelText('يوم راحة','Day off');
-      h+='<span class="pill '+cls+'">'+esc(a.name)+' · '+lab+'</span>';
-    });
+  h+='<div class="sched-meta">'+esc(d.weekday_ar)+' · <span class="num">'+esc(d.date)+'</span> · '+labelText('إجمالي','total')+' <span class="num">'+d.total+'</span></div>';
+  h+='<div class="sched-grid">';
+  d.working.slice().sort(function(a,b){return a.sort_order-b.sort_order;}).forEach(function(w){ h+=schedCard(w); });
+  d.off.forEach(function(o){ h+=schedOffCard(o); });
+  h+='</div>';
+  document.getElementById('schedBody').innerHTML=h;
+}
+function schedCard(w){
+  var ex=SCHED.exp[w.id];
+  var h='<div class="card sched-card" data-semp="'+w.id+'" style="border-inline-start:4px solid '+esc(w.color||'#B29A6A')+'">';
+  h+='<div class="sched-chd"><div class="sched-nm">'+esc(w.name)+'</div><div class="sched-lo num">'+w.load+'</div></div>';
+  h+='<div class="sched-sub">'+labelText('أصلي','own')+' '+w.own.length+(w.coverage.length?(' · '+labelText('تغطية','cover')+' '+w.coverage.length):'')+'</div>';
+  if(ex){
+    h+='<div class="sched-det">';
+    w.own.forEach(function(a){ h+='<span class="chip sched-unit">'+esc(a.name)+'</span>'; });
+    w.coverage.forEach(function(c){ h+='<span class="chip cov sched-unit">'+esc(c.apartment.name)+' <b>'+labelText('بدل','for')+' '+esc(c.owner_name||'')+'</b>'+(c.overridden?' <i class="sched-ovi">يدوي</i>':'')+'</span>'; });
     h+='</div>';
   }
-
-  /* gaps escalation box */
-  if(r.gaps && r.gaps.length){
-    h+='<div class="ros-gapbox"><b>'+labelText('تحتاج تغطية عاجلة','Needs urgent coverage')+' ('+r.gaps.length+')</b><div class="ros-chips" style="margin-top:8px">';
-    r.gaps.forEach(function(g){ h+='<span class="chip">'+esc(g.name)+'</span>'; });
-    h+='</div></div>';
-  }
-
-  /* override bar (when a unit is selected) */
-  if(cw && _rosSel){
-    h+='<div class="ros-ovbar"><div class="ros-ovrow"><b>'+labelText('إعادة تعيين','Reassign')+': '+esc(_rosSel.name)+'</b>'
-     + '<select id="rosOvTo" class="ros-input">'+_rosEmpOptions('')+'</select>'
-     + '<input id="rosOvReason" class="ros-input" placeholder="'+labelText('السبب (مطلوب)','reason (required)')+'">'
-     + '<button class="btn sm" onclick="rosterDoOverride()">'+labelText('تأكيد','Confirm')+'</button>'
-     + '<button class="btn ghost sm" onclick="rosterCancelOverride()">'+labelText('إلغاء','Cancel')+'</button>'
-     + '</div></div>';
-  }
-
-  /* the board */
-  h+='<div class="ros-board">';
-  r.board.forEach(function(e){
-    h+='<div class="card ros-card"><div class="ros-chd"><div class="ros-who"><div class="ros-ava">'+esc(e.initial||e.name.slice(0,1))+'</div><div class="ros-nm">'+esc(e.name)+'</div></div><div class="ros-load num">'+e.load+'</div></div>';
-    if(e.primary && e.primary.length){
-      h+='<div class="ros-grp"><div class="ros-lab">'+labelText('ملكه','Own')+' ('+e.primary.length+')</div><div class="ros-chips">';
-      e.primary.forEach(function(p){ h+='<span class="chip ros-unit'+(cw?' tap':'')+'" data-pid="'+p.id+'" data-pname="'+esc(p.name)+'">'+esc(p.name)+'</span>'; });
-      h+='</div></div>';
-    }
-    if(e.covered && e.covered.length){
-      h+='<div class="ros-grp"><div class="ros-lab">'+labelText('يغطّي','Covering')+' ('+e.covered.length+')</div><div class="ros-chips">';
-      e.covered.forEach(function(c){ h+='<span class="chip cov ros-unit'+(cw?' tap':'')+'" data-pid="'+c.id+'" data-pname="'+esc(c.name)+'">'+esc(c.name)+' <b>'+labelText('بدل','for')+' '+esc(c.orig_name||'')+'</b></span>'; });
-      h+='</div></div>';
-    }
-    h+='</div>';
-  });
   h+='</div>';
-
-  /* management (write roles only) */
-  if(cw){
-    h+='<div class="ros-mgmt">';
-    /* log leave */
-    h+='<div class="card ros-form"><div class="ros-formh">'+labelText('تسجيل إجازة / غياب','Log leave / absence')+'</div><div class="ros-formrow">'
-     + '<select id="rosLeaveEmp" class="ros-input">'+_rosEmpOptions('')+'</select>'
-     + '<select id="rosLeaveType" class="ros-input">'
-       + '<option value="sick">'+labelText('مرضي','Sick')+'</option>'
-       + '<option value="vacation">'+labelText('إجازة','Vacation')+'</option>'
-       + '<option value="emergency">'+labelText('طارئ','Emergency')+'</option>'
-       + '<option value="half_day">'+labelText('نصف يوم','Half day')+'</option>'
-       + '<option value="late">'+labelText('تأخير','Late')+'</option>'
-       + '<option value="training">'+labelText('تدريب','Training')+'</option>'
-       + '<option value="no_show">'+labelText('غياب بدون إذن','No-show')+'</option>'
-       + '<option value="unpaid">'+labelText('بدون راتب','Unpaid')+'</option>'
-     + '</select>'
-     + '<input id="rosLeaveStart" type="date" class="ros-input" value="'+esc(r.date)+'">'
-     + '<input id="rosLeaveEnd" type="date" class="ros-input" value="'+esc(r.date)+'">'
-     + '<input id="rosLeaveNote" class="ros-input" placeholder="'+labelText('ملاحظة','note')+'">'
-     + '<button class="btn sm" onclick="rosterLeave()">'+labelText('حفظ','Save')+'</button>'
-     + '</div></div>';
-    /* unassigned units */
-    var ua=D.rosterUnassigned||[];
-    h+='<div class="card ros-form"><div class="ros-formh">'+labelText('شقق بلا مسؤول','Unassigned units')+' ('+ua.length+')</div>';
-    if(!ua.length){ h+='<div class="ros-lab">'+labelText('كل الشقق لها مسؤول','Every unit has an owner')+'</div>'; }
-    ua.forEach(function(u){
-      h+='<div class="ros-uarow"><span>'+esc(u.name)+'</span><select class="ros-input ros-owner-sel" data-pid="'+u.id+'">'+_rosEmpOptions('')+'</select></div>';
-    });
-    h+='</div></div>';
+  return h;
+}
+function schedOffCard(o){
+  var ex=SCHED.exp[o.id];
+  var h='<div class="card sched-card off" data-semp="'+o.id+'" style="border-inline-start:4px solid '+esc(o.color||'#8B3748')+'">';
+  h+='<div class="sched-chd"><div class="sched-nm">'+esc(o.name)+'</div><div class="sched-tag">'+(o.reason==='leave'?labelText('إجازة','Leave'):labelText('يوم راحة','Day off'))+'</div></div>';
+  h+='<div class="sched-sub">'+o.apartments.length+' '+labelText('شقة يغطّيها الفريق','units covered')+'</div>';
+  if(ex){
+    h+='<div class="sched-det">';
+    o.apartments.forEach(function(a){ h+='<span class="chip cov sched-unit">'+esc(a.apartment.name)+' <b>'+esc(a.covering_name||'—')+'</b></span>'; });
+    h+='</div>';
   }
+  h+='</div>';
+  return h;
+}
 
-  document.getElementById('rosterBody').innerHTML=h;
-  if(!window._rosWired){
-    window._rosWired=true;
-    var body=document.getElementById('rosterBody');
-    body.addEventListener('click', function(ev){
-      var c=ev.target.closest ? ev.target.closest('.ros-unit.tap') : null;
-      if(c){ _rosSel={pid:parseInt(c.getAttribute('data-pid'),10), name:c.getAttribute('data-pname')||''}; renderRoster(); }
+/* ---------- Weekly matrix ---------- */
+function renderSchedWeek(){
+  var w=SCHED.week; if(!w){ document.getElementById('schedBody').innerHTML='<div class="empty sk">—</div>'; return; }
+  var h='<div class="sched-mwrap"><table class="sched-mx"><thead><tr><th>'+labelText('اليوم','Day')+'</th>';
+  w.columns.forEach(function(c){ h+='<th style="background:'+esc(c.color||'#6A3A5D')+';color:#fff">'+esc(c.name)+'</th>'; });
+  h+='</tr></thead><tbody>';
+  w.rows.forEach(function(row){
+    var tr=(row.weekday===w.today)?' class="today"':'';
+    h+='<tr'+tr+'><td class="dn">'+SCHED_DAYS[row.weekday]+'</td>';
+    w.columns.forEach(function(c){
+      var cell=row.cells[c.id]||{load:0,base:0,cov:0,off:false};
+      if(cell.off){ h+='<td class="mc off" data-scell="'+row.weekday+'" data-semp2="'+c.id+'"><span class="mv">'+labelText('إجازة','Off')+'</span></td>'; }
+      else { h+='<td class="mc" data-scell="'+row.weekday+'" data-semp2="'+c.id+'"><span class="mv num">'+cell.load+'</span>'+(cell.cov?'<span class="mb num">'+cell.base+'+'+cell.cov+'</span>':'')+'</td>'; }
     });
-    body.addEventListener('change', function(ev){
-      var sel=ev.target;
-      if(sel && sel.classList && sel.classList.contains('ros-owner-sel')){
-        rosterSetOwner(parseInt(sel.getAttribute('data-pid'),10), sel.value);
-      }
-    });
-  }
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>';
+  document.getElementById('schedBody').innerHTML=h;
 }
 
-function rosterLeave(){
-  var emp=document.getElementById('rosLeaveEmp').value;
-  if(!emp){ toast(labelText('اختر الموظف','Pick an employee')); return; }
-  post('/api/absence', {employee_id:parseInt(emp,10), type:document.getElementById('rosLeaveType').value,
-    start_date:document.getElementById('rosLeaveStart').value, end_date:document.getElementById('rosLeaveEnd').value,
-    note:document.getElementById('rosLeaveNote').value}).then(function(j){
-    if(j && j.ok){ toast(labelText('تم التسجيل','Saved')); loadRoster(true); }
-    else { toast((j&&j.error)?j.error:labelText('تعذّر الحفظ','Could not save')); }
+/* ---------- Manage (editor only) ---------- */
+function renderSchedManage(){
+  var m=SCHED.manage; if(!m){ document.getElementById('schedBody').innerHTML='<div class="empty sk">—</div>'; return; }
+  var emps=m.employees||[], apts=m.apartments||[];
+  var h='';
+  /* employees */
+  h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('الموظفون','Employees')+'</div>';
+  emps.forEach(function(e){ h+=schedEmpRow(e); });
+  h+=schedEmpRow({id:0,name:'',off_day:'',color:'#6A3A5D',sort_order:emps.length});
+  h+='</div>';
+  /* apartments */
+  h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('العقارات','Apartments')+' <span class="num">('+apts.length+')</span></div>';
+  h+='<input class="ros-input" id="schedAptSearch" placeholder="'+labelText('بحث','search')+'" oninput="schedFilterApts()" style="margin-bottom:8px;width:100%">';
+  h+='<div id="schedAptList">';
+  apts.forEach(function(a){ h+=schedAptRow(a, emps); });
+  h+='</div>';
+  h+=schedAptRow({id:0,name:'',owner_id:'',sort_order:apts.length}, emps);
+  h+='</div>';
+  /* overrides */
+  h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('التغطيات اليدوية','Manual coverage')+'</div>';
+  h+='<select class="ros-input" id="schedOvDay" onchange="schedRenderOv()" style="width:100%;margin-bottom:8px">';
+  for(var i=0;i<7;i++){ h+='<option value="'+i+'">'+SCHED_DAYS[i]+'</option>'; }
+  h+='</select><div id="schedOvList" class="sched-sub">'+labelText('اختر يوماً','Pick a day')+'</div></div>';
+  /* settings + reset */
+  h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('إعدادات','Settings')+'</div>';
+  h+='<input class="ros-input" id="schedTitle" value="'+esc((m.settings||{}).title||'')+'" placeholder="'+labelText('العنوان','Title')+'" style="width:100%;margin-bottom:8px">';
+  h+='<input class="ros-input" id="schedSub" value="'+esc((m.settings||{}).subtitle||'')+'" placeholder="'+labelText('الوصف','Subtitle')+'" style="width:100%;margin-bottom:10px">';
+  h+='<button class="btn sm" onclick="schedSaveSettings()">'+labelText('حفظ الإعدادات','Save settings')+'</button> ';
+  h+='<button class="btn ghost sm" onclick="schedReset()" style="color:var(--bad)">'+labelText('إعادة تعيين البيانات للوضع الافتراضي','Reset to default')+'</button></div>';
+  document.getElementById('schedBody').innerHTML=h;
+  schedRenderOv();
+}
+function schedEmpRow(e){
+  var id=e.id;
+  var h='<div class="sched-erow">';
+  h+='<input class="ros-input" id="se_name_'+id+'" value="'+esc(e.name||'')+'" placeholder="'+labelText('الاسم','Name')+'" style="flex:2 1 120px">';
+  h+='<select class="ros-input" id="se_off_'+id+'" style="flex:1 1 90px"><option value="">'+labelText('بدون','none')+'</option>';
+  for(var i=0;i<7;i++){ h+='<option value="'+i+'"'+(String(e.off_day)===String(i)?' selected':'')+'>'+SCHED_DAYS[i]+'</option>'; }
+  h+='</select>';
+  h+='<input type="color" id="se_color_'+id+'" value="'+esc(e.color||'#6A3A5D')+'" class="sched-color">';
+  h+='<input class="ros-input num" id="se_sort_'+id+'" value="'+(e.sort_order||0)+'" style="flex:0 0 52px" title="ترتيب">';
+  h+='<button class="btn sm" onclick="schedSaveEmp('+id+')">'+(id?'حفظ':'إضافة')+'</button>';
+  if(id){ h+='<button class="btn ghost sm" onclick="schedDelEmp('+id+')" style="color:var(--bad)">حذف</button>'; }
+  h+='</div>';
+  return h;
+}
+function schedAptRow(a, emps){
+  var id=a.id;
+  var h='<div class="sched-arow" data-aptname="'+esc(a.name||'')+'">';
+  h+='<input class="ros-input" id="sa_name_'+id+'" value="'+esc(a.name||'')+'" placeholder="'+labelText('اسم الشقة','Apartment')+'" style="flex:2 1 120px">';
+  h+='<select class="ros-input" id="sa_owner_'+id+'" style="flex:1 1 110px"><option value="">'+labelText('— المالك —','— owner —')+'</option>';
+  (emps||[]).forEach(function(e){ h+='<option value="'+e.id+'"'+(String(a.owner_id)===String(e.id)?' selected':'')+'>'+esc(e.name)+'</option>'; });
+  h+='</select>';
+  h+='<button class="btn sm" onclick="schedSaveApt('+id+')">'+(id?'حفظ':'إضافة')+'</button>';
+  if(id){ h+='<button class="btn ghost sm" onclick="schedDelApt('+id+')" style="color:var(--bad)">حذف</button>'; }
+  h+='</div>';
+  return h;
+}
+function schedFilterApts(){
+  var q=(document.getElementById('schedAptSearch').value||'').trim();
+  var rows=document.querySelectorAll('#schedAptList .sched-arow');
+  for(var i=0;i<rows.length;i++){ var nm=rows[i].getAttribute('data-aptname')||''; rows[i].style.display=(!q||nm.indexOf(q)>=0)?'':'none'; }
+}
+function schedRenderOv(){
+  var m=SCHED.manage; if(!m){ return; }
+  var dow=parseInt(document.getElementById('schedOvDay').value,10);
+  var emps=m.employees||[], apts=m.apartments||[];
+  var offIds={}; emps.forEach(function(e){ if(String(e.off_day)===String(dow)) offIds[e.id]=1; });
+  var workers=emps.filter(function(e){ return !offIds[e.id]; });
+  var ovmap={}; (m.overrides||[]).forEach(function(o){ if(o.day_of_week===dow) ovmap[o.apartment_id]=o.covering_employee_id; });
+  var pool=apts.filter(function(a){ return offIds[a.owner_id]; });
+  if(!pool.length){ document.getElementById('schedOvList').innerHTML='<div class="sched-sub">'+labelText('لا أحد في إجازة هذا اليوم — لا تغطيات','Nobody off this day — no coverage')+'</div>'; return; }
+  var h='';
+  pool.forEach(function(a){
+    h+='<div class="sched-ovrow"><span>'+esc(a.name)+'</span><select class="ros-input" onchange="schedSetOv('+dow+','+a.id+',this.value)"><option value="">'+labelText('تلقائي','Auto')+'</option>';
+    workers.forEach(function(e){ h+='<option value="'+e.id+'"'+(String(ovmap[a.id])===String(e.id)?' selected':'')+'>'+esc(e.name)+'</option>'; });
+    h+='</select></div>';
+  });
+  document.getElementById('schedOvList').innerHTML=h;
+}
+
+/* ---------- manage writes ---------- */
+function schedAfterWrite(reopenManage){
+  return Promise.all([api('/api/schedule/manage'), api('/api/schedule/day'), api('/api/schedule/week')]).then(function(r){
+    SCHED.manage=r[0]; if(r[1]&&r[1].ok){ SCHED.day=r[1].day; } if(r[2]&&r[2].week){ SCHED.week=r[2].week; }
+    renderSched();
   });
 }
-
-function rosterSetOwner(pid, ownerId){
-  post('/api/properties/'+pid+'/owner', {owner_id: ownerId?parseInt(ownerId,10):null}).then(function(j){
-    if(j && j.ok){ toast(labelText('تم تعيين المسؤول','Owner set')); loadRoster(true); }
-    else { toast((j&&j.error)?j.error:labelText('تعذّر التعيين','Could not set')); }
-  });
+function schedSaveEmp(id){
+  var body={name:document.getElementById('se_name_'+id).value, off_day:document.getElementById('se_off_'+id).value,
+    color:document.getElementById('se_color_'+id).value, sort_order:document.getElementById('se_sort_'+id).value};
+  if(id) body.id=id;
+  post('/api/schedule/employee', body).then(function(j){ if(j&&j.ok){ toast(labelText('تم','Saved')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } });
 }
-
-function rosterDoOverride(){
-  var to=document.getElementById('rosOvTo').value;
-  var reason=document.getElementById('rosOvReason').value;
-  if(!to){ toast(labelText('اختر الموظف','Pick an employee')); return; }
-  if(!reason || !reason.trim()){ toast(labelText('السبب مطلوب','Reason required')); return; }
-  post('/api/assignment/override', {date:D.roster.date, property:_rosSel.pid, to:parseInt(to,10), reason:reason.trim()}).then(function(j){
-    if(j && j.ok){ toast(labelText('تم التحويل','Reassigned')); _rosSel=null; D.roster=j.roster; renderRoster(); loadRoster(true); }
-    else { toast((j&&j.error)?j.error:labelText('تعذّر التحويل','Could not reassign')); }
-  });
+function schedDelEmp(id){ if(!confirm(labelText('حذف الموظف؟','Delete employee?'))) return;
+  rdelete('/api/schedule/employee/'+id).then(function(j){ if(j&&j.ok){ toast(labelText('تم الحذف','Deleted')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } }); }
+function schedSaveApt(id){
+  var body={name:document.getElementById('sa_name_'+id).value, owner_id:document.getElementById('sa_owner_'+id).value};
+  if(id) body.id=id;
+  post('/api/schedule/apartment', body).then(function(j){ if(j&&j.ok){ toast(labelText('تم','Saved')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } });
 }
-function rosterCancelOverride(){ _rosSel=null; renderRoster(); }
+function schedDelApt(id){ if(!confirm(labelText('حذف الشقة؟','Delete apartment?'))) return;
+  rdelete('/api/schedule/apartment/'+id).then(function(j){ if(j&&j.ok){ toast(labelText('تم الحذف','Deleted')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } }); }
+function schedSetOv(dow, apt, cov){
+  post('/api/schedule/override', {day_of_week:dow, apartment_id:apt, covering_employee_id:cov||null}).then(function(j){
+    if(j&&j.ok){ toast(labelText('تم','Saved')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } });
+}
+function schedSaveSettings(){
+  post('/api/schedule/settings', {title:document.getElementById('schedTitle').value, subtitle:document.getElementById('schedSub').value}).then(function(j){
+    if(j&&j.ok){ toast(labelText('تم','Saved')); } });
+}
+function schedReset(){ if(!confirm(labelText('إعادة كل البيانات للوضع الافتراضي؟ سيُحذف كل تعديل.','Reset ALL data to default? This erases edits.'))) return;
+  post('/api/schedule/reset', {}).then(function(j){ if(j&&j.ok){ toast(labelText('تمت الإعادة','Reset done')); SCHED.manage=null; loadSchedule(true); schedSetView('manage'); } }); }
 
-function rosterSync(){
-  var b=document.getElementById('rosterSyncBtn'); if(b){ b.setAttribute('aria-busy','true'); }
-  post('/api/hostaway/sync', {}).then(function(j){
-    if(b){ b.removeAttribute('aria-busy'); }
-    if(j && j.ok){
-      var rp=j.report||{};
-      toast(labelText('مزامنة: ','Sync: ')+labelText('ربط ','linked ')+((rp.linked||[]).length)+' · '+labelText('جديد ','new ')+((rp.created||[]).length));
-      loadRoster(true);
-    } else { toast((j&&j.error)?j.error:labelText('تعذّرت المزامنة','Sync failed')); }
+function schedWireOnce(){
+  if(window._schedWired) return; window._schedWired=true;
+  document.getElementById('schedBody').addEventListener('click', function(ev){
+    var t=ev.target;
+    var day=t.closest?t.closest('.sched-day'):null;
+    if(day){ schedLoadWeekday(parseInt(day.getAttribute('data-swd'),10)); return; }
+    var cell=t.closest?t.closest('.mc'):null;
+    if(cell){ schedLoadWeekday(parseInt(cell.getAttribute('data-scell'),10)); return; }
+    if(t.closest&&t.closest('.ros-input')) return;
+    if(t.closest&&t.closest('button')) return;
+    var card=t.closest?t.closest('.sched-card'):null;
+    if(card){ var id=parseInt(card.getAttribute('data-semp'),10); SCHED.exp[id]=!SCHED.exp[id]; renderSched(); }
   });
 }
 
@@ -16748,7 +16783,7 @@ function go(id){
   if(id==='listings') loadListings();
   if(id==='brain') loadBrain();
   if(id==='gaps') loadGaps();
-  if(id==='roster') loadRoster();
+  if(id==='schedule') loadSchedule();
 }
 
 /* ============================================================
@@ -31231,7 +31266,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "calendar", "roster", "clean_center", "cphotos", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
@@ -31254,7 +31289,7 @@ NAV_DEF = {
         {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
-        {"id": "roster", "ic": "cleanteams", "tk": "roster"},
+        {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
         {"id": "reviews", "ic": "reviews", "tk": "reviews", "badge": "reviews"},
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
@@ -31279,7 +31314,7 @@ NAV_DEF = {
             "home": "الرئيسية", "brain": "أوجا برين", "gaps": "فجوات منتصف الأسبوع", "inbox": "صندوق الوارد", "calendar": "التقويم",
             "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
-            "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة", "roster": "التوزيع اليومي",
+            "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي",
@@ -31293,7 +31328,7 @@ NAV_DEF = {
             "home": "Home", "brain": "Ouja Brain", "gaps": "Weekday Gaps", "inbox": "Inbox", "calendar": "Calendar",
             "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
-            "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance", "roster": "Duty Roster",
+            "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center",
@@ -46110,21 +46145,19 @@ async def start_web_server():
             except Exception as _be:
                 print("[brain] wiring failed (Brain disabled, bot unaffected):", _be)
 
-        # ---- Auto-Coverage Duty Roster — additive; reuses brain.db + the existing auth ----
-        if _HAS_ROSTER:
+        # ---- Employee Schedule & Coverage Calendar — additive; reuses brain.db + existing auth ----
+        if _HAS_SCHEDULE:
             try:
-                _roster.wire({
+                _schedule.wire({
                     "state_path": _state_path, "load_json": _load_json, "save_json": _save_json,
                     "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json, "web": web,
-                    "get_listings_map": get_listings_map, "ls_get": _ls_get,
-                    "notify": _roster_notify if ROSTER_ENABLED else None,
+                    "notify": _schedule_notify if SCHEDULE_ENABLED else None,
                     "tz": TZ, "now": now_riyadh,
                 })
-                _roster.register_routes(app)
-                print("[roster] wired + routes registered (/roster, /api/roster, /api/absence, "
-                      "/api/properties, /api/hostaway/sync, /api/assignment/override)")
-            except Exception as _re3:
-                print("[roster] wiring failed (roster disabled, bot unaffected):", _re3)
+                _schedule.register_routes(app)
+                print("[schedule] wired + routes registered (/team-calendar, /api/schedule/*)")
+            except Exception as _se3:
+                print("[schedule] wiring failed (schedule disabled, bot unaffected):", _se3)
 
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
@@ -51268,8 +51301,8 @@ async def on_ready():
         discount_catchup_loop.start()
     if not headsup_loop.is_running():
         headsup_loop.start()
-    if _HAS_ROSTER and ROSTER_ENABLED and not roster_digest_loop.is_running():
-        roster_digest_loop.start()     # morning duty-roster digest (default 08:00 Riyadh)
+    if _HAS_SCHEDULE and SCHEDULE_ENABLED and not schedule_digest_loop.is_running():
+        schedule_digest_loop.start()   # morning team-calendar ops summary (default 08:00 Riyadh)
     if not owner_warm_loop.is_running():
         owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():
