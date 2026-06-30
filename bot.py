@@ -16275,19 +16275,18 @@ function renderSchedManage(){
   emps.forEach(function(e){ h+=schedEmpRow(e); });
   h+=schedEmpRow({id:0,name:'',off_day:'',color:'#6A3A5D',sort_order:emps.length});
   h+='</div>';
-  /* apartments */
-  h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('العقارات','Apartments')+' <span class="num">('+apts.length+')</span></div>';
-  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
-  h+='<button class="btn sm" onclick="schedImportAll()" title="'+labelText('يضيف كل شقق Hostaway دفعة واحدة','Add every Hostaway apartment at once')+'">⬇ '+labelText('استيراد الكل من Hostaway','Import all from Hostaway')+'</button>';
-  h+='<button class="btn ghost sm" onclick="schedOpenPicker(0)">'+labelText('＋ اختر من Hostaway','＋ Pick from Hostaway')+'</button>';
-  h+='<button class="btn ghost sm" onclick="schedAutolink()" title="'+labelText('يربط الشقق غير المرتبطة بأسمائها من Hostaway','Link unlinked apartments by name')+'">🔗 '+labelText('ربط تلقائي','Auto-link')+'</button>';
+  /* apartments — Hostaway-driven; one decision per row: who cleans it */
+  h+='<div class="card sched-mgmt">';
+  h+='<div class="sched-mh" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>'+labelText('العقارات','Apartments')+' <span class="num">('+apts.length+')</span></span>';
+  h+='<button class="btn sm" onclick="schedSync()" title="'+labelText('يسحب شققك من Hostaway','Pull your apartments from Hostaway')+'">↻ '+labelText('مزامنة من Hostaway','Sync from Hostaway')+'</button></div>';
+  h+='<div style="font-size:12px;color:var(--muted);margin:2px 0 10px">'+labelText('شققك تجي من Hostaway — حدّد بس مين ينظّف كل وحدة.','Your apartments come from Hostaway — just set who cleans each.')+'</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:10px">';
+  h+='<button class="btn '+(SCHED.aptView===1?'ghost ':'')+'sm" onclick="schedAptViewSet(0)">'+labelText('حسب الشقة','By apartment')+'</button>';
+  h+='<button class="btn '+(SCHED.aptView===1?'':'ghost ')+'sm" onclick="schedAptViewSet(1)">'+labelText('حسب الموظف','By employee')+'</button>';
   h+='</div>';
-  h+='<div id="schedPicker" style="display:none;border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;background:var(--bg)"></div>';
-  h+='<input class="ros-input" id="schedAptSearch" placeholder="'+labelText('بحث','search')+'" oninput="schedFilterApts()" style="margin-bottom:8px;width:100%">';
-  h+='<div id="schedAptList">';
-  apts.forEach(function(a){ h+=schedAptRow(a, emps); });
-  h+='</div>';
-  h+=schedAptRow({id:0,name:'',owner_id:'',sort_order:apts.length}, emps);
+  h+='<input class="ros-input" id="schedAptSearch" value="'+esc(SCHED.aptQ||'')+'" placeholder="'+labelText('بحث','search')+'" oninput="schedAptSearch(this.value)" style="margin-bottom:8px;width:100%">';
+  h+='<div id="schedAptWrap"></div>';
+  h+='<div id="schedAptCleanup"></div>';
   h+='</div>';
   /* overrides */
   h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('التغطيات اليدوية','Manual coverage')+'</div>';
@@ -16301,6 +16300,7 @@ function renderSchedManage(){
   h+='<button class="btn sm" onclick="schedSaveSettings()">'+labelText('حفظ الإعدادات','Save settings')+'</button> ';
   h+='<button class="btn ghost sm" onclick="schedReset()" style="color:var(--bad)">'+labelText('إعادة تعيين البيانات للوضع الافتراضي','Reset to default')+'</button></div>';
   document.getElementById('schedBody').innerHTML=h;
+  schedRenderApts();
   schedRenderOv();
 }
 function schedEmpRow(e){
@@ -16318,95 +16318,87 @@ function schedEmpRow(e){
   h+='</div>';
   return h;
 }
-function schedAptRow(a, emps){
-  var id=a.id;
-  var h='<div class="sched-arow" data-aptname="'+esc(a.name||'')+'">';
-  h+='<input class="ros-input" id="sa_name_'+id+'" value="'+esc(a.name||'')+'" placeholder="'+labelText('اسم الشقة','Apartment')+'" style="flex:2 1 120px">';
-  h+='<select class="ros-input" id="sa_owner_'+id+'" style="flex:1 1 110px"><option value="">'+labelText('— المالك —','— owner —')+'</option>';
-  (emps||[]).forEach(function(e){ h+='<option value="'+e.id+'"'+(String(a.owner_id)===String(e.id)?' selected':'')+'>'+esc(e.name)+'</option>'; });
-  h+='</select>';
-  h+='<button class="btn sm" onclick="schedSaveApt('+id+')">'+(id?'حفظ':'إضافة')+'</button>';
-  if(id){ h+='<button class="btn ghost sm" onclick="schedOpenPicker('+id+')" title="'+labelText('ربط بـ Hostaway','Link to Hostaway')+'">🔗</button>'; }
-  if(id){ h+='<button class="btn ghost sm" onclick="schedDelApt('+id+')" style="color:var(--bad)">حذف</button>'; }
-  if(id){
-    var hn=a.listing_id?schedHostName(a.listing_id):'';
-    h+='<span style="flex:1 1 100%;font-size:12px;margin-top:2px;color:'+(a.listing_id?'#4A6246':'var(--muted)')+'">'
-      +(a.listing_id?('🔗 Hostaway: '+esc(hn||('#'+a.listing_id))):labelText('غير مرتبطة بـ Hostaway','not linked to Hostaway'))+'</span>';
+function schedRenderApts(){
+  var m=SCHED.manage; if(!m){ return; }
+  var emps=m.employees||[], all=m.apartments||[];
+  var empById={}; emps.forEach(function(e){ empById[e.id]=e; });
+  var q=(SCHED.aptQ||'').trim().toLowerCase();
+  var apts=q?all.filter(function(a){ return String(a.name||'').toLowerCase().indexOf(q)>=0; }):all.slice();
+  var h='';
+  if(SCHED.aptView===1){
+    emps.slice().sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); }).forEach(function(e){
+      var list=apts.filter(function(a){ return String(a.owner_id)===String(e.id); });
+      h+=schedGrpHead(e.color, e.emoji, e.name, list.length, false);
+      list.forEach(function(a){ h+=schedAptCard(a, emps, empById); });
+    });
+    var none=apts.filter(function(a){ return !a.owner_id; });
+    if(none.length){ h+=schedGrpHead('', '', labelText('غير محدّد','Unassigned'), none.length, true); none.forEach(function(a){ h+=schedAptCard(a, emps, empById); }); }
+  } else {
+    apts.forEach(function(a){ h+=schedAptCard(a, emps, empById); });
+  }
+  if(!h){ h='<div class="sched-sub">'+labelText('لا توجد شقق — اضغط «مزامنة من Hostaway».','No apartments — press Sync from Hostaway.')+'</div>'; }
+  var wrap=document.getElementById('schedAptWrap'); if(wrap){ wrap.innerHTML=h; }
+  var leftover=(m.apartments||[]).filter(function(a){ return a.listing_id==null; }).length;
+  var cu=document.getElementById('schedAptCleanup');
+  if(cu){ cu.innerHTML=leftover?('<div style="margin-top:10px;font-size:12px;color:var(--muted)">'+labelText('عندك ','You have ')+leftover+labelText(' شقة قديمة غير مرتبطة بـ Hostaway. ',' old apartments not from Hostaway. ')+'<button class="btn ghost sm" onclick="schedRemoveUnlinked()" style="color:var(--bad)">'+labelText('حذف القديمة','Remove old')+'</button></div>'):''; }
+}
+function schedDot(color){ return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+esc(color||'#B29A6A')+';margin-inline-end:5px;vertical-align:middle"></span>'; }
+function schedGrpHead(color, emoji, name, count, danger){
+  var dot=color?('<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:'+esc(color)+';margin-inline-end:6px;vertical-align:middle"></span>'):'';
+  return '<div style="margin:12px 0 6px;font-weight:700'+(danger?';color:var(--bad)':'')+'">'+dot+(emoji?esc(emoji)+' ':'')+esc(name)+' <span class="num" style="color:var(--muted)">('+count+')</span></div>';
+}
+function schedAptCard(a, emps, empById){
+  var open=String(SCHED.openApt)===String(a.id);
+  var own=a.owner_id?empById[a.owner_id]:null;
+  var h='<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px;background:var(--panel)">';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">';
+  h+='<div style="font-weight:600">'+esc(a.name||'')+(a.listing_id==null?(' <span style="font-size:10px;color:var(--muted)">('+labelText('قديمة','old')+')</span>'):'')+'</div>';
+  h+='<button class="btn ghost sm" onclick="schedToggleOwner('+a.id+')" style="border-radius:999px">';
+  if(own){ h+=schedDot(own.color)+(own.emoji?esc(own.emoji)+' ':'')+esc(own.name); }
+  else { h+='<span style="color:var(--bad)">⚠ '+labelText('غير محدّد','Unassigned')+'</span>'; }
+  h+=' ▾</button></div>';
+  if(open){
+    h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">';
+    emps.forEach(function(e){
+      var sel=String(a.owner_id)===String(e.id);
+      h+='<button class="btn sm" onclick="schedSetOwner('+a.id+','+e.id+')" style="border-radius:999px'+(sel?(';border-width:2px;border-color:'+esc(e.color||'#B29A6A')):'')+'">'+schedDot(e.color)+(e.emoji?esc(e.emoji)+' ':'')+esc(e.name)+'</button>';
+    });
+    h+='<button class="btn ghost sm" onclick="schedSetOwner('+a.id+',0)" style="border-radius:999px;color:var(--muted)">— '+labelText('بدون','None')+'</button>';
+    h+='</div>';
   }
   h+='</div>';
   return h;
 }
-function schedHostName(lid){
-  var hs=(SCHED.manage&&SCHED.manage.hostaway)||[];
-  for(var i=0;i<hs.length;i++){ if(String(hs[i].id)===String(lid)) return hs[i].name; }
-  return '';
+function schedToggleOwner(aptId){ SCHED.openApt=(String(SCHED.openApt)===String(aptId))?null:aptId; schedRenderApts(); }
+function schedSetOwner(aptId, empId){
+  var oid=empId?empId:null;
+  (SCHED.manage.apartments||[]).forEach(function(a){ if(String(a.id)===String(aptId)){ a.owner_id=oid; } });
+  SCHED.openApt=null; schedRenderApts();
+  post('/api/schedule/apartment-owner',{id:aptId, owner_id:oid}).then(function(j){
+    if(j&&j.ok){ toast(labelText('تم ✓','Saved ✓')); schedRefreshDayWeek(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); schedAfterWrite(); }
+  });
 }
-function schedAptName(aptId){
-  var as=(SCHED.manage&&SCHED.manage.apartments)||[];
-  for(var i=0;i<as.length;i++){ if(String(as[i].id)===String(aptId)) return as[i].name; }
-  return '';
+function schedRefreshDayWeek(){
+  Promise.all([api('/api/schedule/day'),api('/api/schedule/week')]).then(function(r){
+    if(r[0]&&r[0].ok){ SCHED.day=r[0].day; } if(r[1]&&r[1].week){ SCHED.week=r[1].week; }
+  });
 }
-function schedOpenPicker(aptId){
-  SCHED.pickTarget=aptId;
-  var p=document.getElementById('schedPicker'); if(!p){ return; }
-  p.style.display='';
-  var ttl=aptId?(labelText('ربط شقة بـ Hostaway: ','Link to Hostaway: ')+esc(schedAptName(aptId))):labelText('اختر شقة من Hostaway','Pick an apartment from Hostaway');
-  var hh='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13px">'+ttl+'</b>';
-  hh+='<div style="display:flex;gap:6px">';
-  if(!aptId){ hh+='<button class="btn sm" onclick="schedImportAll()">⬇ '+labelText('استيراد الكل','Import all')+'</button>'; }
-  hh+='<button class="btn ghost sm" onclick="schedClosePicker()">'+labelText('إغلاق','Close')+'</button></div></div>';
-  hh+='<input class="ros-input" id="schedPickSearch" placeholder="'+labelText('بحث في Hostaway','search Hostaway')+'" oninput="schedRenderPicker()" style="width:100%;margin:8px 0">';
-  if(aptId){ hh+='<button class="btn ghost sm" onclick="schedUnlink('+aptId+')" style="color:var(--bad);margin-bottom:6px">'+labelText('إزالة الربط','Remove link')+'</button>'; }
-  hh+='<div id="schedPickList" style="max-height:280px;overflow-y:auto"></div>';
-  p.innerHTML=hh; schedRenderPicker();
-  p.scrollIntoView({behavior:'smooth',block:'nearest'});
-}
-function schedRenderPicker(){
-  var hs=(SCHED.manage&&SCHED.manage.hostaway)||[];
-  var si=document.getElementById('schedPickSearch'); var q=(si?si.value:'')||''; q=q.trim().toLowerCase();
-  var linked={}; (SCHED.manage.apartments||[]).forEach(function(a){ if(a.listing_id!=null){ linked[String(a.listing_id)]=a; } });
-  var h='', n=0;
-  for(var i=0;i<hs.length;i++){
-    var L=hs[i];
-    if(q && (String(L.name||'').toLowerCase().indexOf(q)<0)){ continue; }
-    var lk=linked[String(L.id)];
-    h+='<div onclick="schedPickListing('+L.id+')" style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;margin-bottom:5px;cursor:pointer;background:var(--panel)">';
-    h+='<span>'+(L.oujact?'🧹 ':'')+esc(L.name)+(L.active?'':' <i style="color:var(--muted)">('+labelText('غير نشطة','inactive')+')</i>')+'</span>';
-    h+='<span style="color:var(--muted);font-size:12px;white-space:nowrap">'+(lk?('🔗 '+esc(lk.name)):'')+'</span></div>';
-    n++; if(n>=250){ break; }
-  }
-  if(!h){ h='<div class="sched-sub">'+labelText('لا نتائج','No results')+'</div>'; }
-  document.getElementById('schedPickList').innerHTML=h;
-}
-function schedPickListing(lid){
-  var t=SCHED.pickTarget||0;
-  if(t){ post('/api/schedule/apartment-link',{id:t,listing_id:lid}).then(schedPickDone); }
-  else { var nm=schedHostName(lid)||('unit-'+lid); post('/api/schedule/apartment',{name:nm,listing_id:lid}).then(schedPickDone); }
-}
-function schedPickDone(j){
-  if(j&&j.ok){ toast(labelText('تم الربط','Linked')); schedClosePicker(); schedAfterWrite(); }
-  else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
-}
-function schedClosePicker(){ SCHED.pickTarget=null; var p=document.getElementById('schedPicker'); if(p){ p.style.display='none'; p.innerHTML=''; } }
-function schedUnlink(aptId){ post('/api/schedule/apartment-link',{id:aptId,listing_id:null}).then(schedPickDone); }
-function schedAutolink(){
-  if(!confirm(labelText('ربط كل الشقق غير المرتبطة تلقائياً من أسمائها؟','Auto-link all unlinked apartments by name?'))){ return; }
-  post('/api/schedule/autolink',{}).then(function(j){
-    if(j&&j.ok){ var r=j.report||{}; toast(labelText('تم الربط: ','Linked: ')+(r.linked||0)+' / '+(r.total||0)); schedAfterWrite(); }
+function schedAptViewSet(v){ SCHED.aptView=v; SCHED.openApt=null; renderSched(); }
+function schedAptSearch(v){ SCHED.aptQ=v; schedRenderApts(); }
+function schedSync(){
+  toast(labelText('جاري المزامنة…','Syncing…'));
+  post('/api/schedule/sync',{}).then(function(j){
+    if(j&&j.ok){ var r=j.report||{}; toast(labelText('تمت المزامنة — أُضيفت ','Synced — added ')+(r.added||0)+(r.updated?(labelText(' · حُدّثت ',' · updated ')+r.updated):'')); schedAfterWrite(); }
     else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
   });
 }
-function schedImportAll(){
-  if(!confirm(labelText('استيراد كل شقق Hostaway دفعة واحدة؟ الشقق المرتبطة مسبقاً تُتجاهل (بدون تكرار). تقدر تحدّد المسؤول لكل وحدة بعدها.','Import every Hostaway apartment at once? Already-linked ones are skipped (no duplicates). You assign the employee for each afterwards.'))){ return; }
-  post('/api/schedule/import-all',{}).then(function(j){
-    if(j&&j.ok){ var r=j.report||{}; toast(labelText('أُضيفت ','Added ')+(r.added||0)+labelText(' شقة · تم تجاهل ',' · skipped ')+(r.skipped||0)); schedClosePicker(); schedAfterWrite(); }
+function schedRemoveUnlinked(){
+  if(!confirm(labelText('حذف الشقق القديمة غير المرتبطة بـ Hostaway؟','Remove old apartments not linked to Hostaway?'))){ return; }
+  post('/api/schedule/remove-unlinked',{}).then(function(j){
+    if(j&&j.ok){ toast(labelText('حُذفت ','Removed ')+((j.report||{}).removed||0)); schedAfterWrite(); }
     else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
   });
-}
-function schedFilterApts(){
-  var q=(document.getElementById('schedAptSearch').value||'').trim();
-  var rows=document.querySelectorAll('#schedAptList .sched-arow');
-  for(var i=0;i<rows.length;i++){ var nm=rows[i].getAttribute('data-aptname')||''; rows[i].style.display=(!q||nm.indexOf(q)>=0)?'':'none'; }
 }
 function schedRenderOv(){
   var m=SCHED.manage; if(!m){ return; }
@@ -16442,13 +16434,6 @@ function schedSaveEmp(id){
 }
 function schedDelEmp(id){ if(!confirm(labelText('حذف الموظف؟','Delete employee?'))) return;
   rdelete('/api/schedule/employee/'+id).then(function(j){ if(j&&j.ok){ toast(labelText('تم الحذف','Deleted')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } }); }
-function schedSaveApt(id){
-  var body={name:document.getElementById('sa_name_'+id).value, owner_id:document.getElementById('sa_owner_'+id).value};
-  if(id) body.id=id;
-  post('/api/schedule/apartment', body).then(function(j){ if(j&&j.ok){ toast(labelText('تم','Saved')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } });
-}
-function schedDelApt(id){ if(!confirm(labelText('حذف الشقة؟','Delete apartment?'))) return;
-  rdelete('/api/schedule/apartment/'+id).then(function(j){ if(j&&j.ok){ toast(labelText('تم الحذف','Deleted')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } }); }
 function schedSetOv(dow, apt, cov){
   post('/api/schedule/override', {day_of_week:dow, apartment_id:apt, covering_employee_id:cov||null}).then(function(j){
     if(j&&j.ok){ toast(labelText('تم','Saved')); schedAfterWrite(); } else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); } });

@@ -299,6 +299,63 @@ async def api_autolink(request):
     return HOST.json_response({"ok": True, "report": autolink_listings()})
 
 
+async def api_apartment_owner(request):
+    """Auto-save the cleaner for one apartment. {id, owner_id|null}. owner_id null = «بدون»
+    (apartment joins the auto-distributed pool). Rejects an unknown employee."""
+    if not can_edit_schedule(request):
+        return _deny()
+    b = await _body(request)
+    try:
+        aid = int(b.get("id"))
+    except Exception:
+        return HOST.json_response({"ok": False, "error": "id required"}, 200)
+    owner_id = b.get("owner_id")
+    owner_id = int(owner_id) if owner_id not in (None, "", 0, "0") else None
+    if owner_id is not None and not db.q1("SELECT id FROM schedule_employees WHERE id=?", (owner_id,)):
+        return HOST.json_response({"ok": False, "error": "موظف غير معروف"}, 200)
+    db.execute("UPDATE schedule_apartments SET owner_id=? WHERE id=?", (owner_id, aid))
+    return HOST.json_response({"ok": True, "id": aid, "owner_id": owner_id})
+
+
+async def api_sync(request):
+    """Hostaway-driven sync: add a schedule apartment for every Hostaway listing not already
+    linked, and refresh the name of linked ones whose Hostaway name changed. Never deletes (keeps
+    owner assignments). Returns {added, updated}."""
+    if not can_edit_schedule(request):
+        return _deny()
+    listings = _hostaway_listings()
+    if not listings:
+        return HOST.json_response({"ok": False, "error": "تعذّر جلب قائمة Hostaway — حاول مرة ثانية"}, 200)
+    by_lid = {int(a["listing_id"]): a for a in db.apartments() if a.get("listing_id") is not None}
+    added, updated = 0, 0
+    sort_at = len(db.apartments())
+    for L in listings:
+        lid = int(L["id"])
+        name = L.get("name") or ("unit-" + str(lid))
+        cur = by_lid.get(lid)
+        if cur is None:
+            db.execute("INSERT INTO schedule_apartments(name,owner_id,listing_id,sort_order,created_at) "
+                       "VALUES(?,?,?,?,?)", (name, None, lid, sort_at, db.now_iso()))
+            sort_at += 1
+            added += 1
+        elif (cur.get("name") or "") != name:
+            db.execute("UPDATE schedule_apartments SET name=? WHERE id=?", (name, cur["id"]))
+            updated += 1
+    return HOST.json_response({"ok": True, "report": {"added": added, "updated": updated}})
+
+
+async def api_remove_unlinked(request):
+    """Delete apartments not backed by a Hostaway listing (the pre-Hostaway typed leftovers).
+    Returns {removed}. Coverage overrides cascade with the apartment."""
+    if not can_edit_schedule(request):
+        return _deny()
+    rows = db.q("SELECT id FROM schedule_apartments WHERE listing_id IS NULL")
+    for r in rows:
+        db.execute("DELETE FROM schedule_coverage_overrides WHERE apartment_id=?", (r["id"],))
+        db.execute("DELETE FROM schedule_apartments WHERE id=?", (r["id"],))
+    return HOST.json_response({"ok": True, "report": {"removed": len(rows)}})
+
+
 async def api_import_all(request):
     """Bulk-create a schedule apartment for EVERY Hostaway listing not already linked to one
     (skips already-linked so re-running never duplicates). Owner is left blank — the editor
@@ -437,6 +494,9 @@ def register(app):
     p("/api/schedule/apartment-link", _safe(api_apartment_link))
     p("/api/schedule/autolink", _safe(api_autolink))
     p("/api/schedule/import-all", _safe(api_import_all))
+    p("/api/schedule/apartment-owner", _safe(api_apartment_owner))
+    p("/api/schedule/sync", _safe(api_sync))
+    p("/api/schedule/remove-unlinked", _safe(api_remove_unlinked))
     p("/api/schedule/employee", _safe(api_employee_save))
     app.router.add_delete("/api/schedule/employee/{id}", _safe(api_employee_delete))
     p("/api/schedule/apartment", _safe(api_apartment_save))
