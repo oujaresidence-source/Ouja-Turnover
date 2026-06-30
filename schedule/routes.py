@@ -299,6 +299,35 @@ async def api_autolink(request):
     return HOST.json_response({"ok": True, "report": autolink_listings()})
 
 
+async def api_import_all(request):
+    """Bulk-create a schedule apartment for EVERY Hostaway listing not already linked to one
+    (skips already-linked so re-running never duplicates). Owner is left blank — the editor
+    assigns each one's employee afterwards. Pass {oujact_only:true} to limit to cleaning units."""
+    if not can_edit_schedule(request):
+        return _deny()
+    b = await _body(request)
+    only_oujact = bool(b.get("oujact_only"))
+    listings = _hostaway_listings()
+    if not listings:
+        return HOST.json_response({"ok": False, "error": "تعذّر جلب قائمة Hostaway — حاول مرة ثانية"}, 200)
+    linked = {int(a["listing_id"]) for a in db.apartments() if a.get("listing_id") is not None}
+    added, skipped = 0, 0
+    sort_at = len(db.apartments())
+    for L in listings:
+        if only_oujact and not L.get("oujact"):
+            continue
+        lid = int(L["id"])
+        if lid in linked:
+            skipped += 1
+            continue
+        db.execute("INSERT INTO schedule_apartments(name,owner_id,listing_id,sort_order,created_at) "
+                   "VALUES(?,?,?,?,?)", (L.get("name") or ("unit-" + str(lid)), None, lid, sort_at, db.now_iso()))
+        linked.add(lid)
+        sort_at += 1
+        added += 1
+    return HOST.json_response({"ok": True, "report": {"added": added, "skipped": skipped, "total": len(listings)}})
+
+
 async def api_apartment_delete(request):
     if not can_edit_schedule(request):
         return _deny()
@@ -407,6 +436,7 @@ def register(app):
     g("/api/schedule/hostaway-listings", _safe(api_hostaway_listings))
     p("/api/schedule/apartment-link", _safe(api_apartment_link))
     p("/api/schedule/autolink", _safe(api_autolink))
+    p("/api/schedule/import-all", _safe(api_import_all))
     p("/api/schedule/employee", _safe(api_employee_save))
     app.router.add_delete("/api/schedule/employee/{id}", _safe(api_employee_delete))
     p("/api/schedule/apartment", _safe(api_apartment_save))

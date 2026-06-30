@@ -16278,7 +16278,8 @@ function renderSchedManage(){
   /* apartments */
   h+='<div class="card sched-mgmt"><div class="sched-mh">'+labelText('العقارات','Apartments')+' <span class="num">('+apts.length+')</span></div>';
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
-  h+='<button class="btn sm" onclick="schedOpenPicker(0)">'+labelText('＋ اختر من Hostaway','＋ Pick from Hostaway')+'</button>';
+  h+='<button class="btn sm" onclick="schedImportAll()" title="'+labelText('يضيف كل شقق Hostaway دفعة واحدة','Add every Hostaway apartment at once')+'">⬇ '+labelText('استيراد الكل من Hostaway','Import all from Hostaway')+'</button>';
+  h+='<button class="btn ghost sm" onclick="schedOpenPicker(0)">'+labelText('＋ اختر من Hostaway','＋ Pick from Hostaway')+'</button>';
   h+='<button class="btn ghost sm" onclick="schedAutolink()" title="'+labelText('يربط الشقق غير المرتبطة بأسمائها من Hostaway','Link unlinked apartments by name')+'">🔗 '+labelText('ربط تلقائي','Auto-link')+'</button>';
   h+='</div>';
   h+='<div id="schedPicker" style="display:none;border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;background:var(--bg)"></div>';
@@ -16351,7 +16352,9 @@ function schedOpenPicker(aptId){
   p.style.display='';
   var ttl=aptId?(labelText('ربط شقة بـ Hostaway: ','Link to Hostaway: ')+esc(schedAptName(aptId))):labelText('اختر شقة من Hostaway','Pick an apartment from Hostaway');
   var hh='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13px">'+ttl+'</b>';
-  hh+='<button class="btn ghost sm" onclick="schedClosePicker()">'+labelText('إغلاق','Close')+'</button></div>';
+  hh+='<div style="display:flex;gap:6px">';
+  if(!aptId){ hh+='<button class="btn sm" onclick="schedImportAll()">⬇ '+labelText('استيراد الكل','Import all')+'</button>'; }
+  hh+='<button class="btn ghost sm" onclick="schedClosePicker()">'+labelText('إغلاق','Close')+'</button></div></div>';
   hh+='<input class="ros-input" id="schedPickSearch" placeholder="'+labelText('بحث في Hostaway','search Hostaway')+'" oninput="schedRenderPicker()" style="width:100%;margin:8px 0">';
   if(aptId){ hh+='<button class="btn ghost sm" onclick="schedUnlink('+aptId+')" style="color:var(--bad);margin-bottom:6px">'+labelText('إزالة الربط','Remove link')+'</button>'; }
   hh+='<div id="schedPickList" style="max-height:280px;overflow-y:auto"></div>';
@@ -16390,6 +16393,13 @@ function schedAutolink(){
   if(!confirm(labelText('ربط كل الشقق غير المرتبطة تلقائياً من أسمائها؟','Auto-link all unlinked apartments by name?'))){ return; }
   post('/api/schedule/autolink',{}).then(function(j){
     if(j&&j.ok){ var r=j.report||{}; toast(labelText('تم الربط: ','Linked: ')+(r.linked||0)+' / '+(r.total||0)); schedAfterWrite(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+  });
+}
+function schedImportAll(){
+  if(!confirm(labelText('استيراد كل شقق Hostaway دفعة واحدة؟ الشقق المرتبطة مسبقاً تُتجاهل (بدون تكرار). تقدر تحدّد المسؤول لكل وحدة بعدها.','Import every Hostaway apartment at once? Already-linked ones are skipped (no duplicates). You assign the employee for each afterwards.'))){ return; }
+  post('/api/schedule/import-all',{}).then(function(j){
+    if(j&&j.ok){ var r=j.report||{}; toast(labelText('أُضيفت ','Added ')+(r.added||0)+labelText(' شقة · تم تجاهل ',' · skipped ')+(r.skipped||0)); schedClosePicker(); schedAfterWrite(); }
     else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
   });
 }
