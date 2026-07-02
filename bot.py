@@ -84,6 +84,15 @@ except Exception as _pk_err:           # pragma: no cover
     _pk = None
     _HAS_PK = False
 
+# Guide Engine (دليل الشقق) — the guest guide served in-house (replaces Netlify+Supabase).
+try:
+    import guide as _guide
+    _HAS_GUIDE = True
+except Exception as _guide_err:        # pragma: no cover
+    print("[guide] import failed (guide disabled, bot unaffected):", _guide_err)
+    _guide = None
+    _HAS_GUIDE = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -4731,6 +4740,7 @@ async def headsup_loop():
 # The feature is a calendar PAGE; this is a small add-on that posts the day's coverage to the
 # ops channel once each morning. DRY-RUN by default (logs, doesn't post) until you flip it.
 SCHEDULE_ENABLED       = os.environ.get("SCHEDULE_ENABLED", "1") in ("1", "true", "True", "yes")
+GUIDE_ENABLED          = os.environ.get("GUIDE_ENABLED", "1") in ("1", "true", "True", "yes")
 SCHEDULE_NOTIFY_DRYRUN = os.environ.get("SCHEDULE_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
 SCHEDULE_DIGEST_HOUR   = int(os.environ.get("SCHEDULE_DIGEST_HOUR", "8"))       # 08:00 Riyadh
 SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")  # ops summary channel
@@ -14665,6 +14675,42 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ GUIDE (دليل الشقق — in-house guest guide admin) ============ -->
+      <section class="view" id="view_guide">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_guide">دليل الشقق</div>
+            <div class="page-sub" id="t_guide_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="gdImport(this)" id="gdImportBtn">⬇ استيراد</button>
+            <button class="btn ghost sm" onclick="loadGuide()">↻</button>
+          </div>
+        </div>
+        <div id="gdImportReport"></div>
+        <div class="card">
+          <div class="card-head"><span class="card-title" id="t_gd_units">الشقق</span>
+            <input id="gdSearch" oninput="gdRenderUnits()" placeholder="بحث…" style="max-width:220px;padding:6px 10px;height:32px;font-size:13px">
+          </div>
+          <div id="gdUnits"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card" id="gdEditCard" style="display:none">
+          <div class="card-head"><span class="card-title" id="gdEditTitle">تعديل</span>
+            <button class="btn ghost sm" onclick="gdCloseEdit()">✕</button></div>
+          <div id="gdEditBody"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title" id="t_gd_entries">إضافات الدليل (من الفجوات + يدوي)</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;padding:4px 2px 10px">
+            <select id="geSlug" style="min-width:180px;padding:6px 10px;height:34px;font-size:13px"></select>
+            <input id="geTitle" placeholder="السؤال / العنوان" style="flex:1;min-width:170px;padding:6px 10px;height:34px;font-size:13px">
+            <input id="geBody" placeholder="الجواب / النص" style="flex:2;min-width:220px;padding:6px 10px;height:34px;font-size:13px">
+            <button class="btn primary sm" onclick="gdAddEntry(this)" id="t_gd_add">أضِف</button>
+          </div>
+          <div id="gdEntries"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ GUESTS (profiles + VIP + summaries) ============ -->
       <section class="view" id="view_guests">
         <div class="page-head">
@@ -17084,6 +17130,7 @@ function refreshView(id){
     case 'clean_center': return loadCleaningCenter();
     case 'cphotos':  return loadCleaningPhotos();
     case 'promises': return loadPromises();
+    case 'guide':    return loadGuide();
     case 'quality':  return loadQuality();
     case 'guests':   return loadGuests();
     case 'users':    return loadUsers();
@@ -17124,6 +17171,7 @@ function go(id){
   if(id==='clean_center') loadCleaningCenter();
   if(id==='cphotos') loadCleaningPhotos();
   if(id==='promises') loadPromises();
+  if(id==='guide') loadGuide();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
@@ -19227,6 +19275,130 @@ async function pkDone(el){
   var j=await post('/api/promises/done', {id: pid});
   if(j&&j.ok){ toast(labelText('تم الوفاء ✅','Kept ✅')); loadPromises(); }
   else { el.disabled=false; toast((j&&j.error)||labelText('صار خطأ','Error')); }
+}
+
+/* ============ GUIDE ADMIN (دليل الشقق — units, entries, import) ============ */
+var GD = {edit:null};
+async function loadGuide(){
+  var st_=function(id,txt){ var el=document.getElementById(id); if(el) el.textContent=txt; };
+  st_('t_guide', labelText('دليل الشقق','Apartment Guide'));
+  st_('t_guide_sub', labelText('صفحة الضيف لكل شقة — صور الوصول والواي فاي والعنوان. الرابط العام: '+location.origin+'/guide/…','Each apartment’s guest page — arrival photos, Wi-Fi, address. Public link: '+location.origin+'/guide/…'));
+  st_('t_gd_units', labelText('الشقق','Units'));
+  st_('t_gd_entries', labelText('إضافات الدليل (من الفجوات + يدوي)','Guide additions (from gaps + manual)'));
+  st_('t_gd_add', labelText('أضِف','Add'));
+  st_('gdImportBtn', labelText('⬇ استيراد من ملف التصدير','⬇ Import from export file'));
+  try{
+    var d = await api('/api/guide/admin');
+    D.guide = d;
+    gdRenderUnits(); gdRenderEntries(); gdFillSlugSelect();
+  }catch(e){ document.getElementById('gdUnits').innerHTML='<div class="empty">'+esc(labelText('تعذّر التحميل','Could not load'))+'</div>'; }
+}
+function gdRenderUnits(){
+  var d=D.guide||{}; var units=d.units||[];
+  var qEl=document.getElementById('gdSearch');
+  var q=(qEl&&qEl.value||'').toLowerCase();
+  if(q) units=units.filter(function(u){ return ((u.slug||'')+' '+(u.listing_name||'')).toLowerCase().indexOf(q)>=0; });
+  var box=document.getElementById('gdUnits'); if(!box) return;
+  if(!units.length){ box.innerHTML='<div class="empty">'+esc(labelText('ما فيه شقق — اضغط «استيراد»','No units — press Import'))+'</div>'; return; }
+  box.innerHTML = units.map(function(u){
+    var pics=0; try{ pics=Object.keys(JSON.parse(u.media_local||'{}')).length; }catch(_){ }
+    return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap">'
+      +'<div style="min-width:200px;flex:1"><b>'+esc(u.slug)+'</b>'
+      +'<div class="muted" style="font-size:12px">'+esc(u.listing_name||'—')
+      +(u.listing_id?(' · Hostaway '+esc(String(u.listing_id))):' · <span style="color:var(--yellow)">'+esc(labelText('غير مرتبطة','unlinked'))+'</span>')
+      +' · '+pics+' '+esc(labelText('صور محلية','local photos'))
+      +(u.wifi_name?(' · WiFi ✓'):'')
+      +'</div></div>'
+      +'<div style="display:flex;gap:6px">'
+      +'<a class="btn ghost sm" target="_blank" rel="noopener" href="/guide/'+esc(u.slug)+'">'+esc(labelText('فتح','Open'))+'</a>'
+      +'<button class="btn ghost sm" onclick="gdEdit(this)" data-slug="'+esc(u.slug)+'">'+esc(labelText('تعديل','Edit'))+'</button>'
+      +'</div></div>';
+  }).join('');
+}
+function gdEdit(el){
+  var slug=el.getAttribute('data-slug');
+  var u=((D.guide||{}).units||[]).filter(function(x){ return x.slug===slug; })[0];
+  if(!u) return;
+  GD.edit=slug;
+  document.getElementById('gdEditCard').style.display='';
+  document.getElementById('gdEditTitle').textContent=labelText('تعديل ','Edit ')+slug;
+  function f(id,lbl,val,wide){
+    return '<label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);'+(wide?'flex:1 1 100%':'flex:1;min-width:180px')+'">'
+      +esc(lbl)+'<input id="'+id+'" value="'+esc(val||'')+'" style="padding:6px 10px;height:34px;font-size:13px"></label>';
+  }
+  document.getElementById('gdEditBody').innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:10px;padding:4px 2px">'
+    +f('gd_name', labelText('اسم الشقة','Listing name'), u.listing_name)
+    +f('gd_map', labelText('رابط الموقع','Map link'), u.map_link)
+    +f('gd_wname', labelText('اسم الواي فاي','Wi-Fi name'), u.wifi_name)
+    +f('gd_wpass', labelText('كلمة السر','Wi-Fi password'), u.wifi_pass)
+    +'<label style="flex:1 1 100%;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut)">'
+    +esc(labelText('التفاصيل / العنوان','Details / address'))
+    +'<textarea id="gd_notes" rows="4" style="padding:8px 10px;font-size:13px">'+esc(u.notes||'')+'</textarea></label>'
+    +'<button class="btn primary sm" onclick="gdSave(this)">'+esc(labelText('حفظ','Save'))+'</button>'
+    +'</div>';
+}
+function gdCloseEdit(){ GD.edit=null; document.getElementById('gdEditCard').style.display='none'; }
+async function gdSave(el){
+  if(!GD.edit) return; el.disabled=true;
+  var v=function(id){ return (document.getElementById(id)||{}).value||''; };
+  var j=await post('/api/guide/unit', {slug:GD.edit, listing_name:v('gd_name'), map_link:v('gd_map'),
+    wifi_name:v('gd_wname'), wifi_pass:v('gd_wpass'), notes:v('gd_notes')});
+  el.disabled=false;
+  if(j&&j.ok){ toast(labelText('تم الحفظ ✅','Saved ✅')); gdCloseEdit(); loadGuide(); }
+  else { toast((j&&j.error)||labelText('صار خطأ','Error')); }
+}
+function gdFillSlugSelect(){
+  var sel=document.getElementById('geSlug'); if(!sel) return;
+  var units=((D.guide||{}).units||[]);
+  sel.innerHTML='<option value="">'+esc(labelText('كل الشقق','All units'))+'</option>'
+    +units.map(function(u){ return '<option value="'+esc(u.slug)+'">'+esc(u.slug)+'</option>'; }).join('');
+}
+function gdRenderEntries(){
+  var box=document.getElementById('gdEntries'); if(!box) return;
+  var ents=((D.guide||{}).entries||[]);
+  if(!ents.length){ box.innerHTML='<div class="empty">'+esc(labelText('ما فيه إضافات بعد','No additions yet'))+'</div>'; return; }
+  box.innerHTML=ents.map(function(e){
+    return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)">'
+      +'<div><b>'+esc(e.title_ar||e.title_en||'—')+'</b>'
+      +'<div class="muted" style="font-size:12px">'+esc(e.body_ar||e.body_en||'')
+      +' · '+esc(e.slug||labelText('كل الشقق','all units'))
+      +' · '+esc(e.source==='gap'?labelText('من فجوة','from gap'):labelText('يدوي','manual'))+'</div></div>'
+      +'<button class="btn ghost sm" onclick="gdDelEntry(this)" data-eid="'+esc(String(e.id))+'">🗑</button>'
+      +'</div>';
+  }).join('');
+}
+async function gdAddEntry(el){
+  var v=function(id){ return (document.getElementById(id)||{}).value||''; };
+  if(!v('geTitle') && !v('geBody')){ toast(labelText('اكتب المحتوى أولاً','Write the content first')); return; }
+  el.disabled=true;
+  var j=await post('/api/guide/entry', {slug:v('geSlug'), title_ar:v('geTitle'), body_ar:v('geBody')});
+  el.disabled=false;
+  if(j&&j.ok){ toast(labelText('انضافت ✅','Added ✅')); document.getElementById('geTitle').value=''; document.getElementById('geBody').value=''; loadGuide(); }
+  else { toast((j&&j.error)||labelText('صار خطأ','Error')); }
+}
+async function gdDelEntry(el){
+  if(!confirm(labelText('حذف هالإضافة من الدليل؟','Delete this guide addition?'))) return;
+  el.disabled=true;
+  var j=await post('/api/guide/entry/delete', {id: el.getAttribute('data-eid')});
+  if(j&&j.ok){ toast(labelText('انحذفت','Deleted')); loadGuide(); } else { el.disabled=false; toast((j&&j.error)||labelText('صار خطأ','Error')); }
+}
+async function gdImport(el){
+  if(!confirm(labelText('استيراد الدليل من ملف تصدير Supabase؟ آمن ويمكن تكراره.','Import the guide from the Supabase export file? Safe to re-run.'))) return;
+  el.disabled=true; el.textContent=labelText('جاري الاستيراد…','Importing…');
+  var j=await post('/api/guide/import', {});
+  el.disabled=false; el.textContent=labelText('⬇ استيراد من ملف التصدير','⬇ Import from export file');
+  var box=document.getElementById('gdImportReport');
+  if(j&&j.ok){
+    var r=j.report||{};
+    var failed=(r.media_failed||[]).length;
+    box.innerHTML='<div class="card" style="margin-bottom:10px"><b>'+esc(labelText('تقرير الاستيراد','Import report'))+':</b> '
+      +r.units+' '+esc(labelText('شقة','units'))+' · '+esc(labelText('صور نزلت','photos mirrored'))+' '+(r.media_ok||0)
+      +(failed?(' · <span style="color:var(--red)">'+esc(labelText('روابط صور ميتة/خاصة','dead/private photo links'))+' '+failed+'</span>'):'')
+      +((r.unmatched||[]).length?(' · <span style="color:var(--yellow)">'+esc(labelText('بدون ربط Hostaway','no Hostaway match'))+' '+r.unmatched.length+'</span>'):'')
+      +'</div>';
+    loadGuide();
+  } else { toast((j&&j.error)||labelText('صار خطأ','Error')); }
 }
 
 function renderListingsSyncBar(){
@@ -31742,7 +31914,7 @@ NAV_DEF = {
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly"]},
-        {"tk": "cat_guests", "ids": ["guests", "gw", "reviews"]},
+        {"tk": "cat_guests", "ids": ["guests", "gw", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["users", "learn", "log"]},
     ],
     "items": [
@@ -31773,6 +31945,7 @@ NAV_DEF = {
         {"id": "erp", "ic": "fb", "tk": "erp"},
         {"id": "guests", "ic": "guests", "tk": "guests"},
         {"id": "gw", "ic": "gw", "tk": "gw"},
+        {"id": "guide", "ic": "gw", "tk": "guide"},
         {"id": "quality", "ic": "quality", "tk": "quality"},
         {"id": "rev", "ic": "rev", "tk": "rev"},
         {"id": "learn", "ic": "learn", "tk": "learn"},
@@ -31791,7 +31964,7 @@ NAV_DEF = {
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي",
-            "guests": "الضيوف", "gw": "موقع الضيوف", "quality": "جودة النظافة",
+            "guests": "الضيوف", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
@@ -31806,7 +31979,7 @@ NAV_DEF = {
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center",
-            "guests": "Guests", "gw": "Guest Website", "quality": "Cleaning quality",
+            "guests": "Guests", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "log": "Activity",
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
@@ -45876,24 +46049,36 @@ def _elite_geo_norm(s):
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 def _elite_geo_fetch():
-    """Fetch the oujaguide data.json -> {normalized listing_name: (lat,lng)} parsed from each
-    record's map_link. Best-effort; {} on any failure. BLOCKING — call via run_in_executor."""
+    """{normalized listing_name: (lat,lng)} parsed from each guide record's
+    map_link. Reads the IN-HOUSE guide DB first (same records the old Netlify
+    data.json carried); only when the guide is empty/disabled does it fall back
+    to the legacy Netlify URL, so retiring Netlify can't silently kill the
+    elite map. Best-effort; {} on any failure. BLOCKING — executor only."""
+    records = None
+    if _HAS_GUIDE and GUIDE_ENABLED:
+        try:
+            records = _guide.db.public_records() or None
+        except Exception as e:
+            print("guide geo read error:", e)
+    if records is None:
+        try:
+            r = requests.get(_ELITE_GEO_URL, timeout=12)
+            r.raise_for_status()
+            records = r.json() or []
+        except Exception as e:
+            print("oujaguide data.json fetch error:", e)
+            return {}
     out = {}
-    try:
-        r = requests.get(_ELITE_GEO_URL, timeout=12)
-        r.raise_for_status()
-        for d in (r.json() or []):
-            m = re.search(r"(-?\d{2}\.\d+)[, ]+(-?\d{2}\.\d+)", str(d.get("map_link") or ""))
-            if not m:
-                continue
-            lat, lng = float(m.group(1)), float(m.group(2))
-            if not (24.0 <= lat <= 25.6 and 46.0 <= lng <= 47.6):
-                continue
-            nm = _elite_geo_norm(d.get("listing_name"))
-            if nm:
-                out[nm] = (lat, lng)
-    except Exception as e:
-        print("oujaguide data.json fetch error:", e)
+    for d in records:
+        m = re.search(r"(-?\d{2}\.\d+)[, ]+(-?\d{2}\.\d+)", str(d.get("map_link") or ""))
+        if not m:
+            continue
+        lat, lng = float(m.group(1)), float(m.group(2))
+        if not (24.0 <= lat <= 25.6 and 46.0 <= lng <= 47.6):
+            continue
+        nm = _elite_geo_norm(d.get("listing_name"))
+        if nm:
+            out[nm] = (lat, lng)
     return out
 
 def _elite_geo_refresh():
@@ -47628,6 +47813,20 @@ async def start_web_server():
                     print("[schedule] auto-link skipped:", _ale)
             except Exception as _se3:
                 print("[schedule] wiring failed (schedule disabled, bot unaffected):", _se3)
+
+        # ---- Guide Engine (دليل الشقق) — in-house guest guide; replaces Netlify+Supabase ----
+        if _HAS_GUIDE and GUIDE_ENABLED:
+            try:
+                _guide.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role,
+                    "json_response": _json, "web": web,
+                    "state_dir": STATE_DIR, "listings": get_listings_map,
+                    "csv_path": "supabase_export_listings.csv",
+                })
+                _guide.register_routes(app)
+                print("[guide] wired + routes registered (/guide, /guide/{slug}, /guide/data.json, /data.json)")
+            except Exception as _ge:
+                print("[guide] wiring failed (guide disabled, bot unaffected):", _ge)
 
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
@@ -52586,19 +52785,115 @@ class WatchmanPromiseView(discord.ui.View):
         except Exception:
             pass
 
-class WatchmanGapView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="✅ أضفته للدليل / Added", style=discord.ButtonStyle.success,
-                       custom_id="wm_gap_added")
-    async def added(self, interaction: discord.Interaction, button: discord.ui.Button):
-        key = None
+def _wm_gap_key_from(interaction):
+    """The gap key rides the card's embed footer (wm-gap:<key>)."""
+    try:
         if interaction.message.embeds:
             foot = (interaction.message.embeds[0].footer.text or "") if interaction.message.embeds[0].footer else ""
             m = re.match(r"wm-gap:(.+)", foot)
             if m:
-                key = m.group(1)
+                return m.group(1)
+    except Exception:
+        pass
+    return None
+
+class WatchmanGapAddModal(discord.ui.Modal, title="أضِفها للدليل"):
+    """Pre-filled Q/A → ONE guide_entries FAQ row → guests see it instantly on
+    /guide. all_units=True writes the for-every-apartment variant."""
+    def __init__(self, gap_key, all_units=False):
+        super().__init__()
+        self.gap_key = gap_key
+        self.all_units = all_units
+        rec = _wm_gaps.get(gap_key) or {}
+        self.q = discord.ui.TextInput(
+            label="السؤال (عنوانه في الدليل)", max_length=100,
+            default=((rec.get("guest_question") or rec.get("topic") or "")[:100]))
+        self.a = discord.ui.TextInput(
+            label="الجواب (نص الدليل)", style=discord.TextStyle.paragraph, max_length=1500,
+            default=((rec.get("suggested") or rec.get("our_answer") or "")[:1500]))
+        self.add_item(self.q)
+        self.add_item(self.a)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        rec = _wm_gaps.get(self.gap_key)
+        if not rec:
+            await interaction.response.send_message("⚠️ ما لقيت هالفجوة في السجل.", ephemeral=True)
+            return
+        if not (_HAS_GUIDE and GUIDE_ENABLED):
+            await interaction.response.send_message("⚠️ الدليل الداخلي مو مفعّل (GUIDE_ENABLED).", ephemeral=True)
+            return
+        slug = ""
+        if not self.all_units:
+            unit = await asyncio.to_thread(_guide.db.unit_by_listing, rec.get("listing_id"))
+            if unit is None:
+                await interaction.response.send_message(
+                    "⚠️ هالشقة مو مرتبطة بالدليل بعد — اربطها من تبويب الدليل، "
+                    "أو استخدم زر «لكل الشقق».", ephemeral=True)
+                return
+            slug = unit["slug"]
+        await asyncio.to_thread(
+            _guide.db.add_entry, slug, "faq",
+            str(self.q.value).strip(), "", str(self.a.value).strip(), "",
+            None, 0, "published", "gap", str(interaction.user))
+        rec["resolved"] = True
+        _wm_save()
+        scope = " (لكل الشقق)" if self.all_units else ""
+        await interaction.response.send_message(
+            f"✅ انضافت للدليل{scope} — تظهر للضيوف فوراً على صفحة الشقة.")
+        try:
+            await _wm_close_channel(interaction.channel,
+                                    f"أُضيفت للدليل{scope} بواسطة {interaction.user.mention}")
+        except Exception:
+            pass
+
+class WatchmanGapView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✍️ أضِفها للدليل", style=discord.ButtonStyle.primary,
+                       custom_id="wm_gap_add")
+    async def add_to_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
+        key = _wm_gap_key_from(interaction)
+        if not key or key not in _wm_gaps:
+            await interaction.response.send_message("⚠️ ما لقيت هالفجوة في السجل.", ephemeral=True)
+            return
+        await interaction.response.send_modal(WatchmanGapAddModal(key))
+
+    @discord.ui.button(label="🌐 أضِفها لكل الشقق", style=discord.ButtonStyle.secondary,
+                       custom_id="wm_gap_add_all")
+    async def add_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        key = _wm_gap_key_from(interaction)
+        if not key or key not in _wm_gaps:
+            await interaction.response.send_message("⚠️ ما لقيت هالفجوة في السجل.", ephemeral=True)
+            return
+        await interaction.response.send_modal(WatchmanGapAddModal(key, all_units=True))
+
+    @discord.ui.button(label="👍 موجودة أصلًا", style=discord.ButtonStyle.secondary,
+                       custom_id="wm_gap_exists")
+    async def already_there(self, interaction: discord.Interaction, button: discord.ui.Button):
+        key = _wm_gap_key_from(interaction)
+        rec = _wm_gaps.get(key) if key else None
+        if rec:
+            rec["resolved"] = True
+            _wm_save()
+        try:
+            v = WatchmanGapView()
+            for ch_ in v.children:
+                ch_.disabled = True
+            await interaction.message.edit(view=v)
+        except Exception:
+            pass
+        await interaction.response.send_message("👍 تمام — معلومة موجودة، أقفلنا الفجوة.", ephemeral=True)
+        try:
+            await _wm_close_channel(interaction.channel,
+                                    f"موجودة أصلًا — أكّدها {interaction.user.mention}")
+        except Exception:
+            pass
+
+    @discord.ui.button(label="✅ أضفته يدوياً / Added", style=discord.ButtonStyle.success,
+                       custom_id="wm_gap_added")
+    async def added(self, interaction: discord.Interaction, button: discord.ui.Button):
+        key = _wm_gap_key_from(interaction)
         rec = _wm_gaps.get(key) if key else None
         if rec:
             rec["resolved"] = True
@@ -52639,7 +52934,8 @@ async def _wm_post_gap(rec):
                      f"**سؤال الضيف:** {rec.get('guest_question') or '—'}\n"
                      f"**ردّينا عليه بـ:** {rec.get('our_answer') or '—'}\n\n"
                      f"**أضِف للدليل:**\n> {rec.get('suggested') or rec.get('our_answer') or '—'}{warn}\n\n"
-                     f"اضغط «أضفته للدليل» لما تحدّث صفحة الشقة — بيتقفل الروم."),
+                     f"«أضِفها للدليل» يكتبها بصفحة الشقة مباشرة (تقدر تعدّل النص قبل)، "
+                     f"«لكل الشقق» يضيفها لكل الشقق، «موجودة أصلًا» يقفل الفجوة بدون إضافة."),
         color=0xC9A24B)
     emb.set_footer(text=f"wm-gap:{rec['key']}")
     msg = await ch.send(content=(owner or None), embed=emb, view=WatchmanGapView())

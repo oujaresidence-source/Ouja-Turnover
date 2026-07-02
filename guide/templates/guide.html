@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#1A130D" />
+<title>Ouja Residence · عوجا ريزيدنس</title>
+
+<style>
+@font-face { font-family:'Thmanyah'; src:url('/guide/fonts/thmanyahsans-Light.woff2') format('woff2');   font-weight:300; font-display:swap; }
+@font-face { font-family:'Thmanyah'; src:url('/guide/fonts/thmanyahsans-Regular.woff2') format('woff2'); font-weight:400; font-display:swap; }
+@font-face { font-family:'Thmanyah'; src:url('/guide/fonts/thmanyahsans-Medium.woff2') format('woff2');  font-weight:500; font-display:swap; }
+@font-face { font-family:'Thmanyah'; src:url('/guide/fonts/thmanyahsans-Bold.woff2') format('woff2');    font-weight:700; font-display:swap; }
+@font-face { font-family:'Thmanyah'; src:url('/guide/fonts/thmanyahsans-Black.woff2') format('woff2');   font-weight:900; font-display:swap; }
+@font-face { font-family:'Thmanyah Serif'; src:url('/guide/fonts/thmanyahserifdisplay-Light.woff2') format('woff2');   font-weight:300; font-display:swap; }
+@font-face { font-family:'Thmanyah Serif'; src:url('/guide/fonts/thmanyahserifdisplay-Regular.woff2') format('woff2'); font-weight:400; font-display:swap; }
+@font-face { font-family:'Thmanyah Serif'; src:url('/guide/fonts/thmanyahserifdisplay-Medium.woff2') format('woff2');  font-weight:500; font-display:swap; }
+@font-face { font-family:'Thmanyah Serif'; src:url('/guide/fonts/thmanyahserifdisplay-Bold.woff2') format('woff2');    font-weight:700; font-display:swap; }
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,300;1,400&display=swap" rel="stylesheet">
+<!-- Supabase JS client (used only if SUPABASE_URL/KEY are set in the script below) -->
+<!-- data served in-house from /guide/data.json (Supabase retired) -->
+
+<style>
+:root {
+  --ink:        #1A130D;
+  --ink-soft:   #3A2A1F;
+  --paper:      #F5EDDF;
+  --paper-deep: #EBE0CE;
+  --ivory:      #FAF6EE;
+  --hairline:   rgba(139, 111, 71, 0.20);
+  --bronze:     #8B6F47;
+  --bronze-light: #C9A961;
+  --muted:      #78695A;
+
+  --thmanyah:        'Thmanyah', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --thmanyah-serif:  'Thmanyah Serif', 'Cormorant Garamond', Georgia, serif;
+  --italic-en:       'Cormorant Garamond', Georgia, serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--thmanyah);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+  direction: rtl;
+}
+img { max-width: 100%; display: block; }
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
+a { color: inherit; }
+
+/* ========== APP SHELL ========== */
+.app { background: var(--paper); min-height: 100vh; position: relative; overflow: hidden; }
+@media (min-width: 768px) {
+  body { background: #2B1F16; padding: 40px 0; display: flex; align-items: flex-start; justify-content: center; }
+  .app { max-width: 460px; width: 100%; border-radius: 32px; overflow: hidden; box-shadow: 0 40px 100px rgba(0,0,0,0.4); margin: 0 auto; min-height: calc(100vh - 80px); }
+}
+
+/* ========== TOPBAR ========== */
+.topbar {
+  background: rgba(245, 237, 223, 0.85);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  padding: 18px 24px;
+  text-align: center;
+  position: sticky; top: 0; z-index: 50;
+  border-bottom: 1px solid var(--hairline);
+}
+.topbar-wm { font-family: var(--thmanyah-serif); font-weight: 400; font-size: 13px; letter-spacing: 8px; color: var(--ink); text-transform: uppercase; }
+
+/* ========== HERO ========== */
+.hero {
+  position: relative;
+  min-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 60px 28px 72px;
+  color: #FAF6EE;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(20, 14, 9, 0.50) 0%, rgba(20, 14, 9, 0.80) 100%),
+    url('diriyah-bg.jpg') center/cover no-repeat,
+    radial-gradient(ellipse at 30% 20%, #6B4528 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 80%, #4A2E1B 0%, transparent 50%),
+    linear-gradient(180deg, #1F1410 0%, #3A2418 35%, #6B4528 70%, #2B1810 100%);
+}
+.hero-inner { position: relative; z-index: 2; width: 100%; max-width: 460px; }
+
+/* ========== LOGO — text wordmark, well-aligned ========== */
+.logo {
+  margin: 0 auto 36px;
+  color: #FAF6EE;
+  text-align: center;
+}
+.logo-head {
+  font-family: var(--thmanyah-serif);
+  font-weight: 400;
+  font-size: clamp(24px, 5.6vw, 32px);
+  line-height: 1.25;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  direction: ltr;  /* English appears on the LEFT, Arabic on the RIGHT */
+}
+.logo-head .en { font-family: var(--thmanyah-serif); }
+.logo-head .ar { font-family: var(--thmanyah-serif); font-weight: 500; }
+.logo-head .dot {
+  color: var(--bronze-light);
+  font-size: 0.65em;
+  opacity: 0.75;
+  transform: translateY(-2px);
+}
+.logo-sub {
+  margin-top: 10px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  font-family: var(--italic-en);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 13px;
+  color: rgba(250, 246, 238, 0.62);
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  direction: ltr;  /* English on the LEFT, Arabic on the RIGHT */
+}
+.logo-sub .ar {
+  font-family: var(--thmanyah);
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: none;
+  font-size: 12px;
+}
+.logo-sub .dot { color: var(--bronze-light); font-style: normal; opacity: 0.55; }
+
+/* Optional logo.png override — drop a logo.png next to index.html and it shows instead */
+.logo-photo { width: 180px; height: auto; margin: 0 auto 16px; display: none; filter: brightness(0) invert(1) drop-shadow(0 6px 20px rgba(0,0,0,0.3)); }
+.logo-photo.loaded { display: block; }
+.logo-photo.loaded ~ .logo-text { display: none; }
+
+/* ========== HERO TEXT ========== */
+.motto {
+  font-family: var(--italic-en);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(15px, 3.6vw, 18px);
+  line-height: 1.55;
+  color: rgba(250, 246, 238, 0.78);
+  max-width: 380px;
+  margin: 0 auto 32px;
+  letter-spacing: 0.3px;
+}
+.rule { width: 32px; height: 1px; background: var(--bronze-light); margin: 0 auto 28px; opacity: 0.7; }
+.greeting-ar {
+  font-family: var(--thmanyah-serif);
+  font-weight: 400;
+  font-size: clamp(46px, 12vw, 68px);
+  line-height: 1.05;
+  color: #FAF6EE;
+  margin-bottom: 12px;
+  letter-spacing: -0.5px;
+}
+.greeting-en {
+  font-family: var(--italic-en);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(20px, 5vw, 26px);
+  color: rgba(250, 246, 238, 0.7);
+  letter-spacing: 0.5px;
+}
+
+/* ========== MAIN ========== */
+.section { padding: 56px 22px 40px; background: var(--paper); }
+.eyebrow { text-align: center; font-family: var(--thmanyah); font-weight: 500; font-size: 11px; letter-spacing: 5px; text-transform: uppercase; color: var(--bronze); margin-bottom: 18px; }
+.section-h { text-align: center; margin-bottom: 38px; }
+.section-h .ar {
+  font-family: var(--thmanyah-serif);
+  font-weight: 400;
+  font-size: clamp(28px, 6.5vw, 36px);
+  color: var(--ink);
+  display: block;
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+  unicode-bidi: isolate;
+}
+.section-h .en { font-family: var(--italic-en); font-style: italic; font-weight: 300; font-size: 18px; color: var(--muted); margin-top: 10px; display: block; }
+
+/* ========== CHOICE CARDS — clearly tappable ========== */
+.choices { display: flex; flex-direction: column; gap: 14px; }
+.choice {
+  background: var(--ivory);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  padding: 24px 24px 24px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  text-align: start;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  min-height: 100px;
+  box-shadow: 0 4px 16px rgba(46, 29, 19, 0.05);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.3s ease;
+  position: relative;
+  gap: 16px;
+}
+.choice:hover, .choice:focus-visible {
+  border-color: var(--bronze);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(46, 29, 19, 0.10);
+  outline: none;
+}
+.choice:active { transform: translateY(0); transition: transform 0.08s; }
+
+.choice-text { flex: 1; min-width: 0; }
+.choice-num {
+  font-family: var(--italic-en);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--bronze);
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+  display: block;
+}
+.choice-ar {
+  font-family: var(--thmanyah-serif);
+  font-weight: 400;
+  font-size: 26px;
+  color: var(--ink);
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+  unicode-bidi: isolate;
+}
+.choice-en {
+  font-family: var(--italic-en);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 16px;
+  color: var(--muted);
+  margin-top: 4px;
+  letter-spacing: 0.3px;
+}
+
+/* Chevron in a soft circle — clear button affordance */
+.choice-chev {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--paper-deep);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--bronze);
+  font-size: 22px;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+.choice:hover .choice-chev {
+  background: var(--bronze);
+  color: var(--ivory);
+  transform: translateX(-4px);
+}
+
+/* ========== INNER VIEWS ========== */
+.view { display: none; }
+.view.active { display: block; animation: fadeIn 0.5s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.back-bar {
+  display: inline-flex; align-items: center; gap: 10px;
+  color: var(--ink);
+  padding: 24px 0 6px;
+  font-family: var(--italic-en);
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 1px;
+  transition: color 0.2s;
+}
+.back-bar:hover { color: var(--bronze); }
+.back-bar .arrow { color: var(--bronze); transition: transform 0.2s; }
+.back-bar:hover .arrow { transform: translateX(4px); }
+.back-bar .ar { font-family: var(--thmanyah); font-style: normal; font-weight: 500; font-size: 14px; padding-inline-start: 12px; border-inline-start: 1px solid var(--hairline); }
+
+.detail-header { text-align: center; padding: 30px 0 36px; border-bottom: 1px solid var(--hairline); margin-bottom: 28px; }
+.detail-header .eyebrow { margin-bottom: 14px; }
+.detail-header h2 .ar {
+  font-family: var(--thmanyah-serif);
+  font-weight: 400;
+  font-size: clamp(30px, 7vw, 38px);
+  color: var(--ink);
+  display: block;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  unicode-bidi: isolate;
+}
+.detail-header h2 .en { font-family: var(--italic-en); font-style: italic; font-weight: 300; font-size: 20px; color: var(--muted); margin-top: 8px; display: block; }
+
+/* ========== DATA CARDS ========== */
+.card {
+  background: var(--ivory);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  padding: 26px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 14px rgba(46, 29, 19, 0.04);
+}
+
+/* The first/welcome card on the directions page — make it feel grand */
+.welcome-card {
+  text-align: center;
+  padding: 36px 26px 30px;
+  position: relative;
+  background:
+    radial-gradient(ellipse at top, var(--paper-deep) 0%, var(--ivory) 60%);
+}
+.welcome-card::before {
+  content: "◆";
+  position: absolute;
+  top: 18px; left: 50%; transform: translateX(-50%);
+  color: var(--bronze);
+  font-size: 9px;
+  letter-spacing: 4px;
+}
+.welcome-card .card-eyebrow { text-align: center; margin-bottom: 14px; }
+.welcome-card h3 {
+  text-align: center;
+  font-size: clamp(22px, 5.5vw, 28px);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+.welcome-card .ornament-rule {
+  width: 32px; height: 1px;
+  background: var(--bronze);
+  opacity: 0.55;
+  margin: 18px auto 0;
+}
+.welcome-card .btn { margin-top: 22px; }
+.card.no-pad { padding: 0; overflow: hidden; }
+.card h3 {
+  font-family: var(--thmanyah-serif);
+  font-weight: 400;
+  font-size: 24px;
+  color: var(--ink);
+  margin: 0 0 6px;
+  text-align: start;
+  letter-spacing: -0.3px;
+}
+.card-eyebrow { font-family: var(--italic-en); font-style: italic; font-weight: 400; color: var(--bronze); font-size: 13px; letter-spacing: 1px; margin-bottom: 14px; text-align: start; }
+.photo { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: var(--paper-deep); }
+.card.no-pad .photo { border-radius: 0; }
+.card .card-content { padding: 22px 26px 26px; }
+
+.info-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--hairline); gap: 14px; }
+.info-row:last-child { border-bottom: 0; }
+.info-row .label { font-family: var(--italic-en); font-style: italic; color: var(--muted); font-size: 13px; }
+.info-row .value { font-family: var(--thmanyah); font-weight: 600; color: var(--ink); font-size: 17px; text-align: end; }
+
+.code-pill {
+  background: var(--ink); color: var(--bronze-light);
+  font-family: ui-monospace, Menlo, monospace;
+  padding: 8px 16px; border-radius: 6px;
+  font-size: 14px; letter-spacing: 2px; font-weight: 700;
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 12px;
+  background: var(--ink); color: var(--paper);
+  text-decoration: none;
+  padding: 16px 28px;
+  border-radius: 999px;
+  font-family: var(--thmanyah);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border: 1px solid var(--ink);
+  min-height: 54px;
+  transition: all 0.25s;
+}
+.btn:hover { background: #000; transform: translateY(-1px); }
+.btn-bronze { background: var(--bronze); border-color: var(--bronze); color: var(--paper); }
+.btn-bronze:hover { background: #6F583A; }
+.btn-block { width: 100%; }
+.btn .ar { font-family: var(--thmanyah); font-weight: 600; font-size: 14px; letter-spacing: 0; text-transform: none; padding-inline-start: 12px; border-inline-start: 1px solid rgba(250,246,238,0.25); }
+
+.photo-caption { margin: 0; font-family: var(--thmanyah); font-size: 16px; line-height: 1.85; color: var(--ink-soft); white-space: pre-line; text-align: start; }
+.notes-block { white-space: pre-line; line-height: 1.95; font-size: 15.5px; color: var(--ink-soft); margin: 0; font-family: var(--thmanyah); text-align: start; }
+.notes-block a { color: var(--bronze); word-break: break-all; text-decoration: underline; text-underline-offset: 3px; }
+
+/* ========== PACKAGE CARDS (events) ========== */
+.pkg {
+  background: var(--ivory);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  padding: 28px 24px 24px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 14px rgba(46, 29, 19, 0.04);
+}
+.pkg-tier { display: inline-block; font-family: var(--italic-en); font-style: italic; color: var(--bronze); font-size: 13px; letter-spacing: 1.5px; margin-bottom: 8px; }
+.pkg-name-ar { font-family: var(--thmanyah-serif); font-weight: 400; font-size: 26px; color: var(--ink); line-height: 1.1; letter-spacing: -0.3px; }
+.pkg-name-en { font-family: var(--italic-en); font-style: italic; font-size: 16px; color: var(--muted); margin-top: 4px; letter-spacing: 1.5px; text-transform: uppercase; }
+.pkg-price {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 18px 0 4px;
+  padding: 14px 0 4px;
+  border-top: 1px solid var(--hairline);
+}
+.pkg-price .from { font-family: var(--italic-en); font-style: italic; color: var(--muted); font-size: 13px; }
+.pkg-price .amount { font-family: var(--thmanyah-serif); font-weight: 500; font-size: 32px; color: var(--ink); letter-spacing: -1px; }
+.pkg-price .currency { font-family: var(--thmanyah); font-weight: 600; color: var(--bronze); font-size: 13px; letter-spacing: 2px; }
+.pkg-items { list-style: none; margin: 14px 0 18px; padding: 0; }
+.pkg-items li {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 0;
+  font-family: var(--thmanyah);
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  border-bottom: 1px dashed var(--hairline);
+}
+.pkg-items li:last-child { border-bottom: 0; }
+.pkg-items .dot { color: var(--bronze); flex-shrink: 0; font-size: 9px; line-height: 1.9; }
+.pkg .btn { width: 100%; margin-top: 10px; }
+
+/* ========== VEHICLE TIER CARDS (chauffeur) ========== */
+.vehicle {
+  background: var(--ivory);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(46, 29, 19, 0.04);
+}
+.vehicle-head {
+  text-align: center;
+  padding: 26px 24px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.vehicle-tier-ar { font-family: var(--thmanyah-serif); font-weight: 400; font-size: 26px; color: var(--ink); line-height: 1.1; letter-spacing: -0.3px; }
+.vehicle-tier-en { font-family: var(--italic-en); font-style: italic; font-size: 16px; color: var(--bronze); margin-top: 4px; letter-spacing: 2px; text-transform: uppercase; }
+.vehicle-model { font-family: var(--italic-en); font-style: italic; font-size: 14px; color: var(--muted); margin-top: 8px; }
+.vehicle-pricing { background: var(--ink); color: var(--paper); }
+.vp-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  gap: 14px;
+}
+.vp-row:last-child { border-bottom: 0; }
+.vp-label-ar { font-family: var(--thmanyah); font-size: 14px; font-weight: 500; }
+.vp-label-en { font-family: var(--italic-en); font-style: italic; font-size: 12px; color: rgba(250,246,238,0.55); margin-top: 2px; }
+.vp-price { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--bronze-light); font-size: 15px; letter-spacing: 0.5px; }
+.vp-price .sar { font-size: 10px; color: rgba(250,246,238,0.55); margin-inline-end: 4px; letter-spacing: 1.5px; }
+.vehicle-cta { padding: 18px 24px 22px; }
+.vehicle-cta .btn { width: 100%; }
+
+/* ========== APP / BARBERING ========== */
+.app-card {
+  background: var(--ink);
+  border-radius: 18px;
+  padding: 36px 26px 30px;
+  text-align: center;
+  margin-bottom: 14px;
+  color: var(--paper);
+}
+.app-card .step { font-family: var(--italic-en); font-style: italic; color: var(--bronze-light); font-size: 13px; letter-spacing: 1.5px; margin-bottom: 14px; }
+.app-card h3 { font-family: var(--thmanyah-serif); font-weight: 400; font-size: 28px; color: var(--paper); line-height: 1.15; margin-bottom: 6px; letter-spacing: -0.3px; }
+.app-card .desc { font-family: var(--thmanyah); color: rgba(250,246,238,0.7); font-size: 14.5px; line-height: 1.75; max-width: 340px; margin: 0 auto 20px; }
+.code-block {
+  display: inline-block;
+  background: var(--bronze);
+  color: var(--paper);
+  font-family: ui-monospace, Menlo, monospace;
+  font-weight: 700;
+  font-size: 28px;
+  padding: 14px 28px;
+  border-radius: 10px;
+  letter-spacing: 6px;
+  margin: 8px 0 4px;
+}
+.app-card .code-label { font-family: var(--italic-en); font-style: italic; color: rgba(250,246,238,0.6); font-size: 12px; margin-top: 8px; letter-spacing: 1.5px; }
+.app-buttons { display: flex; gap: 10px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+.app-buttons .btn { background: transparent; border-color: var(--bronze-light); color: var(--paper); }
+.app-buttons .btn:hover { background: var(--bronze); border-color: var(--bronze); }
+
+/* ========== EMERGENCY ========== */
+.emergency-list { border-top: 1px solid var(--hairline); }
+.emergency-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 22px 8px;
+  border-bottom: 1px solid var(--hairline);
+  text-decoration: none; color: var(--ink);
+  gap: 14px;
+  min-height: 76px;
+  transition: background 0.2s, padding 0.3s;
+}
+.emergency-item:hover { background: var(--ivory); padding-inline: 16px; }
+.emergency-item.priority {
+  background: var(--ink); color: var(--paper);
+  border-radius: 16px;
+  padding: 28px 24px;
+  margin-bottom: 24px;
+  border: 0;
+}
+.emergency-item.priority:hover { background: #000; padding-inline: 24px; }
+.emergency-item.priority .num { color: var(--bronze-light); }
+.emergency-item .name-ar { font-family: var(--thmanyah-serif); font-weight: 400; font-size: 20px; letter-spacing: -0.3px; }
+.emergency-item .name-en { font-family: var(--italic-en); font-style: italic; font-size: 13px; color: var(--bronze); margin-top: 3px; }
+.emergency-item.priority .name-en { color: var(--bronze-light); }
+.emergency-item .num { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--ink); font-size: 19px; letter-spacing: 1px; }
+
+/* ========== FOOTER ========== */
+.footer { text-align: center; padding: 48px 24px 36px; border-top: 1px solid var(--hairline); margin-top: 40px; }
+.footer-wm { font-family: var(--thmanyah-serif); font-weight: 400; font-size: 13px; letter-spacing: 8px; text-transform: uppercase; color: var(--ink); margin-bottom: 8px; }
+.footer-sub { font-family: var(--italic-en); font-style: italic; font-size: 12px; color: var(--muted); }
+
+.loading, .error { text-align: center; padding: 50px 22px; color: var(--muted); }
+.error h2 { color: var(--ink); font-family: var(--thmanyah-serif); margin: 0 0 10px; font-size: 22px; }
+
+*:focus-visible { outline: 2px solid var(--bronze); outline-offset: 4px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+.hero .logo, .hero .motto, .hero .rule, .hero .greeting-ar, .hero .greeting-en {
+  opacity: 0;
+  animation: rise 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.hero .logo        { animation-delay: 0.05s; }
+.hero .motto       { animation-delay: 0.30s; }
+.hero .rule        { animation-delay: 0.45s; }
+.hero .greeting-ar { animation-delay: 0.55s; }
+.hero .greeting-en { animation-delay: 0.70s; }
+
+#view-home .eyebrow,
+#view-home .section-h { opacity: 0; animation: rise 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.85s forwards; }
+#view-home .choice    { opacity: 0; animation: rise 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+#view-home .choice:nth-child(1) { animation-delay: 1.00s; }
+#view-home .choice:nth-child(2) { animation-delay: 1.10s; }
+#view-home .choice:nth-child(3) { animation-delay: 1.20s; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== HOME ========== -->
+  <div class="view active" id="view-home">
+
+    <section class="hero" aria-label="Welcome to Ouja Residence">
+      <div class="hero-inner">
+
+        <div class="logo">
+          <!-- ▼ Optional: save a logo file as `logo.png` next to index.html and it will replace the text wordmark -->
+          <img class="logo-photo" src="/guide/logo.png" alt="Ouja Residence" onload="this.classList.add('loaded')" onerror="this.remove()" />
+          <div class="logo-text">
+            <div class="logo-head" aria-label="Ouja Residence · عوجا ريزيدنس">
+              <span class="en" dir="ltr">Ouja Residence</span>
+              <span class="dot" aria-hidden="true">·</span>
+              <span class="ar" dir="rtl">عوجا ريزيدنس</span>
+            </div>
+            <div class="logo-sub">
+              <span class="en" dir="ltr">From Diriyah</span>
+              <span class="dot" aria-hidden="true">·</span>
+              <span class="ar" dir="rtl">من الدرعية</span>
+            </div>
+          </div>
+          <!-- direction: ltr applied via CSS on .logo-head and .logo-sub so English visually sits on the LEFT and Arabic on the RIGHT -->
+        </div>
+
+        <p class="motto">Ladies and Gentlemen<br>serving Ladies and Gentlemen</p>
+        <div class="rule"></div>
+        <h1 class="greeting-ar" dir="rtl">حياكم الله</h1>
+        <p class="greeting-en">Welcome</p>
+
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">دليلكم · Your Guide</div>
+      <div class="section-h">
+        <span class="ar" dir="rtl">كيف نخدمكم</span>
+        <span class="en">How may we be of service</span>
+      </div>
+
+      <nav class="choices" aria-label="Main menu">
+        <button class="choice" onclick="show('directions')" aria-label="الإرشادات">
+          <span class="choice-text">
+            <span class="choice-num">i.</span>
+            <span class="choice-ar" dir="rtl">الإرشادات</span>
+            <span class="choice-en">Arrival &amp; Directions</span>
+          </span>
+          <span class="choice-chev" aria-hidden="true">←</span>
+        </button>
+
+        <button class="choice" onclick="show('services')" aria-label="لحظات عوجا">
+          <span class="choice-text">
+            <span class="choice-num">ii.</span>
+            <span class="choice-ar" dir="rtl">لحظات عوجا</span>
+            <span class="choice-en">Ouja Moments</span>
+          </span>
+          <span class="choice-chev" aria-hidden="true">←</span>
+        </button>
+
+        <button class="choice" onclick="show('emergency')" aria-label="أرقام الطوارئ">
+          <span class="choice-text">
+            <span class="choice-num">iii.</span>
+            <span class="choice-ar" dir="rtl">أرقام الطوارئ</span>
+            <span class="choice-en">Emergency</span>
+          </span>
+          <span class="choice-chev" aria-hidden="true">←</span>
+        </button>
+      </nav>
+
+      <footer class="footer">
+        <div class="footer-wm">OUJA · RESIDENCE</div>
+        <div class="footer-sub">عوجا ريزيدنس · Diriyah</div>
+      </footer>
+    </section>
+  </div>
+
+  <!-- ========== DIRECTIONS ========== -->
+  <div class="view" id="view-directions">
+    <header class="topbar"><span class="topbar-wm">OUJA · RESIDENCE</span></header>
+    <section class="section">
+      <button class="back-bar" onclick="show('home')">
+        <span class="arrow">→</span>
+        <span class="ar">رجوع</span>
+        <span>Back</span>
+      </button>
+      <div class="detail-header">
+        <div class="eyebrow">القسم الأول · Section One</div>
+        <h2>
+          <span class="ar" dir="rtl">الإرشادات</span>
+          <span class="en">Arrival &amp; Directions</span>
+        </h2>
+      </div>
+      <div id="directionsContent"><div class="loading">جارٍ التحميل... · Loading…</div></div>
+    </section>
+  </div>
+
+  <!-- ========== SERVICES INDEX ========== -->
+  <div class="view" id="view-services">
+    <header class="topbar"><span class="topbar-wm">OUJA · RESIDENCE</span></header>
+    <section class="section">
+      <button class="back-bar" onclick="show('home')">
+        <span class="arrow">→</span><span class="ar">رجوع</span><span>Back</span>
+      </button>
+      <div class="detail-header">
+        <div class="eyebrow">القسم الثاني · Section Two</div>
+        <h2>
+          <span class="ar" dir="rtl">لحظات عوجا</span>
+          <span class="en">Ouja Moments</span>
+        </h2>
+      </div>
+
+      <nav class="choices">
+        <button class="choice" onclick="show('events')">
+          <span class="choice-text">
+            <span class="choice-num">i.</span>
+            <span class="choice-ar" dir="rtl">تنسيق الحفلات</span>
+            <span class="choice-en">Event &amp; Celebration Setup</span>
+          </span>
+          <span class="choice-chev">←</span>
+        </button>
+        <button class="choice" onclick="show('chauffeur')">
+          <span class="choice-text">
+            <span class="choice-num">ii.</span>
+            <span class="choice-ar" dir="rtl">الشوفير الخاص</span>
+            <span class="choice-en">Private Chauffeur</span>
+          </span>
+          <span class="choice-chev">←</span>
+        </button>
+        <button class="choice" onclick="show('barbering')">
+          <span class="choice-text">
+            <span class="choice-num">iii.</span>
+            <span class="choice-ar" dir="rtl">الحلاقة المنزلية</span>
+            <span class="choice-en">Home Barbering</span>
+          </span>
+          <span class="choice-chev">←</span>
+        </button>
+      </nav>
+    </section>
+  </div>
+
+  <!-- ========== EVENTS ========== -->
+  <div class="view" id="view-events">
+    <header class="topbar"><span class="topbar-wm">OUJA · RESIDENCE</span></header>
+    <section class="section">
+      <button class="back-bar" onclick="show('services')">
+        <span class="arrow">→</span><span class="ar">رجوع</span><span>Back</span>
+      </button>
+      <div class="detail-header">
+        <div class="eyebrow">لحظات عوجا · Ouja Moments</div>
+        <h2>
+          <span class="ar" dir="rtl">تنسيق الحفلات</span>
+          <span class="en">Event &amp; Celebration Setup</span>
+        </h2>
+      </div>
+
+      <!-- DIAMOND -->
+      <div class="pkg">
+        <span class="pkg-tier">Premium</span>
+        <div class="pkg-name-ar" dir="rtl">الباقة الماسية</div>
+        <div class="pkg-name-en">Diamond Package</div>
+        <ul class="pkg-items">
+          <li><span class="dot">◆</span><span dir="rtl">٥٠ بالونة مع أكثر من ٥٠ وردة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تعليق أكثر من ٣٠ بالونة بالسقف مع ورد طبيعي</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">٨ عبارات معلقة بتصميم مناسب للمناسبة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق غرفة النوم والمدخل والحمام والمسبح</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">طاولة كيك بفازات ورد وشموع فاخرة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">كيك فاخر مع عصير فوار كبير وكاسات</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق طاولة الطعام والمسبح بشكل أنيق</span></li>
+        </ul>
+        <div class="pkg-price">
+          <span class="from">تبدأ من · Starting from</span>
+          <span class="amount">1,450</span>
+          <span class="currency">SAR</span>
+        </div>
+        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة الماسية" data-service-en="Diamond Package">
+          <span class="ar">أنا مهتم</span><span>Inquire</span>
+        </a>
+      </div>
+
+      <!-- SIGNATURE SILVER -->
+      <div class="pkg">
+        <span class="pkg-tier">Most Popular</span>
+        <div class="pkg-name-ar" dir="rtl">الباقة الفضية المميزة</div>
+        <div class="pkg-name-en">Signature Silver Package</div>
+        <ul class="pkg-items">
+          <li><span class="dot">◆</span><span dir="rtl">٤٥ بالونة منها ١٠ بالونات هيليوم</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">٤٠ وردة معلقة وللكتابة على السرير</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">٦ عبارات معلقة حسب اختياركم</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق غرفة النوم والمدخل والحمام</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق طاولة الكيك مع ٣ فازات ورد</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">كيك فاخر مع عصير فوار وكاسات</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق الجاكوزي بعبارة ترحيبية أو أسماء</span></li>
+        </ul>
+        <div class="pkg-price">
+          <span class="from">تبدأ من · Starting from</span>
+          <span class="amount">998</span>
+          <span class="currency">SAR</span>
+        </div>
+        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة الفضية المميزة" data-service-en="Signature Silver Package">
+          <span class="ar">أنا مهتم</span><span>Inquire</span>
+        </a>
+      </div>
+
+      <!-- SILVER -->
+      <div class="pkg">
+        <span class="pkg-tier">Signature</span>
+        <div class="pkg-name-ar" dir="rtl">الباقة الفضية</div>
+        <div class="pkg-name-en">Silver Package</div>
+        <ul class="pkg-items">
+          <li><span class="dot">◆</span><span dir="rtl">٣٥ بالونة مع ٢٠ وردة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">كروت وعبارات معلقة حسب المناسبة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق السرير بالورد حسب اختياركم</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق المدخل بالشموع والبالون</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق طاولة الكيك بالورد والشموع</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">كيك فاخر مع علاقة كيك مناسبة للحفل</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق البانيو أو الجاكوزي وتعطير الغرفة</span></li>
+        </ul>
+        <div class="pkg-price">
+          <span class="from">تبدأ من · Starting from</span>
+          <span class="amount">799</span>
+          <span class="currency">SAR</span>
+        </div>
+        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة الفضية" data-service-en="Silver Package">
+          <span class="ar">أنا مهتم</span><span>Inquire</span>
+        </a>
+      </div>
+
+      <!-- TABLE STYLING -->
+      <div class="pkg">
+        <span class="pkg-tier">Specialty</span>
+        <div class="pkg-name-ar" dir="rtl">تنسيق الطاولة</div>
+        <div class="pkg-name-en">Table Styling</div>
+        <ul class="pkg-items">
+          <li><span class="dot">◆</span><span dir="rtl">٣٠ بالونة منها ١٠ بالونات هيليوم</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">١٠ وردات</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">كيك فاخر مع ملحقاته</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">قاعدة كيك مع قاعدتين للصحون</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">٤ شموع للطاولة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">عصير فوار كبير مع كاسات</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">عبارتين حسب اختياركم وتصميم مناسب للمناسبة</span></li>
+        </ul>
+        <div class="pkg-price">
+          <span class="from">تبدأ من · Starting from</span>
+          <span class="amount">670</span>
+          <span class="currency">SAR</span>
+        </div>
+        <a href="#" class="btn btn-bronze wa-link" data-service-ar="باقة تنسيق الطاولة" data-service-en="Table Styling Package">
+          <span class="ar">أنا مهتم</span><span>Inquire</span>
+        </a>
+      </div>
+
+      <!-- BRONZE -->
+      <div class="pkg">
+        <span class="pkg-tier">Essential</span>
+        <div class="pkg-name-ar" dir="rtl">الباقة البرونزية</div>
+        <div class="pkg-name-en">Bronze Package</div>
+        <ul class="pkg-items">
+          <li><span class="dot">◆</span><span dir="rtl">٢٥ بالونة مع ٢٠ وردة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق السرير بالورد (أحرف فقط)</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">ربط المخدات بالشرائط والورد</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">٤ كومودينات مع شموع وورد</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تنسيق مدخل بسيط بالشموع والبالون</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تعليق ٥ عبارات حسب المناسبة</span></li>
+          <li><span class="dot">◆</span><span dir="rtl">تعطير المخدات والغرفة</span></li>
+        </ul>
+        <div class="pkg-price">
+          <span class="from">تبدأ من · Starting from</span>
+          <span class="amount">598</span>
+          <span class="currency">SAR</span>
+        </div>
+        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة البرونزية" data-service-en="Bronze Package">
+          <span class="ar">أنا مهتم</span><span>Inquire</span>
+        </a>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== CHAUFFEUR ========== -->
+  <div class="view" id="view-chauffeur">
+    <header class="topbar"><span class="topbar-wm">OUJA · RESIDENCE</span></header>
+    <section class="section">
+      <button class="back-bar" onclick="show('services')">
+        <span class="arrow">→</span><span class="ar">رجوع</span><span>Back</span>
+      </button>
+      <div class="detail-header">
+        <div class="eyebrow">سواري المسافر × عوجا · Sawari Almosafer × Ouja</div>
+        <h2>
+          <span class="ar" dir="rtl">شوفيرك الخاص</span>
+          <span class="en">Your Private Chauffeur</span>
+        </h2>
+      </div>
+
+      <!-- EXECUTIVE -->
+      <div class="vehicle">
+        <div class="vehicle-head">
+          <div class="vehicle-tier-ar" dir="rtl">تنفيذي</div>
+          <div class="vehicle-tier-en">Executive</div>
+          <div class="vehicle-model">Ford Taurus</div>
+        </div>
+        <div class="vehicle-pricing">
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">توصيل المطار</div><div class="vp-label-en">Airport Transfer</div></div><div class="vp-price"><span class="sar">SAR</span>245</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٤ ساعات</div><div class="vp-label-en">4 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>550</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٦ ساعات</div><div class="vp-label-en">6 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>750</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٨ ساعات</div><div class="vp-label-en">8 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>960</div></div>
+        </div>
+        <div class="vehicle-cta">
+          <a href="#" class="btn btn-bronze wa-link" data-service-ar="الشوفير - فئة تنفيذي (Ford Taurus)" data-service-en="Executive Chauffeur (Ford Taurus)">
+            <span class="ar">احجز هذه الفئة</span><span>Book this Tier</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- FAMILY -->
+      <div class="vehicle">
+        <div class="vehicle-head">
+          <div class="vehicle-tier-ar" dir="rtl">عائلي</div>
+          <div class="vehicle-tier-en">Family</div>
+          <div class="vehicle-model">GMC Yukon</div>
+        </div>
+        <div class="vehicle-pricing">
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">توصيل المطار</div><div class="vp-label-en">Airport Transfer</div></div><div class="vp-price"><span class="sar">SAR</span>352</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٤ ساعات</div><div class="vp-label-en">4 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>800</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٦ ساعات</div><div class="vp-label-en">6 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>1,050</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٨ ساعات</div><div class="vp-label-en">8 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>1,250</div></div>
+        </div>
+        <div class="vehicle-cta">
+          <a href="#" class="btn btn-bronze wa-link" data-service-ar="الشوفير - فئة عائلي (GMC Yukon)" data-service-en="Family Chauffeur (GMC Yukon)">
+            <span class="ar">احجز هذه الفئة</span><span>Book this Tier</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- ELITE -->
+      <div class="vehicle">
+        <div class="vehicle-head">
+          <div class="vehicle-tier-ar" dir="rtl">إيليت</div>
+          <div class="vehicle-tier-en">Elite</div>
+          <div class="vehicle-model">Mercedes S-Class</div>
+        </div>
+        <div class="vehicle-pricing">
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">توصيل المطار</div><div class="vp-label-en">Airport Transfer</div></div><div class="vp-price"><span class="sar">SAR</span>390</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٤ ساعات</div><div class="vp-label-en">4 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>3,100</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٦ ساعات</div><div class="vp-label-en">6 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>3,600</div></div>
+          <div class="vp-row"><div><div class="vp-label-ar" dir="rtl">٨ ساعات</div><div class="vp-label-en">8 Hours</div></div><div class="vp-price"><span class="sar">SAR</span>3,900</div></div>
+        </div>
+        <div class="vehicle-cta">
+          <a href="#" class="btn btn-bronze wa-link" data-service-ar="الشوفير - فئة إيليت (Mercedes S-Class)" data-service-en="Elite Chauffeur (Mercedes S-Class)">
+            <span class="ar">احجز هذه الفئة</span><span>Book this Tier</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== BARBERING ========== -->
+  <div class="view" id="view-barbering">
+    <header class="topbar"><span class="topbar-wm">OUJA · RESIDENCE</span></header>
+    <section class="section">
+      <button class="back-bar" onclick="show('services')">
+        <span class="arrow">→</span><span class="ar">رجوع</span><span>Back</span>
+      </button>
+      <div class="detail-header">
+        <div class="eyebrow">لحظات عوجا · Ouja Moments</div>
+        <h2>
+          <span class="ar" dir="rtl">الحلاقة المنزلية</span>
+          <span class="en">Home Barbering</span>
+        </h2>
+      </div>
+
+      <div class="app-card">
+        <div class="step">Step 1 · الخطوة الأولى</div>
+        <h3>حمّلوا تطبيق جايك</h3>
+        <p class="desc">
+          خدمة الحلاقة الاحترافية تصلكم في إقامتكم عبر شريكنا الموثوق.
+          <br>Download Jaayek — our trusted home grooming partner.
+        </p>
+        <div class="app-buttons">
+          <a href="https://apps.apple.com/sa/app/jaayek/id1471783886" target="_blank" rel="noopener" class="btn">
+            <span>App Store</span><span class="ar">آب ستور</span>
+          </a>
+          <a href="https://play.google.com/store/apps/details?id=com.jaayek.client" target="_blank" rel="noopener" class="btn">
+            <span>Google Play</span><span class="ar">قوقل بلاي</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="app-card">
+        <div class="step">Step 2 · الخطوة الثانية</div>
+        <h3>استخدموا كود عوجا</h3>
+        <p class="desc">
+          عند الحجز، أدخلوا الكود التالي للاستفادة من امتياز الضيف.
+          <br>Apply this code at checkout for your guest benefit.
+        </p>
+        <div class="code-block">OUJA</div>
+        <div class="code-label">PROMO CODE · كود الخصم</div>
+      </div>
+
+      <div class="app-card" style="background: var(--ivory); color: var(--ink);">
+        <div class="step" style="color: var(--bronze);">Need help? · تحتاجون مساعدة؟</div>
+        <h3 style="color: var(--ink);">راسلوا الكونسيرج</h3>
+        <p class="desc" style="color: var(--ink-soft);">
+          فريقنا متاح لمساعدتكم في الحجز.
+          <br>Our team is here to help you book.
+        </p>
+        <a href="#" class="btn btn-bronze wa-link" data-service-ar="خدمة الحلاقة المنزلية (جايك)" data-service-en="Home Barbering (Jaayek)" style="margin-top: 8px;">
+          <span class="ar">واتساب الكونسيرج</span><span>WhatsApp</span>
+        </a>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========== EMERGENCY ========== -->
+  <div class="view" id="view-emergency">
+    <header class="topbar"><span class="topbar-wm">OUJA · RESIDENCE</span></header>
+    <section class="section">
+      <button class="back-bar" onclick="show('home')">
+        <span class="arrow">→</span><span class="ar">رجوع</span><span>Back</span>
+      </button>
+      <div class="detail-header">
+        <div class="eyebrow">القسم الثالث · Section Three</div>
+        <h2>
+          <span class="ar" dir="rtl">أرقام الطوارئ</span>
+          <span class="en">Emergency Contacts</span>
+        </h2>
+      </div>
+
+      <a href="tel:+966551324214" class="emergency-item priority">
+        <div>
+          <div class="name-ar" dir="rtl">خط عوجا على مدار الساعة</div>
+          <div class="name-en">Ouja 24/7 Hotline</div>
+        </div>
+        <div class="num">+966 55 132 4214</div>
+      </a>
+
+      <div class="emergency-list">
+        <a href="tel:911" class="emergency-item">
+          <div><div class="name-ar" dir="rtl">الطوارئ الموحد</div><div class="name-en">Unified Emergency</div></div>
+          <div class="num">911</div>
+        </a>
+        <a href="tel:999" class="emergency-item">
+          <div><div class="name-ar" dir="rtl">شرطة النجدة</div><div class="name-en">Police</div></div>
+          <div class="num">999</div>
+        </a>
+        <a href="tel:998" class="emergency-item">
+          <div><div class="name-ar" dir="rtl">الدفاع المدني</div><div class="name-en">Civil Defense</div></div>
+          <div class="num">998</div>
+        </a>
+        <a href="tel:997" class="emergency-item">
+          <div><div class="name-ar" dir="rtl">الهلال الأحمر</div><div class="name-en">Red Crescent</div></div>
+          <div class="num">997</div>
+        </a>
+        <a href="tel:993" class="emergency-item">
+          <div><div class="name-ar" dir="rtl">نجدة الطريق</div><div class="name-en">Highway Patrol</div></div>
+          <div class="num">993</div>
+        </a>
+        <a href="tel:996" class="emergency-item">
+          <div><div class="name-ar" dir="rtl">المرور</div><div class="name-en">Traffic</div></div>
+          <div class="num">996</div>
+        </a>
+      </div>
+    </section>
+  </div>
+
+</div><!-- /.app -->
+
+<script>
+/* =========================================================
+   ▼ SUPABASE CONFIG — paste the SAME two values from admin.html
+   If both are blank/placeholder, the site falls back to data.json
+   ========================================================= */
+const SUPABASE_URL = "";
+const SUPABASE_KEY = "";
+
+const DATA_URL = "/guide/data.json";  /* fallback if Supabase not configured */
+const supaReady = SUPABASE_URL && !SUPABASE_URL.startsWith('PASTE_')
+                && SUPABASE_KEY && !SUPABASE_KEY.startsWith('PASTE_');
+
+function show(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+const params = new URLSearchParams(window.location.search);
+let id = (params.get('id') || '').trim().toLowerCase();
+/* Also accept clean URLs like /h8-vlg  →  treat the path segment as the id */
+if (!id) {
+  let path = window.location.pathname.replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
+  if (path.indexOf('guide') === 0) path = path.slice(5).replace(/^\/+/, '');
+  if (path && path !== 'index' && path !== 'admin' && !path.includes('/')) {
+    id = decodeURIComponent(path).toLowerCase();
+  }
+}
+
+function parseCSV(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], n = text[i+1];
+    if (q) {
+      if (c === '"' && n === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else {
+      if (c === '"') q = true;
+      else if (c === ',') { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+      else if (c === '\r') {}
+      else cur += c;
+    }
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  const headers = rows.shift().map(h => h.trim());
+  return rows.filter(r => r.some(v => v && v.trim())).map(r => {
+    const o = {}; headers.forEach((h, i) => o[h] = (r[i] || '').trim()); return o;
+  });
+}
+
+function linkify(t) { return t.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>'); }
+
+/* ==========================================================
+   IMAGE URL NORMALIZER
+   Auto-converts page URLs to direct image URLs so guests don't
+   need to remember which "Direct link" to copy.
+   Handles: Imgur, Google Drive, Dropbox.
+   ========================================================== */
+function normalizeImageUrl(url) {
+  if (!url) return null;
+  url = url.trim();
+  if (!url) return null;
+
+  // Already a direct image file? Use as-is.
+  if (/\.(jpg|jpeg|png|webp|gif|avif|heic|heif)(\?.*)?$/i.test(url)) return url;
+
+  // Imgur page URL  →  direct image
+  // imgur.com/abc123  or  imgur.com/gallery/abc123
+  let m = url.match(/^https?:\/\/(?:www\.|m\.)?imgur\.com\/(?:gallery\/|a\/)?([a-zA-Z0-9]{5,8})\/?(?:\?.*)?$/);
+  if (m) return 'https://i.imgur.com/' + m[1] + '.jpg';
+
+  // i.imgur.com missing the extension
+  m = url.match(/^https?:\/\/i\.imgur\.com\/([a-zA-Z0-9]{5,8})$/);
+  if (m) return 'https://i.imgur.com/' + m[1] + '.jpg';
+
+  // Google Drive: file/d/<ID>/view or open?id=<ID>
+  // Use the lh3.googleusercontent.com CDN (hot-linkable, unlike drive.google.com/uc which Google now blocks)
+  m = url.match(/^https?:\/\/drive\.google\.com\/file\/d\/([^\/?#]+)/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w1600';
+  m = url.match(/^https?:\/\/drive\.google\.com\/open\?id=([^&]+)/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w1600';
+  m = url.match(/^https?:\/\/drive\.google\.com\/uc\?(?:export=view&)?id=([^&]+)/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w1600';
+
+  // Dropbox shared link  →  direct download host
+  m = url.match(/^https?:\/\/(?:www\.)?dropbox\.com\/(s|scl)\/(.+?)(?:\?.*)?$/);
+  if (m) return 'https://dl.dropboxusercontent.com/' + m[1] + '/' + m[2];
+
+  // Otherwise leave the URL alone (Postimages direct, Cloudinary, S3, etc. work natively)
+  return url;
+}
+
+function photoSrc(v) {
+  if (!v) return null;
+  const t = v.trim();
+  if (!t) return null;
+  if (t.startsWith('http')) return normalizeImageUrl(t);
+  if (t.startsWith('/')) return t;   /* in-house mirrored photo */
+  return 'photos/' + t;
+}
+
+/* Build dynamic WhatsApp links once a listing ID is known.
+   Each .wa-link has data-service-ar / data-service-en describing the service. */
+const CONCIERGE_PHONE = '966551324214';
+function updateWaLinks(listingId) {
+  const idTxt = (listingId || '').trim();
+  document.querySelectorAll('a.wa-link').forEach(a => {
+    const sAr = a.dataset.serviceAr || '';
+    const sEn = a.dataset.serviceEn || '';
+    const ar = 'مرحباً، أنا نزيل في شقة ' + (idTxt || '___') + '،\nأرغب باختيار ' + sAr + '.\nهل يمكنكم إخباري المزيد عنها؟';
+    const en = "Hello, I'm a resident at apartment " + (idTxt || '___') + ",\nI would like to choose the " + sEn + ".\nCan you tell me more about it?";
+    const text = encodeURIComponent(ar + '\n\n' + en);
+    a.href = 'https://wa.me/' + CONCIERGE_PHONE + '?text=' + text;
+  });
+}
+
+function render(listing) {
+  const c = document.getElementById('directionsContent');
+  let html = '';
+
+  if (listing.listing_name || listing.map_link) {
+    html += '<div class="card welcome-card"><div class="card-eyebrow">إقامتكم · Your Residence</div>';
+    if (listing.listing_name) html += '<h3>' + listing.listing_name + '</h3>';
+    html += '<div class="ornament-rule"></div>';
+    if (listing.map_link) {
+      html += '<a href="' + listing.map_link + '" target="_blank" rel="noopener" class="btn btn-bronze btn-block">'
+           + '<span class="ar">فتح الموقع</span><span>Open Location</span></a>';
+    }
+    html += '</div>';
+  }
+
+  function photoCard(pic, caption, eyebrow, alt) {
+    const src = photoSrc(pic);
+    if (!src && !caption) return '';
+    let h = '<div class="card no-pad">';
+    if (src) h += '<img class="photo" src="' + src + '" alt="' + alt + '" loading="lazy" />';
+    h += '<div class="card-content"><div class="card-eyebrow">' + eyebrow + '</div>';
+    if (caption) h += '<p class="photo-caption">' + caption + '</p>';
+    h += '</div></div>';
+    return h;
+  }
+
+  html += photoCard(listing.complex_pic,  listing.complex_caption,  'المجمع · The Complex',         'Complex');
+  html += photoCard(listing.building_pic, listing.building_caption, 'المبنى · The Building',         'Building');
+  html += photoCard(listing.elevator_pic, listing.elevator_caption, 'المصعد · Elevator',             'Elevator');
+  html += photoCard(listing.door_pic,     listing.door_caption,     'باب الشقة · Apartment Door',   'Door');
+
+  if (listing.wifi_name || listing.wifi_pass) {
+    html += '<div class="card"><div class="card-eyebrow">الواي فاي · Wi-Fi</div>';
+    if (listing.wifi_name) html += '<div class="info-row"><div class="label">Network · الاسم</div><div class="value">' + listing.wifi_name + '</div></div>';
+    if (listing.wifi_pass) html += '<div class="info-row"><div class="label">Password · كلمة السر</div><div class="value"><span class="code-pill">' + listing.wifi_pass + '</span></div></div>';
+    html += '</div>';
+  }
+
+  if (listing.notes) {
+    html += '<div class="card"><div class="card-eyebrow">التفاصيل · Details</div>'
+         + '<p class="notes-block">' + linkify(listing.notes) + '</p></div>';
+  }
+
+  if (listing.faq && listing.faq.length) {
+    const escq = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    html += '<div class="card"><div class="card-eyebrow">أسئلة شائعة · FAQ</div>'
+         + listing.faq.map(f => '<div class="info-row" style="flex-direction:column;align-items:flex-start;gap:6px">'
+             + '<div class="label">' + escq(f.title_ar) + (f.title_en ? (' · ' + escq(f.title_en)) : '') + '</div>'
+             + '<div class="value" style="font-weight:400">' + escq(f.body_ar) + (f.body_en ? ('<br>' + escq(f.body_en)) : '') + '</div>'
+             + '</div>').join('')
+         + '</div>';
+  }
+
+  c.innerHTML = html || '<div class="card"><p>لا توجد معلومات بعد.</p></div>';
+}
+
+async function load() {
+  const c = document.getElementById('directionsContent');
+  if (!id) {
+    c.innerHTML = '<div class="card error"><h2>أضف ?id=الشقة إلى الرابط</h2><p>Add ?id=YOUR_LISTING to the URL.</p></div>';
+    return;
+  }
+  try {
+    let listing = null;
+    let allIds = [];
+
+    if (supaReady && window.supabase) {
+      // SUPABASE MODE
+      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      const { data, error } = await sb.from('listings').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      listing = data;
+      if (!listing) {
+        // Diagnostic — fetch sample of all ids
+        const { data: all } = await sb.from('listings').select('id').limit(20);
+        allIds = (all || []).map(r => r.id);
+      }
+    } else {
+      // FILE MODE
+      const res = await fetch(DATA_URL + '?_=' + Date.now());
+      if (!res.ok) throw new Error('fetch');
+      const rows = await res.json();
+      listing = rows.find(r => (r.id || '').toLowerCase() === id);
+      if (!listing) allIds = rows.slice(0, 12).map(r => r.id || '');
+    }
+
+    if (!listing) {
+      const sample = allIds.join(', ');
+      c.innerHTML = '<div class="card error">'
+        + '<h2>الشقة "' + id + '" غير موجودة</h2>'
+        + '<p>Listing "' + id + '" not found.</p>'
+        + (sample ? '<hr style="border:none;border-top:1px solid var(--hairline);margin:16px 0;">'
+          + '<p style="font-size:13px;color:var(--muted);text-align:start;"><strong>Available IDs:</strong> '
+          + '<code style="font-size:12px;">' + sample + '</code></p>' : '')
+        + '</div>';
+      return;
+    }
+    render(listing);
+    updateWaLinks(listing.id || id);
+  } catch (e) {
+    c.innerHTML = '<div class="card error"><h2>تعذر تحميل البيانات</h2><p>Could not load data: ' + (e.message || e) + '</p></div>';
+  }
+}
+/* Set safe default WhatsApp hrefs immediately so links work even before listing loads */
+updateWaLinks(id);
+load();
+</script>
+</body>
+</html>
