@@ -48753,11 +48753,18 @@ def apply_price_changes(listing_id, changes):
                     available.add(dd.isoformat())
     except Exception as e:
         print("price re-verify error:", e)
-        available = None                       # couldn't verify -> best effort, apply anyway
+        available = None                       # couldn't verify → skip EVERYTHING (M2, no blind writes)
     applied, skipped, results = 0, 0, []
     for c in changes:
         price = int(round(c["price"]))
-        if available is not None and c["date"] not in available:
+        if available is None:
+            # M2: writing blind would also re-open every night for sale
+            # (isAvailable:1), potentially unblocking a manually-blocked night.
+            skipped += 1
+            results.append({"date": c["date"], "kind": c.get("kind"), "price": price,
+                            "status": "verify_failed"})
+            continue
+        if c["date"] not in available:
             skipped += 1                        # got booked / blocked since the report
             results.append({"date": c["date"], "kind": c.get("kind"), "price": price, "status": "booked"})
             continue
