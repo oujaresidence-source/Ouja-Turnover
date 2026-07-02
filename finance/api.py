@@ -11,7 +11,7 @@ import json
 import uuid
 from calendar import monthrange
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiohttp import web
 
@@ -903,14 +903,21 @@ def match_queue(params):
         page = 1
     ps = 30
     res_list = []
-    need_hostaway = any(
-        (x.get("category") or "") == "channel_payout"
+    # H4: channel payouts land DAYS AFTER departure — the newest reservations,
+    # exactly the rows the truncated full-history cache drops. Use a targeted
+    # window pull spanning the unmatched payout dates instead (trap #4).
+    payout_dates = [
+        _pdate(x.get("date")) for x in B._fb_bank.values()
+        if (x.get("category") or "") == "channel_payout"
         and float(B._fb_money(x.get("credit"))) > 0
-        and (x.get("match_status") or "unmatched") == "unmatched"
-        for x in B._fb_bank.values())
-    if need_hostaway:
+        and (x.get("match_status") or "unmatched") == "unmatched"]
+    payout_dates = [d for d in payout_dates if d]
+    if payout_dates:
         try:
-            res_list = B.get_reservations_cached() or []
+            # fetch_reservations_window pads start by 45d internally → arrival
+            # in [min−45d, max+10d], covering departure-within-±10d candidates.
+            res_list = B.fetch_reservations_window(
+                min(payout_dates), max(payout_dates) + timedelta(days=10)) or []
         except Exception:
             res_list = []
     items = []
