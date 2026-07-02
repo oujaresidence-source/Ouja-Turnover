@@ -4,6 +4,7 @@ Every handler is guarded by the existing dashboard auth (HOST.dash_auth). JSON g
 HOST.json_response (Arabic-safe). Nothing here sends WhatsApp live; Approve = CSV export.
 """
 
+import asyncio
 import json
 import traceback
 from . import db, settings, signals, members, recommend, campaigns, adapters, governor
@@ -124,7 +125,9 @@ async def api_recompute(request):
     g = _guard(request)
     if g:
         return g
-    return HOST.json_response({"ok": True, "move": recommend.todays_view(force=True)})
+    # M12: a forced recompute hits Hostaway — never block the event loop
+    move = await asyncio.to_thread(recommend.todays_view, True)
+    return HOST.json_response({"ok": True, "move": move})
 
 
 async def api_settings_set(request):
@@ -166,7 +169,9 @@ async def api_seed(request):
     g = _guard(request)
     if g:
         return g
-    return HOST.json_response({"ok": True, "result": members.recompute(full=True)})
+    # M12: full=True is a 120-day paginated Hostaway pull — off the event loop
+    result = await asyncio.to_thread(members.recompute, True)
+    return HOST.json_response({"ok": True, "result": result})
 
 
 async def api_seed_import(request):

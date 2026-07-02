@@ -101,16 +101,28 @@ def schedule_week():
     base = {}
     for a in apts:
         base[a.get("owner_id")] = base.get(a.get("owner_id"), 0) + 1
+    # M11: the weekly matrix must honor ad-hoc leave too — resolve each weekday
+    # to its CONCRETE upcoming date (today..+6) and pass that date's absences,
+    # exactly like schedule_day does. Without this the week view showed someone
+    # working on their approved leave day.
+    today = datetime.date.fromisoformat(_today_iso())
+    date_for_wd = {}
+    for i in range(7):
+        d = today + datetime.timedelta(days=i)
+        date_for_wd.setdefault(engine.to_weekday(d), d.isoformat())
     rows = []
     for wd in range(7):
-        r = engine.compute_day(wd, emps, apts, ovs)
+        date_iso = date_for_wd.get(wd)
+        absent_ids = ({a["employee_id"] for a in db.absences_on(date_iso)}
+                      if date_iso else set())
+        r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent_ids)
         cells = {}
         for w in r["working"]:
             cells[w["id"]] = {"load": w["load"], "base": len(w["own"]),
                               "cov": len(w["coverage"]), "off": False}
         for o in r["off"]:
             cells[o["id"]] = {"load": 0, "base": base.get(o["id"], 0), "cov": 0, "off": True}
-        rows.append({"weekday": wd, "weekday_ar": _DAY_AR[wd],
+        rows.append({"weekday": wd, "weekday_ar": _DAY_AR[wd], "date": date_iso,
                      "has_coverage": r["has_coverage"], "cells": cells})
     cols = [{"id": e["id"], "name": e["name"], "color": e.get("color"),
              "emoji": e.get("emoji"), "sort_order": e.get("sort_order", 0)} for e in emps]
