@@ -223,6 +223,34 @@ class GuideUnitLinkApiTest(unittest.TestCase):
         self.assertEqual(r.data["hostaway"], [{"id": 431434,
                                                "name": "Ouja | HUGE 2BR Penthouse with Pool"}])
 
+    def test_pic_fields_save_and_invalidate_stale_mirror(self):
+        import json as _json
+        gdb.upsert_unit("picu", listing_name="P",
+                        complex_pic="https://drive.google.com/file/d/OLD/view",
+                        media_local=_json.dumps({"complex_pic": "complex_pic.jpg",
+                                                 "door_pic": "door_pic.jpg"}))
+        r = self._run_coro(self.gr.api_unit_save(self._req({
+            "slug": "picu",
+            "complex_pic": "https://drive.google.com/file/d/NEW/view",
+            "complex_caption": "المجمع الجديد"})))
+        self.assertTrue(r.data["ok"])
+        u = gdb.get_unit("picu")
+        self.assertIn("NEW", u["complex_pic"])
+        self.assertEqual(u["complex_caption"], "المجمع الجديد")
+        mm = gdb.media_map(u)
+        self.assertNotIn("complex_pic", mm, "changed URL must drop the stale local mirror")
+        self.assertIn("door_pic", mm, "untouched photos keep their mirror")
+
+    def test_unit_get_api(self):
+        r = self._run_coro(self.gr.api_unit_get(
+            type("Q", (), {"query": {"slug": "picu"}, "match_info": {}})()))
+        self.assertTrue(r.data["ok"])
+        self.assertEqual(r.data["unit"]["slug"], "picu")
+        self.assertIn("hostaway", r.data)
+        r404 = self._run_coro(self.gr.api_unit_get(
+            type("Q", (), {"query": {"slug": "nope"}, "match_info": {}})()))
+        self.assertEqual(r404.status, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

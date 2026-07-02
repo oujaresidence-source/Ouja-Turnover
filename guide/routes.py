@@ -17,6 +17,7 @@ ADMIN (dashboard login + admin/ops role — double-gated like schedule writes):
 
 import asyncio
 import datetime
+import json
 import mimetypes
 import os
 import re
@@ -127,6 +128,41 @@ async def logo(request):
 
 # ---------------- admin ----------------
 
+_editor_cache = {"html": None}
+
+
+async def editor_page(request):
+    """The full per-unit editor (/guide-admin/{slug}) — everything the guest
+    page shows is editable here: the four Drive photos + captions with live
+    previews, wifi, notes, map, Hostaway link, FAQ. Login-gated."""
+    if not (HOST.dash_auth and HOST.dash_auth(request)):
+        return HOST.web.Response(
+            text="<!doctype html><meta charset='utf-8'><body style='font-family:sans-serif;"
+                 "text-align:center;padding:60px'>🔒 افتح «تعديل» من لوحة التحكم (تبويب دليل الشقق).",
+            content_type="text/html", status=401)
+    if _editor_cache["html"] is None:
+        _editor_cache["html"] = (_DIR / "templates" / "editor.html").read_text("utf-8")
+    return HOST.web.Response(text=_editor_cache["html"], content_type="text/html",
+                             headers={"Cache-Control": "no-cache"})
+
+
+async def api_unit_get(request):
+    slug = (request.query.get("slug") or "").strip().lower()
+    unit = await asyncio.to_thread(db.get_unit, slug)
+    if unit is None:
+        return HOST.json_response({"ok": False, "error": "الشقة غير موجودة بالدليل"}, 404)
+    entries = await asyncio.to_thread(db.entries_for, slug)
+    hostaway = []
+    try:
+        lm = await asyncio.to_thread(HOST.listings) if HOST.listings else {}
+        hostaway = sorted(({"id": int(k), "name": str(v)} for k, v in (lm or {}).items()),
+                          key=lambda x: x["name"])
+    except Exception:
+        hostaway = []
+    return HOST.json_response({"ok": True, "unit": unit, "entries": entries,
+                               "hostaway": hostaway, "can_edit": _can_edit(request)})
+
+
 async def _body(request):
     try:
         d = await request.json()
@@ -158,8 +194,20 @@ async def api_unit_save(request):
         return HOST.json_response({"ok": False, "error": "معرّف غير صحيح"}, 200)
     fields = {k: str(b[k]).strip() for k in
               ("listing_name", "map_link", "wifi_name", "wifi_pass", "notes",
+               "complex_pic", "building_pic", "elevator_pic", "door_pic",
                "complex_caption", "building_caption", "elevator_caption", "door_caption")
               if k in b}
+    # a CHANGED photo URL invalidates its mirrored local copy — otherwise the
+    # page would keep serving the stale mirror instead of the new link
+    cur = await asyncio.to_thread(db.get_unit, slug)
+    if cur:
+        mm = db.media_map(cur)
+        stale = [p for p in ("complex_pic", "building_pic", "elevator_pic", "door_pic")
+                 if p in fields and fields[p] != (cur.get(p) or "")]
+        if stale and mm:
+            for p in stale:
+                mm.pop(p, None)
+            fields["media_local"] = json.dumps(mm, ensure_ascii=False)
     if "active" in b:
         fields["active"] = 1 if b.get("active") in (1, "1", True, "true") else 0
     unlink = False
@@ -278,7 +326,9 @@ def register_routes(app):
     r.add_get("/guide/fonts/{fname}", _safe_public(font))
     r.add_get("/guide/media/{slug}/{fname}", _safe_public(media))
     r.add_get("/guide/{slug}", _safe_public(page))
+    r.add_get("/guide-admin/{slug}", editor_page)          # gated inside (401 page)
     r.add_get("/api/guide/admin", _safe(api_admin))
+    r.add_get("/api/guide/unit", _safe(api_unit_get))
     r.add_post("/api/guide/unit", _safe(api_unit_save))
     r.add_post("/api/guide/entry", _safe(api_entry_add))
     r.add_post("/api/guide/entry/delete", _safe(api_entry_delete))

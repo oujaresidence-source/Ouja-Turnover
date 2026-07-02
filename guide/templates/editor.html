@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#FAFAF7" />
+<title>تحرير دليل الشقة · عوجا</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#FAFAF7;--surface:#FFFFFF;--surface2:#F4F2EC;--gold:#A37728;--gold2:#8B6320;
+--text:#1A1815;--mut:#8A8374;--line:#E8E2D5;--green:#0E9E5F;--red:#B4232A;--blue:#2563EB}
+html,body{font-family:'IBM Plex Sans Arabic',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.wrap{max-width:880px;margin:0 auto;padding:20px 16px 90px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:20px;font-weight:700}
+h1 code{font-size:15px;color:var(--gold);font-family:inherit}
+.sub{font-size:12.5px;color:var(--mut);margin-top:3px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.card h2{font-size:14px;font-weight:700;margin-bottom:12px;color:var(--gold2)}
+.grid{display:flex;flex-wrap:wrap;gap:12px}
+label.f{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--mut);flex:1;min-width:230px}
+label.f.full{flex:1 1 100%}
+input,textarea,select{font-family:inherit;font-size:13.5px;color:var(--text);background:var(--surface);
+border:1px solid var(--line);border-radius:9px;padding:9px 11px;width:100%}
+input:focus,textarea:focus,select:focus{outline:2px solid rgba(163,119,40,.25);border-color:var(--gold)}
+textarea{min-height:96px;resize:vertical}
+.btn{font-family:inherit;font-size:13.5px;font-weight:600;border:1px solid var(--line);background:var(--surface);
+color:var(--text);border-radius:10px;padding:9px 16px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--gold);border-color:var(--gold);color:#fff}
+.btn.danger{color:var(--red)}
+.btn:disabled{opacity:.5;cursor:default}
+.photo-block{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--surface2);flex:1 1 100%}
+.thumb{width:120px;height:120px;border-radius:9px;object-fit:cover;background:#EDE9DE;border:1px solid var(--line);flex:none}
+.thumb.empty{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:11px;text-align:center;padding:6px}
+.photo-fields{flex:1;min-width:230px;display:flex;flex-direction:column;gap:8px}
+.photo-fields .t{font-size:13px;font-weight:700}
+.hint{font-size:11.5px;color:var(--mut)}
+.faq-row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:9px 2px;border-bottom:1px solid var(--line)}
+.faq-row:last-child{border-bottom:none}
+.faq-row b{font-size:13px}
+.faq-row .b{font-size:12px;color:var(--mut);margin-top:2px}
+.savebar{position:fixed;bottom:0;inset-inline:0;background:rgba(250,250,247,.94);backdrop-filter:blur(8px);
+border-top:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;justify-content:center;z-index:9}
+.toast{position:fixed;top:14px;inset-inline:0;margin:0 auto;width:fit-content;max-width:90%;background:var(--text);color:#fff;
+padding:9px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99}
+.toast.show{opacity:1}
+.pill{font-size:11px;padding:3px 9px;border-radius:99px;background:var(--surface2);border:1px solid var(--line);color:var(--mut)}
+.pill.ok{color:var(--green)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1>تحرير الدليل · <code id="slugLbl">—</code></h1>
+      <div class="sub">كل شي هنا يظهر للضيف بصفحة الشقة — عدّل واحفظ.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn" id="openGuest" target="_blank" rel="noopener">👁 صفحة الضيف</a>
+      <a class="btn" id="backDash">↩ اللوحة</a>
+    </div>
+  </div>
+
+  <div class="card"><h2>البيانات الأساسية</h2>
+    <div class="grid">
+      <label class="f full">ربط Hostaway (للفجوات وخريطة Elite)
+        <select id="f_lid"><option value="">— غير مرتبطة —</option></select>
+      </label>
+      <label class="f">اسم الشقة (يظهر للضيف)<input id="f_listing_name"></label>
+      <label class="f">رابط الموقع (Google Maps)<input id="f_map_link" dir="ltr"></label>
+    </div>
+  </div>
+
+  <div class="card"><h2>صور الوصول (روابط Google Drive أو أي رابط صورة)</h2>
+    <div class="hint" style="margin-bottom:10px">غيّرت الرابط؟ المعاينة تتحدث فوراً. الرابط لازم يكون «مشاركة للجميع» في Drive عشان يشوفه الضيف.</div>
+    <div class="grid" id="photos"></div>
+  </div>
+
+  <div class="card"><h2>الواي فاي</h2>
+    <div class="grid">
+      <label class="f">اسم الشبكة<input id="f_wifi_name" dir="ltr"></label>
+      <label class="f">كلمة السر<input id="f_wifi_pass" dir="ltr"></label>
+    </div>
+  </div>
+
+  <div class="card"><h2>التفاصيل / العنوان / أرقام التواصل</h2>
+    <textarea id="f_notes" rows="7"></textarea>
+  </div>
+
+  <div class="card"><h2>أسئلة شائعة (تظهر بآخر صفحة الضيف)</h2>
+    <div id="faqList"><div class="hint">—</div></div>
+    <div class="grid" style="margin-top:10px">
+      <label class="f">السؤال<input id="faq_t"></label>
+      <label class="f">الجواب<input id="faq_b"></label>
+      <button class="btn" onclick="addFaq(this)">＋ أضف</button>
+    </div>
+  </div>
+</div>
+
+<div class="savebar">
+  <button class="btn primary" id="saveBtn" onclick="save(this)">💾 حفظ التعديلات</button>
+  <span class="pill" id="stat">—</span>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var TOKEN = '';
+(function(){
+  var p = new URLSearchParams(location.search);
+  TOKEN = p.get('token') || '';
+  if (TOKEN) history.replaceState(null, '', location.pathname);  /* keep the token out of the URL bar */
+})();
+var SLUG = decodeURIComponent(location.pathname.replace(/\/+$/,'').split('/').pop() || '').toLowerCase();
+var U = null, ENTRIES = [];
+var PICS = [
+  {k:'complex_pic',  c:'complex_caption',  t:'المجمع · The Complex'},
+  {k:'building_pic', c:'building_caption', t:'المبنى · The Building'},
+  {k:'elevator_pic', c:'elevator_caption', t:'المصعد · Elevator'},
+  {k:'door_pic',     c:'door_caption',     t:'باب الشقة · Apartment Door'}
+];
+function esc(s){return (s==null?'':String(s)).replace(/[<>&"']/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]})}
+function toast(m){var e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show')},2400)}
+async function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign({'X-Token': TOKEN}, opts.headers||{});
+  if (opts.body && typeof opts.body !== 'string'){ opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body); }
+  var r = await fetch(path, opts);
+  if (r.status === 401) { document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:inherit">🔒 انتهت الجلسة — افتح «تعديل» من اللوحة مرة ثانية.</div>'; throw 'unauthorized'; }
+  return r.json();
+}
+/* same normalizer the guest page uses — so the preview = what the guest sees */
+function normalizeImageUrl(url){
+  if(!url) return null; url = url.trim(); if(!url) return null;
+  var m = url.match(/^https?:\/\/drive\.google\.com\/file\/d\/([^\/?#]+)/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w400';
+  m = url.match(/^https?:\/\/drive\.google\.com\/(?:open|uc)\?(?:export=\w+&)?id=([^&]+)/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w400';
+  return url;
+}
+function thumbSrc(v){
+  if(!v) return null; v = v.trim(); if(!v) return null;
+  if (v.charAt(0) === '/') return v;
+  return normalizeImageUrl(v);
+}
+function renderPhotos(){
+  var mm = {};
+  try{ mm = JSON.parse(U.media_local||'{}')||{}; }catch(_){ }
+  document.getElementById('photos').innerHTML = PICS.map(function(p){
+    var url = U[p.k]||'';
+    var local = mm[p.k] ? ('/guide/media/'+SLUG+'/'+mm[p.k]) : '';
+    var src = thumbSrc(local || url);
+    return '<div class="photo-block">'
+      + (src ? '<img class="thumb" id="th_'+p.k+'" src="'+esc(src)+'" onerror="this.outerHTML=\'<div class=&quot;thumb empty&quot; id=&quot;th_'+p.k+'&quot;>الرابط ما يفتح — تأكد إنه مشاركة للجميع</div>\'">'
+             : '<div class="thumb empty" id="th_'+p.k+'">بدون صورة</div>')
+      + '<div class="photo-fields">'
+      + '<div class="t">'+esc(p.t)+(local?' <span class="pill ok">نسخة محلية ✓</span>':'')+'</div>'
+      + '<input id="f_'+p.k+'" dir="ltr" placeholder="https://drive.google.com/file/d/…" value="'+esc(url)+'" oninput="reThumb(\''+p.k+'\')">'
+      + '<input id="f_'+p.c+'" placeholder="التعليق تحت الصورة (اختياري)" value="'+esc(U[p.c]||'')+'">'
+      + '</div></div>';
+  }).join('');
+}
+function reThumb(k){
+  var v = document.getElementById('f_'+k).value;
+  var src = thumbSrc(v);
+  var el = document.getElementById('th_'+k);
+  var html = src ? '<img class="thumb" id="th_'+k+'" src="'+esc(src)+'" onerror="this.outerHTML=\'<div class=&quot;thumb empty&quot; id=&quot;th_'+k+'&quot;>الرابط ما يفتح</div>\'">'
+                 : '<div class="thumb empty" id="th_'+k+'">بدون صورة</div>';
+  el.outerHTML = html;
+}
+function renderFaq(){
+  var mine = ENTRIES.filter(function(e){ return (e.slug||'')===SLUG || !(e.slug||''); });
+  document.getElementById('faqList').innerHTML = mine.length ? mine.map(function(e){
+    return '<div class="faq-row"><div><b>'+esc(e.title_ar||e.title_en||'—')+'</b>'
+      +'<div class="b">'+esc(e.body_ar||e.body_en||'')+((e.slug||'')?'':' · <span class="pill">لكل الشقق</span>')+'</div></div>'
+      +((e.slug||'')===SLUG?('<button class="btn danger" onclick="delFaq(this)" data-id="'+e.id+'">🗑</button>'):'')
+      +'</div>';
+  }).join('') : '<div class="hint">ما فيه أسئلة بعد — أضف أول وحدة تحت.</div>';
+}
+async function load(){
+  document.getElementById('slugLbl').textContent = SLUG;
+  document.getElementById('openGuest').href = '/guide/'+encodeURIComponent(SLUG);
+  document.getElementById('backDash').href = '/dashboard?token='+encodeURIComponent(TOKEN)+'#guide';
+  var d = await api('/api/guide/unit?slug='+encodeURIComponent(SLUG));
+  if(!d.ok){ toast(d.error||'ما لقيت الشقة'); return; }
+  U = d.unit; ENTRIES = d.entries||[];
+  ['listing_name','map_link','wifi_name','wifi_pass','notes'].forEach(function(k){
+    document.getElementById('f_'+k).value = U[k]||'';
+  });
+  var sel = document.getElementById('f_lid');
+  sel.innerHTML = '<option value="">— غير مرتبطة —</option>' + (d.hostaway||[]).map(function(h){
+    return '<option value="'+h.id+'"'+(String(U.listing_id||'')===String(h.id)?' selected':'')+'>'+esc(h.name)+' ('+h.id+')</option>';
+  }).join('');
+  document.getElementById('stat').textContent = 'آخر تحديث: '+((U.updated_at||'—').slice(0,16).replace('T',' '));
+  renderPhotos(); renderFaq();
+}
+async function save(btn){
+  btn.disabled = true;
+  var v = function(id){ return (document.getElementById(id)||{}).value||''; };
+  var body = {slug: SLUG, listing_name: v('f_listing_name'), map_link: v('f_map_link'),
+              wifi_name: v('f_wifi_name'), wifi_pass: v('f_wifi_pass'), notes: v('f_notes'),
+              listing_id: v('f_lid')};
+  PICS.forEach(function(p){ body[p.k]=v('f_'+p.k); body[p.c]=v('f_'+p.c); });
+  var j = await api('/api/guide/unit', {method:'POST', body: body});
+  btn.disabled = false;
+  if(j && j.ok){ U = j.unit; toast('تم الحفظ ✅ — الضيف يشوف التعديل فوراً'); renderPhotos(); }
+  else toast((j&&j.error)||'صار خطأ');
+}
+async function addFaq(btn){
+  var t = document.getElementById('faq_t').value.trim();
+  var b = document.getElementById('faq_b').value.trim();
+  if(!t && !b){ toast('اكتب السؤال أو الجواب أولاً'); return; }
+  btn.disabled = true;
+  var j = await api('/api/guide/entry', {method:'POST', body:{slug:SLUG, title_ar:t, body_ar:b}});
+  btn.disabled = false;
+  if(j && j.ok){ document.getElementById('faq_t').value=''; document.getElementById('faq_b').value='';
+    var d = await api('/api/guide/unit?slug='+encodeURIComponent(SLUG)); ENTRIES = d.entries||[]; renderFaq(); toast('انضافت ✅'); }
+  else toast((j&&j.error)||'صار خطأ');
+}
+async function delFaq(btn){
+  if(!confirm('حذف هالسؤال من الدليل؟')) return;
+  btn.disabled = true;
+  var j = await api('/api/guide/entry/delete', {method:'POST', body:{id: btn.getAttribute('data-id')}});
+  if(j && j.ok){ var d = await api('/api/guide/unit?slug='+encodeURIComponent(SLUG)); ENTRIES = d.entries||[]; renderFaq(); toast('انحذفت'); }
+  else { btn.disabled=false; toast((j&&j.error)||'صار خطأ'); }
+}
+load();
+</script>
+</body>
+</html>
