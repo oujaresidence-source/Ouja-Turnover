@@ -176,5 +176,53 @@ class GuideImportSpeedTest(unittest.TestCase):
         self.assertIn("FileNotFoundError", st["error"])
 
 
+class GuideUnitLinkApiTest(unittest.TestCase):
+    """The edit panel must be able to LINK and UNLINK a unit to Hostaway."""
+
+    @classmethod
+    def setUpClass(cls):
+        import asyncio
+        import types
+        from guide import routes as gr
+        cls.tmp = tempfile.mkdtemp(prefix="guide_link_")
+        bdb.set_db_path_for_tests(os.path.join(cls.tmp, "brain.db"))
+        gdb.reset_init_cache()
+
+        class _R:
+            def __init__(self, data, status=200):
+                self.data, self.status = data, status
+        gr.wire({"dash_auth": lambda r: True, "req_role": lambda r: "admin",
+                 "json_response": lambda d, s=200: _R(d, s),
+                 "web": types.SimpleNamespace(Response=lambda **k: _R(k)),
+                 "state_dir": cls.tmp,
+                 "listings": lambda: {431434: "Ouja | HUGE 2BR Penthouse with Pool"}})
+        cls.gr = gr
+        cls._run_coro = staticmethod(lambda coro: asyncio.new_event_loop().run_until_complete(coro))
+
+    def _req(self, body):
+        class _Q:
+            match_info = {}
+
+            async def json(self):
+                return body
+        return _Q()
+
+    def test_link_then_unlink(self):
+        gdb.upsert_unit("qur-101", listing_name="HUGE 2BR Penthouse with Pool")
+        r = self._run_coro(self.gr.api_unit_save(self._req({"slug": "qur-101", "listing_id": "431434"})))
+        self.assertTrue(r.data["ok"])
+        self.assertEqual(gdb.get_unit("qur-101")["listing_id"], 431434)
+        r = self._run_coro(self.gr.api_unit_save(self._req({"slug": "qur-101", "listing_id": ""})))
+        self.assertTrue(r.data["ok"])
+        self.assertIsNone(gdb.get_unit("qur-101")["listing_id"])
+        r = self._run_coro(self.gr.api_unit_save(self._req({"slug": "qur-101", "listing_id": "junk"})))
+        self.assertFalse(r.data["ok"])
+
+    def test_admin_payload_carries_hostaway_options(self):
+        r = self._run_coro(self.gr.api_admin(self._req({})))
+        self.assertEqual(r.data["hostaway"], [{"id": 431434,
+                                               "name": "Ouja | HUGE 2BR Penthouse with Pool"}])
+
+
 if __name__ == "__main__":
     unittest.main()

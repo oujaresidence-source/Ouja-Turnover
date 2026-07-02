@@ -138,8 +138,15 @@ async def _body(request):
 async def api_admin(request):
     units = await asyncio.to_thread(db.units, False)
     entries = await asyncio.to_thread(db.all_entries)
+    hostaway = []
+    try:
+        lm = await asyncio.to_thread(HOST.listings) if HOST.listings else {}
+        hostaway = sorted(({"id": int(k), "name": str(v)} for k, v in (lm or {}).items()),
+                          key=lambda x: x["name"])
+    except Exception:
+        hostaway = []
     return HOST.json_response({"ok": True, "units": units, "entries": entries,
-                               "can_edit": _can_edit(request)})
+                               "hostaway": hostaway, "can_edit": _can_edit(request)})
 
 
 async def api_unit_save(request):
@@ -155,10 +162,23 @@ async def api_unit_save(request):
               if k in b}
     if "active" in b:
         fields["active"] = 1 if b.get("active") in (1, "1", True, "true") else 0
-    if not fields:
+    unlink = False
+    if "listing_id" in b:                      # Hostaway link from the edit panel
+        raw = str(b.get("listing_id") or "").strip()
+        if raw:
+            try:
+                fields["listing_id"] = int(raw)
+            except ValueError:
+                return HOST.json_response({"ok": False, "error": "رقم Hostaway غير صحيح"}, 200)
+        else:
+            unlink = True                      # explicit empty = unlink
+    if not fields and not unlink:
         return HOST.json_response({"ok": False, "error": "لا شيء للتعديل"}, 200)
     fields["updated_by"] = "dashboard"
     await asyncio.to_thread(db.upsert_unit, slug, **fields)
+    if unlink:
+        await asyncio.to_thread(db.execute,
+                                "UPDATE guide_units SET listing_id=NULL WHERE slug=?", (slug,))
     return HOST.json_response({"ok": True, "unit": db.get_unit(slug)})
 
 

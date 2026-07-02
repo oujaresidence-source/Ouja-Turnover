@@ -19321,14 +19321,23 @@ function gdEdit(el){
   var u=((D.guide||{}).units||[]).filter(function(x){ return x.slug===slug; })[0];
   if(!u) return;
   GD.edit=slug;
-  document.getElementById('gdEditCard').style.display='';
+  var card=document.getElementById('gdEditCard');
+  card.style.display='';
   document.getElementById('gdEditTitle').textContent=labelText('تعديل ','Edit ')+slug;
-  function f(id,lbl,val,wide){
-    return '<label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);'+(wide?'flex:1 1 100%':'flex:1;min-width:180px')+'">'
+  function f(id,lbl,val){
+    return '<label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);flex:1;min-width:180px">'
       +esc(lbl)+'<input id="'+id+'" value="'+esc(val||'')+'" style="padding:6px 10px;height:34px;font-size:13px"></label>';
   }
+  var ha=((D.guide||{}).hostaway||[]);
+  var haSel='<label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);flex:1 1 100%">'
+    +esc(labelText('ربط Hostaway (يربط الدليل بالشقة الصح — يصلح «غير مرتبطة»)','Hostaway link (fixes «unlinked»)'))
+    +'<select id="gd_lid" style="padding:6px 10px;height:34px;font-size:13px">'
+    +'<option value="">'+esc(labelText('— غير مرتبطة —','— unlinked —'))+'</option>'
+    +ha.map(function(h){ return '<option value="'+h.id+'"'+(String(u.listing_id||'')===String(h.id)?' selected':'')+'>'+esc(h.name)+' ('+h.id+')</option>'; }).join('')
+    +'</select></label>';
   document.getElementById('gdEditBody').innerHTML =
     '<div style="display:flex;flex-wrap:wrap;gap:10px;padding:4px 2px">'
+    +haSel
     +f('gd_name', labelText('اسم الشقة','Listing name'), u.listing_name)
     +f('gd_map', labelText('رابط الموقع','Map link'), u.map_link)
     +f('gd_wname', labelText('اسم الواي فاي','Wi-Fi name'), u.wifi_name)
@@ -19338,13 +19347,14 @@ function gdEdit(el){
     +'<textarea id="gd_notes" rows="4" style="padding:8px 10px;font-size:13px">'+esc(u.notes||'')+'</textarea></label>'
     +'<button class="btn primary sm" onclick="gdSave(this)">'+esc(labelText('حفظ','Save'))+'</button>'
     +'</div>';
+  card.scrollIntoView({behavior:'smooth', block:'start'});   /* the card sits BELOW the 64-row list */
 }
 function gdCloseEdit(){ GD.edit=null; document.getElementById('gdEditCard').style.display='none'; }
 async function gdSave(el){
   if(!GD.edit) return; el.disabled=true;
   var v=function(id){ return (document.getElementById(id)||{}).value||''; };
   var j=await post('/api/guide/unit', {slug:GD.edit, listing_name:v('gd_name'), map_link:v('gd_map'),
-    wifi_name:v('gd_wname'), wifi_pass:v('gd_wpass'), notes:v('gd_notes')});
+    wifi_name:v('gd_wname'), wifi_pass:v('gd_wpass'), notes:v('gd_notes'), listing_id:v('gd_lid')});
   el.disabled=false;
   if(j&&j.ok){ toast(labelText('تم الحفظ ✅','Saved ✅')); gdCloseEdit(); loadGuide(); }
   else { toast((j&&j.error)||labelText('صار خطأ','Error')); }
