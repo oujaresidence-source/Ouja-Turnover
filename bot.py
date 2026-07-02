@@ -15409,6 +15409,7 @@ const T = {
     sent:'تم الإرسال ✅', rejected:'تم التجاهل', claimed_t:'تم الاستلام ✅', applied:'تم التطبيق ✅', taught:'تم حفظ المعلومة ✅', skipped:'تم التجاهل', resumed:'تم الاستئناف', err:'صار خطأ',
     needs_alert:'يبيك الحين', no_needs:'كل شي تمام · ما يبيك شي 🤍',
     occ_tonight:'الإشغال الليلة', rev_7:'إيراد ٧ أيام', rev_30:'إيراد ٣٠ يوم',
+    res_trunc:'السجل غير كامل',
     pending_rep:'ردود معلّقة', open_esc:'تصعيدات', empty_units:'فاضية الليلة', active:'وحدات فعّالة',
     no_pending:'ما فيه ردود معلّقة 🎉', no_esc:'ما فيه تصعيدات 🎉',
     rep_send:'إرسال', rep_reject:'تجاهل', rep_edit_focus:'تعديل', rep_teach:'علّم',
@@ -15731,6 +15732,7 @@ const T = {
     sent:'Sent ✅', rejected:'Dismissed', claimed_t:'Claimed ✅', applied:'Applied ✅', taught:'Saved ✅', skipped:'Skipped', resumed:'Resumed', err:'Something went wrong',
     needs_alert:'Needs you', no_needs:"You're all caught up 🤍",
     occ_tonight:'Occupied tonight', rev_7:'Revenue 7d', rev_30:'Revenue 30d',
+    res_trunc:'Partial history',
     pending_rep:'Pending replies', open_esc:'Escalations', empty_units:'Empty tonight', active:'Active units',
     no_pending:'No pending replies 🎉', no_esc:'No open escalations 🎉',
     rep_send:'Send', rep_reject:'Dismiss', rep_edit_focus:'Edit', rep_teach:'Teach',
@@ -22540,7 +22542,7 @@ function renderKpis(){
   const k = [
     {ic:'◌', cls:'g', val:occN+'/'+occT, lbl:t().occ_tonight, sub:'<span class="pill '+(occPct>=85?'ok':(occPct>=60?'info':'warn'))+'">'+occPct+'%</span>'},
     {ic:'$', cls:'gold', val:fmt(ov.rev_7)+' SAR', lbl:t().rev_7},
-    {ic:'∿', cls:'b', val:fmt(ov.rev_30)+' SAR', lbl:t().rev_30},
+    {ic:'∿', cls:'b', val:fmt(ov.rev_30)+' SAR', lbl:t().rev_30, sub:(ov.res_truncated?'<span class="pill warn">'+t().res_trunc+'</span>':'')},
     {ic:'⌂', cls:(empty>0?'y':'g'), val:empty, lbl:t().empty_units, sub:(empty>0?'<a onclick="go(\\'today\\')" style="cursor:pointer;color:var(--gold);font-weight:600;font-size:11px">←</a>':'<span class="pill ok">✓</span>')},
     {ic:'✉', cls:(pending>0?'y':''), val:pending, lbl:t().pending_rep, sub:(pending>0?'<a onclick="go(\\'inbox\\')" style="cursor:pointer;color:var(--gold);font-weight:600;font-size:11px">←</a>':'<span class="muted">—</span>')},
     {ic:'!', cls:(escs>0?'r':''), val:escs, lbl:t().open_esc, sub:(escs>0?'<a onclick="go(\\'inbox\\')" style="cursor:pointer;color:var(--red);font-weight:600;font-size:11px">←</a>':'<span class="muted">—</span>'), vc:(escs>0?'red':'')}
@@ -25530,7 +25532,8 @@ def _compute_overview():
             "rev_7": round(lw["tot_rev"]), "occ_7": round(lw["occ"] * 100),
             "missed_7": round(lw["tot_missed"]), "pending_cards": len(_pending_replies),
             "open_escalations": sum(1 for e in _escalations.values() if not e.get("claimed_by")),
-            "checkins_today": ci, "checkouts_today": co}
+            "checkins_today": ci, "checkouts_today": co,
+            "res_truncated": bool(_res_cache.get("truncated"))}
 
 # ===================== FINANCE: monthly owner/investor report math =====================
 # Stage 3 (items 13-14). PURE, source-agnostic functions so the math is exactly testable
@@ -48227,9 +48230,32 @@ async def _persist_loop_error(error):
 # It NEVER changes prices — it only recommends. All numbers are computed in code.
 
 def fetch_all_reservations(max_pages=None):
-    """Paginate the full reservation history from Hostaway."""
+    """Paginate the full reservation history from Hostaway — NEWEST-SAFE (H3).
+
+    History outgrew the page budget (max_pages×100). The old forward scan cut
+    off the TAIL, silently dropping the NEWEST months and poisoning every
+    recent-window number computed from this pull (rev_30 tiles, weekly reports,
+    demand factors, stale-unit detection…). Now we peek the total row count
+    first; when it exceeds the budget we START at the tail, so truncation drops
+    the OLDEST months instead. Self-validating: a per-page/absent 'count' can
+    never exceed the budget, so a bad peek just means the old forward scan —
+    never worse than before. _res_cache['truncated'] flags any truncation so
+    UIs can warn instead of presenting partial history as complete."""
     max_pages = max_pages or REVENUE_MAX_PAGES
-    out, offset, limit = [], 0, 100
+    limit = 100
+    budget = max_pages * limit
+    out, offset, truncated, total = [], 0, False, None
+    try:
+        head = api_get("/reservations", params={"limit": 1, "offset": 0})
+        c = head.get("count")
+        total = int(c) if isinstance(c, (int, float)) or (isinstance(c, str) and c.isdigit()) else None
+    except Exception as e:
+        print("reservations count peek error:", e)
+    if total and total > budget:
+        truncated = True
+        offset = total - budget          # keep the NEWEST `budget` rows
+        print(f"revenue: history has {total} rows > budget {budget} — skipping the oldest {offset}")
+    pages_used = 0
     for _ in range(max_pages):
         try:
             data = api_get("/reservations", params={"limit": limit, "offset": offset})
@@ -48240,12 +48266,16 @@ def fetch_all_reservations(max_pages=None):
         if not rows:
             break
         out.extend(rows)
+        pages_used += 1
         if len(rows) < limit:
             break
         offset += limit
+    if not truncated and pages_used == max_pages and len(out) >= budget:
+        truncated = True                 # budget exhausted on a full page — more history exists
+    _res_cache["truncated"] = truncated
     if REVENUE_DEBUG and out:
         print("reservation sample keys:", sorted(out[0].keys()))
-    print(f"revenue: fetched {len(out)} reservations")
+    print(f"revenue: fetched {len(out)} reservations" + (" (TRUNCATED history)" if truncated else ""))
     return out
 
 def _res_nights(r):
