@@ -25758,7 +25758,8 @@ def compute_owner_report(reservations, expenses, start, end, management_pct, set
         paid_amt = r.get("paid_amount")
         pfields = r.get("payment_fields") or []
         base_meta = {"id": r.get("id"), "guest": r.get("guest") or "", "channel": channel,
-                     "apartment": r.get("apartment"), "checkin": r.get("checkin"),
+                     "apartment": r.get("apartment"), "lid": r.get("lid"),
+                     "checkin": r.get("checkin"),
                      "checkout": r.get("checkout"), "nights": r.get("nights")}
         # ---- cancelled rows: NEVER income, by policy (v2.2.3, Faisal's call) ----
         # Hostaway's payment fields proved untrustworthy on cancellations (withdrawn
@@ -49140,6 +49141,56 @@ async def _tk_category(guild, kind):
             return cat
     return await guild.create_category(want_name)
 
+_TK_OVERFLOW_SUFFIXES = ("٢", "٣", "٤", "٥", "٦", "٧", "٨")
+
+def _tk_category_full(e):
+    """True when Discord refused the channel because the CATEGORY is at its hard
+    50-channel cap (code 50035 + text mentions 'category'). A full *server* (the
+    500 cap) shares code 50035 WITHOUT 'category' — that one we surface, not spill."""
+    if getattr(e, "code", 0) != 50035:
+        return False
+    return "categor" in (getattr(e, "text", "") or str(e)).lower()
+
+async def _tk_make_channel(guild, kind, name, topic):
+    """Open a ticket channel under the kind's category. Discord caps a category at
+    50 channels and we KEEP closed tickets as an audit trail, so a busy category
+    fills up and every new ticket used to die with a generic error. When the
+    primary category is full we spill into an overflow category («صيانه ٢» …) so
+    tickets never stop opening. Any other Discord error bubbles up so the caller
+    can show the real reason."""
+    base = await _tk_category(guild, kind)
+    try:
+        return await guild.create_text_channel(name, category=base, topic=topic)
+    except discord.HTTPException as e:
+        if not _tk_category_full(e):
+            raise
+    for suf in _TK_OVERFLOW_SUFFIXES:
+        oname = f"{base.name} {suf}"
+        cat = next((c for c in guild.categories
+                    if _tk_cat_norm(c.name) == _tk_cat_norm(oname)), None)
+        if cat is None:
+            cat = await guild.create_category(oname)
+        try:
+            return await guild.create_text_channel(name, category=cat, topic=topic)
+        except discord.HTTPException as e:
+            if _tk_category_full(e):
+                continue        # this overflow is full too — try the next one
+            raise
+    # every overflow category is also full — last resort: guild root (no category)
+    return await guild.create_text_channel(name, topic=topic)
+
+def _tk_open_error_msg(e, base_msg):
+    """Turn a channel-creation failure into a clear, ACTIONABLE Arabic message
+    instead of hiding the real Discord reason behind the generic error."""
+    if getattr(e, "code", 0) == 50035:
+        # category-full auto-spills, so reaching here means the whole server hit
+        # Discord's 500-channel limit.
+        return ("🚫 وصل سيرفر ديسكورد للحد الأقصى لعدد الرومات. احذف بعض الرومات "
+                "المغلقة القديمة (اللي تبدأ بـ «مغلقة-») ثم جرّب مرة ثانية.")
+    if isinstance(e, discord.Forbidden):
+        return "🚫 البوت ما عنده صلاحية «إدارة الرومات» (Manage Channels) — بلّغ فيصل يضبطها."
+    return f"{base_msg}\n(سبب ديسكورد: {str(e)[:180]})"
+
 # ---------------- live occupancy check (the «فحص الإشغال» button) ----------------
 def _avail_rows(lid, today):
     """FRESH targeted pull of one listing's reservations around today (the button
@@ -49374,9 +49425,10 @@ class MaintModal(discord.ui.Modal, title="🛠️ تذكرة صيانة جديد
                 str(self.location.value or "").strip(), str(self.access.value or "").strip())
             await interaction.followup.send(f"✅ انفتحت تذكرتك: {ch.mention}", ephemeral=True)
         except Exception as e:
-            print("maint ticket open error:", e)
-            await interaction.followup.send(
-                "⚠️ صار خطأ وما انفتحت التذكرة — جرّب مرة ثانية أو بلّغ فيصل.", ephemeral=True)
+            print("maint ticket open error:", repr(e))
+            await interaction.followup.send(_tk_open_error_msg(
+                e, "⚠️ صار خطأ وما انفتحت التذكرة — جرّب مرة ثانية أو بلّغ فيصل."),
+                ephemeral=True)
 
 async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
                              summary, details, location, access):
@@ -49384,11 +49436,10 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
     lid = int(lid)
     ukey, ulbl, uprio, ucolor = _urgency_rec(urgency)
     seq = _next_counter("maint_ticket")
-    cat = await _tk_category(guild, "maint")
     slug = re.sub(r"^ouja-", "", channel_name(unit_name))[:40]
-    ch = await guild.create_text_channel(
-        f"صيانة-{seq:03d}-{slug}", category=cat,
-        topic=f"ouja-ticket:maint lid:{lid} seq:{seq}")
+    ch = await _tk_make_channel(
+        guild, "maint", f"صيانة-{seq:03d}-{slug}",
+        f"ouja-ticket:maint lid:{lid} seq:{seq}")
     aname, aid = maint_assignee_for(lid)
     today = datetime.now(TZ).date()
     # the same ticket lands in the dashboard tracker (one source of truth)
@@ -49691,17 +49742,17 @@ class RRModal(discord.ui.Modal, title="🧾 طلب تعويض RR"):
                 f"✅ انفتح طلب التعويض: {ch.mention} — النسخة الإنجليزية بتنزل هناك خلال لحظات.",
                 ephemeral=True)
         except Exception as e:
-            print("rr ticket open error:", e)
-            await interaction.followup.send(
-                "⚠️ صار خطأ وما انفتح الطلب — جرّب مرة ثانية أو بلّغ فيصل.", ephemeral=True)
+            print("rr ticket open error:", repr(e))
+            await interaction.followup.send(_tk_open_error_msg(
+                e, "⚠️ صار خطأ وما انفتح الطلب — جرّب مرة ثانية أو بلّغ فيصل."),
+                ephemeral=True)
 
 async def _rr_open_ticket(interaction, issue_type, evidence, code, found, story, items_raw, total_raw):
     guild = interaction.guild
     seq = _next_counter("rr_ticket")
-    cat = await _tk_category(guild, "rr")
     slug = re.sub(r"[^a-z0-9]+", "-", code.lower()).strip("-")[:30] or issue_type
-    ch = await guild.create_text_channel(f"rr-{seq:03d}-{slug}", category=cat,
-                                         topic=f"ouja-ticket:rr seq:{seq} code:{code[:40]}")
+    ch = await _tk_make_channel(guild, "rr", f"rr-{seq:03d}-{slug}",
+                                f"ouja-ticket:rr seq:{seq} code:{code[:40]}")
     rec = {"kind": "rr", "seq": seq, "code": code, "type": issue_type,
            "evidence": list(evidence or []), "found_date": found,
            "narrative": story, "items_raw": items_raw, "total_raw": total_raw,
@@ -50342,20 +50393,20 @@ class ProcModal(discord.ui.Modal, title="🧾 تذكرة مشتريات جديد
                 str(self.items.value).strip(), str(self.amount.value).strip())
             await interaction.followup.send(f"✅ انفتحت تذكرة المشتريات: {ch.mention}", ephemeral=True)
         except Exception as e:
-            print("proc ticket open error:", e)
-            await interaction.followup.send(
-                "⚠️ صار خطأ وما انفتحت التذكرة — جرّب مرة ثانية أو بلّغ فيصل.", ephemeral=True)
+            print("proc ticket open error:", repr(e))
+            await interaction.followup.send(_tk_open_error_msg(
+                e, "⚠️ صار خطأ وما انفتحت التذكرة — جرّب مرة ثانية أو بلّغ فيصل."),
+                ephemeral=True)
 
 async def _proc_open_ticket(interaction, units, reason, last4, vendor, items, amount_raw):
     guild = interaction.guild
     seq = _next_counter("proc_ticket")
-    cat = await _tk_category(guild, "proc")
     last4c = (re.sub(r"\D", "", str(last4).translate(_AR_DIGIT_MAP))[-4:]
               or re.sub(r"\s+", "", str(last4))[:4] or "0000")
     vslug = _proc_vendor_slug(vendor)
     chname = (f"{last4c}-{vslug}" if vslug else f"{last4c}-مشتريات")[:90]
-    ch = await guild.create_text_channel(
-        chname, category=cat, topic=f"ouja-ticket:proc seq:{seq} q4:{last4c}")
+    ch = await _tk_make_channel(
+        guild, "proc", chname, f"ouja-ticket:proc seq:{seq} q4:{last4c}")
     now = datetime.now(TZ)
     rec = {"kind": "proc", "seq": seq, "last4": last4c, "vendor": vendor,
            "items": items, "amount_raw": amount_raw, "reason": reason,
