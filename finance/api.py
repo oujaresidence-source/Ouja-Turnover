@@ -103,7 +103,10 @@ async def work_queue(request):
     if not ov.get("ok"):
         return {"error": ov.get("error") or "overview_failed"}
 
-    ib = B._fb_inbox({})
+    # filter INSIDE _fb_inbox (pre-truncation) — the plain items list is capped
+    # at the newest 400, so an approval older than that would vanish from this
+    # group while the lane counter still showed it.
+    ib = B._fb_inbox({"filter": "needs_faisal"})
 
     # 1) >= 3000 awaiting Faisal (largest first — that's where the risk is)
     approvals = [i for i in ib["items"] if i.get("lane") == "needs_faisal_approval"]

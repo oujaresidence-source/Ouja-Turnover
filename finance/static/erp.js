@@ -244,6 +244,7 @@
       se_income: 'الدخل', se_fees: 'رسوم الإدارة', se_expenses: 'المصاريف',
       se_cleaning: 'النظافة', se_adjust: 'التسويات', se_net: 'الصافي',
       se_degraded: 'بيانات غير متاحة مؤقتاً — ما قدرنا نسحب الحجوزات من Hostaway، الأرقام هنا ناقصة. حدّث الصفحة بعد شوي، والنشر موقوف لين ترجع البيانات.',
+      se_lidless: '{n} سطر غير مرتبط بشقة — محسوب في الإجماليات ويظهر تحت «الكل»',
       se_resv: 'الحجوزات', se_excluded: 'المستبعدة', se_exclude: 'استبعد',
       se_include: 'احسبه', se_amount_req: 'المبلغ المستلم فعليًا (إلزامي للإدراج)',
       se_reason_req: 'السبب (إلزامي)…', se_manual_chip: 'تسوية يدوية',
@@ -543,6 +544,7 @@
       se_income: 'Income', se_fees: 'Management fee', se_expenses: 'Expenses',
       se_cleaning: 'Cleaning', se_adjust: 'Adjustments', se_net: 'Net',
       se_degraded: 'Data temporarily unavailable — the Hostaway pull failed, so these numbers are incomplete. Refresh in a bit; publishing is blocked until the data is back.',
+      se_lidless: '{n} line(s) not tied to a unit — counted in the totals, shown under «All»',
       se_resv: 'Reservations', se_excluded: 'Excluded', se_exclude: 'Exclude',
       se_include: 'Include', se_amount_req: 'Amount actually received (required to include)',
       se_reason_req: 'Reason (required)…', se_manual_chip: 'manual adjustment',
@@ -1620,7 +1622,7 @@
       el.disabled = true;
       api('/erp/api/exp/export', { method: 'POST', body: { id: id } }).then(function (r) {
         if ((r.queued || []).length) { expApplyCounts(r.tabs); expRemoveRow(id, t('x_exported_ok')); }
-        else { el.disabled = false; toast(((r.skipped || [])[0] || {}).reason || t('act_failed'), 'err'); }
+        else { el.disabled = false; toast(expBlockMsg(r.skipped) || t('act_failed'), 'err'); }   // friendly reason, not a raw code
       }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
     }
     else if (act === 'x-recheck') {
@@ -3089,7 +3091,9 @@
   function monthInput(id, val) {
     return '<input id="' + id + '" class="in date" type="month" value="' + esc(val) + '">';
   }
-  function nowMonth() { return new Date().toISOString().slice(0, 7); }
+  function nowMonth() {   // KSA month (UTC+3): plain toISOString is UTC and flips a day early at month end
+    return new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 7);
+  }
 
   function stRows(rows) {
     return (rows || []).map(function (r) {
@@ -4182,6 +4186,16 @@
         return (l.apartment || '') === unitName;  // owner-level/manual line (no lid): name fallback
       });
     }
+    // lines with no lid AND a non-matching apartment text are invisible in a
+    // unit tab while the subtotals still include them — count & say so.
+    var lidlessN = 0;
+    if (seUI.unit) {
+      ['exp_lines', 'adjustments', 'manual_income_lines'].forEach(function (k) {
+        (s[k] || []).forEach(function (l) {
+          if ((l.lid == null || String(l.lid) === '') && (l.apartment || '') !== unitName) lidlessN++;
+        });
+      });
+    }
     var inLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income != null; }));
     var nrLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income == null; }));
     var exLines = unitFilter((s.contract_excluded_lines || []).concat(s.manual_excluded_lines || [])
@@ -4236,6 +4250,8 @@
         : (
           seUnitsBar(s) +
           seUnitSummary(activePart) +
+          (lidlessN ? '<div class="grp-hint" style="padding:0 16px 8px">⚠ ' +
+            esc(t('se_lidless').replace('{n}', lidlessN)) + '</div>' : '') +
           '<div id="seTieBox"></div>' +
           '<div id="seDiffBox"></div>' +
           '<div class="stat-row">' +

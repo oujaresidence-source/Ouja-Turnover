@@ -7,6 +7,7 @@ and notifications all show identical numbers.
 """
 
 import datetime
+import re
 import traceback
 
 from . import db, engine, seed, notify, page, coverage
@@ -58,9 +59,10 @@ def _safe_public(fn):
     async def _w(request):
         try:
             return await fn(request)
-        except Exception as e:
-            traceback.print_exc()
-            return HOST.json_response({"ok": False, "error": "%s: %s" % (type(e).__name__, e)}, 200)
+        except Exception:
+            traceback.print_exc()          # full detail stays in the server log only —
+            return HOST.json_response(     # anonymous callers get a generic message
+                {"ok": False, "error": "صار خطأ مؤقت — حدّث الصفحة وجرّب مرة ثانية"}, 200)
     _w.__name__ = getattr(fn, "__name__", "w")
     return _w
 
@@ -204,8 +206,15 @@ async def api_employee_save(request):
     if not name:
         return HOST.json_response({"ok": False, "error": "الاسم مطلوب"}, 200)
     off_day = b.get("off_day")
-    off_day = int(off_day) if off_day not in (None, "") else None
+    try:
+        off_day = int(off_day) if off_day not in (None, "") else None
+    except (TypeError, ValueError):
+        return HOST.json_response({"ok": False, "error": "يوم الإجازة غير صحيح"}, 200)
+    if off_day is not None and not (0 <= off_day <= 6):
+        return HOST.json_response({"ok": False, "error": "يوم الإجازة لازم يكون بين الأحد (0) والسبت (6)"}, 200)
     color = b.get("color") or "#6A3A5D"
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", str(color)):
+        return HOST.json_response({"ok": False, "error": "اللون لازم يكون بصيغة ‎#RRGGBB"}, 200)
     emoji = (b.get("emoji") or "").strip()[:8] or None   # free-text marker; cap length, keep NULL when blank
     sort_order = int(b.get("sort_order") or 0)
     eid = b.get("id")
@@ -446,6 +455,11 @@ async def api_absence_add(request):
         return HOST.json_response({"ok": False, "error": "employee_id required"}, 200)
     start = (b.get("start_date") or _today_iso())[:10]
     end = (b.get("end_date") or start)[:10]
+    try:
+        datetime.date.fromisoformat(start)
+        datetime.date.fromisoformat(end)
+    except ValueError:
+        return HOST.json_response({"ok": False, "error": "تاريخ غير صحيح — الصيغة YYYY-MM-DD"}, 200)
     typ = b.get("type") or "sick"
     if typ not in ABSENCE_TYPES:
         return HOST.json_response({"ok": False, "error": "نوع غير صحيح"}, 200)

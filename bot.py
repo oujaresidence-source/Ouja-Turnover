@@ -4414,6 +4414,18 @@ def _oujact_route_eta(start, plan):
         print("oujact ETA error:", e)
         return {"available": False, "reason": "api_error", "legs": [], "total_drive_min": None}
 
+def _loop_guard(loop_obj, name):
+    """discord.py stops a @tasks.loop on its FIRST unhandled exception — one bad
+    cycle silently kills the feature until redeploy (the H2 persist_loop lesson).
+    Register a restart-on-error handler for every business loop."""
+    @loop_obj.error
+    async def _err(error):
+        print(f"{name} crashed — restarting:", error)
+        try:
+            loop_obj.restart()
+        except Exception as e:
+            print(f"{name} restart failed:", e)
+
 @tasks.loop(minutes=POLL_MINUTES)
 async def poll_loop():
     try:
@@ -4544,12 +4556,21 @@ def discount_pause_status():
     return {"paused": True, "until_ts": _discount_paused_until,
             "until_iso": datetime.fromtimestamp(_discount_paused_until, TZ).isoformat(timespec="minutes")}
 
+_lm_inflight = set()   # per-day step slugs currently running — the scheduled tier and
+                       # discount_catchup_loop can otherwise fire the SAME step at once
+                       # (duplicate PUTs + duplicate Discord summary)
+
 async def _run_tier(pct, label, trigger_source="scheduled", force=False, preview_only=None):
     if is_discount_paused():
         print(f"[{label}] skipped — discounts paused by owner until "
               f"{datetime.fromtimestamp(_discount_paused_until, TZ).strftime('%a %H:%M')}")
         _record_lm_run_skip(pct, label, trigger_source, "paused_by_owner")
         return
+    slug = "%s:%s" % (pricing_target_date_riyadh(now_riyadh()), _lm_step_slug(label, pct))
+    if slug in _lm_inflight:
+        print(f"[{label}] already running — duplicate trigger skipped")
+        return
+    _lm_inflight.add(slug)
     try:
         changes, today = await asyncio.to_thread(
             apply_discount_tier, pct, label=label, trigger_source=trigger_source,
@@ -4561,6 +4582,8 @@ async def _run_tier(pct, label, trigger_source="scheduled", force=False, preview
         await post_discount_summary(changes, today, pct, label)
     except Exception as e:
         print(f"{label} error:", e)
+    finally:
+        _lm_inflight.discard(slug)
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER1_HOUR, tzinfo=TZ))
 async def discount_tier1_loop():
@@ -8087,6 +8110,26 @@ async def _process_conversation_now(conversation_id):
         print(f"webhook: processing conversation {conversation_id} ({it['guest']})")
         await process_assistant_item(it, channel)
 
+_bg_tasks = set()
+
+def _bg_task(coro, name=""):
+    """create_task + a strong reference + exception logging. A bare
+    create_task can be GC'd mid-flight (weak refs only) and swallows its
+    exception silently — a webhook that dies this way just never answers."""
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+
+    def _done(task):
+        _bg_tasks.discard(task)
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc:
+            print(f"background task {name or 'anon'} failed:", exc)
+    t.add_done_callback(_done)
+    return t
+
 async def _handle_hook(request):
     secret = request.match_info.get("secret", "")
     if not hmac.compare_digest(secret, WEBHOOK_SECRET):
@@ -8112,10 +8155,10 @@ async def _handle_hook(request):
         print("hook invalidation error:", e)
     cid = _extract_conversation_id(payload)
     if cid:
-        asyncio.create_task(_process_conversation_now(cid))
+        _bg_task(_process_conversation_now(cid), "hook:process_conversation")
     else:
         # couldn't parse a conversation id -> just scan recent inbox (still near-instant)
-        asyncio.create_task(run_assistant_scan())
+        _bg_task(run_assistant_scan(), "hook:assistant_scan")
     return web.Response(status=200, text="ok")     # ack fast so Hostaway doesn't retry
 
 async def _handle_health(request):
@@ -16273,17 +16316,19 @@ function renderAllPageOps(){
   renderRevenueOpsSummary();
 }
 
+/* token rides the X-Token header on fetches — a ?token= query leaks into
+   server logs + browser history. Plain links/images still need ?token=. */
 async function api(path){
-  const r = await fetch(path + (path.indexOf('?')>=0?'&':'?') + 'token=' + encodeURIComponent(tok()));
+  const r = await fetch(path, {headers:{'X-Token': tok()}});
   if(r.status===401) throw 'unauthorized';
   return r.json();
 }
 async function post(path, body){
-  const r = await fetch(path + '?token=' + encodeURIComponent(tok()), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body||{})});
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json','X-Token': tok()}, body:JSON.stringify(body||{})});
   return r.json().catch(function(){return {}});
 }
 async function rdelete(path){
-  const r = await fetch(path + '?token=' + encodeURIComponent(tok()), {method:'DELETE'});
+  const r = await fetch(path, {method:'DELETE', headers:{'X-Token': tok()}});
   return r.json().catch(function(){return {}});
 }
 
@@ -16316,7 +16361,7 @@ function schedSetView(v){
   SCHED.view=v;
   var tabs=document.querySelectorAll('#schedTabs .sched-tab');
   for(var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sv')===v); }
-  if(v==='manage'&&!SCHED.manage){ api('/api/schedule/manage').then(function(m){ SCHED.manage=m; renderSched(); }); return; }
+  if(v==='manage'&&!SCHED.manage){ api('/api/schedule/manage').then(function(m){ SCHED.manage=m; renderSched(); }).catch(function(){ toast(labelText('تعذّر تحميل الإدارة','Could not load manage')); }); return; }
   renderSched();
 }
 function schedToggleManage(){ schedSetView('manage'); }
@@ -16331,7 +16376,7 @@ function renderSched(){
 function schedLoadWeekday(wd){
   api('/api/schedule/day?weekday='+wd).then(function(d){ if(d&&d.ok){ SCHED.day=d.day; SCHED.exp={}; SCHED.view='today';
     var tabs=document.querySelectorAll('#schedTabs .sched-tab'); for(var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sv')==='today'); }
-    renderSched(); } });
+    renderSched(); } }).catch(function(){ toast(labelText('تعذّر التحميل','Load failed')); });
 }
 
 /* ---------- Today ---------- */
@@ -16517,7 +16562,7 @@ function schedSetOwner(aptId, empId){
 function schedRefreshDayWeek(){
   Promise.all([api('/api/schedule/day'),api('/api/schedule/week')]).then(function(r){
     if(r[0]&&r[0].ok){ SCHED.day=r[0].day; } if(r[1]&&r[1].week){ SCHED.week=r[1].week; }
-  });
+  }).catch(function(){});
 }
 function schedAptViewSet(v){ SCHED.aptView=v; SCHED.openApt=null; renderSched(); }
 function schedAptSearch(v){ SCHED.aptQ=v; schedRenderApts(); }
@@ -16558,7 +16603,7 @@ function schedAfterWrite(reopenManage){
   return Promise.all([api('/api/schedule/manage'), api('/api/schedule/day'), api('/api/schedule/week')]).then(function(r){
     SCHED.manage=r[0]; if(r[1]&&r[1].ok){ SCHED.day=r[1].day; } if(r[2]&&r[2].week){ SCHED.week=r[2].week; }
     renderSched();
-  });
+  }).catch(function(){ toast(labelText('تعذّر تحديث التقويم','Calendar refresh failed')); });
 }
 function schedSaveEmp(id){
   var body={name:document.getElementById('se_name_'+id).value, off_day:document.getElementById('se_off_'+id).value,
@@ -16787,7 +16832,6 @@ function badgeCount(key){
     const c = (D.reviews && D.reviews.counts) || {};
     return c.unfixed || 0;
   }
-  if(key==='expenses') return ((D.expSummary||{}).queue) || 0;
   if(key==='listings') return ((D.listings && D.listings.summary) || {}).needs_setup || 0;
   return 0;
 }
@@ -40541,7 +40585,9 @@ def _fb_inbox(filters=None):
               "ready_to_link": lanes.get("ready_to_link", 0), "ready_to_post": lanes.get("ready_for_journal", 0),
               "failed": sum(1 for i in items if i.get("status") == "failed")}
     items.sort(key=lambda i: (i.get("date") or ""), reverse=True)
-    return {"items": items[:400], "counts": counts, "lanes": lanes, "unmatched_breakdown": unmatched_breakdown}
+    return {"items": items[:400], "counts": counts, "lanes": lanes,
+            "truncated": len(items) > 400,   # counts cover EVERYTHING; items are the newest 400
+            "unmatched_breakdown": unmatched_breakdown}
 
 def _fb_fix_statuses(actor=""):
     """Backfill/normalize stored link flags so resolved lanes are consistent (does NOT re-import or
@@ -52697,6 +52743,19 @@ async def on_ready():
           f"premium={CLAUDE_MODEL_PREMIUM} · "
           f"auto-send simple={'ON' if ASSISTANT_AUTO else 'OFF'} · "
           f"escalation-ack={'ON' if ASSISTANT_ESC_ACK else 'OFF'} -> #{ASSISTANT_CHANNEL}")
+    # LOW-1: restart-on-crash guards — one unhandled exception must never
+    # silently kill a business loop until the next redeploy (H2 lesson).
+    for _lp, _nm in ((reminder_loop, "reminder_loop"),
+                     (discount_catchup_loop, "discount_catchup_loop"),
+                     (escalation_reping_loop, "escalation_reping_loop"),
+                     (revenue_loop, "revenue_loop"),
+                     (price_opp_loop, "price_opp_loop"),
+                     (weekly_review_loop, "weekly_review_loop"),
+                     (watchman_loop, "watchman_loop")):
+        if getattr(_lp, "_error_guarded", False):
+            continue                    # on_ready can re-fire on re-identify
+        _loop_guard(_lp, _nm)
+        _lp._error_guarded = True
     if not poll_loop.is_running():
         poll_loop.start()
     if not oujact_daily_loop.is_running():

@@ -10,7 +10,8 @@ schedule_absences (Ouja ad-hoc-leave extension). FK integrity:
 """
 
 import datetime
-from contextlib import closing
+import threading
+from contextlib import closing, contextmanager
 
 from brain import db as _bdb
 
@@ -62,17 +63,21 @@ CREATE INDEX IF NOT EXISTS idx_sched_abs_date  ON schedule_absences(start_date, 
 """
 
 _inited = set()
+_init_lock = threading.Lock()
 
 
 def _ensure():
     path = _bdb.db_path()
     if path in _inited:
         return
-    with closing(_bdb.connect()) as cx:
-        cx.executescript(SCHEMA)
-        _migrate(cx)
-        cx.commit()
-    _inited.add(path)
+    with _init_lock:                # two threads racing the first init would
+        if path in _inited:         # run SCHEMA/migrations concurrently
+            return
+        with closing(_bdb.connect()) as cx:
+            cx.executescript(SCHEMA)
+            _migrate(cx)
+            cx.commit()
+        _inited.add(path)
 
 
 def _migrate(cx):
@@ -133,6 +138,21 @@ def executescript(sql):
     with closing(_bdb.connect()) as cx:
         cx.executescript(sql)
         cx.commit()
+
+
+@contextmanager
+def transaction():
+    """One connection, one commit — a multi-statement write (e.g. reset+reseed)
+    must be all-or-nothing; per-statement commits could wipe the schedule and
+    then die mid-seed."""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        try:
+            yield cx
+            cx.commit()
+        except Exception:
+            cx.rollback()
+            raise
 
 
 # ---- typed readers ----

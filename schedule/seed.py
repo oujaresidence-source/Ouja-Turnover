@@ -25,21 +25,29 @@ DEFAULT_TITLE = "تقويم موظفي عوجا"
 DEFAULT_SUBTITLE = "مسؤوليات التغطية اليومية"
 
 
-def _insert_seed():
+def _insert_seed(cx=None):
+    """Insert the default data. With `cx` every row rides ONE open transaction
+    (reset_to_default); without it each row commits on its own (first boot)."""
+    def ex(sql, args=()):
+        if cx is not None:
+            return cx.execute(sql, args).lastrowid
+        return db.execute(sql, args)
     name_to_id = {}
     for e in EMPLOYEES:
-        eid = db.execute(
+        eid = ex(
             "INSERT INTO schedule_employees(name,off_day,color,emoji,sort_order,created_at) VALUES(?,?,?,?,?,?)",
             (e["name"], e["off_day"], e["color"], e.get("emoji"), e["sort_order"], db.now_iso()))
         name_to_id[e["name"]] = eid
     for owner, names in APARTMENTS.items():
         for so, nm in enumerate(names):
-            db.execute(
+            ex(
                 "INSERT INTO schedule_apartments(name,owner_id,sort_order,created_at) VALUES(?,?,?,?)",
                 (nm, name_to_id[owner], so, db.now_iso()))
-    if not db.settings():
-        db.execute("INSERT OR REPLACE INTO schedule_settings(id,title,subtitle) VALUES(1,?,?)",
-                   (DEFAULT_TITLE, DEFAULT_SUBTITLE))
+    has_settings = (cx.execute("SELECT COUNT(*) FROM schedule_settings").fetchone()[0]
+                    if cx is not None else bool(db.settings()))
+    if not has_settings:
+        ex("INSERT OR REPLACE INTO schedule_settings(id,title,subtitle) VALUES(1,?,?)",
+           (DEFAULT_TITLE, DEFAULT_SUBTITLE))
 
 
 def seed_if_empty():
@@ -52,12 +60,12 @@ def seed_if_empty():
 
 
 def reset_to_default():
-    """Editor-only hard reset: wipe ALL schedule_* rows and re-seed the defaults."""
-    db.executescript(
-        "DELETE FROM schedule_coverage_overrides;"
-        "DELETE FROM schedule_absences;"
-        "DELETE FROM schedule_apartments;"
-        "DELETE FROM schedule_employees;"
-        "DELETE FROM schedule_settings;")
-    _insert_seed()
+    """Editor-only hard reset: wipe ALL schedule_* rows and re-seed the defaults —
+    in ONE transaction, so a mid-seed failure rolls back instead of leaving the
+    schedule wiped."""
+    with db.transaction() as cx:
+        for t in ("schedule_coverage_overrides", "schedule_absences",
+                  "schedule_apartments", "schedule_employees", "schedule_settings"):
+            cx.execute("DELETE FROM " + t)
+        _insert_seed(cx)
     return {"reset": True, "employees": len(db.employees()), "apartments": len(db.apartments())}

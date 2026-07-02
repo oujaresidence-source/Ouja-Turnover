@@ -1037,6 +1037,15 @@ def compute_owner_range(owner, start, end, apt=None):
                 footnotes.append({"kind": "partial_month_manual_excluded", "month": mkey,
                                   "text_ar": mkey + ": شهر جزئي — التسويات اليدوية ما تدخل بالتناسب",
                                   "text_en": mkey + ": partial month — manual edits not pro-rated"})
+                try:
+                    _cl = float((rep.get("cleaning") or {}).get("total") or 0)
+                except (TypeError, ValueError):
+                    _cl = 0
+                if _cl:
+                    # cleaning is a flat monthly fee — a partial month still carries it whole
+                    footnotes.append({"kind": "partial_month_full_cleaning", "month": mkey,
+                                      "text_ar": mkey + ": رسوم النظافة الشهرية محسوبة كاملة رغم إن الشهر جزئي",
+                                      "text_en": mkey + ": monthly cleaning charged in full for the partial month"})
             elif rep is not None and not owner_level:
                 footnotes.append({"kind": "apt_filter_owner_manual_excluded", "month": mkey,
                                   "text_ar": mkey + ": التسويات اليدوية على مستوى المالك تظهر في تقرير المالك",
@@ -1522,6 +1531,7 @@ def cycle_board(mkey):
                      if (r.get("owner") or "").strip()})
     links = getattr(B, "_owner_links", None) or {}
     rows = []
+    _dirty = False   # batch the sent→opened auto-flips into ONE save after the loop
     for o in owners:
         rec = stmt_rec(o, mkey)
         status = (rec or {}).get("status") or "draft"
@@ -1538,7 +1548,7 @@ def cycle_board(mkey):
             rec.setdefault("status_log", []).append(
                 {"at": lk["opened_at"], "by": "owner-open", "to": "opened"})
             status = "opened"
-            _stmt_save()
+            _dirty = True
         try:
             rep = B._owner_month_report(o, mkey)
         except Exception:
@@ -1559,6 +1569,8 @@ def cycle_board(mkey):
                      "url": ("/fin/o/" + lk["token"]) if (lk.get("token") and lk.get("active")) else "",
                      "opened_at": lk.get("opened_at") or ""},
         })
+    if _dirty:
+        _stmt_save()
     # flagged first («راجع هذي قبل الإرسال»), then by name
     rows.sort(key=lambda r: (not r["flagged"], r["owner"]))
     counts = {"total": len(rows),

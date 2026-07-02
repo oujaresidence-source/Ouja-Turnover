@@ -149,8 +149,16 @@ h1{font-size:19px;margin:0 0 10px}p{font-size:14.5px;color:#6E6E73;line-height:1
 
 
 async def _h_version(request):
-    """Ungated build stamp — no business data, just proof of what's deployed."""
-    return web.json_response(version_info())
+    """Ungated build stamp — no business data, just proof of what's deployed.
+    The storage `top` breakdown lists STATE_DIR entry names, so that part is
+    login-only; anonymous callers still get free_mb/writable (the disk-full
+    diagnosis works even when logins are broken)."""
+    info = version_info()
+    if not api.authed(request):
+        st = info.get("storage")
+        if isinstance(st, dict):
+            st.pop("top", None)
+    return web.json_response(info)
 
 
 async def _h_erp(request):
