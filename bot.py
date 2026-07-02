@@ -3075,6 +3075,58 @@ async def ensure_channel(guild, name, category=None):
             print(f"channel move error ({name}):", e)
     return ch
 
+def _category_family(guild, category):
+    """The category plus its overflow twins («<name> ٢» …). Turnover channels
+    spill there when Discord's 50-channel cap fills the category (M6 — same
+    fix as the cb779d3 ticket flow), so every existence scan must cover them."""
+    fam = [category]
+    for suf in _TK_OVERFLOW_SUFFIXES:
+        oname = f"{category.name} {suf}"
+        cat = next((c for c in guild.categories
+                    if _tk_cat_norm(c.name) == _tk_cat_norm(oname)), None)
+        if cat is not None:
+            fam.append(cat)
+    return fam
+
+async def _make_channel_spill(guild, category, name, topic=None):
+    """guild.create_text_channel that survives the 50-channel category cap by
+    spilling into overflow categories («<name> ٢» …). Any other Discord error
+    bubbles up so the caller can surface the REAL reason (M6)."""
+    try:
+        return await guild.create_text_channel(name, category=category, topic=topic)
+    except discord.HTTPException as e:
+        if not _tk_category_full(e):
+            raise
+    for suf in _TK_OVERFLOW_SUFFIXES:
+        oname = f"{category.name} {suf}"
+        cat = next((c for c in guild.categories
+                    if _tk_cat_norm(c.name) == _tk_cat_norm(oname)), None)
+        if cat is None:
+            cat = await guild.create_category(oname)
+        try:
+            return await guild.create_text_channel(name, category=cat, topic=topic)
+        except discord.HTTPException as e:
+            if _tk_category_full(e):
+                continue          # this overflow is full too — try the next one
+            raise
+    # every overflow category is also full — last resort: guild root (no category)
+    return await guild.create_text_channel(name, topic=topic)
+
+async def _turnover_create_failed_alert(guild, unit, err):
+    """M6: a cleaner who never gets their channel is INVISIBLE if we only
+    print. Shout once (per unit, 6h) in the escalations channel with the real,
+    actionable reason."""
+    try:
+        if not _once_claim(f"turnover-open-fail:{unit}"):
+            return
+        cat = await get_assistant_category(guild)
+        ch = await ensure_channel(guild, ESCALATION_CHANNEL, cat)
+        if ch:
+            await ch.send("🚨 **ما قدرنا نفتح روم تنظيف** — الوحدة: **%s**\n%s"
+                          % (unit, _tk_open_error_msg(err, "خطأ غير متوقع من ديسكورد")))
+    except Exception as e2:
+        print("turnover alert error:", e2)
+
 async def sync_checkouts():
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
@@ -3082,12 +3134,13 @@ async def sync_checkouts():
         return
     category = await get_category(guild)
 
-    # reservation ids that already have a live channel
+    # reservation ids that already have a live channel (incl. overflow categories — M6)
     existing = set()
-    for ch in category.text_channels:
-        rid = parse_topic_res(ch.topic)
-        if rid:
-            existing.add(rid)
+    for cat in _category_family(guild, category):
+        for ch in cat.text_channels:
+            rid = parse_topic_res(ch.topic)
+            if rid:
+                existing.add(rid)
     handled.update(existing)
 
     items = await asyncio.to_thread(fetch_upcoming_checkouts)
@@ -3109,8 +3162,8 @@ async def sync_checkouts():
                     topic += f" oujact-key:{int(it['lid'])}:{it['checkout'].date().isoformat()}"
             except (TypeError, ValueError, AttributeError):
                 pass
-            ch = await guild.create_text_channel(
-                channel_name(it["listing"]), category=category, topic=topic)
+            ch = await _make_channel_spill(
+                guild, category, channel_name(it["listing"]), topic=topic)
             embed = discord.Embed(title="🧹 Turnover Ready", color=GOLD)
             embed.add_field(name="Unit", value=it["listing"], inline=False)
             embed.add_field(name="Guest", value=it["guest"], inline=True)
@@ -3131,6 +3184,7 @@ async def sync_checkouts():
             print(f"Opened channel for {it['listing']} (res {it['res_id']}){note}")
         except Exception as e:
             print("create error:", e)
+            await _turnover_create_failed_alert(guild, it["listing"], e)   # M6: never fail silently
 
 # ---- OujaCT (in-house cleaning team) turnover channels + daily schedule ----
 def _schedule_hostaway_listings():
@@ -3236,17 +3290,19 @@ async def sync_oujact_turnovers(day=None):
     else:                                                   # automatic: ~12h before checkout
         items = [it for it in items if it["checkout"] <= now + timedelta(hours=HOURS_AHEAD)]
     # index existing OujaCT channels by the STABLE key; keep a reservation-id fallback for legacy
+    # (incl. overflow categories — M6: a spilled channel that isn't scanned gets duplicated)
     by_key, by_res = {}, {}
-    for ch in category.text_channels:
-        topic = ch.topic or ""
-        if "oujact:1" not in topic:
-            continue
-        k = parse_topic_oujact_key(topic)
-        if k:
-            by_key[k] = ch
-        rid = parse_topic_res(topic)
-        if rid:
-            by_res[rid] = ch
+    for cat in _category_family(guild, category):
+        for ch in cat.text_channels:
+            topic = ch.topic or ""
+            if "oujact:1" not in topic:
+                continue
+            k = parse_topic_oujact_key(topic)
+            if k:
+                by_key[k] = ch
+            rid = parse_topic_res(topic)
+            if rid:
+                by_res[rid] = ch
     changed = []
     for it in items:
         key = "{}:{}".format(it["lid"], it["checkout_date"])
@@ -3262,7 +3318,7 @@ async def sync_oujact_turnovers(day=None):
                 cover = _oujact_cover_info(it["listing"], it["checkout_date"], it["lid"])
                 cover_emoji = (cover.get("emoji") if cover else "") or "⚪"
                 want = _oujact_channel(it["listing"], it["checkin_today"], team_name, cover_emoji)
-                ch = await guild.create_text_channel(want, category=category, topic=topic)
+                ch = await _make_channel_spill(guild, category, want, topic=topic)
                 await ch.send(embed=_oujact_card_embed(it, team_name, cover), view=CleaningDoneView())
                 by_key[key] = ch
                 changed.append({"unit": it["listing"], "channel": want,
@@ -3280,6 +3336,8 @@ async def sync_oujact_turnovers(day=None):
                                     "action": "checkin_flagged", "checkin": True})
         except Exception as e:
             print("OujaCT channel error:", e)
+            if ch is None:                  # creation failed → the cleaner has NO room; shout (M6)
+                await _turnover_create_failed_alert(guild, it["listing"], e)
         if ch is not None:
             _oujact_mark_opened(key)        # remember it exists so we never auto-reopen it once closed
     if pruned:
@@ -3301,7 +3359,8 @@ async def _oujact_cleanup_channels(guild=None):
     _oujact_prune_done()
     _oujact_prune_opened()
     seen, deleted = set(), 0
-    for ch in list(category.text_channels):
+    _fam_channels = [ch for cat in _category_family(guild, category) for ch in cat.text_channels]
+    for ch in list(_fam_channels):
         topic = ch.topic or ""
         if "oujact:1" not in topic:
             continue
@@ -49331,28 +49390,11 @@ async def _tk_make_channel(guild, kind, name, topic):
     50 channels and we KEEP closed tickets as an audit trail, so a busy category
     fills up and every new ticket used to die with a generic error. When the
     primary category is full we spill into an overflow category («صيانه ٢» …) so
-    tickets never stop opening. Any other Discord error bubbles up so the caller
-    can show the real reason."""
+    tickets never stop opening (shared _make_channel_spill — M6 gave the same
+    protection to turnover channels). Any other Discord error bubbles up so the
+    caller can show the real reason."""
     base = await _tk_category(guild, kind)
-    try:
-        return await guild.create_text_channel(name, category=base, topic=topic)
-    except discord.HTTPException as e:
-        if not _tk_category_full(e):
-            raise
-    for suf in _TK_OVERFLOW_SUFFIXES:
-        oname = f"{base.name} {suf}"
-        cat = next((c for c in guild.categories
-                    if _tk_cat_norm(c.name) == _tk_cat_norm(oname)), None)
-        if cat is None:
-            cat = await guild.create_category(oname)
-        try:
-            return await guild.create_text_channel(name, category=cat, topic=topic)
-        except discord.HTTPException as e:
-            if _tk_category_full(e):
-                continue        # this overflow is full too — try the next one
-            raise
-    # every overflow category is also full — last resort: guild root (no category)
-    return await guild.create_text_channel(name, topic=topic)
+    return await _make_channel_spill(guild, base, name, topic)
 
 def _tk_open_error_msg(e, base_msg):
     """Turn a channel-creation failure into a clear, ACTIONABLE Arabic message
