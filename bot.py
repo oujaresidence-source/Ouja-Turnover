@@ -6739,6 +6739,28 @@ def _once_claim(name, ttl=None):
         print("once_claim error (allowing):", e)
         return True                                          # never block a legit send on an FS error
 
+def _once_release(name):
+    """Undo a claim (only after the claimed action FAILED) so a retry can go through.
+    Without this, a failed send poisons the dedup key for 6h and every retry is
+    silently suppressed while the team sees a green checkmark (the H1 bug)."""
+    import hashlib
+    try:
+        marker = os.path.join(_state_path("once_locks"),
+                              hashlib.sha1(str(name).encode("utf-8")).hexdigest()[:24])
+        os.remove(marker)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception as e:
+        print("once_release error:", e)
+        return False
+
+# send_guest_message outcomes a caller MUST distinguish (a suppressed no-op that
+# reads as success means a guest silently never gets a reply):
+SEND_BLOCKED_KILL = "blocked_kill_switch"   # kill switch on — nothing was sent
+SEND_SUPPRESSED = "suppressed_duplicate"    # identical message already delivered — nothing sent
+# success → the Hostaway api_post result (a dict); failure → the exception propagates.
+
 def send_guest_message(conversation_id, body, comm_type="email"):
     if ASSISTANT_SEND_KILL:
         print(f"[KILL] guest send BLOCKED (conv {conversation_id}): {str(body)[:80]}")
@@ -6746,17 +6768,22 @@ def send_guest_message(conversation_id, body, comm_type="email"):
             log_event("assistant", f"⛔ إرسال موقوف (kill switch) · conv {conversation_id}")
         except Exception:
             pass
-        return None
+        return SEND_BLOCKED_KILL
     # de-dup on the RAW body (before the randomized signature) so the same message can't go twice
-    if not _once_claim(f"send:{conversation_id}:{(body or '').strip()}"):
+    claim_key = f"send:{conversation_id}:{(body or '').strip()}"
+    if not _once_claim(claim_key):
         print(f"[dedup] duplicate guest message suppressed · conv {conversation_id}")
         try:
             log_event("assistant", f"⏭️ منع رسالة مكرّرة · conv {conversation_id}")
         except Exception:
             pass
-        return None
-    return api_post(f"/conversations/{conversation_id}/messages",
-                    {"body": with_signature(body), "communicationType": comm_type})
+        return SEND_SUPPRESSED
+    try:
+        return api_post(f"/conversations/{conversation_id}/messages",
+                        {"body": with_signature(body), "communicationType": comm_type})
+    except Exception:
+        _once_release(claim_key)   # failed send must not poison the retry (H1)
+        raise
 
 # pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
 _escalations = {}
@@ -6855,8 +6882,19 @@ class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسا
         await interaction.response.defer(thinking=True)   # ack now; sending can be slow
         text = str(self.box.value).strip()
         try:
-            await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
-                                    self.item["comm_type"])
+            r = await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
+                                        self.item["comm_type"])
+            if r == SEND_BLOCKED_KILL:
+                await interaction.followup.send(
+                    "⛔ ما تم الإرسال — الإرسال للضيوف موقوف حالياً (kill switch). "
+                    "الكرت باقي زي ما هو.", ephemeral=True)
+                return
+            if r == SEND_SUPPRESSED:
+                _pending_replies.pop(self.message_id, None)
+                _replied_msgs.add(self.message_id)
+                await interaction.followup.send(
+                    "⚠️ ما انرسلت مرة ثانية — نفس الرد وصل الضيف قبل قليل (منع تكرار).")
+                return
             # learning: capture the team's edited reply as a strong correction signal
             record_learning(self.item, self._original_draft, text,
                             via="discord_edit", approver=str(interaction.user))
@@ -7067,8 +7105,20 @@ class ConfirmActionView(discord.ui.View):
                 return
             await interaction.response.edit_message(content="⏳ جاري الإرسال…", view=None)
             try:
-                await asyncio.to_thread(send_guest_message, item["conversation_id"], draft,
-                                        item["comm_type"])
+                r = await asyncio.to_thread(send_guest_message, item["conversation_id"], draft,
+                                            item["comm_type"])
+                if r == SEND_BLOCKED_KILL:
+                    await interaction.followup.send(
+                        "⛔ ما تم الإرسال — الإرسال للضيوف موقوف حالياً (kill switch). "
+                        "الكرت باقي زي ما هو.", ephemeral=True)
+                    return
+                if r == SEND_SUPPRESSED:
+                    await self._disable_card(interaction)
+                    _pending_replies.pop(self.message_id, None)
+                    _replied_msgs.add(self.message_id)
+                    await interaction.followup.send(
+                        "⚠️ ما انرسلت مرة ثانية — نفس الرد وصل الضيف قبل قليل (منع تكرار).")
+                    return
                 # learning: send-as-is means the team approved the draft verbatim
                 record_learning(item, draft, draft,
                                 via="discord_send", approver=str(interaction.user))
@@ -7782,8 +7832,14 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                 pass
             return
         try:
-            await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
-                                    item["comm_type"])
+            r = await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
+                                        item["comm_type"])
+            if r == SEND_SUPPRESSED:
+                log_event("assistant", f"⏭️ رد تلقائي مكرّر — ما انرسل · {g} · {item['unit']}")
+                return
+            if r == SEND_BLOCKED_KILL:
+                print("auto-send blocked by kill switch — falling back to approval card")
+                raise RuntimeError("kill switch")   # → the except below falls through to approval
             # learning: auto-sent at high confidence (still useful — confirms the
             # bot's wording on simple replies, helps reinforce the pattern)
             record_learning(item, reply, reply, via="auto", approver="(auto)")
@@ -31337,8 +31393,15 @@ async def _api_send(request):
     original_draft = data.get("draft") or ""
     reply = (b.get("text") or original_draft).strip()
     try:
-        await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
-                                item.get("comm_type", "email"))
+        r = await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
+                                    item.get("comm_type", "email"))
+        if r == SEND_BLOCKED_KILL:
+            _pending_replies[mid] = data          # keep the card — nothing was sent
+            _replied_msgs.discard(mid)
+            return _json({"error": "الإرسال للضيوف موقوف حالياً (kill switch) — ما انرسل شي"}, 409)
+        if r == SEND_SUPPRESSED:
+            return _json({"ok": True, "suppressed": True,
+                          "note": "نفس الرد وصل الضيف قبل قليل — ما انرسل مرة ثانية"})
         # learning: dashboard send — if the user changed the text in the textarea
         # vs the original draft, that's a correction signal (was_edited=True via diff)
         record_learning(item, original_draft, reply,
