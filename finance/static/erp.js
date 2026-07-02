@@ -3979,7 +3979,14 @@
   function seIncBlock(s, unitName) {
     var parts = s.apartments || [];
     var lines = s.manual_income_lines || [];
-    if (unitName) lines = lines.filter(function (l) { return (l.apartment || '') === unitName; });
+    var act0 = seActivePart(s);
+    if (act0) {
+      var alid2 = String(act0.lid);
+      lines = lines.filter(function (l) {
+        if (l.lid != null && String(l.lid) !== '') return String(l.lid) === alid2;
+        return (l.apartment || '') === unitName;
+      });
+    }
     var rows = lines.map(function (l) {
       return '<div class="wq-row" data-incid="' + esc(String(l.id)) + '" data-inclid="' + esc(String(l.lid != null ? l.lid : '')) + '">' +
         '<div class="wq-main"><div class="wq-top"><b>' + esc(l.label || '—') + '</b>' +
@@ -4164,8 +4171,14 @@
     if (seUI.unit && !activePart) seUI.unit = '';
     var unitName = activePart ? (activePart.apartment || '') : '';
     function unitFilter(arr) {
-      if (!unitName) return arr;
-      return arr.filter(function (l) { return (l.apartment || '') === unitName; });
+      if (!seUI.unit) return arr;                 // «الكل» → every line
+      var alid = String(seUI.unit);               // the selected unit IS a listing id (data-lid)
+      return arr.filter(function (l) {
+        // Money is tied to a unit by its Hostaway listing id — match on that, so a line
+        // whose stored apartment TEXT differs from the listing name is never hidden.
+        if (l.lid != null && String(l.lid) !== '') return String(l.lid) === alid;
+        return (l.apartment || '') === unitName;  // owner-level/manual line (no lid): name fallback
+      });
     }
     var inLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income != null; }));
     var nrLines = unitFilter((s.resv_lines || []).filter(function (l) { return l.income == null; }));
