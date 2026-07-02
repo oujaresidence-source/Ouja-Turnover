@@ -545,6 +545,14 @@ def get_listings_map():
     _listings["map"], _listings["ts"] = m, time.time()
     return m
 
+async def get_listings_map_async():
+    """M5: a COLD get_listings_map() paginates Hostaway synchronously (up to
+    ~95s with retries), freezing every web request + the Discord heartbeat when
+    called from an async handler. Async handlers must use this wrapper."""
+    if _listings["map"] and time.time() - _listings["ts"] < 3600:
+        return _listings["map"]                   # warm hit — no thread hop
+    return await asyncio.to_thread(get_listings_map)
+
 # ====================================================================
 #  LISTINGS MASTER STORE — the single source of truth every feature reads.
 #  Synced from Hostaway (NEW ✨ / CHANGED / DEACTIVATED detection, never deletes)
@@ -25349,7 +25357,7 @@ async def _handle_diag_musaed(request):
            "specialized team", "escalated", "i've flagged", "flagged this")
 
     def _build():
-        listings = get_listings_map()
+        listings = get_listings_map()      # sync helper — runs via to_thread, off the loop
         threads, scanned = [], 0
         try:
             data = api_get("/conversations", params={"limit": 100, "offset": page * 100,
@@ -31172,7 +31180,7 @@ async def _api_pricing_activate(request):
     except Exception:
         return _json({"error": "bad lid"}, 400)
     set_pricing_activated(lid, on)
-    nm = (get_listings_map() or {}).get(lid) or str(lid)
+    nm = ((await get_listings_map_async()) or {}).get(lid) or str(lid)
     log_event("pricing", f"تسعير · {'تفعيل ✅' if on else 'إيقاف ⏸'} · {nm}")
     return _json({"ok": True, "lid": lid, "on": on})
 
@@ -31189,7 +31197,7 @@ async def _api_pricing_lean(request):
     if not set_pe_lean(lid, val):
         return _json({"error": "bad lean"}, 400)
     _pe_rec_cache["ts"] = 0          # force the next recs read to recompute with the new dial
-    nm = (get_listings_map() or {}).get(lid) or str(lid)
+    nm = ((await get_listings_map_async()) or {}).get(lid) or str(lid)
     log_event("pricing", f"تسعير · الميل {val} · {nm}")
     return _json({"ok": True, "lid": lid, "lean": val})
 
@@ -33926,8 +33934,10 @@ async def _api_guests_list(request):
     try:
         _t = datetime.now(TZ).date()
         _e = _t + timedelta(days=21)
-        _data = api_get("/reservations", params={"arrivalStartDate": _t.isoformat(),
-                                                 "arrivalEndDate": _e.isoformat(), "limit": 200})
+        # M5: api_get can block up to ~95s with retries — never on the event loop
+        _data = await asyncio.to_thread(
+            api_get, "/reservations", params={"arrivalStartDate": _t.isoformat(),
+                                              "arrivalEndDate": _e.isoformat(), "limit": 200})
         for r in (_data.get("result") or []):
             nm = (r.get("guestName") or "").strip().lower()
             a = _parse_date(r.get("arrivalDate"))
@@ -33999,7 +34009,7 @@ async def _api_cleaning_schedule(request):
     """Dashboard view of every unit's deep-clean state."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    listings = get_listings_map() or {}
+    listings = (await get_listings_map_async()) or {}
     today = datetime.now(TZ).date()
     if not _catalog_units:
         await asyncio.to_thread(load_catalog, True)
@@ -34100,7 +34110,7 @@ async def _api_cleaning_import_csv(request):
         return _json({"error": f"upload error: {e}"}, 400)
 
     import csv as _csv, io as _io
-    listings = get_listings_map() or {}
+    listings = (await get_listings_map_async()) or {}
     norm_to_lid = {norm_unit(name): lid for lid, name in listings.items()}
     rows = list(_csv.reader(_io.StringIO(raw)))
     if not rows:
@@ -34257,7 +34267,7 @@ async def _api_cleaning_import_xlsx(request):
     except Exception as e:
         return _json({"error": f"not a valid xlsx: {e}"}, 400)
 
-    listings = get_listings_map() or {}
+    listings = (await get_listings_map_async()) or {}
     norm_to_lid = {norm_unit(n): lid for lid, n in listings.items()}
     today = datetime.now(TZ).date()
     # treat "unknown" as 90 days ago so the scheduler picks them immediately
@@ -34841,7 +34851,7 @@ async def _api_reviews_insights(request):
         return _json({"error": "unauthorized"}, 401)
     seed = _reviews_insights or {}
     seed_apts = seed.get("apartments", {}) or {}
-    listings = get_listings_map()
+    listings = await get_listings_map_async()
     live = {}
     for rev in _reviews.values():
         lid = rev.get("listing_id")
@@ -35175,7 +35185,7 @@ async def _api_reviews_open_ticket(request):
         existing = next((t for t in _tickets if t.get("id") == state["ticket_id"]), None)
         if existing:
             return _json({"ok": True, "ticket": _ticket_view(existing), "existing": True})
-    listings = get_listings_map() or {}
+    listings = (await get_listings_map_async()) or {}
     unit_name = listings.get(rev.get("listing_id"), "") or "—"
     ai = _review_ai_cache.get(rid) or {}
     title = f"مراجعة سلبية · {unit_name} · {rev.get('guest_name','—')} ({rev.get('rating',0)}/5)"[:120]
@@ -36034,7 +36044,7 @@ async def _api_finance_owners(request):
         return _json({"error": "unauthorized"}, 401)
     if request.method == "GET":
         ql = (request.query.get("q") or "").strip().lower()
-        listings = get_listings_map() or {}
+        listings = (await get_listings_map_async()) or {}
         rows = []
         for rec in _owner_registry.values():
             if ql and ql not in (str(rec.get("apartment", "")) + " " + str(rec.get("owner", ""))).lower():
@@ -36587,7 +36597,7 @@ async def _api_expenses_resolve_apartment(request):
         lid = int(lid)
     except Exception:
         return _json({"error": "bad listing_id"}, 400)
-    name = (get_listings_map() or {}).get(lid)
+    name = ((await get_listings_map_async()) or {}).get(lid)
     if name:
         e["apartment"] = name
     old_lid = e.get("listing_id")
@@ -41858,7 +41868,7 @@ async def _api_cleaning_public(request):
         return _json({"error": "unauthorized"}, 401)
     if not _catalog_units:
         await asyncio.to_thread(load_catalog, True)
-    listings = get_listings_map() or {}
+    listings = (await get_listings_map_async()) or {}
     today = datetime.now(TZ).date()
     out = []
     for lid, s in _deep_clean_state.items():
@@ -42234,7 +42244,7 @@ async def _api_cleaning_teams(request):
         return _json({"error": "unauthorized"}, 401)
     if request.method == "GET":
         teams = [_ct_team_view(t) for t in sorted(_cleaning_teams.values(), key=lambda x: x.get("created_at") or "")]
-        listings = get_listings_map() or {}
+        listings = (await get_listings_map_async()) or {}
         store = _ls_get()["listings"]
         apts = []
         for lid, nm in sorted(listings.items(), key=lambda x: (x[1] or "")):
@@ -42367,7 +42377,7 @@ async def _api_cleaning_log(request):
     manual task adds, newest first. ?lid= scopes to one apartment."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    lmap = get_listings_map() or {}
+    lmap = (await get_listings_map_async()) or {}
     want = (request.query.get("lid") or "").strip()
     rows = []
     for e in _oujact_status[-500:]:
@@ -42487,7 +42497,7 @@ async def _api_oujact_status(request):
         await asyncio.to_thread(_oujact_set_checkout_state, lid, date, "inside", actor)
     # safe urgent Discord update for blockers/issues
     if action in ("guest_inside", "issue"):
-        nm = (get_listings_map() or {}).get(lid, str(lid))
+        nm = ((await get_listings_map_async()) or {}).get(lid, str(lid))
         title = "🛰️ Oujact — الضيف باقي داخل" if action == "guest_inside" else "🛰️ Oujact — بلاغ من الفريق"
         try:
             await _post_system_escalation(title, f"{nm} · {date}" + (f" · {b.get('note')}" if b.get("note") else ""),
@@ -43391,7 +43401,8 @@ async def dashboard_cache_loop():
         try:
             built_n = _pe_cache.get("built_res_count")
             if _pe_cache.get("data") and built_n is not None:
-                cur_n = len(get_reservations_cached())
+                # M5: on TTL expiry this is a full 60-page pull — off the loop
+                cur_n = len(await asyncio.to_thread(get_reservations_cached))
                 if cur_n - built_n >= PE_REBUILD_BURST:
                     print(f"pricing-engine: booking burst ({cur_n - built_n} new) — rebuilding dataset")
                     await asyncio.to_thread(_pe_get, True)
@@ -47804,7 +47815,7 @@ async def reviews_refresh_loop():
         day_ago = (datetime.now(TZ) - timedelta(hours=24)).isoformat(timespec="seconds")
         todays = [h for h in _dp_drift_hits if (h.get("detected_at") or "") >= day_ago]
         if todays:
-            names = get_listings_map() or {}
+            names = (await get_listings_map_async()) or {}
             lines = "، ".join(f"{names.get(h['lid'], h['lid'])} {h['date']} ({h['ours']}→{h['live']})"
                               for h in todays[:6])
             await _post_system_escalation(
