@@ -29571,10 +29571,12 @@ def _dp_drift_check(per_listing_rows):
         _save_json("dp_drift_watch.json", _dp_drift_watch)
     return hits
 
-def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None, force_dry=None):
+def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None, force_dry=None,
+                    note=None):
     """Write ONE night's price to Hostaway (one-time; honors PRICE_APPLY_DRYRUN, or force_dry to
     guarantee a no-write test regardless of env). Returns the REAL result — read back to confirm —
-    never a faked success. Logs to BOTH the learning log and the central price-change audit log."""
+    never a faked success. Logs to BOTH the learning log and the central price-change audit log.
+    Optional `note` rides along on the PUT (the strategy loop preserves ouja-orig:<price>)."""
     try:
         price = int(round(float(price)))
     except Exception:
@@ -29599,8 +29601,10 @@ def _pe_apply_night(lid, date_iso, price, source="manual", reason="", old=None, 
                         old = day.get("price")
             except Exception:
                 old = None
-        resp = api_put(f"/listings/{lid}/calendar",
-                       {"startDate": date_iso, "endDate": date_iso, "isAvailable": 1, "price": price})
+        body = {"startDate": date_iso, "endDate": date_iso, "isAvailable": 1, "price": price}
+        if note:
+            body["note"] = note
+        resp = api_put(f"/listings/{lid}/calendar", body)
         actual = None
         chk = api_get(f"/listings/{lid}/calendar", params={"startDate": date_iso, "endDate": date_iso})
         for day in (chk.get("result") or []):
@@ -33193,19 +33197,25 @@ def _run_strategy_unit(lid, strat, factors, today):
             continue
         want = _strategy_price(base, d, factors)
         cur = rec.get("cur") or want
+        # M1: never write 0/negative or below the hard floors. base can resolve
+        # to 0 when the reservations cache is cold → _strategy_price returns 0,
+        # and the old raw api_put would have PUT a 0-SAR night to Hostaway.
+        floor = max(int(round(DISCOUNT_FLOOR or 0)), int(_pe_floor_overrides.get(lid, 0) or 0))
+        if want <= 0 or (floor and want < floor):
+            print(f"strategy skip {lid} {dstr}: want={want} below floor {floor} or non-positive")
+            continue
         if cur and abs(want - cur) / cur >= 0.03:       # only meaningful moves
-            if not PRICE_APPLY_DRYRUN:
-                # preserve the TRUE original: existing ouja-orig note → else the live price BEFORE this write
-                _orig = _lm_orig_from_note(note_now.get(dstr)) or _coerce_price(price_now.get(dstr)) or cur or want
-                try:
-                    api_put(f"/listings/{lid}/calendar",
-                            {"startDate": dstr, "endDate": dstr, "isAvailable": 1,
-                             "price": want, "note": "ouja-orig:%d" % int(_orig)})
-                except Exception as e:
-                    print(f"strategy put {lid} {dstr}:", e)
-                    continue
-            log_price_change(lid, dstr, int(cur), int(want), "strategy",
-                             "إعادة تحسين ديناميكية (تقترب الليلة وفاضية)", dry=PRICE_APPLY_DRYRUN)
+            # preserve the TRUE original: existing ouja-orig note → else the live price BEFORE this write
+            _orig = _lm_orig_from_note(note_now.get(dstr)) or _coerce_price(price_now.get(dstr)) or cur or want
+            # M1: write through _pe_apply_night — floor/zero guards, dry-run,
+            # read-back confirm and audit logging live THERE, not here.
+            res = _pe_apply_night(lid, dstr, want, source="strategy",
+                                  reason="إعادة تحسين ديناميكية (تقترب الليلة وفاضية)",
+                                  old=(int(cur) if cur else None),
+                                  note="ouja-orig:%d" % int(_orig))
+            if not (res or {}).get("ok"):
+                print(f"strategy put {lid} {dstr}:", (res or {}).get("error"))
+                continue
             rec["cur"] = want
             rec["changes"] = rec.get("changes", 0) + 1
             rec["last"] = datetime.now(TZ).isoformat(timespec="minutes")
