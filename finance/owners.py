@@ -893,6 +893,13 @@ def compute_owner_statement(owner, mkey, apply_edits=True):
     if not reps:
         return None
     agg = B._finance_aggregate(reps, owner, start, end)
+    if any(r.get("degraded") for r in reps):
+        # M3: a unit fell back to the truncated cache — the totals are NOT
+        # trustworthy. Say so loudly; publish is refused while degraded.
+        agg["degraded"] = True
+        foots.append({"kind": "degraded",
+                      "text_ar": "⚠️ بيانات غير متاحة مؤقتاً — ما قدرنا نسحب الحجوزات من Hostaway، الأرقام ناقصة",
+                      "text_en": "⚠️ Data temporarily unavailable — Hostaway pull failed, numbers are incomplete"})
     # carry the v2.1 extras through the aggregate
     contract_excluded = []
     for r in reps:
@@ -1263,6 +1270,11 @@ def statement_publish(request, body):
     fresh = compute_owner_statement(owner, mkey)
     if fresh is None:
         return {"error": "owner_not_in_registry"}, 404
+    if fresh.get("degraded"):
+        # M3: never freeze a snapshot computed from the truncated fallback.
+        return {"error": "degraded_data",
+                "message_ar": "بيانات غير متاحة مؤقتاً — ما قدرنا نسحب الحجوزات من Hostaway. جرّب بعد شوي قبل النشر.",
+                "message_en": "Data temporarily unavailable — the Hostaway pull failed. Retry before publishing."}, 503
     rec = stmt_rec(owner, mkey, create=True)
     old = rec.get("published") or {}
     ver = int(old.get("version") or 0) + 1

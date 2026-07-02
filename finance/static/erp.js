@@ -243,6 +243,7 @@
       se_diff_apply: 'انشر النسخة الجديدة', se_why: 'ليش؟',
       se_income: 'الدخل', se_fees: 'رسوم الإدارة', se_expenses: 'المصاريف',
       se_cleaning: 'النظافة', se_adjust: 'التسويات', se_net: 'الصافي',
+      se_degraded: 'بيانات غير متاحة مؤقتاً — ما قدرنا نسحب الحجوزات من Hostaway، الأرقام هنا ناقصة. حدّث الصفحة بعد شوي، والنشر موقوف لين ترجع البيانات.',
       se_resv: 'الحجوزات', se_excluded: 'المستبعدة', se_exclude: 'استبعد',
       se_include: 'احسبه', se_amount_req: 'المبلغ المستلم فعليًا (إلزامي للإدراج)',
       se_reason_req: 'السبب (إلزامي)…', se_manual_chip: 'تسوية يدوية',
@@ -541,6 +542,7 @@
       se_diff_apply: 'Publish the new version', se_why: 'Why?',
       se_income: 'Income', se_fees: 'Management fee', se_expenses: 'Expenses',
       se_cleaning: 'Cleaning', se_adjust: 'Adjustments', se_net: 'Net',
+      se_degraded: 'Data temporarily unavailable — the Hostaway pull failed, so these numbers are incomplete. Refresh in a bit; publishing is blocked until the data is back.',
       se_resv: 'Reservations', se_excluded: 'Excluded', se_exclude: 'Exclude',
       se_include: 'Include', se_amount_req: 'Amount actually received (required to include)',
       se_reason_req: 'Reason (required)…', se_manual_chip: 'manual adjustment',
@@ -4223,6 +4225,7 @@
       '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
       '</span></header>' +
       mmStrip(mm) +
+      (s.degraded ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' + esc(t('se_degraded')) + '</div>' : '') +
       (d.computed_at ? '<div class="grp-hint" style="padding-top:0">' + esc(t('se_asof')) + ': <code>' + esc(String(d.computed_at).slice(0, 16)) + '</code></div>' : '') +
       '<div class="wsnav" style="position:static;border:none;padding:4px 16px">' +
       '<a class="ws' + (seUI.tab === 'stmt' ? ' on' : '') + '" data-act="se-tab" data-tab="stmt">' + esc(t('se_tab_stmt')) + '</a>' +

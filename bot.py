@@ -26209,7 +26209,8 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
         cleaning = info["cleaning"] if info else {"type": "ours", "amount": 0}
     # TARGETED window pull (trap #4): the full-history cache truncates at ~6,000 rows
     # and silently loses the newest bookings — a statement must never read it.
-    resv = [normalize_reservation(r, listings) for r in fetch_reservations_window(start, end)
+    _rows, _degraded = fetch_reservations_window_checked(start, end)
+    resv = [normalize_reservation(r, listings) for r in _rows
             if lid is None or r.get("listingMapId") == lid]
     if expenses is None:
         expenses = []
@@ -26230,6 +26231,10 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
                                  "description": (e.get("note") or e.get("maintenance_type") or "")[:200],
                                  "receipt_url": (e.get("receipt_link") or "").strip() or None})
     rep = compute_owner_report(resv, expenses, start, end, management_pct, settings, cleaning=cleaning)
+    if _degraded:
+        # M3: the numbers below were computed from the TRUNCATED cache because
+        # the targeted pull failed — flag it so no statement presents them as real.
+        rep["degraded"] = True
     rep["apartment"] = aptname
     rep["lid"] = lid
     rep["owner"] = (info.get("owner") if info else "") or _unit_owners.get(aptname, "")
@@ -48578,6 +48583,8 @@ def get_reservations_cached(ttl=1800):
 
 _res_window_cache = {}   # (start_iso, end_iso) -> (rows, fetched_ts)
 
+_res_window_degraded = {}   # (start_iso, end_iso) -> ts of last cache-fallback (M3)
+
 def fetch_reservations_window(start, end, pad_days=45):
     """Every reservation whose stay can touch [start, end] — a TARGETED Hostaway
     query (CLAUDE.md trap #4). The full-history pull stops at REVENUE_MAX_PAGES
@@ -48585,7 +48592,9 @@ def fetch_reservations_window(start, end, pad_days=45):
     statements undercount real months (the Abu-Fahad June bug). Statements must
     use THIS. Window = arrivalDate in [start − pad, end]: covers checkin-basis
     rows, long stays spanning into the period, and checkout-basis rows.
-    On a page-1 failure falls back to the old cache (never worse than before)."""
+    On a page-1 failure falls back to the old cache — recorded in
+    _res_window_degraded so fetch_reservations_window_checked can tell the
+    statement layer the rows are NOT honest enough to publish (M3)."""
     key = (start.isoformat(), end.isoformat())
     hit = _res_window_cache.get(key)
     if hit and (time.time() - hit[1]) < 900:
@@ -48610,13 +48619,25 @@ def fetch_reservations_window(start, end, pad_days=45):
         offset += limit
     if failed:
         cached = get_reservations_cached()
-        print("window fetch failed — falling back to full-history cache (%d rows)" % len(cached or []))
+        print("window fetch failed — falling back to full-history cache (%d rows) — DEGRADED" % len(cached or []))
+        _res_window_degraded[key] = time.time()
+        if len(_res_window_degraded) > 60:
+            for k in sorted(_res_window_degraded, key=_res_window_degraded.get)[:20]:
+                _res_window_degraded.pop(k, None)
         return cached or []
+    _res_window_degraded.pop(key, None)         # healthy pull clears the mark
     _res_window_cache[key] = (out, time.time())
     if len(_res_window_cache) > 60:
         for k in sorted(_res_window_cache, key=lambda k: _res_window_cache[k][1])[:20]:
             _res_window_cache.pop(k, None)
     return out
+
+def fetch_reservations_window_checked(start, end, pad_days=45):
+    """(rows, degraded) for statement paths. Calls fetch_reservations_window —
+    the ONE implementation (and the seam tests monkeypatch) — then reads the
+    degradation mark it left. A patched/healthy window → degraded=False."""
+    rows = fetch_reservations_window(start, end, pad_days)
+    return rows, (start.isoformat(), end.isoformat()) in _res_window_degraded
 
 def fetch_calendar_days(listing_id, start, end):
     try:
