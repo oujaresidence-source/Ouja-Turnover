@@ -48271,11 +48271,13 @@ def fetch_all_reservations(max_pages=None):
         offset = total - budget          # keep the NEWEST `budget` rows
         print(f"revenue: history has {total} rows > budget {budget} — skipping the oldest {offset}")
     pages_used = 0
+    fetch_failed = False
     for _ in range(max_pages):
         try:
             data = api_get("/reservations", params={"limit": limit, "offset": offset})
         except Exception as e:
             print("reservations fetch error:", e)
+            fetch_failed = True          # M4: the list below is PARTIAL, not truth
             break
         rows = data.get("result", []) or []
         if not rows:
@@ -48288,6 +48290,7 @@ def fetch_all_reservations(max_pages=None):
     if not truncated and pages_used == max_pages and len(out) >= budget:
         truncated = True                 # budget exhausted on a full page — more history exists
     _res_cache["truncated"] = truncated
+    _res_cache["fetch_failed"] = fetch_failed
     if REVENUE_DEBUG and out:
         print("reservation sample keys:", sorted(out[0].keys()))
     print(f"revenue: fetched {len(out)} reservations" + (" (TRUNCATED history)" if truncated else ""))
@@ -48578,6 +48581,15 @@ def get_reservations_cached(ttl=1800):
     if _res_cache["data"] is not None and (time.time() - _res_cache["ts"]) < ttl:
         return _res_cache["data"]
     data = fetch_all_reservations()
+    prev = _res_cache["data"]
+    if _res_cache.get("fetch_failed") and prev and len(data or []) < len(prev):
+        # M4: a mid-pagination failure returned a PARTIAL list — storing it as
+        # truth for 30 min cascades zeros into pricing/demand. Keep the fuller
+        # previous cache and retry in ~5 minutes instead.
+        print(f"reservations pull failed mid-pagination ({len(data or [])} rows) — "
+              f"keeping previous cache ({len(prev)} rows)")
+        _res_cache["ts"] = time.time() - max(0, ttl - 300)
+        return prev
     _res_cache["data"], _res_cache["ts"] = data, time.time()
     return data
 
