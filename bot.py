@@ -48136,71 +48136,89 @@ def load_state():
         print("state load error:", e)
 
 def persist_state():
+    # H2: this runs in a WORKER THREAD while the event loop mutates these
+    # containers. Snapshot each one FIRST with dict()/list() — a single C-level
+    # copy the GIL keeps atomic — before any per-item iteration/serialization.
+    # Iterating the live container here raised intermittent "dictionary changed
+    # size during iteration", which killed persist_loop and silently stopped
+    # ALL state saving until the next gateway re-identify.
     _save_json("seen.json", list(_assistant_seen))
-    _save_json("pending.json", {str(k): v for k, v in _pending_replies.items()})
-    _save_json("escalations.json", {str(k): v for k, v in _escalations.items()})
-    _save_json("ack_count.json", {str(k): v for k, v in _esc_ack_count.items()})
+    _save_json("pending.json", {str(k): v for k, v in dict(_pending_replies).items()})
+    _save_json("escalations.json", {str(k): v for k, v in dict(_escalations).items()})
+    _save_json("ack_count.json", {str(k): v for k, v in dict(_esc_ack_count).items()})
     _save_json("claimed.json", list(_claimed_convos))
     _save_json("activity.json", list(_activity))
     _save_json("auto_replies.json", list(_auto_replies))
-    _save_json("strategies.json", {str(k): v for k, v in _pricing_strategies.items()})
-    _save_json("price_opps.json", {str(k): v for k, v in _price_opps.items()})
+    _save_json("strategies.json", {str(k): v for k, v in dict(_pricing_strategies).items()})
+    _save_json("price_opps.json", {str(k): v for k, v in dict(_price_opps).items()})
     _save_json("discount_pause.json", _discount_paused_until)
-    _save_json("unit_discount_skip.json", {str(k): v for k, v in _unit_discount_skip.items()})
+    _save_json("unit_discount_skip.json", {str(k): v for k, v in dict(_unit_discount_skip).items()})
     _save_json("learning_log.json", list(_learning_log))
-    _save_json("apartment_learnings.json", {str(k): v for k, v in _apartment_learnings.items()})
-    _save_json("general_learnings.json", _general_learnings)
+    _save_json("apartment_learnings.json", {str(k): v for k, v in dict(_apartment_learnings).items()})
+    _save_json("general_learnings.json", dict(_general_learnings))
     _save_json("agreement_reminded.json", list(_agreement_reminded))
     _save_json("code_escalated.json", list(_code_escalated))
     _save_json("not_ready_escalated.json", list(_not_ready_escalated))
     # cap to last 120 days to keep the JSON small
     if len(_daily_metrics) > 120:
-        keep = sorted(_daily_metrics.keys())[-120:]
+        keep = sorted(dict(_daily_metrics).keys())[-120:]
         for k in list(_daily_metrics.keys()):
             if k not in keep:
                 _daily_metrics.pop(k, None)
-    _save_json("daily_metrics.json", _daily_metrics)
-    _save_json("custom_events.json", _custom_events)
-    _save_json("deep_clean.json", {str(k): v for k, v in _deep_clean_state.items()})
+    _save_json("daily_metrics.json", dict(_daily_metrics))
+    _save_json("custom_events.json", list(_custom_events))
+    _save_json("deep_clean.json", {str(k): v for k, v in dict(_deep_clean_state).items()})
     _save_json("paused_units.json", list(_paused_units))
     _save_json("dc_anchor.json", _dc_anchor_date)
     # Cap tickets to last 1000 on disk to keep the JSON small
-    _save_json("tickets.json", _tickets[:1000])
-    _save_json("reviews.json", _reviews)
-    _save_json("review_ai.json", _review_ai_cache)
-    _save_json("review_states.json", _review_states)
-    _save_json("review_translations.json", _review_translations)
-    _save_json("users.json", _users)
-    _save_json("quotes.json", _quotes)
-    _save_json("unit_owners.json", _unit_owners)
-    _save_json("finance_defaults.json", _finance_defaults)   # Stage 3 item 16
-    _save_json("owner_registry.json", _owner_registry)
-    _save_json("cleaning_teams.json", _cleaning_teams)
-    _save_json("clean_early_depart.json", _clean_early_depart)
-    _save_json("finance_adjust.json", _finance_adjust)
-    _save_json("finance_audit.json", _finance_audit)
-    _save_json("finance_last_import.json", _finance_last_import)
-    _save_json("weekly_reports.json", _weekly_reports)
-    _save_json("design_requests.json", _design_requests)
-    _save_json("pmo_projects.json", _pmo_projects)
-    _save_json("pmo_templates.json", _pmo_templates)
-    _save_json("expenses.json", _expenses)
-    _save_json("import_batches.json", _exp4_batches)
-    _save_json("expense_settings.json", _expense_settings)
+    _save_json("tickets.json", list(_tickets)[:1000])
+    _save_json("reviews.json", dict(_reviews))
+    _save_json("review_ai.json", dict(_review_ai_cache))
+    _save_json("review_states.json", dict(_review_states))
+    _save_json("review_translations.json", dict(_review_translations))
+    _save_json("users.json", dict(_users))
+    _save_json("quotes.json", dict(_quotes))
+    _save_json("unit_owners.json", dict(_unit_owners))
+    _save_json("finance_defaults.json", dict(_finance_defaults))   # Stage 3 item 16
+    _save_json("owner_registry.json", dict(_owner_registry))
+    _save_json("cleaning_teams.json", dict(_cleaning_teams))
+    _save_json("clean_early_depart.json", dict(_clean_early_depart))
+    _save_json("finance_adjust.json", dict(_finance_adjust))
+    _save_json("finance_audit.json", list(_finance_audit))
+    _save_json("finance_last_import.json", dict(_finance_last_import))
+    _save_json("weekly_reports.json", dict(_weekly_reports))
+    _save_json("design_requests.json", dict(_design_requests))
+    _save_json("pmo_projects.json", dict(_pmo_projects))
+    _save_json("pmo_templates.json", dict(_pmo_templates))
+    _save_json("expenses.json", dict(_expenses))
+    _save_json("import_batches.json", dict(_exp4_batches))
+    _save_json("expense_settings.json", dict(_expense_settings))
     _save_json("exp_intake.json", {"autopull": bool(_exp_intake.get("autopull")),
-                                   "pulls": (_exp_intake.get("pulls") or [])[-200:]})
+                                   "pulls": list(_exp_intake.get("pulls") or [])[-200:]})
     # Sessions are intentionally NOT persisted — restarts force re-login
-    _save_json("guest_profiles.json", _guest_profiles)
-    _save_json("cleaning_feedback.json", _cleaning_feedback)
+    _save_json("guest_profiles.json", dict(_guest_profiles))
+    _save_json("cleaning_feedback.json", dict(_cleaning_feedback))
     _save_json("cleaning_feedback_sent.json", list(_cleaning_feedback_sent))
-    _save_json("cleaning_photo_templates.json", _cleaning_photo_templates)
-    _save_json("cleaning_reports.json", _cleaning_reports)
-    _save_json("cleaning_report_photos.json", _cleaning_report_photos)
-    _save_json("cleaning_report_audit.json", _cleaning_report_audit[-5000:])
+    _save_json("cleaning_photo_templates.json", dict(_cleaning_photo_templates))
+    _save_json("cleaning_reports.json", dict(_cleaning_reports))
+    _save_json("cleaning_report_photos.json", dict(_cleaning_report_photos))
+    _save_json("cleaning_report_audit.json", list(_cleaning_report_audit)[-5000:])
 
 @tasks.loop(seconds=60)
 async def persist_loop():
-    await asyncio.to_thread(persist_state)
+    try:
+        await asyncio.to_thread(persist_state)
+    except Exception as e:
+        # one bad minute must NEVER kill persistence forever (H2)
+        print("persist_loop error (state not saved this cycle — will retry):", e)
+
+@persist_loop.error
+async def _persist_loop_error(error):
+    print("persist_loop crashed — restarting:", error)
+    try:
+        persist_loop.restart()
+    except Exception as e:
+        print("persist_loop restart failed:", e)
 
 # ==================== Weekly Revenue Report (recommend-only) ====================
 # Pulls full booking history from Hostaway and produces a weekly Discord report:
