@@ -75,6 +75,15 @@ except Exception as _schedule_err:     # pragma: no cover
     _schedule = None
     _HAS_SCHEDULE = False
 
+# Promise Keeper (متتبع الوعود) — durable ledger + accountability for promises made to guests.
+try:
+    import promises as _pk
+    _HAS_PK = True
+except Exception as _pk_err:           # pragma: no cover
+    print("[promises] import failed (promise keeper disabled, bot unaffected):", _pk_err)
+    _pk = None
+    _HAS_PK = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -6998,6 +7007,7 @@ class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسا
             # learning: capture the team's edited reply as a strong correction signal
             record_learning(self.item, self._original_draft, text,
                             via="discord_edit", approver=str(interaction.user))
+            _pk_hook_send(self.item, text, interaction.user.display_name, str(interaction.user.id))
             try:
                 msg = await interaction.channel.fetch_message(self.message_id)
                 done = ApproveView()
@@ -7222,6 +7232,7 @@ class ConfirmActionView(discord.ui.View):
                 # learning: send-as-is means the team approved the draft verbatim
                 record_learning(item, draft, draft,
                                 via="discord_send", approver=str(interaction.user))
+                _pk_hook_send(item, draft, interaction.user.display_name, str(interaction.user.id))
                 await self._disable_card(interaction)
                 _pending_replies.pop(self.message_id, None)
                 _replied_msgs.add(self.message_id)
@@ -14624,6 +14635,36 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="cpBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ PROMISES (متتبع الوعود — accountability ledger) ============ -->
+      <section class="view" id="view_promises">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_promises">الوعود</div>
+            <div class="page-sub" id="t_promises_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadPromises()">↻</button>
+          </div>
+        </div>
+        <div class="kpis" id="pkStats"></div>
+        <div class="card">
+          <div class="card-head"><span class="card-title" id="t_pk_board">لوحة الوفاء بالوعد</span></div>
+          <div id="pkBoard"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_pk_list">السجل</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn ghost sm" data-pkf="" onclick="pkFilter('')" id="pkF_all">الكل</button>
+              <button class="btn ghost sm" data-pkf="open" onclick="pkFilter('open')" id="pkF_open">مفتوحة</button>
+              <button class="btn ghost sm" data-pkf="done" onclick="pkFilter('done')" id="pkF_done">تم الوفاء</button>
+              <button class="btn ghost sm" data-pkf="expired" onclick="pkFilter('expired')" id="pkF_expired">منتهية</button>
+            </div>
+          </div>
+          <div id="pkBody"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ GUESTS (profiles + VIP + summaries) ============ -->
       <section class="view" id="view_guests">
         <div class="page-head">
@@ -16833,6 +16874,7 @@ function badgeCount(key){
     return c.unfixed || 0;
   }
   if(key==='listings') return ((D.listings && D.listings.summary) || {}).needs_setup || 0;
+  if(key==='promises') return ((D.promises && D.promises.counts) || {}).overdue || 0;
   return 0;
 }
 function badgeInfo(key){
@@ -17041,6 +17083,7 @@ function refreshView(id){
     case 'clean':    return loadCleaning();
     case 'clean_center': return loadCleaningCenter();
     case 'cphotos':  return loadCleaningPhotos();
+    case 'promises': return loadPromises();
     case 'quality':  return loadQuality();
     case 'guests':   return loadGuests();
     case 'users':    return loadUsers();
@@ -17080,6 +17123,7 @@ function go(id){
   if(id==='clean') loadCleaning();
   if(id==='clean_center') loadCleaningCenter();
   if(id==='cphotos') loadCleaningPhotos();
+  if(id==='promises') loadPromises();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
@@ -19108,6 +19152,81 @@ function cpReportCard(r){
   }).join('');
   return '<div class="card" style="margin-bottom:12px">'+head
     +'<div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 2px 2px">'+thumbs+'</div></div>';
+}
+
+/* ============ PROMISES (متتبع الوعود — who promised what, and did they keep it) ============ */
+var PK = {status:''};
+function pkFilter(s){ PK.status=s||''; loadPromises(); }
+async function loadPromises(){
+  var st_=function(id,txt){ var el=document.getElementById(id); if(el) el.textContent=txt; };
+  st_('t_promises', labelText('الوعود','Promises'));
+  st_('t_promises_sub', labelText('كل وعد انقال لضيف — مين قاله، متى ينفّذ، ومين وفّى.','Every promise made to a guest — who made it, when it is due, who kept it.'));
+  st_('t_pk_board', labelText('لوحة الوفاء بالوعد','Promise-keeping board'));
+  st_('t_pk_list', labelText('السجل','Ledger'));
+  st_('pkF_all', labelText('الكل','All'));
+  st_('pkF_open', labelText('مفتوحة','Open'));
+  st_('pkF_done', labelText('تم الوفاء','Kept'));
+  st_('pkF_expired', labelText('منتهية','Expired'));
+  var body=document.getElementById('pkBody');
+  try{
+    var d = await api('/api/promises' + (PK.status?('?status='+encodeURIComponent(PK.status)):''));
+    D.promises = d;
+    renderPromises();
+  }catch(e){ if(body) body.innerHTML='<div class="empty">'+esc(labelText('تعذّر التحميل','Could not load'))+'</div>'; }
+}
+function pkChip(s, overdue){
+  if(s==='done') return '<span class="pill ok">'+esc(labelText('تم الوفاء','kept'))+'</span>';
+  if(s==='expired') return '<span class="pill" style="background:var(--red-soft);color:var(--red)">'+esc(labelText('منتهي','expired'))+'</span>';
+  if(overdue) return '<span class="pill warn">'+esc(labelText('متأخر','overdue'))+'</span>';
+  return '<span class="pill info">'+esc(labelText('مفتوح','open'))+'</span>';
+}
+function renderPromises(){
+  var d=D.promises||{}; var c=d.counts||{};
+  var stats=document.getElementById('pkStats');
+  if(stats) stats.innerHTML=[
+    {v:c.open||0, l:labelText('مفتوحة','Open'), cls:'b'},
+    {v:c.overdue||0, l:labelText('متأخرة','Overdue'), cls:(c.overdue>0?'r':''), vc:(c.overdue>0?'red':'')},
+    {v:c.done||0, l:labelText('تم الوفاء','Kept'), cls:'g'},
+    {v:c.expired||0, l:labelText('منتهية','Expired'), cls:''}
+  ].map(function(k){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+k.cls+'">🤝</div></div>'
+      +'<div class="kpi-val '+(k.vc||'')+'">'+k.v+'</div><div class="kpi-lbl">'+esc(k.l)+'</div></div>';
+  }).join('');
+  var lb=d.leaderboard||[];
+  var board=document.getElementById('pkBoard');
+  if(board) board.innerHTML = lb.length ? lb.map(function(p){
+    return '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);align-items:center">'
+      +'<b>'+esc(p.person)+'</b>'
+      +'<span style="display:flex;gap:12px;font-size:12px;align-items:center">'
+      +'<span>'+esc(labelText('مفتوحة','open'))+' <b>'+(p.open||0)+'</b></span>'
+      +'<span style="color:var(--red)">'+esc(labelText('متأخرة','overdue'))+' <b>'+(p.overdue||0)+'</b></span>'
+      +'<span style="color:var(--green)">'+esc(labelText('وفّى','kept'))+' <b>'+(p.kept||0)+'</b></span>'
+      +'<span class="pill '+((p.kept_rate!=null&&p.kept_rate>=80)?'ok':'info')+'">'+(p.kept_rate!=null?(p.kept_rate+'%'):'—')+'</span>'
+      +'</span></div>';
+  }).join('') : '<div class="empty">'+esc(labelText('ما فيه وعود بعد 🤍','No promises yet 🤍'))+'</div>';
+  var items=d.items||[];
+  var body=document.getElementById('pkBody');
+  if(body) body.innerHTML = items.length ? items.map(function(r){
+    var src = r.source==='watchman' ? labelText('الرقيب','Watchman') : labelText('المساعد','Assistant');
+    return '<div style="padding:10px 4px;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<div style="min-width:220px;flex:1"><b>'+esc(r.promise_text||'')+'</b>'
+      +'<div class="muted" style="font-size:12px;margin-top:3px">'
+      +esc(r.apartment||'—')+' · '+esc(labelText('الضيف','guest'))+' '+esc(r.guest_name||'—')
+      +' · '+esc(labelText('بواسطة','by'))+' '+esc(r.promised_by||'—')
+      +(r.due_at?(' · '+esc(labelText('الموعد','due'))+' '+esc(String(r.due_at).slice(0,16).replace('T',' '))):'')
+      +' · '+esc(src)
+      +'</div></div>'
+      +'<div style="display:flex;gap:6px;align-items:center">'+pkChip(r.status, r.overdue)
+      +(r.status==='open'?('<button class="btn primary sm" onclick="pkDone(this)" data-pid="'+esc(String(r.id))+'">✅ '+esc(labelText('تم الوفاء','Done'))+'</button>'):'')
+      +'</div></div></div>';
+  }).join('') : '<div class="empty">'+esc(labelText('لا شيء هنا','Nothing here'))+'</div>';
+}
+async function pkDone(el){
+  var pid=el.getAttribute('data-pid'); el.disabled=true;
+  var j=await post('/api/promises/done', {id: pid});
+  if(j&&j.ok){ toast(labelText('تم الوفاء ✅','Kept ✅')); loadPromises(); }
+  else { el.disabled=false; toast((j&&j.error)||labelText('صار خطأ','Error')); }
 }
 
 function renderListingsSyncBar(){
@@ -31542,6 +31661,7 @@ async def _api_send(request):
         # vs the original draft, that's a correction signal (was_edited=True via diff)
         record_learning(item, original_draft, reply,
                         via="dashboard_send", approver="(dashboard)")
+        _pk_hook_send(item, reply, _req_actor(request) or "(اللوحة)")
         log_event("guest", f"رد (من اللوحة) · {item.get('guest','')} · {item.get('unit','')}")
         return _json({"ok": True})
     except Exception as e:
@@ -31617,7 +31737,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "promises", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
@@ -31633,6 +31753,7 @@ NAV_DEF = {
         {"id": "calendar", "ic": "calendar", "tk": "calendar"},
         {"id": "clean_center", "ic": "clean_center", "tk": "clean_center", "badge": "clean_center"},
         {"id": "cphotos", "ic": "clean_center", "tk": "cphotos"},
+        {"id": "promises", "ic": "tickets", "tk": "promises", "badge": "promises"},
         {"id": "pricing", "ic": "pricing", "tk": "pricing", "badge": "pricing"},
         {"id": "plab", "ic": "plab", "tk": "plab"},
         {"id": "strat", "ic": "strat", "tk": "strat"},
@@ -31663,7 +31784,8 @@ NAV_DEF = {
     "labels": {
         "ar": {
             "home": "الرئيسية", "brain": "أوجا برين", "gaps": "فجوات منتصف الأسبوع", "inbox": "صندوق الوارد", "calendar": "التقويم",
-            "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "pricing": "التسعير الديناميكي",
+            "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "promises": "الوعود",
+            "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
@@ -31677,7 +31799,8 @@ NAV_DEF = {
         },
         "en": {
             "home": "Home", "brain": "Ouja Brain", "gaps": "Weekday Gaps", "inbox": "Inbox", "calendar": "Calendar",
-            "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "pricing": "Dynamic Pricing",
+            "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "promises": "Promises",
+            "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
@@ -47537,6 +47660,8 @@ async def start_web_server():
         app.router.add_post("/api/oujact/checkout-state", _api_oujact_checkout_state)
         app.router.add_post("/api/oujact/status", _api_oujact_status)
         app.router.add_get("/api/guests", _api_guests_list)
+        app.router.add_get("/api/promises", _api_promises)          # متتبع الوعود (login)
+        app.router.add_post("/api/promises/done", _api_promises_done)  # login + admin/ops
         app.router.add_get("/api/cleaning/quality", _api_clean_quality_summary)
         # Public no-auth feedback page + endpoints (token IS the auth)
         app.router.add_get("/clean-feedback", _handle_clean_feedback_page)
@@ -52186,6 +52311,7 @@ def run_watchman_scan():
                 "state": "open", "msg_id": None, "nudged": 0, "escalated": False,
             })
             _wm_promises[pid] = payload
+            _pk_mirror_watchman(payload)        # متتبع الوعود: durable ledger + dashboard
             intents.append(("promise_new", payload))
     if baseline:
         _wm_meta["baselined"] = True
@@ -52444,6 +52570,7 @@ class WatchmanPromiseView(discord.ui.View):
         rec["done_by"] = str(interaction.user)
         rec["done_at"] = datetime.now(TZ).isoformat(timespec="seconds")
         _wm_save()
+        _pk_mark_done_safe(pid, str(interaction.user))   # mirror into the ledger
         try:
             v = WatchmanPromiseView()
             for ch_ in v.children:
@@ -52590,6 +52717,7 @@ async def _wm_post_promise(rec):
     rec["msg_id"] = str(msg.id)
     _wm_msg2promise[str(msg.id)] = rec["id"]
     _wm_save()
+    _pk_mirror_watchman(rec)      # keep ledger channel/msg refs current
 
 async def _wm_promise_followup(rec, escalate):
     ch = bot.get_channel(int(rec["channel_id"])) if rec.get("channel_id") else None
@@ -52635,12 +52763,22 @@ async def _wm_followups():
             rec["escalated"] = True
             rec["state"] = "escalated"
             changed = True
+            if _pk_enabled():
+                try:
+                    await asyncio.to_thread(_pk.db.record_nudge, rec["id"])
+                except Exception:
+                    pass
         elif rec.get("nudged", 0) == 0:
             await _wm_promise_followup(rec, escalate=False)
             rec["nudged"] = 1
             if rec.get("state") == "open":
                 rec["state"] = "nudged"
             changed = True
+            if _pk_enabled():
+                try:
+                    await asyncio.to_thread(_pk.db.record_nudge, rec["id"])
+                except Exception:
+                    pass
     if changed:
         _wm_save()
 
@@ -52675,6 +52813,288 @@ async def watchman_loop():
         except Exception as e:
             print("watchman post error:", e)
 
+# ==================== PROMISE KEEPER (متتبع الوعود) ====================
+# The durable ledger + accountability layer for promises made to guests.
+# Watchman promise tickets are MIRRORED into it (their Discord lifecycle is
+# unchanged); replies a HUMAN approves through المساعد are additionally scanned
+# at send time and attributed to the approving person. Per the owner's rule
+# (see _wm_promise_allowed) unattended AUTO-sends never create promises.
+PROMISE_KEEPER_ENABLED = int(os.environ.get("PROMISE_KEEPER_ENABLED", "1"))
+PK_OPS_LEAD = os.environ.get("PK_OPS_LEAD", "") or WATCHMAN_MANAGER_ROLE   # id / role:id
+
+def _pk_enabled():
+    return _HAS_PK and PROMISE_KEEPER_ENABLED
+
+_PK_EXTRACT_SYSTEM = (
+    "You audit ONE reply that our short-term-rental team just sent to a guest in Riyadh "
+    "(Arabic Najdi dialect or English). Find every CONCRETE COMMITMENT the reply makes to "
+    "the guest — something a specific person must now go do or deliver (send a technician, "
+    "bring towels, refund money, send a code/info later, call back at a time...).\n"
+    "NOT promises: greetings, apologies without action, answering a question with info that "
+    "is already delivered inside the reply itself, generic 'we are at your service'.\n"
+    "Return STRICT JSON only, no prose:\n"
+    '{"promises":[{"promise_text_ar":"...","promise_text_en":"...",'
+    '"due_hint":"today 6pm | at checkout | بكرة | 30 minutes | ...(verbatim-ish, or empty)",'
+    '"category":"maintenance|delivery|info|refund|other"}]}\n'
+    'No commitments → {"promises":[]}. Be conservative: when unsure, leave it out.')
+
+_PK_CATS = ("maintenance", "delivery", "info", "refund", "other")
+
+def _pk_parse(data):
+    """Validate the extraction JSON → clean list (pure, TDD-able)."""
+    out = []
+    for p in (data or {}).get("promises") or []:
+        if not isinstance(p, dict):
+            continue
+        ar = str(p.get("promise_text_ar") or "").strip()
+        en = str(p.get("promise_text_en") or "").strip()
+        if not (ar or en):
+            continue
+        cat = str(p.get("category") or "other").strip().lower()
+        out.append({"promise_text_ar": ar, "promise_text_en": en,
+                    "due_hint": str(p.get("due_hint") or "").strip()[:80],
+                    "category": cat if cat in _PK_CATS else "other"})
+    return out[:5]
+
+def _pk_extract_promises(sent_text, guest="", unit=""):
+    user = (f"Apartment: {unit or '—'} · Guest: {guest or '—'}\n"
+            f"The reply we sent:\n---\n{(sent_text or '')[:1600]}\n---")
+    return _pk_parse(claude_json(_PK_EXTRACT_SYSTEM, user, max_tokens=500))
+
+def _pk_record_send(item, text, approver_name, approver_id):
+    """Runs in a thread after a HUMAN-approved reply reached the guest.
+    Returns the created promise ids (usually [])."""
+    if not _pk_enabled():
+        return []
+    try:
+        found = _pk_extract_promises(text, (item or {}).get("guest") or "",
+                                     (item or {}).get("unit") or "")
+    except Exception as e:
+        print("promise extract error:", e)
+        return []
+    out = []
+    now = datetime.now(TZ).replace(tzinfo=None)
+    for p in found:
+        try:
+            due = _pk.engine.due_from_hint(p.get("due_hint"), now)
+            pid = _pk.db.upsert({
+                "source": "assistant",
+                "conversation_id": str((item or {}).get("conversation_id") or ""),
+                "listing_id": str((item or {}).get("listing_id") or "") or None,
+                "apartment": (item or {}).get("unit") or "",
+                "guest_name": (item or {}).get("guest") or "",
+                "promised_by": approver_name or "",
+                "promised_by_id": str(approver_id or "") or None,
+                "promise_text": p["promise_text_ar"] or p["promise_text_en"],
+                "quote": (text or "")[:280],
+                "category": p["category"], "due_at": due})
+            out.append(pid)
+            log_event("assistant", f"🤝 وعد جديد ({p['category']}) · {(item or {}).get('unit') or ''} · {approver_name}")
+        except Exception as e:
+            print("promise record error:", e)
+    return out
+
+def _pk_mirror_watchman(rec):
+    """Mirror a watchman promise ticket into the ledger (thread-safe, best-effort)."""
+    if not _pk_enabled() or not rec.get("id"):
+        return
+    try:
+        _pk.db.upsert({
+            "id": rec["id"], "source": "watchman",
+            "conversation_id": str(rec.get("conversation_id") or "") or None,
+            "apartment": rec.get("apartment"), "guest_name": rec.get("guest"),
+            "promised_by": rec.get("responder"),
+            "promised_by_id": (rec.get("discord_id") or None),
+            "promise_text": rec.get("summary") or "",
+            "quote": rec.get("quote"), "category": rec.get("type"),
+            "due_at": rec.get("due"),
+            "status": ("done" if rec.get("state") == "done" else "open"),
+            "channel_id": rec.get("channel_id"), "msg_id": rec.get("msg_id")})
+    except Exception as e:
+        print("promise mirror error:", e)
+
+def _pk_mark_done_safe(pid, by):
+    if not _pk_enabled() or not pid:
+        return
+    try:
+        _pk.db.mark_done(pid, by=by)
+    except Exception as e:
+        print("promise done error:", e)
+
+class PromiseKeeperView(discord.ui.View):
+    """✅ button on assistant-sourced promise cards (persistent across restarts)."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ تم الوفاء بالوعد", style=discord.ButtonStyle.success,
+                       custom_id="pk_promise_done")
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = None
+        try:
+            rec = await asyncio.to_thread(_pk.db.get_by_msg, str(interaction.message.id)) if _pk_enabled() else None
+        except Exception as e:
+            print("promise lookup error:", e)
+        if not rec:
+            await interaction.response.send_message("⚠️ ما لقيت هذا الوعد في السجل.", ephemeral=True)
+            return
+        await asyncio.to_thread(_pk.db.mark_done, rec["id"], str(interaction.user))
+        try:
+            v = PromiseKeeperView()
+            for c in v.children:
+                c.disabled = True
+            await interaction.message.edit(view=v)
+        except Exception:
+            pass
+        await interaction.response.send_message(
+            f"✅ تم — سجّلت الوفاء بالوعد، {interaction.user.mention}.")
+
+async def _pk_post_card(pid):
+    """Card in the escalations channel mentioning the promiser, with the ✅ button."""
+    rec = await asyncio.to_thread(_pk.db.get, pid)
+    guild = bot.get_guild(GUILD_ID)
+    if not rec or guild is None:
+        return
+    try:
+        ch = await ensure_channel(guild, ESCALATION_CHANNEL, await get_assistant_category(guild))
+        if ch is None:
+            return
+        mention = f"<@{rec['promised_by_id']}>" if rec.get("promised_by_id") else ""
+        cat_ar = {"maintenance": "صيانة", "delivery": "توصيل/تجهيز", "info": "معلومة لاحقة",
+                  "refund": "استرداد/تعويض", "other": "أخرى"}.get(rec.get("category") or "other", "أخرى")
+        emb = discord.Embed(
+            title=f"🤝 وعد للضيف · {rec.get('apartment') or '—'}",
+            description=(f"**الموظف:** {mention or (rec.get('promised_by') or '—')}\n"
+                         f"**النوع:** {cat_ar}\n"
+                         f"**الوعد:** {rec.get('promise_text') or '—'}\n"
+                         f"**الضيف:** {rec.get('guest_name') or '—'}\n"
+                         f"**الموعد النهائي:** {(rec.get('due_at') or '')[:16].replace('T', ' ')}\n\n"
+                         "اضغط ✅ أول ما تخلّصه — وإلا بيرجع يذكّرك كل ٤ ساعات."),
+            color=0x4B89C9)
+        emb.set_footer(text=f"pk:{rec['id']}")
+        msg = await ch.send(content=(mention or None), embed=emb, view=PromiseKeeperView(),
+                            allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+        await asyncio.to_thread(_pk.db.upsert, {"id": pid, "msg_id": str(msg.id),
+                                                "channel_id": str(msg.channel.id)})
+    except Exception as e:
+        print("promise card error:", e)
+
+async def _pk_after_send(item, text, approver_name, approver_id):
+    """Background follow-up after a human-approved send: extract → ledger → card."""
+    if not _pk_enabled():
+        return
+    try:
+        pids = await asyncio.to_thread(_pk_record_send, item, text, approver_name, approver_id)
+        for pid in pids:
+            await _pk_post_card(pid)
+    except Exception as e:
+        print("promise after-send error:", e)
+
+def _pk_hook_send(item, text, approver_name, approver_id=""):
+    """Fire-and-forget entry point used by the approve/edit/dashboard send paths."""
+    if not _pk_enabled():
+        return
+    try:
+        _bg_task(_pk_after_send(item, text, approver_name, approver_id), "pk:after_send")
+    except Exception as e:
+        print("promise hook error:", e)
+
+async def _pk_reping(rec):
+    """Escalating reminder in the escalations channel (promiser + ops lead)."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        ch = await ensure_channel(guild, ESCALATION_CHANNEL, await get_assistant_category(guild))
+        if ch is None:
+            return
+        who = f"<@{rec['promised_by_id']}>" if rec.get("promised_by_id") else (rec.get("promised_by") or "")
+        lead = _wm_mention(PK_OPS_LEAD)
+        n = int(rec.get("nudges") or 0)
+        tone = ("⏰ تذكير" if n == 0 else "⏰⏰ ثاني تذكير" if n == 1 else "🚨 وعد متأخّر جداً")
+        txt = (f"{tone} — {who} {('· ' + lead) if (lead and n >= 1) else ''}\n"
+               f"وعدنا الضيف **{rec.get('guest_name') or ''}** بـ **{rec.get('promise_text') or ''}** "
+               f"({rec.get('apartment') or ''}) وما انقفل. اضغط ✅ على كرت الوعد لما يخلص.")
+        await ch.send(txt, allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+    except Exception as e:
+        print("promise reping error:", e)
+
+async def _pk_expired_summary(rec):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        ch = await ensure_channel(guild, ESCALATION_CHANNEL, await get_assistant_category(guild))
+        if ch is None:
+            return
+        lead = _wm_mention(PK_OPS_LEAD)
+        emb = discord.Embed(
+            title="🔴 وعد ما تنفّذ — انتهت مهلته",
+            description=(f"**الموظف:** {rec.get('promised_by') or '—'}\n"
+                         f"**الوعد:** {rec.get('promise_text') or '—'}\n"
+                         f"**الضيف:** {rec.get('guest_name') or '—'} · {rec.get('apartment') or ''}\n"
+                         f"مرّ أكثر من ٢٤ ساعة على موعده النهائي بدون ✅."),
+            color=0xC0392B)
+        await ch.send(content=(lead or None), embed=emb,
+                      allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+    except Exception as e:
+        print("promise expired-summary error:", e)
+
+@tasks.loop(minutes=15)
+async def promise_keeper_loop():
+    if not _pk_enabled():
+        return
+    await bot.wait_until_ready()
+    try:
+        now = datetime.now(TZ).replace(tzinfo=None)
+        rows = await asyncio.to_thread(_pk.db.open_rows)
+        for rec in rows:
+            if _pk.engine.is_expired(rec, now):
+                await asyncio.to_thread(_pk.db.mark_expired, rec["id"])
+                await _pk_expired_summary(rec)
+            elif rec.get("source") == "assistant" and _pk.engine.needs_reping(rec, now):
+                # watchman-sourced promises keep their own nudge loop in the ticket room
+                await _pk_reping(rec)
+                await asyncio.to_thread(_pk.db.record_nudge, rec["id"])
+    except Exception as e:
+        print("promise keeper loop error:", e)
+
+async def _api_promises(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if not _pk_enabled():
+        return _json({"ok": True, "enabled": False, "items": [], "counts": {}, "leaderboard": []})
+    status = request.query.get("status") or None
+    rows = await asyncio.to_thread(_pk.db.list_rows, status, 300)
+    all_rows = await asyncio.to_thread(_pk.db.list_rows, None, 2000)
+    now = datetime.now(TZ).replace(tzinfo=None)
+    for r in rows:
+        oh = _pk.engine.overdue_hours(r, now)
+        r["overdue"] = bool((r.get("status") or "open") == "open" and oh is not None and oh > 0)
+    counts = {"open": sum(1 for r in all_rows if r["status"] == "open"),
+              "done": sum(1 for r in all_rows if r["status"] == "done"),
+              "expired": sum(1 for r in all_rows if r["status"] == "expired"),
+              "overdue": sum(1 for r in all_rows
+                             if r["status"] == "open"
+                             and (_pk.engine.overdue_hours(r, now) or 0) > 0)}
+    return _json({"ok": True, "enabled": True, "items": rows, "counts": counts,
+                  "leaderboard": _pk.engine.leaderboard(all_rows, now)})
+
+async def _api_promises_done(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _req_role(request) not in ("admin", "ops"):
+        return _json({"error": "forbidden"}, 403)
+    if not _pk_enabled():
+        return _json({"error": "disabled"}, 503)
+    b = await _read_body(request)
+    pid = str(b.get("id") or "")
+    rec = await asyncio.to_thread(_pk.db.get, pid)
+    if not rec:
+        return _json({"error": "not_found"}, 404)
+    rec = await asyncio.to_thread(_pk.db.mark_done, pid, _req_actor(request))
+    log_event("assistant", f"🤝 وعد اتقفل من اللوحة · {rec.get('apartment') or ''}")
+    return _json({"ok": True, "promise": rec})
+
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
@@ -52691,6 +53111,7 @@ async def on_ready():
     bot.add_view(ProcTicketView())
     bot.add_view(MusaedEvalView())     # Musaed Quality Scoreboard button (additive)
     bot.add_view(WatchmanPromiseView())  # «الرقيب» promise "Done" buttons (re-bind after restart)
+    bot.add_view(PromiseKeeperView())    # متتبع الوعود ✅ buttons (re-bind after restart)
     bot.add_view(WatchmanGapView())      # «الرقيب» guide-gap "Added" buttons (re-bind after restart)
     bot.add_view(WatchmanNameView())     # «الرقيب» name-matching user pickers (re-bind after restart)
     bot.add_view(WatchmanCleanupView())  # «الرقيب» bulk "delete old closed tickets" button
@@ -52782,6 +53203,11 @@ async def on_ready():
         proc_reminder_loop.start()     # nudges the holder of each open purchase ticket
     if WATCHMAN_ENABLED and not watchman_loop.is_running():
         watchman_loop.start()          # «الرقيب»: re-reads finished chats → guide-gap + promise tickets
+    if _pk_enabled() and not promise_keeper_loop.is_running():
+        if not getattr(promise_keeper_loop, "_error_guarded", False):
+            _loop_guard(promise_keeper_loop, "promise_keeper_loop")
+            promise_keeper_loop._error_guarded = True
+        promise_keeper_loop.start()    # متتبع الوعود: reping overdue + expire after 24h
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)
