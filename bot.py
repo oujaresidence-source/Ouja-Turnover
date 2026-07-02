@@ -40546,10 +40546,10 @@ def _fb_profile_to_lid(p, lm):
 
 def _fb_unit_profitability(month=None, dstart=None, dend=None):
     start, end, plabel = _fb_period(month, dstart, dend)
-    try:                                          # one normalization pass over the cached pull
-        listings = get_listings_map() or {}
-        by_lid = {}
-        for r in get_reservations_cached():
+    try:                                          # targeted window pull — the full-history cache
+        listings = get_listings_map() or {}       # truncates at REVENUE_MAX_PAGES and silently
+        by_lid = {}                               # drops the NEWEST months (CLAUDE.md trap #4)
+        for r in fetch_reservations_window(start, end):
             by_lid.setdefault(r.get("listingMapId"), []).append(normalize_reservation(r, listings))
         res_ok = True
     except Exception:
@@ -40606,9 +40606,11 @@ def _fb_unit_profitability(month=None, dstart=None, dend=None):
                       "health": p.get("validation_status")})
     units.sort(key=lambda u: (u["revenue_connected"], _fb_money(u["revenue"] or 0)), reverse=True)
     pulled = None
-    if res_ok and _res_cache.get("ts"):
+    _whit = _res_window_cache.get((start.isoformat(), end.isoformat()))
+    _pulled_ts = (_whit[1] if _whit else None) or _res_cache.get("ts")
+    if res_ok and _pulled_ts:
         try:
-            pulled = datetime.fromtimestamp(_res_cache["ts"], TZ).isoformat(timespec="minutes")
+            pulled = datetime.fromtimestamp(_pulled_ts, TZ).isoformat(timespec="minutes")
         except Exception:
             pulled = None
     return {"month": (month or plabel), "period_label": plabel,
@@ -40940,6 +40942,7 @@ async def _api_fb_revenue_pull(request):
         return _json({"error": "forbidden"}, 403)
     def _refresh():
         _res_cache["data"], _res_cache["ts"] = None, 0
+        _res_window_cache.clear()               # profitability reads window pulls now — bust them too
         data = get_reservations_cached()
         return len(data or [])
     try:
