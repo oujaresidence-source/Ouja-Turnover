@@ -1595,7 +1595,10 @@ def owners_payload():
     for o, d in sorted(by_owner.items()):
         lk = links.get(o) or {}
         rows.append({"owner": o, "units": len(d["apartments"]),
-                     "apartments": sorted(d["apartments"])[:12],
+                     "apartments": sorted(d["apartments"])[:12],   # card display only
+                     # M8: the FULL list — the range-report unit picker reads this;
+                     # the [:12] cut made units 13+ unpickable for big owners.
+                     "apartments_all": sorted(d["apartments"]),
                      "mgmt_pct": (sorted(d["mgmt_pcts"])[0] if len(d["mgmt_pcts"]) == 1
                                   else (list(sorted(d["mgmt_pcts"])) or None)),
                      "link": {"exists": bool(lk.get("token")),

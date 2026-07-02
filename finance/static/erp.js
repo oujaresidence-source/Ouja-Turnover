@@ -3578,7 +3578,7 @@
       var u = $('#rrUnit'); if (!u) return;
       var rec = null, ows = (store.D.owners && store.D.owners.rows) || [];
       ows.forEach(function (r) { if (r.owner === ro.value) rec = r; });
-      var apts = (rec && rec.apartments) || [];
+      var apts = (rec && (rec.apartments_all || rec.apartments)) || [];
       u.innerHTML = '<option value="">' + esc(t('rr_all_units')) + '</option>' +
         apts.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('');
     });

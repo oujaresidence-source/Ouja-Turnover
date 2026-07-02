@@ -199,14 +199,26 @@ async def _h_api_approve(request):
 
 
 def _guarded(handler, write=False):
-    """Wrap a handler with the standard auth + role gate + error envelope."""
+    """Wrap a handler with the standard auth + role gate + error envelope.
+    write=True also watches the storage layer: an edit whose _save_json failed
+    would report ok:true and then evaporate on restart (M9) — surface it."""
     async def wrapped(request):
         if not api.authed(request):
             return api.jres({"error": "unauthorized"}, 401)
         if not api.can_finance(request):
             return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
         try:
-            return await handler(request)
+            before = (getattr(api.B, "_save_failures", None) or {}).get("count", 0) if write else 0
+            resp = await handler(request)
+            if write:
+                sf = getattr(api.B, "_save_failures", None) or {}
+                if sf.get("count", 0) > before:
+                    return api.jres({
+                        "error": "storage_write_failed",
+                        "detail": str(sf.get("last", ""))[:200],
+                        "message_ar": "فشل حفظ التغيير على القرص — راح يضيع عند إعادة التشغيل. بلّغ فيصل (تحقق من مساحة /data).",
+                        "message_en": "Saving to disk failed — this change will be lost on restart. Tell Faisal (check /data space)."}, 500)
+            return resp
         except Exception as e:
             return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
     return wrapped

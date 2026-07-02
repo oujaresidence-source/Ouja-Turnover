@@ -395,15 +395,25 @@ STATE_DIR = os.environ.get("STATE_DIR", "/data")
 def _state_path(name):
     return os.path.join(STATE_DIR, name)
 
+_save_failures = {"count": 0, "last": "", "at": 0}   # M9: writers can check & surface
+
 def _save_json(name, obj):
+    """Atomic JSON write. Returns True on success, False on failure — a caller
+    that reports ok:true after a swallowed disk error is lying to the user
+    (M9: the edit evaporates on the next restart)."""
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
         tmp = _state_path(name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False)
         os.replace(tmp, _state_path(name))   # atomic write
+        return True
     except Exception as e:
         print(f"state save error ({name}):", e)
+        _save_failures["count"] += 1
+        _save_failures["last"] = f"{name}: {e}"
+        _save_failures["at"] = time.time()
+        return False
 
 def _load_json(name, default):
     try:
@@ -25739,7 +25749,7 @@ def _owner_info(apt):
     bn = _owner_norm(best.get("apartment"))
     others = [r for ln, r in matches[1:]
               if _owner_norm(r.get("apartment")) and _owner_norm(r.get("apartment")) not in bn
-              and (r.get("owner") or "") != (best.get("owner") or "")]
+              and (r.get("owner") or "").strip() != (best.get("owner") or "").strip()]
     if others:
         best = dict(best)
         best["ambiguous_with"] = sorted({(r.get("apartment") or "?") for r in others})
@@ -25764,10 +25774,13 @@ def _owner_resolve_lid(rec, listings):
     return best
 
 def _owner_lids(owner, listings):
-    """All Hostaway listing ids belonging to one owner (explicit overrides + auto-match)."""
+    """All Hostaway listing ids belonging to one owner (explicit overrides + auto-match).
+    M10: compare STRIPPED names — a trailing space in the registry (or the query)
+    silently dropped every unit of that owner from statements/anomalies."""
     out = []
+    owner_key = (owner or "").strip()
     for rec in _owner_registry.values():
-        if (rec.get("owner") or "") != owner:
+        if (rec.get("owner") or "").strip() != owner_key:
             continue
         lid = _owner_resolve_lid(rec, listings)
         if lid is not None and lid not in out:
@@ -40593,10 +40606,11 @@ def _fb_journal_post(entry_ids, actor=""):
         return {"ok": False, "error": "not_configured", "draft": draft}
     if not draft["ready"]:
         return {"ok": False, "error": "draft_not_ready", "draft": draft}
-    # mark posting → (real Daftra POST endpoint confirmed on the live account) → read-back verify
-    for eid in entry_ids:
-        _fb_set_status(eid, "posting", actor)
-    # NOTE: the exact Daftra journal POST path must be confirmed on the live account before enabling.
+    # M7: do NOT mark 'posting' before a real POST exists — entries flipped to
+    # 'posting' with no rollback vanish from the migratable set forever the day
+    # posting is enabled. When the Daftra journal POST path is confirmed:
+    # mark 'posting' immediately before the actual POST, and on ANY failure
+    # roll every entry back to 'approved' before returning.
     return {"ok": False, "error": "post_endpoint_unconfirmed",
             "reason": "أكّد مسار ترحيل القيود في دافترة أولاً ثم نفعّل الترحيل الحقيقي.", "draft": draft}
 
