@@ -50,18 +50,35 @@ def match_listing(name, listings_map):
     return hits[0] if len(set(hits)) == 1 else None
 
 
-def _fetch_media(url, dest, http_get):
+def _fetch_media(url, dest, http_get, url_cache=None):
     """Download one image; True on success. Refuses HTML (private/dead Drive
-    links serve an HTML interstitial) and oversized files."""
-    r = http_get(drive_direct(url), timeout=30)
-    ctype = (r.headers.get("content-type") or "").lower()
-    body = r.content or b""
-    if r.status_code != 200 or "text/html" in ctype or not body:
-        return False
-    if len(body) > MAX_MEDIA_BYTES:
+    links serve an HTML interstitial) and oversized files. `url_cache` dedupes
+    across units — the Nuzha buildings share the SAME Drive photos, so 209
+    links are only ~164 unique downloads."""
+    direct = drive_direct(url)
+    if url_cache is not None and direct in url_cache:
+        src = url_cache[direct]
+        if src is False:
+            return False                 # known-dead link — don't wait again
+        import shutil
+        shutil.copyfile(src, dest)
+        return True
+    try:
+        r = http_get(direct, timeout=12)
+        ctype = (r.headers.get("content-type") or "").lower()
+        body = r.content or b""
+        ok = (r.status_code == 200 and "text/html" not in ctype
+              and body and len(body) <= MAX_MEDIA_BYTES)
+    except Exception:
+        ok = False
+    if not ok:
+        if url_cache is not None:
+            url_cache[direct] = False
         return False
     with open(dest, "wb") as f:
         f.write(body)
+    if url_cache is not None:
+        url_cache[direct] = dest
     return True
 
 
@@ -71,10 +88,11 @@ def _ext_for(url, default=".jpg"):
 
 
 def import_csv(path, media_dir=None, http_get=None, listings_map=None,
-               fetch_media=True):
+               fetch_media=True, progress=None):
     """Run the import. Returns the owner report:
     {units, created, updated, matched, unmatched:[names], media_ok,
-     media_failed:[{slug,field,url}], media_skipped}."""
+     media_failed:[{slug,field,url}], media_skipped}.
+    `progress(done, total, slug)` is called after each unit (background-job UI)."""
     rows = list(csv.DictReader(open(path, encoding="utf-8-sig")))
     report = {"units": len(rows), "created": 0, "updated": 0,
               "matched": 0, "unmatched": [],
@@ -82,6 +100,8 @@ def import_csv(path, media_dir=None, http_get=None, listings_map=None,
     if fetch_media and http_get is None:
         import requests
         http_get = requests.get
+    url_cache = {}                       # direct-url → local path | False (dead)
+    done = 0
     for r in rows:
         slug = (r.get("id") or "").strip().lower()
         if not slug:
@@ -107,7 +127,7 @@ def import_csv(path, media_dir=None, http_get=None, listings_map=None,
                     report["media_skipped"] += 1     # already mirrored — idempotent
                     continue
                 try:
-                    if _fetch_media(url, dest, http_get):
+                    if _fetch_media(url, dest, http_get, url_cache):
                         media[pf] = fname
                         report["media_ok"] += 1
                     else:
@@ -118,4 +138,10 @@ def import_csv(path, media_dir=None, http_get=None, listings_map=None,
         fields["active"] = 1
         db.upsert_unit(slug, **fields)
         report["created" if existing is None else "updated"] += 1
+        done += 1
+        if progress:
+            try:
+                progress(done, len(rows), slug)
+            except Exception:
+                pass
     return report

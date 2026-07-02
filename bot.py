@@ -19291,6 +19291,7 @@ async function loadGuide(){
     var d = await api('/api/guide/admin');
     D.guide = d;
     gdRenderUnits(); gdRenderEntries(); gdFillSlugSelect();
+    gdPollImport(null);   /* resume the progress bar if an import is running */
   }catch(e){ document.getElementById('gdUnits').innerHTML='<div class="empty">'+esc(labelText('تعذّر التحميل','Could not load'))+'</div>'; }
 }
 function gdRenderUnits(){
@@ -19383,22 +19384,40 @@ async function gdDelEntry(el){
   var j=await post('/api/guide/entry/delete', {id: el.getAttribute('data-eid')});
   if(j&&j.ok){ toast(labelText('انحذفت','Deleted')); loadGuide(); } else { el.disabled=false; toast((j&&j.error)||labelText('صار خطأ','Error')); }
 }
+function gdReportHtml(r){
+  var failed=(r.media_failed||[]).length;
+  return '<div class="card" style="margin-bottom:10px"><b>'+esc(labelText('تقرير الاستيراد','Import report'))+':</b> '
+    +r.units+' '+esc(labelText('شقة','units'))+' · '+esc(labelText('صور نزلت','photos mirrored'))+' '+(r.media_ok||0)
+    +(r.media_skipped?(' · '+esc(labelText('منسوخة سابقاً','already mirrored'))+' '+r.media_skipped):'')
+    +(failed?(' · <span style="color:var(--red)">'+esc(labelText('روابط صور ميتة/خاصة','dead/private photo links'))+' '+failed+'</span>'):'')
+    +((r.unmatched||[]).length?(' · <span style="color:var(--yellow)">'+esc(labelText('بدون ربط Hostaway','no Hostaway match'))+' '+r.unmatched.length+'</span>'):'')
+    +'</div>';
+}
+var GD_POLL=null;
+function gdPollImport(el){
+  if(GD_POLL) clearTimeout(GD_POLL);
+  api('/api/guide/import/status').then(function(j){
+    var s=(j&&j.state)||{};
+    var box=document.getElementById('gdImportReport');
+    if(s.running){
+      if(box) box.innerHTML='<div class="card" style="margin-bottom:10px">⏳ '
+        +esc(labelText('جاري الاستيراد بالخلفية','Importing in the background'))+' — <b>'
+        +(s.done||0)+'/'+(s.total||'…')+'</b>'+(s.slug?(' · '+esc(s.slug)):'')
+        +' <span class="muted" style="font-size:12px">'+esc(labelText('تقدر تسكّر الصفحة وترجع','You can close the page and come back'))+'</span></div>';
+      GD_POLL=setTimeout(function(){ gdPollImport(el); }, 3000);
+      return;
+    }
+    if(el){ el.disabled=false; el.textContent=labelText('⬇ استيراد من ملف التصدير','⬇ Import from export file'); }
+    if(s.error){ if(box) box.innerHTML='<div class="card" style="margin-bottom:10px;color:var(--red)">⚠ '+esc(s.error)+'</div>'; return; }
+    if(s.report){ if(box) box.innerHTML=gdReportHtml(s.report); loadGuide(); }
+  }).catch(function(){ GD_POLL=setTimeout(function(){ gdPollImport(el); }, 5000); });
+}
 async function gdImport(el){
-  if(!confirm(labelText('استيراد الدليل من ملف تصدير Supabase؟ آمن ويمكن تكراره.','Import the guide from the Supabase export file? Safe to re-run.'))) return;
+  if(!confirm(labelText('استيراد الدليل من ملف تصدير Supabase؟ يشتغل بالخلفية وآمن يتكرر.','Import the guide from the Supabase export? Runs in the background, safe to re-run.'))) return;
   el.disabled=true; el.textContent=labelText('جاري الاستيراد…','Importing…');
   var j=await post('/api/guide/import', {});
-  el.disabled=false; el.textContent=labelText('⬇ استيراد من ملف التصدير','⬇ Import from export file');
-  var box=document.getElementById('gdImportReport');
-  if(j&&j.ok){
-    var r=j.report||{};
-    var failed=(r.media_failed||[]).length;
-    box.innerHTML='<div class="card" style="margin-bottom:10px"><b>'+esc(labelText('تقرير الاستيراد','Import report'))+':</b> '
-      +r.units+' '+esc(labelText('شقة','units'))+' · '+esc(labelText('صور نزلت','photos mirrored'))+' '+(r.media_ok||0)
-      +(failed?(' · <span style="color:var(--red)">'+esc(labelText('روابط صور ميتة/خاصة','dead/private photo links'))+' '+failed+'</span>'):'')
-      +((r.unmatched||[]).length?(' · <span style="color:var(--yellow)">'+esc(labelText('بدون ربط Hostaway','no Hostaway match'))+' '+r.unmatched.length+'</span>'):'')
-      +'</div>';
-    loadGuide();
-  } else { toast((j&&j.error)||labelText('صار خطأ','Error')); }
+  if(j&&j.ok){ gdPollImport(el); }
+  else { el.disabled=false; el.textContent=labelText('⬇ استيراد من ملف التصدير','⬇ Import from export file'); toast((j&&j.error)||labelText('صار خطأ','Error')); }
 }
 
 function renderListingsSyncBar(){

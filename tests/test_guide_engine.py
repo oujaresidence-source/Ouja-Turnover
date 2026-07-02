@@ -119,5 +119,62 @@ class GuideEngineTest(unittest.TestCase):
         self.assertFalse(any(e["id"] == eid for e in gdb.entries_for("6b-htn")))
 
 
+class GuideImportSpeedTest(unittest.TestCase):
+    """The import must not hang the button: shared Drive links download ONCE
+    (dead ones fail ONCE), and the routes layer runs it as a background job."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="guide_speed_")
+        bdb.set_db_path_for_tests(os.path.join(cls.tmp, "brain.db"))
+        gdb.reset_init_cache()
+
+    def test_shared_links_download_once_dead_links_fail_once(self):
+        csvp = os.path.join(self.tmp, "l.csv")
+        shared = "https://drive.google.com/file/d/SHARED/view"
+        dead = "https://drive.google.com/file/d/DEAD/view"
+        _write_csv(csvp, [
+            {"id": "u1", "listing_name": "A", "complex_pic": shared, "door_pic": dead},
+            {"id": "u2", "listing_name": "B", "complex_pic": shared, "door_pic": dead},
+            {"id": "u3", "listing_name": "C", "building_pic": shared},
+        ])
+        calls = []
+
+        def fake_get(url, timeout=12):
+            calls.append(url)
+            if "SHARED" in url:
+                return _Resp(b"\xff\xd8\xd9" * 40)
+            return _Resp(b"<html>denied</html>", ctype="text/html")
+        rep = importer.import_csv(csvp, media_dir=os.path.join(self.tmp, "m"),
+                                  http_get=fake_get, listings_map={})
+        self.assertEqual(len(calls), 2, "1 shared + 1 dead — never re-downloaded")
+        self.assertEqual(rep["media_ok"], 3, "the shared photo lands on all 3 units")
+        self.assertEqual(len(rep["media_failed"]), 2, "dead link reported per unit, fetched once")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "m", "u3", "building_pic.jpg")))
+
+    def test_background_job_state_machine(self):
+        from guide import routes as groutes
+        csvp = os.path.join(self.tmp, "bg.csv")
+        _write_csv(csvp, [{"id": "bg1", "listing_name": "BG"}])
+        groutes._import_state.update({"running": True, "done": 0, "total": 0,
+                                      "report": None, "error": ""})
+        groutes._run_import_job(csvp, os.path.join(self.tmp, "m2"), {})
+        st = groutes._import_state
+        self.assertFalse(st["running"], "job must always end not-running")
+        self.assertIsNotNone(st["report"])
+        self.assertEqual(st["report"]["units"], 1)
+        self.assertEqual(st["done"], 1)
+        self.assertTrue(st["finished_at"])
+
+    def test_background_job_error_is_captured(self):
+        from guide import routes as groutes
+        groutes._import_state.update({"running": True, "report": None, "error": ""})
+        groutes._run_import_job(os.path.join(self.tmp, "missing.csv"),
+                                os.path.join(self.tmp, "m3"), {})
+        st = groutes._import_state
+        self.assertFalse(st["running"])
+        self.assertIn("FileNotFoundError", st["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

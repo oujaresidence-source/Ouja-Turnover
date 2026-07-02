@@ -16,9 +16,11 @@ ADMIN (dashboard login + admin/ops role — double-gated like schedule writes):
   POST /api/guide/import         → run the CSV import (thread)"""
 
 import asyncio
+import datetime
 import mimetypes
 import os
 import re
+import threading
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
@@ -192,20 +194,59 @@ async def api_entry_delete(request):
     return HOST.json_response({"ok": True})
 
 
+# The import mirrors up to ~164 unique Drive photos — minutes of work. Running
+# it inside the HTTP request hung the button and hit proxy timeouts, so it is a
+# BACKGROUND JOB: POST /api/guide/import starts it (double-start guarded),
+# GET /api/guide/import/status feeds the progress bar.
+_import_state = {"running": False, "done": 0, "total": 0, "slug": "",
+                 "report": None, "error": "", "started_at": "", "finished_at": ""}
+_import_lock = threading.Lock()
+
+
+def _run_import_job(csv_path, media_dir, lm):
+    st = _import_state
+
+    def _tick(done, total, slug):
+        st["done"], st["total"], st["slug"] = done, total, slug
+    try:
+        rep = importer.import_csv(csv_path, media_dir, None, lm, True, progress=_tick)
+        st["report"] = rep
+    except Exception as e:
+        st["error"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        st["running"] = False
+        st["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+
+
 async def api_import(request):
     if not _can_edit(request):
         return _deny()
     csv_path = HOST.csv_path or "supabase_export_listings.csv"
     if not os.path.isfile(csv_path):
         return HOST.json_response({"ok": False, "error": "ملف التصدير غير موجود: " + csv_path}, 200)
+    with _import_lock:
+        if _import_state["running"]:
+            return HOST.json_response({"ok": True, "already_running": True,
+                                       "state": dict(_import_state)})
+        _import_state.update({"running": True, "done": 0, "total": 0, "slug": "",
+                              "report": None, "error": "",
+                              "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                              "finished_at": ""})
     lm = {}
     try:
         lm = HOST.listings() if HOST.listings else {}
     except Exception:
         lm = {}
     media_dir = os.path.join(HOST.state_dir or ".", "guide_media")
-    rep = await asyncio.to_thread(importer.import_csv, csv_path, media_dir, None, lm, True)
-    return HOST.json_response({"ok": True, "report": rep})
+    threading.Thread(target=_run_import_job, args=(csv_path, media_dir, lm),
+                     daemon=True).start()
+    return HOST.json_response({"ok": True, "started": True})
+
+
+async def api_import_status(request):
+    if not (HOST.dash_auth and HOST.dash_auth(request)):
+        return HOST.json_response({"ok": False, "error": "unauthorized"}, 401)
+    return HOST.json_response({"ok": True, "state": dict(_import_state)})
 
 
 def register_routes(app):
@@ -222,3 +263,4 @@ def register_routes(app):
     r.add_post("/api/guide/entry", _safe(api_entry_add))
     r.add_post("/api/guide/entry/delete", _safe(api_entry_delete))
     r.add_post("/api/guide/import", _safe(api_import))
+    r.add_get("/api/guide/import/status", _safe(api_import_status))
