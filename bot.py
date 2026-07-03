@@ -52331,30 +52331,52 @@ def _wm_sender_name(m):
     return ""
 
 def _wm_guide_text(listing_id):
-    """Fetch + flatten the guide PAGE behind the apartment's directions link to plain text
-    (cached 6h). '' when there is no link or it can't be read — the caller then falls back
-    to the #knowledge facts for that apartment."""
+    """The guide content the guest can ALREADY see, flattened to plain text
+    (cached 15min). Source of truth: the IN-HOUSE guide DB (unit fields +
+    published FAQ entries) — so a fact added via «أضِفها للدليل» immediately
+    stops re-ticketing. Falls back to scraping the directions link only for
+    units not linked to the in-house guide."""
     if not listing_id:
         return ""
     cached = _wm_guide_cache.get(listing_id)
-    if cached and time.time() - cached[1] < 6 * 3600:
+    if cached and time.time() - cached[1] < 900:
         return cached[0]
     text = ""
-    try:
-        url = directions_link(listing_id)
-    except Exception:
-        url = None
-    if url:
+    if _HAS_GUIDE and GUIDE_ENABLED:
         try:
-            r = requests.get(url, timeout=20, headers={"User-Agent": "OujaWatchman/1.0"})
-            if r.status_code == 200 and r.text:
-                raw = r.text
-                raw = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
-                raw = re.sub(r"(?s)<[^>]+>", " ", raw)
-                raw = re.sub(r"&[a-z#0-9]+;", " ", raw)
-                text = re.sub(r"\s+", " ", raw).strip()[:6000]
+            unit = _guide.db.unit_by_listing(listing_id)
+            if unit:
+                parts = []
+                for k in ("listing_name", "notes", "wifi_name", "wifi_pass", "map_link",
+                          "complex_caption", "building_caption", "elevator_caption",
+                          "door_caption"):
+                    v = (unit.get(k) or "").strip()
+                    if v:
+                        parts.append(v)
+                for e in _guide.db.entries_for(unit["slug"]):
+                    for k in ("title_ar", "title_en", "body_ar", "body_en"):
+                        v = (e.get(k) or "").strip()
+                        if v:
+                            parts.append(v)
+                text = re.sub(r"\s+", " ", " ".join(parts)).strip()[:6000]
         except Exception as e:
-            print(f"watchman: guide fetch error listing {listing_id}: {e}")
+            print(f"watchman: in-house guide read error listing {listing_id}: {e}")
+    if not text:
+        try:
+            url = directions_link(listing_id)
+        except Exception:
+            url = None
+        if url:
+            try:
+                r = requests.get(url, timeout=20, headers={"User-Agent": "OujaWatchman/1.0"})
+                if r.status_code == 200 and r.text:
+                    raw = r.text
+                    raw = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", raw)
+                    raw = re.sub(r"(?s)<[^>]+>", " ", raw)
+                    raw = re.sub(r"&[a-z#0-9]+;", " ", raw)
+                    text = re.sub(r"\s+", " ", raw).strip()[:6000]
+            except Exception as e:
+                print(f"watchman: guide fetch error listing {listing_id}: {e}")
     _wm_guide_cache[listing_id] = (text, time.time())
     return text
 
@@ -52367,12 +52389,17 @@ _WM_SYSTEM = (
     "1) guide_gaps — a piece of practical info the TEAM gave the guest that is NOT already present in "
     "the GUIDE TEXT, and that FUTURE guests of THIS apartment would also need: wifi, parking, AC, the "
     "entry/door-code method, appliances, checkout steps, location/landmark, trash, water/electricity, "
-    "etc. Include it ONLY if it is genuinely ABSENT from the GUIDE TEXT provided. If the GUIDE TEXT is "
+    "etc. Include it ONLY if it is genuinely ABSENT from the GUIDE TEXT provided (re-read the GUIDE "
+    "TEXT before flagging — same fact in different words = NOT a gap). If the GUIDE TEXT is "
     "empty, set used_fallback=true and be conservative (only clearly guide-type facts). Do NOT include "
     "one-off, guest-specific things (a personal refund, a late checkout granted just to them). Do NOT "
     "flag the apartment ENTRY / DOOR / ACCESS code, lock code or passcode as a gap — it is sent ~1 hour "
     "before check-in on purpose and is NOT part of the static guide (the wifi password, by contrast, IS "
-    "fine to flag).\n\n"
+    "fine to flag). NEVER flag as gaps: pre-booking INQUIRIES (price, nightly rate, availability, "
+    "dates, discounts, how to book, payment methods), anything answered from a calendar or a specific "
+    "reservation, complaints or their resolutions, cleaning-status questions, and small talk. A gap is "
+    "a STATIC, reusable apartment fact only. When in doubt, do NOT flag — an unnecessary ticket costs "
+    "the team more than a missed one.\n\n"
     "2) promises — a CONCRETE commitment the TEAM (never the guest) made: ACTION we must do ('we'll send "
     "a technician', 'we'll bring towels', 'we'll replace it'), MONEY ('refund', 'discount', "
     "'compensation', 'no charge'), or TIMING ('early check-in at 12', 'late checkout till 2', 'we'll "
@@ -52391,6 +52418,48 @@ _WM_SYSTEM = (
     "verbatim in its original language. confidence is 0.0-1.0. If nothing qualifies, return empty lists. "
     "Never invent facts."
 )
+
+# Deterministic inquiry/booking blocklist — even if the model slips one through,
+# these are NEVER guide gaps (they belong to pricing/booking, not the static guide).
+_WM_INQUIRY_RX = re.compile(
+    r"سعر|السعر|كم الليلة|بكم|خصم|تخفيض|متاح|متوفر|الحجز|احجز|أحجز|موعد الحجز|تمديد الحجز|"
+    r"price|rate per|per night|nightly|discount|availab|book|reservation|extend my stay|"
+    r"how much|deposit|payment|الدفع|عربون", re.I)
+
+def _wm_gap_is_inquiry(*parts):
+    blob = " ".join(p for p in parts if p)
+    return bool(_WM_INQUIRY_RX.search(blob))
+
+_WM_FAQ_SYSTEM = (
+    "You turn ONE raw guest question + team answer from a Riyadh short-term rental into a "
+    "polished FAQ entry for the apartment's public guest-guide page. Rules:\n"
+    "- Fix all grammar, spelling and vocabulary; the guest's raw wording must NOT survive.\n"
+    "- Strip anything guest-specific: names, phone numbers, dates, reservation details, prices, "
+    "apologies. Keep ONLY the reusable fact.\n"
+    "- Write BOTH languages whatever the input language was: clear warm Arabic (فصحى مبسّطة "
+    "تناسب ضيف سعودي) and natural English.\n"
+    "- Short and scannable: each title ≤ 60 chars, each body ≤ 280 chars.\n"
+    "- Never invent facts not present in the answer.\n"
+    'Return STRICT JSON only: {"title_ar":"...","title_en":"...","body_ar":"...","body_en":"..."}')
+
+def _wm_gap_polish(gap):
+    """Raw Q&A → guest-ready bilingual FAQ (Claude). None on any failure —
+    the modal then falls back to the raw text."""
+    try:
+        user = ("Apartment: %s\nGuest asked: %s\nTeam answered: %s\nSuggested guide text: %s" % (
+            gap.get("apartment") or "—", gap.get("guest_question") or "—",
+            gap.get("our_answer") or "—", gap.get("suggested") or "—"))
+        data = claude_json(_WM_FAQ_SYSTEM, user, max_tokens=450)
+        if not isinstance(data, dict):
+            return None
+        out = {k: str(data.get(k) or "").strip()[:300]
+               for k in ("title_ar", "title_en", "body_ar", "body_en")}
+        if not (out["title_ar"] or out["title_en"]) or not (out["body_ar"] or out["body_en"]):
+            return None
+        return out
+    except Exception as e:
+        print("watchman faq polish error:", e)
+        return None
 
 def run_watchman_scan():
     """SYNC: scan recent conversations, analyze the quiet + not-yet-seen ones, update the
@@ -52494,6 +52563,8 @@ def run_watchman_scan():
             gs = str(g.get("suggested_guide_text") or "").strip()
             if _wm_is_entry_code_gap(topic, gq, ga, gs):
                 continue                              # entry/door code → sent 1h before check-in, not a gap
+            if _wm_gap_is_inquiry(topic, gq):
+                continue                              # pricing/availability/booking → never a guide gap
             payload = {
                 "listing_id": lm, "apartment": apt, "topic": topic,
                 "guest_question": gq,
@@ -52514,6 +52585,7 @@ def run_watchman_scan():
                     existing["last_guest"] = guest
                     intents.append(("gap_bump", {"key": key, "count": existing["count"]}))
                 continue                              # resolved gaps are not re-flagged
+            payload["faq"] = _wm_gap_polish(payload)   # guest-ready bilingual FAQ for the modal/card
             payload.update({"key": key, "count": 1, "resolved": False, "msg_id": None,
                             "opened": now.isoformat(timespec="seconds")})
             _wm_gaps[key] = payload
@@ -52846,21 +52918,30 @@ def _wm_gap_key_from(interaction):
     return None
 
 class WatchmanGapAddModal(discord.ui.Modal, title="أضِفها للدليل"):
-    """Pre-filled Q/A → ONE guide_entries FAQ row → guests see it instantly on
-    /guide. all_units=True writes the for-every-apartment variant."""
+    """Pre-filled with the AI-POLISHED bilingual FAQ (never the guest's raw
+    wording — grammar fixed, guest-specific details stripped). Falls back to
+    the raw Q/A only when polishing failed. One submit → ONE guide_entries
+    FAQ row → guests see it instantly on /guide."""
     def __init__(self, gap_key, all_units=False):
         super().__init__()
         self.gap_key = gap_key
         self.all_units = all_units
         rec = _wm_gaps.get(gap_key) or {}
-        self.q = discord.ui.TextInput(
-            label="السؤال (عنوانه في الدليل)", max_length=100,
-            default=((rec.get("guest_question") or rec.get("topic") or "")[:100]))
-        self.a = discord.ui.TextInput(
-            label="الجواب (نص الدليل)", style=discord.TextStyle.paragraph, max_length=1500,
-            default=((rec.get("suggested") or rec.get("our_answer") or "")[:1500]))
+        faq = rec.get("faq") or {}
+        t_ar = (faq.get("title_ar") or rec.get("topic") or rec.get("guest_question") or "")[:100]
+        b_ar = (faq.get("body_ar") or rec.get("suggested") or rec.get("our_answer") or "")[:1000]
+        self.q = discord.ui.TextInput(label="السؤال بالعربي", max_length=100, default=t_ar)
+        self.a = discord.ui.TextInput(label="الجواب بالعربي", style=discord.TextStyle.paragraph,
+                                      max_length=1000, default=b_ar)
+        self.q_en = discord.ui.TextInput(label="Question (English)", max_length=100,
+                                         required=False, default=(faq.get("title_en") or "")[:100])
+        self.a_en = discord.ui.TextInput(label="Answer (English)", style=discord.TextStyle.paragraph,
+                                         max_length=1000, required=False,
+                                         default=(faq.get("body_en") or "")[:1000])
         self.add_item(self.q)
         self.add_item(self.a)
+        self.add_item(self.q_en)
+        self.add_item(self.a_en)
 
     async def on_submit(self, interaction: discord.Interaction):
         rec = _wm_gaps.get(self.gap_key)
@@ -52881,7 +52962,8 @@ class WatchmanGapAddModal(discord.ui.Modal, title="أضِفها للدليل"):
             slug = unit["slug"]
         await asyncio.to_thread(
             _guide.db.add_entry, slug, "faq",
-            str(self.q.value).strip(), "", str(self.a.value).strip(), "",
+            str(self.q.value).strip(), str(self.q_en.value or "").strip(),
+            str(self.a.value).strip(), str(self.a_en.value or "").strip(),
             None, 0, "published", "gap", str(interaction.user))
         rec["resolved"] = True
         _wm_save()
@@ -52976,13 +53058,21 @@ async def _wm_post_gap(rec):
         return
     owner = _wm_mention(WATCHMAN_GUIDE_OWNER)
     warn = "\n\n⚠️ ثقة أقل — ما قدرت أقرأ صفحة الدليل (راجع يدوياً)." if rec.get("fallback") else ""
+    faq = rec.get("faq") or {}
+    if faq.get("title_ar") or faq.get("title_en"):
+        ready = (f"**النسخة الجاهزة للدليل (منسّقة بالذكاء):**\n"
+                 f"> **{faq.get('title_ar') or faq.get('title_en')}**\n"
+                 f"> {faq.get('body_ar') or faq.get('body_en') or '—'}\n"
+                 + (f"> _{faq.get('title_en')}_\n> _{faq.get('body_en')}_\n" if faq.get("title_en") else ""))
+    else:
+        ready = f"**أضِف للدليل:**\n> {rec.get('suggested') or rec.get('our_answer') or '—'}\n"
     emb = discord.Embed(
         title=f"🧭 نقص في الدليل #{seq:03d} · {rec['apartment']}",
         description=(f"**الموضوع:** {rec['topic']}\n"
                      f"**سؤال الضيف:** {rec.get('guest_question') or '—'}\n"
                      f"**ردّينا عليه بـ:** {rec.get('our_answer') or '—'}\n\n"
-                     f"**أضِف للدليل:**\n> {rec.get('suggested') or rec.get('our_answer') or '—'}{warn}\n\n"
-                     f"«أضِفها للدليل» يكتبها بصفحة الشقة مباشرة (تقدر تعدّل النص قبل)، "
+                     f"{ready}{warn}\n"
+                     f"«أضِفها للدليل» يفتح النسخة المنسّقة للمراجعة قبل النشر — "
                      f"«لكل الشقق» يضيفها لكل الشقق، «موجودة أصلًا» يقفل الفجوة بدون إضافة."),
         color=0xC9A24B)
     emb.set_footer(text=f"wm-gap:{rec['key']}")
