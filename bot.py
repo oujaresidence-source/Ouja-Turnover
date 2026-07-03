@@ -14684,10 +14684,12 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
           <div class="page-tools">
             <button class="btn ghost sm" onclick="gdImport(this)" id="gdImportBtn">⬇ استيراد</button>
+            <button class="btn ghost sm" onclick="ghaPreview(this)" id="ghaBtn">🔗 حدّث روابط Hostaway</button>
             <button class="btn ghost sm" onclick="loadGuide()">↻</button>
           </div>
         </div>
         <div id="gdImportReport"></div>
+        <div id="ghaBox"></div>
         <div class="card">
           <div class="card-head"><span class="card-title" id="t_gd_units">الشقق</span>
             <input id="gdSearch" oninput="gdRenderUnits()" placeholder="بحث…" style="max-width:220px;padding:6px 10px;height:32px;font-size:13px">
@@ -19312,6 +19314,67 @@ function gdRenderUnits(){
 }
 /* per-unit editing moved to the dedicated /guide-admin/{slug} page —
    the تعديل button links there with the session token */
+
+/* ---- Hostaway custom-field links: Netlify → in-house (preview → apply) ---- */
+var GHA_POLL=null;
+async function ghaPreview(el){
+  el.disabled=true; el.textContent=labelText('جاري الفحص…','Scanning…');
+  var box=document.getElementById('ghaBox');
+  try{
+    var d=await api('/api/guide/hostaway-links');
+    el.disabled=false; el.textContent=labelText('🔗 حدّث روابط Hostaway','🔗 Update Hostaway links');
+    if(!d||!d.ok){ toast((d&&d.error)||labelText('صار خطأ','Error')); return; }
+    var rows=d.rows||[];
+    var todo=rows.filter(function(r){ return !r.skip && r['new'] && r.old!==r['new']; });
+    var skipped=rows.filter(function(r){ return r.skip; });
+    var already=rows.length-todo.length-skipped.length;
+    if(!rows.length){ box.innerHTML='<div class="card" style="margin-bottom:10px">✅ '+esc(labelText('ما فيه روابط Netlify باقية في Hostaway','No Netlify links left in Hostaway'))+'</div>'; return; }
+    box.innerHTML='<div class="card" style="margin-bottom:10px">'
+      +'<b>'+esc(labelText('معاينة تحديث الروابط','Link update preview'))+':</b> '
+      +todo.length+' '+esc(labelText('بيتبدّل','to change'))
+      +(already?(' · '+already+' '+esc(labelText('محدّث أصلاً','already updated'))):'')
+      +(skipped.length?(' · <span style="color:var(--yellow)">'+skipped.length+' '+esc(labelText('متجاهل (شقة غير مرتبطة)','skipped (unlinked unit)'))+'</span>'):'')
+      +'<div style="max-height:260px;overflow:auto;margin-top:8px;font-size:12px">'
+      +rows.map(function(r){
+        return '<div style="padding:6px 2px;border-bottom:1px solid var(--border)">'
+          +'<b>'+esc(r.name||('#'+r.lid))+'</b>'
+          +(r.skip?(' — <span style="color:var(--yellow)">'+esc(r.skip)+'</span>')
+            :(' <div class="muted" dir="ltr" style="overflow-wrap:anywhere">'+esc(r.old)+' ← '+esc(r['new'])+'</div>'))
+          +'</div>';
+      }).join('')+'</div>'
+      +(todo.length?('<button class="btn primary sm" style="margin-top:10px" onclick="ghaApply(this)">✅ '
+        +esc(labelText('طبّق التحديث على','Apply to'))+' '+todo.length+' '+esc(labelText('شقة','listings'))+'</button>'):'')
+      +'</div>';
+  }catch(e){ el.disabled=false; el.textContent=labelText('🔗 حدّث روابط Hostaway','🔗 Update Hostaway links'); toast(labelText('صار خطأ','Error')); }
+}
+function ghaPoll(){
+  if(GHA_POLL) clearTimeout(GHA_POLL);
+  api('/api/guide/hostaway-links/status').then(function(j){
+    var s=(j&&j.state)||{};
+    var box=document.getElementById('ghaBox');
+    if(s.running){
+      if(box) box.innerHTML='<div class="card" style="margin-bottom:10px">⏳ '
+        +esc(labelText('جاري تحديث Hostaway','Updating Hostaway'))+' — <b>'+(s.done||0)+'/'+(s.total||'…')+'</b></div>';
+      GHA_POLL=setTimeout(ghaPoll, 3000); return;
+    }
+    if(box){
+      if(s.error) box.innerHTML='<div class="card" style="margin-bottom:10px;color:var(--red)">⚠ '+esc(s.error)+'</div>';
+      else box.innerHTML='<div class="card" style="margin-bottom:10px"><b>'+esc(labelText('خلص التحديث','Update finished'))+':</b> ✅ '
+        +(s.ok||0)+' '+esc(labelText('تم','done'))
+        +(((s.failed||[]).length)?(' · <span style="color:var(--red)">'+s.failed.length+' '+esc(labelText('فشل','failed'))+': '
+          +esc((s.failed||[]).map(function(f){return f.name;}).join('، '))+'</span>'):'')
+        +(s.skipped?(' · '+s.skipped+' '+esc(labelText('متجاهل','skipped'))):'')
+        +'</div>';
+    }
+  }).catch(function(){ GHA_POLL=setTimeout(ghaPoll, 5000); });
+}
+async function ghaApply(el){
+  if(!confirm(labelText('تبديل روابط الدليل في Hostaway من Netlify إلى oujares.com؟ التغيير يوصل للضيوف الجايين.','Switch the guide links in Hostaway from Netlify to oujares.com? Future guests get the new link.'))) return;
+  el.disabled=true;
+  var j=await post('/api/guide/hostaway-links', {});
+  if(j&&j.ok){ ghaPoll(); } else { el.disabled=false; toast((j&&j.error)||labelText('صار خطأ','Error')); }
+}
+
 function gdFillSlugSelect(){
   var sel=document.getElementById('geSlug'); if(!sel) return;
   var units=((D.guide||{}).units||[]);
@@ -47843,6 +47906,9 @@ async def start_web_server():
         app.router.add_get("/api/guests", _api_guests_list)
         app.router.add_get("/api/promises", _api_promises)          # متتبع الوعود (login)
         app.router.add_post("/api/promises/done", _api_promises_done)  # login + admin/ops
+        app.router.add_get("/api/guide/hostaway-links", _api_guide_ha_links)    # dry-run preview
+        app.router.add_post("/api/guide/hostaway-links", _api_guide_ha_links)   # apply (bg job)
+        app.router.add_get("/api/guide/hostaway-links/status", _api_guide_ha_links_status)
         app.router.add_get("/api/cleaning/quality", _api_clean_quality_summary)
         # Public no-auth feedback page + endpoints (token IS the auth)
         app.router.add_get("/clean-feedback", _handle_clean_feedback_page)
@@ -53335,6 +53401,122 @@ async def promise_keeper_loop():
                 await asyncio.to_thread(_pk.db.record_nudge, rec["id"])
     except Exception as e:
         print("promise keeper loop error:", e)
+
+# ---- Guide ↔ Hostaway: rewrite the old Netlify guide links in Custom Fields ----
+# The «Listing Internal Name» custom field carries the guide URL the automations
+# send guests. Hostaway's API updates it: PUT /listings/{id} with
+# customFieldValues [{customFieldId, value}] — so the cutover to oujares.com is
+# one button, not 60 manual edits.
+GUIDE_PUBLIC_BASE = os.environ.get("GUIDE_PUBLIC_BASE", "https://oujares.com").rstrip("/")
+_GHA_CF_KEYS = ("listingCustomFieldValues", "customFieldValues", "customFields")
+
+def _gha_scan():
+    """Every Hostaway custom-field value still pointing at the old Netlify guide,
+    with the in-house URL it should become. Read-only."""
+    rows, seen = [], set()
+    for L in _ha_fetch_all_listings():
+        lid = L.get("id")
+        for key in _GHA_CF_KEYS:
+            for cf in (L.get(key) or []):
+                if not isinstance(cf, dict):
+                    continue
+                val = str(cf.get("value") or "").strip()
+                if "oujaguide.netlify.app" not in val.lower():
+                    continue
+                meta = cf.get("customField") if isinstance(cf.get("customField"), dict) else {}
+                cfid = cf.get("customFieldId") or meta.get("id")
+                dk = (lid, cfid, val)
+                if dk in seen:                     # the same value can appear under alias keys
+                    continue
+                seen.add(dk)
+                slug = None
+                try:                                # best source: the guide unit LINKED to this listing
+                    unit = _guide.db.unit_by_listing(lid) if (_HAS_GUIDE and GUIDE_ENABLED) else None
+                    slug = unit["slug"] if unit else None
+                except Exception:
+                    slug = None
+                if not slug:                        # fallback: the slug inside the old URL itself
+                    m = re.search(r"netlify\.app/(?:\?id=)?([A-Za-z0-9\-_]+)", val)
+                    cand = (m.group(1).lower() if m else "")
+                    if cand and cand not in ("index", "admin"):
+                        try:
+                            if _guide.db.get_unit(cand):
+                                slug = cand
+                        except Exception:
+                            slug = None
+                new = ("%s/guide/%s" % (GUIDE_PUBLIC_BASE, slug)) if slug else None
+                rows.append({"lid": lid,
+                             "name": (L.get("internalListingName") or L.get("name") or "").strip(),
+                             "field": (meta.get("name") or cf.get("name") or "").strip(),
+                             "cf_id": cfid, "old": val, "new": new,
+                             "skip": (None if (slug and cfid) else
+                                      ("ما قدرت أحدد الشقة بالدليل — اربطها أول" if not slug
+                                       else "الحقل بدون معرف"))})
+    return rows
+
+def _gha_verify(lid, want):
+    chk = (api_get(f"/listings/{lid}", params={"includeResources": 1}) or {}).get("result") or {}
+    for key in _GHA_CF_KEYS:
+        for cf in (chk.get(key) or []):
+            if isinstance(cf, dict) and str(cf.get("value") or "").strip() == want:
+                return True
+    return False
+
+_gha_state = {"running": False, "done": 0, "total": 0, "ok": 0,
+              "failed": [], "skipped": 0, "finished_at": "", "error": ""}
+_gha_lock = threading.Lock()
+
+def _gha_apply_job():
+    st = _gha_state
+    try:
+        rows = _gha_scan()
+        todo = [r for r in rows if not r["skip"] and r["new"] and r["old"] != r["new"]]
+        st["total"] = len(todo)
+        st["skipped"] = len(rows) - len(todo)
+        for r in todo:
+            try:
+                api_put(f"/listings/{r['lid']}",
+                        {"customFieldValues": [{"customFieldId": int(r["cf_id"]),
+                                                "value": r["new"]}]})
+                if _gha_verify(r["lid"], r["new"]):
+                    st["ok"] += 1
+                else:
+                    st["failed"].append({"name": r["name"], "error": "الكتابة ما ثبتت (تحقق القراءة فشل)"})
+            except Exception as e:
+                st["failed"].append({"name": r["name"], "error": str(e)[:120]})
+            st["done"] += 1
+        try:                                   # the listings store carries directions_url — refresh it
+            sync_listings_store()
+        except Exception:
+            pass
+    except Exception as e:
+        st["error"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        st["running"] = False
+        st["finished_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+
+async def _api_guide_ha_links(request):
+    """GET = dry-run preview of every rewrite; POST = start the apply job."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _req_role(request) not in ("admin", "ops"):
+        return _json({"error": "forbidden"}, 403)
+    if request.method == "GET":
+        rows = await asyncio.to_thread(_gha_scan)
+        return _json({"ok": True, "rows": rows, "base": GUIDE_PUBLIC_BASE,
+                      "state": dict(_gha_state)})
+    with _gha_lock:
+        if _gha_state["running"]:
+            return _json({"ok": True, "already_running": True, "state": dict(_gha_state)})
+        _gha_state.update({"running": True, "done": 0, "total": 0, "ok": 0,
+                           "failed": [], "skipped": 0, "finished_at": "", "error": ""})
+    threading.Thread(target=_gha_apply_job, daemon=True).start()
+    return _json({"ok": True, "started": True})
+
+async def _api_guide_ha_links_status(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, "state": dict(_gha_state)})
 
 async def _api_promises(request):
     if not _dash_auth(request):
