@@ -180,6 +180,85 @@ class TestRender(unittest.TestCase):
         self.assertIn("غير معروف", txt)
 
 
+def arrival_full(**kw):
+    a = arrival()
+    a.update({"time_label": "15:00", "nights": 3, "price": 1450, "signed": True,
+              "open_tickets": 1})
+    a.update(kw)
+    return a
+
+
+class TestStaleFilter(unittest.TestCase):
+    def test_stale_pending_excluded_from_flags(self):
+        s = snap(pending=[{"id": "old", "guest": "g", "unit": "u", "age_min": 58265},
+                          {"id": "new", "guest": "g2", "unit": "u2", "age_min": 90}])
+        keys = {f["key"] for f in E.compute_flags(s, NOW)}
+        self.assertNotIn("pend:old", keys)
+        self.assertIn("pend:new", keys)
+
+    def test_stale_escalation_excluded(self):
+        s = snap(escalations=[{"id": "old", "guest": "g", "unit": "u", "age_min": 9000}])
+        self.assertEqual([f for f in E.compute_flags(s, NOW) if f["key"].startswith("esc:")], [])
+
+
+class TestEmbeds(unittest.TestCase):
+    def full_snap(self):
+        return snap(
+            arrivals=[arrival_full()],
+            today={"arr_n": 1, "dep_n": 2, "occupied": 27, "tight_n": 0},
+            departures=[{"unit": "Ouja | B", "guest": "سعد", "employee": "أسيل"}],
+            coverage={"ok": True, "off_names": ["مها"], "imbalance": 1,
+                      "working": [{"name": "نورة", "emoji": "🦁", "n": 14}]},
+            pending=[{"id": "old", "guest": "g", "unit": "u", "age_min": 58265}],
+            codes_summary={"manual_total": 1, "sent": 0})
+
+    def test_embeds_structure_and_header(self):
+        s = self.full_snap()
+        flags = E.compute_flags(s, NOW)
+        embeds = E.render_embeds(flags, s, "6:30 م")
+        self.assertLessEqual(len(embeds), 10)
+        for e in embeds:
+            self.assertIn(e["color"], ("red", "gold", "green", "gray"))
+            self.assertLessEqual(len(e["desc"]), 3900)
+        self.assertEqual(embeds[0]["color"], "red")   # manual code missing at 2h → critical
+
+    def test_arrival_line_has_everything(self):
+        s = self.full_snap()
+        embeds = E.render_embeds(E.compute_flags(s, NOW), s, "6:30 م")
+        arr = [e for e in embeds if "وصول" in e["title"]][0]
+        d = arr["desc"]
+        for needle in ("خالد", "Ouja | A", "15:00", "نورة", "3 ليال", "1450", "تذكرة"):
+            self.assertIn(needle, d)
+
+    def test_archive_line_present(self):
+        s = self.full_snap()
+        embeds = E.render_embeds(E.compute_flags(s, NOW), s, "6:30 م")
+        conv = [e for e in embeds if "محادثات" in e["title"]][0]
+        self.assertIn("أرشيف قديم: 1", conv["desc"])
+
+    def test_coverage_and_departure_embeds(self):
+        s = self.full_snap()
+        embeds = E.render_embeds(E.compute_flags(s, NOW), s, "6:30 م")
+        cov = [e for e in embeds if "توزيع" in e["title"]][0]
+        self.assertIn("نورة", cov["desc"])
+        self.assertIn("14", cov["desc"])
+        self.assertIn("مها", cov["desc"])
+        dep = [e for e in embeds if "مغادرات" in e["title"]][0]
+        self.assertIn("أسيل", dep["desc"])
+
+    def test_green_snap_single_status_color(self):
+        s = snap(today={"arr_n": 0, "dep_n": 0, "occupied": 30, "tight_n": 0})
+        embeds = E.render_embeds([], s, "6:30 م")
+        self.assertEqual(embeds[0]["color"], "green")
+
+    def test_errors_detail_surfaced(self):
+        s = snap(errors=["promises"], errors_detail={"promises": "database is locked"})
+        embeds = E.render_embeds([], s, "6:30 م")
+        joined = " ".join(e["desc"] for e in embeds)
+        self.assertIn("غير معروف", joined)
+        self.assertIn("database is locked", joined)
+
+
 class TestScoreboard(unittest.TestCase):
     def test_board_math_and_exclusions(self):
         stats = [{"employee": "نورة", "replies": 30, "resp_min_sum": 300.0,

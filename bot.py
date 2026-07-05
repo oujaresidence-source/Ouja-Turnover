@@ -53660,9 +53660,11 @@ def _watchdog_snapshot():
     now = now_riyadh()
     today_iso = now.date().isoformat()
     snap = {"arrivals": [], "escalations": [], "pending": [], "promises": [], "tickets": [],
-            "cleaning_stale": [], "coverage": {"ok": True, "off_names": [], "imbalance": 0},
+            "cleaning_stale": [], "departures": [],
+            "coverage": {"ok": True, "off_names": [], "imbalance": 0, "working": []},
             "today": {}, "codes_summary": {"manual_total": 0, "sent": 0},
-            "health": {"disk_fallback": False, "api_ok": True}, "errors": [],
+            "health": {"disk_fallback": False, "api_ok": True},
+            "errors": [], "errors_detail": {},
             "generated_at": now.isoformat(timespec="minutes")}
 
     # health: storage + one cheap Hostaway probe
@@ -53676,20 +53678,48 @@ def _watchdog_snapshot():
     except Exception:
         snap["health"]["api_ok"] = False
 
+    def section(name, fn):
+        """Run one collector with ONE retry (brain.db can be briefly locked right after
+        boot — the first live cycle proved it: 4 sections failed then). On the second
+        failure the section reports its REASON into the summary («غير معروف — why»)."""
+        for attempt in (1, 2):
+            try:
+                fn()
+                return
+            except Exception as e:
+                if attempt == 1:
+                    time.sleep(1.5)
+                    continue
+                print(f"[watchdog] {name} error:", e)
+                snap["errors"].append(name)
+                snap["errors_detail"][name] = "%s: %s" % (type(e).__name__, e)
+
     # arrivals + manual-code checks (+ message stats on the conversations we already fetched)
     cover = _wd_cover_lookup(today_iso)
-    try:
+
+    def _sec_arrivals():
+        snap["arrivals"] = []
+        snap["codes_summary"] = {"manual_total": 0, "sent": 0}
+        open_by_lid = {}
+        for tk in _tickets:
+            if tk.get("status") in ("open", "in_progress") and tk.get("lid") is not None:
+                open_by_lid[tk["lid"]] = open_by_lid.get(tk["lid"], 0) + 1
         arrivals = compute_arrivals_with_status(window_hours=WATCHDOG_CODE_LOOKAHEAD_H)
         manual = _watchdog.db.manual_listing_ids()
         for a in arrivals:
             lid = str(a.get("listing_id") or "")
             mode = "manual" if lid in manual else "auto"
+            ci = a.get("checkin_iso") or ""
             row = {"unit": a.get("unit"), "guest": a.get("guest"), "listing_id": lid,
                    "hours_until": a.get("hours_until"), "code_mode": mode,
                    "code_found": False, "code_sender": "",
                    "cleaning_ok": _wd_cleaning_ok(a.get("listing_id"), today_iso),
                    "employee": _wd_employee_for(a.get("unit") or "", cover),
-                   "arrival_date": (a.get("checkin_iso") or today_iso)[:10]}
+                   "arrival_date": (ci or today_iso)[:10],
+                   "time_label": ci[11:16] if len(ci) >= 16 else "",
+                   "nights": a.get("nights"), "price": a.get("total_price"),
+                   "signed": bool(a.get("signed")),
+                   "open_tickets": open_by_lid.get(a.get("listing_id"), 0)}
             cid = a.get("conversation_id")
             if mode == "manual":
                 snap["codes_summary"]["manual_total"] += 1
@@ -53704,18 +53734,17 @@ def _watchdog_snapshot():
                             _watchdog.db.log_code_send({
                                 "listing_id": lid, "reservation_id": a.get("reservation_id"),
                                 "guest_name": a.get("guest"), "sent_by": r["sender"],
-                                "sent_at": r["sent_at"], "arrival_ts": a.get("checkin_iso"),
+                                "sent_at": r["sent_at"], "arrival_ts": ci,
                                 "on_time": 1 if float(a.get("hours_until") or 0) > 0 else 0})
                         _wd_msg_stats_pass(cid, msgs, today_iso)
                     except Exception as e:
                         print(f"[watchdog] code scan error ({cid}):", e)
             snap["arrivals"].append(row)
-    except Exception as e:
-        print("[watchdog] arrivals error:", e)
-        snap["errors"].append("arrivals")
+    section("arrivals", _sec_arrivals)
 
     # escalations + pending replies (in-memory, same math as compute_urgent_now)
-    try:
+    def _sec_escalations():
+        snap["escalations"] = []
         now_ts = time.time()
         for mid, e in list(_escalations.items()):
             if e.get("claimed_by"):
@@ -53726,10 +53755,10 @@ def _watchdog_snapshot():
             age_min = max(0, int((now_ts - (e.get("last_ping") or now_ts)) / 60))
             snap["escalations"].append({"id": str(mid), "guest": e.get("guest", "ضيف"),
                                         "unit": e.get("unit", ""), "age_min": age_min})
-    except Exception as e:
-        print("[watchdog] escalations error:", e)
-        snap["errors"].append("escalations")
-    try:
+    section("escalations", _sec_escalations)
+
+    def _sec_pending():
+        snap["pending"] = []
         for mid, d in list(_pending_replies.items()):
             item = d.get("item", {})
             age_min = 0
@@ -53741,81 +53770,102 @@ def _watchdog_snapshot():
                 pass
             snap["pending"].append({"id": str(mid), "guest": item.get("guest", "ضيف"),
                                     "unit": item.get("unit", ""), "age_min": age_min})
-    except Exception as e:
-        print("[watchdog] pending error:", e)
-        snap["errors"].append("pending")
+    section("pending", _sec_pending)
 
     # promises (brain.db ledger; naive `now` — the promise-keeper convention)
-    try:
-        if _HAS_PK:
-            pnow = datetime.now(TZ).replace(tzinfo=None)
-            for rec in _pk.db.open_rows():
-                oh = _pk.engine.overdue_hours(rec, pnow)
-                if oh is None or oh <= 0:
-                    continue
-                snap["promises"].append({"id": rec.get("id"),
-                                         "promised_by": rec.get("promised_by") or "",
-                                         "apartment": rec.get("apartment") or "",
-                                         "expired": _pk.engine.is_expired(rec, pnow),
-                                         "overdue_h": oh})
-    except Exception as e:
-        print("[watchdog] promises error:", e)
-        snap["errors"].append("promises")
+    def _sec_promises():
+        snap["promises"] = []
+        if not _HAS_PK:
+            return
+        pnow = datetime.now(TZ).replace(tzinfo=None)
+        for rec in _pk.db.open_rows():
+            oh = _pk.engine.overdue_hours(rec, pnow)
+            if oh is None or oh <= 0:
+                continue
+            snap["promises"].append({"id": rec.get("id"),
+                                     "promised_by": rec.get("promised_by") or "",
+                                     "apartment": rec.get("apartment") or "",
+                                     "expired": _pk.engine.is_expired(rec, pnow),
+                                     "overdue_h": oh})
+    section("promises", _sec_promises)
 
     # tickets (open + unassigned counts only — info tier)
-    try:
+    def _sec_tickets():
         snap["tickets"] = [{"id": t.get("id"), "assigned_to": t.get("assigned_to")}
                            for t in _tickets if t.get("status") in ("open", "in_progress")]
-    except Exception as e:
-        print("[watchdog] tickets error:", e)
-        snap["errors"].append("tickets")
+    section("tickets", _sec_tickets)
 
     # stale cleaning channels (opened before today, never done)
-    try:
+    def _sec_cleaning():
+        snap["cleaning_stale"] = []
         for key, opened_date in list(_oujact_opened.items()):
             if key in _oujact_done:
                 continue
             d = str(opened_date or "")[:10]
             if d and d < today_iso:
-                lid, _, date_part = key.partition(":")
+                lid, _, _dp = key.partition(":")
                 unit = (get_listings_map() or {}).get(int(lid)) if lid.isdigit() else None
                 opened_h = max(24.0, (now - datetime.fromisoformat(d + "T12:00:00").replace(
                     tzinfo=TZ)).total_seconds() / 3600.0)
                 snap["cleaning_stale"].append({"key": key, "unit": unit or f"unit-{lid}",
                                                "opened_h": opened_h})
-    except Exception as e:
-        print("[watchdog] stale cleaning error:", e)
-        snap["errors"].append("cleaning")
+    section("cleaning", _sec_cleaning)
 
-    # coverage balance
-    try:
-        if _HAS_SCHEDULE and SCHEDULE_ENABLED:
-            day = _schedule.routes.schedule_day(today_iso)
-            imb = int(day.get("max_load") or 0) - int(day.get("min_load") or 0)
-            snap["coverage"] = {"ok": bool(day.get("balanced", True)),
-                                "off_names": [o.get("name") for o in (day.get("off") or [])],
-                                "imbalance": imb}
-    except Exception as e:
-        print("[watchdog] coverage error:", e)
-        snap["errors"].append("coverage")
+    # today's coverage (who works + how many apartments each)
+    def _sec_coverage():
+        if not (_HAS_SCHEDULE and SCHEDULE_ENABLED):
+            return
+        day = _schedule.routes.schedule_day(today_iso)
+        imb = int(day.get("max_load") or 0) - int(day.get("min_load") or 0)
+        snap["coverage"] = {"ok": bool(day.get("balanced", True)),
+                            "off_names": [o.get("name") for o in (day.get("off") or [])],
+                            "imbalance": imb,
+                            "working": [{"name": w.get("name"), "emoji": w.get("emoji"),
+                                         "n": int(w.get("load") or
+                                                  (len(w.get("own") or []) +
+                                                   len(w.get("coverage") or [])))}
+                                        for w in (day.get("working") or [])]}
+    section("coverage", _sec_coverage)
 
-    # today numbers (targeted in-house query — never the truncated cache)
-    try:
+    # today numbers + departures (targeted in-house query — never the truncated cache)
+    def _sec_today():
         t = _compute_today()
         snap["today"] = {"arr_n": len(t.get("arrivals") or []),
                          "dep_n": len(t.get("departures") or []),
                          "occupied": t.get("occupied", 0),
                          "tight_n": len(t.get("tight") or [])}
-    except Exception as e:
-        print("[watchdog] today error:", e)
-        snap["errors"].append("today")
+        snap["departures"] = [{"unit": d.get("unit"), "guest": d.get("guest"),
+                               "employee": _wd_employee_for(d.get("unit") or "", cover)}
+                              for d in (t.get("departures") or [])]
+    section("today", _sec_today)
 
     return snap
 
 
-async def _watchdog_post(text, flags, meta):
-    """Summary = ONE message edited in place each cycle; criticals = separate pinged
-    messages, once per flag key (re-ping only after WATCHDOG_REPING_HOURS)."""
+_WD_EMBED_COLORS = {"red": 0xD64545, "gold": 0xD9A741, "green": 0x3BA55D, "gray": 0x95A5A6}
+
+
+def _wd_discord_embeds(embed_dicts):
+    """Engine embed dicts → discord.Embed list, fitted under Discord's 6000-char
+    total budget (greedy: earlier categories win; a dropped tail is announced)."""
+    out, total = [], 0
+    for i, d in enumerate(embed_dicts[:10]):
+        desc = (d.get("desc") or "")[:4000]
+        block = len(d.get("title") or "") + len(desc)
+        if total + block > 5600:
+            out.append(discord.Embed(description="… وأقسام إضافية ما لحقت — كاملة في اللوحة",
+                                     color=_WD_EMBED_COLORS["gray"]))
+            break
+        out.append(discord.Embed(title=(d.get("title") or "")[:256], description=desc,
+                                 color=_WD_EMBED_COLORS.get(d.get("color"), 0x95A5A6)))
+        total += block
+    return out
+
+
+async def _watchdog_post(embed_dicts, flags, meta):
+    """Summary = ONE message (categorized embeds) edited in place each cycle;
+    criticals = separate pinged messages, once per flag key (re-ping after
+    WATCHDOG_REPING_HOURS)."""
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
@@ -53823,19 +53873,20 @@ async def _watchdog_post(text, flags, meta):
     ch = await ensure_channel(guild, WATCHDOG_CHANNEL, cat)
     if ch is None:
         return
+    es = _wd_discord_embeds(embed_dicts)
     # rolling summary message
     msg_id = meta.get("summary_msg_id")
     posted = False
     if msg_id:
         try:
             m = await ch.fetch_message(int(msg_id))
-            await m.edit(content=text)
+            await m.edit(content=None, embeds=es)
             posted = True
         except Exception:
             posted = False
     if not posted:
         try:
-            m = await ch.send(text)
+            m = await ch.send(embeds=es)
             meta["summary_msg_id"] = m.id
         except Exception as e:
             print("[watchdog] summary post error:", e)
@@ -53915,7 +53966,7 @@ async def watchdog_loop():
         return
     await bot.wait_until_ready()
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = "dry" if WATCHDOG_DRYRUN else "live"
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v2"   # bump suffix on layout changes → next deploy posts immediately
     if (meta.get("mode") == mode_now
             and time.time() - (meta.get("last_run_ts") or 0) < (WATCHDOG_INTERVAL_MIN * 60) - 90):
         return                                # deploy-restart guard (the @tasks.loop trap)
@@ -53925,15 +53976,16 @@ async def watchdog_loop():
         _watchdog.HOST.last_snapshot = snap
         flags = _watchdog.engine.compute_flags(snap, now_riyadh())
         ts_label = now_riyadh().strftime("%I:%M %p").lstrip("0").replace("AM", "ص").replace("PM", "م")
-        text = _watchdog.engine.render_summary(flags, snap, ts_label)
+        embed_dicts = _watchdog.engine.render_embeds(flags, snap, ts_label)
         meta["last_run_ts"] = time.time()
         if WATCHDOG_DRYRUN:
-            print("[watchdog] (dryrun) summary:\n" + text)
+            print("[watchdog] (dryrun) summary:\n"
+                  + _watchdog.engine.render_summary(flags, snap, ts_label))
             for f in flags:
                 if f["severity"] == "critical":
                     print("[watchdog] (dryrun) critical:", f["key"], "·", f["text"])
         else:
-            await _watchdog_post(text, flags, meta)
+            await _watchdog_post(embed_dicts, flags, meta)
         await _watchdog_scoreboard(meta)
         _save_json("watchdog_meta.json", meta)
     except Exception as e:

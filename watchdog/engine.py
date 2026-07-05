@@ -18,6 +18,7 @@ PEND_CRIT_MIN = 120
 PEND_WARN_MIN = 30
 STALE_CLEAN_H = 36
 MAX_FLAG_LINES = 8         # summary shows at most this many flags, then «+N أخرى»
+STALE_AGE_MIN = 48 * 60    # older conversations = archive noise, not live flags
 
 _SEV_ORDER = {"critical": 0, "warn": 1, "info": 2}
 _SEV_EMOJI = {"critical": "🔴", "warn": "🟡", "info": "🔵"}
@@ -120,6 +121,12 @@ def fp_is_automated(rec):
 
 # ---------------- flags ----------------
 
+def split_live_stale(items):
+    """(live_items, stale_count) — anything older than STALE_AGE_MIN is archive noise."""
+    live = [i for i in (items or []) if int(i.get("age_min") or 0) <= STALE_AGE_MIN]
+    return live, len(items or []) - len(live)
+
+
 def _h_label(h):
     if h <= 1.0:
         return "أقل من ساعة"
@@ -154,7 +161,8 @@ def compute_flags(snap, now):
                 % (a.get("unit"), emp, _h_label(h)),
                 mention_name=a.get("employee") or "", listing=str(a.get("listing_id") or ""))
 
-    for e in snap.get("escalations") or []:
+    live_esc, _ = split_live_stale(snap.get("escalations"))
+    for e in live_esc:
         age = int(e.get("age_min") or 0)
         if age >= ESC_CRIT_MIN:
             sev = "critical"
@@ -166,7 +174,8 @@ def compute_flags(snap, now):
             "📣 تصعيد بدون استلام من %d دقيقة — %s (%s)"
             % (age, e.get("guest") or "ضيف", e.get("unit") or ""))
 
-    for p in snap.get("pending") or []:
+    live_pend, _ = split_live_stale(snap.get("pending"))
+    for p in live_pend:
         age = int(p.get("age_min") or 0)
         if age >= PEND_CRIT_MIN:
             sev = "critical"
@@ -267,6 +276,174 @@ def render_summary(flags, snap, ts_label):
     if err:
         lines.append(err)
     return "\n".join(lines[:12])
+
+
+# ---------------- categorized embeds (the phone-first detailed report) ----------------
+
+def _age_label(m):
+    m = int(m or 0)
+    if m < 60:
+        return "%d دقيقة" % m
+    if m < 48 * 60:
+        return "%d ساعة" % round(m / 60)
+    return "%d يوم" % round(m / 1440)
+
+
+def _nights_label(n):
+    n = int(n or 0)
+    if n == 1:
+        return "ليلة"
+    if n == 2:
+        return "ليلتين"
+    if 3 <= n <= 10:
+        return "%d ليال" % n
+    return "%d ليلة" % n
+
+
+def _cap(desc, limit=3900):
+    if len(desc) <= limit:
+        return desc
+    cut = desc[:limit]
+    return cut[:cut.rfind("\n")] + "\n… القائمة أطول — الباقي بالدورة الجاية"
+
+
+def render_embeds(flags, snap, ts_label):
+    """Snapshot + flags → list of embed dicts {title, color(red|gold|green|gray), desc}.
+    Every fact traces to the snapshot; unknown sections are named with their reason."""
+    embeds = []
+    sev_by_key = {f["key"]: f["severity"] for f in flags}
+    worst = flags[0]["severity"] if flags else ""
+    head_color = "red" if worst == "critical" else ("gold" if worst else "green")
+    head_title = ("🔴 وضع يحتاج تدخل — %s" if head_color == "red" else
+                  "🟡 فيه ملاحظات — %s" if head_color == "gold" else
+                  "🟢 كل شي تمام — %s") % ts_label
+    live_esc, stale_esc = split_live_stale(snap.get("escalations"))
+    live_pend, stale_pend = split_live_stale(snap.get("pending"))
+    t = snap.get("today") or {}
+    cs = snap.get("codes_summary") or {}
+    head = ["🏠 اليوم: %s وصول · %s مغادرة · %s ساكن"
+            % (t.get("arr_n", "؟"), t.get("dep_n", "؟"), t.get("occupied", "؟"))]
+    if t.get("tight_n"):
+        head.append("⚡ %d تسليم بنفس اليوم" % t["tight_n"])
+    if cs.get("manual_total"):
+        head.append("🔑 أكواد يدوية: %d/%d مرسلة" % (cs.get("sent", 0), cs["manual_total"]))
+    prom_over = len(snap.get("promises") or [])
+    head.append("📩 حي الآن: %d تصعيد · %d رد ينتظر · %d وعد متأخر"
+                % (len(live_esc), len(live_pend), prom_over))
+    embeds.append({"title": head_title, "color": head_color, "desc": _cap("\n".join(head))})
+
+    # 🏠 arrivals — full context per guest
+    arrs = snap.get("arrivals") or []
+    if arrs:
+        lines, has_crit, has_warn = [], False, False
+        for a in arrs:
+            code_key = "code:%s:%s" % (a.get("listing_id"), a.get("arrival_date"))
+            clean_key = "clean:%s:%s" % (a.get("listing_id"), a.get("arrival_date"))
+            if sev_by_key.get(code_key) == "critical" or sev_by_key.get(clean_key) == "critical":
+                has_crit = True
+            elif code_key in sev_by_key or clean_key in sev_by_key:
+                has_warn = True
+            if a.get("code_mode") == "manual":
+                code = "✅ مرسل" if a.get("code_found") else "🔴 ما انرسل"
+            else:
+                code = "🔁 تلقائي"
+            clean = "✅ جاهزة" if a.get("cleaning_ok", True) else "🔴 مو جاهزة"
+            contract = "✅ العقد موقّع" if a.get("signed") else "❌ العقد غير موقّع"
+            bits = ["👤 %s" % (a.get("employee") or "غير معروف"),
+                    "🔑 %s" % code, "🧹 %s" % clean, contract]
+            if a.get("nights"):
+                bits.append(_nights_label(a["nights"]))
+            if a.get("price"):
+                bits.append("%s ر.س" % a["price"])
+            if a.get("open_tickets"):
+                bits.append("🛠️ %d تذكرة مفتوحة" % a["open_tickets"])
+            lines.append("⏰ %s · **%s** — %s\n%s"
+                         % (a.get("time_label") or "؟", a.get("guest"), a.get("unit"),
+                            " · ".join(bits)))
+        color = "red" if has_crit else ("gold" if has_warn else "gray")
+        embeds.append({"title": "🏠 وصول اليوم (%d)" % len(arrs), "color": color,
+                       "desc": _cap("\n\n".join(lines))})
+
+    # 🚪 departures
+    deps = snap.get("departures") or []
+    if deps:
+        lines = ["**%s** — %s · 🧹 %s" % (d.get("guest"), d.get("unit"),
+                                          d.get("employee") or "غير معروف") for d in deps]
+        embeds.append({"title": "🚪 مغادرات اليوم (%d)" % len(deps), "color": "gray",
+                       "desc": _cap("\n".join(lines))})
+
+    # 🧹 cleaning problems
+    stale_clean = snap.get("cleaning_stale") or []
+    if stale_clean:
+        lines = ["🟡 %s — مفتوحة من %s بدون تقرير"
+                 % (c.get("unit"), _age_label(float(c.get("opened_h") or 0) * 60))
+                 for c in stale_clean]
+        embeds.append({"title": "🧹 نظافة متأخرة (%d)" % len(stale_clean), "color": "gold",
+                       "desc": _cap("\n".join(lines))})
+
+    # 📩 conversations (live only + archive count)
+    if live_esc or live_pend or stale_esc or stale_pend:
+        lines = []
+        for e in live_esc:
+            lines.append("📣 تصعيد بدون استلام من %s — %s (%s)"
+                         % (_age_label(e.get("age_min")), e.get("guest"), e.get("unit")))
+        for p in live_pend:
+            lines.append("💬 رد ينتظر الاعتماد من %s — %s (%s)"
+                         % (_age_label(p.get("age_min")), p.get("guest"), p.get("unit")))
+        if not lines:
+            lines.append("✅ لا شي حي يحتاج تدخل")
+        archived = stale_esc + stale_pend
+        if archived:
+            lines.append("🗄️ أرشيف قديم: %d — أقدم من يومين، ما يُحسب" % archived)
+        color = "red" if any(e.get("age_min", 0) >= ESC_CRIT_MIN for e in live_esc) else (
+            "gold" if (live_esc or live_pend) else "gray")
+        embeds.append({"title": "📩 محادثات تحتاج الفريق", "color": color,
+                       "desc": _cap("\n".join(lines))})
+
+    # 🤝 promises
+    proms = snap.get("promises") or []
+    if proms:
+        lines = []
+        for p in proms:
+            mark = "🔴 منتهي" if p.get("expired") else ("🟡 متأخر %d ساعة"
+                                                        % round(float(p.get("overdue_h") or 0)))
+            lines.append("%s — 👤 %s (%s)" % (mark, p.get("promised_by") or "غير معروف",
+                                              p.get("apartment") or ""))
+        color = "red" if any(p.get("expired") for p in proms) else "gold"
+        embeds.append({"title": "🤝 وعود متأخرة (%d)" % len(proms), "color": color,
+                       "desc": _cap("\n".join(lines))})
+
+    # 👥 today's coverage
+    cov = snap.get("coverage") or {}
+    working = cov.get("working") or []
+    if working or cov.get("off_names"):
+        lines = ["%s %s — %d شقة" % (w.get("emoji") or "👤", w.get("name"), int(w.get("n") or 0))
+                 for w in working]
+        if cov.get("off_names"):
+            lines.append("🌙 إجازة اليوم: %s" % "، ".join(cov["off_names"]))
+        if not cov.get("ok", True):
+            lines.append("⚠️ التوزيع غير متوازن (فرق %s شقق)" % cov.get("imbalance", "?"))
+        embeds.append({"title": "👥 توزيع الموظفين اليوم", "color": "gray",
+                       "desc": _cap("\n".join(lines))})
+
+    # 🔧 system + unknown sections (with the real reason)
+    sys_lines = []
+    health = snap.get("health") or {}
+    if health.get("disk_fallback"):
+        sys_lines.append("💾 التخزين على وضع الطوارئ — القرص ممتلئ أو معطل")
+    if health.get("api_ok") is False:
+        sys_lines.append("🔌 Hostaway ما يرد — البيانات الحية متوقفة")
+    detail = snap.get("errors_detail") or {}
+    for e in snap.get("errors") or []:
+        why = str(detail.get(e) or "").strip()
+        sys_lines.append("⚪ غير معروف (تعذّر الفحص): %s%s"
+                         % (_ERR_LABELS.get(e, e), (" — %s" % why[:120]) if why else ""))
+    if sys_lines:
+        embeds.append({"title": "🔧 النظام", "color": "red" if (health.get("disk_fallback")
+                       or health.get("api_ok") is False) else "gray",
+                       "desc": _cap("\n".join(sys_lines))})
+
+    return embeds[:10]
 
 
 def render_critical(flag, mention_text=""):
