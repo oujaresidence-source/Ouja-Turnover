@@ -115,11 +115,21 @@ async def h_inbox(request):
     return _jres({"ok": True, "items": items, "open_count": len(items)})
 
 
+async def _body(request):
+    """Parse the JSON body or None — unguarded request.json() would 500 on malformed JSON."""
+    try:
+        return await request.json()
+    except Exception:
+        return None
+
+
 async def h_inbox_answer(request):
     err = _gate(request, admin=True)
     if err:
         return err
-    body = await request.json()
+    body = await _body(request)
+    if body is None:
+        return _jres({"error": "bad_json"}, 400)
     r = await asyncio.to_thread(
         svc_inbox_answer, int(body.get("esc_id") or 0),
         str(body.get("answer") or "").strip(),
@@ -141,7 +151,9 @@ async def h_kb_save(request):
     err = _gate(request, admin=True)
     if err:
         return err
-    b = await request.json()
+    b = await _body(request)
+    if b is None:
+        return _jres({"error": "bad_json"}, 400)
     if not (b.get("q_ar") and b.get("answer_ar")):
         return _jres({"error": "missing_fields"}, 400)
     links = [l for l in (b.get("links") or [])
@@ -158,7 +170,9 @@ async def h_kb_toggle(request):
     err = _gate(request, admin=True)
     if err:
         return err
-    b = await request.json()
+    b = await _body(request)
+    if b is None:
+        return _jres({"error": "bad_json"}, 400)
     await asyncio.to_thread(_db.kb_set_enabled, int(b.get("id") or 0), bool(b.get("enabled")))
     return _jres({"ok": True})
 
@@ -167,7 +181,9 @@ async def h_kb_delete(request):
     err = _gate(request, admin=True)
     if err:
         return err
-    b = await request.json()
+    b = await _body(request)
+    if b is None:
+        return _jres({"error": "bad_json"}, 400)
     await asyncio.to_thread(_db.kb_delete, int(b.get("id") or 0))
     return _jres({"ok": True})
 
