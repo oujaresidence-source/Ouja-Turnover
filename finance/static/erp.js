@@ -342,6 +342,13 @@
       bg_saved: 'انحفظت ✓', bg_deleted: 'انشالت', bg_empty: 'ما فيه ميزانية لهالشهر — ابدأ بإضافة حساب أو انسخ الشهر الماضي',
       bg_weekly_err: 'مجموع الأسابيع لازم يساوي الشهر', bg_over: 'تجاوز', bg_warn: '٩٠٪+',
       bg_del_confirm: 'نشيل ميزانية هالحساب؟'
+      ,
+      /* --- finchat مساعد المركز المالي --- */
+      fc_title: 'مساعد المركز المالي', fc_hint: 'اسأل عن أي شي بالمركز — أجاوبك وأعطيك الرابط',
+      fc_send: 'إرسال', fc_ph: 'اكتب سؤالك…', fc_esc: 'صعّد لفيصل 🆘',
+      fc_esc_done: 'تم التصعيد — بيوصلك الرد هنا', fc_thinking: 'أفكر…',
+      fc_cap: 'وصلت الحد اليومي', fc_err: 'تعذر الاتصال — جرب مرة ثانية',
+      fc_owner: 'فيصل', fc_bot: 'المساعد', fc_empty: 'اسألني عن المصاريف، الكشوفات، البنك، الاعتمادات…'
     },
     en: {
       dir: 'ltr', app: 'Finance Center',
@@ -639,6 +646,13 @@
       bg_saved: 'Saved ✓', bg_deleted: 'Removed', bg_empty: 'No budget for this month — add an account or copy last month',
       bg_weekly_err: 'Weeks must sum to the month', bg_over: 'over', bg_warn: '90%+',
       bg_del_confirm: 'Remove this account’s budget?'
+      ,
+      /* --- finchat Finance Assistant --- */
+      fc_title: 'Finance Assistant', fc_hint: 'Ask anything about the Finance Center',
+      fc_send: 'Send', fc_ph: 'Type your question…', fc_esc: 'Escalate to Faisal 🆘',
+      fc_esc_done: 'Escalated — the answer will land here', fc_thinking: 'Thinking…',
+      fc_cap: 'Daily limit reached', fc_err: 'Connection failed — try again',
+      fc_owner: 'Faisal', fc_bot: 'Assistant', fc_empty: 'Ask me about expenses, statements, bank, approvals…'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -4906,6 +4920,117 @@
     ov.onclick = function (e) { if (e.target === ov) close(); };
   }
 
+  /* ================= مساعد المركز المالي — finchat ================= */
+  var FC = { open: false, busy: false, lastQ: '', loaded: false };
+
+  function fcMsgHtml(m) {
+    var who = m.role === 'user' ? '' : (m.role === 'owner' ? t('fc_owner') : t('fc_bot'));
+    var links = (m.links || []).map(function (l) {
+      return '<a class="fc-link" href="' + esc(l.route) + '">' + esc(l.label_ar) + '</a>';
+    }).join('');
+    return '<div class="fc-msg ' + esc(m.role) + '">' +
+      (who ? '<div class="fc-who">' + esc(who) + '</div>' : '') +
+      '<div class="fc-txt">' + esc(m.text) + '</div>' +
+      (links ? '<div class="fc-links">' + links + '</div>' : '') + '</div>';
+  }
+
+  function fcRender(msgs) {
+    var box = $('#fcMsgs');
+    if (!box) return;
+    box.innerHTML = msgs.length ? msgs.map(fcMsgHtml).join('')
+      : '<div class="fc-empty">' + esc(t('fc_empty')) + '</div>';
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function fcAppend(m) {
+    var box = $('#fcMsgs');
+    if (!box) return null;
+    var empty = box.querySelector('.fc-empty');
+    if (empty) empty.remove();
+    var el = document.createElement('div');
+    el.innerHTML = fcMsgHtml(m);
+    el = el.firstChild;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+  }
+
+  function fcLoad() {
+    api('/erp/api/finchat/history').then(function (r) {
+      FC.loaded = true;
+      fcRender((r && r.msgs) || []);
+    }).catch(function (e) {
+      if (e && e.status === 404) {
+        var b = $('#fcBubble'); if (b) b.remove();
+        var d = $('#fcDrawer'); if (d) d.remove();
+      }
+    });
+  }
+
+  function fcSend() {
+    if (FC.busy) return;
+    var inp = $('#fcInput');
+    var q = (inp.value || '').trim();
+    if (!q) return;
+    FC.busy = true; FC.lastQ = q; inp.value = '';
+    fcAppend({ role: 'user', text: q, links: [] });
+    var think = fcAppend({ role: 'bot', text: t('fc_thinking'), links: [] });
+    $('#fcEsc').hidden = true;
+    api('/erp/api/finchat/ask', { method: 'POST', body: { q: q } }).then(function (r) {
+      if (think) think.remove();
+      fcAppend({ role: 'bot', text: r.answer, links: r.links || [] });
+      if (r.esc_offer) $('#fcEsc').hidden = false;
+    }).catch(function (e) {
+      if (think) think.remove();
+      var msg = (e && e.body && e.body.message_ar) ||
+                (e && e.status === 429 ? t('fc_cap') : t('fc_err'));
+      fcAppend({ role: 'bot', text: msg, links: [] });
+      if (!e || e.status !== 429) $('#fcEsc').hidden = false;
+    }).then(function () { FC.busy = false; });
+  }
+
+  function fcEscalate() {
+    if (!FC.lastQ) return;
+    $('#fcEsc').hidden = true;
+    api('/erp/api/finchat/escalate', { method: 'POST', body: { q: FC.lastQ } }).then(function () {
+      fcAppend({ role: 'bot', text: t('fc_esc_done'), links: [] });
+    }).catch(function () { toast(t('fc_err'), 'err'); });
+  }
+
+  function fcToggle(open) {
+    FC.open = open === undefined ? !FC.open : open;
+    var d = $('#fcDrawer');
+    if (!d) return;
+    d.classList.toggle('on', FC.open);
+    if (FC.open && !FC.loaded) fcLoad();
+    if (FC.open) setTimeout(function () { var i = $('#fcInput'); if (i) i.focus(); }, 250);
+  }
+
+  function fcBoot() {
+    if (document.getElementById('fcBubble')) return;
+    var bub = document.createElement('button');
+    bub.id = 'fcBubble'; bub.type = 'button'; bub.title = t('fc_title');
+    bub.setAttribute('aria-label', t('fc_title'));
+    bub.textContent = '💬';
+    bub.onclick = function () { fcToggle(); };
+    document.body.appendChild(bub);
+    var d = document.createElement('div');
+    d.id = 'fcDrawer';
+    d.innerHTML = '<div class="fc-head"><div><div class="fc-h">' + esc(t('fc_title')) + '</div>' +
+      '<div class="fc-sub">' + esc(t('fc_hint')) + '</div></div>' +
+      '<button type="button" class="fc-x" id="fcClose" aria-label="close">✕</button></div>' +
+      '<div id="fcMsgs" class="fc-msgs"></div>' +
+      '<button type="button" id="fcEsc" class="fc-escbtn" hidden>' + esc(t('fc_esc')) + '</button>' +
+      '<div class="fc-inrow"><input id="fcInput" type="text" placeholder="' + esc(t('fc_ph')) + '">' +
+      '<button type="button" id="fcSend" class="btn primary">' + esc(t('fc_send')) + '</button></div>';
+    document.body.appendChild(d);
+    $('#fcClose').onclick = function () { fcToggle(false); };
+    $('#fcSend').onclick = fcSend;
+    $('#fcEsc').onclick = fcEscalate;
+    $('#fcInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') fcSend(); });
+    fcLoad();
+  }
+
   /* ---------------- boot ---------------- */
   window.addEventListener('hashchange', route);
   window.addEventListener('scroll', (function () {
@@ -4915,5 +5040,6 @@
   applyLang();
   loadGNav();
   route();
+  fcBoot();
   setupHelp();
 })();

@@ -675,3 +675,43 @@ textarea.in{width:100%;font-family:inherit}
 .erp-ov-steps{margin:0 0 12px;padding-inline-start:18px;display:grid;gap:6px;color:var(--text-2);font-size:14px;line-height:1.6}
 .erp-ov-tip{font-size:13px;color:var(--text-3);background:var(--accent-soft);border-radius:var(--r-sm);padding:9px 12px}
 .erp-ov-act{display:flex;gap:10px;margin-top:14px}
+
+/* ---- finchat: مساعد المركز المالي bubble + drawer ---- */
+/* NOTE: placed at inset-inline-END (opposite corner from .erp-help "؟" button,
+   which already owns inset-inline-start/18px bottom/18px) to avoid stacking. */
+#fcBubble{position:fixed;inset-inline-end:18px;bottom:18px;z-index:900;width:52px;height:52px;
+  border-radius:50%;border:none;cursor:pointer;font-size:22px;background:var(--accent);
+  color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.22);
+  transition:transform .18s cubic-bezier(.23,1,.32,1)}
+#fcBubble:hover{background:var(--accent-deep)}
+#fcBubble:active{transform:scale(.97)}
+#fcDrawer{position:fixed;inset-inline-end:14px;bottom:82px;z-index:901;
+  width:min(380px,calc(100vw - 28px));height:min(560px,calc(100vh - 120px));
+  display:flex;flex-direction:column;border-radius:var(--r-lg);
+  background:var(--surface);border:1px solid var(--line);
+  box-shadow:0 12px 40px rgba(0,0,0,.22);opacity:0;pointer-events:none;
+  transform:translateY(12px);
+  transition:transform .22s cubic-bezier(.23,1,.32,1),opacity .22s ease-out}
+#fcDrawer.on{opacity:1;pointer-events:auto;transform:translateY(0)}
+@media (prefers-reduced-motion:reduce){#fcBubble,#fcDrawer{transition:none}}
+.fc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;
+  padding:14px 16px;border-bottom:1px solid var(--line)}
+.fc-h{font-weight:800;font-size:14px}
+.fc-sub{font-size:11.5px;color:var(--mut);margin-top:2px}
+.fc-x{border:none;background:none;cursor:pointer;font-size:15px;color:var(--mut);padding:4px}
+.fc-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.fc-empty{color:var(--mut);font-size:13px;text-align:center;margin-top:40%}
+.fc-msg{max-width:85%;padding:8px 12px;border-radius:12px;font-size:13.5px;line-height:1.65}
+.fc-msg.user{align-self:flex-end;background:var(--accent-soft)}
+.fc-msg.bot{align-self:flex-start;background:var(--bg);border:1px solid var(--line)}
+.fc-msg.owner{align-self:flex-start;background:var(--accent-soft);border:1px solid var(--accent)}
+.fc-who{font-size:10.5px;font-weight:800;color:var(--accent-deep);margin-bottom:2px}
+.fc-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.fc-link{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--accent);
+  color:var(--accent-deep);text-decoration:none;background:var(--surface)}
+.fc-escbtn{margin:0 12px 8px;padding:9px;border-radius:10px;border:1px dashed var(--accent);
+  background:none;color:var(--accent-deep);cursor:pointer;font-size:13px;min-height:40px}
+.fc-inrow{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.fc-inrow input{flex:1;min-height:44px;border-radius:10px;border:1px solid var(--line-strong);
+  padding:0 12px;font-size:14px;background:var(--surface);color:inherit}
+.fc-inrow input:focus{outline:2px solid var(--accent);outline-offset:1px}
