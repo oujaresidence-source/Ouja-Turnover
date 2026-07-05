@@ -981,6 +981,12 @@ def _aggregate_period(reports, owner, start, end):
         for k, v in (es.get("reasons") or {}).items():
             exsum["reasons"][k] = exsum["reasons"].get(k, 0) + v
     ti, fee = tot("total_income"), tot("ouja_fee")
+    # derive the cleaning type/amount honestly (uniform → keep it; else "mixed") —
+    # the PDF header + editor labels read cleaning.type (نواف الوهيبي label bug)
+    _cl_types = {((r.get("cleaning") or {}).get("type") or "ours") for r in reports}
+    cl_type = _cl_types.pop() if len(_cl_types) == 1 else "mixed"
+    _cl_amts = {round(float((r.get("cleaning") or {}).get("amount") or 0), 2) for r in reports}
+    cl_amount = _cl_amts.pop() if len(_cl_amts) == 1 else None
     out = {"currency": "SAR", "owner": owner,
            "management_pct": (round(fee / ti * 100, 1) if ti else None),
            "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
@@ -988,7 +994,8 @@ def _aggregate_period(reports, owner, start, end):
            "extras": tot("extras"), "manual_income": tot("manual_income"),
            "manual_income_lines": concat("manual_income_lines"),
            "total_income": ti, "ouja_fee": fee, "expenses": tot("expenses"),
-           "cleaning": {"type": "mixed", "total": cleaning_total, "cleans": None, "amount": None},
+           "cleaning": {"type": cl_type, "total": cleaning_total, "cleans": None,
+                        "amount": cl_amount, "months": len(reports)},
            "owner_net": tot("owner_net"), "apartments": list(parts_by.values()),
            "resv_lines": all_lines, "exp_lines": all_exp,
            "unpaid_lines": concat("unpaid_lines"), "refunded_lines": concat("refunded_lines"),

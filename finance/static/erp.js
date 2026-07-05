@@ -219,7 +219,7 @@
       om_search_listing: 'ابحث في الشقق (الاسم)…', om_taken: 'مسجلة لـ',
       om_code: 'كود الشقة بالكشف', om_from: 'بداية العقد', om_to: 'نهاية العقد',
       om_open_ended: 'مفتوح', om_mgmt: 'نسبة الإدارة %', om_cleaning: 'النظافة',
-      om_cl_ours: 'على عوجا', om_cl_owner: 'يدفعها المالك (شهري)', om_cl_amount: 'مبلغ النظافة/شهر',
+      om_cl_ours: 'على عوجا', om_cl_owner: 'يدفعها المالك (شهري)', om_cl_mixed: 'حسب كل شقة', om_cl_amount: 'مبلغ النظافة/شهر',
       om_add_do: 'إضافة الشقة', om_added: 'انضافت ✓',
       om_terms_btn: 'تعديل الشروط', om_terms_title: 'تغيير بتاريخ سريان',
       om_terms_from: 'يسري من تاريخ', om_terms_hint: 'التغيير ما يلمس الشهور الماضية — كل شهر يقرأ الشروط اللي كانت سارية فيه',
@@ -522,7 +522,7 @@
       om_search_listing: 'Search listings (name)…', om_taken: 'belongs to',
       om_code: 'Statement code', om_from: 'Contract start', om_to: 'Contract end',
       om_open_ended: 'open', om_mgmt: 'Management %', om_cleaning: 'Cleaning',
-      om_cl_ours: 'On Ouja', om_cl_owner: 'Owner pays (monthly)', om_cl_amount: 'Cleaning amount/month',
+      om_cl_ours: 'On Ouja', om_cl_owner: 'Owner pays (monthly)', om_cl_mixed: 'Per apartment', om_cl_amount: 'Cleaning amount/month',
       om_add_do: 'Add apartment', om_added: 'Added ✓',
       om_terms_btn: 'Change terms', om_terms_title: 'Effective-dated change',
       om_terms_from: 'Effective from', om_terms_hint: 'Past months are untouched — each month reads the terms that were active then',
@@ -3719,7 +3719,9 @@
   /* ----- slice 1: owner & apartment manager (effective-dated) ----- */
   function clTxt(cl) {
     cl = cl || {};
-    return cl.type === 'owner' ? (t('om_cl_owner') + ' · ' + fmtAmt(cl.amount)) : t('om_cl_ours');
+    if (cl.type === 'owner') return t('om_cl_owner') + (cl.amount != null ? ' · ' + fmtAmt(cl.amount) : '');
+    if (cl.type === 'mixed') return t('om_cl_mixed');   // aggregate of differing per-unit policies
+    return t('om_cl_ours');
   }
 
   function manageUnitHtml(u) {

@@ -26837,6 +26837,26 @@ def _ar(text):
     except Exception:
         return str(text if text is not None else "")
 
+def _pdf_cleaning_label(cl):
+    """Header line for the statement PDF. Must never claim «على عوجا (مشمولة)»
+    while cleaning money is being deducted (the نواف الوهيبي label bug)."""
+    cl = cl or {}
+    def _fmt(x):
+        try:
+            return "{:,.2f}".format(float(x or 0))
+        except (TypeError, ValueError):
+            return "0.00"
+    if cl.get("type") == "owner":
+        _cm = cl.get("months") or 1
+        amt = cl.get("amount")
+        if amt:
+            return "النظافة: يدفعها المالك · %s/شهر%s" % (_fmt(amt), (" × %s" % _cm) if _cm > 1 else "")
+        return "النظافة: يدفعها المالك"
+    if float(cl.get("total") or 0) > 0:
+        # aggregated across units with different policies — money IS deducted
+        return "النظافة: يدفعها المالك (حسب كل شقة)"
+    return "النظافة: على عوجا (مشمولة)"
+
 def _pdf_statement_bytes(rep, label):
     """Render ONE owner statement to PDF bytes (fpdf2). Cream/gold, RTL, real Arabic shaping.
     Detailed: owner+fees block, summary, income breakdown, reservations + expenses tables."""
@@ -26885,8 +26905,7 @@ def _pdf_statement_bytes(rep, label):
         period.get("end", ""), period.get("start", ""))
     pdf.cell(usable, 5, shape(meta), align="R")
     cl = rep.get("cleaning") or {}
-    _cm = cl.get("months") or 1
-    clean_txt = ("النظافة: يدفعها المالك · %s/شهر%s" % (_n(cl.get("amount") or 0), (" × %s" % _cm) if _cm > 1 else "")) if cl.get("type") == "owner" else "النظافة: على عوجا (مشمولة)"
+    clean_txt = _pdf_cleaning_label(cl)
     if rep.get("statement_version"):
         clean_txt += " · نسخة %s — حُدّثت %s" % (rep["statement_version"], str(rep.get("published_at") or "")[:10])
     pdf.set_xy(M, 33); pdf.cell(usable, 5, shape(clean_txt), align="R")
@@ -36605,6 +36624,13 @@ def _finance_aggregate(reps, owner, start, end):
               "cleaning": (r.get("cleaning") or {}).get("total", 0), "owner_net": r.get("owner_net")}
              for r in reps]
     cleaning_total = R(sum((r.get("cleaning") or {}).get("total", 0) for r in reps))
+    # keep the cleaning TYPE honest through aggregation: a single-unit (or uniform)
+    # owner must not degrade to "mixed" — the PDF header + editor labels read it
+    # («على عوجا (مشمولة)» printed on an owner-paid statement: نواف الوهيبي bug).
+    _cl_types = {((r.get("cleaning") or {}).get("type") or "ours") for r in reps}
+    cl_type = _cl_types.pop() if len(_cl_types) == 1 else "mixed"
+    _cl_amts = {round(float((r.get("cleaning") or {}).get("amount") or 0), 2) for r in reps}
+    cl_amount = (_cl_amts.pop() if len(_cl_amts) == 1 else None)
     balanced = all((r.get("reconciliation") or {}).get("balanced") for r in reps) if reps else True
     ti = tot("total_income"); fee = tot("ouja_fee")
     blended = round(fee / ti * 100, 1) if ti else None     # owners can differ per apartment → blended effective %
@@ -36642,7 +36668,7 @@ def _finance_aggregate(reps, owner, start, end):
             "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
             "extras": tot("extras"), "manual_income": tot("manual_income"), "manual_income_lines": mil,
             "total_income": tot("total_income"), "ouja_fee": tot("ouja_fee"),
-            "expenses": tot("expenses"), "cleaning": {"type": "mixed", "total": cleaning_total, "cleans": None, "amount": None},
+            "expenses": tot("expenses"), "cleaning": {"type": cl_type, "total": cleaning_total, "cleans": None, "amount": cl_amount},
             "owner_net": tot("owner_net"), "apartments": parts,
             "resv_lines": all_lines, "exp_lines": all_exp,
             "unpaid_lines": all_unpaid, "refunded_lines": all_refunded,
