@@ -53582,6 +53582,358 @@ async def promise_keeper_loop():
     except Exception as e:
         print("promise keeper loop error:", e)
 
+# ====================== Ops Watchdog «الرقيب التشغيلي» ======================
+# READ-ONLY 30-min cycle: builds a proven snapshot (targeted Hostaway queries + existing
+# state), computes flags in the pure watchdog.engine, posts a phone-first summary to
+# WATCHDOG_CHANNEL, and pings ONCE per critical flag (dedup in brain.db). Never writes to
+# Hostaway, never messages guests. DRY-RUN by default (WATCHDOG_DRYRUN=1).
+
+def _wd_cover_lookup(today_iso):
+    """{'map': cover_map, 'apts': schedule apartments} or None — who covers what today."""
+    if not (_HAS_SCHEDULE and SCHEDULE_ENABLED):
+        return None
+    try:
+        cmap, apts = _schedule.coverage.cover_map(today_iso)
+        return {"map": cmap, "apts": apts}
+    except Exception as e:
+        print("[watchdog] cover lookup error:", e)
+        return None
+
+
+def _wd_employee_for(unit_name, cover):
+    if not cover:
+        return ""
+    try:
+        a = _schedule.coverage.match_apartment(unit_name, cover["apts"])
+        if a:
+            return (cover["map"].get(a["id"]) or {}).get("name") or ""
+    except Exception:
+        pass
+    return ""
+
+
+def _wd_cleaning_ok(lid, today_iso):
+    """True unless today's turnover channel for this unit is open without an approved
+    report (keys are 'lid:date' in the persisted OujaCT stores). No record = ready."""
+    key = f"{lid}:{today_iso}"
+    return not (key in _oujact_opened and key not in _oujact_done)
+
+
+def _wd_msg_stats_pass(cid, msgs, today_iso):
+    """Per-employee reply stats from one conversation's messages — idempotent per message,
+    AI-signature and platform automations excluded (the Aseel rule)."""
+    try:
+        seq = sorted(msgs, key=lambda m: str(m.get("date") or m.get("insertedOn") or ""))
+        last_inbound = None
+        for m in seq:
+            ts = _parse_msg_dt(_msg_time(m))
+            if _msg_is_inbound(m):
+                last_inbound = ts
+                continue
+            mid = str(m.get("id") or "")
+            if not mid or _watchdog.db.msg_seen(cid, mid):
+                continue
+            _watchdog.db.mark_msg_seen(cid, mid)
+            sender = _wm_sender_name(m)
+            if not sender or _wm_is_ai_message(m):
+                continue
+            day = (ts.date().isoformat() if ts else today_iso)
+            minute = (ts.hour * 60 + ts.minute) if ts else 0
+            fp = _watchdog.engine.body_fp(m.get("body") or "")
+            _watchdog.db.fp_bump(fp, conv=str(cid), minute=minute)
+            if _watchdog.engine.fp_is_automated(_watchdog.db.fp_get(fp)):
+                _watchdog.db.bump_stat(day, sender, automated=True)
+                continue
+            latency = None
+            if ts and last_inbound and ts >= last_inbound:
+                latency = min(720.0, (ts - last_inbound).total_seconds() / 60.0)
+            _watchdog.db.bump_stat(day, sender, resp_min=latency)
+    except Exception as e:
+        print("[watchdog] stats pass error:", e)
+
+
+def _watchdog_snapshot():
+    """Build the proven snapshot (sync; runs in a thread). Every section is guarded — a
+    failed source lands in snap['errors'] and renders as «غير معروف», never guessed."""
+    now = now_riyadh()
+    today_iso = now.date().isoformat()
+    snap = {"arrivals": [], "escalations": [], "pending": [], "promises": [], "tickets": [],
+            "cleaning_stale": [], "coverage": {"ok": True, "off_names": [], "imbalance": 0},
+            "today": {}, "codes_summary": {"manual_total": 0, "sent": 0},
+            "health": {"disk_fallback": False, "api_ok": True}, "errors": [],
+            "generated_at": now.isoformat(timespec="minutes")}
+
+    # health: storage + one cheap Hostaway probe
+    try:
+        if _HAS_BRAIN:
+            snap["health"]["disk_fallback"] = bool(_brain.db.STORAGE.get("is_fallback"))
+    except Exception:
+        pass
+    try:
+        api_get("/reservations", params={"limit": 1})
+    except Exception:
+        snap["health"]["api_ok"] = False
+
+    # arrivals + manual-code checks (+ message stats on the conversations we already fetched)
+    cover = _wd_cover_lookup(today_iso)
+    try:
+        arrivals = compute_arrivals_with_status(window_hours=WATCHDOG_CODE_LOOKAHEAD_H)
+        manual = _watchdog.db.manual_listing_ids()
+        for a in arrivals:
+            lid = str(a.get("listing_id") or "")
+            mode = "manual" if lid in manual else "auto"
+            row = {"unit": a.get("unit"), "guest": a.get("guest"), "listing_id": lid,
+                   "hours_until": a.get("hours_until"), "code_mode": mode,
+                   "code_found": False, "code_sender": "",
+                   "cleaning_ok": _wd_cleaning_ok(a.get("listing_id"), today_iso),
+                   "employee": _wd_employee_for(a.get("unit") or "", cover),
+                   "arrival_date": (a.get("checkin_iso") or today_iso)[:10]}
+            cid = a.get("conversation_id")
+            if mode == "manual":
+                snap["codes_summary"]["manual_total"] += 1
+                if cid:
+                    try:
+                        msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+                        r = _watchdog.engine.classify_code_send(msgs)
+                        if r["found"]:
+                            row["code_found"] = True
+                            row["code_sender"] = r["sender"]
+                            snap["codes_summary"]["sent"] += 1
+                            _watchdog.db.log_code_send({
+                                "listing_id": lid, "reservation_id": a.get("reservation_id"),
+                                "guest_name": a.get("guest"), "sent_by": r["sender"],
+                                "sent_at": r["sent_at"], "arrival_ts": a.get("checkin_iso"),
+                                "on_time": 1 if float(a.get("hours_until") or 0) > 0 else 0})
+                        _wd_msg_stats_pass(cid, msgs, today_iso)
+                    except Exception as e:
+                        print(f"[watchdog] code scan error ({cid}):", e)
+            snap["arrivals"].append(row)
+    except Exception as e:
+        print("[watchdog] arrivals error:", e)
+        snap["errors"].append("arrivals")
+
+    # escalations + pending replies (in-memory, same math as compute_urgent_now)
+    try:
+        now_ts = time.time()
+        for mid, e in list(_escalations.items()):
+            if e.get("claimed_by"):
+                if not _watchdog.db.msg_seen("escclaim", str(mid)):
+                    _watchdog.db.mark_msg_seen("escclaim", str(mid))
+                    _watchdog.db.log_event(today_iso, "esc_claim", str(e.get("claimed_by")))
+                continue
+            age_min = max(0, int((now_ts - (e.get("last_ping") or now_ts)) / 60))
+            snap["escalations"].append({"id": str(mid), "guest": e.get("guest", "ضيف"),
+                                        "unit": e.get("unit", ""), "age_min": age_min})
+    except Exception as e:
+        print("[watchdog] escalations error:", e)
+        snap["errors"].append("escalations")
+    try:
+        for mid, d in list(_pending_replies.items()):
+            item = d.get("item", {})
+            age_min = 0
+            try:
+                dt0 = _parse_msg_dt(item.get("last_time", ""))
+                if dt0:
+                    age_min = max(0, int((datetime.now(TZ) - dt0).total_seconds() / 60))
+            except Exception:
+                pass
+            snap["pending"].append({"id": str(mid), "guest": item.get("guest", "ضيف"),
+                                    "unit": item.get("unit", ""), "age_min": age_min})
+    except Exception as e:
+        print("[watchdog] pending error:", e)
+        snap["errors"].append("pending")
+
+    # promises (brain.db ledger; naive `now` — the promise-keeper convention)
+    try:
+        if _HAS_PK:
+            pnow = datetime.now(TZ).replace(tzinfo=None)
+            for rec in _pk.db.open_rows():
+                oh = _pk.engine.overdue_hours(rec, pnow)
+                if oh is None or oh <= 0:
+                    continue
+                snap["promises"].append({"id": rec.get("id"),
+                                         "promised_by": rec.get("promised_by") or "",
+                                         "apartment": rec.get("apartment") or "",
+                                         "expired": _pk.engine.is_expired(rec, pnow),
+                                         "overdue_h": oh})
+    except Exception as e:
+        print("[watchdog] promises error:", e)
+        snap["errors"].append("promises")
+
+    # tickets (open + unassigned counts only — info tier)
+    try:
+        snap["tickets"] = [{"id": t.get("id"), "assigned_to": t.get("assigned_to")}
+                           for t in _tickets if t.get("status") in ("open", "in_progress")]
+    except Exception as e:
+        print("[watchdog] tickets error:", e)
+        snap["errors"].append("tickets")
+
+    # stale cleaning channels (opened before today, never done)
+    try:
+        for key, opened_date in list(_oujact_opened.items()):
+            if key in _oujact_done:
+                continue
+            d = str(opened_date or "")[:10]
+            if d and d < today_iso:
+                lid, _, date_part = key.partition(":")
+                unit = (get_listings_map() or {}).get(int(lid)) if lid.isdigit() else None
+                opened_h = max(24.0, (now - datetime.fromisoformat(d + "T12:00:00").replace(
+                    tzinfo=TZ)).total_seconds() / 3600.0)
+                snap["cleaning_stale"].append({"key": key, "unit": unit or f"unit-{lid}",
+                                               "opened_h": opened_h})
+    except Exception as e:
+        print("[watchdog] stale cleaning error:", e)
+        snap["errors"].append("cleaning")
+
+    # coverage balance
+    try:
+        if _HAS_SCHEDULE and SCHEDULE_ENABLED:
+            day = _schedule.routes.schedule_day(today_iso)
+            imb = int(day.get("max_load") or 0) - int(day.get("min_load") or 0)
+            snap["coverage"] = {"ok": bool(day.get("balanced", True)),
+                                "off_names": [o.get("name") for o in (day.get("off") or [])],
+                                "imbalance": imb}
+    except Exception as e:
+        print("[watchdog] coverage error:", e)
+        snap["errors"].append("coverage")
+
+    # today numbers (targeted in-house query — never the truncated cache)
+    try:
+        t = _compute_today()
+        snap["today"] = {"arr_n": len(t.get("arrivals") or []),
+                         "dep_n": len(t.get("departures") or []),
+                         "occupied": t.get("occupied", 0),
+                         "tight_n": len(t.get("tight") or [])}
+    except Exception as e:
+        print("[watchdog] today error:", e)
+        snap["errors"].append("today")
+
+    return snap
+
+
+async def _watchdog_post(text, flags, meta):
+    """Summary = ONE message edited in place each cycle; criticals = separate pinged
+    messages, once per flag key (re-ping only after WATCHDOG_REPING_HOURS)."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    cat = await get_category(guild)
+    ch = await ensure_channel(guild, WATCHDOG_CHANNEL, cat)
+    if ch is None:
+        return
+    # rolling summary message
+    msg_id = meta.get("summary_msg_id")
+    posted = False
+    if msg_id:
+        try:
+            m = await ch.fetch_message(int(msg_id))
+            await m.edit(content=text)
+            posted = True
+        except Exception:
+            posted = False
+    if not posted:
+        try:
+            m = await ch.send(text)
+            meta["summary_msg_id"] = m.id
+        except Exception as e:
+            print("[watchdog] summary post error:", e)
+            return
+    # critical pings (dedup via brain.db flag state)
+    now_iso = now_riyadh().isoformat(timespec="seconds")
+    live_keys = set()
+    for f in flags:
+        live_keys.add(f["key"])
+        if f["severity"] != "critical":
+            continue
+        due = await asyncio.to_thread(_watchdog.db.claim_ping, f["key"], now_iso)
+        if not due:
+            due = await asyncio.to_thread(_watchdog.db.reping_due, f["key"], now_iso,
+                                          WATCHDOG_REPING_HOURS)
+        if not due:
+            continue
+        mentions = []
+        if f.get("mention_name"):
+            men = _wm_mention(_wm_resolve_id(f["mention_name"]))
+            if men:
+                mentions.append(men)
+        boss = _wm_mention(WATCHMAN_MANAGER_ROLE)
+        if boss:
+            mentions.append(boss)
+        try:
+            await ch.send(_watchdog.engine.render_critical(f, " ".join(mentions)))
+        except Exception as e:
+            print("[watchdog] critical ping error:", e)
+    # clear flags that stopped appearing (so a future recurrence pings again)
+    try:
+        stale = await asyncio.to_thread(_watchdog.db.open_flag_keys)
+        for k in stale - live_keys:
+            await asyncio.to_thread(_watchdog.db.resolve_flag, k, now_iso)
+    except Exception as e:
+        print("[watchdog] flag resolve error:", e)
+
+
+async def _watchdog_scoreboard(meta):
+    """Sunday weekly card — proven metrics only, automations excluded and surfaced."""
+    now = now_riyadh()
+    week = "%d-%02d" % now.isocalendar()[:2]
+    if now.weekday() != 6 or meta.get("board_week") == week:      # Sunday = weekday 6
+        return
+    since = (now.date() - timedelta(days=7)).isoformat()
+    try:
+        stats = await asyncio.to_thread(_watchdog.db.stats_since, since)
+        sends = await asyncio.to_thread(_watchdog.db.code_sends_since, since)
+        claims = [{"claimed_by_name": r.get("employee")} for r in
+                  await asyncio.to_thread(_watchdog.db.events_since, since, "esc_claim")]
+        proms = []
+        if _HAS_PK:
+            proms = await asyncio.to_thread(
+                _pk.db.q, "SELECT promised_by, status FROM promise_ledger WHERE created_at >= ?",
+                (since,))
+        board = _watchdog.engine.scoreboard(stats, sends, proms, claims)
+        if not board:
+            return
+        text = _watchdog.engine.render_scoreboard(board)
+        if WATCHDOG_DRYRUN:
+            print("[watchdog] (dryrun) scoreboard:\n" + text)
+        else:
+            guild = bot.get_guild(GUILD_ID)
+            if guild is None:
+                return
+            ch = await ensure_channel(guild, WATCHDOG_CHANNEL, await get_category(guild))
+            if ch is not None:
+                await ch.send(text)
+        meta["board_week"] = week
+    except Exception as e:
+        print("[watchdog] scoreboard error:", e)
+
+
+@tasks.loop(minutes=max(5, WATCHDOG_INTERVAL_MIN))
+async def watchdog_loop():
+    if not (_HAS_WATCHDOG and WATCHDOG_ENABLED):
+        return
+    await bot.wait_until_ready()
+    meta = _load_json("watchdog_meta.json", {}) or {}
+    if time.time() - (meta.get("last_run_ts") or 0) < (WATCHDOG_INTERVAL_MIN * 60) - 90:
+        return                                # deploy-restart guard (the @tasks.loop trap)
+    try:
+        snap = await asyncio.to_thread(_watchdog_snapshot)
+        _watchdog.HOST.last_snapshot = snap
+        flags = _watchdog.engine.compute_flags(snap, now_riyadh())
+        ts_label = now_riyadh().strftime("%I:%M %p").lstrip("0").replace("AM", "ص").replace("PM", "م")
+        text = _watchdog.engine.render_summary(flags, snap, ts_label)
+        meta["last_run_ts"] = time.time()
+        if WATCHDOG_DRYRUN:
+            print("[watchdog] (dryrun) summary:\n" + text)
+            for f in flags:
+                if f["severity"] == "critical":
+                    print("[watchdog] (dryrun) critical:", f["key"], "·", f["text"])
+        else:
+            await _watchdog_post(text, flags, meta)
+        await _watchdog_scoreboard(meta)
+        _save_json("watchdog_meta.json", meta)
+    except Exception as e:
+        print("[watchdog] cycle error:", e)
+
 # ---- Guide ↔ Hostaway: rewrite the old Netlify guide links in Custom Fields ----
 # The «Listing Internal Name» custom field carries the guide URL the automations
 # send guests. Hostaway's API updates it: PUT /listings/{id} with
@@ -53812,7 +54164,8 @@ async def on_ready():
                      (revenue_loop, "revenue_loop"),
                      (price_opp_loop, "price_opp_loop"),
                      (weekly_review_loop, "weekly_review_loop"),
-                     (watchman_loop, "watchman_loop")):
+                     (watchman_loop, "watchman_loop"),
+                     (watchdog_loop, "watchdog_loop")):
         if getattr(_lp, "_error_guarded", False):
             continue                    # on_ready can re-fire on re-identify
         _loop_guard(_lp, _nm)
@@ -53848,6 +54201,8 @@ async def on_ready():
             _loop_guard(promise_keeper_loop, "promise_keeper_loop")
             promise_keeper_loop._error_guarded = True
         promise_keeper_loop.start()    # متتبع الوعود: reping overdue + expire after 24h
+    if _HAS_WATCHDOG and WATCHDOG_ENABLED and not watchdog_loop.is_running():
+        watchdog_loop.start()          # «الرقيب التشغيلي»: 30-min ops summary + critical pings
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)

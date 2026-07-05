@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS watchdog_seen_msgs (
     msg_id  TEXT,
     PRIMARY KEY (conv_id, msg_id)
 );
+CREATE TABLE IF NOT EXISTS watchdog_events (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    day      TEXT,
+    kind     TEXT,
+    employee TEXT
+);
 """
 
 _inited = set()
@@ -230,6 +236,17 @@ def fp_get(fp):
     rec["convs"] = json.loads(rec.get("convs") or "[]")
     rec["minutes"] = json.loads(rec.get("minutes") or "[]")
     return rec
+
+
+# ---------------- generic events (e.g. escalation claims) ----------------
+
+def log_event(day, kind, employee):
+    execute("INSERT INTO watchdog_events(day, kind, employee) VALUES(?,?,?)",
+            (day, kind, employee or ""))
+
+
+def events_since(day_iso, kind):
+    return q("SELECT * FROM watchdog_events WHERE day >= ? AND kind = ?", (day_iso, kind))
 
 
 # ---------------- seen messages (stats pass idempotency) ----------------

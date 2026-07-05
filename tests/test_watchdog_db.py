@@ -69,6 +69,13 @@ class TestWatchdogDb(unittest.TestCase):
         self.assertEqual(sorted(rec["convs"]), ["c1", "c2", "c3"])
         self.assertEqual(rec["minutes"].count(660), 4)
 
+    def test_events_log(self):
+        wdb.log_event("2026-07-05", "esc_claim", "أسيل")
+        wdb.log_event("2026-07-05", "esc_claim", "أسيل")
+        rows = wdb.events_since("2026-07-01", "esc_claim")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["employee"], "أسيل")
+
     def test_seen_msgs(self):
         self.assertFalse(wdb.msg_seen("cv1", "m1"))
         wdb.mark_msg_seen("cv1", "m1")
