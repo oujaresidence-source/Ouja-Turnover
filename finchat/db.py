@@ -3,6 +3,7 @@
 NO WAL, journal_mode=DELETE, busy_timeout). Tables: finchat_kb, finchat_msgs, finchat_esc."""
 import datetime
 import json
+import threading
 from contextlib import closing
 
 from brain import db as _bdb
@@ -46,12 +47,12 @@ CREATE TABLE IF NOT EXISTS finchat_esc (
 CREATE INDEX IF NOT EXISTS idx_finchat_esc_status ON finchat_esc(status);
 """
 
-_inited = False
+_inited = set()
+_init_lock = threading.Lock()
 
 
 def reset_init_cache():
-    global _inited
-    _inited = False
+    _inited.clear()
 
 
 def _now():
@@ -59,13 +60,16 @@ def _now():
 
 
 def _ensure():
-    global _inited
-    if _inited:
+    path = _bdb.db_path()
+    if path in _inited:
         return
-    with closing(_bdb.connect()) as cx:
-        cx.executescript(SCHEMA)
-        cx.commit()
-    _inited = True
+    with _init_lock:
+        if path in _inited:
+            return
+        with closing(_bdb.connect()) as cx:
+            cx.executescript(SCHEMA)
+            cx.commit()
+        _inited.add(path)
 
 
 def _rows(cur):
@@ -80,10 +84,10 @@ def kb_upsert(q_ar, answer_ar, links=None, tags="", source="manual", id=None):
     lj = json.dumps(links or [], ensure_ascii=False)
     with closing(_bdb.connect()) as cx:
         if id:
-            cx.execute("UPDATE finchat_kb SET q_ar=?, answer_ar=?, links_json=?, tags=?, updated_at=? WHERE id=?",
-                       (q_ar, answer_ar, lj, tags, _now(), id))
+            cur = cx.execute("UPDATE finchat_kb SET q_ar=?, answer_ar=?, links_json=?, tags=?, updated_at=? WHERE id=?",
+                             (q_ar, answer_ar, lj, tags, _now(), id))
             cx.commit()
-            return int(id)
+            return int(id) if cur.rowcount > 0 else None
         cur = cx.execute(
             "INSERT INTO finchat_kb (q_ar, answer_ar, links_json, tags, source, enabled, created_at, updated_at)"
             " VALUES (?,?,?,?,?,1,?,?)",
