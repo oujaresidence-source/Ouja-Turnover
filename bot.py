@@ -4756,9 +4756,10 @@ SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")
 
 # ============= Ops Watchdog «الرقيب التشغيلي» — 30-min ops health cycle =============
 # Read-only monitor: posts a phone-first summary to WATCHDOG_CHANNEL every cycle and pings
-# instantly (once per flag) on criticals. DRY-RUN by default — flip WATCHDOG_DRYRUN=0 to post.
+# instantly (once per flag) on criticals. LIVE by default (owner go-live 2026-07-05) — set
+# WATCHDOG_DRYRUN=1 to fall back to log-only watch mode.
 WATCHDOG_ENABLED          = os.environ.get("WATCHDOG_ENABLED", "1") in ("1", "true", "True", "yes")
-WATCHDOG_DRYRUN           = os.environ.get("WATCHDOG_DRYRUN", "1") in ("1", "true", "True", "yes")
+WATCHDOG_DRYRUN           = os.environ.get("WATCHDOG_DRYRUN", "0") in ("1", "true", "True", "yes")
 WATCHDOG_INTERVAL_MIN     = int(os.environ.get("WATCHDOG_INTERVAL_MIN", "30"))
 WATCHDOG_CHANNEL          = os.environ.get("WATCHDOG_CHANNEL", "غرفة-المراقبة")
 WATCHDOG_REPING_HOURS     = float(os.environ.get("WATCHDOG_REPING_HOURS", "2"))
@@ -53914,8 +53915,11 @@ async def watchdog_loop():
         return
     await bot.wait_until_ready()
     meta = _load_json("watchdog_meta.json", {}) or {}
-    if time.time() - (meta.get("last_run_ts") or 0) < (WATCHDOG_INTERVAL_MIN * 60) - 90:
+    mode_now = "dry" if WATCHDOG_DRYRUN else "live"
+    if (meta.get("mode") == mode_now
+            and time.time() - (meta.get("last_run_ts") or 0) < (WATCHDOG_INTERVAL_MIN * 60) - 90):
         return                                # deploy-restart guard (the @tasks.loop trap)
+    meta["mode"] = mode_now                   # dry↔live flip posts immediately (go-live proof)
     try:
         snap = await asyncio.to_thread(_watchdog_snapshot)
         _watchdog.HOST.last_snapshot = snap
