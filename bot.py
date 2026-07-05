@@ -26628,8 +26628,13 @@ def _finance_apply_adjust(rep, adjust):
                                  "apartment": rep.get("apartment"), "lid": rep.get("lid")})
         else:                                  # manual expense (now labelled)
             exp_total += amt
-            lines.append({"id": "exp-adj-%d" % i, "date": label, "label": label, "amount": amt,
-                          "manual": True, "source": "manual"})
+            lines.append({"id": "exp-adj-%d" % i, "date": (x.get("date") or label), "label": label,
+                          "description": label, "amount": amt,
+                          "manual": True, "source": "manual", "kind": "expense",
+                          "edit_reason": (x.get("reason") or ""),
+                          # per-apartment manual expenses (the inc-lines pattern): the
+                          # statement editor's unit tabs + delete-by-lid need the unit
+                          "apartment": rep.get("apartment"), "lid": rep.get("lid")})
     # ---- recompute totals from DISPLAYED values (mgmt fee on booking income only) ----
     booking_income = sum(float(l["income"]) for l in new_resv if l.get("income") is not None) \
         + float(rep.get("extras") or 0)

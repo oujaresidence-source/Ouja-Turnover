@@ -298,6 +298,8 @@
       se_inc_add: 'أضف إيراد يدوي', se_inc_label: 'الوصف / المصدر', se_inc_unit: 'الشقة',
       se_inc_hint: 'يدخل كشف الشقة والـ PDF وما تنحسب عليه رسوم إدارة — مثل سطر «سلطان عبدالله 2,844» في مايو',
       se_inc_pick_unit: 'اختر الشقة أول',
+      se_man_unit: 'الشقة', se_man_owner_level: 'بدون شقة — الكشف الإجمالي فقط',
+      se_man_hint: 'اختر الشقة عشان المصروف يظهر في كشف الشقة والـ PDF حقها — بدونها يظهر في الكشف الإجمالي للمالك فقط.',
       /* --- today: budget group --- */
       g_budget: 'تنبيهات الميزانية', g_budget_hint: 'حسابات وصلت ٩٠٪ أو تعدّت ميزانية الشهر',
       /* --- statements --- */
@@ -597,6 +599,8 @@
       se_inc_add: 'Add manual income', se_inc_label: 'Description / source', se_inc_unit: 'Apartment',
       se_inc_hint: 'Shows on the unit statement + PDF with no management fee — like May’s Sultan Abdullah 2,844 line',
       se_inc_pick_unit: 'Pick the apartment first',
+      se_man_unit: 'Apartment', se_man_owner_level: 'No apartment — owner total only',
+      se_man_hint: 'Pick the apartment so the expense shows on that unit statement + PDF — without one it only shows on the owner total.',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
       st_month: 'Month', st_export_x: 'Excel', st_export_p: 'PDF',
       st_bs: 'Balance sheet', st_is: 'Income statement', st_eq: 'Changes in equity',
@@ -2071,14 +2075,21 @@
       seEdit({ op: 'exp_delete', id: rowD.getAttribute('data-xid'), reason: rD }, el);
     }
     else if (act === 'se-man-del') {
-      seEdit({ op: 'exp_manual_del', id: el.closest('.wq-row').getAttribute('data-xid'), reason: '-' }, el);
+      var rowM = el.closest('.wq-row');
+      var bodyMD = { op: 'exp_manual_del', id: rowM.getAttribute('data-xid'), reason: '-' };
+      var xlid = rowM.getAttribute('data-xlid');
+      if (xlid) bodyMD.lid = xlid;                 // per-apartment line lives in the per-lid store
+      seEdit(bodyMD, el);
     }
     else if (act === 'se-man-add') {
       var mr = $('#seManReason').value.trim();
       if (!(Number($('#seManAmt').value) > 0)) { $('#seManAmt').classList.add('need'); return; }
       if (!mr) { $('#seManReason').classList.add('need'); return; }
-      seEdit({ op: 'exp_manual_add', amount: Number($('#seManAmt').value),
-               date: $('#seManDate').value, description: $('#seManDesc').value, reason: mr }, el);
+      var bodyMA = { op: 'exp_manual_add', amount: Number($('#seManAmt').value),
+                     date: $('#seManDate').value, description: $('#seManDesc').value, reason: mr };
+      var manLid = $('#seManLid') ? $('#seManLid').value : '';
+      if (manLid) bodyMA.lid = manLid;             // apartment picked → shows on the unit statement too
+      seEdit(bodyMA, el);
     }
     else if (act === 'se-adj-add') {
       var ar2 = $('#seAdjReason').value.trim();
@@ -4112,7 +4123,7 @@
       (x.receipt_url
         ? ' <button class="btn ghost xs" data-act="x-receipt" data-url="' + esc(x.receipt_url) + '">🧾 ' + esc(t('x_receipt')) + '</button>'
         : (x.manual ? '' : ' <span class="tag">' + esc(t('x_no_receipt')) + '</span>'));
-    return '<div class="wq-row" data-xid="' + esc(String(x.id)) + '" data-manual="' + (x.manual ? '1' : '0') + '">' +
+    return '<div class="wq-row" data-xid="' + esc(String(x.id)) + '" data-xlid="' + esc(String(x.lid != null ? x.lid : '')) + '" data-manual="' + (x.manual ? '1' : '0') + '">' +
       '<div class="wq-main"><div class="wq-top"><b>' + esc(x.description || x.category || '—') + '</b>' + chips + '</div>' +
       '<div class="wq-sub"><code>' + esc(x.date || '') + '</code>' + (x.apartment ? (' · ' + esc(x.apartment)) : '') + '</div>' +
       '<div class="om-form se-inline" data-need="se-xe" hidden>' +
@@ -4275,7 +4286,14 @@
           '<div class="grp-hint">' + esc(t('se_expenses')) + ' · ' + expLines.length + '</div>' +
           '<div class="grp-list">' + expLines.map(seExpRow).join('') + '</div>' +
           seIncBlock(s, unitName) +
-          '<div style="padding:10px 16px"><div class="om-grid">' +
+          '<div style="padding:10px 16px"><div class="grp-hint" style="padding:0 0 6px">' + esc(t('se_man_hint')) + '</div><div class="om-grid">' +
+          '<label>' + esc(t('se_man_unit')) + '<select class="in" id="seManLid">' +
+          (activePart
+            ? '<option value="' + esc(String(activePart.lid)) + '" selected>' + esc(shortApt(activePart.apartment)) + '</option>'
+            : '<option value="">' + esc(t('se_man_owner_level')) + '</option>' + (s.apartments || []).map(function (p) {
+                return p.lid == null ? '' : '<option value="' + esc(String(p.lid)) + '">' + esc(shortApt(p.apartment)) + '</option>';
+              }).join('')) +
+          '</select></label>' +
           '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in" id="seManAmt"></label>' +
           '<label>' + esc(t('se_date')) + '<input type="date" class="in" id="seManDate"></label>' +
           '<label>' + esc(t('se_desc')) + '<input class="in" id="seManDesc"></label>' +

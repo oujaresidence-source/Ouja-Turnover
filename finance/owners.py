@@ -1185,14 +1185,60 @@ def statement_edit(request, body):
             amt = round(float(body.get("amount")), 2)
         except (TypeError, ValueError):
             return {"error": "bad_amount"}, 400
-        row = {"id": "man-" + uuid.uuid4().hex[:8], "amount": amt,
-               "date": str(body.get("date") or "")[:10],
-               "description": str(body.get("description") or "")[:200],
-               "reason": reason, "by": actor,
-               "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
-        e["exp_manual"].append(row)
-        target = row["id"]
-        after = row
+        if body.get("lid") not in (None, ""):
+            # per-APARTMENT manual expense (owner-reported 2026-07: entered per unit
+            # but invisible on the unit print). Same fix as inc_manual_add: land in
+            # the per-lid adjust store so the unit statement/PDF, the apt-sliced
+            # range report and the owner aggregate all read the SAME line.
+            try:
+                lid = int(body.get("lid"))
+            except (TypeError, ValueError):
+                return {"error": "bad_lid"}, 400
+            start, end = B._month_bounds(mkey)
+            ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+            adj = B._finance_adjust.get(ak) or {}
+            for kdef, vdef in (("expense_overrides", {}), ("extra_lines", []),
+                               ("line_overrides", {}), ("comment", "")):
+                adj.setdefault(kdef, vdef)
+            line = {"kind": "expense",
+                    "label": (str(body.get("description") or "").strip() or "مصروف يدوي")[:200],
+                    "amount": amt, "date": str(body.get("date") or "")[:10],
+                    "reason": reason}
+            adj["extra_lines"] = list(adj.get("extra_lines") or []) + [line]
+            B._finance_adjust[ak] = adj
+            B.persist_state()
+            target = ak + " exp[" + str(len(adj["extra_lines"]) - 1) + "]"
+            after = line
+        else:
+            row = {"id": "man-" + uuid.uuid4().hex[:8], "amount": amt,
+                   "date": str(body.get("date") or "")[:10],
+                   "description": str(body.get("description") or "")[:200],
+                   "reason": reason, "by": actor,
+                   "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
+            e["exp_manual"].append(row)
+            target = row["id"]
+            after = row
+    elif op == "exp_manual_del" and str(target).startswith("exp-adj-"):
+        # per-lid manual expense line (see exp_manual_add) — mirror inc_manual_del
+        try:
+            lid = int(body.get("lid"))
+            idx = int(str(target).replace("exp-adj-", ""))
+        except (TypeError, ValueError):
+            return {"error": "bad_target"}, 400
+        start, end = B._month_bounds(mkey)
+        ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+        adj = B._finance_adjust.get(ak)
+        lines = list((adj or {}).get("extra_lines") or [])
+        if not (0 <= idx < len(lines)) or (lines[idx] or {}).get("kind") == "income":
+            return {"error": "expense_line_not_found"}, 404
+        before = lines[idx]
+        del lines[idx]
+        adj["extra_lines"] = lines
+        if not (adj.get("expense_overrides") or adj.get("extra_lines")
+                or adj.get("line_overrides") or (adj.get("comment") or "").strip()):
+            B._finance_adjust.pop(ak, None)
+        B.persist_state()
+        target = ak + " exp[" + str(idx) + "]"
     elif op == "exp_manual_del":
         before = next((x for x in e["exp_manual"] if x.get("id") == target), None)
         e["exp_manual"] = [x for x in e["exp_manual"] if x.get("id") != target]
