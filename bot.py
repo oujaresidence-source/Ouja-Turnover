@@ -53654,9 +53654,40 @@ def _wd_msg_stats_pass(cid, msgs, today_iso):
         print("[watchdog] stats pass error:", e)
 
 
-def _watchdog_snapshot():
+def _wd_open_maint_by_lid():
+    """OPEN maintenance ticket ROOMS in Discord per listing (owner rule 2026-07-05: the
+    tickets that matter = the open channels under «صيانه», not the tracker backlog).
+    Open = not renamed «مغلقة-»; the lid rides in the channel topic (ouja-ticket:maint lid:N)."""
+    out = {}
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return out
+        want = _tk_cat_norm(MAINT_CATEGORY)
+        for cat in guild.categories:
+            n = _tk_cat_norm(cat.name)
+            if n != want and not any(n == _tk_cat_norm(f"{MAINT_CATEGORY} {s}")
+                                     for s in _TK_OVERFLOW_SUFFIXES):
+                continue
+            for ch in cat.text_channels:
+                if ch.name.startswith("مغلقة-"):
+                    continue
+                topic = ch.topic or ""
+                if "ouja-ticket:maint" not in topic:
+                    continue
+                mm = re.search(r"lid:(\d+)", topic)
+                if mm:
+                    lid = int(mm.group(1))
+                    out[lid] = out.get(lid, 0) + 1
+    except Exception as e:
+        print("[watchdog] maint rooms scan error:", e)
+    return out
+
+
+def _watchdog_snapshot(open_maint=None):
     """Build the proven snapshot (sync; runs in a thread). Every section is guarded — a
     failed source lands in snap['errors'] and renders as «غير معروف», never guessed."""
+    open_maint = open_maint or {}
     now = now_riyadh()
     today_iso = now.date().isoformat()
     snap = {"arrivals": [], "escalations": [], "pending": [], "promises": [], "tickets": [],
@@ -53700,10 +53731,7 @@ def _watchdog_snapshot():
     def _sec_arrivals():
         snap["arrivals"] = []
         snap["codes_summary"] = {"manual_total": 0, "sent": 0}
-        open_by_lid = {}
-        for tk in _tickets:
-            if tk.get("status") in ("open", "in_progress") and tk.get("lid") is not None:
-                open_by_lid[tk["lid"]] = open_by_lid.get(tk["lid"], 0) + 1
+        open_by_lid = open_maint          # open Discord maint rooms (owner rule), not the tracker
         arrivals = compute_arrivals_with_status(window_hours=WATCHDOG_CODE_LOOKAHEAD_H)
         manual = _watchdog.db.manual_listing_ids()
         for a in arrivals:
@@ -53996,7 +54024,7 @@ async def watchdog_loop():
         print("[watchdog] web wiring never became ready — skipping this cycle")
         return
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v5"   # bump suffix on layout changes → next deploy posts immediately
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v6"   # bump suffix on layout changes → next deploy posts immediately
     if meta.get("mode") != mode_now:
         meta.pop("summary_msg_id", None)      # layout/mode change → NEW message (notifies), not a silent edit
     if (meta.get("mode") == mode_now
@@ -54004,7 +54032,8 @@ async def watchdog_loop():
         return                                # deploy-restart guard (the @tasks.loop trap)
     meta["mode"] = mode_now                   # dry↔live flip posts immediately (go-live proof)
     try:
-        snap = await asyncio.to_thread(_watchdog_snapshot)
+        open_maint = _wd_open_maint_by_lid()      # Discord cache read — main loop side
+        snap = await asyncio.to_thread(_watchdog_snapshot, open_maint)
         _watchdog.HOST.last_snapshot = snap
         try:
             _save_json("watchdog_snapshot.json", snap)   # the /watchdog page reads this

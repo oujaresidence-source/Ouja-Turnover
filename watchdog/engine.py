@@ -30,9 +30,24 @@ _ERR_LABELS = {
 }
 
 # ---------------- code-send classification ----------------
+# Owner rule (2026-07-05): the UNIT door code is any digit run ending with «#».
+# A code whose nearby context says «خارجي» (building/gate code) is NOT the unit code.
 
-_CODE_KW_AR = ("كود", "رمز", "كلمة المرور", "كلمة مرور", "الباسوورد", "باسوورد", "رمز الدخول")
-_CODE_KW_EN = ("code", "access code", "door code", "passcode", "password")
+_EXT_MARKERS = ("خارجي", "خارجى", "خارجية", "بوابة", "البوابة", "external", "gate")
+
+
+def _has_unit_code(body):
+    text = body or ""
+    prev_end = 0
+    for m in re.finditer(r"\d{3,10}\s*#", text):
+        # the marker context is what sits between the previous code and this one —
+        # so «الكود الخارجي 1234# وكود الشقة 5678#» counts the second code
+        ctx = text[max(prev_end, m.start() - 40):m.start()]
+        prev_end = m.end()
+        if any(k in ctx for k in _EXT_MARKERS):
+            continue
+        return True
+    return False
 
 
 def _is_inbound(m):
@@ -62,17 +77,13 @@ def _sender(m):
 
 
 def classify_code_send(msgs):
-    """Newest OUTGOING code-bearing message (4-8 digit number near a code keyword)
-    → {found, sender, sent_at}. Inbound messages never count."""
+    """Newest OUTGOING message carrying a UNIT door code (digits ending with «#»,
+    excluding «خارجي»-marked gate codes) → {found, sender, sent_at}. Inbound never counts."""
     best = None
     for m in msgs or []:
         if _is_inbound(m):
             continue
-        body = m.get("body") or ""
-        if not re.search(r"\b\d{4,8}\b", body):
-            continue
-        low = body.lower()
-        if not (any(k in low for k in _CODE_KW_EN) or any(k in body for k in _CODE_KW_AR)):
+        if not _has_unit_code(m.get("body") or ""):
             continue
         ts = str(m.get("date") or m.get("insertedOn") or "")
         if best is None or ts > best["sent_at"]:

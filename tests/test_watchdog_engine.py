@@ -21,28 +21,42 @@ def msg(body, incoming=0, sender="نورة", ts="2026-07-05T10:00:00"):
 
 
 class TestCodeClassifier(unittest.TestCase):
-    def test_finds_code_message(self):
-        msgs = [msg("هلا! كود الباب 4512 حياك"), msg("welcome", sender="")]
+    # Owner rule 2026-07-05: the unit door code is ANY digits ending with «#».
+    # A code marked «خارجي» is the building/gate code — NOT the unit code.
+    def test_finds_hash_code(self):
+        msgs = [msg("هلا! كود الدخول 4512# حياك"), msg("welcome", sender="")]
         r = E.classify_code_send(msgs)
         self.assertTrue(r["found"])
         self.assertEqual(r["sender"], "نورة")
         self.assertEqual(r["sent_at"], "2026-07-05T10:00:00")
 
-    def test_ignores_inbound_and_codeless(self):
-        msgs = [msg("الكود وش هو؟ 4512", incoming=1), msg("أهلين بك")]
-        self.assertFalse(E.classify_code_send(msgs)["found"])
+    def test_hash_code_without_keyword_still_counts(self):
+        self.assertTrue(E.classify_code_send([msg("اهلا فيك: 88123#")])["found"])
 
-    def test_number_without_keyword_not_code(self):
+    def test_digits_without_hash_not_code(self):
+        self.assertFalse(E.classify_code_send([msg("كود الباب 4512 حياك")])["found"])
         self.assertFalse(E.classify_code_send([msg("السعر 4500 ريال")])["found"])
 
+    def test_external_code_alone_not_counted(self):
+        self.assertFalse(E.classify_code_send([msg("الكود الخارجي 1234#")])["found"])
+        self.assertFalse(E.classify_code_send([msg("كود البوابة الخارجية: 9999#")])["found"])
+
+    def test_external_plus_unit_code_counts(self):
+        r = E.classify_code_send([msg("الكود الخارجي 1234# وكود الشقة 5678#")])
+        self.assertTrue(r["found"])
+
+    def test_ignores_inbound(self):
+        msgs = [msg("وش الكود؟ 4512#", incoming=1), msg("أهلين بك")]
+        self.assertFalse(E.classify_code_send(msgs)["found"])
+
     def test_unknown_sender_still_found(self):
-        r = E.classify_code_send([msg("door code 88123", sender="")])
+        r = E.classify_code_send([msg("door code 88123#", sender="")])
         self.assertTrue(r["found"])
         self.assertEqual(r["sender"], "")
 
     def test_newest_wins(self):
-        msgs = [msg("كود الباب 1111", ts="2026-07-04T09:00:00", sender="محمد"),
-                msg("الكود الجديد 2222", ts="2026-07-05T08:00:00", sender="نورة")]
+        msgs = [msg("كود الباب 1111#", ts="2026-07-04T09:00:00", sender="محمد"),
+                msg("الكود الجديد 2222#", ts="2026-07-05T08:00:00", sender="نورة")]
         r = E.classify_code_send(msgs)
         self.assertEqual(r["sender"], "نورة")
 
