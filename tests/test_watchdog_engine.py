@@ -236,6 +236,22 @@ class TestEmbeds(unittest.TestCase):
         conv = [e for e in embeds if "محادثات" in e["title"]][0]
         self.assertIn("أرشيف قديم: 1", conv["desc"])
 
+    def test_pending_dup_count_rendered(self):
+        s = snap(pending=[{"id": "a", "guest": "Ghada", "unit": "FD1",
+                           "age_min": 90, "n": 7}])
+        embeds = E.render_embeds(E.compute_flags(s, NOW), s, "6:30 م")
+        conv = [e for e in embeds if "محادثات" in e["title"]][0]
+        self.assertIn("7 رسائل", conv["desc"])
+
+    def test_conversation_lines_capped(self):
+        many = [{"id": str(i), "guest": "g%d" % i, "unit": "u", "age_min": 100}
+                for i in range(30)]
+        s = snap(pending=many)
+        embeds = E.render_embeds(E.compute_flags(s, NOW), s, "6:30 م")
+        conv = [e for e in embeds if "محادثات" in e["title"]][0]
+        self.assertLessEqual(len(conv["desc"].splitlines()), 16)
+        self.assertIn("أخرى", conv["desc"])
+
     def test_coverage_and_departure_embeds(self):
         s = self.full_snap()
         embeds = E.render_embeds(E.compute_flags(s, NOW), s, "6:30 م")

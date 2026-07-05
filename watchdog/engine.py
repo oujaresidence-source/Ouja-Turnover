@@ -319,6 +319,8 @@ def render_embeds(flags, snap, ts_label):
                   "🟢 كل شي تمام — %s") % ts_label
     live_esc, stale_esc = split_live_stale(snap.get("escalations"))
     live_pend, stale_pend = split_live_stale(snap.get("pending"))
+    live_esc = sorted(live_esc, key=lambda x: -int(x.get("age_min") or 0))
+    live_pend = sorted(live_pend, key=lambda x: -int(x.get("age_min") or 0))
     t = snap.get("today") or {}
     cs = snap.get("codes_summary") or {}
     head = ["🏠 اليوم: %s وصول · %s مغادرة · %s ساكن"
@@ -381,15 +383,19 @@ def render_embeds(flags, snap, ts_label):
         embeds.append({"title": "🧹 نظافة متأخرة (%d)" % len(stale_clean), "color": "gold",
                        "desc": _cap("\n".join(lines))})
 
-    # 📩 conversations (live only + archive count)
+    # 📩 conversations (live only, deduped upstream, capped + archive count)
     if live_esc or live_pend or stale_esc or stale_pend:
         lines = []
         for e in live_esc:
             lines.append("📣 تصعيد بدون استلام من %s — %s (%s)"
                          % (_age_label(e.get("age_min")), e.get("guest"), e.get("unit")))
         for p in live_pend:
-            lines.append("💬 رد ينتظر الاعتماد من %s — %s (%s)"
-                         % (_age_label(p.get("age_min")), p.get("guest"), p.get("unit")))
+            extra = " · %d رسائل" % p["n"] if int(p.get("n") or 1) > 1 else ""
+            lines.append("💬 رد ينتظر الاعتماد من %s — %s (%s)%s"
+                         % (_age_label(p.get("age_min")), p.get("guest"), p.get("unit"), extra))
+        if len(lines) > 13:
+            hidden = len(lines) - 13
+            lines = lines[:13] + ["… +%d أخرى" % hidden]
         if not lines:
             lines.append("✅ لا شي حي يحتاج تدخل")
         archived = stale_esc + stale_pend

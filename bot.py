@@ -53758,7 +53758,9 @@ def _watchdog_snapshot():
     section("escalations", _sec_escalations)
 
     def _sec_pending():
-        snap["pending"] = []
+        # ONE line per guest+unit (a conversation piles up one queue entry per message —
+        # Ghada×7 in the first live report); keep the oldest age + how many piled up.
+        grouped = {}
         for mid, d in list(_pending_replies.items()):
             item = d.get("item", {})
             age_min = 0
@@ -53768,8 +53770,12 @@ def _watchdog_snapshot():
                     age_min = max(0, int((datetime.now(TZ) - dt0).total_seconds() / 60))
             except Exception:
                 pass
-            snap["pending"].append({"id": str(mid), "guest": item.get("guest", "ضيف"),
-                                    "unit": item.get("unit", ""), "age_min": age_min})
+            key = (item.get("guest", "ضيف"), item.get("unit", ""))
+            g = grouped.setdefault(key, {"id": str(mid), "guest": key[0], "unit": key[1],
+                                         "age_min": age_min, "n": 0})
+            g["n"] += 1
+            g["age_min"] = max(g["age_min"], age_min)
+        snap["pending"] = list(grouped.values())
     section("pending", _sec_pending)
 
     # promises (brain.db ledger; naive `now` — the promise-keeper convention)
@@ -53965,8 +53971,19 @@ async def watchdog_loop():
     if not (_HAS_WATCHDOG and WATCHDOG_ENABLED):
         return
     await bot.wait_until_ready()
+    # BOOT RACE (proved live 2026-07-05): on_ready fires before start_web_server wires the
+    # Brain/schedule/watchdog hosts → every brain.db-backed section RuntimeErrors on the
+    # first cycle after a deploy. watchdog.wire() runs AFTER brain/schedule wiring, so its
+    # _wired flag is the all-clear signal — wait for it (up to 3 min) before collecting.
+    for _ in range(90):
+        if getattr(_watchdog.HOST, "_wired", False):
+            break
+        await asyncio.sleep(2)
+    else:
+        print("[watchdog] web wiring never became ready — skipping this cycle")
+        return
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v3"   # bump suffix on layout changes → next deploy posts immediately
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v4"   # bump suffix on layout changes → next deploy posts immediately
     if meta.get("mode") != mode_now:
         meta.pop("summary_msg_id", None)      # layout/mode change → NEW message (notifies), not a silent edit
     if (meta.get("mode") == mode_now
