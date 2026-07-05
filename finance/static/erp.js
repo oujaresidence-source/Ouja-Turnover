@@ -36,7 +36,7 @@
       dir: 'rtl', app: 'المركز المالي',
       ws_today: 'اليوم', ws_bank: 'البنك', ws_match: 'المطابقة', ws_exp: 'المصاريف',
       ws_custody: 'العهد', ws_owners: 'الملاك', ws_close: 'الإقفال', ws_stmts: 'القوائم',
-      ws_budget: 'الميزانية', ws_setup: 'الإعدادات', ws_guide: 'الدليل',
+      ws_budget: 'الميزانية', ws_setup: 'الإعدادات', ws_guide: 'الدليل', ws_assist: 'المساعد',
       soon: 'قريبًا', slice: 'شريحة',
       health: 'صحة البيانات', health_steps: 'خطوة جاهزة',
       bank_today: 'آخر استيراد بنك: اليوم', bank_days_1: 'آخر استيراد بنك: قبل يوم',
@@ -343,6 +343,16 @@
       bg_weekly_err: 'مجموع الأسابيع لازم يساوي الشهر', bg_over: 'تجاوز', bg_warn: '٩٠٪+',
       bg_del_confirm: 'نشيل ميزانية هالحساب؟'
       ,
+      /* --- assist «المساعد» admin workspace: escalation inbox + KB editor --- */
+      as_inbox: 'صندوق التصعيد', as_kb: 'إدارة المعرفة', as_from: 'من',
+      as_answer_ph: 'اكتب الجواب…', as_save_kb: 'احفظ كسؤال شائع', as_tags_ph: 'وسوم (اختياري)…',
+      as_send: 'أرسل الجواب', as_sent: 'انرسل الجواب ✓', as_empty_inbox: 'ما فيه تصعيدات مفتوحة ✓',
+      as_search: 'بحث بالسؤال أو الوسوم…', as_add: 'أضف سؤال', as_q: 'السؤال', as_a: 'الجواب',
+      as_links: 'الروابط', as_add_link: 'أضف رابط', as_link_label: 'اسم الرابط',
+      as_enabled: 'مفعّل', as_disabled: 'موقوف', as_edit: 'تعديل', as_del: 'حذف',
+      as_del_confirm: 'حذف هذا السؤال نهائيًا؟', as_saved: 'انحفظ ✓',
+      as_src_seed: 'أساسي', as_src_learned: 'متعلَّم', as_src_manual: 'يدوي',
+      as_admin_only: 'هذه الشاشة للأدمن فقط', as_needed: 'إلزامي',
       /* --- finchat مساعد المركز المالي --- */
       fc_title: 'مساعد المركز المالي', fc_hint: 'اسأل عن أي شي بالمركز — أجاوبك وأعطيك الرابط',
       fc_send: 'إرسال', fc_ph: 'اكتب سؤالك…', fc_esc: 'صعّد لفيصل 🆘',
@@ -354,7 +364,7 @@
       dir: 'ltr', app: 'Finance Center',
       ws_today: 'Today', ws_bank: 'Bank', ws_match: 'Matching', ws_exp: 'Expenses',
       ws_custody: 'Custody', ws_owners: 'Owners', ws_close: 'Close', ws_stmts: 'Statements',
-      ws_budget: 'Budget', ws_setup: 'Setup', ws_guide: 'Guide',
+      ws_budget: 'Budget', ws_setup: 'Setup', ws_guide: 'Guide', ws_assist: 'Assistant',
       soon: 'soon', slice: 'slice',
       health: 'Data health', health_steps: 'steps ready',
       bank_today: 'Last bank import: today', bank_days_1: 'Last bank import: 1 day ago',
@@ -653,6 +663,17 @@
       fc_esc_done: 'Escalated — the answer will land here', fc_thinking: 'Thinking…',
       fc_cap: 'Daily limit reached', fc_err: 'Connection failed — try again',
       fc_owner: 'Faisal', fc_bot: 'Assistant', fc_empty: 'Ask me about expenses, statements, bank, approvals…'
+      ,
+      /* --- assist "Assistant" admin workspace: escalation inbox + KB editor --- */
+      as_inbox: 'Escalation inbox', as_kb: 'Knowledge base', as_from: 'From',
+      as_answer_ph: 'Type the answer…', as_save_kb: 'Save as FAQ', as_tags_ph: 'Tags (optional)…',
+      as_send: 'Send answer', as_sent: 'Answer sent ✓', as_empty_inbox: 'No open escalations ✓',
+      as_search: 'Search question or tags…', as_add: 'Add entry', as_q: 'Question', as_a: 'Answer',
+      as_links: 'Links', as_add_link: 'Add link', as_link_label: 'Link label',
+      as_enabled: 'Enabled', as_disabled: 'Disabled', as_edit: 'Edit', as_del: 'Delete',
+      as_del_confirm: 'Delete this entry permanently?', as_saved: 'Saved ✓',
+      as_src_seed: 'Seed', as_src_learned: 'Learned', as_src_manual: 'Manual',
+      as_admin_only: 'Admins only', as_needed: 'Required'
     }
   };
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
@@ -703,7 +724,8 @@
     { id: 'stmts', built: true },
     { id: 'budget', built: true },
     { id: 'setup', built: true },
-    { id: 'guide', built: true }
+    { id: 'guide', built: true },
+    { id: 'assist', built: true }
   ];
   // Calm default: with «وضع متقدم» OFF the nav shows only the daily-core lane below.
   // The rest stay reachable via deep-link/hash and appear when Advanced is ON.
@@ -2368,6 +2390,10 @@
       if (xpf) xpf.disabled = el.checked;
       if (xpt) xpt.disabled = el.checked;
     }
+    else if (el.matches && el.matches('.as-savekb')) {
+      var tagsIn = el.closest('.wq-main').querySelector('.as-tags');
+      if (tagsIn) tagsIn.hidden = !el.checked;
+    }
   });
 
   document.addEventListener('input', (function () {
@@ -2381,6 +2407,9 @@
         clearTimeout(tmr);
         var v2 = ev.target.value;
         tmr = setTimeout(function () { expP.q = v2.trim(); expP.o = 0; pushExpHash(); }, 350);
+      } else if (ev.target.id === 'asKbSearch') {
+        asP.q = ev.target.value;
+        asKbListRefresh();
       }
     };
   })());
@@ -4679,6 +4708,7 @@
   var VIEWS = {
     today: { show: function () { loadToday(); } },
     guide: { show: function () { renderGuide(); } },
+    assist: { show: function () { loadAssist(); } },
     setup: { show: function () { loadSetup(); } },
     match: {
       show: function (params) {
@@ -4919,6 +4949,294 @@
     var g = document.getElementById('ovGuide'); if (g) g.onclick = close;
     ov.onclick = function (e) { if (e.target === ov) close(); };
   }
+
+  /* ================= المساعد Assist — escalation inbox + KB editor (admin) ================= */
+  var ASSIST_LINK_ROUTES = ['#today', '#bank', '#match', '#exp', '#custody', '#owners', '#close', '#stmts', '#budget', '#setup', '#guide', '#assist'];
+  var asP = { tab: '', q: '', editId: null };
+
+  function asAdminOnly() {
+    $('#view').innerHTML = '<div class="card state-card"><div class="state-ico">🔒</div>' +
+      '<div class="state-h">' + esc(t('as_admin_only')) + '</div></div>';
+  }
+
+  function asSrcTag(src) {
+    var cls = src === 'seed' ? 'soft' : (src === 'learned' ? 'srcsheet' : 'srcman');
+    var lbl = src === 'seed' ? t('as_src_seed') : (src === 'learned' ? t('as_src_learned') : t('as_src_manual'));
+    return '<span class="tag ' + cls + '">' + esc(lbl) + '</span>';
+  }
+
+  function asTabsHtml() {
+    var d = store.D.assist || {};
+    var openN = (d.inbox_open_count != null) ? d.inbox_open_count : ((d.inbox || []).length);
+    var kbN = (d.kb_count != null) ? d.kb_count : ((d.kb || []).length);
+    return '<div class="card bank-bar"><div class="bb-chips">' +
+      '<button class="fchip' + (asP.tab === 'inbox' ? ' on' : '') + '" data-act="as-tab" data-tab="inbox">' +
+        esc(t('as_inbox')) + ' <b>' + openN + '</b></button>' +
+      '<button class="fchip' + (asP.tab === 'kb' ? ' on' : '') + '" data-act="as-tab" data-tab="kb">' +
+        esc(t('as_kb')) + ' <b>' + kbN + '</b></button>' +
+    '</div></div>';
+  }
+
+  /* ----- inbox ----- */
+  function asInboxRowHtml(r) {
+    return '<div class="wq-row" data-id="' + esc(r.id) + '">' +
+      '<div class="wq-main">' +
+      '<div class="wq-top"><b>' + esc(r.question) + '</b></div>' +
+      '<div class="wq-sub">' + esc(t('as_from')) + ' <code>' + esc(r.username) + '</code>' +
+        (r.created_at ? ' · ' + esc(r.created_at) : '') + '</div>' +
+      '<textarea class="in as-ans" rows="3" placeholder="' + esc(t('as_answer_ph')) + '"></textarea>' +
+      '<label class="cp-check"><input type="checkbox" class="as-savekb" checked> ' + esc(t('as_save_kb')) + '</label>' +
+      '<input class="in as-tags" type="text" placeholder="' + esc(t('as_tags_ph')) + '">' +
+      '</div>' +
+      '<div class="wq-actions">' +
+      '<button class="btn primary xs" data-act="as-send" data-id="' + esc(r.id) + '">' + esc(t('as_send')) + '</button>' +
+      '</div></div>';
+  }
+
+  function renderAssistInbox() {
+    var d = store.D.assist || {};
+    var rows = (d.inbox || []).map(asInboxRowHtml).join('');
+    $('#view').innerHTML = asTabsHtml() +
+      '<section class="card grp"><div class="grp-list" id="asInboxList">' +
+      (rows || '<div class="state-card"><div class="state-h">' + esc(t('as_empty_inbox')) + '</div></div>') +
+      '</div></section>';
+    restoreScroll('assist');
+  }
+
+  function asInboxRemove(id) {
+    var row = $('#asInboxList [data-id="' + id + '"]');
+    if (row) row.remove();
+    var d = store.D.assist || {};
+    d.inbox = (d.inbox || []).filter(function (r) { return String(r.id) !== String(id); });
+    d.inbox_open_count = d.inbox.length;
+    var list = $('#asInboxList');
+    if (list && !d.inbox.length) list.innerHTML = '<div class="state-card"><div class="state-h">' + esc(t('as_empty_inbox')) + '</div></div>';
+  }
+
+  /* ----- KB ----- */
+  function asKbFilterHit(r, qq) {
+    if (!qq) return true;
+    var hay = ((r.q_ar || '') + ' ' + (r.tags || '')).toLowerCase();
+    return hay.indexOf(qq) >= 0;
+  }
+
+  function asKbRowHtml(r) {
+    var q = esc(r.q_ar || '');
+    return '<div class="wq-row" data-id="' + esc(r.id) + '">' +
+      '<div class="wq-main"><div class="wq-top"><b>' + q + '</b>' +
+        asSrcTag(r.source) +
+        '<span class="tag' + (r.enabled ? '' : ' bad') + '">' + esc(r.enabled ? t('as_enabled') : t('as_disabled')) + '</span>' +
+      '</div>' +
+      (r.tags ? '<div class="wq-sub">' + esc(r.tags) + '</div>' : '') +
+      '</div>' +
+      '<div class="wq-actions">' +
+      '<button class="btn ghost xs" data-act="as-kb-edit" data-id="' + esc(r.id) + '">' + esc(t('as_edit')) + '</button>' +
+      '<button class="btn ghost xs" data-act="as-kb-toggle" data-id="' + esc(r.id) + '" data-en="' + (r.enabled ? '0' : '1') + '">' +
+        esc(r.enabled ? t('as_disabled') : t('as_enabled')) + '</button>' +
+      '<button class="btn danger-ghost xs" data-act="as-kb-del" data-id="' + esc(r.id) + '">' + esc(t('as_del')) + '</button>' +
+      '</div></div>';
+  }
+
+  function asKbListHtml() {
+    var d = store.D.assist || {};
+    var qq = (asP.q || '').trim().toLowerCase();
+    var all = d.kb || [];
+    var items = all.filter(function (r) { return asKbFilterHit(r, qq); });
+    if (items.length) return items.map(asKbRowHtml).join('');
+    if (!all.length) return '<div class="state-card"><div class="state-h">' + esc(t('as_add')) + '</div></div>';
+    return '';   // has entries, just none match the search — the search box already explains why
+  }
+
+  function asKbListRefresh() {
+    var list = $('#asKbList');
+    if (list) list.innerHTML = asKbListHtml();
+  }
+
+  function renderAssistKb() {
+    $('#view').innerHTML = asTabsHtml() +
+      '<div class="card bank-bar"><div class="bb-row">' +
+        '<input id="asKbSearch" class="in search" type="search" placeholder="' + esc(t('as_search')) + '" value="' + esc(asP.q) + '">' +
+        '<button class="btn primary sm" data-act="as-kb-add" style="margin-inline-start:auto">' + esc(t('as_add')) + '</button>' +
+      '</div></div>' +
+      '<section class="card grp"><div class="grp-list" id="asKbList">' + asKbListHtml() + '</div></section>';
+    restoreScroll('assist');
+  }
+
+  function asKbLinkRowHtml(l, idx) {
+    var opts = ASSIST_LINK_ROUTES.map(function (rt) {
+      return '<option value="' + rt + '"' + (l.route === rt ? ' selected' : '') + '>' + rt + '</option>';
+    }).join('');
+    return '<div class="bb-row as-link-row" data-idx="' + idx + '">' +
+      '<input class="in as-link-label" type="text" placeholder="' + esc(t('as_link_label')) + '" value="' + esc(l.label_ar || '') + '" style="max-width:160px">' +
+      '<select class="in as-link-route">' + opts + '</select>' +
+      '<button class="btn danger-ghost xs" data-act="as-link-del" data-idx="' + idx + '">✕</button>' +
+      '</div>';
+  }
+
+  function asKbFormHtml(r) {
+    var links = (r && r.links) || [];
+    var linksHtml = links.map(asKbLinkRowHtml).join('');
+    return '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(r ? t('as_edit') : t('as_add')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="as-modal-close">✕</button></div>' +
+      '<div class="drawer-body">' +
+      '<label class="cp-f"><span>' + esc(t('as_q')) + ' *</span>' +
+        '<input class="in" id="asFormQ" type="text" value="' + esc((r && r.q_ar) || '') + '"></label>' +
+      '<label class="cp-f" style="margin-top:8px"><span>' + esc(t('as_a')) + ' *</span>' +
+        '<textarea class="in" id="asFormA" rows="4">' + esc((r && r.answer_ar) || '') + '</textarea></label>' +
+      '<label class="cp-f" style="margin-top:8px"><span>' + esc(t('as_tags_ph')) + '</span>' +
+        '<input class="in" id="asFormTags" type="text" value="' + esc((r && r.tags) || '') + '"></label>' +
+      '<div class="cp-f" style="margin-top:8px"><span>' + esc(t('as_links')) + '</span>' +
+        '<div id="asLinkList">' + linksHtml + '</div>' +
+        '<button class="btn ghost xs" data-act="as-link-add" style="margin-top:6px">' + esc(t('as_add_link')) + '</button>' +
+      '</div>' +
+      '<div class="cp-btns">' +
+        '<button class="btn primary sm" data-act="as-kb-save" data-id="' + esc((r && r.id) || '') + '">' + esc(t('save')) + '</button>' +
+        '<button class="btn ghost sm" data-act="as-modal-close">' + esc(t('cancel')) + '</button>' +
+      '</div></div></div>';
+  }
+
+  function asOpenKbForm(r) {
+    var m = $('#xModal');
+    if (!m) return;
+    asP.editId = r ? r.id : null;
+    m.hidden = false;
+    m.innerHTML = asKbFormHtml(r);
+    var q = $('#asFormQ');
+    if (q) q.focus();
+  }
+
+  function asCloseKbForm() {
+    var m = $('#xModal');
+    if (m) { m.hidden = true; m.innerHTML = ''; }
+    asP.editId = null;
+  }
+
+  function asCollectLinks() {
+    return $$('#asLinkList .as-link-row').map(function (row) {
+      return {
+        label_ar: (row.querySelector('.as-link-label').value || '').trim(),
+        route: row.querySelector('.as-link-route').value
+      };
+    }).filter(function (l) { return l.label_ar; });
+  }
+
+  function asPatchKbRow(item) {
+    var d = store.D.assist || {};
+    d.kb = d.kb || [];
+    var idx = -1;
+    for (var i = 0; i < d.kb.length; i++) if (String(d.kb[i].id) === String(item.id)) { idx = i; break; }
+    if (idx >= 0) d.kb[idx] = item; else d.kb.push(item);
+    d.kb_count = d.kb.length;
+  }
+
+  function loadAssist() {
+    $('#view').innerHTML = skeleton(5);
+    Promise.all([api('/erp/api/finchat/inbox'), api('/erp/api/finchat/kb')])
+      .then(function (r) {
+        var inboxR = r[0], kbR = r[1];
+        store.D.assist = {
+          inbox: inboxR.items || [], inbox_open_count: inboxR.open_count,
+          kb: kbR.items || [], kb_count: kbR.count
+        };
+        if (!asP.tab) asP.tab = inboxR.open_count > 0 ? 'inbox' : 'kb';
+        if (asP.tab === 'kb') renderAssistKb(); else renderAssistInbox();
+      })
+      .catch(function (e) {
+        if (e && e.status === 403) { asAdminOnly(); return; }
+        $('#view').innerHTML = errorCard('retry_assist', srvMsg(e));
+      });
+  }
+
+  document.addEventListener('click', function (ev) {
+    var el = ev.target.closest('[data-act]');
+    if (!el) return;
+    var act = el.getAttribute('data-act');
+    var id = el.getAttribute('data-id');
+
+    if (act === 'retry_assist') loadAssist();
+    else if (act === 'as-tab') { asP.tab = el.getAttribute('data-tab'); if (asP.tab === 'kb') renderAssistKb(); else renderAssistInbox(); }
+    else if (act === 'as-send') {
+      var row = el.closest('.wq-row');
+      var ans = (row.querySelector('.as-ans').value || '').trim();
+      if (!ans) { row.querySelector('.as-ans').classList.add('need'); row.querySelector('.as-ans').focus(); return; }
+      var saveKb = row.querySelector('.as-savekb').checked;
+      var tags = (row.querySelector('.as-tags').value || '').trim();
+      el.disabled = true;
+      api('/erp/api/finchat/inbox/answer', { method: 'POST', body: { esc_id: Number(id), answer: ans, save_kb: saveKb, kb_tags: tags } })
+        .then(function () {
+          asInboxRemove(id);
+          toast(t('as_sent'));
+        })
+        .catch(function (e) {
+          el.disabled = false;
+          if (e && e.status === 409) { toast(srvMsg(e) || t('act_failed'), 'warn'); loadAssist(); }
+          else toast(srvMsg(e) || t('act_failed'), 'err');
+        });
+    }
+    else if (act === 'as-kb-add') asOpenKbForm(null);
+    else if (act === 'as-kb-edit') {
+      var d = store.D.assist || {};
+      var item = (d.kb || []).filter(function (r) { return String(r.id) === String(id); })[0];
+      asOpenKbForm(item || null);
+    }
+    else if (act === 'as-modal-close') asCloseKbForm();
+    else if (act === 'as-link-add') {
+      var list = $('#asLinkList');
+      if (list) list.insertAdjacentHTML('beforeend', asKbLinkRowHtml({ label_ar: '', route: ASSIST_LINK_ROUTES[0] }, list.children.length));
+    }
+    else if (act === 'as-link-del') {
+      var lrow = el.closest('.as-link-row');
+      if (lrow) lrow.remove();
+    }
+    else if (act === 'as-kb-save') {
+      var qEl = $('#asFormQ'), aEl = $('#asFormA');
+      var qv = (qEl.value || '').trim(), av = (aEl.value || '').trim();
+      var ok = true;
+      if (!qv) { qEl.classList.add('need'); ok = false; }
+      if (!av) { aEl.classList.add('need'); ok = false; }
+      if (!ok) { toast(t('as_needed'), 'err'); return; }
+      var body = {
+        q_ar: qv, answer_ar: av,
+        tags: ($('#asFormTags').value || '').trim(),
+        links: asCollectLinks()
+      };
+      if (asP.editId) body.id = asP.editId;
+      var existing = asP.editId && (store.D.assist.kb || []).filter(function (x) { return String(x.id) === String(asP.editId); })[0];
+      el.disabled = true;
+      api('/erp/api/finchat/kb/save', { method: 'POST', body: body }).then(function (r) {
+        asPatchKbRow({
+          id: r.id, q_ar: qv, answer_ar: av, tags: body.tags, links: body.links,
+          enabled: existing ? existing.enabled : 1,
+          source: existing ? existing.source : 'manual'
+        });
+        asCloseKbForm();
+        toast(t('as_saved'));
+        renderAssistKb();
+      }).catch(function (e) {
+        el.disabled = false;
+        toast(srvMsg(e) || t('act_failed'), 'err');
+      });
+    }
+    else if (act === 'as-kb-toggle') {
+      var enTo = el.getAttribute('data-en') === '1';
+      el.disabled = true;
+      api('/erp/api/finchat/kb/toggle', { method: 'POST', body: { id: Number(id), enabled: enTo } }).then(function () {
+        var d = store.D.assist || {};
+        (d.kb || []).forEach(function (r) { if (String(r.id) === String(id)) r.enabled = enTo ? 1 : 0; });
+        renderAssistKb();
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'as-kb-del') {
+      if (!confirm(t('as_del_confirm'))) return;
+      el.disabled = true;
+      api('/erp/api/finchat/kb/delete', { method: 'POST', body: { id: Number(id) } }).then(function () {
+        var d = store.D.assist || {};
+        d.kb = (d.kb || []).filter(function (r) { return String(r.id) !== String(id); });
+        d.kb_count = d.kb.length;
+        renderAssistKb();
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+  });
 
   /* ================= مساعد المركز المالي — finchat ================= */
   var FC = { open: false, busy: false, lastQ: '', loaded: false };
