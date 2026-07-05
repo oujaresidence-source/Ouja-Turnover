@@ -53966,7 +53966,9 @@ async def watchdog_loop():
         return
     await bot.wait_until_ready()
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v2"   # bump suffix on layout changes → next deploy posts immediately
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v3"   # bump suffix on layout changes → next deploy posts immediately
+    if meta.get("mode") != mode_now:
+        meta.pop("summary_msg_id", None)      # layout/mode change → NEW message (notifies), not a silent edit
     if (meta.get("mode") == mode_now
             and time.time() - (meta.get("last_run_ts") or 0) < (WATCHDOG_INTERVAL_MIN * 60) - 90):
         return                                # deploy-restart guard (the @tasks.loop trap)
