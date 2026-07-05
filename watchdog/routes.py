@@ -45,6 +45,20 @@ def _safe(fn):
     return _w
 
 
+def _safe_public(fn):
+    """PUBLIC read wrapper — NO auth (same pattern as the /team-calendar share link, owner's
+    explicit call 2026-07-05: anyone with the URL reads the report). WRITES stay double-gated."""
+    async def _w(request):
+        try:
+            return await fn(request)
+        except Exception:
+            traceback.print_exc()
+            return HOST.json_response(
+                {"ok": False, "error": "صار خطأ مؤقت — حدّث الصفحة وجرّب مرة ثانية"}, 200)
+    _w.__name__ = getattr(fn, "__name__", "w")
+    return _w
+
+
 async def _body(request):
     try:
         d = await request.json()
@@ -443,16 +457,12 @@ api('/api/watchdog/code-mode').then(function(r){
 
 async def handle_page(request):
     web = HOST.require("web")
-    if not HOST.dash_auth(request):
-        return web.Response(status=403, content_type="text/html", charset="utf-8",
-                            text="<!doctype html><meta charset='utf-8'>"
-                                 "<body style='font-family:sans-serif;text-align:center;padding:60px'>"
-                                 "<h3>غير مصرّح — افتح الرابط من لوحة التحكم</h3></body>")
     return web.Response(content_type="text/html", charset="utf-8", text=WATCHDOG_PAGE_HTML)
 
 
 def register(app):
-    app.router.add_get("/api/watchdog/status", _safe(api_status))
-    app.router.add_get("/api/watchdog/code-mode", _safe(api_code_mode_get))
+    # READ = PUBLIC (owner's call — share-link like /team-calendar); WRITE = login + role.
+    app.router.add_get("/api/watchdog/status", _safe_public(api_status))
+    app.router.add_get("/api/watchdog/code-mode", _safe_public(api_code_mode_get))
     app.router.add_post("/api/watchdog/code-mode", _safe(api_code_mode_set))
     app.router.add_get("/watchdog", handle_page)
