@@ -93,6 +93,15 @@ except Exception as _guide_err:        # pragma: no cover
     _guide = None
     _HAS_GUIDE = False
 
+# Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
+try:
+    import watchdog as _watchdog
+    _HAS_WATCHDOG = True
+except Exception as _watchdog_err:     # pragma: no cover
+    print("[watchdog] import failed (watchdog disabled, bot unaffected):", _watchdog_err)
+    _watchdog = None
+    _HAS_WATCHDOG = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -4744,6 +4753,16 @@ GUIDE_ENABLED          = os.environ.get("GUIDE_ENABLED", "1") in ("1", "true", "
 SCHEDULE_NOTIFY_DRYRUN = os.environ.get("SCHEDULE_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
 SCHEDULE_DIGEST_HOUR   = int(os.environ.get("SCHEDULE_DIGEST_HOUR", "8"))       # 08:00 Riyadh
 SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")  # ops summary channel
+
+# ============= Ops Watchdog «الرقيب التشغيلي» — 30-min ops health cycle =============
+# Read-only monitor: posts a phone-first summary to WATCHDOG_CHANNEL every cycle and pings
+# instantly (once per flag) on criticals. DRY-RUN by default — flip WATCHDOG_DRYRUN=0 to post.
+WATCHDOG_ENABLED          = os.environ.get("WATCHDOG_ENABLED", "1") in ("1", "true", "True", "yes")
+WATCHDOG_DRYRUN           = os.environ.get("WATCHDOG_DRYRUN", "1") in ("1", "true", "True", "yes")
+WATCHDOG_INTERVAL_MIN     = int(os.environ.get("WATCHDOG_INTERVAL_MIN", "30"))
+WATCHDOG_CHANNEL          = os.environ.get("WATCHDOG_CHANNEL", "غرفة-المراقبة")
+WATCHDOG_REPING_HOURS     = float(os.environ.get("WATCHDOG_REPING_HOURS", "2"))
+WATCHDOG_CODE_LOOKAHEAD_H = float(os.environ.get("WATCHDOG_CODE_LOOKAHEAD_H", "12"))
 
 def _schedule_notify(payload):
     """HOST.notify hook — schedules the async ops-channel post. Never raises into a handler."""
@@ -47903,6 +47922,20 @@ async def start_web_server():
                 print("[guide] wired + routes registered (/guide, /guide/{slug}, /guide/data.json, /data.json)")
             except Exception as _ge:
                 print("[guide] wiring failed (guide disabled, bot unaffected):", _ge)
+
+        # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
+        if _HAS_WATCHDOG and WATCHDOG_ENABLED:
+            try:
+                _watchdog.wire({
+                    "state_path": _state_path, "load_json": _load_json, "save_json": _save_json,
+                    "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json, "web": web,
+                    "listings": get_listings_map, "resolve_discord": _wm_resolve_id,
+                    "tz": TZ, "now": now_riyadh,
+                })
+                _watchdog.register_routes(app)
+                print("[watchdog] wired + routes registered (/watchdog, /api/watchdog/*)")
+            except Exception as _wde:
+                print("[watchdog] wiring failed (watchdog disabled, bot unaffected):", _wde)
 
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
