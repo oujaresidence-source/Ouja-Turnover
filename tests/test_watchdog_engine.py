@@ -275,6 +275,33 @@ class TestEmbeds(unittest.TestCase):
         self.assertIn("database is locked", joined)
 
 
+class TestCompact(unittest.TestCase):
+    def test_compact_short_with_top_criticals_and_link(self):
+        s = snap(arrivals=[arrival()],
+                 today={"arr_n": 15, "dep_n": 24, "occupied": 28, "tight_n": 11},
+                 codes_summary={"manual_total": 8, "sent": 3})
+        flags = E.compute_flags(s, NOW)
+        c = E.render_compact(flags, s, "6:56 م", "https://oujares.com/watchdog")
+        self.assertEqual(c["color"], "red")
+        lines = c["desc"].splitlines()
+        self.assertLessEqual(len(lines), 10)
+        self.assertIn("15", c["desc"])
+        self.assertIn("كود ما انرسل", c["desc"])
+        self.assertIn("oujares.com/watchdog", c["desc"])
+
+    def test_compact_green(self):
+        s = snap(today={"arr_n": 2, "dep_n": 1, "occupied": 30, "tight_n": 0})
+        c = E.render_compact([], s, "9:00 ص", "")
+        self.assertEqual(c["color"], "green")
+        self.assertIn("كل شي تمام", c["title"])
+
+    def test_compact_caps_criticals_at_three(self):
+        flags = [{"key": "k%d" % i, "severity": "critical",
+                  "text": "🔴 مشكلة %d" % i, "mention_name": ""} for i in range(9)]
+        c = E.render_compact(flags, snap(), "6:00 م", "")
+        self.assertIn("+6", c["desc"])
+
+
 class TestScoreboard(unittest.TestCase):
     def test_board_math_and_exclusions(self):
         stats = [{"employee": "نورة", "replies": 30, "resp_min_sum": 300.0,

@@ -452,6 +452,42 @@ def render_embeds(flags, snap, ts_label):
     return embeds[:10]
 
 
+def render_compact(flags, snap, ts_label, link_url=""):
+    """Discord is the ALARM, the page is the report: one small embed — status, three
+    numbers, top-3 criticals, link. Owner feedback 2026-07-05: long reports are
+    unreadable on the phone inside Discord."""
+    worst = flags[0]["severity"] if flags else ""
+    color = "red" if worst == "critical" else ("gold" if worst else "green")
+    title = ("🔴 يحتاج تدخل — %s" if color == "red" else
+             "🟡 فيه ملاحظات — %s" if color == "gold" else
+             "🟢 كل شي تمام — %s") % ts_label
+    t = snap.get("today") or {}
+    cs = snap.get("codes_summary") or {}
+    live_esc, _ = split_live_stale(snap.get("escalations"))
+    live_pend, _ = split_live_stale(snap.get("pending"))
+    lines = ["🏠 %s وصول · %s مغادرة · %s ساكن"
+             % (t.get("arr_n", "؟"), t.get("dep_n", "؟"), t.get("occupied", "؟"))]
+    bits = []
+    if cs.get("manual_total"):
+        bits.append("🔑 %d/%d" % (cs.get("sent", 0), cs["manual_total"]))
+    bits.append("📩 %d" % (len(live_esc) + len(live_pend)))
+    bits.append("🤝 %d" % len(snap.get("promises") or []))
+    lines.append(" · ".join(bits))
+    crits = [f for f in flags if f["severity"] == "critical"]
+    if crits:
+        lines.append("")
+        for f in crits[:3]:
+            lines.append(f["text"])
+        if len(crits) > 3:
+            lines.append("… +%d حرجة أخرى" % (len(crits) - 3))
+    if snap.get("errors"):
+        lines.append("⚪ فحوصات تعذّرت: %d — التفاصيل في الصفحة" % len(snap["errors"]))
+    if link_url:
+        lines.append("")
+        lines.append("📱 [التقرير الكامل — اضغط هنا](%s)" % link_url)
+    return {"title": title, "color": color, "desc": _cap("\n".join(lines), 2000)}
+
+
 def render_critical(flag, mention_text=""):
     lines = [flag["text"]]
     if mention_text:

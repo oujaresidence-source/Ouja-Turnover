@@ -53744,7 +53744,8 @@ def _watchdog_snapshot():
 
     # escalations + pending replies (in-memory, same math as compute_urgent_now)
     def _sec_escalations():
-        snap["escalations"] = []
+        # same dedup as pending: ONE line per guest+unit (Abdullah×2 in the live report)
+        grouped = {}
         now_ts = time.time()
         for mid, e in list(_escalations.items()):
             if e.get("claimed_by"):
@@ -53753,8 +53754,12 @@ def _watchdog_snapshot():
                     _watchdog.db.log_event(today_iso, "esc_claim", str(e.get("claimed_by")))
                 continue
             age_min = max(0, int((now_ts - (e.get("last_ping") or now_ts)) / 60))
-            snap["escalations"].append({"id": str(mid), "guest": e.get("guest", "ضيف"),
-                                        "unit": e.get("unit", ""), "age_min": age_min})
+            key = (e.get("guest", "ضيف"), e.get("unit", ""))
+            g = grouped.setdefault(key, {"id": str(mid), "guest": key[0], "unit": key[1],
+                                         "age_min": age_min, "n": 0})
+            g["n"] += 1
+            g["age_min"] = max(g["age_min"], age_min)
+        snap["escalations"] = list(grouped.values())
     section("escalations", _sec_escalations)
 
     def _sec_pending():
@@ -53868,10 +53873,11 @@ def _wd_discord_embeds(embed_dicts):
     return out
 
 
-async def _watchdog_post(embed_dicts, flags, meta):
-    """Summary = ONE message (categorized embeds) edited in place each cycle;
-    criticals = separate pinged messages, once per flag key (re-ping after
-    WATCHDOG_REPING_HOURS)."""
+async def _watchdog_post(compact, flags, meta):
+    """Discord = the ALARM (owner feedback: long reports unreadable on the phone).
+    Summary = ONE small embed edited in place; criticals = ONE batched ping message
+    per cycle, each flag pinged once (re-ping after WATCHDOG_REPING_HOURS). The full
+    report lives on the /watchdog page."""
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
@@ -53879,7 +53885,7 @@ async def _watchdog_post(embed_dicts, flags, meta):
     ch = await ensure_channel(guild, WATCHDOG_CHANNEL, cat)
     if ch is None:
         return
-    es = _wd_discord_embeds(embed_dicts)
+    es = _wd_discord_embeds([compact])
     # rolling summary message
     msg_id = meta.get("summary_msg_id")
     posted = False
@@ -53897,9 +53903,10 @@ async def _watchdog_post(embed_dicts, flags, meta):
         except Exception as e:
             print("[watchdog] summary post error:", e)
             return
-    # critical pings (dedup via brain.db flag state)
+    # critical pings — batched into ONE message (dedup via brain.db flag state)
     now_iso = now_riyadh().isoformat(timespec="seconds")
     live_keys = set()
+    ping_lines, ping_mentions = [], []
     for f in flags:
         live_keys.add(f["key"])
         if f["severity"] != "critical":
@@ -53910,16 +53917,22 @@ async def _watchdog_post(embed_dicts, flags, meta):
                                           WATCHDOG_REPING_HOURS)
         if not due:
             continue
-        mentions = []
+        ping_lines.append(f["text"])
         if f.get("mention_name"):
             men = _wm_mention(_wm_resolve_id(f["mention_name"]))
-            if men:
-                mentions.append(men)
+            if men and men not in ping_mentions:
+                ping_mentions.append(men)
+    if ping_lines:
         boss = _wm_mention(WATCHMAN_MANAGER_ROLE)
-        if boss:
-            mentions.append(boss)
+        if boss and boss not in ping_mentions:
+            ping_mentions.append(boss)
+        body = "🚨 **يحتاج تدخل الآن:**\n" + "\n".join(ping_lines[:10])
+        if len(ping_lines) > 10:
+            body += "\n… +%d أخرى" % (len(ping_lines) - 10)
+        if ping_mentions:
+            body += "\n" + " ".join(ping_mentions)
         try:
-            await ch.send(_watchdog.engine.render_critical(f, " ".join(mentions)))
+            await ch.send(body[:1900])
         except Exception as e:
             print("[watchdog] critical ping error:", e)
     # clear flags that stopped appearing (so a future recurrence pings again)
@@ -53983,7 +53996,7 @@ async def watchdog_loop():
         print("[watchdog] web wiring never became ready — skipping this cycle")
         return
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v4"   # bump suffix on layout changes → next deploy posts immediately
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v5"   # bump suffix on layout changes → next deploy posts immediately
     if meta.get("mode") != mode_now:
         meta.pop("summary_msg_id", None)      # layout/mode change → NEW message (notifies), not a silent edit
     if (meta.get("mode") == mode_now
@@ -53993,9 +54006,14 @@ async def watchdog_loop():
     try:
         snap = await asyncio.to_thread(_watchdog_snapshot)
         _watchdog.HOST.last_snapshot = snap
+        try:
+            _save_json("watchdog_snapshot.json", snap)   # the /watchdog page reads this
+        except Exception as e:
+            print("[watchdog] snapshot persist error:", e)
         flags = _watchdog.engine.compute_flags(snap, now_riyadh())
         ts_label = now_riyadh().strftime("%I:%M %p").lstrip("0").replace("AM", "ص").replace("PM", "م")
-        embed_dicts = _watchdog.engine.render_embeds(flags, snap, ts_label)
+        page_url = GUIDE_PUBLIC_BASE.rstrip("/") + "/watchdog"
+        compact = _watchdog.engine.render_compact(flags, snap, ts_label, page_url)
         meta["last_run_ts"] = time.time()
         if WATCHDOG_DRYRUN:
             print("[watchdog] (dryrun) summary:\n"
@@ -54004,7 +54022,7 @@ async def watchdog_loop():
                 if f["severity"] == "critical":
                     print("[watchdog] (dryrun) critical:", f["key"], "·", f["text"])
         else:
-            await _watchdog_post(embed_dicts, flags, meta)
+            await _watchdog_post(compact, flags, meta)
         await _watchdog_scoreboard(meta)
         _save_json("watchdog_meta.json", meta)
     except Exception as e:
