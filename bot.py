@@ -102,6 +102,14 @@ except Exception as _watchdog_err:     # pragma: no cover
     _watchdog = None
     _HAS_WATCHDOG = False
 
+# Finance Chat «مساعد المركز المالي» — KB-grounded chatbot for the ERP; additive, reuses brain.db.
+try:
+    import finchat as _finchat
+    _HAS_FINCHAT = True
+except Exception as _fc_imp_err:        # pragma: no cover
+    print("[finchat] import failed (finchat disabled, bot unaffected):", _fc_imp_err)
+    _HAS_FINCHAT = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -4765,6 +4773,11 @@ WATCHDOG_CHANNEL          = os.environ.get("WATCHDOG_CHANNEL", "غرفة-الم�
 WATCHDOG_REPING_HOURS     = float(os.environ.get("WATCHDOG_REPING_HOURS", "2"))
 WATCHDOG_CODE_LOOKAHEAD_H = float(os.environ.get("WATCHDOG_CODE_LOOKAHEAD_H", "12"))
 
+# ============= Finance Chat «مساعد المركز المالي» — KB-grounded ERP chatbot =============
+FINCHAT_ENABLED       = os.environ.get("FINCHAT_ENABLED", "1") == "1"
+FINCHAT_ESC_CHANNEL   = os.environ.get("FINCHAT_ESC_CHANNEL", "finance-help")
+FINCHAT_OWNER_MENTION = os.environ.get("FINCHAT_OWNER_MENTION", "")  # Discord user id for the @ping
+
 def _schedule_notify(payload):
     """HOST.notify hook — schedules the async ops-channel post. Never raises into a handler."""
     if not (SCHEDULE_ENABLED and _HAS_SCHEDULE):
@@ -4789,6 +4802,35 @@ async def _schedule_deliver(payload):
             await ch.send("```" + nl + payload["channel"] + nl + "```")
     except Exception as e:
         print("[schedule] ops summary failed:", e)
+
+def _finchat_notify(payload):
+    """finchat escalation ping — schedules the async Discord post. Never raises into a handler."""
+    if not (_HAS_FINCHAT and FINCHAT_ENABLED):
+        return
+    try:
+        asyncio.create_task(_finchat_deliver(payload))
+    except RuntimeError:
+        pass
+
+async def _finchat_deliver(payload):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, FINCHAT_ESC_CHANNEL, cat)
+        if ch is None:
+            return
+        mention = f"<@{FINCHAT_OWNER_MENTION}> " if FINCHAT_OWNER_MENTION else ""
+        emb = discord.Embed(
+            title="🆘 تصعيد من مساعد المركز المالي",
+            description=f"**من:** {payload.get('username')}\n**السؤال:** {payload.get('question')}",
+            color=0xB88935)
+        emb.set_footer(text=f"جاوب من صندوق التصعيد: /erp ← المساعد (#{payload.get('esc_id')})")
+        await ch.send(content=mention or None, embed=emb,
+                      allowed_mentions=discord.AllowedMentions(users=True))
+    except Exception as e:
+        print("[finchat] escalation ping failed:", e)
 
 @tasks.loop(time=dt_time(hour=SCHEDULE_DIGEST_HOUR, minute=0, tzinfo=TZ))
 async def schedule_digest_loop():
@@ -47938,6 +47980,23 @@ async def start_web_server():
                 print("[watchdog] wired + routes registered (/watchdog, /api/watchdog/*)")
             except Exception as _wde:
                 print("[watchdog] wiring failed (watchdog disabled, bot unaffected):", _wde)
+
+        # ---- Finance Chat «مساعد المركز المالي» — additive; reuses brain.db + ERP auth ----
+        if _HAS_FINCHAT and FINCHAT_ENABLED:
+            try:
+                _finchat.wire({
+                    "web": web,
+                    "dash_auth": _dash_auth,
+                    "can_finance": _fb_can_finance,
+                    "is_admin": (lambda req: _req_role(req) == "admin"),
+                    "actor": _req_actor,
+                    "claude": claude_text,
+                    "notify": _finchat_notify,
+                })
+                _finchat.register_routes(app)
+                print("[finchat] wired + routes registered (/erp/api/finchat/*)")
+            except Exception as _fce:
+                print("[finchat] wiring failed (finchat disabled, bot unaffected):", _fce)
 
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
