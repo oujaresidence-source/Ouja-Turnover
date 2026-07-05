@@ -27432,7 +27432,8 @@ def _month_bounds(mkey):
 # DROPPED at boot — the April bug: after the v2.2.3 policy change the owner page
 # kept serving pre-policy numbers from the persisted cache while the editor
 # computed fresh ones. A deploy with a rules bump = a full clean rebuild.
-_MONEY_RULES_VERSION = 3        # 3 = cancelled reservations never auto-count (v2.2.3)
+_MONEY_RULES_VERSION = 4        # 4 = honest cleaning type/amount through aggregation (was always "mixed")
+                                # 3 = cancelled reservations never auto-count (v2.2.3)
 
 def _owner_portal_cache_load():
     out = {}
