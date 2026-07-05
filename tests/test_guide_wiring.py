@@ -112,9 +112,9 @@ class GuideDataContractTest(unittest.TestCase):
         self.assertIn("guide", bot.NAV_DEF["labels"]["en"])
         self.assertIn('id="view_guide"', bot.DASHBOARD_HTML)
         self.assertIn("function loadGuide", bot.DASHBOARD_HTML)
-        # the gap card carries the three actions (add / add-all / already-there)
+        # the gap card carries the four actions (add / add-all / already-there / no-need)
         src = (ROOT / "bot.py").read_text(encoding="utf-8")
-        for cid in ("wm_gap_add", "wm_gap_add_all", "wm_gap_exists"):
+        for cid in ("wm_gap_add", "wm_gap_add_all", "wm_gap_exists", "wm_gap_no_need"):
             self.assertIn(cid, src)
 
 

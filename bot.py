@@ -53020,6 +53020,31 @@ class WatchmanGapView(discord.ui.View):
         except Exception:
             pass
 
+    @discord.ui.button(label="🚫 لا داعي لإضافتها", style=discord.ButtonStyle.secondary,
+                       custom_id="wm_gap_no_need")
+    async def no_need(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Not guide material at all (one-off / trivial) — close the gap for
+        good (resolved gaps never re-ticket) and delete the room."""
+        key = _wm_gap_key_from(interaction)
+        rec = _wm_gaps.get(key) if key else None
+        if rec:
+            rec["resolved"] = True
+            rec["dismissed"] = True
+            _wm_save()
+        try:
+            v = WatchmanGapView()
+            for ch_ in v.children:
+                ch_.disabled = True
+            await interaction.message.edit(view=v)
+        except Exception:
+            pass
+        await interaction.response.send_message("🚫 تمام — ما تنضاف، وأقفلنا الموضوع نهائياً.", ephemeral=True)
+        try:
+            await _wm_close_channel(interaction.channel,
+                                    f"لا داعي لإضافتها — قرار {interaction.user.mention}")
+        except Exception:
+            pass
+
     @discord.ui.button(label="✅ أضفته يدوياً / Added", style=discord.ButtonStyle.success,
                        custom_id="wm_gap_added")
     async def added(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -53073,7 +53098,8 @@ async def _wm_post_gap(rec):
                      f"**ردّينا عليه بـ:** {rec.get('our_answer') or '—'}\n\n"
                      f"{ready}{warn}\n"
                      f"«أضِفها للدليل» يفتح النسخة المنسّقة للمراجعة قبل النشر — "
-                     f"«لكل الشقق» يضيفها لكل الشقق، «موجودة أصلًا» يقفل الفجوة بدون إضافة."),
+                     f"«لكل الشقق» يضيفها لكل الشقق، «موجودة أصلًا» يقفلها لأنها موجودة، "
+                     f"«لا داعي لإضافتها» يقفلها نهائياً ويحذف الروم."),
         color=0xC9A24B)
     emb.set_footer(text=f"wm-gap:{rec['key']}")
     msg = await ch.send(content=(owner or None), embed=emb, view=WatchmanGapView())
