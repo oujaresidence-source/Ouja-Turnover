@@ -17225,6 +17225,7 @@ function refreshView(id){
 }
 function go(id){
   if(id==='erp'||id==='fb'||id==='finance'||id==='expenses'){ var _ws={erp:'today',fb:'today',finance:'owners',expenses:'exp'}[id]; window.location.href='/erp?token='+encodeURIComponent(tok())+'#'+_ws; return; }   // old finance views are cut over to ERP v2
+  if(id==='studio'){ window.location.href='/studio?token='+encodeURIComponent(tok()); return; }   // Ouja Studio is its own page
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
@@ -32063,6 +32064,7 @@ NAV_DEF = {
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
+        {"tk": "cat_content", "ids": ["studio"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly"]},
         {"tk": "cat_guests", "ids": ["guests", "gw", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["users", "learn", "log"]},
@@ -32087,6 +32089,7 @@ NAV_DEF = {
         {"id": "reviews", "ic": "reviews", "tk": "reviews", "badge": "reviews"},
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
+        {"id": "studio", "ic": "design", "tk": "studio"},
         {"id": "weekly", "ic": "weekly", "tk": "weekly"},
         {"id": "design", "ic": "design", "tk": "design"},
         {"id": "pmo", "ic": "pmo", "tk": "pmo"},
@@ -32116,8 +32119,10 @@ NAV_DEF = {
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي",
             "guests": "الضيوف", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط",
+            "studio": "استوديو عوجا",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
+            "cat_content": "المحتوى والتسويق",
             "cat_finance": "المالية والمحاسبة", "cat_guests": "الضيوف", "cat_system": "النظام",
         },
         "en": {
@@ -32131,8 +32136,10 @@ NAV_DEF = {
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center",
             "guests": "Guests", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "log": "Activity",
+            "studio": "Ouja Studio",
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
+            "cat_content": "Content & Marketing",
             "cat_finance": "Finance & Accounting", "cat_guests": "Guests", "cat_system": "System",
         },
     },
