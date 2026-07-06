@@ -13926,6 +13926,25 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .sched-shrow .ros-input{font-family:var(--font-en);direction:ltr;font-size:12.5px}
 .sched-shhint{color:var(--mut);font-size:12px;margin-top:9px;line-height:1.6}
 @media (prefers-reduced-motion:reduce){.sched-card,.sched-tab,.sched-day{transition:none}}
+
+/* ---- Weekly report editor: phone-friendly (dashboard#weekly opened from mobile).
+   The editor markup carries inline styles, so mobile overrides need !important. ---- */
+@media (max-width:640px){
+  #weeklyOverlay{padding:0 !important}
+  #weeklyEditorBody{max-width:none !important;margin:0 !important;padding:14px 12px calc(14px + env(safe-area-inset-bottom)) !important;border:none !important;border-radius:0 !important;min-height:100dvh}
+  #weeklyOverlay .wr-grid2{grid-template-columns:1fr !important}
+  #weeklyOverlay input,#weeklyOverlay select,#weeklyOverlay textarea{font-size:16px !important;min-height:44px}
+  #weeklyOverlay #wrF_search{width:100% !important;flex:1 1 100%}
+  #weeklyOverlay .wr-chip{padding:9px 15px !important;font-size:13.5px !important;min-height:42px;display:inline-flex;align-items:center}
+  #weeklyOverlay .wr-chkrow{flex-wrap:wrap !important}
+  #weeklyOverlay .wr-chkrow>span{font-size:14px !important;font-weight:600}
+  #weeklyOverlay .wr-segs{display:grid !important;grid-template-columns:repeat(3,1fr);gap:6px;width:100%;margin-top:7px}
+  #weeklyOverlay .wr-seg{min-height:42px !important;font-size:12.5px !important;padding:6px 4px !important}
+  #weeklyOverlay .wr-sel{min-height:44px;width:100%}
+  #weeklyOverlay .wr-actions{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--border);padding:10px 0 4px;z-index:5}
+  #weeklyOverlay .wr-actions .btn{min-height:48px;font-size:14.5px}
+  #weeklyOverlay .btn.sm{min-height:44px}
+}
 .chip.good{color:var(--good);background:var(--good-bg)}.chip.warn{color:var(--warn);background:var(--warn-bg)}
 .chip.bad{color:var(--bad);background:var(--bad-bg)}.chip.info{color:var(--info);background:var(--info-bg)}
 .chip.flat{color:var(--gray);background:var(--surface-2)}.chip.flat::before{display:none}
@@ -20378,6 +20397,9 @@ function _ensureWeeklyOv(){
 function closeWeekly(){ const ov=document.getElementById('weeklyOverlay'); if(ov) ov.style.display='none'; }
 async function openWeeklyEditor(rid){
   _ensureWeeklyOv();
+  // instant feedback — the template fetch can take a few seconds on a phone
+  document.getElementById('weeklyEditorBody').innerHTML = '<div class="empty" style="padding:34px;text-align:center"><div style="font-size:26px;margin-bottom:8px">⏳</div><div class="muted">نجهّز الشقق ومعلوماتها…</div></div>';
+  document.getElementById('weeklyOverlay').style.display = 'block';
   let r;
   if(rid){ try{ const x=await api('/api/weekly/get?id='+encodeURIComponent(rid)); r=x.report }catch(_){ r=null } }
   if(!r){
@@ -20420,14 +20442,14 @@ function _renderWeeklyEditor(){
     + '<div style="font-size:18px;font-weight:700">📊 '+(r.id?'تعديل':'إنشاء')+' تقرير أسبوعي</div>'
     + '<button onclick="closeWeekly()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px;padding:0 6px">×</button>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+    + '<div class="wr-grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">الموظف *</label>'
     +     '<input id="wrF_employee" value="'+esc(r.employee||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">التاريخ</label>'
     +     '<input id="wrF_date" type="date" value="'+esc(r.date||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
     + '</div>'
     + _wrSummaryHtml(apts, r)
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+    + '<div class="wr-grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">⭐ أبرز إنجازات الأسبوع</label>'
     +     '<textarea oninput="if(_wrDraft)_wrDraft.highlights=this.value" rows="2" placeholder="اكتب أبرز ما تم هذا الأسبوع…" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px;resize:vertical">'+esc(r.highlights||'')+'</textarea></div>'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">⚠ أي شيء غير معتاد</label>'
@@ -20440,10 +20462,10 @@ function _renderWeeklyEditor(){
     + '<div style="margin-bottom:14px;display:flex;gap:8px"><input id="wrF_newApt" placeholder="إضافة شقة يدوياً (مثل: MS5 202)" style="flex:1;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12.5px">'
     + '<button onclick="_wrAddApt()" class="btn ghost sm">+ شقة</button></div>'
     + '<div id="wrApts">'+aptHtml+'</div>'
-    + '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'
+    + '<div class="wr-actions" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'
     +   '<button onclick="closeWeekly()" class="btn ghost sm" style="flex:1">إلغاء</button>'
     +   (r.id ? '<button onclick="deleteWeekly(&#39;'+esc(r.id)+'&#39;)" class="btn danger sm" style="padding:0 14px">🗑 حذف</button>' : '')
-    +   '<button onclick="printWeekly()" class="btn ghost sm" style="flex:1">🖨 طباعة</button>'
+    +   '<button onclick="printWeekly()" class="btn ghost sm" style="flex:1">⬇ PDF</button>'
     +   '<button onclick="saveWeekly()" class="btn primary sm" style="flex:2">💾 احفظ</button>'
     + '</div>';
   document.getElementById('weeklyEditorBody').innerHTML = html;
@@ -20457,6 +20479,15 @@ function _wrSetCheck(i, item, val){
   const a = _wrDraft.apartments[i]; if(!a) return;
   a.checks = a.checks || {};
   a.checks[item] = (a.checks[item]===val) ? '' : val;
+  _renderWeeklyEditor();
+}
+/* one-tap quick-fill: mark every checklist item 'ok' (tap again to clear) */
+function _wrAllOk(i){
+  if(!_wrDraft) return;
+  const a = _wrDraft.apartments[i]; if(!a) return;
+  a.checks = a.checks || {};
+  const all = WR_CHECK_ITEMS.every(function(it){ return a.checks[it]==='ok'; });
+  WR_CHECK_ITEMS.forEach(function(it){ a.checks[it] = all ? '' : 'ok'; });
   _renderWeeklyEditor();
 }
 function _wrComputeSummary(apts){
@@ -20513,10 +20544,10 @@ function _wrRenderApt(i, apt){
     return '<div style="background:var(--surface-2);padding:10px 12px;border-radius:10px;margin-bottom:8px;border:1px solid var(--border)">'+head+'</div>';
   }
   function chips(name, opts, sel){
-    return opts.map(o=>'<button onclick="_wrToggle('+i+',\\''+name+'\\','+JSON.stringify(o).replace(/"/g,'&quot;')+')" style="padding:4px 10px;border-radius:99px;border:1px solid '+(sel&&sel.indexOf(o)>=0?'var(--gold)':'var(--border)')+';background:'+(sel&&sel.indexOf(o)>=0?'var(--gold-tint)':'transparent')+';color:var(--text);font-size:11px;cursor:pointer">'+o+'</button>').join(' ');
+    return opts.map(o=>'<button class="wr-chip" onclick="_wrToggle('+i+',\\''+name+'\\','+JSON.stringify(o).replace(/"/g,'&quot;')+')" style="padding:4px 10px;border-radius:99px;border:1px solid '+(sel&&sel.indexOf(o)>=0?'var(--gold)':'var(--border)')+';background:'+(sel&&sel.indexOf(o)>=0?'var(--gold-tint)':'transparent')+';color:var(--text);font-size:11px;cursor:pointer">'+o+'</button>').join(' ');
   }
   function sel(name, opts, cur){
-    let h='<select onchange="_wrSet('+i+',\\''+name+'\\',this.value)" style="padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">';
+    let h='<select class="wr-sel" onchange="_wrSet('+i+',\\''+name+'\\',this.value)" style="padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px">';
     h+='<option value="">—</option>';
     opts.forEach(o=>h+='<option value="'+esc(o)+'"'+(cur===o?' selected':'')+'>'+o+'</option>');
     h+='</select>'; return h;
@@ -20531,17 +20562,19 @@ function _wrRenderApt(i, apt){
       + '</div></div>';
   }
   // MCQ checklist
-  let chk = '<div style="margin-bottom:10px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:6px">✅ قائمة الفحص الأسبوعي</div>'
+  let chk = '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">'
+    + '<div class="muted" style="font-size:10.5px;font-weight:600">✅ قائمة الفحص الأسبوعي</div>'
+    + '<button onclick="_wrAllOk('+i+')" class="btn ghost sm" style="padding:2px 10px;font-size:11px">✓ كلها سليمة</button></div>'
     + '<div style="display:flex;flex-direction:column;gap:5px">';
   WR_CHECK_ITEMS.forEach(function(it){
     const cur = checks[it] || '';
-    chk += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);border-radius:7px;padding:5px 9px">'
-      + '<span style="font-size:12px">'+esc(it)+'</span><div style="display:flex;gap:4px;flex-shrink:0">';
+    chk += '<div class="wr-chkrow" style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);border-radius:7px;padding:5px 9px">'
+      + '<span style="font-size:12px">'+esc(it)+'</span><div class="wr-segs" style="display:flex;gap:4px;flex-shrink:0">';
     WR_CHECK_STATES.forEach(function(st){
       const active = cur===st[0];
       const col = st[0]==='ok'?'#065f46':st[0]==='issue'?'#92400e':'var(--text-2)';
       const bg  = active ? (st[0]==='ok'?'#d1fae5':st[0]==='issue'?'#fff3cd':'var(--surface-2)') : 'transparent';
-      chk += '<button onclick="_wrSetCheck('+i+','+JSON.stringify(it).replace(/"/g,'&quot;')+','+JSON.stringify(st[0]).replace(/"/g,'&quot;')+')" style="padding:3px 9px;border-radius:99px;border:1px solid '+(active?col:'var(--border)')+';background:'+bg+';color:'+(active?col:'var(--text-2)')+';font-size:10.5px;cursor:pointer;font-weight:'+(active?'700':'400')+'">'+st[1]+'</button>';
+      chk += '<button class="wr-seg" onclick="_wrSetCheck('+i+','+JSON.stringify(it).replace(/"/g,'&quot;')+','+JSON.stringify(st[0]).replace(/"/g,'&quot;')+')" style="padding:3px 9px;border-radius:99px;border:1px solid '+(active?col:'var(--border)')+';background:'+bg+';color:'+(active?col:'var(--text-2)')+';font-size:10.5px;cursor:pointer;font-weight:'+(active?'700':'400')+'">'+st[1]+'</button>';
     });
     chk += '</div></div>';
   });
@@ -20565,7 +20598,7 @@ function _wrRenderApt(i, apt){
   return '<div style="background:var(--surface-2);padding:12px;border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">'
     + head + '<div style="margin-top:10px">'
     + auto + ciHtml + chk
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'
+    + '<div class="wr-grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'
     + '<div><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">الحالة</div>'+sel('status', WR_STATUS, apt.status)+'</div>'
     + '<div><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">حالة الحل</div>'+sel('resolved', WR_RESOLVED, apt.resolved)+'</div></div>'
     + '<div style="margin-bottom:6px"><div class="muted" style="font-size:10.5px;font-weight:600;margin-bottom:4px">الأخطار / المخاطر</div><div style="display:flex;flex-wrap:wrap;gap:4px">'+chips('risks', WR_RISKS, apt.risks)+'</div>'+other('risks_other','أخرى — اكتب هنا…')+'</div>'
@@ -20596,7 +20629,7 @@ function _wrIssuesHtml(i, apt){
       + '<button onclick="_wrIssueResolve('+i+','+j+')" class="btn ghost sm" style="padding:2px 9px;font-size:10.5px">'+(it.resolved?'↩ إعادة فتح':'✓ تم الحل')+'</button>'
       + '<button onclick="_wrIssueDel('+i+','+j+')" style="background:transparent;border:none;color:var(--red);cursor:pointer;font-size:15px;margin-inline-start:auto">×</button></div>'
       + '<input value="'+esc(it.text||'')+'" oninput="_wrIssueSet('+i+','+j+',\\'text\\',this.value,true)" placeholder="وصف المشكلة…" style="width:100%;padding:6px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;margin-bottom:5px">'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+      + '<div class="wr-grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
       + '<input value="'+esc(it.assignee||'')+'" oninput="_wrIssueSet('+i+','+j+',\\'assignee\\',this.value,true)" placeholder="المسؤول…" style="padding:6px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11.5px">'
       + '<input type="date" value="'+esc(it.followup||'')+'" onchange="_wrIssueSet('+i+','+j+',\\'followup\\',this.value,true)" style="padding:6px 9px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11.5px">'
       + '</div></div>';
