@@ -4785,6 +4785,9 @@ WATCHDOG_CHANNEL          = os.environ.get("WATCHDOG_CHANNEL", "غرفة-الم�
 # alarm walls were noise). Every critical pings ONCE then resets when it clears; ONLY
 # inquiry-sourced escalations get a gentle reminder every WATCHDOG_REPING_HOURS (3h).
 WATCHDOG_REPING_HOURS     = float(os.environ.get("WATCHDOG_REPING_HOURS", "3"))
+# Heartbeat (owner 2026-07-06): silence = good news, but a short NEW «🟢 كل شي تمام»
+# message every N quiet hours proves the watchdog is alive from inside Discord.
+WATCHDOG_HEARTBEAT_H      = float(os.environ.get("WATCHDOG_HEARTBEAT_H", "3"))
 WATCHDOG_CODE_LOOKAHEAD_H = float(os.environ.get("WATCHDOG_CODE_LOOKAHEAD_H", "12"))
 
 # ============= Ouja Studio «استوديو عوجا» — TikTok content-idea factory =============
@@ -54152,8 +54155,18 @@ async def _watchdog_post(compact, flags, meta):
             body += "\n" + " ".join(ping_mentions)
         try:
             await ch.send(body[:1900])
+            meta["last_heartbeat_ts"] = time.time()   # a critical ping IS a liveness signal
         except Exception as e:
             print("[watchdog] critical ping error:", e)
+    elif time.time() - (meta.get("last_heartbeat_ts") or 0) >= WATCHDOG_HEARTBEAT_H * 3600:
+        # heartbeat: quiet channel ≠ dead watchdog — a short NEW message every N quiet
+        # hours (compact title already carries the status + time, e.g. «🟢 كل شي تمام — ٦:٠٠ م»)
+        try:
+            await ch.send("%s · التقرير: %s" % (compact.get("title", "🟢"),
+                                                GUIDE_PUBLIC_BASE.rstrip("/") + "/watchdog"))
+            meta["last_heartbeat_ts"] = time.time()
+        except Exception as e:
+            print("[watchdog] heartbeat error:", e)
     # clear flags that stopped appearing (so a future recurrence pings again)
     try:
         stale = await asyncio.to_thread(_watchdog.db.open_flag_keys)
