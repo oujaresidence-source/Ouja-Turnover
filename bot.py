@@ -26216,9 +26216,27 @@ def _owner_info(apt):
         best["ambiguous_with"] = sorted({(r.get("apartment") or "?") for r in others})
     return best
 
+def _owner_digit_boundary_in(rn, nn):
+    """rn occurs in nn at a DIGIT boundary. Letters may glue («ملقا1» inside «الملقا1» —
+    the ال prefix is fine) but a digit touching the match means a DIFFERENT unit number:
+    «ملقا1» must never sit inside «الملقا11» (عبدالمحسن's الملقا 1 statement pulled
+    الملقا 11's reservations — raw substring scored both identically and the first
+    Hostaway listing won). Mirrors the token-boundary fix _owner_info already got."""
+    start = 0
+    while True:
+        i = nn.find(rn, start)
+        if i < 0:
+            return False
+        before = nn[i - 1] if i > 0 else ""
+        after = nn[i + len(rn)] if i + len(rn) < len(nn) else ""
+        if not ((rn[-1].isdigit() and after.isdigit()) or
+                (rn[0].isdigit() and before.isdigit())):
+            return True
+        start = i + 1
+
 def _owner_resolve_lid(rec, listings):
     """The Hostaway listing id for a registry apartment: an explicit override if set, else the
-    best NORMALIZED-substring match against the listing names (longest listing-name code)."""
+    best NORMALIZED digit-boundary substring match against the listing names."""
     if rec.get("lid") is not None:
         try:
             return int(rec["lid"])
@@ -26230,7 +26248,7 @@ def _owner_resolve_lid(rec, listings):
     best, best_len = None, 0
     for lid, nm in (listings or {}).items():
         nn = _owner_norm(nm)
-        if rn and rn in nn and len(rn) > best_len:
+        if rn and len(rn) > best_len and _owner_digit_boundary_in(rn, nn):
             best, best_len = lid, len(rn)
     return best
 
