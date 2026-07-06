@@ -14957,6 +14957,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           </div>
           <div class="page-tools">
             <button class="btn primary sm" onclick="openWeeklyEditor()">➕ تقرير جديد</button>
+            <button class="btn ghost sm" onclick="weeklyShareLink()">📱 رابط الموظفين</button>
             <button class="btn ghost sm" onclick="loadWeekly()">↻</button>
           </div>
         </div>
@@ -20733,6 +20734,36 @@ function printWeekly(){
     +'<script>setTimeout(function(){window.print()},450)<\/script></body></html>');
   w.document.close();
 }
+/* Employee mobile link (/weekly?k=…) — copy panel + admin regenerate */
+async function weeklyShareLink(){
+  let d; try{ d = await api('/api/weekly/link'); }catch(_){ toast('تعذر جلب الرابط'); return; }
+  const url = location.origin + d.url;
+  _ensureWeeklyOv();
+  document.getElementById('weeklyEditorBody').innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+    +'<div style="font-size:17px;font-weight:700">📱 رابط الموظفين — التقرير الأسبوعي</div>'
+    +'<button onclick="closeWeekly()" style="background:transparent;border:none;color:var(--mut);cursor:pointer;font-size:24px;padding:0 6px">×</button></div>'
+    +'<div class="muted" style="font-size:12.5px;line-height:1.9;margin-bottom:10px">أرسل هذا الرابط لفريق العمليات — يفتح من الجوال مباشرة: الموظف يعبّي تقريره ويحمّله PDF بدون دخول اللوحة.</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +'<input readonly id="wrShareUrl" value="'+esc(url)+'" onclick="this.select()" style="flex:1 1 260px;padding:9px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;direction:ltr">'
+    +'<button class="btn primary sm" onclick="weeklyCopyShare()">📋 نسخ</button>'
+    +(d.can_regenerate?'<button class="btn ghost sm" onclick="weeklyRegenLink()">↻ توليد رابط جديد</button>':'')
+    +'</div>'
+    +'<div class="muted" style="font-size:11px;margin-top:10px">⚠ توليد رابط جديد يلغي الرابط القديم عند كل الموظفين.</div>';
+  document.getElementById('weeklyOverlay').style.display = 'block';
+}
+async function weeklyCopyShare(){
+  const el = document.getElementById('wrShareUrl'); if(!el) return;
+  el.select();
+  try{ await navigator.clipboard.writeText(el.value); }catch(_){ document.execCommand('copy'); }
+  toast('📋 انتسخ الرابط');
+}
+async function weeklyRegenLink(){
+  if(!confirm('توليد رابط جديد يلغي الرابط القديم عند كل الموظفين — متأكد؟')) return;
+  const r = await post('/api/weekly/link', {action:'regenerate'});
+  if(r.ok){ toast('↻ انولّد رابط جديد'); weeklyShareLink(); }
+  else toast(r.error || 'خطأ');
+}
 
 /* ============== FIELD EXPENSES (المصاريف) ============== */
 let _expSettingsDraft = null, _expSettingsDryrun = false;
@@ -25601,6 +25632,534 @@ function submitPhotoReport(){
 }
 document.documentElement.lang='ar';
 render();
+</script></body></html>"""
+
+# ===================== WEEKLY REPORT — EMPLOYEE MOBILE PAGE (/weekly) =====================
+# Standalone phone-first page for التقرير الأسبوعي: the owner shares ONE link
+# (/weekly?k=TOKEN) with the team; employees open it on their phone, fill the
+# report apartment-by-apartment and download the PDF — no dashboard, no login.
+# SAME string traps as DASHBOARD_HTML: plain (non-raw) triple-quoted string, so
+# the embedded JS contains ZERO backslashes; all events are DELEGATED via
+# data-* attributes (no inline-onclick quote-building). esprima-parse after edits.
+WEEKLY_HTML = """<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>عوجا · التقرير الأسبوعي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#FAF8F2;--surface:#FFFFFF;--surface-2:#F2EEE4;--surface-3:#E6DFCF;--line:#DCD4C2;--line-strong:#C5BCA4;--text:#15130F;--text-2:#453F38;--mut:#6E6859;--gold:#8B6320;--gold-2:#6F4F18;--gold-soft:#F4EBD5;--green:#0B7A48;--green-2:#096038;--green-soft:#D7F0E2;--red:#BC3B2C;--red-soft:#FBE6E2;--amber:#B45309;--amber-soft:#FDF0DC}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;font-size:16px;line-height:1.6}
+.wrap{max-width:640px;margin:0 auto;padding:14px 14px 130px}
+.top{padding:10px 0 4px}
+.brand{font-size:13px;font-weight:700;color:var(--gold-2);letter-spacing:.4px}
+h1{font-size:24px;font-weight:700;margin:2px 0 0;letter-spacing:-.2px}
+.sub{font-size:14px;color:var(--text-2)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1.5px solid var(--line-strong);background:var(--surface);color:var(--text);border-radius:14px;padding:13px 16px;font:inherit;font-size:16px;font-weight:700;cursor:pointer;min-height:52px;line-height:1.2;transition:transform .1s cubic-bezier(0.23,1,0.32,1),filter .12s}
+.btn:active{transform:scale(.97)}
+.btn.gold{background:var(--gold);color:#fff;border-color:var(--gold-2)} .btn.gold:active{filter:brightness(.93)}
+.btn.gold:disabled{opacity:.55}
+.btn.ghost{background:var(--surface-2);border-color:var(--line)}
+.btn.full{width:100%}
+.btn.big{min-height:62px;font-size:19px;border-radius:16px}
+.btn.mini{min-height:44px;font-size:13.5px;font-weight:600;padding:8px 13px;border-radius:12px}
+.card{background:var(--surface);border:1.5px solid var(--line);border-radius:18px;padding:16px;margin-top:12px;box-shadow:0 1px 3px rgba(21,19,15,.05)}
+.skel{color:var(--mut);text-align:center;padding:26px 16px}
+.sect{font-size:13px;font-weight:800;color:var(--mut);margin:18px 0 8px;letter-spacing:.3px}
+label.f{font-size:13px;font-weight:700;color:var(--mut);display:block;margin-bottom:6px}
+.fld{width:100%;padding:14px;border:1.5px solid var(--line-strong);border-radius:14px;background:var(--surface);color:var(--text);font:inherit;font-size:16px;min-height:52px}
+.fld.sm{min-height:46px;padding:10px 13px;font-size:15px}
+textarea.fld{line-height:1.6;resize:vertical}
+.optrow{display:flex;flex-wrap:wrap;gap:8px}
+.opt{display:inline-flex;align-items:center;min-height:44px;padding:8px 15px;border-radius:99px;border:1.5px solid var(--line);background:var(--surface);color:var(--text-2);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.opt.on{background:var(--gold-soft);border-color:var(--gold);color:var(--gold-2);font-weight:700}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.segb{min-height:44px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font:inherit;font-size:13px;font-weight:600;color:var(--mut);cursor:pointer;padding:4px 2px}
+.segb.ok.on{background:var(--green-soft);border-color:var(--green);color:var(--green-2);font-weight:700}
+.segb.issue.on{background:var(--amber-soft);border-color:var(--amber);color:var(--amber);font-weight:700}
+.segb.na.on{background:var(--surface-3);border-color:var(--line-strong);color:var(--text-2);font-weight:700}
+.chkrow{padding:11px 0;border-bottom:1px dashed var(--line)}
+.chkrow:last-child{border-bottom:none}
+.chkrow .lbl{font-size:15px;font-weight:600;margin-bottom:7px}
+.apt{background:var(--surface);border:1.5px solid var(--line);border-radius:16px;margin-top:10px;overflow:hidden;scroll-margin-top:10px}
+.apt.filled{border-color:var(--green)}
+.apt.warn{border-color:var(--amber);border-width:2px}
+.apt-h{display:flex;align-items:center;gap:9px;width:100%;min-height:60px;padding:10px 14px;background:none;border:none;font:inherit;text-align:start;cursor:pointer}
+.apt-arrow{color:var(--mut);flex:none}
+.apt-name{font-size:15.5px;font-weight:700;flex:1;line-height:1.4}
+.apt-badges{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.apt-b{padding:0 14px 16px}
+.badge{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:99px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--line)}
+.badge.gr{background:var(--green-soft);color:var(--green-2);border-color:rgba(11,122,72,.35)}
+.badge.rd{background:var(--red-soft);color:#9E2D20;border-color:rgba(188,59,44,.35)}
+.badge.am{background:var(--amber-soft);color:var(--amber);border-color:rgba(180,83,9,.35)}
+.badge.gd{background:var(--gold-soft);color:var(--gold-2);border-color:rgba(139,99,32,.35)}
+.facts{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.fact{display:inline-flex;align-items:center;font-size:13px;font-weight:700;padding:5px 12px;border-radius:99px;background:var(--surface-2);color:var(--text-2);border:1.5px solid var(--line)}
+.fact.gr{background:var(--green-soft);color:var(--green-2);border-color:rgba(11,122,72,.35)}
+.fact.rd{background:var(--red-soft);color:#9E2D20;border-color:rgba(188,59,44,.35)}
+.fact.am{background:var(--amber-soft);color:var(--amber);border-color:rgba(180,83,9,.35)}
+.tkls{background:var(--surface-2);border:1.5px solid var(--line);border-radius:12px;padding:9px 12px;margin-top:9px;font-size:13.5px;color:var(--text-2)}
+.ci{background:var(--gold-soft);border:1.5px solid var(--gold);border-radius:14px;padding:11px 13px;margin-top:12px;font-size:13.5px;color:var(--gold-2);line-height:1.7}
+.iss{border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-top:10px;background:var(--surface)}
+.iss.high{border-color:var(--red);border-width:2px}
+.iss.done{opacity:.55}
+.sumrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.sumtile{flex:1;min-width:72px;background:var(--surface-2);border:1.5px solid var(--line);border-radius:14px;padding:9px 6px;text-align:center}
+.sumtile .v{font-size:21px;font-weight:800;letter-spacing:-.5px}
+.sumtile .l{font-size:11px;color:var(--text-2);font-weight:600;margin-top:1px}
+.bar{height:10px;background:var(--surface-3);border-radius:999px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--gold);width:0%;transition:width .3s cubic-bezier(0.23,1,0.32,1)}
+.rep{display:flex;align-items:center;gap:10px;padding:12px 14px}
+.repmain{flex:1;background:none;border:none;font:inherit;text-align:start;cursor:pointer;padding:4px 0;min-height:52px}
+.repd{font-size:15px;font-weight:700}
+.repe{font-size:13.5px;color:var(--text-2);margin-top:2px}
+.repb{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.fab{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(rgba(250,248,242,0),var(--bg) 42%);padding:16px 14px calc(12px + env(safe-area-inset-bottom));z-index:10}
+.fabin{max-width:640px;margin:0 auto;display:flex;gap:10px}
+.ov{position:fixed;inset:0;background:rgba(21,19,15,.55);z-index:30;display:none;align-items:flex-end}
+.ov.on{display:flex}
+.sheet{background:var(--bg);border-radius:22px 22px 0 0;width:100%;max-width:640px;margin:0 auto;padding:22px 16px calc(28px + env(safe-area-inset-bottom));box-shadow:0 -12px 36px rgba(21,19,15,.28)}
+.toast{position:fixed;bottom:calc(104px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:12px 22px;border-radius:14px;font-size:15px;font-weight:600;z-index:40;opacity:0;pointer-events:none;transition:opacity .25s;white-space:nowrap}
+.toast.on{opacity:1}
+@media(prefers-reduced-motion:reduce){.btn,.bar i,.toast{transition:none}}
+</style></head>
+<body>
+<div class="wrap">
+  <div class="top"><div class="brand">عوجا · OUJA</div><h1>التقرير الأسبوعي 📊</h1><div class="sub" id="hSub"></div></div>
+  <div id="vHome"><div class="card skel">نحمّل التقارير…</div></div>
+  <div id="vEd" style="display:none"></div>
+</div>
+<div class="fab" id="fab" style="display:none"><div class="fabin">
+  <button class="btn ghost" data-act="pdfCur">⬇ PDF</button>
+  <button class="btn gold" id="saveBtn" data-act="save" style="flex:1">💾 حفظ التقرير</button>
+</div></div>
+<div class="ov" id="doneOv"><div class="sheet" style="text-align:center">
+  <div style="font-size:44px">✅</div>
+  <div style="font-size:19px;font-weight:800;margin-top:6px">انحفظ تقريرك</div>
+  <div class="sub" style="margin:6px 0 18px">تقدر تحمّله PDF الحين أو ترجع للرئيسية</div>
+  <button class="btn gold big full" data-act="donePdf">⬇ تحميل PDF</button>
+  <button class="btn ghost full" data-act="doneHome" style="margin-top:10px">الرئيسية</button>
+</div></div>
+<div class="toast" id="toast"></div>
+<script>
+var WR_RISKS=["لا يوجد خطر","رائحة الحمام","مشكلة نظافة","تقييمات منخفضة","مشكلة سخان","مشكلة مكيف","مشكلة كهرباء","تسريب مياه","حشرات","رائحة دخان","مشكلة مفارش","مشكلة أبواب","مغلقة للصيانة","عدم توفير مستلزمات","صوت مزعج"];
+var WR_CHALLENGES=["لا يوجد تحدي","رفع التقييمات","تحسين النظافة","تغيير المفارش","رائحة الشقة","صيانة دورات المياه","توفير مستلزمات","مشكلة واي فاي","ديب كلين للشقة","غسيل كنب"];
+var WR_STATUS=["ممتاز","فوق المتوسط","متوسط","سيئ"];
+var WR_PLAN=["سريعة","ممتازة","متوسطة","لا يوجد","تم الحل","تم التواصل مع الصيانة","تم تغيير شركة التنظيف","تم إرسال فني","جاري المتابعة"];
+var WR_RESOLVED=["نعم","لا","في التقدم"];
+var WR_UPDATES=["لا يوجد تحديث","تم الديب كلين","تم تغيير المفارش","تم إصلاح المكيف","تم إصلاح السخان","تم إصلاح الكهرباء","تم حل تسريب المياه","تم رش الحشرات","تم تزويد المستلزمات","تم تغيير الأقفال/الكود","تم تحسين الواي فاي","تم غسيل الكنب","تمت إعادة التصميم","تم التواصل مع المالك"];
+var WR_SUPERVISOR=["لا يوجد إجراء","زيارة ميدانية","إرسال فني","إرسال شركة تنظيف","طلب قطع غيار","متابعة مع المورد","تصعيد للإدارة","إغلاق الشقة مؤقتاً","جدولة ديب كلين","تأكيد الحل ميدانياً"];
+var WR_SEVERITY=[["low","🟢 منخفض"],["med","🟡 متوسط"],["high","🔴 عالي"]];
+var WR_CHECK_ITEMS=["النظافة العامة","رائحة الشقة","المكيفات","السخان والماء الحار","الواي فاي","قفل الباب / الكود","المواقف","المفارش والمناشف","المستلزمات (شامبو، صابون…)","الأجهزة الكهربائية","دورات المياه","الإضاءة"];
+var WR_CHECK_STATES=[["ok","✓ سليم"],["issue","⚠ يحتاج"],["na","—"]];
+var OPTS={status:WR_STATUS,resolved:WR_RESOLVED,risks:WR_RISKS,updates:WR_UPDATES,challenges:WR_CHALLENGES,plan:WR_PLAN,supervisor:WR_SUPERVISOR};
+var Q=new URLSearchParams(location.search);
+var K=Q.get('k')||'', T=Q.get('token')||'';
+var HOME=[], R=null, EXPI=-1, FLT='', FMODE='all', DIRTY=false, DRAFT_T=null;
+function aq(){ return K?('k='+encodeURIComponent(K)):('token='+encodeURIComponent(T)); }
+function api(p){ return fetch(p+(p.indexOf('?')>=0?'&':'?')+aq()).then(function(r){ if(r.status===401||r.status===403){ linkDead(); throw new Error('auth'); } return r.json(); }); }
+function post(p,b){ return fetch(p+'?'+aq(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){ if(r.status===401||r.status===403){ linkDead(); throw new Error('auth'); } return r.json(); }); }
+function esc(s){ s=String(s==null?'':s); return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._h); t._h=setTimeout(function(){ t.classList.remove('on'); },2600); }
+function fmtDate(s){ if(!s) return ''; try{ var d=new Date(s+'T12:00:00'); return d.toLocaleDateString('ar-SA-u-ca-gregory',{weekday:'long',day:'numeric',month:'long'}); }catch(e){ return s; } }
+function linkDead(){ document.getElementById('vHome').innerHTML='<div class="card" style="text-align:center;padding:32px 18px"><div style="font-size:36px">🔒</div><div style="font-size:17px;font-weight:800;margin-top:8px">الرابط غير صالح أو منتهي</div><div class="sub" style="margin-top:6px">اطلب من الإدارة رابط محدّث للتقرير الأسبوعي.</div></div>'; show('home'); }
+function show(v){
+  document.getElementById('vHome').style.display=(v==='home')?'':'none';
+  document.getElementById('vEd').style.display=(v==='ed')?'':'none';
+  document.getElementById('fab').style.display=(v==='ed')?'':'none';
+  document.getElementById('hSub').textContent=(v==='ed')?'عبّي الشقق اللي تشرف عليها ثم احفظ':'افتح تقرير جديد أو كمّل تقرير سابق';
+  window.scrollTo(0,0);
+}
+/* ---------- home ---------- */
+function loadHome(){
+  show('home');
+  document.getElementById('vHome').innerHTML='<div class="card skel">نحمّل التقارير…</div>';
+  api('/api/weekly/list').then(function(d){ HOME=(d&&d.reports)||[]; renderHome(); }).catch(function(e){});
+}
+function renderHome(){
+  var h='<button class="btn gold big full" data-act="new" style="margin-top:8px">➕ تقرير جديد</button>';
+  var dr=loadDraft();
+  if(dr&&dr.r&&!dr.r.id) h+='<button class="btn ghost full" data-act="resume" style="margin-top:10px">📝 كمّل مسودتك غير المحفوظة'+(dr.r.employee?(' ('+esc(dr.r.employee)+')'):'')+'</button>';
+  h+='<div class="sect" style="margin-top:22px">التقارير السابقة</div>';
+  if(!HOME.length) h+='<div class="card" style="text-align:center;color:var(--mut)">ما فيه تقارير بعد — ابدأ أول تقرير من الزر فوق 👆</div>';
+  HOME.forEach(function(r){
+    var sm=r.summary||{}; var b='';
+    if(sm.unresolved) b+='<span class="badge rd">⚠ '+sm.unresolved+' غير محلول</span>';
+    if(sm.carried) b+='<span class="badge am">↪ '+sm.carried+' مُرحّل</span>';
+    if(sm.resolved) b+='<span class="badge gr">✓ '+sm.resolved+' محلول</span>';
+    h+='<div class="card rep"><button class="repmain" data-act="open" data-id="'+esc(r.id)+'">'
+      +'<div class="repd">📅 '+esc(fmtDate(r.date)||r.date||'')+'</div>'
+      +'<div class="repe">👤 '+esc(r.employee||'—')+' · '+(r.apt_count||0)+' شقة</div>'
+      +(b?'<div class="repb">'+b+'</div>':'')
+      +'</button><button class="btn mini" data-act="pdf" data-id="'+esc(r.id)+'">⬇ PDF</button></div>';
+  });
+  document.getElementById('vHome').innerHTML=h;
+}
+/* ---------- local draft (autosave — long form on a phone must never lose data) ---------- */
+function saveDraft(){ if(!R) return; clearTimeout(DRAFT_T); DRAFT_T=setTimeout(function(){ try{ localStorage.setItem('ouja_wr_draft', JSON.stringify({ts:Date.now(),r:R})); }catch(e){} },500); }
+function loadDraft(){ try{ var x=JSON.parse(localStorage.getItem('ouja_wr_draft')||'null'); return (x&&x.r)?x:null; }catch(e){ return null; } }
+function clearDraft(){ try{ localStorage.removeItem('ouja_wr_draft'); }catch(e){} }
+function mark(){ DIRTY=true; saveDraft(); }
+/* ---------- open / new ---------- */
+function blankApt(nm,lid){ return {name:nm,listing_id:(lid==null?null:lid),common_issues:[],checks:{},status:'',risks:[],updates:[],challenges:[],plan:[],supervisor:[],resolved:'',comments:[],risks_other:'',updates_other:'',plan_other:'',supervisor_other:'',issues:[],new_reviews:0,open_tickets:[],occupied:false}; }
+function newReport(){
+  document.getElementById('vHome').innerHTML='<div class="card skel">نجهّز لك الشقق ومعلوماتها… ثواني ⏳</div>';
+  api('/api/weekly/template').then(function(tpl){
+    var today=new Date().toISOString().slice(0,10);
+    R={id:null, employee:(function(){ try{ return localStorage.getItem('ouja_wr_emp')||''; }catch(e){ return ''; } })(),
+       date:today, highlights:'', unusual:'', _carried_from:(tpl&&tpl.carried_from)||'',
+       apartments:((tpl&&tpl.apartments)||[]).map(function(a){
+         var x=blankApt(a.name,a.listing_id);
+         x.common_issues=a.common_issues||[]; x.issues=(a.issues||[]);
+         x.new_reviews=a.new_reviews||0; x.open_tickets=a.open_tickets||[]; x.occupied=!!a.occupied;
+         return x; })};
+    EXPI=-1; FLT=''; FMODE='all'; DIRTY=false;
+    renderEditor(); show('ed');
+  }).catch(function(e){ renderHome(); toast('تعذر التحميل — جرّب مرة ثانية'); });
+}
+function resumeDraft(){ var d=loadDraft(); if(!d||!d.r){ toast('ما فيه مسودة'); renderHome(); return; } R=d.r; EXPI=-1; FLT=''; FMODE='all'; DIRTY=true; renderEditor(); show('ed'); }
+function openReport(id){
+  document.getElementById('vHome').innerHTML='<div class="card skel">نفتح التقرير…</div>';
+  api('/api/weekly/get?id='+encodeURIComponent(id)).then(function(x){
+    R=(x&&x.report)||null;
+    if(!R){ toast('ما لقيت التقرير'); loadHome(); return; }
+    R.apartments=R.apartments||[];
+    EXPI=-1; FLT=''; FMODE='all'; DIRTY=false;
+    renderEditor(); show('ed');
+  }).catch(function(e){});
+}
+/* ---------- editor ---------- */
+function filled(a){
+  var c=a.checks||{}; var any=false; for(var k in c){ if(c[k]) any=true; }
+  return !!(any||a.status||(a.risks||[]).length||(a.updates||[]).length||(a.challenges||[]).length||(a.plan||[]).length||(a.supervisor||[]).length||a.resolved||(a.issues||[]).length||a.risks_other||a.updates_other||a.plan_other||a.supervisor_other);
+}
+function computeSum(apts){
+  apts=apts||[];
+  var withIssue=0,resolved=0,carried=0,high=0,occupied=0;
+  apts.forEach(function(a){
+    var oi=(a.issues||[]).filter(function(it){ return it&&!it.resolved; });
+    var hasChk=false; var c=a.checks||{}; for(var k in c){ if(c[k]==='issue') hasChk=true; }
+    var hasRisk=(a.risks||[]).some(function(r){ return r!=='لا يوجد خطر'; });
+    if(oi.length||hasChk||hasRisk) withIssue++;
+    if(a.resolved==='نعم'||a.resolved==='تم الحل') resolved++;
+    oi.forEach(function(it){ if((it.weeks||1)>1) carried++; if(it.severity==='high') high++; });
+    if(a.occupied) occupied++;
+  });
+  return {total:apts.length,withIssue:withIssue,resolved:resolved,unresolved:Math.max(0,withIssue-resolved),carried:carried,high:high,occupied:occupied};
+}
+function renderEditor(){
+  var r=R||{};
+  var h='<button class="btn mini" data-act="back" style="margin-bottom:4px">‹ الرئيسية</button>'
+   +'<div class="card">'
+   +'<label class="f">👤 اسمك *</label><input class="fld" data-f="employee" value="'+esc(r.employee||'')+'" placeholder="اكتب اسمك…" autocomplete="name">'
+   +'<label class="f" style="margin-top:14px">📅 تاريخ التقرير</label><input class="fld" type="date" data-f="date" value="'+esc(r.date||'')+'">'
+   +'</div>'
+   +(r._carried_from?'<div class="ci">↪ المشاكل غير المحلولة من تقرير '+esc(r._carried_from)+' انسحبت تلقائياً — تلقاها داخل الشقق ومعها عدّاد الأسابيع.</div>':'')
+   +'<div id="edSum"></div>'
+   +'<div class="card">'
+   +'<label class="f">⭐ أبرز إنجازات الأسبوع</label><textarea class="fld" rows="2" data-f="highlights" placeholder="اكتب أبرز ما سوّيته هالأسبوع…">'+esc(r.highlights||'')+'</textarea>'
+   +'<label class="f" style="margin-top:14px">⚠ شي غير معتاد؟</label><textarea class="fld" rows="2" data-f="unusual" placeholder="أي ملاحظة خارجة عن المعتاد…">'+esc(r.unusual||'')+'</textarea>'
+   +'</div>'
+   +'<div class="sect">🏠 الشقق — افتح الشقة وعبّيها</div>'
+   +'<input class="fld" data-f="_flt" value="'+esc(FLT)+'" placeholder="🔍 ابحث عن شقة…">'
+   +'<div class="optrow" id="fmRow" style="margin-top:10px"></div>'
+   +'<div id="apts"></div>'
+   +'<div style="display:flex;gap:8px;margin-top:14px"><input class="fld" id="newApt" placeholder="إضافة شقة يدوياً…" style="flex:1"><button class="btn ghost" data-act="addapt">+ شقة</button></div>';
+  document.getElementById('vEd').innerHTML=h;
+  renderFmode(); renderApts(); updateSummary();
+}
+function renderFmode(){
+  var apts=(R&&R.apartments)||[]; var nd=0; apts.forEach(function(a){ if(filled(a)) nd++; });
+  var modes=[['all','الكل ('+apts.length+')'],['todo','الباقي ('+(apts.length-nd)+')'],['done','المعبّى ('+nd+')']];
+  var h=''; modes.forEach(function(m){ h+='<button class="opt'+(FMODE===m[0]?' on':'')+'" data-act="fmode" data-v="'+m[0]+'">'+m[1]+'</button>'; });
+  var el=document.getElementById('fmRow'); if(el) el.innerHTML=h;
+}
+function renderApts(){
+  var apts=(R&&R.apartments)||[]; var f=(FLT||'').toLowerCase().trim(); var h=''; var shown=0;
+  for(var i=0;i<apts.length;i++){
+    var a=apts[i];
+    if(f&&String(a.name||'').toLowerCase().indexOf(f)<0) continue;
+    if(FMODE==='todo'&&filled(a)) continue;
+    if(FMODE==='done'&&!filled(a)) continue;
+    h+=renderApt(i); shown++;
+  }
+  if(!shown) h='<div class="card" style="text-align:center;color:var(--mut)">ما فيه شقة مطابقة</div>';
+  document.getElementById('apts').innerHTML=h;
+}
+function renderApt(i){
+  var a=R.apartments[i]; if(!a) return '';
+  var open=(EXPI===i);
+  var c=a.checks||{}; var nOk=0,nIssue=0;
+  WR_CHECK_ITEMS.forEach(function(it){ if(c[it]==='ok') nOk++; else if(c[it]==='issue') nIssue++; });
+  var openIss=(a.issues||[]).filter(function(x){ return x&&!x.resolved; });
+  var cls='apt'+((nIssue||openIss.length)?' warn':(filled(a)?' filled':''));
+  var badges='';
+  if(a.occupied) badges+='<span class="badge gr">● مؤجّرة</span>';
+  if(openIss.length) badges+='<span class="badge rd">🎯 '+openIss.length+'</span>';
+  if(nIssue) badges+='<span class="badge am">⚠ '+nIssue+'</span>';
+  if(nOk) badges+='<span class="badge gr">✓ '+nOk+'</span>';
+  if(a.status) badges+='<span class="badge gd">'+esc(a.status)+'</span>';
+  var h='<div class="'+cls+'" id="apt_'+i+'"><button class="apt-h" data-act="tog" data-i="'+i+'">'
+    +'<span class="apt-arrow">'+(open?'▾':'▸')+'</span>'
+    +'<span class="apt-name">'+esc(a.name||'')+'</span>'
+    +'<span class="apt-badges">'+badges+'</span></button>';
+  if(open) h+='<div class="apt-b">'+renderAptBody(i,a)+'</div>';
+  return h+'</div>';
+}
+function optRow(i,a,key,opts,multi){
+  var h='<div class="optrow">';
+  for(var oi=0;oi<opts.length;oi++){
+    var o=opts[oi]; var on=multi?(((a[key])||[]).indexOf(o)>=0):(a[key]===o);
+    h+='<button class="opt'+(on?' on':'')+'" data-act="opt" data-i="'+i+'" data-k="'+key+'" data-oi="'+oi+'" data-m="'+(multi?'1':'')+'">'+esc(o)+'</button>';
+  }
+  return h+'</div>';
+}
+function otherInp(i,a,key){ return '<input class="fld sm" data-af="'+key+'" data-i="'+i+'" value="'+esc(a[key]||'')+'" placeholder="أخرى — اكتب هنا…" style="margin-top:8px">'; }
+function renderAptBody(i,a){
+  var h='<div class="facts">'
+    +(a.occupied?'<span class="fact gr">🟢 مؤجّرة الآن</span>':'<span class="fact">⚪ شاغرة الآن</span>')
+    +((a.new_reviews||0)?'<span class="fact am">⭐ '+a.new_reviews+' مراجعة جديدة</span>':'')
+    +(((a.open_tickets||[]).length)?'<span class="fact rd">🔧 '+(a.open_tickets||[]).length+' تذكرة مفتوحة</span>':'')
+    +'</div>';
+  if((a.open_tickets||[]).length){
+    h+='<div class="tkls">';
+    (a.open_tickets||[]).slice(0,6).forEach(function(t){ h+='<div>• '+esc(t.title||'')+'</div>'; });
+    h+='</div>';
+  }
+  if((a.common_issues||[]).length) h+='<div class="ci">📌 <b>مشاكل متكررة من المراجعات — ركّز عليها:</b><br>'+(a.common_issues||[]).map(esc).join(' · ')+'</div>';
+  h+='<div class="sect">✅ الفحص الأسبوعي</div>'
+   +'<button class="btn ghost full mini" data-act="allok" data-i="'+i+'" style="margin-bottom:4px">✓ كل البنود سليمة</button>';
+  var c=a.checks||{};
+  for(var ci=0;ci<WR_CHECK_ITEMS.length;ci++){
+    var it=WR_CHECK_ITEMS[ci]; var cur=c[it]||'';
+    h+='<div class="chkrow"><div class="lbl">'+esc(it)+'</div><div class="seg">';
+    for(var si=0;si<WR_CHECK_STATES.length;si++){
+      var st=WR_CHECK_STATES[si];
+      h+='<button class="segb '+st[0]+(cur===st[0]?' on':'')+'" data-act="chk" data-i="'+i+'" data-ci="'+ci+'" data-v="'+st[0]+'">'+st[1]+'</button>';
+    }
+    h+='</div></div>';
+  }
+  h+='<div class="sect">الحالة العامة</div>'+optRow(i,a,'status',WR_STATUS,false)
+   +'<div class="sect">الأخطار</div>'+optRow(i,a,'risks',WR_RISKS,true)+otherInp(i,a,'risks_other')
+   +'<div class="sect">التحديثات — وش انسوى؟</div>'+optRow(i,a,'updates',WR_UPDATES,true)+otherInp(i,a,'updates_other')
+   +'<div class="sect">التحدي</div>'+optRow(i,a,'challenges',WR_CHALLENGES,true)
+   +'<div class="sect">خطة الاستجابة</div>'+optRow(i,a,'plan',WR_PLAN,true)+otherInp(i,a,'plan_other')
+   +'<div class="sect">إجراء المشرف</div>'+optRow(i,a,'supervisor',WR_SUPERVISOR,true)+otherInp(i,a,'supervisor_other')
+   +'<div class="sect">حالة الحل</div>'+optRow(i,a,'resolved',WR_RESOLVED,false)
+   +issuesHtml(i,a);
+  return h;
+}
+function issuesHtml(i,a){
+  var h='<div class="sect" style="display:flex;justify-content:space-between;align-items:center;gap:8px">🎯 مشاكل تحتاج متابعة'
+    +'<button class="btn mini" data-act="addiss" data-i="'+i+'">+ مشكلة</button></div>';
+  var iss=a.issues||[];
+  if(!iss.length) h+='<div style="font-size:13.5px;color:var(--mut)">ما فيه مشاكل مفتوحة لهالشقة.</div>';
+  for(var j=0;j<iss.length;j++){
+    var it=iss[j]; var wk=it.weeks||1;
+    h+='<div class="iss'+(it.severity==='high'?' high':'')+(it.resolved?' done':'')+'">'
+     +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+     +(wk>1?'<span class="badge rd">↪ مفتوحة من '+wk+' أسابيع</span>':'<span class="badge gd">جديدة</span>')
+     +'<span style="flex:1"></span>'
+     +'<button class="btn mini" data-act="res" data-i="'+i+'" data-j="'+j+'">'+(it.resolved?'↩ افتحها':'✓ انحلّت')+'</button>'
+     +'<button class="btn mini" data-act="deliss" data-i="'+i+'" data-j="'+j+'">🗑</button></div>'
+     +'<input class="fld sm" data-if="text" data-i="'+i+'" data-j="'+j+'" value="'+esc(it.text||'')+'" placeholder="وش المشكلة؟">'
+     +'<div class="optrow" style="margin-top:8px">';
+    for(var si=0;si<WR_SEVERITY.length;si++){
+      var sv=WR_SEVERITY[si];
+      h+='<button class="opt'+(it.severity===sv[0]?' on':'')+'" data-act="sev" data-i="'+i+'" data-j="'+j+'" data-v="'+sv[0]+'">'+sv[1]+'</button>';
+    }
+    h+='</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">'
+     +'<input class="fld sm" data-if="assignee" data-i="'+i+'" data-j="'+j+'" value="'+esc(it.assignee||'')+'" placeholder="مين المسؤول؟">'
+     +'<input class="fld sm" type="date" data-if="followup" data-i="'+i+'" data-j="'+j+'" value="'+esc(it.followup||'')+'">'
+     +'</div></div>';
+  }
+  return h;
+}
+function updateSummary(){
+  if(!R) return;
+  var apts=R.apartments||[];
+  var s=computeSum(apts); var nd=0; apts.forEach(function(a){ if(filled(a)) nd++; });
+  var pct=apts.length?Math.round(nd*100/apts.length):0;
+  function tile(l,v,col){ return '<div class="sumtile"><div class="v"'+(col?' style="color:'+col+'"':'')+'>'+v+'</div><div class="l">'+l+'</div></div>'; }
+  var h='<div class="card"><div style="display:flex;justify-content:space-between;font-size:13.5px;font-weight:700;color:var(--text-2)"><span>عبّيت '+nd+' من '+apts.length+' شقة</span><span>'+pct+'٪</span></div>'
+   +'<div class="bar" style="margin-top:8px"><i style="width:'+pct+'%"></i></div>'
+   +'<div class="sumrow">'
+   +tile('فيها مشاكل',s.withIssue,s.withIssue?'var(--amber)':'')
+   +tile('غير محلول',s.unresolved,s.unresolved?'var(--red)':'var(--green)')
+   +tile('تم حلها',s.resolved,'var(--green)')
+   +tile('مُرحّلة',s.carried,s.carried?'var(--red)':'')
+   +'</div></div>';
+  var el=document.getElementById('edSum'); if(el) el.innerHTML=h;
+  renderFmode();
+}
+function refreshAptQuiet(i){ var el=document.getElementById('apt_'+i); if(el) el.outerHTML=renderApt(i); }
+function refreshApt(i){ refreshAptQuiet(i); updateSummary(); mark(); }
+/* ---------- save ---------- */
+function save(){
+  if(!R) return;
+  var emp=(R.employee||'').trim();
+  if(!emp){ toast('👤 اكتب اسمك فوق أول'); var e=document.querySelector('[data-f=employee]'); if(e){ e.focus(); e.scrollIntoView({block:'center'}); } return; }
+  var btn=document.getElementById('saveBtn'); if(btn){ btn.disabled=true; btn.textContent='… نحفظ'; }
+  post('/api/weekly/save',{id:R.id||'',employee:emp,date:R.date||'',highlights:R.highlights||'',unusual:R.unusual||'',apartments:R.apartments||[]})
+  .then(function(r){
+    if(btn){ btn.disabled=false; btn.textContent='💾 حفظ التقرير'; }
+    if(r&&r.ok){ R=r.report; DIRTY=false; clearDraft(); try{ localStorage.setItem('ouja_wr_emp',emp); }catch(e){} document.getElementById('doneOv').classList.add('on'); }
+    else toast((r&&r.error)||'صار خطأ — جرّب مرة ثانية');
+  }).catch(function(e){ if(btn){ btn.disabled=false; btn.textContent='💾 حفظ التقرير'; } toast('تعذر الحفظ — تأكد من الشبكة'); });
+}
+/* ---------- PDF (print → save as PDF on the phone) ---------- */
+function pdfById(id){ api('/api/weekly/get?id='+encodeURIComponent(id)).then(function(x){ if(x&&x.report) printReport(x.report); }).catch(function(e){}); }
+function printReport(r){
+  var s=computeSum(r.apartments||[]);
+  var SEVT={low:'منخفض',med:'متوسط',high:'عالي'}, SEVC={low:'#16a34a',med:'#d97706',high:'#ef4444'};
+  function chipRow(lbl,arr,extra,bg){
+    var all=(arr||[]).slice(); if(extra) all.push(extra);
+    if(!all.length) return '';
+    return '<div style="font-size:12px;margin:5px 0"><b style="color:#c8a24a">'+lbl+':</b> '
+      +all.map(function(x){ return '<span style="background:'+(bg||'#2a2a32')+';color:#e8e8ec;padding:1px 8px;border-radius:99px;font-size:10.5px;margin:0 2px;display:inline-block">'+esc(x)+'</span>'; }).join('')+'</div>';
+  }
+  var aptsHtml='';
+  (r.apartments||[]).filter(filled).forEach(function(a){
+    aptsHtml+='<div style="background:#1b1b22;border:1px solid #2e2e38;border-radius:10px;padding:13px 15px;margin-bottom:9px;break-inside:avoid">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+      +'<div style="font-weight:700;font-size:14px;color:#fff">🏠 '+esc(a.name||'')+(a.occupied?' <span style="font-size:10px;color:#34d399">● مؤجّرة</span>':'')+'</div>'
+      +(a.status?'<div style="background:#2b2418;color:#e6c068;padding:2px 11px;border-radius:99px;font-size:11px;font-weight:600">'+esc(a.status)+'</div>':'')+'</div>';
+    if((a.new_reviews||0)||(a.open_tickets||[]).length)
+      aptsHtml+='<div style="font-size:11px;color:#9aa0aa;margin-bottom:5px">'
+        +((a.new_reviews||0)?('⭐ '+a.new_reviews+' مراجعة جديدة  '):'')
+        +(((a.open_tickets||[]).length)?('🔧 '+(a.open_tickets||[]).length+' تذكرة مفتوحة'):'')+'</div>';
+    var c=a.checks||{}; var issueItems=[];
+    for(var k in c){ if(c[k]==='issue') issueItems.push(k); }
+    if(issueItems.length) aptsHtml+='<div style="font-size:12px;margin:5px 0"><b style="color:#f87171">⚠ يحتاج متابعة:</b> '+issueItems.map(esc).join(' · ')+'</div>';
+    if((a.common_issues||[]).length) aptsHtml+='<div style="font-size:11px;margin:5px 0;color:#fca5a5"><b>📌 مشاكل متكررة (مراجعات):</b> '+(a.common_issues||[]).map(esc).join(' · ')+'</div>';
+    aptsHtml+=chipRow('الأخطار',a.risks,a.risks_other,'#3a2418');
+    aptsHtml+=chipRow('التحديثات',a.updates,a.updates_other,'#1b3324');
+    aptsHtml+=chipRow('التحدي',a.challenges);
+    aptsHtml+=chipRow('خطة الاستجابة',a.plan,a.plan_other);
+    aptsHtml+=chipRow('إجراء المشرف',a.supervisor,a.supervisor_other,'#2a2440');
+    if(a.resolved) aptsHtml+='<div style="font-size:12px;margin:5px 0"><b style="color:#c8a24a">حالة الحل:</b> '+esc(a.resolved)+'</div>';
+    (a.issues||[]).forEach(function(it){
+      aptsHtml+='<div style="border:1px solid '+(SEVC[it.severity]||'#888')+';background:#15151b;padding:6px 10px;margin:5px 0;border-radius:7px">'
+        +'<div style="font-size:12px;color:#fff">'+(it.resolved?'✓ ':'')+esc(it.text||'')+'</div>'
+        +'<div style="font-size:10.5px;color:#9aa0aa;margin-top:2px">خطورة: <b style="color:'+(SEVC[it.severity]||'#888')+'">'+(SEVT[it.severity]||'')+'</b>'
+        +(it.assignee?('  ·  المسؤول: '+esc(it.assignee)):'')
+        +(it.followup?('  ·  متابعة: '+esc(it.followup)):'')
+        +((it.weeks||1)>1?('  ·  <b style="color:#f87171">مفتوحة منذ '+it.weeks+' أسابيع</b>'):'')+'</div></div>';
+    });
+    aptsHtml+='</div>';
+  });
+  if(!aptsHtml) aptsHtml='<div style="color:#6b7280;padding:24px;text-align:center">لا توجد شقق معبأة بعد.</div>';
+  function statCard(lbl,val,col){ return '<div style="background:#1b1b22;border:1px solid #2e2e38;border-radius:10px;padding:10px 6px;text-align:center"><div style="font-size:22px;font-weight:800;color:'+(col||'#fff')+'">'+val+'</div><div style="font-size:10px;color:#9aa0aa;margin-top:2px">'+lbl+'</div></div>'; }
+  var summaryHtml='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px">'
+    +statCard('شقة',s.total)+statCard('فيها مشاكل',s.withIssue,'#e6c068')
+    +statCard('غير محلول',s.unresolved,s.unresolved?'#f87171':'#34d399')
+    +statCard('تم حلها',s.resolved,'#34d399')+statCard('مُرحّلة',s.carried,s.carried?'#f87171':'#fff')
+    +statCard('خطورة عالية',s.high,s.high?'#f87171':'#fff')+'</div>';
+  var extra='';
+  if(r.highlights) extra+='<div style="background:#1b2a1f;border:1px solid #2e4a36;border-radius:10px;padding:12px 15px;margin-bottom:10px"><div style="color:#34d399;font-weight:700;font-size:12px;margin-bottom:4px">⭐ أبرز الإنجازات / Highlights</div><div style="font-size:12.5px;color:#dfe3e8;white-space:pre-wrap">'+esc(r.highlights)+'</div></div>';
+  if(r.unusual) extra+='<div style="background:#2a2418;border:1px solid #4a3e26;border-radius:10px;padding:12px 15px;margin-bottom:14px"><div style="color:#e6c068;font-weight:700;font-size:12px;margin-bottom:4px">⚠ شيء غير معتاد / Unusual</div><div style="font-size:12.5px;color:#dfe3e8;white-space:pre-wrap">'+esc(r.unusual)+'</div></div>';
+  var html='<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>Ouja — تقرير '+esc(r.employee||'')+'</title>'
+    +'<style>*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;background:#0e0e12;color:#dfe3e8;padding:24px;max-width:920px;margin:auto;line-height:1.6}'
+    +'.hd{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #c8a24a;padding-bottom:14px;margin-bottom:20px}'
+    +'.brand{font-size:26px;font-weight:800;color:#c8a24a;letter-spacing:.5px}'
+    +'@media print{body{padding:0;background:#0e0e12 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:1cm}}</style></head><body>'
+    +'<div class="hd"><div><div class="brand">عوجا · OUJA</div><div style="font-size:13px;color:#9aa0aa;margin-top:4px">التقرير الأسبوعي · Weekly Report</div></div>'
+    +'<div style="text-align:end;font-size:12px;color:#9aa0aa">👤 '+esc(r.employee||'—')+'<br>📅 '+esc(r.date||'')+'</div></div>'
+    +summaryHtml+extra+aptsHtml
+    +'<div style="margin-top:22px;text-align:center;color:#5b5f68;font-size:10px">عوجا للوحدات السكنية · Ouja Residence — '+esc(r.date||'')+'</div>'
+    +'</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ toast('اسمح بفتح النوافذ عشان التحميل'); return; }
+  w.document.write(html); w.document.close();
+  toast('اختر «حفظ PDF» من نافذة الطباعة');
+  setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} },650);
+}
+/* ---------- delegated events (no inline onclick) ---------- */
+document.addEventListener('click', function(ev){
+  var el=ev.target.closest('[data-act]'); if(!el) return;
+  var act=el.getAttribute('data-act');
+  var i=parseInt(el.getAttribute('data-i')||'-1',10);
+  var j=parseInt(el.getAttribute('data-j')||'-1',10);
+  var v=el.getAttribute('data-v')||'';
+  if(act==='new') return newReport();
+  if(act==='resume') return resumeDraft();
+  if(act==='open') return openReport(el.getAttribute('data-id'));
+  if(act==='pdf') return pdfById(el.getAttribute('data-id'));
+  if(act==='back'){ if(DIRTY&&!confirm('عندك تعديلات ما انحفظت — ترجع بدونها؟ (مسودتك محفوظة مؤقتاً بجوالك)')) return; loadHome(); return; }
+  if(act==='fmode'){ FMODE=v; renderFmode(); renderApts(); return; }
+  if(act==='save') return save();
+  if(act==='pdfCur'){ if(R) printReport(R); return; }
+  if(act==='doneHome'){ document.getElementById('doneOv').classList.remove('on'); loadHome(); return; }
+  if(act==='donePdf'){ document.getElementById('doneOv').classList.remove('on'); if(R) printReport(R); return; }
+  if(!R) return;
+  if(act==='addapt'){
+    var inp=document.getElementById('newApt'); var nm=((inp&&inp.value)||'').trim(); if(!nm) return;
+    R.apartments.push(blankApt(nm,null));
+    if(inp) inp.value='';
+    EXPI=R.apartments.length-1; FMODE='all'; FLT='';
+    var sf=document.querySelector('[data-f=_flt]'); if(sf) sf.value='';
+    renderFmode(); renderApts(); updateSummary(); mark();
+    var ne=document.getElementById('apt_'+EXPI); if(ne) ne.scrollIntoView({block:'center'});
+    return;
+  }
+  var a=R.apartments[i]; if(!a) return;
+  if(act==='tog'){
+    var old=EXPI; EXPI=(EXPI===i?-1:i);
+    if(old>=0&&old!==i) refreshAptQuiet(old);
+    refreshAptQuiet(i);
+    if(EXPI===i){ var e2=document.getElementById('apt_'+i); if(e2) e2.scrollIntoView({behavior:'smooth',block:'start'}); }
+    return;
+  }
+  if(act==='allok'){
+    a.checks=a.checks||{};
+    var all=WR_CHECK_ITEMS.every(function(it){ return a.checks[it]==='ok'; });
+    WR_CHECK_ITEMS.forEach(function(it){ a.checks[it]=all?'':'ok'; });
+    refreshApt(i); return;
+  }
+  if(act==='chk'){
+    var it=WR_CHECK_ITEMS[parseInt(el.getAttribute('data-ci'),10)];
+    a.checks=a.checks||{};
+    a.checks[it]=(a.checks[it]===v)?'':v;
+    refreshApt(i); return;
+  }
+  if(act==='opt'){
+    var kk=el.getAttribute('data-k'); var o=OPTS[kk][parseInt(el.getAttribute('data-oi'),10)];
+    if(el.getAttribute('data-m')){ a[kk]=a[kk]||[]; var x=a[kk].indexOf(o); if(x>=0) a[kk].splice(x,1); else a[kk].push(o); }
+    else a[kk]=(a[kk]===o?'':o);
+    refreshApt(i); return;
+  }
+  if(act==='addiss'){ a.issues=a.issues||[]; a.issues.push({text:'',severity:'med',assignee:'',followup:'',weeks:1,carried:false,resolved:false}); refreshApt(i); return; }
+  if(act==='deliss'){ (a.issues||[]).splice(j,1); refreshApt(i); return; }
+  if(act==='res'){ var z=(a.issues||[])[j]; if(z){ z.resolved=!z.resolved; refreshApt(i); } return; }
+  if(act==='sev'){ var z2=(a.issues||[])[j]; if(z2){ z2.severity=v; refreshApt(i); } return; }
+});
+document.addEventListener('input', function(ev){
+  var el=ev.target; if(!el||!el.getAttribute) return;
+  var f=el.getAttribute('data-f');
+  if(f){
+    if(f==='_flt'){ FLT=el.value; renderApts(); return; }
+    if(R){ R[f]=el.value; mark(); }
+    return;
+  }
+  if(!R) return;
+  var i=parseInt(el.getAttribute('data-i')||'-1',10);
+  var af=el.getAttribute('data-af');
+  if(af){ var a=R.apartments[i]; if(a){ a[af]=el.value; DIRTY=true; saveDraft(); } return; }
+  var f2=el.getAttribute('data-if');
+  if(f2){
+    var a2=R.apartments[i]; var j=parseInt(el.getAttribute('data-j')||'-1',10);
+    var it=a2&&(a2.issues||[])[j];
+    if(it){ it[f2]=el.value; DIRTY=true; saveDraft(); }
+    return;
+  }
+});
+loadHome();
 </script></body></html>"""
 
 CLEANING_HTML = """<!doctype html>
@@ -36124,8 +36683,88 @@ async def _api_quotes_delete(request):
     return _json({"ok": True})
 
 # ===================== WEEKLY REPORTS API =====================
-async def _api_weekly_list(request):
+# --- Weekly-report employee link (boot-persistent token, mirrors the invest link) ---
+# The owner shares ONE mobile link (/weekly?k=…) with the team; employees open it on
+# their phone, fill the report and download it — no dashboard login needed.
+_weekly_link = _load_json("weekly_token.json", {}) or {}
+
+def _weekly_token_get():
+    tok = (_weekly_link.get("token") or "").strip()
+    if tok:
+        return tok
+    tok = _secrets_mod.token_urlsafe(24)
+    _weekly_link.update({"token": tok,
+                         "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+                         "source": "generated",
+                         "regen_log": _weekly_link.get("regen_log") or []})
+    _save_json("weekly_token.json", _weekly_link)
+    print("weekly: employee link token ready — share /weekly?k=…")
+    return tok
+
+def _weekly_token_regenerate(actor=""):
+    old = (_weekly_link.get("token") or "")[-6:]
+    _weekly_link.setdefault("regen_log", []).append(
+        {"ts": datetime.now(TZ).isoformat(timespec="seconds"), "by": (actor or "")[:60],
+         "old_suffix": old})
+    _weekly_link["regen_log"] = _weekly_link["regen_log"][-20:]
+    _weekly_link["token"] = _secrets_mod.token_urlsafe(24)
+    _weekly_link["source"] = "regenerated"
+    _save_json("weekly_token.json", _weekly_link)
+    log_event("ops", f"رابط التقرير الأسبوعي أُعيد توليده · بواسطة {actor or '?'}")
+    return _weekly_link["token"]
+
+def _weekly_token_ok(request):
+    tok = request.query.get("k") or ""
+    return bool(tok) and hmac.compare_digest(str(tok), str(_weekly_token_get()))
+
+def _weekly_auth(request):
+    """Read access to weekly reports: dashboard session OR the shared employee link token."""
+    return _dash_auth(request) or _weekly_token_ok(request)
+
+# Branded bilingual gate page — employees never see raw 401 text or JSON.
+_WEEKLY_DENIED_HTML = """<!doctype html><html lang="ar" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>عوجا · Ouja</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F7F1E6;color:#2F241B;font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;text-align:center}
+.c{max-width:420px;background:#FFFDF8;border:1px solid #E5D8C4;border-radius:18px;padding:36px 28px;box-shadow:0 8px 28px rgba(47,36,27,.08)}
+.logo{font-size:30px;font-weight:700;color:#B88935;margin-bottom:14px}
+h1{font-size:17px;margin:0 0 8px}p{font-size:13.5px;color:#7A6A58;line-height:1.8;margin:0}</style></head>
+<body><div class="c"><div class="logo">عوجا · OUJA</div>
+<h1>هذا الرابط غير صالح أو منتهي</h1>
+<p>اطلب من الإدارة رابط محدّث لصفحة التقرير الأسبوعي.</p>
+<p style="margin-top:14px;direction:ltr">This link is invalid or expired —<br>ask management for an updated weekly-report link.</p>
+</div></body></html>"""
+
+async def _handle_weekly_page(request):
+    # Gated: the shareable employee token (?k=) or an authenticated dashboard session.
+    if not (_weekly_token_ok(request) or _dash_auth(request)):
+        return web.Response(text=_WEEKLY_DENIED_HTML, content_type="text/html", status=403)
+    return web.Response(text=WEEKLY_HTML, content_type="text/html")
+
+async def _api_weekly_link(request):
+    """The employee mobile link. GET → current URL (any logged-in session).
+    POST regenerate → admin only (kills every previously shared link)."""
     if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if request.method == "POST":
+        if not _user_can(request, "users", "write"):
+            return _json({"error": "forbidden — admin only"}, 403)
+        b = await _read_body(request)
+        if (b.get("action") or "") == "regenerate":
+            _weekly_token_regenerate(_req_actor(request))
+        else:
+            return _json({"error": "bad action"}, 400)
+    tok = _weekly_token_get()
+    return _json({"ok": True, "url": "/weekly?k=" + tok,
+                  "source": _weekly_link.get("source"),
+                  "created_at": _weekly_link.get("created_at"),
+                  "regens": len(_weekly_link.get("regen_log") or []),
+                  "can_regenerate": _user_can(request, "users", "write")})
+
+async def _api_weekly_list(request):
+    if not _weekly_auth(request):
         return _json({"error": "unauthorized"}, 401)
     items = list(_weekly_reports.values())
     items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
@@ -36141,7 +36780,7 @@ async def _api_weekly_list(request):
     return _json({"reports": out, "count": len(items)})
 
 async def _api_weekly_get(request):
-    if not _dash_auth(request):
+    if not _weekly_auth(request):
         return _json({"error": "unauthorized"}, 401)
     rid = request.query.get("id", "")
     r = _weekly_reports.get(rid)
@@ -36187,7 +36826,7 @@ async def _api_weekly_template(request):
     current occupancy, and any unresolved issues carried over from the previous
     week's report (with a week counter). Lets the employee just tick the checklist
     and review what the system already knows instead of starting from a blank page."""
-    if not _dash_auth(request):
+    if not _weekly_auth(request):
         return _json({"error": "unauthorized"}, 401)
     seed = _reviews_insights or {}
     seed_apts = seed.get("apartments", {}) or {}
@@ -36272,7 +36911,9 @@ async def _api_weekly_template(request):
                   "carried_from": (prior or {}).get("date")})
 
 async def _api_weekly_save(request):
-    if not _dash_auth(request):
+    # Exempted from the role middleware (see _ROLE_EXEMPT_WRITES) so the employee
+    # link token works; dashboard sessions still need write access to 'weekly'.
+    if not (_weekly_token_ok(request) or _user_can(request, "weekly", "write")):
         return _json({"error": "unauthorized"}, 401)
     b = await _read_body(request)
     rid = (b.get("id") or "").strip()
@@ -45149,6 +45790,7 @@ async def _handle_robots(request):
            "Disallow: /dashboard\n"
            "Disallow: /invest\n"
            "Disallow: /oujact-route\n"
+           "Disallow: /weekly\n"
            "Disallow: /cleaning\n"
            "Disallow: /hook/\n"
            "Disallow: /api/\n"
@@ -47546,6 +48188,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/photo-upload",              # cleaning-team token auth
     "/api/oujact/report-submit",             # cleaning-team token auth
     "/api/oujact/status",                    # team token OR dashboard session
+    "/api/weekly/save",                      # employee link token OR dashboard session (checked in handler)
 }
 _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
@@ -48167,6 +48810,9 @@ async def start_web_server():
         app.router.add_post("/api/quotes/save", _api_quotes_save)
         app.router.add_post("/api/quotes/delete", _api_quotes_delete)
         # Weekly reports
+        app.router.add_get("/weekly", _handle_weekly_page)                  # employee mobile page (token-gated)
+        app.router.add_get("/api/weekly/link", _api_weekly_link)
+        app.router.add_post("/api/weekly/link", _api_weekly_link)
         app.router.add_get("/api/weekly/list", _api_weekly_list)
         app.router.add_get("/api/weekly/template", _api_weekly_template)
         app.router.add_get("/api/weekly/get", _api_weekly_get)
