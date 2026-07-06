@@ -36,10 +36,17 @@ _ERR_LABELS = {
 _EXT_MARKERS = ("خارجي", "خارجى", "خارجية", "بوابة", "البوابة", "external", "gate")
 
 
+# Invisible bidi control marks (RLM/LRM/embedding/isolates) — Airbnb/WhatsApp insert
+# them around «#» in RTL text; they broke the live C08 detection (2026-07-05).
+_BIDI_CTRL = re.compile("[‎‏‪-‮⁦-⁩؜]")
+# RTL typing can store the hash on EITHER side of the digit run («1234#» or «#1234»)
+_CODE_PAT = re.compile(r"\d{3,10}\s*#|#\s*\d{3,10}")
+
+
 def _has_unit_code(body):
-    text = body or ""
+    text = _BIDI_CTRL.sub("", body or "")
     prev_end = 0
-    for m in re.finditer(r"\d{3,10}\s*#", text):
+    for m in _CODE_PAT.finditer(text):
         # the marker context is what sits between the previous code and this one —
         # so «الكود الخارجي 1234# وكود الشقة 5678#» counts the second code
         ctx = text[max(prev_end, m.start() - 40):m.start()]
@@ -159,17 +166,16 @@ def compute_flags(snap, now):
     for a in snap.get("arrivals") or []:
         h = float(a.get("hours_until") or 0)
         emp = a.get("employee") or "غير معروف"
+        when = ("الضيف واصل من %s" % _h_label(-h)) if h < 0 else ("الضيف يوصل خلال %s" % _h_label(h))
         if (a.get("code_mode") == "manual") and not a.get("code_found"):
             sev = "critical" if h <= CODE_CRIT_H else "warn"
             add("code:%s:%s" % (a.get("listing_id"), a.get("arrival_date")), sev,
-                "🔑 كود ما انرسل: %s — 👤 %s — الضيف يوصل خلال %s"
-                % (a.get("unit"), emp, _h_label(h)),
+                "🔑 كود ما انرسل: %s — 👤 %s — %s" % (a.get("unit"), emp, when),
                 mention_name=a.get("employee") or "", listing=str(a.get("listing_id") or ""))
         if not a.get("cleaning_ok", True):
             sev = "critical" if h <= CLEAN_CRIT_H else "warn"
             add("clean:%s:%s" % (a.get("listing_id"), a.get("arrival_date")), sev,
-                "🧹 الشقة مو جاهزة: %s — 👤 %s — الضيف يوصل خلال %s"
-                % (a.get("unit"), emp, _h_label(h)),
+                "🧹 الشقة مو جاهزة: %s — 👤 %s — %s" % (a.get("unit"), emp, when),
                 mention_name=a.get("employee") or "", listing=str(a.get("listing_id") or ""))
 
     live_esc, _ = split_live_stale(snap.get("escalations"))
@@ -357,7 +363,10 @@ def render_embeds(flags, snap, ts_label):
             elif code_key in sev_by_key or clean_key in sev_by_key:
                 has_warn = True
             if a.get("code_mode") == "manual":
-                code = "✅ مرسل" if a.get("code_found") else "🔴 ما انرسل"
+                if a.get("code_found"):
+                    code = "🟡 أُرسل متأخر" if a.get("code_late") else "✅ مرسل"
+                else:
+                    code = "🔴 ما انرسل"
             else:
                 code = "🔁 تلقائي"
             clean = "✅ جاهزة" if a.get("cleaning_ok", True) else "🔴 مو جاهزة"

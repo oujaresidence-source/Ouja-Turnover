@@ -60,6 +60,43 @@ class TestCodeClassifier(unittest.TestCase):
         r = E.classify_code_send(msgs)
         self.assertEqual(r["sender"], "نورة")
 
+    def test_hash_before_digits_rtl_order(self):
+        # RTL typing stores «#335533» though the phone DISPLAYS «335533#»
+        self.assertTrue(E.classify_code_send([msg("كود دخول الشقة: #335533")])["found"])
+
+    def test_bidi_control_chars_between_digits_and_hash(self):
+        # Airbnb inserts invisible direction marks (RLM/LRM) around the «#»
+        body = "كود دخول الشقة: 335533" + chr(0x200F) + "#"
+        self.assertTrue(E.classify_code_send([msg(body)])["found"])
+
+    def test_noura_real_message_c08(self):
+        # The literal C08 MJ message the watchdog missed live (2026-07-05, IMG_7095)
+        body = ("أهلاً وسهلاً بك في بيتك الثاني 🏡\n\n"
+                "المبنى C\n"
+                "كود المبنى الخارجي:\n"
+                "9999#111111\n\n"
+                "كود دخول الشقة:\n\n"
+                "335533#\n\n"
+                "نتمنى لك إقامة مريحة\n\n"
+                "Wi-Fi: Ouja residence\n"
+                "Password: Ouja1234")
+        r = E.classify_code_send([msg(body, sender="Noura")])
+        self.assertTrue(r["found"])
+        self.assertEqual(r["sender"], "Noura")
+
+    def test_noura_message_rtl_logical_variant(self):
+        # same message if the stored logical order flips both codes
+        body = ("المبنى C\n"
+                "كود المبنى الخارجي:\n"
+                "111111#9999\n\n"
+                "كود دخول الشقة:\n\n"
+                "#335533")
+        self.assertTrue(E.classify_code_send([msg(body)])["found"])
+
+    def test_external_only_still_excluded_both_orders(self):
+        self.assertFalse(E.classify_code_send([msg("كود المبنى الخارجي: #9999")])["found"])
+        self.assertFalse(E.classify_code_send([msg("كود المبنى الخارجي: 9999#")])["found"])
+
 
 class TestAutomationFP(unittest.TestCase):
     def test_normalize_strips_digits_and_greeting_name(self):
@@ -112,6 +149,21 @@ class TestFlags(unittest.TestCase):
         self.assertEqual(crit[0]["key"], "code:7:2026-07-05")
         self.assertIn("نورة", crit[0]["text"])
         self.assertEqual(crit[0]["mention_name"], "نورة")
+
+    def test_arrived_guest_missing_code_text_and_severity(self):
+        flags = E.compute_flags(snap(arrivals=[arrival(hours_until=-4.5, arrived=True)]), NOW)
+        f = [x for x in flags if x["key"].startswith("code:")][0]
+        self.assertEqual(f["severity"], "critical")
+        self.assertIn("واصل من", f["text"])
+
+    def test_late_sent_code_no_flag_but_tagged_in_embeds(self):
+        s = snap(arrivals=[arrival(code_found=True, code_sender="نورة", code_late=True,
+                                   hours_until=-2.0, arrived=True)])
+        flags = E.compute_flags(s, NOW)
+        self.assertEqual([f for f in flags if f["key"].startswith("code:")], [])
+        embeds = E.render_embeds(flags, s, "10:00 م")
+        arr = [e for e in embeds if "وصول" in e["title"]][0]
+        self.assertIn("متأخر", arr["desc"])
 
     def test_manual_code_missing_later_is_warn(self):
         flags = E.compute_flags(snap(arrivals=[arrival(hours_until=8.0)]), NOW)

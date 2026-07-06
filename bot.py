@@ -375,7 +375,7 @@ ESCALATION_REPING_MAX_PINGS = int(os.environ.get("ESCALATION_REPING_MAX_PINGS",
 ESCALATION_QUIET_OFFHOURS = os.environ.get("ESCALATION_QUIET_OFFHOURS", "1") in ("1", "true", "True", "yes")  # no nagging outside working hours (no 2 AM spam)
 ESCALATION_CHECK_SEC  = int(os.environ.get("ESCALATION_CHECK_SEC", "60"))     # how often the loop CHECKS (not how often it nags)
 CLAIM_NAMES = [n.strip() for n in os.environ.get(
-    "CLAIM_NAMES", "اسيل,فيصل,ماثر,نوره,ناصر,محمد").split(",") if n.strip()]
+    "CLAIM_NAMES", "اسيل,فيصل,ماثر,نوره,ناصر,محمد,عهود").split(",") if n.strip()]
 # When someone claims an escalation, DM them a ready-to-send reply in the owner's warm style.
 MANAGER_SCRIPT = os.environ.get("MANAGER_SCRIPT", "1") in ("1", "true", "True", "yes")
 
@@ -2590,10 +2590,12 @@ def compute_tonight_empty():
     items.sort(key=lambda x: x["name"])
     return items
 
-def compute_arrivals_with_status(window_hours=36):
+def compute_arrivals_with_status(window_hours=36, lookback_hours=4):
     """For each upcoming arrival inside `window_hours`, attach the agreement
     signing status, the conversation id, and how far away check-in is. Powers
-    the new home-page arrivals timeline."""
+    the new home-page arrivals timeline. `lookback_hours` keeps already-arrived
+    guests visible (the watchdog passes 24 so a late-sent door code is still
+    detected and logged instead of the arrival silently leaving the list)."""
     now = datetime.now(TZ)
     cutoff = now + timedelta(hours=window_hours)
     today_iso = now.date().isoformat()
@@ -2617,7 +2619,7 @@ def compute_arrivals_with_status(window_hours=36):
             continue
         hour = parse_hour(r.get("checkInTime"), 15)
         ci_dt = datetime(arrival.year, arrival.month, arrival.day, min(hour, 23), 0, tzinfo=TZ)
-        if not (now - timedelta(hours=4) <= ci_dt <= cutoff):
+        if not (now - timedelta(hours=lookback_hours) <= ci_dt <= cutoff):
             continue
         lid = r.get("listingMapId")
         unit_name = listings.get(lid) or r.get("listingName") or f"unit-{lid}"
@@ -53791,15 +53793,17 @@ def _watchdog_snapshot(open_maint=None):
         snap["arrivals"] = []
         snap["codes_summary"] = {"manual_total": 0, "sent": 0}
         open_by_lid = open_maint          # open Discord maint rooms (owner rule), not the tracker
-        arrivals = compute_arrivals_with_status(window_hours=WATCHDOG_CODE_LOOKAHEAD_H)
+        arrivals = compute_arrivals_with_status(window_hours=WATCHDOG_CODE_LOOKAHEAD_H,
+                                                lookback_hours=24)   # whole day — catch LATE sends
         manual = _watchdog.db.manual_listing_ids()
         for a in arrivals:
             lid = str(a.get("listing_id") or "")
             mode = "manual" if lid in manual else "auto"
             ci = a.get("checkin_iso") or ""
+            h_until = float(a.get("hours_until") or 0)
             row = {"unit": a.get("unit"), "guest": a.get("guest"), "listing_id": lid,
-                   "hours_until": a.get("hours_until"), "code_mode": mode,
-                   "code_found": False, "code_sender": "",
+                   "hours_until": h_until, "arrived": h_until < 0, "code_mode": mode,
+                   "code_found": False, "code_sender": "", "code_late": False,
                    "cleaning_ok": _wd_cleaning_ok(a.get("listing_id"), today_iso),
                    "employee": _wd_employee_for(a.get("unit") or "", cover),
                    "arrival_date": (ci or today_iso)[:10],
@@ -53815,14 +53819,25 @@ def _watchdog_snapshot(open_maint=None):
                         msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
                         r = _watchdog.engine.classify_code_send(msgs)
                         if r["found"]:
+                            # on-time = the code message predates check-in (timestamps, not
+                            # detection time — a late send discovered later stays "late")
+                            late = False
+                            try:
+                                sent_dt = _parse_msg_dt(r["sent_at"])
+                                ci_dt = datetime.fromisoformat(ci) if ci else None
+                                if sent_dt and ci_dt:
+                                    late = sent_dt > ci_dt
+                            except Exception:
+                                late = h_until < 0
                             row["code_found"] = True
                             row["code_sender"] = r["sender"]
+                            row["code_late"] = late
                             snap["codes_summary"]["sent"] += 1
                             _watchdog.db.log_code_send({
                                 "listing_id": lid, "reservation_id": a.get("reservation_id"),
                                 "guest_name": a.get("guest"), "sent_by": r["sender"],
                                 "sent_at": r["sent_at"], "arrival_ts": ci,
-                                "on_time": 1 if float(a.get("hours_until") or 0) > 0 else 0})
+                                "on_time": 0 if late else 1})
                         _wd_msg_stats_pass(cid, msgs, today_iso)
                     except Exception as e:
                         print(f"[watchdog] code scan error ({cid}):", e)
@@ -54083,7 +54098,7 @@ async def watchdog_loop():
         print("[watchdog] web wiring never became ready — skipping this cycle")
         return
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v6"   # bump suffix on layout changes → next deploy posts immediately
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v7"   # bump suffix on layout changes → next deploy posts immediately
     if meta.get("mode") != mode_now:
         meta.pop("summary_msg_id", None)      # layout/mode change → NEW message (notifies), not a silent edit
     if (meta.get("mode") == mode_now

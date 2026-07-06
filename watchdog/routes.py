@@ -311,8 +311,10 @@ function renderReport(s){
   arrs.forEach(function(a){
     var bad = (a.code_mode === 'manual' && !a.code_found) || a.cleaning_ok === false;
     var tags = [personTag(a.employee)];
-    if (a.code_mode === 'manual') tags.push(a.code_found ? tag('good', '🔑 الكود مرسل') : tag('bad', '🔑 الكود ما انرسل'));
-    else tags.push(tag('', '🔑 تلقائي'));
+    if (a.code_mode === 'manual'){
+      if (a.code_found) tags.push(a.code_late ? tag('amber', '🔑 أرسل متأخر') : tag('good', '🔑 الكود مرسل'));
+      else tags.push(tag('bad', '🔑 الكود ما انرسل'));
+    } else tags.push(tag('', '🔑 تلقائي'));
     tags.push(a.cleaning_ok === false ? tag('bad', '🧹 مو جاهزة') : tag('good', '🧹 جاهزة'));
     tags.push(a.signed ? tag('good', '📄 العقد موقّع') : tag('amber', '📄 العقد غير موقّع'));
     if (a.nights) tags.push(tag('', nightsLabel(a.nights)));
