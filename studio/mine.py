@@ -105,6 +105,29 @@ def _guest_name(c):
     return r.get("guestName") or c.get("recipientName") or ""
 
 
+def _resolve_status(c, cache):
+    """Reservation status for a conversation. Live Hostaway conversations usually
+    do NOT embed a reservation object (the 2026-07-06 all-skipped bug), so when
+    the embedded status is missing we ask /reservations/{id} — the authority.
+    Returns '' when the conversation has no reservation at all (true inquiry chat)."""
+    st = engine._res_status(c)
+    if st:
+        return st
+    rid = engine.reservation_id(c)
+    if not rid:
+        return ""
+    if rid in cache:
+        return cache[rid]
+    st = ""
+    try:
+        data = HOST.require("api_get")("/reservations/%s" % rid)
+        st = str(((data or {}).get("result") or {}).get("status") or "").strip()
+    except Exception as e:
+        print("[studio] reservation %s status fetch error: %s" % (rid, e))
+    cache[rid] = st
+    return st
+
+
 def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX_PREMIUM):
     """Blocking scan (called inside a daemon thread). Idempotent via studio_scanned."""
     api_get = HOST.require("api_get")
@@ -121,10 +144,19 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
        premium_used=0, errors=0, done=False, error="", started_at=_now_iso(),
        finished_at="", last_unit="", target=target)
     try:
+        # One-time heal (2026-07-06): the first live scan mis-labelled everything
+        # 'skipped_inquiry' because conversations don't embed a reservation object.
+        # Purge that legacy verdict so those conversations get re-evaluated; the
+        # fixed code writes 'skip_inquiry' (different name → never purged again).
+        healed = db.execute("DELETE FROM studio_scanned WHERE verdict='skipped_inquiry'")
+        if healed:
+            print("[studio] healed %s legacy skipped_inquiry rows" % healed)
+
         convos = _pull_conversations(PULL_CAP)
         seen = db.scanned_ids()
         _p(phase="scan")
         scanned = qualified = stories_n = premium = errors = 0
+        res_cache = {}
 
         for c in convos:
             if qualified >= target:
@@ -146,11 +178,20 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
                 _p(errors=errors)
                 continue
 
-            ok, why = engine.qualifies(c, msgs)
             scanned += 1
+            # cheap thread filter FIRST (no extra API call), then resolve the
+            # reservation status (may cost one /reservations/{id} call).
+            ok, why = engine.qualifies_msgs(msgs)
+            res_status = ""
+            if ok:
+                res_status = _resolve_status(c, res_cache)
+                if not engine.is_stay(res_status):
+                    ok, why = False, "inquiry"
             if not ok:
-                db.mark_scanned(cid, lid, unit, guest, engine._res_status(c),
-                                _stay_dates(c), len(msgs), "skipped_" + why, ts=ts)
+                db.mark_scanned(cid, lid, unit, guest, res_status,
+                                _stay_dates(c), len(msgs),
+                                ("skip_" + why) if why == "inquiry" else ("skipped_" + why),
+                                ts=ts)
                 _p(scanned=scanned)
                 continue
 
@@ -161,7 +202,7 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
                 TRIAGE_SYSTEM, "المحادثة (شقة: %s):\n\n%s" % (unit, transcript),
                 max_tokens=300, model=model_fast))
             if not triage:
-                db.mark_scanned(cid, lid, unit, guest, engine._res_status(c),
+                db.mark_scanned(cid, lid, unit, guest, res_status,
                                 _stay_dates(c), len(msgs), "error", ts=ts)
                 errors += 1
                 _p(errors=errors)
@@ -186,7 +227,7 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
             elif triage["story"] and triage["score"] >= min_score:
                 verdict = "story_over_budget"   # good story, premium budget spent
 
-            db.mark_scanned(cid, lid, unit, guest, engine._res_status(c),
+            db.mark_scanned(cid, lid, unit, guest, res_status,
                             _stay_dates(c), len(msgs), verdict, triage["score"],
                             triage["type"], engine.scrub_names(triage["one_line"], guest), ts)
 

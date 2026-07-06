@@ -45,17 +45,37 @@ def _msg_ts(m):
     return str(m.get("date") or m.get("insertedOn") or m.get("latestMessageDate") or "")
 
 
-def qualifies(convo, msgs, min_msgs=MIN_MSGS):
-    """(ok, reason). reason in ('ok','inquiry','short','monologue')."""
-    st = _res_status(convo)
-    if st not in STAY_STATUSES:
-        return False, "inquiry"
+def is_stay(status):
+    """True when the reservation status means a real stay was booked."""
+    return str(status or "").strip() in STAY_STATUSES
+
+
+def reservation_id(convo):
+    c = convo or {}
+    r = c.get("reservation")
+    rid = c.get("reservationId") or (r.get("id") if isinstance(r, dict) else None)
+    return str(rid) if rid else ""
+
+
+def qualifies_msgs(msgs, min_msgs=MIN_MSGS):
+    """(ok, reason) on the thread alone. reason in ('ok','short','monologue')."""
     real = [m for m in (msgs or []) if (m.get("body") or "").strip()]
     if len(real) < min_msgs:
         return False, "short"
     if sum(1 for m in real if _is_inbound(m)) < MIN_INBOUND:
         return False, "monologue"
     return True, "ok"
+
+
+def qualifies(convo, msgs, min_msgs=MIN_MSGS):
+    """(ok, reason). reason in ('ok','inquiry','short','monologue').
+    NOTE: only trusts a status embedded on the conversation — live Hostaway
+    conversations usually DON'T embed one, so the miner resolves the status
+    via /reservations/{id} instead of calling this (2026-07-06 fix: the first
+    live scan skipped all 1500 conversations as 'inquiry')."""
+    if not is_stay(_res_status(convo)):
+        return False, "inquiry"
+    return qualifies_msgs(msgs, min_msgs)
 
 
 # transcript ------------------------------------------------------------------

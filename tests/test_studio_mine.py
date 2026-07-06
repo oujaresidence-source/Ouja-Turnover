@@ -27,20 +27,31 @@ def _msgs(n_in, n_out):
     return out
 
 
+# Live Hostaway shape (the 2026-07-06 all-skipped bug): conversations carry a
+# top-level reservationId but NO embedded reservation object — status must be
+# resolved via GET /reservations/{id}.
 CONVOS = [
-    {"id": 1, "listingMapId": 101,
-     "reservation": {"status": "confirmed", "guestName": "سعد الدوسري"}},
-    {"id": 2, "listingMapId": 101,
-     "reservation": {"status": "inquiry", "guestName": "خالد"}},
-    {"id": 3, "listingMapId": 102,
-     "reservation": {"status": "new", "guestName": "نايف"}},
+    {"id": 1, "listingMapId": 101, "reservationId": 9001,
+     "recipientName": "سعد الدوسري"},
+    {"id": 2, "listingMapId": 101, "reservationId": 9002,
+     "recipientName": "خالد"},                       # inquiry per /reservations
+    {"id": 3, "listingMapId": 102, "reservationId": 9003,
+     "recipientName": "نايف"},                        # short thread
+    {"id": 4, "listingMapId": 102,
+     "recipientName": "مجهول"},                       # long thread, NO reservation
 ]
-MSGS = {1: _msgs(4, 4), 2: _msgs(4, 4), 3: _msgs(2, 2)}   # 3 = short thread
+MSGS = {1: _msgs(4, 4), 2: _msgs(4, 4), 3: _msgs(2, 2), 4: _msgs(4, 4)}
+RES = {9001: "modified", 9002: "inquiry", 9003: "new"}
+RES_LOOKUPS = []
 
 
 def _fake_api_get(path, params=None):
     if path == "/conversations":
         return {"result": CONVOS if (params or {}).get("offset", 0) == 0 else []}
+    if path.startswith("/reservations/"):
+        rid = int(path.split("/")[2])
+        RES_LOOKUPS.append(rid)
+        return {"result": {"id": rid, "status": RES[rid]}}
     cid = int(path.split("/")[2])
     return {"result": MSGS[cid]}
 
@@ -73,12 +84,17 @@ class TestStudioMine(unittest.TestCase):
         HOST.model_premium = "premium-model"
 
     def test_scan_pipeline_then_rescan(self):
+        # poisoned legacy row (the 2026-07-06 bug) must be healed + re-evaluated
+        sdb.mark_scanned("1", "101", "Ouja | Test A", "سعد الدوسري", "",
+                         "", 8, "skipped_inquiry", ts="2026-07-06 14:40:00")
         mine.run_scan(target=300)
         counts = sdb.scan_counts()
-        self.assertEqual(counts.get("story"), 1)            # convo 1
+        self.assertEqual(counts.get("story"), 1)            # convo 1 (healed + mined)
         self.assertEqual(counts.get("skipped_short"), 1)    # convo 3
-        # inquiry (convo 2) is skipped BEFORE fetch? no — after fetch, by status
-        self.assertEqual(counts.get("skipped_inquiry"), 1)
+        self.assertEqual(counts.get("skip_inquiry"), 2)     # convo 2 + no-reservation 4
+        self.assertNotIn("skipped_inquiry", counts)         # legacy verdict purged
+        # short thread (convo 3) must NOT cost a /reservations lookup
+        self.assertNotIn(9003, RES_LOOKUPS)
         rows = sdb.stories()
         self.assertEqual(len(rows), 1)
         s = rows[0]
