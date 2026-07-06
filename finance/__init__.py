@@ -136,16 +136,51 @@ def version_info():
 
 
 # Branded "open it from the dashboard" gate — same idea as the invest 403 page.
+# NOTE: normal triple-quoted string — the embedded <script> must contain ZERO backslash
+# escapes (same trap class as DASHBOARD_HTML; Python would eat them before the browser).
 _GATE_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <title>عوجا — المركز المالي</title>
 <style>body{margin:0;font-family:'Tajawal',-apple-system,system-ui,sans-serif;background:#F5F5F7;color:#1D1D1F;
 display:flex;align-items:center;justify-content:center;min-height:100vh}
-.c{background:#fff;border:1px solid #E8E8ED;border-radius:18px;padding:40px 44px;max-width:420px;text-align:center;
-box-shadow:0 4px 12px rgba(0,0,0,.06)}
-h1{font-size:19px;margin:0 0 10px}p{font-size:14.5px;color:#6E6E73;line-height:1.9;margin:0}</style></head>
-<body><div class="c"><h1>هالصفحة محمية 🔒</h1>
-<p>المركز المالي يفتح من داخل لوحة عوجا.<br>ارجع للوحة وافتحه من القائمة الجانبية.</p></div></body></html>"""
+.c{background:#fff;border:1px solid #E8E8ED;border-radius:18px;padding:36px 40px;width:min(360px,calc(100vw - 48px));
+text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.06)}
+h1{font-size:19px;margin:0 0 6px}p{font-size:13.5px;color:#6E6E73;line-height:1.8;margin:0 0 18px}
+input{display:block;width:100%;box-sizing:border-box;min-height:46px;margin:0 0 10px;padding:0 14px;
+font:inherit;font-size:15px;border:1px solid #DEDEE3;border-radius:11px;background:#fff;color:inherit}
+input:focus{outline:2px solid #0A84FF;outline-offset:1px;border-color:#0A84FF}
+button{width:100%;min-height:46px;border:none;border-radius:11px;background:#0A84FF;color:#fff;
+font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+button:hover{background:#0060DF}button:disabled{opacity:.55;cursor:default}
+#err{display:none;font-size:13px;color:#C62828;background:#FDECEA;border-radius:9px;padding:9px 12px;margin:0 0 12px}</style></head>
+<body><div class="c"><h1>المركز المالي 🔒</h1>
+<p>سجّل دخولك بنفس حساب لوحة عوجا</p>
+<div id="err"></div>
+<form id="f" autocomplete="on">
+<input id="u" type="text" placeholder="اسم المستخدم" autocomplete="username" required>
+<input id="p" type="password" placeholder="كلمة المرور" autocomplete="current-password" required>
+<button id="b" type="submit">دخول</button>
+</form>
+<script>
+var f = document.getElementById('f'), b = document.getElementById('b'), err = document.getElementById('err');
+f.addEventListener('submit', function (ev) {
+  ev.preventDefault();
+  b.disabled = true; err.style.display = 'none';
+  fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: document.getElementById('u').value.trim(),
+                           password: document.getElementById('p').value }) })
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (x) {
+      if (x.j && x.j.ok) { location.reload(); return; }
+      err.textContent = x.s === 429 ? 'محاولات كثيرة — جرب بعد شوي' : 'اسم المستخدم أو كلمة المرور غير صحيحة';
+      err.style.display = 'block'; b.disabled = false;
+    })
+    .catch(function () {
+      err.textContent = 'تعذر الاتصال — جرب مرة ثانية';
+      err.style.display = 'block'; b.disabled = false;
+    });
+});
+</script></div></body></html>"""
 
 
 async def _h_version(request):

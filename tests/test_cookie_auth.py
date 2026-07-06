@@ -84,6 +84,17 @@ class TestCookieAuth(unittest.TestCase):
         resp = asyncio.run(finance._h_erp(_Req()))
         self.assertEqual(resp.status, 401)
 
+    def test_gate_page_is_a_login_form(self):
+        """Direct /erp link with no session: a LOGIN form (posts to /api/auth/login,
+        which plants the cookie), not a dead 'go back to the dashboard' card."""
+        resp = asyncio.run(finance._h_erp(_Req()))
+        self.assertEqual(resp.status, 401)
+        body = resp.text
+        self.assertIn("/api/auth/login", body)
+        self.assertIn('type="password"', body)
+        self.assertIn("location.reload", body)   # hash survives the reload → deep link lands
+        self.assertNotIn("\\n", body.split("<script>")[1].split("</script>")[0])
+
     def test_logout_deletes_cookie_and_session(self):
         bot._sessions["logout-tok"] = {"user_id": "u-ck",
                                        "expires_at": time.time() + 3600}
