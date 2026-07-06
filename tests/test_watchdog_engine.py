@@ -194,6 +194,20 @@ class TestFlags(unittest.TestCase):
         s3 = snap(escalations=[{"guest": "g", "unit": "u", "age_min": 10, "id": "9"}])
         self.assertEqual([x for x in E.compute_flags(s3, NOW) if x["key"] == "esc:9"], [])
 
+    def test_escalation_kind_labels(self):
+        s = snap(escalations=[
+            {"guest": "g1", "unit": "u1", "age_min": 130, "id": "b", "kind": "booking"},
+            {"guest": "g2", "unit": "u2", "age_min": 130, "id": "i", "kind": "inquiry"},
+            {"guest": "g3", "unit": "u3", "age_min": 130, "id": "x"}])
+        flags = {f["key"]: f for f in E.compute_flags(s, NOW)}
+        self.assertIn("حجز مؤكد", flags["esc:b"]["text"])
+        self.assertEqual(flags["esc:b"]["kind"], "booking")
+        self.assertIn("استفسار", flags["esc:i"]["text"])
+        self.assertEqual(flags["esc:i"]["kind"], "inquiry")
+        self.assertNotIn("استفسار", flags["esc:x"]["text"])
+        self.assertNotIn("حجز مؤكد", flags["esc:x"]["text"])
+        self.assertEqual(flags["esc:x"]["kind"], "")
+
     def test_promise_expired_critical_overdue_warn(self):
         s = snap(promises=[{"promised_by": "محمد", "apartment": "A", "id": "p1",
                             "expired": True, "overdue_h": 30.0},

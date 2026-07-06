@@ -342,6 +342,7 @@ function renderReport(s){
     h.push('<div class="card ' + ((x.age_min || 0) >= 120 ? 'bad' : 'warn') + '">'
       + '<div class="who">📣 ' + esc(x.guest) + ' <span class="unit">— ' + esc(x.unit) + '</span></div>'
       + '<div class="meta">' + tag('bad', 'تصعيد بدون استلام من <span class="age">' + ageLabel(x.age_min) + '</span>')
+      + (x.kind === 'booking' ? tag('good', 'حجز مؤكد') : (x.kind === 'inquiry' ? tag('amber', 'استفسار') : ''))
       + (x.n > 1 ? tag('', x.n + ' رسائل') : '') + '</div></div>');
   });
   pends.forEach(function(x){

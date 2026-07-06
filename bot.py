@@ -4772,7 +4772,10 @@ WATCHDOG_ENABLED          = os.environ.get("WATCHDOG_ENABLED", "1") in ("1", "tr
 WATCHDOG_DRYRUN           = os.environ.get("WATCHDOG_DRYRUN", "0") in ("1", "true", "True", "yes")
 WATCHDOG_INTERVAL_MIN     = int(os.environ.get("WATCHDOG_INTERVAL_MIN", "30"))
 WATCHDOG_CHANNEL          = os.environ.get("WATCHDOG_CHANNEL", "غرفة-المراقبة")
-WATCHDOG_REPING_HOURS     = float(os.environ.get("WATCHDOG_REPING_HOURS", "2"))
+# Ping-once policy (owner 2026-07-06: «make it that it resets» — the repeating 30-min
+# alarm walls were noise). Every critical pings ONCE then resets when it clears; ONLY
+# inquiry-sourced escalations get a gentle reminder every WATCHDOG_REPING_HOURS (3h).
+WATCHDOG_REPING_HOURS     = float(os.environ.get("WATCHDOG_REPING_HOURS", "3"))
 WATCHDOG_CODE_LOOKAHEAD_H = float(os.environ.get("WATCHDOG_CODE_LOOKAHEAD_H", "12"))
 
 # ============= Finance Chat «مساعد المركز المالي» — KB-grounded ERP chatbot =============
@@ -7983,6 +7986,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             _escalations[msg.id] = {"channel_id": target.id, "guest": g, "unit": item["unit"],
                                     "conversation_id": item["conversation_id"],
                                     "guest_text": item["guest_text"],
+                                    "res_status": (item.get("res_status") or "").lower(),
                                     "reason": result.get("reason", ""), "history": item["history"],
                                     "last_ping": time.time(), "attempts": 0, "claimed_by": None,
                                     "last_msg_id": item.get("message_id") or 0,
@@ -53856,11 +53860,16 @@ def _watchdog_snapshot(open_maint=None):
                     _watchdog.db.log_event(today_iso, "esc_claim", str(e.get("claimed_by")))
                 continue
             age_min = max(0, int((now_ts - (e.get("last_ping") or now_ts)) / 60))
+            st = (e.get("res_status") or "").lower()
+            kind = ("booking" if st in CONFIRMED_STATUSES else
+                    ("inquiry" if st else ""))       # old records (pre-field) stay unlabeled
             key = (e.get("guest", "ضيف"), e.get("unit", ""))
             g = grouped.setdefault(key, {"id": str(mid), "guest": key[0], "unit": key[1],
-                                         "age_min": age_min, "n": 0})
+                                         "age_min": age_min, "n": 0, "kind": kind})
             g["n"] += 1
             g["age_min"] = max(g["age_min"], age_min)
+            if kind == "booking":
+                g["kind"] = "booking"                 # a confirmed booking outranks a duplicate inquiry row
         snap["escalations"] = list(grouped.values())
     section("escalations", _sec_escalations)
 
@@ -54014,7 +54023,9 @@ async def _watchdog_post(compact, flags, meta):
         if f["severity"] != "critical":
             continue
         due = await asyncio.to_thread(_watchdog.db.claim_ping, f["key"], now_iso)
-        if not due:
+        if not due and f.get("kind") == "inquiry":
+            # ping-once policy: only inquiry escalations get the 3h reminder;
+            # everything else fires once and resets when it clears
             due = await asyncio.to_thread(_watchdog.db.reping_due, f["key"], now_iso,
                                           WATCHDOG_REPING_HOURS)
         if not due:
@@ -54098,7 +54109,7 @@ async def watchdog_loop():
         print("[watchdog] web wiring never became ready — skipping this cycle")
         return
     meta = _load_json("watchdog_meta.json", {}) or {}
-    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v7"   # bump suffix on layout changes → next deploy posts immediately
+    mode_now = ("dry" if WATCHDOG_DRYRUN else "live") + "-v8"   # bump suffix on layout changes → next deploy posts immediately
     if meta.get("mode") != mode_now:
         meta.pop("summary_msg_id", None)      # layout/mode change → NEW message (notifies), not a silent edit
     if (meta.get("mode") == mode_now

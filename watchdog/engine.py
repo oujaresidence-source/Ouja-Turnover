@@ -158,10 +158,10 @@ def compute_flags(snap, now):
     Only `manual` code-mode apartments are code-checked; auto ones are Hostaway's job."""
     flags = []
 
-    def add(key, severity, text, mention_name="", listing=""):
+    def add(key, severity, text, mention_name="", listing="", kind=""):
         flags.append({"key": key, "severity": severity,
                       "text": "%s %s" % (_SEV_EMOJI[severity], text),
-                      "mention_name": mention_name, "listing": listing})
+                      "mention_name": mention_name, "listing": listing, "kind": kind})
 
     for a in snap.get("arrivals") or []:
         h = float(a.get("hours_until") or 0)
@@ -187,9 +187,11 @@ def compute_flags(snap, now):
             sev = "warn"
         else:
             continue
+        kind = e.get("kind") or ""
+        label = {"booking": " (حجز مؤكد)", "inquiry": " (استفسار)"}.get(kind, "")
         add("esc:%s" % e.get("id"), sev,
-            "📣 تصعيد بدون استلام من %d دقيقة — %s (%s)"
-            % (age, e.get("guest") or "ضيف", e.get("unit") or ""))
+            "📣 تصعيد%s بدون استلام من %d دقيقة — %s (%s)"
+            % (label, age, e.get("guest") or "ضيف", e.get("unit") or ""), kind=kind)
 
     live_pend, _ = split_live_stale(snap.get("pending"))
     for p in live_pend:
