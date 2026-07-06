@@ -171,7 +171,18 @@ async def _h_erp(request):
     html = (html.replace("__ERP_VERSION__", ERP_VERSION)
                 .replace("__ERP_COMMIT__", _COMMIT)
                 .replace("__ERP_BUILT__", _BUILT))
-    return web.Response(text=html, content_type="text/html")
+    resp = web.Response(text=html, content_type="text/html")
+    qtok = ""
+    try:
+        qtok = request.query.get("token") or ""
+    except Exception:
+        pass
+    if qtok:
+        # Dashboard-cutover entry (/erp?token=...) plants the session cookie so
+        # direct oujares.com/erp#... links work from then on (HttpOnly, Lax).
+        resp.set_cookie("ouja_token", qtok, max_age=30 * 86400, httponly=True,
+                        secure=True, samesite="Lax", path="/")
+    return resp
 
 
 # ---------------- API handlers (auth enforced here — /erp/* is outside the

@@ -12913,9 +12913,22 @@ def _find_user_by_name(name):
             return u
     return None
 
+def _req_token(request):
+    """The caller's token: ?token= → X-Token header → ouja_token cookie. The cookie is
+    planted at login and on /erp?token= entry (HttpOnly, Secure, SameSite=Lax) so direct
+    oujares.com/erp#... links work after one dashboard visit — the SPA keeps sending
+    query/header; the cookie is only the server-side fallback."""
+    try:
+        tok = request.query.get("token") or request.headers.get("X-Token", "")
+        if tok:
+            return tok
+        return request.cookies.get("ouja_token", "") or ""
+    except Exception:
+        return ""
+
 def _auth_session(request):
     """Look up the session by token. Returns the user dict (full) or None."""
-    token = request.query.get("token", "") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if not token:
         return None
     sess = _sessions.get(token)
@@ -12931,7 +12944,7 @@ def _auth_session(request):
 
 def _user_can(request, tab, action="read"):
     """Permission check. Legacy DASHBOARD_TOKEN is treated as super-admin."""
-    token = request.query.get("token", "") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
         return True
     u = _auth_session(request)
@@ -25840,7 +25853,7 @@ def _dash_auth(request):
       • the legacy super-admin DASHBOARD_TOKEN, OR
       • a valid (non-expired, active-user) session token from the users system.
     Both are checked against `?token=...` query param OR the X-Token header."""
-    token = request.query.get("token") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if not token:
         return False
     if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
@@ -35863,19 +35876,26 @@ async def _api_auth_login(request):
         "expires_at": time.time() + 30 * 86400,
     }
     await asyncio.to_thread(_sessions_save)
-    return _json({"ok": True, "token": tok, "user": _user_view(u)})
+    resp = _json({"ok": True, "token": tok, "user": _user_view(u)})
+    # Session cookie: direct oujares.com/erp#... deep links work without re-passing ?token=.
+    # HttpOnly (JS never needs it — the SPA got the token in the body), Lax blocks CSRF POSTs.
+    resp.set_cookie("ouja_token", tok, max_age=30 * 86400, httponly=True,
+                    secure=True, samesite="Lax", path="/")
+    return resp
 
 async def _api_auth_logout(request):
-    token = request.query.get("token") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if token:
         _sessions.pop(token, None)
         await asyncio.to_thread(_sessions_save)
-    return _json({"ok": True})
+    resp = _json({"ok": True})
+    resp.del_cookie("ouja_token", path="/")
+    return resp
 
 async def _api_users_me(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    token = request.query.get("token") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
         # legacy super-admin — synthesise a fake admin user
         return _json({"ok": True, "user": {"id": "owner", "name": "Owner",
@@ -37473,7 +37493,7 @@ async def _api_expenses_diagnose(request):
 #  explicit actions: Export, View Hostaway Match, Reconcile, Check-then-re-export.
 # ============================================================================
 def _exp4_actor(request, body=None):
-    token = request.query.get("token") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
         return "owner"
     sess = _sessions.get(token) or {}
@@ -38135,7 +38155,7 @@ async def _api_design_delete(request):
 # ===================== PMO — FIT-OUT PROJECTS API =====================
 def _req_actor(request):
     """Display name of the logged-in team member (for the activity log)."""
-    token = request.query.get("token") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
         return "admin"
     sess = _sessions.get(token or "")
@@ -38147,7 +38167,7 @@ def _req_actor(request):
 
 def _req_role(request):
     """Caller's role: legacy dashboard token = admin; else the session user's role; else viewer."""
-    token = request.query.get("token") or request.headers.get("X-Token", "")
+    token = _req_token(request)
     if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
         return "admin"
     sess = _sessions.get(token or "")
