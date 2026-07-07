@@ -8,7 +8,7 @@ engine (schedule.engine) is the single source of truth; the dashboard tab, the s
 """
 
 from .host import HOST, wire as _wire_host
-from . import db, engine, seed, notify, routes, page, coverage  # noqa: F401
+from . import db, engine, seed, notify, routes, page, coverage, owners  # noqa: F401
 from .coverage import cover_emoji_for_listing  # noqa: F401
 
 __all__ = ["wire", "register_routes", "HOST", "engine", "coverage", "cover_emoji_for_listing"]

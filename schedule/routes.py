@@ -10,7 +10,7 @@ import datetime
 import re
 import traceback
 
-from . import db, engine, seed, notify, page, coverage
+from . import db, engine, seed, notify, page, coverage, owners
 from .host import HOST
 
 # Editing is gated on the existing multi-user roles (build spec §2). admin/ops may edit; every
@@ -165,6 +165,13 @@ async def api_day(request):
 async def api_week(request):
     return HOST.json_response({"ok": True, "week": schedule_week(),
                                "can_edit": can_edit_schedule(request)})
+
+
+async def api_owners(request):
+    """Permanent-owner snapshot (employees + apartment→owner). The weekly report's
+    employee dropdown / auto-fill and any assignee default read THIS — one resolver
+    (schedule.owners), one answer. Login-gated read; no role needed."""
+    return HOST.json_response({"ok": True, **owners.permanent_map()})
 
 
 def _hostaway_listings():
@@ -516,6 +523,7 @@ def register(app):
     g("/api/schedule/week", _safe_public(api_week))
     # manage = editor data (employee/apartment lists) -> stays behind login.
     g("/api/schedule/manage", _safe(api_manage))
+    g("/api/schedule/owners", _safe(api_owners))
     g("/api/schedule/hostaway-listings", _safe(api_hostaway_listings))
     p("/api/schedule/apartment-link", _safe(api_apartment_link))
     p("/api/schedule/autolink", _safe(api_autolink))

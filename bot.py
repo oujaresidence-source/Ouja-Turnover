@@ -16732,10 +16732,13 @@ function schedAptCard(a, emps, empById){
   var h='<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px;background:var(--panel)">';
   h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">';
   h+='<div style="font-weight:600">'+esc(a.name||'')+(a.listing_id==null?(' <span style="font-size:10px;color:var(--muted)">('+labelText('قديمة','old')+')</span>'):'')+'</div>';
+  h+='<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">';
   h+='<button class="btn ghost sm" onclick="schedToggleOwner('+a.id+')" style="border-radius:999px">';
   if(own){ h+=schedDot(own.color)+(own.emoji?esc(own.emoji)+' ':'')+esc(own.name); }
   else { h+='<span style="color:var(--bad)">⚠ '+labelText('غير محدّد','Unassigned')+'</span>'; }
-  h+=' ▾</button></div>';
+  h+=' ▾</button>';
+  h+='<button class="btn ghost sm" onclick="schedDelApt('+a.id+')" title="'+labelText('حذف من التقويم','Delete from calendar')+'" style="border-radius:999px;color:var(--bad);padding:0 10px">🗑</button>';
+  h+='</div></div>';
   if(open){
     h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">';
     emps.forEach(function(e){
@@ -16765,6 +16768,15 @@ function schedRefreshDayWeek(){
 }
 function schedAptViewSet(v){ SCHED.aptView=v; SCHED.openApt=null; renderSched(); }
 function schedAptSearch(v){ SCHED.aptQ=v; schedRenderApts(); }
+function schedDelApt(aptId){
+  var m=SCHED.manage||{}; var apt=((m.apartments)||[]).filter(function(a){ return String(a.id)===String(aptId); })[0];
+  var nm=apt?String(apt.name||''):'';
+  if(!confirm(labelText('حذف «'+nm+'» من تقويم الموظفين نهائياً؟ بتنحذف من كل الأيام والتغطيات، وما تنحسب على أي موظف بعد الآن.','Delete "'+nm+'" from the calendar permanently? It is removed from ALL days and coverage, and no longer counts for any employee.'))) return;
+  rdelete('/api/schedule/apartment/'+aptId).then(function(j){
+    if(j&&j.ok){ toast(labelText('حُذفت الشقة من التقويم','Apartment deleted from calendar')); SCHED.openApt=null; schedAfterWrite(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+  });
+}
 function schedSync(){
   toast(labelText('جاري المزامنة…','Syncing…'));
   post('/api/schedule/sync',{}).then(function(j){
@@ -20336,6 +20348,9 @@ const WR_SEVERITY = [["low","🟢 منخفض"],["med","🟡 متوسط"],["high"
 const WR_CHECK_ITEMS = ["النظافة العامة","رائحة الشقة","المكيفات","السخان والماء الحار","الواي فاي","قفل الباب / الكود","المواقف","المفارش والمناشف","المستلزمات (شامبو، صابون…)","الأجهزة الكهربائية","دورات المياه","الإضاءة"];
 const WR_CHECK_STATES = [["ok","✓ سليم"],["issue","⚠ يحتاج"],["na","— غير منطبق"]];
 let _wrDraft = null;
+let _wrOwners = null;   /* permanent-owner snapshot from the Employee Calendar (/api/weekly/owners) */
+let _wrTpl = [];        /* last fetched /api/weekly/template apartments — enrichment reused on re-fill */
+let _wrManual = false;  /* user added/removed apartments by hand since the last auto-fill */
 
 async function loadWeekly(){
   const body = document.getElementById('weeklyBody'); if(body) body.innerHTML = '<div class="empty sk">—</div>';
@@ -20403,6 +20418,9 @@ async function openWeeklyEditor(rid){
   // instant feedback — the template fetch can take a few seconds on a phone
   document.getElementById('weeklyEditorBody').innerHTML = '<div class="empty" style="padding:34px;text-align:center"><div style="font-size:26px;margin-bottom:8px">⏳</div><div class="muted">نجهّز الشقق ومعلوماتها…</div></div>';
   document.getElementById('weeklyOverlay').style.display = 'block';
+  // permanent assignments from the Employee Calendar (fast SQLite read) — feeds the
+  // employee dropdown, the auto-fill, and the per-apartment assignee chips.
+  try { _wrOwners = await api('/api/weekly/owners'); } catch(_){ _wrOwners = {employees:[],apartments:[]}; }
   let r;
   if(rid){ try{ const x=await api('/api/weekly/get?id='+encodeURIComponent(rid)); r=x.report }catch(_){ r=null } }
   if(!r){
@@ -20413,8 +20431,10 @@ async function openWeeklyEditor(rid){
     try {
       const tpl = await api('/api/weekly/template');
       r._carried_from = tpl.carried_from || '';
-      r.apartments = (tpl.apartments||[]).map(function(a){
-        return {name:a.name, listing_id:a.listing_id, common_issues:a.common_issues||[],
+      _wrTpl = tpl.apartments||[];
+      r.apartments = _wrTpl.map(function(a){
+        return {name:a.name, listing_id:a.listing_id, assignee:a.assignee||'',
+                common_issues:a.common_issues||[],
                 checks:{}, status:'', risks:[], updates:[], challenges:[], plan:[],
                 supervisor:[], resolved:'', comments:[],
                 risks_other:'', updates_other:'', plan_other:'', supervisor_other:'',
@@ -20422,9 +20442,15 @@ async function openWeeklyEditor(rid){
                 open_tickets:a.open_tickets||[], occupied:!!a.occupied};
       });
     } catch(_){}
+  } else {
+    // editing a saved report: backfill missing assignees from the calendar (display only)
+    (r.apartments||[]).forEach(function(a){ if(!a.assignee){ a.assignee=_wrOwnerOf(a.name, a.listing_id); } });
+    // refresh the enrichment cache in the background so a later re-fill has live data
+    _wrTpl = [];
+    api('/api/weekly/template').then(function(t){ _wrTpl = t.apartments||[]; }).catch(function(){});
   }
   _wrDraft = r;
-  _wrExpanded = {}; _wrFilter = '';
+  _wrExpanded = {}; _wrFilter = ''; _wrManual = false;
   _renderWeeklyEditor();
   document.getElementById('weeklyOverlay').style.display = 'block';
 }
@@ -20447,7 +20473,7 @@ function _renderWeeklyEditor(){
     + '</div>'
     + '<div class="wr-grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">الموظف *</label>'
-    +     '<input id="wrF_employee" value="'+esc(r.employee||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
+    +     _wrEmployeeField(r)+'</div>'
     +   '<div><label class="muted" style="font-size:11px;font-weight:600">التاريخ</label>'
     +     '<input id="wrF_date" type="date" value="'+esc(r.date||'')+'" style="width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>'
     + '</div>'
@@ -20475,6 +20501,77 @@ function _renderWeeklyEditor(){
 }
 let _wrExpanded = {};
 let _wrFilter = '';
+/* ---- Employee dropdown + auto-fill from the Employee Calendar (permanent owners) ---- */
+function _wrEmployeeField(r){
+  const style='width:100%;padding:9px;margin-top:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px';
+  const emps=((_wrOwners||{}).employees)||[];
+  if(!emps.length){
+    /* calendar unavailable → graceful fallback to the old free-text field */
+    return '<input id="wrF_employee" value="'+esc(r.employee||'')+'" style="'+style+'">';
+  }
+  const cur=r.employee||'';
+  const names=emps.map(function(e){ return e.name; });
+  let h='<select id="wrF_employee" onchange="_wrEmployeeChanged(this.value)" style="'+style+'">';
+  h+='<option value="">— اختر الموظف —</option>';
+  if(cur && names.indexOf(cur)<0){ h+='<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>'; }
+  names.forEach(function(n){ h+='<option value="'+esc(n)+'"'+(cur===n?' selected':'')+'>'+esc(n)+'</option>'; });
+  h+='</select>';
+  return h;
+}
+function _wrOwnerOf(name, lid){
+  /* permanent owner of one apartment — listing id first, exact name fallback */
+  const list=((_wrOwners||{}).apartments)||[];
+  let rec=null;
+  if(lid!=null){ rec=list.filter(function(x){ return x.listing_id!=null && String(x.listing_id)===String(lid); })[0]; }
+  if(!rec && name){ rec=list.filter(function(x){ return x.name===name; })[0]; }
+  return (rec&&rec.owner_name)||'';
+}
+function _wrOwnedFor(nm){
+  const o=_wrOwners||{};
+  const emp=((o.employees)||[]).filter(function(e){ return e.name===nm; })[0];
+  if(!emp) return [];
+  return ((o.apartments)||[]).filter(function(a){ return String(a.owner_id)===String(emp.id); });
+}
+function _wrAnyEdits(){
+  if(_wrManual) return true;
+  const apts=((_wrDraft||{}).apartments)||[];
+  for(let i=0;i<apts.length;i++){
+    const a=apts[i], c=a.checks||{};
+    for(const k in c){ if(c[k]) return true; }
+    if(a.status||a.resolved||(a.risks||[]).length||(a.updates||[]).length||(a.challenges||[]).length
+       ||(a.plan||[]).length||(a.supervisor||[]).length||a.risks_other||a.updates_other||a.plan_other||a.supervisor_other) return true;
+    if((a.issues||[]).some(function(it){ return it && !it.carried; })) return true;
+  }
+  return false;
+}
+function _wrRowFor(name, lid, assignee){
+  /* fresh report row; reuse template enrichment (reviews/tickets/occupancy/carried issues) when we have it */
+  let tpl=null;
+  const t=_wrTpl||[];
+  for(let i=0;i<t.length;i++){ const x=t[i];
+    if((lid!=null && x.listing_id!=null && String(x.listing_id)===String(lid)) || (name && x.name===name)){ tpl=x; break; } }
+  return {name:name, listing_id:(lid==null?null:lid), assignee:assignee||'',
+    common_issues:(tpl&&tpl.common_issues)||[], checks:{}, status:'', risks:[], updates:[], challenges:[],
+    plan:[], supervisor:[], resolved:'', comments:[],
+    risks_other:'', updates_other:'', plan_other:'', supervisor_other:'',
+    issues:((tpl&&tpl.issues)||[]).map(function(c){ return Object.assign({},c); }),
+    new_reviews:(tpl&&tpl.new_reviews)||0, open_tickets:((tpl&&tpl.open_tickets)||[]).slice(), occupied:!!(tpl&&tpl.occupied)};
+}
+function _wrEmployeeChanged(nm){
+  if(!_wrDraft) return;
+  const prev=_wrDraft.employee||'';
+  _wrDraft.employee=nm;
+  if(!nm || nm===prev) return;
+  const owned=_wrOwnedFor(nm);
+  if(!owned.length){ toast('«'+nm+'» ما له شقق ثابتة في تقويم الموظفين — عدّل القائمة يدوياً'); return; }
+  if(_wrAnyEdits() && !confirm('تعبئة شقق «'+nm+'» بتستبدل القائمة الحالية وكل التعديلات غير المحفوظة عليها. نكمل؟')){
+    _wrDraft.employee=prev; _renderWeeklyEditor(); return;
+  }
+  _wrDraft.apartments=owned.map(function(a){ return _wrRowFor(a.name, a.listing_id, nm); });
+  _wrManual=false; _wrExpanded={}; _wrFilter='';
+  _renderWeeklyEditor();
+  toast('تمت تعبئة '+owned.length+' شقة من تقويم الموظفين — تقدر تضيف أو تحذف');
+}
 function _wrSetFilter(v){ _wrFilter = v; _renderWeeklyEditor(); const e=document.getElementById('wrF_search'); if(e){ e.focus(); const n=e.value.length; try{e.setSelectionRange(n,n);}catch(_){} } }
 function _wrToggleApt(i){ _wrExpanded[i] = !_wrExpanded[i]; _renderWeeklyEditor(); }
 function _wrSetCheck(i, item, val){
@@ -20535,8 +20632,9 @@ function _wrRenderApt(i, apt){
   WR_CHECK_ITEMS.forEach(function(it){ const v=checks[it]; if(v==='ok')nOk++; else if(v==='issue')nIssue++; });
   const ci = apt.common_issues || [];
   const ciBadge = ci.length ? '<span style="background:var(--bad,#c62828);color:#fff;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">⚠ '+ci.length+' متكررة</span>' : '';
+  const asgBadge = apt.assignee ? '<span style="background:var(--gold-tint);border:1px solid var(--gold);border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">👤 '+esc(apt.assignee)+'</span>' : '';
   const head = '<div onclick="_wrToggleApt('+i+')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:8px">'
-    + '<div class="strong" style="font-size:13.5px">'+(open?'▾':'▸')+' 🏠 '+esc(apt.name||'')+ciBadge+'</div>'
+    + '<div class="strong" style="font-size:13.5px">'+(open?'▾':'▸')+' 🏠 '+esc(apt.name||'')+asgBadge+ciBadge+'</div>'
     + '<div style="display:flex;align-items:center;gap:6px">'
     + (nIssue?'<span style="background:#fff3cd;color:#92400e;border-radius:99px;padding:1px 8px;font-size:10px">⚠ '+nIssue+'</span>':'')
     + (nOk?'<span style="background:#d1fae5;color:#065f46;border-radius:99px;padding:1px 8px;font-size:10px">✓ '+nOk+'</span>':'')
@@ -20643,7 +20741,8 @@ function _wrSetField(i, key, val){ if(_wrDraft && _wrDraft.apartments[i]) _wrDra
 function _wrAddIssue(i){
   if(!_wrDraft || !_wrDraft.apartments[i]) return;
   const a = _wrDraft.apartments[i]; a.issues = a.issues || [];
-  a.issues.push({text:'', severity:'med', assignee:'', followup:'', weeks:1, carried:false, resolved:false});
+  /* assignee defaults to the apartment's permanent owner from the Employee Calendar */
+  a.issues.push({text:'', severity:'med', assignee:(a.assignee||''), followup:'', weeks:1, carried:false, resolved:false});
   _renderWeeklyEditor();
 }
 function _wrIssueSet(i, j, key, val, noRender){
@@ -20665,14 +20764,15 @@ function _wrAddApt(){
   const inp = document.getElementById('wrF_newApt'); const nm = (inp.value||'').trim();
   if(!nm) return;
   _wrDraft.apartments = _wrDraft.apartments || [];
-  _wrDraft.apartments.push({name:nm, listing_id:null, common_issues:[], checks:{}, status:'',
+  _wrDraft.apartments.push({name:nm, listing_id:null, assignee:_wrOwnerOf(nm,null), common_issues:[], checks:{}, status:'',
     risks:[], updates:[], challenges:[], plan:[], supervisor:[], resolved:'', comments:[],
     risks_other:'', updates_other:'', plan_other:'', supervisor_other:'',
     issues:[], new_reviews:0, open_tickets:[], occupied:false});
   _wrExpanded[_wrDraft.apartments.length-1] = true;
+  _wrManual = true;
   inp.value = ''; _renderWeeklyEditor();
 }
-function _wrDelApt(i){ if(_wrDraft){ _wrDraft.apartments.splice(i,1); _renderWeeklyEditor(); } }
+function _wrDelApt(i){ if(_wrDraft){ _wrDraft.apartments.splice(i,1); _wrManual = true; _renderWeeklyEditor(); } }
 function _wrToggle(i, key, val){
   if(!_wrDraft) return;
   const a = _wrDraft.apartments[i]; if(!a) return;
@@ -20687,7 +20787,7 @@ async function saveWeekly(){
   function v(id){const e=document.getElementById(id); return e?e.value:'' }
   const payload = {id:_wrDraft.id||'', employee:v('wrF_employee'), date:v('wrF_date'),
     highlights:_wrDraft.highlights||'', unusual:_wrDraft.unusual||'', apartments:_wrDraft.apartments||[]};
-  if(!payload.employee){ toast('اكتب اسم الموظف'); return; }
+  if(!payload.employee){ toast((((_wrOwners||{}).employees)||[]).length?'اختر اسم الموظف':'اكتب اسم الموظف'); return; }
   const r = await post('/api/weekly/save', payload);
   if(r.ok){ toast('💾 حُفظ'); _wrDraft = r.report; closeWeekly(); loadWeekly(); }
   else toast(r.error || 'خطأ');
@@ -20720,7 +20820,7 @@ function printWeekly(){
   (r.apartments||[]).filter(_hasData).forEach(function(a){
     aptsHtml += '<div style="background:#1b1b22;border:1px solid #2e2e38;border-radius:10px;padding:13px 15px;margin-bottom:9px;break-inside:avoid">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-      + '<div style="font-weight:700;font-size:14px;color:#fff">🏠 '+esc(a.name||'')+(a.occupied?' <span style="font-size:10px;color:#34d399">● مؤجّرة</span>':'')+'</div>'
+      + '<div style="font-weight:700;font-size:14px;color:#fff">🏠 '+esc(a.name||'')+(a.assignee?' <span style="font-size:10px;color:#c8a24a">👤 '+esc(a.assignee)+'</span>':'')+(a.occupied?' <span style="font-size:10px;color:#34d399">● مؤجّرة</span>':'')+'</div>'
       + (a.status?'<div style="background:#2b2418;color:#e6c068;padding:2px 11px;border-radius:99px;font-size:11px;font-weight:600">'+esc(a.status)+'</div>':'')+'</div>';
     if((a.new_reviews||0) || (a.open_tickets||[]).length)
       aptsHtml += '<div style="font-size:11px;color:#9aa0aa;margin-bottom:5px">'
@@ -36160,6 +36260,28 @@ async def _api_quotes_delete(request):
     return _json({"ok": True})
 
 # ===================== WEEKLY REPORTS API =====================
+def _weekly_perm_owners():
+    """Permanent-assignment snapshot from the Employee Calendar (تقويم الموظفين).
+    SINGLE SOURCE: schedule.owners.permanent_map() — the same resolver the calendar
+    itself uses. Returns None when the schedule package is off/unavailable so every
+    caller degrades gracefully (blank assignee, free-text employee field)."""
+    if not (SCHEDULE_ENABLED and _HAS_SCHEDULE):
+        return None
+    try:
+        return _schedule.owners.permanent_map()
+    except Exception as e:
+        print("[weekly] permanent-owner map unavailable:", e)
+        return None
+
+async def _api_weekly_owners(request):
+    """GET → employees + apartment→permanent-owner map for the weekly report UI
+    (employee dropdown + auto-fill). Empty lists when the calendar is unavailable."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    pm = await asyncio.to_thread(_weekly_perm_owners)
+    return _json({"ok": True, "employees": (pm or {}).get("employees") or [],
+                  "apartments": (pm or {}).get("apartments") or []})
+
 async def _api_weekly_list(request):
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
@@ -36304,6 +36426,16 @@ async def _api_weekly_template(request):
         if str(lid) in seen:
             continue
         apts.append({"name": name, "listing_id": lid, "common_issues": [], **enrich(name, lid)})
+    # Auto-assign: every apartment carries its PERMANENT owner from the Employee
+    # Calendar (single resolver — schedule.owners). Unassigned/unknown → "" (no crash).
+    pm = await asyncio.to_thread(_weekly_perm_owners)
+    pm_by_lid = {str(a["listing_id"]): a for a in ((pm or {}).get("apartments") or [])
+                 if a.get("listing_id") is not None}
+    pm_by_name = {a["name"]: a for a in ((pm or {}).get("apartments") or []) if a.get("name")}
+    for a in apts:
+        k = str(a.get("listing_id")) if a.get("listing_id") is not None else None
+        rec = (pm_by_lid.get(k) if k else None) or pm_by_name.get(a.get("name"))
+        a["assignee"] = (rec or {}).get("owner_name") or ""
     return _json({"apartments": apts, "count": len(apts),
                   "carried_from": (prior or {}).get("date")})
 
@@ -36351,6 +36483,7 @@ async def _api_weekly_save(request):
             cleaned.append({
                 "name":      (apt.get("name") or "").strip()[:80],
                 "listing_id": apt.get("listing_id"),
+                "assignee":  (apt.get("assignee") or "").strip()[:60],
                 "status":    (apt.get("status") or "").strip()[:40],
                 "risks":     [str(x)[:120] for x in (apt.get("risks") or [])][:20],
                 "updates":   [str(x)[:160] for x in (apt.get("updates") or [])][:20],
@@ -48204,6 +48337,7 @@ async def start_web_server():
         app.router.add_post("/api/quotes/delete", _api_quotes_delete)
         # Weekly reports
         app.router.add_get("/api/weekly/list", _api_weekly_list)
+        app.router.add_get("/api/weekly/owners", _api_weekly_owners)
         app.router.add_get("/api/weekly/template", _api_weekly_template)
         app.router.add_get("/api/weekly/get", _api_weekly_get)
         app.router.add_post("/api/weekly/save", _api_weekly_save)
