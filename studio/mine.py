@@ -16,41 +16,59 @@ import traceback
 from . import db, engine
 from .host import HOST
 
-TARGET_QUALIFIED = 300      # owner spec: «the last ~300 real guest conversations»
-PULL_CAP = 1500             # hard cap on raw conversations pulled (inquiries inflate this)
+TARGET_QUALIFIED = 2000     # owner spec v2: scan the last ~2000 real guest conversations
+PULL_CAP = 6000             # hard cap on raw conversations pulled (inquiries inflate this)
 MIN_STORY_SCORE = 6         # triage score needed to pay for the premium story pass
-MAX_PREMIUM = 80            # premium-call budget per scan run
+MAX_PREMIUM = 250           # premium-call budget per deep scan (only brand-safe high scorers)
+
+DAILY_TARGET = 400          # daily loop: qualify at most this many FRESH convos
+DAILY_MAX_PREMIUM = 40      # daily loop premium budget (cheap; only the day's best)
 
 PROGRESS = {"running": False}
 _lock = threading.Lock()
 
-TRIAGE_SYSTEM = """أنت محرر قصص لصانع محتوى تيك توك يملك شركة شقق مفروشة في الرياض (عوجا).
-تقرأ محادثة حقيقية بين فريق الشركة وضيف، وتحكم: هل فيها «قصة» تستاهل تنحكى في فيديو؟
+TRIAGE_SYSTEM = """أنت محرر محتوى لصانع تيك توك يملك شركة شقق مفروشة راقية في الرياض (عوجا).
+تقرأ محادثة حقيقية بين فريق الشركة وضيف، وتحكم: هل فيها «قصة إيجابية» تُثبت إن عوجا تشتغل شغل استثنائي؟
 
-قصة = موقف فيه توتر أو غرابة أو تحول: طلب غريب، خطأ من الفريق وكيف انحل، ضيف زعلان صار مبسوط،
-ضيف طلع زعلان، طوارئ (عطل، تسريب، قفل)، موقف مضحك، موقف إنساني مؤثر، خلاف/اعتراض، إلغاء بلحظة أخيرة،
-أو تفصيلة تشغيلية تكشف «أسرار الصنعة».
+الهدف محتوى إيجابي يخلّي الناس يقولون «هذولا محترفين». القصة القوية وحدة من هذي الأنواع الإيجابية:
+- hero_save: صار خطأ/عطل/موقف صعب والفريق حلّه بسرعة واحتراف والضيف انبهر (المشكلة مسموحة فقط بهالشكل).
+- transformation: تحوّل/قبل-بعد، شقة أو تجربة صارت أفضل.
+- transparency_numbers: أرقام حقيقية (إشغال، تقييم، مدة رد، دخل) تكشف احتراف الشغل.
+- day_in_life: كواليس إدارة العملية اليومية.
+- hospitality_wow: لمسة ضيافة/اهتمام فوق التوقع.
+- weird_delight: طلب غريب لكنه لطيف وانتهى بابتسامة.
+- heartwarming: موقف إنساني مؤثر بشكل إيجابي.
+- loyal_return: ضيف رجع/كرّر الحجز أو مدح بصدق.
+- operational_craft: سر من أسرار الصنعة يبيّن الاحتراف.
+
+مهم جداً — الحكم على السلامة البراندية:
+- brand_safe = true فقط إذا القصة تخلّي عوجا تطلع بصورة ممتازة (حتى لو فيها مشكلة، لأنها انحلّت باحتراف).
+- brand_safe = false إذا القصة تخلّي عوجا تطلع سيئة، أو شكوى ما انحلّت، أو دراما/لوم/سلبية بدون حل،
+  أو تسريب مشكلة داخلية. هذي تُرفض.
+- positive = true إذا القوس ينتهي إيجابي (كفاءة/رضا/تحوّل). المحادثة الروتينية أو المفتوحة بسلبية = false.
 مو قصة = أسئلة روتينية (الموقع، الكود، الشيك إن/آوت) وردود عادية بدون أي حدث.
 
 أرجع JSON فقط بدون أي شرح:
-{"story": true/false, "score": 0-10, "type": "weird_request|mistake_fixed|angry_to_happy|sad_exit|emergency|funny|heartwarming|operational_secret|conflict|cancellation|other", "one_line": "سطر واحد بالعربي يلخص الموقف"}
-score = قوة القصة كفيديو (٠ = لا شيء، ١٠ = قصة استثنائية). كن صارم: أغلب المحادثات ٠-٣."""
+{"story": true/false, "brand_safe": true/false, "positive": true/false, "score": 0-10, "type": "hero_save|transformation|transparency_numbers|day_in_life|hospitality_wow|weird_delight|heartwarming|loyal_return|operational_craft|other", "one_line": "سطر واحد بالعربي يلخص الموقف الإيجابي"}
+score = قوة القصة كفيديو إيجابي (٠ = لا شيء، ١٠ = استثنائية). كن صارم: أغلب المحادثات ٠-٣."""
 
-STORY_SYSTEM = """أنت كاتب قصص لصانع محتوى تيك توك سعودي (شركة شقق مفروشة في الرياض).
-تستلم محادثة حقيقية بين الفريق وضيف، وتستخرج منها «بطاقة قصة» جاهزة يبني عليها فيديو.
+STORY_SYSTEM = """أنت كاتب قصص لصانع محتوى تيك توك سعودي (شركة شقق مفروشة راقية في الرياض — عوجا).
+تستلم محادثة حقيقية بين الفريق وضيف، وتستخرج منها «بطاقة قصة» إيجابية تُثبت احتراف عوجا.
 
 قواعد صارمة:
 - عربي واضح بلمسة نجدية طبيعية.
+- الزاوية إيجابية دايماً: تنتهي بكفاءة عوجا/رضا الضيف/تحوّل. إذا فيها مشكلة، خلّ البطل هو حلّ الفريق لها.
 - ممنوع نهائياً ذكر اسم الضيف أو رقم جواله أو أي معلومة تعرّف عليه — قل «الضيف» أو «ضيفة».
 - الاقتباسات: انسخ جمل حرفية قصيرة من المحادثة (هي الذهب) لكن نظّفها من الأسماء.
 - لا تخترع أحداث ما صارت. القصة قوتها إنها حقيقية.
 
 أرجع JSON فقط:
-{"title": "عنوان القصة بسطر جذاب",
- "summary": "القصة كاملة ٣-٦ جمل: وش صار بالضبط ومن سوى وش",
- "beats": ["تسلسل الأحداث نقطة نقطة (٣-٦ نقاط)"],
+{"title": "عنوان القصة بسطر جذاب إيجابي",
+ "angle": "الزاوية الإيجابية بسطر: ليش هالقصة تخلّي عوجا تطلع محترفة",
+ "summary": "القصة كاملة ٣-٦ جمل: وش صار بالضبط وكيف تصرّف الفريق",
+ "beats": ["تسلسل الأحداث نقطة نقطة (٣-٦ نقاط) ينتهي بالحل/الرضا"],
  "quotes": ["اقتباسات حرفية قصيرة من المحادثة بدون أسماء (١-٤)"],
- "emotion": "القوس العاطفي: من وش إلى وش",
+ "emotion": "القوس العاطفي: من وش إلى وش (ينتهي إيجابي)",
  "lesson": "الدرس التشغيلي أو الإنساني بسطر"}"""
 
 
@@ -128,8 +146,10 @@ def _resolve_status(c, cache):
     return st
 
 
-def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX_PREMIUM):
-    """Blocking scan (called inside a daemon thread). Idempotent via studio_scanned."""
+def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX_PREMIUM,
+             pull_cap=PULL_CAP):
+    """Blocking scan (called inside a daemon thread). Idempotent via studio_scanned.
+    Returns the list of story-ids created THIS run (empty on error)."""
     api_get = HOST.require("api_get")
     claude_json = HOST.require("claude_json")
     model_fast = getattr(HOST, "model_fast", None)
@@ -140,8 +160,9 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
     except Exception:
         pass
 
+    created_ids = []
     _p(running=True, phase="pull", pulled=0, scanned=0, qualified=0, stories=0,
-       premium_used=0, errors=0, done=False, error="", started_at=_now_iso(),
+       blocked=0, premium_used=0, errors=0, done=False, error="", started_at=_now_iso(),
        finished_at="", last_unit="", target=target)
     try:
         # One-time heal (2026-07-06): the first live scan mis-labelled everything
@@ -152,10 +173,10 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
         if healed:
             print("[studio] healed %s legacy skipped_inquiry rows" % healed)
 
-        convos = _pull_conversations(PULL_CAP)
+        convos = _pull_conversations(pull_cap)
         seen = db.scanned_ids()
         _p(phase="scan")
-        scanned = qualified = stories_n = premium = errors = 0
+        scanned = qualified = stories_n = blocked = premium = errors = 0
         res_cache = {}
 
         for c in convos:
@@ -209,22 +230,32 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
                 continue
 
             verdict = "no_story"
-            if triage["story"] and triage["score"] >= min_score and premium < max_premium:
+            score_ok = triage["score"] >= min_score
+            gate_ok = engine.brand_ok(triage)
+            if score_ok and not gate_ok:
+                # a high-score story that would hurt the brand (or isn't positive):
+                # never becomes content. This is the v2 filter the owner asked for.
+                verdict = "blocked_brand"
+                blocked += 1
+                _p(blocked=blocked)
+            elif score_ok and gate_ok and premium < max_premium:
                 story = engine.parse_story(claude_json(
                     STORY_SYSTEM, "المحادثة (شقة: %s):\n\n%s" % (unit, transcript),
                     max_tokens=1200, model=model_premium))
                 premium += 1
                 _p(premium_used=premium)
                 if story:
-                    for k in ("title", "summary", "emotion", "lesson"):
-                        story[k] = engine.scrub_names(story[k], guest)
+                    for k in ("title", "summary", "angle", "emotion", "lesson"):
+                        story[k] = engine.scrub_names(story.get(k, ""), guest)
                     story["beats"] = [engine.scrub_names(b, guest) for b in story["beats"]]
                     story["quotes"] = [engine.scrub_names(x, guest) for x in story["quotes"]]
-                    db.add_story(cid, lid, unit, triage["score"], triage["type"], story, ts)
+                    sid = db.add_story(cid, lid, unit, triage["score"], triage["type"], story, ts)
+                    if sid:
+                        created_ids.append(sid)
                     stories_n += 1
                     verdict = "story"
                     _p(stories=stories_n)
-            elif triage["story"] and triage["score"] >= min_score:
+            elif score_ok and gate_ok:
                 verdict = "story_over_budget"   # good story, premium budget spent
 
             db.mark_scanned(cid, lid, unit, guest, res_status,
@@ -232,8 +263,8 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
                             triage["type"], engine.scrub_names(triage["one_line"], guest), ts)
 
         _p(running=False, phase="done", done=True, finished_at=_now_iso())
-        print("[studio] scan done: scanned=%s qualified=%s stories=%s premium=%s errors=%s"
-              % (scanned, qualified, stories_n, premium, errors))
+        print("[studio] scan done: scanned=%s qualified=%s stories=%s blocked=%s premium=%s errors=%s"
+              % (scanned, qualified, stories_n, blocked, premium, errors))
     except Exception as e:
         traceback.print_exc()
         _p(running=False, phase="error", done=True, error="%s: %s" % (type(e).__name__, e),
@@ -244,14 +275,45 @@ def run_scan(target=TARGET_QUALIFIED, min_score=MIN_STORY_SCORE, max_premium=MAX
                 HOST.save_json("studio_scan.json", snapshot())
         except Exception:
             pass
+    return created_ids
 
 
-def start_scan_thread(**kw):
-    """Kick a scan in a daemon thread. Returns False if one is already running."""
+def start_scan_thread(deep=False, **kw):
+    """Kick a scan in a daemon thread. Returns False if one is already running.
+    deep=True first re-mines under the v2 lens (clears weak legacy cards + cursor)."""
     with _lock:
         if PROGRESS.get("running"):
             return False
         PROGRESS["running"] = True
-    t = threading.Thread(target=run_scan, kwargs=kw, name="studio-scan", daemon=True)
+
+    def _target():
+        if deep:
+            try:
+                cleared = db.reset_for_deep_scan()
+                print("[studio] deep-scan reset:", cleared)
+            except Exception as e:
+                print("[studio] deep-scan reset failed:", e)
+        run_scan(**kw)
+
+    t = threading.Thread(target=_target, name="studio-scan", daemon=True)
     t.start()
     return True
+
+
+def run_daily_scan():
+    """Synchronous daily pass over FRESH conversations (small budget). Returns the db
+    rows of stories created today (best first) for the morning digest. Skips if a scan
+    is already running so it never collides with a manual/deep scan."""
+    with _lock:
+        if PROGRESS.get("running"):
+            return []
+        PROGRESS["running"] = True
+    ids = run_scan(target=DAILY_TARGET, min_score=MIN_STORY_SCORE,
+                   max_premium=DAILY_MAX_PREMIUM, pull_cap=800)
+    rows = []
+    for sid in ids:
+        r = db.story(sid)
+        if r:
+            rows.append(r)
+    rows.sort(key=lambda r: r.get("score", 0), reverse=True)
+    return rows

@@ -65,6 +65,34 @@ class TestStudioDb(unittest.TestCase):
         self.assertEqual(mine["views"], 120000)
         self.assertEqual(sdb.set_idea_status(999999, "posted"), 0)
 
+    def test_v2_columns_roundtrip(self):
+        story = _story()
+        story["angle"] = "الفريق حل الموقف بسرعة"
+        sid = sdb.add_story("c-v2", "101", "Ouja | A", 9, "hero_save",
+                            story, "2026-07-08 09:00:00")
+        self.assertEqual(sdb.story(sid)["angle"], "الفريق حل الموقف بسرعة")
+        idea = {"hook_spoken": "لو عندك شقة في الرياض", "visual_title": "رقم حقيقي",
+                "visual_sub": "", "angle": "", "why_it_works": "هوك الهوية أقوى صيغة",
+                "script": [], "video_type": "talking", "cta": "", "audience": "niche",
+                "trigger": "identity"}
+        iid = sdb.add_idea(sid, idea, "2026-07-08 09:00:00")
+        got = [r for r in sdb.ideas() if r["id"] == iid][0]
+        self.assertEqual(got["why_it_works"], "هوك الهوية أقوى صيغة")
+
+    def test_top_posted_archetypes(self):
+        s1 = sdb.add_story("c-a", "101", "Ouja | A", 9, "hero_save", _story(), "t")
+        s2 = sdb.add_story("c-b", "101", "Ouja | A", 9, "transformation", _story(), "t")
+        base = {"hook_spoken": "h", "visual_title": "t", "visual_sub": "", "angle": "",
+                "why_it_works": "w", "script": [], "video_type": "talking", "cta": "",
+                "audience": "niche", "trigger": "curiosity"}
+        i1 = sdb.add_idea(s1, base, "t")
+        i2 = sdb.add_idea(s2, base, "t")
+        sdb.set_idea_status(i1, "posted", views=900000)
+        sdb.set_idea_status(i2, "posted", views=100000)
+        top = sdb.top_posted_archetypes()
+        self.assertEqual(top[0][0], "hero_save")   # highest views first
+        self.assertGreater(top[0][1], top[1][1])
+
 
 if __name__ == "__main__":
     unittest.main()

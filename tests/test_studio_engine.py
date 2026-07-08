@@ -124,10 +124,13 @@ class TestTranscript(unittest.TestCase):
 
 class TestParseTriage(unittest.TestCase):
     def test_valid(self):
-        d = engine.parse_triage({"story": True, "score": 8, "type": "mistake_fixed",
-                                 "one_line": "الفريق أرسل كود شقة خاطئ وعوّض الضيف"})
+        d = engine.parse_triage({"story": True, "score": 8, "type": "hero_save",
+                                 "brand_safe": True, "positive": True,
+                                 "one_line": "عطل تكييف انحلّ بأقل من ساعة والضيف انبسط"})
         self.assertEqual(d["score"], 8)
-        self.assertEqual(d["type"], "mistake_fixed")
+        self.assertEqual(d["type"], "hero_save")
+        self.assertTrue(d["brand_safe"])
+        self.assertTrue(d["positive"])
 
     def test_none_and_junk(self):
         self.assertIsNone(engine.parse_triage(None))
@@ -138,9 +141,68 @@ class TestParseTriage(unittest.TestCase):
         self.assertEqual(d["score"], 10)
         self.assertEqual(d["type"], "other")
 
+    def test_new_positive_taxonomy_accepted(self):
+        for t in ("hero_save", "transformation", "transparency_numbers", "day_in_life",
+                  "hospitality_wow", "weird_delight", "heartwarming", "loyal_return",
+                  "operational_craft"):
+            d = engine.parse_triage({"story": True, "score": 6, "type": t, "one_line": "x"})
+            self.assertEqual(d["type"], t)
+
+    def test_old_negative_types_normalize_to_other(self):
+        # the retired negative buckets must not survive as labels
+        for t in ("sad_exit", "conflict", "cancellation", "angry_to_happy", "emergency"):
+            d = engine.parse_triage({"story": True, "score": 6, "type": t, "one_line": "x"})
+            self.assertEqual(d["type"], "other")
+
+    def test_brand_flags_fail_closed(self):
+        # absent flags must default False (never leak an unjudged story through the gate)
+        d = engine.parse_triage({"story": True, "score": 9, "type": "hero_save", "one_line": "x"})
+        self.assertFalse(d["brand_safe"])
+        self.assertFalse(d["positive"])
+
     def test_no_story_normalizes(self):
         d = engine.parse_triage({"story": False, "score": 2, "type": "other", "one_line": ""})
         self.assertFalse(d["story"])
+
+
+class TestBrandGate(unittest.TestCase):
+    def _t(self, **kw):
+        base = {"story": True, "score": 8, "type": "hero_save",
+                "brand_safe": True, "positive": True, "one_line": "x"}
+        base.update(kw)
+        return engine.parse_triage(base)
+
+    def test_clean_hero_save_passes(self):
+        self.assertTrue(engine.brand_ok(self._t()))
+
+    def test_unsafe_blocked(self):
+        self.assertFalse(engine.brand_ok(self._t(brand_safe=False)))
+
+    def test_negative_blocked(self):
+        self.assertFalse(engine.brand_ok(self._t(positive=False)))
+
+    def test_not_a_story_blocked(self):
+        self.assertFalse(engine.brand_ok(self._t(story=False)))
+
+    def test_none_blocked(self):
+        self.assertFalse(engine.brand_ok(None))
+
+
+class TestHookBanList(unittest.TestCase):
+    def test_clean_hook_passes(self):
+        self.assertTrue(engine.hook_is_clean("لو عندك شقة في الرياض، خلني أوريك رقم"))
+
+    def test_banned_arabic_phrases_rejected(self):
+        for bad in ("لن تصدق وش صار", "انتظر للنهاية عشان تشوف", "ما راح تصدق النتيجة",
+                    "هل تعلم إن", "قصة صادمة"):
+            self.assertFalse(engine.hook_is_clean(bad), bad)
+
+    def test_banned_english_phrases_rejected(self):
+        for bad in ("You won't believe this", "wait for it", "POV: you booked"):
+            self.assertFalse(engine.hook_is_clean(bad), bad)
+
+    def test_empty_hook_not_clean(self):
+        self.assertFalse(engine.hook_is_clean(""))
 
 
 class TestParseStory(unittest.TestCase):
@@ -162,26 +224,38 @@ class TestParseStory(unittest.TestCase):
 
 
 class TestParseIdeas(unittest.TestCase):
+    def _idea(self, **kw):
+        base = {"hook_spoken": "لو عندك شقة في الرياض شوف هالرقم",
+                "visual_title": "٣ ليالي، تقييم كامل",
+                "visual_sub": "كيف صار",
+                "angle": "قصة موقف", "script": ["افتح بالرقم", "القصة", "النهاية"],
+                "video_type": "talking", "cta": "تابع للمزيد",
+                "audience": "escape", "trigger": "curiosity",
+                "why_it_works": "هوك الهوية أقوى صيغة مثبتة ٢٠٢٦ + رقم حقيقي أول ٣ ثواني"}
+        base.update(kw)
+        return base
+
     def test_valid_list(self):
-        raw = {"ideas": [{"hook_spoken": "خمس كلمات توقف السكرول هنا",
-                          "visual_title": "الضيف طلب شي غريب",
-                          "visual_sub": "وسويناه له",
-                          "angle": "قصة موقف", "script": ["افتح بالسؤال", "القصة", "النهاية"],
-                          "video_type": "talking", "cta": "تابع للمزيد",
-                          "audience": "escape", "trigger": "curiosity"}]}
-        ideas = engine.parse_ideas(raw)
+        ideas = engine.parse_ideas({"ideas": [self._idea()]})
         self.assertEqual(len(ideas), 1)
         self.assertEqual(ideas[0]["audience"], "escape")
+        self.assertTrue(ideas[0]["why_it_works"])
 
     def test_bad_audience_defaults_niche(self):
-        raw = {"ideas": [{"hook_spoken": "ه", "visual_title": "ع", "visual_sub": "",
-                          "angle": "", "script": [], "video_type": "talking",
-                          "cta": "", "audience": "everyone", "trigger": "curiosity"}]}
-        self.assertEqual(engine.parse_ideas(raw)[0]["audience"], "niche")
+        ideas = engine.parse_ideas({"ideas": [self._idea(audience="everyone")]})
+        self.assertEqual(ideas[0]["audience"], "niche")
 
     def test_missing_hook_dropped(self):
-        raw = {"ideas": [{"visual_title": "بدون هوك"}]}
-        self.assertEqual(engine.parse_ideas(raw), [])
+        self.assertEqual(engine.parse_ideas({"ideas": [{"visual_title": "بدون هوك"}]}), [])
+
+    def test_missing_why_dropped(self):
+        # every card must justify itself — no rationale, no card
+        self.assertEqual(engine.parse_ideas({"ideas": [self._idea(why_it_works="")]}), [])
+
+    def test_banned_hook_dropped(self):
+        # a card whose hook trips the burned-out ban-list is dropped
+        self.assertEqual(engine.parse_ideas({"ideas": [self._idea(hook_spoken="لن تصدق وش صار")]}), [])
+        self.assertEqual(engine.parse_ideas({"ideas": [self._idea(visual_title="قصة صادمة")]}), [])
 
     def test_junk(self):
         self.assertEqual(engine.parse_ideas(None), [])

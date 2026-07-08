@@ -4792,6 +4792,9 @@ WATCHDOG_CODE_LOOKAHEAD_H = float(os.environ.get("WATCHDOG_CODE_LOOKAHEAD_H", "1
 
 # ============= Ouja Studio «استوديو عوجا» — TikTok content-idea factory =============
 STUDIO_ENABLED = os.environ.get("STUDIO_ENABLED", "1") == "1"
+STUDIO_DIGEST_HOUR    = int(os.environ.get("STUDIO_DIGEST_HOUR", "9"))            # 09:00 Riyadh
+STUDIO_NOTIFY_DRYRUN  = os.environ.get("STUDIO_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
+STUDIO_OPS_CHANNEL    = os.environ.get("STUDIO_OPS_CHANNEL", "ouja-studio")       # daily digest channel
 
 # ============= Finance Chat «مساعد المركز المالي» — KB-grounded ERP chatbot =============
 FINCHAT_ENABLED       = os.environ.get("FINCHAT_ENABLED", "1") == "1"
@@ -4864,6 +4867,41 @@ async def schedule_digest_loop():
         print("[schedule] morning summary fired for", today, "· total", day.get("total"))
     except Exception as e:
         print("[schedule] digest error:", e)
+
+@tasks.loop(time=dt_time(hour=STUDIO_DIGEST_HOUR, minute=0, tzinfo=TZ))
+async def studio_digest_loop():
+    """Ouja Studio morning digest: scan fresh guest conversations, pick the day's best
+    POSITIVE story, generate one ready-to-film idea, and post it (unless dry-run)."""
+    if not (STUDIO_ENABLED and _HAS_STUDIO):
+        return
+    nl = chr(10)
+    try:
+        stories = await asyncio.to_thread(_studio.mine.run_daily_scan)
+        if not stories:
+            print("[studio] daily digest: no fresh story today")
+            return
+        top_ideas = []
+        try:
+            top_ideas = await asyncio.to_thread(
+                _studio.ideas.generate_for_story, stories[0]["id"])
+        except Exception as _ie:
+            print("[studio] daily digest idea gen failed (non-fatal):", _ie)
+        body = _studio.notify.build_digest(stories, top_ideas)
+        if not body:
+            return
+        if STUDIO_NOTIFY_DRYRUN:
+            print("[studio] (dryrun) would post daily digest:", nl, body)
+            return
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, STUDIO_OPS_CHANNEL, cat)
+        if ch is not None:
+            await ch.send(body)
+        print("[studio] daily digest posted ·", len(stories), "fresh stories")
+    except Exception as e:
+        print("[studio] digest error:", e)
 
 # ====================== AI guest-message assistant ======================
 # Claude drafts a reply, a human approves it in Discord, and only then is it sent.
@@ -54651,6 +54689,8 @@ async def on_ready():
         headsup_loop.start()
     if _HAS_SCHEDULE and SCHEDULE_ENABLED and not schedule_digest_loop.is_running():
         schedule_digest_loop.start()   # morning team-calendar ops summary (default 08:00 Riyadh)
+    if _HAS_STUDIO and STUDIO_ENABLED and not studio_digest_loop.is_running():
+        studio_digest_loop.start()     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
     if not owner_warm_loop.is_running():
         owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():

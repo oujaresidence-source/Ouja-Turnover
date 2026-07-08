@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS studio_stories (
     story_type TEXT,
     title      TEXT,
     summary    TEXT,
+    angle      TEXT NOT NULL DEFAULT '',
     beats      TEXT NOT NULL DEFAULT '[]',
     quotes     TEXT NOT NULL DEFAULT '[]',
     emotion    TEXT,
@@ -57,12 +58,20 @@ CREATE TABLE IF NOT EXISTS studio_ideas (
     cta          TEXT,
     audience     TEXT,
     trigger_kind TEXT,
+    why_it_works TEXT NOT NULL DEFAULT '',
     status       TEXT NOT NULL DEFAULT 'new',
     views        INTEGER NOT NULL DEFAULT 0,
     perf_note    TEXT NOT NULL DEFAULT '',
     created_at   TEXT
 );
 """
+
+# Additive columns for brains created before v2 (2026-07-08). CREATE TABLE IF NOT
+# EXISTS won't add columns to an existing table, so ALTER them in idempotently.
+_MIGRATIONS = (
+    ("studio_stories", "angle", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "why_it_works", "TEXT NOT NULL DEFAULT ''"),
+)
 
 _inited = set()
 _init_lock = threading.Lock()
@@ -77,6 +86,10 @@ def _ensure():
             return
         with closing(_bdb.connect()) as cx:
             cx.executescript(SCHEMA)
+            for table, col, decl in _MIGRATIONS:
+                cols = {r[1] for r in cx.execute("PRAGMA table_info(%s)" % table)}
+                if col not in cols:
+                    cx.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, col, decl))
             cx.commit()
         _inited.add(path)
 
@@ -133,10 +146,10 @@ def scan_counts():
 def add_story(convo_id, listing_id, unit, score, story_type, story, ts):
     return execute(
         "INSERT OR IGNORE INTO studio_stories "
-        "(convo_id, listing_id, unit, score, story_type, title, summary, beats, "
-        " quotes, emotion, lesson, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "(convo_id, listing_id, unit, score, story_type, title, summary, angle, beats, "
+        " quotes, emotion, lesson, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (str(convo_id), str(listing_id or ""), unit or "", int(score or 0),
-         story_type or "other", story["title"], story["summary"],
+         story_type or "other", story["title"], story["summary"], story.get("angle", ""),
          json.dumps(story["beats"], ensure_ascii=False),
          json.dumps(story["quotes"], ensure_ascii=False),
          story["emotion"], story["lesson"], ts))
@@ -173,10 +186,10 @@ def set_story_status(story_id, status):
 def add_idea(story_id, idea, ts):
     return execute(
         "INSERT INTO studio_ideas (story_id, hook_spoken, visual_title, visual_sub, "
-        "angle, script, video_type, cta, audience, trigger_kind, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "angle, why_it_works, script, video_type, cta, audience, trigger_kind, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (int(story_id or 0), idea["hook_spoken"], idea["visual_title"],
-         idea["visual_sub"], idea["angle"],
+         idea["visual_sub"], idea["angle"], idea.get("why_it_works", ""),
          json.dumps(idea["script"], ensure_ascii=False), idea["video_type"],
          idea["cta"], idea["audience"], idea["trigger"], ts))
 
@@ -211,3 +224,43 @@ def set_idea_status(idea_id, status, views=None, perf_note=None):
         execute("UPDATE studio_ideas SET perf_note=? WHERE id=?",
                 (str(perf_note)[:500], int(idea_id)))
     return n
+
+
+# ---------------- learn-loop + deep-rescan ----------------
+
+def top_posted_archetypes(limit=3):
+    """[(story_type, total_views), …] from POSTED ideas joined to their story, best
+    first. Feeds the generator a hint of what already works for this account."""
+    _ensure()
+    return [(r["story_type"] or "other", int(r["v"] or 0)) for r in q(
+        "SELECT s.story_type story_type, SUM(i.views) v "
+        "FROM studio_ideas i JOIN studio_stories s ON s.id = i.story_id "
+        "WHERE i.status = 'posted' AND i.views > 0 "
+        "GROUP BY s.story_type ORDER BY v DESC LIMIT ?", (limit,))]
+
+
+def reset_for_deep_scan():
+    """Owner-triggered v2 re-mine: drop the weak legacy cards + the scan cursor so
+    conversations get re-evaluated under the new positive lens — but KEEP posted/filmed
+    ideas and their stories so the performance history (learn-loop) survives.
+    Returns a dict of how many rows were cleared."""
+    _ensure()
+    keep_story_ids = {r["story_id"] for r in q(
+        "SELECT DISTINCT story_id FROM studio_ideas WHERE status IN ('posted','filmed')")}
+    del_ideas = execute(
+        "DELETE FROM studio_ideas WHERE status IN ('new','shortlisted','rejected')")
+    if keep_story_ids:
+        placeholders = ",".join("?" for _ in keep_story_ids)
+        del_stories = execute(
+            "DELETE FROM studio_stories WHERE status IN ('new','hidden') "
+            "AND id NOT IN (%s)" % placeholders, tuple(keep_story_ids))
+        # only re-scan convos whose story we actually dropped
+        execute("DELETE FROM studio_scanned WHERE convo_id NOT IN "
+                "(SELECT convo_id FROM studio_stories)")
+    else:
+        del_stories = execute(
+            "DELETE FROM studio_stories WHERE status IN ('new','hidden')")
+        execute("DELETE FROM studio_scanned WHERE convo_id NOT IN "
+                "(SELECT convo_id FROM studio_stories)")
+    return {"ideas": del_ideas, "stories": del_stories,
+            "kept_stories": len(keep_story_ids)}

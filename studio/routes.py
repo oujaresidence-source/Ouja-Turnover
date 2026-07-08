@@ -54,6 +54,14 @@ async def api_scan(request):
                                "scan": mine.snapshot()})
 
 
+async def api_deep_scan(request):
+    """v2 deep re-mine: clear weak legacy cards + cursor, then scan under the positive
+    lens. Keeps posted/filmed cards. Owner-triggered only."""
+    started = mine.start_scan_thread(deep=True)
+    return HOST.json_response({"ok": True, "started": started, "deep": True,
+                               "scan": mine.snapshot()})
+
+
 async def api_stories(request):
     status = request.query.get("status") or None
     rows = db.stories(status=status)
@@ -185,6 +193,10 @@ STUDIO_PAGE_HTML = """<!doctype html>
   ol.script li{margin-bottom:4px}
   .cta-line{font-size:14px;margin-top:8px;color:var(--ink)}
   .cta-line b{color:var(--amber)}
+  .why{display:flex;gap:8px;align-items:baseline;background:var(--green-soft);
+    border:1px solid #CBDFD1;border-radius:8px;padding:8px 12px;margin-top:8px;
+    font-size:14px;font-weight:600;color:var(--ink)}
+  .why span{flex:none;font-size:12px;font-weight:800;color:var(--green)}
 
   .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
   .acts button{min-height:44px;border:1px solid var(--border);border-radius:999px;
@@ -216,7 +228,10 @@ STUDIO_PAGE_HTML = """<!doctype html>
         <h1>🎬 استوديو عوجا</h1>
         <div class="sub">قصص حقيقية من محادثات الضيوف → أفكار فيديو جاهزة</div>
       </div>
-      <button class="scanbtn" id="scanbtn">امسح المحادثات</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="scanbtn" id="scanbtn">امسح الجديد</button>
+        <button class="scanbtn" id="deepbtn" style="background:var(--gold);color:var(--ink)">🔄 مسح عميق</button>
+      </div>
     </div>
     <div class="prog" id="prog"></div>
     <div class="bar" id="bar" hidden><i id="barfill"></i></div>
@@ -238,9 +253,9 @@ var TAB = 'ideas';
 var STORIES = [], IDEAS = [];
 var NL = String.fromCharCode(10);
 
-var TYPE_AR = {weird_request:'طلب غريب', mistake_fixed:'خطأ وتصحيح', angry_to_happy:'زعل ورضا',
-  sad_exit:'طلع زعلان', emergency:'طوارئ', funny:'موقف مضحك', heartwarming:'موقف إنساني',
-  operational_secret:'أسرار الصنعة', conflict:'خلاف', cancellation:'إلغاء', other:'موقف'};
+var TYPE_AR = {hero_save:'إنقاذ الموقف', transformation:'تحوّل', transparency_numbers:'أرقام وشفافية',
+  day_in_life:'كواليس اليوم', hospitality_wow:'لمسة ضيافة', weird_delight:'طلب طريف',
+  heartwarming:'موقف إنساني', loyal_return:'ضيف رجع', operational_craft:'سر الصنعة', other:'موقف'};
 var TRG_AR = {curiosity:'فضول', loss:'خسارة', identity:'هوية', provocation:'استفزاز', emotion:'مشاعر'};
 var AUD_AR = {niche:'للملّاك 🏠', escape:'جمهور عام 🌍'};
 var VT_AR = {talking:'توك للكاميرا', tour:'جولة', before_after:'قبل/بعد',
@@ -264,22 +279,26 @@ function tag(cls, txt){ return '<span class="tag ' + cls + '">' + txt + '</span>
 // ---------- scan ----------
 function renderScan(s){
   var btn = document.getElementById('scanbtn');
+  var deep = document.getElementById('deepbtn');
   var prog = document.getElementById('prog');
   var bar = document.getElementById('bar');
+  if (deep){ deep.disabled = !!s.running; }
   if (s.running){
     btn.disabled = true; btn.textContent = 'يمسح…'; bar.hidden = false;
     var pct = Math.min(100, Math.round(100 * (s.qualified || 0) / (s.target || 300)));
     document.getElementById('barfill').style.width = pct + '%';
     prog.textContent = 'قرأ ' + (s.scanned || 0) + ' محادثة · ' + (s.qualified || 0)
-      + ' حقيقية · ' + (s.stories || 0) + ' قصة 📖 · آخر شقة: ' + (s.last_unit || '—');
+      + ' حقيقية · ' + (s.stories || 0) + ' قصة 📖 · ' + (s.blocked || 0)
+      + ' مستبعدة للبراند 🚫 · آخر شقة: ' + (s.last_unit || '—');
     setTimeout(loadStatus, 4000);
   } else {
-    btn.disabled = false; btn.textContent = 'امسح المحادثات'; bar.hidden = true;
+    btn.disabled = false; btn.textContent = 'امسح الجديد'; bar.hidden = true;
     var c = s.counts || {};
     var done = 0, k;
     for (k in c){ done += c[k]; }
     prog.textContent = done ? ('في الأرشيف: ' + done + ' محادثة مفحوصة · '
-      + (c.story || 0) + ' قصة — المسح الجديد يكمّل من وين ما وقف') : 'أول مسح ياخذ ٥-١٠ دقايق ويقرأ آخر ٣٠٠ محادثة حقيقية';
+      + (c.story || 0) + ' قصة · ' + (c.blocked_brand || 0) + ' مستبعدة للبراند — «امسح الجديد» يكمّل من وين وقف، و«مسح عميق» يعيد الفحص بالعدسة الجديدة')
+      : 'أول مسح ياخذ وقت ويقرأ آخر ٢٠٠٠ محادثة حقيقية بعدسة إيجابية';
     if (s.error){ prog.textContent = 'خطأ: ' + s.error; }
   }
 }
@@ -291,6 +310,12 @@ function loadStatus(){
 document.getElementById('scanbtn').addEventListener('click', function(){
   api('/api/studio/scan', {method:'POST', body:'{}'}).then(function(r){
     if (r.ok){ toast(r.started ? 'بدأ المسح 🔍' : 'فيه مسح شغّال'); renderScan(r.scan || {}); }
+  });
+});
+document.getElementById('deepbtn').addEventListener('click', function(){
+  if (!confirm('المسح العميق يعيد فحص آخر ٢٠٠٠ محادثة بالعدسة الإيجابية الجديدة، ويمسح البطاقات القديمة الضعيفة (يبقي المنشور والمصوّر). يمكن ياخذ وقت. نبدأ؟')){ return; }
+  api('/api/studio/deep-scan', {method:'POST', body:'{}'}).then(function(r){
+    if (r.ok){ toast(r.started ? 'بدأ المسح العميق 🔄' : 'فيه مسح شغّال'); renderScan(r.scan || {}); loadAll(); }
   });
 });
 
@@ -305,6 +330,7 @@ function ideaCard(x){
     + (x.visual_sub ? '<div class="vs">' + esc(x.visual_sub) + '</div>' : '') + '</div>'
     + '<div class="spoken"><span>🎤 أول ما تقول</span>' + esc(x.hook_spoken) + '</div>'
     + (x.angle ? '<div class="sum">' + esc(x.angle) + '</div>' : '')
+    + (x.why_it_works ? '<div class="why"><span>💡 ليش بيشتغل</span>' + esc(x.why_it_works) + '</div>' : '')
     + (script ? '<ol class="script">' + script + '</ol>' : '')
     + (x.cta ? '<div class="cta-line"><b>الختام:</b> ' + esc(x.cta) + '</div>' : '')
     + '<div class="meta">' + tag('gold', AUD_AR[x.audience] || x.audience)
@@ -383,6 +409,7 @@ document.getElementById('tabs').addEventListener('click', function(e){
 function copyIdea(x){
   var lines = ['🎬 ' + x.visual_title, (x.visual_sub || ''), '',
     '🎤 الهوك: ' + x.hook_spoken, ''];
+  if (x.why_it_works){ lines.push('💡 ليش بيشتغل: ' + x.why_it_works, ''); }
   (x.script || []).forEach(function(b, i){ lines.push((i + 1) + '. ' + b); });
   if (x.cta){ lines.push('', 'الختام: ' + x.cta); }
   navigator.clipboard.writeText(lines.join(NL)).then(function(){ toast('انسخ ✅'); },
@@ -443,6 +470,7 @@ def register(app):
     app.router.add_get("/studio", page)
     app.router.add_get("/api/studio/status", _safe(api_status))
     app.router.add_post("/api/studio/scan", _safe(api_scan))
+    app.router.add_post("/api/studio/deep-scan", _safe(api_deep_scan))
     app.router.add_get("/api/studio/stories", _safe(api_stories))
     app.router.add_post("/api/studio/story-status", _safe(api_story_status))
     app.router.add_post("/api/studio/generate", _safe(api_generate))
