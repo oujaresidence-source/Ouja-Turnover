@@ -2779,6 +2779,53 @@ def render_guests(rows, date_label=""):
     return NL.join(out)
 
 
+def build_update_rows():
+    """Assemble today's check-ins with cleaned / code-sent / agreement status.
+    Reuses the watchdog's own signals. Runs sync (Hostaway calls) — call via
+    asyncio.to_thread. 'cleaned' reflects what the system knows (no turnover
+    record = treated as ready), same as the watchdog."""
+    today = datetime.now(TZ).date()
+    today_iso = today.isoformat()
+    try:
+        arrivals = compute_arrivals_with_status(window_hours=36, lookback_hours=24)
+    except Exception as e:
+        print("build_update_rows arrivals error:", e)
+        arrivals = []
+    rows = []
+    for a in arrivals:
+        ci = a.get("checkin_iso") or ""
+        if ci[:10] != today_iso:
+            continue
+        lid = a.get("listing_id")
+        # agreement: distinguish 'not needed' from 'not signed'
+        try:
+            if not _unit_requires_agreement(lid):
+                agr = "not_required"
+            elif a.get("signed"):
+                agr = "signed"
+            else:
+                agr = "not_signed"
+        except Exception:
+            agr = "signed" if a.get("signed") else "not_signed"
+        # door code sent? (reuse the watchdog classifier on the conversation)
+        code_sent = False
+        cid = a.get("conversation_id")
+        if cid and _HAS_WATCHDOG and _watchdog:
+            try:
+                msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+                code_sent = bool(_watchdog.engine.classify_code_send(msgs)["found"])
+            except Exception as e:
+                print(f"build_update_rows code scan error ({cid}):", e)
+        rows.append({
+            "unit": a.get("unit"), "guest": a.get("guest"),
+            "time_label": ci[11:16] if len(ci) >= 16 else "",
+            "cleaned": _wd_cleaning_ok(lid, today_iso),
+            "code_sent": code_sent,
+            "agreement": agr,
+        })
+    return rows
+
+
 def compute_urgent_now():
     """Top operational items the owner needs to see at a glance:
        - escalations open + age
@@ -52348,6 +52395,45 @@ async def cmd_deepclean_pause(ctx):
     except Exception as e:
         print("deepclean-pause command error:", e)
         await ctx.send("✅ أوقفت الحجب. صار خطأ بسيط وأنا أعرض تفاصيل التواريخ — بس الإيقاف تم بنجاح.")
+
+
+@bot.tree.command(name="update", description="ملخص تسجيلات الدخول اليوم (نظافة/كود/عقد)")
+async def slash_update(interaction: discord.Interaction):
+    if not _can_delete_channels(interaction.user):
+        await interaction.response.send_message("🚫 هذا الأمر للإدارة فقط.", ephemeral=True)
+        return
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    try:
+        rows = await asyncio.to_thread(build_update_rows)
+        text = render_update(rows, _ar_today_label())
+    except Exception as e:
+        print("/update error:", e)
+        await interaction.followup.send("⚠️ صار خطأ وأنا أجهّز الملخص.", ephemeral=True)
+        return
+    await _post_ops_to_watchdog(text)
+    tail = ("\n… (كامل التقرير في #%s)" % WATCHDOG_CHANNEL) if len(text) > 1900 else ""
+    await interaction.followup.send(text[:1900] + tail, ephemeral=True)
+
+
+@bot.command(name="update", aliases=["تحديث", "الوصول", "تسجيلات"])
+async def cmd_update(ctx):
+    """!ouja update — today's check-ins: cleaned / code / agreement (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    try:
+        rows = await asyncio.to_thread(build_update_rows)
+        text = render_update(rows, _ar_today_label())
+    except Exception as e:
+        print("!ouja update error:", e)
+        await ctx.reply("⚠️ صار خطأ وأنا أجهّز الملخص.")
+        return
+    await _post_ops_to_watchdog(text)
+    await ctx.reply(text[:1900])
+
 
 @bot.command(name="افتح-تنظيفات-اليوم",
              aliases=["build-today-cleanings", "افتح-تنظيفات", "build-cleanings", "افتح-التنظيفات"])
