@@ -2093,6 +2093,23 @@ def _dc_calendar_day_free(lid, d_iso):
         print(f"deepclean cal check error ({lid}, {d_iso}):", e)
         return False
 
+def _deep_clean_block_eligible(day):
+    """True iff this Hostaway calendar-day dict is a block THIS feature created:
+    unavailable + no guest reservation + our 'deep-clean' note sentinel. Anything
+    else (a booking, a manual hold with a different/empty note, an available day)
+    returns False so the unblock sweep can never free a date it didn't create."""
+    if not isinstance(day, dict):
+        return False
+    try:
+        avail = int(day.get("isAvailable", 1) or 0)
+    except Exception:
+        avail = 1
+    if avail != 0:
+        return False
+    if day.get("reservationId"):
+        return False
+    return str(day.get("note") or "").strip().lower() == "deep-clean"
+
 def _dc_scheduled_dates():
     return {s.get("next_scheduled") for s in _deep_clean_state.values() if s.get("next_scheduled")}
 
