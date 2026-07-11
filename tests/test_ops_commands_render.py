@@ -48,5 +48,40 @@ class TestRenderUpdate(unittest.TestCase):
         self.assertLess(out.index("09:00"), out.index("20:00"))
 
 
+class TestRenderGuests(unittest.TestCase):
+    def test_empty(self):
+        self.assertIn("ما فيه ضيوف", bot.render_guests([], ""))
+
+    def test_sad_shows_issue_and_open_status(self):
+        rows = [{"guest": "سعد", "unit": "Ouja | A", "mood": "sad",
+                 "issue": "المكيف ما يبرد", "resolved": False}]
+        out = bot.render_guests(rows, "")
+        self.assertIn("☹️", out)
+        self.assertIn("المكيف ما يبرد", out)
+        self.assertIn("لسه مفتوحة", out)
+
+    def test_sad_resolved_status(self):
+        rows = [{"guest": "x", "unit": "y", "mood": "sad", "issue": "z", "resolved": True}]
+        self.assertIn("تم الحل", bot.render_guests(rows, ""))
+
+    def test_happy_hides_issue_line(self):
+        rows = [{"guest": "نورة", "unit": "Ouja | B", "mood": "happy",
+                 "issue": "", "resolved": True}]
+        out = bot.render_guests(rows, "")
+        self.assertIn("🙂", out)
+        self.assertNotIn("المشكلة", out)
+
+    def test_header_counts(self):
+        rows = [
+            {"guest": "a", "unit": "u", "mood": "happy", "issue": "", "resolved": True},
+            {"guest": "b", "unit": "u", "mood": "normal", "issue": "", "resolved": True},
+            {"guest": "c", "unit": "u", "mood": "sad", "issue": "i", "resolved": False},
+        ]
+        out = bot.render_guests(rows, "")
+        self.assertIn("🙂 1", out)
+        self.assertIn("😐 1", out)
+        self.assertIn("☹️ 1", out)
+
+
 if __name__ == "__main__":
     unittest.main()

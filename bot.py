@@ -2752,6 +2752,33 @@ def render_update(rows, date_label=""):
             AGR.get(r.get("agreement"), "؟")))
     return NL.join(out)
 
+
+def render_guests(rows, date_label=""):
+    """Pure Arabic-first renderer for the in-house guest mood snapshot. `rows` items:
+    {guest, unit, mood in {'happy','normal','sad'}, issue, resolved(bool)}.
+    The issue + solved/open line shows ONLY for sad guests."""
+    NL = "\n"
+    EM = {"happy": "🙂", "normal": "😐", "sad": "☹️"}
+    rows = rows or []
+    title = ("🧑‍🤝‍🧑 حالة الضيوف %s" % date_label).strip()
+    if not rows:
+        return title + NL + "ما فيه ضيوف حاليًا"
+    happy = sum(1 for r in rows if r.get("mood") == "happy")
+    normal = sum(1 for r in rows if r.get("mood") == "normal")
+    sad = sum(1 for r in rows if r.get("mood") == "sad")
+    out = ["%s — 🙂 %d · 😐 %d · ☹️ %d" % (title, happy, normal, sad)]
+    order = {"sad": 0, "normal": 1, "happy": 2}
+    for r in sorted(rows, key=lambda x: order.get(x.get("mood"), 1)):
+        out.append("")
+        out.append("%s %s — %s" % (EM.get(r.get("mood"), "😐"),
+                                   r.get("guest") or "ضيف", r.get("unit") or "-"))
+        if r.get("mood") == "sad":
+            issue = (r.get("issue") or "").strip() or "—"
+            status = "✅ تم الحل" if r.get("resolved") else "⏳ لسه مفتوحة"
+            out.append("   ⚠️ المشكلة: %s  ·  الحالة: %s" % (issue, status))
+    return NL.join(out)
+
+
 def compute_urgent_now():
     """Top operational items the owner needs to see at a glance:
        - escalations open + age
