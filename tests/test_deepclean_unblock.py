@@ -44,6 +44,16 @@ class TestBlockEligible(unittest.TestCase):
     def test_false_for_non_dict(self):
         self.assertFalse(bot._deep_clean_block_eligible(None))
 
+    def test_true_for_note_case_and_whitespace_variants(self):
+        self.assertTrue(bot._deep_clean_block_eligible(
+            {"isAvailable": 0, "reservationId": None, "note": "  Deep-Clean  "}))
+        self.assertTrue(bot._deep_clean_block_eligible(
+            {"isAvailable": 0, "reservationId": None, "note": "DEEP-CLEAN"}))
+
+    def test_false_for_none_availability(self):
+        self.assertFalse(bot._deep_clean_block_eligible(
+            {"isAvailable": None, "reservationId": None, "note": "deep-clean"}))
+
 
 if __name__ == "__main__":
     unittest.main()
