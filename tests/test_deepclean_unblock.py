@@ -55,5 +55,75 @@ class TestBlockEligible(unittest.TestCase):
             {"isAvailable": None, "reservationId": None, "note": "deep-clean"}))
 
 
+class TestUnblockSweep(unittest.TestCase):
+    """Synthetic-data test for the live-write sweep: it must free ONLY our own
+    deep-clean blocks (verified against a re-read of the calendar), leave guest
+    bookings and manual holds alone, ignore non-blocked units, and be idempotent."""
+
+    def setUp(self):
+        import re as _re
+        self._orig = (bot.api_get, bot.api_put, bot.get_listings_map,
+                      dict(bot._deep_clean_state))
+        self.puts = []
+        self._cal = {
+            101: {"isAvailable": 0, "reservationId": None, "note": "deep-clean"},   # ours -> free
+            102: {"isAvailable": 0, "reservationId": 99999, "note": "deep-clean"},  # guest booked -> skip
+            103: {"isAvailable": 0, "reservationId": None, "note": "owner hold"},   # manual hold -> skip
+        }
+
+        def fake_get(path, params=None):
+            m = _re.search(r"/listings/(\d+)/calendar", path)
+            lid = int(m.group(1)) if m else None
+            day = self._cal.get(lid)
+            return {"result": [day] if day else []}
+
+        def fake_put(path, body):
+            self.puts.append((path, body))
+            m = _re.search(r"/listings/(\d+)/calendar", path)
+            lid = int(m.group(1)) if m else None
+            if lid in self._cal:   # reflect the freeing write so a 2nd sweep is a no-op
+                self._cal[lid] = {"isAvailable": 1, "reservationId": None, "note": "deep-clean"}
+            return {"result": []}
+
+        bot.api_get = fake_get
+        bot.api_put = fake_put
+        bot.get_listings_map = lambda: {101: "Ouja | A", 102: "Ouja | B",
+                                        103: "Ouja | C", 104: "Ouja | D"}
+        bot._deep_clean_state = {
+            101: {"next_status": "blocked", "next_scheduled": "2026-07-13"},
+            102: {"next_status": "blocked", "next_scheduled": "2026-07-14"},
+            103: {"next_status": "blocked", "next_scheduled": "2026-07-15"},
+            104: {"next_status": "scheduled", "next_scheduled": "2026-07-20"},  # not blocked -> ignored
+        }
+
+    def tearDown(self):
+        (bot.api_get, bot.api_put, bot.get_listings_map, state) = self._orig
+        bot._deep_clean_state = state
+
+    def test_frees_only_our_block(self):
+        rep = bot.unblock_all_deep_clean_dates()
+        self.assertEqual(rep["count"], 1)
+        self.assertEqual([f["lid"] for f in rep["freed"]], [101])
+        # exactly one write, to listing 101, setting it available
+        self.assertEqual(len(self.puts), 1)
+        self.assertIn("/listings/101/calendar", self.puts[0][0])
+        self.assertEqual(self.puts[0][1]["isAvailable"], 1)
+        # 101 state cleared; guest-booked + manual-hold stay blocked
+        self.assertEqual(bot._deep_clean_state[101]["next_status"], "unscheduled")
+        self.assertIsNone(bot._deep_clean_state[101]["next_scheduled"])
+        self.assertEqual(bot._deep_clean_state[102]["next_status"], "blocked")
+        self.assertEqual(bot._deep_clean_state[103]["next_status"], "blocked")
+        # non-blocked unit 104 was never touched (not read, not written, not skipped)
+        self.assertNotIn(104, [s.get("lid") for s in rep["skipped"]])
+        self.assertEqual(sorted(s.get("lid") for s in rep["skipped"]), [102, 103])
+
+    def test_idempotent_second_run_is_noop(self):
+        bot.unblock_all_deep_clean_dates()
+        self.puts.clear()
+        rep2 = bot.unblock_all_deep_clean_dates()
+        self.assertEqual(rep2["count"], 0)
+        self.assertEqual(len(self.puts), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

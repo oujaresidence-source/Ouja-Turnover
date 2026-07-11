@@ -2553,7 +2553,7 @@ def unblock_all_deep_clean_dates():
             day = days[0] if days else None
         except Exception as e:
             print(f"unblock cal read error ({lid},{iso}):", e)
-            skipped.append({"name": name, "date": iso, "reason": "read-error"})
+            skipped.append({"lid": lid, "name": name, "date": iso, "reason": "read-error"})
             continue
         if day and _deep_clean_block_eligible(day):
             try:
@@ -2564,9 +2564,9 @@ def unblock_all_deep_clean_dates():
                 freed.append({"lid": lid, "name": name, "date": iso})
             except Exception as e:
                 print(f"unblock write error ({lid},{iso}):", e)
-                skipped.append({"name": name, "date": iso, "reason": "write-error"})
+                skipped.append({"lid": lid, "name": name, "date": iso, "reason": "write-error"})
         else:
-            skipped.append({"name": name, "date": iso, "reason": "not-eligible"})
+            skipped.append({"lid": lid, "name": name, "date": iso, "reason": "not-eligible"})
     return {"freed": freed, "count": len(freed), "skipped": skipped}
 
 
