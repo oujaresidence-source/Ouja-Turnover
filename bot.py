@@ -2721,6 +2721,37 @@ def compute_arrivals_with_status(window_hours=36, lookback_hours=4):
     out.sort(key=lambda x: x["hours_until"])
     return out
 
+_AR_WEEKDAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]  # Mon..Sun
+
+
+def _ar_today_label():
+    d = datetime.now(TZ).date()
+    return "%s %s" % (_AR_WEEKDAYS[d.weekday()], d.isoformat())
+
+
+def render_update(rows, date_label=""):
+    """Pure Arabic-first renderer for today's check-ins. `rows` items:
+    {unit, guest, time_label, cleaned(bool), code_sent(bool), agreement}
+    where agreement in {'signed','not_signed','not_required'}."""
+    NL = "\n"
+    rows = sorted(rows or [], key=lambda x: x.get("time_label") or "")
+    title = ("📋 تسجيلات الدخول اليوم %s" % date_label).strip()
+    if not rows:
+        return title + NL + "ما فيه تسجيلات دخول اليوم ✅"
+    AGR = {"signed": "موقّع ✅", "not_signed": "غير موقّع ❌", "not_required": "لا يحتاج"}
+    ok = lambda b: "✅" if b else "❌"
+    out = ["%s — %d" % (title, len(rows))]
+    for r in rows:
+        head = "🏠 %s — %s" % (r.get("unit") or "-", r.get("guest") or "ضيف")
+        if r.get("time_label"):
+            head += " — 🕐 %s" % r["time_label"]
+        out.append("")
+        out.append(head)
+        out.append("🧹 نظّفت: %s  ·  🔑 الكود: %s  ·  📝 العقد: %s" % (
+            ok(r.get("cleaned")), ok(r.get("code_sent")),
+            AGR.get(r.get("agreement"), "؟")))
+    return NL.join(out)
+
 def compute_urgent_now():
     """Top operational items the owner needs to see at a glance:
        - escalations open + age
