@@ -2141,7 +2141,7 @@ def _dc_find_next_date(lid, after_date=None):
 
 def schedule_deep_cleans():
     """Assign next_scheduled for every non-paused unit that doesn't have one."""
-    if not DEEPCLEAN_ENABLED:
+    if not DEEPCLEAN_ENABLED or _deep_clean_is_paused():
         return
     listings = get_listings_map() or {}
     for lid in listings:
@@ -2277,7 +2277,7 @@ def confirm_tomorrow_deepcleans():
     """At 9pm: lock in tomorrow's planned deep cleans.
        - if the unit is still free → block the calendar (isAvailable=0) so the cleaner has the day
        - if a guest booked it last-minute → push to the next available slot"""
-    if not DEEPCLEAN_ENABLED:
+    if not DEEPCLEAN_ENABLED or _deep_clean_is_paused():
         return
     tomorrow = datetime.now(TZ).date() + timedelta(days=1)
     iso = tomorrow.isoformat()
@@ -2318,7 +2318,7 @@ def deepclean_lookahead_check(days=7):
     against Hostaway and resolve booking conflicts NOW — the old flow only discovered
     them the night before (9pm confirm), leaving no time to re-plan the crew's day.
     Tomorrow stays the confirm loop's job; this sweeps day 2..days (a handful of calls)."""
-    if not DEEPCLEAN_ENABLED:
+    if not DEEPCLEAN_ENABLED or _deep_clean_is_paused():
         return 0
     today = datetime.now(TZ).date()
     listings = get_listings_map() or {}
@@ -2530,6 +2530,58 @@ def mark_deep_clean_done(lid, date_iso=None, notes="", cleaner=""):
     except Exception as e:
         print(f"calendar-free error (listing {lid}, {done_date}):", e)
     return True
+
+def unblock_all_deep_clean_dates():
+    """Free every calendar date THIS deep-clean feature blocked, and ONLY those.
+    Candidate set = units whose state says next_status=='blocked' with a date
+    (fast — no full-calendar scan). For each, re-read Hostaway and unblock only if
+    _deep_clean_block_eligible confirms it's our own 'deep-clean' block. Idempotent:
+    re-running frees nothing because the day is already available. Returns a report."""
+    freed, skipped = [], []
+    listings = get_listings_map() or {}
+    for lid, s in list(_deep_clean_state.items()):
+        if s.get("next_status") != "blocked":
+            continue
+        iso = s.get("next_scheduled")
+        if not iso:
+            continue
+        name = listings.get(lid, str(lid))
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": iso, "endDate": iso})
+            days = cal.get("result") or []
+            day = days[0] if days else None
+        except Exception as e:
+            print(f"unblock cal read error ({lid},{iso}):", e)
+            skipped.append({"name": name, "date": iso, "reason": "read-error"})
+            continue
+        if day and _deep_clean_block_eligible(day):
+            try:
+                api_put(f"/listings/{lid}/calendar",
+                        {"startDate": iso, "endDate": iso, "isAvailable": 1})
+                s["next_scheduled"] = None
+                s["next_status"] = "unscheduled"
+                freed.append({"lid": lid, "name": name, "date": iso})
+            except Exception as e:
+                print(f"unblock write error ({lid},{iso}):", e)
+                skipped.append({"name": name, "date": iso, "reason": "write-error"})
+        else:
+            skipped.append({"name": name, "date": iso, "reason": "not-eligible"})
+    return {"freed": freed, "count": len(freed), "skipped": skipped}
+
+
+def _dc_unblock_report_text(rep):
+    """Plain-Arabic summary of an unblock sweep for the ops channel."""
+    NL = "\n"
+    n = rep.get("count", 0)
+    if not n:
+        return "✅ حجب التنظيف العميق متوقف. ما فيه أي تاريخ محجوز حالياً."
+    lines = ["✅ حجب التنظيف العميق متوقف. فكّيت %d تاريخ كان محجوز:" % n]
+    for f in rep.get("freed", [])[:40]:
+        lines.append("• %s — %s" % (f.get("name"), f.get("date")))
+    if n > 40:
+        lines.append("… +%d غيرها" % (n - 40))
+    return NL.join(lines)
 
 def compute_tonight_empty():
     """For each unit empty TONIGHT, return its current price + the discount schedule the
@@ -8812,6 +8864,15 @@ def next_work_start(dt=None):
     return today_start + timedelta(days=1)
 # lid (int) -> {last_done, next_scheduled, next_status, history:[{date,ts,notes}], notes}
 _deep_clean_state = {}
+# Owner paused the deep-clean auto-blocker (2026-07-12). Persisted so it survives
+# redeploys WITHOUT needing a Railway env edit. Defaults to paused on first boot;
+# `!ouja deepclean-resume` (or the API) flips it back on. `unblocked_once` guards
+# the one-time boot sweep that frees already-blocked dates.
+_dc_pause = {"paused": True, "unblocked_once": False}
+
+
+def _deep_clean_is_paused():
+    return bool(_dc_pause.get("paused"))
 # Listings the owner has manually parked (out of rotation). When paused, the unit
 # is skipped by every scheduling function and shown in a separate dashboard
 # section. Persisted across redeploys.
@@ -48949,6 +49010,9 @@ def load_state():
         _paused_units.clear()
         _paused_units.update(int(x) for x in _load_json("paused_units.json", []) if str(x).strip())
         _dc_anchor_date = _load_json("dc_anchor.json", None) or None
+        _dc_pause.clear()
+        _dc_pause.update(_load_json("deep_clean_pause.json",
+                                    {"paused": True, "unblocked_once": False}))
         _tickets.clear()
         for t in (_load_json("tickets.json", []) or []):
             if isinstance(t, dict) and t.get("id"):
@@ -49123,6 +49187,7 @@ def persist_state():
     _save_json("deep_clean.json", {str(k): v for k, v in dict(_deep_clean_state).items()})
     _save_json("paused_units.json", list(_paused_units))
     _save_json("dc_anchor.json", _dc_anchor_date)
+    _save_json("deep_clean_pause.json", dict(_dc_pause))
     # Cap tickets to last 1000 on disk to keep the JSON small
     _save_json("tickets.json", list(_tickets)[:1000])
     _save_json("reviews.json", dict(_reviews))
