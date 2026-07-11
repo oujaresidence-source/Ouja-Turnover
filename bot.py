@@ -34949,6 +34949,25 @@ async def _api_cleaning_reschedule(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+async def _api_cleaning_resume_blocking(request):
+    """Turn deep-clean auto-blocking back on."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    _dc_pause["paused"] = False
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "paused": False})
+
+
+async def _api_cleaning_pause_blocking(request):
+    """Pause deep-clean auto-blocking AND free every date it had blocked."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    _dc_pause["paused"] = True
+    rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+    _dc_pause["unblocked_once"] = True
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "paused": True, "freed": rep["count"], "report": rep})
+
 async def _api_cleaning_import_csv(request):
     """POST multipart-form with field 'file' = a CSV with two columns: name,date.
     Header row optional. Date format: YYYY-MM-DD (or DD/MM/YYYY also accepted).
@@ -48418,6 +48437,8 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/unpause", _api_cleaning_unpause)
         app.router.add_post("/api/cleaning/insert", _api_cleaning_insert)
         app.router.add_post("/api/cleaning/reschedule-from", _api_cleaning_reschedule_from)
+        app.router.add_post("/api/cleaning/pause-blocking", _api_cleaning_pause_blocking)
+        app.router.add_post("/api/cleaning/resume-blocking", _api_cleaning_resume_blocking)
         app.router.add_get("/api/cleaning/reports", _api_cleaning_reports)
         app.router.add_post("/api/cleaning/reports/resend-today", _api_cleaning_reports_resend_today)
         app.router.add_post("/api/cleaning/report-decision", _api_cleaning_report_decision)
@@ -48755,7 +48776,20 @@ async def agreement_reminder_loop():
 @tasks.loop(hours=4)
 async def deepclean_schedule_loop():
     """Top up the deep-clean schedule for any unit that doesn't have a next date,
-    then sweep the next 7 days for booking conflicts (early re-planning)."""
+    then sweep the next 7 days for booking conflicts (early re-planning). Also runs
+    the one-time unblock sweep the first boot after the owner paused the feature."""
+    try:
+        if _deep_clean_is_paused() and not _dc_pause.get("unblocked_once"):
+            rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+            _dc_pause["unblocked_once"] = True
+            await asyncio.to_thread(persist_state)
+            try:
+                await _post_ops_to_watchdog(_dc_unblock_report_text(rep))
+            except Exception as e:
+                print("deepclean unblock report post error:", e)
+            print(f"deepclean: one-time unblock freed {rep['count']} date(s)")
+    except Exception as e:
+        print("deepclean unblock sweep error:", e)
     try:
         await asyncio.to_thread(schedule_deep_cleans)
     except Exception as e:
@@ -52228,6 +52262,30 @@ async def cmd_delete_this_channel(ctx):
         except Exception:
             pass
 
+@bot.command(name="deepclean-resume", aliases=["تشغيل-التنظيف-العميق", "استئناف-الحجب"])
+async def cmd_deepclean_resume(ctx):
+    """!ouja deepclean-resume — turn deep-clean auto-blocking back on (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    _dc_pause["paused"] = False
+    await asyncio.to_thread(persist_state)
+    await ctx.reply("✅ رجّعت حجب مواعيد التنظيف العميق يشتغل. من الليلة بيحجز مواعيد التنظيف مثل قبل.")
+
+
+@bot.command(name="deepclean-pause", aliases=["ايقاف-التنظيف-العميق", "ايقاف-الحجب"])
+async def cmd_deepclean_pause(ctx):
+    """!ouja deepclean-pause — pause auto-blocking AND free its blocked dates (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    await ctx.reply("⏳ أوقف الحجب وأفكّ التواريخ المحجوزة للتنظيف العميق…")
+    _dc_pause["paused"] = True
+    rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+    _dc_pause["unblocked_once"] = True
+    await asyncio.to_thread(persist_state)
+    await ctx.send(_dc_unblock_report_text(rep))
+
 @bot.command(name="افتح-تنظيفات-اليوم",
              aliases=["build-today-cleanings", "افتح-تنظيفات", "build-cleanings", "افتح-التنظيفات"])
 async def cmd_build_today_cleanings(ctx):
@@ -54349,6 +54407,37 @@ def _wd_discord_embeds(embed_dicts):
                                  color=_WD_EMBED_COLORS.get(d.get("color"), 0x95A5A6)))
         total += block
     return out
+
+
+async def _send_long_to_channel(ch, text):
+    """Send text to a Discord channel in <=1900-char chunks (2000 is the hard limit)."""
+    NL = "\n"
+    buf = ""
+    for ln in (text or "").split(NL):
+        if len(buf) + len(ln) + 1 > 1900:
+            if buf:
+                await ch.send(buf)
+            buf = ln
+        else:
+            buf = (buf + NL + ln) if buf else ln
+    if buf:
+        await ch.send(buf)
+
+
+async def _post_ops_to_watchdog(text):
+    """Post an on-demand ops summary to the watchdog room (غرفة-المراقبة). Best-effort."""
+    if not text:
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, WATCHDOG_CHANNEL, cat)
+        if ch:
+            await _send_long_to_channel(ch, text)
+    except Exception as e:
+        print("ops channel post error:", e)
 
 
 async def _watchdog_post(compact, flags, meta):
