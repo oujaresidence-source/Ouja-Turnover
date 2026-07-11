@@ -52281,10 +52281,15 @@ async def cmd_deepclean_pause(ctx):
         return
     await ctx.reply("⏳ أوقف الحجب وأفكّ التواريخ المحجوزة للتنظيف العميق…")
     _dc_pause["paused"] = True
-    rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
-    _dc_pause["unblocked_once"] = True
-    await asyncio.to_thread(persist_state)
-    await ctx.send(_dc_unblock_report_text(rep))
+    await asyncio.to_thread(persist_state)   # persist the pause even if the sweep/report errors
+    try:
+        rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+        _dc_pause["unblocked_once"] = True
+        await asyncio.to_thread(persist_state)
+        await _send_long_to_channel(ctx.channel, _dc_unblock_report_text(rep))
+    except Exception as e:
+        print("deepclean-pause command error:", e)
+        await ctx.send("✅ أوقفت الحجب. صار خطأ بسيط وأنا أعرض تفاصيل التواريخ — بس الإيقاف تم بنجاح.")
 
 @bot.command(name="افتح-تنظيفات-اليوم",
              aliases=["build-today-cleanings", "افتح-تنظيفات", "build-cleanings", "افتح-التنظيفات"])
@@ -54410,10 +54415,14 @@ def _wd_discord_embeds(embed_dicts):
 
 
 async def _send_long_to_channel(ch, text):
-    """Send text to a Discord channel in <=1900-char chunks (2000 is the hard limit)."""
+    """Send text to a Discord channel in <=1900-char chunks (2000 is the hard limit).
+    A single line longer than the cap is hard-truncated so a pathological line can
+    never produce an oversized send that aborts the rest of the report."""
     NL = "\n"
     buf = ""
     for ln in (text or "").split(NL):
+        if len(ln) > 1900:
+            ln = ln[:1900]
         if len(buf) + len(ln) + 1 > 1900:
             if buf:
                 await ch.send(buf)
