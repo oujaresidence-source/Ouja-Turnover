@@ -2093,6 +2093,27 @@ def _dc_calendar_day_free(lid, d_iso):
         print(f"deepclean cal check error ({lid}, {d_iso}):", e)
         return False
 
+def _deep_clean_block_eligible(day):
+    """True iff this Hostaway calendar-day dict is a block THIS feature created:
+    unavailable + no guest reservation + our 'deep-clean' note sentinel. Anything
+    else (a booking, a manual hold with a different/empty note, an available day,
+    or an unknown/None availability) returns False so the unblock sweep can never
+    free a date it didn't create."""
+    if not isinstance(day, dict):
+        return False
+    v = day.get("isAvailable", 1)
+    if v is None:
+        v = 1
+    try:
+        avail = int(v)
+    except Exception:
+        avail = 1
+    if avail != 0:
+        return False
+    if day.get("reservationId"):
+        return False
+    return str(day.get("note") or "").strip().lower() == "deep-clean"
+
 def _dc_scheduled_dates():
     return {s.get("next_scheduled") for s in _deep_clean_state.values() if s.get("next_scheduled")}
 
@@ -2120,7 +2141,7 @@ def _dc_find_next_date(lid, after_date=None):
 
 def schedule_deep_cleans():
     """Assign next_scheduled for every non-paused unit that doesn't have one."""
-    if not DEEPCLEAN_ENABLED:
+    if not DEEPCLEAN_ENABLED or _deep_clean_is_paused():
         return
     listings = get_listings_map() or {}
     for lid in listings:
@@ -2256,7 +2277,7 @@ def confirm_tomorrow_deepcleans():
     """At 9pm: lock in tomorrow's planned deep cleans.
        - if the unit is still free → block the calendar (isAvailable=0) so the cleaner has the day
        - if a guest booked it last-minute → push to the next available slot"""
-    if not DEEPCLEAN_ENABLED:
+    if not DEEPCLEAN_ENABLED or _deep_clean_is_paused():
         return
     tomorrow = datetime.now(TZ).date() + timedelta(days=1)
     iso = tomorrow.isoformat()
@@ -2297,7 +2318,7 @@ def deepclean_lookahead_check(days=7):
     against Hostaway and resolve booking conflicts NOW — the old flow only discovered
     them the night before (9pm confirm), leaving no time to re-plan the crew's day.
     Tomorrow stays the confirm loop's job; this sweeps day 2..days (a handful of calls)."""
-    if not DEEPCLEAN_ENABLED:
+    if not DEEPCLEAN_ENABLED or _deep_clean_is_paused():
         return 0
     today = datetime.now(TZ).date()
     listings = get_listings_map() or {}
@@ -2510,6 +2531,58 @@ def mark_deep_clean_done(lid, date_iso=None, notes="", cleaner=""):
         print(f"calendar-free error (listing {lid}, {done_date}):", e)
     return True
 
+def unblock_all_deep_clean_dates():
+    """Free every calendar date THIS deep-clean feature blocked, and ONLY those.
+    Candidate set = units whose state says next_status=='blocked' with a date
+    (fast — no full-calendar scan). For each, re-read Hostaway and unblock only if
+    _deep_clean_block_eligible confirms it's our own 'deep-clean' block. Idempotent:
+    re-running frees nothing because the day is already available. Returns a report."""
+    freed, skipped = [], []
+    listings = get_listings_map() or {}
+    for lid, s in list(_deep_clean_state.items()):
+        if s.get("next_status") != "blocked":
+            continue
+        iso = s.get("next_scheduled")
+        if not iso:
+            continue
+        name = listings.get(lid, str(lid))
+        try:
+            cal = api_get(f"/listings/{lid}/calendar",
+                          params={"startDate": iso, "endDate": iso})
+            days = cal.get("result") or []
+            day = days[0] if days else None
+        except Exception as e:
+            print(f"unblock cal read error ({lid},{iso}):", e)
+            skipped.append({"lid": lid, "name": name, "date": iso, "reason": "read-error"})
+            continue
+        if day and _deep_clean_block_eligible(day):
+            try:
+                api_put(f"/listings/{lid}/calendar",
+                        {"startDate": iso, "endDate": iso, "isAvailable": 1})
+                s["next_scheduled"] = None
+                s["next_status"] = "unscheduled"
+                freed.append({"lid": lid, "name": name, "date": iso})
+            except Exception as e:
+                print(f"unblock write error ({lid},{iso}):", e)
+                skipped.append({"lid": lid, "name": name, "date": iso, "reason": "write-error"})
+        else:
+            skipped.append({"lid": lid, "name": name, "date": iso, "reason": "not-eligible"})
+    return {"freed": freed, "count": len(freed), "skipped": skipped}
+
+
+def _dc_unblock_report_text(rep):
+    """Plain-Arabic summary of an unblock sweep for the ops channel."""
+    NL = "\n"
+    n = rep.get("count", 0)
+    if not n:
+        return "✅ حجب التنظيف العميق متوقف. ما فيه أي تاريخ محجوز حالياً."
+    lines = ["✅ حجب التنظيف العميق متوقف. فكّيت %d تاريخ كان محجوز:" % n]
+    for f in rep.get("freed", [])[:40]:
+        lines.append("• %s — %s" % (f.get("name"), f.get("date")))
+    if n > 40:
+        lines.append("… +%d غيرها" % (n - 40))
+    return NL.join(lines)
+
 def compute_tonight_empty():
     """For each unit empty TONIGHT, return its current price + the discount schedule the
     bot will apply if the unit stays empty. Weekends now use the normal Riyadh-time tiers
@@ -2647,6 +2720,198 @@ def compute_arrivals_with_status(window_hours=36, lookback_hours=4):
         })
     out.sort(key=lambda x: x["hours_until"])
     return out
+
+_AR_WEEKDAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]  # Mon..Sun
+
+
+def _ar_today_label():
+    d = datetime.now(TZ).date()
+    return "%s %s" % (_AR_WEEKDAYS[d.weekday()], d.isoformat())
+
+
+def render_update(rows, date_label=""):
+    """Pure Arabic-first renderer for today's check-ins. `rows` items:
+    {unit, guest, time_label, cleaned(bool), code_sent(bool), agreement}
+    where agreement in {'signed','not_signed','not_required'}."""
+    NL = "\n"
+    rows = sorted(rows or [], key=lambda x: x.get("time_label") or "")
+    title = ("📋 تسجيلات الدخول اليوم %s" % date_label).strip()
+    if not rows:
+        return title + NL + "ما فيه تسجيلات دخول اليوم ✅"
+    AGR = {"signed": "موقّع ✅", "not_signed": "غير موقّع ❌", "not_required": "لا يحتاج"}
+    ok = lambda b: "✅" if b else "❌"
+    out = ["%s — %d" % (title, len(rows))]
+    for r in rows:
+        head = "🏠 %s — %s" % (r.get("unit") or "-", r.get("guest") or "ضيف")
+        if r.get("time_label"):
+            head += " — 🕐 %s" % r["time_label"]
+        out.append("")
+        out.append(head)
+        out.append("🧹 نظّفت: %s  ·  🔑 الكود: %s  ·  📝 العقد: %s" % (
+            ok(r.get("cleaned")), ok(r.get("code_sent")),
+            AGR.get(r.get("agreement"), "؟")))
+    return NL.join(out)
+
+
+def render_guests(rows, date_label=""):
+    """Pure Arabic-first renderer for the in-house guest mood snapshot. `rows` items:
+    {guest, unit, mood in {'happy','normal','sad'}, issue, resolved(bool)}.
+    The issue + solved/open line shows ONLY for sad guests."""
+    NL = "\n"
+    EM = {"happy": "🙂", "normal": "😐", "sad": "☹️"}
+    rows = rows or []
+    title = ("🧑‍🤝‍🧑 حالة الضيوف %s" % date_label).strip()
+    if not rows:
+        return title + NL + "ما فيه ضيوف حاليًا"
+    happy = sum(1 for r in rows if r.get("mood") == "happy")
+    normal = sum(1 for r in rows if r.get("mood") == "normal")
+    sad = sum(1 for r in rows if r.get("mood") == "sad")
+    out = ["%s — 🙂 %d · 😐 %d · ☹️ %d" % (title, happy, normal, sad)]
+    order = {"sad": 0, "normal": 1, "happy": 2}
+    for r in sorted(rows, key=lambda x: order.get(x.get("mood"), 1)):
+        out.append("")
+        out.append("%s %s — %s" % (EM.get(r.get("mood"), "😐"),
+                                   r.get("guest") or "ضيف", r.get("unit") or "-"))
+        if r.get("mood") == "sad":
+            issue = (r.get("issue") or "").strip() or "—"
+            status = "✅ تم الحل" if r.get("resolved") else "⏳ لسه مفتوحة"
+            out.append("   ⚠️ المشكلة: %s  ·  الحالة: %s" % (issue, status))
+    return NL.join(out)
+
+
+def build_update_rows():
+    """Assemble today's check-ins with cleaned / code-sent / agreement status.
+    Reuses the watchdog's own signals. Runs sync (Hostaway calls) — call via
+    asyncio.to_thread. 'cleaned' reflects what the system knows (no turnover
+    record = treated as ready), same as the watchdog."""
+    today = datetime.now(TZ).date()
+    today_iso = today.isoformat()
+    try:
+        arrivals = compute_arrivals_with_status(window_hours=36, lookback_hours=24)
+    except Exception as e:
+        print("build_update_rows arrivals error:", e)
+        arrivals = []
+    rows = []
+    for a in arrivals:
+        ci = a.get("checkin_iso") or ""
+        if ci[:10] != today_iso:
+            continue
+        lid = a.get("listing_id")
+        # agreement: distinguish 'not needed' from 'not signed'
+        try:
+            if not _unit_requires_agreement(lid):
+                agr = "not_required"
+            elif a.get("signed"):
+                agr = "signed"
+            else:
+                agr = "not_signed"
+        except Exception:
+            agr = "signed" if a.get("signed") else "not_signed"
+        # door code sent? (reuse the watchdog classifier on the conversation)
+        code_sent = False
+        cid = a.get("conversation_id")
+        if cid and _HAS_WATCHDOG and _watchdog:
+            try:
+                msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+                code_sent = bool(_watchdog.engine.classify_code_send(msgs)["found"])
+            except Exception as e:
+                print(f"build_update_rows code scan error ({cid}):", e)
+        rows.append({
+            "unit": a.get("unit"), "guest": a.get("guest"),
+            "time_label": ci[11:16] if len(ci) >= 16 else "",
+            "cleaned": _wd_cleaning_ok(lid, today_iso),
+            "code_sent": code_sent,
+            "agreement": agr,
+        })
+    return rows
+
+
+_GUEST_MOOD_SYSTEM = (
+    "أنت محلل خدمة ضيوف لشركة عوجا للشقق المخدومة في الرياض. تقرأ محادثة ضيف حالي "
+    "وتقيّم مزاجه من آخر الرسائل. أعِد JSON فقط بدون أي شرح أو أسوار كود:\n"
+    '{"mood":"happy|normal|sad","issue":"","resolved":true}\n'
+    "happy = راضٍ/شاكر/مبسوط. normal = محايد/استفسار عادي/لوجستي. "
+    "sad = منزعج/يشتكي/عنده مشكلة أو تذمّر.\n"
+    "issue: إذا كان sad فقط — جملة قصيرة بالعربي (≤ 12 كلمة) تلخّص المشكلة، وإلا اتركها فارغة.\n"
+    "resolved: true إذا كانت آخر الرسائل تدل أن المشكلة عولجت/انتهت، false إذا لسه مفتوحة."
+)
+
+
+def _guest_history_text(cid, limit=14):
+    try:
+        msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+    except Exception as e:
+        print(f"guest history error ({cid}):", e)
+        return ""
+    seq = sorted(msgs, key=_msg_sort_key)[-limit:]
+    lines = []
+    for m in seq:
+        body = (m.get("body") or "").strip()
+        if body:
+            who = "الضيف" if _msg_is_inbound(m) else "عوجا"
+            lines.append("%s: %s" % (who, body))
+    return "\n".join(lines)
+
+
+def _classify_one_guest(item):
+    """One guest → {guest, unit, mood, issue, resolved, conversation_id}. Degrades to
+    'normal' if there's no conversation or Claude fails — never raises."""
+    cid = item.get("conversation_id")
+    mood, issue, resolved = "normal", "", True
+    if cid:
+        hist = _guest_history_text(cid)
+        if hist:
+            d = claude_json(_GUEST_MOOD_SYSTEM, hist, max_tokens=200) or {}
+            m = str(d.get("mood") or "").lower()
+            if m in ("happy", "normal", "sad"):
+                mood = m
+            issue = str(d.get("issue") or "").strip()
+            resolved = bool(d.get("resolved", True))
+    return {"guest": item.get("guest"), "unit": item.get("unit"),
+            "mood": mood, "issue": issue if mood == "sad" else "",
+            "resolved": resolved, "conversation_id": str(cid or "")}
+
+
+def build_guests_rows():
+    """Enumerate current in-house guests, classify each with Claude (concurrent),
+    and cross-check the promises ledger so a sad guest with an OPEN promise is shown
+    as still-open regardless of the model's read. Runs sync — call via to_thread."""
+    from concurrent.futures import ThreadPoolExecutor
+    today = datetime.now(TZ).date()
+    listings = get_listings_map() or {}
+    res = fetch_inhouse(today)
+    items, seen = [], set()
+    for r in res:
+        if not _res_realized(r):
+            continue
+        key = (r.get("listingMapId"), r.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        lid = r.get("listingMapId")
+        items.append({
+            "guest": r.get("guestName") or "Guest",
+            "unit": listings.get(lid) or r.get("listingName") or ("unit-%s" % lid),
+            "conversation_id": r.get("conversationId"),
+        })
+    # open promises → force sad guests to "still open"
+    open_cids = set()
+    if _HAS_PK and _pk:
+        try:
+            for p in _pk.db.open_rows():
+                if p.get("conversation_id"):
+                    open_cids.add(str(p["conversation_id"]))
+        except Exception as e:
+            print("guests promises lookup error:", e)
+    rows = []
+    if items:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            rows = list(ex.map(_classify_one_guest, items))
+    for row in rows:
+        if row.get("mood") == "sad" and row.get("conversation_id") in open_cids:
+            row["resolved"] = False
+    return rows
+
 
 def compute_urgent_now():
     """Top operational items the owner needs to see at a glance:
@@ -8791,6 +9056,15 @@ def next_work_start(dt=None):
     return today_start + timedelta(days=1)
 # lid (int) -> {last_done, next_scheduled, next_status, history:[{date,ts,notes}], notes}
 _deep_clean_state = {}
+# Owner paused the deep-clean auto-blocker (2026-07-12). Persisted so it survives
+# redeploys WITHOUT needing a Railway env edit. Defaults to paused on first boot;
+# `!ouja deepclean-resume` (or the API) flips it back on. `unblocked_once` guards
+# the one-time boot sweep that frees already-blocked dates.
+_dc_pause = {"paused": True, "unblocked_once": False}
+
+
+def _deep_clean_is_paused():
+    return bool(_dc_pause.get("paused"))
 # Listings the owner has manually parked (out of rotation). When paused, the unit
 # is skipped by every scheduling function and shown in a separate dashboard
 # section. Persisted across redeploys.
@@ -34867,6 +35141,25 @@ async def _api_cleaning_reschedule(request):
     await asyncio.to_thread(persist_state)
     return _json({"ok": True})
 
+async def _api_cleaning_resume_blocking(request):
+    """Turn deep-clean auto-blocking back on."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    _dc_pause["paused"] = False
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "paused": False})
+
+
+async def _api_cleaning_pause_blocking(request):
+    """Pause deep-clean auto-blocking AND free every date it had blocked."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    _dc_pause["paused"] = True
+    rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+    _dc_pause["unblocked_once"] = True
+    await asyncio.to_thread(persist_state)
+    return _json({"ok": True, "paused": True, "freed": rep["count"], "report": rep})
+
 async def _api_cleaning_import_csv(request):
     """POST multipart-form with field 'file' = a CSV with two columns: name,date.
     Header row optional. Date format: YYYY-MM-DD (or DD/MM/YYYY also accepted).
@@ -48336,6 +48629,8 @@ async def start_web_server():
         app.router.add_post("/api/cleaning/unpause", _api_cleaning_unpause)
         app.router.add_post("/api/cleaning/insert", _api_cleaning_insert)
         app.router.add_post("/api/cleaning/reschedule-from", _api_cleaning_reschedule_from)
+        app.router.add_post("/api/cleaning/pause-blocking", _api_cleaning_pause_blocking)
+        app.router.add_post("/api/cleaning/resume-blocking", _api_cleaning_resume_blocking)
         app.router.add_get("/api/cleaning/reports", _api_cleaning_reports)
         app.router.add_post("/api/cleaning/reports/resend-today", _api_cleaning_reports_resend_today)
         app.router.add_post("/api/cleaning/report-decision", _api_cleaning_report_decision)
@@ -48673,7 +48968,20 @@ async def agreement_reminder_loop():
 @tasks.loop(hours=4)
 async def deepclean_schedule_loop():
     """Top up the deep-clean schedule for any unit that doesn't have a next date,
-    then sweep the next 7 days for booking conflicts (early re-planning)."""
+    then sweep the next 7 days for booking conflicts (early re-planning). Also runs
+    the one-time unblock sweep the first boot after the owner paused the feature."""
+    try:
+        if _deep_clean_is_paused() and not _dc_pause.get("unblocked_once"):
+            rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+            _dc_pause["unblocked_once"] = True
+            await asyncio.to_thread(persist_state)
+            try:
+                await _post_ops_to_watchdog(_dc_unblock_report_text(rep))
+            except Exception as e:
+                print("deepclean unblock report post error:", e)
+            print(f"deepclean: one-time unblock freed {rep['count']} date(s)")
+    except Exception as e:
+        print("deepclean unblock sweep error:", e)
     try:
         await asyncio.to_thread(schedule_deep_cleans)
     except Exception as e:
@@ -48928,6 +49236,9 @@ def load_state():
         _paused_units.clear()
         _paused_units.update(int(x) for x in _load_json("paused_units.json", []) if str(x).strip())
         _dc_anchor_date = _load_json("dc_anchor.json", None) or None
+        _dc_pause.clear()
+        _dc_pause.update(_load_json("deep_clean_pause.json",
+                                    {"paused": True, "unblocked_once": False}))
         _tickets.clear()
         for t in (_load_json("tickets.json", []) or []):
             if isinstance(t, dict) and t.get("id"):
@@ -49102,6 +49413,7 @@ def persist_state():
     _save_json("deep_clean.json", {str(k): v for k, v in dict(_deep_clean_state).items()})
     _save_json("paused_units.json", list(_paused_units))
     _save_json("dc_anchor.json", _dc_anchor_date)
+    _save_json("deep_clean_pause.json", dict(_dc_pause))
     # Cap tickets to last 1000 on disk to keep the JSON small
     _save_json("tickets.json", list(_tickets)[:1000])
     _save_json("reviews.json", dict(_reviews))
@@ -52142,6 +52454,112 @@ async def cmd_delete_this_channel(ctx):
         except Exception:
             pass
 
+@bot.command(name="deepclean-resume", aliases=["تشغيل-التنظيف-العميق", "استئناف-الحجب"])
+async def cmd_deepclean_resume(ctx):
+    """!ouja deepclean-resume — turn deep-clean auto-blocking back on (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    _dc_pause["paused"] = False
+    await asyncio.to_thread(persist_state)
+    await ctx.reply("✅ رجّعت حجب مواعيد التنظيف العميق يشتغل. من الليلة بيحجز مواعيد التنظيف مثل قبل.")
+
+
+@bot.command(name="deepclean-pause", aliases=["ايقاف-التنظيف-العميق", "ايقاف-الحجب"])
+async def cmd_deepclean_pause(ctx):
+    """!ouja deepclean-pause — pause auto-blocking AND free its blocked dates (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    await ctx.reply("⏳ أوقف الحجب وأفكّ التواريخ المحجوزة للتنظيف العميق…")
+    _dc_pause["paused"] = True
+    await asyncio.to_thread(persist_state)   # persist the pause even if the sweep/report errors
+    try:
+        rep = await asyncio.to_thread(unblock_all_deep_clean_dates)
+        _dc_pause["unblocked_once"] = True
+        await asyncio.to_thread(persist_state)
+        await _send_long_to_channel(ctx.channel, _dc_unblock_report_text(rep))
+    except Exception as e:
+        print("deepclean-pause command error:", e)
+        await ctx.send("✅ أوقفت الحجب. صار خطأ بسيط وأنا أعرض تفاصيل التواريخ — بس الإيقاف تم بنجاح.")
+
+
+@bot.tree.command(name="update", description="ملخص تسجيلات الدخول اليوم (نظافة/كود/عقد)")
+async def slash_update(interaction: discord.Interaction):
+    if not _can_delete_channels(interaction.user):
+        await interaction.response.send_message("🚫 هذا الأمر للإدارة فقط.", ephemeral=True)
+        return
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    try:
+        rows = await asyncio.to_thread(build_update_rows)
+        text = render_update(rows, _ar_today_label())
+    except Exception as e:
+        print("/update error:", e)
+        await interaction.followup.send("⚠️ صار خطأ وأنا أجهّز الملخص.", ephemeral=True)
+        return
+    await _post_ops_to_watchdog(text)
+    tail = ("\n… (كامل التقرير في #%s)" % WATCHDOG_CHANNEL) if len(text) > 1900 else ""
+    await interaction.followup.send(text[:1900] + tail, ephemeral=True)
+
+
+@bot.command(name="update", aliases=["تحديث", "الوصول", "تسجيلات"])
+async def cmd_update(ctx):
+    """!ouja update — today's check-ins: cleaned / code / agreement (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    try:
+        rows = await asyncio.to_thread(build_update_rows)
+        text = render_update(rows, _ar_today_label())
+    except Exception as e:
+        print("!ouja update error:", e)
+        await ctx.reply("⚠️ صار خطأ وأنا أجهّز الملخص.")
+        return
+    await _post_ops_to_watchdog(text)
+    await ctx.reply(text[:1900])
+
+
+@bot.tree.command(name="guests", description="حالة الضيوف الحاليين (سعيد/عادي/زعلان) عبر Claude")
+async def slash_guests(interaction: discord.Interaction):
+    if not _can_delete_channels(interaction.user):
+        await interaction.response.send_message("🚫 هذا الأمر للإدارة فقط.", ephemeral=True)
+        return
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    try:
+        rows = await asyncio.to_thread(build_guests_rows)
+        text = render_guests(rows, _ar_today_label())
+    except Exception as e:
+        print("/guests error:", e)
+        await interaction.followup.send("⚠️ صار خطأ وأنا أجهّز حالة الضيوف.", ephemeral=True)
+        return
+    await _post_ops_to_watchdog(text)
+    tail = ("\n… (كامل التقرير في #%s)" % WATCHDOG_CHANNEL) if len(text) > 1900 else ""
+    await interaction.followup.send(text[:1900] + tail, ephemeral=True)
+
+
+@bot.command(name="guests", aliases=["الضيوف", "حالة-الضيوف", "المزاج"])
+async def cmd_guests(ctx):
+    """!ouja guests — in-house guest mood summary via Claude (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    try:
+        rows = await asyncio.to_thread(build_guests_rows)
+        text = render_guests(rows, _ar_today_label())
+    except Exception as e:
+        print("!ouja guests error:", e)
+        await ctx.reply("⚠️ صار خطأ وأنا أجهّز حالة الضيوف.")
+        return
+    await _post_ops_to_watchdog(text)
+    await ctx.reply(text[:1900])
+
+
 @bot.command(name="افتح-تنظيفات-اليوم",
              aliases=["build-today-cleanings", "افتح-تنظيفات", "build-cleanings", "افتح-التنظيفات"])
 async def cmd_build_today_cleanings(ctx):
@@ -54263,6 +54681,41 @@ def _wd_discord_embeds(embed_dicts):
                                  color=_WD_EMBED_COLORS.get(d.get("color"), 0x95A5A6)))
         total += block
     return out
+
+
+async def _send_long_to_channel(ch, text):
+    """Send text to a Discord channel in <=1900-char chunks (2000 is the hard limit).
+    A single line longer than the cap is hard-truncated so a pathological line can
+    never produce an oversized send that aborts the rest of the report."""
+    NL = "\n"
+    buf = ""
+    for ln in (text or "").split(NL):
+        if len(ln) > 1900:
+            ln = ln[:1900]
+        if len(buf) + len(ln) + 1 > 1900:
+            if buf:
+                await ch.send(buf)
+            buf = ln
+        else:
+            buf = (buf + NL + ln) if buf else ln
+    if buf:
+        await ch.send(buf)
+
+
+async def _post_ops_to_watchdog(text):
+    """Post an on-demand ops summary to the watchdog room (غرفة-المراقبة). Best-effort."""
+    if not text:
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, WATCHDOG_CHANNEL, cat)
+        if ch:
+            await _send_long_to_channel(ch, text)
+    except Exception as e:
+        print("ops channel post error:", e)
 
 
 async def _watchdog_post(compact, flags, meta):
