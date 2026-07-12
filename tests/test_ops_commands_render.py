@@ -65,6 +65,7 @@ class TestRenderGuests(unittest.TestCase):
         self.assertIn("نورة", out)                # team member who replied
         self.assertIn("لسه مفتوحة", out)          # open status
         self.assertIn("wa.me/966501234567", out)  # KSA-normalized contact link
+        self.assertIn("يحتاجون انتباهك (1)", out)  # sad section header
 
     def test_sad_resolved_and_missing_fields(self):
         rows = [{"guest": "x", "unit": "y", "mood": "sad", "severity": "upset",
@@ -75,14 +76,16 @@ class TestRenderGuests(unittest.TestCase):
         self.assertNotIn("wa.me", out)     # no phone → no contact line
         self.assertNotIn("«", out)          # no quote → no quote line
 
-    def test_happy_and_normal_names_only(self):
+    def test_happy_and_normal_are_one_line_per_guest(self):
         rows = [
-            {"guest": "سعد", "unit": "u", "mood": "happy"},
-            {"guest": "لمى", "unit": "u", "mood": "normal"},
+            {"guest": "سعد", "unit": "Ouja | A", "mood": "happy"},
+            {"guest": "لمى", "unit": "Ouja | B", "mood": "normal"},
         ]
         out = bot.render_guests(rows, "")
-        self.assertIn("المبسوطين (1): سعد", out)
-        self.assertIn("العاديين (1): لمى", out)
+        self.assertIn("🙂 المبسوطين (1):", out)
+        self.assertIn("• سعد — Ouja | A", out)   # own line, with apartment
+        self.assertIn("😐 العاديين (1):", out)
+        self.assertIn("• لمى — Ouja | B", out)
         self.assertNotIn("وش صار", out)          # no detail for happy/normal
         self.assertNotIn("درجة الانزعاج", out)
 
@@ -94,10 +97,10 @@ class TestRenderGuests(unittest.TestCase):
              "issue": "i", "quote": "", "resolved": False, "staff": "ن", "phone": ""},
         ]
         out = bot.render_guests(rows, "")
-        self.assertIn("عندك اليوم 3 ضيف", out)
-        self.assertIn("مبسوطين: 1", out)
-        self.assertIn("عاديين: 1", out)
-        self.assertIn("يحتاجون انتباه: 1", out)
+        self.assertIn("الإجمالي: 3 ضيف", out)
+        self.assertIn("🙂 1", out)
+        self.assertIn("😐 1", out)
+        self.assertIn("☹️ 1", out)
 
     def test_angriest_first(self):
         rows = [

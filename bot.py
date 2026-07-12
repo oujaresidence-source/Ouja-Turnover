@@ -2773,53 +2773,59 @@ _GUEST_SEVERITY = {
 
 def render_guests(rows, date_label=""):
     """Pure Arabic-first renderer for the in-house guest mood snapshot. Sad guests get a
-    full card (anger level, what happened, the guest's own words, who from the team last
-    replied, solved/open, a WhatsApp link); happy + normal are just names on one line
-    each. `rows` items: {guest, unit, mood, severity, issue, quote, resolved, staff,
-    phone}."""
+    full card (anger level, what happened, the guest's own words, who last replied,
+    solved/open, WhatsApp); happy + normal are a tidy one-line-per-guest roster (never a
+    run-on paragraph). `rows` items: {guest, unit, mood, severity, issue, quote,
+    resolved, staff, phone}."""
     NL = "\n"
-    BAR = "━━━━━━━━━━━━━━━━━━"
     rows = rows or []
-    title = ("🧑‍🤝‍🧑 حالة الضيوف %s" % date_label).strip()
+    title = ("🧑‍🤝‍🧑 حالة الضيوف — %s" % date_label).strip(" —")
     if not rows:
         return title + NL + "ما فيه ضيوف حاليًا"
     happy = [r for r in rows if r.get("mood") == "happy"]
     normal = [r for r in rows if r.get("mood") == "normal"]
     sad = [r for r in rows if r.get("mood") == "sad"]
     out = [title,
-           "📊 عندك اليوم %d ضيف" % len(rows),
-           "🙂 مبسوطين: %d   ·   😐 عاديين: %d   ·   ☹️ يحتاجون انتباه: %d"
-           % (len(happy), len(normal), len(sad)),
-           BAR]
+           "📊 الإجمالي: %d ضيف   ·   🙂 %d   ·   😐 %d   ·   ☹️ %d"
+           % (len(rows), len(happy), len(normal), len(sad))]
+    # Sad guests → full cards, angriest first
     if sad:
-        out.append("☹️ يحتاجون انتباهك الحين (%d):" % len(sad))
+        out.append("")
+        out.append("☹️ ═══ يحتاجون انتباهك (%d) ═══" % len(sad))
         sad_sorted = sorted(sad, key=lambda r: _GUEST_SEVERITY.get(
             r.get("severity") or "upset", ("", "", 1))[2])
-        for r in sad_sorted:
+        for i, r in enumerate(sad_sorted, 1):
             label, emoji, _rank = _GUEST_SEVERITY.get(r.get("severity") or "upset",
                                                       ("زعلان", "🟠", 1))
             out.append("")
-            out.append("%s %s — %s" % (emoji, r.get("guest") or "ضيف", r.get("unit") or "-"))
-            out.append("🌡️ درجة الانزعاج: %s %s" % (label, emoji))
+            out.append("%s  %d) %s — %s" % (emoji, i, r.get("guest") or "ضيف",
+                                            r.get("unit") or "-"))
+            out.append("🌡️ درجة الانزعاج: %s" % label)
             out.append("📝 وش صار: %s" % ((r.get("issue") or "").strip() or "—"))
             quote = (r.get("quote") or "").strip()
             if quote:
-                out.append("💬 كلامه بالضبط: «%s»" % quote)
-            staff = (r.get("staff") or "").strip()
-            out.append("👤 آخر من كلّمه من الفريق: %s" % (staff or "غير معروف"))
+                out.append("💬 كلامه: «%s»" % quote)
+            out.append("👤 آخر من كلّمه: %s" % ((r.get("staff") or "").strip() or "غير معروف"))
             out.append("🔧 الحالة: %s" % ("✅ تم الحل" if r.get("resolved")
-                                          else "⏳ لسه مفتوحة — يحتاج متابعة"))
+                                          else "⏳ لسه مفتوحة"))
             wa = _wa_from_phone(r.get("phone"))
             if wa:
-                out.append("📱 للتواصل: %s" % wa)
-    if happy or normal:
-        out.append(BAR)
+                out.append("📱 %s" % wa)
+
+    def _roster(header, group):
+        out.append("")
+        out.append("%s (%d):" % (header, len(group)))
+        for r in group:
+            unit = r.get("unit")
+            line = "• %s" % (r.get("guest") or "ضيف")
+            if unit and unit != "-":
+                line += " — %s" % unit
+            out.append(line)
+
     if happy:
-        out.append("🙂 المبسوطين (%d): %s" % (len(happy),
-                   "، ".join((r.get("guest") or "ضيف") for r in happy)))
+        _roster("🙂 المبسوطين", happy)
     if normal:
-        out.append("😐 العاديين (%d): %s" % (len(normal),
-                   "، ".join((r.get("guest") or "ضيف") for r in normal)))
+        _roster("😐 العاديين", normal)
     return NL.join(out)
 
 
