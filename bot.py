@@ -2826,6 +2826,93 @@ def build_update_rows():
     return rows
 
 
+_GUEST_MOOD_SYSTEM = (
+    "أنت محلل خدمة ضيوف لشركة عوجا للشقق المخدومة في الرياض. تقرأ محادثة ضيف حالي "
+    "وتقيّم مزاجه من آخر الرسائل. أعِد JSON فقط بدون أي شرح أو أسوار كود:\n"
+    '{"mood":"happy|normal|sad","issue":"","resolved":true}\n'
+    "happy = راضٍ/شاكر/مبسوط. normal = محايد/استفسار عادي/لوجستي. "
+    "sad = منزعج/يشتكي/عنده مشكلة أو تذمّر.\n"
+    "issue: إذا كان sad فقط — جملة قصيرة بالعربي (≤ 12 كلمة) تلخّص المشكلة، وإلا اتركها فارغة.\n"
+    "resolved: true إذا كانت آخر الرسائل تدل أن المشكلة عولجت/انتهت، false إذا لسه مفتوحة."
+)
+
+
+def _guest_history_text(cid, limit=14):
+    try:
+        msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+    except Exception as e:
+        print(f"guest history error ({cid}):", e)
+        return ""
+    seq = sorted(msgs, key=_msg_sort_key)[-limit:]
+    lines = []
+    for m in seq:
+        body = (m.get("body") or "").strip()
+        if body:
+            who = "الضيف" if _msg_is_inbound(m) else "عوجا"
+            lines.append("%s: %s" % (who, body))
+    return "\n".join(lines)
+
+
+def _classify_one_guest(item):
+    """One guest → {guest, unit, mood, issue, resolved, conversation_id}. Degrades to
+    'normal' if there's no conversation or Claude fails — never raises."""
+    cid = item.get("conversation_id")
+    mood, issue, resolved = "normal", "", True
+    if cid:
+        hist = _guest_history_text(cid)
+        if hist:
+            d = claude_json(_GUEST_MOOD_SYSTEM, hist, max_tokens=200) or {}
+            m = str(d.get("mood") or "").lower()
+            if m in ("happy", "normal", "sad"):
+                mood = m
+            issue = str(d.get("issue") or "").strip()
+            resolved = bool(d.get("resolved", True))
+    return {"guest": item.get("guest"), "unit": item.get("unit"),
+            "mood": mood, "issue": issue if mood == "sad" else "",
+            "resolved": resolved, "conversation_id": str(cid or "")}
+
+
+def build_guests_rows():
+    """Enumerate current in-house guests, classify each with Claude (concurrent),
+    and cross-check the promises ledger so a sad guest with an OPEN promise is shown
+    as still-open regardless of the model's read. Runs sync — call via to_thread."""
+    from concurrent.futures import ThreadPoolExecutor
+    today = datetime.now(TZ).date()
+    listings = get_listings_map() or {}
+    res = fetch_inhouse(today)
+    items, seen = [], set()
+    for r in res:
+        if not _res_realized(r):
+            continue
+        key = (r.get("listingMapId"), r.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        lid = r.get("listingMapId")
+        items.append({
+            "guest": r.get("guestName") or "Guest",
+            "unit": listings.get(lid) or r.get("listingName") or ("unit-%s" % lid),
+            "conversation_id": r.get("conversationId"),
+        })
+    # open promises → force sad guests to "still open"
+    open_cids = set()
+    if _HAS_PK and _pk:
+        try:
+            for p in _pk.db.open_rows():
+                if p.get("conversation_id"):
+                    open_cids.add(str(p["conversation_id"]))
+        except Exception as e:
+            print("guests promises lookup error:", e)
+    rows = []
+    if items:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            rows = list(ex.map(_classify_one_guest, items))
+    for row in rows:
+        if row.get("mood") == "sad" and row.get("conversation_id") in open_cids:
+            row["resolved"] = False
+    return rows
+
+
 def compute_urgent_now():
     """Top operational items the owner needs to see at a glance:
        - escalations open + age
@@ -52430,6 +52517,44 @@ async def cmd_update(ctx):
     except Exception as e:
         print("!ouja update error:", e)
         await ctx.reply("⚠️ صار خطأ وأنا أجهّز الملخص.")
+        return
+    await _post_ops_to_watchdog(text)
+    await ctx.reply(text[:1900])
+
+
+@bot.tree.command(name="guests", description="حالة الضيوف الحاليين (سعيد/عادي/زعلان) عبر Claude")
+async def slash_guests(interaction: discord.Interaction):
+    if not _can_delete_channels(interaction.user):
+        await interaction.response.send_message("🚫 هذا الأمر للإدارة فقط.", ephemeral=True)
+        return
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    try:
+        rows = await asyncio.to_thread(build_guests_rows)
+        text = render_guests(rows, _ar_today_label())
+    except Exception as e:
+        print("/guests error:", e)
+        await interaction.followup.send("⚠️ صار خطأ وأنا أجهّز حالة الضيوف.", ephemeral=True)
+        return
+    await _post_ops_to_watchdog(text)
+    tail = ("\n… (كامل التقرير في #%s)" % WATCHDOG_CHANNEL) if len(text) > 1900 else ""
+    await interaction.followup.send(text[:1900] + tail, ephemeral=True)
+
+
+@bot.command(name="guests", aliases=["الضيوف", "حالة-الضيوف", "المزاج"])
+async def cmd_guests(ctx):
+    """!ouja guests — in-house guest mood summary via Claude (admins only)."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    try:
+        rows = await asyncio.to_thread(build_guests_rows)
+        text = render_guests(rows, _ar_today_label())
+    except Exception as e:
+        print("!ouja guests error:", e)
+        await ctx.reply("⚠️ صار خطأ وأنا أجهّز حالة الضيوف.")
         return
     await _post_ops_to_watchdog(text)
     await ctx.reply(text[:1900])
