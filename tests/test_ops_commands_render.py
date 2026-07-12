@@ -52,35 +52,62 @@ class TestRenderGuests(unittest.TestCase):
     def test_empty(self):
         self.assertIn("ما فيه ضيوف", bot.render_guests([], ""))
 
-    def test_sad_shows_issue_and_open_status(self):
-        rows = [{"guest": "سعد", "unit": "Ouja | A", "mood": "sad",
-                 "issue": "المكيف ما يبرد", "resolved": False}]
+    def test_sad_card_has_all_fields(self):
+        rows = [{"guest": "عبدالله", "unit": "Ouja | حطين", "mood": "sad",
+                 "severity": "angry", "issue": "تأخر التسليم ساعتين",
+                 "quote": "صار لي ساعتين أنتظر", "resolved": False,
+                 "staff": "نورة", "phone": "0501234567"}]
         out = bot.render_guests(rows, "")
-        self.assertIn("☹️", out)
-        self.assertIn("المكيف ما يبرد", out)
-        self.assertIn("لسه مفتوحة", out)
+        self.assertIn("غاضب جداً", out)          # severity label
+        self.assertIn("🔴", out)                  # severity emoji
+        self.assertIn("تأخر التسليم", out)        # what happened
+        self.assertIn("«صار لي ساعتين أنتظر»", out)  # verbatim quote in guillemets
+        self.assertIn("نورة", out)                # team member who replied
+        self.assertIn("لسه مفتوحة", out)          # open status
+        self.assertIn("wa.me/966501234567", out)  # KSA-normalized contact link
 
-    def test_sad_resolved_status(self):
-        rows = [{"guest": "x", "unit": "y", "mood": "sad", "issue": "z", "resolved": True}]
-        self.assertIn("تم الحل", bot.render_guests(rows, ""))
-
-    def test_happy_hides_issue_line(self):
-        rows = [{"guest": "نورة", "unit": "Ouja | B", "mood": "happy",
-                 "issue": "", "resolved": True}]
+    def test_sad_resolved_and_missing_fields(self):
+        rows = [{"guest": "x", "unit": "y", "mood": "sad", "severity": "upset",
+                 "issue": "i", "quote": "", "resolved": True, "staff": "", "phone": ""}]
         out = bot.render_guests(rows, "")
-        self.assertIn("🙂", out)
-        self.assertNotIn("المشكلة", out)
+        self.assertIn("تم الحل", out)
+        self.assertIn("غير معروف", out)   # unknown team member
+        self.assertNotIn("wa.me", out)     # no phone → no contact line
+        self.assertNotIn("«", out)          # no quote → no quote line
 
-    def test_header_counts(self):
+    def test_happy_and_normal_names_only(self):
         rows = [
-            {"guest": "a", "unit": "u", "mood": "happy", "issue": "", "resolved": True},
-            {"guest": "b", "unit": "u", "mood": "normal", "issue": "", "resolved": True},
-            {"guest": "c", "unit": "u", "mood": "sad", "issue": "i", "resolved": False},
+            {"guest": "سعد", "unit": "u", "mood": "happy"},
+            {"guest": "لمى", "unit": "u", "mood": "normal"},
         ]
         out = bot.render_guests(rows, "")
-        self.assertIn("🙂 1", out)
-        self.assertIn("😐 1", out)
-        self.assertIn("☹️ 1", out)
+        self.assertIn("المبسوطين (1): سعد", out)
+        self.assertIn("العاديين (1): لمى", out)
+        self.assertNotIn("وش صار", out)          # no detail for happy/normal
+        self.assertNotIn("درجة الانزعاج", out)
+
+    def test_header_total_and_counts(self):
+        rows = [
+            {"guest": "a", "unit": "u", "mood": "happy"},
+            {"guest": "b", "unit": "u", "mood": "normal"},
+            {"guest": "c", "unit": "u", "mood": "sad", "severity": "upset",
+             "issue": "i", "quote": "", "resolved": False, "staff": "ن", "phone": ""},
+        ]
+        out = bot.render_guests(rows, "")
+        self.assertIn("عندك اليوم 3 ضيف", out)
+        self.assertIn("مبسوطين: 1", out)
+        self.assertIn("عاديين: 1", out)
+        self.assertIn("يحتاجون انتباه: 1", out)
+
+    def test_angriest_first(self):
+        rows = [
+            {"guest": "calm", "unit": "u", "mood": "sad", "severity": "annoyed",
+             "issue": "i", "quote": "", "resolved": False, "staff": "", "phone": ""},
+            {"guest": "furious", "unit": "u", "mood": "sad", "severity": "angry",
+             "issue": "i", "quote": "", "resolved": False, "staff": "", "phone": ""},
+        ]
+        out = bot.render_guests(rows, "")
+        self.assertLess(out.index("furious"), out.index("calm"))
 
 
 if __name__ == "__main__":

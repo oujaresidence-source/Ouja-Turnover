@@ -2753,29 +2753,73 @@ def render_update(rows, date_label=""):
     return NL.join(out)
 
 
+def _wa_from_phone(phone):
+    """Pure: digits-only phone → 'wa.me/<intl>' (KSA local 05… → 9665…). '' if too short."""
+    d = "".join(c for c in str(phone or "") if c.isdigit())
+    if d.startswith("00"):
+        d = d[2:]
+    if d.startswith("0") and len(d) == 10:
+        d = "966" + d[1:]
+    return ("wa.me/" + d) if len(d) >= 8 else ""
+
+
+# anger levels for sad guests: (label, emoji, sort-rank) — rank 0 = angriest, shown first
+_GUEST_SEVERITY = {
+    "angry":   ("غاضب جداً", "🔴", 0),
+    "upset":   ("زعلان", "🟠", 1),
+    "annoyed": ("منزعج شوي", "🟡", 2),
+}
+
+
 def render_guests(rows, date_label=""):
-    """Pure Arabic-first renderer for the in-house guest mood snapshot. `rows` items:
-    {guest, unit, mood in {'happy','normal','sad'}, issue, resolved(bool)}.
-    The issue + solved/open line shows ONLY for sad guests."""
+    """Pure Arabic-first renderer for the in-house guest mood snapshot. Sad guests get a
+    full card (anger level, what happened, the guest's own words, who from the team last
+    replied, solved/open, a WhatsApp link); happy + normal are just names on one line
+    each. `rows` items: {guest, unit, mood, severity, issue, quote, resolved, staff,
+    phone}."""
     NL = "\n"
-    EM = {"happy": "🙂", "normal": "😐", "sad": "☹️"}
+    BAR = "━━━━━━━━━━━━━━━━━━"
     rows = rows or []
     title = ("🧑‍🤝‍🧑 حالة الضيوف %s" % date_label).strip()
     if not rows:
         return title + NL + "ما فيه ضيوف حاليًا"
-    happy = sum(1 for r in rows if r.get("mood") == "happy")
-    normal = sum(1 for r in rows if r.get("mood") == "normal")
-    sad = sum(1 for r in rows if r.get("mood") == "sad")
-    out = ["%s — 🙂 %d · 😐 %d · ☹️ %d" % (title, happy, normal, sad)]
-    order = {"sad": 0, "normal": 1, "happy": 2}
-    for r in sorted(rows, key=lambda x: order.get(x.get("mood"), 1)):
-        out.append("")
-        out.append("%s %s — %s" % (EM.get(r.get("mood"), "😐"),
-                                   r.get("guest") or "ضيف", r.get("unit") or "-"))
-        if r.get("mood") == "sad":
-            issue = (r.get("issue") or "").strip() or "—"
-            status = "✅ تم الحل" if r.get("resolved") else "⏳ لسه مفتوحة"
-            out.append("   ⚠️ المشكلة: %s  ·  الحالة: %s" % (issue, status))
+    happy = [r for r in rows if r.get("mood") == "happy"]
+    normal = [r for r in rows if r.get("mood") == "normal"]
+    sad = [r for r in rows if r.get("mood") == "sad"]
+    out = [title,
+           "📊 عندك اليوم %d ضيف" % len(rows),
+           "🙂 مبسوطين: %d   ·   😐 عاديين: %d   ·   ☹️ يحتاجون انتباه: %d"
+           % (len(happy), len(normal), len(sad)),
+           BAR]
+    if sad:
+        out.append("☹️ يحتاجون انتباهك الحين (%d):" % len(sad))
+        sad_sorted = sorted(sad, key=lambda r: _GUEST_SEVERITY.get(
+            r.get("severity") or "upset", ("", "", 1))[2])
+        for r in sad_sorted:
+            label, emoji, _rank = _GUEST_SEVERITY.get(r.get("severity") or "upset",
+                                                      ("زعلان", "🟠", 1))
+            out.append("")
+            out.append("%s %s — %s" % (emoji, r.get("guest") or "ضيف", r.get("unit") or "-"))
+            out.append("🌡️ درجة الانزعاج: %s %s" % (label, emoji))
+            out.append("📝 وش صار: %s" % ((r.get("issue") or "").strip() or "—"))
+            quote = (r.get("quote") or "").strip()
+            if quote:
+                out.append("💬 كلامه بالضبط: «%s»" % quote)
+            staff = (r.get("staff") or "").strip()
+            out.append("👤 آخر من كلّمه من الفريق: %s" % (staff or "غير معروف"))
+            out.append("🔧 الحالة: %s" % ("✅ تم الحل" if r.get("resolved")
+                                          else "⏳ لسه مفتوحة — يحتاج متابعة"))
+            wa = _wa_from_phone(r.get("phone"))
+            if wa:
+                out.append("📱 للتواصل: %s" % wa)
+    if happy or normal:
+        out.append(BAR)
+    if happy:
+        out.append("🙂 المبسوطين (%d): %s" % (len(happy),
+                   "، ".join((r.get("guest") or "ضيف") for r in happy)))
+    if normal:
+        out.append("😐 العاديين (%d): %s" % (len(normal),
+                   "، ".join((r.get("guest") or "ضيف") for r in normal)))
     return NL.join(out)
 
 
@@ -2827,23 +2871,31 @@ def build_update_rows():
 
 
 _GUEST_MOOD_SYSTEM = (
-    "أنت محلل خدمة ضيوف لشركة عوجا للشقق المخدومة في الرياض. تقرأ محادثة ضيف حالي "
-    "وتقيّم مزاجه من آخر الرسائل. أعِد JSON فقط بدون أي شرح أو أسوار كود:\n"
-    '{"mood":"happy|normal|sad","issue":"","resolved":true}\n'
-    "happy = راضٍ/شاكر/مبسوط. normal = محايد/استفسار عادي/لوجستي. "
-    "sad = منزعج/يشتكي/عنده مشكلة أو تذمّر.\n"
-    "issue: إذا كان sad فقط — جملة قصيرة بالعربي (≤ 12 كلمة) تلخّص المشكلة، وإلا اتركها فارغة.\n"
+    "أنت محلل خدمة ضيوف لشركة عوجا للشقق المخدومة بالرياض. تقرأ محادثة ضيف حالي "
+    "وتحكم على مزاجه من آخر الرسائل. أعِد JSON فقط بدون أي شرح أو أسوار:\n"
+    '{"mood":"happy|normal|sad","severity":"annoyed|upset|angry","issue":"","quote":"","resolved":true}\n'
+    "mood: happy=راضٍ/شاكر/مبسوط. normal=محايد/استفسار عادي/لوجستي. "
+    "sad=منزعج/يشتكي/عنده مشكلة أو تذمّر.\n"
+    "severity (فقط إذا sad، وإلا اتركها فارغة): annoyed=منزعج شوي، upset=زعلان، angry=غاضب جداً.\n"
+    "issue (فقط إذا sad): جملة عربية قصيرة (≤ 15 كلمة) تلخّص وش صار.\n"
+    "quote (فقط إذا sad): انسخ حرفياً أقصر جملة من كلام الضيف نفسه تبيّن انزعاجه "
+    "(≤ 20 كلمة) بدون أي تعديل، وإلا اتركها فارغة.\n"
     "resolved: true إذا كانت آخر الرسائل تدل أن المشكلة عولجت/انتهت، false إذا لسه مفتوحة."
 )
 
 
-def _guest_history_text(cid, limit=14):
+def _guest_msgs(cid):
+    """Raw messages for a conversation (read-only). [] on failure."""
     try:
-        msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+        return (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
     except Exception as e:
-        print(f"guest history error ({cid}):", e)
-        return ""
-    seq = sorted(msgs, key=_msg_sort_key)[-limit:]
+        print(f"guest msgs error ({cid}):", e)
+        return []
+
+
+def _guest_history_text(msgs, limit=14):
+    """Last `limit` messages as 'الضيف/عوجا: body' lines for the Claude prompt."""
+    seq = sorted(msgs or [], key=_msg_sort_key)[-limit:]
     lines = []
     for m in seq:
         body = (m.get("body") or "").strip()
@@ -2853,29 +2905,62 @@ def _guest_history_text(cid, limit=14):
     return "\n".join(lines)
 
 
+def _last_team_sender(msgs):
+    """Most recent OUTGOING human team member who replied (skips the AI assistant and
+    platform automations). '' if none/unknown (e.g. replies typed in the Airbnb app)."""
+    for m in sorted(msgs or [], key=_msg_sort_key, reverse=True):
+        if _msg_is_inbound(m):
+            continue
+        if _wm_is_ai_message(m):
+            continue
+        nm = _wm_sender_name(m)
+        if nm:
+            return nm
+    return ""
+
+
 def _classify_one_guest(item):
-    """One guest → {guest, unit, mood, issue, resolved, conversation_id}. Degrades to
-    'normal' if there's no conversation or Claude fails — never raises."""
+    """One guest → full row {guest, unit, mood, severity, issue, quote, resolved, staff,
+    phone, reservation_id, conversation_id}. Degrades to 'normal' if there's no
+    conversation or Claude fails — never raises."""
     cid = item.get("conversation_id")
-    mood, issue, resolved = "normal", "", True
+    mood, severity, issue, quote, resolved, staff = "normal", "", "", "", True, ""
     if cid:
-        hist = _guest_history_text(cid)
-        if hist:
-            d = claude_json(_GUEST_MOOD_SYSTEM, hist, max_tokens=200) or {}
-            m = str(d.get("mood") or "").lower()
-            if m in ("happy", "normal", "sad"):
-                mood = m
-            issue = str(d.get("issue") or "").strip()
-            resolved = bool(d.get("resolved", True))
+        msgs = _guest_msgs(cid)
+        if msgs:
+            staff = _last_team_sender(msgs)
+            hist = _guest_history_text(msgs)
+            if hist:
+                d = claude_json(_GUEST_MOOD_SYSTEM, hist, max_tokens=300) or {}
+                m = str(d.get("mood") or "").lower()
+                if m in ("happy", "normal", "sad"):
+                    mood = m
+                sev = str(d.get("severity") or "").lower()
+                if sev in ("annoyed", "upset", "angry"):
+                    severity = sev
+                issue = str(d.get("issue") or "").strip()
+                quote = str(d.get("quote") or "").strip()
+                resolved = bool(d.get("resolved", True))
+    sad = (mood == "sad")
+    if sad and not severity:
+        severity = "upset"
     return {"guest": item.get("guest"), "unit": item.get("unit"),
-            "mood": mood, "issue": issue if mood == "sad" else "",
-            "resolved": resolved, "conversation_id": str(cid or "")}
+            "mood": mood,
+            "severity": severity if sad else "",
+            "issue": issue if sad else "",
+            "quote": quote if sad else "",
+            "resolved": resolved,
+            "staff": staff,
+            "phone": item.get("phone") or "",
+            "reservation_id": item.get("reservation_id"),
+            "conversation_id": str(cid or "")}
 
 
 def build_guests_rows():
-    """Enumerate current in-house guests, classify each with Claude (concurrent),
-    and cross-check the promises ledger so a sad guest with an OPEN promise is shown
-    as still-open regardless of the model's read. Runs sync — call via to_thread."""
+    """Enumerate current in-house guests, classify each with Claude (concurrent), pull
+    who last replied + a WhatsApp number for the sad ones, and cross-check the promises
+    ledger so a sad guest with an OPEN promise is shown as still-open. Runs sync — call
+    via to_thread."""
     from concurrent.futures import ThreadPoolExecutor
     today = datetime.now(TZ).date()
     listings = get_listings_map() or {}
@@ -2893,6 +2978,8 @@ def build_guests_rows():
             "guest": r.get("guestName") or "Guest",
             "unit": listings.get(lid) or r.get("listingName") or ("unit-%s" % lid),
             "conversation_id": r.get("conversationId"),
+            "reservation_id": r.get("id"),
+            "phone": (r.get("phone") or "").strip(),
         })
     # open promises → force sad guests to "still open"
     open_cids = set()
@@ -2908,8 +2995,17 @@ def build_guests_rows():
         with ThreadPoolExecutor(max_workers=6) as ex:
             rows = list(ex.map(_classify_one_guest, items))
     for row in rows:
-        if row.get("mood") == "sad" and row.get("conversation_id") in open_cids:
+        if row.get("mood") != "sad":
+            continue
+        if row.get("conversation_id") in open_cids:
             row["resolved"] = False
+        # fill a WhatsApp number for the sad guests you may need to contact
+        if not row.get("phone") and row.get("reservation_id"):
+            try:
+                info = _reservation_channel_info(row["reservation_id"])
+                row["phone"] = (info.get("phone") or "").strip()
+            except Exception as e:
+                print("guests phone lookup error:", e)
     return rows
 
 
