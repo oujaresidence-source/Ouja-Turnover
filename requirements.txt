@@ -10,3 +10,8 @@ google-api-python-client~=2.130
 google-auth~=2.29
 google-auth-oauthlib~=1.2
 Pillow>=10.2
+# owner_report module — the FROZEN owner-report renderer prints via headless Chromium.
+# See nixpacks.toml for the Chromium install step. PyMuPDF (fitz) is used by the
+# renderer's frozen visual-regression test. Versions pinned to what was verified locally.
+playwright~=1.61
+PyMuPDF~=1.28

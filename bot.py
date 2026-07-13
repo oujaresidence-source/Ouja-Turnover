@@ -119,6 +119,17 @@ except Exception as _studio_err:        # pragma: no cover
     _studio = None
     _HAS_STUDIO = False
 
+# Owner Performance Report — additive, isolated, read-only against Hostaway. Renders the
+# frozen 17-page bilingual PDF via headless Chromium (see nixpacks.toml). Never edits bot.py
+# logic; wired like schedule/studio. Import guarded so a missing dep never takes down the bot.
+try:
+    import owner_report as _owner_report
+    _HAS_OWNER_REPORT = True
+except Exception as _owner_report_err:  # pragma: no cover
+    print("[owner_report] import failed (owner_report disabled, bot unaffected):", _owner_report_err)
+    _owner_report = None
+    _HAS_OWNER_REPORT = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -48617,6 +48628,26 @@ async def start_web_server():
                     print("[schedule] auto-link skipped:", _ale)
             except Exception as _se3:
                 print("[schedule] wiring failed (schedule disabled, bot unaffected):", _se3)
+
+        # ---- Owner Performance Report — additive; READ-ONLY Hostaway; frozen PDF renderer ----
+        if _HAS_OWNER_REPORT:
+            try:
+                _owner_report.wire({
+                    "state_path": _state_path, "load_json": _load_json, "save_json": _save_json,
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "tz": TZ, "now": now_riyadh,
+                    "listings_map": get_listings_map,
+                    "fetch_window_checked": fetch_reservations_window_checked,
+                    "normalize": normalize_reservation,
+                    "calendar_days": fetch_calendar_days,
+                    "reviews": fetch_reviews_from_hostaway,
+                    "expenses_source": (lambda: _expenses),
+                    "exp_posted": _exp_posted_to_hostaway,
+                })
+                _owner_report.register_routes(app)
+                print("[owner_report] wired + routes registered (/owner-report, /api/owner-report/*)")
+            except Exception as _ore:
+                print("[owner_report] wiring failed (owner_report disabled, bot unaffected):", _ore)
 
         # ---- Guide Engine (دليل الشقق) — in-house guest guide; replaces Netlify+Supabase ----
         if _HAS_GUIDE and GUIDE_ENABLED:
