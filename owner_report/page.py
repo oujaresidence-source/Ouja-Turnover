@@ -122,8 +122,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <script>
 var S={bank:null,sections:[],confirm:{},lastRecon:null,signed:false};
 
+var TOK=new URLSearchParams(location.search).get("token")||"";
+function withTok(path){ if(!TOK) return path; return path+(path.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(TOK); }
 function el(id){return document.getElementById(id);}
-function api(path,opts){return fetch(path,opts).then(function(r){return r.json();});}
+function api(path,opts){return fetch(withTok(path),opts).then(function(r){return r.json();});}
 function money(n){return (n==null)?"—":Number(n).toLocaleString("en-US");}
 
 function loadUnits(){
@@ -303,7 +305,7 @@ function doBuild(kind){
    el("buildmsg").innerHTML="<span class='pill h'>BLOCKED</span> "+(d.error||"error")+extra; return;
   }
   el("buildmsg").innerHTML="<span class='pill ok'>"+(d.draft?"DRAFT":"ISSUED "+d.doc_ref)+"</span> "+
-   "<a href='"+d.pdf+"' target='_blank'>open PDF</a>";
+   "<a href='"+withTok(d.pdf)+"' target='_blank'>open PDF</a>";
   if(kind==="export") loadHistory();
  });
 }
