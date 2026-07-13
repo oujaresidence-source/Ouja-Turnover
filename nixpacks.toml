@@ -1,0 +1,24 @@
+# Railway / NIXPACKS build config.
+#
+# WHY: the owner_report module renders its PDF through the FROZEN renderer, which prints
+# via headless Chromium (Playwright). The default build has no Chromium. This installs it.
+#
+# BULLETPROOF BY DESIGN: this build step can NEVER fail the deploy. It tries, in order,
+#   1. playwright install --with-deps chromium   (Playwright picks the CORRECT apt package
+#      names for the detected OS itself — far more robust than a hardcoded aptPkgs list),
+#   2. playwright install chromium                (browser only, if --with-deps' apt step failed),
+#   3. || true                                    (never fail the build even if both fail).
+# If Chromium ends up missing/unlaunchable, the rest of the bot is UNAFFECTED (the whole
+# owner_report import + wiring is guarded and the renderer runs in a worker thread) — only
+# the PDF export action fails, in isolation, returning a JSON error to the operator.
+#
+# The nav item, the wizard, and the whole pipeline deploy and work regardless; only the
+# final render needs Chromium. Watch the first deploy's build log to see which tier hit.
+# Fallback if Chromium never launches: switch the builder to the official Playwright Python
+# Docker image (see owner_report/README.md).
+
+[phases.build]
+cmds = ["python -m playwright install --with-deps chromium || python -m playwright install chromium || true"]
+
+[variables]
+PLAYWRIGHT_BROWSERS_PATH = "/app/.cache/ms-playwright"
