@@ -81,11 +81,17 @@ authority. All other §5 limits match the spec.
 
 ## Deployment (Railway / NIXPACKS)
 
-The renderer prints via headless Chromium. `requirements.txt` now pins `playwright~=1.61`
-+ `PyMuPDF~=1.28`, and `nixpacks.toml` installs the Chromium browser + its runtime libs at
-build time. **This was NOT verifiable from the build session** — headless Chromium under
-NIXPACKS is finicky (e.g. Debian package names like `libasound2` vs `libasound2t64` shift
-between base images). Watch the first deploy's build log.
+The renderer prints via headless Chromium. `requirements.txt` pins `playwright~=1.61` +
+`PyMuPDF~=1.28`, and `nixpacks.toml` installs Chromium at build time.
+
+**The Chromium install can never fail the deploy.** It tries `playwright install --with-deps
+chromium` (Playwright picks the correct apt package names for the detected OS itself), falls
+back to `playwright install chromium`, then `|| true`. If Chromium ends up missing or
+unlaunchable, the rest of the bot is unaffected — the whole `owner_report` import + wiring is
+guarded and the render runs in a worker thread — and only the PDF **export** action fails, in
+isolation, returning a JSON error. The nav item, wizard, and pipeline deploy and work
+regardless. **Still verify against a real deploy** — watch the first build log to see which
+fallback tier hit, and test one export.
 
 **Fallback if Chromium won't launch under NIXPACKS:** switch the builder to the official
 Playwright Python image by adding a `Dockerfile`:

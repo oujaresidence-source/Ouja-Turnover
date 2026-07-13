@@ -1,33 +1,24 @@
 # Railway / NIXPACKS build config.
 #
-# WHY THIS EXISTS: the owner_report module renders its PDF through the FROZEN renderer,
-# which prints via headless Chromium (Playwright). The default NIXPACKS build has no
-# Chromium, so reports would fail to render in production. This file adds the Chromium
-# browser + its runtime shared libraries during the build.
+# WHY: the owner_report module renders its PDF through the FROZEN renderer, which prints
+# via headless Chromium (Playwright). The default build has no Chromium. This installs it.
 #
-# The rest of the bot is UNAFFECTED — the existing fpdf2 PDF paths keep working. This
-# only ADDS a browser install; it does not change how the app starts (Procfile is
-# unchanged: `web: python bot.py`).
+# BULLETPROOF BY DESIGN: this build step can NEVER fail the deploy. It tries, in order,
+#   1. playwright install --with-deps chromium   (Playwright picks the CORRECT apt package
+#      names for the detected OS itself — far more robust than a hardcoded aptPkgs list),
+#   2. playwright install chromium                (browser only, if --with-deps' apt step failed),
+#   3. || true                                    (never fail the build even if both fail).
+# If Chromium ends up missing/unlaunchable, the rest of the bot is UNAFFECTED (the whole
+# owner_report import + wiring is guarded and the renderer runs in a worker thread) — only
+# the PDF export action fails, in isolation, returning a JSON error to the operator.
 #
-# ⚠️ NOT VERIFIED ON RAILWAY FROM THIS SESSION. Headless-Chromium-under-NIXPACKS is
-# environment-sensitive; watch the first deploy's build log. If Chromium fails to launch,
-# the documented fallback is to switch the builder to the official Playwright Python
-# Docker image (mcr.microsoft.com/playwright/python) — see owner_report/README.md.
-
-[phases.setup]
-# Runtime shared libraries headless Chromium needs (Playwright ships its own Chromium
-# binary but not these system libs).
-aptPkgs = [
-  "libnss3", "libnspr4", "libatk1.0-0", "libatk-bridge2.0-0", "libcups2",
-  "libdrm2", "libxkbcommon0", "libxcomposite1", "libxdamage1", "libxfixes3",
-  "libxrandr2", "libgbm1", "libpango-1.0-0", "libcairo2", "libasound2",
-  "libatspi2.0-0", "fonts-liberation", "libu2f-udev",
-]
+# The nav item, the wizard, and the whole pipeline deploy and work regardless; only the
+# final render needs Chromium. Watch the first deploy's build log to see which tier hit.
+# Fallback if Chromium never launches: switch the builder to the official Playwright Python
+# Docker image (see owner_report/README.md).
 
 [phases.build]
-# Download the Chromium browser binary Playwright drives. Runs after pip install.
-cmds = ["python -m playwright install chromium"]
+cmds = ["python -m playwright install --with-deps chromium || python -m playwright install chromium || true"]
 
 [variables]
-# Bake the browser into the image at a stable path.
 PLAYWRIGHT_BROWSERS_PATH = "/app/.cache/ms-playwright"
