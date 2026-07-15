@@ -37,6 +37,37 @@
       ws_today: 'اليوم', ws_bank: 'البنك', ws_match: 'المطابقة', ws_exp: 'المصاريف',
       ws_custody: 'العهد', ws_owners: 'الملاك', ws_close: 'الإقفال', ws_stmts: 'القوائم',
       ws_budget: 'الميزانية', ws_setup: 'الإعدادات', ws_guide: 'الدليل', ws_assist: 'المساعد',
+      ws_teampur: 'مشتريات الفريق',
+      /* --- مشتريات الفريق Team Purchases --- */
+      tp_title: 'مشتريات الفريق', tp_add: '＋ إضافة عملية شراء', tp_new: 'عملية شراء جديدة',
+      tp_edit: 'تعديل العملية', tp_manage: 'إدارة القوائم والعُهد',
+      tp_search: 'ابحث بالغرض أو الشقة أو الاسم…',
+      tp_sum_pending: 'قيد المراجعة', tp_sum_approved: 'معتمد (بانتظار التحويل)',
+      tp_sum_transferred: 'تم التحويل', tp_sum_float: 'مدفوع من العهدة',
+      tp_date: 'التاريخ', tp_item: 'اسم الغرض', tp_amount: 'المبلغ (ر.س)', tp_apartment: 'الشقة',
+      tp_apt_general: 'غير مخصص / عام', tp_submitter: 'من أضاف الطلب', tp_buyer: 'من اشترى',
+      tp_pay: 'طريقة الدفع', tp_pay_transfer: 'تحويل', tp_pay_float: 'عهدة', tp_reason: 'سبب الشراء',
+      tp_holder: 'صاحب العهدة', tp_receipt: 'الفاتورة / صورة', tp_receipt_hint: 'صورة فقط (jpg/png)',
+      tp_no_receipt_q: 'لماذا لا توجد فاتورة؟', tp_no_receipt_reason: 'سبب عدم وجود فاتورة…',
+      tp_choose: 'اختر…', tp_status: 'الحالة', tp_filter_all: 'الكل', tp_from: 'من تاريخ', tp_to: 'إلى تاريخ',
+      tp_col_receipt: 'الفاتورة', tp_view_receipt: 'عرض الفاتورة', tp_none: 'بدون فاتورة',
+      tp_approve: 'اعتماد', tp_reject: 'رفض', tp_transfer: 'تم التحويل ✓',
+      tp_reject_reason: 'سبب الرفض (إلزامي)…', tp_confirm_reject: 'تأكيد الرفض',
+      tp_edit_btn: 'تعديل', tp_delete: 'حذف', tp_delete_confirm: 'متأكد تبي تحذف العملية؟',
+      tp_save: 'حفظ', tp_saved: 'تم الحفظ ✓', tp_created: 'تم تسجيل العملية ✓', tp_deleted: 'تم الحذف',
+      tp_floats: 'أرصدة العُهد', tp_original: 'الأصلي', tp_spent: 'المصروف', tp_remaining: 'المتبقي',
+      tp_low: 'الرصيد منخفض ⚠', tp_topup: 'تعزيز', tp_settle: 'تصفية', tp_statement: 'كشف الحساب',
+      tp_topup_amount: 'مبلغ التعزيز (ر.س)', tp_topup_do: 'تعزيز العهدة',
+      tp_settle_confirm: 'تصفية العهدة وإرجاع الرصيد للأصلي؟',
+      tp_stmt_title: 'كشف حساب العهدة', tp_stmt_empty: 'ما فيه حركات بعد',
+      tp_k_purchase: 'شراء', tp_k_reversal: 'إلغاء', tp_k_adjust: 'تعديل', tp_k_topup: 'تعزيز', tp_k_settlement: 'تصفية',
+      tp_balance: 'الرصيد', tp_empty: 'ما فيه عمليات — أضف أول عملية شراء',
+      tp_reject_reason_lbl: 'سبب الرفض', tp_by: 'بواسطة',
+      tp_start_balance: 'الرصيد الأصلي', tp_low_threshold: 'حد التنبيه', tp_user_key: 'اسم المستخدم المرتبط',
+      tp_people: 'الأشخاص', tp_can_submit: 'يضيف طلبات', tp_can_buy: 'يشتري',
+      tp_add_person: 'إضافة شخص', tp_add_holder: 'إضافة صاحب عهدة', tp_name: 'الاسم',
+      tp_manage_hint: 'عدّل قوائم الأسماء وأرصدة العُهد من هنا. تنعكس فورًا على النموذج.',
+      tp_only_finance: 'هذا الإجراء للمالية فقط.',
       soon: 'قريبًا', slice: 'شريحة',
       health: 'صحة البيانات', health_steps: 'خطوة جاهزة',
       bank_today: 'آخر استيراد بنك: اليوم', bank_days_1: 'آخر استيراد بنك: قبل يوم',
@@ -365,6 +396,37 @@
       ws_today: 'Today', ws_bank: 'Bank', ws_match: 'Matching', ws_exp: 'Expenses',
       ws_custody: 'Custody', ws_owners: 'Owners', ws_close: 'Close', ws_stmts: 'Statements',
       ws_budget: 'Budget', ws_setup: 'Setup', ws_guide: 'Guide', ws_assist: 'Assistant',
+      ws_teampur: 'Team Purchases',
+      /* --- Team Purchases --- */
+      tp_title: 'Team Purchases', tp_add: '＋ Add purchase', tp_new: 'New purchase',
+      tp_edit: 'Edit purchase', tp_manage: 'Manage lists & floats',
+      tp_search: 'Search item, apartment or name…',
+      tp_sum_pending: 'Pending', tp_sum_approved: 'Approved (awaiting transfer)',
+      tp_sum_transferred: 'Transferred', tp_sum_float: 'Paid from float',
+      tp_date: 'Date', tp_item: 'Item name', tp_amount: 'Amount (SAR)', tp_apartment: 'Apartment',
+      tp_apt_general: 'Unassigned / general', tp_submitter: 'Submitted by', tp_buyer: 'Buyer',
+      tp_pay: 'Payment source', tp_pay_transfer: 'Transfer', tp_pay_float: 'Float', tp_reason: 'Reason',
+      tp_holder: 'Float holder', tp_receipt: 'Receipt / image', tp_receipt_hint: 'Image only (jpg/png)',
+      tp_no_receipt_q: 'Why is there no receipt?', tp_no_receipt_reason: 'Reason for no receipt…',
+      tp_choose: 'Choose…', tp_status: 'Status', tp_filter_all: 'All', tp_from: 'From date', tp_to: 'To date',
+      tp_col_receipt: 'Receipt', tp_view_receipt: 'View receipt', tp_none: 'No receipt',
+      tp_approve: 'Approve', tp_reject: 'Reject', tp_transfer: 'Mark transferred ✓',
+      tp_reject_reason: 'Rejection reason (required)…', tp_confirm_reject: 'Confirm rejection',
+      tp_edit_btn: 'Edit', tp_delete: 'Delete', tp_delete_confirm: 'Delete this purchase?',
+      tp_save: 'Save', tp_saved: 'Saved ✓', tp_created: 'Purchase logged ✓', tp_deleted: 'Deleted',
+      tp_floats: 'Float balances', tp_original: 'Original', tp_spent: 'Spent', tp_remaining: 'Remaining',
+      tp_low: 'Low balance ⚠', tp_topup: 'Top up', tp_settle: 'Settle', tp_statement: 'Statement',
+      tp_topup_amount: 'Top-up amount (SAR)', tp_topup_do: 'Top up float',
+      tp_settle_confirm: 'Settle float and restore balance to original?',
+      tp_stmt_title: 'Float statement', tp_stmt_empty: 'No movements yet',
+      tp_k_purchase: 'Purchase', tp_k_reversal: 'Reversal', tp_k_adjust: 'Adjust', tp_k_topup: 'Top-up', tp_k_settlement: 'Settlement',
+      tp_balance: 'Balance', tp_empty: 'No purchases yet — add the first one',
+      tp_reject_reason_lbl: 'Rejection reason', tp_by: 'by',
+      tp_start_balance: 'Starting balance', tp_low_threshold: 'Low-balance line', tp_user_key: 'Linked username',
+      tp_people: 'People', tp_can_submit: 'Can submit', tp_can_buy: 'Can buy',
+      tp_add_person: 'Add person', tp_add_holder: 'Add float holder', tp_name: 'Name',
+      tp_manage_hint: 'Edit the name lists and float balances here. Changes apply to the form immediately.',
+      tp_only_finance: 'This action is for Finance only.',
       soon: 'soon', slice: 'slice',
       health: 'Data health', health_steps: 'steps ready',
       bank_today: 'Last bank import: today', bank_days_1: 'Last bank import: 1 day ago',
@@ -718,6 +780,7 @@
     { id: 'bank', built: true },
     { id: 'match', built: true },
     { id: 'exp', built: true },
+    { id: 'teampur', built: true },
     { id: 'custody', built: true },
     { id: 'owners', built: true },
     { id: 'close', built: true },
@@ -729,7 +792,7 @@
   ];
   // Calm default: with «وضع متقدم» OFF the nav shows only the daily-core lane below.
   // The rest stay reachable via deep-link/hash and appear when Advanced is ON.
-  var CORE_WS = { today: 1, bank: 1, exp: 1, owners: 1, guide: 1 };
+  var CORE_WS = { today: 1, bank: 1, exp: 1, teampur: 1, owners: 1, guide: 1 };
 
   function parseHash() {
     var h = (location.hash || '#today').slice(1);
@@ -3139,6 +3202,424 @@
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_custody', srvMsg(e)); });
   }
 
+  /* ================= مشتريات الفريق Team Purchases + عهدة (float) ================= */
+  var tpP = { status: '', pay: '', q: '', submitter: '', buyer: '', holder: '', apt: '', from: '', to: '' };
+  var tpSearchTmr = null;
+
+  function pushTpHash() {
+    var ps = new URLSearchParams();
+    if (tpP.status) ps.set('status', tpP.status);
+    if (tpP.pay) ps.set('pay', tpP.pay);
+    if (tpP.q) ps.set('q', tpP.q);
+    if (tpP.submitter) ps.set('submitter', tpP.submitter);
+    if (tpP.buyer) ps.set('buyer', tpP.buyer);
+    if (tpP.holder) ps.set('holder', tpP.holder);
+    if (tpP.apt) ps.set('apt', tpP.apt);
+    if (tpP.from) ps.set('from', tpP.from);
+    if (tpP.to) ps.set('to', tpP.to);
+    var qs = ps.toString();
+    location.hash = 'teampur' + (qs ? '?' + qs : '');
+  }
+
+  function loadTeampur() {
+    $('#view').innerHTML = skeleton(6);
+    var ps = new URLSearchParams();
+    if (tpP.status) ps.set('status', tpP.status);
+    if (tpP.pay) ps.set('pay_source', tpP.pay);
+    if (tpP.q) ps.set('q', tpP.q);
+    if (tpP.submitter) ps.set('submitted_by', tpP.submitter);
+    if (tpP.buyer) ps.set('buyer', tpP.buyer);
+    if (tpP.holder) ps.set('holder_id', tpP.holder);
+    if (tpP.apt) ps.set('listing_id', tpP.apt);
+    if (tpP.from) ps.set('date_from', tpP.from);
+    if (tpP.to) ps.set('date_to', tpP.to);
+    var qs = ps.toString();
+    api('/erp/api/tp' + (qs ? '?' + qs : '')).then(function (d) { renderTeampur(d); })
+      .catch(function (e) { $('#view').innerHTML = errorCard('retry_teampur', srvMsg(e)); });
+  }
+
+  function tpStatusTag(r) {
+    var cls = { pending: 'warnt', approved: 'soft', transferred: 'srcsheet', rejected: 'bad', float_paid: 'purp' }[r.status] || '';
+    var ic = r.status === 'transferred' ? '💸 ' : (r.status === 'float_paid' ? '👛 ' : '');
+    var label = store.lang === 'ar' ? r.status_ar : r.status_en;
+    return '<span class="tag ' + cls + '">' + ic + esc(label) + '</span>';
+  }
+
+  function tpRowHtml(r) {
+    var money = '<b class="amt out">' + fmtAmt(r.amount) + ' <i>' + esc(t('sar')) + '</i></b>';
+    var receipt = r.has_receipt
+      ? '<button class="btn ghost xs" data-act="tp-receipt" data-id="' + r.id + '">🧾 ' + esc(t('tp_view_receipt')) + '</button>'
+      : '<span class="tag">' + esc(t('tp_none')) + '</span>';
+    var apt = '<span class="tag">' + esc(r.apartment_name || t('tp_apt_general')) + '</span>';
+    var payTag = '<span class="tag ' + (r.pay_source === 'float' ? 'purp' : 'soft') + '">' +
+      esc(r.pay_source === 'float' ? t('tp_pay_float') : t('tp_pay_transfer')) + '</span>';
+    var holderTag = r.holder_name ? '<span class="tag">👛 ' + esc(r.holder_name) + '</span>' : '';
+    var rej = (r.status === 'rejected' && r.reject_reason)
+      ? '<div class="tp-rej">' + esc(t('tp_reject_reason_lbl')) + ': ' + esc(r.reject_reason) + '</div>' : '';
+    var fin = '';
+    if (r.pay_source === 'transfer') {
+      if (r.status === 'pending') fin += '<button class="btn primary xs" data-act="tp-approve" data-id="' + r.id + '">' + esc(t('tp_approve')) + '</button>' +
+        '<button class="btn danger-ghost xs" data-act="tp-reject" data-id="' + r.id + '">' + esc(t('tp_reject')) + '</button>';
+      else if (r.status === 'approved') fin += '<button class="btn primary xs" data-act="tp-transfer" data-id="' + r.id + '">' + esc(t('tp_transfer')) + '</button>';
+    }
+    var own = r.can_edit
+      ? '<button class="btn ghost xs" data-act="tp-edit" data-id="' + r.id + '">' + esc(t('tp_edit_btn')) + '</button>' +
+        '<button class="btn ghost xs" data-act="tp-delete" data-id="' + r.id + '">' + esc(t('tp_delete')) + '</button>'
+      : '';
+    return '<div class="wq-row tprow" data-id="' + r.id + '">' +
+      '<div class="wq-main">' +
+        '<div class="tp-r1">' + money + ' <span class="tp-item">' + esc(r.item || '') + '</span> ' + tpStatusTag(r) + '</div>' +
+        '<div class="tp-r2">' +
+          '<span class="tp-date">' + esc(r.purchase_date || '') + '</span>' + apt + payTag + holderTag +
+          '<span class="tp-people">' + esc(t('tp_submitter')) + ': ' + esc(r.submitted_by || '—') + ' · ' + esc(t('tp_buyer')) + ': ' + esc(r.buyer || '—') + '</span>' +
+        '</div>' +
+        (r.reason ? '<div class="tp-reason">' + esc(r.reason) + '</div>' : '') + rej +
+      '</div>' +
+      '<div class="wq-actions">' + receipt + fin + own + '</div>' +
+    '</div>';
+  }
+
+  function tpBalanceCard(b) {
+    var isFin = store.D.teampur && store.D.teampur.is_finance;
+    return '<div class="tp-fcard' + (b.low ? ' low' : '') + '">' +
+      '<div class="tp-fname">👛 ' + esc(b.name) + (b.low ? ' <span class="tag bad">' + esc(t('tp_low')) + '</span>' : '') + '</div>' +
+      '<div class="tp-fnums">' +
+        '<div><span>' + esc(t('tp_original')) + '</span><b>' + fmtAmt(b.original) + '</b></div>' +
+        '<div><span>' + esc(t('tp_spent')) + '</span><b class="amt out">' + fmtAmt(b.spent) + '</b></div>' +
+        '<div><span>' + esc(t('tp_remaining')) + '</span><b class="amt in">' + fmtAmt(b.remaining) + '</b></div>' +
+      '</div>' +
+      '<div class="tp-factions">' +
+        '<button class="btn ghost xs" data-act="tp-stmt" data-id="' + b.holder_id + '">' + esc(t('tp_statement')) + '</button>' +
+        (isFin ? '<button class="btn ghost xs" data-act="tp-topup" data-id="' + b.holder_id + '">' + esc(t('tp_topup')) + '</button>' +
+          '<button class="btn ghost xs" data-act="tp-settle" data-id="' + b.holder_id + '">' + esc(t('tp_settle')) + '</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderTeampur(d) {
+    store.D.teampur = d;
+    var s = d.summary || {};
+    function card(key, val) {
+      return '<div class="tp-stat"><div class="tp-stat-k">' + esc(t('tp_sum_' + key)) + '</div>' +
+        '<div class="tp-stat-v">' + fmtAmt((val || {}).sar || 0) + ' <i>' + esc(t('sar')) + '</i></div>' +
+        '<div class="tp-stat-sub">' + ((val || {}).count || 0) + '</div></div>';
+    }
+    var cards = '<div class="tp-stats">' + card('pending', s.pending) + card('approved', s.approved) +
+      card('transferred', s.transferred) + card('float', s.float) + '</div>';
+
+    var floats = (d.balances && d.balances.length)
+      ? '<div class="tp-floats"><h3 class="tp-h">' + esc(t('tp_floats')) + '</h3><div class="tp-fgrid">' +
+        d.balances.map(tpBalanceCard).join('') + '</div></div>' : '';
+
+    var statuses = ['pending', 'approved', 'transferred', 'rejected', 'float_paid'];
+    var stOpts = (d.options && d.options.statuses) || {};
+    var statusChips = '<button class="fchip' + (!tpP.status ? ' on' : '') + '" data-act="tp-fstatus" data-v="">' + esc(t('tp_filter_all')) + '</button>' +
+      statuses.map(function (k) {
+        var lab = stOpts[k] || {};
+        return '<button class="fchip' + (tpP.status === k ? ' on' : '') + '" data-act="tp-fstatus" data-v="' + k + '">' +
+          esc(store.lang === 'ar' ? (lab.ar || k) : (lab.en || k)) + '</button>';
+      }).join('');
+    var payChips = '<button class="fchip' + (!tpP.pay ? ' on' : '') + '" data-act="tp-fpay" data-v="">' + esc(t('tp_filter_all')) + '</button>' +
+      '<button class="fchip' + (tpP.pay === 'transfer' ? ' on' : '') + '" data-act="tp-fpay" data-v="transfer">' + esc(t('tp_pay_transfer')) + '</button>' +
+      '<button class="fchip' + (tpP.pay === 'float' ? ' on' : '') + '" data-act="tp-fpay" data-v="float">' + esc(t('tp_pay_float')) + '</button>';
+
+    var manageBtn = d.is_finance ? '<button class="btn ghost sm" data-act="tp-manage">⚙ ' + esc(t('tp_manage')) + '</button>' : '';
+    var rows = (d.rows || []).map(tpRowHtml).join('') ||
+      '<div class="state-card"><div class="state-h">' + esc(t('tp_empty')) + '</div></div>';
+
+    // secondary filter controls: submitter / buyer / holder / apartment / date range
+    var o = d.options || {};
+    function selOpts(list, cur, valKey, nameKey) {
+      return (list || []).map(function (x) {
+        var v = valKey ? String(x[valKey]) : String(x);
+        var nm = nameKey ? x[nameKey] : String(x);
+        return '<option value="' + esc(v) + '"' + (String(cur) === v ? ' selected' : '') + '>' + esc(nm) + '</option>';
+      }).join('');
+    }
+    var allOpt = '<option value="">' + esc(t('tp_filter_all')) + '</option>';
+    var filterRow =
+      '<div class="tp-filters">' +
+        '<select class="in xs tpf" id="tpfSubmitter"><option value="">' + esc(t('tp_submitter')) + '</option>' + selOpts(o.submitters, tpP.submitter) + '</select>' +
+        '<select class="in xs tpf" id="tpfBuyer"><option value="">' + esc(t('tp_buyer')) + '</option>' + selOpts(o.buyers, tpP.buyer) + '</select>' +
+        '<select class="in xs tpf" id="tpfHolder"><option value="">' + esc(t('tp_holder')) + '</option>' + selOpts(o.holders, tpP.holder, 'id', 'name') + '</select>' +
+        '<select class="in xs tpf" id="tpfApt"><option value="">' + esc(t('tp_apartment')) + '</option>' + selOpts(o.apartments, tpP.apt, 'lid', 'name') + '</select>' +
+        '<input class="in xs tpf" id="tpfFrom" type="date" value="' + esc(tpP.from) + '" title="' + esc(t('tp_from')) + '">' +
+        '<input class="in xs tpf" id="tpfTo" type="date" value="' + esc(tpP.to) + '" title="' + esc(t('tp_to')) + '">' +
+        (allOpt && (tpP.submitter || tpP.buyer || tpP.holder || tpP.apt || tpP.from || tpP.to) ?
+          '<button class="btn ghost xs" data-act="tp-clear-filters">✕ ' + esc(t('tp_filter_all')) + '</button>' : '') +
+      '</div>';
+
+    $('#view').innerHTML =
+      '<div class="tp-top"><button class="btn primary" data-act="tp-add">' + esc(t('tp_add')) + '</button>' + manageBtn + '</div>' +
+      cards + floats +
+      '<div class="card bank-bar">' +
+        '<div class="bb-row">' +
+          '<input id="tpSearch" class="in search" type="search" placeholder="' + esc(t('tp_search')) + '" value="' + esc(tpP.q) + '">' +
+        '</div>' +
+        '<div class="bb-chips">' + statusChips + '</div>' +
+        '<div class="bb-chips">' + payChips + '</div>' +
+        filterRow +
+      '</div>' +
+      '<div class="card grp"><div class="grp-list" id="tpList">' + rows + '</div></div>';
+    restoreScroll('teampur');
+  }
+
+  function tpFieldSel(id, label, list, cur, withGeneral) {
+    var o = '<option value="">' + esc(t('tp_choose')) + '</option>';
+    if (withGeneral) o += '<option value="general"' + (!cur || cur === 'general' ? ' selected' : '') + '>' + esc(t('tp_apt_general')) + '</option>';
+    (list || []).forEach(function (op) {
+      var val = (op.lid != null) ? String(op.lid) : (op.id != null ? String(op.id) : String(op));
+      var name = (op.name != null) ? op.name : String(op);
+      o += '<option value="' + esc(val) + '"' + (String(cur) === val ? ' selected' : '') + '>' + esc(name) + '</option>';
+    });
+    return '<label class="cp-f"><span>' + esc(label) + '</span><select class="in" id="' + id + '">' + o + '</select></label>';
+  }
+
+  function tpOpenForm(id) {
+    var d = store.D.teampur || {}; var opts = d.options || {};
+    var r = id ? (d.rows || []).filter(function (x) { return String(x.id) === String(id); })[0] : null;
+    var m = $('#xModal'); if (!m) return;
+    var today = new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 10);
+    var holderOpts = (opts.holders || []).map(function (h) { return { id: h.id, name: h.name }; });
+    var payOpts = [{ id: 'transfer', name: t('tp_pay_transfer') }, { id: 'float', name: t('tp_pay_float') }];
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(id ? t('tp_edit') : t('tp_new')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body">' +
+      '<div class="cp-grid" style="grid-template-columns:1fr 1fr">' +
+        '<label class="cp-f"><span>' + esc(t('tp_date')) + '</span><input class="in" id="tp_date" type="date" value="' + esc(r ? r.purchase_date : today) + '"></label>' +
+        '<label class="cp-f"><span>' + esc(t('tp_amount')) + '</span><input class="in" id="tp_amount" type="number" step="0.01" min="0" value="' + esc(r ? r.amount : '') + '"></label>' +
+        '<label class="cp-f" style="grid-column:1/-1"><span>' + esc(t('tp_item')) + '</span><input class="in" id="tp_item" value="' + esc(r ? r.item : '') + '"></label>' +
+        tpFieldSel('tp_apt', t('tp_apartment'), opts.apartments, r ? (r.listing_id != null ? String(r.listing_id) : 'general') : 'general', true) +
+        tpFieldSel('tp_pay', t('tp_pay'), payOpts, r ? r.pay_source : '', false) +
+        tpFieldSel('tp_submitter', t('tp_submitter'), opts.submitters, r ? r.submitted_by : '', false) +
+        tpFieldSel('tp_buyer', t('tp_buyer'), opts.buyers, r ? r.buyer : '', false) +
+        '<div id="tp_holder_wrap" style="grid-column:1/-1"' + (r && r.pay_source === 'float' ? '' : ' hidden') + '>' + tpFieldSel('tp_holder', t('tp_holder'), holderOpts, r ? r.holder_id : '', false) + '</div>' +
+        '<label class="cp-f" style="grid-column:1/-1"><span>' + esc(t('tp_reason')) + '</span><input class="in" id="tp_reason" value="' + esc(r ? (r.reason || '') : '') + '"></label>' +
+      '</div>' +
+      '<div class="tp-receipt-box">' +
+        '<label class="cp-f"><span>' + esc(t('tp_receipt')) + ' <i class="tp-hint">' + esc(t('tp_receipt_hint')) + '</i></span>' +
+          '<input type="file" id="tp_file" accept="image/*" class="in"></label>' +
+        '<div id="tp_preview" class="tp-preview"' + (r && r.has_receipt ? '' : ' hidden') + '>' +
+          (r && r.has_receipt ? '<img src="/erp/api/tp/receipt?id=' + r.id + '&token=' + encodeURIComponent(store.token) + '" alt="receipt">' : '') + '</div>' +
+        '<label class="cp-f" id="tp_noreceipt_wrap"' + (r && r.has_receipt ? ' hidden' : '') + '><span>' + esc(t('tp_no_receipt_q')) + '</span>' +
+          '<input class="in" id="tp_noreason" placeholder="' + esc(t('tp_no_receipt_reason')) + '" value="' + esc(r ? (r.no_receipt_reason || '') : '') + '"></label>' +
+      '</div>' +
+      '<div class="cp-btns">' +
+        '<button class="btn primary sm" data-act="tp-save" data-id="' + (id || '') + '">' + esc(t('tp_save')) + '</button>' +
+        '<button class="btn ghost sm" data-act="x-modal-close">' + esc(t('cancel')) + '</button>' +
+      '</div></div></div>';
+    tpFormWire();
+  }
+
+  function tpFormWire() {
+    var pay = document.getElementById('tp_pay');
+    if (pay) pay.addEventListener('change', function () {
+      var w = document.getElementById('tp_holder_wrap');
+      if (w) w.hidden = pay.value !== 'float';
+      if (pay.value === 'float') {
+        var buyer = (document.getElementById('tp_buyer') || {}).value;
+        var hs = ((store.D.teampur || {}).options || {}).holders || [];
+        var match = hs.filter(function (h) { return h.name === buyer; })[0];
+        var hsel = document.getElementById('tp_holder');
+        if (match && hsel && !hsel.value) hsel.value = String(match.id);
+      }
+    });
+    var file = document.getElementById('tp_file');
+    if (file) file.addEventListener('change', function () {
+      var pv = document.getElementById('tp_preview');
+      var nr = document.getElementById('tp_noreceipt_wrap');
+      if (file.files && file.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function (e) { if (pv) { pv.hidden = false; pv.innerHTML = '<img src="' + e.target.result + '" alt="receipt">'; } };
+        reader.readAsDataURL(file.files[0]);
+        if (nr) nr.hidden = true;
+      } else if (nr) { nr.hidden = false; }
+    });
+  }
+
+  function tpSubmitForm(id) {
+    var g = function (x) { var el = document.getElementById(x); return el ? String(el.value).trim() : ''; };
+    var pay = g('tp_pay');
+    var fileEl = document.getElementById('tp_file');
+    var hasFile = fileEl && fileEl.files && fileEl.files[0];
+    var existingReceipt = false;
+    if (id) { var r0 = ((store.D.teampur || {}).rows || []).filter(function (x) { return String(x.id) === String(id); })[0]; existingReceipt = r0 && r0.has_receipt; }
+    if (!hasFile && !existingReceipt && !g('tp_noreason')) {
+      var nri = document.getElementById('tp_noreason');
+      if (nri) { nri.classList.add('need'); nri.focus(); }
+      return;
+    }
+    var fd = new FormData();
+    if (id) fd.append('id', id);
+    fd.append('purchase_date', g('tp_date'));
+    fd.append('item', g('tp_item'));
+    fd.append('amount', g('tp_amount'));
+    fd.append('listing_id', g('tp_apt'));
+    fd.append('submitted_by', g('tp_submitter'));
+    fd.append('buyer', g('tp_buyer'));
+    fd.append('pay_source', pay);
+    fd.append('reason', g('tp_reason'));
+    fd.append('no_receipt_reason', g('tp_noreason'));
+    if (pay === 'float') fd.append('holder_id', g('tp_holder'));
+    if (hasFile) fd.append('file', fileEl.files[0]);
+    api('/erp/api/tp/' + (id ? 'edit' : 'create'), { method: 'POST', form: fd }).then(function () {
+      var xm = $('#xModal'); if (xm) { xm.hidden = true; xm.innerHTML = ''; }
+      toast(id ? t('tp_saved') : t('tp_created')); loadTeampur();
+    }).catch(function (e) { toast(srvMsg(e) || t('act_failed'), 'err'); });
+  }
+
+  function tpReceiptLightbox(id) {
+    var url = '/erp/api/tp/receipt?id=' + encodeURIComponent(id) + '&token=' + encodeURIComponent(store.token);
+    var m = $('#xModal'); if (!m) return;
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('tp_receipt')) + '</h2>' +
+      '<a class="btn ghost xs" href="' + esc(url) + '" target="_blank" rel="noopener">↗</a>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div>' +
+      '<div class="drawer-body" style="text-align:center"><img src="' + esc(url) + '" alt="receipt" style="max-width:100%;border-radius:10px"></div></div>';
+  }
+
+  function tpRejectBox(id, el) {
+    var row = el.closest('.wq-row'); if (!row) return;
+    var existing = row.querySelector('.tp-reject-box');
+    if (existing) { existing.remove(); return; }
+    var div = document.createElement('div');
+    div.className = 'tp-reject-box';
+    div.innerHTML = '<textarea class="reason-in" rows="2" placeholder="' + esc(t('tp_reject_reason')) + '"></textarea>' +
+      '<div class="tp-reject-btns"><button class="btn danger sm" data-act="tp-reject-confirm" data-id="' + id + '">' + esc(t('tp_confirm_reject')) + '</button>' +
+      '<button class="btn ghost sm" data-act="tp-reject-cancel">' + esc(t('cancel')) + '</button></div>';
+    row.querySelector('.wq-main').appendChild(div);
+    var ta = div.querySelector('.reason-in'); if (ta) ta.focus();
+  }
+
+  function tpStatementDrawer(holderId) {
+    var m = $('#xModal'); if (!m) return;
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('tp_stmt_title')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body" id="tpStmtBody">' + skeleton(4) + '</div></div>';
+    api('/erp/api/tp/statement?holder_id=' + encodeURIComponent(holderId)).then(function (d) {
+      var st = d.statement; var b = st.holder;
+      var head = '<div class="tp-fnums tp-stmt-head">' +
+        '<div><span>' + esc(t('tp_original')) + '</span><b>' + fmtAmt(b.original) + '</b></div>' +
+        '<div><span>' + esc(t('tp_spent')) + '</span><b class="amt out">' + fmtAmt(b.spent) + '</b></div>' +
+        '<div><span>' + esc(t('tp_remaining')) + '</span><b class="amt in">' + fmtAmt(b.remaining) + '</b></div></div>';
+      var rows = (st.entries || []).map(function (e) {
+        var sign = e.delta < 0 ? 'out' : 'in';
+        return '<div class="tp-stmt-row"><div class="tp-stmt-k">' + esc(t('tp_k_' + e.kind)) +
+          (e.purchase ? ' · ' + esc(e.purchase.item || '') : '') + '<i>' + esc(e.created_at ? e.created_at.slice(0, 10) : '') + '</i></div>' +
+          '<div class="amt ' + sign + '">' + (e.delta < 0 ? '' : '+') + fmtAmt(e.delta) + '</div>' +
+          '<div class="tp-stmt-bal">' + fmtAmt(e.balance) + '</div></div>';
+      }).join('') || '<div class="state-sub" style="padding:16px 0">' + esc(t('tp_stmt_empty')) + '</div>';
+      var body = $('#tpStmtBody');
+      if (body) body.innerHTML = head + '<div class="tp-stmt-list">' + rows + '</div>';
+    }).catch(function (e) { var body = $('#tpStmtBody'); if (body) body.innerHTML = errorCard('', srvMsg(e)); });
+  }
+
+  function tpTopupDrawer(holderId) {
+    var m = $('#xModal'); if (!m) return;
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('tp_topup')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body">' +
+      '<label class="cp-f"><span>' + esc(t('tp_topup_amount')) + '</span><input class="in" id="tp_topup_amt" type="number" step="0.01" min="0"></label>' +
+      '<div class="cp-btns"><button class="btn primary sm" data-act="tp-topup-do" data-id="' + holderId + '">' + esc(t('tp_topup_do')) + '</button>' +
+      '<button class="btn ghost sm" data-act="x-modal-close">' + esc(t('cancel')) + '</button></div></div></div>';
+  }
+
+  function tpManageDrawer() {
+    var m = $('#xModal'); if (!m) return;
+    m.hidden = false;
+    m.innerHTML = '<div class="drawer-card card"><div class="grp-h"><h2>' + esc(t('tp_manage')) + '</h2>' +
+      '<button class="btn ghost xs" data-act="x-modal-close">✕</button></div><div class="drawer-body" id="tpMngBody">' + skeleton(4) + '</div></div>';
+    api('/erp/api/tp/config').then(function (d) { tpRenderManage(d); })
+      .catch(function (e) { var b = $('#tpMngBody'); if (b) b.innerHTML = errorCard('', srvMsg(e)); });
+  }
+
+  function tpRenderManage(d) {
+    var body = $('#tpMngBody'); if (!body) return;
+    var ppl = (d.people || []).map(function (p) {
+      return '<div class="tp-mrow" data-pid="' + p.id + '">' +
+        '<input class="in xs tp-m-name" value="' + esc(p.name) + '">' +
+        '<label class="tp-mck"><input type="checkbox" class="tp-m-submit"' + (p.can_submit ? ' checked' : '') + '> ' + esc(t('tp_can_submit')) + '</label>' +
+        '<label class="tp-mck"><input type="checkbox" class="tp-m-buy"' + (p.can_buy ? ' checked' : '') + '> ' + esc(t('tp_can_buy')) + '</label>' +
+        '<button class="btn ghost xs" data-act="tp-person-save" data-id="' + p.id + '">' + esc(t('tp_save')) + '</button></div>';
+    }).join('');
+    var hld = (d.holders || []).map(function (h) {
+      return '<div class="tp-mrow tp-mrow-h" data-hid="' + h.id + '">' +
+        '<input class="in xs tp-h-name" value="' + esc(h.name) + '">' +
+        '<input class="in xs tp-h-start" type="number" step="0.01" value="' + esc(h.start_balance) + '" title="' + esc(t('tp_start_balance')) + '">' +
+        '<input class="in xs tp-h-low" type="number" step="0.01" value="' + esc(h.low_threshold) + '" title="' + esc(t('tp_low_threshold')) + '">' +
+        '<input class="in xs tp-h-user" value="' + esc(h.user_key || '') + '" placeholder="' + esc(t('tp_user_key')) + '">' +
+        '<button class="btn ghost xs" data-act="tp-holder-save" data-id="' + h.id + '">' + esc(t('tp_save')) + '</button></div>';
+    }).join('');
+    body.innerHTML = '<div class="state-sub" style="margin-bottom:10px">' + esc(t('tp_manage_hint')) + '</div>' +
+      '<h3 class="tp-h">' + esc(t('tp_people')) + '</h3><div class="tp-mlist">' + ppl +
+      '<div class="tp-mrow"><input class="in xs" id="tp_newp_name" placeholder="' + esc(t('tp_name')) + '">' +
+      '<label class="tp-mck"><input type="checkbox" id="tp_newp_submit" checked> ' + esc(t('tp_can_submit')) + '</label>' +
+      '<label class="tp-mck"><input type="checkbox" id="tp_newp_buy"> ' + esc(t('tp_can_buy')) + '</label>' +
+      '<button class="btn ghost xs" data-act="tp-person-add">' + esc(t('tp_add_person')) + '</button></div></div>' +
+      '<h3 class="tp-h">' + esc(t('tp_floats')) + '</h3><div class="tp-mlist">' + hld +
+      '<div class="tp-mrow tp-mrow-h"><input class="in xs" id="tp_newh_name" placeholder="' + esc(t('tp_name')) + '">' +
+      '<input class="in xs" id="tp_newh_start" type="number" step="0.01" placeholder="' + esc(t('tp_start_balance')) + '">' +
+      '<input class="in xs" id="tp_newh_low" type="number" step="0.01" placeholder="' + esc(t('tp_low_threshold')) + '">' +
+      '<input class="in xs" id="tp_newh_user" placeholder="' + esc(t('tp_user_key')) + '">' +
+      '<button class="btn ghost xs" data-act="tp-holder-add">' + esc(t('tp_add_holder')) + '</button></div></div>';
+  }
+
+  function tpVal(sel) { var e = document.getElementById(sel); return e ? e.value : ''; }
+  function tpChk(sel) { var e = document.getElementById(sel); return e && e.checked ? 1 : 0; }
+
+  document.addEventListener('input', function (ev) {
+    if (ev.target.id !== 'tpSearch') return;
+    clearTimeout(tpSearchTmr);
+    var v = ev.target.value;
+    tpSearchTmr = setTimeout(function () { tpP.q = v.trim(); pushTpHash(); }, 350);
+  });
+
+  document.addEventListener('change', function (ev) {
+    if (!ev.target.classList || !ev.target.classList.contains('tpf')) return;
+    var map = { tpfSubmitter: 'submitter', tpfBuyer: 'buyer', tpfHolder: 'holder', tpfApt: 'apt', tpfFrom: 'from', tpfTo: 'to' };
+    var key = map[ev.target.id];
+    if (!key) return;
+    tpP[key] = ev.target.value;
+    pushTpHash();
+  });
+
+  document.addEventListener('click', function (ev) {
+    var el = ev.target.closest('[data-act]');
+    if (!el) return;
+    var act = el.getAttribute('data-act');
+    if (act.indexOf('tp-') !== 0 && act !== 'retry_teampur') return;
+    var id = el.getAttribute('data-id');
+    if (act === 'retry_teampur') loadTeampur();
+    else if (act === 'tp-add') tpOpenForm('');
+    else if (act === 'tp-edit') tpOpenForm(id);
+    else if (act === 'tp-save') { ev.preventDefault(); tpSubmitForm(el.getAttribute('data-id') || ''); }
+    else if (act === 'tp-receipt') { ev.stopPropagation(); tpReceiptLightbox(id); }
+    else if (act === 'tp-fstatus') { tpP.status = el.getAttribute('data-v'); pushTpHash(); }
+    else if (act === 'tp-fpay') { tpP.pay = el.getAttribute('data-v'); pushTpHash(); }
+    else if (act === 'tp-clear-filters') { tpP.submitter = ''; tpP.buyer = ''; tpP.holder = ''; tpP.apt = ''; tpP.from = ''; tpP.to = ''; pushTpHash(); }
+    else if (act === 'tp-approve') { el.disabled = true; api('/erp/api/tp/approve', { method: 'POST', body: { id: id } }).then(function () { toast(t('approved_ok')); loadTeampur(); }).catch(function (e) { el.disabled = false; toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-reject') tpRejectBox(id, el);
+    else if (act === 'tp-reject-cancel') { var bx0 = el.closest('.tp-reject-box'); if (bx0) bx0.remove(); }
+    else if (act === 'tp-reject-confirm') {
+      var bx = el.closest('.tp-reject-box'); var ta = bx ? bx.querySelector('.reason-in') : null;
+      var reason = ta ? ta.value.trim() : '';
+      if (!reason) { if (ta) { ta.classList.add('need'); ta.focus(); } return; }
+      el.disabled = true;
+      api('/erp/api/tp/reject', { method: 'POST', body: { id: id, reason: reason } }).then(function () { toast(t('rejected_ok')); loadTeampur(); }).catch(function (e) { el.disabled = false; toast(srvMsg(e), 'err'); });
+    }
+    else if (act === 'tp-transfer') { el.disabled = true; api('/erp/api/tp/transfer', { method: 'POST', body: { id: id } }).then(function () { toast(t('tp_saved')); loadTeampur(); }).catch(function (e) { el.disabled = false; toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-delete') { if (!confirm(t('tp_delete_confirm'))) return; api('/erp/api/tp/delete', { method: 'POST', body: { id: id } }).then(function () { toast(t('tp_deleted')); loadTeampur(); }).catch(function (e) { toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-stmt') tpStatementDrawer(id);
+    else if (act === 'tp-topup') tpTopupDrawer(id);
+    else if (act === 'tp-topup-do') { el.disabled = true; api('/erp/api/tp/topup', { method: 'POST', body: { holder_id: id, amount: tpVal('tp_topup_amt') } }).then(function () { var xm = $('#xModal'); if (xm) { xm.hidden = true; xm.innerHTML = ''; } toast(t('tp_saved')); loadTeampur(); }).catch(function (e) { el.disabled = false; toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-settle') { if (!confirm(t('tp_settle_confirm'))) return; api('/erp/api/tp/settle', { method: 'POST', body: { holder_id: id } }).then(function () { toast(t('tp_saved')); loadTeampur(); }).catch(function (e) { toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-manage') tpManageDrawer();
+    else if (act === 'tp-person-save') { var rp = el.closest('.tp-mrow'); api('/erp/api/tp/person-save', { method: 'POST', body: { id: Number(id), name: rp.querySelector('.tp-m-name').value, can_submit: rp.querySelector('.tp-m-submit').checked ? 1 : 0, can_buy: rp.querySelector('.tp-m-buy').checked ? 1 : 0 } }).then(function () { toast(t('tp_saved')); tpManageDrawer(); }).catch(function (e) { toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-person-add') { api('/erp/api/tp/person-save', { method: 'POST', body: { name: tpVal('tp_newp_name'), can_submit: tpChk('tp_newp_submit'), can_buy: tpChk('tp_newp_buy') } }).then(function () { toast(t('tp_saved')); tpManageDrawer(); }).catch(function (e) { toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-holder-save') { var rh = el.closest('.tp-mrow'); api('/erp/api/tp/holder-save', { method: 'POST', body: { id: Number(id), name: rh.querySelector('.tp-h-name').value, start_balance: rh.querySelector('.tp-h-start').value, low_threshold: rh.querySelector('.tp-h-low').value, user_key: rh.querySelector('.tp-h-user').value } }).then(function () { toast(t('tp_saved')); tpManageDrawer(); }).catch(function (e) { toast(srvMsg(e), 'err'); }); }
+    else if (act === 'tp-holder-add') { api('/erp/api/tp/holder-save', { method: 'POST', body: { name: tpVal('tp_newh_name'), start_balance: tpVal('tp_newh_start'), low_threshold: tpVal('tp_newh_low'), user_key: tpVal('tp_newh_user') } }).then(function () { toast(t('tp_saved')); tpManageDrawer(); }).catch(function (e) { toast(srvMsg(e), 'err'); }); }
+  });
+
   /* ================= القوائم المالية Statements ================= */
   var stP = { m: '' };
 
@@ -4726,6 +5207,20 @@
       }
     },
     custody: { show: function () { loadCustody(); } },
+    teampur: {
+      show: function (params) {
+        tpP.status = params.get('status') || '';
+        tpP.pay = params.get('pay') || '';
+        tpP.q = params.get('q') || '';
+        tpP.submitter = params.get('submitter') || '';
+        tpP.buyer = params.get('buyer') || '';
+        tpP.holder = params.get('holder') || '';
+        tpP.apt = params.get('apt') || '';
+        tpP.from = params.get('from') || '';
+        tpP.to = params.get('to') || '';
+        loadTeampur();
+      }
+    },
     owners: {
       show: function (params) {
         var diag = params && params.get('diag');
@@ -4898,6 +5393,7 @@
     else if (store.view === 'setup') loadSetup();
     else if (store.view === 'match' && store.D.match) renderMatch(store.D.match);
     else if (store.view === 'exp' && store.D.exp) renderExp(store.D.exp);
+    else if (store.view === 'teampur' && store.D.teampur) renderTeampur(store.D.teampur);
     else if (store.view === 'custody' && store.D.custody) renderCustody(store.D.custody);
     else if (store.view === 'owners' && store.D.owners) renderOwners(store.D.owners);
     else if (store.view === 'stmts' && store.D.stmts) renderStmts(store.D.stmts);

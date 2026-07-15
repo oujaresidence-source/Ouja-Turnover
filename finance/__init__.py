@@ -36,10 +36,11 @@ from aiohttp import web
 
 from . import api
 from . import owners as OW
+from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.6.0"   # finchat: «مساعد المركز المالي» assistant
+ERP_VERSION = "2.7.0"   # مشتريات الفريق: Team Purchases + عهدة (float) module
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -800,6 +801,300 @@ async def _h_api_custody_map_set(request):
     return api.jres(data, status)
 
 
+# ============================================================================
+#  مشتريات الفريق — Team Purchases + عهدة (float). Routes under /erp/api/tp/*.
+#  Access model (backend-enforced, NOT just UI):
+#    • view list / create / edit-own / delete-own  → any authed ERP user (_authed).
+#    • approve / reject / transfer / top-up / settle / edit config → Finance only (_guarded).
+#    • float balances + statement → authed but FILTERED by TP.visible_holder_ids
+#      (Finance sees all; a user sees only the holder linked to their name; nobody else).
+# ============================================================================
+
+import mimetypes as _mimetypes
+import uuid as _uuid
+
+_TP_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif"}
+_TP_RECEIPT_MAX_MB = 12
+
+
+def _authed(handler, write=False):
+    """Login-only gate (any active user) + the same storage-failure envelope as _guarded.
+    Used for the team-facing Team-Purchases routes so ops members — not just Finance — can log
+    their own purchases and holders can see their own float."""
+    async def wrapped(request):
+        if not api.authed(request):
+            return api.jres({"error": "unauthorized"}, 401)
+        try:
+            return await handler(request)
+        except TP.TPError as e:
+            return api.jres({"error": e.code, "detail": e.ar,
+                             "message_ar": e.ar, "message_en": e.en}, 400)
+        except Exception as e:
+            return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+    return wrapped
+
+
+def _tp_finance(handler):
+    """Finance-only (admin/accountant) wrapper that also surfaces TPError bilingually."""
+    async def wrapped(request):
+        if not api.authed(request):
+            return api.jres({"error": "unauthorized"}, 401)
+        if not api.can_finance(request):
+            return api.jres({"error": "forbidden", "detail": "finance role required",
+                             "message_ar": "هذا الإجراء للمالية فقط.",
+                             "message_en": "This action is for Finance only."}, 403)
+        try:
+            return await handler(request)
+        except TP.TPError as e:
+            return api.jres({"error": e.code, "detail": e.ar,
+                             "message_ar": e.ar, "message_en": e.en}, 400)
+        except Exception as e:
+            return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+    return wrapped
+
+
+async def _tp_listings_map():
+    """listing_id(int) -> apartment name, via bot.py's cached map (never blocks the loop)."""
+    try:
+        mp = await api.B.get_listings_map_async()
+        return {int(k): v for k, v in (mp or {}).items()}
+    except Exception:
+        try:
+            return {int(k): v for k, v in (api.B.get_listings_map() or {}).items()}
+        except Exception:
+            return {}
+
+
+def _tp_apt_options(mp):
+    rows = [{"lid": lid, "name": name or str(lid)} for lid, name in mp.items()]
+    rows.sort(key=lambda r: str(r["name"]))
+    return rows
+
+
+def _tp_receipt_dir():
+    base = os.path.join(api.B.STATE_DIR, "team_purchases")
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+async def _tp_read_form(request):
+    """Parse the create/edit FormData: returns (fields:dict, saved_receipt_path or None).
+    An image part named `file` is streamed to STATE_DIR/team_purchases/<uuid>.<ext> (size-capped).
+    A browser's fetch(FormData) is always multipart; we still tolerate urlencoded/JSON bodies
+    (no image) so the endpoint never 500s on a fieldsonly post."""
+    ctype = (request.headers.get("Content-Type") or "").lower()
+    if "multipart/" not in ctype:
+        if "application/json" in ctype:
+            data = await _json_body(request)
+        else:
+            data = dict(await request.post())
+        return {k: ("" if v is None else str(v)).strip() for k, v in data.items()}, None
+    fields = {}
+    receipt_path = None
+    reader = await request.multipart()
+    async for part in reader:
+        if part.name == "file" and (part.filename or ""):
+            ext = os.path.splitext(part.filename)[1].lower()
+            if ext not in _TP_IMG_EXT:
+                raise TP.TPError("bad_image", "الفاتورة لازم تكون صورة (jpg/png/webp).",
+                                 "The receipt must be an image (jpg/png/webp).")
+            chunks = []
+            total = 0
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _TP_RECEIPT_MAX_MB * 1024 * 1024:
+                    raise TP.TPError("too_large", "حجم الصورة كبير — أقصى حد %d ميجا." % _TP_RECEIPT_MAX_MB,
+                                     "Image too large — max %d MB." % _TP_RECEIPT_MAX_MB)
+                chunks.append(chunk)
+            fname = _uuid.uuid4().hex + ext
+            path = os.path.join(_tp_receipt_dir(), fname)
+            with open(path, "wb") as f:
+                f.write(b"".join(chunks))
+            receipt_path = path
+        else:
+            fields[part.name] = (await part.text()).strip()
+    return fields, receipt_path
+
+
+def _tp_row_view(r, actor, is_finance, holders_by_id):
+    st = r.get("status")
+    lab = TP.STATUS_LABELS.get(st, {"ar": st, "en": st})
+    can_edit = False
+    if r.get("pay_source") == TP.PAY_TRANSFER:
+        can_edit = (st == TP.ST_PENDING) and (is_finance or (r.get("created_by") == actor))
+    elif r.get("pay_source") == TP.PAY_FLOAT and st == TP.ST_FLOAT:
+        can_edit = is_finance or (r.get("created_by") == actor)
+    return {
+        "id": r["id"], "purchase_date": r.get("purchase_date"), "item": r.get("item"),
+        "amount": r.get("amount"), "listing_id": r.get("listing_id"),
+        "apartment_name": r.get("apartment_name"), "submitted_by": r.get("submitted_by"),
+        "buyer": r.get("buyer"), "pay_source": r.get("pay_source"), "reason": r.get("reason"),
+        "status": st, "status_ar": lab["ar"], "status_en": lab["en"],
+        "reject_reason": r.get("reject_reason"),
+        "holder_id": r.get("holder_id"),
+        "holder_name": (holders_by_id.get(r.get("holder_id")) or {}).get("name") if r.get("holder_id") else None,
+        "has_receipt": bool(r.get("receipt_path")), "no_receipt_reason": r.get("no_receipt_reason"),
+        "created_by": r.get("created_by"), "can_edit": can_edit,
+    }
+
+
+async def _h_tp_list(request):
+    actor = api.actor(request)
+    is_finance = api.can_finance(request)
+    qs = request.query
+    filters = {k: qs.get(k) for k in
+               ("status", "pay_source", "submitted_by", "buyer", "holder_id", "listing_id",
+                "date_from", "date_to", "q") if qs.get(k)}
+    rows = TP.list_purchases(filters)
+    holders_by_id = {h["id"]: h for h in TP.holders()}
+    view_rows = [_tp_row_view(r, actor, is_finance, holders_by_id) for r in rows]
+
+    mp = await _tp_listings_map()
+    vis = TP.visible_holder_ids(actor, is_finance)
+    balances = [b for b in TP.all_balances() if b and b["holder_id"] in vis]
+
+    return api.jres({
+        "ok": True, "actor": actor, "is_finance": is_finance,
+        "rows": view_rows, "summary": TP.summary(filters),
+        "balances": balances,
+        "options": {
+            "apartments": _tp_apt_options(mp),
+            "submitters": TP.submitters(),
+            "buyers": TP.buyers(),
+            "holders": [{"id": h["id"], "name": h["name"]} for h in TP.holders()],
+            "statuses": TP.STATUS_LABELS,
+        },
+    })
+
+
+async def _h_tp_create(request):
+    fields, receipt_path = await _tp_read_form(request)
+    if receipt_path:
+        fields["receipt_path"] = receipt_path
+    mp = await _tp_listings_map()
+    row = TP.create_purchase(fields, actor=api.actor(request),
+                             apartment_resolver=lambda lid: mp.get(int(lid)))
+    return api.jres({"ok": True, "id": row["id"]})
+
+
+async def _h_tp_edit(request):
+    fields, receipt_path = await _tp_read_form(request)
+    pid = fields.pop("id", None)
+    if not pid:
+        return api.jres({"error": "no_id"}, 400)
+    if receipt_path:
+        fields["receipt_path"] = receipt_path
+    mp = await _tp_listings_map()
+    TP.edit_purchase(pid, fields, actor=api.actor(request), is_finance=api.can_finance(request),
+                     apartment_resolver=lambda lid: mp.get(int(lid)))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_delete(request):
+    body = await _json_body(request)
+    pid = body.get("id")
+    if not pid:
+        return api.jres({"error": "no_id"}, 400)
+    TP.delete_purchase(pid, actor=api.actor(request), is_finance=api.can_finance(request))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_approve(request):
+    body = await _json_body(request)
+    TP.approve(body.get("id"), by=api.actor(request))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_reject(request):
+    body = await _json_body(request)
+    TP.reject(body.get("id"), by=api.actor(request), reason=body.get("reason", ""))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_transfer(request):
+    body = await _json_body(request)
+    TP.mark_transferred(body.get("id"), by=api.actor(request))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_holders(request):
+    """Float balance cards — backend-filtered by visibility."""
+    actor = api.actor(request)
+    is_finance = api.can_finance(request)
+    vis = TP.visible_holder_ids(actor, is_finance)
+    balances = [b for b in TP.all_balances() if b and b["holder_id"] in vis]
+    return api.jres({"ok": True, "is_finance": is_finance, "balances": balances})
+
+
+async def _h_tp_statement(request):
+    actor = api.actor(request)
+    is_finance = api.can_finance(request)
+    hid = request.query.get("holder_id")
+    if not hid:
+        return api.jres({"error": "no_holder"}, 400)
+    if not TP.can_see_holder(hid, actor, is_finance):
+        return api.jres({"error": "forbidden", "message_ar": "ما تقدر تشوف كشف هذي العهدة.",
+                         "message_en": "You can't view this float statement."}, 403)
+    st = TP.statement(hid)
+    if not st:
+        return api.jres({"error": "not_found"}, 404)
+    return api.jres({"ok": True, "statement": st})
+
+
+async def _h_tp_topup(request):
+    body = await _json_body(request)
+    bal = TP.topup(body.get("holder_id"), body.get("amount"), by=api.actor(request),
+                   note=body.get("note", ""))
+    return api.jres({"ok": True, "balance": bal})
+
+
+async def _h_tp_settle(request):
+    body = await _json_body(request)
+    bal = TP.settle(body.get("holder_id"), by=api.actor(request), note=body.get("note", ""))
+    return api.jres({"ok": True, "balance": bal})
+
+
+async def _h_tp_config(request):
+    """Editable name lists + holder settings — the single place they live. Finance only."""
+    return api.jres({
+        "ok": True,
+        "people": TP.people(active_only=False),
+        "holders": TP.holders(active_only=False),
+    })
+
+
+async def _h_tp_person_save(request):
+    body = await _json_body(request)
+    pid = TP.save_person(body.get("name"), can_submit=body.get("can_submit", 1),
+                         can_buy=body.get("can_buy", 0), person_id=body.get("id"),
+                         active=body.get("active", 1))
+    return api.jres({"ok": True, "id": pid})
+
+
+async def _h_tp_holder_save(request):
+    body = await _json_body(request)
+    hid = TP.save_holder(body.get("name"), start_balance=body.get("start_balance"),
+                         low_threshold=body.get("low_threshold"), user_key=body.get("user_key"),
+                         holder_id=body.get("id"), active=body.get("active", 1))
+    return api.jres({"ok": True, "id": hid})
+
+
+async def _h_tp_receipt(request):
+    """Stream a receipt image. Any logged-in ERP user may view it."""
+    pid = request.query.get("id")
+    if not pid:
+        return web.Response(status=400, text="no id")
+    r = TP.get_purchase(pid)
+    path = (r or {}).get("receipt_path")
+    if not r or not path or not os.path.exists(path):
+        return web.Response(status=404, text="no receipt")
+    ctype = _mimetypes.guess_type(path)[0] or "image/jpeg"
+    return web.FileResponse(path, headers={"Content-Type": ctype, "Cache-Control": "private, max-age=3600"})
+
+
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
@@ -886,6 +1181,22 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/migrate", _guarded(_h_api_migrate_run, write=True))
     app.router.add_get("/erp/api/budget", _guarded(_h_api_budget_get))
     app.router.add_post("/erp/api/budget", _guarded(_h_api_budget_set, write=True))
+    # مشتريات الفريق — Team Purchases + عهدة (float)
+    app.router.add_get ("/erp/api/tp",            _authed(_h_tp_list))
+    app.router.add_post("/erp/api/tp/create",     _authed(_h_tp_create, write=True))
+    app.router.add_post("/erp/api/tp/edit",       _authed(_h_tp_edit, write=True))
+    app.router.add_post("/erp/api/tp/delete",     _authed(_h_tp_delete, write=True))
+    app.router.add_get ("/erp/api/tp/receipt",    _authed(_h_tp_receipt))
+    app.router.add_get ("/erp/api/tp/holders",    _authed(_h_tp_holders))
+    app.router.add_get ("/erp/api/tp/statement",  _authed(_h_tp_statement))
+    app.router.add_post("/erp/api/tp/approve",    _tp_finance(_h_tp_approve))
+    app.router.add_post("/erp/api/tp/reject",     _tp_finance(_h_tp_reject))
+    app.router.add_post("/erp/api/tp/transfer",   _tp_finance(_h_tp_transfer))
+    app.router.add_post("/erp/api/tp/topup",      _tp_finance(_h_tp_topup))
+    app.router.add_post("/erp/api/tp/settle",     _tp_finance(_h_tp_settle))
+    app.router.add_get ("/erp/api/tp/config",     _tp_finance(_h_tp_config))
+    app.router.add_post("/erp/api/tp/person-save", _tp_finance(_h_tp_person_save))
+    app.router.add_post("/erp/api/tp/holder-save", _tp_finance(_h_tp_holder_save))
     app.router.add_get("/fin/receipt/{expense_id}", _h_receipt_proxy)   # owner-token scoped (public route)
     app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
     return True

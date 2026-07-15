@@ -715,3 +715,63 @@ textarea.in{width:100%;font-family:inherit}
 .fc-inrow input{flex:1;min-height:44px;border-radius:10px;border:1px solid var(--line-strong);
   padding:0 12px;font-size:14px;background:var(--surface);color:inherit}
 .fc-inrow input:focus{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ================= مشتريات الفريق Team Purchases + عهدة (float) ================= */
+.tag.purp{color:var(--purple);background:var(--purple-soft)}
+.in.xs{min-height:36px;padding:0 10px;font-size:13px;border-radius:8px}
+
+.tp-top{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+
+.tp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.tp-stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 14px;box-shadow:var(--sh-xs)}
+.tp-stat-k{font-size:11.5px;color:var(--text-3);font-weight:600;margin-bottom:4px}
+.tp-stat-v{font-size:19px;font-weight:800;font-family:var(--font-mono);color:var(--text);unicode-bidi:isolate}
+.tp-stat-v i{font-size:11px;font-weight:600;color:var(--mut);font-style:normal}
+.tp-stat-sub{font-size:11px;color:var(--mut);margin-top:2px}
+@media (max-width:720px){.tp-stats{grid-template-columns:repeat(2,1fr)}}
+
+.tp-floats{margin-bottom:14px}
+.tp-h{font-size:13px;font-weight:800;color:var(--text-2);margin:6px 2px 10px}
+.tp-fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.tp-fcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;box-shadow:var(--sh-xs)}
+.tp-fcard.low{border-color:var(--red);background:var(--red-soft)}
+.tp-fname{font-weight:800;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tp-fnums{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.tp-fnums>div{display:flex;flex-direction:column;gap:2px}
+.tp-fnums>div span{font-size:10.5px;color:var(--text-3)}
+.tp-fnums>div b{font-size:15px;font-family:var(--font-mono);unicode-bidi:isolate}
+.tp-factions{display:flex;gap:6px;flex-wrap:wrap}
+
+.tprow .tp-r1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tprow .tp-item{font-weight:700;font-size:14px;color:var(--text)}
+.tprow .tp-r2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.tprow .tp-date{font-family:var(--font-mono);font-size:11px;color:var(--mut)}
+.tprow .tp-people{font-size:11.5px;color:var(--text-3)}
+.tprow .tp-reason{margin-top:6px;font-size:12.5px;color:var(--text-2)}
+.tprow .tp-rej{margin-top:6px;font-size:12px;color:var(--red);background:var(--red-soft);
+  border-radius:8px;padding:5px 9px;display:inline-block}
+
+.tp-receipt-box{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+.tp-hint{font-size:10.5px;color:var(--mut);font-style:normal;font-weight:500}
+.tp-preview{margin-top:8px}
+.tp-preview img{max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line-strong)}
+
+.tp-reject-box{margin-top:10px}
+.tp-reject-btns{display:flex;gap:8px;margin-top:8px}
+
+.tp-stmt-head{margin-bottom:12px}
+.tp-stmt-list{display:flex;flex-direction:column}
+.tp-stmt-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;
+  padding:9px 4px;border-top:1px solid var(--line);font-size:13px}
+.tp-stmt-k{color:var(--text-2);display:flex;flex-direction:column}
+.tp-stmt-k i{font-size:10.5px;color:var(--mut);font-style:normal;font-family:var(--font-mono)}
+.tp-stmt-row .amt{font-family:var(--font-mono);font-weight:700;unicode-bidi:isolate}
+.tp-stmt-bal{font-family:var(--font-mono);font-weight:700;color:var(--text);min-width:70px;text-align:end;unicode-bidi:isolate}
+
+.tp-mlist{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.tp-mrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tp-mrow .tp-m-name,.tp-mrow .tp-h-name{flex:1;min-width:120px}
+.tp-mck{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2);white-space:nowrap}
+.tp-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 0 2px}
+.tp-filters .tpf{min-width:120px;max-width:180px}
