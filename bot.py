@@ -13254,11 +13254,19 @@ def _new_quote_number():
 _users = {}                 # user_id -> user dict
 _sessions = {}              # session_token -> {user_id, expires_at}
 
+# The per-page permission matrix keys. This MUST cover every page that appears in
+# the sidebar (NAV_DEF, defined far below): a page with no key here can never be
+# permission-restricted, so it would leak into every user's sidebar. After NAV_DEF
+# is built we reconcile — any nav id missing here is appended — so NAV_DEF stays the
+# single source of truth and future pages are auto-covered (see the loop right after
+# NAV_DEF). `today` and `fb` are legacy views still reachable by deep-link but not in
+# the nav, so they are listed explicitly.
 _USER_TABS = [
-    "home", "inbox", "today", "calendar", "pricing", "strat", "clean",
-    "tickets", "reviews", "guests", "quality", "rev", "learn", "log",
-    "users", "quote", "weekly", "design", "pmo", "expenses", "listings",
-    "cleanteams", "clean_center", "plab", "fb", "finance", "gw",
+    "home", "brain", "gaps", "inbox", "today", "calendar", "clean_center", "cphotos",
+    "promises", "pricing", "plab", "strat", "clean", "cleanteams", "listings",
+    "tickets", "schedule", "reviews", "users", "quote", "studio", "weekly", "ownrep",
+    "design", "pmo", "expenses", "finance", "erp", "fb", "guests", "gw", "guide",
+    "quality", "rev", "learn", "log",
 ]
 
 def _default_perms(role):
@@ -13326,11 +13334,31 @@ def _user_create(name, password, role="viewer", perms=None, created_by="system")
     _users[uid] = u
     return u
 
+def _norm_perms(u):
+    """Return the user's perms with EVERY known tab present. WHITELIST model: a tab the
+    user was never explicitly granted (missing from their stored matrix) is DENIED — not
+    filled from the role default. This mirrors _user_can exactly, so the sidebar shows
+    ONLY the pages the owner actually checked for this user, nothing else."""
+    stored = (u or {}).get("perms") or {}
+    out = {}
+    for tab in _USER_TABS:
+        p = stored.get(tab)
+        if isinstance(p, dict):
+            out[tab] = {"read": bool(p.get("read")),
+                        "write": bool(p.get("write")),
+                        "create": bool(p.get("create"))}
+        else:
+            out[tab] = {"read": False, "write": False, "create": False}
+    return out
+
 def _user_view(u):
-    """Public view (no password hash)."""
+    """Public view (no password hash). Perms are normalised to the full tab set so the
+    dashboard/ERP sidebars can filter every page from the SAME model the server enforces."""
     if not u:
         return None
-    return {k: v for k, v in u.items() if k != "password_hash"}
+    v = {k: val for k, val in u.items() if k != "password_hash"}
+    v["perms"] = _norm_perms(u)
+    return v
 
 def _find_user_by_name(name):
     if not name:
@@ -13380,11 +13408,11 @@ def _user_can(request, tab, action="read"):
         return False
     if u.get("role") == "admin":
         return True
-    perm = (u.get("perms") or {}).get(tab)
-    if perm is None:
-        # Tab added after this user was created: fall back to the role default
-        # instead of silently denying (admins can still edit per-user perms).
-        perm = _default_perms(u.get("role") or "viewer").get(tab) or {}
+    # WHITELIST model: a non-admin gets ONLY what is explicitly granted in their matrix.
+    # A tab that isn't in their perms (never granted, or added after they were set up) is
+    # DENIED — never silently fall back to the role default. The owner grants a page by
+    # checking its box; everything else stays hidden/blocked.
+    perm = (u.get("perms") or {}).get(tab) or {}
     return bool(perm.get(action))
 
 # ===================== REVIEWS (Hostaway + AI dispute/AAA) =====================
@@ -13470,6 +13498,17 @@ DASHBOARD_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>عوجا · Ouja Operations</title>
+<!-- PWA (installable app) — additive, no effect on existing behavior -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F5F5F7">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ouja">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="application-name" content="Ouja">
+<link rel="apple-touch-icon" href="/pwa/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/pwa/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/pwa/icons/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -13674,6 +13713,13 @@ html[lang="ar"] .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5
 .dot.warm{background:var(--yellow);box-shadow:0 0 0 3px rgba(201,150,23,.18)}
 .side-tools{display:flex;gap:5px}
 .side-tools .icbtn{flex:1}
+/* PWA install entry — discreet, matches the nav items */
+.install-row{display:flex;align-items:center;gap:9px;width:100%;padding:8px 11px;margin-bottom:6px;border:1px solid var(--gold-tint);border-radius:var(--r-sm);background:var(--gold-tint);color:var(--gold);font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:.14s var(--ease,ease)}
+.install-row:hover{background:var(--gold-soft);border-color:var(--gold)}
+.install-row:active{transform:scale(.97)}
+.install-row .ic{display:inline-flex;align-items:center;justify-content:center;flex:none}
+@keyframes iosSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){ .install-row{transition:none} .install-row:active{transform:none} #iosInstallOverlay>div{animation:none!important} }
 
 /* ============== TOP BAR (mobile/tablet) ============== */
 header.mhead{display:none;background:var(--surface);border-bottom:1px solid var(--line);padding:10px 14px;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
@@ -15663,6 +15709,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       </div>
       <div class="side-nav" id="sideNav"></div>
       <div class="side-foot">
+        <button class="install-row" id="installRow" onclick="pwaInstall()" style="display:none" aria-label="تثبيت التطبيق / Install app">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 21h16"/></svg></span>
+          <span id="installRowLabel">تثبيت التطبيق</span>
+        </button>
         <div class="side-status"><span class="dot" id="sideDot"></span><span id="sideStatus">…</span></div>
         <div class="side-tools">
           <button class="icbtn" onclick="gsOpen()" aria-label="Search / بحث (Ctrl+K)" title="بحث ⌘K" style="font-weight:700">⌕</button>
@@ -16079,6 +16129,7 @@ const T = {
     urgent_esc:'تصعيد مفتوح', urgent_pending:'رد بانتظار مراجعتك', urgent_unsigned:'عقد غير موقّع · تشيك-إن قريب',
     urgent_age:'منذ', urgent_open:'افتح',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
+    pwaInstall:'تثبيت التطبيق', pwaInstalled:'تم تثبيت التطبيق ✓', pwaUpdate:'يوجد تحديث جديد لعوجا', pwaUpdateNow:'تحديث',
     today_h:'اليوم', today_date_sub:'',
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
     inbox_sub:'كل الردود والتصعيدات في مكان واحد',
@@ -16402,6 +16453,7 @@ const T = {
     urgent_esc:'open escalation', urgent_pending:'pending reply', urgent_unsigned:'unsigned · check-in soon',
     urgent_age:'ago', urgent_open:'open',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
+    pwaInstall:'Install app', pwaInstalled:'App installed ✓', pwaUpdate:'A new Ouja version is available', pwaUpdateNow:'Update',
     today_h:'Today', today_date_sub:'',
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
     inbox_sub:'Replies and escalations in one place',
@@ -17333,6 +17385,7 @@ function applyLang(){
   ['langBtn','dLangBtn','sLangBtn'].forEach(function(id){const e=document.getElementById(id); if(e) e.textContent = L==='ar'?'EN':'ع'});
   const dt = document.getElementById('dThemeBtn'); if(dt) dt.innerHTML = '◐ '+t().theme;
   buildSideNav(); buildBottomNav(); buildMoreNav(); buildInboxTabs();
+  try{ updateInstallUI(); }catch(_){}
   const mhT = document.getElementById('mhead_title');
   if(mhT) mhT.textContent = t()[view] || t().home;
   // Repaint every page-help banner from t().ph[key]
@@ -17497,14 +17550,28 @@ function toggleNavCat(tk){
   try{ localStorage.setItem('ouja:navCollapsed', JSON.stringify(c)); }catch(_){}
   buildSideNav();
 }
-function canRead(id){
-  // Nav visibility follows the user's read permissions (server enforces writes; this
-  // is the UX layer so fb/finance/plab vanish for roles that can't read them).
-  const me = (D.me && D.me.user) || {role:'admin'};
-  if(me.role === 'admin') return true;
-  const p = (me.perms || {})[id];
-  if(p) return !!p.read;
-  return id !== 'users';   // unknown/legacy tab key: visible, except the admin tab
+// ---- Per-page permission gate (UI layer), a strict WHITELIST. The SERVER enforces the
+// same matrix (_user_can in bot.py). A non-admin sees ONLY pages explicitly granted read
+// (شوف) — anything not granted is simply absent, no "no access" screen, no ribbon. Admin
+// always passes; the legacy super-admin token has no D.me user so it defaults to admin.
+function _meUser(){ return (D.me && D.me.user) || {role:'admin'}; }
+function _permOf(id){
+  const me = _meUser();
+  if(me.role === 'admin') return {read:true, write:true, create:true, _admin:true};
+  return (me.perms || {})[id] || {read:false, write:false, create:false};  // deny by default
+}
+function canRead(id){ const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).read; }
+function canWrite(id){ const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).write; }
+function canCreate(id){ const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).create; }
+// The first sidebar page (in nav order) the user is allowed to see — where login lands and
+// where a blocked route silently bounces. Returns '' if the user has NO readable page.
+function firstAllowedView(){
+  if(canRead('home')) return 'home';
+  for(var ci=0; ci<NAV_CATS.length; ci++){
+    var ids = NAV_CATS[ci].ids || [];
+    for(var i=0;i<ids.length;i++){ if(canRead(ids[i])) return ids[i]; }
+  }
+  return '';
 }
 function buildSideNav(){
   const el = document.getElementById('sideNav'); if(!el) return;
@@ -17536,29 +17603,33 @@ function buildSideNav(){
 }
 function buildBottomNav(){
   const el = document.getElementById('bottomNav'); if(!el) return;
-  el.innerHTML = MNAV.map(function(n){
+  el.innerHTML = MNAV.filter(function(n){ return n.id==='more' || canRead(n.id); }).map(function(n){
     const b = badgeInfo(n.badge);
     return '<button class="bn'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'">'+b.count+'</span>':'')+'</button>';
   }).join('');
 }
 function buildMoreNav(){
   const el = document.getElementById('moreNav'); if(!el) return;
-  const items = [
+  const items = [];
+  if(_pwaInstallable()) items.push({action:'install', tk:'pwaInstall'});   // phone: install lives in "More"
+  items.push(
     {id:'strat', tk:'strat'},
     {id:'rev', tk:'rev'},
     {id:'log', tk:'log'},
     {action:'theme', tk:'theme'},
     {action:'lang', tk:'EN/ع'},
     {action:'logout', tk:'logout'}
-  ];
+  );
   el.innerHTML = '<div class="inbox-list">' + items.filter(function(i){ return !i.id || canRead(i.id); }).map(function(i){
     const label = i.tk==='EN/ع' ? 'English / عربي' : t()[i.tk];
     let click;
     if(i.id) click = "go('"+i.id+"')";
+    else if(i.action==='install') click = 'pwaInstall()';
     else if(i.action==='theme') click = 'toggleTheme()';
     else if(i.action==='lang') click = 'toggleLang()';
     else if(i.action==='logout') click = 'logout()';
-    return '<div class="ibox"><div class="ibox-row" style="cursor:pointer" onclick="'+click+'"><div class="ibox-main"><div class="ibox-who">'+label+'</div></div><span style="color:var(--mut)">←</span></div></div>';
+    const lead = i.action==='install' ? '<span style="color:var(--gold);font-weight:700;margin-inline-end:6px">⤓</span>' : '';
+    return '<div class="ibox"><div class="ibox-row" style="cursor:pointer" onclick="'+click+'"><div class="ibox-main"><div class="ibox-who">'+lead+label+'</div></div><span style="color:var(--mut)">←</span></div></div>';
   }).join('') + '</div>';
 }
 function buildInboxTabs(){
@@ -17696,6 +17767,16 @@ function refreshView(id){
   }
 }
 function go(id){
+  id = id || 'home';
+  // PERMISSION GATE (whitelist) — a non-admin can open ONLY a page granted قراءة (read).
+  // Covers deep-links, typed URL hashes, stale bookmarks. Blocked → SILENTLY show their
+  // first allowed page instead (no message, no page flash); if they have none, stay put.
+  // The server independently 403s the data, so this is just the UX half.
+  if(_meUser().role !== 'admin' && !canRead(id)){
+    var _dest = firstAllowedView();
+    if(_dest && _dest !== id && canRead(_dest)){ id = _dest; }
+    else { return; }   // nothing this user may see — don't render a blocked page
+  }
   if(id==='erp'||id==='fb'||id==='finance'||id==='expenses'){ var _ws={erp:'today',fb:'today',finance:'owners',expenses:'exp'}[id]; window.location.href='/erp?token='+encodeURIComponent(tok())+'#'+_ws; return; }   // old finance views are cut over to ERP v2
   if(id==='studio'){ window.location.href='/studio?token='+encodeURIComponent(tok()); return; }   // Ouja Studio is its own page
   if(id==='ownrep'){ window.location.href='/owner-report?token='+encodeURIComponent(tok()); return; }   // Owner Report wizard is its own page
@@ -17740,6 +17821,148 @@ function go(id){
 }
 
 /* ============================================================
+   PWA — installable app (ADDITIVE). Sidebar "تثبيت التطبيق" item,
+   platform-aware install, and service-worker registration + update.
+   No existing page, route, auth, or data flow is touched.
+   ============================================================ */
+var _pwaDeferred = null;    // Android/Chromium beforeinstallprompt (captured for one-tap install)
+var _pwaReloading = false;
+function _pwaStandalone(){
+  try{ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+  catch(_){ return false; }
+}
+function _pwaIsIOS(){
+  try{
+    var ua = navigator.userAgent || '';
+    if(/iphone|ipad|ipod/i.test(ua)) return true;
+    return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;   // iPadOS masquerades as Mac
+  }catch(_){ return false; }
+}
+function _pwaIsIOSSafari(){
+  var ua = navigator.userAgent || '';
+  var isSafari = /safari/i.test(ua) && !/crios|fxios|edgios|opios|mercury|chrome|android/i.test(ua);
+  return _pwaIsIOS() && isSafari;
+}
+function _pwaInstallable(){
+  if(_pwaStandalone()) return false;   // already installed → never offer
+  return !!_pwaDeferred || _pwaIsIOS(); // Android has a live prompt; iOS always needs the manual guide
+}
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();       // suppress Chrome's mini-infobar; we trigger it from the sidebar
+  _pwaDeferred = e;
+  try{ updateInstallUI(); }catch(_){}
+});
+window.addEventListener('appinstalled', function(){
+  _pwaDeferred = null;
+  try{ updateInstallUI(); toast(t().pwaInstalled); }catch(_){}
+});
+function pwaInstall(){
+  if(_pwaDeferred){                       // Android / Samsung / desktop Chrome — native one-tap prompt
+    var d = _pwaDeferred; _pwaDeferred = null;
+    try{ d.prompt(); }catch(_){}
+    if(d.userChoice && d.userChoice.then){ d.userChoice.then(function(){ try{ updateInstallUI(); }catch(_){} }); }
+    else { try{ updateInstallUI(); }catch(_){} }
+    return;
+  }
+  if(_pwaIsIOS()){ showIosInstallGuide(); return; }   // iPhone / iPad — visual Add-to-Home guide
+}
+function updateInstallUI(){
+  var show = _pwaInstallable();
+  var row = document.getElementById('installRow');
+  if(row){
+    row.style.display = show ? 'flex' : 'none';
+    var lbl = document.getElementById('installRowLabel');
+    if(lbl) lbl.textContent = t().pwaInstall;
+  }
+  try{ buildMoreNav(); }catch(_){}   // refresh the mobile "More" list so the item appears/hides
+}
+function _iosStep(n, ic, title, sub){
+  return '<div style="display:flex;gap:13px;align-items:center;background:var(--surface-2);padding:12px 13px;border-radius:14px">'
+    + '<div style="width:30px;height:30px;border-radius:50%;background:var(--surface-3);color:var(--text);display:flex;align-items:center;justify-content:center;font-weight:800;flex:none;font-size:14px">'+n+'</div>'
+    + '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:var(--text)">'+title+'</div><div class="muted" style="font-size:12px;margin-top:2px">'+sub+'</div></div>'
+    + '<div style="flex:none;width:44px;height:44px;border-radius:12px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;justify-content:center">'+ic+'</div>'
+    + '</div>';
+}
+function showIosInstallGuide(){
+  var ar = (typeof L !== 'undefined' && L === 'ar');
+  var safari = _pwaIsIOSSafari();
+  var ov = document.getElementById('iosInstallOverlay');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'iosInstallOverlay';
+    ov.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:10001;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)';
+    ov.addEventListener('click', function(e){ if(e.target === ov) closeIosInstallGuide(); });
+    document.body.appendChild(ov);
+  }
+  var shareSvg = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#0A84FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8.5 6.5 12 3l3.5 3.5"/><path d="M6 12H5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2h-1"/></svg>';
+  var addSvg = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#0A84FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>';
+  var note = safari ? '' :
+    ('<div style="display:flex;gap:9px;align-items:flex-start;background:var(--yellow-soft);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.6">'
+      + '<span style="flex:none">⚠️</span><span>'
+      + (ar ? 'افتح هذا الموقع في متصفح Safari أولاً — التثبيت على الآيفون يعمل من Safari فقط.'
+            : 'Open this site in Safari first — installing on iPhone only works from Safari.')
+      + '</span></div>');
+  var steps =
+    _iosStep('1', shareSvg,
+      (ar ? 'اضغط زر المشاركة' : 'Tap the Share button'),
+      (ar ? 'في شريط Safari بالأسفل' : 'in the Safari toolbar below')) +
+    _iosStep('2', addSvg,
+      (ar ? 'اختر «إضافة إلى الشاشة الرئيسية»' : 'Choose "Add to Home Screen"'),
+      (ar ? 'ثم اضغط «إضافة» بالأعلى' : 'then tap "Add" at the top'));
+  ov.innerHTML =
+      '<div style="background:var(--surface);width:100%;max-width:460px;border-radius:22px 22px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -20px 60px rgba(0,0,0,.4);border:1px solid var(--border);border-bottom:0;animation:iosSheetUp .28s var(--ease,ease)">'
+    +   '<div style="width:38px;height:4px;border-radius:2px;background:var(--line-strong);margin:0 auto 14px"></div>'
+    +   '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">'
+    +     '<img src="/pwa/icons/icon-192.png" alt="Ouja" width="46" height="46" style="border-radius:12px;flex:none">'
+    +     '<div style="flex:1;min-width:0">'
+    +       '<div style="font-size:18px;font-weight:800;color:var(--text)">'+(ar ? 'ثبّت تطبيق عوجا' : 'Install the Ouja app')+'</div>'
+    +       '<div class="muted" style="font-size:12.5px">'+(ar ? 'خطوتان سريعتان لإضافته للشاشة الرئيسية' : 'Two quick steps to add it to your Home Screen')+'</div>'
+    +     '</div>'
+    +     '<button onclick="closeIosInstallGuide()" aria-label="'+(ar ? 'إغلاق' : 'Close')+'" style="flex:none;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);font-size:15px;cursor:pointer">✕</button>'
+    +   '</div>'
+    +   note
+    +   '<div style="display:flex;flex-direction:column;gap:10px">'+steps+'</div>'
+    +   '<button onclick="closeIosInstallGuide()" class="btn primary" style="width:100%;height:46px;margin-top:16px;font-size:15px;font-weight:700;border-radius:13px">'+(ar ? 'تمام' : 'Got it')+'</button>'
+    + '</div>';
+}
+function closeIosInstallGuide(){ var ov = document.getElementById('iosInstallOverlay'); if(ov) ov.remove(); }
+
+/* ---- service worker: register + safe update prompt (never stuck on a stale build) ---- */
+function _pwaRegisterSW(){
+  if(!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('/sw.js').then(function(reg){
+    if(reg.waiting && navigator.serviceWorker.controller){ _pwaOfferUpdate(reg.waiting); }
+    reg.addEventListener('updatefound', function(){
+      var nw = reg.installing; if(!nw) return;
+      nw.addEventListener('statechange', function(){
+        if(nw.state === 'installed' && navigator.serviceWorker.controller){ _pwaOfferUpdate(nw); }
+      });
+    });
+  }).catch(function(){});
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    if(_pwaReloading) return; _pwaReloading = true; location.reload();
+  });
+}
+function _pwaOfferUpdate(worker){
+  window._pwaWaiting = worker;
+  var bar = document.getElementById('pwaUpdateBar');
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'pwaUpdateBar';
+    bar.style.cssText = 'position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:250;display:flex;align-items:center;gap:12px;background:var(--text);color:var(--bg);padding:9px 12px 9px 16px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 12px 40px rgba(0,0,0,.3);max-width:92vw';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = '<span>'+t().pwaUpdate+'</span>'
+    + '<button onclick="_pwaApplyUpdate()" style="background:var(--gold);color:#161310;border:0;border-radius:8px;padding:6px 14px;font-weight:700;font-size:13px;cursor:pointer">'+t().pwaUpdateNow+'</button>';
+}
+function _pwaApplyUpdate(){
+  var b = document.getElementById('pwaUpdateBar'); if(b) b.remove();
+  var w = window._pwaWaiting; if(w){ w.postMessage({type:'SKIP_WAITING'}); }   // → controllerchange → one reload
+}
+window.addEventListener('load', function(){ try{ _pwaRegisterSW(); }catch(_){} });
+
+
+/* ============================================================
    INIT + LOAD
    ============================================================ */
 async function init(){
@@ -17765,6 +17988,7 @@ async function init(){
   try{ applyLang(); }catch(e){ console.error('applyLang failed:', e); }
   try{ D.me = await api('/api/users/me'); }catch(_){ D.me = {user:{role:'admin'}}; }
   try{ buildSideNav(); }catch(e){ console.error('buildSideNav failed:', e); }
+  try{ updateInstallUI(); }catch(e){ console.error('install UI failed:', e); }
   try{ await loadAll(); }catch(e){ console.error('loadAll failed:', e); }
   try{ _applyHelpDismissals(); }catch(e){ console.error('help dismiss failed:', e); }
   try{ maybeShowWelcome(); }catch(e){ console.error('welcome failed:', e); }
@@ -17773,7 +17997,9 @@ async function init(){
   try{
     var _h=location.hash.slice(1);
     if(_h.indexOf('apartment/')===0){ openApartment(parseInt(_h.split('/')[1],10)); }
-    else go((_h && document.getElementById('view_'+_h)) ? _h : 'home');
+    // Land on the deep-linked page IF it exists AND the user may read it; otherwise on
+    // their FIRST allowed page (respecting sidebar order) — never a blocked/blank screen.
+    else go((_h && document.getElementById('view_'+_h) && canRead(_h)) ? _h : firstAllowedView());
     window.addEventListener('hashchange', function(){
       var h=location.hash.slice(1);
       if(h.indexOf('apartment/')===0){ var al=parseInt(h.split('/')[1],10); if(al!==_aptLid) openApartment(al); return; }
@@ -17804,7 +18030,10 @@ async function loadFast(){
       api('/api/inbox'), api('/api/discount/status'),
       api('/api/home/urgent').catch(function(){return {items:[]}}),
     ]);
-    D.inbox=r[0]; D.disc=r[1]; D.urgent=r[2];
+    // a page the user can't read returns a 403 body {error:...}; treat it as empty so
+    // the ambient poll + home KPIs never render a forbidden object.
+    D.inbox=(r[0] && !r[0].error) ? r[0] : {replies:[],escalations:[]};
+    D.disc=r[1]; D.urgent=r[2];
     populateUnitFilter();
     if(!openInboxId) renderInbox();
     renderUrgentStrip(); renderDiscountBanner(); renderKpis();
@@ -17827,7 +18056,8 @@ async function loadSlow(){
       api('/api/revenue').catch(function(){return {loading:true}}),
       api('/api/home/arrivals?hours=36').catch(function(){return {items:[]}}),
     ]);
-    D.rev=r[0]; D.arrivals=r[1];
+    D.rev=(r[0] && !r[0].error) ? r[0] : {};
+    D.arrivals=r[1];
     renderRevCard(); renderArrivalsTimeline();
     // keep the Listings "needs setup" badge live, but never while the user is editing
     // those rows (listings/clean views own D.listings and render from it).
@@ -22216,7 +22446,7 @@ async function investLinkRegen(){
   else toast((r&&r.error)||'⚠');
 }
 function _roleLabel(r){ return (L==='en' ? ROLE_LABEL_EN : ROLE_LABEL)[r] || r }
-function _tabLabel(tab){ return (L==='en' ? TAB_LABEL_EN : TAB_LABEL)[tab] || tab }
+function _tabLabel(tab){ return (L==='en' ? TAB_LABEL_EN : TAB_LABEL)[tab] || (t()[tab]) || tab }
 
 function _renderUsersBody(){
   const body = document.getElementById('usersBody'); if(!body) return;
@@ -32742,19 +32972,65 @@ NAV_DEF = {
     "erp_targets": {"erp": "today", "expenses": "exp", "finance": "owners"},
 }
 
+# SINGLE SOURCE OF TRUTH: every sidebar page must be a permission key, or it can't be
+# restricted and leaks into every user's nav. Reconcile _USER_TABS with NAV_DEF so any
+# nav id (present or future) is always covered by the per-page permission matrix.
+for _nav_it in NAV_DEF.get("items", []):
+    _nid = _nav_it.get("id")
+    if _nid and _nid not in _USER_TABS:
+        _USER_TABS.append(_nid)
+
 _NAV_DEF_JSON = json.dumps(NAV_DEF, ensure_ascii=False)
 # One-time bake at import: the dashboard's `const NAVD = __NAV_DEF_JSON__;` becomes real JS.
 DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
 
 async def _api_nav(request):
     """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
-    every dashboard read."""
+    every dashboard read. Returns the caller's per-page perms too so the ERP sidebar
+    filters pages from the SAME matrix the dashboard + server enforce."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    return _json({"ok": True, "nav": NAV_DEF, "role": _req_role(request)})
+    token = _req_token(request)
+    if DASHBOARD_TOKEN and hmac.compare_digest(token, DASHBOARD_TOKEN):
+        perms = _default_perms("admin")           # legacy super-admin token
+    else:
+        perms = _norm_perms(_auth_session(request) or {})
+    return _json({"ok": True, "nav": NAV_DEF, "role": _req_role(request), "perms": perms})
 
 async def _handle_dashboard(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+
+# =====================================================================
+# PWA (installable app) — ADDITIVE. Serves the web-app manifest and the
+# root-scoped service worker from the pwa/ folder. Icons are served as
+# ordinary static files (add_static("/pwa/", ...) in start_web_server).
+# Nothing here touches existing pages, auth, or data flows.
+# =====================================================================
+_PWA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pwa")
+
+async def _handle_manifest(request):
+    try:
+        with open(os.path.join(_PWA_DIR, "manifest.webmanifest"), "rb") as f:
+            data = f.read()
+    except Exception:
+        return web.Response(status=404, text="manifest not found")
+    return web.Response(body=data, content_type="application/manifest+json",
+                        charset="utf-8",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+async def _handle_sw(request):
+    # Served at /sw.js so its scope is the whole origin (controls /dashboard,
+    # /erp, …). Service-Worker-Allowed:/ lets the root scope stick; no-cache so
+    # a new deploy's worker is picked up promptly (it self-updates from there).
+    try:
+        with open(os.path.join(_PWA_DIR, "sw.js"), "rb") as f:
+            data = f.read()
+    except Exception:
+        return web.Response(status=404, text="sw not found")
+    return web.Response(body=data, content_type="application/javascript",
+                        charset="utf-8",
+                        headers={"Cache-Control": "no-cache",
+                                 "Service-Worker-Allowed": "/"})
 
 # =====================================================================
 # INVESTOR DECK — standalone full-screen ROI presentation at /invest.
@@ -48150,9 +48426,15 @@ async def _api_gw_sync(request):
     return _json(res)
 
 # ===================== Stage-1 security: role enforcement + headers =====================
-# Mutating /api/ endpoints are matched to a permission tab; the middleware rejects the
-# request with 403 BEFORE the handler runs unless the session may write to that tab.
-# Endpoints with their own auth (team tokens, shared secrets, public forms) are exempt.
+# Per-page permissions are enforced HERE, server-side, from the SAME stored matrix the
+# sidebar renders from (_user_can → user['perms'] → _default_perms fallback). The rules
+# below map an /api/ path to a permission tab; the middleware rejects the request with a
+# bilingual 403 BEFORE the handler runs unless the session may read/write/create there.
+#   • GET  → requires the tab's READ permission (only for mapped, page-scoped data reads;
+#            unmapped GETs pass through so public site + shared-reference endpoints work).
+#   • create endpoints → require the tab's CREATE permission.
+#   • other POST/PUT/DELETE/PATCH → require the tab's WRITE permission.
+# Endpoints with their own auth (team tokens, shared secrets, public forms) stay exempt.
 _ROLE_EXEMPT_WRITES = {
     "/api/auth/login", "/api/auth/logout",   # the login flow itself
     "/api/expenses/ingest",                  # shared-secret auth (Google Apps Script)
@@ -48162,6 +48444,14 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/report-submit",             # cleaning-team token auth
     "/api/oujact/status",                    # team token OR dashboard session
 }
+# create endpoints — need the "create" (إنشاء) permission, checked BEFORE the write rules
+# (a create path also matches its broad write prefix). Combined save/upsert endpoints stay
+# under the write rules on purpose (they double as edit).
+_ROLE_CREATE_RULES = [
+    ("/api/tickets/create", "tickets"),
+    ("/api/users/create", "users"),
+    ("/api/pmo/create", "pmo"),
+]
 _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
     ("/api/pricing/strategy-toggle", "strat"),
@@ -48192,30 +48482,83 @@ _ROLE_WRITE_RULES = [
     ("/api/users/", "users"),
     ("/api/quotes/", "quote"),
     ("/api/weekly/", "weekly"),
+    ("/api/promises/", "promises"),
     ("/api/expenses/", "expenses"),
     ("/api/finance/", "finance"),
     ("/api/fb/", "fb"),
     ("/api/design/", "design"),
     ("/api/pmo/", "pmo"),
     ("/api/gw/", "gw"),
+    ("/api/brain/", "brain"),
 ]
+# GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
+# data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
+# handled below, nav, me, units, listings reference, calendar, home) and PUBLIC site
+# endpoints (stay/elite/monthly/guide/schedule day+week/clean-feedback) are intentionally
+# absent so they keep working for every logged-in (or anonymous public) visitor.
+_ROLE_READ_RULES = [
+    ("/api/revenue", "rev"),
+    ("/api/pricing2", "pricing"),
+    ("/api/pricing", "pricing"),
+    ("/api/plab/", "plab"),
+    ("/api/strategies", "strat"),
+    ("/api/strategy", "strat"),
+    ("/api/learning/", "learn"),
+    ("/api/reviews/", "reviews"),
+    ("/api/guests", "guests"),
+    ("/api/tickets/", "tickets"),
+    ("/api/quotes/", "quote"),
+    ("/api/weekly/", "weekly"),
+    ("/api/expenses/", "expenses"),
+    ("/api/finance/", "finance"),
+    ("/api/fb/", "fb"),
+    ("/api/design/", "design"),
+    ("/api/pmo/", "pmo"),
+    ("/api/gw/", "gw"),
+    ("/api/promises", "promises"),
+    ("/api/inbox", "inbox"),
+    ("/api/brain/", "brain"),
+]
+
+def _perm_403(tab, action):
+    """Consistent bilingual 403 the frontend can surface as-is."""
+    ar = {"read": "ليس لديك صلاحية لعرض هذه الصفحة",
+          "write": "ليس لديك صلاحية للتعديل في هذه الصفحة",
+          "create": "ليس لديك صلاحية لإضافة عناصر في هذه الصفحة"}.get(action,
+          "ليس لديك صلاحية")
+    return _json({"error": "forbidden", "tab": tab, "action": action,
+                  "message": ar,
+                  "detail": action + " access to '" + tab + "' required"}, 403)
 
 @web.middleware
 async def _role_enforce_mw(request, handler):
+    p = request.path
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-        p = request.path
         if p.startswith("/api/") and p not in _ROLE_EXEMPT_WRITES:
+            # create endpoints first (a create path also matches its broad write prefix)
+            for cpath, tab in _ROLE_CREATE_RULES:
+                if p == cpath:
+                    if not _user_can(request, tab, "create"):
+                        return _perm_403(tab, "create")
+                    return await handler(request)
             matched = False
             for prefix, tab in _ROLE_WRITE_RULES:
                 if p.startswith(prefix):
                     matched = True
                     if not _user_can(request, tab, "write"):
-                        return _json({"error": "forbidden",
-                                      "detail": "write access to '" + tab + "' required"}, 403)
+                        return _perm_403(tab, "write")
                     break
             if not matched and not _dash_auth(request):
                 # Unmapped future write endpoints still require at least a login.
                 return _json({"error": "unauthorized"}, 401)
+    elif request.method == "GET" and p.startswith("/api/"):
+        # Only tighten mapped, page-scoped data reads; unmapped GETs (public site, shared
+        # reference data) fall through to the handler's own auth exactly as before.
+        for prefix, tab in _ROLE_READ_RULES:
+            if p.startswith(prefix):
+                if not _user_can(request, tab, "read"):
+                    return _perm_403(tab, "read")
+                break
     return await handler(request)
 
 @web.middleware
@@ -48440,6 +48783,13 @@ async def start_web_server():
     app.router.add_get("/", _handle_health)                 # health check / browser test
     app.router.add_post("/hook/{secret}", _handle_hook)     # Hostaway posts here
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
+    # --- PWA (installable app): manifest + root-scoped service worker + icons ---
+    app.router.add_get("/manifest.webmanifest", _handle_manifest)
+    app.router.add_get("/sw.js", _handle_sw)
+    try:
+        app.router.add_static("/pwa/", path=_PWA_DIR, name="pwa-static")
+    except Exception as _e:
+        print("[pwa] static mount failed:", _e)
     if DASHBOARD_ENABLED:
         app.router.add_get("/dashboard", _handle_dashboard)
         app.router.add_get("/diag/musaed-audit", _handle_diag_musaed)  # read-only coaching export
