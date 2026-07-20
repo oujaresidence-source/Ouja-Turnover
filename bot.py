@@ -40,6 +40,7 @@ import hashlib
 import statistics
 import hmac
 import threading
+import urllib.parse
 import secrets as _secrets_mod
 from collections import defaultdict, deque, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -280,6 +281,11 @@ OPERATION_ROLE_NAME = os.environ.get("OPERATION_ROLE_NAME", "operation")
 OUJACT_SCHEDULE_CHANNEL = os.environ.get("OUJACT_SCHEDULE_CHANNEL", "oujact-schedule")
 OUJACT_SCHEDULE_HOUR    = int(os.environ.get("OUJACT_SCHEDULE_HOUR", "0"))   # 0 = 12 AM Riyadh
 LISTINGS_AUTOSYNC       = os.environ.get("LISTINGS_AUTOSYNC", "1") in ("1", "true", "True", "yes")
+# ---- Cleaning Dispatch (WhatsApp) config ----
+DISPATCH_ENABLED = os.environ.get("DISPATCH_ENABLED", "1") == "1"
+DISPATCH_CHANNEL = os.environ.get("DISPATCH_CHANNEL", "dispatch")
+DISPATCH_HOUR    = int(os.environ.get("DISPATCH_HOUR", "21"))   # Riyadh hour for the nightly auto-post
+DISPATCH_DRYRUN  = os.environ.get("DISPATCH_DRYRUN", "0") == "1"
 # ---- Oujact Dispatch Center ----
 # Token-gated mobile route page for the cleaning team (separate from the dashboard token).
 # Falls back to the existing CLEANING_TOKEN so a route link works out-of-the-box.
@@ -736,6 +742,7 @@ def _ct_team_by_token(token):
 def _ct_team_view(t):
     lids = _ct_team_lids(t["id"])
     return {"id": t["id"], "name": t.get("name", ""), "token": t.get("token", ""),
+            "phone": t.get("phone", ""),
             "link": "/oujact-route?token=" + (t.get("token") or ""),
             "apartments": len(lids), "lids": sorted(lids)}
 
@@ -3867,6 +3874,214 @@ async def post_oujact_schedule():
     embed.set_footer(text="Order: check-ins first, then earliest check-in time.")
     await ch.send(embed=embed)
     print(f"OujaCT: posted daily schedule ({len(items)} turnovers)")
+
+# ==================== Cleaning Dispatch → WhatsApp (الإرسال) ====================
+# Additive, isolated. Reuses fetch_oujact_turnovers() + the cleaning_team field. Each
+# day posts one ready-to-send WhatsApp message per cleaning crew into #dispatch; the
+# tap-to-send button hits /d/{token} which rebuilds the message fresh and 302s to WhatsApp.
+
+# Python's date.weekday(): Monday=0 .. Sunday=6
+_AR_WEEKDAYS = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+
+def _dispatch_fmt_date(date_iso):
+    """'2026-07-22' -> 'الأربعاء 22/7'. Pure."""
+    d = datetime.strptime(date_iso, "%Y-%m-%d").date()
+    return f"{_AR_WEEKDAYS[d.weekday()]} {d.day}/{d.month}"
+
+def _dispatch_fmt_time(dt):
+    """datetime -> '3:30 م' / '9:05 ص' (12-hour, Arabic AM/PM). Pure."""
+    ap = "ص" if dt.hour < 12 else "م"
+    h12 = dt.hour % 12 or 12
+    return f"{h12}:{dt.minute:02d} {ap}"
+
+def _dispatch_resolve_date(mode=None, now=None):
+    """Resolve the target cleaning day as 'YYYY-MM-DD'. Pure (inject `now` for tests).
+      - None/''/'auto' : today if before 12:00 noon, else tomorrow
+      - 'today'        : today
+      - 'tomorrow'     : tomorrow
+      - 'YYYY-MM-DD'   : that exact date
+      - anything else  : falls back to auto (never raises)."""
+    now = now or datetime.now(TZ)
+    today = now.date()
+    m = (mode or "").strip().lower()
+    if m == "today":
+        target = today
+    elif m == "tomorrow":
+        target = today + timedelta(days=1)
+    elif m in ("", "auto"):
+        target = today if now.hour < 12 else today + timedelta(days=1)
+    else:
+        try:
+            target = datetime.strptime(m, "%Y-%m-%d").date()
+        except ValueError:
+            target = today if now.hour < 12 else today + timedelta(days=1)
+    return target.isoformat()
+
+def _dispatch_wa_text(team_name, date_iso, items):
+    """Crew-facing WhatsApp message (Arabic, clean — NO internal ops names). Pure.
+    `items` must already be priority-sorted (fetch_oujact_turnovers order)."""
+    lines = [f"تنظيف — فريق {team_name}",
+             f"{_dispatch_fmt_date(date_iso)} · عدد الشقق: {len(items)}", ""]
+    for i, it in enumerate(items, 1):
+        parts = [f"{i}. {it['listing']} — خروج {_dispatch_fmt_time(it['checkout'])}"]
+        if it.get("checkin_today") and it.get("checkin_dt"):
+            parts.append(f"دخول اليوم {_dispatch_fmt_time(it['checkin_dt'])} (عاجل)")
+        else:
+            parts.append("لا يوجد دخول اليوم")
+        if it.get("early_departure"):
+            parts.append("الضيف طلع بدري")
+        lines.append("، ".join(parts))
+    lines += ["", "الرجاء تأكيد الاستلام"]
+    return "\n".join(lines)
+
+def _dispatch_embed_lines(items, covers=None):
+    """Discord-card lines (dispatcher-facing) — includes the responsible ops owner
+    (name + emoji) which is deliberately hidden from the crew's WhatsApp text. Pure.
+    `covers` = {lid: {name, emoji}} or None."""
+    covers = covers or {}
+    out = []
+    for i, it in enumerate(items, 1):
+        seg = f"**{i}.** {it['listing']} — خروج {_dispatch_fmt_time(it['checkout'])}"
+        if it.get("checkin_today"):
+            seg += " 🔴 دخول اليوم"
+        if it.get("early_departure"):
+            seg += " ⚡"
+        cov = covers.get(it["lid"]) or {}
+        tag = ((cov.get("emoji") or "") + " " + (cov.get("name") or "")).strip()
+        if tag:
+            seg += f"  · {tag}"
+        out.append(seg)
+    return out
+
+def _wa_send_url(phone, text):
+    """Build a WhatsApp deep link. With a phone → direct chat; without → contact picker. Pure."""
+    enc = urllib.parse.quote(text, safe="")
+    wa = _wa_from_phone(phone)                         # 'wa.me/<intl>' or ''
+    if wa:
+        return "https://" + wa + "?text=" + enc
+    return "https://api.whatsapp.com/send?text=" + enc
+
+def _dispatch_group(items, team_of_lid):
+    """Group priority-sorted turnover items by crew id. Items whose crew is '' land in
+    'unassigned' (the miss-proofing bucket). Pure. Preserves input order within each crew."""
+    teams, unassigned = {}, []
+    for it in items:
+        tid = str(team_of_lid.get(it["lid"]) or "")
+        if tid:
+            teams.setdefault(tid, []).append(it)
+        else:
+            unassigned.append(it)
+    return {"teams": teams, "unassigned": unassigned}
+
+def _dispatch_jobs(date_iso):
+    """Thin wrapper: fetch today+tomorrow turnovers, keep only `date_iso`, group by crew.
+    Returns {'date', 'teams': {tid: [items]}, 'unassigned': [items]}."""
+    items = [it for it in fetch_oujact_turnovers() if it.get("checkout_date") == date_iso]
+    listings = _ls_get()["listings"]
+    team_of = {}
+    for it in items:
+        rec = listings.get(str(it["lid"])) or {}
+        team_of[it["lid"]] = rec.get("cleaning_team") or ""
+    grouped = _dispatch_group(items, team_of)
+    grouped["date"] = date_iso
+    return grouped
+
+def _dispatch_embed(team_name, date_iso, items, covers=None):
+    e = discord.Embed(title=f"🧹 تنظيف — فريق {team_name}",
+                      description=f"{_dispatch_fmt_date(date_iso)} · {len(items)} شقة",
+                      color=GOLD)
+    body = "\n".join(_dispatch_embed_lines(items, covers)) or "—"
+    e.add_field(name="الشقق", value=body[:1024], inline=False)
+    e.set_footer(text="اضغط الزر لإرسال القائمة عبر واتساب لهذا الفريق.")
+    return e
+
+async def post_dispatch(date_iso):
+    """Post one message per crew (with a Send-on-WhatsApp button) to the dispatch channel,
+    plus a safety-net message for crew-less apartments. Honors DISPATCH_DRYRUN."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    jobs = await asyncio.to_thread(_dispatch_jobs, date_iso)
+    category = await get_category(guild)
+    ch = await ensure_channel(guild, DISPATCH_CHANNEL, category)
+    if ch is None:
+        return
+    base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    posted = 0
+    for tid, items in jobs["teams"].items():
+        team = _cleaning_teams.get(tid) or {"id": tid, "name": "؟", "token": ""}
+        covers = {}
+        for it in items:
+            covers[it["lid"]] = _oujact_cover_info(it["listing"], date_iso, it["lid"])
+        embed = _dispatch_embed(team.get("name", ""), date_iso, items, covers)
+        view = None
+        if base and team.get("token"):
+            url = base + "/d/" + team["token"] + "?date=" + date_iso
+            view = discord.ui.View(timeout=None)
+            view.add_item(discord.ui.Button(label="📲 أرسل عبر واتساب",
+                                            style=discord.ButtonStyle.link, url=url))
+        else:
+            # Graceful fallback when PUBLIC_BASE_URL is unset: paste the copyable text.
+            txt = _dispatch_wa_text(team.get("name", ""), date_iso, items)
+            embed.add_field(name="الرسالة (انسخها لواتساب)",
+                            value="```\n" + txt[:1000] + "\n```", inline=False)
+        if DISPATCH_DRYRUN:
+            print(f"[dispatch DRYRUN] {team.get('name')}: {len(items)} apts, date={date_iso}")
+        else:
+            await ch.send(embed=embed, view=view)
+        posted += 1
+    if jobs["unassigned"]:
+        names = "\n".join(f"• {it['listing']} — خروج {_dispatch_fmt_time(it['checkout'])}"
+                          for it in jobs["unassigned"])
+        warn = discord.Embed(
+            title="⚠️ شقق تحتاج تنظيف — غير معيّنة لأي فريق",
+            description=(f"{_dispatch_fmt_date(date_iso)}\n{names}\n\n"
+                        "عيّن لها فريق تنظيف حتى تنرسل تلقائياً.")[:4000],
+            color=0xC0392B)
+        if DISPATCH_DRYRUN:
+            print(f"[dispatch DRYRUN] UNASSIGNED: {len(jobs['unassigned'])} apts")
+        else:
+            await ch.send(embed=warn)
+    if posted == 0 and not jobs["unassigned"] and not DISPATCH_DRYRUN:
+        await ch.send(f"لا يوجد تنظيف — {_dispatch_fmt_date(date_iso)} 🎉")
+
+async def _handle_d_redirect(request):
+    """Short link the Discord button points at. Rebuilds the crew's WhatsApp message fresh
+    (dodges Discord's 512-char button-URL limit) and 302-redirects to the WhatsApp deep link."""
+    token = request.match_info.get("token", "")
+    team = _ct_team_by_token(token)
+    if team is None:
+        raise web.HTTPNotFound()
+    date_iso = request.query.get("date") or _dispatch_resolve_date(None)
+    jobs = await asyncio.to_thread(_dispatch_jobs, date_iso)
+    items = jobs["teams"].get(team["id"], [])
+    text = _dispatch_wa_text(team.get("name", ""), date_iso, items)
+    raise web.HTTPFound(_wa_send_url(team.get("phone", ""), text))
+
+_dispatch_state = None   # lazily loaded {'last_auto': 'YYYY-MM-DD'}
+
+def _dispatch_load_state():
+    global _dispatch_state
+    if _dispatch_state is None:
+        _dispatch_state = _load_json("dispatch_state.json", {}) or {}
+    return _dispatch_state
+
+@tasks.loop(time=dt_time(hour=DISPATCH_HOUR, minute=0, tzinfo=TZ))
+async def dispatch_daily_loop():
+    """Each night at DISPATCH_HOUR (default 21:00 Riyadh): post TOMORROW's cleaning dispatch."""
+    await bot.wait_until_ready()
+    if not DISPATCH_ENABLED:
+        return
+    try:
+        date_iso = _dispatch_resolve_date("tomorrow")
+        st = _dispatch_load_state()
+        if st.get("last_auto") == date_iso:      # redeploy near 21:00 shouldn't double-post
+            return
+        await post_dispatch(date_iso)
+        st["last_auto"] = date_iso
+        _save_json("dispatch_state.json", st)
+    except Exception as e:
+        print("dispatch_daily_loop error:", e)
 
 # ============================================================================
 #  OUJACT DISPATCH CENTER — priority plan, checkout state, route token, ETA
@@ -25228,7 +25443,7 @@ function renderCleanTeams(){
     var list=units.length ? units.map(_ctUnitRow).join('') : '<div class="muted" style="padding:14px;text-align:center;font-size:11.5px">'+(ar?'ما فيه تنظيف اليوم 🎉':'Nothing to clean today 🎉')+'</div>';
     return '<div class="card" style="border-radius:12px;padding:14px;margin-bottom:10px">'
       +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font-size:15px">'+esc(t.name)+'</b>'
-        +'<div style="display:flex;gap:6px"><button class="btn ghost xs" onclick="ctAddTask(&#39;'+t.id+'&#39;)">➕ '+(ar?'تنظيف':'clean')+'</button><button class="btn ghost xs" onclick="ctRename(&#39;'+t.id+'&#39;)">✏️</button><button class="btn ghost xs" onclick="ctRegen(&#39;'+t.id+'&#39;)" title="'+(ar?'رابط جديد':'new link')+'">🔄</button><button class="btn ghost xs" onclick="ctDelete(&#39;'+t.id+'&#39;)">🗑</button></div></div>'
+        +'<div style="display:flex;gap:6px"><button class="btn ghost xs" onclick="ctAddTask(&#39;'+t.id+'&#39;)">➕ '+(ar?'تنظيف':'clean')+'</button><button class="btn ghost xs" onclick="ctRename(&#39;'+t.id+'&#39;)">✏️</button><button class="btn ghost xs" onclick="ctRegen(&#39;'+t.id+'&#39;)" title="'+(ar?'رابط جديد':'new link')+'">🔄</button><button class="btn ghost xs" onclick="ctSetPhone(&#39;'+t.id+'&#39;)" title="'+(ar?'رقم واتساب الفريق':'crew whatsapp')+'">☎️'+(t.phone?(' '+esc(t.phone)):'')+'</button><button class="btn ghost xs" onclick="ctDelete(&#39;'+t.id+'&#39;)">🗑</button></div></div>'
       +'<div class="muted" style="font-size:11px;margin-top:3px">🏠 '+t.apartments+' '+(ar?'شقة':'apts')+(a.early_departures?(' · <span style="color:var(--down)">⏰ '+a.early_departures+'</span>'):'')+'</div>'
       +_ctPipe(a.counts)
       +'<div style="display:flex;gap:6px;margin:4px 0 8px;align-items:center"><input readonly value="'+esc(fullLink)+'" onclick="this.select()" style="flex:1;padding:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;direction:ltr"><button class="btn ghost sm" onclick="ctCopy(&#39;'+esc(fullLink)+'&#39;)">'+(ar?'نسخ':'copy')+'</button><a class="btn ghost sm" href="'+esc(t.link)+'" target="_blank">'+(ar?'فتح':'open')+'</a></div>'
@@ -25258,6 +25473,7 @@ function renderCleanTeams(){
 async function ctCreateTeam(){ var nm=prompt('اسم الفريق:'); if(nm===null) return; await post('/api/cleaning/teams',{name:nm||''}); loadCleanTeams(); }
 async function ctRename(id){ var nm=prompt('الاسم الجديد:'); if(!nm) return; await post('/api/cleaning/teams',{id:id,name:nm}); loadCleanTeams(); }
 async function ctRegen(id){ if(!confirm('إنشاء رابط جديد؟ الرابط القديم يتوقف عن العمل.')) return; await post('/api/cleaning/teams',{id:id,regen:true}); loadCleanTeams(); }
+async function ctSetPhone(id){ var p=prompt('رقم واتساب الفريق (مثال 0501234567، اتركه فاضي للإلغاء):'); if(p===null) return; await post('/api/cleaning/teams',{id:id,phone:p}); loadCleanTeams(); }
 async function ctDelete(id){ if(!confirm('حذف الفريق؟ شققه تصير بدون فريق.')) return; await post('/api/cleaning/teams',{id:id,delete:true}); loadCleanTeams(); }
 async function ctAssign(lid,team){ await post('/api/cleaning/assign',{lid:lid,team_id:team}); loadCleanTeams(); }
 function ctToggleSel(lid,on){ if(on) _ctSel[lid]=true; else delete _ctSel[lid]; var el=document.getElementById('ctSelCount'); if(el) el.textContent=Object.keys(_ctSel).length; }
@@ -43780,11 +43996,14 @@ async def _api_cleaning_teams(request):
             _cleaning_teams[tid]["token"] = _ct_new_token()
         if (b.get("name") or "").strip():
             _cleaning_teams[tid]["name"] = b["name"].strip()[:60]
+        if "phone" in b:
+            _cleaning_teams[tid]["phone"] = (b.get("phone") or "").strip()[:20]
         _ct_save()
         return _json({"ok": True, "team": _ct_team_view(_cleaning_teams[tid])})
     name = (b.get("name") or "").strip() or ("فريق " + str(len(_cleaning_teams) + 1))
     nid = _ct_new_id()
-    _cleaning_teams[nid] = {"id": nid, "name": name[:60], "token": _ct_new_token(), "created_at": _ct_now()}
+    _cleaning_teams[nid] = {"id": nid, "name": name[:60], "token": _ct_new_token(),
+                            "phone": (b.get("phone") or "").strip()[:20], "created_at": _ct_now()}
     _ct_save()
     return _json({"ok": True, "team": _ct_team_view(_cleaning_teams[nid])})
 
@@ -46040,6 +46259,7 @@ async def _handle_robots(request):
            "Disallow: /dashboard\n"
            "Disallow: /invest\n"
            "Disallow: /oujact-route\n"
+           "Disallow: /d/\n"
            "Disallow: /cleaning\n"
            "Disallow: /hook/\n"
            "Disallow: /api/\n"
@@ -49077,6 +49297,7 @@ async def start_web_server():
         app.router.add_get("/api/oujact/route", _api_oujact_route)         # token-gated route data
         app.router.add_get("/api/cleaning/teams", _api_cleaning_teams)
         app.router.add_post("/api/cleaning/teams", _api_cleaning_teams)
+        app.router.add_get("/d/{token}", _handle_d_redirect)   # WhatsApp cleaning-dispatch redirect
         app.router.add_post("/api/cleaning/assign", _api_cleaning_assign)
         app.router.add_post("/api/cleaning/clear-early", _api_cleaning_clear_early)
         app.router.add_get("/api/cleaning/teams-analytics", _api_cleaning_teams_analytics)
@@ -52950,6 +53171,18 @@ async def cmd_deepclean_resume(ctx):
     await ctx.reply("✅ رجّعت حجب مواعيد التنظيف العميق يشتغل. من الليلة بيحجز مواعيد التنظيف مثل قبل.")
 
 
+@bot.command(name="dispatch", aliases=["إرسال", "ارسال", "توزيع"])
+async def cmd_dispatch(ctx, when: str = None):
+    """!ouja dispatch [today|tomorrow|YYYY-MM-DD] — post the cleaning dispatch now (admins only).
+    Default: today's list before noon, tomorrow's after noon."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    date_iso = _dispatch_resolve_date(when)
+    await post_dispatch(date_iso)
+    await ctx.reply(f"✅ نشرت دِسباتش التنظيف لتاريخ {_dispatch_fmt_date(date_iso)} في #{DISPATCH_CHANNEL}.")
+
+
 @bot.command(name="deepclean-pause", aliases=["ايقاف-التنظيف-العميق", "ايقاف-الحجب"])
 async def cmd_deepclean_pause(ctx):
     """!ouja deepclean-pause — pause auto-blocking AND free its blocked dates (admins only)."""
@@ -55611,6 +55844,8 @@ async def on_ready():
         poll_loop.start()
     if not oujact_daily_loop.is_running():
         oujact_daily_loop.start()      # 12 AM: listings auto-sync + OujaCT channels + schedule
+    if not dispatch_daily_loop.is_running():
+        dispatch_daily_loop.start()    # 9 PM: WhatsApp cleaning dispatch for tomorrow
     if not reminder_loop.is_running():
         reminder_loop.start()
     if not discount_tier1_loop.is_running():
