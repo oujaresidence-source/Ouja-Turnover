@@ -4006,7 +4006,7 @@ async def post_dispatch(date_iso):
     ch = await ensure_channel(guild, DISPATCH_CHANNEL, category)
     if ch is None:
         return
-    base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    base = _dispatch_base_url()
     posted = 0
     for tid, items in jobs["teams"].items():
         team = _cleaning_teams.get(tid) or {"id": tid, "name": "؟", "token": ""}
@@ -4025,7 +4025,7 @@ async def post_dispatch(date_iso):
             txt = _dispatch_wa_text(team.get("name", ""), date_iso, items)
             embed.add_field(name="الرسالة (انسخها لواتساب)",
                             value="```\n" + txt[:1000] + "\n```", inline=False)
-            embed.set_footer(text="انسخ الرسالة فوق وأرسلها بواتساب للفريق · فعّل PUBLIC_BASE_URL في Railway ليظهر زر الإرسال المباشر.")
+            embed.set_footer(text="انسخ الرسالة فوق وأرسلها بواتساب للفريق (افتح لوحة التحكم مرة ليظهر زر الإرسال المباشر).")
         if DISPATCH_DRYRUN:
             print(f"[dispatch DRYRUN] {team.get('name')}: {len(items)} apts, date={date_iso}")
         else:
@@ -4058,6 +4058,26 @@ async def _handle_d_redirect(request):
     items = jobs["teams"].get(team["id"], [])
     text = _dispatch_wa_text(team.get("name", ""), date_iso, items)
     raise web.HTTPFound(_wa_send_url(team.get("phone", ""), text))
+
+_public_base_seen = None   # auto-captured from a real web request (so no PUBLIC_BASE_URL needed)
+
+def _remember_public_base(request):
+    """Capture the public site URL from a real incoming request so the dispatch button can be
+    built WITHOUT anyone setting PUBLIC_BASE_URL. Https-forced; ignores local hosts."""
+    global _public_base_seen
+    if _public_base_seen:
+        return
+    try:
+        host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip()
+        if not host or host.startswith(("localhost", "127.", "0.0.0.0")):
+            return
+        _public_base_seen = "https://" + host
+    except Exception:
+        pass
+
+def _dispatch_base_url():
+    """PUBLIC_BASE_URL env override, else the auto-captured public base, else ''."""
+    return (os.environ.get("PUBLIC_BASE_URL") or _public_base_seen or "").rstrip("/")
 
 _dispatch_state = None   # lazily loaded {'last_auto': 'YYYY-MM-DD'}
 
@@ -48784,6 +48804,7 @@ async def _role_enforce_mw(request, handler):
 
 @web.middleware
 async def _security_headers_mw(request, handler):
+    _remember_public_base(request)     # learn the public site URL for the dispatch button (no env needed)
     resp = await handler(request)
     try:
         h = resp.headers
