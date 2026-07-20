@@ -4025,6 +4025,7 @@ async def post_dispatch(date_iso):
             txt = _dispatch_wa_text(team.get("name", ""), date_iso, items)
             embed.add_field(name="الرسالة (انسخها لواتساب)",
                             value="```\n" + txt[:1000] + "\n```", inline=False)
+            embed.set_footer(text="انسخ الرسالة فوق وأرسلها بواتساب للفريق · فعّل PUBLIC_BASE_URL في Railway ليظهر زر الإرسال المباشر.")
         if DISPATCH_DRYRUN:
             print(f"[dispatch DRYRUN] {team.get('name')}: {len(items)} apts, date={date_iso}")
         else:
