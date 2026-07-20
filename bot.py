@@ -4076,8 +4076,16 @@ def _remember_public_base(request):
         pass
 
 def _dispatch_base_url():
-    """PUBLIC_BASE_URL env override, else the auto-captured public base, else ''."""
-    return (os.environ.get("PUBLIC_BASE_URL") or _public_base_seen or "").rstrip("/")
+    """PUBLIC_BASE_URL env override → auto-captured public base → the site's own public base
+    (GUIDE_PUBLIC_BASE, defaults to https://oujares.com). The last fallback guarantees the
+    WhatsApp button ALWAYS renders with zero setup and survives restarts. `GUIDE_PUBLIC_BASE`
+    is a module global resolved at call time (defined later in the file)."""
+    site = ""
+    try:
+        site = GUIDE_PUBLIC_BASE
+    except NameError:
+        site = "https://oujares.com"
+    return (os.environ.get("PUBLIC_BASE_URL") or _public_base_seen or site or "").rstrip("/")
 
 _dispatch_state = None   # lazily loaded {'last_auto': 'YYYY-MM-DD'}
 
