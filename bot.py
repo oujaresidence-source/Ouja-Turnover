@@ -16443,7 +16443,7 @@ const T = {
     fb_unitp:'ربحية الشقق', fb_companyp:'ربحية الشركة', fb_close:'الإقفال الشهري', fb_mapping:'الإعدادات والربط',
     fb_overview:'النظرة المالية', fb_ws_overview:'النظرة المالية', fb_ws_imports:'الاستيراد والإعداد', fb_ws_queue:'قائمة العمل', fb_ws_mapping:'الربط والقواعد', fb_ws_profit:'الربحية والإقفال',
     fb_ws_daily:'يومي المالي', fb_ws_work:'العمل والمطابقة', fb_ws_setup:'الإعداد والربط', fb_ws_audit:'السجل والمراجعة', fb_daily:'يومي المالي', fb_assist:'وش يحتاج انتباهك اليوم؟', fb_bulk_link:'ربط كل المطابقات المؤكدة', fb_link_confirm:'ربط واعتماد', fb_help_first:'أول مرة تستخدم المركز المالي؟',
-    gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_hero:'الواجهة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
+    gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_hero:'الواجهة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_match:'المطابقة', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
     fb_act_promote:'حوّل للسجل المالي', fb_act_submit:'إرسال للمراجعة', fb_act_classify:'تصنيف', fb_link_cc:'اربط مركز تكلفة', fb_health:'صحة البيانات المالية', fb_nextbest:'وش تسوي الحين؟', fb_applysimilar:'تطبيق على المشابهة', fb_saverule:'احفظ كقاعدة', fb_col_priority:'الأولوية', fb_search:'بحث', fb_bulk:'إجراء جماعي', fb_selected:'محدد', fb_general_expense:'مصروف عام للشركة', fb_no_apt:'غير مرتبط بشقة', fb_dupcheck:'تأكد من التكرار مع دافترة', fb_cc_refresh:'تحديث مراكز التكلفة من دافترة', fb_import_journals:'استيراد قيود دافترة', fb_link_daftra:'ربط بسجل موجود في دافترة', fb_open_compare:'فتح المطابقة', fb_not_dup:'مو مكرر', fb_map_bank:'ربط حسابات البنك في دافترة', fb_recheck:'إعادة فحص النتائج السابقة',
     fb_dist_title:'مطابقة توزيع داخل قيد', fb_dist_sub:'العملية البنكية تطابق مجموعة أسطر داخل قيد دافترة، مو إجمالي القيد كامل', fb_link_dist:'ربط كتوزيع', fb_pick_lines:'اختر أسطر القيد المطابقة', fb_manual_pick:'اختر أسطر يدويًا', fb_open_daftra:'فتح القيد في دافترة', fb_not_this_dist:'مو هذا التوزيع', fb_search_journal:'ابحث عن قيد آخر', fb_confirm_link:'اعتماد الربط', fb_sel_sum:'مجموع الأسطر المختارة', fb_txn_amount:'مبلغ العملية', fb_sum_match:'المجموع مطابق', fb_sum_short:'المجموع ناقص', fb_sum_over:'المجموع زائد', fb_no_double:'لا نقدر نربط نفس السطر مرتين', fb_line_used:'مستخدم سابقًا', fb_dist_done:'تم ربط العملية كتوزيع داخل قيد دافترة', fb_dist_explain:'هذي العملية مب مطابقة لإجمالي القيد، لكنها تطابق أسطر داخل القيد', fb_batch_title:'مطابقة حوالات مجمعة', fb_batch_link:'ربط الحوالات بالقيد', fb_dist_card:'مطابقات التوزيع', fb_dist_review:'راجع توزيعات القيود', fb_cost_center:'مركز التكلفة', fb_included:'مشمول', fb_journal_total:'إجمالي القيد', fb_bank_line:'سطر حساب البنك', fb_lane_dist_ready:'موجود كتوزيع في دافترة', fb_lane_dist_possible:'توزيع محتمل', fb_lane_dist_linked:'مربوط بتوزيع', fb_batch_lane:'حوالة مجمعة', fb_lines_used:'أسطر مستخدمة سابقًا', fb_sum_diff:'فرق في مجموع الأسطر',
     fb_st_notstarted:'ما بدأ', fb_st_attention:'يحتاج انتباه', fb_st_ready:'جاهز', fb_st_done:'تم',
@@ -16767,7 +16767,7 @@ const T = {
     fb_unitp:'Unit Profitability', fb_companyp:'Company Profitability', fb_close:'Monthly Close', fb_mapping:'Settings / Mapping',
     fb_overview:'Overview', fb_ws_overview:'Overview', fb_ws_imports:'Imports & Setup', fb_ws_queue:'Work Queue', fb_ws_mapping:'Mapping & Rules', fb_ws_profit:'Profitability & Close',
     fb_ws_daily:'Daily Flow', fb_ws_work:'Work & Reconciliation', fb_ws_setup:'Setup & Mapping', fb_ws_audit:'Audit & Logs', fb_daily:'Daily Flow', fb_assist:'What needs your attention today?', fb_bulk_link:'Link all confirmed matches', fb_link_confirm:'Link & confirm', fb_help_first:'First time using Financial Brain?',
-    gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_hero:'Landing Hero', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
+    gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_hero:'Landing Hero', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_match:'Match', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
     fb_act_promote:'Move to ledger', fb_act_submit:'Submit for review', fb_act_classify:'Classify', fb_link_cc:'Link cost center', fb_health:'Finance data health', fb_nextbest:'Do this next', fb_applysimilar:'Apply to similar', fb_saverule:'Save as rule', fb_col_priority:'Priority', fb_search:'Search', fb_bulk:'Bulk action', fb_selected:'selected', fb_general_expense:'Company general expense', fb_no_apt:'Not linked to a unit', fb_dupcheck:'Check duplicates with Daftra', fb_cc_refresh:'Refresh cost centers from Daftra', fb_import_journals:'Import Daftra journal entries', fb_link_daftra:'Link existing Daftra record', fb_open_compare:'Open comparison', fb_not_dup:'Not a duplicate', fb_map_bank:'Map Daftra bank accounts', fb_recheck:'Recheck previous results',
     fb_dist_title:'Distribution match inside a journal', fb_dist_sub:'The bank transaction matches a group of lines inside a Daftra journal — not the journal total', fb_link_dist:'Link as distribution', fb_pick_lines:'Select the matching journal lines', fb_manual_pick:'Pick lines manually', fb_open_daftra:'Open journal in Daftra', fb_not_this_dist:'Not this distribution', fb_search_journal:'Search another journal', fb_confirm_link:'Confirm link', fb_sel_sum:'Selected lines total', fb_txn_amount:'Transaction amount', fb_sum_match:'Totals match', fb_sum_short:'Total is short', fb_sum_over:'Total exceeds', fb_no_double:'Cannot link the same line twice', fb_line_used:'already used', fb_dist_done:'Linked as a distribution inside a Daftra journal', fb_dist_explain:'This transaction does not equal the journal total, but it matches lines inside the journal', fb_batch_title:'Batch transfers match', fb_batch_link:'Link transfers to journal', fb_dist_card:'Distribution matches', fb_dist_review:'Review journal distributions', fb_cost_center:'Cost center', fb_included:'Included', fb_journal_total:'Journal total', fb_bank_line:'Bank-account line', fb_lane_dist_ready:'In Daftra as distribution', fb_lane_dist_possible:'Possible distribution', fb_lane_dist_linked:'Linked as distribution', fb_batch_lane:'Batch transfer', fb_lines_used:'Lines already used', fb_sum_diff:'Line-sum difference',
     fb_st_notstarted:'Not started', fb_st_attention:'Needs attention', fb_st_ready:'Ready', fb_st_done:'Done',
@@ -25228,10 +25228,10 @@ function fbStatCard(label,val,color){ return '<div style="'+fbCard()+';margin:0"
 /* ===== Guest Website (موقع الضيوف) dashboard ===== */
 var _gw={tab:'ov',byId:{},tagById:{}};
 function gwTabs(){ var el=document.getElementById('gwTabs'); if(!el) return; var t_=t();
-  var tabs=[['ov','🧭',t_.gw_ov],['hero','🖼️',t_.gw_hero],['listings','🏠',t_.gw_listings],['tags','🏷️',t_.gw_tags],['airbnb','🔗',t_.gw_airbnb],['analytics','📊',t_.gw_analytics]];
+  var tabs=[['ov','🧭',t_.gw_ov],['hero','🖼️',t_.gw_hero],['listings','🏠',t_.gw_listings],['tags','🏷️',t_.gw_tags],['airbnb','🔗',t_.gw_airbnb],['analytics','📊',t_.gw_analytics],['match','🎯',t_.gw_match]];
   el.innerHTML=tabs.map(function(x){ var on=(_gw.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="gwGo(&#39;'+x[0]+'&#39;)">'+x[1]+' '+esc(x[2])+'</button>'; }).join(''); }
 function gwGo(tab){ _gw.tab=tab; gwTabs(); var b=document.getElementById('gwBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
-  ({ov:gwOverview,hero:gwHero,listings:gwListings,tags:gwTags,airbnb:gwAirbnb,analytics:gwAnalytics}[tab]||gwOverview)(); }
+  ({ov:gwOverview,hero:gwHero,listings:gwListings,tags:gwTags,airbnb:gwAirbnb,analytics:gwAnalytics,match:gwMatch}[tab]||gwOverview)(); }
 function loadGw(){ var e=document.getElementById('t_gw'); if(e) e.textContent='📱 '+t().gw; var s=document.getElementById('t_gw_sub'); if(s) s.textContent=t().gw_sub; gwTabs(); gwGo(_gw.tab); }
 async function gwSync(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث من Hostaway…':'⏳ Syncing from Hostaway…'); var r; try{ r=await post('/api/gw/sync',{}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم تحديث ':'synced ')+(r.count||0)+(ar?' وحدة':' listings')); gwGo(_gw.tab); } else toast((r&&r.error)||'⚠'); }
 async function gwHero(){ var b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/hero'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
@@ -25415,6 +25415,31 @@ async function gwAnalytics(){ var ar=(L==='ar'), b=document.getElementById('gwBo
   h+=lst(ar?'أكثر «نوع» مختار':'Top نوع selected',d.top_types,function(k){ var x=(_gw.tagById||{})[k]; return x?(x.ar||x.en||k):k; });
   h+=lst(ar?'المصادر (UTM/إحالة)':'Sources (UTM/referrer)',d.by_utm);
   b.innerHTML=h+'<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'آخر ٧ أيام · جلسات مجهولة بدون بيانات شخصية':'Last 7 days · anonymous sessions, no personal data')+'</div>'; }
+function mqPurposeLabel(k,ar){ var m={boulevard:[ar?'بوليفارد وموسم الرياض':'Boulevard/Season'],work:[ar?'عمل واجتماعات':'Work/meetings'],medical:[ar?'علاج':'Medical'],family:[ar?'زيارة أهل':'Family visit'],shopping:[ar?'تسوق وسياحة':'Shopping/tourism'],rest:[ar?'راحة':'Rest']}; var e=m[k]; return e?e[0]:(k||(ar?'غير محدد':'unspecified')); }
+async function gwMatch(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/stay/match-stats'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
+  var f=d.funnel||{}, start=f.start||0;
+  var steps=[['start',ar?'بدأ الاستبيان':'Started quiz'],['who',ar?'مين معك':"Who's with you"],['sleep',ar?'وين تناموا':'Sleeping setup'],['purpose',ar?'الغرض':'Purpose'],['results',ar?'وصل للنتائج':'Reached results']];
+  var worst=null;
+  for(var i=1;i<steps.length;i++){ var prev=f[steps[i-1][0]]||0, cur=f[steps[i][0]]||0; if(prev>cur){ var drop=prev-cur; if(!worst||drop>worst.drop) worst={drop:drop,from:steps[i-1][1],to:steps[i][1]}; } }
+  var h='<div style="'+fbCard()+'"><b>🎯 '+(ar?'قمع استبيان المطابقة':'Match quiz funnel')+'</b>'
+    +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'آخر ٣٠ يوم · نسبة الإكمال ':'Last 30 days · completion ')+'<b style="color:var(--text)">'+(d.completion||0)+'%</b>'+(ar?' · تخلّى عن الاستبيان ':' · abandoned ')+'<b style="color:var(--text)">'+(f.abandon||0)+'</b></div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'+steps.map(function(s){ var n=f[s[0]]||0, pct=start?Math.round(100*n/start):0;
+      return '<div><div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px"><span>'+esc(s[1])+'</span><b>'+n+'</b></div><div style="height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--gold);border-radius:99px"></div></div></div>'; }).join('')+'</div>';
+  if(worst) h+='<div class="muted" style="font-size:11.5px;margin-top:10px">'+(ar?'⚠ أكبر تسرّب: بين «':'⚠ Biggest drop-off: between "')+esc(worst.from)+(ar?'» و«':'" and "')+esc(worst.to)+(ar?'» — فقدنا ':'" — lost ')+worst.drop+(ar?' ضيف':' guests')+'</div>';
+  h+='</div>';
+  var unmet=d.unmet||[];
+  if(!unmet.length){
+    h+='<div style="'+fbCard()+';margin-top:8px;text-align:center;color:var(--mut)">✓ '+(ar?'ما فيه طلبات ما قدرنا نلبيها':'No unmet demand recorded')+'</div>';
+  } else {
+    h+='<div style="'+fbCard()+';margin-top:8px"><b>📋 '+(ar?'جدول الطلب غير الملبّى':'Unmet-demand table')+'</b>'
+      +'<div class="muted" style="font-size:11px;margin:4px 0 10px">'+(ar?'الطلبات اللي كررنا فيها نتيجة ضعيفة — الأسوأ أول':'Requests we keep serving weakly — worst first')+'</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap"><thead><tr style="text-align:'+(ar?'right':'left')+'">'
+      +'<th style="padding:5px">'+(ar?'الغرض':'Purpose')+'</th><th style="padding:5px">'+(ar?'عدد الضيوف':'Party size')+'</th>'
+      +'<th style="padding:5px">'+(ar?'كم مرة انطلبت':'Asked')+'</th><th style="padding:5px">'+(ar?'كم مرة ما لقينا':'Weak result')+'</th><th style="padding:5px">%</th></tr></thead><tbody>'
+      +unmet.map(function(r){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px">'+esc(mqPurposeLabel(r.purpose,ar))+'</td><td style="padding:6px 5px">'+(r.party||0)+'</td><td style="padding:6px 5px">'+(r.asked||0)+'</td><td style="padding:6px 5px;color:var(--bad)">'+(r.weak||0)+'</td><td style="padding:6px 5px">'+(r.weak_pct||0)+'%</td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+  }
+  b.innerHTML=h+'<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'آخر ٣٠ يوم · جلسات مجهولة بدون بيانات شخصية':'Last 30 days · anonymous sessions, no personal data')+'</div>'; }
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
 var _ctSel={};
 async function loadCleanTeams(){
@@ -46761,9 +46786,56 @@ def _match_run(q):
     out["answers"] = answers
     return out
 
+def _match_stats(days=30):
+    """Quiz funnel + unmet demand from the guest analytics store. Read-only.
+    Returns zeros rather than raising when there is no data yet.
+
+    The unmet-demand table is the highest-value output of this feature: it names
+    the (purpose, party size) combinations we keep failing to serve."""
+    cutoff = (datetime.now(TZ) - timedelta(days=days)).isoformat(timespec="seconds")
+    evs = [e for e in _gw_analytics.get("events", []) if (e.get("ts") or "") >= cutoff]
+
+    funnel = {"start": 0, "who": 0, "sleep": 0, "purpose": 0, "results": 0, "abandon": 0}
+    demand = {}          # (purpose, party) -> {"asked": n, "weak": n}
+    for e in evs:
+        name = e.get("event") or ""
+        if name == "match_start":
+            funnel["start"] += 1
+        elif name == "match_answer":
+            k = e.get("type") or ""
+            if k in funnel:
+                funnel[k] += 1
+        elif name == "match_abandon":
+            funnel["abandon"] += 1
+        elif name == "match_results":
+            funnel["results"] += 1
+            try:
+                party = int(e.get("guests") or 0)
+            except (TypeError, ValueError):
+                party = 0
+            key = (str(e.get("type") or "rest"), party)
+            d = demand.setdefault(key, {"asked": 0, "weak": 0})
+            d["asked"] += 1
+            if e.get("weak") or not e.get("count"):
+                d["weak"] += 1
+
+    unmet = [{"purpose": p, "party": n, "asked": d["asked"], "weak": d["weak"],
+              "weak_pct": round(100.0 * d["weak"] / d["asked"], 1) if d["asked"] else 0.0}
+             for (p, n), d in demand.items() if d["weak"]]
+    unmet.sort(key=lambda r: (-r["weak"], -r["asked"]))
+
+    return {"funnel": funnel, "unmet": unmet[:12],
+            "completion": (round(100.0 * funnel["results"] / funnel["start"], 1)
+                           if funnel["start"] else 0.0)}
+
 async def _api_stay_match(request):
     out = await asyncio.to_thread(_match_run, dict(request.query))
     return _json({"ok": True, **out})
+
+async def _api_stay_match_stats(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, **_match_stats(30)})
 
 async def _handle_stay_match(request):
     return web.Response(text=_stay_render("match", base=str(request.url.origin())),
@@ -49461,6 +49533,7 @@ async def start_web_server():
         app.router.add_post("/api/gw/tags/bulk", _api_gw_tags_bulk)
         app.router.add_get("/api/gw/airbnb", _api_gw_airbnb)
         app.router.add_get("/api/gw/analytics", _api_gw_analytics)
+        app.router.add_get("/api/stay/match-stats", _api_stay_match_stats)  # token-gated, NOT public
         app.router.add_post("/api/gw/sync", _api_gw_sync)
         app.router.add_get("/stay/hero-image", _handle_stay_hero_image)
         app.router.add_get("/api/gw/hero", _api_gw_hero)

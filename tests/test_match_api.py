@@ -145,5 +145,46 @@ class TestMatchEventKeys(unittest.TestCase):
             self.assertIn(key, block, f"{key} missing from the event whitelist")
 
 
+class TestMatchStats(unittest.TestCase):
+    def test_empty_store_returns_zeros_not_crash(self):
+        out = bot._match_stats(30)
+        self.assertIn("funnel", out)
+        self.assertIn("unmet", out)
+        self.assertEqual(out["completion"], 0.0)
+
+    def test_funnel_and_unmet_demand_from_synthetic_events(self):
+        now = bot.datetime.now(bot.TZ).isoformat(timespec="seconds")
+        events = (
+            [{"event": "match_start", "ts": now}] * 4
+            + [{"event": "match_answer", "type": "who", "ts": now}] * 3
+            + [{"event": "match_answer", "type": "purpose", "ts": now}] * 2
+            + [{"event": "match_abandon", "type": "sleep", "ts": now}]
+            + [{"event": "match_results", "ts": now, "guests": 4, "type": "family",
+                "count": 0, "weak": 1}] * 3
+            + [{"event": "match_results", "ts": now, "guests": 2, "type": "rest",
+                "count": 5, "weak": 0}]
+        )
+        with mock.patch.object(bot, "_gw_analytics", {"events": events}):
+            out = bot._match_stats(30)
+        self.assertEqual(out["funnel"]["start"], 4)
+        self.assertEqual(out["funnel"]["who"], 3)
+        self.assertEqual(out["funnel"]["purpose"], 2)
+        self.assertEqual(out["funnel"]["abandon"], 1)
+        self.assertEqual(out["funnel"]["results"], 4)
+        self.assertEqual(out["completion"], 100.0)
+        self.assertEqual(len(out["unmet"]), 1)
+        row = out["unmet"][0]
+        self.assertEqual((row["purpose"], row["party"]), ("family", 4))
+        self.assertEqual(row["asked"], 3)
+        self.assertEqual(row["weak"], 3)
+        self.assertEqual(row["weak_pct"], 100.0)
+
+    def test_stats_endpoint_is_registered_behind_auth(self):
+        src = open("bot.py", encoding="utf-8").read()
+        i = src.index("async def _api_stay_match_stats")
+        self.assertIn("_dash_auth", src[i:i + 400],
+                      "match-stats must be behind _dash_auth")
+
+
 if __name__ == "__main__":
     unittest.main()
