@@ -21,10 +21,24 @@ WEIGHTS = {
 }
 
 # Below this, we tell the guest the truth instead of dressing up a weak match.
+# NOTE: this assumes ALL FIVE weights (bedrooms, proximity, budget, amenities,
+# quality) are wired into `_score_one`. Until Tasks 5-6 land, only bedrooms
+# (30) + quality (10) = 40 points are reachable, so 55 is UNREACHABLE and
+# every result reports `confident: False`. That's fine while `score()` is not
+# yet called from bot.py — but wiring it in before Tasks 5-6 ship would make
+# the honest low-confidence fallback copy fire for every single guest.
 CONFIDENCE_FLOOR = 55
 
 # Bayesian prior for ratings. A raw average lets 5.0 from 3 reviews outrank 4.8
 # from 90, which would put barely-reviewed units at the top of every result.
+# PRIOR_RATING=4.6 encodes "an Ouja unit is expected to perform around 4.6" —
+# so a unit with almost no reviews is pulled toward that expectation rather
+# than trusted at face value, and a unit PROVEN below the prior over many
+# reviews correctly loses to a barely-reviewed unit whose one data point sits
+# near the prior. (4.5*/200 losing to 5.0*/1 is intentional, not a bug — see
+# TestQualitySmoothing.test_barely_reviewed_near_perfect_unit_can_beat_a_proven_strong_unit.)
+# 4.6 is an ASSUMED portfolio mean; re-derive it from live review data once
+# enough units have real review histories.
 PRIOR_RATING = 4.6
 PRIOR_WEIGHT = 12
 
@@ -133,7 +147,7 @@ def score(answers, units, geo=None, top=TOP_N):
 
     scored = []
     for u in eligible:
-        total, reasons, tradeoffs = _score_one(u, answers, geo or {}, party_size)
+        total, reasons, tradeoffs = _score_one(u, answers, geo or {}, party_size, dated)
         # Deep copy: nested fields (amenities, images, ...) must not be
         # shared with the caller's dict — a later mutation of a returned
         # item (e.g. Task 6 amenity scoring) must never corrupt bot.py's
@@ -154,28 +168,70 @@ def score(answers, units, geo=None, top=TOP_N):
             "max_capacity": 0}
 
 
+def _ar_count(n, one, two, few, many):
+    """Arabic number agreement: 1 singular, 2 dual, 3-10 plural, 11+ singular.
+    Guest-facing copy that gets this wrong reads as machine translation."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return f"{n} {many}"
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    if 3 <= n % 100 <= 10:
+        return f"{n} {few}"
+    return f"{n} {many}"
+
+
+_BEDROOM_FORMS = ("غرفة نوم وحدة", "غرفتين نوم", "غرف نوم", "غرفة نوم")
+
+
+def _ar_bedrooms(n):
+    return _ar_count(n, *_BEDROOM_FORMS)
+
+
 def _score_bedrooms(u, party_size, sleep_pref):
     """0.0-1.0 fit, plus a reason or a tradeoff. Exact match wins; over-provisioned
     is slightly worse (the guest pays for space they said they don't need);
-    under-provisioned is heavily penalised but NEVER eliminated.
+    under-provisioned is heavily penalised but NEVER eliminated. The 0.6 floor
+    on over-provisioning is deliberate: no amount of excess space should ever
+    score worse than a one-room shortfall — a too-big apartment is merely an
+    inconvenience, a too-small one can ruin the stay.
 
     `party_size` must already be a clean positive int (the same value the
     capacity gate used) — this function does not validate it.
+
+    `beds` is handled carefully: missing/non-numeric is genuinely UNKNOWN data
+    (neutral 0.5, no claim made either way). `0` is a real studio — Hostaway
+    sends `bedroomsNumber: 0` for these — and must NOT be laundered into the
+    same "unknown" bucket, because 0.5 beats a real one-bedroom that is one
+    room short (0.37), which is backwards and hides studios from guests who
+    should be told honestly.
     """
     need = required_bedrooms(party_size, sleep_pref)
+    raw = u.get("beds")
     try:
-        have = int(u.get("beds") or 0)
+        have = int(raw) if raw is not None else None
     except (TypeError, ValueError):
-        have = 0
-    if not have:
+        have = None
+    if have is None:
         return 0.5, None, None                      # unknown data scores neutral
+    if have == 0:
+        # Real studio: no separate bedroom, so it is scored on the same
+        # under-provisioned curve as a real apartment that is `need` rooms
+        # short (this also guarantees it never outscores a real 1-bedroom at
+        # the same need) — but named honestly rather than as a bare number.
+        short = need
+        return max(0.1, 0.55 - 0.18 * short), None, "استوديو — بدون غرفة نوم منفصلة"
     if have == need:
-        return 1.0, f"{have} غرف نوم — بالضبط اللي طلبته", None
+        return 1.0, f"{_ar_bedrooms(have)} — بالضبط اللي طلبته", None
     if have > need:
         over = have - need
-        return max(0.6, 1.0 - 0.12 * over), f"{have} غرف نوم — فيها زيادة راحة", None
+        return max(0.6, 1.0 - 0.12 * over), f"{_ar_bedrooms(have)} — فيها زيادة راحة", None
     short = need - have
-    return max(0.1, 0.55 - 0.18 * short), None, f"{have} غرف نوم بس — طلبت {need}"
+    return (max(0.1, 0.55 - 0.18 * short), None,
+            f"{_ar_bedrooms(have)} بس — طلبت {_ar_bedrooms(need)}")
 
 
 def _score_quality(u):
@@ -195,12 +251,16 @@ def _score_quality(u):
     return fit, reason
 
 
-def _score_one(u, answers, geo, party_size):
+def _score_one(u, answers, geo, party_size, dated):
     """Returns (total_0_to_100, reasons, tradeoffs). Filled in across Tasks 3-6.
 
     `party_size` is the already-cleaned value from `score()` (see
     `_clean_party_size`) — never re-derive it from raw `answers` here, that
     reintroduces the fail-open-on-garbage-input bug the gate exists to avoid.
+
+    `dated` is whether the guest gave check-in/check-out (same flag `score()`
+    used for the availability gate) — the reason-guarantee fallback below
+    needs it to avoid claiming availability that was never actually checked.
     """
     total = 0.0
     reasons, tradeoffs = [], []
@@ -225,6 +285,13 @@ def _score_one(u, answers, geo, party_size):
     # first; later tasks must insert their blocks BEFORE this one, never after.
     if not reasons:
         cap = u.get("capacity")
-        reasons.append(f"تستوعب {cap} ضيوف" if cap else "متاحة للحجز")
+        if cap:
+            reasons.append(f"تستوعب {_ar_count(cap, 'ضيف واحد', 'ضيفين', 'ضيوف', 'ضيف')}")
+        else:
+            # Never claim availability we have not checked. Hostaway
+            # availability is only verified when the guest gave real dates
+            # (mirrors bot.py's `_gw_search` browse mode, which reports
+            # `available: None` and tells the guest to check inside Airbnb).
+            reasons.append("متاحة بتواريخك" if dated else "من وحدات عوجا المختارة")
 
     return total, reasons, tradeoffs

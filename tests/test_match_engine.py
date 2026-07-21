@@ -197,9 +197,12 @@ class TestBedroomFit(unittest.TestCase):
             self.assertTrue(u["reasons"], f"unit {u['id']} has no reason")
 
     def test_reason_contains_the_real_bedroom_number(self):
+        """Locks the exact rendered string, not a loose digit-substring check
+        (a weak "2" in reasons would falsely pass even after Fix 1's dual
+        form "غرفتين نوم" — which contains no digit at all)."""
         answers = dict(BASE, party_size=4, sleep_pref="pairs")
         out = engine.score(answers, [unit(1, beds=2, capacity=6)])
-        self.assertTrue(any("2" in r for r in out["top"][0]["reasons"]))
+        self.assertIn("غرفتين نوم — بالضبط اللي طلبته", out["top"][0]["reasons"])
 
     def test_malformed_party_size_does_not_raise_during_scoring(self):
         """`_score_one` must use the already-cleaned party_size, not re-derive
@@ -231,6 +234,113 @@ class TestQualitySmoothing(unittest.TestCase):
         u["beds"] = None
         out = engine.score(BASE, [u])
         self.assertTrue(out["top"][0]["reasons"])
+
+    def test_barely_reviewed_near_perfect_unit_can_beat_a_proven_strong_unit(self):
+        """Intentional, not a bug: PRIOR_RATING=4.6 encodes "an Ouja unit is
+        expected to perform around 4.6". A unit proven at 4.5 across 200
+        reviews is a well-established below-prior performer; a unit with a
+        single 5.0 review is pulled toward the prior and lands above it.
+        Locked here so nobody "fixes" this later — see the comment on
+        PRIOR_RATING in match/engine.py."""
+        out = engine.score(BASE, [unit(1, rating=4.5, reviews=200),
+                                  unit(2, rating=5.0, reviews=1)])
+        self.assertEqual(out["top"][0]["id"], 2)
+
+
+class TestArabicNumberAgreement(unittest.TestCase):
+    """Fix 1: Arabic requires singular for 1, dual for 2, plural for 3-10,
+    singular again for 11+. Getting this wrong on guest-facing copy reads as
+    machine translation."""
+
+    def test_bedroom_agreement_forms(self):
+        forms = ('غرفة نوم وحدة', 'غرفتين نوم', 'غرف نوم', 'غرفة نوم')
+        self.assertEqual(engine._ar_count(1, *forms), 'غرفة نوم وحدة')
+        self.assertEqual(engine._ar_count(2, *forms), 'غرفتين نوم')
+        self.assertEqual(engine._ar_count(3, *forms), '3 غرف نوم')
+        self.assertEqual(engine._ar_count(10, *forms), '10 غرف نوم')
+        self.assertEqual(engine._ar_count(11, *forms), '11 غرفة نوم')
+
+    def test_guest_agreement_forms(self):
+        forms = ('ضيف واحد', 'ضيفين', 'ضيوف', 'ضيف')
+        self.assertEqual(engine._ar_count(1, *forms), 'ضيف واحد')
+        self.assertEqual(engine._ar_count(2, *forms), 'ضيفين')
+        self.assertEqual(engine._ar_count(3, *forms), '3 ضيوف')
+        self.assertEqual(engine._ar_count(10, *forms), '10 ضيوف')
+        self.assertEqual(engine._ar_count(11, *forms), '11 ضيف')
+
+    def test_dual_form_appears_in_a_real_reason_and_the_broken_form_never_does(self):
+        answers = dict(BASE, party_size=4, sleep_pref="pairs")   # needs 2
+        out = engine.score(answers, [unit(1, beds=2, capacity=6)])
+        reason = out["top"][0]["reasons"][0]
+        self.assertIn("غرفتين", reason)
+        self.assertNotIn("2 غرف", reason)
+
+    def test_capacity_fallback_uses_correct_guest_agreement(self):
+        u = unit(1, rating=None, reviews=0, capacity=2)
+        u["beds"] = None
+        out = engine.score(BASE, [u])
+        self.assertIn("تستوعب ضيفين", out["top"][0]["reasons"])
+
+
+class TestStudioVsUnknownBeds(unittest.TestCase):
+    """Fix 2: `beds` missing/non-numeric is genuinely unknown (neutral,
+    untouched); `beds == 0` is a real Hostaway studio and must be scored
+    honestly, not laundered into "unknown"."""
+
+    def test_missing_beds_is_neutral_with_no_claim(self):
+        fit, reason, tradeoff = engine._score_bedrooms({"beds": None}, 2, None)
+        self.assertEqual(fit, 0.5)
+        self.assertIsNone(reason)
+        self.assertIsNone(tradeoff)
+
+    def test_non_numeric_beds_is_treated_as_unknown_not_studio(self):
+        fit, reason, tradeoff = engine._score_bedrooms({"beds": "n/a"}, 2, None)
+        self.assertEqual(fit, 0.5)
+        self.assertIsNone(reason)
+        self.assertIsNone(tradeoff)
+
+    def test_studio_is_scored_honestly_not_as_unknown(self):
+        fit, reason, tradeoff = engine._score_bedrooms({"beds": 0}, 2, None)
+        self.assertNotEqual(fit, 0.5)
+        self.assertIsNotNone(tradeoff)
+        self.assertIn("استوديو", tradeoff)
+
+    def test_studio_never_outscores_a_real_one_bedroom_at_the_same_need(self):
+        cases = [(2, None), (4, "pairs"), (6, "pairs")]
+        for party_size, sleep_pref in cases:
+            studio_fit, _, _ = engine._score_bedrooms({"beds": 0}, party_size, sleep_pref)
+            one_bed_fit, _, _ = engine._score_bedrooms({"beds": 1}, party_size, sleep_pref)
+            self.assertLessEqual(studio_fit, one_bed_fit)
+
+    def test_studio_does_not_hide_behind_the_neutral_unknown_score(self):
+        """A studio used to be laundered as 'unknown data' (0.5), which beat
+        a real one-room-short apartment (0.37). That was backwards."""
+        studio_fit, _, _ = engine._score_bedrooms({"beds": 0}, 2, None)
+        self.assertLess(studio_fit, 0.5)
+
+
+class TestHonestAvailabilityFallback(unittest.TestCase):
+    """Fix 3: the reason-guarantee fallback must never claim availability
+    that was never checked. Availability is only verified when the guest
+    gave real dates (mirrors bot.py's `_gw_search` browse-mode behaviour)."""
+
+    def _unclaimed_unit(self):
+        u = unit(1, rating=None, reviews=0)
+        u["beds"] = None
+        u["capacity"] = None
+        return u
+
+    def test_no_dates_makes_no_availability_claim(self):
+        out = engine.score(BASE, [self._unclaimed_unit()])
+        reasons = out["top"][0]["reasons"]
+        self.assertIn("من وحدات عوجا المختارة", reasons)
+        self.assertNotIn("متاحة للحجز", reasons)
+        self.assertNotIn("متاحة بتواريخك", reasons)
+
+    def test_dates_given_allows_the_availability_claim(self):
+        answers = dict(BASE, check_in="2026-08-01", check_out="2026-08-04")
+        out = engine.score(answers, [self._unclaimed_unit()])
+        self.assertIn("متاحة بتواريخك", out["top"][0]["reasons"])
 
 
 if __name__ == "__main__":
