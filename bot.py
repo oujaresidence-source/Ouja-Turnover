@@ -25418,7 +25418,7 @@ async function gwAnalytics(){ var ar=(L==='ar'), b=document.getElementById('gwBo
 function mqPurposeLabel(k,ar){ var m={boulevard:[ar?'بوليفارد وموسم الرياض':'Boulevard/Season'],work:[ar?'عمل واجتماعات':'Work/meetings'],medical:[ar?'علاج':'Medical'],family:[ar?'زيارة أهل':'Family visit'],shopping:[ar?'تسوق وسياحة':'Shopping/tourism'],rest:[ar?'راحة':'Rest']}; var e=m[k]; return e?e[0]:(k||(ar?'غير محدد':'unspecified')); }
 async function gwMatch(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/stay/match-stats'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
   var f=d.funnel||{}, start=f.start||0;
-  var steps=[['start',ar?'بدأ الاستبيان':'Started quiz'],['who',ar?'مين معك':"Who's with you"],['sleep',ar?'وين تناموا':'Sleeping setup'],['purpose',ar?'الغرض':'Purpose'],['results',ar?'وصل للنتائج':'Reached results']];
+  var steps=[['start',ar?'بدأ الاستبيان':'Started quiz'],['who',ar?'مين راح يكون معك':"Who's with you"],['sleep',ar?'وين تناموا':'Sleeping setup'],['purpose',ar?'الغرض':'Purpose'],['results',ar?'وصل للنتائج':'Reached results']];
   var worst=null;
   for(var i=1;i<steps.length;i++){ var prev=f[steps[i-1][0]]||0, cur=f[steps[i][0]]||0; if(prev>cur){ var drop=prev-cur; if(!worst||drop>worst.drop) worst={drop:drop,from:steps[i-1][1],to:steps[i][1]}; } }
   var h='<div style="'+fbCard()+'"><b>🎯 '+(ar?'قمع استبيان المطابقة':'Match quiz funnel')+'</b>'
@@ -46262,7 +46262,7 @@ var MQ_PURPOSE=[['boulevard','البوليفارد وموسم الرياض'],['w
 function mqRender(){
   var st=mqSteps(),key=st[Math.min(MQ.step,st.length-1)],body='',title='';
   if(key==='who'){
-    title='مين معك؟';
+    title='مين راح يكون معك؟';
     body='<div class="mq-opts">'+MQ_WHO.map(function(o){
       return '<button type="button" class="mq-opt" data-who="'+he(o[0])+'" data-n="'+o[2]+'">'+he(o[1])+'</button>';
     }).join('')+'</div>'
