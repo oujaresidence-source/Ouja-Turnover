@@ -131,6 +131,15 @@ except Exception as _owner_report_err:  # pragma: no cover
     _owner_report = None
     _HAS_OWNER_REPORT = False
 
+# Stay Match «مطابقة الإقامة» — pure ranking engine for the /stay/match quiz; additive, read-only.
+try:
+    import match as _match
+    _HAS_MATCH = True
+except Exception as _match_err:         # pragma: no cover
+    print("[match] import failed (match disabled, bot unaffected):", _match_err)
+    _match = None
+    _HAS_MATCH = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -46344,7 +46353,8 @@ def _stay_render(route="landing", listing=None, base=""):
     title = "اختر إقامتك مع عوجا"
     desc = "وحدات عوجا المتاحة في الرياض · دخول ذاتي · الحجز عبر Airbnb"
     og = ""
-    path = {"landing": "/stay", "search": "/stay/search", "listing": "/stay"}.get(route, "/stay")
+    path = {"landing": "/stay", "search": "/stay/search", "listing": "/stay",
+            "match": "/stay/match"}.get(route, "/stay")
     if listing:
         title = (listing.get("name_ar") or title) + " · عوجا"
         desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
@@ -46412,6 +46422,82 @@ async def _handle_stay_detail(request):
     snap, ov = _gw_find_by_slug_or_id(token)
     listing = _gw_listing_public(snap, ov) if snap else None
     return web.Response(text=_stay_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
+
+_MATCH_SLEEP = ("together", "pairs", "each")
+
+def _match_answers(q):
+    """Query params -> the engine's answers contract. Defensive: junk input can
+    never raise, it degrades to a neutral answer."""
+    try:
+        party = int(q.get("party") or 1)
+    except (TypeError, ValueError):
+        party = 1
+    party = max(1, min(16, party))
+    sleep = q.get("sleep") if q.get("sleep") in _MATCH_SLEEP else None
+    purpose = q.get("purpose") or "rest"
+    if _HAS_MATCH and purpose not in _match.poi.PURPOSE_POI:
+        purpose = "rest"
+    try:
+        budget = int(q.get("budget")) if q.get("budget") else None
+    except (TypeError, ValueError):
+        budget = None
+    ci, co = q.get("check_in"), q.get("check_out")
+    if not (ci and co and _gw_valid_dates(ci, co)):
+        ci = co = None
+    return {"party_size": party, "sleep_pref": sleep, "purpose": purpose,
+            "budget_max": budget, "check_in": ci, "check_out": co}
+
+def _match_geo_points():
+    """{listing_id: (lat, lng)} from the cached guide coordinates. Cache-only —
+    no network here. Missing units fall back to a neighborhood centroid inside
+    the engine, so a thin cache degrades precision, never correctness. Matches
+    by name_en/name_ar the same way _elite_geo_points does (an override title
+    can diverge from the raw Hostaway snapshot name the guide was seeded from)."""
+    gmap = _elite_geo_cache.get("map") or {}
+    pts = {}
+    for s, ov in _gw_visible_snaps():
+        try:
+            pub = _gw_listing_public(s, ov, with_airbnb=False)
+        except Exception:
+            continue
+        lid = pub.get("id")
+        if lid is None:
+            continue
+        ll = gmap.get(_elite_geo_norm(pub.get("name_en"))) or gmap.get(_elite_geo_norm(pub.get("name_ar")))
+        if ll:
+            pts[lid] = ll
+    return pts
+
+def _match_run(q):
+    """BLOCKING — executor only. Builds inventory, prices it, delegates ranking."""
+    if not _HAS_MATCH:
+        return {"top": [], "near": [], "confident": False,
+                "impossible": False, "max_capacity": 0}
+    answers = _match_answers(q)
+    _elite_geo_refresh()
+    units = []
+    for s, ov in _gw_visible_snaps():
+        pub = _gw_listing_public(s, ov)
+        if answers["check_in"] and answers["check_out"]:
+            av = unit_availability_price(s.get("id"), answers["check_in"],
+                                         answers["check_out"])
+            if av:
+                pub["available"] = av.get("available")
+                pub["nights"] = av.get("nights")
+                pub["est_total"] = av.get("total")
+                pub["est_avg"] = av.get("avg")
+        units.append(pub)
+    out = _match.score(answers, units, geo=_match_geo_points())
+    out["answers"] = answers
+    return out
+
+async def _api_stay_match(request):
+    out = await asyncio.to_thread(_match_run, dict(request.query))
+    return _json({"ok": True, **out})
+
+async def _handle_stay_match(request):
+    return web.Response(text=_stay_render("match", base=str(request.url.origin())),
+                        content_type="text/html")
 
 async def _api_stay_config(request):
     return _json({"ok": True, "noo": _gw_noo_options(),
@@ -49084,6 +49170,8 @@ async def start_web_server():
         app.router.add_get("/stay", _handle_stay)
         app.router.add_get("/stay/", _handle_stay)
         app.router.add_get("/stay/search", _handle_stay_search)
+        app.router.add_get("/stay/match", _handle_stay_match)
+        app.router.add_get("/api/stay/match", _api_stay_match)
         app.router.add_get("/stay/id/{lid}", _handle_stay_id)
         app.router.add_get("/api/stay/config", _api_stay_config)
         app.router.add_get("/api/stay/search", _api_stay_search)
