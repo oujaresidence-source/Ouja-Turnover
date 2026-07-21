@@ -45792,6 +45792,31 @@ def _gw_noo_options():
     opts.sort(key=lambda o: (o["sort"], -o["count"], o["key"]))
     return opts
 
+_GW_PRICE_MIN_SAMPLE = 5
+
+def _gw_price_bands(prices):
+    """p25/median/p75 nightly price across visible units, for the Stay Match
+    budget slider. Returns None on a thin sample so the UI skips the budget
+    screen rather than showing invented numbers."""
+    vals = []
+    for p in (prices or []):
+        try:
+            v = int(p)
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            vals.append(v)
+    if len(vals) < _GW_PRICE_MIN_SAMPLE:
+        return None
+    vals.sort()
+    def _pct(q):
+        return int(vals[min(len(vals) - 1, max(0, int(round(q * (len(vals) - 1)))))])
+    return {"p25": _pct(0.25), "median": _pct(0.50), "p75": _pct(0.75)}
+
+def _gw_visible_prices():
+    """Nightly base prices of every visible unit (input to _gw_price_bands)."""
+    return [s.get("price_base") for s, _ov in _gw_visible_snaps()]
+
 def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=None, tags=None):
     """Guest listing results. With dates -> only AVAILABLE; else browse mode (no availability claims).
     neighborhood = a RIYADH_NEIGHBORHOODS key (assigned per-unit in the dashboard). tags = comma-
@@ -46333,7 +46358,8 @@ def _stay_render(route="landing", listing=None, base=""):
             "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""),
                        "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP,
                        "neighborhoods": _gw_neighborhoods_with_counts(),
-                       "rating_overall": _gw_ratings_overall()}}
+                       "rating_overall": _gw_ratings_overall(),
+                       "price_bands": _gw_price_bands(_gw_visible_prices())}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO: JSON-LD structured data — LodgingBusiness on /stay, Apartment per unit page.
     if listing:
@@ -46389,7 +46415,8 @@ async def _handle_stay_detail(request):
 
 async def _api_stay_config(request):
     return _json({"ok": True, "noo": _gw_noo_options(),
-                  "neighborhoods": _gw_neighborhoods_with_counts()})
+                  "neighborhoods": _gw_neighborhoods_with_counts(),
+                  "price_bands": _gw_price_bands(_gw_visible_prices())})
 
 async def _api_stay_search(request):
     q = request.query
