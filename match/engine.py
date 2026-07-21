@@ -361,35 +361,53 @@ def _score_budget(u, answers):
 # "Dishwasher", "pool" must not be satisfied by "Pool table"/"Pool cue", and
 # "parking" must not be satisfied by paid/off-site/street parking, which is
 # not the convenience a guest means when they ask for parking.
+#
+# 4th element = tradeoff-eligible: whether this amenity may be NAMED in a
+# missing-amenity tradeoff when it doesn't match. Hostaway amenity lists are
+# frequently incomplete, so a missing match only tells us the LISTING didn't
+# mention it, not that the unit lacks it — see `_missing_amenities_tradeoff`.
+# Naming a near-universal basic (wifi, kitchen) as "missing" is the mirror of
+# the false-positive bug this table was already fixed for: it is very likely
+# false, and a false negative that talks a guest out of booking is worse than
+# a false positive, because we never learn it happened. Wifi/kitchen stay
+# fully eligible as POSITIVE reasons when they DO match — only the negative
+# claim is restricted.
 PURPOSE_AMENITIES = {
-    "work":      [("workspace", (), "مكتب للشغل"),
-                  ("wifi", (), "واي فاي"),
-                  ("desk", (), "مكتب")],
-    "family":    [("kitchen", (), "مطبخ كامل"),
-                  ("washer", ("dishwasher",), "غسالة"),
-                  ("crib", (), "سرير أطفال")],
-    "rest":      [("pool", ("pool table", "pool cue"), "مسبح"),
-                  ("balcony", (), "بلكونة"),
-                  ("jacuzzi", (), "جاكوزي")],
-    "medical":   [("kitchen", (), "مطبخ كامل"),
-                  ("elevator", (), "مصعد"),
-                  ("parking", ("paid parking", "off premises", "street parking"), "موقف")],
-    "boulevard": [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة"),
-                  ("wifi", (), "واي فاي")],
-    "shopping":  [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة"),
-                  ("elevator", (), "مصعد")],
+    "work":      [("workspace", (), "مكتب للشغل", True),
+                  ("wifi", (), "واي فاي", False),
+                  ("desk", (), "مكتب", True)],
+    "family":    [("kitchen", (), "مطبخ كامل", False),
+                  ("washer", ("dishwasher",), "غسالة", True),
+                  ("crib", (), "سرير أطفال", True)],
+    "rest":      [("pool", ("pool table", "pool cue"), "مسبح", True),
+                  ("balcony", (), "بلكونة", True),
+                  ("jacuzzi", (), "جاكوزي", True)],
+    "medical":   [("kitchen", (), "مطبخ كامل", False),
+                  ("elevator", (), "مصعد", True),
+                  ("parking", ("paid parking", "off premises", "street parking"), "موقف", True)],
+    "boulevard": [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة", True),
+                  ("wifi", (), "واي فاي", False)],
+    "shopping":  [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة", True),
+                  ("elevator", (), "مصعد", True)],
 }
 
 
 def _missing_amenities_tradeoff(wanted):
-    """Natural Najdi tradeoff naming what THIS purpose cares about that the
-    unit does not have — built from PURPOSE_AMENITIES' own labels (its top
-    one or two entries) rather than six hand-written sentences, so a future
-    purpose added to that table gets an honest tradeoff for free."""
-    labels = [ar for (_, _, ar) in wanted]
+    """Hedged Najdi tradeoff naming what THIS purpose cares about that the
+    LISTING DOESN'T MENTION — never claims the unit lacks it. "ما ذكروا فيها"
+    ("they didn't mention it") is true regardless of how complete Hostaway's
+    amenity data is; "ما فيها" ("it doesn't have it") would assert a fact we
+    cannot actually support. Only tradeoff-ELIGIBLE labels (see
+    PURPOSE_AMENITIES) may be named — if every unmatched amenity for this
+    purpose is a near-universal basic (wifi/kitchen), there is nothing honest
+    left to say, and this returns None rather than emit no tradeoff at all
+    (the caller must accept that)."""
+    labels = [ar for (_, _, ar, eligible) in wanted if eligible]
+    if not labels:
+        return None
     if len(labels) == 1:
-        return f"ما فيها {labels[0]}"
-    return f"ما فيها {labels[0]} ولا {labels[1]}"
+        return f"ما ذكروا فيها {labels[0]}"
+    return f"ما ذكروا فيها {labels[0]} ولا {labels[1]}"
 
 
 def _score_amenities(u, answers):
@@ -403,16 +421,18 @@ def _score_amenities(u, answers):
     versa); matching string-by-string keeps each exclusion scoped to only the
     string it actually appears in.
 
-    When NOTHING relevant matched, returns an honest tradeoff naming what is
-    missing instead of just going quietly neutral-looking (Fix 2) — a unit
-    with no purpose-relevant amenity is a real, guest-visible downside.
+    When NOTHING relevant matched, returns a hedged tradeoff naming what the
+    listing doesn't mention (see `_missing_amenities_tradeoff`) instead of
+    just going quietly neutral-looking — unless nothing eligible is missing,
+    in which case no tradeoff is emitted at all (the fit still reflects the
+    miss; only the guest-facing claim is withheld).
     """
     wanted = PURPOSE_AMENITIES.get(answers.get("purpose") or "")
     if not wanted:
         return 0.5, None, None
     strings = [str(a).lower() for a in (u.get("amenities") or [])]
     hits = []
-    for kw, exclusions, ar in wanted:
+    for kw, exclusions, ar, _eligible in wanted:
         for s in strings:
             if kw in s and not any(ex in s for ex in exclusions):
                 hits.append(ar)

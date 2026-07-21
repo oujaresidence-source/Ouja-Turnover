@@ -532,14 +532,45 @@ class TestAmenityAndQualityTradeoffs(unittest.TestCase):
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(reason)
         self.assertIsNotNone(tradeoff)
-        self.assertIn("ما فيها", tradeoff)
+        self.assertIn("ما ذكروا", tradeoff)
+
+    def test_work_tradeoff_names_workspace_not_wifi(self):
+        """Wifi is a near-universal basic — Hostaway amenity lists are
+        frequently incomplete, so a missing wifi match only means the
+        LISTING didn't mention it, not that the unit lacks it. Naming it as
+        missing would be a false-negative claim (the mirror of the
+        false-positive bug this table was already fixed for), so wifi must
+        never appear in this tradeoff even though it's in PURPOSE_AMENITIES
+        for "work"."""
+        answers = dict(BASE, purpose="work")
+        u = unit(1, amenities=["Ethernet only", "Fireplace"])
+        fit, reason, tradeoff = engine._score_amenities(u, answers)
+        self.assertIn("مكتب", tradeoff)
+        self.assertNotIn("واي فاي", tradeoff)
 
     def test_family_missing_amenities_tradeoff_names_real_labels(self):
         answers = dict(BASE, purpose="family")
-        u = unit(1, amenities=["Wifi"])
+        u = unit(1, amenities=["Fireplace"])
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNotNone(tradeoff)
-        self.assertTrue(any(lbl in tradeoff for lbl in ("غسالة", "مطبخ كامل", "سرير أطفال")))
+        self.assertTrue(any(lbl in tradeoff for lbl in ("غسالة", "سرير أطفال")))
+        self.assertNotIn("مطبخ كامل", tradeoff)   # kitchen is a near-universal basic
+
+    def test_only_wifi_or_kitchen_missing_produces_no_amenity_tradeoff(self):
+        """If every unmatched amenity for a purpose is a near-universal basic
+        (wifi/kitchen-class, tradeoff-ineligible), there is nothing honest
+        left to name — no amenity tradeoff should be emitted at all, rather
+        than falsely implying the unit lacks something distinctive."""
+        wifi_and_kitchen_only = [("wifi", (), "واي فاي", False),
+                                  ("kitchen", (), "مطبخ كامل", False)]
+        self.assertIsNone(engine._missing_amenities_tradeoff(wifi_and_kitchen_only))
+
+    def test_boulevard_tradeoff_names_parking_not_wifi(self):
+        answers = dict(BASE, purpose="boulevard")
+        u = unit(1, amenities=["Fireplace"])
+        fit, reason, tradeoff = engine._score_amenities(u, answers)
+        self.assertIn("موقف", tradeoff)
+        self.assertNotIn("واي فاي", tradeoff)
 
     def test_low_rating_with_enough_reviews_gets_a_tradeoff(self):
         fit, reason, tradeoff = engine._score_quality({"rating": 3.2, "reviews_count": 50})
