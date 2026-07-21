@@ -23,6 +23,11 @@ WEIGHTS = {
 # Below this, we tell the guest the truth instead of dressing up a weak match.
 CONFIDENCE_FLOOR = 55
 
+# Bayesian prior for ratings. A raw average lets 5.0 from 3 reviews outrank 4.8
+# from 90, which would put barely-reviewed units at the top of every result.
+PRIOR_RATING = 4.6
+PRIOR_WEIGHT = 12
+
 TOP_N = 3
 
 
@@ -128,7 +133,7 @@ def score(answers, units, geo=None, top=TOP_N):
 
     scored = []
     for u in eligible:
-        total, reasons, tradeoffs = _score_one(u, answers, geo or {})
+        total, reasons, tradeoffs = _score_one(u, answers, geo or {}, party_size)
         # Deep copy: nested fields (amenities, images, ...) must not be
         # shared with the caller's dict — a later mutation of a returned
         # item (e.g. Task 6 amenity scoring) must never corrupt bot.py's
@@ -149,8 +154,77 @@ def score(answers, units, geo=None, top=TOP_N):
             "max_capacity": 0}
 
 
-def _score_one(u, answers, geo):
-    """Returns (total_0_to_100, reasons, tradeoffs). Filled in across Tasks 3-6."""
+def _score_bedrooms(u, party_size, sleep_pref):
+    """0.0-1.0 fit, plus a reason or a tradeoff. Exact match wins; over-provisioned
+    is slightly worse (the guest pays for space they said they don't need);
+    under-provisioned is heavily penalised but NEVER eliminated.
+
+    `party_size` must already be a clean positive int (the same value the
+    capacity gate used) — this function does not validate it.
+    """
+    need = required_bedrooms(party_size, sleep_pref)
+    try:
+        have = int(u.get("beds") or 0)
+    except (TypeError, ValueError):
+        have = 0
+    if not have:
+        return 0.5, None, None                      # unknown data scores neutral
+    if have == need:
+        return 1.0, f"{have} غرف نوم — بالضبط اللي طلبته", None
+    if have > need:
+        over = have - need
+        return max(0.6, 1.0 - 0.12 * over), f"{have} غرف نوم — فيها زيادة راحة", None
+    short = need - have
+    return max(0.1, 0.55 - 0.18 * short), None, f"{have} غرف نوم بس — طلبت {need}"
+
+
+def _score_quality(u):
+    """0.0-1.0 from rating, shrunk toward the portfolio prior by review count."""
+    try:
+        rating = float(u.get("rating") or 0)
+        n = int(u.get("reviews_count") or 0)
+    except (TypeError, ValueError):
+        return 0.5, None
+    if rating <= 0 or n <= 0:
+        return 0.5, None                            # unrated scores neutral, never punished
+    smoothed = ((rating * n) + (PRIOR_RATING * PRIOR_WEIGHT)) / (n + PRIOR_WEIGHT)
+    fit = max(0.0, min(1.0, (smoothed - 3.5) / 1.5))
+    reason = None
+    if rating >= 4.7 and n >= 10:
+        reason = f"{rating} ★ من {n} تقييم"
+    return fit, reason
+
+
+def _score_one(u, answers, geo, party_size):
+    """Returns (total_0_to_100, reasons, tradeoffs). Filled in across Tasks 3-6.
+
+    `party_size` is the already-cleaned value from `score()` (see
+    `_clean_party_size`) — never re-derive it from raw `answers` here, that
+    reintroduces the fail-open-on-garbage-input bug the gate exists to avoid.
+    """
     total = 0.0
     reasons, tradeoffs = [], []
+
+    fit, reason, tradeoff = _score_bedrooms(u, party_size, answers.get("sleep_pref"))
+    total += fit * WEIGHTS["bedrooms"]
+    if reason:
+        reasons.append(reason)
+    if tradeoff:
+        tradeoffs.append(tradeoff)
+
+    # Proximity (Task 5) and budget/amenities (Task 6) insert their blocks here.
+
+    qfit, qreason = _score_quality(u)
+    total += qfit * WEIGHTS["quality"]
+    if qreason:
+        reasons.append(qreason)
+
+    # Reason guarantee (invariant 4): a unit with nothing notable still says
+    # something true rather than showing a bare card. MUST STAY LAST — every
+    # scoring block above (and any Task 5/6 blocks) appends its own reason
+    # first; later tasks must insert their blocks BEFORE this one, never after.
+    if not reasons:
+        cap = u.get("capacity")
+        reasons.append(f"تستوعب {cap} ضيوف" if cap else "متاحة للحجز")
+
     return total, reasons, tradeoffs

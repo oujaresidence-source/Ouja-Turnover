@@ -156,5 +156,82 @@ class TestTopAndNearSplit(unittest.TestCase):
         self.assertEqual(scores, sorted(scores, reverse=True))
 
 
+class TestRequiredBedrooms(unittest.TestCase):
+    def test_solo_and_couple_need_one(self):
+        self.assertEqual(engine.required_bedrooms(1, None), 1)
+        self.assertEqual(engine.required_bedrooms(2, None), 1)
+
+    def test_together_means_one_room(self):
+        self.assertEqual(engine.required_bedrooms(5, "together"), 1)
+
+    def test_each_means_one_room_per_person(self):
+        self.assertEqual(engine.required_bedrooms(4, "each"), 4)
+
+    def test_pairs_rounds_up(self):
+        self.assertEqual(engine.required_bedrooms(5, "pairs"), 3)
+        self.assertEqual(engine.required_bedrooms(4, "pairs"), 2)
+
+
+class TestBedroomFit(unittest.TestCase):
+    def test_exact_match_outranks_over_provisioned(self):
+        answers = dict(BASE, party_size=4, sleep_pref="pairs")   # needs 2
+        out = engine.score(answers, [unit(1, beds=5, capacity=10),
+                                     unit(2, beds=2, capacity=6)])
+        self.assertEqual(out["top"][0]["id"], 2)
+
+    def test_under_provisioned_still_appears_with_a_tradeoff(self):
+        answers = dict(BASE, party_size=6, sleep_pref="each")    # needs 6
+        out = engine.score(answers, [unit(1, beds=2, capacity=8)])
+        self.assertEqual(len(out["top"]), 1)
+        self.assertIsNotNone(out["top"][0]["tradeoff"])
+
+    def test_exact_match_produces_a_reason(self):
+        answers = dict(BASE, party_size=4, sleep_pref="pairs")
+        out = engine.score(answers, [unit(1, beds=2, capacity=6)])
+        self.assertTrue(out["top"][0]["reasons"])
+
+    def test_every_returned_unit_has_at_least_one_reason(self):
+        answers = dict(BASE, party_size=2)
+        out = engine.score(answers, [unit(i) for i in range(1, 6)])
+        for u in out["top"] + out["near"]:
+            self.assertTrue(u["reasons"], f"unit {u['id']} has no reason")
+
+    def test_reason_contains_the_real_bedroom_number(self):
+        answers = dict(BASE, party_size=4, sleep_pref="pairs")
+        out = engine.score(answers, [unit(1, beds=2, capacity=6)])
+        self.assertTrue(any("2" in r for r in out["top"][0]["reasons"]))
+
+    def test_malformed_party_size_does_not_raise_during_scoring(self):
+        """`_score_one` must use the already-cleaned party_size, not re-derive
+        it from raw `answers` (which can be a non-numeric string)."""
+        answers = dict(BASE, party_size="abc", sleep_pref="pairs")
+        out = engine.score(answers, [unit(1, beds=2, capacity=6)])
+        self.assertEqual(len(out["top"]), 1)
+
+
+class TestQualitySmoothing(unittest.TestCase):
+    def test_perfect_rating_with_few_reviews_loses_to_strong_rating_with_many(self):
+        out = engine.score(BASE, [unit(1, rating=5.0, reviews=3),
+                                  unit(2, rating=4.8, reviews=90)])
+        self.assertEqual(out["top"][0]["id"], 2)
+
+    def test_unrated_unit_is_not_eliminated(self):
+        u = unit(1, rating=None, reviews=0)
+        out = engine.score(BASE, [u])
+        self.assertEqual(len(out["top"]), 1)
+
+    def test_high_rating_produces_a_reason_with_the_number(self):
+        out = engine.score(BASE, [unit(1, rating=4.9, reviews=67)])
+        joined = " ".join(out["top"][0]["reasons"])
+        self.assertIn("4.9", joined)
+        self.assertIn("67", joined)
+
+    def test_reason_guarantee_holds_for_unknown_data_units(self):
+        u = unit(1, rating=None, reviews=0)
+        u["beds"] = None
+        out = engine.score(BASE, [u])
+        self.assertTrue(out["top"][0]["reasons"])
+
+
 if __name__ == "__main__":
     unittest.main()
