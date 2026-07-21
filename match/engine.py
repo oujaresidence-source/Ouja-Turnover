@@ -7,6 +7,7 @@ honest tradeoff string the UI shows to the guest.
 """
 
 import copy
+import math
 
 from . import poi
 
@@ -247,20 +248,26 @@ def _score_bedrooms(u, party_size, sleep_pref):
 
 
 def _score_quality(u):
-    """0.0-1.0 from rating, shrunk toward the portfolio prior by review count."""
+    """0.0-1.0 from rating, shrunk toward the portfolio prior by review count.
+    A CONFIDENT low rating (>=10 reviews, so it is not noise) earns an honest
+    tradeoff. A thinly-reviewed or unrated unit gets neither the reason nor
+    the tradeoff — absence of reviews is not proof of a flaw, and it would be
+    unfair to tell a guest new inventory is "worse" than the rest."""
     try:
         rating = float(u.get("rating") or 0)
         n = int(u.get("reviews_count") or 0)
     except (TypeError, ValueError):
-        return 0.5, None
+        return 0.5, None, None
     if rating <= 0 or n <= 0:
-        return 0.5, None                            # unrated scores neutral, never punished
+        return 0.5, None, None                      # unrated scores neutral, never punished
     smoothed = ((rating * n) + (PRIOR_RATING * PRIOR_WEIGHT)) / (n + PRIOR_WEIGHT)
     fit = max(0.0, min(1.0, (smoothed - 3.5) / 1.5))
-    reason = None
+    reason, tradeoff = None, None
     if rating >= 4.7 and n >= 10:
         reason = f"{rating} ★ من {n} تقييم"
-    return fit, reason
+    elif n >= 10 and rating < 4.3:
+        tradeoff = f"تقييمها {rating} ★ — أقل من بقية وحداتنا"
+    return fit, reason, tradeoff
 
 
 # Minutes at which proximity stops helping. Beyond this a unit is "across town".
@@ -270,7 +277,15 @@ _NEAR_MIN, _FAR_MIN = 10, 35
 def _score_proximity(u, answers, geo):
     """0.0-1.0 by drive time to the POI implied by the guest's purpose.
     Neutral (never punishing) when the purpose has no POI or the unit cannot be
-    located — invariant 7 means this never returns None."""
+    located — invariant 7 means this never returns None.
+
+    NOTE (reviewed, intentional): across Ouja's actual north-Riyadh footprint,
+    almost every unit computes to 3-20 minutes from every POI, so the
+    "بعيدة عن ..." far-tradeoff below will rarely fire in production. That is
+    correct, not a bug — the copy exists for a genuinely distant or
+    mislabeled unit, not to manufacture a downside where none exists. Do not
+    "fix" this by lowering `_NEAR_MIN`/`_FAR_MIN` to make it fire more often.
+    """
     poi_key = poi.PURPOSE_POI.get(answers.get("purpose") or "")
     if not poi_key:
         return 0.5, None, None
@@ -291,6 +306,19 @@ def _score_proximity(u, answers, geo):
     fit = 1.0 - ((mins - _NEAR_MIN) / span) * 0.9
     reason = f"{mins} دقيقة عن {label}" if mins <= 20 else None
     return fit, reason, None
+
+
+# Beyond the 25%-over tier, decay continuously instead of a flat 0.15 — a unit
+# 26% over budget and one 1000% over used to score identically, which threw
+# away ranking resolution among over-budget units (the tradeoff TEXT already
+# stated the real SAR gap correctly either way; this only affects the score).
+# Chosen so the curve is continuous with the 0.5 "near budget" tier exactly at
+# ratio==0.25, decays smoothly, and lands close to the old flat 0.15 around
+# ratio==1.0 (100% over) — i.e. it doesn't reshuffle the common case, it only
+# adds resolution further out. Floors above zero: an absurdly over-budget unit
+# never fully vanishes from scoring (soft signals never eliminate a unit).
+_BUDGET_OVER_FLOOR = 0.05
+_BUDGET_DECAY = 2.0
 
 
 def _score_budget(u, answers):
@@ -317,36 +345,82 @@ def _score_budget(u, answers):
     if price <= budget:
         return 1.0, f"{price} ريال بالليلة — داخل ميزانيتك", None
     gap = price - budget
+    tradeoff = f"أغلى {gap} ريال بالليلة من ميزانيتك"
     if gap <= budget * 0.25:
-        return 0.5, None, f"أغلى {gap} ريال بالليلة من ميزانيتك"
-    return 0.15, None, f"أغلى {gap} ريال بالليلة من ميزانيتك"
+        return 0.5, None, tradeoff
+    ratio = gap / budget
+    fit = _BUDGET_OVER_FLOOR + (0.5 - _BUDGET_OVER_FLOOR) * math.exp(-_BUDGET_DECAY * (ratio - 0.25))
+    return fit, None, tradeoff
 
 
-# Amenity keywords that genuinely matter per purpose. Matched case-insensitively
-# as substrings against the raw Hostaway amenity names.
+# Amenity keywords that genuinely matter per purpose. (keyword, exclusions,
+# arabic_label). A keyword only counts when it appears in an amenity name
+# that contains NONE of its exclusions — this is what stops real Hostaway/
+# Airbnb amenity strings from producing false positives that would tell a
+# guest they have something they don't: "washer" must not be satisfied by
+# "Dishwasher", "pool" must not be satisfied by "Pool table"/"Pool cue", and
+# "parking" must not be satisfied by paid/off-site/street parking, which is
+# not the convenience a guest means when they ask for parking.
 PURPOSE_AMENITIES = {
-    "work":      [("workspace", "مكتب للشغل"), ("wifi", "واي فاي"), ("desk", "مكتب")],
-    "family":    [("kitchen", "مطبخ كامل"), ("washer", "غسالة"), ("crib", "سرير أطفال")],
-    "rest":      [("pool", "مسبح"), ("balcony", "بلكونة"), ("jacuzzi", "جاكوزي")],
-    "medical":   [("kitchen", "مطبخ كامل"), ("elevator", "مصعد"), ("parking", "موقف")],
-    "boulevard": [("parking", "موقف سيارة"), ("wifi", "واي فاي")],
-    "shopping":  [("parking", "موقف سيارة"), ("elevator", "مصعد")],
+    "work":      [("workspace", (), "مكتب للشغل"),
+                  ("wifi", (), "واي فاي"),
+                  ("desk", (), "مكتب")],
+    "family":    [("kitchen", (), "مطبخ كامل"),
+                  ("washer", ("dishwasher",), "غسالة"),
+                  ("crib", (), "سرير أطفال")],
+    "rest":      [("pool", ("pool table", "pool cue"), "مسبح"),
+                  ("balcony", (), "بلكونة"),
+                  ("jacuzzi", (), "جاكوزي")],
+    "medical":   [("kitchen", (), "مطبخ كامل"),
+                  ("elevator", (), "مصعد"),
+                  ("parking", ("paid parking", "off premises", "street parking"), "موقف")],
+    "boulevard": [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة"),
+                  ("wifi", (), "واي فاي")],
+    "shopping":  [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة"),
+                  ("elevator", (), "مصعد")],
 }
+
+
+def _missing_amenities_tradeoff(wanted):
+    """Natural Najdi tradeoff naming what THIS purpose cares about that the
+    unit does not have — built from PURPOSE_AMENITIES' own labels (its top
+    one or two entries) rather than six hand-written sentences, so a future
+    purpose added to that table gets an honest tradeoff for free."""
+    labels = [ar for (_, _, ar) in wanted]
+    if len(labels) == 1:
+        return f"ما فيها {labels[0]}"
+    return f"ما فيها {labels[0]} ولا {labels[1]}"
 
 
 def _score_amenities(u, answers):
     """0.0-1.0 by how many purpose-relevant amenities the unit actually has.
     Neutral when the purpose has no amenity list; a missing/malformed
-    amenities field is treated as "has none" rather than raising."""
+    amenities field is treated as "has none" rather than raising.
+
+    Matched per RAW amenity string, one at a time — never against one joined
+    blob. Joining first would let an exclusion meant for one amenity string
+    accidentally cancel a genuine match sitting in a different string (or vice
+    versa); matching string-by-string keeps each exclusion scoped to only the
+    string it actually appears in.
+
+    When NOTHING relevant matched, returns an honest tradeoff naming what is
+    missing instead of just going quietly neutral-looking (Fix 2) — a unit
+    with no purpose-relevant amenity is a real, guest-visible downside.
+    """
     wanted = PURPOSE_AMENITIES.get(answers.get("purpose") or "")
     if not wanted:
-        return 0.5, None
-    have = " ".join(str(a).lower() for a in (u.get("amenities") or []))
-    hits = [ar for (kw, ar) in wanted if kw in have]
+        return 0.5, None, None
+    strings = [str(a).lower() for a in (u.get("amenities") or [])]
+    hits = []
+    for kw, exclusions, ar in wanted:
+        for s in strings:
+            if kw in s and not any(ex in s for ex in exclusions):
+                hits.append(ar)
+                break
     if not hits:
-        return 0.2, None
+        return 0.2, None, _missing_amenities_tradeoff(wanted)
     fit = min(1.0, len(hits) / len(wanted))
-    return fit, " · ".join(hits[:2])
+    return fit, " · ".join(hits[:2]), None
 
 
 def _score_one(u, answers, geo, party_size, dated):
@@ -360,44 +434,45 @@ def _score_one(u, answers, geo, party_size, dated):
     used for the availability gate) — the reason-guarantee fallback below
     needs it to avoid claiming availability that was never actually checked.
     """
-    total = 0.0
-    reasons, tradeoffs = [], []
-
-    fit, reason, tradeoff = _score_bedrooms(u, party_size, answers.get("sleep_pref"))
-    total += fit * WEIGHTS["bedrooms"]
-    if reason:
-        reasons.append(reason)
-    if tradeoff:
-        tradeoffs.append(tradeoff)
-
+    bfit, breason, btradeoff = _score_bedrooms(u, party_size, answers.get("sleep_pref"))
     pfit, preason, ptradeoff = _score_proximity(u, answers, geo)
-    total += pfit * WEIGHTS["proximity"]
-    if preason:
-        reasons.append(preason)
-    if ptradeoff:
-        tradeoffs.append(ptradeoff)
+    gfit, greason, gtradeoff = _score_budget(u, answers)          # g: budget (b is bedrooms)
+    afit, areason, atradeoff = _score_amenities(u, answers)
+    qfit, qreason, qtradeoff = _score_quality(u)
 
-    bfit, breason, btradeoff = _score_budget(u, answers)
-    total += bfit * WEIGHTS["budget"]
-    if breason:
-        reasons.append(breason)
-    if btradeoff:
-        tradeoffs.append(btradeoff)
+    # (weight, fit, reason, tradeoff) in the FIXED weight-descending order —
+    # this order is also the tie-break below, since `sorted` is stable.
+    parts = [
+        (WEIGHTS["bedrooms"], bfit, breason, btradeoff),
+        (WEIGHTS["proximity"], pfit, preason, ptradeoff),
+        (WEIGHTS["budget"], gfit, greason, gtradeoff),
+        (WEIGHTS["amenities"], afit, areason, atradeoff),
+        (WEIGHTS["quality"], qfit, qreason, qtradeoff),
+    ]
+    total = sum(weight * fit for weight, fit, _, _ in parts)
 
-    afit, areason = _score_amenities(u, answers)
-    total += afit * WEIGHTS["amenities"]
-    if areason:
-        reasons.append(areason)
+    # Reasons: sorted by actual points EARNED (fit * weight), not by which
+    # block happened to run first — a perfect proximity match (25 pts) must
+    # outrank a merely-adequate over-provisioned bedroom fit (18 pts) even
+    # though bedrooms is scored first. Equal-point ties fall back to the
+    # fixed weight-descending order above (stable sort + `parts` already in
+    # that order), so the existing determinism tests keep holding.
+    reason_candidates = [(weight * fit, text) for weight, fit, text, _ in parts if text]
+    reason_candidates.sort(key=lambda r: -r[0])
+    reasons = [text for _, text in reason_candidates]
 
-    qfit, qreason = _score_quality(u)
-    total += qfit * WEIGHTS["quality"]
-    if qreason:
-        reasons.append(qreason)
+    # Tradeoff: sorted by actual points LOST ((1 - fit) * weight) so the guest
+    # sees the single biggest real shortfall — e.g. being 129 minutes from the
+    # one place they asked to be near (22.5 pts lost) must beat being a single
+    # bedroom short (18.9 pts lost), never whichever block ran first.
+    tradeoff_candidates = [(weight * (1 - fit), text) for weight, fit, _, text in parts if text]
+    tradeoff_candidates.sort(key=lambda t: -t[0])
+    tradeoffs = [text for _, text in tradeoff_candidates]
 
     # Reason guarantee (invariant 4): a unit with nothing notable still says
     # something true rather than showing a bare card. MUST STAY LAST — every
-    # scoring block above (and any Task 5/6 blocks) appends its own reason
-    # first; later tasks must insert their blocks BEFORE this one, never after.
+    # scoring block above appends its own candidate reason first; any future
+    # scoring block must insert BEFORE this one, never after.
     if not reasons:
         cap = u.get("capacity")
         if cap:
