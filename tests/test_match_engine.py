@@ -25,8 +25,15 @@ class TestNeverZero(unittest.TestCase):
         self.assertGreater(len(out["top"]), 0)
 
     def test_returns_results_even_when_every_soft_signal_fails(self):
+        # neighborhood + amenities must ALSO miss for "every soft signal
+        # fails" to be true now that proximity/amenities are real scoring
+        # dimensions (Tasks 5-6) — the default fixture (al_malqa, Wifi) is
+        # coincidentally near the Boulevard and has Wifi, which used to be
+        # inert before those weights were wired in.
         answers = dict(BASE, party_size=2, purpose="boulevard", budget_max=100)
-        out = engine.score(answers, [unit(1, est_avg=5000, rating=3.0, reviews=2)])
+        u = unit(1, est_avg=5000, rating=3.0, reviews=2,
+                 neighborhood="manfuhah", amenities=["Kitchen"])
+        out = engine.score(answers, [u])
         self.assertEqual(len(out["top"]), 1)
         self.assertFalse(out["confident"])
 
@@ -341,6 +348,125 @@ class TestHonestAvailabilityFallback(unittest.TestCase):
         answers = dict(BASE, check_in="2026-08-01", check_out="2026-08-04")
         out = engine.score(answers, [self._unclaimed_unit()])
         self.assertIn("متاحة بتواريخك", out["top"][0]["reasons"])
+
+
+class TestProximity(unittest.TestCase):
+    def test_closer_unit_to_the_boulevard_outranks_farther(self):
+        from match import poi as _poi
+        blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
+        near = (blvd[0] + 0.01, blvd[1])
+        far = (blvd[0] + 0.30, blvd[1])
+        answers = dict(BASE, purpose="boulevard")
+        out = engine.score(answers, [unit(1), unit(2)], geo={1: far, 2: near})
+        self.assertEqual(out["top"][0]["id"], 2)
+
+    def test_close_unit_gets_a_minutes_reason(self):
+        from match import poi as _poi
+        blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
+        answers = dict(BASE, purpose="boulevard")
+        out = engine.score(answers, [unit(1)], geo={1: (blvd[0] + 0.01, blvd[1])})
+        joined = " ".join(out["top"][0]["reasons"])
+        self.assertIn("دقيقة", joined)
+
+    def test_missing_coords_fall_back_to_centroid_not_null(self):
+        answers = dict(BASE, purpose="boulevard")
+        out = engine.score(answers, [unit(1, neighborhood="al_malqa")], geo={})
+        self.assertEqual(len(out["top"]), 1)
+        self.assertGreater(out["top"][0]["match_score"], 0)
+
+    def test_purpose_without_a_poi_scores_neutral_for_everyone(self):
+        answers = dict(BASE, purpose="rest")
+        out = engine.score(answers, [unit(1, neighborhood="al_malqa"),
+                                     unit(2, neighborhood="al_malaz")], geo={})
+        self.assertEqual(out["top"][0]["match_score"], out["top"][1]["match_score"])
+
+    def test_unlocatable_unit_is_not_eliminated(self):
+        u = unit(1, neighborhood="")
+        answers = dict(BASE, purpose="boulevard")
+        out = engine.score(answers, [u], geo={})
+        self.assertEqual(len(out["top"]), 1)
+
+    def test_far_unit_gets_a_distance_tradeoff(self):
+        from match import poi as _poi
+        blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
+        answers = dict(BASE, purpose="boulevard")
+        out = engine.score(answers, [unit(1)], geo={1: (blvd[0] + 0.40, blvd[1])})
+        self.assertIsNotNone(out["top"][0]["tradeoff"])
+
+
+class TestBudget(unittest.TestCase):
+    def test_within_budget_outranks_over_budget(self):
+        answers = dict(BASE, budget_max=800)
+        out = engine.score(answers, [unit(1, est_avg=1400), unit(2, est_avg=700)])
+        self.assertEqual(out["top"][0]["id"], 2)
+
+    def test_over_budget_unit_still_appears_with_a_tradeoff(self):
+        answers = dict(BASE, budget_max=500)
+        out = engine.score(answers, [unit(1, est_avg=900)])
+        self.assertEqual(len(out["top"]), 1)
+        self.assertIsNotNone(out["top"][0]["tradeoff"])
+
+    def test_tradeoff_states_the_real_gap(self):
+        answers = dict(BASE, budget_max=500)
+        out = engine.score(answers, [unit(1, est_avg=650)])
+        self.assertIn("150", out["top"][0]["tradeoff"])
+
+    def test_no_budget_answer_scores_neutral_for_everyone(self):
+        answers = dict(BASE, budget_max=None)
+        out = engine.score(answers, [unit(1, est_avg=300), unit(2, est_avg=3000)])
+        self.assertEqual(out["top"][0]["match_score"], out["top"][1]["match_score"])
+
+    def test_unpriced_unit_is_not_eliminated(self):
+        u = unit(1); u["est_avg"] = None; u["price_base"] = None
+        out = engine.score(dict(BASE, budget_max=500), [u])
+        self.assertEqual(len(out["top"]), 1)
+
+    def test_malformed_budget_max_scores_neutral_not_raise(self):
+        """`budget_max` might not be cleaned yet when this is called directly —
+        a non-numeric string must not raise inside `int(budget)`."""
+        answers = dict(BASE, budget_max="abc")
+        out = engine.score(answers, [unit(1, est_avg=900)])
+        self.assertEqual(len(out["top"]), 1)
+
+
+class TestPurposeAmenities(unittest.TestCase):
+    def test_workspace_helps_a_work_trip(self):
+        answers = dict(BASE, purpose="work")
+        withws = unit(1, amenities=["Wifi", "Dedicated workspace", "Kitchen"])
+        without = unit(2, amenities=["Kitchen"])
+        out = engine.score(answers, [withws, without], geo={})
+        self.assertEqual(out["top"][0]["id"], 1)
+
+    def test_washer_helps_a_family_trip(self):
+        answers = dict(BASE, purpose="family")
+        withw = unit(1, amenities=["Kitchen", "Washer"])
+        without = unit(2, amenities=["Wifi"])
+        out = engine.score(answers, [withw, without], geo={})
+        self.assertEqual(out["top"][0]["id"], 1)
+
+    def test_missing_amenities_list_does_not_crash(self):
+        u = unit(1); u["amenities"] = None
+        out = engine.score(dict(BASE, purpose="work"), [u])
+        self.assertEqual(len(out["top"]), 1)
+
+
+class TestConfidenceReachable(unittest.TestCase):
+    def test_weights_sum_to_one_hundred(self):
+        self.assertEqual(sum(engine.WEIGHTS.values()), 100)
+
+    def test_a_strong_match_clears_the_confidence_floor(self):
+        """Regression guard: CONFIDENCE_FLOOR assumes every weight is wired.
+        If a future change unwires one, the honest-fallback copy would fire for
+        every guest, including perfect matches."""
+        from match import poi as _poi
+        blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
+        answers = dict(BASE, party_size=4, sleep_pref="pairs",
+                       purpose="boulevard", budget_max=1000)
+        u = unit(1, beds=2, capacity=6, rating=4.9, reviews=80,
+                 amenities=["Wifi", "Free parking"], est_avg=800)
+        out = engine.score(answers, [u], geo={1: (blvd[0] + 0.005, blvd[1])})
+        self.assertTrue(out["confident"],
+                        f"score {out['top'][0]['match_score']} < {engine.CONFIDENCE_FLOOR}")
 
 
 if __name__ == "__main__":

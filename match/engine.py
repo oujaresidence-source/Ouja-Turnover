@@ -22,11 +22,12 @@ WEIGHTS = {
 
 # Below this, we tell the guest the truth instead of dressing up a weak match.
 # NOTE: this assumes ALL FIVE weights (bedrooms, proximity, budget, amenities,
-# quality) are wired into `_score_one`. Until Tasks 5-6 land, only bedrooms
-# (30) + quality (10) = 40 points are reachable, so 55 is UNREACHABLE and
-# every result reports `confident: False`. That's fine while `score()` is not
-# yet called from bot.py — but wiring it in before Tasks 5-6 ship would make
-# the honest low-confidence fallback copy fire for every single guest.
+# quality) are wired into `_score_one`. That is now true (Tasks 3-6 all land
+# in `_score_one`) — see
+# TestConfidenceReachable.test_a_strong_match_clears_the_confidence_floor in
+# tests/test_match_engine.py, which is a regression guard: if a future change
+# ever unwires one of the five blocks, that test fails loudly instead of the
+# honest low-confidence fallback copy silently firing for every guest.
 CONFIDENCE_FLOOR = 55
 
 # Bayesian prior for ratings. A raw average lets 5.0 from 3 reviews outrank 4.8
@@ -146,6 +147,7 @@ def score(answers, units, geo=None, top=TOP_N):
                 "impossible": False, "max_capacity": 0}
 
     scored = []
+    raw_totals = []
     for u in eligible:
         total, reasons, tradeoffs = _score_one(u, answers, geo or {}, party_size, dated)
         # Deep copy: nested fields (amenities, images, ...) must not be
@@ -157,9 +159,19 @@ def score(answers, units, geo=None, top=TOP_N):
         item["reasons"] = reasons[:3]
         item["tradeoff"] = (tradeoffs[0] if tradeoffs else None)
         scored.append(item)
+        raw_totals.append(total)
 
     # Stable, deterministic: best score first, ties broken by id ascending.
-    scored.sort(key=lambda x: (-x["match_score"], _id_sort_key(x.get("id"))))
+    # Sort on the RAW float total, not the rounded `match_score` shown to the
+    # guest. With only bedrooms+quality wired (Tasks 1-4) the two never
+    # diverged, but now that all five weights are summed, two units a fraction
+    # of a point apart can round to the same displayed integer — sorting on
+    # the rounded value would silently coin-flip that pair on id instead of on
+    # which one actually scored higher. `match_score` in the returned dict is
+    # still the rounded integer; only the sort key uses the pre-rounding sum.
+    order = sorted(range(len(scored)),
+                   key=lambda i: (-raw_totals[i], _id_sort_key(scored[i].get("id"))))
+    scored = [scored[i] for i in order]
 
     best = scored[0]["match_score"] if scored else 0
     return {"top": scored[:top], "near": scored[top:],
@@ -251,6 +263,92 @@ def _score_quality(u):
     return fit, reason
 
 
+# Minutes at which proximity stops helping. Beyond this a unit is "across town".
+_NEAR_MIN, _FAR_MIN = 10, 35
+
+
+def _score_proximity(u, answers, geo):
+    """0.0-1.0 by drive time to the POI implied by the guest's purpose.
+    Neutral (never punishing) when the purpose has no POI or the unit cannot be
+    located — invariant 7 means this never returns None."""
+    poi_key = poi.PURPOSE_POI.get(answers.get("purpose") or "")
+    if not poi_key:
+        return 0.5, None, None
+    target = poi.POIS.get(poi_key)
+    if not target:
+        return 0.5, None, None
+    point = poi.resolve_point(u, geo)
+    if not point:
+        return 0.5, None, None
+
+    label = target[0]
+    mins = poi.minutes_to(poi.haversine_km(point, (target[2], target[3])))
+    if mins <= _NEAR_MIN:
+        return 1.0, f"{mins} دقيقة عن {label}", None
+    if mins >= _FAR_MIN:
+        return 0.1, None, f"بعيدة عن {label} — حوالي {mins} دقيقة"
+    span = _FAR_MIN - _NEAR_MIN
+    fit = 1.0 - ((mins - _NEAR_MIN) / span) * 0.9
+    reason = f"{mins} دقيقة عن {label}" if mins <= 20 else None
+    return fit, reason, None
+
+
+def _score_budget(u, answers):
+    """0.0-1.0 by nightly price against the guest's band. Unpriced/no-budget
+    scores neutral, never punished — invariant: only physically-true facts
+    eliminate a unit, and price is a soft signal here, not a gate."""
+    budget = answers.get("budget_max")
+    if not budget:
+        return 0.5, None, None
+    price = u.get("est_avg") or u.get("price_base")
+    try:
+        price = int(price)
+    except (TypeError, ValueError):
+        return 0.5, None, None
+    if price <= 0:
+        return 0.5, None, None
+    try:
+        budget = int(budget)
+    except (TypeError, ValueError):
+        # Malformed budget_max (e.g. a non-numeric string) must score neutral
+        # rather than raise — mirrors `_clean_party_size`'s fail-closed-to-
+        # neutral handling of garbage guest input.
+        return 0.5, None, None
+    if price <= budget:
+        return 1.0, f"{price} ريال بالليلة — داخل ميزانيتك", None
+    gap = price - budget
+    if gap <= budget * 0.25:
+        return 0.5, None, f"أغلى {gap} ريال بالليلة من ميزانيتك"
+    return 0.15, None, f"أغلى {gap} ريال بالليلة من ميزانيتك"
+
+
+# Amenity keywords that genuinely matter per purpose. Matched case-insensitively
+# as substrings against the raw Hostaway amenity names.
+PURPOSE_AMENITIES = {
+    "work":      [("workspace", "مكتب للشغل"), ("wifi", "واي فاي"), ("desk", "مكتب")],
+    "family":    [("kitchen", "مطبخ كامل"), ("washer", "غسالة"), ("crib", "سرير أطفال")],
+    "rest":      [("pool", "مسبح"), ("balcony", "بلكونة"), ("jacuzzi", "جاكوزي")],
+    "medical":   [("kitchen", "مطبخ كامل"), ("elevator", "مصعد"), ("parking", "موقف")],
+    "boulevard": [("parking", "موقف سيارة"), ("wifi", "واي فاي")],
+    "shopping":  [("parking", "موقف سيارة"), ("elevator", "مصعد")],
+}
+
+
+def _score_amenities(u, answers):
+    """0.0-1.0 by how many purpose-relevant amenities the unit actually has.
+    Neutral when the purpose has no amenity list; a missing/malformed
+    amenities field is treated as "has none" rather than raising."""
+    wanted = PURPOSE_AMENITIES.get(answers.get("purpose") or "")
+    if not wanted:
+        return 0.5, None
+    have = " ".join(str(a).lower() for a in (u.get("amenities") or []))
+    hits = [ar for (kw, ar) in wanted if kw in have]
+    if not hits:
+        return 0.2, None
+    fit = min(1.0, len(hits) / len(wanted))
+    return fit, " · ".join(hits[:2])
+
+
 def _score_one(u, answers, geo, party_size, dated):
     """Returns (total_0_to_100, reasons, tradeoffs). Filled in across Tasks 3-6.
 
@@ -272,7 +370,24 @@ def _score_one(u, answers, geo, party_size, dated):
     if tradeoff:
         tradeoffs.append(tradeoff)
 
-    # Proximity (Task 5) and budget/amenities (Task 6) insert their blocks here.
+    pfit, preason, ptradeoff = _score_proximity(u, answers, geo)
+    total += pfit * WEIGHTS["proximity"]
+    if preason:
+        reasons.append(preason)
+    if ptradeoff:
+        tradeoffs.append(ptradeoff)
+
+    bfit, breason, btradeoff = _score_budget(u, answers)
+    total += bfit * WEIGHTS["budget"]
+    if breason:
+        reasons.append(breason)
+    if btradeoff:
+        tradeoffs.append(btradeoff)
+
+    afit, areason = _score_amenities(u, answers)
+    total += afit * WEIGHTS["amenities"]
+    if areason:
+        reasons.append(areason)
 
     qfit, qreason = _score_quality(u)
     total += qfit * WEIGHTS["quality"]
