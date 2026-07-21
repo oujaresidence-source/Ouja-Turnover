@@ -46475,18 +46475,40 @@ def _match_run(q):
                 "impossible": False, "max_capacity": 0}
     answers = _match_answers(q)
     _elite_geo_refresh()
-    units = []
-    for s, ov in _gw_visible_snaps():
-        pub = _gw_listing_public(s, ov)
-        if answers["check_in"] and answers["check_out"]:
-            av = unit_availability_price(s.get("id"), answers["check_in"],
-                                         answers["check_out"])
+    snaps = _gw_visible_snaps()
+    units = [_gw_listing_public(s, ov) for s, ov in snaps]
+    if answers["check_in"] and answers["check_out"]:
+        ci, co = answers["check_in"], answers["check_out"]
+        # ---- parallel calendar lookups — SAME pool pattern as enrich_catalog_for_dates
+        # (bot.py ~6176), whose docstring measured ~30s sequential -> ~3-5s parallel across
+        # the portfolio. /stay/match is a public, unauthenticated endpoint a guest is
+        # actively waiting on; do NOT collapse this back into a serial for-loop over
+        # unit_availability_price. Every visible unit is still checked exactly once — this
+        # only changes HOW the calls are made, never which units are checked, so the
+        # result set stays identical to a serial run. One unit's failure (exception or
+        # None) never fails the request; the engine already scores an unpriced unit
+        # neutrally instead of eliminating it.
+        avail_map = {}
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futures = {ex.submit(unit_availability_price, s.get("id"), ci, co): s.get("id")
+                           for s, _ov in snaps}
+                for fut in as_completed(futures):
+                    lid = futures[fut]
+                    try:
+                        avail_map[lid] = fut.result()
+                    except Exception as e:
+                        print(f"match availability parallel error ({lid}):", e)
+                        avail_map[lid] = None
+        except Exception as e:
+            print("match availability pool error:", e)
+        for pub in units:
+            av = avail_map.get(pub.get("id"))
             if av:
                 pub["available"] = av.get("available")
                 pub["nights"] = av.get("nights")
                 pub["est_total"] = av.get("total")
                 pub["est_avg"] = av.get("avg")
-        units.append(pub)
     out = _match.score(answers, units, geo=_match_geo_points())
     out["answers"] = answers
     return out
