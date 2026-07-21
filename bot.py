@@ -46063,6 +46063,35 @@ a{color:inherit;text-decoration:none}
 .sticky-cta{position:fixed;bottom:0;inset-inline:0;z-index:40;background:rgba(247,241,230,.92);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:11px 0 calc(11px + env(safe-area-inset-bottom))}
 .sticky-cta .wrap{display:flex;flex-direction:column;gap:6px}
 .foot{text-align:center;color:var(--mut);font-size:12px;padding:26px 16px 34px}
+.mq-wrap{max-width:560px;margin:0 auto;padding:22px 4px 40px}
+.mq-prog{display:flex;gap:6px;justify-content:center;margin-bottom:22px}
+.mq-dot{width:26px;height:3px;border-radius:2px;background:var(--line);transition:background .25s cubic-bezier(.23,1,.32,1)}
+.mq-dot.on{background:var(--ink)}
+.mq-back{background:none;border:0;color:var(--mut);font:inherit;font-size:13px;cursor:pointer;padding:4px 0;margin-bottom:6px}
+.mq-q{font-size:26px;line-height:1.35;margin:0 0 20px;color:var(--ink);text-wrap:balance}
+.mq-opts{display:flex;flex-direction:column;gap:9px}
+.mq-opt{width:100%;text-align:right;padding:16px 18px;font:inherit;font-size:16px;color:var(--ink);
+  background:var(--surface);border:1px solid var(--line);border-radius:13px;cursor:pointer;
+  transition:border-color .18s cubic-bezier(.23,1,.32,1),transform .12s cubic-bezier(.23,1,.32,1)}
+.mq-opt:hover{border-color:var(--ink)}
+.mq-opt:active{transform:scale(.985)}
+.mq-count{display:flex;align-items:center;gap:14px;justify-content:center;margin-top:20px;
+  color:var(--mut);font-size:14px}
+.mq-count b{font-size:20px;color:var(--ink);min-width:28px;text-align:center}
+.mq-pm{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink);font-size:20px;cursor:pointer;line-height:1}
+.mq-pm:active{transform:scale(.95)}
+.mq-skip{display:block;width:100%;margin-top:12px;background:none;border:0;color:var(--mut);
+  font:inherit;font-size:13.5px;cursor:pointer;padding:8px;text-decoration:underline}
+.mq-why{display:flex;flex-direction:column;gap:5px;margin:8px 0 2px;font-size:13.5px}
+.mq-why span{display:flex;gap:7px;align-items:flex-start;color:var(--ink)}
+.mq-trade{display:flex;gap:7px;align-items:flex-start;font-size:13px;color:var(--mut);margin-top:6px}
+.mq-head{margin:0 0 6px;font-size:21px;color:var(--ink)}
+.mq-sub{margin:0 0 18px;color:var(--mut);font-size:14px}
+@media (prefers-reduced-motion: reduce){
+  .mq-dot,.mq-opt{transition:none}
+  .mq-opt:active,.mq-pm:active{transform:none}
+}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -46175,6 +46204,132 @@ function searchSummary(ci,co,g,ty){
   (pp.get('tags')||'').split(',').filter(Boolean).forEach(function(k){var o=noo.filter(function(x){return x.key===k;})[0];bits.push(he(o?(o.ar||o.en):k));});
   var tyl=noo.filter(function(o){return o.key===ty;})[0];if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
   return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/stay'+location.search+'">تعديل البحث</a></div></div>';
+}
+
+var MQ={party:1,sleep:null,purpose:null,budget:null,ci:'',co:'',step:0};
+
+function mqSteps(){
+  // Q2 is conditional: parties under 3 never see the sleeping question.
+  var s=['who'];
+  if(MQ.party>=3)s.push('sleep');
+  s.push('purpose');
+  var pb=((STAY&&STAY.config&&STAY.config.price_bands)||null);
+  s.push(pb?'when_budget':'when');
+  return s;
+}
+
+function mqProgress(){
+  var st=mqSteps(),n=st.length,i=Math.min(MQ.step,n-1);
+  var dots='';for(var k=0;k<n;k++){dots+='<span class="mq-dot'+(k<=i?' on':'')+'"></span>';}
+  return '<div class="mq-prog" role="progressbar" aria-valuenow="'+(i+1)+'" aria-valuemin="1" aria-valuemax="'+n+'">'+dots+'</div>';
+}
+
+var MQ_WHO=[['solo','أنا بس',1],['couple','أنا وشريكي',2],['family','عائلة وأطفال',4],['friends','شلة أصدقاء',4],['work','سفر عمل',1]];
+var MQ_SLEEP=[['together','غرفة وحدة تكفينا'],['pairs','غرفة لكل ثنين'],['each','كل واحد غرفته']];
+var MQ_PURPOSE=[['boulevard','البوليفارد وموسم الرياض'],['work','عمل واجتماعات'],['medical','علاج'],['family','زيارة أهل'],['shopping','تسوق وسياحة'],['rest','بس أبي أرتاح']];
+
+function mqRender(){
+  var st=mqSteps(),key=st[Math.min(MQ.step,st.length-1)],body='',title='';
+  if(key==='who'){
+    title='مين معك؟';
+    body='<div class="mq-opts">'+MQ_WHO.map(function(o){
+      return '<button type="button" class="mq-opt" data-who="'+he(o[0])+'" data-n="'+o[2]+'">'+he(o[1])+'</button>';
+    }).join('')+'</div>'
+    +'<div class="mq-count"><span>كم عددكم؟</span><button type="button" class="mq-pm" data-pm="-1" aria-label="أقل">−</button>'
+    +'<b id="mqN">'+MQ.party+'</b><button type="button" class="mq-pm" data-pm="1" aria-label="أكثر">+</button></div>';
+  } else if(key==='sleep'){
+    title='كيف تبون تنامون؟';
+    body='<div class="mq-opts">'+MQ_SLEEP.map(function(o){
+      return '<button type="button" class="mq-opt" data-sleep="'+he(o[0])+'">'+he(o[1])+'</button>';
+    }).join('')+'</div>';
+  } else if(key==='purpose'){
+    title='وش جايبك الرياض؟';
+    body='<div class="mq-opts">'+MQ_PURPOSE.map(function(o){
+      return '<button type="button" class="mq-opt" data-purpose="'+he(o[0])+'">'+he(o[1])+'</button>';
+    }).join('')+'</div>';
+  } else {
+    title='متى تجي؟';
+    var pb=((STAY&&STAY.config&&STAY.config.price_bands)||null);
+    body='<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="mqCi"></div>'
+        +'<div class="field"><label>تاريخ الخروج</label><input type="date" id="mqCo"></div></div>'
+        +'<div id="mqErr" class="err"></div>';
+    if(pb){
+      body+='<div class="field"><label>كم تبي تصرف بالليلة؟ <b id="mqBv">'+pb.median+'</b> ريال</label>'
+          +'<input type="range" id="mqB" min="'+pb.p25+'" max="'+(pb.p75*2)+'" step="50" value="'+pb.median+'"></div>';
+    }
+    body+='<button class="btn block" id="mqGo">شوف اللي يناسبك</button>'
+        +'<button type="button" class="mq-skip" id="mqSkipDates">ما حددت التواريخ بعد</button>';
+  }
+  var back=MQ.step>0?'<button type="button" class="mq-back" id="mqBack" aria-label="رجوع">← رجوع</button>':'';
+  V.innerHTML='<div class="mq-wrap">'+mqProgress()+back
+    +'<h1 class="mq-q">'+he(title)+'</h1><div class="mq-body">'+body+'</div></div>';
+  mqBind(key);
+}
+
+function mqBind(key){
+  var wrap=V.querySelector('.mq-wrap');if(!wrap)return;
+  var back=document.getElementById('mqBack');
+  if(back)back.onclick=function(){MQ.step=Math.max(0,MQ.step-1);mqRender();};
+  wrap.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    if(b.hasAttribute('data-pm')){
+      MQ.party=Math.max(1,Math.min(16,MQ.party+parseInt(b.getAttribute('data-pm'),10)));
+      var n=document.getElementById('mqN');if(n)n.textContent=MQ.party;return;
+    }
+    if(b.hasAttribute('data-who')){
+      MQ.party=parseInt(b.getAttribute('data-n'),10)||MQ.party;
+      if(b.getAttribute('data-who')==='work')MQ.purpose='work';
+      track('match_answer',{type:'who'});MQ.step++;mqRender();return;
+    }
+    if(b.hasAttribute('data-sleep')){
+      MQ.sleep=b.getAttribute('data-sleep');
+      track('match_answer',{type:'sleep'});MQ.step++;mqRender();return;
+    }
+    if(b.hasAttribute('data-purpose')){
+      MQ.purpose=b.getAttribute('data-purpose');
+      track('match_answer',{type:'purpose'});MQ.step++;mqRender();return;
+    }
+  });
+  if(key==='when'||key==='when_budget'){
+    var ci=document.getElementById('mqCi'),co=document.getElementById('mqCo');
+    var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
+    ci.min=iso(t);co.min=iso(new Date(t.getTime()+86400000));
+    ci.onchange=function(){var d=ci.value?new Date(ci.value):t;co.min=iso(new Date(d.getTime()+86400000));};
+    var bs=document.getElementById('mqB'),bv=document.getElementById('mqBv');
+    if(bs&&bv)bs.oninput=function(){bv.textContent=bs.value;};
+    var submit=function(withDates){
+      if(withDates){
+        var ev=validateDates(ci.value,co.value);
+        if(ev){var er=document.getElementById('mqErr');er.textContent=ev;er.classList.add('on');return;}
+        MQ.ci=ci.value;MQ.co=co.value;
+      } else {MQ.ci='';MQ.co='';}
+      if(bs)MQ.budget=bs.value;
+      mqSubmit();
+    };
+    document.getElementById('mqGo').onclick=function(){submit(true);};
+    document.getElementById('mqSkipDates').onclick=function(){submit(false);};
+  }
+}
+
+function mqSubmit(){
+  var q='?party='+encodeURIComponent(MQ.party)+'&purpose='+encodeURIComponent(MQ.purpose||'rest');
+  if(MQ.sleep)q+='&sleep='+encodeURIComponent(MQ.sleep);
+  if(MQ.budget)q+='&budget='+encodeURIComponent(MQ.budget);
+  if(MQ.ci&&MQ.co)q+='&check_in='+MQ.ci+'&check_out='+MQ.co;
+  history.replaceState(null,'','/stay/match'+q);
+  mqResults(q);
+}
+
+function viewMatch(){
+  track('match_start',{});
+  var p=qs();
+  if(p.get('party')){                 // returning via a shared/back-button URL
+    MQ.party=parseInt(p.get('party'),10)||1;MQ.sleep=p.get('sleep');
+    MQ.purpose=p.get('purpose');MQ.budget=p.get('budget');
+    MQ.ci=p.get('check_in')||'';MQ.co=p.get('check_out')||'';
+    mqResults(location.search);return;
+  }
+  MQ.step=0;mqRender();
 }
 
 function viewSearch(){
@@ -46302,6 +46457,7 @@ function viewListing(){
   var path=location.pathname;
   if(path==='/stay'||path==='/stay/'){viewLanding();}
   else if(path==='/stay/search'){viewSearch();}
+  else if(path==='/stay/match'){viewMatch();}
   else{viewListing();}
 })();
 </script>
