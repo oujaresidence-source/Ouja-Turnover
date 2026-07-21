@@ -5306,6 +5306,14 @@
     if (!box || !store.gnav || !store.gnav.nav) return;
     var nav = store.gnav.nav;
     var role = store.gnav.role || 'admin';
+    var perms = store.gnav.perms || {};
+    // Same per-page gate as the dashboard: admin sees all; others only pages they can read.
+    function gCanRead(id) {
+      if (role === 'admin') return true;
+      var p = perms[id];
+      if (p) return !!p.read;
+      return id !== 'users';
+    }
     var erpTargets = nav.erp_targets || {};
     var byId = {};
     (nav.items || []).forEach(function (n) { byId[n.id] = n; });
@@ -5327,7 +5335,7 @@
     }
     box.innerHTML = (nav.cats || []).map(function (cat) {
       var items = (cat.ids || []).map(function (id) { return byId[id]; })
-        .filter(function (n) { return n && !(n.adminOnly && role !== 'admin'); });
+        .filter(function (n) { return n && !(n.adminOnly && role !== 'admin') && gCanRead(n.id); });
       if (!items.length) return '';
       var activeHere = items.some(function (n) { return n.id === 'erp'; });
       var isCollapsed = !!collapsed[cat.tk] && !activeHere;
