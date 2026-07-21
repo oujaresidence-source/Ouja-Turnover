@@ -375,7 +375,11 @@ def _score_budget(u, answers):
 PURPOSE_AMENITIES = {
     "work":      [("workspace", (), "مكتب للشغل", True),
                   ("wifi", (), "واي فاي", False),
-                  ("desk", (), "مكتب", True)],
+                  # Tradeoff-ineligible on purpose: «مكتب» and «مكتب للشغل» are
+                  # near-synonyms, so naming both produces the stutter
+                  # «ما ذكروا فيها مكتب للشغل ولا مكتب». Still counts as a
+                  # positive reason when a desk is actually listed.
+                  ("desk", (), "مكتب", False)],
     "family":    [("kitchen", (), "مطبخ كامل", False),
                   ("washer", ("dishwasher",), "غسالة", True),
                   ("crib", (), "سرير أطفال", True)],
