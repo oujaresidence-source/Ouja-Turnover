@@ -72,6 +72,24 @@ class TestAvailabilityGate(unittest.TestCase):
         out = engine.score(BASE, [a])
         self.assertEqual(len(out["top"]), 1)
 
+    def test_booked_dates_are_not_reported_as_too_small(self):
+        """A couple looking at a fully-booked weekend must NOT be told no unit
+        is big enough for them."""
+        a = unit(1, capacity=4); a["available"] = False
+        b = unit(2, capacity=6); b["available"] = False
+        answers = dict(BASE, party_size=2,
+                       check_in="2026-08-01", check_out="2026-08-04")
+        out = engine.score(answers, [a, b])
+        self.assertEqual(out["top"], [])
+        self.assertFalse(out["impossible"])
+
+    def test_too_large_party_is_still_impossible_even_with_dates(self):
+        answers = dict(BASE, party_size=20,
+                       check_in="2026-08-01", check_out="2026-08-04")
+        out = engine.score(answers, [unit(1, capacity=4), unit(2, capacity=8)])
+        self.assertTrue(out["impossible"])
+        self.assertEqual(out["max_capacity"], 8)
+
 
 class TestDeterminism(unittest.TestCase):
     def test_identical_input_gives_identical_order(self):
@@ -90,6 +108,40 @@ class TestDeterminism(unittest.TestCase):
         units = [unit(3), unit(1)]
         engine.score(BASE, units)
         self.assertEqual([u["id"] for u in units], [3, 1])
+
+    def test_mixed_id_types_do_not_crash_the_sort(self):
+        units = [unit(1), unit("2"), unit(None)]
+        out = engine.score(BASE, list(units))
+        again = engine.score(BASE, list(units))
+        ids = [u["id"] for u in out["top"] + out["near"]]
+        ids_again = [u["id"] for u in again["top"] + again["near"]]
+        self.assertEqual(ids, ids_again)
+        self.assertEqual(len(ids), 3)
+
+
+class TestPartySizeCoercion(unittest.TestCase):
+    def test_malformed_party_size_does_not_fail_open(self):
+        """A garbage party_size must not silently disable the capacity gate
+        (the old bug: int("abc") raised, was swallowed, and the unit was
+        admitted no matter its capacity)."""
+        units = [unit(1, capacity=1), unit(2, capacity=4)]
+        malformed = engine.score(dict(BASE, party_size="abc"), [dict(u) for u in units])
+        explicit_one = engine.score(dict(BASE, party_size=1), [dict(u) for u in units])
+        got = sorted(u["id"] for u in malformed["top"] + malformed["near"])
+        want = sorted(u["id"] for u in explicit_one["top"] + explicit_one["near"])
+        self.assertEqual(got, want)
+
+    def test_none_party_size_defaults_to_one(self):
+        out = engine.score(dict(BASE, party_size=None), [unit(1, capacity=1)])
+        self.assertEqual(len(out["top"]), 1)
+
+
+class TestReturnedItemsAreCopies(unittest.TestCase):
+    def test_mutating_a_returned_items_nested_list_does_not_touch_the_input(self):
+        u = unit(1, amenities=["Wifi", "Kitchen"])
+        out = engine.score(BASE, [u])
+        out["top"][0]["amenities"].append("Pool")
+        self.assertEqual(u["amenities"], ["Wifi", "Kitchen"])
 
 
 class TestTopAndNearSplit(unittest.TestCase):
