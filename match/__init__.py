@@ -5,5 +5,4 @@ supplies inventory, availability, prices and coordinates; this package only
 ranks. That keeps the whole thing unit-testable with fabricated data.
 """
 
-# match/engine.py (and its `score` re-export) lands in Task 2 — left out here
-# on purpose so this package stays importable before that file exists.
+from .engine import score  # noqa: F401
