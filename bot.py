@@ -46320,6 +46320,89 @@ function mqSubmit(){
   mqResults(q);
 }
 
+function mqLinkQS(){
+  // The listing page only reads check_in/check_out + UTMs from its query string —
+  // party/sleep/purpose/budget mean nothing there and would just pollute the URL
+  // and its analytics. Carry the dates (so the listing keeps dated pricing, same
+  // as card() does from search) plus carry() for attribution, drop the rest.
+  var d=(MQ.ci&&MQ.co)?('check_in='+MQ.ci+'&check_out='+MQ.co):'';
+  var u=carry();                      // '' or '&utm_x=..&utm_y=..'
+  if(d&&u)return '?'+d+u;
+  if(d)return '?'+d;
+  if(u)return '?'+u.slice(1);
+  return '';
+}
+
+function mqCard(l){
+  var why=(l.reasons||[]).map(function(r){return '<span>✓ '+he(r)+'</span>';}).join('');
+  var tr=l.tradeoff?('<div class="mq-trade">⚠︎ '+he(l.tradeoff)+'</div>'):'';
+  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
+  var price=(l.est_total!=null&&l.nights>0)
+    ?('<div class="price"><b>من '+money(l.est_avg)+' / الليلة</b> · الإجمالي التقريبي '+money(l.est_total)+'</div>')
+    :'<div class="price soft">السعر يظهر داخل Airbnb</div>';
+  return '<a class="card lc" href="/stay/'+he(l.slug)+mqLinkQS()+'">'
+    +'<div class="ph">'+img+'</div><div class="bd">'
+    +'<h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
+    +(l.area?('<div class="meta">📍 '+he(l.area)+'</div>'):'')
+    +'<div class="mq-why">'+why+'</div>'+tr+price
+    +'<div class="cta-row" style="margin-top:auto;padding-top:8px"><span class="btn block sm">شوف التفاصيل</span></div>'
+    +'</div></a>';
+}
+
+function mqResults(q){
+  // A plain skeleton with no text reads as frozen once the guest has waited a
+  // couple of seconds on a cold cache. One static line is honest (we don't know
+  // how long it'll take, so no fake percentage/progress) but tells them it's alive.
+  V.innerHTML='<div class="mq-wrap"><div class="sk" style="height:20px;width:55%;margin-bottom:16px"></div>'
+    +'<p class="muted" style="margin:0 0 14px;font-size:13.5px">نجهز لك أفضل الخيارات المتاحة...</p>'
+    +'<div class="sk" style="height:200px;border-radius:14px"></div></div>';
+  fetch('/api/stay/match'+q).then(function(r){return r.json();}).then(function(d){
+    var top=(d&&d.top)||[],near=(d&&d.near)||[];
+    var medical=(d&&d.answers&&d.answers.purpose==='medical');
+
+    if(d&&d.impossible){
+      V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما عندنا وحدة تكفي هالعدد</h2>'
+        +'<p class="mq-sub">أكبر وحدة عندنا تستوعب '+he(String(d.max_capacity||0))+' ضيوف. لو تبون تقسمون على وحدتين نقدر نساعدكم.</p>'
+        +'<a class="btn block" href="/stay">تصفح كل الوحدات</a></div>';
+      track('match_results',{count:0});return;
+    }
+    if(!top.length){
+      V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما لقينا وحدات متاحة بهذي التواريخ</h2>'
+        +'<p class="mq-sub">جرّب تواريخ ثانية، أو تصفح الوحدات بدون تحديد تاريخ.</p>'
+        +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
+      track('match_results',{count:0});return;
+    }
+
+    // The علاج path drops the celebratory register: no emoji, no upsell, distance first.
+    var head,sub;
+    if(medical){
+      head='هذي أقرب وحداتنا';sub='رتبناها حسب قربها من المستشفى. دخول ذاتي، بدون استقبال.';
+    } else if(d.confident){
+      head='لقينا لك '+top.length+' وحدات تناسبك';sub='مرتبة حسب الأقرب لطلبك.';
+    } else {
+      head='ما عندنا وحدة تطابق كل شي';sub='هذي الأقرب لطلبك — شفنا لك أفضل الموجود بصراحة.';
+    }
+
+    var html='<div class="mq-wrap"><h2 class="mq-head">'+he(head)+'</h2><p class="mq-sub">'+he(sub)+'</p>'
+      +'<div class="grid">'+top.map(mqCard).join('')+'</div>';
+    if(near.length){
+      html+='<h3 class="mq-head" style="font-size:17px;margin:26px 0 10px">قريبة كمان</h3>'
+        +'<div class="grid">'+near.slice(0,3).map(mqCard).join('')+'</div>';
+    }
+    html+='<button type="button" class="mq-skip" id="mqAgain">جاوب من جديد</button></div>';
+    V.innerHTML=html;
+    var again=document.getElementById('mqAgain');
+    if(again)again.onclick=function(){location.href='/stay/match';};
+    // guests + type feed the dashboard unmet-demand table; weak marks a low-confidence result
+    track('match_results',{count:top.length,guests:MQ.party,
+                           type:(MQ.purpose||'rest'),weak:(d.confident?0:1)});
+  }).catch(function(){
+    V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">صار خلل بسيط</h2>'
+      +'<p class="mq-sub">جرّب مرة ثانية، أو تصفح الوحدات مباشرة.</p>'
+      +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
+  });
+}
+
 function viewMatch(){
   track('match_start',{});
   var p=qs();
