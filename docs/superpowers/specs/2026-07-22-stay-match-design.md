@@ -198,9 +198,16 @@ weak match as a strong one.
 
 Written and passing **before** any UI code:
 
-1. Never returns zero results when at least one unit exists.
+1. Never returns zero results when at least one unit **passes the hard gates**.
 2. Capacity gate is absolute — never recommends a unit that cannot physically
    fit the party.
+
+   Invariants 1 and 2 are in tension, and the resolution matters. A party of 20
+   against a portfolio whose largest unit sleeps 8 is a genuine physical
+   impossibility, and it is the **only** legitimate zero. The engine returns it
+   as a distinct `impossible: True` state carrying `max_capacity`, and the UI
+   says so plainly — «أكبر وحدة عندنا تستوعب ٨ ضيوف» — rather than showing a
+   generic "no results" screen. Every other zero is a bug.
 3. Exact bedroom match outranks over-provisioned, all else equal.
 4. Every returned unit carries at least one reason.
 5. A unit failing a soft criterion still appears, carrying a tradeoff string.
