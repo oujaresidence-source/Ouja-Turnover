@@ -46088,8 +46088,13 @@ a{color:inherit;text-decoration:none}
 .mq-trade{display:flex;gap:7px;align-items:flex-start;font-size:13px;color:var(--mut);margin-top:6px}
 .mq-head{margin:0 0 6px;font-size:21px;color:var(--ink)}
 .mq-sub{margin:0 0 18px;color:var(--mut);font-size:14px}
+.mq-entry{display:block;text-align:center;padding:14px 16px;margin:10px 0 14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  color:var(--ink);text-decoration:none;font-size:14.5px;
+  transition:border-color .18s cubic-bezier(.23,1,.32,1)}
+.mq-entry:hover{border-color:var(--ink)}
 @media (prefers-reduced-motion: reduce){
-  .mq-dot,.mq-opt{transition:none}
+  .mq-dot,.mq-opt,.mq-entry{transition:none}
   .mq-opt:active,.mq-pm:active{transform:none}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
@@ -46141,6 +46146,7 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
+    +'<a class="mq-entry" href="/stay/match">محتار؟ جاوبنا بأربع أسئلة ونختار لك — ١٠ ثواني</a>'
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
     +'<div id="feat" class="sec" style="margin-top:4px"></div>';
   var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
@@ -46435,7 +46441,7 @@ function viewSearch(){
       V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
     } else {
       track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
+      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><a class="btn" href="/stay/match">خلّنا نختار لك</a><a class="btn ghost" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
       if(ci&&co){loadSimilar(ty);}
     }
   }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
