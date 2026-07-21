@@ -70,6 +70,78 @@ NEIGHBOURHOOD_CENTROIDS = {
     "al_malaz":       (24.6720, 46.7370),
     "al_masif":       (24.7620, 46.6640),
     "al_mursalat":    (24.7550, 46.6740),
+
+    # ---- Added to cover the remaining bot.RIYADH_NEIGHBORHOODS keys (previously
+    # only 35/93 were mapped, so units in any of the other 58 silently lost
+    # proximity scoring). Approximate district centres from general knowledge of
+    # Riyadh geography, grouped by confidence — see the commit/report for which
+    # entries are lower-confidence and worth a human spot-check.
+
+    # -- higher confidence (well-known, major districts)
+    "al_falah":       (24.7550, 46.6100),
+    "al_dirah":       (24.6293, 46.7127),
+    "al_batha":       (24.6420, 46.7180),
+    "al_murabba":     (24.6480, 46.7160),
+    "manfuhah":       (24.6050, 46.7250),
+    "al_suwaidi":     (24.6100, 46.6550),
+    "al_badiah":      (24.6400, 46.6200),
+    "namar":          (24.5750, 46.6100),
+    "tuwaiq":         (24.5550, 46.5850),
+    "dirab":          (24.4700, 46.6200),
+    "dhahrat_laban":  (24.6050, 46.5600),
+    "al_naseem":      (24.7350, 46.7700),
+    "al_rimal":       (24.7750, 46.8350),
+    "al_andalus":     (24.7550, 46.7500),
+    "al_khaleej":     (24.7450, 46.7650),
+    "ishbiliyah":     (24.7700, 46.8200),
+    "al_hamra":       (24.8100, 46.7800),
+    "al_shimaisi":    (24.6520, 46.7000),
+    "al_wusham":      (24.6550, 46.6850),
+    "al_rabi":        (24.8180, 46.6550),
+
+    # -- medium confidence
+    "al_wizarat":     (24.6550, 46.7100),
+    "al_futah":       (24.6600, 46.7080),
+    "al_morabba":     (24.6850, 46.6650),
+    "al_mathar_north": (24.6950, 46.6680),
+    "al_jaradiyah":   (24.6480, 46.6750),
+    "al_oud":         (24.6150, 46.7350),
+    "al_qadisiyah":   (24.7550, 46.8100),
+    "al_uraija":      (24.6300, 46.6000),
+    "al_hazm":        (24.6550, 46.6100),
+    "shubra":         (24.6200, 46.6350),
+    "laban":          (24.5900, 46.5750),
+    "al_shifa":       (24.5700, 46.7300),
+    "al_faisaliyah":  (24.5600, 46.7200),
+    "al_aziziyah":    (24.5550, 46.7100),
+    "al_munisiyah":   (24.8250, 46.8050),
+    "al_yarmuk":      (24.7650, 46.7950),
+    "al_nahdah":      (24.7500, 46.8050),
+    "al_fayha":       (24.7350, 46.7900),
+
+    # -- lower confidence (smaller/less-documented districts — a human should
+    # spot-check these against a map before relying on them for anything but
+    # rough ranking)
+    "al_qadisiyah_e": (24.7450, 46.8150),  # غبيرة / Ghubairah
+    "al_salam":       (24.7350, 46.8250),
+    "al_jazirah":     (24.7450, 46.8350),
+    "al_manar":       (24.7200, 46.8150),
+    "al_rajhi":       (24.7100, 46.8300),  # الرجاء / Al Raja
+    "al_wurud2":      (24.7600, 46.8400),  # المروة / Al Marwah
+    "al_raid":        (24.8050, 46.8100),
+    "al_rawabi":      (24.8150, 46.8300),
+    "al_mahdiyah":    (24.6150, 46.5900),
+    "al_dar_al_baida": (24.5450, 46.7250),
+    "badr":           (24.5350, 46.7150),
+    "al_mansouriyah": (24.5500, 46.6950),
+    "al_rayyan":      (24.5650, 46.6950),
+    "al_quds":        (24.7900, 46.8500),
+    "al_maizilah":    (24.7100, 46.8100),
+    "al_iskan":       (24.6100, 46.7850),
+    "al_difa":        (24.6000, 46.7950),
+    "al_marqab":      (24.5950, 46.7550),
+    "al_doha":        (24.5750, 46.7450),
+    "al_wadi2":       (24.5850, 46.7700),  # النموذجية / Al Namudhajiyah
 }
 
 EARTH_RADIUS_KM = 6371.0
@@ -90,16 +162,29 @@ def haversine_km(a, b):
     return 2 * EARTH_RADIUS_KM * math.asin(min(1.0, math.sqrt(h)))
 
 
+def _is_real_coord_pair(pt):
+    """True only for an actual 2-element tuple/list of real numbers. A string
+    like "24" is length-2 but NOT a coordinate pair — indexing it would silently
+    fabricate (2.0, 4.0), a nonsense point in the Atlantic. Reject it here."""
+    if not isinstance(pt, (tuple, list)) or len(pt) != 2:
+        return False
+    return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in pt)
+
+
 def resolve_point(unit, geo):
     """(lat, lng) for a unit. Exact coords when known, else the centroid of its
-    assigned neighborhood, else None. Never raises."""
-    try:
-        pt = (geo or {}).get(unit.get("id"))
-    except (TypeError, AttributeError):
-        pt = None
-    if pt and len(pt) == 2:
+    assigned neighborhood, else None. Never raises, and never fabricates a
+    coordinate from malformed input — falls through to the centroid (then
+    None) instead."""
+    if not isinstance(unit, dict):
+        return None
+    pt = geo.get(unit.get("id")) if isinstance(geo, dict) else None
+    if _is_real_coord_pair(pt):
         return (float(pt[0]), float(pt[1]))
-    return NEIGHBOURHOOD_CENTROIDS.get(unit.get("neighborhood") or "")
+    centroid = NEIGHBOURHOOD_CENTROIDS.get(unit.get("neighborhood") or "")
+    if centroid is None:
+        return None
+    return (float(centroid[0]), float(centroid[1]))
 
 
 def minutes_to(km):
