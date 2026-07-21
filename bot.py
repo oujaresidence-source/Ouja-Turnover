@@ -48886,12 +48886,15 @@ async def _api_gw_overview(request):
     snaps = _gw_cache.get("listings") or []
     diag = _gw_cache.get("diag") or {}
     a = _gw_analytics_summary(7)
+    vis = _gw_visible_snaps()
+    mg_pts = _match_geo_points()
     return _json({"ok": True, "status": ("live" if snaps else "no_data"),
                   "synced_at": _gw_cache.get("synced_at"), "total": len(snaps),
-                  "visible": len(_gw_visible_snaps()),
+                  "visible": len(vis),
                   "missing_airbnb": len(diag.get("missing_airbnb") or []),
                   "missing_images": len(diag.get("missing_images") or []),
                   "unmapped_tags": sum(1 for e in _gw_taxonomy.values() if e.get("status") == "unmapped"),
+                  "match_geo": {"with_coords": len(mg_pts), "total": len(vis)},
                   "taxonomy": len(_gw_taxonomy), "searches_7d": a["searches"],
                   "clicks_7d": a["airbnb_clicks"], "ctr": a["ctr"], "views_7d": a["page_views"]})
 
