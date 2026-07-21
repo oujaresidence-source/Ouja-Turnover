@@ -136,5 +136,14 @@ class TestMatchRunParallelAvailability(unittest.TestCase):
         self.assertFalse(out.get("impossible"))
 
 
+class TestMatchEventKeys(unittest.TestCase):
+    def test_event_whitelist_carries_match_fields(self):
+        src = open("bot.py", encoding="utf-8").read()
+        i = src.index("async def _api_stay_event")
+        block = src[i:i + 1200]
+        for key in ('"type"', '"guests"', '"count"', '"weak"'):
+            self.assertIn(key, block, f"{key} missing from the event whitelist")
+
+
 if __name__ == "__main__":
     unittest.main()

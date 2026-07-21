@@ -46419,6 +46419,9 @@ function viewMatch(){
     mqResults(location.search);return;
   }
   MQ.step=0;mqRender();
+  window.addEventListener('pagehide',function(){
+    if(MQ.step>0&&!location.search)track('match_abandon',{type:mqSteps()[MQ.step]||''});
+  },{once:true});
 }
 
 function viewSearch(){
@@ -46804,7 +46807,7 @@ async def _api_stay_event(request):
         b = {}
     if isinstance(b, dict) and b.get("event"):
         ev = {k: b.get(k) for k in ("event", "session", "route", "referrer", "listing_id",
-                                    "check_in", "check_out", "guests", "type",
+                                    "check_in", "check_out", "guests", "type", "count", "weak",
                                     "utm_source", "utm_medium", "utm_campaign", "utm_content") if b.get(k) is not None}
         ua = request.headers.get("User-Agent", "")
         ev["device"] = ("mobile" if re.search(r"Mobi|Android|iPhone", ua) else "desktop")
