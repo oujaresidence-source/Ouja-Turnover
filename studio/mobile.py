@@ -204,6 +204,14 @@ MOBILE_HTML = """<!doctype html>
     background:var(--gold-soft);border-radius:999px;padding:3px 12px}
   .rk .n.top{background:var(--ink);color:#FAF7F1}
   .rk .w{font-size:12px;color:var(--muted);font-weight:500;line-height:1.4}
+  .rk .v{font-family:var(--num);font-weight:600;font-size:12px;color:var(--green);
+    background:var(--green-soft);border:1px solid #CBDFD1;border-radius:999px;padding:2px 9px}
+  .rk .v.low{color:var(--amber);background:var(--amber-soft);border-color:#E8D9BC}
+  .fix{background:var(--amber-soft);border:1px solid #E8D9BC;border-radius:10px;
+    padding:9px 12px;margin-bottom:9px;font-size:14px;color:var(--ink)}
+  .fix b{display:block;font-size:12px;color:var(--amber);margin-bottom:3px}
+  .fix ul{margin:0;padding-inline-start:18px}
+  .fix li{margin-bottom:3px}
 
   .hookbox{background:var(--ink);color:#FAF7F1;border-radius:12px;padding:15px 16px;
     text-align:center;margin-bottom:10px}
@@ -340,15 +348,22 @@ function card(x, i){
       + (x.signal_url ? ' · <a href="' + esc(x.signal_url) + '" target="_blank" rel="noopener">المصدر</a>' : '')
       + '</span></div>'
     : '';
+  var vs = (x.virality === undefined) ? '' :
+    '<span class="v' + (x.virality < 60 ? ' low' : '') + '">بناء ' + x.virality + '٪</span>';
+  var fixes = (x.fixes || []).length
+    ? '<div class="fix"><b>وش تعدّل قبل ما تصوّر</b><ul>'
+      + x.fixes.map(function(f){ return '<li>' + esc(f) + '</li>'; }).join('') + '</ul></div>'
+    : '';
   return '<div class="card" data-id="' + x.id + '">'
     + '<div class="rk"><span class="n' + (i === 0 ? ' top' : '') + '">' + (x.rank_score || 0) + '٪</span>'
-    + '<span class="w">' + esc(why || 'ترتيب مبدئي') + '</span></div>'
+    + vs + '<span class="w">' + esc(why || 'ترتيب مبدئي') + '</span></div>'
     + '<div class="hookbox"><div class="vt">' + esc(x.visual_title) + '</div>'
     + (x.visual_sub ? '<div class="vs">' + esc(x.visual_sub) + '</div>' : '') + '</div>'
     + '<div class="say"><span>🎤 قول</span>' + esc(x.hook_spoken) + '</div>'
     + sig
     + (x.why_it_works ? '<div class="why">💡 ' + esc(x.why_it_works) + '</div>' : '')
     + (s ? '<ol class="s">' + s + '</ol>' : '')
+    + fixes
     + (x.cta ? '<div class="why" style="background:var(--amber-soft);border-color:#E8D9BC">🎯 ' + esc(x.cta) + '</div>' : '')
     + '<div class="tags"><span class="t g">' + esc(AUD[x.audience] || x.audience) + '</span>'
     + '<span class="t">' + esc(TRG[x.trigger_kind] || '') + '</span>'

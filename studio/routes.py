@@ -10,7 +10,7 @@ quote building). esprima-parse every <script> block after edits."""
 import asyncio
 import traceback
 
-from . import db, engine, ideas as ideas_mod, learn, mine, mobile, plan  # noqa: F401
+from . import db, engine, factory, ideas as ideas_mod, learn, mine, mobile, plan  # noqa: F401
 from .host import HOST
 
 # v3 collectors. Imported defensively: a broken collector must degrade the studio
@@ -236,6 +236,23 @@ async def api_instant(request):
         return HOST.json_response(
             {"ok": False, "error": "ما فيه إشارات جاهزة — حدّث الإشارات أول"}, 200)
     return HOST.json_response({"ok": True, "ideas": cards, "generated": generated})
+
+
+async def api_factory(request):
+    """«ولّد كل شي» — sweep every unused story + signal into cards, in the background."""
+    d = await _body(request)
+    pending = await asyncio.to_thread(factory.pending_sources)
+    if not pending:
+        return HOST.json_response(
+            {"ok": False, "error": "ما فيه مصدر جديد — حدّث الإشارات أول", "pending": 0}, 200)
+    budget = d.get("budget") or factory.DEFAULT_BUDGET
+    started = await asyncio.to_thread(factory.start_thread, budget, None)
+    return HOST.json_response({"ok": True, "started": started, "pending": len(pending),
+                               "budget": int(budget), "progress": factory.snapshot()})
+
+
+async def api_factory_status(request):
+    return HOST.json_response({"ok": True, "progress": factory.snapshot()})
 
 
 async def api_learn(request):
@@ -869,3 +886,5 @@ def register(app):
     app.router.add_get("/api/studio/week", _safe(api_week))
     app.router.add_post("/api/studio/instant", _safe(api_instant))
     app.router.add_get("/api/studio/learn", _safe(api_learn))
+    app.router.add_post("/api/studio/factory", _safe(api_factory))
+    app.router.add_get("/api/studio/factory", _safe(api_factory_status))

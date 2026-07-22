@@ -190,3 +190,42 @@ class TestDiscordCommands(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSlashCommands(unittest.TestCase):
+    """The owner asked to drive everything from the Discord `/` picker, so the tree
+    has to actually carry these — and it must not carry anything that would fail the
+    sync, because ONE bad command name takes down every slash command in the bot."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(ROOT, "bot.py"), encoding="utf-8") as f:
+            cls.src = f.read()
+        cls.tree = re.findall(
+            r'@bot\.tree\.command\(\s*name="([^"]+)"\s*,\s*description="([^"]*)"',
+            cls.src, re.S)
+
+    def test_all_studio_slash_commands_exist(self):
+        names = {n for n, _d in self.tree}
+        for want in ("today", "idea", "ideas", "signals", "news", "factory",
+                     "posted", "studio"):
+            self.assertIn(want, names, "missing /%s" % want)
+
+    def test_every_slash_command_has_a_description(self):
+        for name, desc in self.tree:
+            self.assertTrue(desc.strip(), "/%s has no description to pick from" % name)
+            self.assertLessEqual(len(desc), 100, "/%s description too long for Discord" % name)
+
+    def test_slash_names_are_discord_safe(self):
+        # ASCII lowercase only: a rejected name fails the WHOLE tree sync
+        for name, _d in self.tree:
+            self.assertRegex(name, r"^[a-z0-9_-]{1,32}$", "unsafe slash name %r" % name)
+
+    def test_no_duplicate_slash_names(self):
+        names = [n for n, _d in self.tree]
+        self.assertEqual(len(names), len(set(names)), "duplicate slash command name")
+
+    def test_factory_reports_what_it_did_not_reach(self):
+        fn = re.search(r"async def _studio_factory_report.*?(?=\n@|\nasync def |\ndef )",
+                       self.src, re.S).group(0)
+        self.assertIn("left", fn, "an unfinished sweep must say so, not claim success")

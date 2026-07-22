@@ -17,7 +17,7 @@ The prior is deliberately weak. It is a guess about TikTok in general; ingredien
 is a fact about Faisal. As history accumulates, 1 grows and 4 stays where it is.
 """
 
-from . import engine, learn
+from . import engine, learn, virality
 
 # Prior pull from the verified research (playbook.py). Kept close to 1.0 on purpose —
 # these are nudges, not verdicts, and they must never outvote real performance data.
@@ -89,12 +89,22 @@ def signal_points(card):
     return max(-12.0, min(12.0, (strength - 50.0) * 0.24))
 
 
+def craft_points(card):
+    """-20..+20 from studio.virality — is the card BUILT the way the research says
+    short-form has to be built (hook in 3s, loop-closing end, a real number, a
+    length in the completion band)? This is the only ingredient that judges the
+    card itself rather than its context, and it is the one he can act on."""
+    v = virality.score(card)
+    return max(-20.0, min(20.0, (v - 55) * 0.45))
+
+
 def score(card, stats=None, today=""):
     """0-100. Higher = likelier to work for Faisal specifically."""
     if not isinstance(card, dict):
         return 0
-    total = (BASE + history_points(card, stats) + signal_points(card)
-             + freshness_points(card, today) + prior_points(card))
+    total = (BASE + history_points(card, stats) + craft_points(card)
+             + signal_points(card) + freshness_points(card, today)
+             + prior_points(card))
     return int(max(0, min(100, round(total))))
 
 
@@ -120,7 +130,20 @@ def reasons_ar(card, stats=None, today=""):
     p = prior_points(card)
     if p >= 5:
         out.append("شكل وهوك مثبت أداؤه")
+    cr = craft_points(card)
+    if cr >= 8:
+        out.append("مبنية صح: هوك سريع ونهاية ترجع للبداية")
+    elif cr <= -8:
+        out.append("البناء ضعيف — شوف «وش تعدّل»")
     return out
+
+
+def audit(card):
+    """The full explainable breakdown for one card: the rank, plus the structural
+    audit with concrete fixes. This is what the phone page opens when he taps «ليش»."""
+    v = virality.audit(card)
+    return {"virality": v["score"], "fixes": v["fixes"], "wins": v["wins"],
+            "factors": v["factors"]}
 
 
 def rank(cards, stats=None, today=""):
@@ -133,6 +156,10 @@ def rank(cards, stats=None, today=""):
         d = dict(c)
         d["rank_score"] = score(c, stats, today)
         d["rank_why"] = reasons_ar(c, stats, today)
+        va = virality.audit(c)
+        d["virality"] = va["score"]
+        d["fixes"] = va["fixes"]
+        d["wins"] = va["wins"]
         out.append((-d["rank_score"], i, d))
     out.sort(key=lambda t: (t[0], t[1]))
     return [d for _s, _i, d in out]

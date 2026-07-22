@@ -49,6 +49,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 import discord
+from discord import app_commands   # slash-command decorators (@app_commands.describe)
 from discord.ext import commands, tasks
 
 try:
@@ -54374,6 +54375,221 @@ async def cmd_studio_posted(ctx, idea_id: int = None, views: int = None):
     await ctx.reply(nl.join(msg))
 
 
+# ---- slash commands: he types "/" and picks from a list with Arabic descriptions ----
+# Names are ASCII on purpose. Discord permits Arabic command names, but a rejected
+# name fails the WHOLE tree sync and would take every other slash command in this bot
+# down with it. The description is what he actually reads in the picker.
+
+async def _slash_studio_reply(interaction, view, header, cards=None, note=""):
+    url = _studio_link(view)
+    nl = chr(10)
+    parts = [header]
+    for c in (cards or [])[:3]:
+        parts += ["", _studio_card_line(c)]
+    if note:
+        parts += ["", note]
+    if url:
+        parts += ["", "👉 %s" % url]
+    try:
+        await interaction.followup.send(nl.join(parts)[:1900], ephemeral=True)
+    except Exception as e:
+        print("[studio] slash reply failed:", e)
+
+
+def _studio_slash_ok(interaction):
+    return bool(_HAS_STUDIO and STUDIO_ENABLED)
+
+
+async def _slash_defer(interaction):
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except Exception:
+        pass
+
+
+@bot.tree.command(name="today", description="خطة اليوم — ٣ أفكار مرتّبة بالأقرب إنها تشتغل")
+async def slash_studio_today(interaction: discord.Interaction):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    cards = await asyncio.to_thread(_studio_ranked, "today", 3)
+    await _slash_studio_reply(
+        interaction, "today",
+        "📅 **خطة اليوم**" if cards else "📅 **ما فيه خطة لليوم بعد**",
+        cards, "" if cards else "شغّل `/signals` أو `/news` عشان يجمع إشارات.")
+
+
+@bot.tree.command(name="idea", description="أعطني فكرة الحين — وحدة جاهزة أصوّرها فوراً")
+async def slash_studio_idea(interaction: discord.Interaction):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    try:
+        cards, generated = await asyncio.to_thread(_studio.plan.instant, 1)
+    except Exception as e:
+        print("/idea error:", e)
+        cards, generated = [], False
+    if not cards:
+        await _slash_studio_reply(interaction, "ideas", "⚡ **ما فيه فكرة جاهزة**", [],
+                                  "شغّل `/factory` عشان يعبّي الرف.")
+        return
+    ranked = _studio.rank.rank(cards, _studio.learn.stats(_studio.db.learn_rows()))
+    await _slash_studio_reply(interaction, "ideas",
+                              "⚡ **صوّر هذي**" + (" (ولّدتها لك الحين)" if generated else ""),
+                              ranked)
+
+
+@bot.tree.command(name="ideas", description="كل الأفكار الجاهزة مرتّبة + فلترة بالصفحة")
+async def slash_studio_ideas(interaction: discord.Interaction):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    cards = await asyncio.to_thread(_studio_ranked, "ideas", 3)
+    await _slash_studio_reply(interaction, "ideas", "💡 **الأفكار (الأقوى أول)**", cards,
+                              "بالصفحة: فلترة بالجمهور والمصدر والمحفّز وشكل الفيديو.")
+
+
+@bot.tree.command(name="signals", description="اقرأ بيانات عوجا الحين (إشغال، تسعير، تقييمات، عمليات)")
+async def slash_studio_signals(interaction: discord.Interaction):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    try:
+        new = await asyncio.to_thread(_studio.internal.collect)
+    except Exception as e:
+        print("/signals error:", e)
+        new = []
+    nl = chr(10)
+    body = nl.join("• %s" % (s.get("fact") or "") for s in new[:4])
+    await _slash_studio_reply(interaction, "signals",
+                              "📡 **إشارات جديدة: %s**" % len(new) + ((nl + body) if body else ""),
+                              [], "بالصفحة اضغط «سوّها فكرة» على أي إشارة.")
+
+
+@bot.tree.command(name="news", description="بحث ويب حي: أنظمة السياحة السعودية وأخبار السوق")
+async def slash_studio_news(interaction: discord.Interaction):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    if not STUDIO_WEB_SEARCH:
+        await interaction.followup.send("⚠️ البحث الخارجي مطفي (STUDIO_WEB_SEARCH=0).",
+                                        ephemeral=True)
+        return
+    try:
+        new = await asyncio.to_thread(_studio.external.collect)
+    except Exception as e:
+        print("/news error:", e)
+        new = []
+    if not new:
+        await _slash_studio_reply(interaction, "signals", "🌍 **ما طلع جديد موثّق**", [],
+                                  "أي خبر بدون مصدر وتاريخ يُرمى — فالصفر يعني ما لقى شي مؤكد.")
+        return
+    nl = chr(10)
+    lines = []
+    for s in new[:4]:
+        lines.append("• %s" % (s.get("fact") or ""))
+        if s.get("url"):
+            lines.append("  %s" % s["url"])
+    await _slash_studio_reply(interaction, "signals",
+                              "🌍 **%s خبر/نظام جديد**%s%s" % (len(new), nl, nl.join(lines)),
+                              [], "الأخبار تُصوَّر بسرعة — كل يوم يمر يقل تأثيرها.")
+
+
+@bot.tree.command(name="factory",
+                  description="ولّد أفكار من كل القصص والإشارات — يعبّي الرف دفعة وحدة")
+@app_commands.describe(count="كم فكرة تبي يشتغل عليها (افتراضي ٦٠، الأقصى ٤٠٠)")
+async def slash_studio_factory(interaction: discord.Interaction, count: int = None):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    pending = await asyncio.to_thread(_studio.factory.pending_sources)
+    if not pending:
+        await _slash_studio_reply(
+            interaction, "ideas", "🏭 **الرف معبّى — ما فيه مصدر جديد**", [],
+            "شغّل `/signals` و `/news` عشان يجيب إشارات جديدة، بعدها `/factory` مرة ثانية.")
+        return
+    budget = int(count or _studio.factory.DEFAULT_BUDGET)
+    ch = interaction.channel
+
+    def _done(rep):
+        asyncio.run_coroutine_threadsafe(_studio_factory_report(ch, rep), bot.loop)
+
+    started = await asyncio.to_thread(_studio.factory.start_thread, budget, _done)
+    if not started:
+        await interaction.followup.send("⏳ فيه تشغيل شغّال — انتظر يخلص.", ephemeral=True)
+        return
+    await interaction.followup.send(
+        "🏭 بدأت أولّد من **%s** مصدر (ميزانية %s). بأرسل لك النتيجة هنا أول ما أخلص — "
+        "ياخذ دقايق." % (len(pending), budget), ephemeral=True)
+
+
+async def _studio_factory_report(channel, rep):
+    """Posted publicly when the sweep finishes — the owner has already walked away."""
+    nl = chr(10)
+    L = ["🏭 **خلصت التوليد**",
+         "• %s بطاقة جديدة من %s مصدر" % (rep.get("cards", 0), rep.get("used", 0))]
+    if rep.get("empty"):
+        L.append("• %s مصدر ما طلّع شي (فلتر البراند أو التكرار — هذا شغل صح)"
+                 % rep["empty"])
+    if rep.get("errors"):
+        L.append("• %s خطأ" % rep["errors"])
+    if rep.get("left"):
+        L.append("• ⚠️ باقي **%s** مصدر ما وصلت لهم (الميزانية خلصت) — شغّل `/factory` مرة ثانية"
+                 % rep["left"])
+    try:
+        top = await asyncio.to_thread(_studio.factory.top_new, rep.get("new") or [], 3)
+    except Exception:
+        top = []
+    if top:
+        L.append("")
+        L.append("**أقوى اللي طلع:**")
+        for c in top:
+            L.append(_studio_card_line(c))
+    url = _studio_link("ideas")
+    if url:
+        L += ["", "👉 %s" % url]
+    try:
+        await channel.send(nl.join(L)[:1900])
+    except Exception as e:
+        print("[studio] factory report failed:", e)
+
+
+@bot.tree.command(name="studio", description="كل أوامر عوجا ستوديو + رابط الصفحة")
+async def slash_studio_help(interaction: discord.Interaction):
+    await _slash_defer(interaction)
+    await interaction.followup.send(
+        (_STUDIO_HELP_TEXT + chr(10) + chr(10) + "👉 " + (_studio_link("today") or ""))[:1900],
+        ephemeral=True)
+
+
+@bot.tree.command(name="posted", description="سجّل فيديو نشرته + مشاهداته (هذا اللي يعلّم الترتيب)")
+@app_commands.describe(idea_id="رقم الفكرة (تلقاه بالصفحة)", views="كم مشاهدة")
+async def slash_studio_posted(interaction: discord.Interaction, idea_id: int, views: int = 0):
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    n = await asyncio.to_thread(_studio.db.set_idea_status, int(idea_id), "posted",
+                                int(views) if views else None, None)
+    if not n:
+        await interaction.followup.send("⚠️ ما لقيت فكرة برقم %s." % idea_id, ephemeral=True)
+        return
+    st = await asyncio.to_thread(lambda: _studio.learn.stats(_studio.db.learn_rows()))
+    ins = _studio.learn.insights_ar(st)
+    nl = chr(10)
+    L = ["✅ سجّلت #%s%s" % (idea_id, (" · %s مشاهدة" % f"{views:,}") if views else ""),
+         "عندك **%s** فيديو مسجّل — الترتيب يتعلم منها." % st.get("n", 0)]
+    if ins:
+        L += ["", "📈 اللي تعلمناه:"] + ["• %s" % t for t in ins]
+    await interaction.followup.send(nl.join(L)[:1900], ephemeral=True)
+
+
 async def _studio_ensure_channel():
     """Make sure #ouja-studio exists and carries the command card — ONCE.
 
@@ -54407,17 +54623,20 @@ async def cmd_studio_help(ctx):
 
 
 _STUDIO_HELP_TEXT = chr(10).join([
-    "🎬 **أوامر عوجا ستوديو**",
+    "🎬 **عوجا ستوديو** — اكتب `/` وبتطلع لك القائمة كاملة",
     "",
-    "`!ouja اليوم` — خطة اليوم: ٣ أفكار مرتّبة بالأقرب إنها تشتغل",
-    "`!ouja فكرة` — فكرة وحدة الحين (وانت واقف بشقة فاضية)",
-    "`!ouja أفكار` — كل الأفكار الجاهزة + فلترة بالصفحة",
-    "`!ouja إشارات` — يقرأ بيانات عوجا (إشغال، تسعير، تقييمات، عمليات)",
-    "`!ouja أخبار` — بحث حي عن أنظمة السياحة وأخبار السوق",
-    "`!ouja نشرت 12 84000` — تسجّل فيديو نشرته + مشاهداته",
+    "`/today` — خطة اليوم: ٣ أفكار مرتّبة بالأقرب إنها تشتغل",
+    "`/idea` — فكرة وحدة الحين (وانت واقف بشقة فاضية)",
+    "`/ideas` — كل الأفكار الجاهزة + فلترة بالصفحة",
+    "`/factory` — يولّد من **كل** القصص والإشارات دفعة وحدة ويعبّي الرف",
+    "`/signals` — يقرأ بيانات عوجا (إشغال، تسعير، تقييمات، عمليات)",
+    "`/news` — بحث ويب حي عن أنظمة السياحة وأخبار السوق",
+    "`/posted` — تسجّل فيديو نشرته + مشاهداته",
+    "`/studio` — هذي القائمة",
     "",
-    "كل أمر يرجّع لك رابط تفتحه بالجوال — فيه السكربت كامل والفلترة.",
-    "**مهم:** كل ما تسجّل «نشرت» بالمشاهدات، الترتيب يصير أدق لحسابك أنت.",
+    "كل أمر يرجّع رابط تفتحه بالجوال — فيه السكربت كامل والفلترة والتقييم.",
+    "**مهم:** كل ما تسجّل `/posted` بالمشاهدات، الترتيب يصير أدق لحسابك أنت.",
+    "(أوامر `!ouja` القديمة لسا شغّالة لو تعوّدت عليها.)",
 ])
 
 

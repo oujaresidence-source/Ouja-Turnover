@@ -16,10 +16,10 @@ READ-ONLY toward the business: never writes to Hostaway, never messages guests.
 from .host import HOST, wire as _wire_host
 from . import db, engine, routes, mine, notify, ideas  # noqa: F401
 from . import learn, hooks, plan, external, internal    # noqa: F401  (v3 signal bus)
-from . import rank, mobile                              # noqa: F401  (phone page /s/{token})
+from . import rank, virality, factory, mobile           # noqa: F401  (rank + phone page)
 
 __all__ = ["wire", "register_routes", "HOST", "engine", "db", "mine", "notify", "ideas",
-           "learn", "hooks", "plan", "external", "internal", "rank", "mobile"]
+           "learn", "hooks", "plan", "external", "internal", "rank", "virality", "factory", "mobile"]
 
 
 def wire(caps):
