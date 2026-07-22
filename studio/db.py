@@ -103,6 +103,9 @@ _MIGRATIONS = (
     ("studio_ideas", "signal_date", "TEXT NOT NULL DEFAULT ''"),
     ("studio_ideas", "strength", "INTEGER NOT NULL DEFAULT 0"),
     ("studio_ideas", "nkey", "TEXT NOT NULL DEFAULT ''"),
+    # 2026-07-24: a card now carries the script SHAPE it was built in, so the daily
+    # set can be spread across shapes (no two of today's cards look alike).
+    ("studio_ideas", "shape", "TEXT NOT NULL DEFAULT ''"),
 )
 
 _inited = set()
@@ -222,8 +225,8 @@ def add_idea(story_id, idea, ts):
         "INSERT INTO studio_ideas (story_id, hook_spoken, visual_title, visual_sub, "
         "angle, why_it_works, script, video_type, cta, audience, trigger_kind, "
         "signal_sid, signal_family, signal_source, signal_text, signal_url, "
-        "signal_date, strength, nkey, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "signal_date, strength, nkey, shape, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (int(story_id or 0), idea["hook_spoken"], idea["visual_title"],
          idea["visual_sub"], idea["angle"], idea.get("why_it_works", ""),
          json.dumps(idea["script"], ensure_ascii=False), idea["video_type"],
@@ -231,7 +234,8 @@ def add_idea(story_id, idea, ts):
          idea.get("signal_sid", ""), idea.get("signal_family", ""),
          idea.get("signal_source", ""), idea.get("signal_text", ""),
          idea.get("signal_url", ""), idea.get("signal_date", ""),
-         int(idea.get("strength") or 0), idea.get("nkey", ""), ts))
+         int(idea.get("strength") or 0), idea.get("nkey", ""),
+         idea.get("shape", ""), ts))
 
 
 def ideas(status=None, limit=300):
@@ -346,6 +350,22 @@ def recent_nkeys(days_back_rows=120):
     return [r["nkey"] for r in q(
         "SELECT nkey FROM studio_ideas ORDER BY id DESC LIMIT ?", (days_back_rows,))
         if r["nkey"]]
+
+
+def sids_with_live_cards():
+    """Grounding sids that already produced a card worth keeping (spec S2 — one
+    grounding fact = one card). Rejected cards don't count, so a bad card can be
+    regenerated; posted/filmed/new/shortlisted all block a duplicate."""
+    return {r["signal_sid"] for r in q(
+        "SELECT DISTINCT signal_sid FROM studio_ideas "
+        "WHERE signal_sid <> '' AND status <> 'rejected'") if r["signal_sid"]}
+
+
+def sid_has_live_card(sid):
+    if not sid:
+        return False
+    return bool(q1("SELECT 1 FROM studio_ideas WHERE signal_sid=? "
+                   "AND status <> 'rejected' LIMIT 1", (str(sid),)))
 
 
 # ---------------- learn-loop + deep-rescan ----------------

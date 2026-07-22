@@ -133,7 +133,10 @@ def f_length(card):
     """DIRECTIONAL — 21-34s is reported as the completion sweet spot."""
     secs, _n = beat_timing(card.get("script"))
     if secs is None:
-        return 0.5                                    # unknown, not wrong
+        # Scripts no longer carry a timed grid by design (2026-07-24), so length is
+        # usually undeclared. Undeclared is NOT a defect — sit at WEAK so it never
+        # becomes a fix and never a win. Only a declared out-of-band length is flagged.
+        return 0.6
     if BEST_MIN <= secs <= BEST_MAX:
         return 1.0
     if OK_MIN <= secs <= OK_MAX:
@@ -266,19 +269,28 @@ def audit(card):
         total_w += weight
         got += weight * v
     score = int(round(100.0 * got / total_w)) if total_w else 0
-    fixes, wins = [], []
+    weak, wins = [], []
     for name, _fn, weight, label in FACTORS:
         v = factors[name]["value"]
         if v < WEAK:
-            fixes.append({"key": name, "text": FIXES.get(name, label),
-                          "weight": weight})
+            weak.append({"key": name, "text": FIXES.get(name, label),
+                         "value": v, "weight": weight})
         elif v >= 0.9:
             wins.append(label)
-    # verified-tier problems come first: they matter more and are better evidenced
-    fixes.sort(key=lambda f: -f["weight"])
-    return {"score": score, "factors": factors,
-            "fixes": [f["text"] for f in fixes], "wins": wins}
+    # spec S4: ONE fix — the single weakest factor for THIS card (lowest value, ties
+    # broken toward the better-evidenced factor). A satisfied factor is never a fix.
+    # A card that passes everything shows no fix at all — never filler.
+    weak.sort(key=lambda f: (f["value"], -f["weight"]))
+    fixes = [weak[0]["text"]] if weak else []
+    return {"score": score, "factors": factors, "fixes": fixes, "wins": wins,
+            "weakest": (weak[0]["key"] if weak else "")}
 
 
 def score(card):
     return audit(card)["score"]
+
+
+def leads_with_number(hook, fact):
+    """Delegates to engine (spec S3): if the fact carries a number, the first spoken
+    line must lead with one. Kept here so the generator has a single import surface."""
+    return engine.leads_with_number(hook, fact)

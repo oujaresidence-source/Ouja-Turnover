@@ -236,6 +236,9 @@ def parse_ideas(d):
         script = raw.get("script")
         if not isinstance(script, list):
             script = []
+        # kill any timed-beat grid the model slipped in — the script must read like
+        # talking, never like a storyboard (owner verdict 2026-07-24).
+        script = [strip_timestamps(x) for x in script]
         aud = _s(raw.get("audience"), 20)
         trg = _s(raw.get("trigger"), 20)
         vt = _s(raw.get("video_type"), 30)
@@ -245,7 +248,7 @@ def parse_ideas(d):
             "visual_sub": _s(raw.get("visual_sub"), 160),
             "angle": _s(raw.get("angle"), 400),
             "why_it_works": why,
-            "script": [_s(x, 400) for x in script if _s(x, 400)][:10],
+            "script": [_s(x, 400) for x in script if _s(x, 400)][:8],
             "video_type": vt if vt in VIDEO_TYPES else "talking",
             "cta": _s(raw.get("cta"), 200),
             "audience": aud if aud in AUDIENCES else "niche",
@@ -293,6 +296,63 @@ def _tokens(text):
 def novelty_key(text):
     """Storable, comparable fingerprint of an angle. Empty text -> ''."""
     return " ".join(sorted(_tokens(text)))
+
+
+# A timed beat-grid — «(٠-٣ث)», «(3-8s)», «٠-٣ث:», «(ثانية 5)» — is exactly the
+# AI-artifact shape the owner rejected. Strip it so a script reads like talking, not
+# like a storyboard, no matter what the model emits (defense in depth behind the prompt).
+_TS_PATTERNS = (
+    re.compile(r"[（(]\s*\d+\s*[-–—]\s*\d+\s*(?:ث|ثانية|ثواني|s|sec|secs|seconds)?\s*[)）]"),
+    re.compile(r"[（(]\s*(?:ث|ثانية|ثواني|s|sec|second)\s*\d+[^)）]*[)）]"),
+    re.compile(r"^\s*\d+\s*[-–—]\s*\d+\s*(?:ث|ثانية|ثواني|s|sec)?\s*[:：\-–—]\s*"),
+    re.compile(r"[（(]\s*\d+\s*(?:ث|ثانية|ثواني|sec|s)\s*[)）]"),
+)
+
+
+def strip_timestamps(text):
+    """Remove any timed-beat markers from one script line, then tidy whitespace."""
+    t = _norm_digits(str(text or ""))
+    for pat in _TS_PATTERNS:
+        t = pat.sub(" ", t)
+    return re.sub(r"\s{2,}", " ", t).strip(" -–—:•").strip()
+
+
+def _norm_digits(text):
+    t = str(text or "")
+    for i, d in enumerate("٠١٢٣٤٥٦٧٨٩"):
+        t = t.replace(d, str(i))
+    return t
+
+
+def numbers_in(text):
+    """The quantity tokens in a text (Arabic-Indic folded to ASCII), years dropped.
+    A bare year is not a statistic; a percent sign counts as a number."""
+    t = _norm_digits(text)
+    t = re.sub(r"[（(][^)）]*[)）]", " ", t)      # ignore anything already parenthesised
+    out = []
+    for m in re.finditer(r"\d+(?:[.,]\d+)?", t):
+        v = m.group(0)
+        if len(v) == 4 and v.startswith(("19", "20")):
+            continue
+        out.append(v)
+    if "%" in t or "٪" in str(text or ""):
+        out.append("%")
+    return out
+
+
+def leads_with_number(hook, fact, head_words=5):
+    """spec S3: when the grounding fact carries a number, the FIRST spoken line must
+    LEAD with a number — inside the opening few words, before any sentence break, not
+    buried after a rhetorical question. Vacuously true when the fact has no number."""
+    if not numbers_in(fact):
+        return True
+    raw = str(hook or "")
+    # cut at the first sentence break so a number after «؟»/«.» doesn't count as leading
+    first = re.split(r"[؟?!.،,:\n]", raw, 1)[0]
+    head = " ".join(_norm_digits(first).split()[:head_words])
+    if "%" in head or "٪" in " ".join(first.split()[:head_words]):
+        return True
+    return bool(re.search(r"\d", head))
 
 
 def is_novel(key, recent_keys, threshold=0.55):

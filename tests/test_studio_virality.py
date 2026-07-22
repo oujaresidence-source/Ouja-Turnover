@@ -112,7 +112,7 @@ class TestLengthAndRhythm(unittest.TestCase):
     def test_unknown_length_is_neutral_not_a_failure(self):
         c = _good()
         c["script"] = ["هوك بدون توقيت", "شرح بدون توقيت"]
-        self.assertEqual(V.f_length(c), 0.5)
+        self.assertEqual(V.f_length(c), 0.6)
 
 
 class TestLoop(unittest.TestCase):
