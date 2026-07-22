@@ -54184,6 +54184,243 @@ async def cmd_dispatch(ctx, when: str = None):
     await ctx.reply(f"✅ نشرت دِسباتش التنظيف لتاريخ {_dispatch_fmt_date(date_iso)} في #{DISPATCH_CHANNEL}.")
 
 
+# ====================== Ouja Studio — Discord commands ======================
+# The owner works from his phone in Discord, not the dashboard. Every command answers
+# with ONE tap-able link into the mobile studio page (/s/{token}), ranked best-first.
+# The link token is persisted, so links already sitting in the channel keep working
+# across deploys.
+
+def _studio_link(view="today"):
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return ""
+    try:
+        return _studio.mobile.share_url(view, _dispatch_base_url())
+    except Exception as e:
+        print("[studio] link build failed:", e)
+        return ""
+
+
+def _studio_card_line(c):
+    """One card compressed to two Discord lines — enough to decide, not to replace
+    the page. The full script lives behind the link."""
+    L = ["**%s%%** · %s" % (c.get("rank_score", 0), c.get("visual_title") or "")]
+    if c.get("hook_spoken"):
+        L.append("🎤 «%s»" % c["hook_spoken"])
+    if c.get("signal_text"):
+        L.append("📌 %s" % str(c["signal_text"])[:120])
+    return chr(10).join(L)
+
+
+async def _studio_reply(ctx, view, header, cards=None, note=""):
+    url = _studio_link(view)
+    if not url:
+        await ctx.reply("⚠️ الاستوديو مو شغّال حالياً.")
+        return
+    nl = chr(10)
+    parts = [header]
+    for c in (cards or [])[:3]:
+        parts.append("")
+        parts.append(_studio_card_line(c))
+    if note:
+        parts += ["", note]
+    parts += ["", "👉 %s" % url]
+    await ctx.reply(nl.join(parts))
+
+
+def _studio_ranked(view="today", n=3):
+    """Ranked cards for a view, computed off-loop (db + pure maths, no network)."""
+    data = _studio.mobile.feed(view, {})
+    return (data.get("cards") or [])[:n]
+
+
+@bot.command(name="ستوديو", aliases=["studio", "استوديو"])
+async def cmd_studio(ctx):
+    """!ouja ستوديو — the main phone link (today's set, ranked)."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        await ctx.reply("⚠️ الاستوديو مطفي.")
+        return
+    try:
+        cards = await asyncio.to_thread(_studio_ranked, "today", 3)
+    except Exception as e:
+        print("[studio] cmd studio error:", e)
+        cards = []
+    await _studio_reply(ctx, "today", "🎬 **عوجا ستوديو — وش تصوّر اليوم**", cards,
+                        "افتح الرابط: فلترة + السكربت كامل + سجّل اللي صوّرته.")
+
+
+@bot.command(name="اليوم", aliases=["today"])
+async def cmd_studio_today(ctx):
+    """!ouja اليوم — today's 3, ranked best-first."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return
+    cards = await asyncio.to_thread(_studio_ranked, "today", 3)
+    if not cards:
+        await _studio_reply(ctx, "today", "📅 **ما فيه خطة لليوم بعد**", [],
+                            "أرسل `!ouja أخبار` أو `!ouja إشارات` عشان يجمع إشارات جديدة.")
+        return
+    await _studio_reply(ctx, "today", "📅 **خطة اليوم — ٣ أفكار**", cards)
+
+
+@bot.command(name="أفكار", aliases=["افكار", "ideas"])
+async def cmd_studio_ideas(ctx):
+    """!ouja أفكار — the whole shelf, ranked, filterable on the page."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return
+    cards = await asyncio.to_thread(_studio_ranked, "ideas", 3)
+    await _studio_reply(ctx, "ideas", "💡 **كل الأفكار الجاهزة (الأقوى أول)**", cards,
+                        "بالصفحة تقدر تفلتر: ملّاك/جمهور عام · مصدر · محفّز · شكل الفيديو.")
+
+
+@bot.command(name="فكرة", aliases=["idea", "الحين"])
+async def cmd_studio_instant(ctx):
+    """!ouja فكرة — «أعطني فكرة الحين»: one card, right now."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return
+    await ctx.reply("⏳ لحظة أدوّر لك أقوى فكرة…")
+    try:
+        cards, generated = await asyncio.to_thread(_studio.plan.instant, 1)
+    except Exception as e:
+        print("[studio] instant error:", e)
+        cards, generated = [], False
+    if not cards:
+        await _studio_reply(ctx, "ideas", "⚡ **ما فيه فكرة جاهزة**", [],
+                            "أرسل `!ouja إشارات` عشان يقرأ بيانات عوجا ويطلّع أفكار.")
+        return
+    ranked = _studio.rank.rank(cards, _studio.learn.stats(_studio.db.learn_rows()))
+    await _studio_reply(ctx, "ideas",
+                        "⚡ **صوّر هذي**" + (" (ولّدتها لك الحين)" if generated else ""),
+                        ranked)
+
+
+@bot.command(name="إشارات", aliases=["اشارات", "signals"])
+async def cmd_studio_signals(ctx):
+    """!ouja إشارات — refresh Ouja's own data, then link to the feed."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return
+    await ctx.reply("⏳ أقرأ بيانات عوجا الحين…")
+    try:
+        new = await asyncio.to_thread(_studio.internal.collect)
+    except Exception as e:
+        print("[studio] signals cmd error:", e)
+        new = []
+    head = "📡 **إشارات جديدة من بيانات عوجا: %s**" % len(new)
+    nl = chr(10)
+    body = nl.join("• %s" % (s.get("fact") or "") for s in new[:4])
+    await _studio_reply(ctx, "signals", head + ((nl + body) if body else ""), [],
+                        "بالصفحة اضغط «سوّها فكرة» على أي إشارة.")
+
+
+@bot.command(name="أخبار", aliases=["اخبار", "news"])
+async def cmd_studio_news(ctx):
+    """!ouja أخبار — run the LIVE web search (regulation / market / trends) now."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return
+    if not STUDIO_WEB_SEARCH:
+        await ctx.reply("⚠️ البحث الخارجي مطفي (STUDIO_WEB_SEARCH=0).")
+        return
+    await ctx.reply("🌍 أبحث بالويب عن أنظمة وأخبار السوق… ياخذ دقيقة تقريباً.")
+    try:
+        new = await asyncio.to_thread(_studio.external.collect)
+    except Exception as e:
+        print("[studio] news cmd error:", e)
+        new = []
+    if not new:
+        await _studio_reply(ctx, "signals", "🌍 **ما طلع جديد موثّق هالمرة**", [],
+                            "أي خبر يجي بدون مصدر وتاريخ يُرمى — فالصفر هنا يعني ما لقى شي مؤكد.")
+        return
+    nl = chr(10)
+    lines = []
+    for s in new[:4]:
+        lines.append("• %s" % (s.get("fact") or ""))
+        if s.get("url"):
+            lines.append("  %s" % s["url"])
+    await _studio_reply(ctx, "signals",
+                        "🌍 **%s خبر/نظام جديد**%s%s" % (len(new), nl, nl.join(lines)), [],
+                        "الأخبار تُصوَّر بسرعة — كل يوم يمر يقل تأثيرها.")
+
+
+@bot.command(name="نشرت", aliases=["نشرته", "posted"])
+async def cmd_studio_posted(ctx, idea_id: int = None, views: int = None):
+    """!ouja نشرت <رقم> <مشاهدات> — log a posted video. This IS the learning loop:
+    without it the ranking can never learn what works for HIM specifically."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        return
+    if not idea_id:
+        await _studio_reply(ctx, "posted", "📊 **سجّل فيديو منشور**", [],
+                            "الطريقة: `!ouja نشرت 12 84000` (رقم الفكرة + المشاهدات)."
+                            + chr(10) + "أو سجّلها من الصفحة مباشرة — أسهل.")
+        return
+    try:
+        n = await asyncio.to_thread(_studio.db.set_idea_status, int(idea_id), "posted",
+                                    int(views) if views is not None else None, None)
+    except Exception as e:
+        print("[studio] posted cmd error:", e)
+        n = 0
+    if not n:
+        await ctx.reply("⚠️ ما لقيت فكرة برقم %s." % idea_id)
+        return
+    try:
+        st = await asyncio.to_thread(
+            lambda: _studio.learn.stats(_studio.db.learn_rows()))
+        ins = _studio.learn.insights_ar(st)
+    except Exception:
+        st, ins = {"n": 0}, []
+    nl = chr(10)
+    msg = ["✅ سجّلت الفكرة #%s%s" % (idea_id,
+                                     (" · %s مشاهدة" % f"{views:,}") if views else "")]
+    msg.append("عندك الحين **%s** فيديو مسجّل — الترتيب يتعلم منها." % st.get("n", 0))
+    if ins:
+        msg += ["", "📈 اللي تعلمناه لين الحين:"] + ["• %s" % t for t in ins]
+    await ctx.reply(nl.join(msg))
+
+
+async def _studio_ensure_channel():
+    """Make sure #ouja-studio exists and carries the command card — ONCE.
+
+    The help is posted only when the channel has no history. A bot that re-posts on
+    every deploy is how the Musaed spam incident happened; a redeploy must be silent."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    cat = await get_category(guild)
+    ch = await ensure_channel(guild, STUDIO_OPS_CHANNEL, cat)
+    if ch is None:
+        return
+    try:
+        existing = [m async for m in ch.history(limit=3)]
+    except Exception:
+        return                                  # can't read history -> never risk a repost
+    if existing:
+        return
+    msg = await ch.send(_STUDIO_HELP_TEXT + chr(10) + chr(10) + "👉 " + (_studio_link("today") or ""))
+    try:
+        await msg.pin()
+    except Exception:
+        pass
+    print("[studio] posted the command card in #%s" % STUDIO_OPS_CHANNEL)
+
+
+@bot.command(name="ستوديو-مساعدة", aliases=["studio-help", "اوامر-الستوديو"])
+async def cmd_studio_help(ctx):
+    """!ouja ستوديو-مساعدة — the command card."""
+    await ctx.reply(_STUDIO_HELP_TEXT + chr(10) + chr(10) + "👉 " + (_studio_link("today") or ""))
+
+
+_STUDIO_HELP_TEXT = chr(10).join([
+    "🎬 **أوامر عوجا ستوديو**",
+    "",
+    "`!ouja اليوم` — خطة اليوم: ٣ أفكار مرتّبة بالأقرب إنها تشتغل",
+    "`!ouja فكرة` — فكرة وحدة الحين (وانت واقف بشقة فاضية)",
+    "`!ouja أفكار` — كل الأفكار الجاهزة + فلترة بالصفحة",
+    "`!ouja إشارات` — يقرأ بيانات عوجا (إشغال، تسعير، تقييمات، عمليات)",
+    "`!ouja أخبار` — بحث حي عن أنظمة السياحة وأخبار السوق",
+    "`!ouja نشرت 12 84000` — تسجّل فيديو نشرته + مشاهداته",
+    "",
+    "كل أمر يرجّع لك رابط تفتحه بالجوال — فيه السكربت كامل والفلترة.",
+    "**مهم:** كل ما تسجّل «نشرت» بالمشاهدات، الترتيب يصير أدق لحسابك أنت.",
+])
+
+
 @bot.command(name="deepclean-pause", aliases=["ايقاف-التنظيف-العميق", "ايقاف-الحجب"])
 async def cmd_deepclean_pause(ctx):
     """!ouja deepclean-pause — pause auto-blocking AND free its blocked dates (admins only)."""
@@ -56865,6 +57102,11 @@ async def on_ready():
         schedule_digest_loop.start()   # morning team-calendar ops summary (default 08:00 Riyadh)
     if _HAS_STUDIO and STUDIO_ENABLED and not studio_digest_loop.is_running():
         studio_digest_loop.start()     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
+    if _HAS_STUDIO and STUDIO_ENABLED:
+        try:
+            await _studio_ensure_channel()
+        except Exception as _sce:
+            print("[studio] channel setup skipped:", _sce)
     if not owner_warm_loop.is_running():
         owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():

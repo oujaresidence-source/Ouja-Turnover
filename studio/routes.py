@@ -10,7 +10,7 @@ quote building). esprima-parse every <script> block after edits."""
 import asyncio
 import traceback
 
-from . import db, engine, ideas as ideas_mod, learn, mine, plan  # noqa: F401
+from . import db, engine, ideas as ideas_mod, learn, mine, mobile, plan  # noqa: F401
 from .host import HOST
 
 # v3 collectors. Imported defensively: a broken collector must degrade the studio
@@ -850,6 +850,7 @@ async def page(request):
 
 def register(app):
     app.router.add_get("/studio", page)
+    mobile.register(app)          # the phone page Discord links to: /s/{token}
     app.router.add_get("/api/studio/status", _safe(api_status))
     app.router.add_post("/api/studio/scan", _safe(api_scan))
     app.router.add_post("/api/studio/deep-scan", _safe(api_deep_scan))
