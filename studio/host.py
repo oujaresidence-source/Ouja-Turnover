@@ -15,6 +15,12 @@ class _Host:
     listings = None         # () -> {lid:int -> name}
     api_get = None          # bot.api_get (Hostaway GET with auth+retry)
     claude_json = None      # bot.claude_json(system, user, max_tokens=, model=)
+    claude_search = None    # bot.claude_search_json(...) -> (data|None, [urls]) — LIVE WEB
+    # v3 internal-signal data taps (all read-only Hostaway helpers already in bot.py)
+    inhouse = None          # fetch_inhouse(date) -> reservations overlapping that day
+    res_window = None       # fetch_reservations_window(start, end) -> reservations
+    forward_calendar = None  # get_forward_calendar(days) -> per-day occupancy/price rows
+    reviews = None          # () -> list of normalised review dicts (newest first)
     model_fast = None       # cheap model id (triage)
     model_premium = None    # premium model id (stories + ideas)
     tz = None

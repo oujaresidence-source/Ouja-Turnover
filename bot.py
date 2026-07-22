@@ -5426,6 +5426,10 @@ STUDIO_ENABLED = os.environ.get("STUDIO_ENABLED", "1") == "1"
 STUDIO_DIGEST_HOUR    = int(os.environ.get("STUDIO_DIGEST_HOUR", "9"))            # 09:00 Riyadh
 STUDIO_NOTIFY_DRYRUN  = os.environ.get("STUDIO_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
 STUDIO_OPS_CHANNEL    = os.environ.get("STUDIO_OPS_CHANNEL", "ouja-studio")       # daily digest channel
+# v3: the live web search costs money per run, so it gets its own switch. On by
+# default — without it the studio is blind to regulation/market news (spec D7-D10).
+STUDIO_WEB_SEARCH     = os.environ.get("STUDIO_WEB_SEARCH", "1") == "1"
+STUDIO_DAILY_SIGNAL_IDEAS = int(os.environ.get("STUDIO_DAILY_SIGNAL_IDEAS", "4") or 4)
 
 # ============= Finance Chat «مساعد المركز المالي» — KB-grounded ERP chatbot =============
 FINCHAT_ENABLED       = os.environ.get("FINCHAT_ENABLED", "1") == "1"
@@ -5501,24 +5505,57 @@ async def schedule_digest_loop():
 
 @tasks.loop(time=dt_time(hour=STUDIO_DIGEST_HOUR, minute=0, tzinfo=TZ))
 async def studio_digest_loop():
-    """Ouja Studio morning digest: scan fresh guest conversations, pick the day's best
-    POSITIVE story, generate one ready-to-film idea, and post it (unless dry-run)."""
+    """Ouja Studio morning run (v3): refresh the SIGNAL feed — Ouja's own live data
+    plus a real web search for Saudi STR regulation / market / global news — mine
+    fresh guest conversations, turn the strongest new signals into idea cards, lay
+    out the day's 3, and post the digest (unless dry-run)."""
     if not (STUDIO_ENABLED and _HAS_STUDIO):
         return
     nl = chr(10)
     try:
-        stories = await asyncio.to_thread(_studio.mine.run_daily_scan)
-        if not stories:
-            print("[studio] daily digest: no fresh story today")
-            return
-        top_ideas = []
+        # 1. internal signals (cheap, no model calls) — always.
         try:
-            top_ideas = await asyncio.to_thread(
-                _studio.ideas.generate_for_story, stories[0]["id"])
-        except Exception as _ie:
-            print("[studio] daily digest idea gen failed (non-fatal):", _ie)
-        body = _studio.notify.build_digest(stories, top_ideas)
+            new_int = await asyncio.to_thread(_studio.internal.collect)
+            print("[studio] internal signals:", len(new_int))
+        except Exception as _ce:
+            print("[studio] internal collect failed (non-fatal):", _ce)
+            new_int = []
+        # 2. external signals — live web search. Costs money per run, so it is
+        #    gated on its own flag and runs at most once a day, here.
+        new_ext = []
+        if STUDIO_WEB_SEARCH:
+            try:
+                new_ext = await asyncio.to_thread(_studio.external.collect)
+                print("[studio] external signals:", len(new_ext))
+            except Exception as _ee:
+                print("[studio] external collect failed (non-fatal):", _ee)
+        # 3. guest-conversation stories (the v2 miner, unchanged).
+        stories = await asyncio.to_thread(_studio.mine.run_daily_scan)
+        # 4. turn the best new signals into cards, then lay out today's set.
+        for sig in sorted(new_ext + new_int,
+                          key=lambda s: s.get("strength", 0), reverse=True)[:STUDIO_DAILY_SIGNAL_IDEAS]:
+            try:
+                await asyncio.to_thread(_studio.ideas.generate_for_signal, sig["sid"])
+            except Exception as _ge:
+                print("[studio] idea gen from signal failed (non-fatal):", _ge)
+        top_ideas = []
+        if stories:
+            try:
+                top_ideas = await asyncio.to_thread(
+                    _studio.ideas.generate_for_story, stories[0]["id"])
+            except Exception as _ie:
+                print("[studio] daily digest idea gen failed (non-fatal):", _ie)
+        try:
+            day_cards = await asyncio.to_thread(_studio.plan.build_day, None,
+                                                _studio.plan.DAILY_N, True)
+            print("[studio] today's plan:", len(day_cards), "cards")
+        except Exception as _pe:
+            print("[studio] plan build failed (non-fatal):", _pe)
+            day_cards = []
+        body = _studio.notify.build_digest(stories, top_ideas,
+                                           signals=(new_ext + new_int), day_cards=day_cards)
         if not body:
+            print("[studio] daily digest: nothing worth posting today")
             return
         if STUDIO_NOTIFY_DRYRUN:
             print("[studio] (dryrun) would post daily digest:", nl, body)
@@ -6961,6 +6998,79 @@ def claude_json(system, user, max_tokens=900, model=None):
                 pass
         print("claude_json: parse failed, raw=", txt[:300])
         return None
+
+WEB_SEARCH_TOOL = os.environ.get("WEB_SEARCH_TOOL", "web_search_20250305")
+WEB_SEARCH_MAX_USES = int(os.environ.get("WEB_SEARCH_MAX_USES", "6") or 6)
+
+def claude_search_json(system, user, max_tokens=4000, model=None, max_uses=None,
+                       allowed_domains=None):
+    """Claude with Anthropic's SERVER-SIDE web-search tool, parsed as JSON.
+
+    This is the only place the bot touches the live web. It needs no new vendor and
+    no new key — same ANTHROPIC_API_KEY, the search runs on Anthropic's side and the
+    model answers with real sources. Returns (data|None, [urls]) where `urls` are the
+    pages the search actually opened, so a caller can prove a fact was grounded
+    (Ouja Studio drops any external 'fact' that arrives without one).
+
+    Kept separate from claude_json on purpose: web search costs money per search and
+    is slow (tens of seconds), so nothing calls it accidentally.
+    """
+    if not ANTHROPIC_API_KEY:
+        return None, []
+    tool = {"type": WEB_SEARCH_TOOL, "name": "web_search",
+            "max_uses": int(max_uses or WEB_SEARCH_MAX_USES)}
+    if allowed_domains:
+        tool["allowed_domains"] = list(allowed_domains)[:20]
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": model or CLAUDE_MODEL_PREMIUM, "max_tokens": max_tokens,
+                      "system": system, "tools": [tool],
+                      "messages": [{"role": "user", "content": user}]},
+                timeout=240,
+            )
+            if r.status_code in (429, 500, 503, 529):
+                last_err = f"HTTP {r.status_code}"
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            r.raise_for_status()
+            blocks = r.json().get("content", []) or []
+            txt, urls = "", []
+            for b in blocks:
+                if b.get("type") == "text":
+                    txt += b.get("text", "")
+                    for c in (b.get("citations") or []):
+                        u = c.get("url")
+                        if u and u not in urls:
+                            urls.append(u)
+                elif b.get("type") == "web_search_tool_result":
+                    for item in (b.get("content") or []):
+                        if isinstance(item, dict) and item.get("url") \
+                                and item["url"] not in urls:
+                            urls.append(item["url"])
+            txt = (txt or "").replace("```json", "").replace("```", "").strip()
+            if not txt:
+                return None, urls
+            try:
+                return json.loads(txt), urls
+            except Exception:
+                m = re.search(r"\{.*\}", txt, re.DOTALL)
+                if m:
+                    try:
+                        return json.loads(m.group(0)), urls
+                    except Exception:
+                        pass
+                print("claude_search_json: parse failed, raw=", txt[:300])
+                return None, urls
+        except Exception as e:
+            last_err = e
+            time.sleep(min(2 ** attempt, 10))
+    print("claude_search_json error:", last_err)
+    return None, []
 
 _PMO_EQUATION_SYSTEM = (
     "You read an interior fit-out / furnishing 'equation' (المعادلة) — a quotation or "
@@ -50134,6 +50244,22 @@ async def start_web_server():
             except Exception as _fce:
                 print("[finchat] wiring failed (finchat disabled, bot unaffected):", _fce)
 
+        def _studio_reviews_tap():
+            """Reviews for the studio signal collector. Prefers the in-memory store the
+            bot already keeps; falls back to ONE bounded Hostaway page so a cold boot
+            still yields a real quote instead of silently skipping the source."""
+            try:
+                rows = list(_reviews.values()) if isinstance(_reviews, dict) else list(_reviews or [])
+            except Exception:
+                rows = []
+            if rows:
+                return rows
+            try:
+                return fetch_reviews_from_hostaway(limit=200, page_size=100)
+            except Exception as e:
+                print("[studio] reviews tap failed:", e)
+                return []
+
         # ---- Ouja Studio «استوديو عوجا» — additive; reuses brain.db + existing auth ----
         if _HAS_STUDIO and STUDIO_ENABLED:
             try:
@@ -50142,6 +50268,13 @@ async def start_web_server():
                     "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json, "web": web,
                     "listings": get_listings_map, "api_get": api_get,
                     "claude_json": claude_json,
+                    # v3: live web search + the internal data taps the signal
+                    # collectors read (all read-only; studio never writes anywhere).
+                    "claude_search": claude_search_json,
+                    "inhouse": fetch_inhouse,
+                    "res_window": fetch_reservations_window,
+                    "forward_calendar": get_forward_calendar,
+                    "reviews": _studio_reviews_tap,
                     "model_fast": CLAUDE_MODEL, "model_premium": CLAUDE_MODEL_PREMIUM,
                     "tz": TZ, "now": now_riyadh,
                 })

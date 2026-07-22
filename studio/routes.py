@@ -7,10 +7,24 @@ trap as DASHBOARD_HTML: normal triple-quoted string → it contains NO backslash
 at all (real newlines, event delegation, no regex literals, no inline-onclick
 quote building). esprima-parse every <script> block after edits."""
 
+import asyncio
 import traceback
 
-from . import db, ideas as ideas_mod, mine  # noqa: F401
+from . import db, engine, ideas as ideas_mod, learn, mine, plan  # noqa: F401
 from .host import HOST
+
+# v3 collectors. Imported defensively: a broken collector must degrade the studio
+# to "still works, one source missing", never take the whole page (or the bot) down.
+try:
+    from . import external as external_mod
+except Exception as _ex_err:                    # pragma: no cover
+    print("[studio] external collector unavailable:", _ex_err)
+    external_mod = None
+try:
+    from . import internal as internal_mod
+except Exception as _in_err:                    # pragma: no cover
+    print("[studio] internal collector unavailable:", _in_err)
+    internal_mod = None
 
 
 def _guard(request):
@@ -45,7 +59,15 @@ async def _body(request):
 # ---------------- API ----------------
 
 async def api_status(request):
-    return HOST.json_response({"ok": True, "scan": mine.snapshot()})
+    """Progress for every long job at once. The page polls THIS while anything is
+    running, so the collect snapshots must live here too — otherwise the poll reads
+    a stale 'still running' forever and never stops."""
+    collect = {}
+    if external_mod:
+        collect["external"] = external_mod.snapshot()
+    if internal_mod:
+        collect["internal"] = internal_mod.snapshot()
+    return HOST.json_response({"ok": True, "scan": mine.snapshot(), "collect": collect})
 
 
 async def api_scan(request):
@@ -84,7 +106,6 @@ async def api_generate(request):
     sid = d.get("story_id")
     if not sid:
         return HOST.json_response({"ok": False, "error": "bad story_id"}, 200)
-    import asyncio
     cards = await asyncio.to_thread(ideas_mod.generate_for_story, int(sid))
     if not cards:
         return HOST.json_response(
@@ -110,6 +131,120 @@ async def api_idea_status(request):
     return HOST.json_response({"ok": True})
 
 
+# ---------------- v3: signals, plan, manual input, learning ----------------
+
+def _today():
+    try:
+        return HOST.require("now")().strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def _decorate_signals(rows):
+    """Add the owner-facing freshness read so the page never has to compute dates."""
+    today = _today()
+    for r in rows:
+        age = engine.freshness_days(r.get("as_of"), today)
+        r["age_days"] = age
+        r["is_hot"] = bool(r.get("family") == "external" and age is not None and age <= 7)
+    return rows
+
+
+async def api_signals(request):
+    fam = request.query.get("family") or None
+    status = request.query.get("status")
+    status = None if status in ("", "all", None) else status
+    rows = _decorate_signals(db.signals(status=status, family=fam, limit=200))
+    snap = {}
+    if external_mod:
+        snap["external"] = external_mod.snapshot()
+    if internal_mod:
+        snap["internal"] = internal_mod.snapshot()
+    return HOST.json_response({"ok": True, "signals": rows, "collect": snap,
+                               "today": _today()})
+
+
+async def api_collect(request):
+    """Refresh the signal feed. kind = internal | external | both."""
+    d = await _body(request)
+    kind = str(d.get("kind") or "both")
+    started = {}
+    if kind in ("internal", "both") and internal_mod:
+        started["internal"] = internal_mod.start_collect_thread()
+    if kind in ("external", "both") and external_mod:
+        started["external"] = external_mod.start_collect_thread()
+    if not started:
+        return HOST.json_response(
+            {"ok": False, "error": "ما فيه جامع إشارات متاح"}, 200)
+    return HOST.json_response({"ok": True, "started": started})
+
+
+async def api_signal_status(request):
+    d = await _body(request)
+    sid, status = str(d.get("sid") or ""), str(d.get("status") or "")
+    if not sid or status not in ("new", "used", "hidden"):
+        return HOST.json_response({"ok": False, "error": "bad sid/status"}, 200)
+    db.set_signal_status(sid, status)
+    return HOST.json_response({"ok": True})
+
+
+async def api_signal_generate(request):
+    """One tap on a signal in the feed -> ready-to-shoot cards (spec J)."""
+    d = await _body(request)
+    sid = str(d.get("sid") or "")
+    if not sid:
+        return HOST.json_response({"ok": False, "error": "bad sid"}, 200)
+    cards = await asyncio.to_thread(ideas_mod.generate_for_signal, sid)
+    if not cards:
+        return HOST.json_response(
+            {"ok": False, "error": "ما طلعت أفكار من هالإشارة — جرّب وحدة ثانية"}, 200)
+    return HOST.json_response({"ok": True, "ideas": cards})
+
+
+async def api_manual(request):
+    """Spec Section E — Faisal types one line from his day, gets a script."""
+    d = await _body(request)
+    txt = str(d.get("text") or "").strip()
+    if len(txt) < 8:
+        return HOST.json_response(
+            {"ok": False, "error": "اكتب الموقف بجملة أوضح شوي"}, 200)
+    sig, cards = await asyncio.to_thread(ideas_mod.generate_manual, txt)
+    if not cards:
+        return HOST.json_response(
+            {"ok": False, "error": "ما قدرت أطلّع فكرة من هالموقف — أعد صياغته"}, 200)
+    return HOST.json_response({"ok": True, "signal": sig, "ideas": cards})
+
+
+async def api_today(request):
+    """Today's 3 (spec H1). Built once per day, then stable."""
+    force = str(request.query.get("force") or "") == "1"
+    day = request.query.get("day") or _today()
+    cards = await asyncio.to_thread(plan.build_day, day, plan.DAILY_N, force)
+    return HOST.json_response({"ok": True, "day": day, "cards": cards})
+
+
+async def api_week(request):
+    start = request.query.get("start") or _today()
+    return HOST.json_response({"ok": True, "start": start,
+                               "days": plan.week(start, 7)})
+
+
+async def api_instant(request):
+    """«أعطني فكرة الحين» (spec H3)."""
+    cards, generated = await asyncio.to_thread(plan.instant, 1)
+    if not cards:
+        return HOST.json_response(
+            {"ok": False, "error": "ما فيه إشارات جاهزة — حدّث الإشارات أول"}, 200)
+    return HOST.json_response({"ok": True, "ideas": cards, "generated": generated})
+
+
+async def api_learn(request):
+    st = learn.stats(db.learn_rows())
+    return HOST.json_response({"ok": True, "stats": st,
+                               "insights": learn.insights_ar(st),
+                               "min_sample": learn.MIN_SAMPLE})
+
+
 # ---------------- the /studio page ----------------
 # NO BACKSLASHES anywhere inside this string (trap: normal triple-quoted string).
 
@@ -121,7 +256,7 @@ STUDIO_PAGE_HTML = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>استوديو عوجا — مصنع الأفكار</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@600;800&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#F1EDE6; --panel:#FAF7F1; --ink:#292925; --body:#33302B; --muted:#8F887C;
@@ -129,7 +264,8 @@ STUDIO_PAGE_HTML = """<!doctype html>
     --green:#3E7D4E; --green-soft:#E4EFE7; --amber:#A8762A; --amber-soft:#F5EBDA;
     --border:#E7DFD1; --r:18px; --r-sm:12px;
     --sh:0 1px 2px rgba(41,41,37,.05),0 12px 32px rgba(41,41,37,.08);
-    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Tajawal',-apple-system,system-ui,sans-serif;
+    --ease:cubic-bezier(0.23,1,0.32,1);
+    --font:'IBM Plex Sans Arabic',-apple-system,system-ui,sans-serif;
     --num:'Inter',sans-serif;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -211,6 +347,49 @@ STUDIO_PAGE_HTML = """<!doctype html>
     border:1px solid var(--border);border-radius:999px;background:var(--bg);
     color:var(--body);outline:none;font-family:var(--num)}
 
+  /* ---- v3: signal feed, today's set, manual capture, learning ---- */
+  .sec{font-size:13px;font-weight:700;color:var(--muted);margin:14px 2px 8px;
+    display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .sec .lnk{font-size:13px;font-weight:700;color:var(--gold);background:none;border:0;
+    padding:0;font-family:inherit;cursor:pointer}
+
+  .sig{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-sm);
+    padding:12px 14px;margin-bottom:8px;box-shadow:var(--sh);
+    border-inline-start:3px solid var(--border)}
+  .sig.f-internal{border-inline-start-color:var(--gold)}
+  .sig.f-external{border-inline-start-color:var(--green)}
+  .sig.f-manual{border-inline-start-color:var(--amber)}
+  .sig .fact{font-size:16px;font-weight:600;color:var(--ink);line-height:1.55}
+  .sig .det{font-size:14px;color:var(--body);margin-top:4px}
+  .sig .srow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:9px}
+  .sig .src{font-size:12px;font-weight:700;color:var(--muted)}
+  .sig a.cite{font-size:12px;font-weight:600;color:var(--gold);text-decoration:none;
+    max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sig .go{margin-inline-start:auto;min-height:38px;border:1px solid var(--border);
+    border-radius:999px;padding:0 14px;font:inherit;font-size:13px;font-weight:700;
+    background:var(--bg);color:var(--ink);cursor:pointer;
+    transition:transform .15s var(--ease)}
+  .sig .go:active{transform:scale(.97)}
+  .sig .go[disabled]{opacity:.5;cursor:default}
+  .hot{background:var(--red-soft);color:var(--red);border-radius:999px;padding:2px 9px;
+    font-size:12px;font-weight:700}
+
+  .slot{font-size:12px;font-weight:700;color:var(--gold);letter-spacing:.02em;
+    margin:0 2px 6px}
+  .strength{font-family:var(--num);font-size:12px;font-weight:700;color:var(--muted)}
+
+  .manual{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-sm);
+    padding:14px 16px;margin-bottom:10px;box-shadow:var(--sh)}
+  .manual textarea{width:100%;min-height:76px;padding:10px 12px;font:inherit;font-size:16px;
+    border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg);
+    color:var(--body);outline:none;resize:vertical;line-height:1.6}
+  .manual textarea:focus{border-color:var(--gold)}
+
+  .ins{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-sm);
+    padding:14px 16px;margin-bottom:10px;box-shadow:var(--sh)}
+  .ins li{font-size:15px;margin-bottom:6px;color:var(--ink)}
+  .ins .n{font-family:var(--num)}
+
   .empty{color:var(--muted);font-size:15px;padding:18px 6px;text-align:center}
   .foot{color:var(--muted);font-size:13px;text-align:center;padding:20px 0}
   .toast{position:fixed;bottom:18px;right:50%;transform:translateX(50%);background:var(--ink);
@@ -226,11 +405,10 @@ STUDIO_PAGE_HTML = """<!doctype html>
     <div class="row">
       <div>
         <h1>🎬 استوديو عوجا</h1>
-        <div class="sub">قصص حقيقية من محادثات الضيوف → أفكار فيديو جاهزة</div>
+        <div class="sub">إشارات حقيقية — من بيانات عوجا وأخبار السوق — تصير أفكار فيديو</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <button class="scanbtn" id="scanbtn">امسح الجديد</button>
-        <button class="scanbtn" id="deepbtn" style="background:var(--gold);color:var(--ink)">🔄 مسح عميق</button>
+        <button class="scanbtn" id="instantbtn">⚡ فكرة الحين</button>
       </div>
     </div>
     <div class="prog" id="prog"></div>
@@ -238,28 +416,38 @@ STUDIO_PAGE_HTML = """<!doctype html>
   </div>
 
   <div class="chips" id="tabs">
-    <button class="chip on" data-tab="ideas">💡 أفكار <b id="n-ideas">0</b></button>
+    <button class="chip on" data-tab="today">📅 اليوم <b id="n-today">0</b></button>
+    <button class="chip" data-tab="signals">📡 الإشارات <b id="n-signals">0</b></button>
+    <button class="chip" data-tab="ideas">💡 أفكار <b id="n-ideas">0</b></button>
     <button class="chip" data-tab="stories">📖 قصص <b id="n-stories">0</b></button>
     <button class="chip" data-tab="posted">🚀 منشور <b id="n-posted">0</b></button>
+    <button class="chip" data-tab="learn">📈 التعلّم</button>
   </div>
 
   <div id="list"><div class="empty">لحظة…</div></div>
-  <div class="foot">استوديو عوجا · الأفكار من محادثات حقيقية — بدون أسماء ضيوف</div>
+  <div class="foot">استوديو عوجا · كل فكرة مربوطة بإشارة حقيقية — بدون أسماء ضيوف</div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 var TOKEN = new URLSearchParams(location.search).get('token') || '';
-var TAB = 'ideas';
-var STORIES = [], IDEAS = [];
+var TAB = 'today';
+var STORIES = [], IDEAS = [], SIGNALS = [], TODAY = [], LEARN = null, COLLECT = {};
 var NL = String.fromCharCode(10);
 
 var TYPE_AR = {hero_save:'إنقاذ الموقف', transformation:'تحوّل', transparency_numbers:'أرقام وشفافية',
   day_in_life:'كواليس اليوم', hospitality_wow:'لمسة ضيافة', weird_delight:'طلب طريف',
   heartwarming:'موقف إنساني', loyal_return:'ضيف رجع', operational_craft:'سر الصنعة', other:'موقف'};
-var TRG_AR = {curiosity:'فضول', loss:'خسارة', identity:'هوية', provocation:'استفزاز', emotion:'مشاعر'};
+var TRG_AR = {curiosity:'فضول', loss:'خسارة', identity:'هوية', provocation:'رأي مخالف',
+  authority:'خبرة داخلية', social_proof:'أرقام ونتائج', news:'خبر وتوقيت', emotion:'مشاعر'};
 var AUD_AR = {niche:'للملّاك 🏠', escape:'جمهور عام 🌍'};
 var VT_AR = {talking:'توك للكاميرا', tour:'جولة', before_after:'قبل/بعد',
-  story_voiceover:'سرد بصوت', onsite:'من الموقع'};
+  story_voiceover:'سرد بصوت', onsite:'من الموقع', data_reveal:'كشف أرقام',
+  news_reaction:'رد على خبر'};
+var SRC_AR = {occupancy:'الإشغال', pricing:'التسعير', reviews:'التقييمات', ops:'العمليات',
+  season:'الموسم', insider:'من الداخل', guest_story:'قصة ضيف', regulation:'أنظمة وتراخيص',
+  market:'سوق السعودية', global_trend:'اتجاه عالمي', trend:'خبر/ترند', manual:'كتبته بنفسك'};
+var FAM_AR = {internal:'بيانات عوجا', external:'مصدر خارجي', manual:'موقف من عندك'};
+var SLOT_AR = ['فكرة اليوم الأولى', 'فكرة اليوم الثانية', 'فكرة اليوم الثالثة'];
 
 function api(path, opts){
   opts = opts || {};
@@ -277,49 +465,54 @@ function toast(msg){
 function tag(cls, txt){ return '<span class="tag ' + cls + '">' + txt + '</span>'; }
 
 // ---------- scan ----------
+var SCAN = {};
 function renderScan(s){
-  var btn = document.getElementById('scanbtn');
-  var deep = document.getElementById('deepbtn');
+  SCAN = s || {};
   var prog = document.getElementById('prog');
   var bar = document.getElementById('bar');
-  if (deep){ deep.disabled = !!s.running; }
-  if (s.running){
-    btn.disabled = true; btn.textContent = 'يمسح…'; bar.hidden = false;
+  var busy = !!s.running;
+  var ecol = (COLLECT.external || {}).running, icol = (COLLECT.internal || {}).running;
+  if (busy){
+    bar.hidden = false;
     var pct = Math.min(100, Math.round(100 * (s.qualified || 0) / (s.target || 300)));
     document.getElementById('barfill').style.width = pct + '%';
-    prog.textContent = 'قرأ ' + (s.scanned || 0) + ' محادثة · ' + (s.qualified || 0)
-      + ' حقيقية · ' + (s.stories || 0) + ' قصة 📖 · ' + (s.blocked || 0)
-      + ' مستبعدة للبراند 🚫 · آخر شقة: ' + (s.last_unit || '—');
-    setTimeout(loadStatus, 4000);
+    prog.textContent = 'يقرأ المحادثات: ' + (s.scanned || 0) + ' · ' + (s.qualified || 0)
+      + ' حقيقية · ' + (s.stories || 0) + ' قصة 📖 · ' + (s.blocked || 0) + ' مستبعدة للبراند 🚫';
+  } else if (ecol || icol){
+    bar.hidden = true;
+    prog.textContent = ecol ? '🌍 يبحث بالويب عن أخبار وأنظمة…' : '🏠 يقرأ بيانات عوجا…';
   } else {
-    btn.disabled = false; btn.textContent = 'امسح الجديد'; bar.hidden = true;
-    var c = s.counts || {};
-    var done = 0, k;
-    for (k in c){ done += c[k]; }
-    prog.textContent = done ? ('في الأرشيف: ' + done + ' محادثة مفحوصة · '
-      + (c.story || 0) + ' قصة · ' + (c.blocked_brand || 0) + ' مستبعدة للبراند — «امسح الجديد» يكمّل من وين وقف، و«مسح عميق» يعيد الفحص بالعدسة الجديدة')
-      : 'أول مسح ياخذ وقت ويقرأ آخر ٢٠٠٠ محادثة حقيقية بعدسة إيجابية';
-    if (s.error){ prog.textContent = 'خطأ: ' + s.error; }
+    bar.hidden = true;
+    prog.textContent = s.error ? ('خطأ: ' + s.error) : '';
   }
+  if (busy || ecol || icol){ setTimeout(loadStatus, 4000); }
 }
 function loadStatus(){
   api('/api/studio/status').then(function(r){
-    if (r.ok){ renderScan(r.scan || {}); }
+    if (!r.ok){ return; }
+    var wasBusy = !!((COLLECT.external || {}).running || (COLLECT.internal || {}).running);
+    COLLECT = r.collect || {};
+    var busyNow = !!((COLLECT.external || {}).running || (COLLECT.internal || {}).running);
+    renderScan(r.scan || {});
+    if (wasBusy && !busyNow){ loadAll(); }   // collection just finished -> show it
   });
 }
-document.getElementById('scanbtn').addEventListener('click', function(){
-  api('/api/studio/scan', {method:'POST', body:'{}'}).then(function(r){
-    if (r.ok){ toast(r.started ? 'بدأ المسح 🔍' : 'فيه مسح شغّال'); renderScan(r.scan || {}); }
-  });
-});
-document.getElementById('deepbtn').addEventListener('click', function(){
-  if (!confirm('المسح العميق يعيد فحص آخر ٢٠٠٠ محادثة بالعدسة الإيجابية الجديدة، ويمسح البطاقات القديمة الضعيفة (يبقي المنشور والمصوّر). يمكن ياخذ وقت. نبدأ؟')){ return; }
-  api('/api/studio/deep-scan', {method:'POST', body:'{}'}).then(function(r){
-    if (r.ok){ toast(r.started ? 'بدأ المسح العميق 🔄' : 'فيه مسح شغّال'); renderScan(r.scan || {}); loadAll(); }
-  });
-});
 
 // ---------- cards ----------
+// The grounding line. Spec Section C: an idea that can't show its signal is
+// exactly the generic idea this whole system exists to stop producing.
+function signalLine(x){
+  if (!x.signal_text){ return ''; }
+  var src = SRC_AR[x.signal_source] || x.signal_source || '';
+  var cite = x.signal_url
+    ? ' · <a class="cite" href="' + esc(x.signal_url) + '" target="_blank" rel="noopener">المصدر ↗</a>'
+    : '';
+  var dt = x.signal_date ? ' · ' + esc(x.signal_date) : '';
+  return '<div class="quote"><b>الإشارة (' + esc(src) + '):</b> ' + esc(x.signal_text)
+    + '<div class="src" style="margin-top:4px">' + esc(FAM_AR[x.signal_family] || '')
+    + dt + cite + '</div></div>';
+}
+
 function ideaCard(x){
   var st = x.status || 'new';
   var script = (x.script || []).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
@@ -330,6 +523,7 @@ function ideaCard(x){
     + (x.visual_sub ? '<div class="vs">' + esc(x.visual_sub) + '</div>' : '') + '</div>'
     + '<div class="spoken"><span>🎤 أول ما تقول</span>' + esc(x.hook_spoken) + '</div>'
     + (x.angle ? '<div class="sum">' + esc(x.angle) + '</div>' : '')
+    + signalLine(x)
     + (x.why_it_works ? '<div class="why"><span>💡 ليش بيشتغل</span>' + esc(x.why_it_works) + '</div>' : '')
     + (script ? '<ol class="script">' + script + '</ol>' : '')
     + (x.cta ? '<div class="cta-line"><b>الختام:</b> ' + esc(x.cta) + '</div>' : '')
@@ -364,13 +558,115 @@ function storyCard(s){
     + '</div></div>';
 }
 
+// ---------- v3 panels ----------
+function sigCard(s){
+  var hot = s.is_hot ? '<span class="hot">🔥 طازج</span>' : '';
+  var age = (s.age_days === null || s.age_days === undefined) ? ''
+    : (s.age_days === 0 ? 'اليوم' : 'قبل ' + s.age_days + ' يوم');
+  var cite = s.url
+    ? '<a class="cite" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.url) + '</a>'
+    : '';
+  return '<div class="sig f-' + esc(s.family) + '" data-sig="' + esc(s.sid) + '">'
+    + '<div class="fact">' + esc(s.fact) + '</div>'
+    + (s.detail ? '<div class="det">' + esc(s.detail) + '</div>' : '')
+    + '<div class="srow"><span class="src">' + esc(SRC_AR[s.source] || s.source) + '</span>'
+    + (age ? '<span class="src">· ' + esc(age) + '</span>' : '') + hot + cite
+    + '<button class="go" data-act="sig-gen">✨ سوّها فكرة</button>'
+    + '<button class="go" data-act="sig-hide">إخفاء</button>'
+    + '</div></div>';
+}
+
+function signalsPanel(){
+  var vis = SIGNALS.filter(function(s){ return s.status !== 'hidden'; });
+  var ext = vis.filter(function(s){ return s.family === 'external'; });
+  var int_ = vis.filter(function(s){ return s.family !== 'external'; });
+  var head = '<div class="manual">'
+    + '<div class="sec" style="margin-top:0">حدّث الإشارات</div>'
+    + '<div class="acts" style="margin-top:0">'
+    + '<button data-act="col-int">🏠 بيانات عوجا</button>'
+    + '<button data-act="col-ext" class="main">🌍 أخبار وأنظمة (بحث حي)</button>'
+    + '</div>'
+    + '<div class="det" style="margin-top:8px;color:var(--muted)">البحث الحي ياخذ دقيقة تقريباً — وأي خبر يجي بدون مصدر وتاريخ يُرمى تلقائياً.</div>'
+    + '</div>';
+  var body = '';
+  if (ext.length){
+    body += '<div class="sec">🌍 من برّا — أخبار وأنظمة وسوق</div>' + ext.map(sigCard).join('');
+  }
+  if (int_.length){
+    body += '<div class="sec">🏠 من بيانات عوجا</div>' + int_.map(sigCard).join('');
+  }
+  if (!body){
+    body = '<div class="empty">ما فيه إشارات بعد — اضغط زر التحديث فوق 👆</div>';
+  }
+  return head + body;
+}
+
+function manualBox(){
+  return '<div class="manual">'
+    + '<div class="sec" style="margin-top:0">✍️ صار معك شي اليوم؟ اكتبه بسطر</div>'
+    + '<textarea id="manualtxt" placeholder="مثال: ضيف طلب نجهّز الشقة لطلب زواج، وجهّزناها خلال ساعتين"></textarea>'
+    + '<div class="acts"><button data-act="manual" class="main">حوّله لفكرة فيديو</button></div>'
+    + '</div>';
+}
+
+function todayPanel(){
+  var cards = TODAY.map(function(c, i){
+    return '<div class="slot">' + (SLOT_AR[i] || 'فكرة إضافية') + '</div>' + ideaCard(c);
+  }).join('');
+  if (!cards){
+    cards = '<div class="empty">ما فيه خطة لليوم — حدّث الإشارات وولّد أفكار، بعدها اضغط «رتّب اليوم»</div>';
+  }
+  return manualBox()
+    + '<div class="sec">📅 اللي تصوّره اليوم'
+    + '<button class="lnk" data-act="replan">رتّب اليوم من جديد</button></div>'
+    + cards;
+}
+
+function learnPanel(){
+  if (!LEARN){ return '<div class="empty">لحظة…</div>'; }
+  var st = LEARN.stats || {}, ins = LEARN.insights || [];
+  var head = '<div class="ins"><div class="sec" style="margin-top:0">📈 وش يشتغل لحسابك</div>';
+  if (!st.n){
+    head += '<div class="det">ما فيه بيانات كافية بعد. كل ما تعلّم فكرة «نشرتها» وتكتب المشاهدات، الاستوديو يتعلّم منها — ويبدأ يرجّح الأفكار اللي تشبه اللي نجح لك.</div></div>';
+    return head;
+  }
+  head += '<div class="det"><b class="n">' + st.n + '</b> فيديو مسجّل · متوسط <b class="n">'
+    + (st.mean || 0) + '</b> مشاهدة</div>';
+  if (ins.length){
+    head += '<ul style="margin:10px 0 0;padding-inline-start:20px">'
+      + ins.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
+  } else {
+    head += '<div class="det" style="margin-top:8px;color:var(--muted)">لسّه ما فيه فرق واضح — نحتاج '
+      + (LEARN.min_sample || 3) + ' فيديوهات على الأقل بكل نوع قبل ما نقول شي بثقة.</div>';
+  }
+  return head + '</div>';
+}
+
+function scanPanel(){
+  var c = (SCAN.counts || {}), done = 0, k;
+  for (k in c){ done += c[k]; }
+  return '<div class="manual"><div class="sec" style="margin-top:0">تنقيب محادثات الضيوف</div>'
+    + '<div class="det" style="color:var(--muted)">' + (done
+      ? ('في الأرشيف: ' + done + ' محادثة · ' + (c.story || 0) + ' قصة · '
+         + (c.blocked_brand || 0) + ' مستبعدة للبراند')
+      : 'أول مسح يقرأ آخر ٢٠٠٠ محادثة حقيقية بعدسة إيجابية') + '</div>'
+    + '<div class="acts"><button data-act="scan" class="main">امسح الجديد</button>'
+    + '<button data-act="deepscan">🔄 مسح عميق</button></div></div>';
+}
+
 function render(){
   var el = document.getElementById('list');
   var html = '';
-  if (TAB === 'stories'){
+  if (TAB === 'today'){
+    html = todayPanel();
+  } else if (TAB === 'signals'){
+    html = signalsPanel();
+  } else if (TAB === 'learn'){
+    html = learnPanel();
+  } else if (TAB === 'stories'){
     var vis = STORIES.filter(function(s){ return s.status !== 'hidden'; });
-    html = vis.map(storyCard).join('') ||
-      '<div class="empty">ما فيه قصص بعد — اضغط «امسح المحادثات» فوق 👆</div>';
+    html = scanPanel() + (vis.map(storyCard).join('') ||
+      '<div class="empty">ما فيه قصص بعد — اضغط «امسح الجديد» فوق 👆</div>');
   } else if (TAB === 'posted'){
     var posted = IDEAS.filter(function(x){ return x.status === 'posted' || x.status === 'filmed'; });
     html = posted.map(ideaCard).join('') ||
@@ -381,6 +677,9 @@ function render(){
       '<div class="empty">ما فيه أفكار بعد — روح لتبويب «قصص» واضغط «ولّد أفكار» على قصة تعجبك</div>';
   }
   el.innerHTML = html;
+  document.getElementById('n-today').textContent = TODAY.length;
+  document.getElementById('n-signals').textContent =
+    SIGNALS.filter(function(s){ return s.status === 'new'; }).length;
   document.getElementById('n-ideas').textContent =
     IDEAS.filter(function(x){ return x.status === 'new' || x.status === 'shortlisted'; }).length;
   document.getElementById('n-stories').textContent =
@@ -390,9 +689,14 @@ function render(){
 }
 
 function loadAll(){
-  Promise.all([api('/api/studio/stories'), api('/api/studio/ideas')]).then(function(rs){
+  Promise.all([api('/api/studio/stories'), api('/api/studio/ideas'),
+               api('/api/studio/signals'), api('/api/studio/today'),
+               api('/api/studio/learn')]).then(function(rs){
     if (rs[0].ok){ STORIES = rs[0].stories || []; }
     if (rs[1].ok){ IDEAS = rs[1].ideas || []; }
+    if (rs[2].ok){ SIGNALS = rs[2].signals || []; COLLECT = rs[2].collect || {}; }
+    if (rs[3].ok){ TODAY = rs[3].cards || []; }
+    if (rs[4].ok){ LEARN = rs[4]; }
     render();
   });
 }
@@ -416,12 +720,90 @@ function copyIdea(x){
     function(){ toast('ما قدرت أنسخ'); });
 }
 
+document.getElementById('instantbtn').addEventListener('click', function(){
+  var b = this;
+  b.disabled = true; b.textContent = 'يدوّر لك…';
+  api('/api/studio/instant', {method:'POST', body:'{}'}).then(function(r){
+    b.disabled = false; b.textContent = '⚡ فكرة الحين';
+    if (!r.ok){ toast(r.error || 'ما لقيت'); return; }
+    var x = (r.ideas || [])[0];
+    if (!x){ toast('ما لقيت فكرة جاهزة'); return; }
+    TAB = 'ideas';
+    document.querySelectorAll('.chip').forEach(function(c){
+      c.classList.toggle('on', c.getAttribute('data-tab') === 'ideas'); });
+    loadAll();
+    toast(r.generated ? 'ولّدت لك وحدة جديدة ⚡' : 'جاهزة — صوّرها ⚡');
+  });
+});
+
 document.getElementById('list').addEventListener('click', function(e){
   var btn = e.target.closest('button');
   if (!btn){ return; }
   var act = btn.getAttribute('data-act');
   var ideaEl = e.target.closest('[data-idea]');
   var storyEl = e.target.closest('[data-story]');
+  var sigEl = e.target.closest('[data-sig]');
+
+  // ---- v3 panel actions ----
+  if (act === 'scan' || act === 'deepscan'){
+    if (act === 'deepscan' && !confirm('المسح العميق يعيد فحص آخر ٢٠٠٠ محادثة بالعدسة الإيجابية، ويمسح البطاقات القديمة الضعيفة (يبقي المنشور والمصوّر). نبدأ؟')){ return; }
+    var path = act === 'scan' ? '/api/studio/scan' : '/api/studio/deep-scan';
+    btn.disabled = true;
+    api(path, {method:'POST', body:'{}'}).then(function(r){
+      toast(r.started ? 'بدأ المسح 🔍' : 'فيه مسح شغّال'); renderScan(r.scan || {});
+    });
+    return;
+  }
+  if (act === 'col-int' || act === 'col-ext'){
+    btn.disabled = true; btn.textContent = 'يجمع…';
+    api('/api/studio/collect', {method:'POST',
+      body: JSON.stringify({kind: act === 'col-int' ? 'internal' : 'external'})})
+      .then(function(r){
+        if (!r.ok){ toast(r.error || 'ما زبط'); btn.disabled = false; return; }
+        toast(act === 'col-int' ? 'يقرأ بيانات عوجا 🏠' : 'يبحث بالويب 🌍 — دقيقة تقريباً');
+        loadStatus();
+        setTimeout(loadAll, 12000);
+      });
+    return;
+  }
+  if (act === 'replan'){
+    btn.disabled = true;
+    api('/api/studio/today?force=1').then(function(r){
+      if (r.ok){ TODAY = r.cards || []; toast('رتّبت اليوم 📅'); }
+      render();
+    });
+    return;
+  }
+  if (act === 'manual'){
+    var ta = document.getElementById('manualtxt');
+    var txt = (ta && ta.value || '').trim();
+    if (txt.length < 8){ toast('اكتب الموقف بجملة أوضح'); return; }
+    btn.disabled = true; btn.textContent = 'يكتب لك…';
+    api('/api/studio/manual', {method:'POST', body: JSON.stringify({text: txt})})
+      .then(function(r){
+        btn.disabled = false; btn.textContent = 'حوّله لفكرة فيديو';
+        if (!r.ok){ toast(r.error || 'ما زبط'); return; }
+        if (ta){ ta.value = ''; }
+        toast('طلعت ' + r.ideas.length + ' فكرة من موقفك ✍️');
+        loadAll();
+      });
+    return;
+  }
+  if (sigEl){
+    var ssid = sigEl.getAttribute('data-sig');
+    if (act === 'sig-gen'){
+      btn.disabled = true; btn.textContent = 'يفكّر…';
+      api('/api/studio/signal-generate', {method:'POST', body: JSON.stringify({sid: ssid})})
+        .then(function(r){
+          if (r.ok){ toast('طلعت ' + r.ideas.length + ' فكرة 💡'); loadAll(); }
+          else { toast(r.error || 'ما زبطت'); btn.disabled = false; btn.textContent = '✨ سوّها فكرة'; }
+        });
+    } else if (act === 'sig-hide'){
+      api('/api/studio/signal-status', {method:'POST',
+        body: JSON.stringify({sid: ssid, status: 'hidden'})}).then(function(){ loadAll(); });
+    }
+    return;
+  }
   if (storyEl){
     var sid = parseInt(storyEl.getAttribute('data-story'), 10);
     if (act === 'gen'){
@@ -439,7 +821,7 @@ document.getElementById('list').addEventListener('click', function(e){
   }
   if (!ideaEl){ return; }
   var iid = parseInt(ideaEl.getAttribute('data-idea'), 10);
-  var idea = IDEAS.filter(function(x){ return x.id === iid; })[0] || {};
+  var idea = IDEAS.concat(TODAY).filter(function(x){ return x.id === iid; })[0] || {};
   if (act === 'copy'){ copyIdea(idea); return; }
   if (act === 'views'){
     var inp = ideaEl.querySelector('[data-views]');
@@ -476,3 +858,13 @@ def register(app):
     app.router.add_post("/api/studio/generate", _safe(api_generate))
     app.router.add_get("/api/studio/ideas", _safe(api_ideas))
     app.router.add_post("/api/studio/idea-status", _safe(api_idea_status))
+    # v3
+    app.router.add_get("/api/studio/signals", _safe(api_signals))
+    app.router.add_post("/api/studio/collect", _safe(api_collect))
+    app.router.add_post("/api/studio/signal-status", _safe(api_signal_status))
+    app.router.add_post("/api/studio/signal-generate", _safe(api_signal_generate))
+    app.router.add_post("/api/studio/manual", _safe(api_manual))
+    app.router.add_get("/api/studio/today", _safe(api_today))
+    app.router.add_get("/api/studio/week", _safe(api_week))
+    app.router.add_post("/api/studio/instant", _safe(api_instant))
+    app.router.add_get("/api/studio/learn", _safe(api_learn))

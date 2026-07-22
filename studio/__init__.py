@@ -15,8 +15,10 @@ READ-ONLY toward the business: never writes to Hostaway, never messages guests.
 
 from .host import HOST, wire as _wire_host
 from . import db, engine, routes, mine, notify, ideas  # noqa: F401
+from . import learn, hooks, plan, external, internal    # noqa: F401  (v3 signal bus)
 
-__all__ = ["wire", "register_routes", "HOST", "engine", "db", "mine", "notify", "ideas"]
+__all__ = ["wire", "register_routes", "HOST", "engine", "db", "mine", "notify", "ideas",
+           "learn", "hooks", "plan", "external", "internal"]
 
 
 def wire(caps):
