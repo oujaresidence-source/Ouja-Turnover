@@ -46168,20 +46168,30 @@ a{color:inherit;text-decoration:none}
 .mq-trade{display:flex;gap:7px;align-items:flex-start;font-size:13px;color:var(--mut);margin-top:6px}
 .mq-head{margin:0 0 6px;font-size:21px;color:var(--ink)}
 .mq-sub{margin:0 0 18px;color:var(--mut);font-size:14px}
-.mq-entry{display:flex;align-items:center;gap:12px;padding:15px 17px;margin:12px 0 14px;
-  background:var(--surface);border:1px solid var(--line);border-radius:12px;
-  color:var(--ink);text-decoration:none;min-height:44px;
-  transition:border-color .18s cubic-bezier(.23,1,.32,1)}
-.mq-entry:hover{border-color:var(--ink)}
-.mq-entry-x{flex:1;display:flex;flex-direction:column;gap:3px;text-align:right}
-.mq-entry-t{font-size:15.5px;font-weight:700;line-height:1.4;color:var(--ink)}
-.mq-entry-s{font-size:13px;line-height:1.5;color:var(--mut)}
-.mq-entry-a{flex:none;font-size:17px;color:var(--mut);
-  transition:transform .18s cubic-bezier(.23,1,.32,1)}
-.mq-entry:hover .mq-entry-a{transform:translateX(-3px);color:var(--ink)}
+/* The second door. Deliberately DARK on the cream page: the form is near-white and
+   the primary button is gold, so a third light box would dissolve into them. Dark
+   ink reads instantly as "a different way in", not a footnote under the button. */
+.mq-or{display:flex;align-items:center;gap:12px;margin:18px 0 12px;color:var(--mut);
+  font-size:12.5px;letter-spacing:.02em}
+.mq-or:before,.mq-or:after{content:"";flex:1;height:1px;background:var(--line)}
+.mq-entry{display:flex;align-items:center;gap:14px;padding:18px 20px;margin:0 0 14px;
+  background:var(--ink);color:var(--bg);text-decoration:none;border-radius:var(--radius);
+  box-shadow:var(--shadow);min-height:44px;
+  transition:transform .2s var(--ease),box-shadow .2s var(--ease)}
+.mq-entry:hover{transform:translateY(-2px);box-shadow:var(--shadow2)}
+.mq-entry:active{transform:translateY(0) scale(.995)}
+.mq-entry-x{flex:1;display:flex;flex-direction:column;gap:4px;text-align:right}
+.mq-entry-t{font-size:17px;font-weight:700;line-height:1.45}
+.mq-entry-s{font-size:13px;line-height:1.6;color:#C9B79E}
+.mq-entry-s b{color:var(--gold);font-weight:700}
+.mq-entry-a{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
+  font-size:16px;background:rgba(247,241,230,.10);
+  transition:transform .2s var(--ease),background .2s var(--ease)}
+.mq-entry:hover .mq-entry-a{background:var(--gold);color:var(--ink);transform:translateX(-3px)}
 @media (prefers-reduced-motion: reduce){
   .mq-dot,.mq-opt,.mq-entry,.mq-entry-a{transition:none}
-  .mq-opt:active,.mq-pm:active{transform:none}
+  .mq-opt:active,.mq-pm:active,.mq-entry:active{transform:none}
+  .mq-entry:hover{transform:none}
   .mq-entry:hover .mq-entry-a{transform:none}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
@@ -46233,9 +46243,10 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
+    +'<div class="mq-or"><span>أو</span></div>'
     +'<a class="mq-entry" href="/stay/match"><span class="mq-entry-x">'
-    +'<span class="mq-entry-t">ما تدري وين تسكن بالرياض؟</span>'
-    +'<span class="mq-entry-s">جاوب على ٤ أسئلة ونختار لك المناسب — ١٠ ثواني</span>'
+    +'<span class="mq-entry-t">ما تدري وين تسكن؟ خلّنا نختار لك</span>'
+    +'<span class="mq-entry-s">جاوب على ٤ أسئلة ونرشّح لك من <b>'+(cfg.count||'')+'</b> شقة — ١٠ ثواني</span>'
     +'</span><span class="mq-entry-a" aria-hidden="true">←</span></a>'
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
     +'<div id="feat" class="sec" style="margin-top:4px"></div>';
