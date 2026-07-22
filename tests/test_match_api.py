@@ -106,6 +106,21 @@ class TestMatchAnswers(unittest.TestCase):
     def test_malformed_budget_becomes_none(self):
         self.assertIsNone(bot._match_answers({"budget": "lots"})["budget_max"])
 
+    def test_facts_param_parses_known_keys(self):
+        a = bot._match_answers({"facts": "parking,elevator"})
+        self.assertEqual(a["required_facts"], ["parking", "elevator"])
+
+    def test_facts_param_drops_unknown_keys(self):
+        a = bot._match_answers({"facts": "parking,not_a_real_fact,elevator"})
+        self.assertEqual(a["required_facts"], ["parking", "elevator"])
+
+    def test_facts_param_empty_by_default(self):
+        self.assertEqual(bot._match_answers({})["required_facts"], [])
+
+    def test_facts_param_ignores_blank_entries(self):
+        a = bot._match_answers({"facts": "parking,,elevator,"})
+        self.assertEqual(a["required_facts"], ["parking", "elevator"])
+
 
 class TestMatchRouteOrder(unittest.TestCase):
     def test_match_route_is_registered_before_the_slug_catchall(self):
@@ -163,6 +178,46 @@ class TestMatchRunParallelAvailability(unittest.TestCase):
         self.assertIsInstance(out, dict)
         self.assertIn("top", out)
         self.assertFalse(out.get("impossible"))
+
+
+class TestMatchRunRequiredFacts(unittest.TestCase):
+    """_match_run must parse the `facts` query param via _match_answers and
+    pass it through to match.score(required_facts=...), and echo it back in
+    the response (out["answers"]["required_facts"]) so the UI can render
+    active chips."""
+
+    def setUp(self):
+        self.snaps = _fake_visible_snaps(3)
+        self.patches = [
+            mock.patch.object(bot, "_gw_visible_snaps", return_value=self.snaps),
+            mock.patch.object(bot, "_gw_listing_public", side_effect=_fake_listing_public),
+            mock.patch.object(bot, "_elite_geo_refresh", return_value=None),
+            mock.patch.object(bot, "_match_geo_points", return_value={}),
+        ]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_required_facts_reach_the_engine(self):
+        captured = {}
+        real_score = bot._match.score
+
+        def spy_score(*a, **kw):
+            captured.update(kw)
+            return real_score(*a, **kw)
+
+        with mock.patch.object(bot._match, "score", side_effect=spy_score):
+            bot._match_run({"facts": "parking,elevator"})
+
+        self.assertEqual(captured.get("required_facts"), ["parking", "elevator"])
+
+    def test_required_facts_echoed_in_the_response(self):
+        out = bot._match_run({"facts": "parking,elevator"})
+        self.assertEqual(out["answers"]["required_facts"], ["parking", "elevator"])
+
+    def test_no_facts_param_yields_empty_required_facts(self):
+        out = bot._match_run({})
+        self.assertEqual(out["answers"]["required_facts"], [])
 
 
 class TestGwSearchParallelAvailability(unittest.TestCase):
