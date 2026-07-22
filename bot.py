@@ -45390,10 +45390,28 @@ def _gw_parse_coords(L):
     return lat, lng
 
 def _gw_parse_listing(L):
-    """Raw Hostaway listing -> safe guest snapshot. Defensive."""
+    """Raw Hostaway listing -> safe guest snapshot. Defensive.
+
+    `bedroomsNumber` (rooms) and `bedsNumber` (total sleeping beds) are TWO
+    DIFFERENT numbers on Hostaway's listing object — confirmed against
+    api.hostaway.com/documentation (Listings: bedroomsNumber int "Number of
+    bedrooms in the listing"; bedsNumber int "Total quantity of beds
+    available"), 2026-07-22. A 3-bedroom unit can have 5 beds (twin/bunk
+    rooms) — Hostaway sends exactly that for at least one Ouja listing. Never
+    conflate them: this used to read bedsNumber's job out of bedroomsNumber
+    alone and label a bed count as a bedroom count to guests (the "٥ غرف نوم"
+    bug). `beds` below stays bedroomsNumber for backward compatibility with
+    every existing consumer (JS meta rows, tags, dashboard); `bedrooms` is the
+    same value under its honest name; `beds_count` is the new, separate
+    bedsNumber signal. `bedsCount` is accepted as a defensive alternate
+    spelling (unconfirmed in the wild, costs nothing to check)."""
     lid = L.get("id")
     name = (L.get("name") or L.get("internalListingName") or "").strip()
-    beds = L.get("bedroomsNumber"); baths = L.get("bathroomsNumber")
+    bedrooms = L.get("bedroomsNumber")
+    beds_count = L.get("bedsNumber")
+    if beds_count is None:
+        beds_count = L.get("bedsCount")
+    beds = bedrooms; baths = L.get("bathroomsNumber")
     capacity = L.get("personCapacity") or L.get("guestsIncluded") or L.get("maxGuests")
     city = (L.get("city") or "").strip()
     neighbourhood = (L.get("neighbourhood") or L.get("neighborhood") or "").strip()
@@ -45410,7 +45428,7 @@ def _gw_parse_listing(L):
         norm[k]["raw"].add(raw); norm[k]["sources"].add(src)
     return {
         "id": lid, "name": name, "internal": (L.get("internalListingName") or "").strip(),
-        "beds": beds, "baths": baths, "capacity": capacity,
+        "beds": beds, "bedrooms": bedrooms, "beds_count": beds_count, "baths": baths, "capacity": capacity,
         "area": area, "city": city, "neighbourhood": neighbourhood,
         "ptype": (L.get("propertyTypeName") or L.get("propertyType") or "").strip(),
         "desc": (L.get("description") or "").strip()[:4000],
@@ -45714,7 +45732,8 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "desc_en": (ov.get("full_en") or ""),
         "area": (_riyadh_name(ov.get("neighborhood")) or ov.get("area") or snap.get("area") or ""),
         "neighborhood": (ov.get("neighborhood") or ""),
-        "beds": snap.get("beds"), "baths": snap.get("baths"), "capacity": snap.get("capacity"),
+        "beds": snap.get("beds"), "bedrooms": snap.get("bedrooms"), "beds_count": snap.get("beds_count"),
+        "baths": snap.get("baths"), "capacity": snap.get("capacity"),
         "ptype": snap.get("ptype"), "badge": (ov.get("badge") or ""),
         "images": [im["url"] for im in (snap.get("images") or [])],
         "cover": ((ov.get("hero_image") or snap.get("cover")) or ""),

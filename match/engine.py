@@ -199,9 +199,59 @@ def _ar_count(n, one, two, few, many):
 
 _BEDROOM_FORMS = ("غرفة نوم وحدة", "غرفتين نوم", "غرف نوم", "غرفة نوم")
 
+# Beds (Hostaway `bedsNumber`) are a DIFFERENT count from bedrooms
+# (`bedroomsNumber`) — a 3-bedroom unit can have 5 beds via twin/bunk rooms.
+# Own Arabic agreement forms so a bed count is never rendered through the
+# bedroom wording (the "٥ غرف نوم" bug this fixed).
+_BED_FORMS = ("سرير واحد", "سريرين", "أسرّة", "سرير")
+
 
 def _ar_bedrooms(n):
     return _ar_count(n, *_BEDROOM_FORMS)
+
+
+def _ar_beds(n):
+    return _ar_count(n, *_BED_FORMS)
+
+
+# Bed-shortfall penalty: additive on top of the bedroom fit below, capped so
+# it can never by itself drag a unit to the eliminated-in-spirit floor the
+# bedroom shortfall curve uses — beds are a secondary signal layered on the
+# primary bedroom fit, not a second independent gate.
+_BED_PENALTY_STEP = 0.15
+_BED_PENALTY_CAP = 0.3
+
+
+def _bed_signal(u, party_size):
+    """Reads Hostaway's `beds_count` (bedsNumber) — kept STRICTLY separate
+    from `beds` (bedroomsNumber, read by `_score_bedrooms` below). Returns
+    (known, short, penalty, have_beds):
+      - known: whether beds_count was present and numeric (0 counts as known,
+        same "real data, not unknown" treatment `_score_bedrooms` gives a
+        real studio — never launder a real number into the neutral bucket).
+      - short: whether the known bed count is below the party size.
+      - penalty: 0.0-`_BED_PENALTY_CAP`, to subtract from the bedroom fit.
+      - have_beds: the int, or None.
+    Unknown data is silent by design (Owner rule 2026-07-22): no claim is
+    ever made about a number we don't have, and nothing is ever inferred
+    from the bedroom count."""
+    raw = u.get("beds_count")
+    try:
+        have_beds = int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        have_beds = None
+    known = have_beds is not None and have_beds >= 0
+    short = known and have_beds < party_size
+    penalty = min(_BED_PENALTY_CAP, _BED_PENALTY_STEP * (party_size - have_beds)) if short else 0.0
+    return known, short, penalty, have_beds
+
+
+def _beds_short_tradeoff(have_beds, party_size):
+    """Compares the GUEST'S OWN party size to the unit's bed count — allowed
+    under the owner's tradeoff rule (it is a request-vs-unit comparison, not
+    a stated shortcoming of the unit)."""
+    guests = _ar_count(party_size, "ضيف واحد", "ضيفين", "ضيوف", "ضيف")
+    return f"{_ar_beds(have_beds)} بس — عددكم {guests}"
 
 
 def _score_bedrooms(u, party_size, sleep_pref):
@@ -215,12 +265,19 @@ def _score_bedrooms(u, party_size, sleep_pref):
     `party_size` must already be a clean positive int (the same value the
     capacity gate used) — this function does not validate it.
 
-    `beds` is handled carefully: missing/non-numeric is genuinely UNKNOWN data
-    (neutral 0.5, no claim made either way). `0` is a real studio — Hostaway
-    sends `bedroomsNumber: 0` for these — and must NOT be laundered into the
-    same "unknown" bucket, because 0.5 beats a real one-bedroom that is one
-    room short (0.37), which is backwards and hides studios from guests who
-    should be told honestly.
+    `beds` (bedroomsNumber) is handled carefully: missing/non-numeric is
+    genuinely UNKNOWN data (neutral 0.5, no claim made either way). `0` is a
+    real studio — Hostaway sends `bedroomsNumber: 0` for these — and must NOT
+    be laundered into the same "unknown" bucket, because 0.5 beats a real
+    one-bedroom that is one room short (0.37), which is backwards and hides
+    studios from guests who should be told honestly.
+
+    `beds_count` (bedsNumber, a DIFFERENT Hostaway field — see bot.py
+    `_gw_parse_listing`) is layered on top as an ADDITIVE signal via
+    `_bed_signal`/`_beds_short_tradeoff`: never eliminates a unit, never
+    invented from the bedroom count, silent when unknown. When both numbers
+    are known the reason names both, e.g. "٣ غرف نوم · ٥ أسرّة" — never
+    "٥ غرف نوم" for a bed count.
     """
     need = required_bedrooms(party_size, sleep_pref)
     raw = u.get("beds")
@@ -228,7 +285,18 @@ def _score_bedrooms(u, party_size, sleep_pref):
         have = int(raw) if raw is not None else None
     except (TypeError, ValueError):
         have = None
+    beds_known, beds_short, bed_penalty, have_beds = _bed_signal(u, party_size)
+    beds_suffix = f" · {_ar_beds(have_beds)}" if beds_known else ""
+
     if have is None:
+        if beds_short:
+            # Bedrooms unknown but beds known and short: state ONLY the
+            # number we actually have — never infer the missing bedroom count.
+            return max(0.1, 0.5 - bed_penalty), None, _beds_short_tradeoff(have_beds, party_size)
+        if beds_known:
+            # Bedrooms unknown but beds known and sufficient: same rule —
+            # state only the number we have, as a plain positive fact.
+            return 0.5, _ar_beds(have_beds), None
         return 0.5, None, None                      # unknown data scores neutral
     if have == 0:
         # Real studio: no separate bedroom, so it is scored on the same
@@ -236,14 +304,24 @@ def _score_bedrooms(u, party_size, sleep_pref):
         # short (this also guarantees it never outscores a real 1-bedroom at
         # the same need) — but named honestly rather than as a bare number.
         short = need
-        return max(0.1, 0.55 - 0.18 * short), None, "استوديو — بدون غرفة نوم منفصلة"
+        fit = max(0.1, 0.55 - 0.18 * short) - bed_penalty
+        return max(0.05, fit), None, "استوديو — بدون غرفة نوم منفصلة"
     if have == need:
-        return 1.0, f"{_ar_bedrooms(have)} — بالضبط اللي طلبته", None
+        fit = max(0.1, 1.0 - bed_penalty)
+        reason = f"{_ar_bedrooms(have)}{beds_suffix} — بالضبط اللي طلبته"
+        tradeoff = _beds_short_tradeoff(have_beds, party_size) if beds_short else None
+        return fit, reason, tradeoff
     if have > need:
         over = have - need
-        return max(0.6, 1.0 - 0.12 * over), f"{_ar_bedrooms(have)} — فيها زيادة راحة", None
+        fit = max(0.1, max(0.6, 1.0 - 0.12 * over) - bed_penalty)
+        reason = f"{_ar_bedrooms(have)}{beds_suffix} — فيها زيادة راحة"
+        tradeoff = _beds_short_tradeoff(have_beds, party_size) if beds_short else None
+        return fit, reason, tradeoff
     short = need - have
-    return (max(0.1, 0.55 - 0.18 * short), None,
+    fit = max(0.05, max(0.1, 0.55 - 0.18 * short) - bed_penalty)
+    # Rooms already short: keep the room-shortfall tradeoff (the bigger,
+    # already-true claim) rather than stacking a second tradeoff sentence.
+    return (fit, None,
             f"{_ar_bedrooms(have)} بس — طلبت {_ar_bedrooms(need)}")
 
 

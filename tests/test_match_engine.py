@@ -326,6 +326,97 @@ class TestStudioVsUnknownBeds(unittest.TestCase):
         self.assertLess(studio_fit, 0.5)
 
 
+class TestBedsVsBedrooms(unittest.TestCase):
+    """2026-07-22 fix: Hostaway's `bedroomsNumber` (rooms) and `bedsNumber`
+    (sleeping beds) are TWO DIFFERENT numbers — a 3-bedroom unit can report 5
+    beds via twin/bunk rooms. The engine used to read only bedroomsNumber
+    into `beds` and render it to guests as "غرف نوم" (bedrooms) regardless of
+    which Hostaway field it actually came from; a `beds_count` (bedsNumber)
+    it never even looked at was the one that could disagree. This locks that
+    the two are never conflated in guest-facing text."""
+
+    def test_three_bedrooms_five_beds_names_both_numbers_honestly(self):
+        answers = dict(BASE, party_size=3, sleep_pref="each")   # needs 3 bedrooms
+        u = unit(1, beds=3, capacity=10)
+        u["beds_count"] = 5
+        out = engine.score(answers, [u])
+        joined = " ".join(out["top"][0]["reasons"]) + " " + str(out["top"][0]["tradeoff"])
+        self.assertIn("3 غرف نوم", joined)
+        self.assertIn("5 أسرّة", joined)
+        self.assertNotIn("5 غرف نوم", joined)
+
+    def test_score_bedrooms_direct_three_and_five(self):
+        """Same check directly against `_score_bedrooms`, bypassing ranking."""
+        fit, reason, tradeoff = engine._score_bedrooms(
+            {"beds": 3, "beds_count": 5}, 3, "each")
+        self.assertIn("3 غرف نوم", reason)
+        self.assertIn("5 أسرّة", reason)
+        self.assertNotIn("5 غرف نوم", reason)
+        self.assertIsNone(tradeoff)
+
+    def test_beds_unknown_makes_no_bed_claim_anywhere(self):
+        fit, reason, tradeoff = engine._score_bedrooms({"beds": 3}, 3, "each")
+        self.assertNotIn("سرير", reason or "")
+        self.assertNotIn("أسرّة", reason or "")
+        self.assertIsNone(tradeoff)
+
+    def test_beds_unknown_end_to_end_no_bed_claim_in_any_reason_or_tradeoff(self):
+        answers = dict(BASE, party_size=3, sleep_pref="each")
+        u = unit(1, beds=3, capacity=10)   # no beds_count key at all
+        out = engine.score(answers, [u])
+        item = out["top"][0]
+        blob = " ".join(item["reasons"]) + " " + str(item["tradeoff"])
+        self.assertNotIn("سرير", blob)
+        self.assertNotIn("أسرّة", blob)
+
+    def test_bed_agreement_forms(self):
+        self.assertEqual(engine._ar_beds(1), "سرير واحد")
+        self.assertEqual(engine._ar_beds(2), "سريرين")
+        self.assertEqual(engine._ar_beds(3), "3 أسرّة")
+        self.assertEqual(engine._ar_beds(11), "11 سرير")
+
+    def test_enough_bedrooms_too_few_beds_scores_lower_but_not_eliminated(self):
+        answers = dict(BASE, party_size=4, sleep_pref="together")  # needs 1 bedroom
+        plenty = unit(1, beds=1, capacity=10)
+        plenty["beds_count"] = 4
+        scarce = unit(2, beds=1, capacity=10)
+        scarce["beds_count"] = 2
+        out = engine.score(answers, [plenty, scarce])
+        self.assertEqual(len(out["top"]), 2)      # neither eliminated
+        ids = [item["id"] for item in out["top"]]
+        self.assertEqual(ids[0], 1)                # plenty-of-beds ranks first
+        plenty_score = next(i["match_score"] for i in out["top"] if i["id"] == 1)
+        scarce_score = next(i["match_score"] for i in out["top"] if i["id"] == 2)
+        self.assertGreater(plenty_score, scarce_score)
+
+    def test_too_few_beds_tradeoff_compares_party_size_not_unit_shortcoming(self):
+        answers = dict(BASE, party_size=4, sleep_pref="together")
+        u = unit(1, beds=1, capacity=10)
+        u["beds_count"] = 2
+        out = engine.score(answers, [u])
+        tradeoff = out["top"][0]["tradeoff"]
+        self.assertIsNotNone(tradeoff)
+        self.assertIn("سريرين", tradeoff)
+        self.assertIn("عددكم", tradeoff)
+
+    def test_beds_count_never_read_as_bedrooms_in_gw_parse_listing(self):
+        """`bot.py`'s `_gw_parse_listing` keeps bedroomsNumber and bedsNumber
+        distinct on the snapshot. Imported lazily so this test file has no
+        hard dependency on bot.py's heavy import surface unless it runs."""
+        import importlib
+        try:
+            bot = importlib.import_module("bot")
+        except Exception as e:
+            self.skipTest(f"bot module not importable in this environment: {e}")
+        L = {"id": 99, "name": "Ouja | Japandi #3BR", "bedroomsNumber": 3,
+             "bedsNumber": 5, "bathroomsNumber": 2, "personCapacity": 6}
+        snap = bot._gw_parse_listing(L)
+        self.assertEqual(snap["bedrooms"], 3)
+        self.assertEqual(snap["beds_count"], 5)
+        self.assertEqual(snap["beds"], 3)          # unchanged back-compat meaning
+        self.assertNotEqual(snap["beds"], snap["beds_count"])
+
+
 class TestHonestAvailabilityFallback(unittest.TestCase):
     """Fix 3: the reason-guarantee fallback must never claim availability
     that was never checked. Availability is only verified when the guest
