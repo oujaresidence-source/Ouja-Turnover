@@ -265,8 +265,10 @@ def _score_quality(u):
     reason, tradeoff = None, None
     if rating >= 4.7 and n >= 10:
         reason = f"{rating} ★ من {n} تقييم"
-    elif n >= 10 and rating < 4.3:
-        tradeoff = f"تقييمها {rating} ★ — أقل من بقية وحداتنا"
+    # Owner rule (2026-07-22): a tradeoff may only compare the GUEST'S OWN REQUEST
+    # against the unit — never state a shortcoming of the unit itself. A low rating
+    # is a complaint about our own inventory, so it still lowers the score (which
+    # ranks the unit down quietly) but is never shown to the guest.
     return fit, reason, tradeoff
 
 
@@ -442,7 +444,11 @@ def _score_amenities(u, answers):
                 hits.append(ar)
                 break
     if not hits:
-        return 0.2, None, _missing_amenities_tradeoff(wanted)
+        # Owner rule (2026-07-22): tradeoffs compare the guest's REQUEST to the unit.
+        # "the listing doesn't mention parking" is a statement about our own unit, so
+        # it is withheld from the guest. The miss still costs the unit points, which
+        # ranks it down without saying anything negative out loud.
+        return 0.2, None, None
     fit = min(1.0, len(hits) / len(wanted))
     return fit, " · ".join(hits[:2]), None
 

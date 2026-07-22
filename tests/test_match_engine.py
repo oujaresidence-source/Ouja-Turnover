@@ -467,11 +467,17 @@ class TestAmenityExclusions(unittest.TestCase):
         self.assertNotIn("غسالة", reason or "")
 
     def test_pool_table_does_not_satisfy_pool(self):
+        """Pool table must not be credited as a swimming pool. Owner rule
+        (2026-07-22) means a missing-amenity tradeoff is no longer emitted,
+        so the proof shifts to `reason` (no positive credit) and `fit`
+        (stuck at the no-hit floor of 0.2, not the ~0.33 a real pool hit
+        among 3 wanted "rest" amenities would produce) — this still catches
+        "Pool table" being wrongly credited as a pool."""
         answers = dict(BASE, purpose="rest")
         u = unit(1, amenities=["Pool table"])
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(reason)
-        self.assertIsNotNone(tradeoff)
+        self.assertEqual(fit, 0.2)
 
     def test_pool_cue_does_not_satisfy_pool(self):
         answers = dict(BASE, purpose="rest")
@@ -521,62 +527,73 @@ class TestAmenityExclusions(unittest.TestCase):
 
 
 class TestAmenityAndQualityTradeoffs(unittest.TestCase):
-    """Fix 2: amenities and quality must be able to produce a tradeoff, not
-    just a reason-or-nothing — otherwise a unit that loses real points on
-    both (e.g. no relevant amenities + a genuinely low rating) presents as
-    flawless, which reads as machine-generated once guests compare cards."""
+    """Owner rule (2026-07-22): «لا تعرض الشكاوي» — a guest-facing tradeoff
+    may ONLY compare the guest's OWN REQUEST against the unit (their
+    bedroom count, their budget, their destination). It may never state a
+    shortcoming of the unit itself — a missing amenity or a low rating is a
+    complaint about OUR OWN inventory, not about what the guest asked for,
+    so neither may ever reach the guest as a tradeoff string. The `fit`
+    still drops in both cases (the unit is still ranked down), which is why
+    every test below pairs "no tradeoff" with a check that the penalty is
+    still real — otherwise a future change could quietly remove the penalty
+    itself and nothing here would catch it."""
 
-    def test_no_relevant_amenities_produces_a_tradeoff(self):
+    def test_no_relevant_amenities_produces_no_tradeoff_but_fit_still_drops(self):
         answers = dict(BASE, purpose="work")
         u = unit(1, amenities=["Ethernet only", "Fireplace"])
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(reason)
-        self.assertIsNotNone(tradeoff)
-        self.assertIn("ما ذكروا", tradeoff)
+        self.assertIsNone(tradeoff)
+        self.assertEqual(fit, 0.2)   # the miss still costs real points, silently
 
-    def test_work_tradeoff_names_workspace_not_wifi(self):
-        """Wifi is a near-universal basic — Hostaway amenity lists are
-        frequently incomplete, so a missing wifi match only means the
-        LISTING didn't mention it, not that the unit lacks it. Naming it as
-        missing would be a false-negative claim (the mirror of the
-        false-positive bug this table was already fixed for), so wifi must
-        never appear in this tradeoff even though it's in PURPOSE_AMENITIES
-        for "work"."""
+    def test_work_missing_amenities_produce_no_tradeoff(self):
+        """Old test proved the tradeoff named "workspace" not "wifi". Under
+        the owner rule there is no tradeoff to name anything in at all —
+        the hedging logic in `_missing_amenities_tradeoff` (still exercised
+        directly below) is simply no longer wired into the guest-facing
+        path."""
         answers = dict(BASE, purpose="work")
         u = unit(1, amenities=["Ethernet only", "Fireplace"])
         fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIn("مكتب", tradeoff)
-        self.assertNotIn("واي فاي", tradeoff)
+        self.assertIsNone(tradeoff)
 
-    def test_family_missing_amenities_tradeoff_names_real_labels(self):
+    def test_family_missing_amenities_produce_no_tradeoff(self):
         answers = dict(BASE, purpose="family")
         u = unit(1, amenities=["Fireplace"])
         fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIsNotNone(tradeoff)
-        self.assertTrue(any(lbl in tradeoff for lbl in ("غسالة", "سرير أطفال")))
-        self.assertNotIn("مطبخ كامل", tradeoff)   # kitchen is a near-universal basic
+        self.assertIsNone(tradeoff)
 
     def test_only_wifi_or_kitchen_missing_produces_no_amenity_tradeoff(self):
         """If every unmatched amenity for a purpose is a near-universal basic
         (wifi/kitchen-class, tradeoff-ineligible), there is nothing honest
         left to name — no amenity tradeoff should be emitted at all, rather
-        than falsely implying the unit lacks something distinctive."""
+        than falsely implying the unit lacks something distinctive. This
+        exercises the hedging helper directly: `_score_amenities` no longer
+        calls it (owner rule), but the helper itself still guards this
+        invariant in case it is ever wired into an internal/ops-facing view."""
         wifi_and_kitchen_only = [("wifi", (), "واي فاي", False),
                                   ("kitchen", (), "مطبخ كامل", False)]
         self.assertIsNone(engine._missing_amenities_tradeoff(wifi_and_kitchen_only))
 
-    def test_boulevard_tradeoff_names_parking_not_wifi(self):
+    def test_boulevard_missing_amenities_produce_no_tradeoff(self):
         answers = dict(BASE, purpose="boulevard")
         u = unit(1, amenities=["Fireplace"])
         fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIn("موقف", tradeoff)
-        self.assertNotIn("واي فاي", tradeoff)
+        self.assertIsNone(tradeoff)
 
-    def test_low_rating_with_enough_reviews_gets_a_tradeoff(self):
-        fit, reason, tradeoff = engine._score_quality({"rating": 3.2, "reviews_count": 50})
-        self.assertIsNone(reason)
-        self.assertIsNotNone(tradeoff)
-        self.assertIn("3.2", tradeoff)
+    def test_low_rating_produces_no_tradeoff_but_scores_measurably_lower(self):
+        """A low, well-reviewed rating is a complaint about our own unit, so
+        it must never surface as a guest-facing tradeoff — but it must still
+        cost real points against a high-rated unit, or the penalty could
+        silently disappear in a future change with nothing to catch it."""
+        low_fit, low_reason, low_tradeoff = engine._score_quality(
+            {"rating": 3.2, "reviews_count": 50})
+        high_fit, high_reason, high_tradeoff = engine._score_quality(
+            {"rating": 4.9, "reviews_count": 50})
+        self.assertIsNone(low_reason)
+        self.assertIsNone(low_tradeoff)
+        self.assertIsNone(high_tradeoff)
+        self.assertLess(low_fit, high_fit)
 
     def test_unrated_unit_gets_no_quality_tradeoff(self):
         fit, reason, tradeoff = engine._score_quality({"rating": None, "reviews_count": 0})
@@ -588,16 +605,42 @@ class TestAmenityAndQualityTradeoffs(unittest.TestCase):
         fit, reason, tradeoff = engine._score_quality({"rating": 3.0, "reviews_count": 3})
         self.assertIsNone(tradeoff)
 
-    def test_a_weak_unit_no_longer_presents_as_flawless(self):
-        """Reproduces the proof case exactly: amenities=['Ethernet only',
-        'Fireplace'] + rating 3.2/50 reviews on a boulevard journey used to
-        score 78 with tradeoff: None. It must now surface a tradeoff."""
+    def test_weak_unit_ranks_below_strong_unit_without_criticising_it(self):
+        """Replaces the old 'a weak unit must surface a tradeoff' test, which
+        now directly conflicts with the owner's no-complaints rule. The
+        guarantee that survives is ranking, not disclosure: a unit weak on
+        BOTH amenities and rating must still rank below a strong one — the
+        penalty is real, it is just never spoken aloud. Same boulevard proof
+        case as before (amenities=['Ethernet only', 'Fireplace'], 3.2★/50),
+        now compared against a genuinely strong unit at the same distance."""
+        from match import poi as _poi
+        blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
+        answers = dict(BASE, purpose="boulevard")
+        weak = unit(1, amenities=["Ethernet only", "Fireplace"], rating=3.2, reviews=50)
+        strong = unit(2, amenities=["Free parking on premises", "Wifi"], rating=4.9, reviews=50)
+        geo = {1: (blvd[0] + 0.005, blvd[1]), 2: (blvd[0] + 0.005, blvd[1])}
+        out = engine.score(answers, [weak, strong], geo=geo)
+        self.assertEqual(out["top"][0]["id"], 2)
+        self.assertGreater(out["top"][0]["match_score"], out["top"][1]["match_score"])
+
+    def test_top_level_tradeoff_never_criticises_our_own_unit(self):
+        """The regression guard that matters most: whatever `engine.score()`
+        actually returns as `tradeoff` for a unit that is weak on both
+        amenities and rating, it must never contain «تقييمها» (a complaint
+        about our own rating) or «ما ذكروا» (a complaint about what our own
+        listing doesn't mention). A tradeoff may only compare the guest's
+        own request to the unit — this is what a future contributor
+        restoring the old copy, or wiring `_missing_amenities_tradeoff` back
+        in, would break."""
         from match import poi as _poi
         blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
         answers = dict(BASE, purpose="boulevard")
         u = unit(1, amenities=["Ethernet only", "Fireplace"], rating=3.2, reviews=50)
         out = engine.score(answers, [u], geo={1: (blvd[0] + 0.005, blvd[1])})
-        self.assertIsNotNone(out["top"][0]["tradeoff"])
+        tradeoff = out["top"][0]["tradeoff"]
+        if tradeoff is not None:
+            self.assertNotIn("تقييمها", tradeoff)
+            self.assertNotIn("ما ذكروا", tradeoff)
 
 
 class TestImpactBasedSelection(unittest.TestCase):
