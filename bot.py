@@ -131,6 +131,15 @@ except Exception as _owner_report_err:  # pragma: no cover
     _owner_report = None
     _HAS_OWNER_REPORT = False
 
+# Stay Match «مطابقة الإقامة» — pure ranking engine for the /stay/match quiz; additive, read-only.
+try:
+    import match as _match
+    _HAS_MATCH = True
+except Exception as _match_err:         # pragma: no cover
+    print("[match] import failed (match disabled, bot unaffected):", _match_err)
+    _match = None
+    _HAS_MATCH = False
+
 # ---------------- config ----------------
 HOSTAWAY_ACCOUNT_ID = os.environ.get("HOSTAWAY_ACCOUNT_ID", "")
 HOSTAWAY_API_KEY    = os.environ.get("HOSTAWAY_API_KEY", "")
@@ -16434,7 +16443,7 @@ const T = {
     fb_unitp:'ربحية الشقق', fb_companyp:'ربحية الشركة', fb_close:'الإقفال الشهري', fb_mapping:'الإعدادات والربط',
     fb_overview:'النظرة المالية', fb_ws_overview:'النظرة المالية', fb_ws_imports:'الاستيراد والإعداد', fb_ws_queue:'قائمة العمل', fb_ws_mapping:'الربط والقواعد', fb_ws_profit:'الربحية والإقفال',
     fb_ws_daily:'يومي المالي', fb_ws_work:'العمل والمطابقة', fb_ws_setup:'الإعداد والربط', fb_ws_audit:'السجل والمراجعة', fb_daily:'يومي المالي', fb_assist:'وش يحتاج انتباهك اليوم؟', fb_bulk_link:'ربط كل المطابقات المؤكدة', fb_link_confirm:'ربط واعتماد', fb_help_first:'أول مرة تستخدم المركز المالي؟',
-    gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_hero:'الواجهة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
+    gw:'موقع الضيوف', gw_sub:'موقع عوجا العام لزوار تيك توك — بحث وعرض الوحدات والحجز عبر Airbnb', gw_ov:'نظرة عامة', gw_hero:'الواجهة', gw_listings:'الوحدات', gw_tags:'الوسوم / نوع', gw_airbnb:'روابط Airbnb', gw_analytics:'التحليلات', gw_match:'المطابقة', gw_sync:'تحديث من Hostaway', gw_visible:'ظاهر في الموقع', gw_hidden:'مخفي من الموقع', gw_has_airbnb:'رابط Airbnb موجود', gw_no_airbnb:'رابط Airbnb غير موجود', gw_unmapped:'وسوم غير مربوطة', gw_preview:'معاينة صفحة الوحدة', gw_open:'فتح الموقع',
     fb_act_promote:'حوّل للسجل المالي', fb_act_submit:'إرسال للمراجعة', fb_act_classify:'تصنيف', fb_link_cc:'اربط مركز تكلفة', fb_health:'صحة البيانات المالية', fb_nextbest:'وش تسوي الحين؟', fb_applysimilar:'تطبيق على المشابهة', fb_saverule:'احفظ كقاعدة', fb_col_priority:'الأولوية', fb_search:'بحث', fb_bulk:'إجراء جماعي', fb_selected:'محدد', fb_general_expense:'مصروف عام للشركة', fb_no_apt:'غير مرتبط بشقة', fb_dupcheck:'تأكد من التكرار مع دافترة', fb_cc_refresh:'تحديث مراكز التكلفة من دافترة', fb_import_journals:'استيراد قيود دافترة', fb_link_daftra:'ربط بسجل موجود في دافترة', fb_open_compare:'فتح المطابقة', fb_not_dup:'مو مكرر', fb_map_bank:'ربط حسابات البنك في دافترة', fb_recheck:'إعادة فحص النتائج السابقة',
     fb_dist_title:'مطابقة توزيع داخل قيد', fb_dist_sub:'العملية البنكية تطابق مجموعة أسطر داخل قيد دافترة، مو إجمالي القيد كامل', fb_link_dist:'ربط كتوزيع', fb_pick_lines:'اختر أسطر القيد المطابقة', fb_manual_pick:'اختر أسطر يدويًا', fb_open_daftra:'فتح القيد في دافترة', fb_not_this_dist:'مو هذا التوزيع', fb_search_journal:'ابحث عن قيد آخر', fb_confirm_link:'اعتماد الربط', fb_sel_sum:'مجموع الأسطر المختارة', fb_txn_amount:'مبلغ العملية', fb_sum_match:'المجموع مطابق', fb_sum_short:'المجموع ناقص', fb_sum_over:'المجموع زائد', fb_no_double:'لا نقدر نربط نفس السطر مرتين', fb_line_used:'مستخدم سابقًا', fb_dist_done:'تم ربط العملية كتوزيع داخل قيد دافترة', fb_dist_explain:'هذي العملية مب مطابقة لإجمالي القيد، لكنها تطابق أسطر داخل القيد', fb_batch_title:'مطابقة حوالات مجمعة', fb_batch_link:'ربط الحوالات بالقيد', fb_dist_card:'مطابقات التوزيع', fb_dist_review:'راجع توزيعات القيود', fb_cost_center:'مركز التكلفة', fb_included:'مشمول', fb_journal_total:'إجمالي القيد', fb_bank_line:'سطر حساب البنك', fb_lane_dist_ready:'موجود كتوزيع في دافترة', fb_lane_dist_possible:'توزيع محتمل', fb_lane_dist_linked:'مربوط بتوزيع', fb_batch_lane:'حوالة مجمعة', fb_lines_used:'أسطر مستخدمة سابقًا', fb_sum_diff:'فرق في مجموع الأسطر',
     fb_st_notstarted:'ما بدأ', fb_st_attention:'يحتاج انتباه', fb_st_ready:'جاهز', fb_st_done:'تم',
@@ -16758,7 +16767,7 @@ const T = {
     fb_unitp:'Unit Profitability', fb_companyp:'Company Profitability', fb_close:'Monthly Close', fb_mapping:'Settings / Mapping',
     fb_overview:'Overview', fb_ws_overview:'Overview', fb_ws_imports:'Imports & Setup', fb_ws_queue:'Work Queue', fb_ws_mapping:'Mapping & Rules', fb_ws_profit:'Profitability & Close',
     fb_ws_daily:'Daily Flow', fb_ws_work:'Work & Reconciliation', fb_ws_setup:'Setup & Mapping', fb_ws_audit:'Audit & Logs', fb_daily:'Daily Flow', fb_assist:'What needs your attention today?', fb_bulk_link:'Link all confirmed matches', fb_link_confirm:'Link & confirm', fb_help_first:'First time using Financial Brain?',
-    gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_hero:'Landing Hero', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
+    gw:'Guest Website', gw_sub:'Public Ouja site for TikTok visitors — search, browse, book via Airbnb', gw_ov:'Overview', gw_hero:'Landing Hero', gw_listings:'Listings', gw_tags:'Tags / نوع', gw_airbnb:'Airbnb Links', gw_analytics:'Analytics', gw_match:'Match', gw_sync:'Sync from Hostaway', gw_visible:'Visible on site', gw_hidden:'Hidden from site', gw_has_airbnb:'Airbnb URL found', gw_no_airbnb:'Airbnb URL missing', gw_unmapped:'Unmapped tags', gw_preview:'Preview unit page', gw_open:'Open website',
     fb_act_promote:'Move to ledger', fb_act_submit:'Submit for review', fb_act_classify:'Classify', fb_link_cc:'Link cost center', fb_health:'Finance data health', fb_nextbest:'Do this next', fb_applysimilar:'Apply to similar', fb_saverule:'Save as rule', fb_col_priority:'Priority', fb_search:'Search', fb_bulk:'Bulk action', fb_selected:'selected', fb_general_expense:'Company general expense', fb_no_apt:'Not linked to a unit', fb_dupcheck:'Check duplicates with Daftra', fb_cc_refresh:'Refresh cost centers from Daftra', fb_import_journals:'Import Daftra journal entries', fb_link_daftra:'Link existing Daftra record', fb_open_compare:'Open comparison', fb_not_dup:'Not a duplicate', fb_map_bank:'Map Daftra bank accounts', fb_recheck:'Recheck previous results',
     fb_dist_title:'Distribution match inside a journal', fb_dist_sub:'The bank transaction matches a group of lines inside a Daftra journal — not the journal total', fb_link_dist:'Link as distribution', fb_pick_lines:'Select the matching journal lines', fb_manual_pick:'Pick lines manually', fb_open_daftra:'Open journal in Daftra', fb_not_this_dist:'Not this distribution', fb_search_journal:'Search another journal', fb_confirm_link:'Confirm link', fb_sel_sum:'Selected lines total', fb_txn_amount:'Transaction amount', fb_sum_match:'Totals match', fb_sum_short:'Total is short', fb_sum_over:'Total exceeds', fb_no_double:'Cannot link the same line twice', fb_line_used:'already used', fb_dist_done:'Linked as a distribution inside a Daftra journal', fb_dist_explain:'This transaction does not equal the journal total, but it matches lines inside the journal', fb_batch_title:'Batch transfers match', fb_batch_link:'Link transfers to journal', fb_dist_card:'Distribution matches', fb_dist_review:'Review journal distributions', fb_cost_center:'Cost center', fb_included:'Included', fb_journal_total:'Journal total', fb_bank_line:'Bank-account line', fb_lane_dist_ready:'In Daftra as distribution', fb_lane_dist_possible:'Possible distribution', fb_lane_dist_linked:'Linked as distribution', fb_batch_lane:'Batch transfer', fb_lines_used:'Lines already used', fb_sum_diff:'Line-sum difference',
     fb_st_notstarted:'Not started', fb_st_attention:'Needs attention', fb_st_ready:'Ready', fb_st_done:'Done',
@@ -25219,10 +25228,10 @@ function fbStatCard(label,val,color){ return '<div style="'+fbCard()+';margin:0"
 /* ===== Guest Website (موقع الضيوف) dashboard ===== */
 var _gw={tab:'ov',byId:{},tagById:{}};
 function gwTabs(){ var el=document.getElementById('gwTabs'); if(!el) return; var t_=t();
-  var tabs=[['ov','🧭',t_.gw_ov],['hero','🖼️',t_.gw_hero],['listings','🏠',t_.gw_listings],['tags','🏷️',t_.gw_tags],['airbnb','🔗',t_.gw_airbnb],['analytics','📊',t_.gw_analytics]];
+  var tabs=[['ov','🧭',t_.gw_ov],['hero','🖼️',t_.gw_hero],['listings','🏠',t_.gw_listings],['tags','🏷️',t_.gw_tags],['airbnb','🔗',t_.gw_airbnb],['analytics','📊',t_.gw_analytics],['match','🎯',t_.gw_match]];
   el.innerHTML=tabs.map(function(x){ var on=(_gw.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="gwGo(&#39;'+x[0]+'&#39;)">'+x[1]+' '+esc(x[2])+'</button>'; }).join(''); }
 function gwGo(tab){ _gw.tab=tab; gwTabs(); var b=document.getElementById('gwBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
-  ({ov:gwOverview,hero:gwHero,listings:gwListings,tags:gwTags,airbnb:gwAirbnb,analytics:gwAnalytics}[tab]||gwOverview)(); }
+  ({ov:gwOverview,hero:gwHero,listings:gwListings,tags:gwTags,airbnb:gwAirbnb,analytics:gwAnalytics,match:gwMatch}[tab]||gwOverview)(); }
 function loadGw(){ var e=document.getElementById('t_gw'); if(e) e.textContent='📱 '+t().gw; var s=document.getElementById('t_gw_sub'); if(s) s.textContent=t().gw_sub; gwTabs(); gwGo(_gw.tab); }
 async function gwSync(){ var ar=(L==='ar'); toast(ar?'⏳ تحديث من Hostaway…':'⏳ Syncing from Hostaway…'); var r; try{ r=await post('/api/gw/sync',{}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم تحديث ':'synced ')+(r.count||0)+(ar?' وحدة':' listings')); gwGo(_gw.tab); } else toast((r&&r.error)||'⚠'); }
 async function gwHero(){ var b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/hero'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
@@ -25406,6 +25415,31 @@ async function gwAnalytics(){ var ar=(L==='ar'), b=document.getElementById('gwBo
   h+=lst(ar?'أكثر «نوع» مختار':'Top نوع selected',d.top_types,function(k){ var x=(_gw.tagById||{})[k]; return x?(x.ar||x.en||k):k; });
   h+=lst(ar?'المصادر (UTM/إحالة)':'Sources (UTM/referrer)',d.by_utm);
   b.innerHTML=h+'<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'آخر ٧ أيام · جلسات مجهولة بدون بيانات شخصية':'Last 7 days · anonymous sessions, no personal data')+'</div>'; }
+function mqPurposeLabel(k,ar){ var m={boulevard:[ar?'بوليفارد وموسم الرياض':'Boulevard/Season'],work:[ar?'عمل واجتماعات':'Work/meetings'],medical:[ar?'علاج':'Medical'],family:[ar?'زيارة أهل':'Family visit'],shopping:[ar?'تسوق وسياحة':'Shopping/tourism'],rest:[ar?'راحة':'Rest']}; var e=m[k]; return e?e[0]:(k||(ar?'غير محدد':'unspecified')); }
+async function gwMatch(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/stay/match-stats'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
+  var f=d.funnel||{}, start=f.start||0;
+  var steps=[['start',ar?'بدأ الاستبيان':'Started quiz'],['who',ar?'مين راح يكون معك':"Who's with you"],['sleep',ar?'وين تناموا':'Sleeping setup'],['purpose',ar?'الغرض':'Purpose'],['results',ar?'وصل للنتائج':'Reached results']];
+  var worst=null;
+  for(var i=1;i<steps.length;i++){ var prev=f[steps[i-1][0]]||0, cur=f[steps[i][0]]||0; if(prev>cur){ var drop=prev-cur; if(!worst||drop>worst.drop) worst={drop:drop,from:steps[i-1][1],to:steps[i][1]}; } }
+  var h='<div style="'+fbCard()+'"><b>🎯 '+(ar?'قمع استبيان المطابقة':'Match quiz funnel')+'</b>'
+    +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'آخر ٣٠ يوم · نسبة الإكمال ':'Last 30 days · completion ')+'<b style="color:var(--text)">'+(d.completion||0)+'%</b>'+(ar?' · تخلّى عن الاستبيان ':' · abandoned ')+'<b style="color:var(--text)">'+(f.abandon||0)+'</b></div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'+steps.map(function(s){ var n=f[s[0]]||0, pct=start?Math.round(100*n/start):0;
+      return '<div><div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px"><span>'+esc(s[1])+'</span><b>'+n+'</b></div><div style="height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--gold);border-radius:99px"></div></div></div>'; }).join('')+'</div>';
+  if(worst) h+='<div class="muted" style="font-size:11.5px;margin-top:10px">'+(ar?'⚠ أكبر تسرّب: بين «':'⚠ Biggest drop-off: between "')+esc(worst.from)+(ar?'» و«':'" and "')+esc(worst.to)+(ar?'» — فقدنا ':'" — lost ')+worst.drop+(ar?' ضيف':' guests')+'</div>';
+  h+='</div>';
+  var unmet=d.unmet||[];
+  if(!unmet.length){
+    h+='<div style="'+fbCard()+';margin-top:8px;text-align:center;color:var(--mut)">✓ '+(ar?'ما فيه طلبات ما قدرنا نلبيها':'No unmet demand recorded')+'</div>';
+  } else {
+    h+='<div style="'+fbCard()+';margin-top:8px"><b>📋 '+(ar?'جدول الطلب غير الملبّى':'Unmet-demand table')+'</b>'
+      +'<div class="muted" style="font-size:11px;margin:4px 0 10px">'+(ar?'الطلبات اللي كررنا فيها نتيجة ضعيفة — الأسوأ أول':'Requests we keep serving weakly — worst first')+'</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap"><thead><tr style="text-align:'+(ar?'right':'left')+'">'
+      +'<th style="padding:5px">'+(ar?'الغرض':'Purpose')+'</th><th style="padding:5px">'+(ar?'عدد الضيوف':'Party size')+'</th>'
+      +'<th style="padding:5px">'+(ar?'كم مرة انطلبت':'Asked')+'</th><th style="padding:5px">'+(ar?'كم مرة ما لقينا':'Weak result')+'</th><th style="padding:5px">%</th></tr></thead><tbody>'
+      +unmet.map(function(r){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 5px">'+esc(mqPurposeLabel(r.purpose,ar))+'</td><td style="padding:6px 5px">'+(r.party||0)+'</td><td style="padding:6px 5px">'+(r.asked||0)+'</td><td style="padding:6px 5px;color:var(--bad)">'+(r.weak||0)+'</td><td style="padding:6px 5px">'+(r.weak_pct||0)+'%</td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+  }
+  b.innerHTML=h+'<div class="muted" style="font-size:11px;margin-top:8px">'+(ar?'آخر ٣٠ يوم · جلسات مجهولة بدون بيانات شخصية':'Last 30 days · anonymous sessions, no personal data')+'</div>'; }
 /* ===== Cleaning Teams: multi-team management + per-team links + assignment + analytics ===== */
 var _ctSel={};
 async function loadCleanTeams(){
@@ -45792,6 +45826,31 @@ def _gw_noo_options():
     opts.sort(key=lambda o: (o["sort"], -o["count"], o["key"]))
     return opts
 
+_GW_PRICE_MIN_SAMPLE = 5
+
+def _gw_price_bands(prices):
+    """p25/median/p75 nightly price across visible units, for the Stay Match
+    budget slider. Returns None on a thin sample so the UI skips the budget
+    screen rather than showing invented numbers."""
+    vals = []
+    for p in (prices or []):
+        try:
+            v = int(p)
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            vals.append(v)
+    if len(vals) < _GW_PRICE_MIN_SAMPLE:
+        return None
+    vals.sort()
+    def _pct(q):
+        return int(vals[min(len(vals) - 1, max(0, int(round(q * (len(vals) - 1)))))])
+    return {"p25": _pct(0.25), "median": _pct(0.50), "p75": _pct(0.75)}
+
+def _gw_visible_prices():
+    """Nightly base prices of every visible unit (input to _gw_price_bands)."""
+    return [s.get("price_base") for s, _ov in _gw_visible_snaps()]
+
 def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=None, tags=None):
     """Guest listing results. With dates -> only AVAILABLE; else browse mode (no availability claims).
     neighborhood = a RIYADH_NEIGHBORHOODS key (assigned per-unit in the dashboard). tags = comma-
@@ -45805,6 +45864,7 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=
         g = None
     results, avail_error = [], False
     tag_list = [t for t in ((tags or "").split(",")) if t and t not in ("all",)]
+    survivors = []
     for s, ov in _gw_visible_snaps():
         if g and s.get("capacity") and int(s["capacity"]) < g:
             continue
@@ -45818,9 +45878,38 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=
             _tk = s.get("tag_keys") or []
             if not all(t in _tk for t in tag_list):
                 continue
+        survivors.append((s, ov))
+
+    # ---- parallel calendar lookups — SAME pool pattern as enrich_catalog_for_dates
+    # (bot.py ~6176) and _match_run (bot.py ~46744); both measured large serial->parallel
+    # speedups on this exact call. /stay/search is a public, unauthenticated page a guest
+    # is actively waiting on — do NOT collapse this back into a serial for-loop over
+    # unit_availability_price. The fan-out happens only AFTER the cheap guests/type/area/
+    # neighborhood/tags filters have shrunk `survivors`, so a narrowed search still costs
+    # less than an unfiltered one. Results are re-walked below in `survivors` order (not
+    # completion order) so sort_key ties resolve exactly as a serial run would — the
+    # returned list is unchanged, only faster. One unit's failure never fails the whole
+    # request; it just keeps avail=None, which the existing avail_error handling covers.
+    avail_map = {}
+    if not browse and survivors:
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futures = {ex.submit(unit_availability_price, s.get("id"), ci, co): s.get("id")
+                           for s, _ov in survivors}
+                for fut in as_completed(futures):
+                    lid = futures[fut]
+                    try:
+                        avail_map[lid] = fut.result()
+                    except Exception as e:
+                        print(f"stay search availability parallel error ({lid}):", e)
+                        avail_map[lid] = None
+        except Exception as e:
+            print("stay search availability pool error:", e)
+
+    for s, ov in survivors:
         avail = None
         if not browse:
-            avail = unit_availability_price(s.get("id"), ci, co)
+            avail = avail_map.get(s.get("id"))
             if avail is None:
                 avail_error = True
             elif not avail.get("available"):
@@ -46029,6 +46118,40 @@ a{color:inherit;text-decoration:none}
 .sticky-cta{position:fixed;bottom:0;inset-inline:0;z-index:40;background:rgba(247,241,230,.92);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:11px 0 calc(11px + env(safe-area-inset-bottom))}
 .sticky-cta .wrap{display:flex;flex-direction:column;gap:6px}
 .foot{text-align:center;color:var(--mut);font-size:12px;padding:26px 16px 34px}
+.mq-wrap{max-width:560px;margin:0 auto;padding:22px 4px 40px}
+.mq-prog{display:flex;gap:6px;justify-content:center;margin-bottom:22px}
+.mq-dot{width:26px;height:3px;border-radius:2px;background:var(--line);transition:background .25s cubic-bezier(.23,1,.32,1)}
+.mq-dot.on{background:var(--ink)}
+.mq-back{background:none;border:0;color:var(--mut);font:inherit;font-size:13px;cursor:pointer;padding:4px 0;margin-bottom:6px}
+.mq-q{font-size:26px;line-height:1.35;margin:0 0 20px;color:var(--ink);text-wrap:balance}
+.mq-opts{display:flex;flex-direction:column;gap:9px}
+.mq-opt{width:100%;text-align:right;padding:16px 18px;font:inherit;font-size:16px;color:var(--ink);
+  background:var(--surface);border:1px solid var(--line);border-radius:13px;cursor:pointer;
+  transition:border-color .18s cubic-bezier(.23,1,.32,1),transform .12s cubic-bezier(.23,1,.32,1)}
+.mq-opt:hover{border-color:var(--ink)}
+.mq-opt:active{transform:scale(.985)}
+.mq-count{display:flex;align-items:center;gap:14px;justify-content:center;margin-top:20px;
+  color:var(--mut);font-size:14px}
+.mq-count b{font-size:20px;color:var(--ink);min-width:28px;text-align:center}
+.mq-pm{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink);font-size:20px;cursor:pointer;line-height:1}
+.mq-pm:active{transform:scale(.95)}
+.mq-skip{display:block;width:100%;margin-top:12px;background:none;border:0;color:var(--mut);
+  font:inherit;font-size:13.5px;cursor:pointer;padding:8px;text-decoration:underline}
+.mq-why{display:flex;flex-direction:column;gap:5px;margin:8px 0 2px;font-size:13.5px}
+.mq-why span{display:flex;gap:7px;align-items:flex-start;color:var(--ink)}
+.mq-trade{display:flex;gap:7px;align-items:flex-start;font-size:13px;color:var(--mut);margin-top:6px}
+.mq-head{margin:0 0 6px;font-size:21px;color:var(--ink)}
+.mq-sub{margin:0 0 18px;color:var(--mut);font-size:14px}
+.mq-entry{display:block;text-align:center;padding:14px 16px;margin:10px 0 14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  color:var(--ink);text-decoration:none;font-size:14.5px;
+  transition:border-color .18s cubic-bezier(.23,1,.32,1)}
+.mq-entry:hover{border-color:var(--ink)}
+@media (prefers-reduced-motion: reduce){
+  .mq-dot,.mq-opt,.mq-entry{transition:none}
+  .mq-opt:active,.mq-pm:active{transform:none}
+}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -46078,6 +46201,7 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
+    +'<a class="mq-entry" href="/stay/match">محتار؟ جاوبنا بأربع أسئلة ونختار لك — ١٠ ثواني</a>'
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
     +'<div id="feat" class="sec" style="margin-top:4px"></div>';
   var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
@@ -46143,6 +46267,218 @@ function searchSummary(ci,co,g,ty){
   return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/stay'+location.search+'">تعديل البحث</a></div></div>';
 }
 
+var MQ={party:1,sleep:null,purpose:null,budget:null,ci:'',co:'',step:0};
+
+function mqSteps(){
+  // Q2 is conditional: parties under 3 never see the sleeping question.
+  var s=['who'];
+  if(MQ.party>=3)s.push('sleep');
+  s.push('purpose');
+  var pb=((STAY&&STAY.config&&STAY.config.price_bands)||null);
+  s.push(pb?'when_budget':'when');
+  return s;
+}
+
+function mqProgress(){
+  var st=mqSteps(),n=st.length,i=Math.min(MQ.step,n-1);
+  var dots='';for(var k=0;k<n;k++){dots+='<span class="mq-dot'+(k<=i?' on':'')+'"></span>';}
+  return '<div class="mq-prog" role="progressbar" aria-valuenow="'+(i+1)+'" aria-valuemin="1" aria-valuemax="'+n+'">'+dots+'</div>';
+}
+
+var MQ_WHO=[['solo','أنا بس',1],['couple','أنا وشريكي',2],['family','عائلة وأطفال',4],['friends','شلة أصدقاء',4],['work','سفر عمل',1]];
+var MQ_SLEEP=[['together','غرفة وحدة تكفينا'],['pairs','غرفة لكل ثنين'],['each','كل واحد غرفته']];
+var MQ_PURPOSE=[['boulevard','البوليفارد وموسم الرياض'],['work','عمل واجتماعات'],['medical','علاج'],['family','زيارة أهل'],['shopping','تسوق وسياحة'],['rest','بس أبي أرتاح']];
+
+function mqRender(){
+  var st=mqSteps(),key=st[Math.min(MQ.step,st.length-1)],body='',title='';
+  if(key==='who'){
+    title='مين راح يكون معك؟';
+    body='<div class="mq-opts">'+MQ_WHO.map(function(o){
+      return '<button type="button" class="mq-opt" data-who="'+he(o[0])+'" data-n="'+o[2]+'">'+he(o[1])+'</button>';
+    }).join('')+'</div>'
+    +'<div class="mq-count"><span>كم عددكم؟</span><button type="button" class="mq-pm" data-pm="-1" aria-label="أقل">−</button>'
+    +'<b id="mqN">'+MQ.party+'</b><button type="button" class="mq-pm" data-pm="1" aria-label="أكثر">+</button></div>';
+  } else if(key==='sleep'){
+    title='كيف تبون تنامون؟';
+    body='<div class="mq-opts">'+MQ_SLEEP.map(function(o){
+      return '<button type="button" class="mq-opt" data-sleep="'+he(o[0])+'">'+he(o[1])+'</button>';
+    }).join('')+'</div>';
+  } else if(key==='purpose'){
+    title='وش جايبك الرياض؟';
+    body='<div class="mq-opts">'+MQ_PURPOSE.map(function(o){
+      return '<button type="button" class="mq-opt" data-purpose="'+he(o[0])+'">'+he(o[1])+'</button>';
+    }).join('')+'</div>';
+  } else {
+    title='متى تجي؟';
+    var pb=((STAY&&STAY.config&&STAY.config.price_bands)||null);
+    body='<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="mqCi"></div>'
+        +'<div class="field"><label>تاريخ الخروج</label><input type="date" id="mqCo"></div></div>'
+        +'<div id="mqErr" class="err"></div>';
+    if(pb){
+      body+='<div class="field"><label>كم تبي تصرف بالليلة؟ <b id="mqBv">'+pb.median+'</b> ريال</label>'
+          +'<input type="range" id="mqB" min="'+pb.p25+'" max="'+(pb.p75*2)+'" step="50" value="'+pb.median+'"></div>';
+    }
+    body+='<button class="btn block" id="mqGo">شوف اللي يناسبك</button>'
+        +'<button type="button" class="mq-skip" id="mqSkipDates">ما حددت التواريخ بعد</button>';
+  }
+  var back=MQ.step>0?'<button type="button" class="mq-back" id="mqBack" aria-label="رجوع">← رجوع</button>':'';
+  V.innerHTML='<div class="mq-wrap">'+mqProgress()+back
+    +'<h1 class="mq-q">'+he(title)+'</h1><div class="mq-body">'+body+'</div></div>';
+  mqBind(key);
+}
+
+function mqBind(key){
+  var wrap=V.querySelector('.mq-wrap');if(!wrap)return;
+  var back=document.getElementById('mqBack');
+  if(back)back.onclick=function(){MQ.step=Math.max(0,MQ.step-1);mqRender();};
+  wrap.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    if(b.hasAttribute('data-pm')){
+      MQ.party=Math.max(1,Math.min(16,MQ.party+parseInt(b.getAttribute('data-pm'),10)));
+      var n=document.getElementById('mqN');if(n)n.textContent=MQ.party;return;
+    }
+    if(b.hasAttribute('data-who')){
+      MQ.party=parseInt(b.getAttribute('data-n'),10)||MQ.party;
+      if(b.getAttribute('data-who')==='work')MQ.purpose='work';
+      track('match_answer',{type:'who'});MQ.step++;mqRender();return;
+    }
+    if(b.hasAttribute('data-sleep')){
+      MQ.sleep=b.getAttribute('data-sleep');
+      track('match_answer',{type:'sleep'});MQ.step++;mqRender();return;
+    }
+    if(b.hasAttribute('data-purpose')){
+      MQ.purpose=b.getAttribute('data-purpose');
+      track('match_answer',{type:'purpose'});MQ.step++;mqRender();return;
+    }
+  });
+  if(key==='when'||key==='when_budget'){
+    var ci=document.getElementById('mqCi'),co=document.getElementById('mqCo');
+    var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
+    ci.min=iso(t);co.min=iso(new Date(t.getTime()+86400000));
+    ci.onchange=function(){var d=ci.value?new Date(ci.value):t;co.min=iso(new Date(d.getTime()+86400000));};
+    var bs=document.getElementById('mqB'),bv=document.getElementById('mqBv');
+    if(bs&&bv)bs.oninput=function(){bv.textContent=bs.value;};
+    var submit=function(withDates){
+      if(withDates){
+        var ev=validateDates(ci.value,co.value);
+        if(ev){var er=document.getElementById('mqErr');er.textContent=ev;er.classList.add('on');return;}
+        MQ.ci=ci.value;MQ.co=co.value;
+      } else {MQ.ci='';MQ.co='';}
+      if(bs)MQ.budget=bs.value;
+      mqSubmit();
+    };
+    document.getElementById('mqGo').onclick=function(){submit(true);};
+    document.getElementById('mqSkipDates').onclick=function(){submit(false);};
+  }
+}
+
+function mqSubmit(){
+  var q='?party='+encodeURIComponent(MQ.party)+'&purpose='+encodeURIComponent(MQ.purpose||'rest');
+  if(MQ.sleep)q+='&sleep='+encodeURIComponent(MQ.sleep);
+  if(MQ.budget)q+='&budget='+encodeURIComponent(MQ.budget);
+  if(MQ.ci&&MQ.co)q+='&check_in='+MQ.ci+'&check_out='+MQ.co;
+  history.replaceState(null,'','/stay/match'+q);
+  mqResults(q);
+}
+
+function mqLinkQS(){
+  // The listing page only reads check_in/check_out + UTMs from its query string —
+  // party/sleep/purpose/budget mean nothing there and would just pollute the URL
+  // and its analytics. Carry the dates (so the listing keeps dated pricing, same
+  // as card() does from search) plus carry() for attribution, drop the rest.
+  var d=(MQ.ci&&MQ.co)?('check_in='+MQ.ci+'&check_out='+MQ.co):'';
+  var u=carry();                      // '' or '&utm_x=..&utm_y=..'
+  if(d&&u)return '?'+d+u;
+  if(d)return '?'+d;
+  if(u)return '?'+u.slice(1);
+  return '';
+}
+
+function mqCard(l){
+  var why=(l.reasons||[]).map(function(r){return '<span>✓ '+he(r)+'</span>';}).join('');
+  var tr=l.tradeoff?('<div class="mq-trade">⚠︎ '+he(l.tradeoff)+'</div>'):'';
+  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
+  var price=(l.est_total!=null&&l.nights>0)
+    ?('<div class="price"><b>من '+money(l.est_avg)+' / الليلة</b> · الإجمالي التقريبي '+money(l.est_total)+'</div>')
+    :'<div class="price soft">السعر يظهر داخل Airbnb</div>';
+  return '<a class="card lc" href="/stay/'+he(l.slug)+mqLinkQS()+'">'
+    +'<div class="ph">'+img+'</div><div class="bd">'
+    +'<h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
+    +(l.area?('<div class="meta">📍 '+he(l.area)+'</div>'):'')
+    +'<div class="mq-why">'+why+'</div>'+tr+price
+    +'<div class="cta-row" style="margin-top:auto;padding-top:8px"><span class="btn block sm">شوف التفاصيل</span></div>'
+    +'</div></a>';
+}
+
+function mqResults(q){
+  // A plain skeleton with no text reads as frozen once the guest has waited a
+  // couple of seconds on a cold cache. One static line is honest (we don't know
+  // how long it'll take, so no fake percentage/progress) but tells them it's alive.
+  V.innerHTML='<div class="mq-wrap"><div class="sk" style="height:20px;width:55%;margin-bottom:16px"></div>'
+    +'<p class="muted" style="margin:0 0 14px;font-size:13.5px">نجهز لك أفضل الخيارات المتاحة...</p>'
+    +'<div class="sk" style="height:200px;border-radius:14px"></div></div>';
+  fetch('/api/stay/match'+q).then(function(r){return r.json();}).then(function(d){
+    var top=(d&&d.top)||[],near=(d&&d.near)||[];
+    var medical=(d&&d.answers&&d.answers.purpose==='medical');
+
+    if(d&&d.impossible){
+      V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما عندنا وحدة تكفي هالعدد</h2>'
+        +'<p class="mq-sub">أكبر وحدة عندنا تستوعب '+he(String(d.max_capacity||0))+' ضيوف. لو تبون تقسمون على وحدتين نقدر نساعدكم.</p>'
+        +'<a class="btn block" href="/stay">تصفح كل الوحدات</a></div>';
+      track('match_results',{count:0});return;
+    }
+    if(!top.length){
+      V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما لقينا وحدات متاحة بهذي التواريخ</h2>'
+        +'<p class="mq-sub">جرّب تواريخ ثانية، أو تصفح الوحدات بدون تحديد تاريخ.</p>'
+        +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
+      track('match_results',{count:0});return;
+    }
+
+    // The علاج path drops the celebratory register: no emoji, no upsell, distance first.
+    var head,sub;
+    if(medical){
+      head='هذي أقرب وحداتنا';sub='رتبناها حسب قربها من المستشفى. دخول ذاتي، بدون استقبال.';
+    } else if(d.confident){
+      head='لقينا لك '+top.length+' وحدات تناسبك';sub='مرتبة حسب الأقرب لطلبك.';
+    } else {
+      head='ما عندنا وحدة تطابق كل شي';sub='هذي الأقرب لطلبك — شفنا لك أفضل الموجود بصراحة.';
+    }
+
+    var html='<div class="mq-wrap"><h2 class="mq-head">'+he(head)+'</h2><p class="mq-sub">'+he(sub)+'</p>'
+      +'<div class="grid">'+top.map(mqCard).join('')+'</div>';
+    if(near.length){
+      html+='<h3 class="mq-head" style="font-size:17px;margin:26px 0 10px">قريبة كمان</h3>'
+        +'<div class="grid">'+near.slice(0,3).map(mqCard).join('')+'</div>';
+    }
+    html+='<button type="button" class="mq-skip" id="mqAgain">جاوب من جديد</button></div>';
+    V.innerHTML=html;
+    var again=document.getElementById('mqAgain');
+    if(again)again.onclick=function(){location.href='/stay/match';};
+    // guests + type feed the dashboard unmet-demand table; weak marks a low-confidence result
+    track('match_results',{count:top.length,guests:MQ.party,
+                           type:(MQ.purpose||'rest'),weak:(d.confident?0:1)});
+  }).catch(function(){
+    V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">صار خلل بسيط</h2>'
+      +'<p class="mq-sub">جرّب مرة ثانية، أو تصفح الوحدات مباشرة.</p>'
+      +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
+  });
+}
+
+function viewMatch(){
+  track('match_start',{});
+  var p=qs();
+  if(p.get('party')){                 // returning via a shared/back-button URL
+    MQ.party=parseInt(p.get('party'),10)||1;MQ.sleep=p.get('sleep');
+    MQ.purpose=p.get('purpose');MQ.budget=p.get('budget');
+    MQ.ci=p.get('check_in')||'';MQ.co=p.get('check_out')||'';
+    mqResults(location.search);return;
+  }
+  MQ.step=0;mqRender();
+  window.addEventListener('pagehide',function(){
+    if(MQ.step>0&&!location.search)track('match_abandon',{type:mqSteps()[MQ.step]||''});
+  },{once:true});
+}
+
 function viewSearch(){
   var p=qs(),ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
   var verr=validateDates(ci,co);
@@ -46163,7 +46499,7 @@ function viewSearch(){
       V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
     } else {
       track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
+      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><a class="btn" href="/stay/match">خلّنا نختار لك</a><a class="btn ghost" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
       if(ci&&co){loadSimilar(ty);}
     }
   }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
@@ -46268,6 +46604,7 @@ function viewListing(){
   var path=location.pathname;
   if(path==='/stay'||path==='/stay/'){viewLanding();}
   else if(path==='/stay/search'){viewSearch();}
+  else if(path==='/stay/match'){viewMatch();}
   else{viewListing();}
 })();
 </script>
@@ -46319,7 +46656,8 @@ def _stay_render(route="landing", listing=None, base=""):
     title = "اختر إقامتك مع عوجا"
     desc = "وحدات عوجا المتاحة في الرياض · دخول ذاتي · الحجز عبر Airbnb"
     og = ""
-    path = {"landing": "/stay", "search": "/stay/search", "listing": "/stay"}.get(route, "/stay")
+    path = {"landing": "/stay", "search": "/stay/search", "listing": "/stay",
+            "match": "/stay/match"}.get(route, "/stay")
     if listing:
         title = (listing.get("name_ar") or title) + " · عوجا"
         desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
@@ -46333,7 +46671,8 @@ def _stay_render(route="landing", listing=None, base=""):
             "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""),
                        "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP,
                        "neighborhoods": _gw_neighborhoods_with_counts(),
-                       "rating_overall": _gw_ratings_overall()}}
+                       "rating_overall": _gw_ratings_overall(),
+                       "price_bands": _gw_price_bands(_gw_visible_prices())}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO: JSON-LD structured data — LodgingBusiness on /stay, Apartment per unit page.
     if listing:
@@ -46387,9 +46726,155 @@ async def _handle_stay_detail(request):
     listing = _gw_listing_public(snap, ov) if snap else None
     return web.Response(text=_stay_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
 
+_MATCH_SLEEP = ("together", "pairs", "each")
+
+def _match_answers(q):
+    """Query params -> the engine's answers contract. Defensive: junk input can
+    never raise, it degrades to a neutral answer."""
+    try:
+        party = int(q.get("party") or 1)
+    except (TypeError, ValueError):
+        party = 1
+    party = max(1, min(16, party))
+    sleep = q.get("sleep") if q.get("sleep") in _MATCH_SLEEP else None
+    purpose = q.get("purpose") or "rest"
+    if _HAS_MATCH and purpose not in _match.poi.PURPOSE_POI:
+        purpose = "rest"
+    try:
+        budget = int(q.get("budget")) if q.get("budget") else None
+    except (TypeError, ValueError):
+        budget = None
+    ci, co = q.get("check_in"), q.get("check_out")
+    if not (ci and co and _gw_valid_dates(ci, co)):
+        ci = co = None
+    return {"party_size": party, "sleep_pref": sleep, "purpose": purpose,
+            "budget_max": budget, "check_in": ci, "check_out": co}
+
+def _match_geo_points():
+    """{listing_id: (lat, lng)} from the cached guide coordinates. Cache-only —
+    no network here. Missing units fall back to a neighborhood centroid inside
+    the engine, so a thin cache degrades precision, never correctness. Matches
+    by name_en/name_ar the same way _elite_geo_points does (an override title
+    can diverge from the raw Hostaway snapshot name the guide was seeded from)."""
+    gmap = _elite_geo_cache.get("map") or {}
+    pts = {}
+    for s, ov in _gw_visible_snaps():
+        try:
+            pub = _gw_listing_public(s, ov, with_airbnb=False)
+        except Exception:
+            continue
+        lid = pub.get("id")
+        if lid is None:
+            continue
+        ll = gmap.get(_elite_geo_norm(pub.get("name_en"))) or gmap.get(_elite_geo_norm(pub.get("name_ar")))
+        if ll:
+            pts[lid] = ll
+    return pts
+
+def _match_run(q):
+    """BLOCKING — executor only. Builds inventory, prices it, delegates ranking."""
+    if not _HAS_MATCH:
+        return {"top": [], "near": [], "confident": False,
+                "impossible": False, "max_capacity": 0}
+    answers = _match_answers(q)
+    _elite_geo_refresh()
+    snaps = _gw_visible_snaps()
+    units = [_gw_listing_public(s, ov) for s, ov in snaps]
+    if answers["check_in"] and answers["check_out"]:
+        ci, co = answers["check_in"], answers["check_out"]
+        # ---- parallel calendar lookups — SAME pool pattern as enrich_catalog_for_dates
+        # (bot.py ~6176), whose docstring measured ~30s sequential -> ~3-5s parallel across
+        # the portfolio. /stay/match is a public, unauthenticated endpoint a guest is
+        # actively waiting on; do NOT collapse this back into a serial for-loop over
+        # unit_availability_price. Every visible unit is still checked exactly once — this
+        # only changes HOW the calls are made, never which units are checked, so the
+        # result set stays identical to a serial run. One unit's failure (exception or
+        # None) never fails the request; the engine already scores an unpriced unit
+        # neutrally instead of eliminating it.
+        avail_map = {}
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futures = {ex.submit(unit_availability_price, s.get("id"), ci, co): s.get("id")
+                           for s, _ov in snaps}
+                for fut in as_completed(futures):
+                    lid = futures[fut]
+                    try:
+                        avail_map[lid] = fut.result()
+                    except Exception as e:
+                        print(f"match availability parallel error ({lid}):", e)
+                        avail_map[lid] = None
+        except Exception as e:
+            print("match availability pool error:", e)
+        for pub in units:
+            av = avail_map.get(pub.get("id"))
+            if av:
+                pub["available"] = av.get("available")
+                pub["nights"] = av.get("nights")
+                pub["est_total"] = av.get("total")
+                pub["est_avg"] = av.get("avg")
+    out = _match.score(answers, units, geo=_match_geo_points())
+    out["answers"] = answers
+    return out
+
+def _match_stats(days=30):
+    """Quiz funnel + unmet demand from the guest analytics store. Read-only.
+    Returns zeros rather than raising when there is no data yet.
+
+    The unmet-demand table is the highest-value output of this feature: it names
+    the (purpose, party size) combinations we keep failing to serve."""
+    cutoff = (datetime.now(TZ) - timedelta(days=days)).isoformat(timespec="seconds")
+    evs = [e for e in _gw_analytics.get("events", []) if (e.get("ts") or "") >= cutoff]
+
+    funnel = {"start": 0, "who": 0, "sleep": 0, "purpose": 0, "results": 0, "abandon": 0}
+    demand = {}          # (purpose, party) -> {"asked": n, "weak": n}
+    for e in evs:
+        name = e.get("event") or ""
+        if name == "match_start":
+            funnel["start"] += 1
+        elif name == "match_answer":
+            k = e.get("type") or ""
+            if k in funnel:
+                funnel[k] += 1
+        elif name == "match_abandon":
+            funnel["abandon"] += 1
+        elif name == "match_results":
+            funnel["results"] += 1
+            try:
+                party = int(e.get("guests") or 0)
+            except (TypeError, ValueError):
+                party = 0
+            key = (str(e.get("type") or "rest"), party)
+            d = demand.setdefault(key, {"asked": 0, "weak": 0})
+            d["asked"] += 1
+            if e.get("weak") or not e.get("count"):
+                d["weak"] += 1
+
+    unmet = [{"purpose": p, "party": n, "asked": d["asked"], "weak": d["weak"],
+              "weak_pct": round(100.0 * d["weak"] / d["asked"], 1) if d["asked"] else 0.0}
+             for (p, n), d in demand.items() if d["weak"]]
+    unmet.sort(key=lambda r: (-r["weak"], -r["asked"]))
+
+    return {"funnel": funnel, "unmet": unmet[:12],
+            "completion": (round(100.0 * funnel["results"] / funnel["start"], 1)
+                           if funnel["start"] else 0.0)}
+
+async def _api_stay_match(request):
+    out = await asyncio.to_thread(_match_run, dict(request.query))
+    return _json({"ok": True, **out})
+
+async def _api_stay_match_stats(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, **_match_stats(30)})
+
+async def _handle_stay_match(request):
+    return web.Response(text=_stay_render("match", base=str(request.url.origin())),
+                        content_type="text/html")
+
 async def _api_stay_config(request):
     return _json({"ok": True, "noo": _gw_noo_options(),
-                  "neighborhoods": _gw_neighborhoods_with_counts()})
+                  "neighborhoods": _gw_neighborhoods_with_counts(),
+                  "price_bands": _gw_price_bands(_gw_visible_prices())})
 
 async def _api_stay_search(request):
     q = request.query
@@ -46424,7 +46909,7 @@ async def _api_stay_event(request):
         b = {}
     if isinstance(b, dict) and b.get("event"):
         ev = {k: b.get(k) for k in ("event", "session", "route", "referrer", "listing_id",
-                                    "check_in", "check_out", "guests", "type",
+                                    "check_in", "check_out", "guests", "type", "count", "weak",
                                     "utm_source", "utm_medium", "utm_campaign", "utm_content") if b.get(k) is not None}
         ua = request.headers.get("User-Agent", "")
         ev["device"] = ("mobile" if re.search(r"Mobi|Android|iPhone", ua) else "desktop")
@@ -48503,12 +48988,15 @@ async def _api_gw_overview(request):
     snaps = _gw_cache.get("listings") or []
     diag = _gw_cache.get("diag") or {}
     a = _gw_analytics_summary(7)
+    vis = _gw_visible_snaps()
+    mg_pts = _match_geo_points()
     return _json({"ok": True, "status": ("live" if snaps else "no_data"),
                   "synced_at": _gw_cache.get("synced_at"), "total": len(snaps),
-                  "visible": len(_gw_visible_snaps()),
+                  "visible": len(vis),
                   "missing_airbnb": len(diag.get("missing_airbnb") or []),
                   "missing_images": len(diag.get("missing_images") or []),
                   "unmapped_tags": sum(1 for e in _gw_taxonomy.values() if e.get("status") == "unmapped"),
+                  "match_geo": {"with_coords": len(mg_pts), "total": len(vis)},
                   "taxonomy": len(_gw_taxonomy), "searches_7d": a["searches"],
                   "clicks_7d": a["airbnb_clicks"], "ctr": a["ctr"], "views_7d": a["page_views"]})
 
@@ -49057,6 +49545,8 @@ async def start_web_server():
         app.router.add_get("/stay", _handle_stay)
         app.router.add_get("/stay/", _handle_stay)
         app.router.add_get("/stay/search", _handle_stay_search)
+        app.router.add_get("/stay/match", _handle_stay_match)
+        app.router.add_get("/api/stay/match", _api_stay_match)
         app.router.add_get("/stay/id/{lid}", _handle_stay_id)
         app.router.add_get("/api/stay/config", _api_stay_config)
         app.router.add_get("/api/stay/search", _api_stay_search)
@@ -49073,6 +49563,7 @@ async def start_web_server():
         app.router.add_post("/api/gw/tags/bulk", _api_gw_tags_bulk)
         app.router.add_get("/api/gw/airbnb", _api_gw_airbnb)
         app.router.add_get("/api/gw/analytics", _api_gw_analytics)
+        app.router.add_get("/api/stay/match-stats", _api_stay_match_stats)  # token-gated, NOT public
         app.router.add_post("/api/gw/sync", _api_gw_sync)
         app.router.add_get("/stay/hero-image", _handle_stay_hero_image)
         app.router.add_get("/api/gw/hero", _api_gw_hero)

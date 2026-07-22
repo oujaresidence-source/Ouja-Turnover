@@ -207,7 +207,19 @@ Written and passing **before** any UI code:
    impossibility, and it is the **only** legitimate zero. The engine returns it
    as a distinct `impossible: True` state carrying `max_capacity`, and the UI
    says so plainly — «أكبر وحدة عندنا تستوعب ٨ ضيوف» — rather than showing a
-   generic "no results" screen. Every other zero is a bug.
+   generic "no results" screen.
+
+   **The two gates must be evaluated independently.** Capacity and availability
+   can each empty the result set, and they mean opposite things to a guest.
+   If they are collapsed into one check, a couple looking at a fully-booked
+   weekend gets told that no apartment is big enough for two people — a false
+   statement that makes us look like we do not know our own inventory. So:
+   capacity is tested first and alone; only its failure sets `impossible`.
+   Availability is tested second, and its failure returns an empty `top` with
+   `impossible: False`, which the UI renders as «ما لقينا وحدات متاحة بهذي
+   التواريخ». Two zeros, two different truths, two different screens.
+
+   Every other zero is a bug.
 3. Exact bedroom match outranks over-provisioned, all else equal.
 4. Every returned unit carries at least one reason.
 5. A unit failing a soft criterion still appears, carrying a tradeoff string.
