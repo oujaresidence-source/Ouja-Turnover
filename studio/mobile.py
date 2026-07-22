@@ -546,7 +546,21 @@ async def api_act(request):
     return HOST.json_response({"ok": False, "error": "أمر غير معروف"}, 200)
 
 
+async def api_export(request):
+    """The single ready file, always current. Same document Discord attaches — this
+    is the URL to bookmark when you want today’s version rather than the one that
+    happened to be attached last week."""
+    if not token_ok(request):
+        return _deny()
+    from . import export as export_mod
+    doc, name = export_mod.document()
+    return HOST.web.Response(
+        text=doc, content_type="text/markdown", charset="utf-8",
+        headers={"Content-Disposition": "inline; filename=\"%s\"" % name})
+
+
 def register(app):
     app.router.add_get("/s/{token}", page)
+    app.router.add_get("/s/{token}/export.md", api_export)
     app.router.add_get("/s/{token}/feed", api_feed)
     app.router.add_post("/s/{token}/act", api_act)

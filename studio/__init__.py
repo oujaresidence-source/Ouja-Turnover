@@ -17,9 +17,10 @@ from .host import HOST, wire as _wire_host
 from . import db, engine, routes, mine, notify, ideas  # noqa: F401
 from . import learn, hooks, plan, external, internal    # noqa: F401  (v3 signal bus)
 from . import rank, virality, factory, mobile           # noqa: F401  (rank + phone page)
+from . import export, pipeline                          # noqa: F401  (one command, one file)
 
 __all__ = ["wire", "register_routes", "HOST", "engine", "db", "mine", "notify", "ideas",
-           "learn", "hooks", "plan", "external", "internal", "rank", "virality", "factory", "mobile"]
+           "learn", "hooks", "plan", "external", "internal", "rank", "virality", "factory", "mobile", "export", "pipeline"]
 
 
 def wire(caps):

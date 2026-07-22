@@ -21,6 +21,7 @@ class _Host:
     res_window = None       # fetch_reservations_window(start, end) -> reservations
     forward_calendar = None  # get_forward_calendar(days) -> per-day occupancy/price rows
     reviews = None          # () -> list of normalised review dicts (newest first)
+    public_base = None      # () -> public site base url (auto-captured, so CALLABLE)
     model_fast = None       # cheap model id (triage)
     model_premium = None    # premium model id (stories + ideas)
     tz = None

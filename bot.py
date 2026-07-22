@@ -50276,6 +50276,8 @@ async def start_web_server():
                     "res_window": fetch_reservations_window,
                     "forward_calendar": get_forward_calendar,
                     "reviews": _studio_reviews_tap,
+                    "public_base": _dispatch_base_url,
+
                     "model_fast": CLAUDE_MODEL, "model_premium": CLAUDE_MODEL_PREMIUM,
                     "tz": TZ, "now": now_riyadh,
                 })
@@ -54560,6 +54562,106 @@ async def _studio_factory_report(channel, rep):
         print("[studio] factory report failed:", e)
 
 
+@bot.tree.command(
+    name="everything",
+    description="سوّ كل شي: إشارات + أخبار + محادثات + توليد + ترتيب — ويعطيك ملف واحد")
+@app_commands.describe(count="كم مصدر يشتغل عليه (افتراضي ٦٠)",
+                       web="يبحث بالويب؟ (افتراضي نعم)")
+async def slash_studio_everything(interaction: discord.Interaction,
+                                  count: int = None, web: bool = True):
+    """The one command. Runs the full pipeline, then hands back ONE ready file."""
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    ch = interaction.channel
+    who = getattr(interaction.user, "mention", "")
+
+    def _done(rep):
+        asyncio.run_coroutine_threadsafe(_studio_everything_report(ch, rep, who), bot.loop)
+
+    started = await asyncio.to_thread(
+        _studio.pipeline.start_thread, count, bool(web) and STUDIO_WEB_SEARCH, _done)
+    if not started:
+        await interaction.followup.send("⏳ فيه تشغيل شغّال — انتظر يخلص.", ephemeral=True)
+        return
+    steps = chr(10).join("%s. %s" % (i, lbl)
+                         for i, (_k, lbl) in enumerate(_studio.pipeline.STEPS, 1))
+    await interaction.followup.send(
+        "🚀 **بديت — بسوي كل شي:**" + chr(10) + steps + chr(10) + chr(10)
+        + "ياخذ عدة دقايق. بأرسل لك الملف هنا أول ما أخلص — ما تحتاج تنتظر.",
+        ephemeral=True)
+
+
+async def _studio_everything_report(channel, rep, mention=""):
+    """Post the summary AND the single ready file. The file is the deliverable —
+    if attaching it fails we say so loudly instead of quietly posting a summary
+    that looks like success."""
+    if channel is None:
+        return
+    body = _studio.pipeline.summary_ar(rep)
+    if mention:
+        body = mention + chr(10) + body
+    url = _studio_link("today")
+    if url:
+        body += chr(10) + chr(10) + "👉 الصفحة الحيّة: " + url
+    doc = rep.get("doc") or ""
+    try:
+        if doc:
+            data = io.BytesIO(doc.encode("utf-8"))
+            f = discord.File(data, filename=rep.get("filename") or "ouja-studio.md")
+            await channel.send(body[:1900], file=f)
+        else:
+            await channel.send((body + chr(10) + chr(10)
+                                + "⚠️ ما قدرت أجهّز الملف — افتح الصفحة الحيّة.")[:1900])
+    except Exception as e:
+        print("[studio] everything report failed:", e)
+        try:
+            await channel.send((body + chr(10) + chr(10)
+                                + "⚠️ الملخص فوق، لكن إرفاق الملف ما زبط: %s" % e)[:1900])
+        except Exception:
+            pass
+
+
+@bot.command(name="كل-شي", aliases=["كل-شيء", "everything", "الكل"])
+async def cmd_studio_everything(ctx, count: int = None):
+    """!ouja كل-شي — prefix twin of /everything."""
+    if not (_HAS_STUDIO and STUDIO_ENABLED):
+        await ctx.reply("⚠️ الاستوديو مطفي.")
+        return
+    ch = ctx.channel
+    who = ctx.author.mention
+
+    def _done(rep):
+        asyncio.run_coroutine_threadsafe(_studio_everything_report(ch, rep, who), bot.loop)
+
+    started = await asyncio.to_thread(_studio.pipeline.start_thread, count,
+                                      STUDIO_WEB_SEARCH, _done)
+    await ctx.reply("🚀 بديت أسوي كل شي — بأرسل لك الملف هنا أول ما أخلص."
+                    if started else "⏳ فيه تشغيل شغّال.")
+
+
+@bot.tree.command(name="file", description="أعطني الملف الحالي بكل الأفكار (بدون توليد جديد)")
+async def slash_studio_file(interaction: discord.Interaction):
+    """The same document, right now, without paying for a fresh generation run."""
+    await _slash_defer(interaction)
+    if not _studio_slash_ok(interaction):
+        await interaction.followup.send("⚠️ الاستوديو مطفي.", ephemeral=True)
+        return
+    try:
+        doc, name = await asyncio.to_thread(_studio.export.document)
+    except Exception as e:
+        print("/file error:", e)
+        await interaction.followup.send("⚠️ ما قدرت أجهّز الملف.", ephemeral=True)
+        return
+    if not doc:
+        await interaction.followup.send("⚠️ الملف طلع فاضي — شغّل `/everything` أول.",
+                                        ephemeral=True)
+        return
+    f = discord.File(io.BytesIO(doc.encode("utf-8")), filename=name)
+    await interaction.followup.send("📄 ملف الأفكار الحالي:", file=f, ephemeral=True)
+
+
 @bot.tree.command(name="studio", description="كل أوامر عوجا ستوديو + رابط الصفحة")
 async def slash_studio_help(interaction: discord.Interaction):
     await _slash_defer(interaction)
@@ -54624,6 +54726,10 @@ async def cmd_studio_help(ctx):
 
 _STUDIO_HELP_TEXT = chr(10).join([
     "🎬 **عوجا ستوديو** — اكتب `/` وبتطلع لك القائمة كاملة",
+    "",
+    "**`/everything` — الأمر الوحيد اللي تحتاجه:** يجمع الإشارات + يبحث بالأخبار +",
+    "يمسح المحادثات + يولّد من كل شي + يرتّب اليوم، ويرسل لك **ملف واحد جاهز**.",
+    "`/file` — نفس الملف بأحدث نسخة، بدون توليد جديد (فوري ومجاني)",
     "",
     "`/today` — خطة اليوم: ٣ أفكار مرتّبة بالأقرب إنها تشتغل",
     "`/idea` — فكرة وحدة الحين (وانت واقف بشقة فاضية)",
