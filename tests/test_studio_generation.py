@@ -149,5 +149,61 @@ class TestStoryPath(_Base):
         self.assertEqual(ideas_mod.generate_for_story(sto), [])
 
 
+class TestDailySetEndToEnd(_Base):
+    """The whole contract, on real signals: a day's set must be diverse, grounded,
+    number-first, and free of any beat-grid (owner verdict 2026-07-24)."""
+
+    def _fake_per_signal(self):
+        import re as _re
+
+        def gen(system, user, max_tokens=0, model=None):
+            m = _re.search(r'"الحقيقة":\s*"([^"]+)"', user)
+            fact = m.group(1) if m else "٥٠ رقم"
+            aud = "escape" if "تقييم" in fact else "niche"
+            return {"ideas": [
+                {"hook_spoken": fact[:38], "visual_title": "الزاوية: " + fact[:14],
+                 "visual_sub": "لمن يهمه", "why_it_works": "رقم أول ٣ث",
+                 # a timestamp is planted here on purpose — it must be stripped
+                 "script": ["(٠-٣ث) " + fact[:28], "طيب شوف ليش صار كذا", fact[:16]],
+                 "audience": aud, "trigger": "social_proof"}]}
+        return gen
+
+    def test_full_day_is_diverse_grounded_and_number_first(self):
+        from studio import plan
+        HOST.claude_json = self._fake_per_signal()
+        facts = [
+            ("occupancy", "internal", "٩٠٪ من ضيوفنا يحجزون قبل يوم واحد", {}),
+            ("pricing", "internal", "٨٠٢ ريال أغلى ليلة عندنا مقابل ٥٣١", {}),
+            ("reviews", "internal", "٤.٨ نجوم من ٢٣٣٠ تقييم حقيقي", {}),
+            ("ops", "internal", "٢٣ تسليم بنفس اليوم خلال أسبوعين", {}),
+            ("regulation", "external", "٢٩ يوم أقصى مدة للضيف بالنظام الجديد",
+             {"url": "https://mt.gov.sa/x", "as_of": "2026-07-20"}),
+        ]
+        sids = []
+        for source, family, fact, extra in facts:
+            s = engine.make_signal(family, source, "ع", fact, strength=80, **extra)
+            sdb.add_signal(s, nkey=engine.novelty_key(fact), ts="2026-07-24 09:00:00")
+            sids.append(s["sid"])
+            ideas_mod.generate_for_signal(s["sid"])
+
+        day = plan.choose([c for c in sdb.ideas(status="new")], [], n=3, today="2026-07-24")
+        self.assertEqual(len(day), 3)
+
+        # ≥3 distinct grounding sids
+        self.assertEqual(len({c["signal_sid"] for c in day}), 3)
+        # ≥3 distinct shapes
+        self.assertGreaterEqual(len({c["shape"] for c in day}), 3)
+        # ≥1 escape-the-niche card
+        self.assertTrue(any(c["audience"] == "escape" for c in day))
+        # every card grounded, number-first, and NO timestamp grid anywhere
+        for c in day:
+            self.assertTrue(ideas_mod.card_grounded(c))
+            self.assertTrue(engine.leads_with_number(c["hook_spoken"], c["signal_text"]),
+                            c["hook_spoken"])
+            joined = " ".join(c["script"])
+            self.assertNotRegex(joined, r"[（(]\s*\d+\s*[-–—]\s*\d+")
+            self.assertNotIn("ث)", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

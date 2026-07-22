@@ -93,6 +93,20 @@ class TestPage(unittest.TestCase):
         for v in re.findall(r"data-v=.([a-z]+)", mobile.MOBILE_HTML):
             self.assertIn(v, mobile.VIEWS, v)
 
+    def test_script_renders_flowing_not_as_a_numbered_grid(self):
+        # the card script must read like talking — no ordered/numbered <ol><li> list
+        h = mobile.MOBILE_HTML
+        self.assertIn('class="scr"', h)
+        self.assertNotIn("'<ol class=", h)
+        self.assertNotIn("<li>' + esc(b)", h)   # the old per-beat list builder
+
+    def test_card_surfaces_the_shape_label(self):
+        self.assertIn("var SHP =", mobile.MOBILE_HTML)
+        self.assertIn("SHP[x.shape]", mobile.MOBILE_HTML)
+
+    def test_grounding_block_is_present(self):
+        self.assertIn("مبني على", mobile.MOBILE_HTML)
+
     def test_routes_registered(self):
         class _App(object):
             def __init__(self):

@@ -226,8 +226,14 @@ MOBILE_HTML = """<!doctype html>
   .sig b{font-weight:600}
   .sig .m{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
   .sig a{color:var(--gold);text-decoration:none;font-weight:600}
-  ol.s{margin:0 0 9px;padding-inline-start:19px;font-size:15px}
-  ol.s li{margin-bottom:4px}
+  /* the script reads like talking, not a numbered grid (owner verdict 2026-07-24) */
+  .scr{margin:0 0 10px}
+  .scr .lbl{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 5px}
+  .scr p{margin:0 0 6px;font-size:16px;line-height:1.7;color:var(--ink)}
+  .scr p:last-child{margin-bottom:0}
+  .coach{background:var(--green-soft);border:1px solid #CBDFD1;border-radius:10px;
+    padding:9px 12px;margin-bottom:9px;font-size:14px;color:var(--ink)}
+  .coach .k{font-weight:600}
   .why{background:var(--green-soft);border:1px solid #CBDFD1;border-radius:8px;
     padding:8px 11px;margin-bottom:9px;font-size:14px;color:var(--ink)}
   .tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px}
@@ -297,6 +303,9 @@ var SRC = {occupancy:'الإشغال', pricing:'التسعير', reviews:'الت
   season:'الموسم', insider:'من الداخل', guest_story:'قصة ضيف', regulation:'أنظمة',
   market:'سوق السعودية', global_trend:'اتجاه عالمي', trend:'خبر', manual:'كتبته بنفسك'};
 var FAM = {internal:'بيانات عوجا', external:'مصدر خارجي', manual:'موقف من عندك'};
+var SHP = {cold_number:'رقم مفتوح', myth_bust:'كسر اعتقاد', quote_reaction:'رد على موقف',
+  before_after:'قبل وبعد', half_of_us:'أغلب ضيوفنا', owner_question:'سؤال للمالك',
+  list_of_three:'ثلاث نقاط', news_react:'رد على خبر'};
 var FLBL = {audience:AUD, family:FAM, trigger:TRG, format:VT};
 
 function esc(s){
@@ -338,11 +347,11 @@ function chipRow(fac){
   return html;
 }
 function card(x, i){
-  var s = (x.script || []).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
+  var s = (x.script || []).map(function(b){ return '<p>' + esc(b) + '</p>'; }).join('');
   var why = (x.rank_why || []).join(' · ');
   var st = x.status || 'new';
   var sig = x.signal_text
-    ? '<div class="sig"><b>الإشارة:</b> ' + esc(x.signal_text)
+    ? '<div class="sig"><b>مبني على:</b> ' + esc(x.signal_text)
       + '<span class="m">' + esc(SRC[x.signal_source] || '')
       + (x.signal_date ? ' · ' + esc(x.signal_date) : '')
       + (x.signal_url ? ' · <a href="' + esc(x.signal_url) + '" target="_blank" rel="noopener">المصدر</a>' : '')
@@ -350,10 +359,13 @@ function card(x, i){
     : '';
   var vs = (x.virality === undefined) ? '' :
     '<span class="v' + (x.virality < 60 ? ' low' : '') + '">بناء ' + x.virality + '٪</span>';
-  var fixes = (x.fixes || []).length
-    ? '<div class="fix"><b>وش تعدّل قبل ما تصوّر</b><ul>'
-      + x.fixes.map(function(f){ return '<li>' + esc(f) + '</li>'; }).join('') + '</ul></div>'
+  var fix = (x.fixes || [])[0]
+    ? '<div class="fix"><b>وش تعدّل قبل ما تصوّر</b><div>' + esc(x.fixes[0]) + '</div></div>'
     : '';
+  var coach = x.why_it_works
+    ? '<div class="coach"><span class="k">ليش بتشتغل:</span> ' + esc(x.why_it_works) + '</div>'
+    : '';
+  var shape = SHP[x.shape] ? '<span class="t">' + esc(SHP[x.shape]) + '</span>' : '';
   return '<div class="card" data-id="' + x.id + '">'
     + '<div class="rk"><span class="n' + (i === 0 ? ' top' : '') + '">' + (x.rank_score || 0) + '٪</span>'
     + vs + '<span class="w">' + esc(why || 'ترتيب مبدئي') + '</span></div>'
@@ -361,15 +373,15 @@ function card(x, i){
     + (x.visual_sub ? '<div class="vs">' + esc(x.visual_sub) + '</div>' : '') + '</div>'
     + '<div class="say"><span>🎤 قول</span>' + esc(x.hook_spoken) + '</div>'
     + sig
-    + (x.why_it_works ? '<div class="why">💡 ' + esc(x.why_it_works) + '</div>' : '')
-    + (s ? '<ol class="s">' + s + '</ol>' : '')
-    + fixes
-    + (x.cta ? '<div class="why" style="background:var(--amber-soft);border-color:#E8D9BC">🎯 ' + esc(x.cta) + '</div>' : '')
+    + (s ? '<div class="scr"><div class="lbl">السكربت — بصوتك، طبيعي:</div>' + s + '</div>' : '')
+    + coach + fix
+    + (x.cta ? '<div class="coach" style="background:var(--amber-soft);border-color:#E8D9BC">'
+       + '<span class="k">الختام:</span> ' + esc(x.cta) + '</div>' : '')
     + '<div class="tags"><span class="t g">' + esc(AUD[x.audience] || x.audience) + '</span>'
+    + shape
     + '<span class="t">' + esc(TRG[x.trigger_kind] || '') + '</span>'
-    + '<span class="t">' + esc(VT[x.video_type] || '') + '</span>'
-    + (st === 'posted' ? '<span class="t ok">🚀 ' + (x.views || 0) + ' مشاهدة</span>' : '')
-    + (st === 'filmed' ? '<span class="t">🎥 مصوّر</span>' : '')
+    + (st === 'posted' ? '<span class="t ok">' + (x.views || 0) + ' مشاهدة</span>' : '')
+    + (st === 'filmed' ? '<span class="t">مصوّر</span>' : '')
     + '</div>'
     + '<div class="acts"><button data-a="copy">📋 انسخ</button>'
     + (st !== 'posted' ? '<button data-a="filmed">🎥 صوّرته</button>' : '')
