@@ -18,6 +18,26 @@ def _fake_listing_public(s, ov):
             "name_en": "unit-%s" % s["id"], "name_ar": "unit-%s" % s["id"]}
 
 
+def _fake_snaps_for_search(n, neighborhoods=None):
+    """(snap, override) pairs shaped like _gw_visible_snaps() output for
+    _gw_search. `neighborhoods` optionally maps id -> neighborhood key on the
+    override, for exercising the neighborhood filter."""
+    neighborhoods = neighborhoods or {}
+    out = []
+    for i in range(1, n + 1):
+        s = {"id": i, "price_base": 300, "capacity": 4, "tag_keys": []}
+        ov = {"neighborhood": neighborhoods.get(i)}
+        out.append((s, ov))
+    return out
+
+
+def _fake_gw_listing_public(s, ov):
+    """Minimal-but-valid pub dict for _gw_search's sort_key, which reads
+    has_airbnb / images / name_ar (plus s["capacity"] and ov["sort"] directly)."""
+    return {"id": s["id"], "has_airbnb": False, "images": [],
+            "name_ar": "unit-%s" % s["id"], "name_en": "unit-%s" % s["id"]}
+
+
 class TestPriceBands(unittest.TestCase):
     def test_thin_sample_returns_none(self):
         self.assertIsNone(bot._gw_price_bands([100, 200]))
@@ -134,6 +154,92 @@ class TestMatchRunParallelAvailability(unittest.TestCase):
         self.assertIsInstance(out, dict)
         self.assertIn("top", out)
         self.assertFalse(out.get("impossible"))
+
+
+class TestGwSearchParallelAvailability(unittest.TestCase):
+    """_gw_search fans the unit_availability_price calls, for units that
+    survive the cheap guests/type/area/neighborhood/tags filters, out across
+    a ThreadPoolExecutor (see bot.py, same pool pattern as
+    enrich_catalog_for_dates and _match_run). Hermetic: _gw_visible_snaps and
+    _gw_listing_public are stubbed, so nothing here touches the network or
+    the live gw cache."""
+
+    def setUp(self):
+        self.snaps = _fake_snaps_for_search(53)
+        self.patches = [
+            mock.patch.object(bot, "_gw_visible_snaps", return_value=self.snaps),
+            mock.patch.object(bot, "_gw_listing_public", side_effect=_fake_gw_listing_public),
+        ]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_identical_results_regardless_of_completion_order(self):
+        """Result ids + order are driven by sort_key data (availability first,
+        then name_ar), never by which ThreadPoolExecutor future completes
+        first -- the parallelisation must not change the returned list."""
+        def stub_avail(lid, ci, co):
+            if lid == 3:
+                return {"available": False, "nights": 3, "total": 0, "avg": 0}
+            return {"available": True, "nights": 3, "total": 900, "avg": 300}
+
+        with mock.patch.object(bot, "unit_availability_price", side_effect=stub_avail):
+            out = bot._gw_search(ci="2026-08-01", co="2026-08-04")
+
+        # unit 3 is unavailable -> excluded; every survivor is available so
+        # sort_key falls through to name_ar ascending. name_ar is a plain
+        # string ("unit-1", "unit-2", ...) so this is lexicographic, not
+        # numeric, sort -- computed independently here rather than assumed.
+        expected = sorted((i for i in range(1, 54) if i != 3), key=lambda i: "unit-%s" % i)
+        self.assertEqual([r["id"] for r in out["results"]], expected)
+
+    def test_every_surviving_unit_checked_exactly_once(self):
+        calls = []
+
+        def stub_avail(lid, ci, co):
+            calls.append(lid)
+            return {"available": True, "nights": 3, "total": 900, "avg": 300}
+
+        with mock.patch.object(bot, "unit_availability_price", side_effect=stub_avail):
+            out = bot._gw_search(ci="2026-08-01", co="2026-08-04")
+
+        self.assertEqual(sorted(calls), [s["id"] for s, _ov in self.snaps])
+        self.assertEqual(len(calls), len(set(calls)), "a unit was fetched more than once")
+        self.assertEqual(len(out["results"]), 53)
+
+    def test_filters_shortcut_the_availability_work(self):
+        """A neighborhood filter that excludes most units must shrink the
+        set BEFORE availability is checked -- unit_availability_price should
+        only be called for the units that survive filtering."""
+        neighborhoods = {i: ("olaya" if i == 1 else "other") for i in range(1, 54)}
+        snaps = _fake_snaps_for_search(53, neighborhoods=neighborhoods)
+        calls = []
+
+        def stub_avail(lid, ci, co):
+            calls.append(lid)
+            return {"available": True, "nights": 3, "total": 900, "avg": 300}
+
+        with mock.patch.object(bot, "_gw_visible_snaps", return_value=snaps), \
+             mock.patch.object(bot, "unit_availability_price", side_effect=stub_avail):
+            out = bot._gw_search(ci="2026-08-01", co="2026-08-04", neighborhood="olaya")
+
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(out["results"]), 1)
+        self.assertEqual(out["results"][0]["id"], 1)
+
+    def test_one_unit_raising_does_not_fail_the_request(self):
+        def stub_avail(lid, ci, co):
+            if lid == 7:
+                raise RuntimeError("simulated Hostaway failure for unit 7")
+            return {"available": True, "nights": 3, "total": 900, "avg": 300}
+
+        with mock.patch.object(bot, "unit_availability_price", side_effect=stub_avail):
+            out = bot._gw_search(ci="2026-08-01", co="2026-08-04")
+
+        # unit 7's failed lookup keeps avail=None -> avail_error, but the
+        # unit still comes back (unpriced) and every other unit is unaffected.
+        self.assertTrue(out["avail_error"])
+        self.assertEqual(len(out["results"]), 53)
 
 
 class TestMatchEventKeys(unittest.TestCase):

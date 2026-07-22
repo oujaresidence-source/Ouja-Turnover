@@ -45864,6 +45864,7 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=
         g = None
     results, avail_error = [], False
     tag_list = [t for t in ((tags or "").split(",")) if t and t not in ("all",)]
+    survivors = []
     for s, ov in _gw_visible_snaps():
         if g and s.get("capacity") and int(s["capacity"]) < g:
             continue
@@ -45877,9 +45878,38 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=
             _tk = s.get("tag_keys") or []
             if not all(t in _tk for t in tag_list):
                 continue
+        survivors.append((s, ov))
+
+    # ---- parallel calendar lookups — SAME pool pattern as enrich_catalog_for_dates
+    # (bot.py ~6176) and _match_run (bot.py ~46744); both measured large serial->parallel
+    # speedups on this exact call. /stay/search is a public, unauthenticated page a guest
+    # is actively waiting on — do NOT collapse this back into a serial for-loop over
+    # unit_availability_price. The fan-out happens only AFTER the cheap guests/type/area/
+    # neighborhood/tags filters have shrunk `survivors`, so a narrowed search still costs
+    # less than an unfiltered one. Results are re-walked below in `survivors` order (not
+    # completion order) so sort_key ties resolve exactly as a serial run would — the
+    # returned list is unchanged, only faster. One unit's failure never fails the whole
+    # request; it just keeps avail=None, which the existing avail_error handling covers.
+    avail_map = {}
+    if not browse and survivors:
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futures = {ex.submit(unit_availability_price, s.get("id"), ci, co): s.get("id")
+                           for s, _ov in survivors}
+                for fut in as_completed(futures):
+                    lid = futures[fut]
+                    try:
+                        avail_map[lid] = fut.result()
+                    except Exception as e:
+                        print(f"stay search availability parallel error ({lid}):", e)
+                        avail_map[lid] = None
+        except Exception as e:
+            print("stay search availability pool error:", e)
+
+    for s, ov in survivors:
         avail = None
         if not browse:
-            avail = unit_availability_price(s.get("id"), ci, co)
+            avail = avail_map.get(s.get("id"))
             if avail is None:
                 avail_error = True
             elif not avail.get("available"):
