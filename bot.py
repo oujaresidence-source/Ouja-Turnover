@@ -46776,7 +46776,14 @@ def _stay_render(route="landing", listing=None, base=""):
                        "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP,
                        "neighborhoods": _gw_neighborhoods_with_counts(),
                        "rating_overall": _gw_ratings_overall(),
-                       "price_bands": _gw_price_bands(_gw_visible_prices())}}
+                       "price_bands": _gw_price_bands(_gw_visible_prices()),
+                       # Owner-declared fact definitions (match/facts.py) — the single source of
+                       # truth for labels. Exposed here so the /stay/match comparison view and
+                       # refinement chips can read {key, ar, en} from the API instead of a second,
+                       # hand-typed Arabic string list living in JS (which would drift from the
+                       # owner-editable facts the guest-website Manage tab already writes).
+                       "facts": ([{"key": k, "ar": ar, "en": en}
+                                  for k, ar, en, _grp in _match.facts.FACTS] if _HAS_MATCH else [])}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO: JSON-LD structured data — LodgingBusiness on /stay, Apartment per unit page.
     if listing:
