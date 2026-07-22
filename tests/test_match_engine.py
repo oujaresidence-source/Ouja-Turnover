@@ -3,13 +3,18 @@ from match import engine
 
 
 def unit(uid, beds=2, capacity=4, rating=4.7, reviews=40,
-         neighborhood="al_malqa", amenities=None, est_avg=700):
-    """Fabricated public-listing dict, shaped like _gw_listing_public output."""
+         neighborhood="al_malqa", amenities=None, facts=None, est_avg=700):
+    """Fabricated public-listing dict, shaped like _gw_listing_public output.
+
+    `amenities` is kept for fixtures that don't care about it (the engine no
+    longer reads it — see match/facts.py); `facts` is the owner-declared
+    True/False/missing dict the engine actually scores against."""
     return {
         "id": uid, "slug": f"unit-{uid}", "name_ar": f"عوجا | وحدة {uid}",
         "beds": beds, "baths": 2, "capacity": capacity,
         "neighborhood": neighborhood, "area": "الملقا",
         "amenities": amenities if amenities is not None else ["Wifi", "Kitchen"],
+        "facts": facts if facts is not None else {},
         "rating": rating, "reviews_count": reviews,
         "est_avg": est_avg, "available": True,
     }
@@ -524,104 +529,152 @@ class TestBudget(unittest.TestCase):
         self.assertEqual(len(out["top"]), 1)
 
 
-class TestPurposeAmenities(unittest.TestCase):
+class TestPurposeFacts(unittest.TestCase):
+    """`_score_amenities` no longer reads Hostaway's amenity list — it reads
+    owner-declared `facts` (match/facts.py). See TestFactsAmenitySignal below
+    for the direct unit tests; these prove the effect through the full engine
+    (ranking), forcing a real fit difference rather than a coincidental id
+    tie-break by using strong/weak reversed ids."""
+
     def test_workspace_helps_a_work_trip(self):
         answers = dict(BASE, purpose="work")
-        withws = unit(1, amenities=["Wifi", "Dedicated workspace", "Kitchen"])
-        without = unit(2, amenities=["Kitchen"])
+        withws = unit(2, facts={"workspace": True})
+        without = unit(1, facts={})
         out = engine.score(answers, [withws, without], geo={})
-        self.assertEqual(out["top"][0]["id"], 1)
+        self.assertEqual(out["top"][0]["id"], 2)
 
     def test_washer_helps_a_family_trip(self):
         answers = dict(BASE, purpose="family")
-        withw = unit(1, amenities=["Kitchen", "Washer"])
-        without = unit(2, amenities=["Wifi"])
+        withw = unit(2, facts={"washer": True})
+        without = unit(1, facts={})
         out = engine.score(answers, [withw, without], geo={})
-        self.assertEqual(out["top"][0]["id"], 1)
+        self.assertEqual(out["top"][0]["id"], 2)
 
-    def test_missing_amenities_list_does_not_crash(self):
-        u = unit(1); u["amenities"] = None
+    def test_missing_facts_does_not_crash(self):
+        u = unit(1); u["facts"] = None
         out = engine.score(dict(BASE, purpose="work"), [u])
         self.assertEqual(len(out["top"]), 1)
 
 
-class TestAmenityExclusions(unittest.TestCase):
-    """Fix 1: real Hostaway/Airbnb amenity strings that contain a keyword as a
-    substring but mean something else entirely must NOT be credited — that
-    would tell a guest they have an amenity the unit does not actually have,
-    the worst failure mode this feature has."""
+class TestFactsAmenitySignal(unittest.TestCase):
+    """The honesty rule this whole feature exists to enforce (owner
+    instruction 2026-07-22): only an explicit True fact is ever named to the
+    guest. False and unanswered are indistinguishable in the guest-facing
+    reason/tradeoff — both are silent, only the score reflects the miss."""
 
-    def test_dishwasher_does_not_satisfy_washer(self):
+    def test_explicit_true_is_credited(self):
         answers = dict(BASE, purpose="family")
-        u = unit(1, amenities=["Kitchen", "Dishwasher"])
+        u = unit(1, facts={"washer": True, "full_kitchen": True})
         fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertNotIn("غسالة", reason or "")
+        self.assertIn("غسالة", reason)
+        self.assertIsNone(tradeoff)
 
-    def test_pool_table_does_not_satisfy_pool(self):
-        """Pool table must not be credited as a swimming pool. Owner rule
-        (2026-07-22) means a missing-amenity tradeoff is no longer emitted,
-        so the proof shifts to `reason` (no positive credit) and `fit`
-        (stuck at the no-hit floor of 0.2, not the ~0.33 a real pool hit
-        among 3 wanted "rest" amenities would produce) — this still catches
-        "Pool table" being wrongly credited as a pool."""
+    def test_explicit_false_is_never_named(self):
         answers = dict(BASE, purpose="rest")
-        u = unit(1, amenities=["Pool table"])
+        u = unit(1, facts={"pool": False})
+        fit, reason, tradeoff = engine._score_amenities(u, answers)
+        self.assertIsNone(reason)
+        self.assertIsNone(tradeoff)
+        self.assertEqual(fit, 0.2)
+
+    def test_unanswered_is_never_named(self):
+        answers = dict(BASE, purpose="rest")
+        u = unit(1, facts={})
+        fit, reason, tradeoff = engine._score_amenities(u, answers)
+        self.assertIsNone(reason)
+        self.assertIsNone(tradeoff)
+        self.assertEqual(fit, 0.2)
+
+    def test_false_and_unanswered_score_identically(self):
+        """The guest-facing side must never be able to tell "no" apart from
+        "we haven't checked" — proven here at the score/reason/tradeoff level."""
+        answers = dict(BASE, purpose="boulevard")
+        false_u = unit(1, facts={"parking": False})
+        unknown_u = unit(2, facts={})
+        f1 = engine._score_amenities(false_u, answers)
+        f2 = engine._score_amenities(unknown_u, answers)
+        self.assertEqual(f1, f2)
+
+    def test_only_purpose_relevant_facts_count(self):
+        """A True fact irrelevant to this purpose must not be credited."""
+        answers = dict(BASE, purpose="work")
+        u = unit(1, facts={"pool": True})   # pool matters for "rest", not "work"
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(reason)
         self.assertEqual(fit, 0.2)
 
-    def test_pool_cue_does_not_satisfy_pool(self):
-        answers = dict(BASE, purpose="rest")
-        u = unit(1, amenities=["Pool cue rack"])
+    def test_multiple_hits_joined(self):
+        answers = dict(BASE, purpose="medical")
+        u = unit(1, facts={"elevator": True, "ground_floor": True,
+                            "parking": True, "full_kitchen": True})
         fit, reason, tradeoff = engine._score_amenities(u, answers)
+        self.assertEqual(fit, 1.0)
+        self.assertIn("·", reason)
+
+    def test_unknown_purpose_scores_neutral(self):
+        fit, reason, tradeoff = engine._score_amenities(
+            unit(1, facts={"parking": True}), dict(BASE, purpose="spelunking"))
+        self.assertEqual(fit, 0.5)
         self.assertIsNone(reason)
 
-    def test_paid_parking_off_premises_does_not_satisfy_parking(self):
-        answers = dict(BASE, purpose="medical")
-        u = unit(1, amenities=["Paid parking off premises"])
-        fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertNotIn("موقف", reason or "")
 
-    def test_street_parking_does_not_satisfy_parking(self):
-        answers = dict(BASE, purpose="boulevard")
-        u = unit(1, amenities=["Street parking"])
-        fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertNotIn("موقف", reason or "")
+class TestRequiredFactsGate(unittest.TestCase):
+    """score()'s required_facts argument (Part 4.2 of the honesty rule): an
+    explicit False excludes; missing/unanswered is kept and simply never
+    outranks an explicit True, all else equal."""
 
-    def test_real_washer_is_credited(self):
-        answers = dict(BASE, purpose="family")
-        u = unit(1, amenities=["Washer", "Kitchen"])
-        fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIn("غسالة", reason)
-
-    def test_real_pool_is_credited(self):
+    def test_explicit_false_excludes_the_unit(self):
         answers = dict(BASE, purpose="rest")
-        u = unit(1, amenities=["Pool"])
-        fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIn("مسبح", reason)
+        u = unit(1, facts={"parking": False})
+        out = engine.score(answers, [u], required_facts=["parking"])
+        self.assertEqual(out["top"], [])
+        self.assertEqual(out["near"], [])
+        self.assertFalse(out["impossible"])   # reserved for capacity, not facts
 
-    def test_free_parking_on_premises_is_credited(self):
-        answers = dict(BASE, purpose="boulevard")
-        u = unit(1, amenities=["Free parking on premises"])
-        fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIn("موقف", reason)
+    def test_unanswered_is_kept_not_excluded(self):
+        answers = dict(BASE, purpose="rest")
+        u = unit(1, facts={})
+        out = engine.score(answers, [u], required_facts=["parking"])
+        self.assertEqual(len(out["top"]), 1)
+        self.assertEqual(out["top"][0]["id"], 1)
 
-    def test_exclusions_do_not_leak_across_separate_amenity_strings(self):
-        """"washer" must still be credited from a genuine "Washer" entry even
-        when a *different* amenity string in the same list is "Dishwasher" —
-        matching per-string (not one joined blob) keeps the exclusion scoped
-        to only the string it actually appears in."""
-        answers = dict(BASE, purpose="family")
-        u = unit(1, amenities=["Dishwasher", "Washer", "Kitchen"])
-        fit, reason, tradeoff = engine._score_amenities(u, answers)
-        self.assertIn("غسالة", reason)
+    def test_explicit_true_outranks_unanswered_all_else_equal(self):
+        answers = dict(BASE, purpose="rest")
+        confirmed = unit(1, facts={"parking": True})
+        unanswered = unit(2, facts={})
+        out = engine.score(answers, [confirmed, unanswered], required_facts=["parking"])
+        self.assertEqual(out["top"][0]["id"], 1)
+        self.assertGreater(out["top"][0]["match_score"], out["top"][1]["match_score"])
+
+    def test_mixed_pool_excludes_only_the_explicit_false(self):
+        answers = dict(BASE, purpose="rest")
+        yes = unit(1, facts={"parking": True})
+        no = unit(2, facts={"parking": False})
+        unknown = unit(3, facts={})
+        out = engine.score(answers, [yes, no, unknown], required_facts=["parking"])
+        ids = [u["id"] for u in out["top"] + out["near"]]
+        self.assertIn(1, ids)
+        self.assertIn(3, ids)
+        self.assertNotIn(2, ids)
+
+    def test_unknown_required_fact_key_is_ignored(self):
+        answers = dict(BASE, purpose="rest")
+        u = unit(1, facts={})
+        out = engine.score(answers, [u], required_facts=["not_a_real_fact"])
+        self.assertEqual(len(out["top"]), 1)
+
+    def test_no_required_facts_behaves_exactly_like_before(self):
+        answers = dict(BASE, purpose="rest")
+        u = unit(1, facts={"parking": False})
+        out = engine.score(answers, [u])
+        self.assertEqual(len(out["top"]), 1)   # facts=False on a NON-required key never excludes
 
 
 class TestAmenityAndQualityTradeoffs(unittest.TestCase):
     """Owner rule (2026-07-22): «لا تعرض الشكاوي» — a guest-facing tradeoff
     may ONLY compare the guest's OWN REQUEST against the unit (their
     bedroom count, their budget, their destination). It may never state a
-    shortcoming of the unit itself — a missing amenity or a low rating is a
+    shortcoming of the unit itself — a missing fact or a low rating is a
     complaint about OUR OWN inventory, not about what the guest asked for,
     so neither may ever reach the guest as a tradeoff string. The `fit`
     still drops in both cases (the unit is still ranked down), which is why
@@ -629,46 +682,29 @@ class TestAmenityAndQualityTradeoffs(unittest.TestCase):
     still real — otherwise a future change could quietly remove the penalty
     itself and nothing here would catch it."""
 
-    def test_no_relevant_amenities_produces_no_tradeoff_but_fit_still_drops(self):
+    def test_no_relevant_facts_produces_no_tradeoff_but_fit_still_drops(self):
         answers = dict(BASE, purpose="work")
-        u = unit(1, amenities=["Ethernet only", "Fireplace"])
+        u = unit(1, facts={})
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(reason)
         self.assertIsNone(tradeoff)
         self.assertEqual(fit, 0.2)   # the miss still costs real points, silently
 
-    def test_work_missing_amenities_produce_no_tradeoff(self):
-        """Old test proved the tradeoff named "workspace" not "wifi". Under
-        the owner rule there is no tradeoff to name anything in at all —
-        the hedging logic in `_missing_amenities_tradeoff` (still exercised
-        directly below) is simply no longer wired into the guest-facing
-        path."""
+    def test_work_missing_facts_produce_no_tradeoff(self):
         answers = dict(BASE, purpose="work")
-        u = unit(1, amenities=["Ethernet only", "Fireplace"])
+        u = unit(1, facts={"workspace": False})
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(tradeoff)
 
-    def test_family_missing_amenities_produce_no_tradeoff(self):
+    def test_family_missing_facts_produce_no_tradeoff(self):
         answers = dict(BASE, purpose="family")
-        u = unit(1, amenities=["Fireplace"])
+        u = unit(1, facts={})
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(tradeoff)
 
-    def test_only_wifi_or_kitchen_missing_produces_no_amenity_tradeoff(self):
-        """If every unmatched amenity for a purpose is a near-universal basic
-        (wifi/kitchen-class, tradeoff-ineligible), there is nothing honest
-        left to name — no amenity tradeoff should be emitted at all, rather
-        than falsely implying the unit lacks something distinctive. This
-        exercises the hedging helper directly: `_score_amenities` no longer
-        calls it (owner rule), but the helper itself still guards this
-        invariant in case it is ever wired into an internal/ops-facing view."""
-        wifi_and_kitchen_only = [("wifi", (), "واي فاي", False),
-                                  ("kitchen", (), "مطبخ كامل", False)]
-        self.assertIsNone(engine._missing_amenities_tradeoff(wifi_and_kitchen_only))
-
-    def test_boulevard_missing_amenities_produce_no_tradeoff(self):
+    def test_boulevard_missing_facts_produce_no_tradeoff(self):
         answers = dict(BASE, purpose="boulevard")
-        u = unit(1, amenities=["Fireplace"])
+        u = unit(1, facts={})
         fit, reason, tradeoff = engine._score_amenities(u, answers)
         self.assertIsNone(tradeoff)
 
@@ -700,15 +736,15 @@ class TestAmenityAndQualityTradeoffs(unittest.TestCase):
         """Replaces the old 'a weak unit must surface a tradeoff' test, which
         now directly conflicts with the owner's no-complaints rule. The
         guarantee that survives is ranking, not disclosure: a unit weak on
-        BOTH amenities and rating must still rank below a strong one — the
+        BOTH facts and rating must still rank below a strong one — the
         penalty is real, it is just never spoken aloud. Same boulevard proof
-        case as before (amenities=['Ethernet only', 'Fireplace'], 3.2★/50),
-        now compared against a genuinely strong unit at the same distance."""
+        case as before (no facts answered, 3.2★/50), now compared against a
+        genuinely strong unit at the same distance."""
         from match import poi as _poi
         blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
         answers = dict(BASE, purpose="boulevard")
-        weak = unit(1, amenities=["Ethernet only", "Fireplace"], rating=3.2, reviews=50)
-        strong = unit(2, amenities=["Free parking on premises", "Wifi"], rating=4.9, reviews=50)
+        weak = unit(1, facts={}, rating=3.2, reviews=50)
+        strong = unit(2, facts={"parking": True, "private_entrance": True}, rating=4.9, reviews=50)
         geo = {1: (blvd[0] + 0.005, blvd[1]), 2: (blvd[0] + 0.005, blvd[1])}
         out = engine.score(answers, [weak, strong], geo=geo)
         self.assertEqual(out["top"][0]["id"], 2)
@@ -716,17 +752,16 @@ class TestAmenityAndQualityTradeoffs(unittest.TestCase):
 
     def test_top_level_tradeoff_never_criticises_our_own_unit(self):
         """The regression guard that matters most: whatever `engine.score()`
-        actually returns as `tradeoff` for a unit that is weak on both
-        amenities and rating, it must never contain «تقييمها» (a complaint
-        about our own rating) or «ما ذكروا» (a complaint about what our own
-        listing doesn't mention). A tradeoff may only compare the guest's
-        own request to the unit — this is what a future contributor
-        restoring the old copy, or wiring `_missing_amenities_tradeoff` back
-        in, would break."""
+        actually returns as `tradeoff` for a unit that is weak on both facts
+        and rating, it must never contain «تقييمها» (a complaint about our
+        own rating) or «ما ذكروا» (a complaint about what our own listing
+        doesn't mention). A tradeoff may only compare the guest's own
+        request to the unit — this is what a future contributor restoring
+        the old Hostaway-amenity copy would break."""
         from match import poi as _poi
         blvd = (_poi.POIS["boulevard"][2], _poi.POIS["boulevard"][3])
         answers = dict(BASE, purpose="boulevard")
-        u = unit(1, amenities=["Ethernet only", "Fireplace"], rating=3.2, reviews=50)
+        u = unit(1, facts={}, rating=3.2, reviews=50)
         out = engine.score(answers, [u], geo={1: (blvd[0] + 0.005, blvd[1])})
         tradeoff = out["top"][0]["tradeoff"]
         if tradeoff is not None:
@@ -802,7 +837,7 @@ class TestConfidenceReachable(unittest.TestCase):
         answers = dict(BASE, party_size=4, sleep_pref="pairs",
                        purpose="boulevard", budget_max=1000)
         u = unit(1, beds=2, capacity=6, rating=4.9, reviews=80,
-                 amenities=["Wifi", "Free parking"], est_avg=800)
+                 facts={"parking": True, "private_entrance": True}, est_avg=800)
         out = engine.score(answers, [u], geo={1: (blvd[0] + 0.005, blvd[1])})
         self.assertTrue(out["confident"],
                         f"score {out['top'][0]['match_score']} < {engine.CONFIDENCE_FLOOR}")

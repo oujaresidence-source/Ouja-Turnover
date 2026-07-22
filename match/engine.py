@@ -9,6 +9,7 @@ honest tradeoff string the UI shows to the guest.
 import copy
 import math
 
+from . import facts as _facts
 from . import poi
 
 # Weights sum to 100. Tunable here without touching the UI or the tests that
@@ -106,7 +107,16 @@ def _id_sort_key(uid):
         return (1, str(uid))
 
 
-def score(answers, units, geo=None, top=TOP_N):
+def _passes_required_facts_gate(u, required_facts):
+    """A unit is excluded only when it explicitly answered False for a
+    required fact. Missing/unanswered is KEPT — the owner's honesty rule
+    means we never punish a unit for data that simply hasn't been entered
+    yet, only for a fact it explicitly denies having."""
+    facts = u.get("facts") or {}
+    return all(facts.get(k) is not False for k in required_facts)
+
+
+def score(answers, units, geo=None, top=TOP_N, required_facts=None):
     """Rank units by fit. See the plan's data contract for shapes.
 
     Two independent hard gates, deliberately evaluated in this order so the
@@ -121,11 +131,19 @@ def score(answers, units, geo=None, top=TOP_N):
     2. AVAILABILITY — only applies when the guest gave check-in/check-out.
        If capacity was fine but everything that fits is booked, that is a
        normal empty result, not "impossible".
+
+    `required_facts` (optional list of match.facts keys, e.g. from the
+    guest's own must-have picks) adds a THIRD gate, evaluated last: a unit is
+    excluded only when it explicitly says False for one of these — a unit
+    that simply hasn't answered is kept (see `_passes_required_facts_gate`).
+    Unknown keys are dropped defensively; the caller (`bot.py`'s
+    `_match_answers`) already validates against `match.facts.keys()`.
     """
     answers = answers or {}
     units = list(units or [])
     dated = bool(answers.get("check_in") and answers.get("check_out"))
     party_size = _clean_party_size(answers.get("party_size"))
+    required_facts = [k for k in (required_facts or []) if k in _facts.keys()]
 
     capacity_ok = [u for u in units if _passes_capacity_gate(u, party_size)]
 
@@ -147,10 +165,18 @@ def score(answers, units, geo=None, top=TOP_N):
         return {"top": [], "near": [], "confident": False,
                 "impossible": False, "max_capacity": 0}
 
+    if required_facts:
+        eligible = [u for u in eligible if _passes_required_facts_gate(u, required_facts)]
+        if not eligible:
+            # Same rule as availability: a real exclusion, but not "impossible"
+            # (that word is reserved for capacity).
+            return {"top": [], "near": [], "confident": False,
+                    "impossible": False, "max_capacity": 0}
+
     scored = []
     raw_totals = []
     for u in eligible:
-        total, reasons, tradeoffs = _score_one(u, answers, geo or {}, party_size, dated)
+        total, reasons, tradeoffs = _score_one(u, answers, geo or {}, party_size, dated, required_facts)
         # Deep copy: nested fields (amenities, images, ...) must not be
         # shared with the caller's dict — a later mutation of a returned
         # item (e.g. Task 6 amenity scoring) must never corrupt bot.py's
@@ -433,105 +459,81 @@ def _score_budget(u, answers):
     return fit, None, tradeoff
 
 
-# Amenity keywords that genuinely matter per purpose. (keyword, exclusions,
-# arabic_label). A keyword only counts when it appears in an amenity name
-# that contains NONE of its exclusions — this is what stops real Hostaway/
-# Airbnb amenity strings from producing false positives that would tell a
-# guest they have something they don't: "washer" must not be satisfied by
-# "Dishwasher", "pool" must not be satisfied by "Pool table"/"Pool cue", and
-# "parking" must not be satisfied by paid/off-site/street parking, which is
-# not the convenience a guest means when they ask for parking.
-#
-# 4th element = tradeoff-eligible: whether this amenity may be NAMED in a
-# missing-amenity tradeoff when it doesn't match. Hostaway amenity lists are
-# frequently incomplete, so a missing match only tells us the LISTING didn't
-# mention it, not that the unit lacks it — see `_missing_amenities_tradeoff`.
-# Naming a near-universal basic (wifi, kitchen) as "missing" is the mirror of
-# the false-positive bug this table was already fixed for: it is very likely
-# false, and a false negative that talks a guest out of booking is worse than
-# a false positive, because we never learn it happened. Wifi/kitchen stay
-# fully eligible as POSITIVE reasons when they DO match — only the negative
-# claim is restricted.
-PURPOSE_AMENITIES = {
-    "work":      [("workspace", (), "مكتب للشغل", True),
-                  ("wifi", (), "واي فاي", False),
-                  # Tradeoff-ineligible on purpose: «مكتب» and «مكتب للشغل» are
-                  # near-synonyms, so naming both produces the stutter
-                  # «ما ذكروا فيها مكتب للشغل ولا مكتب». Still counts as a
-                  # positive reason when a desk is actually listed.
-                  ("desk", (), "مكتب", False)],
-    "family":    [("kitchen", (), "مطبخ كامل", False),
-                  ("washer", ("dishwasher",), "غسالة", True),
-                  ("crib", (), "سرير أطفال", True)],
-    "rest":      [("pool", ("pool table", "pool cue"), "مسبح", True),
-                  ("balcony", (), "بلكونة", True),
-                  ("jacuzzi", (), "جاكوزي", True)],
-    "medical":   [("kitchen", (), "مطبخ كامل", False),
-                  ("elevator", (), "مصعد", True),
-                  ("parking", ("paid parking", "off premises", "street parking"), "موقف", True)],
-    "boulevard": [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة", True),
-                  ("wifi", (), "واي فاي", False)],
-    "shopping":  [("parking", ("paid parking", "off premises", "street parking"), "موقف سيارة", True),
-                  ("elevator", (), "مصعد", True)],
+# Owner-declared fact keys (see match/facts.py) that genuinely matter per
+# purpose. Owner instruction (2026-07-22): amenity matching is NEVER derived
+# from Hostaway's amenity list again — that data proved unreliable enough to
+# produce false statements to guests (verified case: top Boulevard results
+# had no parking amenity listed while other listings had "Private Parking"
+# literally in their title). Every key here must exist in `match.facts.keys()`.
+PURPOSE_FACTS = {
+    "work":      ["workspace", "private_entrance"],
+    "family":    ["full_kitchen", "washer", "kids_ok"],
+    "rest":      ["pool", "balcony", "view"],
+    "medical":   ["elevator", "ground_floor", "parking", "full_kitchen"],
+    "boulevard": ["parking", "private_entrance"],
+    "shopping":  ["parking", "elevator"],
 }
 
 
-def _missing_amenities_tradeoff(wanted):
-    """Hedged Najdi tradeoff naming what THIS purpose cares about that the
-    LISTING DOESN'T MENTION — never claims the unit lacks it. "ما ذكروا فيها"
-    ("they didn't mention it") is true regardless of how complete Hostaway's
-    amenity data is; "ما فيها" ("it doesn't have it") would assert a fact we
-    cannot actually support. Only tradeoff-ELIGIBLE labels (see
-    PURPOSE_AMENITIES) may be named — if every unmatched amenity for this
-    purpose is a near-universal basic (wifi/kitchen), there is nothing honest
-    left to say, and this returns None rather than emit no tradeoff at all
-    (the caller must accept that)."""
-    labels = [ar for (_, _, ar, eligible) in wanted if eligible]
-    if not labels:
-        return None
-    if len(labels) == 1:
-        return f"ما ذكروا فيها {labels[0]}"
-    return f"ما ذكروا فيها {labels[0]} ولا {labels[1]}"
-
-
 def _score_amenities(u, answers):
-    """0.0-1.0 by how many purpose-relevant amenities the unit actually has.
-    Neutral when the purpose has no amenity list; a missing/malformed
-    amenities field is treated as "has none" rather than raising.
+    """0.0-1.0 by how many purpose-relevant OWNER-DECLARED facts (see
+    match/facts.py) the unit actually confirms. Neutral when the purpose has
+    no fact list. Reads `u["facts"]` — NEVER `u["amenities"]` (see the
+    PURPOSE_FACTS comment above for why).
 
-    Matched per RAW amenity string, one at a time — never against one joined
-    blob. Joining first would let an exclusion meant for one amenity string
-    accidentally cancel a genuine match sitting in a different string (or vice
-    versa); matching string-by-string keeps each exclusion scoped to only the
-    string it actually appears in.
-
-    When NOTHING relevant matched, returns a hedged tradeoff naming what the
-    listing doesn't mention (see `_missing_amenities_tradeoff`) instead of
-    just going quietly neutral-looking — unless nothing eligible is missing,
-    in which case no tradeoff is emitted at all (the fit still reflects the
-    miss; only the guest-facing claim is withheld).
+    A fact explicitly True counts as a hit. A fact explicitly False, or
+    simply unanswered, is never a hit — and, per the owner's no-complaints
+    rule, is NEVER named to the guest either way: stating a False fact would
+    criticise our own unit, and stating an unanswered one would claim
+    something we haven't actually verified. Only the `fit` reflects a miss;
+    the guest never sees why.
     """
-    wanted = PURPOSE_AMENITIES.get(answers.get("purpose") or "")
+    wanted = PURPOSE_FACTS.get(answers.get("purpose") or "")
     if not wanted:
         return 0.5, None, None
-    strings = [str(a).lower() for a in (u.get("amenities") or [])]
-    hits = []
-    for kw, exclusions, ar, _eligible in wanted:
-        for s in strings:
-            if kw in s and not any(ex in s for ex in exclusions):
-                hits.append(ar)
-                break
+    facts = u.get("facts") or {}
+    hits = [_facts.label_ar(k) for k in wanted if facts.get(k) is True]
     if not hits:
         # Owner rule (2026-07-22): tradeoffs compare the guest's REQUEST to the unit.
-        # "the listing doesn't mention parking" is a statement about our own unit, so
-        # it is withheld from the guest. The miss still costs the unit points, which
-        # ranks it down without saying anything negative out loud.
+        # A missing/False fact is a statement about our own unit, so it is withheld
+        # from the guest. The miss still costs the unit points, which ranks it down
+        # without saying anything negative out loud.
         return 0.2, None, None
     fit = min(1.0, len(hits) / len(wanted))
     return fit, " · ".join(hits[:2]), None
 
 
-def _score_one(u, answers, geo, party_size, dated):
+def _score_required_facts(u, required_facts):
+    """0.0-1.0 by how many of the guest's own EXPLICITLY-requested facts (the
+    quiz's `facts` filter — distinct from the purpose-inferred list
+    `_score_amenities` reads) the unit confirms as True. A unit that fails
+    outright (explicit False on one of these) never reaches here — `score()`
+    excludes it first via `_passes_required_facts_gate`. So every unit seen
+    here already has each required fact either True or unanswered;
+    unanswered scores exactly like a miss (never named, never excluded) —
+    the same honesty rule as `_score_amenities`, applied to the guest's own
+    explicit picks instead of the purpose-inferred list."""
+    if not required_facts:
+        return 0.0, None, None
+    facts = u.get("facts") or {}
+    hits = [_facts.label_ar(k) for k in required_facts if facts.get(k) is True]
+    if not hits:
+        return 0.0, None, None
+    fit = min(1.0, len(hits) / len(required_facts))
+    return fit, " · ".join(hits[:2]), None
+
+
+# Weight for the required-facts signal — additive on top of WEIGHTS (which
+# stays fixed at 100; the `test_weights_sum_to_one_hundred` regression guard
+# assumes exactly the five base signals), only present in `parts` when the
+# guest actually picked must-have facts. Chosen comparable to `budget` (20)
+# so an explicit True reliably outranks an otherwise-identical unit that
+# simply hasn't answered (which contributes nothing here, per the honesty
+# rule), without letting it single-handedly dominate every other signal.
+REQUIRED_FACTS_WEIGHT = 20
+
+
+def _score_one(u, answers, geo, party_size, dated, required_facts=None):
     """Returns (total_0_to_100, reasons, tradeoffs). Filled in across Tasks 3-6.
 
     `party_size` is the already-cleaned value from `score()` (see
@@ -541,6 +543,9 @@ def _score_one(u, answers, geo, party_size, dated):
     `dated` is whether the guest gave check-in/check-out (same flag `score()`
     used for the availability gate) — the reason-guarantee fallback below
     needs it to avoid claiming availability that was never actually checked.
+
+    `required_facts` is the already-validated list from `score()` (units that
+    fail it outright never reach here — see `_passes_required_facts_gate`).
     """
     bfit, breason, btradeoff = _score_bedrooms(u, party_size, answers.get("sleep_pref"))
     pfit, preason, ptradeoff = _score_proximity(u, answers, geo)
@@ -557,6 +562,9 @@ def _score_one(u, answers, geo, party_size, dated):
         (WEIGHTS["amenities"], afit, areason, atradeoff),
         (WEIGHTS["quality"], qfit, qreason, qtradeoff),
     ]
+    if required_facts:
+        rfit, rreason, rtradeoff = _score_required_facts(u, required_facts)
+        parts.append((REQUIRED_FACTS_WEIGHT, rfit, rreason, rtradeoff))
     total = sum(weight * fit for weight, fit, _, _ in parts)
 
     # Reasons: sorted by actual points EARNED (fit * weight), not by which
