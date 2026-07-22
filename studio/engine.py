@@ -6,6 +6,10 @@ qualification (which conversations are worth reading), transcript building
 (what Claude actually sees), and strict-but-tolerant parsing of the three
 model outputs (triage / story / idea cards). Keep it pure."""
 
+import hashlib
+import re
+from datetime import date as _date
+
 # conversation qualification -------------------------------------------------
 
 # Hostaway reservation statuses that mean "a real stay happened / was booked".
@@ -23,9 +27,37 @@ STORY_TYPES = ("hero_save", "transformation", "transparency_numbers", "day_in_li
                "hospitality_wow", "weird_delight", "heartwarming", "loyal_return",
                "operational_craft", "other")
 
-TRIGGERS = ("curiosity", "loss", "identity", "provocation", "emotion")
+# v3 (spec Section G): the owner's 7 psychological triggers. 'emotion' is the v2
+# label and stays accepted forever so rows already in brain.db remain valid.
+TRIGGERS = ("curiosity", "loss", "identity", "provocation",
+            "authority", "social_proof", "news", "emotion")
 AUDIENCES = ("niche", "escape")
-VIDEO_TYPES = ("talking", "tour", "before_after", "story_voiceover", "onsite")
+# v3 adds the two signal-native formats (spec F6): a numbers reveal and a news reaction.
+VIDEO_TYPES = ("talking", "tour", "before_after", "story_voiceover", "onsite",
+               "data_reveal", "news_reaction")
+
+# ---------------------------------------------------------------------------
+# v3 SIGNAL BUS — the spine. Spec Section C: an idea with no real signal behind it
+# does not get made. Signals are the only currency the generator may spend.
+# ---------------------------------------------------------------------------
+
+SIGNAL_FAMILIES = ("internal", "external", "manual")
+
+# Ouja's own live data (spec D1–D6). 'guest_story' is the v2 conversation miner,
+# now just one source among many instead of the whole system.
+INTERNAL_SOURCES = ("occupancy", "pricing", "reviews", "ops", "season",
+                    "insider", "guest_story")
+# Live web search (spec D7–D10).
+EXTERNAL_SOURCES = ("regulation", "market", "global_trend", "trend")
+
+SIGNAL_SOURCES = INTERNAL_SOURCES + EXTERNAL_SOURCES + ("manual",)
+
+_FAMILY_OF_SOURCE = {}
+for _s_ in INTERNAL_SOURCES:
+    _FAMILY_OF_SOURCE[_s_] = "internal"
+for _s_ in EXTERNAL_SOURCES:
+    _FAMILY_OF_SOURCE[_s_] = "external"
+_FAMILY_OF_SOURCE["manual"] = "manual"
 
 # Burned-out 2025–26 hook clichés (research brief) — any hook containing one of
 # these substrings is dropped. Substring match on normalized text (Arabic + English).
@@ -220,6 +252,151 @@ def parse_ideas(d):
             "trigger": trg if trg in TRIGGERS else "curiosity",
         })
     return out
+
+
+# v3 signals -------------------------------------------------------------------
+
+def _norm_arabic(text):
+    """Fold Arabic spelling variants so two wordings of the same angle compare equal:
+    Arabic-Indic digits -> ASCII, alef/ya/ta-marbuta unified, diacritics + tatweel
+    dropped, definite article and common possessive suffixes stripped."""
+    t = str(text or "")
+    for i, d in enumerate("٠١٢٣٤٥٦٧٨٩"):
+        t = t.replace(d, str(i))
+    t = re.sub("[ً-ْـ]", "", t)          # harakat + tatweel
+    t = t.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    t = t.replace("ى", "ي").replace("ة", "ه").replace("ؤ", "و").replace("ئ", "ي")
+    t = re.sub("[^0-9a-zA-Zء-ي]+", " ", t)
+    return t.strip()
+
+
+# Function words carry no angle — dropping them keeps the comparison on content.
+_STOP = {"من", "في", "على", "عن", "الى", "او", "و", "ان", "انه", "هذا", "هذي", "هذه",
+         "الي", "اللي", "مع", "كل", "بس", "لكن", "ما", "لا", "هو", "هي", "يا",
+         "the", "a", "an", "of", "to", "in", "for", "and", "is", "are"}
+
+
+def _tokens(text):
+    out = set()
+    for w in _norm_arabic(text).lower().split():
+        if len(w) > 3 and w.startswith("ال"):
+            w = w[2:]
+        for suf in ("هم", "ها", "نا", "كم"):
+            if len(w) > 4 and w.endswith(suf):
+                w = w[:-2]
+                break
+        if len(w) >= 2 and w not in _STOP:
+            out.add(w)
+    return out
+
+
+def novelty_key(text):
+    """Storable, comparable fingerprint of an angle. Empty text -> ''."""
+    return " ".join(sorted(_tokens(text)))
+
+
+def is_novel(key, recent_keys, threshold=0.55):
+    """False when `key` restates something already in `recent_keys` (token Jaccard).
+    An empty key is never novel — an angle we can't fingerprint isn't a fresh one."""
+    a = set(str(key or "").split())
+    if not a:
+        return False
+    for other in recent_keys or []:
+        b = set(str(other or "").split())
+        if not b:
+            continue
+        inter = len(a & b)
+        if inter and inter / float(len(a | b)) >= threshold:
+            return False
+    return True
+
+
+def signal_id(family, source, fact):
+    """Content-addressed id: the same fact is the same signal forever, whatever
+    title the model wrapped it in. Keeps re-scans from duplicating the feed."""
+    h = hashlib.sha1(("%s|%s|%s" % (family, source, novelty_key(fact))).encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
+def signal_ok(sig):
+    """The anti-fabrication gate (spec Section K). FAILS CLOSED.
+    A signal with no fact is nothing; an EXTERNAL claim with no source url or no
+    date is exactly the unverifiable stat the owner banned."""
+    if not isinstance(sig, dict):
+        return False
+    if sig.get("family") not in SIGNAL_FAMILIES:
+        return False
+    if sig.get("source") not in SIGNAL_SOURCES:
+        return False
+    if not str(sig.get("fact") or "").strip():
+        return False
+    if sig.get("family") == "external":
+        url = str(sig.get("url") or "").strip()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return False
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(sig.get("as_of") or "").strip()):
+            return False
+    return True
+
+
+def make_signal(family, source, title, fact, detail="", url="", as_of="",
+                strength=50, ref=""):
+    """Build a validated signal, or None. None means: do NOT make content from this."""
+    if source in SIGNAL_SOURCES and _FAMILY_OF_SOURCE.get(source) != family:
+        return None                          # a source can't change families
+    try:
+        strength = max(0, min(100, int(strength)))
+    except (TypeError, ValueError):
+        strength = 50
+    sig = {"family": str(family or ""), "source": str(source or ""),
+           "title": _s(title, 160), "fact": _s(fact, 700), "detail": _s(detail, 900),
+           "url": str(url or "").strip()[:400], "as_of": str(as_of or "").strip()[:10],
+           "strength": strength, "ref": _s(ref, 80), "status": "new"}
+    if not signal_ok(sig):
+        return None
+    sig["sid"] = signal_id(sig["family"], sig["source"], sig["fact"])
+    return sig
+
+
+def parse_signals(d, family, default_source=None):
+    """Validated signals out of a model's {"signals":[…]} JSON. Anything ungrounded
+    is dropped silently — an empty list is a correct answer."""
+    if not isinstance(d, dict) or not isinstance(d.get("signals"), list):
+        return []
+    fallback = default_source or (
+        "manual" if family == "manual" else
+        ("market" if family == "external" else "insider"))
+    out, seen = [], set()
+    for raw in d["signals"][:20]:
+        if not isinstance(raw, dict):
+            continue
+        src = _s(raw.get("source"), 40)
+        if src not in SIGNAL_SOURCES or _FAMILY_OF_SOURCE.get(src) != family:
+            src = fallback
+        sig = make_signal(family, src, raw.get("title"), raw.get("fact"),
+                          detail=raw.get("detail") or raw.get("why") or "",
+                          url=raw.get("url") or raw.get("source_url") or "",
+                          as_of=raw.get("as_of") or raw.get("date") or "",
+                          strength=raw.get("strength", 50))
+        if sig and sig["sid"] not in seen:
+            seen.add(sig["sid"])
+            out.append(sig)
+    return out
+
+
+def freshness_days(as_of, today):
+    """Age of a signal in days, or None when the date is missing/unparseable.
+    None must never be read as 'fresh today' — callers show «بدون تاريخ» instead."""
+    def _d(v):
+        try:
+            y, m, dd = str(v).strip()[:10].split("-")
+            return _date(int(y), int(m), int(dd))
+        except Exception:
+            return None
+    a, b = _d(as_of), _d(today)
+    if not a or not b:
+        return None
+    return (b - a).days
 
 
 # privacy ----------------------------------------------------------------------

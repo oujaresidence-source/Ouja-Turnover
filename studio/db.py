@@ -64,6 +64,28 @@ CREATE TABLE IF NOT EXISTS studio_ideas (
     perf_note    TEXT NOT NULL DEFAULT '',
     created_at   TEXT
 );
+CREATE TABLE IF NOT EXISTS studio_signals (
+    sid        TEXT PRIMARY KEY,
+    family     TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT '',
+    title      TEXT NOT NULL DEFAULT '',
+    fact       TEXT NOT NULL DEFAULT '',
+    detail     TEXT NOT NULL DEFAULT '',
+    url        TEXT NOT NULL DEFAULT '',
+    as_of      TEXT NOT NULL DEFAULT '',
+    strength   INTEGER NOT NULL DEFAULT 50,
+    ref        TEXT NOT NULL DEFAULT '',
+    nkey       TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS studio_plan (
+    day        TEXT NOT NULL,
+    slot       INTEGER NOT NULL DEFAULT 0,
+    idea_id    INTEGER NOT NULL,
+    created_at TEXT,
+    PRIMARY KEY (day, slot)
+);
 """
 
 # Additive columns for brains created before v2 (2026-07-08). CREATE TABLE IF NOT
@@ -71,6 +93,16 @@ CREATE TABLE IF NOT EXISTS studio_ideas (
 _MIGRATIONS = (
     ("studio_stories", "angle", "TEXT NOT NULL DEFAULT ''"),
     ("studio_ideas", "why_it_works", "TEXT NOT NULL DEFAULT ''"),
+    # v3 (2026-07-23): an idea now carries the SIGNAL it is grounded in (spec F3),
+    # its freshness date (F10), a predicted strength (F9) and a novelty fingerprint.
+    ("studio_ideas", "signal_sid", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "signal_family", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "signal_source", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "signal_text", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "signal_url", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "signal_date", "TEXT NOT NULL DEFAULT ''"),
+    ("studio_ideas", "strength", "INTEGER NOT NULL DEFAULT 0"),
+    ("studio_ideas", "nkey", "TEXT NOT NULL DEFAULT ''"),
 )
 
 _inited = set()
@@ -184,14 +216,22 @@ def set_story_status(story_id, status):
 # ---------------- ideas ----------------
 
 def add_idea(story_id, idea, ts):
+    """Persist one idea card. v3: the signal columns are what make spec Section C
+    checkable after the fact — an idea row remembers exactly what grounded it."""
     return execute(
         "INSERT INTO studio_ideas (story_id, hook_spoken, visual_title, visual_sub, "
-        "angle, why_it_works, script, video_type, cta, audience, trigger_kind, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "angle, why_it_works, script, video_type, cta, audience, trigger_kind, "
+        "signal_sid, signal_family, signal_source, signal_text, signal_url, "
+        "signal_date, strength, nkey, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (int(story_id or 0), idea["hook_spoken"], idea["visual_title"],
          idea["visual_sub"], idea["angle"], idea.get("why_it_works", ""),
          json.dumps(idea["script"], ensure_ascii=False), idea["video_type"],
-         idea["cta"], idea["audience"], idea["trigger"], ts))
+         idea["cta"], idea["audience"], idea["trigger"],
+         idea.get("signal_sid", ""), idea.get("signal_family", ""),
+         idea.get("signal_source", ""), idea.get("signal_text", ""),
+         idea.get("signal_url", ""), idea.get("signal_date", ""),
+         int(idea.get("strength") or 0), idea.get("nkey", ""), ts))
 
 
 def ideas(status=None, limit=300):
@@ -226,7 +266,100 @@ def set_idea_status(idea_id, status, views=None, perf_note=None):
     return n
 
 
+# ---------------- v3 signals ----------------
+
+def add_signal(sig, nkey="", ts=""):
+    """Upsert a validated signal. Content-addressed by sid, so re-collecting the same
+    fact refreshes it instead of flooding the feed with duplicates. Returns the sid."""
+    existing = q1("SELECT sid, status FROM studio_signals WHERE sid=?", (sig["sid"],))
+    if existing:
+        execute("UPDATE studio_signals SET strength=?, as_of=COALESCE(NULLIF(?,''), as_of) "
+                "WHERE sid=?", (int(sig.get("strength") or 50), sig.get("as_of", ""),
+                                sig["sid"]))
+        return sig["sid"]
+    execute(
+        "INSERT INTO studio_signals (sid, family, source, title, fact, detail, url, "
+        "as_of, strength, ref, nkey, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (sig["sid"], sig["family"], sig["source"], sig.get("title", ""), sig["fact"],
+         sig.get("detail", ""), sig.get("url", ""), sig.get("as_of", ""),
+         int(sig.get("strength") or 50), sig.get("ref", ""), nkey,
+         sig.get("status", "new"), ts))
+    return sig["sid"]
+
+
+def signals(status=None, family=None, limit=200):
+    sql = "SELECT * FROM studio_signals"
+    where, args = [], []
+    if status:
+        where.append("status=?")
+        args.append(status)
+    if family:
+        where.append("family=?")
+        args.append(family)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY strength DESC, as_of DESC, rowid DESC LIMIT ?"
+    args.append(limit)
+    return q(sql, tuple(args))
+
+
+def signal(sid):
+    return q1("SELECT * FROM studio_signals WHERE sid=?", (str(sid),))
+
+
+def set_signal_status(sid, status):
+    return execute("UPDATE studio_signals SET status=? WHERE sid=?", (status, str(sid)))
+
+
+def signal_nkeys(limit=400):
+    return [r["nkey"] for r in q(
+        "SELECT nkey FROM studio_signals ORDER BY rowid DESC LIMIT ?", (limit,)) if r["nkey"]]
+
+
+def prune_signals(keep=400):
+    """Keep the feed from growing forever: drop the oldest UNUSED signals."""
+    return execute(
+        "DELETE FROM studio_signals WHERE status='new' AND sid NOT IN "
+        "(SELECT sid FROM studio_signals ORDER BY rowid DESC LIMIT ?)", (keep,))
+
+
+# ---------------- v3 daily plan ----------------
+
+def set_plan(day, idea_ids, ts=""):
+    execute("DELETE FROM studio_plan WHERE day=?", (str(day),))
+    for i, iid in enumerate(idea_ids or []):
+        execute("INSERT OR REPLACE INTO studio_plan (day, slot, idea_id, created_at) "
+                "VALUES (?,?,?,?)", (str(day), i, int(iid), ts))
+    return len(idea_ids or [])
+
+
+def plan_for(day):
+    rows = q("SELECT p.slot slot, i.* FROM studio_plan p JOIN studio_ideas i "
+             "ON i.id = p.idea_id WHERE p.day=? ORDER BY p.slot", (str(day),))
+    for r in rows:
+        r["script"] = json.loads(r.get("script") or "[]")
+    return rows
+
+
+def recent_nkeys(days_back_rows=120):
+    """Novelty history (spec H4): fingerprints of the ideas we recently generated."""
+    return [r["nkey"] for r in q(
+        "SELECT nkey FROM studio_ideas ORDER BY id DESC LIMIT ?", (days_back_rows,))
+        if r["nkey"]]
+
+
 # ---------------- learn-loop + deep-rescan ----------------
+
+def learn_rows(limit=500):
+    """Posted ideas + their story type — the input to studio.learn.stats()."""
+    rows = q("SELECT i.status status, i.views views, i.trigger_kind trigger_kind, "
+             "i.audience audience, i.video_type video_type, i.signal_family signal_family, "
+             "s.story_type story_type FROM studio_ideas i "
+             "LEFT JOIN studio_stories s ON s.id = i.story_id "
+             "ORDER BY i.id DESC LIMIT ?", (limit,))
+    return rows
+
+
 
 def top_posted_archetypes(limit=3):
     """[(story_type, total_views), …] from POSTED ideas joined to their story, best
