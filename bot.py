@@ -46143,14 +46143,21 @@ a{color:inherit;text-decoration:none}
 .mq-trade{display:flex;gap:7px;align-items:flex-start;font-size:13px;color:var(--mut);margin-top:6px}
 .mq-head{margin:0 0 6px;font-size:21px;color:var(--ink)}
 .mq-sub{margin:0 0 18px;color:var(--mut);font-size:14px}
-.mq-entry{display:block;text-align:center;padding:14px 16px;margin:10px 0 14px;
+.mq-entry{display:flex;align-items:center;gap:12px;padding:15px 17px;margin:12px 0 14px;
   background:var(--surface);border:1px solid var(--line);border-radius:12px;
-  color:var(--ink);text-decoration:none;font-size:14.5px;
+  color:var(--ink);text-decoration:none;min-height:44px;
   transition:border-color .18s cubic-bezier(.23,1,.32,1)}
 .mq-entry:hover{border-color:var(--ink)}
+.mq-entry-x{flex:1;display:flex;flex-direction:column;gap:3px;text-align:right}
+.mq-entry-t{font-size:15.5px;font-weight:700;line-height:1.4;color:var(--ink)}
+.mq-entry-s{font-size:13px;line-height:1.5;color:var(--mut)}
+.mq-entry-a{flex:none;font-size:17px;color:var(--mut);
+  transition:transform .18s cubic-bezier(.23,1,.32,1)}
+.mq-entry:hover .mq-entry-a{transform:translateX(-3px);color:var(--ink)}
 @media (prefers-reduced-motion: reduce){
-  .mq-dot,.mq-opt,.mq-entry{transition:none}
+  .mq-dot,.mq-opt,.mq-entry,.mq-entry-a{transition:none}
   .mq-opt:active,.mq-pm:active{transform:none}
+  .mq-entry:hover .mq-entry-a{transform:none}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -46201,7 +46208,10 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
-    +'<a class="mq-entry" href="/stay/match">محتار؟ جاوبنا بأربع أسئلة ونختار لك — ١٠ ثواني</a>'
+    +'<a class="mq-entry" href="/stay/match"><span class="mq-entry-x">'
+    +'<span class="mq-entry-t">ما تدري وين تسكن بالرياض؟</span>'
+    +'<span class="mq-entry-s">جاوب على ٤ أسئلة ونختار لك المناسب — ١٠ ثواني</span>'
+    +'</span><span class="mq-entry-a" aria-hidden="true">←</span></a>'
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
     +'<div id="feat" class="sec" style="margin-top:4px"></div>';
   var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
