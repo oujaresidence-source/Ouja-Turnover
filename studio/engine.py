@@ -253,6 +253,7 @@ def parse_ideas(d):
             "cta": _s(raw.get("cta"), 200),
             "audience": aud if aud in AUDIENCES else "niche",
             "trigger": trg if trg in TRIGGERS else "curiosity",
+            "shape": _s(raw.get("shape"), 30),   # validated against shapes in ideas.py
         })
     return out
 

@@ -87,44 +87,43 @@ class TestBotWiring(unittest.TestCase):
 
 
 class TestIdeaGrounding(unittest.TestCase):
-    def test_stamp_attaches_the_signal_and_a_strength(self):
+    def test_ground_attaches_the_signal_shape_and_strength(self):
         sig = engine.make_signal("external", "regulation", "نظام", "منع تجاوز ٢٩ يوم",
                                  url="https://mt.gov.sa/x", as_of="2026-06-01")
         card = {"visual_title": "نظام جديد يخص شقتك", "angle": "وش يعني لك",
                 "trigger": "news", "audience": "niche", "video_type": "news_reaction"}
-        out = ideas_mod._stamp([dict(card)], signal=sig, stats={"n": 0, "mean": 0, "dims": {}},
-                               guard_novelty=False)
-        self.assertEqual(len(out), 1)
-        c = out[0]
+        c = ideas_mod._ground(dict(card), sig, "news_react",
+                              {"n": 0, "mean": 0, "dims": {}})
         self.assertEqual(c["signal_sid"], sig["sid"])
         self.assertEqual(c["signal_url"], "https://mt.gov.sa/x")
         self.assertEqual(c["signal_date"], "2026-06-01")
         self.assertEqual(c["signal_family"], "external")
+        self.assertEqual(c["shape"], "news_react")
         self.assertEqual(c["strength"], learn.NEUTRAL_STRENGTH)
         self.assertTrue(c["nkey"])
 
-    def test_stamp_drops_a_repeat_of_a_recent_angle(self):
-        card = {"visual_title": "الإشغال وصل ذروته نهاية الأسبوع", "angle": "",
-                "trigger": "social_proof", "audience": "niche", "video_type": "data_reveal"}
-        first = ideas_mod._stamp([dict(card)], story={"story_type": "other"},
-                                 stats={"n": 0, "mean": 0, "dims": {}},
-                                 guard_novelty=False)[0]
-        again = ideas_mod._stamp([dict(card)], story={"story_type": "other"},
-                                 stats={"n": 0, "mean": 0, "dims": {}},
-                                 guard_novelty=True)
-        # the novelty guard reads db history; simulate it directly to stay offline
-        self.assertFalse(engine.is_novel(first["nkey"], [first["nkey"]]))
-        self.assertIsInstance(again, list)
+    def test_ground_falls_back_to_asked_shape_when_model_gave_junk(self):
+        sig = engine.make_signal("internal", "occupancy", "ع", "٤٧ من ٥٣ محجوزة")
+        c = ideas_mod._ground({"visual_title": "ت", "shape": "not_a_shape"},
+                              sig, "cold_number", {"n": 0, "mean": 0, "dims": {}})
+        self.assertEqual(c["shape"], "cold_number")
 
-    def test_story_path_still_tags_its_source(self):
-        out = ideas_mod._stamp(
-            [{"visual_title": "قصة ضيف", "angle": "", "trigger": "curiosity",
-              "audience": "escape", "video_type": "story_voiceover"}],
-            story={"title": "ت", "angle": "زاوية", "created_at": "2026-07-01 10:00:00",
-                   "story_type": "hero_save"},
-            stats={"n": 0, "mean": 0, "dims": {}}, guard_novelty=False)
-        self.assertEqual(out[0]["signal_source"], "guest_story")
-        self.assertEqual(out[0]["signal_family"], "internal")
+    def test_card_grounded_rejects_a_sidless_card(self):
+        self.assertFalse(ideas_mod.card_grounded({"visual_title": "بدون إشارة"}))
+        self.assertFalse(ideas_mod.card_grounded({"signal_sid": ""}))
+
+    def test_pick_best_enforces_number_first_when_the_fact_has_a_number(self):
+        buries = {"hook_spoken": "تعرف كم ضيف يحجز بسرعة؟ عندنا ٩٠٪",
+                  "visual_title": "الحجز اللحظي", "script": ["..."]}
+        leads = {"hook_spoken": "٩٠٪ من ضيوفنا يحجزون قبل يوم",
+                 "visual_title": "السوق صار لحظي", "script": ["..."]}
+        best = ideas_mod._pick_best([buries, leads], "٩٠٪ يحجزون قبل يوم")
+        self.assertEqual(best["hook_spoken"], leads["hook_spoken"])
+
+    def test_pick_best_returns_none_when_all_candidates_are_cliche(self):
+        self.assertIsNone(ideas_mod._pick_best(
+            [{"hook_spoken": "لن تصدق وش صار", "visual_title": "انتظر للنهاية"}],
+            "٩٠٪ يحجزون قبل يوم"))
 
 
 class TestHookBank(unittest.TestCase):
