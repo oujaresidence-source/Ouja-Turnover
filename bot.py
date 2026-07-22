@@ -46226,6 +46226,41 @@ a{color:inherit;text-decoration:none}
 .mq-trade{display:flex;gap:7px;align-items:flex-start;font-size:13px;color:var(--mut);margin-top:6px}
 .mq-head{margin:0 0 6px;font-size:21px;color:var(--ink)}
 .mq-sub{margin:0 0 18px;color:var(--mut);font-size:14px}
+/* Narrowing line — the "proof of work" above the results: how many units we
+   started from vs. how many made it through. A quiet pill, not a headline —
+   the count itself is the point, not the container around it. */
+.mq-narrow{display:inline-flex;align-items:baseline;gap:5px;font-size:13.5px;color:var(--mut);
+  background:var(--surface);border:1px solid var(--line);border-radius:99px;padding:7px 15px;margin:0 0 14px}
+.mq-narrow b{color:var(--gold2);font-size:15px}
+/* Comparison table — rows are deciding attributes, columns are up-to-3 apartments.
+   Scrolls horizontally INSIDE its own wrap on narrow screens; the attribute-name
+   column stays pinned via sticky + logical inset so it works the same in RTL. */
+.mq-cmp-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:2px 0 16px;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}
+.mq-cmp{border-collapse:collapse;width:100%;min-width:460px}
+.mq-cmp th,.mq-cmp td{padding:10px 12px;text-align:center;font-size:13px;border-bottom:1px solid var(--line);white-space:nowrap}
+.mq-cmp tbody tr:last-child th,.mq-cmp tbody tr:last-child td{border-bottom:0}
+.mq-cmp thead th{vertical-align:top;padding:12px 10px}
+.mq-cmp-attr{position:sticky;inset-inline-start:0;background:var(--surface);text-align:right;
+  font-weight:600;color:var(--ink);white-space:normal;min-width:104px;z-index:1}
+.mq-cmp-unit{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:118px}
+.mq-cmp-unit img{display:block;width:100%;max-width:118px;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:12px}
+.mq-cmp-unit span{font-size:12.5px;font-weight:700;line-height:1.35;white-space:normal;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mq-cmp td.yes{color:var(--green);font-weight:700}
+.mq-cmp td.no{color:var(--mut)}
+/* Refinement chips — tapping one re-queries in place, never restarts the quiz. */
+.mq-chips{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 20px}
+.mq-fchip{font:inherit;font-size:13px;font-weight:600;padding:0 15px;min-height:44px;
+  display:inline-flex;align-items:center;border-radius:99px;border:1.5px solid var(--line);
+  background:var(--surface);color:var(--ink);cursor:pointer;
+  transition:border-color .18s var(--ease),background .18s var(--ease),color .18s var(--ease),transform .12s var(--ease)}
+.mq-fchip:active{transform:scale(.97)}
+.mq-fchip.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+@media (prefers-reduced-motion: reduce){
+  .mq-fchip{transition:none}
+  .mq-fchip:active{transform:none}
+}
 /* The second door. Deliberately DARK on the cream page: the form is near-white and
    the primary button is gold, so a third light box would dissolve into them. Dark
    ink reads instantly as "a different way in", not a footnote under the button. */
@@ -46371,7 +46406,7 @@ function searchSummary(ci,co,g,ty){
   return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/stay'+location.search+'">تعديل البحث</a></div></div>';
 }
 
-var MQ={party:1,sleep:null,purpose:null,budget:null,ci:'',co:'',step:0};
+var MQ={party:1,sleep:null,purpose:null,budget:null,ci:'',co:'',step:0,facts:[]};
 
 function mqSteps(){
   // Q2 is conditional: parties under 3 never see the sleeping question.
@@ -46476,13 +46511,27 @@ function mqBind(key){
   }
 }
 
-function mqSubmit(){
+function mqQuery(){
+  // Single source of truth for the /api/stay/match query — used by the quiz
+  // submit AND by chip re-fetches, so a fact toggle never has to reconstruct
+  // party/sleep/purpose/budget/dates by hand.
   var q='?party='+encodeURIComponent(MQ.party)+'&purpose='+encodeURIComponent(MQ.purpose||'rest');
   if(MQ.sleep)q+='&sleep='+encodeURIComponent(MQ.sleep);
   if(MQ.budget)q+='&budget='+encodeURIComponent(MQ.budget);
   if(MQ.ci&&MQ.co)q+='&check_in='+MQ.ci+'&check_out='+MQ.co;
-  history.replaceState(null,'','/stay/match'+q);
-  mqResults(q);
+  if(MQ.facts&&MQ.facts.length)q+='&facts='+encodeURIComponent(MQ.facts.join(','));
+  return q;
+}
+
+function mqSubmit(){
+  mqResults();
+}
+
+function mqToggleFact(key){
+  // Re-fetches and re-renders in place — the guest never restarts the quiz.
+  var i=MQ.facts.indexOf(key);
+  if(i>=0)MQ.facts.splice(i,1);else MQ.facts.push(key);
+  mqResults();
 }
 
 function mqLinkQS(){
@@ -46514,7 +46563,76 @@ function mqCard(l){
     +'</div></a>';
 }
 
-function mqResults(q){
+function mqRoomsBeds(l){
+  // "غرف" (bedrooms) and "أسرّة" (beds) are two different Hostaway numbers —
+  // see the bot.py _gw_parse_listing docstring. Read the honestly-named
+  // fields; l.beds is kept only as a defensive fallback.
+  var rooms=(l.bedrooms!=null?l.bedrooms:l.beds),beds=l.beds_count,parts=[];
+  if(rooms!=null)parts.push(rooms===0?'استوديو':(rooms+' غرف'));
+  if(beds!=null)parts.push(beds+' أسرّة');
+  return parts.length?parts.join(' · '):'—';
+}
+function mqPriceCell(l){
+  if(l.est_avg==null)return '<span class="muted">يظهر داخل Airbnb</span>';
+  var s='<b>'+money(l.est_avg)+'</b> / الليلة';
+  if(l.est_total!=null&&l.nights>0)s+='<div class="muted" style="font-size:11.5px;margin-top:2px">الإجمالي '+money(l.est_total)+'</div>';
+  return s;
+}
+function mqDistanceReason(l){
+  // The proximity signal already comes out of the engine as one of l.reasons
+  // (e.g. "5 دقيقة عن البوليفارد") — never re-derive distance text in JS.
+  var hits=(l.reasons||[]).filter(function(r){return /دقيقة/.test(r);});
+  return hits[0]||null;
+}
+function mqCompareTable(top,factsDef){
+  var cols=top.slice(0,3);
+  var hasDist=cols.some(function(l){return !!mqDistanceReason(l);});
+  // Only facts EXPLICITLY true on at least one shown apartment get a row —
+  // an all-"—" row would just be noise.
+  var shownFacts=(factsDef||[]).filter(function(f){
+    return cols.some(function(l){return (l.facts||{})[f.key]===true;});
+  });
+  var head='<tr><th class="mq-cmp-attr"></th>'+cols.map(function(l){
+    var img=l.cover?('<img loading="lazy" width="200" height="150" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg" style="height:70px">—</div>';
+    return '<th><a class="mq-cmp-unit" href="/stay/'+he(l.slug)+mqLinkQS()+'">'+img+'<span>'+he(l.name_ar||l.name_en)+'</span></a></th>';
+  }).join('')+'</tr>';
+  var rows='<tr><th class="mq-cmp-attr">غرف · أسرّة</th>'+cols.map(function(l){return '<td>'+he(mqRoomsBeds(l))+'</td>';}).join('')+'</tr>'
+    +'<tr><th class="mq-cmp-attr">السعر / الليلة</th>'+cols.map(function(l){return '<td>'+mqPriceCell(l)+'</td>';}).join('')+'</tr>';
+  if(hasDist){
+    rows+='<tr><th class="mq-cmp-attr">المسافة</th>'+cols.map(function(l){
+      var r=mqDistanceReason(l);return '<td>'+(r?he(r):'<span class="muted">—</span>')+'</td>';
+    }).join('')+'</tr>';
+  }
+  shownFacts.forEach(function(f){
+    rows+='<tr><th class="mq-cmp-attr">'+he(f.ar)+'</th>'+cols.map(function(l){
+      var v=(l.facts||{})[f.key]===true;
+      // No "no" vs "unknown" distinction in the guest UI — a dash reads as
+      // "not listed" either way, per the owner's no-complaints rule.
+      return '<td class="'+(v?'yes':'no')+'">'+(v?'✓':'—')+'</td>';
+    }).join('')+'</tr>';
+  });
+  return '<div class="mq-cmp-wrap"><table class="mq-cmp"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>';
+}
+function mqFactsChips(factsDef){
+  if(!factsDef||!factsDef.length)return '';
+  return '<div class="mq-chips" role="list">'+factsDef.map(function(f){
+    var on=MQ.facts.indexOf(f.key)>=0;
+    return '<button type="button" class="mq-fchip'+(on?' on':'')+'" data-fact="'+he(f.key)+'" aria-pressed="'+(on?'true':'false')+'">'+he(f.ar)+'</button>';
+  }).join('')+'</div>';
+}
+function mqBindChipClicks(){
+  var wrap=V.querySelector('.mq-wrap');if(!wrap)return;
+  wrap.addEventListener('click',function(e){
+    var fb=e.target.closest('[data-fact]');
+    if(fb){mqToggleFact(fb.getAttribute('data-fact'));return;}
+    var cb=e.target.closest('#mqClearFacts');
+    if(cb){MQ.facts=[];mqResults();return;}
+  });
+}
+
+function mqResults(){
+  var q=mqQuery();
+  history.replaceState(null,'','/stay/match'+q);
   // A plain skeleton with no text reads as frozen once the guest has waited a
   // couple of seconds on a cold cache. One static line is honest (we don't know
   // how long it'll take, so no fake percentage/progress) but tells them it's alive.
@@ -46524,6 +46642,9 @@ function mqResults(q){
   fetch('/api/stay/match'+q).then(function(r){return r.json();}).then(function(d){
     var top=(d&&d.top)||[],near=(d&&d.near)||[];
     var medical=(d&&d.answers&&d.answers.purpose==='medical');
+    // The server is the authority on which facts actually applied (unknown
+    // keys are dropped there) — sync back so chip highlighting never drifts.
+    if(d&&d.answers&&d.answers.required_facts)MQ.facts=d.answers.required_facts.slice();
 
     if(d&&d.impossible){
       V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما عندنا وحدة تكفي هالعدد</h2>'
@@ -46532,6 +46653,23 @@ function mqResults(q){
       track('match_results',{count:0});return;
     }
     if(!top.length){
+      if(MQ.facts.length){
+        // Never a dead end: the whole premise of the facts filter is that a
+        // guest can always back out of it in one tap. Offer the most
+        // recently added fact — the one most likely to blame — plus a
+        // clear-all when more than one is stacked.
+        var cfg0=(STAY&&STAY.config)||{};
+        var lastKey=MQ.facts[MQ.facts.length-1];
+        var lastDef=(cfg0.facts||[]).filter(function(f){return f.key===lastKey;})[0];
+        var lastLabel=lastDef?lastDef.ar:lastKey;
+        V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما فيه شقة بكل الشروط</h2>'
+          +'<p class="mq-sub">جرّب تشيل شرط عشان نطلع لك خيارات.</p>'
+          +'<button type="button" class="mq-fchip on" data-fact="'+he(lastKey)+'" style="margin:0 0 10px">✕ شيل «'+he(lastLabel)+'»</button>'
+          +(MQ.facts.length>1?'<button type="button" class="mq-skip" id="mqClearFacts" style="margin-top:0">امسح كل الشروط</button>':'')
+          +'</div>';
+        mqBindChipClicks();
+        track('match_results',{count:0,facts_narrowed:1});return;
+      }
       V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما لقينا وحدات متاحة بهذي التواريخ</h2>'
         +'<p class="mq-sub">جرّب تواريخ ثانية، أو تصفح الوحدات بدون تحديد تاريخ.</p>'
         +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
@@ -46548,19 +46686,27 @@ function mqResults(q){
       head='ما عندنا وحدة تطابق كل شي';sub='هذي الأقرب لطلبك — شفنا لك أفضل الموجود بصراحة.';
     }
 
-    var html='<div class="mq-wrap"><h2 class="mq-head">'+he(head)+'</h2><p class="mq-sub">'+he(sub)+'</p>'
-      +'<div class="grid">'+top.map(mqCard).join('')+'</div>';
+    var cfg=(STAY&&STAY.config)||{};
+    var factsDef=cfg.facts||[];
+    // The proof-of-work line: how many units we started from vs. how many
+    // made it through the quiz + any active fact chips.
+    var narrow='<div class="mq-narrow">من <b>'+he(String(cfg.count||0))+'</b> شقة — لقينا لك <b>'+top.length+'</b></div>';
+
+    var html='<div class="mq-wrap">'+narrow+'<h2 class="mq-head">'+he(head)+'</h2><p class="mq-sub">'+he(sub)+'</p>'
+      +mqCompareTable(top,factsDef)
+      +mqFactsChips(factsDef);
     if(near.length){
       html+='<h3 class="mq-head" style="font-size:17px;margin:26px 0 10px">قريبة كمان</h3>'
         +'<div class="grid">'+near.slice(0,3).map(mqCard).join('')+'</div>';
     }
     html+='<button type="button" class="mq-skip" id="mqAgain">جاوب من جديد</button></div>';
     V.innerHTML=html;
+    mqBindChipClicks();
     var again=document.getElementById('mqAgain');
     if(again)again.onclick=function(){location.href='/stay/match';};
     // guests + type feed the dashboard unmet-demand table; weak marks a low-confidence result
     track('match_results',{count:top.length,guests:MQ.party,
-                           type:(MQ.purpose||'rest'),weak:(d.confident?0:1)});
+                           type:(MQ.purpose||'rest'),weak:(d.confident?0:1),facts:MQ.facts.length});
   }).catch(function(){
     V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">صار خلل بسيط</h2>'
       +'<p class="mq-sub">جرّب مرة ثانية، أو تصفح الوحدات مباشرة.</p>'
@@ -46575,7 +46721,8 @@ function viewMatch(){
     MQ.party=parseInt(p.get('party'),10)||1;MQ.sleep=p.get('sleep');
     MQ.purpose=p.get('purpose');MQ.budget=p.get('budget');
     MQ.ci=p.get('check_in')||'';MQ.co=p.get('check_out')||'';
-    mqResults(location.search);return;
+    MQ.facts=(p.get('facts')||'').split(',').filter(Boolean);
+    mqResults();return;
   }
   MQ.step=0;mqRender();
   window.addEventListener('pagehide',function(){
