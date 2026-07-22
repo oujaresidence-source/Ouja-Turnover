@@ -45367,6 +45367,28 @@ def _gw_raw_tag_candidates(L, beds, amenities, neighbourhood, city):
         cands.append((amt, "amenity"))
     return cands
 
+def _gw_parse_coords(L):
+    """Raw Hostaway listing -> (lat, lng) floats, or (None, None). Hostaway's documented
+    listing schema (api.hostaway.com/documentation) uses `lat`/`lng`; we also accept
+    `latitude`/`longitude` defensively in case an account/version differs. Validated
+    against the same Riyadh bounding box _elite_geo_fetch uses (bot.py ~47914) — a bad,
+    zero, or out-of-city coordinate must never leak into the /stay/match distance math,
+    so it becomes None (the caller falls back to the guide, then the engine's centroid)
+    rather than a wrong number. Never raises: strings/None/dicts just fail the float()
+    conversion and fall through to None."""
+    lat = L.get("lat"); lng = L.get("lng")
+    if lat is None:
+        lat = L.get("latitude")
+    if lng is None:
+        lng = L.get("longitude")
+    try:
+        lat = float(lat); lng = float(lng)
+    except (TypeError, ValueError):
+        return None, None
+    if not (24.0 <= lat <= 25.6 and 46.0 <= lng <= 47.6):
+        return None, None
+    return lat, lng
+
 def _gw_parse_listing(L):
     """Raw Hostaway listing -> safe guest snapshot. Defensive."""
     lid = L.get("id")
@@ -45378,6 +45400,7 @@ def _gw_parse_listing(L):
     area = neighbourhood or city or (L.get("address") or "").strip()
     amenities = _extract_amenities(L)
     images = _gw_images(L)
+    lat, lng = _gw_parse_coords(L)
     norm = {}
     for raw, src in _gw_raw_tag_candidates(L, beds, amenities, neighbourhood, city):
         k = _gw_normalize(raw)
@@ -45398,6 +45421,7 @@ def _gw_parse_listing(L):
         "tag_keys": sorted(norm.keys()),
         "tag_raw": {k: {"raw": sorted(v["raw"]), "sources": sorted(v["sources"])} for k, v in norm.items()},
         "price_base": L.get("price"),
+        "lat": lat, "lng": lng,
     }
 
 def _gw_discover_tags(snaps):
@@ -45701,6 +45725,7 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "self_entry": ("self_entry" in (snap.get("tag_keys") or [])),
         "airbnb_url": (url if with_airbnb else ""), "airbnb_source": src, "has_airbnb": bool(url),
         "price_base": snap.get("price_base"),
+        "lat": snap.get("lat"), "lng": snap.get("lng"),
         "structured": (ov.get("structured") or None),
         "rating": (_rt["rating"] if _rt else None),
         "reviews_count": (_rt["count"] if _rt else 0),
@@ -46760,14 +46785,26 @@ def _match_answers(q):
     return {"party_size": party, "sleep_pref": sleep, "purpose": purpose,
             "budget_max": budget, "check_in": ci, "check_out": co}
 
-def _match_geo_points():
-    """{listing_id: (lat, lng)} from the cached guide coordinates. Cache-only —
-    no network here. Missing units fall back to a neighborhood centroid inside
-    the engine, so a thin cache degrades precision, never correctness. Matches
-    by name_en/name_ar the same way _elite_geo_points does (an override title
-    can diverge from the raw Hostaway snapshot name the guide was seeded from)."""
+def _match_geo_points(detail=False):
+    """{listing_id: (lat, lng)} for the /stay/match distance engine, resolved in
+    priority order:
+      1. Hostaway lat/lng straight off the listing snapshot (_gw_parse_listing /
+         _gw_parse_coords) — the new, most complete source: every listing Hostaway has
+         coordinates for is covered, with no dependency on the in-house guide having a
+         record with a parseable Google Maps link.
+      2. The existing guide-derived coordinates (_elite_geo_cache), matched on
+         name_en/name_ar the same way _elite_geo_points does (an override title can
+         diverge from the raw Hostaway snapshot name the guide was seeded from) — kept
+         exactly as-is, since it already works for whatever Hostaway is still missing.
+      3. Nothing. The match engine already falls back to a neighborhood centroid
+         internally, so a unit with neither source just gets no entry here — a thin
+         result degrades precision, never correctness.
+    Cache-only for the guide fallback — no network here.
+    detail=True also returns a {"from_hostaway": n, "from_guide": n} breakdown for the
+    guest-website diagnostics (see _api_gw_overview)."""
     gmap = _elite_geo_cache.get("map") or {}
     pts = {}
+    from_hostaway = from_guide = 0
     for s, ov in _gw_visible_snaps():
         try:
             pub = _gw_listing_public(s, ov, with_airbnb=False)
@@ -46776,9 +46813,17 @@ def _match_geo_points():
         lid = pub.get("id")
         if lid is None:
             continue
+        lat, lng = pub.get("lat"), pub.get("lng")
+        if lat is not None and lng is not None:
+            pts[lid] = (lat, lng)
+            from_hostaway += 1
+            continue
         ll = gmap.get(_elite_geo_norm(pub.get("name_en"))) or gmap.get(_elite_geo_norm(pub.get("name_ar")))
         if ll:
             pts[lid] = ll
+            from_guide += 1
+    if detail:
+        return pts, {"from_hostaway": from_hostaway, "from_guide": from_guide}
     return pts
 
 def _match_run(q):
@@ -48999,14 +49044,15 @@ async def _api_gw_overview(request):
     diag = _gw_cache.get("diag") or {}
     a = _gw_analytics_summary(7)
     vis = _gw_visible_snaps()
-    mg_pts = _match_geo_points()
+    mg_pts, mg_src = _match_geo_points(detail=True)
     return _json({"ok": True, "status": ("live" if snaps else "no_data"),
                   "synced_at": _gw_cache.get("synced_at"), "total": len(snaps),
                   "visible": len(vis),
                   "missing_airbnb": len(diag.get("missing_airbnb") or []),
                   "missing_images": len(diag.get("missing_images") or []),
                   "unmapped_tags": sum(1 for e in _gw_taxonomy.values() if e.get("status") == "unmapped"),
-                  "match_geo": {"with_coords": len(mg_pts), "total": len(vis)},
+                  "match_geo": {"with_coords": len(mg_pts), "total": len(vis),
+                                "from_hostaway": mg_src["from_hostaway"], "from_guide": mg_src["from_guide"]},
                   "taxonomy": len(_gw_taxonomy), "searches_7d": a["searches"],
                   "clicks_7d": a["airbnb_clicks"], "ctr": a["ctr"], "views_7d": a["page_views"]})
 

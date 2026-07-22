@@ -38,6 +38,15 @@ def _fake_gw_listing_public(s, ov):
             "name_ar": "unit-%s" % s["id"], "name_en": "unit-%s" % s["id"]}
 
 
+def _fake_geo_listing_public(s, ov, with_airbnb=True):
+    """Minimal pub dict for _match_geo_points, which reads id/lat/lng/name_en/name_ar.
+    Accepts with_airbnb (_match_geo_points always calls with_airbnb=False) like the
+    real _gw_listing_public does."""
+    return {"id": s["id"], "lat": s.get("lat"), "lng": s.get("lng"),
+            "name_en": s.get("name_en") or ("unit-%s" % s["id"]),
+            "name_ar": s.get("name_ar") or ("unit-%s" % s["id"])}
+
+
 class TestPriceBands(unittest.TestCase):
     def test_thin_sample_returns_none(self):
         self.assertIsNone(bot._gw_price_bands([100, 200]))
@@ -290,6 +299,83 @@ class TestMatchStats(unittest.TestCase):
         i = src.index("async def _api_stay_match_stats")
         self.assertIn("_dash_auth", src[i:i + 400],
                       "match-stats must be behind _dash_auth")
+
+
+class TestGwParseCoords(unittest.TestCase):
+    """_gw_parse_coords: raw Hostaway listing -> (lat, lng) or (None, None).
+    Pure function, no network -- hermetic by construction."""
+
+    def test_lat_lng_fields_parsed(self):
+        lat, lng = bot._gw_parse_coords({"lat": 24.7136, "lng": 46.6753})
+        self.assertEqual((lat, lng), (24.7136, 46.6753))
+
+    def test_falls_back_to_latitude_longitude_spelling(self):
+        lat, lng = bot._gw_parse_coords({"latitude": 24.7136, "longitude": 46.6753})
+        self.assertEqual((lat, lng), (24.7136, 46.6753))
+
+    def test_lat_lng_preferred_over_latitude_longitude(self):
+        lat, lng = bot._gw_parse_coords({"lat": 24.7, "lng": 46.6,
+                                          "latitude": 25.5, "longitude": 47.5})
+        self.assertEqual((lat, lng), (24.7, 46.6))
+
+    def test_out_of_riyadh_coordinates_rejected(self):
+        # New York City -- nowhere near Riyadh's bounding box.
+        lat, lng = bot._gw_parse_coords({"lat": 40.7128, "lng": -74.0060})
+        self.assertIsNone(lat)
+        self.assertIsNone(lng)
+
+    def test_malformed_values_never_raise(self):
+        for L in ({"lat": "abc", "lng": "xyz"}, {"lat": None, "lng": None},
+                  {"lat": {}, "lng": []}, {"lat": [1, 2], "lng": {"x": 1}}, {}):
+            lat, lng = bot._gw_parse_coords(L)
+            self.assertIsNone(lat)
+            self.assertIsNone(lng)
+
+
+class TestMatchGeoPoints(unittest.TestCase):
+    """_match_geo_points: Hostaway lat/lng (preferred) -> guide-cache coords
+    (fallback) -> no entry (engine's centroid fallback engages). Hermetic:
+    _gw_visible_snaps, _gw_listing_public and _elite_geo_cache are all stubbed."""
+
+    def _patch(self, snaps, gmap=None):
+        patches = [
+            mock.patch.object(bot, "_gw_visible_snaps", return_value=snaps),
+            mock.patch.object(bot, "_gw_listing_public", side_effect=_fake_geo_listing_public),
+            mock.patch.object(bot, "_elite_geo_cache", {"map": gmap or {}, "ts": 0.0}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_hostaway_coords_preferred_when_both_exist(self):
+        snaps = [({"id": 1, "lat": 24.70, "lng": 46.60, "name_en": "Ouja A"}, {})]
+        self._patch(snaps, gmap={"ouja a": (24.90, 46.90)})
+        pts = bot._match_geo_points()
+        self.assertEqual(pts[1], (24.70, 46.60))
+
+    def test_guide_coords_used_when_hostaway_has_none(self):
+        snaps = [({"id": 2, "lat": None, "lng": None, "name_en": "Ouja B"}, {})]
+        self._patch(snaps, gmap={"ouja b": (24.80, 46.70)})
+        pts = bot._match_geo_points()
+        self.assertEqual(pts[2], (24.80, 46.70))
+
+    def test_unit_with_neither_source_yields_no_entry(self):
+        snaps = [({"id": 3, "lat": None, "lng": None, "name_en": "Ouja C"}, {})]
+        self._patch(snaps, gmap={})
+        pts = bot._match_geo_points()
+        self.assertNotIn(3, pts)
+        self.assertEqual(pts, {})
+
+    def test_detail_breakdown_counts_each_source_separately(self):
+        snaps = [
+            ({"id": 1, "lat": 24.70, "lng": 46.60, "name_en": "A"}, {}),
+            ({"id": 2, "lat": None, "lng": None, "name_en": "B"}, {}),
+            ({"id": 3, "lat": None, "lng": None, "name_en": "C"}, {}),
+        ]
+        self._patch(snaps, gmap={"b": (24.80, 46.70)})
+        pts, src = bot._match_geo_points(detail=True)
+        self.assertEqual(len(pts), 2)
+        self.assertEqual(src, {"from_hostaway": 1, "from_guide": 1})
 
 
 if __name__ == "__main__":
