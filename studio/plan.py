@@ -21,9 +21,16 @@ SPREAD_WEIGHT = 40.0        # how hard we push for variety vs raw strength
 
 
 def _card_keys(card):
+    """The dimensions the daily set is spread across (spec S5) — audience, source
+    family, trigger, and now SHAPE so no two of today's cards look alike."""
     return (str(card.get("audience") or ""),
             str(card.get("signal_family") or ""),
-            str(card.get("trigger_kind") or card.get("trigger") or ""))
+            str(card.get("trigger_kind") or card.get("trigger") or ""),
+            str(card.get("shape") or ""))
+
+
+def _card_sid(card):
+    return str(card.get("signal_sid") or "")
 
 
 def _freshness_bonus(card, today):
@@ -51,13 +58,16 @@ def choose(candidates, recent_keys=(), n=DAILY_N, today=""):
             "%s %s" % (c.get("visual_title", ""), c.get("angle", "")))
         if engine.is_novel(key, seen):
             fresh.append((c, key))
-    picked, covered = [], {0: set(), 1: set(), 2: set()}
+    picked, used_sids = [], set()
+    covered = {0: set(), 1: set(), 2: set(), 3: set()}
     while fresh and len(picked) < int(n):
         best, best_score, best_key = None, None, ""
         for c, key in fresh:
+            if _card_sid(c) and _card_sid(c) in used_sids:
+                continue                       # S5: never two cards on one fact in a set
             keys = _card_keys(c)
             # spread: reward every dimension this card adds that the set lacks
-            new_dims = sum(1 for i in range(3) if keys[i] and keys[i] not in covered[i])
+            new_dims = sum(1 for i in range(4) if keys[i] and keys[i] not in covered[i])
             try:
                 strength = float(c.get("strength") or 0)
             except (TypeError, ValueError):
@@ -68,13 +78,33 @@ def choose(candidates, recent_keys=(), n=DAILY_N, today=""):
         if best is None:
             break
         picked.append(best)
+        if _card_sid(best):
+            used_sids.add(_card_sid(best))
         for i, v in enumerate(_card_keys(best)):
             if v:
                 covered[i].add(v)
         # a chosen card's angle also blocks its own near-duplicates in this set
         fresh = [(c, k) for c, k in fresh
-                 if c is not best and engine.is_novel(k, [best_key])]
-    return picked
+                 if c is not best and engine.is_novel(k, [best_key])
+                 and (not _card_sid(c) or _card_sid(c) not in used_sids)]
+    return _ensure_escape(picked, pool, used_sids)
+
+
+def _ensure_escape(picked, pool, used_sids, n=DAILY_N):
+    """spec S5: guarantee ≥1 escape-the-niche card when a broad one exists — swap the
+    weakest niche pick for the strongest escape candidate that keeps sids unique."""
+    if not picked or any(str(c.get("audience")) == "escape" for c in picked):
+        return picked
+    picked_ids = {id(c) for c in picked}
+    cands = [c for c in pool
+             if str(c.get("audience")) == "escape" and id(c) not in picked_ids
+             and (not _card_sid(c) or _card_sid(c) not in used_sids)]
+    if not cands:
+        return picked
+    best_escape = max(cands, key=lambda c: float(c.get("strength") or 0))
+    # drop the weakest NICHE pick (never demote another escape — there are none here)
+    weakest = min(picked, key=lambda c: float(c.get("strength") or 0))
+    return [best_escape if c is weakest else c for c in picked]
 
 
 def build_day(day=None, n=DAILY_N, force=False):
