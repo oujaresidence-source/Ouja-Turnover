@@ -37,6 +37,8 @@ COPY = {
         "src_line": "as of {date} · Airbnb channel · refreshed nightly",
         "kick_what": "The company", "kick_record": "Quality, measured",
         "kick_reviews": "The evidence", "kick_os": "The machine behind it",
+        "kick_listings": "Selected residences", "listings_title": "A few of the residences",
+        "listings_lead": "A small selection from the portfolio. Every photo is the real unit.",
         "src_reviews": "Airbnb · verified stays",
         "router_title": "What brings you here?",
         "router": [
@@ -169,6 +171,8 @@ COPY = {
         "src_line": "حتى {date} · قناة Airbnb · تتحدّث ليليًا",
         "kick_what": "الشركة", "kick_record": "الجودة، بالقياس",
         "kick_reviews": "الدليل", "kick_os": "الآلة خلف ذلك",
+        "kick_listings": "وحدات مختارة", "listings_title": "بعض من الوحدات",
+        "listings_lead": "اختيار صغير من المحفظة. كل صورة هي الوحدة الحقيقية.",
         "src_reviews": "Airbnb · إقامات موثّقة",
         "router_title": "ما الذي يهمّك هنا؟",
         "router": [
@@ -366,6 +370,33 @@ def build_what(t):
         '<section class="block"><p class="kicker">%s</p>'
         '<h2 class="h2">%s</h2><div class="prose">%s</div></section>'
     ) % (_e(t["kick_what"]), _e(t["what_title"]), body)
+
+
+def build_listings(t, listings, lang):
+    """Owner-curated residences: real Hostaway photo + short title, area, tagline.
+    Hidden entirely until at least one unit is featured in /business/manage."""
+    items = [l for l in (listings or []) if (l.get("photo") or l.get("title"))]
+    if not items:
+        return ""
+    cards = ""
+    for l in items:
+        photo = l.get("photo") or ""
+        img = ('<div class="lst-photo"><img src="%s" alt="%s" loading="lazy" decoding="async"></div>'
+               % (_e(photo), _e(l.get("title") or ""))) if photo else '<div class="lst-photo lst-noimg"></div>'
+        area = ('<span class="lst-area mono">%s</span>' % _e(l.get("area"))) if l.get("area") else ""
+        tag = ('<p class="lst-tag">%s</p>' % _e(l.get("tagline"))) if l.get("tagline") else ""
+        cards += (
+            '<article class="lst-card">%s'
+            '<div class="lst-body">%s<h3 class="lst-title"><bdi>%s</bdi></h3>%s</div>'
+            '</article>'
+        ) % (img, area, _e(l.get("title") or ""), tag)
+    return (
+        '<section class="block listings" id="residences">'
+        '<p class="kicker">%s</p><h2 class="h2">%s</h2>'
+        '<p class="lead">%s</p>'
+        '<div class="lst-grid">%s</div>'
+        '</section>'
+    ) % (_e(t["kick_listings"]), _e(t["listings_title"]), _e(t["listings_lead"]), cards)
 
 
 # ---- charts (inline SVG, server-rendered, with text equivalents) ---------- #
@@ -724,19 +755,20 @@ SHELL = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__TITLE__</title>
 <meta name="description" content="__DESC__">
-<meta name="theme-color" content="#0E0D0B">
+<meta name="theme-color" content="#FBF8F1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 __HEAD_EXTRA__
 <style>
 :root{
-  --bg:#0E0D0B; --bg-2:#141210; --panel:#1A1611; --panel-2:#221C15; --panel-lift:#2A2318;
-  --ivory:#F4EEE0; --ivory-2:#CDC4AF; --muted:#948B76; --faint:#5F5847;
-  --gold:#CBA05A; --gold-2:#E7C983; --gold-deep:#8E6C31;
-  --line:rgba(203,160,90,0.20); --line-2:rgba(244,238,224,0.09); --hair:rgba(244,238,224,0.06);
-  --glow:0 0 40px rgba(203,160,90,0.22); --glow-soft:0 0 24px rgba(203,160,90,0.14);
-  --ok:#82B07F; --bad:#C77B63;
+  --bg:#FBF8F1; --bg-2:#F4EEE1; --panel:#FFFFFF; --panel-2:#FAF5EB; --panel-lift:#FFFFFF;
+  --ivory:#221C14; --ivory-2:#584F40; --muted:#6F6656; --faint:#8A7E66;
+  --gold:#A9781F; --gold-2:#8A6218; --gold-deep:#6E4E14;
+  --line:rgba(169,120,31,0.30); --line-2:rgba(34,28,20,0.10); --hair:rgba(34,28,20,0.08);
+  --glow:0 20px 50px -28px rgba(120,88,28,0.40); --glow-soft:0 12px 30px -20px rgba(120,88,28,0.26);
+  --tglow:0 2px 22px rgba(169,120,31,0.18);
+  --ok:#4C7A52; --bad:#B0553C;
   --mx:1140px; --rad:16px; --rad-s:11px;
   --e1:cubic-bezier(0.22,1,0.36,1); --e2:cubic-bezier(0.16,1,0.3,1);
 }
@@ -751,8 +783,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
     radial-gradient(1100px 620px at 72% -6%, rgba(203,160,90,0.14), transparent 60%),
     radial-gradient(760px 520px at 8% 8%, rgba(203,160,90,0.06), transparent 55%),
     radial-gradient(1200px 900px at 50% 120%, rgba(203,160,90,0.05), transparent 60%)}
-.grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;mix-blend-mode:overlay;
-  background-image:radial-gradient(rgba(255,255,255,.02) 1px, transparent 1px);background-size:3px 3px}
+.grain{display:none}
 main,header,footer{position:relative;z-index:1}
 .wrap{max-width:var(--mx);margin:0 auto;padding:0 24px}
 a{color:inherit;text-decoration:none}
@@ -766,11 +797,11 @@ html[dir=rtl] body{line-height:1.85}
   padding:11px 18px;border-radius:9px;z-index:60;font-weight:600;transition:top .25s var(--e1)}
 .skip:focus{top:14px}
 :focus-visible{outline:2px solid var(--gold-2);outline-offset:3px;border-radius:5px}
-::selection{background:rgba(203,160,90,.28);color:#fff}
+::selection{background:rgba(169,120,31,.22);color:#221C14}
 
 /* topbar */
 .topbar{position:sticky;top:0;z-index:40;
-  background:linear-gradient(to bottom, rgba(14,13,11,0.86), rgba(14,13,11,0.5));
+  background:linear-gradient(to bottom, rgba(251,248,241,0.90), rgba(251,248,241,0.55));
   backdrop-filter:saturate(1.3) blur(12px);border-bottom:1px solid var(--hair)}
 .topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
 .brand-mark{font-weight:600;letter-spacing:.04em;font-size:16px}
@@ -789,7 +820,7 @@ html[dir=rtl] body{line-height:1.85}
   font-size:clamp(40px,8.2vw,104px);line-height:1.02;margin:0;letter-spacing:-0.025em;color:var(--ivory)}
 html[dir=rtl] .hero-line{font-family:"IBM Plex Sans Arabic",serif;font-weight:700}
 .hero-line .count{color:var(--gold-2);font-family:"IBM Plex Sans Arabic",sans-serif;font-weight:700;
-  text-shadow:0 0 44px rgba(203,160,90,.35)}
+  text-shadow:var(--tglow)}
 .hero-sub{max-width:600px;margin:30px 0 0;font-size:clamp(16px,1.8vw,19px);color:var(--ivory-2);line-height:1.6}
 .stamp{font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.04em;color:var(--faint)}
 
@@ -830,7 +861,7 @@ html[dir=rtl] .router-title{font-family:"IBM Plex Sans Arabic",serif;font-weight
 .router-card::after{content:"";position:absolute;inset:0;border-radius:var(--rad);
   background:radial-gradient(400px 200px at 50% -40%,rgba(203,160,90,.16),transparent 70%);
   opacity:0;transition:opacity .4s var(--e1)}
-.router-card:hover{transform:translateY(-4px);border-color:var(--line);box-shadow:0 24px 60px -30px rgba(0,0,0,.8),var(--glow-soft)}
+.router-card:hover{transform:translateY(-4px);border-color:var(--line);box-shadow:0 24px 60px -34px rgba(80,60,20,.30),var(--glow-soft)}
 .router-card:hover::after{opacity:1}
 .router-card.active{border-color:var(--gold)}
 .rc-num{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;color:var(--gold);opacity:.8}
@@ -850,24 +881,24 @@ html[dir=rtl] .router-card:hover .rc-go{transform:scaleX(-1) translateX(0)}
 .panel .src{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.03em;color:var(--faint)}
 /* distribution */
 .dist-big{font-size:clamp(56px,9vw,92px);font-weight:700;line-height:.92;color:var(--gold-2);
-  letter-spacing:-0.04em;text-shadow:var(--glow);display:block}
+  letter-spacing:-0.04em;text-shadow:var(--tglow);display:block}
 .dist-cap{font-size:15px;color:var(--ivory-2);margin:8px 0 22px;font-weight:500}
-.dist-bar{display:flex;height:20px;border-radius:10px;overflow:hidden;gap:3px;background:rgba(244,238,224,.05)}
+.dist-bar{display:flex;height:20px;border-radius:10px;overflow:hidden;gap:3px;background:rgba(34,28,20,.05)}
 .dist-seg{display:block;height:100%;border-radius:3px}
 .dist-seg-0{background:linear-gradient(90deg,var(--gold-deep),var(--gold-2));box-shadow:var(--glow-soft)}
-.dist-seg-1{background:rgba(244,238,224,.12)}
+.dist-seg-1{background:rgba(34,28,20,.10)}
 .dist-legend{list-style:none;margin:20px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:9px 22px;font-size:13.5px;color:var(--ivory-2)}
 .dist-legend li{display:flex;align-items:center;gap:8px}
 .dist-legend b{font-variant-numeric:tabular-nums;color:var(--ivory)}
 .dot{width:10px;height:10px;border-radius:3px;flex:none}
 .dot-0{background:var(--gold-2)}
-.dot-1{background:rgba(244,238,224,.2)}
+.dot-1{background:rgba(34,28,20,.18)}
 .dist-foot{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);margin:18px 0 0;letter-spacing:.02em}
 /* category bars */
 .cats{display:flex;flex-direction:column;gap:15px}
 .cat{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px}
 .cat-l{font-size:14px;color:var(--ivory-2);white-space:nowrap}
-.cat-track{height:9px;border-radius:6px;background:rgba(244,238,224,.06);overflow:hidden}
+.cat-track{height:9px;border-radius:6px;background:rgba(34,28,20,.06);overflow:hidden}
 .cat-fill{height:100%;border-radius:6px;transform:scaleX(0);transform-origin:inline-start;
   background:linear-gradient(90deg,var(--gold-deep),var(--gold-2));box-shadow:var(--glow-soft);
   transition:transform 1.1s var(--e2)}
@@ -906,7 +937,7 @@ html[dir=rtl] .growth-cap{font-family:"IBM Plex Sans Arabic",serif;font-weight:6
   background:radial-gradient(600px 300px at 50% 0%,rgba(203,160,90,.14),transparent 70%),var(--panel);
   border:1px solid var(--line)}
 .repeat-big{font-size:clamp(52px,10vw,110px);font-weight:700;color:var(--gold-2);line-height:1;
-  letter-spacing:-0.04em;text-shadow:var(--glow)}
+  letter-spacing:-0.04em;text-shadow:var(--tglow)}
 .repeat-line{font-family:"Fraunces","IBM Plex Sans Arabic",serif;font-size:clamp(19px,2.6vw,28px);
   color:var(--ivory);margin:16px 0 0;font-weight:500}
 html[dir=rtl] .repeat-line{font-family:"IBM Plex Sans Arabic",serif;font-weight:600}
@@ -974,6 +1005,25 @@ html[dir=rtl] .track-h{font-family:"IBM Plex Sans Arabic",serif;font-weight:600}
   margin-inline-end:8px;box-shadow:0 0 8px var(--ok);animation:pulse 2.4s var(--e1) infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
+/* selected residences */
+.listings .lead{margin:0 0 30px}
+.lst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:22px}
+.lst-card{background:var(--panel);border:1px solid var(--line-2);border-radius:var(--rad);
+  overflow:hidden;transition:transform .4s var(--e1),box-shadow .4s var(--e1),border-color .4s var(--e1)}
+.lst-card:hover{transform:translateY(-5px);box-shadow:var(--glow);border-color:var(--line)}
+.lst-photo{aspect-ratio:4/3;overflow:hidden;background:var(--panel-2)}
+.lst-photo img{width:100%;height:100%;object-fit:cover;display:block;
+  transition:transform .8s var(--e1)}
+.lst-card:hover .lst-photo img{transform:scale(1.05)}
+.lst-noimg{background:linear-gradient(135deg,var(--panel-2),var(--bg-2))}
+.lst-body{padding:20px 22px 24px}
+.lst-area{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);display:block;margin-bottom:8px}
+.lst-title{font-family:"Fraunces","IBM Plex Sans Arabic",serif;font-weight:500;font-size:20px;
+  margin:0;color:var(--ivory);line-height:1.2;letter-spacing:-0.01em}
+html[dir=rtl] .lst-title{font-family:"IBM Plex Sans Arabic",serif;font-weight:600}
+.lst-tag{margin:10px 0 0;font-size:14.5px;color:var(--ivory-2);line-height:1.55}
+@media(max-width:560px){.lst-grid{grid-template-columns:1fr}}
+
 /* motion */
 .reveal-init{opacity:0;transform:translateY(22px)}
 .reveal-init.in{opacity:1;transform:none;transition:opacity .7s var(--e2),transform .7s var(--e2)}
@@ -1012,7 +1062,7 @@ __BODY__
 <footer class="foot"><div class="wrap"><p><span class="dot-live" aria-hidden="true"></span>__FOOTER__</p></div></footer>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <linearGradient id="goldbar" x1="0" y1="1" x2="0" y2="0">
-    <stop offset="0" stop-color="#8E6C31"></stop><stop offset="1" stop-color="#E7C983"></stop>
+    <stop offset="0" stop-color="#8A6218"></stop><stop offset="1" stop-color="#C79A4E"></stop>
   </linearGradient>
 </defs></svg>
 <script>
@@ -1159,6 +1209,7 @@ def render_page(lang, base="", links=None):
         build_hero(t, m, lang, turnovers, as_of)
         + build_router(t)
         + build_what(t)
+        + build_listings(t, blob.get("listings"), lang)
         + build_record(t, m, lang)
         + build_reviews(t, blob["reviews"], lang)
         + build_os(t)

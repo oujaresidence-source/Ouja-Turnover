@@ -7,10 +7,11 @@ route into the EXISTING ticketing intake (HOST.ticket_create) â€” no new inbox â
 are additionally appended to a durable business_leads.json so a lead is never lost
 even if ticket creation hiccups.
 """
+import asyncio
 import time
 import traceback
 
-from . import page
+from . import manage, page
 from .host import HOST
 
 _301 = ("/partners", "/profile", "/b2b")  # different words, same page
@@ -138,6 +139,84 @@ async def api_proposal(request):
     return await _submit(request, "proposal")
 
 
+# --------------------------------------------------------------------------- #
+# featured-residences picker (login-gated)
+# --------------------------------------------------------------------------- #
+def _authed(request):
+    try:
+        return bool(HOST.dash_auth and HOST.dash_auth(request))
+    except Exception:
+        return False
+
+
+def _safe_auth(fn):
+    """Login-gated wrapper for the manage page + its write endpoints."""
+    async def _w(request):
+        if not _authed(request):
+            return HOST.json_response({"ok": False, "error": "unauthorized"}, 401)
+        try:
+            return await fn(request)
+        except Exception as e:
+            if isinstance(e, HOST.web.HTTPException):
+                raise
+            traceback.print_exc()
+            return HOST.json_response({"ok": False, "error": "%s" % type(e).__name__}, 200)
+    _w.__name__ = getattr(fn, "__name__", "w")
+    return _w
+
+
+async def handle_manage(request):
+    if not _authed(request):
+        return HOST.web.Response(text="Unauthorized. Open this from the dashboard while signed in.",
+                                 status=401, content_type="text/plain")
+    return HOST.web.Response(text=manage.MANAGE_HTML, content_type="text/html", charset="utf-8")
+
+
+async def api_manage(request):
+    options = []
+    try:
+        if HOST.hostaway_listings:
+            options = await asyncio.to_thread(HOST.hostaway_listings)
+    except Exception:
+        traceback.print_exc()
+        options = []
+    saved = {"listings": []}
+    try:
+        if HOST.load_json:
+            saved = HOST.load_json("business_listings.json", {"listings": []}) or {"listings": []}
+    except Exception:
+        traceback.print_exc()
+    return HOST.json_response({"ok": True, "options": options, "saved": saved})
+
+
+_LST_FIELDS = ("title", "area", "tagline", "photo")
+
+
+async def api_listings_save(request):
+    raw = await _read_body(request)
+    items = raw.get("listings") if isinstance(raw, dict) else None
+    if not isinstance(items, list):
+        return HOST.json_response({"ok": False, "error": "bad_payload"}, 400)
+    clean = []
+    for it in items[:20]:
+        if not isinstance(it, dict) or not it.get("id"):
+            continue
+        rec = {"id": str(it.get("id"))}
+        for f in _LST_FIELDS:
+            v = it.get(f)
+            if v is not None:
+                rec[f] = str(v).strip()[:400]
+        try:
+            rec["order"] = int(it.get("order", 999))
+        except Exception:
+            rec["order"] = 999
+        clean.append(rec)
+    clean.sort(key=lambda r: r.get("order", 999))
+    if HOST.save_json:
+        HOST.save_json("business_listings.json", {"listings": clean})
+    return HOST.json_response({"ok": True, "saved": len(clean)})
+
+
 def register(app):
     g = app.router.add_get
     p = app.router.add_post
@@ -147,3 +226,7 @@ def register(app):
         g(path, handle_redirect)
     p("/api/business/lead", _safe_public(api_lead))
     p("/api/business/proposal", _safe_public(api_proposal))
+    # featured-residences picker (login-gated)
+    g("/business/manage", handle_manage)
+    g("/api/business/manage", _safe_auth(api_manage))
+    p("/api/business/listings", _safe_auth(api_listings_save))

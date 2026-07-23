@@ -100,6 +100,16 @@ def load_reviews():
     return _load_json(os.path.join(_DATA, "reviews_curated.json"), [])
 
 
+def load_featured_listings(state_dir=None):
+    """Owner-curated units to showcase, chosen in /business/manage. Stored in
+    STATE_DIR/business_listings.json as {"listings": [{id,title,area,tagline,photo}]}."""
+    state_dir = state_dir or os.environ.get("STATE_DIR", "/data")
+    data = _load_json(os.path.join(state_dir, "business_listings.json"), None)
+    if isinstance(data, dict):
+        return data.get("listings") or []
+    return []
+
+
 def load_manual():
     # import here to avoid a cycle at module import time
     from .manual import load_manual_metrics
@@ -115,4 +125,5 @@ def assemble(lang, state_dir=None):
         "metrics": metrics,
         "manual": load_manual(),
         "reviews": load_reviews(),
+        "listings": load_featured_listings(state_dir=state_dir),
     }

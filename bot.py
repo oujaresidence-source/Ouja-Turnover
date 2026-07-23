@@ -50208,10 +50208,35 @@ async def start_web_server():
             try:
                 _wa = re.sub(r"\D", "", os.environ.get("STAY_WHATSAPP", "") or "")
                 _base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+
+                def _biz_listings():
+                    """Hostaway units for the /business/manage picker: id, name, photo, city."""
+                    out = []
+                    try:
+                        resp = api_get("/listings", params={"limit": 300}) or {}
+                        for l in (resp.get("result") or []):
+                            imgs = l.get("listingImages") or []
+                            try:
+                                imgs = sorted(imgs, key=lambda x: x.get("sortOrder", 0))
+                            except Exception:
+                                pass
+                            photo = imgs[0].get("url", "") if imgs and isinstance(imgs[0], dict) else ""
+                            out.append({
+                                "id": l.get("id"),
+                                "name": l.get("internalListingName") or l.get("name") or ("Listing " + str(l.get("id"))),
+                                "photo": photo,
+                                "city": l.get("city") or l.get("address") or "",
+                            })
+                    except Exception as _le:
+                        print("[business] hostaway listings fetch failed:", repr(_le))
+                    return out
+
                 _business.wire({
                     "web": web, "json_response": _json,
                     "ticket_create": _ticket_create,
                     "save_json": _save_json, "load_json": _load_json,
+                    "dash_auth": _dash_auth,
+                    "hostaway_listings": _biz_listings,
                     "base_url": _base,
                     "links": {
                         "book": (_base + "/stay") if _base else "/stay",
@@ -50220,7 +50245,7 @@ async def start_web_server():
                     },
                 })
                 _business.register_routes(app)
-                print("[business] wired + routes registered (/business, /business/ar, /partners→301)")
+                print("[business] wired + routes registered (/business, /business/ar, /business/manage, /partners→301)")
                 # First-run: ensure a snapshot exists so the page never shows the bare fallback.
                 try:
                     if not _load_json("metrics_snapshot.json", None):

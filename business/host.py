@@ -14,6 +14,8 @@ class _Host:
     base_url = ""            # PUBLIC_BASE_URL, e.g. https://oujares.com
     links = None             # {"book":..., "wa":..., "email":...}
     notify = None            # optional (payload) -> None Discord push
+    dash_auth = None         # _dash_auth(request) -> bool  (gates the manage page)
+    hostaway_listings = None  # () -> [{id, name, photo, city}]  (for the picker)
 
     _wired = False
 
