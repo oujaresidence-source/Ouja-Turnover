@@ -1,0 +1,59 @@
+{
+  "social_views": {
+    "value": "100M+",
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Views across TikTok & Snapchat",
+    "label_ar": "مشاهدة عبر تيك توك وسناب شات"
+  },
+  "followers": {
+    "value": "70,000+",
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Followers across TikTok & Snapchat",
+    "label_ar": "متابع عبر تيك توك وسناب شات"
+  },
+  "units_under_management": {
+    "value": "60+",
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Branded units under management",
+    "label_ar": "وحدة تحت الإدارة بعلامة واحدة"
+  },
+  "turnovers_inhouse": {
+    "value": "~14,000",
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Turnovers executed in-house (OujaCT)",
+    "label_ar": "عملية تجهيز نُفّذت داخليًا (OujaCT)"
+  },
+  "loyalty_members": {
+    "value": "4,500+",
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Ouja Elite loyalty members",
+    "label_ar": "عضو في برنامج عوجا إيليت"
+  },
+  "compounds": {
+    "value": ["Al Majdiah", "Gadh 33", "Gadh 44", "Dyar 20", "Hue Residence", "Al Ajlan", "Calma 90"],
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Compounds operated",
+    "label_ar": "المجمعات المُشغّلة"
+  },
+  "districts": {
+    "value": ["Al Malqa", "Al Nuzha", "Qurtuba", "Al Yasmin", "Diriyah corridor"],
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "label_en": "Riyadh districts covered",
+    "label_ar": "أحياء الرياض المُغطّاة"
+  },
+  "commercial_registration": {
+    "value": "7050158810",
+    "as_of": "2026-07-23",
+    "source": "internal",
+    "entity_ar": "عوجا لإدارة الأملاك والمقاولات",
+    "label_en": "Commercial Registration",
+    "label_ar": "السجل التجاري"
+  }
+}

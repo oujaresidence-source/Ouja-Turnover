@@ -1,0 +1,443 @@
+[
+ {
+  "id": 1,
+  "name": "Mohammed",
+  "date": "Apr 2026",
+  "listing": "Ouja | Bohemian Escape | Cinema | Self-Entry",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "design",
+   "communication",
+   "location",
+   "checkin",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "Excellent stay in Riyadh. The apartment was clean, modern, and exactly as described, with a great central location. The host was responsive and check-in was seamless. Highly recommended."
+ },
+ {
+  "id": 2,
+  "name": "Khalid",
+  "date": "May 2026",
+  "listing": "Ouja | Spacious 1BR, Prime Location, Self-Entry",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "checkin",
+   "repeat",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "Great host and great apartment. The place was clean, comfortable, and exactly as described. The host was very responsive, helpful, and made the whole stay smooth and easy from check-in to check-out. Would definitely stay again and highly recommend."
+ },
+ {
+  "id": 3,
+  "name": "Hanan",
+  "date": "Dec 2025",
+  "listing": "2BR Modern Apt w/ Big Living Room | Dyar 20",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "repeat",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "كانت الإقامة رائعة جدًا، الشقة جميلة ونظيفة ومرتبة بعناية، ومطابقة تمامًا للوصف والصور. الموقع ممتاز وقريب من كل الخدمات، والهدوء كان مثاليًا للراحة. المضيف متعاون جدًا وسريع في الرد، ولم نواجه أي مشاكل أثناء الإقامة. تجربة أكثر من رائعة وأنصح بها بشدة، وبالتأكيد سأكرر الزيارة مرة أخرى"
+ },
+ {
+  "id": 4,
+  "name": "Abdullah",
+  "date": "Nov 2025",
+  "listing": "VIP Compound, Lift & Parking",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "checkin",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "I stayed in this apartment and had a great experience. The place was clean, comfortable, and exactly as described. Check-in was smooth, and the host was responsive and helpful. The location was convenient, and everything I needed was available. Overall, a pleasant and hassle-free stay — I would definitely recommend it!"
+ },
+ {
+  "id": 5,
+  "name": "Ibrahim",
+  "date": "Apr 2026",
+  "listing": "Ouja | Grand 3BR Stay | Calma 90 | Private Parking",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "design",
+   "communication",
+   "location",
+   "repeat",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "The stay was absolutely exceptional. The place is very clean, well-maintained, and thoughtfully designed to provide maximum comfort. The location is perfect—quiet, private, and ideal for relaxing away from the city noise. Everything was exactly as described, if not better.\n\nThe host was very professional, responsive, and made sure that our experience was smooth from start to finish. I would definitely recommend this place and will absolutely come back again."
+ },
+ {
+  "id": 6,
+  "name": "Laith",
+  "date": "Oct 2025",
+  "listing": "Spacious 2BR • Huge Living • Self - Entry",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "checkin",
+   "repeat",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "I had an amazing stay at Ouja apartment. The apartment was clean, stylish, and exactly as described — even better in person.\n\nThe host was incredibly friendly, responsive, and made sure everything went smoothly from check-in to check-out. I really appreciated their hospitality and attention to detail.\n\nI highly recommend both the place and the host “Faisal” I’d definitely stay here again!"
+ },
+ {
+  "id": 7,
+  "name": "Khaled",
+  "date": "May 2026",
+  "listing": "Private Cinema in Malqa",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "recommend",
+   "accuracy",
+   "service"
+  ],
+  "text": "Great stay! The apartment was clean, comfortable, and exactly as described.\nThe host team was very helpful and responsive. Thank you for the hospitality.\nHighly recommended!"
+ },
+ {
+  "id": 8,
+  "name": "Othman",
+  "date": "Feb 2026",
+  "listing": "NUZHA 102A",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "checkin",
+   "recommend"
+  ],
+  "text": "Really enjoyed my stay. The apartment was clean, well maintained, and in a great location. Check-in was smooth and the host was very cooperative. Highly recommended."
+ },
+ {
+  "id": 9,
+  "name": "Jay",
+  "date": "Jan 2026",
+  "listing": "Modern 1BR, 65\" 4K TV, SelfEntry",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "location",
+   "repeat",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "I had a great stay at this Airbnb. The place was clean, comfortable, and exactly as described. The location was convenient and quiet. I would definitely recommend this place and would stay here again."
+ },
+ {
+  "id": 10,
+  "name": "Hazza",
+  "date": "Jan 2026",
+  "listing": "2BR Modern Apt w/ Big Living Room | Dyar 20",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "repeat",
+   "service"
+  ],
+  "text": "Location: Great. Strategic location within Riyadh.  \nHost: Excellent, friendly, professional and communicative.  \nAppartment: Clean, spacious, all amenities available. \nThank you you to the host and team. Defiantly will stay again."
+ },
+ {
+  "id": 11,
+  "name": "Nasser",
+  "date": "Dec 2025",
+  "listing": "Modern Cinema-Equipped Unit – Majdiah Comp",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "location",
+   "value",
+   "service",
+   "business"
+  ],
+  "text": "إقامة اكثر من رائعه \nمكان هادي ونظيف جداً وقريب من جميع الخدمات\nايضاً خدمة العملاء كانت ممتازه وتجاوب سريع \nأشكر الاخ فيصل على تعامله الراقي والاستضافة المميزة مقابل السعر والخدمه و إن شاء الله انها مو اخر مره \nشكراً جزيلاً عوجا اسعدتوني كثير والله يبيض وجيهكم ❤️💐"
+ },
+ {
+  "id": 12,
+  "name": "Moath",
+  "date": "Nov 2025",
+  "listing": "Ouja | Bohemian Escape | Cinema | Self-Entry",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "checkin",
+   "repeat"
+  ],
+  "text": "Salah’s place was perfect! It was spotless, cozy, and had everything I needed for a comfortable stay. Salah was incredibly welcoming and responsive throughout my visit, making check-in and check-out super easy. The location was convenient and quiet I’d definitely stay here again!"
+ },
+ {
+  "id": 13,
+  "name": "Naif",
+  "date": "Sep 2025",
+  "listing": "Ouja | Spacious 1BR, Prime Location, Self-Entry",
+  "lang": "en",
+  "themes": [
+   "design",
+   "communication",
+   "location",
+   "repeat",
+   "recommend"
+  ],
+  "text": "Highly recommended place with great location and well furnitures with a modern design with a great Tv screen which i enjoyed watching all days and the host was professional and friendly and quickly responded and let me feel home with his kindness and definitely i ll come again ."
+ },
+ {
+  "id": 14,
+  "name": "Lama",
+  "date": "Apr 2026",
+  "listing": "Modern 3BR flat w/ private balcony in Qurtuba",
+  "lang": "en",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "checkin",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "I had a wonderful stay. The place was very clean, well-organized, and exactly as described. Everything was comfortable and thoughtfully prepared. Faisal and all co-hosts were great—very responsive, kind, and made the whole experience smooth and easy, Check-in and check-out were simple and hassle-free. I truly enjoyed my stay and would definitely recommend this place. Thank you for the great hospitality 💕"
+ },
+ {
+  "id": 15,
+  "name": "Joud",
+  "date": "Apr 2026",
+  "listing": "Spacious 3BR • Huge Living • Self - Entry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "design",
+   "communication",
+   "value"
+  ],
+  "text": "الشقه احلى من الصور عشر مرات والعماره تصميمها مميز مره اول مره ادخل شقة تبهرني قد كذا ابتداءًا من المدخل للشفه والغرف وسعرها قليل عليها والنظافه عاليه جدًا وخدماتها كثيره كل شي كان متوفر حتى مساحيق التنظيف والغسيل!  والمضيف متعاون ولبق شكرًا لكم من القلب 🙏🏻"
+ },
+ {
+  "id": 16,
+  "name": "Faten",
+  "date": "Apr 2026",
+  "listing": "Ground Floor 3BR + Huge Living | AlMajdiah",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "service"
+  ],
+  "text": "الشقه كانت نظيفه والأثاث جديد والمطبخ متوفره فيه جميع الأدوات غرف النوم حلوه ومرتبه والمفارش نظيفه العماره هاديه ما انزعجنا فيها ومنطقه حلوه كل شي قريب منها المضيف كان متجاوب معنا حتى لما نقصنا مناديل ماقصر وفرها بسرعه لنا باذن الله مو آخر مره شكرا لكم على الخدمة المقدمه"
+ },
+ {
+  "id": 17,
+  "name": "Amal",
+  "date": "Mar 2026",
+  "listing": "Cozy Escape in Malqa | Parking",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "location",
+   "service",
+   "business"
+  ],
+  "text": "السكن جداً رائع و ملموم خصوصاً النظافه جداً عاليه و الحمام و الاثاث  جديد و الموقع ممتاز العماره برضو مرتبه ونظيفه و موقعها جداً ممتاز قريب من كل شي و غير خدمة العملاء عندهم رد سريع و بكل لباقه👍🏻👍🏻 اكرر السكن فيه"
+ },
+ {
+  "id": 18,
+  "name": "Abdulrhman",
+  "date": "Mar 2026",
+  "listing": "NUZHA 102A",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "location",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "السكن ممتاز وانصح فيه مكان جميل وكل ماتحتاجه قريب منك و مطابق للصور .\nنظافة العماره و السكن وسهولة الوصول له ممتاز جدا"
+ },
+ {
+  "id": 19,
+  "name": "Turki",
+  "date": "Mar 2026",
+  "listing": "Ouja Luxury Retreat | Al-Nuzha | Self-Entry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "location",
+   "recommend",
+   "accuracy"
+  ],
+  "text": "من اجمل الاستيديوهات فالرياض \nتتميز بموقع جميل وهادي وخدمات قريبه \nومستضيف رائع والمكان مطابق للصور تماماً ونظيف جداً \nانصح فيه"
+ },
+ {
+  "id": 20,
+  "name": "Ahmed",
+  "date": "Jan 2026",
+  "listing": "Spacious 2BR + Cinema | AlAjlan Compound",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "recommend"
+  ],
+  "text": "من أفضل الأماكن التي سكنت بها نظيفه والمضيفين سريعين الرد ومتحرمين وفقكم الله ورزقكم من واسع فضله انصح به وبشده ولي زياره قريبه ان شاء الله والسكن واسع واسع واسع جداً ومريحه"
+ },
+ {
+  "id": 21,
+  "name": "ليالي",
+  "date": "Dec 2025",
+  "listing": "Ouja | Modern 1BR, 85\" TV, Huge Living, Self-Entry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "accuracy",
+   "service"
+  ],
+  "text": "المضيف متعاون جدًا وسريع في الرد من بداية الحجز إلى وقت المغادرة، وهذا بحد ذاته يعطي إحساس بالراحة والاهتمام. المكان نظيف ومرتب بشكل ممتاز، وكل شيء كان مطابق للوصف وأكثر.\nأكثر شيء لفت انتباهي هو الشاشة، أعطت المكان طابع مختلف ومميز وزادت من متعة الإقامة، سواء للاسترخاء أو مشاهدة الأفلام. تجربة تستحق التكرار"
+ },
+ {
+  "id": 22,
+  "name": "Wejdan",
+  "date": "Dec 2025",
+  "listing": "Full Kitchen, Parking, SelfEntry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "location",
+   "checkin",
+   "recommend"
+  ],
+  "text": "المكان جميل ونظيف ولطيف والدخول سهل إليه والموقع رائع جدًا ، والاستجابه سريعه شكرًا لكم .. انصح فيه وارجع للإقامة فيه مره أخرى"
+ },
+ {
+  "id": 23,
+  "name": "Hamad",
+  "date": "Dec 2025",
+  "listing": "Private Cinema in Malqa",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "recommend",
+   "service"
+  ],
+  "text": "شقة ممتازة ونظيفة ومريحة وكل الاحتياجات متوفرة. المضيفة أسيل قمة في التعامل والاهتمام وسرعة الرد. تجربة رائعة وأنصح بالحجز دون تردد."
+ },
+ {
+  "id": 24,
+  "name": "Hala",
+  "date": "Nov 2025",
+  "listing": "Modern Cinema-Equipped Unit – Majdiah Comp",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "accuracy"
+  ],
+  "text": "الشقه جديدة جدّا  جميلة ونظيفة وواسعة ومطابقة للصور والمواصفات المكتوبة ، ايضا مهتمين بالتفاصيل الدقيقه ،  ومكانها ممتاز ومميّز قريب لكل شي 👍🏻 والمضيف صراحه متجاوب علطول ماقصّر معنا . \nمو آخر زيارة لناإن شاء الله"
+ },
+ {
+  "id": 25,
+  "name": "وليد",
+  "date": "Oct 2025",
+  "listing": "Spacious Mid-Century Apt • Self Entry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "design",
+   "location",
+   "accuracy"
+  ],
+  "text": "ماشاء الله تبارك الله الشقه تفتح النفس  نظافه وريحه وديكور وترتيب ومطابقه للصور\nواشكر المالك الاخ صلاح كان متعاون جدا جدا\nكما يوجد مغسلة قريبه وهناك عامل خاص بالعماره متواجد باستمرار \nمن افضل الاماكن للسكن . \nللامانه لي عوده وهي خياري الاول للسكن بالرياض"
+ },
+ {
+  "id": 26,
+  "name": "Abdulaziz",
+  "date": "Jun 2026",
+  "listing": "Modern 1BR, 65\" 4K TV, SelfEntry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "service"
+  ],
+  "text": "صراحه أنا من متابعينهم على مواقع التواصل الاجتماعي، والطريف بالموضوع اني حجزت ولا ركزت انه هم، المكان والمبنى ممتاز جداً حديث نظيف مريح وهدوء والحي ممتاز بعيد عن الزحمه وقريب من احتياجي. \nالشقه ممتازه وأجمل من الصور للامانه، نظافه واهتمام. \nاشكر الفريق على الاهتمام والتواجد للرد بكل وقت احتجت استفسر عن شي وباذن الله لي زيارات اخرى إذا جيت الرياض. \nتحياتي،"
+ },
+ {
+  "id": 27,
+  "name": "Rakan",
+  "date": "Aug 2025",
+  "listing": "Spacious Mid-Century Apt • Self Entry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "design",
+   "accuracy",
+   "service"
+  ],
+  "text": "المكان نظيف ومرتب ومطابق تمامًا للصور. المبنى جديد وتصميمه الداخلي مميز.\nموقع العمارة ممتاز، حيث يوجد جامع أمامها، إضافةً إلى سوبر ماركت صغير، ومغسلة ملابس، وحلاق .\nالخدمة كانت سريعة جدًا، وكل ما احتجناه تم توفيره دون تقصير."
+ },
+ {
+  "id": 28,
+  "name": "O",
+  "date": "Jan 2026",
+  "listing": "Ouja Luxury Retreat | Al-Nuzha | Self-Entry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "location",
+   "value",
+   "service"
+  ],
+  "text": "الشقة كانت نظيفة ومرتبة ، قريبة للاين الاحمر بالمترو يربط باللاين البنفسجي سواء كنت جايه عشان موعد او حتى شغل بكون قريبة لكل شيء \nالشقة شكلها جديدة مريحة \nاكثر ما اعجبني السعر جدًا مناسب لمدة اقامتي \nالمبنى مناسب واضح كله عوائل وهذا مناسب للبنات   بشكل مخصوص \nFelt like home \nفريق الدعم موجود قبل التشيك ان والتشيك اوت ماقصروا واكيد مو اخر زيارة لعوجا"
+ },
+ {
+  "id": 29,
+  "name": "Ghalia",
+  "date": "Jun 2026",
+  "listing": "2BR Ground Floor | Private Pool & Movie Cinema",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "design",
+   "checkin"
+  ],
+  "text": "من اجممل الشقق الي سكنت فيها و سهل الدخول و الخروج و نظافة و الديكور و كل شيء و احب اشكر الهوست نورا و ناصر و فيصل و اسيل و ماثر يردون بسرعه و يسهلون عليك و اسلوبهم الراقي"
+ },
+ {
+  "id": 30,
+  "name": "Abdulrzaq",
+  "date": "Oct 2025",
+  "listing": "Modern 1BR, 75\" 4K TV, SelfEntry",
+  "lang": "ar",
+  "themes": [
+   "cleanliness",
+   "communication",
+   "location",
+   "service"
+  ],
+  "text": "كانت تجربتي في هذا المسكن أكثر من رائعة، حيث امتاز المكان بالنظافة والراحة والاهتمام بأدق التفاصيل التي تجعل الإقامة ممتعة. الأجواء هادئة وتبعث على الاسترخاء، والموقع مميز ويتيح سهولة الوصول إلى الخدمات والأماكن الحيوية. كذلك كان تعامل المضيف راقياً وسلساً، مما أضفى على التجربة طابعاً مميزاً. بالتأكيد سأقوم بزيارة هذا المكان مرة أخرى في أقرب فرصة، وأوصي به بشدة لكل من يبحث عن إقامة مريحة ومميزة."
+ }
+]

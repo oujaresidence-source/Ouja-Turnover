@@ -1,0 +1,41 @@
+{
+  "as_of": "2026-07-23",
+  "channel": "airbnb",
+  "window": { "start": "2024-07-23", "end": "2026-07-23" },
+  "reservations_total": 6,
+  "guest_nights": 9,
+  "unique_guests": 4,
+  "returning_guests": 2,
+  "repeat_guest_share": 0.6667,
+  "avg_los": 1.5,
+  "single_night_share": 0.6667,
+  "reviews_published": 4,
+  "rating_avg_5": 4.75,
+  "perfect_share": 0.75,
+  "review_rate": 0.6667,
+  "category_avgs": {
+    "communication": 9.5,
+    "checkin": 9.75,
+    "accuracy": 9.25,
+    "location": 9.0,
+    "cleanliness": 9.25,
+    "value": 9.0
+  },
+  "review_lang_split": { "ar": 0.5, "en": 0.5 },
+  "reviews_by_quarter": [
+    { "q": "Q3'24", "count": 1, "rating_avg_5": 5.0 },
+    { "q": "Q4'24", "count": 1, "rating_avg_5": 4.0 },
+    { "q": "Q1'25", "count": 0, "rating_avg_5": null },
+    { "q": "Q2'25", "count": 1, "rating_avg_5": 5.0 },
+    { "q": "Q3'25", "count": 0, "rating_avg_5": null },
+    { "q": "Q4'25", "count": 0, "rating_avg_5": null },
+    { "q": "Q1'26", "count": 0, "rating_avg_5": null },
+    { "q": "Q2'26", "count": 1, "rating_avg_5": 5.0 },
+    { "q": "Q3'26", "count": 0, "rating_avg_5": null }
+  ],
+  "rating_distribution": { "10": 3, "8": 1 },
+  "listings_active": 2,
+  "listings_by_year": { "2024": 1, "2025": 2, "2026": 3 },
+  "districts_covered": 2,
+  "unit_type_mix": { "1": 1, "2": 1, "3": 1 }
+}

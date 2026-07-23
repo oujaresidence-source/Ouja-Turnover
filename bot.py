@@ -121,6 +121,15 @@ except Exception as _studio_err:        # pragma: no cover
     _studio = None
     _HAS_STUDIO = False
 
+# B2B company profile «/business» — public data room; server-rendered from a nightly snapshot.
+try:
+    import business as _business
+    _HAS_BUSINESS = True
+except Exception as _business_err:      # pragma: no cover
+    print("[business] import failed (business page disabled, bot unaffected):", _business_err)
+    _business = None
+    _HAS_BUSINESS = False
+
 # Owner Performance Report — additive, isolated, read-only against Hostaway. Renders the
 # frozen 17-page bilingual PDF via headless Chromium (see nixpacks.toml). Never edits bot.py
 # logic; wired like schedule/studio. Import guarded so a missing dep never takes down the bot.
@@ -5503,6 +5512,22 @@ async def schedule_digest_loop():
         print("[schedule] morning summary fired for", today, "· total", day.get("total"))
     except Exception as e:
         print("[schedule] digest error:", e)
+
+@tasks.loop(time=dt_time(hour=3, minute=0, tzinfo=TZ))
+async def business_snapshot_loop():
+    """Nightly 03:00 Riyadh: refresh /business metrics_snapshot.json from Hostaway,
+    archive it dated, prune archives older than 400 days (superprompt §3). Off-loop."""
+    if not _HAS_BUSINESS:
+        return
+    await bot.wait_until_ready()
+    try:
+        today = now_riyadh().date()
+        rep = await asyncio.to_thread(_business.run_snapshot, today)
+        print("[business] nightly snapshot:", rep.get("ok"),
+              "written", rep.get("written"), "pruned", len(rep.get("pruned") or []),
+              rep.get("error") or "")
+    except Exception as e:
+        print("[business] snapshot loop error:", e)
 
 @tasks.loop(time=dt_time(hour=STUDIO_DIGEST_HOUR, minute=0, tzinfo=TZ))
 async def studio_digest_loop():
@@ -50178,6 +50203,34 @@ async def start_web_server():
             except Exception as _se3:
                 print("[schedule] wiring failed (schedule disabled, bot unaffected):", _se3)
 
+        # ---- B2B company profile «/business» — public data room; renders from nightly snapshot ----
+        if _HAS_BUSINESS:
+            try:
+                _wa = re.sub(r"\D", "", os.environ.get("STAY_WHATSAPP", "") or "")
+                _base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+                _business.wire({
+                    "web": web, "json_response": _json,
+                    "ticket_create": _ticket_create,
+                    "save_json": _save_json, "load_json": _load_json,
+                    "base_url": _base,
+                    "links": {
+                        "book": (_base + "/stay") if _base else "/stay",
+                        "wa": ("https://wa.me/" + _wa) if _wa else "/stay",
+                        "email": "oujaresidence@gmail.com",
+                    },
+                })
+                _business.register_routes(app)
+                print("[business] wired + routes registered (/business, /business/ar, /partners→301)")
+                # First-run: ensure a snapshot exists so the page never shows the bare fallback.
+                try:
+                    if not _load_json("metrics_snapshot.json", None):
+                        _brep = _business.run_snapshot()
+                        print("[business] initial snapshot:", _brep.get("ok"), _brep.get("error") or "")
+                except Exception as _b1:
+                    print("[business] initial snapshot skipped:", _b1)
+            except Exception as _be:
+                print("[business] wiring failed (business page disabled, bot unaffected):", _be)
+
         # ---- Owner Performance Report — additive; READ-ONLY Hostaway; frozen PDF renderer ----
         if _HAS_OWNER_REPORT:
             try:
@@ -57425,6 +57478,8 @@ async def on_ready():
         schedule_digest_loop.start()   # morning team-calendar ops summary (default 08:00 Riyadh)
     if _HAS_STUDIO and STUDIO_ENABLED and not studio_digest_loop.is_running():
         studio_digest_loop.start()     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
+    if _HAS_BUSINESS and not business_snapshot_loop.is_running():
+        business_snapshot_loop.start()  # nightly 03:00 Riyadh: refresh /business snapshot
     if _HAS_STUDIO and STUDIO_ENABLED:
         try:
             await _studio_ensure_channel()
