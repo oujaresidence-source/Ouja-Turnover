@@ -91,10 +91,15 @@ class Renders(unittest.TestCase):
             self.assertNotIn("7050158810", h)         # CR number removed
             self.assertNotIn("Commercial Registration", h)
 
-    def test_thirty_reviews_with_theme_filter(self):
+    def test_review_wall_scales_with_featured_default_and_show_all(self):
         for lang in ("en", "ar"):
-            self.assertEqual(self.html[lang].count('class="review"'), 30)
-            self.assertIn('class="tfilter', self.html[lang])
+            h = self.html[lang]
+            total = h.count('data-themes=')          # every review card carries data-themes
+            self.assertGreaterEqual(total, 100)       # the full curated set is in the DOM
+            self.assertEqual(h.count('class="review "') + h.count('class="review"'), 30)  # 30 shown by default
+            self.assertIn('class="review-wall collapsed"', h)
+            self.assertIn("data-show-all", h)
+            self.assertIn('class="tfilter', h)
 
     def test_our_chrome_is_emoji_free(self):
         # scan template + copy (not guest review text, which is verbatim)

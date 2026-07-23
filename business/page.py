@@ -27,8 +27,8 @@ COPY = {
         "title": "Ouja Residence — operating record",
         "meta_desc": "Ouja Residence operates short-stay residences in Riyadh. Two years, {stays} stays, {rating} out of 5. The verified operating record.",
         "hero_line": "Two years. {stays} stays. {rating} out of 5.",
-        "hero_sub": "Ouja Residence operates short-stay residences in Riyadh — 100+ branded units, one in-house team, one operating system.",
-        "strip": ["{stays} stays", "{nights} nights", "{guests} guests", "{reviews} reviews", "{rating}★"],
+        "hero_sub": "Ouja Residence operates short-stay residences across Riyadh: 100+ branded units, one in-house team, one operating system built for them.",
+        "strip": ["{stays} stays", "{nights} nights", "{turnovers} turnovers", "{guests} guests", "{reviews} reviews", "{rating}★"],
         "as_of_prefix": "as of", "source": "source", "method": "method",
         "src_hostaway": "Hostaway · Airbnb channel", "src_internal": "internal",
         "router_title": "What brings you here?",
@@ -39,13 +39,15 @@ COPY = {
         ],
         "what_title": "What Ouja is",
         "what_body": [
-            "Founded 2024. Riyadh. Short-stay residences under a single brand across managed compounds.",
-            "It operates on a revenue-share model with owners, with an in-house cleaning team, an in-house technology platform, and a licensed Saudi entity behind it.",
-            "The name comes from the old name of Diriyah — the winding valley of Wadi Hanifa.",
+            "Founded in 2024 in Riyadh, Ouja operates furnished short-stay residences under a single brand across managed compounds, from studios to three-bedroom apartments.",
+            "Owners keep their asset and share the revenue. Ouja takes the rest: furnishing, photography, listing, pricing, guest communication, cleaning, inspection, maintenance, and monthly reporting, all run by one in-house team on one platform we built ourselves.",
+            "That platform is the difference. Every unit is priced by date, prepared to a checklist, inspected before each arrival, and reported on down to the last riyal. Nothing is left to a spreadsheet or a WhatsApp group.",
+            "Ouja is the old name of Diriyah, the winding valley of Wadi Hanifa where Riyadh began.",
         ],
         "record_title": "The record",
         "dist_title": "Rating distribution",
-        "dist_perfect": "10 / 10", "dist_rest": "9 / 10 or below",
+        "dist_perfect": "rated 10 / 10", "dist_rest": "9 / 10 or below",
+        "dist_foot": "{avg} average across {n} published reviews, low scores included",
         "cat_title": "Category sub-scores (out of 10)",
         "cat_note": "Communication and check-in score highest — the two categories most correlated with guest-support escalations.",
         "growth_title": "Growth against rating",
@@ -54,20 +56,24 @@ COPY = {
         "repeat_line": "{pct} of our stays are guests who came back.",
         "repeat_note": "Repeat rate is the one metric that cannot be bought with marketing spend.",
         "reviews_title": "Reviews as evidence",
-        "reviews_intro": "Every review below is a real published Airbnb review from a verified stay. {more} more where these came from.",
+        "reviews_intro": "Every card below is a real, published Airbnb review from a verified stay, shown verbatim. These are {shown} of {total}.",
         "verified_badge": "Airbnb · verified stay",
         "filter_all": "All",
+        "show_all": "Show all {total} reviews",
         "themes": {"cleanliness": "Cleanliness", "checkin": "Check-in", "design": "Design",
                    "communication": "Communication", "location": "Location", "value": "Value",
-                   "accuracy": "Accuracy", "repeat": "Returning guest"},
+                   "accuracy": "Accuracy", "service": "Service", "quiet": "Quiet",
+                   "space": "Spacious", "family": "Family", "cinema": "Cinema",
+                   "returning_guest": "Returning guest"},
         "os_title": "The operating system",
+        "os_intro": "Most operators run on a spreadsheet and a phone. Ouja runs on infrastructure we built ourselves, and a standard we hold on every single unit.",
         "os_items": [
-            ("Trusted PMS", "Full API integration across the portfolio.", "Calendar accuracy and one source of truth."),
-            ("Proprietary platform", "~49,000 lines, purpose-built: turnover scheduling, staff assignment with absence-driven redistribution, dynamic pricing with per-date explainability, append-only audit logs, vendor ticketing, expense reconciliation, automated owner reporting.", "Predictable quality at scale, verifiable reporting."),
-            ("OujaCT", "In-house cleaning team, not outsourced. ~14,000 turnovers.", "Why cleanliness holds at 9.57 across 100+ listings."),
-            ("Musaed", "In-house AI guest assistant, pre-booking communication in Arabic and English.", "Faster response, fewer escalations."),
-            ("Ouja Elite", "4,500+ member loyalty database.", "The mechanism behind the repeat rate."),
-            ("Reach", "100M+ views, 70,000+ followers across TikTok and Snapchat.", "New listings launch to a warm audience, not a cold start."),
+            ("Inspection before every arrival", "Cleaning is a mix of in-house crews and vetted third parties, but the standard is not. Ouja's own team inspects each unit against a checklist before the guest walks in, every time, whoever cleaned it.", "This is why cleanliness holds at 9.57 across 100+ listings, not who holds the mop."),
+            ("A trusted PMS, fully integrated", "Every unit lives on a professional property-management system with full API integration: one calendar, one guest inbox, real-time channel sync, and no double-bookings across Airbnb and direct.", "One source of truth for every reservation, price, and message."),
+            ("Our own platform, ~49,000 lines", "Purpose-built and running the business daily: turnover scheduling, staff assignment that redistributes on the fly when someone is off, dynamic pricing with a written reason for every date, append-only audit logs, vendor ticketing, expense reconciliation, and automated owner reporting.", "Predictable quality at scale, and reporting an owner can actually check."),
+            ("Musaed, the in-house assistant", "An AI guest assistant that handles pre-booking questions in Arabic and English around the clock, and hands off to a person the moment it should.", "Faster answers, fewer escalations, nothing lost overnight."),
+            ("Reach that arrives before the booking", "100M+ views and 70,000+ followers across TikTok and Snapchat, aimed at Saudi travellers in Arabic.", "A new listing opens to a warm audience, not a cold start."),
+            ("Ouja Elite", "A small, invite-only tier for our most valued guests, under 1% of everyone who stays.", "Not a mass loyalty scheme; a short list, looked after closely."),
         ],
         "compliance_title": "Standing",
         "compliance": [
@@ -142,12 +148,12 @@ COPY = {
     },
     "ar": {
         "dir": "rtl", "lang": "ar", "alt_href": "/business", "alt_label": "English",
-        "brand": "عوجا الريزيدنس",
-        "title": "عوجا الريزيدنس — السجل التشغيلي",
-        "meta_desc": "عوجا الريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض. سنتان، {stays} إقامة، {rating} من ٥.",
+        "brand": "عوجا ريزيدنس",
+        "title": "عوجا ريزيدنس — السجل التشغيلي",
+        "meta_desc": "عوجا ريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض. سنتان، {stays} إقامة، {rating} من ٥.",
         "hero_line": "سنتان. {stays} إقامة. {rating} من ٥.",
-        "hero_sub": "عوجا الريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض — أكثر من ١٠٠ وحدة تحت علامة واحدة، وفريق داخلي واحد، ونظام تشغيل واحد.",
-        "strip": ["{stays} إقامة", "{nights} ليلة", "{guests} ضيف", "{reviews} تقييم", "{rating}★"],
+        "hero_sub": "عوجا ريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض: أكثر من ١٠٠ وحدة تحت علامة واحدة، وفريق داخلي واحد، ونظام تشغيل بنيناه لها.",
+        "strip": ["{stays} إقامة", "{nights} ليلة", "{turnovers} تجهيز", "{guests} ضيف", "{reviews} تقييم", "{rating}★"],
         "as_of_prefix": "حتى", "source": "المصدر", "method": "الطريقة",
         "src_hostaway": "هوستاوي · قناة Airbnb", "src_internal": "داخلي",
         "router_title": "ما الذي يهمّك هنا؟",
@@ -158,13 +164,15 @@ COPY = {
         ],
         "what_title": "ما هي عوجا",
         "what_body": [
-            "تأسّست عام ٢٠٢٤. الرياض. وحدات إقامة قصيرة تحت علامة واحدة عبر مجمّعات تديرها.",
-            "تعمل بنموذج مشاركة في الإيراد مع الملاك، مع فريق تنظيف داخلي، ومنصة تقنية داخلية، وكيان سعودي مُرخّص.",
-            "الاسم مأخوذ من الاسم القديم للدرعية — وادي حنيفة المتعرّج.",
+            "تأسّست عوجا في الرياض عام ٢٠٢٤، وتُشغّل وحدات إقامة قصيرة مفروشة تحت علامة واحدة عبر مجمّعات تديرها، من الاستوديو إلى شقق بثلاث غرف.",
+            "المالك يحتفظ بأصله ويشاركنا الإيراد، ونتولّى نحن الباقي: التأثيث والتصوير والإعلان والتسعير والتواصل مع الضيوف والتنظيف والفحص والصيانة والتقارير الشهرية، يديرها فريق داخلي واحد على منصة بنيناها بأنفسنا.",
+            "هذه المنصة هي الفرق. كل وحدة تُسعَّر بحسب التاريخ، وتُجهَّز وفق قائمة تحقّق، وتُفحَص قبل كل وصول، ويُرفَع عنها تقرير حتى آخر ريال. لا شيء متروك لجدول أو مجموعة واتساب.",
+            "«عوجا» هو الاسم القديم للدرعية، وادي حنيفة المتعرّج حيث بدأت الرياض.",
         ],
         "record_title": "السجل",
         "dist_title": "توزع التقييمات",
-        "dist_perfect": "١٠ / ١٠", "dist_rest": "٩ / ١٠ أو أقل",
+        "dist_perfect": "بتقييم ١٠ / ١٠", "dist_rest": "٩ / ١٠ أو أقل",
+        "dist_foot": "متوسط {avg} عبر {n} تقييمًا منشورًا، والدرجات المنخفضة مشمولة",
         "cat_title": "التقييمات الفرعية (من ١٠)",
         "cat_note": "التواصل وتسجيل الدخول الأعلى — وهما أكثر فئتين ارتباطًا بتصعيد دعم الضيوف.",
         "growth_title": "النمو مقابل التقييم",
@@ -173,20 +181,24 @@ COPY = {
         "repeat_line": "{pct} من إقاماتنا ضيوف عادوا.",
         "repeat_note": "معدل العودة هو المقياس الوحيد الذي لا يُشترى بإنفاق التسويق.",
         "reviews_title": "التقييمات كدليل",
-        "reviews_intro": "كل تقييم أدناه حقيقي ومنشور على Airbnb من إقامة موثّقة. يوجد {more} غيرها.",
+        "reviews_intro": "كل بطاقة أدناه تقييم حقيقي منشور على Airbnb من إقامة موثّقة، منقول كما هو. هذه {shown} من {total}.",
         "verified_badge": "Airbnb · إقامة موثّقة",
         "filter_all": "الكل",
+        "show_all": "عرض كل التقييمات ({total})",
         "themes": {"cleanliness": "النظافة", "checkin": "تسجيل الدخول", "design": "التصميم",
                    "communication": "التواصل", "location": "الموقع", "value": "القيمة",
-                   "accuracy": "الدقة", "repeat": "ضيف عائد"},
+                   "accuracy": "الدقة", "service": "الخدمة", "quiet": "الهدوء",
+                   "space": "الاتساع", "family": "العائلة", "cinema": "سينما",
+                   "returning_guest": "ضيف عائد"},
         "os_title": "نظام التشغيل",
+        "os_intro": "معظم المُشغّلين يعملون بجدول وهاتف. عوجا تعمل ببنية بنيناها بأنفسنا، وبمعيار نلتزم به على كل وحدة دون استثناء.",
         "os_items": [
-            ("نظام إدارة موثوق", "تكامل كامل عبر واجهة برمجية لكل المحفظة.", "دقة في التقويم ومصدر واحد للحقيقة."),
-            ("منصة خاصة", "نحو ٤٩ألف سطر، مبنية لغرضها: جدولة التجهيز، توزيع المهام مع إعادة التوزيع عند الغياب، تسعير ديناميكي قابل للتفسير لكل تاريخ، سجلات تدقيق غير قابلة للتعديل، تذاكر موردين، تسوية مصروفات، تقارير ملاك آلية.", "جودة ثابتة على نطاق واسع، وتقارير قابلة للتحقق."),
-            ("OujaCT", "فريق تنظيف داخلي غير مُسند. نحو ١٤ألف عملية تجهيز.", "لهذا تبقى النظافة عند ٩٫٥٧ عبر أكثر من ١٠٠ وحدة."),
-            ("مساعد", "مساعد ضيوف بالذكاء الاصطناعي، تواصل قبل الحجز بالعربية والإنجليزية.", "استجابة أسرع وتصعيد أقل."),
-            ("عوجا إيليت", "قاعدة ولاء تضم أكثر من ٤٬٥٠٠ عضو.", "الآلية خلف معدل العودة."),
-            ("الانتشار", "أكثر من ١٠٠ مليون مشاهدة، وأكثر من ٧٠ألف متابع عبر تيك توك وسناب شات.", "الوحدات الجديدة تنطلق لجمهور جاهز، لا من الصفر."),
+            ("فحص قبل كل وصول", "التنظيف مزيج من فرق داخلية وأخرى خارجية موثوقة، لكن المعيار واحد لا يتغير: فريق عوجا نفسه يفحص كل وحدة وفق قائمة تحقّق قبل دخول الضيف، في كل مرة، أيًّا كان من نظّفها.", "لهذا تبقى النظافة عند ٩٫٥٧ عبر أكثر من ١٠٠ وحدة، لا لمن يمسك الممسحة."),
+            ("نظام إدارة موثوق ومتكامل", "كل وحدة على نظام إدارة أملاك احترافي بتكامل كامل عبر واجهة برمجية: تقويم واحد، صندوق رسائل واحد، مزامنة فورية للقنوات، وبلا حجوزات مزدوجة بين Airbnb والحجز المباشر.", "مصدر واحد للحقيقة لكل حجز وسعر ورسالة."),
+            ("منصتنا الخاصة، نحو ٤٩ألف سطر", "مبنية لغرضها وتدير العمل يوميًا: جدولة التجهيز، توزيع المهام الذي يعيد التوزيع فورًا عند غياب أحد، تسعير ديناميكي بسبب مكتوب لكل تاريخ، سجلات تدقيق غير قابلة للتعديل، تذاكر موردين، تسوية مصروفات، وتقارير ملاك آلية.", "جودة ثابتة على نطاق واسع، وتقارير يستطيع المالك التحقق منها فعلًا."),
+            ("مساعد، مساعدنا الداخلي", "مساعد ضيوف بالذكاء الاصطناعي يجيب على أسئلة ما قبل الحجز بالعربية والإنجليزية على مدار الساعة، ويحوّل لموظف فور أن يلزم.", "إجابات أسرع، تصعيد أقل، ولا شيء يضيع في الليل."),
+            ("انتشار يسبق الحجز", "أكثر من ١٠٠ مليون مشاهدة وأكثر من ٧٠ألف متابع عبر تيك توك وسناب شات، موجّهة للمسافر السعودي بالعربية.", "الوحدة الجديدة تنطلق لجمهور جاهز، لا من الصفر."),
+            ("عوجا إيليت", "فئة محدودة بالدعوة لأكثر ضيوفنا قيمة، أقل من ١٪ ممن يقيمون معنا.", "ليست برنامج ولاء جماهيري؛ قائمة قصيرة نعتني بها عن قرب."),
         ],
         "compliance_title": "المكانة",
         "compliance": [
@@ -273,7 +285,7 @@ def _stat(value, lang):
     return value  # already localized upstream
 
 
-def build_hero(t, m, lang):
+def build_hero(t, m, lang, turnovers):
     stays = render.fmt_int(m.get("reservations_total", 0), lang)
     nights = render.fmt_int(m.get("guest_nights", 0), lang)
     guests = render.fmt_int(m.get("unique_guests", 0), lang)
@@ -283,6 +295,7 @@ def build_hero(t, m, lang):
     chips = "".join(
         '<span class="chip">%s</span>' % _e(s
              .replace("{stays}", stays).replace("{nights}", nights)
+             .replace("{turnovers}", turnovers)
              .replace("{guests}", guests).replace("{reviews}", reviews)
              .replace("{rating}", rating))
         for s in t["strip"]
@@ -329,33 +342,49 @@ def _svg_open(w, h, label):
 
 
 def build_distribution(t, m, lang):
+    perfect = m.get("perfect_share", 0)
+    rest = max(0.0, 1 - perfect)
+    pct = render.fmt_pct(perfect, lang)
     dist = m.get("rating_distribution") or {}
-    rows = []
+
+    # If a full live distribution exists, draw every score honestly; otherwise the
+    # honest two-segment split from perfect_share. Either way, big number up top.
     if len(dist) > 1:
         total = sum(dist.values()) or 1
+        segs = []
         for score in range(10, 0, -1):
             c = dist.get(str(score), 0)
             if c:
-                rows.append((str(score) + "/10", c / total, render.fmt_int(c, lang)))
+                segs.append((c / total, "%s/10" % score, render.fmt_int(c, lang)))
     else:
-        perfect = m.get("perfect_share", 0)
-        rows = [(t["dist_perfect"], perfect, render.fmt_pct(perfect, lang)),
-                (t["dist_rest"], max(0.0, 1 - perfect), render.fmt_pct(max(0.0, 1 - perfect), lang))]
-    bars = ""
-    y = 8
-    rh, gap, maxw, x0 = 30, 14, 300, 150
-    for label, frac, val in rows:
-        w = max(2, int(round(frac * maxw)))
-        bars += (
-            '<text x="%d" y="%d" class="c-lab" text-anchor="end">%s</text>'
-            '<rect x="%d" y="%d" width="%d" height="16" rx="4" class="c-bar"></rect>'
-            '<text x="%d" y="%d" class="c-val">%s</text>'
-        ) % (x0 - 10, y + 13, _e(label), x0, y, w, x0 + w + 8, y + 13, _e(val))
-        y += rh + gap
-    svg = _svg_open(480, y + 4, t["dist_title"]) + bars + "</svg>"
-    alt = " · ".join("%s: %s" % (lab, val) for lab, _, val in rows)
-    return '<figure class="fig">%s<figcaption>%s</figcaption></figure>' % (
-        svg, _e(alt))
+        segs = [(perfect, t["dist_perfect"], pct),
+                (rest, t["dist_rest"], render.fmt_pct(rest, lang))]
+
+    seg_html = ""
+    for i, (frac, lab, val) in enumerate(segs):
+        seg_html += (
+            '<span class="dist-seg dist-seg-%d" style="flex:%d 1 0" '
+            'title="%s: %s"></span>'
+        ) % (0 if i == 0 else 1, max(1, int(round(frac * 1000))), _e(lab), _e(val))
+
+    legend = ""
+    for i, (frac, lab, val) in enumerate(segs[:4]):
+        legend += ('<li><span class="dot dot-%d"></span>%s <b>%s</b></li>'
+                   % (0 if i == 0 else 1, _e(lab), _e(val)))
+
+    avg = render.fmt_dec(m.get("rating_avg_5", 0), lang)
+    nrev = render.fmt_int(m.get("reviews_published", 0), lang)
+    alt = "%s %s · %s %s" % (t["dist_perfect"], pct, t["dist_rest"], render.fmt_pct(rest, lang))
+    foot = t["dist_foot"].replace("{avg}", avg).replace("{n}", nrev)
+    return (
+        '<div class="dist">'
+        '<div class="dist-head"><span class="dist-big num">%s</span>'
+        '<span class="dist-cap">%s</span></div>'
+        '<div class="dist-bar" role="img" aria-label="%s">%s</div>'
+        '<ul class="dist-legend">%s</ul>'
+        '<p class="dist-foot num">%s</p>'
+        '</div>'
+    ) % (_e(pct), _e(t["dist_perfect"]), _e(alt), seg_html, legend, _e(foot))
 
 
 def build_categories(t, m, lang):
@@ -387,8 +416,8 @@ def build_growth(t, m, lang):
         return ""
     counts = [row.get("count", 0) for row in q]
     maxc = max(counts) or 1
-    W, H = 560, 300
-    padL, padR, padT, padB = 40, 40, 30, 46
+    W, H = 900, 320
+    padL, padR, padT, padB = 20, 20, 34, 48
     plotW = W - padL - padR
     plotH = H - padT - padB
     n = len(q)
@@ -455,43 +484,62 @@ def build_record(t, m, lang):
 
 
 def build_reviews(t, reviews, lang):
-    more = render.fmt_int(2633 - len(reviews), lang)
-    intro = t["reviews_intro"].replace("{more}", more)
-    # theme filter chips (only themes we render)
-    theme_keys = ["cleanliness", "checkin", "design", "communication", "location", "value", "repeat"]
+    total_published = 2633
+    shown = render.fmt_int(len(reviews), lang)
+    total = render.fmt_int(total_published, lang)
+    intro = t["reviews_intro"].replace("{shown}", shown).replace("{total}", total)
+
+    # theme chips — only themes that actually occur, in a sensible order, most-covered first
+    present = set()
+    for r in reviews:
+        present.update(r.get("themes", []))
+    preferred = ["cleanliness", "communication", "location", "design", "checkin",
+                 "value", "returning_guest", "service", "quiet", "space", "family", "cinema"]
+    theme_keys = [k for k in preferred if k in present and k in t["themes"]]
     chips = '<button class="tfilter on" data-theme="all" type="button">%s</button>' % _e(t["filter_all"])
     for k in theme_keys:
         chips += '<button class="tfilter" data-theme="%s" type="button">%s</button>' % (k, _e(t["themes"][k]))
+
+    # featured first are the default-visible set; the rest load on demand
+    ordered = sorted(reviews, key=lambda r: (not r.get("featured", False),))
+    n_featured = sum(1 for r in reviews if r.get("featured"))
+    initial = n_featured or 30
     cards = ""
-    for r in reviews:
+    for i, r in enumerate(ordered):
         rlang = r.get("lang", "en")
         rdir = "rtl" if rlang == "ar" else "ltr"
-        themes = " ".join(r.get("themes", []))
+        extra = " extra" if i >= initial else ""
         cards += (
-            '<article class="review" data-themes="%s" lang="%s" dir="%s">'
+            '<article class="review%s" data-themes="%s" lang="%s" dir="%s">'
             '<p class="r-text">%s</p>'
             '<div class="r-meta">'
             '<span class="r-name">%s</span>'
-            '<span class="r-dot">·</span>'
+            '<span class="r-dot" aria-hidden="true">·</span>'
             '<span class="r-date">%s</span>'
             '<bdi class="r-listing">%s</bdi>'
             '<span class="r-badge">%s</span>'
             '</div></article>'
         ) % (
-            _e(themes), _e(rlang), rdir,
+            extra, _e(" ".join(r.get("themes", []))), _e(rlang), rdir,
             _e(r.get("text", "")),
             _e(r.get("name", "")),
             _e(render.localize_digits(r.get("date", ""), lang)),
             _e(r.get("listing", "")),
             _e(t["verified_badge"]),
         )
+    show_all = t["show_all"].replace("{total}", shown)
+    more_btn = ""
+    if len(ordered) > initial:
+        more_btn = ('<div class="reviews-more"><button class="btn ghost" type="button" '
+                    'data-show-all>%s</button></div>') % _e(show_all)
     return (
         '<section class="block reviews" id="reviews"><h2>%s</h2>'
         '<p class="intro">%s</p>'
         '<div class="tfilters" role="group" aria-label="filter">%s</div>'
-        '<div class="review-wall">%s</div>'
+        '<div class="review-wall collapsed">%s</div>'
+        '%s'
         '</section>'
-    ) % (_e(t["reviews_title"]), _e(intro), chips, cards)
+    ) % (_e(t["reviews_title"]), _e(intro), chips, cards, more_btn)
 
 
 def build_os(t):
@@ -500,8 +548,9 @@ def build_os(t):
         items += (
             '<div class="os-item"><h3>%s</h3><p>%s</p><p class="means">%s</p></div>'
         ) % (_e(name), _e(what), _e(means))
-    return '<section class="block"><h2>%s</h2><div class="os-grid">%s</div></section>' % (
-        _e(t["os_title"]), items)
+    intro = '<p class="os-intro">%s</p>' % _e(t["os_intro"]) if t.get("os_intro") else ""
+    return '<section class="block"><h2>%s</h2>%s<div class="os-grid">%s</div></section>' % (
+        _e(t["os_title"]), intro, items)
 
 
 def build_compliance(t, cr, lang):
@@ -668,7 +717,7 @@ section{scroll-margin-top:72px}
 
 .router{padding:34px 0 6px}
 .router-title{font-size:15px;font-weight:600;letter-spacing:.02em;color:var(--ink-3);margin:0 0 16px}
-.router-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.router-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
 .router-card{display:flex;flex-direction:column;gap:4px;padding:20px;background:var(--paper);
   border:1px solid var(--line);border-radius:var(--r);text-decoration:none;position:relative;
   transition:transform .25s var(--ease),border-color .25s var(--ease),box-shadow .25s var(--ease)}
@@ -689,9 +738,26 @@ html[dir=rtl] .router-card:hover .rc-go{transform:scaleX(-1) translateX(0)}
 .note{font-size:14px;color:var(--ink-3);margin:12px 0 0}
 .fig{margin:0}
 .fig .chart{width:100%;height:auto;overflow:visible}
-.fig-hero .chart{max-width:620px}
+.fig-hero .chart{max-width:none;width:100%;display:block}
 figcaption{font-size:14px;color:var(--ink-3);margin-top:10px}
-.growth-cap{font-size:16px;color:var(--ink);font-weight:600;margin-top:14px}
+.growth-cap{font-size:clamp(16px,2vw,19px);color:var(--ink);font-weight:700;margin-top:16px;letter-spacing:-0.01em}
+/* distribution — a big honest number, one segmented bar, supporting stats */
+.dist{display:flex;flex-direction:column;gap:14px}
+.dist-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.dist-big{font-size:clamp(40px,6vw,58px);font-weight:700;line-height:1;letter-spacing:-0.03em}
+.dist-cap{font-size:15px;color:var(--ink-2);font-weight:600}
+.dist-bar{display:flex;height:16px;border-radius:8px;overflow:hidden;gap:2px;background:var(--cream)}
+.dist-seg{display:block;height:100%}
+.dist-seg-0{background:var(--gold)}
+.dist-seg-1{background:var(--gold-soft)}
+.dist-legend{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--ink-2)}
+.dist-legend li{display:flex;align-items:center;gap:7px}
+.dist-legend b{font-variant-numeric:tabular-nums}
+.dot{width:9px;height:9px;border-radius:3px;flex:none}
+.dot-0{background:var(--gold)}
+.dot-1{background:var(--gold-soft);border:1px solid var(--line-2)}
+.dist-foot{font-size:13px;color:var(--ink-3);margin:0}
+.os-intro{max-width:660px;color:var(--ink-2);margin:-8px 0 22px;font-size:17px}
 .c-lab{font-size:13px;fill:var(--ink-2)}
 .c-val{font-size:13px;fill:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 .c-track{fill:var(--gold-soft)}
@@ -715,8 +781,10 @@ figcaption{font-size:14px;color:var(--ink-3);margin-top:10px}
 .tfilter.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .review-wall{columns:3 280px;column-gap:16px}
 .review{break-inside:avoid;margin:0 0 16px;background:var(--paper);border:1px solid var(--line);
-  border-radius:var(--rs);padding:18px;transition:opacity .25s var(--ease)}
+  border-radius:var(--rs);padding:18px}
 .review.hide{display:none}
+.review-wall.collapsed .review.extra{display:none}
+.reviews-more{margin-top:8px;text-align:center}
 .r-text{margin:0 0 12px;font-size:15px;line-height:1.7}
 .r-meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-3)}
 .r-name{font-weight:600;color:var(--ink-2)}
@@ -842,13 +910,29 @@ __BODY__
         });
     });
   });
-  // review theme filter
+  // review wall: theme filter + show-all
+  var wall = document.querySelector(".review-wall");
   var filters = document.querySelectorAll(".tfilter");
   var cards = document.querySelectorAll(".review");
+  var moreBtn = document.querySelector("[data-show-all]");
+  var expanded = false;
+  if (moreBtn){
+    moreBtn.addEventListener("click", function(){
+      expanded = true;
+      if (wall){ wall.classList.remove("collapsed"); }
+      var box = moreBtn.parentNode;
+      if (box){ box.style.display = "none"; }
+    });
+  }
   filters.forEach(function(f){
     f.addEventListener("click", function(){
       var theme = f.getAttribute("data-theme");
       filters.forEach(function(x){ x.classList.toggle("on", x === f); });
+      // a filter reveals every match; only the unfiltered "all" view stays collapsed
+      if (wall){ wall.classList.toggle("collapsed", theme === "all" && !expanded); }
+      if (moreBtn && moreBtn.parentNode){
+        moreBtn.parentNode.style.display = (theme === "all" && !expanded) ? "" : "none";
+      }
       cards.forEach(function(card){
         var themes = (card.getAttribute("data-themes") || "").split(" ");
         var show = theme === "all" || themes.indexOf(theme) !== -1;
@@ -874,14 +958,16 @@ def render_page(lang, base="", links=None):
         "wa": links.get("wa", "#"),
         "email": links.get("email", "oujaresidence@gmail.com"),
     }
+    turnovers = "14,000+"
+    if lang == "ar":
+        turnovers = render.localize_digits(turnovers.replace(",", "٬"), "ar")
     body = (
-        build_hero(t, m, lang)
+        build_hero(t, m, lang, turnovers)
         + build_router(t)
         + build_what(t)
         + build_record(t, m, lang)
         + build_reviews(t, blob["reviews"], lang)
         + build_os(t)
-        + build_compliance(t, cr, lang)
         + build_tracks(t, cr, lang)
         + build_close(t, cr, lang, links)
     )

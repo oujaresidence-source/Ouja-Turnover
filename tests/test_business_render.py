@@ -59,7 +59,7 @@ class PageDataAssembly(unittest.TestCase):
         for key in ("metrics", "manual", "reviews", "lang", "as_of"):
             self.assertIn(key, blob)
         self.assertEqual(blob["lang"], "en")
-        self.assertEqual(len(blob["reviews"]), 30)
+        self.assertGreaterEqual(len(blob["reviews"]), 100)
 
     def test_contains_emoji_detects_and_ignores_correctly(self):
         self.assertTrue(render.contains_emoji("great \U0001f44d"))
