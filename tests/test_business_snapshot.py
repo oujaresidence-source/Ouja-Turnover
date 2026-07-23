@@ -42,14 +42,26 @@ class Retention(unittest.TestCase):
         self.assertEqual(archives_to_prune(names, today=today, retain_days=400), [])
 
 
+def _fetch_with_data(**_):
+    return {"as_of": "2026-07-23", "channel": "airbnb",
+            "window": {"start": "2024-07-23", "end": "2026-07-23"},
+            "listings": [{"id": 1, "name": "A", "created": "2024-08-01", "active": True,
+                          "district": "Al Malqa", "bedrooms": 1, "property_type": "Apartment"}],
+            "reservations": [{"id": 1, "guest_key": "ali", "arrival": "2024-09-01",
+                              "departure": "2024-09-03", "listing_id": 1, "status": "new",
+                              "channel": "airbnb"}],
+            "reviews": []}
+
+
+def _fetch_empty(**_):
+    return {"as_of": "2026-07-23", "channel": "airbnb",
+            "window": {"start": "2024-07-23", "end": "2026-07-23"},
+            "listings": [], "reservations": [], "reviews": []}
+
+
 class Orchestration(unittest.TestCase):
     def test_build_and_write_saves_current_and_archive(self):
         saved = {}
-
-        def fake_fetch(**_):
-            return {"as_of": "2026-07-23", "channel": "airbnb",
-                    "window": {"start": "2024-07-23", "end": "2026-07-23"},
-                    "listings": [], "reservations": [], "reviews": []}
 
         def fake_save(name, obj):
             saved[name] = obj
@@ -57,23 +69,33 @@ class Orchestration(unittest.TestCase):
 
         res = build_and_write(
             today=datetime.date(2026, 7, 23),
-            fetch=fake_fetch, save_json=fake_save,
+            fetch=_fetch_with_data, save_json=fake_save,
             list_archives=lambda: [], delete=lambda n: None,
         )
         self.assertIn("metrics_snapshot.json", saved)
         self.assertIn("metrics_snapshot_2026-07-23.json", saved)
         # both writes are the SAME computed dict (page and archive can't disagree)
         self.assertEqual(saved["metrics_snapshot.json"], saved["metrics_snapshot_2026-07-23.json"])
-        self.assertEqual(saved["metrics_snapshot.json"]["reservations_total"], 0)
+        self.assertEqual(saved["metrics_snapshot.json"]["reservations_total"], 1)
         self.assertEqual(res["ok"], True)
+
+    def test_empty_fetch_is_not_persisted(self):
+        # A failed/empty live fetch must NEVER overwrite good data with zeros.
+        saved = {}
+        res = build_and_write(
+            today=datetime.date(2026, 7, 23),
+            fetch=_fetch_empty, save_json=lambda n, o: saved.__setitem__(n, o) or True,
+            list_archives=lambda: [], delete=lambda n: None,
+        )
+        self.assertEqual(saved, {})
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["error"], "empty_fetch")
 
     def test_build_and_write_prunes_stale_archives(self):
         deleted = []
         build_and_write(
             today=datetime.date(2026, 7, 23),
-            fetch=lambda **_: {"as_of": "2026-07-23", "channel": "airbnb",
-                               "window": {"start": "2024-07-23", "end": "2026-07-23"},
-                               "listings": [], "reservations": [], "reviews": []},
+            fetch=_fetch_with_data,
             save_json=lambda n, o: True,
             list_archives=lambda: ["metrics_snapshot_2024-01-01.json",
                                    "metrics_snapshot_2026-07-23.json"],

@@ -71,13 +71,25 @@ class Renders(unittest.TestCase):
             self.assertIn("AggregateRating", self.html[lang])
             self.assertIn('property="og:title"', self.html[lang])
 
-    def test_four_tracks_and_forms_render(self):
+    def test_tracks_render_without_owners_and_without_forms(self):
         for lang in ("en", "ar"):
-            for tid in ("platforms", "corporate", "owners", "suppliers"):
+            for tid in ("platforms", "corporate", "suppliers"):
                 self.assertIn('id="%s"' % tid, self.html[lang])
-            # corporate + supplier forms present, posting handled client-side
-            self.assertIn('data-kind="lead"', self.html[lang])
-            self.assertIn('data-kind="proposal"', self.html[lang])
+            # owners track is hidden for now (owner request)
+            self.assertNotIn('id="owners"', self.html[lang])
+            self.assertNotIn('data-track="owners"', self.html[lang])
+            # forms are hidden for now — no lead/proposal form in the DOM
+            self.assertNotIn('data-kind="lead"', self.html[lang])
+            self.assertNotIn('data-kind="proposal"', self.html[lang])
+            self.assertNotIn('class="lead-form"', self.html[lang])
+
+    def test_no_exact_listing_count_and_no_cr_or_hostaway(self):
+        for lang in ("en", "ar"):
+            h = self.html[lang]
+            self.assertNotIn("67 listings", h)
+            self.assertNotIn("Hostaway", h)          # "trusted PMS" instead
+            self.assertNotIn("7050158810", h)         # CR number removed
+            self.assertNotIn("Commercial Registration", h)
 
     def test_thirty_reviews_with_theme_filter(self):
         for lang in ("en", "ar"):

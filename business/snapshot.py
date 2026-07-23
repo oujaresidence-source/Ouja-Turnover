@@ -57,6 +57,12 @@ def build_and_write(today=None, fetch=fetch_snapshot, compute=compute_metrics,
         raw = fetch(**(fetch_kwargs or {}))
         metrics = compute(raw)
 
+        # A failed live fetch computes all-zeros. Never persist that — it would
+        # overwrite good data (or the verified fallback) with zeros on the page.
+        if not metrics.get("reservations_total") and not metrics.get("reviews_published"):
+            result["error"] = "empty_fetch"
+            return result
+
         def _save(name, obj):
             if save_json is not None:
                 return bool(save_json(name, obj))

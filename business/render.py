@@ -89,7 +89,9 @@ def load_metrics(state_dir=None):
     """Latest metrics_snapshot.json from STATE_DIR, else the verified §4 fallback."""
     state_dir = state_dir or os.environ.get("STATE_DIR", "/data")
     snap = _load_json(os.path.join(state_dir, "metrics_snapshot.json"), None)
-    if isinstance(snap, dict) and snap.get("reservations_total") is not None:
+    # A zero/empty snapshot means the live fetch failed — NEVER show zeros to a
+    # diligence reader. Fall back to the verified §4 numbers instead.
+    if isinstance(snap, dict) and snap.get("reservations_total"):
         return snap
     return _load_json(os.path.join(_DATA, "verified_fallback.json"), {})
 

@@ -312,7 +312,8 @@ def fetch_snapshot(as_of=None, window_start=None, window_end=None,
                 "bedrooms": l.get("bedroomsNumber"),
                 "property_type": l.get("propertyType"),
             })
-    except Exception:
+    except Exception as e:
+        print("[business] fetch listings failed:", repr(e))
         listings = []
 
     # reservations (confirmed only)
@@ -330,15 +331,20 @@ def fetch_snapshot(as_of=None, window_start=None, window_end=None,
                 "status": r.get("status"),
                 "channel": r.get("channelName"),
             })
-    except Exception:
+    except Exception as e:
+        print("[business] fetch reservations failed:", repr(e))
         reservations = []
 
     # reviews
     reviews = []
     try:
         reviews = [_norm_review(v) for v in (fetch_reviews() or [])]
-    except Exception:
+    except Exception as e:
+        print("[business] fetch reviews failed:", repr(e))
         reviews = []
+
+    print("[business] snapshot fetch: listings=%d reservations=%d reviews=%d (window %s..%s)"
+          % (len(listings), len(reservations), len(reviews), start, end))
 
     return {
         "as_of": as_of,

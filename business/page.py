@@ -27,7 +27,7 @@ COPY = {
         "title": "Ouja Residence — operating record",
         "meta_desc": "Ouja Residence operates short-stay residences in Riyadh. Two years, {stays} stays, {rating} out of 5. The verified operating record.",
         "hero_line": "Two years. {stays} stays. {rating} out of 5.",
-        "hero_sub": "Ouja Residence operates short-stay residences in Riyadh — 60+ branded units, one in-house team, one operating system.",
+        "hero_sub": "Ouja Residence operates short-stay residences in Riyadh — 100+ branded units, one in-house team, one operating system.",
         "strip": ["{stays} stays", "{nights} nights", "{guests} guests", "{reviews} reviews", "{rating}★"],
         "as_of_prefix": "as of", "source": "source", "method": "method",
         "src_hostaway": "Hostaway · Airbnb channel", "src_internal": "internal",
@@ -35,7 +35,6 @@ COPY = {
         "router": [
             ("platforms", "You run a booking platform", "Supply, quality, pipeline"),
             ("corporate", "You need housing for your people", "Inventory, rates, invoicing"),
-            ("owners", "You own or are building units", "Operating model, owner reporting"),
             ("suppliers", "You want to sell to or work with us", "Scale, procurement, contact"),
         ],
         "what_title": "What Ouja is",
@@ -63,20 +62,18 @@ COPY = {
                    "accuracy": "Accuracy", "repeat": "Returning guest"},
         "os_title": "The operating system",
         "os_items": [
-            ("Hostaway PMS", "Full API integration across the portfolio.", "Calendar accuracy and one source of truth."),
+            ("Trusted PMS", "Full API integration across the portfolio.", "Calendar accuracy and one source of truth."),
             ("Proprietary platform", "~49,000 lines, purpose-built: turnover scheduling, staff assignment with absence-driven redistribution, dynamic pricing with per-date explainability, append-only audit logs, vendor ticketing, expense reconciliation, automated owner reporting.", "Predictable quality at scale, verifiable reporting."),
-            ("OujaCT", "In-house cleaning team, not outsourced. ~14,000 turnovers.", "Why cleanliness holds at 9.57 across 67 listings."),
+            ("OujaCT", "In-house cleaning team, not outsourced. ~14,000 turnovers.", "Why cleanliness holds at 9.57 across 100+ listings."),
             ("Musaed", "In-house AI guest assistant, pre-booking communication in Arabic and English.", "Faster response, fewer escalations."),
             ("Ouja Elite", "4,500+ member loyalty database.", "The mechanism behind the repeat rate."),
             ("Reach", "100M+ views, 70,000+ followers across TikTok and Snapchat.", "New listings launch to a warm audience, not a cold start."),
         ],
-        "compliance_title": "Standing & compliance",
+        "compliance_title": "Standing",
         "compliance": [
-            "Commercial Registration {cr} — عوجا لإدارة الأملاك والمقاولات",
-            "ZATCA VAT registration",
-            "Ministry of Tourism hospitality licensing",
-            "Insurance coverage in force (guest damage / liability)",
-            "Management agreements and master leases across the portfolio",
+            "A registered Saudi company",
+            "VAT-registered operations",
+            "A two-year operating track record",
         ],
         "tracks_title": "Tracks",
         "tracks": {
@@ -88,7 +85,7 @@ COPY = {
                     "Content aimed at specific inventory, seasons, or campaigns",
                     "A growth pipeline: units live now, more contracted for the next 12 months",
                     "A quality profile that lowers support load: 9.77 communication, 9.74 check-in",
-                    "One operator, one account, 67 listings — one relationship instead of sixty",
+                    "One operator, one account, 100+ listings — one relationship instead of many",
                     "Event capacity: Riyadh Season, Formula 1, Expo 2030 build-up",
                 ],
                 "cta": "Talk to us about supply", "form": None,
@@ -108,13 +105,13 @@ COPY = {
             },
             "owners": {
                 "h": "Owners & developers",
-                "angle": "We already do this for 60+ units. Here is the record, the model, and the reporting.",
+                "angle": "We already do this for 100+ units. Here is the record, the model, and the reporting.",
                 "points": [
                     "Revenue-share model (80/20), management agreements or master lease",
                     "Automated bilingual owner performance reporting",
                     "Dynamic pricing with per-date explainability, not guesswork",
                     "Furnishing, branding, photography, listing creation handled in-house",
-                    "A two-year record: 11 to 67 listings without the rating dropping",
+                    "A two-year record: growing to 100+ listings without the rating dropping",
                 ],
                 "cta": "Bring us your building", "form": None,
             },
@@ -122,7 +119,7 @@ COPY = {
                 "h": "Vendors, suppliers & service providers",
                 "angle": "This track exists to save both sides time. Most inbound pitches fail because they do not know the shape of the operation.",
                 "points": [
-                    "Scale: 60+ units, 67 active listings, ~14,000 turnovers, 11,307 guest nights",
+                    "Scale: 100+ listings, ~14,000 turnovers, 11,307 guest nights",
                     "Recurring categories: insurance, laundry, furniture and FF&E, consumables, maintenance, fintech and payments, PropTech and software",
                     "What a first message needs: category, pricing model, minimum commitment, Saudi entity status, existing clients at similar scale",
                 ],
@@ -149,7 +146,7 @@ COPY = {
         "title": "عوجا الريزيدنس — السجل التشغيلي",
         "meta_desc": "عوجا الريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض. سنتان، {stays} إقامة، {rating} من ٥.",
         "hero_line": "سنتان. {stays} إقامة. {rating} من ٥.",
-        "hero_sub": "عوجا الريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض — أكثر من ٦٠ وحدة تحت علامة واحدة، وفريق داخلي واحد، ونظام تشغيل واحد.",
+        "hero_sub": "عوجا الريزيدنس تُشغّل وحدات الإقامة القصيرة في الرياض — أكثر من ١٠٠ وحدة تحت علامة واحدة، وفريق داخلي واحد، ونظام تشغيل واحد.",
         "strip": ["{stays} إقامة", "{nights} ليلة", "{guests} ضيف", "{reviews} تقييم", "{rating}★"],
         "as_of_prefix": "حتى", "source": "المصدر", "method": "الطريقة",
         "src_hostaway": "هوستاوي · قناة Airbnb", "src_internal": "داخلي",
@@ -157,7 +154,6 @@ COPY = {
         "router": [
             ("platforms", "تُدير منصة حجوزات", "العرض، الجودة، خط النمو"),
             ("corporate", "تحتاج سكنًا لفريقك", "الوحدات، الأسعار، الفوترة"),
-            ("owners", "تملك أو تبني وحدات", "نموذج التشغيل، تقارير الملاك"),
             ("suppliers", "ترغب بالبيع لنا أو العمل معنا", "الحجم، المشتريات، التواصل"),
         ],
         "what_title": "ما هي عوجا",
@@ -185,20 +181,18 @@ COPY = {
                    "accuracy": "الدقة", "repeat": "ضيف عائد"},
         "os_title": "نظام التشغيل",
         "os_items": [
-            ("نظام Hostaway", "تكامل كامل عبر واجهة برمجية لكل المحفظة.", "دقة في التقويم ومصدر واحد للحقيقة."),
+            ("نظام إدارة موثوق", "تكامل كامل عبر واجهة برمجية لكل المحفظة.", "دقة في التقويم ومصدر واحد للحقيقة."),
             ("منصة خاصة", "نحو ٤٩ألف سطر، مبنية لغرضها: جدولة التجهيز، توزيع المهام مع إعادة التوزيع عند الغياب، تسعير ديناميكي قابل للتفسير لكل تاريخ، سجلات تدقيق غير قابلة للتعديل، تذاكر موردين، تسوية مصروفات، تقارير ملاك آلية.", "جودة ثابتة على نطاق واسع، وتقارير قابلة للتحقق."),
-            ("OujaCT", "فريق تنظيف داخلي غير مُسند. نحو ١٤ألف عملية تجهيز.", "لهذا تبقى النظافة عند ٩٫٥٧ عبر ٦٧ وحدة."),
+            ("OujaCT", "فريق تنظيف داخلي غير مُسند. نحو ١٤ألف عملية تجهيز.", "لهذا تبقى النظافة عند ٩٫٥٧ عبر أكثر من ١٠٠ وحدة."),
             ("مساعد", "مساعد ضيوف بالذكاء الاصطناعي، تواصل قبل الحجز بالعربية والإنجليزية.", "استجابة أسرع وتصعيد أقل."),
             ("عوجا إيليت", "قاعدة ولاء تضم أكثر من ٤٬٥٠٠ عضو.", "الآلية خلف معدل العودة."),
             ("الانتشار", "أكثر من ١٠٠ مليون مشاهدة، وأكثر من ٧٠ألف متابع عبر تيك توك وسناب شات.", "الوحدات الجديدة تنطلق لجمهور جاهز، لا من الصفر."),
         ],
-        "compliance_title": "المكانة والامتثال",
+        "compliance_title": "المكانة",
         "compliance": [
-            "السجل التجاري {cr} — عوجا لإدارة الأملاك والمقاولات",
-            "تسجيل ضريبة القيمة المضافة (زكاة)",
-            "ترخيص الضيافة من وزارة السياحة",
-            "تغطية تأمينية سارية (أضرار الضيوف / المسؤولية)",
-            "اتفاقيات إدارة وعقود إيجار رئيسية عبر المحفظة",
+            "شركة سعودية مُسجّلة",
+            "منشأة مسجّلة في ضريبة القيمة المضافة",
+            "سجل تشغيلي يمتد سنتين",
         ],
         "tracks_title": "المسارات",
         "tracks": {
@@ -210,7 +204,7 @@ COPY = {
                     "محتوى موجّه لوحدات أو مواسم أو حملات محددة",
                     "خط نمو: وحدات قائمة الآن، وأخرى متعاقد عليها للأشهر ال١٢ القادمة",
                     "ملف جودة يخفّض عبء الدعم: ٩٫٧٧ تواصل، ٩٫٧٤ تسجيل دخول",
-                    "مُشغّل واحد، حساب واحد، ٦٧ وحدة — علاقة واحدة بدل ستين",
+                    "مُشغّل واحد، حساب واحد، أكثر من ١٠٠ وحدة — علاقة واحدة بدل الكثير",
                     "قدرة على الفعاليات: موسم الرياض، فورمولا ١، التحضير لإكسبو ٢٠٣٠",
                 ],
                 "cta": "تحدّث معنا عن العرض", "form": None,
@@ -230,13 +224,13 @@ COPY = {
             },
             "owners": {
                 "h": "الملاك والمطوّرون",
-                "angle": "نفعل هذا فعلًا لأكثر من ٦٠ وحدة. هذا هو السجل والنموذج والتقارير.",
+                "angle": "نفعل هذا فعلًا لأكثر من ١٠٠ وحدة. هذا هو السجل والنموذج والتقارير.",
                 "points": [
                     "نموذج مشاركة في الإيراد (٨٠/٢٠)، اتفاقية إدارة أو إيجار رئيسي",
                     "تقارير أداء للملاك آلية ثنائية اللغة",
                     "تسعير ديناميكي قابل للتفسير لكل تاريخ، لا تخمين",
                     "تأثيث وعلامة وتصوير وإنشاء إعلانات داخليًا",
-                    "سجل سنتين: من ١١ إلى ٦٧ وحدة دون أن ينخفض التقييم",
+                    "سجل سنتين: النمو إلى أكثر من ١٠٠ وحدة دون أن ينخفض التقييم",
                 ],
                 "cta": "قدّم مبناك", "form": None,
             },
@@ -244,7 +238,7 @@ COPY = {
                 "h": "الموردون ومقدّمو الخدمات",
                 "angle": "هذا المسار موجود لتوفير وقت الطرفين. معظم العروض تفشل لأنها لا تعرف شكل العملية.",
                 "points": [
-                    "الحجم: أكثر من ٦٠ وحدة، ٦٧ إعلانًا نشطًا، نحو ١٤ألف عملية تجهيز، ١١٬٣٠٧ ليلة",
+                    "الحجم: أكثر من ١٠٠ وحدة، نحو ١٤ألف عملية تجهيز، ١١٬٣٠٧ ليلة",
                     "فئات متكررة: تأمين، غسيل، أثاث، مستهلكات، صيانة، مدفوعات، تقنية عقارات وبرمجيات",
                     "ما يحتاجه أول تواصل: الفئة، نموذج التسعير، الحد الأدنى للالتزام، وضع الكيان السعودي، عملاء بحجم مماثل",
                 ],
@@ -544,30 +538,19 @@ def _form_fields(t, kind):
 
 def build_tracks(t, cr, lang):
     out = '<section class="tracks" id="tracks"><h2 class="sr-only">%s</h2>' % _e(t["tracks_title"])
-    for tid in ("platforms", "corporate", "owners", "suppliers"):
+    for tid in ("platforms", "corporate", "suppliers"):  # owners track hidden for now
         tr = t["tracks"][tid]
         points = "".join("<li>%s</li>" % _e(p) for p in tr["points"])
-        form_html = ""
-        if tr.get("form"):
-            fields, submit, sent = _form_fields(t, tr["form"])
-            form_html = (
-                '<form class="lead-form" data-kind="%s" novalidate>'
-                '<div class="f-grid">%s</div>'
-                '<p class="f-err" hidden>%s</p>'
-                '<button class="btn" type="submit" data-sent="%s">%s</button>'
-                '<p class="f-ok" hidden>%s</p>'
-                '</form>'
-            ) % (tr["form"], fields, _e(t["form_err"]), _e(sent), _e(tr["cta"]), _e(sent))
-            cta_html = ""
-        else:
-            cta_html = '<a class="btn" href="#content">%s</a>' % _e(tr["cta"])
+        # Forms are hidden for now (owner request) — every track's CTA points to
+        # the contact block. The form builder stays in place for when they return.
+        cta_html = '<a class="btn" href="#close">%s</a>' % _e(tr["cta"])
         out += (
             '<article class="track" id="%s" data-track-panel="%s">'
             '<h3 class="track-h">%s</h3>'
             '<p class="track-angle">%s</p>'
             '<ul class="track-points">%s</ul>'
-            '%s%s</article>'
-        ) % (tid, tid, _e(tr["h"]), _e(tr["angle"]), points, cta_html, form_html)
+            '%s</article>'
+        ) % (tid, tid, _e(tr["h"]), _e(tr["angle"]), points, cta_html)
     out += "</section>"
     return out
 
@@ -580,14 +563,14 @@ def build_close(t, cr, lang, links):
         '<a class="btn ghost" href="%s">%s</a>'
         '<a class="btn ghost" href="mailto:%s">%s</a>'
         '</div>'
-        '<p class="contact-meta">%s %s · %s</p>'
+        '<p class="contact-meta">%s</p>'
         '</section>'
     ) % (
         _e(t["close_title"]),
         _e(links["book"]), _e(t["book"]),
         _e(links["wa"]), _e(t["wa"]),
         _e(links["email"]), _e(t["email_l"]),
-        _e(t["contact_cr"]), _e(render.localize_digits(cr, lang)), _e(t["contact_addr"]),
+        _e(t["contact_addr"]),
     )
 
 
@@ -595,14 +578,12 @@ def build_close(t, cr, lang, links):
 # SEO / structured data
 # --------------------------------------------------------------------------- #
 def build_head_extra(t, m, lang, base, desc):
-    cr = "7050158810"
     jsonld = {
         "@context": "https://schema.org",
         "@type": ["Organization", "LocalBusiness"],
         "name": "Ouja Residence",
         "url": base + ("/business/ar" if lang == "ar" else "/business"),
         "areaServed": "Riyadh, Saudi Arabia",
-        "identifier": cr,
         "aggregateRating": {
             "@type": "AggregateRating",
             "ratingValue": m.get("rating_avg_5", 0),
