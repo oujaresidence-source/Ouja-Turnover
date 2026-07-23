@@ -46447,11 +46447,9 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
     +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
-    +'<div class="mq-or"><span>أو</span></div>'
-    +'<a class="mq-entry" href="/stay/match"><span class="mq-entry-x">'
-    +'<span class="mq-entry-t">ما تدري وين تسكن؟ خلّنا نختار لك</span>'
-    +'<span class="mq-entry-s">جاوب على ٤ أسئلة ونرشّح لك من <b>'+(cfg.count||'')+'</b> شقة — ١٠ ثواني</span>'
-    +'</span><span class="mq-entry-a" aria-hidden="true">←</span></a>'
+    /* Stay Match entry PAUSED (owner request 2026-07-23): the /stay/match route and
+       all its code stay intact, but no guest-facing link points to it. Re-enable by
+       restoring this card + the search zero-results button below it. */
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
     +'<div id="feat" class="sec" style="margin-top:4px"></div>';
   var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
@@ -46861,7 +46859,7 @@ function viewSearch(){
       V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
     } else {
       track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><a class="btn" href="/stay/match">خلّنا نختار لك</a><a class="btn ghost" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
+      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
       if(ci&&co){loadSimilar(ty);}
     }
   }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
