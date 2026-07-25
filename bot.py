@@ -3282,6 +3282,9 @@ bot = commands.Bot(command_prefix="!ouja ", intents=intents)
 import ops_audit                    # read-only server audit: !ouja-audit
 ops_audit.setup(bot)
 
+import ops_archive, sys as _oa_sys  # Drive archive + guarded purge: !ouja-archive / !ouja-purge
+ops_archive.setup(bot, _oa_sys.modules[__name__])   # hand over the LIVE module (never `import bot`)
+
 class CleaningDoneView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)   # persistent across restarts
@@ -52679,6 +52682,70 @@ class _TkCloseConfirm(discord.ui.View):
     async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="تم التراجع — التذكرة باقية مفتوحة.", view=None)
 
+_TK_LOCK_PAUSE = 0.4       # seconds between permission writes (Discord rate-limits these)
+
+async def _tk_lock_channel(ch):
+    """Really lock a closed ticket. Returns (locked_role_names, admin_role_names).
+
+    WHY THIS IS NOT ONE LINE: denying @everyone alone does NOT work. Discord resolves
+    a role-level ALLOW on send_messages ABOVE an @everyone DENY, and every ops role
+    inherits such an allow from the ticket category — which is why «مغلقة-صيانة-070-unit»
+    kept receiving messages for 30 days after it was closed (48 of them). So we resolve,
+    live, every non-admin role that can still write here and deny it on THIS channel only.
+
+    Two deliberate carve-outs:
+    * Administrator roles are skipped — Discord lets admins bypass channel overwrites
+      entirely. That is a Discord invariant, not something to code around; the closing
+      message says so out loud instead of pretending the room is sealed.
+    * Managed (bot/integration) roles and the bot's own roles are skipped, otherwise the
+      bot could not post or pin the closing notice, or ever reopen the ticket.
+
+    Every overwrite is MERGED into whatever the channel already had (overwrites_for +
+    overwrite=), never replaced: passing send_messages=False as a keyword would wipe an
+    existing view_channel deny and silently expose a private ticket to the whole server.
+    """
+    locked, admins = [], []
+    guild = getattr(ch, "guild", None)
+    if guild is None:
+        return locked, admins
+    everyone = getattr(guild, "default_role", None)
+    me = getattr(guild, "me", None)
+    my_role_ids = {getattr(r, "id", None) for r in (getattr(me, "roles", None) or [])}
+
+    if everyone is not None:
+        try:
+            ov = ch.overwrites_for(everyone)
+            ov.send_messages = False
+            await ch.set_permissions(everyone, overwrite=ov)
+            locked.append(getattr(everyone, "name", "@everyone"))
+        except Exception as e:
+            print("ticket lock error (@everyone):", e)
+
+    for role in list(getattr(guild, "roles", None) or []):
+        if everyone is not None and getattr(role, "id", None) == getattr(everyone, "id", None):
+            continue
+        perms = getattr(role, "permissions", None)
+        if perms is not None and getattr(perms, "administrator", False):
+            admins.append(getattr(role, "name", "?"))
+            continue
+        if getattr(role, "managed", False) or getattr(role, "id", None) in my_role_ids:
+            continue
+        try:
+            if not ch.permissions_for(role).send_messages:
+                continue                     # already can't write here — leave it alone
+        except Exception:
+            continue
+        try:
+            ov = ch.overwrites_for(role)
+            ov.send_messages = False
+            await ch.set_permissions(role, overwrite=ov)
+            locked.append(getattr(role, "name", "?"))
+        except Exception as e:
+            print("ticket lock error (role %s):" % getattr(role, "name", "?"), e)
+        if _TK_LOCK_PAUSE:
+            await asyncio.sleep(_TK_LOCK_PAUSE)
+    return locked, admins
+
 async def _tk_close(interaction):
     """Close a ticket channel (maint or RR): store + dashboard status, lock the
     room read-only, rename with مغلقة-, kill the card buttons. Channel is KEPT
@@ -52719,8 +52786,9 @@ async def _tk_close(interaction):
                     await m.edit(view=None)
             except Exception:
                 pass
+    admins = []
     try:
-        await ch.set_permissions(ch.guild.default_role, send_messages=False)
+        _locked, admins = await _tk_lock_channel(ch)
     except Exception as e:
         print("ticket lock error:", e)
     try:
@@ -52729,8 +52797,18 @@ async def _tk_close(interaction):
     except Exception as e:
         print("ticket rename error:", e)
     log_event("ops", f"أُغلقت تذكرة {ch.name} بواسطة {interaction.user}")
-    await ch.send(f"🔒 **أُغلقت التذكرة** بواسطة {interaction.user.mention}{dur_txt}",
-                  allowed_mentions=discord.AllowedMentions(users=True))
+    note = (f"🔒 **أُغلقت التذكرة** بواسطة {interaction.user.mention}{dur_txt}\n"
+            "هذي الغرفة صارت **للقراءة فقط** — أي مشكلة جديدة، حتى لو نفس الشقة، "
+            "افتحوا لها **تذكرة جديدة** عشان تتابع صح وما تضيع.")
+    if admins:
+        note += ("\n⚠️ ملاحظة: أصحاب صلاحية Administrator (" + "، ".join(admins[:4]) +
+                 ") يقدرون يكتبون هنا حتى بعد الإغلاق — هذا نظام ديسكورد نفسه، مو خلل عندنا. "
+                 "الرجاء عدم استخدام الغرفة المقفلة.")
+    msg = await ch.send(note, allowed_mentions=discord.AllowedMentions(users=True))
+    try:
+        await msg.pin()
+    except Exception as e:
+        print("ticket close pin error:", e)
 
 class MaintTicketView(discord.ui.View):
     """Lives on every maintenance-ticket card. Persistent across restarts."""
