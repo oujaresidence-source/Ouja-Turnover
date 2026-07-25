@@ -3279,6 +3279,9 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!ouja ", intents=intents)
 
+import ops_audit                    # read-only server audit: !ouja-audit
+ops_audit.setup(bot)
+
 class CleaningDoneView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)   # persistent across restarts
