@@ -4,6 +4,30 @@
 > and the specific traps that have caused real bugs. Follow the verification routine
 > before ever saying a change is "done."
 
+## Owner approval protocol
+
+The owner has no coding background and reviews by screenshot and plain language.
+Follow this on EVERY task, without being asked:
+
+**1. Plan before touching anything.** Before the first edit, reply with: what you
+understood the task to be; exactly which files you will change and roughly which
+lines; what could break if you get it wrong; anything you are unsure about. Then
+STOP and wait. Do not edit, create, delete, commit, or push until the owner approves.
+
+**2. Plain language only.** No jargon addressed to the owner. If a technical term is
+unavoidable, explain it in the same sentence. Arabic (Najdi) or English, matching
+whatever the owner used.
+
+**3. Never without explicit approval:** delete any file, channel, or data; push to
+GitHub (auto-deploys to Railway and hits the live business); change anything outside
+the files named in the approved plan; "while I was in there" improvements.
+
+**4. Report after.** What changed in plain words; the exact files and line counts
+touched; how to undo it in one step; what the owner should click or type to verify.
+
+**5. If the plan changes mid-task, stop and re-ask.** Discovering the job is bigger
+than expected is a reason to come back, not a reason to keep going.
+
 ## What this is
 A 24/7 Python bot for **Ouja Residence** (عوجا) — a Riyadh-based short-term-rental /
 property-management company running ~49–69 branded units across premium compounds,
