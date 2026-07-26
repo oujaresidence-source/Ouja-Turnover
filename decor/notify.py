@@ -15,7 +15,9 @@ from .host import HOST
 
 
 def dryrun():
-    return (os.environ.get("DECOR_DRYRUN", "1") or "1").strip() != "0"
+    """LIVE by default since 2026-07-26 — the owner asked for it to post for real. Set
+    DECOR_DRYRUN=1 in Railway to silence it again without a deploy."""
+    return (os.environ.get("DECOR_DRYRUN", "0") or "0").strip() == "1"
 
 
 def supervisor_role():

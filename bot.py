@@ -6047,6 +6047,51 @@ async def _decor_refresh_card(channel, order_id):
         print("[decor] card refresh failed (non-fatal):", e)
 
 
+async def _decor_ensure_home():
+    """Create #تنسيق-الحفلات at boot so the owner can SEE it immediately, instead of the
+    channel only materialising when the first guest happens to tap a package.
+
+    Idempotent on both counts: ensure_channel finds an existing channel rather than making a
+    second one, and the intro is written ONLY into a channel with no messages — so the
+    redeploy that happens on every push never repeats it."""
+    if not (DECOR_ENABLED and _HAS_DECOR) or _decor.notify.dryrun():
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
+        if ch is None:
+            return
+        async for _ in ch.history(limit=1):
+            return                      # already has messages — nothing to introduce
+        nl = chr(10)
+        intro = nl.join([
+            "🎀 **تنسيق الحفلات**",
+            "",
+            "هنا تجيكم اهتمامات الضيوف بباقات التنسيق من دليل الشقق.",
+            "",
+            "**المهم:** ضغط الضيف على «أنا مهتم» ما يفتح تذكرة ولا مهمة ولا يكلّف أحد — يجي سطر هنا وبس،"
+            " والمشرف هو اللي يقرر.",
+            "• «افتح الطلب» → يفتح روم خاص للطلب فيه كل الأزرار (معلومات الضيف، السعر، الإرسال، تم).",
+            "• «تجاهل» → ينتهي الموضوع.",
+            "",
+            "الشقة اللي ما فيها مسبح أو جاكوزي، الباقة توقف وتنبّهكم — وتقدرون تكمّلون، بس الطلب"
+            " بيحمل التنبيه معه للمنسّق.",
+            "",
+            "التنبيهات: الكيك قبل موعده بـ٦ ساعات، والتنسيق قبل وقت البداية بـ٣ ساعات.",
+        ])
+        msg = await ch.send(intro)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        print("[decor] home channel ready:", ch.name)
+    except Exception as e:
+        print("[decor] home channel setup skipped (non-fatal):", e)
+
+
 @tasks.loop(minutes=15)
 async def decor_warn_loop():
     """The clock. A late cake and a late decoration are different failures, so they warn
@@ -58746,6 +58791,10 @@ async def on_ready():
         cleaning_feedback_loop.start()
     if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
         decor_warn_loop.start()          # late decoration / late cake — separate warnings
+    try:
+        await _decor_ensure_home()       # make #تنسيق-الحفلات visible without waiting for a guest
+    except Exception as _dhe:
+        print("[decor] home channel skipped:", _dhe)
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:
