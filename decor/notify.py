@@ -112,14 +112,20 @@ def _missing_tokens(order):
 
 # ---------------- late warnings ----------------
 
-def late_warning(order, pack, kind="decor"):
-    who = "<@&%s>" % supervisor_role() if supervisor_role().isdigit() else "@%s" % supervisor_role()
+def late_warning(order, pack, kind="decor", mention="", overdue=False, due_at=""):
+    """`mention` is resolved by the Discord layer (a real role mention when the DEC role is
+    found by name, otherwise the plain text) — the wording lives here, the pinging there."""
+    who = mention or ("@%s" % supervisor_role())
     apt = order.get("apartment") or order.get("slug")
+    name = (pack or {}).get("name_ar") or ""
+    when = str(due_at or "").replace("T", " ")
     if kind == "cake":
-        return ("🍰 %s تنبيه: كيك %s (%s) قرب موعده وما انطلب بعد."
-                % (who, (pack or {}).get("name_ar") or "", apt))
-    return ("⏰ %s تنبيه: تنسيق %s (%s) قرب موعده والحالة: %s."
-            % (who, (pack or {}).get("name_ar") or "", apt, order.get("state")))
+        head = "🍰 %s كيك %s (%s) " % (who, name, apt)
+        head += "فات موعده!" if overdue else "قرب موعده وما انطلب بعد."
+        return head + ("  الموعد: %s" % when if when else "")
+    head = "⏰ %s تنسيق %s (%s) " % (who, name, apt)
+    head += "فات وقت البداية!" if overdue else "قرب وقت البداية وما انرسل للمنسّق."
+    return head + ("  يبدأ: %s" % when if when else "")
 
 
 def fire(kind, payload):

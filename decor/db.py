@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS decor_leads (
     dismissed_by    TEXT,
     dismissed_at    TEXT,
     dismiss_reason  TEXT,
+    msg_id          TEXT,                            -- the Discord message its buttons live on
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_decor_leads_status ON decor_leads(status, created_at);
@@ -124,8 +125,17 @@ def _ensure():
             return
         with closing(_bdb.connect()) as cx:
             cx.executescript(SCHEMA)
+            _migrate(cx)
             cx.commit()
         _inited.add(path)
+
+
+def _migrate(cx):
+    """Additive column migrations — CREATE TABLE IF NOT EXISTS never adds a column to a table
+    that already exists, and this package already shipped once."""
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(decor_leads)").fetchall()}
+    if "msg_id" not in cols:
+        cx.execute("ALTER TABLE decor_leads ADD COLUMN msg_id TEXT")
 
 
 def reset_init_cache():
@@ -238,6 +248,17 @@ def recent_lead(slug, pack_id, since_iso):
               (str(slug or "").lower(), str(pack_id or ""), since_iso))
 
 
+def set_lead_msg(lead_id, msg_id):
+    """Remember which Discord message carries this lead's buttons, so a click can find its
+    lead after a redeploy without any state in the button itself."""
+    execute("UPDATE decor_leads SET msg_id=? WHERE id=?", (str(msg_id), lead_id))
+    return lead(lead_id)
+
+
+def lead_by_msg(msg_id):
+    return q1("SELECT * FROM decor_leads WHERE msg_id=?", (str(msg_id),))
+
+
 def dismiss_lead(lead_id, by="", reason=""):
     execute("""UPDATE decor_leads SET status='dismissed', dismissed_by=?, dismissed_at=?,
                dismiss_reason=? WHERE id=? AND status='new'""",
@@ -281,6 +302,26 @@ def order(order_id):
         row["inputs"] = _j(row.get("inputs"), {})
         row["na_input_keys"] = _j(row.get("na_input_keys"), [])
     return row
+
+
+def order_by_thread(thread_id):
+    """Which order does this Discord thread belong to? This is how the buttons survive a
+    redeploy: they carry no id, the THREAD is the id."""
+    row = q1("SELECT * FROM decor_orders WHERE thread_id=?", (str(thread_id),))
+    if row:
+        row["inputs"] = _j(row.get("inputs"), {})
+        row["na_input_keys"] = _j(row.get("na_input_keys"), [])
+    return row
+
+
+def live_orders():
+    """Orders still capable of running late — what the warning clock walks."""
+    rows = q("""SELECT * FROM decor_orders
+                WHERE state NOT IN ('done','cancelled') AND deadline_at IS NOT NULL""")
+    for r in rows:
+        r["inputs"] = _j(r.get("inputs"), {})
+        r["na_input_keys"] = _j(r.get("na_input_keys"), [])
+    return rows
 
 
 def orders(state=None, limit=300):

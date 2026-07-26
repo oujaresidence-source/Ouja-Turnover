@@ -5519,6 +5519,13 @@ async def _decor_deliver(payload):
         ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
         if ch is None:
             return
+        if kind == "lead":
+            # The interest line, with its two buttons. We remember which MESSAGE carries them
+            # so a click months later — after any number of redeploys — still finds this lead.
+            msg = await ch.send(text, view=DecorLeadView())
+            if payload.get("lead_id"):
+                await asyncio.to_thread(_decor.db.set_lead_msg, payload["lead_id"], msg.id)
+            return
         if kind == "open":
             order_id = payload.get("order_id")
             try:
@@ -5527,6 +5534,8 @@ async def _decor_deliver(payload):
                 await th.send(text)
                 if order_id:
                     await asyncio.to_thread(_decor.db.update_order, order_id, thread_id=str(th.id))
+                    order = await asyncio.to_thread(_decor.db.order, order_id)
+                    await _decor_post_card(th, order, _decor_pack(order))
                 return
             except Exception as _te:                 # threads unavailable → never lose the message
                 print("[decor] thread create failed, posting in channel:", _te)
@@ -5544,6 +5553,538 @@ async def _decor_deliver(payload):
         await ch.send(text)
     except Exception as e:
         print("[decor] post failed (non-fatal):", e)
+
+# ===================== «تنسيق الحفلات» — the whole workflow, inside Discord =====================
+# The owner wanted the team to never need the dashboard. So every action the dashboard tab
+# offers exists here as a button, and the two clocks (decoration + cake) shout on their own.
+#
+# HOW THE BUTTONS SURVIVE A REDEPLOY: they carry NO id. A click inside a thread finds its
+# order by the THREAD id; a click on an interest line finds its lead by the MESSAGE id. Both
+# are stored in brain.db when the message is posted, so a button clicked weeks later — after
+# any number of restarts — still resolves. (The custom_ids are fixed strings, re-bound in
+# on_ready like every other view in this bot.)
+
+def _decor_role(guild):
+    """The DEC role object, found by id OR by name — the owner should not have to hunt for a
+    role id just to get a working ping."""
+    want = _decor.notify.supervisor_role()
+    if not guild:
+        return None
+    try:
+        if want.isdigit():
+            return guild.get_role(int(want))
+        low = want.lower()
+        for r in guild.roles:
+            if (r.name or "").lower() == low:
+                return r
+    except Exception:
+        pass
+    return None
+
+def _decor_mention(guild):
+    r = _decor_role(guild)
+    return r.mention if r is not None else ("@%s" % _decor.notify.supervisor_role())
+
+def _decor_may_press(interaction):
+    """DEC members and server admins. Everyone else gets a quiet ephemeral no."""
+    try:
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if perms is not None and (perms.administrator or perms.manage_guild):
+            return True
+        role = _decor_role(interaction.guild)
+        if role is None:                      # role not created yet — don't lock the team out
+            return True
+        return role in getattr(interaction.user, "roles", [])
+    except Exception:
+        return True
+
+def _decor_actor(interaction):
+    u = interaction.user
+    return getattr(u, "display_name", None) or getattr(u, "name", "") or "—"
+
+async def _decor_deny(interaction):
+    await interaction.response.send_message(
+        "هذي الأزرار لفريق %s فقط." % _decor.notify.supervisor_role(), ephemeral=True)
+
+def _decor_pack(order_or_lead):
+    try:
+        return _decor.packs.get((order_or_lead or {}).get("pack_id")) or {}
+    except Exception:
+        return {}
+
+
+class DecorInputsModal(discord.ui.Modal, title="معلومات الضيف"):
+    """Exactly the fields that are still missing, by name — never a vague 'add details'.
+    Discord allows 5 inputs per form; the biggest pack (Signature Silver) needs exactly 5."""
+    def __init__(self, order, missing):
+        super().__init__(timeout=600)
+        self.order_id = order["id"]
+        self.keys = []
+        for m in (missing or [])[:5]:
+            key = m.get("key")
+            self.keys.append(key)
+            self.add_item(discord.ui.TextInput(
+                label=(m.get("label_ar") or key)[:45], custom_id=key, required=False,
+                style=discord.TextStyle.short, max_length=200))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        vals = {}
+        for item in self.children:
+            if getattr(item, "value", "").strip():
+                vals[item.custom_id] = item.value.strip()
+        if not vals:
+            await interaction.response.send_message("ما كتبت شي.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await asyncio.to_thread(_decor.db.set_inputs, self.order_id, vals)
+        order = await asyncio.to_thread(_decor.db.order, self.order_id)
+        pack = _decor_pack(order)
+        cake = await asyncio.to_thread(_decor.db.cake_for_order, self.order_id)
+        if cake and cake.get("state") == "pending":
+            await asyncio.to_thread(_decor.db.update_cake, cake["id"],
+                                    flavor=(order.get("inputs") or {}).get("cake_flavor"),
+                                    writing=(order.get("inputs") or {}).get("cake_writing"))
+        chk = _decor.engine.dispatch_check(pack, order)
+        if chk["ok"] and order.get("state") == "awaiting_guest":
+            order = await asyncio.to_thread(_decor.db.update_order, self.order_id, state="ready")
+        await interaction.followup.send("انحفظ ✓ " + _decor_missing_line(pack, order), ephemeral=True)
+        await _decor_refresh_card(interaction.channel, self.order_id)
+
+
+class DecorPriceModal(discord.ui.Modal, title="السعر النهائي"):
+    """«تبدأ من» is advertising. Only what is typed here is ever counted as money."""
+    def __init__(self, order):
+        super().__init__(timeout=600)
+        self.order_id = order["id"]
+        self.add_item(discord.ui.TextInput(
+            label="السعر المتفق عليه (ر.س)", custom_id="final", required=True,
+            default=str(order.get("final_price_sar") or ""), max_length=12))
+        self.add_item(discord.ui.TextInput(
+            label="تكلفة المنسّق (اختياري)", custom_id="cost", required=False,
+            default=str(order.get("vendor_cost_sar") or ""), max_length=12))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        def num(v):
+            try:
+                return float(str(v).strip().replace(",", ""))
+            except (TypeError, ValueError):
+                return None
+        final = num(self.children[0].value)
+        cost = num(self.children[1].value)
+        if final is None or final <= 0:
+            await interaction.response.send_message("اكتب رقم صحيح للسعر.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await asyncio.to_thread(_decor.db.update_order, self.order_id,
+                                final_price_sar=final, vendor_cost_sar=cost)
+        order = await asyncio.to_thread(_decor.db.order, self.order_id)
+        pack = _decor_pack(order)
+        if _decor.engine.dispatch_check(pack, order)["ok"] and order.get("state") == "awaiting_guest":
+            await asyncio.to_thread(_decor.db.update_order, self.order_id, state="ready")
+        await interaction.followup.send("انحفظ ✓", ephemeral=True)
+        await _decor_refresh_card(interaction.channel, self.order_id)
+
+
+class DecorReasonModal(discord.ui.Modal, title="سبب التجاوز"):
+    """No override without a name and a reason — both are stored on the order forever."""
+    def __init__(self, lead_id, kind, message):
+        super().__init__(timeout=600)
+        self.lead_id = lead_id
+        self.kind = kind
+        self.src_message = message
+        self.add_item(discord.ui.TextInput(
+            label="ليش؟ (إلزامي)", custom_id="reason", required=True,
+            style=discord.TextStyle.paragraph, max_length=300))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await _decor_open_lead(interaction, self.lead_id, self.kind,
+                               self.children[0].value.strip(), self.src_message)
+
+
+class DecorOverrideView(discord.ui.View):
+    """Shown only to the supervisor who pressed «افتح الطلب» on a unit that cannot deliver.
+    Ephemeral and short-lived on purpose — the decision belongs to that moment."""
+    def __init__(self, lead_id, message):
+        super().__init__(timeout=600)
+        self.lead_id = lead_id
+        self.src_message = message
+
+    @discord.ui.button(label="القائمة غلط — الشقة فيها", style=discord.ButtonStyle.secondary)
+    async def correction(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            DecorReasonModal(self.lead_id, "correction", self.src_message))
+
+    @discord.ui.button(label="أدري ما فيها — كمّل", style=discord.ButtonStyle.danger)
+    async def accept_gap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            DecorReasonModal(self.lead_id, "accept_gap", self.src_message))
+
+
+class DecorLeadView(discord.ui.View):
+    """The interest line. Until someone presses «افتح الطلب» nothing exists — no ticket, no
+    task, nobody assigned. That is the owner's rule, and this view is where a human breaks it
+    on purpose."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ افتح الطلب", style=discord.ButtonStyle.success,
+                       custom_id="ouja_dec_open")
+    async def open_it(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        lead = await asyncio.to_thread(_decor.db.lead_by_msg, interaction.message.id)
+        if not lead:
+            return await interaction.response.send_message("ما لقيت الاهتمام.", ephemeral=True)
+        if lead.get("status") != "new":
+            return await interaction.response.send_message(
+                "هذا الاهتمام حالته: %s" % lead["status"], ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await _decor_open_lead(interaction, lead["id"], None, "", interaction.message)
+
+    @discord.ui.button(label="✖️ تجاهل", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_dec_dismiss")
+    async def dismiss(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        lead = await asyncio.to_thread(_decor.db.lead_by_msg, interaction.message.id)
+        if not lead or lead.get("status") != "new":
+            return await interaction.response.send_message("ما فيه شي أتجاهله.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await asyncio.to_thread(_decor.db.dismiss_lead, lead["id"], _decor_actor(interaction), "")
+        try:
+            await interaction.message.edit(
+                content=(interaction.message.content or "") + "\n\n— تجاهله %s"
+                        % _decor_actor(interaction), view=None)
+        except Exception:
+            pass
+        await interaction.followup.send("انتجاهل ✓", ephemeral=True)
+
+
+async def _decor_open_lead(interaction, lead_id, override_kind, reason, src_message):
+    """The gate, from Discord. Same engine call the dashboard makes — one rulebook."""
+    lead = await asyncio.to_thread(_decor.db.lead, lead_id)
+    if not lead or lead.get("status") != "new":
+        return await interaction.followup.send("هذا الاهتمام انفتح أو انتجاهل.", ephemeral=True)
+    pack = _decor_pack(lead)
+    if not pack:
+        return await interaction.followup.send("الباقة مو موجودة في الملف.", ephemeral=True)
+    actor = _decor_actor(interaction)
+    feats = await asyncio.to_thread(_decor.db.unit_features, lead["slug"])
+    chk = _decor.engine.open_check(pack, feats, override_kind=override_kind,
+                                   overridden_by=actor, reason=reason)
+    if not chk["allowed"]:
+        cap = _decor.engine.capability_check(pack, feats)
+        if chk["error"] in ("capability", "override_needs_who_and_why", "bad_override"):
+            msg = _decor.engine.capability_stamp(pack, cap.get("missing") or [], "", "",
+                                                 cap.get("verdict"))
+            return await interaction.followup.send(
+                msg + "\n\nتقدر تكمّل — بس وضّح وش تقصد:", ephemeral=True,
+                view=DecorOverrideView(lead_id, src_message))
+        return await interaction.followup.send("ما قدرت أفتح الطلب.", ephemeral=True)
+
+    ctx = await asyncio.to_thread(_decor.routes._context_for, lead["slug"])
+    if chk["learn_features"]:
+        await asyncio.to_thread(_decor.db.add_unit_features, lead["slug"],
+                                chk["learn_features"], actor)
+    deadline = _decor.routes._deadline_for(ctx, None)
+    dl = _decor.engine.deadlines(pack, deadline, _decor.packs.cake_lead_hours()) if deadline else {}
+    order = await asyncio.to_thread(
+        _decor.db.open_order, lead["id"], lead["slug"], lead["pack_id"], actor,
+        apartment=ctx.get("apartment"), listing_id=ctx.get("listing_id"),
+        reservation_id=ctx.get("reservation_id"), guest_name=ctx.get("guest_name"),
+        checkin_date=ctx.get("checkin_date"),
+        deadline_at=deadline.isoformat(timespec="minutes") if deadline else None,
+        work_start_at=dl["work_start"].isoformat(timespec="minutes") if dl else None,
+        na_input_keys=chk["na_input_keys"], capability_verdict=chk["verdict"],
+        capability_stamp=chk["stamp"], override_kind=override_kind,
+        overridden_by=actor if override_kind else None,
+        overridden_at=_decor.db.now_iso() if override_kind else None,
+        override_reason=reason or None)
+    await asyncio.to_thread(_decor.routes._sync_cake, order, pack)
+    order = await asyncio.to_thread(_decor.db.order, order["id"])
+
+    thread = await _decor_make_thread(interaction, order, pack)
+    try:
+        if src_message is not None:
+            await src_message.edit(
+                content=(src_message.content or "") + "\n\n— فتحه %s" % actor, view=None)
+    except Exception:
+        pass
+    where = thread.mention if thread is not None else "القناة"
+    await interaction.followup.send("انفتح الطلب ✓ — %s" % where, ephemeral=True)
+
+
+async def _decor_make_thread(interaction, order, pack):
+    """One thread per request. Threads, not channels — the ticket categories already hit
+    Discord's 50-channel cap once."""
+    ch = interaction.channel
+    if isinstance(ch, discord.Thread):
+        ch = ch.parent
+    try:
+        th = await ch.create_thread(name=_decor.notify.thread_name(order, pack),
+                                    type=discord.ChannelType.public_thread)
+        await asyncio.to_thread(_decor.db.update_order, order["id"], thread_id=str(th.id))
+        order = await asyncio.to_thread(_decor.db.order, order["id"])
+        await th.send(_decor.notify.thread_header(order, pack))
+        await _decor_post_card(th, order, pack)
+        return th
+    except Exception as e:
+        print("[decor] thread create failed:", e)
+        try:
+            await ch.send(_decor.notify.thread_header(order, pack))
+        except Exception:
+            pass
+        return None
+
+
+def _decor_missing_line(pack, order):
+    miss = _decor.engine.missing_inputs(pack, order.get("inputs") or {},
+                                        order.get("na_input_keys") or [])
+    chk = _decor.engine.dispatch_check(pack, order)
+    bits = []
+    if miss:
+        bits.append("ناقص: " + " · ".join((m.get("label_ar") or m.get("key")) for m in miss))
+    if chk.get("needs_price"):
+        bits.append("ناقص: السعر النهائي")
+    return "  ".join(bits) if bits else "كل شي جاهز ✓"
+
+
+class DecorOrderView(discord.ui.View):
+    """The request card, inside its own thread. No ids on the buttons — the thread IS the id."""
+    def __init__(self, has_cake=True):
+        super().__init__(timeout=None)
+        if not has_cake:
+            for item in list(self.children):
+                if getattr(item, "custom_id", "").startswith("ouja_dec_cake"):
+                    self.remove_item(item)
+
+    async def _order(self, interaction):
+        o = await asyncio.to_thread(_decor.db.order_by_thread, interaction.channel.id)
+        if not o:
+            await interaction.response.send_message("ما لقيت الطلب لهذا الروم.", ephemeral=True)
+        return o
+
+    @discord.ui.button(label="📝 معلومات الضيف", style=discord.ButtonStyle.primary,
+                       custom_id="ouja_dec_inputs", row=0)
+    async def inputs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        o = await self._order(interaction)
+        if not o:
+            return
+        pack = _decor_pack(o)
+        miss = _decor.engine.missing_inputs(pack, o.get("inputs") or {},
+                                            o.get("na_input_keys") or [])
+        if not miss:
+            return await interaction.response.send_message(
+                "كل معلومات الضيف كاملة ✓", ephemeral=True)
+        await interaction.response.send_modal(DecorInputsModal(o, miss))
+
+    @discord.ui.button(label="💰 السعر النهائي", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_dec_price", row=0)
+    async def price(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        o = await self._order(interaction)
+        if not o:
+            return
+        await interaction.response.send_modal(DecorPriceModal(o))
+
+    @discord.ui.button(label="🚚 أرسل للمنسّق", style=discord.ButtonStyle.success,
+                       custom_id="ouja_dec_dispatch", row=0)
+    async def dispatch(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        o = await self._order(interaction)
+        if not o:
+            return
+        pack = _decor_pack(o)
+        chk = _decor.engine.dispatch_check(pack, o)
+        if not chk["ok"]:
+            names = [(m.get("label_ar") or m.get("key")) for m in chk["missing_inputs"]]
+            if chk["needs_price"]:
+                names.append("السعر النهائي")
+            return await interaction.response.send_message(
+                "ما ينرسل ناقص. باقي: " + " · ".join(names), ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        o = await asyncio.to_thread(_decor.db.update_order, o["id"], state="dispatched",
+                                    dispatched_by=_decor_actor(interaction),
+                                    dispatched_at=_decor.db.now_iso())
+        try:
+            await interaction.channel.send(_decor.notify.vendor_message(o, pack))
+        except Exception:
+            pass
+        await interaction.followup.send("انرسل ✓ — انسخ النص فوق وأرسله للمنسّق.", ephemeral=True)
+        await _decor_refresh_card(interaction.channel, o["id"])
+
+    @discord.ui.button(label="✅ تم التنفيذ", style=discord.ButtonStyle.success,
+                       custom_id="ouja_dec_done", row=0)
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        o = await self._order(interaction)
+        if not o:
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await asyncio.to_thread(_decor.db.update_order, o["id"], state="done",
+                                done_by=_decor_actor(interaction),
+                                done_at=_decor.db.now_iso())
+        await interaction.followup.send("تم ✓", ephemeral=True)
+        await _decor_refresh_card(interaction.channel, o["id"])
+
+    @discord.ui.button(label="🗑️ إلغاء", style=discord.ButtonStyle.danger,
+                       custom_id="ouja_dec_cancel", row=0)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        o = await self._order(interaction)
+        if not o:
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await asyncio.to_thread(_decor.db.update_order, o["id"], state="cancelled",
+                                cancel_reason="ألغي من ديسكورد")
+        cake = await asyncio.to_thread(_decor.db.cake_for_order, o["id"])
+        if cake and cake.get("state") == "pending":
+            await asyncio.to_thread(_decor.db.update_cake, cake["id"], state="cancelled")
+        await interaction.followup.send("انلغى ✓", ephemeral=True)
+        await _decor_refresh_card(interaction.channel, o["id"])
+
+    @discord.ui.button(label="🍰 الكيك انطلب", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_dec_cake_ordered", row=1)
+    async def cake_ordered(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._cake(interaction, "ordered")
+
+    @discord.ui.button(label="🍰 الكيك وصل", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_dec_cake_delivered", row=1)
+    async def cake_delivered(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._cake(interaction, "delivered")
+
+    async def _cake(self, interaction, state):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        o = await self._order(interaction)
+        if not o:
+            return
+        cake = await asyncio.to_thread(_decor.db.cake_for_order, o["id"])
+        if not cake:
+            return await interaction.response.send_message(
+                "هذي الباقة ما فيها كيك.", ephemeral=True)
+        pack = _decor_pack(o)
+        if state == "ordered":
+            ready = _decor.engine.cake_ready(pack, o)
+            if ready["applies"] and not ready["ok"]:
+                return await interaction.response.send_message(
+                    "الكيك ما ينطلب قبل النكهة والكتابة. باقي: " + " · ".join(ready["missing"]),
+                    ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        fields = {"state": state}
+        if state == "ordered":
+            fields["ordered_by"] = _decor_actor(interaction)
+            fields["ordered_at"] = _decor.db.now_iso()
+        else:
+            fields["delivered_at"] = _decor.db.now_iso()
+        await asyncio.to_thread(_decor.db.update_cake, cake["id"], **fields)
+        await interaction.followup.send("انحفظ ✓", ephemeral=True)
+        await _decor_refresh_card(interaction.channel, o["id"])
+
+
+def _decor_card_text(order, pack, cake):
+    state_ar = {"awaiting_guest": "بانتظار معلومات الضيف", "ready": "جاهز للإرسال",
+                "dispatched": "مُرسل للمنسّق", "done": "تم التنفيذ", "cancelled": "ملغي"}
+    lines = ["**%s — %s**" % ((pack or {}).get("name_ar") or "",
+                              order.get("apartment") or order.get("slug")),
+             "الحالة: %s" % state_ar.get(order.get("state"), order.get("state") or "")]
+    if order.get("deadline_at"):
+        lines.append("الموعد: %s" % order["deadline_at"].replace("T", " "))
+    if cake:
+        cake_ar = {"pending": "ما انطلب", "ordered": "انطلب", "delivered": "وصل",
+                   "cancelled": "ملغي"}
+        lines.append("🍰 الكيك: %s — موعده %s"
+                     % (cake_ar.get(cake.get("state"), cake.get("state")),
+                        str(cake.get("due_at") or "").replace("T", " ")))
+    if order.get("final_price_sar"):
+        lines.append("السعر النهائي: %s ر.س" % order["final_price_sar"])
+    lines.append(_decor_missing_line(pack, order))
+    if order.get("capability_stamp"):
+        lines.append("")
+        lines.append(order["capability_stamp"])
+    return "\n".join(lines)
+
+
+async def _decor_post_card(thread, order, pack):
+    cake = await asyncio.to_thread(_decor.db.cake_for_order, order["id"])
+    try:
+        msg = await thread.send(_decor_card_text(order, pack, cake),
+                                view=DecorOrderView(has_cake=bool(cake)))
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        return msg
+    except Exception as e:
+        print("[decor] card post failed:", e)
+        return None
+
+
+async def _decor_refresh_card(channel, order_id):
+    """Re-render the pinned card in place so the thread always shows the truth."""
+    try:
+        order = await asyncio.to_thread(_decor.db.order, order_id)
+        if not order:
+            return
+        pack = _decor_pack(order)
+        cake = await asyncio.to_thread(_decor.db.cake_for_order, order_id)
+        text = _decor_card_text(order, pack, cake)
+        finished = order.get("state") in ("done", "cancelled")
+        view = None if finished else DecorOrderView(has_cake=bool(cake))
+        async for m in channel.history(limit=25, oldest_first=True):
+            if m.author.id == bot.user.id and m.components:
+                await m.edit(content=text, view=view)
+                return
+        await channel.send(text, view=view)
+    except Exception as e:
+        print("[decor] card refresh failed (non-fatal):", e)
+
+
+@tasks.loop(minutes=15)
+async def decor_warn_loop():
+    """The clock. A late cake and a late decoration are different failures, so they warn
+    separately and each warns ONCE (the escalated flag), inside that order's own thread."""
+    if not (DECOR_ENABLED and _HAS_DECOR) or _decor.notify.dryrun():
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        now = datetime.now(TZ).replace(tzinfo=None)
+        orders = await asyncio.to_thread(_decor.db.live_orders)
+        for o in orders:
+            cake = await asyncio.to_thread(_decor.db.cake_for_order, o["id"])
+            for w in _decor.engine.warn_due(o, cake, now):
+                pack = _decor_pack(o)
+                text = _decor.notify.late_warning(o, pack, w["kind"], _decor_mention(guild),
+                                                  w.get("overdue"), w.get("due_at"))
+                ch = None
+                if o.get("thread_id") and str(o["thread_id"]).isdigit():
+                    ch = guild.get_thread(int(o["thread_id"]))
+                if ch is None:
+                    cat = await get_category(guild)
+                    ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
+                if ch is None:
+                    continue
+                await ch.send(text)
+                if w["kind"] == "cake":
+                    await asyncio.to_thread(_decor.db.update_cake, w["cake_id"], escalated=1)
+                else:
+                    await asyncio.to_thread(_decor.db.update_order, o["id"], escalated=1)
+    except Exception as e:
+        print("[decor] warn loop error (non-fatal):", e)
+
+
+@decor_warn_loop.before_loop
+async def _decor_warn_ready():
+    await bot.wait_until_ready()
 
 def _finchat_notify(payload):
     """finchat escalation ping — schedules the async Discord post. Never raises into a handler."""
@@ -57991,6 +58532,9 @@ async def on_ready():
     bot.add_view(WatchmanGapView())      # «الرقيب» guide-gap "Added" buttons (re-bind after restart)
     bot.add_view(WatchmanNameView())     # «الرقيب» name-matching user pickers (re-bind after restart)
     bot.add_view(WatchmanCleanupView())  # «الرقيب» bulk "delete old closed tickets" button
+    if _HAS_DECOR:
+        bot.add_view(DecorLeadView())    # «تنسيق الحفلات» interest buttons
+        bot.add_view(DecorOrderView())   # request-thread buttons (thread id = the order id)
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)
@@ -58179,6 +58723,8 @@ async def on_ready():
         guest_summary_loop.start()
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
         cleaning_feedback_loop.start()
+    if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
+        decor_warn_loop.start()          # late decoration / late cake — separate warnings
     if HEADS_UP_TEST:
         print("HEADS_UP_TEST=1 — posting a heads-up preview now (test run)")
         try:

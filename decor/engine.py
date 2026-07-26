@@ -282,7 +282,44 @@ def cake_ready(pack, order):
     return {"applies": True, "ok": not missing, "missing": missing}
 
 
-# --- 4. money -----------------------------------------------------------------------
+# --- 4. running late ----------------------------------------------------------------
+
+WARN_DECOR_HOURS = 3      # before work must START (deadline minus the pack's setup time)
+WARN_CAKE_HOURS = 6       # before the cake's own, earlier deadline
+
+def _dt(v):
+    if isinstance(v, datetime.datetime):
+        return v
+    try:
+        return datetime.datetime.fromisoformat(str(v))
+    except (ValueError, TypeError):
+        return None
+
+
+def warn_due(order, cake, now, decor_hours=WARN_DECOR_HOURS, cake_hours=WARN_CAKE_HOURS):
+    """Which warnings does this order deserve RIGHT NOW? Pure — the clock passes `now` in.
+
+    A late cake and a late decoration are different failures, so they are decided and
+    escalated separately, and each is returned at most once (the caller stamps `escalated`).
+    A dispatched decoration is not late; an ordered/delivered cake is not late.
+    """
+    out = []
+    if (order or {}).get("state") in ("done", "cancelled"):
+        return out
+    if cake and not cake.get("escalated") and cake.get("state") == "pending":
+        due = _dt(cake.get("due_at"))
+        if due and now >= due - datetime.timedelta(hours=cake_hours):
+            out.append({"kind": "cake", "due_at": cake.get("due_at"),
+                        "overdue": now >= due, "cake_id": cake.get("id")})
+    if order and not order.get("escalated") and order.get("state") not in ("dispatched",):
+        start = _dt(order.get("work_start_at")) or _dt(order.get("deadline_at"))
+        if start and now >= start - datetime.timedelta(hours=decor_hours):
+            out.append({"kind": "decor", "due_at": order.get("work_start_at") or order.get("deadline_at"),
+                        "overdue": now >= start, "order_id": order.get("id")})
+    return out
+
+
+# --- 5. money -----------------------------------------------------------------------
 
 def order_money(pack, order):
     """`price_from_sar` is advertising («تبدأ من») and is NEVER revenue. Only the
