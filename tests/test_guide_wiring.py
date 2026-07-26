@@ -34,7 +34,7 @@ class GuideTemplateTest(unittest.TestCase):
         self.assertIn('theme-color" content="#1A130D"', TPL)     # dark warm-brown theme
         self.assertIn("حياكم الله", TPL)                          # landing welcome
         self.assertIn("لحظات عوجا", TPL)                          # Ouja Moments
-        self.assertIn("tel:+966551324214", TPL)                   # 24/7 hotline
+        self.assertIn("tel:+966557581797", TPL)                   # 24/7 hotline
         for n in ("911", "999", "998", "997", "993", "996"):     # Saudi emergency numbers
             self.assertIn('tel:' + n, TPL)
         for price in ("1,450", "998", "799", "670", "598"):      # event packages, verbatim
