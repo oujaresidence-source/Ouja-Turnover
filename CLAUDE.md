@@ -174,6 +174,42 @@ Superpowers = the PROCESS (brainstorm → plan → TDD → build → verify, no 
 audit → critique → polish → harden every view (kill AI-slop); emil-design-eng = the FEEL
 (micro-interactions, motion, the drawer/transition craft). Use them on every UI change.
 
+## Decoration orders «تنسيق الحفلات» — the `decor/` package
+Guests tap «أنا مهتم» on one of the five Ouja Moments packages in `/guide/{slug}`; the button
+POSTs to `/api/decor/inquire` **and** opens WhatsApp exactly as before.
+- **THE OWNER RULE (2026-07-26), absolute:** a guest's tap creates an **interest and nothing
+  else** — no ticket, no thread, no task, no assignment, nobody notified but the DEC
+  supervisor. **Only the supervisor opens a request.** Enforced structurally, not by
+  discipline: `decor_leads` and `decor_orders` are separate tables (the lead table has no
+  assignee/deadline/thread columns), `db.open_order` is the only insert into orders and is
+  unreachable from the public endpoint, and `tests/test_decor_flow.py` +
+  `tests/test_decor_routes.py` count every other table before/after a tap. Do not "simplify"
+  the two tables into one.
+- **Capability gate is a STOP, not a wall.** Diamond needs a pool, Signature Silver a jacuzzi,
+  Silver a jacuzzi *or* bathtub (`jacuzzi_or_bathtub`, split on `_or_`). Missing → the
+  supervisor is refused *unless* they pass an override: `correction` (our sheet was wrong →
+  writes the feature, clean order) or `accept_gap` (feature really absent → order is
+  **stamped** forever). Unknown unit ≠ missing feature — `db.unit_features` returns `None` vs
+  `[]` on purpose; never collapse them. Every override records who + why or it is refused.
+- **One stamp, three surfaces.** `engine.capability_stamp` is the ONLY producer of that Arabic
+  warning; the thread header, the dashboard row and the vendor message all render it so they
+  cannot drift. `accept_gap` also marks feature-bound guest questions «ما ينطبق»
+  (`na_input_keys`) — without it, Signature Silver on a jacuzzi-less unit waits forever for
+  «عبارة الجاكوزي» and can never dispatch.
+- **Cake = its own job** (`decor_cake_tasks`): every pack but Bronze, due `cake.lead_hours`
+  (24h, read from the JSON) before the decoration deadline, own state and own escalation.
+- **Two prices:** `price_from_sar` is advertising and is NEVER revenue; only the supervisor's
+  `final_price_sar` counts.
+- `decor_packs.json` is owner-editable **live**: `$STATE_DIR/decor_packs.json` wins over the
+  repo seed and is re-read on mtime change; a broken edit keeps serving the last good copy.
+- Env: `DECOR_ENABLED`(1), `DECOR_DRYRUN`(**1** — posts nothing; flip to 0 for real Discord
+  threads), `DECOR_SUPERVISOR_ROLE`(DEC), `DECOR_OPS_CHANNEL`(تنسيق-الحفلات). Orders open
+  Discord **threads**, not channels — deliberately, because ticket channels already hit the
+  50-per-category cap once.
+- `/api/decor/inquire` is in `_ROLE_EXEMPT_WRITES` (public guest). Every other `/api/decor/*`
+  is double-gated: login + `decor` permission. **Existing non-admin users see the tab only
+  after the owner ticks it in الصلاحيات** — the whitelist model denies unknown tabs.
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log

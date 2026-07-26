@@ -95,6 +95,15 @@ except Exception as _guide_err:        # pragma: no cover
     _guide = None
     _HAS_GUIDE = False
 
+# Decoration orders «تنسيق الحفلات» — leads from the guide, requests opened only by DEC.
+try:
+    import decor as _decor
+    _HAS_DECOR = True
+except Exception as _decor_err:         # pragma: no cover
+    print("[decor] import failed (decoration orders disabled, bot unaffected):", _decor_err)
+    _decor = None
+    _HAS_DECOR = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -5420,6 +5429,14 @@ SCHEDULE_NOTIFY_DRYRUN = os.environ.get("SCHEDULE_NOTIFY_DRYRUN", "1") in ("1", 
 SCHEDULE_DIGEST_HOUR   = int(os.environ.get("SCHEDULE_DIGEST_HOUR", "8"))       # 08:00 Riyadh
 SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")  # ops summary channel
 
+# ============= «تنسيق الحفلات» decoration orders =============
+# A guest tapping «أنا مهتم» in the guide records an INTEREST only — no ticket, no thread, no
+# task, nobody assigned. Only the DEC supervisor opens a request (owner rule, 2026-07-26).
+# DECOR_DRYRUN=1 (the default, read inside decor.notify) computes and logs but posts nothing;
+# flip it to 0 when the owner is ready for the threads to appear.
+DECOR_ENABLED      = os.environ.get("DECOR_ENABLED", "1") in ("1", "true", "True", "yes")
+DECOR_OPS_CHANNEL  = os.environ.get("DECOR_OPS_CHANNEL", "تنسيق-الحفلات")
+
 # ============= Ops Watchdog «الرقيب التشغيلي» — 30-min ops health cycle =============
 # Read-only monitor: posts a phone-first summary to WATCHDOG_CHANNEL every cycle and pings
 # instantly (once per flag) on criticals. LIVE by default (owner go-live 2026-07-05) — set
@@ -5476,6 +5493,57 @@ async def _schedule_deliver(payload):
             await ch.send("```" + nl + payload["channel"] + nl + "```")
     except Exception as e:
         print("[schedule] ops summary failed:", e)
+
+def _decor_notify(payload):
+    """HOST.notify hook for «تنسيق الحفلات» — schedules the async post. Never raises into a
+    request handler: a Discord problem must not stop the supervisor from opening an order."""
+    if not (DECOR_ENABLED and _HAS_DECOR):
+        return
+    try:
+        asyncio.create_task(_decor_deliver(payload))
+    except RuntimeError:
+        pass
+
+async def _decor_deliver(payload):
+    """kind='lead'     → one line in the decoration channel (interest only, no thread)
+       kind='open'     → the supervisor opened a request: its own THREAD (threads have no
+                         50-per-category cap, unlike the ticket channels)
+       kind='dispatch' → the vendor text, posted inside that order's thread"""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    kind = payload.get("kind")
+    text = payload.get("text") or ""
+    try:
+        cat = await get_category(guild)
+        ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
+        if ch is None:
+            return
+        if kind == "open":
+            order_id = payload.get("order_id")
+            try:
+                th = await ch.create_thread(name=payload.get("thread_name") or "تنسيق",
+                                            type=discord.ChannelType.public_thread)
+                await th.send(text)
+                if order_id:
+                    await asyncio.to_thread(_decor.db.update_order, order_id, thread_id=str(th.id))
+                return
+            except Exception as _te:                 # threads unavailable → never lose the message
+                print("[decor] thread create failed, posting in channel:", _te)
+                await ch.send(text)
+                return
+        if kind == "dispatch":
+            order_id = payload.get("order_id")
+            row = await asyncio.to_thread(_decor.db.order, order_id) if order_id else None
+            tid = (row or {}).get("thread_id")
+            if tid:
+                th = guild.get_thread(int(tid)) if str(tid).isdigit() else None
+                if th is not None:
+                    await th.send(text)
+                    return
+        await ch.send(text)
+    except Exception as e:
+        print("[decor] post failed (non-fatal):", e)
 
 def _finchat_notify(payload):
     """finchat escalation ping — schedules the async Discord post. Never raises into a handler."""
@@ -15626,6 +15694,55 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="cpBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ DECORATION ORDERS (تنسيق الحفلات — interests in, DEC opens requests) ============ -->
+      <section class="view" id="view_decor">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_decor">تنسيق الحفلات</div>
+            <div class="page-sub" id="t_decor_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadDecor()">↻</button>
+          </div>
+        </div>
+        <div class="kpis" id="decStats"></div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_dec_leads">اهتمامات الضيوف</span>
+            <span class="muted" id="t_dec_leads_hint" style="font-size:12px"></span>
+          </div>
+          <div id="decLeads"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_dec_orders">الطلبات</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn ghost sm" data-decf="" id="decF_all">الكل</button>
+              <button class="btn ghost sm" data-decf="awaiting_guest" id="decF_awaiting">بانتظار الضيف</button>
+              <button class="btn ghost sm" data-decf="ready" id="decF_ready">جاهزة</button>
+              <button class="btn ghost sm" data-decf="dispatched" id="decF_dispatched">مُرسلة</button>
+              <button class="btn ghost sm" data-decf="done" id="decF_done">تمّت</button>
+            </div>
+          </div>
+          <div id="decOrders"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_dec_feat">الشقق — مسبح · جاكوزي · بانيو</span>
+            <button class="btn ghost sm" id="decFeatToggle" data-act="feat-toggle">عرض</button>
+          </div>
+          <div id="decFeatWrap" style="display:none">
+            <div class="muted" id="t_dec_feat_hint" style="font-size:12px;margin:2px 2px 10px"></div>
+            <div id="decFeatures"><div class="empty sk">—</div></div>
+            <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+              <div class="muted" id="t_dec_csv_hint" style="font-size:12px;margin-bottom:6px"></div>
+              <textarea id="decCsv" rows="4" style="width:100%;font-size:12px;padding:8px;font-family:inherit"></textarea>
+              <button class="btn ghost sm" id="decCsvBtn" data-act="feat-import" style="margin-top:8px">استيراد</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ PROMISES (متتبع الوعود — accountability ledger) ============ -->
       <section class="view" id="view_promises">
         <div class="page-head">
@@ -18145,6 +18262,7 @@ function refreshView(id){
     case 'clean_center': return loadCleaningCenter();
     case 'cphotos':  return loadCleaningPhotos();
     case 'promises': return loadPromises();
+    case 'decor':    return loadDecor();
     case 'guide':    return loadGuide();
     case 'quality':  return loadQuality();
     case 'guests':   return loadGuests();
@@ -18198,6 +18316,7 @@ function go(id){
   if(id==='clean_center') loadCleaningCenter();
   if(id==='cphotos') loadCleaningPhotos();
   if(id==='promises') loadPromises();
+  if(id==='decor') loadDecor();
   if(id==='guide') loadGuide();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='guests') loadGuests();
@@ -20304,6 +20423,348 @@ async function loadListings(){
   renderListingsOpsSummary();
   try{ buildSideNav(); }catch(_){}
 }
+
+/* ============ DECORATION ORDERS — تنسيق الحفلات ============
+   The owner rule this screen exists to make visible: a guest tapping «أنا مهتم» in the guide
+   records an INTEREST. It opens no ticket, creates no task and assigns nobody. Only a
+   supervisor turns an interest into a request, and a request that the apartment physically
+   cannot deliver can still be opened — it just carries a permanent warning from that moment.
+   NOTE: this whole block lives inside DASHBOARD_HTML, a normal (non-raw) triple-quoted Python
+   string — so it contains ZERO backslashes on purpose. Newlines use String.fromCharCode(10). */
+var DEC = {board:null, filter:'', blocked:{}, featOpen:false, feat:null};
+
+async function loadDecor(){
+  var st=function(id,txt){ var el=document.getElementById(id); if(el) el.textContent=txt; };
+  st('t_decor', labelText('تنسيق الحفلات','Decoration Orders'));
+  st('t_decor_sub', labelText('اهتمام الضيف ما يفتح تذكرة ولا يكلّف أحد — المشرف هو اللي يفتح الطلب.','A guest tapping Inquire opens no ticket and assigns nobody — only the supervisor opens a request.'));
+  st('t_dec_leads', labelText('اهتمامات الضيوف','Guest interests'));
+  st('t_dec_leads_hint', labelText('ما انفتحت تذكرة — أنت اللي تقرر','No ticket opened — you decide'));
+  st('t_dec_orders', labelText('الطلبات','Requests'));
+  st('t_dec_feat', labelText('الشقق — مسبح · جاكوزي · بانيو','Apartments — pool · jacuzzi · bathtub'));
+  st('t_dec_feat_hint', labelText('الشقة اللي ما فيها علامة، الباقات اللي تحتاج مسبح أو جاكوزي بتوقف وتسألك كل مرة.','An unticked apartment makes pool/jacuzzi packages stop and ask you every time.'));
+  st('t_dec_csv_hint', labelText('الصق ملف الشقق هنا (رمز الشقة، الاسم، مسبح، جاكوزي، بانيو) واضغط استيراد.','Paste the apartment sheet here (slug, name, pool, jacuzzi, bathtub) and press import.'));
+  st('decF_all', labelText('الكل','All'));
+  st('decF_awaiting', labelText('بانتظار الضيف','Awaiting guest'));
+  st('decF_ready', labelText('جاهزة','Ready'));
+  st('decF_dispatched', labelText('مُرسلة','Dispatched'));
+  st('decF_done', labelText('تمّت','Done'));
+  var d; try{ d = await api('/api/decor/board'); }catch(e){ d = null; }
+  if(!d || !d.ok){
+    var lb=document.getElementById('decLeads');
+    if(lb) lb.innerHTML = emptyState(labelText('تعذّر التحميل','Could not load'),'','⚠️');
+    return;
+  }
+  DEC.board = d;
+  decRender();
+}
+
+function decStateChip(s){
+  if(s==='done') return '<span class="pill ok">'+esc(labelText('تم التنفيذ','done'))+'</span>';
+  if(s==='cancelled') return '<span class="pill">'+esc(labelText('ملغي','cancelled'))+'</span>';
+  if(s==='dispatched') return '<span class="pill info">'+esc(labelText('مُرسل للمنسّق','dispatched'))+'</span>';
+  if(s==='ready') return '<span class="pill ok">'+esc(labelText('جاهز للإرسال','ready'))+'</span>';
+  return '<span class="pill warn">'+esc(labelText('بانتظار معلومات الضيف','awaiting guest'))+'</span>';
+}
+
+function decWarnBox(text){
+  if(!text) return '';
+  return '<div style="background:var(--red-soft);color:var(--red);border-radius:10px;padding:9px 11px;'
+    +'font-size:12.5px;line-height:1.7;margin:8px 0;white-space:pre-wrap">'+esc(text)+'</div>';
+}
+
+function decRender(){
+  var d=DEC.board||{}; var c=d.counts||{};
+  var stats=document.getElementById('decStats');
+  if(stats) stats.innerHTML=[
+    {v:c.leads_new||0, l:labelText('اهتمامات جديدة','New interests'), cls:'b'},
+    {v:c.awaiting_guest||0, l:labelText('بانتظار الضيف','Awaiting guest'), cls:'r', vc:((c.awaiting_guest||0)>0?'red':'')},
+    {v:c.ready||0, l:labelText('جاهزة','Ready'), cls:'g'},
+    {v:c.cakes_pending||0, l:labelText('كيك ما انطلب','Cakes to order'), cls:''}
+  ].map(function(k){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+k.cls+'">🎀</div></div>'
+      +'<div class="kpi-val '+(k.vc||'')+'">'+k.v+'</div><div class="kpi-lbl">'+esc(k.l)+'</div></div>';
+  }).join('');
+  decRenderLeads();
+  decRenderOrders();
+  decRenderFeatures();
+  var dr=document.getElementById('t_dec_leads_hint');
+  if(dr && d.dryrun) dr.textContent = labelText('وضع التجربة: ما ينرسل شي للديسكورد','Dry run: nothing is posted to Discord');
+}
+
+function decRenderLeads(){
+  var d=DEC.board||{}; var rows=d.leads||[];
+  var box=document.getElementById('decLeads'); if(!box) return;
+  if(!rows.length){
+    box.innerHTML='<div class="empty">'+esc(labelText('ما فيه اهتمامات جديدة 🤍','No new interests 🤍'))+'</div>';
+    return;
+  }
+  box.innerHTML = rows.map(function(l){
+    var cap=l.capability||{}; var blocked=(cap.verdict==='missing'||cap.verdict==='unknown');
+    var h='<div style="border-bottom:1px solid var(--border);padding:12px 4px">';
+    h+='<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">';
+    h+='<div><b>'+esc(l.apartment||l.slug)+'</b> · '+esc(l.pack_name_ar||l.pack_id)
+      +' <span class="muted" style="font-size:12px">'+esc(labelText('تبدأ من','from'))+' '+(l.price_from_sar||0)+' '+esc(labelText('ر.س','SAR'))+'</span></div>';
+    h+='<div style="display:flex;gap:6px;flex-wrap:wrap">'
+      +'<button class="btn sm" data-act="open" data-id="'+esc(l.id)+'">'+esc(labelText('افتح الطلب','Open request'))+'</button>'
+      +'<button class="btn ghost sm" data-act="dismiss" data-id="'+esc(l.id)+'">'+esc(labelText('تجاهل','Dismiss'))+'</button>'
+      +'</div></div>';
+    var meta=[];
+    if(l.guest_name) meta.push(esc(labelText('الضيف','Guest'))+': '+esc(l.guest_name));
+    if(l.checkin_date) meta.push(esc(labelText('الدخول','Check-in'))+': '+esc(l.checkin_date));
+    meta.push(esc(labelText('وصل','Received'))+': '+esc(String(l.created_at||'').replace('T',' ')));
+    h+='<div class="muted" style="font-size:12px;margin-top:5px">'+meta.join(' · ')+'</div>';
+    if(blocked) h+=decWarnBox(l.capability_stamp_preview||'');
+    var b=DEC.blocked[l.id];
+    if(b){
+      h+='<div style="background:var(--card-2, transparent);border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px">';
+      h+='<div style="font-size:12.5px;margin-bottom:8px">'+esc(labelText('تقدر تكمّل، بس لازم تختار وش تقصد:','You can continue — but say which you mean:'))+'</div>';
+      if((b.affected_items||[]).length){
+        h+='<div class="muted" style="font-size:12px;margin-bottom:8px">'+esc(labelText('البنود المتأثرة','Affected items'))+': '
+          +(b.affected_items||[]).map(function(i){ return esc(i); }).join(' · ')+'</div>';
+      }
+      h+='<input id="decR_'+esc(l.id)+'" placeholder="'+esc(labelText('السبب (إلزامي)','Reason (required)'))+'" style="width:100%;padding:7px 10px;font-size:13px;margin-bottom:8px">';
+      h+='<div style="display:flex;gap:6px;flex-wrap:wrap">'
+        +'<button class="btn ghost sm" data-act="ovr-correction" data-id="'+esc(l.id)+'">'+esc(labelText('القائمة غلط — الشقة فيها','Our sheet was wrong — it has it'))+'</button>'
+        +'<button class="btn sm" data-act="ovr-gap" data-id="'+esc(l.id)+'">'+esc(labelText('أدري ما فيها — كمّل','I know it does not — continue'))+'</button>'
+        +'</div></div>';
+    }
+    return h+'</div>';
+  }).join('');
+}
+
+function decRenderOrders(){
+  var d=DEC.board||{}; var rows=(d.orders||[]).filter(function(o){
+    return !DEC.filter || o.state===DEC.filter;
+  });
+  var box=document.getElementById('decOrders'); if(!box) return;
+  document.querySelectorAll('[data-decf]').forEach(function(b){
+    b.classList.toggle('on', (b.getAttribute('data-decf')||'')===DEC.filter);
+  });
+  if(!rows.length){
+    box.innerHTML='<div class="empty">'+esc(labelText('ما فيه طلبات هنا','Nothing here'))+'</div>';
+    return;
+  }
+  box.innerHTML = rows.map(function(o){
+    var h='<div style="border-bottom:1px solid var(--border);padding:13px 4px">';
+    h+='<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">';
+    h+='<div><b>'+esc(o.apartment||o.slug)+'</b> · '+esc(o.pack_name_ar||o.pack_id)+' '+decStateChip(o.state)+'</div>';
+    h+='<div class="muted" style="font-size:12px">'+esc(labelText('الموعد','Deadline'))+': '
+      +esc(String(o.deadline_at||'—').replace('T',' '))+'</div>';
+    h+='</div>';
+    if(o.capability_stamp) h+=decWarnBox(o.capability_stamp);
+    var miss=o.missing_inputs||[];
+    if(miss.length && o.state!=='done' && o.state!=='cancelled'){
+      h+='<div style="margin-top:9px">';
+      h+='<div class="muted" style="font-size:12px;margin-bottom:6px">'+esc(labelText('ناقص من الضيف','Missing from the guest'))+':</div>';
+      h+=miss.map(function(m){
+        return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'
+          +'<span style="font-size:12.5px;min-width:150px">'+esc(m.label_ar||m.key)+'</span>'
+          +'<input id="decI_'+esc(o.id)+'_'+esc(m.key)+'" style="flex:1;padding:6px 9px;font-size:13px">'
+          +'</div>';
+      }).join('');
+      h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'
+        +'<button class="btn ghost sm" data-act="save-inputs" data-id="'+esc(o.id)+'">'+esc(labelText('احفظ','Save'))+'</button>'
+        +'<button class="btn ghost sm" data-act="copy-ask" data-id="'+esc(o.id)+'">'+esc(labelText('انسخ رسالة الضيف','Copy guest message'))+'</button>'
+        +'</div></div>';
+    }
+    var cake=o.cake;
+    if(cake){
+      h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px;font-size:12.5px">'
+        +'<span>🍰 '+esc(labelText('الكيك','Cake'))+'</span>'
+        +'<span class="pill '+(cake.state==='delivered'?'ok':(cake.state==='ordered'?'info':'warn'))+'">'+esc(cake.state)+'</span>'
+        +'<span class="muted">'+esc(labelText('موعده','Due'))+': '+esc(String(cake.due_at||'').replace('T',' '))+'</span>';
+      if(cake.state==='pending') h+='<button class="btn ghost sm" data-act="cake-ordered" data-id="'+esc(cake.id)+'">'+esc(labelText('انطلب','Ordered'))+'</button>';
+      if(cake.state==='ordered') h+='<button class="btn ghost sm" data-act="cake-delivered" data-id="'+esc(cake.id)+'">'+esc(labelText('وصل','Delivered'))+'</button>';
+      h+='</div>';
+    }
+    if(o.state!=='done' && o.state!=='cancelled'){
+      h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">'
+        +'<span style="font-size:12.5px">'+esc(labelText('السعر النهائي','Final price'))+'</span>'
+        +'<input id="decP_'+esc(o.id)+'" type="number" value="'+(o.final_price_sar||'')+'" style="width:110px;padding:6px 9px;font-size:13px">'
+        +'<input id="decV_'+esc(o.id)+'" type="number" placeholder="'+esc(labelText('تكلفة المنسّق','Vendor cost'))+'" value="'+(o.vendor_cost_sar||'')+'" style="width:130px;padding:6px 9px;font-size:13px">'
+        +'<button class="btn ghost sm" data-act="save-price" data-id="'+esc(o.id)+'">'+esc(labelText('احفظ','Save'))+'</button>'
+        +'</div>';
+      h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">';
+      if(o.state!=='dispatched') h+='<button class="btn sm" data-act="dispatch" data-id="'+esc(o.id)+'">'+esc(labelText('أرسل للمنسّق','Dispatch'))+'</button>';
+      h+='<button class="btn ghost sm" data-act="copy-vendor" data-id="'+esc(o.id)+'">'+esc(labelText('انسخ نص المنسّق','Copy vendor text'))+'</button>';
+      h+='<button class="btn ghost sm" data-act="done" data-id="'+esc(o.id)+'">'+esc(labelText('تم التنفيذ','Mark done'))+'</button>';
+      h+='<button class="btn ghost sm" data-act="cancel" data-id="'+esc(o.id)+'">'+esc(labelText('إلغاء','Cancel'))+'</button>';
+      h+='</div>';
+    }
+    return h+'</div>';
+  }).join('');
+}
+
+function decRenderFeatures(){
+  var box=document.getElementById('decFeatures'); if(!box || !DEC.featOpen) return;
+  var rows=(DEC.feat&&DEC.feat.rows)||[];
+  if(!rows.length){ box.innerHTML='<div class="empty">—</div>'; return; }
+  var names={pool:labelText('مسبح','Pool'), jacuzzi:labelText('جاكوزي','Jacuzzi'), bathtub:labelText('بانيو','Bathtub')};
+  box.innerHTML = rows.map(function(r){
+    var have=r.features||[];
+    var boxes=['pool','jacuzzi','bathtub'].map(function(f){
+      var on=have.indexOf(f)>=0?' checked':'';
+      return '<label style="display:inline-flex;gap:4px;align-items:center;font-size:12.5px;margin-inline-end:12px">'
+        +'<input type="checkbox" data-act="feat-set" data-slug="'+esc(r.slug)+'" data-feat="'+f+'"'+on+'>'
+        +esc(names[f])+'</label>';
+    }).join('');
+    var unknown = r.known ? '' : '<span class="pill warn" style="margin-inline-start:8px">'+esc(labelText('ما نعرف','unknown'))+'</span>';
+    return '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border)">'
+      +'<span style="font-size:13px"><b>'+esc(r.apartment||r.slug)+'</b> <span class="muted" style="font-size:11.5px">'+esc(r.slug)+'</span>'+unknown+'</span>'
+      +'<span>'+boxes+'</span></div>';
+  }).join('');
+}
+
+async function decToggleFeatures(){
+  DEC.featOpen=!DEC.featOpen;
+  var wrap=document.getElementById('decFeatWrap');
+  var btn=document.getElementById('decFeatToggle');
+  if(wrap) wrap.style.display = DEC.featOpen?'block':'none';
+  if(btn) btn.textContent = DEC.featOpen?labelText('إخفاء','Hide'):labelText('عرض','Show');
+  if(DEC.featOpen && !DEC.feat){
+    try{ DEC.feat = await api('/api/decor/features'); }catch(e){ DEC.feat={rows:[]}; }
+  }
+  decRenderFeatures();
+}
+
+async function decOpenLead(id, kind){
+  var body={lead_id:id};
+  if(kind){
+    var el=document.getElementById('decR_'+id);
+    var reason=el?String(el.value||'').trim():'';
+    if(!reason){ toast(labelText('اكتب السبب أول','Add a reason first')); return; }
+    body.override_kind=kind; body.reason=reason;
+  }
+  var r=await post('/api/decor/lead/open', body);
+  if(r && r.ok){
+    delete DEC.blocked[id];
+    toast(labelText('انفتح الطلب ✓','Request opened ✓'));
+    loadDecor();
+    return;
+  }
+  if(r && r.error==='capability'){ DEC.blocked[id]=r; decRenderLeads(); return; }
+  toast((r&&(r.message||r.error))||'⚠');
+}
+
+async function decAct(act, id, node){
+  if(act==='open') return decOpenLead(id, null);
+  if(act==='ovr-correction') return decOpenLead(id, 'correction');
+  if(act==='ovr-gap') return decOpenLead(id, 'accept_gap');
+  if(act==='dismiss'){
+    if(!confirm(labelText('تتجاهل هذا الاهتمام؟','Dismiss this interest?'))) return;
+    await post('/api/decor/lead/dismiss', {lead_id:id});
+    return loadDecor();
+  }
+  if(act==='save-inputs'){
+    var order=(DEC.board.orders||[]).filter(function(o){ return o.id===id; })[0];
+    if(!order) return;
+    var vals={};
+    (order.missing_inputs||[]).forEach(function(m){
+      var el=document.getElementById('decI_'+id+'_'+m.key);
+      if(el && String(el.value||'').trim()) vals[m.key]=String(el.value).trim();
+    });
+    if(!Object.keys(vals).length){ toast(labelText('ما فيه شي محفوظ','Nothing to save')); return; }
+    await post('/api/decor/order/inputs', {order_id:id, inputs:vals});
+    toast(labelText('انحفظ ✓','Saved ✓'));
+    return loadDecor();
+  }
+  if(act==='save-price'){
+    var p=document.getElementById('decP_'+id); var v=document.getElementById('decV_'+id);
+    await post('/api/decor/order/update', {order_id:id,
+      final_price_sar:(p&&p.value)?Number(p.value):null,
+      vendor_cost_sar:(v&&v.value)?Number(v.value):null});
+    toast(labelText('انحفظ ✓','Saved ✓'));
+    return loadDecor();
+  }
+  if(act==='copy-ask' || act==='copy-vendor'){
+    var o2=(DEC.board.orders||[]).filter(function(o){ return o.id===id; })[0];
+    if(!o2) return;
+    var txt = act==='copy-ask' ? (o2.ask_text||'') : (o2.vendor_text||'');
+    try{ await navigator.clipboard.writeText(txt); toast(labelText('انتسخ ✓','Copied ✓')); }
+    catch(e){ toast(labelText('ما قدرنا ننسخ','Could not copy')); }
+    return;
+  }
+  if(act==='dispatch'){
+    var r=await post('/api/decor/order/dispatch', {order_id:id});
+    if(r && r.ok){ toast(labelText('انرسل ✓','Dispatched ✓')); return loadDecor(); }
+    if(r && r.error==='incomplete'){
+      var names=(r.missing_inputs||[]).map(function(m){ return m.label_ar||m.key; }).join(' · ');
+      if(r.needs_price) names = names ? (names+' · '+labelText('السعر النهائي','final price')) : labelText('السعر النهائي','final price');
+      toast(labelText('ناقص: ','Missing: ')+names);
+      return loadDecor();
+    }
+    toast((r&&r.error)||'⚠');
+    return;
+  }
+  if(act==='done'){
+    await post('/api/decor/order/done', {order_id:id});
+    return loadDecor();
+  }
+  if(act==='cancel'){
+    if(!confirm(labelText('تلغي الطلب؟','Cancel this request?'))) return;
+    await post('/api/decor/order/cancel', {order_id:id, reason:''});
+    return loadDecor();
+  }
+  if(act==='cake-ordered' || act==='cake-delivered'){
+    var state = act==='cake-ordered' ? 'ordered' : 'delivered';
+    var rc=await post('/api/decor/cake', {cake_id:id, state:state});
+    if(rc && !rc.ok && rc.error==='cake_incomplete'){
+      toast(labelText('الكيك ناقصه نكهة أو كتابة','The cake still needs flavour or writing'));
+      return;
+    }
+    return loadDecor();
+  }
+  if(act==='feat-toggle') return decToggleFeatures();
+  if(act==='feat-import'){
+    var ta=document.getElementById('decCsv');
+    var csv=ta?String(ta.value||''):'';
+    if(!csv.trim()){ toast(labelText('الصق الملف أول','Paste the sheet first')); return; }
+    var ri=await post('/api/decor/features/import', {csv:csv});
+    if(ri && ri.ok){
+      toast(labelText('انحفظ ','Saved ')+(ri.saved||0));
+      DEC.feat=null; DEC.featOpen=false;
+      if(ta) ta.value='';
+      return decToggleFeatures();
+    }
+    toast((ri&&ri.error)||'⚠');
+    return;
+  }
+  if(act==='feat-set'){
+    var slug=node.getAttribute('data-slug');
+    var have=[];
+    document.querySelectorAll('[data-act="feat-set"][data-slug="'+slug+'"]').forEach(function(cb){
+      if(cb.checked) have.push(cb.getAttribute('data-feat'));
+    });
+    var rf=await post('/api/decor/features', {slug:slug, features:have});
+    if(rf && rf.ok){
+      (((DEC.feat||{}).rows)||[]).forEach(function(row){
+        if(row.slug===slug){ row.features=rf.features||[]; row.known=true; }
+      });
+      toast(labelText('انحفظ ✓','Saved ✓'));
+    } else toast((rf&&rf.error)||'⚠');
+    return;
+  }
+}
+
+/* One delegated listener for the whole panel — no inline onclick means no quote-building
+   around Arabic apartment names (the schedule page learned this the hard way). */
+document.addEventListener('click', function(ev){
+  var view=document.getElementById('view_decor');
+  if(!view || !view.contains(ev.target)) return;
+  var f=ev.target.closest ? ev.target.closest('[data-decf]') : null;
+  if(f){ DEC.filter=f.getAttribute('data-decf')||''; decRenderOrders(); return; }
+  var el=ev.target.closest ? ev.target.closest('[data-act]') : null;
+  if(!el) return;
+  var act=el.getAttribute('data-act');
+  if(act==='feat-set') return;
+  ev.preventDefault();
+  decAct(act, el.getAttribute('data-id')||'', el);
+});
+document.addEventListener('change', function(ev){
+  var el=ev.target.closest ? ev.target.closest('[data-act="feat-set"]') : null;
+  if(!el) return;
+  decAct('feat-set', '', el);
+});
 
 /* ============ CLEANING PHOTOS LOCATOR (find submitted photos by apartment + date) ============ */
 async function loadCleaningPhotos(){
@@ -33339,7 +33800,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "promises", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
@@ -33357,6 +33818,7 @@ NAV_DEF = {
         {"id": "clean_center", "ic": "clean_center", "tk": "clean_center", "badge": "clean_center"},
         {"id": "cphotos", "ic": "clean_center", "tk": "cphotos"},
         {"id": "promises", "ic": "tickets", "tk": "promises", "badge": "promises"},
+        {"id": "decor", "ic": "design", "tk": "decor", "badge": "decor"},
         {"id": "pricing", "ic": "pricing", "tk": "pricing", "badge": "pricing"},
         {"id": "plab", "ic": "plab", "tk": "plab"},
         {"id": "strat", "ic": "strat", "tk": "strat"},
@@ -33391,6 +33853,7 @@ NAV_DEF = {
         "ar": {
             "home": "الرئيسية", "brain": "أوجا برين", "gaps": "فجوات منتصف الأسبوع", "inbox": "صندوق الوارد", "calendar": "التقويم",
             "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "promises": "الوعود",
+            "decor": "تنسيق الحفلات",
             "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
@@ -33408,6 +33871,7 @@ NAV_DEF = {
         "en": {
             "home": "Home", "brain": "Ouja Brain", "gaps": "Weekday Gaps", "inbox": "Inbox", "calendar": "Calendar",
             "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "promises": "Promises",
+            "decor": "Decoration Orders",
             "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
@@ -49665,6 +50129,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/photo-upload",              # cleaning-team token auth
     "/api/oujact/report-submit",             # cleaning-team token auth
     "/api/oujact/status",                    # team token OR dashboard session
+    "/api/decor/inquire",                    # public guide button — records an INTEREST only
 }
 # create endpoints — need the "create" (إنشاء) permission, checked BEFORE the write rules
 # (a create path also matches its broad write prefix). Combined save/upsert endpoints stay
@@ -49676,6 +50141,7 @@ _ROLE_CREATE_RULES = [
 ]
 _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
+    ("/api/decor/", "decor"),                # /api/decor/inquire is exempt above (public guest)
     ("/api/pricing/strategy-toggle", "strat"),
     ("/api/strategy/", "strat"),
     ("/api/pricing", "pricing"),             # /api/pricing/* and /api/pricing2/*
@@ -49738,6 +50204,7 @@ _ROLE_READ_RULES = [
     ("/api/pmo/", "pmo"),
     ("/api/gw/", "gw"),
     ("/api/promises", "promises"),
+    ("/api/decor/", "decor"),
     ("/api/inbox", "inbox"),
     ("/api/brain/", "brain"),
 ]
@@ -50295,6 +50762,33 @@ async def start_web_server():
                 print("[guide] wired + routes registered (/guide, /guide/{slug}, /guide/data.json, /data.json)")
             except Exception as _ge:
                 print("[guide] wiring failed (guide disabled, bot unaffected):", _ge)
+
+        # ---- Decoration orders «تنسيق الحفلات» — guide leads in, DEC opens the requests ----
+        if _HAS_DECOR and DECOR_ENABLED:
+            try:
+                def _decor_guide_units():
+                    """slug -> apartment name + Hostaway listing id, straight from the guide."""
+                    try:
+                        return [{"slug": u.get("slug"), "listing_id": u.get("listing_id"),
+                                 "listing_name": u.get("listing_name")}
+                                for u in _guide.db.units(active_only=True)] if _HAS_GUIDE else []
+                    except Exception as _gue:
+                        print("[decor] guide units unavailable:", _gue)
+                        return []
+
+                _decor.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "state_dir": STATE_DIR,
+                    "tz": TZ, "now": now_riyadh, "listings": get_listings_map,
+                    "inhouse": fetch_inhouse,          # targeted query — never the truncated cache
+                    "guide_units": _decor_guide_units,
+                    "notify": _decor_notify,
+                })
+                _decor.register_routes(app)
+                print("[decor] wired + routes registered (/api/decor/*) — dryrun=%s"
+                      % _decor.notify.dryrun())
+            except Exception as _de:
+                print("[decor] wiring failed (decoration orders disabled, bot unaffected):", _de)
 
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:

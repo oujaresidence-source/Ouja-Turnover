@@ -737,7 +737,7 @@ a { color: inherit; }
           <span class="amount">1,450</span>
           <span class="currency">SAR</span>
         </div>
-        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة الماسية" data-service-en="Diamond Package">
+        <a href="#" class="btn btn-bronze wa-link" data-pack-id="diamond" data-service-ar="الباقة الماسية" data-service-en="Diamond Package">
           <span class="ar">أنا مهتم</span><span>Inquire</span>
         </a>
       </div>
@@ -761,7 +761,7 @@ a { color: inherit; }
           <span class="amount">998</span>
           <span class="currency">SAR</span>
         </div>
-        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة الفضية المميزة" data-service-en="Signature Silver Package">
+        <a href="#" class="btn btn-bronze wa-link" data-pack-id="signature_silver" data-service-ar="الباقة الفضية المميزة" data-service-en="Signature Silver Package">
           <span class="ar">أنا مهتم</span><span>Inquire</span>
         </a>
       </div>
@@ -785,7 +785,7 @@ a { color: inherit; }
           <span class="amount">799</span>
           <span class="currency">SAR</span>
         </div>
-        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة الفضية" data-service-en="Silver Package">
+        <a href="#" class="btn btn-bronze wa-link" data-pack-id="silver" data-service-ar="الباقة الفضية" data-service-en="Silver Package">
           <span class="ar">أنا مهتم</span><span>Inquire</span>
         </a>
       </div>
@@ -809,7 +809,7 @@ a { color: inherit; }
           <span class="amount">670</span>
           <span class="currency">SAR</span>
         </div>
-        <a href="#" class="btn btn-bronze wa-link" data-service-ar="باقة تنسيق الطاولة" data-service-en="Table Styling Package">
+        <a href="#" class="btn btn-bronze wa-link" data-pack-id="table_styling" data-service-ar="باقة تنسيق الطاولة" data-service-en="Table Styling Package">
           <span class="ar">أنا مهتم</span><span>Inquire</span>
         </a>
       </div>
@@ -833,7 +833,7 @@ a { color: inherit; }
           <span class="amount">598</span>
           <span class="currency">SAR</span>
         </div>
-        <a href="#" class="btn btn-bronze wa-link" data-service-ar="الباقة البرونزية" data-service-en="Bronze Package">
+        <a href="#" class="btn btn-bronze wa-link" data-pack-id="bronze" data-service-ar="الباقة البرونزية" data-service-en="Bronze Package">
           <span class="ar">أنا مهتم</span><span>Inquire</span>
         </a>
       </div>
@@ -1144,6 +1144,33 @@ function updateWaLinks(listingId) {
     a.href = 'https://wa.me/' + CONCIERGE_PHONE + '?text=' + text;
   });
 }
+
+/* Tell the bot that a guest is INTERESTED in a decoration package.
+   This records an interest and nothing else: it opens no ticket, creates no task, assigns
+   nobody, and is seen only by the decoration supervisor, who decides whether to open a
+   request. Only the five Ouja Moments event packages carry data-pack-id — chauffeur and
+   barbering never reach here.
+   The guest experience is protected first: the request is fire-and-forget (sendBeacon, or
+   fetch with keepalive), it never calls preventDefault, and every failure is swallowed — so
+   if the bot is down, WhatsApp still opens exactly as it does today. */
+function notifyInterest(packId) {
+  try {
+    if (!packId || !id) return;
+    const payload = JSON.stringify({slug: id, pack_id: packId, lang: 'ar'});
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/decor/inquire', new Blob([payload], {type: 'application/json'}));
+    } else {
+      fetch('/api/decor/inquire', {
+        method: 'POST', body: payload, keepalive: true,
+        headers: {'Content-Type': 'application/json'}
+      }).catch(function () {});
+    }
+  } catch (e) { /* the guide must keep working even when the bot does not */ }
+}
+
+document.querySelectorAll('a.wa-link[data-pack-id]').forEach(function (a) {
+  a.addEventListener('click', function () { notifyInterest(a.dataset.packId); });
+});
 
 function render(listing) {
   const c = document.getElementById('directionsContent');
