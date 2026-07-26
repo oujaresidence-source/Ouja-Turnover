@@ -5436,6 +5436,10 @@ SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")
 # flip it to 0 when the owner is ready for the threads to appear.
 DECOR_ENABLED      = os.environ.get("DECOR_ENABLED", "1") in ("1", "true", "True", "yes")
 DECOR_OPS_CHANNEL  = os.environ.get("DECOR_OPS_CHANNEL", "تنسيق-الحفلات")
+# Its OWN category (owner: same as the ticketing system, sitting right under صيانه), with
+# one ROOM per request — not threads. _make_channel_spill gives it the same 50-channel
+# overflow protection the صيانة tickets already have.
+DECOR_CATEGORY     = os.environ.get("DECOR_CATEGORY", "تنسيق الحفلات")
 
 # ============= Ops Watchdog «الرقيب التشغيلي» — 30-min ops health cycle =============
 # Read-only monitor: posts a phone-first summary to WATCHDOG_CHANNEL every cycle and pings
@@ -5515,7 +5519,7 @@ async def _decor_deliver(payload):
     kind = payload.get("kind")
     text = payload.get("text") or ""
     try:
-        cat = await get_category(guild)
+        cat = await _decor_category(guild)
         ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
         if ch is None:
             return
@@ -5528,19 +5532,12 @@ async def _decor_deliver(payload):
             return
         if kind == "open":
             order_id = payload.get("order_id")
-            try:
-                th = await ch.create_thread(name=payload.get("thread_name") or "تنسيق",
-                                            type=discord.ChannelType.public_thread)
-                await th.send(text)
-                if order_id:
-                    await asyncio.to_thread(_decor.db.update_order, order_id, thread_id=str(th.id))
-                    order = await asyncio.to_thread(_decor.db.order, order_id)
-                    await _decor_post_card(th, order, _decor_pack(order))
-                return
-            except Exception as _te:                 # threads unavailable → never lose the message
-                print("[decor] thread create failed, posting in channel:", _te)
+            order = await asyncio.to_thread(_decor.db.order, order_id) if order_id else None
+            if order:
+                await _decor_make_room(guild, order, _decor_pack(order))
+            else:
                 await ch.send(text)
-                return
+            return
         if kind == "dispatch":
             order_id = payload.get("order_id")
             row = await asyncio.to_thread(_decor.db.order, order_id) if order_id else None
@@ -5687,9 +5684,9 @@ class DecorPriceModal(discord.ui.Modal, title="السعر النهائي"):
 
 class DecorReasonModal(discord.ui.Modal, title="سبب التجاوز"):
     """No override without a name and a reason — both are stored on the order forever."""
-    def __init__(self, lead_id, kind, message):
+    def __init__(self, ctx, kind, message):
         super().__init__(timeout=600)
-        self.lead_id = lead_id
+        self.ctx = dict(ctx or {})
         self.kind = kind
         self.src_message = message
         self.add_item(discord.ui.TextInput(
@@ -5698,33 +5695,151 @@ class DecorReasonModal(discord.ui.Modal, title="سبب التجاوز"):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await _decor_open_lead(interaction, self.lead_id, self.kind,
-                               self.children[0].value.strip(), self.src_message)
+        await _decor_open_request(interaction, self.ctx, self.kind,
+                                  self.children[0].value.strip(), self.src_message)
 
 
 class DecorOverrideView(discord.ui.View):
-    """Shown only to the supervisor who pressed «افتح الطلب» on a unit that cannot deliver.
-    Ephemeral and short-lived on purpose — the decision belongs to that moment."""
-    def __init__(self, lead_id, message):
+    """Shown only to the supervisor who tried to open a request on a unit that cannot
+    deliver. Ephemeral and short-lived on purpose — the decision belongs to that moment."""
+    def __init__(self, ctx, message):
         super().__init__(timeout=600)
-        self.lead_id = lead_id
+        self.ctx = dict(ctx or {})
         self.src_message = message
 
     @discord.ui.button(label="القائمة غلط — الشقة فيها", style=discord.ButtonStyle.secondary)
     async def correction(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
-            DecorReasonModal(self.lead_id, "correction", self.src_message))
+            DecorReasonModal(self.ctx, "correction", self.src_message))
 
     @discord.ui.button(label="أدري ما فيها — كمّل", style=discord.ButtonStyle.danger)
     async def accept_gap(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
-            DecorReasonModal(self.lead_id, "accept_gap", self.src_message))
+            DecorReasonModal(self.ctx, "accept_gap", self.src_message))
+
+
+# ---------------- the panel: the team opens a request itself ----------------
+# Mirrors the صيانة / RR / مشتريات panels exactly: one pinned message with a button, an
+# ephemeral picker, then a ROOM. Most decoration requests arrive on WhatsApp, not through
+# the guide, so the team must be able to start one without waiting for a guest.
+
+class _DecorAptSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        chunk = parent.units[parent.page * 25:(parent.page + 1) * 25]
+        opts = [discord.SelectOption(label=(u.get("apartment") or u["slug"])[:100],
+                                     value=u["slug"], description=u["slug"][:90],
+                                     default=(u["slug"] == parent.slug))
+                for u in chunk]
+        if not opts:
+            opts = [discord.SelectOption(label="(القائمة فاضية)", value="_none")]
+        super().__init__(placeholder="🏠 اختر الشقة — صفحة %d/%d" % (parent.page + 1, parent.pages),
+                         options=opts, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        v = self.values[0]
+        self.parent_view.slug = None if v == "_none" else v
+        self.parent_view.refresh()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
+class _DecorPackSelect(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent_view = parent
+        opts = []
+        for p in parent.packs:
+            need = p.get("requires_unit_features") or []
+            desc = "تبدأ من %s ر.س" % p.get("price_from_sar")
+            if need:
+                desc += " · تحتاج %s" % " و".join(_decor.engine.token_ar(t) for t in need)
+            opts.append(discord.SelectOption(label=(p.get("name_ar") or p.get("id"))[:100],
+                                             value=p.get("id"), description=desc[:100],
+                                             default=(p.get("id") == parent.pack_id)))
+        super().__init__(placeholder="🎀 اختر الباقة", options=opts, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.pack_id = self.values[0]
+        self.parent_view.refresh()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
+class _DecorNavBtn(discord.ui.Button):
+    def __init__(self, parent, delta, label, disabled):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary,
+                         disabled=disabled, row=2)
+        self.parent_view_ref = parent
+        self.delta = delta
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        p.page = max(0, min(p.pages - 1, p.page + self.delta))
+        p.refresh()
+        await interaction.response.edit_message(view=p)
+
+
+class _DecorGoBtn(discord.ui.Button):
+    def __init__(self, parent):
+        super().__init__(label="✅ متابعة — افتح الطلب", style=discord.ButtonStyle.success, row=3)
+        self.parent_view_ref = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        p = self.parent_view_ref
+        if not p.slug or not p.pack_id:
+            await interaction.response.send_message("🙏 اختر الشقة والباقة أول.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await _decor_open_request(interaction, {"slug": p.slug, "pack_id": p.pack_id},
+                                  None, "", None)
+
+
+class DecorPickView(discord.ui.View):
+    """Ephemeral picker: apartment (paged — Discord caps a menu at 25) + package."""
+    def __init__(self, units, packs_list):
+        super().__init__(timeout=900)
+        self.units = units
+        self.packs = packs_list
+        self.pages = max(1, (len(units) + 24) // 25)
+        self.page = 0
+        self.slug = None
+        self.pack_id = None
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(_DecorAptSelect(self))
+        self.add_item(_DecorPackSelect(self))
+        if self.pages > 1:
+            self.add_item(_DecorNavBtn(self, -1, "◀ الشقق السابقة", self.page <= 0))
+            self.add_item(_DecorNavBtn(self, +1, "الشقق التالية ▶", self.page >= self.pages - 1))
+        self.add_item(_DecorGoBtn(self))
+
+
+class DecorPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🎀 افتح طلب تنسيق", style=discord.ButtonStyle.primary,
+                       custom_id="ouja_dec_panel")
+    async def open_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _decor_may_press(interaction):
+            return await _decor_deny(interaction)
+        units = await asyncio.to_thread(_decor.routes._feature_rows)
+        try:
+            packs_list = _decor.packs.all_packs()
+        except Exception:
+            packs_list = []
+        if not units or not packs_list:
+            return await interaction.response.send_message(
+                "⚠️ ما قدرت أجيب قائمة الشقق أو الباقات — جرّب بعد دقيقة.", ephemeral=True)
+        await interaction.response.send_message(
+            "**طلب تنسيق جديد** — اختر من القوائم ثم اضغط «متابعة»:",
+            view=DecorPickView(units, packs_list), ephemeral=True)
 
 
 class DecorLeadView(discord.ui.View):
-    """The interest line. Until someone presses «افتح الطلب» nothing exists — no ticket, no
-    task, nobody assigned. That is the owner's rule, and this view is where a human breaks it
-    on purpose."""
+    """The guest-interest line. Until someone presses «افتح الطلب» nothing exists — no
+    ticket, no task, nobody assigned. That is the owner's rule, and this view is where a
+    human breaks it on purpose."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -5740,7 +5855,10 @@ class DecorLeadView(discord.ui.View):
             return await interaction.response.send_message(
                 "هذا الاهتمام حالته: %s" % lead["status"], ephemeral=True)
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await _decor_open_lead(interaction, lead["id"], None, "", interaction.message)
+        await _decor_open_request(interaction,
+                                  {"lead_id": lead["id"], "slug": lead["slug"],
+                                   "pack_id": lead["pack_id"]},
+                                  None, "", interaction.message)
 
     @discord.ui.button(label="✖️ تجاهل", style=discord.ButtonStyle.secondary,
                        custom_id="ouja_dec_dismiss")
@@ -5761,39 +5879,52 @@ class DecorLeadView(discord.ui.View):
         await interaction.followup.send("انتجاهل ✓", ephemeral=True)
 
 
-async def _decor_open_lead(interaction, lead_id, override_kind, reason, src_message):
-    """The gate, from Discord. Same engine call the dashboard makes — one rulebook."""
-    lead = await asyncio.to_thread(_decor.db.lead, lead_id)
-    if not lead or lead.get("status") != "new":
-        return await interaction.followup.send("هذا الاهتمام انفتح أو انتجاهل.", ephemeral=True)
-    pack = _decor_pack(lead)
+async def _decor_open_request(interaction, ctx, override_kind, reason, src_message):
+    """THE GATE — the only path to a request, whether it started from a guest tapping the
+    guide or from the team pressing the panel button. Same engine call the dashboard makes,
+    so there is one rulebook and three doors.
+
+    A lead is created here for a team-opened request (source 'discord') only AFTER the gate
+    passes, so a supervisor who backs out of an override never leaves an orphan interest.
+    """
+    lead_id = ctx.get("lead_id")
+    slug = str(ctx.get("slug") or "").lower()
+    pack_id = ctx.get("pack_id")
+    if lead_id:
+        lead = await asyncio.to_thread(_decor.db.lead, lead_id)
+        if not lead or lead.get("status") != "new":
+            return await interaction.followup.send("هذا الاهتمام انفتح أو انتجاهل.", ephemeral=True)
+        slug, pack_id = lead["slug"], lead["pack_id"]
+    pack = _decor.packs.get(pack_id) if pack_id else None
     if not pack:
         return await interaction.followup.send("الباقة مو موجودة في الملف.", ephemeral=True)
+
     actor = _decor_actor(interaction)
-    feats = await asyncio.to_thread(_decor.db.unit_features, lead["slug"])
+    feats = await asyncio.to_thread(_decor.db.unit_features, slug)
     chk = _decor.engine.open_check(pack, feats, override_kind=override_kind,
                                    overridden_by=actor, reason=reason)
     if not chk["allowed"]:
         cap = _decor.engine.capability_check(pack, feats)
-        if chk["error"] in ("capability", "override_needs_who_and_why", "bad_override"):
-            msg = _decor.engine.capability_stamp(pack, cap.get("missing") or [], "", "",
-                                                 cap.get("verdict"))
-            return await interaction.followup.send(
-                msg + "\n\nتقدر تكمّل — بس وضّح وش تقصد:", ephemeral=True,
-                view=DecorOverrideView(lead_id, src_message))
-        return await interaction.followup.send("ما قدرت أفتح الطلب.", ephemeral=True)
+        msg = _decor.engine.capability_stamp(pack, cap.get("missing") or [], "", "",
+                                             cap.get("verdict"))
+        return await interaction.followup.send(
+            msg + "\n\nتقدر تكمّل — بس وضّح وش تقصد:", ephemeral=True,
+            view=DecorOverrideView({"lead_id": lead_id, "slug": slug, "pack_id": pack_id},
+                                   src_message))
 
-    ctx = await asyncio.to_thread(_decor.routes._context_for, lead["slug"])
+    if not lead_id:                       # team-opened: the interest is recorded now
+        lead = await asyncio.to_thread(_decor.db.create_lead, slug, pack_id, "ar", "discord")
+        lead_id = lead["id"]
+    ctx2 = await asyncio.to_thread(_decor.routes._context_for, slug)
     if chk["learn_features"]:
-        await asyncio.to_thread(_decor.db.add_unit_features, lead["slug"],
-                                chk["learn_features"], actor)
-    deadline = _decor.routes._deadline_for(ctx, None)
+        await asyncio.to_thread(_decor.db.add_unit_features, slug, chk["learn_features"], actor)
+    deadline = _decor.routes._deadline_for(ctx2, None)
     dl = _decor.engine.deadlines(pack, deadline, _decor.packs.cake_lead_hours()) if deadline else {}
     order = await asyncio.to_thread(
-        _decor.db.open_order, lead["id"], lead["slug"], lead["pack_id"], actor,
-        apartment=ctx.get("apartment"), listing_id=ctx.get("listing_id"),
-        reservation_id=ctx.get("reservation_id"), guest_name=ctx.get("guest_name"),
-        checkin_date=ctx.get("checkin_date"),
+        _decor.db.open_order, lead_id, slug, pack_id, actor,
+        apartment=ctx2.get("apartment"), listing_id=ctx2.get("listing_id"),
+        reservation_id=ctx2.get("reservation_id"), guest_name=ctx2.get("guest_name"),
+        checkin_date=ctx2.get("checkin_date"),
         deadline_at=deadline.isoformat(timespec="minutes") if deadline else None,
         work_start_at=dl["work_start"].isoformat(timespec="minutes") if dl else None,
         na_input_keys=chk["na_input_keys"], capability_verdict=chk["verdict"],
@@ -5804,38 +5935,56 @@ async def _decor_open_lead(interaction, lead_id, override_kind, reason, src_mess
     await asyncio.to_thread(_decor.routes._sync_cake, order, pack)
     order = await asyncio.to_thread(_decor.db.order, order["id"])
 
-    thread = await _decor_make_thread(interaction, order, pack)
+    room = await _decor_make_room(interaction.guild, order, pack)
     try:
         if src_message is not None:
             await src_message.edit(
                 content=(src_message.content or "") + "\n\n— فتحه %s" % actor, view=None)
     except Exception:
         pass
-    where = thread.mention if thread is not None else "القناة"
-    await interaction.followup.send("انفتح الطلب ✓ — %s" % where, ephemeral=True)
+    if room is None:
+        return await interaction.followup.send(
+            "انفتح الطلب بس ما قدرت أفتح روم — شوفه في لوحة التحكم.", ephemeral=True)
+    await interaction.followup.send("✅ انفتح طلبك: %s" % room.mention, ephemeral=True)
 
 
-async def _decor_make_thread(interaction, order, pack):
-    """One thread per request. Threads, not channels — the ticket categories already hit
-    Discord's 50-channel cap once."""
-    ch = interaction.channel
-    if isinstance(ch, discord.Thread):
-        ch = ch.parent
+async def _decor_make_room(guild, order, pack):
+    """ONE ROOM PER REQUEST, exactly like a صيانة ticket — same category behaviour, same
+    naming, and the SAME overflow protection: _make_channel_spill rolls into «... ٢» when a
+    category hits Discord's 50-channel cap, so requests never stop opening."""
     try:
-        th = await ch.create_thread(name=_decor.notify.thread_name(order, pack),
-                                    type=discord.ChannelType.public_thread)
-        await asyncio.to_thread(_decor.db.update_order, order["id"], thread_id=str(th.id))
+        seq = await asyncio.to_thread(_next_counter, "decor_ticket")
+        apt = order.get("apartment") or order.get("slug") or ""
+        slug = re.sub(r"^ouja-", "", channel_name(apt))[:40]
+        cat = await _decor_category(guild)
+        ch = await _make_channel_spill(guild, cat, "تنسيق-%03d-%s" % (seq, slug),
+                                       "ouja-decor:%s" % order["id"])
+        await asyncio.to_thread(_decor.db.update_order, order["id"], thread_id=str(ch.id))
         order = await asyncio.to_thread(_decor.db.order, order["id"])
-        await th.send(_decor.notify.thread_header(order, pack))
-        await _decor_post_card(th, order, pack)
-        return th
+        await ch.send(_decor.notify.thread_header(order, pack))
+        await _decor_post_card(ch, order, pack)
+        return ch
     except Exception as e:
-        print("[decor] thread create failed:", e)
-        try:
-            await ch.send(_decor.notify.thread_header(order, pack))
-        except Exception:
-            pass
+        print("[decor] room create failed:", e)
         return None
+
+
+async def _decor_category(guild):
+    """«تنسيق الحفلات» — its own category, positioned right under صيانه (owner's request).
+    Spelling-tolerant match like _tk_category, created on first use."""
+    want = _tk_cat_norm(DECOR_CATEGORY)
+    for cat in guild.categories:
+        if _tk_cat_norm(cat.name) == want:
+            return cat
+    cat = await guild.create_category(DECOR_CATEGORY)
+    try:                                   # sit directly beneath the maintenance category
+        maint = next((c for c in guild.categories
+                      if _tk_cat_norm(c.name) == _tk_cat_norm(MAINT_CATEGORY)), None)
+        if maint is not None:
+            await cat.edit(position=maint.position + 1)
+    except Exception as e:
+        print("[decor] category position skipped (non-fatal):", e)
+    return cat
 
 
 def _decor_missing_line(pack, order):
@@ -6048,46 +6197,71 @@ async def _decor_refresh_card(channel, order_id):
 
 
 async def _decor_ensure_home():
-    """Create #تنسيق-الحفلات at boot so the owner can SEE it immediately, instead of the
-    channel only materialising when the first guest happens to tap a package.
+    """The decoration category + its front-desk room, ready before anyone asks.
 
-    Idempotent on both counts: ensure_channel finds an existing channel rather than making a
-    second one, and the intro is written ONLY into a channel with no messages — so the
-    redeploy that happens on every push never repeats it."""
+    Mirrors ensure_ticket_panels: ONE pinned panel message holding the «افتح طلب تنسيق»
+    button, re-posted automatically if someone deletes it. Idempotent three times over —
+    the category and channel are found rather than re-created (ensure_channel also MOVES an
+    existing channel under the category), the intro is written only into a channel with no
+    messages, and the panel is skipped when a pinned bot message already carries buttons.
+    That matters because every push restarts this bot."""
     if not (DECOR_ENABLED and _HAS_DECOR) or _decor.notify.dryrun():
         return
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return
     try:
-        cat = await get_category(guild)
+        cat = await _decor_category(guild)
         ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
         if ch is None:
             return
+        empty = True
         async for _ in ch.history(limit=1):
-            return                      # already has messages — nothing to introduce
+            empty = False
+            break
         nl = chr(10)
-        intro = nl.join([
-            "🎀 **تنسيق الحفلات**",
-            "",
-            "هنا تجيكم اهتمامات الضيوف بباقات التنسيق من دليل الشقق.",
-            "",
-            "**المهم:** ضغط الضيف على «أنا مهتم» ما يفتح تذكرة ولا مهمة ولا يكلّف أحد — يجي سطر هنا وبس،"
-            " والمشرف هو اللي يقرر.",
-            "• «افتح الطلب» → يفتح روم خاص للطلب فيه كل الأزرار (معلومات الضيف، السعر، الإرسال، تم).",
-            "• «تجاهل» → ينتهي الموضوع.",
-            "",
-            "الشقة اللي ما فيها مسبح أو جاكوزي، الباقة توقف وتنبّهكم — وتقدرون تكمّلون، بس الطلب"
-            " بيحمل التنبيه معه للمنسّق.",
-            "",
-            "التنبيهات: الكيك قبل موعده بـ٦ ساعات، والتنسيق قبل وقت البداية بـ٣ ساعات.",
-        ])
-        msg = await ch.send(intro)
+        if empty:
+            intro = nl.join([
+                "🎀 **تنسيق الحفلات**",
+                "",
+                "من هنا تفتحون طلبات التنسيق، ومن هنا تجيكم اهتمامات الضيوف من دليل الشقق.",
+                "",
+                "**المهم:** ضغط الضيف على «أنا مهتم» ما يفتح تذكرة ولا مهمة ولا يكلّف أحد —"
+                " يجي سطر هنا وبس، والمشرف هو اللي يقرر.",
+                "",
+                "الشقة اللي ما فيها مسبح أو جاكوزي، الباقة توقف وتنبّهكم — وتقدرون تكمّلون،"
+                " بس الطلب بيحمل التنبيه معه للمنسّق.",
+                "",
+                "التنبيهات: الكيك قبل موعده بـ٦ ساعات، والتنسيق قبل وقت البداية بـ٣ ساعات.",
+            ])
+            try:
+                await (await ch.send(intro)).pin()
+            except Exception:
+                pass
+        try:
+            for m in await ch.pins():
+                if m.author.id == bot.user.id and m.components:
+                    return                      # the panel is already up
+        except Exception:
+            pass
+        emb = discord.Embed(
+            title="🎀 طلبات تنسيق الحفلات",
+            description=nl.join([
+                "ضيف طلب تنسيق؟ افتح الطلب من الزر تحت 👇",
+                "",
+                "1️⃣ اختر الشقة + الباقة",
+                "2️⃣ لو الشقة ما تسمح بالباقة (مسبح/جاكوزي) بينبّهك، وتقدر تكمّل بعد ما توضّح السبب",
+                "3️⃣ ينفتح روم خاص بالطلب فيه كل الأزرار:",
+                "📝 معلومات الضيف · 💰 السعر النهائي · 🚚 أرسل للمنسّق · ✅ تم · 🍰 الكيك",
+                "",
+                "وما ينرسل طلب ناقص للمنسّق — البوت يوقفك ويقول لك وش الناقص بالضبط.",
+            ]), color=GOLD)
+        msg = await ch.send(embed=emb, view=DecorPanelView())
         try:
             await msg.pin()
         except Exception:
             pass
-        print("[decor] home channel ready:", ch.name)
+        print("[decor] front desk ready:", ch.name)
     except Exception as e:
         print("[decor] home channel setup skipped (non-fatal):", e)
 
@@ -6112,9 +6286,9 @@ async def decor_warn_loop():
                                                   w.get("overdue"), w.get("due_at"))
                 ch = None
                 if o.get("thread_id") and str(o["thread_id"]).isdigit():
-                    ch = guild.get_thread(int(o["thread_id"]))
+                    ch = guild.get_channel(int(o["thread_id"]))     # the request's own room
                 if ch is None:
-                    cat = await get_category(guild)
+                    cat = await _decor_category(guild)
                     ch = await ensure_channel(guild, DECOR_OPS_CHANNEL, cat)
                 if ch is None:
                     continue
@@ -58600,7 +58774,8 @@ async def on_ready():
     bot.add_view(WatchmanCleanupView())  # «الرقيب» bulk "delete old closed tickets" button
     if _HAS_DECOR:
         bot.add_view(DecorLeadView())    # «تنسيق الحفلات» interest buttons
-        bot.add_view(DecorOrderView())   # request-thread buttons (thread id = the order id)
+        bot.add_view(DecorOrderView())   # request-room buttons (the room id IS the order id)
+        bot.add_view(DecorPanelView())   # «افتح طلب تنسيق» panel button
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)

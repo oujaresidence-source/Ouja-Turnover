@@ -48,6 +48,8 @@ def lead_line(lead, pack, cap=None):
 # ---------------- a supervisor opened a request ----------------
 
 def thread_name(order, pack):
+    """Kept for the dashboard/tests; the Discord side now names ROOMS «تنسيق-001-<apt>»
+    through the ticket system's own helper (owner, 2026-07-26: rooms, not threads)."""
     apt = order.get("apartment") or order.get("slug") or ""
     return ("تنسيق — %s — %s" % (apt, (pack or {}).get("name_ar") or ""))[:95]
 
