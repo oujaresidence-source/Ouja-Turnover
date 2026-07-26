@@ -16270,7 +16270,10 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="card">
           <div class="card-head">
             <span class="card-title" id="t_dec_feat">الشقق — مسبح · جاكوزي · بانيو</span>
-            <button class="btn ghost sm" id="decFeatToggle" data-act="feat-toggle">عرض</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn ghost sm" id="decFeatCsv" data-act="feat-export">حمّل الملف</button>
+              <button class="btn ghost sm" id="decFeatToggle" data-act="feat-toggle">عرض</button>
+            </div>
           </div>
           <div id="decFeatWrap" style="display:none">
             <div class="muted" id="t_dec_feat_hint" style="font-size:12px;margin:2px 2px 10px"></div>
@@ -20982,6 +20985,7 @@ async function loadDecor(){
   st('t_dec_leads_hint', labelText('ما انفتحت تذكرة — أنت اللي تقرر','No ticket opened — you decide'));
   st('t_dec_orders', labelText('الطلبات','Requests'));
   st('t_dec_feat', labelText('الشقق — مسبح · جاكوزي · بانيو','Apartments — pool · jacuzzi · bathtub'));
+  st('decFeatCsv', labelText('حمّل الملف','Download sheet'));
   st('t_dec_feat_hint', labelText('الشقة اللي ما فيها علامة، الباقات اللي تحتاج مسبح أو جاكوزي بتوقف وتسألك كل مرة.','An unticked apartment makes pool/jacuzzi packages stop and ask you every time.'));
   st('t_dec_csv_hint', labelText('الصق ملف الشقق هنا (رمز الشقة، الاسم، مسبح، جاكوزي، بانيو) واضغط استيراد.','Paste the apartment sheet here (slug, name, pool, jacuzzi, bathtub) and press import.'));
   st('decF_all', labelText('الكل','All'));
@@ -21140,6 +21144,18 @@ function decRenderFeatures(){
   var box=document.getElementById('decFeatures'); if(!box || !DEC.featOpen) return;
   var rows=(DEC.feat&&DEC.feat.rows)||[];
   if(!rows.length){ box.innerHTML='<div class="empty">—</div>'; return; }
+  var head='';
+  if(DEC.feat && DEC.feat.hostaway_ok===false){
+    head+='<div class="muted" style="font-size:12px;margin-bottom:8px">'
+      +esc(labelText('ما وصلنا أسماء الشقق من هوستاواي الحين — الأسماء المعروضة محفوظة عندنا.','Hostaway names unavailable right now — showing our stored names.'))+'</div>';
+  }
+  var unl=(DEC.feat&&DEC.feat.unlinked)||[];
+  if(unl.length){
+    head+='<div class="muted" style="font-size:12px;margin-bottom:8px">'
+      +esc(labelText('في هوستاواي بس ما لها صفحة دليل (الضيف ما يقدر يطلب منها): ','In Hostaway but with no guide page (a guest cannot order from these): '))
+      +unl.length+' — '+unl.slice(0,6).map(function(u){ return esc(u.name); }).join(' · ')
+      +(unl.length>6?' …':'')+'</div>';
+  }
   var names={pool:labelText('مسبح','Pool'), jacuzzi:labelText('جاكوزي','Jacuzzi'), bathtub:labelText('بانيو','Bathtub')};
   box.innerHTML = rows.map(function(r){
     var have=r.features||[];
@@ -21154,6 +21170,7 @@ function decRenderFeatures(){
       +'<span style="font-size:13px"><b>'+esc(r.apartment||r.slug)+'</b> <span class="muted" style="font-size:11.5px">'+esc(r.slug)+'</span>'+unknown+'</span>'
       +'<span>'+boxes+'</span></div>';
   }).join('');
+  box.innerHTML = head + box.innerHTML;
 }
 
 async function decToggleFeatures(){
@@ -21254,6 +21271,10 @@ async function decAct(act, id, node){
       return;
     }
     return loadDecor();
+  }
+  if(act==='feat-export'){
+    window.open('/api/decor/features/export?token='+encodeURIComponent(tok()), '_blank');
+    return;
   }
   if(act==='feat-toggle') return decToggleFeatures();
   if(act==='feat-import'){

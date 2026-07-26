@@ -141,17 +141,29 @@ _ctx_cache = {"at": 0, "units": {}, "inhouse": []}
 
 
 def _units_map():
-    """slug -> {listing_id, name}. Cached for a few minutes; failures are non-fatal."""
+    """slug -> {listing_id, name}. Cached for a few minutes; failures are non-fatal.
+
+    The APARTMENT NAME comes from the Hostaway API (the live source of truth the owner
+    edits), matched to the guide's slug by listing_id. The slug still has to come from the
+    guide, because the slug is the only thing the guest's button can send — but the name the
+    supervisor reads is always the current Hostaway one, never a stale stored copy."""
     now = time.time()
     if now - _ctx_cache["at"] < 300 and _ctx_cache["units"]:
         return _ctx_cache["units"], _ctx_cache["inhouse"]
     units, rows = {}, []
+    live = {}
+    try:
+        live = (HOST.listings() if HOST.listings else {}) or {}
+    except Exception as e:
+        print("[decor] hostaway listings unavailable (non-fatal):", e)
     try:
         for u in (HOST.guide_units() if HOST.guide_units else []) or []:
             slug = str(u.get("slug") or "").lower()
             if slug:
-                units[slug] = {"listing_id": u.get("listing_id"),
-                               "name": u.get("listing_name") or slug}
+                lid = u.get("listing_id")
+                units[slug] = {"listing_id": lid,
+                               "name": live.get(lid) or u.get("listing_name") or slug,
+                               "from_hostaway": bool(live.get(lid))}
     except Exception as e:
         print("[decor] guide units unavailable (non-fatal):", e)
     try:
@@ -482,20 +494,69 @@ async def cake_update(request):
 
 # ---------------- the unit-features sheet ----------------
 
-@_safe
-async def features_get(request):
-    if not _can_edit(request):
-        return _deny()
+def _feature_rows():
+    """Every apartment a guest could tap a package on, named from Hostaway."""
     units, _ = _units_map()
     have = db.all_unit_features()
     rows = [{"slug": s, "apartment": (u or {}).get("name") or s,
+             "listing_id": (u or {}).get("listing_id"),
+             "from_hostaway": (u or {}).get("from_hostaway", False),
              "features": have.get(s), "known": s in have}
             for s, u in sorted(units.items())]
     for s, f in sorted(have.items()):
         if s not in units:
-            rows.append({"slug": s, "apartment": s, "features": f, "known": True})
-    return HOST.json_response({"ok": True, "rows": rows,
+            rows.append({"slug": s, "apartment": s, "listing_id": None,
+                         "from_hostaway": False, "features": f, "known": True})
+    return rows
+
+
+def _unlinked_listings():
+    """Hostaway units with no guide page. A guest can never tap a package on these — there is
+    no page to tap it on — so they are reported, not silently dropped."""
+    try:
+        live = (HOST.listings() if HOST.listings else {}) or {}
+    except Exception:
+        return []
+    linked = {u.get("listing_id") for u in _units_map()[0].values() if u.get("listing_id")}
+    return [{"listing_id": lid, "name": nm} for lid, nm in sorted(live.items(), key=lambda x: str(x[1]))
+            if lid not in linked]
+
+
+@_safe
+async def features_get(request):
+    if not _can_edit(request):
+        return _deny()
+    rows = _feature_rows()
+    unlinked = _unlinked_listings()
+    return HOST.json_response({"ok": True, "rows": rows, "unlinked": unlinked,
+                               "hostaway_ok": any(r.get("from_hostaway") for r in rows),
                                "vocabulary": sorted(engine.FEATURE_AR.items())})
+
+
+@_safe
+async def features_export(request):
+    """The fill-in sheet, generated from LIVE Hostaway names — not a stale export. Opens
+    straight in Excel/Numbers (utf-8-sig), and imports back through features_import."""
+    if not _can_edit(request):
+        return _deny()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["رمز الشقة (لا تغيّره)", "اسم الشقة", "مسبح؟", "جاكوزي؟", "بانيو؟", "ملاحظة"])
+    yes = "نعم"
+    for r in _feature_rows():
+        have = r.get("features") or []
+        known = r.get("known")
+        note = "" if known else "ما عبّيناها بعد"
+        nm = str(r.get("apartment") or "")
+        if "pool" not in have and ("pool" in nm.lower() or "مسبح" in nm):
+            note = (note + " · " if note else "") + "الاسم يذكر مسبح — تأكد"
+        w.writerow([r["slug"], nm,
+                    yes if "pool" in have else "", yes if "jacuzzi" in have else "",
+                    yes if "bathtub" in have else "", note])
+    body = ("﻿" + buf.getvalue()).encode("utf-8")
+    return HOST.web.Response(
+        body=body, content_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="ouja_decor_apartments.csv"'})
 
 
 @_safe
@@ -556,5 +617,6 @@ def register_routes(app):
     app.router.add_post("/api/decor/order/cancel", order_cancel)
     app.router.add_post("/api/decor/cake", cake_update)
     app.router.add_get("/api/decor/features", features_get)
+    app.router.add_get("/api/decor/features/export", features_export)
     app.router.add_post("/api/decor/features", features_set)
     app.router.add_post("/api/decor/features/import", features_import)
