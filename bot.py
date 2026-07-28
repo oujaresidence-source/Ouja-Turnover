@@ -56332,11 +56332,14 @@ async def cmd_ops_channels(ctx):
     fixed = []
 
     async def _ensure_private(ch, overwrites, label):
-        """A room that EXISTS but is readable by @everyone is worse than no room: it has an
-        employee's name on it and the whole team can read it. So «already there» is not good
-        enough — re-apply the lock and say so."""
+        """Make the room match what it is SUPPOSED to be — not merely «locked».
+
+        The first version returned early as soon as @everyone was denied, and that produced
+        the worst outcome of the night: six sealed rooms that the employees themselves could
+        not open. «The door is locked» says nothing about who holds a key. So compare the
+        whole overwrite set against the intended one and re-apply whenever they differ."""
         try:
-            if ch.overwrites_for(guild.default_role).view_channel is False:
+            if dict(ch.overwrites) == dict(overwrites):
                 kept.append(label)
                 return
             await ch.edit(overwrites=overwrites)
