@@ -104,6 +104,17 @@ except Exception as _decor_err:         # pragma: no cover
     _decor = None
     _HAS_DECOR = False
 
+# Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
+# humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
+# nothing, issues nothing.
+try:
+    import ops as _ops
+    _HAS_OPS = True
+except Exception as _ops_err:           # pragma: no cover
+    print("[ops] import failed (accountability disabled, bot unaffected):", _ops_err)
+    _ops = None
+    _HAS_OPS = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -5498,6 +5509,113 @@ async def _schedule_deliver(payload):
     except Exception as e:
         print("[schedule] ops summary failed:", e)
 
+# ---------------- «نظام الالتزام» delivery (ops package) ----------------
+# THE CHAIN, for every single message:
+#     DM  ->  (Forbidden/any failure)  the person's own «#اسم-اليوم» channel
+#         ->  (still nothing)          DM the lead
+# The road that worked is written back with ops.db.set_ladder_path, because that is ALSO how
+# the package knows whether somebody is reachable — and an unreachable person is never warned.
+OPS_CATEGORY_NAME = os.environ.get("OPS_CATEGORY", "الالتزام") or "الالتزام"
+
+def _ops_notify(payload):
+    """HOST.notify hook — schedules the Discord work. Never raises into a request handler or
+    into the ladder tick: a Discord problem must not stop the business.
+
+    UNLIKE the schedule/decor hooks, this one is called from a WORKER THREAD (the ladder tick
+    runs under asyncio.to_thread), where asyncio.create_task raises "no running event loop"
+    and would silently drop every single message. run_coroutine_threadsafe is the only
+    correct call here; create_task stays as the fallback for the request-handler path."""
+    if not (_HAS_OPS and _ops.notify.enabled()):
+        return
+    try:
+        loop = getattr(bot, "loop", None)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_ops_deliver(payload), loop)
+            return
+    except Exception as e:
+        print("[ops] cross-thread delivery failed:", e)
+    try:
+        asyncio.create_task(_ops_deliver(payload))
+    except RuntimeError:
+        print("[ops] no event loop — message NOT delivered:", payload.get("kind"))
+
+async def _ops_dm(did, text):
+    """DM one Discord id. Returns True only if it actually landed."""
+    try:
+        user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
+        if user is None:
+            return False
+        await user.send(text)
+        return True
+    except Exception as e:
+        print("[ops] dm failed (%s): %s" % (did, e))
+        return False
+
+async def _ops_person_channel(guild, name):
+    """The employee's own private channel, if it exists. Deliberately NOT created here —
+    creating five channels in the live server is an owner decision, made once with
+    `!ouja-ops-channels`."""
+    if guild is None or not name:
+        return None
+    return discord.utils.get(guild.text_channels, name=name)
+
+async def _ops_reach_person(guild, payload):
+    """Walk the chain. Returns (path, detail)."""
+    text, did = payload.get("text") or "", payload.get("employee_did") or ""
+    if not text:
+        return ("skip", "no text")
+    if did and await _ops_dm(did, text):
+        return ("dm", "")
+    ch = await _ops_person_channel(guild, payload.get("channel"))
+    if ch is not None:
+        try:
+            mention = ("<@%s> " % did) if did else ""
+            await ch.send(mention + text, allowed_mentions=discord.AllowedMentions(users=True))
+            return ("channel", ch.name)
+        except Exception as e:
+            print("[ops] private channel send failed:", e)
+    lead = _ops.notify.lead_id()
+    if lead and await _ops_dm(lead, "⚠️ ما قدرنا نوصل %s — الرسالة:\n%s"
+                              % (payload.get("employee") or "?", text)):
+        return ("lead", "delivered to lead")
+    return ("failed", "no route worked")
+
+async def _ops_deliver(payload):
+    """One payload -> up to four destinations: the employee, the lead, an appeal approver,
+    and (warnings only) the PRIVATE HR channel. Nothing here ever posts a name publicly."""
+    if _ops.notify.dryrun():
+        print("[ops] (dryrun) would deliver:", payload.get("kind"), payload.get("employee"))
+        return
+    guild = bot.get_guild(GUILD_ID)
+    try:
+        # 1) the person
+        if payload.get("text") and (payload.get("employee_did") or payload.get("channel")):
+            path, detail = await _ops_reach_person(guild, payload)
+            if payload.get("obligation_id") and payload.get("level"):
+                await asyncio.to_thread(_ops.db.set_ladder_path, payload["obligation_id"],
+                                        payload["level"], path, detail)
+        # 2) the lead (the «عذر مسبق» prompt at L4, and unreachable alerts)
+        if payload.get("lead_id") and payload.get("lead_text"):
+            await _ops_dm(payload["lead_id"], payload["lead_text"])
+        # 3) an appeal approver
+        if payload.get("approver_id") and payload.get("approver_text"):
+            await _ops_dm(payload["approver_id"], payload["approver_text"])
+        # 4) the PRIVATE HR record — never a public channel
+        if payload.get("hr_channel") and payload.get("hr_text") and guild is not None:
+            ch = discord.utils.get(guild.text_channels, name=payload["hr_channel"])
+            if ch is not None:
+                await ch.send(payload["hr_text"])
+            else:
+                print("[ops] HR channel missing:", payload["hr_channel"])
+        # 5) the monthly summary — counts only, no names (built in ops.engine)
+        if payload.get("public_channel") and payload.get("text") and guild is not None:
+            cat = await get_category(guild)
+            ch = await ensure_channel(guild, payload["public_channel"], cat)
+            if ch is not None:
+                await ch.send(payload["text"])
+    except Exception as e:
+        print("[ops] deliver failed:", e)
+
 def _decor_notify(payload):
     """HOST.notify hook for «تنسيق الحفلات» — schedules the async post. Never raises into a
     request handler: a Discord problem must not stop the supervisor from opening an order."""
@@ -6346,6 +6464,25 @@ async def schedule_digest_loop():
         print("[schedule] morning summary fired for", today, "· total", day.get("total"))
     except Exception as e:
         print("[schedule] digest error:", e)
+
+@tasks.loop(minutes=5)
+async def ops_ladder_loop():
+    """«نظام الالتزام» — one pass of the weekly-report ladder plus the 24h appeal clock.
+
+    Every 5 minutes, so a step timed at 17:59 is delivered at 18:00 (see ops/engine.py).
+    The tick is idempotent: it claims each level in the database before sending, so a
+    restart mid-pass can never double-nudge anybody. Runs off the event loop."""
+    if not (_HAS_OPS and _ops.notify.enabled()):
+        return
+    await bot.wait_until_ready()
+    try:
+        rep = await asyncio.to_thread(_ops.notify.tick)
+        await asyncio.to_thread(_ops.notify.appeal_tick)
+        if rep.get("nudged") or rep.get("verdicts") or rep.get("retired"):
+            print("[ops] tick:", {k: rep.get(k) for k in ("period", "nudged", "verdicts",
+                                                          "retired", "dryrun")})
+    except Exception as e:
+        print("[ops] ladder loop error:", e)
 
 @tasks.loop(time=dt_time(hour=3, minute=0, tzinfo=TZ))
 async def business_snapshot_loop():
@@ -50911,6 +51048,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/report-submit",             # cleaning-team token auth
     "/api/oujact/status",                    # team token OR dashboard session
     "/api/decor/inquire",                    # public guide button — records an INTEREST only
+    "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
 }
 # create endpoints — need the "create" (إنشاء) permission, checked BEFORE the write rules
 # (a create path also matches its broad write prefix). Combined save/upsert endpoints stay
@@ -51570,6 +51708,35 @@ async def start_web_server():
                       % _decor.notify.dryrun())
             except Exception as _de:
                 print("[decor] wiring failed (decoration orders disabled, bot unaffected):", _de)
+
+        # ---- «نظام الالتزام» — weekly-report ladder + warnings. Additive; reuses brain.db,
+        # the Employee Calendar (the ONE employee list) and assignments.json's Discord ids.
+        if _HAS_OPS and _ops.notify.enabled():
+            try:
+                def _ops_weekly_reports():
+                    """The dashboard's تقرير أسبوعي rows — the obligation this system
+                    watches. Read-only; the ops package never writes a report."""
+                    return [{"employee": r.get("employee"), "date": r.get("date"),
+                             "created_at": r.get("created_at"), "updated_at": r.get("updated_at")}
+                            for r in _weekly_reports.values()]
+
+                def _ops_discord_ids():
+                    return dict(ASSIGNMENTS.get("discord_ids", {}) or {})
+
+                _ops.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "tz": TZ, "now": now_riyadh,
+                    "weekly_reports": _ops_weekly_reports,
+                    "discord_ids": _ops_discord_ids,
+                    "public_base": _dispatch_base_url,   # env → auto-captured → site base
+                    "notify": _ops_notify,
+                })
+                _ops.bootstrap()
+                _ops.register_routes(app)
+                print("[ops] wired + routes registered (/compliance, /appeal/{token}, "
+                      "/api/ops/*) — dryrun=%s" % _ops.notify.dryrun())
+            except Exception as _opse:
+                print("[ops] wiring failed (accountability disabled, bot unaffected):", _opse)
 
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
@@ -55607,6 +55774,61 @@ async def cmd_deepclean_resume(ctx):
     await ctx.reply("✅ رجّعت حجب مواعيد التنظيف العميق يشتغل. من الليلة بيحجز مواعيد التنظيف مثل قبل.")
 
 
+@bot.command(name="ops-channels", aliases=["رومات-الالتزام", "غرف-الالتزام"])
+async def cmd_ops_channels(ctx):
+    """!ouja ops-channels — create the private «#اسم-اليوم» room for each employee.
+
+    Deliberately a one-off command and NOT something the ladder does on its own: five new
+    channels in the live server is the owner's decision, not a side effect of a dry run.
+    Each room is visible ONLY to that person, the lead, and the admins. Re-running it is
+    safe — an existing room is left exactly as it is."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    if not _HAS_OPS:
+        await ctx.reply("🚫 نظام الالتزام مو مفعّل.")
+        return
+    guild = ctx.guild
+    roster = await asyncio.to_thread(_ops.notify.employees)
+    if not roster:
+        await ctx.reply("🚫 ما لقيت أي موظف في تقويم الموظفين.")
+        return
+    cat = next((c for c in guild.categories if c.name == OPS_CATEGORY_NAME), None)
+    if cat is None:
+        cat = await guild.create_category(OPS_CATEGORY_NAME)
+    lead_id = _ops.notify.lead_id()
+    made, kept, failed = [], [], []
+    for emp in roster:
+        name = _ops.notify.channel_name(emp["name"])
+        if discord.utils.get(guild.text_channels, name=name) is not None:
+            kept.append(emp["name"])
+            continue
+        ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+        for did in (emp.get("did"), lead_id):
+            if not did:
+                continue
+            m = guild.get_member(int(did))
+            if m is not None:
+                ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                    read_message_history=True)
+        try:
+            ch = await _make_channel_spill(guild, cat, name,
+                                           "روم خاصة — نظام الالتزام")
+            await ch.edit(overwrites=ov)
+            made.append(emp["name"])
+        except Exception as e:
+            failed.append("%s (%s)" % (emp["name"], str(e)[:80]))
+    nl = chr(10)
+    msg = ["✅ رومات الالتزام:"]
+    if made:
+        msg.append("انفتحت: " + "، ".join(made))
+    if kept:
+        msg.append("موجودة من قبل: " + "، ".join(kept))
+    if failed:
+        msg.append("⚠️ ما انفتحت: " + "، ".join(failed))
+    await ctx.reply(nl.join(msg))
+
+
 @bot.command(name="dispatch", aliases=["إرسال", "ارسال", "توزيع"])
 async def cmd_dispatch(ctx, when: str = None):
     """!ouja dispatch [today|tomorrow|YYYY-MM-DD] — post the cleaning dispatch now (admins only).
@@ -58883,6 +59105,8 @@ async def on_ready():
         promise_keeper_loop.start()    # متتبع الوعود: reping overdue + expire after 24h
     if _HAS_WATCHDOG and WATCHDOG_ENABLED and not watchdog_loop.is_running():
         watchdog_loop.start()          # «الرقيب التشغيلي»: 30-min ops summary + critical pings
+    if _HAS_OPS and _ops.notify.enabled() and not ops_ladder_loop.is_running():
+        ops_ladder_loop.start()        # «نظام الالتزام»: weekly-report ladder (dry-run by default)
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)

@@ -1,0 +1,43 @@
+# -*- coding: utf-8 -*-
+"""
+ops.host — the ONE bridge between this package and bot.py (schedule/host.py + decor/host.py
+pattern). bot.py calls ops.wire({...}) once at web-server start. This package NEVER does
+`import bot`: bot.py runs as __main__, so importing it by name would boot a second bot.
+"""
+
+
+class _Host:
+    # --- web / auth (same objects every other package gets) ---
+    dash_auth = None         # (request) -> bool     any authenticated staff
+    req_role = None          # (request) -> role string
+    actor = None             # (request) -> display name of the logged-in user
+    json_response = None     # (data, status=200) -> web.Response
+    web = None               # aiohttp web module
+    tz = None
+    now = None               # () -> tz-aware Riyadh datetime
+
+    # --- the data this feature judges people on ---
+    weekly_reports = None    # () -> [{employee, date}]   the dashboard's تقرير أسبوعي rows
+    discord_ids = None       # () -> {employee name: discord id}   from assignments.json
+    public_base = None       # () -> 'https://…'  for the appeal link
+
+    # --- delivery ---
+    # notify(payload) -> None. bot.py schedules the Discord work and then calls
+    # ops.db.record_ladder(...) with the road that actually worked (dm | channel | lead |
+    # failed), which is ALSO how this package knows whether somebody is reachable at all.
+    notify = None
+
+    def require(self, attr):
+        v = getattr(self, attr, None)
+        if v is None:
+            raise RuntimeError("ops used '%s' before ops.wire()" % attr)
+        return v
+
+
+HOST = _Host()
+
+
+def wire(caps):
+    for k, v in (caps or {}).items():
+        setattr(HOST, k, v)
+    return HOST
