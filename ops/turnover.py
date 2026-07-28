@@ -48,8 +48,10 @@ def enabled():
 
 
 def dryrun():
-    """DEFAULT ON, like every other phase. Computes and logs everything, sends nothing."""
-    return _env("NUDGE_DRYRUN", "1") == "1"
+    """DEFAULT ON, like every other phase. Computes and logs everything, sends nothing.
+    Flipped from the remote control on /compliance or NUDGE_DRYRUN in Railway."""
+    from . import switch
+    return switch.is_dry("nudge_dryrun")
 
 
 def quiet_start():

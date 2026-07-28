@@ -173,6 +173,16 @@ CREATE TABLE IF NOT EXISTS ops_scorecards (
     released_by TEXT,
     PRIMARY KEY(month_key, employee)
 );
+-- The owner's remote control. A flip made on /compliance must SURVIVE A REDEPLOY, so the
+-- stored value wins over the Railway env var (which stays as the boot-time default). Every
+-- change records who made it and when, because "who turned the warnings on" is a question
+-- that WILL be asked.
+CREATE TABLE IF NOT EXISTS ops_switches (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL,          -- '1' = silent (dry-run), '0' = live
+    set_by TEXT,
+    set_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_ops_nudge_item ON ops_nudges(work_item_id);
 CREATE INDEX IF NOT EXISTS idx_ops_nudge_msg  ON ops_nudge_items(message_id);
 CREATE INDEX IF NOT EXISTS idx_ops_ob_period  ON ops_obligations(period_key);
@@ -253,7 +263,7 @@ def counts():
     out = {}
     for t in ("ops_obligations", "ops_warnings", "ops_appeals", "ops_free_passes",
               "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity",
-              "ops_nudge_items", "ops_nudges", "ops_scorecards"):
+              "ops_nudge_items", "ops_nudges", "ops_scorecards", "ops_switches"):
         out[t] = (q1("SELECT COUNT(*) c FROM %s" % t) or {}).get("c", 0)
     return out
 
@@ -767,6 +777,22 @@ def release_scorecard(month_key, employee, by):
     execute("UPDATE ops_scorecards SET released_at=?, released_by=? "
             "WHERE month_key=? AND employee=? AND released_at IS NULL",
             (now_iso(), by or "", month_key, employee))
+
+
+# ------------------------------------------------------------------ the remote control
+
+def switch_all():
+    return {r["key"]: r["value"] for r in q("SELECT key, value FROM ops_switches")}
+
+
+def switch_row(key):
+    return q1("SELECT * FROM ops_switches WHERE key=?", (key,))
+
+
+def switch_set(key, value, by=""):
+    execute("INSERT INTO ops_switches(key,value,set_by,set_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, set_by=excluded.set_by, "
+            "set_at=excluded.set_at", (key, value, by or "", now_iso()))
 
 
 # ------------------------------------------------------------------ dry-run log

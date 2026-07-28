@@ -66,6 +66,9 @@ _CSS = """
   .b-dry{background:var(--gold-soft);color:#7A6742;border:1px solid #E3D6BC}
   .b-bad{background:var(--maroon-soft);color:var(--maroon);border:1px solid #E6CDD2}
   .b-ok{background:var(--green-soft);color:var(--green);border:1px solid #D5E0D2}
+  .swrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .swrow:last-of-type{border-bottom:0}
+  .swrow button{min-width:96px}
   .idbox{width:190px;min-width:150px;padding:8px 10px;font-family:var(--num);font-size:13px;
     direction:ltr;text-align:left;border-radius:var(--r-sm)}
   .idmsg{margin-top:4px;max-width:210px}
@@ -304,11 +307,51 @@ function post(p, body){
 var STATE = null;
 var SCORE = null;
 
+function d_effect(key){
+  var sw = ((STATE || {}).control || {}).switches || [];
+  for (var i = 0; i < sw.length; i++){
+    if (sw[i].key === key) return 'تشغيله معناه: ' + sw[i].effect;
+  }
+  return '';
+}
+
 function pill(status){
   var m = {done: ['p-ok', 'تم'], pending: ['p-wait', 'ما وصل بعد'], missed: ['p-warn', 'ما وصل'],
            waived: ['p-mute', 'ملغى'], excused: ['p-mute', 'معذور']};
   var x = m[status] || ['p-mute', status];
   return '<span class="pill ' + x[0] + '">' + esc(x[1]) + '</span>';
+}
+
+function controlPanel(d){
+  var c = d.control || {};
+  var sw = c.switches || [];
+  if (!sw.length) return '';
+  var out = '<div class="card"><h2>التحكم — شغّل ووقّف من هنا</h2>';
+  out += '<div class="hint" style="margin-bottom:12px">'
+    + 'ما تحتاج تدخل Railway. اللي تغيّره هنا يبقى حتى بعد تحديث النظام.</div>';
+  for (var i = 0; i < sw.length; i++){
+    var s = sw[i];
+    out += '<div class="swrow">'
+      + '<div style="flex:1">'
+      +   '<b>' + esc(s.label) + '</b>'
+      +   '<div class="hint">' + (s.dry
+            ? 'وضع التجربة — يحسب كل شي وما يرسل ولا رسالة'
+            : '⚠️ شغّال فعلياً — ' + esc(s.effect)) + '</div>'
+      +   (s.changed_by ? '<div class="hint">آخر تغيير: ' + esc(s.changed_by) + '</div>' : '')
+      + '</div>'
+      + '<span class="pill ' + (s.dry ? 'p-wait' : 'p-warn') + '">'
+      +   (s.dry ? 'تجربة' : 'شغّال') + '</span>'
+      + '<button class="' + (s.dry ? 'primary' : 'ghost') + '"'
+      +   ' data-sw="' + esc(s.key) + '" data-dry="' + (s.dry ? '0' : '1') + '">'
+      +   (s.dry ? 'شغّله' : 'وقّفه') + '</button>'
+      + '</div>';
+  }
+  if (!c.all_quiet){
+    out += '<div class="row" style="margin-top:14px">'
+      + '<button class="danger" data-sw="stop_all" data-dry="1">🛑 وقّف كل شي الحين</button>'
+      + '</div>';
+  }
+  return out + '</div>';
 }
 
 function rosterTable(d){
@@ -509,6 +552,7 @@ function render(d){
 
   el('sub').textContent = 'التقرير الأسبوعي · الموعد ' + (d.due_at || '').replace('T', ' ');
   el('app').innerHTML = banner + hole
+    + controlPanel(d)
     + rosterTable(d)
     + turnoverCard(d)
     + scorecardCard()
@@ -567,6 +611,24 @@ document.addEventListener('click', function(ev){
     t.disabled = true;
     el('state').textContent = 'نفحص…';
     post('/api/ops/tick', {}).then(function(){ load(); });
+    return;
+  }
+  var sw = t.getAttribute('data-sw');
+  if (sw){
+    var wantDry = t.getAttribute('data-dry') === '1';
+    var body = {key: sw, dry: wantDry};
+    if (!wantDry){
+      var word = prompt((d_effect(sw) || '') + String.fromCharCode(10)
+        + 'اكتب كلمة «' + ((STATE.control || {}).confirm_word || '') + '» عشان تشغّله فعلياً:');
+      if (!word) return;
+      body.confirm = word;
+    }
+    t.disabled = true;
+    post('/api/ops/switch', body).then(function(r){
+      if (!r.ok) alert(r.error || 'ما ضبط');
+      else if (!wantDry) alert(r.message || '');
+      load();
+    });
     return;
   }
   var wid = t.getAttribute('data-waive');

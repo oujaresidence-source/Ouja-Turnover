@@ -23,12 +23,12 @@ Layout mirrors schedule/ and decor/:
     page.py   — /compliance (login) and /appeal/{token} (public, token, zero backslashes)
 """
 
-from . import engine, db, notify, turnover, scorecard, routes, page  # noqa: F401
+from . import engine, db, switch, notify, turnover, scorecard, routes, page  # noqa: F401
 from .host import HOST, wire  # noqa: F401
 from .routes import register_routes  # noqa: F401
 
 __all__ = ["wire", "register_routes", "HOST", "engine", "db", "notify", "turnover",
-           "scorecard", "routes", "page"]
+           "scorecard", "switch", "routes", "page"]
 
 
 def bootstrap():

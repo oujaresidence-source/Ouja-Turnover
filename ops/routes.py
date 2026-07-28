@@ -18,7 +18,7 @@ password to answer it.
 import json
 import traceback
 
-from . import db, engine, notify, page, scorecard, turnover
+from . import db, engine, notify, page, scorecard, switch, turnover
 from .host import HOST
 
 EDIT_ROLES = ("admin", "ops")
@@ -285,6 +285,7 @@ def state(period_key=None):
         "dry_log": db.dry_rows(200),
         "summary": notify.monthly_summary(month)["text"],
         "turnover": turnover.state(),
+        "control": switch.panel(),
     }
 
 
@@ -342,6 +343,34 @@ async def api_turnover_tick(request):
     if not can_edit(request):
         return _deny()
     return HOST.json_response({"ok": True, "report": turnover.tick()})
+
+
+# ---- the remote control ----
+
+def is_admin(request):
+    try:
+        return (HOST.req_role(request) if HOST.req_role else "viewer") == "admin"
+    except Exception:
+        return False
+
+
+async def api_switch(request):
+    """Turning something OFF: any editor, one click. Turning it ON: admin + typed word.
+    Stopping must never be harder than starting."""
+    b = await _body(request)
+    key = (b.get("key") or "").strip()
+    dry = bool(b.get("dry", True))
+    if key == "stop_all":
+        if not can_edit(request):
+            return _deny()
+        return HOST.json_response(switch.stop_everything(_actor(request)))
+    if not dry and not is_admin(request):
+        return HOST.json_response(
+            {"ok": False, "error": "تشغيل النظام فعلياً للأدمن فقط"}, 403)
+    if dry and not can_edit(request):
+        return _deny()
+    return HOST.json_response(switch.set_value(key, dry, _actor(request),
+                                               b.get("confirm") or ""))
 
 
 # ---- phase 3 «كرت التقييم» ----
@@ -452,6 +481,7 @@ def register(app):
     p("/api/ops/tick", _safe(api_tick))
     p("/api/ops/excuse", _safe(api_excuse))
     p("/api/ops/identity", _safe(api_identity))
+    p("/api/ops/switch", _safe(api_switch))
     p("/api/ops/waive", _safe(api_waive))
     p("/api/ops/appeal/decide", _safe(api_decide))
 

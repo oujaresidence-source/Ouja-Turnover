@@ -59,9 +59,10 @@ def enabled():
 
 
 def dryrun():
-    """DEFAULT ON. Flip OPS_WARN_DRYRUN=0 in Railway — no deploy needed — only after the
-    log at /compliance has been read for two full weeks and the numbers look right."""
-    return _env("OPS_WARN_DRYRUN", "1") == "1"
+    """DEFAULT ON. Flipped either from the remote control on /compliance (which survives a
+    redeploy) or with OPS_WARN_DRYRUN=0 in Railway. The page wins — see ops/switch.py."""
+    from . import switch
+    return switch.is_dry("warn_dryrun")
 
 
 def due_hour():
