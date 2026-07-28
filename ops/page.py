@@ -442,42 +442,51 @@ function appealsCard(d){
 function turnoverCard(d){
   var t = d.turnover || {};
   var rows = t.rows || [];
-  var out = '<div class="card"><h2>تسليم الشقق اليوم · ' + esc(t.date || '') + '</h2>';
+  var tot = t.totals || {};
+  var out = '<div class="card"><h2>سؤال التنظيف · ' + esc(t.date || '') + '</h2>';
   if (t.dryrun){
-    out += '<div class="hint" style="margin-bottom:10px">وضع التجربة — ما انرسل ولا تذكير.</div>';
+    out += '<div class="hint" style="margin-bottom:10px">وضع التجربة — ما انرسل ولا سؤال.</div>';
   }
+
+  // WHY apartments went unclean this month. This is the view the owner actually needs:
+  // «الفريق ما وصل» twelve times is a staffing fact, not an anecdote.
+  var rs = t.reasons || [];
+  if (rs.length){
+    out += '<div style="margin-bottom:14px"><b>أسباب عدم التنظيف — ' + esc(t.month || '') + '</b>';
+    for (var k = 0; k < rs.length; k++){
+      out += '<div class="swrow" style="padding:8px 0">'
+        + '<div style="flex:1">' + esc(rs[k].label) + '</div>'
+        + '<b class="num">' + esc(rs[k].n) + '</b></div>';
+    }
+    out += '</div>';
+  }
+  out += '<div class="hint" style="margin-bottom:12px">'
+    + 'هذا الشهر: انسأل ' + esc(tot.asked || 0) + ' · نعم ' + esc(tot.yes || 0)
+    + ' · لا ' + esc(tot.no || 0) + ' · بدون رد ' + esc(tot.silent || 0) + '</div>';
+
   if (!rows.length){
-    return out + '<div class="muted">ما فيه شقق مفتوحة اليوم.</div></div>';
+    return out + '<div class="muted">ما انسأل عن أي شقة اليوم.</div></div>';
   }
   out += '<div class="scroll"><table>'
-    + '<tr><th>الشقة</th><th>المسؤول</th><th>دخول الضيف</th><th>الحالة</th><th>التذكيرات</th></tr>';
+    + '<tr><th>الشقة</th><th>المسؤول</th><th>انسأل</th><th>الرد</th><th>السبب</th></tr>';
   for (var i = 0; i < rows.length; i++){
     var r = rows[i];
-    var st = r.acked_at ? '<span class="pill p-ok">جاهزة</span>'
-           : (r.problem_at ? '<span class="pill p-warn">فيه مشكلة</span>'
+    var st = r.answer === 'yes' ? '<span class="pill p-ok">نعم</span>'
+           : (r.answer === 'no' ? '<span class="pill p-warn">لا</span>'
            : (r.asleep ? '<span class="pill p-wait">محوّلة (نايم)</span>'
-           : (r.closed ? '<span class="pill p-mute">مقفلة</span>'
-           : '<span class="pill p-wait">شغالة</span>')));
+           : '<span class="pill p-mute">ما رد بعد</span>'));
     out += '<tr><td><b>' + esc(r.unit) + '</b></td>'
         + '<td>' + esc(r.employee || '—')
         + (r.reassigned_to ? ' <span class="muted">→ ' + esc(r.reassigned_to) + '</span>' : '')
         + '</td>'
-        + '<td class="num">' + esc(r.checkin_at) + '</td>'
+        + '<td class="num">' + esc(r.asked_at) + '</td>'
         + '<td>' + st + '</td>'
-        + '<td class="muted num">' + esc((r.levels || []).join(' ')) + '</td></tr>';
+        + '<td class="muted">' + esc(r.reason || '')
+        + (r.reason_text ? '<div class="hint">' + esc(r.reason_text) + '</div>' : '')
+        + '</td></tr>';
   }
   out += '</table></div>';
 
-  var sig = t.staffing_signal || [];
-  if (sig.length){
-    out += '<div class="banner b-dry" style="margin-top:14px">'
-      + '👥 تحويلات ليلية آخر ٣٠ يوم (مؤشّر توظيف — <b>مو</b> مخالفة): ';
-    var parts = [];
-    for (var j = 0; j < sig.length; j++){
-      parts.push(esc(sig[j].employee) + ' (' + esc(sig[j].n) + ')');
-    }
-    out += parts.join(' · ') + '</div>';
-  }
   return out + '</div>';
 }
 

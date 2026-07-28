@@ -409,20 +409,20 @@ def gather(month_key, minimum=None):
 def _gather_turnover(facts, attrib_by_day, start, end):
     """Phase 2's own record: closed with a photo BEFORE the guest arrived."""
     try:
-        rows = db.q("SELECT * FROM ops_nudge_items WHERE date>=? AND date<=?",
+        rows = db.q("SELECT * FROM ops_clean_checks WHERE day_key>=? AND day_key<=?",
                     (start.isoformat(), end.isoformat()))
     except Exception as e:
         print("[scorecard] turnover data unavailable:", e)
         return
     for r in rows:
-        lid = str(r.get("work_item_id") or "").split(":")[0]
-        who = (attrib_by_day.get(r.get("date")) or {}).get(_int_or(lid))
-        name = (who or {}).get("name") or r.get("employee")
+        name = r.get("responsible")
         if name not in facts:
             continue
+        # Every apartment we had to ask about is one that was NOT closed on its own before
+        # the guest was due. «نعم» after being asked still counts as a miss on the line;
+        # what it buys is an honest answer, which is what the reasons view is for.
         facts[name]["turnover"]["total"] += 1
-        acked, ci = r.get("acked_at"), r.get("checkin_at")
-        if acked and ci and str(acked) <= str(ci):
+        if r.get("answer") == "yes":
             facts[name]["turnover"]["closed_before_checkin"] += 1
 
 

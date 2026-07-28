@@ -5179,7 +5179,7 @@ async def reminder_loop():
     behaviour can be restored instantly if the new one disappoints: set NUDGE_ENABLED=0 in
     Railway (no deploy) and this comes straight back."""
     if _HAS_OPS and _ops.turnover.enabled() and not _ops.turnover.dryrun():
-        return                      # the private ladder owns this job now
+        return                      # «القفل» owns this job now — privately, and once
     now = datetime.now(TZ)
     hour = now.hour
     if hour < REMINDER_START_HOUR or hour >= REMINDER_END_HOUR:
@@ -5536,8 +5536,8 @@ def _ops_notify(payload):
     if not _HAS_OPS:
         return
     # Phase 2 payloads have their own delivery (one message, edited in place).
-    coro = (_ops_turnover_deliver(payload)
-            if str(payload.get("kind", "")).startswith("nudge") else _ops_deliver(payload))
+    coro = (_ops_clean_deliver(payload)
+            if str(payload.get("kind", "")).startswith("clean") else _ops_deliver(payload))
     try:
         loop = getattr(bot, "loop", None)
         if loop is not None and loop.is_running():
@@ -5629,122 +5629,163 @@ async def _ops_deliver(payload):
 
 # ---------------- «القفل» phase 2 delivery: ONE message, edited in place ----------------
 
-class TurnoverNudgeView(discord.ui.View):
+class CleanCheckView(discord.ui.View):
     """Two buttons, zero typing. Static custom_ids so a press survives a redeploy; WHICH
-    turnover it belongs to is looked up from the message id in the database — the same idea
-    as the existing Submit-for-Review button reading its channel topic."""
+    turnover it belongs to is looked up from the message id in the database."""
 
     def __init__(self, can_ack=True, upload_url=""):
         super().__init__(timeout=None)
         if can_ack:
-            self.add_item(discord.ui.Button(label="✅ جاهزة", style=discord.ButtonStyle.success,
-                                            custom_id="ouja_nudge_ready"))
+            self.add_item(discord.ui.Button(label="✅ نعم", style=discord.ButtonStyle.success,
+                                            custom_id="ouja_clean_yes"))
         elif upload_url:
-            # No photos yet, so «جاهزة» would be a lie. Offer the upload instead.
+            # No photos yet, so «نعم» would be a lie. Offer the upload instead.
             self.add_item(discord.ui.Button(label="📷 ارفع الصور",
                                             style=discord.ButtonStyle.link, url=upload_url))
         else:
             self.add_item(discord.ui.Button(label="📷 ارفع الصور أول", disabled=True,
                                             style=discord.ButtonStyle.secondary,
-                                            custom_id="ouja_nudge_need_photos"))
-        self.add_item(discord.ui.Button(label="⚠️ فيه مشكلة", style=discord.ButtonStyle.danger,
-                                        custom_id="ouja_nudge_problem"))
+                                            custom_id="ouja_clean_needphoto"))
+        self.add_item(discord.ui.Button(label="❌ لا", style=discord.ButtonStyle.danger,
+                                        custom_id="ouja_clean_no"))
 
-async def _ops_nudge_interaction(interaction):
-    """The two buttons. Registered as a LISTENER rather than a bound view, so a press still
-    works after a redeploy when no view object exists in memory any more."""
+
+class CleanReasonSelect(discord.ui.Select):
+    """«لا» is never accepted bare. The reason IS the feature — the owner has no data today
+    on why apartments go unclean."""
+
+    def __init__(self, work_item_id):
+        self.work_item_id = work_item_id
+        opts = [discord.SelectOption(label=ar, value=code)
+                for code, ar in _ops.engine.REASONS]
+        super().__init__(placeholder="ليش ما تم التنظيف؟", min_values=1, max_values=1,
+                         options=opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        code = self.values[0]
+        if code == "other":
+            await interaction.response.send_modal(CleanReasonModal(self.work_item_id))
+            return
+        res = await asyncio.to_thread(_ops.turnover.answer_no, self.work_item_id,
+                                      str(interaction.user), code, "")
+        await _clean_finish(interaction, res)
+
+
+class CleanReasonModal(discord.ui.Modal, title="وش السبب؟"):
+    def __init__(self, work_item_id):
+        super().__init__()
+        self.work_item_id = work_item_id
+        self.box = discord.ui.TextInput(label="اكتب السبب", style=discord.TextStyle.paragraph,
+                                        required=True, max_length=400)
+        self.add_item(self.box)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        res = await asyncio.to_thread(_ops.turnover.answer_no, self.work_item_id,
+                                      str(interaction.user), "other",
+                                      str(self.box.value).strip())
+        await _clean_finish(interaction, res)
+
+
+async def _clean_finish(interaction, res):
+    """Reply to the person and EDIT the original question in place — never a second message."""
+    try:
+        msg = res.get("message") if res.get("ok") else res.get("error")
+        if interaction.response.is_done():
+            await interaction.followup.send(msg or "تم", ephemeral=True)
+        else:
+            await interaction.response.send_message(msg or "تم", ephemeral=True)
+    except Exception as e:
+        print("[ops.clean] reply failed:", e)
+    if not res.get("ok") or not res.get("edit"):
+        return
+    try:
+        row = await asyncio.to_thread(_ops.db.clean_check, res["work_item_id"])
+        cid, mid = (row or {}).get("channel_id"), (row or {}).get("message_id")
+        if cid and mid:
+            ch = bot.get_channel(int(cid)) or await bot.fetch_channel(int(cid))
+            target = await ch.fetch_message(int(mid))
+            await target.edit(content=res["edit"], view=None)
+    except Exception as e:
+        print("[ops.clean] could not edit the question:", e)
+
+
+async def _ops_clean_interaction(interaction):
+    """The two buttons. A LISTENER, not a bound view, so a press still works on a message
+    posted before the last redeploy."""
     try:
         if not _HAS_OPS or interaction.type != discord.InteractionType.component:
             return
         cid = (interaction.data or {}).get("custom_id") or ""
-        if cid not in ("ouja_nudge_ready", "ouja_nudge_problem"):
+        if cid not in ("ouja_clean_yes", "ouja_clean_no"):
             return
         mid = str(getattr(interaction.message, "id", "") or "")
-        who = str(interaction.user)
-        if cid == "ouja_nudge_ready":
-            res = await asyncio.to_thread(_ops.turnover.press_ready, mid, who)
-        else:
-            res = await asyncio.to_thread(_ops.turnover.press_problem, mid, who)
-        await interaction.response.send_message(
-            (res.get("message") if res.get("ok") else res.get("error")) or "تم", ephemeral=True)
-        if res.get("ok"):
-            try:            # job closed — retire the buttons on that same message
-                await interaction.message.edit(view=None)
-            except Exception:
-                pass
+        row = await asyncio.to_thread(_ops.db.clean_check_by_message, mid)
+        if not row:
+            await interaction.response.send_message("ما لقينا هذي المهمة.", ephemeral=True)
+            return
+        if cid == "ouja_clean_yes":
+            res = await asyncio.to_thread(_ops.turnover.answer_yes, row["work_item_id"],
+                                          str(interaction.user))
+            await _clean_finish(interaction, res)
+            return
+        picker = discord.ui.View(timeout=300)
+        picker.add_item(CleanReasonSelect(row["work_item_id"]))
+        await interaction.response.send_message("اختر السبب:", view=picker, ephemeral=True)
     except Exception as e:
-        print("[ops.turnover] button error:", e)
+        print("[ops.clean] button error:", e)
 
-async def _ops_nudge_target(payload):
-    """Where the one message lives: the person's DM first, their «#اسم-اليوم» room second."""
+
+async def _ops_clean_target(payload):
+    """Where the question goes: the person's DM first, their «#اسم-اليوم» room second.
+    Never the shared turnover room — that is the whole point of the private route."""
     did = payload.get("employee_did") or ""
     if did:
         try:
             user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
             if user is not None:
-                return user, "dm"
+                return user
         except Exception as e:
-            print("[ops.turnover] dm target failed:", e)
+            print("[ops.clean] dm target failed:", e)
     guild = bot.get_guild(GUILD_ID)
     if guild is not None and payload.get("channel"):
         ch = discord.utils.get(guild.text_channels, name=payload["channel"])
         if ch is not None:
-            return ch, "channel"
-    return None, ""
+            return ch
+    lead = _ops.notify.lead_id()
+    if lead:
+        try:
+            return bot.get_user(int(lead)) or await bot.fetch_user(int(lead))
+        except Exception:
+            pass
+    return None
 
-async def _ops_turnover_deliver(payload):
-    """op='send' posts a NEW message (a phone buzz — L3/L5, or the very first one);
-    op='edit' rewrites the message we already have."""
+
+async def _ops_clean_deliver(payload):
     kind = payload.get("kind")
-    wid = payload.get("work_item_id")
     try:
-        if kind == "nudge_ops":                      # L5 — the only line anyone else sees
-            guild = bot.get_guild(GUILD_ID)
-            if guild is not None and payload.get("ops_channel"):
-                cat = await get_category(guild)
-                ch = await ensure_channel(guild, payload["ops_channel"], cat)
-                if ch is not None:
-                    await ch.send(payload["ops_text"])
-            return
-        if kind in ("nudge_lead", "nudge_problem"):
+        if kind == "clean_problem":
             if payload.get("lead_id"):
                 await _ops_dm(payload["lead_id"], payload.get("lead_text") or "")
             return
-        if kind == "nudge_asleep":
+        if kind == "clean_asleep":
             if payload.get("lead_id"):
                 await _ops_dm(payload["lead_id"], payload.get("lead_text") or "")
-            tgt, _how = await _ops_nudge_target(payload)
+            tgt = await _ops_clean_target(payload)
             if tgt is not None:
                 await tgt.send(payload.get("text") or "")
             return
-        if kind != "nudge":
+        if kind != "clean_check":
             return
-
-        view = (TurnoverNudgeView(payload.get("can_ack", False), payload.get("upload_url", ""))
-                if payload.get("buttons") else None)
-
-        if payload.get("op") == "edit" and payload.get("message_id"):
-            try:
-                cid = payload.get("channel_id")
-                ch = bot.get_channel(int(cid)) if cid else None
-                if ch is None and cid:
-                    ch = await bot.fetch_channel(int(cid))
-                if ch is not None:
-                    msg = await ch.fetch_message(int(payload["message_id"]))
-                    await msg.edit(content=payload.get("text") or "", view=view)
-                    return
-            except Exception as e:
-                print("[ops.turnover] edit failed, falling back to a new message:", e)
-
-        tgt, how = await _ops_nudge_target(payload)
+        tgt = await _ops_clean_target(payload)
         if tgt is None:
-            print("[ops.turnover] nobody to send to for", wid)
+            print("[ops.clean] nobody to ask for", payload.get("work_item_id"))
             return
+        view = CleanCheckView(payload.get("can_ack", False), payload.get("upload_url", ""))
         msg = await tgt.send(payload.get("text") or "", view=view)
-        await asyncio.to_thread(_ops.db.set_nudge_message, wid, how,
+        await asyncio.to_thread(_ops.db.set_check_message, payload["work_item_id"],
                                 getattr(msg.channel, "id", ""), msg.id)
     except Exception as e:
-        print("[ops.turnover] deliver failed:", e)
+        print("[ops.clean] deliver failed:", e)
 
 # ---------------- «القفل» phase 2: the turnover picture the ops package judges ----------------
 
@@ -6762,18 +6803,18 @@ async def ops_ladder_loop():
 
 @tasks.loop(minutes=2)
 async def ops_turnover_loop():
-    """«القفل» — the private turnover ladder. Every 2 minutes, because its steps are minutes
-    apart near the guest's arrival (T+20m, T+40m) and the L3 countdown refreshes every 10.
-    Each level is claimed in the database before it is sent, so a restart mid-pass cannot
-    double-nudge anybody."""
+    """«القفل» — asks «هل تم تنظيف الشقة؟» once per turnover, after its moment passes.
+    Every 2 minutes so the question lands close to the actual check-in time rather than up
+    to a quarter of an hour late. The ask is claimed in the database before it is sent, so a
+    restart mid-pass cannot ask twice."""
     if not (_HAS_OPS and _ops.turnover.enabled()):
         return
     await bot.wait_until_ready()
     try:
         rep = await asyncio.to_thread(_ops.turnover.tick)
-        if rep.get("nudged") or rep.get("asleep"):
+        if rep.get("asked") or rep.get("asleep"):
             print("[ops.turnover] tick:", {k: rep.get(k) for k in
-                                           ("nudged", "asleep", "closed", "dryrun")})
+                                           ("asked", "asleep", "closed", "dryrun")})
     except Exception as e:
         print("[ops.turnover] loop error:", e)
 
@@ -59594,9 +59635,9 @@ async def on_ready():
     if _HAS_OPS:
         # «القفل» buttons are handled by a LISTENER, not a bound view, so a press still works
         # on a message posted before the last redeploy.
-        if not getattr(bot, "_ops_nudge_listener", False):
-            bot.add_listener(_ops_nudge_interaction, "on_interaction")
-            bot._ops_nudge_listener = True
+        if not getattr(bot, "_ops_clean_listener", False):
+            bot.add_listener(_ops_clean_interaction, "on_interaction")
+            bot._ops_clean_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart

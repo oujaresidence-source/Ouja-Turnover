@@ -173,6 +173,31 @@ CREATE TABLE IF NOT EXISTS ops_scorecards (
     released_by TEXT,
     PRIMARY KEY(month_key, employee)
 );
+-- ============ «القفل» — one question per turnover, and the ANSWER ============
+-- The answers are the point. The owner has no data today on WHY apartments go unclean; a
+-- reason logged 12 times («الفريق ما وصل») is a staffing fact, not an anecdote.
+CREATE TABLE IF NOT EXISTS ops_clean_checks (
+    id              TEXT PRIMARY KEY,      -- 'chk_<lid>:<date>'  = one ask per turnover per day
+    work_item_id    TEXT NOT NULL,
+    unit            TEXT,
+    responsible     TEXT,
+    responsible_did TEXT,
+    asked_at        TEXT,
+    answered_at     TEXT,
+    answer          TEXT,                  -- yes | no
+    reason_code     TEXT,
+    reason_text     TEXT,
+    message_id      TEXT,                  -- the ONE message; a follow-up edits it
+    channel_id      TEXT,
+    reassigned_to     TEXT,
+    reassigned_reason TEXT,
+    day_key         TEXT,
+    month_key       TEXT,
+    UNIQUE(work_item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ops_chk_month ON ops_clean_checks(month_key);
+CREATE INDEX IF NOT EXISTS idx_ops_chk_msg   ON ops_clean_checks(message_id);
+
 -- ============ the two inputs the scorecard was missing ============
 -- APPEND-ONLY and on disk, which is the entire point: the old reply log was a 500-item deque
 -- and the escalation map was a dict that died on every restart, so «الاستجابة» — the biggest
@@ -320,7 +345,8 @@ def counts():
     for t in ("ops_obligations", "ops_warnings", "ops_appeals", "ops_free_passes",
               "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity",
               "ops_nudge_items", "ops_nudges", "ops_scorecards", "ops_switches",
-              "ops_response_events", "ops_escalation_events", "ops_config"):
+              "ops_response_events", "ops_escalation_events", "ops_config",
+              "ops_clean_checks"):
         out[t] = (q1("SELECT COUNT(*) c FROM %s" % t) or {}).get("c", 0)
     return out
 
@@ -834,6 +860,81 @@ def release_scorecard(month_key, employee, by):
     execute("UPDATE ops_scorecards SET released_at=?, released_by=? "
             "WHERE month_key=? AND employee=? AND released_at IS NULL",
             (now_iso(), by or "", month_key, employee))
+
+
+# ============================================ «القفل» clean checks
+
+def check_id(work_item_id):
+    return "chk_%s" % work_item_id
+
+
+def clean_check(work_item_id):
+    return q1("SELECT * FROM ops_clean_checks WHERE work_item_id=?", (work_item_id,))
+
+
+def clean_check_by_message(message_id):
+    """A button press arrives with a message id and nothing else. The link lives on disk so
+    the press still works after a redeploy."""
+    if not message_id:
+        return None
+    return q1("SELECT * FROM ops_clean_checks WHERE message_id=?", (str(message_id),))
+
+
+def open_clean_check(row):
+    """Record that we asked. UNIQUE(work_item_id) is what makes «one message only» a fact
+    about the database rather than a promise about the loop."""
+    if clean_check(row["work_item_id"]):
+        return False
+    execute("INSERT OR IGNORE INTO ops_clean_checks"
+            "(id,work_item_id,unit,responsible,responsible_did,asked_at,day_key,month_key)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (check_id(row["work_item_id"]), row["work_item_id"], row.get("unit"),
+             row.get("responsible"), row.get("responsible_did"),
+             row.get("asked_at") or now_iso(), row.get("day_key"), row.get("month_key")))
+    return True
+
+
+def set_check_message(work_item_id, channel_id, message_id):
+    execute("UPDATE ops_clean_checks SET channel_id=?, message_id=? WHERE work_item_id=?",
+            (str(channel_id or ""), str(message_id or ""), work_item_id))
+
+
+def answer_clean_check(work_item_id, answer, reason_code=None, reason_text=None, at=None):
+    """First answer wins — a later tap must not rewrite what somebody already said."""
+    execute("UPDATE ops_clean_checks SET answer=?, reason_code=?, reason_text=?, answered_at=? "
+            "WHERE work_item_id=? AND IFNULL(answered_at,'')=''",
+            (answer, reason_code, (reason_text or "")[:500], at or now_iso(), work_item_id))
+    return clean_check(work_item_id)
+
+
+def reassign_clean_check(work_item_id, to_name, reason):
+    execute("UPDATE ops_clean_checks SET reassigned_to=?, reassigned_reason=? "
+            "WHERE work_item_id=?", (to_name or "", reason or "", work_item_id))
+
+
+def clean_checks_for_day(day_key):
+    return q("SELECT * FROM ops_clean_checks WHERE day_key=? ORDER BY asked_at", (day_key,))
+
+
+def unanswered_checks_since(responsible, since_iso):
+    return len(q("SELECT id FROM ops_clean_checks WHERE responsible=? AND asked_at>=? "
+                 "AND IFNULL(answered_at,'')=''", (responsible, since_iso)))
+
+
+def clean_reason_counts(month_key):
+    """WHY apartments went unclean this month, grouped. This is the view the owner reads."""
+    return q("SELECT reason_code, COUNT(*) n FROM ops_clean_checks "
+             "WHERE month_key=? AND answer='no' AND IFNULL(reason_code,'')<>'' "
+             "GROUP BY reason_code ORDER BY n DESC", (month_key,))
+
+
+def clean_check_totals(month_key):
+    r = q1("SELECT COUNT(*) asked, "
+           "SUM(CASE WHEN answer='yes' THEN 1 ELSE 0 END) yes, "
+           "SUM(CASE WHEN answer='no' THEN 1 ELSE 0 END) no, "
+           "SUM(CASE WHEN IFNULL(answered_at,'')='' THEN 1 ELSE 0 END) silent "
+           "FROM ops_clean_checks WHERE month_key=?", (month_key,)) or {}
+    return {k: (r.get(k) or 0) for k in ("asked", "yes", "no", "silent")}
 
 
 # ============================================ response + escalation events

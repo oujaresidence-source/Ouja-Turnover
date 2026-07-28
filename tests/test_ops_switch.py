@@ -67,10 +67,11 @@ class TestTheFlipSurvivesARedeploy(SwitchCase):
         self.assertEqual(switch.source("warn_dryrun"), "page")
 
     def test_it_is_still_set_after_the_process_forgets_everything(self):
-        switch.set_value("nudge_dryrun", dry=False, by="فيصل", confirm=switch.CONFIRM_WORD)
+        switch.set_value("clean_check_dryrun", dry=False, by="فيصل",
+                         confirm=switch.CONFIRM_WORD)
         switch.invalidate()
         db.reset_init_cache()                        # as if the container restarted
-        self.assertFalse(switch.is_dry("nudge_dryrun"))
+        self.assertFalse(switch.is_dry("clean_check_dryrun"))
 
     def test_every_phase_reads_through_the_one_resolver(self):
         self.assertTrue(notify.dryrun())
@@ -197,6 +198,27 @@ class TestTheAppealChainMovedOffRailway(SwitchCase):
         self.assertEqual(
             next(p for p in self.notify.approver_panel() if p["stage"] == "s1")["source"],
             "none")
+
+
+class TestARenamedSwitchKeepsItsSetting(SwitchCase):
+    """«nudge_dryrun» became «clean_check_dryrun». Losing the stored value would silently
+    bring back the public shared-room nagging the owner asked us to remove."""
+
+    def test_the_old_key_is_honoured_until_the_new_one_is_set(self):
+        db.switch_set("nudge_dryrun", "0", "فيصل")
+        switch.invalidate()
+        self.assertFalse(switch.is_dry("clean_check_dryrun"))
+        self.assertEqual(switch.source("clean_check_dryrun"), "page")
+
+    def test_the_new_key_wins_once_it_exists(self):
+        db.switch_set("nudge_dryrun", "0", "فيصل")
+        switch.set_value("clean_check_dryrun", dry=True, by="فيصل")
+        self.assertTrue(switch.is_dry("clean_check_dryrun"))
+
+    def test_no_stored_value_at_all_still_defaults_to_silent(self):
+        self.assertTrue(switch.is_dry("clean_check_dryrun"))
+        self.assertEqual(switch.source("clean_check_dryrun"), "railway")
+
 
 if __name__ == "__main__":
     unittest.main()

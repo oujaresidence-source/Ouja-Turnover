@@ -32,13 +32,21 @@ SWITCHES = {
     "warn_dryrun": (
         "OPS_WARN_DRYRUN", "1", "نظام الالتزام — الإنذارات",
         "بيرسل التذكيرات للموظفين وبيسجل إنذارات تنقص من العمولة"),
-    "nudge_dryrun": (
-        "NUDGE_DRYRUN", "1", "القفل — تذكيرات التسليم",
-        "بيرسل تذكيرات خاصة للمسؤول عن كل شقة قبل دخول الضيف"),
+    "clean_check_dryrun": (
+        "CLEAN_CHECK_DRYRUN", "1", "القفل — سؤال التنظيف",
+        "بيسأل المسؤول «هل تم تنظيف الشقة؟» بعد ما يعدّي وقت الدخول"),
     "scorecard_dryrun": (
         "SCORECARD_DRYRUN", "1", "كرت التقييم الشهري",
         "بيسمح باعتماد الكروت وإرسالها للموظفين"),
 }
+
+# A renamed switch must carry its old setting across. «nudge_dryrun» (the five-level ladder)
+# became «clean_check_dryrun» (one question). The owner had already deliberately turned the
+# old one ON; dropping that on the floor would silently re-enable the PUBLIC shared-room
+# nagging they asked us to remove, which is the opposite of what they chose. The new feature
+# sends strictly fewer messages than the one they authorised, so carrying the choice over is
+# the conservative direction, not the reckless one.
+LEGACY_KEYS = {"clean_check_dryrun": "nudge_dryrun"}
 
 CONFIRM_WORD = "تشغيل"        # must be TYPED to take a system live
 
@@ -63,17 +71,30 @@ def invalidate():
     _cache["at"] = 0.0
 
 
+def _stored_value(key):
+    vals = _stored()
+    v = vals.get(key)
+    if v in ("0", "1"):
+        return v
+    legacy = LEGACY_KEYS.get(key)
+    if legacy:
+        v = vals.get(legacy)
+        if v in ("0", "1"):
+            return v
+    return None
+
+
 def value(key):
     """'1' = silent (dry-run), '0' = live. Stored value wins over the env var."""
     env_name, default = SWITCHES[key][0], SWITCHES[key][1]
-    stored = _stored().get(key)
-    if stored in ("0", "1"):
+    stored = _stored_value(key)
+    if stored is not None:
         return stored
     return (os.environ.get(env_name, default) or default).strip()
 
 
 def source(key):
-    return "page" if _stored().get(key) in ("0", "1") else "railway"
+    return "page" if _stored_value(key) is not None else "railway"
 
 
 def is_dry(key):
