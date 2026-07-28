@@ -56248,31 +56248,82 @@ async def cmd_ops_channels(ctx):
     if not roster:
         await ctx.reply("🚫 ما لقيت أي موظف في تقويم الموظفين.")
         return
+    # PREFLIGHT. A private room that is created and only THEN locked down is public for the
+    # moment in between — and if the lock fails, it stays public forever with an employee's
+    # name on it. Refuse up front instead, with the actual missing permission named in Arabic.
+    me = guild.me
+    missing = []
+    if not me.guild_permissions.manage_channels:
+        missing.append("«إدارة الرومات» (Manage Channels)")
+    if not (me.guild_permissions.manage_roles or me.guild_permissions.administrator):
+        missing.append("«إدارة الأدوار» (Manage Roles) — بدونها ما نقدر نخلي الروم خاصة")
+    if missing:
+        nl = chr(10)
+        await ctx.reply(nl.join([
+            "🚫 ما قدرت أفتح الرومات — البوت ناقصه صلاحيات:",
+            *["• " + m for m in missing],
+            "",
+            "الحل: Server Settings ← Roles ← دور البوت «Ouja Turnovers» ← تبويب "
+            "**Permissions** (مو Manage Members) ← فعّلها ← Save.",
+            "ما انفتح ولا روم — عشان ما يصير عندك روم باسم موظف والكل يشوفه."]))
+        return
+
     cat = next((c for c in guild.categories if c.name == OPS_CATEGORY_NAME), None)
     if cat is None:
         cat = await guild.create_category(OPS_CATEGORY_NAME)
     lead_id = _ops.notify.lead_id()
     made, kept, failed = [], [], []
+
+    async def _make_private(name, topic, overwrites):
+        """Create a room that is private FROM BIRTH. Discord applies overwrites atomically at
+        creation, so the room is never briefly visible. If anything still fails, delete the
+        half-made room rather than leave a public channel named after somebody."""
+        ch = None
+        try:
+            ch = await guild.create_text_channel(name, category=cat, topic=topic,
+                                                 overwrites=overwrites)
+            return ch, None
+        except discord.HTTPException as e:
+            if ch is not None:
+                try:
+                    await ch.delete(reason="ops: could not secure the room")
+                except Exception:
+                    pass
+            if _tk_category_full(e):
+                return None, "التصنيف ممتلئ (٥٠ روم)"
+            return None, str(e)[:90]
+        except Exception as e:
+            if ch is not None:
+                try:
+                    await ch.delete(reason="ops: could not secure the room")
+                except Exception:
+                    pass
+            return None, str(e)[:90]
+
     for emp in roster:
         name = _ops.notify.channel_name(emp["name"])
         if discord.utils.get(guild.text_channels, name=name) is not None:
             kept.append(emp["name"])
             continue
-        ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+        ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
+              me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                              read_message_history=True,
+                                              manage_messages=True)}
         for did in (emp.get("did"), lead_id):
             if not did:
                 continue
-            m = guild.get_member(int(did))
+            try:
+                m = guild.get_member(int(did))
+            except (TypeError, ValueError):
+                continue
             if m is not None:
                 ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                                     read_message_history=True)
-        try:
-            ch = await _make_channel_spill(guild, cat, name,
-                                           "روم خاصة — نظام الالتزام")
-            await ch.edit(overwrites=ov)
+        ch, err = await _make_private(name, "روم خاصة — نظام الالتزام", ov)
+        if ch is not None:
             made.append(emp["name"])
-        except Exception as e:
-            failed.append("%s (%s)" % (emp["name"], str(e)[:80]))
+        else:
+            failed.append("%s (%s)" % (emp["name"], err))
     # The private HR room. Everyone denied, then the lead + the appeal chain + the admins.
     # It holds the warning record, so it must never be a room the team can stumble into.
     hr_name = _ops.notify.hr_channel()
@@ -56293,13 +56344,14 @@ async def cmd_ops_channels(ctx):
             if m is not None:
                 hr_ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                                        read_message_history=True)
-        try:
-            hr = await _make_channel_spill(guild, cat, hr_name,
-                                           "سجل الإنذارات — خاص، ما يدخله إلا المسؤولين")
-            await hr.edit(overwrites=hr_ov)
+        hr_ov[me] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                read_message_history=True)
+        hr, err = await _make_private(hr_name,
+                                      "سجل الإنذارات — خاص، ما يدخله إلا المسؤولين", hr_ov)
+        if hr is not None:
             made.append("#" + hr_name)
-        except Exception as e:
-            failed.append("#%s (%s)" % (hr_name, str(e)[:80]))
+        else:
+            failed.append("#%s (%s)" % (hr_name, err))
 
     nl = chr(10)
     msg = ["✅ رومات الالتزام:"]
