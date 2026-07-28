@@ -56300,11 +56300,23 @@ async def cmd_ops_channels(ctx):
                     pass
             return None, str(e)[:90]
 
+    fixed = []
+
+    async def _ensure_private(ch, overwrites, label):
+        """A room that EXISTS but is readable by @everyone is worse than no room: it has an
+        employee's name on it and the whole team can read it. So «already there» is not good
+        enough — re-apply the lock and say so."""
+        try:
+            if ch.overwrites_for(guild.default_role).view_channel is False:
+                kept.append(label)
+                return
+            await ch.edit(overwrites=overwrites)
+            fixed.append(label)
+        except Exception as e:
+            failed.append("%s (%s)" % (label, str(e)[:80]))
+
     for emp in roster:
         name = _ops.notify.channel_name(emp["name"])
-        if discord.utils.get(guild.text_channels, name=name) is not None:
-            kept.append(emp["name"])
-            continue
         ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
               me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                               read_message_history=True,
@@ -56319,6 +56331,10 @@ async def cmd_ops_channels(ctx):
             if m is not None:
                 ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                                     read_message_history=True)
+        existing = discord.utils.get(guild.text_channels, name=name)
+        if existing is not None:
+            await _ensure_private(existing, ov, emp["name"])
+            continue
         ch, err = await _make_private(name, "روم خاصة — نظام الالتزام", ov)
         if ch is not None:
             made.append(emp["name"])
@@ -56327,9 +56343,8 @@ async def cmd_ops_channels(ctx):
     # The private HR room. Everyone denied, then the lead + the appeal chain + the admins.
     # It holds the warning record, so it must never be a room the team can stumble into.
     hr_name = _ops.notify.hr_channel()
-    if discord.utils.get(guild.text_channels, name=hr_name) is not None:
-        kept.append("#" + hr_name)
-    else:
+    hr_existing = discord.utils.get(guild.text_channels, name=hr_name)
+    if True:
         hr_ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
         seen_ids = set()
         for did in [lead_id] + list(_ops.notify.approver_ids().values()) + [str(ctx.author.id)]:
@@ -56346,19 +56361,24 @@ async def cmd_ops_channels(ctx):
                                                        read_message_history=True)
         hr_ov[me] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                                 read_message_history=True)
-        hr, err = await _make_private(hr_name,
-                                      "سجل الإنذارات — خاص، ما يدخله إلا المسؤولين", hr_ov)
-        if hr is not None:
-            made.append("#" + hr_name)
+        if hr_existing is not None:
+            await _ensure_private(hr_existing, hr_ov, "#" + hr_name)
         else:
-            failed.append("#%s (%s)" % (hr_name, err))
+            hr, err = await _make_private(
+                hr_name, "سجل الإنذارات — خاص، ما يدخله إلا المسؤولين", hr_ov)
+            if hr is not None:
+                made.append("#" + hr_name)
+            else:
+                failed.append("#%s (%s)" % (hr_name, err))
 
     nl = chr(10)
     msg = ["✅ رومات الالتزام:"]
     if made:
         msg.append("انفتحت: " + "، ".join(made))
+    if fixed:
+        msg.append("🔒 كانت مكشوفة وانقفلت: " + "، ".join(fixed))
     if kept:
-        msg.append("موجودة من قبل: " + "، ".join(kept))
+        msg.append("موجودة ومقفلة من قبل: " + "، ".join(kept))
     if failed:
         msg.append("⚠️ ما انفتحت: " + "، ".join(failed))
     await ctx.reply(nl.join(msg))
