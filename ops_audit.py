@@ -539,14 +539,354 @@ async def handle_message(message):
             pass
 
 
-def setup(bot):
-    """Register the read-only audit listener. Called once from bot.py."""
+# =====================================================================
+# TEMPORARY DIAGNOSTIC — !ouja-msgdump                    (added 2026-07-27)
+# ---------------------------------------------------------------------
+# WHY: we cannot tell, from the outside, which outgoing guest messages went
+# through Hostaway and which did not, nor which human sent them. The code we
+# have today reads only `body` / `isIncoming` / `date` and throws the rest of
+# the message object away. This dumps EVERY key Hostaway returns so the owner
+# can see the fields we ignore — `sentUsingHostaway` above all.
+#
+# READ-ONLY: two GET endpoints, nothing written to Hostaway, nothing written
+# to Discord except its own reply + one JSON attachment.
+#
+# TO REMOVE: delete this whole block (down to "END TEMPORARY") and drop
+# `TRIGGER_MSGDUMP` from the listener in `setup()`. Nothing else depends on it.
+# =====================================================================
+TRIGGER_MSGDUMP  = "!ouja-msgdump"
+MSGDUMP_CONVOS   = 10      # how many conversations to pull (owner-specified)
+MSGDUMP_MAX_CHARS = 7_000_000   # safety cap on the attachment (Discord: 8 MB)
+
+_HOST = None   # bot.py's LIVE module object — this file must NEVER `import bot`
+
+# Redaction. The point of the dump is METADATA, so we blank content and guest
+# identity and keep every other key exactly as Hostaway returned it. The key
+# NAME always survives — you always see that a field exists and how long its
+# value was, so nothing hides silently.
+_MD_TEXT_KEYS = ("body", "bodyplain", "subject", "preview", "snippet",
+                 "lastmessage", "text", "message")
+_MD_PII_SUBSTR = ("guestname", "firstname", "lastname", "fullname",
+                  "phone", "mobile", "whatsapp", "email",
+                  "picture", "avatar", "recipientname")
+
+
+def _md_should_redact(key):
+    k = str(key).lower()
+    if k in _MD_TEXT_KEYS or "body" in k:
+        return True
+    return any(s in k for s in _MD_PII_SUBSTR)
+
+
+def _md_redact_value(value):
+    """Same '<redacted: N chars>' shape for everything we blank."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return f"<redacted: {len(value)} chars>"
+    return f"<redacted: {len(str(value))} chars, {type(value).__name__}>"
+
+
+def _md_redact(obj, _path="", _hit=None):
+    """Deep copy with content + guest identity blanked. Returns (obj, [paths])."""
+    hit = [] if _hit is None else _hit
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            here = f"{_path}.{k}" if _path else str(k)
+            if _md_should_redact(k):
+                out[k] = _md_redact_value(v)
+                hit.append(here)
+            else:
+                out[k], _ = _md_redact(v, here, hit)
+        return out, hit
+    if isinstance(obj, list):
+        out = []
+        for i, v in enumerate(obj):
+            r, _ = _md_redact(v, f"{_path}[{i}]", hit)
+            out.append(r)
+        return out, hit
+    return obj, hit
+
+
+def _md_is_incoming(msg):
+    return bool(msg.get("isIncoming"))
+
+
+def _md_from_hostaway(msg):
+    """True / False / None(unknown) from `sentUsingHostaway`.
+
+    None means the key was absent or null — a THIRD shape, not a synonym for
+    False. Collapsing them would erase the very thing we are looking for.
+    """
+    if "sentUsingHostaway" not in msg:
+        return None
+    v = msg.get("sentUsingHostaway")
+    if v is None:
+        return None
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("1", "true", "yes"):
+            return True
+        if s in ("0", "false", "no", ""):
+            return False
+        return None
+    return bool(v)
+
+
+def _md_sort_key(msg):
+    """Newest-first ordering: Hostaway dates sort fine as plain strings."""
+    stamp = ""
+    for k in ("date", "insertedOn", "updatedOn"):
+        v = msg.get(k)
+        if isinstance(v, str) and v:
+            stamp = v
+            break
+    try:
+        mid = int(msg.get("id") or 0)
+    except (TypeError, ValueError):
+        mid = 0
+    return (stamp, mid)
+
+
+_MD_BUCKETS = ("sent_using_hostaway", "not_sent_using_hostaway", "flag_missing")
+
+
+def _md_pick_shapes(messages):
+    """Newest OUTGOING message of each shape. (buckets, outgoing_count)."""
+    picked = {b: None for b in _MD_BUCKETS}
+    outgoing = [m for m in messages if isinstance(m, dict) and not _md_is_incoming(m)]
+    for m in sorted(outgoing, key=_md_sort_key, reverse=True):
+        flag = _md_from_hostaway(m)
+        bucket = ("sent_using_hostaway" if flag is True else
+                  "not_sent_using_hostaway" if flag is False else "flag_missing")
+        if picked[bucket] is None:
+            picked[bucket] = m
+    return picked, len(outgoing)
+
+
+def _md_keys(obj):
+    return sorted(obj.keys()) if isinstance(obj, dict) else []
+
+
+def build_msgdump(raw, generated_at=None):
+    """Pure builder: raw fetch -> the dict we write to the .json file."""
+    convos_out, seen = [], {b: [] for b in _MD_BUCKETS}
+
+    for row in raw.get("conversations") or []:
+        convo = row.get("conversation") if isinstance(row.get("conversation"), dict) else {}
+        msgs = [m for m in (row.get("messages") or []) if isinstance(m, dict)]
+        picked, n_out = _md_pick_shapes(msgs)
+
+        # The conversation object may carry the whole thread inline; that is the
+        # same data as the messages section, so we note it instead of repeating it.
+        convo_copy = dict(convo)
+        for k, v in list(convo_copy.items()):
+            if isinstance(v, list) and v and isinstance(v[0], dict) and "isIncoming" in v[0]:
+                convo_copy[k] = f"<omitted: {len(v)} embedded message objects — see messages below>"
+        convo_red, convo_hits = _md_redact(convo_copy)
+
+        entry = {
+            "order_index": row.get("order_index"),
+            "conversation_id": row.get("id"),
+            "fetch_error": row.get("error"),
+            "message_count": len(msgs),
+            "outgoing_count": n_out,
+            "conversation_object": convo_red,
+            "conversation_object_keys": _md_keys(convo),
+            "conversation_redacted_paths": sorted(set(convo_hits)),
+            "messages": {},
+            "missing_shapes": [],
+        }
+        for bucket in _MD_BUCKETS:
+            msg = picked[bucket]
+            if msg is None:
+                entry["missing_shapes"].append(bucket)
+                entry["messages"][bucket] = None
+                continue
+            red, hits = _md_redact(msg)
+            entry["messages"][bucket] = {
+                "raw": red,
+                "keys": _md_keys(msg),
+                "redacted_paths": sorted(set(hits)),
+                "sentUsingHostaway_raw": repr(msg.get("sentUsingHostaway", "<key absent>")),
+            }
+            seen[bucket].append(set(msg.keys()))
+        if len(entry["missing_shapes"]) == len(_MD_BUCKETS):
+            entry["note"] = "no outgoing messages in this conversation"
+        convos_out.append(entry)
+
+    # The whole point: which keys appear on one shape but not the other.
+    union = {b: sorted(set().union(*seen[b])) if seen[b] else [] for b in _MD_BUCKETS}
+    a, b = set(union["sent_using_hostaway"]), set(union["not_sent_using_hostaway"])
+    return {
+        "_what_this_is": (
+            "TEMPORARY diagnostic dump of Hostaway conversations + their newest "
+            "OUTGOING message of each shape. Read-only. Message text, guest names, "
+            "phone numbers and e-mails are replaced by '<redacted: N chars>'; every "
+            "other key is exactly as Hostaway returned it."
+        ),
+        "_redaction_rule": {
+            "text_keys": list(_MD_TEXT_KEYS),
+            "identity_substrings": list(_MD_PII_SUBSTR),
+            "note": "a key is blanked if its NAME matches — the name and value length always survive",
+        },
+        "generated_at": generated_at,
+        "conversations_requested": raw.get("requested"),
+        "conversations_returned": len(convos_out),
+        "conversation_order": "exactly as GET /conversations returned them (order_index 0 = first)",
+        "list_endpoint_params": raw.get("params"),
+        "list_fetch_error": raw.get("error"),
+        "field_comparison": {
+            "keys_on_sent_using_hostaway": union["sent_using_hostaway"],
+            "keys_on_not_sent_using_hostaway": union["not_sent_using_hostaway"],
+            "keys_on_flag_missing": union["flag_missing"],
+            "only_when_sent_using_hostaway": sorted(a - b),
+            "only_when_not_sent_using_hostaway": sorted(b - a),
+            "on_both": sorted(a & b),
+        },
+        "shape_counts": {bucket: sum(1 for c in convos_out
+                                     if (c["messages"] or {}).get(bucket)) for bucket in _MD_BUCKETS},
+        "conversations": convos_out,
+    }
+
+
+def _md_fetch(api_get, limit=MSGDUMP_CONVOS):
+    """The blocking part (requests). Runs in a worker thread. Read-only GETs."""
+    params = {"limit": limit, "includeResources": 1}
+    raw = {"requested": limit, "params": dict(params), "error": None, "conversations": []}
+    try:
+        convos = ((api_get("/conversations", params=params) or {}).get("result")) or []
+    except Exception as e:
+        raw["error"] = f"{type(e).__name__}: {e}"
+        return raw
+
+    for idx, convo in enumerate(convos[:limit]):
+        convo = convo if isinstance(convo, dict) else {}
+        cid = convo.get("id")
+        row = {"order_index": idx, "id": cid, "conversation": convo,
+               "messages": [], "error": None}
+        if cid is None:
+            row["error"] = "conversation has no id"
+        else:
+            try:
+                row["messages"] = ((api_get(f"/conversations/{cid}/messages") or {})
+                                   .get("result")) or []
+            except Exception as e:
+                row["error"] = f"{type(e).__name__}: {e}"
+        raw["conversations"].append(row)
+    return raw
+
+
+def build_msgdump_summary(dump):
+    counts = dump.get("shape_counts") or {}
+    fc = dump.get("field_comparison") or {}
+    lines = [
+        "🔎 **!ouja-msgdump** — نسخة تشخيصية مؤقتة (قراءة فقط).",
+        f"• محادثات: {dump.get('conversations_returned')} من {dump.get('conversations_requested')}",
+        f"• رسائل انطلقت عبر Hostaway: {counts.get('sent_using_hostaway', 0)}",
+        f"• رسائل ما انطلقت عبر Hostaway: {counts.get('not_sent_using_hostaway', 0)}",
+        f"• الحقل `sentUsingHostaway` مو موجود أصلًا: {counts.get('flag_missing', 0)}",
+    ]
+    only_a = fc.get("only_when_sent_using_hostaway") or []
+    only_b = fc.get("only_when_not_sent_using_hostaway") or []
+    if only_a or only_b:
+        lines.append(f"• فروق الحقول بين الشكلين: {len(only_a)} / {len(only_b)} حقل مختلف — التفاصيل بالملف.")
+    else:
+        lines.append("• الشكلان بنفس الحقول تمامًا (أو ما توفر أحد الشكلين) — شوف الملف.")
+    if dump.get("list_fetch_error"):
+        lines.append(f"⚠️ خطأ من Hostaway: {str(dump['list_fetch_error'])[:300]}")
+    lines += ["", "🔒 ما أرسلنا ولا عدّلنا أي شيء — قراءة فقط.",
+              "🙈 نص الرسائل وأسماء الضيوف وأرقامهم مخفية، والباقي كامل بالملف."]
+    text = "\n".join(lines)
+    return text if len(text) <= SUMMARY_MAX else text[:SUMMARY_MAX]
+
+
+async def handle_msgdump(message):
+    """The listener body for !ouja-msgdump. Never raises."""
+    if getattr(message.author, "bot", False):
+        return
+    parts = (message.content or "").strip().split()
+    if not parts or parts[0].lower() != TRIGGER_MSGDUMP:
+        return
+
+    if message.guild is None:
+        try:
+            await message.reply("هذا الأمر يشتغل داخل السيرفر فقط.", mention_author=False)
+        except Exception:
+            pass
+        return
+
+    if not _is_allowed(message):
+        try:
+            await message.reply("🔒 هذا الأمر للمالك أو الأدمن فقط.", mention_author=False)
+        except Exception:
+            pass
+        return
+
+    status = None
+    try:
+        status = await message.reply(
+            f"⏳ أسحب آخر {MSGDUMP_CONVOS} محادثات من Hostaway… (قراءة فقط، ما راح أرسل ولا أعدّل شيء)",
+            mention_author=False)
+    except Exception:
+        status = None
+
+    try:
+        api_get = getattr(_HOST, "api_get", None)
+        if api_get is None:
+            raise RuntimeError("ops_audit.setup(bot, host) was called without the host "
+                               "module — no api_get available")
+        raw = await asyncio.to_thread(_md_fetch, api_get, MSGDUMP_CONVOS)
+        dump = build_msgdump(raw, generated_at=_iso(datetime.now(timezone.utc)))
+
+        payload = json.dumps(dump, ensure_ascii=False, indent=2)
+        if len(payload) > MSGDUMP_MAX_CHARS:
+            payload = payload[:MSGDUMP_MAX_CHARS] + "\n… TRUNCATED (file size cap)"
+        day = (dump.get("generated_at") or "")[:10] or "today"
+        f = discord.File(io.BytesIO(payload.encode("utf-8")),
+                         filename=f"ouja_msgdump_{day}.json")
+
+        summary = build_msgdump_summary(dump)
+        if status is not None:
+            await status.edit(content=summary)
+        else:
+            await message.channel.send(summary)
+        await message.channel.send(file=f)
+    except Exception as e:
+        err = f"{type(e).__name__}: {e}"
+        print("ops_audit msgdump error:", err)
+        traceback.print_exc()
+        note = ("❌ التشخيص وقف بخطأ. ابعث هذا السطر لفيصل:\n```\n" + err[:1500] + "\n```")
+        try:
+            if status is not None:
+                await status.edit(content=note)
+            else:
+                await message.channel.send(note)
+        except Exception:
+            pass
+# ============================ END TEMPORARY ==========================
+
+
+def setup(bot, host=None):
+    """Register the read-only listeners. Called once from bot.py.
+
+    `host` is bot.py's own LIVE module object (for `api_get`) — this file must
+    NEVER `import bot`. It stays optional so the audit half works without it.
+    """
+    global _HOST
+    _HOST = host
+
     async def _ops_audit_on_message(message):
         try:
-            await handle_message(message)
+            head = (message.content or "").strip().split(" ")[0].lower()
+            if head == TRIGGER_MSGDUMP:
+                await handle_msgdump(message)
+            else:
+                await handle_message(message)
         except Exception as e:                      # belt AND braces
             print("ops_audit listener error:", type(e).__name__, e)
 
     bot.add_listener(_ops_audit_on_message, "on_message")
-    print("ops_audit: !ouja-audit listener registered (read-only)")
+    print("ops_audit: !ouja-audit + !ouja-msgdump listeners registered (read-only)")
     return _ops_audit_on_message

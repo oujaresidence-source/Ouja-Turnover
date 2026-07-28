@@ -3288,8 +3288,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!ouja ", intents=intents)
 
-import ops_audit                    # read-only server audit: !ouja-audit
-ops_audit.setup(bot)
+import ops_audit, sys as _oad_sys   # read-only: !ouja-audit + !ouja-msgdump (temporary)
+ops_audit.setup(bot, _oad_sys.modules[__name__])    # hand over the LIVE module (never `import bot`)
 
 import ops_archive, sys as _oa_sys  # Drive archive + guarded purge: !ouja-archive / !ouja-purge
 ops_archive.setup(bot, _oa_sys.modules[__name__])   # hand over the LIVE module (never `import bot`)
