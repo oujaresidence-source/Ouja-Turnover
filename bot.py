@@ -5858,6 +5858,73 @@ def _ops_cover_today(day):
         print("[ops.turnover] coverage unavailable:", e)
     return out
 
+# ---------------- «كرت التقييم» phase 3: the three sources scored by OWNERSHIP ----------------
+# None of these looks at WHO replied. Hostaway cannot tell us — every outgoing message has
+# sentUsingHostaway=0 and userId=null because the team answers inside Airbnb. The ops package
+# attributes each row to whoever the coverage calendar had on that apartment that day. Any of
+# these returning [] makes its line read «بيانات ناقصة» and redistribute — never a zero.
+
+def _ops_escalations_window(start, end):
+    """Escalations on each apartment, and whether somebody actually took it. Sourced from the
+    tickets the escalation flow already opens (they persist; the in-memory escalation map does
+    not survive a restart)."""
+    out = []
+    try:
+        for t in _tickets:
+            if t.get("source") != "escalation":
+                continue
+            day = str(t.get("created_at") or "")[:10]
+            if not day or not (start <= day <= end):
+                continue
+            out.append({
+                "listing_id": t.get("listing_id"),
+                "date": day,
+                # "took it" = somebody owned it, not merely that it closed itself
+                "taken": bool(t.get("assignee") or t.get("claimed_by")
+                              or t.get("status") in ("closed", "done", "resolved")),
+            })
+    except Exception as e:
+        print("[scorecard] escalation source failed:", e)
+    return out
+
+def _ops_response_events(start, end):
+    """First-response events per apartment inside working hours.
+
+    NOT INSTRUMENTED YET. The bot does not currently record a per-apartment first-response
+    time (the auto-reply log is a capped 500-item deque and the escalation map is in-memory),
+    and inventing a number here would put a made-up figure on somebody's review. Returning
+    nothing is the specified behaviour: the line renders «بيانات ناقصة» and its 25% is spread
+    over the lines we CAN measure honestly."""
+    return []
+
+def _ops_reviews_window(start, end):
+    """Guest review SUB-scores per apartment: cleanliness, communication, check-in/accuracy.
+    Location and value are deliberately passed through and dropped by the ops package, which
+    owns that rule in one place."""
+    out = []
+    try:
+        for rev in _reviews.values():
+            day = str(rev.get("date") or "")[:10]
+            if not day or not (start <= day <= end):
+                continue
+            cats = {}
+            raw = rev.get("raw") or {}
+            for c in (raw.get("reviewCategory") or raw.get("reviewCategories") or []):
+                if not isinstance(c, dict):
+                    continue
+                name = str(c.get("category") or c.get("categoryName") or "").strip().lower()
+                if not name:
+                    continue
+                try:
+                    cats[name] = float(c.get("rating"))
+                except (TypeError, ValueError):
+                    continue
+            if cats:
+                out.append({"listing_id": rev.get("listing_id"), "date": day, "categories": cats})
+    except Exception as e:
+        print("[scorecard] review source failed:", e)
+    return out
+
 def _decor_notify(payload):
     """HOST.notify hook for «تنسيق الحفلات» — schedules the async post. Never raises into a
     request handler: a Discord problem must not stop the supervisor from opening an order."""
@@ -51989,6 +52056,9 @@ async def start_web_server():
                     "discord_ids": _ops_discord_ids,
                     "turnover_items": _ops_turnover_items,   # «القفل» phase 2
                     "has_photos": _ops_has_photos,
+                    "escalations_window": _ops_escalations_window,   # «كرت التقييم» phase 3
+                    "response_events": _ops_response_events,
+                    "reviews_window": _ops_reviews_window,
                     "public_base": _dispatch_base_url,   # env → auto-captured → site base
                     "notify": _ops_notify,
                 })

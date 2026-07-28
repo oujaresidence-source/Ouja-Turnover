@@ -158,6 +158,21 @@ CREATE TABLE IF NOT EXISTS ops_nudges (
     reassigned_reason TEXT,
     UNIQUE(work_item_id, level)
 );
+-- ===================== PHASE 3 «كرت التقييم» — monthly scorecard =====================
+-- The whole card is stored as JSON so the RAW numbers behind every line stay next to the
+-- score: the owner must be able to see what produced a 3 before approving it. An override
+-- is written INTO the card with who did it and why, and `released_at` is the one-way door —
+-- nothing may be edited after an employee has seen it.
+CREATE TABLE IF NOT EXISTS ops_scorecards (
+    month_key   TEXT NOT NULL,
+    employee    TEXT NOT NULL,
+    card_json   TEXT NOT NULL,
+    computed_at TEXT,
+    computed_by TEXT,
+    released_at TEXT,
+    released_by TEXT,
+    PRIMARY KEY(month_key, employee)
+);
 CREATE INDEX IF NOT EXISTS idx_ops_nudge_item ON ops_nudges(work_item_id);
 CREATE INDEX IF NOT EXISTS idx_ops_nudge_msg  ON ops_nudge_items(message_id);
 CREATE INDEX IF NOT EXISTS idx_ops_ob_period  ON ops_obligations(period_key);
@@ -238,7 +253,7 @@ def counts():
     out = {}
     for t in ("ops_obligations", "ops_warnings", "ops_appeals", "ops_free_passes",
               "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity",
-              "ops_nudge_items", "ops_nudges"):
+              "ops_nudge_items", "ops_nudges", "ops_scorecards"):
         out[t] = (q1("SELECT COUNT(*) c FROM %s" % t) or {}).get("c", 0)
     return out
 
@@ -716,6 +731,42 @@ def sleep_reassignments(since_iso, limit=200):
     return q("SELECT employee, COUNT(*) n, MAX(created_at) last_at FROM ops_nudge_items "
              "WHERE reassigned_reason='reassigned_asleep' AND created_at>=? "
              "GROUP BY employee ORDER BY n DESC LIMIT ?", (since_iso, int(limit)))
+
+
+# ================================================================== PHASE 3 «كرت التقييم»
+
+def save_scorecards(month_key, cards, by=""):
+    """Compute-and-store. Never overwrites a card an employee has already been shown."""
+    for c in cards or []:
+        existing = scorecard(month_key, c["employee"])
+        if existing and existing.get("released_at"):
+            continue
+        execute("INSERT INTO ops_scorecards(month_key,employee,card_json,computed_at,computed_by)"
+                " VALUES(?,?,?,?,?) ON CONFLICT(month_key,employee) DO UPDATE SET "
+                "card_json=excluded.card_json, computed_at=excluded.computed_at, "
+                "computed_by=excluded.computed_by",
+                (month_key, c["employee"], json.dumps(c, ensure_ascii=False), now_iso(), by or ""))
+
+
+def update_scorecard(month_key, employee, card):
+    execute("UPDATE ops_scorecards SET card_json=? WHERE month_key=? AND employee=? "
+            "AND released_at IS NULL",
+            (json.dumps(card, ensure_ascii=False), month_key, employee))
+
+
+def scorecard(month_key, employee):
+    return q1("SELECT * FROM ops_scorecards WHERE month_key=? AND employee=?",
+              (month_key, employee))
+
+
+def scorecards(month_key):
+    return q("SELECT * FROM ops_scorecards WHERE month_key=? ORDER BY employee", (month_key,))
+
+
+def release_scorecard(month_key, employee, by):
+    execute("UPDATE ops_scorecards SET released_at=?, released_by=? "
+            "WHERE month_key=? AND employee=? AND released_at IS NULL",
+            (now_iso(), by or "", month_key, employee))
 
 
 # ------------------------------------------------------------------ dry-run log

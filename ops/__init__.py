@@ -18,16 +18,17 @@ Layout mirrors schedule/ and decor/:
     db.py     — ops_* tables inside the existing brain.db (one obligation = one warning, by UNIQUE)
     notify.py — phase 1 ladder + Arabic wording; delivery is HOST.notify, DRY-RUN by default
     turnover.py — phase 2 «القفل»: check-in-anchored nudges, one message edited in place
+    scorecard.py — phase 3 «كرت التقييم»: monthly 1-5, BONUS only, owner-approved
     routes.py — /api/ops/* (login + admin/ops) and the token-gated appeal endpoints
     page.py   — /compliance (login) and /appeal/{token} (public, token, zero backslashes)
 """
 
-from . import engine, db, notify, turnover, routes, page  # noqa: F401
+from . import engine, db, notify, turnover, scorecard, routes, page  # noqa: F401
 from .host import HOST, wire  # noqa: F401
 from .routes import register_routes  # noqa: F401
 
 __all__ = ["wire", "register_routes", "HOST", "engine", "db", "notify", "turnover",
-           "routes", "page"]
+           "scorecard", "routes", "page"]
 
 
 def bootstrap():

@@ -18,7 +18,7 @@ password to answer it.
 import json
 import traceback
 
-from . import db, engine, notify, page, turnover
+from . import db, engine, notify, page, scorecard, turnover
 from .host import HOST
 
 EDIT_ROLES = ("admin", "ops")
@@ -344,6 +344,46 @@ async def api_turnover_tick(request):
     return HOST.json_response({"ok": True, "report": turnover.tick()})
 
 
+# ---- phase 3 «كرت التقييم» ----
+
+async def api_scorecard(request):
+    """The owner sees the score AND the raw numbers behind every single line."""
+    month = request.query.get("month") or engine.month_key(db.now_dt().date())
+    stored = db.scorecards(month)
+    cards = [json.loads(r["card_json"]) for r in stored]
+    for r, c in zip(stored, cards):
+        c["released_at"] = r.get("released_at")
+    return HOST.json_response({"ok": True, "month": month, "cards": cards,
+                               "dryrun": scorecard.dryrun(),
+                               "enabled": scorecard.enabled()})
+
+
+async def api_scorecard_compute(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    month = (b.get("month") or engine.month_key(db.now_dt().date()))
+    rep = scorecard.gather(month)
+    scorecard.save(month, rep.get("cards") or [], _actor(request))
+    return HOST.json_response({"ok": True, **rep})
+
+
+async def api_scorecard_override(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    return HOST.json_response(scorecard.override(b.get("month"), b.get("employee"),
+                                                 b.get("line"), b.get("score"),
+                                                 b.get("reason"), _actor(request)))
+
+
+async def api_scorecard_release(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    return HOST.json_response(scorecard.release(b.get("month"), _actor(request)))
+
+
 async def api_summary(request):
     return HOST.json_response({"ok": True, **notify.monthly_summary(request.query.get("month"))})
 
@@ -405,6 +445,10 @@ def register(app):
     g("/api/ops/summary", _safe(api_summary))
     g("/api/ops/turnover", _safe(api_turnover))
     p("/api/ops/turnover-tick", _safe(api_turnover_tick))
+    g("/api/ops/scorecard", _safe(api_scorecard))
+    p("/api/ops/scorecard-compute", _safe(api_scorecard_compute))
+    p("/api/ops/scorecard-override", _safe(api_scorecard_override))
+    p("/api/ops/scorecard-release", _safe(api_scorecard_release))
     p("/api/ops/tick", _safe(api_tick))
     p("/api/ops/excuse", _safe(api_excuse))
     p("/api/ops/identity", _safe(api_identity))

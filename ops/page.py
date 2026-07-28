@@ -302,6 +302,7 @@ function post(p, body){
 }
 
 var STATE = null;
+var SCORE = null;
 
 function pill(status){
   var m = {done: ['p-ok', 'تم'], pending: ['p-wait', 'ما وصل بعد'], missed: ['p-warn', 'ما وصل'],
@@ -415,6 +416,64 @@ function turnoverCard(d){
   return out + '</div>';
 }
 
+// «كرت التقييم» — the owner sees the score AND the raw numbers behind every single line,
+// because approving a 3 you cannot explain is how the whole thing stops meaning anything.
+function scorecardCard(){
+  var s = SCORE || {};
+  var cards = s.cards || [];
+  var out = '<div class="card"><h2>كرت التقييم الشهري · ' + esc(s.month || '') + '</h2>';
+  if (s.dryrun){
+    out += '<div class="hint" style="margin-bottom:10px">وضع التجربة — ما ينرسل أي كرت للموظفين.</div>';
+  }
+  if (!cards.length){
+    return out + '<div class="muted">ما فيه كروت محسوبة لهذا الشهر.</div>'
+      + '<div class="row" style="margin-top:14px">'
+      + '<button class="primary" id="cardcompute">احسب كروت الشهر</button></div></div>';
+  }
+  for (var i = 0; i < cards.length; i++){
+    var c = cards[i];
+    out += '<div style="padding:14px 0;border-bottom:1px solid var(--border)">'
+      + '<div class="row" style="justify-content:space-between">'
+      +   '<b>' + esc(c.employee) + '</b>'
+      +   '<span class="num" style="font-size:20px;font-weight:800">'
+      +     (c.score === null || c.score === undefined ? '—' : esc(c.score)) + ' / 5</span>'
+      + '</div>'
+      + '<div class="muted" style="margin:4px 0 10px">'
+      +   'مكافأة التغطية: ' + esc(c.coverage_bonus) + ' · المضاعف: ' + esc(c.multiplier)
+      +   (c.released_at ? ' · <b>انرسل للموظف</b>' : '') + '</div>'
+      + '<div class="scroll"><table>'
+      + '<tr><th>البند</th><th>الوزن</th><th>الدرجة</th><th>العيّنة</th><th></th></tr>';
+    for (var j = 0; j < (c.lines || []).length; j++){
+      var l = c.lines[j];
+      var missing = (l.score === null || l.score === undefined);
+      out += '<tr><td>' + esc(l.label || l.key) + '</td>'
+        + '<td class="num">' + esc(Math.round(l.effective_weight)) + '%</td>'
+        + '<td>' + (missing
+            ? '<span class="pill p-mute">بيانات ناقصة</span>'
+            : '<b class="num">' + esc(l.score) + '</b>'
+              + (l.overridden ? ' <span class="pill p-wait">معدّل</span>' : '')) + '</td>'
+        + '<td class="num muted">' + esc(l.sample) + '</td>'
+        + '<td>' + (c.released_at ? '' :
+            '<button class="ghost" data-ov="' + esc(l.key) + '"'
+            + ' data-emp="' + esc(c.employee) + '">عدّل</button>') + '</td></tr>';
+    }
+    out += '</table></div>';
+    for (var k = 0; k < (c.lines || []).length; k++){
+      var ol = c.lines[k];
+      if (ol.overridden){
+        out += '<div class="hint">✏️ ' + esc(ol.label) + ': ' + esc(ol.overridden.by)
+             + ' — ' + esc(ol.overridden.reason) + '</div>';
+      }
+    }
+    out += '</div>';
+  }
+  out += '<div class="row" style="margin-top:14px">'
+    + '<button class="ghost" id="cardcompute">أعد الحساب</button>'
+    + '<button class="primary" id="cardrelease">اعتمد وأرسل للموظفين</button>'
+    + '<span class="muted" id="cardstate"></span></div>';
+  return out + '</div>';
+}
+
 function logCard(d){
   if (!d.dryrun) return '';
   if (!d.dry_log.length){
@@ -448,6 +507,7 @@ function render(d){
   el('app').innerHTML = banner + hole
     + rosterTable(d)
     + turnoverCard(d)
+    + scorecardCard()
     + appealsCard(d)
     + warningsCard(d)
     + logCard(d)
@@ -459,7 +519,8 @@ function render(d){
 }
 
 function load(){
-  api('/api/ops/state').then(render).catch(function(){
+  api('/api/ops/scorecard').then(function(s){ SCORE = s; }).catch(function(){ SCORE = null; })
+    .then(function(){ return api('/api/ops/state'); }).then(render).catch(function(){
     el('app').innerHTML = '<div class="card">ما قدرنا نجيب البيانات — تأكد من الرابط والتوكن.</div>';
   });
 }
@@ -509,6 +570,34 @@ document.addEventListener('click', function(ev){
     var why = prompt('ليش تلغي هذا الإنذار؟ (لازم سبب مكتوب)');
     if (!why || !why.trim()) return;
     post('/api/ops/waive', {warning_id: wid, reason: why}).then(function(r){
+      if (!r.ok) alert(r.error || 'ما ضبط');
+      load();
+    });
+    return;
+  }
+  if (t.id === 'cardcompute'){
+    t.disabled = true;
+    var cs = el('cardstate'); if (cs) cs.textContent = 'نحسب…';
+    post('/api/ops/scorecard-compute', {}).then(function(){ load(); });
+    return;
+  }
+  if (t.id === 'cardrelease'){
+    if (!confirm('تعتمد الكروت وترسلها للموظفين؟')) return;
+    post('/api/ops/scorecard-release', {month: (SCORE || {}).month}).then(function(r){
+      if (!r.ok) alert(r.error || 'ما ضبط');
+      load();
+    });
+    return;
+  }
+  var ov = t.getAttribute('data-ov');
+  if (ov){
+    var emp = t.getAttribute('data-emp');
+    var sc = prompt('الدرجة الجديدة (من ١ إلى ٥):');
+    if (!sc) return;
+    var why = prompt('ليش تعدّلها؟ (التعديل بدون سبب مرفوض)');
+    if (!why || !why.trim()) return;
+    post('/api/ops/scorecard-override', {month: (SCORE || {}).month, employee: emp,
+                                         line: ov, score: sc, reason: why}).then(function(r){
       if (!r.ok) alert(r.error || 'ما ضبط');
       load();
     });

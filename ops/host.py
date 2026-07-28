@@ -30,6 +30,14 @@ class _Host:
     turnover_items = None
     has_photos = None        # (work_item_id) -> bool   re-checked at the moment «جاهزة» is pressed
 
+    # --- phase 3 «كرت التقييم» ---
+    # All three are attributed BY OWNERSHIP (never by sender — Hostaway has no sender field).
+    # Any of them returning [] makes its line render «بيانات ناقصة» and redistribute, which is
+    # the specified behaviour: never a zero for a gap in our own instrumentation.
+    escalations_window = None   # (start, end) -> [{listing_id, date, taken}]
+    response_events = None      # (start, end) -> [{listing_id, date, at, answered}]
+    reviews_window = None       # (start, end) -> [{listing_id, date, categories:{cat: rating}}]
+
     # --- delivery ---
     # notify(payload) -> None. bot.py schedules the Discord work and then calls
     # ops.db.record_ladder(...) with the road that actually worked (dm | channel | lead |
