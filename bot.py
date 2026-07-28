@@ -56384,7 +56384,35 @@ async def cmd_ops_channels(ctx):
     if kept:
         msg.append("موجودة ومقفلة من قبل: " + "، ".join(kept))
     if failed:
+        # Two identical 403s in a row is a guess repeated, not a diagnosis. Print what the
+        # bot ACTUALLY has and where it sits in the role order, so the next failure answers
+        # the question instead of re-asking it.
         msg.append("⚠️ ما انفتحت: " + "، ".join(failed))
+        try:
+            gp = me.guild_permissions
+            msg.append("")
+            msg.append("🔍 صلاحيات البوت الحين: "
+                       + "إدارة الرومات=%s · إدارة الأدوار=%s · أدمن=%s"
+                       % ("✅" if gp.manage_channels else "❌",
+                          "✅" if gp.manage_roles else "❌",
+                          "✅" if gp.administrator else "❌"))
+            tops = []
+            for emp in roster:
+                did = (emp.get("did") or "").strip()
+                if not did:
+                    continue
+                try:
+                    m = guild.get_member(int(did))
+                except (TypeError, ValueError):
+                    continue
+                if m is not None:
+                    tops.append("%s(%d)" % (emp["name"], m.top_role.position))
+            msg.append("ترتيب دور البوت: %d · أعلى دور لكل موظف: %s"
+                       % (me.top_role.position, "، ".join(tops) or "—"))
+            msg.append("لو دور البوت أقل من دور الموظف، ارفعه فوقه في Server Settings ← Roles "
+                       "(اسحبه لفوق).")
+        except Exception as _de:
+            msg.append("(ما قدرت أقرأ تفاصيل الصلاحيات: %s)" % str(_de)[:80])
     await ctx.reply(nl.join(msg))
 
 
