@@ -165,6 +165,81 @@ class TestTheLadder(OpsCase):
         self.assertFalse(notify.report_done(NOURA, W))
 
 
+class TestTypingAnIdInTheDashboard(OpsCase):
+    """The owner fills the hole from /compliance (or «!ouja اربط») instead of Railway."""
+
+    def test_it_accepts_a_raw_id_a_mention_or_a_messy_paste(self):
+        for raw, want in (("1134973768159203418", "1134973768159203418"),
+                          ("<@1134973768159203418>", "1134973768159203418"),
+                          ("<@!1134973768159203418>", "1134973768159203418"),
+                          ("  1134973768159203418 ", "1134973768159203418")):
+            self.assertEqual(routes.parse_discord_id(raw), want, raw)
+
+    def test_it_refuses_things_that_are_not_ids(self):
+        for bad in ("عهود", "0501234567", "abc", "12345", "@ohoud"):
+            self.assertIsNone(routes.parse_discord_id(bad), bad)
+
+    def test_an_empty_box_means_clear_not_error(self):
+        self.assertEqual(routes.parse_discord_id(""), "")
+        self.assertEqual(routes.parse_discord_id("   "), "")
+
+    def test_typing_ohouds_id_makes_her_reachable_immediately(self):
+        emp = {e["name"]: e for e in notify.employees()}
+        self.assertFalse(emp[OHOUD]["reachable"])
+
+        r = routes.do_set_identity(OHOUD, "<@987654321098765432>", "فيصل")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["discord_id"], "987654321098765432")
+
+        emp = {e["name"]: e for e in notify.employees()}
+        self.assertTrue(emp[OHOUD]["reachable"])
+        self.assertEqual(emp[OHOUD]["source"], "typed")
+
+    def test_a_typed_id_wins_over_the_imported_file(self):
+        """assignments.json has already been wrong once. A later re-import must not silently
+        overwrite a correction made by hand."""
+        routes.do_set_identity(NASSER, "111111111111111111", "فيصل")
+        emp = {e["name"]: e for e in notify.employees()}
+        self.assertEqual(emp[NASSER]["did"], "111111111111111111")
+        self.assertEqual(emp[NASSER]["source"], "typed")
+        self.assertNotEqual(emp[NASSER]["did"], REAL_IDS["ناصر"])
+
+    def test_you_cannot_invent_a_person_here(self):
+        r = routes.do_set_identity("شخص ما", "987654321098765432", "فيصل")
+        self.assertFalse(r["ok"])
+        self.assertIn("تقويم الموظفين", r["error"])
+        self.assertEqual(db.counts()["ops_identity"], 0)
+
+    def test_the_same_id_cannot_belong_to_two_people(self):
+        routes.do_set_identity(OHOUD, "987654321098765432", "فيصل")
+        r = routes.do_set_identity(NOURA, "987654321098765432", "فيصل")
+        self.assertFalse(r["ok"])
+        self.assertIn("موظف ثاني", r["error"])
+
+    def test_clearing_an_id_makes_the_person_unwarnable_again(self):
+        routes.do_set_identity(NASSER, "", "فيصل")
+        emp = {e["name"]: e for e in notify.employees()}
+        self.assertFalse(emp[NASSER]["reachable"])
+        self.open_week()
+        r = notify.tick(now=at(2026, 7, 28, 0, 5))
+        self.assertEqual([x["verdict"] for x in r["verdicts"] if x["employee"] == NASSER],
+                         ["unreachable"])
+        self.assertEqual(db.warnings_for(NASSER), [])
+
+    def test_a_newly_reachable_person_is_nudged_like_everyone_else(self):
+        routes.do_set_identity(OHOUD, "987654321098765432", "فيصل")
+        r = self.open_week()
+        self.assertIn(OHOUD, [n["employee"] for n in r["nudged"]])
+        self.assertNotIn(OHOUD, r["unreachable"])
+
+    def test_the_screen_says_where_each_id_came_from(self):
+        routes.do_set_identity(OHOUD, "987654321098765432", "فيصل")
+        rows = {r["employee"]: r for r in routes.state(W)["rows"]}
+        self.assertEqual(rows[OHOUD]["id_source"], "مضاف يدوياً")
+        self.assertEqual(rows[NASSER]["id_source"], "من ملف التعيينات")
+        self.assertEqual(rows[OHOUD]["did"], "987654321098765432")
+
+
 class TestUnreachableIsAHoleNotANudge(OpsCase):
 
     def test_a_person_with_no_discord_id_gets_one_alert_not_four_dead_nudges(self):

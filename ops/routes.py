@@ -114,6 +114,47 @@ def do_excuse(employee, period_key, reason, by):
     return {"ok": True, "obligation": db.obligation(oid)}
 
 
+def parse_discord_id(raw):
+    """Accept whatever the owner has in their hand: a raw id (1134973768159203418), a pasted
+    mention (<@1134…> or <@!1134…>), or the same with spaces. Returns '' for a deliberate
+    clear, or None when the text is not an id at all.
+
+    Discord ids are snowflakes — 17-19 digits today, so 15-25 is a deliberately generous
+    window that still rejects a phone number or a typo'd name."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits or not (15 <= len(digits) <= 25):
+        return None
+    return digits
+
+
+def do_set_identity(employee, raw_id, by):
+    """Tell the system how to reach one person. The ONLY way a name enters this table is by
+    already being in the Employee Calendar — you cannot invent a person here."""
+    employee = (employee or "").strip()
+    known = [e["name"] for e in notify.employees()]
+    if employee not in known:
+        return {"ok": False, "error": "هذا الاسم مو موجود في تقويم الموظفين"}
+    did = parse_discord_id(raw_id)
+    if did is None:
+        return {"ok": False, "error": "هذا مو معرّف ديسكورد — لازم أرقام فقط (١٧ رقم تقريباً)"}
+    if not did:
+        # Recorded as a deliberate blank, NOT deleted — otherwise assignments.json would
+        # refill the box with the very number the owner just removed.
+        db.set_identity(employee, "", by)
+        return {"ok": True, "employee": employee, "discord_id": "",
+                "message": "انشال المعرّف — هذا الشخص ما راح يوصله شي وما ينسجل عليه إنذار"}
+    taken = [n for n, (v, _s) in notify._id_map().items()
+             if v == did and n != notify._norm(employee)]
+    if taken:
+        return {"ok": False, "error": "هذا المعرّف مربوط بموظف ثاني — كل واحد له معرّف خاص"}
+    db.set_identity(employee, did, by)
+    return {"ok": True, "employee": employee, "discord_id": did,
+            "message": "انحفظ ✅ من الحين بتوصله التذكيرات"}
+
+
 def do_waive(warning_id, reason, by):
     """Forgive a warning that already exists. Commission is recomputed in the same breath —
     a voided warning that still shows as money lost is worse than no mercy at all."""
@@ -216,7 +257,8 @@ def state(period_key=None):
         active = db.warnings_for(e["name"], "active")
         led = db.commission(e["name"], month) or {}
         rows.append({
-            "employee": e["name"], "reachable": e["reachable"], "did": bool(e["did"]),
+            "employee": e["name"], "reachable": e["reachable"],
+            "did": e["did"], "id_source": e.get("source_ar") or "",
             "status": ob.get("status") or "—",
             "due_at": ob.get("due_at") or notify.due_at(period).isoformat(timespec="minutes"),
             "active_warnings": len(active),
@@ -273,6 +315,14 @@ async def api_waive(request):
         return _deny()
     b = await _body(request)
     return HOST.json_response(do_waive(b.get("warning_id"), b.get("reason"), _actor(request)))
+
+
+async def api_identity(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    return HOST.json_response(do_set_identity(b.get("employee"), b.get("discord_id"),
+                                              _actor(request)))
 
 
 async def api_decide(request):
@@ -344,6 +394,7 @@ def register(app):
     g("/api/ops/summary", _safe(api_summary))
     p("/api/ops/tick", _safe(api_tick))
     p("/api/ops/excuse", _safe(api_excuse))
+    p("/api/ops/identity", _safe(api_identity))
     p("/api/ops/waive", _safe(api_waive))
     p("/api/ops/appeal/decide", _safe(api_decide))
 

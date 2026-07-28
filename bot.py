@@ -55774,6 +55774,41 @@ async def cmd_deepclean_resume(ctx):
     await ctx.reply("✅ رجّعت حجب مواعيد التنظيف العميق يشتغل. من الليلة بيحجز مواعيد التنظيف مثل قبل.")
 
 
+@bot.command(name="اربط", aliases=["link-id", "ربط", "ops-link"])
+async def cmd_ops_link(ctx, *, rest: str = ""):
+    """!ouja اربط <اسم الموظف> @المستخدم — teach the system how to reach somebody.
+
+    A MENTION is the whole point: mentioned users arrive inside the message payload, so this
+    works with the members intent off and without anyone turning on Developer Mode to copy a
+    raw id. The name must already exist in the Employee Calendar — you cannot invent a person
+    here. Owner/admin only, because self-registration would be a hole in an accountability
+    system: anyone could claim to be somebody else."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    if not _HAS_OPS:
+        await ctx.reply("🚫 نظام الالتزام مو مفعّل.")
+        return
+    target = ctx.message.mentions[0] if ctx.message.mentions else None
+    name = re.sub(r"<@!?\d+>", "", rest or "").strip()
+    if not name or target is None:
+        roster = await asyncio.to_thread(_ops.notify.employees)
+        nl = chr(10)
+        lines = ["الطريقة: `!ouja اربط <اسم الموظف> @المستخدم`", "", "الأسماء الموجودة:"]
+        for e in roster:
+            lines.append(("• %s — %s" % (e["name"], e["did"] if e["did"] else "❌ ما عنده معرّف")))
+        await ctx.reply(nl.join(lines))
+        return
+    res = await asyncio.to_thread(_ops.routes.do_set_identity, name, str(target.id),
+                                  str(ctx.author))
+    if res.get("ok"):
+        await ctx.reply("✅ ربطت **%s** بـ %s — %s"
+                        % (res["employee"], target.mention, res.get("message", "")),
+                        allowed_mentions=discord.AllowedMentions.none())
+    else:
+        await ctx.reply("🚫 %s" % res.get("error", "ما ضبط"))
+
+
 @bot.command(name="ops-channels", aliases=["رومات-الالتزام", "غرف-الالتزام"])
 async def cmd_ops_channels(ctx):
     """!ouja ops-channels — create the private «#اسم-اليوم» room for each employee.

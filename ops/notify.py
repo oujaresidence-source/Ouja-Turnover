@@ -140,35 +140,59 @@ def _aliases():
     return out
 
 
+# Where an id came from, weakest first. Whatever the owner typed always wins: assignments.json
+# is import-generated and has already been wrong once (عهود missing, مآثر spelled ماذر), so a
+# later re-import must never silently overwrite a correction made by hand.
+ID_SOURCES = ("assignments", "env", "typed")
+
+
 def _id_map():
-    """{normalized name -> discord id}. assignments.json is the existing source; the
-    OPS_DISCORD_IDS env is a CONFIG OVERRIDE for names that file is missing (it is not a
-    second employee list — the people themselves still come from the Employee Calendar)."""
-    raw = {}
+    """{normalized name -> (discord id, source)}.
+
+    Order: assignments.json  <  OPS_DISCORD_IDS env  <  what the owner typed in /compliance
+    (or set with «!ouja اربط»). The people themselves still come only from the Employee
+    Calendar — this map answers 'how do we reach them', never 'who works here'."""
+    layered = []
     try:
-        raw.update(HOST.discord_ids() or {})
+        layered.append(("assignments", HOST.discord_ids() or {}))
     except Exception:
         pass
     try:
         extra = json.loads(_env("OPS_DISCORD_IDS", "") or "{}")
         if isinstance(extra, dict):
-            raw.update(extra)
+            layered.append(("env", extra))
     except Exception:
         pass
+    try:
+        layered.append(("typed", db.identity_map()))
+    except Exception as e:
+        print("[ops] identity table unavailable:", e)
+
     alias = _aliases()
     out = {}
-    for name, did in raw.items():
-        canonical = alias.get((name or "").strip(), name)
-        out[_norm(canonical)] = str(did or "").strip()
+    for source, raw in layered:
+        for name, did in (raw or {}).items():
+            did = str(did or "").strip()
+            key = _norm(alias.get((name or "").strip(), name))
+            if not did:
+                if source == "typed":
+                    out.pop(key, None)      # the owner emptied the box: deliberately no route
+                continue
+            out[key] = (did, source)
     return out
+
+
+ID_SOURCE_AR = {"assignments": "من ملف التعيينات", "env": "من إعدادات Railway",
+                "typed": "مضاف يدوياً"}
 
 
 def employees():
     """THE one employee list: the Employee Calendar (schedule_employees). This package does
     not keep a second copy of who works here — it only attaches the Discord id.
 
-    Returns [{name, did, reachable}]. reachable=False means we have no way to message them;
-    they still appear everywhere (so the hole is visible) but can never be warned."""
+    Returns [{name, did, reachable, source, source_ar}]. reachable=False means we have no way
+    to message them; they still appear everywhere (so the hole stays visible) but can never
+    be warned."""
     names = []
     try:
         from schedule import owners as _sowners
@@ -177,8 +201,12 @@ def employees():
         print("[ops] employee calendar unavailable:", e)
         return []
     ids = _id_map()
-    return [{"name": n, "did": ids.get(_norm(n), ""), "reachable": bool(ids.get(_norm(n)))}
-            for n in names]
+    out = []
+    for n in names:
+        did, source = ids.get(_norm(n), ("", ""))
+        out.append({"name": n, "did": did, "reachable": bool(did),
+                    "source": source, "source_ar": ID_SOURCE_AR.get(source, "")})
+    return out
 
 
 def on_leave(name, day):

@@ -66,6 +66,9 @@ _CSS = """
   .b-dry{background:var(--gold-soft);color:#7A6742;border:1px solid #E3D6BC}
   .b-bad{background:var(--maroon-soft);color:var(--maroon);border:1px solid #E6CDD2}
   .b-ok{background:var(--green-soft);color:var(--green);border:1px solid #D5E0D2}
+  .idbox{width:190px;min-width:150px;padding:8px 10px;font-family:var(--num);font-size:13px;
+    direction:ltr;text-align:left;border-radius:var(--r-sm)}
+  .idmsg{margin-top:4px;max-width:210px}
   .log{font-family:var(--num);font-size:12.5px;color:var(--body);direction:rtl}
   .log div{padding:7px 0;border-bottom:1px dashed var(--border)}
   .muted{color:var(--muted)}
@@ -309,17 +312,30 @@ function pill(status){
 
 function rosterTable(d){
   var out = '<div class="card"><h2>هذا الأسبوع · ' + esc(d.period) + '</h2><div class="scroll"><table>'
-    + '<tr><th>الموظف</th><th>الحالة</th><th>إنذارات</th><th>العمولة</th><th>التذكيرات</th></tr>';
+    + '<tr><th>الموظف</th><th>معرّف الديسكورد</th><th>الحالة</th><th>إنذارات</th>'
+    + '<th>العمولة</th><th>التذكيرات</th></tr>';
   for (var i = 0; i < d.rows.length; i++){
     var r = d.rows[i];
     out += '<tr><td><b>' + esc(r.employee) + '</b>'
-        + (r.reachable ? '' : ' <span class="pill p-warn">ما نقدر نوصله</span>')
-        + '</td><td>' + pill(r.status) + '</td>'
+        + (r.reachable ? '' : '<div><span class="pill p-warn">ما نقدر نوصله</span></div>')
+        + '</td>'
+        + '<td><input type="text" class="idbox" data-emp="' + esc(r.employee) + '"'
+        +   ' value="' + esc(r.did || '') + '" placeholder="الصق المعرّف أو المنشن"'
+        +   ' inputmode="numeric" autocomplete="off">'
+        +   '<div class="hint idmsg" data-msg="' + esc(r.employee) + '">'
+        +   esc(r.id_source || '') + '</div></td>'
+        + '<td>' + pill(r.status) + '</td>'
         + '<td class="num">' + esc(r.active_warnings) + '</td>'
         + '<td class="num">' + Math.round(r.multiplier * 100) + '%</td>'
         + '<td class="muted num">' + esc((r.sent || []).join(' ')) + '</td></tr>';
   }
-  return out + '</table></div></div>';
+  out += '</table></div>'
+    + '<div class="hint" style="margin-top:12px">'
+    + 'وش هو «معرّف الديسكورد»؟ رقم طويل خاص بكل شخص. أسهل طريقة: في الديسكورد اكتب '
+    + '<b>!ouja اربط اسم-الموظف @المستخدم</b> ومنشنه، والنظام يحفظه لحاله. '
+    + 'أو انسخ الرقم من الديسكورد والصقه هنا.'
+    + '</div></div>';
+  return out;
 }
 
 function warningsCard(d){
@@ -404,6 +420,36 @@ function load(){
     el('app').innerHTML = '<div class="card">ما قدرنا نجيب البيانات — تأكد من الرابط والتوكن.</div>';
   });
 }
+
+// Saving an id must never redraw the table under the owner's fingers while they are still
+// typing in the next row, so this patches ONE line of text instead of calling load().
+function saveId(input){
+  var emp = input.getAttribute('data-emp');
+  var msg = document.querySelector('[data-msg="' + emp + '"]');
+  if (msg){ msg.textContent = 'نحفظ…'; }
+  post('/api/ops/identity', {employee: emp, discord_id: input.value}).then(function(r){
+    if (!msg) return;
+    msg.textContent = r.ok ? (r.message || 'انحفظ') : (r.error || 'ما انحفظ');
+    msg.style.color = r.ok ? 'var(--green)' : 'var(--maroon)';
+    if (r.ok){
+      var pillEl = input.closest('tr').querySelector('.p-warn');
+      if (pillEl && r.discord_id){ pillEl.remove(); }
+    }
+  }).catch(function(){
+    if (msg){ msg.textContent = 'ما انحفظ — جرّب مرة ثانية'; msg.style.color = 'var(--maroon)'; }
+  });
+}
+
+document.addEventListener('change', function(ev){
+  var t = ev.target;
+  if (t && t.className && t.className.indexOf('idbox') > -1){ saveId(t); }
+});
+document.addEventListener('keydown', function(ev){
+  var t = ev.target;
+  if (ev.key === 'Enter' && t && t.className && t.className.indexOf('idbox') > -1){
+    t.blur();
+  }
+});
 
 document.addEventListener('click', function(ev){
   var t = ev.target;

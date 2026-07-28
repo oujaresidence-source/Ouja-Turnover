@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS ops_commission_ledger (
     computed_at    TEXT,
     PRIMARY KEY(employee, month_key)
 );
+-- Discord ids the owner typed in /compliance (or set with «!ouja اربط»). This is NOT a second
+-- employee list: the PEOPLE still come from the Employee Calendar, this only remembers how to
+-- reach one of them. It wins over assignments.json, which is import-generated and has already
+-- been wrong once (عهود missing, مآثر spelled ماذر).
+CREATE TABLE IF NOT EXISTS ops_identity (
+    employee   TEXT PRIMARY KEY,
+    discord_id TEXT,
+    updated_by TEXT,
+    updated_at TEXT
+);
 -- which ladder steps actually went out, and by which road. This is also how we know whether
 -- a person is REACHABLE: a warning is refused for somebody every path failed on.
 CREATE TABLE IF NOT EXISTS ops_ladder_log (
@@ -185,7 +195,7 @@ def counts():
     any other feature, creates nothing here."""
     out = {}
     for t in ("ops_obligations", "ops_warnings", "ops_appeals", "ops_free_passes",
-              "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log"):
+              "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity"):
         out[t] = (q1("SELECT COUNT(*) c FROM %s" % t) or {}).get("c", 0)
     return out
 
@@ -254,6 +264,33 @@ def prior_misses(employee, quarter_key, kind="wr", before_period=None):
             continue
         n += 1
     return n
+
+
+# ------------------------------------------------------------------ who is who
+
+def identity_map():
+    """{employee name -> discord id} as typed by the owner.
+
+    A row with an EMPTY id is kept on purpose and means «this person has no way to be
+    reached», which suppresses whatever assignments.json says. Emptying the box in
+    /compliance has to actually stick — silently falling back to the number the owner just
+    deleted would put it straight back on screen and look broken. A true revert-to-file is
+    clear_identity(), which removes the row entirely."""
+    return {r["employee"]: (r["discord_id"] or "")
+            for r in q("SELECT employee, discord_id FROM ops_identity")}
+
+
+def set_identity(employee, discord_id, by=""):
+    execute("INSERT INTO ops_identity(employee,discord_id,updated_by,updated_at)"
+            " VALUES(?,?,?,?) ON CONFLICT(employee) DO UPDATE SET "
+            "discord_id=excluded.discord_id, updated_by=excluded.updated_by, "
+            "updated_at=excluded.updated_at",
+            (employee, (discord_id or "").strip(), by or "", now_iso()))
+    return q1("SELECT * FROM ops_identity WHERE employee=?", (employee,))
+
+
+def clear_identity(employee):
+    execute("DELETE FROM ops_identity WHERE employee=?", (employee,))
 
 
 # ------------------------------------------------------------------ the ladder log
