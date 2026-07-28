@@ -56268,6 +56268,26 @@ async def cmd_ops_channels(ctx):
             "ما انفتح ولا روم — عشان ما يصير عندك روم باسم موظف والكل يشوفه."]))
         return
 
+    async def _member(did):
+        """Resolve a Discord id to a member.
+
+        guild.get_member() reads the local CACHE, and this bot runs WITHOUT the members
+        intent, so it returns None for almost everybody. Using it to build a permission
+        overwrite silently produced private rooms that the employee themselves could not
+        see — the room existed, was locked, and locked the wrong person out. fetch_member
+        asks the API and works with the intent off."""
+        did = str(did or "").strip()
+        if not did.isdigit():
+            return None
+        m = guild.get_member(int(did))
+        if m is not None:
+            return m
+        try:
+            return await guild.fetch_member(int(did))
+        except Exception as e:
+            print("[ops] could not resolve member %s: %s" % (did, e))
+            return None
+
     cat = next((c for c in guild.categories if c.name == OPS_CATEGORY_NAME), None)
     if cat is None:
         cat = await guild.create_category(OPS_CATEGORY_NAME)
@@ -56325,16 +56345,18 @@ async def cmd_ops_channels(ctx):
         ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
               me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                               read_message_history=True)}
+        granted = 0
         for did in (emp.get("did"), lead_id):
-            if not did:
-                continue
-            try:
-                m = guild.get_member(int(did))
-            except (TypeError, ValueError):
-                continue
+            m = await _member(did)
             if m is not None:
                 ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                                     read_message_history=True)
+                granted += 1
+        if not granted:
+            # Locking a room nobody can enter is worse than leaving it open: the person it
+            # belongs to would never see their own tasks. Say so instead.
+            failed.append("%s (ما قدرنا نلقى حسابه في السيرفر — تأكد من المعرّف)" % emp["name"])
+            continue
         existing = discord.utils.get(guild.text_channels, name=name)
         if existing is not None:
             await _ensure_private(existing, ov, emp["name"])
@@ -56356,10 +56378,7 @@ async def cmd_ops_channels(ctx):
             if not did or did in seen_ids:
                 continue
             seen_ids.add(did)
-            try:
-                m = guild.get_member(int(did))
-            except (TypeError, ValueError):
-                continue
+            m = await _member(did)
             if m is not None:
                 hr_ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                                        read_message_history=True)
@@ -56398,15 +56417,11 @@ async def cmd_ops_channels(ctx):
                           "✅" if gp.administrator else "❌"))
             tops = []
             for emp in roster:
-                did = (emp.get("did") or "").strip()
-                if not did:
-                    continue
-                try:
-                    m = guild.get_member(int(did))
-                except (TypeError, ValueError):
-                    continue
+                m = await _member(emp.get("did"))
                 if m is not None:
                     tops.append("%s(%d)" % (emp["name"], m.top_role.position))
+                else:
+                    tops.append("%s(ما لقيناه)" % emp["name"])
             msg.append("ترتيب دور البوت: %d · أعلى دور لكل موظف: %s"
                        % (me.top_role.position, "، ".join(tops) or "—"))
             msg.append("لو دور البوت أقل من دور الموظف، ارفعه فوقه في Server Settings ← Roles "
