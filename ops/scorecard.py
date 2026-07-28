@@ -59,6 +59,18 @@ REVIEW_EXCLUDE = ("location", "value", "respect_house_rules")
 
 MISSING_AR = "بيانات ناقصة"
 
+# WHY a line is missing. «بيانات ناقصة» on its own looks like the page is broken; the owner
+# needs to know whether it is a quiet month, a small sample, or something we never wired up.
+WHY_AR = {
+    "no_data": "ما وصلتنا أي بيانات لهذا البند هذا الشهر",
+    "below_min": "العيّنة أصغر من الحد الأدنى — ما ينحسب عشان ما نظلم أحد برقم صغير",
+    "not_instrumented": "هذا البند ما هو مربوط بعد — ما ينحسب على أحد إطلاقاً",
+}
+
+# Lines we know are not wired to a real source yet. Named out loud so the page can say so
+# instead of implying somebody had a quiet month.
+NOT_INSTRUMENTED = ("response",)
+
 
 # ------------------------------------------------------------------ env
 
@@ -277,15 +289,26 @@ def build(person, facts, minimum=5):
     score, dist = weighted_score(scored)
     bonus = coverage_bonus(f.get("coverage_days", 0), f.get("working_days", 0))
     labels = dict((k, ar) for k, ar, _w in LINES)
+    by_key = {s["key"]: s for s in scored}
     for ln in dist["lines"]:
         ln["label"] = labels.get(ln["key"], ln["key"])
+        if ln.get("score") is None:
+            sample = (by_key.get(ln["key"]) or {}).get("sample") or 0
+            ln["why"] = ("not_instrumented" if ln["key"] in NOT_INSTRUMENTED
+                         else ("no_data" if not sample else "below_min"))
+            ln["why_ar"] = WHY_AR[ln["why"]]
+    scored_at_all = score is not None
     return {
         "employee": person,
         "score": score,
+        # A month with no score has no bonus either — showing «مكافأة التغطية: ٥» next to
+        # «المضاعف: ١» reads like a bug, because the bonus is not being applied to anything.
+        "no_data_month": not scored_at_all,
         "lines": dist["lines"],
         "missing": dist["missing"],
         "total_weight": dist["total_weight"],
-        "coverage_bonus": bonus,
+        "coverage_bonus": bonus if scored_at_all else 0.0,
+        "coverage_bonus_earned": bonus,
         "multiplier": bonus_multiplier(score, bonus),
         "apartment_days": f.get("apartment_days", 0),
         "working_days": f.get("working_days", 0),

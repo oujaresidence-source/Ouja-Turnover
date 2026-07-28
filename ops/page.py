@@ -439,14 +439,18 @@ function scorecardCard(){
       +     (c.score === null || c.score === undefined ? '—' : esc(c.score)) + ' / 5</span>'
       + '</div>'
       + '<div class="muted" style="margin:4px 0 10px">'
-      +   'مكافأة التغطية: ' + esc(c.coverage_bonus) + ' · المضاعف: ' + esc(c.multiplier)
+      +   (c.no_data_month
+          ? 'ما فيه بيانات كافية لهذا الشهر — ما ينحسب كرت، وما ينحسب على أحد شي'
+          : 'مكافأة التغطية: ' + esc(c.coverage_bonus) + ' · المضاعف: ' + esc(c.multiplier))
       +   (c.released_at ? ' · <b>انرسل للموظف</b>' : '') + '</div>'
       + '<div class="scroll"><table>'
       + '<tr><th>البند</th><th>الوزن</th><th>الدرجة</th><th>العيّنة</th><th></th></tr>';
     for (var j = 0; j < (c.lines || []).length; j++){
       var l = c.lines[j];
       var missing = (l.score === null || l.score === undefined);
-      out += '<tr><td>' + esc(l.label || l.key) + '</td>'
+      out += '<tr><td>' + esc(l.label || l.key)
+        + (missing && l.why_ar
+            ? '<div class="hint">' + esc(l.why_ar) + '</div>' : '') + '</td>'
         + '<td class="num">' + esc(Math.round(l.effective_weight)) + '%</td>'
         + '<td>' + (missing
             ? '<span class="pill p-mute">بيانات ناقصة</span>'

@@ -352,3 +352,43 @@ def _line(card, key):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheEmptyMonthExplainsItself(unittest.TestCase):
+    """«بيانات ناقصة» on every line looks like a broken page. The owner has to be able to
+    tell a quiet month from a small sample from something we never wired up."""
+
+    def test_each_missing_line_says_why(self):
+        card = scorecard.build("أ", facts(turnover={"closed_before_checkin": 1, "total": 1}),
+                               minimum=5)
+        by = {l["key"]: l for l in card["lines"]}
+        self.assertEqual(by["response"]["why"], "not_instrumented")
+        self.assertEqual(by["turnover"]["why"], "below_min")     # sample 1, minimum 5
+        self.assertEqual(by["escalation"]["why"], "no_data")     # nothing at all
+        for l in card["lines"]:
+            if l["score"] is None:
+                self.assertTrue(l["why_ar"].strip())
+
+    def test_a_month_with_no_score_advertises_no_bonus(self):
+        """«مكافأة التغطية: ٥» next to «المضاعف: ١» reads like a bug — the bonus is not
+        being applied to anything."""
+        card = scorecard.build("أ", facts(coverage_days=26, working_days=26))
+        self.assertIsNone(card["score"])
+        self.assertTrue(card["no_data_month"])
+        self.assertEqual(card["coverage_bonus"], 0.0)
+        self.assertEqual(card["coverage_bonus_earned"], 5)
+        self.assertEqual(card["multiplier"], 1.0)
+
+    def test_a_real_month_still_shows_the_bonus(self):
+        card = scorecard.build("أ", facts(coverage_days=13, working_days=26,
+                                          turnover={"closed_before_checkin": 50, "total": 50}))
+        self.assertFalse(card["no_data_month"])
+        self.assertGreater(card["coverage_bonus"], 0)
+        self.assertGreater(card["multiplier"], 1.0)
+
+    def test_a_scored_line_never_carries_a_reason(self):
+        card = scorecard.build("أ", facts(turnover={"closed_before_checkin": 50, "total": 50}))
+        scored = [l for l in card["lines"] if l["score"] is not None]
+        self.assertTrue(scored)
+        for l in scored:
+            self.assertNotIn("why", l)
