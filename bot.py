@@ -56317,10 +56317,14 @@ async def cmd_ops_channels(ctx):
 
     for emp in roster:
         name = _ops.notify.channel_name(emp["name"])
+        # NOTE: do NOT ask for manage_messages here. Discord refuses (50013) to let a bot
+        # grant itself a permission it does not already hold at guild level, and that single
+        # extra flag is what made all five employee rooms fail while #الالتزام-خاص — whose
+        # overwrite does not request it — succeeded. Nothing needs it: editing your OWN
+        # message requires no permission, and this feature never pins.
         ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
               me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                              read_message_history=True,
-                                              manage_messages=True)}
+                                              read_message_history=True)}
         for did in (emp.get("did"), lead_id):
             if not did:
                 continue
