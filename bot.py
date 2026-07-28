@@ -5864,39 +5864,6 @@ def _ops_cover_today(day):
 # attributes each row to whoever the coverage calendar had on that apartment that day. Any of
 # these returning [] makes its line read «بيانات ناقصة» and redistribute — never a zero.
 
-def _ops_escalations_window(start, end):
-    """Escalations on each apartment, and whether somebody actually took it. Sourced from the
-    tickets the escalation flow already opens (they persist; the in-memory escalation map does
-    not survive a restart)."""
-    out = []
-    try:
-        for t in _tickets:
-            if t.get("source") != "escalation":
-                continue
-            day = str(t.get("created_at") or "")[:10]
-            if not day or not (start <= day <= end):
-                continue
-            out.append({
-                "listing_id": t.get("listing_id"),
-                "date": day,
-                # "took it" = somebody owned it, not merely that it closed itself
-                "taken": bool(t.get("assignee") or t.get("claimed_by")
-                              or t.get("status") in ("closed", "done", "resolved")),
-            })
-    except Exception as e:
-        print("[scorecard] escalation source failed:", e)
-    return out
-
-def _ops_response_events(start, end):
-    """First-response events per apartment inside working hours.
-
-    NOT INSTRUMENTED YET. The bot does not currently record a per-apartment first-response
-    time (the auto-reply log is a capped 500-item deque and the escalation map is in-memory),
-    and inventing a number here would put a made-up figure on somebody's review. Returning
-    nothing is the specified behaviour: the line renders «بيانات ناقصة» and its 25% is spread
-    over the lines we CAN measure honestly."""
-    return []
-
 def _ops_reviews_window(start, end):
     """Guest review SUB-scores per apartment: cleanliness, communication, check-in/accuracy.
     Location and value are deliberately passed through and dropped by the ops package, which
@@ -8814,6 +8781,17 @@ def distill_learnings():
     if distilled:
         print(f"learnings: distilled {distilled} summary block(s)")
 
+def _ops_capture_conversation(cid, listing_id, unit, msgs):
+    """Hand one conversation's messages to ops.capture. Wrapped twice on purpose: this sits
+    inside the live guest path, so a bug in the scorecard's plumbing must never stop a guest
+    from being answered."""
+    if not _HAS_OPS:
+        return
+    try:
+        _ops.capture.on_conversation(cid, listing_id, unit, msgs)
+    except Exception as e:
+        print("[ops.capture] conversation skipped:", e)
+
 def _conv_to_item(c, listings, seen, debug=False):
     """Turn ONE conversation object into a new-guest-message item, or None.
     Shared by the full scan and the single-conversation webhook path."""
@@ -8830,6 +8808,13 @@ def _conv_to_item(c, listings, seen, debug=False):
     if not msgs:
         return None
     msgs = sorted(msgs, key=_msg_sort_key)
+    # «الاستجابة على وحداتك»: record every guest-wait in this conversation BEFORE any of the
+    # early returns below — most conversations exit early (already seen, already answered),
+    # and those are exactly the ones with a response time worth measuring. Reuses the messages
+    # already fetched above: no second poller, no second API call.
+    # Fully swallowed: this runs in the live guest-messaging path and must never block a reply.
+    _ops_capture_conversation(cid, c.get("listingMapId"),
+                              listings.get(c.get("listingMapId")) or c.get("listingName"), msgs)
     # the guest's most recent (inbound) message
     guest_idx = next((i for i in range(len(msgs) - 1, -1, -1)
                       if _msg_is_inbound(msgs[i])), None)
@@ -9112,6 +9097,11 @@ class NameSelect(discord.ui.Select):
         if esc:
             esc["claimed_by"] = name
             metric_bump("escalations_resolved")
+            try:
+                if _HAS_OPS:
+                    _ops.capture.on_escalation_taken(self.target_message_id, name)
+            except Exception as _oct:
+                print("[ops.capture] escalation take skipped:", _oct)
             if esc.get("conversation_id"):
                 _claimed_convos.add(esc["conversation_id"])   # stop auto-acks
             log_event("escalation", f"تم استلام تصعيد بواسطة {name} · {esc.get('unit','')}")
@@ -10112,6 +10102,12 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             # Open a linked maintenance ticket so the issue lives in the
             # dashboard's ticket log too — survives Discord scroll-back and
             # gets owners the audit trail they asked for.
+            try:
+                if _HAS_OPS:
+                    _ops.capture.on_escalation_opened(
+                        msg.id, item["unit"], item.get("listing_id"))
+            except Exception as _oce:
+                print("[ops.capture] escalation open skipped:", _oce)
             try:
                 tkt = _ticket_from_escalation(msg.id, _escalations[msg.id])
                 _escalations[msg.id]["ticket_id"] = tkt["id"]
@@ -52056,9 +52052,15 @@ async def start_web_server():
                     "discord_ids": _ops_discord_ids,
                     "turnover_items": _ops_turnover_items,   # «القفل» phase 2
                     "has_photos": _ops_has_photos,
-                    "escalations_window": _ops_escalations_window,   # «كرت التقييم» phase 3
-                    "response_events": _ops_response_events,
-                    "reviews_window": _ops_reviews_window,
+                    "reviews_window": _ops_reviews_window,           # «كرت التقييم» phase 3
+                    # response + escalation now come from ops' OWN tables (ops.capture writes
+                    # them); only the work window and the message helpers cross the bridge.
+                    "work_start_hour": WORK_START_HOUR,
+                    "work_end_hour": WORK_END_HOUR,
+                    "work_end_min": WORK_END_MIN,
+                    "msg_is_inbound": _msg_is_inbound,
+                    "msg_time": _msg_time,
+                    "msg_is_automated": (lambda m: _looks_automated((m or {}).get("body") or "")),
                     "public_base": _dispatch_base_url,   # env → auto-captured → site base
                     "notify": _ops_notify,
                 })
@@ -56140,6 +56142,93 @@ async def cmd_ops_link(ctx, *, rest: str = ""):
         await ctx.reply("🚫 %s" % res.get("error", "ما ضبط"))
 
 
+def _ops_backfill_conversations(days):
+    """Conversations touched inside the window, newest first. Uses the SAME Hostaway client
+    as everything else — no second API layer. Stops paging once a whole page is older than
+    the window, so a 30-day backfill does not walk five years of history."""
+    cutoff = (now_riyadh().date() - timedelta(days=int(days))).isoformat()
+    out, offset = [], 0
+    for _ in range(30):                       # hard page cap: 30 x 100 = 3000 conversations
+        try:
+            data = api_get("/conversations", params={"limit": 100, "offset": offset,
+                                                     "includeResources": 1})
+        except Exception as e:
+            print("[ops.backfill] conversations fetch failed:", e)
+            break
+        batch = data.get("result", []) or []
+        if not batch:
+            break
+        fresh = 0
+        for c in batch:
+            latest = str(c.get("latestMessageDate") or c.get("updatedOn")
+                         or c.get("insertedOn") or "")[:10]
+            if not latest or latest >= cutoff:
+                out.append(c)
+                fresh += 1
+        if fresh == 0:                        # this whole page predates the window
+            break
+        offset += 100
+    return out
+
+def _ops_backfill_messages(conversation_id):
+    try:
+        data = api_get(f"/conversations/{conversation_id}/messages")
+        return sorted(data.get("result", []) or [], key=_msg_sort_key)
+    except Exception as e:
+        print(f"[ops.backfill] messages fetch failed ({conversation_id}):", e)
+        return []
+
+@bot.command(name="ops-backfill", aliases=["تعبئة-الاستجابة", "backfill"])
+async def cmd_ops_backfill(ctx, days: str = "30"):
+    """!ouja ops-backfill [days] — fill «الاستجابة على وحداتك» from conversation history.
+
+    Without this the first August scorecard would be scored on whatever few days happened to
+    exist since capture started, and the biggest line on the card would still be thin.
+    Idempotent: the UNIQUE key means a second run writes nothing and reports duplicates."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    if not _HAS_OPS:
+        await ctx.reply("🚫 نظام الالتزام مو مفعّل.")
+        return
+    try:
+        n = max(1, min(90, int(str(days).strip() or "30")))
+    except ValueError:
+        n = 30
+    status = await ctx.reply(f"⏳ أجمع محادثات آخر {n} يوم… (ياخذ شوي)")
+
+    def _run():
+        return _ops.capture.backfill(
+            days=n,
+            fetch_conversations=_ops_backfill_conversations,
+            fetch_messages=_ops_backfill_messages,
+            listings=get_listings_map(),
+            pause=lambda: time.sleep(0.3))     # be kind to Hostaway's rate limit
+
+    try:
+        rep = await asyncio.to_thread(_run)
+    except Exception as e:
+        await status.edit(content=f"🚫 وقف بخطأ: {str(e)[:300]}")
+        return
+    nl = chr(10)
+    lines = [f"✅ خلصت تعبئة آخر {rep.get('days', n)} يوم",
+             f"محادثات: {rep.get('conversations', 0)}",
+             f"سجلات جديدة: {rep.get('written', 0)}",
+             f"اكتملت بردود: {rep.get('completed', 0)}",
+             f"مكررة (انتجاهلت): {rep.get('skipped', 0)}"]
+    unattr = rep.get("unattributed", 0)
+    total = rep.get("events_in_window", 0)
+    if total:
+        pct = round(100.0 * (total - unattr) / total)
+        lines.append(f"انحسب لها مسؤول: {pct}٪ ({total - unattr} من {total})")
+        if unattr:
+            lines.append(f"⚠️ {unattr} رسالة ما عرفنا مين المسؤول عنها — "
+                         "غالباً شقق مو مربوطة في تقويم الموظفين.")
+    if rep.get("errors"):
+        lines.append(f"⚠️ محادثات ما قدرنا نقراها: {rep['errors']}")
+    await status.edit(content=nl.join(lines))
+
+
 @bot.command(name="ops-channels", aliases=["رومات-الالتزام", "غرف-الالتزام"])
 async def cmd_ops_channels(ctx):
     """!ouja ops-channels — create the private «#اسم-اليوم» room for each employee.
@@ -56184,6 +56273,34 @@ async def cmd_ops_channels(ctx):
             made.append(emp["name"])
         except Exception as e:
             failed.append("%s (%s)" % (emp["name"], str(e)[:80]))
+    # The private HR room. Everyone denied, then the lead + the appeal chain + the admins.
+    # It holds the warning record, so it must never be a room the team can stumble into.
+    hr_name = _ops.notify.hr_channel()
+    if discord.utils.get(guild.text_channels, name=hr_name) is not None:
+        kept.append("#" + hr_name)
+    else:
+        hr_ov = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+        seen_ids = set()
+        for did in [lead_id] + list(_ops.notify.approver_ids().values()) + [str(ctx.author.id)]:
+            did = str(did or "").strip()
+            if not did or did in seen_ids:
+                continue
+            seen_ids.add(did)
+            try:
+                m = guild.get_member(int(did))
+            except (TypeError, ValueError):
+                continue
+            if m is not None:
+                hr_ov[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                       read_message_history=True)
+        try:
+            hr = await _make_channel_spill(guild, cat, hr_name,
+                                           "سجل الإنذارات — خاص، ما يدخله إلا المسؤولين")
+            await hr.edit(overwrites=hr_ov)
+            made.append("#" + hr_name)
+        except Exception as e:
+            failed.append("#%s (%s)" % (hr_name, str(e)[:80]))
+
     nl = chr(10)
     msg = ["✅ رومات الالتزام:"]
     if made:

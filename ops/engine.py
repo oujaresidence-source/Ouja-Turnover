@@ -354,6 +354,109 @@ def minutes_to(checkin_at, now):
     return int(round((checkin_at - now).total_seconds() / 60.0))
 
 
+# ================================================================== RESPONSE CLOCK
+# The work window is ONE definition and it is bot.py's: WORK_START_HOUR=11,
+# WORK_END_HOUR=25, WORK_END_MIN=30 — i.e. 11:00 → 01:30 the next morning. Those constants
+# are passed in by the caller (wired from bot.py) rather than re-declared here, because a
+# second copy of a business rule is a second thing to forget to change.
+#
+# One "work day" D is the span [D 11:00, D+1 01:30]. Consecutive spans do NOT overlap: the
+# dead zone from 01:30 to 11:00 is when nobody is expected to be awake, so it costs nobody
+# anything. A guest message at 02:00 does not start its clock until 11:00.
+
+WORK_START_DEFAULT = 11
+WORK_END_HOUR_DEFAULT = 25        # 25:30 == 01:30 the following day
+WORK_END_MIN_DEFAULT = 30
+
+
+def work_span(day, work_start=WORK_START_DEFAULT, work_end_hour=WORK_END_HOUR_DEFAULT,
+              work_end_min=WORK_END_MIN_DEFAULT, tzinfo=None):
+    """The one working span that OPENS on `day`, as (start, end) aware datetimes."""
+    z = tzinfo or tz()
+    start = datetime.datetime(day.year, day.month, day.day, work_start, 0, tzinfo=z)
+    minutes = (work_end_hour * 60 + work_end_min) - work_start * 60
+    return start, start + datetime.timedelta(minutes=minutes)
+
+
+def worked_minutes(start, end, work_start=WORK_START_DEFAULT,
+                   work_end_hour=WORK_END_HOUR_DEFAULT, work_end_min=WORK_END_MIN_DEFAULT,
+                   tzinfo=None):
+    """Minutes between two moments that fall INSIDE working hours. Pure.
+
+    This is the number the response line is scored on, and the reason is fairness: a guest
+    message that lands at 02:00 and is answered at 11:15 took nine hours by the clock and
+    fifteen minutes by any measure a human would accept. Scoring wall-clock time would
+    punish people for the hours we tell them not to work.
+
+    Accepts aware datetimes or ISO strings. Returns 0.0 when end <= start."""
+    s, e = _as_dt(start, tzinfo), _as_dt(end, tzinfo)
+    if s is None or e is None or e <= s:
+        return 0.0
+    total = 0.0
+    # start one day early: the span opening on the previous day can still be running
+    day = s.date() - datetime.timedelta(days=1)
+    last = e.date()
+    while day <= last:
+        ws, we = work_span(day, work_start, work_end_hour, work_end_min, s.tzinfo)
+        lo, hi = max(s, ws), min(e, we)
+        if hi > lo:
+            total += (hi - lo).total_seconds() / 60.0
+        day += datetime.timedelta(days=1)
+    return round(total, 2)
+
+
+def _as_dt(v, tzinfo=None):
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime.datetime):
+        return v if v.tzinfo else v.replace(tzinfo=tzinfo or tz())
+    try:
+        d = datetime.datetime.fromisoformat(str(v).replace("T", " ").strip()[:19])
+        return d if d.tzinfo else d.replace(tzinfo=tzinfo or tz())
+    except Exception:
+        return None
+
+
+def response_pairs(msgs, is_inbound, msg_time, is_automated=None):
+    """One event per RUN of consecutive guest messages, paired with the first real reply.
+
+    Keying on the run's FIRST message, not on every message, is deliberate: if a guest sends
+    three messages in a row and we answer once, that is ONE person waiting once — counting it
+    three times would make a chatty guest look like three failures by whoever owns that unit.
+
+    An automated welcome does not close a run: it answers nobody, so the guest is still
+    waiting and the clock keeps running.
+
+    A run with no reply yet is still returned, with responded_at None — it belongs in the
+    denominator, or a team could score 100% by answering nothing.
+
+    Pure: the three callables are passed in so this never imports bot.py."""
+    out, pending = [], None
+    for m in msgs or []:
+        if is_inbound(m):
+            if pending is None:
+                pending = m
+            continue
+        if is_automated and is_automated(m):
+            continue
+        if pending is not None:
+            out.append({"incoming": pending, "incoming_at": msg_time(pending),
+                        "outgoing": m, "responded_at": msg_time(m)})
+            pending = None
+    if pending is not None:
+        out.append({"incoming": pending, "incoming_at": msg_time(pending),
+                    "outgoing": None, "responded_at": None})
+    return out
+
+
+def answered_in_target(minutes_worked, target_minutes):
+    """Did this one message get its first reply inside the target, in WORKING minutes?
+    An unanswered message (None) is never 'answered'."""
+    if minutes_worked is None:
+        return False
+    return float(minutes_worked) <= float(target_minutes)
+
+
 # ----------------------------------------------------------------- public summary
 
 def public_summary_counts(reports_done, reports_total, warnings_issued, warnings_voided,

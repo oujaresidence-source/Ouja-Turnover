@@ -173,6 +173,62 @@ CREATE TABLE IF NOT EXISTS ops_scorecards (
     released_by TEXT,
     PRIMARY KEY(month_key, employee)
 );
+-- ============ the two inputs the scorecard was missing ============
+-- APPEND-ONLY and on disk, which is the entire point: the old reply log was a 500-item deque
+-- and the escalation map was a dict that died on every restart, so «الاستجابة» — the biggest
+-- line on the card at 25% — had nothing to read and rendered «بيانات ناقصة».
+--
+-- `responsible` is resolved ONCE at capture time through the coverage calendar for THAT date
+-- and then frozen. Re-deriving it later would silently rewrite history every time the roster
+-- changes; a month already scored must keep the attribution it was scored on.
+CREATE TABLE IF NOT EXISTS ops_response_events (
+    id              TEXT PRIMARY KEY,      -- 'rsp_<conversation>_<incoming msg>'
+    conversation_id TEXT,
+    incoming_msg_id TEXT,
+    outgoing_msg_id TEXT,
+    listing_id      INTEGER,
+    unit            TEXT,
+    incoming_at     TEXT,
+    responded_at    TEXT,                  -- NULL = still waiting; counts in the denominator
+    minutes_raw     REAL,                  -- wall clock
+    minutes_worked  REAL,                  -- inside 11:00-01:30 only — what we score on
+    responsible     TEXT,
+    responsible_did TEXT,
+    attribution     TEXT,                  -- owner | coverer | unknown
+    day_key         TEXT,
+    month_key       TEXT,
+    created_at      TEXT,
+    UNIQUE(conversation_id, incoming_msg_id)
+);
+CREATE TABLE IF NOT EXISTS ops_escalation_events (
+    id              TEXT PRIMARY KEY,
+    source          TEXT,
+    unit            TEXT,
+    listing_id      INTEGER,
+    opened_at       TEXT,
+    taken_at        TEXT,
+    taken_by        TEXT,                  -- who actually stepped up
+    taken_by_did    TEXT,
+    responsible     TEXT,                  -- who SHOULD have, per the calendar that day
+    responsible_did TEXT,
+    taken_by_responsible INTEGER,          -- 1 when the two match — the scorecard signal
+    resolved_at     TEXT,
+    day_key         TEXT,
+    month_key       TEXT,
+    created_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ops_resp_month ON ops_response_events(month_key, responsible);
+CREATE INDEX IF NOT EXISTS idx_ops_resp_open  ON ops_response_events(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_ops_esc_month  ON ops_escalation_events(month_key, responsible);
+-- Free-text settings the owner edits on /compliance (currently the appeal chain). Separate
+-- from ops_switches, which is strictly '0'/'1' — overloading a typed table with free text is
+-- how a boolean ends up holding a Discord id.
+CREATE TABLE IF NOT EXISTS ops_config (
+    key    TEXT PRIMARY KEY,
+    value  TEXT,
+    set_by TEXT,
+    set_at TEXT
+);
 -- The owner's remote control. A flip made on /compliance must SURVIVE A REDEPLOY, so the
 -- stored value wins over the Railway env var (which stays as the boot-time default). Every
 -- change records who made it and when, because "who turned the warnings on" is a question
@@ -263,7 +319,8 @@ def counts():
     out = {}
     for t in ("ops_obligations", "ops_warnings", "ops_appeals", "ops_free_passes",
               "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity",
-              "ops_nudge_items", "ops_nudges", "ops_scorecards", "ops_switches"):
+              "ops_nudge_items", "ops_nudges", "ops_scorecards", "ops_switches",
+              "ops_response_events", "ops_escalation_events", "ops_config"):
         out[t] = (q1("SELECT COUNT(*) c FROM %s" % t) or {}).get("c", 0)
     return out
 
@@ -777,6 +834,111 @@ def release_scorecard(month_key, employee, by):
     execute("UPDATE ops_scorecards SET released_at=?, released_by=? "
             "WHERE month_key=? AND employee=? AND released_at IS NULL",
             (now_iso(), by or "", month_key, employee))
+
+
+# ============================================ response + escalation events
+
+def response_event_id(conversation_id, incoming_msg_id):
+    return "rsp_%s_%s" % (conversation_id, incoming_msg_id)
+
+
+def record_response_event(row):
+    """Append one guest-wait. INSERT OR IGNORE on the UNIQUE key is what makes the backfill
+    safe to run twice — the second pass writes nothing and reports it as a duplicate.
+
+    Returns True when a NEW row was written."""
+    rid = response_event_id(row["conversation_id"], row["incoming_msg_id"])
+    before = q1("SELECT 1 x FROM ops_response_events WHERE id=?", (rid,))
+    if before:
+        return False
+    execute("INSERT OR IGNORE INTO ops_response_events"
+            "(id,conversation_id,incoming_msg_id,outgoing_msg_id,listing_id,unit,incoming_at,"
+            " responded_at,minutes_raw,minutes_worked,responsible,responsible_did,attribution,"
+            " day_key,month_key,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (rid, str(row["conversation_id"]), str(row["incoming_msg_id"]),
+             str(row.get("outgoing_msg_id") or "") or None, row.get("listing_id"),
+             row.get("unit"), row.get("incoming_at"), row.get("responded_at"),
+             row.get("minutes_raw"), row.get("minutes_worked"), row.get("responsible"),
+             row.get("responsible_did"), row.get("attribution"),
+             row.get("day_key"), row.get("month_key"), now_iso()))
+    return True
+
+
+def complete_response_event(conversation_id, incoming_msg_id, outgoing_msg_id, responded_at,
+                            minutes_raw, minutes_worked):
+    """Fill in the reply for a wait we recorded as still-open. Only ever fills a blank —
+    the FIRST reply is the one that counts, so a later one must not overwrite it."""
+    execute("UPDATE ops_response_events SET outgoing_msg_id=?, responded_at=?, minutes_raw=?,"
+            " minutes_worked=? WHERE id=? AND IFNULL(responded_at,'')=''",
+            (str(outgoing_msg_id or ""), responded_at, minutes_raw, minutes_worked,
+             response_event_id(conversation_id, incoming_msg_id)))
+
+
+def response_event(conversation_id, incoming_msg_id):
+    return q1("SELECT * FROM ops_response_events WHERE id=?",
+              (response_event_id(conversation_id, incoming_msg_id),))
+
+
+def response_events_month(month_key):
+    return q("SELECT * FROM ops_response_events WHERE month_key=?", (month_key,))
+
+
+def response_events_since(start_day):
+    """No upper bound on purpose. Clamping to 'today' loses events on a timezone boundary and
+    makes the backfill report understate what it actually wrote."""
+    return q("SELECT * FROM ops_response_events WHERE day_key>=?", (start_day,))
+
+
+def record_escalation_event(row):
+    """Record an escalation AT OPEN, with who was on the hook for that unit that day."""
+    eid = str(row["id"])
+    if q1("SELECT 1 x FROM ops_escalation_events WHERE id=?", (eid,)):
+        return False
+    execute("INSERT OR IGNORE INTO ops_escalation_events"
+            "(id,source,unit,listing_id,opened_at,responsible,responsible_did,"
+            " taken_by_responsible,day_key,month_key,created_at)"
+            " VALUES(?,?,?,?,?,?,?,0,?,?,?)",
+            (eid, row.get("source") or "escalation", row.get("unit"), row.get("listing_id"),
+             row.get("opened_at"), row.get("responsible"), row.get("responsible_did"),
+             row.get("day_key"), row.get("month_key"), now_iso()))
+    return True
+
+
+def take_escalation_event(eid, taken_by, taken_by_did, matched, taken_at=None):
+    execute("UPDATE ops_escalation_events SET taken_at=?, taken_by=?, taken_by_did=?,"
+            " taken_by_responsible=? WHERE id=? AND IFNULL(taken_at,'')=''",
+            (taken_at or now_iso(), taken_by or "", taken_by_did or "",
+             1 if matched else 0, str(eid)))
+
+
+def escalation_event(eid):
+    return q1("SELECT * FROM ops_escalation_events WHERE id=?", (str(eid),))
+
+
+def escalation_events_month(month_key):
+    return q("SELECT * FROM ops_escalation_events WHERE month_key=?", (month_key,))
+
+
+# ------------------------------------------------------------------ free-text config
+
+def config_all():
+    return {r["key"]: (r["value"] or "") for r in q("SELECT key, value FROM ops_config")}
+
+
+def config_get(key):
+    r = q1("SELECT value FROM ops_config WHERE key=?", (key,))
+    return (r or {}).get("value") or ""
+
+
+def config_set(key, value, by=""):
+    execute("INSERT INTO ops_config(key,value,set_by,set_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, set_by=excluded.set_by, "
+            "set_at=excluded.set_at", (key, (value or "").strip(), by or "", now_iso()))
+
+
+def config_row(key):
+    return q1("SELECT * FROM ops_config WHERE key=?", (key,))
 
 
 # ------------------------------------------------------------------ the remote control

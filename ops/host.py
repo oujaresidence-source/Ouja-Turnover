@@ -31,12 +31,23 @@ class _Host:
     has_photos = None        # (work_item_id) -> bool   re-checked at the moment «جاهزة» is pressed
 
     # --- phase 3 «كرت التقييم» ---
-    # All three are attributed BY OWNERSHIP (never by sender — Hostaway has no sender field).
-    # Any of them returning [] makes its line render «بيانات ناقصة» and redistribute, which is
-    # the specified behaviour: never a zero for a gap in our own instrumentation.
-    escalations_window = None   # (start, end) -> [{listing_id, date, taken}]
-    response_events = None      # (start, end) -> [{listing_id, date, at, answered}]
+    # Response and escalation used to be fed from bot.py; they now come from ops' OWN tables,
+    # written by ops.capture, because nothing in bot.py persisted them. Reviews still cross
+    # the bridge — Hostaway is the only source. An empty return makes the line render
+    # «بيانات ناقصة» and redistribute: never a zero for a gap in our own instrumentation.
     reviews_window = None       # (start, end) -> [{listing_id, date, categories:{cat: rating}}]
+
+    # --- capture (ops.capture): the live guest-message path ---
+    # The work window is bot.py's ONE definition (WORK_START_HOUR / WORK_END_HOUR /
+    # WORK_END_MIN), passed in rather than re-declared inside the package.
+    work_start_hour = None
+    work_end_hour = None
+    work_end_min = None
+    msg_is_inbound = None      # (msg) -> bool          bot.py's _msg_is_inbound
+    msg_time = None            # (msg) -> iso string    bot.py's _msg_time
+    msg_is_automated = None    # (msg) -> bool          bot.py's _looks_automated on the body
+    fetch_conversations = None # (days) -> [conversation]   backfill only
+    fetch_messages = None      # (conversation_id) -> [msg] backfill only
 
     # --- delivery ---
     # notify(payload) -> None. bot.py schedules the Discord work and then calls

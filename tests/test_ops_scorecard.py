@@ -362,9 +362,9 @@ class TestTheEmptyMonthExplainsItself(unittest.TestCase):
         card = scorecard.build("أ", facts(turnover={"closed_before_checkin": 1, "total": 1}),
                                minimum=5)
         by = {l["key"]: l for l in card["lines"]}
-        self.assertEqual(by["response"]["why"], "not_instrumented")
         self.assertEqual(by["turnover"]["why"], "below_min")     # sample 1, minimum 5
         self.assertEqual(by["escalation"]["why"], "no_data")     # nothing at all
+        self.assertEqual(by["response"]["why"], "no_data")       # wired now, just quiet
         for l in card["lines"]:
             if l["score"] is None:
                 self.assertTrue(l["why_ar"].strip())
@@ -392,3 +392,77 @@ class TestTheEmptyMonthExplainsItself(unittest.TestCase):
         self.assertTrue(scored)
         for l in scored:
             self.assertNotIn("why", l)
+
+
+class TestTheWiredResponseLine(ScorecardDbCase):
+    """The 25% line now reads real rows. The «بيانات ناقصة» protection must survive that."""
+
+    def rows(self, employee, n, answered, month="2026-07", day="2026-07-15"):
+        for i in range(n):
+            db.record_response_event({
+                "conversation_id": "c%s%d" % (employee, i), "incoming_msg_id": "g%d" % i,
+                "outgoing_msg_id": "h%d" % i, "listing_id": 1, "unit": "u",
+                "incoming_at": day + " 12:00:00", "responded_at": day + " 12:10:00",
+                "minutes_raw": 10.0, "minutes_worked": (5.0 if i < answered else 900.0),
+                "responsible": employee, "responsible_did": "1", "attribution": "owner",
+                "day_key": day, "month_key": month})
+
+    def test_a_person_below_the_minimum_sample_still_gets_missing_data(self):
+        """Wiring the data must NOT remove the small-sample protection."""
+        self.rows("ناصر", 3, 3)                       # 3 events, minimum is 5
+        rep = scorecard.gather("2026-07", minimum=5)
+        card = next(c for c in rep["cards"] if c["employee"] == "ناصر")
+        line = _line(card, "response")
+        self.assertIsNone(line["score"])
+        self.assertEqual(line["why"], "below_min")
+        self.assertEqual(line["effective_weight"], 0)
+
+    def test_enough_events_produce_a_real_score(self):
+        self.rows("ناصر", 20, 20)                     # all inside target
+        rep = scorecard.gather("2026-07", minimum=5)
+        card = next(c for c in rep["cards"] if c["employee"] == "ناصر")
+        self.assertEqual(_line(card, "response")["score"], 5)
+        self.assertEqual(_line(card, "response")["sample"], 20)
+
+    def test_slow_replies_score_lower(self):
+        self.rows("ناصر", 20, 10)                     # half inside target
+        rep = scorecard.gather("2026-07", minimum=5)
+        self.assertEqual(_line(next(c for c in rep["cards"] if c["employee"] == "ناصر"),
+                               "response")["score"], 1)
+
+    def test_an_unanswered_wait_counts_against_the_share(self):
+        """Otherwise a team could score 100% by answering nothing at all."""
+        self.rows("ناصر", 10, 10)
+        for i in range(10):
+            db.record_response_event({
+                "conversation_id": "silent%d" % i, "incoming_msg_id": "g", "listing_id": 1,
+                "unit": "u", "incoming_at": "2026-07-15 12:00:00", "responded_at": None,
+                "minutes_raw": None, "minutes_worked": None,
+                "responsible": "ناصر", "responsible_did": "1", "attribution": "owner",
+                "day_key": "2026-07-15", "month_key": "2026-07"})
+        rep = scorecard.gather("2026-07", minimum=5)
+        line = _line(next(c for c in rep["cards"] if c["employee"] == "ناصر"), "response")
+        self.assertEqual(line["sample"], 20)
+        self.assertLess(line["score"], 5)
+
+    def test_different_loads_with_equal_performance_score_the_same(self):
+        """The whole point of a share: 40 messages and 12 messages, both 100% on time."""
+        self.rows("ناصر", 40, 40)
+        self.rows("نورة", 12, 12)
+        rep = scorecard.gather("2026-07", minimum=5)
+        heavy = _line(next(c for c in rep["cards"] if c["employee"] == "ناصر"), "response")
+        light = _line(next(c for c in rep["cards"] if c["employee"] == "نورة"), "response")
+        self.assertEqual(heavy["score"], light["score"])
+        self.assertNotEqual(heavy["sample"], light["sample"])
+
+    def test_an_escalation_taken_by_someone_else_does_not_credit_the_responsible(self):
+        for i in range(6):
+            db.record_escalation_event({
+                "id": "e%d" % i, "unit": "u", "listing_id": 1,
+                "opened_at": "2026-07-15 13:00:00", "responsible": "ناصر",
+                "responsible_did": "1", "day_key": "2026-07-15", "month_key": "2026-07"})
+            db.take_escalation_event("e%d" % i, "نورة", "3", matched=False)
+        rep = scorecard.gather("2026-07", minimum=5)
+        line = _line(next(c for c in rep["cards"] if c["employee"] == "ناصر"), "escalation")
+        self.assertEqual(line["sample"], 6)
+        self.assertEqual(line["score"], 1)          # 0 of 6 taken by the person on the hook

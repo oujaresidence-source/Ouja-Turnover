@@ -354,6 +354,28 @@ function controlPanel(d){
   return out + '</div>';
 }
 
+function approverPanel(d){
+  var ap = d.approvers || [];
+  if (!ap.length) return '';
+  var out = '<div class="card"><h2>سلسلة الاعتراضات</h2>'
+    + '<div class="hint" style="margin-bottom:12px">'
+    + 'الاعتراض يروح للأول، وإذا ما رد خلال ٢٤ ساعة ينتقل للي بعده لحاله.</div>';
+  for (var i = 0; i < ap.length; i++){
+    var a = ap[i];
+    var src = a.source === 'page' ? 'مضاف من هنا'
+            : (a.source === 'railway' ? 'من إعدادات Railway' : '⚠️ ما فيه أحد — بينتقل تلقائياً');
+    out += '<div class="swrow">'
+      + '<div style="flex:1"><b>' + esc(i + 1) + '. ' + esc(a.name) + '</b>'
+      +   '<div class="hint">' + esc(src) + '</div></div>'
+      + '<input type="text" class="idbox apbox" data-stage="' + esc(a.stage) + '"'
+      +   ' value="' + esc(a.did || '') + '" placeholder="الصق المعرّف أو المنشن"'
+      +   ' inputmode="numeric" autocomplete="off">'
+      + '</div>';
+  }
+  return out + '<div class="hint" style="margin-top:10px">'
+    + 'أسهل طريقة تجيب المعرّف: <b>!ouja اربط</b> في الديسكورد يعرض لك المعرّفات.</div></div>';
+}
+
 function rosterTable(d){
   var out = '<div class="card"><h2>هذا الأسبوع · ' + esc(d.period) + '</h2><div class="scroll"><table>'
     + '<tr><th>الموظف</th><th>معرّف الديسكورد</th><th>الحالة</th><th>إنذارات</th>'
@@ -553,6 +575,7 @@ function render(d){
   el('sub').textContent = 'التقرير الأسبوعي · الموعد ' + (d.due_at || '').replace('T', ' ');
   el('app').innerHTML = banner + hole
     + controlPanel(d)
+    + approverPanel(d)
     + rosterTable(d)
     + turnoverCard(d)
     + scorecardCard()
@@ -592,9 +615,19 @@ function saveId(input){
   });
 }
 
+function saveApprover(input){
+  var stage = input.getAttribute('data-stage');
+  post('/api/ops/approver', {stage: stage, discord_id: input.value}).then(function(r){
+    if (!r.ok) alert(r.error || 'ما انحفظ');
+    load();
+  });
+}
+
 document.addEventListener('change', function(ev){
   var t = ev.target;
-  if (t && t.className && t.className.indexOf('idbox') > -1){ saveId(t); }
+  if (!t || !t.className) return;
+  if (t.className.indexOf('apbox') > -1){ saveApprover(t); return; }
+  if (t.className.indexOf('idbox') > -1){ saveId(t); }
 });
 document.addEventListener('keydown', function(ev){
   var t = ev.target;

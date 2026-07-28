@@ -151,5 +151,52 @@ class TestABrokenDatabaseCannotTurnThingsOn(SwitchCase):
             switch.invalidate()
 
 
+
+class TestTheAppealChainMovedOffRailway(SwitchCase):
+    """Same reason as the switch panel: a redeploy must not silently reset who reviews
+    appeals."""
+
+    def setUp(self):
+        super().setUp()
+        from ops import notify
+        self.notify = notify
+        for env in notify.APPEAL_ENV.values():
+            self._saved.setdefault(env, os.environ.get(env))
+            os.environ.pop(env, None)
+
+    def test_with_nothing_set_the_chain_is_empty_not_wrong(self):
+        ids = self.notify.approver_ids()
+        self.assertEqual(set(ids), {"s1", "s2", "s3"})
+        self.assertTrue(all(v == "" for v in ids.values()))
+
+    def test_the_env_var_is_the_fallback(self):
+        os.environ["OPS_APPEAL_S1_ID"] = "111111111111111111"
+        self.assertEqual(self.notify.approver_ids()["s1"], "111111111111111111")
+        self.assertEqual(
+            next(p for p in self.notify.approver_panel() if p["stage"] == "s1")["source"],
+            "railway")
+
+    def test_the_stored_value_wins_over_the_env(self):
+        os.environ["OPS_APPEAL_S2_ID"] = "111111111111111111"
+        db.config_set("appeal_s2", "222222222222222222", "فيصل")
+        self.assertEqual(self.notify.approver_ids()["s2"], "222222222222222222")
+        self.assertEqual(
+            next(p for p in self.notify.approver_panel() if p["stage"] == "s2")["source"],
+            "page")
+
+    def test_it_survives_the_process_forgetting_everything(self):
+        db.config_set("appeal_s3", "333333333333333333", "فيصل")
+        db.reset_init_cache()
+        self.assertEqual(self.notify.approver_ids()["s3"], "333333333333333333")
+
+    def test_the_panel_names_all_three_stages_in_order(self):
+        panel = self.notify.approver_panel()
+        self.assertEqual([p["name"] for p in panel], ["أصيل", "ريم", "فيصل"])
+
+    def test_an_empty_stage_is_reported_as_nobody(self):
+        self.assertEqual(
+            next(p for p in self.notify.approver_panel() if p["stage"] == "s1")["source"],
+            "none")
+
 if __name__ == "__main__":
     unittest.main()

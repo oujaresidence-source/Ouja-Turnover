@@ -286,6 +286,7 @@ def state(period_key=None):
         "summary": notify.monthly_summary(month)["text"],
         "turnover": turnover.state(),
         "control": switch.panel(),
+        "approvers": notify.approver_panel(),
     }
 
 
@@ -317,6 +318,27 @@ async def api_waive(request):
         return _deny()
     b = await _body(request)
     return HOST.json_response(do_waive(b.get("warning_id"), b.get("reason"), _actor(request)))
+
+
+async def do_set_approver(stage, raw_id, by):
+    """Same rules as the Discord id column: a raw id or a pasted mention, an empty box means
+    a deliberate blank, and the page value overrides Railway."""
+    if stage not in notify.APPEAL_ENV:
+        return {"ok": False, "error": "مرحلة غير معروفة"}
+    did = parse_discord_id(raw_id)
+    if did is None:
+        return {"ok": False, "error": "هذا مو معرّف ديسكورد — لازم أرقام فقط"}
+    db.config_set("appeal_" + stage, did, by)
+    return {"ok": True, "stage": stage, "discord_id": did,
+            "message": ("انحفظ ✅" if did else "انشال — هالمرحلة بتنتقل تلقائياً للي بعدها")}
+
+
+async def api_approver(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    return HOST.json_response(await do_set_approver((b.get("stage") or "").strip(),
+                                                    b.get("discord_id"), _actor(request)))
 
 
 async def api_identity(request):
@@ -482,6 +504,7 @@ def register(app):
     p("/api/ops/excuse", _safe(api_excuse))
     p("/api/ops/identity", _safe(api_identity))
     p("/api/ops/switch", _safe(api_switch))
+    p("/api/ops/approver", _safe(api_approver))
     p("/api/ops/waive", _safe(api_waive))
     p("/api/ops/appeal/decide", _safe(api_decide))
 

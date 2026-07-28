@@ -67,9 +67,10 @@ WHY_AR = {
     "not_instrumented": "هذا البند ما هو مربوط بعد — ما ينحسب على أحد إطلاقاً",
 }
 
-# Lines we know are not wired to a real source yet. Named out loud so the page can say so
-# instead of implying somebody had a quiet month.
-NOT_INSTRUMENTED = ("response",)
+# Lines with no real source yet. «الاستجابة» used to live here — it is now wired to
+# ops_response_events (ops.capture), so the tuple is empty. Keep the mechanism: the next line
+# that gets stubbed must say so out loud rather than implying somebody had a quiet month.
+NOT_INSTRUMENTED = ()
 
 
 # ------------------------------------------------------------------ env
@@ -100,13 +101,11 @@ def min_sample():
     return _int("SCORECARD_MIN_SAMPLE", 5)
 
 
-def work_start():
-    return _int("SCORECARD_WORK_START", 11)
-
-
-def work_end():
-    """01:30 next day — stored as the hour 1; the half hour is fixed by the spec."""
-    return _int("SCORECARD_WORK_END", 1)
+# NOTE: this module used to declare SCORECARD_WORK_START / SCORECARD_WORK_END — a SECOND
+# definition of the work window alongside bot.py's WORK_START_HOUR / WORK_END_HOUR /
+# WORK_END_MIN. That was a mistake: two copies of a business rule is two things to forget to
+# change. The window now lives in bot.py alone and reaches the package through wire(); the
+# clipping itself is engine.worked_minutes, applied once at capture time.
 
 
 # ================================================================== PURE SCORING
@@ -446,45 +445,48 @@ def _gather_compliance(facts, month_key, start, end):
 
 
 def _gather_escalation(facts, attrib_by_day, start, end):
+    """From ops_escalation_events. `responsible` was resolved by the calendar on the day the
+    escalation opened and frozen then, so a later roster change cannot rewrite a scored
+    month. The signal is taken_by_responsible: did the person on the hook step up?"""
     try:
-        rows = HOST.escalations_window(start.isoformat(), end.isoformat()) if HOST.escalations_window else []
+        rows = db.escalation_events_month(engine.month_key(start))
     except Exception as e:
         print("[scorecard] escalation data unavailable:", e)
-        rows = []
-    for r in rows or []:
-        day = str(r.get("date") or "")[:10]
-        who = (attrib_by_day.get(day) or {}).get(_int_or(r.get("listing_id")))
-        name = (who or {}).get("name")
+        return
+    for r in rows:
+        name = r.get("responsible")
         if name not in facts:
             continue
         facts[name]["escalation"]["total"] += 1
-        if r.get("taken"):
+        if r.get("taken_by_responsible"):
             facts[name]["escalation"]["taken"] += 1
 
 
 def _gather_response(facts, attrib_by_day, start, end):
-    """Guest response time inside working hours.
+    """From ops_response_events — one row per guest wait, with the responsible person and the
+    WORKING minutes already computed and frozen at capture time.
 
-    Hostaway cannot tell us WHO replied (§3.1), so this is attributed by ownership like
-    everything else. When bot.py has no response data to give — which is the case today —
-    the line correctly becomes «بيانات ناقصة» and its 25% is redistributed. That is the
-    specified behaviour: never score a zero for a gap in our own instrumentation."""
+    The metric is the SHARE answered inside the target, which is inherently normalised: two
+    people with the same per-apartment performance and different loads produce the same
+    share. An unanswered wait counts in the denominator — otherwise a team could score 100%
+    by answering nothing at all.
+
+    If nothing was captured (the capture layer off, or a month before it existed) the line
+    still falls through to «بيانات ناقصة» and redistributes. Wiring the data did not remove
+    that protection."""
+    from . import capture
+    target = capture.target_minutes()
     try:
-        rows = HOST.response_events(start.isoformat(), end.isoformat()) if HOST.response_events else []
+        rows = db.response_events_month(engine.month_key(start))
     except Exception as e:
         print("[scorecard] response data unavailable:", e)
-        rows = []
-    for r in rows or []:
-        day = str(r.get("date") or "")[:10]
-        who = (attrib_by_day.get(day) or {}).get(_int_or(r.get("listing_id")))
-        name = (who or {}).get("name")
+        return
+    for r in rows:
+        name = r.get("responsible")
         if name not in facts:
             continue
-        at = r.get("at")
-        if at is not None and not in_working_hours(at, work_start(), work_end()):
-            continue                      # outside the window: not counted either way
         facts[name]["response"]["total"] += 1
-        if r.get("answered"):
+        if r.get("responded_at") and engine.answered_in_target(r.get("minutes_worked"), target):
             facts[name]["response"]["answered"] += 1
 
 

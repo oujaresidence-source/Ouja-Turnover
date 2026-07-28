@@ -94,12 +94,36 @@ def public_channel():
     return _env("OPS_PUBLIC_CHANNEL", "غرفة-المراقبة")
 
 
+APPEAL_ENV = {"s1": "OPS_APPEAL_S1_ID", "s2": "OPS_APPEAL_S2_ID", "s3": "OPS_APPEAL_S3_ID"}
+
+
 def approver_ids():
-    """The appeal chain: أصيل -> ريم -> فيصل. Set in Railway, so the people can change
-    without a deploy. A stage with nobody set auto-escalates instead of swallowing the
-    appeal."""
-    return {"s1": _env("OPS_APPEAL_S1_ID"), "s2": _env("OPS_APPEAL_S2_ID"),
-            "s3": _env("OPS_APPEAL_S3_ID")}
+    """The appeal chain: أصيل -> ريم -> فيصل.
+
+    Stored on /compliance  >  Railway env  >  empty. The page wins for the same reason the
+    switch panel does: a redeploy must not silently reset who reviews appeals. A stage with
+    nobody set auto-escalates rather than swallowing the appeal."""
+    try:
+        stored = db.config_all()
+    except Exception:
+        stored = {}
+    out = {}
+    for stage, env_name in APPEAL_ENV.items():
+        out[stage] = (stored.get("appeal_" + stage) or "").strip() or _env(env_name)
+    return out
+
+
+def approver_panel():
+    """What /compliance renders for the appeal chain."""
+    try:
+        stored = db.config_all()
+    except Exception:
+        stored = {}
+    live = approver_ids()
+    return [{"stage": s, "name": APPROVER_NAMES[s], "did": live.get(s) or "",
+             "source": ("page" if (stored.get("appeal_" + s) or "").strip()
+                        else ("railway" if _env(APPEAL_ENV[s]) else "none"))}
+            for s in ("s1", "s2", "s3")]
 
 
 APPROVER_NAMES = {"s1": "أصيل", "s2": "ريم", "s3": "فيصل"}
