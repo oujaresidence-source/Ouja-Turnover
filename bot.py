@@ -56244,9 +56244,18 @@ async def cmd_ops_channels(ctx):
         await ctx.reply("🚫 نظام الالتزام مو مفعّل.")
         return
     guild = ctx.guild
-    roster = await asyncio.to_thread(_ops.notify.employees)
+    roster, roster_err = await asyncio.to_thread(_ops.notify.roster_or_error)
+    if roster_err is not None:
+        # NOT the same as an empty calendar. A command that lands while the bot is still
+        # booting hits the database before brain.wire() has run, and the old code announced
+        # «ما لقيت أي موظف» to an owner whose calendar holds 53 apartments.
+        booting = "before brain.wire()" in str(roster_err)
+        await ctx.reply(
+            "⏳ النظام لسه يشغّل — انتظر دقيقة وجرّب مرة ثانية." if booting else
+            "🚫 ما قدرت أقرأ تقويم الموظفين: %s" % str(roster_err)[:200])
+        return
     if not roster:
-        await ctx.reply("🚫 ما لقيت أي موظف في تقويم الموظفين.")
+        await ctx.reply("🚫 تقويم الموظفين فاضي فعلاً — أضف الموظفين أول.")
         return
     # PREFLIGHT. A private room that is created and only THEN locked down is public for the
     # moment in between — and if the lock fails, it stays public forever with an employee's

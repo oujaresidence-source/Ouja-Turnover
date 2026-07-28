@@ -211,13 +211,52 @@ ID_SOURCE_AR = {"assignments": "من ملف التعيينات", "env": "من إ
                 "typed": "مضاف يدوياً"}
 
 
+def roster_or_error(attempts=3, pause=0.4):
+    """(employees, error). Distinguishes «the calendar is empty» from «we could not read it».
+
+    Those two look identical to a caller that only gets a list, and the difference matters:
+    during a redeploy a transient read failure made `!ouja ops-channels` announce «ما لقيت أي
+    موظف في تقويم الموظفين» to an owner whose calendar had 53 apartments in it. A message
+    that is both false and alarming is worse than an error. Retries first, because the usual
+    cause is a restart rather than a real problem."""
+    import time as _t
+    last = None
+    for i in range(max(1, attempts)):
+        try:
+            from schedule import owners as _sowners
+            names = [e["name"] for e in (_sowners.permanent_map() or {}).get("employees", [])]
+            return _attach_ids(names), None
+        except Exception as e:
+            last = e
+            print("[ops] employee calendar read failed (try %d): %s" % (i + 1, e))
+            if i + 1 < attempts:
+                _t.sleep(pause)
+    return [], last
+
+
+def _attach_ids(names):
+    ids = _id_map()
+    out = []
+    for n in names:
+        did, source = ids.get(_norm(n), ("", ""))
+        out.append({"name": n, "did": did, "reachable": bool(did),
+                    "source": source, "source_ar": ID_SOURCE_AR.get(source, "")})
+    return out
+
+
 def employees():
     """THE one employee list: the Employee Calendar (schedule_employees). This package does
     not keep a second copy of who works here — it only attaches the Discord id.
 
     Returns [{name, did, reachable, source, source_ar}]. reachable=False means we have no way
     to message them; they still appear everywhere (so the hole stays visible) but can never
-    be warned."""
+    be warned. Use roster_or_error() when you need to tell an empty calendar apart from an
+    unreadable one."""
+    rows, _err = roster_or_error()
+    return rows
+
+
+def _employees_legacy():
     names = []
     try:
         from schedule import owners as _sowners
