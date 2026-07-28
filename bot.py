@@ -5171,7 +5171,15 @@ _last_reminder = {}
 @tasks.loop(minutes=1)
 async def reminder_loop():
     """Nag every open turnover channel until cleaning is submitted for review.
-    12 PM–3 PM: every 30 min. After 3 PM: every 15 min. Quiet outside those hours."""
+    12 PM–3 PM: every 30 min. After 3 PM: every 15 min. Quiet outside those hours.
+
+    SUPERSEDED BY «القفل» (ops.turnover). This loop @mentions a person in the SHARED room, so
+    the whole team watches one person get nagged; Phase 2 does the same job privately, timed
+    to the guest's actual check-in. It stays here — untouched, one flag away — so the old
+    behaviour can be restored instantly if the new one disappoints: set NUDGE_ENABLED=0 in
+    Railway (no deploy) and this comes straight back."""
+    if _HAS_OPS and _ops.turnover.enabled() and not _ops.turnover.dryrun():
+        return                      # the private ladder owns this job now
     now = datetime.now(TZ)
     hour = now.hour
     if hour < REMINDER_START_HOUR or hour >= REMINDER_END_HOUR:
@@ -5525,17 +5533,20 @@ def _ops_notify(payload):
     runs under asyncio.to_thread), where asyncio.create_task raises "no running event loop"
     and would silently drop every single message. run_coroutine_threadsafe is the only
     correct call here; create_task stays as the fallback for the request-handler path."""
-    if not (_HAS_OPS and _ops.notify.enabled()):
+    if not _HAS_OPS:
         return
+    # Phase 2 payloads have their own delivery (one message, edited in place).
+    coro = (_ops_turnover_deliver(payload)
+            if str(payload.get("kind", "")).startswith("nudge") else _ops_deliver(payload))
     try:
         loop = getattr(bot, "loop", None)
         if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(_ops_deliver(payload), loop)
+            asyncio.run_coroutine_threadsafe(coro, loop)
             return
     except Exception as e:
         print("[ops] cross-thread delivery failed:", e)
     try:
-        asyncio.create_task(_ops_deliver(payload))
+        asyncio.create_task(coro)
     except RuntimeError:
         print("[ops] no event loop — message NOT delivered:", payload.get("kind"))
 
@@ -5615,6 +5626,237 @@ async def _ops_deliver(payload):
                 await ch.send(payload["text"])
     except Exception as e:
         print("[ops] deliver failed:", e)
+
+# ---------------- «القفل» phase 2 delivery: ONE message, edited in place ----------------
+
+class TurnoverNudgeView(discord.ui.View):
+    """Two buttons, zero typing. Static custom_ids so a press survives a redeploy; WHICH
+    turnover it belongs to is looked up from the message id in the database — the same idea
+    as the existing Submit-for-Review button reading its channel topic."""
+
+    def __init__(self, can_ack=True, upload_url=""):
+        super().__init__(timeout=None)
+        if can_ack:
+            self.add_item(discord.ui.Button(label="✅ جاهزة", style=discord.ButtonStyle.success,
+                                            custom_id="ouja_nudge_ready"))
+        elif upload_url:
+            # No photos yet, so «جاهزة» would be a lie. Offer the upload instead.
+            self.add_item(discord.ui.Button(label="📷 ارفع الصور",
+                                            style=discord.ButtonStyle.link, url=upload_url))
+        else:
+            self.add_item(discord.ui.Button(label="📷 ارفع الصور أول", disabled=True,
+                                            style=discord.ButtonStyle.secondary,
+                                            custom_id="ouja_nudge_need_photos"))
+        self.add_item(discord.ui.Button(label="⚠️ فيه مشكلة", style=discord.ButtonStyle.danger,
+                                        custom_id="ouja_nudge_problem"))
+
+async def _ops_nudge_interaction(interaction):
+    """The two buttons. Registered as a LISTENER rather than a bound view, so a press still
+    works after a redeploy when no view object exists in memory any more."""
+    try:
+        if not _HAS_OPS or interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id") or ""
+        if cid not in ("ouja_nudge_ready", "ouja_nudge_problem"):
+            return
+        mid = str(getattr(interaction.message, "id", "") or "")
+        who = str(interaction.user)
+        if cid == "ouja_nudge_ready":
+            res = await asyncio.to_thread(_ops.turnover.press_ready, mid, who)
+        else:
+            res = await asyncio.to_thread(_ops.turnover.press_problem, mid, who)
+        await interaction.response.send_message(
+            (res.get("message") if res.get("ok") else res.get("error")) or "تم", ephemeral=True)
+        if res.get("ok"):
+            try:            # job closed — retire the buttons on that same message
+                await interaction.message.edit(view=None)
+            except Exception:
+                pass
+    except Exception as e:
+        print("[ops.turnover] button error:", e)
+
+async def _ops_nudge_target(payload):
+    """Where the one message lives: the person's DM first, their «#اسم-اليوم» room second."""
+    did = payload.get("employee_did") or ""
+    if did:
+        try:
+            user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
+            if user is not None:
+                return user, "dm"
+        except Exception as e:
+            print("[ops.turnover] dm target failed:", e)
+    guild = bot.get_guild(GUILD_ID)
+    if guild is not None and payload.get("channel"):
+        ch = discord.utils.get(guild.text_channels, name=payload["channel"])
+        if ch is not None:
+            return ch, "channel"
+    return None, ""
+
+async def _ops_turnover_deliver(payload):
+    """op='send' posts a NEW message (a phone buzz — L3/L5, or the very first one);
+    op='edit' rewrites the message we already have."""
+    kind = payload.get("kind")
+    wid = payload.get("work_item_id")
+    try:
+        if kind == "nudge_ops":                      # L5 — the only line anyone else sees
+            guild = bot.get_guild(GUILD_ID)
+            if guild is not None and payload.get("ops_channel"):
+                cat = await get_category(guild)
+                ch = await ensure_channel(guild, payload["ops_channel"], cat)
+                if ch is not None:
+                    await ch.send(payload["ops_text"])
+            return
+        if kind in ("nudge_lead", "nudge_problem"):
+            if payload.get("lead_id"):
+                await _ops_dm(payload["lead_id"], payload.get("lead_text") or "")
+            return
+        if kind == "nudge_asleep":
+            if payload.get("lead_id"):
+                await _ops_dm(payload["lead_id"], payload.get("lead_text") or "")
+            tgt, _how = await _ops_nudge_target(payload)
+            if tgt is not None:
+                await tgt.send(payload.get("text") or "")
+            return
+        if kind != "nudge":
+            return
+
+        view = (TurnoverNudgeView(payload.get("can_ack", False), payload.get("upload_url", ""))
+                if payload.get("buttons") else None)
+
+        if payload.get("op") == "edit" and payload.get("message_id"):
+            try:
+                cid = payload.get("channel_id")
+                ch = bot.get_channel(int(cid)) if cid else None
+                if ch is None and cid:
+                    ch = await bot.fetch_channel(int(cid))
+                if ch is not None:
+                    msg = await ch.fetch_message(int(payload["message_id"]))
+                    await msg.edit(content=payload.get("text") or "", view=view)
+                    return
+            except Exception as e:
+                print("[ops.turnover] edit failed, falling back to a new message:", e)
+
+        tgt, how = await _ops_nudge_target(payload)
+        if tgt is None:
+            print("[ops.turnover] nobody to send to for", wid)
+            return
+        msg = await tgt.send(payload.get("text") or "", view=view)
+        await asyncio.to_thread(_ops.db.set_nudge_message, wid, how,
+                                getattr(msg.channel, "id", ""), msg.id)
+    except Exception as e:
+        print("[ops.turnover] deliver failed:", e)
+
+# ---------------- «القفل» phase 2: the turnover picture the ops package judges ----------------
+
+def _ops_turnover_key(ch):
+    """The stable turnover identity 'lid:YYYY-MM-DD' from a channel topic. Present on BOTH
+    the in-house OujaCT rooms and the legacy ones (sync_checkouts writes it too)."""
+    return parse_topic_oujact_key(getattr(ch, "topic", "") or "")
+
+def _ops_has_photos(work_item_id):
+    """Has ANY cleaning photo been uploaded for this unit+date? This is what makes «جاهزة»
+    pressable — an ack with no photos closes the loop on a lie."""
+    try:
+        lid_raw, date_iso = str(work_item_id).split(":", 1)
+        rid = _cleanproof_report_id(int(lid_raw), date_iso)
+        return bool(_cleanproof_report_photos(rid))
+    except Exception:
+        return False
+
+def _ops_checkin_map(day):
+    """{listing id -> earliest guest arrival datetime} for one day, from Hostaway. The whole
+    Phase 2 ladder hangs off this: a 20:00 arrival must not be nudged on a 15:00 schedule."""
+    out = {}
+    try:
+        rows = _ha_reservations_window("arrivalStartDate", "arrivalEndDate",
+                                       day.isoformat(), day.isoformat())
+    except Exception as e:
+        print("[ops.turnover] check-in fetch failed:", e)
+        return out
+    for r in rows or []:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        lid, a = r.get("listingMapId"), r.get("arrivalDate")
+        if not lid or not a:
+            continue
+        try:
+            cin = datetime.strptime(a[:10], "%Y-%m-%d").replace(
+                hour=min(parse_hour(r.get("checkInTime"), 15), 23), tzinfo=TZ)
+        except ValueError:
+            continue
+        if lid not in out or cin < out[lid]:
+            out[lid] = cin
+    return out
+
+def _ops_turnover_items():
+    """Every OPEN turnover room today — in-house and legacy alike — with the guest's real
+    check-in time, who is responsible, and whether photos exist yet.
+
+    Responsibility comes from the room's own `did:` when it has one, otherwise from the
+    Employee Calendar's coverage for that day. The backup for sleep-reassignment is the
+    least-loaded other person working today, from the same calendar."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return []
+    category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+    if category is None:
+        return []
+    today = now_riyadh().date()
+    checkins = _ops_checkin_map(today)
+    cover = _ops_cover_today(today)
+    items = []
+    for cat in _category_family(guild, category):
+        for ch in cat.text_channels:
+            topic = getattr(ch, "topic", "") or ""
+            key = _ops_turnover_key(ch)
+            if not key:
+                continue
+            try:
+                lid_raw, date_iso = key.split(":", 1)
+                lid = int(lid_raw)
+            except (TypeError, ValueError):
+                continue
+            done = "cleaning-review:1" in topic
+            did = parse_topic_did(topic) or ""
+            name, backup = cover.get(lid, ("", None))
+            items.append({
+                "work_item_id": key, "unit": ch.name, "date": date_iso,
+                "employee": name, "employee_did": did or _ops_did_for(name),
+                "checkin_at": checkins.get(lid),
+                "photos": _ops_has_photos(key), "done": done,
+                "backup": backup,
+            })
+    return items
+
+def _ops_did_for(name):
+    try:
+        return next((e["did"] for e in _ops.notify.employees() if e["name"] == name), "")
+    except Exception:
+        return ""
+
+def _ops_cover_today(day):
+    """{listing id -> (responsible name, backup {name, did})} from the Employee Calendar's
+    coverage for today — the same engine the roster page renders."""
+    out = {}
+    if not (_HAS_SCHEDULE and _HAS_OPS):
+        return out
+    try:
+        board = _schedule.routes.schedule_day(day.isoformat())
+        working = board.get("working") or []
+        loads = sorted(working, key=lambda w: w.get("load", 0))
+        for w in working:
+            others = [x for x in loads if x["id"] != w["id"]]
+            bk = others[0] if others else None
+            backup = ({"name": bk["name"], "did": _ops_did_for(bk["name"])} if bk else None)
+            for bucket in ("own", "coverage"):
+                for entry in (w.get(bucket) or []):
+                    apt = entry.get("apartment") if bucket == "coverage" else entry
+                    lid = (apt or {}).get("listing_id")
+                    if lid:
+                        out[int(lid)] = (w["name"], backup)
+    except Exception as e:
+        print("[ops.turnover] coverage unavailable:", e)
+    return out
 
 def _decor_notify(payload):
     """HOST.notify hook for «تنسيق الحفلات» — schedules the async post. Never raises into a
@@ -6483,6 +6725,23 @@ async def ops_ladder_loop():
                                                           "retired", "dryrun")})
     except Exception as e:
         print("[ops] ladder loop error:", e)
+
+@tasks.loop(minutes=2)
+async def ops_turnover_loop():
+    """«القفل» — the private turnover ladder. Every 2 minutes, because its steps are minutes
+    apart near the guest's arrival (T+20m, T+40m) and the L3 countdown refreshes every 10.
+    Each level is claimed in the database before it is sent, so a restart mid-pass cannot
+    double-nudge anybody."""
+    if not (_HAS_OPS and _ops.turnover.enabled()):
+        return
+    await bot.wait_until_ready()
+    try:
+        rep = await asyncio.to_thread(_ops.turnover.tick)
+        if rep.get("nudged") or rep.get("asleep"):
+            print("[ops.turnover] tick:", {k: rep.get(k) for k in
+                                           ("nudged", "asleep", "closed", "dryrun")})
+    except Exception as e:
+        print("[ops.turnover] loop error:", e)
 
 @tasks.loop(time=dt_time(hour=3, minute=0, tzinfo=TZ))
 async def business_snapshot_loop():
@@ -51728,6 +51987,8 @@ async def start_web_server():
                     "json_response": _json, "web": web, "tz": TZ, "now": now_riyadh,
                     "weekly_reports": _ops_weekly_reports,
                     "discord_ids": _ops_discord_ids,
+                    "turnover_items": _ops_turnover_items,   # «القفل» phase 2
+                    "has_photos": _ops_has_photos,
                     "public_base": _dispatch_base_url,   # env → auto-captured → site base
                     "notify": _ops_notify,
                 })
@@ -59012,6 +59273,12 @@ async def _api_promises_done(request):
 @bot.event
 async def on_ready():
     load_state()                       # restore seen/cards/escalations from the volume FIRST
+    if _HAS_OPS:
+        # «القفل» buttons are handled by a LISTENER, not a bound view, so a press still works
+        # on a message posted before the last redeploy.
+        if not getattr(bot, "_ops_nudge_listener", False):
+            bot.add_listener(_ops_nudge_interaction, "on_interaction")
+            bot._ops_nudge_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
@@ -59142,6 +59409,8 @@ async def on_ready():
         watchdog_loop.start()          # «الرقيب التشغيلي»: 30-min ops summary + critical pings
     if _HAS_OPS and _ops.notify.enabled() and not ops_ladder_loop.is_running():
         ops_ladder_loop.start()        # «نظام الالتزام»: weekly-report ladder (dry-run by default)
+    if _HAS_OPS and _ops.turnover.enabled() and not ops_turnover_loop.is_running():
+        ops_turnover_loop.start()      # «القفل»: private turnover nudges (dry-run by default)
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)

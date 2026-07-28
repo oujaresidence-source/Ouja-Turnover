@@ -18,7 +18,7 @@ password to answer it.
 import json
 import traceback
 
-from . import db, engine, notify, page
+from . import db, engine, notify, page, turnover
 from .host import HOST
 
 EDIT_ROLES = ("admin", "ops")
@@ -284,6 +284,7 @@ def state(period_key=None):
         "unreachable": db.unreachable_report(),
         "dry_log": db.dry_rows(200),
         "summary": notify.monthly_summary(month)["text"],
+        "turnover": turnover.state(),
     }
 
 
@@ -331,6 +332,16 @@ async def api_decide(request):
     b = await _body(request)
     return HOST.json_response(do_decide_appeal(b.get("appeal_id"), (b.get("action") or "").strip(),
                                                b.get("reason"), _actor(request)))
+
+
+async def api_turnover(request):
+    return HOST.json_response({"ok": True, **turnover.state(request.query.get("date"))})
+
+
+async def api_turnover_tick(request):
+    if not can_edit(request):
+        return _deny()
+    return HOST.json_response({"ok": True, "report": turnover.tick()})
 
 
 async def api_summary(request):
@@ -392,6 +403,8 @@ def register(app):
     g("/compliance", handle_compliance)
     g("/api/ops/state", _safe(api_state))
     g("/api/ops/summary", _safe(api_summary))
+    g("/api/ops/turnover", _safe(api_turnover))
+    p("/api/ops/turnover-tick", _safe(api_turnover_tick))
     p("/api/ops/tick", _safe(api_tick))
     p("/api/ops/excuse", _safe(api_excuse))
     p("/api/ops/identity", _safe(api_identity))

@@ -21,6 +21,15 @@ class _Host:
     discord_ids = None       # () -> {employee name: discord id}   from assignments.json
     public_base = None       # () -> 'https://…'  for the appeal link
 
+    # --- phase 2 «القفل» ---
+    # turnover_items() -> [{work_item_id:'<lid>:<date>', unit, date, employee, employee_did,
+    #                       checkin_at, photos: bool, done: bool,
+    #                       backup: {name, did}}]
+    # The whole picture bot.py alone can see: the open turnover rooms, the guest's real
+    # check-in time from Hostaway, and whether cleaning photos exist yet.
+    turnover_items = None
+    has_photos = None        # (work_item_id) -> bool   re-checked at the moment «جاهزة» is pressed
+
     # --- delivery ---
     # notify(payload) -> None. bot.py schedules the Discord work and then calls
     # ops.db.record_ladder(...) with the road that actually worked (dm | channel | lead |

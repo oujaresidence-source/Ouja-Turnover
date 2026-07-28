@@ -373,6 +373,48 @@ function appealsCard(d){
   return out + '</div>';
 }
 
+function turnoverCard(d){
+  var t = d.turnover || {};
+  var rows = t.rows || [];
+  var out = '<div class="card"><h2>تسليم الشقق اليوم · ' + esc(t.date || '') + '</h2>';
+  if (t.dryrun){
+    out += '<div class="hint" style="margin-bottom:10px">وضع التجربة — ما انرسل ولا تذكير.</div>';
+  }
+  if (!rows.length){
+    return out + '<div class="muted">ما فيه شقق مفتوحة اليوم.</div></div>';
+  }
+  out += '<div class="scroll"><table>'
+    + '<tr><th>الشقة</th><th>المسؤول</th><th>دخول الضيف</th><th>الحالة</th><th>التذكيرات</th></tr>';
+  for (var i = 0; i < rows.length; i++){
+    var r = rows[i];
+    var st = r.acked_at ? '<span class="pill p-ok">جاهزة</span>'
+           : (r.problem_at ? '<span class="pill p-warn">فيه مشكلة</span>'
+           : (r.asleep ? '<span class="pill p-wait">محوّلة (نايم)</span>'
+           : (r.closed ? '<span class="pill p-mute">مقفلة</span>'
+           : '<span class="pill p-wait">شغالة</span>')));
+    out += '<tr><td><b>' + esc(r.unit) + '</b></td>'
+        + '<td>' + esc(r.employee || '—')
+        + (r.reassigned_to ? ' <span class="muted">→ ' + esc(r.reassigned_to) + '</span>' : '')
+        + '</td>'
+        + '<td class="num">' + esc(r.checkin_at) + '</td>'
+        + '<td>' + st + '</td>'
+        + '<td class="muted num">' + esc((r.levels || []).join(' ')) + '</td></tr>';
+  }
+  out += '</table></div>';
+
+  var sig = t.staffing_signal || [];
+  if (sig.length){
+    out += '<div class="banner b-dry" style="margin-top:14px">'
+      + '👥 تحويلات ليلية آخر ٣٠ يوم (مؤشّر توظيف — <b>مو</b> مخالفة): ';
+    var parts = [];
+    for (var j = 0; j < sig.length; j++){
+      parts.push(esc(sig[j].employee) + ' (' + esc(sig[j].n) + ')');
+    }
+    out += parts.join(' · ') + '</div>';
+  }
+  return out + '</div>';
+}
+
 function logCard(d){
   if (!d.dryrun) return '';
   if (!d.dry_log.length){
@@ -405,6 +447,7 @@ function render(d){
   el('sub').textContent = 'التقرير الأسبوعي · الموعد ' + (d.due_at || '').replace('T', ' ');
   el('app').innerHTML = banner + hole
     + rosterTable(d)
+    + turnoverCard(d)
     + appealsCard(d)
     + warningsCard(d)
     + logCard(d)

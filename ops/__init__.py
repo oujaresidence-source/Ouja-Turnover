@@ -16,21 +16,24 @@ MONEY RULE
 Layout mirrors schedule/ and decor/:
     engine.py — PURE rules: multiplier, deadline, ladder clock, forgiveness, the verdict
     db.py     — ops_* tables inside the existing brain.db (one obligation = one warning, by UNIQUE)
-    notify.py — the ladder + the Arabic wording; delivery is HOST.notify, DRY-RUN by default
+    notify.py — phase 1 ladder + Arabic wording; delivery is HOST.notify, DRY-RUN by default
+    turnover.py — phase 2 «القفل»: check-in-anchored nudges, one message edited in place
     routes.py — /api/ops/* (login + admin/ops) and the token-gated appeal endpoints
     page.py   — /compliance (login) and /appeal/{token} (public, token, zero backslashes)
 """
 
-from . import engine, db, notify, routes, page  # noqa: F401
+from . import engine, db, notify, turnover, routes, page  # noqa: F401
 from .host import HOST, wire  # noqa: F401
 from .routes import register_routes  # noqa: F401
 
-__all__ = ["wire", "register_routes", "HOST", "engine", "db", "notify", "routes", "page"]
+__all__ = ["wire", "register_routes", "HOST", "engine", "db", "notify", "turnover",
+           "routes", "page"]
 
 
 def bootstrap():
     try:
         db._ensure()
-        print("[ops] ready: dryrun=%s enabled=%s" % (notify.dryrun(), notify.enabled()))
+        print("[ops] ready: warn-dryrun=%s enabled=%s · nudge-dryrun=%s enabled=%s"
+              % (notify.dryrun(), notify.enabled(), turnover.dryrun(), turnover.enabled()))
     except Exception as e:
         print("[ops] bootstrap error:", e)

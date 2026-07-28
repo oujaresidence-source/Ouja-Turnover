@@ -251,6 +251,109 @@ def can_reject(reason):
     return bool((reason or "").strip())
 
 
+# ================================================================== PHASE 2: «القفل»
+# Turnover nudges. ANCHORED TO THE GUEST'S CHECK-IN, never to the wall clock — a unit whose
+# guest arrives at 18:00 must not be nudged on the same schedule as one arriving at 14:00.
+#
+#     T−3h    L1  the employee, calm
+#     T−1h    L2  the employee, with buttons
+#     T−0     L3  the employee, refreshed every 10 min
+#     T+20m   L4  the shift lead, privately
+#     T+40m   L5  #غرفة-المراقبة — a guest is at the door; dignity yields to the guest
+#
+# ONE MESSAGE, EDITED IN PLACE. Escalation happens through CONTENT, not volume: 40 pings is
+# how people learn to mute the bot, and then the whole accountability suite dies silently and
+# nobody finds out for a month. A genuinely NEW message (which buzzes a phone) is reserved
+# for L3 and L5 only.
+
+NUDGE_LADDER = (("L1", -180), ("L2", -60), ("L3", 0), ("L4", 20), ("L5", 40))
+NUDGE_LEVELS = tuple(l for l, _ in NUDGE_LADDER)
+
+# Levels that may send a NEW message instead of editing the existing one.
+NUDGE_PUSH_LEVELS = ("L3", "L5")
+
+L3_REFRESH_MIN = 10          # while the guest is due, re-edit the countdown this often
+
+QUIET_START_DEFAULT = 0      # 00:00 Riyadh
+QUIET_END_DEFAULT = 6        # 06:00 Riyadh
+SLEEP_STRIKES = 2            # consecutive unacked nudges in the quiet window
+
+
+def nudge_steps(checkin_at):
+    """The full timetable for one turnover, from that booking's real check-in time."""
+    return [{"level": lv, "at": checkin_at + datetime.timedelta(minutes=mins), "minutes": mins}
+            for lv, mins in NUDGE_LADDER]
+
+
+def nudge_due_step(checkin_at, now, sent_levels=()):
+    """The single step that should fire now, or None.
+
+    Two rules, both about not making things worse:
+      * only the LATEST due level fires, so a bot that was down through L1 and L2 does not
+        machine-gun the backlog at somebody's phone;
+      * levels already sent form a HIGH-WATER MARK. This ladder only ever escalates — after
+        an L3 has gone out, an L2 that was skipped must never fire afterwards and tell a
+        person things just got calmer while a guest is standing at the door. (Phase 1's
+        weekly ladder deliberately behaves differently: there, a skipped level is still worth
+        sending because nothing has happened yet.)
+    """
+    sent = set(sent_levels or ())
+    steps = nudge_steps(checkin_at)
+    high = -1
+    for i, s in enumerate(steps):
+        if s["level"] in sent:
+            high = i
+    pending = [s for i, s in enumerate(steps)
+               if i > high and s["at"] <= now and s["level"] not in sent]
+    return pending[-1] if pending else None
+
+
+def nudge_is_push(level):
+    """True when this level is allowed to be a NEW message (a phone buzz) rather than a
+    silent edit of the one we already sent."""
+    return level in NUDGE_PUSH_LEVELS
+
+
+def l3_refresh_due(last_edit_at, now, every_min=L3_REFRESH_MIN):
+    """While at L3 the countdown is re-edited every 10 minutes — an EDIT, so no new
+    notification is produced."""
+    if last_edit_at is None:
+        return True
+    return now - last_edit_at >= datetime.timedelta(minutes=every_min)
+
+
+def in_quiet_window(now, start=QUIET_START_DEFAULT, end=QUIET_END_DEFAULT):
+    """Riyadh night hours. Handles a window that wraps past midnight."""
+    h = now.hour
+    if start == end:
+        return False
+    return (start <= h < end) if start < end else (h >= start or h < end)
+
+
+def sleep_reassign(unacked_in_quiet, in_quiet, strikes=SLEEP_STRIKES):
+    """Two consecutive unanswered nudges in the small hours mean the person is ASLEEP.
+
+    Being asleep at 3 AM is not misconduct. The unit is handed to the on-call backup and
+    NOBODY IS WARNED — repeated occurrences are a staffing signal for the owner, not a
+    disciplinary one. (Nothing in this module can produce a warning; the Phase 1 verdict
+    function is never called from the turnover path.)"""
+    return bool(in_quiet) and int(unacked_in_quiet or 0) >= strikes
+
+
+def can_ack(has_photos):
+    """«✅ جاهزة» is refused until cleaning photos exist for that unit and date.
+
+    An ack from a half-asleep person with no photos closes the loop on a lie, which is worse
+    than silence: it tells everyone the unit is ready when nobody has evidence it is."""
+    return bool(has_photos)
+
+
+def minutes_to(checkin_at, now):
+    """Signed minutes until check-in (negative once the guest is due). Used for the countdown
+    the message shows."""
+    return int(round((checkin_at - now).total_seconds() / 60.0))
+
+
 # ----------------------------------------------------------------- public summary
 
 def public_summary_counts(reports_done, reports_total, warnings_issued, warnings_voided,

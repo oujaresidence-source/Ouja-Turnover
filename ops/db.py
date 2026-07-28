@@ -118,6 +118,48 @@ CREATE TABLE IF NOT EXISTS ops_dryrun_log (
     detail     TEXT,
     payload    TEXT
 );
+-- ===================== PHASE 2 «القفل» — turnover nudges =====================
+-- Split the same way Phase 1 splits obligations/ladder_log: ops_nudge_items is the LIVE state
+-- of one turnover (crucially the id of the ONE message we keep editing), ops_nudges is the
+-- append-only record of which levels actually went out. Keeping message_id in the database
+-- rather than in memory is the lesson from the Musaed duplicate-spam incident: a redeploy
+-- must not make the bot forget it already has a message open and start a second one.
+CREATE TABLE IF NOT EXISTS ops_nudge_items (
+    work_item_id      TEXT PRIMARY KEY,     -- '<listing id>:YYYY-MM-DD' (the stable turnover key)
+    unit              TEXT,
+    date              TEXT,
+    employee          TEXT,
+    employee_did      TEXT,
+    checkin_at        TEXT,                 -- the GUEST's arrival, the anchor for every step
+    channel           TEXT,                 -- where the one message lives ('dm' or a channel name)
+    channel_id        TEXT,
+    message_id        TEXT,                 -- <<< the ONE message, edited in place
+    last_edit_at      TEXT,
+    acked_at          TEXT,
+    acked_by          TEXT,
+    problem_at        TEXT,
+    reassigned_to     TEXT,
+    reassigned_reason TEXT,
+    closed_at         TEXT,
+    created_at        TEXT
+);
+CREATE TABLE IF NOT EXISTS ops_nudges (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_item_id  TEXT NOT NULL,
+    employee      TEXT,
+    employee_did  TEXT,
+    level         TEXT NOT NULL,            -- L1..L5
+    sent_at       TEXT NOT NULL,
+    path          TEXT,                     -- dm | channel | lead | ops | failed | dryrun
+    acked_at      TEXT,
+    channel       TEXT,
+    message_id    TEXT,
+    reassigned_to     TEXT,
+    reassigned_reason TEXT,
+    UNIQUE(work_item_id, level)
+);
+CREATE INDEX IF NOT EXISTS idx_ops_nudge_item ON ops_nudges(work_item_id);
+CREATE INDEX IF NOT EXISTS idx_ops_nudge_msg  ON ops_nudge_items(message_id);
 CREATE INDEX IF NOT EXISTS idx_ops_ob_period  ON ops_obligations(period_key);
 CREATE INDEX IF NOT EXISTS idx_ops_ob_emp     ON ops_obligations(employee, period_key);
 CREATE INDEX IF NOT EXISTS idx_ops_warn_emp   ON ops_warnings(employee, status);
@@ -195,7 +237,8 @@ def counts():
     any other feature, creates nothing here."""
     out = {}
     for t in ("ops_obligations", "ops_warnings", "ops_appeals", "ops_free_passes",
-              "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity"):
+              "ops_commission_ledger", "ops_ladder_log", "ops_dryrun_log", "ops_identity",
+              "ops_nudge_items", "ops_nudges"):
         out[t] = (q1("SELECT COUNT(*) c FROM %s" % t) or {}).get("c", 0)
     return out
 
@@ -535,6 +578,144 @@ def move_appeal(aid, stage, sla_hours=24, outcome=None):
     execute("UPDATE ops_appeals SET stage=?, stage_due_at=?, outcome=COALESCE(?,outcome) WHERE id=?",
             (stage, due, outcome, int(aid)))
     return appeal(aid)
+
+
+# ================================================================== PHASE 2 «القفل»
+
+def nudge_item(work_item_id):
+    return q1("SELECT * FROM ops_nudge_items WHERE work_item_id=?", (work_item_id,))
+
+
+def nudge_item_by_message(message_id):
+    """The button click arrives with a message id and nothing else. This is how a press still
+    works after a redeploy: the link lives in the database, not in a view registered in
+    memory."""
+    if not message_id:
+        return None
+    return q1("SELECT * FROM ops_nudge_items WHERE message_id=?", (str(message_id),))
+
+
+def ensure_nudge_item(work_item_id, unit, date, employee, employee_did, checkin_at):
+    """Open the turnover's row once, then keep its live fields fresh. Never resets the
+    message id, the ack, or a reassignment — those are the state we are protecting."""
+    execute("INSERT OR IGNORE INTO ops_nudge_items"
+            "(work_item_id,unit,date,employee,employee_did,checkin_at,created_at)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (work_item_id, unit, date, employee, employee_did or "",
+             checkin_at if isinstance(checkin_at, str) else checkin_at.isoformat(timespec="seconds"),
+             now_iso()))
+    execute("UPDATE ops_nudge_items SET unit=?, checkin_at=?, employee=COALESCE(NULLIF(?,''),employee),"
+            " employee_did=COALESCE(NULLIF(?,''),employee_did) WHERE work_item_id=?",
+            (unit,
+             checkin_at if isinstance(checkin_at, str) else checkin_at.isoformat(timespec="seconds"),
+             employee or "", employee_did or "", work_item_id))
+    return nudge_item(work_item_id)
+
+
+def _stamp(at=None):
+    """The TICK's clock, not the wall clock. The L3 countdown refresh compares this value
+    against the tick's `now`; stamping it from a different clock makes the two disagree and
+    the message re-edits on every single pass."""
+    if at is None:
+        return now_iso()
+    return at if isinstance(at, str) else at.isoformat(timespec="seconds")
+
+
+def set_nudge_message(work_item_id, channel, channel_id, message_id, at=None):
+    execute("UPDATE ops_nudge_items SET channel=?, channel_id=?, message_id=?, last_edit_at=? "
+            "WHERE work_item_id=?",
+            (channel or "", str(channel_id or ""), str(message_id or ""), _stamp(at),
+             work_item_id))
+
+
+def touch_nudge_edit(work_item_id, at=None):
+    execute("UPDATE ops_nudge_items SET last_edit_at=? WHERE work_item_id=?",
+            (_stamp(at), work_item_id))
+
+
+def ack_nudge(work_item_id, by):
+    execute("UPDATE ops_nudge_items SET acked_at=?, acked_by=? WHERE work_item_id=? "
+            "AND acked_at IS NULL", (now_iso(), by or "", work_item_id))
+    execute("UPDATE ops_nudges SET acked_at=? WHERE work_item_id=? AND acked_at IS NULL",
+            (now_iso(), work_item_id))
+    return nudge_item(work_item_id)
+
+
+def flag_nudge_problem(work_item_id, by):
+    execute("UPDATE ops_nudge_items SET problem_at=?, acked_by=COALESCE(acked_by,?) "
+            "WHERE work_item_id=?", (now_iso(), by or "", work_item_id))
+    return nudge_item(work_item_id)
+
+
+def reassign_nudge(work_item_id, to_name, reason):
+    execute("UPDATE ops_nudge_items SET reassigned_to=?, reassigned_reason=? WHERE work_item_id=?",
+            (to_name or "", reason or "", work_item_id))
+    return nudge_item(work_item_id)
+
+
+def close_nudge(work_item_id):
+    execute("UPDATE ops_nudge_items SET closed_at=COALESCE(closed_at,?) WHERE work_item_id=?",
+            (now_iso(), work_item_id))
+
+
+def record_nudge(work_item_id, employee, employee_did, level, path, channel="", message_id="",
+                 at=None):
+    """Claim a level. UNIQUE(work_item_id, level) means a retry, a restart or a double tick
+    can never send the same level twice.
+
+    `at` is the tick's own clock, not the wall clock. The sleep-protection strike count reads
+    these timestamps back, so stamping them with a different clock than the one deciding the
+    ladder would make the two disagree — and a night reassignment that never fires is a
+    person nudged awake at 3 AM for nothing."""
+    execute("INSERT OR IGNORE INTO ops_nudges"
+            "(work_item_id,employee,employee_did,level,sent_at,path,channel,message_id)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (work_item_id, employee, employee_did or "", level,
+             at if isinstance(at, str) else (at.isoformat(timespec="seconds") if at else now_iso()),
+             path, channel or "", str(message_id or "")))
+
+
+def set_nudge_path(work_item_id, level, path, message_id=None):
+    if message_id is None:
+        execute("UPDATE ops_nudges SET path=? WHERE work_item_id=? AND level=?",
+                (path, work_item_id, level))
+    else:
+        execute("UPDATE ops_nudges SET path=?, message_id=? WHERE work_item_id=? AND level=?",
+                (path, str(message_id), work_item_id, level))
+
+
+def nudge_levels_sent(work_item_id):
+    return [r["level"] for r in
+            q("SELECT level FROM ops_nudges WHERE work_item_id=?", (work_item_id,))]
+
+
+def nudge_rows(work_item_id):
+    return q("SELECT * FROM ops_nudges WHERE work_item_id=? ORDER BY id", (work_item_id,))
+
+
+def unacked_nudges_in_window(work_item_id, since_iso):
+    """How many nudges have gone out for this turnover since a given moment with no answer —
+    the sleep-protection strike count."""
+    return len(q("SELECT id FROM ops_nudges WHERE work_item_id=? AND acked_at IS NULL "
+                 "AND sent_at>=?", (work_item_id, since_iso)))
+
+
+def open_nudge_items(limit=200):
+    return q("SELECT * FROM ops_nudge_items WHERE closed_at IS NULL "
+             "ORDER BY checkin_at LIMIT ?", (int(limit),))
+
+
+def nudge_items_for_date(date_iso, limit=300):
+    return q("SELECT * FROM ops_nudge_items WHERE date=? ORDER BY checkin_at LIMIT ?",
+             (date_iso, int(limit)))
+
+
+def sleep_reassignments(since_iso, limit=200):
+    """Repeated night reassignments are a STAFFING signal for the owner's screen — never a
+    disciplinary one."""
+    return q("SELECT employee, COUNT(*) n, MAX(created_at) last_at FROM ops_nudge_items "
+             "WHERE reassigned_reason='reassigned_asleep' AND created_at>=? "
+             "GROUP BY employee ORDER BY n DESC LIMIT ?", (since_iso, int(limit)))
 
 
 # ------------------------------------------------------------------ dry-run log
