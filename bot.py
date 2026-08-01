@@ -18374,9 +18374,9 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div class="ph-t">دراسة التغطية — للقرار مو للمتابعة اليومية</div>
           <div class="ph-b">
             الخريطة تبيّن الشقق اللي فوق بعض في نفس العمارة — هذي أرخص شقق تنظّفها لأن ما فيها تنقّل.
-            <b>مهم:</b> النظام يسجّل وقت <b>انتهاء</b> التنظيف فقط، ما فيه زر «بدأت».
-            فحساب عدد الموظفين مبني على <b>زمن الدورة</b> (من شقة خالصة للي بعدها) — وهو أصدق رقم للقرار،
-            لأنه يشمل التنظيف والطريق والمواقف والطلعة.
+            <b>مهم:</b> النظام يسجّل وقت <b>انتهاء</b> التنظيف فقط، ما فيه زر «بدأت»، والفريق غالباً يضغط
+            «تم» لعدة شقق مرة وحدة. لذلك حساب عدد الموظفين مبني على <b>عدد الشقق للشخص في اليوم</b> — رقم
+            مقاس فعلياً وما يتأثر بطريقة الضغط. زمن الدورة معروض للمتابعة فقط، مو أساس للقرار.
           </div>
         </div>
 
@@ -28952,7 +28952,7 @@ function renderCoverage(){
     {v:safeNum(u.in_house), l:ar?'تنظّفها أوجا':'Cleaned by OujaCT', s:ar?'فريقنا الداخلي':'our in-house team'},
     {v:safeNum(u.third_party), l:ar?'شركات خارجية':'Third-party', s:ar?('في '+safeNum(cl.multi)+' عمارة مشتركة'):('across '+safeNum(cl.multi)+' shared buildings')},
     {v:oj.per_day_avg!=null?oj.per_day_avg:'—', l:ar?'شقق/يوم لأوجا':'OujaCT per day', s:oj.started_on?(ar?('من '+oj.started_on):('since '+oj.started_on)):'—'},
-    {v:_covMin(cy.median_min), l:ar?'زمن الدورة (وسيط)':'Cycle time (median)', s:ar?'شقة لِشقة':'finish to finish'}
+    {v:((s.throughput||{}).median==null?'—':(s.throughput||{}).median), l:ar?'شقق للشخص باليوم':'Per person per day', s:ar?'المقاس فعلياً · أساس الحساب':'measured · basis of the model'}
   ].map(function(k){
     return '<div class="kpi"><div class="kpi-val">'+esc(String(k.v))+'</div>'
       + '<div class="kpi-lbl">'+esc(k.l)+'</div>'
@@ -28973,32 +28973,37 @@ function _covCapacityCard(s){
     return '<div class="card">'+head+emptyState(ar?'ما فيه بيانات كافية':'Not enough data yet',
       cap.reason||(ar?'نحتاج أيام أكثر من سجل أوجا عشان نحسب زمن الدورة.':'We need more OujaCT log days to compute cycle time.'),'🧮')+'</div>';
   }
+  var thr = s.throughput||{};
   var rows = [
     [ar?'شقق تحتاج تنظيف باليوم':'Apartments needing a clean per day', cap.demand_per_day],
-    [ar?'زمن الدورة المستخدم':'Cycle time used', _covMin(cap.cycle_used_min)],
-    [ar?'ساعات اليوم':'Working day', Math.round(safeNum(cap.workday_min)/60)+(ar?' ساعات':'h')],
-    [ar?'شقق للشخص باليوم':'Apartments per person per day', cap.units_per_person_day],
+    [ar?'شقق للشخص باليوم (مقاسة)':'Apartments per person per day (measured)', cap.units_per_person_day],
     [ar?'العدد المطلوب':'People needed', cap.people_needed],
     [ar?'موجود حالياً':'Working today', cap.current_people],
     [ar?'المطلوب توظيفه':'To hire', cap.hire]
   ];
   var body = '<div style="overflow-x:auto"><table class="data"><tbody>'
     + rows.map(function(r,i){
-        var strong = (i>=4) ? ' style="font-weight:700"' : '';
+        var strong = (i>=2) ? ' style="font-weight:700"' : '';
         return '<tr'+strong+'><td>'+esc(r[0])+'</td><td class="num strong">'+esc(String(r[1]==null?'—':r[1]))+'</td></tr>';
       }).join('')
     + '</tbody></table></div>';
+  var basis = (cap.basis==='observed')
+    ? (ar ? ('الرقم مبني على المعدل اليومي المقاس فعلياً: وسيط '+esc(String(thr.median))+' شقة للشخص في اليوم، من '+safeNum(thr.n)+' يوم عمل مسجّل. هذا الرقم ما يتأثر بطريقة ضغط زر «تم».')
+          : ('Built on the measured day rate: a median of '+esc(String(thr.median))+' apartments per person per day across '+safeNum(thr.n)+' recorded working days. This is unaffected by how the done button is pressed.'))
+    : (ar ? ('ما فيه معدل يومي مقاس، فاستخدمنا زمن الدورة '+_covMin(cap.cycle_used_min)+' — أقل ثقة.')
+          : ('No measured day rate, so cycle time '+_covMin(cap.cycle_used_min)+' was used instead — lower confidence.'));
+  var batchWarn = safeNum(cy.batched_pct) >= 20
+    ? (ar ? (' <b>تنبيه:</b> '+cy.batched_pct+'% من التنظيفات مسجّلة على دفعات (أقل من '+safeNum(cy.min_gap_min)+' دقايق بين وحدة والثانية) — يعني الفريق يضغط «تم» لعدة شقق مرة وحدة. لذلك زمن الدورة ما ينفع للقرار، وما بنينا عليه.')
+          : (' <b>Note:</b> '+cy.batched_pct+'% of finishes are logged in batches (under '+safeNum(cy.min_gap_min)+' minutes apart), meaning the team presses done for several apartments at once. Cycle time is therefore not decision-grade and is not used here.'))
+    : '';
+  var dem = (cap.demand_source==='hostaway_30d')
+    ? '' : (ar ? ' الطلب مُقدّر من السجل لأن رقم هوستاواي ما توفّر'+(cap.demand_note?(' ('+esc(cap.demand_note)+')'):'')+'.'
+               : ' Demand is estimated from the log because the Hostaway figure was unavailable'+(cap.demand_note?(' ('+esc(cap.demand_note)+')'):'')+'.');
   var note = '<div class="page-help" style="margin-top:12px"><div class="ph-t">'
     + (ar?'على أي أساس هذا الرقم':'What this number rests on')+'</div><div class="ph-b">'
-    + (ar
-      ? ('زمن الدورة وسيط '+_covMin(cy.median_min)+' من '+safeNum(cy.n)+' انتقالة فعلية'
-         + (safeNum(cy.excluded)?(' (استبعدنا '+safeNum(cy.excluded)+' فجوة أطول من '+safeNum(cy.max_gap_min)+' دقيقة — غداء أو وردية ثانية)'):'')
-         + '. الوسيط مو المتوسط عشان يوم واحد غريب ما يحرّك القرار.'
-         + ' زمن التصوير وسيطه '+_covMin(pt.median_min)+' — هذا وقت التصوير مو وقت التنظيف، ما بنينا عليه شيء.')
-      : ('Median cycle time '+_covMin(cy.median_min)+' from '+safeNum(cy.n)+' real hops'
-         + (safeNum(cy.excluded)?(' ('+safeNum(cy.excluded)+' gaps longer than '+safeNum(cy.max_gap_min)+' min excluded as breaks or second shifts)'):'')
-         + '. Median not mean, so one odd day cannot move the decision.'
-         + ' Photo-session median is '+_covMin(pt.median_min)+' — that is photographing, not cleaning, and nothing is built on it.'))
+    + basis + batchWarn + dem
+    + (ar ? (' زمن التصوير وسيطه '+_covMin(pt.median_min)+' — وقت تصوير مو وقت تنظيف، ما بنينا عليه شيء.')
+          : (' Photo-session median is '+_covMin(pt.median_min)+' — photographing, not cleaning, and nothing is built on it.'))
     + '</div></div>';
   return '<div class="card">'+head+body+note+'</div>';
 }

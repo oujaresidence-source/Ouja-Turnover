@@ -254,6 +254,24 @@ class TestCycleStats(unittest.TestCase):
         self.assertIsNone(s["median_min"])
         self.assertEqual(s["n"], 0)
 
+    def test_batched_finishes_excluded_and_counted(self):
+        # Cleaners submit several apartments in one burst, so sub-minute gaps are two
+        # records written together — NOT a work cycle. This is what made the live page
+        # report a 1-minute cycle and 480 apartments per person per day.
+        s = E.cycle_stats([{"gaps": [1, 1, 0, 2, 40, 50]}], min_gap_min=5)
+        self.assertEqual(s["batched"], 4)
+        self.assertEqual(s["n"], 2)
+        self.assertEqual(s["median_min"], 45)
+
+    def test_batched_share_is_reported(self):
+        s = E.cycle_stats([{"gaps": [1, 1, 1, 60]}], min_gap_min=5)
+        self.assertEqual(s["batched_pct"], 75.0)
+
+    def test_all_batched_gives_no_cycle_rather_than_a_fake_one(self):
+        s = E.cycle_stats([{"gaps": [1, 1, 1]}], min_gap_min=5)
+        self.assertIsNone(s["median_min"])
+        self.assertEqual(s["batched"], 3)
+
     def test_quartiles(self):
         s = E.cycle_stats([{"gaps": [10, 20, 30, 40, 50, 60, 70, 80]}])
         self.assertEqual(s["p25_min"], 25)
@@ -262,7 +280,50 @@ class TestCycleStats(unittest.TestCase):
 
 # ---------------------------------------------------------------- capacity
 
+class TestThroughput(unittest.TestCase):
+    """Apartments per person per DAY. Immune to batched button presses, because it
+    counts a whole day — which is exactly why the head count rests on it."""
+
+    def test_median_of_person_days(self):
+        rows = [{"count": 4}, {"count": 6}, {"count": 5}]
+        s = E.throughput_stats(rows)
+        self.assertEqual(s["median"], 5)
+        self.assertEqual(s["n"], 3)
+
+    def test_p75_reported_for_the_optimistic_view(self):
+        rows = [{"count": c} for c in (2, 4, 6, 8)]
+        s = E.throughput_stats(rows)
+        self.assertEqual(s["median"], 5)
+        self.assertEqual(s["p75"], 7)
+
+    def test_empty_gives_none(self):
+        s = E.throughput_stats([])
+        self.assertIsNone(s["median"])
+        self.assertEqual(s["n"], 0)
+
+
 class TestCapacityModel(unittest.TestCase):
+    def test_observed_throughput_is_preferred_over_cycle_time(self):
+        # Both available: the observed day rate wins, because batching corrupts cycles.
+        m = E.capacity_model(units_per_person_day=5, cycle_median_min=1,
+                             workday_min=480, demand_per_day=20, current_people=3)
+        self.assertEqual(m["units_per_person_day"], 5)
+        self.assertEqual(m["basis"], "observed")
+        self.assertEqual(m["people_needed"], 4)
+        self.assertEqual(m["hire"], 1)
+
+    def test_falls_back_to_cycle_when_no_observed_rate(self):
+        m = E.capacity_model(units_per_person_day=None, cycle_median_min=45,
+                             workday_min=480, demand_per_day=40, current_people=0)
+        self.assertEqual(m["basis"], "cycle")
+        self.assertEqual(m["units_per_person_day"], 10)
+
+    def test_neither_basis_refuses_to_guess(self):
+        m = E.capacity_model(units_per_person_day=None, cycle_median_min=None,
+                             demand_per_day=40)
+        self.assertIsNone(m["people_needed"])
+        self.assertTrue(m["reason"])
+
     def test_straightforward_headcount(self):
         # 45 min/apartment, 8h day = 480 min -> 10.6 -> 10 apartments per person.
         # 40 apartments/day of demand -> 4 people.
@@ -398,6 +459,35 @@ class TestStudy(unittest.TestCase):
         s = E.study(listings=[], guide_units=[], teams=[], status_log=log, reports=[],
                     photos=[], since="2026-07-01")
         self.assertEqual(s["oujact"]["total_cleans"], 1)
+
+    def test_demand_estimate_can_never_exceed_the_apartment_count(self):
+        # The live page reported 94.8 apartments needing a clean per day against 71
+        # apartments — an impossible number from scaling the observed rate up.
+        listings = [{"id": i, "internal_name": "U%d" % i, "active": True,
+                     "cleaning_team": "team-1" if i <= 3 else ""} for i in range(1, 21)]
+        log = []
+        for d in range(5):
+            day = "2026-07-0%d" % (d + 1)
+            for k in range(18):
+                log.append({"lid": k + 1, "date": day, "action": "done",
+                            "ts": "%sT%02d:00:00" % (day, 8 + k % 12), "by": "a"})
+        s = E.study(listings=listings, guide_units=[], teams=[{"id": "team-1", "name": "OujaCT"}],
+                    status_log=log, reports=[], photos=[], in_house_team_ids={"team-1"})
+        self.assertLessEqual(s["capacity"]["demand_per_day"], s["units"]["total"])
+
+    def test_geo_key_falls_back_to_the_address_when_there_is_no_pin(self):
+        # 63 of 71 live apartments had an address but no map link — with no fallback
+        # there was nothing for the locate button to resolve.
+        listings = [{"id": 1, "internal_name": "U", "active": True,
+                     "address": "RRHC3169, 3169 Prince Faisal Ibn Abdulrahman"}]
+        u = E.build_units(listings, [], [])[0]
+        self.assertEqual(u["geo_key"], "RRHC3169, 3169 Prince Faisal Ibn Abdulrahman")
+
+    def test_geo_key_prefers_the_map_link(self):
+        listings = [{"id": 1, "internal_name": "U", "active": True,
+                     "address": "somewhere", "maps_link": "https://maps.app.goo.gl/abc"}]
+        u = E.build_units(listings, [], [])[0]
+        self.assertEqual(u["geo_key"], "https://maps.app.goo.gl/abc")
 
     def test_counts_split_in_house_versus_third_party(self):
         listings = [{"id": 1, "internal_name": "A", "active": True, "cleaning_team": "team-1"},

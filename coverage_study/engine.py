@@ -27,6 +27,10 @@ UNKNOWN_PERSON = "غير معروف"
 # A gap longer than this is lunch, a shift change, or a drive across town — not the
 # cost of one apartment. Excluded from the median, but always COUNTED and reported.
 DEFAULT_MAX_GAP_MIN = 180
+# A gap SHORTER than this is a batched submission: the cleaner pressed «تم» for several
+# apartments in one burst. Also excluded, also counted. Ignoring this produced a
+# 1-minute "cycle time" on live data (2026-08-02).
+DEFAULT_MIN_GAP_MIN = 5
 
 # Reports that never reached a submit still count as done if they carry one of these.
 DONE_STATUSES = frozenset((
@@ -261,72 +265,120 @@ def _median(xs):
     return round(s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0, 1)
 
 
-def cycle_stats(rows, max_gap_min=DEFAULT_MAX_GAP_MIN):
+def cycle_stats(rows, max_gap_min=DEFAULT_MAX_GAP_MIN, min_gap_min=DEFAULT_MIN_GAP_MIN):
     """Pooled cycle time across every work day.
 
-    Median, not mean: one 4-hour outlier should not move the hiring decision. Long
-    gaps are excluded from the maths but the excluded COUNT is always returned — a
-    silently trimmed sample is how you end up under-hiring.
+    Two exclusions, both counted and reported — a silently trimmed sample is how you
+    end up under-hiring:
+
+      * gaps ABOVE max_gap_min  — lunch, a shift change, a drive across town.
+      * gaps BELOW min_gap_min  — BATCHED submissions. Cleaners press «تم» for several
+        apartments in one burst, so those records are seconds apart. They are two rows
+        written together, not two apartments cleaned back to back. Counting them made
+        the live page report a 1-minute cycle and 480 apartments per person per day.
+
+    When most of the sample is batched this returns median_min=None rather than a
+    tidy-looking fiction. Capacity should then come from observed day rates instead
+    (throughput_stats) — see capacity_model.
     """
-    kept, excluded = [], 0
+    kept, excluded, batched = [], 0, 0
     for r in rows or []:
         for g in r.get("gaps") or []:
-            if g is not None and g <= max_gap_min:
-                kept.append(g)
-            else:
+            if g is None:
+                continue
+            if g < min_gap_min:
+                batched += 1
+            elif g > max_gap_min:
                 excluded += 1
+            else:
+                kept.append(g)
+    total = len(kept) + excluded + batched
+    base = {"excluded": excluded, "batched": batched,
+            "batched_pct": round(batched * 100.0 / total, 1) if total else 0.0,
+            "max_gap_min": max_gap_min, "min_gap_min": min_gap_min}
     if not kept:
-        return {"median_min": None, "mean_min": None, "p25_min": None, "p75_min": None,
-                "n": 0, "excluded": excluded, "max_gap_min": max_gap_min}
+        base.update({"median_min": None, "mean_min": None, "p25_min": None,
+                     "p75_min": None, "n": 0})
+        return base
     s = sorted(kept)
     half = len(s) // 2
-    return {
+    base.update({
         "median_min": _median(s),
         "mean_min": round(sum(s) / float(len(s)), 1),
         "p25_min": _median(s[:half]) if half else _median(s),
         "p75_min": _median(s[-half:]) if half else _median(s),
         "n": len(s),
-        "excluded": excluded,
-        "max_gap_min": max_gap_min,
+    })
+    return base
+
+
+def throughput_stats(rows):
+    """Apartments finished per person per DAY, straight from the work-day rows.
+
+    This is the honest basis for a head count on this data. Batched button presses
+    distort every gap-based measure, but they cannot distort a whole-day total — the
+    apartments still got cleaned that day, whenever the button was pressed.
+
+    Median (not mean, not peak) so one heroic day cannot inflate the plan.
+    """
+    counts = sorted(int(r.get("count") or 0) for r in (rows or []) if r.get("count"))
+    if not counts:
+        return {"median": None, "p75": None, "mean": None, "n": 0}
+    half = len(counts) // 2
+    return {
+        "median": _median(counts),
+        "p75": _median(counts[-half:]) if half else _median(counts),
+        "mean": round(sum(counts) / float(len(counts)), 1),
+        "n": len(counts),
     }
 
 
 # ------------------------------------------------------------------ capacity
 
-def capacity_model(cycle_median_min, workday_min=480, demand_per_day=0,
-                   current_people=0, cluster_saving_pct=0):
+def capacity_model(units_per_person_day=None, cycle_median_min=None, workday_min=480,
+                   demand_per_day=0, current_people=0, cluster_saving_pct=0):
     """How many cleaners it takes to cover `demand_per_day` apartments.
 
-    Built on cycle time (finish-to-finish), which already contains the driving and the
-    stairs. Head count always rounds UP — you cannot hire 3.1 people.
+    PREFERS the OBSERVED apartments-per-person-per-day rate. That is what this log can
+    actually measure: cleaners submit in batches, so every gap-based figure is corrupted,
+    but a whole-day total is not (2026-08-02 — a 1-minute "cycle" produced a nonsense
+    480 apartments per person per day on live data).
+
+    Falls back to deriving a rate from cycle time only when no observed rate exists, and
+    says which basis it used. Head count always rounds UP — you cannot hire 3.1 people.
     """
-    if not cycle_median_min or cycle_median_min <= 0:
-        return {"units_per_person_day": None, "people_needed": None, "hire": None,
-                "cycle_used_min": None, "workday_min": workday_min,
-                "demand_per_day": demand_per_day, "current_people": current_people,
-                "cluster_saving_pct": cluster_saving_pct,
-                "reason": "لا توجد بيانات كافية لحساب زمن الدورة / not enough cycle-time data yet"}
     saving = max(0.0, min(60.0, float(cluster_saving_pct or 0)))
-    cycle = float(cycle_median_min) * (1.0 - saving / 100.0)
-    per_person = int(workday_min // cycle) if cycle > 0 else 0
+    base = {"workday_min": workday_min, "demand_per_day": demand_per_day,
+            "current_people": current_people, "cluster_saving_pct": saving,
+            "cycle_used_min": None, "basis": "", "reason": ""}
+
+    per_person, basis, cycle_used = 0, "", None
+    if units_per_person_day and float(units_per_person_day) > 0:
+        per_person = int(math.floor(float(units_per_person_day) * (1.0 + saving / 100.0)))
+        basis, cycle_used = "observed", None
+    elif cycle_median_min and float(cycle_median_min) > 0:
+        cycle = float(cycle_median_min) * (1.0 - saving / 100.0)
+        per_person = int(workday_min // cycle) if cycle > 0 else 0
+        basis, cycle_used = "cycle", round(cycle, 1)
+    else:
+        base.update({"units_per_person_day": None, "people_needed": None, "hire": None,
+                     "reason": ("لا يوجد أساس كافٍ للحساب — لا معدل يومي ولا زمن دورة سليم / "
+                                "no basis yet — neither an observed day rate nor a usable cycle time")})
+        return base
+
+    base.update({"basis": basis, "cycle_used_min": cycle_used})
     if per_person <= 0:
-        return {"units_per_person_day": 0, "people_needed": None, "hire": None,
-                "cycle_used_min": round(cycle, 1), "workday_min": workday_min,
-                "demand_per_day": demand_per_day, "current_people": current_people,
-                "cluster_saving_pct": saving,
-                "reason": "زمن الدورة أطول من يوم العمل / cycle time exceeds the working day"}
+        base.update({"units_per_person_day": 0, "people_needed": None, "hire": None,
+                     "reason": ("المعدل المقاس أقل من شقة في اليوم / "
+                                "the measured rate is under one apartment a day")})
+        return base
     needed = int(math.ceil(float(demand_per_day) / per_person)) if demand_per_day else 0
-    return {
+    base.update({
         "units_per_person_day": per_person,
         "people_needed": needed,
         "hire": max(0, needed - int(current_people or 0)),
-        "cycle_used_min": round(cycle, 1),
-        "workday_min": workday_min,
-        "demand_per_day": demand_per_day,
-        "current_people": current_people,
-        "cluster_saving_pct": saving,
-        "reason": "",
-    }
+    })
+    return base
 
 
 # ------------------------------------------------------------------ units
@@ -369,6 +421,7 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
                     lat, lng, src = ll[0], ll[1], tag
                     break
         tid = str(rec.get("cleaning_team") or "")
+        link = (rec.get("maps_link") or g.get("map_link") or "")
         out.append({
             "lid": lid,
             "name": rec.get("internal_name") or rec.get("public_name") or ("unit-%d" % lid),
@@ -377,7 +430,10 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
             "lat": lat, "lng": lng,
             "coord_source": src,
             "has_location": lat is not None and lng is not None,
-            "map_link": (rec.get("maps_link") or g.get("map_link") or ""),
+            "map_link": link,
+            # What the geocoder should look up. Most live units have a street address but
+            # NO map pin, so without this fallback there is nothing to resolve for them.
+            "geo_key": link or (rec.get("address") or ""),
             "guide_slug": g.get("slug") or "",
             "team_id": tid,
             "team_name": team_name.get(tid, ""),
@@ -442,15 +498,22 @@ def study(listings, guide_units, teams, status_log, reports, photos,
     days_worked = len({e["date"] for e in events})
     active_people = len(per_person) if per_person else 0
     if current_people is None:
-        # Busiest single day is a fairer "how many we actually run" than the roster.
-        current_people = max([d["people"] for d in daily], default=0)
-    if demand_per_day is None:
-        # Fallback only. routes.py passes the real Hostaway turnover rate instead.
-        obs = (len(events) / float(days_worked)) if days_worked else 0
-        covered = len([u for u in units if u["in_house"]]) or 1
-        demand_per_day = round(obs * (len(units) / float(covered)), 1) if obs else 0
+        # TYPICAL day, not the busiest — one all-hands day should not become the baseline.
+        current_people = int(_median([d["people"] for d in daily]) or 0)
 
-    cap = capacity_model(cyc["median_min"], workday_min=workday_min,
+    thr = throughput_stats(rows)
+
+    if demand_per_day is None:
+        # Fallback only — routes.py passes the real Hostaway checkout rate instead.
+        # HARD CAP at the apartment count: an estimate of 94.8 cleans/day against 71
+        # apartments is impossible, and scaling the observed rate up by
+        # total/in-house produced exactly that on live data (2026-08-02).
+        obs = round(len(events) / float(days_worked), 1) if days_worked else 0
+        demand_per_day = min(obs, float(len(units))) if units else obs
+
+    cap = capacity_model(units_per_person_day=thr["median"],
+                         cycle_median_min=cyc["median_min"],
+                         workday_min=workday_min,
                          demand_per_day=demand_per_day, current_people=current_people)
 
     stacked = sum(c["size"] for c in clusters if c["size"] > 1)
@@ -484,6 +547,7 @@ def study(listings, guide_units, teams, status_log, reports, photos,
             "work_days": rows,
         },
         "cycle": cyc,
+        "throughput": thr,
         "photo_time": {
             "median_min": _median(photo_mins),
             "n": len(photo_mins),

@@ -93,8 +93,10 @@ def _build(request_params):
         units=units,
     )
     s["geo"] = {"filled_from_cache": filled, "cached_total": len(cache),
-                "unresolved": [u["map_link"] for u in units
-                               if not u["has_location"] and u.get("map_link")]}
+                "pending": len([u for u in units
+                                if not u["has_location"] and u.get("geo_key")]),
+                "nothing_to_resolve": len([u for u in units
+                                           if not u["has_location"] and not u.get("geo_key")])}
     return s
 
 
@@ -112,22 +114,29 @@ async def api_study(request):
     }
     s = await asyncio.to_thread(_build, params)
 
-    # Real turnover demand from Hostaway beats the engine's fallback estimate.
+    # Real checkout demand from Hostaway beats the engine's capped fallback estimate.
+    # Whatever happens is REPORTED — a silent fallback to the estimate is how the page
+    # ended up showing an impossible 94.8 cleans/day (2026-08-02).
     if params["demand"] is None and callable(getattr(HOST, "turnovers", None)):
         try:
             end = datetime.date.today()
             start = end - datetime.timedelta(days=29)
             n = await asyncio.to_thread(HOST.turnovers, start.isoformat(), end.isoformat())
             if n:
-                per_day = round(float(n) / 30.0, 1)
                 s["capacity"] = engine.capacity_model(
-                    s["cycle"]["median_min"], workday_min=params["workday_min"],
-                    demand_per_day=per_day,
+                    units_per_person_day=(s.get("throughput") or {}).get("median"),
+                    cycle_median_min=s["cycle"]["median_min"],
+                    workday_min=params["workday_min"],
+                    demand_per_day=round(float(n) / 30.0, 1),
                     current_people=s["capacity"].get("current_people") or 0)
                 s["capacity"]["demand_source"] = "hostaway_30d"
+                s["capacity"]["demand_note"] = "%d checkouts in 30 days" % n
+            else:
+                s["capacity"]["demand_note"] = "Hostaway returned no checkouts for the window"
         except Exception as e:
-            s["capacity"]["demand_note"] = "Hostaway demand unavailable: %s" % str(e)[:120]
+            s["capacity"]["demand_note"] = "Hostaway demand unavailable: %s" % str(e)[:160]
     s["capacity"].setdefault("demand_source", "estimated_from_log")
+    s["capacity"].setdefault("demand_note", "")
     s["generated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     return _json({"ok": True, "study": s})
 
@@ -154,7 +163,7 @@ async def api_geo(request):
                                    _in_house_ids(teams))
         cache = geo.load_cache()
         geo.apply_to_units(units, cache)
-        links = [u["map_link"] for u in units if not u["has_location"] and u.get("map_link")]
+        links = [u["geo_key"] for u in units if not u["has_location"] and u.get("geo_key")]
         key = call("maps_key") or ""
         return geo.resolve_missing(links, api_key=key,
                                    batch=_int(request, "batch", geo.DEFAULT_BATCH, 1, 60))

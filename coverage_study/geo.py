@@ -56,8 +56,37 @@ def _parse_effective(url):
     return addr, None
 
 
+def _geocode(addr, api_key, session, out):
+    """Street address -> coordinates via Google. Mutates and returns `out`."""
+    if not api_key:
+        out["error"] = "address only — no Maps key to geocode with"
+        return out
+    try:
+        g = session.get("https://maps.googleapis.com/maps/api/geocode/json",
+                        params={"address": addr, "key": api_key, "region": "sa"}, timeout=20)
+        data = g.json()
+    except Exception as e:
+        out["error"] = "geocode failed: %s" % str(e)[:120]
+        return out
+    if (data.get("status") or "") != "OK" or not data.get("results"):
+        out["error"] = "geocode: %s" % (data.get("status") or "no result")
+        return out
+    loc = ((data["results"][0].get("geometry") or {}).get("location") or {})
+    if loc.get("lat") is None or loc.get("lng") is None:
+        out["error"] = "geocode returned no location"
+        return out
+    out.update(lat=float(loc["lat"]), lng=float(loc["lng"]),
+               address=data["results"][0].get("formatted_address") or addr,
+               source="geocode")
+    return out
+
+
 def resolve_link(url, api_key="", session=None):
-    """One map link -> {lat, lng, address, source, error}. Network. Call off the loop."""
+    """One target -> {lat, lng, address, source, error}. Network. Call off the loop.
+
+    The target is EITHER a Google Maps link OR a plain street address — most live
+    apartments have an address on the listing but no pin, so both must work.
+    """
     from . import engine
     out = {"lat": None, "lng": None, "address": "", "source": "", "error": "",
             "resolved_at": _now(), "link": url}
@@ -74,6 +103,15 @@ def resolve_link(url, api_key="", session=None):
         return out
 
     s = session or requests
+
+    # Not a URL at all → it is an address; skip the redirect hop entirely.
+    if not str(url or "").lower().startswith(("http://", "https://")):
+        out["address"] = str(url or "")
+        if not out["address"].strip():
+            out["error"] = "nothing to resolve"
+            return out
+        return _geocode(out["address"], api_key, s, out)
+
     try:
         r = s.get(url, allow_redirects=True, timeout=20, headers={"User-Agent": UA})
         effective = r.url or ""
@@ -89,28 +127,7 @@ def resolve_link(url, api_key="", session=None):
     if not addr:
         out["error"] = "no address in resolved link"
         return out
-    if not api_key:
-        out["error"] = "address only — no Maps key to geocode with"
-        return out
-
-    try:
-        g = s.get("https://maps.googleapis.com/maps/api/geocode/json",
-                  params={"address": addr, "key": api_key, "region": "sa"}, timeout=20)
-        data = g.json()
-    except Exception as e:
-        out["error"] = "geocode failed: %s" % str(e)[:120]
-        return out
-    if (data.get("status") or "") != "OK" or not data.get("results"):
-        out["error"] = "geocode: %s" % (data.get("status") or "no result")
-        return out
-    loc = ((data["results"][0].get("geometry") or {}).get("location") or {})
-    if loc.get("lat") is None or loc.get("lng") is None:
-        out["error"] = "geocode returned no location"
-        return out
-    out.update(lat=float(loc["lat"]), lng=float(loc["lng"]),
-               address=data["results"][0].get("formatted_address") or addr,
-               source="geocode")
-    return out
+    return _geocode(addr, api_key, s, out)
 
 
 def resolve_missing(links, api_key="", batch=DEFAULT_BATCH, force=False):
@@ -149,7 +166,8 @@ def apply_to_units(units, cache):
     for u in units:
         if u.get("has_location"):
             continue
-        rec = cache.get(u.get("map_link") or "")
+        # geo_key is the map link when there is one, otherwise the street address.
+        rec = cache.get(u.get("geo_key") or u.get("map_link") or "")
         if not rec or rec.get("lat") is None:
             continue
         u["lat"], u["lng"] = rec["lat"], rec["lng"]
