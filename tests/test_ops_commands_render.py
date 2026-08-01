@@ -49,68 +49,56 @@ class TestRenderUpdate(unittest.TestCase):
 
 
 class TestRenderGuests(unittest.TestCase):
+    @staticmethod
+    def scored(score=8, **overrides):
+        row = {"guest": "عبدالله", "unit": "Ouja | حطين", "score": score,
+               "reason": "تأخر التسليم ساعتين", "quote": "صار لي ساعتين أنتظر",
+               "resolved": False, "staff": "نورة", "phone": "0501234567",
+               "evidence_state": "known"}
+        row.update(overrides)
+        return row
+
     def test_empty(self):
         self.assertIn("ما فيه ضيوف", bot.render_guests([], ""))
 
-    def test_sad_card_has_all_fields(self):
-        rows = [{"guest": "عبدالله", "unit": "Ouja | حطين", "mood": "sad",
-                 "severity": "angry", "issue": "تأخر التسليم ساعتين",
-                 "quote": "صار لي ساعتين أنتظر", "resolved": False,
-                 "staff": "نورة", "phone": "0501234567"}]
-        out = bot.render_guests(rows, "")
-        self.assertIn("غاضب جداً", out)          # severity label
-        self.assertIn("🔴", out)                  # severity emoji
-        self.assertIn("تأخر التسليم", out)        # what happened
-        self.assertIn("«صار لي ساعتين أنتظر»", out)  # verbatim quote in guillemets
-        self.assertIn("نورة", out)                # team member who replied
-        self.assertIn("لسه مفتوحة", out)          # open status
-        self.assertIn("wa.me/966501234567", out)  # KSA-normalized contact link
-        self.assertIn("يحتاجون انتباهك (1)", out)  # sad section header
+    def test_lowest_score_is_first(self):
+        text = bot.render_guests([
+            {"guest": "Perfect", "unit": "A", "score": 10,
+             "evidence_state": "known"},
+            self.scored(3, guest="Needs help", unit="B"),
+        ], "اليوم")
+        self.assertLess(text.index("Needs help"), text.index("Perfect"))
 
-    def test_sad_resolved_and_missing_fields(self):
-        rows = [{"guest": "x", "unit": "y", "mood": "sad", "severity": "upset",
-                 "issue": "i", "quote": "", "resolved": True, "staff": "", "phone": ""}]
-        out = bot.render_guests(rows, "")
-        self.assertIn("تم الحل", out)
-        self.assertIn("غير معروف", out)   # unknown team member
-        self.assertNotIn("wa.me", out)     # no phone → no contact line
-        self.assertNotIn("«", out)          # no quote → no quote line
+    def test_below_ten_has_reason_evidence_status_and_contact(self):
+        text = bot.render_guests([self.scored(8)], "اليوم")
+        self.assertIn("8/10", text)
+        self.assertIn("ليش", text)
+        self.assertIn("تأخر التسليم", text)
+        self.assertIn("«صار لي ساعتين أنتظر»", text)
+        self.assertIn("لسه مفتوحة", text)
+        self.assertIn("نورة", text)
+        self.assertIn("wa.me/966501234567", text)
 
-    def test_happy_and_normal_are_one_line_per_guest(self):
-        rows = [
-            {"guest": "سعد", "unit": "Ouja | A", "mood": "happy"},
-            {"guest": "لمى", "unit": "Ouja | B", "mood": "normal"},
-        ]
-        out = bot.render_guests(rows, "")
-        self.assertIn("🙂 المبسوطين (1):", out)
-        self.assertIn("• سعد — Ouja | A", out)   # own line, with apartment
-        self.assertIn("😐 العاديين (1):", out)
-        self.assertIn("• لمى — Ouja | B", out)
-        self.assertNotIn("وش صار", out)          # no detail for happy/normal
-        self.assertNotIn("درجة الانزعاج", out)
+    def test_ten_is_compact_and_unknown_is_explicit(self):
+        text = bot.render_guests([
+            {"guest": "Perfect", "unit": "A", "score": 10,
+             "evidence_state": "known"},
+            {"guest": "Unknown", "unit": "B", "score": None,
+             "evidence_state": "unknown", "reason": "تعذر التحليل"},
+        ], "")
+        self.assertIn("10/10 · Perfect — A", text)
+        self.assertIn("أدلة غير كافية", text)
 
-    def test_header_total_and_counts(self):
-        rows = [
-            {"guest": "a", "unit": "u", "mood": "happy"},
-            {"guest": "b", "unit": "u", "mood": "normal"},
-            {"guest": "c", "unit": "u", "mood": "sad", "severity": "upset",
-             "issue": "i", "quote": "", "resolved": False, "staff": "ن", "phone": ""},
-        ]
-        out = bot.render_guests(rows, "")
-        self.assertIn("الإجمالي: 3 ضيف", out)
-        self.assertIn("🙂 1", out)
-        self.assertIn("😐 1", out)
-        self.assertIn("☹️ 1", out)
-
-    def test_angriest_first(self):
-        rows = [
-            {"guest": "calm", "unit": "u", "mood": "sad", "severity": "annoyed",
-             "issue": "i", "quote": "", "resolved": False, "staff": "", "phone": ""},
-            {"guest": "furious", "unit": "u", "mood": "sad", "severity": "angry",
-             "issue": "i", "quote": "", "resolved": False, "staff": "", "phone": ""},
-        ]
-        out = bot.render_guests(rows, "")
-        self.assertLess(out.index("furious"), out.index("calm"))
+    def test_header_has_score_bands(self):
+        text = bot.render_guests([
+            self.scored(2, guest="a"), self.scored(5, guest="b"),
+            self.scored(8, guest="c"), self.scored(10, guest="d"),
+        ], "")
+        self.assertIn("الإجمالي: 4 ضيف", text)
+        self.assertIn("0–3: 1", text)
+        self.assertIn("4–6: 1", text)
+        self.assertIn("7–9: 1", text)
+        self.assertIn("10: 1", text)
 
 
 if __name__ == "__main__":

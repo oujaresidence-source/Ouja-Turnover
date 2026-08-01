@@ -2975,60 +2975,59 @@ _GUEST_SEVERITY = {
 
 
 def render_guests(rows, date_label=""):
-    """Pure Arabic-first renderer for the in-house guest mood snapshot. Sad guests get a
-    full card (anger level, what happened, the guest's own words, who last replied,
-    solved/open, WhatsApp); happy + normal are a tidy one-line-per-guest roster (never a
-    run-on paragraph). `rows` items: {guest, unit, mood, severity, issue, quote,
-    resolved, staff, phone}."""
+    """Arabic-first 0-10 current-stay report; every sub-10 score explains why."""
     NL = "\n"
-    rows = rows or []
+    rows = list(rows or [])
     title = ("🧑‍🤝‍🧑 حالة الضيوف — %s" % date_label).strip(" —")
     if not rows:
         return title + NL + "ما فيه ضيوف حاليًا"
-    happy = [r for r in rows if r.get("mood") == "happy"]
-    normal = [r for r in rows if r.get("mood") == "normal"]
-    sad = [r for r in rows if r.get("mood") == "sad"]
+    bands = {
+        "critical": sum(r.get("score") is not None and r["score"] <= 3 for r in rows),
+        "attention": sum(r.get("score") is not None and 4 <= r["score"] <= 6 for r in rows),
+        "watch": sum(r.get("score") is not None and 7 <= r["score"] <= 9 for r in rows),
+        "perfect": sum(r.get("score") == 10 for r in rows),
+        "unknown": sum(r.get("score") is None for r in rows),
+    }
     out = [title,
-           "📊 الإجمالي: %d ضيف   ·   🙂 %d   ·   😐 %d   ·   ☹️ %d"
-           % (len(rows), len(happy), len(normal), len(sad))]
-    # Sad guests → full cards, angriest first
-    if sad:
-        out.append("")
-        out.append("☹️ ═══ يحتاجون انتباهك (%d) ═══" % len(sad))
-        sad_sorted = sorted(sad, key=lambda r: _GUEST_SEVERITY.get(
-            r.get("severity") or "upset", ("", "", 1))[2])
-        for i, r in enumerate(sad_sorted, 1):
-            label, emoji, _rank = _GUEST_SEVERITY.get(r.get("severity") or "upset",
-                                                      ("زعلان", "🟠", 1))
-            out.append("")
-            out.append("%s  %d) %s — %s" % (emoji, i, r.get("guest") or "ضيف",
-                                            r.get("unit") or "-"))
-            out.append("🌡️ درجة الانزعاج: %s" % label)
-            out.append("📝 وش صار: %s" % ((r.get("issue") or "").strip() or "—"))
-            quote = (r.get("quote") or "").strip()
-            if quote:
-                out.append("💬 كلامه: «%s»" % quote)
-            out.append("👤 آخر من كلّمه: %s" % ((r.get("staff") or "").strip() or "غير معروف"))
-            out.append("🔧 الحالة: %s" % ("✅ تم الحل" if r.get("resolved")
-                                          else "⏳ لسه مفتوحة"))
-            wa = _wa_from_phone(r.get("phone"))
-            if wa:
-                out.append("📱 %s" % wa)
-
-    def _roster(header, group):
-        out.append("")
-        out.append("%s (%d):" % (header, len(group)))
-        for r in group:
-            unit = r.get("unit")
-            line = "• %s" % (r.get("guest") or "ضيف")
-            if unit and unit != "-":
-                line += " — %s" % unit
-            out.append(line)
-
-    if happy:
-        _roster("🙂 المبسوطين", happy)
-    if normal:
-        _roster("😐 العاديين", normal)
+           ("📊 الإجمالي: %d ضيف · 🔴 0–3: %d · 🟠 4–6: %d · "
+            "🟡 7–9: %d · 🟢 10: %d · ❔ بلا تقييم: %d")
+           % (len(rows), bands["critical"], bands["attention"], bands["watch"],
+              bands["perfect"], bands["unknown"])]
+    ordered = sorted(rows, key=lambda r: (-1 if r.get("score") is None else r["score"]))
+    needs_detail = [r for r in ordered if r.get("score") != 10]
+    if needs_detail:
+        out.extend(["", "═══ يحتاجون مراجعة (%d) ═══" % len(needs_detail)])
+    for index, row in enumerate(needs_detail, 1):
+        score = row.get("score")
+        if score is None:
+            emoji, score_label = "❔", "أدلة غير كافية"
+        elif score <= 3:
+            emoji, score_label = "🔴", f"{score}/10"
+        elif score <= 6:
+            emoji, score_label = "🟠", f"{score}/10"
+        else:
+            emoji, score_label = "🟡", f"{score}/10"
+        out.extend(["", "%s %d) %s — %s — %s" % (
+            emoji, index, row.get("guest") or "ضيف", row.get("unit") or "-", score_label)])
+        reason = (row.get("reason") or "").strip()
+        if score is None:
+            reason = reason or "تعذر تحليل المحادثة أو لا توجد أدلة كافية"
+        out.append("📝 ليش: %s" % (reason or "لا يوجد سبب واضح — يحتاج مراجعة بشرية"))
+        quote = (row.get("quote") or "").strip()
+        if quote:
+            out.append("💬 الدليل: «%s»" % quote)
+        out.append("🔧 الحالة: %s" % ("✅ تم الحل" if row.get("resolved")
+                                      else "⏳ لسه مفتوحة"))
+        out.append("👤 آخر من كلّمه: %s" % ((row.get("staff") or "").strip() or "غير معروف"))
+        wa = _wa_from_phone(row.get("phone"))
+        if wa:
+            out.append("📱 %s" % wa)
+    perfect = [r for r in ordered if r.get("score") == 10]
+    if perfect:
+        out.extend(["", "🟢 الإقامات الممتازة (%d):" % len(perfect)])
+        for row in perfect:
+            out.append("• 10/10 · %s — %s" % (
+                row.get("guest") or "ضيف", row.get("unit") or "-"))
     return NL.join(out)
 
 
@@ -3079,17 +3078,26 @@ def build_update_rows():
     return rows
 
 
-_GUEST_MOOD_SYSTEM = (
-    "أنت محلل خدمة ضيوف لشركة عوجا للشقق المخدومة بالرياض. تقرأ محادثة ضيف حالي "
-    "وتحكم على مزاجه من آخر الرسائل. أعِد JSON فقط بدون أي شرح أو أسوار:\n"
-    '{"mood":"happy|normal|sad","severity":"annoyed|upset|angry","issue":"","quote":"","resolved":true}\n'
-    "mood: happy=راضٍ/شاكر/مبسوط. normal=محايد/استفسار عادي/لوجستي. "
-    "sad=منزعج/يشتكي/عنده مشكلة أو تذمّر.\n"
-    "severity (فقط إذا sad، وإلا اتركها فارغة): annoyed=منزعج شوي، upset=زعلان، angry=غاضب جداً.\n"
-    "issue (فقط إذا sad): جملة عربية قصيرة (≤ 15 كلمة) تلخّص وش صار.\n"
-    "quote (فقط إذا sad): انسخ حرفياً أقصر جملة من كلام الضيف نفسه تبيّن انزعاجه "
-    "(≤ 20 كلمة) بدون أي تعديل، وإلا اتركها فارغة.\n"
-    "resolved: true إذا كانت آخر الرسائل تدل أن المشكلة عولجت/انتهت، false إذا لسه مفتوحة."
+_GUEST_SCORE_SYSTEM = (
+    "أنت محلل عمليات ضيوف لعوجا في الرياض. قيّم تجربة الضيف الحالية كاملة من 0 إلى 10؛ "
+    "10 ممتاز بلا مشكلة، و0 أزمة شديدة. أعطِ الرسائل الحديثة والمشكلات غير المحلولة وزناً أكبر، "
+    "لكن لا تخصم على سؤال لوجستي محايد وحده. الحقائق الموضوعية المرسلة لك إلزامية. "
+    "أعد JSON فقط بهذا الشكل:\n"
+    '{"score":0,"severity":"none|annoyed|upset|angry","reason":"سبب عربي قصير",'
+    '"quote":"اقتباس قصير حرفي من الضيف أو فارغ","resolved":true,"confidence":0.0}\n'
+    "إذا كانت هناك مشكلة محلولة، لا تجعل النتيجة 10 إلا إذا ظهر رضا إيجابي واضح بعدها. "
+    "لا تخترع اقتباساً أو حلاً أو رداً من الفريق."
+)
+
+_GUEST_COMPLAINT_HINTS = (
+    "ما قدرت", "ما اقدر", "ما أقدر", "ما يفتح", "ما اشتغل", "ما يشتغل", "وين الرد",
+    "محد رد", "تأخر", "متأخر", "سيئ", "سيئة", "زعلان", "مشكلة", "شكوى", "نصب",
+    "can't", "cannot", "couldn't", "not working", "no response", "still waiting",
+    "terrible", "awful", "complaint", "locked out", "angry",
+)
+_GUEST_POSITIVE_HINTS = (
+    "شكرا", "شكراً", "يعطيكم العافية", "تمام شكرا", "ممتاز", "انحلت", "تم الحل",
+    "thank you", "thanks", "great", "perfect", "resolved", "all good",
 )
 
 
@@ -3102,9 +3110,19 @@ def _guest_msgs(cid):
         return []
 
 
-def _guest_history_text(msgs, limit=14):
-    """Last `limit` messages as 'الضيف/عوجا: body' lines for the Claude prompt."""
-    seq = sorted(msgs or [], key=_msg_sort_key)[-limit:]
+def _guest_messages_since(msgs, since=None):
+    start = _parse_date(since)
+    seq = sorted(msgs or [], key=_msg_sort_key)
+    if not start:
+        return seq
+    start_dt = datetime.combine(start, dt_time.min).replace(tzinfo=TZ)
+    return [m for m in seq if not _parse_msg_dt(_msg_time(m))
+            or _parse_msg_dt(_msg_time(m)) >= start_dt]
+
+
+def _guest_history_text(msgs, since=None):
+    """The entire current-stay conversation as labeled lines for the score prompt."""
+    seq = _guest_messages_since(msgs, since)
     lines = []
     for m in seq:
         body = (m.get("body") or "").strip()
@@ -3112,6 +3130,113 @@ def _guest_history_text(msgs, limit=14):
             who = "الضيف" if _msg_is_inbound(m) else "عوجا"
             lines.append("%s: %s" % (who, body))
     return "\n".join(lines)
+
+
+def _guest_score_facts(msgs, open_promise=False, open_escalation=False):
+    """Objective facts that constrain (and can cap) the model's subjective score."""
+    seq = sorted(msgs or [], key=_msg_sort_key)
+    meaningful_host_indexes = [
+        i for i, m in enumerate(seq)
+        if not _msg_is_inbound(m) and (m.get("body") or "").strip()
+        and not _looks_automated(m.get("body") or "")
+    ]
+    last_host = meaningful_host_indexes[-1] if meaningful_host_indexes else -1
+    unanswered = [m for m in seq[last_host + 1:] if _msg_is_inbound(m)
+                  and (m.get("body") or "").strip()]
+    unanswered_minutes = 0
+    if unanswered:
+        first_at = _parse_msg_dt(_msg_time(unanswered[0]))
+        if first_at:
+            unanswered_minutes = max(0, round((datetime.now(TZ) - first_at).total_seconds() / 60))
+
+    inbound = [(i, m) for i, m in enumerate(seq) if _msg_is_inbound(m)]
+    complaint_indexes = [i for i, m in inbound if any(
+        hint in (m.get("body") or "").lower() for hint in _GUEST_COMPLAINT_HINTS)]
+    open_complaint = bool(complaint_indexes)
+    positive_after_issue = False
+    if complaint_indexes:
+        last_issue = complaint_indexes[-1]
+        positive_after_issue = any(
+            i > last_issue and any(hint in (m.get("body") or "").lower()
+                                   for hint in _GUEST_POSITIVE_HINTS)
+            for i, m in inbound
+        )
+
+    response_minutes = []
+    for inbound_index, inbound_msg in inbound:
+        inbound_at = _parse_msg_dt(_msg_time(inbound_msg))
+        if not inbound_at:
+            continue
+        next_host = next((m for m in seq[inbound_index + 1:]
+                          if not _msg_is_inbound(m) and (m.get("body") or "").strip()
+                          and not _looks_automated(m.get("body") or "")), None)
+        host_at = _parse_msg_dt(_msg_time(next_host)) if next_host else None
+        if host_at and host_at >= inbound_at:
+            response_minutes.append(round((host_at - inbound_at).total_seconds() / 60))
+    return {
+        "open_promise": bool(open_promise),
+        "open_escalation": bool(open_escalation),
+        "open_complaint": open_complaint and not positive_after_issue,
+        "complaint_seen": open_complaint,
+        "positive_after_issue": positive_after_issue,
+        "inbound_after_last_host": len(unanswered),
+        "unanswered_minutes": unanswered_minutes,
+        "slowest_response_minutes": max(response_minutes) if response_minutes else None,
+    }
+
+
+def _as_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes")
+    return default if value is None else bool(value)
+
+
+def _normalize_guest_score(raw, facts):
+    """Validate model output and enforce non-negotiable objective score caps."""
+    if not isinstance(raw, dict):
+        return {
+            "score": None, "severity": "", "reason": "تعذر تحليل المحادثة",
+            "quote": "", "resolved": False, "confidence": 0.0,
+            "evidence_state": "unknown",
+        }
+    try:
+        score = int(round(float(raw.get("score"))))
+    except (TypeError, ValueError):
+        return _normalize_guest_score(None, facts)
+    score = max(0, min(10, score))
+    severity = str(raw.get("severity") or "").lower()
+    if severity not in ("none", "annoyed", "upset", "angry"):
+        severity = ""
+    resolved = _as_bool(raw.get("resolved"), False)
+    reason = str(raw.get("reason") or "").strip()[:300]
+    quote = str(raw.get("quote") or "").strip()[:300]
+    try:
+        confidence = max(0.0, min(1.0, float(raw.get("confidence", 0))))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    if facts.get("open_promise") or facts.get("open_escalation"):
+        score = min(score, 6)
+        resolved = False
+        reason = reason or "يوجد وعد أو تصعيد مفتوح يحتاج متابعة"
+    if int(facts.get("inbound_after_last_host") or 0) >= 2:
+        score = min(score, 5)
+        resolved = False
+        reason = reason or "الضيف كرر طلبه ولم يصله رد بعد"
+    if facts.get("open_complaint") and severity == "angry" and not resolved:
+        score = min(score, 3)
+        reason = reason or "شكوى شديدة ما زالت مفتوحة"
+    if (resolved and score == 10 and severity in ("annoyed", "upset", "angry")
+            and not facts.get("positive_after_issue")):
+        score = 9
+        reason = reason or "المشكلة حُلّت لكن ما ظهر رضا واضح بعدها"
+    return {
+        "score": score, "severity": severity, "reason": reason,
+        "quote": quote, "resolved": resolved, "confidence": confidence,
+        "evidence_state": "known",
+    }
 
 
 def _last_team_sender(msgs):
@@ -3129,51 +3254,51 @@ def _last_team_sender(msgs):
 
 
 def _classify_one_guest(item):
-    """One guest → full row {guest, unit, mood, severity, issue, quote, resolved, staff,
-    phone, reservation_id, conversation_id}. Degrades to 'normal' if there's no
-    conversation or Claude fails — never raises."""
+    """Analyze one entire current stay, constrained by objective open-work facts."""
     cid = item.get("conversation_id")
-    mood, severity, issue, quote, resolved, staff = "normal", "", "", "", True, ""
+    analysis = _normalize_guest_score(None, {})
+    staff = ""
     if cid:
         msgs = _guest_msgs(cid)
         if msgs:
             staff = _last_team_sender(msgs)
-            hist = _guest_history_text(msgs)
+            stay_msgs = _guest_messages_since(msgs, item.get("arrival"))
+            hist = _guest_history_text(stay_msgs)
             if hist:
-                d = claude_json(_GUEST_MOOD_SYSTEM, hist, max_tokens=300) or {}
-                m = str(d.get("mood") or "").lower()
-                if m in ("happy", "normal", "sad"):
-                    mood = m
-                sev = str(d.get("severity") or "").lower()
-                if sev in ("annoyed", "upset", "angry"):
-                    severity = sev
-                issue = str(d.get("issue") or "").strip()
-                quote = str(d.get("quote") or "").strip()
-                resolved = bool(d.get("resolved", True))
-    sad = (mood == "sad")
-    if sad and not severity:
-        severity = "upset"
+                facts = _guest_score_facts(
+                    stay_msgs, item.get("open_promise"), item.get("open_escalation"))
+                user = ("حقائق موضوعية (لا تتجاوزها):\n"
+                        + json.dumps(facts, ensure_ascii=False)
+                        + "\n\nمحادثة الإقامة الحالية كاملة:\n" + hist)
+                raw = claude_json(_GUEST_SCORE_SYSTEM, user, max_tokens=1000,
+                                  model=GUEST_ANALYSIS_MODEL)
+                analysis = _normalize_guest_score(raw, facts)
     return {"guest": item.get("guest"), "unit": item.get("unit"),
-            "mood": mood,
-            "severity": severity if sad else "",
-            "issue": issue if sad else "",
-            "quote": quote if sad else "",
-            "resolved": resolved,
             "staff": staff,
             "phone": item.get("phone") or "",
             "reservation_id": item.get("reservation_id"),
-            "conversation_id": str(cid or "")}
+            "conversation_id": str(cid or ""), **analysis}
 
 
 def build_guests_rows():
-    """Enumerate current in-house guests, classify each with Claude (concurrent), pull
-    who last replied + a WhatsApp number for the sad ones, and cross-check the promises
-    ledger so a sad guest with an OPEN promise is shown as still-open. Runs sync — call
-    via to_thread."""
+    """Score every current in-house guest across their whole current-stay conversation."""
     from concurrent.futures import ThreadPoolExecutor
     today = datetime.now(TZ).date()
     listings = get_listings_map() or {}
     res = fetch_inhouse(today)
+    open_cids = set()
+    if _HAS_PK and _pk:
+        try:
+            for promise in _pk.db.open_rows():
+                if promise.get("conversation_id"):
+                    open_cids.add(str(promise["conversation_id"]))
+        except Exception as e:
+            print("guests promises lookup error:", e)
+    escalation_cids = {
+        str(row.get("conversation_id")) for row in dict(_escalations).values()
+        if row.get("conversation_id") and not row.get("resolved_at")
+        and row.get("status") not in ("closed", "resolved")
+    }
     items, seen = [], set()
     for r in res:
         if not _res_realized(r):
@@ -3189,27 +3314,17 @@ def build_guests_rows():
             "conversation_id": r.get("conversationId"),
             "reservation_id": r.get("id"),
             "phone": (r.get("phone") or "").strip(),
+            "arrival": str(r.get("arrivalDate") or "")[:10],
+            "open_promise": str(r.get("conversationId") or "") in open_cids,
+            "open_escalation": str(r.get("conversationId") or "") in escalation_cids,
         })
-    # open promises → force sad guests to "still open"
-    open_cids = set()
-    if _HAS_PK and _pk:
-        try:
-            for p in _pk.db.open_rows():
-                if p.get("conversation_id"):
-                    open_cids.add(str(p["conversation_id"]))
-        except Exception as e:
-            print("guests promises lookup error:", e)
     rows = []
     if items:
         with ThreadPoolExecutor(max_workers=6) as ex:
             rows = list(ex.map(_classify_one_guest, items))
     for row in rows:
-        if row.get("mood") != "sad":
-            continue
-        if row.get("conversation_id") in open_cids:
-            row["resolved"] = False
-        # fill a WhatsApp number for the sad guests you may need to contact
-        if not row.get("phone") and row.get("reservation_id"):
+        # Fill a WhatsApp number for any non-perfect/unknown stay that may need contact.
+        if row.get("score") != 10 and not row.get("phone") and row.get("reservation_id"):
             try:
                 info = _reservation_channel_info(row["reservation_id"])
                 row["phone"] = (info.get("phone") or "").strip()
@@ -7848,7 +7963,7 @@ def _history_latest_role_line(history_text, role):
     return ""
 
 
-def _guest_history_text(history_text):
+def _apartment_guest_history_text(history_text):
     """Keep guest turns (including multiline continuations), excluding host examples."""
     lines = (history_text or "").splitlines()
     has_roles = any(line.strip().startswith(("Guest:", "Host:")) for line in lines)
@@ -7898,7 +8013,7 @@ def _extract_apartment_dates(text, supplied_dates=None):
 
 def _apartment_requirements(history_text, supplied_dates=None):
     """Extract every qualification answer from the full guest conversation."""
-    raw = _guest_history_text(history_text).translate(_ARABIC_DIGITS)
+    raw = _apartment_guest_history_text(history_text).translate(_ARABIC_DIGITS)
     low = raw.lower()
     criteria = _criteria_from_text(raw)
     checkin, checkout = _extract_apartment_dates(raw, supplied_dates)
@@ -58233,8 +58348,8 @@ async def cmd_update(ctx):
     await ctx.reply(text[:1900])
 
 
-@bot.tree.command(name="guests", description="حالة الضيوف الحاليين (سعيد/عادي/زعلان) عبر Claude")
-async def slash_guests(interaction: discord.Interaction):
+async def _run_guests_report(interaction):
+    """Shared implementation for the singular and plural guest-score slash commands."""
     if not _can_delete_channels(interaction.user):
         await interaction.response.send_message("🚫 هذا الأمر للإدارة فقط.", ephemeral=True)
         return
@@ -58254,9 +58369,19 @@ async def slash_guests(interaction: discord.Interaction):
     await interaction.followup.send(text[:1900] + tail, ephemeral=True)
 
 
+@bot.tree.command(name="guests", description="تقييم كل الضيوف الحاليين من 10 مع الأسباب")
+async def slash_guests(interaction: discord.Interaction):
+    await _run_guests_report(interaction)
+
+
+@bot.tree.command(name="guest", description="تقييم كل الضيوف الحاليين من 10 مع الأسباب")
+async def slash_guest(interaction: discord.Interaction):
+    await _run_guests_report(interaction)
+
+
 @bot.command(name="guests", aliases=["الضيوف", "حالة-الضيوف", "المزاج"])
 async def cmd_guests(ctx):
-    """!ouja guests — in-house guest mood summary via Claude (admins only)."""
+    """!ouja guests — in-house 0-10 guest score summary (admins only)."""
     if not _can_delete_channels(ctx.author):
         await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
         return
