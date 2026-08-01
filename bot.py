@@ -104,6 +104,17 @@ except Exception as _decor_err:         # pragma: no cover
     _decor = None
     _HAS_DECOR = False
 
+# Cleaning coverage «تغطية التنظيف» — where every apartment is, who cleans it, how
+# OujaCT actually performs, and the head count to bring cleaning fully in-house.
+# READ-ONLY: it computes from the existing stores and writes nothing but its geo cache.
+try:
+    import coverage_study as _coverage
+    _HAS_COVERAGE = True
+except Exception as _coverage_err:      # pragma: no cover
+    print("[coverage] import failed (coverage tab disabled, bot unaffected):", _coverage_err)
+    _coverage = None
+    _HAS_COVERAGE = False
+
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
 # humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
 # nothing, issues nothing.
@@ -18345,6 +18356,34 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="cleanTeamsBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ COVERAGE (where every apartment is · who cleans it · how many people we need) ============ -->
+      <section class="view" id="view_coverage">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🗺️ تغطية التنظيف</div>
+            <div class="page-sub">كل شقة وين هي · مين ينظفها · أداء أوجا الفعلي · كم شخص ناقصنا</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="covResolveGeo()" title="حل روابط الخرائط المختصرة وتحويلها لإحداثيات">📍 حدّد المواقع</button>
+            <button class="btn ghost sm" onclick="loadCoverage(1)">↻ تحديث</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_coverage" data-help-key="coverage">
+          <button class="ph-x" onclick="dismissHelp('coverage')" title="إخفاء">×</button>
+          <div class="ph-t">دراسة التغطية — للقرار مو للمتابعة اليومية</div>
+          <div class="ph-b">
+            الخريطة تبيّن الشقق اللي فوق بعض في نفس العمارة — هذي أرخص شقق تنظّفها لأن ما فيها تنقّل.
+            <b>مهم:</b> النظام يسجّل وقت <b>انتهاء</b> التنظيف فقط، ما فيه زر «بدأت».
+            فحساب عدد الموظفين مبني على <b>زمن الدورة</b> (من شقة خالصة للي بعدها) — وهو أصدق رقم للقرار،
+            لأنه يشمل التنظيف والطريق والمواقف والطلعة.
+          </div>
+        </div>
+
+        <div class="kpis" id="covKpis"></div>
+        <div id="covBody"><div class="empty sk">—</div></div>
+      </section>
+
       <section class="view" id="view_listings">
         <div class="page-head">
           <div>
@@ -19223,6 +19262,7 @@ const T = {
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير الديناميكي', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
+    coverage:'تغطية التنظيف',
     clean_center:'مركز التنظيف',
     cc_title:'مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
     cc_help_t:'تنظيف اليوم بدون تشتت', cc_help_b:'هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.',
@@ -19547,6 +19587,7 @@ const T = {
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Dynamic Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
+    coverage:'Cleaning Coverage',
     clean_center:'Cleaning Center',
     cc_title:'Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
     cc_help_t:'Cleaning today without scatter', cc_help_b:'Managers can see what is urgent, started, waiting for review, and approved. A team submit is not final until a manager approves the photos.',
@@ -21064,6 +21105,7 @@ function go(id){
   if(id==='decor') loadDecor();
   if(id==='guide') loadGuide();
   if(id==='cleanteams') loadCleanTeams();
+  if(id==='coverage') loadCoverage();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
   if(id==='tickets') loadTickets();
@@ -28851,6 +28893,251 @@ async function loadCleanTeams(){
   try{ D.cleanReports=await api('/api/cleaning/reports'); }catch(_e){}
   renderCleanTeams();
 }
+/* ============================================================
+   CLEANING COVERAGE — تغطية التنظيف
+   Read-only study: where every apartment is, who cleans it, what OujaCT actually
+   does in a day, and the head count to bring cleaning fully in-house.
+   NOTE: DASHBOARD_HTML is a normal triple-quoted Python string — NO backslash
+   escapes anywhere in here (a stray backslash-n kills the whole login).
+   ============================================================ */
+var COV = {data:null, busy:false};
+
+async function loadCoverage(force){
+  var body=document.getElementById('covBody'); if(!body) return;
+  if(COV.data && !force){ renderCoverage(); return; }
+  body.innerHTML='<div class="empty sk">—</div>';
+  try{
+    var r = await api('/api/coverage/study');
+    if(!r || !r.study) throw (r && r.detail) ? r.detail : 'no data';
+    COV.data = r.study;
+  }catch(e){
+    COV.data = null;
+    putHtml('covKpis','');
+    body.innerHTML = errorState('loadCoverage(1)', String(e));
+    return;
+  }
+  renderCoverage();
+}
+
+async function covResolveGeo(){
+  if(COV.busy) return;
+  COV.busy = true;
+  var body=document.getElementById('covBody');
+  if(body) body.innerHTML='<div class="empty sk">'+esc(labelText('يحل روابط الخرائط… ممكن ياخذ دقيقة','Resolving map links… this can take a minute'))+'</div>';
+  try{
+    var r = await api('/api/coverage/geo');
+    var g = (r && r.geo) || {};
+    var msg = labelText('تم تحديد ','Located ')+safeNum(g.resolved)+labelText(' موقع.',' locations.');
+    if(safeNum(g.failed)) msg += labelText(' تعذّر ','  Failed: ')+safeNum(g.failed)+'.';
+    if(safeNum(g.pending)) msg += labelText(' باقي ','  Remaining: ')+safeNum(g.pending)+labelText(' — اضغط الزر مرة ثانية.',' — press the button again.');
+    if(!g.have_key) msg += labelText(' (ما فيه مفتاح خرائط — العناوين بدون إحداثيات)',' (no Maps key — addresses without coordinates)');
+    toast(msg);
+  }catch(e){
+    toast(labelText('ما نجح تحديد المواقع','Could not resolve locations'));
+  }
+  COV.busy = false;
+  loadCoverage(1);
+}
+
+function _covMin(v){ return (v==null) ? '—' : (Math.round(v)+labelText(' د',' min')); }
+
+function renderCoverage(){
+  var s = COV.data; if(!s) return;
+  var ar = (L==='ar');
+  var u = s.units||{}, cl = s.clusters||{}, oj = s.oujact||{}, cy = s.cycle||{}, cap = s.capacity||{};
+
+  putHtml('covKpis', [
+    {v:(cap.hire==null?'—':cap.hire), l:ar?'المطلوب توظيفه':'People to hire', s:(cap.people_needed==null?(ar?'بيانات ناقصة':'not enough data'):(ar?('الإجمالي المطلوب '+cap.people_needed):('total needed '+cap.people_needed)))},
+    {v:safeNum(u.total),  l:ar?'إجمالي الشقق':'Total apartments', s:ar?(safeNum(u.located)+' لها موقع'):(safeNum(u.located)+' located')},
+    {v:safeNum(u.in_house), l:ar?'تنظّفها أوجا':'Cleaned by OujaCT', s:ar?'فريقنا الداخلي':'our in-house team'},
+    {v:safeNum(u.third_party), l:ar?'شركات خارجية':'Third-party', s:ar?('في '+safeNum(cl.multi)+' عمارة مشتركة'):('across '+safeNum(cl.multi)+' shared buildings')},
+    {v:oj.per_day_avg!=null?oj.per_day_avg:'—', l:ar?'شقق/يوم لأوجا':'OujaCT per day', s:oj.started_on?(ar?('من '+oj.started_on):('since '+oj.started_on)):'—'},
+    {v:_covMin(cy.median_min), l:ar?'زمن الدورة (وسيط)':'Cycle time (median)', s:ar?'شقة لِشقة':'finish to finish'}
+  ].map(function(k){
+    return '<div class="kpi"><div class="kpi-val">'+esc(String(k.v))+'</div>'
+      + '<div class="kpi-lbl">'+esc(k.l)+'</div>'
+      + '<div class="kpi-lbl" style="opacity:.75">'+esc(k.s)+'</div></div>';
+  }).join(''));
+
+  var html = _covCapacityCard(s) + _covMapCard(s) + _covClusterCard(s)
+           + _covDailyCard(s) + _covPeopleCard(s) + _covUnitsCard(s);
+  putHtml('covBody', html);
+}
+
+/* ---- the decision card: how many people, and on what assumptions ---- */
+function _covCapacityCard(s){
+  var ar=(L==='ar'), cap=s.capacity||{}, cy=s.cycle||{}, pt=s.photo_time||{};
+  var head = '<div class="card-head"><span class="card-title">'+(ar?'🧮 كم شخص نحتاج':'🧮 How many people we need')+'</span>'
+    + '<span class="card-sub">'+(cap.demand_source==='hostaway_30d'?(ar?'الطلب من هوستاواي · آخر 30 يوم':'demand from Hostaway · last 30 days'):(ar?'الطلب مُقدّر من السجل':'demand estimated from the log'))+'</span></div>';
+  if(cap.people_needed==null){
+    return '<div class="card">'+head+emptyState(ar?'ما فيه بيانات كافية':'Not enough data yet',
+      cap.reason||(ar?'نحتاج أيام أكثر من سجل أوجا عشان نحسب زمن الدورة.':'We need more OujaCT log days to compute cycle time.'),'🧮')+'</div>';
+  }
+  var rows = [
+    [ar?'شقق تحتاج تنظيف باليوم':'Apartments needing a clean per day', cap.demand_per_day],
+    [ar?'زمن الدورة المستخدم':'Cycle time used', _covMin(cap.cycle_used_min)],
+    [ar?'ساعات اليوم':'Working day', Math.round(safeNum(cap.workday_min)/60)+(ar?' ساعات':'h')],
+    [ar?'شقق للشخص باليوم':'Apartments per person per day', cap.units_per_person_day],
+    [ar?'العدد المطلوب':'People needed', cap.people_needed],
+    [ar?'موجود حالياً':'Working today', cap.current_people],
+    [ar?'المطلوب توظيفه':'To hire', cap.hire]
+  ];
+  var body = '<div style="overflow-x:auto"><table class="data"><tbody>'
+    + rows.map(function(r,i){
+        var strong = (i>=4) ? ' style="font-weight:700"' : '';
+        return '<tr'+strong+'><td>'+esc(r[0])+'</td><td class="num strong">'+esc(String(r[1]==null?'—':r[1]))+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  var note = '<div class="page-help" style="margin-top:12px"><div class="ph-t">'
+    + (ar?'على أي أساس هذا الرقم':'What this number rests on')+'</div><div class="ph-b">'
+    + (ar
+      ? ('زمن الدورة وسيط '+_covMin(cy.median_min)+' من '+safeNum(cy.n)+' انتقالة فعلية'
+         + (safeNum(cy.excluded)?(' (استبعدنا '+safeNum(cy.excluded)+' فجوة أطول من '+safeNum(cy.max_gap_min)+' دقيقة — غداء أو وردية ثانية)'):'')
+         + '. الوسيط مو المتوسط عشان يوم واحد غريب ما يحرّك القرار.'
+         + ' زمن التصوير وسيطه '+_covMin(pt.median_min)+' — هذا وقت التصوير مو وقت التنظيف، ما بنينا عليه شيء.')
+      : ('Median cycle time '+_covMin(cy.median_min)+' from '+safeNum(cy.n)+' real hops'
+         + (safeNum(cy.excluded)?(' ('+safeNum(cy.excluded)+' gaps longer than '+safeNum(cy.max_gap_min)+' min excluded as breaks or second shifts)'):'')
+         + '. Median not mean, so one odd day cannot move the decision.'
+         + ' Photo-session median is '+_covMin(pt.median_min)+' — that is photographing, not cleaning, and nothing is built on it.'))
+    + '</div></div>';
+  return '<div class="card">'+head+body+note+'</div>';
+}
+
+/* ---- the map: one dot per building, size = how many flats are stacked there ---- */
+function _covMapCard(s){
+  var ar=(L==='ar');
+  var rows = safeArr((s.clusters||{}).rows).filter(function(c){return c.has_location;});
+  var head = '<div class="card-head"><span class="card-title">'+(ar?'🗺️ الخريطة':'🗺️ The map')+'</span>'
+    + '<span class="card-sub">'+(ar?'حجم الدائرة = عدد الشقق في نفس المبنى':'circle size = flats in the same building')+'</span></div>';
+  if(!rows.length){
+    return '<div class="card">'+head+emptyState(ar?'ما فيه مواقع محددة':'No located apartments',
+      ar?'اضغط «حدّد المواقع» فوق عشان نحل روابط الخرائط.':'Press "Locate" above to resolve the map links.','📍')+'</div>';
+  }
+  var lats=rows.map(function(c){return c.lat;}), lngs=rows.map(function(c){return c.lng;});
+  var minLat=Math.min.apply(null,lats), maxLat=Math.max.apply(null,lats);
+  var minLng=Math.min.apply(null,lngs), maxLng=Math.max.apply(null,lngs);
+  var dLat=(maxLat-minLat)||0.01, dLng=(maxLng-minLng)||0.01;
+  var W=760, H=460, pad=34;
+  var svg = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-height:480px;background:var(--tint);border-radius:12px;border:1px solid var(--line)" role="img" aria-label="'+esc(ar?'خريطة مواقع الشقق':'Apartment location map')+'">';
+  svg += '<g stroke="var(--line-strong)" stroke-width="1" opacity="0.5">';
+  for(var gi=1; gi<4; gi++){
+    var gx = pad + (W-2*pad)*gi/4, gy = pad + (H-2*pad)*gi/4;
+    svg += '<line x1="'+gx+'" y1="'+pad+'" x2="'+gx+'" y2="'+(H-pad)+'"/>';
+    svg += '<line x1="'+pad+'" y1="'+gy+'" x2="'+(W-pad)+'" y2="'+gy+'"/>';
+  }
+  svg += '</g>';
+  var byLid = {};
+  safeArr((s.units||{}).rows).forEach(function(x){ byLid[x.lid]=x; });
+  rows.slice().sort(function(a,b){return a.size-b.size;}).forEach(function(c){
+    var x = pad + (W-2*pad) * ((c.lng-minLng)/dLng);
+    var y = pad + (H-2*pad) * ((maxLat-c.lat)/dLat);
+    var first = byLid[c.lids[0]] || {};
+    var inh = 0, tp = 0, un = 0;
+    c.lids.forEach(function(lid){
+      var uu = byLid[lid] || {};
+      if(uu.in_house) inh++; else if(uu.team_id) tp++; else un++;
+    });
+    var fill = inh>=tp && inh>=un ? 'var(--green)' : (tp>=un ? 'var(--blue)' : 'var(--yellow)');
+    var r = Math.min(26, 6 + c.size*2.6);
+    var names = c.lids.map(function(lid){ return (byLid[lid]||{}).name || lid; }).join(' · ');
+    svg += '<g><circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+r.toFixed(1)+'" fill="'+fill+'" fill-opacity="0.22" stroke="'+fill+'" stroke-width="1.8"/>'
+      + '<title>'+esc((c.label||first.name||'')+' — '+c.size+(ar?' شقة':' flats')+String.fromCharCode(10)+names)+'</title>';
+    if(c.size>1){
+      svg += '<text x="'+x.toFixed(1)+'" y="'+(y+4).toFixed(1)+'" text-anchor="middle" font-size="12" font-weight="700" fill="'+fill+'">'+c.size+'</text>';
+    }
+    svg += '</g>';
+  });
+  svg += '</svg>';
+  var legend = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--mut)">'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green);margin-inline-end:5px"></span>'+(ar?'أوجا (داخلي)':'OujaCT (in-house)')+'</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--blue);margin-inline-end:5px"></span>'+(ar?'شركة خارجية':'Third-party')+'</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--yellow);margin-inline-end:5px"></span>'+(ar?'بدون فريق':'Unassigned')+'</span>'
+    + '<span>'+(ar?'الرقم داخل الدائرة = عدد الشقق':'number inside = flats in that building')+'</span></div>';
+  var missing = safeNum((s.units||{}).missing_location);
+  var warn = missing ? ('<div class="page-help" style="margin-top:10px"><div class="ph-b">'
+    + esc(ar?(missing+' شقة ما لها موقع بعد — اضغط «حدّد المواقع».'):(missing+' apartments still have no location — press "Locate".'))
+    + '</div></div>') : '';
+  return '<div class="card">'+head+svg+legend+warn+'</div>';
+}
+
+/* ---- buildings with more than one flat: the cheapest apartments to cover ---- */
+function _covClusterCard(s){
+  var ar=(L==='ar');
+  var rows = safeArr((s.clusters||{}).rows).filter(function(c){return c.size>1;});
+  var head = '<div class="card-head"><span class="card-title">'+(ar?'🏢 شقق في نفس المبنى':'🏢 Stacked buildings')+'</span>'
+    + '<span class="card-sub">'+(ar?'صفر تنقّل بينها':'zero travel between them')+'</span></div>';
+  if(!rows.length) return '<div class="card">'+head+emptyState(ar?'ما فيه شقق متجاورة':'No stacked units','','🏢')+'</div>';
+  var byLid={}; safeArr((s.units||{}).rows).forEach(function(x){ byLid[x.lid]=x; });
+  var body='<div style="overflow-x:auto"><table class="data"><thead><tr>'
+    + '<th>'+(ar?'المنطقة':'Area')+'</th><th class="num">'+(ar?'شقق':'Flats')+'</th><th>'+(ar?'الشقق':'Which')+'</th></tr></thead><tbody>'
+    + rows.map(function(c){
+        var names = c.lids.map(function(lid){ return esc((byLid[lid]||{}).name || String(lid)); }).join(' · ');
+        return '<tr><td class="strong">'+esc(c.label||'—')+'</td><td class="num strong">'+c.size+'</td>'
+          + '<td style="font-size:11.5px;color:var(--mut)">'+names+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  return '<div class="card">'+head+body+'</div>';
+}
+
+/* ---- what OujaCT actually did, day by day ---- */
+function _covDailyCard(s){
+  var ar=(L==='ar'), oj=s.oujact||{}, daily=safeArr(oj.daily);
+  var head = '<div class="card-head"><span class="card-title">'+(ar?'📅 إنتاج أوجا يوم بيوم':'📅 OujaCT day by day')+'</span>'
+    + '<span class="card-sub">'+esc(ar?(safeNum(oj.total_cleans)+' تنظيفة على '+safeNum(oj.days_worked)+' يوم عمل'):(safeNum(oj.total_cleans)+' cleans over '+safeNum(oj.days_worked)+' working days'))+'</span></div>';
+  if(!daily.length) return '<div class="card">'+head+emptyState(ar?'ما فيه سجل بعد':'No log yet','','📅')+'</div>';
+  var mx = Math.max.apply(null, daily.map(function(d){return d.count;}))||1;
+  var bars = '<div style="display:flex;align-items:flex-end;gap:3px;height:130px;overflow-x:auto;padding-top:6px">'
+    + daily.map(function(d){
+        var h = Math.max(3, Math.round(d.count/mx*112));
+        return '<div style="flex:0 0 auto;width:16px;text-align:center" title="'+esc(d.date+' — '+d.count+(ar?' شقة · ':' flats · ')+d.people+(ar?' أشخاص':' people'))+'">'
+          + '<div style="height:'+h+'px;background:var(--accent);border-radius:3px 3px 0 0;opacity:.85"></div>'
+          + '<div style="font-size:8.5px;color:var(--mut);margin-top:3px">'+esc(d.date.slice(5))+'</div></div>';
+      }).join('')
+    + '</div>';
+  return '<div class="card">'+head+bars+'</div>';
+}
+
+/* ---- per person: the real throughput each cleaner sustains ---- */
+function _covPeopleCard(s){
+  var ar=(L==='ar'), people=safeArr((s.oujact||{}).people);
+  var head='<div class="card-head"><span class="card-title">'+(ar?'👤 لكل شخص':'👤 Per person')+'</span>'
+    + '<span class="card-sub">'+(ar?'من ضغط زر «تم» فعلياً':'from who actually pressed done')+'</span></div>';
+  if(!people.length) return '<div class="card">'+head+emptyState(ar?'ما فيه بيانات':'No data','','👤')+'</div>';
+  var body='<div style="overflow-x:auto"><table class="data"><thead><tr>'
+    + '<th>'+(ar?'الشخص':'Person')+'</th><th class="num">'+(ar?'أيام':'Days')+'</th>'
+    + '<th class="num">'+(ar?'شقق':'Flats')+'</th><th class="num">'+(ar?'شقق/يوم':'Per day')+'</th></tr></thead><tbody>'
+    + people.map(function(p){
+        return '<tr><td class="strong">'+esc(p.person)+'</td><td class="num">'+safeNum(p.days)+'</td>'
+          + '<td class="num">'+safeNum(p.cleans)+'</td><td class="num strong">'+esc(String(p.per_day))+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  return '<div class="card">'+head+body+'</div>';
+}
+
+/* ---- every apartment: location, crew, and the pin it came from ---- */
+function _covUnitsCard(s){
+  var ar=(L==='ar'), rows=safeArr((s.units||{}).rows);
+  var head='<div class="card-head"><span class="card-title">'+(ar?'📋 كل الشقق':'📋 Every apartment')+'</span>'
+    + '<span class="card-sub">'+esc(safeNum(rows.length)+(ar?' شقة':' apartments'))+'</span></div>';
+  if(!rows.length) return '<div class="card">'+head+emptyState(ar?'ما فيه شقق':'No apartments','','📋')+'</div>';
+  var body='<div style="overflow-x:auto;max-height:520px"><table class="data"><thead><tr>'
+    + '<th>'+(ar?'الشقة':'Apartment')+'</th><th>'+(ar?'المنطقة':'Area')+'</th>'
+    + '<th>'+(ar?'الفريق':'Team')+'</th><th>'+(ar?'الموقع':'Location')+'</th></tr></thead><tbody>'
+    + rows.map(function(x){
+        var team = x.team_name ? esc(x.team_name) : ('<span class="pill warn">'+(ar?'بدون فريق':'unassigned')+'</span>');
+        if(x.in_house) team = '<span class="pill ok">'+esc(x.team_name||'OujaCT')+'</span>';
+        var loc = x.has_location
+          ? (x.map_link ? ('<a href="'+esc(x.map_link)+'" target="_blank" rel="noopener">'+(ar?'افتح الخريطة':'open map')+'</a>')
+                        : (ar?'محدّد':'located'))
+          : '<span class="pill danger">'+(ar?'بدون موقع':'no location')+'</span>';
+        return '<tr><td class="strong">'+esc(x.name)+'</td>'
+          + '<td style="font-size:11.5px;color:var(--mut)">'+esc(String(x.district||'—').slice(0,46))+'</td>'
+          + '<td>'+team+'</td><td style="font-size:11.5px">'+loc+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  return '<div class="card">'+head+body+'</div>';
+}
+
 function _ctStageInfo(s){
   var ar=(L==='ar');
   if(s==='in_progress') return {t:ar?'قيد التنظيف':'In progress', c:'#3b82c4', ic:'🔄'};
@@ -36563,7 +36850,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "listings", "quality", "pmo", "design"]},
+                                  "cleanteams", "coverage", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio"]},
@@ -36586,6 +36873,7 @@ NAV_DEF = {
         {"id": "strat", "ic": "strat", "tk": "strat"},
         {"id": "clean", "ic": "clean", "tk": "clean", "badge": "clean"},
         {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
+        {"id": "coverage", "ic": "cleanteams", "tk": "coverage"},
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -36618,7 +36906,7 @@ NAV_DEF = {
             "decor": "تنسيق الحفلات",
             "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
-            "cleanteams": "فرق التنظيف", "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
+            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
@@ -36636,7 +36924,7 @@ NAV_DEF = {
             "decor": "Decoration Orders",
             "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
-            "cleanteams": "Cleaning Teams", "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
+            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
@@ -52967,6 +53255,7 @@ _ROLE_READ_RULES = [
     ("/api/decor/", "decor"),
     ("/api/inbox", "inbox"),
     ("/api/brain/", "brain"),
+    ("/api/coverage/", "coverage"),
 ]
 
 def _perm_403(tab, action):
@@ -53549,6 +53838,55 @@ async def start_web_server():
                       % _decor.notify.dryrun())
             except Exception as _de:
                 print("[decor] wiring failed (decoration orders disabled, bot unaffected):", _de)
+
+        # ---- «تغطية التنظيف» — the coverage study. READ-ONLY: every capability below is
+        # a getter. It reads the same stores the cleaning ops already use and computes
+        # locations, crew split, OujaCT throughput and the hiring model from them.
+        if _HAS_COVERAGE:
+            try:
+                def _cov_guide_units():
+                    """Guide rows carry the Google Maps pin the owner asked us to use."""
+                    if not _HAS_GUIDE:
+                        return []
+                    try:
+                        return [{"slug": u.get("slug"), "listing_id": u.get("listing_id"),
+                                 "listing_name": u.get("listing_name"),
+                                 "map_link": u.get("map_link")}
+                                for u in _guide.db.units(active_only=True)]
+                    except Exception as _cge:
+                        print("[coverage] guide units unavailable:", _cge)
+                        return []
+
+                def _cov_turnovers(start, end):
+                    """Real checkouts in [start, end] — the honest demand figure.
+                    Uses the TARGETED window query, never the truncated history cache
+                    (CLAUDE.md trap #4)."""
+                    rows = fetch_reservations_window(start, end) or []
+                    n = 0
+                    for r in rows:
+                        if str(r.get("status") or "") not in ("new", "modified"):
+                            continue
+                        d = str(r.get("departureDate") or "")[:10]
+                        if d and start <= d <= end:
+                            n += 1
+                    return n
+
+                _coverage.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json,
+                    "load_json": _load_json, "save_json": _save_json, "tz": TZ,
+                    "listings": lambda: list(_ls_get()["listings"].values()),
+                    "teams": lambda: list(_cleaning_teams.values()),
+                    "guide_units": _cov_guide_units,
+                    "status_log": lambda: list(_oujact_status),
+                    "reports": lambda: list(_cleaning_reports.values()),
+                    "photos": lambda: list(_cleaning_report_photos.values()),
+                    "turnovers": _cov_turnovers,
+                    "maps_key": lambda: GOOGLE_MAPS_API_KEY,
+                })
+                _coverage.register_routes(app)
+                print("[coverage] wired + routes registered (/api/coverage/study, /api/coverage/geo)")
+            except Exception as _ce:
+                print("[coverage] wiring failed (coverage tab disabled, bot unaffected):", _ce)
 
         # ---- «نظام الالتزام» — weekly-report ladder + warnings. Additive; reuses brain.db,
         # the Employee Calendar (the ONE employee list) and assignments.json's Discord ids.
