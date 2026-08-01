@@ -1926,6 +1926,27 @@ def _stay_summary(reservation):
     }
 
 
+def _reservation_guest_count(reservation):
+    """Best available party size from a Hostaway reservation."""
+    for key in ("numberOfGuests", "guestCount", "guestsCount"):
+        try:
+            value = int(reservation.get(key) or 0)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    total = 0
+    found = False
+    for key in ("adults", "children", "infants"):
+        try:
+            value = int(reservation.get(key) or 0)
+            total += max(0, value)
+            found = found or value > 0
+        except (TypeError, ValueError):
+            pass
+    return total if found and total > 0 else None
+
+
 def _early_checkin_context_from_rows(listing_id, reservation_id, arrival, departure, rows):
     """Find the realized stays immediately before and after this stay."""
     relevant = []
@@ -1962,7 +1983,8 @@ def _check_early_alternative(unit, previous_night, arrival, departure):
         return None, True
     return {
         "id": unit["id"], "name": unit["name"],
-        "beds": unit.get("beds"), "area": unit.get("area") or unit.get("neighbourhood"),
+        "beds": unit.get("beds"), "capacity": unit.get("capacity"),
+        "area": unit.get("area") or unit.get("neighbourhood"),
         "link": unit.get("link"), "price": unit.get("price"),
         "nights": info.get("nights"), "total": info.get("total"),
         "avg": info.get("avg"), "available": True,
@@ -1984,6 +2006,7 @@ def early_checkin_context(reservation_id, listing_id):
         if not arrival:
             return None
         departure = _parse_date(r.get("departureDate")) or (arrival + timedelta(days=1))
+        guests = _reservation_guest_count(r)
     except Exception as e:
         print(f"early_checkin_context arrival fetch error: {e}")
         return None
@@ -2006,10 +2029,12 @@ def early_checkin_context(reservation_id, listing_id):
         current = next((u for u in _catalog_units
                         if str(u.get("id")) == str(listing_id)), {})
         want = {"beds": current.get("beds"), "area": current.get("area"),
-                "tags": list(current.get("tags") or [])[:3]}
+                "capacity": guests, "tags": list(current.get("tags") or [])[:3]}
         candidates = sorted(
             [u for u in _catalog_units if u.get("id")
-             and str(u["id"]) != str(listing_id)],
+             and str(u["id"]) != str(listing_id)
+             and (not guests or (u.get("capacity")
+                                  and int(u["capacity"]) >= int(guests)))],
             key=lambda u: -_unit_match_score(u, want),
         )
         checked = {}
@@ -2036,6 +2061,7 @@ def early_checkin_context(reservation_id, listing_id):
         "prev_night": prev_night.isoformat(),
         "arrival": arrival.isoformat(),
         "departure": departure.isoformat(),
+        "guests": guests,
         "alternatives": alternatives,
         "alternatives_checked": alternatives_checked,
         "previous": neighbors["previous"],
@@ -3225,6 +3251,11 @@ def _normalize_guest_score(raw, facts):
         score = min(score, 5)
         resolved = False
         reason = reason or "الضيف كرر طلبه ولم يصله رد بعد"
+    if facts.get("open_complaint"):
+        # Objective message evidence wins over a model claiming the issue is resolved.
+        resolved = False
+        score = min(score, 6)
+        reason = reason or "شكوى ما زالت مفتوحة وتحتاج متابعة"
     if facts.get("open_complaint") and severity == "angry" and not resolved:
         score = min(score, 3)
         reason = reason or "شكوى شديدة ما زالت مفتوحة"
@@ -7707,8 +7738,12 @@ def load_catalog(force=False):
         return
     try:
         data = api_get("/listings", params={"limit": 100, "includeResources": 1})
+        source = (data or {}).get("result")
+        if not isinstance(source, list) or not source:
+            print("catalog: Hostaway returned no listings; keeping the last known catalog")
+            return
         rows, units, skipped = [], [], 0
-        for L in (data.get("result", []) or []):
+        for L in source:
             name = (L.get("internalListingName") or L.get("name") or "").strip()
             if not name:
                 continue
@@ -7779,7 +7814,8 @@ def unit_availability_price(listing_id, checkin, checkout):
         data = api_get(f"/listings/{listing_id}/calendar",
                        params={"startDate": ci.isoformat(), "endDate": last_night.isoformat()})
         days = data.get("result", []) or []
-        if days:
+        # A truncated Hostaway response is UNKNOWN, never a shorter fully-free stay.
+        if len(days) == nights:
             available = all(int(d.get("isAvailable", 0) or 0) == 1 for d in days)
             prices = [d.get("price") for d in days
                       if isinstance(d.get("price"), (int, float)) and d.get("price") > 0]
@@ -7925,6 +7961,7 @@ _ALT_PHRASES = [
     "متوفره شقه", "متوفره وحده",
     "ابي شقة", "أبي شقة", "ابغى شقة", "أبغى شقة", "احتاج شقة", "أحتاج شقة",
     "ادور شقة", "أدور شقة", "حجز شقة", "ابي استوديو", "أبي استوديو",
+    "ابحث عن سكن", "أبحث عن سكن", "ادور سكن", "أدور سكن", "احتاج سكن", "أحتاج سكن",
     # multi-bedroom shopping (clearly looking around)
     "غرفتين", "ثلاث غرف", "ثلاث غرفه", "اربع غرف", "أربع غرف",
     "studio apartment", "two bedroom", "three bedroom", "2 bedroom", "3 bedroom",
@@ -7936,6 +7973,7 @@ _ALT_PHRASES = [
     "do you have other", "do you have another",
     "i need an apartment", "i want an apartment", "looking for an apartment",
     "i need a unit", "i want a unit", "looking for a unit",
+    "looking for accommodation", "i need accommodation", "i want accommodation",
 ]
 
 def _is_asking_alternatives(text):
@@ -8001,6 +8039,49 @@ def _extract_apartment_dates(text, supplied_dates=None):
                 parsed.append(date(int(year), int(month), int(day)))
             except ValueError:
                 pass
+    if len(parsed) < 2:
+        months = {
+            "يناير": 1, "فبراير": 2, "مارس": 3, "أبريل": 4, "ابريل": 4,
+            "مايو": 5, "يونيو": 6, "يوليو": 7, "أغسطس": 8, "اغسطس": 8,
+            "سبتمبر": 9, "أكتوبر": 10, "اكتوبر": 10, "نوفمبر": 11, "ديسمبر": 12,
+            "january": 1, "february": 2, "march": 3, "april": 4, "may": 5,
+            "june": 6, "july": 7, "august": 8, "september": 9, "october": 10,
+            "november": 11, "december": 12,
+        }
+        parsed = []
+        month_words = "|".join(sorted((re.escape(k) for k in months), key=len, reverse=True))
+        low = raw.lower()
+        natural = re.findall(
+            rf"(?:\b(\d{{1,2}})\s+({month_words})\s*,?\s*(20\d{{2}})\b|"
+            rf"\b({month_words})\s+(\d{{1,2}})\s*,?\s*(20\d{{2}})\b)",
+            low,
+        )
+        for day_first, month_first, year_first, month_en, day_en, year_en in natural:
+            day_value = day_first or day_en
+            month_value = month_first or month_en
+            year_value = year_first or year_en
+            try:
+                parsed.append(date(int(year_value), months[month_value], int(day_value)))
+            except (KeyError, ValueError):
+                pass
+        if len(parsed) < 2:
+            shared = re.search(
+                rf"(?:من|from)?\s*(\d{{1,2}})\s*(?:إلى|الى|to|[-–])\s*"
+                rf"(\d{{1,2}})\s+({month_words})(?:\s*,?\s*(20\d{{2}}))?",
+                low,
+            )
+            if shared:
+                first_day, last_day, month_word, year_word = shared.groups()
+                year_value = int(year_word or datetime.now(TZ).year)
+                try:
+                    first = date(year_value, months[month_word], int(first_day))
+                    last = date(year_value, months[month_word], int(last_day))
+                    if not year_word and last < datetime.now(TZ).date():
+                        first = date(year_value + 1, months[month_word], int(first_day))
+                        last = date(year_value + 1, months[month_word], int(last_day))
+                    parsed = [first, last]
+                except (KeyError, ValueError):
+                    pass
     if len(parsed) >= 2 and parsed[-1] > parsed[-2]:
         return parsed[-2].isoformat(), parsed[-1].isoformat()
     supplied_dates = supplied_dates or ()
@@ -8045,6 +8126,7 @@ def _apartment_requirements(history_text, supplied_dates=None):
     budget = None
     budget_patterns = (
         r"(?:ميزاني(?:ة|ه)|budget)[^\d]{0,24}(\d{2,6})",
+        r"(?:sar|ريال|ر\.?\s*س)\s*(\d{2,6})\s*(?:per night|nightly|لليلة|بالليلة)?",
         r"(\d{2,6})\s*(?:ر\.?\s*س|ريال|sar)?\s*(?:لليلة|بالليلة|في الليلة|per night|nightly)",
     )
     for pattern in budget_patterns:
@@ -9637,6 +9719,49 @@ def _once_release(name):
         print("once_release error:", e)
         return False
 
+
+def _permanent_once_claim(name):
+    """Atomic, non-expiring claim for irreversible manager decisions.
+
+    Unlike message de-duplication, a final approval/rejection must never become
+    eligible again after a TTL. Storage errors fail closed so two bot copies
+    cannot both tell a guest that they made the final decision.
+    """
+    import hashlib
+    try:
+        directory = _state_path("permanent_locks")
+        os.makedirs(directory, exist_ok=True)
+        marker = os.path.join(
+            directory, hashlib.sha1(str(name).encode("utf-8")).hexdigest()[:24])
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        try:
+            os.write(fd, str(time.time()).encode("utf-8"))
+        finally:
+            os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except Exception as e:
+        print("permanent_once_claim error (blocking):", e)
+        return False
+
+
+def _permanent_once_release(name):
+    """Release an irreversible-action claim only when that action failed."""
+    import hashlib
+    try:
+        marker = os.path.join(
+            _state_path("permanent_locks"),
+            hashlib.sha1(str(name).encode("utf-8")).hexdigest()[:24],
+        )
+        os.remove(marker)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception as e:
+        print("permanent_once_release error:", e)
+        return False
+
 # send_guest_message outcomes a caller MUST distinguish (a suppressed no-op that
 # reads as success means a guest silently never gets a reply):
 SEND_BLOCKED_KILL = "blocked_kill_switch"   # kill switch on — nothing was sent
@@ -9723,7 +9848,7 @@ def _early_guest_reply(record, decision, reason=""):
                     "بنرسل لك تعليمات الدخول المعتادة قبل وصولك.")
         return (f"Good news 🤍 the manager approved your early check-in at {when}. "
                 "We will send the usual entry instructions before you arrive.")
-    reason = str(reason or "").strip()
+    reason = _redact_early_private_names(record, reason)
     if is_ar:
         why = reason or "ترتيب الوحدة ما يسمح بالدخول قبل الوقت الرسمي"
         return (f"نعتذر منك، ما قدرنا نعتمد تسجيل الدخول المبكر: {why}. "
@@ -9731,6 +9856,18 @@ def _early_guest_reply(record, decision, reason=""):
     why = reason or "the apartment schedule does not allow entry before the official time"
     return (f"Sorry, we could not approve early check-in because {why}. "
             "The official check-in time remains 3:00 PM.")
+
+
+def _redact_early_private_names(record, text):
+    """Remove internal neighboring guest names from any manager-authored outbound reason."""
+    cleaned = str(text or "").strip()
+    replacement = ("ضيف آخر" if _has_arabic(record.get("guest_text") or "")
+                   else "another guest")
+    for key in ("previous", "next"):
+        name = str((record.get(key) or {}).get("guest") or "").strip()
+        if len(name) >= 2:
+            cleaned = re.sub(re.escape(name), replacement, cleaned, flags=re.IGNORECASE)
+    return cleaned
 
 
 def _early_pending_reply(record):
@@ -9999,9 +10136,16 @@ class EarlyDecisionConfirmView(discord.ui.View):
                 content=f"تم اتخاذ القرار مسبقاً بواسطة {existing.get('decided_by') or 'أحد الفريق'}.",
                 view=None)
             return
+        decision_claim = f"early-decision:{self.message_id}"
+        if not _permanent_once_claim(decision_claim):
+            await interaction.response.edit_message(
+                content="⚠️ القرار قيد الإرسال أو تم إرساله من نسخة أخرى. حدّث الكرت بعد لحظات.",
+                view=None)
+            return
         row = _decide_early_checkin(
             self.message_id, self.decision, actor, self.reason)
         if not row:
+            _permanent_once_release(decision_claim)
             await interaction.response.edit_message(
                 content="⚠️ ما قدرت أسجل القرار. السبب مطلوب عند الرفض.", view=None)
             return
@@ -10012,6 +10156,7 @@ class EarlyDecisionConfirmView(discord.ui.View):
                 send_guest_message, row["conversation_id"], reply, row.get("comm_type") or "email")
             if result == SEND_BLOCKED_KILL:
                 _reset_early_checkin_decision(self.message_id, actor)
+                _permanent_once_release(decision_claim)
                 await interaction.followup.send(
                     "⛔ ما تم الإرسال لأن إيقاف رسائل الضيوف مفعّل. الكرت ما زال مفتوحاً.",
                     ephemeral=True)
@@ -10026,6 +10171,7 @@ class EarlyDecisionConfirmView(discord.ui.View):
                 ephemeral=True)
         except Exception as e:
             _reset_early_checkin_decision(self.message_id, actor)
+            _permanent_once_release(decision_claim)
             await interaction.followup.send(
                 f"⚠️ فشل الإرسال، وبقي الكرت مفتوحاً: {e}", ephemeral=True)
 
@@ -10988,7 +11134,8 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
         if cid in _claimed_convos:
             embed.add_field(name="🙋 مستلمة",
                             value="الموضوع مستلم من أحد الفريق — ما أرسلنا رد تلقائي.", inline=False)
-        elif ASSISTANT_ESC_ACK:
+        elif ASSISTANT_ESC_ACK and _claim_offhours_ack(
+                cid, bool(item.get("_offhours"))):
             _esc_ack_count[cid] = _esc_ack_count.get(cid, 0) + 1
             n = _esc_ack_count[cid]
             is_ar = _has_arabic(item["guest_text"])
@@ -11022,14 +11169,27 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                               item["history"], item["guest_text"]) \
                        or (ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN)
             try:
-                await asyncio.to_thread(send_guest_message, cid, ack, item["comm_type"])
-                _esc_sent_acks.setdefault(cid, []).append(ack)
-                embed.add_field(name="📤 تم إبلاغ الضيف",
-                                value=("رسالة طمأنة متعاطفة (متابعة)" if n > 1
-                                       else "رسالة طمأنة إنه تم تصعيد طلبه للقسم المختص."),
-                                inline=False)
+                ack_result = await asyncio.to_thread(
+                    send_guest_message, cid, ack, item["comm_type"])
+                if ack_result == SEND_BLOCKED_KILL:
+                    _release_offhours_ack(cid, offhours_now)
+                    embed.add_field(
+                        name="⚠️ تعذّر إبلاغ الضيف",
+                        value="إيقاف رسائل الضيوف مفعّل.", inline=False)
+                else:
+                    _esc_sent_acks.setdefault(cid, []).append(ack)
+                    embed.add_field(name="📤 تم إبلاغ الضيف",
+                                    value=("رسالة طمأنة متعاطفة (متابعة)" if n > 1
+                                           else "رسالة طمأنة إنه تم تصعيد طلبه للقسم المختص."),
+                                    inline=False)
             except Exception as e:
+                _release_offhours_ack(cid, offhours_now)
                 embed.add_field(name="⚠️ تعذّر إبلاغ الضيف", value=str(e), inline=False)
+        elif ASSISTANT_ESC_ACK and item.get("_offhours"):
+            embed.add_field(
+                name="🌙 سبق إبلاغ الضيف خارج الدوام",
+                value="لم نكرر رسالة الانتظار؛ التصعيد الجديد ظاهر للفريق هنا.",
+                inline=False)
         embed.set_footer(text=f"النوع: {intent} · المشاعر: {sent_ar} · الثقة: {round(conf*100)}% · "
                               f"يُذكَّر الفريق كل ~{ESCALATION_REPING_MIN} دقيقة (بحد أقصى {ESCALATION_REPING_MAX_PINGS} تذكيرات، ويهدأ خارج أوقات العمل)")
         # One-tap "reach the guest" buttons (WhatsApp + Airbnb/Hostaway) so the team
@@ -11270,10 +11430,25 @@ async def _post_early_decision_card(channel, item, record):
     _early_checkin_decisions[msg.id] = record
     await asyncio.to_thread(_persist_early_state)
     pending = _early_pending_reply(record)
-    result = await asyncio.to_thread(
-        send_guest_message, record["conversation_id"], pending, record["comm_type"])
-    if result not in (SEND_BLOCKED_KILL, SEND_SUPPRESSED):
-        record["pending_sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    try:
+        result = await asyncio.to_thread(
+            send_guest_message, record["conversation_id"], pending, record["comm_type"])
+        if result not in (SEND_BLOCKED_KILL, SEND_SUPPRESSED):
+            record["pending_sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        elif result == SEND_BLOCKED_KILL:
+            record["pending_send_error"] = "kill switch"
+    except Exception as e:
+        record["pending_send_error"] = str(e)[:300]
+        embed.add_field(
+            name="⚠️ لم تصل رسالة الانتظار للضيف",
+            value="اتخذ القرار من الكرت، أو تواصل مع الضيف يدوياً إذا كان الطلب عاجلاً.",
+            inline=False,
+        )
+        try:
+            await msg.edit(embed=embed, view=EarlyCheckinDecisionView())
+        except Exception as edit_error:
+            print("early pending warning edit error:", edit_error)
+    await asyncio.to_thread(_persist_early_state)
     metric_bump("escalations_created")
     log_event("escalation", f"قرار دخول مبكر · {record.get('guest')} · {title_unit}")
 
@@ -11394,7 +11569,7 @@ async def handle_apartment_search_item(item, channel):
         return True
 
     matches, conclusive = await asyncio.to_thread(_scan_apartment_matches, requirements)
-    if not matches and not conclusive:
+    if not conclusive:
         result = {
             "action": "escalate", "intent": "apartment_search",
             "sentiment": "ok", "confidence": 1.0, "reply": "",
@@ -11426,6 +11601,16 @@ async def handle_apartment_search_item(item, channel):
     await channel.send(embed=embed)
     log_event("guest", f"بحث شقق · {item.get('guest')} · {len(matches)} خيارات")
     return True
+
+
+def _assistant_failure_result(detail=""):
+    """Fail closed: an unavailable drafting model always becomes a human escalation."""
+    suffix = (f" ({str(detail)[:120]})" if detail else "")
+    return {
+        "action": "escalate", "intent": "تعذر توليد الرد",
+        "sentiment": "ok", "confidence": 1.0, "reply": "",
+        "reason": "تعذر توليد رد موثوق؛ تعامل مع رسالة الضيف يدوياً" + suffix,
+    }
 
 async def process_assistant_item(it, channel):
     """Draft + post a card (or escalate) for ONE guest message. Shared by the poll
@@ -11498,6 +11683,12 @@ async def process_assistant_item(it, channel):
         (it.get("checkin"), it.get("checkout")), it.get("listing_id"),
         it.get("reservation_id"), it.get("guest_profile_key"))
     if not result:
+        result = _assistant_failure_result("Anthropic unavailable or invalid response")
+        try:
+            await post_assistant_card(channel, it, result, guide, confirmed)
+            log_event("escalation", f"تعذر رد Claude · {it['guest']} · {it['unit']}")
+        except Exception as e:
+            print("assistant failure escalation error:", e)
         return
     try:
         await post_assistant_card(channel, it, result, guide, confirmed)
@@ -11946,6 +12137,27 @@ WORK_END_HOUR    = int(os.environ.get("WORK_END_HOUR", "24"))    # midnight
 WORK_END_MIN     = int(os.environ.get("WORK_END_MIN", "0"))
 OFFHOURS_AUTOREPLY_ENABLED = os.environ.get("OFFHOURS_AUTOREPLY_ENABLED", "1") in ("1","true","True","yes")
 _offhours_acked_convos = set()    # conversation_ids we already auto-replied to in the current off-hours window
+_offhours_ack_lock = threading.Lock()
+
+
+def _claim_offhours_ack(conversation_id, offhours):
+    """Atomically allow only one off-hours escalation acknowledgement per chat."""
+    if not offhours:
+        return True
+    cid = str(conversation_id or "")
+    with _offhours_ack_lock:
+        if cid in _offhours_acked_convos:
+            return False
+        _offhours_acked_convos.add(cid)
+        return True
+
+
+def _release_offhours_ack(conversation_id, offhours):
+    """Allow a retry when the claimed off-hours acknowledgement was not sent."""
+    if not offhours:
+        return
+    with _offhours_ack_lock:
+        _offhours_acked_convos.discard(str(conversation_id or ""))
 
 # ---------------- WILT: What I Learned Today ----------------
 # Once a day at WILT_HOUR Riyadh, post a daily journal-style summary to
@@ -31932,7 +32144,6 @@ async def owner_warm_loop():
 def _owner_portal_data(owner, mkey):
     """Everything the owner page renders, computed from real stores only. Missing data
     stays null/empty and the page shows honest empty-states — nothing interpolated."""
-    import calendar as _cal
     listings = get_listings_map() or {}
     lids = _owner_lids(owner, listings)
     today = datetime.now(TZ).date()
@@ -39125,9 +39336,6 @@ def parse_ar_freeform_date(s, today=None):
                     except ValueError:
                         pass
     return None, False
-
-# Add a 'date' alias at module level since we use it in the helper above
-from datetime import date  # noqa: E402
 
 async def _api_cleaning_import_xlsx(request):
     """POST multipart 'file' = .xlsx with one row per apartment.

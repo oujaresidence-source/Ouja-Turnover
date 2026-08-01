@@ -21,6 +21,11 @@ class _Response:
 
 
 class TestMusaedModelRouting(unittest.TestCase):
+    def test_anthropic_failure_routes_to_human(self):
+        result = bot._assistant_failure_result("Anthropic unavailable")
+        self.assertEqual(result["action"], "escalate")
+        self.assertEqual(result["reply"], "")
+
     def test_guest_draft_uses_sonnet_five_without_adaptive_thinking(self):
         response = _Response(
             '{"action":"reply","reply":"Hello","intent":"other",'

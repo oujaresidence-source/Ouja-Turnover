@@ -25,6 +25,19 @@ class TestGuestScoreNormalization(unittest.TestCase):
         got = bot._normalize_guest_score(raw, {"open_complaint": True})
         self.assertEqual(got["score"], 3)
 
+    def test_objective_open_complaint_overrides_model_resolved_claim(self):
+        raw = {"score": 9, "severity": "angry", "resolved": True,
+               "reason": "مشكلة دخول", "quote": "ما قدرت أدخل", "confidence": 0.9}
+        got = bot._normalize_guest_score(raw, {"open_complaint": True})
+        self.assertEqual(got["score"], 3)
+        self.assertFalse(got["resolved"])
+
+    def test_any_open_complaint_cannot_look_perfect(self):
+        raw = {"score": 10, "severity": "upset", "resolved": False,
+               "reason": "مشكلة تكييف", "confidence": 0.9}
+        got = bot._normalize_guest_score(raw, {"open_complaint": True})
+        self.assertLessEqual(got["score"], 6)
+
     def test_repeated_unanswered_request_caps_score_at_five(self):
         raw = {"score": 9, "resolved": True, "confidence": 0.8}
         got = bot._normalize_guest_score(raw, {"inbound_after_last_host": 2})

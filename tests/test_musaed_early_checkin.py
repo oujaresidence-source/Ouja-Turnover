@@ -1,5 +1,6 @@
 """MUSAED early-check-in decisions, with synthetic Hostaway facts only."""
 
+import tempfile
 import unittest
 from datetime import date, datetime
 from unittest import mock
@@ -116,6 +117,39 @@ class TestEarlyCheckinContext(unittest.TestCase):
         self.assertEqual([row["id"] for row in got["alternatives"]], [8])
         self.assertEqual(got["alternatives"][0]["total"], 1800)
 
+    def test_alternative_never_offers_a_unit_too_small_for_the_booking(self):
+        reservation = {"result": {"id": 11, "listingMapId": 7,
+                                   "arrivalDate": "2026-08-05",
+                                   "departureDate": "2026-08-08",
+                                   "numberOfGuests": 4}}
+        units = [
+            {"id": 8, "name": "Too small", "beds": 1, "capacity": 2},
+            {"id": 9, "name": "Fits", "beds": 2, "capacity": 4},
+            {"id": 10, "name": "Capacity unknown", "beds": 2},
+        ]
+        with mock.patch.object(bot, "api_get", return_value=reservation), \
+             mock.patch.object(bot, "_catalog_units", units), \
+             mock.patch.object(bot, "_catalog_ts", 1.0), \
+             mock.patch.object(bot, "_calendar_night_state", side_effect=lambda lid, _d: (
+                 "occupied" if lid == 7 else "free")), \
+             mock.patch.object(bot, "unit_availability_price", return_value={
+                 "available": True, "nights": 3, "total": 1800, "avg": 600}), \
+             mock.patch.object(bot, "fetch_reservations_window", return_value=self.ROWS):
+            got = bot.early_checkin_context(11, 7)
+        self.assertEqual([row["id"] for row in got["alternatives"]], [9])
+        self.assertEqual(got["guests"], 4)
+
+    def test_empty_listing_response_does_not_replace_a_known_catalog(self):
+        old_units = [{"id": 99, "name": "Known"}]
+        with mock.patch.object(bot, "_catalog_units", old_units), \
+             mock.patch.object(bot, "_catalog_text", "Known"), \
+             mock.patch.object(bot, "_catalog_ts", 123.0), \
+             mock.patch.object(bot, "api_get", return_value={"result": []}):
+            bot.load_catalog(force=True)
+            self.assertEqual(bot._catalog_units, old_units)
+            self.assertEqual(bot._catalog_text, "Known")
+            self.assertEqual(bot._catalog_ts, 123.0)
+
 
 class TestWorkingHours(unittest.TestCase):
     def test_midnight_is_outside_working_hours(self):
@@ -142,6 +176,18 @@ class TestEarlyDecision(unittest.TestCase):
         self.assertEqual(second["status"], "approved")
         self.assertEqual(second["decided_by"], "Faisal")
 
+    def test_permanent_decision_claim_never_expires_and_can_release_after_failure(self):
+        with tempfile.TemporaryDirectory() as state_dir, \
+             mock.patch.object(bot, "STATE_DIR", state_dir):
+            self.assertTrue(bot._permanent_once_claim("early-decision:44"))
+            self.assertFalse(bot._permanent_once_claim("early-decision:44"))
+            self.assertTrue(bot._permanent_once_release("early-decision:44"))
+            self.assertTrue(bot._permanent_once_claim("early-decision:44"))
+
+    def test_permanent_decision_claim_fails_closed_when_storage_is_unavailable(self):
+        with mock.patch.object(bot.os, "makedirs", side_effect=OSError("readonly")):
+            self.assertFalse(bot._permanent_once_claim("early-decision:45"))
+
     def test_rejection_requires_reason(self):
         bot._early_checkin_decisions[45] = {"status": "pending"}
         self.assertIsNone(
@@ -167,6 +213,17 @@ class TestEarlyDecision(unittest.TestCase):
             record, "reject", "جدول التنظيف ما يسمح بالدخول في هذا الوقت")
         self.assertIn("جدول التنظيف", reply)
         self.assertIn("3", reply)
+
+    def test_custom_rejection_reason_redacts_neighbor_names(self):
+        record = {
+            "guest_text": "Can I check in at noon?",
+            "previous": {"guest": "PRIVATE PREVIOUS"},
+            "next": {"guest": "PRIVATE NEXT"},
+        }
+        reply = bot._early_guest_reply(
+            record, "reject", "PRIVATE PREVIOUS needs more time")
+        self.assertNotIn("PRIVATE PREVIOUS", reply)
+        self.assertNotIn("PRIVATE NEXT", reply)
 
     def test_verified_alternatives_are_guest_safe_and_require_manager(self):
         record = {

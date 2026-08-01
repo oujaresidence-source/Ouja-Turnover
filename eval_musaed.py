@@ -429,6 +429,36 @@ def _parse_judge(text):
 # Default real draft / judge functions (call into bot.py). Both are injectable
 # so --selftest can run with mocks and ZERO network/keys.
 # ---------------------------------------------------------------------------
+def deterministic_route_draft(case):
+    """Evaluate live deterministic MUSAED branches without Hostaway writes or reads."""
+    route = case.get("deterministic_route") or {}
+    kind = route.get("kind")
+    if not kind:
+        return None
+    b = _bot()
+    record = dict(route.get("record") or {})
+    record.setdefault("guest_text", last_guest_line(case))
+    if kind == "early_free":
+        reply = b._early_pending_reply(record)
+    elif kind == "early_alternatives":
+        reply = b._early_alternatives_reply(record)
+    elif kind == "early_unavailable":
+        reply = b._early_unavailable_reply(record)
+    elif kind == "early_unknown":
+        return {"action": "escalate", "reply": "", "intent": "تسجيل دخول مبكر",
+                "sentiment": "ok", "confidence": 1.0,
+                "reason": "تعذر التحقق من Hostaway"}
+    elif kind == "apartment_qualification":
+        requirements = b._apartment_requirements(render_history(case.get("history")))
+        missing = b._missing_apartment_requirements(requirements)
+        reply = b._apartment_qualification_reply(
+            requirements, missing, arabic=(case.get("lang") != "en"))
+    else:
+        return None
+    return {"action": "reply", "reply": reply, "intent": case.get("intent") or "",
+            "sentiment": "ok", "confidence": 1.0, "reason": ""}
+
+
 def real_draft(case):
     """Draft via Musaed's real brain. Returns the draft dict or None.
 
@@ -436,6 +466,8 @@ def real_draft(case):
     rate limits and return None. We retry with backoff here so transient 429/529s don't
     sink the whole run (the live assistant rarely hits this — it calls one at a time)."""
     b = _bot()
+    if case.get("deterministic_route"):
+        return deterministic_route_draft(case)
     guest_name = case.get("guest") or "Guest"
     unit = case.get("unit") or ""
     hist = render_history(case.get("history"), last_guest_line(case))
@@ -672,7 +704,7 @@ def set_baseline(dirpath=None):
 
 # Bump this whenever the built-in seed changes so it auto-propagates to volumes still
 # running an untouched seed — WITHOUT ever overwriting a set the owner curated via /eval.
-_SEED_VERSION = 2
+_SEED_VERSION = 3
 
 
 def _seed_meta_path(dirpath=None):
@@ -1388,6 +1420,30 @@ def selftest():
     check(not door_code_leak("تسجيل الخروج الساعة 12:00", "كود")[0], "ignores HH:MM times")
     check(not door_code_leak("السعر 1450 ريال", "كود")[0], "ignores prices (1450 ريال)")
     check(not door_code_leak("نشوفك سنة 2026", "كود")[0], "ignores 4-digit years")
+
+    # --- deterministic guest-operations gates (no network) ---
+    print("\n[guest operations]")
+    b = _bot()
+    check(b._early_checkin_request("هل أقدر أدخل الساعة ١٢؟")["requested_minutes"] == 720,
+          "detects an ordinary Arabic noon early-check-in request")
+    check(b._early_checkin_request("Can I check in at 3 pm?") is None,
+          "does not treat official 3 PM as early check-in")
+    private = {"guest_text": "Can I arrive at noon?", "requested_label": "12:00 PM",
+               "previous": {"guest": "PRIVATE NAME"}}
+    check("PRIVATE NAME" not in b._early_guest_reply(private, "approve"),
+          "never leaks neighboring guest names in outbound replies")
+    req = b._apartment_requirements("Guest: أبي شقة في الرياض")
+    check(b._missing_apartment_requirements(req)
+          == ["dates", "guests", "bedrooms", "area", "budget", "must_haves"],
+          "asks all apartment qualification gaps in one turn")
+    payload = b._claude_request_payload("claude-sonnet-5", 300, "system", "user")
+    check(payload.get("thinking") == {"type": "disabled"}
+          and payload.get("max_tokens", 0) >= 1000,
+          "builds safe short-call payloads for Sonnet 5")
+    check(b._normalize_guest_score(
+        {"score": 9, "resolved": False, "confidence": 0.9},
+        {"open_escalation": True})["score"] == 6,
+          "objective open escalation caps guest score at 6")
 
     dirpath = tempfile.mkdtemp(prefix="eval_self_")
     cases = _selftest_cases()

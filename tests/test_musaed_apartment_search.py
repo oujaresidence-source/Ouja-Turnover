@@ -12,6 +12,7 @@ class TestApartmentQualification(unittest.TestCase):
         self.assertTrue(bot._is_apartment_search("أبي شقة في الرياض"))
         self.assertTrue(bot._is_apartment_search("Do you have an apartment?"))
         self.assertTrue(bot._is_apartment_search("I need an apartment in Riyadh"))
+        self.assertTrue(bot._is_apartment_search("أبحث عن سكن بالرياض"))
         self.assertFalse(bot._is_apartment_search("هل الواي فاي متاح في الشقة؟"))
 
     def test_all_missing_questions_are_asked_in_one_message(self):
@@ -54,6 +55,25 @@ class TestApartmentQualification(unittest.TestCase):
         self.assertEqual(req["budget"], 700)
         self.assertEqual(set(req["must_haves"]), {"parking", "wifi"})
         self.assertEqual(bot._missing_apartment_requirements(req), [])
+
+    def test_natural_month_names_are_understood(self):
+        ar = bot._apartment_requirements(
+            "Guest: من 10 أغسطس 2026 إلى 13 أغسطس 2026، 4 ضيوف، غرفتين، "
+            "أي حي، 700 لليلة، بدون متطلبات")
+        en = bot._apartment_requirements(
+            "Guest: August 10, 2026 to August 13, 2026, 4 guests, two bedroom, "
+            "any area, SAR 700 per night, no requirements")
+        self.assertEqual((ar["checkin"], ar["checkout"]),
+                         ("2026-08-10", "2026-08-13"))
+        self.assertEqual((en["checkin"], en["checkout"]),
+                         ("2026-08-10", "2026-08-13"))
+
+    def test_shared_month_yearless_range_is_understood(self):
+        req = bot._apartment_requirements(
+            "Guest: أبحث عن سكن من 5 إلى 8 أغسطس، 4 ضيوف، غرفتين، "
+            "أي حي، 700 لليلة، بدون متطلبات")
+        self.assertEqual((req["checkin"], req["checkout"]),
+                         ("2026-08-05", "2026-08-08"))
 
     def test_explicit_no_preferences_fulfils_optional_questions(self):
         history = (
@@ -109,6 +129,47 @@ class TestVerifiedApartmentMatches(unittest.TestCase):
         self.assertIn("SAR 1800", reply)
         self.assertIn("matches all", reply.lower())
         self.assertIn("does not fully match", reply.lower())
+
+    def test_partial_calendar_is_unknown_not_available(self):
+        partial = {"result": [{"isAvailable": 1, "price": 500}]}
+        key = (91, "2026-08-10", "2026-08-13")
+        bot._avail_cache.pop(key, None)
+        with mock.patch.object(bot, "api_get", return_value=partial):
+            got = bot.unit_availability_price(91, "2026-08-10", "2026-08-13")
+        self.assertIsNone(got)
+
+    def test_one_unknown_lookup_makes_the_whole_guest_scan_inconclusive(self):
+        req = {
+            "checkin": "2026-08-10", "checkout": "2026-08-13", "guests": 4,
+            "bedrooms": 2, "area": "الملقا", "budget": 700,
+            "must_haves": ["wifi"],
+        }
+
+        def availability(lid, _ci, _co):
+            if lid == 4:
+                return None
+            return {"available": lid == 1, "nights": 3, "total": 1800, "avg": 600}
+
+        with mock.patch.object(bot, "unit_availability_price", side_effect=availability):
+            rows, conclusive = bot._verified_apartment_matches(
+                req, self.UNITS, include_meta=True)
+        self.assertEqual([row["id"] for row in rows], [1])
+        self.assertFalse(conclusive)
+
+
+class TestOffhoursAcknowledgement(unittest.TestCase):
+    def setUp(self):
+        bot._offhours_acked_convos.clear()
+
+    def test_only_one_offhours_ack_can_be_claimed_per_conversation(self):
+        self.assertTrue(bot._claim_offhours_ack("conv-7", True))
+        self.assertFalse(bot._claim_offhours_ack("conv-7", True))
+        bot._release_offhours_ack("conv-7", True)
+        self.assertTrue(bot._claim_offhours_ack("conv-7", True))
+
+    def test_inhours_ack_is_not_limited_by_offhours_set(self):
+        self.assertTrue(bot._claim_offhours_ack("conv-7", False))
+        self.assertTrue(bot._claim_offhours_ack("conv-7", False))
 
 
 if __name__ == "__main__":
