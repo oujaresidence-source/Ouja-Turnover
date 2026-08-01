@@ -2,6 +2,7 @@
 
 import unittest
 from datetime import datetime, timedelta
+from unittest import mock
 
 import bot
 
@@ -87,6 +88,70 @@ class TestGuestScoreFacts(unittest.TestCase):
         self.assertNotIn("قبل الإقامة", text)
         self.assertIn("أثناء الإقامة 1", text)
         self.assertIn("أثناء الإقامة 2", text)
+
+
+class TestGuestConversationResolution(unittest.TestCase):
+    def setUp(self):
+        bot._GUEST_CONVERSATION_CACHE.clear()
+
+    def test_classification_resolves_conversation_from_reservation(self):
+        messages = [
+            {"isIncoming": 1, "body": "كل شيء ممتاز شكراً",
+             "date": "2026-08-01 18:00:00"},
+        ]
+
+        def hostaway(path, params=None):
+            if path == "/reservations/77/conversations":
+                return {"result": [{"id": 900, "messageReceivedOn": "2026-08-01 18:00:00"}]}
+            if path == "/conversations/900/messages":
+                return {"result": messages}
+            raise AssertionError("unexpected Hostaway path: %s" % path)
+
+        model_result = {
+            "score": 10, "severity": "none", "reason": "", "quote": "",
+            "resolved": True, "confidence": 0.9,
+        }
+        item = {
+            "guest": "Guest", "unit": "101A", "reservation_id": 77,
+            "conversation_id": None, "arrival": "2026-08-01",
+            "open_promise_conversation_ids": set(),
+            "open_escalation_conversation_ids": set(),
+        }
+        with mock.patch.object(bot, "api_get", side_effect=hostaway), \
+             mock.patch.object(bot, "claude_json", return_value=model_result) as analyze:
+            got = bot._classify_one_guest(item)
+
+        self.assertEqual(got["conversation_id"], "900")
+        self.assertEqual(got["score"], 10)
+        analyze.assert_called_once()
+
+    def test_resolved_conversation_keeps_objective_open_work_caps(self):
+        messages = [
+            {"isIncoming": 1, "body": "Everything is fine",
+             "date": "2026-08-01 18:00:00"},
+        ]
+
+        def hostaway(path, params=None):
+            if path == "/reservations/88/conversations":
+                return {"result": [{"id": 901}]}
+            if path == "/conversations/901/messages":
+                return {"result": messages}
+            raise AssertionError("unexpected Hostaway path: %s" % path)
+
+        item = {
+            "guest": "Guest", "unit": "101B", "reservation_id": 88,
+            "conversation_id": None, "arrival": "2026-08-01",
+            "open_promise_conversation_ids": {"901"},
+            "open_escalation_conversation_ids": set(),
+        }
+        raw = {"score": 10, "severity": "none", "resolved": True,
+               "reason": "", "confidence": 0.9}
+        with mock.patch.object(bot, "api_get", side_effect=hostaway), \
+             mock.patch.object(bot, "claude_json", return_value=raw):
+            got = bot._classify_one_guest(item)
+
+        self.assertEqual(got["score"], 6)
+        self.assertFalse(got["resolved"])
 
 
 if __name__ == "__main__":

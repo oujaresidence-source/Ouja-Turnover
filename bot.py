@@ -3126,6 +3126,40 @@ _GUEST_POSITIVE_HINTS = (
     "thank you", "thanks", "great", "perfect", "resolved", "all good",
 )
 
+_GUEST_CONVERSATION_CACHE = {}
+_GUEST_CONVERSATION_CACHE_TTL = 3600
+
+
+def _guest_conversation_id(reservation_id, supplied_id=None):
+    """Resolve a reservation to its Hostaway conversation through the supported API."""
+    if supplied_id:
+        return supplied_id
+    rid = str(reservation_id or "").strip()
+    if not rid:
+        return None
+    cached = _GUEST_CONVERSATION_CACHE.get(rid)
+    if cached and time.time() - cached[1] < _GUEST_CONVERSATION_CACHE_TTL:
+        return cached[0]
+    try:
+        data = api_get(f"/reservations/{rid}/conversations")
+        rows = (data or {}).get("result") or []
+        if not isinstance(rows, list):
+            rows = []
+        rows = [row for row in rows if isinstance(row, dict) and row.get("id")]
+        rows.sort(key=lambda row: str(
+            row.get("messageReceivedOn") or row.get("messageSentOn")
+            or row.get("updatedOn") or ""), reverse=True)
+        conversation_id = rows[0]["id"] if rows else None
+        if len(_GUEST_CONVERSATION_CACHE) >= 2000:
+            oldest = min(_GUEST_CONVERSATION_CACHE,
+                         key=lambda key: _GUEST_CONVERSATION_CACHE[key][1])
+            _GUEST_CONVERSATION_CACHE.pop(oldest, None)
+        _GUEST_CONVERSATION_CACHE[rid] = (conversation_id, time.time())
+        return conversation_id
+    except Exception as e:
+        print(f"guest conversation lookup error ({rid}):", e)
+        return None
+
 
 def _guest_msgs(cid):
     """Raw messages for a conversation (read-only). [] on failure."""
@@ -3286,7 +3320,8 @@ def _last_team_sender(msgs):
 
 def _classify_one_guest(item):
     """Analyze one entire current stay, constrained by objective open-work facts."""
-    cid = item.get("conversation_id")
+    cid = _guest_conversation_id(
+        item.get("reservation_id"), item.get("conversation_id"))
     analysis = _normalize_guest_score(None, {})
     staff = ""
     if cid:
@@ -3297,7 +3332,12 @@ def _classify_one_guest(item):
             hist = _guest_history_text(stay_msgs)
             if hist:
                 facts = _guest_score_facts(
-                    stay_msgs, item.get("open_promise"), item.get("open_escalation"))
+                    stay_msgs,
+                    item.get("open_promise") or str(cid) in item.get(
+                        "open_promise_conversation_ids", set()),
+                    item.get("open_escalation") or str(cid) in item.get(
+                        "open_escalation_conversation_ids", set()),
+                )
                 user = ("حقائق موضوعية (لا تتجاوزها):\n"
                         + json.dumps(facts, ensure_ascii=False)
                         + "\n\nمحادثة الإقامة الحالية كاملة:\n" + hist)
@@ -3348,6 +3388,8 @@ def build_guests_rows():
             "arrival": str(r.get("arrivalDate") or "")[:10],
             "open_promise": str(r.get("conversationId") or "") in open_cids,
             "open_escalation": str(r.get("conversationId") or "") in escalation_cids,
+            "open_promise_conversation_ids": open_cids,
+            "open_escalation_conversation_ids": escalation_cids,
         })
     rows = []
     if items:
