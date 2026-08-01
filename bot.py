@@ -1828,72 +1828,192 @@ _EARLY_CHECKIN_HINTS = [
     "arrive early", "arrival early", "before check-in", "before check in",
 ]
 
-def _is_early_checkin_request(text):
-    t = (text or "").lower()
-    return any(h in t for h in _EARLY_CHECKIN_HINTS)
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_OFFICIAL_CHECKIN_MINUTES = 15 * 60
 
-def _calendar_night_free(listing_id, night_date):
-    """True iff `night_date` (single date) is not occupied/blocked for `listing_id`."""
+
+def _format_guest_time(minutes):
+    """A compact 12-hour label for an extracted guest-requested time."""
+    if minutes is None:
+        return ""
+    minutes = int(minutes) % (24 * 60)
+    hour, minute = divmod(minutes, 60)
+    suffix = "AM" if hour < 12 else "PM"
+    shown = hour % 12 or 12
+    return f"{shown}:{minute:02d} {suffix}"
+
+
+def _early_checkin_request(text):
+    """Return extracted early-entry intent from ONE guest message, else None.
+
+    Time-based wording matters because guests often say only "can I enter at
+    12?" without the literal word "early". A stated time is early only when it
+    is before Ouja's official 3 PM check-in.
+    """
+    raw = (text or "").translate(_ARABIC_DIGITS)
+    low = raw.lower()
+    explicit = any(h in low for h in _EARLY_CHECKIN_HINTS)
+    checkin_words = any(x in low for x in (
+        "ادخل", "أدخل", "ندخل", "دخول", "تشيك ان", "تشيك إن", "تشيك-ان",
+        "check in", "check-in", "arrive", "arrival"))
+    requested = None
+    if "noon" in low or "الظهر" in low:
+        requested = 12 * 60
+    else:
+        match = re.search(
+            r"(?:الساعة|الساعه|at)\s*(\d{1,2})(?::(\d{2}))?\s*"
+            r"(am|pm|صباح|الصبح|ظهر|الظهر|مساء)?",
+            low,
+        )
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2) or 0)
+            marker = match.group(3) or ""
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return None
+            if marker in ("pm", "مساء", "ظهر", "الظهر") and hour < 12:
+                hour += 12
+            if marker in ("am", "صباح", "الصبح") and hour == 12:
+                hour = 0
+            requested = hour * 60 + minute
+    if not explicit and not (
+            checkin_words and requested is not None
+            and requested < _OFFICIAL_CHECKIN_MINUTES):
+        return None
+    if requested is not None and requested >= _OFFICIAL_CHECKIN_MINUTES and not explicit:
+        return None
+    return {
+        "requested_minutes": requested,
+        "requested_label": _format_guest_time(requested),
+    }
+
+def _is_early_checkin_request(text):
+    return _early_checkin_request(text) is not None
+
+
+def _calendar_night_state(listing_id, night_date):
+    """Return free, occupied, blocked, or unknown for one Hostaway night."""
     try:
         d_iso = night_date.isoformat()
         cal = api_get(f"/listings/{listing_id}/calendar",
                       params={"startDate": d_iso, "endDate": d_iso})
-        days = cal.get("result") or []
-        if not days:
-            return False
-        day = days[0]
-        if day.get("reservationId"):
-            return False
-        return int(day.get("isAvailable", 0) or 0) == 1
+        days = (cal or {}).get("result") or []
     except Exception as e:
-        print(f"_calendar_night_free error ({listing_id}, {night_date}):", e)
-        return False
+        print(f"_calendar_night_state error ({listing_id}, {night_date}):", e)
+        return "unknown"
+    if not days:
+        return "unknown"
+    day = days[0]
+    if day.get("reservationId"):
+        return "occupied"
+    if int(day.get("isAvailable", 0) or 0) == 1:
+        return "free"
+    return "blocked"
+
+def _calendar_night_free(listing_id, night_date):
+    """True iff `night_date` (single date) is not occupied/blocked for `listing_id`."""
+    return _calendar_night_state(listing_id, night_date) == "free"
+
+def _stay_summary(reservation):
+    """Small internal-only reservation summary for a Discord decision card."""
+    if not reservation:
+        return None
+    return {
+        "reservation_id": reservation.get("id"),
+        "guest": reservation.get("guestName") or "Guest",
+        "arrival": str(reservation.get("arrivalDate") or "")[:10],
+        "departure": str(reservation.get("departureDate") or "")[:10],
+    }
+
+
+def _early_checkin_context_from_rows(listing_id, reservation_id, arrival, departure, rows):
+    """Find the realized stays immediately before and after this stay."""
+    relevant = []
+    for row in rows or []:
+        if str(row.get("listingMapId")) != str(listing_id):
+            continue
+        if str(row.get("id")) == str(reservation_id):
+            continue
+        if str(row.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        row_arrival = _parse_date(row.get("arrivalDate"))
+        row_departure = _parse_date(row.get("departureDate"))
+        if row_arrival and row_departure:
+            relevant.append((row, row_arrival, row_departure))
+    before = [x for x in relevant if x[2] <= arrival]
+    after = [x for x in relevant if x[1] >= departure]
+    previous = max(before, key=lambda x: x[2])[0] if before else None
+    following = min(after, key=lambda x: x[1])[0] if after else None
+    return {"previous": _stay_summary(previous), "next": _stay_summary(following)}
+
 
 def early_checkin_context(reservation_id, listing_id):
-    """Heavy helper used only when a guest seems to be requesting early check-in.
-    Returns a dict the prompt can use to give Claude a concrete answer:
-      - prev_occupied: is the night BEFORE arrival booked for the guest's unit?
-      - alternatives: up to 5 active units where the same night IS free (potential
-        swaps the team could approve).
-    Returns None if we can't determine arrival or have no listing context."""
+    """Verified facts for an early-check-in request.
+
+    Calendar failure stays unknown. Alternatives require a free previous night
+    and verified availability for the guest's full stay.
+    """
     if not reservation_id or not listing_id:
         return None
     try:
         rdata = api_get(f"/reservations/{reservation_id}")
-        r = rdata.get("result") or {}
+        r = (rdata or {}).get("result") or {}
         arrival = _parse_date(r.get("arrivalDate"))
         if not arrival:
             return None
+        departure = _parse_date(r.get("departureDate")) or (arrival + timedelta(days=1))
     except Exception as e:
         print(f"early_checkin_context arrival fetch error: {e}")
         return None
     prev_night = arrival - timedelta(days=1)
-    prev_occupied = not _calendar_night_free(listing_id, prev_night)
+    night_state = _calendar_night_state(listing_id, prev_night)
+    prev_occupied = (True if night_state == "occupied" else
+                     False if night_state == "free" else None)
+    try:
+        rows = fetch_reservations_window(prev_night, departure + timedelta(days=1),
+                                         pad_days=7)
+        neighbors = _early_checkin_context_from_rows(
+            listing_id, reservation_id, arrival, departure, rows)
+    except Exception as e:
+        print(f"early_checkin_context neighbors fetch error: {e}")
+        neighbors = {"previous": None, "next": None}
     alternatives = []
-    if prev_occupied and _catalog_units:
+    if night_state in ("occupied", "blocked") and _catalog_units:
         # Pre-rank candidates so we don't burn 70 calendar reads if we don't need to:
         # prefer the same bedroom count + area as the guest's current unit when known.
-        current = next((u for u in _catalog_units if u.get("id") == listing_id), {})
+        current = next((u for u in _catalog_units
+                        if str(u.get("id")) == str(listing_id)), {})
         want = {"beds": current.get("beds"), "area": current.get("area"),
                 "tags": list(current.get("tags") or [])[:3]}
         candidates = sorted(
-            [u for u in _catalog_units if u.get("id") and u["id"] != listing_id],
+            [u for u in _catalog_units if u.get("id")
+             and str(u["id"]) != str(listing_id)],
             key=lambda u: -_unit_match_score(u, want),
         )[:18]   # check at most ~18 so the loop stays fast
         for u in candidates:
-            if _calendar_night_free(u["id"], prev_night) and _calendar_night_free(u["id"], arrival):
+            if _calendar_night_state(u["id"], prev_night) != "free":
+                continue
+            info = unit_availability_price(
+                u["id"], arrival.isoformat(), departure.isoformat())
+            if info and info.get("available") is True:
                 alternatives.append({
                     "id": u["id"], "name": u["name"],
                     "beds": u.get("beds"), "area": u.get("area") or u.get("neighbourhood"),
                     "link": u.get("link"), "price": u.get("price"),
+                    "nights": info.get("nights"), "total": info.get("total"),
+                    "avg": info.get("avg"), "available": True,
                 })
                 if len(alternatives) >= 5:
                     break
     return {
         "prev_occupied": prev_occupied,
+        "previous_night_state": night_state,
         "prev_night": prev_night.isoformat(),
         "arrival": arrival.isoformat(),
+        "departure": departure.isoformat(),
         "alternatives": alternatives,
+        "previous": neighbors["previous"],
+        "next": neighbors["next"],
     }
 
 _AGREEMENT_URL_HINTS = ("signing.hostaway", "hostaway.com/signing", "/signing/",
@@ -10710,12 +10830,12 @@ DEEPCLEAN_CONFIRM_HOUR = int(os.environ.get("DEEPCLEAN_CONFIRM_HOUR", "21"))  # 
 CLEANING_TOKEN         = os.environ.get("CLEANING_TOKEN", "")   # public link gate
 
 # ---------------- Working hours / off-hours behavior ----------------
-# Team is active 11:00–01:30 (next day). Outside this window we:
+# Team is active 11:00–00:00. Outside this window we:
 #   1) Stop counting SLA against the team
 #   2) Send a one-time "we're back at HOURS" auto-reply to the guest
 WORK_START_HOUR  = int(os.environ.get("WORK_START_HOUR", "11"))
-WORK_END_HOUR    = int(os.environ.get("WORK_END_HOUR", "25"))    # 25 == 1am next day (i.e. 24+1)
-WORK_END_MIN     = int(os.environ.get("WORK_END_MIN", "30"))     # 30 → 1:30 am
+WORK_END_HOUR    = int(os.environ.get("WORK_END_HOUR", "24"))    # midnight
+WORK_END_MIN     = int(os.environ.get("WORK_END_MIN", "0"))
 OFFHOURS_AUTOREPLY_ENABLED = os.environ.get("OFFHOURS_AUTOREPLY_ENABLED", "1") in ("1","true","True","yes")
 _offhours_acked_convos = set()    # conversation_ids we already auto-replied to in the current off-hours window
 
