@@ -7477,7 +7477,22 @@ INTEL_PARALLEL = int(os.environ.get("INTEL_PARALLEL", "12"))         # concurren
 # Model for guest-facing drafts. Always premium by default — Haiku produces too many
 # generic/templated replies that ignore the actual context (e.g. saying "code arrives
 # 5 days before check-in" when check-in is today). Cost increase is modest at this volume.
-GUEST_DRAFT_MODEL = os.environ.get("GUEST_DRAFT_MODEL", CLAUDE_MODEL_PREMIUM)
+GUEST_DRAFT_MODEL = os.environ.get("GUEST_DRAFT_MODEL", "claude-sonnet-5")
+GUEST_ANALYSIS_MODEL = os.environ.get("GUEST_ANALYSIS_MODEL", "claude-sonnet-5")
+
+
+def _claude_request_payload(model, max_tokens, system, user):
+    """Build a Messages payload, disabling adaptive thinking for short Sonnet 5 JSON/text."""
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    if str(model or "").startswith("claude-sonnet-5"):
+        payload["max_tokens"] = max(1000, int(max_tokens or 0))
+        payload["thinking"] = {"type": "disabled"}
+    return payload
 
 def _listing_active(L):
     """False if the listing looks inactive/unlisted (the red 🚫 in Hostaway) — skip those."""
@@ -8670,8 +8685,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": model, "max_tokens": 700, "system": ASSISTANT_RULES,
-                  "messages": [{"role": "user", "content": user}]},
+            json=_claude_request_payload(model, 1000, ASSISTANT_RULES, user),
             timeout=60,
         )
         r.raise_for_status()
@@ -8711,8 +8725,8 @@ def claude_text(system, user, max_tokens=600, model=None):
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
                          "content-type": "application/json"},
-                json={"model": model or CLAUDE_MODEL, "max_tokens": max_tokens, "system": system,
-                      "messages": [{"role": "user", "content": user}]},
+                json=_claude_request_payload(
+                    model or CLAUDE_MODEL, max_tokens, system, user),
                 timeout=60,
             )
             if r.status_code in (429, 500, 503, 529):
