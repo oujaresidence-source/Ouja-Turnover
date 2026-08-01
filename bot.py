@@ -1947,6 +1947,28 @@ def _early_checkin_context_from_rows(listing_id, reservation_id, arrival, depart
     return {"previous": _stay_summary(previous), "next": _stay_summary(following)}
 
 
+def _check_early_alternative(unit, previous_night, arrival, departure):
+    """Return (verified option or None, check_was_conclusive) for one unit."""
+    state = _calendar_night_state(unit["id"], previous_night)
+    if state == "unknown":
+        return None, False
+    if state != "free":
+        return None, True
+    info = unit_availability_price(
+        unit["id"], arrival.isoformat(), departure.isoformat())
+    if info is None:
+        return None, False
+    if info.get("available") is not True:
+        return None, True
+    return {
+        "id": unit["id"], "name": unit["name"],
+        "beds": unit.get("beds"), "area": unit.get("area") or unit.get("neighbourhood"),
+        "link": unit.get("link"), "price": unit.get("price"),
+        "nights": info.get("nights"), "total": info.get("total"),
+        "avg": info.get("avg"), "available": True,
+    }, True
+
+
 def early_checkin_context(reservation_id, listing_id):
     """Verified facts for an early-check-in request.
 
@@ -1978,9 +2000,9 @@ def early_checkin_context(reservation_id, listing_id):
         print(f"early_checkin_context neighbors fetch error: {e}")
         neighbors = {"previous": None, "next": None}
     alternatives = []
+    alternatives_checked = bool(_catalog_ts)
     if night_state in ("occupied", "blocked") and _catalog_units:
-        # Pre-rank candidates so we don't burn 70 calendar reads if we don't need to:
-        # prefer the same bedroom count + area as the guest's current unit when known.
+        # Rank the full portfolio so the best matching verified options appear first.
         current = next((u for u in _catalog_units
                         if str(u.get("id")) == str(listing_id)), {})
         want = {"beds": current.get("beds"), "area": current.get("area"),
@@ -1989,22 +2011,25 @@ def early_checkin_context(reservation_id, listing_id):
             [u for u in _catalog_units if u.get("id")
              and str(u["id"]) != str(listing_id)],
             key=lambda u: -_unit_match_score(u, want),
-        )[:18]   # check at most ~18 so the loop stays fast
+        )
+        checked = {}
+        try:
+            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+                futures = {
+                    ex.submit(_check_early_alternative, u, prev_night, arrival, departure): u["id"]
+                    for u in candidates
+                }
+                for future in as_completed(futures):
+                    checked[futures[future]] = future.result()
+        except Exception as e:
+            print("early alternative pool error:", e)
+            alternatives_checked = False
         for u in candidates:
-            if _calendar_night_state(u["id"], prev_night) != "free":
-                continue
-            info = unit_availability_price(
-                u["id"], arrival.isoformat(), departure.isoformat())
-            if info and info.get("available") is True:
-                alternatives.append({
-                    "id": u["id"], "name": u["name"],
-                    "beds": u.get("beds"), "area": u.get("area") or u.get("neighbourhood"),
-                    "link": u.get("link"), "price": u.get("price"),
-                    "nights": info.get("nights"), "total": info.get("total"),
-                    "avg": info.get("avg"), "available": True,
-                })
-                if len(alternatives) >= 5:
-                    break
+            option, conclusive = checked.get(u["id"], (None, False))
+            if not conclusive:
+                alternatives_checked = False
+            if option and len(alternatives) < 5:
+                alternatives.append(option)
     return {
         "prev_occupied": prev_occupied,
         "previous_night_state": night_state,
@@ -2012,6 +2037,7 @@ def early_checkin_context(reservation_id, listing_id):
         "arrival": arrival.isoformat(),
         "departure": departure.isoformat(),
         "alternatives": alternatives,
+        "alternatives_checked": alternatives_checked,
         "previous": neighbors["previous"],
         "next": neighbors["next"],
     }
@@ -9240,6 +9266,186 @@ _esc_ack_count = {}     # conversation_id -> how many escalation acks we've sent
 _esc_sent_acks = {}     # conversation_id -> [ack bodies we sent] (to tell our msgs from a co-host's)
 _claimed_convos = set() # conversation_ids a human has claimed (stop auto-acks)
 
+# Manager decisions for early check-in cards. Keyed by the Discord card message id
+# and persisted so a deploy cannot reopen a decision or send it twice.
+_early_checkin_decisions = {}
+_early_alt_offers = {}       # conversation_id -> verified alternatives awaiting guest choice
+_early_decision_lock = threading.Lock()
+
+
+def _decide_early_checkin(message_id, decision, actor, reason=""):
+    """Atomically record one manager decision. The first final decision wins."""
+    if decision not in ("approve", "reject"):
+        return None
+    reason = str(reason or "").strip()
+    if decision == "reject" and not reason:
+        return None
+    with _early_decision_lock:
+        row = _early_checkin_decisions.get(int(message_id))
+        if not row:
+            return None
+        if row.get("status") in ("approved", "rejected"):
+            return row
+        row.update({
+            "status": "approved" if decision == "approve" else "rejected",
+            "reason": reason[:500],
+            "decided_by": str(actor or "")[:80],
+            "decided_at": datetime.now(TZ).isoformat(timespec="seconds"),
+        })
+        return row
+
+
+def _reset_early_checkin_decision(message_id, actor):
+    """Reopen a decision only when its outbound send failed."""
+    with _early_decision_lock:
+        row = _early_checkin_decisions.get(int(message_id))
+        if not row or row.get("sent_at") or row.get("decided_by") != str(actor or "")[:80]:
+            return False
+        row.update({"status": "pending", "reason": "", "decided_by": "",
+                    "decided_at": ""})
+        return True
+
+
+def _early_guest_reply(record, decision, reason=""):
+    """Privacy-safe approval or rejection message for the guest."""
+    is_ar = _has_arabic(record.get("guest_text") or record.get("guest") or "")
+    when = record.get("requested_label") or ("الوقت المطلوب" if is_ar else "your requested time")
+    if decision == "approve":
+        if is_ar:
+            return (f"أبشر 🤍 وافق المدير على تسجيل دخولك المبكر الساعة {when}. "
+                    "بنرسل لك تعليمات الدخول المعتادة قبل وصولك.")
+        return (f"Good news 🤍 the manager approved your early check-in at {when}. "
+                "We will send the usual entry instructions before you arrive.")
+    reason = str(reason or "").strip()
+    if is_ar:
+        why = reason or "ترتيب الوحدة ما يسمح بالدخول قبل الوقت الرسمي"
+        return (f"نعتذر منك، ما قدرنا نعتمد تسجيل الدخول المبكر: {why}. "
+                "يبقى وقت تسجيل الدخول الرسمي الساعة 3 مساءً.")
+    why = reason or "the apartment schedule does not allow entry before the official time"
+    return (f"Sorry, we could not approve early check-in because {why}. "
+            "The official check-in time remains 3:00 PM.")
+
+
+def _early_pending_reply(record):
+    """Tell the guest a verified opening is possible but still needs approval."""
+    is_ar = _has_arabic(record.get("guest_text") or "")
+    when = record.get("requested_label") or ("الوقت المطلوب" if is_ar else "your requested time")
+    proposed = record.get("proposed_unit")
+    offhours = bool(record.get("offhours"))
+    if is_ar:
+        unit = f" في {proposed}" if proposed else ""
+        prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً ويرجع الساعة 11:00 صباحاً. "
+                  if offhours else "")
+        return (
+            f"{prefix}تحققت من الجدول، ويظهر أن تسجيل الدخول المبكر الساعة {when}{unit} "
+            "ممكن مبدئياً. رفعت الطلب للمدير الآن، لكن ما نقدر نعتمده إلا بعد موافقته. "
+            "بنرسل لك القرار هنا فور اعتماده."
+        )
+    unit = f" at {proposed}" if proposed else ""
+    prefix = ("Sorry, our operations team is currently outside working hours and returns at "
+              "11:00 AM. " if offhours else "")
+    return (
+        f"{prefix}I checked the schedule, and early check-in at {when}{unit} appears possible. "
+        "I have sent the request to the manager, but it still needs manager approval. "
+        "We will send the decision here as soon as it is approved."
+    )
+
+
+def _early_unavailable_reply(record):
+    """Direct, privacy-safe answer when all relevant calendars are verified unavailable."""
+    is_ar = _has_arabic(record.get("guest_text") or "")
+    offhours = bool(record.get("offhours"))
+    if is_ar:
+        prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً. " if offhours else "")
+        return (f"{prefix}تحققت من الجدول والخيارات المتاحة، وللأسف تسجيل الدخول المبكر "
+                "غير ممكن لهذا الحجز. يبقى وقت تسجيل الدخول الرسمي الساعة 3 مساءً.")
+    prefix = ("Sorry, our operations team is currently outside working hours. "
+              if offhours else "")
+    return (f"{prefix}I checked the schedule and the available alternatives. Unfortunately, "
+            "early check-in is not possible for this booking. The official check-in time "
+            "remains 3:00 PM.")
+
+
+def _early_alternatives_reply(record):
+    """Guest-safe list of verified units that could support early entry."""
+    is_ar = _has_arabic(record.get("guest_text") or "")
+    lines = []
+    for idx, row in enumerate((record.get("alternatives") or [])[:3], 1):
+        bits = [f"{idx}) {row.get('name') or 'Ouja'}"]
+        if row.get("beds"):
+            bits.append((f"{row['beds']} غرفة نوم" if is_ar
+                         else f"{row['beds']} bedrooms"))
+        if row.get("area"):
+            bits.append(str(row["area"]))
+        if row.get("total") is not None:
+            bits.append((f"{row['total']} ر.س للإقامة · {row.get('avg')} ر.س/ليلة"
+                         if is_ar else
+                         f"SAR {row['total']} total · SAR {row.get('avg')}/night"))
+        if row.get("link"):
+            bits.append(str(row["link"]))
+        lines.append(" · ".join(bits))
+    options = "\n".join(lines)
+    if is_ar:
+        prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً ويرجع الساعة 11:00 صباحاً. "
+                  if record.get("offhours") else "")
+        return (
+            f"{prefix}نعتذر، جدول الحجز في شقتك الحالية ما يسمح بالدخول المبكر. "
+            "لكن تحققت من الخيارات ولقيت هذي الوحدات متاحة للإقامة والليلة اللي قبلها فاضية:\n"
+            f"{options}\n"
+            "الأسعار قبل الضريبة ورسوم المنصة. ارسل رقم الخيار اللي يناسبك، "
+            "وتغيير الوحدة وتسجيل الدخول المبكر يحتاجان موافقة المدير قبل التأكيد."
+        )
+    prefix = ("Our operations team is currently outside working hours and returns at "
+              "11:00 AM. " if record.get("offhours") else "")
+    return (
+        f"{prefix}Sorry, the booking schedule for your current apartment does not allow early check-in. "
+        "I verified these alternatives; each is available for your stay and free the night before:\n"
+        f"{options}\n"
+        "Prices are before tax and platform fees. Reply with the option number you prefer. "
+        "The apartment change and early check-in still require manager approval before confirmation."
+    )
+
+
+def _match_early_offer_selection(text, offer):
+    """Resolve a guest's option number or apartment name against a prior offer."""
+    raw = (text or "").translate(_ARABIC_DIGITS).strip().lower()
+    options = list((offer or {}).get("alternatives") or [])
+    for row in options:
+        name = str(row.get("name") or "").strip().lower()
+        if name and name in raw:
+            return row
+    match = re.search(r"(?:الخيار|خيار|option)?\s*([1-9])\b", raw)
+    if match:
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < len(options):
+            return options[idx]
+    ordinals = (("الثاني", 1), ("الثانية", 1), ("second", 1),
+                ("الأول", 0), ("الاول", 0), ("الأولى", 0), ("first", 0),
+                ("الثالث", 2), ("الثالثة", 2), ("third", 2))
+    for word, idx in ordinals:
+        if word in raw and idx < len(options):
+            return options[idx]
+    if len(options) == 1 and raw in ("yes", "yeah", "ok", "okay", "نعم", "اي", "إي"):
+        return options[0]
+    return None
+
+
+def _early_internal_summary(record):
+    """Internal occupancy evidence. This text is never sent to the guest."""
+    labels = {"free": "فاضية", "occupied": "محجوزة", "blocked": "محجوبة",
+              "unknown": "غير معروف"}
+    lines = ["الليلة السابقة: " + labels.get(
+        record.get("previous_night_state"), "غير معروف")]
+    for key, title in (("previous", "الضيف السابق"), ("next", "الضيف التالي")):
+        stay = record.get(key)
+        if stay:
+            lines.append(
+                f"{title}: {stay.get('guest') or 'Guest'} · "
+                f"{stay.get('arrival') or '—'} → {stay.get('departure') or '—'}")
+        else:
+            lines.append(f"{title}: ما فيه حجز ظاهر")
+    return "\n".join(lines)
+
 class NameSelect(discord.ui.Select):
     """The name picker shown after tapping Claim."""
     def __init__(self, channel_id, message_id):
@@ -9321,6 +9527,200 @@ class ClaimView(discord.ui.View):
         picker = discord.ui.View(timeout=300)
         picker.add_item(NameSelect(interaction.channel.id, interaction.message.id))
         await interaction.response.send_message("اختر اسمك للاستلام:", view=picker, ephemeral=True)
+
+
+_EARLY_REJECT_REASONS = {
+    "previous_guest": ("وجود حجز قبل وصولك يحتاج وقت التجهيز الكامل",
+                       "a booking before your arrival requires the full turnover window"),
+    "cleaning": ("جدول التنظيف ما يسمح بالدخول في الوقت المطلوب",
+                 "the cleaning schedule does not allow entry at the requested time"),
+    "staff": ("فريق التشغيل غير متاح لتجهيز دخول مبكر في هذا الوقت",
+              "the operations team is not available to prepare early entry at that time"),
+    "time": ("الوقت المطلوب غير متاح تشغيلياً",
+             "the requested time is not operationally available"),
+}
+
+
+def _early_reject_reason(record, code, custom=""):
+    if code == "custom":
+        return str(custom or "").strip()[:500]
+    pair = _EARLY_REJECT_REASONS.get(code)
+    if not pair:
+        return ""
+    return pair[0] if _has_arabic(record.get("guest_text") or "") else pair[1]
+
+
+async def _finish_early_decision_card(interaction, record, decision):
+    try:
+        ch = interaction.client.get_channel(record.get("channel_id"))
+        card = await ch.fetch_message(record.get("message_id"))
+        embed = card.embeds[0] if card.embeds else discord.Embed()
+        approved = decision == "approve"
+        embed.color = 0x3BA55D if approved else 0xD64545
+        embed.add_field(
+            name="✅ تم اعتماد الدخول المبكر" if approved else "❌ تم رفض الدخول المبكر",
+            value=(f"بواسطة **{record.get('decided_by') or interaction.user.display_name}**"
+                   + (f"\nالسبب: {record.get('reason')}" if record.get("reason") else "")),
+            inline=False,
+        )
+        done = EarlyCheckinDecisionView()
+        for child in done.children:
+            child.disabled = True
+        await card.edit(embed=embed, view=done)
+    except Exception as e:
+        print("early decision card finish error:", e)
+
+
+class EarlyDecisionConfirmView(discord.ui.View):
+    """Second click: the only place an early-check-in decision sends."""
+    def __init__(self, message_id, decision, reason=""):
+        super().__init__(timeout=180)
+        self.message_id = int(message_id)
+        self.decision = decision
+        self.reason = reason
+
+    @discord.ui.button(label="✅ تأكيد وإرسال", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        actor = interaction.user.display_name
+        existing = _early_checkin_decisions.get(self.message_id)
+        if not existing:
+            await interaction.response.edit_message(
+                content="⚠️ الكرت قديم أو غير متاح. تعامل مع الطلب يدوياً.", view=None)
+            return
+        if existing.get("status") in ("approved", "rejected"):
+            await interaction.response.edit_message(
+                content=f"تم اتخاذ القرار مسبقاً بواسطة {existing.get('decided_by') or 'أحد الفريق'}.",
+                view=None)
+            return
+        row = _decide_early_checkin(
+            self.message_id, self.decision, actor, self.reason)
+        if not row:
+            await interaction.response.edit_message(
+                content="⚠️ ما قدرت أسجل القرار. السبب مطلوب عند الرفض.", view=None)
+            return
+        reply = _early_guest_reply(row, self.decision, row.get("reason"))
+        await interaction.response.edit_message(content="⏳ جاري إرسال القرار للضيف…", view=None)
+        try:
+            result = await asyncio.to_thread(
+                send_guest_message, row["conversation_id"], reply, row.get("comm_type") or "email")
+            if result == SEND_BLOCKED_KILL:
+                _reset_early_checkin_decision(self.message_id, actor)
+                await interaction.followup.send(
+                    "⛔ ما تم الإرسال لأن إيقاف رسائل الضيوف مفعّل. الكرت ما زال مفتوحاً.",
+                    ephemeral=True)
+                return
+            row["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+            row["sent_reply"] = reply
+            await asyncio.to_thread(_persist_early_state)
+            await _finish_early_decision_card(interaction, row, self.decision)
+            await interaction.followup.send(
+                ("✅ تم اعتماد وإرسال الدخول المبكر."
+                 if self.decision == "approve" else "✅ تم إرسال الرفض وسببه للضيف."),
+                ephemeral=True)
+        except Exception as e:
+            _reset_early_checkin_decision(self.message_id, actor)
+            await interaction.followup.send(
+                f"⚠️ فشل الإرسال، وبقي الكرت مفتوحاً: {e}", ephemeral=True)
+
+    @discord.ui.button(label="تراجع", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="تمام، ما تم إرسال أي قرار. الكرت ما زال مفتوحاً.", view=None)
+
+
+class EarlyCustomRejectModal(discord.ui.Modal, title="سبب رفض الدخول المبكر"):
+    def __init__(self, message_id):
+        super().__init__()
+        self.message_id = int(message_id)
+        self.reason = discord.ui.TextInput(
+            label="السبب الذي سيصل للضيف", style=discord.TextStyle.paragraph,
+            min_length=3, max_length=500)
+        self.add_item(self.reason)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        row = _early_checkin_decisions.get(self.message_id) or {}
+        reason = _early_reject_reason(row, "custom", str(self.reason.value))
+        preview = _early_guest_reply(row, "reject", reason)
+        await interaction.response.send_message(
+            "متأكد تبي ترفض وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
+            view=EarlyDecisionConfirmView(self.message_id, "reject", reason),
+            ephemeral=True)
+
+
+class EarlyRejectReasonSelect(discord.ui.Select):
+    def __init__(self, message_id):
+        self.message_id = int(message_id)
+        super().__init__(
+            placeholder="اختر سبب الرفض…", min_values=1, max_values=1,
+            options=[
+                discord.SelectOption(label="وجود حجز سابق", value="previous_guest"),
+                discord.SelectOption(label="جدول التنظيف", value="cleaning"),
+                discord.SelectOption(label="فريق التشغيل غير متاح", value="staff"),
+                discord.SelectOption(label="الوقت المطلوب غير متاح", value="time"),
+                discord.SelectOption(label="سبب آخر أكتبه", value="custom"),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        code = self.values[0]
+        if code == "custom":
+            await interaction.response.send_modal(EarlyCustomRejectModal(self.message_id))
+            return
+        row = _early_checkin_decisions.get(self.message_id) or {}
+        reason = _early_reject_reason(row, code)
+        preview = _early_guest_reply(row, "reject", reason)
+        await interaction.response.send_message(
+            "متأكد تبي ترفض وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
+            view=EarlyDecisionConfirmView(self.message_id, "reject", reason),
+            ephemeral=True)
+
+
+class EarlyRejectReasonView(discord.ui.View):
+    def __init__(self, message_id):
+        super().__init__(timeout=180)
+        self.add_item(EarlyRejectReasonSelect(message_id))
+
+
+class EarlyCheckinDecisionView(discord.ui.View):
+    """Persistent first-click manager actions for an early-check-in card."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ اعتماد الدخول المبكر", style=discord.ButtonStyle.success,
+                       custom_id="ouja_early_checkin_approve")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        row = _early_checkin_decisions.get(interaction.message.id)
+        if not row:
+            await interaction.response.send_message(
+                "⚠️ هذا الكرت قديم. تعامل مع الطلب يدوياً.", ephemeral=True)
+            return
+        if row.get("status") in ("approved", "rejected"):
+            await interaction.response.send_message(
+                f"تم اتخاذ القرار مسبقاً بواسطة {row.get('decided_by') or 'أحد الفريق'}.",
+                ephemeral=True)
+            return
+        preview = _early_guest_reply(row, "approve")
+        await interaction.response.send_message(
+            "متأكد تبي تعتمد وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
+            view=EarlyDecisionConfirmView(interaction.message.id, "approve"),
+            ephemeral=True)
+
+    @discord.ui.button(label="❌ رفض الدخول المبكر", style=discord.ButtonStyle.danger,
+                       custom_id="ouja_early_checkin_reject")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        row = _early_checkin_decisions.get(interaction.message.id)
+        if not row:
+            await interaction.response.send_message(
+                "⚠️ هذا الكرت قديم. تعامل مع الطلب يدوياً.", ephemeral=True)
+            return
+        if row.get("status") in ("approved", "rejected"):
+            await interaction.response.send_message(
+                f"تم اتخاذ القرار مسبقاً بواسطة {row.get('decided_by') or 'أحد الفريق'}.",
+                ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "اختر السبب الذي سيظهر للضيف:",
+            view=EarlyRejectReasonView(interaction.message.id), ephemeral=True)
 
 class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسال"):
     def __init__(self, item, draft, message_id=None):
@@ -10343,6 +10743,205 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed,
                                  "intent": intent, "confidence": round(conf*100), "sentiment": sentiment}
 
+
+def _persist_early_state():
+    """Persist only the early-entry workflow after a material state transition."""
+    _save_json("early_checkin_decisions.json",
+               {str(k): v for k, v in dict(_early_checkin_decisions).items()})
+    _save_json("early_alt_offers.json", dict(_early_alt_offers))
+
+
+def _load_early_checkin_context(reservation_id, listing_id):
+    """Blocking Hostaway read bundle; run from the event loop via to_thread."""
+    load_catalog()
+    return early_checkin_context(reservation_id, listing_id)
+
+
+def _early_record(item, request, context, proposed=None):
+    """Create the JSON-safe manager record shared by current and alternate units."""
+    proposed = proposed or {}
+    return {
+        "status": "pending",
+        "conversation_id": item.get("conversation_id"),
+        "comm_type": item.get("comm_type") or "email",
+        "reservation_id": item.get("reservation_id"),
+        "guest": item.get("guest") or "Guest",
+        "guest_text": item.get("guest_text") or "",
+        "original_unit": item.get("unit") or "",
+        "original_listing_id": item.get("listing_id"),
+        "unit": proposed.get("name") or item.get("unit") or "",
+        "listing_id": proposed.get("id") or item.get("listing_id"),
+        "proposed_unit": proposed.get("name") or "",
+        "requested_label": request.get("requested_label") or "",
+        "requested_minutes": request.get("requested_minutes"),
+        "arrival": context.get("arrival"),
+        "departure": context.get("departure"),
+        "previous_night_state": context.get("previous_night_state"),
+        "previous": context.get("previous"),
+        "next": context.get("next"),
+        "offhours": bool(item.get("_offhours")),
+        "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
+    }
+
+
+def _recheck_early_alternative(item, offer, selected):
+    """Revalidate a selected alternative and build its own neighboring-stay facts."""
+    arrival = _parse_date(offer.get("arrival"))
+    departure = _parse_date(offer.get("departure"))
+    if not arrival or not departure or not selected.get("id"):
+        return None
+    previous_night = arrival - timedelta(days=1)
+    state = _calendar_night_state(selected["id"], previous_night)
+    availability = unit_availability_price(
+        selected["id"], arrival.isoformat(), departure.isoformat())
+    if state != "free" or not availability or availability.get("available") is not True:
+        return None
+    try:
+        rows = fetch_reservations_window(previous_night, departure + timedelta(days=1),
+                                         pad_days=7)
+        neighbors = _early_checkin_context_from_rows(
+            selected["id"], "", arrival, departure, rows)
+    except Exception as e:
+        print("early alternative neighbor fetch error:", e)
+        neighbors = {"previous": None, "next": None}
+    context = {
+        "arrival": arrival.isoformat(), "departure": departure.isoformat(),
+        "previous_night_state": state,
+        "previous": neighbors.get("previous"), "next": neighbors.get("next"),
+    }
+    request = {
+        "requested_label": offer.get("requested_label") or "",
+        "requested_minutes": offer.get("requested_minutes"),
+    }
+    return _early_record(item, request, context, selected)
+
+
+def _pending_early_for_conversation(conversation_id):
+    cid = str(conversation_id or "")
+    for row in dict(_early_checkin_decisions).values():
+        if (str(row.get("conversation_id") or "") == cid
+                and row.get("status") == "pending"):
+            return row
+    return None
+
+
+async def _post_early_decision_card(channel, item, record):
+    """Post the internal evidence card, then acknowledge the pending guest request."""
+    guild = channel.guild
+    target = await ensure_channel(
+        guild, ESCALATION_CHANNEL, await get_assistant_category(guild)) or channel
+    op_role = find_operation_role(guild)
+    mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
+    proposed = record.get("proposed_unit")
+    title_unit = proposed or record.get("original_unit") or "—"
+    embed = discord.Embed(
+        title=f"⏰ قرار دخول مبكر · {record.get('guest')} · {title_unit}",
+        color=0xF0A431,
+        timestamp=datetime.now(TZ),
+    )
+    embed.add_field(name="📩 طلب الضيف", value=(record.get("guest_text") or "—")[:1000],
+                    inline=False)
+    request_line = record.get("requested_label") or "وقت غير محدد"
+    if proposed:
+        request_line += (f"\nتغيير مقترح: **{record.get('original_unit') or '—'}** → "
+                         f"**{proposed}**")
+    embed.add_field(name="🕐 الطلب", value=request_line[:1000], inline=False)
+    embed.add_field(name="🔒 ملخص الحجوزات الداخلي", value=_early_internal_summary(record)[:1000],
+                    inline=False)
+    embed.add_field(name="📤 عند الاعتماد", value=_early_guest_reply(record, "approve")[:1000],
+                    inline=False)
+    embed.add_field(name="❌ عند الرفض", value="اختر سبباً جاهزاً أو اكتب سبباً؛ سيظهر للضيف بعد تأكيد ثانٍ.",
+                    inline=False)
+    embed.set_footer(text="اضغط اعتماد/رفض، ثم أكّد مرة ثانية. أول قرار نهائي فقط هو الذي يُرسل.")
+    msg = await target.send(
+        content=f"{mention} ⏰ طلب دخول مبكر يحتاج قرار",
+        embed=embed, view=EarlyCheckinDecisionView(),
+        allowed_mentions=discord.AllowedMentions(roles=True),
+    )
+    record["message_id"] = msg.id
+    record["channel_id"] = target.id
+    _early_checkin_decisions[msg.id] = record
+    await asyncio.to_thread(_persist_early_state)
+    pending = _early_pending_reply(record)
+    result = await asyncio.to_thread(
+        send_guest_message, record["conversation_id"], pending, record["comm_type"])
+    if result not in (SEND_BLOCKED_KILL, SEND_SUPPRESSED):
+        record["pending_sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    metric_bump("escalations_created")
+    log_event("escalation", f"قرار دخول مبكر · {record.get('guest')} · {title_unit}")
+
+
+async def handle_early_checkin_item(item, channel):
+    """Deterministic early-entry workflow. True means the message was fully handled."""
+    cid = str(item.get("conversation_id") or "")
+    offer = _early_alt_offers.get(cid)
+    if offer:
+        selected = _match_early_offer_selection(item.get("guest_text"), offer)
+        if selected:
+            record = await asyncio.to_thread(
+                _recheck_early_alternative, item, offer, selected)
+            _early_alt_offers.pop(cid, None)
+            await asyncio.to_thread(_persist_early_state)
+            if record:
+                await _post_early_decision_card(channel, item, record)
+            else:
+                result = {
+                    "action": "escalate", "intent": "early_checkin",
+                    "sentiment": "ok", "confidence": 1.0, "reply": "",
+                    "reason": "الخيار الذي اختاره الضيف تغيّر أو تعذر التحقق منه؛ راجعه يدوياً.",
+                }
+                await post_assistant_card(channel, item, result, confirmed=True)
+            return True
+
+    request = _early_checkin_request(item.get("guest_text"))
+    if not request:
+        return False
+    existing = _pending_early_for_conversation(item.get("conversation_id"))
+    if existing:
+        reminder = dict(existing)
+        reminder["offhours"] = bool(item.get("_offhours"))
+        await asyncio.to_thread(
+            send_guest_message, item["conversation_id"], _early_pending_reply(reminder),
+            item.get("comm_type") or "email")
+        return True
+    context = await asyncio.to_thread(
+        _load_early_checkin_context, item.get("reservation_id"), item.get("listing_id"))
+    state = (context or {}).get("previous_night_state")
+    if not context or state == "unknown":
+        result = {
+            "action": "escalate", "intent": "early_checkin",
+            "sentiment": "ok", "confidence": 1.0, "reply": "",
+            "reason": "تعذر التحقق من الليلة السابقة في Hostaway؛ لا تؤكد أو ترفض قبل المراجعة.",
+        }
+        await post_assistant_card(channel, item, result, confirmed=True)
+        return True
+    record = _early_record(item, request, context)
+    if state == "free":
+        await _post_early_decision_card(channel, item, record)
+        return True
+    alternatives = list(context.get("alternatives") or [])[:3]
+    if alternatives:
+        offer = dict(record)
+        offer["alternatives"] = alternatives
+        _early_alt_offers[cid] = offer
+        await asyncio.to_thread(_persist_early_state)
+        await asyncio.to_thread(
+            send_guest_message, item["conversation_id"], _early_alternatives_reply(offer),
+            item.get("comm_type") or "email")
+        return True
+    if context.get("alternatives_checked"):
+        await asyncio.to_thread(
+            send_guest_message, item["conversation_id"], _early_unavailable_reply(record),
+            item.get("comm_type") or "email")
+        return True
+    result = {
+        "action": "escalate", "intent": "early_checkin",
+        "sentiment": "ok", "confidence": 1.0, "reply": "",
+        "reason": "تعذر تحميل كتالوج الشقق للتحقق من البدائل؛ راجع الطلب يدوياً.",
+    }
+    await post_assistant_card(channel, item, result, confirmed=True)
+    return True
+
 async def process_assistant_item(it, channel):
     """Draft + post a card (or escalate) for ONE guest message. Shared by the poll
     loop and the webhook handler so both behave identically."""
@@ -10380,6 +10979,18 @@ async def process_assistant_item(it, channel):
     # promises an escalation + supervisor reminder at the start of the day,
     # instead of just "we'll get back to you".
     it["_offhours"] = (OFFHOURS_AUTOREPLY_ENABLED and not is_within_working_hours())
+    try:
+        if await handle_early_checkin_item(it, channel):
+            return
+    except Exception as e:
+        print("early check-in workflow error:", e)
+        result = {
+            "action": "escalate", "intent": "early_checkin",
+            "sentiment": "ok", "confidence": 1.0, "reply": "",
+            "reason": "حدث خطأ أثناء التحقق من الدخول المبكر؛ راجع Hostaway يدوياً قبل الرد.",
+        }
+        await post_assistant_card(channel, it, result, confirmed=True)
+        return
     status = it.get("res_status") or await asyncio.to_thread(
         get_reservation_status, it.get("reservation_id"))
     confirmed = status in CONFIRMED_STATUSES
@@ -52929,12 +53540,17 @@ async def guest_summary_loop():
 def load_state():
     """Restore in-memory state from the volume so nothing is lost across restarts/redeploys."""
     global _assistant_seen, _pending_replies, _escalations, _esc_ack_count, _claimed_convos
+    global _early_checkin_decisions, _early_alt_offers
     global _price_opps, _discount_paused_until, _unit_discount_skip, _agreement_reminded
     global _dc_anchor_date
     try:
         _assistant_seen = _BoundedSet(_load_json("seen.json", []), maxlen=20000)
         _pending_replies = {int(k): v for k, v in _load_json("pending.json", {}).items()}
         _escalations = {int(k): v for k, v in _load_json("escalations.json", {}).items()}
+        _early_checkin_decisions = {
+            int(k): v for k, v in _load_json("early_checkin_decisions.json", {}).items()}
+        _early_alt_offers = {
+            str(k): v for k, v in _load_json("early_alt_offers.json", {}).items()}
         _esc_ack_count = {int(k): v for k, v in _load_json("ack_count.json", {}).items()}
         _claimed_convos = set(int(x) for x in _load_json("claimed.json", []))
         _activity.clear()
@@ -53099,10 +53715,10 @@ def load_state():
                 _cleaning_report_photos[str(k)] = v
         _cleaning_report_audit.clear()
         _cleaning_report_audit.extend(_load_json("cleaning_report_audit.json", []) or [])
-        if _assistant_seen or _pending_replies or _escalations:
+        if _assistant_seen or _pending_replies or _escalations or _early_checkin_decisions:
             print(f"state: restored {len(_assistant_seen)} seen · {len(_pending_replies)} cards · "
                   f"{len(_escalations)} escalations · {len(_claimed_convos)} claimed · "
-                  f"{len(_price_opps)} price cards")
+                  f"{len(_early_checkin_decisions)} early decisions · {len(_price_opps)} price cards")
     except Exception as e:
         print("state load error:", e)
 
@@ -53116,6 +53732,9 @@ def persist_state():
     _save_json("seen.json", list(_assistant_seen))
     _save_json("pending.json", {str(k): v for k, v in dict(_pending_replies).items()})
     _save_json("escalations.json", {str(k): v for k, v in dict(_escalations).items()})
+    _save_json("early_checkin_decisions.json",
+               {str(k): v for k, v in dict(_early_checkin_decisions).items()})
+    _save_json("early_alt_offers.json", dict(_early_alt_offers))
     _save_json("ack_count.json", {str(k): v for k, v in dict(_esc_ack_count).items()})
     _save_json("claimed.json", list(_claimed_convos))
     _save_json("activity.json", list(_activity))
@@ -59760,6 +60379,7 @@ async def on_ready():
             bot._ops_clean_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
+    bot.add_view(EarlyCheckinDecisionView())  # early check-in approve/reject
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
     bot.add_view(CleaningProofReviewView())  # re-bind cleaning photo approval buttons

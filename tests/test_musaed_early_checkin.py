@@ -129,5 +129,111 @@ class TestWorkingHours(unittest.TestCase):
         self.assertEqual((got.hour, got.minute), (11, 0))
 
 
+class TestEarlyDecision(unittest.TestCase):
+    def setUp(self):
+        bot._early_checkin_decisions.clear()
+
+    def test_first_decision_wins(self):
+        bot._early_checkin_decisions[44] = {"status": "pending"}
+        first = bot._decide_early_checkin(44, "approve", "Faisal")
+        second = bot._decide_early_checkin(
+            44, "reject", "Noura", "staff unavailable")
+        self.assertEqual(first["status"], "approved")
+        self.assertEqual(second["status"], "approved")
+        self.assertEqual(second["decided_by"], "Faisal")
+
+    def test_rejection_requires_reason(self):
+        bot._early_checkin_decisions[45] = {"status": "pending"}
+        self.assertIsNone(
+            bot._decide_early_checkin(45, "reject", "Faisal", ""))
+        self.assertEqual(bot._early_checkin_decisions[45]["status"], "pending")
+
+    def test_approval_reply_never_contains_neighbor_name(self):
+        record = {
+            "guest": "A", "unit": "Ouja | Test", "requested_label": "12:00 PM",
+            "previous": {"guest": "PRIVATE PREVIOUS"},
+            "next": {"guest": "PRIVATE NEXT"},
+            "guest_text": "Can I check in at noon?",
+        }
+        reply = bot._early_guest_reply(record, "approve")
+        self.assertIn("12:00 PM", reply)
+        self.assertNotIn("PRIVATE PREVIOUS", reply)
+        self.assertNotIn("PRIVATE NEXT", reply)
+
+    def test_rejection_reply_includes_selected_reason(self):
+        record = {"guest": "A", "unit": "Ouja | Test",
+                  "requested_label": "12:00 PM", "guest_text": "دخول 12"}
+        reply = bot._early_guest_reply(
+            record, "reject", "جدول التنظيف ما يسمح بالدخول في هذا الوقت")
+        self.assertIn("جدول التنظيف", reply)
+        self.assertIn("3", reply)
+
+    def test_verified_alternatives_are_guest_safe_and_require_manager(self):
+        record = {
+            "guest_text": "Can I check in at noon?",
+            "previous": {"guest": "PRIVATE PREVIOUS"},
+            "alternatives": [
+                {"id": 8, "name": "Ouja | Malqa", "beds": 2,
+                 "area": "Malqa", "total": 1800, "avg": 600,
+                 "link": "https://example.com/8"},
+            ],
+        }
+        reply = bot._early_alternatives_reply(record)
+        self.assertIn("Ouja | Malqa", reply)
+        self.assertIn("1800", reply)
+        self.assertIn("manager", reply.lower())
+        self.assertNotIn("PRIVATE PREVIOUS", reply)
+
+    def test_guest_can_select_an_offered_option_by_number(self):
+        offer = {"alternatives": [
+            {"id": 8, "name": "First"},
+            {"id": 9, "name": "Second"},
+        ]}
+        self.assertEqual(
+            bot._match_early_offer_selection("الخيار ٢", offer)["id"], 9)
+
+    def test_internal_summary_contains_neighbors(self):
+        record = {
+            "previous_night_state": "free",
+            "previous": {"guest": "Previous", "arrival": "2026-08-01",
+                         "departure": "2026-08-05"},
+            "next": {"guest": "Next", "arrival": "2026-08-08",
+                     "departure": "2026-08-10"},
+        }
+        summary = bot._early_internal_summary(record)
+        self.assertIn("Previous", summary)
+        self.assertIn("Next", summary)
+
+    def test_pending_reply_says_possible_not_confirmed(self):
+        record = {
+            "guest_text": "Can I check in at noon?",
+            "requested_label": "12:00 PM",
+        }
+        reply = bot._early_pending_reply(record)
+        self.assertIn("possible", reply.lower())
+        self.assertIn("manager", reply.lower())
+        self.assertNotIn("confirmed", reply.lower())
+
+    def test_offhours_pending_reply_apologizes_and_names_return_time(self):
+        record = {
+            "guest_text": "Can I check in at noon?",
+            "requested_label": "12:00 PM",
+            "offhours": True,
+        }
+        reply = bot._early_pending_reply(record)
+        self.assertIn("sorry", reply.lower())
+        self.assertIn("11:00", reply)
+
+    def test_unavailable_reply_is_direct_and_privacy_safe(self):
+        record = {
+            "guest_text": "هل أقدر أدخل الساعة 12؟",
+            "previous": {"guest": "PRIVATE PREVIOUS"},
+        }
+        reply = bot._early_unavailable_reply(record)
+        self.assertIn("غير ممكن", reply)
+        self.assertIn("3", reply)
+        self.assertNotIn("PRIVATE PREVIOUS", reply)
+
+
 if __name__ == "__main__":
     unittest.main()
