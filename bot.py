@@ -44,7 +44,7 @@ import urllib.parse
 import secrets as _secrets_mod
 from collections import defaultdict, deque, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, time as dt_time
+from datetime import date, datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
 import requests
@@ -7793,6 +7793,8 @@ _ALT_PHRASES = [
     "عندكم استوديو", "فيه شقة", "فيه شقه", "فيه وحدة", "فيه وحده",
     "فيه استوديو", "تتوفر شقة", "تتوفر وحدة", "متوفر شقة", "متوفر وحدة",
     "متوفره شقه", "متوفره وحده",
+    "ابي شقة", "أبي شقة", "ابغى شقة", "أبغى شقة", "احتاج شقة", "أحتاج شقة",
+    "ادور شقة", "أدور شقة", "حجز شقة", "ابي استوديو", "أبي استوديو",
     # multi-bedroom shopping (clearly looking around)
     "غرفتين", "ثلاث غرف", "ثلاث غرفه", "اربع غرف", "أربع غرف",
     "studio apartment", "two bedroom", "three bedroom", "2 bedroom", "3 bedroom",
@@ -7802,6 +7804,8 @@ _ALT_PHRASES = [
     "bigger apartment", "smaller apartment", "cheaper apartment",
     "do you have a unit", "do you have an apartment", "do you have any",
     "do you have other", "do you have another",
+    "i need an apartment", "i want an apartment", "looking for an apartment",
+    "i need a unit", "i want a unit", "looking for a unit",
 ]
 
 def _is_asking_alternatives(text):
@@ -7809,6 +7813,280 @@ def _is_asking_alternatives(text):
     phrasing — won't false-fire on amenity questions ('is the wifi available?')."""
     t = (text or "").lower()
     return any(p in t for p in _ALT_PHRASES)
+
+
+_APARTMENT_QUALIFICATION_MARKER = "حتى أتحقق لك مباشرة"
+_APARTMENT_QUALIFICATION_MARKER_EN = "To check live availability and prices directly"
+
+
+def _is_apartment_search(text):
+    """Public deterministic gate for a genuine apartment-shopping request."""
+    return _is_asking_alternatives(text)
+
+
+def _history_latest_role_line(history_text, role):
+    prefix = role + ":"
+    for line in reversed((history_text or "").splitlines()):
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            return stripped[len(prefix):].strip()
+    return ""
+
+
+def _guest_history_text(history_text):
+    """Keep guest turns (including multiline continuations), excluding host examples."""
+    lines = (history_text or "").splitlines()
+    has_roles = any(line.strip().startswith(("Guest:", "Host:")) for line in lines)
+    if not has_roles:
+        return history_text or ""
+    out = []
+    current_role = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("Guest:"):
+            current_role = "guest"
+            out.append(stripped[len("Guest:"):].strip())
+        elif stripped.startswith("Host:"):
+            current_role = "host"
+        elif current_role == "guest" and stripped:
+            out.append(stripped)
+    return "\n".join(out)
+
+
+def _extract_apartment_dates(text, supplied_dates=None):
+    """Extract the latest explicit date pair, falling back to Hostaway inquiry dates."""
+    raw = (text or "").translate(_ARABIC_DIGITS)
+    found = re.findall(r"\b(20\d{2}-\d{1,2}-\d{1,2})\b", raw)
+    parsed = []
+    for value in found:
+        try:
+            parsed.append(datetime.strptime(value, "%Y-%m-%d").date())
+        except ValueError:
+            pass
+    if len(parsed) < 2:
+        slash_dates = re.findall(r"\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b", raw)
+        parsed = []
+        for day, month, year in slash_dates:
+            try:
+                parsed.append(date(int(year), int(month), int(day)))
+            except ValueError:
+                pass
+    if len(parsed) >= 2 and parsed[-1] > parsed[-2]:
+        return parsed[-2].isoformat(), parsed[-1].isoformat()
+    supplied_dates = supplied_dates or ()
+    checkin = _parse_date(supplied_dates[0]) if len(supplied_dates) > 0 else None
+    checkout = _parse_date(supplied_dates[1]) if len(supplied_dates) > 1 else None
+    if checkin and checkout and checkout > checkin:
+        return checkin.isoformat(), checkout.isoformat()
+    return None, None
+
+
+def _apartment_requirements(history_text, supplied_dates=None):
+    """Extract every qualification answer from the full guest conversation."""
+    raw = _guest_history_text(history_text).translate(_ARABIC_DIGITS)
+    low = raw.lower()
+    criteria = _criteria_from_text(raw)
+    checkin, checkout = _extract_apartment_dates(raw, supplied_dates)
+    guest_match = re.findall(
+        r"(\d{1,2})\s*(?:شخص|اشخاص|أشخاص|ضيف|ضيوف|persons?|people|guests?)", low)
+    guests = int(guest_match[-1]) if guest_match else criteria.get("capacity")
+    if not guests:
+        guest_words = (
+            ("ضيفين", 2), ("ضيفان", 2), ("شخصين", 2), ("شخصان", 2),
+            ("ثلاثة ضيوف", 3), ("ثلاث ضيوف", 3), ("أربعة ضيوف", 4),
+            ("اربع ضيوف", 4), ("خمسة ضيوف", 5), ("ستة ضيوف", 6),
+            ("two guests", 2), ("three guests", 3), ("four guests", 4),
+        )
+        guests = next((count for phrase, count in guest_words if phrase in low), None)
+
+    bedrooms_any = any(p in low for p in (
+        "عدد الغرف ما يهم", "الغرف ما تهم", "اي عدد غرف", "أي عدد غرف",
+        "any bedrooms", "bedrooms do not matter", "no bedroom preference"))
+    area_any = any(p in low for p in (
+        "اي حي", "أي حي", "الحي ما يهم", "المنطقة ما تهم", "بدون حي محدد",
+        "any area", "no area preference", "location does not matter"))
+    budget_flexible = any(p in low for p in (
+        "الميزانية مفتوحة", "الميزانيه مفتوحه", "الميزانية مرنة", "بدون ميزانية",
+        "no budget", "flexible budget", "budget is flexible"))
+    must_haves_none = any(p in low for p in (
+        "بدون متطلبات", "ما عندي متطلبات", "ما فيه متطلبات", "المرافق ما تهم",
+        "no requirements", "no must haves", "no must-haves", "no amenities needed"))
+
+    budget = None
+    budget_patterns = (
+        r"(?:ميزاني(?:ة|ه)|budget)[^\d]{0,24}(\d{2,6})",
+        r"(\d{2,6})\s*(?:ر\.?\s*س|ريال|sar)?\s*(?:لليلة|بالليلة|في الليلة|per night|nightly)",
+    )
+    for pattern in budget_patterns:
+        matches = re.findall(pattern, low)
+        if matches:
+            budget = int(matches[-1])
+            break
+
+    return {
+        "checkin": checkin, "checkout": checkout,
+        "guests": guests,
+        "bedrooms": criteria.get("beds"), "bedrooms_any": bedrooms_any,
+        "area": criteria.get("area"), "area_any": area_any,
+        "budget": budget, "budget_flexible": budget_flexible,
+        "must_haves": list(criteria.get("tags") or []),
+        "must_haves_none": must_haves_none,
+    }
+
+
+def _missing_apartment_requirements(requirements):
+    missing = []
+    if not requirements.get("checkin") or not requirements.get("checkout"):
+        missing.append("dates")
+    if not requirements.get("guests"):
+        missing.append("guests")
+    if not requirements.get("bedrooms") and not requirements.get("bedrooms_any"):
+        missing.append("bedrooms")
+    if not requirements.get("area") and not requirements.get("area_any"):
+        missing.append("area")
+    if requirements.get("budget") is None and not requirements.get("budget_flexible"):
+        missing.append("budget")
+    if not requirements.get("must_haves") and not requirements.get("must_haves_none"):
+        missing.append("must_haves")
+    return missing
+
+
+def _apartment_qualification_reply(requirements, missing, arabic=True):
+    """Ask every unanswered shopping question once, in one compact message."""
+    if arabic:
+        labels = {
+            "dates": "تاريخ الوصول والمغادرة",
+            "guests": "عدد الضيوف",
+            "bedrooms": "عدد غرف النوم (أو ما يهم)",
+            "area": "الحي/المنطقة المفضلة (أو ما يهم)",
+            "budget": "الميزانية لليلة (أو مفتوحة)",
+            "must_haves": "المتطلبات الضرورية مثل موقف/واي فاي/مسبح (أو بدون متطلبات)",
+        }
+        items = "\n".join(f"• {labels[key]}" for key in missing)
+        return (f"{_APARTMENT_QUALIFICATION_MARKER} وأرسل لك المتاح بأسعاره، احتاج منك هذي "
+                f"التفاصيل في رسالة واحدة:\n{items}")
+    labels = {
+        "dates": "check-in and check-out dates",
+        "guests": "number of guests",
+        "bedrooms": "bedrooms needed (or no preference)",
+        "area": "preferred area (or no preference)",
+        "budget": "budget per night (or flexible)",
+        "must_haves": "must-have amenities (or none)",
+    }
+    items = "\n".join(f"• {labels[key]}" for key in missing)
+    return (f"{_APARTMENT_QUALIFICATION_MARKER_EN}, please send these details in one "
+            f"message:\n{items}")
+
+
+def _apartment_unit_match(unit, requirements):
+    """Attach transparent fit gaps; guest capacity is a non-negotiable safety filter."""
+    if requirements.get("guests"):
+        if not unit.get("capacity") or int(unit["capacity"]) < int(requirements["guests"]):
+            return None
+    mismatches = []
+    if (requirements.get("bedrooms") and unit.get("beds")
+            and int(unit["beds"]) != int(requirements["bedrooms"])):
+        mismatches.append("bedrooms")
+    area_text = ((unit.get("neighbourhood") or "") + " " + (unit.get("area") or "")).lower()
+    if requirements.get("area") and requirements["area"].lower() not in area_text:
+        mismatches.append("area")
+    unit_tags = set(unit.get("tags") or [])
+    for tag in requirements.get("must_haves") or []:
+        if tag not in unit_tags:
+            mismatches.append(tag)
+    return mismatches
+
+
+def _verified_apartment_matches(requirements, units=None, include_meta=False):
+    """Return up to three live-priced available units, exact matches before closest fits."""
+    units = list(_catalog_units if units is None else units)
+    eligible = []
+    for unit in units:
+        gaps = _apartment_unit_match(unit, requirements)
+        if unit.get("id") and gaps is not None:
+            eligible.append((unit, gaps))
+    results = {}
+    conclusive = bool(units)
+    try:
+        with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
+            futures = {
+                ex.submit(unit_availability_price, unit["id"], requirements["checkin"],
+                          requirements["checkout"]): (unit, gaps)
+                for unit, gaps in eligible
+            }
+            for future in as_completed(futures):
+                unit, gaps = futures[future]
+                try:
+                    results[unit["id"]] = (unit, gaps, future.result())
+                except Exception as e:
+                    print(f"apartment availability match error ({unit['id']}):", e)
+                    results[unit["id"]] = (unit, gaps, None)
+    except Exception as e:
+        print("apartment availability pool error:", e)
+        conclusive = False
+
+    rows = []
+    for unit, base_gaps in eligible:
+        _, gaps, info = results.get(unit["id"], (unit, base_gaps, None))
+        if info is None:
+            conclusive = False
+            continue
+        if info.get("available") is not True:
+            continue
+        if info.get("total") is None or info.get("avg") is None:
+            conclusive = False
+            continue
+        gaps = list(gaps)
+        if (requirements.get("budget") is not None
+                and float(info["avg"]) > float(requirements["budget"])):
+            gaps.append("budget")
+        rows.append({
+            **unit, "nights": info.get("nights"), "total": info.get("total"),
+            "avg": info.get("avg"), "mismatches": gaps,
+        })
+    rows.sort(key=lambda row: (
+        len(row["mismatches"]),
+        -_unit_match_score(row, {
+            "beds": requirements.get("bedrooms"), "capacity": requirements.get("guests"),
+            "area": requirements.get("area"), "tags": requirements.get("must_haves") or [],
+        }),
+        row.get("avg") or float("inf"),
+    ))
+    chosen = rows[:3]
+    return (chosen, conclusive) if include_meta else chosen
+
+
+def _apartment_matches_reply(requirements, matches, arabic=True):
+    if not matches:
+        if arabic:
+            return ("تحققت من التوفر الفعلي، وما لقيت حالياً شقة متاحة تطابق فترة إقامتك. "
+                    "إذا تغيرت التواريخ أو الميزانية أقدر أتحقق من جديد.")
+        return ("I checked live availability and could not find an available apartment for "
+                "those dates. If your dates or budget change, I can check again.")
+    lines = []
+    for index, row in enumerate(matches, 1):
+        location = " · ".join(filter(None, [row.get("neighbourhood"), row.get("area")]))
+        gaps = list(row.get("mismatches") or [])
+        if arabic:
+            fit = ("يطابق كل طلباتك" if not gaps else
+                   "الأقرب لكنه لا يطابق بالكامل: " + "، ".join(gaps))
+            parts = [f"{index}) {row.get('name')}",
+                     f"{row.get('beds') or '—'} غرفة", f"يستوعب {row.get('capacity') or '—'}",
+                     location, f"{row['total']} ر.س للإقامة · {row['avg']} ر.س/ليلة", fit,
+                     row.get("link")]
+        else:
+            fit = ("Matches all your needs" if not gaps else
+                   "Does not fully match: " + ", ".join(gaps))
+            parts = [f"{index}) {row.get('name')}",
+                     f"{row.get('beds') or '—'} bedrooms", f"sleeps {row.get('capacity') or '—'}",
+                     location, f"SAR {row['total']} total · SAR {row['avg']}/night", fit,
+                     row.get("link")]
+        lines.append(" · ".join(str(part) for part in parts if part))
+    intro = ("تحققت من Hostaway، وهذي أفضل الخيارات المتاحة فعلياً:\n" if arabic else
+             "I checked Hostaway; these are the best live available options:\n")
+    ending = ("\nالأسعار قبل الضريبة ورسوم المنصة." if arabic else
+              "\nPrices are before tax and platform fees.")
+    return intro + "\n".join(lines) + ending
 
 # Late checkout requests. Mirror of early check-in. We check if the NEXT night
 # (after the guest's departure) is free — if yes, late checkout is easy and team
@@ -10942,6 +11220,84 @@ async def handle_early_checkin_item(item, channel):
     await post_assistant_card(channel, item, result, confirmed=True)
     return True
 
+
+def _scan_apartment_matches(requirements):
+    """Blocking catalog refresh + live Hostaway match scan."""
+    load_catalog()
+    return _verified_apartment_matches(requirements, include_meta=True)
+
+
+def _apartment_requirements_summary(requirements):
+    return (
+        f"{requirements.get('checkin')} → {requirements.get('checkout')} · "
+        f"{requirements.get('guests')} guests · "
+        f"{requirements.get('bedrooms') or 'any'} bedrooms · "
+        f"{requirements.get('area') or 'any area'} · "
+        f"{requirements.get('budget') or 'flexible'} SAR/night · "
+        f"{', '.join(requirements.get('must_haves') or []) or 'no must-haves'}"
+    )
+
+
+async def handle_apartment_search_item(item, channel):
+    """Qualify once, then send 1-3 live-priced Hostaway matches directly."""
+    latest = item.get("guest_text") or ""
+    last_host = _history_latest_role_line(item.get("history"), "Host")
+    if not (_is_apartment_search(latest)
+            or _APARTMENT_QUALIFICATION_MARKER in last_host
+            or _APARTMENT_QUALIFICATION_MARKER_EN in last_host):
+        return False
+    is_ar = _has_arabic(latest) or _has_arabic(item.get("history") or "")
+    requirements = _apartment_requirements(
+        item.get("history") or latest,
+        (item.get("checkin"), item.get("checkout")),
+    )
+    missing = _missing_apartment_requirements(requirements)
+    if missing:
+        reply = _apartment_qualification_reply(requirements, missing, arabic=is_ar)
+        if item.get("_offhours"):
+            prefix = ("نعتذر، فريق العمليات خارج ساعات العمل ويرجع الساعة 11:00 صباحاً، لكن "
+                      if is_ar else
+                      "Sorry, our operations team returns at 11:00 AM, but ")
+            reply = prefix + reply
+        await asyncio.to_thread(
+            send_guest_message, item["conversation_id"], reply,
+            item.get("comm_type") or "email")
+        return True
+
+    matches, conclusive = await asyncio.to_thread(_scan_apartment_matches, requirements)
+    if not matches and not conclusive:
+        result = {
+            "action": "escalate", "intent": "apartment_search",
+            "sentiment": "ok", "confidence": 1.0, "reply": "",
+            "reason": "تعذر التحقق من توفر الشقق وأسعارها في Hostaway؛ لا ترسل خيارات غير مؤكدة.",
+        }
+        await post_assistant_card(channel, item, result, confirmed=False)
+        return True
+    reply = _apartment_matches_reply(requirements, matches, arabic=is_ar)
+    if item.get("_offhours"):
+        prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً. " if is_ar else
+                  "Sorry, our operations team is currently outside working hours. ")
+        reply = prefix + reply
+    outcome = await asyncio.to_thread(
+        send_guest_message, item["conversation_id"], reply,
+        item.get("comm_type") or "email")
+    embed = discord.Embed(
+        title=f"🏠 بحث شقق تلقائي · {item.get('guest')} ",
+        color=0x3BA55D if matches else 0xF0A431,
+        timestamp=datetime.now(TZ),
+    )
+    embed.add_field(name="المعايير", value=_apartment_requirements_summary(requirements)[:1000],
+                    inline=False)
+    embed.add_field(name="النتيجة المرسلة", value=reply[:1000], inline=False)
+    embed.set_footer(text=(f"{len(matches)} خيارات متاحة ومتحقق منها مباشرة"
+                           if matches else "لا يوجد خيار متاح متحقق منه"))
+    if outcome == SEND_BLOCKED_KILL:
+        embed.color = 0xD64545
+        embed.add_field(name="⛔ الإرسال", value="موقوف بالـ kill switch", inline=False)
+    await channel.send(embed=embed)
+    log_event("guest", f"بحث شقق · {item.get('guest')} · {len(matches)} خيارات")
+    return True
+
 async def process_assistant_item(it, channel):
     """Draft + post a card (or escalate) for ONE guest message. Shared by the poll
     loop and the webhook handler so both behave identically."""
@@ -10990,6 +11346,18 @@ async def process_assistant_item(it, channel):
             "reason": "حدث خطأ أثناء التحقق من الدخول المبكر؛ راجع Hostaway يدوياً قبل الرد.",
         }
         await post_assistant_card(channel, it, result, confirmed=True)
+        return
+    try:
+        if await handle_apartment_search_item(it, channel):
+            return
+    except Exception as e:
+        print("apartment search workflow error:", e)
+        result = {
+            "action": "escalate", "intent": "apartment_search",
+            "sentiment": "ok", "confidence": 1.0, "reply": "",
+            "reason": "حدث خطأ أثناء البحث عن الشقق؛ راجع Hostaway يدوياً قبل الرد.",
+        }
+        await post_assistant_card(channel, it, result, confirmed=False)
         return
     status = it.get("res_status") or await asyncio.to_thread(
         get_reservation_status, it.get("reservation_id"))
