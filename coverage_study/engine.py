@@ -383,6 +383,18 @@ def capacity_model(units_per_person_day=None, cycle_median_min=None, workday_min
 
 # ------------------------------------------------------------------ units
 
+def norm_code(s):
+    """Apartment code normaliser: lowercase, punctuation out, tokens SORTED.
+
+    Sorted because the two systems write the same unit in different orders —
+    the sheet says `101-qur`, Hostaway says `QUR 101`. Dropping the brand word keeps
+    `Ouja | 3BMJ` and `3bmj` together.
+    """
+    import re
+    s = re.sub(r"[^a-z0-9]+", " ", (s or "").lower())
+    return " ".join(sorted(t for t in s.split() if t not in ("ouja",)))
+
+
 def build_units(listings, guide_units, teams, in_house_team_ids=None):
     """One row per live apartment: where it is, who cleans it, and how we know.
 
@@ -392,15 +404,23 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
     """
     in_house = set(in_house_team_ids or ())
     team_name = {str(t.get("id")): (t.get("name") or "") for t in (teams or [])}
-    guide_by_lid = {}
+    guide_by_lid, by_code, ambiguous = {}, {}, set()
     for g in guide_units or []:
         lid = g.get("listing_id")
-        if lid is None:
+        if lid is not None:
+            try:
+                guide_by_lid[int(lid)] = g
+            except (TypeError, ValueError):
+                pass
+        # Second index on the SHEET CODE (the slug). The guide's importer only ever
+        # matched marketing names against Hostaway internal names, which scored 0/17
+        # on live data and left 63 of 71 apartments with no pin.
+        code = norm_code(g.get("slug"))
+        if not code:
             continue
-        try:
-            guide_by_lid[int(lid)] = g
-        except (TypeError, ValueError):
-            continue
+        if code in by_code and by_code[code] is not g:
+            ambiguous.add(code)          # never guess between two sheet rows
+        by_code[code] = g
 
     out = []
     for rec in listings or []:
@@ -410,7 +430,11 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
             lid = int(rec.get("id"))
         except (TypeError, ValueError):
             continue
-        g = guide_by_lid.get(lid) or {}
+        g = guide_by_lid.get(lid)
+        if g is None:
+            code = norm_code(rec.get("internal_name"))
+            g = by_code.get(code) if code and code not in ambiguous else None
+        g = g or {}
         lat, lng, src = rec.get("lat"), rec.get("lng"), "listing"
         if lat is None or lng is None:
             lat, lng, src = None, None, ""
@@ -450,7 +474,7 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
 def study(listings, guide_units, teams, status_log, reports, photos,
           since=None, in_house_team_ids=None, workday_min=480,
           cluster_radius_m=120, max_gap_min=DEFAULT_MAX_GAP_MIN,
-          demand_per_day=None, current_people=None, units=None):
+          demand_per_day=None, current_people=None, units=None, non_cleaners=None):
     """The whole snapshot the coverage tab renders. Pure — hand it dicts, get a dict.
 
     `units` lets the caller pass rows that have already been through the geo cache, so
@@ -465,15 +489,22 @@ def study(listings, guide_units, teams, status_log, reports, photos,
     started_on = all_events[0]["date"] if all_events else None   # never moves with `since`
     events = [e for e in all_events if not since or e["date"] >= since]
 
+    # Actors the owner has said are not cleaning staff (themselves, a shared crew link).
+    # Their cleans still HAPPENED — demand keeps them — but they must not dilute the
+    # per-person rate or inflate the count of people already working.
+    excluded_people = set(non_cleaners or ())
     rows = work_days(events)
-    cyc = cycle_stats(rows, max_gap_min=max_gap_min)
+    counted_rows = [r for r in rows if r["person"] not in excluded_people]
+    cyc = cycle_stats(counted_rows, max_gap_min=max_gap_min)
 
     by_day = defaultdict(lambda: {"date": "", "count": 0, "people": set()})
     for e in events:
         d = by_day[e["date"]]
         d["date"] = e["date"]
         d["count"] += 1
-        d["people"].add((e.get("by") or "").strip() or UNKNOWN_PERSON)
+        who = (e.get("by") or "").strip() or UNKNOWN_PERSON
+        if who not in excluded_people:
+            d["people"].add(who)
     daily = [{"date": d["date"], "count": d["count"], "people": len(d["people"])}
              for d in sorted(by_day.values(), key=lambda x: x["date"])]
 
@@ -492,6 +523,7 @@ def study(listings, guide_units, teams, status_log, reports, photos,
         p["days"] += 1
         p["cleans"] += r["count"]
     people = [{"person": k, "days": v["days"], "cleans": v["cleans"],
+               "counted": k not in excluded_people,
                "per_day": round(v["cleans"] / float(v["days"]), 1) if v["days"] else 0}
               for k, v in sorted(per_person.items(), key=lambda kv: -kv[1]["cleans"])]
 
@@ -501,7 +533,7 @@ def study(listings, guide_units, teams, status_log, reports, photos,
         # TYPICAL day, not the busiest — one all-hands day should not become the baseline.
         current_people = int(_median([d["people"] for d in daily]) or 0)
 
-    thr = throughput_stats(rows)
+    thr = throughput_stats(counted_rows)
 
     if demand_per_day is None:
         # Fallback only — routes.py passes the real Hostaway checkout rate instead.

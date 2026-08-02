@@ -422,6 +422,38 @@ class TestBuildUnits(unittest.TestCase):
         u = E.build_units(listings, [], [])
         self.assertFalse(u[0]["has_location"])
 
+    def test_guide_matched_by_code_when_listing_id_is_missing(self):
+        """The sheet's slug IS the apartment code. Matching the guest-facing marketing
+        name against Hostaway's internal name scored 0/17 on live data; matching the
+        slug against the internal name scores 16/17. This is why 63 of 71 apartments
+        had no location (2026-08-02)."""
+        listings = [{"id": 9, "internal_name": "6B HTN", "active": True},
+                    {"id": 10, "internal_name": "MS (113)", "active": True},
+                    {"id": 11, "internal_name": "QUR 101", "active": True}]
+        guide = [{"slug": "6b-htn", "listing_id": None, "map_link": "https://x/1"},
+                 {"slug": "ms-113", "listing_id": None, "map_link": "https://x/2"},
+                 {"slug": "101-qur", "listing_id": None, "map_link": "https://x/3"}]
+        u = {x["lid"]: x for x in E.build_units(listings, guide, [])}
+        self.assertEqual(u[9]["map_link"], "https://x/1")
+        self.assertEqual(u[10]["map_link"], "https://x/2")
+        self.assertEqual(u[11]["map_link"], "https://x/3")   # token order differs
+
+    def test_explicit_listing_id_still_wins_over_the_code_match(self):
+        listings = [{"id": 9, "internal_name": "6B HTN", "active": True}]
+        guide = [{"slug": "6b-htn", "listing_id": None, "map_link": "https://wrong"},
+                 {"slug": "other", "listing_id": 9, "map_link": "https://right"}]
+        u = E.build_units(listings, guide, [])[0]
+        self.assertEqual(u["map_link"], "https://right")
+
+    def test_ambiguous_code_refuses_to_guess(self):
+        # Two sheet rows normalising the same way: a wrong pin sends a cleaner to the
+        # wrong building, which is worse than a blank.
+        listings = [{"id": 9, "internal_name": "B 10", "active": True}]
+        guide = [{"slug": "b-10", "listing_id": None, "map_link": "https://a"},
+                 {"slug": "10-b", "listing_id": None, "map_link": "https://b"}]
+        u = E.build_units(listings, guide, [])[0]
+        self.assertEqual(u["map_link"], "")
+
     def test_unassigned_unit_kept_and_marked(self):
         listings = self.listings + [{"id": 4, "internal_name": "Ouja | New",
                                      "active": True, "cleaning_team": ""}]
@@ -488,6 +520,30 @@ class TestStudy(unittest.TestCase):
                      "address": "somewhere", "maps_link": "https://maps.app.goo.gl/abc"}]
         u = E.build_units(listings, [], [])[0]
         self.assertEqual(u["geo_key"], "https://maps.app.goo.gl/abc")
+
+    def test_non_cleaners_excluded_from_the_rate_but_still_shown(self):
+        """The owner named faisalouja / route-link / _hmdkhdyr as not cleaning staff.
+        Their cleans still happened, so demand keeps them — but they must not dilute
+        the per-person rate or inflate the head count we already have."""
+        log = []
+        for d in range(4):
+            day = "2026-07-1%d" % d
+            for k in range(6):                      # a real cleaner: 6 a day
+                log.append({"lid": k + 1, "date": day, "action": "done",
+                            "ts": "%sT%02d:00:00" % (day, 8 + k), "by": "noura"})
+            log.append({"lid": 20, "date": day, "action": "done",          # the owner: 1 a day
+                        "ts": "%sT20:00:00" % day, "by": "faisalouja"})
+        s = E.study(listings=[{"id": i, "internal_name": "U%d" % i, "active": True}
+                              for i in range(1, 22)],
+                    guide_units=[], teams=[], status_log=log, reports=[], photos=[],
+                    non_cleaners={"faisalouja"})
+        self.assertEqual(s["throughput"]["median"], 6)      # not dragged down to 3.5
+        self.assertEqual(s["capacity"]["current_people"], 1)
+        people = {p["person"]: p for p in s["oujact"]["people"]}
+        self.assertIn("faisalouja", people)                 # still visible
+        self.assertFalse(people["faisalouja"]["counted"])
+        self.assertTrue(people["noura"]["counted"])
+        self.assertEqual(s["oujact"]["total_cleans"], 28)   # their work still counts
 
     def test_counts_split_in_house_versus_third_party(self):
         listings = [{"id": 1, "internal_name": "A", "active": True, "cleaning_team": "team-1"},

@@ -17,6 +17,27 @@ from . import engine, geo
 from .host import HOST, call
 
 EDIT_ROLES = ("admin", "ops")
+SETTINGS_FILE = "coverage_settings.json"
+
+# Actors who press «تم» but are not cleaning staff — the owner named these on
+# 2026-08-02. Seeded once into the settings file so it can be changed later without
+# a deploy. Their cleans still count as demand; they just do not dilute the
+# per-person rate or inflate the count of people already working.
+DEFAULT_NON_CLEANERS = ("faisalouja", "route-link", "_hmdkhdyr")
+
+
+def _settings():
+    load = getattr(HOST, "load_json", None)
+    if not callable(load):
+        return {"non_cleaners": list(DEFAULT_NON_CLEANERS)}
+    cfg = load(SETTINGS_FILE, None)
+    if not isinstance(cfg, dict):
+        cfg = {"non_cleaners": list(DEFAULT_NON_CLEANERS)}
+        save = getattr(HOST, "save_json", None)
+        if callable(save):
+            save(SETTINGS_FILE, cfg)
+    cfg.setdefault("non_cleaners", list(DEFAULT_NON_CLEANERS))
+    return cfg
 
 
 def _json(obj, status=200):
@@ -91,6 +112,7 @@ def _build(request_params):
         demand_per_day=request_params.get("demand"),
         current_people=request_params.get("people"),
         units=units,
+        non_cleaners=set(_settings().get("non_cleaners") or ()),
     )
     s["geo"] = {"filled_from_cache": filled, "cached_total": len(cache),
                 "pending": len([u for u in units
@@ -172,6 +194,62 @@ async def api_geo(request):
     return _json({"ok": True, "geo": report})
 
 
+_MAP_CACHE = {}          # (params) -> png bytes. Static tiles for fixed views never change.
+_MAP_CACHE_MAX = 24
+
+
+async def api_map(request):
+    """Real Google map imagery, fetched BY US so the Maps key never reaches the browser.
+
+    The owner chose this over the interactive JS map precisely to avoid putting a key
+    in the page (2026-08-02): nothing to configure in Google Cloud, and no key to steal.
+    The page draws its own coloured dots on top using the same Mercator projection.
+    """
+    key = call("maps_key") or ""
+    if not key:
+        return _json({"ok": False, "error": "no_maps_key",
+                      "message": "ما فيه مفتاح خرائط في الإعدادات / GOOGLE_MAPS_API_KEY is not set"}, 503)
+    try:
+        lat = float(request.query.get("lat"))
+        lng = float(request.query.get("lng"))
+    except (TypeError, ValueError):
+        return _json({"ok": False, "error": "bad_center"}, 400)
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return _json({"ok": False, "error": "bad_center"}, 400)
+    z = _int(request, "z", 11, 1, 20)
+    w = _int(request, "w", 640, 100, 640)          # Static Maps caps a side at 640
+    h = _int(request, "h", 420, 100, 640)
+    ck = (round(lat, 5), round(lng, 5), z, w, h)
+    png = _MAP_CACHE.get(ck)
+    if png is None:
+        def _fetch():
+            import requests
+            r = requests.get("https://maps.googleapis.com/maps/api/staticmap",
+                             params={"center": "%s,%s" % (lat, lng), "zoom": z,
+                                     "size": "%dx%d" % (w, h), "scale": 2,
+                                     "maptype": "roadmap", "language": "ar",
+                                     "region": "sa", "key": key},
+                             timeout=20)
+            r.raise_for_status()
+            if not (r.headers.get("Content-Type") or "").startswith("image/"):
+                raise ValueError("Google returned %s" % (r.text or "")[:120])
+            return r.content
+        try:
+            png = await asyncio.to_thread(_fetch)
+        except Exception as e:
+            return _json({"ok": False, "error": "map_fetch_failed",
+                          "message": str(e)[:200]}, 502)
+        if len(_MAP_CACHE) >= _MAP_CACHE_MAX:
+            _MAP_CACHE.clear()
+        _MAP_CACHE[ck] = png
+    web = getattr(HOST, "web", None)
+    if web is None:
+        return _json({"ok": False, "error": "no_web"}, 500)
+    return web.Response(body=png, content_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
 def register(app):
     app.router.add_get("/api/coverage/study", _safe(api_study))
     app.router.add_get("/api/coverage/geo", _safe(api_geo))
+    app.router.add_get("/api/coverage/map.png", _safe(api_map))

@@ -28900,7 +28900,7 @@ async function loadCleanTeams(){
    NOTE: DASHBOARD_HTML is a normal triple-quoted Python string — NO backslash
    escapes anywhere in here (a stray backslash-n kills the whole login).
    ============================================================ */
-var COV = {data:null, busy:false};
+var COV = {data:null, busy:false, zoom:null};
 
 async function loadCoverage(force){
   var body=document.getElementById('covBody'); if(!body) return;
@@ -29008,61 +29008,114 @@ function _covCapacityCard(s){
   return '<div class="card">'+head+body+note+'</div>';
 }
 
-/* ---- the map: one dot per building, size = how many flats are stacked there ---- */
+/* ---- the map: REAL Google imagery + our own dots on top ----
+   The map image is fetched by our server (/api/coverage/map.png) so the Maps key
+   never reaches the browser — the owner chose this over the interactive JS map on
+   2026-08-02 precisely so there is no key to steal and nothing to configure.
+   We project the dots ourselves with the same Web Mercator maths the tiles use. */
+function _covMercator(lat, lng, z){
+  var scale = Math.pow(2, z);
+  var s = Math.min(0.9999, Math.max(-0.9999, Math.sin(lat*Math.PI/180)));
+  return {x: 256*((lng+180)/360)*scale,
+          y: 256*(0.5 - Math.log((1+s)/(1-s))/(4*Math.PI))*scale};
+}
+function _covFitZoom(pts, W, H, pad){
+  for(var z=17; z>=2; z--){
+    var minX=1e18, maxX=-1e18, minY=1e18, maxY=-1e18;
+    for(var i=0;i<pts.length;i++){
+      var p=_covMercator(pts[i].lat, pts[i].lng, z);
+      if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x;
+      if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y;
+    }
+    if((maxX-minX) <= (W-2*pad) && (maxY-minY) <= (H-2*pad)) return z;
+  }
+  return 2;
+}
+function covZoom(delta){
+  var s=COV.data; if(!s) return;
+  var rows=safeArr((s.clusters||{}).rows).filter(function(c){return c.has_location;});
+  var base=COV.zoom!=null?COV.zoom:_covFitZoom(rows, 700, 440, 46);
+  COV.zoom=Math.max(2, Math.min(19, base+delta));
+  renderCoverage();
+}
+function covZoomReset(){ COV.zoom=null; renderCoverage(); }
+
 function _covMapCard(s){
   var ar=(L==='ar');
   var rows = safeArr((s.clusters||{}).rows).filter(function(c){return c.has_location;});
   var head = '<div class="card-head"><span class="card-title">'+(ar?'🗺️ الخريطة':'🗺️ The map')+'</span>'
-    + '<span class="card-sub">'+(ar?'حجم الدائرة = عدد الشقق في نفس المبنى':'circle size = flats in the same building')+'</span></div>';
+    + '<div class="card-actions">'
+    + '<button class="btn ghost xs" onclick="covZoom(1)" title="'+(ar?'تكبير':'Zoom in')+'">+</button>'
+    + '<button class="btn ghost xs" onclick="covZoom(-1)" title="'+(ar?'تصغير':'Zoom out')+'">−</button>'
+    + '<button class="btn ghost xs" onclick="covZoomReset()">'+(ar?'ضبط':'Fit')+'</button>'
+    + '<span class="card-sub">'+(ar?'حجم الدائرة = عدد الشقق في نفس المبنى':'circle size = flats in one building')+'</span>'
+    + '</div></div>';
   if(!rows.length){
     return '<div class="card">'+head+emptyState(ar?'ما فيه مواقع محددة':'No located apartments',
-      ar?'اضغط «حدّد المواقع» فوق عشان نحل روابط الخرائط.':'Press "Locate" above to resolve the map links.','📍')+'</div>';
+      ar?'اضغط «حدّد المواقع» فوق عشان نجيب إحداثيات كل شقة.':'Press "Locate" above to fetch coordinates for every apartment.','📍')+'</div>';
   }
-  var lats=rows.map(function(c){return c.lat;}), lngs=rows.map(function(c){return c.lng;});
-  var minLat=Math.min.apply(null,lats), maxLat=Math.max.apply(null,lats);
-  var minLng=Math.min.apply(null,lngs), maxLng=Math.max.apply(null,lngs);
-  var dLat=(maxLat-minLat)||0.01, dLng=(maxLng-minLng)||0.01;
-  var W=760, H=460, pad=34;
-  var svg = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-height:480px;background:var(--tint);border-radius:12px;border:1px solid var(--line)" role="img" aria-label="'+esc(ar?'خريطة مواقع الشقق':'Apartment location map')+'">';
-  svg += '<g stroke="var(--line-strong)" stroke-width="1" opacity="0.5">';
-  for(var gi=1; gi<4; gi++){
-    var gx = pad + (W-2*pad)*gi/4, gy = pad + (H-2*pad)*gi/4;
-    svg += '<line x1="'+gx+'" y1="'+pad+'" x2="'+gx+'" y2="'+(H-pad)+'"/>';
-    svg += '<line x1="'+pad+'" y1="'+gy+'" x2="'+(W-pad)+'" y2="'+gy+'"/>';
-  }
-  svg += '</g>';
-  var byLid = {};
-  safeArr((s.units||{}).rows).forEach(function(x){ byLid[x.lid]=x; });
+  var W=700, H=440, pad=46;
+  var z = COV.zoom!=null ? COV.zoom : _covFitZoom(rows, W, H, pad);
+  var cLat=0, cLng=0;
+  var minLat=90, maxLat=-90, minLng=180, maxLng=-180;
+  rows.forEach(function(c){
+    if(c.lat<minLat)minLat=c.lat; if(c.lat>maxLat)maxLat=c.lat;
+    if(c.lng<minLng)minLng=c.lng; if(c.lng>maxLng)maxLng=c.lng;
+  });
+  cLat=(minLat+maxLat)/2; cLng=(minLng+maxLng)/2;
+  var ctr=_covMercator(cLat, cLng, z);
+
+  var byLid={}; safeArr((s.units||{}).rows).forEach(function(x){ byLid[x.lid]=x; });
+  var dots='';
   rows.slice().sort(function(a,b){return a.size-b.size;}).forEach(function(c){
-    var x = pad + (W-2*pad) * ((c.lng-minLng)/dLng);
-    var y = pad + (H-2*pad) * ((maxLat-c.lat)/dLat);
-    var first = byLid[c.lids[0]] || {};
-    var inh = 0, tp = 0, un = 0;
+    var p=_covMercator(c.lat, c.lng, z);
+    var x=W/2+(p.x-ctr.x), y=H/2+(p.y-ctr.y);
+    if(x<-40||x>W+40||y<-40||y>H+40) return;
+    var inh=0, tp=0, un=0;
     c.lids.forEach(function(lid){
-      var uu = byLid[lid] || {};
+      var uu=byLid[lid]||{};
       if(uu.in_house) inh++; else if(uu.team_id) tp++; else un++;
     });
-    var fill = inh>=tp && inh>=un ? 'var(--green)' : (tp>=un ? 'var(--blue)' : 'var(--yellow)');
-    var r = Math.min(26, 6 + c.size*2.6);
+    var col = (inh>=tp && inh>=un) ? 'var(--green)' : (tp>=un ? 'var(--blue)' : 'var(--yellow)');
+    var r = Math.min(30, 14 + c.size*2.4);
     var names = c.lids.map(function(lid){ return (byLid[lid]||{}).name || lid; }).join(' · ');
-    svg += '<g><circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+r.toFixed(1)+'" fill="'+fill+'" fill-opacity="0.22" stroke="'+fill+'" stroke-width="1.8"/>'
-      + '<title>'+esc((c.label||first.name||'')+' — '+c.size+(ar?' شقة':' flats')+String.fromCharCode(10)+names)+'</title>';
-    if(c.size>1){
-      svg += '<text x="'+x.toFixed(1)+'" y="'+(y+4).toFixed(1)+'" text-anchor="middle" font-size="12" font-weight="700" fill="'+fill+'">'+c.size+'</text>';
-    }
-    svg += '</g>';
+    var tip = (c.label||'')+' — '+c.size+(ar?' شقة':' flats')+String.fromCharCode(10)+names;
+    // PERCENTAGE positions, not pixels: the container scales down on a phone and the
+    // dots must scale with the map behind them or every pin lands on the wrong street.
+    dots += '<div title="'+esc(tip)+'" style="position:absolute;left:'+(x/W*100).toFixed(3)+'%;top:'+(y/H*100).toFixed(3)+'%;'
+      + 'transform:translate(-50%,-50%);'
+      + 'width:'+r.toFixed(0)+'px;height:'+r.toFixed(0)+'px;border-radius:50%;background:'+col+';opacity:.82;'
+      + 'border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;'
+      + 'justify-content:center;color:#fff;font-size:11px;font-weight:700;cursor:default">'
+      + (c.size>1?c.size:'')+'</div>';
   });
-  svg += '</svg>';
+
+  // No token in the URL — the ouja_token cookie rides along on a same-origin image
+  // request, and a session token in a query string would land in every access log.
+  var src='/api/coverage/map.png?lat='+cLat.toFixed(6)+'&lng='+cLng.toFixed(6)
+        +'&z='+z+'&w='+W+'&h='+H;
+  // aspect-ratio (not a fixed height) so the box keeps the map's proportions at any
+  // width — otherwise the image gets cropped and the dots drift off their buildings.
+  var canvas='<div style="position:relative;width:100%;max-width:'+W+'px;aspect-ratio:'+W+' / '+H+';margin:0 auto;'
+    + 'border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface-2)">'
+    + '<img src="'+esc(src)+'" alt="'+esc(ar?'خريطة الشقق':'Apartment map')+'" '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block" '
+    + 'onerror="this.style.display=&#39;none&#39;;var n=document.getElementById(&#39;covMapErr&#39;);if(n)n.style.display=&#39;block&#39;">'
+    + '<div id="covMapErr" style="display:none;position:absolute;inset:0;padding:16px;color:var(--mut);font-size:12px">'
+    + esc(ar?'ما قدرنا نجيب صورة الخريطة من قوقل — النقاط تحت صحيحة، بس بدون خلفية الخريطة.'
+           :'Could not load the Google map image — the dots below are correct, just without the map behind them.')
+    + '</div>' + dots + '</div>';
+
   var legend = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--mut)">'
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green);margin-inline-end:5px"></span>'+(ar?'أوجا (داخلي)':'OujaCT (in-house)')+'</span>'
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--blue);margin-inline-end:5px"></span>'+(ar?'شركة خارجية':'Third-party')+'</span>'
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--yellow);margin-inline-end:5px"></span>'+(ar?'بدون فريق':'Unassigned')+'</span>'
-    + '<span>'+(ar?'الرقم داخل الدائرة = عدد الشقق':'number inside = flats in that building')+'</span></div>';
+    + '<span>'+(ar?'تكبير ':'zoom ')+z+'</span></div>';
   var missing = safeNum((s.units||{}).missing_location);
   var warn = missing ? ('<div class="page-help" style="margin-top:10px"><div class="ph-b">'
     + esc(ar?(missing+' شقة ما لها موقع بعد — اضغط «حدّد المواقع».'):(missing+' apartments still have no location — press "Locate".'))
     + '</div></div>') : '';
-  return '<div class="card">'+head+svg+legend+warn+'</div>';
+  return '<div class="card">'+head+canvas+legend+warn+'</div>';
 }
 
 /* ---- buildings with more than one flat: the cheapest apartments to cover ---- */
@@ -53878,7 +53931,7 @@ async def start_web_server():
 
                 _coverage.wire({
                     "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json,
-                    "load_json": _load_json, "save_json": _save_json, "tz": TZ,
+                    "load_json": _load_json, "save_json": _save_json, "tz": TZ, "web": web,
                     "listings": lambda: list(_ls_get()["listings"].values()),
                     "teams": lambda: list(_cleaning_teams.values()),
                     "guide_units": _cov_guide_units,
