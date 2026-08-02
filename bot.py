@@ -28940,6 +28940,32 @@ async function covResolveGeo(){
 
 function _covMin(v){ return (v==null) ? '—' : (Math.round(v)+labelText(' د',' min')); }
 
+/* Paste one apartment's Google Maps link. Saves AND locates in a single step, so the
+   pin shows up on the map without a second trip to the Locate button. */
+async function covPin(lid){
+  var s=COV.data; if(!s) return;
+  var name=lid;
+  safeArr((s.units||{}).rows).forEach(function(x){ if(x.lid===lid) name=x.name; });
+  var link=prompt(labelText('الصق رابط قوقل ماب لـ ','Paste the Google Maps link for ')+name);
+  if(link==null) return;
+  link=String(link).trim();
+  if(!link) return;
+  toast(labelText('يحفظ الموقع…','Saving the location…'));
+  var r;
+  try{
+    var res=await fetch('/api/coverage/pin',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Token':tok()},
+      body:JSON.stringify({lid:lid, link:link})});
+    r=await res.json();
+  }catch(e){ r={ok:false, message:String(e)}; }
+  if(r && r.ok){
+    toast(labelText('تم — ','Saved — ')+name+labelText(' صارت على الخريطة',' is on the map'));
+    loadCoverage(1);
+  }else{
+    toast((r && r.message) ? r.message : labelText('ما نجح الحفظ','Could not save'));
+  }
+}
+
 function renderCoverage(){
   var s = COV.data; if(!s) return;
   var ar = (L==='ar');
@@ -29178,7 +29204,18 @@ function _covUnitsCard(s){
   var head='<div class="card-head"><span class="card-title">'+(ar?'📋 كل الشقق':'📋 Every apartment')+'</span>'
     + '<span class="card-sub">'+esc(safeNum(rows.length)+(ar?' شقة':' apartments'))+'</span></div>';
   if(!rows.length) return '<div class="card">'+head+emptyState(ar?'ما فيه شقق':'No apartments','','📋')+'</div>';
-  var body='<div style="overflow-x:auto;max-height:520px"><table class="data"><thead><tr>'
+  // Unlocated FIRST: this table is the owner's worklist for pasting the missing pins,
+  // so the ones needing work must not be buried under the ones already done.
+  rows = rows.slice().sort(function(a,b){
+    if(!!a.has_location !== !!b.has_location) return a.has_location ? 1 : -1;
+    return String(a.name||'').localeCompare(String(b.name||''));
+  });
+  var missing = rows.filter(function(x){return !x.has_location;}).length;
+  var hint = missing ? ('<div class="page-help" style="margin-bottom:10px"><div class="ph-b">'
+    + esc(ar ? (missing+' شقة بدون موقع، وهي فوق القائمة. افتح الشقة في قوقل ماب من جوالك، اضغط «مشاركة» وانسخ الرابط، ثم اضغط «الصق الرابط» جنبها — تنحفظ وتظهر على الخريطة على طول.')
+             : (missing+' apartments have no pin and are listed first. Open the apartment in Google Maps, tap Share, copy the link, then press "Paste link" next to it — it saves and appears on the map straight away.'))
+    + '</div></div>') : '';
+  var body=hint+'<div style="overflow-x:auto;max-height:520px"><table class="data"><thead><tr>'
     + '<th>'+(ar?'الشقة':'Apartment')+'</th><th>'+(ar?'المنطقة':'Area')+'</th>'
     + '<th>'+(ar?'الفريق':'Team')+'</th><th>'+(ar?'الموقع':'Location')+'</th></tr></thead><tbody>'
     + rows.map(function(x){
@@ -29187,7 +29224,8 @@ function _covUnitsCard(s){
         var loc = x.has_location
           ? (x.map_link ? ('<a href="'+esc(x.map_link)+'" target="_blank" rel="noopener">'+(ar?'افتح الخريطة':'open map')+'</a>')
                         : (ar?'محدّد':'located'))
-          : '<span class="pill danger">'+(ar?'بدون موقع':'no location')+'</span>';
+          : ('<button class="btn ghost xs" onclick="covPin('+x.lid+')">📍 '
+             + (ar?'الصق الرابط':'Paste link')+'</button>');
         return '<tr><td class="strong">'+esc(x.name)+'</td>'
           + '<td style="font-size:11.5px;color:var(--mut)">'+esc(String(x.district||'—').slice(0,46))+'</td>'
           + '<td>'+team+'</td><td style="font-size:11.5px">'+loc+'</td></tr>';
@@ -53284,6 +53322,7 @@ _ROLE_WRITE_RULES = [
     ("/api/pmo/", "pmo"),
     ("/api/gw/", "gw"),
     ("/api/brain/", "brain"),
+    ("/api/coverage/", "coverage"),
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -53941,6 +53980,19 @@ async def start_web_server():
                             n += 1
                     return n
 
+                def _cov_set_pin(lid, link, lat, lng):
+                    """Save one apartment's map pin onto the LISTINGS store — the same
+                    field /api/listings/update writes and the dispatch/ETA code already
+                    trusts, so a pin set here is a pin everywhere. Additive only."""
+                    rec = _ls_get()["listings"].get(str(int(lid)))
+                    if not rec:
+                        return False
+                    rec["maps_link"] = str(link or "")[:600]
+                    rec["lat"], rec["lng"] = float(lat), float(lng)
+                    _ls_save()
+                    log_event("ops", f"تغطية التنظيف · تم تحديد موقع شقة {lid}")
+                    return True
+
                 _coverage.wire({
                     "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json,
                     "load_json": _load_json, "save_json": _save_json, "tz": TZ, "web": web,
@@ -53952,6 +54004,7 @@ async def start_web_server():
                     "photos": lambda: list(_cleaning_report_photos.values()),
                     "turnovers": _cov_turnovers,
                     "maps_key": lambda: GOOGLE_MAPS_API_KEY,
+                    "set_pin": _cov_set_pin,
                 })
                 _coverage.register_routes(app)
                 print("[coverage] wired + routes registered (/api/coverage/study, /api/coverage/geo)")

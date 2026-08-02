@@ -13,7 +13,7 @@ import asyncio
 import datetime
 import traceback
 
-from . import engine, geo, tiles
+from . import engine, geo, pluscode, tiles
 from .host import HOST, call
 
 EDIT_ROLES = ("admin", "ops")
@@ -239,7 +239,65 @@ async def api_map(request):
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
+async def api_pin(request):
+    """Owner pastes a Google Maps link for one apartment: save it AND locate it, now.
+
+    One step on purpose. /api/listings/update already stores a maps_link, but it can
+    only read coordinates that are literally inside the URL — a shortened
+    maps.app.goo.gl link has none, so the apartment would still read "no location" and
+    the owner would have to go press Locate again. This follows the redirect, reads a
+    Plus Code if that is what the link resolves to, and writes the coordinates straight
+    onto the listing, so the pin appears on the map immediately.
+    """
+    role = HOST.req_role(request) if callable(getattr(HOST, "req_role", None)) else "viewer"
+    if role not in EDIT_ROLES:
+        return _json({"ok": False, "error": "غير مصرّح لك بالتعديل / not allowed"}, 403)
+    body = await request.json()
+    try:
+        lid = int(body.get("lid"))
+    except (TypeError, ValueError):
+        return _json({"ok": False, "error": "bad_lid"}, 400)
+    link = str(body.get("link") or "").strip()[:600]
+    if not link:
+        return _json({"ok": False, "error": "empty_link",
+                      "message": "الصق رابط قوقل ماب أول / paste a Google Maps link first"}, 400)
+
+    def _work():
+        ll = engine.extract_latlng(link)
+        if not ll:
+            rec = geo.resolve_link(link, api_key=call("maps_key") or "")
+            if rec.get("lat") is not None:
+                ll = (rec["lat"], rec["lng"])
+            else:
+                ll = pluscode.from_address(rec.get("address") or link,
+                                           engine.REF_LAT, engine.REF_LNG)
+        if not ll:
+            return None
+        # Sanity-gate to greater Riyadh: a link pasted from the wrong tab should be
+        # refused, not silently dropped onto the map hundreds of km away.
+        if not (23.0 <= ll[0] <= 26.5 and 45.0 <= ll[1] <= 48.5):
+            return "out_of_range"
+        saver = getattr(HOST, "set_pin", None)
+        if not callable(saver):
+            return "no_saver"
+        return saver(lid, link, ll[0], ll[1])
+
+    res = await asyncio.to_thread(_work)
+    if res is None:
+        return _json({"ok": False, "error": "unresolvable",
+                      "message": "ما قدرنا نطلع موقع من هذا الرابط — جرّب «مشاركة» من تطبيق قوقل ماب."
+                                 " / could not read a location from that link"}, 422)
+    if res == "out_of_range":
+        return _json({"ok": False, "error": "out_of_range",
+                      "message": "الموقع طالع برّه الرياض — تأكد من الرابط."
+                                 " / that location is outside Riyadh"}, 422)
+    if res == "no_saver":
+        return _json({"ok": False, "error": "not_wired"}, 500)
+    return _json({"ok": True, "lid": lid, "saved": res})
+
+
 def register(app):
+    app.router.add_post("/api/coverage/pin", _safe(api_pin))
     app.router.add_get("/api/coverage/study", _safe(api_study))
     app.router.add_get("/api/coverage/geo", _safe(api_geo))
     app.router.add_get("/api/coverage/map.png", _safe(api_map))
