@@ -28930,7 +28930,8 @@ async function covResolveGeo(){
     var msg = labelText('تم تحديد ','Located ')+safeNum(g.resolved)+labelText(' موقع.',' locations.');
     if(safeNum(g.failed)) msg += labelText(' تعذّر ','  Failed: ')+safeNum(g.failed)+'.';
     if(safeNum(g.pending)) msg += labelText(' باقي ','  Remaining: ')+safeNum(g.pending)+labelText(' — اضغط الزر مرة ثانية.',' — press the button again.');
-    if(!g.have_key) msg += labelText(' (ما فيه مفتاح خرائط — العناوين بدون إحداثيات)',' (no Maps key — addresses without coordinates)');
+    if(!g.have_key) msg = labelText('ما فيه مفتاح خرائط قوقل — ضيفه في Railway باسم GOOGLE_MAPS_API_KEY وبعدين اضغط الزر مرة ثانية.',
+                                    'No Google Maps key — add GOOGLE_MAPS_API_KEY in Railway, then press the button again.');
     toast(msg);
   }catch(e){
     toast(labelText('ما نجح تحديد المواقع','Could not resolve locations'));
@@ -29050,6 +29051,22 @@ function _covMapCard(s){
     + '<button class="btn ghost xs" onclick="covZoomReset()">'+(ar?'ضبط':'Fit')+'</button>'
     + '<span class="card-sub">'+(ar?'حجم الدائرة = عدد الشقق في نفس المبنى':'circle size = flats in one building')+'</span>'
     + '</div></div>';
+  // The KEY check comes first: with no key there are usually no located apartments
+  // either, and "press Locate" would be useless advice — pressing it cannot work.
+  var geo = s.geo||{};
+  if(geo.have_key === false){
+    return '<div class="card">'+head
+      + '<div class="page-help" style="border-color:var(--red);background:var(--red-soft)">'
+      + '<div class="ph-t">'+(ar?'مفتاح خرائط قوقل مو مضبوط':'The Google Maps key is not set')+'</div>'
+      + '<div class="ph-b">'
+      + (ar ? ('عشان تشتغل الخريطة وتتحدد مواقع الشقق لازم يتضاف المفتاح في Railway باسم '
+               + '<b>GOOGLE_MAPS_API_KEY</b>. بدونه ما نقدر نجيب صورة الخريطة، ولا نحوّل عناوين '
+               + 'الشقق لإحداثيات — لذلك أغلب الشقق مكتوب عندها «بدون موقع».')
+            : ('The map and the apartment locations both need <b>GOOGLE_MAPS_API_KEY</b> set in '
+               + 'Railway. Without it we cannot fetch the map image or turn the apartment addresses '
+               + 'into coordinates, which is why most apartments read "no location".'))
+      + '</div></div></div>';
+  }
   if(!rows.length){
     return '<div class="card">'+head+emptyState(ar?'ما فيه مواقع محددة':'No located apartments',
       ar?'اضغط «حدّد المواقع» فوق عشان نجيب إحداثيات كل شقة.':'Press "Locate" above to fetch coordinates for every apartment.','📍')+'</div>';
@@ -53918,8 +53935,20 @@ async def start_web_server():
                 def _cov_turnovers(start, end):
                     """Real checkouts in [start, end] — the honest demand figure.
                     Uses the TARGETED window query, never the truncated history cache
-                    (CLAUDE.md trap #4)."""
-                    rows = fetch_reservations_window(start, end) or []
+                    (CLAUDE.md trap #4).
+
+                    fetch_reservations_window takes DATE objects and calls .isoformat()
+                    on them; handing it ISO strings raised
+                    "'str' object has no attribute 'isoformat'" and silently dropped the
+                    page back to the estimated demand (seen live 2026-08-02)."""
+                    if isinstance(start, str):
+                        start = datetime.strptime(start[:10], "%Y-%m-%d").date()
+                    if isinstance(end, str):
+                        end = datetime.strptime(end[:10], "%Y-%m-%d").date()
+                    start, end = str(start)[:10], str(end)[:10]
+                    rows = fetch_reservations_window(
+                        datetime.strptime(start, "%Y-%m-%d").date(),
+                        datetime.strptime(end, "%Y-%m-%d").date()) or []
                     n = 0
                     for r in rows:
                         if str(r.get("status") or "") not in ("new", "modified"):

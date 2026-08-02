@@ -114,7 +114,12 @@ def _build(request_params):
         units=units,
         non_cleaners=set(_settings().get("non_cleaners") or ()),
     )
-    s["geo"] = {"filled_from_cache": filled, "cached_total": len(cache),
+    # have_key decides whether locating can work AT ALL: without it we can follow a short
+    # link to a street address but never turn that address into coordinates, and the map
+    # image cannot be fetched either. The page must say so outright rather than showing a
+    # blank box and a vague failure (seen live 2026-08-02).
+    s["geo"] = {"have_key": bool(call("maps_key")),
+                "filled_from_cache": filled, "cached_total": len(cache),
                 "pending": len([u for u in units
                                 if not u["has_location"] and u.get("geo_key")]),
                 "nothing_to_resolve": len([u for u in units
