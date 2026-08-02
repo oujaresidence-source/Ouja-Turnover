@@ -4642,7 +4642,17 @@
       '</div><div class="wq-actions"><span class="c-amt">' + amt + '</span>' + act + '</div></div>';
   }
 
-  function seExpRow(x) {
+  function seExpRow(x, readOnly) {
+    if (readOnly) {
+      // an expense the contract window excluded — shown so it is never a silent
+      // disappearance, but with NO action buttons: nothing here can include it
+      return '<div class="wq-row" data-xid="' + esc(String(x.id)) + '">' +
+        '<div class="wq-main"><div class="wq-top"><b>' + esc(x.description || x.category || '—') + '</b>' +
+        '<span class="tag bad">' + rsnLabel(x.exclude_reason || 'outside_contract') + '</span>' +
+        (x.apartment ? '<span class="tag soft">' + esc(x.apartment) + '</span>' : '') + '</div>' +
+        '<div class="wq-sub"><code>' + esc(x.date || '') + '</code></div></div>' +
+        '<div class="wq-actions"><span class="c-amt">' + fmtAmt(x.amount) + '</span></div></div>';
+    }
     var chips = (x.manual ? '<span class="tag soft">' + esc(t('se_manual_chip')) + '</span>' : '') +
       (x.edited ? '<span class="tag">' + esc(t('se_exp_edit')) + ' ✓</span>' : '') +
       (x.edit_reason ? '<span class="tag">' + esc(x.edit_reason) + '</span>' : '') +
@@ -4746,6 +4756,15 @@
         return Object.assign({}, l, { exclude_reason: 'unpaid_yet', reference_total: l.expected });
       })));
     var expLines = unitFilter(s.exp_lines || []);
+    var expExcl = unitFilter(s.contract_excluded_expenses || []);
+    // «أضف مصروف يدوي» opens on the last day of the statement month, so a blank
+    // date can never turn into a line nobody can date
+    var seManDefDate = (function () {
+      var p = String(d.month || '').split('-');
+      if (p.length < 2) return '';
+      var last = new Date(Number(p[0]), Number(p[1]), 0).getDate();
+      return p[0] + '-' + p[1] + '-' + (last < 10 ? '0' : '') + last;
+    })();
     function statBtn(key, label, val, neg) {
       var on = seUI.explain === key;
       return '<button class="stat tap' + (on ? ' on' : '') + '" data-act="se-why" data-key="' + key + '">' +
@@ -4810,7 +4829,11 @@
                exLines.map(function (l) { return seResvRow(l, 'ex'); }).join('') + '</div>')
             : '') +
           '<div class="grp-hint">' + esc(t('se_expenses')) + ' · ' + expLines.length + '</div>' +
-          '<div class="grp-list">' + expLines.map(seExpRow).join('') + '</div>' +
+          '<div class="grp-list">' + expLines.map(function (x) { return seExpRow(x); }).join('') +
+          (expExcl.length
+            ? ('<div class="grp-hint">' + esc(t('se_excluded')) + ' · ' + expExcl.length + '</div>' +
+               expExcl.map(function (x) { return seExpRow(x, true); }).join(''))
+            : '') + '</div>' +
           seIncBlock(s, unitName) +
           '<div style="padding:10px 16px"><div class="grp-hint" style="padding:0 0 6px">' + esc(t('se_man_hint')) + '</div><div class="om-grid">' +
           '<label>' + esc(t('se_man_unit')) + '<select class="in" id="seManLid">' +
@@ -4821,7 +4844,7 @@
               }).join('')) +
           '</select></label>' +
           '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in" id="seManAmt"></label>' +
-          '<label>' + esc(t('se_date')) + '<input type="date" class="in" id="seManDate"></label>' +
+          '<label>' + esc(t('se_date')) + '<input type="date" class="in" id="seManDate" value="' + esc(seManDefDate) + '"></label>' +
           '<label>' + esc(t('se_desc')) + '<input class="in" id="seManDesc"></label>' +
           '</div><input class="in" id="seManReason" placeholder="' + esc(t('se_reason_req')) + '" style="margin-top:6px">' +
           '<button class="btn ghost sm" data-act="se-man-add" style="margin-top:6px">' + esc(t('se_exp_add')) + '</button></div>' +

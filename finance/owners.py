@@ -465,6 +465,19 @@ def unit_statement(rec, mkey, force_rederive=False):
     exp_kept, exp_excluded = [], []
     exp_total = Decimal(0)
     for e in rep.get("exp_lines") or []:
+        if e.get("manual"):
+            # A hand-entered line is an explicit human decision, not a Hostaway
+            # fact: the accountant attached it to THIS statement on purpose, so
+            # its own date can never delete it. (Owner-reported 2026-08-02: an
+            # invoice dated after the month vanished from the print and the
+            # editor blamed «وحدة خارج فترة العقد» — a reason with nothing to do
+            # with a manual entry.) A date that doesn't parse is blanked for
+            # display only — it must never show text in a date column.
+            if _pdate(e.get("date")) is None:
+                e = {**e, "date": ""}
+            exp_kept.append(e)
+            exp_total += _D(e.get("amount"))
+            continue
         d = _pdate(e.get("display_date") or e.get("date"))
         if d is not None and not (win_s <= d <= win_e and win_e >= win_s):
             exp_excluded.append({**e, "exclude_reason": "outside_contract"})
@@ -901,17 +914,22 @@ def compute_owner_statement(owner, mkey, apply_edits=True):
                       "text_ar": "⚠️ بيانات غير متاحة مؤقتاً — ما قدرنا نسحب الحجوزات من Hostaway، الأرقام ناقصة",
                       "text_en": "⚠️ Data temporarily unavailable — Hostaway pull failed, numbers are incomplete"})
     # carry the v2.1 extras through the aggregate
-    contract_excluded = []
+    # Bookings and expenses keep SEPARATE buckets. Merging them made the editor
+    # render an excluded expense with the reservation row renderer — a ghost row
+    # with no guest, no dates and an «احسبه» button that could never work.
+    contract_excluded, contract_excluded_exp = [], []
     for r in reps:
         contract_excluded.extend(r.get("contract_excluded_lines") or [])
-        contract_excluded.extend(r.get("contract_excluded_expenses") or [])
-    if contract_excluded:
+        contract_excluded_exp.extend(r.get("contract_excluded_expenses") or [])
+    if contract_excluded or contract_excluded_exp:
         es = dict(agg.get("excluded_summary") or {})
-        es["outside_contract"] = sum(1 for x in contract_excluded if x.get("checkin"))
-        es["outside_contract_value"] = _fnum(sum((_D(x.get("reference_total") or x.get("amount") or 0)
-                                                  for x in contract_excluded), Decimal(0)))
+        es["outside_contract"] = len(contract_excluded) + len(contract_excluded_exp)
+        es["outside_contract_value"] = _fnum(
+            sum((_D(x.get("reference_total") or 0) for x in contract_excluded), Decimal(0))
+            + sum((_D(x.get("amount") or 0) for x in contract_excluded_exp), Decimal(0)))
         agg["excluded_summary"] = es
         agg["contract_excluded_lines"] = contract_excluded
+        agg["contract_excluded_expenses"] = contract_excluded_exp
     if foots:
         agg["footnotes"] = foots
     op = (_terms_store()["owners"] or {}).get(owner) or {}
@@ -1129,6 +1147,12 @@ _EDIT_OPS = ("resv_exclude", "resv_include", "exp_override", "exp_delete",
              "exp_manual_add", "exp_manual_del", "adj_add", "adj_del",
              "inc_manual_add", "inc_manual_del")
 
+# Ids minted by the editor itself — an expense, a manual income line or an
+# adjustment. `resv_exclude`/`resv_include` used to accept ANY id and write it
+# into `edits.resv`, where it matched no reservation: the accountant clicked,
+# the server answered 200 with unchanged numbers, and nothing ever happened.
+_NON_RESV_ID_PREFIXES = ("exp-", "man-", "inc-", "adj-")
+
 
 def statement_edit(request, body):
     """ONE mutation endpoint for the editor. Every op requires a reason, lands
@@ -1147,10 +1171,16 @@ def statement_edit(request, body):
         return {"error": "reason_required",
                 "message_ar": "السبب إلزامي — كل تعديل لازم يُفسَّر.",
                 "message_en": "A reason is required — every edit must be explainable."}, 400
+    target = str(body.get("id") or "")
+    if op in ("resv_exclude", "resv_include") and (
+            not target or target.startswith(_NON_RESV_ID_PREFIXES)):
+        return {"error": "not_a_reservation",
+                "message_ar": "هذا السطر مصروف أو تسوية يدوية، مو حجز — يتعدّل أو ينحذف من قائمة المصاريف.",
+                "message_en": "That row is an expense or a manual line, not a booking — edit or "
+                              "delete it in the expenses list."}, 400
     rec = stmt_rec(owner, mkey, create=True)
     e = rec["edits"]
     actor = api.actor(request)
-    target = str(body.get("id") or "")
     before = None
     after = None
     if op == "resv_exclude":
@@ -1192,6 +1222,12 @@ def statement_edit(request, body):
             amt = round(float(body.get("amount")), 2)
         except (TypeError, ValueError):
             return {"error": "bad_amount"}, 400
+        # An empty date used to leak the DESCRIPTION into the date field
+        # downstream (a sentence printed where a date belongs). Fall back to the
+        # last day of the statement month — the line belongs to this month by
+        # the very act of typing it here.
+        _d_in = str(body.get("date") or "")[:10]
+        exp_date = _d_in if _pdate(_d_in) else B._month_bounds(mkey)[1].isoformat()
         if body.get("lid") not in (None, ""):
             # per-APARTMENT manual expense (owner-reported 2026-07: entered per unit
             # but invisible on the unit print). Same fix as inc_manual_add: land in
@@ -1209,7 +1245,7 @@ def statement_edit(request, body):
                 adj.setdefault(kdef, vdef)
             line = {"kind": "expense",
                     "label": (str(body.get("description") or "").strip() or "مصروف يدوي")[:200],
-                    "amount": amt, "date": str(body.get("date") or "")[:10],
+                    "amount": amt, "date": exp_date,
                     "reason": reason}
             adj["extra_lines"] = list(adj.get("extra_lines") or []) + [line]
             B._finance_adjust[ak] = adj
@@ -1218,7 +1254,7 @@ def statement_edit(request, body):
             after = line
         else:
             row = {"id": "man-" + uuid.uuid4().hex[:8], "amount": amt,
-                   "date": str(body.get("date") or "")[:10],
+                   "date": exp_date,
                    "description": str(body.get("description") or "")[:200],
                    "reason": reason, "by": actor,
                    "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
