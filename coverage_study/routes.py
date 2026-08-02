@@ -42,7 +42,7 @@ SETTING_DEFAULTS = {
     "supervisor_cost_sar": 6000,
     "days_per_week": 6,
     "days_off_per_year": 21,
-    "vendor_rate_sar": {},                  # {team_id: SAR per apartment cleaned}
+    "apartment_price_sar": {},              # {listing_id: SAR per month, per apartment}
 }
 NUMERIC_SETTINGS = ("cleaners_count", "supervisors_count", "cleaner_cost_sar",
                     "supervisor_cost_sar", "days_per_week", "days_off_per_year")
@@ -233,7 +233,7 @@ def _build(request_params):
             demand_per_day=demand, rate=rate, current_people=cleaners,
             peak_per_day=peak, roster_factor=roster_f, absence_factor=absence_f)
 
-        vm = engine.vendor_monthly(rows, units, cfg.get("vendor_rate_sar") or {},
+        vm = engine.vendor_monthly(rows, units, cfg.get("apartment_price_sar") or {},
                                    window_days=wdays)
         s["vendors"] = vm
         s["cost"] = engine.cost_compare(
@@ -278,31 +278,33 @@ async def api_study(request):
         "demand": float(demand) if _num(demand) else None,
         "people": int(float(people)) if _num(people) else None,
     }
-    s = await asyncio.to_thread(_build, params)
-
-    # Real checkout demand from Hostaway beats the engine's capped fallback estimate.
-    # Whatever happens is REPORTED — a silent fallback to the estimate is how the page
-    # ended up showing an impossible 94.8 cleans/day (2026-08-02).
+    # Fetch the real Hostaway demand BEFORE building, and hand it in.
+    #
+    # This used to run afterwards and REPLACED s["capacity"] wholesale, which silently
+    # destroyed the head count computed inside _build. The page then showed two different
+    # hiring answers at once: a KPI reading from the leftover old model, and the main card
+    # reading a key that no longer existed, so it rendered "not enough data" directly
+    # underneath a filled-in KPI (owner screenshot, 2026-08-02). Computing demand first
+    # means everything downstream is derived once, from one number.
+    params["demand_source"] = "estimated_from_log"
+    params["demand_note"] = ""
     if params["demand"] is None and callable(getattr(HOST, "turnovers", None)):
         try:
             end = datetime.date.today()
             start = end - datetime.timedelta(days=29)
             n = await asyncio.to_thread(HOST.turnovers, start.isoformat(), end.isoformat())
             if n:
-                s["capacity"] = engine.capacity_model(
-                    units_per_person_day=(s.get("throughput") or {}).get("median"),
-                    cycle_median_min=s["cycle"]["median_min"],
-                    workday_min=params["workday_min"],
-                    demand_per_day=round(float(n) / 30.0, 1),
-                    current_people=s["capacity"].get("current_people") or 0)
-                s["capacity"]["demand_source"] = "hostaway_30d"
-                s["capacity"]["demand_note"] = "%d checkouts in 30 days" % n
+                params["demand"] = round(float(n) / 30.0, 1)
+                params["demand_source"] = "hostaway_30d"
+                params["demand_note"] = "%d checkouts in 30 days" % n
             else:
-                s["capacity"]["demand_note"] = "Hostaway returned no checkouts for the window"
+                params["demand_note"] = "Hostaway returned no checkouts for the window"
         except Exception as e:
-            s["capacity"]["demand_note"] = "Hostaway demand unavailable: %s" % str(e)[:160]
-    s["capacity"].setdefault("demand_source", "estimated_from_log")
-    s["capacity"].setdefault("demand_note", "")
+            params["demand_note"] = "Hostaway demand unavailable: %s" % str(e)[:160]
+
+    s = await asyncio.to_thread(_build, params)
+    s["capacity"]["demand_source"] = params["demand_source"]
+    s["capacity"]["demand_note"] = params["demand_note"]
     s["generated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     return _json({"ok": True, "study": s})
 
@@ -455,12 +457,12 @@ async def api_settings(request):
                 return _json({"ok": False, "error": "out_of_range", "field": k}, 400)
             cfg[k] = int(v) if float(v).is_integer() else v
 
-    if "vendor_rate_sar" in body:
-        rates = body.get("vendor_rate_sar") or {}
+    if "apartment_price_sar" in body:
+        rates = body.get("apartment_price_sar") or {}
         if not isinstance(rates, dict):
             return _json({"ok": False, "error": "bad_rates"}, 400)
         clean = {}
-        for tid, val in list(rates.items())[:40]:
+        for tid, val in list(rates.items())[:200]:   # one entry per apartment
             tid = str(tid)[:40]
             if val in (None, ""):
                 continue
@@ -470,7 +472,7 @@ async def api_settings(request):
                 return _json({"ok": False, "error": "bad_rate", "field": tid}, 400)
             if 0 <= f <= 100000:
                 clean[tid] = f
-        cfg["vendor_rate_sar"] = clean
+        cfg["apartment_price_sar"] = clean
 
     save = getattr(HOST, "save_json", None)
     if callable(save):

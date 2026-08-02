@@ -953,43 +953,55 @@ def cleaner_capacity(turn_rows, units, cleaners, window_days, in_house_ids=None)
 
 # ------------------------------------------------------------------ money
 
-def vendor_monthly(turn_rows, units, rates, window_days=30):
-    """What the outside companies cost per month, each at its own rate per clean.
+def vendor_monthly(turn_rows, units, prices, window_days=30):
+    """What the outside companies cost per month, priced PER APARTMENT.
 
-    A company with no price entered contributes ZERO and is NAMED — a silent zero would
-    make in-housing look free by comparison, which is the most expensive mistake this
-    page could make.
+    The owner bills and thinks per apartment per month, and the price varies with the
+    bedroom count (2026-08-02) — so that is the unit of entry, not a rate per clean.
+    Cost per clean is DERIVED from each apartment's own turnover, which is the honest
+    direction: a 1-bedroom that turns over twice a week is not the same cost per clean
+    as a 3-bedroom that turns over twice a month, even on the same monthly price.
+
+    An apartment with no price entered contributes ZERO and is COUNTED as missing — a
+    silent zero would make in-housing look free, the most expensive possible mistake here.
     """
-    team_of, names = {}, {}
-    for u in units or []:
-        team_of[u.get("lid")] = u.get("team_id") or ""
-        if not u.get("in_house") and (u.get("team_id") or ""):
-            names[u["team_id"]] = u.get("team_name") or u["team_id"]
-
+    days = max(1, int(window_days or 30))
     cleans = defaultdict(int)
     for r in turn_rows or []:
-        tid = team_of.get(r.get("lid"))
-        if tid and tid in names:
-            cleans[tid] += 1
+        cleans[r.get("lid")] += 1
 
-    days = max(1, int(window_days or 30))
-    rows, total, missing = [], 0.0, []
-    for tid, name in names.items():
-        n = cleans.get(tid, 0)
-        per_month = n * 30.0 / days
-        rate = rates.get(tid) if rates else None
+    rows, total, missing, by_team = [], 0.0, [], {}
+    for u in units or []:
+        if u.get("in_house") or not (u.get("team_id") or ""):
+            continue                      # ours, or nobody's — not a company bill
+        lid = u.get("lid")
+        raw = (prices or {}).get(str(lid), (prices or {}).get(lid))
         try:
-            rate = float(rate) if rate not in (None, "") else None
+            price = float(raw) if raw not in (None, "") else None
         except (TypeError, ValueError):
-            rate = None
-        cost = round(per_month * rate, 0) if rate else 0
-        if rate is None and n:
-            missing.append(name)
-        total += cost
-        rows.append({"team_id": tid, "name": name, "cleans_per_month": round(per_month, 1),
-                     "rate": rate, "monthly": cost})
-    rows.sort(key=lambda r: -r["monthly"])
-    return {"rows": rows, "total_monthly": round(total, 0), "missing_rates": missing}
+            price = None
+        per_month = cleans.get(lid, 0) * 30.0 / days
+        if price is None:
+            missing.append(u.get("name") or str(lid))
+        else:
+            total += price
+        tname = u.get("team_name") or u.get("team_id")
+        by_team[tname] = round(by_team.get(tname, 0.0) + (price or 0.0), 0)
+        rows.append({
+            "lid": lid, "name": u.get("name") or str(lid),
+            "bedrooms": u.get("bedrooms"),
+            "team_id": u.get("team_id"), "team_name": tname,
+            "monthly": price,
+            "cleans_per_month": round(per_month, 1),
+            "per_clean": round(price / per_month, 1) if (price and per_month) else None,
+        })
+    # Company, then bedroom count, then name: the order the owner reads a price list in.
+    rows.sort(key=lambda r: (r["team_name"] or "", -(r["bedrooms"] or 0), r["name"] or ""))
+    return {"rows": rows, "total_monthly": round(total, 0),
+            "missing_prices": missing, "missing_count": len(missing),
+            "priced_count": len(rows) - len(missing), "apartments": len(rows),
+            "by_team": [{"name": k, "monthly": v} for k, v in
+                        sorted(by_team.items(), key=lambda kv: -kv[1])]}
 
 
 def cost_compare(demand_per_day, per_cleaner_day, cleaner_cost, supervisor_cost,

@@ -353,24 +353,58 @@ class TestCostCompare(unittest.TestCase):
 
 
 class TestVendorMonthly(unittest.TestCase):
-    def test_multiplies_each_company_rate_by_its_own_checkouts(self):
-        units = [{"lid": 1, "team_id": "v1", "in_house": False},
-                 {"lid": 2, "team_id": "v2", "in_house": False},
-                 {"lid": 3, "team_id": "t1", "in_house": True}]
-        rows = ([{"lid": 1, "date": "2026-07-01"}] * 10
-                + [{"lid": 2, "date": "2026-07-01"}] * 5
-                + [{"lid": 3, "date": "2026-07-01"}] * 20)
-        out = E.vendor_monthly(rows, units, {"v1": 50, "v2": 100}, window_days=30)
-        # v1: 10 cleans x 50 = 500 ; v2: 5 x 100 = 500 ; our own apartments excluded
-        self.assertEqual(out["total_monthly"], 1000)
-        self.assertEqual(out["missing_rates"], [])
+    """Priced PER APARTMENT PER MONTH — how the owner is actually billed, and it varies
+    with the bedroom count."""
 
-    def test_a_company_with_no_price_is_named_not_silently_zeroed(self):
-        units = [{"lid": 1, "team_id": "v1", "team_name": "StayClean", "in_house": False}]
-        rows = [{"lid": 1, "date": "2026-07-01"}] * 10
-        out = E.vendor_monthly(rows, units, {}, window_days=30)
-        self.assertEqual(out["total_monthly"], 0)
-        self.assertIn("StayClean", out["missing_rates"])
+    def _units(self):
+        return [{"lid": 1, "name": "A11", "team_id": "v1", "team_name": "StayClean",
+                 "in_house": False, "bedrooms": 2},
+                {"lid": 2, "name": "B10", "team_id": "v2", "team_name": "Servicu",
+                 "in_house": False, "bedrooms": 3},
+                {"lid": 3, "name": "OURS", "team_id": "t1", "team_name": "OujaCT",
+                 "in_house": True, "bedrooms": 1},
+                {"lid": 4, "name": "NOTEAM", "team_id": "", "team_name": "",
+                 "in_house": False, "bedrooms": 1}]
+
+    def test_sums_the_monthly_price_of_each_outsourced_apartment(self):
+        out = E.vendor_monthly([], self._units(), {"1": 1200, "2": 1800}, window_days=30)
+        self.assertEqual(out["total_monthly"], 3000)
+        self.assertEqual(out["apartments"], 2)          # ours and the untagged one excluded
+        self.assertEqual(out["missing_prices"], [])
+
+    def test_our_own_and_untagged_apartments_are_not_billed(self):
+        out = E.vendor_monthly([], self._units(), {"1": 1200, "2": 1800, "3": 999, "4": 999})
+        self.assertEqual(out["total_monthly"], 3000)
+
+    def test_an_apartment_with_no_price_is_counted_missing_not_zeroed(self):
+        out = E.vendor_monthly([], self._units(), {"1": 1200}, window_days=30)
+        self.assertEqual(out["total_monthly"], 1200)
+        self.assertIn("B10", out["missing_prices"])
+        self.assertEqual(out["missing_count"], 1)
+        self.assertEqual(out["priced_count"], 1)
+
+    def test_cost_per_clean_is_derived_from_that_apartment_turnover(self):
+        # 1,200 a month over 6 checkouts a month = 200 per clean.
+        rows = [{"lid": 1, "date": "2026-07-%02d" % (d + 1)} for d in range(6)]
+        out = E.vendor_monthly(rows, self._units(), {"1": 1200}, window_days=30)
+        row = [r for r in out["rows"] if r["lid"] == 1][0]
+        self.assertEqual(row["cleans_per_month"], 6.0)
+        self.assertEqual(row["per_clean"], 200.0)
+
+    def test_bedrooms_are_carried_through_for_the_price_list(self):
+        out = E.vendor_monthly([], self._units(), {})
+        self.assertEqual({r["name"]: r["bedrooms"] for r in out["rows"]},
+                         {"A11": 2, "B10": 3})
+
+    def test_integer_and_string_apartment_keys_both_work(self):
+        a = E.vendor_monthly([], self._units(), {"1": 1200})["total_monthly"]
+        b = E.vendor_monthly([], self._units(), {1: 1200})["total_monthly"]
+        self.assertEqual(a, b)
+
+    def test_grouped_by_company_for_scanning(self):
+        out = E.vendor_monthly([], self._units(), {"1": 1200, "2": 1800})
+        self.assertEqual({t["name"]: t["monthly"] for t in out["by_team"]},
+                         {"StayClean": 1200, "Servicu": 1800})
 
 
 if __name__ == "__main__":
