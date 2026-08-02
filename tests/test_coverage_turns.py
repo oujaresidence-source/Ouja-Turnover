@@ -236,5 +236,142 @@ class TestReconcile(unittest.TestCase):
         self.assertEqual(r["untagged_cleans"], 40)
 
 
+# ---------------------------------------------------------------- cleaner capacity
+
+def _u2(lid, in_house, team="t1", name=None):
+    return {"lid": lid, "in_house": in_house, "team_id": team if in_house else "v1",
+            "team_name": "OujaCT" if in_house else "StayClean",
+            "name": name or ("U%d" % lid)}
+
+
+class TestCleanerCapacity(unittest.TestCase):
+    """The rate that matters for hiring is per CLEANER, and the log never records a
+    cleaner — only the supervisor who pressed done (owner, 2026-08-02). So it is derived:
+    checkouts on OUR OWN apartments, divided by the cleaners we actually employ."""
+
+    def _rows(self):
+        # 3 own apartments (1,2,3) + 2 outsourced (8,9). 10-day window.
+        rows = []
+        for d in range(1, 11):
+            day = "2026-07-%02d" % d
+            for lid in (1, 2, 3):
+                rows.append({"lid": lid, "date": day, "kind": "T1"})
+            for lid in (8, 9):
+                rows.append({"lid": lid, "date": day, "kind": "T1"})
+        return rows
+
+    def _units(self):
+        return [_u2(1, True), _u2(2, True), _u2(3, True), _u2(8, False), _u2(9, False)]
+
+    def test_only_our_own_apartments_count(self):
+        c = E.cleaner_capacity(self._rows(), self._units(), cleaners=3, window_days=10)
+        self.assertEqual(c["own_units"], 3)
+        self.assertEqual(c["own_checkouts"], 30)          # 3 apartments x 10 days
+        self.assertEqual(c["own_per_day"], 3.0)
+
+    def test_rate_is_per_cleaner_not_per_supervisor(self):
+        c = E.cleaner_capacity(self._rows(), self._units(), cleaners=3, window_days=10)
+        self.assertEqual(c["per_cleaner_typical"], 1.0)   # 3 a day across 3 cleaners
+
+    def test_busiest_day_is_reported_as_the_capacity_floor(self):
+        # A typical day understates capacity when the team is not busy. Their best
+        # observed day is the honest lower bound on what they CAN do.
+        rows = self._rows() + [{"lid": 1, "date": "2026-07-05", "kind": "T1"},
+                               {"lid": 2, "date": "2026-07-05", "kind": "T1"},
+                               {"lid": 3, "date": "2026-07-05", "kind": "T1"}]
+        c = E.cleaner_capacity(rows, self._units(), cleaners=3, window_days=10)
+        self.assertEqual(c["busiest_day"], 6)
+        self.assertEqual(c["per_cleaner_best"], 2.0)
+
+    def test_idle_team_is_flagged_rather_than_read_as_capacity(self):
+        c = E.cleaner_capacity(self._rows(), self._units(), cleaners=3, window_days=10)
+        self.assertTrue(c["likely_underused"])            # 1.0/day/cleaner is not busy
+
+    def test_a_busy_team_is_not_flagged(self):
+        rows = []
+        for d in range(1, 11):
+            for lid in (1, 2, 3):
+                for k in range(4):
+                    rows.append({"lid": lid, "date": "2026-07-%02d" % d, "kind": "T1"})
+        c = E.cleaner_capacity(rows, self._units(), cleaners=3, window_days=10)
+        self.assertFalse(c["likely_underused"])
+
+    def test_no_cleaners_refuses_rather_than_dividing_by_zero(self):
+        c = E.cleaner_capacity(self._rows(), self._units(), cleaners=0, window_days=10)
+        self.assertIsNone(c["per_cleaner_typical"])
+        self.assertTrue(c["reason"])
+
+    def test_no_own_apartments_refuses(self):
+        units = [_u2(8, False), _u2(9, False)]
+        c = E.cleaner_capacity(self._rows(), units, cleaners=3, window_days=10)
+        self.assertEqual(c["own_units"], 0)
+        self.assertTrue(c["reason"])
+
+
+# ---------------------------------------------------------------- cost
+
+class TestCostCompare(unittest.TestCase):
+    def test_saving_when_in_house_is_cheaper(self):
+        # 20 cleans/day, 2 per cleaner per day -> 10 on shift.
+        # 10 x (7/6) x 1.067 = 12.45 -> 13 on payroll.
+        # 13 x 1300 + 1 x 6000 = 22,900/month.
+        # Now: 3 x 1300 + 6000 + 36,000 to companies = 45,900. Saving = 23,000.
+        c = E.cost_compare(demand_per_day=20, per_cleaner_day=2,
+                           cleaner_cost=1300, supervisor_cost=6000, supervisors=1,
+                           current_cleaners=3, vendor_monthly=36000,
+                           roster_factor=7 / 6.0, absence_factor=0.067)
+        self.assertEqual(c["cleaners_needed"], 13)
+        self.assertEqual(c["inhouse_monthly"], 22900)
+        self.assertEqual(c["current_monthly"], 45900)
+        self.assertEqual(c["saving_monthly"], 23000)
+
+    def test_loss_when_in_house_is_dearer(self):
+        c = E.cost_compare(demand_per_day=20, per_cleaner_day=1,
+                           cleaner_cost=1300, supervisor_cost=6000, supervisors=1,
+                           current_cleaners=3, vendor_monthly=5000,
+                           roster_factor=7 / 6.0, absence_factor=0.067)
+        self.assertLess(c["saving_monthly"], 0)
+
+    def test_cost_per_clean_is_reported(self):
+        c = E.cost_compare(demand_per_day=20, per_cleaner_day=2,
+                           cleaner_cost=1300, supervisor_cost=6000, supervisors=1,
+                           current_cleaners=3, vendor_monthly=36000)
+        self.assertGreater(c["inhouse_per_clean"], 0)
+        self.assertEqual(c["vendor_per_clean"], 60.0)     # 36000 / (20*30)
+
+    def test_no_rate_refuses_to_guess(self):
+        c = E.cost_compare(demand_per_day=20, per_cleaner_day=None,
+                           cleaner_cost=1300, supervisor_cost=6000)
+        self.assertIsNone(c["saving_monthly"])
+        self.assertTrue(c["reason"])
+
+    def test_no_vendor_prices_still_reports_the_in_house_cost(self):
+        c = E.cost_compare(demand_per_day=20, per_cleaner_day=2,
+                           cleaner_cost=1300, supervisor_cost=6000, vendor_monthly=None)
+        self.assertGreater(c["inhouse_monthly"], 0)
+        self.assertIsNone(c["saving_monthly"])
+
+
+class TestVendorMonthly(unittest.TestCase):
+    def test_multiplies_each_company_rate_by_its_own_checkouts(self):
+        units = [{"lid": 1, "team_id": "v1", "in_house": False},
+                 {"lid": 2, "team_id": "v2", "in_house": False},
+                 {"lid": 3, "team_id": "t1", "in_house": True}]
+        rows = ([{"lid": 1, "date": "2026-07-01"}] * 10
+                + [{"lid": 2, "date": "2026-07-01"}] * 5
+                + [{"lid": 3, "date": "2026-07-01"}] * 20)
+        out = E.vendor_monthly(rows, units, {"v1": 50, "v2": 100}, window_days=30)
+        # v1: 10 cleans x 50 = 500 ; v2: 5 x 100 = 500 ; our own apartments excluded
+        self.assertEqual(out["total_monthly"], 1000)
+        self.assertEqual(out["missing_rates"], [])
+
+    def test_a_company_with_no_price_is_named_not_silently_zeroed(self):
+        units = [{"lid": 1, "team_id": "v1", "team_name": "StayClean", "in_house": False}]
+        rows = [{"lid": 1, "date": "2026-07-01"}] * 10
+        out = E.vendor_monthly(rows, units, {}, window_days=30)
+        self.assertEqual(out["total_monthly"], 0)
+        self.assertIn("StayClean", out["missing_rates"])
+
+
 if __name__ == "__main__":
     unittest.main()

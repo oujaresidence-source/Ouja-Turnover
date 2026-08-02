@@ -32,12 +32,39 @@ _TURNS_CACHE = {}          # (start, end) -> (payload, fetched_at). Hostaway is 
 _TURNS_TTL_S = 900
 
 # Owner-editable without a deploy, exactly like the non-cleaner list.
+# Owner-supplied, 2026-08-02: 3 cleaners, 1 supervisor, 6-day week, 21 days off a year,
+# 1,300 SAR/month per cleaner, 6,000 SAR/month for the supervisor (with car, housing,
+# transport and petrol). Editable on the page — no deploy needed to change any of them.
 SETTING_DEFAULTS = {
-    "roster_factor": round(30 / 26.0, 4),   # six-day week: 26 worked days in 30
-    "absence_factor": 0.08,                 # leave + sickness
+    "cleaners_count": 3,
+    "supervisors_count": 1,
+    "cleaner_cost_sar": 1300,
+    "supervisor_cost_sar": 6000,
+    "days_per_week": 6,
+    "days_off_per_year": 21,
     "vendor_rate_sar": {},                  # {team_id: SAR per apartment cleaned}
-    "inhouse_cost_per_person_sar": 0,       # monthly, all-in, per cleaner
 }
+NUMERIC_SETTINGS = ("cleaners_count", "supervisors_count", "cleaner_cost_sar",
+                    "supervisor_cost_sar", "days_per_week", "days_off_per_year")
+
+
+def _factors(cfg):
+    """Roster and absence factors derived from the real working pattern.
+
+    A 6-day week needs 7/6 people on payroll to keep one on shift every day; 21 days off
+    against 312 working days is ~6.7%. Derived rather than typed so the two can never
+    drift apart from the pattern they describe.
+    """
+    try:
+        dpw = max(1.0, min(7.0, float(cfg.get("days_per_week") or 6)))
+    except (TypeError, ValueError):
+        dpw = 6.0
+    try:
+        off = max(0.0, float(cfg.get("days_off_per_year") or 0))
+    except (TypeError, ValueError):
+        off = 0.0
+    worked = max(1.0, 52.0 * dpw)
+    return 7.0 / dpw, min(0.5, off / worked)
 
 
 def _settings():
@@ -181,30 +208,54 @@ def _build(request_params):
     # blank box and a vague failure (seen live 2026-08-02).
     # ---- v2: turn deadlines, the shape of the week, and the corrected head count ----
     cfg = _settings()
+    roster_f, absence_f = _factors(cfg)
     all_lids = call("all_listing_ids") or None
     tp = _turns_payload(units, all_lids)
     if tp:
+        rows = tp["turns"]["rows"]
+        wdays = max(1, TURNS_WEEKS_BACK * 7)
         s["turns"] = tp["turns"]
         s["week"] = tp["week"]
-        # Peak from MEASURED checkouts, not a guessed multiplier (owner's choice).
+
+        # The rate that decides hiring is per CLEANER, and the log only records the
+        # SUPERVISOR who pressed done — so it is derived from checkouts on our own
+        # apartments (owner's own suggestion, 2026-08-02).
+        cleaners = int(cfg.get("cleaners_count") or 0)
+        cap = engine.cleaner_capacity(rows, units, cleaners, wdays)
+        s["cleaner"] = cap
+
+        demand = s["capacity"].get("demand_per_day") or tp["turns"].get("checkouts_per_day") or 0
+        # Their BEST observed day, not their typical one: a team that is not busy would
+        # otherwise look incapable, and every hiring number built on it would be inflated.
+        rate = cap.get("per_cleaner_best") or cap.get("per_cleaner_typical")
         peak = (tp["week"].get("busiest") or {}).get("total")
         s["capacity"]["headcount"] = engine.headcount(
-            demand_per_day=s["capacity"].get("demand_per_day") or 0,
-            rate=(s.get("throughput") or {}).get("median"),
-            current_people=s["capacity"].get("current_people") or 0,
-            peak_per_day=peak,
-            roster_factor=float(cfg.get("roster_factor") or engine.DEFAULT_ROSTER_FACTOR),
-            absence_factor=float(cfg.get("absence_factor") or engine.DEFAULT_ABSENCE_FACTOR))
+            demand_per_day=demand, rate=rate, current_people=cleaners,
+            peak_per_day=peak, roster_factor=roster_f, absence_factor=absence_f)
+
+        vm = engine.vendor_monthly(rows, units, cfg.get("vendor_rate_sar") or {},
+                                   window_days=wdays)
+        s["vendors"] = vm
+        s["cost"] = engine.cost_compare(
+            demand_per_day=demand, per_cleaner_day=rate,
+            cleaner_cost=cfg.get("cleaner_cost_sar"),
+            supervisor_cost=cfg.get("supervisor_cost_sar"),
+            supervisors=int(cfg.get("supervisors_count") or 0),
+            current_cleaners=cleaners,
+            vendor_monthly=(vm["total_monthly"] if vm["total_monthly"] else None),
+            roster_factor=roster_f, absence_factor=absence_f)
+
         s["reconcile"] = engine.reconcile(
             logged_per_day=(s.get("oujact") or {}).get("per_day_avg") or 0,
             checkouts_per_day=tp["turns"].get("checkouts_per_day") or 0,
             units=units, events=_events_for_reconcile(s))
     else:
-        s["turns"] = None
-        s["week"] = None
+        for k in ("turns", "week", "cleaner", "vendors", "cost", "reconcile"):
+            s[k] = None
         s["capacity"]["headcount"] = None
-        s["reconcile"] = None
-    s["settings"] = {k: cfg.get(k) for k in SETTING_DEFAULTS}
+    s["settings"] = dict(cfg)
+    s["settings"]["roster_factor"] = round(roster_f, 3)
+    s["settings"]["absence_factor"] = round(absence_f, 4)
 
     s["geo"] = {"have_key": bool(call("maps_key")),
                 "filled_from_cache": filled, "cached_total": len(cache),
@@ -384,7 +435,51 @@ async def api_pin(request):
     return _json({"ok": True, "lid": lid, "saved": res})
 
 
+async def api_settings(request):
+    """Save the numbers the model runs on: how many cleaners, what they cost, and each
+    company's price per clean. Whitelisted keys only — this endpoint can never be talked
+    into writing anything else into the settings file."""
+    role = HOST.req_role(request) if callable(getattr(HOST, "req_role", None)) else "viewer"
+    if role not in EDIT_ROLES:
+        return _json({"ok": False, "error": "غير مصرّح لك بالتعديل / not allowed"}, 403)
+    body = await request.json()
+    cfg = _settings()
+
+    for k in NUMERIC_SETTINGS:
+        if k in body:
+            try:
+                v = float(body.get(k))
+            except (TypeError, ValueError):
+                return _json({"ok": False, "error": "bad_number", "field": k}, 400)
+            if v < 0 or v > 1e7:
+                return _json({"ok": False, "error": "out_of_range", "field": k}, 400)
+            cfg[k] = int(v) if float(v).is_integer() else v
+
+    if "vendor_rate_sar" in body:
+        rates = body.get("vendor_rate_sar") or {}
+        if not isinstance(rates, dict):
+            return _json({"ok": False, "error": "bad_rates"}, 400)
+        clean = {}
+        for tid, val in list(rates.items())[:40]:
+            tid = str(tid)[:40]
+            if val in (None, ""):
+                continue
+            try:
+                f = float(val)
+            except (TypeError, ValueError):
+                return _json({"ok": False, "error": "bad_rate", "field": tid}, 400)
+            if 0 <= f <= 100000:
+                clean[tid] = f
+        cfg["vendor_rate_sar"] = clean
+
+    save = getattr(HOST, "save_json", None)
+    if callable(save):
+        save(SETTINGS_FILE, cfg)
+    return _json({"ok": True, "settings": cfg})
+
+
 def register(app):
+    app.router.add_post("/api/coverage/settings", _safe(api_settings))
     app.router.add_post("/api/coverage/pin", _safe(api_pin))
     app.router.add_get("/api/coverage/study", _safe(api_study))
     app.router.add_get("/api/coverage/geo", _safe(api_geo))

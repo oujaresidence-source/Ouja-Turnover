@@ -903,6 +903,134 @@ def reconcile(logged_per_day, checkouts_per_day, units, events, implausible_rati
             "crews": crews, "untagged_cleans": untagged}
 
 
+# ------------------------------------------------------------------ cleaner capacity
+
+# Below this many apartments per cleaner per day the team is not the bottleneck — the
+# workload is. Hiring would be the wrong answer; moving apartments to them is the right one.
+UNDERUSED_BELOW = 2.0
+
+
+def cleaner_capacity(turn_rows, units, cleaners, window_days, in_house_ids=None):
+    """Apartments per CLEANER per day — derived, because it is not recorded.
+
+    The log stores who pressed «تم», and the owner confirmed those are SUPERVISORS, not
+    the people doing the cleaning (2026-08-02). So a cleaner's rate cannot be read off
+    the log directly. It is derived the way the owner suggested: count the checkouts on
+    OUR OWN apartments and divide by the cleaners we actually employ.
+
+    Two rates, deliberately:
+      * typical — what they get through on an average day. This is CURRENT LOAD, not
+        capacity: an under-used team makes it look as if a cleaner can only do one flat
+        a day, which would then inflate any hiring estimate built on it.
+      * best    — their busiest observed day, an honest lower bound on what they CAN do.
+    """
+    own = {u.get("lid") for u in (units or []) if u.get("in_house")}
+    out = {"own_units": len(own), "cleaners": cleaners, "window_days": window_days,
+           "own_checkouts": 0, "own_per_day": 0.0, "busiest_day": 0,
+           "per_cleaner_typical": None, "per_cleaner_best": None,
+           "likely_underused": False, "reason": ""}
+    if not own:
+        out["reason"] = ("ما فيه شقق مربوطة بفريقنا / no apartments are tagged to our own team")
+        return out
+    if not cleaners or int(cleaners) <= 0:
+        out["reason"] = "ما فيه عدد عمّال / the number of cleaners is not set"
+        return out
+
+    by_date = defaultdict(int)
+    for r in turn_rows or []:
+        if r.get("lid") in own:
+            by_date[r.get("date")] += 1
+    total = sum(by_date.values())
+    days = max(1, int(window_days or 0) or len(by_date) or 1)
+    out["own_checkouts"] = total
+    out["own_per_day"] = round(total / float(days), 1)
+    out["busiest_day"] = max(by_date.values()) if by_date else 0
+    out["per_cleaner_typical"] = round(out["own_per_day"] / float(cleaners), 2)
+    out["per_cleaner_best"] = round(out["busiest_day"] / float(cleaners), 2)
+    out["likely_underused"] = out["per_cleaner_typical"] < UNDERUSED_BELOW
+    return out
+
+
+# ------------------------------------------------------------------ money
+
+def vendor_monthly(turn_rows, units, rates, window_days=30):
+    """What the outside companies cost per month, each at its own rate per clean.
+
+    A company with no price entered contributes ZERO and is NAMED — a silent zero would
+    make in-housing look free by comparison, which is the most expensive mistake this
+    page could make.
+    """
+    team_of, names = {}, {}
+    for u in units or []:
+        team_of[u.get("lid")] = u.get("team_id") or ""
+        if not u.get("in_house") and (u.get("team_id") or ""):
+            names[u["team_id"]] = u.get("team_name") or u["team_id"]
+
+    cleans = defaultdict(int)
+    for r in turn_rows or []:
+        tid = team_of.get(r.get("lid"))
+        if tid and tid in names:
+            cleans[tid] += 1
+
+    days = max(1, int(window_days or 30))
+    rows, total, missing = [], 0.0, []
+    for tid, name in names.items():
+        n = cleans.get(tid, 0)
+        per_month = n * 30.0 / days
+        rate = rates.get(tid) if rates else None
+        try:
+            rate = float(rate) if rate not in (None, "") else None
+        except (TypeError, ValueError):
+            rate = None
+        cost = round(per_month * rate, 0) if rate else 0
+        if rate is None and n:
+            missing.append(name)
+        total += cost
+        rows.append({"team_id": tid, "name": name, "cleans_per_month": round(per_month, 1),
+                     "rate": rate, "monthly": cost})
+    rows.sort(key=lambda r: -r["monthly"])
+    return {"rows": rows, "total_monthly": round(total, 0), "missing_rates": missing}
+
+
+def cost_compare(demand_per_day, per_cleaner_day, cleaner_cost, supervisor_cost,
+                 supervisors=1, current_cleaners=0, vendor_monthly=None,
+                 roster_factor=None, absence_factor=None):
+    """Doing every apartment in-house versus paying the companies.
+
+    Answers the only question that actually decides this: not "can we staff it" but
+    "does it cost less". Silent on saving when there is no rate or no vendor price —
+    a made-up saving is worse than none.
+    """
+    roster_factor = DEFAULT_ROSTER_FACTOR if roster_factor is None else roster_factor
+    absence_factor = DEFAULT_ABSENCE_FACTOR if absence_factor is None else absence_factor
+    out = {"demand_per_day": demand_per_day, "per_cleaner_day": per_cleaner_day,
+           "cleaners_needed": None, "inhouse_monthly": None, "inhouse_per_clean": None,
+           "vendor_monthly": vendor_monthly, "vendor_per_clean": None,
+           "current_monthly": None, "saving_monthly": None, "reason": ""}
+    if vendor_monthly and demand_per_day:
+        out["vendor_per_clean"] = round(float(vendor_monthly) / (float(demand_per_day) * 30.0), 1)
+    if not per_cleaner_day or float(per_cleaner_day) <= 0:
+        out["reason"] = ("ما نعرف كم شقة يخلّص العامل في اليوم / "
+                         "the apartments-per-cleaner-per-day rate is unknown")
+        return out
+
+    on_shift = int(math.ceil(float(demand_per_day) / float(per_cleaner_day)))
+    needed = int(math.ceil(on_shift * float(roster_factor) * (1.0 + float(absence_factor))))
+    inhouse = needed * float(cleaner_cost or 0) + int(supervisors or 0) * float(supervisor_cost or 0)
+    out["cleaners_needed"] = needed
+    out["inhouse_monthly"] = round(inhouse, 0)
+    if demand_per_day:
+        out["inhouse_per_clean"] = round(inhouse / (float(demand_per_day) * 30.0), 1)
+    if vendor_monthly is None:
+        return out
+    current = (int(current_cleaners or 0) * float(cleaner_cost or 0)
+               + int(supervisors or 0) * float(supervisor_cost or 0)
+               + float(vendor_monthly))
+    out["current_monthly"] = round(current, 0)
+    out["saving_monthly"] = round(current - inhouse, 0)
+    return out
+
+
 def _team_rollup(units, teams, in_house_ids):
     known = {str(t.get("id")): (t.get("name") or "") for t in (teams or [])}
     counts = defaultdict(int)

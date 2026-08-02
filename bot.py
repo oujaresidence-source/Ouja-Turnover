@@ -28984,7 +28984,7 @@ function renderCoverage(){
     {v:safeNum(u.in_house), l:ar?'تنظّفها أوجا':'Cleaned by OujaCT', s:ar?'فريقنا الداخلي':'our in-house team'},
     {v:safeNum(u.third_party), l:ar?'شركات خارجية':'Third-party', s:ar?('في '+safeNum(cl.multi)+' عمارة مشتركة'):('across '+safeNum(cl.multi)+' shared buildings')},
     {v:oj.per_day_avg!=null?oj.per_day_avg:'—', l:ar?'شقق/يوم لأوجا':'OujaCT per day', s:oj.started_on?(ar?('من '+oj.started_on):('since '+oj.started_on)):'—'},
-    {v:((s.throughput||{}).median==null?'—':(s.throughput||{}).median), l:ar?'شقق للشخص باليوم':'Per person per day', s:ar?'المقاس فعلياً · أساس الحساب':'measured · basis of the model'}
+    {v:((s.cleaner||{}).per_cleaner_best==null?'—':(s.cleaner||{}).per_cleaner_best), l:ar?'شقق للعامل باليوم':'Per cleaner per day', s:ar?'أقصى يوم وصلوا له':'their best observed day'}
   ].map(function(k){
     return '<div class="kpi"><div class="kpi-val">'+esc(String(k.v))+'</div>'
       + '<div class="kpi-lbl">'+esc(k.l)+'</div>'
@@ -28995,7 +28995,8 @@ function renderCoverage(){
   // the page was too long to scroll, and the head count is what he opens it for.
   var ar2=(L==='ar');
   var missing2=safeNum((s.units||{}).missing_location);
-  var html = _covHeadcountCard(s) + _covWeekCard(s) + _covReconcileCard(s)
+  var html = _covHeadcountCard(s) + _covCleanerCard(s) + _covCostCard(s)
+    + _covWeekCard(s) + _covReconcileCard(s)
     + _covFold(ar2?'🗺️ الخريطة':'🗺️ The map',
                ar2?(safeNum((s.units||{}).located)+' شقة محددة'):(safeNum((s.units||{}).located)+' located'),
                _covMapCard(s), false)
@@ -29012,6 +29013,165 @@ function renderCoverage(){
                missing2?(ar2?(missing2+' بدون موقع'):(missing2+' unlocated')):(ar2?'كلها محددة':'all located'),
                _covUnitsCard(s), missing2>0);
   putHtml('covBody', html);
+}
+
+/* Save one setting and reload. The numbers the whole model runs on live here, so the
+   owner can change any of them without a deploy. */
+async function covSet(key, value){
+  var body = {}; body[key] = value;
+  try{
+    var r = await fetch('/api/coverage/settings', {method:'POST',
+      headers:{'Content-Type':'application/json','X-Token':tok()},
+      body:JSON.stringify(body)});
+    var j = await r.json();
+    if(j && j.ok){ toast(labelText('تم الحفظ','Saved')); loadCoverage(1); }
+    else toast((j && j.error) ? j.error : labelText('ما نجح الحفظ','Could not save'));
+  }catch(e){ toast(labelText('ما نجح الحفظ','Could not save')); }
+}
+function covSetNum(key, el){
+  var v = String(el.value).replace(/[^0-9.]/g, '');
+  if(v === '') return;
+  covSet(key, Number(v));
+}
+function covSetRate(teamId, el){
+  var v = String(el.value).replace(/[^0-9.]/g, '');
+  var rates = {};
+  var s = COV.data || {};
+  var cur = (s.settings || {}).vendor_rate_sar || {};
+  for(var k in cur){ if(Object.prototype.hasOwnProperty.call(cur, k)) rates[k] = cur[k]; }
+  if(v === '') delete rates[teamId]; else rates[teamId] = Number(v);
+  covSet('vendor_rate_sar', rates);
+}
+
+/* How many apartments ONE CLEANER gets through in a day.
+   Not in the log — the log records the supervisor who pressed done — so it is derived
+   from checkouts on our own apartments divided by the cleaners we employ. */
+function _covCleanerCard(s){
+  var ar=(L==='ar'), c=s.cleaner;
+  var head='<div class="card-head"><span class="card-title">'+(ar?'🧍 سرعة العامل الواحد':'🧍 One cleaner per day')+'</span>'
+    + '<span class="card-sub">'+(ar?'محسوبة من مغادرات شققنا نحن':'from checkouts on our own apartments')+'</span></div>';
+  if(!c) return '';
+  if(c.reason && c.per_cleaner_typical==null){
+    return '<div class="card">'+head+emptyState(ar?'ما نقدر نحسبها':'Cannot work this out yet', c.reason,'🧍')+'</div>';
+  }
+  var cells=[
+    [c.own_units, ar?'شققنا':'Our apartments', ar?'مربوطة بفريق عوجا':'tagged to OujaCT'],
+    [c.own_per_day, ar?'مغادرات شققنا/يوم':'Our checkouts per day', ar?'الشغل الحالي':'current workload'],
+    [c.cleaners, ar?'عمّال':'Cleaners', ar?'اللي عندك الحين':'you have now'],
+    [c.per_cleaner_typical, ar?'شقق للعامل/يوم':'Per cleaner per day', ar?'في اليوم العادي':'on a typical day'],
+    [c.per_cleaner_best, ar?'أقصى ما وصلوا له':'Their best day', ar?'أقرب رقم لطاقتهم':'closest to real capacity']
+  ];
+  var grid='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">'
+    + cells.map(function(k){
+        return '<div class="kpi"><div class="kpi-val">'+esc(String(k[0]==null?'—':k[0]))+'</div>'
+          + '<div class="kpi-lbl">'+esc(k[1])+'</div>'
+          + '<div class="kpi-lbl" style="opacity:.75">'+esc(k[2])+'</div></div>';
+      }).join('')
+    + '</div>';
+  var finding='';
+  if(c.likely_underused){
+    finding='<div style="margin-top:12px;padding:13px 15px;border-radius:10px;background:var(--yellow-soft);'
+      + 'border-inline-start:3px solid var(--yellow);font-size:13px;line-height:1.8;color:var(--text-2)">'
+      + esc(ar
+        ? ('عمّالك مو مشغولين. كل عامل يخلّص '+c.per_cleaner_typical+' شقة في اليوم العادي، وأقصى يوم وصلوا له '
+           + c.per_cleaner_best+'. يعني قبل ما توظّف أحد، تقدر تنقل شقق من الشركات الخارجية للناس اللي تدفع لهم أصلاً — '
+           + 'هذا ما يكلّفك ريال زيادة.')
+        : ('Your cleaners are not busy. Each finishes '+c.per_cleaner_typical+' apartments on a typical day, and their '
+           + 'best day was '+c.per_cleaner_best+'. So before hiring anyone, you can move apartments off the outside '
+           + 'companies onto people you already pay — that costs you nothing extra.'))
+      + '</div>';
+  }
+  var why='<div class="page-help" style="margin-top:12px"><div class="ph-b">'
+    + esc(ar
+      ? ('النظام ما يسجّل مين نظّف — يسجّل مين ضغط «تم»، وهم المشرفين. فحسبنا سرعة العامل من مغادرات شققنا '
+         + '('+c.own_checkouts+' مغادرة على '+c.window_days+' يوم) مقسومة على عدد العمّال. '
+         + 'وبنينا حساب التوظيف على «أقصى يوم» مو اليوم العادي، لأن الفريق لو مو مشغول بيطلع رقم أقل من قدرته الحقيقية.')
+      : ('The system never records who cleaned — it records who pressed done, and those are supervisors. So a '
+         + 'cleaner rate is derived from checkouts on our own apartments ('+c.own_checkouts+' over '+c.window_days
+         + ' days) divided by the cleaners employed. The hiring maths uses their BEST day, not a typical one, '
+         + 'because an unbusy team would otherwise look less capable than it is.'))
+    + '</div></div>';
+  return '<div class="card">'+head+grid+finding+why+'</div>';
+}
+
+/* Does doing it ourselves actually cost less? The only question that decides this. */
+function _covCostCard(s){
+  var ar=(L==='ar'), k=s.cost, v=s.vendors, st=s.settings||{};
+  var head='<div class="card-head"><span class="card-title">'+(ar?'💰 يوفّر ولا يكلّف':'💰 Cheaper or dearer')+'</span>'
+    + '<span class="card-sub">'+(ar?'بالريال في الشهر':'SAR per month')+'</span></div>';
+  if(!k) return '';
+
+  var num=function(id,key,val,lbl,w){
+    return '<label style="display:block;font-size:11.5px;color:var(--mut);margin-bottom:4px">'+esc(lbl)+'</label>'
+      + '<input type="text" inputmode="decimal" id="'+id+'" value="'+esc(String(val==null?'':val))+'" '
+      + 'onchange="covSetNum(&#39;'+key+'&#39;,this)" '
+      + 'style="width:'+(w||'100%')+';padding:8px 10px;font-size:14px;background:var(--surface-2);'
+      + 'border:1px solid var(--line);border-radius:8px;color:var(--text)">';
+  };
+  var inputs='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">'
+    + '<div>'+num('csC','cleaners_count',st.cleaners_count,ar?'عدد العمّال':'Cleaners')+'</div>'
+    + '<div>'+num('csS','supervisors_count',st.supervisors_count,ar?'عدد المشرفين':'Supervisors')+'</div>'
+    + '<div>'+num('csCC','cleaner_cost_sar',st.cleaner_cost_sar,ar?'تكلفة العامل/شهر':'Cleaner per month')+'</div>'
+    + '<div>'+num('csSC','supervisor_cost_sar',st.supervisor_cost_sar,ar?'تكلفة المشرف/شهر':'Supervisor per month')+'</div>'
+    + '<div>'+num('csD','days_per_week',st.days_per_week,ar?'أيام الدوام/أسبوع':'Work days per week')+'</div>'
+    + '<div>'+num('csO','days_off_per_year',st.days_off_per_year,ar?'إجازات/سنة':'Days off per year')+'</div>'
+    + '</div>';
+
+  var vrows='';
+  if(v && safeArr(v.rows).length){
+    vrows='<div style="overflow-x:auto;margin-bottom:12px"><table class="data"><thead><tr>'
+      + '<th>'+(ar?'الشركة':'Company')+'</th><th class="num">'+(ar?'تنظيفات/شهر':'Cleans/month')+'</th>'
+      + '<th class="num">'+(ar?'السعر للتنظيفة':'Price per clean')+'</th>'
+      + '<th class="num">'+(ar?'بالشهر':'Per month')+'</th></tr></thead><tbody>'
+      + v.rows.map(function(r){
+          return '<tr><td class="strong">'+esc(r.name)+'</td>'
+            + '<td class="num">'+esc(String(r.cleans_per_month))+'</td>'
+            + '<td class="num"><input type="text" inputmode="decimal" value="'+esc(String(r.rate==null?'':r.rate))+'" '
+            + 'placeholder="'+(ar?'اكتب السعر':'price')+'" onchange="covSetRate(&#39;'+esc(r.team_id)+'&#39;,this)" '
+            + 'style="width:96px;padding:6px 9px;font-size:13.5px;background:var(--surface-2);'
+            + 'border:1px solid '+(r.rate==null?'var(--yellow)':'var(--line)')+';border-radius:7px;color:var(--text);text-align:end"></td>'
+            + '<td class="num strong">'+(r.monthly?esc(String(r.monthly)):'—')+'</td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
+  }
+
+  var verdict='';
+  if(k.saving_monthly==null){
+    verdict='<div class="page-help" style="margin-bottom:12px"><div class="ph-b">'
+      + esc(ar
+        ? ((v && safeArr(v.missing_rates).length)
+            ? ('باقي أسعار: '+v.missing_rates.join('، ')+'. اكتب سعر التنظيفة الواحدة لكل شركة فوق، وبعدها نقدر نقول لك يوفّر ولا يكلّف.')
+            : (k.reason || 'ناقص بيانات عشان نقارن.'))
+        : ((v && safeArr(v.missing_rates).length)
+            ? ('Missing prices for: '+v.missing_rates.join(', ')+'. Type the price per clean above and this will tell you whether in-housing saves or costs.')
+            : (k.reason || 'Not enough data to compare yet.')))
+      + '</div></div>';
+  }else{
+    var save=k.saving_monthly, good=save>0;
+    verdict='<div style="padding:16px 18px;border-radius:12px;margin-bottom:12px;'
+      + 'background:'+(good?'var(--green-soft)':'var(--red-soft)')+';border-inline-start:4px solid '+(good?'var(--green)':'var(--red)')+'">'
+      + '<div style="font-size:26px;font-weight:700;font-family:var(--font-mono);color:'+(good?'var(--green)':'var(--red)')+'">'
+      + esc(String(Math.abs(save).toLocaleString()))+' <span style="font-size:14px">'+(ar?'ريال/شهر':'SAR/month')+'</span></div>'
+      + '<div style="font-size:13.5px;color:var(--text-2);margin-top:5px">'
+      + esc(good ? (ar?'توفير لو سوّيت كل التنظيف بفريقك':'saved if you bring all cleaning in-house')
+                 : (ar?'زيادة تكلفة لو سوّيت كل التنظيف بفريقك':'extra cost if you bring all cleaning in-house'))
+      + '</div></div>';
+  }
+
+  var rows=[
+    [ar?'عمّال مطلوبين لكل الشقق':'Cleaners needed for everything', k.cleaners_needed],
+    [ar?'تكلفتهم بالشهر':'Their monthly cost', k.inhouse_monthly],
+    [ar?'تكلفة التنظيفة الواحدة عندنا':'Our cost per clean', k.inhouse_per_clean],
+    [ar?'سعر التنظيفة عند الشركات':'Companies cost per clean', k.vendor_per_clean],
+    [ar?'تدفع الحين بالشهر':'You pay now per month', k.current_monthly]
+  ];
+  var table='<div style="overflow-x:auto"><table class="data"><tbody>'
+    + rows.map(function(r){
+        return '<tr><td>'+esc(r[0])+'</td><td class="num strong">'+esc(String(r[1]==null?'—':r[1]))+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+
+  return '<div class="card">'+head+verdict+inputs+vrows+table+'</div>';
 }
 
 /* Collapsible wrapper. The owner said the page is too long to scroll, so the answer
@@ -29068,7 +29228,7 @@ function _covHeadcountCard(s){
     + '</div>';
   var rows=[
     [ar?'شقق تحتاج تنظيف باليوم':'Apartments needing a clean per day', cap.demand_per_day],
-    [ar?'شقق للشخص باليوم (مقاسة)':'Apartments per person per day (measured)', thr.median==null?'—':thr.median],
+    [ar?'شقق للعامل باليوم':'Apartments per cleaner per day', (s.cleaner||{}).per_cleaner_best==null?'—':(s.cleaner||{}).per_cleaner_best],
     [ar?'موجود حالياً':'Working today', h.current_people]
   ];
   var table='<div style="overflow-x:auto"><table class="data"><tbody>'
@@ -29077,16 +29237,23 @@ function _covHeadcountCard(s){
       }).join('')
     + '</tbody></table></div>';
   var rf=Math.round((safeNum(h.roster_factor)-1)*100), af=Math.round(safeNum(h.absence_factor)*100);
+  // The rate quoted here MUST be the one the model actually divided by — the cleaner
+  // rate, not the supervisor throughput the page used to show.
+  var cRate=(s.cleaner||{}).per_cleaner_best;
+  if(cRate==null) cRate=(s.cleaner||{}).per_cleaner_typical;
+  if(cRate==null) cRate='—';
   var why='<div class="page-help" style="margin-top:12px"><div class="ph-t">'
     + (ar?'على أي أساس هذي الأرقام':'What these numbers rest on')+'</div><div class="ph-b">'
     + (ar
-      ? ('«في الدوام» = الشقق المطلوبة ÷ '+esc(String(thr.median))+' شقة للشخص في اليوم، وهو معدل مقاس فعلياً من '+safeNum(thr.n)+' يوم عمل. '
-         + '«على الرواتب» أعلى لأن الشخص ما يداوم كل يوم: زدنا '+rf+'% للإجازة الأسبوعية و'+af+'% للإجازات والمرض — '
-         + 'الرقمين تقدر تغيّرهما من الإعدادات بدون ما نعدّل البرنامج. '
+      ? ('«في الدوام» = الشقق المطلوبة ÷ '+esc(String(cRate))+' شقة للعامل في اليوم — وهو أقصى يوم وصل له فريقك فعلياً، '
+         + 'مو اليوم العادي، لأن الفريق لو مو مشغول يطلع رقمه أقل من قدرته. '
+         + '«على الرواتب» أعلى لأن العامل ما يداوم كل يوم: زدنا '+rf+'% للإجازة الأسبوعية و'+af+'% للإجازات والمرض — '
+         + 'كل الأرقام هذي تقدر تغيّرها من مربّعات «يوفّر ولا يكلّف» تحت. '
          + '«أقوى يوم» ما توظّف له — تشتريه من شركة وقت الذروة.')
-      : ('"On shift" = apartments needed divided by '+esc(String(thr.median))+' per person per day, measured across '+safeNum(thr.n)+' working days. '
-         + '"On payroll" is higher because nobody works every day: '+rf+'% added for the weekly day off and '+af+'% for leave and sickness — '
-         + 'both editable in settings without a code change. '
+      : ('"On shift" = apartments needed divided by '+esc(String(cRate))+' per CLEANER per day — their best observed day, '
+         + 'not a typical one, because an unbusy team reads as less capable than it is. '
+         + '"On payroll" is higher because nobody works every day: '+rf+'% for the weekly day off and '+af+'% for leave and sickness — '
+         + 'all of these are editable in the boxes under "Cheaper or dearer" below. '
          + 'You do not hire for the busiest day, you buy it in.'))
     + (safeNum(cy.batched_pct)>=20
        ? (ar?(' زمن الدورة ما استخدمناه: '+cy.batched_pct+'% من التنظيفات مسجّلة على دفعات.')
@@ -29175,50 +29342,6 @@ function _covReconcileCard(s){
       + ';margin-bottom:8px;font-size:12.5px;line-height:1.75;color:var(--text-2)">'+esc(l[1])+'</div>';
   }).join('');
   return '<div class="card">'+head+body+'</div>';
-}
-
-/* ---- the decision card: how many people, and on what assumptions ---- */
-function _covCapacityCard(s){
-  var ar=(L==='ar'), cap=s.capacity||{}, cy=s.cycle||{}, pt=s.photo_time||{};
-  var head = '<div class="card-head"><span class="card-title">'+(ar?'🧮 كم شخص نحتاج':'🧮 How many people we need')+'</span>'
-    + '<span class="card-sub">'+(cap.demand_source==='hostaway_30d'?(ar?'الطلب من هوستاواي · آخر 30 يوم':'demand from Hostaway · last 30 days'):(ar?'الطلب مُقدّر من السجل':'demand estimated from the log'))+'</span></div>';
-  if(cap.people_needed==null){
-    return '<div class="card">'+head+emptyState(ar?'ما فيه بيانات كافية':'Not enough data yet',
-      cap.reason||(ar?'نحتاج أيام أكثر من سجل أوجا عشان نحسب زمن الدورة.':'We need more OujaCT log days to compute cycle time.'),'🧮')+'</div>';
-  }
-  var thr = s.throughput||{};
-  var rows = [
-    [ar?'شقق تحتاج تنظيف باليوم':'Apartments needing a clean per day', cap.demand_per_day],
-    [ar?'شقق للشخص باليوم (مقاسة)':'Apartments per person per day (measured)', cap.units_per_person_day],
-    [ar?'العدد المطلوب':'People needed', cap.people_needed],
-    [ar?'موجود حالياً':'Working today', cap.current_people],
-    [ar?'المطلوب توظيفه':'To hire', cap.hire]
-  ];
-  var body = '<div style="overflow-x:auto"><table class="data"><tbody>'
-    + rows.map(function(r,i){
-        var strong = (i>=2) ? ' style="font-weight:700"' : '';
-        return '<tr'+strong+'><td>'+esc(r[0])+'</td><td class="num strong">'+esc(String(r[1]==null?'—':r[1]))+'</td></tr>';
-      }).join('')
-    + '</tbody></table></div>';
-  var basis = (cap.basis==='observed')
-    ? (ar ? ('الرقم مبني على المعدل اليومي المقاس فعلياً: وسيط '+esc(String(thr.median))+' شقة للشخص في اليوم، من '+safeNum(thr.n)+' يوم عمل مسجّل. هذا الرقم ما يتأثر بطريقة ضغط زر «تم».')
-          : ('Built on the measured day rate: a median of '+esc(String(thr.median))+' apartments per person per day across '+safeNum(thr.n)+' recorded working days. This is unaffected by how the done button is pressed.'))
-    : (ar ? ('ما فيه معدل يومي مقاس، فاستخدمنا زمن الدورة '+_covMin(cap.cycle_used_min)+' — أقل ثقة.')
-          : ('No measured day rate, so cycle time '+_covMin(cap.cycle_used_min)+' was used instead — lower confidence.'));
-  var batchWarn = safeNum(cy.batched_pct) >= 20
-    ? (ar ? (' <b>تنبيه:</b> '+cy.batched_pct+'% من التنظيفات مسجّلة على دفعات (أقل من '+safeNum(cy.min_gap_min)+' دقايق بين وحدة والثانية) — يعني الفريق يضغط «تم» لعدة شقق مرة وحدة. لذلك زمن الدورة ما ينفع للقرار، وما بنينا عليه.')
-          : (' <b>Note:</b> '+cy.batched_pct+'% of finishes are logged in batches (under '+safeNum(cy.min_gap_min)+' minutes apart), meaning the team presses done for several apartments at once. Cycle time is therefore not decision-grade and is not used here.'))
-    : '';
-  var dem = (cap.demand_source==='hostaway_30d')
-    ? '' : (ar ? ' الطلب مُقدّر من السجل لأن رقم هوستاواي ما توفّر'+(cap.demand_note?(' ('+esc(cap.demand_note)+')'):'')+'.'
-               : ' Demand is estimated from the log because the Hostaway figure was unavailable'+(cap.demand_note?(' ('+esc(cap.demand_note)+')'):'')+'.');
-  var note = '<div class="page-help" style="margin-top:12px"><div class="ph-t">'
-    + (ar?'على أي أساس هذا الرقم':'What this number rests on')+'</div><div class="ph-b">'
-    + basis + batchWarn + dem
-    + (ar ? (' زمن التصوير وسيطه '+_covMin(pt.median_min)+' — وقت تصوير مو وقت تنظيف، ما بنينا عليه شيء.')
-          : (' Photo-session median is '+_covMin(pt.median_min)+' — photographing, not cleaning, and nothing is built on it.'))
-    + '</div></div>';
-  return '<div class="card">'+head+body+note+'</div>';
 }
 
 /* ---- the map: REAL Google imagery + our own dots on top ----
@@ -29373,7 +29496,7 @@ function _covDailyCard(s){
 function _covPeopleCard(s){
   var ar=(L==='ar'), people=safeArr((s.oujact||{}).people);
   var head='<div class="card-head"><span class="card-title">'+(ar?'👤 لكل شخص':'👤 Per person')+'</span>'
-    + '<span class="card-sub">'+(ar?'من ضغط زر «تم» فعلياً':'from who actually pressed done')+'</span></div>';
+    + '<span class="card-sub">'+(ar?'هؤلاء مشرفون — مو العمّال اللي ينظّفون':'these are supervisors, not the people cleaning')+'</span></div>';
   if(!people.length) return '<div class="card">'+head+emptyState(ar?'ما فيه بيانات':'No data','','👤')+'</div>';
   var body='<div style="overflow-x:auto"><table class="data"><thead><tr>'
     + '<th>'+(ar?'الشخص':'Person')+'</th><th class="num">'+(ar?'أيام':'Days')+'</th>'
