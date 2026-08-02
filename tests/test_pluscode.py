@@ -90,6 +90,21 @@ class TestFindInAddress(unittest.TestCase):
         self.assertIsNone(P.find_in("RRHC3169, 3169 Prince Faisal Ibn Abdulrahman"))
         self.assertIsNone(P.find_in("RHGA7576, 7576 Tamir"))
 
+    def test_space_instead_of_plus_is_understood(self):
+        # Six real Ouja addresses are written this way by Google.
+        self.assertEqual(P.find_in("QH9H 8R الماجدية 84, Hittin, Riyadh 13518"), "QH9H+8R")
+        self.assertEqual(P.find_in("RJ94 M2 العجلان ريڤيرا 17، الملقا"), "RJ94+M2")
+        self.assertEqual(P.find_in("QJF5 HHG عمارة مشروع البدور15B"), "QJF5+HHG")
+
+    def test_space_form_decodes_to_the_same_place_as_the_plus_form(self):
+        a = P.from_address("QH9H 8R الماجدية 84, Hittin", RIYADH[0], RIYADH[1])
+        b = P.from_address("QH9H+8R الماجدية 84, Hittin", RIYADH[0], RIYADH[1])
+        self.assertEqual(a, b)
+
+    def test_space_form_only_counts_at_a_field_boundary(self):
+        # Four alphabet letters mid-sentence are a coincidence, not a location.
+        self.assertIsNone(P.find_in("the quick 4RVW 9C brown fox"))
+
     def test_no_code_returns_none(self):
         self.assertIsNone(P.find_in("Al Malqa, Riyadh"))
         self.assertIsNone(P.find_in(""))

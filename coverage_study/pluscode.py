@@ -26,12 +26,23 @@ MAX_LENGTH = 15
 # A code sitting inside a longer address string: 2-8 chars, '+', then 2-3 more.
 _RX = re.compile(r"\b([" + ALPHABET + PADDING + r"]{2,8}\+[" + ALPHABET + r"]{2,3})\b",
                  re.IGNORECASE)
+# Google sometimes writes the code with a SPACE where the '+' belongs
+# ("QH9H 8R الماجدية 84, Hittin") — six of Ouja's own addresses are like this.
+# Anchored to the start of the string (or just after a comma) because four unanchored
+# letters are far likelier to be a coincidence than a location.
+_RX_SPACE = re.compile(r"(?:^|,)\s*([" + ALPHABET + r"]{4})[  ]([" + ALPHABET + r"]{2,3})\b",
+                       re.IGNORECASE)
 
 
 def find_in(text):
-    """First Plus Code inside a free-text address, or None."""
-    m = _RX.search((text or "").upper())
-    return m.group(1) if m else None
+    """First Plus Code inside a free-text address, or None. Handles the '+' form and
+    the space-instead-of-plus form Google sometimes emits."""
+    s = (text or "").upper()
+    m = _RX.search(s)
+    if m:
+        return m.group(1)
+    m = _RX_SPACE.search(s)
+    return (m.group(1) + SEPARATOR + m.group(2)) if m else None
 
 
 def _clean(code):

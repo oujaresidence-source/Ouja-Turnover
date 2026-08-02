@@ -172,8 +172,12 @@ def resolve_missing(links, api_key="", batch=DEFAULT_BATCH, force=False):
     are still pending, rather than blocking for minutes on a first run.
     """
     cache = load_cache()
+    # RETRY FAILURES. Only a SUCCESS is permanent. The first version cached misses too,
+    # so the very first press — made before the offline decoders existed — poisoned every
+    # entry, and every press afterwards resolved nothing and reported "0 located" with no
+    # hint why (owner, 2026-08-02).
     todo = [ln for ln in dict.fromkeys(l for l in links if l)
-            if force or ln not in cache or (cache[ln].get("error") and force)]
+            if force or ln not in cache or cache[ln].get("lat") is None]
     done, failed = 0, 0
     for ln in todo[:batch]:
         rec = resolve_link(ln, api_key=api_key)

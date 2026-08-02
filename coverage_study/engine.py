@@ -31,6 +31,35 @@ UNKNOWN_PERSON = "غير معروف"
 # greater Riyadh, so this is safe.
 REF_LAT, REF_LNG = 24.7136, 46.6753
 
+
+def _load_seed():
+    """Coordinates resolved ONCE from the owner's Supabase sheet, keyed by guide slug.
+
+    The sheet always held a Maps link for every apartment; re-resolving those links over
+    the network on each deploy is what kept leaving units unlocated. Resolved offline
+    and committed, so the map is populated the moment the page opens.
+    """
+    import json
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed_locations.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except Exception:
+        return {}
+    out = {}
+    for slug, rec in (raw or {}).items():
+        try:
+            out[str(slug).strip().lower()] = {"lat": float(rec["lat"]),
+                                              "lng": float(rec["lng"]),
+                                              "src": rec.get("src") or "seed"}
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
+
+
+SEED_LOCATIONS = _load_seed()
+
 # A gap longer than this is lunch, a shift change, or a drive across town — not the
 # cost of one apartment. Excluded from the median, but always COUNTED and reported.
 DEFAULT_MAX_GAP_MIN = 180
@@ -120,6 +149,10 @@ def extract_latlng(url):
 
     # A bare "24.75,46.70" — what the browser sends as a route start.
     m = re.match(r"^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$", s)
+    if m:
+        return _ok(m.group(1), m.group(2))
+    # Coordinates written into an address in words: "N 24.75995° E 46.67103°".
+    m = re.search(r"N\s*(\d{1,2}\.\d+)\s*°?\s*[,;]?\s*E\s*(\d{2,3}\.\d+)\s*°?", s, re.I)
     if m:
         return _ok(m.group(1), m.group(2))
     # ?q=lat,lng  /  ?query=lat,lng  /  ll=lat,lng
@@ -458,6 +491,14 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
                 ll = pluscode.from_address(rec.get("address"), REF_LAT, REF_LNG)
                 if ll:
                     lat, lng, src = ll[0], ll[1], "pluscode"
+            if lat is None and g.get("slug"):
+                # Pre-resolved once from the owner's own Supabase sheet (seed_locations
+                # .json). The sheet already held every pin; resolving it on every
+                # deployment over the network was the reason apartments kept reading
+                # "no location" while the answer sat in the repo.
+                seeded = SEED_LOCATIONS.get(str(g.get("slug")).strip().lower())
+                if seeded:
+                    lat, lng, src = seeded["lat"], seeded["lng"], "sheet:" + seeded.get("src", "seed")
         tid = str(rec.get("cleaning_team") or "")
         link = (rec.get("maps_link") or g.get("map_link") or "")
         out.append({
