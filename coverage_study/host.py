@@ -22,6 +22,8 @@ HOST = SimpleNamespace(
     turnovers=None,        # (start, end) -> int  real Hostaway turnover count
     maps_key=None,         # () -> Google Maps API key or ""
     set_pin=None,          # (lid, link, lat, lng) -> bool   save one apartment's pin
+    reservations=None,     # (start_iso, end_iso) -> list of confirmed reservation dicts
+    all_listing_ids=None,  # () -> set of every listing id, incl. deactivated
     web=None,              # aiohttp.web (for the map-image response)
     tz=None,
 )

@@ -645,6 +645,264 @@ def study(listings, guide_units, teams, status_log, reports, photos,
     }
 
 
+# ------------------------------------------------------------------ turn deadlines
+
+DEFAULT_CHECKIN_HOUR = 15
+DEFAULT_CHECKOUT_HOUR = 11
+CONFIRMED = ("new", "modified")           # Hostaway's confirmed statuses
+
+SKIP_UNLINKED = "الشقة غير مرتبطة بـ Hostaway"
+SKIP_INACTIVE = "الشقة غير مفعّلة في Hostaway"
+
+TURN_KINDS = ("T0", "T1", "T2")
+
+
+def _hour(value, default):
+    """'16:00' -> 16. Anything unreadable falls back, rather than dropping the turn."""
+    try:
+        return max(0, min(23, int(str(value).split(":")[0])))
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return default
+
+
+def _dt(date_iso, hour):
+    d = str(date_iso or "")[:10]
+    if len(d) != 10:
+        return None
+    try:
+        return datetime.strptime(d, "%Y-%m-%d").replace(hour=hour)
+    except ValueError:
+        return None
+
+
+def classify_turns(reservations, units, all_lids=None, since=None, until=None,
+                   checkin_hour=DEFAULT_CHECKIN_HOUR, checkout_hour=DEFAULT_CHECKOUT_HOUR):
+    """Every checkout, joined to the NEXT check-in for the same apartment.
+
+        T0  next check-in the SAME day   — hard deadline, the guest is arriving
+        T1  next check-in the NEXT day   — due by end of tomorrow
+        T2  later, or nothing booked     — deferrable
+
+    This is the difference between a day with 19 relaxed turns and a day with 12 that
+    must happen inside a few hours. Both look identical on a count alone.
+
+    It comes entirely from the reservations, so it needs NO new button and no change to
+    how cleaners work — unlike a true cleaning duration, which the data cannot give.
+    Cancelled bookings are ignored on both sides: a cancelled same-day arrival must not
+    manufacture a hard deadline that does not exist.
+
+    Skips are returned explicitly with an Arabic reason — never a silently shorter list.
+    """
+    active = {}
+    for u in units or []:
+        try:
+            active[int(u.get("lid"))] = u
+        except (TypeError, ValueError):
+            continue
+    known = set(all_lids) if all_lids is not None else None
+
+    arrivals, departures, skipped, seen_skips = {}, {}, [], set()
+
+    def _skip(lid, reason):
+        if (lid, reason) in seen_skips:
+            return
+        seen_skips.add((lid, reason))
+        skipped.append({"lid": lid, "reason": reason})
+
+    for r in reservations or []:
+        if str(r.get("status") or "") not in CONFIRMED:
+            continue
+        try:
+            lid = int(r.get("listingMapId"))
+        except (TypeError, ValueError):
+            continue
+        if lid not in active:
+            _skip(lid, SKIP_INACTIVE if (known and lid in known) else SKIP_UNLINKED)
+            continue
+        a = _dt(r.get("arrivalDate"), _hour(r.get("checkInTime"), checkin_hour))
+        if a:
+            arrivals.setdefault(lid, []).append(a)
+        d = _dt(r.get("departureDate"), _hour(r.get("checkOutTime"), checkout_hour))
+        if d:
+            departures.setdefault(lid, []).append(d)
+
+    for v in arrivals.values():
+        v.sort()
+
+    rows = []
+    for lid, deps in departures.items():
+        ars = arrivals.get(lid, [])
+        for dep in sorted(deps):
+            day = dep.date().isoformat()
+            if since and day < since:
+                continue
+            if until and day > until:
+                continue
+            nxt = next((a for a in ars if a > dep), None)
+            if nxt is None:
+                kind, deadline = "T2", None
+            elif nxt.date() == dep.date():
+                kind, deadline = "T0", nxt.isoformat(timespec="minutes")
+            elif (nxt.date() - dep.date()).days == 1:
+                kind = "T1"
+                deadline = nxt.replace(hour=23, minute=59).isoformat(timespec="minutes")
+            else:
+                kind, deadline = "T2", None
+            rows.append({"lid": lid, "name": (active[lid].get("name") or str(lid)),
+                         "date": day, "kind": kind, "deadline": deadline,
+                         "checkout": dep.isoformat(timespec="minutes"),
+                         "next_checkin": nxt.isoformat(timespec="minutes") if nxt else None})
+
+    rows.sort(key=lambda r: (r["date"], r["lid"]))
+    by_date = {}
+    for r in rows:
+        d = by_date.setdefault(r["date"], {"date": r["date"], "T0": 0, "T1": 0,
+                                           "T2": 0, "total": 0})
+        d[r["kind"]] += 1
+        d["total"] += 1
+    return {"rows": rows, "by_date": by_date, "skipped": skipped,
+            "counts": {k: sum(1 for r in rows if r["kind"] == k) for k in TURN_KINDS}}
+
+
+# ------------------------------------------------------------------ shape of the week
+
+WEEKDAY_AR = ("الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
+WEEKDAY_EN = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+# Saudi week reads Sunday-first; Python's weekday() is Monday=0.
+_WEEK_ORDER = (6, 0, 1, 2, 3, 4, 5)
+
+
+def week_shape(turns, weeks_back=None):
+    """Turns by weekday, with the same-day (T0) portion broken out.
+
+    Answers the question the head count actually hinges on: is the busiest day 1.2x an
+    average day or 2x? Staffing the mean and hoping is how Thursday goes wrong.
+    """
+    per_day = {}
+    for t in turns or []:
+        d = per_day.setdefault(t.get("date"), {"total": 0, "T0": 0})
+        d["total"] += 1
+        if t.get("kind") == "T0":
+            d["T0"] += 1
+
+    buckets = {i: {"total": 0, "T0": 0, "days": 0} for i in range(7)}
+    for date_iso, v in per_day.items():
+        dt = _dt(date_iso, 12)
+        if not dt:
+            continue
+        b = buckets[dt.weekday()]
+        b["total"] += v["total"]
+        b["T0"] += v["T0"]
+        b["days"] += 1
+
+    days = []
+    for wd in _WEEK_ORDER:
+        b = buckets[wd]
+        n = b["days"] or 1
+        days.append({"weekday": wd, "ar": WEEKDAY_AR[wd], "en": WEEKDAY_EN[wd],
+                     "total": round(b["total"] / float(n), 1) if b["days"] else 0,
+                     "T0": round(b["T0"] / float(n), 1) if b["days"] else 0,
+                     "observed_days": b["days"]})
+
+    totals = sorted(v["total"] for v in per_day.values())
+    mean = round(sum(totals) / float(len(totals)), 1) if totals else 0
+    busiest = max(days, key=lambda d: d["total"]) if days else None
+    return {"days": days, "mean_per_day": mean,
+            "p70_per_day": _percentile(totals, 70),
+            "busiest": busiest,
+            "peak_ratio": round(busiest["total"] / mean, 2) if (busiest and mean) else None,
+            "observed_days": len(totals)}
+
+
+def _percentile(values, pct):
+    """Nearest-rank percentile — no interpolation, so it always lands on a real day."""
+    if not values:
+        return 0
+    s = sorted(values)
+    k = int(math.ceil(pct / 100.0 * len(s))) - 1
+    return s[max(0, min(len(s) - 1, k))]
+
+
+# ------------------------------------------------------------------ head count
+
+DEFAULT_ROSTER_FACTOR = 30 / 26.0     # six-day week: 26 worked days in 30
+DEFAULT_ABSENCE_FACTOR = 0.08         # leave + sickness
+
+
+def headcount(demand_per_day, rate, current_people=0, peak_per_day=None,
+              roster_factor=DEFAULT_ROSTER_FACTOR, absence_factor=DEFAULT_ABSENCE_FACTOR):
+    """Four numbers, not one — because "on shift" and "on payroll" are not the same thing.
+
+    The previous single figure staffed the average day and quietly assumed everyone works
+    every day. To keep N people on shift daily across a six-day week you need N × 30/26 on
+    payroll, and more again once leave and sickness are allowed for.
+    """
+    base = {"demand_per_day": demand_per_day, "rate": rate,
+            "current_people": current_people, "peak_per_day": peak_per_day,
+            "roster_factor": round(roster_factor, 3),
+            "absence_factor": absence_factor, "reason": ""}
+    if not rate or float(rate) <= 0:
+        base.update({"on_shift_avg": None, "payroll": None, "on_shift_peak": None,
+                     "gap": None,
+                     "reason": "ما فيه معدل يومي مقاس بعد / no measured day rate yet"})
+        return base
+    on_shift = int(math.ceil(float(demand_per_day) / float(rate))) if demand_per_day else 0
+    payroll = int(math.ceil(on_shift * float(roster_factor) * (1.0 + float(absence_factor))))
+    peak = (int(math.ceil(float(peak_per_day) / float(rate)))
+            if peak_per_day else None)
+    base.update({"on_shift_avg": on_shift, "payroll": payroll, "on_shift_peak": peak,
+                 "gap": max(0, payroll - int(current_people or 0))})
+    return base
+
+
+# ------------------------------------------------------------------ reconciliation
+
+def reconcile(logged_per_day, checkouts_per_day, units, events, implausible_ratio=2.0):
+    """Two checks that can be wrong today without anyone noticing.
+
+    1. Cleans logged vs real checkouts. If Hostaway shows more checkouts than the system
+       logged cleans, cleaning is happening that we never see — almost certainly the
+       third-party crews — and the head count is understated by exactly that gap.
+    2. Crew tags vs the work actually logged on their apartments. OujaCT is tagged to 14
+       units yet logged over a thousand cleans; 14 units cannot produce that. So the
+       tags describe paperwork, not work, and any plan sized off them is sized wrong.
+
+    Note this counts cleans by the APARTMENT's crew tag, not by who pressed the button —
+    a done event records a person, and there is no person-to-crew mapping anywhere.
+    """
+    gap = round(max(0.0, float(checkouts_per_day or 0) - float(logged_per_day or 0)), 1)
+
+    team_of, names = {}, {}
+    for u in units or []:
+        team_of[u.get("lid")] = u.get("team_id") or ""
+        names[u.get("team_id") or ""] = u.get("team_name") or ""
+
+    cleans, untagged = defaultdict(int), 0
+    for e in events or []:
+        tid = team_of.get(e.get("lid"))
+        if tid is None:
+            continue                      # apartment not in the active list at all
+        cleans[tid] += 1
+        if not tid:
+            untagged += 1
+
+    crews = []
+    for tid, name in names.items():
+        n_units = sum(1 for u in units if (u.get("team_id") or "") == tid)
+        n_cleans = cleans.get(tid, 0)
+        # A unit turns over at most ~once every other day; well beyond that and the tag
+        # cannot be describing who really cleans it.
+        ceiling = max(1, n_units) * implausible_ratio * 15
+        crews.append({"team_id": tid, "name": name or "—", "units": n_units,
+                      "cleans": n_cleans,
+                      "implausible": bool(n_units and n_cleans > ceiling)})
+    crews.sort(key=lambda c: -c["cleans"])
+    return {"logged_per_day": round(float(logged_per_day or 0), 1),
+            "checkouts_per_day": round(float(checkouts_per_day or 0), 1),
+            "unlogged_per_day": gap, "has_gap": gap > 0.5,
+            "crews": crews, "untagged_cleans": untagged}
+
+
 def _team_rollup(units, teams, in_house_ids):
     known = {str(t.get("id")): (t.get("name") or "") for t in (teams or [])}
     counts = defaultdict(int)

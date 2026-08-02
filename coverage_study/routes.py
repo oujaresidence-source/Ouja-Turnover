@@ -11,6 +11,7 @@ geo cache.
 
 import asyncio
 import datetime
+import time
 import traceback
 
 from . import engine, geo, pluscode, tiles
@@ -25,6 +26,19 @@ SETTINGS_FILE = "coverage_settings.json"
 # per-person rate or inflate the count of people already working.
 DEFAULT_NON_CLEANERS = ("faisalouja", "route-link", "_hmdkhdyr")
 
+# How many trailing weeks of checkouts the week-shape and peak factor are measured over.
+TURNS_WEEKS_BACK = 8
+_TURNS_CACHE = {}          # (start, end) -> (payload, fetched_at). Hostaway is slow.
+_TURNS_TTL_S = 900
+
+# Owner-editable without a deploy, exactly like the non-cleaner list.
+SETTING_DEFAULTS = {
+    "roster_factor": round(30 / 26.0, 4),   # six-day week: 26 worked days in 30
+    "absence_factor": 0.08,                 # leave + sickness
+    "vendor_rate_sar": {},                  # {team_id: SAR per apartment cleaned}
+    "inhouse_cost_per_person_sar": 0,       # monthly, all-in, per cleaner
+}
+
 
 def _settings():
     load = getattr(HOST, "load_json", None)
@@ -37,7 +51,44 @@ def _settings():
         if callable(save):
             save(SETTINGS_FILE, cfg)
     cfg.setdefault("non_cleaners", list(DEFAULT_NON_CLEANERS))
+    for k, v in SETTING_DEFAULTS.items():
+        cfg.setdefault(k, v)
     return cfg
+
+
+def _turns_payload(units, all_lids, weeks_back=TURNS_WEEKS_BACK):
+    """Turn deadlines + the shape of the week, over the trailing `weeks_back` weeks.
+
+    Cached: this is a live Hostaway window query and the page must not wait on it twice.
+    Returns None when reservations are unavailable, so the page can say the deadline view
+    is missing rather than silently showing zero same-day turns — which would read as
+    'no pressure' and is the most dangerous possible wrong answer here.
+    """
+    if not callable(getattr(HOST, "reservations", None)):
+        return None
+    end = datetime.date.today()
+    start = end - datetime.timedelta(days=weeks_back * 7)
+    key = (start.isoformat(), end.isoformat())
+    hit = _TURNS_CACHE.get(key)
+    if hit and (time.time() - hit[1]) < _TURNS_TTL_S:
+        res = hit[0]
+    else:
+        try:
+            res = HOST.reservations(start.isoformat(), end.isoformat())
+        except Exception as e:
+            print("[coverage] reservations unavailable:", e)
+            return None
+        _TURNS_CACHE.clear()
+        _TURNS_CACHE[key] = (res, time.time())
+    turns = engine.classify_turns(res, units, all_lids,
+                                  since=start.isoformat(), until=end.isoformat())
+    shape = engine.week_shape(turns["rows"])
+    checkouts = len(turns["rows"])
+    days = max(1, (end - start).days)
+    turns["window"] = {"start": start.isoformat(), "end": end.isoformat(),
+                       "weeks": weeks_back}
+    turns["checkouts_per_day"] = round(checkouts / float(days), 1)
+    return {"turns": turns, "week": shape}
 
 
 def _json(obj, status=200):
@@ -75,6 +126,16 @@ def _collect():
         "reports": call("reports") or [],
         "photos": call("photos") or [],
     }
+
+
+def _events_for_reconcile(study):
+    """Every logged clean as {lid, date} — the crew-tag check counts by the APARTMENT's
+    tag, since a done event records a person and no person-to-crew mapping exists."""
+    out = []
+    for row in (study.get("oujact") or {}).get("work_days") or []:
+        for lid in row.get("lids") or []:
+            out.append({"lid": lid, "date": row.get("date")})
+    return out
 
 
 def _in_house_ids(teams):
@@ -118,6 +179,33 @@ def _build(request_params):
     # link to a street address but never turn that address into coordinates, and the map
     # image cannot be fetched either. The page must say so outright rather than showing a
     # blank box and a vague failure (seen live 2026-08-02).
+    # ---- v2: turn deadlines, the shape of the week, and the corrected head count ----
+    cfg = _settings()
+    all_lids = call("all_listing_ids") or None
+    tp = _turns_payload(units, all_lids)
+    if tp:
+        s["turns"] = tp["turns"]
+        s["week"] = tp["week"]
+        # Peak from MEASURED checkouts, not a guessed multiplier (owner's choice).
+        peak = (tp["week"].get("busiest") or {}).get("total")
+        s["capacity"]["headcount"] = engine.headcount(
+            demand_per_day=s["capacity"].get("demand_per_day") or 0,
+            rate=(s.get("throughput") or {}).get("median"),
+            current_people=s["capacity"].get("current_people") or 0,
+            peak_per_day=peak,
+            roster_factor=float(cfg.get("roster_factor") or engine.DEFAULT_ROSTER_FACTOR),
+            absence_factor=float(cfg.get("absence_factor") or engine.DEFAULT_ABSENCE_FACTOR))
+        s["reconcile"] = engine.reconcile(
+            logged_per_day=(s.get("oujact") or {}).get("per_day_avg") or 0,
+            checkouts_per_day=tp["turns"].get("checkouts_per_day") or 0,
+            units=units, events=_events_for_reconcile(s))
+    else:
+        s["turns"] = None
+        s["week"] = None
+        s["capacity"]["headcount"] = None
+        s["reconcile"] = None
+    s["settings"] = {k: cfg.get(k) for k in SETTING_DEFAULTS}
+
     s["geo"] = {"have_key": bool(call("maps_key")),
                 "filled_from_cache": filled, "cached_total": len(cache),
                 "pending": len([u for u in units

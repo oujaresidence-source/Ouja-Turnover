@@ -23750,6 +23750,7 @@ function gdRenderUnits(){
       +(u.listing_id?(' · Hostaway '+esc(String(u.listing_id))):' · <span style="color:var(--yellow)">'+esc(labelText('غير مرتبطة','unlinked'))+'</span>')
       +' · '+pics+' '+esc(labelText('صور محلية','local photos'))
       +(u.wifi_name?(' · WiFi ✓'):'')
+      +((u.active===0||u.active==='0')?(' · <span style="color:var(--yellow)">'+esc(labelText('مخفية عن الضيوف','hidden from guests'))+'</span>'):'')
       +'</div></div>'
       +'<div style="display:flex;gap:6px">'
       +'<a class="btn ghost sm" target="_blank" rel="noopener" href="/guide/'+esc(u.slug)+'">'+esc(labelText('فتح','Open'))+'</a>'
@@ -28971,8 +28972,14 @@ function renderCoverage(){
   var ar = (L==='ar');
   var u = s.units||{}, cl = s.clusters||{}, oj = s.oujact||{}, cy = s.cycle||{}, cap = s.capacity||{};
 
+  // ONE hiring number on the page. The v2 head count is payroll-aware (roster + absence);
+  // the old capacity_model figure is not, and showing both produced a KPI reading 0 above
+  // a card reading 1. The v2 figure wins whenever it exists.
+  var hc = cap.headcount || null;
+  var gapV = hc ? hc.gap : cap.hire;
+  var needV = hc ? hc.payroll : cap.people_needed;
   putHtml('covKpis', [
-    {v:(cap.hire==null?'—':cap.hire), l:ar?'المطلوب توظيفه':'People to hire', s:(cap.people_needed==null?(ar?'بيانات ناقصة':'not enough data'):(ar?('الإجمالي المطلوب '+cap.people_needed):('total needed '+cap.people_needed)))},
+    {v:(gapV==null?'—':gapV), l:ar?'الناقص':'Gap to close', s:(needV==null?(ar?'بيانات ناقصة':'not enough data'):(ar?('على الرواتب '+needV):('on payroll '+needV)))},
     {v:safeNum(u.total),  l:ar?'إجمالي الشقق':'Total apartments', s:ar?(safeNum(u.located)+' لها موقع'):(safeNum(u.located)+' located')},
     {v:safeNum(u.in_house), l:ar?'تنظّفها أوجا':'Cleaned by OujaCT', s:ar?'فريقنا الداخلي':'our in-house team'},
     {v:safeNum(u.third_party), l:ar?'شركات خارجية':'Third-party', s:ar?('في '+safeNum(cl.multi)+' عمارة مشتركة'):('across '+safeNum(cl.multi)+' shared buildings')},
@@ -28984,9 +28991,190 @@ function renderCoverage(){
       + '<div class="kpi-lbl" style="opacity:.75">'+esc(k.s)+'</div></div>';
   }).join(''));
 
-  var html = _covCapacityCard(s) + _covMapCard(s) + _covClusterCard(s)
-           + _covDailyCard(s) + _covPeopleCard(s) + _covUnitsCard(s);
+  // The answer first, open. Everything that supports it folds away — the owner said
+  // the page was too long to scroll, and the head count is what he opens it for.
+  var ar2=(L==='ar');
+  var missing2=safeNum((s.units||{}).missing_location);
+  var html = _covHeadcountCard(s) + _covWeekCard(s) + _covReconcileCard(s)
+    + _covFold(ar2?'🗺️ الخريطة':'🗺️ The map',
+               ar2?(safeNum((s.units||{}).located)+' شقة محددة'):(safeNum((s.units||{}).located)+' located'),
+               _covMapCard(s), false)
+    + _covFold(ar2?'🏢 شقق في نفس المبنى':'🏢 Stacked buildings',
+               ar2?(safeNum((s.clusters||{}).multi)+' عمارة'):(safeNum((s.clusters||{}).multi)+' buildings'),
+               _covClusterCard(s), false)
+    + _covFold(ar2?'📅 إنتاج أوجا يوم بيوم':'📅 OujaCT day by day',
+               ar2?(safeNum((s.oujact||{}).total_cleans)+' تنظيفة'):(safeNum((s.oujact||{}).total_cleans)+' cleans'),
+               _covDailyCard(s), false)
+    + _covFold(ar2?'👤 لكل شخص':'👤 Per person',
+               ar2?(safeNum(((s.oujact||{}).people||[]).length)+' أشخاص'):(safeNum(((s.oujact||{}).people||[]).length)+' people'),
+               _covPeopleCard(s), false)
+    + _covFold(ar2?'📋 كل الشقق':'📋 Every apartment',
+               missing2?(ar2?(missing2+' بدون موقع'):(missing2+' unlocated')):(ar2?'كلها محددة':'all located'),
+               _covUnitsCard(s), missing2>0);
   putHtml('covBody', html);
+}
+
+/* Collapsible wrapper. The owner said the page is too long to scroll, so the answer
+   sits at the top open and every supporting view folds away behind one line.
+   Native <details> — no JS, no state to lose, works with the keyboard. */
+function _covFold(title, sub, inner, open){
+  return '<details'+(open?' open':'')+' style="margin-bottom:14px">'
+    + '<summary style="cursor:pointer;list-style:none;padding:13px 16px;background:var(--surface);'
+    + 'border:1px solid var(--line);border-radius:var(--r-lg);font-size:13.5px;font-weight:700;'
+    + 'color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px">'
+    + '<span>'+title+'</span>'
+    + '<span style="font-weight:500;font-size:11.5px;color:var(--mut)">'+(sub||'')+' ▾</span>'
+    + '</summary><div style="margin-top:10px">'+inner+'</div></details>';
+}
+
+function _covTurnChips(s){
+  var ar=(L==='ar'), c=((s.turns||{}).counts)||{};
+  if(!s.turns) return '';
+  var defs=[['T0', ar?'نفس اليوم':'same day', 'var(--red)', 'var(--red-soft)'],
+            ['T1', ar?'اليوم اللي بعده':'next day', 'var(--yellow)', 'var(--yellow-soft)'],
+            ['T2', ar?'مؤجّلة':'deferrable', 'var(--mut)', 'var(--surface-2)']];
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    + defs.map(function(d){
+        return '<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;'
+          + 'border-radius:8px;background:'+d[3]+';color:'+d[2]+';font-size:12px;font-weight:700">'
+          + safeNum(c[d[0]])+' <span style="font-weight:500">'+esc(d[1])+'</span></span>';
+      }).join('')
+    + '</div>';
+}
+
+/* THE ANSWER. Four numbers, not one — "on shift" and "on payroll" are different things,
+   and the old single figure quietly assumed everyone works every day. */
+function _covHeadcountCard(s){
+  var ar=(L==='ar'), cap=s.capacity||{}, h=cap.headcount, thr=s.throughput||{}, cy=s.cycle||{};
+  var head='<div class="card-head"><span class="card-title">'+(ar?'🧮 كم شخص نحتاج':'🧮 How many people')+'</span>'
+    + '<span class="card-sub">'+(cap.demand_source==='hostaway_30d'
+        ?(ar?'الطلب من هوستاواي':'demand from Hostaway')
+        :(ar?'الطلب مُقدّر من السجل · تقديري':'demand estimated from the log'))+'</span></div>';
+  if(!h || h.payroll==null){
+    return '<div class="card">'+head+emptyState(ar?'ما فيه بيانات كافية':'Not enough data yet',
+      (h&&h.reason)||(cap.reason)||(ar?'نحتاج أيام أكثر من السجل.':'More logged days are needed.'),'🧮')+'</div>';
+  }
+  var big='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">'
+    + [[h.gap, ar?'الناقص':'Gap to close', ar?'نوظّفهم':'people to hire', true],
+       [h.payroll, ar?'على الرواتب':'On payroll', ar?'عشان يدوم التغطية':'to sustain cover', false],
+       [h.on_shift_avg, ar?'في الدوام — يوم عادي':'On shift — average day', ar?'كل يوم':'every day', false],
+       [h.on_shift_peak==null?'—':h.on_shift_peak, ar?'في الدوام — أقوى يوم':'On shift — busiest day', ar?'ذروة الأسبوع':'weekly peak', false]
+      ].map(function(k){
+        var acc = k[3] ? 'border-color:var(--accent);background:var(--accent-soft)' : '';
+        return '<div class="kpi" style="'+acc+'"><div class="kpi-val">'+esc(String(k[0]))+'</div>'
+          + '<div class="kpi-lbl">'+esc(k[1])+'</div>'
+          + '<div class="kpi-lbl" style="opacity:.75">'+esc(k[2])+'</div></div>';
+      }).join('')
+    + '</div>';
+  var rows=[
+    [ar?'شقق تحتاج تنظيف باليوم':'Apartments needing a clean per day', cap.demand_per_day],
+    [ar?'شقق للشخص باليوم (مقاسة)':'Apartments per person per day (measured)', thr.median==null?'—':thr.median],
+    [ar?'موجود حالياً':'Working today', h.current_people]
+  ];
+  var table='<div style="overflow-x:auto"><table class="data"><tbody>'
+    + rows.map(function(r){
+        return '<tr><td>'+esc(r[0])+'</td><td class="num strong">'+esc(String(r[1]==null?'—':r[1]))+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  var rf=Math.round((safeNum(h.roster_factor)-1)*100), af=Math.round(safeNum(h.absence_factor)*100);
+  var why='<div class="page-help" style="margin-top:12px"><div class="ph-t">'
+    + (ar?'على أي أساس هذي الأرقام':'What these numbers rest on')+'</div><div class="ph-b">'
+    + (ar
+      ? ('«في الدوام» = الشقق المطلوبة ÷ '+esc(String(thr.median))+' شقة للشخص في اليوم، وهو معدل مقاس فعلياً من '+safeNum(thr.n)+' يوم عمل. '
+         + '«على الرواتب» أعلى لأن الشخص ما يداوم كل يوم: زدنا '+rf+'% للإجازة الأسبوعية و'+af+'% للإجازات والمرض — '
+         + 'الرقمين تقدر تغيّرهما من الإعدادات بدون ما نعدّل البرنامج. '
+         + '«أقوى يوم» ما توظّف له — تشتريه من شركة وقت الذروة.')
+      : ('"On shift" = apartments needed divided by '+esc(String(thr.median))+' per person per day, measured across '+safeNum(thr.n)+' working days. '
+         + '"On payroll" is higher because nobody works every day: '+rf+'% added for the weekly day off and '+af+'% for leave and sickness — '
+         + 'both editable in settings without a code change. '
+         + 'You do not hire for the busiest day, you buy it in.'))
+    + (safeNum(cy.batched_pct)>=20
+       ? (ar?(' زمن الدورة ما استخدمناه: '+cy.batched_pct+'% من التنظيفات مسجّلة على دفعات.')
+            :(' Cycle time is not used: '+cy.batched_pct+'% of finishes are logged in batches.'))
+       : '')
+    + '</div></div>';
+  return '<div class="card">'+head+big+_covTurnChips(s)+table+why+'</div>';
+}
+
+/* The shape of the week — whether the peak is 1.2x the mean or 2x changes the plan
+   more than anything else on this page. */
+function _covWeekCard(s){
+  var ar=(L==='ar'), w=s.week;
+  var head='<div class="card-head"><span class="card-title">'+(ar?'📆 شكل الأسبوع':'📆 Shape of the week')+'</span>'
+    + '<span class="card-sub">'+(ar?'متوسط المغادرات لكل يوم · الغامق = نفس اليوم':'average checkouts per weekday · dark = same-day')+'</span></div>';
+  if(!w || !safeArr(w.days).length){
+    return '<div class="card">'+head+emptyState(ar?'ما وصلتنا حجوزات':'Reservations unavailable',
+      ar?'ما قدرنا نقرأ الحجوزات من هوستاواي، فما نقدر نعرف أي يوم أثقل.':'Could not read reservations from Hostaway, so the weekly pattern is unknown.','📆')+'</div>';
+  }
+  var mx=Math.max.apply(null, w.days.map(function(d){return d.total;}))||1;
+  var bars='<div style="display:flex;align-items:flex-end;gap:10px;height:150px;padding-top:6px">'
+    + w.days.map(function(d){
+        var h=Math.max(2, Math.round(d.total/mx*112));
+        var h0=Math.max(0, Math.round(d.T0/mx*112));
+        var peak=(w.busiest && w.busiest.weekday===d.weekday);
+        return '<div style="flex:1;text-align:center" title="'+esc(d.ar+' — '+d.total+(ar?' مغادرة، منها ':' checkouts, ')+d.T0+(ar?' نفس اليوم':' same-day'))+'">'
+          + '<div style="height:'+h+'px;background:var(--accent);opacity:.30;border-radius:4px 4px 0 0;position:relative">'
+          + '<div style="position:absolute;bottom:0;left:0;right:0;height:'+h0+'px;background:var(--red);opacity:.85;border-radius:4px 4px 0 0"></div>'
+          + '</div>'
+          + '<div style="font-size:10.5px;margin-top:4px;font-weight:'+(peak?'700':'500')+';color:'+(peak?'var(--text)':'var(--mut)')+'">'+esc(ar?d.ar:d.en)+'</div>'
+          + '<div style="font-size:10px;color:var(--mut)">'+d.total+'</div></div>';
+      }).join('')
+    + '</div>';
+  var pr=w.peak_ratio;
+  var note='<div class="page-help" style="margin-top:10px"><div class="ph-b">'
+    + esc(ar
+      ? ('أثقل يوم: '+((w.busiest||{}).ar||'—')+' بمعدل '+((w.busiest||{}).total||0)+' مغادرة، مقابل '+w.mean_per_day+' في اليوم العادي'
+         + (pr?(' — يعني الذروة '+pr+' ضعف المتوسط.'):'.')
+         + ' هذا الفرق هو اللي يقرر كم شخص تحتاج، مو المتوسط لحاله.')
+      : ('Busiest: '+((w.busiest||{}).en||'—')+' at '+((w.busiest||{}).total||0)+' checkouts against '+w.mean_per_day+' on an average day'
+         + (pr?(' — a peak of '+pr+'x the mean.'):'.')
+         + ' That difference drives the head count, not the average alone.'))
+    + '</div></div>';
+  return '<div class="card">'+head+bars+note+'</div>';
+}
+
+/* Two checks that can be wrong today without anyone noticing. */
+function _covReconcileCard(s){
+  var ar=(L==='ar'), r=s.reconcile;
+  var head='<div class="card-head"><span class="card-title">'+(ar?'🔎 تطابق الأرقام':'🔎 Reconciliation')+'</span>'
+    + '<span class="card-sub">'+(ar?'تنبيهات على البيانات نفسها':'checks on the data itself')+'</span></div>';
+  if(!r) return '';
+  var lines=[];
+  if(r.has_gap){
+    lines.push(['danger', ar
+      ? ('تسجيلات النظافة '+r.logged_per_day+'/يوم · مغادرات هوستاواي '+r.checkouts_per_day+'/يوم · '
+         + 'فرق '+r.unlogged_per_day+' ما انسجّل. يعني فيه تنظيف يصير وما يوصلنا — غالباً الشركات الخارجية — '
+         + 'والعدد المطلوب أعلى من اللي طالع فوق بنفس الفرق.')
+      : ('Logged cleans '+r.logged_per_day+'/day vs Hostaway checkouts '+r.checkouts_per_day+'/day — '
+         + r.unlogged_per_day+' unlogged. Cleaning is happening that the system never sees, almost certainly '
+         + 'third-party, so the head count above is understated by that much.')]);
+  }else{
+    lines.push(['ok', ar
+      ? ('تسجيلات النظافة '+r.logged_per_day+'/يوم تغطي مغادرات هوستاواي '+r.checkouts_per_day+'/يوم — ما فيه فرق.')
+      : ('Logged cleans '+r.logged_per_day+'/day cover Hostaway checkouts '+r.checkouts_per_day+'/day — no gap.')]);
+  }
+  var bad=safeArr(r.crews).filter(function(c){return c.implausible;});
+  if(bad.length){
+    lines.push(['danger', ar
+      ? ('توزيع الفرق على الشقق ما يطابق الشغل المسجّل: '
+         + bad.map(function(c){return c.name+' مربوط له '+c.units+' شقة بس انسجّل عليها '+c.cleans+' تنظيفة';}).join('، ')
+         + '. يعني التوزيع ورق مو واقع — لازم يتصحّح من «فرق التنظيف» قبل ما نعتمد على تقسيم الداخلي/الخارجي.')
+      : ('Crew tags do not match the logged work: '
+         + bad.map(function(c){return c.name+' is tagged to '+c.units+' apartments but '+c.cleans+' cleans were logged on them';}).join('; ')
+         + '. The split describes paperwork, not work — fix it in Cleaning Teams before trusting the in-house/third-party numbers.')]);
+  }
+  if(safeNum(r.untagged_cleans)){
+    lines.push(['warn', ar
+      ? (r.untagged_cleans+' تنظيفة انسجّلت على شقق ما لها فريق. هذي الشقق ما تدخل في حساب «داخلي مقابل خارجي».')
+      : (r.untagged_cleans+' cleans were logged on apartments with no crew tag. Those are missing from the in-house vs third-party split.')]);
+  }
+  var body=lines.map(function(l){
+    var col = l[0]==='danger' ? 'var(--red)' : (l[0]==='warn' ? 'var(--yellow)' : 'var(--green)');
+    var bg  = l[0]==='danger' ? 'var(--red-soft)' : (l[0]==='warn' ? 'var(--yellow-soft)' : 'var(--green-soft)');
+    return '<div style="padding:11px 13px;border-radius:10px;background:'+bg+';border-inline-start:3px solid '+col
+      + ';margin-bottom:8px;font-size:12.5px;line-height:1.75;color:var(--text-2)">'+esc(l[1])+'</div>';
+  }).join('');
+  return '<div class="card">'+head+body+'</div>';
 }
 
 /* ---- the decision card: how many people, and on what assumptions ---- */
@@ -53980,6 +54168,35 @@ async def start_web_server():
                             n += 1
                     return n
 
+                def _cov_reservations(start, end):
+                    """Confirmed reservations touching [start, end] — the raw material for
+                    the turn-deadline join (checkout -> next check-in). TARGETED window
+                    query; never the truncated history cache (CLAUDE.md trap #4). Takes
+                    ISO strings and hands fetch_reservations_window real date objects."""
+                    s = datetime.strptime(str(start)[:10], "%Y-%m-%d").date()
+                    e = datetime.strptime(str(end)[:10], "%Y-%m-%d").date()
+                    return [
+                        {"listingMapId": r.get("listingMapId"),
+                         "arrivalDate": r.get("arrivalDate"),
+                         "departureDate": r.get("departureDate"),
+                         "checkInTime": r.get("checkInTime"),
+                         "checkOutTime": r.get("checkOutTime"),
+                         "status": r.get("status")}
+                        for r in (fetch_reservations_window(s, e) or [])
+                    ]
+
+                def _cov_all_listing_ids():
+                    """Every listing id Hostaway knows, INCLUDING deactivated ones — so a
+                    reservation on a switched-off apartment is reported as inactive rather
+                    than as 'not linked', which are different problems with different fixes."""
+                    out = set()
+                    for k in _ls_get()["listings"]:
+                        try:
+                            out.add(int(k))
+                        except (TypeError, ValueError):
+                            pass
+                    return out
+
                 def _cov_set_pin(lid, link, lat, lng):
                     """Save one apartment's map pin onto the LISTINGS store — the same
                     field /api/listings/update writes and the dispatch/ETA code already
@@ -54005,6 +54222,8 @@ async def start_web_server():
                     "turnovers": _cov_turnovers,
                     "maps_key": lambda: GOOGLE_MAPS_API_KEY,
                     "set_pin": _cov_set_pin,
+                    "reservations": _cov_reservations,
+                    "all_listing_ids": _cov_all_listing_ids,
                 })
                 _coverage.register_routes(app)
                 print("[coverage] wired + routes registered (/api/coverage/study, /api/coverage/geo)")
