@@ -28930,8 +28930,6 @@ async function covResolveGeo(){
     var msg = labelText('تم تحديد ','Located ')+safeNum(g.resolved)+labelText(' موقع.',' locations.');
     if(safeNum(g.failed)) msg += labelText(' تعذّر ','  Failed: ')+safeNum(g.failed)+'.';
     if(safeNum(g.pending)) msg += labelText(' باقي ','  Remaining: ')+safeNum(g.pending)+labelText(' — اضغط الزر مرة ثانية.',' — press the button again.');
-    if(!g.have_key) msg = labelText('ما فيه مفتاح خرائط قوقل — ضيفه في Railway باسم GOOGLE_MAPS_API_KEY وبعدين اضغط الزر مرة ثانية.',
-                                    'No Google Maps key — add GOOGLE_MAPS_API_KEY in Railway, then press the button again.');
     toast(msg);
   }catch(e){
     toast(labelText('ما نجح تحديد المواقع','Could not resolve locations'));
@@ -29051,22 +29049,6 @@ function _covMapCard(s){
     + '<button class="btn ghost xs" onclick="covZoomReset()">'+(ar?'ضبط':'Fit')+'</button>'
     + '<span class="card-sub">'+(ar?'حجم الدائرة = عدد الشقق في نفس المبنى':'circle size = flats in one building')+'</span>'
     + '</div></div>';
-  // The KEY check comes first: with no key there are usually no located apartments
-  // either, and "press Locate" would be useless advice — pressing it cannot work.
-  var geo = s.geo||{};
-  if(geo.have_key === false){
-    return '<div class="card">'+head
-      + '<div class="page-help" style="border-color:var(--red);background:var(--red-soft)">'
-      + '<div class="ph-t">'+(ar?'مفتاح خرائط قوقل مو مضبوط':'The Google Maps key is not set')+'</div>'
-      + '<div class="ph-b">'
-      + (ar ? ('عشان تشتغل الخريطة وتتحدد مواقع الشقق لازم يتضاف المفتاح في Railway باسم '
-               + '<b>GOOGLE_MAPS_API_KEY</b>. بدونه ما نقدر نجيب صورة الخريطة، ولا نحوّل عناوين '
-               + 'الشقق لإحداثيات — لذلك أغلب الشقق مكتوب عندها «بدون موقع».')
-            : ('The map and the apartment locations both need <b>GOOGLE_MAPS_API_KEY</b> set in '
-               + 'Railway. Without it we cannot fetch the map image or turn the apartment addresses '
-               + 'into coordinates, which is why most apartments read "no location".'))
-      + '</div></div></div>';
-  }
   if(!rows.length){
     return '<div class="card">'+head+emptyState(ar?'ما فيه مواقع محددة':'No located apartments',
       ar?'اضغط «حدّد المواقع» فوق عشان نجيب إحداثيات كل شقة.':'Press "Locate" above to fetch coordinates for every apartment.','📍')+'</div>';
@@ -29127,7 +29109,8 @@ function _covMapCard(s){
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green);margin-inline-end:5px"></span>'+(ar?'أوجا (داخلي)':'OujaCT (in-house)')+'</span>'
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--blue);margin-inline-end:5px"></span>'+(ar?'شركة خارجية':'Third-party')+'</span>'
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--yellow);margin-inline-end:5px"></span>'+(ar?'بدون فريق':'Unassigned')+'</span>'
-    + '<span>'+(ar?'تكبير ':'zoom ')+z+'</span></div>';
+    + '<span>'+(ar?'تكبير ':'zoom ')+z+'</span>'
+    + '<span style="opacity:.8">© OpenStreetMap</span></div>';
   var missing = safeNum((s.units||{}).missing_location);
   var warn = missing ? ('<div class="page-help" style="margin-top:10px"><div class="ph-b">'
     + esc(ar?(missing+' شقة ما لها موقع بعد — اضغط «حدّد المواقع».'):(missing+' apartments still have no location — press "Locate".'))

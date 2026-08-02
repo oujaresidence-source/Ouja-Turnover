@@ -56,11 +56,46 @@ def _parse_effective(url):
     return addr, None
 
 
-def _geocode(addr, api_key, session, out):
-    """Street address -> coordinates via Google. Mutates and returns `out`."""
-    if not api_key:
-        out["error"] = "address only — no Maps key to geocode with"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# OSM's policy demands an identifying User-Agent and at most one request a second.
+NOMINATIM_UA = "OujaResidence-CoverageMap/1.0 (+https://oujares.com; ops@oujares.com)"
+NOMINATIM_SLEEP_S = 1.1
+
+
+def _geocode_osm(addr, session, out):
+    """Street address -> coordinates via OpenStreetMap. Free, no key.
+
+    The fallback when there is no Google key, which is the normal case here — the owner
+    chose not to register one. Coverage in Riyadh is good for named streets and
+    districts and poorer for plot codes, so a miss is recorded as a miss.
+    """
+    try:
+        r = session.get(NOMINATIM_URL,
+                        params={"q": addr, "format": "json", "limit": 1,
+                                "countrycodes": "sa", "accept-language": "ar"},
+                        timeout=20, headers={"User-Agent": NOMINATIM_UA})
+        r.raise_for_status()
+        res = r.json()
+    except Exception as e:
+        out["error"] = "osm geocode failed: %s" % str(e)[:120]
         return out
+    finally:
+        time.sleep(NOMINATIM_SLEEP_S)          # rate limit, always — even on failure
+    if not res:
+        out["error"] = "osm geocode: no result for this address"
+        return out
+    try:
+        out.update(lat=float(res[0]["lat"]), lng=float(res[0]["lon"]),
+                   address=res[0].get("display_name") or addr, source="osm")
+    except (KeyError, TypeError, ValueError):
+        out["error"] = "osm geocode: unreadable result"
+    return out
+
+
+def _geocode(addr, api_key, session, out):
+    """Street address -> coordinates. Google when a key exists, OpenStreetMap when not."""
+    if not api_key:
+        return _geocode_osm(addr, session, out)
     try:
         g = session.get("https://maps.googleapis.com/maps/api/geocode/json",
                         params={"address": addr, "key": api_key, "region": "sa"}, timeout=20)

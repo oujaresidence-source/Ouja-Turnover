@@ -13,7 +13,7 @@ import asyncio
 import datetime
 import traceback
 
-from . import engine, geo
+from . import engine, geo, tiles
 from .host import HOST, call
 
 EDIT_ROLES = ("admin", "ops")
@@ -204,16 +204,13 @@ _MAP_CACHE_MAX = 24
 
 
 async def api_map(request):
-    """Real Google map imagery, fetched BY US so the Maps key never reaches the browser.
+    """A real street map, stitched from OpenStreetMap tiles on OUR server.
 
-    The owner chose this over the interactive JS map precisely to avoid putting a key
-    in the page (2026-08-02): nothing to configure in Google Cloud, and no key to steal.
-    The page draws its own coloured dots on top using the same Mercator projection.
+    NO API key — the owner does not want to register one (2026-08-02), so this replaced
+    Google Static Maps outright. Fetching server-side also means the page makes no
+    third-party requests and the tiles can be cached hard. The dashboard draws its own
+    coloured dots on top using the same Web Mercator projection these tiles use.
     """
-    key = call("maps_key") or ""
-    if not key:
-        return _json({"ok": False, "error": "no_maps_key",
-                      "message": "ما فيه مفتاح خرائط في الإعدادات / GOOGLE_MAPS_API_KEY is not set"}, 503)
     try:
         lat = float(request.query.get("lat"))
         lng = float(request.query.get("lng"))
@@ -221,26 +218,14 @@ async def api_map(request):
         return _json({"ok": False, "error": "bad_center"}, 400)
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         return _json({"ok": False, "error": "bad_center"}, 400)
-    z = _int(request, "z", 11, 1, 20)
-    w = _int(request, "w", 640, 100, 640)          # Static Maps caps a side at 640
-    h = _int(request, "h", 420, 100, 640)
+    z = _int(request, "z", 11, 1, 19)
+    w = _int(request, "w", 700, 100, 1024)
+    h = _int(request, "h", 440, 100, 1024)
     ck = (round(lat, 5), round(lng, 5), z, w, h)
     png = _MAP_CACHE.get(ck)
     if png is None:
-        def _fetch():
-            import requests
-            r = requests.get("https://maps.googleapis.com/maps/api/staticmap",
-                             params={"center": "%s,%s" % (lat, lng), "zoom": z,
-                                     "size": "%dx%d" % (w, h), "scale": 2,
-                                     "maptype": "roadmap", "language": "ar",
-                                     "region": "sa", "key": key},
-                             timeout=20)
-            r.raise_for_status()
-            if not (r.headers.get("Content-Type") or "").startswith("image/"):
-                raise ValueError("Google returned %s" % (r.text or "")[:120])
-            return r.content
         try:
-            png = await asyncio.to_thread(_fetch)
+            png = await asyncio.to_thread(tiles.render, lat, lng, z, w, h)
         except Exception as e:
             return _json({"ok": False, "error": "map_fetch_failed",
                           "message": str(e)[:200]}, 502)

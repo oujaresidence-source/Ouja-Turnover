@@ -22,7 +22,14 @@ import math
 from collections import defaultdict
 from datetime import datetime
 
+from . import pluscode
+
 UNKNOWN_PERSON = "غير معروف"
+
+# Reference point for recovering SHORT Plus Codes — central Riyadh. A short code drops
+# its leading characters and is only meaningful near a reference; every Ouja unit is in
+# greater Riyadh, so this is safe.
+REF_LAT, REF_LNG = 24.7136, 46.6753
 
 # A gap longer than this is lunch, a shift change, or a drive across town — not the
 # cost of one apartment. Excluded from the median, but always COUNTED and reported.
@@ -444,6 +451,13 @@ def build_units(listings, guide_units, teams, in_house_team_ids=None):
                 if ll:
                     lat, lng, src = ll[0], ll[1], tag
                     break
+            if lat is None:
+                # A Plus Code in the Hostaway address IS a coordinate written as text —
+                # exact, offline, no geocoder and no API key. Several Ouja units carry
+                # one ("QJVM+4MM, King Fahd Rd, As Sahafah, Riyadh").
+                ll = pluscode.from_address(rec.get("address"), REF_LAT, REF_LNG)
+                if ll:
+                    lat, lng, src = ll[0], ll[1], "pluscode"
         tid = str(rec.get("cleaning_team") or "")
         link = (rec.get("maps_link") or g.get("map_link") or "")
         out.append({
