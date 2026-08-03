@@ -115,6 +115,17 @@ except Exception as _coverage_err:      # pragma: no cover
     _coverage = None
     _HAS_COVERAGE = False
 
+# Internet subscriptions «اشتراكات النت» — which apartment has which subscription, from
+# whom, for how much, until when. Phase 1: make paying twice for one unit structurally
+# impossible (a partial unique index in wifi/db.py) and start collecting the data.
+try:
+    import wifi as _wifi
+    _HAS_WIFI = os.environ.get("WIFI_ENABLED", "1") == "1"
+except Exception as _wifi_err:          # pragma: no cover
+    print("[wifi] import failed (internet tab disabled, bot unaffected):", _wifi_err)
+    _wifi = None
+    _HAS_WIFI = False
+
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
 # humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
 # nothing, issues nothing.
@@ -17109,6 +17120,76 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .pill.muted{background:var(--surface-2);color:var(--mut)}
 .pill.gold{background:var(--gold-soft);color:var(--gold)}
 
+/* ============== WIFI — اشتراكات النت ==============
+   Semantic colour only: red = dead/urgent, amber = soon, green = ok, neutral = unknown.
+   Reuses the locked tokens; no per-view palette. */
+.wf-list{display:flex;flex-direction:column;gap:6px}
+.wf-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 13px;
+  cursor:pointer;transition:transform .14s var(--ease),border-color .16s ease,box-shadow .16s ease}
+.wf-row:hover{border-color:var(--gold);box-shadow:var(--sh-xs)}
+.wf-row:active{transform:scale(.99)}
+.wf-dot{width:8px;height:8px;border-radius:50%;background:var(--mut);flex-shrink:0}
+.wf-dot.dead,.wf-dot.urgent{background:var(--red)}
+.wf-dot.soon{background:var(--yellow)}
+.wf-dot.ok{background:var(--green)}
+.wf-main{min-width:0}
+.wf-nm{font-weight:600;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-sub{font-size:11.5px;color:var(--mut);margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.wf-left{text-align:end;font-family:var(--font-mono);font-weight:700;font-size:15px;color:var(--text-3);white-space:nowrap}
+.wf-left small{display:block;font-family:inherit;font-weight:500;font-size:10.5px;color:var(--mut);margin-top:2px}
+.wf-left.dead,.wf-left.urgent{color:var(--red)}
+.wf-left.soon{color:var(--yellow)}
+.wf-left.ok{color:var(--green)}
+.wf-who{font-size:11.5px;color:var(--text-3);white-space:nowrap}
+@media (max-width:767px){.wf-row{grid-template-columns:auto 1fr auto}.wf-who{display:none}}
+@media (prefers-reduced-motion:reduce){.wf-row:hover,.wf-row:active{transform:none}}
+.wf-blocked{background:var(--red-soft);border:1px solid color-mix(in srgb,var(--red) 22%,transparent);
+  border-radius:var(--r);padding:12px 13px;font-size:12.5px;color:var(--text);margin-bottom:14px;line-height:1.65}
+.wf-blocked b{color:var(--red)}
+.wf-fld{margin-bottom:13px}
+.wf-fld label{display:block;font-size:11.5px;font-weight:600;color:var(--mut);margin-bottom:5px}
+.wf-fld input,.wf-fld textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);color:var(--text);font-family:inherit;font-size:13px}
+.wf-chips{display:flex;flex-wrap:wrap;gap:6px}
+.wf-chip{border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);border-radius:999px;
+  padding:7px 13px;font-size:12.5px;font-weight:600;cursor:pointer;
+  transition:transform .12s var(--ease),background .15s ease,color .15s ease,border-color .15s ease}
+.wf-chip:active{transform:scale(.97)}
+.wf-chip.on{background:var(--text);color:var(--surface);border-color:var(--text)}
+.wf-hist{border-top:1px solid var(--line);padding-top:11px;margin-top:6px;font-size:12px}
+.wf-hist .h{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+.wf-hist .h:last-child{border-bottom:none}
+.wf-hist .h .w{color:var(--mut);font-family:var(--font-mono);white-space:nowrap}
+.wf-stamp{background:var(--yellow-soft);color:var(--text);border-radius:8px;padding:9px 11px;
+  font-size:12px;line-height:1.6;margin-bottom:12px}
+/* team follow-up — who has filled how many. Phone-first: the row reflows to two lines
+   under 700px so the name and the bar never fight for the same 40px. */
+.wf-team{display:flex;flex-direction:column;gap:6px}
+.wf-emp{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 13px}
+.wf-emp.fin{background:var(--green-soft);border-color:color-mix(in srgb,var(--green) 20%,var(--line))}
+.wf-ava{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;
+  justify-content:center;font-size:15px;background:var(--surface-2);flex-shrink:0;
+  border:1px solid var(--line)}
+.wf-emp .nm{font-weight:600;font-size:13px;color:var(--text)}
+.wf-bar{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin-top:6px}
+.wf-bar i{display:block;height:100%;border-radius:99px;background:var(--gold);
+  transition:width .45s var(--ease)}
+.wf-emp .cnt{font-family:var(--font-mono);font-weight:700;font-size:13.5px;color:var(--text);
+  white-space:nowrap}
+.wf-emp .cnt small{display:block;font-family:inherit;font-weight:500;font-size:10.5px;
+  color:var(--mut);margin-top:2px}
+.wf-acts{display:flex;gap:5px;flex-shrink:0}
+.wf-msg{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+  padding:12px 13px;font-size:12.5px;line-height:1.8;color:var(--text-2);white-space:pre-wrap;
+  margin-top:10px;max-height:230px;overflow:auto}
+@media (max-width:700px){
+  .wf-emp{grid-template-columns:auto 1fr auto;row-gap:8px}
+  .wf-acts{grid-column:1 / -1;justify-content:stretch}
+  .wf-acts .btn{flex:1;justify-content:center}
+}
+
 /* ============== FILTER BAR ============== */
 .filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;background:var(--surface);border:1px solid var(--line);padding:10px 12px;border-radius:var(--r-lg);box-shadow:var(--sh-xs)}
 .filterbar select,.filterbar input{padding:6px 10px;font-size:12px;height:32px;border-radius:6px;min-width:130px}
@@ -18384,6 +18465,37 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="covBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ WIFI (which apartment has which internet subscription · when it dies) ============ -->
+      <section class="view" id="view_wifi">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📶 اشتراكات النت</div>
+            <div class="page-sub">كل شقة · من وين الاشتراك · كم باقي له · مين مسؤول عنها</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="wifiCopyLink()" title="رابط تعبئة للفريق — يفتح بدون تسجيل دخول">🔗 رابط الفريق</button>
+            <button class="btn ghost sm" onclick="loadWifi(1)">↻ تحديث</button>
+            <button class="btn primary sm" onclick="wifiOpenNew()">+ سجّل اشتراك</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_wifi" data-help-key="wifi">
+          <button class="ph-x" onclick="dismissHelp('wifi')" title="إخفاء">×</button>
+          <div class="ph-t">اللي بيموت أول، فوق</div>
+          <div class="ph-b">
+            الصفحة مرتّبة بالأيام الباقية — أول سطر هو أقرب اشتراك ينتهي.
+            <b>مهم:</b> إذا الباقة مكتوب عليها ٩٠ يوم، نعدّ ٩٠ يوم. ما نقصّر المدة من عندنا —
+            نقصّرها بس بعد ما بياناتنا نفسها تثبت <b>٣ مرات</b> إن هالبائع يعطينا أقل من كلامه.
+            وقتها يظهر «حسب بياناتنا» بدل «حسب كلام البائع».
+            <b>وشقة وحدة = اشتراك واحد شغّال</b> — لو حاولت تسجّل ثاني، النظام يوقفك ويقول لك مين سجّل الأول.
+          </div>
+        </div>
+
+        <div class="kpis" id="wifiKpis"></div>
+        <div id="wifiTeam"></div>
+        <div id="wifiBody"><div class="empty sk">—</div></div>
+      </section>
+
       <section class="view" id="view_listings">
         <div class="page-head">
           <div>
@@ -19263,6 +19375,7 @@ const T = {
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
     coverage:'تغطية التنظيف',
+    wifi:'اشتراكات النت',
     clean_center:'مركز التنظيف',
     cc_title:'مركز التنظيف', cc_sub:'اليوم، المراجعة، المشاكل، الفرق، الجودة، التنظيف العميق، والإعدادات في مكان واحد.',
     cc_help_t:'تنظيف اليوم بدون تشتت', cc_help_b:'هنا المدير يعرف وش عاجل، وش بدأ، وش ينتظر مراجعة، وش تم اعتماده. تنظيف الفريق ما يعتبر منتهي لين المدير يعتمد الصور.',
@@ -19588,6 +19701,7 @@ const T = {
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
     coverage:'Cleaning Coverage',
+    wifi:'Internet subscriptions',
     clean_center:'Cleaning Center',
     cc_title:'Cleaning Center', cc_sub:'Today, review, issues, teams, quality, deep clean, and settings in one place.',
     cc_help_t:'Cleaning today without scatter', cc_help_b:'Managers can see what is urgent, started, waiting for review, and approved. A team submit is not final until a manager approves the photos.',
@@ -21106,6 +21220,7 @@ function go(id){
   if(id==='guide') loadGuide();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='coverage') loadCoverage();
+  if(id==='wifi') loadWifi();
   if(id==='guests') loadGuests();
   if(id==='quality') loadQuality();
   if(id==='tickets') loadTickets();
@@ -30014,6 +30129,507 @@ function showBootstrapStatus(s){
    DRAWER
    ============================================================ */
 var _drawerReturnEl = null;
+/* ============================================================
+   اشتراكات النت — internet subscriptions (Phase 1)
+
+   Two rules the UI must never blur:
+   1. The countdown shows the SELLER'S label until our own data has proven, three
+      times, that this seller is short. Until then the row carries «حسب كلام البائع»,
+      because believing a stranger is a state worth seeing, not a detail to hide.
+   2. One apartment, one live subscription. The server refuses a duplicate; this
+      screen shows the refusal in full — what is running, how long is left, who
+      logged it, for how much — so nobody overrides it blind. Overriding needs a
+      written reason and stamps the new row permanently.
+   NOTE: no backslash escapes anywhere below — DASHBOARD_HTML is a normal Python
+   triple-quoted string and would eat them (CLAUDE.md trap #1).
+   ============================================================ */
+var WIFI = {data:null, team:null, loading:false, unit:null, form:null, blocked:null, mode:''};
+
+async function loadWifi(force){
+  if(WIFI.loading) return;
+  WIFI.loading = true;
+  if(force || !WIFI.data){ putHtml('wifiBody','<div class="empty sk">—</div>'); }
+  try{
+    var r = await api('/api/wifi/list');
+    if(!r || !r.ok) throw 'bad';
+    WIFI.data = r;
+    renderWifi();
+  }catch(e){
+    putHtml('wifiKpis','');
+    putHtml('wifiBody','<div class="empty">'+esc(labelText('ما قدرنا نجيب الاشتراكات','Could not load subscriptions'))+'</div>');
+  }
+  WIFI.loading = false;
+  loadWifiTeam();      // the follow-up card loads on its own so a slow count never
+                       // delays the list of what is about to die
+}
+
+function wifiKpi(val, lbl, cls){
+  return '<div class="kpi"><div class="kpi-val '+cls+'">'+val+'</div><div class="kpi-lbl">'+esc(lbl)+'</div></div>';
+}
+
+function renderWifi(){
+  var d = WIFI.data; if(!d) return;
+  var c = d.counters || {};
+  var dead = safeNum(c.dead), soon = safeNum(c.urgent)+safeNum(c.soon);
+  var ok = safeNum(c.ok), unk = safeNum(c.unknown);
+  putHtml('wifiKpis',
+      wifiKpi(dead, labelText('منتهي','Expired'), dead?'red':'')
+    + wifiKpi(soon, labelText('يقرب','Ending soon'), soon?'gold':'')
+    + wifiKpi(ok, labelText('سليم','Healthy'), 'green')
+    + wifiKpi(unk, labelText('ما نعرف','Unknown'), ''));
+
+  var units = safeArr(d.units);
+  if(!units.length){
+    putHtml('wifiBody', emptyState(labelText('ما فيه شقق','No apartments'),
+      labelText('أول ما تنسحب الشقق من هوستاواي بتظهر هنا.','Units appear here once Hostaway syncs.'), '📶'));
+    return;
+  }
+  var h = '<div class="card"><div class="card-head"><span class="card-title">'
+    + esc(labelText('كل الشقق — الأقرب للانتهاء أول','Every apartment — closest to expiry first'))
+    + '</span><span class="card-sub">'+esc(labelText('اضغط أي سطر تشوف تفاصيله','Tap any row for its detail'))+'</span></div>'
+    + '<div class="wf-list">';
+  for(var i=0;i<units.length;i++){ h += wifiRowHtml(units[i], d); }
+  h += '</div></div>';
+  putHtml('wifiBody', h);
+}
+
+function wifiDaysText(u){
+  if(u.days_left === null || u.days_left === undefined) return labelText('ما نعرف','Unknown');
+  if(u.days_left < 0) return labelText('انتهى','Expired');
+  return u.days_left + ' ' + labelText('يوم','d');
+}
+
+function wifiRowHtml(u, d){
+  var band = u.band || 'unknown';
+  var sub = u.sub || null;
+  var prov = sub ? ((d.provider_ar || {})[sub.provider] || sub.provider || '') : '';
+  var bits = [];
+  if(prov) bits.push('<span class="pill muted">'+esc(prov)+'</span>');
+  if(sub && sub.source_kind === 'vendor' && sub.source_name) bits.push(esc(sub.source_name));
+  /* Emphasis is deliberate and inverted from the obvious: «حسب كلام البائع» — we are
+     believing a stranger — is the state worth catching the eye, so it gets the amber
+     warn pill. «حسب بياناتنا» is the settled, trustworthy state and stays quiet. */
+  if(sub && sub.confidence === 'label') bits.push('<span class="pill warn" title="'
+    + esc(labelText('ما عندنا بيانات كافية عن هالبائع — نعد بالمدة المكتوبة على الباقة',
+                    'Not enough data on this seller yet — counting the printed length'))
+    + '">'+esc(labelText('حسب كلام البائع','Seller says'))+'</span>');
+  if(sub && sub.confidence === 'learned') bits.push('<span class="pill muted" title="'
+    + esc(labelText('المدة محسوبة من بياناتنا نحن، مو من كلام البائع',
+                    'Length computed from our own data, not the seller word'))
+    + '">'+esc(labelText('حسب بياناتنا','Our data'))+'</span>');
+  if(sub && sub.override_reason) bits.push('<span class="pill danger">'
+    + esc(labelText('انسجّل فوق اشتراك شغّال','Logged over a live one'))+'</span>');
+  if(!sub) bits.push(esc(labelText('ما سجّلنا له شي','Nothing recorded')));
+  var endTxt = (sub && sub.end_date) ? sub.end_date : '—';
+  return '<div class="wf-row" onclick="wifiOpenUnit('+safeNum(u.listing_id)+')">'
+    + '<span class="wf-dot '+band+'"></span>'
+    + '<div class="wf-main"><div class="wf-nm">'+esc(u.apartment_name)+'</div>'
+    + '<div class="wf-sub">'+bits.join(' ')+'</div></div>'
+    + '<div class="wf-who">'+esc(u.assignee || '')+'</div>'
+    + '<div class="wf-left '+band+'">'+esc(wifiDaysText(u))+'<small>'+esc(endTxt)+'</small></div>'
+    + '</div>';
+}
+
+/* ---------- the unit drawer ---------- */
+
+async function wifiOpenUnit(lid){
+  WIFI.blocked = null; WIFI.mode = '';
+  openDrawer(labelText('جاري التحميل…','Loading…'), '');
+  setDrawerBody('<div class="empty sk">—</div>'); setDrawerFoot('');
+  var r = await api('/api/wifi/unit/'+lid);
+  if(!r || !r.ok){ setDrawerBody('<div class="empty">'+esc(labelText('ما قدرنا نجيب التفاصيل','Could not load'))+'</div>'); return; }
+  WIFI.unit = r;
+  wifiRenderUnit();
+}
+
+function wifiRenderUnit(){
+  var r = WIFI.unit; if(!r) return;
+  var u = r.unit || {}, hist = safeArr(r.history);
+  var live = null;
+  for(var i=0;i<hist.length;i++){ if(hist[i].status === 'active') live = hist[i]; }
+  openDrawer(u.apartment_name || '—',
+    (u.assignee ? (labelText('المسؤول: ','Owner: ')+u.assignee) : labelText('ما فيه مسؤول','No owner set')));
+
+  if(WIFI.mode === 'form'){ setDrawerBody(wifiFormHtml(u, live)); wifiFormFoot(u, live); return; }
+
+  var h = '';
+  if(live){
+    var provAr = (r.provider_ar || {})[live.provider] || live.provider || '';
+    if(live.override_reason){
+      h += '<div class="wf-stamp"><b>'+esc(labelText('هذا الاشتراك انسجّل فوق اشتراك كان شغّال.','This was logged over a live subscription.'))+'</b><br>'
+        + esc(labelText('السبب: ','Reason: ')) + esc(live.override_reason)
+        + ' — ' + esc(live.override_by || '') + '</div>';
+    }
+    var conf = live.confidence === 'learned'
+      ? labelText('المدة محسوبة من بياناتنا نحن (وسيط '+live.expected_days+' يوم لهالبائع)',
+                  'Length from our own data (median '+live.expected_days+' days for this seller)')
+      : labelText('المدة حسب كلام البائع ('+live.expected_days+' يوم) — ما جمعنا بيانات كافية عنه بعد',
+                  'Length as the seller states ('+live.expected_days+' days) — not enough data yet');
+    var srcTxt = live.end_source === 'real' ? labelText('التاريخ مؤكد — انتهى فعلاً','Confirmed — it actually ended')
+      : (live.end_source === 'stated' ? labelText('التاريخ من تطبيق الشركة','Read off the telco app')
+      : labelText('التاريخ تقديري','Estimated date'));
+    h += '<div class="dr-grid">'
+      + wifiField(labelText('الشركة','Provider'), provAr)
+      + wifiField(labelText('من وين','Bought from'), live.source_kind === 'vendor'
+          ? (labelText('محل: ','Shop: ')+(live.source_name || '—')) : labelText('من الشركة نفسها','Direct from the telco'))
+      + wifiField(labelText('المدة المكتوبة','Printed length'), live.label_days + ' ' + labelText('يوم','days'))
+      + wifiField(labelText('المبلغ','Amount'), fmt(live.amount_sar) + ' ' + labelText('ر.س','SAR'))
+      + wifiField(labelText('تاريخ الشراء','Bought on'), live.purchase_date || labelText('ما نعرف','Unknown'))
+      + wifiField(labelText('التفعيل','Activated'), live.activation_date || labelText('ما نعرف','Unknown'))
+      + wifiField(labelText('ينتهي','Ends'), (live.end_date || labelText('ما نعرف','Unknown')) + ' — ' + srcTxt, 1)
+      + wifiField(labelText('كم باقي','Days left'), live.days_left === null ? labelText('ما نعرف','Unknown') : (live.days_left + ' ' + labelText('يوم','days')))
+      + wifiField(labelText('دفع','Paid by'), (live.paid_by || '—'))
+      + wifiField(labelText('الثقة','Confidence'), conf, 1)
+      + '</div>';
+    h += '<div class="row" style="margin-bottom:16px">'
+      + '<button class="btn ghost sm" onclick="wifiCheckPrompt('+live.id+',&quot;still_working&quot;)">'+esc(labelText('شفته شغّال','Checked — still working'))+'</button>'
+      + '<button class="btn ghost sm" onclick="wifiCheckPrompt('+live.id+',&quot;exact_expiry&quot;)">'+esc(labelText('عندي تاريخ الانتهاء بالضبط','I have the exact expiry'))+'</button>'
+      + '<button class="btn ghost sm" onclick="wifiCheckPrompt('+live.id+',&quot;died&quot;)">'+esc(labelText('انقطع','It died'))+'</button>'
+      + '</div>';
+  }else{
+    h += '<div class="empty" style="margin-bottom:16px">'+esc(labelText('ما فيه اشتراك مسجّل لهالشقة','No subscription recorded for this apartment'))+'</div>';
+  }
+
+  h += '<div class="wf-fld"><label>'+esc(labelText('على حساب مين','Billed to'))+'</label><div class="wf-chips">'
+    + wifiChip('billed_to','ouja',labelText('عوجا','Ouja'), u.billed_to === 'ouja')
+    + wifiChip('billed_to','owner',labelText('المالك','Owner'), u.billed_to === 'owner')
+    + '</div></div>';
+
+  var past = [];
+  for(var j=0;j<hist.length;j++){ if(hist[j].status !== 'active') past.push(hist[j]); }
+  if(past.length){
+    h += '<div class="wf-hist"><div class="card-title" style="margin-bottom:6px">'
+      + esc(labelText('اشتراكات سابقة','Past subscriptions'))+'</div>';
+    for(var k=0;k<past.length;k++){
+      var p = past[k];
+      var pn = (r.provider_ar || {})[p.provider] || p.provider || '';
+      var stat = p.status === 'dead' ? labelText('انقطع','Died')
+        : (p.status === 'replaced' ? labelText('انستبدل','Replaced') : labelText('انلغى','Cancelled'));
+      h += '<div class="h"><div>'+esc(pn)+' · '+esc(p.label_days)+esc(labelText(' يوم',' d'))
+        + ' · '+fmt(p.amount_sar)+esc(labelText(' ر.س',' SAR'))+' · '+esc(stat)+'</div>'
+        + '<div class="w">'+esc(p.activation_date || '—')+' → '+esc(p.real_end || p.end_date || '—')+'</div></div>';
+    }
+    h += '</div>';
+  }
+  setDrawerBody(h);
+  setDrawerFoot('<button class="btn ghost" onclick="closeDrawer()">'+esc(labelText('إغلاق','Close'))+'</button>'
+    + '<button class="btn primary" onclick="wifiStartForm()">'
+    + esc(live ? labelText('سجّل اشتراك جديد','Log a new subscription') : labelText('سجّل اشتراك','Log a subscription'))+'</button>');
+}
+
+function wifiField(l, v, full){
+  return '<div class="dr-field'+(full?' full':'')+'"><div class="l">'+esc(l)+'</div><div class="v">'+esc(v==null?'—':v)+'</div></div>';
+}
+
+function wifiChip(field, value, label, on){
+  return '<button class="wf-chip'+(on?' on':'')+'" data-f="'+esc(field)+'" data-v="'+esc(value)+'" '
+    + 'onclick="wifiPick(this)">'+esc(label)+'</button>';
+}
+
+function wifiPick(el){
+  var f = el.getAttribute('data-f'), v = el.getAttribute('data-v');
+  var wrap = el.parentNode, kids = wrap.querySelectorAll('.wf-chip');
+  for(var i=0;i<kids.length;i++){ kids[i].classList.remove('on'); }
+  el.classList.add('on');
+  if(f === 'billed_to'){ wifiSaveUnitSetting(v); return; }
+  WIFI.form = WIFI.form || {};
+  WIFI.form[f] = v;
+  if(f === 'source_kind'){
+    var shop = document.getElementById('wfShopWrap');
+    if(shop) shop.style.display = (v === 'vendor') ? 'block' : 'none';
+  }
+}
+
+async function wifiSaveUnitSetting(billed){
+  var u = (WIFI.unit || {}).unit || {};
+  var r = await post('/api/wifi/unit-settings', {listing_id:u.listing_id, billed_to:billed});
+  if(r && r.ok){ u.billed_to = billed; toast(labelText('انحفظ','Saved')); }
+  else toast(labelText('ما انحفظ','Not saved'));
+}
+
+/* ---------- the log / renew form ---------- */
+
+function wifiStartForm(){
+  WIFI.mode = 'form'; WIFI.blocked = null;
+  WIFI.form = {provider:'', source_kind:'first_party', label_days:'30', pay_method:''};
+  wifiRenderUnit();
+}
+
+function wifiCancelForm(){ WIFI.mode = ''; WIFI.blocked = null; wifiRenderUnit(); }
+
+function wifiFormHtml(u, live){
+  var r = WIFI.unit || {}, f = WIFI.form || {};
+  var h = '';
+  if(WIFI.blocked){
+    var ex = WIFI.blocked.existing || {};
+    h += '<div class="wf-blocked"><b>'+esc(labelText('وقفنا التسجيل','Stopped'))+'</b><br>'
+      + esc(WIFI.blocked.message_ar || '') + '<br><br>'
+      + esc(labelText('لو متأكد إنك لازم تسجّل اشتراك جديد فوق هذا، اكتب السبب تحت. السبب ينحفظ على الاشتراك للأبد.',
+                      'If you are sure you must log a new one over it, write why below. The reason is stamped on the record permanently.'))
+      + '</div>';
+  }
+  var provs = safeArr(r.providers), lens = safeArr(r.label_days), pays = safeArr(r.pay_methods);
+  var payAr = {cash:labelText('كاش','Cash'), transfer:labelText('تحويل','Transfer'),
+               float:labelText('عهدة','Float'), card:labelText('بطاقة','Card')};
+  h += '<div class="wf-fld"><label>'+esc(labelText('الشركة','Provider'))+'</label><div class="wf-chips">';
+  for(var i=0;i<provs.length;i++){ h += wifiChip('provider', provs[i], (r.provider_ar||{})[provs[i]] || provs[i], f.provider === provs[i]); }
+  h += '</div></div>';
+
+  h += '<div class="wf-fld"><label>'+esc(labelText('من وين شريناه','Bought from'))+'</label><div class="wf-chips">'
+    + wifiChip('source_kind','first_party',labelText('من الشركة نفسها','Direct from the telco'), f.source_kind !== 'vendor')
+    + wifiChip('source_kind','vendor',labelText('من محل','From a shop'), f.source_kind === 'vendor')
+    + '</div><div id="wfShopWrap" style="margin-top:8px;display:'+(f.source_kind === 'vendor' ? 'block' : 'none')+'">'
+    + '<input id="wfShop" placeholder="'+esc(labelText('اسم المحل','Shop name'))+'"></div></div>';
+
+  h += '<div class="wf-fld"><label>'+esc(labelText('المدة المكتوبة على الباقة','Length printed on the package'))+'</label><div class="wf-chips">';
+  for(var j=0;j<lens.length;j++){ h += wifiChip('label_days', String(lens[j]), lens[j]+' '+labelText('يوم','days'), String(f.label_days) === String(lens[j])); }
+  h += '</div></div>';
+
+  h += '<div class="wf-fld"><label>'+esc(labelText('كم دفعنا (ر.س)','Amount (SAR)'))+'</label><input id="wfAmount" type="number" min="0" inputmode="decimal"></div>';
+  h += '<div class="wf-fld"><label>'+esc(labelText('تاريخ الشراء','Bought on'))+'</label><input id="wfPurchase" type="date"></div>';
+  h += '<div class="wf-fld"><label>'+esc(labelText('تاريخ التفعيل (اتركه فاضي لو نفس يوم الشراء)','Activated on (leave blank if same day)'))+'</label><input id="wfActivation" type="date"></div>';
+  h += '<div class="wf-fld"><label>'+esc(labelText('تاريخ الانتهاء من تطبيق الشركة — لو تعرفه','Exact expiry from the telco app — if you know it'))+'</label>'
+    + '<input id="wfStated" type="date"><div class="card-sub" style="margin-top:4px">'
+    + esc(labelText('لو كتبته، نعتمده بدل الحساب التقديري.','If you enter it, we use it instead of the estimate.'))+'</div></div>';
+  h += '<div class="wf-fld"><label>'+esc(labelText('مين دفع','Paid by'))+'</label><input id="wfPaidBy"></div>';
+  h += '<div class="wf-fld"><label>'+esc(labelText('طريقة الدفع','Payment method'))+'</label><div class="wf-chips">';
+  for(var k=0;k<pays.length;k++){ h += wifiChip('pay_method', pays[k], payAr[pays[k]] || pays[k], f.pay_method === pays[k]); }
+  h += '</div></div>';
+  h += '<div class="wf-fld"><label><input id="wfTax" type="checkbox" style="width:auto;margin-inline-end:6px">'
+    + esc(labelText('فيه فاتورة ضريبية','There is a tax invoice'))+'</label></div>';
+  if(WIFI.blocked){
+    h += '<div class="wf-fld"><label>'+esc(labelText('ليش تسجّل فوق اشتراك شغّال؟ (إجباري)','Why log over a live subscription? (required)'))
+      + '</label><textarea id="wfReason" rows="2"></textarea></div>';
+  }
+  return h;
+}
+
+function wifiFormFoot(u, live){
+  setDrawerFoot('<button class="btn ghost" onclick="wifiCancelForm()">'+esc(labelText('رجوع','Back'))+'</button>'
+    + '<button class="btn primary" id="wfSaveBtn" onclick="wifiSave()">'
+    + esc(WIFI.blocked ? labelText('سجّله وأنا مسؤول','Log it — on my responsibility') : labelText('احفظ','Save'))+'</button>');
+}
+
+function wifiVal(id){ var el = document.getElementById(id); return el ? el.value : ''; }
+
+async function wifiSave(){
+  var u = (WIFI.unit || {}).unit || {}, f = WIFI.form || {};
+  if(!f.provider){ toast(labelText('اختر الشركة','Pick the provider')); return; }
+  var btn = document.getElementById('wfSaveBtn');
+  if(btn){ btn.disabled = true; btn.textContent = labelText('يحفظ…','Saving…'); }
+  var taxEl = document.getElementById('wfTax');
+  var body = {
+    listing_id: u.listing_id, apartment_name: u.apartment_name,
+    provider: f.provider, source_kind: f.source_kind || 'first_party',
+    source_name: (f.source_kind === 'vendor') ? wifiVal('wfShop') : '',
+    label_days: f.label_days || 30, amount_sar: wifiVal('wfAmount'),
+    purchase_date: wifiVal('wfPurchase'), activation_date: wifiVal('wfActivation'),
+    stated_end: wifiVal('wfStated'), paid_by: wifiVal('wfPaidBy'),
+    pay_method: f.pay_method || '', tax_invoice: taxEl ? taxEl.checked : false,
+    override_reason: WIFI.blocked ? wifiVal('wfReason') : ''
+  };
+  var r = await post('/api/wifi/log', body);
+  if(btn){ btn.disabled = false; }
+  if(r && r.blocked){
+    WIFI.blocked = r;
+    wifiRenderUnit();
+    toast(labelText('فيه اشتراك شغّال — اقرأ الرسالة','A live subscription exists — read the message'));
+    return;
+  }
+  if(!r || !r.ok){ toast(labelText('ما انحفظ','Not saved')); wifiFormFoot(); return; }
+  toast(r.kind === 'override' ? labelText('انحفظ — وانسجّل السبب','Saved — reason recorded')
+        : (r.kind === 'renewal' ? labelText('انحفظ التجديد','Renewal saved') : labelText('انحفظ','Saved')));
+  WIFI.mode = ''; WIFI.blocked = null;
+  await wifiOpenUnit(u.listing_id);
+  loadWifi(1);
+}
+
+/* ---------- observations ---------- */
+
+async function wifiCheckPrompt(subId, kind){
+  var body = {sub_id: subId, kind: kind};
+  if(kind === 'exact_expiry' || kind === 'died'){
+    var d = prompt(kind === 'died'
+      ? labelText('متى انقطع؟ اكتب التاريخ بصيغة سنة-شهر-يوم','When did it die? Format year-month-day')
+      : labelText('كم تاريخ الانتهاء المكتوب بالتطبيق؟ بصيغة سنة-شهر-يوم','Exact expiry from the app, format year-month-day'), '');
+    if(!d) return;
+    body.end_date = d;
+  }
+  var path = (kind === 'died') ? '/api/wifi/dead' : '/api/wifi/check';
+  var r = await post(path, body);
+  if(!r || !r.ok){ toast((r && r.error) ? r.error : labelText('ما انحفظ','Not saved')); return; }
+  toast(labelText('انسجّل','Recorded'));
+  var u = (WIFI.unit || {}).unit || {};
+  await wifiOpenUnit(u.listing_id);
+  loadWifi(1);
+}
+
+/* ============================================================
+   المتابعة — who has filled how many, and the message you send them.
+
+   Sorted furthest-behind first (the server does it), so the person who needs a nudge
+   is row one. Every employee has their own short link and their own ready message with
+   that link already inside it — you copy and paste into WhatsApp, no typing.
+   ============================================================ */
+
+function wifiCopy(text, okMsg){
+  try{
+    navigator.clipboard.writeText(text).then(function(){ toast(okMsg); },
+      function(){ prompt(labelText('انسخ يدوياً','Copy manually'), text); });
+  }catch(e){ prompt(labelText('انسخ يدوياً','Copy manually'), text); }
+}
+
+function wifiLinkFor(row){
+  return location.origin + (row && row.link ? row.link : '/wifi-fill');
+}
+
+/* The message that lands on the employee's phone. Najdi, short, and it says out loud
+   that guessing a date is NOT wanted — the whole «ما أعرف» button is wasted if the
+   message they get pressures them to fill something in. */
+function wifiMessageFor(row){
+  var nl = String.fromCharCode(10);
+  var name = (row && row.name) ? row.name : '';
+  var n = (row && row.remaining) ? row.remaining : 0;
+  return 'هلا ' + name + ' 👋' + nl + nl
+    + 'نبي نعرف اشتراك النت لكل شقة من شققك — أي شركة، من وين شريناه، كم دفعنا، ومتى تقريباً.' + nl
+    + 'خمس أسئلة بس لكل شقة، وياخذ منك دقيقتين.' + nl + nl
+    + 'وإذا ما تذكر التاريخ لا تخمّن — فيه زر «ما أعرف»، اضغطه وخلاص.' + nl + nl
+    + (n ? ('باقي عليك ' + wifiAptCount(n) + ':' + nl) : '')
+    + wifiLinkFor(row);
+}
+
+/* Arabic counts its nouns properly or it reads like a machine wrote it:
+   1 = شقة وحدة, 2 = شقتين, 3-10 = N شقق, 11+ = N شقة. */
+function wifiAptCount(n){
+  if(n === 1) return 'شقة وحدة';
+  if(n === 2) return 'شقتين';
+  if(n <= 10) return n + ' شقق';
+  return n + ' شقة';
+}
+
+function wifiCopyMsg(idx){
+  var row = ((WIFI.team || {}).rows || [])[idx];
+  if(!row) return;
+  wifiCopy(wifiMessageFor(row),
+    labelText('انتسخت رسالة ' + row.name + ' — الصقها بالواتساب',
+              'Message for ' + row.name + ' copied — paste it into WhatsApp'));
+}
+
+function wifiCopyEmpLink(idx){
+  var row = ((WIFI.team || {}).rows || [])[idx];
+  if(!row) return;
+  wifiCopy(wifiLinkFor(row), labelText('انتسخ رابط ' + row.name, 'Link for ' + row.name + ' copied'));
+}
+
+function wifiCopyAllMsgs(){
+  var rows = ((WIFI.team || {}).rows || []).filter(function(r){ return r.link && !r.finished; });
+  if(!rows.length){ toast(labelText('الكل خلّصوا 🎉','Everyone is done 🎉')); return; }
+  var nl = String.fromCharCode(10), sep = nl + '———————————' + nl + nl;
+  var all = rows.map(wifiMessageFor).join(sep);
+  wifiCopy(all, labelText('انتسخت ' + rows.length + ' رسائل','Copied ' + rows.length + ' messages'));
+}
+
+function wifiPreviewMsg(idx){
+  var row = ((WIFI.team || {}).rows || [])[idx];
+  if(!row) return;
+  var box = document.getElementById('wfMsgBox');
+  if(!box) return;
+  var open = box.getAttribute('data-i') === String(idx) && box.style.display !== 'none';
+  if(open){ box.style.display = 'none'; return; }
+  box.textContent = wifiMessageFor(row);
+  box.setAttribute('data-i', String(idx));
+  box.style.display = 'block';
+}
+
+function wifiAgo(iso){
+  if(!iso) return labelText('ما عبّى شي','Nothing yet');
+  var then = Date.parse(iso);
+  if(!then) return '—';
+  var mins = Math.round((Date.now() - then) / 60000);
+  if(mins < 2) return labelText('الحين','Just now');
+  if(mins < 60) return labelText('قبل ' + mins + ' دقيقة','' + mins + 'm ago');
+  var hrs = Math.round(mins / 60);
+  if(hrs < 24) return labelText('قبل ' + hrs + ' ساعة','' + hrs + 'h ago');
+  var days = Math.round(hrs / 24);
+  if(days === 1) return labelText('أمس','Yesterday');
+  return labelText('قبل ' + days + ' يوم','' + days + 'd ago');
+}
+
+async function loadWifiTeam(){
+  try{
+    var r = await api('/api/wifi/progress');
+    if(!r || !r.ok) throw 'bad';
+    WIFI.team = r;
+    renderWifiTeam();
+  }catch(e){ putHtml('wifiTeam',''); }
+}
+
+function renderWifiTeam(){
+  var d = WIFI.team; if(!d) return;
+  var rows = safeArr(d.rows);
+  if(!rows.length){ putHtml('wifiTeam',''); return; }
+  var left = safeNum(d.total) - safeNum(d.done);
+  var h = '<div class="card"><div class="card-head"><span class="card-title">👥 '
+    + esc(labelText('متابعة الفريق','Team follow-up')) + '</span>'
+    + '<span class="card-actions">'
+    + '<span class="card-sub">' + esc(labelText('باقي ','')) + '<b>' + left + '</b> '
+    + esc(labelText('شقة من','of')) + ' ' + safeNum(d.total) + '</span>'
+    + '<button class="btn ghost sm" onclick="wifiCopyAllMsgs()">'
+    + esc(labelText('انسخ كل الرسائل','Copy every message')) + '</button></span></div>'
+    + '<div class="wf-team">';
+  for(var i=0;i<rows.length;i++){ h += wifiEmpHtml(rows[i], i); }
+  h += '</div><div class="wf-msg" id="wfMsgBox" style="display:none"></div></div>';
+  putHtml('wifiTeam', h);
+}
+
+function wifiEmpHtml(r, i){
+  var name = r.name || labelText('بدون مسؤول','Unassigned');
+  var ava = r.emoji ? r.emoji : '👤';
+  var barColor = r.color ? (';background:' + esc(r.color)) : '';
+  var acts = '';
+  if(r.link){
+    acts = '<div class="wf-acts">'
+      + '<button class="btn ghost sm" onclick="wifiCopyEmpLink(' + i + ')" title="'
+      + esc(labelText('رابطه الخاص','His own link')) + '">🔗</button>'
+      + '<button class="btn ghost sm" onclick="wifiPreviewMsg(' + i + ')" title="'
+      + esc(labelText('شوف الرسالة','Preview the message')) + '">👁</button>'
+      + '<button class="btn primary sm" onclick="wifiCopyMsg(' + i + ')">'
+      + esc(labelText('انسخ الرسالة','Copy message')) + '</button></div>';
+  }else{
+    acts = '<div class="wf-acts"><span class="card-sub">'
+      + esc(labelText('ما له رابط — اربطه بموظف في تقويم الموظفين',
+                      'No link — assign it in the Employee Calendar')) + '</span></div>';
+  }
+  return '<div class="wf-emp' + (r.finished ? ' fin' : '') + '">'
+    + '<div class="wf-ava">' + esc(ava) + '</div>'
+    + '<div><div class="nm">' + esc(name) + (r.finished ? ' ✓' : '') + '</div>'
+    + '<div class="wf-bar"><i style="width:' + safeNum(r.pct) + '%' + barColor + '"></i></div></div>'
+    + '<div class="cnt">' + safeNum(r.done) + ' / ' + safeNum(r.total)
+    + '<small>' + esc(wifiAgo(r.last_fill)) + '</small></div>'
+    + acts + '</div>';
+}
+
+/* ---------- the team share link ---------- */
+
+function wifiCopyLink(){
+  wifiCopy(location.origin + '/wifi-fill',
+    labelText('انتسخ الرابط العام — كل واحد يختار اسمه',
+              'General link copied — everyone picks their own name'));
+}
+
+/* «+ سجّل اشتراك» from the page header: open the first apartment that has nothing
+   recorded and go straight into the form. Picking the unit is the drawer's job — this
+   button only saves the two taps of finding an empty row. */
+async function wifiOpenNew(){
+  var d = WIFI.data;
+  if(!d || !safeArr(d.units).length){ toast(labelText('حدّث الصفحة أول','Refresh first')); return; }
+  var pick = null, units = safeArr(d.units);
+  for(var i=0;i<units.length;i++){ if(!units[i].sub && !pick) pick = units[i]; }
+  if(!pick) pick = units[0];
+  await wifiOpenUnit(pick.listing_id);
+  if(!(WIFI.unit && safeArr(WIFI.unit.history).length)) wifiStartForm();
+}
+
 function openDrawer(title, sub){
   document.getElementById('drwTitle').textContent = title;
   document.getElementById('drwSub').textContent = sub||'';
@@ -37205,7 +37821,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "coverage", "listings", "quality", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "listings", "quality", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio"]},
@@ -37229,6 +37845,7 @@ NAV_DEF = {
         {"id": "clean", "ic": "clean", "tk": "clean", "badge": "clean"},
         {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
         {"id": "coverage", "ic": "cleanteams", "tk": "coverage"},
+        {"id": "wifi", "ic": "listings", "tk": "wifi"},
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -37261,7 +37878,8 @@ NAV_DEF = {
             "decor": "تنسيق الحفلات",
             "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
-            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
+            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت",
+            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
@@ -37279,7 +37897,8 @@ NAV_DEF = {
             "decor": "Decoration Orders",
             "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
-            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
+            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions",
+            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
@@ -53533,6 +54152,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/status",                    # team token OR dashboard session
     "/api/decor/inquire",                    # public guide button — records an INTEREST only
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
+    "/api/wifi/fill-save",                   # public /wifi-fill backfill — ADD-ONLY (see wifi/routes.py)
 }
 # create endpoints — need the "create" (إنشاء) permission, checked BEFORE the write rules
 # (a create path also matches its broad write prefix). Combined save/upsert endpoints stay
@@ -53582,6 +54202,7 @@ _ROLE_WRITE_RULES = [
     ("/api/gw/", "gw"),
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
+    ("/api/wifi/", "wifi"),                  # /api/wifi/fill-save is exempt above (public team page)
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -53612,6 +54233,12 @@ _ROLE_READ_RULES = [
     ("/api/inbox", "inbox"),
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
+    # NOT the broad "/api/wifi/" prefix: it would also match GET /api/wifi/fill, the read
+    # behind the public /wifi-fill team page, and demand a login the team does not have.
+    # Same reason /api/schedule/day+week are absent from this list. List the private reads.
+    ("/api/wifi/list", "wifi"),
+    ("/api/wifi/progress", "wifi"),
+    ("/api/wifi/unit", "wifi"),
 ]
 
 def _perm_403(tab, action):
@@ -54300,6 +54927,49 @@ async def start_web_server():
                 print("[coverage] wired + routes registered (/api/coverage/study, /api/coverage/geo)")
             except Exception as _ce:
                 print("[coverage] wiring failed (coverage tab disabled, bot unaffected):", _ce)
+
+        # ---- «اشتراكات النت» — internet subscriptions. Phase 1: the order log, the
+        # one-active-subscription lock, the /wifi-fill backfill page and the manager view.
+        # No Discord reminders and no money view here — those are later phases.
+        if _HAS_WIFI:
+            try:
+                def _wifi_listings():
+                    """{listing_id: apartment name} — the LISTINGS MASTER STORE, which is
+                    local JSON. Deliberately not get_listings_map(): that paginates
+                    Hostaway synchronously on a cold cache and would freeze the request.
+                    Deactivated units are dropped — a switched-off apartment needs no
+                    internet — but a wifi row already attached to one still surfaces
+                    (routes._unit_master), because money is attached to it."""
+                    try:
+                        return {int(k): (v.get("internal_name") or ("#" + str(k)))
+                                for k, v in _ls_get()["listings"].items()
+                                if v.get("active", True)}
+                    except Exception as _wle:
+                        print("[wifi] listings unavailable:", _wle)
+                        return {}
+
+                def _wifi_permanent_map():
+                    """Who permanently owns which apartment — straight from the Employee
+                    Calendar via schedule.owners, the SHARED resolver. No second copy of
+                    the assignment lives in wifi/."""
+                    try:
+                        return _schedule.owners.permanent_map() if _HAS_SCHEDULE else {}
+                    except Exception as _wpe:
+                        print("[wifi] permanent map unavailable:", _wpe)
+                        return {}
+
+                _wifi.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "tz": TZ, "now": now_riyadh,
+                    "listings": _wifi_listings,
+                    "permanent_map": _wifi_permanent_map,
+                })
+                _wifi.register_routes(app)
+                print("[wifi] wired + routes registered (/api/wifi/*, /wifi-fill) — "
+                      "min_observations=%d grace=%d"
+                      % (_wifi.engine.MIN_OBSERVATIONS, _wifi.engine.LOCK_GRACE_DAYS))
+            except Exception as _we:
+                print("[wifi] wiring failed (internet tab disabled, bot unaffected):", _we)
 
         # ---- «نظام الالتزام» — weekly-report ladder + warnings. Additive; reuses brain.db,
         # the Employee Calendar (the ONE employee list) and assignments.json's Discord ids.
