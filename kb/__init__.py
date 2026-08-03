@@ -12,7 +12,9 @@ week to ask. The company has a bus factor of one.
     db.py     — kb_* tables inside the existing brain.db. Every write is audited, every
                 delete is soft, and the haystack is rebuilt on every write.
     seed.py   — the one-time fill from seed_kb.json. Never re-runs over live edits.
-    routes.py — /api/kb/*, behind login + the `kb` permission.
+    routes.py — /api/kb/* behind login + the `kb` permission, and /api/kbp/* behind
+                nothing but an unguessable token (the share link).
+    page.py   — /kb/{token}, the share page. No login, phone-first Arabic.
 
 Deliberately NOT here: RAG, embeddings, a chatbot, a vector database. The dataset is 56
 units. Exact-match plus substring search is faster, cheaper, and — unlike a language model
@@ -20,7 +22,7 @@ units. Exact-match plus substring search is faster, cheaper, and — unlike a la
 """
 
 from .host import HOST, wire  # noqa: F401
-from . import db, engine, routes, seed  # noqa: F401
+from . import db, engine, page, routes, seed  # noqa: F401
 
 
 def register_routes(app):

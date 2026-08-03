@@ -23,6 +23,7 @@ with the old name, which is worse than an error.
 
 import json
 import re
+import secrets
 from contextlib import closing
 
 from brain import db as _bdb
@@ -107,7 +108,17 @@ CREATE TABLE IF NOT EXISTS kb_search_log (
     searched_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_kb_log_zero ON kb_search_log(result_count, searched_at);
+CREATE TABLE IF NOT EXISTS kb_setting (
+    k          TEXT PRIMARY KEY,
+    v          TEXT,
+    updated_by TEXT,
+    updated_at TEXT
+);
 """
+
+# The share link's secret. Long and random, because the whole security of the public door
+# is that the URL cannot be guessed — there is nothing else in front of it.
+SHARE_KEY = "share_token"
 
 UNIT_FIELDS = ("unit_name", "listing_code", "owner_id", "district", "district_en",
                "cleaning_policy", "cleaning_monthly_sar", "payment_cycle", "ouja_owned",
@@ -608,6 +619,56 @@ def quality():
         "district_variants": [{"canonical": k, "variants": v}
                               for k, v in sorted(engine.DISTRICT_VARIANTS.items())],
     }
+
+
+# ---------------- settings + the share token ----------------
+
+def get_setting(k, default=None):
+    init()
+    with closing(connect()) as cx:
+        row = cx.execute("SELECT v FROM kb_setting WHERE k=?", (k,)).fetchone()
+    return row[0] if row else default
+
+
+def set_setting(k, v, actor=""):
+    init()
+    with closing(connect()) as cx:
+        cx.execute("""INSERT OR REPLACE INTO kb_setting (k, v, updated_by, updated_at)
+                      VALUES (?,?,?,?)""", (k, v, actor or "", _now()))
+        cx.commit()
+
+
+def share_token(create=True):
+    """The secret in the public URL. Created once and then persisted, so a Railway
+    redeploy does not silently invalidate a link the team already saved."""
+    t = get_setting(SHARE_KEY)
+    if t or not create:
+        return t
+    t = secrets.token_urlsafe(24)
+    set_setting(SHARE_KEY, t, actor="system")
+    return t
+
+
+def rotate_share_token(actor=""):
+    """Kills every copy of the old link at once. Audited: who burned the old link and
+    when is the first thing anyone will ask afterwards."""
+    old = get_setting(SHARE_KEY)
+    new = secrets.token_urlsafe(24)
+    set_setting(SHARE_KEY, new, actor=actor)
+    with closing(connect()) as cx:
+        # Only the last 6 characters are logged. A full old token in an audit row anyone
+        # can read would just be the same secret in a second place.
+        _audit(cx, "setting", SHARE_KEY, "rotated",
+               ("…" + old[-6:]) if old else None, "…" + new[-6:], actor)
+        cx.commit()
+    return new
+
+
+def token_ok(t):
+    real = get_setting(SHARE_KEY)
+    if not real or not t:
+        return False
+    return secrets.compare_digest(str(t), str(real))
 
 
 def stats():

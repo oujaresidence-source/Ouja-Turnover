@@ -18581,6 +18581,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub">دوّر قبل ما تسأل — وإذا ما لقيت، ضيفها بنفسك</div>
           </div>
           <div class="page-tools">
+            <button class="btn ghost sm" onclick="kbShare()">🔗 الرابط العام</button>
             <button class="btn ghost sm" onclick="kbShowQuality()">📋 جودة البيانات</button>
             <button class="btn ghost sm" onclick="loadKB(1)">↻ تحديث</button>
             <button class="btn primary sm" onclick="kbNewUnit()">+ أضف شقة</button>
@@ -31135,6 +31136,66 @@ async function kbShowQuality(){
   kbBind();
 }
 
+/* ---------- the share link ---------- */
+
+async function kbShare(){
+  go('kb');
+  putHtml('kbMeta','');
+  putHtml('kbBody','<div class="empty sk">—</div>');
+  var r = await api('/api/kb/share');
+  if(!r || !r.ok){ putHtml('kbBody','<div class="empty">'+esc(labelText('ما قدرنا نجيب الرابط','Could not load the link'))+'</div>'); return; }
+  kbShareRender(r);
+}
+
+function kbShareRender(r){
+  /* Say plainly what the link does before showing it. Whoever holds this URL can read
+     and change every unit without logging in and without leaving a name — that is what
+     the owner asked for, and the person about to paste it into a group should know it. */
+  var h = '<div class="kb-card"><div class="kb-top"><span class="kb-nm">'
+    + esc(labelText('الرابط العام','Public link')) + '</span>'
+    + '<span class="kb-edit"><button class="btn ghost sm" data-act="back">'
+    + esc(labelText('رجوع للبحث','Back to search')) + '</button></span></div>'
+    + '<div class="kb-note warn">'
+    + esc(labelText('أي أحد يفتح هذا الرابط يشوف كل الشقق والملاك ومبالغ النظافة، ويقدر يعدّلها — بدون تسجيل دخول وبدون ما يكتب اسمه. التعديلات منه تنسجّل باسم «رابط عام».',
+                    'Anyone with this link can read and edit every unit, owner and cleaning amount — with no login and no name. Edits through it are logged as «رابط عام».'))
+    + '</div>'
+    + '<div class="kb-form"><div class="full"><label>'+esc(labelText('الرابط','Link'))+'</label>'
+    + '<input id="kbShareUrl" readonly value="'+esc(r.url||'')+'"></div></div>'
+    + '<div class="kb-acts">'
+    + '<button class="btn primary sm" data-act="copy">'+esc(labelText('انسخ الرابط','Copy link'))+'</button>'
+    + '<span class="sp"></span>'
+    + '<button class="btn red sm" data-act="rotate">'+esc(labelText('غيّر الرابط','Change the link'))+'</button>'
+    + '</div>'
+    + '<div class="kb-lbl" style="margin-top:10px">'
+    + esc(labelText('«غيّر الرابط» يقتل كل النسخ القديمة فوراً — أي أحد عنده الرابط القديم ما بيفتح.',
+                    'Changing it kills every old copy at once — anyone holding the old link is locked out.'))
+    + '</div></div>';
+  putHtml('kbBody', h);
+  kbBind();
+}
+
+function kbCopyShare(){
+  var box = document.getElementById('kbShareUrl');
+  if(!box) return;
+  box.select();
+  try{
+    navigator.clipboard.writeText(box.value);
+    toast(labelText('انتسخ الرابط','Link copied'));
+  }catch(e){
+    document.execCommand('copy');
+    toast(labelText('انتسخ الرابط','Link copied'));
+  }
+}
+
+async function kbRotateShare(){
+  if(!confirm(labelText('بيتغيّر الرابط، وكل واحد عنده الرابط القديم ما بيقدر يفتح. أكمل؟',
+                        'The link changes and every old copy stops working. Continue?'))) return;
+  var r = await post('/api/kb/share-rotate', {});
+  if(!r || !r.ok){ toast(labelText('ما تغيّر','Not changed')); return; }
+  toast(r.message || labelText('انتغيّر','Changed'));
+  kbShareRender(r);
+}
+
 /* ---------- one delegated listener for the whole tab ---------- */
 
 function kbBind(){
@@ -31166,6 +31227,8 @@ function kbClick(ev){
   else if(act === 'new') kbNewUnit();
   else if(act === 'ask') kbAsk();
   else if(act === 'back'){ KB.editing = null; loadKB(1); }
+  else if(act === 'copy') kbCopyShare();
+  else if(act === 'rotate') kbRotateShare();
   else if(act === 'find'){
     var box = document.getElementById('kbQ');
     if(box){ box.value = v; }
@@ -54697,6 +54760,14 @@ _ROLE_EXEMPT_WRITES = {
     "/api/decor/inquire",                    # public guide button — records an INTEREST only
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
     "/api/wifi/fill-save",                   # public /wifi-fill backfill — ADD-ONLY (see wifi/routes.py)
+    # The «قاعدة المعرفة» share link. Owner's explicit decision (2026-08-03): whoever
+    # holds the link reads AND edits, with no name asked. The token is checked inside
+    # kb/routes._pub on every one of these; nothing else stands in front of them. Note
+    # the prefix is /api/kbp/ (public), NOT /api/kb/ — the private door keeps its broad
+    # role rule and no public path can ever match it.
+    "/api/kbp/unit-save",
+    "/api/kbp/unit-delete",
+    "/api/kbp/question",
 }
 # create endpoints — need the "create" (إنشاء) permission, checked BEFORE the write rules
 # (a create path also matches its broad write prefix). Combined save/upsert endpoints stay
