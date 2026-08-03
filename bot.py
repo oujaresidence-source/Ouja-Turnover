@@ -126,6 +126,17 @@ except Exception as _wifi_err:          # pragma: no cover
     _wifi = None
     _HAS_WIFI = False
 
+# Knowledge base «قاعدة المعرفة» — who owns which unit, who pays the cleaning subscription
+# and how much, when the owner is paid. Those facts lived in one accountant's memory; this
+# moves them somewhere the whole team can search, edit, and see the gaps in.
+try:
+    import kb as _kb
+    _HAS_KB = os.environ.get("KB_ENABLED", "1") == "1"
+except Exception as _kb_err:            # pragma: no cover
+    print("[kb] import failed (knowledge tab disabled, bot unaffected):", _kb_err)
+    _kb = None
+    _HAS_KB = False
+
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
 # humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
 # nothing, issues nothing.
@@ -17190,6 +17201,72 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
   .wf-acts .btn{flex:1;justify-content:center}
 }
 
+/* ============== KB — قاعدة المعرفة ==============
+   The approved reference design, rebuilt on the locked tokens instead of its own navy
+   palette, so the tab reads as part of this app and not as a second one pasted in.
+   Semantic colour only: amber = a fact nobody recorded, red = two units claiming one
+   Hostaway code, green = just edited. Nothing else is coloured. */
+.kb-search{position:relative;margin-bottom:12px}
+#kbQ{width:100%;padding:16px 46px 16px 16px;font-family:inherit;font-size:16px;font-weight:500;
+  border:1.5px solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--text)}
+#kbQ::placeholder{color:var(--mut);font-weight:400}
+.kb-search .ic{position:absolute;inset-inline-end:16px;top:50%;transform:translateY(-50%);
+  font-size:16px;color:var(--mut);pointer-events:none}
+.kb-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.kb-chip{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:999px;
+  padding:6px 13px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;
+  transition:transform .12s var(--ease),background .15s ease,color .15s ease,border-color .15s ease}
+.kb-chip:hover{border-color:var(--line-strong);color:var(--text)}
+.kb-chip:active{transform:scale(.97)}
+.kb-chip.on{background:var(--text);color:var(--surface);border-color:var(--text)}
+select.kb-chip{padding-inline-end:24px;height:auto}
+.kb-meta{color:var(--mut);font-size:12.5px;margin:10px 2px}
+.kb-list{display:flex;flex-direction:column;gap:8px}
+.kb-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:13px 15px;transition:border-color .16s ease,box-shadow .16s ease}
+.kb-card.gap{border-inline-start:3px solid var(--yellow)}
+.kb-card.conf{border-inline-start:3px solid var(--red)}
+.kb-card.saved{border-inline-start:3px solid var(--green)}
+.kb-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.kb-nm{font-size:16px;font-weight:700;color:var(--text);letter-spacing:-.01em}
+.kb-code{font-family:var(--font-mono);font-size:11.5px;color:var(--text-3);background:var(--surface-2);
+  border-radius:6px;padding:2px 7px;direction:ltr}
+.kb-tag{font-size:11px;font-weight:700;border-radius:5px;padding:2px 8px}
+.kb-tag.warn{background:var(--yellow-soft);color:var(--yellow)}
+.kb-tag.bad{background:var(--red-soft);color:var(--red)}
+.kb-tag.ouja{background:var(--gold-tint);color:var(--gold)}
+.kb-edit{margin-inline-start:auto;display:flex;gap:6px}
+.kb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 16px}
+.kb-lbl{font-size:11px;color:var(--mut);margin-bottom:2px}
+.kb-val{font-size:14px;font-weight:600;color:var(--text)}
+.kb-val.miss{color:var(--yellow);font-weight:500}
+.kb-val small{display:block;font-weight:500;font-size:11px;color:var(--mut);margin-top:1px}
+.kb-note{margin-top:10px;padding:8px 11px;border-radius:8px;font-size:12.5px;line-height:1.6}
+.kb-note.warn{background:var(--yellow-soft);color:var(--text)}
+.kb-note.bad{background:var(--red-soft);color:var(--text)}
+.kb-note b{color:var(--red)}
+.kb-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:11px}
+.kb-form .full{grid-column:1/-1}
+.kb-form label{display:block;font-size:11px;font-weight:600;color:var(--mut);margin-bottom:4px}
+.kb-form input,.kb-form select,.kb-form textarea{width:100%;padding:9px 11px;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);color:var(--text);font-family:inherit;font-size:13px}
+.kb-form textarea{min-height:66px;resize:vertical}
+.kb-acts{display:flex;gap:7px;margin-top:13px;align-items:center;flex-wrap:wrap}
+.kb-acts .sp{margin-inline-start:auto}
+.kb-owner{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:12px 15px}
+.kb-owner .who{font-size:15px;font-weight:700;color:var(--text)}
+.kb-units{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.kb-unit-chip{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 11px;
+  font-size:12px;font-weight:600;color:var(--text-2);cursor:pointer}
+.kb-unit-chip:hover{border-color:var(--gold);color:var(--gold)}
+.kb-hist{font-size:12px;margin-top:10px;border-top:1px solid var(--line);padding-top:9px}
+.kb-hist .r{display:flex;justify-content:space-between;gap:9px;padding:5px 0;color:var(--text-2)}
+.kb-hist .r .w{color:var(--mut);font-family:var(--font-mono);white-space:nowrap;font-size:11px}
+.kb-q{font-size:15px;font-weight:700;color:var(--text);margin-bottom:5px}
+.kb-a{font-size:13.5px;color:var(--text-2);line-height:1.75;white-space:pre-wrap}
+@media (max-width:600px){.kb-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}}
+@media (prefers-reduced-motion:reduce){.kb-chip:active{transform:none}}
+
 /* ============== FILTER BAR ============== */
 .filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;background:var(--surface);border:1px solid var(--line);padding:10px 12px;border-radius:var(--r-lg);box-shadow:var(--sh-xs)}
 .filterbar select,.filterbar input{padding:6px 10px;font-size:12px;height:32px;border-radius:6px;min-width:130px}
@@ -18494,6 +18571,41 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="kpis" id="wifiKpis"></div>
         <div id="wifiTeam"></div>
         <div id="wifiBody"><div class="empty sk">—</div></div>
+      </section>
+
+      <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
+      <section class="view" id="view_kb">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📚 قاعدة المعرفة</div>
+            <div class="page-sub">دوّر قبل ما تسأل — وإذا ما لقيت، ضيفها بنفسك</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="kbShowQuality()">📋 جودة البيانات</button>
+            <button class="btn ghost sm" onclick="loadKB(1)">↻ تحديث</button>
+            <button class="btn primary sm" onclick="kbNewUnit()">+ أضف شقة</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_kb" data-help-key="kb">
+          <button class="ph-x" onclick="dismissHelp('kb')" title="إخفاء">×</button>
+          <div class="ph-t">الجواب على الكرت نفسه</div>
+          <div class="ph-b">
+            اكتب اسم الشقة، أو كود هوستاواي، أو اسم المالك، أو الحي — بالعربي أو الإنجليزي.
+            «الملقا» و«الملقى» و«المقى» و«Al Malqa» كلها تطلّع نفس الشقق.
+            <b>الفراغ ما ينخبى:</b> إذا معلومة ما أحد سجّلها بتشوف «غير مسجّل» بالأصفر — اضغط «تعديل» واكتبها،
+            وينحفظ اسمك وتاريخك عليها. <b>والأحمر معناه تعارض:</b> شقتين بنفس كود هوستاواي، وهذا يودّي
+            الإيراد للشقة الغلط — لازم إنسان يصلّحه من هوستاواي.
+          </div>
+        </div>
+
+        <div class="kb-search">
+          <input id="kbQ" type="search" autocomplete="off" placeholder="ابحث باسم الشقة، الكود، اسم المالك، أو الحي…" oninput="kbTyped()">
+          <span class="ic">🔍</span>
+        </div>
+        <div class="kb-filters" id="kbFilters"></div>
+        <div class="kb-meta" id="kbMeta"></div>
+        <div id="kbBody"><div class="empty sk">—</div></div>
       </section>
 
       <section class="view" id="view_listings">
@@ -21234,6 +21346,7 @@ function go(id){
   if(id==='brain') loadBrain();
   if(id==='gaps') loadGaps();
   if(id==='schedule') loadSchedule();
+  if(id==='kb') loadKB();
 }
 
 /* ============================================================
@@ -30635,6 +30748,431 @@ async function wifiOpenNew(){
   if(!(WIFI.unit && safeArr(WIFI.unit.history).length)) wifiStartForm();
 }
 
+/* ============================================================
+   KB — قاعدة المعرفة. One search box answers "who owns this / who pays its cleaning /
+   when does the owner get paid", and the answer is ON the card: no click-through, because
+   the target is ten seconds from question to answer and a second click costs more than it
+   looks. Editing happens in place — the card becomes the form, no modal, no page change.
+
+   NOTE: no backslash escapes anywhere below. DASHBOARD_HTML is a normal Python
+   triple-quoted string and Python would eat them before the browser ever saw them
+   (CLAUDE.md trap #1). Every click is handled by ONE delegated listener reading data-act
+   / data-id, so no handler string is ever built out of quotes either.
+   ============================================================ */
+var KB = {data:null, q:'', owned:'all', gaps:false, district:'', editing:null,
+          saved:{}, timer:null, loading:false, quality:false};
+
+function kbUrl(){
+  var p = ['q=' + encodeURIComponent(KB.q)];
+  if(KB.owned !== 'all') p.push('owned=' + KB.owned);
+  if(KB.gaps) p.push('gaps=1');
+  if(KB.district) p.push('district=' + encodeURIComponent(KB.district));
+  return '/api/kb/search?' + p.join('&');
+}
+
+async function loadKB(force){
+  if(KB.loading) return;
+  KB.loading = true;
+  if(force || !KB.data) putHtml('kbBody','<div class="empty sk">—</div>');
+  try{
+    var r = await api(kbUrl());
+    if(!r || !r.ok) throw 'bad';
+    KB.data = r;
+    kbRender();
+  }catch(e){
+    putHtml('kbMeta','');
+    putHtml('kbBody','<div class="empty">'+esc(labelText('ما قدرنا نفتح قاعدة المعرفة','Could not load the knowledge base'))+'</div>');
+  }
+  KB.loading = false;
+  var box = document.getElementById('kbQ');
+  if(box && !KB.q && document.getElementById('view_kb').classList.contains('on')) box.focus();
+}
+
+/* Search is instant and debounced — no submit button. 110ms is short enough to feel
+   immediate and long enough that a fast typist fires one request, not eight. */
+function kbTyped(){
+  var box = document.getElementById('kbQ');
+  KB.q = box ? box.value : '';
+  clearTimeout(KB.timer);
+  KB.timer = setTimeout(function(){ KB.editing = null; loadKB(); }, 110);
+}
+
+function kbSetOwned(v){ KB.owned = v; KB.editing = null; loadKB(); }
+function kbToggleGaps(){ KB.gaps = !KB.gaps; KB.editing = null; loadKB(); }
+function kbSetDistrict(v){ KB.district = v; KB.editing = null; loadKB(); }
+
+function kbFiltersHtml(){
+  var d = KB.data || {}, c = d.counts || {};
+  var h = '';
+  h += '<button class="kb-chip'+(KB.owned==='all'?' on':'')+'" data-act="owned" data-v="all">'
+     + esc(labelText('الكل','All')) + ' ' + safeNum(c.units) + '</button>';
+  h += '<button class="kb-chip'+(KB.owned==='inv'?' on':'')+'" data-act="owned" data-v="inv">'
+     + esc(labelText('المستثمرين','Investors')) + '</button>';
+  h += '<button class="kb-chip'+(KB.owned==='ouja'?' on':'')+'" data-act="owned" data-v="ouja">'
+     + esc(labelText('عوجا','Ouja')) + ' ' + safeNum(c.ouja_owned) + '</button>';
+  h += '<button class="kb-chip'+(KB.gaps?' on':'')+'" data-act="gaps">'
+     + esc(labelText('ناقصة معلومات','Missing info')) + ' ' + safeNum(c.gaps) + '</button>';
+  var ds = safeArr(d.districts);
+  h += '<select class="kb-chip" data-act="district"><option value="">'
+     + esc(labelText('كل الأحياء','All districts')) + '</option>';
+  for(var i=0;i<ds.length;i++){
+    h += '<option value="'+esc(ds[i].district)+'"'+(KB.district===ds[i].district?' selected':'')+'>'
+       + esc(ds[i].district) + ' (' + safeNum(ds[i].count) + ')</option>';
+  }
+  h += '</select>';
+  return h;
+}
+
+function kbRender(){
+  var d = KB.data; if(!d) return;
+  putHtml('kbFilters', kbFiltersHtml());
+  var units = safeArr(d.units), owners = safeArr(d.owners), faqs = safeArr(d.faqs);
+  putHtml('kbMeta', esc(units.length + ' ' + labelText('نتيجة','result')
+        + (KB.q ? (' ' + labelText('لـ','for') + ' "' + KB.q + '"') : '')));
+
+  if(!units.length && !owners.length && !faqs.length){ putHtml('kbBody', kbEmptyHtml()); kbBind(); return; }
+
+  var h = '';
+  /* Owner cards sit above unit cards, and only when the owner has more than one unit —
+     a single-unit owner adds nothing the unit card does not already say. */
+  for(var i=0;i<owners.length;i++) h += kbOwnerHtml(owners[i]);
+  if(faqs.length){
+    h += '<div class="kb-meta">'+esc(labelText('أسئلة وإجراءات','Questions and procedures'))+'</div>';
+    for(var f=0;f<faqs.length;f++) h += kbFaqHtml(faqs[f]);
+  }
+  h += '<div class="kb-list">';
+  for(var j=0;j<units.length;j++) h += kbCardHtml(units[j]);
+  h += '</div>';
+  putHtml('kbBody', h);
+  kbBind();
+}
+
+function kbEmptyHtml(){
+  /* An invitation, not an apology: the two things worth doing next are right here. */
+  return '<div class="empty" style="text-align:center">'
+    + '<div style="font-size:15px;font-weight:700;margin-bottom:6px">'
+    + esc(labelText('ما لقينا شيء لـ','Nothing found for') + ' "' + KB.q + '"') + '</div>'
+    + '<div style="margin-bottom:14px">'
+    + esc(labelText('إما إنها ما انسجّلت عندنا، أو مكتوبة باسم ثاني.',
+                    'Either it was never recorded, or it is stored under another name.')) + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'
+    + '<button class="btn primary sm" data-act="new">'+esc(labelText('+ أضف شقة','+ Add a unit'))+'</button>'
+    + '<button class="btn ghost sm" data-act="ask">'+esc(labelText('سجّل السؤال','Log the question'))+'</button>'
+    + '</div></div>';
+}
+
+function kbOwnerHtml(o){
+  var h = '<div class="kb-owner"><div class="who">'+esc(o.name_ar)
+        + ' <span class="kb-code">'+safeNum(o.unit_count)+' '+esc(labelText('شقة','units'))+'</span></div>'
+        + '<div class="kb-units">';
+  var us = safeArr(o.units);
+  for(var i=0;i<us.length;i++){
+    h += '<button class="kb-unit-chip" data-act="find" data-v="'+esc(us[i].unit_name)+'">'
+       + esc(us[i].unit_name)+'</button>';
+  }
+  return h + '</div></div>';
+}
+
+function kbFaqHtml(f){
+  return '<div class="kb-card"><div class="kb-q">'+esc(f.q_ar)+'</div>'
+       + '<div class="kb-a">'+esc(f.a_ar)+'</div></div>';
+}
+
+function kbMissing(){
+  return '<span class="kb-val miss">'+esc(labelText('غير مسجّل','Not recorded'))+'</span>';
+}
+
+function kbField(lbl, val, sub){
+  return '<div><div class="kb-lbl">'+esc(lbl)+'</div>'
+       + (val ? ('<div class="kb-val">'+esc(val)+(sub?('<small>'+esc(sub)+'</small>'):'')+'</div>') : kbMissing())
+       + '</div>';
+}
+
+function kbCleanText(u){
+  if(u.cleaning_policy === 'ouja') return labelText('علينا','On Ouja');
+  if(u.cleaning_policy === 'owner'){
+    if(u.cleaning_monthly_sar === null || u.cleaning_monthly_sar === undefined) return null;
+    return labelText('على المالك','On owner') + ' — ' + safeNum(u.cleaning_monthly_sar) + ' '
+         + labelText('ريال/شهر','SAR/mo');
+  }
+  return null;
+}
+
+function kbCardHtml(u){
+  if(KB.editing === u.unit_id) return kbFormHtml(u);
+  var cls = 'kb-card';
+  if(u.conflicts && u.conflicts.length) cls += ' conf';
+  else if(KB.saved[u.unit_id]) cls += ' saved';
+  else if(u.gaps && u.gaps.length) cls += ' gap';
+
+  var h = '<div class="'+cls+'" id="kbc_'+esc(u.unit_id)+'"><div class="kb-top">'
+        + '<span class="kb-nm">'+esc(u.unit_name)+'</span>';
+  if(u.listing_code) h += '<span class="kb-code">'+esc(u.listing_code)+'</span>';
+  if(u.ouja_owned) h += '<span class="kb-tag ouja">'+esc(labelText('شقة عوجا','Ouja unit'))+'</span>';
+  if(u.gaps && u.gaps.length) h += '<span class="kb-tag warn">'+esc(labelText('ناقص: ','Missing: ')+u.gaps.join(' · '))+'</span>';
+  if(u.conflicts && u.conflicts.length) h += '<span class="kb-tag bad">'+esc(labelText('كود مكرر','Duplicate code'))+'</span>';
+  h += '<span class="kb-edit"><button class="btn ghost sm" data-act="edit" data-id="'+esc(u.unit_id)+'">'
+     + esc(labelText('تعديل','Edit'))+'</button></span></div>';
+
+  h += '<div class="kb-grid">'
+     + kbField(labelText('المالك','Owner'), u.owner_ar)
+     + kbField(labelText('الحي','District'), u.district, u.district_en)
+     + kbField(labelText('النظافة','Cleaning'), kbCleanText(u))
+     + kbField(labelText('دورة الدفع','Payment cycle'), u.cycle_ar)
+     + '</div>';
+
+  if(u.note) h += '<div class="kb-note warn">'+esc(u.note)+'</div>';
+  if(u.conflicts && u.conflicts.length){
+    var c = u.conflicts[0];
+    h += '<div class="kb-note bad"><b>'+esc(labelText('تعارض: ','Conflict: '))+'</b>'
+       + esc(labelText('هذي الشقة تشارك كود هوستاواي ','This unit shares Hostaway code ')
+             + c.code + labelText(' مع ',' with ')
+             + safeArr(c.with_names && c.with_names.length ? c.with_names : c["with"]).join(' + ') + '. '
+             + labelText('معناها الإيراد والمصاريف ممكن تنزل على الشقة الغلط — لازم أحد يصلّح الكود من هوستاواي.',
+                         'Revenue and expenses can post to the wrong unit — the real ids must be fixed in Hostaway.'))
+       + '</div>';
+  }
+  var who = u.updated_by ? (labelText('آخر تعديل: ','Last edited by ') + u.updated_by
+          + (u.last_reviewed ? (' · ' + u.last_reviewed) : '')) : '';
+  if(who) h += '<div class="kb-lbl" style="margin-top:9px">'+esc(who)+'</div>';
+  return h + '</div>';
+}
+
+/* ---------- editing in place ---------- */
+
+function kbOpt(val, cur, label){
+  return '<option value="'+esc(val)+'"'+(cur===val?' selected':'')+'>'+esc(label)+'</option>';
+}
+
+function kbFormHtml(u){
+  var isNew = !u.unit_id;
+  var h = '<div class="kb-card"><div class="kb-top"><span class="kb-nm">'
+        + esc(isNew ? labelText('شقة جديدة','New unit') : u.unit_name) + '</span></div>'
+        + '<div class="kb-form">'
+        + '<div><label>'+esc(labelText('اسم الشقة','Unit name'))+'</label>'
+        + '<input id="kbf_unit_name" value="'+esc(u.unit_name||'')+'"></div>'
+        + '<div><label>'+esc(labelText('كود هوستاواي','Hostaway code'))+'</label>'
+        + '<input id="kbf_listing_code" inputmode="numeric" value="'+esc(u.listing_code||'')+'"></div>'
+        + '<div><label>'+esc(labelText('الحي','District'))+'</label>'
+        + '<input id="kbf_district" value="'+esc(u.district||'')+'"></div>'
+        + '<div><label>'+esc(labelText('الحي بالإنجليزي','District (EN)'))+'</label>'
+        + '<input id="kbf_district_en" value="'+esc(u.district_en||'')+'"></div>';
+
+  /* Dropdowns, never free text: «ربع شهري» and «ربع سنوي» differ by one character and
+     decide when an owner is paid. */
+  h += '<div><label>'+esc(labelText('مين يدفع النظافة','Who pays the cleaning'))+'</label>'
+     + '<select id="kbf_cleaning_policy">'
+     + kbOpt('', u.cleaning_policy||'', labelText('غير مسجّل','Not recorded'))
+     + kbOpt('ouja', u.cleaning_policy||'', labelText('علينا','On Ouja'))
+     + kbOpt('owner', u.cleaning_policy||'', labelText('على المالك','On the owner'))
+     + '</select></div>';
+  h += '<div><label>'+esc(labelText('مبلغ الاشتراك بالشهر (ريال)','Monthly amount (SAR)'))+'</label>'
+     + '<input id="kbf_cleaning_monthly_sar" inputmode="decimal" value="'
+     + esc(u.cleaning_monthly_sar===null||u.cleaning_monthly_sar===undefined?'':u.cleaning_monthly_sar)+'"></div>';
+  h += '<div><label>'+esc(labelText('دورة الدفع','Payment cycle'))+'</label>'
+     + '<select id="kbf_payment_cycle">'
+     + kbOpt('', u.payment_cycle||'', labelText('غير مسجّل','Not recorded'))
+     + kbOpt('monthly', u.payment_cycle||'', labelText('شهري','Monthly'))
+     + kbOpt('biweekly_quarter_month', u.payment_cycle||'', labelText('ربع شهري','Every quarter-month'))
+     + kbOpt('quarterly', u.payment_cycle||'', labelText('ربع سنوي','Quarterly'))
+     + '</select></div>';
+  h += '<div><label>'+esc(labelText('شقة عوجا؟','Ouja-owned?'))+'</label>'
+     + '<select id="kbf_ouja_owned">'
+     + kbOpt('0', u.ouja_owned?'1':'0', labelText('لا — شقة مستثمر','No — investor unit'))
+     + kbOpt('1', u.ouja_owned?'1':'0', labelText('نعم — شقة عوجا','Yes — Ouja unit'))
+     + '</select></div>';
+  h += '<div class="full"><label>'+esc(labelText('ملاحظة','Note'))+'</label>'
+     + '<textarea id="kbf_note">'+esc(u.note||'')+'</textarea></div>';
+  h += '</div>';
+
+  h += '<div class="kb-acts">'
+     + '<button class="btn primary sm" data-act="save" data-id="'+esc(u.unit_id||'')+'">'
+     + esc(labelText('احفظ','Save'))+'</button>'
+     + '<button class="btn ghost sm" data-act="cancel">'+esc(labelText('إلغاء','Cancel'))+'</button>';
+  if(!isNew){
+    h += '<span class="sp"></span>'
+       + '<button class="btn ghost sm" data-act="hist" data-id="'+esc(u.unit_id)+'">'
+       + esc(labelText('سجل التعديلات','History'))+'</button>'
+       + '<button class="btn red sm" data-act="del" data-id="'+esc(u.unit_id)+'">'
+       + esc(labelText('اخفِ من البحث','Hide'))+'</button>';
+  }
+  h += '</div><div id="kbHist"></div></div>';
+  return h;
+}
+
+function kbVal(id){
+  var el = document.getElementById(id);
+  return el ? el.value : '';
+}
+
+function kbEdit(unit_id){ KB.editing = unit_id; kbRender(); }
+
+function kbNewUnit(){
+  go('kb');
+  KB.editing = '__new__';
+  KB.data = KB.data || {units:[], owners:[], faqs:[], counts:{}, districts:[]};
+  putHtml('kbBody', kbFormHtml({}));
+  kbBind();
+}
+
+function kbCancel(){ KB.editing = null; kbRender(); }
+
+async function kbSave(unit_id){
+  var body = {
+    unit_name: kbVal('kbf_unit_name'),
+    listing_code: kbVal('kbf_listing_code'),
+    district: kbVal('kbf_district'),
+    district_en: kbVal('kbf_district_en'),
+    cleaning_policy: kbVal('kbf_cleaning_policy'),
+    cleaning_monthly_sar: kbVal('kbf_cleaning_monthly_sar'),
+    payment_cycle: kbVal('kbf_payment_cycle'),
+    ouja_owned: kbVal('kbf_ouja_owned'),
+    note: kbVal('kbf_note')
+  };
+  if(unit_id && unit_id !== '__new__') body.unit_id = unit_id;
+  var r = await post('/api/kb/unit-save', body);
+  /* Never a success toast on assumption: the server decides, and a refused enum or a
+     number typed against «علينا» comes back with its own Arabic reason. */
+  if(!r || !r.ok){ toast((r && r.message) || labelText('ما انحفظ','Not saved')); return; }
+  toast(r.message || labelText('انحفظ','Saved'));
+  var savedId = (r.unit && r.unit.unit_id) || unit_id;
+  KB.saved[savedId] = 1;
+  KB.editing = null;
+  await loadKB(0);
+}
+
+async function kbDelete(unit_id){
+  if(!confirm(labelText('تنخفي من البحث؟ بياناتها وسجلها يظلون محفوظين.',
+                        'Hide it from search? Its data and history are kept.'))) return;
+  var r = await post('/api/kb/unit-delete', {unit_id: unit_id});
+  toast((r && r.message) || labelText('تم','Done'));
+  KB.editing = null;
+  await loadKB(1);
+}
+
+async function kbHistory(unit_id){
+  var r = await api('/api/kb/unit/' + encodeURIComponent(unit_id));
+  var rows = (r && safeArr(r.audit)) || [];
+  if(!rows.length){ putHtml('kbHist','<div class="kb-hist">'+esc(labelText('ما فيه تعديلات بعد','No edits yet'))+'</div>'); return; }
+  var h = '<div class="kb-hist">';
+  for(var i=0;i<rows.length;i++){
+    var x = rows[i];
+    h += '<div class="r"><span>'+esc(x.field + ': ' + (x.old_value===null?labelText('فاضي','empty'):x.old_value)
+       + ' ' + String.fromCharCode(8592) + ' ' + (x.new_value===null?labelText('فاضي','empty'):x.new_value))+'</span>'
+       + '<span class="w">'+esc((x.changed_by||'') + ' · ' + String(x.changed_at||'').slice(0,16))+'</span></div>';
+  }
+  putHtml('kbHist', h + '</div>');
+}
+
+async function kbAsk(){
+  var t = prompt(labelText('وش السؤال اللي ما لقيت جوابه؟','What question could you not answer?'), KB.q);
+  if(!t) return;
+  var r = await post('/api/kb/question', {text: t});
+  toast((r && r.message) || labelText('انسجّل','Logged'));
+}
+
+/* ---------- the data-quality panel ---------- */
+
+async function kbShowQuality(){
+  go('kb');
+  putHtml('kbBody','<div class="empty sk">—</div>');
+  var r = await api('/api/kb/quality');
+  if(!r || !r.ok){ putHtml('kbBody','<div class="empty">'+esc(labelText('ما قدرنا نجيب التقرير','Could not load'))+'</div>'); return; }
+  var q = r.quality || {}, s = r.stats || {}, m = q.missing || {};
+  var h = '<div class="kb-card"><div class="kb-top"><span class="kb-nm">'
+        + esc(labelText('جودة البيانات','Data quality'))+'</span>'
+        + '<span class="kb-edit"><button class="btn ghost sm" data-act="back">'
+        + esc(labelText('رجوع للبحث','Back to search'))+'</button></span></div>'
+        + '<div class="kb-grid">'
+        + kbField(labelText('مكتملة','Complete'), safeNum(s.units_complete_pct) + '%')
+        + kbField(labelText('ناقصة نظافة','Missing cleaning'), String(safeNum(m.cleaning)))
+        + kbField(labelText('ناقصة دورة دفع','Missing cycle'), String(safeNum(m.cycle)))
+        + kbField(labelText('ناقصة حي','Missing district'), String(safeNum(m.district)))
+        + '</div></div>';
+
+  var dc = safeArr(q.duplicate_codes);
+  if(dc.length){
+    h += '<div class="kb-card conf"><div class="kb-q">'
+       + esc(labelText('أكواد هوستاواي مكررة','Duplicate Hostaway codes'))+'</div>'
+       + '<div class="kb-a">'
+       + esc(labelText('كل واحد من هذي يعني شقتين تتنافسان على نفس الكود، وإيراد ممكن ينزل على الغلط. ما نصلحها من البرنامج — لازم تتصلح من هوستاواي.',
+                       'Each of these means two units share one code and revenue can post to the wrong one. Not fixable here — fix the real ids in Hostaway.'))
+       + '</div>';
+    for(var i=0;i<dc.length;i++){
+      h += '<div class="kb-note bad"><b>'+esc(dc[i].code)+'</b> — '+esc(safeArr(dc[i].names).join(' + '))+'</div>';
+    }
+    h += '</div>';
+  }
+
+  var gu = safeArr(q.gap_units);
+  if(gu.length){
+    h += '<div class="kb-card gap"><div class="kb-q">'
+       + esc(labelText('وحدات ناقصة معلومات','Units with gaps')) + ' (' + gu.length + ')</div><div class="kb-units">';
+    for(var j=0;j<gu.length;j++){
+      h += '<button class="kb-unit-chip" data-act="find" data-v="'+esc(gu[j].unit_name)+'">'
+         + esc(gu[j].unit_name + ' — ' + safeArr(gu[j].gaps).join(' · ')) + '</button>';
+    }
+    h += '</div></div>';
+  }
+
+  /* Zero-result searches are the most valuable rows in the system: each one is either a
+     missing fact or a missing spelling, and both are one-line fixes. */
+  var zq = safeArr(s.zero_queries);
+  if(zq.length){
+    h += '<div class="kb-card"><div class="kb-q">'+esc(labelText('بحثوا وما لقوا','Searched and found nothing'))+'</div>'
+       + '<div class="kb-a">'
+       + esc(labelText('كل سطر هنا إما معلومة ناقصة أو اسم مكتوب بشكل ثاني.',
+                       'Every line is either a missing fact or a spelling we do not know yet.'))
+       + '</div><div class="kb-units">';
+    for(var k=0;k<zq.length;k++){
+      h += '<button class="kb-unit-chip" data-act="find" data-v="'+esc(zq[k].q)+'">'
+         + esc(zq[k].q + ' (' + safeNum(zq[k].n) + ')') + '</button>';
+    }
+    h += '</div></div>';
+  }
+  putHtml('kbMeta','');
+  putHtml('kbBody', h);
+  kbBind();
+}
+
+/* ---------- one delegated listener for the whole tab ---------- */
+
+function kbBind(){
+  var root = document.getElementById('kbBody');
+  var filt = document.getElementById('kbFilters');
+  if(root && !root._kb){ root._kb = 1; root.addEventListener('click', kbClick); }
+  if(filt && !filt._kb){
+    filt._kb = 1;
+    filt.addEventListener('click', kbClick);
+    filt.addEventListener('change', function(ev){
+      var el = ev.target;
+      if(el && el.getAttribute && el.getAttribute('data-act') === 'district') kbSetDistrict(el.value);
+    });
+  }
+}
+
+function kbClick(ev){
+  var el = ev.target;
+  while(el && el !== document && !(el.getAttribute && el.getAttribute('data-act'))) el = el.parentNode;
+  if(!el || !el.getAttribute) return;
+  var act = el.getAttribute('data-act'), id = el.getAttribute('data-id'), v = el.getAttribute('data-v');
+  if(act === 'owned') kbSetOwned(v);
+  else if(act === 'gaps') kbToggleGaps();
+  else if(act === 'edit') kbEdit(id);
+  else if(act === 'save') kbSave(id);
+  else if(act === 'cancel') kbCancel();
+  else if(act === 'del') kbDelete(id);
+  else if(act === 'hist') kbHistory(id);
+  else if(act === 'new') kbNewUnit();
+  else if(act === 'ask') kbAsk();
+  else if(act === 'back'){ KB.editing = null; loadKB(1); }
+  else if(act === 'find'){
+    var box = document.getElementById('kbQ');
+    if(box){ box.value = v; }
+    KB.q = v; KB.editing = null; loadKB(1);
+  }
+}
+
 function openDrawer(title, sub){
   document.getElementById('drwTitle').textContent = title;
   document.getElementById('drwSub').textContent = sub||'';
@@ -37832,7 +38370,7 @@ NAV_DEF = {
         {"tk": "cat_content", "ids": ["studio"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
         {"tk": "cat_guests", "ids": ["guests", "gw", "guide", "reviews"]},
-        {"tk": "cat_system", "ids": ["users", "learn", "log"]},
+        {"tk": "cat_system", "ids": ["kb", "users", "learn", "log"]},
     ],
     "items": [
         {"id": "home", "ic": "home", "tk": "home"},
@@ -37855,6 +38393,7 @@ NAV_DEF = {
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
         {"id": "reviews", "ic": "reviews", "tk": "reviews", "badge": "reviews"},
+        {"id": "kb", "ic": "learn", "tk": "kb"},
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
         {"id": "studio", "ic": "design", "tk": "studio"},
@@ -37889,7 +38428,7 @@ NAV_DEF = {
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
             "guests": "الضيوف", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
-            "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط",
+            "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط", "kb": "قاعدة المعرفة",
             "studio": "استوديو عوجا",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
@@ -37908,7 +38447,7 @@ NAV_DEF = {
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
             "guests": "Guests", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
-            "rev": "Revenue", "learn": "Learnings", "log": "Activity",
+            "rev": "Revenue", "learn": "Learnings", "log": "Activity", "kb": "Knowledge Base",
             "studio": "Ouja Studio",
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
@@ -54208,6 +54747,7 @@ _ROLE_WRITE_RULES = [
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
     ("/api/wifi/", "wifi"),                  # /api/wifi/fill-save is exempt above (public team page)
+    ("/api/kb/", "kb"),                      # knowledge base — no public door at all
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -54244,6 +54784,10 @@ _ROLE_READ_RULES = [
     ("/api/wifi/list", "wifi"),
     ("/api/wifi/progress", "wifi"),
     ("/api/wifi/unit", "wifi"),
+    # Every kb read is gated: this is who owns what and what we charge them. Unlike wifi
+    # and schedule there is no public share link to keep working, so the broad prefix is
+    # correct here.
+    ("/api/kb/", "kb"),
 ]
 
 def _perm_403(tab, action):
@@ -54975,6 +55519,24 @@ async def start_web_server():
                       % (_wifi.engine.MIN_OBSERVATIONS, _wifi.engine.LOCK_GRACE_DAYS))
             except Exception as _we:
                 print("[wifi] wiring failed (internet tab disabled, bot unaffected):", _we)
+
+        # ---- «قاعدة المعرفة» — the searchable master data for units and owners. Seeds
+        # itself once from kb/seed_kb.json; after that the database is the truth and the
+        # team edits it in the tab, so the seed never re-runs over a hand-typed correction.
+        if _HAS_KB:
+            try:
+                _kb.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web,
+                })
+                _kb.register_routes(app)
+                _kb_seeded = _kb.seed.seed()
+                _kb.db.init()
+                print("[kb] wired + routes registered (/api/kb/*) — %d units, %d owners%s"
+                      % (_kb_seeded["units"], _kb_seeded["owners"],
+                         " (already seeded)" if _kb_seeded.get("skipped") else " (seeded now)"))
+            except Exception as _kbe:
+                print("[kb] wiring failed (knowledge tab disabled, bot unaffected):", _kbe)
 
         # ---- «نظام الالتزام» — weekly-report ladder + warnings. Additive; reuses brain.db,
         # the Employee Calendar (the ONE employee list) and assignments.json's Discord ids.
