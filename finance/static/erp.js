@@ -1433,6 +1433,30 @@
     else if (item && (ev.key === 's' || ev.key === 'S' || ev.key === 'س')) { ev.preventDefault(); var md = matchItemData(item); if (md) openMatchDrawer(item, md); }
     else if (item && (ev.key === 'n' || ev.key === 'N' || ev.key === 'ى')) { ev.preventDefault(); matchPromote(item); }
   });
+  // Enter inside a statement-editor box saves that box. Without this, typing the
+  // deletion reason and pressing Enter — the natural move — did NOTHING: the row
+  // stayed and read as "still there", so the accountant re-typed, gave up, or
+  // believed it was gone. Owner-reported 2026-08-03: ten expenses believed
+  // deleted had no delete recorded anywhere. Never let a typed decision evaporate.
+  var _SE_KEY_FIELDS = ['se-reason', 'se-amt', 'se-e-amt', 'se-e-date', 'se-e-desc'];
+  var _SE_KEY_FORMS = {
+    seManAmt: 'se-man-add', seManDate: 'se-man-add', seManDesc: 'se-man-add',
+    seManReason: 'se-man-add', seManLid: 'se-man-add',
+    seAdjAmt: 'se-adj-add', seAdjLabel: 'se-adj-add', seAdjReason: 'se-adj-add'
+  };
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' || ev.shiftKey) return;
+    var el = ev.target;
+    if (!el || !el.classList || !el.closest) return;
+    var inline = null;
+    for (var i = 0; i < _SE_KEY_FIELDS.length; i++) {
+      if (el.classList.contains(_SE_KEY_FIELDS[i])) { inline = el.closest('.se-inline'); break; }
+    }
+    var btn = inline ? inline.querySelector('button[data-act]')
+      : (_SE_KEY_FORMS[el.id] ? document.querySelector('button[data-act="' + _SE_KEY_FORMS[el.id] + '"]') : null);
+    if (btn && !btn.disabled) { ev.preventDefault(); btn.click(); }
+  });
+
   document.addEventListener('keydown', function (ev) {
     if (store.view !== 'bank') return;
     var tag = (ev.target.tagName || '').toLowerCase();

@@ -40,7 +40,7 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.3"   # ترحيل الحذف القديم للشقة — old expense deletes backfilled to their unit
+ERP_VERSION = "2.7.4"   # Enter يحفظ سبب الحذف — a typed decision never evaporates
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
