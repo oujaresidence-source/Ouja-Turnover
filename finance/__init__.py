@@ -40,7 +40,7 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.2"   # حذف/تعديل المصروف يوصل للشقة — expense edits reach the unit
+ERP_VERSION = "2.7.3"   # ترحيل الحذف القديم للشقة — old expense deletes backfilled to their unit
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -1102,6 +1102,14 @@ def mount(app, botmod):
     # through this hook (bot.py falls back to its legacy aggregate on any error).
     # Published snapshot wins; live compute otherwise (slice 2).
     botmod._owner_statement_hook = OW.statement_for_portal
+    # Expense deletes/edits saved before the per-unit mirror existed reach their
+    # apartment at BOOT, not on whoever happens to read a statement first — an
+    # apartment PDF requested before any statement view must not show a line the
+    # accountant deleted days ago (owner-reported 2026-08-03).
+    try:
+        OW.backfill_expense_mirrors()
+    except Exception as _e:
+        print("expense mirror backfill skipped:", _e)
     app.router.add_get("/erp", _h_erp)
     app.router.add_get("/erp/version", _h_version)
     app.router.add_get("/erp/api/work-queue", _h_api_work_queue)

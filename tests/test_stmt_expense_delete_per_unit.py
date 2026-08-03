@@ -128,6 +128,53 @@ class ExpenseDeleteReachesTheUnitTest(unittest.TestCase):
         res = self._delete("e11")
         self.assertEqual(res[1], 200)
 
+    # ---- deletes recorded BEFORE the mirror shipped must be honoured too ----
+    def test_delete_recorded_before_the_fix_is_backfilled(self):
+        """Owner-reported «ما انحلت» 2026-08-03: mirroring on WRITE only helps the
+        next delete. Every expense the accountant had already deleted still sat in
+        the apartment report, because its decision never reached the per-lid store.
+        The store is backfilled from owner_statements.json, so old and new behave
+        identically."""
+        bot._save_json("owner_statements.json", {
+            OWNER + "|" + MONTH: {
+                "owner": OWNER, "month": MONTH, "status": "draft",
+                "edits": {"resv": {}, "exp_manual": [], "adjustments": [],
+                          "exp_overrides": {"e9": {"deleted": True, "reason": "مصروف غير صحيح",
+                                                   "by": "المحاسب",
+                                                   "at": "2026-08-01T10:00:00+03:00"}}},
+                "audit": [], "published": None}})
+        OW._stmt_cache["v"] = None
+        bot._finance_adjust.clear()                     # nothing was ever mirrored
+        agg = OW.compute_owner_statement(OWNER, MONTH)
+        self.assertEqual(agg["expenses"], 0.0)
+        for p in agg.get("apartments") or []:
+            self.assertEqual(p.get("expenses"), 0.0,
+                             "an OLD delete is still counted in the unit subtotal")
+        self.assertEqual(self._unit_report()["expenses"], 0.0,
+                         "an OLD delete is still on the apartment report/PDF")
+
+    def test_old_amount_edit_is_backfilled_too(self):
+        bot._save_json("owner_statements.json", {
+            OWNER + "|" + MONTH: {
+                "owner": OWNER, "month": MONTH, "status": "draft",
+                "edits": {"resv": {}, "exp_manual": [], "adjustments": [],
+                          "exp_overrides": {"e9": {"amount": 300.0, "reason": "الصحيح 300",
+                                                   "by": "المحاسب",
+                                                   "at": "2026-08-01T10:00:00+03:00"}}},
+                "audit": [], "published": None}})
+        OW._stmt_cache["v"] = None
+        bot._finance_adjust.clear()
+        OW.backfill_expense_mirrors()          # what mount() runs at boot
+        self.assertEqual(self._unit_report()["expenses"], 300.0)
+
+    def test_backfill_is_idempotent_and_does_not_double_apply(self):
+        self._delete()
+        first = OW.compute_owner_statement(OWNER, MONTH)["expenses"]
+        for _ in range(3):
+            OW._stmt_cache["v"] = None
+            OW.compute_owner_statement(OWNER, MONTH)
+        self.assertEqual(OW.compute_owner_statement(OWNER, MONTH)["expenses"], first)
+
     # ---- the audit trail survives the new road ----
     def test_reason_is_still_recorded(self):
         self._delete(reason="مكرر")

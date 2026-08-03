@@ -702,6 +702,9 @@ _stmt_cache = {"v": None}
 def _stmt_store():
     if _stmt_cache["v"] is None:
         _stmt_cache["v"] = _B()._load_json(_STMT_FILE, {}) or {}
+        # Decisions taken before the per-unit mirror existed reach their
+        # apartment on the first read after boot — see backfill_expense_mirrors.
+        backfill_expense_mirrors()
     return _stmt_cache["v"]
 
 
@@ -794,6 +797,45 @@ def _mirror_expense_edit(mkey, eid, body, delete=False, fields=None):
     except Exception as ex:
         print("expense edit mirror failed for %s: %s" % (eid, ex))
         return False
+
+
+def backfill_expense_mirrors():
+    """Give expense decisions taken BEFORE the mirror shipped the same road as new
+    ones. Mirroring on WRITE only helps the next delete — every expense the
+    accountant had already deleted still sat in the apartment report and the unit
+    PDF (owner-reported «ما انحلت المشكلة», 2026-08-03). This walks the saved
+    statements once per boot and mirrors each exp_override into the per-lid store.
+
+    Idempotent by construction: writing the SAME key with the same value twice is
+    a no-op, and money is never added — only a line is dropped or its amount
+    restated. Rows the ledger can no longer attribute are skipped (they cannot
+    reach a unit report anyway). Never raises: a statement store we cannot read
+    must not take the whole finance page down.
+    """
+    done = 0
+    try:
+        # _stmt_store() loads on demand and re-enters here with the cache already
+        # set, so this is safe from either direction (boot or first statement read)
+        for key, rec in list((_stmt_store() or {}).items()):
+            mkey = (rec or {}).get("month") or (key.split("|", 1)[-1] if "|" in key else "")
+            if not mkey:
+                continue
+            for eid, ov in list((((rec or {}).get("edits") or {}).get("exp_overrides") or {}).items()):
+                if not isinstance(ov, dict):
+                    continue
+                if ov.get("deleted"):
+                    done += 1 if _mirror_expense_edit(mkey, eid, None, delete=True) else 0
+                elif any(ov.get(f) not in (None, "") for f in ("amount", "date", "description")):
+                    done += 1 if _mirror_expense_edit(
+                        mkey, eid, None,
+                        fields={"amount": ov.get("amount"), "date": ov.get("date"),
+                                "description": ov.get("description"),
+                                "edit_reason": ov.get("reason")}) else 0
+    except Exception as ex:
+        print("expense mirror backfill failed:", ex)
+    if done:
+        print("expense mirror backfill: %d decision(s) pushed down to their apartment" % done)
+    return done
 
 
 def _apply_stmt_edits(agg, edits):
