@@ -734,6 +734,68 @@ def stmt_audit_add(rec, actor, action, target, before, after, reason=""):
         del rec["audit"][:len(rec["audit"]) - 400]
 
 
+def _expense_lid(eid, body=None):
+    """The listing an expense belongs to. The ledger is the authority; the
+    editor's row may pass one as a hint for a line the ledger no longer holds."""
+    try:
+        rec = (getattr(_B(), "_expenses", None) or {}).get(str(eid)) or {}
+        lid = rec.get("listing_id")
+        if lid not in (None, ""):
+            return int(lid)
+    except (TypeError, ValueError):
+        pass
+    try:
+        v = (body or {}).get("lid")
+        return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _unit_adjust(lid, mkey):
+    """This unit's per-month adjust record, created on demand. THE store every
+    per-apartment surface reads (build_owner_report → _finance_apply_adjust)."""
+    B = _B()
+    start, end = B._month_bounds(mkey)
+    ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+    adj = B._finance_adjust.get(ak) or {}
+    for kdef, vdef in (("expense_overrides", {}), ("extra_lines", []),
+                       ("line_overrides", {}), ("comment", "")):
+        adj.setdefault(kdef, vdef)
+    B._finance_adjust[ak] = adj
+    return adj
+
+
+def _mirror_expense_edit(mkey, eid, body, delete=False, fields=None):
+    """Carry an editor decision about ONE expense down to its apartment.
+
+    `_apply_stmt_edits` runs AFTER `_finance_aggregate`, so on its own it patches
+    the owner TOTAL and nothing else: the per-apartment breakdown, the unit tab
+    subtotal and the apartment PDF (build_owner_report) all kept showing the
+    deleted line (owner-reported 2026-08-03). Manual ADDs were routed into the
+    per-lid store in 2026-07-05 for exactly this reason — deletes and amount
+    edits now take the same road, so every surface tells one story.
+
+    Returns True when the decision reached a unit. An expense we cannot attribute
+    (no listing on the ledger row) still applies at owner level — never a crash.
+    """
+    lid = _expense_lid(eid, body)
+    if lid is None:
+        return False
+    try:
+        adj = _unit_adjust(lid, mkey)
+        if delete:
+            adj["expense_overrides"][str(eid)] = None      # None = drop the line
+        else:
+            ov = dict(adj["line_overrides"].get("exp:" + str(eid)) or {})
+            ov.update({k: v for k, v in (fields or {}).items() if v not in (None, "")})
+            adj["line_overrides"]["exp:" + str(eid)] = ov
+        _B().persist_state()
+        return True
+    except Exception as ex:
+        print("expense edit mirror failed for %s: %s" % (eid, ex))
+        return False
+
+
 def _apply_stmt_edits(agg, edits):
     """Apply the editor's decisions to a computed statement. Pure recompute from
     the per-line mgmt stamps — totals always equal the visible rows."""
@@ -1129,6 +1191,14 @@ def statement_payload(owner, mkey):
     live = _receipt_proxy_rewrite(live, owner)
     rec = stmt_rec(owner, mkey)
     pub = (rec or {}).get("published") or {}
+    # What the OWNER's link/PDF renders is the PUBLISHED snapshot, frozen until an
+    # explicit republish. So an edit can be correct on this screen and absent from
+    # «التقرير النهائي» — and nothing used to say so (owner-reported 2026-08-03,
+    # deleted expenses "still in the final report"). Say it, loudly and cheaply.
+    snap = pub.get("snapshot") or {}
+    stale = bool(snap) and any(
+        _fnum(snap.get(k)) != _fnum(live.get(k))
+        for k in ("owner_net", "total_income", "expenses", "ouja_fee"))
     return {"ok": True, "owner": owner, "month": mkey,
             "computed_at": datetime.now(_B().TZ).isoformat(timespec="seconds"),
             "month_meta": month_meta(owner, mkey, live, with_compare=True),
@@ -1137,6 +1207,7 @@ def statement_payload(owner, mkey):
             "edits": (rec or {}).get("edits") or {},
             "audit": list(reversed(((rec or {}).get("audit") or [])))[:120],
             "status": (rec or {}).get("status") or "draft",
+            "published_stale": stale,
             "published": ({"version": pub.get("version"), "at": pub.get("at"),
                            "by": pub.get("by"),
                            "net": ((pub.get("snapshot") or {}).get("owner_net"))}
@@ -1212,11 +1283,20 @@ def statement_edit(request, body):
                 o[f] = (round(float(body[f]), 2) if f == "amount" else str(body[f])[:200])
         e["exp_overrides"][target] = o
         after = o
+        # …and down to the apartment, or the unit PDF keeps the old amount
+        o["reached_unit"] = _mirror_expense_edit(
+            mkey, target, body,
+            fields={"amount": o.get("amount"), "date": o.get("date"),
+                    "description": o.get("description"), "edit_reason": reason,
+                    "edited_by": actor})
     elif op == "exp_delete":
         before = e["exp_overrides"].get(target)
         e["exp_overrides"][target] = {"deleted": True, "reason": reason, "by": actor,
                                       "at": datetime.now(B.TZ).isoformat(timespec="seconds")}
         after = e["exp_overrides"][target]
+        # …and down to the apartment, or the deleted line survives on the unit
+        # report, the unit tab subtotal and the apartment PDF
+        after["reached_unit"] = _mirror_expense_edit(mkey, target, body, delete=True)
     elif op == "exp_manual_add":
         try:
             amt = round(float(body.get("amount")), 2)

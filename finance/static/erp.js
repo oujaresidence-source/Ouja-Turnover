@@ -269,6 +269,7 @@
       o_stmt: 'الكشف', se_title: 'محرر الكشف', se_pub: 'نشر النسخة للمالك',
       se_pub_confirm: 'بينشر هالأرقام للمالك (الرابط الحي + PDF سوا) ويرفع رقم النسخة. نتأكد؟',
       se_pubd: 'نُشرت نسخة {v} ✓', se_ver: 'نسخة', se_never_pub: 'ما انشرت بعد',
+      se_pub_stale: 'تعديلاتك ما وصلت للمالك بعد — التقرير النهائي والرابط لا يزالان على النسخة {v}. اضغط «نشر النسخة للمالك».',
       se_recompute: 'أعد الحساب', se_diff_title: 'فرق إعادة الحساب (المنشور ← الجديد)',
       se_diff_none: 'ما تغيّر شي — المنشور مطابق للحساب الجديد ✓',
       se_diff_apply: 'انشر النسخة الجديدة', se_why: 'ليش؟',
@@ -619,6 +620,7 @@
       o_stmt: 'Statement', se_title: 'Statement editor', se_pub: 'Publish to owner',
       se_pub_confirm: 'Publishes these numbers to the owner (live link + PDF together) and bumps the version. Continue?',
       se_pubd: 'Published version {v} ✓', se_ver: 'Version', se_never_pub: 'Not published yet',
+      se_pub_stale: 'Your edits have not reached the owner — the final report and link are still on version {v}. Press «Publish to owner».',
       se_recompute: 'Recompute', se_diff_title: 'Recompute diff (published ← fresh)',
       se_diff_none: 'Nothing changed — published matches the fresh compute ✓',
       se_diff_apply: 'Publish the new version', se_why: 'Why?',
@@ -2163,6 +2165,7 @@
       var rE = boxE.querySelector('.se-reason').value.trim();
       if (!rE) { boxE.querySelector('.se-reason').classList.add('need'); return; }
       seEdit({ op: 'exp_override', id: rowE.getAttribute('data-xid'), reason: rE,
+               lid: rowE.getAttribute('data-xlid') || '',   // so the edit reaches the apartment
                amount: boxE.querySelector('.se-e-amt').value,
                date: boxE.querySelector('.se-e-date').value,
                description: boxE.querySelector('.se-e-desc').value }, el);
@@ -2171,7 +2174,8 @@
       var rowD = el.closest('.wq-row');
       var rD = rowD.querySelector('.se-inline[data-need="se-xd"] .se-reason').value.trim();
       if (!rD) { rowD.querySelector('.se-inline[data-need="se-xd"] .se-reason').classList.add('need'); return; }
-      seEdit({ op: 'exp_delete', id: rowD.getAttribute('data-xid'), reason: rD }, el);
+      seEdit({ op: 'exp_delete', id: rowD.getAttribute('data-xid'), reason: rD,
+               lid: rowD.getAttribute('data-xlid') || '' }, el);   // reaches the apartment too
     }
     else if (act === 'se-man-del') {
       var rowM = el.closest('.wq-row');
@@ -4795,6 +4799,10 @@
       '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
       '</span></header>' +
       mmStrip(mm) +
+      (d.published_stale && pub
+        ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' +
+          esc(t('se_pub_stale').replace('{v}', pub.version)) + '</div>'
+        : '') +
       (s.degraded ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' + esc(t('se_degraded')) + '</div>' : '') +
       (d.computed_at ? '<div class="grp-hint" style="padding-top:0">' + esc(t('se_asof')) + ': <code>' + esc(String(d.computed_at).slice(0, 16)) + '</code></div>' : '') +
       '<div class="wsnav" style="position:static;border:none;padding:4px 16px">' +
