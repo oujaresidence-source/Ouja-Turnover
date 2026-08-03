@@ -7,10 +7,17 @@ the team opens the link with nothing. Unlike /team-calendar this one WRITES — 
 through the add-only public door (wifi.routes.core_fill_save), which cannot close, edit
 or delete anything and stamps every row is_backfill=1.
 
-THE HONESTY RULE THIS PAGE ENFORCES:
-    «ما أعرف» is one tap and it is honest — it saves a BLANK date and leaves the unit in
-    the «ما نعرف» bucket. A wrong guess is worse than a blank, so nothing here nudges
-    anybody into inventing a date.
+WHAT THE PAGE ASKS FOR (owner call, 2026-08-03):
+    GO AND FIND THE REAL DATE. The telco app, the purchase SMS, the invoice, or a call to
+    the shop — the information exists, so the page asks for it plainly and does not offer
+    a shortcut past the question.
+
+    «ما لقيت المعلومة» still exists, but quiet and secondary, and it says out loud what
+    happens next (saved with no date, shows up under «ما نعرف»). It is kept for one
+    reason: somebody who genuinely cannot find the date would otherwise type ANY date
+    just to be allowed to save, and an invented date is worse than a blank — the system
+    believes it, and would then report a live subscription as dead. A blank is honest;
+    a fabrication is not.
 
 SAME BACKSLASH TRAP AS DASHBOARD_HTML: this is a normal triple-quoted string, so Python
 eats any backslash before JavaScript ever sees it. There are ZERO backslashes in this
@@ -113,11 +120,18 @@ HTML = """<!doctype html>
   .row{display:flex;gap:8px;align-items:center}
   .row input{flex:1}
   .hint{color:var(--muted);font-size:12.5px;margin-top:6px}
-  .dk{border:1px solid var(--border);background:var(--bg);color:var(--body);border-radius:999px;
-    padding:10px 15px;font-family:var(--font);font-weight:700;font-size:14px;cursor:pointer;
-    white-space:nowrap;min-height:46px;transition:transform .12s var(--ease)}
-  .dk:active{transform:scale(.97)}
-  .dk[aria-pressed="true"]{background:var(--amber);color:#fff;border-color:var(--amber)}
+  /* The escape hatch is DELIBERATELY quiet now: the ask is to go and find the real
+     date, not to tap past the question. It still exists, because somebody who truly
+     cannot find it would otherwise type any date just to be allowed to save — and an
+     invented date is worse than a blank, since the system believes it. */
+  .dk{border:none;background:none;color:var(--muted);font-family:var(--font);font-weight:600;
+    font-size:12.5px;cursor:pointer;padding:8px 2px;margin-top:2px;text-decoration:underline;
+    text-underline-offset:3px;transition:color .15s}
+  .dk:active{color:var(--ink)}
+  .dk[aria-pressed="true"]{color:var(--amber);text-decoration:none;font-weight:700}
+  .dknote{display:none;background:var(--amber-soft);color:var(--ink);border-radius:var(--r-sm);
+    padding:9px 11px;font-size:12.5px;line-height:1.6;margin-top:6px}
+  .dknote.on{display:block}
   .save{width:100%;margin-top:22px;border:none;background:var(--ink);color:#fff;
     border-radius:var(--r-sm);padding:15px;font-family:var(--font);font-weight:800;
     font-size:16px;cursor:pointer;min-height:52px;transition:transform .12s var(--ease),opacity .15s}
@@ -136,7 +150,7 @@ HTML = """<!doctype html>
 
 <header>
   <div class="ttl" id="hello">اشتراكات النت</div>
-  <div class="sub" id="helloSub">عبِّي اللي تعرفه عن كل شقة — واللي ما تعرفه اتركه</div>
+  <div class="sub" id="helloSub">سجّل اشتراك النت لكل شقة — طلّع المعلومة الصح</div>
   <div class="who" id="whoLine"></div>
 </header>
 
@@ -249,7 +263,7 @@ function renderGreeting(){
 
 function renderPeople(){
   qs('hello').textContent = 'اشتراكات النت';
-  qs('helloSub').textContent = 'عبِّي اللي تعرفه عن كل شقة — واللي ما تعرفه اتركه';
+  qs('helloSub').textContent = 'سجّل اشتراك النت لكل شقة — طلّع المعلومة الصح';
   qs('whoLine').innerHTML = '';
   qs('progWrap').innerHTML = '';
   var h = '<div class="sect">مين أنت؟</div><div class="people">';
@@ -375,10 +389,12 @@ function sheetHtml(u){
   h += '<div class="q"><div class="lab">4 · كم دفعنا</div>'
      + '<input type="number" id="amount" placeholder="بالريال" inputmode="decimal" min="0"></div>';
 
-  h += '<div class="q"><div class="lab">5 · متى تقريباً</div>'
-     + '<div class="row"><input type="date" id="pdate">'
-     + '<button class="dk" data-act="dontknow" aria-pressed="false">ما أعرف</button></div>'
-     + '<div class="hint">لو ما تذكر التاريخ اضغط «ما أعرف» — أحسن من تاريخ غلط بكثير</div></div>';
+  h += '<div class="q"><div class="lab">5 · متى شريناه</div>'
+     + '<input type="date" id="pdate">'
+     + '<div class="hint">طلّعه من تطبيق الشركة أو من رسالة الشراء أو الفاتورة — لا تكتب تاريخ من راسك</div>'
+     + '<button class="dk" data-act="dontknow" aria-pressed="false">ما لقيت المعلومة</button>'
+     + '<div class="dknote" id="dkNote">بنسجّلها بدون تاريخ، وبتظهر عند فيصل ضمن «ما نعرف». '
+     + 'إذا لقيت التاريخ بعدين كلّمه يحدّثها.</div></div>';
 
   h += '<button class="save" id="saveBtn" data-act="save" disabled>احفظ</button>';
   return h;
@@ -407,6 +423,10 @@ function pickChip(field, value, el){
 function toggleDontKnow(el){
   F.unknown_date = !F.unknown_date;
   el.setAttribute('aria-pressed', F.unknown_date ? 'true' : 'false');
+  el.textContent = F.unknown_date ? 'ما لقيت المعلومة ✓' : 'ما لقيت المعلومة';
+  /* Say what happens next, so tapping this is a decision and not a shortcut. */
+  var note = qs('dkNote');
+  if(note) note.classList.toggle('on', F.unknown_date);
   var d = qs('pdate');
   if(d){
     if(F.unknown_date) d.value = '';

@@ -30483,17 +30483,22 @@ function wifiLinkFor(row){
   return location.origin + (row && row.link ? row.link : '/wifi-fill');
 }
 
-/* The message that lands on the employee's phone. Najdi, short, and it says out loud
-   that guessing a date is NOT wanted — the whole «ما أعرف» button is wasted if the
-   message they get pressures them to fill something in. */
+/* The message that lands on the employee's phone (owner call, 2026-08-03). It asks them
+   to GO AND FIND the real information — the app, the receipt, the shop — instead of
+   tapping past the question. It still refuses a fabricated date, because an invented
+   date is worse than a blank: the system believes it and would report a live
+   subscription as dead. So the exception routes to a human, not to a made-up number. */
 function wifiMessageFor(row){
   var nl = String.fromCharCode(10);
   var name = (row && row.name) ? row.name : '';
   var n = (row && row.remaining) ? row.remaining : 0;
   return 'هلا ' + name + ' 👋' + nl + nl
-    + 'نبي نعرف اشتراك النت لكل شقة من شققك — أي شركة، من وين شريناه، كم دفعنا، ومتى تقريباً.' + nl
-    + 'خمس أسئلة بس لكل شقة، وياخذ منك دقيقتين.' + nl + nl
-    + 'وإذا ما تذكر التاريخ لا تخمّن — فيه زر «ما أعرف»، اضغطه وخلاص.' + nl + nl
+    + 'محتاجين نسجّل اشتراك النت لكل شقة من شققك — أي شركة، من وين شريناه، كم دفعنا، ومتى ينتهي.' + nl + nl
+    + 'المعلومة موجودة، طلّعها ولا تحط «ما أعرف»:' + nl
+    + '• من تطبيق الشركة نفسها — STC أو موبايلي أو زين أو سلام' + nl
+    + '• أو من رسالة الشراء أو الفاتورة' + nl
+    + '• أو اتصل على المحل اللي شرينا منه' + nl + nl
+    + 'واللي ما تلقى له معلومة بعد ما تدوّر، كلّمني — لا تكتب تاريخ من راسك.' + nl + nl
     + (n ? ('باقي عليك ' + wifiAptCount(n) + ':' + nl) : '')
     + wifiLinkFor(row);
 }
