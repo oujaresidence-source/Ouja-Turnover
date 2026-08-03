@@ -28900,7 +28900,7 @@ async function loadCleanTeams(){
    NOTE: DASHBOARD_HTML is a normal triple-quoted Python string — NO backslash escapes
    anywhere in here. Use String.fromCharCode(10) for a newline.
    ============================================================ */
-var COV = {data:null, busy:false, zoom:null};
+var COV = {data:null, busy:false, zoom:null, pending:{prices:{}, nums:{}}};
 
 async function loadCoverage(force){
   var body=document.getElementById('covBody'); if(!body) return;
@@ -28935,29 +28935,85 @@ async function covResolveGeo(){
 }
 
 /* ---- settings ---- */
-async function covSet(key, value){
-  var body = {}; body[key] = value;
+/* Typing does NOT save. Edits collect in COV.pending until «حفظ» is pressed.
+   Saving on every field meant a full reload per keystroke — with 42 apartments to price
+   that is unusable, and it threw away focus and scroll each time (owner, 2026-08-02).
+   One button, one request, one re-render. */
+function _covPend(){
+  COV.pending = COV.pending || {prices:{}, nums:{}};
+  return COV.pending;
+}
+function _covPendCount(){
+  var p=_covPend();
+  return Object.keys(p.prices).length + Object.keys(p.nums).length;
+}
+function _covPendBadge(){
+  var el=document.getElementById('covPendBar'); if(!el) return;
+  var n=_covPendCount(), ar=(L==='ar');
+  el.style.display = n ? 'flex' : 'none';
+  var lbl=document.getElementById('covPendCount');
+  if(lbl) lbl.textContent = ar ? (n+' تغيير ما انحفظ') : (n+' unsaved');
+}
+/* Reads a numeric field without fighting the typist: strips anything that is not a
+   digit or a dot, and treats an emptied box as "remove this price". */
+function _covNum(el){
+  var v=String(el.value).replace(/[^0-9.]/g,'');
+  if(v!==el.value) el.value=v;
+  return v==='' ? null : Number(v);
+}
+function covPriceInput(lid, el){
+  _covPend().prices[String(lid)] = _covNum(el);
+  el.style.borderColor='var(--accent)';
+  _covPendBadge();
+}
+function covNumInput(key, el){
+  var v=_covNum(el);
+  if(v==null){ delete _covPend().nums[key]; }
+  else { _covPend().nums[key]=v; el.style.borderColor='var(--accent)'; }
+  _covPendBadge();
+}
+function covDiscard(){
+  COV.pending={prices:{}, nums:{}};
+  renderCoverage();
+  toast(labelText('رجّعنا الأرقام زي ما كانت','Changes discarded'));
+}
+async function covApply(){
+  var p=_covPend();
+  if(!_covPendCount()){ toast(labelText('ما فيه تغييرات','Nothing to save')); return; }
+  var btn=document.getElementById('covApplyBtn');
+  if(btn){ btn.disabled=true; btn.textContent=labelText('يحفظ…','Saving…'); }
+
+  var body={};
+  for(var k in p.nums){ if(Object.prototype.hasOwnProperty.call(p.nums,k)) body[k]=p.nums[k]; }
+  if(Object.keys(p.prices).length){
+    var cur=((COV.data||{}).settings||{}).apartment_price_sar || {};
+    var out={};
+    for(var c in cur){ if(Object.prototype.hasOwnProperty.call(cur,c)) out[c]=cur[c]; }
+    for(var lid in p.prices){
+      if(!Object.prototype.hasOwnProperty.call(p.prices,lid)) continue;
+      if(p.prices[lid]==null) delete out[lid]; else out[lid]=p.prices[lid];
+    }
+    body.apartment_price_sar=out;
+  }
+  var keep=window.scrollY;
   try{
-    var r = await fetch('/api/coverage/settings', {method:'POST',
+    var r=await fetch('/api/coverage/settings',{method:'POST',
       headers:{'Content-Type':'application/json','X-Token':tok()},
       body:JSON.stringify(body)});
-    var j = await r.json();
-    if(j && j.ok){ COV.data = null; loadCoverage(1); }
-    else toast((j && j.error) ? j.error : labelText('ما نجح الحفظ','Could not save'));
+    var j=await r.json();
+    if(j && j.ok){
+      COV.pending={prices:{}, nums:{}};
+      COV.data=null;
+      await loadCoverage(1);
+      // Put the reader back where they were; a jump to the top after saving is its own
+      // small punishment for having entered data.
+      window.scrollTo(0, keep);
+      toast(labelText('تم الحفظ','Saved'));
+      return;
+    }
+    toast((j && j.error) ? j.error : labelText('ما نجح الحفظ','Could not save'));
   }catch(e){ toast(labelText('ما نجح الحفظ','Could not save')); }
-}
-function covSetNum(key, el){
-  var v = String(el.value).replace(/[^0-9.]/g, '');
-  if(v === '') return;
-  covSet(key, Number(v));
-}
-function covSetPrice(lid, el){
-  var v = String(el.value).replace(/[^0-9.]/g, '');
-  var cur = ((COV.data||{}).settings||{}).apartment_price_sar || {};
-  var out = {};
-  for(var k in cur){ if(Object.prototype.hasOwnProperty.call(cur,k)) out[k]=cur[k]; }
-  if(v === '') delete out[String(lid)]; else out[String(lid)] = Number(v);
-  covSet('apartment_price_sar', out);
+  if(btn){ btn.disabled=false; btn.textContent=labelText('حفظ','Save'); }
 }
 
 /* ---- small building blocks ---- */
@@ -29108,8 +29164,9 @@ function _covPrices(s){
         return '<tr><td class="strong">'+esc(r.name)+'</td>'
           + '<td class="num">'+esc(String(r.bedrooms==null?'—':r.bedrooms))+'</td>'
           + '<td style="font-size:12px;color:var(--mut)">'+esc(r.team_name||'—')+'</td>'
-          + '<td class="num"><input type="text" inputmode="decimal" value="'+esc(String(r.monthly==null?'':r.monthly))+'" '
-          + 'placeholder="'+(ar?'اكتب':'type')+'" onchange="covSetPrice('+r.lid+',this)" '
+          + '<td class="num"><input type="text" inputmode="decimal" id="covPrice'+r.lid+'" '
+          + 'value="'+esc(String(r.monthly==null?'':r.monthly))+'" '
+          + 'placeholder="'+(ar?'اكتب':'type')+'" oninput="covPriceInput('+r.lid+',this)" '
           + 'aria-label="'+esc((ar?'سعر ':'price for ')+r.name)+'" '
           + 'style="width:94px;padding:6px 9px;font-size:13.5px;background:var(--surface-2);border:1px solid '
           + (empty?'var(--yellow)':'var(--line)')+';border-radius:7px;color:var(--text);text-align:end"></td>'
@@ -29140,7 +29197,7 @@ function _covPrices(s){
   var n=function(id,key,val,lbl){
     return '<div><label for="'+id+'" style="display:block;font-size:11px;color:var(--mut);margin-bottom:4px">'+esc(lbl)+'</label>'
       + '<input id="'+id+'" type="text" inputmode="decimal" value="'+esc(String(val==null?'':val))+'" '
-      + 'onchange="covSetNum(&#39;'+key+'&#39;,this)" style="width:100%;padding:8px 10px;font-size:14px;'
+      + 'oninput="covNumInput(&#39;'+key+'&#39;,this)" style="width:100%;padding:8px 10px;font-size:14px;'
       + 'background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--text)"></div>';
   };
   var cfg='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px">'
@@ -29151,8 +29208,17 @@ function _covPrices(s){
     + n('csD','days_per_week',st.days_per_week,ar?'أيام الدوام/أسبوع':'Days/week')
     + n('csO','days_off_per_year',st.days_off_per_year,ar?'إجازات/سنة':'Days off/year')
     + '</div>';
+  // Sits directly above the table, which scrolls inside its own box — so it stays in
+  // view the whole way down the list without needing to be sticky.
+  var bar='<div id="covPendBar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;'
+    + 'border:1px solid var(--accent);background:var(--accent-soft);border-radius:10px;'
+    + 'padding:10px 14px;margin-bottom:10px">'
+    + '<span id="covPendCount" style="font-size:13px;font-weight:700;color:var(--accent);margin-inline-end:auto"></span>'
+    + '<button class="btn ghost sm" onclick="covDiscard()">'+(ar?'تراجع':'Discard')+'</button>'
+    + '<button class="btn primary sm" id="covApplyBtn" onclick="covApply()">'+(ar?'حفظ':'Save')+'</button>'
+    + '</div>';
   return _covPanel(head, esc(ar?(v.priced_count+' من '+v.apartments+' مسعّرة'):(v.priced_count+' of '+v.apartments+' priced')),
-                   verdict + top + body + money + cfg);
+                   verdict + top + bar + body + money + cfg);
 }
 
 /* ============ week shape ============ */
@@ -29402,6 +29468,29 @@ function renderCoverage(){
         esc(safeNum(u.missing_location)?((ar?'':'')+safeNum(u.missing_location)+(ar?' بدون موقع':' unlocated')):(ar?'كلها محددة':'all located')),
         _covUnits(s), safeNum(u.missing_location)>0);
   putHtml('covBody', html);
+  _covRestorePending();
+}
+
+/* renderCoverage rebuilds the markup from COV.data, so anything typed but not yet saved
+   would vanish on any re-render (zooming the map is enough). Put it back. */
+function _covRestorePending(){
+  var p=_covPend();
+  safeArr((((COV.data||{}).vendors)||{}).rows).forEach(function(r){
+    if(!Object.prototype.hasOwnProperty.call(p.prices, String(r.lid))) return;
+    var el=document.getElementById('covPrice'+r.lid);
+    if(!el) return;
+    var v=p.prices[String(r.lid)];
+    el.value = (v==null?'':String(v));
+    el.style.borderColor='var(--accent)';
+  });
+  var ids={cleaners_count:'csC', supervisors_count:'csS', cleaner_cost_sar:'csCC',
+           supervisor_cost_sar:'csSC', days_per_week:'csD', days_off_per_year:'csO'};
+  for(var k in p.nums){
+    if(!Object.prototype.hasOwnProperty.call(p.nums,k)) continue;
+    var e2=document.getElementById(ids[k]);
+    if(e2){ e2.value=String(p.nums[k]); e2.style.borderColor='var(--accent)'; }
+  }
+  _covPendBadge();
 }
 
 function _ctStageInfo(s){
