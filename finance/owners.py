@@ -935,7 +935,105 @@ def _apply_stmt_edits(agg, edits):
     es["manual_excluded"] = len(manual_excluded)
     es["manual_excluded_value"] = _fnum(sum((_D(x.get("reference_total") or 0) for x in manual_excluded), Decimal(0)))
     agg["excluded_summary"] = es
+    return _rebuild_unit_parts(agg)
+
+
+def _rebuild_unit_parts(agg):
+    """Re-derive the per-apartment breakdown from the EDITED lines.
+
+    `bot._finance_aggregate` builds `apartments[]` from the untouched per-unit
+    reports, and `_apply_stmt_edits` runs after it — so a booking the accountant
+    force-included (or excluded) moved the owner total but left the apartment
+    exactly as the raw engine saw it. That stale row is what the apartment PDF
+    prints (owner-reported 2026-08-04: 202A printed 5,839.38 while the owner
+    total already carried 6,350.50).
+
+    Every line knows its unit, so the breakdown is rebuilt from them. Lines with
+    no lid (owner-level manual entries and adjustments) stay OUT of the units on
+    purpose — they are unattributable and already footnoted; the unit subtotals
+    then legitimately sum to less than the owner total.
+    """
+    parts = agg.get("apartments") or []
+    if not parts:
+        return agg
+    out, idx = [], {}
+    for p in parts:
+        q = dict(p)
+        q["total_income"] = Decimal(0)
+        q["ouja_fee"] = Decimal(0)
+        q["expenses"] = Decimal(0)
+        out.append(q)
+        idx[str(q.get("lid"))] = q
+    default_pct = _D(agg.get("management_pct") or 0)
+    for l in agg.get("resv_lines") or []:
+        q = idx.get(str(l.get("lid")))
+        if q is None or l.get("income") is None:
+            continue
+        money = _D(l["income"]) + _D(l.get("extras") or 0)
+        pct = _D(l.get("mgmt_pct_applied")) if l.get("mgmt_pct_applied") is not None else default_pct
+        q["total_income"] += money
+        q["ouja_fee"] += money * pct / Decimal(100)
+    for m in agg.get("manual_income_lines") or []:      # fee-exempt by design
+        q = idx.get(str(m.get("lid")))
+        if q is not None:
+            q["total_income"] += _D(m.get("amount"))
+    for x in agg.get("exp_lines") or []:
+        q = idx.get(str(x.get("lid")))
+        if q is not None:
+            q["expenses"] += _D(x.get("amount"))
+    for q in out:
+        q["total_income"] = _fnum(q["total_income"])
+        q["ouja_fee"] = _fnum(q["ouja_fee"])
+        q["expenses"] = _fnum(q["expenses"])
+        q["owner_net"] = _fnum(_D(q["total_income"]) - _D(q["ouja_fee"])
+                               - _D(q["expenses"]) - _D(q.get("cleaning") or 0))
+    agg["apartments"] = out
     return agg
+
+
+def unit_slice(rep, lid):
+    """One apartment's view of an EDITED monthly statement, shaped like a unit
+    report so the range report / apartment PDF can sum it. Used when an apartment
+    filter is applied to a multi-unit owner — re-running the raw engine there is
+    what silently dropped every editor decision."""
+    if rep is None or lid is None:
+        return None
+    part = next((p for p in (rep.get("apartments") or [])
+                 if str(p.get("lid")) == str(lid)), None)
+    if part is None:
+        return None
+    same = lambda l: str(l.get("lid") or "") == str(lid)
+    resv = [l for l in (rep.get("resv_lines") or []) if same(l)]
+    paid = [l for l in resv if l.get("income") is not None]
+    mil = [m for m in (rep.get("manual_income_lines") or []) if same(m)]
+    cl = rep.get("cleaning") or {}
+    return {
+        "currency": "SAR", "owner": rep.get("owner"),
+        "apartment": part.get("apartment"), "lid": part.get("lid"),
+        "management_pct": rep.get("management_pct"),
+        "income_airbnb": _fnum(sum((_D(l["income"]) for l in paid
+                                    if (l.get("channel") or "") == "airbnb"), Decimal(0))),
+        "income_direct": _fnum(sum((_D(l["income"]) for l in paid
+                                    if (l.get("channel") or "") != "airbnb"), Decimal(0))),
+        "extras": _fnum(sum((_D(l.get("extras") or 0) for l in paid), Decimal(0))),
+        "manual_income": _fnum(sum((_D(m.get("amount")) for m in mil), Decimal(0))),
+        "manual_income_lines": mil,
+        "total_income": part.get("total_income"), "ouja_fee": part.get("ouja_fee"),
+        "expenses": part.get("expenses"), "owner_net": part.get("owner_net"),
+        "cleaning": {"type": cl.get("type"), "amount": cl.get("amount"),
+                     "total": part.get("cleaning") or 0, "cleans": None, "months": 1},
+        "apartments": [part],
+        "resv_lines": resv,
+        "exp_lines": [x for x in (rep.get("exp_lines") or []) if same(x)],
+        "unpaid_lines": [l for l in (rep.get("unpaid_lines") or []) if same(l)],
+        "refunded_lines": [l for l in (rep.get("refunded_lines") or []) if same(l)],
+        "manual_excluded_lines": [l for l in (rep.get("manual_excluded_lines") or []) if same(l)],
+        "adjust_lines": [], "adjustments_total": 0.0,
+        "excluded_summary": rep.get("excluded_summary") or {},
+        "has_manual_edits": rep.get("has_manual_edits"),
+        "reconciliation": rep.get("reconciliation") or {"balanced": True},
+        "footnotes": rep.get("footnotes") or [],
+    }
 
 
 def _build_explain(agg):
@@ -1156,9 +1254,20 @@ def compute_owner_range(owner, start, end, apt=None):
     owner_level = (not apt) or owner_total_units <= 1
     month_reports, footnotes = [], []
     for (m_start, m_end, mkey, whole) in _iter_months(start, end):
+        rep = None
         if whole and owner_level:
             rep = compute_owner_statement(owner, mkey)
-        else:
+        elif whole and len(lids) == 1:
+            # An apartment filter on a multi-unit owner used to re-run the RAW
+            # engine, which knows nothing of the statement editor — every
+            # include/exclude silently vanished from the apartment PDF. Slice the
+            # EDITED statement instead (owner-reported 2026-08-04).
+            rep = unit_slice(compute_owner_statement(owner, mkey), lids[0])
+            if rep is not None:
+                footnotes.append({"kind": "apt_filter_owner_manual_excluded", "month": mkey,
+                                  "text_ar": mkey + ": التسويات اليدوية على مستوى المالك تظهر في تقرير المالك",
+                                  "text_en": mkey + ": owner-level manual entries appear on the owner report"})
+        if rep is None:
             reps = [B.build_owner_report(lid, m_start, m_end, 0, {}) for lid in lids]
             reps = [r for r in reps if r is not None]
             rep = B._finance_aggregate(reps, owner, m_start, m_end) if reps else None
