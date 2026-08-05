@@ -86,6 +86,20 @@ async def _api_scan(request):
     return HOST.json_response(out)
 
 
+async def _api_one(request):
+    """Everything Hostaway holds about ONE booking. The portfolio scan can say two
+    numbers differ; only this can say where a third number lives."""
+    import asyncio
+    rid = (request.rel_url.query.get("id") or "").strip()
+    if not rid.isdigit():
+        return HOST.json_response(
+            {"ok": False, "error": "bad_id",
+             "message": "اكتب رقم الحجز بالأرقام فقط"}, 200)
+    out = await asyncio.to_thread(scan.probe, int(rid))
+    out["ok"] = not out.get("error")
+    return HOST.json_response(out)
+
+
 async def _page(request):
     g = _guard(request)
     if g:
@@ -99,3 +113,4 @@ async def _page(request):
 def register(app):
     app.router.add_get("/pricecheck", _page)
     app.router.add_get("/api/pricecheck/scan", _safe(_api_scan))
+    app.router.add_get("/api/pricecheck/one", _safe(_api_one))

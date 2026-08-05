@@ -77,6 +77,8 @@ select{font-family:var(--font-ar)}
 .verdict.bad{background:var(--red-soft);border-color:var(--red-line)}
 .verdict.good{background:var(--green-soft);border-color:#B6DCC6}
 .verdict.idle{background:var(--surface-2);border-color:var(--line)}
+.verdict.warn{background:var(--gold-soft);border-color:#E3CFA0}
+.verdict.warn .big{color:var(--gold-2)}
 .verdict .big{font-size:29px;font-weight:700;letter-spacing:-.5px;margin:0 0 6px;line-height:1.25}
 .verdict .why{font-size:14.5px;color:var(--text-2);margin:0}
 .verdict.bad .big{color:var(--red)} .verdict.good .big{color:var(--green)}
@@ -157,6 +159,23 @@ td.gap{font-weight:700}
     </div>
     <p class="hint" id="hint" style="margin:12px 0 0">الفحص الأعمق يقرأ تفاصيل كل حجز على حدة —
        أبطأ، لكنه يكشف تفصيل الأسعار الكامل اللي تعتمد عليه تقارير هوستاواي.</p>
+  </div>
+
+  <div class="card">
+    <h2>افحص حجز واحد</h2>
+    <p class="hint">اكتب رقم الحجز من هوستاواي (مثال 62939747) — نعرض لك كل رقم يرسله
+       هوستاواي عن هذا الحجز، وكل يوم من أيام التقويم اللي تخصه، بدون أي تفسير مننا.
+       هذي الطريقة اللي نلقى فيها من وين جاء الرقم اللي تشوفه في التقارير.</p>
+    <div class="controls">
+      <div class="f"><label>رقم الحجز</label>
+        <input type="text" id="oneId" inputmode="numeric" placeholder="62939747"
+               style="font-family:var(--font-num);direction:ltr;text-align:left;
+                      padding:9px 11px;border:1px solid var(--line-strong);
+                      border-radius:10px;background:var(--surface);color:var(--text);
+                      min-height:42px;font-size:14.5px;width:180px"></div>
+      <div class="f"><button class="btn" id="oneGo">اعرض كل شيء</button></div>
+    </div>
+    <div id="oneOut"></div>
   </div>
 
   <div id="err" class="err hide"></div>
@@ -294,6 +313,24 @@ function render(){
     v.className = 'verdict idle';
     v.innerHTML = '<p class="big">ما لقينا أي رقم مالي في هذي الحجوزات</p>' +
       '<p class="why">جرّب «تفاصيل مالية أعمق» أو وسّع الفترة.</p>';
+  } else if(res.ok === 0 && res.wrong.length === 0){
+    /* NOTHING was compared. Saying "everything matches" here is not optimism, it is a
+       false all-clear: the first live run showed green while all 55 calendars had come
+       back empty. Zero comparisons is a failure to look, and must read as one. */
+    var m = DATA.meta, why;
+    if(m.calendar_days_seen === 0){
+      why = 'ما وصلنا ولا يوم من التقويم لأي شقة — يعني قراءة التقويم من هوستاواي فشلت،' +
+            ' مو إن الأسعار سليمة.';
+    } else if(m.calendar_days_with_reservation === 0){
+      why = 'وصلنا ' + m.calendar_days_seen + ' يوم من التقويم، بس ولا يوم منها يقول' +
+            ' لأي حجز يتبع — فما نقدر نربط الليالي بالحجوزات.';
+    } else {
+      why = 'التقويم ما غطّى ليالي هذي الحجوزات، أو الرقم «' + esc(FIELD) +
+            '» مو موجود فيها.';
+    }
+    v.className = 'verdict warn';
+    v.innerHTML = '<p class="big">ما قدرنا نقارن ولا حجز</p><p class="why">' + why +
+      '</p>' + statsHtml(res);
   } else if(res.wrong.length === 0){
     v.className = 'verdict good';
     v.innerHTML = '<p class="big">كل الحجوزات مطابقة للتقويم</p>' +
@@ -419,10 +456,23 @@ function renderMeta(){
   var m = DATA.meta, bits = [];
   bits.push('قرأنا ' + m.fetched + ' حجز من هوستاواي، وقارنّا ' + m.compared +
             ' منها عبر ' + m.listings_scanned + ' شقة.');
+  bits.push('التقويم: وصلنا ' + m.calendar_days_seen + ' يوم، منها ' +
+            m.calendar_days_with_reservation + ' يوم مربوط بحجز.');
+  if(m.calendar_blind_listings && m.calendar_blind_listings.length)
+    bits.push('فيه ' + m.calendar_blind_listings.length + ' شقة ما رجع منها ولا يوم.');
+  if(m.calendar_day_keys && m.calendar_day_keys.length)
+    bits.push('حقول اليوم في التقويم: ' + m.calendar_day_keys.join('، ') + '.');
+  var ns = m.not_a_sale || {}, nsk = Object.keys(ns);
+  if(nsk.length){
+    var t = 0;
+    for(var q=0;q<nsk.length;q++) t += ns[nsk[q]];
+    bits.push('استبعدنا ' + t + ' استفسار (مو حجوزات).');
+  }
   if(m.deep) bits.push('الفحص العميق قرأ ' + m.deep_fetched + ' حجز بالتفصيل' +
                        (m.deep_capped ? ' (وصلنا الحد الأقصى — قسّم الفترة)' : '') + '.');
   if(m.calendar_errors && m.calendar_errors.length)
-    bits.push('تعذّر قراءة تقويم ' + m.calendar_errors.length + ' شقة.');
+    bits.push('تعذّر قراءة تقويم ' + m.calendar_errors.length + ' شقة: ' +
+              m.calendar_errors[0].error + '.');
   var odd = m.unrecognised_statuses || {}, oddKeys = Object.keys(odd);
   if(oddKeys.length){
     var parts = [];
@@ -458,10 +508,76 @@ function downloadCsv(){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
+async function runOne(){
+  var box = $('oneOut'), id = ($('oneId').value || '').replace(/[^0-9]/g, '');
+  if(!id){ box.innerHTML = '<p class="empty">اكتب رقم الحجز أول.</p>'; return; }
+  box.innerHTML = '<p class="empty">جاري القراءة…</p>';
+  var d;
+  try{
+    var r = await fetch('/api/pricecheck/one?id=' + id, {credentials:'same-origin'});
+    d = await r.json();
+  } catch(e){ box.innerHTML = '<p class="empty">تعذّر الاتصال — ' + esc(e) + '</p>'; return; }
+  if(!d.ok){
+    box.innerHTML = '<div class="err">' + esc(d.message || d.error || 'ما قدرنا نقرأ الحجز') + '</div>';
+    return;
+  }
+  var h = '<div class="nights" style="margin-top:14px"><div class="row"><b>' +
+    esc(d.guest || 'بدون اسم') + ' — ' + esc(d.listing || ('وحدة ' + d.lid)) + '</b>' +
+    '<span class="num">' + esc(d.checkin) + ' ← ' + esc(d.checkout) + '</span></div>' +
+    '<div class="row"><span>القناة / الحالة</span><span>' + esc(d.channel || '—') +
+    ' · ' + esc(d.status || '—') + '</span></div></div>';
+
+  h += '<h2 style="font-size:15px;margin:16px 0 6px">الأرقام المالية على الحجز</h2>';
+  var mk = Object.keys(d.money || {}).sort();
+  h += '<div class="fieldsdump">';
+  if(!mk.length) h += '<span>ما فيه أي رقم مالي</span>';
+  for(var i=0;i<mk.length;i++) h += '<span>' + esc(mk[i]) + ' = ' + fmt(d.money[mk[i]]) + '</span>';
+  h += '</div>';
+
+  var nk = Object.keys(d.non_money_numbers || {}).sort();
+  if(nk.length){
+    h += '<h2 style="font-size:15px;margin:16px 0 6px">أرقام ثانية على الحجز' +
+         ' <span class="pill">قد يكون بينها المطلوب</span></h2><div class="fieldsdump">';
+    for(var j=0;j<nk.length;j++)
+      h += '<span>' + esc(nk[j]) + ' = ' + esc(d.non_money_numbers[nk[j]]) + '</span>';
+    h += '</div>';
+  }
+
+  h += '<h2 style="font-size:15px;margin:16px 0 6px">أيام التقويم لهذا الحجز</h2>';
+  if(d.calendar_error){
+    h += '<div class="err">تعذّر قراءة التقويم — ' + esc(d.calendar_error) + '</div>';
+  } else if(!(d.calendar_days || []).length){
+    h += '<p class="empty">ما رجع ولا يوم من التقويم لهذي الفترة.</p>';
+  } else {
+    var cm = d.calendar_matched || {};
+    h += '<p class="hint">رجع ' + d.calendar_days.length + ' يوم، منها ' +
+         (cm.nights_matched || 0) + ' مربوطة بهذا الحجز من أصل ' +
+         (cm.nights_expected || 0) + ' ليلة.</p>';
+    h += '<div class="scroll"><table><thead><tr>';
+    var cols = [];
+    for(var c=0;c<d.calendar_days.length;c++)
+      for(var key in d.calendar_days[c]) if(cols.indexOf(key) < 0) cols.push(key);
+    for(var x=0;x<cols.length;x++) h += '<th>' + esc(cols[x]) + '</th>';
+    h += '</tr></thead><tbody>';
+    for(var y=0;y<d.calendar_days.length;y++){
+      h += '<tr>';
+      for(var z=0;z<cols.length;z++){
+        var val = d.calendar_days[y][cols[z]];
+        if(val && typeof val === 'object') val = JSON.stringify(val);
+        h += '<td class="mono">' + esc(val === null || val === undefined ? '—' : val) + '</td>';
+      }
+      h += '</tr>';
+    }
+    h += '</tbody></table></div>';
+  }
+  box.innerHTML = h;
+}
+
 document.addEventListener('click', function(ev){
   var t = ev.target;
   if(!t || !t.closest) return;
   if(t.closest('#go')){ run(); return; }
+  if(t.closest('#oneGo')){ runOne(); return; }
   if(t.closest('#csv')){ downloadCsv(); return; }
   var fEl = t.closest('[data-field]');
   if(fEl){ FIELD = fEl.getAttribute('data-field'); render(); return; }

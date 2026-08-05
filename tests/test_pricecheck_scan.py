@@ -60,6 +60,7 @@ class _Fake:
 
     def __init__(self):
         self.window_calls, self.cal_calls, self.get_calls = [], [], []
+        self.calendar_raises = None
 
     def window(self, start, end, pad_days=45):
         self.window_calls.append((start, end))
@@ -70,7 +71,17 @@ class _Fake:
         return [dict(d) for d in CAL.get(lid, [])]
 
     def api_get(self, path, params=None):
+        """The ONE transport now — the scan reads calendars through api_get so a
+        failure raises and is reported instead of being swallowed into an empty list."""
         self.get_calls.append(path)
+        if "/calendar" in path:
+            if self.calendar_raises:
+                raise RuntimeError(self.calendar_raises)
+            lid = int(path.split("/")[2])
+            self.cal_calls.append((lid, params.get("startDate"), params.get("endDate")))
+            lo, hi = params["startDate"], params["endDate"]
+            return {"result": [dict(d) for d in CAL.get(lid, [])
+                               if lo <= d["date"] <= hi]}
         rid = int(str(path).rsplit("/", 1)[-1])
         for r in RES:
             if r["id"] == rid:
@@ -123,10 +134,15 @@ class PriceCheckScanTest(unittest.TestCase):
         ids_c = {r["id"] for r in self._scan(include_cancelled=True)["rows"]}
         self.assertIn(904, ids_c)
 
-    def test_one_calendar_call_per_listing_not_per_booking(self):
+    def test_calendars_are_fetched_per_listing_not_per_booking(self):
         self._scan()
-        self.assertEqual(len(self.fake.cal_calls), 2)
-        self.assertEqual(sorted(c[0] for c in self.fake.cal_calls), [11, 12])
+        self.assertEqual(sorted({c[0] for c in self.fake.cal_calls}), [11, 12])
+        # 3 bookings across 2 listings, spans under one chunk → far fewer calls than rows
+        self.assertLessEqual(len(self.fake.cal_calls), 4)
+
+    def test_shallow_mode_reads_calendars_but_no_reservation_details(self):
+        self._scan()
+        self.assertTrue(all("/calendar" in p for p in self.fake.get_calls))
 
     def test_uses_the_window_fetch_never_the_truncating_history_cache(self):
         self._scan()
@@ -138,19 +154,80 @@ class PriceCheckScanTest(unittest.TestCase):
         by_id = {r["id"]: r for r in out["rows"]}
         self.assertIn("financeField.baseRate", by_id[901]["money"])
         self.assertEqual(out["meta"]["deep_fetched"], 3)
-        self.assertTrue(all(p.startswith("/reservations/") for p in self.fake.get_calls))
+        detail = [p for p in self.fake.get_calls if p.startswith("/reservations/")]
+        self.assertEqual(len(detail), 3)
 
     def test_shallow_mode_makes_no_per_reservation_calls(self):
         self._scan()
-        self.assertEqual(self.fake.get_calls, [])
+        self.assertFalse([p for p in self.fake.get_calls if "/reservations/" in p])
 
     def test_a_broken_calendar_never_becomes_a_price_accusation(self):
-        scan.HOST.fetch_calendar_days = lambda lid, s, e: (_ for _ in ()).throw(
-            RuntimeError("429 rate limited"))
+        self.fake.calendar_raises = "429 rate limited"
         out = self._scan()
         self.assertTrue(all(r["status"] == "uncertain" for r in out["rows"]))
         self.assertEqual(engine.verdict(out["rows"], "totalPrice")["counts"]["wrong"], 0)
         self.assertEqual(len(out["meta"]["calendar_errors"]), 2)
+
+    def test_a_blind_calendar_is_reported_not_silently_treated_as_agreement(self):
+        """The live-run defect: 55 calendars came back empty and the page went GREEN.
+        An empty read is a failure to look, and the numbers must say so."""
+        self.fake.calendar_raises = "500 upstream"
+        m = self._scan()["meta"]
+        self.assertEqual(m["calendar_days_seen"], 0)
+        self.assertEqual(m["calendar_days_with_reservation"], 0)
+        self.assertEqual(sorted(m["calendar_blind_listings"]), [11, 12])
+
+    def test_calendar_evidence_is_reported_on_a_healthy_run(self):
+        m = self._scan()["meta"]
+        self.assertGreater(m["calendar_days_seen"], 0)
+        self.assertGreater(m["calendar_days_with_reservation"], 0)
+        self.assertEqual(m["calendar_blind_listings"], [])
+        self.assertIn("reservationId", m["calendar_day_keys"])
+
+    def test_inquiries_are_not_bookings_and_never_enter_the_maths(self):
+        """3,818 inquiries entered the first live scan and then all reported
+        «التقويم ما غطّى الليالي» — of course: nobody ever booked them."""
+        RES.append({"id": 910, "listingMapId": 11, "arrivalDate": "2026-07-20",
+                    "departureDate": "2026-07-21", "status": "inquiry",
+                    "channelName": "direct", "guestName": "Sail", "totalPrice": 700.0})
+        try:
+            out = self._scan()
+            self.assertNotIn(910, {r["id"] for r in out["rows"]})
+            self.assertEqual(out["meta"]["not_a_sale"], {"inquiry": 1})
+        finally:
+            RES.pop()
+
+    def test_a_long_span_is_split_into_chunks_rather_than_one_huge_request(self):
+        RES.append({"id": 911, "listingMapId": 12, "arrivalDate": "2026-07-25",
+                    "departureDate": "2026-09-20", "status": "new",
+                    "channelName": "direct", "guestName": "Long", "totalPrice": 9000.0})
+        try:
+            self._scan()
+            cal12 = [c for c in self.fake.cal_calls if c[0] == 12]
+            self.assertGreater(len(cal12), 1)
+            for _lid, s, e in cal12:
+                self.assertLessEqual((date.fromisoformat(e) - date.fromisoformat(s)).days,
+                                     scan.CAL_CHUNK_DAYS)
+        finally:
+            RES.pop()
+
+
+class PriceCheckProbeTest(PriceCheckScanTest):
+    """The single-booking diagnostic — the only thing that can locate a number the
+    portfolio scan never sees."""
+
+    def test_probe_returns_every_field_and_the_calendar_days_raw(self):
+        p = scan.probe(901)
+        self.assertEqual(p["guest"], "Reem Ali")
+        self.assertAlmostEqual(p["money"]["totalPrice"], 1000.0)
+        self.assertIn("financeField.baseRate", p["money"])
+        self.assertIn("arrivalDate", p["all_keys"])
+        self.assertEqual(len(p["calendar_days"]), 2)
+        self.assertAlmostEqual(p["calendar_matched"]["total"], 1416.0)
+
+    def test_probe_on_an_unknown_booking_says_so_instead_of_inventing(self):
+        p = scan.probe(999999)
+        self.assertEqual(p["error"], "not_found")
 
     def test_the_package_contains_no_write_call_at_all(self):
         import pathlib
