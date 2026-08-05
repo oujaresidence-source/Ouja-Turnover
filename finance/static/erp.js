@@ -270,6 +270,7 @@
       se_pub_confirm: 'بينشر هالأرقام للمالك (الرابط الحي + PDF سوا) ويرفع رقم النسخة. نتأكد؟',
       se_pubd: 'نُشرت نسخة {v} ✓', se_ver: 'نسخة', se_never_pub: 'ما انشرت بعد',
       se_pub_stale: 'تعديلاتك ما وصلت للمالك بعد — التقرير النهائي والرابط لا يزالان على النسخة {v}. اضغط «نشر النسخة للمالك».',
+      se_moved: 'انتقل المصروف إلى كشف {m} — انشال من هذا الشهر وأضيف هناك ✅',
       se_recompute: 'أعد الحساب', se_diff_title: 'فرق إعادة الحساب (المنشور ← الجديد)',
       se_diff_none: 'ما تغيّر شي — المنشور مطابق للحساب الجديد ✓',
       se_diff_apply: 'انشر النسخة الجديدة', se_why: 'ليش؟',
@@ -621,6 +622,7 @@
       se_pub_confirm: 'Publishes these numbers to the owner (live link + PDF together) and bumps the version. Continue?',
       se_pubd: 'Published version {v} ✓', se_ver: 'Version', se_never_pub: 'Not published yet',
       se_pub_stale: 'Your edits have not reached the owner — the final report and link are still on version {v}. Press «Publish to owner».',
+      se_moved: 'Moved to the {m} statement — removed from this month, added there ✅',
       se_recompute: 'Recompute', se_diff_title: 'Recompute diff (published ← fresh)',
       se_diff_none: 'Nothing changed — published matches the fresh compute ✓',
       se_diff_apply: 'Publish the new version', se_why: 'Why?',
@@ -2188,7 +2190,10 @@
       var boxE = rowE.querySelector('.se-inline[data-need="se-xe"]');
       var rE = boxE.querySelector('.se-reason').value.trim();
       if (!rE) { boxE.querySelector('.se-reason').classList.add('need'); return; }
-      seEdit({ op: 'exp_override', id: rowE.getAttribute('data-xid'), reason: rE,
+      // a hand-entered row takes its own op: changing its date MOVES it to that
+      // month's statement, which an override on a Hostaway line can never do
+      seEdit({ op: (rowE.getAttribute('data-manual') === '1' ? 'exp_manual_edit' : 'exp_override'),
+               id: rowE.getAttribute('data-xid'), reason: rE,
                lid: rowE.getAttribute('data-xlid') || '',   // so the edit reaches the apartment
                amount: boxE.querySelector('.se-e-amt').value,
                date: boxE.querySelector('.se-e-date').value,
@@ -4699,10 +4704,10 @@
       '<button class="btn primary xs" data-act="se-xe-go">' + esc(t('se_save')) + '</button></div>' +
       seReasonRow('se-xd') +
       '</div><div class="wq-actions"><span class="c-amt"><b>−' + fmtAmt(x.amount) + '</b></span>' +
+      '<button class="btn ghost xs" data-act="se-xe-open">' + esc(t('se_exp_edit')) + '</button>' +
       (x.manual
         ? '<button class="btn danger-ghost xs" data-act="se-man-del">' + esc(t('se_exp_del')) + '</button>'
-        : '<button class="btn ghost xs" data-act="se-xe-open">' + esc(t('se_exp_edit')) + '</button>' +
-          '<button class="btn danger-ghost xs" data-act="se-xd-open">' + esc(t('se_exp_del')) + '</button>') +
+        : '<button class="btn danger-ghost xs" data-act="se-xd-open">' + esc(t('se_exp_del')) + '</button>') +
       '</div></div>';
   }
 
@@ -4923,7 +4928,12 @@
     body.m = d.month;
     if (btn) btn.disabled = true;
     return api('/erp/api/owners/statement/edit', { method: 'POST', body: body })
-      .then(function (r) { toast(t('se_saved')); seRerender(r); })
+      .then(function (r) {
+        // a moved line disappears from this month — say WHERE it went, or the
+        // accountant reads the empty row as a delete
+        toast(r && r.moved_to ? t('se_moved').replace('{m}', r.moved_to) : t('se_saved'));
+        seRerender(r);
+      })
       .catch(function (e) { if (btn) btn.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
   }
 

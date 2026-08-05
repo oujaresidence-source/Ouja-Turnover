@@ -1504,7 +1504,7 @@ def statement_payload(owner, mkey):
 
 
 _EDIT_OPS = ("resv_exclude", "resv_include", "exp_override", "exp_delete",
-             "exp_manual_add", "exp_manual_del", "adj_add", "adj_del",
+             "exp_manual_add", "exp_manual_edit", "exp_manual_del", "adj_add", "adj_del",
              "inc_manual_add", "inc_manual_del")
 
 # Ids minted by the editor itself — an expense, a manual income line or an
@@ -1541,6 +1541,7 @@ def statement_edit(request, body):
     rec = stmt_rec(owner, mkey, create=True)
     e = rec["edits"]
     actor = api.actor(request)
+    moved_to = None            # set when an edit relocates a line to another month
     before = None
     after = None
     if op == "resv_exclude":
@@ -1630,6 +1631,96 @@ def statement_edit(request, body):
             e["exp_manual"].append(row)
             target = row["id"]
             after = row
+    elif op == "exp_manual_edit":
+        # «تعديل» on a hand-entered expense — amount / date / description, and
+        # above all the MONTH. Since 2.7.1 a manual line counts in the month whose
+        # store holds it, whatever its date says, so moving it to another month
+        # means physically relocating the row: out of July's store, into August's.
+        # Anything less would print an August date on a line July still charges.
+        new_amt = body.get("amount")
+        if new_amt not in (None, ""):
+            try:
+                new_amt = round(float(new_amt), 2)
+            except (TypeError, ValueError):
+                return {"error": "bad_amount"}, 400
+        else:
+            new_amt = None
+        d_in = str(body.get("date") or "")[:10]
+        new_date = d_in if _pdate(d_in) else None
+        dest = new_date[:7] if new_date else mkey
+        new_desc = body.get("description")
+        moved = dest != mkey
+
+        if str(target).startswith("exp-adj-"):          # per-APARTMENT line
+            try:
+                lid = int(body.get("lid"))
+                idx = int(str(target).replace("exp-adj-", ""))
+            except (TypeError, ValueError):
+                return {"error": "bad_target"}, 400
+            adj = B._finance_adjust.get(
+                B._finance_adjust_key(lid, *[d.isoformat() for d in B._month_bounds(mkey)]))
+            lines = list((adj or {}).get("extra_lines") or [])
+            if not (0 <= idx < len(lines)) or (lines[idx] or {}).get("kind") == "income":
+                return {"error": "expense_line_not_found"}, 404
+            before = dict(lines[idx])
+            row = dict(lines[idx])
+            if new_amt is not None:
+                row["amount"] = new_amt
+            if new_date:
+                row["date"] = new_date
+            if new_desc not in (None, ""):
+                row["label"] = str(new_desc)[:200]
+            row["reason"] = reason
+            if not moved:
+                lines[idx] = row
+                adj["extra_lines"] = lines
+                B._finance_adjust[B._finance_adjust_key(
+                    lid, *[d.isoformat() for d in B._month_bounds(mkey)])] = adj
+            else:
+                del lines[idx]
+                adj["extra_lines"] = lines
+                src_key = B._finance_adjust_key(
+                    lid, *[d.isoformat() for d in B._month_bounds(mkey)])
+                if not (adj.get("expense_overrides") or adj.get("extra_lines")
+                        or adj.get("line_overrides") or (adj.get("comment") or "").strip()):
+                    B._finance_adjust.pop(src_key, None)
+                else:
+                    B._finance_adjust[src_key] = adj
+                dst = _unit_adjust(lid, dest)
+                dst["extra_lines"] = list(dst.get("extra_lines") or []) + [row]
+            B.persist_state()
+            after = row
+        else:                                            # owner-level line
+            rows = e.get("exp_manual") or []
+            hit = next((x for x in rows if x.get("id") == target), None)
+            if hit is None:
+                return {"error": "expense_line_not_found"}, 404
+            before = dict(hit)
+            row = dict(hit)
+            if new_amt is not None:
+                row["amount"] = new_amt
+            if new_date:
+                row["date"] = new_date
+            if new_desc not in (None, ""):
+                row["description"] = str(new_desc)[:200]
+            row["reason"] = reason
+            row["by"] = actor
+            row["at"] = datetime.now(B.TZ).isoformat(timespec="seconds")
+            if not moved:
+                e["exp_manual"] = [row if x.get("id") == target else x for x in rows]
+            else:
+                e["exp_manual"] = [x for x in rows if x.get("id") != target]
+                drec = stmt_rec(owner, dest, create=True)
+                drec["edits"].setdefault("exp_manual", []).append(row)
+            after = row
+        if moved:
+            # The destination month must be able to explain the line too, and its
+            # own cached numbers are now wrong.
+            drec = stmt_rec(owner, dest, create=True)
+            stmt_audit_add(drec, actor, op, target, before, after,
+                           (reason + " — منقول من " + mkey))
+            _invalidate_owner_cache(owner, dest)
+            moved_to = dest
     elif op == "exp_manual_del" and str(target).startswith("exp-adj-"):
         # per-lid manual expense line (see exp_manual_add) — mirror inc_manual_del
         try:
@@ -1724,7 +1815,10 @@ def statement_edit(request, body):
     except Exception:
         pass
     _invalidate_owner_cache(owner, mkey)
-    return statement_payload(owner, mkey), 200
+    payload = statement_payload(owner, mkey)
+    if moved_to:
+        payload["moved_to"] = moved_to
+    return payload, 200
 
 
 def statement_publish(request, body):
