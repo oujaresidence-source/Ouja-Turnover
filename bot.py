@@ -19724,7 +19724,8 @@ const T = {
     fb_clarify:'طلب توضيح', fb_no_approve_perm:'ما عندك صلاحية اعتماد مبالغ ٣٠٠٠+', fb_review_approvals:'مراجعة الاعتمادات', fb_bulk_approve:'اعتماد المحدد', fb_reject_reason:'سبب الرفض', fb_clarify_reason:'وش التوضيح المطلوب؟',
     log_empty:'لا يوجد نشاط',
     fresh:'آخر تحديث', live:'مباشر',
-    wrong:'رمز غير صحيح · Wrong token',
+    wrong:'انتهت جلستك أو ما عاد الرمز صالح — سجّل دخولك مرة ثانية بالاسم وكلمة المرور',
+    bootfail:'ما قدرنا نوصل للخادم — جرّب مرة ثانية بعد شوي',
     sent:'تم الإرسال ✅', rejected:'تم التجاهل', claimed_t:'تم الاستلام ✅', applied:'تم التطبيق ✅', taught:'تم حفظ المعلومة ✅', skipped:'تم التجاهل', resumed:'تم الاستئناف', err:'صار خطأ',
     needs_alert:'يبيك الحين', no_needs:'كل شي تمام · ما يبيك شي 🤍',
     occ_tonight:'الإشغال الليلة', rev_7:'إيراد ٧ أيام', rev_30:'إيراد ٣٠ يوم',
@@ -20050,7 +20051,8 @@ const T = {
     fb_clarify:'Request clarification', fb_no_approve_perm:'You do not have permission to approve 3,000+ SAR items', fb_review_approvals:'Review approvals', fb_bulk_approve:'Approve selected', fb_reject_reason:'Rejection reason', fb_clarify_reason:'What clarification is needed?',
     log_empty:'No activity',
     fresh:'Updated', live:'live',
-    wrong:'Wrong token',
+    wrong:'Your session ended or the token is no longer valid — please sign in again with your username and password',
+    bootfail:'Could not reach the server — please try again in a moment',
     sent:'Sent ✅', rejected:'Dismissed', claimed_t:'Claimed ✅', applied:'Applied ✅', taught:'Saved ✅', skipped:'Skipped', resumed:'Resumed', err:'Something went wrong',
     needs_alert:'Needs you', no_needs:"You're all caught up 🤍",
     occ_tonight:'Occupied tonight', rev_7:'Revenue 7d', rev_30:'Revenue 30d',
@@ -21503,12 +21505,17 @@ async function init(){
     var _qt = new URLSearchParams(location.search).get('token');
     if(_qt){ localStorage.setItem(TK, _qt); history.replaceState(null, '', location.pathname + location.hash); }
   }catch(e){ console.error('token bootstrap failed:', e); }
-  // STEP 1 — verify token. Only here can we say "wrong token".
+  // STEP 1 — verify the saved login. Two DIFFERENT failures used to print the same
+  // "wrong token" line, and employees read it as "my password is wrong" (it never is —
+  // this runs before anyone types anything). api() throws the string 'unauthorized' on
+  // a 401 (session expired / account switched off or rebuilt) — that is the one case
+  // where signing in again fixes it. Anything else is the server or the network, and
+  // telling them to sign in again would be a lie.
   try{
     document.getElementById('lerr').textContent='';
     await api('/api/overview');
   }catch(e){
-    document.getElementById('lerr').textContent = t().wrong;
+    document.getElementById('lerr').textContent = (e === 'unauthorized') ? t().wrong : t().bootfail;
     return;
   }
   // STEP 2 — token is valid. From here on, *never* fall back to "wrong token"
