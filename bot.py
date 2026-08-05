@@ -18522,6 +18522,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub">كل شقة وين هي · مين ينظفها · أداء أوجا الفعلي · كم شخص ناقصنا</div>
           </div>
           <div class="page-tools">
+            <button class="btn ghost sm" id="covDlBtn" onclick="covDownloadAll()" title="ينزّل ملفين: تقرير يشرح كل رقم ومن وين جاء، وملف بيانات خام كامل">📄 نزّل كل البيانات</button>
             <button class="btn ghost sm" onclick="covResolveGeo()" title="حل روابط الخرائط المختصرة وتحويلها لإحداثيات">📍 حدّد المواقع</button>
             <button class="btn ghost sm" onclick="loadCoverage(1)">↻ تحديث</button>
           </div>
@@ -29161,6 +29162,40 @@ async function covResolveGeo(){
   }catch(e){ toast(labelText('ما نجح تحديد المواقع','Could not resolve locations')); }
   COV.busy = false;
   loadCoverage(1);
+}
+
+/* ---- download everything ----
+   Two files from ONE request: the briefing that explains where every number came from,
+   and the complete raw data. One request on purpose — asking twice could hand back two
+   files computed from two different moments. NO backslashes anywhere in here. */
+function covSaveBlob(text, name, mime){
+  var blob = new Blob([text], {type: mime + ';charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+}
+async function covDownloadAll(){
+  if(COV.busy) return;
+  COV.busy = true;
+  var btn = document.getElementById('covDlBtn');
+  if(btn){ btn.disabled = true; btn.textContent = labelText('يجهّز الملفات…','Preparing…'); }
+  try{
+    var r = await api('/api/coverage/brief?format=both');
+    if(!r || !r.ok || !r.md) throw (r && r.detail) ? r.detail : 'no data';
+    covSaveBlob(r.md, r.md_name || 'ouja-coverage-brief.md', 'text/markdown');
+    // A short pause: browsers drop the second file when two downloads fire together.
+    setTimeout(function(){
+      covSaveBlob(JSON.stringify(r.data, null, 1),
+                  r.json_name || 'ouja-coverage-data.json', 'application/json');
+    }, 700);
+    toast(labelText('نزّلنا ملفين: التقرير + البيانات الخام','Downloaded 2 files: brief + raw data'));
+  }catch(e){
+    toast(labelText('ما نجح التنزيل — جرّب مرة ثانية','Download failed — try again'));
+  }
+  COV.busy = false;
+  if(btn){ btn.disabled = false; btn.textContent = '📄 نزّل كل البيانات'; }
 }
 
 /* ---- settings ---- */

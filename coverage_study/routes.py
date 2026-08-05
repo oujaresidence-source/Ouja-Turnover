@@ -11,10 +11,11 @@ geo cache.
 
 import asyncio
 import datetime
+import json
 import time
 import traceback
 
-from . import engine, geo, pluscode, tiles
+from . import brief, engine, geo, pluscode, tiles
 from .host import HOST, call
 
 EDIT_ROLES = ("admin", "ops")
@@ -266,7 +267,13 @@ def _build(request_params):
     return s
 
 
-async def api_study(request):
+async def _snapshot(request):
+    """The one snapshot both the page and the export are built from.
+
+    Deliberately shared: an export that recomputed its own numbers could disagree with
+    the screen the owner is looking at, and a file that quietly says something different
+    from the dashboard is worse than no file.
+    """
     since = (request.query.get("since") or "").strip()[:10] or None
     demand = request.query.get("demand")
     people = request.query.get("people")
@@ -306,7 +313,49 @@ async def api_study(request):
     s["capacity"]["demand_source"] = params["demand_source"]
     s["capacity"]["demand_note"] = params["demand_note"]
     s["generated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
-    return _json({"ok": True, "study": s})
+    return s
+
+
+async def api_study(request):
+    return _json({"ok": True, "study": await _snapshot(request)})
+
+
+async def api_brief(request):
+    """«نزّل كل البيانات» — the same snapshot as a file you can hand to someone else.
+
+    `?format=md`   a readable briefing where every number carries its source
+    `?format=json` the complete raw snapshot, nothing summarised
+    `?format=both` both of them, built from ONE computation, for the page's button
+
+    `both` exists for a reason: fetching the two files separately would run the study
+    twice, and the reservation cache can turn over between the two runs — leaving the
+    owner holding a briefing and a data file that quietly disagree.
+
+    Read-only, like everything else in this module: it renders what the page already
+    computed and writes nothing anywhere.
+    """
+    s = await _snapshot(request)
+    fmt = (request.query.get("format") or "md").strip().lower()
+    day = str(s.get("generated_at") or "")[:10]
+    if fmt == "both":
+        return _json({"ok": True,
+                      "md": brief.render_markdown(s),
+                      "data": brief.render_payload(s),
+                      "md_name": brief.filename("md", day),
+                      "json_name": brief.filename("json", day)})
+    if fmt == "json":
+        body = json.dumps(brief.render_payload(s), ensure_ascii=False, indent=1)
+        ctype = "application/json"
+    else:
+        body = brief.render_markdown(s)
+        ctype = "text/markdown"
+    name = brief.filename("json" if fmt == "json" else "md", day)
+    web = getattr(HOST, "web", None)
+    if web is None:
+        return _json({"ok": False, "error": "no_web"}, 500)
+    return web.Response(text=body, content_type=ctype, charset="utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="%s"' % name,
+                                 "Cache-Control": "no-store"})
 
 
 def _num(v):
@@ -484,5 +533,6 @@ def register(app):
     app.router.add_post("/api/coverage/settings", _safe(api_settings))
     app.router.add_post("/api/coverage/pin", _safe(api_pin))
     app.router.add_get("/api/coverage/study", _safe(api_study))
+    app.router.add_get("/api/coverage/brief", _safe(api_brief))
     app.router.add_get("/api/coverage/geo", _safe(api_geo))
     app.router.add_get("/api/coverage/map.png", _safe(api_map))
