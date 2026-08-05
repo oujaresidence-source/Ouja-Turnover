@@ -137,6 +137,17 @@ except Exception as _kb_err:            # pragma: no cover
     _kb = None
     _HAS_KB = False
 
+# Price check «فحص الأسعار» — an employee edits the price of a manual direct booking in
+# the Hostaway mobile app and afterwards the Calendar and Financial Reporting disagree.
+# READ-ONLY: the package contains no write of any kind. The calendar is the truth.
+try:
+    import pricecheck as _pricecheck
+    _HAS_PRICECHECK = os.environ.get("PRICECHECK_ENABLED", "1") == "1"
+except Exception as _pc_err:            # pragma: no cover
+    print("[pricecheck] import failed (page disabled, bot unaffected):", _pc_err)
+    _pricecheck = None
+    _HAS_PRICECHECK = False
+
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
 # humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
 # nothing, issues nothing.
@@ -55650,6 +55661,24 @@ async def start_web_server():
                          " (already seeded)" if _kb_seeded.get("skipped") else " (seeded now)"))
             except Exception as _kbe:
                 print("[kb] wiring failed (knowledge tab disabled, bot unaffected):", _kbe)
+
+        # ---- «فحص الأسعار» — compares every booking against the calendar and reports the
+        # ones whose Hostaway numbers disagree. Hands it fetch_reservations_window (NOT the
+        # truncating history cache — CLAUDE.md trap #4) and the calendar reader. Read-only.
+        if _HAS_PRICECHECK:
+            try:
+                _pricecheck.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role,
+                    "json_response": _json, "web": web,
+                    "api_get": api_get,
+                    "fetch_reservations_window": fetch_reservations_window,
+                    "fetch_calendar_days": fetch_calendar_days,
+                    "get_listings_map": get_listings_map,
+                })
+                _pricecheck.register_routes(app)
+                print("[pricecheck] wired + routes registered (/pricecheck) — read-only")
+            except Exception as _pce:
+                print("[pricecheck] wiring failed (page disabled, bot unaffected):", _pce)
 
         # ---- «نظام الالتزام» — weekly-report ladder + warnings. Additive; reuses brain.db,
         # the Employee Calendar (the ONE employee list) and assignments.json's Discord ids.
