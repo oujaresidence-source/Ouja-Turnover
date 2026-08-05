@@ -516,6 +516,16 @@ def unit_statement(rec, mkey, force_rederive=False):
     out["exp_lines"] = exp_kept
     out["contract_excluded_expenses"] = exp_excluded
     out["total_income"] = _fnum(income + manual)
+    # The channel split has to follow the window filter too. It didn't, so a unit
+    # that is OUTSIDE its contract for the month showed «إجمالي الدخل 0.00» beside
+    # «دخل Airbnb 9,232.32» on the same page — found by the 2026-08-04 sweep on
+    # عبدالمحسن (4 months), not by anyone reading the statement.
+    _paid = [l for l in kept if l.get("income") is not None]
+    out["income_airbnb"] = _fnum(sum((_D(l["income"]) for l in _paid
+                                      if (l.get("channel") or "") == "airbnb"), Decimal(0)))
+    out["income_direct"] = _fnum(sum((_D(l["income"]) for l in _paid
+                                      if (l.get("channel") or "") != "airbnb"), Decimal(0)))
+    out["extras"] = _fnum(sum((_D(l.get("extras") or 0) for l in _paid), Decimal(0)))
     out["ouja_fee"] = _fnum(fee)
     out["expenses"] = _fnum(exp_total)
     out["cleaning"] = {"type": cl_now.get("type", "ours"), "amount": _fnum(cl_month_amt or 0),
@@ -1068,17 +1078,22 @@ def statement_health(owner, mkey, rep=None):
     add = lambda k, ar, gap=None: P.append(
         {"kind": k, "text_ar": ar, "gap": (_fnum(gap) if gap is not None else None)})
     T = lambda k: _D(rep.get(k) or 0)
+    # Each unit is rounded to halalas before being summed, so a multi-unit owner
+    # drifts a halala or two by arithmetic, not by losing money. Alarming on that
+    # would bury the real findings — allow the drift, never more.
+    tol = Decimal("0.05") + Decimal("0.01") * len(rep.get("apartments") or [])
+    off = lambda a, b: abs(_D(a) - _D(b)) > tol
 
     # 1) «تفصيل الدخل» must add up to «إجمالي الدخل» — the PDF prints both.
     split = T("income_airbnb") + T("income_direct") + T("extras") + T("manual_income")
-    if _fnum(split) != _fnum(T("total_income")):
+    if off(split, T("total_income")):
         add("income_split", "تفصيل الدخل ما يساوي إجمالي الدخل",
             T("total_income") - split)
 
     # 2) The bottom line must follow from the rows above it.
     net = (T("total_income") - T("ouja_fee") - T("expenses")
            - _D((rep.get("cleaning") or {}).get("total") or 0) + T("adjustments_total"))
-    if _fnum(net) != _fnum(T("owner_net")):
+    if off(net, T("owner_net")):
         add("net_math", "صافي المالك ما يطلع من الصفوف اللي فوقه", T("owner_net") - net)
 
     # 3) Unit subtotals may only fall short by lines that carry no apartment.
@@ -1087,13 +1102,13 @@ def statement_health(owner, mkey, rep=None):
         unit_sum = sum((_D(p.get("total_income") or 0) for p in parts), Decimal(0))
         homeless = sum((_D(m.get("amount")) for m in (rep.get("manual_income_lines") or [])
                         if not m.get("lid")), Decimal(0))
-        if _fnum(unit_sum + homeless) != _fnum(T("total_income")):
+        if off(unit_sum + homeless, T("total_income")):
             add("unit_rollup", "مجموع الشقق ما يساوي إجمالي المالك",
                 T("total_income") - unit_sum - homeless)
         unit_exp = sum((_D(p.get("expenses") or 0) for p in parts), Decimal(0))
         homeless_exp = sum((_D(x.get("amount")) for x in (rep.get("exp_lines") or [])
                             if not x.get("lid")), Decimal(0))
-        if _fnum(unit_exp + homeless_exp) != _fnum(T("expenses")):
+        if off(unit_exp + homeless_exp, T("expenses")):
             add("unit_expenses", "مجموع مصاريف الشقق ما يساوي مصاريف المالك",
                 T("expenses") - unit_exp - homeless_exp)
 

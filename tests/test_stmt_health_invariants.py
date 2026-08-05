@@ -146,5 +146,55 @@ class StatementHealthTest(unittest.TestCase):
         self.assertEqual(rep["statements_with_problems"], 0)
 
 
+class OutsideContractSplitTest(unittest.TestCase):
+    """A unit outside its contract window zeroes the income — the channel split
+    must follow. Found by the 2026-08-04 sweep on عبدالمحسن: «إجمالي الدخل 0.00»
+    printed beside «دخل Airbnb 9,232.32», for four months, unreported by anyone."""
+
+    def setUp(self):
+        OW._terms_cache["v"] = None
+        OW._stmt_cache["v"] = None
+        bot._save_json("owner_statements.json", {})
+        bot._save_json("owner_terms.json", {
+            "owners": {},
+            "units": {bot._owner_key("1 MLQ"): {"contract_from": "2026-09-01",
+                                                "terms": [{"from": "2026-01-01", "mgmt_pct": 20.0}]}},
+            "versions": []})
+        bot._owner_registry.clear()
+        bot._owner_registry[bot._owner_key("1 MLQ")] = {
+            "apartment": "1 MLQ", "owner": "عبدالمحسن", "mgmt_pct": 20.0, "lid": 8801,
+            "cleaning": {"type": "ours", "amount": 0}}
+        self._patched = (bot.fetch_reservations_window, bot.fetch_reservations_window_checked,
+                         bot.get_listings_map)
+        rows = [{"id": 7001, "listingMapId": 8801, "arrivalDate": "2026-07-05",
+                 "departureDate": "2026-07-06", "nights": 1, "totalPrice": 9232.32,
+                 "guestName": "ضيف", "status": "new", "channelName": "airbnb",
+                 "airbnbExpectedPayoutAmount": 9232.32, "alreadyPaid": 9232.32,
+                 "paymentStatus": "paid"}]
+        bot.fetch_reservations_window = lambda s, e, pad_days=45: list(rows)
+        bot.fetch_reservations_window_checked = lambda s, e: (list(rows), False)
+        bot.get_listings_map = lambda: {8801: "1 MLQ"}
+        bot._expenses.clear()
+        bot._owner_portal_cache.clear()
+        bot._finance_adjust.clear()
+
+    def tearDown(self):
+        (bot.fetch_reservations_window, bot.fetch_reservations_window_checked,
+         bot.get_listings_map) = self._patched
+
+    def test_split_is_zero_when_the_month_is_outside_the_contract(self):
+        s = OW.compute_owner_statement("عبدالمحسن", MONTH)
+        self.assertEqual(s["total_income"], 0.0)
+        self.assertEqual(s["income_airbnb"], 0.0,
+                         "the channel split kept income the contract window excluded")
+        self.assertTrue(OW.statement_health("عبدالمحسن", MONTH)["ok"])
+
+    def test_rounding_drift_is_not_reported_as_a_problem(self):
+        s = dict(OW.compute_owner_statement("عبدالمحسن", MONTH))
+        s["owner_net"] = round(float(s["owner_net"]) + 0.01, 2)      # a halala of drift
+        self.assertTrue(OW.statement_health("عبدالمحسن", MONTH, rep=s)["ok"])
+        s["owner_net"] = round(float(s["owner_net"]) + 5.0, 2)       # real money
+        self.assertFalse(OW.statement_health("عبدالمحسن", MONTH, rep=s)["ok"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
