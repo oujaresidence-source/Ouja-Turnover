@@ -40,7 +40,7 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.5"   # قرارات المحرر توصل تفصيل الشقة و PDF — editor decisions reach the unit breakdown
+ERP_VERSION = "2.7.6"   # تفصيل الدخل يتبع التعديلات + «فحص الكشوف» لكل الملاك
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -675,6 +675,17 @@ async def _h_api_stmt_diff(request):
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
+async def _h_api_stmt_audit(request):
+    """«فحص الكشوف» — sweep every owner × month and report any statement whose own
+    numbers disagree (income split, net math, unit roll-up, a force-included
+    booking with no money, a deleted expense still counted, a stale published
+    copy). One call answers «هل فيه كشف ثاني فيه نفس المشكلة؟» for the whole book."""
+    months = [m.strip() for m in (request.query.get("months") or "").split(",") if m.strip()]
+    owner = (request.query.get("owner") or "").strip() or None
+    data = await asyncio.to_thread(OW.audit_all, months, owner)
+    return api.jres(data, 200)
+
+
 async def _h_api_stmt_tieout(request):
     """v2.2 slice 2: تطابق الكشوف — per-unit subtotals vs aggregate vs PDF fixture."""
     owner = (request.query.get("owner") or "").strip()
@@ -1170,6 +1181,7 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/statement/publish", _guarded(_h_api_stmt_publish, write=True))
     app.router.add_get("/erp/api/owners/statement/diff", _guarded(_h_api_stmt_diff))
     app.router.add_get("/erp/api/owners/statement/tieout", _guarded(_h_api_stmt_tieout))
+    app.router.add_get("/erp/api/owners/statement/audit", _guarded(_h_api_stmt_audit))
     app.router.add_get("/erp/api/owners/cycle", _guarded(_h_api_cycle))
     app.router.add_post("/erp/api/owners/cycle/status", _guarded(_h_api_cycle_status, write=True))
     app.router.add_post("/erp/api/owners/cycle/links", _guarded(_h_api_cycle_links, write=True))

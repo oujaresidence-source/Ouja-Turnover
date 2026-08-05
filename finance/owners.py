@@ -927,6 +927,19 @@ def _apply_stmt_edits(agg, edits):
     agg["adjust_lines"] = adjustments
     agg["expenses"] = _fnum(exp_total)
     agg["total_income"] = _fnum(income + manual_income)
+    # …and the CHANNEL SPLIT with it. It used to keep the pre-edit numbers, so a
+    # force-included booking landed in the total while «تفصيل الدخل» still showed
+    # the old figure — the same page contradicting itself by exactly the included
+    # amount, which reads as «الحجز ما ظهر» (owner-reported 2026-08-04: ثامر ال
+    # جربوع 2026-07, total 8,860.88 vs split 8,424.54, diff = 436.34).
+    # Non-airbnb income folds into «مباشر»: a forced include must be visible
+    # somewhere, and 'other' channels carry no confirmed payout rule of their own.
+    paid_kept = [l for l in kept if l.get("income") is not None]
+    agg["income_airbnb"] = _fnum(sum((_D(l["income"]) for l in paid_kept
+                                      if (l.get("channel") or "") == "airbnb"), Decimal(0)))
+    agg["income_direct"] = _fnum(sum((_D(l["income"]) for l in paid_kept
+                                      if (l.get("channel") or "") != "airbnb"), Decimal(0)))
+    agg["extras"] = _fnum(sum((_D(l.get("extras") or 0) for l in paid_kept), Decimal(0)))
     agg["ouja_fee"] = _fnum(fee)
     agg["adjustments_total"] = _fnum(adj_total)
     agg["owner_net"] = _fnum(income + manual_income - fee - exp_total - cleaning + adj_total)
@@ -1034,6 +1047,116 @@ def unit_slice(rep, lid):
         "reconciliation": rep.get("reconciliation") or {"balanced": True},
         "footnotes": rep.get("footnotes") or [],
     }
+
+
+def statement_health(owner, mkey, rep=None):
+    """Every way a statement can silently disagree with itself, checked in one
+    place. Born 2026-08-04 after four separate «الرقم على الشاشة مو نفسه في
+    التقرير» reports: each one was a surface reading a value the editor's
+    decisions had never reached. Rather than wait for the fifth, assert the
+    invariants and let anyone sweep every owner on demand.
+
+    Returns {owner, month, ok, problems[]} — a problem names the surface that
+    would lie, in Arabic, with the exact gap.
+    """
+    if rep is None:
+        rep = compute_owner_statement(owner, mkey)
+    if rep is None:
+        return {"owner": owner, "month": mkey, "ok": True, "skipped": "not_in_registry",
+                "problems": []}
+    P = []
+    add = lambda k, ar, gap=None: P.append(
+        {"kind": k, "text_ar": ar, "gap": (_fnum(gap) if gap is not None else None)})
+    T = lambda k: _D(rep.get(k) or 0)
+
+    # 1) «تفصيل الدخل» must add up to «إجمالي الدخل» — the PDF prints both.
+    split = T("income_airbnb") + T("income_direct") + T("extras") + T("manual_income")
+    if _fnum(split) != _fnum(T("total_income")):
+        add("income_split", "تفصيل الدخل ما يساوي إجمالي الدخل",
+            T("total_income") - split)
+
+    # 2) The bottom line must follow from the rows above it.
+    net = (T("total_income") - T("ouja_fee") - T("expenses")
+           - _D((rep.get("cleaning") or {}).get("total") or 0) + T("adjustments_total"))
+    if _fnum(net) != _fnum(T("owner_net")):
+        add("net_math", "صافي المالك ما يطلع من الصفوف اللي فوقه", T("owner_net") - net)
+
+    # 3) Unit subtotals may only fall short by lines that carry no apartment.
+    parts = rep.get("apartments") or []
+    if parts:
+        unit_sum = sum((_D(p.get("total_income") or 0) for p in parts), Decimal(0))
+        homeless = sum((_D(m.get("amount")) for m in (rep.get("manual_income_lines") or [])
+                        if not m.get("lid")), Decimal(0))
+        if _fnum(unit_sum + homeless) != _fnum(T("total_income")):
+            add("unit_rollup", "مجموع الشقق ما يساوي إجمالي المالك",
+                T("total_income") - unit_sum - homeless)
+        unit_exp = sum((_D(p.get("expenses") or 0) for p in parts), Decimal(0))
+        homeless_exp = sum((_D(x.get("amount")) for x in (rep.get("exp_lines") or [])
+                            if not x.get("lid")), Decimal(0))
+        if _fnum(unit_exp + homeless_exp) != _fnum(T("expenses")):
+            add("unit_expenses", "مجموع مصاريف الشقق ما يساوي مصاريف المالك",
+                T("expenses") - unit_exp - homeless_exp)
+
+    # 4) A booking the accountant force-included must actually be in the money.
+    for l in rep.get("resv_lines") or []:
+        if l.get("manual_included") and l.get("income") is None:
+            add("included_without_money",
+                "حجز مُدرج يدويًا بدون مبلغ: " + str(l.get("guest") or l.get("id")))
+    for fk in ("refunded_lines", "unpaid_lines"):
+        for l in rep.get(fk) or []:
+            if l.get("manual_included"):
+                add("included_still_excluded",
+                    "حجز مُدرج يدويًا لا يزال في «حركات بدون فلوس»: "
+                    + str(l.get("guest") or l.get("id")))
+
+    # 5) An expense must never be drawn as an excluded BOOKING row.
+    for l in rep.get("contract_excluded_lines") or []:
+        if l.get("kind") == "expense":
+            add("expense_as_booking", "مصروف معروض كأنه حجز مستبعد: " + str(l.get("id")))
+
+    # 6) A deleted expense must be gone from the apartment, not just the total.
+    edits = ((stmt_rec(owner, mkey) or {}).get("edits") or {})
+    live_ids = {str(x.get("id")) for x in (rep.get("exp_lines") or [])}
+    for eid, ov in (edits.get("exp_overrides") or {}).items():
+        if isinstance(ov, dict) and ov.get("deleted") and str(eid) in live_ids:
+            add("deleted_expense_alive", "مصروف محذوف لا يزال محسوبًا: " + str(eid))
+
+    # 7) The owner's «التقرير النهائي» is the published snapshot — say when it lags.
+    pub = (stmt_rec(owner, mkey) or {}).get("published") or {}
+    snap = pub.get("snapshot") or {}
+    if snap and any(_fnum(snap.get(k)) != _fnum(rep.get(k))
+                    for k in ("owner_net", "total_income", "expenses", "ouja_fee")):
+        add("published_stale",
+            "المنشور للمالك (نسخة %s) أقدم من الأرقام الحالية" % pub.get("version"),
+            _D(rep.get("owner_net") or 0) - _D(snap.get("owner_net") or 0))
+
+    return {"owner": owner, "month": mkey, "ok": not P, "problems": P,
+            "owner_net": rep.get("owner_net"), "total_income": rep.get("total_income")}
+
+
+def audit_all(months=None, owner=None):
+    """Sweep every owner (or one) across the given months and report every
+    statement that disagrees with itself. `months` defaults to the last 6."""
+    B = _B()
+    if not months:
+        cur = datetime.now(B.TZ).date().isoformat()[:7]
+        months = list(reversed(_prev_months(cur, 5) + [cur]))
+    owners = [owner] if owner else sorted({(r.get("owner") or "").strip()
+                                           for r in api._registry_rows()
+                                           if (r.get("owner") or "").strip()})
+    rows, bad = [], 0
+    for own in owners:
+        for mk in months:
+            try:
+                h = statement_health(own, mk)
+            except Exception as ex:
+                h = {"owner": own, "month": mk, "ok": False,
+                     "problems": [{"kind": "crash", "text_ar": "تعذّر حساب الكشف: " + str(ex)[:120]}]}
+            if not h.get("ok"):
+                bad += 1
+                rows.append(h)
+    return {"ok": True, "checked_owners": len(owners), "months": months,
+            "statements_with_problems": bad, "rows": rows}
 
 
 def _build_explain(agg):
