@@ -33390,8 +33390,12 @@ def _pdf_statement_bytes(rep, label):
     pdf.set_fill_color(*GOLD); pdf.rect(0, 46, W, 1.4, "F")
     pdf.set_xy(M, 9); pdf.set_font(FONT, size=10); pdf.set_text_color(*GOLD)
     pdf.cell(usable, 5, shape("OUJA RESIDENCE · عوجا"), align="R")
+    # «بدون خصم ٣٪»: an alternate-basis report must be unmistakable at a glance —
+    # a different title, and a red band in the gap between the gold rule (y=46) and
+    # the first content row (y=54), so nothing below has to shift.
+    _nofee = bool(rep.get("no_direct_fee"))
     pdf.set_xy(M, 15); pdf.set_font(FONT, size=20); pdf.set_text_color(*INK)
-    pdf.cell(usable, 9, shape("كشف حساب المالك"), align="R")
+    pdf.cell(usable, 9, shape("تقرير بدون خصم ٣٪" if _nofee else "كشف حساب المالك"), align="R")
     pdf.set_xy(M, 27); pdf.set_font(FONT, size=10); pdf.set_text_color(*MUT)
     period = (rep.get("period") or {})
     # v2.2 slice 1: a month in progress must SAY so — on the PDF too.
@@ -33410,6 +33414,12 @@ def _pdf_statement_bytes(rep, label):
     if rep.get("statement_version"):
         clean_txt += " · نسخة %s — حُدّثت %s" % (rep["statement_version"], str(rep.get("published_at") or "")[:10])
     pdf.set_xy(M, 33); pdf.cell(usable, 5, shape(clean_txt), align="R")
+    if _nofee:
+        pdf.set_fill_color(181, 59, 59); pdf.rect(0, 47.6, W, 6.0, "F")
+        pdf.set_xy(M, 47.9); pdf.set_font(FONT, size=9); pdf.set_text_color(255, 255, 255)
+        pdf.cell(usable, 5.4, shape("تقرير داخلي — الحجوزات المباشرة بكامل قيمتها بدون خصم ٣٪ · "
+                                    "هذا ليس الكشف الرسمي للمالك"), align="C")
+        pdf.set_text_color(*MUT)
     pdf.set_y(54)
     # ---- row helper (label right, value left) ----
     def kv(lbl, val, big=False, neg=False):
@@ -33462,7 +33472,9 @@ def _pdf_statement_bytes(rep, label):
     section("تفصيل الدخل")
     kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
     _dpct = rep.get("direct_fee_pct")
-    kv("دخل مباشر (−%s٪)" % (_dpct if _dpct is not None else 3), money(rep.get("income_direct")))
+    kv("دخل مباشر (كامل — بدون خصم)" if _nofee
+       else "دخل مباشر (−%s٪)" % (_dpct if _dpct is not None else 3),
+       money(rep.get("income_direct")))
     if rep.get("extras"):
         kv("إضافات", money(rep.get("extras")))
     if rep.get("manual_income"):

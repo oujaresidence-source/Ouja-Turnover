@@ -266,6 +266,13 @@
       om_history: 'سجل التغييرات', om_no_changes: 'ما فيه تغييرات بعد',
       om_contract: 'العقد', om_terms_n: 'تغييرات الشروط', om_now: 'الحالي',
       /* --- statement editor (slice 2) --- */
+      o_nofee: 'بدون خصم ٣٪',
+      o_nofee_on: 'عرض بدون خصم ٣٪ — الحجوزات المباشرة بكامل قيمتها. هذي معاينة فقط: ما تنحفظ وما تننشر. اضغط الزر مرة ثانية للرجوع للكشف العادي.',
+      o_nofee_dl: 'نزّل تقارير الشهر بدون خصم ٣٪',
+      o_nofee_wait: 'نجهّز الملفات… ياخذ شوي',
+      o_nofee_done: 'تم — {n} ملف',
+      o_nofee_none: 'ما فيه تقارير لهذا الشهر',
+      o_nofee_err: 'تعذّر إنشاء الملفات — جرّب بعد قليل',
       o_stmt: 'الكشف', se_title: 'محرر الكشف', se_pub: 'نشر النسخة للمالك',
       se_pub_confirm: 'بينشر هالأرقام للمالك (الرابط الحي + PDF سوا) ويرفع رقم النسخة. نتأكد؟',
       se_pubd: 'نُشرت نسخة {v} ✓', se_ver: 'نسخة', se_never_pub: 'ما انشرت بعد',
@@ -618,6 +625,13 @@
       om_reason: 'Reason (required)…', om_remove_do: 'Confirm end', om_removed: 'Contract ended',
       om_history: 'Change history', om_no_changes: 'No changes yet',
       om_contract: 'Contract', om_terms_n: 'Term changes', om_now: 'now',
+      o_nofee: 'Without the 3%',
+      o_nofee_on: 'Showing direct bookings at full value, without the 3% deduction. This is a preview only — nothing is saved and nothing is published. Press the button again to go back to the normal statement.',
+      o_nofee_dl: 'Download this month without the 3%',
+      o_nofee_wait: 'Building the files… this takes a moment',
+      o_nofee_done: 'Done — {n} files',
+      o_nofee_none: 'No reports for that month',
+      o_nofee_err: 'Could not build the files — try again shortly',
       o_stmt: 'Statement', se_title: 'Statement editor', se_pub: 'Publish to owner',
       se_pub_confirm: 'Publishes these numbers to the owner (live link + PDF together) and bumps the version. Continue?',
       se_pubd: 'Published version {v} ✓', se_ver: 'Version', se_never_pub: 'Not published yet',
@@ -2243,6 +2257,38 @@
           loadStmtEd(dP.owner, dP.month);
         })
         .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
+    else if (act === 'se-nofee') {
+      // pure view flip: re-read the same month on the other basis. Nothing is
+      // written, so pressing it again is the whole "undo".
+      var dN = store.D.stmtEd || {};
+      seUI.nofee = !seUI.nofee;
+      loadStmtEd(dN.owner, dN.month, seUI.unit);
+    }
+    else if (act === 'se-nofee-dl') {
+      var dZ = store.D.stmtEd || {};
+      el.disabled = true;
+      toast(t('o_nofee_wait'));
+      fetch('/erp/api/owners/no-direct-fee.zip?m=' + encodeURIComponent(dZ.month),
+            { headers: { 'X-Token': store.token } })
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (j) { throw j; });
+          var n = r.headers.get('X-Ouja-Built') || '';
+          return r.blob().then(function (b) { return { blob: b, n: n }; });
+        })
+        .then(function (res) {
+          el.disabled = false;
+          var url = URL.createObjectURL(res.blob);
+          var a = document.createElement('a');
+          a.href = url; a.download = 'ouja-no-3pct-' + dZ.month + '.zip';
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+          toast(t('o_nofee_done').replace('{n}', res.n));
+        })
+        .catch(function (er) {
+          el.disabled = false;
+          toast(srvMsg(er) || (er && er.error === 'no_reports' ? t('o_nofee_none') : t('o_nofee_err')), 'err');
+        });
     }
     else if (act === 'se-tieout') {
       var dT = store.D.stmtEd || {};
@@ -4512,7 +4558,7 @@
   }
 
   /* ----- slice 2: statement editor + «ليش هالرقم؟» + audit trail ----- */
-  var seUI = { tab: 'stmt', explain: '', unit: '' };   // unit = lid (v2.2 slice 3 tabs)
+  var seUI = { tab: 'stmt', explain: '', unit: '', nofee: false };   // unit = lid (v2.2 slice 3 tabs)
 
   function seActivePart(s) {
     if (!seUI.unit) return null;
@@ -4805,6 +4851,9 @@
         '<b>' + (neg ? '−' : '') + fmtAmt(val) + '</b></button>';
     }
     var months = lastNMonths(13);
+    // trust the SERVER's stamp, not the local toggle — if the flag never reached
+    // the backend the banner must not appear over ordinary 3%-deducted numbers
+    var nofee = !!s.no_direct_fee;
     var mm = d.month_meta || {};
     var running = mm.state === 'running';
     var pub = d.published;
@@ -4825,8 +4874,20 @@
       '<span class="tag' + (pub ? ' soft' : '') + '">' + (pub ? (esc(t('se_ver')) + ' ' + pub.version + ' · ' + esc((pub.at || '').slice(0, 10))) : esc(t('se_never_pub'))) + '</span>' +
       '<button class="btn ghost sm" data-act="se-tieout">' + esc(t('to_btn')) + '</button>' +
       '<button class="btn ghost sm" data-act="se-diff">' + esc(t('se_recompute')) + '</button>' +
-      '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>' +
+      // «بدون خصم ٣٪» — a view, not an action. While it is on, publishing is
+      // taken off the screen entirely: the server would ignore it anyway
+      // (statement_publish recomputes on the real basis), but nobody should be
+      // able to press Publish while reading numbers that are not the statement.
+      '<button class="btn ' + (nofee ? 'primary' : 'ghost') + ' sm" data-act="se-nofee"' +
+        (nofee ? ' aria-pressed="true"' : '') + '>' + (nofee ? '● ' : '') + esc(t('o_nofee')) + '</button>' +
+      (nofee
+        ? '<button class="btn ghost sm" data-act="se-nofee-dl">⬇ ' + esc(t('o_nofee_dl')) + '</button>'
+        : '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>') +
       '</span></header>' +
+      (nofee
+        ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' +
+          esc(t('o_nofee_on')) + '</div>'
+        : '') +
       mmStrip(mm) +
       (d.published_stale && pub
         ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' +
@@ -4917,7 +4978,8 @@
   function loadStmtEd(owner, m, unit) {
     seUI.unit = unit || '';
     $('#view').innerHTML = skeleton(6);
-    api('/erp/api/owners/statement?owner=' + encodeURIComponent(owner) + (m ? '&m=' + encodeURIComponent(m) : ''))
+    api('/erp/api/owners/statement?owner=' + encodeURIComponent(owner) + (m ? '&m=' + encodeURIComponent(m) : '') +
+        (seUI.nofee ? '&nofee=1' : ''))
       .then(renderStmt)
       .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
   }
@@ -5295,7 +5357,9 @@
         if (diag) loadDiag(diag, params.get('m') || '');
         else if (profile) loadProfile(profile, params.get('unit') || '');
         else if (manage) loadManage(manage);
-        else if (stmt) { seUI.tab = 'stmt'; seUI.explain = ''; loadStmtEd(stmt, params.get('m') || '', params.get('unit') || ''); }
+        // seUI.nofee resets on every fresh navigation: the alternate view must never
+        // be what someone finds waiting for them when they open a statement.
+        else if (stmt) { seUI.tab = 'stmt'; seUI.explain = ''; seUI.nofee = false; loadStmtEd(stmt, params.get('m') || '', params.get('unit') || ''); }
         else loadOwners();
       }
     },

@@ -649,12 +649,109 @@ async def _h_api_owners_range_report_pdf(request):
                         headers={"Content-Disposition": '%s; filename="%s"' % (dispo, ascii_fn)})
 
 
+_NOFEE_SETTINGS = {"direct_fee_pct": 0.0}
+
+
+def _nofee_asked(query):
+    """?nofee=1 → the read-only «بدون خصم ٣٪» basis. Read paths only; no write
+    endpoint consults this, and statement_publish never sees it."""
+    return _NOFEE_SETTINGS if str(query.get("nofee") or "") in ("1", "true", "yes") else None
+
+
+def _nofee_filename(owner, apartment, mkey, used):
+    """«المالك - الشقة - 2026-07.pdf» — the owner asked for all three on every file.
+    Arabic is kept (zip filenames are utf-8); only path-breaking characters go."""
+    raw = " - ".join(x for x in (str(owner or "").strip(),
+                                 str(apartment or "").strip(), mkey) if x)
+    safe = "".join("-" if c in '/\\:*?"<>|' else c for c in raw).strip() or "statement"
+    used[safe] = used.get(safe, 0) + 1
+    if used[safe] > 1:                      # two units sharing a display name
+        safe += "-%d" % used[safe]
+    return safe + ".pdf"
+
+
+def _nofee_pack(mkey, owner_filter=None):
+    """Build the «بدون خصم ٣٪» pack for one month: ONE PDF per apartment, computed
+    on the alternate basis through the SAME statement engine the real reports use
+    (so editor edits, manual expenses and contract windows are all still in).
+    Returns (zip_bytes, [built], [skipped]). Pure read — writes nothing, and it
+    deliberately bypasses _owner_month_report so the memoized real statements
+    can never be overwritten with these numbers."""
+    import io
+    import zipfile
+    B = api.B
+    start, end = B._month_bounds(mkey)
+    owners = []
+    for rec in api._registry_rows():
+        own = (rec.get("owner") or "").strip()
+        if own and own not in owners and (not owner_filter or own == owner_filter):
+            owners.append(own)
+    built, skipped, used = [], [], {}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for own in sorted(owners):
+            units, _listings = OW._owner_units(own)
+            for u in units:
+                apt = (u.get("apartment") or "").strip()
+                if u.get("lid") is None:
+                    skipped.append({"owner": own, "apartment": apt, "why": "no_listing"})
+                    continue
+                try:
+                    rep, err = OW.compute_owner_range(own, start, end, apt,
+                                                      settings=_NOFEE_SETTINGS)
+                    if err or rep is None:
+                        skipped.append({"owner": own, "apartment": apt, "why": err or "no_data"})
+                        continue
+                    rep["no_direct_fee"] = True          # the PDF banner reads this
+                    fn = _nofee_filename(own, apt, mkey, used)
+                    z.writestr(fn, B._pdf_statement_bytes(rep, apt))
+                    built.append(fn)
+                except B.PdfFontError:
+                    raise                            # font missing = stop, never ship broken Arabic
+                except Exception as e:
+                    # one bad unit must not cost the owner the other 52 files
+                    print("nofee pack error:", own, apt, e)
+                    skipped.append({"owner": own, "apartment": apt, "why": str(e)[:120]})
+    return buf.getvalue(), built, skipped
+
+
+async def _h_api_nofee_zip(request):
+    """«تقارير بدون خصم ٣٪» — one zip, one PDF per apartment, named
+    «المالك - الشقة - الشهر.pdf». READ-ONLY: nothing is stored or published."""
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    owner_filter = (request.query.get("owner") or "").strip() or None
+    try:
+        data, built, skipped = await asyncio.to_thread(_nofee_pack, mkey, owner_filter)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    except Exception as e:
+        print("nofee zip error:", e)
+        return api.jres({"error": "pack_failed", "message_ar": "تعذّر إنشاء الملف — جرّب بعد قليل.",
+                         "message_en": "Could not build the pack — try again shortly."}, 500)
+    if not built:
+        return api.jres({"error": "no_reports", "skipped": skipped[:20],
+                         "message_ar": "ما فيه تقارير لهذا الشهر.",
+                         "message_en": "No reports for that month."}, 404)
+    try:
+        api.B.log_event("finance", "تقارير بدون خصم ٣٪ — %s (%d ملف)" % (mkey, len(built)))
+    except Exception:
+        pass
+    return web.Response(body=data, content_type="application/zip",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="ouja-no-3pct-%s.zip"' % mkey,
+                                 "X-Ouja-Built": str(len(built)),
+                                 "X-Ouja-Skipped": str(len(skipped))})
+
+
 async def _h_api_stmt_get(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
     mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.statement_payload, owner, mkey)
+    data = await asyncio.to_thread(OW.statement_payload, owner, mkey,
+                                   _nofee_asked(request.query))
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
@@ -1190,6 +1287,7 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
     app.router.add_get("/erp/api/owners/range-report", _guarded(_h_api_owners_range_report))
     app.router.add_get("/erp/api/owners/range-report.pdf", _guarded(_h_api_owners_range_report_pdf))
+    app.router.add_get("/erp/api/owners/no-direct-fee.zip", _guarded(_h_api_nofee_zip))
     app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))
     app.router.add_get("/erp/api/stmts/account", _guarded(_h_api_stmts_account))
     app.router.add_get("/erp/api/stmts/type-probe", _guarded(_h_api_stmts_probe))

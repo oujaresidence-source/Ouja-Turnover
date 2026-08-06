@@ -401,17 +401,20 @@ def _fnum(x):
     return float(_D(x).quantize(TWO, rounding=ROUND_HALF_UP))
 
 
-def unit_statement(rec, mkey, force_rederive=False):
+def unit_statement(rec, mkey, force_rederive=False, settings=None):
     """One unit's month with effective dating applied ON TOP of bot.py's report.
     No overlay data → the legacy report passes through untouched (safety),
     unless force_rederive (the statement editor needs per-line mgmt % stamps).
+    `settings` overrides bot.py's FINANCE_DEFAULTS for this compute only — the ONE
+    way the «بدون خصم ٣٪» view asks for direct_fee_pct=0. Default None = today's
+    numbers, bit-for-bit; nothing here is stored, so the override cannot leak.
     Returns (report_dict, footnotes[])."""
     B = _B()
     listings = B.get_listings_map() or {}
     apt = rec.get("apartment") or ""
     lid = B._owner_resolve_lid(rec, listings)
     start, end = B._month_bounds(mkey)
-    rep = B.build_owner_report(lid, start, end, 0, {}) if lid is not None else None
+    rep = B.build_owner_report(lid, start, end, 0, dict(settings or {})) if lid is not None else None
     if rep is None:
         return None, []
     ov = unit_overlay(apt)
@@ -1223,10 +1226,13 @@ def _build_explain(agg):
     }
 
 
-def compute_owner_statement(owner, mkey, apply_edits=True):
+def compute_owner_statement(owner, mkey, apply_edits=True, settings=None):
     """The v2.1 owner-month statement: per-unit effective-dated reports
     aggregated the same way bot.py aggregates (shape-compatible superset),
     then the editor's saved decisions applied on top.
+    `settings` = a per-compute override of bot.py's FINANCE_DEFAULTS (see
+    unit_statement). It is READ-ONLY and never persisted: statement_publish
+    calls this WITHOUT settings, so an alternate view can never be published.
     Returns None when the owner has no registry units (caller falls back)."""
     B = _B()
     start, end = B._month_bounds(mkey)
@@ -1239,7 +1245,7 @@ def compute_owner_statement(owner, mkey, apply_edits=True):
                      or edits.get("exp_manual") or edits.get("adjustments"))
     reps, foots = [], []
     for rec in recs:
-        rep, fn = unit_statement(rec, mkey, force_rederive=has_edits)
+        rep, fn = unit_statement(rec, mkey, force_rederive=has_edits, settings=settings)
         if rep is not None:
             reps.append(rep)
             foots.extend(fn)
@@ -1277,6 +1283,13 @@ def compute_owner_statement(owner, mkey, apply_edits=True):
         agg["owner_profile"] = {"phone": op.get("phone") or "", "active": op.get("active", True)}
     if apply_edits and has_edits:
         agg = _apply_stmt_edits(agg, edits)
+    # Stamp the alternate basis so EVERY surface that renders this object (screen
+    # banner, PDF header, income label) says so. _finance_aggregate drops
+    # direct_fee_pct, so an unstamped 0% report would print «−3٪» over full-value
+    # numbers — the one way this feature could lie.
+    if settings is not None and settings.get("direct_fee_pct") is not None:
+        agg["direct_fee_pct"] = float(settings["direct_fee_pct"])
+        agg["no_direct_fee"] = (float(settings["direct_fee_pct"]) == 0.0)
     if srec:
         agg["statement_status"] = srec.get("status") or "draft"
         pub = srec.get("published") or {}
@@ -1372,7 +1385,7 @@ def _aggregate_period(reports, owner, start, end):
     return out
 
 
-def compute_owner_range(owner, start, end, apt=None):
+def compute_owner_range(owner, start, end, apt=None, settings=None):
     """Custom-range owner report = the SUM of the monthly statements across the
     window, so manual expenses / edits / adjustments entered in the monthly editor
     all appear (parity with what the owner sees month by month). Whole months use
@@ -1394,19 +1407,19 @@ def compute_owner_range(owner, start, end, apt=None):
     for (m_start, m_end, mkey, whole) in _iter_months(start, end):
         rep = None
         if whole and owner_level:
-            rep = compute_owner_statement(owner, mkey)
+            rep = compute_owner_statement(owner, mkey, settings=settings)
         elif whole and len(lids) == 1:
             # An apartment filter on a multi-unit owner used to re-run the RAW
             # engine, which knows nothing of the statement editor — every
             # include/exclude silently vanished from the apartment PDF. Slice the
             # EDITED statement instead (owner-reported 2026-08-04).
-            rep = unit_slice(compute_owner_statement(owner, mkey), lids[0])
+            rep = unit_slice(compute_owner_statement(owner, mkey, settings=settings), lids[0])
             if rep is not None:
                 footnotes.append({"kind": "apt_filter_owner_manual_excluded", "month": mkey,
                                   "text_ar": mkey + ": التسويات اليدوية على مستوى المالك تظهر في تقرير المالك",
                                   "text_en": mkey + ": owner-level manual entries appear on the owner report"})
         if rep is None:
-            reps = [B.build_owner_report(lid, m_start, m_end, 0, {}) for lid in lids]
+            reps = [B.build_owner_report(lid, m_start, m_end, 0, dict(settings or {})) for lid in lids]
             reps = [r for r in reps if r is not None]
             rep = B._finance_aggregate(reps, owner, m_start, m_end) if reps else None
             if rep is not None and not whole:
@@ -1431,6 +1444,11 @@ def compute_owner_range(owner, start, end, apt=None):
     if not month_reports:
         return None, "no_data"
     agg = _aggregate_period(month_reports, owner, start, end)
+    # re-stamp the basis: neither _aggregate_period nor unit_slice carries it, and an
+    # unstamped 0% report would print the «−٣٪» label over full-value numbers
+    if settings is not None and settings.get("direct_fee_pct") is not None:
+        agg["direct_fee_pct"] = float(settings["direct_fee_pct"])
+        agg["no_direct_fee"] = (float(settings["direct_fee_pct"]) == 0.0)
     if apt:
         agg["apartment"] = apt
         if len(agg.get("apartments") or []) == 1:
@@ -1472,9 +1490,11 @@ def _receipt_proxy_rewrite(rep, owner):
     return rep
 
 
-def statement_payload(owner, mkey):
-    """Everything the editor view needs."""
-    live = compute_owner_statement(owner, mkey)
+def statement_payload(owner, mkey, settings=None):
+    """Everything the editor view needs. `settings` = the read-only alternate
+    basis for the «بدون خصم ٣٪» toggle; it changes what this screen SHOWS and
+    nothing else (publish recomputes on its own, without it)."""
+    live = compute_owner_statement(owner, mkey, settings=settings)
     if live is None:
         return {"error": "owner_not_in_registry"}
     live = _receipt_proxy_rewrite(live, owner)
@@ -1485,7 +1505,9 @@ def statement_payload(owner, mkey):
     # «التقرير النهائي» — and nothing used to say so (owner-reported 2026-08-03,
     # deleted expenses "still in the final report"). Say it, loudly and cheaply.
     snap = pub.get("snapshot") or {}
-    stale = bool(snap) and any(
+    # An alternate-basis view differs from the published snapshot BY DESIGN, so the
+    # «تحتاج إعادة نشر» warning would be a false alarm — compare only on the real basis.
+    stale = (settings is None) and bool(snap) and any(
         _fnum(snap.get(k)) != _fnum(live.get(k))
         for k in ("owner_net", "total_income", "expenses", "ouja_fee"))
     return {"ok": True, "owner": owner, "month": mkey,
