@@ -1231,8 +1231,9 @@ def compute_owner_statement(owner, mkey, apply_edits=True, settings=None):
     aggregated the same way bot.py aggregates (shape-compatible superset),
     then the editor's saved decisions applied on top.
     `settings` = a per-compute override of bot.py's FINANCE_DEFAULTS (see
-    unit_statement). It is READ-ONLY and never persisted: statement_publish
-    calls this WITHOUT settings, so an alternate view can never be published.
+    unit_statement). Defaults to off. It IS publishable, but only through
+    statement_publish's explicit `basis` argument, which records what it froze —
+    a screen previewing an alternate basis can never publish itself.
     Returns None when the owner has no registry units (caller falls back)."""
     B = _B()
     start, end = B._month_bounds(mkey)
@@ -1490,6 +1491,11 @@ def _receipt_proxy_rewrite(rep, owner):
     return rep
 
 
+# The only two bases a statement may be published on. `None` = bot.py's
+# FINANCE_DEFAULTS (the 3% direct-booking deduction) — always the default.
+PUBLISH_BASES = {"normal": None, "no_direct_fee": {"direct_fee_pct": 0.0}}
+
+
 def statement_payload(owner, mkey, settings=None):
     """Everything the editor view needs. `settings` = the read-only alternate
     basis for the «بدون خصم ٣٪» toggle; it changes what this screen SHOWS and
@@ -1505,11 +1511,25 @@ def statement_payload(owner, mkey, settings=None):
     # «التقرير النهائي» — and nothing used to say so (owner-reported 2026-08-03,
     # deleted expenses "still in the final report"). Say it, loudly and cheaply.
     snap = pub.get("snapshot") or {}
-    # An alternate-basis view differs from the published snapshot BY DESIGN, so the
-    # «تحتاج إعادة نشر» warning would be a false alarm — compare only on the real basis.
-    stale = (settings is None) and bool(snap) and any(
-        _fnum(snap.get(k)) != _fnum(live.get(k))
-        for k in ("owner_net", "total_income", "expenses", "ouja_fee"))
+    pub_basis = pub.get("basis") or "normal"
+    # Staleness must compare LIKE WITH LIKE. Two ways it goes wrong:
+    #  • previewing an alternate basis — the diff is by design, so don't warn at all;
+    #  • the owner's published copy is on the no-fee basis while this screen shows the
+    #    normal one — then every such owner would read as permanently "needs
+    #    republishing". Re-derive on the PUBLISHED basis and compare against that.
+    stale = False
+    if settings is None and snap:
+        ref = live
+        if pub_basis != "normal":
+            try:
+                ref = compute_owner_statement(owner, mkey,
+                                              settings=PUBLISH_BASES[pub_basis]) or live
+            except Exception as e:                  # never let this break the screen
+                print("stale-compare error:", e)
+                ref = None
+        stale = ref is not None and any(
+            _fnum(snap.get(k)) != _fnum(ref.get(k))
+            for k in ("owner_net", "total_income", "expenses", "ouja_fee"))
     return {"ok": True, "owner": owner, "month": mkey,
             "computed_at": datetime.now(_B().TZ).isoformat(timespec="seconds"),
             "month_meta": month_meta(owner, mkey, live, with_compare=True),
@@ -1520,7 +1540,7 @@ def statement_payload(owner, mkey, settings=None):
             "status": (rec or {}).get("status") or "draft",
             "published_stale": stale,
             "published": ({"version": pub.get("version"), "at": pub.get("at"),
-                           "by": pub.get("by"),
+                           "by": pub.get("by"), "basis": pub_basis,
                            "net": ((pub.get("snapshot") or {}).get("owner_net"))}
                           if pub.get("version") else None)}
 
@@ -1846,11 +1866,22 @@ def statement_edit(request, body):
 def statement_publish(request, body):
     """Freeze the CURRENT live compute as the published snapshot (version+1).
     The owner's live link + PDF flip to it together; the version marker shows
-    on the page so a stale PDF is recognizable."""
+    on the page so a stale PDF is recognizable.
+
+    `basis` (2026-08-06, owner's decision) picks WHICH statement gets frozen —
+    'normal' (the 3% direct-booking deduction) or 'no_direct_fee' (full value).
+    It must arrive EXPLICITLY in the request body: it is never inherited from
+    whatever basis the screen happens to be previewing, so an alternate view
+    cannot publish itself. Default is always 'normal', and the chosen basis is
+    stored on the published record + the audit trail — six months from now the
+    record is the only way to know which statement an owner was actually sent."""
     B = _B()
     owner = (body.get("owner") or "").strip()
     mkey = api._month_key_or_prev(body.get("m"))
-    fresh = compute_owner_statement(owner, mkey)
+    basis = (body.get("basis") or "normal").strip()
+    if basis not in PUBLISH_BASES:
+        return {"error": "bad_basis"}, 400
+    fresh = compute_owner_statement(owner, mkey, settings=PUBLISH_BASES[basis])
     if fresh is None:
         return {"error": "owner_not_in_registry"}, 404
     if fresh.get("degraded"):
@@ -1858,16 +1889,23 @@ def statement_publish(request, body):
         return {"error": "degraded_data",
                 "message_ar": "بيانات غير متاحة مؤقتاً — ما قدرنا نسحب الحجوزات من Hostaway. جرّب بعد شوي قبل النشر.",
                 "message_en": "Data temporarily unavailable — the Hostaway pull failed. Retry before publishing."}, 503
+    # The OWNER's copy must read as an ordinary statement (his call: «ولا شي —
+    # كشف عادي تماماً»), so the internal display stamp is dropped — no red band,
+    # no «تقرير بدون خصم ٣٪» title. direct_fee_pct=0 deliberately STAYS: it is what
+    # makes the PDF print a bare «دخل مباشر» instead of a false «−٣٪» over
+    # full-value numbers. Silence is fine; a wrong percentage is not.
+    fresh.pop("no_direct_fee", None)
     rec = stmt_rec(owner, mkey, create=True)
     old = rec.get("published") or {}
     ver = int(old.get("version") or 0) + 1
     rec["published"] = {"version": ver, "at": datetime.now(B.TZ).isoformat(timespec="seconds"),
-                        "by": api.actor(request), "snapshot": fresh}
+                        "by": api.actor(request), "basis": basis, "snapshot": fresh}
     if rec.get("status") in (None, "", "draft"):
         rec["status"] = "ready"
     stmt_audit_add(rec, api.actor(request), "publish", "v" + str(ver),
-                   {"version": old.get("version"), "net": (old.get("snapshot") or {}).get("owner_net")},
-                   {"version": ver, "net": fresh.get("owner_net")},
+                   {"version": old.get("version"), "basis": old.get("basis") or "normal",
+                    "net": (old.get("snapshot") or {}).get("owner_net")},
+                   {"version": ver, "basis": basis, "net": fresh.get("owner_net")},
                    body.get("reason") or "")
     _stmt_save()
     _invalidate_owner_cache(owner, mkey)
@@ -1876,7 +1914,7 @@ def statement_publish(request, body):
     except Exception:
         pass
     return {"ok": True, "version": ver, "net": fresh.get("owner_net"),
-            "at": rec["published"]["at"]}, 200
+            "basis": basis, "at": rec["published"]["at"]}, 200
 
 
 def statement_recompute_diff(owner, mkey):

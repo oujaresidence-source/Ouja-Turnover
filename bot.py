@@ -33358,6 +33358,21 @@ def _pdf_cleaning_label(cl):
         return "النظافة: يدفعها المالك (حسب كل شقة)"
     return "النظافة: على عوجا (مشمولة)"
 
+def _pdf_direct_income_label(rep):
+    """The «دخل مباشر» row label. Three cases, and the middle one is the point:
+      • internal «بدون خصم ٣٪» preview  → say so plainly;
+      • PUBLISHED on the no-fee basis   → say NOTHING (the owner's call), because
+        printing «−0٪» — or falling back to «−3٪» over full-value numbers —
+        would be a lie on a document an owner receives;
+      • ordinary statement              → the real percentage."""
+    dpct = rep.get("direct_fee_pct")
+    if rep.get("no_direct_fee"):
+        return "دخل مباشر (كامل — بدون خصم)"
+    if dpct is not None and float(dpct) == 0:
+        return "دخل مباشر"
+    return "دخل مباشر (−%s٪)" % (dpct if dpct is not None else 3)
+
+
 def _pdf_statement_bytes(rep, label):
     """Render ONE owner statement to PDF bytes (fpdf2). Cream/gold, RTL, real Arabic shaping.
     Detailed: owner+fees block, summary, income breakdown, reservations + expenses tables."""
@@ -33471,10 +33486,7 @@ def _pdf_statement_bytes(rep, label):
     # ---- income breakdown ----
     section("تفصيل الدخل")
     kv("دخل Airbnb (دفعات)", money(rep.get("income_airbnb")))
-    _dpct = rep.get("direct_fee_pct")
-    kv("دخل مباشر (كامل — بدون خصم)" if _nofee
-       else "دخل مباشر (−%s٪)" % (_dpct if _dpct is not None else 3),
-       money(rep.get("income_direct")))
+    kv(_pdf_direct_income_label(rep), money(rep.get("income_direct")))
     if rep.get("extras"):
         kv("إضافات", money(rep.get("extras")))
     if rep.get("manual_income"):

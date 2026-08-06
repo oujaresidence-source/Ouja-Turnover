@@ -268,6 +268,12 @@
       /* --- statement editor (slice 2) --- */
       o_nofee: 'بدون خصم ٣٪',
       o_nofee_on: 'عرض بدون خصم ٣٪ — الحجوزات المباشرة بكامل قيمتها. هذي معاينة فقط: ما تنحفظ وما تننشر. اضغط الزر مرة ثانية للرجوع للكشف العادي.',
+      o_nofee_pub: 'نشر للمالك — بدون خصم ٣٪',
+      o_nofee_pub_confirm: 'بينشر للمالك أرقام الحجوزات المباشرة كاملة بدون خصم ٣٪ — هذا اللي بيشوفه في رابطه وفي الـPDF. صافي المالك بيصير {n}. نكمل؟',
+      o_nofee_back: 'رجوع للكشف العادي',
+      o_nofee_back_confirm: 'بيرجع كشف المالك للحساب العادي مع خصم ٣٪ على الحجوزات المباشرة، وينشر نسخة جديدة. نكمل؟',
+      o_nofee_pubd: 'نُشرت للمالك بدون خصم ٣٪ — نسخة {v} ✓',
+      o_nofee_badge: 'النسخة المنشورة للمالك: بدون خصم ٣٪',
       o_nofee_dl: 'تقارير هذا المالك',
       o_nofee_dl_all: 'كل الملاك',
       o_nofee_dl_all_confirm: 'بينزّل تقارير كل الملاك لشهر {m} — ملف لكل شقة. ياخذ وقت. نكمل؟',
@@ -629,6 +635,12 @@
       om_contract: 'Contract', om_terms_n: 'Term changes', om_now: 'now',
       o_nofee: 'Without the 3%',
       o_nofee_on: 'Showing direct bookings at full value, without the 3% deduction. This is a preview only — nothing is saved and nothing is published. Press the button again to go back to the normal statement.',
+      o_nofee_pub: 'Publish to owner — without the 3%',
+      o_nofee_pub_confirm: 'This publishes direct bookings at full value, with no 3% deducted — it is what the owner sees in their link and PDF. Owner net becomes {n}. Continue?',
+      o_nofee_back: 'Back to the normal statement',
+      o_nofee_back_confirm: 'This returns the owner’s statement to the normal calculation with the 3% deducted from direct bookings, and publishes a new version. Continue?',
+      o_nofee_pubd: 'Published without the 3% — version {v} ✓',
+      o_nofee_badge: 'Published to the owner: without the 3%',
       o_nofee_dl: 'This owner’s reports',
       o_nofee_dl_all: 'All owners',
       o_nofee_dl_all_confirm: 'This downloads every owner’s reports for {m} — one file per apartment. It takes a while. Continue?',
@@ -2251,13 +2263,23 @@
     else if (act === 'se-adj-del') {
       seEdit({ op: 'adj_del', id: el.closest('.wq-row').getAttribute('data-aid'), reason: '-' }, el);
     }
-    else if (act === 'se-publish') {
-      if (!window.confirm(t('se_pub_confirm'))) return;
+    else if (act === 'se-publish' || act === 'se-publish-nofee' || act === 'se-publish-back') {
       var dP = store.D.stmtEd || {};
+      // the basis is decided by WHICH BUTTON was pressed and is sent explicitly —
+      // never read off the current view, so a preview cannot publish itself
+      var pubBase = (act === 'se-publish-nofee') ? 'no_direct_fee' : 'normal';
+      var ask = act === 'se-publish-nofee'
+        ? t('o_nofee_pub_confirm').replace('{n}', fmtAmt((dP.statement || {}).owner_net))
+        : (act === 'se-publish-back' ? t('o_nofee_back_confirm') : t('se_pub_confirm'));
+      if (!window.confirm(ask)) return;
       el.disabled = true;
-      api('/erp/api/owners/statement/publish', { method: 'POST', body: { owner: dP.owner, m: dP.month } })
+      api('/erp/api/owners/statement/publish',
+          { method: 'POST', body: { owner: dP.owner, m: dP.month, basis: pubBase } })
         .then(function (r) {
-          toast(t('se_pubd').replace('{v}', r.version));
+          toast((r.basis === 'no_direct_fee' ? t('o_nofee_pubd') : t('se_pubd')).replace('{v}', r.version));
+          // always land back on the REAL statement — after publishing, what
+          // matters is what the owner now has, not the preview you were in
+          seUI.nofee = false;
           loadStmtEd(dP.owner, dP.month);
         })
         .catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
@@ -4869,6 +4891,7 @@
     var mm = d.month_meta || {};
     var running = mm.state === 'running';
     var pub = d.published;
+    var pubBasis = (pub && pub.basis) || 'normal';   // what the OWNER is actually on
     var foots = (s.footnotes || []).map(function (f) {
       return '<span class="tag">' + esc(store.lang === 'ar' ? f.text_ar : (f.text_en || f.text_ar)) + '</span>';
     }).join(' ');
@@ -4896,12 +4919,23 @@
         // the owner you are LOOKING AT is the default download — an all-owners
         // pack is a deliberate, confirmed second choice, never the accident
         ? '<button class="btn ghost sm" data-act="se-nofee-dl">⬇ ' + esc(t('o_nofee_dl')) + '</button>' +
-          '<button class="btn ghost sm" data-act="se-nofee-dl-all">⬇ ' + esc(t('o_nofee_dl_all')) + '</button>'
+          '<button class="btn ghost sm" data-act="se-nofee-dl-all">⬇ ' + esc(t('o_nofee_dl_all')) + '</button>' +
+          '<button class="btn primary sm" data-act="se-publish-nofee">' + esc(t('o_nofee_pub')) + '</button>'
         : '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>') +
+      // the way back is ALWAYS on screen while the owner's published copy is on the
+      // alternate basis — toggle on or off, you can never be stuck there
+      (pubBasis === 'no_direct_fee'
+        ? '<button class="btn ghost sm" data-act="se-publish-back">↩ ' + esc(t('o_nofee_back')) + '</button>'
+        : '') +
       '</span></header>' +
       (nofee
         ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' +
           esc(t('o_nofee_on')) + '</div>'
+        : '') +
+      // internal only — the owner's own copy says nothing (his call), so this
+      // screen is the ONLY place anyone can see which basis he was sent
+      (pubBasis === 'no_direct_fee'
+        ? '<div class="grp-hint" style="padding-top:0;font-weight:700">● ' + esc(t('o_nofee_badge')) + '</div>'
         : '') +
       mmStrip(mm) +
       (d.published_stale && pub

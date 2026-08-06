@@ -40,7 +40,7 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.10"  # «بدون خصم ٣٪»: التنزيل صار للمالك المفتوح، وكل الملاك بتأكيد
+ERP_VERSION = "2.7.11"  # نشر الكشف بدون خصم ٣٪ للمالك + زر الرجوع للكشف العادي
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -653,8 +653,9 @@ _NOFEE_SETTINGS = {"direct_fee_pct": 0.0}
 
 
 def _nofee_asked(query):
-    """?nofee=1 → the read-only «بدون خصم ٣٪» basis. Read paths only; no write
-    endpoint consults this, and statement_publish never sees it."""
+    """?nofee=1 → the «بدون خصم ٣٪» basis for READ paths (the screen, the zip).
+    Publishing has its own separate `basis` field in the POST body and never
+    consults this — so what you are previewing can't become what you ship."""
     return _NOFEE_SETTINGS if str(query.get("nofee") or "") in ("1", "true", "yes") else None
 
 

@@ -61,7 +61,8 @@ class WindowDegradedM3Test(unittest.TestCase):
 
     def test_publish_refuses_degraded_statement(self):
         orig = OW.compute_owner_statement
-        OW.compute_owner_statement = lambda owner, mkey: {"degraded": True, "owner_net": 0}
+        # **kw: publish now passes the chosen `basis` down as settings=
+        OW.compute_owner_statement = lambda owner, mkey, **kw: {"degraded": True, "owner_net": 0}
         try:
             data, status = OW.statement_publish(None, {"owner": "x", "m": "2026-06"})
             self.assertEqual(status, 503)

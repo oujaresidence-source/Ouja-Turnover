@@ -23,7 +23,11 @@ import re
 import unittest
 
 import bot
+from finance import api as FAPI
 from finance import owners as OW
+
+# finance/ reaches bot.py through api.B, which mount() normally sets at boot.
+FAPI.B = FAPI.B or bot
 
 JS = pathlib.Path("finance/static/erp.js").read_text("utf-8")
 INIT = pathlib.Path("finance/__init__.py").read_text("utf-8")
@@ -49,6 +53,36 @@ def _report(rows, pct=20.0, settings=None):
     import datetime
     return bot.compute_owner_report(rows, [], datetime.date(2026, 7, 1),
                                     datetime.date(2026, 7, 31), pct, settings)
+
+
+def _publish(body):
+    """Run statement_publish against stubs and report what it did: which settings
+    reached the compute, and what landed on the stored record."""
+    rec = {}
+    seen = {}
+
+    def fake_compute(owner, mkey, apply_edits=True, settings=None):
+        seen["settings"] = settings
+        out = {"owner": owner, "owner_net": 100.0, "total_income": 100.0}
+        if settings is not None and settings.get("direct_fee_pct") is not None:
+            out["direct_fee_pct"] = float(settings["direct_fee_pct"])
+            out["no_direct_fee"] = (float(settings["direct_fee_pct"]) == 0.0)
+        return out
+
+    saved = (OW.compute_owner_statement, OW.stmt_rec, OW._stmt_save,
+             OW._invalidate_owner_cache, FAPI.actor)
+    OW.compute_owner_statement = fake_compute
+    OW.stmt_rec = lambda o, m, create=False: rec
+    OW._stmt_save = lambda: None
+    OW._invalidate_owner_cache = lambda *a, **k: None
+    FAPI.actor = lambda r: "tester"
+    try:
+        data, status = OW.statement_publish(None, body)
+    finally:
+        (OW.compute_owner_statement, OW.stmt_rec, OW._stmt_save,
+         OW._invalidate_owner_cache, FAPI.actor) = saved
+    return {"data": data, "status": status, "record": rec.get("published") or {},
+            "audit": rec.get("audit") or [], "seen_settings": seen.get("settings")}
 
 
 class TheMath(unittest.TestCase):
@@ -107,14 +141,62 @@ class BlastRadius(unittest.TestCase):
             self.assertIn("settings", sig.parameters, fn.__name__)
             self.assertIsNone(sig.parameters["settings"].default, fn.__name__)
 
-    def test_publish_recomputes_without_settings(self):
-        # THE guard: statement_publish must build its snapshot from a bare
-        # compute_owner_statement(owner, mkey). If a `settings=` ever appears in
-        # that call, an alternate-basis view could be frozen and sent to an owner.
-        src = inspect.getsource(OW.statement_publish)
-        call = re.search(r"compute_owner_statement\((.*?)\)", src, re.S)
-        self.assertIsNotNone(call, "publish no longer calls compute_owner_statement")
-        self.assertNotIn("settings", call.group(1))
+    def test_publish_defaults_to_the_normal_3pct_basis(self):
+        # The owner asked (2026-08-06) to be able to publish the no-fee statement,
+        # so publish is no longer basis-blind. What replaces that guarantee: the
+        # basis must arrive EXPLICITLY, and its absence always means the real one.
+        r = _publish({"owner": "X", "m": "2026-07"})
+        self.assertEqual(r["seen_settings"], None)
+        self.assertEqual(r["record"]["basis"], "normal")
+
+    def test_publish_refuses_a_basis_it_does_not_know(self):
+        data, status = OW.statement_publish(None, {"owner": "X", "m": "2026-07",
+                                                   "basis": "half_price"})
+        self.assertEqual(status, 400)
+        self.assertEqual(data["error"], "bad_basis")
+
+    def test_publishing_the_no_fee_basis_records_it(self):
+        r = _publish({"owner": "X", "m": "2026-07", "basis": "no_direct_fee"})
+        self.assertEqual(r["seen_settings"], {"direct_fee_pct": 0.0})
+        self.assertEqual(r["record"]["basis"], "no_direct_fee")
+        # …and the audit trail carries it, or six months from now nobody can tell
+        # which statement an owner was actually sent
+        self.assertEqual(r["audit"][-1]["after"]["basis"], "no_direct_fee")
+
+    def test_the_owners_copy_carries_no_internal_stamp(self):
+        # his call: «ولا شي — كشف عادي تماماً». The snapshot must not trip the
+        # red band or the «تقرير بدون خصم ٣٪» title.
+        snap = _publish({"owner": "X", "m": "2026-07", "basis": "no_direct_fee"})["record"]["snapshot"]
+        self.assertNotIn("no_direct_fee", snap)
+        # but direct_fee_pct=0 STAYS — it is what stops the PDF printing «−٣٪»
+        self.assertEqual(snap["direct_fee_pct"], 0.0)
+
+    def test_the_view_cannot_publish_itself(self):
+        # the basis comes from the button pressed, never from the screen's state
+        h = JS[JS.index("act === 'se-publish'"):]
+        h = h[:h.index("else if (act === 'se-nofee')")]
+        self.assertIn("(act === 'se-publish-nofee') ? 'no_direct_fee' : 'normal'", h)
+        self.assertIn("basis: pubBase", h)
+        self.assertNotIn("seUI.nofee ?", h)      # never derived from the toggle
+
+
+class ThePublishedLabel(unittest.TestCase):
+    """A published no-fee statement says nothing about the fee — but silence must
+    not become a false «−٣٪» on a document an owner receives."""
+
+    _label = staticmethod(bot._pdf_direct_income_label)
+
+    def test_normal_statement_still_shows_the_percentage(self):
+        self.assertEqual(self._label({"direct_fee_pct": 3.0}), "دخل مباشر (−3.0٪)")
+
+    def test_internal_preview_says_it_plainly(self):
+        self.assertIn("بدون خصم", self._label({"direct_fee_pct": 0.0, "no_direct_fee": True}))
+
+    def test_published_no_fee_is_silent_and_never_claims_a_deduction(self):
+        lbl = self._label({"direct_fee_pct": 0.0})
+        self.assertEqual(lbl, "دخل مباشر")
+        self.assertNotIn("٪", lbl)
+        self.assertNotIn("−", lbl)
 
     def test_default_report_is_unchanged_by_the_new_parameter(self):
         rows = [_resv("d1", "direct", 10000.0), _resv("a1", "airbnb", 5000.0, day="20")]
