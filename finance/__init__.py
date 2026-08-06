@@ -40,7 +40,7 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.8"   # «تعديل» للمصروف اليدوي + نقله بين الشهور
+ERP_VERSION = "2.7.9"   # «بدون خصم ٣٪» — عرض الكشف بدون خصم الحجوزات المباشرة + تنزيل تقارير الشهر
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
