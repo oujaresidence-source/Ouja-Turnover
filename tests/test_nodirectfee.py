@@ -145,9 +145,20 @@ class Wiring(unittest.TestCase):
         self.assertNotIn("write=True", line)
 
     def test_toggle_labels_exist_in_both_languages(self):
-        for key in ("o_nofee", "o_nofee_on", "o_nofee_dl"):
+        for key in ("o_nofee", "o_nofee_on", "o_nofee_dl",
+                    "o_nofee_dl_all", "o_nofee_dl_all_confirm"):
             self.assertEqual(len(re.findall(r"\b%s:" % key, JS)), 2,
                              "%s must be defined in BOTH T.ar and T.en" % key)
+
+    def test_the_default_download_is_scoped_to_the_owner_on_screen(self):
+        # the owner pressed the button on one owner's statement and got the whole
+        # book — the per-owner download must stay the DEFAULT, all-owners opt-in
+        h = JS[JS.index("act === 'se-nofee-dl'"):]
+        h = h[:h.index("else if (act === 'se-tieout')")]
+        self.assertIn("allOwners = (act === 'se-nofee-dl-all')", h)
+        self.assertIn("who = allOwners ? '' : (dZ.owner || '')", h)
+        self.assertIn("'&owner=' + encodeURIComponent(who)", h)
+        self.assertIn("confirm(", h)        # the whole book is a confirmed choice
 
 
 if __name__ == "__main__":

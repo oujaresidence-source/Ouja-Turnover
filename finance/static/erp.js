@@ -268,7 +268,9 @@
       /* --- statement editor (slice 2) --- */
       o_nofee: 'بدون خصم ٣٪',
       o_nofee_on: 'عرض بدون خصم ٣٪ — الحجوزات المباشرة بكامل قيمتها. هذي معاينة فقط: ما تنحفظ وما تننشر. اضغط الزر مرة ثانية للرجوع للكشف العادي.',
-      o_nofee_dl: 'نزّل تقارير الشهر بدون خصم ٣٪',
+      o_nofee_dl: 'تقارير هذا المالك',
+      o_nofee_dl_all: 'كل الملاك',
+      o_nofee_dl_all_confirm: 'بينزّل تقارير كل الملاك لشهر {m} — ملف لكل شقة. ياخذ وقت. نكمل؟',
       o_nofee_wait: 'نجهّز الملفات… ياخذ شوي',
       o_nofee_done: 'تم — {n} ملف',
       o_nofee_none: 'ما فيه تقارير لهذا الشهر',
@@ -627,7 +629,9 @@
       om_contract: 'Contract', om_terms_n: 'Term changes', om_now: 'now',
       o_nofee: 'Without the 3%',
       o_nofee_on: 'Showing direct bookings at full value, without the 3% deduction. This is a preview only — nothing is saved and nothing is published. Press the button again to go back to the normal statement.',
-      o_nofee_dl: 'Download this month without the 3%',
+      o_nofee_dl: 'This owner’s reports',
+      o_nofee_dl_all: 'All owners',
+      o_nofee_dl_all_confirm: 'This downloads every owner’s reports for {m} — one file per apartment. It takes a while. Continue?',
       o_nofee_wait: 'Building the files… this takes a moment',
       o_nofee_done: 'Done — {n} files',
       o_nofee_none: 'No reports for that month',
@@ -2265,11 +2269,16 @@
       seUI.nofee = !seUI.nofee;
       loadStmtEd(dN.owner, dN.month, seUI.unit);
     }
-    else if (act === 'se-nofee-dl') {
+    else if (act === 'se-nofee-dl' || act === 'se-nofee-dl-all') {
       var dZ = store.D.stmtEd || {};
+      var allOwners = (act === 'se-nofee-dl-all');
+      // downloading the whole book is the expensive, easy-to-regret one — ask first
+      if (allOwners && !confirm(t('o_nofee_dl_all_confirm').replace('{m}', dZ.month))) return;
+      var who = allOwners ? '' : (dZ.owner || '');
       el.disabled = true;
       toast(t('o_nofee_wait'));
-      fetch('/erp/api/owners/no-direct-fee.zip?m=' + encodeURIComponent(dZ.month),
+      fetch('/erp/api/owners/no-direct-fee.zip?m=' + encodeURIComponent(dZ.month) +
+            (who ? '&owner=' + encodeURIComponent(who) : ''),
             { headers: { 'X-Token': store.token } })
         .then(function (r) {
           if (!r.ok) return r.json().then(function (j) { throw j; });
@@ -2280,7 +2289,10 @@
           el.disabled = false;
           var url = URL.createObjectURL(res.blob);
           var a = document.createElement('a');
-          a.href = url; a.download = 'ouja-no-3pct-' + dZ.month + '.zip';
+          // name the file after who is actually inside it, so two downloads
+          // never land in the Downloads folder under the same name
+          a.href = url;
+          a.download = 'ouja-no-3pct-' + (who ? who.replace(/[^\w؀-ۿ.-]+/g, '-') + '-' : '') + dZ.month + '.zip';
           document.body.appendChild(a); a.click(); document.body.removeChild(a);
           setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
           toast(t('o_nofee_done').replace('{n}', res.n));
@@ -4881,7 +4893,10 @@
       '<button class="btn ' + (nofee ? 'primary' : 'ghost') + ' sm" data-act="se-nofee"' +
         (nofee ? ' aria-pressed="true"' : '') + '>' + (nofee ? '● ' : '') + esc(t('o_nofee')) + '</button>' +
       (nofee
-        ? '<button class="btn ghost sm" data-act="se-nofee-dl">⬇ ' + esc(t('o_nofee_dl')) + '</button>'
+        // the owner you are LOOKING AT is the default download — an all-owners
+        // pack is a deliberate, confirmed second choice, never the accident
+        ? '<button class="btn ghost sm" data-act="se-nofee-dl">⬇ ' + esc(t('o_nofee_dl')) + '</button>' +
+          '<button class="btn ghost sm" data-act="se-nofee-dl-all">⬇ ' + esc(t('o_nofee_dl_all')) + '</button>'
         : '<button class="btn primary sm" data-act="se-publish">' + esc(t('se_pub')) + '</button>') +
       '</span></header>' +
       (nofee
