@@ -1405,22 +1405,30 @@ def compute_owner_range(owner, start, end, apt=None, settings=None):
     owner_total_units = len([u for u in units if u.get("lid") is not None])
     owner_level = (not apt) or owner_total_units <= 1
     month_reports, footnotes = [], []
+    bases_used = set()
     for (m_start, m_end, mkey, whole) in _iter_months(start, end):
+        # A month the owner was SENT on the no-fee basis has to report on that basis
+        # here too. Without this the custom-range report contradicted the statement
+        # the owner actually received — it silently re-applied the 3% (owner-reported
+        # 2026-08-06). The basis is per owner-MONTH, so a window spanning a no-fee
+        # July and a normal August computes each month on its own basis.
+        m_settings = settings if settings is not None else PUBLISH_BASES[published_basis(owner, mkey)]
+        bases_used.add("no_direct_fee" if (m_settings or {}).get("direct_fee_pct") == 0.0 else "normal")
         rep = None
         if whole and owner_level:
-            rep = compute_owner_statement(owner, mkey, settings=settings)
+            rep = compute_owner_statement(owner, mkey, settings=m_settings)
         elif whole and len(lids) == 1:
             # An apartment filter on a multi-unit owner used to re-run the RAW
             # engine, which knows nothing of the statement editor — every
             # include/exclude silently vanished from the apartment PDF. Slice the
             # EDITED statement instead (owner-reported 2026-08-04).
-            rep = unit_slice(compute_owner_statement(owner, mkey, settings=settings), lids[0])
+            rep = unit_slice(compute_owner_statement(owner, mkey, settings=m_settings), lids[0])
             if rep is not None:
                 footnotes.append({"kind": "apt_filter_owner_manual_excluded", "month": mkey,
                                   "text_ar": mkey + ": التسويات اليدوية على مستوى المالك تظهر في تقرير المالك",
                                   "text_en": mkey + ": owner-level manual entries appear on the owner report"})
         if rep is None:
-            reps = [B.build_owner_report(lid, m_start, m_end, 0, dict(settings or {})) for lid in lids]
+            reps = [B.build_owner_report(lid, m_start, m_end, 0, dict(m_settings or {})) for lid in lids]
             reps = [r for r in reps if r is not None]
             rep = B._finance_aggregate(reps, owner, m_start, m_end) if reps else None
             if rep is not None and not whole:
@@ -1445,11 +1453,21 @@ def compute_owner_range(owner, start, end, apt=None, settings=None):
     if not month_reports:
         return None, "no_data"
     agg = _aggregate_period(month_reports, owner, start, end)
-    # re-stamp the basis: neither _aggregate_period nor unit_slice carries it, and an
-    # unstamped 0% report would print the «−٣٪» label over full-value numbers
-    if settings is not None and settings.get("direct_fee_pct") is not None:
-        agg["direct_fee_pct"] = float(settings["direct_fee_pct"])
-        agg["no_direct_fee"] = (float(settings["direct_fee_pct"]) == 0.0)
+    # Re-stamp the basis: neither _aggregate_period nor unit_slice carries it, and an
+    # unstamped 0% report would print the «−٣٪» label over full-value numbers.
+    if bases_used == {"no_direct_fee"}:
+        agg["direct_fee_pct"] = 0.0
+        # the stamp (red band + «تقرير بدون خصم ٣٪» title) is for an EXPLICIT preview
+        # only. When the range simply follows what was published, the report must look
+        # exactly like the statement the owner was sent — silent, per the owner's rule.
+        if settings is not None:
+            agg["no_direct_fee"] = True
+    elif len(bases_used) > 1:
+        # a window straddling both bases can't carry one honest fee label
+        agg.pop("direct_fee_pct", None)
+        footnotes.append({"kind": "mixed_direct_fee_basis",
+                          "text_ar": "الفترة تجمع شهورًا بخصم ٣٪ وشهورًا بدونه",
+                          "text_en": "This period mixes months with and without the 3% deduction"})
     if apt:
         agg["apartment"] = apt
         if len(agg.get("apartments") or []) == 1:
@@ -1494,6 +1512,17 @@ def _receipt_proxy_rewrite(rep, owner):
 # The only two bases a statement may be published on. `None` = bot.py's
 # FINANCE_DEFAULTS (the 3% direct-booking deduction) — always the default.
 PUBLISH_BASES = {"normal": None, "no_direct_fee": {"direct_fee_pct": 0.0}}
+
+
+def published_basis(owner, mkey):
+    """Which basis this owner-month was actually PUBLISHED on — the answer to
+    «وش شاف المالك؟». Never published, or a basis this build doesn't know, both
+    mean 'normal': an unrecognised value must not silently drop the 3%."""
+    pub = (stmt_rec(owner, mkey) or {}).get("published") or {}
+    if not pub.get("version"):
+        return "normal"
+    b = pub.get("basis") or "normal"
+    return b if b in PUBLISH_BASES else "normal"
 
 
 def statement_payload(owner, mkey, settings=None):

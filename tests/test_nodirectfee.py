@@ -215,6 +215,79 @@ class ThePublishedLabel(unittest.TestCase):
         self.assertIn("no_direct_fee", src)
 
 
+class RangeFollowsWhatWasPublished(unittest.TestCase):
+    """Owner-reported 2026-08-06: an owner was published on the no-fee basis, but
+    «تقرير لفترة مخصّصة» kept deducting the 3% — so the custom-range report
+    contradicted the statement that owner had actually been sent."""
+
+    def _range(self, published, months=("2026-07",)):
+        """Run compute_owner_range over stubs; return the settings each month got."""
+        seen = []
+
+        def fake_compute(owner, mkey, apply_edits=True, settings=None):
+            seen.append((mkey, settings))
+            return {"owner": owner, "owner_net": 1.0, "total_income": 1.0,
+                    "apartments": [{"apartment": "A", "lid": 1, "total_income": 1.0,
+                                    "ouja_fee": 0.0, "expenses": 0.0, "cleaning": 0.0,
+                                    "owner_net": 1.0}], "cleaning": {}}
+
+        saved = (OW._owner_units, OW.compute_owner_statement, OW.stmt_rec)
+        OW._owner_units = lambda o: ([{"apartment": "A", "lid": 1}], {})
+        OW.compute_owner_statement = fake_compute
+        OW.stmt_rec = lambda o, m, create=False: {
+            "published": {"version": 5, "basis": published.get(m, "normal")}
+        } if m in published else {}
+        try:
+            import calendar
+            import datetime as _dt
+            s = _dt.date(int(months[0][:4]), int(months[0][5:7]), 1)
+            ly, lm = int(months[-1][:4]), int(months[-1][5:7])
+            # WHOLE months, or _iter_months flags the edge as partial and the
+            # statement path (the one under test) is never reached
+            e = _dt.date(ly, lm, calendar.monthrange(ly, lm)[1])
+            rep, err = OW.compute_owner_range("X", s, e)
+        finally:
+            (OW._owner_units, OW.compute_owner_statement, OW.stmt_rec) = saved
+        return seen, rep, err
+
+    def test_a_month_published_no_fee_is_reported_no_fee(self):
+        seen, rep, err = self._range({"2026-07": "no_direct_fee"})
+        self.assertIsNone(err)
+        self.assertEqual(seen[0][1], {"direct_fee_pct": 0.0})
+        self.assertEqual(rep["direct_fee_pct"], 0.0)
+
+    def test_an_ordinary_month_is_untouched(self):
+        seen, rep, _ = self._range({})
+        self.assertIsNone(seen[0][1])
+        self.assertNotIn("direct_fee_pct", rep)
+
+    def test_following_a_published_basis_stays_silent(self):
+        # it must render like the statement the owner was sent — no red band, no
+        # «تقرير بدون خصم ٣٪» title. That stamp is for an explicit preview only.
+        _seen, rep, _ = self._range({"2026-07": "no_direct_fee"})
+        self.assertNotIn("no_direct_fee", rep)
+
+    def test_a_window_spanning_both_bases_says_so_and_claims_no_percentage(self):
+        seen, rep, _ = self._range({"2026-07": "no_direct_fee"},
+                                   months=("2026-07", "2026-08"))
+        self.assertEqual([s for _m, s in seen], [{"direct_fee_pct": 0.0}, None])
+        self.assertNotIn("direct_fee_pct", rep)
+        self.assertIn("mixed_direct_fee_basis",
+                      [f.get("kind") for f in (rep.get("footnotes") or [])])
+
+    def test_an_unpublished_or_unknown_basis_never_drops_the_fee(self):
+        saved = OW.stmt_rec
+        try:
+            OW.stmt_rec = lambda o, m, create=False: {}
+            self.assertEqual(OW.published_basis("X", "2026-07"), "normal")
+            OW.stmt_rec = lambda o, m, create=False: {"published": {"version": 2, "basis": "half"}}
+            self.assertEqual(OW.published_basis("X", "2026-07"), "normal")
+            OW.stmt_rec = lambda o, m, create=False: {"published": {"basis": "no_direct_fee"}}
+            self.assertEqual(OW.published_basis("X", "2026-07"), "normal")   # never published
+        finally:
+            OW.stmt_rec = saved
+
+
 class Wiring(unittest.TestCase):
     def test_download_route_is_registered_and_separate(self):
         self.assertIn("/erp/api/owners/no-direct-fee.zip", INIT)
