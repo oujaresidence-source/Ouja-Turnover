@@ -926,12 +926,47 @@ def _clean_tasks_for(date_iso, lids=None):
         out.append(rec)
     return out
 
+# ---- the retired Netlify guide -------------------------------------------------
+# oujaguide.netlify.app WAS the guest guide until it came in-house. The site is
+# gone: on 2026-08-08 a guest tapped .../a2 from the Airbnb app and got Netlify's
+# "Site not found" — standing outside the building. So a leftover link to it is
+# never handed to anyone. When the old URL names a page we actually serve it is
+# rewritten to ours; when it does not it counts as NO link, and every caller
+# already handles that (they must never invent one).
+_NETLIFY_GUIDE_RX = re.compile(
+    r"^https?://(?:www\.)?oujaguide\.netlify\.app(?:/+(?:\?id=)?([A-Za-z0-9_-]*))?/*(?:[?#].*)?$",
+    re.I)
+
+def _guide_page_exists(slug):
+    """True when /guide/{slug} would really render for a guest — the unit is in
+    the guide AND published. A hidden unit is excluded on purpose: its page has
+    no arrival photos yet, so sending a guest there is its own broken arrival."""
+    if not (slug and _HAS_GUIDE and GUIDE_ENABLED):
+        return False
+    try:
+        u = _guide.db.get_unit(slug.lower())
+    except Exception:
+        return False
+    return bool(u) and str(u.get("active", 1)) != "0"
+
+def inhouse_guide_url(url):
+    """Any URL → the URL we may safely give out: an old Netlify guide link becomes
+    our own /guide/{slug}, one we cannot serve becomes None, everything else is
+    returned untouched."""
+    val = (url or "").strip()
+    m = _NETLIFY_GUIDE_RX.match(val)
+    if not m:
+        return val or None
+    slug = (m.group(1) or "").lower()
+    return ("%s/guide/%s" % (GUIDE_PUBLIC_BASE, slug)) if _guide_page_exists(slug) else None
+
 def _extract_directions(L):
     """Find the unit's arrival-guide / 'how to reach the apartment' (directions) link in
     the listing's Custom Fields. Returns (url, custom_field_name) — either may be None.
     Mirrors get_guide_url's URL heuristic but ALSO captures which custom field it came
     from, so the dashboard can show the exact Hostaway field name."""
     best_url, best_name = None, None
+    ours = GUIDE_PUBLIC_BASE + "/guide/"
     for key in ("listingCustomFieldValues", "customFieldValues", "customFields"):
         for cf in (L.get(key) or []):
             if not isinstance(cf, dict):
@@ -944,7 +979,10 @@ def _extract_directions(L):
             if isinstance(meta, dict):
                 name = meta.get("name") or meta.get("title") or ""
             name = name or cf.get("name") or cf.get("customFieldName") or ""
-            if re.search(r"oujaguide|netlify", val, re.I):   # the known guide domains win
+            val = inhouse_guide_url(val)
+            if not val:                                       # dead Netlify link — keep looking
+                continue
+            if val.startswith(ours):                          # our own guide page wins
                 return val, (name or None)
             if best_url is None:                              # else keep the first http value
                 best_url, best_name = val, (name or None)
@@ -7608,8 +7646,10 @@ def get_guide_url(listing_id):
             for cf in (listing.get(key) or []):
                 v = str(cf.get("value") or "").strip()
                 if v.startswith("http"):
-                    url = v
-                    break
+                    v = inhouse_guide_url(v)     # retired Netlify link → ours, or keep looking
+                    if v:
+                        url = v
+                        break
             if url:
                 break
         # 2) fallback: scan the whole listing for the guide domain
@@ -7618,7 +7658,7 @@ def get_guide_url(listing_id):
             m = (re.search(r"https?://[^\s\"']*oujaguide[^\s\"']*", blob)
                  or re.search(r"https?://[^\s\"']*netlify[^\s\"']*", blob))
             if m:
-                url = m.group(0)
+                url = inhouse_guide_url(m.group(0))
     except Exception as e:
         print(f"guide url error for listing {listing_id}: {e}")
     _guide_cache[listing_id] = url

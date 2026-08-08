@@ -1,0 +1,16 @@
+# The retired guest guide → the in-house one.
+#
+# oujaguide.netlify.app was the guide until it came in-house. Every message we
+# ever sent a guest carries a link to it, and those messages cannot be recalled —
+# on 2026-08-08 a guest tapped .../a2 and got "Site not found". Re-creating the
+# site name with nothing but these rules turns every one of those old links into
+# a working one, forever.
+#
+# Old shapes, both covered:  /a2            → /guide/a2
+#                            /?id=a2        → /guide?id=a2   (the page reads ?id= too)
+#
+# 301 = permanent, so phones and Airbnb cache the new address.
+
+/data.json    https://oujares.com/guide/data.json    301
+/             https://oujares.com/guide              301
+/*            https://oujares.com/guide/:splat       301
