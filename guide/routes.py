@@ -13,7 +13,9 @@ ADMIN (dashboard login + admin/ops role — double-gated like schedule writes):
   POST /api/guide/unit           → edit one unit's fields
   POST /api/guide/entry          → add a FAQ/section entry
   POST /api/guide/entry/delete   → remove an entry
-  POST /api/guide/import         → run the CSV import (thread)"""
+  POST /api/guide/import         → run the CSV import (thread)
+  GET  /api/guide/hostaway-new   → apartments Hostaway has and the guide lacks
+  POST /api/guide/hostaway-new   → create guide rows for the picked ones"""
 
 import asyncio
 import datetime
@@ -29,7 +31,7 @@ from types import SimpleNamespace
 from . import db, importer
 
 HOST = SimpleNamespace(dash_auth=None, req_role=None, json_response=None, web=None,
-                       state_dir=None, listings=None, csv_path=None)
+                       state_dir=None, listings=None, listings_full=None, csv_path=None)
 
 _DIR = Path(__file__).resolve().parent
 EDIT_ROLES = ("admin", "ops")
@@ -311,6 +313,86 @@ async def api_import(request):
     return HOST.json_response({"ok": True, "started": True})
 
 
+# ---- new apartments from Hostaway (the CSV export was a one-shot, July 2026) ----
+
+
+def _ha_listings():
+    """Hostaway listings as records ({id, internal_name, address, active}).
+    Prefers the master Listings store (it carries the address); falls back to
+    the plain id→name map so the button still works if the store is empty."""
+    if HOST.listings_full:
+        try:
+            rows = HOST.listings_full() or []
+            if rows:
+                return rows
+        except Exception:
+            traceback.print_exc()
+    try:
+        lm = HOST.listings() if HOST.listings else {}
+    except Exception:
+        lm = {}
+    return [{"id": k, "internal_name": str(v), "address": "", "active": True}
+            for k, v in (lm or {}).items()]
+
+
+async def api_ha_new(request):
+    """Preview only — writes NOTHING. The apartments Hostaway has and the guide
+    does not, each with a suggested (owner-editable) public link."""
+    if not _can_edit(request):
+        return _deny()
+    listings = await asyncio.to_thread(_ha_listings)
+    units = await asyncio.to_thread(db.units, False)
+    res = await asyncio.to_thread(importer.new_from_hostaway, listings, units)
+    res["ok"] = True
+    return HOST.json_response(res)
+
+
+async def api_ha_add(request):
+    """Create guide rows for the picked Hostaway listings.
+
+    Everything but the slug is re-derived from Hostaway here — the client picks
+    WHICH apartment and WHAT link, never the name or the id it maps to. Rows
+    are created HIDDEN (active=0): an apartment with no arrival photos must not
+    be reachable by a guest until the owner fills it in and publishes it."""
+    if not _can_edit(request):
+        return _deny()
+    b = await _body(request)
+    items = b.get("items")
+    if not isinstance(items, list) or not items:
+        return HOST.json_response({"ok": False, "error": "ما اخترت ولا شقة"}, 200)
+    listings = await asyncio.to_thread(_ha_listings)
+    units = await asyncio.to_thread(db.units, False)
+    allowed = {r["lid"]: r["name"] for r in
+               (await asyncio.to_thread(importer.new_from_hostaway, listings, units))["new"]}
+    results, created = [], 0
+    for it in items[:200]:
+        it = it if isinstance(it, dict) else {}
+        slug = str(it.get("slug") or "").strip().lower()
+        try:
+            lid = int(it.get("lid"))
+        except (TypeError, ValueError):
+            results.append({"lid": it.get("lid"), "slug": slug, "error": "رقم Hostaway غير صحيح"})
+            continue
+        name = allowed.get(lid)
+        if name is None:                       # already in the guide, inactive, or made up
+            results.append({"lid": lid, "slug": slug,
+                            "error": "الشقة مو ضمن الشقق الجديدة (موجودة بالدليل أو غير مفعّلة)"})
+            continue
+        if not _SLUG_RX.match(slug):
+            results.append({"lid": lid, "slug": slug,
+                            "error": "الرابط لازم حروف إنجليزية وأرقام و«-» فقط"})
+            continue
+        if await asyncio.to_thread(db.get_unit, slug):
+            results.append({"lid": lid, "slug": slug, "error": "الرابط مستخدم — اختر غيره"})
+            continue
+        await asyncio.to_thread(db.upsert_unit, slug, listing_id=lid, listing_name=name,
+                                active=0, updated_by="hostaway-import")
+        allowed.pop(lid, None)                 # one page per apartment, even inside one batch
+        results.append({"lid": lid, "slug": slug, "created": True, "name": name})
+        created += 1
+    return HOST.json_response({"ok": True, "created": created, "results": results})
+
+
 async def api_import_status(request):
     if not (HOST.dash_auth and HOST.dash_auth(request)):
         return HOST.json_response({"ok": False, "error": "unauthorized"}, 401)
@@ -333,4 +415,6 @@ def register_routes(app):
     r.add_post("/api/guide/entry", _safe(api_entry_add))
     r.add_post("/api/guide/entry/delete", _safe(api_entry_delete))
     r.add_post("/api/guide/import", _safe(api_import))
+    r.add_get("/api/guide/hostaway-new", _safe(api_ha_new))     # preview (writes nothing)
+    r.add_post("/api/guide/hostaway-new", _safe(api_ha_add))    # create the picked rows
     r.add_get("/api/guide/import/status", _safe(api_import_status))

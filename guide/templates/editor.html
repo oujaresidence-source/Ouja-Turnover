@@ -39,6 +39,12 @@ color:var(--text);border-radius:10px;padding:9px 16px;cursor:pointer;text-decora
 .photo-fields{flex:1;min-width:230px;display:flex;flex-direction:column;gap:8px}
 .photo-fields .t{font-size:13px;font-weight:700}
 .hint{font-size:11.5px;color:var(--mut)}
+.pub{display:flex;gap:11px;align-items:flex-start;padding:11px 12px;margin-bottom:12px;
+border:1px solid var(--line);border-radius:11px;background:var(--surface2)}
+.pub input{width:18px;height:18px;flex:none;margin-top:1px;accent-color:var(--gold)}
+.pub-t{font-size:13px;font-weight:700}
+.pub.off{border-color:var(--gold);background:rgba(163,119,40,.07)}
+.pub.off .pub-t{color:var(--gold2)}
 .faq-row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:9px 2px;border-bottom:1px solid var(--line)}
 .faq-row:last-child{border-bottom:none}
 .faq-row b{font-size:13px}
@@ -67,6 +73,13 @@ padding:9px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity 
   </div>
 
   <div class="card"><h2>البيانات الأساسية</h2>
+    <div class="pub" id="pubRow">
+      <input type="checkbox" id="f_active">
+      <div>
+        <div class="pub-t" id="pubTitle">—</div>
+        <div class="hint" id="pubSub">—</div>
+      </div>
+    </div>
     <div class="grid">
       <label class="f full">ربط Hostaway (للفجوات وخريطة Elite)
         <select id="f_lid"><option value="">— غير مرتبطة —</option></select>
@@ -196,18 +209,35 @@ async function load(){
     return '<option value="'+h.id+'"'+(String(U.listing_id||'')===String(h.id)?' selected':'')+'>'+esc(h.name)+' ('+h.id+')</option>';
   }).join('');
   document.getElementById('stat').textContent = 'آخر تحديث: '+((U.updated_at||'—').slice(0,16).replace('T',' '));
-  renderPhotos(); renderFaq();
+  var ck = document.getElementById('f_active');
+  ck.checked = String(U.active) !== '0';
+  ck.onchange = renderPub;
+  renderPub(); renderPhotos(); renderFaq();
+}
+/* شقة بلا صور وصول ما تنعرض للضيف — الشقق اللي تنسحب من Hostaway تنضاف مخفية،
+   وهذا الزر هو اللي يظهرها بعد ما تكتمل بياناتها. */
+function renderPub(){
+  var on = document.getElementById('f_active').checked;
+  var row = document.getElementById('pubRow');
+  row.className = on ? 'pub' : 'pub off';
+  document.getElementById('pubTitle').textContent = on ? 'ظاهرة للضيوف ✓' : 'مخفية عن الضيوف';
+  document.getElementById('pubSub').textContent = on
+    ? 'صفحة الشقة تفتح للضيف. شِل الصح لو تبي تخفيها.'
+    : 'ما تفتح للضيف. عبّي الصور والواي فاي، ثم حط الصح واحفظ عشان تظهر.';
 }
 async function save(btn){
   btn.disabled = true;
   var v = function(id){ return (document.getElementById(id)||{}).value||''; };
   var body = {slug: SLUG, listing_name: v('f_listing_name'), map_link: v('f_map_link'),
               wifi_name: v('f_wifi_name'), wifi_pass: v('f_wifi_pass'), notes: v('f_notes'),
-              listing_id: v('f_lid')};
+              listing_id: v('f_lid'),
+              active: document.getElementById('f_active').checked ? 1 : 0};
   PICS.forEach(function(p){ body[p.k]=v('f_'+p.k); body[p.c]=v('f_'+p.c); });
   var j = await api('/api/guide/unit', {method:'POST', body: body});
   btn.disabled = false;
-  if(j && j.ok){ U = j.unit; toast('تم الحفظ ✅ — الضيف يشوف التعديل فوراً'); renderPhotos(); }
+  if(j && j.ok){ U = j.unit;
+    toast(String(U.active)==='0' ? 'تم الحفظ ✅ — الشقة مخفية عن الضيوف' : 'تم الحفظ ✅ — الضيف يشوف التعديل فوراً');
+    renderPub(); renderPhotos(); }
   else toast((j&&j.error)||'صار خطأ');
 }
 async function addFaq(btn){

@@ -1045,6 +1045,30 @@ def sync_listings_store(raw=None):
     _ls_save()
     return summary
 
+_GUIDE_LS_MAX_AGE = 600          # seconds — how stale the store may be for the guide screen
+
+def _guide_listings_full():
+    """Listing records (with address) for the guide's «شقق جديدة من Hostaway»
+    screen. That screen exists to spot an apartment added to Hostaway RECENTLY,
+    so a stale store would hide exactly what the owner is looking for — resync
+    when it is older than 10 minutes (repeat clicks stay instant). A failed
+    sync falls back to the stored copy instead of showing nothing."""
+    store = _ls_get()
+    fresh = False
+    try:
+        last = store.get("last_sync")
+        if last:
+            age = (datetime.now(TZ) - datetime.fromisoformat(last)).total_seconds()
+            fresh = 0 <= age < _GUIDE_LS_MAX_AGE
+    except Exception:
+        fresh = False
+    if not fresh:
+        try:
+            sync_listings_store()
+        except Exception as e:
+            print("[guide] listings sync failed, using the stored copy:", e)
+    return [dict(r) for r in _ls_get()["listings"].values()]
+
 # ---- OujaCT turnover data: today's + tomorrow's turnovers for assigned units ----
 _OUJACT_FAR = datetime.max.replace(tzinfo=TZ)   # sort sentinel for "no check-in"
 
@@ -18802,11 +18826,13 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_guide_sub"></div>
           </div>
           <div class="page-tools">
+            <button class="btn primary sm" onclick="gdNewPreview(this)" id="gdNewBtn">➕ شقق جديدة من Hostaway</button>
             <button class="btn ghost sm" onclick="gdImport(this)" id="gdImportBtn">⬇ استيراد</button>
             <button class="btn ghost sm" onclick="ghaPreview(this)" id="ghaBtn">🔗 حدّث روابط Hostaway</button>
             <button class="btn ghost sm" onclick="loadGuide()">↻</button>
           </div>
         </div>
+        <div id="gdNewBox"></div>
         <div id="gdImportReport"></div>
         <div id="ghaBox"></div>
         <div class="card">
@@ -23976,6 +24002,7 @@ async function loadGuide(){
   st_('t_gd_entries', labelText('إضافات الدليل (من الفجوات + يدوي)','Guide additions (from gaps + manual)'));
   st_('t_gd_add', labelText('أضِف','Add'));
   st_('gdImportBtn', labelText('⬇ استيراد من ملف التصدير','⬇ Import from export file'));
+  st_('gdNewBtn', labelText('➕ شقق جديدة من Hostaway','➕ New apartments from Hostaway'));
   try{
     var d = await api('/api/guide/admin');
     D.guide = d;
@@ -24008,6 +24035,83 @@ function gdRenderUnits(){
 }
 /* per-unit editing moved to the dedicated /guide-admin/{slug} page —
    the تعديل button links there with the session token */
+
+/* ---- new apartments from Hostaway (preview → pick links → add, hidden) ---- */
+function gdApts(n){ return n===1?'شقة وحدة':(n===2?'شقتين':(n+' شقق')); }
+function gdAptsEn(n){ return n+' apartment'+(n===1?'':'s'); }
+async function gdNewPreview(el){
+  var box=document.getElementById('gdNewBox'); if(!box) return;
+  var lbl=labelText('➕ شقق جديدة من Hostaway','➕ New apartments from Hostaway');
+  el.disabled=true; el.textContent=labelText('جاري الفحص…','Scanning…');
+  box.innerHTML='<div class="card" style="margin-bottom:10px"><div class="empty sk">'
+    +esc(labelText('نجيب الشقق من Hostaway…','Fetching from Hostaway…'))+'</div></div>';
+  var d=null;
+  try{ d=await api('/api/guide/hostaway-new'); }catch(e){ d=null; }
+  el.disabled=false; el.textContent=lbl;
+  if(!d||!d.ok){ box.innerHTML=''; toast((d&&d.error)||labelText('صار خطأ','Error')); return; }
+  var rows=d['new']||[], unl=d.unlinked||[];
+  var foot=(unl.length?('<div class="muted" style="font-size:12px;margin-top:8px">'
+      +esc(labelText('فيه '+gdApts(unl.length)+' بالدليل بس غير مرتبطة بـ Hostaway — تنربط من صفحة «تعديل» حقّها',gdAptsEn(unl.length)+' are in the guide but not linked to Hostaway — link them from their Edit page'))
+      +'</div>'):'');
+  if(!rows.length){
+    box.innerHTML='<div class="card" style="margin-bottom:10px">✅ '
+      +esc(labelText('الدليل مكتمل — كل شقق Hostaway المفعّلة لها صفحة','Guide is complete — every active Hostaway apartment has a page'))
+      +foot+'</div>';
+    return;
+  }
+  box.innerHTML='<div class="card" style="margin-bottom:10px">'
+    +'<b>'+esc(labelText(gdApts(rows.length)+' في Hostaway وما لها صفحة بالدليل',gdAptsEn(rows.length)+' in Hostaway with no guide page'))+'</b>'
+    +'<div class="muted" style="font-size:12px;margin-top:4px">'
+    +esc(labelText('عدّل الرابط لو تبي، وشِل الصح عن أي شقة ما تبيها. تنضاف مخفية عن الضيوف — تظهر بعد ما تعبّي الصور من «تعديل».','Edit the link if you like, untick any you do not want. They are added hidden from guests — publish each one from its Edit page after the photos are in.'))
+    +'</div>'
+    +'<div style="max-height:320px;overflow:auto;margin-top:10px">'
+    +rows.map(function(r){
+      return '<div style="display:flex;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--border);flex-wrap:wrap">'
+        +'<input type="checkbox" checked id="gdn_ck_'+esc(String(r.lid))+'" style="width:16px;height:16px;flex:none">'
+        +'<div style="min-width:200px;flex:1"><b>'+esc(r.name||('#'+r.lid))+'</b>'
+        +'<div class="muted" style="font-size:12px">Hostaway '+esc(String(r.lid))
+        +(r.address?(' · '+esc(r.address)):'')+'</div></div>'
+        +'<div style="display:flex;align-items:center;gap:4px" dir="ltr">'
+        +'<span class="muted" style="font-size:12px">/guide/</span>'
+        +'<input id="gdn_slug_'+esc(String(r.lid))+'" value="'+esc(r.slug||'')
+        +'" style="width:210px;padding:6px 10px;height:32px;font-size:13px" dir="ltr">'
+        +'</div></div>';
+    }).join('')+'</div>'
+    +'<button class="btn primary sm" style="margin-top:10px" onclick="gdNewApply(this)" id="gdNewApplyBtn">✅ '
+    +esc(labelText('أضِف المختارة للدليل','Add the ticked ones'))+'</button>'
+    +foot+'</div>';
+  D.gdNew=rows;
+}
+async function gdNewApply(el){
+  var rows=(D.gdNew||[]), items=[];
+  rows.forEach(function(r){
+    var ck=document.getElementById('gdn_ck_'+r.lid), sl=document.getElementById('gdn_slug_'+r.lid);
+    if(ck&&ck.checked) items.push({lid:r.lid, slug:(sl&&sl.value||'').trim().toLowerCase()});
+  });
+  if(!items.length){ toast(labelText('ما اخترت ولا شقة','Nothing ticked')); return; }
+  if(!confirm(labelText('نضيف '+gdApts(items.length)+' للدليل؟ تنضاف مخفية عن الضيوف.','Add '+gdAptsEn(items.length)+' to the guide? They are added hidden from guests.'))) return;
+  el.disabled=true; el.textContent=labelText('جاري الإضافة…','Adding…');
+  var j=null;
+  try{ j=await post('/api/guide/hostaway-new', {items:items}); }catch(e){ j=null; }
+  el.disabled=false;
+  if(!j||!j.ok){ el.textContent='✅ '+labelText('أضِف المختارة للدليل','Add the ticked ones');
+    toast((j&&j.error)||labelText('صار خطأ','Error')); return; }
+  var res=j.results||[], ok=res.filter(function(r){ return r.created; }), bad=res.filter(function(r){ return r.error; });
+  document.getElementById('gdNewBox').innerHTML='<div class="card" style="margin-bottom:10px">'
+    +'<b>'+esc(labelText('انضافت','Added')+': '+ok.length)
+    +(bad.length?(' · '+labelText('ما انضافت','Not added')+': '+bad.length):'')+'</b>'
+    +'<div style="max-height:260px;overflow:auto;margin-top:8px;font-size:12px">'
+    +res.map(function(r){
+      return '<div style="padding:6px 2px;border-bottom:1px solid var(--border)">'
+        +'<b>'+esc(r.name||('#'+r.lid))+'</b> <span class="muted" dir="ltr">/guide/'+esc(r.slug||'')+'</span>'
+        +(r.error?(' — <span style="color:var(--yellow)">'+esc(r.error)+'</span>')
+          :(' <a class="btn primary sm" target="_blank" rel="noopener" href="/guide-admin/'+esc(r.slug)
+            +'?token='+encodeURIComponent(tok())+'">'+esc(labelText('عبّي الصور','Fill in photos'))+'</a>'))
+        +'</div>';
+    }).join('')+'</div></div>';
+  if(ok.length) toast(labelText('انضافت '+gdApts(ok.length)+' — عبّي صورها ثم اظهرها','Added '+gdAptsEn(ok.length)+' — fill in the photos, then publish'));
+  loadGuide();
+}
 
 /* ---- Hostaway custom-field links: Netlify → in-house (preview → apply) ---- */
 var GHA_POLL=null;
@@ -55485,6 +55589,7 @@ async def start_web_server():
                     "dash_auth": _dash_auth, "req_role": _req_role,
                     "json_response": _json, "web": web,
                     "state_dir": STATE_DIR, "listings": get_listings_map,
+                    "listings_full": _guide_listings_full,
                     "csv_path": "supabase_export_listings.csv",
                 })
                 _guide.register_routes(app)

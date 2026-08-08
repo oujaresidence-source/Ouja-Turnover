@@ -50,6 +50,103 @@ def match_listing(name, listings_map):
     return hits[0] if len(set(hits)) == 1 else None
 
 
+# ---------------------------------------------------------------------------
+#  NEW APARTMENTS FROM HOSTAWAY
+#  The CSV above was a ONE-SHOT export (July 2026). Every apartment added to
+#  Hostaway afterwards had no way into the guide at all — this is that way.
+#  Pure functions: the route layer only feeds them the Hostaway rows and the
+#  current guide units, so the whole rule set is testable without a network.
+# ---------------------------------------------------------------------------
+SLUG_MAX = 40
+
+
+def slugify_name(name, max_len=SLUG_MAX):
+    """Listing name → the public '/guide/{slug}' id, in the style the existing
+    slugs already use ('spacious-mid-century-apt-self-entry'). Truncates on a
+    word boundary; returns '' when the name carries no usable ASCII (Arabic-only
+    names fall back to the listing id in suggest_slug)."""
+    parts = [p for p in re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).split("-")
+             if p and p != "ouja"]
+    out = ""
+    for p in parts:
+        nxt = (out + "-" + p) if out else p
+        if len(nxt) > max_len:
+            break
+        out = nxt
+    return out
+
+
+def suggest_slug(name, lid, taken):
+    """A free slug for this listing. NEVER returns one already in `taken` — the
+    slug is the public guest link, and a collision would overwrite a live page."""
+    base = slugify_name(name)
+    for cand in (base, ("%s-%s" % (base, lid)) if base else "", "ha-%s" % lid):
+        if cand and cand not in taken:
+            return cand
+    n = 2
+    while ("ha-%s-%d" % (lid, n)) in taken:
+        n += 1
+    return "ha-%s-%d" % (lid, n)
+
+
+def _ha_names(L):
+    """Every name a Hostaway listing record answers to (store shape + raw API)."""
+    return [L.get("internal_name") or L.get("internalListingName") or "",
+            L.get("public_name") or L.get("name") or ""]
+
+
+def new_from_hostaway(listings, units):
+    """Which LIVE Hostaway listings have no row in the guide yet.
+
+    Returns {"new": [{lid, name, address, slug}], "in_guide": n,
+             "unlinked": [{lid, name, slug}], "skipped_inactive": n}
+
+    An apartment the guide already carries is NEVER offered — not by Hostaway
+    id, and not by an exactly-matching name. A second row for the same
+    apartment would split its photos across two guest pages, and the guest
+    would land on whichever one we happened to link. Name matches that are
+    missing the Hostaway id come back as `unlinked` (informational: those are
+    the «غير مرتبطة» rows, fixed from the unit's own edit page)."""
+    have_ids = set()
+    by_name = {}
+    taken = set()
+    for u in (units or []):
+        taken.add((u.get("slug") or "").strip().lower())
+        try:
+            if u.get("listing_id") is not None:
+                have_ids.add(int(u["listing_id"]))
+        except (TypeError, ValueError):
+            pass
+        nm = _norm_name(u.get("listing_name"))
+        if nm:
+            by_name.setdefault(nm, u.get("slug"))
+    out = {"new": [], "in_guide": 0, "unlinked": [], "skipped_inactive": 0}
+    for L in (listings or []):
+        try:
+            lid = int(L.get("id"))
+        except (TypeError, ValueError):
+            continue
+        names = [n for n in _ha_names(L) if n]
+        name = names[0] if names else ("#%d" % lid)
+        if not L.get("active", True):
+            out["skipped_inactive"] += 1
+            continue
+        if lid in have_ids:
+            out["in_guide"] += 1
+            continue
+        hit = next((by_name[_norm_name(n)] for n in names if _norm_name(n) in by_name), None)
+        if hit:
+            out["unlinked"].append({"lid": lid, "name": name, "slug": hit})
+            continue
+        slug = suggest_slug(name, lid, taken)
+        taken.add(slug)
+        out["new"].append({"lid": lid, "name": name,
+                           "address": (L.get("address") or L.get("city") or "").strip(),
+                           "slug": slug})
+    out["new"].sort(key=lambda r: r["name"].lower())
+    return out
+
+
 def _fetch_media(url, dest, http_get, url_cache=None):
     """Download one image; True on success. Refuses HTML (private/dead Drive
     links serve an HTML interstitial) and oversized files. `url_cache` dedupes
