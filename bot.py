@@ -57973,6 +57973,41 @@ RR_PANEL_CHANNEL     = os.environ.get("RR_PANEL_CHANNEL", "فتح-تذكرة-rr"
 MAINT_URGENT_ROLE_ID = int(os.environ.get("MAINT_URGENT_ROLE_ID", "0") or 0)
 RR_MODEL             = os.environ.get("RR_MODEL", "")   # empty → premium model
 
+# Who may CLOSE a صيانة ticket (owner decision 2026-08-09). Three named people only —
+# everyone else keeps the other buttons (فحص الإشغال / أستلم التذكرة) and is refused here.
+# Overridable from Railway without a deploy; a garbled value falls back to these three
+# rather than to "everybody", because a wide-open close is the bug we are fixing.
+_MAINT_CLOSE_IDS_DEFAULT = "1449076419316682812,1486735916767903915,288811937662238720"
+
+def _maint_close_ids():
+    raw = str(os.environ.get("MAINT_CLOSE_IDS", "") or _MAINT_CLOSE_IDS_DEFAULT)
+    ids = [p.strip() for p in raw.replace("،", ",").split(",")]
+    out = [int(p) for p in ids if p.isdigit()]
+    if not out:
+        out = [int(p) for p in _MAINT_CLOSE_IDS_DEFAULT.split(",")]
+    return out
+
+def _maint_can_close(user):
+    """The three named closers, plus server admins (owner-approved carve-out)."""
+    return bool(getattr(user, "id", None) in _maint_close_ids() or _tk_is_admin(user))
+
+_MAINT_PROOF_SCAN = int(os.environ.get("MAINT_PROOF_SCAN", "200") or 200)
+
+async def _maint_has_proof(channel):
+    """Was ANY file uploaded in this ticket room — photo, invoice, PDF, from anyone?
+
+    We can see that a file exists; we cannot read it and swear it is an invoice. That
+    is the deal the owner accepted. A Discord history hiccup must never trap a ticket
+    open, so a failed read counts as "proof present" (same rule as `_proc_has_attachment`)."""
+    try:
+        async for m in channel.history(limit=_MAINT_PROOF_SCAN):
+            if m.attachments:
+                return True
+    except Exception as e:
+        print("maint proof scan error:", e)
+        return True
+    return False
+
 # ---- vendor-purchase tickets (kind = proc): vendor → approval chain → paid ----
 PROC_CATEGORY           = os.environ.get("PROC_CATEGORY", "مشتريات")
 PROC_PANEL_CHANNEL      = os.environ.get("PROC_PANEL_CHANNEL", "فتح-تذكرة-مشتريات")
@@ -58490,11 +58525,19 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
     return ch
 
 class _TkCloseConfirm(discord.ui.View):
-    def __init__(self):
+    """Shared by maint / RR / proc. `guard` re-checks the caller at the moment they
+    confirm — the window lives 120s, and a permission proven when it opened is not
+    the same as a permission at the press. RR and proc pass no guard: unchanged."""
+    def __init__(self, guard=None, refuse_msg=None):
         super().__init__(timeout=120)
+        self.guard = guard
+        self.refuse_msg = refuse_msg or "🙏 ما عندك صلاحية تقفل هذي التذكرة."
 
     @discord.ui.button(label="✅ نعم، اقفلها", style=discord.ButtonStyle.danger)
     async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.guard is not None and not self.guard(interaction.user):
+            await interaction.response.edit_message(content=self.refuse_msg, view=None)
+            return
         await interaction.response.edit_message(content="🔒 جاري الإغلاق…", view=None)
         await _tk_close(interaction)
 
@@ -58630,6 +58673,61 @@ async def _tk_close(interaction):
     except Exception as e:
         print("ticket close pin error:", e)
 
+_MAINT_CLOSE_REFUSAL = (
+    "🙏 **إغلاق تذاكر الصيانة للمسؤولين المحددين فقط.**\n"
+    "تقدر تكمّل شغلك عادي: ارفع صور الإصلاح والفاتورة هنا، واضغط «🙋 أستلم التذكرة» — "
+    "والمسؤول هو اللي يقفلها بعد ما يشوف الفاتورة.")
+
+class _MaintNoProofModal(discord.ui.Modal, title="🔒 إغلاق بدون فاتورة"):
+    """The escape hatch. Without it, a false-alarm ticket could never be closed and the
+    team would route around the whole system — but the reason is REQUIRED and it is
+    written into the room and the dashboard log, in the closer's name."""
+    def __init__(self):
+        super().__init__()
+        self.why = discord.ui.TextInput(
+            label="ليش ما فيه فاتورة أو صورة؟",
+            placeholder="مثال: إنذار كاذب — الشقة سليمة / تصليح بسيط ما كلّف شي",
+            style=discord.TextStyle.paragraph, min_length=5, max_length=400, required=True)
+        self.add_item(self.why)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _maint_can_close(interaction.user):
+            await interaction.response.send_message(_MAINT_CLOSE_REFUSAL, ephemeral=True)
+            return
+        reason = str(self.why.value or "").strip()
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if rec:
+            rec["closed_without_proof"] = True
+            rec["close_reason"] = reason[:400]
+            _dtk_save()
+            dash = _dash_ticket(rec.get("dash_id"))
+            if dash:
+                _ticket_log(dash, str(interaction.user), f"أُغلقت بدون فاتورة — السبب: {reason[:200]}")
+                try:
+                    _save_json("tickets.json", _tickets[:1000])
+                except Exception:
+                    pass
+        await interaction.response.send_message("🔒 جاري الإغلاق…", ephemeral=True)
+        try:
+            await interaction.channel.send(
+                f"📝 **أُغلقت بدون فاتورة** بواسطة {interaction.user.mention}\n**السبب:** {reason}",
+                allowed_mentions=discord.AllowedMentions(users=False))
+        except Exception as e:
+            print("maint no-proof note error:", e)
+        await _tk_close(interaction)
+
+class _MaintNoProofView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @discord.ui.button(label="🔒 اقفلها بدون فاتورة (اكتب السبب)",
+                       style=discord.ButtonStyle.danger)
+    async def close_anyway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _maint_can_close(interaction.user):
+            await interaction.response.send_message(_MAINT_CLOSE_REFUSAL, ephemeral=True)
+            return
+        await interaction.response.send_modal(_MaintNoProofModal())
+
 class MaintTicketView(discord.ui.View):
     """Lives on every maintenance-ticket card. Persistent across restarts."""
     def __init__(self):
@@ -58682,8 +58780,24 @@ class MaintTicketView(discord.ui.View):
     @discord.ui.button(label="✅ إغلاق التذكرة", style=discord.ButtonStyle.success,
                        custom_id="maint_close")
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("متأكد تبغى تقفل التذكرة؟",
-                                                view=_TkCloseConfirm(), ephemeral=True)
+        # Discord cannot hide a button from some viewers of a shared message, so the
+        # button stays visible for everyone and refuses politely instead.
+        if not _maint_can_close(interaction.user):
+            await interaction.response.send_message(_MAINT_CLOSE_REFUSAL, ephemeral=True)
+            return
+        # ack first — the history scan below can outlive the 3-second interaction deadline
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if await _maint_has_proof(interaction.channel):
+            await interaction.followup.send(
+                "متأكد تبغى تقفل التذكرة؟",
+                view=_TkCloseConfirm(guard=_maint_can_close, refuse_msg=_MAINT_CLOSE_REFUSAL),
+                ephemeral=True)
+            return
+        await interaction.followup.send(
+            "📎 **ما فيه صورة ولا فاتورة مرفوعة بهذي التذكرة.**\n"
+            "ارفعوا صورة الإصلاح أو الفاتورة (صورة، PDF، أي ملف) بالروم، بعدين اضغط «إغلاق التذكرة» مرة ثانية.\n\n"
+            "إذا فعلاً ما فيه فاتورة (إنذار كاذب، أو تصليح ما كلّف شي) — اقفلها وأنت تكتب السبب:",
+            view=_MaintNoProofView(), ephemeral=True)
 
 class MaintPanelView(discord.ui.View):
     def __init__(self):
