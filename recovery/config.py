@@ -36,8 +36,11 @@ AGENTS = [
      "label": "Mohammed"},
 ]
 
-# Roles. Zero means "not configured" — notify.py must degrade to a plain message rather
-# than posting a broken <@&0> mention, the way MAINT_URGENT_ROLE_ID already does.
+# ESCALATION WITHOUT ROLES (owner, 2026-08-08: «the role name is not primary, just use the
+# ids I gave you»). Both role ids are optional. When neither is set, an escalation pings the
+# OTHER agent and states plainly in the room that the deadline passed — the ticket is never
+# silently dropped for want of a role. Setting either env var later upgrades it in place; no
+# rebuild. escalation_targets() is the ONE place that decides, so the ladder cannot drift.
 SUPERVISOR_ROLE_ID = int(_env("RECOVERY_SUPERVISOR_ROLE_ID", "0") or 0)
 OPS_LEADERSHIP_ROLE_ID = int(_env("RECOVERY_OPS_LEAD_ROLE_ID", "0") or 0)
 
@@ -83,20 +86,35 @@ def is_agent(user_id):
     return str(user_id) in agent_ids()
 
 
+def escalation_targets(current_agent_id):
+    """Who to ping when a deadline passes. Roles first when configured, otherwise the other
+    agent. Returns [{"kind": "role"|"user", "id": str}] — never empty while two agents
+    exist, which is the point: an escalation must always reach a human.
+    """
+    if SUPERVISOR_ROLE_ID:
+        return [{"kind": "role", "id": str(SUPERVISOR_ROLE_ID)}]
+    peers = [a["id"] for a in AGENTS if a["id"] and a["id"] != str(current_agent_id)]
+    return [{"kind": "user", "id": p} for p in peers]
+
+
+def leadership_targets():
+    if OPS_LEADERSHIP_ROLE_ID:
+        return [{"kind": "role", "id": str(OPS_LEADERSHIP_ROLE_ID)}]
+    return [{"kind": "user", "id": a["id"]} for a in AGENTS if a["id"]]
+
+
 def ready_for_discord():
     """(ok, missing) — what still has to be answered before anything may post.
-    Called at wire time so a half-configured feature refuses loudly instead of posting a
-    card with a broken mention in it."""
+
+    Only the two AGENTS are required. Roles are optional by owner decision (see above), and
+    the public base URL is NOT listed: bot.py resolves it itself via _dispatch_base_url()
+    — env override, then the address auto-captured from a real web request, then the site's
+    own domain. Asking the owner for a link the bot already knows was my error.
+    """
     missing = []
     for a in AGENTS:
         if not a["id"] or not a["id"].isdigit():
             missing.append("agent id for %s" % (a.get("label") or a.get("name")))
         if not a["name"]:
             missing.append("agent name for %s" % (a.get("label") or a.get("id")))
-    if not SUPERVISOR_ROLE_ID:
-        missing.append("RECOVERY_SUPERVISOR_ROLE_ID")
-    if not OPS_LEADERSHIP_ROLE_ID:
-        missing.append("RECOVERY_OPS_LEAD_ROLE_ID")
-    if not PUBLIC_BASE:
-        missing.append("PUBLIC_BASE_URL (the call button needs it)")
     return (not missing), missing

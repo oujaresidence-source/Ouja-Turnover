@@ -30,6 +30,22 @@ Layout mirrors ops/ and decor/:
                 as __main__; importing it by name would boot a second Discord client).
 """
 
-from . import engine  # noqa: F401
+from . import config, db, engine, llm, status, routes  # noqa: F401
+from .host import HOST, wire  # noqa: F401
+from .routes import register_routes  # noqa: F401
 
-__all__ = ["engine"]
+__all__ = ["wire", "register_routes", "HOST", "config", "db", "engine", "llm",
+           "status", "routes"]
+
+
+def bootstrap():
+    """Create the tables and say what mode we are in. Never raises into the boot path —
+    a broken recovery module must not stop the bot."""
+    try:
+        db._ensure()
+        ready, missing = config.ready_for_discord()
+        print("[recovery] ready: enabled=%s dryrun=%s agents=%d discord-ready=%s%s"
+              % (config.ENABLED, config.DRYRUN, len(config.AGENTS), ready,
+                 (" missing=%s" % ", ".join(missing)) if missing else ""))
+    except Exception as e:
+        print("[recovery] bootstrap error:", e)

@@ -128,22 +128,47 @@ class TestEquityOnTheRealOwnershipSplit(unittest.TestCase):
             self.assertGreater(stats.get(aid, {}).get("assigned_count", 0), 0)
 
 
-class TestNotReadyToPostYet(unittest.TestCase):
+class TestReadiness(unittest.TestCase):
 
-    def test_the_feature_refuses_discord_until_the_roles_and_domain_are_set(self):
+    def test_both_agents_present_means_ready(self):
+        """Owner decision 2026-08-08: roles are optional, and the public URL is resolved by
+        bot.py itself — so the two agents are the only hard requirement."""
         ok, missing = config.ready_for_discord()
-        self.assertFalse(ok)
-        blob = " ".join(missing)
-        self.assertIn("SUPERVISOR", blob)
-        self.assertIn("OPS_LEAD", blob)
-        self.assertIn("PUBLIC_BASE_URL", blob)
-
-    def test_the_agent_ids_are_no_longer_among_the_missing(self):
-        _, missing = config.ready_for_discord()
-        self.assertFalse([m for m in missing if "agent" in m], missing)
+        self.assertTrue(ok, missing)
+        self.assertEqual(missing, [])
 
     def test_it_ships_switched_off(self):
         self.assertTrue(config.DRYRUN)      # computes and logs, posts nothing
+
+
+class TestEscalationAlwaysReachesAHuman(unittest.TestCase):
+    """The failure this prevents: a deadline passes and the ping goes nowhere because no
+    role was ever configured."""
+
+    def test_with_no_roles_it_pings_the_other_agent(self):
+        ohd, mohammed = config.AGENTS[0]["id"], config.AGENTS[1]["id"]
+        t = config.escalation_targets(ohd)
+        self.assertEqual(t, [{"kind": "user", "id": mohammed}])
+        self.assertEqual(config.escalation_targets(mohammed),
+                         [{"kind": "user", "id": ohd}])
+
+    def test_it_never_pings_the_agent_who_already_missed_it(self):
+        for a in config.AGENTS:
+            self.assertNotIn(a["id"], [t["id"] for t in config.escalation_targets(a["id"])])
+
+    def test_it_is_never_empty(self):
+        for a in config.AGENTS:
+            self.assertTrue(config.escalation_targets(a["id"]))
+        self.assertTrue(config.leadership_targets())
+
+    def test_a_configured_role_takes_over_cleanly(self):
+        original = config.SUPERVISOR_ROLE_ID
+        try:
+            config.SUPERVISOR_ROLE_ID = 12345
+            self.assertEqual(config.escalation_targets(config.AGENTS[0]["id"]),
+                             [{"kind": "role", "id": "12345"}])
+        finally:
+            config.SUPERVISOR_ROLE_ID = original
 
 
 if __name__ == "__main__":

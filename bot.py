@@ -115,6 +115,18 @@ except Exception as _coverage_err:      # pragma: no cover
     _coverage = None
     _HAS_COVERAGE = False
 
+# Guest recovery «استرداد التجربة» — a guest scored under 7 by /guest gets one accountable,
+# time-boxed phone call the same day, assigned to someone who does NOT own that apartment.
+# This phase is READ-ONLY: the dashboard tab and its data endpoint. Nothing posts to
+# Discord and nothing writes to Hostaway — recovery.config.DRYRUN ships at 1.
+try:
+    import recovery as _recovery
+    _HAS_RECOVERY = True
+except Exception as _recovery_err:      # pragma: no cover
+    print("[recovery] import failed (recovery tab disabled, bot unaffected):", _recovery_err)
+    _recovery = None
+    _HAS_RECOVERY = False
+
 # Internet subscriptions «اشتراكات النت» — which apartment has which subscription, from
 # whom, for how much, until when. Phase 1: make paying twice for one unit structurally
 # impossible (a partial unique index in wifi/db.py) and start collecting the data.
@@ -18893,6 +18905,37 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ GUEST RECOVERY «استرداد التجربة» ============
+           Read-only view over the recovery/ package. Every number here comes from
+           recovery.status.payload(), which reads the same functions the engine decides
+           with — a dashboard that recomputes the equity gap its own way is a dashboard
+           that can disagree with the thing it is reporting on. -->
+      <section class="view" id="view_rec">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🚨 استرداد التجربة</div>
+            <div class="page-sub">أي ضيف تقييمه تحت 7 يلحقه اتصال في نفس اليوم — والتوزيع بين الموظفين يبقى عادل</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadRecovery(1)">↻ تحديث</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_rec" data-help-key="rec">
+          <button class="ph-x" onclick="dismissHelp('rec')" title="إخفاء">×</button>
+          <div class="ph-t">الصفحة تجاوب على سؤالين: مين ينتظر اتصال الحين، وهل التوزيع عادل</div>
+          <div class="ph-b">
+            التذكرة تنفتح لما ينزل تقييم الضيف تحت <b>7</b> وهو لا يزال داخل الشقة.
+            الموظف المسؤول عن الشقة <b>ما يتصل عن شقته</b> — الضيف ما راح يتكلم بصراحة.
+            الاستثناء ينسجّل ويتعوّض تلقائياً، عشان ما يميل الشغل على أحد.
+            وأهم جدول في الصفحة هو <b>الشقق المتكررة</b>: الشقة اللي طلّعت تذكرتين خلال شهر
+            هي اللي تاكل في تقييماتنا بهدوء.
+          </div>
+        </div>
+
+        <div id="recBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ GUESTS (profiles + VIP + summaries) ============ -->
       <section class="view" id="view_guests">
         <div class="page-head">
@@ -19565,6 +19608,7 @@ const T = {
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير الديناميكي', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
+    rec:'استرداد التجربة',
     coverage:'تغطية التنظيف',
     wifi:'اشتراكات النت',
     clean_center:'مركز التنظيف',
@@ -19892,6 +19936,7 @@ const T = {
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Dynamic Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
+    rec:'Guest Recovery',
     coverage:'Cleaning Coverage',
     wifi:'Internet subscriptions',
     clean_center:'Cleaning Center',
@@ -21415,6 +21460,7 @@ function go(id){
   if(id==='coverage') loadCoverage();
   if(id==='wifi') loadWifi();
   if(id==='guests') loadGuests();
+  if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
   if(id==='tickets') loadTickets();
   if(id==='reviews') loadReviews();
@@ -29293,6 +29339,152 @@ async function loadCleanTeams(){
    anywhere in here. Use String.fromCharCode(10) for a newline.
    ============================================================ */
 var COV = {data:null, busy:false, zoom:null, pending:{prices:{}, nums:{}}};
+
+/* ===================== استرداد التجربة — Guest Recovery =====================
+   READ-ONLY. Renders recovery.status.payload() verbatim; it computes nothing itself, so
+   the tab can never disagree with the engine it reports on.
+   NO BACKSLASHES ANYWHERE BELOW — DASHBOARD_HTML is a normal triple-quoted Python string,
+   so a backslash-escape here is eaten by Python and kills the whole script. */
+var REC = {data:null};
+
+async function loadRecovery(force){
+  var body=document.getElementById('recBody'); if(!body) return;
+  if(REC.data && !force){ renderRecovery(); return; }
+  body.innerHTML='<div class="empty sk">—</div>';
+  try{
+    var r = await api('/api/recovery/status');
+    if(!r || !r.state) throw (r && r.detail) ? r.detail : 'no data';
+    REC.data = r;
+  }catch(e){
+    REC.data = null;
+    body.innerHTML = errorState('loadRecovery(1)', String(e));
+    return;
+  }
+  renderRecovery();
+}
+
+function _recKpi(lbl, val, tone){
+  return '<div class="kpi'+(tone?' '+tone:'')+'"><div class="kpi-lbl">'+esc(lbl)+
+         '</div><div class="kpi-val">'+esc(val)+'</div></div>';
+}
+
+function _recAgentCard(a){
+  var owns = (a.owns===null||a.owns===undefined) ? '—' : String(a.owns);
+  return '<div class="card">'+
+    '<div style="font-weight:700;font-size:17px">'+esc(a.name)+
+      ' <span class="muted" style="font-weight:400;font-size:12px">'+esc(a.label||'')+'</span></div>'+
+    '<div class="kpis" style="margin-top:10px">'+
+      _recKpi('تذاكر هذا الشهر', a.assigned)+
+      _recKpi('تواصل', a.contacted)+
+      _recKpi('انحلت', a.resolved)+
+      _recKpi('تجاوز الموعد', a.breached, a.breached?'bad':'')+
+    '</div>'+
+    '<div class="muted" style="margin-top:8px;font-size:13px">'+
+      'شققه في التقويم: '+esc(owns)+
+      ' · استُثني بسبب التعارض: '+esc(String(a.conflict_debt))+
+    '</div></div>';
+}
+
+function renderRecovery(){
+  var d = REC.data, body = document.getElementById('recBody');
+  if(!d || !body) return;
+  var st = d.state||{}, ag = d.agents||{}, mo = d.month||{}, tk = d.tickets||{},
+      ru = d.repeat_units||{}, sk = d.skips||{};
+  var h = '';
+
+  /* --- mode banner: never let the owner think it is live when it is not --- */
+  var toneCls = st.mode==='live' ? 'good' : 'warn';
+  h += '<div class="card" style="margin-bottom:14px">'+
+       '<span class="pill '+toneCls+'">'+esc(st.mode_ar||st.mode||'')+'</span> '+
+       '<span class="muted" style="font-size:13px">'+
+         'التذكرة تنفتح تحت '+esc(String(st.threshold))+' من 10 · '+
+         'الحد اليومي '+esc(String(st.daily_cap))+' تذكرة · '+
+         'النافذة '+esc(st.window||'')+' · '+
+         'الضيف داخل الشقة: مهلة '+esc(String(st.in_house_hours))+' ساعات'+
+       '</span>';
+  if(st.missing && st.missing.length){
+    h += '<div class="muted" style="margin-top:8px;font-size:13px">ناقص: '+
+         esc(st.missing.join(' · '))+'</div>';
+  }
+  h += '</div>';
+
+  /* --- this month at a glance --- */
+  h += '<div class="kpis" style="margin-bottom:14px">'+
+    _recKpi('تذاكر مفتوحة', tk.open||0)+
+    _recKpi('تذاكر الشهر', mo.total||0)+
+    _recKpi('تم التواصل', (mo.contacted||0)+' ('+(mo.contacted_pct||0)+'%)')+
+    _recKpi('انحلت', (mo.resolved||0)+' ('+(mo.resolved_pct||0)+'%)')+
+    _recKpi('تجاوزت الموعد', mo.breached||0, (mo.breached?'bad':''))+
+    _recKpi('تكلفة التحليل', (mo.cost_sar||0)+' ر.س')+
+  '</div>';
+
+  /* --- fairness: the number the owner actually asked about --- */
+  h += '<div class="card" style="margin-bottom:14px">'+
+       '<div style="font-weight:700;margin-bottom:4px">⚖️ التوزيع بين الموظفين</div>'+
+       '<div class="muted" style="font-size:13px;margin-bottom:12px">'+
+       'الفرق '+esc(String(ag.gap||0))+' تذكرة — '+
+       (ag.balanced ? 'متوازن' : 'يحتاج تعديل')+
+       ' (التنبيه يشتغل عند '+esc(String(ag.gap_alert_at||4))+')</div>'+
+       '<div class="grid2">'+((ag.rows||[]).map(_recAgentCard).join(''))+'</div>'+
+       '</div>';
+
+  /* --- repeat apartments: the highest-value output of the whole system --- */
+  h += '<div class="card" style="margin-bottom:14px">'+
+       '<div style="font-weight:700">🏚️ شقق تكررت شكاواها</div>'+
+       '<div class="muted" style="font-size:13px;margin-bottom:10px">'+
+       esc(String(ru.threshold||2))+' تذاكر أو أكثر خلال '+
+       esc(String(ru.window_days||30))+' يوم — هذي اللي تحتاج فحص كامل</div>';
+  if(!(ru.rows||[]).length){
+    h += '<div class="empty">ما فيه شقة تكررت — زين</div>';
+  }else{
+    h += '<div style="overflow-x:auto"><table class="data"><thead><tr>'+
+         '<th>الشقة</th><th>عدد التذاكر</th><th>آخر تذكرة</th></tr></thead><tbody>';
+    (ru.rows||[]).forEach(function(r){
+      h += '<tr><td>'+esc(r.unit_name||r.listing_id)+'</td><td>'+esc(String(r.n))+
+           '</td><td class="muted">'+esc(String(r.last_at||'').slice(0,10))+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
+  /* --- the tickets themselves --- */
+  h += '<div class="card" style="margin-bottom:14px">'+
+       '<div style="font-weight:700;margin-bottom:10px">🎫 التذاكر</div>';
+  if(!(tk.rows||[]).length){
+    h += '<div class="empty">ما فيه تذاكر بعد — النظام ما زال ما ربط بالبوت</div>';
+  }else{
+    h += '<div style="overflow-x:auto"><table class="data"><thead><tr>'+
+         '<th>الضيف</th><th>الشقة</th><th>التقييم</th><th>وش صار</th>'+
+         '<th>المسؤول</th><th>الحالة</th></tr></thead><tbody>';
+    (tk.rows||[]).forEach(function(r){
+      var late = r.sla_breached ? ' <span class="chip bad">تجاوز</span>' : '';
+      var inh = r.in_house ? ' <span class="chip">داخل الشقة</span>' : '';
+      h += '<tr><td>'+esc(r.guest_name||'—')+inh+'</td>'+
+           '<td>'+esc(r.unit_name||'—')+'</td>'+
+           '<td>'+esc(String(r.score==null?'—':r.score))+'</td>'+
+           '<td>'+esc(r.headline_ar||'—')+'</td>'+
+           '<td>'+esc(r.assigned_agent_name||'—')+'</td>'+
+           '<td>'+esc(r.status||'—')+late+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
+  /* --- why a guest did NOT get a ticket. Without this the tab can only say what
+         happened, never what didn't. --- */
+  h += '<div class="card">'+
+       '<div style="font-weight:700;margin-bottom:6px">🔍 ليش ما انفتحت تذكرة</div>';
+  if(!(sk.last7||[]).length){
+    h += '<div class="empty">ما فيه سجل بعد</div>';
+  }else{
+    h += '<div class="muted" style="font-size:13px">آخر 7 أيام: '+
+         esc((sk.last7||[]).map(function(p){ return p[0]+' × '+p[1]; }).join(' · '))+
+         '</div>';
+  }
+  h += '</div>';
+
+  body.innerHTML = h;
+}
 
 async function loadCoverage(force){
   var body=document.getElementById('covBody'); if(!body) return;
@@ -38653,7 +38845,7 @@ NAV_DEF = {
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
-        {"tk": "cat_guests", "ids": ["guests", "gw", "guide", "reviews"]},
+        {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["kb", "users", "learn", "log"]},
     ],
     "items": [
@@ -38689,6 +38881,7 @@ NAV_DEF = {
         {"id": "finance", "ic": "finance", "tk": "finance"},
         {"id": "erp", "ic": "fb", "tk": "erp"},
         {"id": "guests", "ic": "guests", "tk": "guests"},
+        {"id": "rec", "ic": "tickets", "tk": "rec"},
         {"id": "gw", "ic": "gw", "tk": "gw"},
         {"id": "guide", "ic": "gw", "tk": "guide"},
         {"id": "quality", "ic": "quality", "tk": "quality"},
@@ -38711,7 +38904,7 @@ NAV_DEF = {
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
-            "guests": "الضيوف", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
+            "guests": "الضيوف", "rec": "استرداد التجربة", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط", "kb": "قاعدة المعرفة",
             "studio": "استوديو عوجا",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
@@ -38730,7 +38923,7 @@ NAV_DEF = {
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
-            "guests": "Guests", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
+            "guests": "Guests", "rec": "Guest Recovery", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "log": "Activity", "kb": "Knowledge Base",
             "studio": "Ouja Studio",
             "cat_overview": "Overview", "cat_ops": "Operations",
@@ -55038,6 +55231,7 @@ _ROLE_WRITE_RULES = [
     ("/api/gw/", "gw"),
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
+    ("/api/recovery/", "rec"),
     ("/api/wifi/", "wifi"),                  # /api/wifi/fill-save is exempt above (public team page)
     ("/api/kb/", "kb"),                      # knowledge base — no public door at all
 ]
@@ -55070,6 +55264,7 @@ _ROLE_READ_RULES = [
     ("/api/inbox", "inbox"),
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
+    ("/api/recovery/", "rec"),
     # NOT the broad "/api/wifi/" prefix: it would also match GET /api/wifi/fill, the read
     # behind the public /wifi-fill team page, and demand a login the team does not have.
     # Same reason /api/schedule/day+week are absent from this list. List the private reads.
@@ -55769,6 +55964,30 @@ async def start_web_server():
                 print("[coverage] wired + routes registered (/api/coverage/study, /api/coverage/geo)")
             except Exception as _ce:
                 print("[coverage] wiring failed (coverage tab disabled, bot unaffected):", _ce)
+
+        # ---- «استرداد التجربة» — guest recovery. THIS PHASE IS READ-ONLY: one GET that
+        # feeds the dashboard tab. No Discord, no scheduler, no writes. public_base is
+        # injected from _dispatch_base_url so the call link has exactly one definition,
+        # and unit_owner comes from schedule.owners — the shared permanent-owner resolver,
+        # never a second copy of "who owns this apartment".
+        if _HAS_RECOVERY:
+            try:
+                _recovery.wire({
+                    "dash_auth": _dash_auth,
+                    "req_role": _req_role,
+                    "json_response": _json,
+                    "web": web,
+                    "tz": TZ,
+                    "public_base": _dispatch_base_url,
+                    "unit_owner": (lambda lid=None, name=None:
+                                   (_schedule.owners.owner_for(listing_id=lid, name=name)
+                                    if _HAS_SCHEDULE else None)),
+                })
+                _recovery.bootstrap()
+                _recovery.register_routes(app)
+                print("[recovery] wired + route registered (/api/recovery/status)")
+            except Exception as _re:
+                print("[recovery] wiring failed (recovery tab disabled, bot unaffected):", _re)
 
         # ---- «اشتراكات النت» — internet subscriptions. Phase 1: the order log, the
         # one-active-subscription lock, the /wifi-fill backfill page and the manager view.
