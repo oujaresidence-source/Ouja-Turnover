@@ -29408,6 +29408,40 @@ function renderRecovery(){
   }
   h += '</div>';
 
+  /* --- today: real data before the Discord half exists. Context, NOT a to-do list —
+         a departure only becomes a ticket when /guest scores it under the threshold. --- */
+  var td = d.today||{};
+  h += '<div class="card" style="margin-bottom:14px">'+
+       '<div style="font-weight:700">🧳 مغادرو اليوم</div>'+
+       '<div class="muted" style="font-size:13px;margin-bottom:10px">'+
+       esc(String(td.date||''))+' · '+esc(String(td.checkouts_count||0))+' مغادرة'+
+       ((td.inhouse_count===null||td.inhouse_count===undefined) ? '' :
+         (' · '+esc(String(td.inhouse_count))+' ضيف داخل الشقق الحين'))+
+       ((td.no_phone) ? (' · '+esc(String(td.no_phone))+' بدون رقم') : '')+
+       '<br>هذي قائمة معلومات مو قائمة مهام — المغادرة ما تصير تذكرة إلا لو نزل تقييمها تحت '+
+       esc(String(st.threshold))+'</div>';
+  if(!(td.checkouts||[]).length){
+    h += '<div class="empty">ما فيه مغادرات اليوم</div>';
+  }else{
+    h += '<div style="overflow-x:auto"><table class="data"><thead><tr>'+
+         '<th>الضيف</th><th>الشقة</th><th>الإقامة</th><th>ليالٍ</th>'+
+         '<th>القناة</th><th>تذكرة</th></tr></thead><tbody>';
+    (td.checkouts||[]).forEach(function(r){
+      var badge = r.ticket_status
+        ? '<span class="chip">'+esc(r.ticket_status)+'</span>'
+        : '<span class="muted">—</span>';
+      var nophone = r.has_phone ? '' : ' <span class="chip bad">بدون رقم</span>';
+      h += '<tr><td>'+esc(r.guest||'—')+nophone+'</td>'+
+           '<td>'+esc(r.unit||'—')+'</td>'+
+           '<td class="muted">'+esc(String(r.checkin||''))+' ← '+esc(String(r.checkout||''))+'</td>'+
+           '<td>'+esc(String(r.nights==null?'—':r.nights))+'</td>'+
+           '<td class="muted">'+esc(r.channel||'—')+'</td>'+
+           '<td>'+badge+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
   /* --- this month at a glance --- */
   h += '<div class="kpis" style="margin-bottom:14px">'+
     _recKpi('تذاكر مفتوحة', tk.open||0)+
@@ -32732,6 +32766,60 @@ def fetch_inhouse(day):
     except Exception as e:
         print("in-house fetch error:", e)
         return []
+
+_RECOVERY_CHECKOUTS_CACHE = {"day": None, "rows": [], "ts": 0.0}
+_RECOVERY_CHECKOUTS_TTL = 600      # Hostaway is slow; the tab must not re-pull on every open
+
+
+def _recovery_todays_checkouts():
+    """Who leaves today — for the «استرداد التجربة» tab, so the page has something real in
+    it before the Discord half exists.
+
+    A TARGETED departure-window query, never get_reservations_cached(): that cache truncates
+    around 6,000 rows and silently drops the newest months (the 18,842-instead-of-48,114
+    owner-statement bug). Read-only, cached for ten minutes, and it makes NO Claude calls —
+    a guest's mood still comes only from /guest.
+    """
+    today = datetime.now(TZ).date()
+    now = time.time()
+    if (_RECOVERY_CHECKOUTS_CACHE["day"] == today
+            and now - _RECOVERY_CHECKOUTS_CACHE["ts"] < _RECOVERY_CHECKOUTS_TTL):
+        return list(_RECOVERY_CHECKOUTS_CACHE["rows"])
+
+    iso = today.isoformat()
+    listings = get_listings_map() or {}
+    rows, seen = [], set()
+    try:
+        deps = _ha_reservations_window("departureStartDate", "departureEndDate", iso, iso)
+    except Exception as e:
+        print("[recovery] checkouts fetch error:", e)
+        return list(_RECOVERY_CHECKOUTS_CACHE["rows"])
+
+    for r in deps:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue                                   # confirmed stays only — never blocks
+        if str(r.get("departureDate") or "")[:10] != iso:
+            continue                                   # the window is inclusive; pin the day
+        rid = r.get("id")
+        if rid in seen:
+            continue
+        seen.add(rid)
+        lid = r.get("listingMapId")
+        rows.append({
+            "reservation_id": str(rid or ""),
+            "guest": r.get("guestName") or "ضيف",
+            "unit": listings.get(lid) or r.get("listingName") or ("unit-%s" % lid),
+            "listing_id": lid,
+            "checkin": str(r.get("arrivalDate") or "")[:10],
+            "checkout": iso,
+            "nights": _res_nights(r),
+            "channel": (r.get("channelName") or "").strip(),
+            "has_phone": bool((r.get("phone") or "").strip()),
+        })
+    rows.sort(key=lambda x: (x["unit"] or ""))
+    _RECOVERY_CHECKOUTS_CACHE.update({"day": today, "rows": rows, "ts": now})
+    return list(rows)
+
 
 def _compute_today():
     """The morning cockpit: arrivals, departures, who's empty tonight, same-day turnovers,
@@ -55982,6 +56070,10 @@ async def start_web_server():
                     "unit_owner": (lambda lid=None, name=None:
                                    (_schedule.owners.owner_for(listing_id=lid, name=name)
                                     if _HAS_SCHEDULE else None)),
+                    "todays_checkouts": _recovery_todays_checkouts,
+                    "inhouse_count": (lambda: len([
+                        r for r in (fetch_inhouse(datetime.now(TZ).date()) or [])
+                        if _res_realized(r)])),
                 })
                 _recovery.bootstrap()
                 _recovery.register_routes(app)

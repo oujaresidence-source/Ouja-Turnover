@@ -12,6 +12,7 @@ Read-only. No writes, no Discord, no Hostaway.
 import datetime
 
 from . import config, db, engine
+from .host import call
 
 
 def _owned_counts():
@@ -137,6 +138,42 @@ def skips_block(limit=25):
     return {"rows": rows, "last7": sorted(tally.items(), key=lambda kv: -kv[1])}
 
 
+def today_block():
+    """Who is leaving today, and how many guests are inside an apartment right now.
+
+    This is context, NOT the pipeline. A name appearing here does not mean a ticket is
+    owed — a ticket needs a /guest score under the threshold, and most departures are
+    perfectly happy. The tab labels it that way so nobody reads this list as a to-do.
+
+    Every row is cross-checked against recovery_tickets so an existing ticket shows up
+    beside the guest rather than the team wondering whether one was opened.
+    """
+    rows = call("todays_checkouts") or []
+    ids = [str(r.get("reservation_id") or "") for r in rows if r.get("reservation_id")]
+    have = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for t in db.q("SELECT reservation_id,status,score,assigned_agent_name"
+                      " FROM recovery_tickets WHERE reservation_id IN (%s)" % marks, ids):
+            have[str(t["reservation_id"])] = t
+    out = []
+    for r in rows:
+        t = have.get(str(r.get("reservation_id") or ""))
+        out.append(dict(r,
+                        ticket_status=(t or {}).get("status"),
+                        ticket_score=(t or {}).get("score"),
+                        ticket_agent=(t or {}).get("assigned_agent_name")))
+    return {
+        "date": db.now_dt().date().isoformat(),
+        "checkouts": out,
+        "checkouts_count": len(out),
+        "no_phone": sum(1 for r in out if not r.get("has_phone")),
+        "with_ticket": sum(1 for r in out if r.get("ticket_status")),
+        "inhouse_count": call("inhouse_count"),      # None when bot.py did not inject it
+        "available": bool(rows) or call("todays_checkouts") is not None,
+    }
+
+
 def state_block():
     ready, missing = config.ready_for_discord()
     if config.DRYRUN:
@@ -165,6 +202,7 @@ def payload(month_key=None):
     in one block must not blank the whole page."""
     out = {"ok": True, "generated_at": db.now_iso()}
     for key, fn in (("state", state_block),
+                    ("today", today_block),
                     ("agents", lambda: agents_block(month_key)),
                     ("tickets", tickets_block),
                     ("month", lambda: month_block(month_key)),

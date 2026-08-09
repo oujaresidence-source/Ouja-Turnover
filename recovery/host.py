@@ -35,6 +35,13 @@ HOST = SimpleNamespace(
     # --- who permanently owns an apartment (schedule.owners) ---
     unit_owner=None,       # (listing_id, name) -> owner name or None
 
+    # --- today's picture, so the tab is useful before the Discord half exists ---
+    # Both are targeted Hostaway queries and make NO Claude calls: a guest's mood still
+    # comes only from /guest. todays_checkouts is cached for ten minutes inside bot.py.
+    todays_checkouts=None, # () -> [{reservation_id, guest, unit, listing_id, checkin,
+                           #          checkout, nights, channel, has_phone}]
+    inhouse_count=None,    # () -> int   guests inside an apartment right now
+
     # --- delivery ---
     notify=None,           # (payload) -> None    Discord side, DRY-RUN aware
     open_maintenance=None, # (payload) -> ticket id   the EXISTING maintenance system
