@@ -32984,6 +32984,133 @@ def _owner_registry_migrate():
         _save_json("owner_registry.json", _owner_registry)
     return changed
 
+# ---------- one-time owner RENAMES (owner-approved spelling corrections) ----------
+# (marker, old name, new name). The owner's name is the primary key of SIX stores,
+# so a rename is a MOVE, never a relabel: rename the registry alone and you get a
+# brand-new empty owner beside an old one still holding every statement, her share
+# link and her phone. Marked like the migrations above — a later rename by Faisal's
+# own hand is never undone on the next boot.
+_OWNER_RENAMES = [
+    ("rename-najla-2026-08", "نجلاء القاسم", "نجلاء الغشام"),   # 2026-08-10, Faisal
+]
+
+# Every state file that stores an owner NAME (the portal cache is dropped, not moved).
+_OWNER_NAME_FILES = ("owner_registry.json", "unit_owners.json", "owner_links.json",
+                     "owner_statements.json", "owner_terms.json")
+
+def _owner_rename_resolve(old):
+    """The registry name to rename, or None when it can't be resolved WITHOUT
+    guessing. Exact match first (spacing-insensitive); else a single owner
+    carrying every token of `old` («نجلاء عبدالله القاسم»). Two candidates =
+    None: renaming the wrong owner is far worse than doing nothing."""
+    names = sorted({(r.get("owner") or "").strip()
+                    for r in _owner_registry.values() if (r.get("owner") or "").strip()})
+    exact = [n for n in names if _owner_norm(n) == _owner_norm(old)]
+    if exact:
+        return exact[0]
+    want = set(_owner_tokens(old))
+    near = [n for n in names if want and want.issubset(set(_owner_tokens(n)))]
+    return near[0] if len(near) == 1 else None
+
+def _owner_rename_apply(old, new):
+    """Move one owner across every store. Returns the apartment count, or None
+    when the name couldn't be resolved (caller leaves the marker unset so a
+    corrected spelling still gets its chance on a later boot)."""
+    src = _owner_rename_resolve(old)
+    if not src or not new or src == new:
+        print("owner rename: «%s» not found or ambiguous in the registry — skipped" % old)
+        return None
+    stamp = datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
+    for fn in _OWNER_NAME_FILES:                     # one-step undo
+        blob = _load_json(fn, None)
+        if blob is not None:
+            _save_json("backup-%s-%s" % (stamp, fn), blob)
+
+    n_units = 0                                      # 1) the registry (memory + disk)
+    for rec in _owner_registry.values():
+        if (rec.get("owner") or "").strip() == src:
+            rec["owner"] = new
+            n_units += 1
+    _save_json("owner_registry.json", _owner_registry)
+
+    for apt, own in list(_unit_owners.items()):      # 2) the older per-owner P&L map
+        if (own or "").strip() == src:
+            _unit_owners[apt] = new
+    _save_json("unit_owners.json", dict(_unit_owners))
+
+    if src in _owner_links:                          # 3) her share link — SAME token,
+        _owner_links[new] = _owner_links.pop(src)    #    so the link she already has lives
+        _save_json("owner_links.json", dict(_owner_links))
+
+    st = _load_json("owner_statements.json", {}) or {}   # 4) statements, edits, published
+    out, n_stmt = {}, 0
+    for k, rec in st.items():
+        owner_part, _, mkey = str(k).partition("|")
+        if owner_part == src:
+            new_key = new + "|" + mkey
+            if new_key in st:                        # never overwrite real data
+                print("owner rename: %s already exists — left %s alone" % (new_key, k))
+            else:
+                if isinstance(rec, dict):
+                    rec["owner"] = new
+                    snap = ((rec.get("published") or {}).get("snapshot")) or {}
+                    if isinstance(snap, dict) and snap.get("owner"):
+                        snap["owner"] = new          # the NAME only — no number is touched
+                k = new_key
+                n_stmt += 1
+        out[k] = rec
+    _save_json("owner_statements.json", out)
+
+    tm = _load_json("owner_terms.json", {}) or {}    # 5) phone / notes / active + history
+    owners_tm = tm.get("owners") or {}
+    if src in owners_tm and new not in owners_tm:
+        owners_tm[new] = owners_tm.pop(src)
+    tm["owners"] = owners_tm
+    tm.setdefault("versions", []).append(
+        {"at": datetime.now(TZ).isoformat(timespec="seconds"), "by": "system",
+         "what": "owner_rename", "target": src + " → " + new,
+         "before": {"owner": src}, "after": {"owner": new, "units": n_units},
+         "reason": "تصحيح اسم المالك (قرار فيصل)"})
+    _save_json("owner_terms.json", tm)
+
+    try:                                     # 6) drop the finance caches (only if that
+        import sys as _sys                   #    module is already loaded) so the moved
+        _fo = _sys.modules.get("finance.owners")   # files are re-read, not the old names
+        if _fo is not None:
+            _fo._stmt_cache["v"] = None
+            _fo._terms_cache["v"] = None
+    except Exception:
+        pass
+    for who in (src, new):
+        try:
+            _owner_cache_bust(owner=who)
+        except Exception:
+            pass
+
+    print("owner rename: «%s» → «%s» — %d apartment(s), %d statement(s)" % (src, new, n_units, n_stmt))
+    try:
+        log_event("finance", "سجل الملاك: تغيّر اسم «%s» إلى «%s» — %d شقة و%d كشف"
+                             % (src, new, n_units, n_stmt))
+    except Exception:
+        pass
+    return n_units
+
+def _owner_rename_once():
+    """Run each pending rename exactly once. A rename that couldn't be resolved
+    stays unmarked and is retried on the next boot (it changed nothing)."""
+    applied = _load_json("owner_registry_migrations.json", []) or []
+    changed = False
+    for key, old, new in _OWNER_RENAMES:
+        if key in applied:
+            continue
+        if _owner_rename_apply(old, new) is None:
+            continue
+        applied.append(key)
+        changed = True
+    if changed:
+        _save_json("owner_registry_migrations.json", applied)
+    return changed
+
 def _owner_norm(s):
     """Normalize for matching: lowercase, keep only alphanumerics + Arabic letters (drop
     spaces, '|', '-', etc.). So code 'A-11' → 'a11' matches a listing 'Ouja | A 11'."""
@@ -57009,6 +57136,10 @@ def load_state():
             _owner_registry_migrate()        # one-time data fixes (e.g. 0b: missing 102B)
         except Exception as _e:
             print("owner registry migrate error:", _e)
+        try:
+            _owner_rename_once()             # one-time owner renames (moves ALL six stores)
+        except Exception as _e:
+            print("owner rename error:", _e)
         _finance_adjust.clear()
         _finance_adjust.update(_load_json("finance_adjust.json", {}) or {})
         _finance_audit[:] = _load_json("finance_audit.json", []) or []
