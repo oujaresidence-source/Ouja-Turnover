@@ -10942,6 +10942,15 @@ class CleaningProofReviewView(discord.ui.View):
             _oujact_mark_done("{}:{}".format(report.get("apartment_id"), report.get("date")))
             key = "{}:{}".format(report.get("apartment_id"), str(report.get("date"))[:10])
             reason = "OujaCT: cleaning approved by " + (str(interaction.user) or "manager")
+            # A guest checks in today and it's still before his check-in time? Then the room
+            # does NOT close yet: ask the team whether to send him the «شقتك جاهزة» notice
+            # first (see _ready_offer). Nothing is ever sent without two human clicks, and a
+            # question nobody answers sends nothing at all.
+            try:
+                if await _ready_offer(interaction.channel, report, str(interaction.user)):
+                    return
+            except Exception as e:
+                print("ready-notice offer (discord) error:", e)
             try:
                 # The review card now lives in the apartment's OWN turnover channel, so the
                 # channel to close is the one we're in. Delete it DIRECTLY (verified by its
@@ -11145,6 +11154,340 @@ async def _cleanproof_send_approval_summary(report, approver):
                       report.get("status"), report.get("status"), f"#{CLEANING_REVIEW_CHANNEL}",
                       extra={"minutes": minutes, "photos": n_photos, "approver": approver})
     return True, ""
+
+# ---- «شقتك جاهزة» — the guest ready notice (2026-08-13, owner-specified) ----
+# When a manager approves the cleaning photos, the apartment is verified ready by a HUMAN.
+# Only then may we tell the arriving guest. Two hard rules from the owner:
+#   1) NEVER auto-send. The team is ASKED first (button), then asked "are you sure" (second
+#      button). Silence = nothing is sent, ever. The turnover channel simply stays open and
+#      the existing 2-day cleanup removes it.
+#   2) The guide link comes from the listing's Hostaway CUSTOM FIELDS (get_guide_url) — not
+#      from directions_url. No guide link → no prompt, no message. We never invent a link.
+# This is deliberately NOT the assistant (Musaed), which must still never claim a unit is
+# clean/ready: that rule is about guessing. This message is a verified human sign-off.
+READY_NOTIFY_ENABLED = True          # in code on purpose — nothing to configure in Railway
+_READY_PROMPT_FILE = "ready_notify_prompts.json"   # prompt message id -> payload (survives restarts)
+_READY_SENT_FILE = "ready_notified.json"           # reservation id -> when we told that guest
+_ready_prompts = _load_json(_READY_PROMPT_FILE, {}) or {}
+_ready_sent = _load_json(_READY_SENT_FILE, {}) or {}
+_ready_lock = threading.Lock()
+
+def _ready_prune(days=3):
+    """Drop prompt payloads older than a few days (their channels are long gone)."""
+    cutoff = (datetime.now(TZ).date() - timedelta(days=days)).isoformat()
+    stale = [k for k, p in list(_ready_prompts.items())
+             if str((p or {}).get("date") or "") < cutoff]
+    for k in stale:
+        _ready_prompts.pop(k, None)
+    if stale:
+        _save_json(_READY_PROMPT_FILE, _ready_prompts)
+
+def _ready_guest_first_name(full_name):
+    """First name if it looks like a real one, else "" (we greet without a name rather than
+    write 'هلا Guest'). Airbnb hands us 'Guest', empty strings and single letters often."""
+    raw = str(full_name or "").strip()
+    if not raw:
+        return ""
+    first = raw.split()[0].strip(" .,-_")
+    if len(first) < 2 or first.lower() in ("guest", "guests", "airbnb", "booking", "ضيف"):
+        return ""
+    if not re.match(r"^[A-Za-z؀-ۿ][A-Za-z؀-ۿ'\-]*$", first):
+        return ""
+    return first[:24]
+
+def _ready_message_text(first_name, guide_url):
+    """The owner's message, word for word. The team signature is appended by
+    send_guest_message (with_signature), so the body does not repeat 'فريق عوجا'."""
+    hello = ("هلا " + first_name + " 👋") if first_name else "هلا وغلا 👋"
+    return "\n".join([
+        hello,
+        "",
+        "✨ شقتك جاهزة لاستقبالك!",
+        "",
+        "تو وصلنا تأكيد فريقنا إن الشقة تم تجهيزها بالكامل:",
+        "🧼 تنظيف وتعقيم بعناية",
+        "🛏️ تغيير المفارش وتجهيزها من جديد",
+        "✨ مراجعة الشقة والتأكد إن كل شيء جاهز لوصولك",
+        "",
+        "ومب ناقصها إلا إنك تنورها 🤍",
+        "",
+        "🔑 كل تفاصيل الدخول والشقة موجودة هنا:",
+        str(guide_url),
+        "",
+        "وإذا احتجت أي شيء خلال إقامتك، 💬 اكتب لنا هنا وفريقنا بيكون معك بأسرع وقت.",
+        "",
+        "إقامة سعيدة 🤍",
+    ])
+
+def _ready_context(lid, date_iso):
+    """Everything needed to offer the ready notice for this unit+day, or a plain reason why
+    we can't. Blocking (Hostaway calls) — always call from a thread.
+    Returns (payload_dict, "") or (None, reason)."""
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return None, "bad_listing"
+    date_iso = str(date_iso or "")[:10]
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_iso):
+        return None, "bad_date"
+    try:
+        data = api_get("/reservations", params={
+            "arrivalStartDate": date_iso, "arrivalEndDate": date_iso,
+            "limit": 200, "includeResources": 0})
+    except Exception as e:
+        print("ready-notice reservations error:", e)
+        return None, "hostaway_error"
+    best = None
+    for r in (data.get("result") or []):
+        if r.get("listingMapId") != lid:
+            continue
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        if str(r.get("arrivalDate") or "")[:10] != date_iso:
+            continue
+        hour = parse_hour(r.get("checkInTime"), 15)
+        if best is None or hour < best[0]:
+            best = (hour, r)
+    if best is None:
+        return None, "no_arrival_today"        # nobody checks in today → nothing to tell
+    hour, res = best
+    res_id = str(res.get("id") or "")
+    if res_id and res_id in _ready_sent:
+        return None, "already_sent"            # this guest was already told
+    cid = res.get("conversationId")
+    if not cid:
+        return None, "no_conversation"
+    y, m, d = (int(x) for x in date_iso.split("-"))
+    checkin_dt = datetime(y, m, d, min(hour, 23), 0, tzinfo=TZ)
+    if datetime.now(TZ) >= checkin_dt:
+        return None, "after_checkin"           # his check-in time already passed
+    guide = get_guide_url(lid)                 # Hostaway CUSTOM FIELDS — the real guide link
+    if not guide:
+        return None, "no_guide_link"
+    first = _ready_guest_first_name(res.get("guestName") or res.get("guestFirstName") or "")
+    return {
+        "lid": lid, "date": date_iso, "res_id": res_id, "cid": str(cid),
+        "guest": str(res.get("guestName") or "")[:80], "first": first,
+        "guide": guide, "checkin": checkin_dt.strftime("%Y-%m-%d %H:%M"),
+        "checkin_label": _fmt_hour(min(hour, 23)),
+        "unit": _cleanproof_listing_name(lid),
+        "body": _ready_message_text(first, guide),
+    }, ""
+
+_READY_SKIP_AR = {
+    "no_arrival_today": "ما فيه ضيف داخل اليوم",
+    "already_sent": "الضيف مبلّغ من قبل",
+    "no_conversation": "ما فيه محادثة مع الضيف في Hostaway",
+    "after_checkin": "وقت دخوله عدّى",
+    "no_guide_link": "ما فيه رابط دليل لهذي الشقة",
+    "hostaway_error": "Hostaway ما رد",
+}
+
+def _ready_prompt_embed(payload, stage="ask"):
+    """The question card. stage: ask → send/skip, confirm → are-you-sure, done → outcome."""
+    if stage == "confirm":
+        title, color = "⚠️ متأكد؟ الرسالة بتوصل للضيف فوراً", 0xE0A33E
+    else:
+        title, color = "📩 نرسل للضيف رسالة «شقتك جاهزة»؟", GOLD
+    head = [
+        "**الضيف / Guest:** " + (payload.get("guest") or "—"),
+        "**وقت الدخول / Check-in:** اليوم " + (payload.get("checkin_label") or "—"),
+        "**الشقة / Unit:** " + (payload.get("unit") or "—"),
+        "**الدليل / Guide:** " + (payload.get("guide") or "—"),
+    ]
+    e = discord.Embed(title=title, description="\n".join(head)[:1500], color=color)
+    e.add_field(name="نص الرسالة كما بتوصل الضيف",
+                value=(payload.get("body") or "")[:1024], inline=False)
+    if stage == "confirm":
+        e.set_footer(text="اضغط «تأكيد الإرسال» وتروح للضيف · أو «تراجع»")
+    else:
+        e.set_footer(text="ما ضغطت شيء؟ ما ينرسل شيء. الروم يقفل تلقائياً بعد يومين.")
+    return e
+
+def _ready_store_prompt(message_id, payload):
+    with _ready_lock:
+        _ready_prompts[str(message_id)] = payload
+        _save_json(_READY_PROMPT_FILE, _ready_prompts)
+
+def _ready_claim_send(res_id):
+    """Claim the one send for this reservation. False = somebody already claimed it (a second
+    click, or both the Discord card and the dashboard). Persisted, so a restart can't undo it."""
+    rid = str(res_id or "")
+    if not rid:
+        return False
+    with _ready_lock:
+        if rid in _ready_sent:
+            return False
+        _ready_sent[rid] = _cleanproof_now()
+        _save_json(_READY_SENT_FILE, _ready_sent)
+        return True
+
+def _ready_checkin_passed(checkin_str):
+    """True when the guest's check-in time is already behind us. Unreadable/missing time =
+    treat as passed: we refuse to send rather than risk a late message."""
+    try:
+        dt = datetime.strptime(str(checkin_str)[:16], "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+    except Exception:
+        return True
+    return datetime.now(TZ) >= dt
+
+def _ready_release_send(res_id):
+    """Undo the claim when the send actually failed, so the team can retry."""
+    rid = str(res_id or "")
+    with _ready_lock:
+        if _ready_sent.pop(rid, None) is not None:
+            _save_json(_READY_SENT_FILE, _ready_sent)
+
+async def _ready_log_review(text):
+    """One line into the central #oujact-review room, so the ready notices have a paper trail
+    that outlives the apartment channel (which gets deleted right after)."""
+    try:
+        guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
+        if guild is None:
+            return
+        ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
+        if ch is not None:
+            await ch.send(text[:1900])
+    except Exception as e:
+        print("ready-notice review log error:", e)
+
+async def _ready_close_channel(guild, lid, date_iso, reason, channel=None):
+    """Close the apartment's turnover channel once the ready-notice question is answered —
+    the same tidy-up the approve path does, just deferred until the team decided."""
+    key = "{}:{}".format(lid, str(date_iso)[:10])
+    try:
+        if channel is not None and parse_topic_oujact_key(getattr(channel, "topic", "") or "") == key:
+            await channel.delete(reason=reason)
+            return
+        tch = await _oujact_find_turnover_channel(guild, lid, date_iso)
+        if tch is not None:
+            await tch.delete(reason=reason)
+    except Exception as e:
+        print("ready-notice close channel error:", e)
+
+async def _ready_offer(channel, report, actor):
+    """Ask the team whether to send the ready notice, INSTEAD of closing the channel.
+    Returns True when the question was posted (caller must NOT delete the channel yet),
+    False when there is nothing to ask (caller closes the channel exactly as before)."""
+    if not READY_NOTIFY_ENABLED or channel is None or not report:
+        return False
+    lid, date_iso = report.get("apartment_id"), str(report.get("date") or "")[:10]
+    payload, reason = await asyncio.to_thread(_ready_context, lid, date_iso)
+    if not payload:
+        if reason not in ("no_arrival_today", "already_sent"):
+            print(f"ready-notice skipped ({report.get('apartment_name')}): {reason}")
+        return False
+    payload["actor"] = str(actor or "")[:80]
+    payload["channel_id"] = str(getattr(channel, "id", "") or "")
+    payload["report_id"] = report.get("report_id")
+    try:
+        msg = await channel.send(embed=_ready_prompt_embed(payload, "ask"), view=ReadyNotifyAskView())
+    except Exception as e:
+        print("ready-notice prompt send error:", e)
+        return False
+    _ready_prune()
+    _ready_store_prompt(msg.id, payload)
+    return True
+
+class ReadyNotifyAskView(discord.ui.View):
+    """Step 1 — send the guest the ready notice, or close without sending."""
+    def __init__(self):
+        super().__init__(timeout=None)     # persistent: survives a restart
+
+    @discord.ui.button(label="✅ نعم، أرسل", style=discord.ButtonStyle.success,
+                       custom_id="ouja_ready_send")
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        payload = _ready_prompts.get(str(interaction.message.id))
+        if not payload:
+            await interaction.response.send_message(
+                "ما لقيت تفاصيل هذي الرسالة (يمكن قديمة). ما أرسلت شي.", ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=_ready_prompt_embed(payload, "confirm"),
+                                                view=ReadyNotifyConfirmView())
+
+    @discord.ui.button(label="✖️ لا، أغلق بدون إرسال", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_ready_skip")
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        payload = _ready_prompts.get(str(interaction.message.id)) or {}
+        try:
+            await interaction.response.send_message(
+                "تمام — أغلقت الروم بدون ما نرسل شي للضيف.", ephemeral=True)
+        except Exception:
+            pass
+        with _ready_lock:
+            _ready_prompts.pop(str(interaction.message.id), None)
+            _save_json(_READY_PROMPT_FILE, _ready_prompts)
+        unit = payload.get("unit") or "—"
+        await _ready_log_review(
+            f"🚫 **{unit}** · ما أرسلنا رسالة الجاهزية للضيف — قرار {interaction.user} "
+            f"(الضيف: {payload.get('guest') or '—'})")
+        log_event("ops", f"Ready notice declined · {unit}")
+        await _ready_close_channel(interaction.guild, payload.get("lid"), payload.get("date"),
+                                   "OujaCT: closed without a ready notice", interaction.channel)
+
+class ReadyNotifyConfirmView(discord.ui.View):
+    """Step 2 — the are-you-sure. This is the only button that reaches a guest."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🚀 تأكيد الإرسال", style=discord.ButtonStyle.danger,
+                       custom_id="ouja_ready_confirm")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mid = str(interaction.message.id)
+        payload = _ready_prompts.get(mid)
+        if not payload:
+            await interaction.response.send_message(
+                "ما لقيت تفاصيل هذي الرسالة (يمكن قديمة). ما أرسلت شي.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=False, thinking=True)
+        unit = payload.get("unit") or "—"
+        # The card may have sat there a while. Telling a guest his apartment is ready AFTER
+        # his check-in time has passed reads as late, not helpful — re-check at click time.
+        if _ready_checkin_passed(payload.get("checkin")):
+            await interaction.followup.send(
+                "⏰ وقت دخول الضيف عدّى — ما أرسلت الرسالة (صارت متأخرة). "
+                "إذا تبي ترسل له شي، أرسله يدوياً.")
+            return
+        if not _ready_claim_send(payload.get("res_id")):
+            await interaction.followup.send("هذا الضيف مبلّغ من قبل — ما أرسلت مرة ثانية.")
+            return
+        try:
+            res = await asyncio.to_thread(send_guest_message, payload.get("cid"),
+                                          payload.get("body"), "email")
+        except Exception as e:
+            _ready_release_send(payload.get("res_id"))
+            print("ready-notice send error:", e)
+            await interaction.followup.send(f"❌ ما انرسلت. السبب: {e}\nالروم باقي مفتوح، جرّب مرة ثانية.")
+            return
+        if res == SEND_BLOCKED_KILL:
+            _ready_release_send(payload.get("res_id"))
+            await interaction.followup.send(
+                "⛔ ما انرسلت: مفتاح إيقاف الإرسال للضيوف مشغّل حالياً. الروم باقي مفتوح.")
+            return
+        if res == SEND_SUPPRESSED:
+            await interaction.followup.send("ℹ️ نفس الرسالة موصّلة للضيف من قبل — ما تكررت.")
+        else:
+            await interaction.followup.send(
+                f"✅ تم إرسال رسالة الجاهزية للضيف **{payload.get('guest') or '—'}**.")
+        with _ready_lock:
+            _ready_prompts.pop(mid, None)
+            _save_json(_READY_PROMPT_FILE, _ready_prompts)
+        await _ready_log_review(
+            f"📩 **{unit}** · أُرسلت رسالة «شقتك جاهزة» للضيف **{payload.get('guest') or '—'}** "
+            f"(الدخول {payload.get('checkin_label') or '—'}) — بواسطة {interaction.user}")
+        log_event("ops", f"Ready notice sent · {unit}")
+        await _ready_close_channel(interaction.guild, payload.get("lid"), payload.get("date"),
+                                   "OujaCT: ready notice sent", interaction.channel)
+
+    @discord.ui.button(label="↩️ تراجع", style=discord.ButtonStyle.secondary,
+                       custom_id="ouja_ready_back")
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        payload = _ready_prompts.get(str(interaction.message.id))
+        if not payload:
+            await interaction.response.send_message("ما لقيت تفاصيل هذي الرسالة.", ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=_ready_prompt_embed(payload, "ask"),
+                                                view=ReadyNotifyAskView())
 
 class ApproveView(discord.ui.View):
     def __init__(self, item=None, draft=None):
@@ -50426,7 +50769,15 @@ async def _api_cleaning_report_decision(request):
         try:
             guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
             tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
-            if tch is not None:
+            # Approving from the dashboard behaves exactly like the Discord button: if a guest
+            # arrives today and it's still before his check-in time, the apartment room stays
+            # open with the «شقتك جاهزة» question in it instead of being deleted.
+            asked = False
+            try:
+                asked = await _ready_offer(tch, report, actor)
+            except Exception as e:
+                print("ready-notice offer error:", e)
+            if tch is not None and not asked:
                 await tch.delete(reason="OujaCT: cleaning approved by " + (actor or "manager"))
         except Exception as e:
             print("oujact close-on-approve error:", e)
@@ -63995,6 +64346,8 @@ async def on_ready():
     bot.add_view(ApproveView())        # re-bind guest-reply approval buttons after a restart
     bot.add_view(PriceApplyView())     # re-bind price apply/skip buttons after a restart
     bot.add_view(CleaningProofReviewView())  # re-bind cleaning photo approval buttons
+    bot.add_view(ReadyNotifyAskView())       # «شقتك جاهزة» send/skip question
+    bot.add_view(ReadyNotifyConfirmView())   # ...and its are-you-sure step
     bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR/مشتريات)
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
