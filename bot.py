@@ -18203,6 +18203,84 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 .sched-shrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .sched-shrow .ros-input{font-family:var(--font-en);direction:ltr;font-size:12.5px}
 .sched-shhint{color:var(--mut);font-size:12px;margin-top:9px;line-height:1.6}
+/* ===== LEAVE & COVERAGE PLANNER · مخطط الإجازات — tokens only, RTL-logical, motion under 300ms ===== */
+.lv-wrap{display:flex;flex-direction:column;gap:14px}
+.lv-card2{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh-sm);padding:15px}
+.lv-h{font-weight:800;font-size:14.5px;color:var(--ink);margin-bottom:11px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.lv-form{display:flex;flex-wrap:wrap;gap:9px;align-items:flex-end}
+.lv-f{display:flex;flex-direction:column;gap:5px;flex:1 1 150px}
+.lv-f label{font-size:11.5px;color:var(--mut);font-weight:700}
+.lv-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.lv-chip{border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);border-radius:999px;padding:6px 13px;font-family:var(--font-ar);font-weight:700;font-size:12.5px;cursor:pointer;min-height:34px;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1)),background .15s,border-color .15s}
+.lv-chip:hover{border-color:var(--line-strong)}
+.lv-chip:active{transform:scale(.97)}
+.lv-chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.lv-who{display:flex;flex-wrap:wrap;gap:6px}
+.lv-who .lv-chip{padding-inline-start:9px}
+.lv-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:6px;vertical-align:middle}
+/* headline */
+.lv-head{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:13px 15px;font-weight:700;font-size:14px;color:var(--ink);line-height:1.75}
+.lv-head .n{font-family:var(--font-en);font-variant-numeric:tabular-nums;font-weight:800}
+.lv-est{display:inline-block;background:var(--warn-bg);color:var(--warn);border-radius:var(--r-xs);padding:1px 7px;font-size:11px;font-weight:800;margin-inline-start:6px}
+/* day strip */
+.lv-strip{display:flex;gap:7px;overflow-x:auto;padding-bottom:6px}
+.lv-day{flex:0 0 92px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r-sm);padding:9px 8px;cursor:pointer;text-align:center;border-block-end:3px solid var(--line-strong);transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1)),border-color .15s}
+.lv-day:active{transform:scale(.97)}
+.lv-day.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--gold-tint)}
+.lv-day .dn{font-weight:800;font-size:12.5px;color:var(--ink)}
+.lv-day .dd{font-family:var(--font-en);font-size:10.5px;color:var(--mut);margin-top:1px}
+.lv-day .hj{font-size:10px;color:var(--mut)}
+.lv-day .tv{font-family:var(--font-en);font-weight:800;font-size:17px;color:var(--ink);margin-top:5px}
+.lv-day .tl{font-size:10px;color:var(--mut)}
+.lv-day.sev-block{border-block-end-color:var(--bad);background:var(--bad-bg)}
+.lv-day.sev-warn{border-block-end-color:var(--warn);background:var(--warn-bg)}
+.lv-day.sev-info{border-block-end-color:var(--info)}
+.lv-day.sev-ok{border-block-end-color:var(--good)}
+/* impact cards */
+.lv-imp{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.lv-ic{border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 12px;background:var(--surface);border-inline-start:4px solid var(--c,var(--accent))}
+.lv-ic .nm{font-weight:800;font-size:14px;color:var(--ink)}
+.lv-ic .fig{display:flex;align-items:baseline;gap:7px;margin-top:6px;font-family:var(--font-en);font-variant-numeric:tabular-nums}
+.lv-ic .from{color:var(--mut);font-size:13px;text-decoration:line-through}
+.lv-ic .to{font-weight:800;font-size:19px;color:var(--ink)}
+.lv-ic .dl{font-weight:800;font-size:12px;border-radius:var(--r-xs);padding:1px 6px}
+.lv-ic .dl.up{background:var(--warn-bg);color:var(--warn)}
+.lv-ic .dl.dn{background:var(--good-bg);color:var(--good)}
+.lv-ic .hrs{color:var(--mut);font-size:11.5px;margin-top:3px;font-family:var(--font-en)}
+.lv-bar{height:6px;border-radius:999px;background:var(--surface-3);margin-top:8px;overflow:hidden}
+.lv-bar i{display:block;height:100%;background:var(--good);border-radius:999px;transition:width .28s var(--ease,cubic-bezier(0.23,1,0.32,1))}
+.lv-bar i.w{background:var(--warn)} .lv-bar i.b{background:var(--bad)}
+/* risks */
+.lv-risk{display:flex;align-items:flex-start;gap:9px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface);border-inline-start:3px solid var(--mut);font-size:12.5px;line-height:1.65}
+.lv-risk.block{border-inline-start-color:var(--bad);background:var(--bad-bg)}
+.lv-risk.warn{border-inline-start-color:var(--warn);background:var(--warn-bg)}
+.lv-risk.info{border-inline-start-color:var(--info)}
+.lv-risk .cnt{margin-inline-start:auto;font-family:var(--font-en);font-weight:800;color:var(--mut);font-size:11px;flex:none}
+/* leave list */
+.lv-row2{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface)}
+.lv-row2.past{opacity:.6}
+.lv-row2 .dates{font-family:var(--font-en);font-size:12px;color:var(--text-2)}
+.lv-tag{border-radius:var(--r-xs);padding:1px 7px;font-size:10.5px;font-weight:800;background:var(--surface-2);color:var(--text-2)}
+.lv-sp{margin-inline-start:auto;display:flex;gap:6px}
+/* reassignment sheet */
+.lv-scrim{position:fixed;inset:0;background:rgba(0,0,0,.38);opacity:0;pointer-events:none;transition:opacity .22s var(--ease,cubic-bezier(0.23,1,0.32,1));z-index:80}
+.lv-scrim.on{opacity:1;pointer-events:auto}
+.lv-sheet{position:fixed;inset-block-end:0;inset-inline:0;background:var(--surface);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.16);z-index:81;transform:translateY(101%);transition:transform .28s var(--ease,cubic-bezier(0.23,1,0.32,1));max-height:84vh;overflow-y:auto;padding:17px 16px 24px}
+.lv-sheet.on{transform:translateY(0)}
+.lv-sheeth{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.lv-sheeth .t{font-weight:800;font-size:17px;color:var(--ink)}
+.lv-x{border:none;background:var(--surface-2);color:var(--text-2);width:33px;height:33px;border-radius:50%;font-size:17px;cursor:pointer}
+.lv-unit{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:10px 11px;border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:7px;background:var(--surface)}
+.lv-unit .un{font-weight:700;font-size:13px;color:var(--ink)}
+.lv-unit .cur{color:var(--mut);font-size:11.5px}
+.lv-cands{display:flex;flex-wrap:wrap;gap:6px;width:100%}
+.lv-cand{border:1px solid var(--line);background:var(--surface-2);border-radius:999px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-ar);color:var(--text-2);min-height:34px;transition:transform .12s var(--ease,cubic-bezier(0.23,1,0.32,1))}
+.lv-cand:active{transform:scale(.97)}
+.lv-cand.on{border-color:var(--accent);border-width:2px;color:var(--ink);background:var(--gold-tint)}
+.lv-cand .why{font-weight:600;color:var(--mut);font-size:10.5px;margin-inline-start:5px}
+.lv-cand.best{box-shadow:0 0 0 2px var(--good-bg)}
+.lv-wa{width:100%;min-height:130px;font-family:var(--font-ar);font-size:12.5px;line-height:1.85;border:1px solid var(--line);border-radius:var(--r-sm);padding:11px;background:var(--surface-2);color:var(--text-2);resize:vertical}
+@media (prefers-reduced-motion:reduce){.lv-chip,.lv-day,.lv-cand,.lv-sheet,.lv-scrim,.lv-bar i{transition:none}}
 @media (prefers-reduced-motion:reduce){.sched-card,.sched-tab,.sched-day{transition:none}}
 
 /* ---- Weekly report editor: phone-friendly (dashboard#weekly opened from mobile).
@@ -18679,7 +18757,8 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div class="sched-tabs" id="schedTabs">
           <button class="sched-tab on" data-sv="today" onclick="schedSetView('today')">اليوم</button>
           <button class="sched-tab" data-sv="week" onclick="schedSetView('week')">التقويم الأسبوعي</button>
-          <button class="sched-tab" data-sv="manage" id="schedManageTab" onclick="schedSetView('manage')" style="display:none">الإدارة</button>
+          <button class="sched-tab" data-sv="leave" id="schedLeaveTab" onclick="schedSetView('leave')" style="display:none">الإجازات</button>
+        <button class="sched-tab" data-sv="manage" id="schedManageTab" onclick="schedSetView('manage')" style="display:none">الإدارة</button>
         </div>
         <div id="schedBody"><div class="empty sk">—</div></div>
       </section>
@@ -21021,12 +21100,14 @@ function loadSchedule(force){
     if(di&&!di.value) di.value=d.day.date;
     document.getElementById('schedManageBtn').style.display=SCHED.canEdit?'':'none';
     document.getElementById('schedManageTab').style.display=SCHED.canEdit?'':'none';
+    document.getElementById('schedLeaveTab').style.display=SCHED.canEdit?'':'none';
     schedWireOnce(); renderSched();
   }).catch(function(){ document.getElementById('schedBody').innerHTML='<div class="empty">'+labelText('تعذّر تحميل التقويم','Could not load')+'</div>'; });
 }
 
 function schedSetView(v){
-  if(v==='manage'&&!SCHED.canEdit) return;
+  if((v==='manage'||v==='leave')&&!SCHED.canEdit) return;
+  if(v==='leave'){ SCHED.view=v; schedTabsOn(v); lvEnter(); return; }
   SCHED.view=v;
   var tabs=document.querySelectorAll('#schedTabs .sched-tab');
   for(var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sv')===v); }
@@ -21039,6 +21120,7 @@ function schedPickDate(){ loadSchedule(true); }
 function renderSched(){
   if(SCHED.view==='today') renderSchedToday();
   else if(SCHED.view==='week') renderSchedWeek();
+  else if(SCHED.view==='leave') renderSchedLeave();
   else renderSchedManage();
 }
 
@@ -21330,6 +21412,476 @@ function schedWireOnce(){
     var card=t.closest?t.closest('.sched-card'):null;
     if(card){ var id=parseInt(card.getAttribute('data-semp'),10); SCHED.exp[id]=!SCHED.exp[id]; renderSched(); }
   });
+}
+
+/* ============================================================
+   LEAVE & COVERAGE PLANNER — مخطط الإجازات
+   "ناصر off 20-27 August" answered BEFORE it is saved. Every number here comes from
+   /api/schedule/period, which replays the window through the same engine the Today tab
+   uses, so the preview can never disagree with the board.
+   NOTE: this lives inside DASHBOARD_HTML, a normal triple-quoted Python string. ZERO
+   backslashes anywhere below — a lone n after a backslash would become a real newline and
+   kill the login. Newlines are String.fromCharCode(10).
+   ============================================================ */
+var LV_NL = String.fromCharCode(10);
+
+function schedTabsOn(v){
+  var tabs=document.querySelectorAll('#schedTabs .sched-tab');
+  for(var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sv')===v); }
+}
+function lvState(){
+  if(!SCHED.lv){
+    var t=(SCHED.day&&SCHED.day.date)?SCHED.day.date:lvISO(new Date());
+    SCHED.lv={who:[], start:t, end:lvAdd(t,2), type:'vacation', note:'',
+              preview:null, day:null, pins:{}, list:null, types:null, busy:false, saving:false};
+  }
+  return SCHED.lv;
+}
+function lvISO(d){
+  // NEVER toISOString(): it converts LOCAL midnight to UTC, and in Riyadh (UTC+3) that lands
+  // on the previous day, so every quick-pick chip came out one day short. Read the local parts.
+  var m=d.getMonth()+1, dd=d.getDate();
+  return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd;
+}
+function lvAdd(iso, n){
+  var d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return lvISO(d);
+}
+function lvDays(a,b){
+  return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000)+1;
+}
+function lvDayName(iso){
+  var W=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+  return W[new Date(iso+'T00:00:00').getDay()];
+}
+function lvHijri(iso){
+  try{ return new Date(iso+'T00:00:00').toLocaleDateString('ar-SA-u-ca-islamic-umalqura',{day:'numeric',month:'short'}); }
+  catch(e){ return ''; }
+}
+function lvHM(m){
+  m=Math.round(m||0); var h=Math.floor(m/60), r=m%60;
+  return h+'س '+(r<10?'0':'')+r+'د';
+}
+function lvEnter(){
+  var st=lvState();
+  renderSchedLeave();
+  if(st.list===null){ lvLoadList(); }
+}
+function lvLoadList(){
+  api('/api/schedule/absences').then(function(j){
+    var st=lvState();
+    st.list=(j&&j.ok)?(j.absences||[]):[];
+    if(j&&j.types){ st.types=j.types; }
+    if(SCHED.view==='leave') renderSchedLeave();
+  }).catch(function(){ var st=lvState(); st.list=[]; if(SCHED.view==='leave') renderSchedLeave(); });
+}
+
+/* ---------- the form ---------- */
+function renderSchedLeave(){
+  var st=lvState(), m=SCHED.manage;
+  if(!m){ api('/api/schedule/manage').then(function(x){ SCHED.manage=x; renderSchedLeave(); }); 
+    document.getElementById('schedBody').innerHTML='<div class="empty sk">-</div>'; return; }
+  var emps=m.employees||[];
+  var types=st.types||[{id:'vacation',ar:'إجازة سنوية'},{id:'sick',ar:'مرضية'},
+                       {id:'emergency',ar:'طارئة'},{id:'no_show',ar:'غياب بدون إذن'},
+                       {id:'unpaid',ar:'بدون راتب'}];
+  var h='<div class="lv-wrap">';
+  h+='<div class="lv-card2"><div class="lv-h"><span>'+labelText('إجازة جديدة','New leave')+'</span>';
+  h+='<span style="font-size:11.5px;color:var(--mut);font-weight:600">'+labelText('اختر مين وكم، وبنوريك وش يصير قبل ما تحفظ','Pick who and when — we show you what happens before you save')+'</span></div>';
+  h+='<div style="font-size:12px;color:var(--mut);margin-bottom:9px">'+labelText('مين برّا؟ تقدر تختار أكثر من واحد.','Who is out? You can pick more than one.')+'</div>';
+  h+='<div class="lv-who">';
+  emps.forEach(function(e){
+    var on=st.who.indexOf(e.id)>=0;
+    h+='<button class="lv-chip'+(on?' on':'')+'" onclick="lvToggleWho('+e.id+')">'
+      +'<span class="lv-dot" style="background:'+esc(e.color||'#0A84FF')+'"></span>'
+      +(e.emoji?esc(e.emoji)+' ':'')+esc(e.name)+'</button>';
+  });
+  h+='</div>';
+  h+='<div class="lv-form" style="margin-top:12px">';
+  h+='<div class="lv-f"><label>'+labelText('من','From')+'</label><input type="date" class="ros-input" id="lvStart" value="'+esc(st.start)+'" onchange="lvSetDate(0,this.value)"></div>';
+  h+='<div class="lv-f"><label>'+labelText('إلى','To')+'</label><input type="date" class="ros-input" id="lvEnd" value="'+esc(st.end)+'" onchange="lvSetDate(1,this.value)"></div>';
+  h+='<div class="lv-f"><label>'+labelText('النوع','Type')+'</label><select class="ros-input" id="lvType" onchange="lvSetType(this.value)">';
+  types.forEach(function(t){ h+='<option value="'+esc(t.id)+'"'+(st.type===t.id?' selected':'')+'>'+esc(L==='ar'?t.ar:(t.en||t.ar))+'</option>'; });
+  h+='</select></div>';
+  h+='<div class="lv-f" style="flex:2 1 200px"><label>'+labelText('ملاحظة','Note')+'</label><input class="ros-input" id="lvNote" value="'+esc(st.note||'')+'" oninput="lvSetNote(this.value)" placeholder="'+labelText('اختياري','optional')+'"></div>';
+  h+='</div>';
+  h+='<div class="lv-chips">';
+  [[1,'يوم واحد','1 day'],[3,'٣ أيام','3 days'],[7,'أسبوع','1 week'],[14,'أسبوعين','2 weeks']].forEach(function(q){
+    h+='<button class="lv-chip" onclick="lvQuick('+q[0]+')">'+labelText(q[1],q[2])+'</button>';
+  });
+  h+='</div>';
+  h+='<div style="margin-top:13px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+  h+='<button class="btn" onclick="lvPreview()"'+(st.busy?' disabled':'')+'>'+(st.busy?labelText('جاري الحساب…','Working…'):labelText('اعرض التأثير','Show the impact'))+'</button>';
+  h+='<span style="font-size:12px;color:var(--mut)">'+labelText('ما ينحفظ شي في هذي الخطوة.','Nothing is saved at this step.')+'</span>';
+  h+='</div>';
+  h+='<div style="margin-top:10px;font-size:11.5px;color:var(--mut);line-height:1.7">'
+    +labelText('«نصف يوم» و«تأخير» و«تدريب» مخفية مؤقتاً: النظام لسه يحسبها يوم كامل ويوزّع شقق الشخص على الباقين، وهذا غلط. راجعة في التحديث الجاي.',
+               'Half-day, Late and Training are hidden for now: the system still counts them as a full day off and hands the person apartments away, which is wrong. Back in the next update.')+'</div>';
+  h+='</div>';
+  if(st.preview){ h+=lvPreviewHtml(st.preview); }
+  h+=lvListHtml(st.list);
+  h+='</div>';
+  h+='<div class="lv-scrim" id="lvScrim" onclick="lvCloseSheet()"></div><div class="lv-sheet" id="lvSheet"></div>';
+  document.getElementById('schedBody').innerHTML=h;
+}
+function lvToggleWho(id){
+  var st=lvState(), i=st.who.indexOf(id);
+  if(i>=0){ st.who.splice(i,1); } else { st.who.push(id); }
+  st.preview=null; renderSchedLeave();
+}
+function lvSetDate(which, v){
+  var st=lvState();
+  if(!v) return;
+  if(which===0){ st.start=v; if(st.end<v){ st.end=v; } } else { st.end=v; if(v<st.start){ st.start=v; } }
+  st.preview=null; renderSchedLeave();
+}
+function lvSetType(v){ lvState().type=v; }
+function lvSetNote(v){ lvState().note=v; }
+function lvQuick(n){
+  var st=lvState();
+  st.end=lvAdd(st.start, n-1); st.preview=null; renderSchedLeave();
+}
+
+/* ---------- preview (dry run — the server writes nothing) ---------- */
+function lvSimParam(){
+  var st=lvState();
+  return st.who.map(function(id){ return id+':'+st.start+':'+st.end; }).join(',');
+}
+function lvPreview(){
+  var st=lvState();
+  if(!st.who.length){ toast(labelText('اختر موظف واحد على الأقل','Pick at least one person')); return; }
+  if(lvDays(st.start,st.end)>62){ toast(labelText('الفترة أطول من ٦٢ يوم','Longer than 62 days')); return; }
+  st.busy=true; st.pins={}; renderSchedLeave();
+  var u='/api/schedule/period?start='+encodeURIComponent(st.start)+'&end='+encodeURIComponent(st.end)
+       +'&simulate_absence='+encodeURIComponent(lvSimParam());
+  api(u).then(function(j){
+    st.busy=false;
+    if(!j||!j.ok){ toast((j&&j.error)?j.error:labelText('تعذّر الحساب','Could not compute')); renderSchedLeave(); return; }
+    st.preview=j.period; st.day=(j.period.days[0]||{}).date;
+    renderSchedLeave();
+  }).catch(function(){ st.busy=false; toast(labelText('تعذّر الحساب','Could not compute')); renderSchedLeave(); });
+}
+function lvSev(day){
+  var rs=day.risks||[];
+  for(var i=0;i<rs.length;i++){ if(rs[i].severity==='block') return 'sev-block'; }
+  for(var j=0;j<rs.length;j++){ if(rs[j].severity==='warn') return 'sev-warn'; }
+  return rs.length?'sev-info':'sev-ok';
+}
+function lvPreviewHtml(p){
+  var st=lvState();
+  var h='<div class="lv-card2">';
+  h+='<div class="lv-h"><span>'+labelText('وش يصير في هذي الفترة','What these days look like')+'</span>';
+  if(p.demand_source!=='hostaway'){ h+='<span class="lv-est">'+labelText('تقديري - ما وصلنا Hostaway','Estimated - Hostaway unreachable')+'</span>'; }
+  h+='</div>';
+  h+=lvHeadline(p);
+  h+='<div class="lv-strip" style="margin-top:12px">';
+  (p.days||[]).forEach(function(d){
+    var on=(st.day===d.date);
+    h+='<div class="lv-day '+lvSev(d)+(on?' on':'')+'" onclick="lvPickDayEl(this)" data-lvd="'+esc(d.date)+'">'
+      +'<div class="dn">'+esc(d.weekday_ar||lvDayName(d.date))+'</div>'
+      +'<div class="dd">'+esc(d.date.slice(5))+'</div>'
+      +'<div class="hj">'+esc(lvHijri(d.date))+'</div>'
+      +'<div class="tv">'+(d.total_turnovers||0)+'</div>'
+      +'<div class="tl">'+labelText('مغادرة','checkouts')+'</div></div>';
+  });
+  h+='</div>';
+  h+='<div style="margin-top:14px" class="lv-imp">'+lvImpactHtml(p)+'</div>';
+  var rs=(p.rollup&&p.rollup.risks)||[];
+  if(rs.length){
+    h+='<div style="margin-top:14px"><div class="lv-h">'+labelText('تنبيهات','What to watch')+'</div>';
+    rs.forEach(function(r){
+      h+='<div class="lv-risk '+esc(r.severity)+'"><span>'+esc(L==='ar'?r.ar:r.en)+'</span>'
+        +(r.count>1?'<span class="cnt">x'+r.count+'</span>':'')+'</div>';
+    });
+    h+='</div>';
+  }
+  h+='<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">';
+  h+='<button class="btn ghost" onclick="lvOpenSheet()">'+labelText('وزّع الشقق يدوياً','Reassign apartments')+'</button>';
+  h+='<button class="btn" onclick="lvSave(0)"'+(st.saving?' disabled':'')+'>'+labelText('احفظ الخطة','Save the plan')+'</button>';
+  h+='<button class="btn ghost" onclick="lvWhatsApp()">'+labelText('انسخ نص للفريق','Copy team message')+'</button>';
+  var np=lvPinCount();
+  if(np){ h+='<span style="font-size:12px;color:var(--mut);align-self:center">'+np+' '+labelText('تعيين يدوي','manual move(s)')+'</span>'; }
+  h+='</div>';
+  h+='<textarea class="lv-wa" id="lvWaBox" style="margin-top:10px" readonly placeholder="'+labelText('اضغط «انسخ نص للفريق» ويطلع هنا','Press Copy team message and it appears here')+'"></textarea>';
+  h+='</div>';
+  return h;
+}
+function lvHeadline(p){
+  var r=p.rollup||{}, n=p.count||0;
+  var movers=(r.by_employee||[]).filter(function(e){ return e.delta>0; })
+    .sort(function(a,b){ return b.delta-a.delta; });
+  var worst=r.worst_day;
+  var h='<div class="lv-head">';
+  h+=labelText('خلال ','Over ')+'<span class="n">'+n+'</span>'+labelText(' يوم: ',' days: ')
+    +'<span class="n">'+(r.turnovers||0)+'</span>'+labelText(' مغادرة','  checkouts');
+  if(movers.length){
+    var top=movers[0];
+    h+=' · '+esc(top.name)+labelText(' يزيد ',' takes ')+'<span class="n">+'+top.delta+'</span>'
+      +labelText(' شقة',' more units');
+  }
+  if(worst){ h+=' · '+labelText('أثقل يوم ','busiest day ')+esc(lvDayName(worst))+' '+'<span class="n">'+esc(worst.slice(5))+'</span>'; }
+  h+='</div>';
+  return h;
+}
+function lvImpactHtml(p){
+  var caps=p.caps||{}, cap=caps.minutes;
+  var rows=((p.rollup||{}).by_employee)||[];
+  var h='';
+  rows.forEach(function(e){
+    if(!e.plan_load && !e.baseline_load) return;
+    var days=p.count||1;
+    var perDay=Math.round((e.plan_minutes||0)/days);
+    // Units and hours must be the SAME unit of time or the card lies at a glance: a big
+    // "110" beside "3h54 per day" reads as 110 apartments a day. Both are per-day here;
+    // the period total goes underneath in words.
+    var uNow=Math.round((e.plan_load||0)/days), uWas=Math.round((e.baseline_load||0)/days);
+    var uDelta=uNow-uWas;
+    var pct=cap?Math.min(100, Math.round(perDay*100/cap)):0;
+    var cls=cap?(perDay>cap?'b':(perDay>cap*0.85?'w':'')):'';
+    h+='<div class="lv-ic" style="--c:'+esc(e.color||'#0A84FF')+'">';
+    h+='<div class="nm">'+(e.emoji?esc(e.emoji)+' ':'')+esc(e.name)+'</div>';
+    h+='<div class="fig"><span class="from">'+uWas+'</span><span class="to">'+uNow+'</span>';
+    if(uDelta){ h+='<span class="dl '+(uDelta>0?'up':'dn')+'">'+(uDelta>0?'+':'')+uDelta+'</span>'; }
+    h+='</div>';
+    h+='<div class="hrs">'+labelText('شقة باليوم · ','units/day · ')+lvHM(perDay)+(cap?(' / '+lvHM(cap)):'')+'</div>';
+    h+='<div class="hrs">'+labelText('خلال الفترة ','over the period ')+(e.plan_load||0)
+      +(e.delta?(' ('+(e.delta>0?'+':'')+e.delta+')'):'')+'</div>';
+    if(cap){ h+='<div class="lv-bar"><i class="'+cls+'" style="width:'+pct+'%"></i></div>'; }
+    h+='</div>';
+  });
+  if(!h){ h='<div class="sched-sub">'+labelText('ما فيه بيانات','No data')+'</div>'; }
+  return h;
+}
+function lvPickDayEl(el){ lvPickDay(el.getAttribute('data-lvd')); }
+function lvPickDay(iso){ var st=lvState(); st.day=iso; renderSchedLeave(); lvOpenSheet(); }
+function lvPinCount(){
+  var st=lvState(), n=0;
+  for(var d in st.pins){ if(st.pins.hasOwnProperty(d)){ for(var a in st.pins[d]){ if(st.pins[d].hasOwnProperty(a)) n++; } } }
+  return n;
+}
+function lvPinsParam(){
+  var st=lvState(), out=[];
+  for(var d in st.pins){ if(!st.pins.hasOwnProperty(d)) continue;
+    for(var a in st.pins[d]){ if(st.pins[d].hasOwnProperty(a)){ out.push(d+':'+a+':'+st.pins[d][a]); } } }
+  return out.join(',');
+}
+
+/* ---------- the reassignment sheet ---------- */
+function lvOpenSheet(){
+  var st=lvState();
+  if(!st.preview){ toast(labelText('اعرض التأثير أول','Preview first')); return; }
+  if(!st.day){ st.day=(st.preview.days[0]||{}).date; }
+  st.sheet=null; lvRenderSheet();
+  document.getElementById('lvScrim').classList.add('on');
+  document.getElementById('lvSheet').classList.add('on');
+  lvLoadSheet();
+}
+function lvCloseSheet(){
+  var sc=document.getElementById('lvScrim'), sh=document.getElementById('lvSheet');
+  if(sc) sc.classList.remove('on');
+  if(sh) sh.classList.remove('on');
+}
+function lvLoadSheet(){
+  var st=lvState();
+  var u='/api/schedule/suggest-day?date='+encodeURIComponent(st.day)
+       +'&simulate_absence='+encodeURIComponent(lvSimParam());
+  var pp=lvPinsParam();
+  if(pp){ u+='&pins='+encodeURIComponent(pp); }
+  api(u).then(function(j){
+    st.sheet=(j&&j.ok)?j:{error:(j&&j.error)||labelText('تعذّر التحميل','Could not load')};
+    lvRenderSheet();
+  }).catch(function(){ st.sheet={error:labelText('تعذّر التحميل','Could not load')}; lvRenderSheet(); });
+}
+function lvRenderSheet(){
+  var st=lvState(), el=document.getElementById('lvSheet');
+  if(!el) return;
+  var h='<div class="lv-sheeth"><div class="t">'+labelText('توزيع ','Coverage for ')
+       +esc(lvDayName(st.day))+' <span style="font-family:var(--font-en)">'+esc(st.day)+'</span></div>'
+       +'<button class="lv-x" onclick="lvCloseSheet()">&times;</button></div>';
+  if(!st.sheet){ el.innerHTML=h+'<div class="empty sk">-</div>'; return; }
+  if(st.sheet.error){ el.innerHTML=h+'<div class="empty">'+esc(st.sheet.error)+'</div>'; return; }
+  h+='<div class="lv-chips" style="margin-bottom:11px">';
+  h+='<button class="lv-chip'+(st.scope!=='period'?' on':'')+'" onclick="lvScope(0)">'+labelText('هذا اليوم فقط','This day only')+'</button>';
+  h+='<button class="lv-chip'+(st.scope==='period'?' on':'')+'" onclick="lvScope(1)">'+labelText('كل الفترة','The whole period')+'</button>';
+  if(lvPinCount()){ h+='<button class="lv-chip" onclick="lvResetPins()">'+labelText('رجّع الكل للتلقائي','Reset all to auto')+'</button>'; }
+  h+='</div>';
+  if(st.sheet.demand_source!=='hostaway'){
+    h+='<div class="lv-risk info" style="margin-bottom:10px">'+labelText('أرقام الشغل تقديرية — ما وصلنا Hostaway','Workload numbers are estimated - Hostaway unreachable')+'</div>';
+  }
+  var rows=st.sheet.units||[];
+  if(!rows.length){ h+='<div class="empty">'+labelText('ما فيه شقق تحتاج تغطية هذا اليوم','Nothing needs covering this day')+'</div>'; }
+  rows.forEach(function(r){
+    h+='<div class="lv-unit">';
+    h+='<div style="flex:1 1 100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+    h+='<span class="un">'+esc(r.name||'')+'</span>';
+    if(r.has_turnover){ h+='<span class="lv-tag" style="background:var(--warn-bg);color:var(--warn)">'+labelText('فيه مغادرة','checkout')+'</span>'; }
+    if(r.district){ h+='<span class="lv-tag">'+esc(r.district)+'</span>'; }
+    h+='<span class="cur">'+labelText('بدل ','for ')+esc(r.owner_name||'')
+      +' · '+labelText('حالياً ','now ')+esc(r.current_name||'-')+(r.pinned?(' · '+labelText('يدوي','manual')):'')+'</span>';
+    h+='</div>';
+    h+='<div class="lv-cands">';
+    (r.candidates||[]).forEach(function(c, i){
+      var on=(String(r.current_id)===String(c.id));
+      h+='<button class="lv-cand'+(on?' on':'')+(i===0?' best':'')+'" onclick="lvChooseEl(this)"'
+        +' data-apt="'+r.apartment_id+'" data-emp="'+c.id+'">'
+        +'<span class="lv-dot" style="background:'+esc(c.color||'#0A84FF')+'"></span>'
+        +(c.emoji?esc(c.emoji)+' ':'')+esc(c.name)
+        +'<span class="why">'+esc(L==='ar'?c.reason_ar:c.reason_en)+'</span></button>';
+    });
+    if(r.pinned){
+      h+='<button class="lv-cand" onclick="lvChooseEl(this)" data-apt="'+r.apartment_id+'" data-emp="0">'
+        +labelText('تلقائي','Auto')+'</button>';
+    }
+    h+='</div></div>';
+  });
+  el.innerHTML=h;
+}
+function lvScope(isPeriod){ lvState().scope=isPeriod?'period':'day'; lvRenderSheet(); }
+function lvChooseEl(el){
+  lvChoose(parseInt(el.getAttribute('data-apt'),10), parseInt(el.getAttribute('data-emp'),10));
+}
+function lvChoose(aptId, empId){
+  var st=lvState();
+  var dates=(st.scope==='period')?(st.preview.days||[]).map(function(d){ return d.date; }):[st.day];
+  dates.forEach(function(d){
+    if(!st.pins[d]) st.pins[d]={};
+    if(!empId){ delete st.pins[d][aptId]; }
+    else { st.pins[d][aptId]=empId; }
+  });
+  lvLoadSheet();
+  lvRefreshPreview();
+}
+function lvResetPins(){ var st=lvState(); st.pins={}; lvLoadSheet(); lvRefreshPreview(); }
+function lvRefreshPreview(){
+  var st=lvState();
+  var u='/api/schedule/period?start='+encodeURIComponent(st.start)+'&end='+encodeURIComponent(st.end)
+       +'&simulate_absence='+encodeURIComponent(lvSimParam());
+  var pp=lvPinsParam();
+  if(pp){ u+='&pins='+encodeURIComponent(pp); }
+  api(u).then(function(j){
+    if(j&&j.ok){ st.preview=j.period; if(SCHED.view==='leave'){ var open=document.getElementById('lvSheet');
+      var wasOpen=open&&open.classList.contains('on');
+      renderSchedLeave();
+      if(wasOpen){ document.getElementById('lvScrim').classList.add('on');
+        document.getElementById('lvSheet').classList.add('on'); lvRenderSheet(); } } }
+  }).catch(function(){});
+}
+
+/* ---------- save / undo ---------- */
+function lvPinsBody(){
+  var st=lvState(), out=[];
+  for(var d in st.pins){ if(!st.pins.hasOwnProperty(d)) continue;
+    for(var a in st.pins[d]){ if(!st.pins[d].hasOwnProperty(a)) continue;
+      out.push({date:d, apartment_id:parseInt(a,10), covering_employee_id:st.pins[d][a]}); } }
+  return out;
+}
+function lvSave(accept){
+  var st=lvState();
+  if(st.saving) return;
+  if(!st.who.length){ toast(labelText('اختر موظف','Pick a person')); return; }
+  st.saving=true;
+  var body={employees:st.who.map(function(id){
+      return {employee_id:id, start:st.start, end:st.end, type:st.type, note:st.note}; }),
+    overrides:lvPinsBody(), note:st.note};
+  if(accept){ body.accept_warnings=true; }
+  post('/api/schedule/plan', body).then(function(j){
+    st.saving=false;
+    if(j&&j.ok){
+      toast(labelText('انحفظت الخطة ✓','Plan saved ✓'));
+      st.preview=null; st.pins={}; st.who=[]; st.list=null;
+      lvCloseSheet(); schedAfterWrite(); lvLoadList();
+      return;
+    }
+    if(j&&j.code==='needs_confirm'){
+      var lines=(j.warnings||[]).map(function(r){ return '- '+(L==='ar'?r.ar:r.en); }).join(LV_NL);
+      if(confirm(labelText('فيه تنبيهات:','Warnings:')+LV_NL+LV_NL+lines+LV_NL+LV_NL
+                 +labelText('تبي تحفظ برغمها؟','Save anyway?'))){ lvSave(1); }
+      return;
+    }
+    toast((j&&j.error)?j.error:labelText('ما انحفظت','Not saved'));
+  }).catch(function(){ st.saving=false; toast(labelText('ما انحفظت','Not saved')); });
+}
+function lvUndoEl(el){ lvUndo(parseInt(el.getAttribute('data-pid'),10)); }
+function lvUndo(pid){
+  if(!confirm(labelText('تلغي الخطة كاملة؟ بترجع الإجازة وكل التعيينات اللي معها.','Undo the whole plan? The leave and all its moves are removed.'))) return;
+  rdelete('/api/schedule/plan/'+pid).then(function(j){
+    if(j&&j.ok){ toast(labelText('انلغت الخطة','Plan undone')); lvState().list=null; lvLoadList(); schedAfterWrite(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+  });
+}
+function lvDelEl(el){ lvDelAbsence(parseInt(el.getAttribute('data-aid'),10)); }
+function lvDelAbsence(aid){
+  if(!confirm(labelText('تحذف هذي الإجازة؟','Delete this leave?'))) return;
+  rdelete('/api/schedule/absence/'+aid).then(function(j){
+    if(j&&j.ok){ toast(labelText('انحذفت','Deleted')); lvState().list=null; lvLoadList(); schedAfterWrite(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+  });
+}
+
+/* ---------- the leave list ---------- */
+function lvListHtml(list){
+  var h='<div class="lv-card2"><div class="lv-h">'+labelText('الإجازات','Leave')+'</div>';
+  if(list===null||list===undefined){ return h+'<div class="empty sk">-</div></div>'; }
+  if(!list.length){ return h+'<div class="empty">'+labelText('ما فيه إجازات مسجّلة','No leave recorded')+'</div></div>'; }
+  list.forEach(function(a){
+    h+='<div class="lv-row2'+(a.past?' past':'')+'">';
+    h+='<span class="lv-dot" style="background:'+esc(a.color||'#0A84FF')+'"></span>';
+    h+='<b>'+(a.emoji?esc(a.emoji)+' ':'')+esc(a.employee_name||'')+'</b>';
+    h+='<span class="dates">'+esc(a.start_date)+' - '+esc(a.end_date)+'</span>';
+    h+='<span class="lv-tag">'+esc(L==='ar'?a.type_ar:a.type_en)+'</span>';
+    h+='<span class="lv-tag">'+a.days+' '+labelText('يوم','d')+'</span>';
+    if(a.override_count){ h+='<span class="lv-tag" style="background:var(--gold-tint);color:var(--accent)">'+a.override_count+' '+labelText('تعيين','moves')+'</span>'; }
+    if(a.note){ h+='<span style="font-size:11.5px;color:var(--mut)">'+esc(a.note)+'</span>'; }
+    h+='<span style="font-size:11px;color:var(--mut)">'+labelText('أضافها ','by ')+esc(a.created_by||'-')+'</span>';
+    h+='<span class="lv-sp">';
+    if(a.plan_id){ h+='<button class="btn ghost sm" onclick="lvUndoEl(this)" data-pid="'+a.plan_id+'">'+labelText('تراجع','Undo')+'</button>'; }
+    else { h+='<button class="btn ghost sm" onclick="lvDelEl(this)" data-aid="'+a.id+'" style="color:var(--bad)">'+labelText('حذف','Delete')+'</button>'; }
+    h+='</span></div>';
+  });
+  h+='</div>';
+  return h;
+}
+
+/* ---------- the message the team actually reads ---------- */
+function lvWhatsApp(){
+  var st=lvState(), p=st.preview;
+  if(!p){ return; }
+  var m=SCHED.manage||{}, byId={};
+  (m.employees||[]).forEach(function(e){ byId[e.id]=e; });
+  var L1=[];
+  L1.push('خطة تغطية: ' + st.start + ' الى ' + st.end);
+  st.who.forEach(function(id){
+    var e=byId[id]||{};
+    L1.push('برّا: ' + (e.name||'') + ' (' + lvTypeAr(st.type) + ')');
+  });
+  L1.push('');
+  L1.push('التغطية اليومية:');
+  ((p.rollup||{}).by_employee||[]).forEach(function(e){
+    if(!e.plan_load) return;
+    var dd=p.count||1;
+    var perDay=Math.round(e.plan_load/dd), was=Math.round(e.baseline_load/dd);
+    var diff=perDay-was;
+    L1.push('- ' + e.name + ': ' + perDay + ' شقة باليوم' + (diff?(' (' + (diff>0?'+':'') + diff + ')'):''));
+  });
+  var rs=((p.rollup||{}).risks)||[];
+  if(rs.length){
+    L1.push('');
+    L1.push('انتبهوا:');
+    rs.forEach(function(r){ L1.push('- ' + r.ar); });
+  }
+  if(p.demand_source!=='hostaway'){ L1.push(''); L1.push('(الارقام تقديرية)'); }
+  var txt=L1.join(LV_NL);
+  var el=document.getElementById('lvWaBox');
+  if(el){ el.value=txt; el.focus(); el.select();
+    try{ document.execCommand('copy'); toast(labelText('انتسخ النص','Text copied')); }catch(e){}
+    return; }
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){ toast(labelText('انتسخ النص','Text copied')); },
+      function(){ toast(labelText('انسخه يدوياً','Copy manually')); });
+  }
+}
+function lvTypeAr(t){
+  var M={vacation:'إجازة سنوية', sick:'مرضية', emergency:'طارئة', no_show:'غياب بدون إذن', unpaid:'بدون راتب'};
+  return M[t]||t;
 }
 
 /* ============================================================

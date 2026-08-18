@@ -65,7 +65,8 @@ def reset_to_default():
     schedule wiped."""
     with db.transaction() as cx:
         for t in ("schedule_coverage_overrides", "schedule_date_overrides", "schedule_absences",
-                  "schedule_apartments", "schedule_employees", "schedule_settings"):
+                  "schedule_plans", "schedule_apartments", "schedule_employees",
+                  "schedule_settings"):
             cx.execute("DELETE FROM " + t)
         _insert_seed(cx)
     return {"reset": True, "employees": len(db.employees()), "apartments": len(db.apartments())}

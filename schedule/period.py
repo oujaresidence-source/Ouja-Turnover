@@ -110,11 +110,17 @@ def day_risks(day, caps):
                           "%s: units spread across %d districts — a lot of driving"
                           % (e.get("name"), len(set(districts))), e.get("id")))
 
-    if len(off) >= 2:
+    # "two people out" is NOT the signal: exactly one person is off by rota on five days of
+    # seven, so any ordinary leave day already has two people out and this would fire almost
+    # every day — noise the owner would learn to ignore. The real signal is cover thinning
+    # beyond the rota: two or more people on LEAVE together, or three or more out at once.
+    leaves = [o for o in off if o.get("reason") == "leave"]
+    if len(leaves) >= 2 or len(off) >= 3:
         who = "، ".join(o.get("name", "") for o in off)
         out.append(_r("double_absence", "warn",
-                      "%d أشخاص برّا في نفس اليوم (%s)" % (len(off), who),
-                      "%d people out on the same day (%s)" % (len(off), who)))
+                      "%d أشخاص برّا في نفس اليوم (%s) — التغطية رفيعة" % (len(off), who),
+                      "%d people out on the same day (%s) — cover is thin"
+                      % (len(off), who)))
 
     un = day.get("unassigned") or []
     if un:

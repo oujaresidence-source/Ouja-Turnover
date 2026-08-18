@@ -77,6 +77,14 @@ CREATE TABLE IF NOT EXISTS schedule_date_overrides (
     created_at           TEXT,
     UNIQUE(date, apartment_id)
 );
+CREATE TABLE IF NOT EXISTS schedule_plans (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    note        TEXT,
+    start_date  TEXT,
+    end_date    TEXT,
+    created_by  TEXT,
+    created_at  TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_sched_apt_owner ON schedule_apartments(owner_id);
 CREATE INDEX IF NOT EXISTS idx_sched_dov_date  ON schedule_date_overrides(date);
 CREATE INDEX IF NOT EXISTS idx_sched_dov_plan  ON schedule_date_overrides(plan_id);
@@ -120,6 +128,10 @@ def _migrate(cx):
     # Overload caps live on the settings row. They are DERIVED from this team's own last-60-day
     # history (p90), never guessed — so they start NULL and stay NULL until there is real
     # history to learn from, and no overload flag is raised while they are NULL.
+    # A leave and the apartments moved because of it are ONE plan, so they undo as one.
+    bcols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_absences)").fetchall()}
+    if "plan_id" not in bcols:
+        cx.execute("ALTER TABLE schedule_absences ADD COLUMN plan_id INTEGER")
     scols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_settings)").fetchall()}
     for col, decl in (("max_units_per_day", "INTEGER"), ("max_minutes_per_day", "INTEGER"),
                       ("caps_source", "TEXT"), ("caps_computed_at", "TEXT")):

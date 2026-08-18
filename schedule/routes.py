@@ -17,6 +17,19 @@ from .host import HOST
 # other authenticated user is a viewer. Documented in the README section.
 EDIT_ROLES = ("admin", "ops")
 ABSENCE_TYPES = ("sick", "vacation", "emergency", "half_day", "late", "training", "no_show", "unpaid")
+# What the PLANNER is allowed to create. half_day / late / training are deliberately absent:
+# the engine drops an absent person for the WHOLE day regardless of type, so recording a
+# two-hour تأخير silently dumps that person's apartments on everyone else — and that error
+# flows straight into the OujaCT Discord channel emojis. Owner's ruling (2026-08-18): do not
+# offer a tool that is known to miscalculate. They come back in step 4 with a real capacity
+# model. The legacy /api/schedule/absence endpoint still accepts all eight.
+PLANNER_ABSENCE_TYPES = ("vacation", "sick", "emergency", "no_show", "unpaid")
+ABSENCE_LABEL_AR = {"vacation": "إجازة سنوية", "sick": "مرضية", "emergency": "طارئة",
+                    "no_show": "غياب بدون إذن", "unpaid": "بدون راتب", "half_day": "نصف يوم",
+                    "late": "تأخير", "training": "تدريب"}
+ABSENCE_LABEL_EN = {"vacation": "Annual leave", "sick": "Sick", "emergency": "Emergency",
+                    "no_show": "No-show", "unpaid": "Unpaid", "half_day": "Half day",
+                    "late": "Late", "training": "Training"}
 _DAY_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"]
 
 
@@ -718,8 +731,12 @@ async def api_period(request):
         sims = _parse_sims(q.get("simulate_absence"))
     except (ValueError, TypeError) as e:
         return HOST.json_response({"ok": False, "error": "طلب المحاكاة غير صحيح: %s" % e}, 200)
+    try:
+        pins = _parse_pins(q.get("pins"))
+    except (ValueError, TypeError) as e:
+        return HOST.json_response({"ok": False, "error": "تعيين غير صحيح: %s" % e}, 200)
     editor = can_edit_schedule(request)
-    if sims and not editor:
+    if (sims or pins) and not editor:
         return _deny()
     # Deriving the caps costs a 60-day Hostaway pull. Only an editor (the planner) may trigger
     # that; an anonymous /team-calendar reader gets the stored caps or none at all, so a public
@@ -728,7 +745,8 @@ async def api_period(request):
                              {"units": None, "minutes": None, "source": "unknown",
                               "reason": "not_computed"})
     return HOST.json_response({"ok": True,
-                               "period": build_period(start, end, sims=sims, caps=caps),
+                               "period": build_period(start, end, sims=sims, caps=caps,
+                                                      extra_date_overrides=pins),
                                "can_edit": editor})
 
 
@@ -737,6 +755,356 @@ async def api_caps_recompute(request):
     if not can_edit_schedule(request):
         return _deny()
     return HOST.json_response({"ok": True, "caps": compute_caps()})
+
+
+# ---------------- the PLAN: one leave + every apartment moved because of it ----------------
+
+def _actor(request):
+    fn = getattr(HOST, "req_actor", None)
+    try:
+        return (fn(request) or "").strip() if fn else ""
+    except Exception:
+        return ""
+
+
+def _plan_caps():
+    """Caps for the save-time re-check. Uses only what is STORED — saving a plan must never
+    trigger a 60-day Hostaway pull."""
+    return stored_caps() or {"units": None, "minutes": None, "source": "unknown"}
+
+
+async def api_plan_save(request):
+    """POST /api/schedule/plan — the leave(s) and the pins, saved as ONE thing.
+
+    The simulation is re-run here, server-side: a client that never previewed, or previewed an
+    hour ago, still cannot save a day with nobody on it."""
+    if not can_edit_schedule(request):
+        return _deny()
+    b = await _body(request)
+
+    emps, seen = [], set()
+    for raw in (b.get("employees") or []):
+        try:
+            eid = int(raw.get("employee_id"))
+        except (TypeError, ValueError):
+            return HOST.json_response({"ok": False, "error": "موظف غير صحيح"}, 200)
+        emp = db.q1("SELECT id, name FROM schedule_employees WHERE id=?", (eid,))
+        if not emp:
+            return HOST.json_response({"ok": False, "error": "موظف غير معروف"}, 200)
+        start = (raw.get("start") or _today_iso())[:10]
+        end = (raw.get("end") or start)[:10]
+        try:
+            datetime.date.fromisoformat(start)
+            datetime.date.fromisoformat(end)
+        except ValueError:
+            return HOST.json_response({"ok": False, "error": "تاريخ غير صحيح — الصيغة YYYY-MM-DD"}, 200)
+        if end < start:
+            return HOST.json_response({"ok": False, "error": "تاريخ النهاية قبل البداية"}, 200)
+        typ = raw.get("type") or "vacation"
+        if typ not in PLANNER_ABSENCE_TYPES:
+            return HOST.json_response(
+                {"ok": False, "error": "نوع الإجازة غير متاح في المخطط حالياً"}, 200)
+        if (eid, start, end) in seen:
+            continue
+        seen.add((eid, start, end))
+        if db.q1("SELECT id FROM schedule_absences WHERE employee_id=? AND status='approved' "
+                 "AND start_date<=? AND end_date>=?", (eid, end, start)):
+            return HOST.json_response(
+                {"ok": False, "code": "overlap",
+                 "error": "%s مسجّل إجازة في هذه الفترة أصلاً" % emp["name"]}, 200)
+        emps.append({"employee_id": eid, "name": emp["name"], "start": start, "end": end,
+                     "type": typ, "note": (raw.get("note") or "")[:300]})
+    if not emps:
+        return HOST.json_response({"ok": False, "error": "أضف موظفاً واحداً على الأقل"}, 200)
+
+    pins, edo = [], {}
+    for raw in (b.get("overrides") or []):
+        try:
+            d = str(raw.get("date"))[:10]
+            datetime.date.fromisoformat(d)
+            aid = int(raw.get("apartment_id"))
+            cov = int(raw.get("covering_employee_id"))
+        except (TypeError, ValueError):
+            return HOST.json_response({"ok": False, "error": "تعيين غير صحيح"}, 200)
+        pins.append({"date": d, "apartment_id": aid, "covering_employee_id": cov})
+        edo.setdefault(d, []).append({"apartment_id": aid, "covering_employee_id": cov})
+
+    win_start = min([e["start"] for e in emps] + [p["date"] for p in pins])
+    win_end = max([e["end"] for e in emps] + [p["date"] for p in pins])
+    span = (datetime.date.fromisoformat(win_end) - datetime.date.fromisoformat(win_start)).days + 1
+    if span > _PERIOD_MAX_DAYS:
+        return HOST.json_response(
+            {"ok": False, "error": "الخطة أطول من %d يوم" % _PERIOD_MAX_DAYS}, 200)
+
+    sims = [{"employee_id": e["employee_id"], "name": e["name"],
+             "start": e["start"], "end": e["end"]} for e in emps]
+    per = build_period(win_start, win_end, sims=sims, caps=_plan_caps(),
+                       extra_date_overrides=edo)
+    blocking = [r for d in per["days"] for r in d["risks"] if r["severity"] == "block"]
+    if blocking:
+        return HOST.json_response({"ok": False, "code": blocking[0]["code"],
+                                   "error": blocking[0]["ar"], "risks": blocking}, 200)
+    warnings = [r for d in per["days"] for r in d["risks"] if r["severity"] == "warn"]
+    if warnings and not b.get("accept_warnings"):
+        seen_codes, uniq = set(), []
+        for r in warnings:
+            if r["code"] in seen_codes:
+                continue
+            seen_codes.add(r["code"])
+            uniq.append(r)
+        return HOST.json_response({"ok": False, "code": "needs_confirm",
+                                   "error": "فيه تنبيهات — راجعها وأكّد",
+                                   "warnings": uniq}, 200)
+
+    actor = _actor(request) or "editor"
+    now = db.now_iso()
+    with db.transaction() as cx:
+        pid = cx.execute(
+            "INSERT INTO schedule_plans(note,start_date,end_date,created_by,created_at) "
+            "VALUES(?,?,?,?,?)",
+            ((b.get("note") or "")[:300], win_start, win_end, actor, now)).lastrowid
+        for e in emps:
+            cx.execute(
+                "INSERT INTO schedule_absences(employee_id,start_date,end_date,type,status,"
+                "note,created_by,created_at,plan_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                (e["employee_id"], e["start"], e["end"], e["type"], "approved",
+                 e["note"], actor, now, pid))
+        for pn in pins:
+            cx.execute(
+                "INSERT INTO schedule_date_overrides(date,apartment_id,covering_employee_id,"
+                "plan_id,note,created_by,created_at) VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(date,apartment_id) DO UPDATE SET "
+                "covering_employee_id=excluded.covering_employee_id, plan_id=excluded.plan_id",
+                (pn["date"], pn["apartment_id"], pn["covering_employee_id"], pid, None,
+                 actor, now))
+    return HOST.json_response({"ok": True, "plan_id": pid, "start": win_start, "end": win_end,
+                               "employees": len(emps), "overrides": len(pins),
+                               "warnings_accepted": bool(warnings)})
+
+
+async def api_plan_delete(request):
+    """DELETE /api/schedule/plan/{id} — undo the WHOLE plan, and nothing that is not part of it."""
+    if not can_edit_schedule(request):
+        return _deny()
+    try:
+        pid = int(request.match_info.get("id"))
+    except (TypeError, ValueError):
+        return HOST.json_response({"ok": False, "error": "bad id"}, 200)
+    if not db.q1("SELECT id FROM schedule_plans WHERE id=?", (pid,)):
+        return HOST.json_response({"ok": False, "error": "الخطة غير موجودة"}, 200)
+    n_ov = len(db.q("SELECT id FROM schedule_date_overrides WHERE plan_id=?", (pid,)))
+    n_ab = len(db.q("SELECT id FROM schedule_absences WHERE plan_id=?", (pid,)))
+    with db.transaction() as cx:
+        cx.execute("DELETE FROM schedule_date_overrides WHERE plan_id=?", (pid,))
+        cx.execute("DELETE FROM schedule_absences WHERE plan_id=?", (pid,))
+        cx.execute("DELETE FROM schedule_plans WHERE id=?", (pid,))
+    return HOST.json_response({"ok": True, "removed": {"absences": n_ab, "overrides": n_ov}})
+
+
+async def api_absences(request):
+    """GET /api/schedule/absences?from=&to= — the leave list, upcoming first. Login-gated read."""
+    today = _today_iso()
+    q = request.query
+    frm = (q.get("from") or (datetime.date.fromisoformat(today)
+                             - datetime.timedelta(days=30)).isoformat())[:10]
+    to = (q.get("to") or (datetime.date.fromisoformat(today)
+                          + datetime.timedelta(days=120)).isoformat())[:10]
+    try:
+        datetime.date.fromisoformat(frm)
+        datetime.date.fromisoformat(to)
+    except ValueError:
+        return HOST.json_response({"ok": False, "error": "تاريخ غير صحيح"}, 200)
+    rows = db.q(
+        "SELECT a.*, e.name employee_name, e.color, e.emoji FROM schedule_absences a "
+        "LEFT JOIN schedule_employees e ON a.employee_id=e.id "
+        "WHERE a.end_date>=? AND a.start_date<=? ORDER BY a.start_date", (frm, to))
+    out = []
+    for r in rows:
+        try:
+            days = (datetime.date.fromisoformat(r["end_date"])
+                    - datetime.date.fromisoformat(r["start_date"])).days + 1
+        except ValueError:
+            days = 1
+        pid = r.get("plan_id")
+        n_ov = (len(db.q("SELECT id FROM schedule_date_overrides WHERE plan_id=?", (pid,)))
+                if pid else 0)
+        out.append({"id": r["id"], "employee_id": r["employee_id"],
+                    "employee_name": r.get("employee_name"), "color": r.get("color"),
+                    "emoji": r.get("emoji"), "start_date": r["start_date"],
+                    "end_date": r["end_date"], "days": days, "type": r.get("type"),
+                    "type_ar": ABSENCE_LABEL_AR.get(r.get("type"), r.get("type")),
+                    "type_en": ABSENCE_LABEL_EN.get(r.get("type"), r.get("type")),
+                    "status": r.get("status"), "note": r.get("note"),
+                    "created_by": r.get("created_by"), "plan_id": pid,
+                    "override_count": n_ov, "past": r["end_date"] < today})
+    out.sort(key=lambda x: (x["past"], x["start_date"] if not x["past"] else ""),)
+    return HOST.json_response({"ok": True, "absences": out, "from": frm, "to": to,
+                               "types": [{"id": t, "ar": ABSENCE_LABEL_AR[t],
+                                          "en": ABSENCE_LABEL_EN[t]}
+                                         for t in PLANNER_ABSENCE_TYPES],
+                               "can_edit": can_edit_schedule(request)})
+
+
+async def api_suggest(request):
+    """GET /api/schedule/suggest?date=&apartment_id=[&simulate_absence=...]
+
+    Who should take this apartment on this date, ranked, each with the reason shown. The
+    ranking itself lives in the pure engine; this only gathers the day's facts."""
+    q = request.query
+    date_iso = (q.get("date") or _today_iso())[:10]
+    try:
+        datetime.date.fromisoformat(date_iso)
+        aid = int(q.get("apartment_id"))
+    except (TypeError, ValueError):
+        return HOST.json_response({"ok": False, "error": "date + apartment_id required"}, 200)
+    apt = db.q1("SELECT * FROM schedule_apartments WHERE id=?", (aid,))
+    if not apt:
+        return HOST.json_response({"ok": False, "error": "شقة غير معروفة"}, 200)
+    try:
+        sims = _parse_sims(q.get("simulate_absence"))
+    except (ValueError, TypeError) as e:
+        return HOST.json_response({"ok": False, "error": "%s" % e}, 200)
+    absent = {x["employee_id"] for x in sims if x["start"] <= date_iso <= x["end"]}
+    day = schedule_day(date_iso, extra_absent=absent)
+    demand = workload.fetch_window(date_iso, date_iso)
+    enriched = _enrich_day(day, date_iso, demand, _unassigned_apartments())
+
+    units = demand["units"]
+    lid = apt.get("listing_id")
+    apt_district = (units.get(int(lid)) or {}).get("district") if lid is not None else None
+    # how often each employee has actually covered THIS apartment before (pins already made +
+    # the recurring weekday rules) — "يغطّيها عادة" has to mean something real
+    history = {}
+    for r in db.q("SELECT covering_employee_id c, COUNT(*) n FROM schedule_date_overrides "
+                  "WHERE apartment_id=? GROUP BY covering_employee_id", (aid,)):
+        history[r["c"]] = history.get(r["c"], 0) + (r["n"] or 0)
+    for r in db.q("SELECT covering_employee_id c, COUNT(*) n FROM schedule_coverage_overrides "
+                  "WHERE apartment_id=? GROUP BY covering_employee_id", (aid,)):
+        history[r["c"]] = history.get(r["c"], 0) + (r["n"] or 0)
+    if apt.get("owner_id"):
+        history[apt["owner_id"]] = history.get(apt["owner_id"], 0) + 1   # its permanent owner
+
+    cands = [{"id": e["id"], "name": e["name"], "color": e.get("color"),
+              "emoji": e.get("emoji"), "sort_order": e.get("sort_order", 0),
+              "load": e["load"], "minutes": e["est_minutes"]}
+             for e in enriched["employees"]]
+    ranked = engine.rank_candidates(
+        {"id": apt["id"], "name": apt.get("name")}, cands,
+        {"apartment_district": apt_district,
+         "districts": {e["id"]: e["districts"] for e in enriched["employees"]},
+         "history": history,
+         "minutes": {e["id"]: e["est_minutes"] for e in enriched["employees"]}})
+    current = None
+    for e in day["working"]:
+        if aid in [a["id"] for a in e["own"]]:
+            current = {"id": e["id"], "name": e["name"], "kind": "own"}
+        for c in e["coverage"]:
+            if c["apartment"]["id"] == aid:
+                current = {"id": e["id"], "name": e["name"],
+                           "kind": "pinned" if c["overridden"] else "auto"}
+    return HOST.json_response({"ok": True, "date": date_iso, "apartment": apt.get("name"),
+                               "apartment_id": aid, "district": apt_district,
+                               "current": current, "candidates": ranked,
+                               "demand_source": demand["source"]})
+
+
+def _parse_pins(raw):
+    """'DATE:APT:EMP,DATE:APT:EMP' -> {date: [{apartment_id, covering_employee_id}]}. The manual
+    moves the owner is trying out, carried through a dry run without ever being written."""
+    out = {}
+    for chunk in (raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split(":")
+        if len(parts) != 3:
+            raise ValueError("pins must be DATE:APT:EMP")
+        d = parts[0][:10]
+        datetime.date.fromisoformat(d)
+        out.setdefault(d, []).append({"apartment_id": int(parts[1]),
+                                      "covering_employee_id": int(parts[2])})
+    return out
+
+
+def _cover_history():
+    """{apartment_id: {employee_id: times}} in TWO queries — who has actually covered what
+    before. Called once per sheet, never once per apartment."""
+    hist = {}
+    for sql in ("SELECT apartment_id a, covering_employee_id c, COUNT(*) n "
+                "FROM schedule_date_overrides GROUP BY apartment_id, covering_employee_id",
+                "SELECT apartment_id a, covering_employee_id c, COUNT(*) n "
+                "FROM schedule_coverage_overrides GROUP BY apartment_id, covering_employee_id"):
+        for r in db.q(sql):
+            hist.setdefault(r["a"], {})
+            hist[r["a"]][r["c"]] = hist[r["a"]].get(r["c"], 0) + (r["n"] or 0)
+    return hist
+
+
+async def api_suggest_day(request):
+    """GET /api/schedule/suggest-day?date=[&simulate_absence=][&pins=]
+
+    Every apartment that needs covering on this date, each with the working team ranked and the
+    reason shown. ONE Hostaway window call for the whole sheet, not one per apartment."""
+    q = request.query
+    date_iso = (q.get("date") or _today_iso())[:10]
+    try:
+        datetime.date.fromisoformat(date_iso)
+    except ValueError:
+        return HOST.json_response({"ok": False, "error": "تاريخ غير صحيح"}, 200)
+    try:
+        sims = _parse_sims(q.get("simulate_absence"))
+        pins = _parse_pins(q.get("pins"))
+    except (ValueError, TypeError) as e:
+        return HOST.json_response({"ok": False, "error": "%s" % e}, 200)
+    if (sims or pins) and not can_edit_schedule(request):
+        return _deny()
+    absent = {x["employee_id"] for x in sims if x["start"] <= date_iso <= x["end"]}
+    day = schedule_day(date_iso, extra_absent=absent,
+                       extra_date_overrides=pins.get(date_iso))
+    demand = workload.fetch_window(date_iso, date_iso)
+    enriched = _enrich_day(day, date_iso, demand, _unassigned_apartments())
+    units = demand["units"]
+    hist = _cover_history()
+    apts_by_id = {a["id"]: a for a in db.apartments()}
+    cands = [{"id": e["id"], "name": e["name"], "color": e.get("color"),
+              "emoji": e.get("emoji"), "sort_order": e.get("sort_order", 0),
+              "load": e["load"], "est_minutes": e["est_minutes"]}
+             for e in enriched["employees"]]
+    ctx_districts = {e["id"]: e["districts"] for e in enriched["employees"]}
+    ctx_minutes = {e["id"]: e["est_minutes"] for e in enriched["employees"]}
+    outs = demand["checkouts"].get(date_iso) or set()
+
+    rows = []
+    for o in day["off"]:
+        for item in o.get("apartments") or []:
+            apt = item["apartment"]
+            row_hist = dict(hist.get(apt["id"]) or {})
+            if apt.get("owner_id"):
+                row_hist[apt["owner_id"]] = row_hist.get(apt["owner_id"], 0) + 1
+            lid = apt.get("listing_id")
+            district = (units.get(int(lid)) or {}).get("district") if lid is not None else None
+            ranked = engine.rank_candidates(
+                {"id": apt["id"], "name": apt.get("name")},
+                [dict(c) for c in cands],
+                {"apartment_district": district, "districts": ctx_districts,
+                 "history": row_hist, "minutes": ctx_minutes})
+            pinned = any(p["apartment_id"] == apt["id"] for p in pins.get(date_iso, []))
+            rows.append({
+                "apartment_id": apt["id"], "name": apt.get("name"),
+                "owner_id": o["id"], "owner_name": o["name"], "district": district,
+                "has_turnover": (lid is not None and int(lid) in outs),
+                "current_id": item.get("covering_id"), "current_name": item.get("covering_name"),
+                "pinned": pinned,
+                "candidates": [{"id": c["id"], "name": c["name"], "color": c.get("color"),
+                                "emoji": c.get("emoji"), "reason": c["reason"],
+                                "reason_ar": c["reason_ar"], "reason_en": c["reason_en"],
+                                "load": c.get("load"), "est_minutes": c.get("est_minutes")}
+                               for c in ranked]})
+    rows.sort(key=lambda r: (not r["has_turnover"],
+                             apts_by_id.get(r["apartment_id"], {}).get("sort_order", 0),
+                             r["apartment_id"]))
+    return HOST.json_response({"ok": True, "date": date_iso, "weekday_ar": day["weekday_ar"],
+                               "units": rows, "demand_source": demand["source"]})
 
 
 # ---------------- settings + reset ----------------
@@ -772,6 +1140,11 @@ def register(app):
     # period: plain read PUBLIC like day/week; simulate mode re-checks the editor role inside.
     g("/api/schedule/period", _safe_public(api_period))
     p("/api/schedule/caps-recompute", _safe(api_caps_recompute))
+    g("/api/schedule/absences", _safe(api_absences))
+    g("/api/schedule/suggest", _safe(api_suggest))
+    g("/api/schedule/suggest-day", _safe(api_suggest_day))
+    p("/api/schedule/plan", _safe(api_plan_save))
+    app.router.add_delete("/api/schedule/plan/{id}", _safe(api_plan_delete))
     g("/api/schedule/manage", _safe(api_manage))
     g("/api/schedule/owners", _safe(api_owners))
     g("/api/schedule/hostaway-listings", _safe(api_hostaway_listings))

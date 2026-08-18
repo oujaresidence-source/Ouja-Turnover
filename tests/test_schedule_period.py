@@ -107,11 +107,27 @@ class PeriodRiskTest(unittest.TestCase):
         d = _day(employees=[_emp(1, "نورة")], unassigned=[{"id": 9, "name": "حطين 6b"}])
         self.assertIn("unassigned", _codes(period.day_risks(d, CAPS)))
 
-    def test_double_absence(self):
+    def test_double_absence_fires_on_two_people_on_LEAVE(self):
+        d = _day(employees=[_emp(1, "نورة")],
+                 off=[{"id": 2, "name": "ناصر", "reason": "leave"},
+                      {"id": 3, "name": "مآثر", "reason": "leave"}])
+        self.assertIn("double_absence", _codes(period.day_risks(d, CAPS)))
+
+    def test_double_absence_fires_on_three_out_however_caused(self):
+        d = _day(employees=[_emp(1, "نورة")],
+                 off=[{"id": 2, "name": "ناصر", "reason": "leave"},
+                      {"id": 3, "name": "مآثر", "reason": "off"},
+                      {"id": 4, "name": "عهود", "reason": "off"}])
+        self.assertIn("double_absence", _codes(period.day_risks(d, CAPS)))
+
+    def test_one_leave_landing_on_a_normal_off_day_is_NOT_a_warning(self):
+        """Exactly one person is off by rota on five days of seven, so this shape is every
+        ordinary leave day. Flagging it would fire almost daily and train the owner to ignore
+        the whole risk list."""
         d = _day(employees=[_emp(1, "نورة")],
                  off=[{"id": 2, "name": "ناصر", "reason": "leave"},
                       {"id": 3, "name": "مآثر", "reason": "off"}])
-        self.assertIn("double_absence", _codes(period.day_risks(d, CAPS)))
+        self.assertNotIn("double_absence", _codes(period.day_risks(d, CAPS)))
 
     def test_single_absence_is_not_a_double_absence(self):
         d = _day(employees=[_emp(1, "نورة")], off=[{"id": 2, "name": "ناصر", "reason": "off"}])

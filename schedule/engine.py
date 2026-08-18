@@ -181,3 +181,67 @@ def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None,
 def _nm(emp_by_id, eid):
     e = emp_by_id.get(eid)
     return e["name"] if e else None
+
+
+def rank_candidates(apartment, candidates, context=None):
+    """Who should take this apartment on this day — ranked, with the REASON shown.
+
+    Pure and deterministic, and deliberately in the engine rather than in JavaScript: the
+    suggestion is part of the model, so it can be tested and can never drift from the board.
+
+    context = {
+      apartment_district: the apartment's compound/district,
+      districts: {employee_id: [districts they already work that day]},
+      history:   {employee_id: how many times they have covered THIS apartment before},
+      minutes:   {employee_id: their estimated minutes that day},
+    }
+
+    Order: same district (less driving between Malqa and Qurtubah is the biggest real win)
+        -> has covered it before -> lightest day -> sort_order -> id.
+
+    The `reason` reported is the factor that actually SEPARATED this candidate from the others.
+    A factor every candidate shares explains nothing, so it is skipped — otherwise every
+    suggestion on a single-district day would claim "same compound" and mean nothing.
+    """
+    ctx = context or {}
+    apt_district = ctx.get("apartment_district")
+    districts = ctx.get("districts") or {}
+    history = ctx.get("history") or {}
+    minutes = ctx.get("minutes") or {}
+    cands = list(candidates or [])
+    if not cands:
+        return []
+
+    def _same(c):
+        return bool(apt_district and apt_district in (districts.get(c["id"]) or []))
+
+    def _hist(c):
+        return int(history.get(c["id"]) or 0)
+
+    def _mins(c):
+        return int(minutes.get(c["id"]) or 0)
+
+    same_all = [_same(c) for c in cands]
+    hist_all = [_hist(c) for c in cands]
+    mins_all = [_mins(c) for c in cands]
+    sep_district = len(set(same_all)) > 1
+    sep_hist = len(set(hist_all)) > 1
+    sep_mins = len(set(mins_all)) > 1
+    best_hist, best_mins = max(hist_all), min(mins_all)
+
+    out = []
+    for c in cands:
+        same, hist, mins = _same(c), _hist(c), _mins(c)
+        if sep_district and same:
+            reason, ar, en = "same_district", "نفس المجمع", "Same compound"
+        elif sep_hist and hist and hist == best_hist:
+            reason, ar, en = "covers_it_usually", "يغطّيها عادة", "Usually covers it"
+        elif sep_mins and mins == best_mins:
+            reason, ar, en = "lightest_day", "أقل حمل اليوم", "Lightest day"
+        else:
+            reason, ar, en = "available", "متاح", "Available"
+        out.append(dict(c, reason=reason, reason_ar=ar, reason_en=en,
+                        same_district=same, covered_before=hist, est_minutes=mins))
+    out.sort(key=lambda c: (0 if c["same_district"] else 1, -c["covered_before"],
+                            c["est_minutes"], c.get("sort_order", 0), c["id"]))
+    return out
