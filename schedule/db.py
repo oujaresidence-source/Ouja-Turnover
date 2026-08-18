@@ -47,9 +47,13 @@ CREATE TABLE IF NOT EXISTS schedule_coverage_overrides (
     UNIQUE(day_of_week, apartment_id)
 );
 CREATE TABLE IF NOT EXISTS schedule_settings (
-    id        INTEGER PRIMARY KEY CHECK (id = 1),
-    title     TEXT,
-    subtitle  TEXT
+    id                 INTEGER PRIMARY KEY CHECK (id = 1),
+    title              TEXT,
+    subtitle           TEXT,
+    max_units_per_day  INTEGER,        -- advisory overload cap  (NULL = not computed yet)
+    max_minutes_per_day INTEGER,       -- PRIMARY overload cap   (NULL = not computed yet)
+    caps_source        TEXT,           -- 'observed' (p90 of our own history) | 'manual'
+    caps_computed_at   TEXT
 );
 CREATE TABLE IF NOT EXISTS schedule_absences (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +117,14 @@ def _migrate(cx):
     acols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_apartments)").fetchall()}
     if "listing_id" not in acols:
         cx.execute("ALTER TABLE schedule_apartments ADD COLUMN listing_id INTEGER")
+    # Overload caps live on the settings row. They are DERIVED from this team's own last-60-day
+    # history (p90), never guessed — so they start NULL and stay NULL until there is real
+    # history to learn from, and no overload flag is raised while they are NULL.
+    scols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_settings)").fetchall()}
+    for col, decl in (("max_units_per_day", "INTEGER"), ("max_minutes_per_day", "INTEGER"),
+                      ("caps_source", "TEXT"), ("caps_computed_at", "TEXT")):
+        if col not in scols:
+            cx.execute("ALTER TABLE schedule_settings ADD COLUMN %s %s" % (col, decl))
 
 
 def reset_init_cache():

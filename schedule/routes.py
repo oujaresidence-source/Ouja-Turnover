@@ -10,7 +10,7 @@ import datetime
 import re
 import traceback
 
-from . import db, engine, seed, notify, page, coverage, owners
+from . import db, engine, seed, notify, page, coverage, owners, period, workload
 from .host import HOST
 
 # Editing is gated on the existing multi-user roles (build spec §2). admin/ops may edit; every
@@ -84,12 +84,22 @@ def _today_iso():
 
 # ---------------- shared compute (single source) ----------------
 
-def schedule_day(date_iso):
+def schedule_day(date_iso, extra_absent=None, extra_date_overrides=None):
+    """The ONE board every surface renders from.
+
+    `extra_absent` / `extra_date_overrides` are the DRY-RUN inputs the period planner passes to
+    ask "what would this look like" — they are never persisted here and default to nothing, so
+    every existing caller behaves exactly as before."""
     emps = db.employees()
     apts = db.apartments()
     ovs = db.overrides()
     absent_ids = {a["employee_id"] for a in db.absences_on(date_iso)}
+    if extra_absent:
+        absent_ids |= set(extra_absent)
     dovs = db.date_overrides_on(date_iso)
+    if extra_date_overrides:
+        pinned = {d.get("apartment_id") for d in extra_date_overrides}
+        dovs = [d for d in dovs if d.get("apartment_id") not in pinned] + list(extra_date_overrides)
     wd = engine.to_weekday(date_iso)
     r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent_ids, date_overrides=dovs)
     r["date"] = date_iso
@@ -499,6 +509,236 @@ async def api_absence_del(request):
     return HOST.json_response({"ok": True, "deleted": 1})
 
 
+# ---------------- PERIOD SIMULATION («مخطط الإجازات») ----------------
+# "ناصر off 20-27 August" answered BEFORE it is saved. Every day is built by schedule_day(), so
+# the preview can never disagree with the Today tab; the Hostaway pull happens ONCE for the whole
+# window and degrades to apartment counts instead of failing.
+
+_PERIOD_MAX_DAYS = 62
+_CAPS_HISTORY_DAYS = 60
+
+
+def _dates(start_iso, end_iso):
+    d = datetime.date.fromisoformat(start_iso)
+    end = datetime.date.fromisoformat(end_iso)
+    out = []
+    while d <= end:
+        out.append(d.isoformat())
+        d += datetime.timedelta(days=1)
+    return out
+
+
+def _parse_sims(raw):
+    """'EMP:START:END,EMP:START:END' -> [{employee_id, start, end, name}]. Raises ValueError."""
+    sims = []
+    for chunk in (raw or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split(":")
+        if len(parts) != 3:
+            raise ValueError("simulate_absence must be EMP_ID:START:END")
+        eid = int(parts[0])
+        start, end = parts[1][:10], parts[2][:10]
+        datetime.date.fromisoformat(start)
+        datetime.date.fromisoformat(end)
+        if end < start:
+            raise ValueError("simulated leave ends before it starts")
+        emp = db.q1("SELECT id, name FROM schedule_employees WHERE id=?", (eid,))
+        if not emp:
+            raise ValueError("unknown employee %d" % eid)
+        sims.append({"employee_id": eid, "name": emp["name"], "start": start, "end": end})
+    return sims
+
+
+def _events_for(date_iso):
+    fn = getattr(HOST, "events_for_date", None)
+    if not fn:
+        return []
+    try:
+        return [e.get("name") for e in (fn(date_iso) or []) if e.get("name")]
+    except Exception:
+        return []
+
+
+def _enrich_day(day, date_iso, demand, unassigned):
+    """Turn one coverage board into a workload board. Apartment counts stay, but the numbers
+    that matter — real turnovers, same-day check-ins, estimated minutes — come from Hostaway."""
+    outs = demand["checkouts"].get(date_iso) or set()
+    ins = demand["checkins"].get(date_iso) or set()
+    deep = demand["deep_cleans"].get(date_iso) or set()
+    units, mdef = demand["units"], demand["minutes_default"]
+    emps = []
+    for w in day["working"]:
+        apts = list(w["own"]) + [c["apartment"] for c in w["coverage"]]
+        turns = mins = checkins = deeps = 0
+        districts = []
+        for a in apts:
+            lid = a.get("listing_id")
+            if lid is None:
+                continue
+            lid = int(lid)
+            cfg = units.get(lid) or {}
+            if lid in deep:
+                deeps += 1
+            if lid not in outs:
+                continue                     # no checkout today = no cleaning today
+            turns += 1
+            mins += cfg.get("minutes") or mdef
+            if cfg.get("district"):
+                districts.append(cfg["district"])
+            if lid in ins:
+                checkins += 1                # same-day arrival — the urgent ones
+        emps.append({"id": w["id"], "name": w["name"], "color": w.get("color"),
+                     "emoji": w.get("emoji"), "sort_order": w.get("sort_order", 0),
+                     "own": len(w["own"]), "coverage": len(w["coverage"]), "load": w["load"],
+                     "real_turnovers": turns, "checkins": checkins, "deep_cleans": deeps,
+                     "est_minutes": mins, "districts": sorted(set(districts))})
+    return {"date": date_iso, "weekday_ar": day["weekday_ar"], "employees": emps,
+            "off": [{"id": o["id"], "name": o["name"], "color": o.get("color"),
+                     "emoji": o.get("emoji"), "reason": o.get("reason"),
+                     "units": len(o.get("apartments") or [])} for o in day["off"]],
+            "unassigned": unassigned,
+            "skipped_date_overrides": day.get("skipped_date_overrides") or [],
+            "total_turnovers": sum(e["real_turnovers"] for e in emps),
+            "checkins": sum(e["checkins"] for e in emps),
+            "balanced": day.get("balanced"),
+            "events": _events_for(date_iso)}
+
+
+def _unassigned_apartments():
+    return [{"id": a["id"], "name": a.get("name")} for a in db.apartments()
+            if a.get("owner_id") is None]
+
+
+def build_period(start_iso, end_iso, sims=None, demand=None, caps=None,
+                 extra_date_overrides=None):
+    """The days of a window, enriched and risk-flagged, plus the rollup vs the normal week."""
+    dates = _dates(start_iso, end_iso)
+    demand = demand or workload.fetch_window(start_iso, end_iso)
+    caps = caps if caps is not None else current_caps()
+    unassigned = _unassigned_apartments()
+    sims = sims or []
+    edo = extra_date_overrides or {}
+
+    def _absent_on(date_iso):
+        return {s["employee_id"] for s in sims if s["start"] <= date_iso <= s["end"]}
+
+    days, baseline = [], []
+    for d in dates:
+        plan_day = schedule_day(d, extra_absent=_absent_on(d),
+                                extra_date_overrides=edo.get(d))
+        days.append(_enrich_day(plan_day, d, demand, unassigned))
+        if sims or edo:
+            baseline.append(_enrich_day(schedule_day(d), d, demand, unassigned))
+    if not (sims or edo):
+        baseline = days
+
+    period.mark_peaks(days)
+    for d in days:
+        d["risks"] = period.day_risks(d, caps)
+    return {"start": start_iso, "end": end_iso, "count": len(dates),
+            "demand_source": demand["source"], "caps": caps,
+            "simulated": sims, "days": days,
+            "rollup": period.summarize(days, baseline=baseline, caps=caps)}
+
+
+# ---- overload caps: derived from THIS team's history, never guessed ----
+
+def stored_caps():
+    s = db.settings() or {}
+    if s.get("max_minutes_per_day") or s.get("max_units_per_day"):
+        return {"units": s.get("max_units_per_day"), "minutes": s.get("max_minutes_per_day"),
+                "source": s.get("caps_source") or "manual",
+                "computed_at": s.get("caps_computed_at")}
+    return None
+
+
+def compute_caps(days_back=_CAPS_HISTORY_DAYS, save=True):
+    """The 90th percentile of what this team actually carried per person per day over the last
+    `days_back` days. Refuses to answer from a degraded Hostaway pull — a cap computed from
+    zeroes would flag every single day as an overload."""
+    end = datetime.date.fromisoformat(_today_iso())
+    start = end - datetime.timedelta(days=days_back)
+    demand = workload.fetch_window(start.isoformat(), end.isoformat())
+    if demand["source"] != "hostaway":
+        return {"units": None, "minutes": None, "source": "unknown", "reason": "hostaway_down"}
+    unassigned = _unassigned_apartments()
+    hist = []
+    for d in _dates(start.isoformat(), end.isoformat()):
+        for e in _enrich_day(schedule_day(d), d, demand, unassigned)["employees"]:
+            if e["real_turnovers"]:            # a day somebody actually worked
+                hist.append({"units": e["load"], "minutes": e["est_minutes"]})
+    caps = period.observed_caps(hist)
+    if caps["source"] != "observed" or not caps.get("minutes"):
+        return {"units": None, "minutes": None, "source": "unknown", "reason": "no_history"}
+    if save:
+        s = db.settings() or {}
+        db.execute("INSERT OR REPLACE INTO schedule_settings(id,title,subtitle,"
+                   "max_units_per_day,max_minutes_per_day,caps_source,caps_computed_at) "
+                   "VALUES(1,?,?,?,?,?,?)",
+                   (s.get("title"), s.get("subtitle"), caps["units"], caps["minutes"],
+                    "observed", db.now_iso()))
+        caps["computed_at"] = db.now_iso()
+    return caps
+
+
+def current_caps():
+    """Stored caps, else derive them once from history. Unknown caps raise NO overload flag."""
+    st = stored_caps()
+    if st:
+        return st
+    try:
+        return compute_caps()
+    except Exception:
+        traceback.print_exc()
+        return {"units": None, "minutes": None, "source": "unknown", "reason": "error"}
+
+
+async def api_period(request):
+    """GET /api/schedule/period?start&end[&simulate_absence=EMP:START:END,...]
+
+    Plain read is PUBLIC (same rule as day/week — the ops team opens /team-calendar with no
+    login). SIMULATE mode is a planning tool and needs an editor."""
+    q = request.query
+    start = (q.get("start") or _today_iso())[:10]
+    end = (q.get("end") or start)[:10]
+    try:
+        datetime.date.fromisoformat(start)
+        datetime.date.fromisoformat(end)
+    except ValueError:
+        return HOST.json_response({"ok": False, "error": "تاريخ غير صحيح — الصيغة YYYY-MM-DD"}, 200)
+    if end < start:
+        return HOST.json_response({"ok": False, "error": "تاريخ النهاية قبل البداية"}, 200)
+    span = (datetime.date.fromisoformat(end) - datetime.date.fromisoformat(start)).days + 1
+    if span > _PERIOD_MAX_DAYS:
+        return HOST.json_response(
+            {"ok": False, "error": "الفترة أطول من %d يوم — قسّمها على فترات" % _PERIOD_MAX_DAYS}, 200)
+    try:
+        sims = _parse_sims(q.get("simulate_absence"))
+    except (ValueError, TypeError) as e:
+        return HOST.json_response({"ok": False, "error": "طلب المحاكاة غير صحيح: %s" % e}, 200)
+    editor = can_edit_schedule(request)
+    if sims and not editor:
+        return _deny()
+    # Deriving the caps costs a 60-day Hostaway pull. Only an editor (the planner) may trigger
+    # that; an anonymous /team-calendar reader gets the stored caps or none at all, so a public
+    # URL can never be used to hammer Hostaway.
+    caps = stored_caps() or (compute_caps() if editor else
+                             {"units": None, "minutes": None, "source": "unknown",
+                              "reason": "not_computed"})
+    return HOST.json_response({"ok": True,
+                               "period": build_period(start, end, sims=sims, caps=caps),
+                               "can_edit": editor})
+
+
+async def api_caps_recompute(request):
+    """Re-derive the overload caps from the last 60 days (editor only)."""
+    if not can_edit_schedule(request):
+        return _deny()
+    return HOST.json_response({"ok": True, "caps": compute_caps()})
+
+
 # ---------------- settings + reset ----------------
 
 async def api_settings_set(request):
@@ -529,6 +769,9 @@ def register(app):
     g("/api/schedule/day", _safe_public(api_day))
     g("/api/schedule/week", _safe_public(api_week))
     # manage = editor data (employee/apartment lists) -> stays behind login.
+    # period: plain read PUBLIC like day/week; simulate mode re-checks the editor role inside.
+    g("/api/schedule/period", _safe_public(api_period))
+    p("/api/schedule/caps-recompute", _safe(api_caps_recompute))
     g("/api/schedule/manage", _safe(api_manage))
     g("/api/schedule/owners", _safe(api_owners))
     g("/api/schedule/hostaway-listings", _safe(api_hostaway_listings))

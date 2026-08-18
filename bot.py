@@ -56293,6 +56293,23 @@ async def start_web_server():
                     "notify": _schedule_notify if SCHEDULE_ENABLED else None,
                     "listings": _schedule_hostaway_listings,
                     "tz": TZ, "now": now_riyadh,
+                    # ---- leave planner («مخطط الإجازات») ----
+                    # Who is writing: the leave/plan audit trail records the logged-in name
+                    # instead of the old hardcoded "editor".
+                    "req_actor": _req_actor,
+                    # Real workload, not apartment counts. WINDOWED reservation query only
+                    # (CLAUDE.md trap #4) — never the truncating full-history cache. Used ONLY
+                    # by the period planner; the public day/week reads never touch Hostaway.
+                    "ha_reservations_window": _ha_reservations_window,
+                    "ls_get": _ls_get,
+                    "deep_clean_state": (lambda: _deep_clean_state),
+                    # Saudi seasons are a LABEL on the day, never a risk trigger — Riyadh
+                    # Season alone is five months and would paint half the year red.
+                    "events_for_date": events_for_date,
+                    "clean_defaults": (lambda: {"clean_min": OUJACT_CLEAN_MIN,
+                                                "clean_max": OUJACT_CLEAN_MAX,
+                                                "park_buffer": OUJACT_PARK_BUFFER}),
+                    "confirmed_statuses": (lambda: CONFIRMED_STATUSES),
                 })
                 _schedule.register_routes(app)
                 print("[schedule] wired + routes registered (/team-calendar, /api/schedule/*)")
