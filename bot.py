@@ -4141,6 +4141,42 @@ def _schedule_hostaway_listings():
         print("schedule hostaway-listings provider error:", e)
         return []
 
+def _recovery_unit_owner(lid=None, name=None):
+    """WHO OWNS THE PROBLEM, for recovery's conflict-of-interest rule (the person responsible
+    for an apartment never makes the recovery call about it).
+
+    This must be whoever actually covered the unit THAT DAY, not the permanent owner: while
+    ناصر is on leave and نورة is covering, excluding ناصر protects nobody (he is at home) and
+    نورة could be handed the apology call for her own mistake. Falls back to the permanent
+    owner when the calendar has nothing to say. Never raises."""
+    if not (_HAS_SCHEDULE and _schedule):
+        return None
+    try:
+        today = datetime.now(TZ).date().isoformat()
+        info = None
+        if lid is not None:
+            info = _schedule.coverage.cover_for_listing_id(lid, today)
+        if info is None and name:
+            info = _schedule.coverage.cover_for_listing(name, today)
+        if info and info.get("name"):
+            return info["name"]
+        return _schedule.owners.owner_for(listing_id=lid, name=name)
+    except Exception as e:
+        print("[recovery] unit-owner lookup failed:", e)
+        return None
+
+
+def _schedule_changed(dates=None):
+    """Coverage changed (leave recorded, plan saved, pin moved). Drop every cache that
+    answered "who is responsible" for those dates — a no-show recorded at 10am has to land
+    on the accountability board immediately, not after the next restart."""
+    try:
+        import ops.capture as _opscap
+        _opscap.invalidate(dates)
+    except Exception as e:
+        print("[schedule] cache invalidation skipped:", e)
+
+
 def _oujact_cover_info(listing_name, date_iso, lid=None):
     """{name, emoji, ...} of the employee responsible for cleaning this apartment on `date_iso`,
     looked up via the Employee Schedule. Tries the EXACT Hostaway-listing-id link first (reliable),
@@ -21433,6 +21469,7 @@ function lvState(){
   if(!SCHED.lv){
     var t=(SCHED.day&&SCHED.day.date)?SCHED.day.date:lvISO(new Date());
     SCHED.lv={who:[], start:t, end:lvAdd(t,2), type:'vacation', note:'',
+              shift:'morning',
               preview:null, day:null, pins:{}, list:null, types:null, busy:false, saving:false};
   }
   return SCHED.lv;
@@ -21502,6 +21539,12 @@ function renderSchedLeave(){
   h+='<div class="lv-f"><label>'+labelText('النوع','Type')+'</label><select class="ros-input" id="lvType" onchange="lvSetType(this.value)">';
   types.forEach(function(t){ h+='<option value="'+esc(t.id)+'"'+(st.type===t.id?' selected':'')+'>'+esc(L==='ar'?t.ar:(t.en||t.ar))+'</option>'; });
   h+='</select></div>';
+  if(st.type==='half_day'){
+    h+='<div class="lv-f"><label>'+labelText('أي نص؟','Which half?')+'</label><select class="ros-input" id="lvShift" onchange="lvSetShift(this.value)">';
+    h+='<option value="morning"'+(st.shift==='morning'?' selected':'')+'>'+labelText('صباحي — ما يلحق التنظيف','Morning - misses the cleaning')+'</option>';
+    h+='<option value="evening"'+(st.shift==='evening'?' selected':'')+'>'+labelText('مسائي — يلحق التنظيف','Evening - covers the cleaning')+'</option>';
+    h+='</select></div>';
+  }
   h+='<div class="lv-f" style="flex:2 1 200px"><label>'+labelText('ملاحظة','Note')+'</label><input class="ros-input" id="lvNote" value="'+esc(st.note||'')+'" oninput="lvSetNote(this.value)" placeholder="'+labelText('اختياري','optional')+'"></div>';
   h+='</div>';
   h+='<div class="lv-chips">';
@@ -21514,8 +21557,8 @@ function renderSchedLeave(){
   h+='<span style="font-size:12px;color:var(--mut)">'+labelText('ما ينحفظ شي في هذي الخطوة.','Nothing is saved at this step.')+'</span>';
   h+='</div>';
   h+='<div style="margin-top:10px;font-size:11.5px;color:var(--mut);line-height:1.7">'
-    +labelText('«نصف يوم» و«تأخير» و«تدريب» مخفية مؤقتاً: النظام لسه يحسبها يوم كامل ويوزّع شقق الشخص على الباقين، وهذا غلط. راجعة في التحديث الجاي.',
-               'Half-day, Late and Training are hidden for now: the system still counts them as a full day off and hands the person apartments away, which is wrong. Back in the next update.')+'</div>';
+    +labelText('التدريب سجّله «إجازة سنوية» واكتب السبب في الملاحظة · الغياب بدون إذن يتسجّل يوم ما يصير مو مقدماً · المرضية والطارئة تسري فوراً، والسنوية وبدون راتب تنتظر موافقة المالك.',
+               'Record training as annual leave with the reason in the note. A no-show is recorded on the day, not in advance. Sick and emergency apply at once; annual and unpaid wait for the owner.')+'</div>';
   h+='</div>';
   if(st.preview){ h+=lvPreviewHtml(st.preview); }
   h+=lvListHtml(st.list);
@@ -21534,7 +21577,13 @@ function lvSetDate(which, v){
   if(which===0){ st.start=v; if(st.end<v){ st.end=v; } } else { st.end=v; if(v<st.start){ st.start=v; } }
   st.preview=null; renderSchedLeave();
 }
-function lvSetType(v){ lvState().type=v; }
+function lvSetType(v){
+  var st=lvState(); st.type=v; st.preview=null;
+  // «نصف يوم» is the one type whose meaning changes the board, so the shift picker has to
+  // appear immediately — morning is a full absence, evening changes nothing.
+  renderSchedLeave();
+}
+function lvSetShift(v){ var st=lvState(); st.shift=v; st.preview=null; renderSchedLeave(); }
 function lvSetNote(v){ lvState().note=v; }
 function lvQuick(n){
   var st=lvState();
@@ -21544,11 +21593,19 @@ function lvQuick(n){
 /* ---------- preview (dry run — the server writes nothing) ---------- */
 function lvSimParam(){
   var st=lvState();
+  // An evening half-day catches every cleaning (checkout 12:00, check-in 15:00), so it takes
+  // nobody off the board and must not be simulated as an absence.
+  if(st.type==='half_day' && st.shift==='evening'){ return ''; }
   return st.who.map(function(id){ return id+':'+st.start+':'+st.end; }).join(',');
 }
 function lvPreview(){
   var st=lvState();
   if(!st.who.length){ toast(labelText('اختر موظف واحد على الأقل','Pick at least one person')); return; }
+  if(st.type==='half_day' && st.shift==='evening'){
+    toast(labelText('نصف يوم مسائي ما يغيّر التوزيع — التنظيف كله بعد الظهر. احفظه مباشرة.',
+                    'An evening half-day changes nothing - all cleaning is after midday. Just save it.'));
+    return;
+  }
   if(lvDays(st.start,st.end)>62){ toast(labelText('الفترة أطول من ٦٢ يوم','Longer than 62 days')); return; }
   st.busy=true; st.pins={}; renderSchedLeave();
   var u='/api/schedule/period?start='+encodeURIComponent(st.start)+'&end='+encodeURIComponent(st.end)
@@ -21780,7 +21837,8 @@ function lvSave(accept){
   if(!st.who.length){ toast(labelText('اختر موظف','Pick a person')); return; }
   st.saving=true;
   var body={employees:st.who.map(function(id){
-      return {employee_id:id, start:st.start, end:st.end, type:st.type, note:st.note}; }),
+      return {employee_id:id, start:st.start, end:st.end, type:st.type, note:st.note,
+              shift:(st.type==='half_day'?st.shift:null)}; }),
     overrides:lvPinsBody(), note:st.note};
   if(accept){ body.accept_warnings=true; }
   post('/api/schedule/plan', body).then(function(j){
@@ -21799,6 +21857,16 @@ function lvSave(accept){
     }
     toast((j&&j.error)?j.error:labelText('ما انحفظت','Not saved'));
   }).catch(function(){ st.saving=false; toast(labelText('ما انحفظت','Not saved')); });
+}
+function lvDecideEl(el){ lvDecide(parseInt(el.getAttribute('data-aid'),10), el.getAttribute('data-dec')); }
+function lvDecide(aid, decision){
+  var reject=(decision==='rejected');
+  if(reject && !confirm(labelText('تلغي هذي الإجازة؟ الشخص يرجع للتوزيع فوراً.','Reverse this leave? The person returns to the board immediately.'))) return;
+  post('/api/schedule/absence-decide', {id:aid, decision:decision}).then(function(j){
+    if(j&&j.ok){ toast(reject?labelText('انلغت','Reversed'):labelText('تمت الموافقة','Approved'));
+      lvState().list=null; lvLoadList(); schedAfterWrite(); }
+    else { toast((j&&j.error)?j.error:labelText('خطأ','Error')); }
+  });
 }
 function lvUndoEl(el){ lvUndo(parseInt(el.getAttribute('data-pid'),10)); }
 function lvUndo(pid){
@@ -21829,10 +21897,18 @@ function lvListHtml(list){
     h+='<span class="dates">'+esc(a.start_date)+' - '+esc(a.end_date)+'</span>';
     h+='<span class="lv-tag">'+esc(L==='ar'?a.type_ar:a.type_en)+'</span>';
     h+='<span class="lv-tag">'+a.days+' '+labelText('يوم','d')+'</span>';
+    if(a.needs_decision){ h+='<span class="lv-tag" style="background:var(--warn-bg);color:var(--warn)">'+labelText('بانتظار موافقتك','awaiting you')+'</span>'; }
+    else if(a.affects_coverage===false){ h+='<span class="lv-tag">'+labelText('ما يغيّر التوزيع','no coverage change')+'</span>'; }
     if(a.override_count){ h+='<span class="lv-tag" style="background:var(--gold-tint);color:var(--accent)">'+a.override_count+' '+labelText('تعيين','moves')+'</span>'; }
     if(a.note){ h+='<span style="font-size:11.5px;color:var(--mut)">'+esc(a.note)+'</span>'; }
     h+='<span style="font-size:11px;color:var(--mut)">'+labelText('أضافها ','by ')+esc(a.created_by||'-')+'</span>';
     h+='<span class="lv-sp">';
+    if(a.needs_decision){
+      h+='<button class="btn sm" onclick="lvDecideEl(this)" data-aid="'+a.id+'" data-dec="approved">'+labelText('وافق','Approve')+'</button>';
+      h+='<button class="btn ghost sm" onclick="lvDecideEl(this)" data-aid="'+a.id+'" data-dec="rejected" style="color:var(--bad)">'+labelText('ارفض','Reject')+'</button>';
+    } else if(a.status==='approved'){
+      h+='<button class="btn ghost sm" onclick="lvDecideEl(this)" data-aid="'+a.id+'" data-dec="rejected">'+labelText('إلغاء','Reverse')+'</button>';
+    }
     if(a.plan_id){ h+='<button class="btn ghost sm" onclick="lvUndoEl(this)" data-pid="'+a.plan_id+'">'+labelText('تراجع','Undo')+'</button>'; }
     else { h+='<button class="btn ghost sm" onclick="lvDelEl(this)" data-aid="'+a.id+'" style="color:var(--bad)">'+labelText('حذف','Delete')+'</button>'; }
     h+='</span></div>';
@@ -56862,6 +56938,7 @@ async def start_web_server():
                                                 "clean_max": OUJACT_CLEAN_MAX,
                                                 "park_buffer": OUJACT_PARK_BUFFER}),
                     "confirmed_statuses": (lambda: CONFIRMED_STATUSES),
+                    "on_change": _schedule_changed,
                 })
                 _schedule.register_routes(app)
                 print("[schedule] wired + routes registered (/team-calendar, /api/schedule/*)")
@@ -57114,9 +57191,8 @@ async def start_web_server():
                     "web": web,
                     "tz": TZ,
                     "public_base": _dispatch_base_url,
-                    "unit_owner": (lambda lid=None, name=None:
-                                   (_schedule.owners.owner_for(listing_id=lid, name=name)
-                                    if _HAS_SCHEDULE else None)),
+                    # the DAY'S coverer, not the permanent owner — see _recovery_unit_owner
+                    "unit_owner": _recovery_unit_owner,
                     "todays_checkouts": _recovery_todays_checkouts,
                     "inhouse_count": (lambda: len([
                         r for r in (fetch_inhouse(datetime.now(TZ).date()) or [])

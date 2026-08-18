@@ -85,6 +85,13 @@ SCHEDULE_PAGE_HTML = """<!doctype html>
   .row .ov{background:var(--gold);color:#fff;font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;margin-inline-start:6px}
   .big{font-family:var(--num);font-weight:800;font-size:30px;color:var(--ink);direction:ltr}
   .center{min-height:55vh;display:grid;place-items:center;color:var(--muted);text-align:center;padding:24px}
+  .lvstrip{display:flex;flex-wrap:wrap;gap:7px;align-items:center;background:var(--maroon-soft);
+    border:1px solid var(--border);border-radius:var(--r-sm);padding:9px 12px;margin-bottom:12px}
+  .lvstrip .lb{font-weight:700;font-size:12.5px;color:var(--maroon)}
+  .lvstrip .pill{background:var(--panel);border:1px solid var(--border);border-radius:999px;
+    padding:3px 10px;font-size:12.5px;font-weight:700;color:var(--body)}
+  .lvstrip .pill .dt{color:var(--muted);font-weight:400;font-size:11px;margin-inline-start:4px;
+    font-family:var(--num);direction:ltr;unicode-bidi:isolate;display:inline-block}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   @media (min-width:620px){body{max-width:680px;margin:0 auto}}
 </style>
@@ -133,14 +140,28 @@ async function loadDay(wd){
 async function loadWeek(){
   var j = await apiGet('/api/schedule/week');
   if (j.__auth===false){ noauth(); return; }
-  if (j.ok){ WEEK = j.week; if (view==='week'){ renderWeek(); } }
+  if (j.ok){ WEEK = j.week; if (view==='week'){ renderWeek(); } else if (view==='today' && DAY){ renderToday(); } }
 }
 
 function noauth(){ document.getElementById('root').innerHTML='<div class="center">افتح الصفحة من الرابط الموثوق (مع الرمز).</div>'; }
 
+function leaveStrip(){
+  // NAMES AND DATES ONLY. This page needs no login and gets forwarded around, so the leave
+  // TYPE and the note never come down from the server at all — see _public_leave_strip.
+  var rows = (WEEK && WEEK.leave) || [];
+  if (!rows.length){ return ''; }
+  var h = '<div class="lvstrip"><span class="lb">إجازات هذي الأيام</span>';
+  rows.forEach(function(r){
+    h += '<span class="pill">' + (r.emoji ? (esc(r.emoji) + ' ') : '') + esc(r.name)
+      + '<span class="dt">' + esc(r.start.slice(5)) + (r.end !== r.start ? (' - ' + esc(r.end.slice(5))) : '') + '</span></span>';
+  });
+  return h + '</div>';
+}
+
 function renderToday(){
   if (!DAY){ return; }
-  var h = '<div class="days">';
+  var h = leaveStrip();
+  h += '<div class="days">';
   for (var i=0;i<7;i++){ h += '<button class="day" data-wd="'+i+'" aria-selected="'+(i===sel)+'">'+DAYS[i]+'</button>'; }
   h += '</div><div class="grid">';
   DAY.working.slice().sort(function(a,b){return a.sort_order-b.sort_order;}).forEach(function(w){

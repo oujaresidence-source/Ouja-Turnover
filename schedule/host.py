@@ -16,6 +16,9 @@ class _Host:
     listings = None          # () -> [{id, name, active, oujact}]  Hostaway listings for the picker
     tz = None
     now = None               # () -> tz-aware datetime in Riyadh
+    on_change = None         # (dates=None) -> None  fired after ANY coverage-changing write,
+                             # so downstream caches (ops attribution) cannot serve a stale
+                             # answer — a no-show recorded at 10am must land immediately.
 
     _wired = False
 

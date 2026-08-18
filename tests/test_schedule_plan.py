@@ -279,22 +279,22 @@ class PlanRouteTest(unittest.TestCase):
                                                              "to": "2027-02-01"})))
         self.assertEqual(far.data["absences"], [])
 
-    # ---- the types the owner disabled until capacity exists ----
-    def test_half_day_types_are_not_offered(self):
-        """نصف يوم / تأخير / تدريب currently delete the person for the WHOLE day, which would
-        silently dump their apartments on everyone else. Owner's call (2026-08-18): hide them
-        from the planner until step 4 gives them a real capacity model."""
-        self.assertEqual(routes.PLANNER_ABSENCE_TYPES,
-                         ("vacation", "sick", "emergency", "no_show", "unpaid"))
-        for bad in ("half_day", "late", "training"):
-            self.assertIn(bad, routes.ABSENCE_TYPES, "still valid for the legacy endpoint")
+    # ---- the types the planner offers ----
+    def test_disabled_types_stay_out_of_the_planner(self):
+        """SUPERSEDED IN PART on 2026-08-18: «نصف يوم» came back once the owner replaced the
+        capacity idea with a morning/evening flag (see tests/test_schedule_leave_types.py), and
+        «no_show» left because you record one on the day, not in advance. What still holds:
+        تأخير and تدريب are never offered, and both remain valid on the legacy endpoint."""
+        for bad in ("late", "training", "no_show"):
             self.assertNotIn(bad, routes.PLANNER_ABSENCE_TYPES)
+        for legacy in ("half_day", "late", "training", "no_show"):
+            self.assertIn(legacy, routes.ABSENCE_TYPES, "still valid for the legacy endpoint")
 
     def test_planner_refuses_a_disabled_type(self):
         E = self._ids()
         res = self._run(routes.api_plan_save(self._req({
             "employees": [{"employee_id": E["ناصر"], "start": "2026-08-20",
-                           "end": "2026-08-20", "type": "half_day"}]})))
+                           "end": "2026-08-20", "type": "late"}]})))
         self.assertFalse(res.data["ok"])
         self.assertEqual(sdb.q("SELECT id FROM schedule_absences"), [])
 

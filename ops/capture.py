@@ -66,6 +66,21 @@ def _window():
 
 # ------------------------------------------------------------------ attribution
 
+def invalidate(dates=None):
+    """Drop cached attribution. Called from schedule.HOST.on_change after ANY coverage write,
+    because this cache is what decides who gets warned — serving it stale means warning
+    somebody who was recorded absent an hour ago. `dates` is advisory; clearing all is cheap
+    and always correct."""
+    if not dates:
+        _attrib_cache.clear()
+        return
+    for d in dates:
+        _attrib_cache.pop(str(d)[:10], None)
+    # a range was passed (start, end) rather than every day in it — be safe
+    if len(dates) == 2 and str(dates[0])[:10] != str(dates[1])[:10]:
+        _attrib_cache.clear()
+
+
 def attribution_for(day):
     """{listing_id -> {name, did, kind}} for ONE date, from the coverage calendar.
 

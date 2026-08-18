@@ -23,14 +23,57 @@ ABSENCE_TYPES = ("sick", "vacation", "emergency", "half_day", "late", "training"
 # flows straight into the OujaCT Discord channel emojis. Owner's ruling (2026-08-18): do not
 # offer a tool that is known to miscalculate. They come back in step 4 with a real capacity
 # model. The legacy /api/schedule/absence endpoint still accepts all eight.
-PLANNER_ABSENCE_TYPES = ("vacation", "sick", "emergency", "no_show", "unpaid")
+PLANNER_ABSENCE_TYPES = ("vacation", "sick", "emergency", "unpaid", "half_day")
+# Approval is per TYPE (owner, 2026-08-18): nobody requests being ill in advance. Sick and
+# emergency (and a same-day no-show) take effect the moment ops records them — the owner is
+# told and can reverse it. Annual and unpaid wait for the owner.
+NEEDS_OWNER_TYPES = ("vacation", "unpaid")
+DECIDE_ROLES = ("admin",)
+HALF_DAY_SHIFTS = ("morning", "evening")
 ABSENCE_LABEL_AR = {"vacation": "إجازة سنوية", "sick": "مرضية", "emergency": "طارئة",
                     "no_show": "غياب بدون إذن", "unpaid": "بدون راتب", "half_day": "نصف يوم",
                     "late": "تأخير", "training": "تدريب"}
+SHIFT_LABEL_AR = {"morning": "صباحي (ما يلحق التنظيف)", "evening": "مسائي (يلحق التنظيف)"}
+SHIFT_LABEL_EN = {"morning": "Morning (misses the cleaning)",
+                  "evening": "Evening (covers the cleaning)"}
 ABSENCE_LABEL_EN = {"vacation": "Annual leave", "sick": "Sick", "emergency": "Emergency",
                     "no_show": "No-show", "unpaid": "Unpaid", "half_day": "Half day",
                     "late": "Late", "training": "Training"}
 _DAY_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"]
+
+
+def can_decide_leave(request):
+    """Only the owner approves or reverses a leave."""
+    try:
+        return (HOST.req_role(request) if HOST.req_role else "viewer") in DECIDE_ROLES
+    except Exception:
+        return False
+
+
+def _fire_change(dates=None):
+    """Announce a coverage change so downstream caches drop it. Without this the ops
+    attribution cache would keep blaming somebody who was recorded absent an hour ago."""
+    fn = getattr(HOST, "on_change", None)
+    if not fn:
+        return
+    try:
+        fn(dates)
+    except Exception:
+        traceback.print_exc()
+
+
+def _affects_coverage(typ, shift):
+    """A half-day only takes somebody off the board when it is the MORNING one — every
+    cleaning starts after the 12:00 checkout, so an evening half-day misses nothing."""
+    if typ == "half_day":
+        return 1 if shift == "morning" else 0
+    return 1
+
+
+def _status_for(typ, request):
+    if can_decide_leave(request):
+        return "approved"                     # the owner never waits for themselves
+    return "pending" if typ in NEEDS_OWNER_TYPES else "approved"
 
 
 def can_edit_schedule(request):
@@ -155,7 +198,31 @@ def schedule_week():
                      "has_coverage": r["has_coverage"], "cells": cells})
     cols = [{"id": e["id"], "name": e["name"], "color": e.get("color"),
              "emoji": e.get("emoji"), "sort_order": e.get("sort_order", 0)} for e in emps]
-    return {"columns": cols, "rows": rows, "today": engine.to_weekday(_today_iso())}
+    return {"columns": cols, "rows": rows, "today": engine.to_weekday(_today_iso()),
+            "leave": _public_leave_strip(today)}
+
+
+def _public_leave_strip(today, days=7):
+    """«إجازات هذا الأسبوع» for the PUBLIC /team-calendar link.
+
+    That URL needs no login and gets forwarded, so this carries NAME AND DATES ONLY. The type
+    would announce «مرضية» about a real person and the note is where the actual reason is
+    written — neither belongs on a link anyone can open. Today forward only; a pending request
+    is not news yet, and an evening half-day is not an absence at all."""
+    end = (today + datetime.timedelta(days=days - 1)).isoformat()
+    start = today.isoformat()
+    emps = {e["id"]: e for e in db.employees()}
+    out = []
+    for r in db.q("SELECT employee_id, start_date, end_date FROM schedule_absences "
+                  "WHERE status='approved' AND COALESCE(affects_coverage,1)=1 "
+                  "AND end_date>=? AND start_date<=? ORDER BY start_date", (start, end)):
+        e = emps.get(r["employee_id"])
+        if not e:
+            continue
+        out.append({"employee_id": e["id"], "name": e["name"], "color": e.get("color"),
+                    "emoji": e.get("emoji"),
+                    "start": max(r["start_date"], start), "end": r["end_date"]})
+    return out
 
 
 # ---------------- reads ----------------
@@ -505,10 +572,47 @@ async def api_absence_add(request):
     if db.q1("SELECT id FROM schedule_absences WHERE employee_id=? AND status='approved' "
              "AND start_date<=? AND end_date>=?", (emp, end, start)):
         return HOST.json_response({"ok": False, "error": "الموظف مسجّل إجازة في هذه الفترة"}, 200)
-    aid = db.execute("INSERT INTO schedule_absences(employee_id,start_date,end_date,type,status,note,created_by,created_at) "
-                     "VALUES(?,?,?,?,?,?,?,?)",
-                     (emp, start, end, typ, "approved", b.get("note"), "editor", db.now_iso()))
-    return HOST.json_response({"ok": True, "id": aid})
+    shift = b.get("shift") if typ == "half_day" else None
+    if typ == "half_day" and shift not in HALF_DAY_SHIFTS:
+        return HOST.json_response({"ok": False, "error": "حدّد نصف اليوم: صباحي أو مسائي"}, 200)
+    affects = _affects_coverage(typ, shift)
+    status = _status_for(typ, request)
+    actor = _actor(request) or "editor"
+    aid = db.execute("INSERT INTO schedule_absences(employee_id,start_date,end_date,type,status,"
+                     "note,created_by,created_at,shift,affects_coverage) "
+                     "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                     (emp, start, end, typ, status, b.get("note"), actor, db.now_iso(),
+                      shift, affects))
+    # A no-show recorded at 10am has to land NOW: the board is computed fresh on every read,
+    # but downstream caches (ops attribution) must be told to drop the day.
+    _fire_change([start, end])
+    return HOST.json_response({"ok": True, "id": aid, "status": status,
+                               "affects_coverage": bool(affects)})
+
+
+async def api_absence_decide(request):
+    """POST /api/schedule/absence-decide — the owner approves a pending request, or reverses
+    a sick/emergency leave that ops applied immediately. Owner only."""
+    if not can_decide_leave(request):
+        return HOST.json_response(
+            {"ok": False, "error": "الموافقة على الإجازات للمالك فقط"}, 403)
+    b = await _body(request)
+    try:
+        aid = int(b.get("id"))
+    except (TypeError, ValueError):
+        return HOST.json_response({"ok": False, "error": "id required"}, 200)
+    decision = b.get("decision")
+    if decision not in ("approved", "rejected"):
+        return HOST.json_response({"ok": False, "error": "القرار لازم يكون موافقة أو رفض"}, 200)
+    row = db.q1("SELECT * FROM schedule_absences WHERE id=?", (aid,))
+    if not row:
+        return HOST.json_response({"ok": False, "error": "الإجازة غير موجودة"}, 200)
+    db.execute("UPDATE schedule_absences SET status=?, decided_by=?, decided_at=?, "
+               "decision_reason=? WHERE id=?",
+               (decision, _actor(request) or "admin", db.now_iso(),
+                (b.get("reason") or "")[:300], aid))
+    _fire_change([row["start_date"], row["end_date"]])
+    return HOST.json_response({"ok": True, "id": aid, "status": decision})
 
 
 async def api_absence_del(request):
@@ -518,7 +622,10 @@ async def api_absence_del(request):
         aid = int(request.match_info.get("id"))
     except Exception:
         return HOST.json_response({"ok": False, "error": "bad id"}, 200)
+    row = db.q1("SELECT start_date, end_date FROM schedule_absences WHERE id=?", (aid,))
     db.execute("DELETE FROM schedule_absences WHERE id=?", (aid,))
+    if row:
+        _fire_change([row["start_date"], row["end_date"]])
     return HOST.json_response({"ok": True, "deleted": 1})
 
 
@@ -804,6 +911,14 @@ async def api_plan_save(request):
         if typ not in PLANNER_ABSENCE_TYPES:
             return HOST.json_response(
                 {"ok": False, "error": "نوع الإجازة غير متاح في المخطط حالياً"}, 200)
+        shift = raw.get("shift")
+        if typ == "half_day":
+            if shift not in HALF_DAY_SHIFTS:
+                return HOST.json_response(
+                    {"ok": False,
+                     "error": "حدّد نصف اليوم: صباحي أو مسائي — الفرق إنه يلحق التنظيف أو لا"}, 200)
+        else:
+            shift = None
         if (eid, start, end) in seen:
             continue
         seen.add((eid, start, end))
@@ -813,7 +928,10 @@ async def api_plan_save(request):
                 {"ok": False, "code": "overlap",
                  "error": "%s مسجّل إجازة في هذه الفترة أصلاً" % emp["name"]}, 200)
         emps.append({"employee_id": eid, "name": emp["name"], "start": start, "end": end,
-                     "type": typ, "note": (raw.get("note") or "")[:300]})
+                     "type": typ, "shift": shift,
+                     "affects": _affects_coverage(typ, shift),
+                     "status": _status_for(typ, request),
+                     "note": (raw.get("note") or "")[:300]})
     if not emps:
         return HOST.json_response({"ok": False, "error": "أضف موظفاً واحداً على الأقل"}, 200)
 
@@ -836,8 +954,11 @@ async def api_plan_save(request):
         return HOST.json_response(
             {"ok": False, "error": "الخطة أطول من %d يوم" % _PERIOD_MAX_DAYS}, 200)
 
+    # A pending request and an evening half-day change nothing, so they must not be
+    # simulated into the save-time risk check either.
     sims = [{"employee_id": e["employee_id"], "name": e["name"],
-             "start": e["start"], "end": e["end"]} for e in emps]
+             "start": e["start"], "end": e["end"]} for e in emps
+            if e["affects"] and e["status"] == "approved"]
     per = build_period(win_start, win_end, sims=sims, caps=_plan_caps(),
                        extra_date_overrides=edo)
     blocking = [r for d in per["days"] for r in d["risks"] if r["severity"] == "block"]
@@ -866,9 +987,10 @@ async def api_plan_save(request):
         for e in emps:
             cx.execute(
                 "INSERT INTO schedule_absences(employee_id,start_date,end_date,type,status,"
-                "note,created_by,created_at,plan_id) VALUES(?,?,?,?,?,?,?,?,?)",
-                (e["employee_id"], e["start"], e["end"], e["type"], "approved",
-                 e["note"], actor, now, pid))
+                "note,created_by,created_at,plan_id,shift,affects_coverage) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (e["employee_id"], e["start"], e["end"], e["type"], e["status"],
+                 e["note"], actor, now, pid, e["shift"], e["affects"]))
         for pn in pins:
             cx.execute(
                 "INSERT INTO schedule_date_overrides(date,apartment_id,covering_employee_id,"
@@ -877,9 +999,33 @@ async def api_plan_save(request):
                 "covering_employee_id=excluded.covering_employee_id, plan_id=excluded.plan_id",
                 (pn["date"], pn["apartment_id"], pn["covering_employee_id"], pid, None,
                  actor, now))
+    _fire_change([win_start, win_end])
+    pending = [e for e in emps if e["status"] == "pending"]
+    immediate = [e for e in emps if e["status"] == "approved" and e["affects"]
+                 and not can_decide_leave(request)]
+    if immediate:
+        _notify_owner_immediate(immediate, actor)
     return HOST.json_response({"ok": True, "plan_id": pid, "start": win_start, "end": win_end,
                                "employees": len(emps), "overrides": len(pins),
+                               "pending": len(pending),
                                "warnings_accepted": bool(warnings)})
+
+
+def _notify_owner_immediate(entries, actor):
+    """Sick/emergency applied without waiting — the owner has to hear about it, and can
+    reverse it. Delivery is HOST.notify, DRY-RUN by default like every other schedule post."""
+    try:
+        lines = ["تسجيل غياب فوري بواسطة %s" % (actor or "-")]
+        for e in entries:
+            lines.append("• %s: %s %s الى %s"
+                         % (e["name"], ABSENCE_LABEL_AR.get(e["type"], e["type"]),
+                            e["start"], e["end"]))
+        lines.append("سرت على التوزيع فوراً — تقدر تلغيها من «الإجازات».")
+        fn = getattr(HOST, "notify", None)
+        if fn:
+            fn({"channel": "\n".join(lines), "date": entries[0]["start"]})
+    except Exception:
+        traceback.print_exc()
 
 
 async def api_plan_delete(request):
@@ -898,6 +1044,7 @@ async def api_plan_delete(request):
         cx.execute("DELETE FROM schedule_date_overrides WHERE plan_id=?", (pid,))
         cx.execute("DELETE FROM schedule_absences WHERE plan_id=?", (pid,))
         cx.execute("DELETE FROM schedule_plans WHERE id=?", (pid,))
+    _fire_change()
     return HOST.json_response({"ok": True, "removed": {"absences": n_ab, "overrides": n_ov}})
 
 
@@ -917,7 +1064,8 @@ async def api_absences(request):
     rows = db.q(
         "SELECT a.*, e.name employee_name, e.color, e.emoji FROM schedule_absences a "
         "LEFT JOIN schedule_employees e ON a.employee_id=e.id "
-        "WHERE a.end_date>=? AND a.start_date<=? ORDER BY a.start_date", (frm, to))
+        "WHERE a.end_date>=? AND a.start_date<=? AND COALESCE(a.status,'approved')<>'rejected' "
+        "ORDER BY a.start_date", (frm, to))
     out = []
     for r in rows:
         try:
@@ -928,12 +1076,21 @@ async def api_absences(request):
         pid = r.get("plan_id")
         n_ov = (len(db.q("SELECT id FROM schedule_date_overrides WHERE plan_id=?", (pid,)))
                 if pid else 0)
+        typ = r.get("type")
+        label_ar = ABSENCE_LABEL_AR.get(typ, typ)
+        label_en = ABSENCE_LABEL_EN.get(typ, typ)
+        if typ == "half_day" and r.get("shift"):
+            label_ar += " — " + SHIFT_LABEL_AR.get(r["shift"], r["shift"])
+            label_en += " - " + SHIFT_LABEL_EN.get(r["shift"], r["shift"])
         out.append({"id": r["id"], "employee_id": r["employee_id"],
                     "employee_name": r.get("employee_name"), "color": r.get("color"),
                     "emoji": r.get("emoji"), "start_date": r["start_date"],
-                    "end_date": r["end_date"], "days": days, "type": r.get("type"),
-                    "type_ar": ABSENCE_LABEL_AR.get(r.get("type"), r.get("type")),
-                    "type_en": ABSENCE_LABEL_EN.get(r.get("type"), r.get("type")),
+                    "end_date": r["end_date"], "days": days, "type": typ,
+                    "type_ar": label_ar, "type_en": label_en,
+                    "shift": r.get("shift"),
+                    "affects_coverage": bool(r.get("affects_coverage", 1)),
+                    "needs_decision": (r.get("status") == "pending"),
+                    "decided_by": r.get("decided_by"),
                     "status": r.get("status"), "note": r.get("note"),
                     "created_by": r.get("created_by"), "plan_id": pid,
                     "override_count": n_ov, "past": r["end_date"] < today})
@@ -1160,6 +1317,7 @@ def register(app):
     app.router.add_delete("/api/schedule/apartment/{id}", _safe(api_apartment_delete))
     p("/api/schedule/override", _safe(api_override_set))
     p("/api/schedule/absence", _safe(api_absence_add))
+    p("/api/schedule/absence-decide", _safe(api_absence_decide))
     app.router.add_delete("/api/schedule/absence/{id}", _safe(api_absence_del))
     p("/api/schedule/settings", _safe(api_settings_set))
     p("/api/schedule/reset", _safe(api_reset))

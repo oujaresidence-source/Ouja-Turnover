@@ -56,15 +56,23 @@ CREATE TABLE IF NOT EXISTS schedule_settings (
     caps_computed_at   TEXT
 );
 CREATE TABLE IF NOT EXISTS schedule_absences (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    employee_id INTEGER NOT NULL,
-    start_date  TEXT NOT NULL,
-    end_date    TEXT NOT NULL,
-    type        TEXT,
-    status      TEXT DEFAULT 'approved',
-    note        TEXT,
-    created_by  TEXT,
-    created_at  TEXT
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id      INTEGER NOT NULL,
+    start_date       TEXT NOT NULL,
+    end_date         TEXT NOT NULL,
+    type             TEXT,
+    status           TEXT DEFAULT 'approved',   -- approved | pending | rejected
+    note             TEXT,
+    created_by       TEXT,
+    created_at       TEXT,
+    -- «نصف يوم» is NOT a fraction. Cleaning starts at midday (checkout 12:00, check-in
+    -- 15:00), so a MORNING half-day misses all of it and an EVENING one catches all of it.
+    -- Two flags, integer engine, no capacity maths anywhere.
+    shift            TEXT,                      -- morning | evening (half_day only)
+    affects_coverage INTEGER DEFAULT 1,         -- 0 = recorded but the board must not move
+    decided_by       TEXT,
+    decided_at       TEXT,
+    decision_reason  TEXT
 );
 CREATE TABLE IF NOT EXISTS schedule_date_overrides (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +140,13 @@ def _migrate(cx):
     bcols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_absences)").fetchall()}
     if "plan_id" not in bcols:
         cx.execute("ALTER TABLE schedule_absences ADD COLUMN plan_id INTEGER")
+    for col, decl in (("shift", "TEXT"), ("affects_coverage", "INTEGER DEFAULT 1"),
+                      ("decided_by", "TEXT"), ("decided_at", "TEXT"),
+                      ("decision_reason", "TEXT")):
+        if col not in bcols:
+            cx.execute("ALTER TABLE schedule_absences ADD COLUMN %s %s" % (col, decl))
+    # existing rows predate the flag and were all coverage-affecting
+    cx.execute("UPDATE schedule_absences SET affects_coverage=1 WHERE affects_coverage IS NULL")
     scols = {r["name"] for r in cx.execute("PRAGMA table_info(schedule_settings)").fetchall()}
     for col, decl in (("max_units_per_day", "INTEGER"), ("max_minutes_per_day", "INTEGER"),
                       ("caps_source", "TEXT"), ("caps_computed_at", "TEXT")):
@@ -219,6 +234,16 @@ def date_overrides_on(date_iso):
 
 
 def absences_on(date_iso):
+    """Only APPROVED absences that actually take somebody off the board. A pending request and
+    an evening half-day are both real records that must NOT move coverage."""
+    return q("SELECT * FROM schedule_absences WHERE status='approved' "
+             "AND COALESCE(affects_coverage,1)=1 "
+             "AND start_date<=? AND end_date>=?", (date_iso, date_iso))
+
+
+def absences_recorded_on(date_iso):
+    """Every approved absence on a date INCLUDING the ones that do not change coverage —
+    for showing «نصف يوم مسائي» on a card without touching the board."""
     return q("SELECT * FROM schedule_absences WHERE status='approved' "
              "AND start_date<=? AND end_date>=?", (date_iso, date_iso))
 
