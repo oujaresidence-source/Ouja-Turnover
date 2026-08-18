@@ -19516,6 +19516,86 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ MUSAED TRAINING · تدريب مساعد ============ -->
+      <style>
+        /* Only Musaed's lines get the accent; everything else stays quiet so the eye
+           lands on exactly what you are training. */
+        .tr-ctl{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end}
+        .tr-ctl label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:var(--text-2)}
+        .tr-ctl label.tr-chk{flex-direction:row;align-items:center;gap:7px;padding-bottom:9px;cursor:pointer}
+        .tr-ctl select,.tr-ctl input[type=text]{height:34px}
+        .tr-peek{padding:2px 4px 4px;color:var(--mut);font-size:12.5px;line-height:1.6}
+        .tr-thread{display:flex;flex-direction:column;gap:9px;padding:6px 2px 2px;max-height:620px;overflow-y:auto}
+        .tr-msg{border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 11px;background:var(--surface)}
+        .tr-msg.in{background:var(--surface-2)}
+        .tr-msg.musaed{border-color:var(--accent);background:var(--gold-tint);border-inline-start:3px solid var(--accent)}
+        .tr-msg.unk{border-style:dashed}
+        .tr-meta{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+        .tr-ts{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+        .tr-body{white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.75}
+        .tr-draft{margin-top:7px;border-top:1px dashed var(--line);padding-top:7px}
+        .tr-draft summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--accent)}
+        .tr-head{cursor:pointer}
+      </style>
+      <section class="view" id="view_train">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_train_title">تدريب مساعد</div>
+            <div class="page-sub" id="t_train_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" id="trainDlTxt" onclick="trainDownloadText()"></button>
+            <button class="btn ghost sm" id="trainDlJsonl" onclick="trainDownloadJsonl()"></button>
+            <button class="btn primary sm" id="trainRunBtn" onclick="loadTrain(1)"></button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_train" data-help-key="train">
+          <button class="ph-x" onclick="dismissHelp('train')" title="إخفاء">×</button>
+          <div class="ph-t">وش تسوي هذي الصفحة</div>
+          <div class="ph-b">
+            تسحب المحادثات كاملة بينك وبين الضيوف، وتحدّد لك <b>كل رسالة كتبها مساعد</b> —
+            ومعها الرسالة اللي قبلها من الضيف ورد الضيف بعدها. النظام يقول لك بالضبط
+            <b>هل الرسالة انرسلت تلقائي، أو الفريق اعتمدها زي ما هي، أو الفريق عدّلها</b>
+            (وتقدر تشوف المسوّدة قبل التعديل). أي رسالة ما عندنا سجل عنها تطلع
+            <b>«مو متأكد مين كتبها»</b> — ما نخمّن أبداً، لأن التخمين يفسد التدريب.
+            بعدها نزّل الملف: نص للقراءة، أو ملف تدريب JSONL.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_train_filters">الفلاتر</span>
+            <div class="card-actions"><span class="tr-ts" id="trainMeta"></span></div>
+          </div>
+          <div class="tr-ctl">
+            <label><span id="t_train_days">المدة</span>
+              <select id="trainDays">
+                <option value="7">7</option>
+                <option value="14">14</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+                <option value="90">90</option>
+              </select>
+            </label>
+            <label><span id="t_train_limit">عدد المحادثات</span>
+              <select id="trainLimit">
+                <option value="15">15</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+                <option value="120">120</option>
+              </select>
+            </label>
+            <label><span id="t_train_q">بحث</span><input type="text" id="trainQ" placeholder="شقة أو ضيف"></label>
+            <label class="tr-chk"><input type="checkbox" id="trainOnly" checked><span id="t_train_only">فقط المحادثات اللي رد فيها مساعد</span></label>
+            <label class="tr-chk"><input type="checkbox" id="trainNames"><span id="t_train_names">أظهر أسماء الضيوف بالملف المنزّل</span></label>
+          </div>
+        </div>
+
+        <div class="kpis" id="trainStats"></div>
+        <div id="trainBody"></div>
+      </section>
+
       <!-- ============ FINANCE / ACCOUNTING (المالية) ============ -->
 
       <!-- ============ QUOTATIONS (عرض سعر) ============ -->
@@ -22025,6 +22105,7 @@ function applyLang(){
   // If we have data on screen, re-render so dynamic strings flip too
   if(D.tickets) _renderTicketsBody(), _renderTicketStats();
   if(D.reviews) _renderReviewsBody(), _renderReviewsStats(), _renderTimeFilterStrip();
+  try{ if(typeof renderTrainAll === 'function') renderTrainAll(); }catch(_){}   // «تدريب مساعد»: labels + rendered messages flip with the language
 }
 
 function _i18nPaintTickets(){
@@ -22377,6 +22458,7 @@ function refreshView(id){
     case 'guests':   return loadGuests();
     case 'users':    return loadUsers();
     case 'learn':    return loadLearnings();
+    case 'train':    return renderTrainAll();
     case 'today':    return loadTodayEmpty();
     case 'log':      return renderLog();
     case 'listings': return loadListings();
@@ -22420,6 +22502,7 @@ function go(id){
   if(id==='log') renderLog();
   if(id==='inbox') { renderInbox(); populateUnitFilter() }
   if(id==='learn') loadLearnings();
+  if(id==='train') renderTrainAll();
   if(id==='calendar') loadForwardCalendar();
   if(id==='clean') loadCleaning();
   if(id==='clean_center') loadCleaningCenter();
@@ -31313,6 +31396,272 @@ async function ctOpenLog(){
   }).join('')+'</div>');
 }
 
+/* ============================================================
+   «تدريب مساعد» — Musaed Training. READ-ONLY.
+   Hostaway never records WHO wrote an outbound message, so the server rebuilds
+   authorship from our own send records and hands every message a code plus how sure
+   it is. This view NEVER promotes an unknown message to «مساعد» — an unproven line
+   stays «مو متأكد», because in training data a wrong label is worse than a missing one.
+   NO BACKSLASHES ANYWHERE IN HERE (CLAUDE.md trap 1): DASHBOARD_HTML is a normal
+   Python string, so any backslash escape is eaten by Python and kills the whole
+   script — which kills the login. Newline = String.fromCharCode(10).
+   ============================================================ */
+var TRAIN = {data:null, busy:false, open:{}};
+var TRAIN_NL = String.fromCharCode(10);
+
+function trainSaveBlob(text, name, mime){
+  var blob = new Blob([text], {type: mime + ';charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+}
+function trainLabelOf(code){
+  var rows = ((TRAIN.data||{}).labels)||{};
+  var row = rows[code];
+  if(!row) return code || '';
+  return (L==='ar') ? row[0] : row[1];
+}
+function trainPill(code){
+  if(code==='guest') return 'muted';
+  if(code==='musaed_auto') return 'ok';
+  if(code==='musaed_approved') return 'info';
+  if(code==='musaed_edited') return 'gold';
+  if(code==='system') return 'purple';
+  return 'warn';
+}
+function trainIsMusaed(code){ return String(code||'').indexOf('musaed')===0 }
+
+async function loadTrain(force){
+  if(TRAIN.busy) return;
+  var gv = function(id, dflt){ var el=document.getElementById(id); return el?el.value:dflt };
+  var gc = function(id){ var el=document.getElementById(id); return (el && el.checked)?1:0 };
+  var days = gv('trainDays','30'), lim = gv('trainLimit','30');
+  var only = gc('trainOnly'), q = String(gv('trainQ','')||'').trim();
+  TRAIN.busy = true; TRAIN.open = {};
+  var btn = document.getElementById('trainRunBtn');
+  if(btn) btn.disabled = true;
+  renderTrainBody();
+  try{
+    var url = '/api/train/threads?days='+encodeURIComponent(days)
+            + '&limit='+encodeURIComponent(lim)
+            + '&only_musaed='+only
+            + '&q='+encodeURIComponent(q)
+            + (force?'&force=1':'');
+    var r = await api(url);
+    if(r && r.error){ TRAIN.data = {__error:true, __detail:(r.detail||r.error)}; }
+    else {
+      TRAIN.data = r || {};
+      if(((TRAIN.data.threads)||[]).length) TRAIN.open[0] = true;
+    }
+  }catch(e){
+    TRAIN.data = {__error:true, __detail:String(e)};
+  }
+  TRAIN.busy = false;
+  if(btn) btn.disabled = false;
+  renderTrainAll();
+}
+
+function renderTrainAll(){
+  var put = function(id, txt){ var el=document.getElementById(id); if(el) el.textContent = txt };
+  put('t_train_title', labelText('تدريب مساعد','Musaed Training'));
+  put('t_train_sub', labelText('المحادثات كاملة مع تمييز كل رسالة كتبها مساعد',
+                               'Full conversations with every Musaed message marked'));
+  put('t_train_filters', labelText('الفلاتر','Filters'));
+  put('t_train_days', labelText('كم يوم للخلف','Days back'));
+  put('t_train_limit', labelText('عدد المحادثات','Conversations'));
+  put('t_train_q', labelText('بحث','Search'));
+  put('t_train_only', labelText('فقط المحادثات اللي رد فيها مساعد','Only threads Musaed replied in'));
+  put('t_train_names', labelText('أظهر أسماء الضيوف بالملف المنزّل','Keep guest names in the download'));
+  put('trainRunBtn', labelText('استخرج المحادثات','Extract conversations'));
+  put('trainDlTxt', labelText('نزّل نص','Download text'));
+  put('trainDlJsonl', labelText('نزّل ملف تدريب','Download training file'));
+  var qi = document.getElementById('trainQ');
+  if(qi) qi.placeholder = labelText('شقة أو ضيف','Apartment or guest');
+  var d = TRAIN.data || {};
+  var has = !!(d.threads && d.threads.length);
+  var dt = document.getElementById('trainDlTxt'), dj = document.getElementById('trainDlJsonl');
+  if(dt) dt.disabled = !has;
+  if(dj) dj.disabled = !has;
+  var meta = document.getElementById('trainMeta');
+  if(meta){
+    if(d.generated_at){
+      meta.textContent = labelText('آخر استخراج ','Last pull ') + shortTime(d.generated_at)
+        + ' · ' + labelText('قرأ ','scanned ') + fmt(d.scanned||0) + labelText(' محادثة',' conversations')
+        + (d.cached ? labelText(' · محفوظة',' · cached') : '');
+    } else meta.textContent = '';
+  }
+  renderTrainStats();
+  renderTrainBody();
+}
+
+function renderTrainStats(){
+  var el = document.getElementById('trainStats');
+  if(!el) return;
+  var d = TRAIN.data;
+  if(!d || !d.totals){ el.innerHTML=''; return; }
+  var s = d.totals;
+  var cards = [
+    {ic:'✉', cls:'b', val:s.threads||0, lbl:labelText('محادثة','conversations')},
+    {ic:'⚡', cls:'g', val:s.musaed||0, lbl:labelText('رسالة كتبها مساعد','messages by Musaed')},
+    {ic:'◎', cls:'p', val:s.guest||0, lbl:labelText('رسالة من الضيوف','guest messages')},
+    {ic:'?', cls:((s.unknown||0)?'r':''), val:s.unknown||0, lbl:labelText('كاتبها غير معروف','author unknown')}
+  ];
+  el.innerHTML = cards.map(function(c){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+c.cls+'">'+esc(c.ic)+'</div></div>'
+      + '<div class="kpi-val">'+fmt(c.val)+'</div><div class="kpi-lbl">'+esc(c.lbl)+'</div></div>';
+  }).join('');
+}
+
+function trainPeek(t){
+  var ms = t.messages || [];
+  for(var i=0;i<ms.length;i++){ if(ms[i].dir==='in') return String(ms[i].body||'').slice(0,150) }
+  return String((ms[0]||{}).body||'').slice(0,150);
+}
+
+function renderTrainBody(){
+  var el = document.getElementById('trainBody');
+  if(!el) return;
+  if(TRAIN.busy){
+    el.innerHTML = '<div class="empty sk">'
+      + esc(labelText('يسحب المحادثات من Hostaway… ياخذ شوي وما ينفع تستعجله',
+                      'Pulling conversations from Hostaway… this takes a moment')) + '</div>';
+    return;
+  }
+  var d = TRAIN.data;
+  if(!d){
+    el.innerHTML = emptyState(labelText('ما استخرجنا شي بعد','Nothing extracted yet'),
+      labelText('اختر المدة فوق واضغط «استخرج المحادثات».','Pick a window above and press "Extract conversations".'), '?');
+    return;
+  }
+  if(d.__error){ el.innerHTML = errorState('loadTrain(1)', d.__detail||''); return; }
+  var th = d.threads || [];
+  if(!th.length){
+    el.innerHTML = emptyState(labelText('ما فيه محادثات بهذي الفلاتر','No conversations match these filters'),
+      labelText('وسّع المدة، أو شيل علامة «فقط المحادثات اللي رد فيها مساعد».',
+                'Widen the window, or untick "Only threads Musaed replied in".'), '?');
+    return;
+  }
+  el.innerHTML = th.map(function(t,i){ return trainThreadHtml(t,i) }).join('');
+}
+
+function trainThreadHtml(t, i){
+  var open = !!TRAIN.open[i];
+  var c = t.counts || {};
+  var h = '<div class="card" style="margin-bottom:12px">'
+    + '<div class="card-head tr-head" onclick="trainToggle('+i+')">'
+    + '<span class="card-title">'+esc(t.guest||'')
+    + ' <span style="opacity:.7;font-weight:600">· '+esc(t.unit||'')+'</span></span>'
+    + '<div class="card-actions">'
+    + '<span class="pill ok">'+esc(labelText('مساعد','Musaed'))+' '+fmt(c.musaed||0)+'</span>'
+    + '<span class="pill muted">'+esc(labelText('ضيف','Guest'))+' '+fmt(c.guest||0)+'</span>'
+    + ((c.unknown||0) ? ('<span class="pill warn">'+esc(labelText('غير معروف','unknown'))+' '+fmt(c.unknown)+'</span>') : '')
+    + '<button class="btn ghost xs" onclick="event.stopPropagation();trainCopy('+i+')">'+esc(labelText('نسخ','Copy'))+'</button>'
+    + '<span style="opacity:.55;font-size:11px">'+(open?'▾':'▸')+'</span>'
+    + '</div></div>';
+  if(open){
+    h += '<div class="tr-thread">' + (t.messages||[]).map(trainMsgHtml).join('') + '</div>';
+  }else{
+    h += '<div class="tr-peek">' + esc(trainPeek(t)) + '</div>';
+  }
+  return h + '</div>';
+}
+
+function trainMsgHtml(m){
+  var code = m.code || 'unknown';
+  var cls = 'tr-msg ' + (code==='guest' ? 'in' : 'out')
+          + (trainIsMusaed(code) ? ' musaed' : '')
+          + (code==='unknown' ? ' unk' : '');
+  var extra = '';
+  if(m.conf !== undefined && m.conf !== null) extra += ' · ' + labelText('ثقة ','confidence ') + fmt(m.conf) + '%';
+  if(m.approver) extra += ' · ' + m.approver;
+  var h = '<div class="'+cls+'">'
+    + '<div class="tr-meta"><span class="pill '+trainPill(code)+'">'+esc(trainLabelOf(code))+'</span>'
+    + '<span class="tr-ts">'+esc(shortTime(m.ts||'')+extra)+'</span></div>'
+    + '<div class="tr-body">'+esc(m.body||'')+'</div>';
+  if(m.draft && m.draft !== m.body){
+    h += '<details class="tr-draft"><summary>'
+      + esc(labelText('شوف مسوّدة مساعد قبل ما الفريق يعدّلها','Show Musaed draft before the team edited it'))
+      + '</summary><div class="tr-body">'+esc(m.draft)+'</div></details>';
+  }
+  return h + '</div>';
+}
+
+function trainToggle(i){
+  TRAIN.open[i] = !TRAIN.open[i];
+  renderTrainBody();
+}
+
+function trainKeepNames(){
+  var el = document.getElementById('trainNames');
+  return !!(el && el.checked);
+}
+
+function trainThreadLines(t){
+  var who = trainKeepNames() ? (t.guest||'') : labelText('ضيف','Guest');
+  var out = ['=== ' + (t.unit||'') + ' · ' + who + ' ==='];
+  (t.messages||[]).forEach(function(m){
+    out.push('[' + trainLabelOf(m.code||'unknown') + '] ' + String(m.body||''));
+    if(m.draft && m.draft !== m.body){
+      out.push('    (' + labelText('مسوّدة مساعد قبل التعديل','Musaed draft before the edit') + ') ' + String(m.draft));
+    }
+  });
+  out.push('');
+  return out;
+}
+
+function trainCopy(i){
+  var t = ((TRAIN.data||{}).threads||[])[i];
+  if(!t) return;
+  var txt = trainThreadLines(t).join(TRAIN_NL);
+  try{
+    navigator.clipboard.writeText(txt);
+    toast(labelText('نسخت المحادثة','Conversation copied'));
+  }catch(e){ toast(labelText('ما قدرت أنسخ','Could not copy')); }
+}
+
+function trainDownloadText(){
+  var d = TRAIN.data || {};
+  var th = d.threads || [];
+  if(!th.length) return;
+  var lines = ['# ' + labelText('تدريب مساعد · عوجا','Musaed training · Ouja'),
+               '# ' + labelText('استخرج: ','Generated: ') + (d.generated_at||''),
+               '# ' + labelText('المحادثات: ','Conversations: ') + th.length
+                    + ' · ' + labelText('رسائل مساعد: ','Musaed messages: ') + ((d.totals||{}).musaed||0),
+               ''];
+  th.forEach(function(t){ lines = lines.concat(trainThreadLines(t)) });
+  trainSaveBlob(lines.join(TRAIN_NL), 'ouja-musaed-training.txt', 'text/plain');
+  toast(labelText('نزّلت الملف','File downloaded'));
+}
+
+function trainDownloadJsonl(){
+  var d = TRAIN.data || {};
+  var th = d.threads || [];
+  if(!th.length) return;
+  var keep = trainKeepNames();
+  var rows = [];
+  th.forEach(function(t){
+    (t.messages||[]).forEach(function(m){
+      if(!trainIsMusaed(m.code)) return;
+      rows.push(JSON.stringify({
+        unit: t.unit || '',
+        guest: keep ? (t.guest||'') : '',
+        label: m.code || '',
+        guest_said: m.before || '',
+        musaed_replied: m.body || '',
+        guest_next: m.after || '',
+        musaed_draft: m.draft || '',
+        edited_by_team: (m.code === 'musaed_edited'),
+        at: m.ts || ''
+      }));
+    });
+  });
+  if(!rows.length){ toast(labelText('ما فيه رسائل مساعد بالنتيجة','No Musaed messages in this result')); return; }
+  trainSaveBlob(rows.join(TRAIN_NL) + TRAIN_NL, 'ouja-musaed-training.jsonl', 'application/json');
+  toast(labelText('نزّلت ملف التدريب · ','Training file downloaded · ') + rows.length);
+}
+
 async function loadLearnings(){
   const list = document.getElementById('learnAptList');
   if(list) list.innerHTML = '<div class="empty sk">—</div>';
@@ -33695,6 +34044,273 @@ async def _handle_diag_musaed(request):
         out.extend(t["lines"])
         out.append("")
     return web.Response(text="\n".join(out), content_type="text/plain", charset="utf-8")
+
+# ================= «تدريب مساعد» — Musaed training export (READ-ONLY) =================
+# WHY this is not a one-liner: Hostaway stores only inbound(guest) vs outbound(us) — it
+# does NOT record WHO wrote an outbound message. So authorship is RECONSTRUCTED from our
+# own records, and every message carries the confidence of that reconstruction:
+#   certain  — the message is in _learning_log / _auto_replies (we sent it, we know how)
+#   likely   — it ends with one of our rotating sign-offs, so it left through our system,
+#              but no record survives (the log is a bounded deque)
+#   unknown  — outbound with neither: somebody replied from the Airbnb/Hostaway app
+# An unknown message is NEVER labelled «مساعد». For training data a wrong label is worse
+# than a missing one. Read-only: no Hostaway writes, no state writes.
+
+_TRAIN_CACHE = {}                 # cache-key -> (ts, payload); Hostaway is slow
+_TRAIN_CACHE_TTL = 300            # 5 min — re-opening the tab must not re-pull
+_TRAIN_LOCK = threading.Lock()    # one pull at a time (a double-click must not double-pull)
+_TRAIN_PAUSE = float(os.environ.get("TRAIN_PAUSE_SEC", "0.15"))   # be kind to the rate limit
+
+# code -> (arabic, english, confidence)
+_TRAIN_LABELS = {
+    "guest":           ("الضيف", "Guest", "certain"),
+    "musaed_auto":     ("مساعد · رد تلقائي", "Musaed · sent automatically", "certain"),
+    "musaed_approved": ("مساعد · اعتمده الفريق كما هو", "Musaed · approved as-is", "certain"),
+    "musaed_edited":   ("مساعد · عدّله الفريق", "Musaed · edited by the team", "certain"),
+    "system":          ("انرسل من نظامنا · الكاتب ما انسجّل", "Sent by our system · author not logged", "likely"),
+    "unknown":         ("مو متأكد مين كتبها", "Author unknown", "unknown"),
+}
+
+
+def _train_norm(s):
+    """Whitespace-insensitive lowercase form, used ONLY to match a delivered body against
+    what our own log says we sent."""
+    return re.sub(r"\s+", " ", str(s or "")).strip().lower()
+
+
+def _train_signatures():
+    return [s for s in (list(SIGNATURES_AR) + list(SIGNATURES_EN)
+                        + [ASSISTANT_SIGNATURE_AR, ASSISTANT_SIGNATURE_EN]) if s]
+
+
+def _train_split_signature(body):
+    """(text_without_our_signature, signature). with_signature() appends exactly
+    '\\n\\n' + one of the rotating sign-offs, so splitting on the LAST blank line and
+    checking the tail against that list is exact — never a fuzzy guess."""
+    txt = str(body or "").rstrip()
+    if "\n\n" not in txt:
+        return txt, ""
+    head, _, tail = txt.rpartition("\n\n")
+    sigs = set(_train_norm(s) for s in _train_signatures())
+    if _train_norm(tail) in sigs:
+        return head.rstrip(), tail.strip()
+    return txt, ""
+
+
+def _train_author_index():
+    """Everything we can PROVE we sent, keyed for lookup. Both stores are bounded
+    in-memory structures, so this is cheap and always current."""
+    by_conv, by_text = {}, {}
+    for e in list(_learning_log):
+        key = _train_norm(e.get("final_reply"))
+        if not key:
+            continue
+        rec = {"via": e.get("via") or "", "was_edited": bool(e.get("was_edited")),
+               "diff": e.get("diff_ratio"), "draft": e.get("bot_draft") or "",
+               "approver": e.get("approver") or "", "ts": e.get("ts") or "",
+               "asked": e.get("guest_question") or "", "src": "learning"}
+        cid = str(e.get("conversation_id") or "")
+        if cid:
+            by_conv.setdefault((cid, key), rec)
+        by_text.setdefault(key, rec)
+    for a in list(_auto_replies):
+        key = _train_norm(a.get("reply"))
+        if key:
+            by_text.setdefault(key, {"via": "auto", "was_edited": False, "diff": 0,
+                                     "draft": "", "approver": "(auto)", "ts": a.get("ts") or "",
+                                     "asked": a.get("guest_text") or "", "conf": a.get("conf"),
+                                     "src": "auto_log"})
+    return {"by_conv": by_conv, "by_text": by_text}
+
+
+def _train_match(idx, cid, clean_body):
+    """Find our record of this outbound message. Exact first; only very long bodies fall
+    back to a prefix match, because the log truncates stored text at 1400 chars."""
+    key = _train_norm(clean_body)
+    if not key:
+        return None
+    rec = idx["by_conv"].get((str(cid), key)) or idx["by_text"].get(key)
+    if rec:
+        return rec
+    if len(key) > 1200:
+        for k, r in idx["by_text"].items():
+            if len(k) >= 800 and key.startswith(k):
+                return r
+    return None
+
+
+def _train_code_for(rec, signed):
+    if rec:
+        via = rec.get("via") or ""
+        if via in ("auto", "escalation_ack"):
+            return "musaed_auto"
+        return "musaed_edited" if rec.get("was_edited") else "musaed_approved"
+    return "system" if signed else "unknown"
+
+
+def _train_build(days, want, page, only_musaed, q):
+    """Walk recent conversations and label every message. Bounded on purpose: `want`
+    threads, at most 12 pages of conversations, and it stops the moment a whole page
+    predates the window — a 30-day pull must not walk five years of history."""
+    listings = get_listings_map()
+    idx = _train_author_index()
+    cutoff = (datetime.now(TZ).date() - timedelta(days=int(days))).isoformat()
+    threads, scanned, offset, walked = [], 0, page * 100, 0
+
+    for _ in range(12):
+        if len(threads) >= want:
+            break
+        try:
+            data = api_get("/conversations", params={"limit": 100, "offset": offset,
+                                                     "includeResources": 1})
+        except Exception as e:
+            if threads:
+                break
+            return {"error": "conversations: %s" % e}
+        batch = data.get("result", []) or []
+        if not batch:
+            break
+        walked += 1
+        fresh = 0
+        for c in batch:
+            if len(threads) >= want:
+                break
+            latest = str(c.get("latestMessageDate") or c.get("updatedOn")
+                         or c.get("insertedOn") or "")[:10]
+            if latest and latest < cutoff:
+                continue
+            fresh += 1
+            cid = c.get("id")
+            if not cid:
+                continue
+            unit = (listings.get(c.get("listingMapId")) or c.get("listingName")
+                    or ("unit-%s" % c.get("listingMapId")))
+            guest = c.get("recipientName") or c.get("guestName") or "Guest"
+            if q and q not in str(unit).lower() and q not in str(guest).lower():
+                continue
+            try:
+                msgs = (api_get("/conversations/%s/messages" % cid) or {}).get("result") or []
+            except Exception:
+                continue
+            scanned += 1
+            if _TRAIN_PAUSE:
+                time.sleep(_TRAIN_PAUSE)
+            msgs = sorted([m for m in msgs if (m.get("body") or "").strip()], key=_msg_sort_key)
+            if not msgs:
+                continue
+
+            rows = []
+            counts = {"guest": 0, "out": 0, "musaed": 0, "unknown": 0}
+            for m in msgs:
+                raw = (m.get("body") or "").strip()
+                if _msg_is_inbound(m):
+                    counts["guest"] += 1
+                    rows.append({"dir": "in", "ts": _msg_time(m), "body": raw, "code": "guest"})
+                    continue
+                clean, sig = _train_split_signature(raw)
+                rec = _train_match(idx, cid, clean)
+                code = _train_code_for(rec, bool(sig))
+                counts["out"] += 1
+                if code.startswith("musaed"):
+                    counts["musaed"] += 1
+                if code == "unknown":
+                    counts["unknown"] += 1
+                row = {"dir": "out", "ts": _msg_time(m), "body": clean, "sig": sig, "code": code}
+                if rec:
+                    row["via"] = rec.get("via") or ""
+                    row["approver"] = rec.get("approver") or ""
+                    if rec.get("conf") is not None:
+                        row["conf"] = rec.get("conf")
+                    if code == "musaed_edited":
+                        row["draft"] = rec.get("draft") or ""
+                        row["diff"] = rec.get("diff")
+                rows.append(row)
+
+            if only_musaed and not counts["musaed"]:
+                continue
+            if not counts["guest"]:
+                continue
+
+            # context: for every Musaed line keep the guest message BEFORE it and the
+            # guest's NEXT reply — the training signal is whether the guest came back
+            # satisfied or repeated the same question.
+            for i, r in enumerate(rows):
+                if not str(r.get("code") or "").startswith("musaed"):
+                    continue
+                before = after = ""
+                for j in range(i - 1, -1, -1):
+                    if rows[j]["dir"] == "in":
+                        before = rows[j]["body"]
+                        break
+                for j in range(i + 1, len(rows)):
+                    if rows[j]["dir"] == "in":
+                        after = rows[j]["body"]
+                        break
+                r["before"] = before
+                r["after"] = after
+
+            threads.append({"cid": cid, "unit": unit, "guest": guest,
+                            "first": rows[0]["ts"], "last": rows[-1]["ts"],
+                            "counts": counts, "messages": rows})
+        if not fresh:
+            break
+        offset += 100
+
+    totals = {"threads": len(threads),
+              "guest": sum(t["counts"]["guest"] for t in threads),
+              "out": sum(t["counts"]["out"] for t in threads),
+              "musaed": sum(t["counts"]["musaed"] for t in threads),
+              "unknown": sum(t["counts"]["unknown"] for t in threads)}
+    return {"ok": True, "threads": threads, "scanned": scanned, "page": page,
+            "days": days, "pages_walked": walked, "only_musaed": bool(only_musaed),
+            "totals": totals, "labels": _TRAIN_LABELS,
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds")}
+
+
+async def _api_train_threads(request):
+    """READ-ONLY: labelled guest transcripts for training. Same login + per-page
+    permission as every other dashboard read (see _ROLE_READ_RULES)."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+
+    def _int(name, dflt, lo, hi):
+        try:
+            return max(lo, min(hi, int(request.query.get(name, str(dflt)))))
+        except Exception:
+            return dflt
+
+    days = _int("days", 30, 1, 365)
+    want = _int("limit", 30, 1, 120)
+    page = _int("page", 0, 0, 200)
+    only_musaed = request.query.get("only_musaed", "1") not in ("0", "false", "no")
+    q = (request.query.get("q") or "").strip().lower()[:60]
+    force = request.query.get("force") in ("1", "true", "yes")
+
+    ck = "%s|%s|%s|%s|%s" % (days, want, page, int(only_musaed), q)
+    hit = _TRAIN_CACHE.get(ck)
+    if hit and not force and (time.time() - hit[0]) < _TRAIN_CACHE_TTL:
+        out = dict(hit[1])
+        out["cached"] = True
+        return _json(out)
+
+    if not _TRAIN_LOCK.acquire(blocking=False):
+        return _json({"error": "busy",
+                      "detail": "فيه استخراج شغّال حالياً — انتظر شوي وجرّب مرة ثانية"}, 429)
+    try:
+        res = await asyncio.to_thread(_train_build, days, want, page, only_musaed, q)
+    finally:
+        _TRAIN_LOCK.release()
+
+    if res.get("error"):
+        return _json(res, 502)
+    _TRAIN_CACHE[ck] = (time.time(), res)
+    if len(_TRAIN_CACHE) > 12:
+        for k in sorted(_TRAIN_CACHE, key=lambda x: _TRAIN_CACHE[x][0])[:-12]:
+            _TRAIN_CACHE.pop(k, None)
+    out = dict(res)
+    out["cached"] = False
+    return _json(out)
+
 
 def _cache_get(key):
     hit = _dash_cache.get(key)
@@ -40032,7 +40648,7 @@ NAV_DEF = {
         {"tk": "cat_content", "ids": ["studio"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
         {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "guide", "reviews"]},
-        {"tk": "cat_system", "ids": ["kb", "users", "learn", "log"]},
+        {"tk": "cat_system", "ids": ["kb", "users", "learn", "train", "log"]},
     ],
     "items": [
         {"id": "home", "ic": "home", "tk": "home"},
@@ -40073,6 +40689,7 @@ NAV_DEF = {
         {"id": "quality", "ic": "quality", "tk": "quality"},
         {"id": "rev", "ic": "rev", "tk": "rev"},
         {"id": "learn", "ic": "learn", "tk": "learn"},
+        {"id": "train", "ic": "inbox", "tk": "train"},
         {"id": "log", "ic": "log", "tk": "log"},
     ],
     # Labels override the same keys inside the dashboard's T.ar/T.en at boot, so the
@@ -40091,7 +40708,7 @@ NAV_DEF = {
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
             "guests": "الضيوف", "rec": "استرداد التجربة", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
-            "rev": "الإيرادات", "learn": "ما تعلّمه", "log": "النشاط", "kb": "قاعدة المعرفة",
+            "rev": "الإيرادات", "learn": "ما تعلّمه", "train": "تدريب مساعد", "log": "النشاط", "kb": "قاعدة المعرفة",
             "studio": "استوديو عوجا",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
@@ -40110,7 +40727,7 @@ NAV_DEF = {
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
             "guests": "Guests", "rec": "Guest Recovery", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
-            "rev": "Revenue", "learn": "Learnings", "log": "Activity", "kb": "Knowledge Base",
+            "rev": "Revenue", "learn": "Learnings", "train": "Musaed Training", "log": "Activity", "kb": "Knowledge Base",
             "studio": "Ouja Studio",
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
@@ -56469,6 +57086,8 @@ _ROLE_READ_RULES = [
     # and schedule there is no public share link to keep working, so the broad prefix is
     # correct here.
     ("/api/kb/", "kb"),
+    # «تدريب مساعد»: full guest transcripts + who wrote each reply. Private by definition.
+    ("/api/train/", "train"),
 ]
 
 def _perm_403(tab, action):
@@ -56819,6 +57438,7 @@ async def start_web_server():
         app.router.add_get("/api/log", _api_log)
         app.router.add_get("/api/inbox", _api_inbox)
         app.router.add_get("/api/autolog", _api_autolog)
+        app.router.add_get("/api/train/threads", _api_train_threads)   # «تدريب مساعد» — read-only
         app.router.add_get("/api/today", _api_today)
         app.router.add_get("/api/pricing/detail", _api_pricing_detail)
         app.router.add_get("/api/pricing/command", _api_pricing_command)  # read-only Command Center snapshot (no writes)
