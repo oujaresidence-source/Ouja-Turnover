@@ -89,8 +89,9 @@ def schedule_day(date_iso):
     apts = db.apartments()
     ovs = db.overrides()
     absent_ids = {a["employee_id"] for a in db.absences_on(date_iso)}
+    dovs = db.date_overrides_on(date_iso)
     wd = engine.to_weekday(date_iso)
-    r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent_ids)
+    r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent_ids, date_overrides=dovs)
     r["date"] = date_iso
     r["weekday_ar"] = _DAY_AR[wd]
     return r
@@ -117,7 +118,10 @@ def schedule_week():
         date_iso = date_for_wd.get(wd)
         absent_ids = ({a["employee_id"] for a in db.absences_on(date_iso)}
                       if date_iso else set())
-        r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent_ids)
+        # Same M11 rule for date pins: the weekly matrix resolves each weekday to a CONCRETE
+        # date, so it must read that date's pins or it will disagree with the Today tab.
+        dovs = db.date_overrides_on(date_iso) if date_iso else []
+        r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent_ids, date_overrides=dovs)
         cells = {}
         for w in r["working"]:
             cells[w["id"]] = {"load": w["load"], "base": len(w["own"]),
@@ -246,6 +250,7 @@ async def api_employee_delete(request):
         return HOST.json_response(
             {"ok": False, "error": "لا يمكن حذف موظف يملك شققاً (%d). أعد تعيين شققه أولاً." % owned["n"]}, 200)
     db.execute("DELETE FROM schedule_coverage_overrides WHERE covering_employee_id=?", (eid,))
+    db.execute("DELETE FROM schedule_date_overrides WHERE covering_employee_id=?", (eid,))
     db.execute("DELETE FROM schedule_absences WHERE employee_id=?", (eid,))
     db.execute("DELETE FROM schedule_employees WHERE id=?", (eid,))
     return HOST.json_response({"ok": True, "deleted": 1})
@@ -380,6 +385,7 @@ async def api_remove_unlinked(request):
     rows = db.q("SELECT id FROM schedule_apartments WHERE listing_id IS NULL")
     for r in rows:
         db.execute("DELETE FROM schedule_coverage_overrides WHERE apartment_id=?", (r["id"],))
+        db.execute("DELETE FROM schedule_date_overrides WHERE apartment_id=?", (r["id"],))
         db.execute("DELETE FROM schedule_apartments WHERE id=?", (r["id"],))
     return HOST.json_response({"ok": True, "report": {"removed": len(rows)}})
 
@@ -421,6 +427,7 @@ async def api_apartment_delete(request):
     except Exception:
         return HOST.json_response({"ok": False, "error": "bad id"}, 200)
     db.execute("DELETE FROM schedule_coverage_overrides WHERE apartment_id=?", (aid,))  # cascade
+    db.execute("DELETE FROM schedule_date_overrides WHERE apartment_id=?", (aid,))
     db.execute("DELETE FROM schedule_apartments WHERE id=?", (aid,))
     return HOST.json_response({"ok": True, "deleted": 1})
 

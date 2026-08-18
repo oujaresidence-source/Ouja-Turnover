@@ -13,6 +13,11 @@ Model (build spec §1 + §5):
     apartment to a chosen employee for a weekday via a recurring OVERRIDE.
   * days where nobody is off (Thu/Fri) have no coverage — everyone on their own base.
 
+Ouja extension 2 (leave planner): a recurring override is a rule about a WEEKDAY, forever. The
+planner needs the other kind — "on this one date, نورة takes حطين 6b" — so `date_overrides`
+pins an apartment for ONE concrete date and outranks both the recurring rule and the balancer.
+It is the primitive the whole «مخطط الإجازات» screen is built on.
+
 Ouja extension (kept from roster v1, per owner choice): ad-hoc, date-specific LEAVE. The route
 passes the set of employee ids who are on approved leave for the chosen date as `absent_ids`;
 the engine treats them exactly like an extra day-off, so their apartments join the pool and
@@ -28,18 +33,28 @@ def to_weekday(d):
     return (d.weekday() + 1) % 7
 
 
-def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None):
+def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None,
+                date_overrides=None):
     """Pure coverage computation. See module docstring + build spec §5.
 
     Args:
       weekday: int 0..6 (0=الأحد .. 6=السبت)
       employees:  [{id, name, off_day, color, sort_order}]
       apartments: [{id, name, owner_id, sort_order}]
-      overrides:  [{day_of_week, apartment_id, covering_employee_id}]  (recurring)
+      overrides:  [{day_of_week, apartment_id, covering_employee_id}]  (recurring, per weekday)
       absent_ids: iterable of employee ids on ad-hoc leave for this date (treated as off)
+      date_overrides: [{apartment_id, covering_employee_id}] pinned for THIS EXACT DATE
+
+    Precedence: date_overrides  ->  overrides (recurring)  ->  auto-balance.
+
+    A date override applies to the WHOLE apartment list, not only to the pool belonging to off
+    employees — moving one apartment on one day must work with nobody absent at all. One aimed
+    at an employee who is off/absent that day is SKIPPED (same rule as a stale recurring
+    override) and reported in `skipped_date_overrides` so the UI can flag it instead of
+    silently doing nothing.
 
     Returns:
-      {weekday, total, has_coverage, balanced, max_load, min_load,
+      {weekday, total, has_coverage, balanced, max_load, min_load, skipped_date_overrides,
        working:[{id,name,color,sort_order, own:[apt], coverage:[{apartment,owner_id,owner_name,overridden}], load}],
        off:[{id,name,color, reason:'off'|'leave', apartments:[{apartment, covering_id, covering_name}]}]}
     """
@@ -57,18 +72,48 @@ def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None)
     apts = sorted(apartments, key=lambda a: (
         emp_by_id.get(a.get("owner_id"), {}).get("sort_order", 9999), a.get("sort_order", 0), a["id"]))
 
+    # 0) date pins win over everything. Resolved FIRST and against the whole apartment list, so
+    #    one apartment can be moved on one day even when nobody is off. A pin at someone who is
+    #    off/absent (or at a deleted employee/apartment) is refused and reported, never silently
+    #    dropped — the planner UI shows it as a stale row.
+    apt_by_id = {a["id"]: a for a in apts}
+    date_ov, skipped = {}, []
+    for d in (date_overrides or []):
+        aid, cov = d.get("apartment_id"), d.get("covering_employee_id")
+        if aid not in apt_by_id:
+            reason = "unknown_apartment"
+        elif cov not in emp_by_id:
+            reason = "unknown_employee"
+        elif cov not in working_ids:
+            reason = "target_off"
+        else:
+            date_ov[aid] = cov
+            continue
+        skipped.append({"apartment_id": aid, "covering_employee_id": cov, "reason": reason})
+
     # base load = own apartments for working employees; their own list kept for display
     board = {e["id"]: {"own": [], "coverage": [], "load": 0} for e in working}
+    covered = {}                                # apartment_id -> {covering_id, overridden}
     pool = []                                   # apartments owned by an off employee
     for a in apts:
         owner = a.get("owner_id")
+        pin = date_ov.get(a["id"])
+        if pin is not None:
+            if pin == owner:                    # pinned at its own working owner = a no-op, and
+                board[pin]["own"].append(a)     # never a card that says "covering yourself"
+                board[pin]["load"] += 1
+            else:
+                board[pin]["coverage"].append({"apartment": a, "owner_id": owner,
+                                               "owner_name": _nm(emp_by_id, owner),
+                                               "overridden": True})
+                board[pin]["load"] += 1
+                covered[a["id"]] = {"covering_id": pin, "overridden": True}
+            continue                            # a pinned apartment never reaches the pool
         if owner in working_ids:
             board[owner]["own"].append(a)
             board[owner]["load"] += 1
         else:
             pool.append(a)                      # owner is off (or unknown/None) -> needs coverage
-
-    covered = {}                                # apartment_id -> {covering_id, overridden}
 
     # 1) recurring overrides for this weekday: pin apt -> covering (if covering is working)
     ov_for_day = {o["apartment_id"]: o["covering_employee_id"]
@@ -121,12 +166,15 @@ def compute_day(weekday, employees, apartments, overrides=None, absent_ids=None)
         })
 
     loads = [w["load"] for w in working_out]
-    has_cov = bool(off_ids)
+    # a day with date pins HAS coverage even when nobody is off — and `balanced` then reports
+    # honestly that the owner's manual plan broke the even split, which is the point of a pin.
+    has_cov = bool(off_ids) or bool(date_ov)
     mx, mn = (max(loads), min(loads)) if loads else (0, 0)
     total = len(apts)
     balanced = (not has_cov) or (mx - mn <= 1 and sum(loads) == total)
     return {"weekday": weekday, "total": total, "has_coverage": has_cov,
             "balanced": balanced, "max_load": mx, "min_load": mn,
+            "skipped_date_overrides": skipped,
             "working": working_out, "off": off_out}
 
 

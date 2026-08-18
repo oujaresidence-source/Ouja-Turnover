@@ -3,10 +3,15 @@ schedule.db — schedule_* tables inside the SAME brain.db SQLite file (reuses b
 for the proven NO-WAL / journal_mode=DELETE / busy_timeout rules). Build spec §3.
 
 Tables: schedule_employees, schedule_apartments, schedule_coverage_overrides, schedule_settings,
-schedule_absences (Ouja ad-hoc-leave extension). FK integrity:
+schedule_absences (Ouja ad-hoc-leave extension), schedule_date_overrides (leave-plan pins for ONE
+concrete date — the primitive the «مخطط الإجازات» planner is built on). FK integrity:
   * deleting an employee who still owns apartments is BLOCKED (checked in the route for a clean
     Arabic message; declared RESTRICT here as a backstop).
-  * deleting an apartment CASCADEs its coverage overrides.
+  * deleting an apartment CASCADEs its coverage overrides AND its date pins.
+
+A NEW table needs no _migrate entry: SCHEMA runs on every _ensure and CREATE TABLE IF NOT EXISTS
+adds it to an already-existing brain.db. _migrate is only for columns added to a table that
+already exists.
 """
 
 import datetime
@@ -57,7 +62,20 @@ CREATE TABLE IF NOT EXISTS schedule_absences (
     created_by  TEXT,
     created_at  TEXT
 );
+CREATE TABLE IF NOT EXISTS schedule_date_overrides (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    date                 TEXT NOT NULL,          -- YYYY-MM-DD, ONE concrete day (not a weekday)
+    apartment_id         INTEGER REFERENCES schedule_apartments(id) ON DELETE CASCADE,
+    covering_employee_id INTEGER REFERENCES schedule_employees(id)  ON DELETE CASCADE,
+    plan_id              INTEGER,                -- groups a whole leave plan for one-click undo
+    note                 TEXT,
+    created_by           TEXT,
+    created_at           TEXT,
+    UNIQUE(date, apartment_id)
+);
 CREATE INDEX IF NOT EXISTS idx_sched_apt_owner ON schedule_apartments(owner_id);
+CREATE INDEX IF NOT EXISTS idx_sched_dov_date  ON schedule_date_overrides(date);
+CREATE INDEX IF NOT EXISTS idx_sched_dov_plan  ON schedule_date_overrides(plan_id);
 CREATE INDEX IF NOT EXISTS idx_sched_ov_day    ON schedule_coverage_overrides(day_of_week);
 CREATE INDEX IF NOT EXISTS idx_sched_abs_date  ON schedule_absences(start_date, end_date);
 """
@@ -167,6 +185,13 @@ def apartments():
 
 def overrides():
     return q("SELECT * FROM schedule_coverage_overrides")
+
+
+def date_overrides_on(date_iso):
+    """Apartment pins for ONE concrete date (the leave-plan primitive). Ordered so the engine
+    reads them deterministically."""
+    return q("SELECT * FROM schedule_date_overrides WHERE date=? ORDER BY apartment_id, id",
+             (date_iso,))
 
 
 def absences_on(date_iso):

@@ -64,7 +64,7 @@ def reset_to_default():
     in ONE transaction, so a mid-seed failure rolls back instead of leaving the
     schedule wiped."""
     with db.transaction() as cx:
-        for t in ("schedule_coverage_overrides", "schedule_absences",
+        for t in ("schedule_coverage_overrides", "schedule_date_overrides", "schedule_absences",
                   "schedule_apartments", "schedule_employees", "schedule_settings"):
             cx.execute("DELETE FROM " + t)
         _insert_seed(cx)

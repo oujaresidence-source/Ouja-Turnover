@@ -48,8 +48,12 @@ def cover_map(date_iso):
     apts = db.apartments()
     ovs = db.overrides()
     absent = {a["employee_id"] for a in db.absences_on(date_iso)}
+    # Date pins must reach Discord too: this map is what stamps the covering employee's emoji
+    # onto the OujaCT cleaning channel, so a saved leave plan has to be visible there. It does
+    # NOT come for free — compute_day only honours pins that are handed to it.
+    dovs = db.date_overrides_on(date_iso)
     wd = engine.to_weekday(date_iso)
-    r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent)
+    r = engine.compute_day(wd, emps, apts, ovs, absent_ids=absent, date_overrides=dovs)
     m = {}
     for w in r["working"]:
         who = {"name": w.get("name"), "emoji": w.get("emoji"), "color": w.get("color")}
