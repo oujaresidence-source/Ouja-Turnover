@@ -143,11 +143,13 @@ class LiveContractTest(_Base):
         settings.set_price_source("engine", coverage=0.9)
         import monthly.collect as collect
         real = collect.price_one
+        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
         collect.price_one = lambda lid, month, **k: {"price": 15000}
         try:
             out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         finally:
             collect.price_one = real
+            collect._CACHE.clear()
         self.assertIsNotNone(out)
         self.assertEqual(set(out), set(self.NINE))
         for k in ("before", "after", "saved", "per_month_before", "per_month_after"):
@@ -161,11 +163,13 @@ class LiveContractTest(_Base):
         settings.set_price_source("engine", coverage=0.9)
         import monthly.collect as collect
         real = collect.price_one
+        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
         collect.price_one = lambda lid, month, **k: {"price": 25000}
         try:
             self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
         finally:
             collect.price_one = real
+            collect._CACHE.clear()
 
     def test_any_exception_falls_back_to_the_discount_path(self):
         settings.set_price_source("engine", coverage=0.9)
@@ -245,8 +249,11 @@ class VerifiedOnlyModeTest(_Base):
                 "per_month_after": 16000, "promo": False, "promo_label": ""}
 
     def _with_basis(self, basis, price=15000):
+        """Warms the cache as well as stubbing the price: the guest path is now
+        cache-only, so a stub without a warm month is correctly ignored."""
         import monthly.collect as collect
         real = collect.price_one
+        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
         collect.price_one = lambda lid, month, **k: {"price": price, "basis": basis}
         return real, collect
 
@@ -274,6 +281,7 @@ class VerifiedOnlyModeTest(_Base):
             out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         finally:
             collect.price_one = real
+            collect._CACHE.clear()
         self.assertIsNotNone(out)
         self.assertEqual(out["after"], 15000)
 
@@ -304,3 +312,63 @@ class VerifiedOnlyModeTest(_Base):
             self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
         finally:
             collect.price_one = real
+
+
+class GuestPathNeverBlocksTest(_Base):
+    """A guest page must never wait on Hostaway. price_one pulls years of
+    reservation history and paginates the listings API; putting that in front of
+    a customer looking at apartments is how a pricing feature takes down a
+    storefront."""
+
+    def _discount(self):
+        return {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
+                "ceiling": 0.3, "per_month_before": 20000,
+                "per_month_after": 16000, "promo": False, "promo_label": ""}
+
+    def test_a_cold_cache_falls_back_instead_of_computing(self):
+        import monthly.collect as collect
+        collect._CACHE.clear()
+        called = []
+        real = collect.month_state
+        collect.month_state = lambda *a, **k: called.append(1) or (_ for _ in ()).throw(
+            AssertionError("the guest path computed a month state"))
+        try:
+            settings.set_price_source("engine_verified", coverage=0.9)
+            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+        finally:
+            collect.month_state = real
+        self.assertEqual(called, [])
+
+    def test_a_warm_cache_serves_the_price(self):
+        import monthly.collect as collect
+        settings.set_price_source("engine_verified", coverage=0.9)
+        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
+        real = collect.price_one
+        collect.price_one = lambda lid, month, **k: {"price": 15000,
+                                                     "basis": "own_history"}
+        try:
+            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
+        finally:
+            collect.price_one = real
+            collect._CACHE.clear()
+        self.assertIsNotNone(out)
+        self.assertEqual(out["after"], 15000)
+
+    def test_an_expired_cache_is_treated_as_cold(self):
+        import monthly.collect as collect
+        settings.set_price_source("engine_verified", coverage=0.9)
+        collect._CACHE["2026-10"] = {"at": collect._now_ts() - collect._CACHE_TTL - 5,
+                                     "unit_meta": {1: {}}}
+        try:
+            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+        finally:
+            collect._CACHE.clear()
+
+    def test_a_unit_absent_from_the_cached_month_falls_back(self):
+        import monthly.collect as collect
+        settings.set_price_source("engine_verified", coverage=0.9)
+        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {999: {}}}
+        try:
+            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+        finally:
+            collect._CACHE.clear()

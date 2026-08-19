@@ -236,6 +236,32 @@ def month_state(month, force=False, today=None):
     return st
 
 
+def cached_month(month):
+    """The month state ONLY if it is already warm. Never computes.
+
+    month_state() pulls years of Hostaway history and paginates the listings API.
+    That is fine on an admin screen where someone chose to wait; it is a hazard
+    on a guest page, where it would put a 30-60 second Hostaway round trip in
+    front of a customer looking at apartments. The guest path uses this and
+    nothing else."""
+    hit = _CACHE.get(month)
+    if hit and (_now_ts() - hit["at"]) < _CACHE_TTL:
+        return hit
+    return None
+
+
+def price_one_cached(lid, month):
+    """A price for the guest site, or None. O(1) against a warm cache, and
+    silent otherwise — never a computation, never a network call."""
+    st = cached_month(month)
+    if not st:
+        return None
+    lid = int(lid)
+    if lid not in st["unit_meta"]:
+        return None
+    return price_one(lid, month)
+
+
 def price_one(lid, month, force=False, today=None):
     """The full explainability payload for ONE unit — the same object the page
     renders and the PDF renders, so the screen and the document cannot drift."""

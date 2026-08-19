@@ -30,7 +30,13 @@ def engine_after(listing_id, month, before_total, months, discount_result):
         if mode not in ("engine", "engine_verified"):
             return None
         from . import collect
-        p = collect.price_one(int(listing_id), month)
+        # CACHE ONLY. The guest page must never wait on Hostaway: price_one
+        # would pull years of reservation history and paginate the listings API
+        # inside a customer's page load. If the month is not already warm, the
+        # guest gets the discount path and nothing is slower than it was before.
+        p = collect.price_one_cached(int(listing_id), month)
+        if not p:
+            return None
         est = p.get("price")
         if not est or est <= 0:
             return None
