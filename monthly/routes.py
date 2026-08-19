@@ -85,7 +85,12 @@ async def _api_diagnose(request):
         return HOST.json_response(
             {"ok": False, "error": "too_many_months",
              "message": "أقصى 6 شهور في المرة الوحدة"}, 200)
-    out = await asyncio.to_thread(collect.diagnose_months, ",".join(months))
+    try:
+        years = max(1, min(3, int(request.rel_url.query.get("years") or 2)))
+    except ValueError:
+        years = 2
+    out = await asyncio.to_thread(collect.diagnose_months, ",".join(months),
+                                  None, years)
     out["ok"] = True
     if (request.rel_url.query.get("format") or "").lower() == "text":
         from . import diagnose as _diag

@@ -39,13 +39,22 @@ def _kb_district_lookup():
     return lambda lid: by_code.get(int(lid))
 
 
-def diagnose(month, today=None):
-    """The full S8 report for one target month. Read-only end to end."""
+def diagnose(month, today=None, unit_meta=None, years=None):
+    """The full S8 report for one target month. Read-only end to end.
+
+    unit_meta is passed in when several months are run together: it paginates
+    the whole Hostaway listings API and does not change between months, so
+    rebuilding it per month tripled the request for nothing. That, plus a third
+    year of history worth a 0.028 freshness weight, is what pushed this past
+    Railway's proxy timeout and produced an "Application failed to respond" page
+    on a service the dashboard showed as Online.
+    """
     today = today or (HOST.now().date() if HOST.now else datetime.date.today())
     today_key = data.month_key(today)
 
-    reservations = data.fetch_history(month, today=today)
-    unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
+    reservations = data.fetch_history(month, today=today, years_back=years)
+    if unit_meta is None:
+        unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
 
     funnel = {}
     all_rows = data.unit_month_rows(reservations, int(month[5:7]), today_key,
@@ -152,14 +161,22 @@ def trace(lid, month, today=None, windows=1):
     }
 
 
-def diagnose_months(months, today=None):
+def diagnose_months(months, today=None, years=None):
     """Several target months side by side. One month is not the answer: the
     question is whether occupancy leaves room for a monthly band, and that moves
-    far more by season than by unit."""
+    far more by season than by unit.
+
+    The listings pull is hoisted OUT of the loop — it is identical for every
+    month and paginating it three times was pure waste on the slowest call in
+    the request."""
     out = []
+    try:
+        shared_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
+    except Exception:
+        shared_meta = None
     for m in [x.strip() for x in str(months or "").split(",") if x.strip()]:
         try:
-            out.append(diagnose(m, today=today))
+            out.append(diagnose(m, today=today, unit_meta=shared_meta, years=years))
         except Exception as e:
             out.append({"month": m, "error": "%s: %s" % (type(e).__name__, e)})
     return {"months": out, "compare": [

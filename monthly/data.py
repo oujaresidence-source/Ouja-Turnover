@@ -29,7 +29,11 @@ from .host import HOST
 CONFIRMED_STATUSES = {"new", "modified"}
 CANCELLED_STATUSES = {"cancelled", "canceled", "declined", "expired", "denied"}
 
-YEARS_BACK = 3
+# Two years back, not three. Each extra year is another full pass over Hostaway's
+# reservation API, and the third year contributes almost nothing to the forecast:
+# a 31-month-old month carries a freshness weight of 0.028 against 0.445 for a
+# 7-month-old one. It cost real time and bought a rounding error.
+YEARS_BACK = 2
 
 
 def _d(s):
@@ -192,10 +196,11 @@ def pool_rows(unit_rows, unit_meta, district_of, bedrooms_of):
 
 # ───────────────────────────── the live pulls ─────────────────────────────
 
-def fetch_history(target_month, years_back=YEARS_BACK, today=None, max_windows=None):
+def fetch_history(target_month, years_back=None, today=None, max_windows=None):
     """Every confirmed reservation that can touch the matching calendar months of
     the last `years_back` years. fetch_reservations_window ONLY."""
     today = today or datetime.date.today()
+    years_back = YEARS_BACK if years_back is None else years_back
     m = int(str(target_month)[5:7])
     rows, seen, used = [], set(), []
     for back in range(0, years_back + 1):
@@ -208,8 +213,6 @@ def fetch_history(target_month, years_back=YEARS_BACK, today=None, max_windows=N
         if first > today:
             continue
         got = HOST.require("fetch_reservations_window")(first, last) or []
-        if max_windows and len(used) >= max_windows:
-            break
         used.append("%s..%s" % (first, last))
         for r in got:
             rid = r.get("id")
