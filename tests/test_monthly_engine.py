@@ -416,19 +416,31 @@ class TwoGatesTest(unittest.TestCase):
         p = engine.price_unit(1, "2026-10", own=_own(), district=[obs(200, 0.4, 1)],
                               attr_values={})
         self.assertEqual(p["bound_by"], "floor")
-        self.assertEqual(p["gates"]["floor"], max(p["gates"].values()))
+        # The floor is the highest of the two GATES THAT PUSH UP. The ceiling is
+        # a cap, so comparing against max(all gates) stopped being meaningful the
+        # moment a third gate started pulling the other way.
+        self.assertGreater(p["gates"]["floor"], p["gates"]["model"])
 
     def test_the_model_binds_when_quality_carries_it_higher(self):
+        # Inputs retuned so the model lands BETWEEN the floor and the ceiling.
+        # The old inputs (ADR 900, every attribute maxed) now correctly resolve
+        # to 'ceiling' — the model wanted more than a guest would pay booking the
+        # 30 nights one at a time, which is the whole point of the new cap.
         p = engine.price_unit(1, "2026-10", own=_own(),
-                              district=[obs(900, 0.95, 1)],
-                              attr_values={"design": 10, "sqm": 300, "majlis": True})
+                              district=[obs(500, 0.8, 1)],
+                              attr_values={"design": 6})
         self.assertEqual(p["bound_by"], "model")
+        self.assertGreater(p["gates"]["model"], p["gates"]["floor"])
+        self.assertLess(p["gates"]["model"], p["gates"]["ceiling"])
 
-    def test_there_are_exactly_two_gates_and_owner_gate_is_not_one_of_them(self):
+    def test_the_gates_are_floor_model_ceiling_and_never_owner_gate(self):
         p = engine.price_unit(1, "2026-10", own=_own(), district=[obs(500, 0.8, 1)],
                               attr_values={})
-        self.assertEqual(set(p["gates"]), {"floor", "model"})
-        self.assertIn(p["bound_by"], ("floor", "model"))
+        # Three gates now — floor and model push up, ceiling caps. owner_gate is
+        # not among them and cannot be.
+        self.assertEqual(set(p["gates"]), {"floor", "model", "ceiling"})
+        self.assertIn(p["bound_by"], engine.BOUND_BY_VALUES)
+        self.assertNotIn("owner_gate", p["gates"])
 
     def test_a_unit_with_no_history_anywhere_gets_no_price(self):
         p = engine.price_unit(1, "2026-10", own=[], district=[], bedroom=[],
@@ -532,8 +544,10 @@ class RoundingTest(unittest.TestCase):
                 attr_values={"design": rnd.randint(1, 10), "sqm": rnd.uniform(60, 300)})
             if p["price"] is None:
                 continue
-            binding = max(v for v in p["gates"].values() if v is not None)
-            self.assertGreaterEqual(p["price"] + 1e-9, binding)
+            # The band, not the maximum: a price must clear the floor and stay
+            # under the ceiling. Asserting against max(gates) was a two-gate idea.
+            self.assertGreaterEqual(p["price"] + 1e-9, p["gates"]["floor"])
+            self.assertLessEqual(p["price"], p["gates"]["ceiling"] + 1e-9)
             self.assertEqual(p["price"] % 50, 0)
 
 
@@ -545,9 +559,11 @@ class WaterfallEndsOnThePriceTest(unittest.TestCase):
         self.assertAlmostEqual(sum(c["sar"] for c in p["components"]), p["price"])
 
     def test_a_model_bound_price_shows_the_quality_step(self):
+        # Same retune as above: the old inputs are now ceiling-bound by design.
         p = engine.price_unit(1, "2026-10", own=_own(),
-                              district=[obs(900, 0.95, 1)],
-                              attr_values={"design": 10, "sqm": 300})
+                              district=[obs(500, 0.8, 1)],
+                              attr_values={"design": 6})
+        self.assertEqual(p["bound_by"], "model")
         self.assertIn("quality_uplift", [c["key"] for c in p["components"]])
 
     def test_a_floor_bound_price_shows_no_quality_step(self):
@@ -699,3 +715,158 @@ class ConfidenceTest(unittest.TestCase):
                               attr_values={}, paired_obs=250)
         self.assertFalse(p["is_estimate"])
         self.assertEqual(p["label_ar"], "سعر")
+
+
+# ═══════════════════ S7b — the ceiling: the constraint that was missing ═══════════════════
+
+class CeilingTest(unittest.TestCase):
+    """A guest can always book 30 nights one at a time. If our monthly price is
+    above that, the product has no reason to exist."""
+
+    def test_the_ceiling_is_thirty_nights_less_the_commitment_discount(self):
+        c = engine.costs(monthly_commitment_discount=0.15)
+        self.assertAlmostEqual(engine.ceiling_price(628, c), 30 * 628 * 0.85)
+
+    def test_committing_to_a_month_must_cost_less_than_booking_night_by_night(self):
+        c = engine.costs()
+        rack = 30 * 628
+        self.assertLess(engine.ceiling_price(628, c), rack)
+
+    def test_the_discount_is_owner_editable(self):
+        loose = engine.ceiling_price(628, engine.costs(monthly_commitment_discount=0.05))
+        tight = engine.ceiling_price(628, engine.costs(monthly_commitment_discount=0.30))
+        self.assertGreater(loose, tight)
+
+    def test_no_forecast_means_no_ceiling(self):
+        self.assertIsNone(engine.ceiling_price(None, engine.costs()))
+
+    def test_a_runaway_model_is_capped_and_says_so(self):
+        """The case that exposed this: 628/night, model wanted 23,506, rack rate
+        for 30 nights is 18,840. Nobody takes that monthly deal."""
+        p = engine.price_unit(
+            1, "2026-10",
+            own=[obs(628, 0.85, 6, nights=50)],
+            district=[obs(590, 0.83, 10)],
+            attr_values={"design": 10, "furniture": 10, "compound": 10,
+                         "living_room": 10, "view_light": 10, "majlis": True,
+                         "parking_covered": True, "sqm": 300})
+        self.assertEqual(p["bound_by"], "ceiling")
+        self.assertLessEqual(p["price"], p["gates"]["ceiling"])
+        self.assertLess(p["price"], 30 * p["data"]["adr"])
+
+    def test_a_ceiling_bound_price_is_a_warning_not_a_normal_outcome(self):
+        p = engine.price_unit(
+            1, "2026-10", own=[obs(628, 0.85, 6, nights=50)],
+            district=[obs(590, 0.83, 10)],
+            attr_values={"design": 10, "furniture": 10, "compound": 10,
+                         "living_room": 10, "view_light": 10, "sqm": 300})
+        self.assertIn("model_above_ceiling", p["warnings"])
+
+    def test_the_price_never_exceeds_the_ceiling_across_the_input_space(self):
+        import random
+        rnd = random.Random(31337)
+        for _ in range(3000):
+            adr = rnd.uniform(120, 2500)
+            p = engine.price_unit(
+                1, "2026-10",
+                own=[obs(adr, rnd.uniform(0.2, 1.0), 1, nights=30)],
+                district=[obs(rnd.uniform(120, 2500), rnd.uniform(0.2, 1.0), 1)],
+                attr_values={"design": rnd.randint(1, 10),
+                             "sqm": rnd.uniform(60, 320),
+                             "majlis": rnd.choice([True, False, None])})
+            if p["price"] is None:
+                continue
+            self.assertLessEqual(p["price"], p["gates"]["ceiling"] + 1e-9)
+            self.assertGreaterEqual(p["price"] + 1e-9, p["gates"]["floor"])
+
+    def test_a_floor_above_the_ceiling_returns_no_price_and_does_not_split(self):
+        """Not lettable monthly at a sane price. Do not average the two."""
+        c = engine.costs(min_margin_sar=90000, monthly_commitment_discount=0.15)
+        p = engine.price_unit(1, "2026-10", own=[obs(300, 0.5, 1, nights=30)],
+                              district=[obs(300, 0.5, 1)], attr_values={}, cost_set=c)
+        self.assertIsNone(p["price"])
+        self.assertIn("floor_above_ceiling", p["warnings"])
+        self.assertIsNone(p["bound_by"])
+
+    def test_bound_by_now_has_four_possible_answers(self):
+        self.assertEqual(set(engine.BOUND_BY_VALUES), {"floor", "model", "ceiling"})
+
+    def test_the_waterfall_still_lands_on_the_price_when_the_ceiling_binds(self):
+        p = engine.price_unit(
+            1, "2026-10", own=[obs(628, 0.85, 6, nights=50)],
+            district=[obs(590, 0.83, 10)],
+            attr_values={"design": 10, "furniture": 10, "compound": 10,
+                         "living_room": 10, "view_light": 10, "sqm": 300})
+        self.assertAlmostEqual(sum(c["sar"] for c in p["components"]), p["price"])
+        self.assertIn("ceiling_cap", [c["key"] for c in p["components"]])
+
+    def test_rounding_at_the_ceiling_rounds_DOWN_not_up(self):
+        """The floor rule was 'round up when rounding down would breach'. Against
+        a ceiling that rule is backwards — rounding up breaches the cap."""
+        self.assertEqual(engine.round_to_50(12040, floor=11000, ceiling=12045), 12000)
+
+    def test_rounding_still_rounds_up_off_the_floor(self):
+        self.assertEqual(engine.round_to_50(10010, floor=10010, ceiling=99999), 10050)
+
+    def test_a_band_with_no_fifty_step_in_it_returns_no_price(self):
+        self.assertIsNone(engine.round_to_50(10020, floor=10010, ceiling=10040))
+
+
+class ScoreAnchorTest(unittest.TestCase):
+    """The anchor IS the calibration. If a scorer reads 5 as 'fine' rather than
+    'the median Ouja unit', every multiplier points up and the whole portfolio
+    inflates by the same amount."""
+
+    def test_the_anchor_is_stated_on_every_attribute_shown_to_a_scorer(self):
+        from monthly import attrs
+        for row in attrs.rows_for_ui({}):
+            self.assertTrue(row["anchor_ar"].strip())
+            self.assertIn("5", row["anchor_ar"])
+
+    def test_the_anchor_names_our_own_portfolio_not_an_abstract_scale(self):
+        from monthly import attrs
+        self.assertIn("عوجا", attrs.SCORE_ANCHOR_AR)
+        self.assertIn("median", attrs.SCORE_ANCHOR_EN.lower())
+
+    def test_a_median_report_flags_an_attribute_anchored_too_high(self):
+        from monthly import attrs
+        units = [{"design": 8}, {"design": 8}, {"design": 7}, {"design": 9},
+                 {"design": 8}]
+        rep = attrs.median_report(units)
+        row = [r for r in rep if r["key"] == "design"][0]
+        self.assertEqual(row["median"], 8)
+        self.assertTrue(row["anchor_suspect"])
+
+    def test_a_correctly_anchored_attribute_is_not_flagged(self):
+        from monthly import attrs
+        units = [{"design": 3}, {"design": 5}, {"design": 5}, {"design": 7},
+                 {"design": 5}]
+        row = [r for r in attrs.median_report(units) if r["key"] == "design"][0]
+        self.assertEqual(row["median"], 5)
+        self.assertFalse(row["anchor_suspect"])
+
+    def test_an_unscored_attribute_reports_no_median_rather_than_zero(self):
+        from monthly import attrs
+        row = [r for r in attrs.median_report([{}, {}]) if r["key"] == "sqm"][0]
+        self.assertIsNone(row["median"])
+        self.assertFalse(row["anchor_suspect"])
+
+
+class ClampIsADiagnosticTest(unittest.TestCase):
+    def test_a_clamped_unit_is_recorded_as_a_clamp_hit(self):
+        p = engine.price_unit(1, "2026-10", own=_own(), district=[obs(500, 0.8, 1)],
+                              attr_values={"design": 10, "furniture": 10,
+                                           "compound": 10, "living_room": 10,
+                                           "view_light": 10, "sqm": 320})
+        self.assertTrue(p["quality"]["clamped"])
+        self.assertIn("quality_clamped", p["warnings"])
+
+    def test_a_portfolio_clamping_too_often_is_flagged_as_an_anchor_problem(self):
+        results = [{"quality": {"clamped": i < 3}} for i in range(20)]
+        rep = engine.clamp_report(results)
+        self.assertAlmostEqual(rep["rate"], 0.15)
+        self.assertTrue(rep["anchor_suspect"])
+
+    def test_a_healthy_portfolio_is_not_flagged(self):
+        results = [{"quality": {"clamped": i < 1}} for i in range(50)]
+        self.assertFalse(engine.clamp_report(results)["anchor_suspect"])

@@ -327,7 +327,7 @@ def calib_set(source, district, bedrooms, mape, bias_factor, n_obs, trust_tier):
 # the math survives in ejar.owner_annual_net for acquisition material. Validating
 # here is the structural half of that decision — a rule nothing enforces is a
 # rule that comes back.
-BOUND_BY_VALUES = ("floor", "model")
+BOUND_BY_VALUES = ("floor", "model", "ceiling")
 
 
 class RetiredBoundBy(ValueError):

@@ -46,6 +46,10 @@ DEFAULT_COSTS = {
     "min_margin_sar": 650.0,        # what we require to bother
     "blended_channel_pct": 0.15,    # Airbnb/Booking/Gathern blended host fee
     "alos": 2.9,                    # average length of stay, nights
+    # A guest who commits to 30 nights up front must pay LESS than booking those
+    # 30 nights one at a time, or the monthly product has no reason to exist.
+    # This discount IS the product. Owner-editable.
+    "monthly_commitment_discount": 0.15,
 }
 
 
@@ -384,19 +388,66 @@ def base_rate(district=None, bedroom=None):
     return {"base": None, "basis": "insufficient", "pool_obs": 0}
 
 
-def round_to_50(value, binding_gate):
-    """Round to the nearest 50 — upward whenever rounding down would put the
-    price below the constraint that set it. A rounded price that breaches its own
-    gate is a bug, not a cosmetic choice."""
+BOUND_BY_VALUES = ("floor", "model", "ceiling")
+
+
+def ceiling_price(adr, cost_set=None):
+    """CEILING — 30 nights at our own nightly rate, less the commitment discount.
+
+    THE CONSTRAINT THAT WAS MISSING. max(FLOOR, MODEL) runs upward forever: the
+    floor is a floor and nothing held the model down. A guest can always book 30
+    consecutive nights one at a time, so a monthly price above that rack total is
+    a price nobody takes. The engine proposed 23,506 for a unit whose 30 nights
+    cost 18,840 — arithmetically consistent, commercially absurd.
+    """
+    c = cost_set or costs()
+    a = _num(adr)
+    if a is None or a <= 0:
+        return None
+    return 30.0 * a * (1.0 - c["monthly_commitment_discount"])
+
+
+def round_to_50(value, floor=None, ceiling=None):
+    """Round to the nearest 50 WITHOUT leaving the band.
+
+    The original rule — round up when rounding down would breach — was written
+    for a floor. Against a ceiling it is exactly backwards: rounding up breaches
+    the cap. So the band is respected in both directions, and if no multiple of
+    50 fits inside it at all, there is no sane rounded price and we say so rather
+    than quietly stepping outside.
+    """
     v = _num(value)
     if v is None:
         return None
     import math
     nearest = round(v / PRICE_STEP) * PRICE_STEP
-    g = _num(binding_gate)
-    if g is not None and nearest < g:
-        return math.ceil(g / PRICE_STEP) * PRICE_STEP
+    lo, hi = _num(floor), _num(ceiling)
+    if lo is not None and nearest < lo:
+        nearest = math.ceil(lo / PRICE_STEP) * PRICE_STEP
+    if hi is not None and nearest > hi:
+        nearest = math.floor(hi / PRICE_STEP) * PRICE_STEP
+    if lo is not None and nearest < lo:
+        return None                     # the band holds no 50-step price
     return nearest
+
+
+def clamp_report(results):
+    """How often the quality clamp binds across a set of priced units.
+
+    The clamp is a DIAGNOSTIC, not a save. One unit pinned at 1.60 is an
+    exceptional apartment; a tenth of the portfolio pinned there is a
+    mis-anchored scale, and the second is far more likely than the first.
+    """
+    rows = [r for r in (results or []) if r]
+    n = len(rows)
+    hits = sum(1 for r in rows if (r.get("quality") or {}).get("clamped"))
+    rate = (hits / float(n)) if n else 0.0
+    return {"n": n, "clamped": hits, "rate": rate,
+            "anchor_suspect": n >= 10 and rate > CLAMP_RATE_ALARM,
+            "threshold": CLAMP_RATE_ALARM}
+
+
+CLAMP_RATE_ALARM = 0.10
 
 
 def months_let_breakeven(price, monthly_direct_cost, nightly_year_net):
@@ -437,6 +488,24 @@ def _confidence(basis, own_obs, unanswered_count):
     return _CONF_LADDER[min(i, len(_CONF_LADDER) - 1)]
 
 
+def _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar, ejar_row,
+              today, paired_obs, reason):
+    """No price, and the reason why. A blank with a stated cause beats a number
+    nobody should act on."""
+    return {
+        "unit_id": unit_id, "month": month, "price": None, "price_unrounded": None,
+        "bound_by": None, "confidence": "insufficient", "basis": fc["basis"],
+        "gates": gates, "components": [], "multipliers": [], "quality": q,
+        "floor_detail": fl, "breakeven": None,
+        "market_context": _ejar.market_context(None, ejar_row, today=today),
+        "data": {"own_obs": fc["own_obs"], "unanswered": q["unanswered"],
+                 "adr": fc["adr"], "occ": fc["occ"],
+                 "beta_version": attrs.BETA_VERSION, "paired_obs": paired_obs},
+        "is_estimate": True, "label_ar": "تقدير", "label_en": "Estimate",
+        "warnings": [reason],
+    }
+
+
 def price_unit(unit_id, month, own=None, district=None, bedroom=None,
                attr_values=None, cost_set=None, ejar_row=None, paired_obs=0,
                today=None):
@@ -459,28 +528,40 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
     fl = floor_price(fc["adr"], fc["occ"], c)
     mp = model_price(base["base"], attr_values)
 
-    gates = {"floor": (fl or {}).get("floor"), "model": (mp or {}).get("model")}
-    live = {k: v for k, v in gates.items() if v is not None}
+    ceil_p = ceiling_price(fc["adr"], c)
+    gates = {"floor": (fl or {}).get("floor"), "model": (mp or {}).get("model"),
+             "ceiling": ceil_p}
+    live = {k: v for k, v in gates.items()
+            if v is not None and k in ("floor", "model")}
 
     # Market context is computed AFTER the price and never feeds it. Passing the
     # price in one direction only is what keeps that true.
     if not live:
-        return {
-            "unit_id": unit_id, "month": month, "price": None,
-            "price_unrounded": None, "bound_by": None,
-            "confidence": "insufficient", "basis": fc["basis"],
-            "gates": gates, "components": [], "multipliers": [],
-            "quality": q, "floor_detail": fl, "breakeven": None,
-            "market_context": _ejar.market_context(None, ejar_row, today=today),
-            "data": {"own_obs": fc["own_obs"], "unanswered": q["unanswered"],
-                     "beta_version": attrs.BETA_VERSION, "paired_obs": paired_obs},
-            "is_estimate": True, "label_ar": "تقدير", "label_en": "Estimate",
-            "warnings": ["insufficient_history"],
-        }
+        return _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar,
+                         ejar_row, today, paired_obs, "insufficient_history")
 
+    # FINAL = clamp(max(FLOOR, MODEL), FLOOR, CEILING).
     bound_by = max(live, key=lambda k: live[k])
     final_raw = live[bound_by]
-    price = round_to_50(final_raw, final_raw)
+
+    floor_v = gates["floor"]
+    if ceil_p is not None and floor_v is not None and floor_v > ceil_p:
+        # Not lettable monthly at a price that makes sense. Do NOT split the
+        # difference — a number halfway between "we lose money" and "no guest
+        # would pay it" is simply a number nobody should act on.
+        return _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar,
+                         ejar_row, today, paired_obs, "floor_above_ceiling")
+
+    capped = False
+    if ceil_p is not None and final_raw > ceil_p:
+        final_raw = ceil_p
+        bound_by = "ceiling"
+        capped = True
+
+    price = round_to_50(final_raw, floor=floor_v, ceiling=ceil_p)
+    if price is None:
+        return _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar,
+                         ejar_row, today, paired_obs, "band_too_narrow")
 
     # The waterfall starts at the FLOOR's own components and is carried up to the
     # number printed at the top of the page — one step for what the unit's
@@ -495,6 +576,11 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
             "key": "quality_uplift", "sar": final_raw - (fl or {}).get("floor", 0.0),
             "label_ar": "رفعناه لأن مواصفات الوحدة تستاهل أكثر من الأرضية",
             "label_en": "Raised: the unit's own features are worth more than the floor"})
+    elif bound_by == "ceiling":
+        components.append({
+            "key": "ceiling_cap", "sar": final_raw - (fl or {}).get("floor", 0.0),
+            "label_ar": "وقفناه عند سقف: أقل مما يدفعه الضيف لو حجز 30 ليلة وحدة وحدة",
+            "label_en": "Capped: below what a guest would pay booking 30 nights one by one"})
     if abs(price - final_raw) > 1e-9:
         components.append({
             "key": "rounding", "sar": price - final_raw,
@@ -511,6 +597,11 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
     is_estimate = (paired_obs or 0) < attrs.CALIBRATED_AT
 
     warnings = []
+    if capped:
+        # A WARNING, not a normal outcome: the model wanted more than a guest
+        # would pay night-by-night. That is a signal about the model, not about
+        # the unit.
+        warnings.append("model_above_ceiling")
     if fc["basis"] != "own_history":
         warnings.append("priced_from_pool")
     if q["clamped"]:

@@ -45,6 +45,30 @@ BETAS = [
 
 BETA_VERSION = 1
 
+# ─────────────────────────── THE ANCHOR IS THE CALIBRATION ───────────────────────────
+# Every score is RELATIVE TO OUR OWN PORTFOLIO, not to an abstract idea of good.
+# The multiplier formula is 1 + beta x (score - 5)/5, so a score of 5 means "this
+# unit sits exactly at the middle of the 53" and contributes nothing.
+#
+# This matters more than any individual weight. If a scorer reads 5 as "fine,
+# nothing special" instead of "the median Ouja unit", everything lands at 7-8,
+# every multiplier points up, and THE WHOLE PORTFOLIO INFLATES BY THE SAME AMOUNT
+# — invisibly, because nothing looks wrong on any single unit. Twelve attributes
+# all multiplying upward until the clamp catches them is the signature of a bad
+# anchor, not of an exceptional apartment.
+SCORE_ANCHOR_AR = ("5 = الوحدة المتوسطة عندنا في عوجا · 1 = الأضعف في محفظتنا · "
+                   "10 = الأفضل في محفظتنا")
+SCORE_ANCHOR_EN = ("5 = the median Ouja unit · 1 = worst in our portfolio · "
+                   "10 = best in our portfolio")
+# A bool is anchored the same way: yes/no against the portfolio, not the world.
+BOOL_ANCHOR_AR = "نعم / لا — بالمقارنة مع بقية وحداتنا"
+BOOL_ANCHOR_EN = "Yes / no, judged against the rest of our units"
+
+# If the MEDIAN score of an attribute across the portfolio sits materially above
+# 5, the anchor is wrong and every price built on it is wrong in the same
+# direction. Half a point is materially.
+ANCHOR_MEDIAN_TOL = 0.5
+
 # Below this many (predicted, actual) pairs the model has never been checked
 # against reality, so its output is «تقدير» and is labelled as such everywhere.
 CALIBRATED_AT = 200
@@ -167,5 +191,36 @@ def rows_for_ui(values):
             "key": k, "label_ar": ar, "label_en": en, "beta": b, "kind": kd,
             "value": raw, "score": s, "answered": s is not None,
             "mult": multiplier(k, raw),
+            # Carried on every row so the anchor is in front of whoever is
+            # scoring, not buried in a doc nobody opens while typing a 7.
+            "anchor_ar": (BOOL_ANCHOR_AR + " (5 = المتوسط)") if kd == "bool" else SCORE_ANCHOR_AR,
+            "anchor_en": (BOOL_ANCHOR_EN + " (5 = median)") if kd == "bool" else SCORE_ANCHOR_EN,
         })
+    return out
+
+
+def median_report(all_unit_values):
+    """Median score per attribute across the whole portfolio — the anchor check.
+
+    A median materially above 5 means the scale is mis-anchored, and every price
+    built on it is wrong in the same direction. That is invisible on any single
+    unit, which is exactly why it needs a portfolio-level report.
+    """
+    import statistics
+    out = []
+    for k in KEYS:
+        scores = []
+        for vals in (all_unit_values or []):
+            s = to_score(k, (vals or {}).get(k))
+            if s is not None:
+                scores.append(s)
+        med = statistics.median(scores) if scores else None
+        out.append({
+            "key": k, "label_ar": label_ar(k), "label_en": label_en(k),
+            "beta": beta(k), "n_scored": len(scores), "median": med,
+            "anchor_suspect": med is not None and abs(med - 5.0) > ANCHOR_MEDIAN_TOL,
+            "direction": None if med is None else ("high" if med > 5 else
+                                                   ("low" if med < 5 else "even")),
+        })
+    out.sort(key=lambda r: (not r["anchor_suspect"], -r["beta"]))
     return out
