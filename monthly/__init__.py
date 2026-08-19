@@ -53,12 +53,25 @@ are not re-decided later in a moment of enthusiasm.
    hidden. Still open, and it gates the public side: confirm the فال scope
    covers التسويق and not only الوساطة.
 
-4. «الإشغال المتعادل» IS MEASURED AGAINST THE NIGHTLY PATH.
-   The occupancy the unit must reach, let nightly, to match what the owner nets
-   from their annual lease. The monthly path has no occupancy term in it, so the
-   figure cannot be derived from it. The PDF also carries the months-let
-   break-even: how many months of the year the unit must be let monthly to beat
-   the same lease — the more honest framing for a monthly pitch.
+4. THE OWNER-VERSUS-ANNUAL-LEASE COMPARISON IS OUT OF THE PRICING PATH.
+   Superseded 2026-08-19. Ouja's owners are on revenue guarantees — they are not
+   choosing between a yearly lease and us — so a gate built on that comparison
+   answered a question nobody asks.
+     * FINAL = max(FLOOR, MODEL). bound_by is 'floor' or 'model' only, and
+       db.save_quote REFUSES any other value.
+     * The gate math is kept, not deleted, in ejar.owner_annual_net for owner
+       acquisition later. engine.py does not import it and a test asserts the
+       pricing path cannot reach it.
+     * Ejar becomes MARKET CONTEXT: our monthly price as a multiple of the
+       district's annual-equivalent month. Shown, never acted on. A 2.8x is
+       plausible for furnished and serviced; an 8x is a question worth being
+       asked before an owner asks it.
+     * `base` for the model price therefore comes from OUR OWN realised history.
+       An annual-lease index feeding a variable called base_rate would be Ejar
+       binding the price under a different name, invisibly.
+     * BREAK-EVEN is months-let against the NIGHTLY path: how many months of the
+       year this unit must be let monthly to match what it would have earned let
+       nightly over the same period.
 ──────────────────────────────────────────────────────────────────────────────
 """
 

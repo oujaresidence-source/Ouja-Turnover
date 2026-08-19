@@ -13,9 +13,13 @@ THE SHAPE OF THE ANSWER (§3)
      commission.
   3. FLOOR — the monthly rent that leaves us no worse off than that, plus what
      the monthly path itself costs, plus a margin.
-  4. MODEL  — what the unit's own quality says it is worth.        (S5)
-  5. GATE   — what the owner must clear to beat their annual lease. (S7)
-  6. FINAL  = max of the three, and WHICH ONE won is the explanation.
+  4. MODEL  — what the unit's own quality says it is worth.
+  5. FINAL  = max(FLOOR, MODEL), and WHICH ONE won is the explanation.
+
+There is no third gate. The owner-versus-annual-lease comparison left this path
+on 2026-08-19 — Ouja's owners are on revenue guarantees, so it answered a
+question nobody asks. Ejar survives as market context AFTER the price, never
+before it.
 
 WHY PER CALENDAR MONTH AND NEVER A YEARLY AVERAGE
 Ramadan and the summer trough are real and large in Riyadh. A flat twelve-month
@@ -344,3 +348,194 @@ def check_reconciles(components, total, label="waterfall"):
             "%s does not reconcile: components sum to %.2f but the total shown "
             "is %.2f (a %.2f SAR discrepancy on screen)" % (label, s, t, s - t))
     return True
+
+
+# ═════════════════════ the two gates, and the answer (§3.6, §3.7) ═════════════════════
+#
+# FINAL = max(FLOOR, MODEL). There is no third gate.
+#
+# The owner-versus-annual-lease comparison was removed from this path on
+# 2026-08-19: Ouja's owners are on revenue guarantees, so it answered a question
+# nobody asks. Its math survives in ejar.owner_annual_net for acquisition
+# material. THIS MODULE DOES NOT IMPORT IT, and a test asserts so — a retired
+# gate that can still be reached is not retired.
+#
+# `base` for the model price comes from OUR OWN realised history and never from
+# the annual-lease index. An index feeding a variable named base_rate would be
+# Ejar binding the price under a different name, and nobody reading that call
+# site would see it happen. Ejar appears only AFTER the price, as a multiple.
+
+PRICE_STEP = 50
+
+
+def base_rate(district=None, bedroom=None):
+    """What a unit like this actually earns us in a month, from our own history:
+    30 nights at the comparable pool's own ADR and occupancy.
+
+    Deliberately NOT scaled by this unit's quality — model_price applies
+    quality_mult exactly once, and scaling here as well would count a good unit
+    twice.
+    """
+    for rows, basis in ((district, "district_pool"), (bedroom, "bedroom_pool")):
+        f = forecast(rows)
+        if f:
+            return {"base": 30.0 * f["adr"] * f["occ"], "basis": basis,
+                    "pool_obs": f["n"]}
+    return {"base": None, "basis": "insufficient", "pool_obs": 0}
+
+
+def round_to_50(value, binding_gate):
+    """Round to the nearest 50 — upward whenever rounding down would put the
+    price below the constraint that set it. A rounded price that breaches its own
+    gate is a bug, not a cosmetic choice."""
+    v = _num(value)
+    if v is None:
+        return None
+    import math
+    nearest = round(v / PRICE_STEP) * PRICE_STEP
+    g = _num(binding_gate)
+    if g is not None and nearest < g:
+        return math.ceil(g / PRICE_STEP) * PRICE_STEP
+    return nearest
+
+
+def months_let_breakeven(price, monthly_direct_cost, nightly_year_net):
+    """How many months of the year this unit must be let MONTHLY to match what it
+    would have earned let NIGHTLY over the same year.
+
+    The question the monthly product actually raises. Above 12 it cannot match
+    nightly even fully let, which is a real and useful answer rather than a
+    failure.
+    """
+    p, cost, ny = _num(price), _num(monthly_direct_cost), _num(nightly_year_net)
+    if p is None or cost is None or ny is None:
+        return {"months_let": None, "kept_per_month": None,
+                "nightly_year_net": ny, "exceeds_year": None}
+    kept = p - cost
+    if kept <= 0:
+        return {"months_let": None, "kept_per_month": kept,
+                "nightly_year_net": ny, "exceeds_year": None}
+    months = ny / kept
+    return {"months_let": months, "kept_per_month": kept,
+            "nightly_year_net": ny, "exceeds_year": months > 12.0}
+
+
+_CONF_LADDER = ("high", "medium", "low")
+
+
+def _confidence(basis, own_obs, unanswered_count):
+    from . import attrs
+    if basis == "insufficient":
+        return "insufficient"
+    i = 0
+    if basis != "own_history":
+        i += 1
+    if (own_obs or 0) < 20:
+        i += 1
+    if (unanswered_count or 0) > attrs.MAX_UNANSWERED_BEFORE_LOW:
+        i += 1
+    return _CONF_LADDER[min(i, len(_CONF_LADDER) - 1)]
+
+
+def price_unit(unit_id, month, own=None, district=None, bedroom=None,
+               attr_values=None, cost_set=None, ejar_row=None, paired_obs=0,
+               today=None):
+    """THE ANSWER, and the reason for it.
+
+    One producer, two surfaces: page.py renders the waterfall from `components`
+    and quote.py renders the PDF from the same object, so the screen and the
+    document cannot drift apart.
+    """
+    from . import attrs, ejar as _ejar
+
+    c = cost_set or costs()
+    attr_values = attr_values or {}
+
+    q = quality_multiplier(attr_values)
+    fc = forecast_unit(own=own, district=district, bedroom=bedroom,
+                       quality_index=q["mult"])
+
+    base = base_rate(district=district, bedroom=bedroom)
+    fl = floor_price(fc["adr"], fc["occ"], c)
+    mp = model_price(base["base"], attr_values)
+
+    gates = {"floor": (fl or {}).get("floor"), "model": (mp or {}).get("model")}
+    live = {k: v for k, v in gates.items() if v is not None}
+
+    # Market context is computed AFTER the price and never feeds it. Passing the
+    # price in one direction only is what keeps that true.
+    if not live:
+        return {
+            "unit_id": unit_id, "month": month, "price": None,
+            "price_unrounded": None, "bound_by": None,
+            "confidence": "insufficient", "basis": fc["basis"],
+            "gates": gates, "components": [], "multipliers": [],
+            "quality": q, "floor_detail": fl, "breakeven": None,
+            "market_context": _ejar.market_context(None, ejar_row, today=today),
+            "data": {"own_obs": fc["own_obs"], "unanswered": q["unanswered"],
+                     "beta_version": attrs.BETA_VERSION, "paired_obs": paired_obs},
+            "is_estimate": True, "label_ar": "تقدير", "label_en": "Estimate",
+            "warnings": ["insufficient_history"],
+        }
+
+    bound_by = max(live, key=lambda k: live[k])
+    final_raw = live[bound_by]
+    price = round_to_50(final_raw, final_raw)
+
+    # The waterfall starts at the FLOOR's own components and is carried up to the
+    # number printed at the top of the page — one step for what the unit's
+    # quality is worth, one for the rounding. It must land exactly on `price`.
+    components = list((fl or {}).get("components") or [])
+    if not components:
+        components = [{"key": "model_base", "sar": (mp or {}).get("model") or 0.0,
+                       "label_ar": "سعر الوحدة حسب مواصفاتها وأداء الحي",
+                       "label_en": "The unit's own worth, from its features and its district"}]
+    if bound_by == "model":
+        components.append({
+            "key": "quality_uplift", "sar": final_raw - (fl or {}).get("floor", 0.0),
+            "label_ar": "رفعناه لأن مواصفات الوحدة تستاهل أكثر من الأرضية",
+            "label_en": "Raised: the unit's own features are worth more than the floor"})
+    if abs(price - final_raw) > 1e-9:
+        components.append({
+            "key": "rounding", "sar": price - final_raw,
+            "label_ar": "تقريب لأقرب 50 ريال",
+            "label_en": "Rounded to the nearest 50 SAR"})
+
+    check_reconciles(components, price, "price waterfall")
+
+    nightly_year_net = 12.0 * (fl or {}).get("nightly", {}).get("nightly_net", 0.0)
+    be = months_let_breakeven(price, (fl or {}).get("monthly_direct_cost"),
+                              nightly_year_net)
+
+    conf = _confidence(fc["basis"], fc["own_obs"], q["unanswered"])
+    is_estimate = (paired_obs or 0) < attrs.CALIBRATED_AT
+
+    warnings = []
+    if fc["basis"] != "own_history":
+        warnings.append("priced_from_pool")
+    if q["clamped"]:
+        warnings.append("quality_clamped")
+    if q["unanswered"] > attrs.MAX_UNANSWERED_BEFORE_LOW:
+        warnings.append("thin_attributes")
+
+    return {
+        "unit_id": unit_id, "month": month,
+        "price": price, "price_unrounded": final_raw,
+        "bound_by": bound_by,
+        "confidence": conf, "basis": fc["basis"],
+        "gates": gates,
+        "components": components,
+        "multipliers": (mp or {}).get("quality", {}).get("multipliers", []),
+        "quality": q,
+        "floor_detail": fl,
+        "breakeven": be,
+        "market_context": _ejar.market_context(price, ejar_row, today=today),
+        "data": {"own_obs": fc["own_obs"], "pool_obs": fc["pool_obs"],
+                 "unanswered": q["unanswered"], "adr": fc["adr"], "occ": fc["occ"],
+                 "base": base["base"], "base_basis": base["basis"],
+                 "beta_version": attrs.BETA_VERSION, "paired_obs": paired_obs},
+        "is_estimate": is_estimate,
+        "label_ar": "تقدير" if is_estimate else "سعر",
+        "label_en": "Estimate" if is_estimate else "Price",
+        "warnings": warnings,
+    }

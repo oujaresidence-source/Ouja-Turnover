@@ -17,11 +17,18 @@ market rate.
     silver  Ejar / Sakani / REGA index    annual-lease reference only
     bronze  AirDNA, Bayut, عقار           direction and trend, never a quote
 
-THE MOST IMPORTANT BEHAVIOUR IN THIS FILE is what happens when there is NO
-reference row. The owner gate then has nothing to compare against, and it must
-report UNAVAILABLE — never zero, never satisfied. A silently-zero gate would drop
-straight out of the max() that picks the final price, and the screen would look
-completely normal while the single most important constraint had vanished.
+EJAR IS CONTEXT, NOT A GATE (owner, 2026-08-19). Ouja's owners are on revenue
+guarantees; they are not choosing between a yearly lease and us, so a gate built
+on that comparison answered a question nobody asks. Nothing in this module may
+bind a price. What it produces is a MULTIPLE — our monthly price against the
+district's annual-equivalent month — shown so a 2.8x can be recognised as
+plausible for furnished, serviced, utilities-included and flexible, and an 8x can
+be caught before an owner sees it.
+
+Which is also why `base` for the model price is drawn from OUR OWN realised
+history and never from here. An annual-lease index feeding a variable named
+base_rate would be this module binding the price under a different name, and
+nobody reading that call site would see it happen.
 """
 
 import datetime
@@ -153,19 +160,19 @@ def reference(row, today=None):
     """One stored reference row -> what we may do with it, and what to warn about.
 
     `usable` False with `annual_rent` None is the honest shape of "we do not
-    know". The caller must render the owner comparison as UNAVAILABLE — not as
-    passed, not as zero.
+    know". The caller renders the market context as UNAVAILABLE — it never
+    substitutes a zero, and it never lets the absence pass unremarked.
     """
     today = today or datetime.date.today().isoformat()
 
     if not row:
         return {"usable": False, "annual_rent": None, "tier": None,
-                "warnings": ["ejar_missing"], "confidence_penalty": True,
+                "warnings": ["ejar_missing"], "context_confidence_penalty": True,
                 "as_of": None, "txn_count": None,
                 "message_ar": "ما عندنا مرجع إيجار سنوي لهذا الحي — "
-                              "مقارنة المالك غير متاحة",
+                              "مقارنة السوق غير متاحة (ما تأثّر السعر)",
                 "message_en": "No annual-lease reference for this district — "
-                              "the owner comparison is unavailable"}
+                              "market context unavailable (the price is unaffected)"}
 
     warnings = []
     rent = _num(row.get("annual_rent"))
@@ -203,9 +210,11 @@ def reference(row, today=None):
         "annual_rent": rent if usable_now else None,
         "tier": tier,
         "warnings": warnings,
-        # A thin or stale reference is still a reference — it just costs a level
-        # of stated confidence rather than being thrown away.
-        "confidence_penalty": bool({"ejar_stale", "thin_district"} & set(warnings)),
+        # Costs a level of confidence IN THE MARKET CONTEXT ONLY. It must never
+        # reach the price's own confidence: Ejar no longer feeds the price, and a
+        # number that does not feed a price has no business degrading how
+        # confidently that price is stated.
+        "context_confidence_penalty": bool({"ejar_stale", "thin_district"} & set(warnings)),
         "as_of": row.get("as_of"),
         "txn_count": None if txn is None else int(txn),
     }
@@ -223,8 +232,16 @@ def terms(**overrides):
     return t
 
 
+# ── NOT IN THE PRICING PATH ──────────────────────────────────────────────────
+# Kept, not deleted: written and tested, and wanted for owner acquisition later.
+# But it must not find a quiet way back into a price, so engine.py never imports
+# it and a test asserts the pricing path cannot reach it.
+
 def owner_annual_net(ejar_annual, term_overrides=None):
     """What the owner ACTUALLY keeps from a normal annual lease.
+
+    OUT OF THE PRICING PATH (owner, 2026-08-19). For owner-acquisition material,
+    never for setting a price.
 
     An owner weighing two paths compares what reaches their pocket, not the
     headline rent. Quoting them the gross would flatter our own side of the
@@ -281,3 +298,37 @@ def inversions(rows):
                                        "annual_rent": b.get("annual_rent")},
                 })
     return out
+
+
+def market_context(monthly_price, row, today=None):
+    """Our monthly price as a multiple of the district's annual-equivalent month.
+
+    INFORMATIONAL. Nothing here may bind, adjust or veto a price — it is a number
+    to look at before an owner does. A 2.8x is plausible for furnished, serviced,
+    utilities-included and flexible-term. An 8x is a question, and the point of
+    computing it is to be asked that question early.
+    """
+    r = reference(row, today=today)
+    price = _num(monthly_price)
+    if not r["usable"] or price is None or price <= 0:
+        return {"available": False, "multiple": None, "annual_equivalent_month": None,
+                "annual_rent": None, "warnings": r["warnings"], "tier": r["tier"],
+                "as_of": r.get("as_of"), "txn_count": r.get("txn_count"),
+                "binding": False,
+                "message_ar": r.get("message_ar") or "مرجع السوق غير متاح لهذا الحي",
+                "message_en": r.get("message_en") or "No market reference for this district"}
+    aem = r["annual_rent"] / 12.0
+    return {
+        "available": True,
+        "annual_rent": r["annual_rent"],
+        "annual_equivalent_month": aem,
+        "multiple": price / aem,
+        "warnings": r["warnings"],
+        "tier": r["tier"],
+        "as_of": r.get("as_of"),
+        "txn_count": r.get("txn_count"),
+        # Stated on the object itself so no caller has to remember it.
+        "binding": False,
+        "message_ar": "للسياق فقط — ما يدخل في حساب السعر",
+        "message_en": "Context only — does not enter the price calculation",
+    }

@@ -78,7 +78,7 @@ class EjarTest(_Base):
 
 class OverrideTest(_Base):
     def _quote(self):
-        return db.save_quote(555, "2026-10", 11800, 11800, "owner_gate", "high",
+        return db.save_quote(555, "2026-10", 11800, 11800, "model", "high",
                              attrs.BETA_VERSION, {"price": 11800}, created_by="faisal")
 
     def test_override_without_a_reason_is_refused(self):
@@ -103,9 +103,9 @@ class FrozenQuoteTest(_Base):
     def test_a_saved_quote_does_not_change_when_the_model_does(self):
         """August's quote must still explain itself in November, in August's
         terms — not recomputed against whatever the betas say by then."""
-        payload = {"price": 11800, "bound_by": "owner_gate",
+        payload = {"price": 11800, "bound_by": "model",
                    "multipliers": [{"key": "sqm", "beta": 0.25}]}
-        qid = db.save_quote(777, "2026-10", 11800, 11800, "owner_gate", "high",
+        qid = db.save_quote(777, "2026-10", 11800, 11800, "model", "high",
                             1, payload, created_by="faisal")
         payload["price"] = 99999                      # the caller mutates its own dict
         payload["multipliers"][0]["beta"] = 0.99

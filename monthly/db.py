@@ -322,9 +322,24 @@ def calib_set(source, district, bedrooms, mape, bias_factor, n_obs, trust_tier):
 
 # ──────────────────────────── quotes & overrides ────────────────────────────
 
+# The only constraints a price may be bound by. 'owner_gate' was retired on
+# 2026-08-19 when the owner-versus-annual-lease comparison left the pricing path;
+# the math survives in ejar.owner_annual_net for acquisition material. Validating
+# here is the structural half of that decision — a rule nothing enforces is a
+# rule that comes back.
+BOUND_BY_VALUES = ("floor", "model")
+
+
+class RetiredBoundBy(ValueError):
+    """A quote claiming to be bound by a constraint the engine cannot produce."""
+
+
 def save_quote(unit_id, month, price, final_price, bound_by, confidence,
                beta_version, payload, override_pct=0.0, created_by=None):
     """Freeze one quote. payload is serialised HERE and never rewritten."""
+    if bound_by not in BOUND_BY_VALUES:
+        raise RetiredBoundBy(
+            "bound_by must be one of %s — got %r" % (BOUND_BY_VALUES, bound_by))
     _ensure()
     with closing(_bdb.connect()) as cx:
         cur = cx.execute(

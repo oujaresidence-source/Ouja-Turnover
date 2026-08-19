@@ -118,11 +118,16 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual(r["annual_rent"], 85000)
         self.assertEqual(r["warnings"], [])
 
-    def test_a_row_older_than_180_days_is_stale_and_lowers_confidence(self):
+    def test_a_stale_row_lowers_CONTEXT_confidence_only(self):
+        # Renamed with the key: since 2026-08-19 Ejar is market context and does
+        # not feed the price, so staleness may cost confidence in the CONTEXT and
+        # must never touch confidence in the price. test_monthly_engine asserts
+        # the other half — that a stale row leaves the price's confidence equal.
         row = dict(self.FRESH, as_of="2025-12-01")
         r = ejar.reference(row, today="2026-08-19")
         self.assertIn("ejar_stale", r["warnings"])
-        self.assertTrue(r["confidence_penalty"])
+        self.assertTrue(r["context_confidence_penalty"])
+        self.assertNotIn("confidence_penalty", r)
 
     def test_a_thin_district_is_flagged(self):
         """The published index itself uses 200 transactions as its threshold."""
