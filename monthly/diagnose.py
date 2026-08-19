@@ -165,3 +165,102 @@ def run(units, cost_set=None, today=None):
         "n_priced": len(priced),
         "turnover_cost_used": c["turnover_cost_sar"],
     }
+
+
+def render_text(multi):
+    """A compact, pasteable summary. The full JSON is 53 units x N months and is
+    unreadable in a terminal; this is the part a human actually reads, with the
+    two trust numbers first because everything else is conditional on them."""
+    L = []
+    A = L.append
+    A("=" * 68)
+    A("  MONTHLY PRICING DIAGNOSIS")
+    A("=" * 68)
+
+    p = PREDICTIONS
+    A("")
+    A("  PREDICTIONS ON RECORD (stated %s, before any live run)" % p["stated_on"])
+    for m in ("2026-08", "2026-10", "2027-01"):
+        if m in p["pct_above_85"]:
+            lo, hi = p["pct_above_85"][m]
+            A("    %s  pct_above_85 predicted %.0f-%.0f%%" % (m, lo * 100, hi * 100))
+    A("    ceiling-bound share should track pct_above_85 within %.0f pts"
+      % (p["ceiling_bound_share_tracks_pct_above_85"]["within"] * 100))
+    A("    units_with_own_history predicted %.0f-%.0f%%"
+      % (p["units_with_own_history"]["share"][0] * 100,
+         p["units_with_own_history"]["share"][1] * 100))
+
+    A("")
+    A("  TRUST CHECK FIRST — everything below is conditional on this")
+    A("  " + "-" * 64)
+    for r in multi.get("months") or []:
+        if r.get("error"):
+            A("    %s  ERROR: %s" % (r.get("month"), r["error"]))
+            continue
+        h = r.get("headline") or {}
+        A("    %s  own-history %d/%d (%.0f%%)   fallback %d   none %d   %s"
+          % (r.get("month"), h.get("units_with_own_history", 0), h.get("n_units", 0),
+             (h.get("pct_own_history") or 0) * 100, h.get("units_on_fallback", 0),
+             h.get("units_with_nothing", 0),
+             "OK" if h.get("trustworthy") else "*** NOT TRUSTWORTHY ***"))
+        if h.get("warning"):
+            A("            %s" % h["warning"])
+
+    A("")
+    A("  HEADLINE — share of units forecasting above 85% occupancy")
+    A("  " + "-" * 64)
+    A("    month      units   >85%     ceiling-bound   floor/gross   no-price")
+    for c in multi.get("compare") or []:
+        if c.get("error"):
+            continue
+        mrow = next((x for x in (multi.get("months") or [])
+                     if x.get("month") == c.get("month")), {})
+        n = (mrow.get("headline") or {}).get("n_units", 0)
+        A("    %-9s  %5d  %5.0f%%   %11.0f%%   %11s   %8d"
+          % (c.get("month"), n, (c.get("pct_above_85") or 0) * 100,
+             (c.get("ceiling_share") or 0) * 100,
+             ("%.3f" % c["floor_ratio_median"]) if c.get("floor_ratio_median") else "—",
+             c.get("no_price") or 0))
+
+    for r in multi.get("months") or []:
+        if r.get("error"):
+            continue
+        A("")
+        A("  %s" % r.get("month"))
+        A("  " + "-" * 64)
+        seg = r.get("segmented") or {}
+        A("    band     n   floor  model  ceiling  no-price   floor/gross")
+        for b in engine.OCC_BANDS:
+            br = (seg.get("bands") or {}).get(b) or {}
+            if not br.get("n"):
+                continue
+            k = br["counts"]
+            fr = ((r.get("floor_ratio_by_band") or {}).get(b) or {}).get("median")
+            A("    %-7s %3d  %5d  %5d  %7d  %8d   %11s"
+              % (b, br["n"], k["floor"], k["model"], k["ceiling"], k["no_price"],
+                 ("%.3f" % fr) if fr else "—"))
+        A("    verdict: %s" % seg.get("verdict"))
+        lm = r.get("loss_making_nightly") or []
+        A("    loss-making nightly: %d    band-closed/no-price: %d"
+          % (len(lm), len(r.get("no_price") or [])))
+        A("    turnover cost used: %s SAR  (%s)"
+          % (r.get("turnover_cost_used"), r.get("turnover_cost_source")))
+        A("    reservations read: %s   partial months dropped: %s"
+          % (r.get("n_reservations_read"), r.get("partial_months_dropped")))
+        if r.get("anchor_is_empty"):
+            A("    anchor: EMPTY — %d units unscored, so every quality_mult is 1.0"
+              % r.get("n_unscored", 0))
+        cl = r.get("clamp") or {}
+        A("    quality clamp: %d/%d at 1.60 (%.0f%%)%s"
+          % (cl.get("clamped", 0), cl.get("n", 0), (cl.get("rate") or 0) * 100,
+             "  ANCHOR SUSPECT" if cl.get("anchor_suspect") else ""))
+        for row in (r.get("no_price") or [])[:8]:
+            A("      no price: %s (%s) occ %.2f floor %s ceiling %s  %s"
+              % (row.get("name"), row.get("lid"), row.get("occ") or 0,
+                 int(row["floor"]) if row.get("floor") else "—",
+                 int(row["ceiling"]) if row.get("ceiling") else "—",
+                 ",".join(row.get("warnings") or [])))
+
+    A("")
+    A("=" * 68)
+    return "\n".join(L)

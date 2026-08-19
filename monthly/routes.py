@@ -87,6 +87,10 @@ async def _api_diagnose(request):
              "message": "أقصى 6 شهور في المرة الوحدة"}, 200)
     out = await asyncio.to_thread(collect.diagnose_months, ",".join(months))
     out["ok"] = True
+    if (request.rel_url.query.get("format") or "").lower() == "text":
+        from . import diagnose as _diag
+        return HOST.web.Response(text=_diag.render_text(out),
+                                 content_type="text/plain", charset="utf-8")
     return HOST.json_response(out)
 
 

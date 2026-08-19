@@ -166,3 +166,41 @@ class FallbackVisibilityTest(unittest.TestCase):
         rep = diagnose.run([unit(1, 500, 0.8)])
         for k in ("units_with_own_history", "units_on_fallback", "pct_own_history"):
             self.assertIn(k, rep["headline"])
+
+
+class RenderTextTest(unittest.TestCase):
+    def _multi(self):
+        r = diagnose.run([unit(1, 500, 0.92), unit(2, 500, 0.55)])
+        r["month"] = "2026-10"
+        return {"months": [r], "compare": [
+            {"month": "2026-10", "pct_above_85": r["headline"]["pct_above_85"],
+             "ceiling_share": r["segmented"]["overall"]["ceiling_share"],
+             "floor_ratio_median": r["floor_ratio"]["median"],
+             "no_price": 0, "trustworthy": True}]}
+
+    def test_the_trust_check_is_printed_before_the_headline(self):
+        txt = diagnose.render_text(self._multi())
+        self.assertLess(txt.index("TRUST CHECK FIRST"), txt.index("HEADLINE"))
+
+    def test_the_predictions_are_printed_above_everything(self):
+        txt = diagnose.render_text(self._multi())
+        self.assertLess(txt.index("PREDICTIONS ON RECORD"), txt.index("TRUST CHECK"))
+
+    def test_no_stray_percent_escapes_reach_the_reader(self):
+        self.assertNotIn("%%", diagnose.render_text(self._multi()))
+
+    def test_an_untrustworthy_month_is_shouted_not_whispered(self):
+        thin = [{"lid": i, "name": "u", "month": "2026-10", "own": [],
+                 "district_pool": [{"adr": 500, "occ": 0.8, "months_old": 1}],
+                 "bedroom_pool": [], "attr_values": {}, "ejar_row": None,
+                 "adr_pool": 500, "occ_pool": 0.8} for i in range(5)]
+        r = diagnose.run(thin); r["month"] = "2026-10"
+        txt = diagnose.render_text({"months": [r], "compare": []})
+        self.assertIn("NOT TRUSTWORTHY", txt)
+
+    def test_a_failed_month_reports_its_error_rather_than_vanishing(self):
+        txt = diagnose.render_text({"months": [{"month": "2027-01",
+                                                "error": "RuntimeError: boom"}],
+                                    "compare": [{"month": "2027-01", "error": "x"}]})
+        self.assertIn("ERROR", txt)
+        self.assertIn("2027-01", txt)
