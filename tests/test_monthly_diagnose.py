@@ -154,13 +154,14 @@ class FallbackVisibilityTest(unittest.TestCase):
         self.assertEqual(rep["headline"]["units_on_fallback"], 10)
         self.assertEqual(rep["headline"]["units_with_own_history"], 0)
         self.assertFalse(rep["headline"]["trustworthy"])
-        self.assertIn("POOL FALLBACK", rep["headline"]["warning"])
+        kinds = [w["kind"] for w in rep["headline"]["warnings"]]
+        self.assertIn("on_fallback", kinds)
 
     def test_a_portfolio_on_its_own_history_is_trustworthy(self):
         rep = diagnose.run([unit(i, 500, 0.8) for i in range(10)])
         self.assertEqual(rep["headline"]["units_with_own_history"], 10)
         self.assertTrue(rep["headline"]["trustworthy"])
-        self.assertIsNone(rep["headline"]["warning"])
+        self.assertEqual(rep["headline"]["warnings"], [])
 
     def test_the_split_sits_in_the_headline_not_the_detail(self):
         rep = diagnose.run([unit(1, 500, 0.8)])
@@ -204,3 +205,41 @@ class RenderTextTest(unittest.TestCase):
                                     "compare": [{"month": "2027-01", "error": "x"}]})
         self.assertIn("ERROR", txt)
         self.assertIn("2027-01", txt)
+
+
+class TwoDifferentFailuresTest(unittest.TestCase):
+    """'on fallback' and 'no price' mean opposite things and the first version of
+    the trust check printed the same sentence for both — which sent a live
+    diagnosis chasing a data-matching bug that was really a missing-metadata bug."""
+
+    def _no_history(self, n):
+        return [{"lid": i, "name": "u%d" % i, "month": "2026-10", "own": [],
+                 "district_pool": [], "bedroom_pool": [], "attr_values": {},
+                 "ejar_row": None} for i in range(n)]
+
+    def test_no_price_is_reported_separately_from_fallback(self):
+        rep = diagnose.run(self._no_history(10))
+        h = rep["headline"]
+        self.assertEqual(h["units_with_no_price"], 10)
+        self.assertEqual(h["units_on_fallback"], 0)
+
+    def test_the_warning_names_no_price_not_fallback(self):
+        rep = diagnose.run(self._no_history(10))
+        kinds = [w["kind"] for w in rep["headline"]["warnings"]]
+        self.assertIn("no_price", kinds)
+        self.assertNotIn("on_fallback", kinds)
+
+    def test_the_fallback_warning_only_fires_when_the_pool_path_ran(self):
+        pooled = [{"lid": i, "name": "u", "month": "2026-10", "own": [],
+                   "district_pool": [{"adr": 500, "occ": 0.8, "months_old": 1}],
+                   "bedroom_pool": [], "attr_values": {}, "ejar_row": None,
+                   "adr_pool": 500, "occ_pool": 0.8} for i in range(10)]
+        kinds = [w["kind"] for w in diagnose.run(pooled)["headline"]["warnings"]]
+        self.assertIn("on_fallback", kinds)
+        self.assertNotIn("no_price", kinds)
+
+    def test_a_no_price_unit_renders_occupancy_as_a_dash_not_zero(self):
+        r = diagnose.run(self._no_history(3)); r["month"] = "2026-10"
+        txt = diagnose.render_text({"months": [r], "compare": []})
+        self.assertIn("occ   —", txt)
+        self.assertNotIn("occ 0.00", txt)

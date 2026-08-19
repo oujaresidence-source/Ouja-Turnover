@@ -65,6 +65,31 @@ def _pct(n, d):
     return (n / float(d)) if d else 0.0
 
 
+def _trust_warnings(own, fallback, no_price, n):
+    out = []
+    if not n:
+        return out
+    if _pct(fallback, n) > 0.40:
+        out.append({
+            "kind": "on_fallback",
+            "text": "MOST UNITS ARE PRICED FROM DISTRICT POOLS — the distribution "
+                    "describes the pools, not these units",
+            "count": fallback})
+    if _pct(no_price, n) > 0.40:
+        out.append({
+            "kind": "no_price",
+            "text": "MOST UNITS RETURNED NO PRICE AT ALL — they are absent from "
+                    "the distribution, so the percentages below are shares of the "
+                    "few that priced, not of the portfolio",
+            "count": no_price})
+    if _pct(own, n) < 0.60 and not out:
+        out.append({
+            "kind": "thin_own_history",
+            "text": "fewer than 60% of units priced from their own history",
+            "count": own})
+    return out
+
+
 def run(units, cost_set=None, today=None):
     """`units` = [{lid, name, own, district_pool, bedroom_pool, attr_values,
     ejar_row, adr_pool, occ_pool}] — everything already gathered."""
@@ -133,12 +158,19 @@ def run(units, cost_set=None, today=None):
             # read these two before reading anything else
             "units_with_own_history": len(own_hist),
             "units_on_fallback": len(fallback),
-            "units_with_nothing": len(none_at_all),
+            "units_with_no_price": len(none_at_all),
             "pct_own_history": _pct(len(own_hist), n),
+            "pct_on_fallback": _pct(len(fallback), n),
+            "pct_no_price": _pct(len(none_at_all), n),
             "trustworthy": _pct(len(own_hist), n) >= 0.60,
-            "warning": (None if _pct(len(own_hist), n) >= 0.60 else
-                        "MOST UNITS ARE ON THE POOL FALLBACK — this distribution "
-                        "describes the pool, not the portfolio"),
+            # TWO DIFFERENT FAILURES THAT MEAN OPPOSITE THINGS, and the first
+            # version of this printed the same sentence for both. On fallback:
+            # every unit got a number, but the numbers describe district pools.
+            # No price: the unit got nothing, so it is absent from the
+            # distribution entirely and the denominator is the lie. The warning
+            # now names whichever actually happened.
+            "warnings": _trust_warnings(len(own_hist), len(fallback),
+                                        len(none_at_all), n),
         },
         "bands": {b: sum(1 for r in per_unit if r["band"] == b)
                   for b in engine.OCC_BANDS + ("unknown",)},
@@ -198,13 +230,28 @@ def render_text(multi):
             A("    %s  ERROR: %s" % (r.get("month"), r["error"]))
             continue
         h = r.get("headline") or {}
-        A("    %s  own-history %d/%d (%.0f%%)   fallback %d   none %d   %s"
-          % (r.get("month"), h.get("units_with_own_history", 0), h.get("n_units", 0),
-             (h.get("pct_own_history") or 0) * 100, h.get("units_on_fallback", 0),
-             h.get("units_with_nothing", 0),
-             "OK" if h.get("trustworthy") else "*** NOT TRUSTWORTHY ***"))
-        if h.get("warning"):
-            A("            %s" % h["warning"])
+        A("    %s   %s" % (r.get("month"),
+                             "OK" if h.get("trustworthy") else "*** NOT TRUSTWORTHY ***"))
+        A("        own history  %3d / %-3d (%.0f%%)   priced from this unit's own record"
+          % (h.get("units_with_own_history", 0), h.get("n_units", 0),
+             (h.get("pct_own_history") or 0) * 100))
+        A("        on fallback  %3d / %-3d (%.0f%%)   priced from a district/bedroom pool"
+          % (h.get("units_on_fallback", 0), h.get("n_units", 0),
+             (h.get("pct_on_fallback") or 0) * 100))
+        A("        NO PRICE     %3d / %-3d (%.0f%%)   absent from the distribution entirely"
+          % (h.get("units_with_no_price", 0), h.get("n_units", 0),
+             (h.get("pct_no_price") or 0) * 100))
+        for w in (h.get("warnings") or []):
+            A("        !! %s" % w["text"])
+        j = r.get("join") or {}
+        if j:
+            A("        join: %s active listings, %s with a district (%s from KB), "
+              "%s with bedrooms, %s matched a reservation"
+              % (j.get("listings_active"), j.get("with_district"),
+                 j.get("district_from_kb"), j.get("with_bedrooms"),
+                 j.get("units_matching_a_reservation")))
+            A("        pools built: %s district, %s bedroom"
+              % (j.get("district_pools"), j.get("bedroom_pools")))
 
     A("")
     A("  HEADLINE — share of units forecasting above 85% occupancy")
@@ -255,8 +302,12 @@ def render_text(multi):
           % (cl.get("clamped", 0), cl.get("n", 0), (cl.get("rate") or 0) * 100,
              "  ANCHOR SUSPECT" if cl.get("anchor_suspect") else ""))
         for row in (r.get("no_price") or [])[:8]:
-            A("      no price: %s (%s) occ %.2f floor %s ceiling %s  %s"
-              % (row.get("name"), row.get("lid"), row.get("occ") or 0,
+            A("      no price: %s (%s) occ %s floor %s ceiling %s  %s"
+              % (row.get("name"), row.get("lid"),
+                 # None is NOT 0.00. Printing it as 0.00 made "no forecast" read
+                 # as "zero reservations found", which sent a diagnosis chasing a
+                 # data-matching bug that was really a missing-metadata bug.
+                 ("%.2f" % row["occ"]) if row.get("occ") is not None else "  —",
                  int(row["floor"]) if row.get("floor") else "—",
                  int(row["ceiling"]) if row.get("ceiling") else "—",
                  ",".join(row.get("warnings") or [])))

@@ -147,15 +147,102 @@ class MonthArithmeticTest(unittest.TestCase):
 
 
 class TurnoverCostTest(unittest.TestCase):
-    def test_it_names_its_source_so_a_fallback_is_never_read_as_real(self):
-        val, src = data.turnover_cost_sar(140.0)
-        self.assertGreater(val, 0)
-        self.assertIn("coverage_study", src)
+    """Rewritten because the thing these asserted was fiction: the old code
+    called coverage_study.build_study(), which does not exist. hasattr() was
+    False, the call fell through silently, and the report said "coverage_study
+    unavailable" — which reads like a transient outage rather than an invented
+    API. The real entry point needs live teams, status logs, reports and photos
+    rebuilt per request and is cached nowhere, so the number is an owner setting
+    now and the source string says plainly which of the two it used."""
 
-    def test_the_fallback_is_labelled_as_a_fallback(self):
+    def test_an_owner_set_value_is_used_and_named(self):
+        val, src = data.turnover_cost_sar(140.0,
+                                          lambda *_a: {"turnover_cost_sar": 287})
+        self.assertEqual(val, 287.0)
+        self.assertIn("owner-set", src)
+
+    def test_the_default_announces_itself_loudly_and_says_what_to_do(self):
         val, src = data.turnover_cost_sar(140.0)
-        if val == 140.0:
-            self.assertIn("default", src)
+        self.assertEqual(val, 140.0)
+        self.assertIn("DEFAULT", src)
+        self.assertIn("monthly_settings.json", src)
+
+    def test_a_broken_settings_file_falls_back_rather_than_raising(self):
+        def boom(*_a):
+            raise ValueError("corrupt")
+        try:
+            val, src = data.turnover_cost_sar(140.0, boom)
+        except ValueError:
+            self.fail("a broken settings file must not take the report down")
+        self.assertEqual(val, 140.0)
+
+    def test_a_zero_or_negative_setting_is_refused(self):
+        for bad in (0, -50):
+            val, _src = data.turnover_cost_sar(140.0,
+                                               lambda *_a: {"turnover_cost_sar": bad})
+            self.assertEqual(val, 140.0)
+
+
+class ListingMetaTest(unittest.TestCase):
+    """THE JOIN FAILURE. get_listings_map returns {id: name} — a STRING — and
+    collect.py wrapped it as {"name": ...}, so district and bedrooms were None
+    for every unit, both pools built empty, and the fallback ladder had no rungs.
+    Zero units were 'on fallback' because that path could not execute."""
+
+    def _api(self, rows):
+        def api_get(_path, params=None):
+            off = (params or {}).get("offset", 0)
+            return {"result": rows[off:off + 100]}
+        return api_get
+
+    def test_it_returns_bedrooms_and_district_not_just_a_name(self):
+        meta = data.listing_meta(self._api([
+            {"id": 457230, "internalListingName": "1 MLQ", "bedroomsNumber": 3,
+             "city": "Riyadh", "status": "active"}]))
+        self.assertEqual(meta[457230]["bedrooms"], 3)
+        self.assertTrue(meta[457230]["district"])
+
+    def test_inactive_listings_are_dropped_from_the_denominator(self):
+        meta = data.listing_meta(self._api([
+            {"id": 1, "name": "live", "status": "active", "bedroomsNumber": 2},
+            {"id": 2, "name": "dead", "status": "inactive", "bedroomsNumber": 2},
+            {"id": 3, "name": "gone", "status": "delisted", "bedroomsNumber": 2}]))
+        self.assertEqual(list(meta), [1])
+
+    def test_the_kb_district_wins_over_hostaways_city(self):
+        """Hostaway's city is 'Riyadh' for every unit — it pools everything
+        together and can never match an Ejar row keyed on الملقا."""
+        meta = data.listing_meta(
+            self._api([{"id": 457230, "name": "1 MLQ", "city": "Riyadh",
+                        "bedroomsNumber": 3, "status": "active"}]),
+            kb_district=lambda lid: "الملقا")
+        self.assertEqual(meta[457230]["district"], "الملقا")
+        self.assertEqual(meta[457230]["district_source"], "kb")
+
+    def test_a_broken_kb_lookup_degrades_to_the_city_rather_than_crashing(self):
+        def boom(_lid):
+            raise RuntimeError("kb down")
+        meta = data.listing_meta(
+            self._api([{"id": 1, "name": "u", "city": "Riyadh",
+                        "bedroomsNumber": 2, "status": "active"}]), kb_district=boom)
+        self.assertEqual(meta[1]["district"], "Riyadh")
+
+    def test_pagination_is_followed(self):
+        rows = [{"id": i, "name": "u%d" % i, "bedroomsNumber": 2, "status": "active"}
+                for i in range(250)]
+        self.assertEqual(len(data.listing_meta(self._api(rows))), 250)
+
+    def test_metadata_actually_builds_pools(self):
+        """The end-to-end shape of the bug: with real bedrooms and district the
+        pools are non-empty, so the fallback ladder has rungs."""
+        meta = {1: {"district": "الملقا", "bedrooms": 3},
+                2: {"district": "الملقا", "bedrooms": 3}}
+        rows = {1: [{"adr": 600, "occ": .8, "nights": 25, "months_old": 1}],
+                2: [{"adr": 550, "occ": .7, "nights": 20, "months_old": 1}]}
+        d, b = data.pool_rows(rows, meta,
+                              lambda m: m.get("district"), lambda m: m.get("bedrooms"))
+        self.assertEqual(len(d[("الملقا", 3)]), 2)
+        self.assertEqual(len(b[3]), 2)
 
 
 class ReadOnlyTest(unittest.TestCase):

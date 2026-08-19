@@ -94,6 +94,22 @@ async def _api_diagnose(request):
     return HOST.json_response(out)
 
 
+async def _api_trace(request):
+    """Every step for one unit, so a join failure is visible rather than inferred."""
+    import asyncio
+    from . import collect
+    q = request.rel_url.query
+    lid, month = (q.get("lid") or "").strip(), (q.get("month") or "").strip()
+    if not lid.isdigit() or len(month) != 7 or month[4] != "-":
+        return HOST.json_response(
+            {"ok": False, "error": "bad_args",
+             "message": "استخدم ?lid=457230&month=2026-08"}, 200)
+    out = await asyncio.to_thread(collect.trace, int(lid), month)
+    out["ok"] = True
+    return HOST.json_response(out)
+
+
 def register(app):
     app.router.add_get("/api/mrent/health", _safe(_api_health))
     app.router.add_get("/api/mrent/diagnose", _safe(_api_diagnose))
+    app.router.add_get("/api/mrent/trace", _safe(_api_trace))

@@ -185,21 +185,93 @@ def fetch_history(target_month, years_back=YEARS_BACK, today=None):
     return rows
 
 
-def turnover_cost_sar(fallback):
-    """The real derived cost of one clean, from the cleaning coverage study —
-    fully-loaded payroll divided by our own checkouts, NOT a settings default.
+def turnover_cost_sar(fallback, load_json=None):
+    """The cost of one clean, and WHERE IT CAME FROM.
 
-    A floor built on a too-cheap clean is a floor that is too low, and the floor
-    is the one number in this engine we tell owners is safe. Returns
-    (value, source) so the report can say which it used rather than implying the
-    real one when it fell back.
+    An earlier version of this called coverage_study.build_study() — a function
+    that does not exist. hasattr() returned False, the call silently fell through
+    to the default, and the report said "default (coverage_study unavailable)"
+    which read like a transient outage rather than an invented API. The real
+    entry point is coverage_study.engine.study(), which needs live teams, status
+    logs, reports and photos rebuilt per request and is not cached anywhere, so
+    this module cannot reach it without becoming a second copy of that pipeline.
+
+    So the number is an OWNER SETTING, read from monthly_settings.json, and the
+    source string always says which of the two it used. This is load-bearing for
+    every floor on the page: at occ 0.85 each riyal on the true cost of a clean
+    moves the floor by -7.79 riyals, so a wrong default is not a rounding error.
     """
-    try:
-        from coverage_study import engine as cs
-        study = cs.build_study() if hasattr(cs, "build_study") else None
-        per = ((study or {}).get("cost") or {}).get("inhouse_per_clean")
-        if per and float(per) > 0:
-            return float(per), "coverage_study.inhouse_per_clean"
-    except Exception:
-        pass
-    return float(fallback), "default (coverage_study unavailable)"
+    if load_json:
+        try:
+            cfg = load_json("monthly_settings.json", None) or {}
+            v = cfg.get("turnover_cost_sar")
+            if v is not None and float(v) > 0:
+                return float(v), "monthly_settings.json (owner-set)"
+        except (TypeError, ValueError, AttributeError):
+            pass
+    return float(fallback), ("DEFAULT %s — nobody has entered the real per-clean "
+                             "cost; read it off the cleaning coverage page and set "
+                             "turnover_cost_sar in monthly_settings.json" % fallback)
+
+
+def listing_meta(api_get, kb_district=None):
+    """Real per-listing metadata, read straight from Hostaway.
+
+    get_listings_map() returns {id: name} — a STRING, not a record. collect.py
+    wrapped it as {"name": ...}, so district and bedrooms came out None for every
+    unit, both pools were built empty, and the fallback ladder had no rungs. That
+    is why zero units were 'on fallback': the path could not execute, not that it
+    was not needed.
+
+    Inactive listings are dropped here. A unit that has not operated since 2024
+    should not sit in the denominator making the percentages mean less than they
+    appear to.
+    """
+    out, limit, offset = {}, 100, 0
+    while True:
+        data = api_get("/listings", params={"limit": limit, "offset": offset}) or {}
+        batch = data.get("result", []) or []
+        for L in batch:
+            lid = L.get("id")
+            if lid is None:
+                continue
+            if not _is_active(L):
+                continue
+            try:
+                lid = int(lid)
+            except (TypeError, ValueError):
+                continue
+            district = None
+            if kb_district:
+                try:
+                    district = kb_district(lid)
+                except Exception:
+                    district = None
+            out[lid] = {
+                "name": (L.get("internalListingName") or L.get("name") or "").strip(),
+                "bedrooms": L.get("bedroomsNumber"),
+                "district": district or (L.get("city") or L.get("address") or "").strip() or None,
+                "district_source": "kb" if district else "hostaway_city",
+                "status": L.get("status"),
+            }
+        if len(batch) < limit:
+            break
+        offset += limit
+    return out
+
+
+# Mirrors bot.py's _listing_active: the red no-entry sign in Hostaway.
+_INACTIVE_WORDS = ("inactive", "disabled", "unlisted", "delisted", "deleted",
+                   "draft", "paused", "off")
+
+
+def _is_active(L):
+    v = (L or {}).get("status")
+    if isinstance(v, str) and v.lower() in _INACTIVE_WORDS:
+        return False
+    if v in (0, "0", False):
+        return False
+    for key in ("isActive", "listed", "active", "isListed"):
+        if key in (L or {}) and L.get(key) in (0, "0", False):
+            return False
+    return True
