@@ -65,5 +65,25 @@ async def _api_health(request):
     })
 
 
+async def _api_diagnose(request):
+    """The S8 diagnosis, run where the Hostaway credentials actually live.
+
+    It cannot run on a developer laptop — there are no credentials and no cached
+    reservations there — so it is exposed as an endpoint rather than a script.
+    Read-only: it prices units in memory and stores nothing.
+    """
+    import asyncio
+    from . import collect
+    month = (request.rel_url.query.get("month") or "").strip()
+    if len(month) != 7 or month[4] != "-":
+        return HOST.json_response(
+            {"ok": False, "error": "bad_month",
+             "message": "اكتب الشهر بالصيغة YYYY-MM مثل 2026-10"}, 200)
+    out = await asyncio.to_thread(collect.diagnose, month)
+    out["ok"] = True
+    return HOST.json_response(out)
+
+
 def register(app):
     app.router.add_get("/api/mrent/health", _safe(_api_health))
+    app.router.add_get("/api/mrent/diagnose", _safe(_api_diagnose))
