@@ -189,3 +189,107 @@ def diagnose_months(months, today=None, years=None):
          "trustworthy": (r.get("headline") or {}).get("trustworthy"),
          "error": r.get("error")}
         for r in out]}
+
+
+# ─────────────────────────── the page's data layer ───────────────────────────
+#
+# Pricing ONE unit still needs its district pool, which needs every unit's
+# history for that month — so the cheap-looking question costs the same as the
+# expensive one. The month is computed once and held briefly, which is what makes
+# the page feel like a page instead of a report generator.
+
+_CACHE = {}
+_CACHE_TTL = 900          # seconds
+
+
+def _now_ts():
+    import time
+    return time.time()
+
+
+def month_state(month, force=False, today=None):
+    hit = _CACHE.get(month)
+    if hit and not force and (_now_ts() - hit["at"]) < _CACHE_TTL:
+        return hit
+    today = today or (HOST.now().date() if HOST.now else datetime.date.today())
+    today_key = data.month_key(today)
+
+    reservations = data.fetch_history(month, today=today)
+    unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
+
+    all_rows = data.unit_month_rows(reservations, int(month[5:7]), today_key)
+    unit_rows = {lid: [r for r in rows if not r.get("partial")]
+                 for lid, rows in all_rows.items()}
+
+    dpool, bpool = data.pool_rows(unit_rows, unit_meta,
+                                  lambda m: m.get("district"),
+                                  lambda m: m.get("bedrooms"))
+    tc, tc_source = data.turnover_cost_sar(
+        engine.DEFAULT_COSTS["turnover_cost_sar"], HOST.load_json)
+
+    st = {"at": _now_ts(), "month": month, "today": today.isoformat(),
+          "unit_meta": unit_meta, "unit_rows": unit_rows,
+          "dpool": dpool, "bpool": bpool,
+          "cost_set": engine.costs(turnover_cost_sar=tc),
+          "turnover_cost_source": tc_source}
+    _CACHE[month] = st
+    return st
+
+
+def price_one(lid, month, force=False, today=None):
+    """The full explainability payload for ONE unit — the same object the page
+    renders and the PDF renders, so the screen and the document cannot drift."""
+    st = month_state(month, force=force, today=today)
+    lid = int(lid)
+    meta = st["unit_meta"].get(lid) or {}
+    d, b = meta.get("district"), meta.get("bedrooms")
+    dp = st["dpool"].get((d, b)) or []
+    bp = st["bpool"].get(b) or []
+    p = engine.price_unit(
+        lid, month, own=st["unit_rows"].get(lid) or [],
+        district=dp, bedroom=bp, attr_values=db.unit_attrs(lid),
+        cost_set=st["cost_set"],
+        ejar_row=db.ejar_latest(d, bedrooms=b) if d and b else None,
+        paired_obs=db.paired_obs_count(), today=st["today"])
+    p["name"] = meta.get("name")
+    p["district"] = d
+    p["district_source"] = meta.get("district_source")
+    p["bedrooms"] = b
+    p["turnover_cost_source"] = st["turnover_cost_source"]
+    p["saved_quote"] = db.latest_quote(lid, month)
+    return p
+
+
+def units_report(month, force=False, today=None):
+    """Every unit, its price, what bound it, and — when there is no price — the
+    stated reason rather than a blank."""
+    st = month_state(month, force=force, today=today)
+    rows = []
+    for lid in sorted(st["unit_meta"]):
+        p = price_one(lid, month, today=today)
+        rows.append({
+            "lid": lid, "name": p.get("name"), "district": p.get("district"),
+            "bedrooms": p.get("bedrooms"),
+            "price": p.get("price"), "bound_by": p.get("bound_by"),
+            "confidence": p.get("confidence"), "basis": p.get("basis"),
+            "own_obs": (p.get("data") or {}).get("own_obs"),
+            "occ": (p.get("data") or {}).get("occ"),
+            "gates": p.get("gates"),
+            "unanswered": (p.get("quality") or {}).get("unanswered"),
+            "warnings": p.get("warnings") or [],
+            "no_price_reason": (p.get("warnings") or ["unknown"])[0]
+                               if p.get("price") is None else None,
+            "is_estimate": p.get("is_estimate"),
+            "has_saved_quote": bool(p.get("saved_quote")),
+        })
+    priced = [r for r in rows if r["price"] is not None]
+    own = [r for r in rows if r["basis"] == "own_history"]
+    return {
+        "month": month, "rows": rows,
+        "n": len(rows), "n_priced": len(priced),
+        "n_own_history": len(own),
+        "pct_own_history": (len(own) / float(len(rows))) if rows else 0.0,
+        "trustworthy": (len(own) / float(len(rows)) if rows else 0) >= 0.60,
+        "turnover_cost_source": st["turnover_cost_source"],
+        "computed_at": st["at"],
+    }

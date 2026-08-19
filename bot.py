@@ -22495,6 +22495,7 @@ function go(id){
   if(id==='erp'||id==='fb'||id==='finance'||id==='expenses'){ var _ws={erp:'today',fb:'today',finance:'owners',expenses:'exp'}[id]; window.location.href='/erp?token='+encodeURIComponent(tok())+'#'+_ws; return; }   // old finance views are cut over to ERP v2
   if(id==='studio'){ window.location.href='/studio?token='+encodeURIComponent(tok()); return; }   // Ouja Studio is its own page
   if(id==='ownrep'){ window.location.href='/owner-report?token='+encodeURIComponent(tok()); return; }   // Owner Report wizard is its own page
+  if(id==='monthlylab'){ window.location.href='/monthly-lab?token='+encodeURIComponent(tok()); return; }   // «التسعير الشهري» is its own page — a bad token there can never touch DASHBOARD_HTML
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
@@ -40803,7 +40804,7 @@ NAV_DEF = {
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "coverage", "wifi", "listings", "quality", "pmo", "design"]},
-        {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "strat", "rev"]},
+        {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
@@ -40822,6 +40823,7 @@ NAV_DEF = {
         {"id": "decor", "ic": "design", "tk": "decor", "badge": "decor"},
         {"id": "pricing", "ic": "pricing", "tk": "pricing", "badge": "pricing"},
         {"id": "plab", "ic": "plab", "tk": "plab"},
+        {"id": "monthlylab", "ic": "pricing", "tk": "monthlylab"},
         {"id": "strat", "ic": "strat", "tk": "strat"},
         {"id": "clean", "ic": "clean", "tk": "clean", "badge": "clean"},
         {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
@@ -40861,7 +40863,8 @@ NAV_DEF = {
             "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "promises": "الوعود",
             "decor": "تنسيق الحفلات",
             "pricing": "التسعير الديناميكي",
-            "plab": "مختبر التسعير", "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
+            "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
+            "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت",
             "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
@@ -40880,7 +40883,8 @@ NAV_DEF = {
             "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "promises": "Promises",
             "decor": "Decoration Orders",
             "pricing": "Dynamic Pricing",
-            "plab": "Pricing Lab", "strat": "Strategies", "clean": "Deep clean",
+            "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
+            "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions",
             "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",

@@ -338,3 +338,48 @@ class FunnelTest(unittest.TestCase):
         rows = data.unit_month_rows([res(1, "2026-10-01", "2026-10-11", 6200)],
                                     10, "2026-08")
         self.assertEqual(rows[1][0]["nights"], 10)
+
+
+class NoFutureCalendarTest(unittest.TestCase):
+    """A future month's own calendar is mostly unsold. Reading it as outcome
+    would make every forward month look empty, drop occupancy, drop the floor,
+    and make every price too cheap — under an owner PDF. Two independent locks."""
+
+    def test_lock_one_a_future_window_is_never_fetched(self):
+        import datetime
+        from monthly import host
+        pulled = []
+
+        def fake_window(first, last, pad_days=45):
+            pulled.append((first, last))
+            return []
+
+        original = host.HOST.fetch_reservations_window
+        host.HOST.fetch_reservations_window = fake_window
+        try:
+            data.fetch_history("2027-01", today=datetime.date(2026, 8, 19))
+        finally:
+            host.HOST.fetch_reservations_window = original
+        self.assertTrue(pulled)
+        for first, _last in pulled:
+            self.assertLessEqual(first, datetime.date(2026, 8, 19))
+            self.assertNotEqual(first.year, 2027)
+
+    def test_lock_two_a_future_dated_observation_is_flagged_partial(self):
+        rows = data.unit_month_rows([res(1, "2026-10-01", "2026-10-11", 6200)],
+                                    10, "2026-08")
+        self.assertTrue(rows[1][0]["partial"],
+                        "an observation dated after the current month must be "
+                        "flagged, whatever route it arrived by")
+
+    def test_a_completed_historical_month_is_kept(self):
+        rows = data.unit_month_rows([res(1, "2026-01-01", "2026-01-11", 6200)],
+                                    1, "2026-08")
+        self.assertFalse(rows[1][0]["partial"])
+
+    def test_only_completed_instances_survive_the_filter(self):
+        rows = data.unit_month_rows(
+            [res(1, "2026-01-01", "2026-01-11", 6200),
+             res(1, "2025-01-01", "2025-01-11", 5200)], 1, "2026-08")
+        kept = [o for o in rows[1] if not o.get("partial")]
+        self.assertEqual(len(kept), 2)

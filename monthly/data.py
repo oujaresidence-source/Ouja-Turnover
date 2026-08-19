@@ -172,6 +172,15 @@ def unit_month_rows(reservations, target_month_num, today_key, funnel=None):
             # forecast downward, which widens the price band and makes monthly
             # look more viable than it is — the wrong direction to be wrong in.
             # Flagged here; collect.py drops it and reports how many it dropped.
+            # partial covers BOTH ends: the running current month (age 0) and
+            # anything dated after it (age < 0). A future month's own calendar is
+            # mostly unsold, so reading it as outcome would make every forward
+            # month look empty, drop occupancy, drop the FLOOR, and make every
+            # price too cheap — with the owner PDF built on top of it.
+            #
+            # fetch_history already refuses to pull a future window at all, so
+            # this is the second lock on the same door. Two locks, because the
+            # failure is silent and the consequence reaches an owner.
             "partial": age <= 0,
         })
     for lid in out:
