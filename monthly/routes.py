@@ -284,8 +284,13 @@ async def _api_quote_pdf(request):
                     % ", ".join(payload.get("warnings") or []))
 
     src = payload.get("turnover_cost_source") or ""
+    draft = src.startswith("DEFAULT")
     cfg = {"turnover_note": ("رقم مبدئي 140 ريال — لم يُحدَّث بعد"
-                             if src.startswith("DEFAULT") else "من إعدادات المالك")}
+                             if draft else "من إعدادات المالك"),
+           # A file that admits on page 4 that its inputs are provisional should
+           # not be sendable without saying so on every page. Same source as the
+           # note, so the two cannot disagree.
+           "draft": draft}
 
     def _render():
         d = tempfile.mkdtemp(prefix="ouja_mq_")

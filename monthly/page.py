@@ -444,8 +444,13 @@ function viewUnit(){
     h += '<div class="ovbox" style="margin-top:12px">';
     h += '<input type="text" id="ovrreason" placeholder="ليش عدّلت السعر؟" style="flex:1;min-width:240px">';
     h += '<button class="btn primary" id="savequote">احفظ التسعيرة</button>';
-    h += '<a class="btn ghost" id="pdfbtn" target="_blank" href="/api/mrent/quote.pdf?lid=' +
-         encodeURIComponent(LID) + '&month=' + encodeURIComponent(MONTH) + '">ملف المالك (PDF)</a>';
+    var draftPdf = (p.turnover_cost_source || '').indexOf('DEFAULT') === 0;
+    h += '<a class="btn ghost" id="pdfbtn" target="_blank" title="' +
+         (draftPdf ? 'مسودة — تكلفة التنظيفة رقم مبدئي، الملف يطلع بعلامة مائية' :
+                     'ملف جاهز للإرسال للمالك') +
+         '" href="/api/mrent/quote.pdf?lid=' + encodeURIComponent(LID) +
+         '&month=' + encodeURIComponent(MONTH) + '">ملف المالك (PDF)' +
+         (draftPdf ? ' — مسودة' : '') + '</a>';
     h += '</div>';
     if(p.saved_quote){
       h += '<div class="quality" style="margin-top:12px">آخر تسعيرة محفوظة: ' +

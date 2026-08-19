@@ -220,9 +220,13 @@ def floor_price(adr, occ, cost_set=None):
                 "nightly": e, "components": components}
 
     components = [
+        # The occupancy is IN the label. Without it this reads as a full-rack
+        # figure and invites comparison with the ceiling, which is a full-rack
+        # figure — two different quantities that both said "30 nights".
         {"key": "nightly_gross", "sar": e["nightly_gross"],
-         "label_ar": "دخل التأجير اليومي لـ30 ليلة",
-         "label_en": "30 nights let nightly, gross"},
+         "label_ar": "دخل 30 ليلة بإشغال %d%%" % round(min(max(_num(occ) or 0, 0.0), 1.0) * 100),
+         "label_en": "30 nights at %d%% occupancy, gross"
+                     % round(min(max(_num(occ) or 0, 0.0), 1.0) * 100)},
         {"key": "turnover_cost", "sar": -e["turnover_cost_tot"],
          "label_ar": "تكلفة التنظيف بين الحجوزات (تنظيفة وحدة بالشهري)",
          "label_en": "Turnover cleans between stays (one on a monthly let)"},
@@ -572,10 +576,21 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
                        "label_ar": "سعر الوحدة حسب مواصفاتها وأداء الحي",
                        "label_en": "The unit's own worth, from its features and its district"}]
     if bound_by == "model":
+        # The step is only about QUALITY when quality was actually measured. With
+        # every attribute unscored the model gate is the comparable-units average,
+        # so this gap is the distance between that average and our cost floor —
+        # and calling it «مواصفات» would print a claim the rest of the document
+        # contradicts three pages later.
+        measured = abs(q["mult"] - 1.0) > 1e-9
         components.append({
-            "key": "quality_uplift", "sar": final_raw - (fl or {}).get("floor", 0.0),
-            "label_ar": "رفعناه لأن مواصفات الوحدة تستاهل أكثر من الأرضية",
-            "label_en": "Raised: the unit's own features are worth more than the floor"})
+            "key": "quality_uplift" if measured else "pool_above_floor",
+            "sar": final_raw - (fl or {}).get("floor", 0.0),
+            "label_ar": ("رفعناه لأن مواصفات الوحدة تستاهل أكثر من الأرضية"
+                         if measured else
+                         "الفرق بين أداء الوحدات المماثلة وأرضية التكلفة"),
+            "label_en": ("Raised: the unit's own features are worth more than the floor"
+                         if measured else
+                         "The gap between what comparable units achieve and our cost floor")})
     elif bound_by == "ceiling":
         components.append({
             "key": "ceiling_cap", "sar": final_raw - (fl or {}).get("floor", 0.0),

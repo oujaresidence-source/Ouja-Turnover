@@ -81,11 +81,28 @@ def _month_ar(key):
         return str(key)
 
 
-_BOUND_AR = {
-    "floor": "هذا أقل سعر يغطي تكلفة تشغيل الوحدة مقارنة بالتأجير اليومي",
-    "model": "هذا ما تستحقه الوحدة بمواصفاتها وأداء الحي",
-    "ceiling": "أقل من تكلفة حجز 30 ليلة منفصلة — وهذا ما يجعل العرض الشهري منطقياً للضيف",
-}
+def _measured(p):
+    """Did the quality model actually measure anything? ONE definition, used by
+    the cover sentence, by page 2's gate state, and by page 4 — so they cannot
+    disagree. The cover claiming «بمواصفاتها» while page 4 says «0 من 16» is the
+    sentence an owner quotes back at you."""
+    return abs(((p.get("quality") or {}).get("mult") or 1.0) - 1.0) > 1e-9
+
+
+def _bound_sentence(p):
+    b = p.get("bound_by")
+    if b == "floor":
+        return "هذا أقل سعر يغطي تكلفة تشغيل الوحدة مقارنة بالتأجير اليومي"
+    if b == "ceiling":
+        return ("أقل من تكلفة حجز 30 ليلة منفصلة — وهذا ما يجعل العرض الشهري "
+                "منطقياً للضيف")
+    if b == "model":
+        if _measured(p):
+            return "هذا ما تستحقه الوحدة بمواصفاتها وأداء الحي"
+        # No attributes scored: the model gate IS the comparable-units average.
+        return ("هذا ما تحققه الوحدات المماثلة في نفس الحي — مواصفات هذه الوحدة "
+                "لم تُسجَّل بعد")
+    return ""
 
 _BASIS_AR = {
     "own_history": "محسوب من حجوزات هذه الوحدة نفسها في نفس الشهر من السنوات السابقة",
@@ -99,6 +116,30 @@ _CONF_AR = {"high": "عالية", "medium": "متوسطة", "low": "منخفضة
 
 
 # ─────────────────────────────── the charts ───────────────────────────────
+
+# A chart label that needs an ellipsis is too long for its space. These are the
+# SHORT forms for the PDF's narrow label column; the screen keeps the full text.
+# A test asserts every one of them fits without clipping.
+CHART_LABEL_MAX = 38
+
+_SHORT_AR = {
+    "turnover_cost": "تنظيف بين الحجوزات",
+    "channel_fee": "عمولة المنصات",
+    "monthly_cost": "تشغيل شهري: كهرباء، نت، تنظيفة",
+    "margin": "الحد الأدنى لهامشنا",
+    "quality_uplift": "فرق مواصفات الوحدة",
+    "pool_above_floor": "فرق الوحدات المماثلة عن الأرضية",
+    "ceiling_cap": "وقف عند السقف",
+    "rounding": "تقريب لأقرب 50 ريال",
+    "nightly_net_zero": "اليومي ما يغطي تكلفته",
+    "model_base": "سعر الوحدة حسب حيّها",
+}
+
+
+def chart_label(component):
+    """The short form when there is one, otherwise the full label."""
+    return _SHORT_AR.get(component.get("key")) or (component.get("label_ar") or "")
+
 
 def _clip(txt, n):
     t = str(txt or "")
@@ -158,7 +199,7 @@ def _svg_waterfall(p):
         x2 = 372 - int(round(lo / mx * 268))
         neg = (c.get("sar") or 0) < 0
         out.append('<text x="636" y="%d" text-anchor="end" class="wl">%s</text>'
-                   % (y + 23, _e(_clip(c.get("label_ar"), 46))))
+                   % (y + 23, _e(_clip(chart_label(c), CHART_LABEL_MAX))))
         out.append('<rect x="%d" y="%d" width="%d" height="19" rx="4" fill="%s"/>'
                    % (x1, y + 9, max(x2 - x1, 2), "#B3382A" if neg else "#8B6320"))
         out.append('<text x="8" y="%d" text-anchor="start" class="wv%s">%s</text>'
@@ -193,15 +234,30 @@ def _page1(p, cfg):
         '<div class="c-price">%s <span>ريال / شهر</span></div>'
         '<div class="c-tag">%s</div>'
         '<div class="c-bound">%s</div>'
-        '</div>%s</div>'
+        '%s</div>%s</div>'
         % (_e(p.get("name") or ""),
            _e(p.get("district") or ""),
            (" · %s غرف" % _e(p.get("bedrooms"))) if p.get("bedrooms") else "",
            _e(_month_ar(p.get("month"))),
            _sar(price),
            _e(p.get("label_ar") or "تقدير"),
-           _e(_BOUND_AR.get(p.get("bound_by"), "")),
+           _e(_bound_sentence(p)),
+           _cover_zero_nights(p),
            _footer(1, p.get("name") or "", p.get("month"))))
+
+
+def _cover_zero_nights(p):
+    """Zero of our own nights, with a confident number above it, is the first
+    thing an owner should read — not row two of a table on page 4."""
+    d = p.get("data") or {}
+    if (d.get("own_obs") or 0) > 0:
+        return ""
+    basis = p.get("basis")
+    where = ("متوسط وحدات الحي" if basis == "district_pool"
+             else "متوسط الوحدات المماثلة في الحجم" if basis == "bedroom_pool"
+             else "وحدات مماثلة")
+    return ('<div class="c-zero">ما عندنا ولا ليلة مرصودة لهالوحدة بهذا الشهر — '
+            'الرقم من %s.</div>' % _e(where))
 
 
 def _page2(p, cfg):
@@ -300,6 +356,16 @@ def _page4(p, cfg):
         % (body, _footer(4, p.get("name") or "", p.get("month"))))
 
 
+def _watermark(cfg):
+    """Stamped on every page while the cleaning cost is still the placeholder.
+    A file that admits on page 4 that its inputs are provisional should not be
+    sendable without saying so on every page. It disappears by itself the moment
+    a real per-clean cost is set — nobody has to remember to remove it."""
+    if not cfg.get("draft"):
+        return ""
+    return '<div class="wm">مسودة — أرقام غير نهائية</div>'
+
+
 def build_html(p, cfg=None):
     """The assembled 4-page document. cfg carries render-time notes only."""
     cfg = cfg or {}
@@ -308,7 +374,19 @@ def build_html(p, cfg=None):
         '<title>%s · %s</title><style>%s%s</style></head><body>%s%s%s%s</body></html>'
         % (_e(p.get("name") or ""), _e(_month_ar(p.get("month"))),
            _font_css(), _CSS,
-           _page1(p, cfg), _page2(p, cfg), _page3(p, cfg), _page4(p, cfg)))
+           _stamp(_page1(p, cfg), cfg, '<div class="page cover">'),
+           _stamp(_page2(p, cfg), cfg, '<div class="page">'),
+           _stamp(_page3(p, cfg), cfg, '<div class="page">'),
+           _stamp(_page4(p, cfg), cfg, '<div class="page">')))
+
+
+def _stamp(page_html, cfg, opener):
+    """Put the watermark INSIDE the page div — appended after it, position:absolute
+    would resolve against the body and land on page 1 only."""
+    wm = _watermark(cfg)
+    if not wm:
+        return page_html
+    return page_html.replace(opener, opener + wm, 1)
 
 
 _CSS = """
@@ -337,6 +415,17 @@ h2{font-size:20pt;font-weight:700;letter-spacing:-.4px;margin-bottom:5mm}
 .c-tag{display:inline-block;margin-top:4mm;padding:2mm 5mm;border:1px solid #C9A227;
   color:#C9A227;border-radius:99px;font-size:10pt;font-weight:600}
 .c-bound{font-size:12pt;color:#D8D2C4;margin-top:8mm;max-width:135mm;line-height:1.7}
+.c-zero{margin-top:6mm;padding:4mm 5mm;border-radius:8px;background:#3A2A24;
+  border:1px solid #6B4A3E;color:#F0C9BE;font-size:10.5pt;line-height:1.6;
+  max-width:135mm}
+/* Height stops well above the footer ON PURPOSE: audit_layout flags any direct
+   child of .page whose bottom passes the footer line, and a full-bleed overlay
+   would fail the gate it exists to sit behind. */
+.wm{position:absolute;top:0;left:0;right:0;height:250mm;pointer-events:none;
+  display:flex;align-items:center;justify-content:center}
+.wm::before{content:"مسودة — أرقام غير نهائية";font-size:34pt;font-weight:700;
+  color:rgba(179,56,42,.13);transform:rotate(-24deg);white-space:nowrap;
+  letter-spacing:2px}
 .legend{display:grid;gap:3mm;margin-bottom:8mm}
 .legend div{font-size:10pt;color:#4A4339;line-height:1.6;
   border-inline-start:3px solid #DFD8C8;padding-inline-start:4mm}
