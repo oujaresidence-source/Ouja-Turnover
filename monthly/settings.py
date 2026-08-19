@@ -59,15 +59,15 @@ FLIP_CRITERION_EN = (
 LICENCE_FILTER_ON_DATE = "2026-09-30"
 LICENCE_EXPIRY_WARN_DAYS = 14
 
-# OWNER DECISION, 2026-08-19: ship "engine_verified" ON.
-# It publishes the engine's number ONLY for units whose own booking history
-# produced it, and cannot publish a pooled average at all — so turning it on by
-# default carries the same guarantee as turning it on by hand. "discount" is one
-# click away on the settings screen and reverts instantly.
+# REVERTED to "discount", 2026-08-19. engine_verified was shipped on at the
+# owner's instruction and the guest site became unreachable. The mode itself is
+# still correct and still available, but nothing in this package touches the
+# guest price path any more (see bot.py, monthly_quote), so this default now only
+# affects /monthly-lab.
 DEFAULTS = {
     "_comment_flip": FLIP_CRITERION_AR,
     "_comment_flip_en": FLIP_CRITERION_EN,
-    "price_source": "engine_verified",
+    "price_source": "discount",
     "price_source_reason": "",
     "price_source_actor": "",
     "price_source_at": "",

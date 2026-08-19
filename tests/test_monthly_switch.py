@@ -20,6 +20,20 @@ from brain import db as bdb                              # noqa: E402
 from monthly import db, host, live, settings             # noqa: E402
 
 
+class _Connected(object):
+    """The guest-site connection is OFF by default since the outage. Tests that
+    exercise the wiring turn it on for their own duration, so the disconnect
+    stays the thing you have to opt out of rather than the thing you forget."""
+
+    def __enter__(self):
+        self._prev = live.CONNECTED_TO_GUEST_SITE
+        live.CONNECTED_TO_GUEST_SITE = True
+
+    def __exit__(self, *_a):
+        live.CONNECTED_TO_GUEST_SITE = self._prev
+        return False
+
+
 class _Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="monthly_switch_")
@@ -42,8 +56,31 @@ class ShipsOnButOnlyWhereMeasuredTest(_Base):
     cannot publish a pooled average — the guarantee is in live.engine_after, not
     in the choice of default."""
 
-    def test_the_switch_ships_as_engine_verified(self):
-        self.assertEqual(settings.price_source(), "engine_verified")
+    def test_the_switch_ships_as_discount_after_the_outage(self):
+        """Reverted 2026-08-19: engine_verified was shipped on and the guest site
+        became unreachable. The mode is still correct and still selectable; it
+        just no longer reaches a customer-facing page."""
+        self.assertEqual(settings.price_source(), "discount")
+
+    def test_the_guest_site_hook_is_off(self):
+        self.assertFalse(live.CONNECTED_TO_GUEST_SITE)
+
+    def test_nothing_reaches_the_guest_path_while_it_is_disconnected(self):
+        settings.set_price_source("engine_verified", coverage=0.9)
+        import monthly.collect as collect
+        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
+        real = collect.price_one
+        collect.price_one = lambda lid, month, **k: {"price": 15000,
+                                                     "basis": "own_history"}
+        try:
+            self.assertIsNone(live.engine_after(
+                1, "2026-10", 20000, 1,
+                {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
+                 "ceiling": 0.3, "per_month_before": 20000,
+                 "per_month_after": 16000, "promo": False, "promo_label": ""}))
+        finally:
+            collect.price_one = real
+            collect._CACHE.clear()
 
     def test_the_shipped_mode_can_never_publish_a_pooled_number(self):
         """The property that makes shipping it on defensible."""
@@ -62,7 +99,7 @@ class ShipsOnButOnlyWhereMeasuredTest(_Base):
 
     def test_an_unreadable_settings_file_falls_back_to_the_shipped_default(self):
         host.HOST.load_json = lambda *_a, **_k: (_ for _ in ()).throw(IOError("gone"))
-        self.assertEqual(settings.price_source(), "engine_verified")
+        self.assertEqual(settings.price_source(), "discount")
 
     def test_a_corrupt_value_falls_back_to_discount(self):
         self.store[settings.FILE] = {"price_source": "whatever"}
@@ -146,7 +183,8 @@ class LiveContractTest(_Base):
         collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
         collect.price_one = lambda lid, month, **k: {"price": 15000}
         try:
-            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
+            with _Connected():
+                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         finally:
             collect.price_one = real
             collect._CACHE.clear()
@@ -278,7 +316,8 @@ class VerifiedOnlyModeTest(_Base):
         settings.set_price_source("engine_verified", coverage=0.26)
         real, collect = self._with_basis("own_history")
         try:
-            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
+            with _Connected():
+                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         finally:
             collect.price_one = real
             collect._CACHE.clear()
@@ -301,7 +340,9 @@ class VerifiedOnlyModeTest(_Base):
         settings.set_price_source("engine", coverage=0.9)
         real, collect = self._with_basis("district_pool")
         try:
-            self.assertIsNotNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+            with _Connected():
+                self.assertIsNotNone(
+                    live.engine_after(1, "2026-10", 20000, 1, self._discount()))
         finally:
             collect.price_one = real
 
@@ -347,7 +388,8 @@ class GuestPathNeverBlocksTest(_Base):
         collect.price_one = lambda lid, month, **k: {"price": 15000,
                                                      "basis": "own_history"}
         try:
-            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
+            with _Connected():
+                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         finally:
             collect.price_one = real
             collect._CACHE.clear()

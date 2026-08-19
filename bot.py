@@ -55997,18 +55997,13 @@ def monthly_quote(listing_id, move_in, months, snap=None):
     if before is None:
         return None
     out = monthly_pricing(before, months, _monthly_cfg)
-    # ---- «التسعير الشهري» switch. Ships as "discount": the day this deployed,
-    # this line changed nothing. Flipping to "engine" is refused in code below
-    # 60% own-history coverage (monthly/settings.py), and engine_after returns
-    # None on ANY doubt, so the guest site keeps its existing behaviour.
-    if _HAS_MONTHLY and _monthly is not None:
-        try:
-            _eng = _monthly.live.engine_after(
-                listing_id, "%04d-%02d" % (mi.year, mi.month), before, months, out)
-            if _eng:
-                out = _eng
-        except Exception as _mle:
-            print("[monthly] live price skipped (guest site unaffected):", _mle)
+    # ---- «التسعير الشهري» is DISCONNECTED from the guest price path (2026-08-19).
+    # It was hooked in here and the guest site went down. Whatever the mechanism —
+    # SQLite contention from the background warm-up, thread pressure, something
+    # else — the diagnosis is not worth one more minute of a customer-facing page
+    # being unreachable. The engine keeps running on /monthly-lab, where a slow
+    # page costs nothing. Re-connecting it needs a load test first, not another
+    # guess.
     out.update({"months": months, "nights": nights,
                 "move_in": mi.isoformat(), "move_out": mo.isoformat(),
                 "available": available, "estimated": estimated})

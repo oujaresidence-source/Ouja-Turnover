@@ -16,6 +16,10 @@ off by default anyway.
 
 from . import settings
 
+# Flip to True ONLY after a load test on a page with many listings. It was True
+# for one deploy and oujares.com/monthly stopped responding.
+CONNECTED_TO_GUEST_SITE = False
+
 
 def engine_after(listing_id, month, before_total, months, discount_result):
     """Replace the DISCOUNTED total with the engine's monthly estimate, keeping
@@ -25,6 +29,11 @@ def engine_after(listing_id, month, before_total, months, discount_result):
     today: below the own-history threshold the switch cannot even be flipped, so
     this is only ever reached deliberately.
     """
+    # HARD STOP. bot.py no longer calls this at all; this is the second lock, so
+    # that re-adding the hook without also re-enabling this cannot quietly put a
+    # customer-facing page back in front of a database.
+    if not CONNECTED_TO_GUEST_SITE:
+        return None
     try:
         mode = settings.price_source()
         if mode not in ("engine", "engine_verified"):
