@@ -192,12 +192,12 @@ def pool_rows(unit_rows, unit_meta, district_of, bedrooms_of):
 
 # ───────────────────────────── the live pulls ─────────────────────────────
 
-def fetch_history(target_month, years_back=YEARS_BACK, today=None):
+def fetch_history(target_month, years_back=YEARS_BACK, today=None, max_windows=None):
     """Every confirmed reservation that can touch the matching calendar months of
     the last `years_back` years. fetch_reservations_window ONLY."""
     today = today or datetime.date.today()
     m = int(str(target_month)[5:7])
-    rows, seen = [], set()
+    rows, seen, used = [], set(), []
     for back in range(0, years_back + 1):
         y = today.year - back
         try:
@@ -208,12 +208,17 @@ def fetch_history(target_month, years_back=YEARS_BACK, today=None):
         if first > today:
             continue
         got = HOST.require("fetch_reservations_window")(first, last) or []
+        if max_windows and len(used) >= max_windows:
+            break
+        used.append("%s..%s" % (first, last))
         for r in got:
             rid = r.get("id")
             if rid in seen:
                 continue
             seen.add(rid)
             rows.append(r)
+        if max_windows and len(used) >= max_windows:
+            break
     return rows
 
 

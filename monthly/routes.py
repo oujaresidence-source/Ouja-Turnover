@@ -104,7 +104,11 @@ async def _api_trace(request):
         return HOST.json_response(
             {"ok": False, "error": "bad_args",
              "message": "استخدم ?lid=457230&month=2026-08"}, 200)
-    out = await asyncio.to_thread(collect.trace, int(lid), month)
+    try:
+        windows = max(1, min(4, int(q.get("windows") or 1)))
+    except ValueError:
+        windows = 1
+    out = await asyncio.to_thread(collect.trace, int(lid), month, None, windows)
     out["ok"] = True
     return HOST.json_response(out)
 

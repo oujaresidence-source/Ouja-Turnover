@@ -102,12 +102,19 @@ def diagnose(month, today=None):
     return rep
 
 
-def trace(lid, month, today=None):
+def trace(lid, month, today=None, windows=1):
     """Every step for ONE unit, so a join failure can be seen rather than
-    inferred. Read-only."""
+    inferred. Read-only.
+
+    ONE window by default. The first version pulled four years of history plus
+    the full listings pagination before answering, and Railway's proxy gave up
+    before the app did — an "Application failed to respond" page that looks like
+    a crash and is really a slow query. A trace is a question about one unit; it
+    does not need the whole corpus to answer.
+    """
     today = today or (HOST.now().date() if HOST.now else datetime.date.today())
     lid = int(lid)
-    reservations = data.fetch_history(month, today=today)
+    reservations = data.fetch_history(month, today=today, max_windows=windows)
     mine = [r for r in reservations if str(r.get("listingMapId")) == str(lid)]
     unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
     unit_funnel = {}
@@ -126,6 +133,9 @@ def trace(lid, month, today=None):
         })
     return {
         "lid": lid, "month": month,
+        "windows_pulled": windows,
+        "note": ("one history window only, for speed — add &windows=4 for the "
+                 "full picture if this returns quickly"),
         "in_listing_map": lid in unit_meta,
         "listing_meta": unit_meta.get(lid),
         "reservations_in_window_total": len(reservations),
