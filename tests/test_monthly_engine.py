@@ -1010,3 +1010,128 @@ class ScoringProtocolTest(unittest.TestCase):
         from monthly import attrs
         self.assertIn("attribute", attrs.SCORING_PROTOCOL_EN[3].lower())
         self.assertIn("53", attrs.SCORING_PROTOCOL_EN[3])
+
+
+# ═══════════ S8 diagnostics: is the floor the whole answer at high occupancy? ═══════════
+
+class OccupancyBandTest(unittest.TestCase):
+    def test_the_four_bands(self):
+        self.assertEqual(engine.occupancy_band(0.42), "<60")
+        self.assertEqual(engine.occupancy_band(0.60), "60-75")
+        self.assertEqual(engine.occupancy_band(0.75), "75-85")
+        self.assertEqual(engine.occupancy_band(0.92), ">85")
+
+    def test_an_unknown_occupancy_is_its_own_bucket_not_the_lowest(self):
+        self.assertEqual(engine.occupancy_band(None), "unknown")
+
+
+class SegmentedReportTest(unittest.TestCase):
+    def _r(self, bound_by, occ, mult=1.0, model=1000, ceiling=1000):
+        return {"bound_by": bound_by, "price": 1000,
+                "quality": {"mult": mult, "clamped": mult >= 1.60},
+                "gates": {"model": model, "ceiling": ceiling},
+                "data": {"occ": occ}}
+
+    def test_it_splits_the_distribution_by_occupancy_band(self):
+        rows = [self._r("model", 0.55), self._r("ceiling", 0.92),
+                self._r("ceiling", 0.90), self._r("floor", 0.70)]
+        rep = engine.segmented_report(rows)
+        self.assertEqual(rep["bands"][">85"]["counts"]["ceiling"], 2)
+        self.assertEqual(rep["bands"]["<60"]["counts"]["model"], 1)
+
+    def test_a_model_that_only_bites_below_75_is_named_as_a_domain_not_a_defect(self):
+        rows = ([self._r("ceiling", 0.92)] * 8 + [self._r("ceiling", 0.88)] * 4
+                + [self._r("model", 0.55)] * 6 + [self._r("model", 0.65)] * 5)
+        rep = engine.segmented_report(rows)
+        self.assertEqual(rep["verdict"], "model_is_a_low_occupancy_tool")
+
+    def test_it_reports_each_band_separately_so_one_cannot_hide_another(self):
+        rows = [self._r("ceiling", 0.92)] * 10 + [self._r("model", 0.50)] * 10
+        rep = engine.segmented_report(rows)
+        self.assertEqual(rep["bands"][">85"]["ceiling_share"], 1.0)
+        self.assertEqual(rep["bands"]["<60"]["ceiling_share"], 0.0)
+
+
+class FloorRatioTest(unittest.TestCase):
+    def test_it_reports_the_floor_as_a_share_of_nightly_gross(self):
+        p = engine.price_unit(1, "2026-10", own=[obs(628, 0.85, 1, nights=30)],
+                              district=[obs(628, 0.85, 1)], attr_values={})
+        rep = engine.floor_ratio_report([p])
+        self.assertAlmostEqual(rep["ratios"][0],
+                               p["gates"]["floor"] / p["floor_detail"]["nightly"]["nightly_gross"])
+
+    def test_a_stable_ratio_is_reported_as_stable(self):
+        rows = [{"gates": {"floor": 86.0},
+                 "floor_detail": {"nightly": {"nightly_gross": 100.0}}} for _ in range(10)]
+        rep = engine.floor_ratio_report(rows)
+        self.assertTrue(rep["stable"])
+        self.assertAlmostEqual(rep["median"], 0.86)
+
+    def test_a_scattered_ratio_is_not_called_stable(self):
+        rows = [{"gates": {"floor": f},
+                 "floor_detail": {"nightly": {"nightly_gross": 100.0}}}
+                for f in (40, 60, 86, 110, 150)]
+        self.assertFalse(engine.floor_ratio_report(rows)["stable"])
+
+    def test_units_with_no_gross_are_skipped_not_counted_as_zero(self):
+        rows = [{"gates": {"floor": 86.0},
+                 "floor_detail": {"nightly": {"nightly_gross": 0.0}}}]
+        self.assertEqual(engine.floor_ratio_report(rows)["n"], 0)
+
+
+class SensitivitySweepTest(unittest.TestCase):
+    """What the FIRST scoring pass will do to the engine — computed before anyone
+    spends two days scoring."""
+
+    def test_it_finds_the_qmult_at_which_ceiling_bound_crosses_half(self):
+        units = [{"adr_unit": 500, "adr_pool": 500, "occ_pool": 0.80}] * 10
+        sw = engine.sensitivity_sweep(units)
+        self.assertAlmostEqual(sw["bands"]["75-85"]["crossover"], 1.1, places=6)
+
+    def test_a_band_already_past_the_crossover_at_qmult_one_reports_1_0(self):
+        units = [{"adr_unit": 500, "adr_pool": 500, "occ_pool": 0.95}] * 6
+        sw = engine.sensitivity_sweep(units)
+        self.assertEqual(sw["bands"][">85"]["crossover"], 1.0)
+        self.assertTrue(sw["bands"][">85"]["already_crossed"])
+
+    def test_a_band_that_never_crosses_reports_none(self):
+        units = [{"adr_unit": 500, "adr_pool": 500, "occ_pool": 0.45}] * 6
+        sw = engine.sensitivity_sweep(units)
+        self.assertIsNone(sw["bands"]["<60"]["crossover"])
+
+    def test_the_sweep_runs_the_requested_steps(self):
+        sw = engine.sensitivity_sweep([{"adr_unit": 500, "adr_pool": 500,
+                                        "occ_pool": 0.80}])
+        self.assertEqual(sw["steps"][0], 1.0)
+        self.assertAlmostEqual(sw["steps"][-1], 1.6)
+        self.assertEqual(len(sw["steps"]), 7)
+
+
+class BandCollapseTest(unittest.TestCase):
+    """The consequence of the owner's derivation that needed checking: if the
+    floor is ~86% of nightly GROSS and the ceiling is 85% of nightly RACK, then
+    as occupancy approaches 1.0 gross approaches rack and the two converge."""
+
+    def test_the_price_band_narrows_as_occupancy_rises(self):
+        c = engine.costs()
+        widths = []
+        for occ in (0.60, 0.75, 0.85, 0.95):
+            p = engine.price_unit(1, "2026-10", own=[obs(628, occ, 1, nights=30)],
+                                  district=[obs(628, occ, 1)], attr_values={},
+                                  cost_set=c)
+            if p["gates"]["floor"] is not None and p["gates"]["ceiling"] is not None:
+                widths.append(p["gates"]["ceiling"] - p["gates"]["floor"])
+        self.assertEqual(widths, sorted(widths, reverse=True),
+                         "the band must narrow monotonically as occupancy rises")
+
+    def test_at_full_occupancy_the_band_can_close_entirely(self):
+        """And when it does the engine returns NO price rather than inventing one
+        inside a band that does not exist."""
+        c = engine.costs()
+        p = engine.price_unit(1, "2026-10", own=[obs(628, 1.0, 1, nights=30)],
+                              district=[obs(628, 1.0, 1)], attr_values={}, cost_set=c)
+        if p["price"] is None:
+            self.assertIn(p["warnings"][0], ("floor_above_ceiling", "band_too_narrow"))
+        else:
+            self.assertLessEqual(p["price"], p["gates"]["ceiling"])
+            self.assertGreaterEqual(p["price"], p["gates"]["floor"])

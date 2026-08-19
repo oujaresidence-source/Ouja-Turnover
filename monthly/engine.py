@@ -720,3 +720,142 @@ def bound_by_report(results):
         },
         "verdict": verdict,
     }
+
+
+# ══════════ is the floor the whole answer at high occupancy? (S8 diagnosis) ══════════
+#
+# The owner's derivation, carried one step further. Both sides of the binding
+# comparison are 30 x ADR x something:
+#     ceiling = 30 x ADR_unit x (1 - d)
+#     model   = 30 x ADR_pool x occ x qmult
+# so for a unit priced near its pool it reduces to (1 - d) vs occ x qmult. That
+# is arithmetic, not economics. QUALITY IS ALREADY INSIDE ADR — a better unit
+# charges more per night, so its ceiling rises with it and the model chases a
+# target that moves with it. Quality cannot win at high occupancy.
+#
+# Which raises the real question these functions exist to answer with numbers:
+# at 95% we are not filling empty nights, because there are none. A monthly
+# booking displaces nightly revenue we would have earned anyway, so monthly stops
+# being a yield play and becomes a cost-and-hassle play — one clean instead of
+# ten, no channel fee, no gaps. THE FLOOR ALREADY COMPUTES EXACTLY THAT. The
+# quality model may simply belong to the low-occupancy case: soft months, new
+# units, and later developer inventory with no history at all.
+#
+# Diagnosis only. Nothing here changes the ceiling, the discount or any beta.
+
+OCC_BANDS = ("<60", "60-75", "75-85", ">85")
+FLOOR_RATIO_STABLE_SPREAD = 0.10     # inter-quartile-ish spread that still reads as "one number"
+
+
+def occupancy_band(occ):
+    o = _num(occ)
+    if o is None:
+        return "unknown"
+    if o < 0.60:
+        return "<60"
+    if o < 0.75:
+        return "60-75"
+    if o < 0.85:
+        return "75-85"
+    return ">85"
+
+
+def segmented_report(results):
+    """The bound_by distribution split by forecast occupancy band.
+
+    One band can otherwise hide another: a portfolio that is 50% ceiling-bound
+    overall might be 100% ceiling-bound above 85% and 0% below 60%, which is a
+    completely different fact about the model.
+    """
+    rows = [r for r in (results or []) if r]
+    bands = {}
+    for b in OCC_BANDS + ("unknown",):
+        bands[b] = bound_by_report(
+            [r for r in rows if occupancy_band((r.get("data") or {}).get("occ")) == b])
+
+    high = bands[">85"]["ceiling_share"] if bands[">85"]["n"] else None
+    low_model = 0.0
+    low_n = bands["<60"]["n"] + bands["60-75"]["n"]
+    if low_n:
+        low_model = (bands["<60"]["counts"]["model"]
+                     + bands["60-75"]["counts"]["model"]) / float(low_n)
+
+    verdict = "inconclusive"
+    if high is not None and high >= 0.80 and low_model >= 0.40:
+        # Not a defect — a domain. The model bites where there are empty nights
+        # to fill, and stands aside where there are not.
+        verdict = "model_is_a_low_occupancy_tool"
+    elif high is not None and high >= 0.80 and low_n and low_model < 0.20:
+        verdict = "model_contributes_nothing_anywhere"
+
+    return {"bands": bands, "overall": bound_by_report(rows), "verdict": verdict,
+            "high_occ_ceiling_share": high, "low_occ_model_share": low_model}
+
+
+def floor_ratio_report(results):
+    """FLOOR as a share of nightly gross, per unit.
+
+    If this is stable across the portfolio the floor is doing something simple
+    and legible — "about 86% of what the unit grosses nightly" — and it should be
+    shown that way rather than dressed up as a model.
+    """
+    import statistics
+    ratios = []
+    for r in (results or []):
+        if not r:
+            continue
+        fl = (r.get("gates") or {}).get("floor")
+        gross = ((r.get("floor_detail") or {}).get("nightly") or {}).get("nightly_gross")
+        f, g = _num(fl), _num(gross)
+        if f is None or g is None or g <= 0:
+            continue
+        ratios.append(f / g)
+    if not ratios:
+        return {"n": 0, "ratios": [], "median": None, "min": None, "max": None,
+                "spread": None, "stable": False}
+    return {
+        "n": len(ratios), "ratios": ratios,
+        "median": statistics.median(ratios),
+        "min": min(ratios), "max": max(ratios),
+        "spread": max(ratios) - min(ratios),
+        "stable": (max(ratios) - min(ratios)) <= FLOOR_RATIO_STABLE_SPREAD,
+    }
+
+
+def sensitivity_sweep(units, steps=None, cost_set=None):
+    """What the FIRST scoring pass will do to the engine, before anyone scores.
+
+    Every quality_mult is 1.0 today because no unit has been scored. Sweeping
+    qmult from 1.0 to 1.6 says at which value ceiling-bound crosses half, per
+    occupancy band. If a band crosses at 1.05, scoring changes nothing except
+    which gate gets named — and that is worth knowing before two days of work,
+    not after.
+
+    `units` are dicts of {adr_unit, adr_pool, occ_pool}: no attributes needed,
+    which is exactly the point.
+    """
+    c = cost_set or costs()
+    steps = steps or [round(1.0 + 0.1 * i, 1) for i in range(7)]
+    rows = [u for u in (units or []) if u]
+
+    bands = {}
+    for b in OCC_BANDS:
+        members = [u for u in rows if occupancy_band(u.get("occ_pool")) == b]
+        curve, crossover = [], None
+        for q in steps:
+            if not members:
+                curve.append(None)
+                continue
+            hits = 0
+            for u in members:
+                t = ceiling_binds_above(u.get("adr_unit"), u.get("adr_pool"),
+                                        u.get("occ_pool"), c)
+                if t is not None and q > t:
+                    hits += 1
+            share = hits / float(len(members))
+            curve.append(share)
+            if crossover is None and share > 0.50:
+                crossover = q
+        bands[b] = {"n": len(members), "curve": curve, "crossover": crossover,
+                    "already_crossed": crossover == steps[0] if crossover else False}
+    return {"steps": steps, "bands": bands}
