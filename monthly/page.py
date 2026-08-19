@@ -145,6 +145,10 @@ tr.tot td{font-weight:700;border-top:2px solid var(--line-strong);border-bottom:
 .attr .meta{font-size:12px;color:var(--mut)}
 .attr .unset{color:var(--mut);font-style:normal}
 .empty{padding:34px 16px;text-align:center;color:var(--mut)}
+.spin{width:26px;height:26px;margin:0 auto;border-radius:50%;
+  border:2.5px solid var(--surface-3);border-top-color:var(--gold);
+  animation:sp .9s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
 .sk{background:linear-gradient(90deg,var(--surface-2),var(--surface-3),var(--surface-2));
   border-radius:8px;animation:sh 1.2s infinite}
 @keyframes sh{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}
@@ -572,11 +576,17 @@ function viewAdmin(){
        'وش يشوفه الضيف في صفحة /monthly.</div>';
 
   /* the number that says not to flip, printed beside the switch */
-  h += '<div class="' + (f.may_flip ? 'quality' : 'quality warn') + '">' +
-       '<b>تغطية السجل الذاتي الآن: ' +
-       (f.coverage_pct === null || f.coverage_pct === undefined ? '—' : f.coverage_pct + '%') +
-       '</b> (شهر ' + he(CFG.coverage_month || '') + ') — الحد الأدنى ' + f.min_pct + '%.<br>' +
-       he(f.criterion_ar || '') + '</div>';
+  var cs = (CFG.coverage_status || {}).state;
+  if(f.coverage_pct === null || f.coverage_pct === undefined){
+    h += '<div class="quality">التغطية تنحسب الحين في الخلفية' +
+         (cs === 'error' ? ' — صار خطأ، جرّب «تحديث البيانات»' : '') +
+         '. الإعدادات تشتغل عادي.</div>';
+  } else {
+    h += '<div class="' + (f.may_flip ? 'quality' : 'quality warn') + '">' +
+         '<b>تغطية السجل الذاتي الآن: ' + f.coverage_pct + '%</b> (شهر ' +
+         he(CFG.coverage_month || '') + ') — الحد الأدنى ' + f.min_pct + '%.<br>' +
+         he(f.criterion_ar || '') + '</div>';
+  }
 
   var mode = f.price_source;
   h += '<div class="modes">';
@@ -669,11 +679,29 @@ function render(){
   else if(TAB === 'admin') viewAdmin();
   else viewAttrs();
 }
+var WAIT = null;
+function waiting(msg){
+  var v = $('view');
+  v.innerHTML = '<div class="card"><div class="empty">' +
+    '<div class="spin"></div>' +
+    '<div style="margin-top:14px;font-weight:600">' + he(msg) + '</div>' +
+    '<div class="muted" style="font-size:13px;margin-top:6px">' +
+    'ما تحتاج تسوي شي — الصفحة تحدّث نفسها.</div></div></div>';
+}
+function retryLater(fn){
+  if(WAIT) clearTimeout(WAIT);
+  WAIT = setTimeout(fn, 4000);
+}
 function loadUnits(force){
   UNITS = null; render();
   api('/api/mrent/units?month=' + encodeURIComponent(MONTH) + (force ? '&refresh=1' : ''))
     .then(function(d){
       if(!d.ok){ toast(d.message || 'ما قدرنا نجيب البيانات'); return; }
+      if(d.status === 'computing'){
+        waiting(d.message || 'نجهّز بيانات الشهر…');
+        retryLater(function(){ loadUnits(false); });
+        return;
+      }
       UNITS = d;
       var sel = $('unit');
       var html = '<option value="">— اختر شقة —</option>';
@@ -703,6 +731,11 @@ function loadPrice(){
   api('/api/mrent/price?lid=' + encodeURIComponent(LID) + '&month=' + encodeURIComponent(MONTH))
     .then(function(d){
       if(!d.ok){ toast(d.message || 'ما قدرنا نحسب'); return; }
+      if(d.status === 'computing'){
+        waiting(d.message || 'نجهّز بيانات الشهر…');
+        retryLater(loadPrice);
+        return;
+      }
       PRICE = d.price; render();
     });
 }

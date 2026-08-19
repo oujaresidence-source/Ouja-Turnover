@@ -141,8 +141,18 @@ async def _api_units(request):
     if not month:
         return _bad("اكتب الشهر بالصيغة YYYY-MM مثل 2026-10")
     force = request.rel_url.query.get("refresh") in ("1", "true")
-    out = await asyncio.to_thread(collect.units_report, month, force)
+    if force:
+        collect._CACHE.pop(month, None)
+    out = await asyncio.to_thread(collect.units_report, month, False)
+    if out is None:
+        st = collect.month_status(month)
+        collect.ensure_month(month)
+        return HOST.json_response({
+            "ok": True, "status": "computing", "month": month,
+            "error": st.get("error"),
+            "message": "نجهّز بيانات الشهر — أول مرة تاخذ دقيقة. الصفحة تحدّث نفسها."})
     out["ok"] = True
+    out["status"] = "ready"
     return HOST.json_response(out)
 
 
@@ -153,8 +163,13 @@ async def _api_price(request):
     lid = (request.rel_url.query.get("lid") or "").strip()
     if not month or not lid.isdigit():
         return _bad("استخدم ?lid=457230&month=2026-10")
+    if not collect.cached_month(month):
+        collect.ensure_month(month)
+        return HOST.json_response({
+            "ok": True, "status": "computing", "month": month,
+            "message": "نجهّز بيانات الشهر — أول مرة تاخذ دقيقة."})
     out = await asyncio.to_thread(collect.price_one, int(lid), month)
-    return HOST.json_response({"ok": True, "price": out})
+    return HOST.json_response({"ok": True, "status": "ready", "price": out})
 
 
 async def _api_attrs_get(request):
@@ -317,16 +332,24 @@ async def _api_quote_pdf(request):
 
 
 def _coverage_now():
-    """Own-history coverage for the month a guest would actually book. Fetched
-    fresh rather than remembered — the number that gates the switch must not be
-    a number from last week."""
+    """Own-history coverage for the month a guest would actually book.
+
+    CACHE ONLY, and it warms in the background if cold. This function used to
+    compute, which made the settings screen the heaviest endpoint in the app —
+    and the settings screen is exactly where someone goes when something looks
+    wrong. It is now the cheapest.
+    """
     import datetime
     from . import collect
     d = datetime.date.today()
     m = "%04d-%02d" % (d.year + (1 if d.month == 12 else 0),
                        1 if d.month == 12 else d.month + 1)
     try:
-        return collect.units_report(m).get("pct_own_history"), m
+        rep = collect.units_report(m)
+        if rep is None:
+            collect.ensure_month(m)
+            return None, m
+        return rep.get("pct_own_history"), m
     except Exception:
         return None, m
 
@@ -349,8 +372,10 @@ async def _api_settings_get(request):
     cov, month = await asyncio.to_thread(_coverage_now)
     cur = settings.load()
     g = _guest_cfg()
+    from . import collect as _c
     return HOST.json_response({
         "ok": True,
+        "coverage_status": _c.month_status(month),
         "guest_discount_pct": g.get("default_pct"),
         "guest_ceiling_pct": g.get("ceiling_pct"),
         "flip": settings.flip_state(cov),

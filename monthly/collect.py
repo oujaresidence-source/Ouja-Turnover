@@ -236,6 +236,58 @@ def month_state(month, force=False, today=None):
     return st
 
 
+# ─────────────────────────── never block a request ───────────────────────────
+#
+# month_state() reads years of Hostaway history and paginates the listings API.
+# Every screen needed it, so every screen could hang, and Railway's proxy gave up
+# before the app did — an "Application failed to respond" page on a service that
+# was merely busy. Three separate outages came from this one shape.
+#
+# So NO request computes any more. A request either finds the month warm and
+# answers instantly, or it starts the work in a background thread and answers
+# "computing" — and the page waits visibly instead of the browser dying quietly.
+
+_JOBS = {}
+_JOBS_LOCK = __import__("threading").Lock()
+_JOB_STALE = 600          # a job older than this is presumed dead and may restart
+
+
+def ensure_month(month):
+    """Warm the month WITHOUT blocking. Returns 'ready', 'running' or 'error'."""
+    import threading
+    if cached_month(month):
+        return "ready"
+    with _JOBS_LOCK:
+        j = _JOBS.get(month)
+        if j and j.get("state") == "running" and (_now_ts() - j["started"]) < _JOB_STALE:
+            return "running"
+        _JOBS[month] = {"state": "running", "started": _now_ts(), "error": None}
+
+    def _work():
+        try:
+            month_state(month, force=True)
+            with _JOBS_LOCK:
+                _JOBS[month] = {"state": "ready", "started": _now_ts(), "error": None}
+        except Exception as e:
+            with _JOBS_LOCK:
+                _JOBS[month] = {"state": "error", "started": _now_ts(),
+                                "error": "%s: %s" % (type(e).__name__, e)}
+            print("[monthly] month_state failed for %s: %s" % (month, e))
+
+    threading.Thread(target=_work, name="monthly-%s" % month, daemon=True).start()
+    return "running"
+
+
+def month_status(month):
+    if cached_month(month):
+        return {"state": "ready", "error": None}
+    with _JOBS_LOCK:
+        j = _JOBS.get(month)
+    if not j:
+        return {"state": "cold", "error": None}
+    return {"state": j.get("state"), "error": j.get("error")}
+
+
 def cached_month(month):
     """The month state ONLY if it is already warm. Never computes.
 
@@ -338,8 +390,13 @@ def pooled_range(p, st, meta):
 
 def units_report(month, force=False, today=None):
     """Every unit, its price, what bound it, and — when there is no price — the
-    stated reason rather than a blank."""
-    st = month_state(month, force=force, today=today)
+    stated reason rather than a blank. Returns None when the month is not warm:
+    the caller answers "computing" rather than making a browser wait."""
+    if force:
+        month_state(month, force=True, today=today)
+    st = cached_month(month)
+    if not st:
+        return None
     rows = []
     for lid in sorted(st["unit_meta"]):
         p = price_one(lid, month, today=today)
