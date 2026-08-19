@@ -160,6 +160,18 @@ except Exception as _pc_err:            # pragma: no cover
     _pricecheck = None
     _HAS_PRICECHECK = False
 
+# «التسعير الشهري» — the monthly-rent engine: what a unit should rent for by the month,
+# WHY that number, and what it means for the owner against their annual Ejar lease.
+# READ-ONLY against Hostaway (host.py wires no api_post/api_put). Endpoints live under
+# /api/mrent/ and NOT /api/monthly/, which is the public guest site's prefix.
+try:
+    import monthly as _monthly
+    _HAS_MONTHLY = os.environ.get("MONTHLY_LAB_ENABLED", "1") == "1"
+except Exception as _ml_err:            # pragma: no cover
+    print("[monthly] import failed (page disabled, bot unaffected):", _ml_err)
+    _monthly = None
+    _HAS_MONTHLY = False
+
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
 # humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
 # nothing, issues nothing.
@@ -58050,6 +58062,32 @@ async def start_web_server():
                 print("[pricecheck] wired + routes registered (/pricecheck) — read-only")
             except Exception as _pce:
                 print("[pricecheck] wiring failed (page disabled, bot unaffected):", _pce)
+
+        # ---- «التسعير الشهري» — monthly rent recommendation + the owner justification PDF.
+        # Consumes the _pe_* engine; never modifies it. Hands it fetch_reservations_window
+        # (NOT the truncating history cache — CLAUDE.md trap #4): a monthly price built on a
+        # truncated history is a wrong price sent to an owner.
+        if _HAS_MONTHLY:
+            try:
+                _monthly.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "tz": TZ, "now": now_riyadh,
+                    "api_get": api_get,
+                    "fetch_reservations_window": fetch_reservations_window,
+                    "fetch_calendar_days": fetch_calendar_days,
+                    "get_listings_map": get_listings_map,
+                    "load_json": _load_json, "save_json": _save_json,
+                    "state_path": _state_path,
+                    "base_url": _dispatch_base_url,   # a RESOLVER, not a constant: env -> auto-captured -> oujares.com
+                    "saudi_events": SAUDI_EVENTS,
+                    "pe_band": _pe_band,
+                    "pe_build_dataset": _pe_build_dataset,
+                })
+                _monthly.bootstrap()
+                _monthly.register_routes(app)
+                print("[monthly] wired + routes registered (/api/mrent/*) — read-only")
+            except Exception as _me:
+                print("[monthly] wiring failed (page disabled, bot unaffected):", _me)
 
         # ---- «نظام الالتزام» — weekly-report ladder + warnings. Additive; reuses brain.db,
         # the Employee Calendar (the ONE employee list) and assignments.json's Discord ids.
