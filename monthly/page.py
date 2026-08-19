@@ -112,6 +112,8 @@ tr.tot td{font-weight:700;border-top:2px solid var(--line-strong);border-bottom:
 .neg{color:var(--red)}
 .pos{color:var(--green)}
 .muted{color:var(--mut)}
+.alt{font-size:12.5px;color:var(--mut);font-weight:400}
+.unitname{font-size:14px;color:var(--text-2);font-weight:600;margin-bottom:10px}
 .rowlink{cursor:pointer;transition:background .15s var(--ease)}
 .rowlink:hover{background:var(--surface-2)}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;
@@ -309,7 +311,9 @@ function section(title, subtitle, rows, kind){
   for(var i = 0; i < rows.length; i++){
     var r = rows[i];
     h += '<tr class="rowlink" data-lid="' + he(r.lid) + '">';
-    h += '<td>' + he(r.name || r.lid) + '</td>';
+    h += '<td><div>' + he(r.name || r.lid) + '</div>' +
+         (r.public_name && r.public_name !== r.name
+           ? '<div class="alt">' + he(r.public_name) + '</div>' : '') + '</td>';
     h += '<td class="muted">' + he(r.district || '—') + '</td>';
     if(kind === 'none'){
       h += '<td class="n"><span class="pill none">—</span></td>';
@@ -359,6 +363,11 @@ function viewUnit(){
   var h = '';
 
   h += '<div class="card"><div class="hero"><div style="flex:1;min-width:280px">';
+  if(p.name){
+    h += '<div class="unitname">' + he(p.name) +
+         (p.public_name && p.public_name !== p.name
+           ? '<span class="alt"> — ' + he(p.public_name) + '</span>' : '') + '</div>';
+  }
   if(p.price === null || p.price === undefined){
     h += '<div class="price">—</div>';
     h += '<div class="bound"><b>ما فيه تقدير لهالشقة هذا الشهر.</b><br>' +
@@ -641,7 +650,10 @@ function loadUnits(force){
       var sel = $('unit');
       var html = '<option value="">— اختر شقة —</option>';
       for(var i = 0; i < d.rows.length; i++){
-        html += '<option value="' + he(d.rows[i].lid) + '">' + he(d.rows[i].name || d.rows[i].lid) + '</option>';
+        var rw = d.rows[i];
+        var lbl = he(rw.name || rw.lid);
+        if(rw.public_name && rw.public_name !== rw.name) lbl += ' — ' + he(rw.public_name);
+        html += '<option value="' + he(rw.lid) + '">' + lbl + '</option>';
       }
       sel.innerHTML = html;
       if(LID) sel.value = LID;

@@ -297,7 +297,13 @@ def listing_meta(api_get, kb_district=None):
                 except Exception:
                     district = None
             out[lid] = {
+                # BOTH names. Hostaway's internalListingName is what the team
+                # says out loud («2D - صاد»); `name` is what the guest site
+                # publishes («98" Cinema Suite»). Showing only one made the lab
+                # impossible to line up against /monthly by eye, and led to
+                # comparing two labels and concluding they were two flats.
                 "name": (L.get("internalListingName") or L.get("name") or "").strip(),
+                "public_name": (L.get("name") or "").strip(),
                 "bedrooms": L.get("bedroomsNumber"),
                 "district": district or (L.get("city") or L.get("address") or "").strip() or None,
                 "district_source": "kb" if district else "hostaway_city",

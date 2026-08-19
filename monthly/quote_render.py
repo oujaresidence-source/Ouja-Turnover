@@ -236,8 +236,8 @@ def _page1(p, cfg):
         '<div class="c-bound">%s</div>'
         '%s</div>%s</div>'
         % (_e(p.get("name") or ""),
-           _e(p.get("district") or ""),
-           (" · %s غرف" % _e(p.get("bedrooms"))) if p.get("bedrooms") else "",
+           _e(p.get("public_name") or p.get("district") or ""),
+           (" · %s" % _e(p.get("district"))) if p.get("public_name") and p.get("district") else "",
            _e(_month_ar(p.get("month"))),
            _sar(price),
            _e(p.get("label_ar") or "تقدير"),

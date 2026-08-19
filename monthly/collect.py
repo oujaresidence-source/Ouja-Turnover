@@ -252,6 +252,7 @@ def price_one(lid, month, force=False, today=None):
         ejar_row=db.ejar_latest(d, bedrooms=b) if d and b else None,
         paired_obs=db.paired_obs_count(), today=st["today"])
     p["name"] = meta.get("name")
+    p["public_name"] = meta.get("public_name")
     p["district"] = d
     p["district_source"] = meta.get("district_source")
     p["bedrooms"] = b
@@ -317,7 +318,8 @@ def units_report(month, force=False, today=None):
     for lid in sorted(st["unit_meta"]):
         p = price_one(lid, month, today=today)
         rows.append({
-            "lid": lid, "name": p.get("name"), "district": p.get("district"),
+            "lid": lid, "name": p.get("name"),
+            "public_name": p.get("public_name"), "district": p.get("district"),
             "bedrooms": p.get("bedrooms"),
             "price": p.get("price"), "bound_by": p.get("bound_by"),
             "confidence": p.get("confidence"), "basis": p.get("basis"),
