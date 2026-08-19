@@ -243,3 +243,28 @@ class TwoDifferentFailuresTest(unittest.TestCase):
         txt = diagnose.render_text({"months": [r], "compare": []})
         self.assertIn("occ   —", txt)
         self.assertNotIn("occ 0.00", txt)
+
+
+class VerdictSuppressionTest(unittest.TestCase):
+    """The verdict was reading data completeness as seasonality: January said
+    'inconclusive' only because 41 units matched where August matched 20."""
+
+    def _no_history(self, n):
+        return [{"lid": i, "name": "u%d" % i, "month": "2026-10", "own": [],
+                 "district_pool": [], "bedroom_pool": [], "attr_values": {},
+                 "ejar_row": None} for i in range(n)]
+
+    def test_a_broken_sample_suppresses_the_verdict(self):
+        rep = diagnose.run(self._no_history(10))
+        seg = rep["segmented"]
+        self.assertTrue(seg["verdict_suppressed"])
+        self.assertIn("SUPPRESSED", seg["verdict"])
+
+    def test_the_suppressed_verdict_is_kept_for_later_not_destroyed(self):
+        rep = diagnose.run(self._no_history(10))
+        self.assertIn("verdict_would_have_been", rep["segmented"])
+
+    def test_a_healthy_sample_still_gets_its_verdict(self):
+        rep = diagnose.run([unit(i, 500, 0.8) for i in range(10)])
+        self.assertFalse(rep["segmented"]["verdict_suppressed"])
+        self.assertNotIn("SUPPRESSED", rep["segmented"]["verdict"])

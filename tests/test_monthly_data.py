@@ -289,3 +289,52 @@ class PartialMonthTest(unittest.TestCase):
              res(1, "2025-08-01", "2025-08-11", 5200)], 8, "2026-08")
         for o in rows[1]:
             self.assertIn("partial", o)
+
+
+class FunnelTest(unittest.TestCase):
+    """Two-thirds of a portfolio showing zero bookings in a busy month is not
+    possible, so the question is never 'which unit is quiet' but 'which filter is
+    eating them'. Counting every drop by reason turns a guess into a reading."""
+
+    def test_every_reservation_lands_in_exactly_one_bucket(self):
+        f = {}
+        rows = [res(1, "2026-10-01", "2026-10-11", 6200),
+                res(2, "2026-10-01", "2026-10-11", 6200, "cancelled"),
+                res(3, "2026-07-01", "2026-07-11", 6200),
+                dict(res(4, "2026-10-01", "2026-10-11", 0)),
+                dict(res(5, "2026-10-01", "2026-10-11", 900), listingMapId=None)]
+        data.unit_month_rows(rows, 10, "2026-08", funnel=f)
+        total = (f["kept"] + f["dropped_not_confirmed"] + f["dropped_no_listing_id"]
+                 + f["dropped_bad_dates"] + f["dropped_no_price"]
+                 + f["dropped_no_nights_in_month"])
+        self.assertEqual(f["read"], len(rows))
+        self.assertEqual(total, f["read"], "a reservation vanished without a reason")
+
+    def test_an_unexpected_status_is_counted_and_named(self):
+        """The prime suspect: if Hostaway returns statuses beyond new/modified,
+        is_confirmed discards real bookings and nothing downstream can tell."""
+        f = {}
+        data.unit_month_rows([res(1, "2026-10-01", "2026-10-11", 6200, "checkedOut")],
+                             10, "2026-08", funnel=f)
+        self.assertEqual(f["dropped_not_confirmed"], 1)
+        self.assertEqual(f["status_seen"]["checkedout"], 1)
+
+    def test_the_listing_id_type_is_recorded(self):
+        f = {}
+        rows = [res(1, "2026-10-01", "2026-10-11", 6200)]
+        rows.append(dict(rows[0], id="s", listingMapId="457230"))
+        data.unit_month_rows(rows, 10, "2026-08", funnel=f)
+        self.assertIn("int", f["listing_id_types"])
+        self.assertIn("str", f["listing_id_types"])
+
+    def test_a_zero_price_booking_is_counted_separately_from_a_cancelled_one(self):
+        f = {}
+        data.unit_month_rows([dict(res(1, "2026-10-01", "2026-10-11", 0))],
+                             10, "2026-08", funnel=f)
+        self.assertEqual(f["dropped_no_price"], 1)
+        self.assertEqual(f["dropped_not_confirmed"], 0)
+
+    def test_the_funnel_is_optional_and_costs_nothing_when_absent(self):
+        rows = data.unit_month_rows([res(1, "2026-10-01", "2026-10-11", 6200)],
+                                    10, "2026-08")
+        self.assertEqual(rows[1][0]["nights"], 10)

@@ -87,27 +87,57 @@ def nights_in_month(res, first, last):
     return max(0, (hi - lo).days + 1)
 
 
-def unit_month_rows(reservations, target_month_num, today_key):
+def unit_month_rows(reservations, target_month_num, today_key, funnel=None):
     """Realized (ADR, occupancy) per unit per matching CALENDAR MONTH.
 
     Only months whose NUMBER matches the target — October is compared with
     Octobers. Ramadan and the summer trough are large enough in Riyadh that a
     flat twelve-month average overprices July and underprices Riyadh Season.
     """
+    # THE FUNNEL. Two-thirds of a portfolio showing zero bookings in a busy month
+    # is not possible, so the question is never "which unit is quiet" but "which
+    # filter is eating them". Counting every drop BY REASON turns that from a
+    # guess into a reading. status_seen is the sharpest of them: if Hostaway
+    # returns statuses beyond new/modified, is_confirmed silently discards real
+    # bookings and nothing downstream can tell.
+    f = funnel if funnel is not None else {}
+    f.setdefault("read", 0)
+    for k in ("dropped_not_confirmed", "dropped_no_listing_id", "dropped_bad_dates",
+              "dropped_no_price", "dropped_no_nights_in_month", "kept"):
+        f.setdefault(k, 0)
+    f.setdefault("status_seen", {})
+    f.setdefault("listing_id_types", {})
+
     buckets = {}
     for r in (reservations or []):
-        if not is_confirmed(r):
-            continue
+        f["read"] += 1
+        st = str((r or {}).get("status") or "").strip().lower() or "(missing)"
+        f["status_seen"][st] = f["status_seen"].get(st, 0) + 1
         lid = r.get("listingMapId")
+        tn = type(lid).__name__
+        f["listing_id_types"][tn] = f["listing_id_types"].get(tn, 0) + 1
+
+        if not is_confirmed(r):
+            f["dropped_not_confirmed"] += 1
+            continue
         ci, co = _d(r.get("arrivalDate")), _d(r.get("departureDate"))
-        if lid is None or not ci or not co:
+        if lid is None:
+            f["dropped_no_listing_id"] += 1
+            continue
+        if not ci or not co:
+            f["dropped_bad_dates"] += 1
             continue
         total = _num(r.get("totalPrice"))
         stay_nights = (co - ci).days
-        if not total or stay_nights <= 0:
+        if stay_nights <= 0:
+            f["dropped_bad_dates"] += 1
+            continue
+        if not total:
+            f["dropped_no_price"] += 1
             continue
         adr_of_stay = total / float(stay_nights)
 
+        hit = False
         d = datetime.date(ci.year, ci.month, 1)
         while d <= co:
             key = month_key(d)
@@ -118,7 +148,9 @@ def unit_month_rows(reservations, target_month_num, today_key):
                     b = buckets.setdefault((int(lid), key), {"nights": 0, "revenue": 0.0})
                     b["nights"] += n
                     b["revenue"] += adr_of_stay * n
+                    hit = True
             d = (datetime.date(d.year + (d.month // 12), (d.month % 12) + 1, 1))
+        f["kept" if hit else "dropped_no_nights_in_month"] += 1
 
     out = {}
     for (lid, key), b in buckets.items():
@@ -272,6 +304,6 @@ def _is_active(L):
     if v in (0, "0", False):
         return False
     for key in ("isActive", "listed", "active", "isListed"):
-        if key in (L or {}) and L.get(key) in (0, "0", False):
+        if key in (L or {}) and L.get(key) in (0, "0", False, "false", "False"):
             return False
     return True

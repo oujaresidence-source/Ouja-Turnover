@@ -65,6 +65,19 @@ def _pct(n, d):
     return (n / float(d)) if d else 0.0
 
 
+def _segmented_or_suppressed(results, no_price, n):
+    seg = engine.segmented_report(results)
+    if n and _pct(no_price, n) > 0.40:
+        seg["verdict_suppressed"] = True
+        seg["verdict_would_have_been"] = seg.get("verdict")
+        seg["verdict"] = ("SUPPRESSED — %d of %d units returned no price, so any "
+                          "verdict here would describe the sample that survived, "
+                          "not the portfolio" % (no_price, n))
+    else:
+        seg["verdict_suppressed"] = False
+    return seg
+
+
 def _trust_warnings(own, fallback, no_price, n):
     out = []
     if not n:
@@ -174,7 +187,12 @@ def run(units, cost_set=None, today=None):
         },
         "bands": {b: sum(1 for r in per_unit if r["band"] == b)
                   for b in engine.OCC_BANDS + ("unknown",)},
-        "segmented": engine.segmented_report(results),
+        # THE VERDICT IS SUPPRESSED WHILE THE TRUST CHECK IS FAILING. It was
+        # reading data completeness as seasonality: January said "inconclusive"
+        # only because 41 units matched where August matched 20. A conclusion
+        # drawn from a sample we already know is broken is worse than no
+        # conclusion, because it looks like a finding.
+        "segmented": _segmented_or_suppressed(results, len(none_at_all), n),
         "floor_ratio": engine.floor_ratio_report(results),
         "floor_ratio_by_band": {
             b: engine.floor_ratio_report(
@@ -287,6 +305,23 @@ def render_text(multi):
               % (b, br["n"], k["floor"], k["model"], k["ceiling"], k["no_price"],
                  ("%.3f" % fr) if fr else "—"))
         A("    verdict: %s" % seg.get("verdict"))
+        fn = r.get("funnel") or {}
+        if fn:
+            A("    reservation funnel: read %s -> kept %s" % (fn.get("read"), fn.get("kept")))
+            for k in ("dropped_not_confirmed", "dropped_no_listing_id",
+                      "dropped_bad_dates", "dropped_no_price",
+                      "dropped_no_nights_in_month"):
+                if fn.get(k):
+                    A("        %-30s %s" % (k, fn[k]))
+            ss = fn.get("status_seen") or {}
+            if ss:
+                A("        statuses seen: %s"
+                  % ", ".join("%s=%d" % (k, v) for k, v in
+                              sorted(ss.items(), key=lambda x: -x[1])[:8]))
+            lt = fn.get("listing_id_types") or {}
+            if lt:
+                A("        listingMapId types: %s"
+                  % ", ".join("%s=%d" % (k, v) for k, v in lt.items()))
         lm = r.get("loss_making_nightly") or []
         A("    loss-making nightly: %d    band-closed/no-price: %d"
           % (len(lm), len(r.get("no_price") or [])))

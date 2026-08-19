@@ -47,7 +47,9 @@ def diagnose(month, today=None):
     reservations = data.fetch_history(month, today=today)
     unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
 
-    all_rows = data.unit_month_rows(reservations, int(month[5:7]), today_key)
+    funnel = {}
+    all_rows = data.unit_month_rows(reservations, int(month[5:7]), today_key,
+                                    funnel=funnel)
     unit_rows, dropped_partial = {}, 0
     for lid, rows in all_rows.items():
         keep = [r for r in rows if not r.get("partial")]
@@ -85,6 +87,7 @@ def diagnose(month, today=None):
     rep["partial_months_dropped"] = dropped_partial
     # The join, made auditable: how many listings, how many carried the metadata
     # the pools are keyed on, and how many actually matched a reservation.
+    rep["funnel"] = funnel
     rep["join"] = {
         "listings_active": len(unit_meta),
         "with_district": sum(1 for m in unit_meta.values() if m.get("district")),
@@ -107,6 +110,9 @@ def trace(lid, month, today=None):
     reservations = data.fetch_history(month, today=today)
     mine = [r for r in reservations if str(r.get("listingMapId")) == str(lid)]
     unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
+    unit_funnel = {}
+    data.unit_month_rows(mine, int(month[5:7]), data.month_key(today),
+                         funnel=unit_funnel)
     rows = data.unit_month_rows(reservations, int(month[5:7]), data.month_key(today))
     steps = []
     for r in mine[:25]:
@@ -125,10 +131,14 @@ def trace(lid, month, today=None):
         "reservations_in_window_total": len(reservations),
         "reservations_matching_this_lid": len(mine),
         "sample": steps,
+        "funnel_for_this_unit": unit_funnel,
         "observations_built": rows.get(lid) or [],
         "observations_after_partial_drop": [o for o in (rows.get(lid) or [])
                                             if not o.get("partial")],
-        "min_own_obs_required": None,
+        "min_own_obs_required": engine.MIN_OWN_OBS,
+        "own_nights_total": sum(o.get("nights") or 0
+                                for o in (rows.get(lid) or [])
+                                if not o.get("partial")),
     }
 
 
