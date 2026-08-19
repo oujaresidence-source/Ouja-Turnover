@@ -207,6 +207,7 @@ def floor_price(adr, occ, cost_set=None):
              "label_ar": "الحد الأدنى لهامشنا",
              "label_en": "Our minimum margin"},
         ]
+        check_reconciles(components, floor, "floor waterfall (nightly loss)")
         return {"floor": floor, "monthly_direct_cost": monthly_direct,
                 "nightly": e, "components": components}
 
@@ -228,6 +229,7 @@ def floor_price(adr, occ, cost_set=None):
          "label_en": "Our minimum margin"},
     ]
 
+    check_reconciles(components, floor, "floor waterfall")
     return {
         "floor": floor,
         "monthly_direct_cost": monthly_direct,
@@ -305,3 +307,40 @@ def model_price(base, values):
     for row in q["multipliers"]:
         row["delta_sar"] = price - (price / row["mult"]) if row["mult"] else 0.0
     return {"model": price, "base": b, "quality": q}
+
+
+# ───────────────────── the reconciliation invariant (§ hard rule) ─────────────────────
+#
+# THIS CLASS OF BUG HAS NOW OCCURRED TWICE, from two different authors:
+#   * the brief's own sample payload summed to 12,900 under a stated 11,800;
+#   * this engine's first waterfall printed -1,402 under a headline of 1,670.
+#
+# Twice from independent directions means it is not a bug to fix, it is a bug to
+# make impossible. There are at least four more places it can reappear — rounding
+# to the nearest 50, the override percentage, the owner-gate uplift and the
+# months-let break-even — and each is a fresh chance at the same failure.
+#
+# So reconciliation is checked HERE, on every payload, at construction, rather
+# than by whichever test someone remembered to write. A number shown to an owner
+# under a column that does not add up to it is the single most expensive kind of
+# wrong this feature can be: it is not a miscalculation, it is a visible one.
+
+RECONCILE_TOL = 0.01          # riyals; floating point, not judgement
+
+
+class ReconciliationError(AssertionError):
+    """A payload whose parts do not add up to its whole. Raised at construction
+    so it can never reach a screen, a PDF or an owner."""
+
+
+def check_reconciles(components, total, label="waterfall"):
+    """sum(components) must equal the number the components explain."""
+    s = sum(_num(c.get("sar")) or 0.0 for c in (components or []))
+    t = _num(total)
+    if t is None:
+        raise ReconciliationError("%s: no total to reconcile against" % label)
+    if abs(s - t) > RECONCILE_TOL:
+        raise ReconciliationError(
+            "%s does not reconcile: components sum to %.2f but the total shown "
+            "is %.2f (a %.2f SAR discrepancy on screen)" % (label, s, t, s - t))
+    return True

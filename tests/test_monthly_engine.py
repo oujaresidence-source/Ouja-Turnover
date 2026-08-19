@@ -317,3 +317,66 @@ class ModelPriceTest(unittest.TestCase):
         m = engine.model_price(10000, best)
         self.assertTrue(m["quality"]["clamped"])
         self.assertEqual(m["model"], 16000)
+
+
+# ─────────────────── the reconciliation invariant, property-tested ───────────────────
+
+class ReconciliationInvariantTest(unittest.TestCase):
+    """Hand-picked cases are what missed this the first two times it happened.
+    These sweep the space instead."""
+
+    def test_it_refuses_a_column_that_does_not_add_up(self):
+        with self.assertRaises(engine.ReconciliationError):
+            engine.check_reconciles([{"sar": 100}, {"sar": 50}], 1000)
+
+    def test_it_accepts_floating_point_noise_but_not_real_money(self):
+        engine.check_reconciles([{"sar": 33.333333}, {"sar": 66.666667}], 100.0)
+        with self.assertRaises(engine.ReconciliationError):
+            engine.check_reconciles([{"sar": 33.0}, {"sar": 66.0}], 100.0)
+
+    def test_a_missing_total_is_an_error_not_a_pass(self):
+        with self.assertRaises(engine.ReconciliationError):
+            engine.check_reconciles([{"sar": 100}], None)
+
+    def test_every_floor_waterfall_reconciles_across_the_whole_input_space(self):
+        """4,800 randomized units: cheap and dear, empty and full, tiny turnover
+        costs and absurd ones. Any combination whose column does not sum to its
+        own headline raises at construction, so this test would fail loudly
+        rather than a wrong number reaching a screen."""
+        import random
+        rnd = random.Random(20260819)          # seeded: a failure is reproducible
+        checked = 0
+        for _ in range(4800):
+            adr = rnd.choice([0.0, 45.0, 120.0, 380.0, 700.0, 1500.0, 6000.0])
+            occ = rnd.choice([0.0, 0.05, 0.35, 0.62, 0.88, 1.0])
+            c = engine.costs(
+                turnover_cost_sar=rnd.choice([1, 60, 140, 400, 1200]),
+                alos=rnd.choice([1.0, 1.5, 2.9, 6.0, 30.0]),
+                blended_channel_pct=rnd.choice([0.001, 0.03, 0.15, 0.30, 0.55]),
+                utilities_month=rnd.choice([1, 350, 2000]),
+                consumables_month=rnd.choice([1, 120, 900]),
+                wifi_month=rnd.choice([1, 150, 600]),
+                min_margin_sar=rnd.choice([1, 650, 5000]))
+            f = engine.floor_price(adr, occ, c)
+            if f is None:
+                continue
+            checked += 1
+            self.assertAlmostEqual(sum(x["sar"] for x in f["components"]),
+                                   f["floor"], places=2)
+            self.assertGreater(f["floor"], 0, "a floor must never be zero or negative")
+        self.assertGreater(checked, 4000, "the sweep did not actually exercise anything")
+
+    def test_the_floor_never_falls_below_the_cost_of_serving_a_monthly_let(self):
+        """Whatever the nightly side does, we cannot rationally let a unit for
+        less than it costs us to run plus our margin."""
+        import random
+        rnd = random.Random(7)
+        for _ in range(600):
+            c = engine.costs(turnover_cost_sar=rnd.uniform(1, 900),
+                             utilities_month=rnd.uniform(1, 1500),
+                             consumables_month=rnd.uniform(1, 800),
+                             wifi_month=rnd.uniform(1, 500),
+                             min_margin_sar=rnd.uniform(1, 4000))
+            f = engine.floor_price(rnd.uniform(50, 3000), rnd.uniform(0, 1), c)
+            self.assertGreaterEqual(
+                f["floor"] + 0.01, f["monthly_direct_cost"] + c["min_margin_sar"])
