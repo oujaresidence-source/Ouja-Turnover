@@ -296,3 +296,78 @@ class SuppressionCoversTheWholeTrustCheckTest(unittest.TestCase):
             rep = diagnose.run(units)
             self.assertEqual(rep["headline"]["trustworthy"],
                              not rep["segmented"]["verdict_suppressed"])
+
+
+class PooledRangeTest(unittest.TestCase):
+    """A pool average repeated as an identical point price on fifteen rows
+    implies a precision the pool does not have — and the repetition makes that
+    obvious to anyone reading, which is worse than admitting it up front."""
+
+    def test_a_pooled_unit_gets_a_band_not_a_point(self):
+        from monthly import collect, engine
+        pool = [{"adr": a, "occ": 0.8, "months_old": 1, "nights": 30}
+                for a in (380, 450, 520, 600, 700, 810)]
+        st = {"dpool": {("الملقا", 3): pool}, "bpool": {}, "cost_set": engine.costs()}
+        p = engine.price_unit(1, "2026-10", own=[], district=pool, bedroom=[],
+                              attr_values={})
+        rng = collect.pooled_range(p, st, {"district": "الملقا", "bedrooms": 3})
+        self.assertIsNotNone(rng)
+        self.assertLess(rng["low"], p["price"])
+        self.assertGreater(rng["high"], p["price"])
+
+    def test_an_own_history_unit_gets_no_band(self):
+        from monthly import collect, engine
+        own = [{"adr": 600, "occ": 0.8, "months_old": 1, "nights": 30}]
+        st = {"dpool": {}, "bpool": {}, "cost_set": engine.costs()}
+        p = engine.price_unit(1, "2026-10", own=own, district=own, bedroom=[],
+                              attr_values={})
+        self.assertEqual(p["basis"], "own_history")
+        self.assertIsNone(collect.pooled_range(p, st, {"district": "x", "bedrooms": 3}))
+
+    def test_a_thin_pool_gets_no_band_rather_than_a_fake_one(self):
+        from monthly import collect, engine
+        pool = [{"adr": 500, "occ": 0.8, "months_old": 1, "nights": 30}] * 2
+        st = {"dpool": {("د", 2): pool}, "bpool": {}, "cost_set": engine.costs()}
+        p = engine.price_unit(1, "2026-10", own=[], district=pool, bedroom=[],
+                              attr_values={})
+        self.assertIsNone(collect.pooled_range(p, st, {"district": "د", "bedrooms": 2}))
+
+
+class ModelGateHonestyTest(unittest.TestCase):
+    """With nothing scored the model gate is the pool average wearing a different
+    label. It must not be drawn as an independent estimate."""
+
+    def test_an_unscored_unit_reports_the_model_as_not_measured(self):
+        from monthly import engine
+        p = engine.price_unit(1, "2026-10",
+                              own=[{"adr": 600, "occ": 0.8, "months_old": 1, "nights": 30}],
+                              district=[{"adr": 600, "occ": 0.8, "months_old": 1}],
+                              attr_values={})
+        self.assertEqual(p["quality"]["mult"], 1.0)
+
+    def test_a_scored_unit_reports_the_model_as_measured(self):
+        from monthly import engine
+        p = engine.price_unit(1, "2026-10",
+                              own=[{"adr": 600, "occ": 0.8, "months_old": 1, "nights": 30}],
+                              district=[{"adr": 600, "occ": 0.8, "months_old": 1}],
+                              attr_values={"design": 8})
+        self.assertNotEqual(p["quality"]["mult"], 1.0)
+
+
+class PageContractTest(unittest.TestCase):
+    """The page reads these fields by name; a rename that misses one shows an
+    empty column rather than an error."""
+
+    def test_the_page_says_what_it_must_say(self):
+        import monthly.page as pg
+        for needed in ("ما فيه مواصفات مسجّلة", "تقريباً", "من متوسط الحي",
+                       "تكلفة التنظيف رقم مبدئي", "تقدير"):
+            self.assertIn(needed, pg.HTML, "missing required phrase: %s" % needed)
+
+    def test_the_page_never_calls_an_estimate_a_price(self):
+        import monthly.page as pg
+        self.assertNotIn("سعر مؤكد ", pg.HTML)
+
+    def test_zero_backslashes(self):
+        import monthly.page as pg
+        self.assertNotIn(chr(92), pg.HTML)

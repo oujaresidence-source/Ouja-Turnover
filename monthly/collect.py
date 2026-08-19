@@ -257,7 +257,56 @@ def price_one(lid, month, force=False, today=None):
     p["bedrooms"] = b
     p["turnover_cost_source"] = st["turnover_cost_source"]
     p["saved_quote"] = db.latest_quote(lid, month)
+    p["pooled_range"] = pooled_range(p, st, meta)
     return p
+
+
+def _pctile(vals, q):
+    """Nearest-rank percentile. No numpy, no interpolation games."""
+    if not vals:
+        return None
+    xs = sorted(vals)
+    i = int(round(q * (len(xs) - 1)))
+    return xs[max(0, min(i, len(xs) - 1))]
+
+
+def pooled_range(p, st, meta):
+    """A RANGE for a unit priced from a pool, not a point.
+
+    A pool average repeated as an identical point price on fifteen rows implies a
+    precision the pool does not have — and the repetition makes that obvious to
+    anyone reading the page, which is worse than admitting it up front. So a
+    pooled unit is priced at the pool's 25th and 75th percentile ADR and shown as
+    the band between them.
+
+    Computed by re-running the real engine at both ends rather than scaling the
+    midpoint: the floor is not linear in ADR (the monthly running costs are
+    fixed), so a scaled band would be wrong at exactly the edges it exists to
+    describe.
+    """
+    if p.get("basis") not in ("district_pool", "bedroom_pool"):
+        return None
+    d, b = meta.get("district"), meta.get("bedrooms")
+    rows = (st["dpool"].get((d, b)) if p["basis"] == "district_pool"
+            else st["bpool"].get(b)) or []
+    adrs = [r.get("adr") for r in rows if r.get("adr")]
+    if len(adrs) < 4:
+        return None
+    occ = (p.get("data") or {}).get("occ")
+    lo_adr, hi_adr = _pctile(adrs, 0.25), _pctile(adrs, 0.75)
+    if not lo_adr or not hi_adr or hi_adr <= lo_adr:
+        return None
+    out = []
+    for adr in (lo_adr, hi_adr):
+        synthetic = [{"adr": adr, "occ": occ, "months_old": 0, "nights": 30}]
+        q = engine.price_unit(p.get("unit_id"), p.get("month"), own=[],
+                              district=synthetic, bedroom=[],
+                              attr_values={}, cost_set=st["cost_set"])
+        out.append(q.get("price"))
+    if out[0] is None or out[1] is None:
+        return None
+    lo, hi = min(out), max(out)
+    return {"low": lo, "high": hi, "n_pool": len(adrs)} if hi > lo else None
 
 
 def units_report(month, force=False, today=None):
@@ -281,6 +330,11 @@ def units_report(month, force=False, today=None):
                                if p.get("price") is None else None,
             "is_estimate": p.get("is_estimate"),
             "has_saved_quote": bool(p.get("saved_quote")),
+            "pooled_range": p.get("pooled_range"),
+            # A model gate computed with every quality_mult at 1.0 is not a
+            # model: it is the pool average wearing a different label. The page
+            # must not draw it as an independent estimate.
+            "model_is_measured": abs(((p.get("quality") or {}).get("mult") or 1.0) - 1.0) > 1e-9,
         })
     priced = [r for r in rows if r["price"] is not None]
     own = [r for r in rows if r["basis"] == "own_history"]

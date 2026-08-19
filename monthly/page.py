@@ -99,6 +99,10 @@ select,input[type=text],input[type=number]{font:inherit;padding:9px 11px;
 .gate.on .lbl{color:var(--gold-2)}
 .gate .val{text-align:left;font-family:var(--font-num);font-weight:600;font-size:14.5px}
 .gate .note{grid-column:1 / -1;font-size:12.5px;color:var(--mut);margin-top:-4px}
+.gate.dead .lbl,.gate.dead .val{color:var(--mut);text-decoration:line-through;
+  text-decoration-thickness:1px}
+.gate.dead .fill{background:repeating-linear-gradient(45deg,var(--surface-3),
+  var(--surface-3) 5px,var(--surface-2) 5px,var(--surface-2) 10px)}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line)}
 th{font-size:12.5px;color:var(--mut);font-weight:600;white-space:nowrap}
@@ -133,6 +137,9 @@ tr.tot td{font-weight:700;border-top:2px solid var(--line-strong);border-bottom:
 .sk{background:linear-gradient(90deg,var(--surface-2),var(--surface-3),var(--surface-2));
   border-radius:8px;animation:sh 1.2s infinite}
 @keyframes sh{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}
+.costwarn{display:inline-block;padding:6px 12px;border-radius:9px;font-size:13px;
+  font-weight:600;background:var(--red-soft);border:1px solid var(--red-line);
+  color:var(--red)}
 .toast{position:fixed;inset-inline-start:50%;transform:translateX(-50%);bottom:24px;
   background:var(--text);color:#fff;padding:11px 18px;border-radius:11px;font-size:14px;
   font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s var(--ease)}
@@ -272,37 +279,75 @@ function viewList(){
   }
   h += '</div>';
 
-  h += '<div class="card"><table><thead><tr>' +
-       '<th>الشقة</th><th>الحي</th><th class="n">التقدير</th>' +
-       '<th>اللي حدّده</th><th>مصدر الرقم</th><th class="n">ليالينا</th>' +
-       '</tr></thead><tbody>';
+  var own = [], pooled = [], none = [];
   for(var i = 0; i < q.rows.length; i++){
     var r = q.rows[i];
+    if(r.price === null || r.price === undefined) none.push(r);
+    else if(r.basis === 'own_history') own.push(r);
+    else pooled.push(r);
+  }
+  own.sort(function(a, b){ return (b.price || 0) - (a.price || 0); });
+  pooled.sort(function(a, b){ return (b.price || 0) - (a.price || 0); });
+
+  h += section('من سجل الشقة نفسها', own.length + ' شقة — هذي الأرقام مقاسة',
+               own, 'own');
+  h += section('من متوسط الحي أو الحجم', pooled.length +
+               ' شقة — تقريبية، معروضة كنطاق مو رقم واحد', pooled, 'pool');
+  h += section('بدون تقدير', none.length + ' شقة', none, 'none');
+  v.innerHTML = h;
+}
+
+function section(title, subtitle, rows, kind){
+  if(!rows.length) return '';
+  var h = '<div class="card"><h3 style="margin:0 0 2px;font-size:16px">' + he(title) + '</h3>';
+  h += '<div class="muted" style="font-size:13px;margin-bottom:12px">' + he(subtitle) + '</div>';
+  h += '<table><thead><tr><th>الشقة</th><th>الحي</th><th class="n">التقدير</th>';
+  h += (kind === 'none' ? '<th>السبب</th>' : '<th>اللي حدّده</th><th>مصدر الرقم</th>');
+  h += '<th class="n">ليالينا</th></tr></thead><tbody>';
+  for(var i = 0; i < rows.length; i++){
+    var r = rows[i];
     h += '<tr class="rowlink" data-lid="' + he(r.lid) + '">';
     h += '<td>' + he(r.name || r.lid) + '</td>';
     h += '<td class="muted">' + he(r.district || '—') + '</td>';
-    if(r.price === null || r.price === undefined){
-      h += '<td class="n"><span class="pill none">بدون تقدير</span></td>';
-      h += '<td class="muted" colspan="2">' + he(noPriceReason(r.no_price_reason)) + '</td>';
+    if(kind === 'none'){
+      h += '<td class="n"><span class="pill none">—</span></td>';
+      h += '<td class="muted">' + he(noPriceReason(r.no_price_reason)) + '</td>';
+    } else if(kind === 'pool' && r.pooled_range){
+      h += '<td class="n">تقريباً ' + sar(r.pooled_range.low) + ' – ' +
+           sar(r.pooled_range.high) + '</td>';
+      h += '<td>' + he({floor:'الأرضية', model:'المواصفات', ceiling:'السقف'}[r.bound_by] || '—') + '</td>';
+      h += '<td>' + basisPill(r.basis) + '</td>';
     } else {
       h += '<td class="n"><b>' + sar(r.price) + '</b></td>';
       h += '<td>' + he({floor:'الأرضية', model:'المواصفات', ceiling:'السقف'}[r.bound_by] || '—') + '</td>';
       h += '<td>' + basisPill(r.basis) + '</td>';
     }
-    h += '<td class="n muted">' + (r.own_obs === null || r.own_obs === undefined ? '—' : r.own_obs) + '</td>';
+    h += '<td class="n muted">' + nightsCell(r) + '</td>';
     h += '</tr>';
   }
-  h += '</tbody></table></div>';
-  v.innerHTML = h;
+  return h + '</tbody></table></div>';
+}
+
+/* Zero of our own nights, with a price beside it, reads as "we measured nothing
+   and priced it anyway". Say which it is instead of printing a bare 0. */
+function nightsCell(r){
+  if(r.own_obs === null || r.own_obs === undefined) return '—';
+  if(r.own_obs > 0) return String(r.own_obs);
+  if(r.basis === 'district_pool') return '0 — من متوسط الحي';
+  if(r.basis === 'bedroom_pool') return '0 — من متوسط الحجم';
+  return '0';
 }
 
 /* ================= UNIT ================= */
-function gateBar(key, label, val, bound, max){
+function gateBar(key, label, val, bound, max, dead, note){
   var w = (val && max) ? Math.max(3, Math.round(val / max * 100)) : 0;
-  var on = (key === bound) ? ' on' : '';
-  return '<div class="gate' + on + '"><div class="lbl">' + label + '</div>' +
-         '<div class="track"><div class="fill" style="width:' + w + '%"></div></div>' +
-         '<div class="val">' + sar(val) + '</div></div>';
+  var on = (key === bound && !dead) ? ' on' : '';
+  var cls = dead ? ' dead' : '';
+  var h = '<div class="gate' + on + cls + '"><div class="lbl">' + label + '</div>' +
+          '<div class="track"><div class="fill" style="width:' + w + '%"></div></div>' +
+          '<div class="val">' + sar(val) + '</div>';
+  if(note) h += '<div class="note">' + he(note) + '</div>';
+  return h + '</div>';
 }
 function viewUnit(){
   var v = $('view');
@@ -341,12 +386,20 @@ function viewUnit(){
     var mx = Math.max(g.floor || 0, g.model || 0, g.ceiling || 0) * 1.05;
     h += '<div class="card"><h3 style="margin:0 0 14px;font-size:16px">البوابات الثلاث</h3>';
     h += '<div class="gates">';
-    h += gateBar('floor', 'الأرضية', g.floor, p.bound_by, mx);
-    h += gateBar('model', 'المواصفات', g.model, p.bound_by, mx);
-    h += gateBar('ceiling', 'السقف', g.ceiling, p.bound_by, mx);
+    var measured = p.quality && Math.abs((p.quality.mult || 1) - 1) > 0.000000001;
+    h += gateBar('floor', 'الأرضية', g.floor, p.bound_by, mx, false, '');
+    h += gateBar('model', 'المواصفات', g.model, p.bound_by, mx, !measured,
+        measured ? '' :
+        'ما فيه مواصفات مسجّلة لهالشقة — هذا نفس دخل التأجير اليومي، مو تقييم مستقل');
+    h += gateBar('ceiling', 'السقف', g.ceiling, p.bound_by, mx, false, '');
     h += '</div>';
     h += '<div class="quality" style="margin-top:14px">الأرضية = أقل شي يغطي تكلفتنا · ' +
          'المواصفات = اللي تستاهله الشقة · السقف = أرخص من حجز 30 ليلة وحدة وحدة</div>';
+    if(!measured){
+      h += '<div class="quality warn">بوابة «المواصفات» مطفية: ما دام ما فيه صفات ' +
+           'مسجّلة، حسابها يطلع نفس دخل التأجير اليومي بالضبط. سجّل المواصفات ' +
+           'عشان تصير رقم مستقل.</div>';
+    }
     h += '</div>';
 
     h += '<div class="card"><h3 style="margin:0 0 12px;font-size:16px">من وين طلع الرقم</h3>';
@@ -501,7 +554,16 @@ function loadUnits(force){
       }
       sel.innerHTML = html;
       if(LID) sel.value = LID;
-      $('stamp').textContent = 'مصدر تكلفة التنظيف: ' + (d.turnover_cost_source || '');
+      var src = d.turnover_cost_source || '';
+      var el = $('stamp');
+      if(src.indexOf('DEFAULT') === 0){
+        el.className = 'costwarn';
+        el.textContent = 'تكلفة التنظيف رقم مبدئي (140 ريال) — الأسعار كلها مبنية عليه. ' +
+                         'حدّثه من صفحة تغطية التنظيف.';
+      } else {
+        el.className = 'muted';
+        el.textContent = 'تكلفة التنظيف: من إعدادات المالك';
+      }
       render();
     });
 }
