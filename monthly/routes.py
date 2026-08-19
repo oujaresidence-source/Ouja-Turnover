@@ -74,12 +74,18 @@ async def _api_diagnose(request):
     """
     import asyncio
     from . import collect
-    month = (request.rel_url.query.get("month") or "").strip()
-    if len(month) != 7 or month[4] != "-":
+    raw = (request.rel_url.query.get("month") or "").strip()
+    months = [m.strip() for m in raw.split(",") if m.strip()]
+    if not months or any(len(m) != 7 or m[4] != "-" for m in months):
         return HOST.json_response(
             {"ok": False, "error": "bad_month",
-             "message": "اكتب الشهر بالصيغة YYYY-MM مثل 2026-10"}, 200)
-    out = await asyncio.to_thread(collect.diagnose, month)
+             "message": "اكتب الشهر بالصيغة YYYY-MM — أو عدة شهور مفصولة بفواصل، "
+                        "مثل 2026-08,2026-10,2027-01"}, 200)
+    if len(months) > 6:
+        return HOST.json_response(
+            {"ok": False, "error": "too_many_months",
+             "message": "أقصى 6 شهور في المرة الوحدة"}, 200)
+    out = await asyncio.to_thread(collect.diagnose_months, ",".join(months))
     out["ok"] = True
     return HOST.json_response(out)
 

@@ -15,6 +15,51 @@ answer, not a failure, and it should not have to be dug out of a table.
 
 from . import attrs, engine
 
+# ─────────────────── PREDICTIONS, RECORDED BEFORE THE DATA ───────────────────
+# Written 2026-08-19, before the endpoint had ever run against Hostaway. If the
+# numbers arrive and we rationalise whatever they say, the diagnosis is worth
+# nothing; a prediction on record makes a surprise visible AS a surprise.
+#
+# The sharpest one is CEILING_TRACKS_HIGH_OCC. With nothing scored every
+# quality_mult is 1.0, so the ceiling binds when occ_pool x (adr_pool/adr_unit)
+# exceeds (1 - d) = 0.85. For a unit priced near its pool that is simply
+# "occupancy above 85%". So the ceiling-bound share should land close to the
+# >85% share. If it does not, ADR dispersion inside the pools is doing more work
+# than expected, and that is a finding in itself.
+
+PREDICTIONS = {
+    "stated_on": "2026-08-19",
+    "stated_before_any_live_run": True,
+    "pct_above_85": {
+        "2026-08": [0.10, 0.25],   # summer trough: Riyadh empties
+        "2026-10": [0.30, 0.50],   # a strong ordinary month
+        "2027-01": [0.55, 0.75],   # Riyadh Season
+        "why": "CLAUDE.md targets ~95% ex-Ramadan, but a target is not a realized "
+               "figure, and the seasonal swing should dominate the unit spread",
+    },
+    "ceiling_bound_share_tracks_pct_above_85": {
+        "within": 0.15,
+        "why": "with nothing scored, qmult is 1.0 everywhere, so the ceiling "
+               "binds at occ > 0.85 for any unit priced near its pool",
+    },
+    "floor_ratio": {
+        "median": [0.82, 0.92],
+        "spread_within_a_band": [0.0, 0.05],
+        "falls_with_occupancy": True,
+    },
+    "units_with_own_history": {
+        "share": [0.70, 0.90],
+        "why": "3 same-months back, and one 10-night booking clears MIN_OWN_OBS=8; "
+               "the shortfall should be new units and units that sat empty",
+    },
+    "loss_making_nightly": {"count": [0, 0],
+                            "why": "real ADRs are far above the synthetic 120 that "
+                                   "produced the clamped case"},
+    "no_price_band_closed": {"count": [0, 3],
+                             "why": "only reachable near 100% occupancy"},
+}
+
+
 
 def _pct(n, d):
     return (n / float(d)) if d else 0.0
@@ -68,13 +113,32 @@ def run(units, cost_set=None, today=None):
     priced = [r for r in per_unit if r["price"] is not None]
     unscored = sum(1 for u in (units or []) if not (u.get("attr_values") or {}))
 
+    # THE FAILURE THAT WOULD LOOK LIKE A FINDING. If most units have too little
+    # same-month history and fall back to the district pool, the distribution
+    # describes the POOL, not the portfolio — and it reads like a clean answer
+    # because every unit still gets a number. So the split sits next to the
+    # headline, not buried in the per-unit table.
+    own_hist = [r for r in per_unit if r["basis"] == "own_history"]
+    fallback = [r for r in per_unit if r["basis"] in ("district_pool", "bedroom_pool")]
+    none_at_all = [r for r in per_unit if r["basis"] == "insufficient"]
+
     return {
         # ── the headline, on its own ──
+        "predictions": PREDICTIONS,
         "headline": {
             "n_units": n,
             "n_above_85": len(high),
             "pct_above_85": _pct(len(high), n),
             "band_at_95_note": "the price band at 95% occupancy is a few hundred SAR",
+            # read these two before reading anything else
+            "units_with_own_history": len(own_hist),
+            "units_on_fallback": len(fallback),
+            "units_with_nothing": len(none_at_all),
+            "pct_own_history": _pct(len(own_hist), n),
+            "trustworthy": _pct(len(own_hist), n) >= 0.60,
+            "warning": (None if _pct(len(own_hist), n) >= 0.60 else
+                        "MOST UNITS ARE ON THE POOL FALLBACK — this distribution "
+                        "describes the pool, not the portfolio"),
         },
         "bands": {b: sum(1 for r in per_unit if r["band"] == b)
                   for b in engine.OCC_BANDS + ("unknown",)},

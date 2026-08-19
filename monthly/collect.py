@@ -36,7 +36,12 @@ def diagnose(month, today=None):
             continue
         unit_meta[lid] = _meta_for(val if isinstance(val, dict) else {"name": val})
 
-    unit_rows = data.unit_month_rows(reservations, int(month[5:7]), today_key)
+    all_rows = data.unit_month_rows(reservations, int(month[5:7]), today_key)
+    unit_rows, dropped_partial = {}, 0
+    for lid, rows in all_rows.items():
+        keep = [r for r in rows if not r.get("partial")]
+        dropped_partial += len(rows) - len(keep)
+        unit_rows[lid] = keep
     dpool, bpool = data.pool_rows(unit_rows, unit_meta,
                                   lambda m: m.get("district"),
                                   lambda m: m.get("bedrooms"))
@@ -64,4 +69,27 @@ def diagnose(month, today=None):
     rep["turnover_cost_source"] = tc_source
     rep["month"] = month
     rep["n_reservations_read"] = len(reservations)
+    rep["partial_months_dropped"] = dropped_partial
     return rep
+
+
+def diagnose_months(months, today=None):
+    """Several target months side by side. One month is not the answer: the
+    question is whether occupancy leaves room for a monthly band, and that moves
+    far more by season than by unit."""
+    out = []
+    for m in [x.strip() for x in str(months or "").split(",") if x.strip()]:
+        try:
+            out.append(diagnose(m, today=today))
+        except Exception as e:
+            out.append({"month": m, "error": "%s: %s" % (type(e).__name__, e)})
+    return {"months": out, "compare": [
+        {"month": r.get("month"),
+         "pct_above_85": (r.get("headline") or {}).get("pct_above_85"),
+         "pct_own_history": (r.get("headline") or {}).get("pct_own_history"),
+         "ceiling_share": ((r.get("segmented") or {}).get("overall") or {}).get("ceiling_share"),
+         "floor_ratio_median": (r.get("floor_ratio") or {}).get("median"),
+         "no_price": len(r.get("no_price") or []),
+         "trustworthy": (r.get("headline") or {}).get("trustworthy"),
+         "error": r.get("error")}
+        for r in out]}

@@ -118,3 +118,51 @@ class NoProposalsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PredictionsOnRecordTest(unittest.TestCase):
+    """Recorded before the endpoint ever ran. If we rationalise whatever the
+    numbers say, the diagnosis is worthless."""
+
+    def test_every_report_carries_the_predictions(self):
+        rep = diagnose.run([unit(1, 500, 0.8)])
+        self.assertTrue(rep["predictions"]["stated_before_any_live_run"])
+        self.assertEqual(rep["predictions"]["stated_on"], "2026-08-19")
+
+    def test_all_three_months_are_predicted(self):
+        p = diagnose.PREDICTIONS["pct_above_85"]
+        for m in ("2026-08", "2026-10", "2027-01"):
+            lo, hi = p[m]
+            self.assertLess(lo, hi)
+
+    def test_the_seasonal_prediction_is_directional_not_a_hedge(self):
+        p = diagnose.PREDICTIONS["pct_above_85"]
+        self.assertLess(p["2026-08"][1], p["2027-01"][0],
+                        "August and January must be predicted as disjoint ranges "
+                        "or the prediction cannot be wrong")
+
+
+class FallbackVisibilityTest(unittest.TestCase):
+    """The failure that would look like a finding."""
+
+    def test_a_portfolio_mostly_on_the_pool_is_flagged_as_untrustworthy(self):
+        thin = [{"lid": i, "name": "u", "month": "2026-10", "own": [],
+                 "district_pool": [{"adr": 500, "occ": 0.8, "months_old": 1}],
+                 "bedroom_pool": [], "attr_values": {}, "ejar_row": None,
+                 "adr_pool": 500, "occ_pool": 0.8} for i in range(10)]
+        rep = diagnose.run(thin)
+        self.assertEqual(rep["headline"]["units_on_fallback"], 10)
+        self.assertEqual(rep["headline"]["units_with_own_history"], 0)
+        self.assertFalse(rep["headline"]["trustworthy"])
+        self.assertIn("POOL FALLBACK", rep["headline"]["warning"])
+
+    def test_a_portfolio_on_its_own_history_is_trustworthy(self):
+        rep = diagnose.run([unit(i, 500, 0.8) for i in range(10)])
+        self.assertEqual(rep["headline"]["units_with_own_history"], 10)
+        self.assertTrue(rep["headline"]["trustworthy"])
+        self.assertIsNone(rep["headline"]["warning"])
+
+    def test_the_split_sits_in_the_headline_not_the_detail(self):
+        rep = diagnose.run([unit(1, 500, 0.8)])
+        for k in ("units_with_own_history", "units_on_fallback", "pct_own_history"):
+            self.assertIn(k, rep["headline"])

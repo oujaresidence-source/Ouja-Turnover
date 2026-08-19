@@ -179,3 +179,26 @@ class ReadOnlyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PartialMonthTest(unittest.TestCase):
+    """A month still running has unsold nights that may yet sell, so its
+    occupancy reads low. Including it biases the forecast DOWN, which widens the
+    price band and makes monthly look more viable than it is."""
+
+    def test_the_current_month_is_flagged_partial(self):
+        rows = data.unit_month_rows([res(1, "2026-08-01", "2026-08-11", 6200)],
+                                    8, "2026-08")
+        self.assertTrue(rows[1][0]["partial"])
+
+    def test_a_completed_month_is_not_flagged(self):
+        rows = data.unit_month_rows([res(1, "2025-08-01", "2025-08-11", 6200)],
+                                    8, "2026-08")
+        self.assertFalse(rows[1][0]["partial"])
+
+    def test_the_flag_is_present_on_every_observation(self):
+        rows = data.unit_month_rows(
+            [res(1, "2026-08-01", "2026-08-11", 6200),
+             res(1, "2025-08-01", "2025-08-11", 5200)], 8, "2026-08")
+        for o in rows[1]:
+            self.assertIn("partial", o)

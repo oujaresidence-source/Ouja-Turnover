@@ -124,12 +124,19 @@ def unit_month_rows(reservations, target_month_num, today_key):
     for (lid, key), b in buckets.items():
         first, last = month_bounds(key)
         days = (last - first).days + 1
+        age = months_between(key, today_key)
         out.setdefault(lid, []).append({
             "month": key,
             "adr": b["revenue"] / b["nights"],
             "occ": min(1.0, b["nights"] / float(days)),
             "nights": b["nights"],
-            "months_old": max(0, months_between(key, today_key)),
+            "months_old": max(0, age),
+            # A month still running has unsold nights that may yet sell, so its
+            # occupancy reads LOW. Mixing it into a weighted average biases the
+            # forecast downward, which widens the price band and makes monthly
+            # look more viable than it is — the wrong direction to be wrong in.
+            # Flagged here; collect.py drops it and reports how many it dropped.
+            "partial": age <= 0,
         })
     for lid in out:
         out[lid].sort(key=lambda o: o["month"], reverse=True)
