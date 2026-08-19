@@ -29,7 +29,12 @@ import datetime
 # ─────────────────────────────── the tiers ───────────────────────────────
 
 GOLD_SOURCES = ("ouja", "hostaway", "own")
-SILVER_SOURCES = ("sakani", "rega", "ejar", "manual")
+# Matched by PREFIX after normalising, so the same publisher reached through a
+# differently-named product — sakani, sakani_rei, «المؤشر الإيجاري» — lands in the
+# same tier. An exact-match list silently demoted an entire real dataset to
+# bronze once already, and a trust ladder that fails closed on a spelling is not
+# measuring trust, it is measuring string equality.
+SILVER_PREFIXES = ("sakani", "rega", "ejar", "manual")
 
 _TIER_RANK = {"gold": 3, "silver": 2, "bronze": 1}
 
@@ -61,10 +66,11 @@ def tier_for(source, obs_type="transacted"):
     turn an advertisement into a transaction."""
     if str(obs_type or "").strip().lower() != "transacted":
         return "bronze"
-    s = str(source or "").strip().lower()
+    s = "".join(ch for ch in str(source or "").strip().lower()
+                if ch.isalnum() or ch == "_")
     if s in GOLD_SOURCES:
         return "gold"
-    if s in SILVER_SOURCES:
+    if any(s == p or s.startswith(p + "_") or s.startswith(p) for p in SILVER_PREFIXES):
         return "silver"
     return "bronze"
 
@@ -183,8 +189,13 @@ def reference(row, today=None):
     elif age > EJAR_STALE_DAYS:
         warnings.append("ejar_stale")
 
+    # thin_district BLOCKS. Owner's rule, 2026-08-19, and it matches §4: below the
+    # sample gate we show a RANGE, never a number. With «النطاق السعري» not yet
+    # captured a thin cell has no range either, so it is simply unusable — and the
+    # honest answer is to say which districts still have no reference rather than
+    # to lower the threshold until they all pass.
     blocking = {"ejar_invalid", "asking_not_transacted",
-                "source_not_trusted", "ejar_undated"}
+                "source_not_trusted", "ejar_undated", "thin_district"}
     usable_now = not (blocking & set(warnings))
 
     return {
@@ -225,3 +236,48 @@ def owner_annual_net(ejar_annual, term_overrides=None):
     t = terms(**(term_overrides or {}))
     return (rent * (1.0 - t["broker_pct"] - t["vacancy_pct"])
             - t["owner_maintenance"] - t["admin_fees"])
+
+
+def gate_report(rows, today=None):
+    """Every stored cell, sorted into what may be used and what the sample gate
+    turned away — and WHY. The blocked list is the useful half: it names the
+    districts that still have no usable annual-lease reference."""
+    usable_rows, blocked = [], []
+    for row in (rows or []):
+        r = reference(row, today=today)
+        entry = {
+            "district": row.get("district"), "unit_type": row.get("unit_type"),
+            "bedrooms": row.get("bedrooms"), "annual_rent": row.get("annual_rent"),
+            "txn_count": row.get("txn_count"), "warnings": r["warnings"],
+            "tier": r["tier"],
+        }
+        (usable_rows if r["usable"] else blocked).append(entry)
+    return {"usable": usable_rows, "blocked": blocked,
+            "n_usable": len(usable_rows), "n_blocked": len(blocked)}
+
+
+def inversions(rows):
+    """Cells where MORE bedrooms fetch LESS rent than fewer bedrooms elsewhere.
+    Surfaced, never smoothed: it may be perfectly real — different district,
+    different stock — but a pricing model that quietly averages it away is a
+    model nobody can interrogate."""
+    apts = [r for r in (rows or [])
+            if r.get("unit_type") == "شقة" and r.get("bedrooms")]
+    out = []
+    for a in apts:
+        for b in apts:
+            if a is b:
+                continue
+            if (a.get("bedrooms") or 0) > (b.get("bedrooms") or 0) and \
+                    _num(a.get("annual_rent")) is not None and \
+                    _num(b.get("annual_rent")) is not None and \
+                    _num(a["annual_rent"]) < _num(b["annual_rent"]):
+                out.append({
+                    "more_bedrooms": {"district": a.get("district"),
+                                      "bedrooms": a.get("bedrooms"),
+                                      "annual_rent": a.get("annual_rent")},
+                    "fewer_bedrooms": {"district": b.get("district"),
+                                       "bedrooms": b.get("bedrooms"),
+                                       "annual_rent": b.get("annual_rent")},
+                })
+    return out

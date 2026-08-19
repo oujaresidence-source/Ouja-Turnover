@@ -63,17 +63,17 @@ class UnansweredTest(_Base):
 
 class EjarTest(_Base):
     def test_latest_row_wins_but_history_is_kept(self):
-        db.ejar_upsert("الملقا", 2, 85000, "2026-01-01", txn_count=310)
-        db.ejar_upsert("الملقا", 2, 92000, "2026-07-01", txn_count=344)
-        self.assertEqual(db.ejar_latest("الملقا", 2)["annual_rent"], 92000)
+        db.ejar_upsert("الملقا", 85000, "2026-01-01", bedrooms=2, txn_count=310)
+        db.ejar_upsert("الملقا", 92000, "2026-07-01", bedrooms=2, txn_count=344)
+        self.assertEqual(db.ejar_latest("الملقا", bedrooms=2)["annual_rent"], 92000)
         self.assertEqual(len(db.ejar_all()), 2)
 
     def test_obs_type_is_stored_because_asking_is_not_transacted(self):
-        db.ejar_upsert("النرجس", 3, 120000, "2026-06-01", obs_type="asking")
-        self.assertEqual(db.ejar_latest("النرجس", 3)["obs_type"], "asking")
+        db.ejar_upsert("النرجس", 120000, "2026-06-01", bedrooms=3, obs_type="asking")
+        self.assertEqual(db.ejar_latest("النرجس", bedrooms=3)["obs_type"], "asking")
 
     def test_unknown_cell_is_none_not_zero(self):
-        self.assertIsNone(db.ejar_latest("حي ما موجود", 1))
+        self.assertIsNone(db.ejar_latest("حي ما موجود", bedrooms=1))
 
 
 class OverrideTest(_Base):
@@ -135,3 +135,50 @@ class OutcomeTest(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EjarSchemaTest(_Base):
+    """The S3 schema had two defects that only real data exposed."""
+
+    def test_five_unit_types_in_one_district_are_five_rows_not_a_collision(self):
+        for ut, rent in (("شقة", 54396), ("استديو", 50433), ("دوبلاكس", 72015),
+                         ("فله", 154432), ("دور", 66874)):
+            db.ejar_upsert("القيروان", rent, "2026-06-30", bedrooms=None, unit_type=ut)
+        self.assertEqual(len(db.ejar_all()), 5)
+        self.assertEqual(db.ejar_latest("القيروان", unit_type="فله")["annual_rent"], 154432)
+
+    def test_reloading_the_same_cell_updates_instead_of_duplicating(self):
+        """SQLite treats NULLs in a PRIMARY KEY as DISTINCT, so the S3 shape would
+        have added five fresh rows on every re-run of the seed."""
+        for _ in range(3):
+            db.ejar_upsert("القيروان", 54396, "2026-06-30", bedrooms=None, unit_type="شقة")
+        self.assertEqual(len(db.ejar_all()), 1)
+
+    def test_all_bedrooms_and_three_bedrooms_are_different_cells(self):
+        """Asking for 3BR must never be answered with the all-bedrooms average."""
+        db.ejar_upsert("الملقا", 51213, "2026-06-30", bedrooms=None, unit_type="شقة")
+        db.ejar_upsert("الملقا", 54845, "2026-06-30", bedrooms=3, unit_type="شقة")
+        self.assertEqual(len(db.ejar_all()), 2)
+        self.assertEqual(db.ejar_latest("الملقا", bedrooms=None)["annual_rent"], 51213)
+        self.assertEqual(db.ejar_latest("الملقا", bedrooms=3)["annual_rent"], 54845)
+
+    def test_the_seed_loads_and_is_idempotent(self):
+        n = db.ejar_load_seed()
+        self.assertEqual(n, 26)
+        self.assertEqual(len(db.ejar_all()), 26)
+        db.ejar_load_seed()
+        self.assertEqual(len(db.ejar_all()), 26)
+
+    def test_every_seeded_row_keeps_its_provenance_and_uncertainty(self):
+        db.ejar_load_seed()
+        for r in db.ejar_all():
+            self.assertEqual(r["source"], "sakani_rei")
+            self.assertEqual(r["obs_type"], "transacted")
+            self.assertEqual(r["period"], "2026-01/2026-08")
+            self.assertEqual(r["as_of"], "2026-06-30")
+            self.assertIn("شهري", r["note"])       # the toggle uncertainty, kept
+            self.assertTrue(r["entered_by"])
+
+    def test_price_ranges_are_flagged_as_a_follow_up_not_silently_absent(self):
+        db.ejar_load_seed()
+        self.assertEqual(len(db.ejar_missing_ranges()), 26)

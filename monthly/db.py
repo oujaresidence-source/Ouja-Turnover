@@ -43,16 +43,29 @@ CREATE TABLE IF NOT EXISTS monthly_unit_attrs (
     PRIMARY KEY (unit_id, attr_key)
 );
 CREATE TABLE IF NOT EXISTS monthly_ejar_refs (
-    district    TEXT NOT NULL,
-    bedrooms    INTEGER NOT NULL,
-    annual_rent REAL NOT NULL,
-    txn_count   INTEGER,
-    source      TEXT,                    -- 'sakani' | 'rega' | 'manual'
-    obs_type    TEXT NOT NULL,           -- 'transacted' | 'asking'
-    as_of       TEXT NOT NULL,
-    entered_by  TEXT,
-    PRIMARY KEY (district, bedrooms, as_of)
+    district      TEXT NOT NULL,
+    bedrooms      INTEGER,               -- NULL = not broken out by bedrooms (filter الكل,
+                                         -- and every non-apartment type: the index has no
+                                         -- bedroom tabs for استديو/دوبلاكس/فله/دور)
+    unit_type     TEXT NOT NULL DEFAULT 'شقة',   -- شقة | استديو | دوبلاكس | فله | دور
+    annual_rent   REAL NOT NULL,
+    txn_count     INTEGER,
+    range_low_sar REAL,                  -- «النطاق السعري» — NOT captured yet, see note
+    range_high_sar REAL,
+    source        TEXT,                  -- 'sakani_rei' | 'rega' | 'manual'
+    obs_type      TEXT NOT NULL,         -- 'transacted' | 'asking'
+    period        TEXT,                  -- the range selected in the tool, e.g. '2026-01/2026-08'
+    as_of         TEXT NOT NULL,
+    note          TEXT,                  -- recorded uncertainties, kept rather than resolved
+    entered_by    TEXT
 );
+-- Uniqueness CANNOT live in a PRIMARY KEY here: bedrooms is legitimately NULL for
+-- filter الكل and for every non-apartment type, and SQLite treats NULLs in a PK as
+-- DISTINCT — so the upsert would never fire and re-running the seed would duplicate
+-- every one of those rows. IFNULL(bedrooms,-1) makes "not broken out" a real value
+-- for the index while the column keeps saying NULL, which is the truth.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_ejar_cell
+    ON monthly_ejar_refs(district, unit_type, IFNULL(bedrooms, -1), as_of);
 CREATE TABLE IF NOT EXISTS monthly_source_calib (
     source      TEXT NOT NULL,
     district    TEXT NOT NULL,
@@ -108,9 +121,37 @@ def _ensure():
         if path in _inited:
             return
         with closing(_bdb.connect()) as cx:
+            _migrate_pre(cx)
             cx.executescript(SCHEMA)
             cx.commit()
         _inited.add(path)
+
+
+def _migrate_pre(cx):
+    """Runs BEFORE the schema script, for tables that already exist in a live
+    brain.db. CREATE TABLE IF NOT EXISTS cannot reshape an existing table, so the
+    S3 shape of monthly_ejar_refs — bedrooms NOT NULL, no unit_type, a PRIMARY KEY
+    that silently duplicates NULL rows — has to be rebuilt in place.
+
+    Rebuild rather than ALTER because the PRIMARY KEY itself is the defect, and
+    SQLite cannot drop one. Existing rows are carried over; the table is empty in
+    practice (this ships before any row was entered), but a migration that
+    discards data it did not check for is how data gets lost.
+    """
+    try:
+        cols = [r[1] for r in cx.execute("PRAGMA table_info(monthly_ejar_refs)").fetchall()]
+    except Exception:
+        return
+    if not cols or "unit_type" in cols:
+        return                                  # absent (fresh) or already migrated
+    cx.execute("ALTER TABLE monthly_ejar_refs RENAME TO monthly_ejar_refs_s3")
+    cx.executescript(SCHEMA)
+    cx.execute(
+        "INSERT INTO monthly_ejar_refs (district, bedrooms, unit_type, annual_rent, "
+        "txn_count, source, obs_type, as_of, entered_by) "
+        "SELECT district, bedrooms, 'شقة', annual_rent, txn_count, source, obs_type, "
+        "as_of, entered_by FROM monthly_ejar_refs_s3")
+    cx.execute("DROP TABLE monthly_ejar_refs_s3")
 
 
 def _now():
@@ -174,48 +215,79 @@ def units_with_attrs():
 
 # ─────────────────────────── ejar reference table ───────────────────────────
 
-def ejar_latest(district, bedrooms):
-    """The most recent reference row for this cell, or None. as_of is part of the
-    key on purpose: history is kept, so a stale row can be SEEN to be stale
-    rather than silently overwritten."""
+def _ejar_row(r):
+    return {"district": r[0], "bedrooms": r[1], "unit_type": r[2], "annual_rent": r[3],
+            "txn_count": r[4], "range_low_sar": r[5], "range_high_sar": r[6],
+            "source": r[7], "obs_type": r[8], "period": r[9], "as_of": r[10],
+            "note": r[11], "entered_by": r[12]}
+
+
+_EJAR_COLS = ("district, bedrooms, unit_type, annual_rent, txn_count, range_low_sar, "
+              "range_high_sar, source, obs_type, period, as_of, note, entered_by")
+
+
+def ejar_latest(district, bedrooms=None, unit_type="شقة"):
+    """The most recent row for this cell, or None.
+
+    bedrooms=None means "the row that is not broken out by bedrooms" — the الكل
+    filter — and is matched as a real value, not as "any bedroom count". Asking
+    for 3BR must not silently answer with the all-bedrooms average; they are
+    different numbers about different things.
+    """
     _ensure()
     with closing(_bdb.connect()) as cx:
         r = cx.execute(
-            "SELECT district, bedrooms, annual_rent, txn_count, source, obs_type, "
-            "as_of, entered_by FROM monthly_ejar_refs WHERE district=? AND bedrooms=? "
-            "ORDER BY as_of DESC LIMIT 1", (str(district), int(bedrooms))).fetchone()
-    if not r:
-        return None
-    return {"district": r[0], "bedrooms": r[1], "annual_rent": r[2], "txn_count": r[3],
-            "source": r[4], "obs_type": r[5], "as_of": r[6], "entered_by": r[7]}
+            "SELECT " + _EJAR_COLS + " FROM monthly_ejar_refs WHERE district=? "
+            "AND unit_type=? AND IFNULL(bedrooms,-1)=? ORDER BY as_of DESC LIMIT 1",
+            (str(district), str(unit_type),
+             -1 if bedrooms is None else int(bedrooms))).fetchone()
+    return _ejar_row(r) if r else None
 
 
 def ejar_all():
     _ensure()
     with closing(_bdb.connect()) as cx:
         rows = cx.execute(
-            "SELECT district, bedrooms, annual_rent, txn_count, source, obs_type, "
-            "as_of, entered_by FROM monthly_ejar_refs ORDER BY district, bedrooms, as_of DESC"
-        ).fetchall()
-    return [{"district": r[0], "bedrooms": r[1], "annual_rent": r[2], "txn_count": r[3],
-             "source": r[4], "obs_type": r[5], "as_of": r[6], "entered_by": r[7]} for r in rows]
+            "SELECT " + _EJAR_COLS + " FROM monthly_ejar_refs "
+            "ORDER BY district, unit_type, IFNULL(bedrooms,-1), as_of DESC").fetchall()
+    return [_ejar_row(r) for r in rows]
 
 
-def ejar_upsert(district, bedrooms, annual_rent, as_of, txn_count=None,
-                source="manual", obs_type="transacted", entered_by=None):
+def ejar_upsert(district, annual_rent, as_of, bedrooms=None, unit_type="شقة",
+                txn_count=None, source="manual", obs_type="transacted",
+                period=None, note=None, entered_by=None,
+                range_low_sar=None, range_high_sar=None):
+    """One reference cell. Keyed on (district, unit_type, bedrooms, as_of) via the
+    expression index, so re-running a seed updates rather than duplicates."""
     _ensure()
+    bk = -1 if bedrooms is None else int(bedrooms)
     with closing(_bdb.connect()) as cx:
         cx.execute(
-            "INSERT INTO monthly_ejar_refs (district, bedrooms, annual_rent, txn_count, "
-            "source, obs_type, as_of, entered_by) VALUES (?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(district, bedrooms, as_of) DO UPDATE SET "
-            "annual_rent=excluded.annual_rent, txn_count=excluded.txn_count, "
-            "source=excluded.source, obs_type=excluded.obs_type, entered_by=excluded.entered_by",
-            (str(district), int(bedrooms), float(annual_rent),
-             None if txn_count is None else int(txn_count),
-             str(source), str(obs_type), str(as_of)[:10], entered_by))
+            "DELETE FROM monthly_ejar_refs WHERE district=? AND unit_type=? "
+            "AND IFNULL(bedrooms,-1)=? AND as_of=?",
+            (str(district), str(unit_type), bk, str(as_of)[:10]))
+        cx.execute(
+            "INSERT INTO monthly_ejar_refs (" + _EJAR_COLS + ") "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (str(district), None if bedrooms is None else int(bedrooms), str(unit_type),
+             float(annual_rent), None if txn_count is None else int(txn_count),
+             range_low_sar, range_high_sar, str(source), str(obs_type),
+             period, str(as_of)[:10], note, entered_by))
         cx.commit()
     return True
+
+
+def ejar_missing_ranges():
+    """Cells whose «النطاق السعري» was never captured — the follow-up worklist.
+    A point figure with no range around it cannot say how tight the market is."""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute(
+            "SELECT district, unit_type, bedrooms, as_of FROM monthly_ejar_refs "
+            "WHERE range_low_sar IS NULL OR range_high_sar IS NULL "
+            "ORDER BY district, unit_type").fetchall()
+    return [{"district": r[0], "unit_type": r[1], "bedrooms": r[2], "as_of": r[3]}
+            for r in rows]
 
 
 # ───────────────────────── source calibration table ─────────────────────────
@@ -349,3 +421,28 @@ def paired_obs_count():
         r = cx.execute("SELECT COUNT(*) FROM monthly_outcomes WHERE booked=1 "
                        "AND booked_price IS NOT NULL").fetchone()
     return int(r[0]) if r else 0
+
+
+def ejar_load_seed(path=None):
+    """Load monthly/ejar_seed.json into monthly_ejar_refs. Idempotent — the
+    expression index keys each cell, so re-running updates rather than
+    duplicates. Every row carries its source, period, capture date and the
+    recorded uncertainty; a figure that forgets where it came from cannot be
+    re-checked when an owner queries it eight months later."""
+    import os
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "ejar_seed.json")
+    with open(path, encoding="utf-8") as fh:
+        blob = json.load(fh)
+    note = blob.get("_note") or ""
+    n = 0
+    for r in blob.get("rows") or []:
+        ejar_upsert(
+            district=r["district"], annual_rent=r["annual_rent"],
+            as_of=blob["_as_of"], bedrooms=r.get("bedrooms"),
+            unit_type=r.get("unit_type") or "شقة", txn_count=r.get("txn_count"),
+            source=blob["_source_key"], obs_type=blob["_obs_type"],
+            period=blob["_period"], entered_by=blob["_entered_by"],
+            note=(note + " | filter: " + str(r.get("filter") or "")).strip())
+        n += 1
+    return n

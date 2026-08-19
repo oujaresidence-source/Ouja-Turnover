@@ -46,6 +46,20 @@ class TierTest(unittest.TestCase):
         self.assertTrue(ejar.may_reference_annual("silver"))
         self.assertFalse(ejar.may_reference_annual("bronze"))
 
+    def test_the_source_key_the_seed_actually_uses_is_recognised(self):
+        """The registry held "sakani" while the real capture is "sakani_rei", and
+        an exact-match list demoted all 26 real rows to bronze. Every source key
+        that appears in the shipped seed must resolve to the tier it deserves."""
+        import json, os
+        seed = json.load(open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "monthly", "ejar_seed.json"), encoding="utf-8"))
+        self.assertEqual(ejar.tier_for(seed["_source_key"], seed["_obs_type"]), "silver")
+
+    def test_publisher_variants_land_in_the_same_tier(self):
+        for src in ("sakani", "sakani_rei", "SAKANI-REI", "rega", "ejar"):
+            self.assertEqual(ejar.tier_for(src, "transacted"), "silver")
+
     def test_an_unknown_source_is_bronze_not_trusted(self):
         self.assertEqual(ejar.tier_for("some-new-site", "transacted"), "bronze")
 
