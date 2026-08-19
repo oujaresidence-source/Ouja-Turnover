@@ -63,14 +63,32 @@ are not re-decided later in a moment of enthusiasm.
 """
 
 from .host import HOST, wire  # noqa: F401
-from . import routes  # noqa: F401
+from . import attrs, db, routes, seed  # noqa: F401
 
 
 def bootstrap():
-    """Create tables and seed what can be seeded. Safe to call on every boot.
-    Stays a no-op until S3 introduces db.py — a bootstrap that half-creates
-    something is worse than one that does nothing."""
-    return None
+    """Create the monthly_* tables. Safe to call on every boot: the schema is
+    CREATE TABLE IF NOT EXISTS throughout.
+
+    It deliberately does NOT seed attribute values. Seeding reads Hostaway, and
+    a boot path that reaches the network is a boot path that can hang the bot;
+    seeding is an explicit action from the page instead.
+
+    Ordering-independent ON PURPOSE. Every db.py function calls _ensure() itself,
+    so the tables get created on first real use whatever happens here. brain.wire()
+    currently runs earlier in start_web_server than this does, but that is 400
+    lines of a file several sessions edit at once, and this repo already carries a
+    scar from boot code reaching the database before brain.wire() ran. So a
+    not-yet-wired brain is a normal deferral here, not a failure.
+    """
+    try:
+        db._ensure()
+        return "created"
+    except Exception as e:
+        if "before brain.wire()" in str(e):
+            return "deferred"               # first real query will create them
+        print("[monthly] table bootstrap failed (tables created on first use):", e)
+        return "deferred"
 
 
 def register_routes(app):

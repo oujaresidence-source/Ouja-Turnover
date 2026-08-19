@@ -126,9 +126,11 @@ class GateTest(unittest.TestCase):
 
 
 class BootstrapTest(unittest.TestCase):
-    def test_bootstrap_is_safe_to_call_repeatedly(self):
-        self.assertIsNone(monthly.bootstrap())
-        self.assertIsNone(monthly.bootstrap())
+    def test_bootstrap_never_raises_and_never_blocks_the_boot(self):
+        """Called with brain unwired (as at import time here) it must defer, not
+        explode: the tables are created on first real use either way."""
+        self.assertIn(monthly.bootstrap(), ("created", "deferred"))
+        self.assertIn(monthly.bootstrap(), ("created", "deferred"))
 
 
 if __name__ == "__main__":
