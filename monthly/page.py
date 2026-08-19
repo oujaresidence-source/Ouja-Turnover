@@ -122,6 +122,15 @@ tr.tot td{font-weight:700;border-top:2px solid var(--line-strong);border-bottom:
 .pill.none{background:var(--red-soft);border-color:var(--red-line);color:var(--red)}
 .slider{width:100%;margin:10px 0 4px}
 .ovbox{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.modes{display:grid;gap:10px;margin-top:14px}
+.mode{text-align:right;font:inherit;background:var(--surface);cursor:pointer;
+  border:1px solid var(--line);border-radius:12px;padding:13px 15px;
+  transition:border-color .18s var(--ease),background .18s var(--ease),transform .18s var(--ease)}
+.mode:active{transform:scale(.99)}
+.mode.on{border-color:var(--gold);background:var(--gold-soft)}
+.mode b{display:block;font-size:14.5px;margin-bottom:3px}
+.mode.on b{color:var(--gold-2)}
+.mode span{display:block;font-size:12.5px;color:var(--mut);line-height:1.6}
 .ovwarn{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--red-soft);
   border:1px solid var(--red-line);color:var(--red);font-size:13.5px;font-weight:600}
 .protocol{background:var(--gold-soft);border:1px solid #E3D3AC;border-radius:12px;
@@ -569,17 +578,23 @@ function viewAdmin(){
        '</b> (شهر ' + he(CFG.coverage_month || '') + ') — الحد الأدنى ' + f.min_pct + '%.<br>' +
        he(f.criterion_ar || '') + '</div>';
 
-  h += '<div class="ovbox" style="margin-top:14px">';
-  h += '<button class="btn' + (!on ? ' primary' : ' ghost') + '" data-src="discount">' +
-       'الخصم الثابت (الوضع الحالي)</button>';
-  h += '<button class="btn' + (on ? ' primary' : ' ghost') + '" data-src="engine"' +
-       (f.may_flip ? '' : ' data-needs-override="1"') + '>محرّك التسعير</button>';
+  var mode = f.price_source;
+  h += '<div class="modes">';
+  h += '<button class="mode' + (mode === 'discount' ? ' on' : '') + '" data-src="discount">' +
+       '<b>الخصم الثابت</b><span>نسبة وحدة على كل الشقق. ما يدخل المحرّك أبداً.</span></button>';
+  h += '<button class="mode' + (mode === 'engine_verified' ? ' on' : '') + '" data-src="engine_verified">' +
+       '<b>المحرّك للمقيسة فقط</b><span>الشقق اللي عندها سجل حجوزات خاص فيها ' +
+       'تاخذ سعر المحرّك. الباقي يبقى على الخصم. ما ينشر أي متوسط حي.</span></button>';
+  h += '<button class="mode' + (mode === 'engine' ? ' on' : '') + '" data-src="engine"' +
+       (f.may_flip ? '' : ' data-needs-override="1"') + '>' +
+       '<b>المحرّك للكل</b><span>كل الشقق تاخذ سعر المحرّك، حتى اللي سعرها من ' +
+       'متوسط الحي. يحتاج تغطية ' + f.min_pct + '%.</span></button>';
   h += '</div>';
 
   if(!f.may_flip){
-    h += '<div class="ovwarn" style="margin-top:12px">التحويل لمحرّك التسعير ' +
-         'مرفوض برمجياً وقت التغطية تحت الحد. لو أصررت، اكتب السبب تحت — ' +
-         'ينحفظ باسمك.</div>';
+    h += '<div class="ovwarn" style="margin-top:12px">«المحرّك للكل» مرفوض ' +
+         'برمجياً وقت التغطية تحت الحد. «المحرّك للمقيسة فقط» متاح دائماً — ' +
+         'ما يقدر ينشر متوسط حي أصلاً. لو تبي الكل، اكتب السبب تحت — ينحفظ باسمك.</div>';
     h += '<div class="ovbox" style="margin-top:10px">';
     h += '<input type="text" id="ovreason" placeholder="سبب التجاوز" style="flex:1;min-width:240px">';
     h += '</div>';

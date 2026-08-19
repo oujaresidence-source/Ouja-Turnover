@@ -210,3 +210,75 @@ class LicenceTest(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VerifiedOnlyModeTest(_Base):
+    """The middle setting. All-or-nothing was the defect: it forced a choice
+    between publishing pooled averages for the whole portfolio and publishing
+    nothing, when a third of the units already have real per-unit numbers."""
+
+    def _discount(self):
+        return {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
+                "ceiling": 0.3, "per_month_before": 20000,
+                "per_month_after": 16000, "promo": False, "promo_label": ""}
+
+    def _with_basis(self, basis, price=15000):
+        import monthly.collect as collect
+        real = collect.price_one
+        collect.price_one = lambda lid, month, **k: {"price": price, "basis": basis}
+        return real, collect
+
+    def test_verified_needs_no_coverage_gate(self):
+        """Its guarantee is in the code, not in a threshold — so at 26% coverage
+        it is still allowed, because it cannot publish a pooled number."""
+        settings.set_price_source("engine_verified", coverage=0.26, actor="faisal")
+        self.assertEqual(settings.price_source(), "engine_verified")
+
+    def test_full_engine_is_still_gated_at_the_same_threshold(self):
+        with self.assertRaises(settings.FlipRefused):
+            settings.set_price_source("engine", coverage=0.26)
+
+    def test_the_refusal_now_points_at_the_middle_option(self):
+        with self.assertRaises(settings.FlipRefused) as cm:
+            settings.set_price_source("engine", coverage=0.26)
+        # «للمقيسة» — the alef of «ال» elides after the ل, exactly as it does
+        # in «للمالك». Same trap, second time this session.
+        self.assertIn("للمقيسة فقط", str(cm.exception))
+
+    def test_a_unit_with_its_own_history_gets_the_engine_price(self):
+        settings.set_price_source("engine_verified", coverage=0.26)
+        real, collect = self._with_basis("own_history")
+        try:
+            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
+        finally:
+            collect.price_one = real
+        self.assertIsNotNone(out)
+        self.assertEqual(out["after"], 15000)
+
+    def test_a_pool_priced_unit_keeps_the_discount_path(self):
+        settings.set_price_source("engine_verified", coverage=0.26)
+        for basis in ("district_pool", "bedroom_pool", "insufficient"):
+            real, collect = self._with_basis(basis)
+            try:
+                self.assertIsNone(
+                    live.engine_after(1, "2026-10", 20000, 1, self._discount()),
+                    "%s must never reach the guest site under engine_verified" % basis)
+            finally:
+                collect.price_one = real
+
+    def test_full_engine_mode_does_publish_pooled_units(self):
+        """The difference between the two modes, stated as a test."""
+        settings.set_price_source("engine", coverage=0.9)
+        real, collect = self._with_basis("district_pool")
+        try:
+            self.assertIsNotNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+        finally:
+            collect.price_one = real
+
+    def test_discount_mode_ignores_the_engine_entirely(self):
+        settings.set_price_source("discount", coverage=0.9)
+        real, collect = self._with_basis("own_history")
+        try:
+            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+        finally:
+            collect.price_one = real

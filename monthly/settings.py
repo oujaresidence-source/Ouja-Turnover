@@ -26,7 +26,21 @@ from .host import HOST
 
 FILE = "monthly_settings.json"
 
-PRICE_SOURCES = ("discount", "engine")
+# THREE MODES, not two. "engine" was all-or-nothing and that was the defect: it
+# forced a choice between publishing pooled averages for the whole portfolio or
+# publishing nothing at all, when a third of the units already have real,
+# measured, per-unit numbers.
+#
+#   discount         the old flat percentage. Nothing from this package.
+#   engine_verified  the engine speaks ONLY for units priced from their OWN
+#                    booking history. Every other unit keeps the discount path.
+#                    Structurally cannot publish a pooled average, so it needs no
+#                    coverage gate — the guarantee is in the code, not in a rule.
+#   engine           the engine speaks for everything. Still gated at 60%.
+PRICE_SOURCES = ("discount", "engine_verified", "engine")
+
+# Only this one can publish a number that was not measured on the unit itself.
+NEEDS_COVERAGE_GATE = ("engine",)
 
 # The flip criterion, written where the switch lives so it is read by whoever is
 # about to flip it rather than remembered by whoever wrote it.
@@ -100,11 +114,13 @@ def set_price_source(value, coverage, actor=None, reason="", override=False):
         raise FlipRefused("قيمة غير معروفة: %s" % value)
 
     cur = load()
-    if value == "engine" and (coverage is None or coverage < MIN_OWN_HISTORY):
+    if value in NEEDS_COVERAGE_GATE and (coverage is None or coverage < MIN_OWN_HISTORY):
         pctnow = 0 if coverage is None else int(round(coverage * 100))
         if not override:
             raise FlipRefused(
-                "مرفوض: تغطية السجل الذاتي %d%% والحد الأدنى %d%%. %s"
+                "مرفوض: تغطية السجل الذاتي %d%% والحد الأدنى %d%%. %s "
+                "جرّب «المحرّك للمقيسة فقط» — ينشر أسعار المحرّك للشقق اللي "
+                "عندها سجل خاص فيها، والباقي يبقى على الخصم."
                 % (pctnow, int(MIN_OWN_HISTORY * 100), FLIP_CRITERION_AR))
         if not (reason or "").strip():
             raise FlipRefused(
@@ -116,7 +132,7 @@ def set_price_source(value, coverage, actor=None, reason="", override=False):
     cur["price_source_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     cur["price_source_coverage_at_flip"] = coverage
     cur["price_source_overridden"] = bool(
-        override and value == "engine"
+        override and value in NEEDS_COVERAGE_GATE
         and (coverage is None or coverage < MIN_OWN_HISTORY))
     save(cur)
     return cur
@@ -129,6 +145,7 @@ def flip_state(coverage):
     ok = coverage is not None and coverage >= MIN_OWN_HISTORY
     return {
         "price_source": cur.get("price_source"),
+        "verified_always_allowed": True,
         "coverage": coverage,
         "coverage_pct": None if coverage is None else int(round(coverage * 100)),
         "min_pct": int(MIN_OWN_HISTORY * 100),

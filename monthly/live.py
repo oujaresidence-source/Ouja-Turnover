@@ -26,12 +26,20 @@ def engine_after(listing_id, month, before_total, months, discount_result):
     this is only ever reached deliberately.
     """
     try:
-        if settings.price_source() != "engine":
+        mode = settings.price_source()
+        if mode not in ("engine", "engine_verified"):
             return None
         from . import collect
         p = collect.price_one(int(listing_id), month)
         est = p.get("price")
         if not est or est <= 0:
+            return None
+        # THE GUARANTEE OF "engine_verified", enforced here rather than promised:
+        # a unit priced from a district or bedroom pool keeps the discount path.
+        # This is what stops fifteen apartments showing the same number side by
+        # side on one page, which is what an average looks like when it is
+        # published as a price.
+        if mode == "engine_verified" and p.get("basis") != "own_history":
             return None
 
         months = max(1, int(months or 1))
