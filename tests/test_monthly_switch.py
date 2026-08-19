@@ -35,14 +35,34 @@ class _Base(unittest.TestCase):
         host.HOST.save_json = None
 
 
-class ShipsOffTest(_Base):
-    def test_the_switch_ships_as_discount(self):
-        """The day this deploys, the live site behaves exactly as before."""
-        self.assertEqual(settings.price_source(), "discount")
+class ShipsOnButOnlyWhereMeasuredTest(_Base):
+    """Owner decision, 2026-08-19: ship engine_verified ON. Renamed from
+    ShipsOffTest with the behaviour it now describes, rather than left asserting
+    a default that is no longer the intent. Safe to ship on because the mode
+    cannot publish a pooled average — the guarantee is in live.engine_after, not
+    in the choice of default."""
 
-    def test_an_unreadable_settings_file_still_means_discount(self):
+    def test_the_switch_ships_as_engine_verified(self):
+        self.assertEqual(settings.price_source(), "engine_verified")
+
+    def test_the_shipped_mode_can_never_publish_a_pooled_number(self):
+        """The property that makes shipping it on defensible."""
+        import monthly.collect as collect
+        real = collect.price_one
+        collect.price_one = lambda lid, month, **k: {"price": 15000,
+                                                     "basis": "district_pool"}
+        try:
+            self.assertIsNone(live.engine_after(
+                1, "2026-10", 20000, 1,
+                {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
+                 "ceiling": 0.3, "per_month_before": 20000,
+                 "per_month_after": 16000, "promo": False, "promo_label": ""}))
+        finally:
+            collect.price_one = real
+
+    def test_an_unreadable_settings_file_falls_back_to_the_shipped_default(self):
         host.HOST.load_json = lambda *_a, **_k: (_ for _ in ()).throw(IOError("gone"))
-        self.assertEqual(settings.price_source(), "discount")
+        self.assertEqual(settings.price_source(), "engine_verified")
 
     def test_a_corrupt_value_falls_back_to_discount(self):
         self.store[settings.FILE] = {"price_source": "whatever"}
@@ -51,6 +71,7 @@ class ShipsOffTest(_Base):
 
 class RefusalIsInCodeTest(_Base):
     def test_flipping_to_engine_below_the_threshold_is_refused(self):
+        settings.set_price_source("discount", coverage=0.31)
         with self.assertRaises(settings.FlipRefused) as cm:
             settings.set_price_source("engine", coverage=0.31, actor="faisal")
         self.assertIn("31%", str(cm.exception))
@@ -71,6 +92,7 @@ class RefusalIsInCodeTest(_Base):
         self.assertEqual(settings.price_source(), "engine")
 
     def test_the_override_needs_a_typed_reason(self):
+        settings.set_price_source("discount", coverage=0.31)
         with self.assertRaises(settings.FlipRefused) as cm:
             settings.set_price_source("engine", coverage=0.31, override=True, reason="")
         self.assertIn("سبب", str(cm.exception))

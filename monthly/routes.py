@@ -331,13 +331,28 @@ def _coverage_now():
         return None, m
 
 
+def _guest_cfg():
+    """The LIVE guest site's own config (monthly_config.json). Separate file,
+    separate feature — read here only so the discount has a screen at all: there
+    was an API for it and no UI anywhere, which is how it sat at 0% while the
+    site advertised «وفّرت 0 ر.س»."""
+    try:
+        cfg = HOST.load_json("monthly_config.json", None) or {}
+    except Exception:
+        cfg = {}
+    return cfg
+
+
 async def _api_settings_get(request):
     import asyncio
     from . import db, settings
     cov, month = await asyncio.to_thread(_coverage_now)
     cur = settings.load()
+    g = _guest_cfg()
     return HOST.json_response({
         "ok": True,
+        "guest_discount_pct": g.get("default_pct"),
+        "guest_ceiling_pct": g.get("ceiling_pct"),
         "flip": settings.flip_state(cov),
         "coverage_month": month,
         "turnover_cost_sar": cur.get("turnover_cost_sar"),
@@ -365,6 +380,18 @@ async def _api_settings_set(request):
         settings.save(cur)
         from . import collect
         collect._CACHE.clear()
+
+    if "guest_discount_pct" in b:
+        try:
+            v = float(b.get("guest_discount_pct"))
+        except (TypeError, ValueError):
+            return _bad("نسبة الخصم لازم تكون رقم")
+        if v < 0 or v > 0.95:
+            return _bad("نسبة الخصم لازم بين 0% و 95%")
+        g = _guest_cfg()
+        g["default_pct"] = v
+        if HOST.save_json:
+            HOST.save_json("monthly_config.json", g)
 
     if "licence_filter_on" in b:
         cur = settings.load()

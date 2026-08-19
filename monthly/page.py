@@ -607,6 +607,19 @@ function viewAdmin(){
   }
   h += '</div>';
 
+  var gp = CFG.guest_discount_pct;
+  var gpNum = (gp === null || gp === undefined) ? null : Math.round(gp * 100);
+  h += '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">خصم موقع الضيوف</h3>';
+  h += '<div class="muted" style="font-size:13px;margin-bottom:10px">' +
+       'الخصم اللي يشوفه الضيف على الشقق اللي ما عندها سعر من المحرّك.</div>';
+  if(gpNum === 0){
+    h += '<div class="ovwarn">الخصم الآن 0% — الموقع يكتب «وفّرت 0 ر.س» على كل شقة.</div>';
+  }
+  h += '<div class="ovbox" style="margin-top:10px">' +
+       '<input type="number" id="gdisc" min="0" max="95" step="1" value="' +
+       (gpNum === null ? '' : gpNum) + '" style="min-width:100px">' +
+       '<span class="muted">%</span>' +
+       '<button class="btn primary" id="savedisc">حفظ</button></div></div>';
   h += '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">تكلفة التنظيفة</h3>';
   h += '<div class="muted" style="font-size:13px;margin-bottom:10px">' +
        'كل الأسعار مبنية على هذا الرقم. خذه من صفحة تغطية التنظيف.</div>';
@@ -749,6 +762,18 @@ document.addEventListener('click', function(e){
       .then(function(d){
         if(!d.ok){ toast(d.message || 'مرفوض'); return; }
         toast('انحفظ'); CFG = null; loadCfg();
+      });
+    return;
+  }
+  if(t.id === 'savedisc'){
+    var gv = parseInt(($('gdisc') || {}).value, 10);
+    if(isNaN(gv)){ toast('اكتب رقم'); return; }
+    api('/api/mrent/settings', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({guest_discount_pct: gv / 100})})
+      .then(function(d){
+        if(!d.ok){ toast(d.message || 'ما انحفظ'); return; }
+        toast('انحفظ — شوف الموقع'); CFG = null; loadCfg();
       });
     return;
   }
