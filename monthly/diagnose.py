@@ -65,14 +65,26 @@ def _pct(n, d):
     return (n / float(d)) if d else 0.0
 
 
-def _segmented_or_suppressed(results, no_price, n):
+def _segmented_or_suppressed(results, no_price, fallback, own, n):
+    """Suppress whenever the TRUST CHECK fails — not only when units are missing.
+
+    The first version only suppressed above 40% no-price, so a run that was 68%
+    priced from district pools printed "*** NOT TRUSTWORTHY ***" at the top and
+    then a confident "model_is_a_low_occupancy_tool" underneath it. Those two
+    lines cannot both be true, and the second is the one people quote.
+    """
     seg = engine.segmented_report(results)
+    reason = None
     if n and _pct(no_price, n) > 0.40:
+        reason = ("%d of %d units returned no price" % (no_price, n))
+    elif n and _pct(own, n) < 0.60:
+        reason = ("only %d of %d units priced from their own history — %d came "
+                  "from district pools" % (own, n, fallback))
+    if reason:
         seg["verdict_suppressed"] = True
         seg["verdict_would_have_been"] = seg.get("verdict")
-        seg["verdict"] = ("SUPPRESSED — %d of %d units returned no price, so any "
-                          "verdict here would describe the sample that survived, "
-                          "not the portfolio" % (no_price, n))
+        seg["verdict"] = ("SUPPRESSED — %s, so any verdict here would describe "
+                          "the sample, not the portfolio" % reason)
     else:
         seg["verdict_suppressed"] = False
     return seg
@@ -192,7 +204,8 @@ def run(units, cost_set=None, today=None):
         # only because 41 units matched where August matched 20. A conclusion
         # drawn from a sample we already know is broken is worse than no
         # conclusion, because it looks like a finding.
-        "segmented": _segmented_or_suppressed(results, len(none_at_all), n),
+        "segmented": _segmented_or_suppressed(results, len(none_at_all),
+                                              len(fallback), len(own_hist), n),
         "floor_ratio": engine.floor_ratio_report(results),
         "floor_ratio_by_band": {
             b: engine.floor_ratio_report(
@@ -307,12 +320,20 @@ def render_text(multi):
         A("    verdict: %s" % seg.get("verdict"))
         fn = r.get("funnel") or {}
         if fn:
-            A("    reservation funnel: read %s -> kept %s" % (fn.get("read"), fn.get("kept")))
+            A("    reservation funnel: read %s -> kept %s   (drops below are"
+              " EXPECTED, not losses)" % (fn.get("read"), fn.get("kept")))
+            _why = {
+                "dropped_not_confirmed": "inquiries, cancellations, declines — not bookings",
+                "dropped_no_listing_id": "*** UNEXPECTED — investigate ***",
+                "dropped_bad_dates": "*** UNEXPECTED — investigate ***",
+                "dropped_no_price": "zero-price rows (owner blocks etc.)",
+                "dropped_no_nights_in_month": "arrived in the 45-day pad, left before the month began",
+            }
             for k in ("dropped_not_confirmed", "dropped_no_listing_id",
                       "dropped_bad_dates", "dropped_no_price",
                       "dropped_no_nights_in_month"):
                 if fn.get(k):
-                    A("        %-30s %s" % (k, fn[k]))
+                    A("        %-30s %-6s %s" % (k, fn[k], _why.get(k, "")))
             ss = fn.get("status_seen") or {}
             if ss:
                 A("        statuses seen: %s"

@@ -268,3 +268,31 @@ class VerdictSuppressionTest(unittest.TestCase):
         rep = diagnose.run([unit(i, 500, 0.8) for i in range(10)])
         self.assertFalse(rep["segmented"]["verdict_suppressed"])
         self.assertNotIn("SUPPRESSED", rep["segmented"]["verdict"])
+
+
+class SuppressionCoversTheWholeTrustCheckTest(unittest.TestCase):
+    """A run that was 68% priced from district pools printed *** NOT TRUSTWORTHY
+    *** at the top and a confident verdict underneath it. Both cannot be true,
+    and the confident one is the line people quote."""
+
+    def _pooled(self, n):
+        return [{"lid": i, "name": "u", "month": "2026-10", "own": [],
+                 "district_pool": [{"adr": 500, "occ": 0.9, "months_old": 1}],
+                 "bedroom_pool": [], "attr_values": {}, "ejar_row": None,
+                 "adr_pool": 500, "occ_pool": 0.9} for i in range(n)]
+
+    def test_a_pool_heavy_run_suppresses_the_verdict_too(self):
+        rep = diagnose.run(self._pooled(10))
+        self.assertFalse(rep["headline"]["trustworthy"])
+        self.assertTrue(rep["segmented"]["verdict_suppressed"])
+        self.assertIn("district pools", rep["segmented"]["verdict"])
+
+    def test_the_suppressed_verdict_is_still_kept(self):
+        rep = diagnose.run(self._pooled(10))
+        self.assertIn("verdict_would_have_been", rep["segmented"])
+
+    def test_trustworthy_and_suppressed_never_disagree(self):
+        for units in (self._pooled(10), [unit(i, 500, 0.8) for i in range(10)]):
+            rep = diagnose.run(units)
+            self.assertEqual(rep["headline"]["trustworthy"],
+                             not rep["segmented"]["verdict_suppressed"])
