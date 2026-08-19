@@ -76,7 +76,7 @@ are not re-decided later in a moment of enthusiasm.
 """
 
 from .host import HOST, wire  # noqa: F401
-from . import attrs, db, routes, seed  # noqa: F401
+from . import attrs, db, live, routes, seed, settings  # noqa: F401
 
 
 def bootstrap():

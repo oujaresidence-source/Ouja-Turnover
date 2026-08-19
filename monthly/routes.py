@@ -311,6 +311,92 @@ async def _api_quote_pdf(request):
                  % (name, payload.get("month"))})
 
 
+def _coverage_now():
+    """Own-history coverage for the month a guest would actually book. Fetched
+    fresh rather than remembered — the number that gates the switch must not be
+    a number from last week."""
+    import datetime
+    from . import collect
+    d = datetime.date.today()
+    m = "%04d-%02d" % (d.year + (1 if d.month == 12 else 0),
+                       1 if d.month == 12 else d.month + 1)
+    try:
+        return collect.units_report(m).get("pct_own_history"), m
+    except Exception:
+        return None, m
+
+
+async def _api_settings_get(request):
+    import asyncio
+    from . import db, settings
+    cov, month = await asyncio.to_thread(_coverage_now)
+    cur = settings.load()
+    return HOST.json_response({
+        "ok": True,
+        "flip": settings.flip_state(cov),
+        "coverage_month": month,
+        "turnover_cost_sar": cur.get("turnover_cost_sar"),
+        "licence_filter_on": bool(cur.get("licence_filter_on")),
+        "licence_filter_due": cur.get("licence_filter_due"),
+        "licence_warn_days": settings.LICENCE_EXPIRY_WARN_DAYS,
+        "licences": db.licence_all(),
+        "expiry": db.licences_expiring(settings.LICENCE_EXPIRY_WARN_DAYS),
+    })
+
+
+async def _api_settings_set(request):
+    import asyncio
+    from . import settings
+    b = await _body(request)
+    actor = HOST.actor(request) if HOST.actor else None
+    cur = settings.load()
+
+    if "turnover_cost_sar" in b:
+        v = b.get("turnover_cost_sar")
+        try:
+            cur["turnover_cost_sar"] = None if v in (None, "") else float(v)
+        except (TypeError, ValueError):
+            return _bad("تكلفة التنظيفة لازم تكون رقم")
+        settings.save(cur)
+        from . import collect
+        collect._CACHE.clear()
+
+    if "licence_filter_on" in b:
+        cur = settings.load()
+        cur["licence_filter_on"] = bool(b.get("licence_filter_on"))
+        settings.save(cur)
+
+    if "price_source" in b:
+        cov, _m = await asyncio.to_thread(_coverage_now)
+        try:
+            settings.set_price_source(
+                b.get("price_source"), cov, actor=actor,
+                reason=b.get("reason") or "", override=bool(b.get("override")))
+        except settings.FlipRefused as e:
+            return HOST.json_response(
+                {"ok": False, "error": "refused", "message": str(e),
+                 "coverage": cov}, 200)
+
+    cov, month = await asyncio.to_thread(_coverage_now)
+    return HOST.json_response({"ok": True, "flip": settings.flip_state(cov),
+                               "coverage_month": month})
+
+
+async def _api_licence_set(request):
+    from . import db
+    b = await _body(request)
+    lid = b.get("lid")
+    if not str(lid or "").isdigit():
+        return _bad("رقم الشقة ناقص")
+    exp = (b.get("expires") or "").strip()
+    if exp and (len(exp) != 10 or exp[4] != "-"):
+        return _bad("تاريخ الانتهاء بالصيغة YYYY-MM-DD")
+    db.licence_set(int(lid), b.get("licence_no"), exp,
+                   entered_by=(HOST.actor(request) if HOST.actor else None))
+    return HOST.json_response({"ok": True, "lid": int(lid),
+                               "licence": db.licence_get(int(lid))})
+
+
 async def _page(request):
     g = _guard(request)
     if g:
@@ -334,3 +420,6 @@ def register(app):
     app.router.add_post("/api/mrent/quote", _safe(_api_quote))
     app.router.add_post("/api/mrent/override", _safe(_api_override))
     app.router.add_get("/api/mrent/quote.pdf", _safe(_api_quote_pdf))
+    app.router.add_get("/api/mrent/settings", _safe(_api_settings_get))
+    app.router.add_post("/api/mrent/settings", _safe(_api_settings_set))
+    app.router.add_post("/api/mrent/licence", _safe(_api_licence_set))

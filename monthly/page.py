@@ -172,6 +172,7 @@ tr.tot td{font-weight:700;border-top:2px solid var(--line-strong);border-bottom:
     <button class="tab on" data-tab="list">كل الشقق</button>
     <button class="tab" data-tab="unit">الشقة</button>
     <button class="tab" data-tab="attrs">مواصفات الشقة</button>
+    <button class="tab" data-tab="admin">الإعدادات</button>
   </div>
 
   <div id="view"></div>
@@ -186,6 +187,7 @@ var LID = '';
 var UNITS = null;
 var PRICE = null;
 var ATTRS = null;
+var CFG = null;
 
 function $(id){ return document.getElementById(id); }
 function he(s){
@@ -533,6 +535,87 @@ function viewAttrs(){
   v.innerHTML = h;
 }
 
+/* ================= SETTINGS ================= */
+function viewAdmin(){
+  var v = $('view');
+  if(!CFG){ v.innerHTML = '<div class="card"><div class="sk" style="height:240px"></div></div>'; return; }
+  var f = CFG.flip || {};
+  var on = f.price_source === 'engine';
+  var h = '';
+
+  h += '<div class="card">';
+  h += '<h3 style="margin:0 0 4px;font-size:16px">سعر موقع الضيوف</h3>';
+  h += '<div class="muted" style="font-size:13px;margin-bottom:12px">' +
+       'وش يشوفه الضيف في صفحة /monthly.</div>';
+
+  /* the number that says not to flip, printed beside the switch */
+  h += '<div class="' + (f.may_flip ? 'quality' : 'quality warn') + '">' +
+       '<b>تغطية السجل الذاتي الآن: ' +
+       (f.coverage_pct === null || f.coverage_pct === undefined ? '—' : f.coverage_pct + '%') +
+       '</b> (شهر ' + he(CFG.coverage_month || '') + ') — الحد الأدنى ' + f.min_pct + '%.<br>' +
+       he(f.criterion_ar || '') + '</div>';
+
+  h += '<div class="ovbox" style="margin-top:14px">';
+  h += '<button class="btn' + (!on ? ' primary' : ' ghost') + '" data-src="discount">' +
+       'الخصم الثابت (الوضع الحالي)</button>';
+  h += '<button class="btn' + (on ? ' primary' : ' ghost') + '" data-src="engine"' +
+       (f.may_flip ? '' : ' data-needs-override="1"') + '>محرّك التسعير</button>';
+  h += '</div>';
+
+  if(!f.may_flip){
+    h += '<div class="ovwarn" style="margin-top:12px">التحويل لمحرّك التسعير ' +
+         'مرفوض برمجياً وقت التغطية تحت الحد. لو أصررت، اكتب السبب تحت — ' +
+         'ينحفظ باسمك.</div>';
+    h += '<div class="ovbox" style="margin-top:10px">';
+    h += '<input type="text" id="ovreason" placeholder="سبب التجاوز" style="flex:1;min-width:240px">';
+    h += '</div>';
+  }
+  if(f.last_change && f.last_change.at){
+    h += '<div class="quality" style="margin-top:12px">آخر تغيير: ' +
+         he(f.last_change.at) + (f.last_change.actor ? ' · ' + he(f.last_change.actor) : '') +
+         (f.last_change.reason ? ' · ' + he(f.last_change.reason) : '') +
+         (f.last_change.overridden ? ' · بتجاوز' : '') + '</div>';
+  }
+  h += '</div>';
+
+  h += '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">تكلفة التنظيفة</h3>';
+  h += '<div class="muted" style="font-size:13px;margin-bottom:10px">' +
+       'كل الأسعار مبنية على هذا الرقم. خذه من صفحة تغطية التنظيف.</div>';
+  h += '<div class="ovbox"><input type="number" id="tcost" placeholder="140" value="' +
+       he(CFG.turnover_cost_sar === null || CFG.turnover_cost_sar === undefined ? '' : CFG.turnover_cost_sar) +
+       '" style="min-width:120px"><span class="muted">ريال للتنظيفة</span>' +
+       '<button class="btn primary" id="savetcost">حفظ</button></div></div>';
+
+  var ex = CFG.expiry || {};
+  h += '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">تراخيص الإعلان</h3>';
+  h += '<div class="muted" style="font-size:13px;margin-bottom:10px">' +
+       'الفلترة مطفية الآن — موعد تشغيلها ' + he(CFG.licence_filter_due || '') +
+       '. لين ذاك الوقت ما نخفي أي شقة.</div>';
+  var nexp = (ex.expired || []).length, nsoon = (ex.expiring || []).length;
+  if(nexp || nsoon){
+    h += '<div class="ovwarn">' + (nexp ? nexp + ' ترخيص منتهي. ' : '') +
+         (nsoon ? nsoon + ' ينتهي خلال ' + CFG.licence_warn_days + ' يوم.' : '') + '</div>';
+  } else {
+    h += '<div class="quality">ما فيه تراخيص منتهية أو قريبة الانتهاء.</div>';
+  }
+  h += '<div class="ovbox" style="margin-top:12px">';
+  h += '<input type="text" id="licno" placeholder="رقم الترخيص" style="min-width:180px">';
+  h += '<input type="text" id="licexp" placeholder="ينتهي YYYY-MM-DD" style="min-width:170px">';
+  h += '<button class="btn primary" id="savelic">احفظ للشقة المختارة</button>';
+  h += '</div>';
+  if(!LID) h += '<div class="muted" style="font-size:12.5px;margin-top:8px">اختر شقة أول من فوق.</div>';
+  h += '</div>';
+  v.innerHTML = h;
+}
+
+function loadCfg(){
+  CFG = null; render();
+  api('/api/mrent/settings').then(function(d){
+    if(!d.ok){ toast(d.message || 'ما قدرنا نجيب الإعدادات'); return; }
+    CFG = d; render();
+  });
+}
+
 /* ================= wiring ================= */
 function render(){
   var tabs = document.querySelectorAll('.tab');
@@ -541,6 +624,7 @@ function render(){
   }
   if(TAB === 'list') viewList();
   else if(TAB === 'unit') viewUnit();
+  else if(TAB === 'admin') viewAdmin();
   else viewAttrs();
 }
 function loadUnits(force){
@@ -592,6 +676,7 @@ document.addEventListener('click', function(e){
     TAB = tab.getAttribute('data-tab');
     if(TAB === 'unit' && LID && !PRICE) loadPrice();
     else if(TAB === 'attrs' && LID && !ATTRS) loadAttrs();
+    else if(TAB === 'admin' && !CFG) loadCfg();
     else render();
     return;
   }
@@ -619,6 +704,46 @@ document.addEventListener('click', function(e){
     return;
   }
   if(t.id === 'refresh'){ PRICE = null; loadUnits(true); if(LID) loadPrice(); return; }
+  var src = t.getAttribute ? t.getAttribute('data-src') : null;
+  if(src){
+    var body = {price_source: src};
+    if(t.getAttribute('data-needs-override')){
+      var rs = (($('ovreason') || {}).value || '').trim();
+      if(!rs){ toast('اكتب سبب التجاوز'); return; }
+      body.override = true; body.reason = rs;
+    }
+    api('/api/mrent/settings', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function(d){
+        if(!d.ok){ toast(d.message || 'مرفوض'); return; }
+        toast('انحفظ'); CFG = null; loadCfg();
+      });
+    return;
+  }
+  if(t.id === 'savetcost'){
+    api('/api/mrent/settings', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({turnover_cost_sar: ($('tcost') || {}).value})})
+      .then(function(d){
+        if(!d.ok){ toast(d.message || 'ما انحفظ'); return; }
+        toast('انحفظ — الأسعار تنحسب من جديد'); CFG = null; UNITS = null; PRICE = null;
+        loadCfg();
+      });
+    return;
+  }
+  if(t.id === 'savelic'){
+    if(!LID){ toast('اختر شقة أول'); return; }
+    api('/api/mrent/licence', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lid: parseInt(LID, 10),
+                            licence_no: ($('licno') || {}).value,
+                            expires: ($('licexp') || {}).value})})
+      .then(function(d){
+        if(!d.ok){ toast(d.message || 'ما انحفظ'); return; }
+        toast('انحفظ الترخيص'); CFG = null; loadCfg();
+      });
+    return;
+  }
   if(t.id === 'savequote'){
     var pctv = parseInt(($('ovrnum') || {}).value, 10) || 0;
     var reason = (($('ovrreason') || {}).value || '').trim();

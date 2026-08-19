@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS monthly_overrides (
     actor       TEXT,
     created_at  TEXT
 );
+CREATE TABLE IF NOT EXISTS monthly_licences (
+    unit_id     INTEGER PRIMARY KEY,
+    licence_no  TEXT,                    -- رقم ترخيص الإعلان (REGA)
+    expires     TEXT,                    -- YYYY-MM-DD
+    entered_by  TEXT,
+    updated_at  TEXT
+);
 CREATE TABLE IF NOT EXISTS monthly_outcomes (
     quote_id      INTEGER PRIMARY KEY,
     booked        INTEGER,                -- 0/1
@@ -461,3 +468,71 @@ def ejar_load_seed(path=None):
             note=(note + " | filter: " + str(r.get("filter") or "")).strip())
         n += 1
     return n
+
+
+# ─────────────────────── advertising licences (S15) ───────────────────────
+#
+# REGA's marketing regulation requires a per-property advertisement licence
+# number on every ad. The FILTER is off until the owner turns it on — a hard
+# filter today would blank a live page, because no licence number exists yet.
+# What ships now is the storage, the entry point and the expiry warning, so the
+# switch has something to switch on.
+
+def licence_get(unit_id):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        r = cx.execute("SELECT unit_id, licence_no, expires, entered_by, updated_at "
+                       "FROM monthly_licences WHERE unit_id=?", (int(unit_id),)).fetchone()
+    if not r:
+        return None
+    return {"unit_id": r[0], "licence_no": r[1], "expires": r[2],
+            "entered_by": r[3], "updated_at": r[4]}
+
+
+def licence_all():
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT unit_id, licence_no, expires, entered_by, updated_at "
+                          "FROM monthly_licences ORDER BY expires").fetchall()
+    return [{"unit_id": r[0], "licence_no": r[1], "expires": r[2],
+             "entered_by": r[3], "updated_at": r[4]} for r in rows]
+
+
+def licence_set(unit_id, licence_no, expires, entered_by=None):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cx.execute(
+            "INSERT INTO monthly_licences (unit_id, licence_no, expires, entered_by, "
+            "updated_at) VALUES (?,?,?,?,?) ON CONFLICT(unit_id) DO UPDATE SET "
+            "licence_no=excluded.licence_no, expires=excluded.expires, "
+            "entered_by=excluded.entered_by, updated_at=excluded.updated_at",
+            (int(unit_id), (licence_no or "").strip() or None,
+             (expires or "").strip()[:10] or None, entered_by, _now()))
+        cx.commit()
+    return True
+
+
+def licence_ok(unit_id, today=None):
+    """True only with a number AND an unexpired date. Missing is not ok, and
+    expired is not ok — the two failures are different and both block."""
+    row = licence_get(unit_id)
+    if not row or not row.get("licence_no") or not row.get("expires"):
+        return False
+    today = today or datetime.date.today().isoformat()
+    return str(row["expires"])[:10] >= str(today)[:10]
+
+
+def licences_expiring(days=14, today=None):
+    """Licences that lapse within `days`, plus the ones already expired. Ready
+    for a nightly job; surfaced on the settings screen meanwhile."""
+    today = datetime.date.fromisoformat(str(today)[:10]) if today else datetime.date.today()
+    edge = (today + datetime.timedelta(days=int(days))).isoformat()
+    out = {"expired": [], "expiring": [], "missing": []}
+    for row in licence_all():
+        if not row.get("licence_no") or not row.get("expires"):
+            out["missing"].append(row)
+        elif str(row["expires"])[:10] < today.isoformat():
+            out["expired"].append(row)
+        elif str(row["expires"])[:10] <= edge:
+            out["expiring"].append(row)
+    return out
