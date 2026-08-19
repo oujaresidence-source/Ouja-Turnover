@@ -252,6 +252,65 @@ async def _api_override(request):
     return HOST.json_response({"ok": True, "quote_id": int(qid), "to_pct": pct})
 
 
+async def _api_quote_pdf(request):
+    """The 4-page owner PDF.
+
+    Playwright's SYNC api cannot run inside the aiohttp event loop, so the whole
+    render goes through asyncio.to_thread — the same thing owner_report/routes.py
+    does for the frozen renderer.
+
+    A quote id renders the FROZEN payload from the moment it was issued; without
+    one it renders live. An owner asking in November why we said 16,000 in August
+    is shown August's reasoning, not a recomputation.
+    """
+    import asyncio, os, tempfile
+    from . import collect, db, quote_render
+    q = request.rel_url.query
+    qid, lid, month = q.get("id"), (q.get("lid") or "").strip(), (q.get("month") or "").strip()
+
+    if qid and str(qid).isdigit():
+        saved = db.get_quote(int(qid))
+        if not saved:
+            return _bad("ما لقينا التسعيرة")
+        payload = saved["payload"]
+        payload["price"] = saved.get("final_price") or payload.get("price")
+    else:
+        if not lid.isdigit() or len(month) != 7:
+            return _bad("استخدم ?id=12 أو ?lid=457230&month=2026-10")
+        payload = await asyncio.to_thread(collect.price_one, int(lid), month)
+
+    if payload.get("price") is None:
+        return _bad("ما فيه تقدير لهذي الوحدة هذا الشهر — %s"
+                    % ", ".join(payload.get("warnings") or []))
+
+    src = payload.get("turnover_cost_source") or ""
+    cfg = {"turnover_note": ("رقم مبدئي 140 ريال — لم يُحدَّث بعد"
+                             if src.startswith("DEFAULT") else "من إعدادات المالك")}
+
+    def _render():
+        d = tempfile.mkdtemp(prefix="ouja_mq_")
+        out = os.path.join(d, "quote.pdf")
+        pdf, _html, viol = quote_render.render(payload, out, cfg)
+        with open(pdf, "rb") as fh:
+            return fh.read(), viol
+
+    data, violations = await asyncio.to_thread(_render)
+    if violations:
+        # Zero violations or the PDF does not reach an owner. A broken layout is
+        # not a cosmetic problem on a document whose whole claim is that the
+        # numbers add up.
+        traceback.print_stack()
+        return HOST.json_response(
+            {"ok": False, "error": "layout", "violations": violations[:12],
+             "message": "تخطيط الملف فيه مشكلة — ما نرسله للمالك قبل ما ينضبط"}, 200)
+
+    name = (payload.get("name") or "quote").replace(" ", "-")
+    return HOST.web.Response(
+        body=data, content_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="ouja-%s-%s.pdf"'
+                 % (name, payload.get("month"))})
+
+
 async def _page(request):
     g = _guard(request)
     if g:
@@ -274,3 +333,4 @@ def register(app):
     app.router.add_post("/api/mrent/attrs", _safe(_api_attrs_set))
     app.router.add_post("/api/mrent/quote", _safe(_api_quote))
     app.router.add_post("/api/mrent/override", _safe(_api_override))
+    app.router.add_get("/api/mrent/quote.pdf", _safe(_api_quote_pdf))
