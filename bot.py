@@ -19530,12 +19530,18 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         .tr-msg.in{background:var(--surface-2)}
         .tr-msg.musaed{border-color:var(--accent);background:var(--gold-tint);border-inline-start:3px solid var(--accent)}
         .tr-msg.unk{border-style:dashed}
+        .tr-msg.tpl{opacity:.62}   /* Hostaway's own template: present, but never the point */
         .tr-meta{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
         .tr-ts{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
         .tr-body{white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.75}
         .tr-draft{margin-top:7px;border-top:1px dashed var(--line);padding-top:7px}
         .tr-draft summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--accent)}
         .tr-head{cursor:pointer}
+        .tr-prog{display:none;align-items:center;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:12.5px;color:var(--text-2)}
+        .tr-prog.on{display:flex}
+        .tr-prog .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+        @media (prefers-reduced-motion:no-preference){.tr-prog .dot{animation:trPulse 1.4s ease-in-out infinite}}
+        @keyframes trPulse{0%,100%{opacity:.35}50%{opacity:1}}
       </style>
       <section class="view" id="view_train">
         <div class="page-head">
@@ -19571,25 +19577,18 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
           <div class="tr-ctl">
             <label><span id="t_train_days">المدة</span>
               <select id="trainDays">
-                <option value="7">7</option>
                 <option value="14">14</option>
-                <option value="30" selected>30</option>
+                <option value="30">30</option>
                 <option value="60">60</option>
-                <option value="90">90</option>
-              </select>
-            </label>
-            <label><span id="t_train_limit">عدد المحادثات</span>
-              <select id="trainLimit">
-                <option value="15">15</option>
-                <option value="30" selected>30</option>
-                <option value="60">60</option>
-                <option value="120">120</option>
+                <option value="90" selected>90</option>
+                <option value="since">من أول يوم رد فيه مساعد</option>
               </select>
             </label>
             <label><span id="t_train_q">بحث</span><input type="text" id="trainQ" placeholder="شقة أو ضيف"></label>
             <label class="tr-chk"><input type="checkbox" id="trainOnly" checked><span id="t_train_only">فقط المحادثات اللي رد فيها مساعد</span></label>
             <label class="tr-chk"><input type="checkbox" id="trainNames"><span id="t_train_names">أظهر أسماء الضيوف بالملف المنزّل</span></label>
           </div>
+          <div class="tr-prog" id="trainProgress"></div>
         </div>
 
         <div class="kpis" id="trainStats"></div>
@@ -31399,15 +31398,21 @@ async function ctOpenLog(){
 /* ============================================================
    «تدريب مساعد» — Musaed Training. READ-ONLY.
    Hostaway never records WHO wrote an outbound message, so the server rebuilds
-   authorship from our own send records and hands every message a code plus how sure
-   it is. This view NEVER promotes an unknown message to «مساعد» — an unproven line
-   stays «مو متأكد», because in training data a wrong label is worse than a missing one.
+   authorship from our own send records plus his sign-off, and hands every message a
+   code. This view NEVER promotes a truly unproven line to «مساعد» — it stays
+   «مو متأكد», because in training data a wrong label is worse than a missing one.
+   THE PULL IS CHUNKED: three months is several hundred conversations and one Hostaway
+   call each, so we walk them in batches, paint as they land, and let the owner stop.
    NO BACKSLASHES ANYWHERE IN HERE (CLAUDE.md trap 1): DASHBOARD_HTML is a normal
    Python string, so any backslash escape is eaten by Python and kills the whole
    script — which kills the login. Newline = String.fromCharCode(10).
    ============================================================ */
-var TRAIN = {data:null, busy:false, open:{}};
+var TRAIN = {data:null, busy:false, stop:false, open:{}, scanned:0, sinceDays:0};
 var TRAIN_NL = String.fromCharCode(10);
+var TRAIN_SCAN = 25;        // conversations per request — keeps every call short
+var TRAIN_MAX = 4000;
+// whitespace class built from char codes: a backslash-s literal would be eaten by Python
+var TRAIN_WS = new RegExp('[' + String.fromCharCode(9,10,13,32) + ']+', 'g');       // runaway guard; the progress line says so if we ever hit it
 
 function trainSaveBlob(text, name, mime){
   var blob = new Blob([text], {type: mime + ';charset=utf-8'});
@@ -31428,40 +31433,116 @@ function trainPill(code){
   if(code==='musaed_auto') return 'ok';
   if(code==='musaed_approved') return 'info';
   if(code==='musaed_edited') return 'gold';
-  if(code==='system') return 'purple';
+  if(code==='musaed_signed') return 'purple';
+  if(code==='template') return 'muted';
   return 'warn';
 }
 function trainIsMusaed(code){ return String(code||'').indexOf('musaed')===0 }
+
+/* ---- Hostaway's own automated templates ----
+   The welcome / check-in / checkout messages the PMS fires per reservation are outbound,
+   unsigned, and repeat almost verbatim across bookings — they were drowning the «unknown»
+   count and reading as mystery humans. Same skeleton in 3+ DIFFERENT conversations = a
+   template. The guest's own name and every digit are stripped first, because that is the
+   only part a template varies. Log-proven Musaed lines are never touched. */
+function trainSkeleton(body, guest){
+  var s = String(body||'').toLowerCase();
+  String(guest||'').split(/[^a-zA-Z0-9؀-ۿ]+/).forEach(function(part){
+    if(part && part.length>2) s = s.split(part.toLowerCase()).join(' ');
+  });
+  s = s.replace(/[0-9٠-٩]+/g, ' ').replace(TRAIN_WS, ' ').trim();
+  return s.slice(0, 200);
+}
+function trainMarkTemplates(){
+  var d = TRAIN.data; if(!d) return;
+  var seen = {};
+  (d.threads||[]).forEach(function(t){
+    var here = {};
+    (t.messages||[]).forEach(function(m){
+      if(m.dir!=='out') return;
+      var k = trainSkeleton(m.body, t.guest);
+      if(k.length < 40 || here[k]) return;      // short lines repeat innocently
+      here[k] = 1;
+      seen[k] = (seen[k]||0) + 1;               // count DISTINCT conversations
+    });
+  });
+  (d.threads||[]).forEach(function(t){
+    (t.messages||[]).forEach(function(m){
+      if(m.dir!=='out') return;
+      if(m.code!=='unknown' && m.code!=='musaed_signed' && m.code!=='template') return;
+      var k = trainSkeleton(m.body, t.guest);
+      var isTpl = (k.length>=40 && (seen[k]||0) >= 3);
+      if(isTpl) m.code = 'template';
+      else if(m.code === 'template') m.code = m.sig ? 'musaed_signed' : 'unknown';
+    });
+  });
+}
+
+/* Counts are recomputed here, never trusted from a single chunk: the template pass
+   changes labels only once the whole set is on screen. */
+function trainRecount(){
+  var d = TRAIN.data; if(!d) return;
+  var tot = {threads:0, guest:0, out:0, musaed:0, unknown:0, template:0};
+  (d.threads||[]).forEach(function(t){
+    var c = {guest:0, out:0, musaed:0, unknown:0, template:0};
+    (t.messages||[]).forEach(function(m){
+      if(m.dir==='in'){ c.guest++; return }
+      c.out++;
+      if(trainIsMusaed(m.code)) c.musaed++;
+      else if(m.code==='template') c.template++;
+      else if(m.code==='unknown') c.unknown++;
+    });
+    t.counts = c;
+    tot.threads++; tot.guest+=c.guest; tot.out+=c.out;
+    tot.musaed+=c.musaed; tot.unknown+=c.unknown; tot.template+=c.template;
+  });
+  d.totals = tot;
+}
 
 async function loadTrain(force){
   if(TRAIN.busy) return;
   var gv = function(id, dflt){ var el=document.getElementById(id); return el?el.value:dflt };
   var gc = function(id){ var el=document.getElementById(id); return (el && el.checked)?1:0 };
-  var days = gv('trainDays','30'), lim = gv('trainLimit','30');
+  var days = gv('trainDays','90');
   var only = gc('trainOnly'), q = String(gv('trainQ','')||'').trim();
-  TRAIN.busy = true; TRAIN.open = {};
-  var btn = document.getElementById('trainRunBtn');
-  if(btn) btn.disabled = true;
-  renderTrainBody();
-  try{
+
+  TRAIN.busy = true; TRAIN.stop = false; TRAIN.open = {}; TRAIN.scanned = 0;
+  TRAIN.data = {threads:[], labels:null, days:days, totals:null, generated_at:''};
+  renderTrainAll();
+
+  var offset = 0, rounds = 0, hitGuard = false;
+  while(!TRAIN.stop){
     var url = '/api/train/threads?days='+encodeURIComponent(days)
-            + '&limit='+encodeURIComponent(lim)
+            + '&offset='+offset + '&scan='+TRAIN_SCAN
             + '&only_musaed='+only
             + '&q='+encodeURIComponent(q)
             + (force?'&force=1':'');
-    var r = await api(url);
-    if(r && r.error){ TRAIN.data = {__error:true, __detail:(r.detail||r.error)}; }
-    else {
-      TRAIN.data = r || {};
-      if(((TRAIN.data.threads)||[]).length) TRAIN.open[0] = true;
-    }
-  }catch(e){
-    TRAIN.data = {__error:true, __detail:String(e)};
+    var r;
+    try{ r = await api(url); }
+    catch(e){ TRAIN.data.__error = true; TRAIN.data.__detail = String(e); break }
+    if(r && r.error){ TRAIN.data.__error = true; TRAIN.data.__detail = (r.detail||r.error); break }
+
+    TRAIN.data.labels = r.labels || TRAIN.data.labels;
+    TRAIN.data.days = r.days;
+    TRAIN.data.generated_at = r.generated_at || '';
+    TRAIN.data.threads = TRAIN.data.threads.concat(r.threads||[]);
+    TRAIN.scanned += (r.scanned||0);
+    offset = r.next_offset || (offset + TRAIN_SCAN);
+    if(TRAIN.data.threads.length && TRAIN.open[0]===undefined) TRAIN.open[0] = true;
+
+    trainMarkTemplates(); trainRecount(); renderTrainAll();
+    if(r.exhausted) break;
+    if(TRAIN.scanned >= TRAIN_MAX){ hitGuard = true; break }
+    rounds++;
+    if(rounds > 400) { hitGuard = true; break }
   }
+
   TRAIN.busy = false;
-  if(btn) btn.disabled = false;
-  renderTrainAll();
+  TRAIN.guard = hitGuard;
+  trainMarkTemplates(); trainRecount(); renderTrainAll();
 }
+
+function trainStop(){ TRAIN.stop = true }
 
 function renderTrainAll(){
   var put = function(id, txt){ var el=document.getElementById(id); if(el) el.textContent = txt };
@@ -31470,30 +31551,50 @@ function renderTrainAll(){
                                'Full conversations with every Musaed message marked'));
   put('t_train_filters', labelText('الفلاتر','Filters'));
   put('t_train_days', labelText('كم يوم للخلف','Days back'));
-  put('t_train_limit', labelText('عدد المحادثات','Conversations'));
   put('t_train_q', labelText('بحث','Search'));
   put('t_train_only', labelText('فقط المحادثات اللي رد فيها مساعد','Only threads Musaed replied in'));
   put('t_train_names', labelText('أظهر أسماء الضيوف بالملف المنزّل','Keep guest names in the download'));
-  put('trainRunBtn', labelText('استخرج المحادثات','Extract conversations'));
+  put('trainRunBtn', TRAIN.busy ? labelText('يسحب…','Pulling…') : labelText('استخرج المحادثات','Extract conversations'));
   put('trainDlTxt', labelText('نزّل نص','Download text'));
   put('trainDlJsonl', labelText('نزّل ملف تدريب','Download training file'));
   var qi = document.getElementById('trainQ');
   if(qi) qi.placeholder = labelText('شقة أو ضيف','Apartment or guest');
+  var sinceOpt = document.querySelector('#trainDays option[value=since]');
+  if(sinceOpt) sinceOpt.textContent = labelText('من أول يوم رد فيه مساعد','Since Musaed started replying');
+
   var d = TRAIN.data || {};
   var has = !!(d.threads && d.threads.length);
+  var run = document.getElementById('trainRunBtn'); if(run) run.disabled = TRAIN.busy;
   var dt = document.getElementById('trainDlTxt'), dj = document.getElementById('trainDlJsonl');
   if(dt) dt.disabled = !has;
   if(dj) dj.disabled = !has;
-  var meta = document.getElementById('trainMeta');
-  if(meta){
-    if(d.generated_at){
-      meta.textContent = labelText('آخر استخراج ','Last pull ') + shortTime(d.generated_at)
-        + ' · ' + labelText('قرأ ','scanned ') + fmt(d.scanned||0) + labelText(' محادثة',' conversations')
-        + (d.cached ? labelText(' · محفوظة',' · cached') : '');
-    } else meta.textContent = '';
-  }
+
+  renderTrainProgress();
   renderTrainStats();
   renderTrainBody();
+}
+
+function renderTrainProgress(){
+  var el = document.getElementById('trainProgress');
+  if(!el) return;
+  var d = TRAIN.data;
+  if(!d){ el.className = 'tr-prog'; el.innerHTML = ''; return; }
+  var found = ((d.totals||{}).threads)||0;
+  el.className = 'tr-prog on';
+  if(TRAIN.busy){
+    el.innerHTML = '<span class="dot"></span><span>'
+      + esc(labelText('قرأ ','Scanned ') + fmt(TRAIN.scanned) + labelText(' محادثة',' conversations')
+            + ' · ' + labelText('لقى ','found ') + fmt(found) + labelText(' فيها مساعد',' with Musaed'))
+      + '</span><button class="btn ghost xs" onclick="trainStop()">'
+      + esc(labelText('وقّف','Stop')) + '</button>';
+    return;
+  }
+  var win = (d.days ? (labelText('آخر ','last ') + fmt(d.days) + labelText(' يوم',' days') + ' · ') : '');
+  el.innerHTML = '<span>' + esc(win + labelText('قرأ ','scanned ') + fmt(TRAIN.scanned)
+      + labelText(' محادثة، طلع منها ',' conversations, kept ') + fmt(found)
+      + (TRAIN.stop ? labelText(' — وقّفتها أنت',' — you stopped it')
+                    : (TRAIN.guard ? labelText(' — وصل الحد الأقصى',' — hit the safety cap') : '')))
+      + '</span>';
 }
 
 function renderTrainStats(){
@@ -31506,6 +31607,7 @@ function renderTrainStats(){
     {ic:'✉', cls:'b', val:s.threads||0, lbl:labelText('محادثة','conversations')},
     {ic:'⚡', cls:'g', val:s.musaed||0, lbl:labelText('رسالة كتبها مساعد','messages by Musaed')},
     {ic:'◎', cls:'p', val:s.guest||0, lbl:labelText('رسالة من الضيوف','guest messages')},
+    {ic:'▤', cls:'', val:s.template||0, lbl:labelText('قالب تلقائي','automated templates')},
     {ic:'?', cls:((s.unknown||0)?'r':''), val:s.unknown||0, lbl:labelText('كاتبها غير معروف','author unknown')}
   ];
   el.innerHTML = cards.map(function(c){
@@ -31523,27 +31625,28 @@ function trainPeek(t){
 function renderTrainBody(){
   var el = document.getElementById('trainBody');
   if(!el) return;
-  if(TRAIN.busy){
-    el.innerHTML = '<div class="empty sk">'
-      + esc(labelText('يسحب المحادثات من Hostaway… ياخذ شوي وما ينفع تستعجله',
-                      'Pulling conversations from Hostaway… this takes a moment')) + '</div>';
-    return;
-  }
   var d = TRAIN.data;
   if(!d){
     el.innerHTML = emptyState(labelText('ما استخرجنا شي بعد','Nothing extracted yet'),
       labelText('اختر المدة فوق واضغط «استخرج المحادثات».','Pick a window above and press "Extract conversations".'), '?');
     return;
   }
-  if(d.__error){ el.innerHTML = errorState('loadTrain(1)', d.__detail||''); return; }
   var th = d.threads || [];
+  if(d.__error && !th.length){ el.innerHTML = errorState('loadTrain(1)', d.__detail||''); return; }
   if(!th.length){
+    if(TRAIN.busy){
+      el.innerHTML = '<div class="empty sk">'
+        + esc(labelText('يسحب من Hostaway محادثة محادثة… النتائج تنزل أول بأول',
+                        'Pulling conversations from Hostaway one by one… results appear as they land')) + '</div>';
+      return;
+    }
     el.innerHTML = emptyState(labelText('ما فيه محادثات بهذي الفلاتر','No conversations match these filters'),
       labelText('وسّع المدة، أو شيل علامة «فقط المحادثات اللي رد فيها مساعد».',
                 'Widen the window, or untick "Only threads Musaed replied in".'), '?');
     return;
   }
-  el.innerHTML = th.map(function(t,i){ return trainThreadHtml(t,i) }).join('');
+  var head = (d.__error ? ('<div class="tr-peek">'+esc(labelText('وقف بخطأ قبل ما يخلص: ','Stopped early: ')+(d.__detail||''))+'</div>') : '');
+  el.innerHTML = head + th.map(function(t,i){ return trainThreadHtml(t,i) }).join('');
 }
 
 function trainThreadHtml(t, i){
@@ -31572,6 +31675,7 @@ function trainMsgHtml(m){
   var code = m.code || 'unknown';
   var cls = 'tr-msg ' + (code==='guest' ? 'in' : 'out')
           + (trainIsMusaed(code) ? ' musaed' : '')
+          + (code==='template' ? ' tpl' : '')
           + (code==='unknown' ? ' unk' : '');
   var extra = '';
   if(m.conf !== undefined && m.conf !== null) extra += ' · ' + labelText('ثقة ','confidence ') + fmt(m.conf) + '%';
@@ -34067,9 +34171,18 @@ _TRAIN_LABELS = {
     "musaed_auto":     ("مساعد · رد تلقائي", "Musaed · sent automatically", "certain"),
     "musaed_approved": ("مساعد · اعتمده الفريق كما هو", "Musaed · approved as-is", "certain"),
     "musaed_edited":   ("مساعد · عدّله الفريق", "Musaed · edited by the team", "certain"),
-    "system":          ("انرسل من نظامنا · الكاتب ما انسجّل", "Sent by our system · author not logged", "likely"),
+    "musaed_signed":   ("مساعد · موقّع باسمه", "Musaed · signed with his name", "certain"),
+    "template":        ("قالب تلقائي من النظام", "Automated template", "certain"),
     "unknown":         ("مو متأكد مين كتبها", "Author unknown", "unknown"),
 }
+
+# He ALWAYS signs off (owner, 2026-08-19). Audited against the list: 47/50 Arabic and
+# 19/20 English sign-offs carry his name, the other few sign as «فريق عوجا» — and the
+# wording has not changed since 2026-05-26, so the whole 3-month window is covered.
+# The exact list stays the first test; these tokens catch a sign-off the list has since
+# lost, which is why an unmatched-but-signed message is «مساعد», not a mystery.
+_TRAIN_SIGN_TOKENS = ("مساعد", "musaid", "musaed", "فريق عوجا", "ouja team")
+_TRAIN_SIGN_MAXLEN = 140          # a sign-off block is short; a paragraph is not
 
 
 def _train_norm(s):
@@ -34083,17 +34196,28 @@ def _train_signatures():
                         + [ASSISTANT_SIGNATURE_AR, ASSISTANT_SIGNATURE_EN]) if s]
 
 
+def _train_looks_signed(tail):
+    t = str(tail or "").strip()
+    if not t or len(t) > _TRAIN_SIGN_MAXLEN:
+        return False
+    low = t.lower()
+    return any(tok in low for tok in _TRAIN_SIGN_TOKENS)
+
+
 def _train_split_signature(body):
-    """(text_without_our_signature, signature). with_signature() appends exactly
-    '\\n\\n' + one of the rotating sign-offs, so splitting on the LAST blank line and
-    checking the tail against that list is exact — never a fuzzy guess."""
+    """(text_without_the_sign_off, sign_off). with_signature() appends exactly
+    '\\n\\n' + one of the rotating sign-offs, so the last blank line is the exact seam;
+    the name check below is the fallback for a wording the list no longer holds."""
     txt = str(body or "").rstrip()
-    if "\n\n" not in txt:
-        return txt, ""
-    head, _, tail = txt.rpartition("\n\n")
     sigs = set(_train_norm(s) for s in _train_signatures())
-    if _train_norm(tail) in sigs:
-        return head.rstrip(), tail.strip()
+    if "\n\n" in txt:
+        head, _, tail = txt.rpartition("\n\n")
+        if _train_norm(tail) in sigs or _train_looks_signed(tail):
+            return head.rstrip(), tail.strip()
+    if "\n" in txt:
+        head, _, last = txt.rpartition("\n")
+        if _train_norm(last) in sigs or _train_looks_signed(last):
+            return head.rstrip(), last.strip()
     return txt, ""
 
 
@@ -34140,136 +34264,160 @@ def _train_match(idx, cid, clean_body):
 
 
 def _train_code_for(rec, signed):
+    """The log says HOW it was sent, which is richer than the signature — so it wins.
+    A signed message with no surviving record is still HIS: he always signs off."""
     if rec:
         via = rec.get("via") or ""
         if via in ("auto", "escalation_ack"):
             return "musaed_auto"
         return "musaed_edited" if rec.get("was_edited") else "musaed_approved"
-    return "system" if signed else "unknown"
+    return "musaed_signed" if signed else "unknown"
 
 
-def _train_build(days, want, page, only_musaed, q):
-    """Walk recent conversations and label every message. Bounded on purpose: `want`
-    threads, at most 12 pages of conversations, and it stops the moment a whole page
-    predates the window — a 30-day pull must not walk five years of history."""
+def _train_musaed_since_days():
+    """How many days back the FIRST reply we ever logged sits. Turns «من أول يوم رد فيه
+    مساعد» into a derived number instead of a guess. Falls back to 120 when the log is
+    empty (a fresh volume), never to 'everything'."""
+    oldest = None
+    for e in list(_learning_log):
+        ts = str(e.get("ts") or "")[:10]
+        if len(ts) == 10 and (oldest is None or ts < oldest):
+            oldest = ts
+    if not oldest:
+        return 120
+    try:
+        d = datetime.strptime(oldest, "%Y-%m-%d").date()
+    except ValueError:
+        return 120
+    return max(1, min(400, (datetime.now(TZ).date() - d).days + 1))
+
+
+def _train_build(days, offset, scan, only_musaed, q):
+    """Scan up to `scan` in-window conversations starting at conversation `offset`.
+
+    ONE CHUNK, not the whole pull: three months is several hundred conversations and one
+    Hostaway call per conversation, so a single request would sit for ten minutes and the
+    browser would cut it. The caller loops on `next_offset` until `exhausted`, which also
+    means results appear as they arrive and a stop button actually stops something.
+    """
     listings = get_listings_map()
     idx = _train_author_index()
     cutoff = (datetime.now(TZ).date() - timedelta(days=int(days))).isoformat()
-    threads, scanned, offset, walked = [], 0, page * 100, 0
+    threads, scanned, cursor, exhausted = [], 0, max(0, int(offset)), False
+    scan = max(1, int(scan))
 
-    for _ in range(12):
-        if len(threads) >= want:
-            break
+    while scanned < scan:
         try:
-            data = api_get("/conversations", params={"limit": 100, "offset": offset,
+            data = api_get("/conversations", params={"limit": 100, "offset": cursor,
                                                      "includeResources": 1})
         except Exception as e:
-            if threads:
+            if scanned:
                 break
             return {"error": "conversations: %s" % e}
         batch = data.get("result", []) or []
         if not batch:
+            exhausted = True
             break
-        walked += 1
-        fresh = 0
+        stale, looked, hit_cap = 0, 0, False
         for c in batch:
-            if len(threads) >= want:
-                break
+            cursor += 1
+            looked += 1
             latest = str(c.get("latestMessageDate") or c.get("updatedOn")
                          or c.get("insertedOn") or "")[:10]
             if latest and latest < cutoff:
+                stale += 1
                 continue
-            fresh += 1
+            scanned += 1
             cid = c.get("id")
-            if not cid:
-                continue
             unit = (listings.get(c.get("listingMapId")) or c.get("listingName")
                     or ("unit-%s" % c.get("listingMapId")))
             guest = c.get("recipientName") or c.get("guestName") or "Guest"
-            if q and q not in str(unit).lower() and q not in str(guest).lower():
-                continue
-            try:
-                msgs = (api_get("/conversations/%s/messages" % cid) or {}).get("result") or []
-            except Exception:
-                continue
-            scanned += 1
-            if _TRAIN_PAUSE:
-                time.sleep(_TRAIN_PAUSE)
-            msgs = sorted([m for m in msgs if (m.get("body") or "").strip()], key=_msg_sort_key)
-            if not msgs:
-                continue
-
-            rows = []
-            counts = {"guest": 0, "out": 0, "musaed": 0, "unknown": 0}
-            for m in msgs:
-                raw = (m.get("body") or "").strip()
-                if _msg_is_inbound(m):
-                    counts["guest"] += 1
-                    rows.append({"dir": "in", "ts": _msg_time(m), "body": raw, "code": "guest"})
-                    continue
-                clean, sig = _train_split_signature(raw)
-                rec = _train_match(idx, cid, clean)
-                code = _train_code_for(rec, bool(sig))
-                counts["out"] += 1
-                if code.startswith("musaed"):
-                    counts["musaed"] += 1
-                if code == "unknown":
-                    counts["unknown"] += 1
-                row = {"dir": "out", "ts": _msg_time(m), "body": clean, "sig": sig, "code": code}
-                if rec:
-                    row["via"] = rec.get("via") or ""
-                    row["approver"] = rec.get("approver") or ""
-                    if rec.get("conf") is not None:
-                        row["conf"] = rec.get("conf")
-                    if code == "musaed_edited":
-                        row["draft"] = rec.get("draft") or ""
-                        row["diff"] = rec.get("diff")
-                rows.append(row)
-
-            if only_musaed and not counts["musaed"]:
-                continue
-            if not counts["guest"]:
-                continue
-
-            # context: for every Musaed line keep the guest message BEFORE it and the
-            # guest's NEXT reply — the training signal is whether the guest came back
-            # satisfied or repeated the same question.
-            for i, r in enumerate(rows):
-                if not str(r.get("code") or "").startswith("musaed"):
-                    continue
-                before = after = ""
-                for j in range(i - 1, -1, -1):
-                    if rows[j]["dir"] == "in":
-                        before = rows[j]["body"]
-                        break
-                for j in range(i + 1, len(rows)):
-                    if rows[j]["dir"] == "in":
-                        after = rows[j]["body"]
-                        break
-                r["before"] = before
-                r["after"] = after
-
-            threads.append({"cid": cid, "unit": unit, "guest": guest,
-                            "first": rows[0]["ts"], "last": rows[-1]["ts"],
-                            "counts": counts, "messages": rows})
-        if not fresh:
+            if cid and not (q and q not in str(unit).lower() and q not in str(guest).lower()):
+                t = _train_thread(cid, unit, guest, idx, only_musaed)
+                if t:
+                    threads.append(t)
+            if scanned >= scan:
+                hit_cap = True
+                break
+        if not hit_cap and stale == looked:      # this whole page predates the window
+            exhausted = True
             break
-        offset += 100
 
-    totals = {"threads": len(threads),
-              "guest": sum(t["counts"]["guest"] for t in threads),
-              "out": sum(t["counts"]["out"] for t in threads),
-              "musaed": sum(t["counts"]["musaed"] for t in threads),
-              "unknown": sum(t["counts"]["unknown"] for t in threads)}
-    return {"ok": True, "threads": threads, "scanned": scanned, "page": page,
-            "days": days, "pages_walked": walked, "only_musaed": bool(only_musaed),
-            "totals": totals, "labels": _TRAIN_LABELS,
+    return {"ok": True, "threads": threads, "scanned": scanned, "days": days,
+            "next_offset": cursor, "exhausted": bool(exhausted),
+            "only_musaed": bool(only_musaed), "labels": _TRAIN_LABELS,
             "generated_at": datetime.now(TZ).isoformat(timespec="seconds")}
 
 
+def _train_thread(cid, unit, guest, idx, only_musaed):
+    """One labelled conversation, or None if it does not belong in the export."""
+    try:
+        msgs = (api_get("/conversations/%s/messages" % cid) or {}).get("result") or []
+    except Exception:
+        return None
+    if _TRAIN_PAUSE:
+        time.sleep(_TRAIN_PAUSE)
+    msgs = sorted([m for m in msgs if (m.get("body") or "").strip()], key=_msg_sort_key)
+    if not msgs:
+        return None
+
+    rows = []
+    counts = {"guest": 0, "out": 0, "musaed": 0, "unknown": 0}
+    for m in msgs:
+        raw = (m.get("body") or "").strip()
+        if _msg_is_inbound(m):
+            counts["guest"] += 1
+            rows.append({"dir": "in", "ts": _msg_time(m), "body": raw, "code": "guest"})
+            continue
+        clean, sig = _train_split_signature(raw)
+        rec = _train_match(idx, cid, clean)
+        code = _train_code_for(rec, bool(sig))
+        counts["out"] += 1
+        if code.startswith("musaed"):
+            counts["musaed"] += 1
+        if code == "unknown":
+            counts["unknown"] += 1
+        row = {"dir": "out", "ts": _msg_time(m), "body": clean, "sig": sig, "code": code}
+        if rec:
+            row["via"] = rec.get("via") or ""
+            row["approver"] = rec.get("approver") or ""
+            if rec.get("conf") is not None:
+                row["conf"] = rec.get("conf")
+            if code == "musaed_edited":
+                row["draft"] = rec.get("draft") or ""
+                row["diff"] = rec.get("diff")
+        rows.append(row)
+
+    if only_musaed and not counts["musaed"]:
+        return None
+    if not counts["guest"]:
+        return None
+
+    # context: for every Musaed line keep the guest message BEFORE it and the guest's
+    # NEXT reply — whether the guest said thanks or asked again IS the lesson.
+    for i, r in enumerate(rows):
+        if not str(r.get("code") or "").startswith("musaed"):
+            continue
+        before = after = ""
+        for j in range(i - 1, -1, -1):
+            if rows[j]["dir"] == "in":
+                before = rows[j]["body"]
+                break
+        for j in range(i + 1, len(rows)):
+            if rows[j]["dir"] == "in":
+                after = rows[j]["body"]
+                break
+        r["before"] = before
+        r["after"] = after
+
+    return {"cid": cid, "unit": unit, "guest": guest,
+            "first": rows[0]["ts"], "last": rows[-1]["ts"],
+            "counts": counts, "messages": rows}
+
+
 async def _api_train_threads(request):
-    """READ-ONLY: labelled guest transcripts for training. Same login + per-page
-    permission as every other dashboard read (see _ROLE_READ_RULES)."""
+    """READ-ONLY: one chunk of labelled transcripts. Same login + per-page permission as
+    every other dashboard read (see _ROLE_READ_RULES)."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
 
@@ -34279,14 +34427,15 @@ async def _api_train_threads(request):
         except Exception:
             return dflt
 
-    days = _int("days", 30, 1, 365)
-    want = _int("limit", 30, 1, 120)
-    page = _int("page", 0, 0, 200)
+    raw_days = (request.query.get("days") or "90").strip()
+    days = _train_musaed_since_days() if raw_days == "since" else _int("days", 90, 1, 400)
+    offset = _int("offset", 0, 0, 100000)
+    scan = _int("scan", 25, 1, 60)
     only_musaed = request.query.get("only_musaed", "1") not in ("0", "false", "no")
     q = (request.query.get("q") or "").strip().lower()[:60]
     force = request.query.get("force") in ("1", "true", "yes")
 
-    ck = "%s|%s|%s|%s|%s" % (days, want, page, int(only_musaed), q)
+    ck = "%s|%s|%s|%s|%s" % (days, offset, scan, int(only_musaed), q)
     hit = _TRAIN_CACHE.get(ck)
     if hit and not force and (time.time() - hit[0]) < _TRAIN_CACHE_TTL:
         out = dict(hit[1])
@@ -34297,20 +34446,19 @@ async def _api_train_threads(request):
         return _json({"error": "busy",
                       "detail": "فيه استخراج شغّال حالياً — انتظر شوي وجرّب مرة ثانية"}, 429)
     try:
-        res = await asyncio.to_thread(_train_build, days, want, page, only_musaed, q)
+        res = await asyncio.to_thread(_train_build, days, offset, scan, only_musaed, q)
     finally:
         _TRAIN_LOCK.release()
 
     if res.get("error"):
         return _json(res, 502)
     _TRAIN_CACHE[ck] = (time.time(), res)
-    if len(_TRAIN_CACHE) > 12:
-        for k in sorted(_TRAIN_CACHE, key=lambda x: _TRAIN_CACHE[x][0])[:-12]:
+    if len(_TRAIN_CACHE) > 40:
+        for k in sorted(_TRAIN_CACHE, key=lambda x: _TRAIN_CACHE[x][0])[:-40]:
             _TRAIN_CACHE.pop(k, None)
     out = dict(res)
     out["cached"] = False
     return _json(out)
-
 
 def _cache_get(key):
     hit = _dash_cache.get(key)
