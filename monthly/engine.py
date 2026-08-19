@@ -630,3 +630,93 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
         "label_en": "Estimate" if is_estimate else "Price",
         "warnings": warnings,
     }
+
+
+# ═════════════════ diagnosis: how often does the ceiling actually bind? ═════════════════
+#
+# A COINCIDENCE TO NOT MISTAKE FOR A RELATIONSHIP. In the first worked example
+# the ceiling and the nightly gross were both 16,014. Occupancy was 0.85 and the
+# commitment discount 0.15, so (1 - discount) happened to equal occ. They share
+# no term:
+#     ceiling       = 30 x adr x (1 - discount)     — no occupancy in it
+#     nightly_gross = 30 x adr x occ                — no discount in it
+# Tests pin them apart at other occupancies so this never becomes folklore.
+#
+# THE THRESHOLD. The ceiling binds when MODEL > CEILING, i.e. when
+#     base x qmult > 30 x adr_unit x (1 - d)
+#     30 x adr_pool x occ_pool x qmult > 30 x adr_unit x (1 - d)
+# so the ceiling binds above
+#     qmult > (adr_unit x (1 - d)) / (adr_pool x occ_pool)
+#
+# For a unit priced near its pool (adr_unit ~ adr_pool) that collapses to
+# (1 - d) / occ_pool — which carries an uncomfortable implication: THE BETTER OUR
+# OCCUPANCY, THE MORE CERTAINLY THE CEILING BINDS. Above occ = (1 - d) the
+# threshold drops below 1.0 and the ceiling binds even for units the model rates
+# BELOW average. Ouja targets ~95% occupancy.
+#
+# This function exists to measure that, not to fix it.
+
+
+def ceiling_binds_above(adr_unit, adr_pool, occ_pool, cost_set=None):
+    """The quality multiplier at which the ceiling starts to bind. None when
+    there is no pool to compare against."""
+    c = cost_set or costs()
+    au, ap, op = _num(adr_unit), _num(adr_pool), _num(occ_pool)
+    if au is None or ap is None or op is None or ap <= 0 or op <= 0:
+        return None
+    return (au * (1.0 - c["monthly_commitment_discount"])) / (ap * op)
+
+
+def bound_by_report(results):
+    """The distribution of what actually set the price, across a set of units.
+
+    Read it as:
+        ceiling-bound > 50%   the model contributes nothing — say so plainly
+        ceiling-bound 20-40%  healthy: the ceiling is a guardrail, not the rule
+        floor-bound common    the units are marginal, which is its own finding
+    """
+    import statistics
+    rows = [r for r in (results or []) if r]
+    counts = {"floor": 0, "model": 0, "ceiling": 0, "no_price": 0}
+    mults, overshoot = [], []
+    for r in rows:
+        b = r.get("bound_by")
+        counts[b if b in counts else "no_price"] += 1
+        m = (r.get("quality") or {}).get("mult")
+        if m is not None:
+            mults.append(float(m))
+        if b == "ceiling":
+            g = r.get("gates") or {}
+            if g.get("model") and g.get("ceiling"):
+                overshoot.append(g["model"] / g["ceiling"] - 1.0)
+
+    priced = counts["floor"] + counts["model"] + counts["ceiling"]
+    ceil_share = counts["ceiling"] / float(priced) if priced else 0.0
+    floor_share = counts["floor"] / float(priced) if priced else 0.0
+
+    if ceil_share > 0.50:
+        verdict = "model_contributes_nothing"
+    elif floor_share > 0.50:
+        verdict = "units_marginal"
+    elif 0.20 <= ceil_share <= 0.40:
+        verdict = "healthy"
+    else:
+        verdict = "inconclusive"
+
+    clamped = sum(1 for m in mults if m >= QUALITY_CLAMP[1] - 1e-9)
+    return {
+        "n": len(rows), "counts": counts,
+        "ceiling_share": ceil_share, "floor_share": floor_share,
+        "quality_mult": {
+            "min": min(mults) if mults else None,
+            "median": statistics.median(mults) if mults else None,
+            "max": max(mults) if mults else None,
+            "pct_at_clamp": (clamped / float(len(mults))) if mults else 0.0,
+        },
+        "overshoot": {
+            "n": len(overshoot),
+            "median_pct": statistics.median(overshoot) if overshoot else None,
+            "max_pct": max(overshoot) if overshoot else None,
+        },
+        "verdict": verdict,
+    }

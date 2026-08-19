@@ -64,6 +64,44 @@ SCORE_ANCHOR_EN = ("5 = the median Ouja unit · 1 = worst in our portfolio · "
 BOOL_ANCHOR_AR = "نعم / لا — بالمقارنة مع بقية وحداتنا"
 BOOL_ANCHOR_EN = "Yes / no, judged against the rest of our units"
 
+# ───────────────────────────── THE SCORING PROTOCOL ─────────────────────────────
+# How the 53 get scored decides whether every price is right or wrong. This lives
+# here, next to the scale it governs, because a protocol in a document is a
+# protocol nobody reads while typing a 7.
+#
+#   1. ONE PERSON SCORES ALL 53, IN ONE SITTING.
+#      A single consistently-wrong anchor is fixable with one correction applied
+#      to everything. Five people with five private anchors is not fixable at all,
+#      because the error is different on every unit and invisible on each.
+#
+#   2. SET THE POLES FIRST.
+#      Before scoring anything, name the best unit and the worst unit in the
+#      portfolio FOR THAT ATTRIBUTE. Those two are the 10 and the 1. Everything
+#      else is placed between two real apartments rather than against an idea.
+#
+#   3. RANK BEFORE SCORING.
+#      For each attribute, order all 53 best to worst FIRST, then assign numbers
+#      down the list. Absolute scoring drifts upward — everything feels "pretty
+#      good" — and forced ranking cannot drift, because someone has to be last.
+#
+#   4. ONE ATTRIBUTE ACROSS ALL 53 BEFORE MOVING TO THE NEXT.
+#      Never score one unit across all 16. Doing it unit-by-unit lets an overall
+#      impression of the apartment bleed into every individual attribute, which
+#      turns 16 measurements into one opinion recorded 16 times.
+#
+SCORING_PROTOCOL_AR = [
+    "شخص واحد يقيّم الـ53 كلها، بجلسة وحدة",
+    "قبل ما تبدأ: حدّد أفضل وحدة وأسوأ وحدة بهذي الصفة — هذي 10 وهذي 1",
+    "رتّب قبل ما تعطي أرقام: صفّ الـ53 من الأفضل للأسوأ، بعدين اكتب الأرقام",
+    "أكمل صفة وحدة على كل الـ53 قبل ما تنتقل للصفة اللي بعدها",
+]
+SCORING_PROTOCOL_EN = [
+    "One person scores all 53, in one sitting",
+    "Set the poles first: name the best and worst unit for this attribute — 10 and 1",
+    "Rank before scoring: order all 53 best to worst, then assign the numbers",
+    "Finish one attribute across all 53 before moving to the next",
+]
+
 # If the MEDIAN score of an attribute across the portfolio sits materially above
 # 5, the anchor is wrong and every price built on it is wrong in the same
 # direction. Half a point is materially.

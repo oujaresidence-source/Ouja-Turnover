@@ -870,3 +870,143 @@ class ClampIsADiagnosticTest(unittest.TestCase):
     def test_a_healthy_portfolio_is_not_flagged(self):
         results = [{"quality": {"clamped": i < 1}} for i in range(50)]
         self.assertFalse(engine.clamp_report(results)["anchor_suspect"])
+
+
+class CeilingAndGrossAreIndependentTest(unittest.TestCase):
+    """In the first worked example ceiling and nightly_gross both came to 16,014.
+    That is a COINCIDENCE, not a relationship: occupancy was 0.85 and the
+    commitment discount 0.15, so (1 - discount) happened to equal occ.
+
+        ceiling       = 30 x adr x (1 - discount)      <- no occupancy term
+        nightly_gross = 30 x adr x occ                 <- no discount term
+
+    Documented here so it never becomes folklore."""
+
+    def test_they_coincide_only_when_occupancy_equals_one_minus_the_discount(self):
+        c = engine.costs(monthly_commitment_discount=0.15)
+        e = engine.nightly_economics(628, 0.85, c)
+        self.assertAlmostEqual(engine.ceiling_price(628, c), e["nightly_gross"])
+
+    def test_at_sixty_percent_occupancy_they_separate(self):
+        c = engine.costs(monthly_commitment_discount=0.15)
+        e = engine.nightly_economics(628, 0.60, c)
+        self.assertAlmostEqual(e["nightly_gross"], 30 * 628 * 0.60)
+        self.assertAlmostEqual(engine.ceiling_price(628, c), 30 * 628 * 0.85)
+        self.assertGreater(engine.ceiling_price(628, c), e["nightly_gross"])
+
+    def test_occupancy_moves_gross_and_leaves_the_ceiling_untouched(self):
+        c = engine.costs()
+        base = engine.ceiling_price(628, c)
+        for occ in (0.1, 0.35, 0.6, 0.85, 1.0):
+            self.assertAlmostEqual(engine.ceiling_price(628, c), base)
+            self.assertAlmostEqual(engine.nightly_economics(628, occ, c)["nightly_gross"],
+                                   30 * 628 * occ)
+
+    def test_the_discount_moves_the_ceiling_and_leaves_gross_untouched(self):
+        gross = engine.nightly_economics(628, 0.85, engine.costs())["nightly_gross"]
+        for d in (0.05, 0.15, 0.30):
+            c = engine.costs(monthly_commitment_discount=d)
+            self.assertAlmostEqual(engine.nightly_economics(628, 0.85, c)["nightly_gross"],
+                                   gross)
+            self.assertAlmostEqual(engine.ceiling_price(628, c), 30 * 628 * (1 - d))
+
+
+class CeilingBindingThresholdTest(unittest.TestCase):
+    """Instrumentation for the S8 diagnosis: at what quality multiplier does the
+    ceiling start to bind? Diagnosis only — no treatment here."""
+
+    def test_the_threshold_matches_the_worked_example(self):
+        t = engine.ceiling_binds_above(adr_unit=628, adr_pool=590, occ_pool=0.83,
+                                       cost_set=engine.costs())
+        self.assertAlmostEqual(t, 1.090, places=2)
+
+    def test_for_a_typical_unit_the_threshold_is_one_minus_discount_over_occupancy(self):
+        t = engine.ceiling_binds_above(adr_unit=500, adr_pool=500, occ_pool=0.80,
+                                       cost_set=engine.costs(monthly_commitment_discount=0.15))
+        self.assertAlmostEqual(t, 0.85 / 0.80)
+
+    def test_high_occupancy_makes_the_ceiling_bind_even_below_median_quality(self):
+        """Ouja targets ~95% occupancy. Above (1 - discount) the threshold drops
+        under 1.0, so the ceiling binds for units the model rates BELOW average."""
+        t = engine.ceiling_binds_above(adr_unit=500, adr_pool=500, occ_pool=0.95,
+                                       cost_set=engine.costs())
+        self.assertLess(t, 1.0)
+
+    def test_low_occupancy_gives_the_model_real_room(self):
+        t = engine.ceiling_binds_above(adr_unit=500, adr_pool=500, occ_pool=0.60,
+                                       cost_set=engine.costs())
+        self.assertGreater(t, 1.4)
+
+    def test_no_pool_means_no_threshold(self):
+        self.assertIsNone(engine.ceiling_binds_above(500, None, 0.8, engine.costs()))
+
+
+class BoundByDistributionTest(unittest.TestCase):
+    """The S8 exit condition, ready before the data arrives."""
+
+    def _r(self, bound_by, mult, price=1000, model=1000, ceiling=1000):
+        return {"bound_by": bound_by, "price": price,
+                "quality": {"mult": mult, "clamped": mult >= 1.60},
+                "gates": {"model": model, "ceiling": ceiling}}
+
+    def test_it_counts_every_outcome_including_no_price(self):
+        rows = [self._r("floor", 1.0), self._r("model", 1.05),
+                self._r("ceiling", 1.3), {"bound_by": None, "price": None,
+                                          "quality": {"mult": 1.0}}]
+        rep = engine.bound_by_report(rows)
+        self.assertEqual(rep["counts"], {"floor": 1, "model": 1, "ceiling": 1,
+                                         "no_price": 1})
+
+    def test_it_reads_a_collapsed_engine_plainly(self):
+        rows = [self._r("ceiling", 1.3) for _ in range(6)] + [self._r("floor", 1.0)] * 4
+        rep = engine.bound_by_report(rows)
+        self.assertEqual(rep["verdict"], "model_contributes_nothing")
+
+    def test_it_reads_a_healthy_guardrail(self):
+        rows = ([self._r("ceiling", 1.2)] * 3 + [self._r("model", 1.1)] * 4
+                + [self._r("floor", 1.0)] * 3)
+        self.assertEqual(engine.bound_by_report(rows)["verdict"], "healthy")
+
+    def test_it_names_marginal_units_when_the_floor_dominates(self):
+        rows = [self._r("floor", 1.0)] * 8 + [self._r("model", 1.1)] * 2
+        self.assertEqual(engine.bound_by_report(rows)["verdict"], "units_marginal")
+
+    def test_it_reports_the_quality_multiplier_spread_and_clamp_share(self):
+        rows = [self._r("model", m) for m in (0.9, 1.0, 1.1, 1.60, 1.60)]
+        rep = engine.bound_by_report(rows)
+        self.assertAlmostEqual(rep["quality_mult"]["min"], 0.9)
+        self.assertAlmostEqual(rep["quality_mult"]["median"], 1.1)
+        self.assertAlmostEqual(rep["quality_mult"]["max"], 1.60)
+        self.assertAlmostEqual(rep["quality_mult"]["pct_at_clamp"], 0.4)
+
+    def test_it_reports_how_far_ceiling_bound_models_overshot(self):
+        rows = [self._r("ceiling", 1.3, model=23506, ceiling=16014)]
+        rep = engine.bound_by_report(rows)
+        self.assertAlmostEqual(rep["overshoot"]["median_pct"], 23506 / 16014 - 1,
+                               places=4)
+
+
+class ScoringProtocolTest(unittest.TestCase):
+    """The protocol lives beside the scale it governs, in both languages, because
+    whoever scores reads attrs.py and not a document."""
+
+    def test_all_four_rules_are_present_in_both_languages(self):
+        from monthly import attrs
+        self.assertEqual(len(attrs.SCORING_PROTOCOL_AR), 4)
+        self.assertEqual(len(attrs.SCORING_PROTOCOL_EN), 4)
+        for line in attrs.SCORING_PROTOCOL_AR + attrs.SCORING_PROTOCOL_EN:
+            self.assertTrue(line.strip())
+
+    def test_it_names_the_one_scorer_one_sitting_rule(self):
+        from monthly import attrs
+        self.assertIn("53", attrs.SCORING_PROTOCOL_AR[0])
+        self.assertIn("one sitting", attrs.SCORING_PROTOCOL_EN[0].lower())
+
+    def test_it_requires_ranking_before_scoring(self):
+        from monthly import attrs
+        self.assertIn("rank", attrs.SCORING_PROTOCOL_EN[2].lower())
+
+    def test_it_forbids_scoring_a_unit_across_all_sixteen(self):
+        from monthly import attrs
+        self.assertIn("attribute", attrs.SCORING_PROTOCOL_EN[3].lower())
+        self.assertIn("53", attrs.SCORING_PROTOCOL_EN[3])
