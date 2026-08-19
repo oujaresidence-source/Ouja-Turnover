@@ -302,8 +302,15 @@ def listing_meta(api_get, kb_district=None):
                 # publishes («98" Cinema Suite»). Showing only one made the lab
                 # impossible to line up against /monthly by eye, and led to
                 # comparing two labels and concluding they were two flats.
-                "name": (L.get("internalListingName") or L.get("name") or "").strip(),
-                "public_name": (L.get("name") or "").strip(),
+                # Never blank. A listing with neither name still has to be
+                # findable in a dropdown of 74, so it falls back to its id
+                # rather than rendering as an empty row.
+                "name": ((L.get("internalListingName") or "").strip()
+                         or (L.get("name") or "").strip()
+                         or ("unit-%s" % lid)),
+                "public_name": ((L.get("name") or "").strip()
+                                or (L.get("internalListingName") or "").strip()
+                                or ("unit-%s" % lid)),
                 "bedrooms": L.get("bedroomsNumber"),
                 "district": district or (L.get("city") or L.get("address") or "").strip() or None,
                 "district_source": "kb" if district else "hostaway_city",

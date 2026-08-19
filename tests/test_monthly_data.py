@@ -383,3 +383,52 @@ class NoFutureCalendarTest(unittest.TestCase):
              res(1, "2025-01-01", "2025-01-11", 5200)], 1, "2026-08")
         kept = [o for o in rows[1] if not o.get("partial")]
         self.assertEqual(len(kept), 2)
+
+
+class EveryUnitHasBothNamesTest(unittest.TestCase):
+    """74 units in a dropdown: one blank row is one the owner cannot find."""
+
+    def _api(self, rows):
+        def api_get(_p, params=None):
+            off = (params or {}).get("offset", 0)
+            return {"result": rows[off:off + 100]}
+        return api_get
+
+    def test_both_names_are_present_for_a_normal_listing(self):
+        m = data.listing_meta(self._api([
+            {"id": 537003, "internalListingName": "2D - صاد",
+             "name": "98 Cinema Suite | 3BR", "bedroomsNumber": 3, "status": "active"}]))
+        self.assertEqual(m[537003]["name"], "2D - صاد")
+        self.assertEqual(m[537003]["public_name"], "98 Cinema Suite | 3BR")
+
+    def test_a_missing_public_name_falls_back_to_the_internal_one(self):
+        m = data.listing_meta(self._api([
+            {"id": 1, "internalListingName": "2D - صاد", "status": "active"}]))
+        self.assertEqual(m[1]["public_name"], "2D - صاد")
+
+    def test_a_missing_internal_name_falls_back_to_the_public_one(self):
+        m = data.listing_meta(self._api([
+            {"id": 2, "name": "Cinema Suite", "status": "active"}]))
+        self.assertEqual(m[2]["name"], "Cinema Suite")
+
+    def test_a_listing_with_no_name_at_all_still_gets_a_label(self):
+        m = data.listing_meta(self._api([{"id": 3, "status": "active"}]))
+        self.assertEqual(m[3]["name"], "unit-3")
+        self.assertEqual(m[3]["public_name"], "unit-3")
+
+    def test_whitespace_only_names_are_treated_as_missing(self):
+        m = data.listing_meta(self._api([
+            {"id": 4, "internalListingName": "   ", "name": "  ", "status": "active"}]))
+        self.assertEqual(m[4]["name"], "unit-4")
+
+    def test_no_unit_in_a_mixed_batch_comes_back_nameless(self):
+        rows = [{"id": 10, "internalListingName": "A", "name": "Alpha", "status": "active"},
+                {"id": 11, "internalListingName": "B", "status": "active"},
+                {"id": 12, "name": "Gamma", "status": "active"},
+                {"id": 13, "status": "active"}]
+        m = data.listing_meta(self._api(rows))
+        self.assertEqual(len(m), 4)
+        for lid, meta in m.items():
+            self.assertTrue(meta["name"].strip(), "unit %s has no name" % lid)
+            self.assertTrue(meta["public_name"].strip(),
+                            "unit %s has no public name" % lid)
