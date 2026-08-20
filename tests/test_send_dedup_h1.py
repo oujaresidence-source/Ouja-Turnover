@@ -13,6 +13,7 @@ import os
 import sys
 import unittest
 import uuid
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,6 +21,7 @@ os.environ.setdefault("STATE_DIR", "/tmp/ouja-test-state-h1")
 os.makedirs("/tmp/ouja-test-state-h1", exist_ok=True)
 
 import bot  # noqa: E402
+from guard import mode as guard_mode  # noqa: E402
 
 
 class SendGuestMessageH1Test(unittest.TestCase):
@@ -27,8 +29,15 @@ class SendGuestMessageH1Test(unittest.TestCase):
         self._api_post = bot.api_post
         self._kill = bot.ASSISTANT_SEND_KILL
         bot.ASSISTANT_SEND_KILL = False
+        # «مساعد» v2 (2026-08-20): ASSISTANT_MODE now defaults to "shadow", where
+        # send_guest_message returns SEND_SHADOW before reaching the dedup claim. These
+        # cases are about the DELIVERY path, so they have to say so. No assertion below
+        # was changed or relaxed — this only declares the mode they always assumed.
+        self._mode = mock.patch.object(guard_mode, "current", return_value=guard_mode.FULL)
+        self._mode.start()
 
     def tearDown(self):
+        self._mode.stop()
         bot.api_post = self._api_post
         bot.ASSISTANT_SEND_KILL = self._kill
 

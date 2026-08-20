@@ -189,11 +189,12 @@ except Exception as _ops_err:           # pragma: no cover
 # degrades to exactly today's behaviour.
 try:
     import guard as _guard
-    from guard import gate as _guard_gate, ledger as _guard_ledger
+    from guard import (gate as _guard_gate, ledger as _guard_ledger,
+                       mode as _guard_mode, shadow as _guard_shadow)
     _HAS_GUARD = True
 except Exception as _guard_err:         # pragma: no cover
     print("[guard] import failed (assistant guards disabled, bot unaffected):", _guard_err)
-    _guard = _guard_gate = _guard_ledger = None
+    _guard = _guard_gate = _guard_ledger = _guard_mode = _guard_shadow = None
     _HAS_GUARD = False
 
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
@@ -496,6 +497,27 @@ CATALOG_CALENDAR_PRICES = os.environ.get("CATALOG_CALENDAR_PRICES", "1") in ("1"
 # Auto-send: when ON, very simple/safe replies (action="auto") go straight to the guest;
 # anything needing approval or a human still posts a card. Default OFF — everything waits
 # for approval/edit until you've judged the assistant's quality. Set to 1 to enable later.
+# ── «مساعد» v2 guards. Every flag defaults to the SAFE value; with all of them unset the
+# bot behaves exactly as before EXCEPT that ASSISTANT_MODE defaults to shadow, i.e. the
+# assistant decides and logs but sends nothing. That is the one intentional default change.
+# ASSISTANT_MODE itself is resolved at RUNTIME by guard.mode (stored file > env > shadow)
+# so it can be flipped without a redeploy — an env var alone would not be a kill switch.
+# Anthropic price per MILLION tokens, so cost is a real number and not a guess. Override
+# on Railway when the rate card changes; wrong rates make the cost gate meaningless.
+ASSISTANT_COST_IN_PER_MTOK  = float(os.environ.get("ASSISTANT_COST_IN_PER_MTOK", "3.0"))
+ASSISTANT_COST_OUT_PER_MTOK = float(os.environ.get("ASSISTANT_COST_OUT_PER_MTOK", "15.0"))
+GUARD_OUTBOUND     = os.environ.get("GUARD_OUTBOUND", "1") in ("1", "true", "True", "yes")
+GUARD_BLOCK_ON_FAIL = os.environ.get("GUARD_BLOCK_ON_FAIL", "1") in ("1", "true", "True", "yes")
+GATE_RECHECK       = os.environ.get("GATE_RECHECK", "1") in ("1", "true", "True", "yes")
+GATE_SILENCE       = os.environ.get("GATE_SILENCE", "1") in ("1", "true", "True", "yes")
+GATE_STALE_HOURS   = int(os.environ.get("GATE_STALE_HOURS", "12"))
+SEND_LEDGER        = os.environ.get("SEND_LEDGER", "1") in ("1", "true", "True", "yes")
+COMMIT_REQUIRES_TICKET = os.environ.get("COMMIT_REQUIRES_TICKET", "1") in ("1", "true", "True", "yes")
+INCIDENT_TIER      = os.environ.get("INCIDENT_TIER", "1") in ("1", "true", "True", "yes")
+MEMORY_V2          = os.environ.get("MEMORY_V2", "1") in ("1", "true", "True", "yes")
+LEARN_FROM_HOSTAWAY = os.environ.get("LEARN_FROM_HOSTAWAY", "1") in ("1", "true", "True", "yes")
+PROMPT_V2          = os.environ.get("PROMPT_V2", "0") in ("1", "true", "True", "yes")
+
 ASSISTANT_AUTO     = os.environ.get("ASSISTANT_AUTO", "0") in ("1", "true", "True", "yes")
 ASSISTANT_AUTO_CONF = float(os.environ.get("ASSISTANT_AUTO_CONF", "0.85"))  # Stage 1: auto-send at/above this confidence
 ESCALATE_BELOW     = float(os.environ.get("ESCALATE_BELOW", "0.55"))       # Stage 3: escalate below this confidence
@@ -9100,6 +9122,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     # context-blind replies (the "code arrives 5 days before" template being the
     # canonical example). Can be overridden via GUEST_DRAFT_MODEL env var.
     model = GUEST_DRAFT_MODEL
+    _t0 = time.monotonic()
     try:
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -9109,7 +9132,17 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             timeout=60,
         )
         r.raise_for_status()
-        blocks = r.json().get("content", []) or []
+        _payload = r.json()
+        # T2: wall-clock and token usage. Before today `cost_usd` and `tokens_used` had
+        # ZERO occurrences in this file, so "p95 latency / cost per conversation" was
+        # listed as a rollout gate with nothing behind it to measure.
+        try:
+            metric_record_latency((time.monotonic() - _t0) * 1000.0)
+            _u = _payload.get("usage") or {}
+            metric_record_cost(_u.get("input_tokens"), _u.get("output_tokens"))
+        except Exception:
+            pass
+        blocks = _payload.get("content", []) or []
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         try:
@@ -9989,9 +10022,29 @@ def _permanent_once_release(name):
 # reads as success means a guest silently never gets a reply):
 SEND_BLOCKED_KILL = "blocked_kill_switch"   # kill switch on — nothing was sent
 SEND_SUPPRESSED = "suppressed_duplicate"    # identical message already delivered — nothing sent
+SEND_SHADOW = "shadow_mode"                 # shadow/canary — decided and logged, nothing sent
+SEND_BLOCKED_GUARD = "blocked_guard"        # the content guard refused it — nothing sent
+
+# Every outcome that means "the guest did NOT receive this". A caller that treats any of
+# these as success turns a blocked message into a guest who is simply never answered —
+# which is worse than an error, because nobody finds out.
+_SEND_NOT_DELIVERED = (SEND_BLOCKED_KILL, SEND_SHADOW, SEND_BLOCKED_GUARD)
+
+
+def _send_block_reason_ar(outcome):
+    """Plain Arabic for why nothing was sent — the team reads these on Discord cards."""
+    return {
+        SEND_BLOCKED_KILL: "إيقاف رسائل الضيوف مفعّل (kill switch)",
+        SEND_SHADOW: "المساعد في وضع المراقبة — يقرّر ويسجّل بس ما يرسل",
+        SEND_BLOCKED_GUARD: "حارس المحتوى منع الرسالة",
+    }.get(outcome, "ما انرسلت")
 # success → the Hostaway api_post result (a dict); failure → the exception propagates.
 
-def send_guest_message(conversation_id, body, comm_type="email"):
+def send_guest_message(conversation_id, body, comm_type="email", *,
+                       listing_id=None, guard_ctx=None, ticket_id=None,
+                       via="", actor="", shadow_ctx=None):
+    # ── C4: the kill switch is checked FIRST, always, before any new logic. A kill must
+    # never be masked by a mode or a guard verdict deciding something else first. ──
     if ASSISTANT_SEND_KILL:
         print(f"[KILL] guest send BLOCKED (conv {conversation_id}): {str(body)[:80]}")
         try:
@@ -9999,6 +10052,49 @@ def send_guest_message(conversation_id, body, comm_type="email"):
         except Exception:
             pass
         return SEND_BLOCKED_KILL
+
+    # ── C2: shadow first. Everything above ran for real; nothing below reaches a guest. ──
+    if _HAS_GUARD and _guard_mode:
+        try:
+            _mode = _guard_mode.current()
+            if _mode == _guard_mode.SHADOW:
+                _guard_shadow.log(conversation_id, body, reason="shadow_mode",
+                                  listing_id=listing_id, mode=_mode, **(shadow_ctx or {}))
+                return SEND_SHADOW
+            if _mode == _guard_mode.CANARY and not _guard_mode.in_canary(listing_id):
+                _guard_shadow.log(conversation_id, body, reason="not_in_canary",
+                                  listing_id=listing_id, mode=_mode, **(shadow_ctx or {}))
+                return SEND_SHADOW
+        except Exception as e:
+            # A broken mode file must never silently start sending. Fail CLOSED.
+            print("[guard] mode resolution failed — staying silent:", e)
+            return SEND_SHADOW
+
+    # ── the content guard: the mechanical version of «لا تكتب أي كود تحت أي ظرف» ──
+    if GUARD_OUTBOUND and _HAS_GUARD and _guard:
+        try:
+            v = _guard.check_outbound(body, ticket_id=ticket_id, **(guard_ctx or {}))
+        except Exception as e:
+            print("[guard] check_outbound failed (allowing):", e)
+            v = None
+        if v is not None and v.blocked:
+            print(f"[GUARD] {v.code} blocked a send (conv {conversation_id}): {str(body)[:80]}")
+            try:
+                log_event("assistant",
+                          f"⛔ حارس المحتوى منع رسالة · {v.code} · conv {conversation_id}")
+                metric_bump("guard_blocks")
+                metric_bump(f"guard_blocks_by_code.{v.code}")
+            except Exception:
+                pass
+            try:
+                _guard_shadow.log(conversation_id, body, reason=f"guard:{v.code}",
+                                  listing_id=listing_id, guard_verdict=v.code,
+                                  **(shadow_ctx or {}))
+            except Exception:
+                pass
+            if GUARD_BLOCK_ON_FAIL:
+                return SEND_BLOCKED_GUARD
+
     # de-dup on the RAW body (before the randomized signature) so the same message can't go twice
     claim_key = f"send:{conversation_id}:{(body or '').strip()}"
     if not _once_claim(claim_key):
@@ -10009,11 +10105,20 @@ def send_guest_message(conversation_id, body, comm_type="email"):
             pass
         return SEND_SUPPRESSED
     try:
-        return api_post(f"/conversations/{conversation_id}/messages",
-                        {"body": with_signature(body), "communicationType": comm_type})
+        _sent = api_post(f"/conversations/{conversation_id}/messages",
+                         {"body": with_signature(body), "communicationType": comm_type})
     except Exception:
         _once_release(claim_key)   # failed send must not poison the retry (H1)
         raise
+    # T5: the ONLY place a delivered outbound is recorded. Inside the send, after success,
+    # so no future caller can add a send path that forgets to attribute itself.
+    if SEND_LEDGER and _HAS_GUARD and _guard_ledger:
+        try:
+            _guard_ledger.record_send(conversation_id, body, via=via or "unknown",
+                                      actor=actor or "musaed", ticket_id=ticket_id)
+        except Exception as e:
+            print("[ledger] record_send failed (send already delivered):", e)
+    return _sent
 
 # pending escalations: discord_message_id -> {channel_id, guest, unit, last_ping, attempts, claimed_by}
 _escalations = {}
@@ -10377,11 +10482,11 @@ class EarlyDecisionConfirmView(discord.ui.View):
         try:
             result = await asyncio.to_thread(
                 send_guest_message, row["conversation_id"], reply, row.get("comm_type") or "email")
-            if result == SEND_BLOCKED_KILL:
+            if result in _SEND_NOT_DELIVERED:
                 _reset_early_checkin_decision(self.message_id, actor)
                 _permanent_once_release(decision_claim)
                 await interaction.followup.send(
-                    "⛔ ما تم الإرسال لأن إيقاف رسائل الضيوف مفعّل. الكرت ما زال مفتوحاً.",
+                    f"⛔ ما تم الإرسال — {_send_block_reason_ar(result)}. الكرت ما زال مفتوحاً.",
                     ephemeral=True)
                 return
             row["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
@@ -10514,9 +10619,9 @@ class EditModal(discord.ui.Modal, title="تعديل الرد قبل الإرسا
         try:
             r = await asyncio.to_thread(send_guest_message, self.item["conversation_id"], text,
                                         self.item["comm_type"])
-            if r == SEND_BLOCKED_KILL:
+            if r in _SEND_NOT_DELIVERED:
                 await interaction.followup.send(
-                    "⛔ ما تم الإرسال — الإرسال للضيوف موقوف حالياً (kill switch). "
+                    f"⛔ ما تم الإرسال — {_send_block_reason_ar(r)}. "
                     "الكرت باقي زي ما هو.", ephemeral=True)
                 return
             if r == SEND_SUPPRESSED:
@@ -10738,9 +10843,9 @@ class ConfirmActionView(discord.ui.View):
             try:
                 r = await asyncio.to_thread(send_guest_message, item["conversation_id"], draft,
                                             item["comm_type"])
-                if r == SEND_BLOCKED_KILL:
+                if r in _SEND_NOT_DELIVERED:
                     await interaction.followup.send(
-                        "⛔ ما تم الإرسال — الإرسال للضيوف موقوف حالياً (kill switch). "
+                        f"⛔ ما تم الإرسال — {_send_block_reason_ar(r)}. "
                         "الكرت باقي زي ما هو.", ephemeral=True)
                     return
                 if r == SEND_SUPPRESSED:
@@ -11520,10 +11625,10 @@ class ReadyNotifyConfirmView(discord.ui.View):
             print("ready-notice send error:", e)
             await interaction.followup.send(f"❌ ما انرسلت. السبب: {e}\nالروم باقي مفتوح، جرّب مرة ثانية.")
             return
-        if res == SEND_BLOCKED_KILL:
+        if res in _SEND_NOT_DELIVERED:
             _ready_release_send(payload.get("res_id"))
             await interaction.followup.send(
-                "⛔ ما انرسلت: مفتاح إيقاف الإرسال للضيوف مشغّل حالياً. الروم باقي مفتوح.")
+                f"⛔ ما انرسلت: {_send_block_reason_ar(res)}. الروم باقي مفتوح.")
             return
         if res == SEND_SUPPRESSED:
             await interaction.followup.send("ℹ️ نفس الرسالة موصّلة للضيف من قبل — ما تكررت.")
@@ -11737,11 +11842,11 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             try:
                 ack_result = await asyncio.to_thread(
                     send_guest_message, cid, ack, item["comm_type"])
-                if ack_result == SEND_BLOCKED_KILL:
+                if ack_result in _SEND_NOT_DELIVERED:
                     _release_offhours_ack(cid, offhours_now)
                     embed.add_field(
                         name="⚠️ تعذّر إبلاغ الضيف",
-                        value="إيقاف رسائل الضيوف مفعّل.", inline=False)
+                        value=_send_block_reason_ar(ack_result), inline=False)
                 else:
                     _esc_sent_acks.setdefault(cid, []).append(ack)
                     embed.add_field(name="📤 تم إبلاغ الضيف",
@@ -11833,9 +11938,11 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             if r == SEND_SUPPRESSED:
                 log_event("assistant", f"⏭️ رد تلقائي مكرّر — ما انرسل · {g} · {item['unit']}")
                 return
-            if r == SEND_BLOCKED_KILL:
-                print("auto-send blocked by kill switch — falling back to approval card")
-                raise RuntimeError("kill switch")   # → the except below falls through to approval
+            if r in _SEND_NOT_DELIVERED:
+                print(f"auto-send not delivered ({r}) — falling back to approval card")
+                # C1/T3: never silently drop. The except below falls through to a card a
+                # human can read, so a blocked auto-send becomes a human decision.
+                raise RuntimeError(r)
             # learning: auto-sent at high confidence (still useful — confirms the
             # bot's wording on simple replies, helps reinforce the pattern)
             record_learning(item, reply, reply, via="auto", approver="(auto)")
@@ -11999,10 +12106,10 @@ async def _post_early_decision_card(channel, item, record):
     try:
         result = await asyncio.to_thread(
             send_guest_message, record["conversation_id"], pending, record["comm_type"])
-        if result not in (SEND_BLOCKED_KILL, SEND_SUPPRESSED):
+        if result not in _SEND_NOT_DELIVERED and result != SEND_SUPPRESSED:
             record["pending_sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
-        elif result == SEND_BLOCKED_KILL:
-            record["pending_send_error"] = "kill switch"
+        elif result in _SEND_NOT_DELIVERED:
+            record["pending_send_error"] = _send_block_reason_ar(result)
     except Exception as e:
         record["pending_send_error"] = str(e)[:300]
         embed.add_field(
@@ -12161,9 +12268,9 @@ async def handle_apartment_search_item(item, channel):
     embed.add_field(name="النتيجة المرسلة", value=reply[:1000], inline=False)
     embed.set_footer(text=(f"{len(matches)} خيارات متاحة ومتحقق منها مباشرة"
                            if matches else "لا يوجد خيار متاح متحقق منه"))
-    if outcome == SEND_BLOCKED_KILL:
+    if outcome in _SEND_NOT_DELIVERED:
         embed.color = 0xD64545
-        embed.add_field(name="⛔ الإرسال", value="موقوف بالـ kill switch", inline=False)
+        embed.add_field(name="⛔ الإرسال", value=_send_block_reason_ar(outcome), inline=False)
     await channel.send(embed=embed)
     log_event("guest", f"بحث شقق · {item.get('guest')} · {len(matches)} خيارات")
     return True
@@ -12426,6 +12533,17 @@ def _new_day_row():
         "confidence_count": 0,
         "topics": {},                # intent -> count
         "apartments_touched": [],    # list of unit names that saw activity today
+        # ── «مساعد» v2. None of the rollout gates in §8 can be argued without these;
+        # cost_usd and tokens_used had ZERO occurrences in this file before today, so
+        # "no >20% cost regression" was not a measurable claim.
+        "silent_total": 0, "silent_by_reason": {},
+        "guard_blocks": 0, "guard_blocks_by_code": {},
+        "collisions_avoided": 0,
+        "commitments_backed": 0, "commitments_blocked": 0,
+        "incidents_harm": 0, "incidents_habitability": 0, "incidents_security": 0,
+        "unattributed_outbound": 0,
+        "memory_used": 0, "memory_absent": 0,
+        "latency_ms": [], "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0,
     }
 
 def _today_key():
@@ -12436,9 +12554,46 @@ def _day_row(d_key=None):
     return _daily_metrics.setdefault(k, _new_day_row())
 
 def metric_bump(key, by=1, day=None):
+    """Bump a counter. A dotted key bumps a nested dict — metric_bump("silent_by_reason.
+    human_active") lands in row["silent_by_reason"]["human_active"], not in a flat key
+    literally named "silent_by_reason.human_active"."""
     try:
         row = _day_row(day)
+        if "." in key:
+            parent, _, child = key.partition(".")
+            bucket = row.get(parent)
+            if not isinstance(bucket, dict):
+                bucket = {}
+                row[parent] = bucket
+            bucket[child] = bucket.get(child, 0) + by
+            return
         row[key] = row.get(key, 0) + by
+    except Exception:
+        pass
+
+
+def metric_record_latency(ms, day=None):
+    """Keep the raw samples — a p95 cannot be recovered from a running average. Capped so
+    a busy day cannot grow the state file without bound."""
+    try:
+        row = _day_row(day)
+        arr = row.setdefault("latency_ms", [])
+        if len(arr) < 5000:
+            arr.append(int(ms))
+    except Exception:
+        pass
+
+
+def metric_record_cost(input_tokens=0, output_tokens=0, day=None):
+    """Anthropic usage for one draft. Rates are per million tokens."""
+    try:
+        row = _day_row(day)
+        row["tokens_in"] = row.get("tokens_in", 0) + int(input_tokens or 0)
+        row["tokens_out"] = row.get("tokens_out", 0) + int(output_tokens or 0)
+        row["cost_usd"] = round(
+            row.get("cost_usd", 0.0)
+            + (int(input_tokens or 0) / 1_000_000.0) * ASSISTANT_COST_IN_PER_MTOK
+            + (int(output_tokens or 0) / 1_000_000.0) * ASSISTANT_COST_OUT_PER_MTOK, 6)
     except Exception:
         pass
 
@@ -40763,10 +40918,11 @@ async def _api_send(request):
     try:
         r = await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
                                     item.get("comm_type", "email"))
-        if r == SEND_BLOCKED_KILL:
+        if r in _SEND_NOT_DELIVERED:
             _pending_replies[mid] = data          # keep the card — nothing was sent
             _replied_msgs.discard(mid)
-            return _json({"error": "الإرسال للضيوف موقوف حالياً (kill switch) — ما انرسل شي"}, 409)
+            return _json({"error": f"{_send_block_reason_ar(r)} — ما انرسل شي",
+                          "outcome": r}, 409)
         if r == SEND_SUPPRESSED:
             return _json({"ok": True, "suppressed": True,
                           "note": "نفس الرد وصل الضيف قبل قليل — ما انرسل مرة ثانية"})
