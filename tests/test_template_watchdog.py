@@ -92,5 +92,25 @@ class WatchdogTest(unittest.TestCase):
         self.assertTrue(f["detail"].strip(), "the ticket needs plain Arabic for the team")
 
 
+class WiringTest(unittest.TestCase):
+
+    def test_the_scan_runs_inside_conv_to_item(self):
+        import inspect, bot
+        src = inspect.getsource(bot._conv_to_item)
+        self.assertIn("_template_watchdog_scan", src)
+
+    def test_it_runs_after_ops_capture_so_it_can_never_skip_it(self):
+        import inspect, bot
+        src = inspect.getsource(bot._conv_to_item)
+        self.assertLess(src.index("_ops_capture_conversation"),
+                        src.index("_template_watchdog_scan"))
+
+    def test_the_ticket_says_the_fix_is_not_in_this_repo(self):
+        import inspect, bot
+        src = inspect.getsource(bot._template_watchdog_scan)
+        self.assertIn("Hostaway", src)
+        self.assertIn("source_ref", src)      # deduped at the ticket layer too
+
+
 if __name__ == "__main__":
     unittest.main()

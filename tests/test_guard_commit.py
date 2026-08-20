@@ -72,5 +72,30 @@ class BackingTest(unittest.TestCase):
         self.assertTrue(is_backed(None, None))
 
 
+class WiringTest(unittest.TestCase):
+
+    def test_the_card_path_checks_for_an_unbacked_promise_before_sending(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        self.assertIn("detect_commitment", src)
+        self.assertIn("وعد بدون تذكرة", src)
+
+    def test_an_unbacked_promise_escalates_and_is_counted(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        i = src.index("detect_commitment")
+        window = src[i:i + 700]
+        self.assertIn("escalate = True", window)
+        self.assertIn('metric_bump("commitments_blocked")', window)
+        self.assertIn('metric_bump("commitments_backed")', window)
+
+    def test_the_owner_rule_was_not_flipped(self):
+        # _wm_promise_allowed must still refuse to let an AI create accountability.
+        import bot
+        for who in ("ai-assistant", "team", "musaid", "مساعد"):
+            self.assertFalse(bot._wm_promise_allowed(who),
+                             "T6 must invert the flow, never flip the owner rule")
+
+
 if __name__ == "__main__":
     unittest.main()

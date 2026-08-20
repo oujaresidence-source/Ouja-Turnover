@@ -145,5 +145,49 @@ class HarmHoldTest(unittest.TestCase):
         self.assertIsNone(incident.held("2"))
 
 
+class WiringTest(unittest.TestCase):
+    """A tier nobody consults is a list of words in a file."""
+
+    def test_the_card_path_classifies_the_guest_message(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        self.assertIn("match_detail", src)
+        self.assertIn('_incident == "harm"', src)
+
+    def test_harm_forces_escalation_and_unsafe_sentiment(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        i = src.index('if _incident == "harm":')
+        window = src[i:i + 400]
+        self.assertIn("escalate = True", window)
+        self.assertIn('sentiment = "unsafe"', window)
+
+    def test_harm_opens_an_urgent_ticket_under_its_own_category(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        self.assertIn('priority="urgent"', src)
+        self.assertIn('category="سلامة"', src)
+
+    def test_the_send_path_refuses_everything_while_a_hold_is_open(self):
+        import inspect, bot
+        src = inspect.getsource(bot.send_guest_message)
+        self.assertIn("SEND_BLOCKED_HOLD", src)
+        self.assertIn("safety_notice", src)
+        # ... and the kill switch still comes first.
+        self.assertLess(src.index("ASSISTANT_SEND_KILL"), src.index("SEND_BLOCKED_HOLD"))
+
+    def test_a_hold_is_a_non_delivery_not_a_success(self):
+        import bot
+        self.assertIn(bot.SEND_BLOCKED_HOLD, bot._SEND_NOT_DELIVERED)
+        self.assertTrue(bot._send_block_reason_ar(bot.SEND_BLOCKED_HOLD).strip())
+
+    def test_the_card_says_hostaway_is_NOT_under_control(self):
+        # The hold stops OUR sends only. Nobody may believe otherwise.
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        self.assertIn("Hostaway", src)
+        self.assertIn("يدوياً", src)
+
+
 if __name__ == "__main__":
     unittest.main()

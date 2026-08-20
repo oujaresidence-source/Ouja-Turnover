@@ -12060,13 +12060,36 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                 )
             elif n == 1 and not is_neg:
                 ack = ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN
+            if _incident == "harm":
+                # COPY-2. Overrides the off-hours boilerplate, the static ack and the
+                # empathetic generator alike. T085 answered «الباب مايفتح» at 02:00 twice
+                # with identical English off-hours boilerplate; a safety report must never
+                # get the same treatment. Emergency numbers come FIRST — before anything
+                # about tickets — because that is the part that matters in the next minute.
+                _hid = (_guard_incident.held(cid) or {}).get("ticket_id") if _guard_incident else None
+                _tref = f" رقم {_hid}" if _hid else ""
+                _tref_en = f" ({_hid})" if _hid else ""
+                ack = (
+                    f"{g}، سلامتك أهم شي عندنا 🤍\n"
+                    "إذا فيه إصابة أو خطر الحين، اتصل على 997 (الهلال الأحمر) أو 911 مباشرة.\n"
+                    f"بلّغت المشرف الحين، والتذكرة{_tref} مفتوحة بأعلى أولوية، وبيتواصل معك "
+                    "أحد من الفريق حالاً."
+                    if is_ar else
+                    f"{g}, your safety comes first 🤍\n"
+                    "If anyone is hurt or in danger right now, please call 911, or 997 for "
+                    "the Red Crescent.\n"
+                    f"I've alerted the supervisor and opened a ticket{_tref_en} at the highest "
+                    "priority — someone from the team is contacting you now."
+                )
             else:                                  # repeat OR upset/sarcastic: empathetic, problem-specific
                 ack = await asyncio.to_thread(claude_escalation_ack, g, item["unit"],
                                               item["history"], item["guest_text"]) \
                        or (ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN)
             try:
                 ack_result = await asyncio.to_thread(
-                    send_guest_message, cid, ack, item["comm_type"])
+                    send_guest_message, cid, ack, item["comm_type"],
+                    listing_id=item.get("listing_id"), via="escalation_ack",
+                    actor="musaed", safety_notice=(_incident == "harm"))
                 if ack_result in _SEND_NOT_DELIVERED:
                     _release_offhours_ack(cid, offhours_now)
                     embed.add_field(
