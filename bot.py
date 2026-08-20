@@ -183,6 +183,19 @@ except Exception as _ops_err:           # pragma: no cover
     _ops = None
     _HAS_OPS = False
 
+# Guest-assistant safety guards «حُرّاس المساعد» — content guard, silence gate, send
+# ledger. Additive and subtractive-only: nothing here can make the assistant say
+# something it would not already have said; it can only stop it. A failed import
+# degrades to exactly today's behaviour.
+try:
+    import guard as _guard
+    from guard import gate as _guard_gate, ledger as _guard_ledger
+    _HAS_GUARD = True
+except Exception as _guard_err:         # pragma: no cover
+    print("[guard] import failed (assistant guards disabled, bot unaffected):", _guard_err)
+    _guard = _guard_gate = _guard_ledger = None
+    _HAS_GUARD = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -31746,6 +31759,9 @@ function trainDownloadText(){
                '# ' + labelText('استخرج: ','Generated: ') + (d.generated_at||''),
                '# ' + labelText('المحادثات: ','Conversations: ') + th.length
                     + ' · ' + labelText('رسائل مساعد: ','Musaed messages: ') + ((d.totals||{}).musaed||0),
+               '# ' + labelText('رسائل صادرة مجهولة الكاتب: ','Unattributed outbound: ')
+                    + (d.unattributed_outbound||0) + '/' + (d.outbound_total||0)
+                    + ' (' + (d.pct_unattributed||0) + '%)',
                ''];
   th.forEach(function(t){ lines = lines.concat(trainThreadLines(t)) });
   trainSaveBlob(lines.join(TRAIN_NL), 'ouja-musaed-training.txt', 'text/plain');
@@ -31765,6 +31781,7 @@ function trainDownloadJsonl(){
         unit: t.unit || '',
         guest: keep ? (t.guest||'') : '',
         label: m.code || '',
+        confidence: m.confidence || '',
         guest_said: m.before || '',
         musaed_replied: m.body || '',
         guest_next: m.after || '',
@@ -34184,7 +34201,14 @@ _TRAIN_LABELS = {
     "musaed_auto":     ("مساعد · رد تلقائي", "Musaed · sent automatically", "certain"),
     "musaed_approved": ("مساعد · اعتمده الفريق كما هو", "Musaed · approved as-is", "certain"),
     "musaed_edited":   ("مساعد · عدّله الفريق", "Musaed · edited by the team", "certain"),
-    "musaed_signed":   ("مساعد · موقّع باسمه", "Musaed · signed with his name", "certain"),
+    # "likely", NOT "certain". This code means "no record of this send survived, but it
+    # ends with one of our sign-offs". The module header above always described it that
+    # way; the value said otherwise, and 15 of 62 exported rows carried a guess stamped
+    # as fact. Worse: _TRAIN_SIGN_TOKENS below contains «فريق عوجا», which the TEAM's own
+    # canned templates also carry — which is how two byte-identical canned checkout
+    # reminders (T053 i11, T101 i4) were labelled «مساعد» with certainty.
+    "musaed_signed":   ("مساعد · موقّع باسمه (غير مؤكد)",
+                        "Musaed · signed with his name (unproven)", "likely"),
     "template":        ("قالب تلقائي من النظام", "Automated template", "certain"),
     "unknown":         ("مو متأكد مين كتبها", "Author unknown", "unknown"),
 }
@@ -34269,6 +34293,18 @@ def _train_match(idx, cid, clean_body):
     rec = idx["by_conv"].get((str(cid), key)) or idx["by_text"].get(key)
     if rec:
         return rec
+    # The deques are bounded (3000 / 500) and roll. The send ledger is append-only on the
+    # volume, so it still knows about sends the logs have forgotten — and knowing it was
+    # OURS is what keeps the signature heuristic from labelling a team template «مساعد».
+    if _HAS_GUARD and _guard_ledger:
+        try:
+            led = _guard_ledger.lookup(cid, clean_body)
+            if led:
+                return {"via": led.get("via") or "", "was_edited": False, "diff": None,
+                        "draft": "", "approver": led.get("actor") or "",
+                        "ts": led.get("ts") or "", "asked": "", "src": "ledger"}
+        except Exception:
+            pass
     if len(key) > 1200:
         for k, r in idx["by_text"].items():
             if len(k) >= 800 and key.startswith(k):
@@ -34356,9 +34392,18 @@ def _train_build(days, offset, scan, only_musaed, q):
             exhausted = True
             break
 
+    # The headline number of the export. 32.1% of outbound in the 4,015-message audit had
+    # no known author, and that ceiling caps every other metric computed from this data —
+    # a language-mismatch or collision rate measured over messages we cannot prove we
+    # wrote is not a measurement. Ship it next to the data so nobody has to recount it.
+    _out = sum((t.get("counts") or {}).get("out", 0) for t in threads)
+    _unattributed = sum((t.get("counts") or {}).get("unknown", 0) for t in threads)
     return {"ok": True, "threads": threads, "scanned": scanned, "days": days,
             "next_offset": cursor, "exhausted": bool(exhausted),
             "only_musaed": bool(only_musaed), "labels": _TRAIN_LABELS,
+            "outbound_total": _out,
+            "unattributed_outbound": _unattributed,
+            "pct_unattributed": (round(100.0 * _unattributed / _out, 1) if _out else 0.0),
             "generated_at": datetime.now(TZ).isoformat(timespec="seconds")}
 
 
@@ -34390,7 +34435,10 @@ def _train_thread(cid, unit, guest, idx, only_musaed):
             counts["musaed"] += 1
         if code == "unknown":
             counts["unknown"] += 1
-        row = {"dir": "out", "ts": _msg_time(m), "body": clean, "sig": sig, "code": code}
+        row = {"dir": "out", "ts": _msg_time(m), "body": clean, "sig": sig, "code": code,
+               # ship the confidence WITH the row: a reader of one line must be able to
+               # see whether the label was proven or guessed, without a lookup table.
+               "confidence": (_TRAIN_LABELS.get(code) or ("", "", "unknown"))[2]}
         if rec:
             row["via"] = rec.get("via") or ""
             row["approver"] = rec.get("approver") or ""
